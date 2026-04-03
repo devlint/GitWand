@@ -6,6 +6,7 @@ import {
   readFile,
   writeFile,
 } from "../utils/backend";
+import { useFolderHistory } from "./useFolderHistory";
 
 export interface ConflictFile {
   path: string;
@@ -77,6 +78,8 @@ function replaceConflictByIndex(
  * undo/redo history, and inline editing.
  */
 export function useGitWand() {
+  const { addToHistory } = useFolderHistory();
+
   const files = ref<ConflictFile[]>([]);
   const selectedPath = ref<string | null>(null);
   const folderPath = ref<string | null>(null);
@@ -147,11 +150,32 @@ export function useGitWand() {
       if (!folder) { loading.value = false; return; }
 
       folderPath.value = folder;
+      addToHistory(folder);
       await loadRealFiles(folder);
     } catch (err: any) {
       console.error("openFolder error:", err);
       error.value = err.message ?? "Erreur inconnue";
       // Fallback to demo data if dev server is not running
+      loadDemoData();
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  /**
+   * Open a specific folder path directly (e.g. from history/favorites).
+   */
+  async function openPath(path: string) {
+    error.value = null;
+    loading.value = true;
+
+    try {
+      folderPath.value = path;
+      addToHistory(path);
+      await loadRealFiles(path);
+    } catch (err: any) {
+      console.error("openPath error:", err);
+      error.value = err.message ?? "Erreur inconnue";
       loadDemoData();
     } finally {
       loading.value = false;
@@ -443,6 +467,25 @@ export async function fetchUsers() {
     }
   }
 
+  /**
+   * Save all files back to disk.
+   */
+  async function saveAllFiles() {
+    if (!folderPath.value) return;
+
+    let saved = 0;
+    for (const file of files.value) {
+      try {
+        await writeFile(folderPath.value, file.path, file.content);
+        saved++;
+      } catch (err: any) {
+        error.value = `Erreur sauvegarde ${file.path}: ${err.message}`;
+        return;
+      }
+    }
+    error.value = null;
+  }
+
   function selectFile(path: string) {
     selectedPath.value = path;
   }
@@ -462,6 +505,8 @@ export async function fetchUsers() {
     resolveHunkManual,
     resolveHunkCustom,
     saveFile,
+    saveAllFiles,
+    openPath,
     undo,
     redo,
     selectFile,

@@ -1,7 +1,15 @@
 <script setup lang="ts">
+import { computed } from "vue";
+import { useFolderHistory } from "../composables/useFolderHistory";
+
 const emit = defineEmits<{
   openFolder: [];
+  openPath: [path: string];
 }>();
+
+const { history } = useFolderHistory();
+
+const recentFolders = computed(() => history.value.slice(0, 5));
 
 const isMac = navigator.platform.toUpperCase().includes("MAC");
 </script>
@@ -33,6 +41,42 @@ const isMac = navigator.platform.toUpperCase().includes("MAC");
       </svg>
       Ouvrir un dossier
     </button>
+
+    <!-- Recent folders -->
+    <div v-if="recentFolders.length > 0" class="recent-section">
+      <span class="recent-label muted">Dossiers récents</span>
+      <ul class="recent-list">
+        <li
+          v-for="entry in recentFolders"
+          :key="entry.path"
+          class="recent-item"
+          @click="emit('openPath', entry.path)"
+        >
+          <svg
+            v-if="entry.pinned"
+            class="recent-star"
+            width="12" height="12"
+            viewBox="0 0 12 12"
+            fill="#fbbf24"
+            aria-hidden="true"
+          >
+            <path d="M6 1l1.5 3 3.5.5-2.5 2.5.5 3.5L6 9l-3 1.5.5-3.5L1 4.5 4.5 4 6 1z" stroke-linejoin="round"/>
+          </svg>
+          <svg
+            v-else
+            class="recent-icon"
+            width="12" height="12"
+            viewBox="0 0 16 16"
+            fill="currentColor"
+            aria-hidden="true"
+          >
+            <path d="M1 3.5A1.5 1.5 0 012.5 2h2.764c.58 0 1.13.237 1.53.659l.74.815A1.5 1.5 0 008.58 4H13.5A1.5 1.5 0 0115 5.5v7a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 011 12.5v-9z"/>
+          </svg>
+          <span class="recent-name">{{ entry.name }}</span>
+          <span class="recent-path muted">{{ entry.path }}</span>
+        </li>
+      </ul>
+    </div>
 
     <div class="empty-hint muted">
       <kbd>{{ isMac ? '⌘' : 'Ctrl' }}</kbd> + <kbd>K</kbd> pour ouvrir rapidement
@@ -95,6 +139,74 @@ const isMac = navigator.platform.toUpperCase().includes("MAC");
 .empty-btn:active {
   transform: translateY(0);
 }
+
+/* ─── Recent folders ──────────────────────────────────── */
+
+.recent-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  width: 100%;
+  max-width: 400px;
+}
+
+.recent-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.recent-list {
+  list-style: none;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+.recent-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.12s;
+  text-align: left;
+}
+
+.recent-item:hover {
+  background: var(--color-bg-tertiary);
+}
+
+.recent-icon {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+}
+
+.recent-star {
+  flex-shrink: 0;
+}
+
+.recent-name {
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.recent-path {
+  flex: 1;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* ─── Hint ────────────────────────────────────────────── */
 
 .empty-hint {
   font-size: 12px;

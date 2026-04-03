@@ -7,12 +7,14 @@ const props = defineProps<{
   hasFiles: boolean;
   canUndo: boolean;
   canRedo: boolean;
+  canSave: boolean;
   theme: Theme;
 }>();
 
 const emit = defineEmits<{
   openFolder: [];
   resolveAll: [];
+  saveAll: [];
   undo: [];
   redo: [];
   toggleTheme: [];
@@ -120,6 +122,20 @@ const emit = defineEmits<{
         </svg>
         <span>Tout résoudre</span>
       </button>
+      <button
+        v-if="canSave"
+        class="btn btn--save"
+        @click="emit('saveAll')"
+        aria-label="Sauvegarder tous les fichiers (Ctrl+S)"
+        title="Sauvegarder (Ctrl+S)"
+      >
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M12.5 14h-9A1.5 1.5 0 012 12.5v-9A1.5 1.5 0 013.5 2H10l4 4v6.5a1.5 1.5 0 01-1.5 1.5z" stroke="currentColor" stroke-width="1.5" fill="none"/>
+          <path d="M10 2v4h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+          <rect x="5" y="9" width="6" height="3" rx="0.5" stroke="currentColor" stroke-width="1.2" fill="none"/>
+        </svg>
+        <span>Sauvegarder</span>
+      </button>
     </div>
   </header>
 </template>
@@ -226,6 +242,15 @@ const emit = defineEmits<{
 
 .btn--primary:hover {
   background: var(--color-accent-hover);
+}
+
+.btn--save {
+  background: var(--color-success);
+  color: #fff;
+}
+
+.btn--save:hover {
+  filter: brightness(1.1);
 }
 
 .undo-redo {

@@ -1,25 +1,14 @@
 <script setup lang="ts">
-import { ref, onMounted, watch, nextTick } from "vue";
+import { ref, computed, onMounted, nextTick } from "vue";
+import { listDir as backendListDir, type DirEntry } from "../utils/backend";
+import { useFolderHistory } from "../composables/useFolderHistory";
 
-interface DirEntry {
-  name: string;
-  path: string;
-  isGitRepo: boolean;
-}
-
-interface ListDirResponse {
-  current: string;
-  parent: string | null;
-  home: string;
-  dirs: DirEntry[];
-}
+const { history, togglePin, removeFromHistory } = useFolderHistory();
 
 const emit = defineEmits<{
   (e: "select", path: string): void;
   (e: "cancel"): void;
 }>();
-
-const DEV_SERVER = "http://localhost:3001";
 
 const currentPath = ref("");
 const parentPath = ref<string | null>(null);
@@ -29,14 +18,11 @@ const loadingDir = ref(false);
 const errorMsg = ref<string | null>(null);
 const inputEl = ref<HTMLInputElement | null>(null);
 
-async function listDir(dirPath?: string) {
+async function fetchDir(dirPath?: string) {
   loadingDir.value = true;
   errorMsg.value = null;
   try {
-    const qs = dirPath ? `?path=${encodeURIComponent(dirPath)}` : "";
-    const res = await fetch(`${DEV_SERVER}/api/list-dir${qs}`);
-    if (!res.ok) throw new Error(`Erreur ${res.status}`);
-    const data: ListDirResponse = await res.json();
+    const data = await backendListDir(dirPath);
     currentPath.value = data.current;
     parentPath.value = data.parent;
     pathInput.value = data.current;
@@ -49,20 +35,20 @@ async function listDir(dirPath?: string) {
 }
 
 function navigateTo(path: string) {
-  listDir(path);
+  fetchDir(path);
 }
 
 function goUp() {
-  if (parentPath.value) listDir(parentPath.value);
+  if (parentPath.value) fetchDir(parentPath.value);
 }
 
 function goHome() {
-  listDir(); // No path = home dir
+  fetchDir(); // No path = home dir
 }
 
 function onInputEnter() {
   const val = pathInput.value.trim();
-  if (val) listDir(val);
+  if (val) fetchDir(val);
 }
 
 function selectCurrent() {
@@ -83,7 +69,7 @@ function onKeyDown(e: KeyboardEvent) {
 }
 
 onMounted(() => {
-  listDir();
+  fetchDir();
   window.addEventListener("keydown", onKeyDown);
   nextTick(() => inputEl.value?.focus());
 });
@@ -139,6 +125,57 @@ onUnmounted(() => {
           placeholder="/chemin/vers/repo"
           spellcheck="false"
         />
+      </div>
+
+      <!-- Recent folders / Favorites -->
+      <div v-if="history.length > 0" class="fp-history">
+        <div class="fp-history-header">
+          <span class="fp-history-title">Récents & Favoris</span>
+        </div>
+        <ul class="fp-history-list">
+          <li
+            v-for="entry in history"
+            :key="entry.path"
+            class="fp-history-entry"
+            :class="{ 'fp-history-entry--pinned': entry.pinned }"
+          >
+            <button
+              class="fp-history-pin"
+              :class="{ 'fp-history-pin--active': entry.pinned }"
+              @click.stop="togglePin(entry.path)"
+              :title="entry.pinned ? 'Retirer des favoris' : 'Ajouter aux favoris'"
+              :aria-label="entry.pinned ? 'Retirer des favoris' : 'Ajouter aux favoris'"
+            >
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                <path
+                  d="M6 1l1.5 3 3.5.5-2.5 2.5.5 3.5L6 9l-3 1.5.5-3.5L1 4.5 4.5 4 6 1z"
+                  :fill="entry.pinned ? 'currentColor' : 'none'"
+                  stroke="currentColor"
+                  stroke-width="1"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </button>
+            <button
+              class="fp-history-select"
+              @click="$emit('select', entry.path)"
+              :title="entry.path"
+            >
+              <span class="fp-history-name">{{ entry.name }}</span>
+              <span class="fp-history-path">{{ entry.path }}</span>
+            </button>
+            <button
+              class="fp-history-remove"
+              @click.stop="removeFromHistory(entry.path)"
+              title="Supprimer de l'historique"
+              aria-label="Supprimer"
+            >
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor">
+                <path d="M2.146 2.146a.5.5 0 01.708 0L5 4.293l2.146-2.147a.5.5 0 01.708.708L5.707 5l2.147 2.146a.5.5 0 01-.708.708L5 5.707 2.854 7.854a.5.5 0 01-.708-.708L4.293 5 2.146 2.854a.5.5 0 010-.708z"/>
+              </svg>
+            </button>
+          </li>
+        </ul>
       </div>
 
       <!-- Directory listing -->
@@ -287,6 +324,127 @@ onUnmounted(() => {
 }
 .fp-path-input:focus {
   border-color: var(--color-accent, #6366f1);
+}
+
+/* ─── History / Favorites ─────────────────────────────── */
+
+.fp-history {
+  border-bottom: 1px solid var(--color-border, #333);
+}
+
+.fp-history-header {
+  padding: 8px 16px 4px;
+}
+
+.fp-history-title {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted, #888);
+}
+
+.fp-history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 8px 8px;
+}
+
+.fp-history-entry {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 6px;
+  transition: background 0.12s;
+}
+
+.fp-history-entry:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.fp-history-entry--pinned {
+  background: rgba(251, 191, 36, 0.05);
+}
+
+.fp-history-pin {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 4px;
+  background: none;
+  border: none;
+  color: var(--color-text-muted, #666);
+  cursor: pointer;
+  opacity: 0.4;
+  transition: opacity 0.15s, color 0.15s;
+}
+
+.fp-history-pin:hover,
+.fp-history-pin--active {
+  opacity: 1;
+}
+
+.fp-history-pin--active {
+  color: #fbbf24;
+}
+
+.fp-history-select {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 4px;
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  color: var(--color-text, #e0e0e0);
+}
+
+.fp-history-name {
+  font-size: 13px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fp-history-path {
+  font-size: 11px;
+  font-family: "SF Mono", "Fira Code", monospace;
+  color: var(--color-text-muted, #888);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fp-history-remove {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  background: none;
+  border: none;
+  color: var(--color-text-muted, #666);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s;
+}
+
+.fp-history-entry:hover .fp-history-remove {
+  opacity: 0.5;
+}
+
+.fp-history-remove:hover {
+  opacity: 1 !important;
+  color: var(--color-danger, #ef4444);
 }
 
 /* Directory listing */

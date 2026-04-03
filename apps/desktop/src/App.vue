@@ -19,16 +19,21 @@ const {
   error,
   canUndo,
   canRedo,
+  folderPath,
   openFolder,
+  openPath,
   resolveAll,
   resolveFile,
   resolveHunkManual,
   resolveHunkCustom,
   saveFile,
+  saveAllFiles,
   undo,
   redo,
   selectFile,
 } = useGitWand();
+
+const canSave = computed(() => hasFiles.value && !!folderPath.value);
 
 const hasFiles = computed(() => files.value.length > 0);
 
@@ -82,6 +87,9 @@ function onKeyDown(e: KeyboardEvent) {
   } else if (mod && e.key === "y") {
     e.preventDefault();
     redo();
+  } else if (mod && e.key === "s") {
+    e.preventDefault();
+    if (canSave.value) saveAllFiles();
   }
 }
 
@@ -96,9 +104,11 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
       :has-files="hasFiles"
       :can-undo="canUndo"
       :can-redo="canRedo"
+      :can-save="canSave"
       :theme="theme"
       @open-folder="openFolder"
       @resolve-all="resolveAll"
+      @save-all="saveAllFiles"
       @undo="undo"
       @redo="redo"
       @toggle-theme="toggleTheme"
@@ -142,7 +152,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
           @resolve-hunk="(path, idx, choice) => resolveHunkManual(path, idx, choice)"
           @resolve-hunk-custom="(path, idx, content) => resolveHunkCustom(path, idx, content)"
         />
-        <EmptyState v-else-if="!loading" @open-folder="openFolder" />
+        <EmptyState v-else-if="!loading" @open-folder="openFolder" @open-path="openPath" />
       </main>
     </div>
 
