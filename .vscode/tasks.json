@@ -1,0 +1,48 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build",
+      "type": "shell",
+      "command": "pnpm build",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": ["$tsc"]
+    },
+    {
+      "label": "build:core",
+      "type": "shell",
+      "command": "pnpm --filter @gitwand/core build",
+      "problemMatcher": ["$tsc"]
+    },
+    {
+      "label": "build:cli",
+      "type": "shell",
+      "command": "pnpm --filter @gitwand/core build && pnpm --filter @gitwand/cli build",
+      "problemMatcher": ["$tsc"]
+    },
+    {
+      "label": "build:vscode",
+      "type": "shell",
+      "command": "pnpm --filter @gitwand/core build && pnpm --filter gitwand-vscode build",
+      "problemMatcher": ["$tsc"]
+    },
+    {
+      "label": "test",
+      "type": "shell",
+      "command": "pnpm test",
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      }
+    },
+    {
+      "label": "test:watch",
+      "type": "shell",
+      "command": "pnpm --filter @gitwand/core test:watch",
+      "isBackground": true
+    }
+  ]
+}

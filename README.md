@@ -80,6 +80,12 @@ gitwand resolve --verbose
 
 # Show conflict status for all files
 gitwand status
+
+# CI mode: JSON output + exit code 1 if conflicts remain
+gitwand resolve --ci
+
+# JSON output without writing files
+gitwand resolve --ci --dry-run
 ```
 
 ### Example output
@@ -99,16 +105,26 @@ gitwand status
   2 conflict(s) remaining — manual resolution needed
 ```
 
+## CI integration
+
+Use `--ci` or `--json` to get structured JSON output, perfect for GitHub Actions, GitLab CI, or any pipeline:
+
+```yaml
+# .github/workflows/merge-check.yml
+- name: Auto-resolve trivial conflicts
+  run: npx @gitwand/cli resolve --ci
+```
+
+The JSON report includes every conflict with its type, resolution status, and explanation. Exit code is `1` if any conflict remains unresolved, `0` if all were handled.
+
 ## VS Code extension
 
-> Coming soon — Phase 3
+The extension integrates directly into VS Code's merge workflow:
 
-The extension will integrate directly into VS Code's merge workflow:
-
-- **One-click resolve** — A "GitWand: Resolve" button in the merge editor
-- **CodeLens** — Inline annotations above each conflict showing its type and resolution
-- **Status bar** — Conflict count with auto-resolvable ratio
-- **Diagnostics** — Inline hints for conflicts GitWand can handle
+- **CodeLens** — Clickable annotations above each conflict showing its type and a one-click resolve action
+- **Diagnostics** — Inline hints in the Problems panel for each conflict (info = resolvable, warning = complex)
+- **Status bar** — Conflict count with auto-resolvable ratio, click to resolve
+- **Commands** — `GitWand: Resolve Conflicts in Current File` and `GitWand: Resolve All Trivial Conflicts`
 
 ## Architecture
 
@@ -145,8 +161,8 @@ if (result.mergedContent) {
 - [x] **Core engine** — Conflict parser + 5 resolution patterns
 - [x] **CLI** — `gitwand resolve` and `gitwand status`
 - [x] **Non-overlapping pattern** — Smart import merging (LCS-based 3-way diff)
-- [ ] **VS Code extension** — CodeLens, status bar, one-click resolve
-- [ ] **CI integration** — `gitwand resolve --ci` for automated pipelines
+- [x] **VS Code extension** — CodeLens, diagnostics, status bar, one-click resolve
+- [x] **CI integration** — `gitwand resolve --ci` with JSON output and exit codes
 - [ ] **Desktop app** — Standalone 3-way merge editor (Tauri + Vue 3)
 - [ ] **Plugin system** — Custom resolution strategies per language/framework
 

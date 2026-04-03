@@ -1,0 +1,44 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run Extension",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/packages/vscode"
+      ],
+      "outFiles": ["${workspaceFolder}/packages/vscode/dist/**/*.js"],
+      "preLaunchTask": "build:vscode"
+    },
+    {
+      "name": "Debug CLI - resolve",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/packages/cli/dist/index.js",
+      "args": ["resolve", "--dry-run", "--verbose"],
+      "cwd": "${workspaceFolder}",
+      "outFiles": ["${workspaceFolder}/packages/cli/dist/**/*.js"],
+      "preLaunchTask": "build:cli"
+    },
+    {
+      "name": "Debug CLI - status",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/packages/cli/dist/index.js",
+      "args": ["status"],
+      "cwd": "${workspaceFolder}",
+      "outFiles": ["${workspaceFolder}/packages/cli/dist/**/*.js"],
+      "preLaunchTask": "build:cli"
+    },
+    {
+      "name": "Debug Tests",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/node_modules/.bin/vitest",
+      "args": ["run", "--reporter=verbose"],
+      "cwd": "${workspaceFolder}/packages/core",
+      "console": "integratedTerminal"
+    }
+  ]
+}

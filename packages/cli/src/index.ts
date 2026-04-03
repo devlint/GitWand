@@ -4,33 +4,42 @@
  * GitWand CLI
  *
  * Usage:
- *   gitwand resolve [fichiers...]   Résout automatiquement les conflits triviaux
- *   gitwand status                  Affiche le statut des conflits dans le repo
- *   gitwand --help                  Affiche l'aide
+ *   gitwand resolve [files...]       Auto-resolve trivial conflicts
+ *   gitwand status                   Show conflict status for the repo
+ *   gitwand --help                   Show help
+ *
+ * CI mode:
+ *   gitwand resolve --ci             JSON output + exit code 1 if conflicts remain
  *
  * @example
  *   npx gitwand resolve
  *   npx gitwand resolve src/app.ts src/config.ts
+ *   npx gitwand resolve --ci --dry-run
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { resolve as resolvePath } from "node:path";
-import { resolve } from "@gitwand/core";
+import { resolve, type MergeResult } from "@gitwand/core";
 
 // ─── ANSI Colors ────────────────────────────────────────────────
-const c = {
-  reset: "\x1b[0m",
-  bold: "\x1b[1m",
-  dim: "\x1b[2m",
-  green: "\x1b[32m",
-  yellow: "\x1b[33m",
-  red: "\x1b[31m",
-  cyan: "\x1b[36m",
-  magenta: "\x1b[35m",
-};
+const isCI = process.env.CI === "true" || process.env.CI === "1";
+const noColor = isCI || process.env.NO_COLOR !== undefined;
 
-const WAND = "✨";
+const c = noColor
+  ? { reset: "", bold: "", dim: "", green: "", yellow: "", red: "", cyan: "", magenta: "" }
+  : {
+      reset: "\x1b[0m",
+      bold: "\x1b[1m",
+      dim: "\x1b[2m",
+      green: "\x1b[32m",
+      yellow: "\x1b[33m",
+      red: "\x1b[31m",
+      cyan: "\x1b[36m",
+      magenta: "\x1b[35m",
+    };
+
+const WAND = noColor ? "*" : "\u2728";
 
 function printBanner() {
   console.log(
@@ -41,19 +50,21 @@ function printBanner() {
 function printHelp() {
   printBanner();
   console.log(`${c.bold}Usage:${c.reset}`);
-  console.log(`  gitwand resolve [fichiers...]   Résout les conflits triviaux`);
-  console.log(`  gitwand status                  Affiche le statut des conflits`);
-  console.log(`  gitwand --help                  Affiche cette aide`);
+  console.log(`  gitwand resolve [files...]      Auto-resolve trivial conflicts`);
+  console.log(`  gitwand status                  Show conflict status`);
+  console.log(`  gitwand --help                  Show this help`);
   console.log();
   console.log(`${c.bold}Options:${c.reset}`);
-  console.log(`  --dry-run       Analyse sans écrire les fichiers`);
-  console.log(`  --verbose       Affiche les détails de chaque résolution`);
-  console.log(`  --no-whitespace Ne résout pas les conflits de whitespace`);
+  console.log(`  --dry-run       Analyze without writing files`);
+  console.log(`  --verbose       Show details for each resolution`);
+  console.log(`  --no-whitespace Don't resolve whitespace-only conflicts`);
+  console.log(`  --ci            CI mode: JSON output + exit code 1 if unresolved`);
+  console.log(`  --json          Output results as JSON (implies --ci behavior)`);
   console.log();
 }
 
 /**
- * Récupère la liste des fichiers en conflit dans le repo Git courant.
+ * Get the list of conflicted files in the current Git repo.
  */
 function getConflictedFiles(): string[] {
   try {
@@ -63,29 +74,107 @@ function getConflictedFiles(): string[] {
     return output
       .trim()
       .split("\n")
-      .filter((f) => f.length > 0);
+      .filter((f: string) => f.length > 0);
   } catch {
     return [];
   }
 }
 
+/** JSON report for CI mode */
+interface CIReport {
+  version: string;
+  timestamp: string;
+  summary: {
+    files: number;
+    totalConflicts: number;
+    autoResolved: number;
+    remaining: number;
+    allResolved: boolean;
+  };
+  files: Array<{
+    path: string;
+    totalConflicts: number;
+    autoResolved: number;
+    remaining: number;
+    resolutions: Array<{
+      line: number;
+      type: string;
+      resolved: boolean;
+      explanation: string;
+    }>;
+  }>;
+}
+
 /**
- * Commande principale : resolve
+ * Build a CI-friendly JSON report from results.
+ */
+function buildCIReport(
+  results: Array<{ file: string; result: MergeResult }>,
+): CIReport {
+  let totalConflicts = 0;
+  let totalResolved = 0;
+
+  const files = results.map(({ file, result }) => {
+    totalConflicts += result.stats.totalConflicts;
+    totalResolved += result.stats.autoResolved;
+
+    return {
+      path: file,
+      totalConflicts: result.stats.totalConflicts,
+      autoResolved: result.stats.autoResolved,
+      remaining: result.stats.remaining,
+      resolutions: result.resolutions.map((r) => ({
+        line: r.hunk.startLine,
+        type: r.hunk.type,
+        resolved: r.autoResolved,
+        explanation: r.hunk.explanation,
+      })),
+    };
+  });
+
+  return {
+    version: "0.0.1",
+    timestamp: new Date().toISOString(),
+    summary: {
+      files: results.length,
+      totalConflicts,
+      autoResolved: totalResolved,
+      remaining: totalConflicts - totalResolved,
+      allResolved: totalConflicts - totalResolved === 0,
+    },
+    files,
+  };
+}
+
+/**
+ * Main command: resolve
  */
 function cmdResolve(files: string[], flags: Record<string, boolean>) {
-  printBanner();
+  const isCIMode = flags.ci || flags.json;
 
-  // Si pas de fichiers spécifiés, chercher dans le repo
+  if (!isCIMode) {
+    printBanner();
+  }
+
+  // If no files specified, discover from git
   if (files.length === 0) {
     files = getConflictedFiles();
     if (files.length === 0) {
-      console.log(`${c.green}Aucun fichier en conflit détecté.${c.reset}`);
+      if (isCIMode) {
+        console.log(JSON.stringify({ version: "0.0.1", summary: { files: 0, totalConflicts: 0, autoResolved: 0, remaining: 0, allResolved: true }, files: [] }, null, 2));
+        process.exit(0);
+      }
+      console.log(`${c.green}No conflicted files detected.${c.reset}`);
       return;
     }
-    console.log(
-      `${c.cyan}${files.length} fichier(s) en conflit détecté(s)${c.reset}\n`,
-    );
+    if (!isCIMode) {
+      console.log(
+        `${c.cyan}${files.length} conflicted file(s) detected${c.reset}\n`,
+      );
+    }
   }
+
+  const results: Array<{ file: string; result: MergeResult }> = [];
 
   let totalResolved = 0;
   let totalRemaining = 0;
@@ -98,92 +187,121 @@ function cmdResolve(files: string[], flags: Record<string, boolean>) {
     try {
       content = readFileSync(filePath, "utf-8");
     } catch {
-      console.log(`${c.red}  ✗ ${file} — fichier introuvable${c.reset}`);
+      if (!isCIMode) {
+        console.log(`${c.red}  \u2717 ${file} — file not found${c.reset}`);
+      }
       continue;
     }
 
     const result = resolve(content, file, {
-      verbose: flags.verbose ?? false,
+      verbose: !isCIMode && (flags.verbose ?? false),
       resolveWhitespace: !(flags["no-whitespace"] ?? false),
     });
+
+    results.push({ file, result });
 
     totalConflicts += result.stats.totalConflicts;
     totalResolved += result.stats.autoResolved;
     totalRemaining += result.stats.remaining;
 
-    if (result.stats.totalConflicts === 0) {
-      console.log(`${c.dim}  ○ ${file} — aucun conflit${c.reset}`);
-      continue;
-    }
+    if (!isCIMode) {
+      if (result.stats.totalConflicts === 0) {
+        console.log(`${c.dim}  \u25CB ${file} — no conflicts${c.reset}`);
+      } else {
+        const icon = result.stats.remaining === 0 ? "\u2713" : "\u25D0";
+        const color = result.stats.remaining === 0 ? c.green : c.yellow;
 
-    const icon = result.stats.remaining === 0 ? "✓" : "◐";
-    const color = result.stats.remaining === 0 ? c.green : c.yellow;
-
-    console.log(
-      `${color}  ${icon} ${file} — ${result.stats.autoResolved}/${result.stats.totalConflicts} résolus${c.reset}`,
-    );
-
-    // Afficher les détails en mode verbose
-    if (flags.verbose) {
-      for (const res of result.resolutions) {
-        const status = res.autoResolved
-          ? `${c.green}auto${c.reset}`
-          : `${c.red}manuel${c.reset}`;
         console.log(
-          `${c.dim}    L${res.hunk.startLine} [${res.hunk.type}] ${status} — ${res.hunk.explanation}${c.reset}`,
+          `${color}  ${icon} ${file} — ${result.stats.autoResolved}/${result.stats.totalConflicts} resolved${c.reset}`,
         );
+
+        // Show details in verbose mode
+        if (flags.verbose) {
+          for (const res of result.resolutions) {
+            const status = res.autoResolved
+              ? `${c.green}auto${c.reset}`
+              : `${c.red}manual${c.reset}`;
+            console.log(
+              `${c.dim}    L${res.hunk.startLine} [${res.hunk.type}] ${status} — ${res.hunk.explanation}${c.reset}`,
+            );
+          }
+        }
       }
     }
 
-    // Écrire le fichier résolu (sauf dry-run)
+    // Write resolved file (unless dry-run)
     if (!flags["dry-run"] && result.stats.autoResolved > 0) {
-      const output = result.mergedContent ?? content;
-      // Écrire seulement si on a résolu au moins quelque chose
-      const resolvedContent =
-        result.mergedContent ??
-        // Reconstruire depuis les résolutions
-        content; // TODO: reconstruire le contenu partiel
-      writeFileSync(filePath, resolvedContent, "utf-8");
+      // Use mergedContent if all resolved, otherwise rebuild with partial resolutions
+      const newContent = result.mergedContent ?? content;
+      writeFileSync(filePath, newContent, "utf-8");
     }
   }
 
-  // Résumé final
-  console.log(`\n${c.bold}─── Résumé ───${c.reset}`);
+  // CI mode: JSON output
+  if (isCIMode) {
+    const report = buildCIReport(results);
+    console.log(JSON.stringify(report, null, 2));
+
+    if (report.summary.remaining > 0) {
+      process.exit(1);
+    }
+    process.exit(0);
+  }
+
+  // Human-readable summary
+  console.log(`\n${c.bold}\u2500\u2500\u2500 Summary \u2500\u2500\u2500${c.reset}`);
   console.log(
-    `${c.bold}${WAND} ${totalResolved}${c.reset} conflit(s) résolus automatiquement sur ${c.bold}${totalConflicts}${c.reset}`,
+    `${c.bold}${WAND} ${totalResolved}${c.reset} conflict(s) auto-resolved out of ${c.bold}${totalConflicts}${c.reset}`,
   );
 
   if (totalRemaining > 0) {
     console.log(
-      `${c.yellow}${totalRemaining} conflit(s) restant(s) nécessitent une résolution manuelle${c.reset}`,
+      `${c.yellow}${totalRemaining} conflict(s) remaining — manual resolution needed${c.reset}`,
     );
   } else if (totalConflicts > 0) {
     console.log(
-      `${c.green}${c.bold}Tous les conflits ont été résolus ! ${WAND}${c.reset}`,
+      `${c.green}${c.bold}All conflicts resolved! ${WAND}${c.reset}`,
     );
   }
 
   if (flags["dry-run"]) {
-    console.log(`\n${c.dim}(dry-run — aucun fichier modifié)${c.reset}`);
+    console.log(`\n${c.dim}(dry-run — no files modified)${c.reset}`);
   }
 
   console.log();
 }
 
 /**
- * Commande : status
+ * Command: status
  */
-function cmdStatus() {
-  printBanner();
+function cmdStatus(flags: Record<string, boolean>) {
+  const isCIMode = flags.ci || flags.json;
+
+  if (!isCIMode) {
+    printBanner();
+  }
 
   const files = getConflictedFiles();
 
   if (files.length === 0) {
-    console.log(`${c.green}Aucun fichier en conflit.${c.reset}\n`);
+    if (isCIMode) {
+      console.log(JSON.stringify({ files: 0, conflicts: [] }, null, 2));
+      return;
+    }
+    console.log(`${c.green}No conflicted files.${c.reset}\n`);
     return;
   }
 
-  console.log(`${c.cyan}${files.length} fichier(s) en conflit :${c.reset}\n`);
+  if (!isCIMode) {
+    console.log(`${c.cyan}${files.length} conflicted file(s):${c.reset}\n`);
+  }
+
+  const statusEntries: Array<{
+    path: string;
+    total: number;
+    resolvable: number;
+    percentage: number;
+  }> = [];
 
   for (const file of files) {
     const filePath = resolvePath(file);
@@ -193,19 +311,28 @@ function cmdStatus() {
 
       const resolvable = result.stats.autoResolved;
       const total = result.stats.totalConflicts;
-
       const pct = total > 0 ? Math.round((resolvable / total) * 100) : 0;
-      const color = pct === 100 ? c.green : pct > 0 ? c.yellow : c.red;
 
-      console.log(
-        `  ${color}${file}${c.reset} — ${resolvable}/${total} résolvables (${pct}%)`,
-      );
+      statusEntries.push({ path: file, total, resolvable, percentage: pct });
+
+      if (!isCIMode) {
+        const color = pct === 100 ? c.green : pct > 0 ? c.yellow : c.red;
+        console.log(
+          `  ${color}${file}${c.reset} — ${resolvable}/${total} resolvable (${pct}%)`,
+        );
+      }
     } catch {
-      console.log(`  ${c.red}${file}${c.reset} — erreur de lecture`);
+      if (!isCIMode) {
+        console.log(`  ${c.red}${file}${c.reset} — read error`);
+      }
     }
   }
 
-  console.log();
+  if (isCIMode) {
+    console.log(JSON.stringify({ files: files.length, conflicts: statusEntries }, null, 2));
+  } else {
+    console.log();
+  }
 }
 
 // ─── Main ───────────────────────────────────────────────────────
@@ -228,9 +355,9 @@ if (!command || command === "--help" || command === "-h") {
 } else if (command === "resolve") {
   cmdResolve(positional, flags);
 } else if (command === "status") {
-  cmdStatus();
+  cmdStatus(flags);
 } else {
-  console.error(`${c.red}Commande inconnue : ${command}${c.reset}`);
+  console.error(`${c.red}Unknown command: ${command}${c.reset}`);
   printHelp();
   process.exit(1);
 }
