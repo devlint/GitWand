@@ -46,6 +46,8 @@ const TYPE_LABELS: Record<ConflictType, string> = {
   delete_no_change: "Deleted by one side",
   whitespace_only: "Whitespace difference only",
   non_overlapping: "Non-overlapping changes",
+  generated_file: "Auto-generated file (lockfile, build output…)",
+  value_only_change: "Only volatile values differ (hashes, versions…)",
   complex: "Complex conflict",
 };
 
@@ -56,6 +58,8 @@ const TYPE_ICONS: Record<ConflictType, string> = {
   delete_no_change: "\u2713",
   whitespace_only: "\u2713",
   non_overlapping: "\u2713",
+  generated_file: "\u2713",
+  value_only_change: "\u2713",
   complex: "\u2717",
 };
 

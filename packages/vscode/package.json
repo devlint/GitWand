@@ -4,12 +4,28 @@
   "description": "Git's magic wand — automatic conflict resolution for VS Code",
   "version": "0.0.1",
   "publisher": "gitwand",
+  "icon": "icon.png",
   "engines": {
     "vscode": "^1.85.0"
   },
   "categories": ["SCM Providers", "Other"],
-  "keywords": ["git", "merge", "conflict", "resolution", "diff"],
-  "activationEvents": [],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/devlint/GitWand",
+    "directory": "packages/vscode"
+  },
+  "homepage": "https://github.com/devlint/GitWand#readme",
+  "bugs": {
+    "url": "https://github.com/devlint/GitWand/issues"
+  },
+  "keywords": ["git", "merge", "conflict", "resolution", "diff", "rebase", "auto-resolve"],
+  "galleryBanner": {
+    "color": "#1a1a24",
+    "theme": "dark"
+  },
+  "activationEvents": [
+    "onLanguage:*"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
