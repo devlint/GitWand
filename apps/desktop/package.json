@@ -1,0 +1,16 @@
+{
+  "name": "@gitwand/desktop",
+  "version": "0.0.1",
+  "private": true,
+  "description": "GitWand Desktop — standalone merge conflict resolution (Tauri + Vue 3)",
+  "type": "module",
+  "scripts": {
+    "dev": "echo 'TODO: Tauri + Vue dev server — voir Phase 4'",
+    "build": "echo 'TODO: Tauri build — voir Phase 4'",
+    "clean": "echo 'clean'"
+  },
+  "dependencies": {
+    "@gitwand/core": "workspace:*"
+  },
+  "license": "MIT"
+}

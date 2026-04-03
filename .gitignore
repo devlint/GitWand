@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.turbo/
+*.tsbuildinfo
+.DS_Store
+coverage/
+
+# Tauri
+apps/desktop/src-tauri/target/
+
+# VS Code extension
+packages/vscode/*.vsix

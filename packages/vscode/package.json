@@ -1,0 +1,58 @@
+{
+  "name": "gitwand-vscode",
+  "displayName": "GitWand",
+  "description": "Git's magic wand — automatic conflict resolution for VS Code",
+  "version": "0.0.1",
+  "publisher": "gitwand",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["SCM Providers", "Other"],
+  "keywords": ["git", "merge", "conflict", "resolution", "diff"],
+  "activationEvents": [],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "gitwand.resolveFile",
+        "title": "GitWand: Resolve Conflicts in Current File"
+      },
+      {
+        "command": "gitwand.resolveAll",
+        "title": "GitWand: Resolve All Trivial Conflicts"
+      },
+      {
+        "command": "gitwand.status",
+        "title": "GitWand: Show Conflict Status"
+      }
+    ],
+    "configuration": {
+      "title": "GitWand",
+      "properties": {
+        "gitwand.resolveWhitespace": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically resolve whitespace-only conflicts"
+        },
+        "gitwand.minConfidence": {
+          "type": "string",
+          "enum": ["certain", "high", "medium", "low"],
+          "default": "high",
+          "description": "Minimum confidence level for auto-resolution"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@gitwand/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.4.0"
+  },
+  "license": "MIT"
+}

@@ -1,0 +1,25 @@
+{
+  "name": "@gitwand/cli",
+  "version": "0.0.1",
+  "description": "GitWand CLI — resolve Git conflicts from your terminal",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "gitwand": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@gitwand/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "typescript": "^5.4.0"
+  },
+  "license": "MIT"
+}
