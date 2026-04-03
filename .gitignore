@@ -34,5 +34,8 @@ Thumbs.db
 npm-debug.log*
 pnpm-debug.log*
 
+# pnpm store
+.pnpm-store/
+
 # Temp
 _tmp_*

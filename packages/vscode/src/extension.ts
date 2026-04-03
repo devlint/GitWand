@@ -366,6 +366,67 @@ async function cmdResolveAll() {
   );
 }
 
+async function cmdStatus() {
+  // Gather stats from all open documents
+  const fileStats: Array<{
+    name: string;
+    total: number;
+    resolvable: number;
+  }> = [];
+
+  for (const document of vscode.workspace.textDocuments) {
+    if (document.uri.scheme !== "file") continue;
+
+    const content = document.getText();
+    const { segments } = parseConflictMarkers(content);
+    const conflicts = segments.filter((s) => s.type === "conflict");
+    if (conflicts.length === 0) continue;
+
+    let resolvable = 0;
+    for (const seg of conflicts) {
+      const classification = classifyConflict(seg.conflict);
+      if (classification.type !== "complex") resolvable++;
+    }
+
+    const name = vscode.workspace.asRelativePath(document.uri);
+    fileStats.push({ name, total: conflicts.length, resolvable });
+  }
+
+  if (fileStats.length === 0) {
+    vscode.window.showInformationMessage(
+      `${WAND} GitWand: No conflicted files open.`,
+    );
+    return;
+  }
+
+  // Build a readable report
+  const totalConflicts = fileStats.reduce((sum, f) => sum + f.total, 0);
+  const totalResolvable = fileStats.reduce((sum, f) => sum + f.resolvable, 0);
+
+  const lines = fileStats.map((f) => {
+    const icon = f.resolvable === f.total ? "\u2713" : f.resolvable > 0 ? "\u25D0" : "\u25CB";
+    return `${icon} ${f.name} — ${f.resolvable}/${f.total} resolvable`;
+  });
+
+  const header = `${WAND} GitWand Status: ${totalResolvable}/${totalConflicts} conflict(s) auto-resolvable across ${fileStats.length} file(s)`;
+
+  // Show in an output channel for a nicer view
+  const channel = vscode.window.createOutputChannel("GitWand");
+  channel.clear();
+  channel.appendLine(header);
+  channel.appendLine("");
+  for (const line of lines) {
+    channel.appendLine(`  ${line}`);
+  }
+  channel.appendLine("");
+  if (totalResolvable > 0) {
+    channel.appendLine(
+      `Run "GitWand: Resolve All Trivial Conflicts" to auto-resolve.`,
+    );
+  }
+  channel.show(true);
+}
+
 // ─── Activation ─────────────────────────────────────────────────
 
 export function activate(context: vscode.ExtensionContext) {
@@ -391,6 +452,7 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand("gitwand.resolveFile", cmdResolveFile),
     vscode.commands.registerCommand("gitwand.resolveAll", cmdResolveAll),
+    vscode.commands.registerCommand("gitwand.status", cmdStatus),
   );
 
   // Mettre à jour les diagnostics quand un fichier change ou est ouvert

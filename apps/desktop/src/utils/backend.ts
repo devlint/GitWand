@@ -125,3 +125,47 @@ export async function writeFile(
   });
   if (!res.ok) throw new Error(`Failed to write ${path}`);
 }
+
+// ─── Directory listing (for FolderPicker) ────────────────
+
+export interface DirEntry {
+  name: string;
+  path: string;
+  isGitRepo: boolean;
+}
+
+export interface ListDirResult {
+  current: string;
+  parent: string | null;
+  home: string;
+  dirs: DirEntry[];
+}
+
+/**
+ * List directories in a given path. Used by FolderPicker.
+ */
+export async function listDir(dirPath?: string): Promise<ListDirResult> {
+  if (isTauri()) {
+    const raw = await tauriInvoke<{
+      current: string;
+      parent: string | null;
+      home: string;
+      dirs: Array<{ name: string; path: string; is_git_repo: boolean }>;
+    }>("list_dir", { path: dirPath ?? null });
+    // Map snake_case from Rust to camelCase
+    return {
+      current: raw.current,
+      parent: raw.parent,
+      home: raw.home,
+      dirs: raw.dirs.map((d) => ({
+        name: d.name,
+        path: d.path,
+        isGitRepo: d.is_git_repo,
+      })),
+    };
+  }
+  const qs = dirPath ? `?path=${encodeURIComponent(dirPath)}` : "";
+  const res = await fetch(`${DEV_SERVER}/api/list-dir${qs}`);
+  if (!res.ok) throw new Error(`Failed to list directory: ${res.status}`);
+  return res.json();
+}
