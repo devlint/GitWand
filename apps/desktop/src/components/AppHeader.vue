@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import type { GlobalStats } from "../composables/useGitWand";
+import type { Theme } from "../composables/useTheme";
 
 const props = defineProps<{
   stats: GlobalStats;
   hasFiles: boolean;
   canUndo: boolean;
   canRedo: boolean;
+  theme: Theme;
 }>();
 
 const emit = defineEmits<{
@@ -13,6 +15,7 @@ const emit = defineEmits<{
   resolveAll: [];
   undo: [];
   redo: [];
+  toggleTheme: [];
 }>();
 </script>
 
@@ -50,6 +53,24 @@ const emit = defineEmits<{
     </div>
 
     <div class="header-right">
+      <!-- Theme toggle -->
+      <button
+        class="btn btn--icon theme-toggle"
+        @click="emit('toggleTheme')"
+        :aria-label="theme === 'dark' ? 'Passer en mode clair' : 'Passer en mode sombre'"
+        :title="theme === 'dark' ? 'Mode clair' : 'Mode sombre'"
+      >
+        <!-- Sun (shown in dark mode → click to go light) -->
+        <svg v-if="theme === 'dark'" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <circle cx="8" cy="8" r="3.5" stroke="currentColor" stroke-width="1.5"/>
+          <path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.41 1.41M11.54 11.54l1.41 1.41M3.05 12.95l1.41-1.41M11.54 4.46l1.41-1.41" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+        <!-- Moon (shown in light mode → click to go dark) -->
+        <svg v-else width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M13.5 9.5a5.5 5.5 0 01-7-7A5.5 5.5 0 1013.5 9.5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+        </svg>
+      </button>
+
       <div class="undo-redo" v-if="hasFiles">
         <button
           class="btn btn--icon"

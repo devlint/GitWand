@@ -1,5 +1,11 @@
-import { ref, computed, reactive } from "vue";
+import { ref, computed } from "vue";
 import { resolve, type MergeResult, type ConflictHunk } from "@gitwand/core";
+import {
+  pickFolder,
+  getConflictedFiles,
+  readFile,
+  writeFile,
+} from "../utils/backend";
 
 export interface ConflictFile {
   path: string;
@@ -125,23 +131,60 @@ export function useGitWand() {
     };
   });
 
+  const loading = ref(false);
+  const error = ref<string | null>(null);
+
   /**
    * Open a folder and scan for conflicted files.
-   * In Tauri, this will use the native dialog + git commands.
-   * For now (dev mode), we use a demo dataset.
+   * Works in both Tauri (native dialog) and browser (prompt + dev server).
    */
   async function openFolder() {
-    // In Tauri context:
-    // const { open } = await import("@tauri-apps/plugin-dialog");
-    // const folder = await open({ directory: true });
-    // if (!folder) return;
-    // folderPath.value = folder;
-    // const { invoke } = await import("@tauri-apps/api/core");
-    // const conflictedPaths = await invoke<string[]>("get_conflicted_files", { cwd: folder });
-    // ... read each file and analyze
+    error.value = null;
+    loading.value = true;
 
-    // Demo mode: load sample conflicted files
-    loadDemoData();
+    try {
+      const folder = await pickFolder(folderPath.value ?? undefined);
+      if (!folder) { loading.value = false; return; }
+
+      folderPath.value = folder;
+      await loadRealFiles(folder);
+    } catch (err: any) {
+      console.error("openFolder error:", err);
+      error.value = err.message ?? "Erreur inconnue";
+      // Fallback to demo data if dev server is not running
+      loadDemoData();
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  /**
+   * Load real conflicted files from a Git repository.
+   */
+  async function loadRealFiles(cwd: string) {
+    const conflictedPaths = await getConflictedFiles(cwd);
+
+    if (conflictedPaths.length === 0) {
+      error.value = "Aucun fichier en conflit trouvé dans ce dossier.";
+      files.value = [];
+      return;
+    }
+
+    // Read each file
+    const loaded: ConflictFile[] = [];
+    for (const filePath of conflictedPaths) {
+      const content = await readFile(cwd, filePath);
+      loaded.push({
+        path: filePath,
+        content,
+        result: resolve(content, filePath),
+      });
+    }
+
+    files.value = loaded;
+    if (loaded.length > 0) {
+      selectedPath.value = loaded[0].path;
+    }
   }
 
   /**
@@ -386,6 +429,20 @@ export async function fetchUsers() {
     };
   }
 
+  /**
+   * Save a resolved file back to disk.
+   */
+  async function saveFile(path: string) {
+    const file = files.value.find((f) => f.path === path);
+    if (!file || !folderPath.value) return;
+
+    try {
+      await writeFile(folderPath.value, path, file.content);
+    } catch (err: any) {
+      error.value = `Erreur sauvegarde: ${err.message}`;
+    }
+  }
+
   function selectFile(path: string) {
     selectedPath.value = path;
   }
@@ -395,6 +452,8 @@ export async function fetchUsers() {
     selectedFile,
     stats,
     folderPath,
+    loading,
+    error,
     canUndo,
     canRedo,
     openFolder,
@@ -402,6 +461,7 @@ export async function fetchUsers() {
     resolveFile,
     resolveHunkManual,
     resolveHunkCustom,
+    saveFile,
     undo,
     redo,
     selectFile,

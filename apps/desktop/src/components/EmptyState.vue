@@ -2,6 +2,8 @@
 const emit = defineEmits<{
   openFolder: [];
 }>();
+
+const isMac = navigator.platform.toUpperCase().includes("MAC");
 </script>
 
 <template>
@@ -33,7 +35,7 @@ const emit = defineEmits<{
     </button>
 
     <div class="empty-hint muted">
-      <kbd>Ctrl</kbd> + <kbd>O</kbd> pour ouvrir rapidement
+      <kbd>{{ isMac ? '⌘' : 'Ctrl' }}</kbd> + <kbd>K</kbd> pour ouvrir rapidement
     </div>
   </div>
 </template>

@@ -1,6 +1,8 @@
 /* ─── GitWand Desktop — Global Styles ──────────────────────────── */
 
-:root {
+/* ─── Dark theme (default) ─────────────────────────────────────── */
+:root,
+[data-theme="dark"] {
   --color-bg: #0f0f14;
   --color-bg-secondary: #1a1a24;
   --color-bg-tertiary: #24243a;
@@ -12,17 +14,41 @@
   --color-success: #22c55e;
   --color-warning: #f59e0b;
   --color-danger: #ef4444;
+  --color-danger-bg: rgba(239, 68, 68, 0.15);
   --color-ours: #3b82f6;
   --color-ours-bg: rgba(59, 130, 246, 0.1);
   --color-theirs: #a855f7;
   --color-theirs-bg: rgba(168, 85, 247, 0.1);
   --color-resolved-bg: rgba(34, 197, 94, 0.08);
+  --color-overlay: rgba(0, 0, 0, 0.6);
 
   --font-mono: "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 
   --sidebar-width: 280px;
   --header-height: 48px;
+}
+
+/* ─── Light theme ──────────────────────────────────────────────── */
+[data-theme="light"] {
+  --color-bg: #f8f8fc;
+  --color-bg-secondary: #ffffff;
+  --color-bg-tertiary: #eeeef5;
+  --color-border: #d4d4e0;
+  --color-text: #1e1e2e;
+  --color-text-muted: #6b6b88;
+  --color-accent: #7c3aed;
+  --color-accent-hover: #6d28d9;
+  --color-success: #16a34a;
+  --color-warning: #d97706;
+  --color-danger: #dc2626;
+  --color-danger-bg: rgba(220, 38, 38, 0.1);
+  --color-ours: #2563eb;
+  --color-ours-bg: rgba(37, 99, 235, 0.08);
+  --color-theirs: #9333ea;
+  --color-theirs-bg: rgba(147, 51, 234, 0.08);
+  --color-resolved-bg: rgba(22, 163, 74, 0.06);
+  --color-overlay: rgba(0, 0, 0, 0.3);
 }
 
 * {
