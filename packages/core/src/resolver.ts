@@ -25,6 +25,32 @@ const DEFAULT_OPTIONS: Required<GitWandOptions> = {
   verbose: false,
 };
 
+// ─── Generated File Detection ────────────────────────────
+
+/** Patterns de fichiers auto-générés qui ne doivent pas être mergés ligne par ligne */
+const GENERATED_FILE_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
+  { pattern: /package-lock\.json$/i, label: "npm lockfile" },
+  { pattern: /yarn\.lock$/i, label: "yarn lockfile" },
+  { pattern: /pnpm-lock\.yaml$/i, label: "pnpm lockfile" },
+  { pattern: /composer\.lock$/i, label: "composer lockfile" },
+  { pattern: /Gemfile\.lock$/i, label: "bundler lockfile" },
+  { pattern: /Cargo\.lock$/i, label: "cargo lockfile" },
+  { pattern: /\.min\.(js|css)$/i, label: "fichier minifié" },
+  { pattern: /\bdist\//, label: "fichier build dist/" },
+  { pattern: /\bbuild\/manifest\.json$/i, label: "manifest de build" },
+  { pattern: /\.bundle\.(js|css)$/i, label: "bundle" },
+  { pattern: /mix-manifest\.json$/i, label: "Laravel Mix manifest" },
+];
+
+function isGeneratedFile(filePath: string): { generated: boolean; label: string } {
+  for (const { pattern, label } of GENERATED_FILE_PATTERNS) {
+    if (pattern.test(filePath)) {
+      return { generated: true, label };
+    }
+  }
+  return { generated: false, label: "" };
+}
+
 /** Ordre de confiance pour comparaison */
 const CONFIDENCE_ORDER: Record<Confidence, number> = {
   certain: 4,
@@ -86,6 +112,14 @@ function resolveHunk(
       return merged;
     }
 
+    case "value_only_change":
+      // Même structure, seule une valeur volatile diffère → prendre theirs (plus récent)
+      return [...hunk.theirsLines];
+
+    case "generated_file":
+      // Fichier auto-généré → prendre theirs (sera régénéré de toute façon)
+      return [...hunk.theirsLines];
+
     case "complex":
       // Pas de résolution automatique
       return null;
@@ -117,11 +151,25 @@ export function resolve(
   const outputLines: string[] = [];
   let allResolved = true;
 
+  // Détecter si le fichier est auto-généré
+  const genInfo = isGeneratedFile(filePath);
+
   for (const segment of segments) {
     if (segment.type === "text") {
       outputLines.push(...segment.lines);
     } else {
-      const hunk = toConflictHunk(segment.conflict);
+      let hunk = toConflictHunk(segment.conflict);
+
+      // Si fichier auto-généré et hunk classifié "complex", reclassifier en "generated_file"
+      if (genInfo.generated && hunk.type === "complex") {
+        hunk = {
+          ...hunk,
+          type: "generated_file",
+          confidence: "medium",
+          explanation: `Fichier auto-généré (${genInfo.label}). Ce fichier sera régénéré après le merge. Résolution proposée : accepter theirs et relancer le build.`,
+        };
+      }
+
       hunks.push(hunk);
 
       const resolvedLines = resolveHunk(hunk, options);

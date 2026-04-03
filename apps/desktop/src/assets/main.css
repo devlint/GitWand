@@ -1,0 +1,92 @@
+/* ─── GitWand Desktop — Global Styles ──────────────────────────── */
+
+:root {
+  --color-bg: #0f0f14;
+  --color-bg-secondary: #1a1a24;
+  --color-bg-tertiary: #24243a;
+  --color-border: #2e2e48;
+  --color-text: #e4e4ef;
+  --color-text-muted: #8888a8;
+  --color-accent: #8b5cf6;
+  --color-accent-hover: #a78bfa;
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-danger: #ef4444;
+  --color-ours: #3b82f6;
+  --color-ours-bg: rgba(59, 130, 246, 0.1);
+  --color-theirs: #a855f7;
+  --color-theirs-bg: rgba(168, 85, 247, 0.1);
+  --color-resolved-bg: rgba(34, 197, 94, 0.08);
+
+  --font-mono: "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+
+  --sidebar-width: 280px;
+  --header-height: 48px;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #app {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--color-bg);
+  color: var(--color-text);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ─── Scrollbar ──────────────────────────────────────────────── */
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
+
+/* ─── Utilities ──────────────────────────────────────────────── */
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+.muted {
+  color: var(--color-text-muted);
+}
+
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+button {
+  font-family: var(--font-sans);
+  cursor: pointer;
+  border: none;
+  outline: none;
+}
+
+button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}

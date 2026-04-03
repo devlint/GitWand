@@ -24,6 +24,8 @@ export type ConflictType =
   | "non_overlapping"       // Ajouts à des endroits différents (ex: imports)
   | "whitespace_only"       // Différences de whitespace uniquement
   | "delete_no_change"      // Un côté supprime, l'autre n'a pas touché
+  | "generated_file"        // Fichier auto-généré (lock, manifest, min.js…)
+  | "value_only_change"     // Même structure, seule une valeur change (hash, version, timestamp…)
   | "complex";              // Conflit réel nécessitant intervention humaine
 
 /** Niveau de confiance de la résolution */

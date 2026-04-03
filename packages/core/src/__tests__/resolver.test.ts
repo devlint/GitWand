@@ -593,4 +593,147 @@ describe("@gitwand/core resolve", () => {
       ).toBe(result.stats.totalConflicts);
     });
   });
+
+  // ═════════════════════════════════════════════════════════════
+  // DIFF2 IMPROVEMENTS (no base)
+  // ═════════════════════════════════════════════════════════════
+
+  describe("diff2: value_only_change", () => {
+    it("detects hash-only differences in build manifest", () => {
+      const manifest = `{
+<<<<<<< HEAD
+  "_Foo-DIwZRTuY.js": {
+    "file": "assets/Foo-DIwZRTuY.js",
+=======
+  "_Foo-Bv7I4tRv.js": {
+    "file": "assets/Foo-Bv7I4tRv.js",
+>>>>>>> master
+    "name": "Foo"
+  }
+}`;
+      const result = resolve(manifest, "build/manifest.json");
+      expect(result.hunks[0].type).toBe("value_only_change");
+      expect(result.hunks[0].confidence).toBe("high");
+      expect(result.stats.autoResolved).toBe(1);
+      // Should take theirs
+      expect(result.mergedContent).toContain("Bv7I4tRv");
+      expect(result.mergedContent).not.toContain("DIwZRTuY");
+    });
+
+    it("detects version-only changes in diff2", () => {
+      const lockEntry = `<<<<<<< HEAD
+      "version": "3.2.1",
+      "resolved": "https://registry.npmjs.org/foo/-/foo-3.2.1.tgz",
+      "integrity": "sha512-abc123def456"
+=======
+      "version": "3.3.0",
+      "resolved": "https://registry.npmjs.org/foo/-/foo-3.3.0.tgz",
+      "integrity": "sha512-xyz789ghi012"
+>>>>>>> master`;
+      const result = resolve(lockEntry, "package-lock.json");
+      expect(result.hunks[0].type).toBe("value_only_change");
+      expect(result.stats.autoResolved).toBe(1);
+    });
+
+    it("does NOT classify as value_only when structure differs", () => {
+      const diff = `<<<<<<< HEAD
+export const API_URL = "https://staging.example.com";
+export const TIMEOUT = 5000;
+export const DEBUG = true;
+=======
+export const API_URL = "https://production.example.com";
+export const TIMEOUT = 5000;
+>>>>>>> master`;
+      const result = resolve(diff, "config.ts");
+      // Different number of lines → not value_only
+      expect(result.hunks[0].type).toBe("complex");
+    });
+  });
+
+  describe("diff2: delete_no_change (sans base)", () => {
+    it("detects deletion by ours (empty ours, non-empty theirs)", () => {
+      const diff = `before
+<<<<<<< HEAD
+=======
+  some old code;
+>>>>>>> master
+after`;
+      const result = resolve(diff, "file.ts", { minConfidence: "medium" });
+      expect(result.hunks[0].type).toBe("delete_no_change");
+      expect(result.hunks[0].confidence).toBe("medium");
+      expect(result.stats.autoResolved).toBe(1);
+      expect(result.mergedContent).toBe("before\nafter");
+    });
+
+    it("detects deletion by theirs (non-empty ours, empty theirs)", () => {
+      const diff = `before
+<<<<<<< HEAD
+  some old code;
+=======
+>>>>>>> master
+after`;
+      const result = resolve(diff, "file.ts", { minConfidence: "medium" });
+      expect(result.hunks[0].type).toBe("delete_no_change");
+      expect(result.stats.autoResolved).toBe(1);
+    });
+  });
+
+  describe("generated file detection", () => {
+    it("reclassifies truly complex conflicts in .min.js as generated_file", () => {
+      // Minified code with structural differences (not just value changes)
+      const minJs = `<<<<<<< HEAD
+!function(){var a=1;console.log(a);doStuff()}();
+=======
+!function(){var b=2;alert(b);doOther();cleanup()}();
+>>>>>>> master`;
+      const result = resolve(minJs, "public/dist/app.min.js", { minConfidence: "medium" });
+      expect(result.hunks[0].type).toBe("generated_file");
+      expect(result.stats.autoResolved).toBe(1);
+    });
+
+    it("reclassifies complex conflicts in package-lock.json as generated_file", () => {
+      const lockJson = `<<<<<<< HEAD
+    "node_modules/foo": {
+      "version": "1.0.0",
+      "requires": { "bar": "^2.0" }
+    }
+=======
+    "node_modules/foo": {
+      "version": "1.1.0",
+      "requires": { "bar": "^2.0", "baz": "^1.0" }
+    }
+>>>>>>> master`;
+      const result = resolve(lockJson, "package-lock.json", { minConfidence: "medium" });
+      expect(result.hunks[0].type).toBe("generated_file");
+      expect(result.stats.autoResolved).toBe(1);
+    });
+
+    it("reclassifies complex in build/manifest.json as generated_file", () => {
+      const manifest = `<<<<<<< HEAD
+  "resources/js/app.js": {
+    "file": "assets/app-abc.js",
+    "css": ["assets/app-abc.css"]
+  }
+=======
+  "resources/js/app.js": {
+    "file": "assets/app-xyz.js",
+    "css": ["assets/app-xyz.css"],
+    "extra": true
+  }
+>>>>>>> master`;
+      const result = resolve(manifest, "public/build/manifest.json", { minConfidence: "medium" });
+      expect(result.hunks[0].type).toBe("generated_file");
+      expect(result.stats.autoResolved).toBe(1);
+    });
+
+    it("does NOT mark normal .ts files as generated", () => {
+      const ts = `<<<<<<< HEAD
+const x = 1;
+=======
+const x = 2;
+>>>>>>> master`;
+      const result = resolve(ts, "src/utils/config.ts");
+      expect(result.hunks[0].type).not.toBe("generated_file");
+    });
+  });
 });

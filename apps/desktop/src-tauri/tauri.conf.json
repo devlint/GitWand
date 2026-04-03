@@ -1,0 +1,37 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-config-schema/schema.json",
+  "productName": "GitWand",
+  "version": "0.0.1",
+  "identifier": "com.gitwand.desktop",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "pnpm dev",
+    "beforeBuildCommand": "pnpm build"
+  },
+  "app": {
+    "title": "GitWand",
+    "windows": [
+      {
+        "title": "GitWand — Git's magic wand",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 800,
+        "minHeight": 600,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "plugins": {
+    "dialog": {},
+    "fs": {
+      "scope": ["**"]
+    },
+    "shell": {
+      "open": true
+    }
+  }
+}

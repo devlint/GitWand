@@ -1,12 +1,37 @@
+# Dependencies
 node_modules/
-dist/
-.turbo/
-*.tsbuildinfo
-.DS_Store
-coverage/
 
-# Tauri
+# Build outputs
+dist/
+*.tsbuildinfo
+coverage/
+.turbo/
+
+# Tauri / Rust
 apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/Cargo.lock
 
 # VS Code extension
 packages/vscode/*.vsix
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+*.swp
+*.swo
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Temp
+_tmp_*
