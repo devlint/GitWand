@@ -169,3 +169,182 @@ export async function listDir(dirPath?: string): Promise<ListDirResult> {
   if (!res.ok) throw new Error(`Failed to list directory: ${res.status}`);
   return res.json();
 }
+
+// ─── Git status ────────────────────────────────────────────
+
+export interface FileChange {
+  path: string;
+  status: "added" | "modified" | "deleted" | "renamed";
+  oldPath?: string;
+}
+
+export interface GitStatus {
+  branch: string;
+  remote: string | null;
+  ahead: number;
+  behind: number;
+  staged: FileChange[];
+  unstaged: FileChange[];
+  untracked: string[];
+  conflicted: string[];
+}
+
+/**
+ * Get the full status of a Git repository.
+ */
+export async function getGitStatus(cwd: string): Promise<GitStatus> {
+  if (isTauri()) {
+    const raw = await tauriInvoke<{
+      branch: string;
+      remote: string | null;
+      ahead: number;
+      behind: number;
+      staged: Array<{ path: string; status: string; old_path?: string }>;
+      unstaged: Array<{ path: string; status: string; old_path?: string }>;
+      untracked: string[];
+      conflicted: string[];
+    }>("git_status", { cwd });
+
+    return {
+      branch: raw.branch,
+      remote: raw.remote,
+      ahead: raw.ahead,
+      behind: raw.behind,
+      staged: raw.staged.map((f) => ({
+        path: f.path,
+        status: f.status as "added" | "modified" | "deleted" | "renamed",
+        oldPath: f.old_path,
+      })),
+      unstaged: raw.unstaged.map((f) => ({
+        path: f.path,
+        status: f.status as "added" | "modified" | "deleted" | "renamed",
+        oldPath: f.old_path,
+      })),
+      untracked: raw.untracked,
+      conflicted: raw.conflicted,
+    };
+  }
+
+  const res = await fetch(`${DEV_SERVER}/api/git-status?cwd=${encodeURIComponent(cwd)}`);
+  if (!res.ok) throw new Error(`Failed to get git status: ${res.status}`);
+  return res.json();
+}
+
+// ─── Git diff ──────────────────────────────────────────────
+
+export interface DiffLine {
+  type: "context" | "add" | "delete";
+  content: string;
+  oldLineNo?: number;
+  newLineNo?: number;
+}
+
+export interface DiffHunk {
+  header: string;
+  oldStart: number;
+  oldCount: number;
+  newStart: number;
+  newCount: number;
+  lines: DiffLine[];
+}
+
+export interface GitDiff {
+  path: string;
+  hunks: DiffHunk[];
+}
+
+/**
+ * Get the diff for a specific file.
+ */
+export async function getGitDiff(
+  cwd: string,
+  path: string,
+  staged: boolean,
+): Promise<GitDiff> {
+  if (isTauri()) {
+    const raw = await tauriInvoke<{
+      path: string;
+      hunks: Array<{
+        header: string;
+        old_start: number;
+        old_count: number;
+        new_start: number;
+        new_count: number;
+        lines: Array<{
+          type: string;
+          content: string;
+          old_line_no?: number;
+          new_line_no?: number;
+        }>;
+      }>;
+    }>("git_diff", { cwd, path, staged });
+
+    return {
+      path: raw.path,
+      hunks: raw.hunks.map((h) => ({
+        header: h.header,
+        oldStart: h.old_start,
+        oldCount: h.old_count,
+        newStart: h.new_start,
+        newCount: h.new_count,
+        lines: h.lines.map((l) => ({
+          type: l.type as "context" | "add" | "delete",
+          content: l.content,
+          oldLineNo: l.old_line_no,
+          newLineNo: l.new_line_no,
+        })),
+      })),
+    };
+  }
+
+  const qs = `?cwd=${encodeURIComponent(cwd)}&path=${encodeURIComponent(path)}&staged=${staged}`;
+  const res = await fetch(`${DEV_SERVER}/api/git-diff${qs}`);
+  if (!res.ok) throw new Error(`Failed to get git diff: ${res.status}`);
+  return res.json();
+}
+
+// ─── Git log ───────────────────────────────────────────────
+
+export interface GitLogEntry {
+  hash: string;
+  hashFull: string;
+  author: string;
+  email: string;
+  date: string;
+  message: string;
+  body: string;
+}
+
+/**
+ * Get recent commits from a Git repository.
+ */
+export async function getGitLog(cwd: string, count?: number): Promise<GitLogEntry[]> {
+  if (isTauri()) {
+    const raw = await tauriInvoke<
+      Array<{
+        hash: string;
+        hash_full: string;
+        author: string;
+        email: string;
+        date: string;
+        message: string;
+        body: string;
+      }>
+    >("git_log", { cwd, count: count ?? 50 });
+
+    return raw.map((e) => ({
+      hash: e.hash,
+      hashFull: e.hash_full,
+      author: e.author,
+      email: e.email,
+      date: e.date,
+      message: e.message,
+      body: e.body,
+    }));
+  }
+
+  const qs = `?cwd=${encodeURIComponent(cwd)}&count=${count ?? 50}`;
+  const res = await fetch(`${DEV_SERVER}/api/git-log${qs}`);
+  if (!res.ok) throw new Error(`Failed to get git log: ${res.status}`);
+  return res.json();
+}
