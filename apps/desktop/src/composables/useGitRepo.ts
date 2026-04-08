@@ -9,6 +9,7 @@ import {
   gitPush,
   gitPull,
   gitDiscard,
+  getGitShow,
   getGitBranches,
   gitCreateBranch,
   gitSwitchBranch,
@@ -54,6 +55,10 @@ export function useGitRepo() {
   // Branch state
   const branches = ref<GitBranch[]>([]);
   const branchesLoading = ref(false);
+
+  // Commit diff state (for history view)
+  const selectedCommitHash = ref<string | null>(null);
+  const commitDiffs = ref<GitDiff[]>([]);
 
   /** Whether a repo is loaded. */
   const hasRepo = computed(() => !!folderPath.value && !!status.value);
@@ -205,6 +210,20 @@ export function useGitRepo() {
       log.value = await getGitLog(folderPath.value, count);
     } catch (err: any) {
       error.value = `git log: ${err.message}`;
+    }
+  }
+
+  /**
+   * Select a commit and load its diffs.
+   */
+  async function selectCommit(hash: string) {
+    if (!folderPath.value) return;
+    selectedCommitHash.value = hash;
+    try {
+      commitDiffs.value = await getGitShow(folderPath.value, hash);
+    } catch (err: any) {
+      commitDiffs.value = [];
+      error.value = `git show: ${err.message}`;
     }
   }
 
@@ -391,6 +410,8 @@ export function useGitRepo() {
     lastCommitHash,
     branches,
     branchesLoading,
+    selectedCommitHash,
+    commitDiffs,
     // Computed
     hasRepo,
     branchDisplay,
@@ -413,6 +434,7 @@ export function useGitRepo() {
     push,
     pull,
     discardFiles,
+    selectCommit,
     loadBranches,
     createBranch,
     switchBranch,

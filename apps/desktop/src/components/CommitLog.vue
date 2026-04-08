@@ -5,6 +5,11 @@ import type { GitLogEntry } from "../utils/backend";
 const props = defineProps<{
   entries: GitLogEntry[];
   loading: boolean;
+  selectedHash: string | null;
+}>();
+
+const emit = defineEmits<{
+  selectCommit: [hash: string];
 }>();
 
 function relativeDate(isoDate: string): string {
@@ -44,11 +49,6 @@ function authorColor(name: string): string {
 
 <template>
   <div class="commit-log">
-    <div class="log-header">
-      <span class="log-title">Historique</span>
-      <span class="log-count" v-if="entries.length > 0">{{ entries.length }}</span>
-    </div>
-
     <div class="log-loading" v-if="loading">
       <div class="loading-spinner"></div>
       <span class="muted">Chargement...</span>
@@ -59,6 +59,10 @@ function authorColor(name: string): string {
         v-for="entry in entries"
         :key="entry.hashFull"
         class="commit-item"
+        :class="{ 'commit-item--selected': selectedHash === entry.hashFull }"
+        @click="emit('selectCommit', entry.hashFull)"
+        tabindex="0"
+        @keydown.enter="emit('selectCommit', entry.hashFull)"
       >
         <div class="commit-avatar" :style="{ background: authorColor(entry.author) }">
           {{ authorInitials(entry.author) }}
@@ -88,33 +92,6 @@ function authorColor(name: string): string {
   flex-direction: column;
   height: 100%;
   overflow: hidden;
-}
-
-.log-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--color-border);
-  flex-shrink: 0;
-}
-
-.log-title {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--color-text-muted);
-}
-
-.log-count {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--color-text-muted);
-  background: var(--color-bg-tertiary);
-  padding: 1px 6px;
-  border-radius: 10px;
-  font-variant-numeric: tabular-nums;
 }
 
 .log-loading {
@@ -149,11 +126,23 @@ function authorColor(name: string): string {
   gap: 10px;
   padding: 10px 16px;
   border-bottom: 1px solid var(--color-border);
+  cursor: pointer;
   transition: background 0.1s;
+  border-left: 3px solid transparent;
 }
 
 .commit-item:hover {
   background: var(--color-bg-tertiary);
+}
+
+.commit-item--selected {
+  background: var(--color-bg-tertiary);
+  border-left-color: var(--color-accent);
+}
+
+.commit-item:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
 }
 
 .commit-item:last-child {

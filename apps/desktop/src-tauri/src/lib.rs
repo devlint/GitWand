@@ -605,6 +605,133 @@ fn git_discard(cwd: String, paths: Vec<String>) -> Result<(), String> {
     Ok(())
 }
 
+// ─── Git show (commit diff) ──────────────────────────────────
+
+#[tauri::command]
+fn git_show(cwd: String, hash: String) -> Result<Vec<GitDiff>, String> {
+    let output = std::process::Command::new("git")
+        .args(["show", "--format=", &hash])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("Failed to run git show: {}", e))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut diffs: Vec<GitDiff> = Vec::new();
+    let mut current_path: Option<String> = None;
+    let mut current_hunk: Option<DiffHunk> = None;
+    let mut old_line_no = 0;
+    let mut new_line_no = 0;
+    let mut current_hunks: Vec<DiffHunk> = Vec::new();
+
+    for line in stdout.lines() {
+        if line.starts_with("diff --git ") {
+            // Save previous file diff
+            if let Some(hunk) = current_hunk.take() {
+                current_hunks.push(hunk);
+            }
+            if let Some(path) = current_path.take() {
+                diffs.push(GitDiff {
+                    path,
+                    hunks: std::mem::take(&mut current_hunks),
+                });
+            }
+
+            // Extract file path from "diff --git a/path b/path"
+            let parts: Vec<&str> = line.split(" b/").collect();
+            if parts.len() >= 2 {
+                current_path = Some(parts[1].to_string());
+            }
+        } else if line.starts_with("@@") {
+            if let Some(hunk) = current_hunk.take() {
+                current_hunks.push(hunk);
+            }
+
+            let header = line.to_string();
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            let mut old_start = 0;
+            let mut old_count = 1;
+            let mut new_start = 0;
+            let mut new_count = 1;
+
+            if parts.len() >= 3 {
+                let old_range = parts[1].strip_prefix('-').unwrap_or("0");
+                let new_range = parts[2].strip_prefix('+').unwrap_or("0");
+
+                if let Some(comma_idx) = old_range.find(',') {
+                    old_start = old_range[..comma_idx].parse().unwrap_or(0);
+                    old_count = old_range[comma_idx + 1..].parse().unwrap_or(1);
+                } else {
+                    old_start = old_range.parse().unwrap_or(0);
+                }
+
+                if let Some(comma_idx) = new_range.find(',') {
+                    new_start = new_range[..comma_idx].parse().unwrap_or(0);
+                    new_count = new_range[comma_idx + 1..].parse().unwrap_or(1);
+                } else {
+                    new_start = new_range.parse().unwrap_or(0);
+                }
+            }
+
+            old_line_no = old_start;
+            new_line_no = new_start;
+
+            current_hunk = Some(DiffHunk {
+                header,
+                old_start,
+                old_count,
+                new_start,
+                new_count,
+                lines: Vec::new(),
+            });
+        } else if let Some(ref mut hunk) = current_hunk {
+            if line.starts_with('+') && !line.starts_with("+++") {
+                hunk.lines.push(DiffLine {
+                    r#type: "add".to_string(),
+                    content: line[1..].to_string(),
+                    old_line_no: None,
+                    new_line_no: Some(new_line_no),
+                });
+                new_line_no += 1;
+            } else if line.starts_with('-') && !line.starts_with("---") {
+                hunk.lines.push(DiffLine {
+                    r#type: "delete".to_string(),
+                    content: line[1..].to_string(),
+                    old_line_no: Some(old_line_no),
+                    new_line_no: None,
+                });
+                old_line_no += 1;
+            } else if !line.starts_with('\\') {
+                let content = if line.is_empty() {
+                    "".to_string()
+                } else {
+                    line[1..].to_string()
+                };
+                hunk.lines.push(DiffLine {
+                    r#type: "context".to_string(),
+                    content,
+                    old_line_no: Some(old_line_no),
+                    new_line_no: Some(new_line_no),
+                });
+                old_line_no += 1;
+                new_line_no += 1;
+            }
+        }
+    }
+
+    // Save last file diff
+    if let Some(hunk) = current_hunk.take() {
+        current_hunks.push(hunk);
+    }
+    if let Some(path) = current_path.take() {
+        diffs.push(GitDiff {
+            path,
+            hunks: current_hunks,
+        });
+    }
+
+    Ok(diffs)
+}
+
 // ─── Git branches ────────────────────────────────────────────
 
 #[derive(Serialize)]
@@ -763,6 +890,7 @@ pub fn run() {
             git_push,
             git_pull,
             git_discard,
+            git_show,
             git_branches,
             git_create_branch,
             git_switch_branch,

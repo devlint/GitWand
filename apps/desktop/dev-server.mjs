@@ -426,6 +426,74 @@ const server = createServer(async (req, res) => {
       }
     }
 
+    // GET /api/git-show?cwd=<path>&hash=<commit>
+    if (url.pathname === "/api/git-show" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd");
+      const hash = url.searchParams.get("hash");
+      if (!cwd || !hash) return jsonResponse(res, { error: "Missing cwd or hash param" }, 400);
+
+      try {
+        const resolvedCwd = resolve(cwd);
+        const stdout = execSync(`git show --format= "${hash}"`, {
+          cwd: resolvedCwd,
+          encoding: "utf-8",
+          shell: true,
+        });
+
+        const diffs = [];
+        let currentPath = null;
+        let currentHunk = null;
+        let currentHunks = [];
+        let oldLineNo = 0;
+        let newLineNo = 0;
+
+        for (const line of stdout.split("\n")) {
+          if (line.startsWith("diff --git ")) {
+            if (currentHunk) currentHunks.push(currentHunk);
+            currentHunk = null;
+            if (currentPath) {
+              diffs.push({ path: currentPath, hunks: currentHunks });
+              currentHunks = [];
+            }
+            const parts = line.split(" b/");
+            currentPath = parts.length >= 2 ? parts[1] : null;
+          } else if (line.startsWith("@@")) {
+            if (currentHunk) currentHunks.push(currentHunk);
+
+            const match = line.match(/@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
+            const oldStart = match ? parseInt(match[1]) : 0;
+            const oldCount = match ? parseInt(match[2] || "1") : 1;
+            const newStart = match ? parseInt(match[3]) : 0;
+            const newCount = match ? parseInt(match[4] || "1") : 1;
+            oldLineNo = oldStart;
+            newLineNo = newStart;
+
+            currentHunk = { header: line, oldStart, oldCount, newStart, newCount, lines: [] };
+          } else if (currentHunk) {
+            if (line.startsWith("+") && !line.startsWith("+++")) {
+              currentHunk.lines.push({ type: "add", content: line.substring(1), oldLineNo: null, newLineNo });
+              newLineNo++;
+            } else if (line.startsWith("-") && !line.startsWith("---")) {
+              currentHunk.lines.push({ type: "delete", content: line.substring(1), oldLineNo, newLineNo: null });
+              oldLineNo++;
+            } else if (!line.startsWith("\\")) {
+              const content = line.length > 0 ? line.substring(1) : "";
+              currentHunk.lines.push({ type: "context", content, oldLineNo, newLineNo });
+              oldLineNo++;
+              newLineNo++;
+            }
+          }
+        }
+
+        if (currentHunk) currentHunks.push(currentHunk);
+        if (currentPath) diffs.push({ path: currentPath, hunks: currentHunks });
+
+        return jsonResponse(res, diffs);
+      } catch (err) {
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
+
     // GET /api/git-branches?cwd=<path>
     if (url.pathname === "/api/git-branches" && req.method === "GET") {
       const cwd = url.searchParams.get("cwd");

@@ -442,6 +442,56 @@ export async function gitPull(cwd: string): Promise<GitPushPullResult> {
   return res.json();
 }
 
+// ─── Git show (commit diff) ───────────────────────────────────
+
+/**
+ * Get the diff(s) for a specific commit.
+ */
+export async function getGitShow(cwd: string, hash: string): Promise<GitDiff[]> {
+  if (isTauri()) {
+    const raw = await tauriInvoke<
+      Array<{
+        path: string;
+        hunks: Array<{
+          header: string;
+          old_start: number;
+          old_count: number;
+          new_start: number;
+          new_count: number;
+          lines: Array<{
+            type: string;
+            content: string;
+            old_line_no?: number;
+            new_line_no?: number;
+          }>;
+        }>;
+      }>
+    >("git_show", { cwd, hash });
+
+    return raw.map((d) => ({
+      path: d.path,
+      hunks: d.hunks.map((h) => ({
+        header: h.header,
+        oldStart: h.old_start,
+        oldCount: h.old_count,
+        newStart: h.new_start,
+        newCount: h.new_count,
+        lines: h.lines.map((l) => ({
+          type: l.type as "context" | "add" | "delete",
+          content: l.content,
+          oldLineNo: l.old_line_no,
+          newLineNo: l.new_line_no,
+        })),
+      })),
+    }));
+  }
+
+  const qs = `?cwd=${encodeURIComponent(cwd)}&hash=${encodeURIComponent(hash)}`;
+  const res = await fetch(`${DEV_SERVER}/api/git-show${qs}`);
+  if (!res.ok) throw new Error(`Failed to get commit diff: ${res.status}`);
+  return res.json();
+}
+
 // ─── Git discard ──────────────────────────────────────────────
 
 /**

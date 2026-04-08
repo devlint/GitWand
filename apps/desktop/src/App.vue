@@ -9,6 +9,7 @@ import RepoSidebar from "./components/RepoSidebar.vue";
 import DiffViewer from "./components/DiffViewer.vue";
 import CommitLog from "./components/CommitLog.vue";
 import BranchPanel from "./components/BranchPanel.vue";
+import CommitDiffViewer from "./components/CommitDiffViewer.vue";
 import { useGitWand } from "./composables/useGitWand";
 import { useGitRepo } from "./composables/useGitRepo";
 import { useTheme } from "./composables/useTheme";
@@ -81,6 +82,9 @@ const {
   discardFiles,
   branches,
   branchesLoading,
+  selectedCommitHash,
+  commitDiffs,
+  selectCommit,
   loadBranches,
   createBranch,
   switchBranch,
@@ -345,13 +349,24 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
             <EmptyState v-else @open-folder="handleOpenFolder" @open-path="handleOpenPath" />
           </template>
 
-          <!-- History view: commit log -->
+          <!-- History view: commit log + diff -->
           <template v-else-if="viewMode === 'history'">
-            <CommitLog
-              v-if="hasRepo"
-              :entries="repoLog"
-              :loading="repoLoading"
-            />
+            <div v-if="hasRepo" class="history-split">
+              <div class="history-log">
+                <CommitLog
+                  :entries="repoLog"
+                  :loading="repoLoading"
+                  :selected-hash="selectedCommitHash"
+                  @select-commit="selectCommit"
+                />
+              </div>
+              <div class="history-diff">
+                <CommitDiffViewer
+                  :diffs="commitDiffs"
+                  :commit-hash="selectedCommitHash"
+                />
+              </div>
+            </div>
             <EmptyState v-else @open-folder="handleOpenFolder" @open-path="handleOpenPath" />
           </template>
 
@@ -484,5 +499,23 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
 .error-close:hover {
   opacity: 1;
   background: rgba(239, 68, 68, 0.15);
+}
+
+.history-split {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.history-log {
+  width: 360px;
+  min-width: 280px;
+  border-right: 1px solid var(--color-border);
+  overflow: hidden;
+}
+
+.history-diff {
+  flex: 1;
+  overflow: hidden;
 }
 </style>
