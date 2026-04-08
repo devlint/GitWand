@@ -127,6 +127,199 @@ const server = createServer(async (req, res) => {
       }
     }
 
+    // GET /api/git-status?cwd=<path>
+    if (url.pathname === "/api/git-status" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd");
+      if (!cwd) return jsonResponse(res, { error: "Missing cwd param" }, 400);
+
+      try {
+        const resolvedCwd = resolve(cwd);
+        const stdout = execSync("git status --porcelain=v2 --branch", {
+          cwd: resolvedCwd,
+          encoding: "utf-8",
+        });
+
+        let branch = "unknown";
+        let remote = null;
+        let ahead = 0;
+        let behind = 0;
+        const staged = [];
+        const unstaged = [];
+        const untracked = [];
+        const conflicted = [];
+
+        const lines = stdout.split("\n");
+        for (const line of lines) {
+          if (line.startsWith("# branch.head ")) {
+            branch = line.substring("# branch.head ".length).trim();
+          } else if (line.startsWith("# branch.ab ")) {
+            const parts = line.split(/\s+/);
+            if (parts.length >= 4) {
+              ahead = parseInt(parts[2].substring(1)) || 0;
+              behind = parseInt(parts[3].substring(1)) || 0;
+            }
+          } else if (line.startsWith("# branch.upstream ")) {
+            remote = line.substring("# branch.upstream ".length).trim();
+          } else if (line.startsWith("u ")) {
+            // conflicted
+            const parts = line.split("\t");
+            if (parts.length >= 2) {
+              conflicted.push(parts[1]);
+            }
+          } else if (line.startsWith("1 ") || line.startsWith("2 ")) {
+            // regular file
+            const parts = line.split("\t");
+            if (parts.length < 2) continue;
+            const path = parts[1];
+            const meta = parts[0].split(/\s+/);
+            if (meta.length < 2) continue;
+
+            const xy = meta[1];
+            if (xy.length < 2) continue;
+
+            const stagedChar = xy[0];
+            const unstagedChar = xy[1];
+
+            if (stagedChar !== ".") {
+              const status =
+                { A: "added", M: "modified", D: "deleted", R: "renamed" }[stagedChar] || "modified";
+              staged.push({ path, status, oldPath: undefined });
+            }
+
+            if (unstagedChar !== ".") {
+              const status = { M: "modified", D: "deleted" }[unstagedChar] || "modified";
+              unstaged.push({ path, status, oldPath: undefined });
+            }
+          } else if (line.startsWith("? ")) {
+            const path = line.substring("? ".length);
+            if (path) untracked.push(path);
+          }
+        }
+
+        return jsonResponse(res, { branch, remote, ahead, behind, staged, unstaged, untracked, conflicted });
+      } catch (err) {
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
+
+    // GET /api/git-diff?cwd=<path>&path=<file>&staged=<bool>
+    if (url.pathname === "/api/git-diff" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd");
+      const path = url.searchParams.get("path");
+      const staged = url.searchParams.get("staged") === "true";
+
+      if (!cwd || !path) return jsonResponse(res, { error: "Missing cwd or path param" }, 400);
+
+      try {
+        const resolvedCwd = resolve(cwd);
+        const args = staged ? ["diff", "--cached", "--", path] : ["diff", "--", path];
+        const stdout = execSync(`git ${args.join(" ")}`, {
+          cwd: resolvedCwd,
+          encoding: "utf-8",
+          shell: true,
+        });
+
+        const hunks = [];
+        let currentHunk = null;
+        let oldLineNo = 0;
+        let newLineNo = 0;
+
+        const lines = stdout.split("\n");
+        for (const line of lines) {
+          if (line.startsWith("@@")) {
+            if (currentHunk) hunks.push(currentHunk);
+
+            const header = line;
+            const match = line.match(/@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
+            const oldStart = match ? parseInt(match[1]) : 0;
+            const oldCount = match ? parseInt(match[2] || "1") : 1;
+            const newStart = match ? parseInt(match[3]) : 0;
+            const newCount = match ? parseInt(match[4] || "1") : 1;
+
+            oldLineNo = oldStart;
+            newLineNo = newStart;
+
+            currentHunk = { header, oldStart, oldCount, newStart, newCount, lines: [] };
+          } else if (currentHunk) {
+            if (line.startsWith("+") && !line.startsWith("+++")) {
+              currentHunk.lines.push({
+                type: "add",
+                content: line.substring(1),
+                oldLineNo: null,
+                newLineNo,
+              });
+              newLineNo++;
+            } else if (line.startsWith("-") && !line.startsWith("---")) {
+              currentHunk.lines.push({
+                type: "delete",
+                content: line.substring(1),
+                oldLineNo,
+                newLineNo: null,
+              });
+              oldLineNo++;
+            } else if (!line.startsWith("\\")) {
+              const content = line.length > 0 ? line.substring(1) : "";
+              currentHunk.lines.push({
+                type: "context",
+                content,
+                oldLineNo,
+                newLineNo,
+              });
+              oldLineNo++;
+              newLineNo++;
+            }
+          }
+        }
+
+        if (currentHunk) hunks.push(currentHunk);
+
+        return jsonResponse(res, { path, hunks });
+      } catch (err) {
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
+
+    // GET /api/git-log?cwd=<path>&count=<n>
+    if (url.pathname === "/api/git-log" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd");
+      const count = parseInt(url.searchParams.get("count") || "50");
+
+      if (!cwd) return jsonResponse(res, { error: "Missing cwd param" }, 400);
+
+      try {
+        const resolvedCwd = resolve(cwd);
+        const format = "%h%x1f%H%x1f%an%x1f%ae%x1f%aI%x1f%s%x1f%b%x1e";
+        const stdout = execSync(`git log -n${count} --format="${format}"`, {
+          cwd: resolvedCwd,
+          encoding: "utf-8",
+          shell: true,
+        });
+
+        const entries = [];
+        const records = stdout.split("\x1e");
+        for (const record of records) {
+          const trimmed = record.trim();
+          if (!trimmed) continue;
+          const fields = trimmed.split("\x1f");
+          if (fields.length < 7) continue;
+
+          entries.push({
+            hash: fields[0],
+            hashFull: fields[1],
+            author: fields[2],
+            email: fields[3],
+            date: fields[4],
+            message: fields[5],
+            body: fields[6].trim(),
+          });
+        }
+
+        return jsonResponse(res, entries);
+      } catch (err) {
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
+
     jsonResponse(res, { error: "Not found" }, 404);
   } catch (err) {
     jsonResponse(res, { error: err.message }, 500);
@@ -140,5 +333,8 @@ server.listen(PORT, () => {
   console.log(`    GET  /api/conflicted-files?cwd=<path>`);
   console.log(`    POST /api/read-file   { cwd, path }`);
   console.log(`    POST /api/write-file  { cwd, path, content }`);
-  console.log(`    GET  /api/list-dir?path=<path>\n`);
+  console.log(`    GET  /api/list-dir?path=<path>`);
+  console.log(`    GET  /api/git-status?cwd=<path>`);
+  console.log(`    GET  /api/git-diff?cwd=<path>&path=<file>&staged=<bool>`);
+  console.log(`    GET  /api/git-log?cwd=<path>&count=<n>\n`);
 });
