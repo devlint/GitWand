@@ -14,28 +14,105 @@ function fileName(path: string): string {
   return path.split("/").pop() ?? path;
 }
 
-function diffStats(diff: GitDiff) {
-  let adds = 0;
-  let dels = 0;
-  for (const hunk of diff.hunks) {
-    for (const line of hunk.lines) {
-      if (line.type === "add") adds++;
-      else if (line.type === "delete") dels++;
+// ─── Cached diff stats (computed once per diffs change) ──
+const fileStats = computed(() =>
+  props.diffs.map((diff) => {
+    let adds = 0;
+    let dels = 0;
+    for (const hunk of diff.hunks) {
+      for (const line of hunk.lines) {
+        if (line.type === "add") adds++;
+        else if (line.type === "delete") dels++;
+      }
     }
-  }
-  return { adds, dels };
-}
+    return { adds, dels };
+  }),
+);
 
 const totalStats = computed(() => {
   let adds = 0;
   let dels = 0;
-  for (const diff of props.diffs) {
-    const s = diffStats(diff);
+  for (const s of fileStats.value) {
     adds += s.adds;
     dels += s.dels;
   }
   return { adds, dels, files: props.diffs.length };
 });
+
+// ─── Lazy rendering: only expand a few files at a time ──
+const MAX_INITIAL_FILES = 20;
+const MAX_LINES_PER_FILE = 500;
+
+/** Set of expanded file indices */
+const expandedFiles = ref(new Set<number>());
+
+/** How many files to show in the list (grows on scroll) */
+const renderedFileCount = ref(MAX_INITIAL_FILES);
+
+function isExpanded(idx: number): boolean {
+  return expandedFiles.value.has(idx);
+}
+
+function toggleFile(idx: number) {
+  const s = new Set(expandedFiles.value);
+  if (s.has(idx)) {
+    s.delete(idx);
+  } else {
+    s.add(idx);
+  }
+  expandedFiles.value = s;
+}
+
+/** Total lines in a file diff */
+function fileTotalLines(idx: number): number {
+  let count = 0;
+  for (const hunk of props.diffs[idx].hunks) {
+    count += hunk.lines.length;
+  }
+  return count;
+}
+
+/** Whether a file diff is truncated (too many lines) */
+function isFileTruncated(idx: number): boolean {
+  return fileTotalLines(idx) > MAX_LINES_PER_FILE;
+}
+
+/** Get hunks with truncation applied */
+function truncatedHunks(idx: number) {
+  const diff = props.diffs[idx];
+  if (!isFileTruncated(idx)) return diff.hunks;
+
+  const result: typeof diff.hunks = [];
+  let remaining = MAX_LINES_PER_FILE;
+
+  for (const hunk of diff.hunks) {
+    if (remaining <= 0) break;
+    if (hunk.lines.length <= remaining) {
+      result.push(hunk);
+      remaining -= hunk.lines.length;
+    } else {
+      result.push({ ...hunk, lines: hunk.lines.slice(0, remaining) });
+      remaining = 0;
+    }
+  }
+  return result;
+}
+
+// Reset expansion and rendered count when diffs change
+watch(
+  () => props.diffs,
+  () => {
+    // Auto-expand the first few files
+    const initial = new Set<number>();
+    const autoExpand = Math.min(props.diffs.length, 5);
+    for (let i = 0; i < autoExpand; i++) {
+      initial.add(i);
+    }
+    expandedFiles.value = initial;
+    renderedFileCount.value = Math.min(props.diffs.length, MAX_INITIAL_FILES);
+    visibleFileIdx.value = 0;
+  },
+);
 
 // ─── Scroll-spy: track which file is visible ────────────
 const contentEl = ref<HTMLElement | null>(null);
@@ -43,7 +120,7 @@ const fileEls = ref<HTMLElement[]>([]);
 const visibleFileIdx = ref(0);
 
 let observer: IntersectionObserver | null = null;
-const visibleSet = new Map<number, number>(); // idx → intersectionRatio
+const visibleSet = new Map<number, number>();
 
 function setupObserver() {
   teardownObserver();
@@ -59,7 +136,6 @@ function setupObserver() {
           visibleSet.delete(idx);
         }
       }
-      // Pick the topmost visible file
       if (visibleSet.size > 0) {
         visibleFileIdx.value = Math.min(...visibleSet.keys());
       }
@@ -80,11 +156,9 @@ function teardownObserver() {
   visibleSet.clear();
 }
 
-// Re-setup observer when diffs change
 watch(
   () => props.diffs,
   async () => {
-    visibleFileIdx.value = 0;
     await nextTick();
     setupObserver();
   },
@@ -92,17 +166,44 @@ watch(
 
 onUnmounted(() => teardownObserver());
 
-// Click on a file in the list → scroll to it
+// Click on a file in the list → expand & scroll to it
 function scrollToFile(idx: number) {
-  const el = fileEls.value[idx];
-  if (el) {
-    el.scrollIntoView({ behavior: "smooth", block: "start" });
+  // Ensure file is rendered
+  if (idx >= renderedFileCount.value) {
+    renderedFileCount.value = idx + 1;
   }
+  // Ensure file is expanded
+  if (!expandedFiles.value.has(idx)) {
+    const s = new Set(expandedFiles.value);
+    s.add(idx);
+    expandedFiles.value = s;
+  }
+  nextTick(() => {
+    const el = fileEls.value[idx];
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  });
 }
 
 // Collect refs
 function setFileRef(el: any, idx: number) {
   if (el) fileEls.value[idx] = el as HTMLElement;
+}
+
+// ─── Load more on scroll ─────────────────────────────────
+function onContentScroll(e: Event) {
+  const el = e.target as HTMLElement;
+  if (!el) return;
+  const scrollBottom = el.scrollTop + el.clientHeight;
+  const threshold = el.scrollHeight - 200;
+  if (scrollBottom >= threshold && renderedFileCount.value < props.diffs.length) {
+    renderedFileCount.value = Math.min(
+      renderedFileCount.value + MAX_INITIAL_FILES,
+      props.diffs.length,
+    );
+    nextTick(() => setupObserver());
+  }
 }
 </script>
 
@@ -116,57 +217,79 @@ function setFileRef(el: any, idx: number) {
       </span>
       <span class="cdv-stat cdv-stat--add" v-if="totalStats.adds > 0">+{{ totalStats.adds }}</span>
       <span class="cdv-stat cdv-stat--del" v-if="totalStats.dels > 0">-{{ totalStats.dels }}</span>
+      <span class="cdv-large-diff-hint" v-if="diffs.length > MAX_INITIAL_FILES">
+        ({{ renderedFileCount }}/{{ diffs.length }})
+      </span>
     </div>
 
     <div class="cdv-body" v-if="diffs.length > 0">
       <!-- File diffs -->
-      <div class="cdv-content" ref="contentEl">
+      <div class="cdv-content" ref="contentEl" @scroll="onContentScroll">
         <div
-          v-for="(fileDiff, fileIdx) in diffs"
-          :key="fileIdx"
+          v-for="fileIdx in renderedFileCount"
+          :key="fileIdx - 1"
           class="cdv-file"
-          :ref="(el) => setFileRef(el, fileIdx)"
-          :data-file-idx="fileIdx"
+          :ref="(el) => setFileRef(el, fileIdx - 1)"
+          :data-file-idx="fileIdx - 1"
         >
-          <div class="cdv-file-header">
-            <span class="cdv-file-name mono">{{ fileName(fileDiff.path) }}</span>
-            <span class="cdv-file-path muted">{{ fileDiff.path }}</span>
+          <!-- Collapsible file header -->
+          <div
+            class="cdv-file-header"
+            @click="toggleFile(fileIdx - 1)"
+            role="button"
+            tabindex="0"
+            @keydown.enter="toggleFile(fileIdx - 1)"
+          >
+            <span class="cdv-collapse-icon" :class="{ 'cdv-collapse-icon--open': isExpanded(fileIdx - 1) }">&#9654;</span>
+            <span class="cdv-file-name mono">{{ fileName(diffs[fileIdx - 1].path) }}</span>
+            <span class="cdv-file-path muted">{{ diffs[fileIdx - 1].path }}</span>
             <div class="cdv-file-stats">
-              <span class="cdv-stat cdv-stat--add" v-if="diffStats(fileDiff).adds > 0">
-                +{{ diffStats(fileDiff).adds }}
+              <span class="cdv-stat cdv-stat--add" v-if="fileStats[fileIdx - 1]?.adds > 0">
+                +{{ fileStats[fileIdx - 1].adds }}
               </span>
-              <span class="cdv-stat cdv-stat--del" v-if="diffStats(fileDiff).dels > 0">
-                -{{ diffStats(fileDiff).dels }}
+              <span class="cdv-stat cdv-stat--del" v-if="fileStats[fileIdx - 1]?.dels > 0">
+                -{{ fileStats[fileIdx - 1].dels }}
               </span>
             </div>
           </div>
 
-          <div
-            v-for="(hunk, hunkIdx) in fileDiff.hunks"
-            :key="hunkIdx"
-            class="cdv-hunk"
-          >
-            <div class="cdv-hunk-header mono">{{ hunk.header }}</div>
-            <table class="cdv-table">
-              <tbody>
-                <tr
-                  v-for="(line, lineIdx) in hunk.lines"
-                  :key="lineIdx"
-                  class="cdv-line"
-                  :class="`cdv-line--${line.type}`"
-                >
-                  <td class="cdv-line-no mono">{{ line.oldLineNo ?? '' }}</td>
-                  <td class="cdv-line-no mono">{{ line.newLineNo ?? '' }}</td>
-                  <td class="cdv-line-marker mono">
-                    {{ line.type === 'add' ? '+' : line.type === 'delete' ? '-' : ' ' }}
-                  </td>
-                  <td class="cdv-line-content mono">
-                    <span>{{ line.content || '\u00a0' }}</span>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+          <!-- Hunks (only rendered if expanded) -->
+          <template v-if="isExpanded(fileIdx - 1)">
+            <div
+              v-for="(hunk, hunkIdx) in truncatedHunks(fileIdx - 1)"
+              :key="hunkIdx"
+              class="cdv-hunk"
+            >
+              <div class="cdv-hunk-header mono">{{ hunk.header }}</div>
+              <table class="cdv-table">
+                <tbody>
+                  <tr
+                    v-for="(line, lineIdx) in hunk.lines"
+                    :key="lineIdx"
+                    class="cdv-line"
+                    :class="`cdv-line--${line.type}`"
+                  >
+                    <td class="cdv-line-no mono">{{ line.oldLineNo ?? '' }}</td>
+                    <td class="cdv-line-no mono">{{ line.newLineNo ?? '' }}</td>
+                    <td class="cdv-line-marker mono">
+                      {{ line.type === 'add' ? '+' : line.type === 'delete' ? '-' : ' ' }}
+                    </td>
+                    <td class="cdv-line-content mono">
+                      <span>{{ line.content || '\u00a0' }}</span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div v-if="isFileTruncated(fileIdx - 1)" class="cdv-truncated">
+              Diff truncated ({{ fileTotalLines(fileIdx - 1) }} lines, showing first {{ MAX_LINES_PER_FILE }})
+            </div>
+          </template>
+        </div>
+
+        <!-- Load more indicator -->
+        <div v-if="renderedFileCount < diffs.length" class="cdv-load-more">
+          {{ diffs.length - renderedFileCount }} more files — scroll down to load
         </div>
       </div>
 
@@ -183,14 +306,14 @@ function setFileRef(el: any, idx: number) {
             :title="fileDiff.path"
           >
             <span class="cdv-filelist-icon mono" :class="{
-              'cdv-filelist-icon--add': diffStats(fileDiff).adds > 0 && diffStats(fileDiff).dels === 0,
-              'cdv-filelist-icon--del': diffStats(fileDiff).dels > 0 && diffStats(fileDiff).adds === 0,
-              'cdv-filelist-icon--mod': diffStats(fileDiff).adds > 0 && diffStats(fileDiff).dels > 0,
-            }">{{ diffStats(fileDiff).adds > 0 && diffStats(fileDiff).dels === 0 ? 'A' : diffStats(fileDiff).dels > 0 && diffStats(fileDiff).adds === 0 ? 'D' : 'M' }}</span>
+              'cdv-filelist-icon--add': fileStats[idx]?.adds > 0 && fileStats[idx]?.dels === 0,
+              'cdv-filelist-icon--del': fileStats[idx]?.dels > 0 && fileStats[idx]?.adds === 0,
+              'cdv-filelist-icon--mod': fileStats[idx]?.adds > 0 && fileStats[idx]?.dels > 0,
+            }">{{ fileStats[idx]?.adds > 0 && fileStats[idx]?.dels === 0 ? 'A' : fileStats[idx]?.dels > 0 && fileStats[idx]?.adds === 0 ? 'D' : 'M' }}</span>
             <span class="cdv-filelist-name">{{ fileName(fileDiff.path) }}</span>
             <span class="cdv-filelist-stats">
-              <span v-if="diffStats(fileDiff).adds > 0" class="cdv-stat cdv-stat--add">+{{ diffStats(fileDiff).adds }}</span>
-              <span v-if="diffStats(fileDiff).dels > 0" class="cdv-stat cdv-stat--del">-{{ diffStats(fileDiff).dels }}</span>
+              <span v-if="fileStats[idx]?.adds > 0" class="cdv-stat cdv-stat--add">+{{ fileStats[idx].adds }}</span>
+              <span v-if="fileStats[idx]?.dels > 0" class="cdv-stat cdv-stat--del">-{{ fileStats[idx].dels }}</span>
             </span>
           </li>
         </ul>
@@ -237,6 +360,12 @@ function setFileRef(el: any, idx: number) {
 .cdv-summary {
   font-size: 12px;
   color: var(--color-text-muted);
+}
+
+.cdv-large-diff-hint {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  opacity: 0.6;
 }
 
 .cdv-stat {
@@ -367,6 +496,26 @@ function setFileRef(el: any, idx: number) {
   position: sticky;
   top: 0;
   z-index: 2;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.12s;
+}
+
+.cdv-file-header:hover {
+  background: var(--color-bg-tertiary);
+}
+
+.cdv-collapse-icon {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  transition: transform 0.15s ease;
+  flex-shrink: 0;
+  width: 14px;
+  text-align: center;
+}
+
+.cdv-collapse-icon--open {
+  transform: rotate(90deg);
 }
 
 .cdv-file-name {
@@ -442,6 +591,22 @@ function setFileRef(el: any, idx: number) {
   white-space: pre;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.cdv-truncated {
+  padding: 8px 16px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  background: var(--color-bg-tertiary);
+  text-align: center;
+  font-style: italic;
+}
+
+.cdv-load-more {
+  padding: 12px 16px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  text-align: center;
 }
 
 .cdv-empty {

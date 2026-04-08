@@ -11,6 +11,7 @@ import {
   gitFetch,
   gitMerge,
   gitMergeAbort,
+  gitMergeContinue,
   gitDiscard,
   getGitShow,
   getGitBranches,
@@ -50,7 +51,22 @@ export function useGitRepo() {
   const viewMode = ref<ViewMode>("changes");
 
   // Commit editor state
+  const COMMIT_SIGNATURE = "\u{1FA84} Commit via GitWand";
   const commitMessage = ref("");
+  const commitSummary = ref("");
+
+  function getCommitSignatureDefault(): string {
+    try {
+      const raw = localStorage.getItem("gitwand-settings");
+      if (raw) {
+        const s = JSON.parse(raw);
+        if (s.commitSignature === false) return "";
+      }
+    } catch { /* ignore */ }
+    return COMMIT_SIGNATURE;
+  }
+
+  const commitDescription = ref(getCommitSignatureDefault());
   const isCommitting = ref(false);
   const isPushing = ref(false);
   const isPulling = ref(false);
@@ -143,9 +159,9 @@ export function useGitRepo() {
   const aheadCount = computed(() => status.value?.ahead ?? 0);
   const behindCount = computed(() => status.value?.behind ?? 0);
 
-  /** Can we commit? (staged files + non-empty message) */
+  /** Can we commit? (staged files + non-empty summary) */
   const canCommit = computed(() => {
-    return repoStats.value.staged > 0 && commitMessage.value.trim().length > 0 && !isCommitting.value;
+    return repoStats.value.staged > 0 && commitSummary.value.trim().length > 0 && !isCommitting.value;
   });
 
   /** Can we push? */
@@ -179,7 +195,8 @@ export function useGitRepo() {
   const isFetching = ref(false);
 
   async function fetchRemote() {
-    if (!folderPath.value || isFetching.value) return;
+    // Skip fetch during merge operations to avoid git lock conflicts
+    if (!folderPath.value || isFetching.value || isMerging.value || hasConflicts.value) return;
     isFetching.value = true;
     try {
       const result = await gitFetch(folderPath.value);
@@ -359,9 +376,15 @@ export function useGitRepo() {
     if (!folderPath.value || !canCommit.value) return;
     isCommitting.value = true;
     try {
-      const hash = await gitCommit(folderPath.value, commitMessage.value.trim());
+      const desc = commitDescription.value.trim();
+      const fullMessage = desc
+        ? `${commitSummary.value.trim()}\n\n${desc}`
+        : commitSummary.value.trim();
+      const hash = await gitCommit(folderPath.value, fullMessage);
       lastCommitHash.value = hash;
       commitMessage.value = "";
+      commitSummary.value = "";
+      commitDescription.value = getCommitSignatureDefault();
       await refresh();
       if (viewMode.value === "history") {
         await loadLog();
@@ -430,15 +453,33 @@ export function useGitRepo() {
 
   async function mergeBranch(branchName: string) {
     if (!folderPath.value || !branchName) return;
+    stopAutoFetch();
     isMerging.value = true;
     try {
       const result = await gitMerge(folderPath.value, branchName);
       await refresh();
 
-      // If there are conflicts, switch to changes view and select first conflict
-      if (status.value && status.value.conflicted.length > 0) {
+      // Detect conflicts from both the server response and the git status
+      const hasConflictedFiles = status.value && status.value.conflicted.length > 0;
+      const serverSaysConflicts = result.conflicts === true;
+
+      if (hasConflictedFiles) {
+        // Conflicts found in status → switch to changes view and select first conflict
         viewMode.value = "changes";
-        await selectFile(status.value.conflicted[0], false);
+        await selectFile(status.value!.conflicted[0], false);
+      } else if (serverSaysConflicts) {
+        // Server detected conflicts but status didn't catch them yet — reload status and retry
+        if (folderPath.value) {
+          await loadStatus(folderPath.value);
+        }
+        if (status.value && status.value.conflicted.length > 0) {
+          viewMode.value = "changes";
+          await selectFile(status.value.conflicted[0], false);
+        } else {
+          // Fallback: still show changes view so user can see the state
+          viewMode.value = "changes";
+          error.value = `merge: ${result.message || "unknown error"}`;
+        }
       } else if (!result.success) {
         error.value = `merge: ${result.message || "unknown error"}`;
       } else {
@@ -452,6 +493,8 @@ export function useGitRepo() {
       error.value = `merge: ${err?.message || String(err) || "unknown error"}`;
     } finally {
       isMerging.value = false;
+      // Restart auto-fetch only if no conflicts remain (conflicts = merge still in progress)
+      if (!hasConflicts.value) startAutoFetch();
     }
   }
 
@@ -464,6 +507,31 @@ export function useGitRepo() {
       await refresh();
     } catch (err: any) {
       error.value = `abort merge: ${err?.message || String(err)}`;
+    } finally {
+      startAutoFetch();
+    }
+  }
+
+  /** Continue a merge after all conflicts have been resolved. */
+  async function mergeContinue() {
+    if (!folderPath.value) return;
+    isMerging.value = true;
+    try {
+      const result = await gitMergeContinue(folderPath.value);
+      await refresh();
+      if (result.success) {
+        successMessage.value = "merge-done";
+      } else {
+        error.value = `merge --continue: ${result.message || "unknown error"}`;
+      }
+      if (viewMode.value === "history") {
+        await loadLog();
+      }
+    } catch (err: any) {
+      error.value = `merge --continue: ${err?.message || String(err)}`;
+    } finally {
+      isMerging.value = false;
+      startAutoFetch();
     }
   }
 
@@ -561,6 +629,8 @@ export function useGitRepo() {
     isSelectedFileConflicted,
     allFiles,
     repoStats,
+    commitSummary,
+    commitDescription,
     canCommit,
     canPush,
     canPull,
@@ -579,6 +649,7 @@ export function useGitRepo() {
     push,
     pull,
     mergeBranch,
+    mergeContinue,
     abortMerge,
     discardFiles,
     selectCommit,

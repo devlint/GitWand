@@ -161,22 +161,23 @@ const server = createServer(async (req, res) => {
           } else if (line.startsWith("# branch.upstream ")) {
             remote = line.substring("# branch.upstream ".length).trim();
           } else if (line.startsWith("u ")) {
-            // conflicted
-            const parts = line.split("\t");
-            if (parts.length >= 2) {
-              conflicted.push(parts[1]);
+            // conflicted — porcelain v2 unmerged format:
+            // u <xy> <sub> <m1> <m2> <m3> <mW> <h1> <h2> <h3> <path>
+            // All fields separated by spaces (no tabs)
+            const parts = line.split(/\s+/);
+            if (parts.length >= 11) {
+              conflicted.push(parts.slice(10).join(" "));
             }
-          } else if (line.startsWith("1 ") || line.startsWith("2 ")) {
-            // regular file
-            const parts = line.split("\t");
-            if (parts.length < 2) continue;
-            const path = parts[1];
-            const meta = parts[0].split(/\s+/);
-            if (meta.length < 2) continue;
+          } else if (line.startsWith("1 ")) {
+            // ordinary changed entry — porcelain v2 format:
+            // 1 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <path>
+            // All fields separated by spaces (9 fields total)
+            const fields = line.split(/\s+/);
+            if (fields.length < 9) continue;
+            const xy = fields[1];
+            const path = fields.slice(8).join(" ");
 
-            const xy = meta[1];
             if (xy.length < 2) continue;
-
             const stagedChar = xy[0];
             const unstagedChar = xy[1];
 
@@ -189,6 +190,32 @@ const server = createServer(async (req, res) => {
             if (unstagedChar !== ".") {
               const status = { M: "modified", D: "deleted" }[unstagedChar] || "modified";
               unstaged.push({ path, status, oldPath: undefined });
+            }
+          } else if (line.startsWith("2 ")) {
+            // renamed/copied entry — porcelain v2 format:
+            // 2 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <Xscore> <path>\t<origPath>
+            // Metadata separated by spaces, path and origPath by tab
+            const tabIdx = line.indexOf("\t");
+            const metaPart = tabIdx >= 0 ? line.substring(0, tabIdx) : line;
+            const fields = metaPart.split(/\s+/);
+            if (fields.length < 10) continue;
+            const xy = fields[1];
+            const path = fields.slice(9).join(" ");
+            const origPath = tabIdx >= 0 ? line.substring(tabIdx + 1) : undefined;
+
+            if (xy.length < 2) continue;
+            const stagedChar = xy[0];
+            const unstagedChar = xy[1];
+
+            if (stagedChar !== ".") {
+              const status =
+                { A: "added", M: "modified", D: "deleted", R: "renamed" }[stagedChar] || "modified";
+              staged.push({ path, status, oldPath: origPath });
+            }
+
+            if (unstagedChar !== ".") {
+              const status = { M: "modified", D: "deleted" }[unstagedChar] || "modified";
+              unstaged.push({ path, status, oldPath: origPath });
             }
           } else if (line.startsWith("? ")) {
             const path = line.substring("? ".length);
@@ -445,8 +472,27 @@ const server = createServer(async (req, res) => {
         const isConflict = combined.includes("CONFLICT") || combined.includes("Automatic merge failed");
         return jsonResponse(res, {
           success: false,
+          conflicts: isConflict,
           message: isConflict ? "Merge conflicts detected" : (stderr || stdout || err.message || "Merge failed").trim(),
         });
+      }
+    }
+
+    // POST /api/git-merge-continue  { cwd }
+    if (url.pathname === "/api/git-merge-continue" && req.method === "POST") {
+      const { cwd } = await readBody(req);
+      if (!cwd) return jsonResponse(res, { success: false, message: "Missing cwd" }, 400);
+      try {
+        const resolvedCwd = resolve(cwd);
+        const stdout = execSync('git -c core.editor=true merge --continue 2>&1', {
+          cwd: resolvedCwd,
+          encoding: "utf-8",
+          shell: true,
+          env: { ...process.env, GIT_MERGE_AUTOEDIT: "no", GIT_EDITOR: "true" },
+        });
+        return jsonResponse(res, { success: true, message: stdout.trim() || "Merge completed" });
+      } catch (err) {
+        return jsonResponse(res, { success: false, message: (err.stderr || err.stdout || err.message || "").toString().trim() });
       }
     }
 

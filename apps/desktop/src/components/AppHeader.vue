@@ -111,12 +111,21 @@ function closeMergePopover() {
   showMergePopover.value = false;
 }
 
-/** Branches available for merging: all except the current one. */
+/** Branches available for merging: all except the current one, main/master first. */
 const mergeBranches = computed(() => {
   const filter = mergeFilter.value.toLowerCase();
+  const mainNames = ["main", "master"];
   return props.branches
     .filter((b) => !b.isCurrent)
-    .filter((b) => !filter || b.name.toLowerCase().includes(filter));
+    .filter((b) => !filter || b.name.toLowerCase().includes(filter))
+    .sort((a, b) => {
+      const aName = a.name.replace(/^origin\//, "").toLowerCase();
+      const bName = b.name.replace(/^origin\//, "").toLowerCase();
+      const aMain = mainNames.includes(aName) ? 0 : 1;
+      const bMain = mainNames.includes(bName) ? 0 : 1;
+      if (aMain !== bMain) return aMain - bMain;
+      return a.name.localeCompare(b.name);
+    });
 });
 
 function handleMerge(name: string) {
@@ -847,10 +856,9 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
   align-items: center;
   justify-content: center;
   min-width: 18px;
-  height: 18px;
-  padding: 0 5px;
+  padding: 2px 5px;
   border-radius: 9px;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   line-height: 1;

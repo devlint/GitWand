@@ -410,6 +410,7 @@ export async function gitCommit(cwd: string, message: string): Promise<string> {
 export interface GitPushPullResult {
   success: boolean;
   message: string;
+  conflicts?: boolean;
 }
 
 /**
@@ -480,6 +481,21 @@ export async function gitMergeAbort(cwd: string): Promise<GitPushPullResult> {
     return tauriInvoke<GitPushPullResult>("git_merge_abort", { cwd });
   }
   const res = await fetch(`${DEV_SERVER}/api/git-merge-abort`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd }),
+  });
+  return res.json();
+}
+
+/**
+ * Continue a merge after all conflicts are resolved.
+ */
+export async function gitMergeContinue(cwd: string): Promise<GitPushPullResult> {
+  if (isTauri()) {
+    return tauriInvoke<GitPushPullResult>("git_merge_continue", { cwd });
+  }
+  const res = await fetch(`${DEV_SERVER}/api/git-merge-continue`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ cwd }),

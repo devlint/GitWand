@@ -13,6 +13,7 @@ const { theme, setTheme } = useTheme();
 
 const emit = defineEmits<{
   close: [];
+  "update:commitSignature": [enabled: boolean];
 }>();
 
 // ─── Settings state (persisted in localStorage) ────────
@@ -22,6 +23,7 @@ interface Settings {
   editor: string;
   gitPath: string;
   defaultBranch: string;
+  commitSignature: boolean;
 }
 
 function loadSettings(): Settings {
@@ -38,6 +40,7 @@ const defaultSettings: Settings = {
   editor: "",
   gitPath: "",
   defaultBranch: "main",
+  commitSignature: true,
 };
 
 function saveSettings(s: Settings) {
@@ -93,6 +96,12 @@ function onThemeChange(val: ThemeSetting) {
   } else {
     setTheme(val);
   }
+}
+
+function onSignatureChange(e: Event) {
+  const checked = (e.target as HTMLInputElement).checked;
+  updateSetting("commitSignature", checked);
+  emit("update:commitSignature", checked);
 }
 
 function onKeyDown(e: KeyboardEvent) {
@@ -186,6 +195,21 @@ function onKeyDown(e: KeyboardEvent) {
             @input="updateSetting('defaultBranch', ($event.target as HTMLInputElement).value)"
             placeholder="main"
           />
+        </div>
+
+        <!-- Commit signature -->
+        <div class="sp-row sp-row--checkbox">
+          <label class="sp-checkbox-label" for="setting-signature">
+            <input
+              id="setting-signature"
+              type="checkbox"
+              class="sp-checkbox"
+              :checked="settings.commitSignature"
+              @change="onSignatureChange"
+            />
+            <span>{{ t('settings.commitSignature') }}</span>
+          </label>
+          <span class="sp-hint">{{ t('settings.commitSignatureHint') }}</span>
         </div>
       </div>
     </div>
@@ -301,5 +325,30 @@ function onKeyDown(e: KeyboardEvent) {
 
 .sp-input::placeholder {
   color: var(--color-text-muted);
+}
+
+.sp-row--checkbox {
+  gap: 4px;
+}
+
+.sp-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.sp-checkbox {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+
+.sp-hint {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  padding-left: 24px;
 }
 </style>

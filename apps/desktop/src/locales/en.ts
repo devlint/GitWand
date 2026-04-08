@@ -83,7 +83,9 @@ const en: Locale = {
     stage: "Stage",
     unstage: "Unstage",
     // Commit panel
-    commitPlaceholder: "Commit message\u2026",
+    stageAllButton: "Stage all ({0})",
+    summaryPlaceholder: "Summary (required)",
+    descriptionPlaceholder: "Description (optional)",
     commitButton: "Commit ({0})",
     commitButtonLoading: "Committing\u2026",
     commitHint: "Ctrl+Enter to commit",
@@ -166,12 +168,17 @@ const en: Locale = {
 
   // ─── MergeEditor ────────────────────────────────────────
   merge: {
-    conflictType: "Conflict type",
-    keepOurs: "Keep Ours",
-    keepTheirs: "Keep Theirs",
-    keepBoth: "Keep both",
-    customEdit: "Edit manually",
-    autoResolved: "Auto-resolved",
+    conflictType: "conflict",
+    acceptCurrent: "Accept Current Change",
+    acceptIncoming: "Accept Incoming Change",
+    acceptBoth: "Accept Both Changes",
+    customEdit: "Edit",
+    currentBranch: "Current branch",
+    incomingBranch: "Incoming branch",
+    resolveAuto: "Resolve auto",
+    resolveAutoLabel: "Automatically resolve conflicts",
+    recommended: "recommended",
+    autoResolved: "auto",
     resolvedManually: "Manually resolved",
     analysing: "Analysing conflicts\u2026",
     loadingRepo: "Loading repository\u2026",
@@ -191,6 +198,8 @@ const en: Locale = {
     gitPath: "Git path",
     gitPathAuto: "Automatic",
     defaultBranch: "Default branch",
+    commitSignature: "Add \u201c\u{1FA84} Commit via GitWand\u201d to description",
+    commitSignatureHint: "A small signature added automatically \u2014 removable anytime",
   },
 } as const;
 

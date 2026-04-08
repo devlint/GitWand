@@ -10,7 +10,8 @@ const props = defineProps<{
   selectedFile: string | null;
   viewMode: ViewMode;
   repoStats: { staged: number; unstaged: number; untracked: number; conflicted: number };
-  commitMessage: string;
+  commitSummary: string;
+  commitDescription: string;
   canCommit: boolean;
   isCommitting: boolean;
   // History mode props
@@ -28,7 +29,8 @@ const emit = defineEmits<{
   stageAll: [];
   unstageAll: [];
   commit: [];
-  "update:commitMessage": [value: string];
+  "update:commitSummary": [value: string];
+  "update:commitDescription": [value: string];
   selectCommit: [hash: string];
 }>();
 
@@ -80,6 +82,8 @@ function fileDir(path: string): string {
 
 const totalChanges = computed(() => props.files.length);
 
+const unstagedCount = computed(() => props.repoStats.unstaged + props.repoStats.untracked);
+
 function onStageClick(e: Event, path: string) {
   e.stopPropagation();
   emit("stageFile", path);
@@ -90,8 +94,12 @@ function onUnstageClick(e: Event, path: string) {
   emit("unstageFile", path);
 }
 
-function onCommitMessageInput(e: Event) {
-  emit("update:commitMessage", (e.target as HTMLTextAreaElement).value);
+function onSummaryInput(e: Event) {
+  emit("update:commitSummary", (e.target as HTMLInputElement).value);
+}
+
+function onDescriptionInput(e: Event) {
+  emit("update:commitDescription", (e.target as HTMLTextAreaElement).value);
 }
 
 function onCommitKeydown(e: KeyboardEvent) {
@@ -202,16 +210,37 @@ function onCommitKeydown(e: KeyboardEvent) {
         <span class="empty-text">{{ t('sidebar.cleanTree') }}</span>
       </div>
 
-      <!-- Commit panel -->
-      <div class="commit-panel" v-if="repoStats.staged > 0 || commitMessage.length > 0">
-        <textarea
-          class="commit-input mono"
-          :value="commitMessage"
-          @input="onCommitMessageInput"
-          @keydown="onCommitKeydown"
-          :placeholder="t('sidebar.commitPlaceholder')"
-          rows="3"
-        ></textarea>
+    </div>
+
+    <!-- Commit panel — fixed at bottom, always visible in changes view -->
+    <div class="commit-panel" v-if="viewMode === 'changes'">
+      <input
+        class="commit-summary mono"
+        type="text"
+        :value="commitSummary"
+        @input="onSummaryInput"
+        @keydown="onCommitKeydown"
+        :placeholder="t('sidebar.summaryPlaceholder')"
+      />
+      <textarea
+        class="commit-description mono"
+        :value="commitDescription"
+        @input="onDescriptionInput"
+        @keydown="onCommitKeydown"
+        :placeholder="t('sidebar.descriptionPlaceholder')"
+        rows="2"
+      ></textarea>
+      <div class="commit-actions">
+        <button
+          class="commit-stage-all"
+          v-if="unstagedCount > 0"
+          @click="emit('stageAll')"
+        >
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+          <span>{{ t('sidebar.stageAllButton', unstagedCount) }}</span>
+        </button>
         <button
           class="commit-btn"
           :class="{ 'commit-btn--disabled': !canCommit }"
@@ -227,8 +256,8 @@ function onCommitKeydown(e: KeyboardEvent) {
           </svg>
           <span>{{ isCommitting ? t('sidebar.commitButtonLoading') : t('sidebar.commitButton', repoStats.staged) }}</span>
         </button>
-        <span class="commit-hint muted">{{ t('sidebar.commitHint') }}</span>
       </div>
+      <span class="commit-hint muted">{{ t('sidebar.commitHint') }}</span>
     </div>
 
     <!-- History view: commit log in sidebar -->
@@ -465,7 +494,7 @@ function onCommitKeydown(e: KeyboardEvent) {
   color: var(--color-text-muted);
 }
 
-/* Commit panel */
+/* Commit panel — fixed at bottom of sidebar */
 .commit-panel {
   border-top: 1px solid var(--color-border);
   padding: 10px 12px;
@@ -474,34 +503,83 @@ function onCommitKeydown(e: KeyboardEvent) {
   gap: 8px;
   background: var(--color-bg-secondary);
   flex-shrink: 0;
-  margin-top: auto;
 }
 
-.commit-input {
+.commit-summary {
   width: 100%;
-  padding: 8px 10px;
-  font-size: 12px;
+  padding: 7px 10px;
+  font-size: 11px;
+  line-height: 1.5;
+  background: var(--color-bg);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.commit-summary:focus {
+  border-color: var(--color-accent);
+}
+
+.commit-summary::placeholder {
+  color: var(--color-text-muted);
+}
+
+.commit-description {
+  width: 100%;
+  padding: 7px 10px;
+  font-size: 11px;
   line-height: 1.5;
   background: var(--color-bg);
   color: var(--color-text);
   border: 1px solid var(--color-border);
   border-radius: 6px;
   resize: vertical;
-  min-height: 60px;
-  max-height: 150px;
+  min-height: 38px;
+  max-height: 120px;
   outline: none;
   transition: border-color 0.15s;
 }
 
-.commit-input:focus {
+.commit-description:focus {
   border-color: var(--color-accent);
 }
 
-.commit-input::placeholder {
+.commit-description::placeholder {
   color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.commit-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.commit-stage-all {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 7px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  background: var(--color-bg-tertiary);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  transition: background 0.15s, border-color 0.15s;
+  white-space: nowrap;
+}
+
+.commit-stage-all:hover {
+  background: var(--color-bg);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
 }
 
 .commit-btn {
+  flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;

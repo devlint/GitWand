@@ -91,25 +91,24 @@ fn git_status(cwd: String) -> Result<GitStatus, String> {
         } else if line.starts_with("# branch.upstream ") {
             remote = Some(line.strip_prefix("# branch.upstream ").unwrap_or("").to_string());
         } else if line.starts_with("u ") {
-            // unmerged (conflicted)
-            let parts: Vec<&str> = line.split('\t').collect();
-            if parts.len() >= 2 {
-                conflicted.push(parts[1].to_string());
+            // unmerged (conflicted) — porcelain v2 format:
+            // u <xy> <sub> <m1> <m2> <m3> <mW> <h1> <h2> <h3> <path>
+            // All fields separated by spaces (no tabs)
+            let parts: Vec<&str> = line.splitn(11, ' ').collect();
+            if parts.len() >= 11 {
+                conflicted.push(parts[10].to_string());
             }
-        } else if line.starts_with("1 ") || line.starts_with("2 ") {
-            // regular file
-            let parts: Vec<&str> = line.split('\t').collect();
-            if parts.len() < 2 {
+        } else if line.starts_with("1 ") {
+            // ordinary changed entry — porcelain v2 format:
+            // 1 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <path>
+            // All fields separated by spaces (no tabs)
+            let fields: Vec<&str> = line.splitn(9, ' ').collect();
+            if fields.len() < 9 {
                 continue;
             }
-            let path = parts[1].to_string();
-            let meta_parts: Vec<&str> = parts[0].split_whitespace().collect();
-            if meta_parts.len() < 2 {
-                continue;
-            }
+            let xy = fields[1];
+            let path = fields[8].to_string();
 
-            // Format: "1 <xy> ..." where x is staged, y is unstaged
-            let xy = meta_parts[1];
             if xy.len() < 2 {
                 continue;
             }
@@ -146,6 +145,58 @@ fn git_status(cwd: String) -> Result<GitStatus, String> {
                     path,
                     status,
                     old_path: None,
+                });
+            }
+        } else if line.starts_with("2 ") {
+            // renamed/copied entry — porcelain v2 format:
+            // 2 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <Xscore> <path>\t<origPath>
+            // Fields separated by spaces, but path and origPath separated by tab
+            let tab_idx = line.find('\t');
+            let meta_part = if let Some(idx) = tab_idx { &line[..idx] } else { line };
+            let fields: Vec<&str> = meta_part.split_whitespace().collect();
+            if fields.len() < 10 {
+                continue;
+            }
+            let xy = fields[1];
+            let path = fields[9].to_string();
+            let old_path = tab_idx.map(|idx| line[idx + 1..].to_string());
+
+            if xy.len() < 2 {
+                continue;
+            }
+
+            let staged_char = xy.chars().next().unwrap();
+            let unstaged_char = xy.chars().nth(1).unwrap();
+
+            // Staged changes
+            if staged_char != '.' {
+                let status = match staged_char {
+                    'A' => "added",
+                    'M' => "modified",
+                    'D' => "deleted",
+                    'R' => "renamed",
+                    _ => "modified",
+                }
+                .to_string();
+                staged.push(FileChange {
+                    path: path.clone(),
+                    status,
+                    old_path: old_path.clone(),
+                });
+            }
+
+            // Unstaged changes
+            if unstaged_char != '.' {
+                let status = match unstaged_char {
+                    'M' => "modified",
+                    'D' => "deleted",
+                    _ => "modified",
+                }
+                .to_string();
+                unstaged.push(FileChange {
+                    path,
+                    status,
+                    old_path,
                 });
             }
         } else if line.starts_with("? ") {
@@ -565,6 +616,8 @@ fn git_commit(cwd: String, message: String) -> Result<String, String> {
 struct GitPushPullResult {
     success: bool,
     message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    conflicts: Option<bool>,
 }
 
 #[tauri::command]
@@ -585,6 +638,7 @@ fn git_push(cwd: String) -> Result<GitPushPullResult, String> {
         } else {
             stderr.trim().to_string()
         },
+        conflicts: None,
     })
 }
 
@@ -606,6 +660,7 @@ fn git_fetch(cwd: String) -> Result<GitPushPullResult, String> {
         } else {
             stderr.trim().to_string()
         },
+        conflicts: None,
     })
 }
 
@@ -619,14 +674,19 @@ fn git_merge(cwd: String, branch: String) -> Result<GitPushPullResult, String> {
 
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let combined = format!("{}{}", stderr, stdout);
+    let is_conflict = combined.contains("CONFLICT") || combined.contains("Automatic merge failed");
 
     Ok(GitPushPullResult {
         success: output.status.success(),
         message: if output.status.success() {
             stdout.trim().to_string()
+        } else if is_conflict {
+            "Merge conflicts detected".to_string()
         } else {
             stderr.trim().to_string()
         },
+        conflicts: if is_conflict { Some(true) } else { None },
     })
 }
 
@@ -639,7 +699,6 @@ fn git_merge_abort(cwd: String) -> Result<GitPushPullResult, String> {
         .map_err(|e| format!("Failed to run git merge --abort: {}", e))?;
 
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
 
     Ok(GitPushPullResult {
         success: output.status.success(),
@@ -648,6 +707,31 @@ fn git_merge_abort(cwd: String) -> Result<GitPushPullResult, String> {
         } else {
             stderr.trim().to_string()
         },
+        conflicts: None,
+    })
+}
+
+#[tauri::command]
+fn git_merge_continue(cwd: String) -> Result<GitPushPullResult, String> {
+    let output = std::process::Command::new("git")
+        .args(["-c", "core.editor=true", "merge", "--continue"])
+        .current_dir(&cwd)
+        .env("GIT_MERGE_AUTOEDIT", "no")
+        .env("GIT_EDITOR", "true")
+        .output()
+        .map_err(|e| format!("Failed to run git merge --continue: {}", e))?;
+
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+
+    Ok(GitPushPullResult {
+        success: output.status.success(),
+        message: if output.status.success() {
+            stdout.trim().to_string()
+        } else {
+            stderr.trim().to_string()
+        },
+        conflicts: None,
     })
 }
 
@@ -669,6 +753,7 @@ fn git_pull(cwd: String) -> Result<GitPushPullResult, String> {
         } else {
             stderr.trim().to_string()
         },
+        conflicts: None,
     })
 }
 
@@ -977,6 +1062,7 @@ pub fn run() {
             git_fetch,
             git_merge,
             git_merge_abort,
+            git_merge_continue,
             git_discard,
             git_show,
             git_branches,

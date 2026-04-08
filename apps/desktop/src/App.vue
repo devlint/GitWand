@@ -59,6 +59,8 @@ const {
   allFiles: repoFiles,
   repoStats,
   commitMessage,
+  commitSummary,
+  commitDescription,
   canCommit,
   isCommitting,
   canPush,
@@ -79,6 +81,7 @@ const {
   push: doPush,
   pull: doPull,
   mergeBranch: doMerge,
+  mergeContinue: doMergeContinue,
   abortMerge: doAbortMerge,
   discardFiles,
   branches,
@@ -142,17 +145,68 @@ watch(repoSuccess, (val) => {
 // When a conflicted file is selected, load it in useGitWand for resolution
 const showingMergeEditor = ref(false);
 
-watch(isSelectedFileConflicted, async (isConflicted) => {
-  if (isConflicted && repoFolderPath.value && repoSelectedFile.value) {
-    // Load conflicted files via useGitWand
-    await mergeOpenPath(repoFolderPath.value);
-    // Select the specific conflicted file
-    mergeSelectFile(repoSelectedFile.value!);
-    showingMergeEditor.value = true;
-  } else {
-    showingMergeEditor.value = false;
+// Watch both the conflicted flag AND the selected file path —
+// switching between two conflicted files keeps isConflicted=true
+// so we need to also react to the file path changing.
+watch(
+  [isSelectedFileConflicted, repoSelectedFile],
+  async ([isConflicted, filePath]) => {
+    if (isConflicted && repoFolderPath.value && filePath) {
+      await mergeOpenPath(repoFolderPath.value);
+      mergeSelectFile(filePath);
+      showingMergeEditor.value = true;
+    } else {
+      showingMergeEditor.value = false;
+    }
+  },
+);
+
+/**
+ * After resolving a hunk or file, check if the file is fully resolved.
+ * If so: save to disk, git add, refresh status, move to next conflicted file.
+ */
+async function checkAndSaveIfResolved(filePath: string) {
+  const file = mergeFiles.value.find((f) => f.path === filePath);
+  if (!file) return;
+
+  // Still has unresolved conflict markers → nothing to do yet
+  if (file.result.stats.totalConflicts > 0) return;
+
+  // All conflicts resolved → save + stage
+  if (!repoFolderPath.value) return;
+
+  try {
+    await saveFile(filePath);
+    await stageFiles([filePath]);
+    await repoRefresh();
+
+    // Move to the next conflicted file, if any
+    if (repoStatus.value && repoStatus.value.conflicted.length > 0) {
+      await repoSelectFile(repoStatus.value.conflicted[0], false);
+    } else {
+      // All conflicts resolved → finalize the merge commit
+      await doMergeContinue();
+    }
+  } catch (err: any) {
+    repoError.value = `save: ${err?.message || String(err)}`;
   }
-});
+}
+
+/** Wrapped resolve handlers that auto-save when fully resolved */
+function handleResolveHunk(path: string, hunkIndex: number, choice: "ours" | "theirs" | "both" | "both-theirs-first") {
+  resolveHunkManual(path, hunkIndex, choice);
+  checkAndSaveIfResolved(path);
+}
+
+function handleResolveFile(path: string) {
+  resolveFile(path);
+  checkAndSaveIfResolved(path);
+}
+
+function handleResolveHunkCustom(path: string, hunkIndex: number, content: string) {
+  resolveHunkCustom(path, hunkIndex, content);
+  checkAndSaveIfResolved(path);
+}
 
 // ─── Folder opening ─────────────────────────────────────
 async function handleOpenFolder() {
@@ -187,6 +241,19 @@ function onViewModeChange(mode: "changes" | "history") {
 
 // ─── Settings panel ─────────────────────────────────────
 const showSettings = ref(false);
+
+const COMMIT_SIGNATURE = "\u{1FA84} Commit via GitWand";
+function onCommitSignatureChange(enabled: boolean) {
+  if (enabled) {
+    if (!commitDescription.value) {
+      commitDescription.value = COMMIT_SIGNATURE;
+    }
+  } else {
+    if (commitDescription.value === COMMIT_SIGNATURE) {
+      commitDescription.value = "";
+    }
+  }
+}
 
 // ─── Folder picker (browser mode) ───────────────────────
 const showFolderPicker = ref(false);
@@ -277,7 +344,8 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
           :selected-file="repoSelectedFile"
           :view-mode="viewMode"
           :repo-stats="repoStats"
-          :commit-message="commitMessage"
+          :commit-summary="commitSummary"
+          :commit-description="commitDescription"
           :can-commit="canCommit"
           :is-committing="isCommitting"
           :log-entries="repoLog"
@@ -291,7 +359,8 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
           @stage-all="stageAll"
           @unstage-all="unstageAll"
           @commit="doCommit"
-          @update:commit-message="(val) => commitMessage = val"
+          @update:commit-summary="(val) => commitSummary = val"
+          @update:commit-description="(val) => commitDescription = val"
           @select-commit="selectCommit"
         />
       </aside>
@@ -341,9 +410,9 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
             <MergeEditor
               v-if="showingMergeEditor && mergeSelectedFile"
               :file="mergeSelectedFile"
-              @resolve="resolveFile"
-              @resolve-hunk="(path, idx, choice) => resolveHunkManual(path, idx, choice)"
-              @resolve-hunk-custom="(path, idx, content) => resolveHunkCustom(path, idx, content)"
+              @resolve="handleResolveFile"
+              @resolve-hunk="(path, idx, choice) => handleResolveHunk(path, idx, choice)"
+              @resolve-hunk-custom="(path, idx, content) => handleResolveHunkCustom(path, idx, content)"
             />
             <DiffViewer
               v-else
@@ -382,6 +451,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
     <SettingsPanel
       v-if="showSettings"
       @close="showSettings = false"
+      @update:commit-signature="onCommitSignatureChange"
     />
   </div>
 </template>

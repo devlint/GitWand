@@ -85,7 +85,9 @@ const fr = {
     stage: "Stager",
     unstage: "Unstager",
     // Commit panel
-    commitPlaceholder: "Message du commit\u2026",
+    stageAllButton: "Tout ajouter ({0})",
+    summaryPlaceholder: "Résumé (requis)",
+    descriptionPlaceholder: "Description (optionnel)",
     commitButton: "Commit ({0})",
     commitButtonLoading: "Commit\u2026",
     commitHint: "Ctrl+Enter pour commiter",
@@ -168,12 +170,17 @@ const fr = {
 
   // ─── MergeEditor ────────────────────────────────────────
   merge: {
-    conflictType: "Type de conflit",
-    keepOurs: "Garder Ours",
-    keepTheirs: "Garder Theirs",
-    keepBoth: "Garder les deux",
-    customEdit: "\u00c9diter manuellement",
-    autoResolved: "Auto-r\u00e9solu",
+    conflictType: "conflit",
+    acceptCurrent: "Accepter version courante",
+    acceptIncoming: "Accepter version entrante",
+    acceptBoth: "Accepter les deux",
+    customEdit: "\u00c9diter",
+    currentBranch: "Branche courante",
+    incomingBranch: "Branche entrante",
+    resolveAuto: "R\u00e9soudre auto",
+    resolveAutoLabel: "R\u00e9soudre automatiquement les conflits",
+    recommended: "recommand\u00e9",
+    autoResolved: "auto",
     resolvedManually: "R\u00e9solu manuellement",
     analysing: "Analyse des conflits\u2026",
     loadingRepo: "Chargement du repo\u2026",
@@ -193,6 +200,8 @@ const fr = {
     gitPath: "Chemin de Git",
     gitPathAuto: "Automatique",
     defaultBranch: "Branche par d\u00e9faut",
+    commitSignature: "Ajouter \u00ab \u{1FA84} Commit via GitWand \u00bb dans la description",
+    commitSignatureHint: "Un petit clin d\u2019\u0153il ajout\u00e9 automatiquement \u2014 supprimable \u00e0 tout moment",
   },
 } as const;
 
