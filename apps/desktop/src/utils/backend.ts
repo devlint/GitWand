@@ -472,6 +472,21 @@ export async function gitMerge(cwd: string, branch: string): Promise<GitPushPull
   return res.json();
 }
 
+/**
+ * Abort an in-progress merge.
+ */
+export async function gitMergeAbort(cwd: string): Promise<GitPushPullResult> {
+  if (isTauri()) {
+    return tauriInvoke<GitPushPullResult>("git_merge_abort", { cwd });
+  }
+  const res = await fetch(`${DEV_SERVER}/api/git-merge-abort`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd }),
+  });
+  return res.json();
+}
+
 // ─── Git show (commit diff) ───────────────────────────────────
 
 /**

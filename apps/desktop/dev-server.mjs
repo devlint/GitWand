@@ -450,6 +450,23 @@ const server = createServer(async (req, res) => {
       }
     }
 
+    // POST /api/git-merge-abort  { cwd }
+    if (url.pathname === "/api/git-merge-abort" && req.method === "POST") {
+      const { cwd } = await readBody(req);
+      if (!cwd) return jsonResponse(res, { success: false, message: "Missing cwd" }, 400);
+      try {
+        const resolvedCwd = resolve(cwd);
+        execSync("git merge --abort 2>&1", {
+          cwd: resolvedCwd,
+          encoding: "utf-8",
+          shell: true,
+        });
+        return jsonResponse(res, { success: true, message: "Merge aborted" });
+      } catch (err) {
+        return jsonResponse(res, { success: false, message: (err.stderr || err.message || "").trim() });
+      }
+    }
+
     // POST /api/git-pull  { cwd }
     if (url.pathname === "/api/git-pull" && req.method === "POST") {
       const { cwd } = await readBody(req);

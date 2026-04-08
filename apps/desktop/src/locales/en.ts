@@ -62,6 +62,9 @@ const en: Locale = {
     syncDone: "Sync completed",
     pushDone: "Push completed",
     mergeDone: "Merge completed",
+    mergeAborted: "Merge aborted",
+    resolveConflicts: "resolve conflicts to continue",
+    abortMerge: "Abort merge",
   },
 
   // ─── Sidebar / RepoSidebar ──────────────────────────────

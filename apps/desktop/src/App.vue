@@ -55,6 +55,7 @@ const {
   branchDisplay,
   isClean,
   isSelectedFileConflicted,
+  hasConflicts,
   allFiles: repoFiles,
   repoStats,
   commitMessage,
@@ -78,6 +79,7 @@ const {
   push: doPush,
   pull: doPull,
   mergeBranch: doMerge,
+  abortMerge: doAbortMerge,
   discardFiles,
   branches,
   branchesLoading,
@@ -125,6 +127,7 @@ watch(repoSuccess, (val) => {
     "sync-done": "header.syncDone",
     "push-done": "header.pushDone",
     "merge-done": "header.mergeDone",
+    "merge-aborted": "header.mergeAborted",
   } as Record<string, string>)[val] || val;
   successToast.value = t(key as any);
   // Reset source immediately so we can trigger again
@@ -317,6 +320,22 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
             </button>
           </div>
 
+          <!-- Merge conflict banner -->
+          <div v-if="hasConflicts" class="conflict-banner" role="alert">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+              <path d="M9 1.5L16.5 15H1.5L9 1.5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+              <path d="M9 7v3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+              <circle cx="9" cy="12.5" r="0.75" fill="currentColor"/>
+            </svg>
+            <span class="conflict-text">
+              {{ repoStats.conflicted }} {{ repoStats.conflicted > 1 ? t('header.conflicts') : t('header.conflict') }}
+              — {{ t('header.resolveConflicts') }}
+            </span>
+            <button class="conflict-abort-btn" @click="doAbortMerge">
+              {{ t('header.abortMerge') }}
+            </button>
+          </div>
+
           <!-- Changes view: conflict editor or diff viewer -->
           <template v-if="viewMode === 'changes'">
             <MergeEditor
@@ -469,6 +488,40 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
 .error-close:hover {
   opacity: 1;
   background: rgba(239, 68, 68, 0.15);
+}
+
+/* ─── Merge conflict banner ──────────────────────────── */
+.conflict-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  background: var(--color-warning-bg, rgba(234, 179, 8, 0.1));
+  border-left: 3px solid var(--color-warning);
+  color: var(--color-warning);
+  font-size: 13px;
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.conflict-text {
+  flex: 1;
+}
+
+.conflict-abort-btn {
+  padding: 4px 12px;
+  border-radius: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--color-bg-tertiary);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.conflict-abort-btn:hover {
+  background: var(--color-border);
 }
 
 /* ─── Success toast ──────────────────────────────────── */

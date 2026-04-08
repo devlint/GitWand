@@ -631,6 +631,27 @@ fn git_merge(cwd: String, branch: String) -> Result<GitPushPullResult, String> {
 }
 
 #[tauri::command]
+fn git_merge_abort(cwd: String) -> Result<GitPushPullResult, String> {
+    let output = std::process::Command::new("git")
+        .args(["merge", "--abort"])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("Failed to run git merge --abort: {}", e))?;
+
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+
+    Ok(GitPushPullResult {
+        success: output.status.success(),
+        message: if output.status.success() {
+            "Merge aborted".to_string()
+        } else {
+            stderr.trim().to_string()
+        },
+    })
+}
+
+#[tauri::command]
 fn git_pull(cwd: String) -> Result<GitPushPullResult, String> {
     let output = std::process::Command::new("git")
         .args(["pull"])
@@ -955,6 +976,7 @@ pub fn run() {
             git_pull,
             git_fetch,
             git_merge,
+            git_merge_abort,
             git_discard,
             git_show,
             git_branches,

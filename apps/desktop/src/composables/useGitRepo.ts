@@ -10,6 +10,7 @@ import {
   gitPull,
   gitFetch,
   gitMerge,
+  gitMergeAbort,
   gitDiscard,
   getGitShow,
   getGitBranches,
@@ -87,6 +88,11 @@ export function useGitRepo() {
   const isSelectedFileConflicted = computed(() => {
     if (!selectedFilePath.value || !status.value) return false;
     return status.value.conflicted.includes(selectedFilePath.value);
+  });
+
+  /** Are there unresolved merge conflicts? */
+  const hasConflicts = computed(() => {
+    return (status.value?.conflicted.length ?? 0) > 0;
   });
 
   const isClean = computed(() => {
@@ -427,12 +433,18 @@ export function useGitRepo() {
     isMerging.value = true;
     try {
       const result = await gitMerge(folderPath.value, branchName);
-      if (!result.success) {
+      await refresh();
+
+      // If there are conflicts, switch to changes view and select first conflict
+      if (status.value && status.value.conflicted.length > 0) {
+        viewMode.value = "changes";
+        await selectFile(status.value.conflicted[0], false);
+      } else if (!result.success) {
         error.value = `merge: ${result.message || "unknown error"}`;
       } else {
         successMessage.value = "merge-done";
       }
-      await refresh();
+
       if (viewMode.value === "history") {
         await loadLog();
       }
@@ -440,6 +452,18 @@ export function useGitRepo() {
       error.value = `merge: ${err?.message || String(err) || "unknown error"}`;
     } finally {
       isMerging.value = false;
+    }
+  }
+
+  /** Abort an in-progress merge. */
+  async function abortMerge() {
+    if (!folderPath.value) return;
+    try {
+      await gitMergeAbort(folderPath.value);
+      successMessage.value = "merge-aborted";
+      await refresh();
+    } catch (err: any) {
+      error.value = `abort merge: ${err?.message || String(err)}`;
     }
   }
 
@@ -533,6 +557,7 @@ export function useGitRepo() {
     hasRepo,
     branchDisplay,
     isClean,
+    hasConflicts,
     isSelectedFileConflicted,
     allFiles,
     repoStats,
@@ -554,6 +579,7 @@ export function useGitRepo() {
     push,
     pull,
     mergeBranch,
+    abortMerge,
     discardFiles,
     selectCommit,
     loadBranches,

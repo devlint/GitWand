@@ -64,6 +64,9 @@ const fr = {
     syncDone: "Synchronisation termin\u00e9e",
     pushDone: "Push termin\u00e9",
     mergeDone: "Merge termin\u00e9",
+    mergeAborted: "Merge annul\u00e9",
+    resolveConflicts: "r\u00e9solvez les conflits pour continuer",
+    abortMerge: "Annuler le merge",
   },
 
   // ─── Sidebar / RepoSidebar ──────────────────────────────
