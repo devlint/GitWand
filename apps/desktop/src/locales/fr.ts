@@ -43,6 +43,8 @@ const fr = {
     themeDarkLabel: "Mode sombre",
     push: "Push",
     pull: "Pull",
+    sync: "Sync",
+    syncTooltip: "Récupérer les branches distantes et pull",
     // Stats
     file: "fichier",
     files: "fichiers",

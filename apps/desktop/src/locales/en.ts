@@ -41,6 +41,8 @@ const en: Locale = {
     themeDarkLabel: "Dark mode",
     push: "Push",
     pull: "Pull",
+    sync: "Sync",
+    syncTooltip: "Fetch remote branches and pull",
     // Stats
     file: "file",
     files: "files",

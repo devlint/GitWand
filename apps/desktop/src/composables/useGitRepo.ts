@@ -389,6 +389,8 @@ export function useGitRepo() {
     if (!folderPath.value) return;
     isPulling.value = true;
     try {
+      // Fetch all branches first (updates origin/master, etc.)
+      await gitFetch(folderPath.value);
       const result = await gitPull(folderPath.value);
       if (!result.success) {
         error.value = `pull: ${result.message}`;
