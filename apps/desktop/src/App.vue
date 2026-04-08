@@ -7,7 +7,6 @@ import EmptyState from "./components/EmptyState.vue";
 import FolderPicker from "./components/FolderPicker.vue";
 import RepoSidebar from "./components/RepoSidebar.vue";
 import DiffViewer from "./components/DiffViewer.vue";
-import CommitLog from "./components/CommitLog.vue";
 import CommitDiffViewer from "./components/CommitDiffViewer.vue";
 import SettingsPanel from "./components/SettingsPanel.vue";
 import { useGitWand } from "./composables/useGitWand";
@@ -332,6 +331,10 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
             :commit-message="commitMessage"
             :can-commit="canCommit"
             :is-committing="isCommitting"
+            :log-entries="repoLog"
+            :log-loading="repoLoading"
+            :selected-commit-hash="selectedCommitHash"
+            :ahead-count="aheadCount"
             @select="onRepoFileSelect"
             @change-view="onViewModeChange"
             @stage-file="(path) => stageFiles([path])"
@@ -340,6 +343,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
             @unstage-all="unstageAll"
             @commit="doCommit"
             @update:commit-message="(val) => commitMessage = val"
+            @select-commit="selectCommit"
           />
         </aside>
 
@@ -374,24 +378,12 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
               :file-path="repoSelectedFile"
             />
 
-            <!-- History view: commit log + diff -->
-            <div v-else-if="viewMode === 'history'" class="history-split">
-              <div class="history-log">
-                <CommitLog
-                  :entries="repoLog"
-                  :loading="repoLoading"
-                  :selected-hash="selectedCommitHash"
-                  :ahead-count="aheadCount"
-                  @select-commit="selectCommit"
-                />
-              </div>
-              <div class="history-diff">
-                <CommitDiffViewer
-                  :diffs="commitDiffs"
-                  :commit-hash="selectedCommitHash"
-                />
-              </div>
-            </div>
+            <!-- History view: commit diff (log is in sidebar) -->
+            <CommitDiffViewer
+              v-else-if="viewMode === 'history'"
+              :diffs="commitDiffs"
+              :commit-hash="selectedCommitHash"
+            />
           </template>
         </main>
       </template>
@@ -516,21 +508,4 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
   background: rgba(239, 68, 68, 0.15);
 }
 
-.history-split {
-  display: flex;
-  flex: 1;
-  overflow: hidden;
-}
-
-.history-log {
-  width: 360px;
-  min-width: 280px;
-  border-right: 1px solid var(--color-border);
-  overflow: hidden;
-}
-
-.history-diff {
-  flex: 1;
-  overflow: hidden;
-}
 </style>

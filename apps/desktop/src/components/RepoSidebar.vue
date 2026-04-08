@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import type { RepoFileEntry, ViewMode } from "../composables/useGitRepo";
+import type { GitLogEntry } from "../utils/backend";
+import CommitLog from "./CommitLog.vue";
 import { useI18n } from "../composables/useI18n";
 
 const props = defineProps<{
@@ -11,6 +13,11 @@ const props = defineProps<{
   commitMessage: string;
   canCommit: boolean;
   isCommitting: boolean;
+  // History mode props
+  logEntries: GitLogEntry[];
+  logLoading: boolean;
+  selectedCommitHash: string | null;
+  aheadCount: number;
 }>();
 
 const emit = defineEmits<{
@@ -22,6 +29,7 @@ const emit = defineEmits<{
   unstageAll: [];
   commit: [];
   "update:commitMessage": [value: string];
+  selectCommit: [hash: string];
 }>();
 
 const { t } = useI18n();
@@ -222,6 +230,17 @@ function onCommitKeydown(e: KeyboardEvent) {
         <span class="commit-hint muted">{{ t('sidebar.commitHint') }}</span>
       </div>
     </div>
+
+    <!-- History view: commit log in sidebar -->
+    <div class="sidebar-log" v-if="viewMode === 'history'">
+      <CommitLog
+        :entries="logEntries"
+        :loading="logLoading"
+        :selected-hash="selectedCommitHash"
+        :ahead-count="aheadCount"
+        @select-commit="(hash: string) => emit('selectCommit', hash)"
+      />
+    </div>
   </nav>
 </template>
 
@@ -277,6 +296,11 @@ function onCommitKeydown(e: KeyboardEvent) {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
+}
+
+.sidebar-log {
+  flex: 1;
+  overflow: hidden;
 }
 
 .section {
