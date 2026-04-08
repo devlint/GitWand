@@ -18,6 +18,7 @@ const props = defineProps<{
   branchDisplay: string;
   repoStats: { staged: number; unstaged: number; untracked: number; conflicted: number };
   hasRepo: boolean;
+  folderName: string;
   canPush: boolean;
   canPull: boolean;
   aheadCount: number;
@@ -367,15 +368,17 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
         </button>
       </div>
 
+      <!-- Clickable folder name (replaces the Open button) -->
       <button
-        class="btn btn--secondary"
+        v-if="hasRepo && folderName"
+        class="folder-trigger"
         @click="emit('openFolder')"
-        :aria-label="t('header.openFolder')"
+        :title="t('header.openFolder')"
       >
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
           <path d="M2 3.5A1.5 1.5 0 013.5 2H6l1.5 2H12.5A1.5 1.5 0 0114 5.5v7a1.5 1.5 0 01-1.5 1.5h-9A1.5 1.5 0 012 12.5v-9z" stroke="currentColor" stroke-width="1.5" fill="none"/>
         </svg>
-        <span>{{ t('header.open') }}</span>
+        <span class="folder-name">{{ folderName }}</span>
       </button>
 
       <!-- Repo mode: push/pull -->
@@ -822,6 +825,33 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
 
 .stat--warning .stat-value {
   color: var(--color-warning);
+}
+
+/* Folder trigger */
+.folder-trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  color: var(--color-text-muted);
+  background: none;
+  font-size: 12px;
+  transition: background 0.12s, color 0.12s;
+  cursor: pointer;
+  max-width: 200px;
+}
+
+.folder-trigger:hover {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text);
+}
+
+.folder-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
 }
 
 .header-right {

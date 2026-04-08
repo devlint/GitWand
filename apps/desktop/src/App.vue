@@ -118,6 +118,14 @@ const error = computed({
 
 const canSave = computed(() => isMergeMode.value && mergeFiles.value.length > 0 && !!mergeFolderPath.value);
 
+/** Name of the current folder (last segment of path). */
+const folderName = computed(() => {
+  const p = isRepoMode.value ? repoFolderPath.value : mergeFolderPath.value;
+  if (!p) return "";
+  const parts = p.replace(/[/\\]+$/, "").split(/[/\\]/);
+  return parts[parts.length - 1] || p;
+});
+
 const currentFolderPath = computed(() =>
   isMergeMode.value ? mergeFolderPath.value : repoFolderPath.value,
 );
@@ -246,6 +254,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
       :branch-display="branchDisplay"
       :repo-stats="repoStats"
       :has-repo="hasRepo"
+      :folder-name="folderName"
       :can-push="canPush"
       :can-pull="canPull"
       :ahead-count="aheadCount"
@@ -314,7 +323,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
 
       <!-- ─── REPO MODE ───────────────────────── -->
       <template v-else>
-        <aside class="sidebar">
+        <aside class="sidebar" v-if="hasRepo">
           <RepoSidebar
             :files="repoFiles"
             :selected-file="repoSelectedFile"
@@ -335,38 +344,38 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
         </aside>
 
         <main class="main">
-          <div v-if="repoLoading" class="loading-overlay">
-            <div class="loading-spinner"></div>
-            <span class="loading-text">{{ t('merge.loadingRepo') }}</span>
-          </div>
+          <!-- No repo loaded → EmptyState full screen -->
+          <EmptyState v-if="!hasRepo && !repoLoading" @open-folder="handleOpenFolder" @open-path="handleOpenPath" />
 
-          <div v-if="repoError" class="error-banner" role="alert">
-            <svg class="error-icon" width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
-              <circle cx="9" cy="9" r="8" stroke="currentColor" stroke-width="1.5"/>
-              <path d="M9 5v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-              <circle cx="9" cy="12" r="1" fill="currentColor"/>
-            </svg>
-            <span class="error-text">{{ repoError }}</span>
-            <button class="error-close" @click="repoError = null" :aria-label="t('common.close')">
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
-                <path d="M3.646 3.646a.5.5 0 01.708 0L7 6.293l2.646-2.647a.5.5 0 01.708.708L7.707 7l2.647 2.646a.5.5 0 01-.708.708L7 7.707l-2.646 2.647a.5.5 0 01-.708-.708L6.293 7 3.646 4.354a.5.5 0 010-.708z"/>
+          <template v-else>
+            <div v-if="repoLoading" class="loading-overlay">
+              <div class="loading-spinner"></div>
+              <span class="loading-text">{{ t('merge.loadingRepo') }}</span>
+            </div>
+
+            <div v-if="repoError" class="error-banner" role="alert">
+              <svg class="error-icon" width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+                <circle cx="9" cy="9" r="8" stroke="currentColor" stroke-width="1.5"/>
+                <path d="M9 5v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                <circle cx="9" cy="12" r="1" fill="currentColor"/>
               </svg>
-            </button>
-          </div>
+              <span class="error-text">{{ repoError }}</span>
+              <button class="error-close" @click="repoError = null" :aria-label="t('common.close')">
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
+                  <path d="M3.646 3.646a.5.5 0 01.708 0L7 6.293l2.646-2.647a.5.5 0 01.708.708L7.707 7l2.647 2.646a.5.5 0 01-.708.708L7 7.707l-2.646 2.647a.5.5 0 01-.708-.708L6.293 7 3.646 4.354a.5.5 0 010-.708z"/>
+                </svg>
+              </button>
+            </div>
 
-          <!-- Changes view: diff viewer -->
-          <template v-if="viewMode === 'changes'">
+            <!-- Changes view: diff viewer -->
             <DiffViewer
-              v-if="hasRepo"
+              v-if="viewMode === 'changes'"
               :diff="repoDiff"
               :file-path="repoSelectedFile"
             />
-            <EmptyState v-else @open-folder="handleOpenFolder" @open-path="handleOpenPath" />
-          </template>
 
-          <!-- History view: commit log + diff -->
-          <template v-else-if="viewMode === 'history'">
-            <div v-if="hasRepo" class="history-split">
+            <!-- History view: commit log + diff -->
+            <div v-else-if="viewMode === 'history'" class="history-split">
               <div class="history-log">
                 <CommitLog
                   :entries="repoLog"
@@ -383,10 +392,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
                 />
               </div>
             </div>
-            <EmptyState v-else @open-folder="handleOpenFolder" @open-path="handleOpenPath" />
           </template>
-
-          <!-- (Branches view removed — now a header popover) -->
         </main>
       </template>
     </div>
