@@ -117,28 +117,41 @@ watch(repoError, (val) => {
   }
 });
 
-// Auto-dismiss success toast after 2.5s
+// Auto-dismiss success toast after 3s
 const successToast = ref<string | null>(null);
+const successToastDetail = ref<string | null>(null);
+const successToastLeaving = ref(false);
 let successTimer: number | null = null;
+
+function dismissToast() {
+  successToastLeaving.value = true;
+  window.setTimeout(() => {
+    successToast.value = null;
+    successToastDetail.value = null;
+    successToastLeaving.value = false;
+    successTimer = null;
+  }, 200);
+}
 
 watch(repoSuccess, (val) => {
   if (!val) return;
-  // Clear any previous toast
   if (successTimer != null) { window.clearTimeout(successTimer); successTimer = null; }
-  const key = ({
-    "already-up-to-date": "header.syncUpToDate",
-    "sync-done": "header.syncDone",
-    "push-done": "header.pushDone",
-    "merge-done": "header.mergeDone",
-    "merge-aborted": "header.mergeAborted",
-  } as Record<string, string>)[val] || val;
-  successToast.value = t(key as any);
-  // Reset source immediately so we can trigger again
+  successToastLeaving.value = false;
+
+  const meta: Record<string, { key: string; detail?: string }> = {
+    "already-up-to-date": { key: "header.syncUpToDate" },
+    "sync-done": { key: "header.syncDone" },
+    "push-done": { key: "header.pushDone" },
+    "merge-done": { key: "header.mergeDone" },
+    "merge-aborted": { key: "header.mergeAborted" },
+  };
+  const info = meta[val];
+  successToast.value = info ? t(info.key as any) : val;
+  successToastDetail.value = new Date().toLocaleString(undefined, {
+    weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit",
+  });
   repoSuccess.value = null;
-  successTimer = window.setTimeout(() => {
-    successToast.value = null;
-    successTimer = null;
-  }, 2500);
+  successTimer = window.setTimeout(dismissToast, 3000);
 });
 
 // ─── Conflict handling ──────────────────────────────────
@@ -440,12 +453,17 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
     />
 
     <!-- Success toast -->
-    <div v-if="successToast" class="success-toast" role="status" :key="successToast">
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-        <circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.5"/>
-        <path d="M5 8l2 2 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-      </svg>
-      <span>{{ successToast }}</span>
+    <div
+      v-if="successToast"
+      class="toast"
+      :class="{ 'toast--leaving': successToastLeaving }"
+      role="status"
+    >
+      <div class="toast-body">
+        <div class="toast-title">{{ successToast }}</div>
+        <div class="toast-detail" v-if="successToastDetail">{{ successToastDetail }}</div>
+      </div>
+      <button class="toast-dismiss" @click="dismissToast">OK</button>
     </div>
 
     <!-- Settings panel -->
@@ -595,30 +613,70 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
   background: var(--color-border);
 }
 
-/* ─── Success toast ──────────────────────────────────── */
-.success-toast {
+/* ─── Toast ──────────────────────────────────────────── */
+.toast {
   position: fixed;
-  bottom: 20px;
-  left: 50%;
-  transform: translateX(-50%);
+  bottom: 24px;
+  right: 24px;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-success);
-  border-radius: 8px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-  color: var(--color-success);
-  font-size: 13px;
-  font-weight: 500;
-  z-index: 100;
-  pointer-events: none;
-  animation: toastIn 0.25s ease-out;
+  gap: 16px;
+  padding: 14px 16px;
+  background: #1a1a1a;
+  border-radius: 12px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.06);
+  color: #fff;
+  z-index: 200;
+  min-width: 260px;
+  max-width: 380px;
+  animation: toastSlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-@keyframes toastIn {
-  from { opacity: 0; transform: translateX(-50%) translateY(10px); }
-  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+.toast--leaving {
+  animation: toastSlideOut 0.2s ease-in forwards;
+}
+
+.toast-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.toast-title {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.toast-detail {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+  margin-top: 2px;
+}
+
+.toast-dismiss {
+  flex-shrink: 0;
+  padding: 5px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.toast-dismiss:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+@keyframes toastSlideIn {
+  from { opacity: 0; transform: translateY(12px) scale(0.96); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes toastSlideOut {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to   { opacity: 0; transform: translateY(8px) scale(0.96); }
 }
 </style>
