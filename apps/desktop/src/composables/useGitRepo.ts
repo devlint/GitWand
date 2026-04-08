@@ -348,6 +348,9 @@ export function useGitRepo() {
       lastCommitHash.value = hash;
       commitMessage.value = "";
       await refresh();
+      if (viewMode.value === "history") {
+        await loadLog();
+      }
     } catch (err: any) {
       error.value = `commit: ${err.message}`;
     } finally {
@@ -366,6 +369,9 @@ export function useGitRepo() {
         error.value = `push: ${result.message}`;
       }
       await refresh();
+      if (viewMode.value === "history") {
+        await loadLog();
+      }
     } catch (err: any) {
       error.value = `push: ${err.message}`;
     } finally {
@@ -382,6 +388,10 @@ export function useGitRepo() {
         error.value = `pull: ${result.message}`;
       }
       await refresh();
+      // Reload log so the commit list reflects pulled commits
+      if (viewMode.value === "history") {
+        await loadLog();
+      }
     } catch (err: any) {
       error.value = `pull: ${err.message}`;
     } finally {
