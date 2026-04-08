@@ -509,10 +509,12 @@ const server = createServer(async (req, res) => {
 
       try {
         const resolvedCwd = resolve(cwd);
-        const stdout = execSync(`git show --format= "${hash}"`, {
+        // Use -m --first-parent to handle merge commits (otherwise diff is empty/combined)
+        const stdout = execSync(`git show -m --first-parent --format= "${hash}"`, {
           cwd: resolvedCwd,
           encoding: "utf-8",
           shell: true,
+          maxBuffer: 10 * 1024 * 1024, // 10MB for large diffs
         });
 
         const diffs = [];

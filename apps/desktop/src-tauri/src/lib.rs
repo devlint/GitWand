@@ -695,7 +695,7 @@ fn git_discard(cwd: String, paths: Vec<String>) -> Result<(), String> {
 #[tauri::command]
 fn git_show(cwd: String, hash: String) -> Result<Vec<GitDiff>, String> {
     let output = std::process::Command::new("git")
-        .args(["show", "--format=", &hash])
+        .args(["show", "-m", "--first-parent", "--format=", &hash])
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to run git show: {}", e))?;
