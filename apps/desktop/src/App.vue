@@ -58,7 +58,6 @@ const {
   hasConflicts,
   allFiles: repoFiles,
   repoStats,
-  commitMessage,
   commitSummary,
   commitDescription,
   canCommit,

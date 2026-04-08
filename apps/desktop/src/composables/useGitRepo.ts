@@ -52,7 +52,6 @@ export function useGitRepo() {
 
   // Commit editor state
   const COMMIT_SIGNATURE = "\u{1FA84} Commit via GitWand";
-  const commitMessage = ref("");
   const commitSummary = ref("");
 
   function getCommitSignatureDefault(): string {
@@ -386,7 +385,6 @@ export function useGitRepo() {
         : commitSummary.value.trim();
       const hash = await gitCommit(folderPath.value, fullMessage);
       lastCommitHash.value = hash;
-      commitMessage.value = "";
       commitSummary.value = "";
       commitDescription.value = getCommitSignatureDefault();
       await refresh();
@@ -607,7 +605,6 @@ export function useGitRepo() {
     error,
     successMessage,
     viewMode,
-    commitMessage,
     isCommitting,
     isPushing,
     isPulling,

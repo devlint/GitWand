@@ -913,6 +913,7 @@ struct GitBranch {
     ahead: i32,
     behind: i32,
     last_commit: String,
+    last_commit_date: String,
 }
 
 #[tauri::command]
@@ -921,7 +922,7 @@ fn git_branches(cwd: String) -> Result<Vec<GitBranch>, String> {
     let output = std::process::Command::new("git")
         .args([
             "branch", "-a",
-            "--format=%(HEAD)%(refname:short)\x1f%(upstream:short)\x1f%(upstream:track,nobracket)\x1f%(objectname:short) %(subject)",
+            "--format=%(HEAD)%(refname:short)\x1f%(upstream:short)\x1f%(upstream:track,nobracket)\x1f%(objectname:short) %(subject)\x1f%(creatordate:iso)",
         ])
         .current_dir(&cwd)
         .output()
@@ -963,6 +964,7 @@ fn git_branches(cwd: String) -> Result<Vec<GitBranch>, String> {
         }
 
         let last_commit = if parts.len() > 3 { parts[3].to_string() } else { String::new() };
+        let last_commit_date = if parts.len() > 4 { parts[4].trim().to_string() } else { String::new() };
 
         // Skip HEAD -> origin/main style remote refs
         if name.contains("HEAD ->") || name == "origin/HEAD" { continue; }
@@ -977,6 +979,7 @@ fn git_branches(cwd: String) -> Result<Vec<GitBranch>, String> {
             ahead,
             behind,
             last_commit,
+            last_commit_date,
         });
     }
 
