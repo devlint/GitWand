@@ -8,6 +8,7 @@ const props = defineProps<{
   entries: GitLogEntry[];
   loading: boolean;
   selectedHash: string | null;
+  aheadCount?: number;
 }>();
 
 const emit = defineEmits<{
@@ -57,29 +58,50 @@ function authorColor(name: string): string {
     </div>
 
     <ul class="log-list" v-else-if="entries.length > 0">
-      <li
-        v-for="entry in entries"
-        :key="entry.hashFull"
-        class="commit-item"
-        :class="{ 'commit-item--selected': selectedHash === entry.hashFull }"
-        @click="emit('selectCommit', entry.hashFull)"
-        tabindex="0"
-        @keydown.enter="emit('selectCommit', entry.hashFull)"
-      >
-        <div class="commit-avatar" :style="{ background: authorColor(entry.author) }">
-          {{ authorInitials(entry.author) }}
-        </div>
-        <div class="commit-info">
-          <div class="commit-message">{{ entry.message }}</div>
-          <div class="commit-meta">
-            <span class="commit-hash mono">{{ entry.hash }}</span>
-            <span class="commit-separator" aria-hidden="true">&middot;</span>
-            <span class="commit-author">{{ entry.author }}</span>
-            <span class="commit-separator" aria-hidden="true">&middot;</span>
-            <time class="commit-date" :datetime="entry.date">{{ relativeDate(entry.date) }}</time>
+      <template v-for="(entry, idx) in entries" :key="entry.hashFull">
+        <!-- Section label before first unpushed commit -->
+        <li v-if="aheadCount && aheadCount > 0 && idx === 0" class="log-section-label log-section-label--unpushed">
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M8 13V3M5 6l3-3 3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span>{{ aheadCount }} {{ aheadCount === 1 ? t('log.unpushedOne') : t('log.unpushedMany') }}</span>
+        </li>
+        <!-- Section label before first pushed commit -->
+        <li v-if="aheadCount && aheadCount > 0 && idx === aheadCount" class="log-section-label log-section-label--pushed">
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M13.5 3.5l-7 7L3 7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span>{{ t('log.pushed') }}</span>
+        </li>
+        <!-- Commit item -->
+        <li
+          class="commit-item"
+          :class="{
+            'commit-item--selected': selectedHash === entry.hashFull,
+            'commit-item--unpushed': aheadCount != null && idx < aheadCount,
+          }"
+          @click="emit('selectCommit', entry.hashFull)"
+          tabindex="0"
+          @keydown.enter="emit('selectCommit', entry.hashFull)"
+        >
+          <div class="commit-avatar" :style="{ background: authorColor(entry.author) }">
+            {{ authorInitials(entry.author) }}
           </div>
-        </div>
-      </li>
+          <div class="commit-info">
+            <div class="commit-message">
+              {{ entry.message }}
+              <span v-if="aheadCount != null && idx < aheadCount" class="unpushed-badge">unpushed</span>
+            </div>
+            <div class="commit-meta">
+              <span class="commit-hash mono">{{ entry.hash }}</span>
+              <span class="commit-separator" aria-hidden="true">&middot;</span>
+              <span class="commit-author">{{ entry.author }}</span>
+              <span class="commit-separator" aria-hidden="true">&middot;</span>
+              <time class="commit-date" :datetime="entry.date">{{ relativeDate(entry.date) }}</time>
+            </div>
+          </div>
+        </li>
+      </template>
     </ul>
 
     <div class="log-empty" v-else>
@@ -123,6 +145,37 @@ function authorColor(name: string): string {
   overflow-y: auto;
 }
 
+/* ─── Section labels ──────────────────────────────────── */
+
+.log-section-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 16px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--color-border);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.log-section-label--unpushed {
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.08);
+  border-left: 3px solid #f59e0b;
+}
+
+.log-section-label--pushed {
+  color: var(--color-success);
+  background: rgba(34, 197, 94, 0.06);
+  border-left: 3px solid var(--color-success);
+}
+
+/* ─── Commit item ─────────────────────────────────────── */
+
 .commit-item {
   display: flex;
   gap: 10px;
@@ -131,6 +184,29 @@ function authorColor(name: string): string {
   cursor: pointer;
   transition: background 0.1s;
   border-left: 3px solid transparent;
+}
+
+.commit-item--unpushed {
+  border-left-color: #f59e0b;
+  background: rgba(245, 158, 11, 0.04);
+}
+
+.commit-item--unpushed:hover {
+  background: rgba(245, 158, 11, 0.08);
+}
+
+.unpushed-badge {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+  margin-left: 6px;
+  vertical-align: middle;
 }
 
 .commit-item:hover {

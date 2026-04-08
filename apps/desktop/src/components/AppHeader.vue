@@ -18,6 +18,8 @@ const props = defineProps<{
   hasRepo: boolean;
   canPush: boolean;
   canPull: boolean;
+  aheadCount: number;
+  behindCount: number;
   isPushing: boolean;
   isPulling: boolean;
 }>();
@@ -211,11 +213,11 @@ const isMerge = () => props.appMode === "merge";
       <!-- Repo mode: push/pull -->
       <template v-if="appMode === 'repo' && hasRepo">
         <button
-          class="btn btn--secondary"
-          :class="{ 'btn--disabled': !canPull }"
+          class="btn btn--sync"
+          :class="{ 'btn--disabled': !canPull, 'btn--sync-active': behindCount > 0 }"
           :disabled="!canPull"
           @click="emit('pull')"
-          title="Pull"
+          :title="`Pull (${behindCount})`"
         >
           <svg v-if="isPulling" class="btn-spinner" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
             <circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.5" fill="none" opacity="0.3"/>
@@ -225,13 +227,14 @@ const isMerge = () => props.appMode === "merge";
             <path d="M8 3v10M5 10l3 3 3-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
           <span>{{ t('header.pull') }}</span>
+          <span v-if="behindCount > 0" class="sync-badge sync-badge--pull">{{ behindCount }}</span>
         </button>
         <button
-          class="btn btn--primary"
-          :class="{ 'btn--disabled': !canPush }"
+          class="btn btn--sync btn--push"
+          :class="{ 'btn--disabled': !canPush, 'btn--sync-active': aheadCount > 0 }"
           :disabled="!canPush"
           @click="emit('push')"
-          title="Push"
+          :title="`Push (${aheadCount})`"
         >
           <svg v-if="isPushing" class="btn-spinner" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
             <circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.5" fill="none" opacity="0.3"/>
@@ -241,6 +244,7 @@ const isMerge = () => props.appMode === "merge";
             <path d="M8 13V3M5 6l3-3 3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
           <span>{{ t('header.push') }}</span>
+          <span v-if="aheadCount > 0" class="sync-badge sync-badge--push">{{ aheadCount }}</span>
         </button>
       </template>
 
@@ -446,6 +450,55 @@ const isMerge = () => props.appMode === "merge";
 
 .btn--primary:hover {
   background: var(--color-accent-hover);
+}
+
+/* Sync buttons (Push/Pull) */
+.btn--sync {
+  position: relative;
+  background: var(--color-bg-tertiary);
+  color: var(--color-text);
+}
+
+.btn--sync:hover:not(:disabled) {
+  background: var(--color-border);
+}
+
+.btn--sync-active {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text);
+}
+
+.btn--push.btn--sync-active {
+  background: var(--color-accent);
+  color: #fff;
+}
+
+.btn--push.btn--sync-active:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+}
+
+.sync-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.sync-badge--push {
+  background: rgba(255, 255, 255, 0.25);
+  color: #fff;
+}
+
+.sync-badge--pull {
+  background: var(--color-accent);
+  color: #fff;
 }
 
 .btn--save {

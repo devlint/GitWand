@@ -104,6 +104,9 @@ const fr = {
     noCommit: "Aucun commit",
     selectCommit: "S\u00e9lectionnez un commit pour voir les changements",
     noDiffForCommit: "Pas de diff pour ce commit",
+    unpushedOne: "commit non push\u00e9",
+    unpushedMany: "commits non push\u00e9s",
+    pushed: "Push\u00e9s sur le remote",
   },
 
   // ─── Relative dates ─────────────────────────────────────

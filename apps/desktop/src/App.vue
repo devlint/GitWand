@@ -70,6 +70,8 @@ const {
   isCommitting,
   canPush,
   canPull,
+  aheadCount,
+  behindCount,
   isPushing,
   isPulling,
   openRepo,
@@ -249,6 +251,8 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
       :has-repo="hasRepo"
       :can-push="canPush"
       :can-pull="canPull"
+      :ahead-count="aheadCount"
+      :behind-count="behindCount"
       :is-pushing="isPushing"
       :is-pulling="isPulling"
       @open-folder="handleOpenFolder"
@@ -365,6 +369,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
                   :entries="repoLog"
                   :loading="repoLoading"
                   :selected-hash="selectedCommitHash"
+                  :ahead-count="aheadCount"
                   @select-commit="selectCommit"
                 />
               </div>

@@ -102,6 +102,9 @@ const en: Locale = {
     noCommit: "No commits",
     selectCommit: "Select a commit to view changes",
     noDiffForCommit: "No diff for this commit",
+    unpushedOne: "unpushed commit",
+    unpushedMany: "unpushed commits",
+    pushed: "Pushed to remote",
   },
 
   // ─── Relative dates ─────────────────────────────────────

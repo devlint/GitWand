@@ -122,6 +122,10 @@ export function useGitRepo() {
     };
   });
 
+  /** How many commits ahead / behind the remote tracking branch. */
+  const aheadCount = computed(() => status.value?.ahead ?? 0);
+  const behindCount = computed(() => status.value?.behind ?? 0);
+
   /** Can we commit? (staged files + non-empty message) */
   const canCommit = computed(() => {
     return repoStats.value.staged > 0 && commitMessage.value.trim().length > 0 && !isCommitting.value;
@@ -421,6 +425,8 @@ export function useGitRepo() {
     canCommit,
     canPush,
     canPull,
+    aheadCount,
+    behindCount,
     // Actions
     openRepo,
     refresh,
