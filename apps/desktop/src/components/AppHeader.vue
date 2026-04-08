@@ -28,6 +28,7 @@ const props = defineProps<{
   // Branch popover
   branches: GitBranch[];
   branchesLoading: boolean;
+  isSwitchingBranch: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -176,8 +177,12 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
       <!-- Repo mode: branch + stats -->
       <template v-if="appMode === 'repo' && hasRepo">
         <div class="branch-popover-wrapper">
-          <button class="branch-trigger" @click="toggleBranchPopover" :title="t('branches.title')">
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <button class="branch-trigger" :class="{ 'branch-trigger--loading': isSwitchingBranch }" @click="toggleBranchPopover" :title="t('branches.title')">
+            <svg v-if="isSwitchingBranch" class="btn-spinner" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+              <circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.5" fill="none" opacity="0.3"/>
+              <path d="M7 1.5A5.5 5.5 0 0112.5 7" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+            </svg>
+            <svg v-else width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
               <circle cx="5" cy="4" r="2" stroke="currentColor" stroke-width="1.3"/>
               <circle cx="5" cy="12" r="2" stroke="currentColor" stroke-width="1.3"/>
               <circle cx="12" cy="8" r="2" stroke="currentColor" stroke-width="1.3"/>
@@ -530,6 +535,11 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
 
 .branch-trigger:hover {
   background: var(--color-bg-tertiary);
+}
+
+.branch-trigger--loading {
+  opacity: 0.7;
+  pointer-events: none;
 }
 
 .branch-name {

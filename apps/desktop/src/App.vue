@@ -86,6 +86,7 @@ const {
   discardFiles,
   branches,
   branchesLoading,
+  isSwitchingBranch,
   selectedCommitHash,
   commitDiffs,
   selectCommit,
@@ -262,6 +263,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
       :is-pulling="isPulling"
       :branches="branches"
       :branches-loading="branchesLoading"
+      :is-switching-branch="isSwitchingBranch"
       @open-folder="handleOpenFolder"
       @resolve-all="resolveAll"
       @save-all="saveAllFiles"

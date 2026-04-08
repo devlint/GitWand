@@ -56,6 +56,7 @@ export function useGitRepo() {
   // Branch state
   const branches = ref<GitBranch[]>([]);
   const branchesLoading = ref(false);
+  const isSwitchingBranch = ref(false);
 
   // Commit diff state (for history view)
   const selectedCommitHash = ref<string | null>(null);
@@ -417,12 +418,15 @@ export function useGitRepo() {
 
   async function switchBranch(name: string) {
     if (!folderPath.value) return;
+    isSwitchingBranch.value = true;
     try {
       await gitSwitchBranch(folderPath.value, name);
       await refresh();
       await loadBranches();
     } catch (err: any) {
       error.value = `switch branch: ${err.message}`;
+    } finally {
+      isSwitchingBranch.value = false;
     }
   }
 
@@ -466,6 +470,7 @@ export function useGitRepo() {
     lastCommitHash,
     branches,
     branchesLoading,
+    isSwitchingBranch,
     selectedCommitHash,
     commitDiffs,
     // Computed
