@@ -114,21 +114,25 @@ watch(repoError, (val) => {
 
 // Auto-dismiss success toast after 2.5s
 const successToast = ref<string | null>(null);
-let successTimer: ReturnType<typeof setTimeout> | null = null;
+let successTimer: number | null = null;
 
 watch(repoSuccess, (val) => {
-  if (successTimer) { clearTimeout(successTimer); successTimer = null; }
-  if (val) {
-    const key = ({
-      "already-up-to-date": "header.syncUpToDate",
-      "sync-done": "header.syncDone",
-      "push-done": "header.pushDone",
-      "merge-done": "header.mergeDone",
-    } as Record<string, string>)[val] || val;
-    successToast.value = t(key as any);
-    repoSuccess.value = null;
-    successTimer = setTimeout(() => { successToast.value = null; }, 2500);
-  }
+  if (!val) return;
+  // Clear any previous toast
+  if (successTimer != null) { window.clearTimeout(successTimer); successTimer = null; }
+  const key = ({
+    "already-up-to-date": "header.syncUpToDate",
+    "sync-done": "header.syncDone",
+    "push-done": "header.pushDone",
+    "merge-done": "header.mergeDone",
+  } as Record<string, string>)[val] || val;
+  successToast.value = t(key as any);
+  // Reset source immediately so we can trigger again
+  repoSuccess.value = null;
+  successTimer = window.setTimeout(() => {
+    successToast.value = null;
+    successTimer = null;
+  }, 2500);
 });
 
 // ─── Conflict handling ──────────────────────────────────
@@ -347,15 +351,13 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
     />
 
     <!-- Success toast -->
-    <Transition name="toast">
-      <div v-if="successToast" class="success-toast" role="status">
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-          <circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.5"/>
-          <path d="M5 8l2 2 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-        <span>{{ successToast }}</span>
-      </div>
-    </Transition>
+    <div v-if="successToast" class="success-toast" role="status" :key="successToast">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.5"/>
+        <path d="M5 8l2 2 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span>{{ successToast }}</span>
+    </div>
 
     <!-- Settings panel -->
     <SettingsPanel
@@ -488,21 +490,11 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
   font-weight: 500;
   z-index: 100;
   pointer-events: none;
-}
-
-.toast-enter-active {
   animation: toastIn 0.25s ease-out;
-}
-.toast-leave-active {
-  animation: toastOut 0.2s ease-in forwards;
 }
 
 @keyframes toastIn {
   from { opacity: 0; transform: translateX(-50%) translateY(10px); }
   to   { opacity: 1; transform: translateX(-50%) translateY(0); }
-}
-@keyframes toastOut {
-  from { opacity: 1; transform: translateX(-50%) translateY(0); }
-  to   { opacity: 0; transform: translateX(-50%) translateY(10px); }
 }
 </style>
