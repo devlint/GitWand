@@ -162,6 +162,13 @@ export function useGitRepo() {
     error.value = null;
     folderPath.value = path;
 
+    // Reset previous repo state
+    selectedCommitHash.value = null;
+    commitDiffs.value = [];
+    log.value = [];
+    selectedFilePath.value = null;
+    diff.value = null;
+
     try {
       await loadStatus(path);
     } catch (err: any) {
