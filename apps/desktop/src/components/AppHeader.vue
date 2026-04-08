@@ -59,16 +59,38 @@ function closeBranchPopover() {
   newBranchName.value = "";
 }
 
+const mainNames = ["main", "master"];
+
+function branchSort(a: typeof props.branches[0], b: typeof props.branches[0]): number {
+  // Current branch always first
+  if (a.isCurrent !== b.isCurrent) return a.isCurrent ? -1 : 1;
+  // main/master next
+  const aName = a.name.replace(/^origin\//, "").toLowerCase();
+  const bName = b.name.replace(/^origin\//, "").toLowerCase();
+  const aMain = mainNames.includes(aName) ? 0 : 1;
+  const bMain = mainNames.includes(bName) ? 0 : 1;
+  if (aMain !== bMain) return aMain - bMain;
+  // Then by last commit date (most recent first)
+  if (a.lastCommitDate && b.lastCommitDate) {
+    const da = new Date(a.lastCommitDate).getTime();
+    const db = new Date(b.lastCommitDate).getTime();
+    if (da !== db) return db - da;
+  }
+  return a.name.localeCompare(b.name);
+}
+
 const localBranches = computed(() =>
   props.branches
     .filter((b) => !b.isRemote)
-    .filter((b) => !branchFilter.value || b.name.toLowerCase().includes(branchFilter.value.toLowerCase())),
+    .filter((b) => !branchFilter.value || b.name.toLowerCase().includes(branchFilter.value.toLowerCase()))
+    .sort(branchSort),
 );
 
 const remoteBranches = computed(() =>
   props.branches
     .filter((b) => b.isRemote)
-    .filter((b) => !branchFilter.value || b.name.toLowerCase().includes(branchFilter.value.toLowerCase())),
+    .filter((b) => !branchFilter.value || b.name.toLowerCase().includes(branchFilter.value.toLowerCase()))
+    .sort(branchSort),
 );
 
 function handleBranchSwitch(name: string) {
@@ -114,18 +136,10 @@ function closeMergePopover() {
 /** Branches available for merging: all except the current one, main/master first. */
 const mergeBranches = computed(() => {
   const filter = mergeFilter.value.toLowerCase();
-  const mainNames = ["main", "master"];
   return props.branches
     .filter((b) => !b.isCurrent)
     .filter((b) => !filter || b.name.toLowerCase().includes(filter))
-    .sort((a, b) => {
-      const aName = a.name.replace(/^origin\//, "").toLowerCase();
-      const bName = b.name.replace(/^origin\//, "").toLowerCase();
-      const aMain = mainNames.includes(aName) ? 0 : 1;
-      const bMain = mainNames.includes(bName) ? 0 : 1;
-      if (aMain !== bMain) return aMain - bMain;
-      return a.name.localeCompare(b.name);
-    });
+    .sort(branchSort);
 });
 
 function handleMerge(name: string) {

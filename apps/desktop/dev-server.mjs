@@ -622,7 +622,7 @@ const server = createServer(async (req, res) => {
       if (!cwd) return jsonResponse(res, { error: "Missing cwd param" }, 400);
       try {
         const resolvedCwd = resolve(cwd);
-        const format = "%(HEAD)%(refname:short)\x1f%(upstream:short)\x1f%(upstream:track,nobracket)\x1f%(objectname:short) %(subject)";
+        const format = "%(HEAD)%(refname:short)\x1f%(upstream:short)\x1f%(upstream:track,nobracket)\x1f%(objectname:short) %(subject)\x1f%(creatordate:iso)";
         const stdout = execSync(`git branch -a --format="${format}"`, {
           cwd: resolvedCwd,
           encoding: "utf-8",
@@ -637,12 +637,13 @@ const server = createServer(async (req, res) => {
           const isCurrent = trimmed.startsWith("*");
           const rest = isCurrent ? trimmed.substring(1) : trimmed;
           const parts = rest.split("\x1f");
-          if (parts.length < 3) continue;
+          if (parts.length < 4) continue;
 
           const name = parts[0];
           const upstream = parts[1] || null;
           const trackInfo = parts[2] || "";
           const lastCommit = parts[3] || "";
+          const lastCommitDate = parts[4] || "";
 
           if (name.includes("HEAD ->") || name === "origin/HEAD") continue;
 
@@ -654,7 +655,7 @@ const server = createServer(async (req, res) => {
 
           const isRemote = name.startsWith("origin/") || name.startsWith("remotes/");
 
-          branches.push({ name, isCurrent, isRemote, upstream, ahead, behind, lastCommit });
+          branches.push({ name, isCurrent, isRemote, upstream, ahead, behind, lastCommit, lastCommitDate });
         }
 
         return jsonResponse(res, branches);

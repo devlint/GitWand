@@ -297,6 +297,10 @@ export function useGitRepo() {
     if (!folderPath.value) return;
     try {
       log.value = await getGitLog(folderPath.value, count);
+      // If a commit was selected but its diffs were lost, reload them
+      if (selectedCommitHash.value && commitDiffs.value.length === 0) {
+        commitDiffs.value = await getGitShow(folderPath.value, selectedCommitHash.value);
+      }
     } catch (err: any) {
       error.value = `git log: ${err.message}`;
     }
@@ -386,9 +390,7 @@ export function useGitRepo() {
       commitSummary.value = "";
       commitDescription.value = getCommitSignatureDefault();
       await refresh();
-      if (viewMode.value === "history") {
-        await loadLog();
-      }
+      await loadLog();
     } catch (err: any) {
       error.value = `commit: ${err.message}`;
     } finally {
@@ -409,9 +411,7 @@ export function useGitRepo() {
         successMessage.value = "push-done";
       }
       await refresh();
-      if (viewMode.value === "history") {
-        await loadLog();
-      }
+      await loadLog();
     } catch (err: any) {
       error.value = `push: ${err.message}`;
     } finally {
@@ -438,10 +438,7 @@ export function useGitRepo() {
         }
       }
       await refresh();
-      // Reload log so the commit list reflects pulled commits
-      if (viewMode.value === "history") {
-        await loadLog();
-      }
+      await loadLog();
     } catch (err: any) {
       error.value = `pull: ${err.message}`;
     } finally {

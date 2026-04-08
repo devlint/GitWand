@@ -21,16 +21,35 @@ const newBranchName = ref("");
 const showCreate = ref(false);
 const filter = ref("");
 
+const mainNames = ["main", "master"];
+
+function branchSort(a: typeof props.branches[0], b: typeof props.branches[0]): number {
+  if (a.isCurrent !== b.isCurrent) return a.isCurrent ? -1 : 1;
+  const aName = a.name.replace(/^origin\//, "").toLowerCase();
+  const bName = b.name.replace(/^origin\//, "").toLowerCase();
+  const aMain = mainNames.includes(aName) ? 0 : 1;
+  const bMain = mainNames.includes(bName) ? 0 : 1;
+  if (aMain !== bMain) return aMain - bMain;
+  if (a.lastCommitDate && b.lastCommitDate) {
+    const da = new Date(a.lastCommitDate).getTime();
+    const db = new Date(b.lastCommitDate).getTime();
+    if (da !== db) return db - da;
+  }
+  return a.name.localeCompare(b.name);
+}
+
 const localBranches = computed(() =>
   props.branches
     .filter((b) => !b.isRemote)
-    .filter((b) => !filter.value || b.name.toLowerCase().includes(filter.value.toLowerCase())),
+    .filter((b) => !filter.value || b.name.toLowerCase().includes(filter.value.toLowerCase()))
+    .sort(branchSort),
 );
 
 const remoteBranches = computed(() =>
   props.branches
     .filter((b) => b.isRemote)
-    .filter((b) => !filter.value || b.name.toLowerCase().includes(filter.value.toLowerCase())),
+    .filter((b) => !filter.value || b.name.toLowerCase().includes(filter.value.toLowerCase()))
+    .sort(branchSort),
 );
 
 function handleCreate() {
