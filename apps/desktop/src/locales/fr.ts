@@ -45,6 +45,9 @@ const fr = {
     pull: "Pull",
     sync: "Sync",
     syncTooltip: "Récupérer les branches distantes et pull",
+    merge: "Merge",
+    mergeTooltip: "Merger une branche dans la branche courante",
+    mergeFilterPlaceholder: "Branche à merger\u2026",
     // Stats
     file: "fichier",
     files: "fichiers",

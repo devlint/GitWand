@@ -9,6 +9,7 @@ import {
   gitPush,
   gitPull,
   gitFetch,
+  gitMerge,
   gitDiscard,
   getGitShow,
   getGitBranches,
@@ -57,6 +58,7 @@ export function useGitRepo() {
   const branches = ref<GitBranch[]>([]);
   const branchesLoading = ref(false);
   const isSwitchingBranch = ref(false);
+  const isMerging = ref(false);
 
   // Commit diff state (for history view)
   const selectedCommitHash = ref<string | null>(null);
@@ -407,6 +409,27 @@ export function useGitRepo() {
     }
   }
 
+  // ─── Merge ──────────────────────────────────────────────
+
+  async function mergeBranch(branchName: string) {
+    if (!folderPath.value) return;
+    isMerging.value = true;
+    try {
+      const result = await gitMerge(folderPath.value, branchName);
+      if (!result.success) {
+        error.value = `merge: ${result.message}`;
+      }
+      await refresh();
+      if (viewMode.value === "history") {
+        await loadLog();
+      }
+    } catch (err: any) {
+      error.value = `merge: ${err.message}`;
+    } finally {
+      isMerging.value = false;
+    }
+  }
+
   // ─── Discard ────────────────────────────────────────────
 
   // ─── Branches ────────────────────────────────────────────
@@ -489,6 +512,7 @@ export function useGitRepo() {
     branches,
     branchesLoading,
     isSwitchingBranch,
+    isMerging,
     selectedCommitHash,
     commitDiffs,
     // Computed
@@ -515,6 +539,7 @@ export function useGitRepo() {
     commit,
     push,
     pull,
+    mergeBranch,
     discardFiles,
     selectCommit,
     loadBranches,

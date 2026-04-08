@@ -457,6 +457,21 @@ export async function gitFetch(cwd: string): Promise<GitPushPullResult> {
   return res.json();
 }
 
+/**
+ * Merge a branch into the current branch.
+ */
+export async function gitMerge(cwd: string, branch: string): Promise<GitPushPullResult> {
+  if (isTauri()) {
+    return tauriInvoke<GitPushPullResult>("git_merge", { cwd, branch });
+  }
+  const res = await fetch(`${DEV_SERVER}/api/git-merge`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, branch }),
+  });
+  return res.json();
+}
+
 // ─── Git show (commit diff) ───────────────────────────────────
 
 /**

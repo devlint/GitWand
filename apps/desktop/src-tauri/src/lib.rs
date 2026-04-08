@@ -610,6 +610,27 @@ fn git_fetch(cwd: String) -> Result<GitPushPullResult, String> {
 }
 
 #[tauri::command]
+fn git_merge(cwd: String, branch: String) -> Result<GitPushPullResult, String> {
+    let output = std::process::Command::new("git")
+        .args(["merge", &branch])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("Failed to run git merge: {}", e))?;
+
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+
+    Ok(GitPushPullResult {
+        success: output.status.success(),
+        message: if output.status.success() {
+            stdout.trim().to_string()
+        } else {
+            stderr.trim().to_string()
+        },
+    })
+}
+
+#[tauri::command]
 fn git_pull(cwd: String) -> Result<GitPushPullResult, String> {
     let output = std::process::Command::new("git")
         .args(["pull"])
@@ -933,6 +954,7 @@ pub fn run() {
             git_push,
             git_pull,
             git_fetch,
+            git_merge,
             git_discard,
             git_show,
             git_branches,

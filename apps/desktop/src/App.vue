@@ -76,10 +76,12 @@ const {
   commit: doCommit,
   push: doPush,
   pull: doPull,
+  mergeBranch: doMerge,
   discardFiles,
   branches,
   branchesLoading,
   isSwitchingBranch,
+  isMerging,
   selectedCommitHash,
   commitDiffs,
   selectCommit,
@@ -228,10 +230,12 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
       :branches="branches"
       :branches-loading="branchesLoading"
       :is-switching-branch="isSwitchingBranch"
+      :is-merging="isMerging"
       @open-folder="handleOpenFolder"
       @toggle-theme="toggleTheme"
       @push="doPush"
       @pull="doPull"
+      @merge-branch="doMerge"
       @open-settings="showSettings = true"
       @switch-branch="switchBranch"
       @create-branch="createBranch"

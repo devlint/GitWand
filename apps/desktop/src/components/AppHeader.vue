@@ -23,6 +23,7 @@ const props = defineProps<{
   branches: GitBranch[];
   branchesLoading: boolean;
   isSwitchingBranch: boolean;
+  isMerging: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -30,6 +31,7 @@ const emit = defineEmits<{
   toggleTheme: [];
   push: [];
   pull: [];
+  mergeBranch: [name: string];
   openSettings: [];
   switchBranch: [name: string];
   createBranch: [name: string];
@@ -93,11 +95,43 @@ function onCreateKeydown(e: KeyboardEvent) {
   }
 }
 
-// Close popover on click outside
+// ─── Merge popover ──────────────────────────────────
+const showMergePopover = ref(false);
+const mergeFilter = ref("");
+
+function toggleMergePopover() {
+  showMergePopover.value = !showMergePopover.value;
+  if (showMergePopover.value) {
+    mergeFilter.value = "";
+    emit("loadBranches");
+  }
+}
+
+function closeMergePopover() {
+  showMergePopover.value = false;
+}
+
+/** Branches available for merging: all except the current one. */
+const mergeBranches = computed(() => {
+  const filter = mergeFilter.value.toLowerCase();
+  return props.branches
+    .filter((b) => !b.isCurrent)
+    .filter((b) => !filter || b.name.toLowerCase().includes(filter));
+});
+
+function handleMerge(name: string) {
+  emit("mergeBranch", name);
+  closeMergePopover();
+}
+
+// Close popovers on click outside
 function onDocClick(e: MouseEvent) {
   const target = e.target as HTMLElement;
   if (showBranchPopover.value && !target.closest(".branch-popover-wrapper")) {
     closeBranchPopover();
+  }
+  if (showMergePopover.value && !target.closest(".merge-popover-wrapper")) {
+    closeMergePopover();
   }
 }
 
@@ -293,6 +327,68 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
           <span>{{ t('header.push') }}</span>
           <span v-if="aheadCount > 0" class="sync-badge sync-badge--push">{{ aheadCount }}</span>
         </button>
+
+        <!-- Merge from branch -->
+        <div class="merge-popover-wrapper">
+          <button
+            class="btn btn--sync btn--merge"
+            :class="{ 'btn--disabled': isMerging }"
+            :disabled="isMerging"
+            @click="toggleMergePopover"
+            :title="t('header.mergeTooltip')"
+          >
+            <svg v-if="isMerging" class="btn-spinner" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+              <circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.5" fill="none" opacity="0.3"/>
+              <path d="M7 1.5A5.5 5.5 0 0112.5 7" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+            </svg>
+            <svg v-else width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <circle cx="5" cy="4" r="2" stroke="currentColor" stroke-width="1.3"/>
+              <circle cx="5" cy="12" r="2" stroke="currentColor" stroke-width="1.3"/>
+              <circle cx="12" cy="8" r="2" stroke="currentColor" stroke-width="1.3"/>
+              <path d="M5 6v4M10 8H7c-1.1 0-2-.9-2-2" stroke="currentColor" stroke-width="1.3"/>
+            </svg>
+            <span>{{ t('header.merge') }}</span>
+          </button>
+
+          <!-- Merge branch picker popover -->
+          <div v-if="showMergePopover" class="merge-popover">
+            <div class="mp-header">
+              <input
+                class="mp-filter"
+                v-model="mergeFilter"
+                :placeholder="t('header.mergeFilterPlaceholder')"
+                autofocus
+                @keydown.escape="closeMergePopover"
+              />
+            </div>
+            <div class="mp-loading" v-if="branchesLoading">
+              <div class="mp-spinner"></div>
+            </div>
+            <div class="mp-list-wrapper" v-else>
+              <ul class="mp-list" v-if="mergeBranches.length > 0">
+                <li
+                  v-for="branch in mergeBranches"
+                  :key="branch.name"
+                  class="mp-item"
+                  :class="{ 'mp-item--remote': branch.isRemote }"
+                  @click="handleMerge(branch.isRemote ? branch.name : branch.name)"
+                >
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <circle cx="5" cy="4" r="2" stroke="currentColor" stroke-width="1.3"/>
+                    <circle cx="5" cy="12" r="2" stroke="currentColor" stroke-width="1.3"/>
+                    <circle cx="12" cy="8" r="2" stroke="currentColor" stroke-width="1.3"/>
+                    <path d="M5 6v4M10 8H7c-1.1 0-2-.9-2-2" stroke="currentColor" stroke-width="1.3"/>
+                  </svg>
+                  <span class="mp-item-name mono">{{ branch.name }}</span>
+                  <span class="mp-item-tag" v-if="branch.isRemote">remote</span>
+                </li>
+              </ul>
+              <div class="mp-empty" v-else>
+                <span class="muted">{{ t('branches.noBranch') }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
 
         <div class="header-separator"></div>
       </template>
@@ -808,5 +904,121 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+/* ─── Merge Popover ──────────────────────────────────── */
+
+.merge-popover-wrapper {
+  position: relative;
+}
+
+.merge-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 300px;
+  max-height: 360px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  z-index: 50;
+  animation: bpSlide 0.15s ease-out;
+}
+
+.mp-header {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.mp-filter {
+  width: 100%;
+  padding: 5px 8px;
+  font-size: 12px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.mp-filter:focus {
+  border-color: var(--color-accent);
+}
+
+.mp-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.mp-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+.mp-list-wrapper {
+  flex: 1;
+  overflow-y: auto;
+  max-height: 280px;
+}
+
+.mp-list {
+  list-style: none;
+}
+
+.mp-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: background 0.1s;
+  font-size: 12px;
+  color: var(--color-text);
+}
+
+.mp-item:hover {
+  background: var(--color-bg-tertiary);
+}
+
+.mp-item--remote {
+  opacity: 0.7;
+}
+
+.mp-item-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.mp-item-tag {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--color-bg);
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.mp-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  font-size: 12px;
 }
 </style>

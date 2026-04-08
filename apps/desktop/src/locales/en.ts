@@ -43,6 +43,9 @@ const en: Locale = {
     pull: "Pull",
     sync: "Sync",
     syncTooltip: "Fetch remote branches and pull",
+    merge: "Merge",
+    mergeTooltip: "Merge a branch into the current branch",
+    mergeFilterPlaceholder: "Branch to merge\u2026",
     // Stats
     file: "file",
     files: "files",
