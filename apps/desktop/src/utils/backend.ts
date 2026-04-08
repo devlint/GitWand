@@ -442,6 +442,21 @@ export async function gitPull(cwd: string): Promise<GitPushPullResult> {
   return res.json();
 }
 
+/**
+ * Fetch from remote (updates tracking info without merging).
+ */
+export async function gitFetch(cwd: string): Promise<GitPushPullResult> {
+  if (isTauri()) {
+    return tauriInvoke<GitPushPullResult>("git_fetch", { cwd });
+  }
+  const res = await fetch(`${DEV_SERVER}/api/git-fetch`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd }),
+  });
+  return res.json();
+}
+
 // ─── Git show (commit diff) ───────────────────────────────────
 
 /**

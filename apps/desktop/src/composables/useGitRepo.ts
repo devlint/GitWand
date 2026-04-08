@@ -8,6 +8,7 @@ import {
   gitCommit,
   gitPush,
   gitPull,
+  gitFetch,
   gitDiscard,
   getGitShow,
   getGitBranches,
@@ -137,10 +138,10 @@ export function useGitRepo() {
     return status.value.ahead > 0 && !isPushing.value;
   });
 
-  /** Can we pull? */
+  /** Can we pull? Enabled whenever a remote is configured. */
   const canPull = computed(() => {
     if (!status.value) return false;
-    return status.value.behind > 0 && !isPulling.value;
+    return !!status.value.remote && !isPulling.value;
   });
 
   /**
@@ -151,6 +152,35 @@ export function useGitRepo() {
       status.value = await getGitStatus(cwd);
     } catch (err: any) {
       error.value = `git status: ${err.message}`;
+    }
+  }
+
+  /**
+   * Fetch from remote (background, non-blocking).
+   * Updates tracking refs so ahead/behind counts become accurate.
+   */
+  let fetchInterval: ReturnType<typeof setInterval> | null = null;
+
+  async function fetchRemote() {
+    if (!folderPath.value) return;
+    try {
+      await gitFetch(folderPath.value);
+      // Refresh status to update ahead/behind counts
+      await loadStatus(folderPath.value);
+    } catch {
+      // Fetch failures are non-critical, ignore silently
+    }
+  }
+
+  function startAutoFetch() {
+    stopAutoFetch();
+    fetchInterval = setInterval(fetchRemote, 30_000);
+  }
+
+  function stopAutoFetch() {
+    if (fetchInterval) {
+      clearInterval(fetchInterval);
+      fetchInterval = null;
     }
   }
 
@@ -176,6 +206,10 @@ export function useGitRepo() {
     } finally {
       loading.value = false;
     }
+
+    // Background fetch to get accurate ahead/behind + start periodic fetch
+    fetchRemote();
+    startAutoFetch();
   }
 
   /**

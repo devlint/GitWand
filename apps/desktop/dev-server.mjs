@@ -392,6 +392,24 @@ const server = createServer(async (req, res) => {
       }
     }
 
+    // POST /api/git-fetch  { cwd }
+    if (url.pathname === "/api/git-fetch" && req.method === "POST") {
+      const { cwd } = await readBody(req);
+      if (!cwd) return jsonResponse(res, { error: "Missing cwd" }, 400);
+      try {
+        const resolvedCwd = resolve(cwd);
+        execSync("git fetch --prune 2>&1", {
+          cwd: resolvedCwd,
+          encoding: "utf-8",
+          shell: true,
+          timeout: 15000,
+        });
+        return jsonResponse(res, { success: true });
+      } catch (err) {
+        return jsonResponse(res, { success: false, message: err.stderr || err.message });
+      }
+    }
+
     // POST /api/git-pull  { cwd }
     if (url.pathname === "/api/git-pull" && req.method === "POST") {
       const { cwd } = await readBody(req);
