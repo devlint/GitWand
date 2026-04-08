@@ -157,6 +157,19 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
           {{ t('header.modeMerge') }}
         </button>
       </div>
+
+      <!-- Clickable folder name next to logo -->
+      <button
+        v-if="hasRepo && folderName"
+        class="folder-trigger"
+        @click="emit('openFolder')"
+        :title="t('header.openFolder')"
+      >
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M2 3.5A1.5 1.5 0 013.5 2H6l1.5 2H12.5A1.5 1.5 0 0114 5.5v7a1.5 1.5 0 01-1.5 1.5h-9A1.5 1.5 0 012 12.5v-9z" stroke="currentColor" stroke-width="1.5" fill="none"/>
+        </svg>
+        <span class="folder-name">{{ folderName }}</span>
+      </button>
     </div>
 
     <div class="header-center">
@@ -367,19 +380,6 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
           </svg>
         </button>
       </div>
-
-      <!-- Clickable folder name (replaces the Open button) -->
-      <button
-        v-if="hasRepo && folderName"
-        class="folder-trigger"
-        @click="emit('openFolder')"
-        :title="t('header.openFolder')"
-      >
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-          <path d="M2 3.5A1.5 1.5 0 013.5 2H6l1.5 2H12.5A1.5 1.5 0 0114 5.5v7a1.5 1.5 0 01-1.5 1.5h-9A1.5 1.5 0 012 12.5v-9z" stroke="currentColor" stroke-width="1.5" fill="none"/>
-        </svg>
-        <span class="folder-name">{{ folderName }}</span>
-      </button>
 
       <!-- Repo mode: push/pull -->
       <template v-if="appMode === 'repo' && hasRepo">
@@ -833,7 +833,10 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
   align-items: center;
   gap: 6px;
   padding: 4px 10px;
-  border-radius: 6px;
+  margin-left: 8px;
+  border-left: 1px solid var(--color-border);
+  padding-left: 16px;
+  border-radius: 0;
   color: var(--color-text-muted);
   background: none;
   font-size: 12px;
@@ -843,7 +846,6 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
 }
 
 .folder-trigger:hover {
-  background: var(--color-bg-tertiary);
   color: var(--color-text);
 }
 
