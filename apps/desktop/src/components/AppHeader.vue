@@ -305,12 +305,12 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
         :title="theme === 'dark' ? t('header.themeLightLabel') : t('header.themeDarkLabel')"
       >
         <!-- Sun icon (shown in dark mode → click to go light) -->
-        <svg v-if="theme === 'dark'" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <svg v-if="theme === 'dark'" width="18" height="18" viewBox="0 0 16 16" fill="none" aria-hidden="true">
           <circle cx="8" cy="8" r="3" stroke="currentColor" stroke-width="1.4"/>
           <path d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M3.4 12.6l1.1-1.1M11.5 4.5l1.1-1.1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
         </svg>
         <!-- Moon icon (shown in light mode → click to go dark) -->
-        <svg v-else width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <svg v-else width="18" height="18" viewBox="0 0 16 16" fill="none" aria-hidden="true">
           <path d="M14 9.3A6 6 0 016.7 2 6 6 0 1014 9.3z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
         </svg>
       </button>
@@ -322,7 +322,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
         :aria-label="t('settings.title')"
         :title="t('settings.title')"
       >
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <svg width="18" height="18" viewBox="0 0 16 16" fill="none" aria-hidden="true">
           <path d="M2.5 4h11M2.5 8h11M2.5 12h11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
           <circle cx="5.5" cy="4" r="1.5" fill="var(--color-bg-secondary)" stroke="currentColor" stroke-width="1.2"/>
           <circle cx="10.5" cy="8" r="1.5" fill="var(--color-bg-secondary)" stroke="currentColor" stroke-width="1.2"/>
@@ -783,16 +783,17 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
   border-radius: 6px;
-  background: var(--color-bg-tertiary);
-  color: var(--color-text);
-  transition: background 0.12s, color 0.12s;
+  background: none;
+  color: var(--color-text-muted);
+  transition: color 0.12s;
 }
 
 .btn--icon:hover:not(:disabled) {
-  background: var(--color-border);
+  color: var(--color-text);
 }
 
 .btn--icon:disabled,
