@@ -257,36 +257,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
     </div>
 
     <div class="header-right">
-      <!-- Theme toggle -->
-      <button
-        class="btn btn--icon theme-toggle"
-        @click="emit('toggleTheme')"
-        :aria-label="theme === 'dark' ? t('header.themeLight') : t('header.themeDark')"
-        :title="theme === 'dark' ? t('header.themeLightLabel') : t('header.themeDarkLabel')"
-      >
-        <svg v-if="theme === 'dark'" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-          <circle cx="8" cy="8" r="3.5" stroke="currentColor" stroke-width="1.5"/>
-          <path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.41 1.41M11.54 11.54l1.41 1.41M3.05 12.95l1.41-1.41M11.54 4.46l1.41-1.41" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-        </svg>
-        <svg v-else width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-          <path d="M13.5 9.5a5.5 5.5 0 01-7-7A5.5 5.5 0 1013.5 9.5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
-        </svg>
-      </button>
-
-      <!-- Settings -->
-      <button
-        class="btn btn--icon"
-        @click="emit('openSettings')"
-        :aria-label="t('settings.title')"
-        :title="t('settings.title')"
-      >
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-          <path d="M6.5 1.5h3l.4 1.6a5.5 5.5 0 011.3.7l1.5-.6 1.5 2.6-1.1 1a5.5 5.5 0 010 1.4l1.1 1-1.5 2.6-1.5-.6a5.5 5.5 0 01-1.3.7l-.4 1.6h-3l-.4-1.6a5.5 5.5 0 01-1.3-.7l-1.5.6-1.5-2.6 1.1-1a5.5 5.5 0 010-1.4l-1.1-1 1.5-2.6 1.5.6a5.5 5.5 0 011.3-.7l.4-1.6z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
-          <circle cx="8" cy="8" r="2" stroke="currentColor" stroke-width="1.2"/>
-        </svg>
-      </button>
-
-      <!-- Push/Pull -->
+      <!-- Sync / Push -->
       <template v-if="hasRepo">
         <button
           class="btn btn--sync"
@@ -322,7 +293,42 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
           <span>{{ t('header.push') }}</span>
           <span v-if="aheadCount > 0" class="sync-badge sync-badge--push">{{ aheadCount }}</span>
         </button>
+
+        <div class="header-separator"></div>
       </template>
+
+      <!-- Theme toggle -->
+      <button
+        class="btn btn--icon theme-toggle"
+        @click="emit('toggleTheme')"
+        :aria-label="theme === 'dark' ? t('header.themeLight') : t('header.themeDark')"
+        :title="theme === 'dark' ? t('header.themeLightLabel') : t('header.themeDarkLabel')"
+      >
+        <!-- Sun icon (shown in dark mode → click to go light) -->
+        <svg v-if="theme === 'dark'" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <circle cx="8" cy="8" r="3" stroke="currentColor" stroke-width="1.4"/>
+          <path d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M3.4 12.6l1.1-1.1M11.5 4.5l1.1-1.1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+        </svg>
+        <!-- Moon icon (shown in light mode → click to go dark) -->
+        <svg v-else width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M14 9.3A6 6 0 016.7 2 6 6 0 1014 9.3z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+        </svg>
+      </button>
+
+      <!-- Settings -->
+      <button
+        class="btn btn--icon"
+        @click="emit('openSettings')"
+        :aria-label="t('settings.title')"
+        :title="t('settings.title')"
+      >
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M2.5 4h11M2.5 8h11M2.5 12h11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+          <circle cx="5.5" cy="4" r="1.5" fill="var(--color-bg-secondary)" stroke="currentColor" stroke-width="1.2"/>
+          <circle cx="10.5" cy="8" r="1.5" fill="var(--color-bg-secondary)" stroke="currentColor" stroke-width="1.2"/>
+          <circle cx="7" cy="12" r="1.5" fill="var(--color-bg-secondary)" stroke="currentColor" stroke-width="1.2"/>
+        </svg>
+      </button>
     </div>
   </header>
 </template>
@@ -677,6 +683,13 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.header-separator {
+  width: 1px;
+  height: 20px;
+  background: var(--color-border);
+  flex-shrink: 0;
 }
 
 .btn {
