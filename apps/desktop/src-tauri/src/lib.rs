@@ -157,6 +157,28 @@ fn git_status(cwd: String) -> Result<GitStatus, String> {
         }
     }
 
+    // If upstream exists but ahead/behind are 0, try rev-list as fallback
+    if remote.is_some() && ahead == 0 && behind == 0 {
+        if let Ok(rev_output) = std::process::Command::new("git")
+            .args(["rev-list", "--left-right", "--count", "HEAD...@{upstream}"])
+            .current_dir(&cwd)
+            .output()
+        {
+            if rev_output.status.success() {
+                let rev_str = String::from_utf8_lossy(&rev_output.stdout);
+                let nums: Vec<i32> = rev_str
+                    .trim()
+                    .split_whitespace()
+                    .filter_map(|s| s.parse().ok())
+                    .collect();
+                if nums.len() >= 2 {
+                    ahead = nums[0];
+                    behind = nums[1];
+                }
+            }
+        }
+    }
+
     Ok(GitStatus {
         branch,
         remote,

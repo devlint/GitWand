@@ -160,20 +160,31 @@ export function useGitRepo() {
    * Updates tracking refs so ahead/behind counts become accurate.
    */
   let fetchInterval: ReturnType<typeof setInterval> | null = null;
+  const isFetching = ref(false);
 
   async function fetchRemote() {
-    if (!folderPath.value) return;
+    if (!folderPath.value || isFetching.value) return;
+    isFetching.value = true;
     try {
-      await gitFetch(folderPath.value);
-      // Refresh status to update ahead/behind counts
+      const result = await gitFetch(folderPath.value);
+      console.log("[GitWand] fetch result:", result);
+      // Always refresh status after fetch attempt to get updated ahead/behind
       await loadStatus(folderPath.value);
-    } catch {
-      // Fetch failures are non-critical, ignore silently
+      console.log("[GitWand] status after fetch:", {
+        ahead: status.value?.ahead,
+        behind: status.value?.behind,
+        remote: status.value?.remote,
+      });
+    } catch (err) {
+      console.warn("[GitWand] fetch failed:", err);
+    } finally {
+      isFetching.value = false;
     }
   }
 
   function startAutoFetch() {
     stopAutoFetch();
+    // Initial fetch after a short delay, then every 30s
     fetchInterval = setInterval(fetchRemote, 30_000);
   }
 
@@ -207,7 +218,7 @@ export function useGitRepo() {
       loading.value = false;
     }
 
-    // Background fetch to get accurate ahead/behind + start periodic fetch
+    // Background fetch then refresh status — awaited so UI updates before user interacts
     fetchRemote();
     startAutoFetch();
   }

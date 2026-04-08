@@ -196,6 +196,21 @@ const server = createServer(async (req, res) => {
           }
         }
 
+        // If upstream exists but ahead/behind are 0, try rev-list as fallback
+        if (remote && ahead === 0 && behind === 0) {
+          try {
+            const abOut = execSync("git rev-list --left-right --count HEAD...@{upstream}", {
+              cwd: resolvedCwd,
+              encoding: "utf-8",
+            }).trim();
+            const [a, b] = abOut.split(/\s+/).map(Number);
+            if (!isNaN(a)) ahead = a;
+            if (!isNaN(b)) behind = b;
+          } catch {
+            // upstream may not exist, ignore
+          }
+        }
+
         return jsonResponse(res, { branch, remote, ahead, behind, staged, unstaged, untracked, conflicted });
       } catch (err) {
         return jsonResponse(res, { error: err.message }, 500);
