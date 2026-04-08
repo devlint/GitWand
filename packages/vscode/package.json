@@ -2,7 +2,7 @@
   "name": "gitwand-vscode",
   "displayName": "GitWand",
   "description": "Git's magic wand — automatic conflict resolution for VS Code",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "publisher": "gitwand",
   "icon": "icon.png",
   "engines": {
