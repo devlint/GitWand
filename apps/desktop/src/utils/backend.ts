@@ -459,3 +459,96 @@ export async function gitDiscard(cwd: string, paths: string[]): Promise<void> {
   });
   if (!res.ok) throw new Error(`Failed to discard changes: ${res.status}`);
 }
+
+// ─── Git branches ─────────────────────────────────────────────
+
+export interface GitBranch {
+  name: string;
+  isCurrent: boolean;
+  isRemote: boolean;
+  upstream: string | null;
+  ahead: number;
+  behind: number;
+  lastCommit: string;
+}
+
+/**
+ * List all branches (local + remote).
+ */
+export async function getGitBranches(cwd: string): Promise<GitBranch[]> {
+  if (isTauri()) {
+    const raw = await tauriInvoke<
+      Array<{
+        name: string;
+        is_current: boolean;
+        is_remote: boolean;
+        upstream: string | null;
+        ahead: number;
+        behind: number;
+        last_commit: string;
+      }>
+    >("git_branches", { cwd });
+
+    return raw.map((b) => ({
+      name: b.name,
+      isCurrent: b.is_current,
+      isRemote: b.is_remote,
+      upstream: b.upstream,
+      ahead: b.ahead,
+      behind: b.behind,
+      lastCommit: b.last_commit,
+    }));
+  }
+
+  const res = await fetch(`${DEV_SERVER}/api/git-branches?cwd=${encodeURIComponent(cwd)}`);
+  if (!res.ok) throw new Error(`Failed to get branches: ${res.status}`);
+  return res.json();
+}
+
+/**
+ * Create a new branch. If checkout=true, switch to it.
+ */
+export async function gitCreateBranch(cwd: string, name: string, checkout: boolean = true): Promise<void> {
+  if (isTauri()) {
+    await tauriInvoke("git_create_branch", { cwd, name, checkout });
+    return;
+  }
+  const res = await fetch(`${DEV_SERVER}/api/git-create-branch`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, name, checkout }),
+  });
+  if (!res.ok) throw new Error(`Failed to create branch: ${res.status}`);
+}
+
+/**
+ * Switch to an existing branch.
+ */
+export async function gitSwitchBranch(cwd: string, name: string): Promise<void> {
+  if (isTauri()) {
+    await tauriInvoke("git_switch_branch", { cwd, name });
+    return;
+  }
+  const res = await fetch(`${DEV_SERVER}/api/git-switch-branch`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, name }),
+  });
+  if (!res.ok) throw new Error(`Failed to switch branch: ${res.status}`);
+}
+
+/**
+ * Delete a branch.
+ */
+export async function gitDeleteBranch(cwd: string, name: string, force: boolean = false): Promise<void> {
+  if (isTauri()) {
+    await tauriInvoke("git_delete_branch", { cwd, name, force });
+    return;
+  }
+  const res = await fetch(`${DEV_SERVER}/api/git-delete-branch`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, name, force }),
+  });
+  if (!res.ok) throw new Error(`Failed to delete branch: ${res.status}`);
+}

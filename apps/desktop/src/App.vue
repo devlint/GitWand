@@ -8,6 +8,7 @@ import FolderPicker from "./components/FolderPicker.vue";
 import RepoSidebar from "./components/RepoSidebar.vue";
 import DiffViewer from "./components/DiffViewer.vue";
 import CommitLog from "./components/CommitLog.vue";
+import BranchPanel from "./components/BranchPanel.vue";
 import { useGitWand } from "./composables/useGitWand";
 import { useGitRepo } from "./composables/useGitRepo";
 import { useTheme } from "./composables/useTheme";
@@ -78,6 +79,12 @@ const {
   push: doPush,
   pull: doPull,
   discardFiles,
+  branches,
+  branchesLoading,
+  loadBranches,
+  createBranch,
+  switchBranch,
+  deleteBranch,
 } = useGitRepo();
 
 // ─── Computed state ─────────────────────────────────────
@@ -143,10 +150,12 @@ function handleSwitchMode(mode: AppMode) {
   appMode.value = mode;
 }
 
-// When switching to history tab, load log
+// When switching tabs, load data as needed
 watch(viewMode, async (mode) => {
   if (mode === "history" && hasRepo.value) {
     await loadLog();
+  } else if (mode === "branches" && hasRepo.value) {
+    await loadBranches();
   }
 });
 
@@ -155,9 +164,8 @@ function onRepoFileSelect(path: string, staged: boolean) {
   repoSelectFile(path, staged);
 }
 
-function onViewModeChange(mode: "changes" | "merge" | "history") {
+function onViewModeChange(mode: "changes" | "merge" | "history" | "branches") {
   if (mode === "merge") {
-    // Switch to merge mode if user clicks merge tab
     appMode.value = "merge";
     return;
   }
@@ -343,6 +351,21 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
               v-if="hasRepo"
               :entries="repoLog"
               :loading="repoLoading"
+            />
+            <EmptyState v-else @open-folder="handleOpenFolder" @open-path="handleOpenPath" />
+          </template>
+
+          <!-- Branches view -->
+          <template v-else-if="viewMode === 'branches'">
+            <BranchPanel
+              v-if="hasRepo"
+              :branches="branches"
+              :current-branch="branchDisplay"
+              :loading="branchesLoading"
+              @switch-branch="switchBranch"
+              @create-branch="createBranch"
+              @delete-branch="deleteBranch"
+              @refresh="loadBranches"
             />
             <EmptyState v-else @open-folder="handleOpenFolder" @open-path="handleOpenPath" />
           </template>

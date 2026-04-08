@@ -9,14 +9,19 @@ import {
   gitPush,
   gitPull,
   gitDiscard,
+  getGitBranches,
+  gitCreateBranch,
+  gitSwitchBranch,
+  gitDeleteBranch,
   type GitStatus,
   type GitDiff,
   type GitLogEntry,
   type FileChange,
   type GitPushPullResult,
+  type GitBranch,
 } from "../utils/backend";
 
-export type ViewMode = "changes" | "merge" | "history";
+export type ViewMode = "changes" | "merge" | "history" | "branches";
 
 export interface RepoFileEntry {
   path: string;
@@ -45,6 +50,10 @@ export function useGitRepo() {
   const isPushing = ref(false);
   const isPulling = ref(false);
   const lastCommitHash = ref<string | null>(null);
+
+  // Branch state
+  const branches = ref<GitBranch[]>([]);
+  const branchesLoading = ref(false);
 
   /** Whether a repo is loaded. */
   const hasRepo = computed(() => !!folderPath.value && !!status.value);
@@ -306,6 +315,54 @@ export function useGitRepo() {
 
   // ─── Discard ────────────────────────────────────────────
 
+  // ─── Branches ────────────────────────────────────────────
+
+  async function loadBranches() {
+    if (!folderPath.value) return;
+    branchesLoading.value = true;
+    try {
+      branches.value = await getGitBranches(folderPath.value);
+    } catch (err: any) {
+      error.value = `branches: ${err.message}`;
+    } finally {
+      branchesLoading.value = false;
+    }
+  }
+
+  async function createBranch(name: string) {
+    if (!folderPath.value) return;
+    try {
+      await gitCreateBranch(folderPath.value, name, true);
+      await refresh();
+      await loadBranches();
+    } catch (err: any) {
+      error.value = `create branch: ${err.message}`;
+    }
+  }
+
+  async function switchBranch(name: string) {
+    if (!folderPath.value) return;
+    try {
+      await gitSwitchBranch(folderPath.value, name);
+      await refresh();
+      await loadBranches();
+    } catch (err: any) {
+      error.value = `switch branch: ${err.message}`;
+    }
+  }
+
+  async function deleteBranch(name: string) {
+    if (!folderPath.value) return;
+    try {
+      await gitDeleteBranch(folderPath.value, name, false);
+      await loadBranches();
+    } catch (err: any) {
+      error.value = `delete branch: ${err.message}`;
+    }
+  }
+
+  // ─── Discard ────────────────────────────────────────────
+
   async function discardFiles(paths: string[]) {
     if (!folderPath.value) return;
     try {
@@ -332,6 +389,8 @@ export function useGitRepo() {
     isPushing,
     isPulling,
     lastCommitHash,
+    branches,
+    branchesLoading,
     // Computed
     hasRepo,
     branchDisplay,
@@ -354,5 +413,9 @@ export function useGitRepo() {
     push,
     pull,
     discardFiles,
+    loadBranches,
+    createBranch,
+    switchBranch,
+    deleteBranch,
   };
 }

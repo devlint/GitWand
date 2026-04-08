@@ -605,6 +605,142 @@ fn git_discard(cwd: String, paths: Vec<String>) -> Result<(), String> {
     Ok(())
 }
 
+// ─── Git branches ────────────────────────────────────────────
+
+#[derive(Serialize)]
+struct GitBranch {
+    name: String,
+    is_current: bool,
+    is_remote: bool,
+    upstream: Option<String>,
+    ahead: i32,
+    behind: i32,
+    last_commit: String,
+}
+
+#[tauri::command]
+fn git_branches(cwd: String) -> Result<Vec<GitBranch>, String> {
+    // Use git branch -a --format to get structured output
+    let output = std::process::Command::new("git")
+        .args([
+            "branch", "-a",
+            "--format=%(HEAD)%(refname:short)\x1f%(upstream:short)\x1f%(upstream:track,nobracket)\x1f%(objectname:short) %(subject)",
+        ])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("Failed to run git branch: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("git branch failed: {}", stderr));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut branches: Vec<GitBranch> = Vec::new();
+
+    for line in stdout.lines() {
+        let line = line.trim();
+        if line.is_empty() { continue; }
+
+        let is_current = line.starts_with('*');
+        let line = if is_current { &line[1..] } else { line };
+
+        let parts: Vec<&str> = line.split('\x1f').collect();
+        if parts.len() < 3 { continue; }
+
+        let name = parts[0].to_string();
+        let upstream = if parts[1].is_empty() { None } else { Some(parts[1].to_string()) };
+        let track_info = parts[2];
+
+        // Parse ahead/behind from track info like "ahead 2, behind 1"
+        let mut ahead: i32 = 0;
+        let mut behind: i32 = 0;
+        if !track_info.is_empty() {
+            for part in track_info.split(", ") {
+                if part.starts_with("ahead ") {
+                    ahead = part.strip_prefix("ahead ").unwrap_or("0").parse().unwrap_or(0);
+                } else if part.starts_with("behind ") {
+                    behind = part.strip_prefix("behind ").unwrap_or("0").parse().unwrap_or(0);
+                }
+            }
+        }
+
+        let last_commit = if parts.len() > 3 { parts[3].to_string() } else { String::new() };
+
+        // Skip HEAD -> origin/main style remote refs
+        if name.contains("HEAD ->") || name == "origin/HEAD" { continue; }
+
+        let is_remote = name.starts_with("origin/") || name.starts_with("remotes/");
+
+        branches.push(GitBranch {
+            name,
+            is_current,
+            is_remote,
+            upstream,
+            ahead,
+            behind,
+            last_commit,
+        });
+    }
+
+    Ok(branches)
+}
+
+#[tauri::command]
+fn git_create_branch(cwd: String, name: String, checkout: bool) -> Result<(), String> {
+    if checkout {
+        let output = std::process::Command::new("git")
+            .args(["checkout", "-b", &name])
+            .current_dir(&cwd)
+            .output()
+            .map_err(|e| format!("Failed to create branch: {}", e))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("git checkout -b failed: {}", stderr));
+        }
+    } else {
+        let output = std::process::Command::new("git")
+            .args(["branch", &name])
+            .current_dir(&cwd)
+            .output()
+            .map_err(|e| format!("Failed to create branch: {}", e))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("git branch failed: {}", stderr));
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn git_switch_branch(cwd: String, name: String) -> Result<(), String> {
+    let output = std::process::Command::new("git")
+        .args(["checkout", &name])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("Failed to switch branch: {}", e))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("git checkout failed: {}", stderr));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn git_delete_branch(cwd: String, name: String, force: bool) -> Result<(), String> {
+    let flag = if force { "-D" } else { "-d" };
+    let output = std::process::Command::new("git")
+        .args(["branch", flag, &name])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("Failed to delete branch: {}", e))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("git branch {} failed: {}", flag, stderr));
+    }
+    Ok(())
+}
+
 // ─── Tauri entry point ─────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -627,6 +763,10 @@ pub fn run() {
             git_push,
             git_pull,
             git_discard,
+            git_branches,
+            git_create_branch,
+            git_switch_branch,
+            git_delete_branch,
         ])
         .run(tauri::generate_context!())
         .expect("error while running GitWand");

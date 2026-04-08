@@ -426,6 +426,94 @@ const server = createServer(async (req, res) => {
       }
     }
 
+    // GET /api/git-branches?cwd=<path>
+    if (url.pathname === "/api/git-branches" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd");
+      if (!cwd) return jsonResponse(res, { error: "Missing cwd param" }, 400);
+      try {
+        const resolvedCwd = resolve(cwd);
+        const format = "%(HEAD)%(refname:short)\x1f%(upstream:short)\x1f%(upstream:track,nobracket)\x1f%(objectname:short) %(subject)";
+        const stdout = execSync(`git branch -a --format="${format}"`, {
+          cwd: resolvedCwd,
+          encoding: "utf-8",
+          shell: true,
+        });
+
+        const branches = [];
+        for (const line of stdout.split("\n")) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+
+          const isCurrent = trimmed.startsWith("*");
+          const rest = isCurrent ? trimmed.substring(1) : trimmed;
+          const parts = rest.split("\x1f");
+          if (parts.length < 3) continue;
+
+          const name = parts[0];
+          const upstream = parts[1] || null;
+          const trackInfo = parts[2] || "";
+          const lastCommit = parts[3] || "";
+
+          if (name.includes("HEAD ->") || name === "origin/HEAD") continue;
+
+          let ahead = 0, behind = 0;
+          for (const part of trackInfo.split(", ")) {
+            if (part.startsWith("ahead ")) ahead = parseInt(part.substring(6)) || 0;
+            if (part.startsWith("behind ")) behind = parseInt(part.substring(7)) || 0;
+          }
+
+          const isRemote = name.startsWith("origin/") || name.startsWith("remotes/");
+
+          branches.push({ name, isCurrent, isRemote, upstream, ahead, behind, lastCommit });
+        }
+
+        return jsonResponse(res, branches);
+      } catch (err) {
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
+
+    // POST /api/git-create-branch  { cwd, name, checkout }
+    if (url.pathname === "/api/git-create-branch" && req.method === "POST") {
+      const { cwd, name, checkout } = await readBody(req);
+      if (!cwd || !name) return jsonResponse(res, { error: "Missing cwd or name" }, 400);
+      try {
+        const resolvedCwd = resolve(cwd);
+        const cmd = checkout ? `git checkout -b "${name}"` : `git branch "${name}"`;
+        execSync(cmd, { cwd: resolvedCwd, encoding: "utf-8", shell: true });
+        return jsonResponse(res, { ok: true });
+      } catch (err) {
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
+
+    // POST /api/git-switch-branch  { cwd, name }
+    if (url.pathname === "/api/git-switch-branch" && req.method === "POST") {
+      const { cwd, name } = await readBody(req);
+      if (!cwd || !name) return jsonResponse(res, { error: "Missing cwd or name" }, 400);
+      try {
+        const resolvedCwd = resolve(cwd);
+        execSync(`git checkout "${name}"`, { cwd: resolvedCwd, encoding: "utf-8", shell: true });
+        return jsonResponse(res, { ok: true });
+      } catch (err) {
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
+
+    // POST /api/git-delete-branch  { cwd, name, force }
+    if (url.pathname === "/api/git-delete-branch" && req.method === "POST") {
+      const { cwd, name, force } = await readBody(req);
+      if (!cwd || !name) return jsonResponse(res, { error: "Missing cwd or name" }, 400);
+      try {
+        const resolvedCwd = resolve(cwd);
+        const flag = force ? "-D" : "-d";
+        execSync(`git branch ${flag} "${name}"`, { cwd: resolvedCwd, encoding: "utf-8", shell: true });
+        return jsonResponse(res, { ok: true });
+      } catch (err) {
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
+
     jsonResponse(res, { error: "Not found" }, 404);
   } catch (err) {
     jsonResponse(res, { error: err.message }, 500);
