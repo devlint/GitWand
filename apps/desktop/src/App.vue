@@ -426,6 +426,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
             v-else-if="viewMode === 'history'"
             :diffs="commitDiffs"
             :commit-hash="selectedCommitHash"
+            :commit-info="repoLog.find(e => e.hashFull === selectedCommitHash) ?? null"
           />
         </template>
       </main>

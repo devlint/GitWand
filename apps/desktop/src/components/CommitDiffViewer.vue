@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onUnmounted, nextTick } from "vue";
-import type { GitDiff } from "../utils/backend";
+import type { GitDiff, GitLogEntry } from "../utils/backend";
 import { useI18n } from "../composables/useI18n";
 
 const { t } = useI18n();
@@ -8,10 +8,42 @@ const { t } = useI18n();
 const props = defineProps<{
   diffs: GitDiff[];
   commitHash: string | null;
+  commitInfo: GitLogEntry | null;
 }>();
 
 function fileName(path: string): string {
   return path.split("/").pop() ?? path;
+}
+
+// Deterministic pastel color from author name
+function avatarColor(name: string): string {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = name.charCodeAt(i) + ((h << 5) - h);
+  const hue = ((h % 360) + 360) % 360;
+  return `hsl(${hue}, 55%, 45%)`;
+}
+
+function cleanBody(raw: string): string {
+  // Replace literal \n sequences with real newlines, then trim
+  return raw.replace(/\\n/g, "\n").trim();
+}
+
+function formatDate(raw: string): string {
+  try {
+    const d = new Date(raw);
+    const now = new Date();
+    const diffMs = now.getTime() - d.getTime();
+    const diffMin = Math.floor(diffMs / 60000);
+    if (diffMin < 1) return "just now";
+    if (diffMin < 60) return `${diffMin}m ago`;
+    const diffH = Math.floor(diffMin / 60);
+    if (diffH < 24) return `${diffH}h ago`;
+    const diffD = Math.floor(diffH / 24);
+    if (diffD < 30) return `${diffD}d ago`;
+    return d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+  } catch {
+    return raw;
+  }
 }
 
 // ─── Cached diff stats (computed once per diffs change) ──
@@ -209,17 +241,37 @@ function onContentScroll(e: Event) {
 
 <template>
   <div class="commit-diff-viewer">
-    <!-- Summary header -->
-    <div class="cdv-header" v-if="commitHash">
-      <span class="cdv-hash mono">{{ commitHash?.substring(0, 8) }}</span>
-      <span class="cdv-summary">
-        {{ totalStats.files }} {{ totalStats.files === 1 ? t('header.file') : t('header.files') }}
-      </span>
-      <span class="cdv-stat cdv-stat--add" v-if="totalStats.adds > 0">+{{ totalStats.adds }}</span>
-      <span class="cdv-stat cdv-stat--del" v-if="totalStats.dels > 0">-{{ totalStats.dels }}</span>
-      <span class="cdv-large-diff-hint" v-if="diffs.length > MAX_INITIAL_FILES">
-        ({{ renderedFileCount }}/{{ diffs.length }})
-      </span>
+    <!-- Commit card -->
+    <div class="cdv-commit-card" v-if="commitInfo">
+      <!-- Row 1: avatar + subject + hash -->
+      <div class="cdv-commit-top">
+        <span class="cdv-avatar" :style="{ background: avatarColor(commitInfo.author) }">
+          {{ commitInfo.author.charAt(0).toUpperCase() }}
+        </span>
+        <div class="cdv-commit-top-text">
+          <div class="cdv-commit-subject">{{ commitInfo.message }}</div>
+          <div class="cdv-commit-meta">
+            <span class="cdv-author">{{ commitInfo.author }}</span>
+            <span class="cdv-meta-sep">&middot;</span>
+            <span class="cdv-date">{{ formatDate(commitInfo.date) }}</span>
+            <span class="cdv-meta-sep">&middot;</span>
+            <span class="cdv-hash mono" :title="commitInfo.hashFull">{{ commitInfo.hash }}</span>
+          </div>
+        </div>
+      </div>
+      <!-- Row 2: body (if any) -->
+      <div class="cdv-commit-body" v-if="commitInfo.body">{{ cleanBody(commitInfo.body) }}</div>
+      <!-- Row 3: stats badges -->
+      <div class="cdv-commit-stats">
+        <span class="cdv-badge cdv-badge--files">
+          {{ totalStats.files }} {{ totalStats.files === 1 ? t('header.file') : t('header.files') }}
+        </span>
+        <span class="cdv-badge cdv-badge--add" v-if="totalStats.adds > 0">+{{ totalStats.adds }}</span>
+        <span class="cdv-badge cdv-badge--del" v-if="totalStats.dels > 0">&minus;{{ totalStats.dels }}</span>
+        <span class="cdv-large-diff-hint" v-if="diffs.length > MAX_INITIAL_FILES">
+          ({{ renderedFileCount }}/{{ diffs.length }})
+        </span>
+      </div>
     </div>
 
     <div class="cdv-body" v-if="diffs.length > 0">
@@ -341,20 +393,108 @@ function onContentScroll(e: Event) {
   overflow: hidden;
 }
 
-.cdv-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 16px;
+.cdv-commit-card {
+  padding: 16px 20px;
   border-bottom: 1px solid var(--color-border);
   background: var(--color-bg-secondary);
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cdv-commit-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.cdv-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.cdv-commit-top-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.cdv-commit-subject {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text);
+  line-height: 1.4;
+}
+
+.cdv-commit-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.cdv-meta-sep {
+  opacity: 0.4;
+}
+
+.cdv-author {
+  font-weight: 500;
 }
 
 .cdv-hash {
-  font-size: 12px;
+  font-size: 10px;
   color: var(--color-accent);
+  background: var(--color-bg-tertiary);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.cdv-commit-body {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--color-text-muted);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  padding-left: 44px;
+}
+
+.cdv-commit-stats {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 44px;
+}
+
+.cdv-badge {
+  font-size: 11px;
   font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+.cdv-badge--files {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-muted);
+}
+
+.cdv-badge--add {
+  background: rgba(63, 185, 80, 0.15);
+  color: var(--color-success);
+}
+
+.cdv-badge--del {
+  background: rgba(248, 81, 73, 0.15);
+  color: var(--color-danger);
 }
 
 .cdv-summary {

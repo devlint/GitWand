@@ -9,7 +9,7 @@
  */
 
 import { createServer } from "node:http";
-import { execSync } from "node:child_process";
+import { execSync, execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
 import { resolve, join, dirname, basename } from "node:path";
 import { homedir } from "node:os";
@@ -402,10 +402,9 @@ const server = createServer(async (req, res) => {
       if (!cwd || !message) return jsonResponse(res, { error: "Missing cwd or message" }, 400);
       try {
         const resolvedCwd = resolve(cwd);
-        execSync(`git commit -m ${JSON.stringify(message)}`, {
+        execFileSync("git", ["commit", "-m", message], {
           cwd: resolvedCwd,
           encoding: "utf-8",
-          shell: true,
         });
         const hash = execSync("git rev-parse --short HEAD", {
           cwd: resolvedCwd,
