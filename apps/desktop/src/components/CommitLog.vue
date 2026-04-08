@@ -164,13 +164,13 @@ function authorColor(name: string): string {
 
 .log-section-label--unpushed {
   color: #f59e0b;
-  background: rgba(245, 158, 11, 0.08);
+  background: var(--color-bg-secondary);
   border-left: 3px solid #f59e0b;
 }
 
 .log-section-label--pushed {
   color: var(--color-success);
-  background: rgba(34, 197, 94, 0.06);
+  background: var(--color-bg-secondary);
   border-left: 3px solid var(--color-success);
 }
 
