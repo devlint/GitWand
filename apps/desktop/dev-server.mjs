@@ -428,7 +428,7 @@ const server = createServer(async (req, res) => {
     // POST /api/git-merge  { cwd, branch }
     if (url.pathname === "/api/git-merge" && req.method === "POST") {
       const { cwd, branch } = await readBody(req);
-      if (!cwd || !branch) return jsonResponse(res, { error: "Missing cwd or branch" }, 400);
+      if (!cwd || !branch) return jsonResponse(res, { success: false, message: "Missing cwd or branch" }, 400);
       try {
         const resolvedCwd = resolve(cwd);
         const stdout = execSync(`git merge "${branch}" 2>&1`, {
@@ -436,16 +436,16 @@ const server = createServer(async (req, res) => {
           encoding: "utf-8",
           shell: true,
         });
-        return jsonResponse(res, { success: true, message: stdout.trim() });
+        return jsonResponse(res, { success: true, message: stdout.trim() || "Merge completed" });
       } catch (err) {
         // Merge conflicts are not fatal — check if it's a conflict vs real error
-        const stderr = err.stderr || err.message || "";
-        const stdout = err.stdout || "";
-        const isConflict = stderr.includes("CONFLICT") || stdout.includes("CONFLICT") || stderr.includes("Automatic merge failed");
+        const stderr = (err.stderr || "").toString();
+        const stdout = (err.stdout || "").toString();
+        const combined = stderr + stdout;
+        const isConflict = combined.includes("CONFLICT") || combined.includes("Automatic merge failed");
         return jsonResponse(res, {
           success: false,
-          message: isConflict ? "Merge conflicts detected" : (stderr || stdout).trim(),
-          hasConflicts: isConflict,
+          message: isConflict ? "Merge conflicts detected" : (stderr || stdout || err.message || "Merge failed").trim(),
         });
       }
     }

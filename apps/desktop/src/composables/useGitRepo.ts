@@ -412,19 +412,19 @@ export function useGitRepo() {
   // ─── Merge ──────────────────────────────────────────────
 
   async function mergeBranch(branchName: string) {
-    if (!folderPath.value) return;
+    if (!folderPath.value || !branchName) return;
     isMerging.value = true;
     try {
       const result = await gitMerge(folderPath.value, branchName);
       if (!result.success) {
-        error.value = `merge: ${result.message}`;
+        error.value = `merge: ${result.message || "unknown error"}`;
       }
       await refresh();
       if (viewMode.value === "history") {
         await loadLog();
       }
     } catch (err: any) {
-      error.value = `merge: ${err.message}`;
+      error.value = `merge: ${err?.message || String(err) || "unknown error"}`;
     } finally {
       isMerging.value = false;
     }
