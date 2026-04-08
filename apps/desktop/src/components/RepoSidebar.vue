@@ -108,13 +108,6 @@ function onCommitKeydown(e: KeyboardEvent) {
       </button>
       <button
         class="view-tab"
-        :class="{ 'view-tab--active': viewMode === 'branches' }"
-        @click="emit('changeView', 'branches')"
-      >
-        {{ t('sidebar.tabBranches') }}
-      </button>
-      <button
-        class="view-tab"
         :class="{ 'view-tab--active': viewMode === 'history' }"
         @click="emit('changeView', 'history')"
       >

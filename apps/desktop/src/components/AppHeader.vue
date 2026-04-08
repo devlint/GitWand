@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import { ref, computed, onMounted, onUnmounted } from "vue";
 import type { GlobalStats } from "../composables/useGitWand";
 import type { Theme } from "../composables/useTheme";
+import type { GitBranch } from "../utils/backend";
 import { useI18n } from "../composables/useI18n";
 
 const { t } = useI18n();
@@ -22,6 +24,9 @@ const props = defineProps<{
   behindCount: number;
   isPushing: boolean;
   isPulling: boolean;
+  // Branch popover
+  branches: GitBranch[];
+  branchesLoading: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -35,10 +40,81 @@ const emit = defineEmits<{
   push: [];
   pull: [];
   openSettings: [];
+  switchBranch: [name: string];
+  createBranch: [name: string];
+  deleteBranch: [name: string];
+  loadBranches: [];
 }>();
 
 const isRepo = () => props.appMode === "repo";
 const isMerge = () => props.appMode === "merge";
+
+// ─── Branch popover ──────────────────────────────────
+const showBranchPopover = ref(false);
+const branchFilter = ref("");
+const showBranchCreate = ref(false);
+const newBranchName = ref("");
+
+function toggleBranchPopover() {
+  showBranchPopover.value = !showBranchPopover.value;
+  if (showBranchPopover.value) {
+    branchFilter.value = "";
+    emit("loadBranches");
+  }
+}
+
+function closeBranchPopover() {
+  showBranchPopover.value = false;
+  showBranchCreate.value = false;
+  newBranchName.value = "";
+}
+
+const localBranches = computed(() =>
+  props.branches
+    .filter((b) => !b.isRemote)
+    .filter((b) => !branchFilter.value || b.name.toLowerCase().includes(branchFilter.value.toLowerCase())),
+);
+
+const remoteBranches = computed(() =>
+  props.branches
+    .filter((b) => b.isRemote)
+    .filter((b) => !branchFilter.value || b.name.toLowerCase().includes(branchFilter.value.toLowerCase())),
+);
+
+function handleBranchSwitch(name: string) {
+  emit("switchBranch", name);
+  closeBranchPopover();
+}
+
+function handleBranchCreate() {
+  const name = newBranchName.value.trim();
+  if (!name) return;
+  emit("createBranch", name);
+  newBranchName.value = "";
+  showBranchCreate.value = false;
+  closeBranchPopover();
+}
+
+function onCreateKeydown(e: KeyboardEvent) {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    handleBranchCreate();
+  } else if (e.key === "Escape") {
+    showBranchCreate.value = false;
+    newBranchName.value = "";
+  }
+}
+
+// Close popover on click outside
+function onDocClick(e: MouseEvent) {
+  const target = e.target as HTMLElement;
+  if (showBranchPopover.value && !target.closest(".branch-popover-wrapper")) {
+    closeBranchPopover();
+  }
+}
+
+onMounted(() => document.addEventListener("click", onDocClick, true));
+onUnmounted(() => document.removeEventListener("click", onDocClick, true));
 </script>
 
 <template>
@@ -85,14 +161,106 @@ const isMerge = () => props.appMode === "merge";
     <div class="header-center">
       <!-- Repo mode: branch + stats -->
       <template v-if="appMode === 'repo' && hasRepo">
-        <div class="branch-info">
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <circle cx="5" cy="4" r="2" stroke="currentColor" stroke-width="1.3"/>
-            <circle cx="5" cy="12" r="2" stroke="currentColor" stroke-width="1.3"/>
-            <circle cx="12" cy="8" r="2" stroke="currentColor" stroke-width="1.3"/>
-            <path d="M5 6v4M7 4h3c1.1 0 2 .9 2 2v0" stroke="currentColor" stroke-width="1.3"/>
-          </svg>
-          <span class="branch-name mono">{{ branchDisplay }}</span>
+        <div class="branch-popover-wrapper">
+          <button class="branch-trigger" @click="toggleBranchPopover" :title="t('branches.title')">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <circle cx="5" cy="4" r="2" stroke="currentColor" stroke-width="1.3"/>
+              <circle cx="5" cy="12" r="2" stroke="currentColor" stroke-width="1.3"/>
+              <circle cx="12" cy="8" r="2" stroke="currentColor" stroke-width="1.3"/>
+              <path d="M5 6v4M7 4h3c1.1 0 2 .9 2 2v0" stroke="currentColor" stroke-width="1.3"/>
+            </svg>
+            <span class="branch-name mono">{{ branchDisplay }}</span>
+            <svg class="branch-chevron" :class="{ 'branch-chevron--open': showBranchPopover }" width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">
+              <path d="M2.5 3.5l2.5 3 2.5-3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+
+          <!-- Branch popover -->
+          <div v-if="showBranchPopover" class="branch-popover">
+            <div class="bp-header">
+              <input
+                class="bp-filter"
+                v-model="branchFilter"
+                :placeholder="t('branches.filter')"
+                autofocus
+                @keydown.escape="closeBranchPopover"
+              />
+              <button class="bp-action-btn" @click="showBranchCreate = !showBranchCreate" :title="t('branches.create')">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                </svg>
+              </button>
+            </div>
+
+            <!-- Create form -->
+            <div class="bp-create" v-if="showBranchCreate">
+              <input
+                class="bp-create-input mono"
+                v-model="newBranchName"
+                @keydown="onCreateKeydown"
+                :placeholder="t('branches.namePlaceholder')"
+                autofocus
+              />
+              <button
+                class="bp-create-btn"
+                :disabled="!newBranchName.trim()"
+                @click="handleBranchCreate"
+              >{{ t('common.create') }}</button>
+            </div>
+
+            <div class="bp-loading" v-if="branchesLoading">
+              <div class="bp-spinner"></div>
+            </div>
+            <div class="bp-lists" v-else>
+              <!-- Local -->
+              <div class="bp-section" v-if="localBranches.length > 0">
+                <div class="bp-section-label">{{ t('branches.local') }}</div>
+                <ul class="bp-list">
+                  <li
+                    v-for="branch in localBranches"
+                    :key="branch.name"
+                    class="bp-item"
+                    :class="{ 'bp-item--current': branch.isCurrent }"
+                    @click="!branch.isCurrent && handleBranchSwitch(branch.name)"
+                  >
+                    <span class="bp-current-dot" v-if="branch.isCurrent"></span>
+                    <span class="bp-item-name mono">{{ branch.name }}</span>
+                    <span class="bp-item-meta muted" v-if="branch.ahead > 0 || branch.behind > 0">
+                      <span v-if="branch.ahead > 0">&uarr;{{ branch.ahead }}</span>
+                      <span v-if="branch.behind > 0">&darr;{{ branch.behind }}</span>
+                    </span>
+                    <button
+                      v-if="!branch.isCurrent"
+                      class="bp-item-delete"
+                      @click.stop="emit('deleteBranch', branch.name)"
+                      :title="t('branches.deleteLabel')"
+                    >
+                      <svg width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                        <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                      </svg>
+                    </button>
+                  </li>
+                </ul>
+              </div>
+              <!-- Remote -->
+              <div class="bp-section" v-if="remoteBranches.length > 0">
+                <div class="bp-section-label">{{ t('branches.remote') }}</div>
+                <ul class="bp-list">
+                  <li
+                    v-for="branch in remoteBranches"
+                    :key="branch.name"
+                    class="bp-item bp-item--remote"
+                    @click="handleBranchSwitch(branch.name.replace(/^origin\//, ''))"
+                  >
+                    <span class="bp-item-name mono">{{ branch.name }}</span>
+                  </li>
+                </ul>
+              </div>
+              <div class="bp-empty" v-if="localBranches.length === 0 && remoteBranches.length === 0">
+                <span class="muted">{{ t('branches.noBranch') }}</span>
+              </div>
+            </div>
+          </div>
         </div>
         <div class="repo-stat-group" v-if="repoStats.staged + repoStats.unstaged + repoStats.untracked + repoStats.conflicted > 0">
           <span class="repo-stat" v-if="repoStats.staged > 0">
@@ -340,17 +508,256 @@ const isMerge = () => props.appMode === "merge";
   background: var(--color-bg-tertiary);
 }
 
-/* Branch info */
-.branch-info {
+/* Branch trigger & popover */
+.branch-popover-wrapper {
+  position: relative;
+}
+
+.branch-trigger {
   display: flex;
   align-items: center;
   gap: 6px;
+  padding: 4px 10px;
+  border-radius: 6px;
   color: var(--color-text);
+  background: none;
+  transition: background 0.12s;
+  cursor: pointer;
+}
+
+.branch-trigger:hover {
+  background: var(--color-bg-tertiary);
 }
 
 .branch-name {
   font-size: 13px;
   font-weight: 500;
+}
+
+.branch-chevron {
+  transition: transform 0.15s;
+  opacity: 0.5;
+}
+
+.branch-chevron--open {
+  transform: rotate(180deg);
+}
+
+/* ─── Branch Popover ─────────────────────────────────── */
+
+.branch-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 320px;
+  max-height: 420px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  z-index: 50;
+  animation: bpSlide 0.15s ease-out;
+}
+
+@keyframes bpSlide {
+  from { opacity: 0; transform: translateX(-50%) translateY(-4px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+.bp-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.bp-filter {
+  flex: 1;
+  padding: 5px 8px;
+  font-size: 12px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  outline: none;
+}
+
+.bp-filter:focus {
+  border-color: var(--color-accent);
+}
+
+.bp-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 5px;
+  color: var(--color-text-muted);
+  background: none;
+  transition: background 0.1s, color 0.1s;
+}
+
+.bp-action-btn:hover {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text);
+}
+
+.bp-create {
+  display: flex;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.bp-create-input {
+  flex: 1;
+  padding: 5px 8px;
+  font-size: 12px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  outline: none;
+}
+
+.bp-create-input:focus {
+  border-color: var(--color-accent);
+}
+
+.bp-create-btn {
+  padding: 5px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--color-accent);
+  color: #fff;
+  border-radius: 5px;
+}
+
+.bp-create-btn:disabled {
+  opacity: 0.4;
+}
+
+.bp-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.bp-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+.bp-lists {
+  flex: 1;
+  overflow-y: auto;
+  max-height: 300px;
+}
+
+.bp-section {
+  border-bottom: 1px solid var(--color-border);
+}
+
+.bp-section:last-child {
+  border-bottom: none;
+}
+
+.bp-section-label {
+  padding: 5px 12px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-muted);
+  background: var(--color-bg);
+}
+
+.bp-list {
+  list-style: none;
+}
+
+.bp-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  cursor: pointer;
+  transition: background 0.1s;
+  font-size: 12px;
+}
+
+.bp-item:hover {
+  background: var(--color-bg-tertiary);
+}
+
+.bp-item--current {
+  background: var(--color-bg-tertiary);
+  cursor: default;
+}
+
+.bp-current-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  flex-shrink: 0;
+}
+
+.bp-item-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.bp-item--remote .bp-item-name {
+  opacity: 0.7;
+}
+
+.bp-item-meta {
+  font-size: 10px;
+  flex-shrink: 0;
+}
+
+.bp-item-delete {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  color: var(--color-text-muted);
+  background: none;
+  opacity: 0;
+  transition: opacity 0.1s, color 0.1s;
+}
+
+.bp-item:hover .bp-item-delete {
+  opacity: 0.6;
+}
+
+.bp-item-delete:hover {
+  opacity: 1 !important;
+  color: var(--color-danger);
+}
+
+.bp-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  font-size: 12px;
 }
 
 .repo-stat-group {

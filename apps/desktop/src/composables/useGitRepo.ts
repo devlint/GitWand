@@ -22,7 +22,7 @@ import {
   type GitBranch,
 } from "../utils/backend";
 
-export type ViewMode = "changes" | "merge" | "history" | "branches";
+export type ViewMode = "changes" | "merge" | "history";
 
 export interface RepoFileEntry {
   path: string;

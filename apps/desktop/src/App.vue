@@ -8,7 +8,6 @@ import FolderPicker from "./components/FolderPicker.vue";
 import RepoSidebar from "./components/RepoSidebar.vue";
 import DiffViewer from "./components/DiffViewer.vue";
 import CommitLog from "./components/CommitLog.vue";
-import BranchPanel from "./components/BranchPanel.vue";
 import CommitDiffViewer from "./components/CommitDiffViewer.vue";
 import SettingsPanel from "./components/SettingsPanel.vue";
 import { useGitWand } from "./composables/useGitWand";
@@ -164,8 +163,6 @@ function handleSwitchMode(mode: AppMode) {
 watch(viewMode, async (mode) => {
   if (mode === "history" && hasRepo.value) {
     await loadLog();
-  } else if (mode === "branches" && hasRepo.value) {
-    await loadBranches();
   }
 });
 
@@ -174,7 +171,7 @@ function onRepoFileSelect(path: string, staged: boolean) {
   repoSelectFile(path, staged);
 }
 
-function onViewModeChange(mode: "changes" | "merge" | "history" | "branches") {
+function onViewModeChange(mode: "changes" | "merge" | "history") {
   if (mode === "merge") {
     appMode.value = "merge";
     return;
@@ -255,6 +252,8 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
       :behind-count="behindCount"
       :is-pushing="isPushing"
       :is-pulling="isPulling"
+      :branches="branches"
+      :branches-loading="branchesLoading"
       @open-folder="handleOpenFolder"
       @resolve-all="resolveAll"
       @save-all="saveAllFiles"
@@ -265,6 +264,10 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
       @push="doPush"
       @pull="doPull"
       @open-settings="showSettings = true"
+      @switch-branch="switchBranch"
+      @create-branch="createBranch"
+      @delete-branch="deleteBranch"
+      @load-branches="loadBranches"
     />
 
     <div class="app-body">
@@ -383,20 +386,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
             <EmptyState v-else @open-folder="handleOpenFolder" @open-path="handleOpenPath" />
           </template>
 
-          <!-- Branches view -->
-          <template v-else-if="viewMode === 'branches'">
-            <BranchPanel
-              v-if="hasRepo"
-              :branches="branches"
-              :current-branch="branchDisplay"
-              :loading="branchesLoading"
-              @switch-branch="switchBranch"
-              @create-branch="createBranch"
-              @delete-branch="deleteBranch"
-              @refresh="loadBranches"
-            />
-            <EmptyState v-else @open-folder="handleOpenFolder" @open-path="handleOpenPath" />
-          </template>
+          <!-- (Branches view removed — now a header popover) -->
         </main>
       </template>
     </div>
