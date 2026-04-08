@@ -56,7 +56,7 @@ const fr = {
     auto: "auto",
     remaining: "restant",
     remainingPlural: "restants",
-    staged: "staged",
+    staged: "indexés",
     modified: "modifi\u00e9s",
     untracked: "non suivis",
     // Toast notifications
@@ -76,23 +76,23 @@ const fr = {
     tabLog: "Log",
     // Sections
     sectionConflicts: "Conflits",
-    sectionStaged: "Staged",
+    sectionStaged: "Indexés",
     sectionModified: "Modifi\u00e9s",
     sectionUntracked: "Non suivis",
     // Actions
-    stageAll: "Tout stager",
-    unstageAll: "Tout unstager",
-    stage: "Stager",
-    unstage: "Unstager",
+    stageAll: "Tout indexer",
+    unstageAll: "Tout désindexer",
+    stage: "Indexer",
+    unstage: "Désindexer",
     // Commit panel
     stageAllButton: "Tout ajouter ({0})",
     summaryPlaceholder: "Résumé (requis)",
     descriptionPlaceholder: "Description (optionnel)",
-    commitButton: "Commit ({0})",
-    commitButtonLoading: "Commit\u2026",
-    commitHint: "Ctrl+Enter pour commiter",
+    commitButton: "Commiter ({0})",
+    commitButtonLoading: "En cours\u2026",
+    commitHint: "Ctrl+Enter pour valider",
     // Empty
-    cleanTree: "Working tree clean",
+    cleanTree: "Espace de travail propre",
   },
 
   // ─── FileList (merge mode) ──────────────────────────────
