@@ -57,6 +57,11 @@ const en: Locale = {
     staged: "staged",
     modified: "modified",
     untracked: "untracked",
+    // Toast notifications
+    syncUpToDate: "Already up to date",
+    syncDone: "Sync completed",
+    pushDone: "Push completed",
+    mergeDone: "Merge completed",
   },
 
   // ─── Sidebar / RepoSidebar ──────────────────────────────

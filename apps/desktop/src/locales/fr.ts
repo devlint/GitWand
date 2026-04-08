@@ -59,6 +59,11 @@ const fr = {
     staged: "staged",
     modified: "modifi\u00e9s",
     untracked: "non suivis",
+    // Toast notifications
+    syncUpToDate: "D\u00e9j\u00e0 \u00e0 jour",
+    syncDone: "Synchronisation termin\u00e9e",
+    pushDone: "Push termin\u00e9",
+    mergeDone: "Merge termin\u00e9",
   },
 
   // ─── Sidebar / RepoSidebar ──────────────────────────────

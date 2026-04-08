@@ -45,6 +45,7 @@ export function useGitRepo() {
   const log = ref<GitLogEntry[]>([]);
   const loading = ref(false);
   const error = ref<string | null>(null);
+  const successMessage = ref<string | null>(null);
   const viewMode = ref<ViewMode>("changes");
 
   // Commit editor state
@@ -375,6 +376,8 @@ export function useGitRepo() {
       const result = await gitPush(folderPath.value);
       if (!result.success) {
         error.value = `push: ${result.message}`;
+      } else {
+        successMessage.value = "push-done";
       }
       await refresh();
       if (viewMode.value === "history") {
@@ -396,6 +399,14 @@ export function useGitRepo() {
       const result = await gitPull(folderPath.value);
       if (!result.success) {
         error.value = `pull: ${result.message}`;
+      } else {
+        // Show success feedback
+        const msg = (result.message || "").trim();
+        if (msg.includes("Already up to date") || msg.includes("Already up-to-date")) {
+          successMessage.value = "already-up-to-date";
+        } else {
+          successMessage.value = "sync-done";
+        }
       }
       await refresh();
       // Reload log so the commit list reflects pulled commits
@@ -418,6 +429,8 @@ export function useGitRepo() {
       const result = await gitMerge(folderPath.value, branchName);
       if (!result.success) {
         error.value = `merge: ${result.message || "unknown error"}`;
+      } else {
+        successMessage.value = "merge-done";
       }
       await refresh();
       if (viewMode.value === "history") {
@@ -503,6 +516,7 @@ export function useGitRepo() {
     log,
     loading,
     error,
+    successMessage,
     viewMode,
     commitMessage,
     isCommitting,
