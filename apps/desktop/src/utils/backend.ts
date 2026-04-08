@@ -348,3 +348,114 @@ export async function getGitLog(cwd: string, count?: number): Promise<GitLogEntr
   if (!res.ok) throw new Error(`Failed to get git log: ${res.status}`);
   return res.json();
 }
+
+// ─── Git stage / unstage ──────────────────────────────────────
+
+/**
+ * Stage files (git add).
+ */
+export async function gitStage(cwd: string, paths: string[]): Promise<void> {
+  if (isTauri()) {
+    await tauriInvoke("git_stage", { cwd, paths });
+    return;
+  }
+  const res = await fetch(`${DEV_SERVER}/api/git-stage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, paths }),
+  });
+  if (!res.ok) throw new Error(`Failed to stage files: ${res.status}`);
+}
+
+/**
+ * Unstage files (git reset HEAD).
+ */
+export async function gitUnstage(cwd: string, paths: string[]): Promise<void> {
+  if (isTauri()) {
+    await tauriInvoke("git_unstage", { cwd, paths });
+    return;
+  }
+  const res = await fetch(`${DEV_SERVER}/api/git-unstage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, paths }),
+  });
+  if (!res.ok) throw new Error(`Failed to unstage files: ${res.status}`);
+}
+
+// ─── Git commit ───────────────────────────────────────────────
+
+/**
+ * Create a commit with the given message. Returns the short hash.
+ */
+export async function gitCommit(cwd: string, message: string): Promise<string> {
+  if (isTauri()) {
+    return tauriInvoke<string>("git_commit", { cwd, message });
+  }
+  const res = await fetch(`${DEV_SERVER}/api/git-commit`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, message }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || `Failed to commit: ${res.status}`);
+  }
+  const data = await res.json();
+  return data.hash;
+}
+
+// ─── Git push / pull ──────────────────────────────────────────
+
+export interface GitPushPullResult {
+  success: boolean;
+  message: string;
+}
+
+/**
+ * Push to remote.
+ */
+export async function gitPush(cwd: string): Promise<GitPushPullResult> {
+  if (isTauri()) {
+    return tauriInvoke<GitPushPullResult>("git_push", { cwd });
+  }
+  const res = await fetch(`${DEV_SERVER}/api/git-push`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd }),
+  });
+  return res.json();
+}
+
+/**
+ * Pull from remote.
+ */
+export async function gitPull(cwd: string): Promise<GitPushPullResult> {
+  if (isTauri()) {
+    return tauriInvoke<GitPushPullResult>("git_pull", { cwd });
+  }
+  const res = await fetch(`${DEV_SERVER}/api/git-pull`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd }),
+  });
+  return res.json();
+}
+
+// ─── Git discard ──────────────────────────────────────────────
+
+/**
+ * Discard changes to tracked files (git checkout --).
+ */
+export async function gitDiscard(cwd: string, paths: string[]): Promise<void> {
+  if (isTauri()) {
+    await tauriInvoke("git_discard", { cwd, paths });
+    return;
+  }
+  const res = await fetch(`${DEV_SERVER}/api/git-discard`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, paths }),
+  });
+  if (!res.ok) throw new Error(`Failed to discard changes: ${res.status}`);
+}

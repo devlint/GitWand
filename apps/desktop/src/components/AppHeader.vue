@@ -13,6 +13,10 @@ const props = defineProps<{
   branchDisplay: string;
   repoStats: { staged: number; unstaged: number; untracked: number; conflicted: number };
   hasRepo: boolean;
+  canPush: boolean;
+  canPull: boolean;
+  isPushing: boolean;
+  isPulling: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -23,6 +27,8 @@ const emit = defineEmits<{
   redo: [];
   toggleTheme: [];
   switchMode: [mode: "merge" | "repo"];
+  push: [];
+  pull: [];
 }>();
 
 const isRepo = () => props.appMode === "repo";
@@ -184,6 +190,42 @@ const isMerge = () => props.appMode === "merge";
         </svg>
         <span>Ouvrir</span>
       </button>
+
+      <!-- Repo mode: push/pull -->
+      <template v-if="appMode === 'repo' && hasRepo">
+        <button
+          class="btn btn--secondary"
+          :class="{ 'btn--disabled': !canPull }"
+          :disabled="!canPull"
+          @click="emit('pull')"
+          title="Pull"
+        >
+          <svg v-if="isPulling" class="btn-spinner" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+            <circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.5" fill="none" opacity="0.3"/>
+            <path d="M7 1.5A5.5 5.5 0 0112.5 7" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+          </svg>
+          <svg v-else width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M8 3v10M5 10l3 3 3-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span>Pull</span>
+        </button>
+        <button
+          class="btn btn--primary"
+          :class="{ 'btn--disabled': !canPush }"
+          :disabled="!canPush"
+          @click="emit('push')"
+          title="Push"
+        >
+          <svg v-if="isPushing" class="btn-spinner" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+            <circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.5" fill="none" opacity="0.3"/>
+            <path d="M7 1.5A5.5 5.5 0 0112.5 7" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+          </svg>
+          <svg v-else width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M8 13V3M5 6l3-3 3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span>Push</span>
+        </button>
+      </template>
 
       <!-- Merge mode buttons -->
       <button
@@ -424,5 +466,13 @@ const isMerge = () => props.appMode === "merge";
 .btn--disabled {
   opacity: 0.3;
   cursor: not-allowed;
+}
+
+.btn-spinner {
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 </style>

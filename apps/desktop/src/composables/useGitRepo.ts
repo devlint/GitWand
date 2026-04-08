@@ -3,10 +3,17 @@ import {
   getGitStatus,
   getGitDiff,
   getGitLog,
+  gitStage,
+  gitUnstage,
+  gitCommit,
+  gitPush,
+  gitPull,
+  gitDiscard,
   type GitStatus,
   type GitDiff,
   type GitLogEntry,
   type FileChange,
+  type GitPushPullResult,
 } from "../utils/backend";
 
 export type ViewMode = "changes" | "merge" | "history";
@@ -19,7 +26,7 @@ export interface RepoFileEntry {
 
 /**
  * Main composable for the Git repository view.
- * Manages repo status, file changes, diff, and log.
+ * Manages repo status, file changes, diff, log, staging, committing, push/pull.
  */
 export function useGitRepo() {
   const folderPath = ref<string | null>(null);
@@ -32,6 +39,13 @@ export function useGitRepo() {
   const error = ref<string | null>(null);
   const viewMode = ref<ViewMode>("changes");
 
+  // Commit editor state
+  const commitMessage = ref("");
+  const isCommitting = ref(false);
+  const isPushing = ref(false);
+  const isPulling = ref(false);
+  const lastCommitHash = ref<string | null>(null);
+
   /** Whether a repo is loaded. */
   const hasRepo = computed(() => !!folderPath.value && !!status.value);
 
@@ -42,8 +56,8 @@ export function useGitRepo() {
     let text = s.branch;
     if (s.ahead > 0 || s.behind > 0) {
       const parts: string[] = [];
-      if (s.ahead > 0) parts.push(`↑${s.ahead}`);
-      if (s.behind > 0) parts.push(`↓${s.behind}`);
+      if (s.ahead > 0) parts.push(`\u2191${s.ahead}`);
+      if (s.behind > 0) parts.push(`\u2193${s.behind}`);
       text += ` ${parts.join(" ")}`;
     }
     return text;
@@ -92,6 +106,23 @@ export function useGitRepo() {
       untracked: s.untracked.length,
       conflicted: s.conflicted.length,
     };
+  });
+
+  /** Can we commit? (staged files + non-empty message) */
+  const canCommit = computed(() => {
+    return repoStats.value.staged > 0 && commitMessage.value.trim().length > 0 && !isCommitting.value;
+  });
+
+  /** Can we push? */
+  const canPush = computed(() => {
+    if (!status.value) return false;
+    return status.value.ahead > 0 && !isPushing.value;
+  });
+
+  /** Can we pull? */
+  const canPull = computed(() => {
+    if (!status.value) return false;
+    return status.value.behind > 0 && !isPulling.value;
   });
 
   /**
@@ -168,7 +199,125 @@ export function useGitRepo() {
     }
   }
 
+  // ─── Staging operations ─────────────────────────────────
+
+  /**
+   * Stage specific files.
+   */
+  async function stageFiles(paths: string[]) {
+    if (!folderPath.value) return;
+    try {
+      await gitStage(folderPath.value, paths);
+      await refresh();
+    } catch (err: any) {
+      error.value = `git add: ${err.message}`;
+    }
+  }
+
+  /**
+   * Stage all unstaged + untracked files.
+   */
+  async function stageAll() {
+    if (!folderPath.value || !status.value) return;
+    const paths = [
+      ...status.value.unstaged.map((f) => f.path),
+      ...status.value.untracked,
+    ];
+    if (paths.length === 0) return;
+    await stageFiles(paths);
+  }
+
+  /**
+   * Unstage specific files.
+   */
+  async function unstageFiles(paths: string[]) {
+    if (!folderPath.value) return;
+    try {
+      await gitUnstage(folderPath.value, paths);
+      await refresh();
+    } catch (err: any) {
+      error.value = `git reset: ${err.message}`;
+    }
+  }
+
+  /**
+   * Unstage all staged files.
+   */
+  async function unstageAll() {
+    if (!folderPath.value || !status.value) return;
+    const paths = status.value.staged.map((f) => f.path);
+    if (paths.length === 0) return;
+    await unstageFiles(paths);
+  }
+
+  // ─── Commit ─────────────────────────────────────────────
+
+  /**
+   * Commit staged changes with the current message.
+   */
+  async function commit() {
+    if (!folderPath.value || !canCommit.value) return;
+    isCommitting.value = true;
+    try {
+      const hash = await gitCommit(folderPath.value, commitMessage.value.trim());
+      lastCommitHash.value = hash;
+      commitMessage.value = "";
+      await refresh();
+    } catch (err: any) {
+      error.value = `commit: ${err.message}`;
+    } finally {
+      isCommitting.value = false;
+    }
+  }
+
+  // ─── Push / Pull ────────────────────────────────────────
+
+  async function push() {
+    if (!folderPath.value) return;
+    isPushing.value = true;
+    try {
+      const result = await gitPush(folderPath.value);
+      if (!result.success) {
+        error.value = `push: ${result.message}`;
+      }
+      await refresh();
+    } catch (err: any) {
+      error.value = `push: ${err.message}`;
+    } finally {
+      isPushing.value = false;
+    }
+  }
+
+  async function pull() {
+    if (!folderPath.value) return;
+    isPulling.value = true;
+    try {
+      const result = await gitPull(folderPath.value);
+      if (!result.success) {
+        error.value = `pull: ${result.message}`;
+      }
+      await refresh();
+    } catch (err: any) {
+      error.value = `pull: ${err.message}`;
+    } finally {
+      isPulling.value = false;
+    }
+  }
+
+  // ─── Discard ────────────────────────────────────────────
+
+  async function discardFiles(paths: string[]) {
+    if (!folderPath.value) return;
+    try {
+      await gitDiscard(folderPath.value, paths);
+      await refresh();
+    } catch (err: any) {
+      error.value = `discard: ${err.message}`;
+    }
+  }
+
   return {
+    // State
     folderPath,
     status,
     selectedFilePath,
@@ -178,14 +327,32 @@ export function useGitRepo() {
     loading,
     error,
     viewMode,
+    commitMessage,
+    isCommitting,
+    isPushing,
+    isPulling,
+    lastCommitHash,
+    // Computed
     hasRepo,
     branchDisplay,
     isClean,
     allFiles,
     repoStats,
+    canCommit,
+    canPush,
+    canPull,
+    // Actions
     openRepo,
     refresh,
     selectFile,
     loadLog,
+    stageFiles,
+    stageAll,
+    unstageFiles,
+    unstageAll,
+    commit,
+    push,
+    pull,
+    discardFiles,
   };
 }

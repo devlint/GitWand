@@ -320,6 +320,112 @@ const server = createServer(async (req, res) => {
       }
     }
 
+    // POST /api/git-stage  { cwd, paths }
+    if (url.pathname === "/api/git-stage" && req.method === "POST") {
+      const { cwd, paths } = await readBody(req);
+      if (!cwd || !paths) return jsonResponse(res, { error: "Missing cwd or paths" }, 400);
+      try {
+        const resolvedCwd = resolve(cwd);
+        execSync(`git add -- ${paths.map((p) => `"${p}"`).join(" ")}`, {
+          cwd: resolvedCwd,
+          encoding: "utf-8",
+          shell: true,
+        });
+        return jsonResponse(res, { ok: true });
+      } catch (err) {
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
+
+    // POST /api/git-unstage  { cwd, paths }
+    if (url.pathname === "/api/git-unstage" && req.method === "POST") {
+      const { cwd, paths } = await readBody(req);
+      if (!cwd || !paths) return jsonResponse(res, { error: "Missing cwd or paths" }, 400);
+      try {
+        const resolvedCwd = resolve(cwd);
+        execSync(`git reset HEAD -- ${paths.map((p) => `"${p}"`).join(" ")}`, {
+          cwd: resolvedCwd,
+          encoding: "utf-8",
+          shell: true,
+        });
+        return jsonResponse(res, { ok: true });
+      } catch (err) {
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
+
+    // POST /api/git-commit  { cwd, message }
+    if (url.pathname === "/api/git-commit" && req.method === "POST") {
+      const { cwd, message } = await readBody(req);
+      if (!cwd || !message) return jsonResponse(res, { error: "Missing cwd or message" }, 400);
+      try {
+        const resolvedCwd = resolve(cwd);
+        execSync(`git commit -m ${JSON.stringify(message)}`, {
+          cwd: resolvedCwd,
+          encoding: "utf-8",
+          shell: true,
+        });
+        const hash = execSync("git rev-parse --short HEAD", {
+          cwd: resolvedCwd,
+          encoding: "utf-8",
+        }).trim();
+        return jsonResponse(res, { hash });
+      } catch (err) {
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
+
+    // POST /api/git-push  { cwd }
+    if (url.pathname === "/api/git-push" && req.method === "POST") {
+      const { cwd } = await readBody(req);
+      if (!cwd) return jsonResponse(res, { error: "Missing cwd" }, 400);
+      try {
+        const resolvedCwd = resolve(cwd);
+        const stdout = execSync("git push 2>&1", {
+          cwd: resolvedCwd,
+          encoding: "utf-8",
+          shell: true,
+        });
+        return jsonResponse(res, { success: true, message: stdout.trim() });
+      } catch (err) {
+        return jsonResponse(res, { success: false, message: err.stderr || err.message });
+      }
+    }
+
+    // POST /api/git-pull  { cwd }
+    if (url.pathname === "/api/git-pull" && req.method === "POST") {
+      const { cwd } = await readBody(req);
+      if (!cwd) return jsonResponse(res, { error: "Missing cwd" }, 400);
+      try {
+        const resolvedCwd = resolve(cwd);
+        const stdout = execSync("git pull 2>&1", {
+          cwd: resolvedCwd,
+          encoding: "utf-8",
+          shell: true,
+        });
+        return jsonResponse(res, { success: true, message: stdout.trim() });
+      } catch (err) {
+        return jsonResponse(res, { success: false, message: err.stderr || err.message });
+      }
+    }
+
+    // POST /api/git-discard  { cwd, paths }
+    if (url.pathname === "/api/git-discard" && req.method === "POST") {
+      const { cwd, paths } = await readBody(req);
+      if (!cwd || !paths) return jsonResponse(res, { error: "Missing cwd or paths" }, 400);
+      try {
+        const resolvedCwd = resolve(cwd);
+        execSync(`git checkout -- ${paths.map((p) => `"${p}"`).join(" ")}`, {
+          cwd: resolvedCwd,
+          encoding: "utf-8",
+          shell: true,
+        });
+        return jsonResponse(res, { ok: true });
+      } catch (err) {
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
+
     jsonResponse(res, { error: "Not found" }, 404);
   } catch (err) {
     jsonResponse(res, { error: err.message }, 500);

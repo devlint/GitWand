@@ -479,6 +479,132 @@ fn list_dir(path: Option<String>) -> Result<ListDirResult, String> {
     })
 }
 
+// ─── Git stage / unstage ─────────────────────────────────────
+
+#[tauri::command]
+fn git_stage(cwd: String, paths: Vec<String>) -> Result<(), String> {
+    let mut cmd = std::process::Command::new("git");
+    cmd.arg("add").arg("--").current_dir(&cwd);
+    for p in &paths {
+        cmd.arg(p);
+    }
+    let output = cmd.output().map_err(|e| format!("Failed to run git add: {}", e))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("git add failed: {}", stderr));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn git_unstage(cwd: String, paths: Vec<String>) -> Result<(), String> {
+    let mut cmd = std::process::Command::new("git");
+    cmd.arg("reset").arg("HEAD").arg("--").current_dir(&cwd);
+    for p in &paths {
+        cmd.arg(p);
+    }
+    let output = cmd.output().map_err(|e| format!("Failed to run git reset: {}", e))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("git reset failed: {}", stderr));
+    }
+    Ok(())
+}
+
+// ─── Git commit ──────────────────────────────────────────────
+
+#[tauri::command]
+fn git_commit(cwd: String, message: String) -> Result<String, String> {
+    let output = std::process::Command::new("git")
+        .args(["commit", "-m", &message])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("Failed to run git commit: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("git commit failed: {}", stderr));
+    }
+
+    // Return the new commit hash
+    let log_output = std::process::Command::new("git")
+        .args(["rev-parse", "--short", "HEAD"])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("Failed to get commit hash: {}", e))?;
+
+    let hash = String::from_utf8_lossy(&log_output.stdout).trim().to_string();
+    Ok(hash)
+}
+
+// ─── Git push / pull ─────────────────────────────────────────
+
+#[derive(Serialize)]
+struct GitPushPullResult {
+    success: bool,
+    message: String,
+}
+
+#[tauri::command]
+fn git_push(cwd: String) -> Result<GitPushPullResult, String> {
+    let output = std::process::Command::new("git")
+        .args(["push"])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("Failed to run git push: {}", e))?;
+
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+
+    Ok(GitPushPullResult {
+        success: output.status.success(),
+        message: if output.status.success() {
+            stdout.trim().to_string()
+        } else {
+            stderr.trim().to_string()
+        },
+    })
+}
+
+#[tauri::command]
+fn git_pull(cwd: String) -> Result<GitPushPullResult, String> {
+    let output = std::process::Command::new("git")
+        .args(["pull"])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("Failed to run git pull: {}", e))?;
+
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+
+    Ok(GitPushPullResult {
+        success: output.status.success(),
+        message: if output.status.success() {
+            stdout.trim().to_string()
+        } else {
+            stderr.trim().to_string()
+        },
+    })
+}
+
+// ─── Git discard changes ─────────────────────────────────────
+
+#[tauri::command]
+fn git_discard(cwd: String, paths: Vec<String>) -> Result<(), String> {
+    // Restore tracked files
+    let mut cmd = std::process::Command::new("git");
+    cmd.arg("checkout").arg("--").current_dir(&cwd);
+    for p in &paths {
+        cmd.arg(p);
+    }
+    let output = cmd.output().map_err(|e| format!("Failed to run git checkout: {}", e))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("git checkout failed: {}", stderr));
+    }
+    Ok(())
+}
+
 // ─── Tauri entry point ─────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -495,6 +621,12 @@ pub fn run() {
             git_status,
             git_diff,
             git_log,
+            git_stage,
+            git_unstage,
+            git_commit,
+            git_push,
+            git_pull,
+            git_discard,
         ])
         .run(tauri::generate_context!())
         .expect("error while running GitWand");

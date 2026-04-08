@@ -59,10 +59,25 @@ const {
   isClean,
   allFiles: repoFiles,
   repoStats,
+  commitMessage,
+  canCommit,
+  isCommitting,
+  canPush,
+  canPull,
+  isPushing,
+  isPulling,
   openRepo,
   refresh: repoRefresh,
   selectFile: repoSelectFile,
   loadLog,
+  stageFiles,
+  stageAll,
+  unstageFiles,
+  unstageAll,
+  commit: doCommit,
+  push: doPush,
+  pull: doPull,
+  discardFiles,
 } = useGitRepo();
 
 // ─── Computed state ─────────────────────────────────────
@@ -213,6 +228,10 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
       :branch-display="branchDisplay"
       :repo-stats="repoStats"
       :has-repo="hasRepo"
+      :can-push="canPush"
+      :can-pull="canPull"
+      :is-pushing="isPushing"
+      :is-pulling="isPulling"
       @open-folder="handleOpenFolder"
       @resolve-all="resolveAll"
       @save-all="saveAllFiles"
@@ -220,6 +239,8 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
       @redo="redo"
       @toggle-theme="toggleTheme"
       @switch-mode="handleSwitchMode"
+      @push="doPush"
+      @pull="doPull"
     />
 
     <div class="app-body">
@@ -272,8 +293,17 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
             :selected-file="repoSelectedFile"
             :view-mode="viewMode"
             :repo-stats="repoStats"
+            :commit-message="commitMessage"
+            :can-commit="canCommit"
+            :is-committing="isCommitting"
             @select="onRepoFileSelect"
             @change-view="onViewModeChange"
+            @stage-file="(path) => stageFiles([path])"
+            @unstage-file="(path) => unstageFiles([path])"
+            @stage-all="stageAll"
+            @unstage-all="unstageAll"
+            @commit="doCommit"
+            @update:commit-message="(val) => commitMessage = val"
           />
         </aside>
 
