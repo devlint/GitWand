@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import type { ConflictFile } from "../composables/useGitWand";
+import { useI18n } from "../composables/useI18n";
+
+const { t } = useI18n();
 
 const props = defineProps<{
   files: ConflictFile[];
@@ -30,17 +33,17 @@ function statusIcon(file: ConflictFile): string {
 
 function statusLabel(file: ConflictFile): string {
   const { totalConflicts, autoResolved } = file.result.stats;
-  if (totalConflicts === 0) return "Aucun conflit";
-  if (autoResolved === totalConflicts) return `${autoResolved} auto-résolvable${autoResolved > 1 ? "s" : ""}`;
-  if (autoResolved > 0) return `${autoResolved}/${totalConflicts} auto`;
-  return `${totalConflicts} conflit${totalConflicts > 1 ? "s" : ""}`;
+  if (totalConflicts === 0) return t('fileList.noConflict');
+  if (autoResolved === totalConflicts) return autoResolved > 1 ? t('fileList.autoResolvablePlural', autoResolved) : t('fileList.autoResolvable', autoResolved);
+  if (autoResolved > 0) return t('fileList.autoPartial', autoResolved, totalConflicts);
+  return totalConflicts > 1 ? t('fileList.conflictCountPlural', totalConflicts) : t('fileList.conflictCount', totalConflicts);
 }
 </script>
 
 <template>
-  <nav class="file-list" aria-label="Fichiers en conflit">
+  <nav class="file-list" :aria-label="t('fileList.title')">
     <div class="file-list-header">
-      <span class="file-list-title">Fichiers</span>
+      <span class="file-list-title">{{ t('fileList.title') }}</span>
       <span class="file-list-count">{{ files.length }}</span>
     </div>
 

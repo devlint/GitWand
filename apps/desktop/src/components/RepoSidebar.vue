@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import type { RepoFileEntry, ViewMode } from "../composables/useGitRepo";
+import { useI18n } from "../composables/useI18n";
 
 const props = defineProps<{
   files: RepoFileEntry[];
@@ -23,6 +24,8 @@ const emit = defineEmits<{
   "update:commitMessage": [value: string];
 }>();
 
+const { t } = useI18n();
+
 const sections = computed(() => {
   const map: Record<string, RepoFileEntry[]> = {
     conflicted: [],
@@ -36,12 +39,12 @@ const sections = computed(() => {
   return map;
 });
 
-const sectionMeta: Record<string, { label: string; color: string; icon: string }> = {
-  conflicted: { label: "Conflits", color: "var(--color-danger)", icon: "!" },
-  staged: { label: "Staged", color: "var(--color-success)", icon: "+" },
-  unstaged: { label: "Modifi\u00e9s", color: "var(--color-warning)", icon: "~" },
-  untracked: { label: "Non suivis", color: "var(--color-text-muted)", icon: "?" },
-};
+const sectionMeta = computed((): Record<string, { label: string; color: string; icon: string }> => ({
+  conflicted: { label: t('sidebar.sectionConflicts'), color: "var(--color-danger)", icon: "!" },
+  staged: { label: t('sidebar.sectionStaged'), color: "var(--color-success)", icon: "+" },
+  unstaged: { label: t('sidebar.sectionModified'), color: "var(--color-warning)", icon: "~" },
+  untracked: { label: t('sidebar.sectionUntracked'), color: "var(--color-text-muted)", icon: "?" },
+}));
 
 function statusBadge(status: string): string {
   const map: Record<string, string> = { added: "A", modified: "M", deleted: "D", renamed: "R" };
@@ -92,7 +95,7 @@ function onCommitKeydown(e: KeyboardEvent) {
 </script>
 
 <template>
-  <nav class="repo-sidebar" aria-label="Fichiers modifi\u00e9s">
+  <nav class="repo-sidebar" :aria-label="t('sidebar.tabChanges')">
     <!-- View mode tabs -->
     <div class="view-tabs">
       <button
@@ -100,7 +103,7 @@ function onCommitKeydown(e: KeyboardEvent) {
         :class="{ 'view-tab--active': viewMode === 'changes' }"
         @click="emit('changeView', 'changes')"
       >
-        Changements
+        {{ t('sidebar.tabChanges') }}
         <span class="tab-badge" v-if="totalChanges > 0">{{ totalChanges }}</span>
       </button>
       <button
@@ -108,14 +111,14 @@ function onCommitKeydown(e: KeyboardEvent) {
         :class="{ 'view-tab--active': viewMode === 'branches' }"
         @click="emit('changeView', 'branches')"
       >
-        Branches
+        {{ t('sidebar.tabBranches') }}
       </button>
       <button
         class="view-tab"
         :class="{ 'view-tab--active': viewMode === 'history' }"
         @click="emit('changeView', 'history')"
       >
-        Log
+        {{ t('sidebar.tabLog') }}
       </button>
     </div>
 
@@ -137,13 +140,13 @@ function onCommitKeydown(e: KeyboardEvent) {
               v-if="sectionKey === 'unstaged' || sectionKey === 'untracked'"
               class="section-action"
               @click="emit('stageAll')"
-              title="Tout stager"
+              :title="t('sidebar.stageAll')"
             >+</button>
             <button
               v-if="sectionKey === 'staged'"
               class="section-action"
               @click="emit('unstageAll')"
-              title="Tout unstager"
+              :title="t('sidebar.unstageAll')"
             >-</button>
           </div>
 
@@ -176,13 +179,13 @@ function onCommitKeydown(e: KeyboardEvent) {
                 v-if="file.section === 'unstaged' || file.section === 'untracked'"
                 class="file-action"
                 @click="onStageClick($event, file.path)"
-                title="Stager"
+                :title="t('sidebar.stage')"
               >+</button>
               <button
                 v-if="file.section === 'staged'"
                 class="file-action"
                 @click="onUnstageClick($event, file.path)"
-                title="Unstager"
+                :title="t('sidebar.unstage')"
               >-</button>
             </li>
           </ul>
@@ -195,7 +198,7 @@ function onCommitKeydown(e: KeyboardEvent) {
           <path d="M9 12l2 2 4-4" stroke="var(--color-success)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
           <circle cx="12" cy="12" r="9" stroke="var(--color-success)" stroke-width="1.5" opacity="0.4"/>
         </svg>
-        <span class="empty-text">Working tree clean</span>
+        <span class="empty-text">{{ t('sidebar.cleanTree') }}</span>
       </div>
 
       <!-- Commit panel -->
@@ -205,7 +208,7 @@ function onCommitKeydown(e: KeyboardEvent) {
           :value="commitMessage"
           @input="onCommitMessageInput"
           @keydown="onCommitKeydown"
-          placeholder="Message du commit..."
+          :placeholder="t('sidebar.commitPlaceholder')"
           rows="3"
         ></textarea>
         <button
@@ -221,9 +224,9 @@ function onCommitKeydown(e: KeyboardEvent) {
           <svg v-else width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <path d="M13.5 3.5l-7 7L3 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
-          <span>{{ isCommitting ? 'Commit...' : `Commit (${repoStats.staged})` }}</span>
+          <span>{{ isCommitting ? t('sidebar.commitButtonLoading') : t('sidebar.commitButton', repoStats.staged) }}</span>
         </button>
-        <span class="commit-hint muted">Ctrl+Enter pour commiter</span>
+        <span class="commit-hint muted">{{ t('sidebar.commitHint') }}</span>
       </div>
     </div>
   </nav>

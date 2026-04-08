@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import type { GitDiff } from "../utils/backend";
+import { useI18n } from "../composables/useI18n";
+
+const { t } = useI18n();
 
 const props = defineProps<{
   diffs: GitDiff[];
@@ -41,7 +44,7 @@ const totalStats = computed(() => {
     <div class="cdv-header" v-if="commitHash">
       <span class="cdv-hash mono">{{ commitHash?.substring(0, 8) }}</span>
       <span class="cdv-summary">
-        {{ totalStats.files }} {{ totalStats.files === 1 ? 'fichier' : 'fichiers' }}
+        {{ totalStats.files }} {{ totalStats.files === 1 ? t('header.file') : t('header.files') }}
       </span>
       <span class="cdv-stat cdv-stat--add" v-if="totalStats.adds > 0">+{{ totalStats.adds }}</span>
       <span class="cdv-stat cdv-stat--del" v-if="totalStats.dels > 0">-{{ totalStats.dels }}</span>
@@ -98,13 +101,13 @@ const totalStats = computed(() => {
 
     <!-- Empty state -->
     <div class="cdv-empty" v-else-if="commitHash">
-      <span class="muted">Pas de diff pour ce commit</span>
+      <span class="muted">{{ t('log.noDiffForCommit') }}</span>
     </div>
     <div class="cdv-empty" v-else>
       <svg width="40" height="40" viewBox="0 0 24 24" fill="none" aria-hidden="true">
         <path d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5" stroke="var(--color-text-muted)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.4"/>
       </svg>
-      <span class="muted">S&eacute;lectionnez un commit pour voir les changements</span>
+      <span class="muted">{{ t('log.selectCommit') }}</span>
     </div>
   </div>
 </template>

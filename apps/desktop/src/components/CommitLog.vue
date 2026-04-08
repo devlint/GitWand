@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import type { GitLogEntry } from "../utils/backend";
+import { useI18n } from "../composables/useI18n";
+const { t } = useI18n();
 
 const props = defineProps<{
   entries: GitLogEntry[];
@@ -20,11 +22,11 @@ function relativeDate(isoDate: string): string {
   const diffHour = Math.floor(diffMin / 60);
   const diffDay = Math.floor(diffHour / 24);
 
-  if (diffMin < 1) return "maintenant";
-  if (diffMin < 60) return `il y a ${diffMin} min`;
-  if (diffHour < 24) return `il y a ${diffHour}h`;
-  if (diffDay < 7) return `il y a ${diffDay}j`;
-  if (diffDay < 30) return `il y a ${Math.floor(diffDay / 7)} sem.`;
+  if (diffMin < 1) return t('date.now');
+  if (diffMin < 60) return t('date.minutesAgo', diffMin);
+  if (diffHour < 24) return t('date.hoursAgo', diffHour);
+  if (diffDay < 7) return t('date.daysAgo', diffDay);
+  if (diffDay < 30) return t('date.weeksAgo', Math.floor(diffDay / 7));
   return date.toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
 }
 
@@ -51,7 +53,7 @@ function authorColor(name: string): string {
   <div class="commit-log">
     <div class="log-loading" v-if="loading">
       <div class="loading-spinner"></div>
-      <span class="muted">Chargement...</span>
+      <span class="muted">{{ t('common.loading') }}</span>
     </div>
 
     <ul class="log-list" v-else-if="entries.length > 0">
@@ -81,7 +83,7 @@ function authorColor(name: string): string {
     </ul>
 
     <div class="log-empty" v-else>
-      <span class="muted">Aucun commit</span>
+      <span class="muted">{{ t('log.noCommit') }}</span>
     </div>
   </div>
 </template>

@@ -42,5 +42,9 @@ export function useTheme() {
     theme.value = theme.value === "dark" ? "light" : "dark";
   }
 
-  return { theme, toggle };
+  function setTheme(t: Theme) {
+    theme.value = t;
+  }
+
+  return { theme, toggle, setTheme };
 }

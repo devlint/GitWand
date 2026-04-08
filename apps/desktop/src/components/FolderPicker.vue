@@ -2,8 +2,10 @@
 import { ref, computed, onMounted, nextTick } from "vue";
 import { listDir as backendListDir, type DirEntry } from "../utils/backend";
 import { useFolderHistory } from "../composables/useFolderHistory";
+import { useI18n } from "../composables/useI18n";
 
 const { history, togglePin, removeFromHistory } = useFolderHistory();
+const { t } = useI18n();
 
 const emit = defineEmits<{
   (e: "select", path: string): void;
@@ -83,11 +85,11 @@ onUnmounted(() => {
 
 <template>
   <div class="folder-picker-overlay" @click.self="$emit('cancel')">
-    <div class="folder-picker" role="dialog" aria-label="Sélection de dossier">
+    <div class="folder-picker" role="dialog" :aria-label="t('folderPicker.title')">
       <!-- Header -->
       <div class="fp-header">
-        <h2 class="fp-title">Ouvrir un dossier Git</h2>
-        <button class="fp-close" @click="$emit('cancel')" aria-label="Fermer">
+        <h2 class="fp-title">{{ t('folderPicker.title') }}</h2>
+        <button class="fp-close" @click="$emit('cancel')" :aria-label="t('common.close')">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
             <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/>
           </svg>
@@ -100,8 +102,8 @@ onUnmounted(() => {
           class="fp-nav-btn"
           :disabled="!parentPath"
           @click="goUp"
-          title="Dossier parent"
-          aria-label="Dossier parent"
+          :title="t('folderPicker.parentDir')"
+          :aria-label="t('folderPicker.parentDir')"
         >
           <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
             <path d="M8 4l-5 5h3v4h4V9h3L8 4z"/>
@@ -122,7 +124,7 @@ onUnmounted(() => {
           class="fp-path-input"
           v-model="pathInput"
           @keydown.enter="onInputEnter"
-          placeholder="/chemin/vers/repo"
+          :placeholder="t('folderPicker.pathPlaceholder')"
           spellcheck="false"
         />
       </div>
@@ -130,7 +132,7 @@ onUnmounted(() => {
       <!-- Recent folders / Favorites -->
       <div v-if="history.length > 0" class="fp-history">
         <div class="fp-history-header">
-          <span class="fp-history-title">Récents & Favoris</span>
+          <span class="fp-history-title">{{ t('folderPicker.recentTitle') }}</span>
         </div>
         <ul class="fp-history-list">
           <li
@@ -143,8 +145,8 @@ onUnmounted(() => {
               class="fp-history-pin"
               :class="{ 'fp-history-pin--active': entry.pinned }"
               @click.stop="togglePin(entry.path)"
-              :title="entry.pinned ? 'Retirer des favoris' : 'Ajouter aux favoris'"
-              :aria-label="entry.pinned ? 'Retirer des favoris' : 'Ajouter aux favoris'"
+              :title="entry.pinned ? t('folderPicker.unpin') : t('folderPicker.pin')"
+              :aria-label="entry.pinned ? t('folderPicker.unpin') : t('folderPicker.pin')"
             >
               <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
                 <path
@@ -167,8 +169,8 @@ onUnmounted(() => {
             <button
               class="fp-history-remove"
               @click.stop="removeFromHistory(entry.path)"
-              title="Supprimer de l'historique"
-              aria-label="Supprimer"
+              :title="t('folderPicker.remove')"
+              :aria-label="t('common.delete')"
             >
               <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor">
                 <path d="M2.146 2.146a.5.5 0 01.708 0L5 4.293l2.146-2.147a.5.5 0 01.708.708L5.707 5l2.147 2.146a.5.5 0 01-.708.708L5 5.707 2.854 7.854a.5.5 0 01-.708-.708L4.293 5 2.146 2.854a.5.5 0 010-.708z"/>
@@ -180,7 +182,7 @@ onUnmounted(() => {
 
       <!-- Directory listing -->
       <div class="fp-list-container">
-        <div v-if="loadingDir" class="fp-loading">Chargement...</div>
+        <div v-if="loadingDir" class="fp-loading">{{ t('common.loading') }}</div>
         <div v-else-if="errorMsg" class="fp-error">{{ errorMsg }}</div>
         <div v-else-if="dirs.length === 0" class="fp-empty">Aucun sous-dossier</div>
         <ul v-else class="fp-list" role="listbox">
@@ -216,7 +218,7 @@ onUnmounted(() => {
       <div class="fp-footer">
         <span class="fp-current-path" :title="currentPath">{{ currentPath }}</span>
         <div class="fp-actions">
-          <button class="fp-btn fp-btn--cancel" @click="$emit('cancel')">Annuler</button>
+          <button class="fp-btn fp-btn--cancel" @click="$emit('cancel')">{{ t('common.cancel') }}</button>
           <button class="fp-btn fp-btn--select" @click="selectCurrent">
             Sélectionner ce dossier
           </button>

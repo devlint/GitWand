@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import type { GlobalStats } from "../composables/useGitWand";
 import type { Theme } from "../composables/useTheme";
+import { useI18n } from "../composables/useI18n";
+
+const { t } = useI18n();
 
 const props = defineProps<{
   stats: GlobalStats;
@@ -29,6 +32,7 @@ const emit = defineEmits<{
   switchMode: [mode: "merge" | "repo"];
   push: [];
   pull: [];
+  openSettings: [];
 }>();
 
 const isRepo = () => props.appMode === "repo";
@@ -50,20 +54,20 @@ const isMerge = () => props.appMode === "merge";
           class="mode-btn"
           :class="{ 'mode-btn--active': appMode === 'repo' }"
           @click="emit('switchMode', 'repo')"
-          title="Vue repo"
+          :title="t('header.modeRepo')"
         >
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <circle cx="8" cy="3" r="2" stroke="currentColor" stroke-width="1.5"/>
             <circle cx="8" cy="13" r="2" stroke="currentColor" stroke-width="1.5"/>
             <path d="M8 5v6" stroke="currentColor" stroke-width="1.5"/>
           </svg>
-          Repo
+          {{ t('header.modeRepo') }}
         </button>
         <button
           class="mode-btn"
           :class="{ 'mode-btn--active': appMode === 'merge' }"
           @click="emit('switchMode', 'merge')"
-          title="R\u00e9solution de conflits"
+          :title="t('header.modeMerge')"
         >
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <circle cx="4" cy="3" r="2" stroke="currentColor" stroke-width="1.5"/>
@@ -71,7 +75,7 @@ const isMerge = () => props.appMode === "merge";
             <circle cx="8" cy="13" r="2" stroke="currentColor" stroke-width="1.5"/>
             <path d="M4 5v2c0 2 4 4 4 4M12 5v2c0 2-4 4-4 4" stroke="currentColor" stroke-width="1.5"/>
           </svg>
-          Merge
+          {{ t('header.modeMerge') }}
         </button>
       </div>
     </div>
@@ -91,19 +95,19 @@ const isMerge = () => props.appMode === "merge";
         <div class="repo-stat-group" v-if="repoStats.staged + repoStats.unstaged + repoStats.untracked + repoStats.conflicted > 0">
           <span class="repo-stat" v-if="repoStats.staged > 0">
             <span class="repo-stat-dot" style="background: var(--color-success)"></span>
-            {{ repoStats.staged }} staged
+            {{ repoStats.staged }} {{ t('header.staged') }}
           </span>
           <span class="repo-stat" v-if="repoStats.unstaged > 0">
             <span class="repo-stat-dot" style="background: var(--color-warning)"></span>
-            {{ repoStats.unstaged }} modifi\u00e9s
+            {{ repoStats.unstaged }} {{ t('header.modified') }}
           </span>
           <span class="repo-stat" v-if="repoStats.untracked > 0">
             <span class="repo-stat-dot" style="background: var(--color-text-muted)"></span>
-            {{ repoStats.untracked }} non suivis
+            {{ repoStats.untracked }} {{ t('header.untracked') }}
           </span>
           <span class="repo-stat" v-if="repoStats.conflicted > 0">
             <span class="repo-stat-dot" style="background: var(--color-danger)"></span>
-            {{ repoStats.conflicted }} conflits
+            {{ repoStats.conflicted }} {{ t('header.conflicts') }}
           </span>
         </div>
       </template>
@@ -113,21 +117,21 @@ const isMerge = () => props.appMode === "merge";
         <div class="stat-group">
           <span class="stat">
             <span class="stat-value">{{ stats.totalFiles }}</span>
-            <span class="stat-label">{{ stats.totalFiles === 1 ? 'fichier' : 'fichiers' }}</span>
+            <span class="stat-label">{{ stats.totalFiles === 1 ? t('header.file') : t('header.files') }}</span>
           </span>
           <span class="stat-separator" aria-hidden="true">/</span>
           <span class="stat">
             <span class="stat-value">{{ stats.totalConflicts }}</span>
-            <span class="stat-label">{{ stats.totalConflicts === 1 ? 'conflit' : 'conflits' }}</span>
+            <span class="stat-label">{{ stats.totalConflicts === 1 ? t('header.conflict') : t('header.conflicts') }}</span>
           </span>
           <span class="stat-separator" aria-hidden="true">/</span>
           <span class="stat stat--success" v-if="stats.autoResolved > 0">
             <span class="stat-value">{{ stats.autoResolved }}</span>
-            <span class="stat-label">auto</span>
+            <span class="stat-label">{{ t('header.auto') }}</span>
           </span>
           <span class="stat stat--warning" v-if="stats.remaining > 0">
             <span class="stat-value">{{ stats.remaining }}</span>
-            <span class="stat-label">{{ stats.remaining === 1 ? 'restant' : 'restants' }}</span>
+            <span class="stat-label">{{ stats.remaining === 1 ? t('header.remaining') : t('header.remainingPlural') }}</span>
           </span>
         </div>
       </template>
@@ -138,8 +142,8 @@ const isMerge = () => props.appMode === "merge";
       <button
         class="btn btn--icon theme-toggle"
         @click="emit('toggleTheme')"
-        :aria-label="theme === 'dark' ? 'Passer en mode clair' : 'Passer en mode sombre'"
-        :title="theme === 'dark' ? 'Mode clair' : 'Mode sombre'"
+        :aria-label="theme === 'dark' ? t('header.themeLight') : t('header.themeDark')"
+        :title="theme === 'dark' ? t('header.themeLightLabel') : t('header.themeDarkLabel')"
       >
         <svg v-if="theme === 'dark'" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
           <circle cx="8" cy="8" r="3.5" stroke="currentColor" stroke-width="1.5"/>
@@ -150,6 +154,19 @@ const isMerge = () => props.appMode === "merge";
         </svg>
       </button>
 
+      <!-- Settings -->
+      <button
+        class="btn btn--icon"
+        @click="emit('openSettings')"
+        :aria-label="t('settings.title')"
+        :title="t('settings.title')"
+      >
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M6.5 1.5h3l.4 1.6a5.5 5.5 0 011.3.7l1.5-.6 1.5 2.6-1.1 1a5.5 5.5 0 010 1.4l1.1 1-1.5 2.6-1.5-.6a5.5 5.5 0 01-1.3.7l-.4 1.6h-3l-.4-1.6a5.5 5.5 0 01-1.3-.7l-1.5.6-1.5-2.6 1.1-1a5.5 5.5 0 010-1.4l-1.1-1 1.5-2.6 1.5.6a5.5 5.5 0 011.3-.7l.4-1.6z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
+          <circle cx="8" cy="8" r="2" stroke="currentColor" stroke-width="1.2"/>
+        </svg>
+      </button>
+
       <!-- Undo/Redo (merge mode only) -->
       <div class="undo-redo" v-if="appMode === 'merge' && hasFiles">
         <button
@@ -157,8 +174,8 @@ const isMerge = () => props.appMode === "merge";
           :class="{ 'btn--disabled': !canUndo }"
           :disabled="!canUndo"
           @click="emit('undo')"
-          aria-label="Annuler (Ctrl+Z)"
-          title="Annuler (Ctrl+Z)"
+          :aria-label="t('header.undo')"
+          :title="t('header.undo')"
         >
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <path d="M3 8h8a3 3 0 010 6H8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -170,8 +187,8 @@ const isMerge = () => props.appMode === "merge";
           :class="{ 'btn--disabled': !canRedo }"
           :disabled="!canRedo"
           @click="emit('redo')"
-          aria-label="R\u00e9tablir (Ctrl+Shift+Z)"
-          title="R\u00e9tablir (Ctrl+Shift+Z)"
+          :aria-label="t('header.redo')"
+          :title="t('header.redo')"
         >
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <path d="M13 8H5a3 3 0 000 6h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -183,12 +200,12 @@ const isMerge = () => props.appMode === "merge";
       <button
         class="btn btn--secondary"
         @click="emit('openFolder')"
-        aria-label="Ouvrir un dossier"
+        :aria-label="t('header.openFolder')"
       >
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
           <path d="M2 3.5A1.5 1.5 0 013.5 2H6l1.5 2H12.5A1.5 1.5 0 0114 5.5v7a1.5 1.5 0 01-1.5 1.5h-9A1.5 1.5 0 012 12.5v-9z" stroke="currentColor" stroke-width="1.5" fill="none"/>
         </svg>
-        <span>Ouvrir</span>
+        <span>{{ t('header.open') }}</span>
       </button>
 
       <!-- Repo mode: push/pull -->
@@ -207,7 +224,7 @@ const isMerge = () => props.appMode === "merge";
           <svg v-else width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <path d="M8 3v10M5 10l3 3 3-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
-          <span>Pull</span>
+          <span>{{ t('header.pull') }}</span>
         </button>
         <button
           class="btn btn--primary"
@@ -223,7 +240,7 @@ const isMerge = () => props.appMode === "merge";
           <svg v-else width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <path d="M8 13V3M5 6l3-3 3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
-          <span>Push</span>
+          <span>{{ t('header.push') }}</span>
         </button>
       </template>
 
@@ -232,26 +249,26 @@ const isMerge = () => props.appMode === "merge";
         v-if="appMode === 'merge' && hasFiles && stats.autoResolved > 0"
         class="btn btn--primary"
         @click="emit('resolveAll')"
-        aria-label="R\u00e9soudre tous les conflits automatiques"
+        :aria-label="t('header.resolveAll')"
       >
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
           <path d="M8 1L9.5 5.5L14 7L9.5 8.5L8 13L6.5 8.5L2 7L6.5 5.5L8 1Z" fill="currentColor"/>
         </svg>
-        <span>Tout r\u00e9soudre</span>
+        <span>{{ t('header.resolveAll') }}</span>
       </button>
       <button
         v-if="canSave"
         class="btn btn--save"
         @click="emit('saveAll')"
-        aria-label="Sauvegarder tous les fichiers (Ctrl+S)"
-        title="Sauvegarder (Ctrl+S)"
+        :aria-label="t('header.saveShortcut')"
+        :title="t('header.saveShortcut')"
       >
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
           <path d="M12.5 14h-9A1.5 1.5 0 012 12.5v-9A1.5 1.5 0 013.5 2H10l4 4v6.5a1.5 1.5 0 01-1.5 1.5z" stroke="currentColor" stroke-width="1.5" fill="none"/>
           <path d="M10 2v4h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
           <rect x="5" y="9" width="6" height="3" rx="0.5" stroke="currentColor" stroke-width="1.2" fill="none"/>
         </svg>
-        <span>Sauvegarder</span>
+        <span>{{ t('header.save') }}</span>
       </button>
     </div>
   </header>

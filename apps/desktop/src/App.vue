@@ -10,9 +10,13 @@ import DiffViewer from "./components/DiffViewer.vue";
 import CommitLog from "./components/CommitLog.vue";
 import BranchPanel from "./components/BranchPanel.vue";
 import CommitDiffViewer from "./components/CommitDiffViewer.vue";
+import SettingsPanel from "./components/SettingsPanel.vue";
 import { useGitWand } from "./composables/useGitWand";
 import { useGitRepo } from "./composables/useGitRepo";
 import { useTheme } from "./composables/useTheme";
+import { useI18n } from "./composables/useI18n";
+
+const { t } = useI18n();
 import { isTauri, registerBrowserFolderPicker, pickFolder } from "./utils/backend";
 
 const { theme, toggle: toggleTheme } = useTheme();
@@ -176,6 +180,9 @@ function onViewModeChange(mode: "changes" | "merge" | "history" | "branches") {
   viewMode.value = mode;
 }
 
+// ─── Settings panel ─────────────────────────────────────
+const showSettings = ref(false);
+
 // ─── Folder picker (browser mode) ───────────────────────
 const showFolderPicker = ref(false);
 let folderPickerResolve: ((path: string | null) => void) | null = null;
@@ -253,6 +260,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
       @switch-mode="handleSwitchMode"
       @push="doPush"
       @pull="doPull"
+      @open-settings="showSettings = true"
     />
 
     <div class="app-body">
@@ -269,7 +277,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
         <main class="main">
           <div v-if="mergeLoading" class="loading-overlay">
             <div class="loading-spinner"></div>
-            <span class="loading-text">Analyse des conflits...</span>
+            <span class="loading-text">{{ t('merge.analysing') }}</span>
           </div>
 
           <div v-if="mergeError" class="error-banner" role="alert">
@@ -279,7 +287,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
               <circle cx="9" cy="12" r="1" fill="currentColor"/>
             </svg>
             <span class="error-text">{{ mergeError }}</span>
-            <button class="error-close" @click="mergeError = null" aria-label="Fermer">
+            <button class="error-close" @click="mergeError = null" :aria-label="t('common.close')">
               <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
                 <path d="M3.646 3.646a.5.5 0 01.708 0L7 6.293l2.646-2.647a.5.5 0 01.708.708L7.707 7l2.647 2.646a.5.5 0 01-.708.708L7 7.707l-2.646 2.647a.5.5 0 01-.708-.708L6.293 7 3.646 4.354a.5.5 0 010-.708z"/>
               </svg>
@@ -322,7 +330,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
         <main class="main">
           <div v-if="repoLoading" class="loading-overlay">
             <div class="loading-spinner"></div>
-            <span class="loading-text">Chargement du repo...</span>
+            <span class="loading-text">{{ t('merge.loadingRepo') }}</span>
           </div>
 
           <div v-if="repoError" class="error-banner" role="alert">
@@ -332,7 +340,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
               <circle cx="9" cy="12" r="1" fill="currentColor"/>
             </svg>
             <span class="error-text">{{ repoError }}</span>
-            <button class="error-close" @click="repoError = null" aria-label="Fermer">
+            <button class="error-close" @click="repoError = null" :aria-label="t('common.close')">
               <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
                 <path d="M3.646 3.646a.5.5 0 01.708 0L7 6.293l2.646-2.647a.5.5 0 01.708.708L7.707 7l2.647 2.646a.5.5 0 01-.708.708L7 7.707l-2.646 2.647a.5.5 0 01-.708-.708L6.293 7 3.646 4.354a.5.5 0 010-.708z"/>
               </svg>
@@ -393,6 +401,12 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
       v-if="showFolderPicker"
       @select="onFolderSelected"
       @cancel="onFolderPickerCancel"
+    />
+
+    <!-- Settings panel -->
+    <SettingsPanel
+      v-if="showSettings"
+      @close="showSettings = false"
     />
   </div>
 </template>

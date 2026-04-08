@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import type { GitDiff, DiffHunk, DiffLine } from "../utils/backend";
+import { useI18n } from "../composables/useI18n";
+
+const { t } = useI18n();
 
 const props = defineProps<{
   diff: GitDiff | null;
@@ -90,8 +93,8 @@ function fileName(path: string): string {
         <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" stroke="var(--color-text-muted)" stroke-width="1.5" opacity="0.4"/>
         <polyline points="14,2 14,8 20,8" stroke="var(--color-text-muted)" stroke-width="1.5" opacity="0.4"/>
       </svg>
-      <span class="diff-empty-text">Pas de diff disponible pour ce fichier</span>
-      <span class="diff-empty-hint muted">Fichier nouveau ou binaire</span>
+      <span class="diff-empty-text">{{ t('diff.noDiff') }}</span>
+      <span class="diff-empty-hint muted">{{ t('diff.noDiffHint') }}</span>
     </div>
 
     <!-- No file selected -->
@@ -99,7 +102,7 @@ function fileName(path: string): string {
       <svg width="40" height="40" viewBox="0 0 24 24" fill="none" aria-hidden="true">
         <path d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5" stroke="var(--color-text-muted)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.4"/>
       </svg>
-      <span class="diff-empty-text">S&eacute;lectionnez un fichier pour voir le diff</span>
+      <span class="diff-empty-text">{{ t('diff.selectFile') }}</span>
     </div>
   </div>
 </template>

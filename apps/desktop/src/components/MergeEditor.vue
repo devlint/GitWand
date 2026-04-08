@@ -3,6 +3,9 @@ import { computed, ref, watch } from "vue";
 import type { ConflictFile } from "../composables/useGitWand";
 import type { ConflictHunk } from "@gitwand/core";
 import { highlightConflict } from "../utils/diffHighlight";
+import { useI18n } from "../composables/useI18n";
+
+const { t } = useI18n();
 
 const props = defineProps<{
   file: ConflictFile;
@@ -215,7 +218,7 @@ function highlightedHtml(hunkIndex: number, panel: "ours" | "base" | "theirs"): 
             <!-- ── Inline Edit Mode ─────────────────────── -->
             <div v-if="editingHunkIndex === seg.hunkIndex" class="hunk-edit">
               <div class="edit-header">
-                <span class="edit-label">Edition manuelle</span>
+                <span class="edit-label">{{ t('merge.customEdit') }}</span>
                 <span class="edit-hint muted">Modifiez le contenu puis validez</span>
               </div>
               <textarea
@@ -233,13 +236,13 @@ function highlightedHtml(hunkIndex: number, panel: "ours" | "base" | "theirs"): 
                   <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
                     <path d="M2 6l3 3 5-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                   </svg>
-                  Valider
+                  {{ t('common.confirm') }}
                 </button>
                 <button
                   class="action-btn"
                   @click="cancelEditing"
                 >
-                  Annuler
+                  {{ t('common.cancel') }}
                 </button>
               </div>
             </div>
@@ -290,7 +293,7 @@ function highlightedHtml(hunkIndex: number, panel: "ours" | "base" | "theirs"): 
                   <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
                     <path d="M2 6l3 3 5-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                   </svg>
-                  Accepter Ours
+                  {{ t('merge.keepOurs') }}
                 </button>
                 <button
                   class="action-btn action-btn--theirs"
@@ -300,7 +303,7 @@ function highlightedHtml(hunkIndex: number, panel: "ours" | "base" | "theirs"): 
                   <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
                     <path d="M2 6l3 3 5-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                   </svg>
-                  Accepter Theirs
+                  {{ t('merge.keepTheirs') }}
                 </button>
                 <button
                   class="action-btn action-btn--both"
@@ -310,7 +313,7 @@ function highlightedHtml(hunkIndex: number, panel: "ours" | "base" | "theirs"): 
                   <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
                     <path d="M1 4h10M1 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
                   </svg>
-                  Les deux
+                  {{ t('merge.keepBoth') }}
                 </button>
                 <button
                   class="action-btn action-btn--both-reverse"
@@ -331,7 +334,7 @@ function highlightedHtml(hunkIndex: number, panel: "ours" | "base" | "theirs"): 
                   <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
                     <path d="M8.5 1.5l2 2-7 7H1.5V8.5l7-7z" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
                   </svg>
-                  Editer
+                  {{ t('merge.customEdit') }}
                 </button>
               </div>
             </template>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useFolderHistory } from "../composables/useFolderHistory";
+import { useI18n } from "../composables/useI18n";
 
 const emit = defineEmits<{
   openFolder: [];
@@ -8,6 +9,7 @@ const emit = defineEmits<{
 }>();
 
 const { history } = useFolderHistory();
+const { t } = useI18n();
 
 const recentFolders = computed(() => history.value.slice(0, 5));
 
@@ -25,26 +27,23 @@ const isMac = navigator.platform.toUpperCase().includes("MAC");
       </svg>
     </div>
 
-    <h2 class="empty-title">Aucun fichier chargé</h2>
-    <p class="empty-desc muted">
-      Ouvrez un dossier contenant des conflits Git<br />
-      pour commencer la résolution automatique.
-    </p>
+    <h2 class="empty-title">{{ t('empty.title') }}</h2>
+    <p class="empty-desc muted">{{ t('empty.subtitle') }}</p>
 
     <button
       class="empty-btn"
       @click="emit('openFolder')"
-      aria-label="Ouvrir un dossier pour analyser les conflits"
+      :aria-label="t('empty.openButton')"
     >
       <svg width="18" height="18" viewBox="0 0 16 16" fill="none" aria-hidden="true">
         <path d="M2 3.5A1.5 1.5 0 013.5 2H6l1.5 2H12.5A1.5 1.5 0 0114 5.5v7a1.5 1.5 0 01-1.5 1.5h-9A1.5 1.5 0 012 12.5v-9z" stroke="currentColor" stroke-width="1.5" fill="none"/>
       </svg>
-      Ouvrir un dossier
+      {{ t('empty.openButton') }}
     </button>
 
     <!-- Recent folders -->
     <div v-if="recentFolders.length > 0" class="recent-section">
-      <span class="recent-label muted">Dossiers récents</span>
+      <span class="recent-label muted">{{ t('empty.recentTitle') }}</span>
       <ul class="recent-list">
         <li
           v-for="entry in recentFolders"

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref, computed } from "vue";
 import type { GitBranch } from "../utils/backend";
+import { useI18n } from "../composables/useI18n";
+const { t } = useI18n();
 
 const props = defineProps<{
   branches: GitBranch[];
@@ -53,15 +55,15 @@ function handleCreateKeydown(e: KeyboardEvent) {
 <template>
   <div class="branch-panel">
     <div class="branch-header">
-      <span class="branch-title">Branches</span>
+      <span class="branch-title">{{ t('branches.title') }}</span>
       <div class="branch-actions">
-        <button class="branch-action-btn" @click="emit('refresh')" title="Rafra\u00eechir">
+        <button class="branch-action-btn" @click="emit('refresh')" :title="t('common.refresh')">
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <path d="M1 8a7 7 0 0112.95-3.64M15 8a7 7 0 01-12.95 3.64" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
             <path d="M14 1v4h-4M2 15v-4h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
         </button>
-        <button class="branch-action-btn" @click="showCreate = !showCreate" title="Nouvelle branche">
+        <button class="branch-action-btn" @click="showCreate = !showCreate" :title="t('branches.create')">
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
           </svg>
@@ -75,14 +77,14 @@ function handleCreateKeydown(e: KeyboardEvent) {
         class="create-input mono"
         v-model="newBranchName"
         @keydown="handleCreateKeydown"
-        placeholder="Nom de la branche..."
+        :placeholder="t('branches.namePlaceholder')"
         autofocus
       />
       <button
         class="create-btn"
         :disabled="!newBranchName.trim()"
         @click="handleCreate"
-      >Cr\u00e9er</button>
+      >{{ t('common.create') }}</button>
     </div>
 
     <!-- Filter -->
@@ -90,7 +92,7 @@ function handleCreateKeydown(e: KeyboardEvent) {
       <input
         class="filter-input"
         v-model="filter"
-        placeholder="Filtrer..."
+        :placeholder="t('branches.filter')"
       />
     </div>
 
@@ -101,7 +103,7 @@ function handleCreateKeydown(e: KeyboardEvent) {
     <div class="branch-lists" v-else>
       <!-- Local branches -->
       <div class="branch-section" v-if="localBranches.length > 0">
-        <div class="branch-section-label">Locales</div>
+        <div class="branch-section-label">{{ t('branches.local') }}</div>
         <ul class="branch-list">
           <li
             v-for="branch in localBranches"
@@ -121,7 +123,7 @@ function handleCreateKeydown(e: KeyboardEvent) {
               <button
                 class="branch-item-btn"
                 @click="emit('switchBranch', branch.name)"
-                title="Basculer"
+                :title="t('branches.switch')"
               >
                 <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                   <path d="M4 12l4-4-4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -130,7 +132,7 @@ function handleCreateKeydown(e: KeyboardEvent) {
               <button
                 class="branch-item-btn branch-item-btn--danger"
                 @click="emit('deleteBranch', branch.name)"
-                title="Supprimer"
+                :title="t('branches.deleteLabel')"
               >
                 <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                   <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
@@ -143,7 +145,7 @@ function handleCreateKeydown(e: KeyboardEvent) {
 
       <!-- Remote branches -->
       <div class="branch-section" v-if="remoteBranches.length > 0">
-        <div class="branch-section-label">Remotes</div>
+        <div class="branch-section-label">{{ t('branches.remote') }}</div>
         <ul class="branch-list">
           <li
             v-for="branch in remoteBranches"
@@ -156,7 +158,7 @@ function handleCreateKeydown(e: KeyboardEvent) {
             <button
               class="branch-item-btn"
               @click="emit('switchBranch', branch.name.replace(/^origin\//, ''))"
-              title="Checkout"
+              :title="t('branches.switch')"
             >
               <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <path d="M4 12l4-4-4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -167,7 +169,7 @@ function handleCreateKeydown(e: KeyboardEvent) {
       </div>
 
       <div class="branch-empty" v-if="localBranches.length === 0 && remoteBranches.length === 0">
-        <span class="muted">Aucune branche trouv\u00e9e</span>
+        <span class="muted">{{ t('branches.noBranch') }}</span>
       </div>
     </div>
   </div>
