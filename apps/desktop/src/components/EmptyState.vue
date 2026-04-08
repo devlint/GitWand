@@ -41,44 +41,30 @@ const isMac = navigator.platform.toUpperCase().includes("MAC");
       {{ t('empty.openButton') }}
     </button>
 
-    <!-- Recent folders -->
+    <!-- Recent repos -->
     <div v-if="recentFolders.length > 0" class="recent-section">
       <span class="recent-label muted">{{ t('empty.recentTitle') }}</span>
-      <ul class="recent-list">
-        <li
+      <div class="recent-cards">
+        <button
           v-for="entry in recentFolders"
           :key="entry.path"
-          class="recent-item"
+          class="recent-card"
           @click="emit('openPath', entry.path)"
+          :title="entry.path"
         >
-          <svg
-            v-if="entry.pinned"
-            class="recent-star"
-            width="12" height="12"
-            viewBox="0 0 12 12"
-            fill="#fbbf24"
-            aria-hidden="true"
-          >
-            <path d="M6 1l1.5 3 3.5.5-2.5 2.5.5 3.5L6 9l-3 1.5.5-3.5L1 4.5 4.5 4 6 1z" stroke-linejoin="round"/>
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <circle cx="5" cy="4" r="2" stroke="currentColor" stroke-width="1.3"/>
+            <circle cx="5" cy="12" r="2" stroke="currentColor" stroke-width="1.3"/>
+            <circle cx="12" cy="8" r="2" stroke="currentColor" stroke-width="1.3"/>
+            <path d="M5 6v4M7 4h3c1.1 0 2 .9 2 2v0" stroke="currentColor" stroke-width="1.3"/>
           </svg>
-          <svg
-            v-else
-            class="recent-icon"
-            width="12" height="12"
-            viewBox="0 0 16 16"
-            fill="currentColor"
-            aria-hidden="true"
-          >
-            <path d="M1 3.5A1.5 1.5 0 012.5 2h2.764c.58 0 1.13.237 1.53.659l.74.815A1.5 1.5 0 008.58 4H13.5A1.5 1.5 0 0115 5.5v7a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 011 12.5v-9z"/>
-          </svg>
-          <span class="recent-name">{{ entry.name }}</span>
-          <span class="recent-path muted">{{ entry.path }}</span>
-        </li>
-      </ul>
+          <span class="recent-card-name">{{ entry.name }}</span>
+        </button>
+      </div>
     </div>
 
     <div class="empty-hint muted">
-      <kbd>{{ isMac ? '⌘' : 'Ctrl' }}</kbd> + <kbd>K</kbd> pour ouvrir rapidement
+      <kbd>{{ isMac ? '⌘' : 'Ctrl' }}</kbd> + <kbd>K</kbd> {{ t('empty.shortcut') }}
     </div>
   </div>
 </template>
@@ -139,16 +125,14 @@ const isMac = navigator.platform.toUpperCase().includes("MAC");
   transform: translateY(0);
 }
 
-/* ─── Recent folders ──────────────────────────────────── */
+/* ─── Recent repos ───────────────────────────────────── */
 
 .recent-section {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
-  margin-top: 12px;
-  width: 100%;
-  max-width: 400px;
+  gap: 10px;
+  margin-top: 16px;
 }
 
 .recent-label {
@@ -158,51 +142,45 @@ const isMac = navigator.platform.toUpperCase().includes("MAC");
   letter-spacing: 0.06em;
 }
 
-.recent-list {
-  list-style: none;
-  width: 100%;
-  margin: 0;
-  padding: 0;
+.recent-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
 }
 
-.recent-item {
+.recent-card {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: background 0.12s;
-  text-align: left;
-}
-
-.recent-item:hover {
-  background: var(--color-bg-tertiary);
-}
-
-.recent-icon {
-  flex-shrink: 0;
-  color: var(--color-text-muted);
-}
-
-.recent-star {
-  flex-shrink: 0;
-}
-
-.recent-name {
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg);
+  color: var(--color-text);
   font-size: 13px;
   font-weight: 500;
-  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
 }
 
-.recent-path {
-  flex: 1;
-  font-size: 11px;
-  font-family: var(--font-mono);
-  overflow: hidden;
-  text-overflow: ellipsis;
+.recent-card:hover {
+  border-color: var(--color-accent);
+  background: var(--color-bg-secondary);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+}
+
+.recent-card svg {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.recent-card:hover svg {
+  color: var(--color-accent);
+}
+
+.recent-card-name {
   white-space: nowrap;
-  min-width: 0;
 }
 
 /* ─── Hint ────────────────────────────────────────────── */

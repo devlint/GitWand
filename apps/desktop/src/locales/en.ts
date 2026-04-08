@@ -131,11 +131,11 @@ const en: Locale = {
 
   // ─── EmptyState ─────────────────────────────────────────
   empty: {
-    title: "No files loaded",
-    subtitle: "Open a folder containing a Git repository",
-    openButton: "Open a folder",
-    shortcut: "Ctrl+K",
-    recentTitle: "Recent folders",
+    title: "No repository open",
+    subtitle: "Select a Git repository to get started",
+    openButton: "Open a repository",
+    shortcut: "to open quickly",
+    recentTitle: "Recent",
   },
 
   // ─── FolderPicker ───────────────────────────────────────

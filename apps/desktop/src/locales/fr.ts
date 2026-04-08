@@ -133,11 +133,11 @@ const fr = {
 
   // ─── EmptyState ─────────────────────────────────────────
   empty: {
-    title: "Aucun fichier charg\u00e9",
-    subtitle: "Ouvrez un dossier contenant un d\u00e9p\u00f4t Git",
-    openButton: "Ouvrir un dossier",
-    shortcut: "Ctrl+K",
-    recentTitle: "Dossiers r\u00e9cents",
+    title: "Aucun d\u00e9p\u00f4t ouvert",
+    subtitle: "S\u00e9lectionnez un d\u00e9p\u00f4t Git pour commencer",
+    openButton: "Ouvrir un d\u00e9p\u00f4t",
+    shortcut: "pour ouvrir rapidement",
+    recentTitle: "R\u00e9cents",
   },
 
   // ─── FolderPicker ───────────────────────────────────────
