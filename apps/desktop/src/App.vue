@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from "vue";
 import AppHeader from "./components/AppHeader.vue";
-import FileList from "./components/FileList.vue";
 import MergeEditor from "./components/MergeEditor.vue";
 import EmptyState from "./components/EmptyState.vue";
 import FolderPicker from "./components/FolderPicker.vue";
@@ -19,13 +18,8 @@ import { isTauri, registerBrowserFolderPicker, pickFolder } from "./utils/backen
 
 const { theme, toggle: toggleTheme } = useTheme();
 
-// ─── App mode ───────────────────────────────────────────
-// "merge" = original conflict resolution view
-// "repo"  = new full git client view
-type AppMode = "merge" | "repo";
-const appMode = ref<AppMode>("repo");
-
-// ─── Merge mode (useGitWand) ────────────────────────────
+// ─── Merge conflict resolution (useGitWand) ─────────────
+// Still used for conflict resolution, but auto-triggered, no mode switch
 const {
   files: mergeFiles,
   selectedFile: mergeSelectedFile,
@@ -34,8 +28,6 @@ const {
   error: mergeError,
   canUndo,
   canRedo,
-  folderPath: mergeFolderPath,
-  openFolder: mergeOpenFolder,
   openPath: mergeOpenPath,
   resolveAll,
   resolveFile,
@@ -61,6 +53,7 @@ const {
   hasRepo,
   branchDisplay,
   isClean,
+  isSelectedFileConflicted,
   allFiles: repoFiles,
   repoStats,
   commitMessage,
@@ -97,74 +90,54 @@ const {
 } = useGitRepo();
 
 // ─── Computed state ─────────────────────────────────────
-const isRepoMode = computed(() => appMode.value === "repo");
-const isMergeMode = computed(() => appMode.value === "merge");
-
-const hasFiles = computed(() =>
-  isMergeMode.value ? mergeFiles.value.length > 0 : repoFiles.value.length > 0,
-);
-
-const loading = computed(() =>
-  isMergeMode.value ? mergeLoading.value : repoLoading.value,
-);
-
-const error = computed({
-  get: () => (isMergeMode.value ? mergeError.value : repoError.value),
-  set: (val) => {
-    if (isMergeMode.value) mergeError.value = val;
-    else repoError.value = val;
-  },
-});
-
-const canSave = computed(() => isMergeMode.value && mergeFiles.value.length > 0 && !!mergeFolderPath.value);
+const hasFiles = computed(() => repoFiles.value.length > 0);
 
 /** Name of the current folder (last segment of path). */
 const folderName = computed(() => {
-  const p = isRepoMode.value ? repoFolderPath.value : mergeFolderPath.value;
+  const p = repoFolderPath.value;
   if (!p) return "";
   const parts = p.replace(/[/\\]+$/, "").split(/[/\\]/);
   return parts[parts.length - 1] || p;
 });
 
-const currentFolderPath = computed(() =>
-  isMergeMode.value ? mergeFolderPath.value : repoFolderPath.value,
-);
-
 // Auto-dismiss error after 3s
 let errorTimer: ReturnType<typeof setTimeout> | null = null;
-watch(error, (val) => {
+watch(repoError, (val) => {
   if (errorTimer) { clearTimeout(errorTimer); errorTimer = null; }
   if (val) {
-    errorTimer = setTimeout(() => { error.value = null; }, 3000);
+    errorTimer = setTimeout(() => { repoError.value = null; }, 3000);
+  }
+});
+
+// ─── Conflict handling ──────────────────────────────────
+// When a conflicted file is selected, load it in useGitWand for resolution
+const showingMergeEditor = ref(false);
+
+watch(isSelectedFileConflicted, async (isConflicted) => {
+  if (isConflicted && repoFolderPath.value && repoSelectedFile.value) {
+    // Load conflicted files via useGitWand
+    await mergeOpenPath(repoFolderPath.value);
+    // Select the specific conflicted file
+    mergeSelectFile(repoSelectedFile.value!);
+    showingMergeEditor.value = true;
+  } else {
+    showingMergeEditor.value = false;
   }
 });
 
 // ─── Folder opening ─────────────────────────────────────
 async function handleOpenFolder() {
-  if (isMergeMode.value) {
-    await mergeOpenFolder();
-  } else {
-    const path = await pickFolder();
-    if (path) {
-      await openRepo(path);
-      // Load log if switching to history tab
-      if (viewMode.value === "history") {
-        await loadLog();
-      }
+  const path = await pickFolder();
+  if (path) {
+    await openRepo(path);
+    if (viewMode.value === "history") {
+      await loadLog();
     }
   }
 }
 
 async function handleOpenPath(path: string) {
-  if (isMergeMode.value) {
-    await mergeOpenPath(path);
-  } else {
-    await openRepo(path);
-  }
-}
-
-function handleSwitchMode(mode: AppMode) {
-  appMode.value = mode;
+  await openRepo(path);
 }
 
 // When switching tabs, load data as needed
@@ -179,11 +152,7 @@ function onRepoFileSelect(path: string, staged: boolean) {
   repoSelectFile(path, staged);
 }
 
-function onViewModeChange(mode: "changes" | "merge" | "history") {
-  if (mode === "merge") {
-    appMode.value = "merge";
-    return;
-  }
+function onViewModeChange(mode: "changes" | "history") {
   viewMode.value = mode;
 }
 
@@ -222,18 +191,18 @@ function onKeyDown(e: KeyboardEvent) {
   if (mod && e.key === "k") {
     e.preventDefault();
     handleOpenFolder();
-  } else if (mod && e.key === "z" && !e.shiftKey && isMergeMode.value) {
+  } else if (mod && e.key === "z" && !e.shiftKey && showingMergeEditor.value) {
     e.preventDefault();
     undo();
-  } else if (mod && e.key === "z" && e.shiftKey && isMergeMode.value) {
+  } else if (mod && e.key === "z" && e.shiftKey && showingMergeEditor.value) {
     e.preventDefault();
     redo();
-  } else if (mod && e.key === "y" && isMergeMode.value) {
+  } else if (mod && e.key === "y" && showingMergeEditor.value) {
     e.preventDefault();
     redo();
   } else if (mod && e.key === "s") {
     e.preventDefault();
-    if (canSave.value) saveAllFiles();
+    if (showingMergeEditor.value) saveAllFiles();
   }
 }
 
@@ -244,13 +213,8 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
 <template>
   <div class="app">
     <AppHeader
-      :stats="mergeStats"
       :has-files="hasFiles"
-      :can-undo="isMergeMode && canUndo"
-      :can-redo="isMergeMode && canRedo"
-      :can-save="canSave"
       :theme="theme"
-      :app-mode="appMode"
       :branch-display="branchDisplay"
       :repo-stats="repoStats"
       :has-repo="hasRepo"
@@ -265,12 +229,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
       :branches-loading="branchesLoading"
       :is-switching-branch="isSwitchingBranch"
       @open-folder="handleOpenFolder"
-      @resolve-all="resolveAll"
-      @save-all="saveAllFiles"
-      @undo="undo"
-      @redo="redo"
       @toggle-theme="toggleTheme"
-      @switch-mode="handleSwitchMode"
       @push="doPush"
       @pull="doPull"
       @open-settings="showSettings = true"
@@ -281,114 +240,79 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
     />
 
     <div class="app-body">
-      <!-- ─── MERGE MODE ──────────────────────── -->
-      <template v-if="isMergeMode">
-        <aside class="sidebar" v-if="mergeFiles.length > 0">
-          <FileList
-            :files="mergeFiles"
-            :selected-file="mergeSelectedFile"
-            @select="mergeSelectFile"
-          />
-        </aside>
+      <aside class="sidebar" v-if="hasRepo">
+        <RepoSidebar
+          :files="repoFiles"
+          :selected-file="repoSelectedFile"
+          :view-mode="viewMode"
+          :repo-stats="repoStats"
+          :commit-message="commitMessage"
+          :can-commit="canCommit"
+          :is-committing="isCommitting"
+          :log-entries="repoLog"
+          :log-loading="repoLoading"
+          :selected-commit-hash="selectedCommitHash"
+          :ahead-count="aheadCount"
+          @select="onRepoFileSelect"
+          @change-view="onViewModeChange"
+          @stage-file="(path) => stageFiles([path])"
+          @unstage-file="(path) => unstageFiles([path])"
+          @stage-all="stageAll"
+          @unstage-all="unstageAll"
+          @commit="doCommit"
+          @update:commit-message="(val) => commitMessage = val"
+          @select-commit="selectCommit"
+        />
+      </aside>
 
-        <main class="main">
-          <div v-if="mergeLoading" class="loading-overlay">
+      <main class="main">
+        <!-- No repo loaded → EmptyState full screen -->
+        <EmptyState v-if="!hasRepo && !repoLoading" @open-folder="handleOpenFolder" @open-path="handleOpenPath" />
+
+        <template v-else>
+          <div v-if="repoLoading" class="loading-overlay">
             <div class="loading-spinner"></div>
-            <span class="loading-text">{{ t('merge.analysing') }}</span>
+            <span class="loading-text">{{ t('merge.loadingRepo') }}</span>
           </div>
 
-          <div v-if="mergeError" class="error-banner" role="alert">
+          <div v-if="repoError" class="error-banner" role="alert">
             <svg class="error-icon" width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
               <circle cx="9" cy="9" r="8" stroke="currentColor" stroke-width="1.5"/>
               <path d="M9 5v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
               <circle cx="9" cy="12" r="1" fill="currentColor"/>
             </svg>
-            <span class="error-text">{{ mergeError }}</span>
-            <button class="error-close" @click="mergeError = null" :aria-label="t('common.close')">
+            <span class="error-text">{{ repoError }}</span>
+            <button class="error-close" @click="repoError = null" :aria-label="t('common.close')">
               <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
                 <path d="M3.646 3.646a.5.5 0 01.708 0L7 6.293l2.646-2.647a.5.5 0 01.708.708L7.707 7l2.647 2.646a.5.5 0 01-.708.708L7 7.707l-2.646 2.647a.5.5 0 01-.708-.708L6.293 7 3.646 4.354a.5.5 0 010-.708z"/>
               </svg>
             </button>
           </div>
 
-          <MergeEditor
-            v-if="mergeSelectedFile"
-            :file="mergeSelectedFile"
-            @resolve="resolveFile"
-            @resolve-hunk="(path, idx, choice) => resolveHunkManual(path, idx, choice)"
-            @resolve-hunk-custom="(path, idx, content) => resolveHunkCustom(path, idx, content)"
-          />
-          <EmptyState v-else-if="!mergeLoading" @open-folder="handleOpenFolder" @open-path="handleOpenPath" />
-        </main>
-      </template>
-
-      <!-- ─── REPO MODE ───────────────────────── -->
-      <template v-else>
-        <aside class="sidebar" v-if="hasRepo">
-          <RepoSidebar
-            :files="repoFiles"
-            :selected-file="repoSelectedFile"
-            :view-mode="viewMode"
-            :repo-stats="repoStats"
-            :commit-message="commitMessage"
-            :can-commit="canCommit"
-            :is-committing="isCommitting"
-            :log-entries="repoLog"
-            :log-loading="repoLoading"
-            :selected-commit-hash="selectedCommitHash"
-            :ahead-count="aheadCount"
-            @select="onRepoFileSelect"
-            @change-view="onViewModeChange"
-            @stage-file="(path) => stageFiles([path])"
-            @unstage-file="(path) => unstageFiles([path])"
-            @stage-all="stageAll"
-            @unstage-all="unstageAll"
-            @commit="doCommit"
-            @update:commit-message="(val) => commitMessage = val"
-            @select-commit="selectCommit"
-          />
-        </aside>
-
-        <main class="main">
-          <!-- No repo loaded → EmptyState full screen -->
-          <EmptyState v-if="!hasRepo && !repoLoading" @open-folder="handleOpenFolder" @open-path="handleOpenPath" />
-
-          <template v-else>
-            <div v-if="repoLoading" class="loading-overlay">
-              <div class="loading-spinner"></div>
-              <span class="loading-text">{{ t('merge.loadingRepo') }}</span>
-            </div>
-
-            <div v-if="repoError" class="error-banner" role="alert">
-              <svg class="error-icon" width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
-                <circle cx="9" cy="9" r="8" stroke="currentColor" stroke-width="1.5"/>
-                <path d="M9 5v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                <circle cx="9" cy="12" r="1" fill="currentColor"/>
-              </svg>
-              <span class="error-text">{{ repoError }}</span>
-              <button class="error-close" @click="repoError = null" :aria-label="t('common.close')">
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
-                  <path d="M3.646 3.646a.5.5 0 01.708 0L7 6.293l2.646-2.647a.5.5 0 01.708.708L7.707 7l2.647 2.646a.5.5 0 01-.708.708L7 7.707l-2.646 2.647a.5.5 0 01-.708-.708L6.293 7 3.646 4.354a.5.5 0 010-.708z"/>
-                </svg>
-              </button>
-            </div>
-
-            <!-- Changes view: diff viewer -->
+          <!-- Changes view: conflict editor or diff viewer -->
+          <template v-if="viewMode === 'changes'">
+            <MergeEditor
+              v-if="showingMergeEditor && mergeSelectedFile"
+              :file="mergeSelectedFile"
+              @resolve="resolveFile"
+              @resolve-hunk="(path, idx, choice) => resolveHunkManual(path, idx, choice)"
+              @resolve-hunk-custom="(path, idx, content) => resolveHunkCustom(path, idx, content)"
+            />
             <DiffViewer
-              v-if="viewMode === 'changes'"
+              v-else
               :diff="repoDiff"
               :file-path="repoSelectedFile"
             />
-
-            <!-- History view: commit diff (log is in sidebar) -->
-            <CommitDiffViewer
-              v-else-if="viewMode === 'history'"
-              :diffs="commitDiffs"
-              :commit-hash="selectedCommitHash"
-            />
           </template>
-        </main>
-      </template>
+
+          <!-- History view: commit diff (log is in sidebar) -->
+          <CommitDiffViewer
+            v-else-if="viewMode === 'history'"
+            :diffs="commitDiffs"
+            :commit-hash="selectedCommitHash"
+          />
+        </template>
+      </main>
     </div>
 
     <!-- Folder picker modal (browser mode) -->
@@ -509,5 +433,4 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
   opacity: 1;
   background: rgba(239, 68, 68, 0.15);
 }
-
 </style>

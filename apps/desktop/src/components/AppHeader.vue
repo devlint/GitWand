@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from "vue";
-import type { GlobalStats } from "../composables/useGitWand";
 import type { Theme } from "../composables/useTheme";
 import type { GitBranch } from "../utils/backend";
 import { useI18n } from "../composables/useI18n";
@@ -8,13 +7,8 @@ import { useI18n } from "../composables/useI18n";
 const { t } = useI18n();
 
 const props = defineProps<{
-  stats: GlobalStats;
   hasFiles: boolean;
-  canUndo: boolean;
-  canRedo: boolean;
-  canSave: boolean;
   theme: Theme;
-  appMode: "merge" | "repo";
   branchDisplay: string;
   repoStats: { staged: number; unstaged: number; untracked: number; conflicted: number };
   hasRepo: boolean;
@@ -33,12 +27,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   openFolder: [];
-  resolveAll: [];
-  saveAll: [];
-  undo: [];
-  redo: [];
   toggleTheme: [];
-  switchMode: [mode: "merge" | "repo"];
   push: [];
   pull: [];
   openSettings: [];
@@ -47,9 +36,6 @@ const emit = defineEmits<{
   deleteBranch: [name: string];
   loadBranches: [];
 }>();
-
-const isRepo = () => props.appMode === "repo";
-const isMerge = () => props.appMode === "merge";
 
 // ─── Branch popover ──────────────────────────────────
 const showBranchPopover = ref(false);
@@ -128,37 +114,6 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
       </svg>
       <h1 class="title">GitWand</h1>
 
-      <!-- Mode switcher -->
-      <div class="mode-switcher">
-        <button
-          class="mode-btn"
-          :class="{ 'mode-btn--active': appMode === 'repo' }"
-          @click="emit('switchMode', 'repo')"
-          :title="t('header.modeRepo')"
-        >
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <circle cx="8" cy="3" r="2" stroke="currentColor" stroke-width="1.5"/>
-            <circle cx="8" cy="13" r="2" stroke="currentColor" stroke-width="1.5"/>
-            <path d="M8 5v6" stroke="currentColor" stroke-width="1.5"/>
-          </svg>
-          {{ t('header.modeRepo') }}
-        </button>
-        <button
-          class="mode-btn"
-          :class="{ 'mode-btn--active': appMode === 'merge' }"
-          @click="emit('switchMode', 'merge')"
-          :title="t('header.modeMerge')"
-        >
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <circle cx="4" cy="3" r="2" stroke="currentColor" stroke-width="1.5"/>
-            <circle cx="12" cy="3" r="2" stroke="currentColor" stroke-width="1.5"/>
-            <circle cx="8" cy="13" r="2" stroke="currentColor" stroke-width="1.5"/>
-            <path d="M4 5v2c0 2 4 4 4 4M12 5v2c0 2-4 4-4 4" stroke="currentColor" stroke-width="1.5"/>
-          </svg>
-          {{ t('header.modeMerge') }}
-        </button>
-      </div>
-
       <!-- Clickable folder name next to logo -->
       <button
         v-if="hasRepo && folderName"
@@ -174,8 +129,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
     </div>
 
     <div class="header-center">
-      <!-- Repo mode: branch + stats -->
-      <template v-if="appMode === 'repo' && hasRepo">
+      <template v-if="hasRepo">
         <div class="branch-popover-wrapper">
           <button class="branch-trigger" :class="{ 'branch-trigger--loading': isSwitchingBranch }" @click="toggleBranchPopover" :title="t('branches.title')">
             <svg v-if="isSwitchingBranch" class="btn-spinner" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
@@ -300,30 +254,6 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
           </span>
         </div>
       </template>
-
-      <!-- Merge mode: conflict stats -->
-      <template v-else-if="appMode === 'merge' && hasFiles">
-        <div class="stat-group">
-          <span class="stat">
-            <span class="stat-value">{{ stats.totalFiles }}</span>
-            <span class="stat-label">{{ stats.totalFiles === 1 ? t('header.file') : t('header.files') }}</span>
-          </span>
-          <span class="stat-separator" aria-hidden="true">/</span>
-          <span class="stat">
-            <span class="stat-value">{{ stats.totalConflicts }}</span>
-            <span class="stat-label">{{ stats.totalConflicts === 1 ? t('header.conflict') : t('header.conflicts') }}</span>
-          </span>
-          <span class="stat-separator" aria-hidden="true">/</span>
-          <span class="stat stat--success" v-if="stats.autoResolved > 0">
-            <span class="stat-value">{{ stats.autoResolved }}</span>
-            <span class="stat-label">{{ t('header.auto') }}</span>
-          </span>
-          <span class="stat stat--warning" v-if="stats.remaining > 0">
-            <span class="stat-value">{{ stats.remaining }}</span>
-            <span class="stat-label">{{ stats.remaining === 1 ? t('header.remaining') : t('header.remainingPlural') }}</span>
-          </span>
-        </div>
-      </template>
     </div>
 
     <div class="header-right">
@@ -356,38 +286,8 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
         </svg>
       </button>
 
-      <!-- Undo/Redo (merge mode only) -->
-      <div class="undo-redo" v-if="appMode === 'merge' && hasFiles">
-        <button
-          class="btn btn--icon"
-          :class="{ 'btn--disabled': !canUndo }"
-          :disabled="!canUndo"
-          @click="emit('undo')"
-          :aria-label="t('header.undo')"
-          :title="t('header.undo')"
-        >
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <path d="M3 8h8a3 3 0 010 6H8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-            <path d="M5 5L3 8l2 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-          </svg>
-        </button>
-        <button
-          class="btn btn--icon"
-          :class="{ 'btn--disabled': !canRedo }"
-          :disabled="!canRedo"
-          @click="emit('redo')"
-          :aria-label="t('header.redo')"
-          :title="t('header.redo')"
-        >
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <path d="M13 8H5a3 3 0 000 6h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-            <path d="M11 5l2 3-2 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-          </svg>
-        </button>
-      </div>
-
-      <!-- Repo mode: push/pull -->
-      <template v-if="appMode === 'repo' && hasRepo">
+      <!-- Push/Pull -->
+      <template v-if="hasRepo">
         <button
           class="btn btn--sync"
           :class="{ 'btn--disabled': !canPull, 'btn--sync-active': behindCount > 0 }"
@@ -423,33 +323,6 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
           <span v-if="aheadCount > 0" class="sync-badge sync-badge--push">{{ aheadCount }}</span>
         </button>
       </template>
-
-      <!-- Merge mode buttons -->
-      <button
-        v-if="appMode === 'merge' && hasFiles && stats.autoResolved > 0"
-        class="btn btn--primary"
-        @click="emit('resolveAll')"
-        :aria-label="t('header.resolveAll')"
-      >
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-          <path d="M8 1L9.5 5.5L14 7L9.5 8.5L8 13L6.5 8.5L2 7L6.5 5.5L8 1Z" fill="currentColor"/>
-        </svg>
-        <span>{{ t('header.resolveAll') }}</span>
-      </button>
-      <button
-        v-if="canSave"
-        class="btn btn--save"
-        @click="emit('saveAll')"
-        :aria-label="t('header.saveShortcut')"
-        :title="t('header.saveShortcut')"
-      >
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-          <path d="M12.5 14h-9A1.5 1.5 0 012 12.5v-9A1.5 1.5 0 013.5 2H10l4 4v6.5a1.5 1.5 0 01-1.5 1.5z" stroke="currentColor" stroke-width="1.5" fill="none"/>
-          <path d="M10 2v4h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-          <rect x="5" y="9" width="6" height="3" rx="0.5" stroke="currentColor" stroke-width="1.2" fill="none"/>
-        </svg>
-        <span>{{ t('header.save') }}</span>
-      </button>
     </div>
   </header>
 </template>
@@ -484,38 +357,6 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
 }
 
 /* Mode switcher */
-.mode-switcher {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  margin-left: 8px;
-  background: var(--color-bg);
-  border-radius: 6px;
-  padding: 2px;
-}
-
-.mode-btn {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 8px;
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--color-text-muted);
-  background: none;
-  border-radius: 4px;
-  transition: all 0.15s;
-}
-
-.mode-btn:hover {
-  color: var(--color-text);
-}
-
-.mode-btn--active {
-  color: var(--color-text);
-  background: var(--color-bg-tertiary);
-}
-
 /* Branch trigger & popover */
 .branch-popover-wrapper {
   position: relative;
@@ -803,40 +644,6 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
   gap: 8px;
 }
 
-.stat-group {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-}
-
-.stat {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.stat-value {
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-
-.stat-label {
-  color: var(--color-text-muted);
-}
-
-.stat-separator {
-  color: var(--color-border);
-}
-
-.stat--success .stat-value {
-  color: var(--color-success);
-}
-
-.stat--warning .stat-value {
-  color: var(--color-warning);
-}
-
 /* Folder trigger */
 .folder-trigger {
   display: flex;
@@ -957,12 +764,6 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
 
 .btn--save:hover {
   filter: brightness(1.1);
-}
-
-.undo-redo {
-  display: flex;
-  align-items: center;
-  gap: 2px;
 }
 
 .btn--icon {

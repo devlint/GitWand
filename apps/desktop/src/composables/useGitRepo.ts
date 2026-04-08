@@ -23,7 +23,7 @@ import {
   type GitBranch,
 } from "../utils/backend";
 
-export type ViewMode = "changes" | "merge" | "history";
+export type ViewMode = "changes" | "history";
 
 export interface RepoFileEntry {
   path: string;
@@ -80,6 +80,12 @@ export function useGitRepo() {
   });
 
   /** Is the repo clean (no changes at all)? */
+  /** Is the currently selected file in conflicted state? */
+  const isSelectedFileConflicted = computed(() => {
+    if (!selectedFilePath.value || !status.value) return false;
+    return status.value.conflicted.includes(selectedFilePath.value);
+  });
+
   const isClean = computed(() => {
     if (!status.value) return true;
     const s = status.value;
@@ -487,6 +493,7 @@ export function useGitRepo() {
     hasRepo,
     branchDisplay,
     isClean,
+    isSelectedFileConflicted,
     allFiles,
     repoStats,
     canCommit,
