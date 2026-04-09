@@ -22,6 +22,11 @@ export { resolve } from "./resolver.js";
 export { parseConflictMarkers, classifyConflict } from "./parser.js";
 export { mergeNonOverlapping, computeDiff, lcs } from "./diff.js";
 
+// Phase 7.3 — Résolveurs spécialisés par format
+export { tryResolveJsonConflict, stripJsoncComments } from "./resolvers/json.js";
+export { tryResolveMarkdownConflict, parseSections, extractFrontmatter } from "./resolvers/markdown.js";
+export { tryFormatAwareResolve, isJsonFile, isMarkdownFile } from "./resolvers/dispatcher.js";
+
 export type {
   MergeInput,
   MergeResult,
@@ -31,4 +36,13 @@ export type {
   Confidence,
   HunkResolution,
   GitWandOptions,
+  // Phase 7.1
+  DecisionTrace,
+  TraceStep,
+  // Phase 7.2
+  ValidationResult,
 } from "./types.js";
+
+export type { JsonMergeResult } from "./resolvers/json.js";
+export type { MarkdownMergeResult, MarkdownSection } from "./resolvers/markdown.js";
+export type { FormatResolveResult } from "./resolvers/dispatcher.js";

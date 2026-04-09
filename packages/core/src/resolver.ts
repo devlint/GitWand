@@ -8,6 +8,8 @@
  *             de classification de son hunk.
  * Phase 7.2 : le MergeResult inclut un ValidationResult — détection de
  *             marqueurs résiduels et erreurs de syntaxe JSON.
+ * Phase 7.3 : dispatch automatique vers les résolveurs spécialisés par format
+ *             (JSON/JSONC, Markdown) avant le moteur textuel.
  */
 
 import type {
@@ -22,6 +24,7 @@ import type {
 } from "./types.js";
 import { parseConflictMarkers, toConflictHunk } from "./parser.js";
 import { mergeNonOverlapping } from "./diff.js";
+import { tryFormatAwareResolve } from "./resolvers/dispatcher.js";
 
 /** Options par défaut */
 const DEFAULT_OPTIONS: Required<GitWandOptions> = {
@@ -128,10 +131,14 @@ const EMPTY_VALIDATION: ValidationResult = {
 /**
  * Résout automatiquement un hunk de conflit.
  *
+ * @param hunk - Le hunk à résoudre
+ * @param filePath - Chemin du fichier (pour le dispatch format-aware)
+ * @param options - Options de configuration
  * @returns Les lignes résolues + la raison, ou null + raison de refus
  */
 function resolveHunk(
   hunk: ConflictHunk,
+  filePath: string,
   options: Required<GitWandOptions>,
 ): { lines: string[] | null; reason: string } {
   // explainOnly : ne pas appliquer de résolution, juste tracer
@@ -142,11 +149,24 @@ function resolveHunk(
     };
   }
 
+  // Phase 7.3 — Dispatch format-aware
+  // Tenter le résolveur spécialisé avant le moteur textuel.
+  // Les résolveurs JSON/Markdown effectuent une validation sémantique,
+  // ce qui justifie de bypasser le filtre de confiance textuel.
+  const formatResult = tryFormatAwareResolve(hunk, filePath);
+  if (formatResult.resolverUsed !== "none") {
+    if (formatResult.lines !== null) {
+      return { lines: formatResult.lines, reason: formatResult.reason };
+    }
+    // Le résolveur spécialisé a échoué → noter et continuer vers le moteur textuel
+    // (formatResult.reason sera préfixé dans la reason finale si on arrive à un conflit)
+  }
+
   // Vérifier le niveau de confiance minimum
   if (CONFIDENCE_ORDER[hunk.confidence] < CONFIDENCE_ORDER[options.minConfidence]) {
     return {
       lines: null,
-      reason: `Confiance ${hunk.confidence} insuffisante (minimum requis : ${options.minConfidence}).`,
+      reason: `Confiance ${hunk.confidence} insuffisante (minimum requis : ${options.minConfidence}).${formatResult.resolverUsed !== "none" ? ` [${formatResult.reason}]` : ""}`,
     };
   }
 
@@ -303,7 +323,7 @@ export function resolve(
 
       hunks.push(hunk);
 
-      const { lines: resolvedLines, reason: resolutionReason } = resolveHunk(hunk, options);
+      const { lines: resolvedLines, reason: resolutionReason } = resolveHunk(hunk, filePath, options);
       const autoResolved = resolvedLines !== null;
 
       resolutions.push({ hunk, resolvedLines, autoResolved, resolutionReason });

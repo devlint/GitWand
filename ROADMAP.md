@@ -294,22 +294,17 @@ interface DecisionTrace {
 - ⬜ **Meilleure normalisation whitespace** : indentation fine, whitespace interne, lignes vides — selon le langage
 - ⬜ **Réglage des seuils de confiance** : ajustement des seuils `value_only_change` et `non_overlapping` pour réduire les faux positifs
 
-#### 7.3 — Rendre plus intelligent : résolveurs par format (priorité moyenne)
+#### 7.3 — Rendre plus intelligent : résolveurs par format (priorité moyenne) ✅
 
-- ⬜ **Résolveurs spécialisés** par type de fichier : JSON/JSONC, YAML, Markdown, Vue SFC, TS/JS/TSX, CSS, lockfiles
-- ⬜ **Dispatch automatique** : brancher le résolveur spécialisé si le type est reconnu, fallback textuel sinon
+- ✅ **Résolveur JSON/JSONC sémantique** (`resolvers/json.ts`) — fusion clé-par-clé récursive avec `JSON.parse`/`JSON.stringify` ; merge d'objets imbriqués ; détection de conflits scalaires non résolvables ; `stripJsoncComments` pour les `.jsonc` ; fallback textuel si les sections de conflit ne sont pas du JSON valide
+- ✅ **Résolveur Markdown section-aware** (`resolvers/markdown.ts`) — découpage en sections par heading ATX (H1..H6) ; `parseSections`, `extractFrontmatter` ; merge section par section ; gestion ajout/suppression de sections ; fallback si une section est modifiée des deux côtés
+- ✅ **Dispatcher automatique** (`resolvers/dispatcher.ts`) — `tryFormatAwareResolve(hunk, filePath)` ; `isJsonFile`/`isMarkdownFile` ; résolveur spécialisé tenté en premier pour les formats reconnus, fallback textuel sinon ; `resolverUsed` dans la réponse pour la trace
+- ✅ **Branché dans resolver.ts** — `resolveHunk` accepte `filePath`, appelle `tryFormatAwareResolve` avant le moteur textuel ; bypass du filtre de confiance pour les résolutions sémantiquement validées (JSON) ; `resolutionReason` préfixé `[json]` ou `[markdown]`
+- ✅ **44 nouveaux tests** dans `format-resolvers.test.ts` — `stripJsoncComments`, `tryResolveJsonConflict` (7 cas), objets imbriqués, base vide, JSON malformé, intégration via `resolve()`, `parseSections`, `extractFrontmatter`, `tryResolveMarkdownConflict` (5 cas), dispatcher (7 cas)
+- ⬜ **Formats restants** : YAML, Vue SFC, TS/JS/TSX, CSS — reporter en 7.3b
 - ⬜ **Score de confiance composite** : remplacer le label discret par un score multidimensionnel
 
-```ts
-// Nouvelle interface à ajouter dans types.ts
-interface ConfidenceScore {
-  overall: number;   // 0..1
-  structure: number;  // cohérence structurelle
-  lexical: number;    // similarité lexicale
-  volatility: number; // détection de valeurs volatiles
-  overlapRisk: number; // risque de chevauchement
-}
-```
+**Note d'implémentation** : le résolveur JSON fonctionne quand chaque section de conflit (ours/base/theirs) est un JSON autonome valide (ex: fichier entier en conflit). Pour les conflits partiels (fragment d'objet), il revient gracieusement au moteur textuel.
 
 #### 7.4 — Rendre configurable : stratégies de merge (priorité moyenne)
 
