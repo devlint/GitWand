@@ -75,6 +75,9 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      - name: Build workspace dependencies (core needed by desktop)
+        run: pnpm --filter @gitwand/core run build
+
       - name: Build desktop app
         uses: tauri-apps/tauri-action@v0
         env:
