@@ -429,16 +429,16 @@ export async function gitPush(cwd: string): Promise<GitPushPullResult> {
 }
 
 /**
- * Pull from remote.
+ * Pull from remote. Supports optional rebase mode.
  */
-export async function gitPull(cwd: string): Promise<GitPushPullResult> {
+export async function gitPull(cwd: string, rebase: boolean = false): Promise<GitPushPullResult> {
   if (isTauri()) {
-    return tauriInvoke<GitPushPullResult>("git_pull", { cwd });
+    return tauriInvoke<GitPushPullResult>("git_pull", { cwd, rebase });
   }
   const res = await fetch(`${DEV_SERVER}/api/git-pull`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ cwd }),
+    body: JSON.stringify({ cwd, rebase }),
   });
   return res.json();
 }

@@ -417,13 +417,13 @@ export function useGitRepo() {
     }
   }
 
-  async function pull() {
+  async function pull(rebase: boolean = false) {
     if (!folderPath.value) return;
     isPulling.value = true;
     try {
       // Fetch all branches first (updates origin/master, etc.)
       await gitFetch(folderPath.value);
-      const result = await gitPull(folderPath.value);
+      const result = await gitPull(folderPath.value, rebase);
       if (!result.success) {
         error.value = `pull: ${result.message}`;
       } else {

@@ -273,6 +273,58 @@ function onDiffModeChange(mode: DiffMode) {
   persistDiffMode(mode);
 }
 
+// Pull mode (merge/rebase) — read from settings localStorage
+function getPersistedPullMode(): "merge" | "rebase" {
+  try {
+    const raw = localStorage.getItem("gitwand-settings");
+    if (raw) {
+      const s = JSON.parse(raw);
+      if (s.pullMode === "rebase") return "rebase";
+    }
+  } catch { /* ignore */ }
+  return "merge";
+}
+const pullMode = ref<"merge" | "rebase">(getPersistedPullMode());
+
+function onPullModeChange(mode: "merge" | "rebase") {
+  pullMode.value = mode;
+}
+
+// Font size & tab size — apply as CSS custom properties
+function getPersistedFontSize(): number {
+  try {
+    const raw = localStorage.getItem("gitwand-settings");
+    if (raw) { const s = JSON.parse(raw); if (s.fontSize) return s.fontSize; }
+  } catch { /* ignore */ }
+  return 12;
+}
+function getPersistedTabSize(): number {
+  try {
+    const raw = localStorage.getItem("gitwand-settings");
+    if (raw) { const s = JSON.parse(raw); if (s.tabSize) return s.tabSize; }
+  } catch { /* ignore */ }
+  return 4;
+}
+
+const fontSize = ref(getPersistedFontSize());
+const tabSize = ref(getPersistedTabSize());
+
+function applyCodeStyles() {
+  document.documentElement.style.setProperty("--code-font-size", `${fontSize.value}px`);
+  document.documentElement.style.setProperty("--code-tab-size", `${tabSize.value}`);
+}
+applyCodeStyles();
+
+function onFontSizeChange(size: number) {
+  fontSize.value = size;
+  applyCodeStyles();
+}
+
+function onTabSizeChange(size: number) {
+  tabSize.value = size;
+  applyCodeStyles();
+}
+
 const COMMIT_SIGNATURE = "\u{1FA84} Commit via GitWand";
 function onCommitSignatureChange(enabled: boolean) {
   if (enabled) {
@@ -359,7 +411,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
       @open-folder="handleOpenFolder"
       @toggle-theme="toggleTheme"
       @push="doPush"
-      @pull="doPull"
+      @pull="() => doPull(pullMode === 'rebase')"
       @merge-branch="doMerge"
       @open-settings="showSettings = true"
       @switch-branch="switchBranch"
@@ -502,6 +554,9 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
       @close="showSettings = false"
       @update:commit-signature="onCommitSignatureChange"
       @update:diff-mode="onDiffModeChange"
+      @update:pull-mode="onPullModeChange"
+      @update:font-size="onFontSizeChange"
+      @update:tab-size="onTabSizeChange"
     />
   </div>
 </template>

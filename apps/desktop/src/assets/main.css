@@ -27,6 +27,9 @@
 
   --sidebar-width: 280px;
   --header-height: 48px;
+
+  --code-font-size: 12px;
+  --code-tab-size: 4;
 }
 
 /* ─── Light theme ──────────────────────────────────────────────── */
@@ -93,6 +96,13 @@ body {
 
 .mono {
   font-family: var(--font-mono);
+  tab-size: var(--code-tab-size);
+  -moz-tab-size: var(--code-tab-size);
+}
+
+/* Applied to code/diff content areas — uses configurable font size */
+.line-content {
+  font-size: var(--code-font-size) !important;
 }
 
 .muted {

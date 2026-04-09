@@ -211,6 +211,18 @@ const fr = {
     diffDisplay: "Affichage des diffs",
     diffInline: "Inline (unifi\u00e9)",
     diffSideBySide: "C\u00f4te \u00e0 c\u00f4te",
+    pullMode: "Mode de pull",
+    pullMerge: "Merge (d\u00e9faut)",
+    pullRebase: "Rebase",
+    switchBehavior: "Comportement au switch",
+    switchStash: "Stash automatique",
+    switchAsk: "Demander",
+    switchRefuse: "Refuser si modifi\u00e9",
+    fontSize: "Taille de police",
+    tabSize: "Indentation (tab)",
+    spaces: "espaces",
+    notifications: "Notifications",
+    notificationsHint: "Afficher les notifications toast (sync, push, erreurs)",
   },
 } as const;
 

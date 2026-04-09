@@ -512,13 +512,14 @@ const server = createServer(async (req, res) => {
       }
     }
 
-    // POST /api/git-pull  { cwd }
+    // POST /api/git-pull  { cwd, rebase? }
     if (url.pathname === "/api/git-pull" && req.method === "POST") {
-      const { cwd } = await readBody(req);
+      const { cwd, rebase } = await readBody(req);
       if (!cwd) return jsonResponse(res, { error: "Missing cwd" }, 400);
       try {
         const resolvedCwd = resolve(cwd);
-        const stdout = execSync("git pull 2>&1", {
+        const cmd = rebase ? "git pull --rebase 2>&1" : "git pull 2>&1";
+        const stdout = execSync(cmd, {
           cwd: resolvedCwd,
           encoding: "utf-8",
           shell: true,

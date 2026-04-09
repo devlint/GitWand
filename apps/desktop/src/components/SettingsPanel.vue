@@ -11,10 +11,16 @@ import {
 const { t, locale, isAuto, setLocale } = useI18n();
 const { theme, setTheme } = useTheme();
 
+export type PullMode = "merge" | "rebase";
+export type SwitchBehavior = "stash" | "ask" | "refuse";
+
 const emit = defineEmits<{
   close: [];
   "update:commitSignature": [enabled: boolean];
   "update:diffMode": [mode: DiffMode];
+  "update:pullMode": [mode: PullMode];
+  "update:fontSize": [size: number];
+  "update:tabSize": [size: number];
 }>();
 
 // ─── Settings state (persisted in localStorage) ────────
@@ -28,6 +34,11 @@ interface Settings {
   defaultBranch: string;
   commitSignature: boolean;
   diffMode: DiffMode;
+  pullMode: PullMode;
+  switchBehavior: SwitchBehavior;
+  fontSize: number;
+  tabSize: number;
+  notifications: boolean;
 }
 
 function loadSettings(): Settings {
@@ -46,6 +57,11 @@ const defaultSettings: Settings = {
   defaultBranch: "main",
   commitSignature: true,
   diffMode: "inline",
+  pullMode: "merge",
+  switchBehavior: "ask",
+  fontSize: 12,
+  tabSize: 4,
+  notifications: true,
 };
 
 function saveSettings(s: Settings) {
@@ -112,6 +128,31 @@ function onSignatureChange(e: Event) {
 function onDiffModeChange(val: DiffMode) {
   updateSetting("diffMode", val);
   emit("update:diffMode", val);
+}
+
+function onPullModeChange(val: PullMode) {
+  updateSetting("pullMode", val);
+  emit("update:pullMode", val);
+}
+
+function onFontSizeChange(val: number) {
+  const clamped = Math.max(10, Math.min(18, val));
+  updateSetting("fontSize", clamped);
+  emit("update:fontSize", clamped);
+}
+
+function onTabSizeChange(val: number) {
+  updateSetting("tabSize", val);
+  emit("update:tabSize", val);
+}
+
+function onSwitchBehaviorChange(val: SwitchBehavior) {
+  updateSetting("switchBehavior", val);
+}
+
+function onNotificationsChange(e: Event) {
+  const checked = (e.target as HTMLInputElement).checked;
+  updateSetting("notifications", checked);
 }
 
 function onKeyDown(e: KeyboardEvent) {
@@ -221,6 +262,68 @@ function onKeyDown(e: KeyboardEvent) {
           </select>
         </div>
 
+        <!-- Pull mode -->
+        <div class="sp-row">
+          <label class="sp-label" for="setting-pull-mode">{{ t('settings.pullMode') }}</label>
+          <select
+            id="setting-pull-mode"
+            class="sp-select"
+            :value="settings.pullMode"
+            @change="onPullModeChange(($event.target as HTMLSelectElement).value as PullMode)"
+          >
+            <option value="merge">{{ t('settings.pullMerge') }}</option>
+            <option value="rebase">{{ t('settings.pullRebase') }}</option>
+          </select>
+        </div>
+
+        <!-- Switch behavior -->
+        <div class="sp-row">
+          <label class="sp-label" for="setting-switch-behavior">{{ t('settings.switchBehavior') }}</label>
+          <select
+            id="setting-switch-behavior"
+            class="sp-select"
+            :value="settings.switchBehavior"
+            @change="onSwitchBehaviorChange(($event.target as HTMLSelectElement).value as SwitchBehavior)"
+          >
+            <option value="stash">{{ t('settings.switchStash') }}</option>
+            <option value="ask">{{ t('settings.switchAsk') }}</option>
+            <option value="refuse">{{ t('settings.switchRefuse') }}</option>
+          </select>
+        </div>
+
+        <!-- Font size -->
+        <div class="sp-row">
+          <label class="sp-label" for="setting-font-size">{{ t('settings.fontSize') }}</label>
+          <div class="sp-range-row">
+            <input
+              id="setting-font-size"
+              class="sp-range"
+              type="range"
+              min="10"
+              max="18"
+              step="1"
+              :value="settings.fontSize"
+              @input="onFontSizeChange(Number(($event.target as HTMLInputElement).value))"
+            />
+            <span class="sp-range-value mono">{{ settings.fontSize }}px</span>
+          </div>
+        </div>
+
+        <!-- Tab size -->
+        <div class="sp-row">
+          <label class="sp-label" for="setting-tab-size">{{ t('settings.tabSize') }}</label>
+          <select
+            id="setting-tab-size"
+            class="sp-select"
+            :value="settings.tabSize"
+            @change="onTabSizeChange(Number(($event.target as HTMLSelectElement).value))"
+          >
+            <option :value="2">2 {{ t('settings.spaces') }}</option>
+            <option :value="4">4 {{ t('settings.spaces') }}</option>
+            <option :value="8">8 {{ t('settings.spaces') }}</option>
+          </select>
+        </div>
+
         <!-- Commit signature -->
         <div class="sp-row sp-row--checkbox">
           <label class="sp-checkbox-label" for="setting-signature">
@@ -234,6 +337,21 @@ function onKeyDown(e: KeyboardEvent) {
             <span>{{ t('settings.commitSignature') }}</span>
           </label>
           <span class="sp-hint">{{ t('settings.commitSignatureHint') }}</span>
+        </div>
+
+        <!-- Notifications -->
+        <div class="sp-row sp-row--checkbox">
+          <label class="sp-checkbox-label" for="setting-notifications">
+            <input
+              id="setting-notifications"
+              type="checkbox"
+              class="sp-checkbox"
+              :checked="settings.notifications"
+              @change="onNotificationsChange"
+            />
+            <span>{{ t('settings.notifications') }}</span>
+          </label>
+          <span class="sp-hint">{{ t('settings.notificationsHint') }}</span>
         </div>
       </div>
     </div>
@@ -374,5 +492,25 @@ function onKeyDown(e: KeyboardEvent) {
   font-size: 11px;
   color: var(--color-text-muted);
   padding-left: 24px;
+}
+
+.sp-range-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sp-range {
+  flex: 1;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+  height: 4px;
+}
+
+.sp-range-value {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  min-width: 36px;
+  text-align: right;
 }
 </style>

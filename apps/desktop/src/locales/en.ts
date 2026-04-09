@@ -209,6 +209,18 @@ const en: Locale = {
     diffDisplay: "Diff display",
     diffInline: "Inline (unified)",
     diffSideBySide: "Side by side",
+    pullMode: "Pull mode",
+    pullMerge: "Merge (default)",
+    pullRebase: "Rebase",
+    switchBehavior: "Switch behavior",
+    switchStash: "Auto stash",
+    switchAsk: "Ask",
+    switchRefuse: "Refuse if dirty",
+    fontSize: "Font size",
+    tabSize: "Tab size",
+    spaces: "spaces",
+    notifications: "Notifications",
+    notificationsHint: "Show toast notifications (sync, push, errors)",
   },
 } as const;
 
