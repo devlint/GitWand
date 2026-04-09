@@ -137,6 +137,13 @@ function onCommitKeydown(e: KeyboardEvent) {
       >
         {{ t('sidebar.tabGraph') }}
       </button>
+      <button
+        class="view-tab"
+        :class="{ 'view-tab--active': viewMode === 'prs' }"
+        @click="emit('changeView', 'prs')"
+      >
+        PRs
+      </button>
     </div>
 
     <!-- File sections -->

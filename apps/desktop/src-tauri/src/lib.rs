@@ -1909,6 +1909,266 @@ fn gh_merge_pr(cwd: String, number: i64, method: String) -> Result<(), String> {
     Ok(())
 }
 
+// ─── PR Detail & Diff (Phase 9.1) ─────────────────────────
+
+#[derive(serde::Serialize)]
+struct PullRequestDetail {
+    number: i64,
+    title: String,
+    body: String,
+    state: String,
+    author: String,
+    branch: String,
+    base: String,
+    draft: bool,
+    created_at: String,
+    updated_at: String,
+    merged_at: String,
+    url: String,
+    additions: i64,
+    deletions: i64,
+    changed_files: i64,
+    comments: i64,
+    review_comments: i64,
+    labels: Vec<String>,
+    reviewers: Vec<String>,
+    mergeable: String,
+    checks_status: String,
+}
+
+/// Get detailed PR information using `gh` CLI.
+#[tauri::command]
+fn gh_pr_detail(cwd: String, number: i64) -> Result<PullRequestDetail, String> {
+    let output = std::process::Command::new("gh")
+        .args([
+            "pr", "view", &number.to_string(),
+            "--json", "number,title,body,state,author,headRefName,baseRefName,isDraft,createdAt,updatedAt,mergedAt,url,additions,deletions,changedFiles,comments,reviewRequests,labels,reviews,mergeable,statusCheckRollup",
+        ])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("gh pr view: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!("gh pr view failed: {}", String::from_utf8_lossy(&output.stderr)));
+    }
+
+    let json = String::from_utf8_lossy(&output.stdout);
+    let json = json.trim();
+
+    let get_str = |key: &str| -> String {
+        extract_json_string(json, key).unwrap_or_default()
+    };
+    let get_num = |key: &str| -> i64 {
+        let needle = format!("\"{}\"", key);
+        if let Some(pos) = json.find(&needle) {
+            let rest = &json[pos + needle.len()..];
+            if let Some(colon) = rest.find(':') {
+                let after = rest[colon + 1..].trim_start();
+                let end = after.find(|c: char| !c.is_ascii_digit() && c != '-').unwrap_or(after.len());
+                return after[..end].parse().unwrap_or(0);
+            }
+        }
+        0
+    };
+    let get_bool = |key: &str| -> bool {
+        let needle = format!("\"{}\"", key);
+        if let Some(pos) = json.find(&needle) {
+            let rest = &json[pos + needle.len()..];
+            if let Some(colon) = rest.find(':') {
+                let after = rest[colon + 1..].trim_start();
+                return after.starts_with("true");
+            }
+        }
+        false
+    };
+
+    // Parse author.login
+    let author = if let Some(pos) = json.find("\"author\"") {
+        let rest = &json[pos..];
+        extract_json_string(rest, "login").unwrap_or_default()
+    } else { String::new() };
+
+    // Parse labels array
+    let mut labels = Vec::new();
+    if let Some(pos) = json.find("\"labels\"") {
+        let rest = &json[pos..];
+        if let Some(arr_start) = rest.find('[') {
+            if let Some(arr_end) = rest[arr_start..].find(']') {
+                let arr = &rest[arr_start..arr_start + arr_end + 1];
+                let mut search_start = 0;
+                while let Some(name_pos) = arr[search_start..].find("\"name\"") {
+                    let abs_pos = search_start + name_pos;
+                    if let Some(val) = extract_json_string(&arr[abs_pos..], "name") {
+                        labels.push(val);
+                    }
+                    search_start = abs_pos + 6;
+                }
+            }
+        }
+    }
+
+    // Parse reviewers from reviewRequests
+    let mut reviewers = Vec::new();
+    if let Some(pos) = json.find("\"reviewRequests\"") {
+        let rest = &json[pos..];
+        if let Some(arr_start) = rest.find('[') {
+            if let Some(arr_end) = rest[arr_start..].find(']') {
+                let arr = &rest[arr_start..arr_start + arr_end + 1];
+                let mut search_start = 0;
+                while let Some(login_pos) = arr[search_start..].find("\"login\"") {
+                    let abs_pos = search_start + login_pos;
+                    if let Some(val) = extract_json_string(&arr[abs_pos..], "login") {
+                        reviewers.push(val);
+                    }
+                    search_start = abs_pos + 7;
+                }
+            }
+        }
+    }
+
+    // Parse comments count
+    let comments = if let Some(pos) = json.find("\"comments\"") {
+        let rest = &json[pos..];
+        if let Some(arr_start) = rest.find('[') {
+            if let Some(arr_end) = rest[arr_start..].find(']') {
+                let arr = &rest[arr_start..arr_start + arr_end + 1];
+                arr.matches('{').count() as i64
+            } else { 0 }
+        } else { 0 }
+    } else { 0 };
+
+    // Parse review comments count from reviews
+    let review_comments = if let Some(pos) = json.find("\"reviews\"") {
+        let rest = &json[pos..];
+        if let Some(arr_start) = rest.find('[') {
+            if let Some(arr_end) = rest[arr_start..].find(']') {
+                let arr = &rest[arr_start..arr_start + arr_end + 1];
+                arr.matches('{').count() as i64
+            } else { 0 }
+        } else { 0 }
+    } else { 0 };
+
+    // Parse checks status from statusCheckRollup
+    let checks_status = if let Some(pos) = json.find("\"statusCheckRollup\"") {
+        let rest = &json[pos..];
+        if rest.contains("\"FAILURE\"") || rest.contains("\"ERROR\"") {
+            "failure".to_string()
+        } else if rest.contains("\"PENDING\"") || rest.contains("\"QUEUED\"") || rest.contains("\"IN_PROGRESS\"") {
+            "pending".to_string()
+        } else if rest.contains("\"SUCCESS\"") {
+            "success".to_string()
+        } else {
+            "unknown".to_string()
+        }
+    } else {
+        "unknown".to_string()
+    };
+
+    Ok(PullRequestDetail {
+        number: get_num("number"),
+        title: get_str("title"),
+        body: get_str("body"),
+        state: get_str("state"),
+        author,
+        branch: get_str("headRefName"),
+        base: get_str("baseRefName"),
+        draft: get_bool("isDraft"),
+        created_at: get_str("createdAt"),
+        updated_at: get_str("updatedAt"),
+        merged_at: get_str("mergedAt"),
+        url: get_str("url"),
+        additions: get_num("additions"),
+        deletions: get_num("deletions"),
+        changed_files: get_num("changedFiles"),
+        comments,
+        review_comments,
+        labels,
+        reviewers,
+        mergeable: get_str("mergeable"),
+        checks_status,
+    })
+}
+
+/// Get the diff of a PR using `gh` CLI.
+#[tauri::command]
+fn gh_pr_diff(cwd: String, number: i64) -> Result<String, String> {
+    let output = std::process::Command::new("gh")
+        .args(["pr", "diff", &number.to_string()])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("gh pr diff: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!("gh pr diff failed: {}", String::from_utf8_lossy(&output.stderr)));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+/// Get CI checks for a PR using `gh` CLI.
+#[tauri::command]
+fn gh_pr_checks(cwd: String, number: i64) -> Result<Vec<CICheck>, String> {
+    let output = std::process::Command::new("gh")
+        .args([
+            "pr", "checks", &number.to_string(),
+            "--json", "name,state,conclusion,detailsUrl",
+        ])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("gh pr checks: {}", e))?;
+
+    if !output.status.success() {
+        // Some repos have no checks — not a fatal error
+        return Ok(Vec::new());
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let trimmed = stdout.trim();
+    if trimmed == "[]" || trimmed.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut checks = Vec::new();
+    let mut depth = 0;
+    let mut obj_start = None;
+    for (i, ch) in trimmed.char_indices() {
+        match ch {
+            '{' => {
+                if depth == 1 { obj_start = Some(i); }
+                depth += 1;
+            }
+            '}' => {
+                depth -= 1;
+                if depth == 1 {
+                    if let Some(start) = obj_start {
+                        let obj = &trimmed[start..=i];
+                        checks.push(CICheck {
+                            name: extract_json_string(obj, "name").unwrap_or_default(),
+                            state: extract_json_string(obj, "state").unwrap_or_default(),
+                            conclusion: extract_json_string(obj, "conclusion").unwrap_or_default(),
+                            details_url: extract_json_string(obj, "detailsUrl").unwrap_or_default(),
+                        });
+                    }
+                    obj_start = None;
+                }
+            }
+            '[' if depth == 0 => { depth = 1; }
+            ']' if depth == 1 => { depth = 0; }
+            _ => {}
+        }
+    }
+
+    Ok(checks)
+}
+
+#[derive(serde::Serialize)]
+struct CICheck {
+    name: String,
+    state: String,
+    conclusion: String,
+    details_url: String,
+}
+
 // ─── Terminal Command Execution (Phase 8.5) ───────────────
 
 #[derive(serde::Serialize)]
@@ -2377,6 +2637,9 @@ pub fn run() {
             gh_create_pr,
             gh_checkout_pr,
             gh_merge_pr,
+            gh_pr_detail,
+            gh_pr_diff,
+            gh_pr_checks,
             git_exec,
             git_autocomplete,
         ])

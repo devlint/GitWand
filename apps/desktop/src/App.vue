@@ -11,6 +11,7 @@ import CommitDiffViewer from "./components/CommitDiffViewer.vue";
 import FileHistoryViewer from "./components/FileHistoryViewer.vue";
 import CommitGraph from "./components/CommitGraph.vue";
 import SettingsPanel from "./components/SettingsPanel.vue";
+import PullRequestPanel from "./components/PullRequestPanel.vue";
 import EditCommitOverlay from "./components/EditCommitOverlay.vue";
 import type { GitLogEntry } from "./utils/backend";
 import { getPersistedDiffMode, persistDiffMode, type DiffMode } from "./utils/diffMode";
@@ -712,6 +713,15 @@ onUnmounted(() => {
             :selected-hash="selectedCommitHash"
             :current-branch="branchDisplay"
             @select-commit="(hash) => { selectCommit(hash); viewMode = 'history'; }"
+          />
+
+          <!-- Pull Requests view -->
+          <PullRequestPanel
+            v-else-if="viewMode === 'prs'"
+            :cwd="repoFolderPath ?? ''"
+            @refresh="repoRefresh"
+            @close="viewMode = 'changes'"
+            @navigate-commit="(hash) => { selectCommit(hash); viewMode = 'history'; }"
           />
         </template>
       </main>

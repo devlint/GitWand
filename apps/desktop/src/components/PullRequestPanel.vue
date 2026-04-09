@@ -5,10 +5,21 @@ import {
   ghCreatePr,
   ghCheckoutPr,
   ghMergePr,
+  ghPrDetail,
+  ghPrDiff,
+  ghPrChecks,
   gitRemoteInfo,
   type PullRequest,
+  type PullRequestDetail,
+  type CICheck,
   type RemoteInfo,
+  type GitDiff,
+  type DiffHunk,
+  type DiffLine,
 } from "../utils/backend";
+import DiffViewer from "./DiffViewer.vue";
+import type { DiffMode } from "../utils/diffMode";
+import { getPersistedDiffMode } from "../utils/diffMode";
 
 const props = defineProps<{
   cwd: string;
@@ -17,6 +28,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: "refresh"): void;
   (e: "close"): void;
+  (e: "navigate-commit", hash: string): void;
 }>();
 
 // State
@@ -39,7 +51,114 @@ const isCreating = ref(false);
 const mergingPr = ref<PullRequest | null>(null);
 const mergeMethod = ref<"merge" | "squash" | "rebase">("merge");
 
+// Detail view
+const expandedPrNumber = ref<number | null>(null);
+const prDetail = ref<PullRequestDetail | null>(null);
+const prChecks = ref<CICheck[]>([]);
+const prDiffRaw = ref<string>("");
+const prDiffFiles = ref<GitDiff[]>([]);
+const detailLoading = ref(false);
+const detailError = ref<string | null>(null);
+const detailTab = ref<"info" | "diff" | "checks">("info");
+const selectedDiffFile = ref<string | null>(null);
+const diffMode = ref<DiffMode>(getPersistedDiffMode());
+
 const isGitHub = computed(() => remote.value?.provider === "github");
+
+// ─── Parse unified diff into GitDiff[] ─────────────────
+
+function parseUnifiedDiff(rawDiff: string): GitDiff[] {
+  const files: GitDiff[] = [];
+  if (!rawDiff.trim()) return files;
+
+  const lines = rawDiff.split("\n");
+  let currentFile: GitDiff | null = null;
+  let currentHunk: DiffHunk | null = null;
+  let oldLine = 0;
+  let newLine = 0;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    // New file header: diff --git a/... b/...
+    if (line.startsWith("diff --git ")) {
+      if (currentFile) files.push(currentFile);
+      const match = line.match(/diff --git a\/(.+) b\/(.+)/);
+      const path = match ? match[2] : "unknown";
+      currentFile = { path, hunks: [] };
+      currentHunk = null;
+      continue;
+    }
+
+    // Skip diff metadata lines
+    if (
+      line.startsWith("index ") ||
+      line.startsWith("--- ") ||
+      line.startsWith("+++ ") ||
+      line.startsWith("old mode ") ||
+      line.startsWith("new mode ") ||
+      line.startsWith("new file ") ||
+      line.startsWith("deleted file ") ||
+      line.startsWith("similarity index ") ||
+      line.startsWith("rename from ") ||
+      line.startsWith("rename to ") ||
+      line.startsWith("Binary files ")
+    ) {
+      continue;
+    }
+
+    // Hunk header
+    const hunkMatch = line.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)/);
+    if (hunkMatch && currentFile) {
+      const oldStart = parseInt(hunkMatch[1], 10);
+      const oldCount = parseInt(hunkMatch[2] ?? "1", 10);
+      const newStart = parseInt(hunkMatch[3], 10);
+      const newCount = parseInt(hunkMatch[4] ?? "1", 10);
+      currentHunk = {
+        header: line,
+        oldStart,
+        oldCount,
+        newStart,
+        newCount,
+        lines: [],
+      };
+      currentFile.hunks.push(currentHunk);
+      oldLine = oldStart;
+      newLine = newStart;
+      continue;
+    }
+
+    // Diff lines
+    if (currentHunk) {
+      if (line.startsWith("+")) {
+        currentHunk.lines.push({
+          type: "add",
+          content: line.substring(1),
+          newLineNo: newLine++,
+        });
+      } else if (line.startsWith("-")) {
+        currentHunk.lines.push({
+          type: "delete",
+          content: line.substring(1),
+          oldLineNo: oldLine++,
+        });
+      } else if (line.startsWith(" ") || line === "") {
+        currentHunk.lines.push({
+          type: "context",
+          content: line.startsWith(" ") ? line.substring(1) : line,
+          oldLineNo: oldLine++,
+          newLineNo: newLine++,
+        });
+      }
+      // Skip "\ No newline at end of file"
+    }
+  }
+
+  if (currentFile) files.push(currentFile);
+  return files;
+}
+
+// ─── Data loading ──────────────────────────────────────
 
 async function loadRemote() {
   try {
@@ -62,6 +181,69 @@ async function loadPrs() {
     loading.value = false;
   }
 }
+
+async function toggleDetail(prNumber: number) {
+  if (expandedPrNumber.value === prNumber) {
+    expandedPrNumber.value = null;
+    prDetail.value = null;
+    prChecks.value = [];
+    prDiffRaw.value = "";
+    prDiffFiles.value = [];
+    selectedDiffFile.value = null;
+    return;
+  }
+
+  expandedPrNumber.value = prNumber;
+  detailTab.value = "info";
+  detailLoading.value = true;
+  detailError.value = null;
+  prDetail.value = null;
+  prChecks.value = [];
+  prDiffRaw.value = "";
+  prDiffFiles.value = [];
+  selectedDiffFile.value = null;
+
+  try {
+    const [detail, checks] = await Promise.all([
+      ghPrDetail(props.cwd, prNumber),
+      ghPrChecks(props.cwd, prNumber).catch(() => [] as CICheck[]),
+    ]);
+    prDetail.value = detail;
+    prChecks.value = checks;
+  } catch (err: any) {
+    detailError.value = err.message;
+  } finally {
+    detailLoading.value = false;
+  }
+}
+
+async function loadDiff() {
+  if (!expandedPrNumber.value || prDiffRaw.value) return;
+  detailLoading.value = true;
+  try {
+    prDiffRaw.value = await ghPrDiff(props.cwd, expandedPrNumber.value);
+    prDiffFiles.value = parseUnifiedDiff(prDiffRaw.value);
+    if (prDiffFiles.value.length > 0) {
+      selectedDiffFile.value = prDiffFiles.value[0].path;
+    }
+  } catch (err: any) {
+    detailError.value = err.message;
+  } finally {
+    detailLoading.value = false;
+  }
+}
+
+// Load diff when switching to diff tab
+watch(detailTab, (tab) => {
+  if (tab === "diff") loadDiff();
+});
+
+const selectedDiff = computed<GitDiff | null>(() => {
+  if (!selectedDiffFile.value) return null;
+  return prDiffFiles.value.find((f) => f.path === selectedDiffFile.value) ?? null;
+});
+
+// ─── Actions ───────────────────────────────────────────
 
 async function createPr() {
   if (!props.cwd || !newPrTitle.value.trim()) return;
@@ -131,6 +313,43 @@ function timeAgo(dateStr: string): string {
   }
 }
 
+function mergeableIcon(status: string): string {
+  switch (status.toUpperCase()) {
+    case "MERGEABLE": return "✅";
+    case "CONFLICTING": return "⚠️";
+    case "UNKNOWN": return "❓";
+    default: return "—";
+  }
+}
+
+function checkIcon(check: CICheck): string {
+  const c = (check.conclusion || check.state || "").toUpperCase();
+  if (c === "SUCCESS") return "✅";
+  if (c === "FAILURE" || c === "ERROR" || c === "CANCELLED") return "❌";
+  if (c === "PENDING" || c === "IN_PROGRESS" || c === "QUEUED") return "⏳";
+  if (c === "SKIPPED") return "⏭️";
+  return "❓";
+}
+
+function checksStatusIcon(status: string): string {
+  const s = status.toUpperCase();
+  if (s === "SUCCESS" || s === "PASS") return "✅";
+  if (s === "FAILURE" || s === "FAIL" || s === "ERROR") return "❌";
+  if (s === "PENDING") return "⏳";
+  return "—";
+}
+
+function renderBody(body: string): string {
+  // Simple markdown-ish rendering: preserve newlines, bold, code
+  return body
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/`(.+?)`/g, '<code class="pr-inline-code">$1</code>')
+    .replace(/\n/g, "<br />");
+}
+
 onMounted(() => {
   loadRemote();
   loadPrs();
@@ -140,6 +359,7 @@ watch(filterState, loadPrs);
 watch(() => props.cwd, () => {
   loadRemote();
   loadPrs();
+  expandedPrNumber.value = null;
 });
 </script>
 
@@ -222,12 +442,20 @@ watch(() => props.cwd, () => {
     </div>
 
     <div v-else class="pr-list">
-      <div v-for="pr in prs" :key="pr.number" class="pr-item">
+      <div v-for="pr in prs" :key="pr.number" class="pr-item" :class="{ 'pr-item-expanded': expandedPrNumber === pr.number }">
         <div class="pr-item-header">
           <span class="pr-number">#{{ pr.number }}</span>
-          <span class="pr-title" @click="openInBrowser(pr.url)">{{ pr.title }}</span>
+          <span class="pr-title" @click="toggleDetail(pr.number)">{{ pr.title }}</span>
           <span v-if="pr.draft" class="pr-badge pr-badge-draft">Draft</span>
           <span v-for="label in pr.labels" :key="label" class="pr-badge">{{ label }}</span>
+          <button
+            class="btn-expand"
+            :class="{ 'btn-expand-active': expandedPrNumber === pr.number }"
+            @click="toggleDetail(pr.number)"
+            :title="expandedPrNumber === pr.number ? 'Collapse' : 'Expand details'"
+          >
+            ▸
+          </button>
         </div>
         <div class="pr-item-meta">
           <span>{{ pr.author }}</span>
@@ -254,6 +482,176 @@ watch(() => props.cwd, () => {
             ↗
           </button>
         </div>
+
+        <!-- ─── Expanded Detail View ─── -->
+        <div v-if="expandedPrNumber === pr.number" class="pr-detail">
+          <div v-if="detailLoading && !prDetail" class="pr-detail-loading">
+            Loading PR details…
+          </div>
+          <div v-else-if="detailError && !prDetail" class="pr-error">{{ detailError }}</div>
+          <template v-else-if="prDetail">
+            <!-- Detail Tabs -->
+            <div class="pr-detail-tabs">
+              <button
+                :class="['pr-detail-tab', { active: detailTab === 'info' }]"
+                @click="detailTab = 'info'"
+              >
+                📋 Info
+              </button>
+              <button
+                :class="['pr-detail-tab', { active: detailTab === 'diff' }]"
+                @click="detailTab = 'diff'"
+              >
+                📝 Diff
+                <span v-if="prDetail.changedFiles" class="tab-badge">{{ prDetail.changedFiles }}</span>
+              </button>
+              <button
+                :class="['pr-detail-tab', { active: detailTab === 'checks' }]"
+                @click="detailTab = 'checks'"
+              >
+                {{ checksStatusIcon(prDetail.checksStatus) }} CI
+                <span v-if="prChecks.length" class="tab-badge">{{ prChecks.length }}</span>
+              </button>
+            </div>
+
+            <!-- ─── Info Tab ─── -->
+            <div v-if="detailTab === 'info'" class="pr-detail-content">
+              <!-- Summary row -->
+              <div class="pr-detail-summary">
+                <div class="pr-detail-stat">
+                  <span class="stat-label">Mergeable</span>
+                  <span>{{ mergeableIcon(prDetail.mergeable) }} {{ prDetail.mergeable }}</span>
+                </div>
+                <div class="pr-detail-stat">
+                  <span class="stat-label">Files changed</span>
+                  <span>{{ prDetail.changedFiles }}</span>
+                </div>
+                <div class="pr-detail-stat">
+                  <span class="stat-label">Changes</span>
+                  <span>
+                    <span class="pr-additions">+{{ prDetail.additions }}</span>
+                    <span class="pr-deletions"> -{{ prDetail.deletions }}</span>
+                  </span>
+                </div>
+                <div class="pr-detail-stat">
+                  <span class="stat-label">Comments</span>
+                  <span>{{ prDetail.comments }} + {{ prDetail.reviewComments }} review</span>
+                </div>
+              </div>
+
+              <!-- Reviewers -->
+              <div v-if="prDetail.reviewers.length" class="pr-detail-reviewers">
+                <span class="stat-label">Reviewers</span>
+                <div class="reviewer-list">
+                  <span
+                    v-for="reviewer in prDetail.reviewers"
+                    :key="reviewer"
+                    class="reviewer-badge"
+                  >
+                    {{ reviewer }}
+                  </span>
+                </div>
+              </div>
+
+              <!-- Body -->
+              <div v-if="prDetail.body" class="pr-detail-body">
+                <div class="pr-body-content" v-html="renderBody(prDetail.body)" />
+              </div>
+              <div v-else class="pr-detail-body pr-detail-empty">No description provided.</div>
+
+              <!-- Cross-links -->
+              <div class="pr-detail-links">
+                <span class="stat-label">Links</span>
+                <div class="pr-links-row">
+                  <button class="btn btn-xs" @click="openInBrowser(prDetail.url)">
+                    🌐 View on GitHub
+                  </button>
+                  <button class="btn btn-xs" @click="openInBrowser(prDetail.url + '/commits')">
+                    📦 Commits
+                  </button>
+                  <button class="btn btn-xs" @click="openInBrowser(prDetail.url + '/files')">
+                    📄 Files changed
+                  </button>
+                  <button
+                    v-if="prDetail.checksStatus"
+                    class="btn btn-xs"
+                    @click="openInBrowser(prDetail.url + '/checks')"
+                  >
+                    🔗 CI Runs
+                  </button>
+                </div>
+              </div>
+
+              <!-- Timestamps -->
+              <div class="pr-detail-timestamps">
+                <span>Created {{ timeAgo(prDetail.createdAt) }}</span>
+                <span v-if="prDetail.mergedAt"> · Merged {{ timeAgo(prDetail.mergedAt) }}</span>
+                <span v-else> · Updated {{ timeAgo(prDetail.updatedAt) }}</span>
+              </div>
+            </div>
+
+            <!-- ─── Diff Tab ─── -->
+            <div v-if="detailTab === 'diff'" class="pr-detail-content pr-detail-diff">
+              <div v-if="detailLoading && !prDiffRaw" class="pr-detail-loading">
+                Loading diff…
+              </div>
+              <template v-else-if="prDiffFiles.length > 0">
+                <!-- File list sidebar -->
+                <div class="pr-diff-sidebar">
+                  <div class="pr-diff-file-count">
+                    {{ prDiffFiles.length }} file{{ prDiffFiles.length !== 1 ? "s" : "" }} changed
+                  </div>
+                  <div
+                    v-for="file in prDiffFiles"
+                    :key="file.path"
+                    :class="['pr-diff-file-entry', { active: selectedDiffFile === file.path }]"
+                    @click="selectedDiffFile = file.path"
+                  >
+                    <span class="pr-diff-file-name">{{ file.path.split('/').pop() }}</span>
+                    <span class="pr-diff-file-path">{{ file.path }}</span>
+                  </div>
+                </div>
+                <!-- Diff viewer -->
+                <div class="pr-diff-viewer-wrapper">
+                  <DiffViewer
+                    v-if="selectedDiff"
+                    :diff="selectedDiff"
+                    :file-path="selectedDiffFile"
+                    :diff-mode="diffMode"
+                    @update:diff-mode="diffMode = $event"
+                  />
+                </div>
+              </template>
+              <div v-else class="pr-detail-empty">No diff available.</div>
+            </div>
+
+            <!-- ─── Checks Tab ─── -->
+            <div v-if="detailTab === 'checks'" class="pr-detail-content">
+              <div v-if="prChecks.length === 0" class="pr-detail-empty">
+                No CI checks found for this PR.
+              </div>
+              <div v-else class="pr-checks-list">
+                <div
+                  v-for="check in prChecks"
+                  :key="check.name"
+                  class="pr-check-item"
+                >
+                  <span class="pr-check-icon">{{ checkIcon(check) }}</span>
+                  <span class="pr-check-name">{{ check.name }}</span>
+                  <span class="pr-check-state">{{ check.conclusion || check.state }}</span>
+                  <button
+                    v-if="check.detailsUrl"
+                    class="btn btn-xs"
+                    @click="openInBrowser(check.detailsUrl)"
+                    title="View CI run details"
+                  >
+                    🔗
+                  </button>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
       </div>
     </div>
   </div>
@@ -268,7 +666,7 @@ watch(() => props.cwd, () => {
   background: var(--bg-secondary, #1e1e2e);
   border-radius: 8px;
   border: 1px solid var(--border-color, #313244);
-  max-height: 500px;
+  max-height: 80vh;
   overflow-y: auto;
 }
 
@@ -418,6 +816,11 @@ watch(() => props.cwd, () => {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  transition: border-color 0.15s;
+}
+
+.pr-item-expanded {
+  border-color: var(--color-accent, #cba6f7);
 }
 
 .pr-item-header {
@@ -459,6 +862,20 @@ watch(() => props.cwd, () => {
   border-color: var(--text-muted, #6c7086);
 }
 
+.btn-expand {
+  background: none;
+  border: none;
+  color: var(--text-muted, #6c7086);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 4px;
+  transition: transform 0.15s, color 0.15s;
+  line-height: 1;
+}
+
+.btn-expand:hover { color: var(--color-accent, #cba6f7); }
+.btn-expand-active { transform: rotate(90deg); color: var(--color-accent, #cba6f7); }
+
 .pr-item-meta {
   display: flex;
   align-items: center;
@@ -484,6 +901,249 @@ watch(() => props.cwd, () => {
   display: flex;
   gap: 4px;
   margin-top: 2px;
+}
+
+/* ─── Detail View ─── */
+.pr-detail {
+  margin-top: 8px;
+  border-top: 1px solid var(--border-color, #313244);
+  padding-top: 8px;
+}
+
+.pr-detail-loading {
+  font-size: 12px;
+  color: var(--text-muted, #6c7086);
+  text-align: center;
+  padding: 12px;
+}
+
+.pr-detail-tabs {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--border-color, #313244);
+  padding-bottom: 0;
+}
+
+.pr-detail-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted, #6c7086);
+  font-size: 12px;
+  padding: 6px 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.pr-detail-tab:hover { color: inherit; }
+.pr-detail-tab.active {
+  color: var(--color-accent, #cba6f7);
+  border-bottom-color: var(--color-accent, #cba6f7);
+}
+
+.tab-badge {
+  font-size: 10px;
+  background: var(--bg-tertiary, #11111b);
+  border-radius: 8px;
+  padding: 0 5px;
+  min-width: 16px;
+  text-align: center;
+}
+
+.pr-detail-content {
+  font-size: 12px;
+}
+
+.pr-detail-empty {
+  color: var(--text-muted, #6c7086);
+  font-style: italic;
+  padding: 8px;
+}
+
+/* Info tab */
+.pr-detail-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.pr-detail-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  background: var(--bg-tertiary, #11111b);
+  border-radius: 4px;
+}
+
+.stat-label {
+  font-size: 10px;
+  color: var(--text-muted, #6c7086);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.pr-detail-reviewers {
+  margin-bottom: 10px;
+}
+
+.reviewer-list {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.reviewer-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  background: rgba(203, 166, 247, 0.15);
+  color: var(--color-accent, #cba6f7);
+  border: 1px solid rgba(203, 166, 247, 0.3);
+}
+
+.pr-detail-body {
+  margin-bottom: 10px;
+  padding: 8px;
+  background: var(--bg-tertiary, #11111b);
+  border-radius: 4px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.pr-body-content {
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.pr-body-content :deep(.pr-inline-code) {
+  background: rgba(203, 166, 247, 0.15);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 11px;
+}
+
+.pr-detail-links {
+  margin-bottom: 10px;
+}
+
+.pr-links-row {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.pr-detail-timestamps {
+  font-size: 11px;
+  color: var(--text-muted, #6c7086);
+  padding-top: 6px;
+  border-top: 1px solid var(--border-color, #313244);
+}
+
+/* Diff tab */
+.pr-detail-diff {
+  display: flex;
+  gap: 8px;
+  max-height: 400px;
+}
+
+.pr-diff-sidebar {
+  width: 200px;
+  min-width: 160px;
+  max-height: 400px;
+  overflow-y: auto;
+  border-right: 1px solid var(--border-color, #313244);
+  padding-right: 8px;
+  flex-shrink: 0;
+}
+
+.pr-diff-file-count {
+  font-size: 11px;
+  color: var(--text-muted, #6c7086);
+  margin-bottom: 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border-color, #313244);
+}
+
+.pr-diff-file-entry {
+  padding: 4px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+  margin-bottom: 2px;
+  transition: background 0.1s;
+}
+
+.pr-diff-file-entry:hover { background: var(--bg-hover, rgba(255, 255, 255, 0.05)); }
+.pr-diff-file-entry.active { background: rgba(203, 166, 247, 0.15); }
+
+.pr-diff-file-name {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pr-diff-file-path {
+  display: block;
+  font-size: 10px;
+  color: var(--text-muted, #6c7086);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pr-diff-viewer-wrapper {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  max-height: 400px;
+}
+
+/* Checks tab */
+.pr-checks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pr-check-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: var(--bg-tertiary, #11111b);
+  border-radius: 4px;
+}
+
+.pr-check-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.pr-check-name {
+  flex: 1;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pr-check-state {
+  font-size: 11px;
+  color: var(--text-muted, #6c7086);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
 }
 
 /* Button styles */

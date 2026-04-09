@@ -404,13 +404,14 @@ interface DecisionTrace {
 
 **Positionnement** : GitHub et GitLab ont des interfaces de review correctes mais déconnectées du contexte local. GitWand connaît *votre* repo en profondeur — historique, conflits passés, patterns de merge — et peut apporter de l'intelligence là où les autres affichent juste un diff statique.
 
-#### 9.1 — Visualisation de PR
+#### 9.1 — Visualisation de PR ✅
 
-- ⬜ **Liste des PRs** : Toutes les PRs ouvertes (GitHub/GitLab), avec statut CI, auteur, âge, nombre de commentaires
-- ⬜ **Diff de PR complet** : Affichage du diff de la PR dans le diff viewer GitWand (toutes les forces de Phase 6 : SBS, word-diff, minimap, collapse, syntax highlighting)
-- ⬜ **Résumé de PR** : Titre, description, reviewers assignés, labels, checks CI — vue agrégée
-- ⬜ **Checkout local** : Basculer sur la branche de la PR en un clic pour tester localement
-- ⬜ **Liens croisés** : Lien commit ↔ PR ↔ CI run pour naviguer sans quitter l'app
+- ✅ **Liste des PRs** : Toutes les PRs ouvertes (GitHub/GitLab), avec statut CI, auteur, âge, nombre de commentaires
+- ✅ **Diff de PR complet** : Affichage du diff de la PR dans le diff viewer GitWand (toutes les forces de Phase 6 : SBS, word-diff, minimap, collapse, syntax highlighting) — parser unified diff intégré + DiffViewer réutilisé
+- ✅ **Résumé de PR enrichi** : Titre, description, reviewers assignés, labels, checks CI, mergeable status — vue agrégée avec onglets Info/Diff/CI
+- ✅ **Checkout local** : Basculer sur la branche de la PR en un clic pour tester localement
+- ✅ **Liens croisés** : Lien commit ↔ PR ↔ CI run pour naviguer sans quitter l'app (boutons vers GitHub commits/files/checks + navigation interne)
+- ✅ **Auth Claude Connect** : Flow de connexion Claude simplifié dans les settings IA — mode Connect (ouverture console + paste clé) et mode Clé API manuelle, avec état connecté/déconnecté et validation
 
 #### 9.2 — Commentaires inline
 

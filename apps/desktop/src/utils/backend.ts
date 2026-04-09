@@ -1277,6 +1277,125 @@ export async function ghMergePr(cwd: string, number: number, method: string = "m
   throw new Error("PR merge not available in dev mode");
 }
 
+// ─── PR Detail, Diff & Checks (Phase 9.1) ──────────────────
+
+export interface PullRequestDetail {
+  number: number;
+  title: string;
+  body: string;
+  state: string;
+  author: string;
+  branch: string;
+  base: string;
+  draft: boolean;
+  createdAt: string;
+  updatedAt: string;
+  mergedAt: string;
+  url: string;
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  comments: number;
+  reviewComments: number;
+  labels: string[];
+  reviewers: string[];
+  mergeable: string;
+  checksStatus: string;
+}
+
+export interface CICheck {
+  name: string;
+  state: string;
+  conclusion: string;
+  detailsUrl: string;
+}
+
+/**
+ * Get detailed PR information (requires `gh` CLI).
+ */
+export async function ghPrDetail(cwd: string, number: number): Promise<PullRequestDetail> {
+  if (isTauri()) {
+    const raw = await tauriInvoke<{
+      number: number;
+      title: string;
+      body: string;
+      state: string;
+      author: string;
+      branch: string;
+      base: string;
+      draft: boolean;
+      created_at: string;
+      updated_at: string;
+      merged_at: string;
+      url: string;
+      additions: number;
+      deletions: number;
+      changed_files: number;
+      comments: number;
+      review_comments: number;
+      labels: string[];
+      reviewers: string[];
+      mergeable: string;
+      checks_status: string;
+    }>("gh_pr_detail", { cwd, number });
+    return {
+      number: raw.number,
+      title: raw.title,
+      body: raw.body,
+      state: raw.state,
+      author: raw.author,
+      branch: raw.branch,
+      base: raw.base,
+      draft: raw.draft,
+      createdAt: raw.created_at,
+      updatedAt: raw.updated_at,
+      mergedAt: raw.merged_at,
+      url: raw.url,
+      additions: raw.additions,
+      deletions: raw.deletions,
+      changedFiles: raw.changed_files,
+      comments: raw.comments,
+      reviewComments: raw.review_comments,
+      labels: raw.labels,
+      reviewers: raw.reviewers,
+      mergeable: raw.mergeable,
+      checksStatus: raw.checks_status,
+    };
+  }
+  throw new Error("PR detail not available in dev mode");
+}
+
+/**
+ * Get the diff of a PR (requires `gh` CLI).
+ */
+export async function ghPrDiff(cwd: string, number: number): Promise<string> {
+  if (isTauri()) {
+    return await tauriInvoke<string>("gh_pr_diff", { cwd, number });
+  }
+  throw new Error("PR diff not available in dev mode");
+}
+
+/**
+ * Get CI checks for a PR (requires `gh` CLI).
+ */
+export async function ghPrChecks(cwd: string, number: number): Promise<CICheck[]> {
+  if (isTauri()) {
+    const raw = await tauriInvoke<Array<{
+      name: string;
+      state: string;
+      conclusion: string;
+      details_url: string;
+    }>>("gh_pr_checks", { cwd, number });
+    return raw.map((c) => ({
+      name: c.name,
+      state: c.state,
+      conclusion: c.conclusion,
+      detailsUrl: c.details_url,
+    }));
+  }
+  throw new Error("PR checks not available in dev mode");
+}
+
 // ─── Merge Preview (Phase 8.1) ─────────────────────────────
 
 /** Résultat brut d'un fichier analysé par preview_merge (Rust) */

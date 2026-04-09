@@ -237,6 +237,52 @@ const maskedApiKey = computed(() => {
   return key.slice(0, 4) + "••••" + key.slice(-4);
 });
 
+// ─── Claude OAuth-like Connect flow ─────────────────────
+const claudeAuthMode = ref<"apikey" | "connect">(
+  settings.value.aiApiKey ? "apikey" : "connect",
+);
+const claudeConnectStep = ref<"idle" | "waiting" | "success" | "error">("idle");
+const claudeConnectError = ref<string | null>(null);
+
+function startClaudeConnect() {
+  // Open the Anthropic console key creation page
+  window.open("https://console.anthropic.com/settings/keys", "_blank");
+  claudeConnectStep.value = "waiting";
+  claudeConnectError.value = null;
+}
+
+function validateAndSaveClaudeKey(key: string) {
+  const trimmed = key.trim();
+  if (!trimmed) {
+    claudeConnectError.value = "Veuillez coller votre clé API";
+    claudeConnectStep.value = "error";
+    return;
+  }
+  if (!trimmed.startsWith("sk-ant-")) {
+    claudeConnectError.value = "La clé doit commencer par sk-ant-...";
+    claudeConnectStep.value = "error";
+    return;
+  }
+  updateSetting("aiApiKey", trimmed);
+  claudeConnectStep.value = "success";
+  claudeConnectError.value = null;
+  // Auto-dismiss after 2s
+  setTimeout(() => {
+    if (claudeConnectStep.value === "success") {
+      claudeConnectStep.value = "idle";
+      claudeAuthMode.value = "apikey";
+    }
+  }, 2000);
+}
+
+function disconnectClaude() {
+  updateSetting("aiApiKey", "");
+  claudeAuthMode.value = "connect";
+  claudeConnectStep.value = "idle";
+}
+
+const claudeConnectKeyInput = ref("");
+
 onMounted(() => {
   detectOllama();
 });
@@ -473,28 +519,113 @@ function onKeyDown(e: KeyboardEvent) {
 
             <!-- Claude provider -->
             <template v-if="settings.aiProvider === 'claude'">
+              <!-- Auth mode selector -->
               <div class="sp-row">
-                <label class="sp-label" for="setting-ai-key">Clé API Anthropic</label>
-                <div class="sp-key-row">
-                  <input
-                    id="setting-ai-key"
-                    class="sp-input mono sp-input--key"
-                    :type="showApiKey ? 'text' : 'password'"
-                    :value="settings.aiApiKey"
-                    @input="updateSetting('aiApiKey', ($event.target as HTMLInputElement).value)"
-                    placeholder="sk-ant-api03-..."
-                  />
-                  <button class="sp-key-toggle" @click="showApiKey = !showApiKey" :title="showApiKey ? 'Masquer' : 'Afficher'">
-                    <svg v-if="showApiKey" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
-                      <path d="M2 8s2.5-4 6-4 6 4 6 4-2.5 4-6 4-6-4-6-4z"/><circle cx="8" cy="8" r="2"/>
-                    </svg>
-                    <svg v-else width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
-                      <path d="M2 8s2.5-4 6-4 6 4 6 4-2.5 4-6 4-6-4-6-4z"/><circle cx="8" cy="8" r="2"/><path d="M3 13L13 3" stroke-width="1.5"/>
-                    </svg>
+                <label class="sp-label">Authentification</label>
+                <div class="sp-auth-toggle">
+                  <button
+                    :class="['sp-auth-btn', { 'sp-auth-btn--active': claudeAuthMode === 'connect' }]"
+                    @click="claudeAuthMode = 'connect'"
+                  >
+                    Connecter
+                  </button>
+                  <button
+                    :class="['sp-auth-btn', { 'sp-auth-btn--active': claudeAuthMode === 'apikey' }]"
+                    @click="claudeAuthMode = 'apikey'"
+                  >
+                    Clé API
                   </button>
                 </div>
-                <span class="sp-hint">Disponible sur <a href="https://console.anthropic.com/settings/keys" target="_blank" class="sp-link">console.anthropic.com</a></span>
               </div>
+
+              <!-- Connect flow -->
+              <template v-if="claudeAuthMode === 'connect'">
+                <div v-if="settings.aiApiKey" class="sp-row">
+                  <div class="sp-connected-badge">
+                    <span class="sp-connected-dot"></span>
+                    <span>Connecté — {{ maskedApiKey }}</span>
+                    <button class="sp-disconnect-btn" @click="disconnectClaude">Déconnecter</button>
+                  </div>
+                </div>
+                <div v-else class="sp-row">
+                  <div class="sp-connect-flow">
+                    <!-- Step 1: Start -->
+                    <div v-if="claudeConnectStep === 'idle'" class="sp-connect-start">
+                      <button class="sp-connect-btn" @click="startClaudeConnect">
+                        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5">
+                          <path d="M9 1C4.58 1 1 4.58 1 9s3.58 8 8 8 8-3.58 8-8-3.58-8-8-8z"/>
+                          <path d="M6 9h6M9 6v6"/>
+                        </svg>
+                        Connecter avec Claude
+                      </button>
+                      <span class="sp-hint">Ouvre la console Anthropic pour créer une clé API</span>
+                    </div>
+
+                    <!-- Step 2: Waiting for key -->
+                    <div v-if="claudeConnectStep === 'waiting'" class="sp-connect-waiting">
+                      <p class="sp-connect-instruction">
+                        1. Créez ou copiez une clé API depuis la console Anthropic<br />
+                        2. Collez-la ci-dessous :
+                      </p>
+                      <div class="sp-key-row">
+                        <input
+                          v-model="claudeConnectKeyInput"
+                          class="sp-input mono sp-input--key"
+                          type="password"
+                          placeholder="sk-ant-api03-..."
+                          @keydown.enter="validateAndSaveClaudeKey(claudeConnectKeyInput)"
+                        />
+                        <button
+                          class="sp-connect-save-btn"
+                          :disabled="!claudeConnectKeyInput.trim()"
+                          @click="validateAndSaveClaudeKey(claudeConnectKeyInput)"
+                        >
+                          Enregistrer
+                        </button>
+                      </div>
+                      <div v-if="claudeConnectError" class="sp-connect-error">{{ claudeConnectError }}</div>
+                      <button class="sp-text-btn" @click="claudeConnectStep = 'idle'">Annuler</button>
+                    </div>
+
+                    <!-- Step 3: Success -->
+                    <div v-if="claudeConnectStep === 'success'" class="sp-connect-success">
+                      Connecté avec succès !
+                    </div>
+
+                    <!-- Step 3b: Error -->
+                    <div v-if="claudeConnectStep === 'error'" class="sp-connect-error-block">
+                      <div class="sp-connect-error">{{ claudeConnectError }}</div>
+                      <button class="sp-text-btn" @click="claudeConnectStep = 'waiting'">Réessayer</button>
+                    </div>
+                  </div>
+                </div>
+              </template>
+
+              <!-- Manual API key mode -->
+              <template v-if="claudeAuthMode === 'apikey'">
+                <div class="sp-row">
+                  <label class="sp-label" for="setting-ai-key">Clé API Anthropic</label>
+                  <div class="sp-key-row">
+                    <input
+                      id="setting-ai-key"
+                      class="sp-input mono sp-input--key"
+                      :type="showApiKey ? 'text' : 'password'"
+                      :value="settings.aiApiKey"
+                      @input="updateSetting('aiApiKey', ($event.target as HTMLInputElement).value)"
+                      placeholder="sk-ant-api03-..."
+                    />
+                    <button class="sp-key-toggle" @click="showApiKey = !showApiKey" :title="showApiKey ? 'Masquer' : 'Afficher'">
+                      <svg v-if="showApiKey" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
+                        <path d="M2 8s2.5-4 6-4 6 4 6 4-2.5 4-6 4-6-4-6-4z"/><circle cx="8" cy="8" r="2"/>
+                      </svg>
+                      <svg v-else width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
+                        <path d="M2 8s2.5-4 6-4 6 4 6 4-2.5 4-6 4-6-4-6-4z"/><circle cx="8" cy="8" r="2"/><path d="M3 13L13 3" stroke-width="1.5"/>
+                      </svg>
+                    </button>
+                  </div>
+                  <span class="sp-hint">Disponible sur <a href="https://console.anthropic.com/settings/keys" target="_blank" class="sp-link">console.anthropic.com</a></span>
+                </div>
+              </template>
 
               <div class="sp-row">
                 <label class="sp-label" for="setting-ai-model-claude">Modèle</label>
@@ -870,5 +1001,163 @@ function onKeyDown(e: KeyboardEvent) {
 
 .sp-info-box p {
   margin: 0;
+}
+
+/* ─── Claude Auth flow ────────────────────────────────── */
+.sp-auth-toggle {
+  display: flex;
+  gap: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.sp-auth-btn {
+  flex: 1;
+  padding: 5px 12px;
+  font-size: 12px;
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.sp-auth-btn:first-child { border-right: 1px solid var(--color-border); }
+
+.sp-auth-btn--active {
+  background: var(--color-accent);
+  color: #1e1e2e;
+  font-weight: 600;
+}
+
+.sp-connect-flow {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sp-connect-start {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sp-connect-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--color-accent);
+  background: rgba(203, 166, 247, 0.1);
+  color: var(--color-accent);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.sp-connect-btn:hover {
+  background: rgba(203, 166, 247, 0.2);
+}
+
+.sp-connect-waiting {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sp-connect-instruction {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  line-height: 1.6;
+  margin: 0;
+}
+
+.sp-connect-save-btn {
+  padding: 4px 12px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  background: var(--color-accent);
+  color: #1e1e2e;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: filter 0.15s;
+}
+
+.sp-connect-save-btn:hover { filter: brightness(1.1); }
+.sp-connect-save-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.sp-connect-error {
+  font-size: 12px;
+  color: var(--color-error, #f38ba8);
+}
+
+.sp-connect-error-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sp-connect-success {
+  font-size: 13px;
+  color: var(--color-success, #a6e3a1);
+  font-weight: 600;
+  padding: 8px;
+  background: rgba(166, 227, 161, 0.1);
+  border-radius: 6px;
+  text-align: center;
+}
+
+.sp-text-btn {
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+  align-self: flex-start;
+}
+
+.sp-text-btn:hover { color: var(--color-text); }
+
+.sp-connected-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: rgba(166, 227, 161, 0.1);
+  border: 1px solid rgba(166, 227, 161, 0.3);
+  font-size: 12px;
+  color: var(--color-success, #a6e3a1);
+}
+
+.sp-connected-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-success, #a6e3a1);
+  flex-shrink: 0;
+}
+
+.sp-disconnect-btn {
+  margin-left: auto;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(243, 139, 168, 0.4);
+  background: transparent;
+  color: var(--color-error, #f38ba8);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.sp-disconnect-btn:hover {
+  background: rgba(243, 139, 168, 0.15);
 }
 </style>
