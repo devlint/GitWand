@@ -1,5 +1,5 @@
 use serde::Serialize;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
 /// GitWand Desktop — Tauri backend
@@ -517,8 +517,6 @@ struct ListDirResult {
     dirs: Vec<DirEntry>,
 }
 
-/// Hidden directories to skip (except .git which we detect)
-const HIDDEN_EXCEPTIONS: &[&str] = &[];
 const SKIP_DIRS: &[&str] = &["node_modules", "__pycache__", ".Trash", "target"];
 
 #[tauri::command]
@@ -1499,7 +1497,6 @@ fn open_in_editor(cwd: String, path: String, editor: String) -> Result<(), Strin
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![
             get_conflicted_files,
