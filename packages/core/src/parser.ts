@@ -65,6 +65,43 @@ function makeScore(
   };
 }
 
+// ─── Phase 7.2 — Whitespace normalization ────────────────
+//
+// Normalisation progressive pour la détection whitespace-only.
+// Les étapes sont cumulatives et couvrent les cas les plus courants
+// rencontrés en pratique (indentation tab/espace, reformatage auto).
+
+/**
+ * Normalise les lignes d'un bloc pour la comparaison whitespace-only.
+ *
+ * Étapes :
+ *  1. Tabs → 2 espaces (normalise les fichiers mixtes tab/espace)
+ *  2. Trim leading/trailing sur chaque ligne
+ *  3. Strip des lignes vides en tête et queue du bloc
+ *     (reformatage souvent ajoute/supprime des lignes vides aux bornes)
+ *  4. Collapse des espaces internes multiples → un seul espace
+ *     (reformatage de prose, align-inline dans configs)
+ *
+ * Résultat : chaîne normalisée prête pour une comparaison ===.
+ */
+function normalizeForWhitespaceCheck(lines: string[]): string {
+  // 1. Tabs → 2 espaces
+  let normalized = lines.map((l) => l.replace(/\t/g, "  "));
+
+  // 2. Trim leading/trailing sur chaque ligne
+  normalized = normalized.map((l) => l.trim());
+
+  // 3. Strip lignes vides en tête et queue du bloc
+  while (normalized.length > 0 && normalized[0] === "") normalized.shift();
+  while (normalized.length > 0 && normalized[normalized.length - 1] === "") normalized.pop();
+
+  // 4. Collapse des espaces internes multiples → un seul espace
+  //    (s'applique après trim — une ligne entière d'espaces est déjà "" à ce stade)
+  normalized = normalized.map((l) => l.replace(/  +/g, " "));
+
+  return normalized.join("\n");
+}
+
 /** Marqueurs de conflit Git standard */
 const MARKER_OURS = /^<{7}\s/;
 const MARKER_BASE = /^\|{7}\s/;
@@ -448,8 +485,13 @@ export function classifyConflict(conflict: RawConflict): {
   }
 
   // ─── 5. Whitespace-only ─────────────────────────────────
-  const oursNormalized = oursLines.map((l) => l.trim()).join("\n");
-  const theirsNormalized = theirsLines.map((l) => l.trim()).join("\n");
+  // Phase 7.2 — Normalisation whitespace améliorée :
+  //   1. Tabs → espaces (2 espaces, standard courant)
+  //   2. Trim leading/trailing sur chaque ligne
+  //   3. Collapse des espaces internes pour les fichiers prose (.md, .txt, .rst)
+  //   4. Strip des lignes vides en tête/queue du bloc
+  const oursNormalized = normalizeForWhitespaceCheck(oursLines);
+  const theirsNormalized = normalizeForWhitespaceCheck(theirsLines);
 
   if (oursNormalized === theirsNormalized) {
     steps.push({
@@ -553,20 +595,102 @@ export function classifyConflict(conflict: RawConflict): {
 
 // ─── Patterns pour la détection de valeurs atomiques ────
 
+// ─── Phase 7.2 — Patterns volatils affinés ───────────────
+//
+// Précision améliorée pour réduire les faux positifs dans detectValueOnlyChange.
+// Le pattern générique `/[A-Za-z0-9_-]{6,12}/` était trop large — il matchait
+// des identifiants de code (noms de fonctions, clés de config…) comme volatils.
+//
+// Critères pour qu'un token soit "volatile" (susceptible de changer sans conflit réel) :
+//  - Hashes Git/contenu : hex pur, ≥ 7 chars, ne ressemble pas à un mot (pas de voyelles seules)
+//  - UUID : format standard xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+//  - Hashes de build courts : majuscules + chiffres ou camelCase court (Vite/Webpack output)
+//  - Semver complet : N.N.N (avec pré-release facultatif)
+//  - Timestamp : format date+heure reconnaissable
+//  - URL complète : commence par http:// ou https://
+//
+// NON volatile : identifiants camelCase standards, noms de variables, clés de config textuelles
+
+// ─── Phase 7.2 — Patterns volatils affinés ───────────────
+//
+// Précision améliorée pour réduire les faux positifs dans detectValueOnlyChange.
+// L'ancien pattern générique `/[A-Za-z0-9_-]{6,12}/` était trop large — il matchait
+// des identifiants de code normaux (noms de fonctions, clés de config…) comme volatils.
+//
+// Sont considérés "volatiles" uniquement les tokens reconnaissables comme :
+//   - Hash Git/contenu : hex pur ≥7 chars (ex: a3f2c1d)
+//   - UUID : format canonique (ex: f47ac10b-58cc-4372-a567-0e02b2c3d479)
+//   - Hash de build court Vite/Webpack : mix obligatoire de maj + min + chiffres, 6–16 chars
+//     (ex: DIwZRTuY, C3Po9xAB — distingué d'un mot par la présence de chiffres OU de maj isolées)
+//   - Semver complet : N.N.N avec éventuel pre-release/build
+//   - Timestamp ISO : date+heure reconnaissable
+//   - URL complète : commence par http:// ou https://
+
 /** Regex qui matche les tokens "volatiles" : hashes, UUIDs, semver, timestamps, URLs */
 const VOLATILE_PATTERNS = [
-  /[a-f0-9]{7,40}/i,                          // git hash / content hash
-  /[A-Za-z0-9_-]{6,12}/,                       // short build hash (Vite, Webpack)
-  /\d+\.\d+\.\d+(-[\w.]+)?/,                  // semver
-  /\d{4}-\d{2}-\d{2}[\sT]\d{2}:\d{2}(:\d{2})?/, // timestamp
-  /https?:\/\/\S+/,                            // URL
+  /^[a-f0-9]{7,64}$/,                                                 // git hash / hex hash (lowercase pur)
+  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/, // UUID standard
+  /^(?=.*[A-Z])(?=.*[a-z])(?=.*\d)[A-Za-z\d]{6,20}$/,               // build hash : maj+min+chiffre (ex: BVdDe8aQ)
+  /^[~^>=<]*\d+\.\d+\.\d+(-[\w.]+)?(\+[\w.]+)?$/,                    // semver (avec préfixe npm ^, ~, >=…)
+  /^\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}(:\d{2})?([Z+\-]\S*)?$/,       // ISO timestamp
+  /^(https?:)?\/\/\S+$/,                                              // URL complète ou protocol-relative
+  /^[a-z][a-z0-9]{1,9}-[A-Za-z0-9+/=]{8,}$/,                        // intégrité npm : sha512-…, sha256-…
 ];
 
 /**
+ * Vérifie si deux tokens diffèrent uniquement par une sous-chaîne "hash-like".
+ * Exemple : `assets/main-BVdDe8aQ.js` vs `assets/main-Dx9QwPzM.js`
+ *            → prefix=`assets/main-`, suffix=`.js`, mid=`BVdDe8aQ` vs `Dx9QwPzM`
+ */
+function isPairwiseVolatile(a: string, b: string): boolean {
+  if (a === b) return false;
+
+  // Préfixe commun
+  let prefixLen = 0;
+  while (prefixLen < a.length && prefixLen < b.length && a[prefixLen] === b[prefixLen]) {
+    prefixLen++;
+  }
+
+  // Suffixe commun (sans empiéter sur le préfixe)
+  let suffixLen = 0;
+  const aRem = a.length - prefixLen;
+  const bRem = b.length - prefixLen;
+  while (
+    suffixLen < aRem &&
+    suffixLen < bRem &&
+    a[a.length - 1 - suffixLen] === b[b.length - 1 - suffixLen]
+  ) {
+    suffixLen++;
+  }
+
+  // Il faut au moins un caractère de structure commune
+  if (prefixLen + suffixLen === 0) return false;
+
+  const aMid = a.slice(prefixLen, suffixLen > 0 ? a.length - suffixLen : undefined);
+  const bMid = b.slice(prefixLen, suffixLen > 0 ? b.length - suffixLen : undefined);
+
+  if (aMid.length === 0 || bMid.length === 0) return false;
+
+  // La partie centrale doit ressembler à un hash ou correspondre à un pattern volatile
+  const isHashLikeMid = (s: string): boolean => {
+    if (VOLATILE_PATTERNS.some((p) => p.test(s))) return true;
+    // Hash build alphanumérique pur : ≥7 chars, ≥2 majuscules, ≥2 minuscules
+    if (s.length >= 7 && /^[A-Za-z\d]+$/.test(s)) {
+      const upper = (s.match(/[A-Z]/g) ?? []).length;
+      const lower = (s.match(/[a-z]/g) ?? []).length;
+      if (upper >= 2 && lower >= 2) return true;
+    }
+    return false;
+  };
+
+  return isHashLikeMid(aMid) && isHashLikeMid(bMid);
+}
+
+/**
  * Tokenize une ligne en parties "structurelles" et "valeurs".
- * Ex: `"file": "assets/Foo-DIwZRTuY.js"` → structure = `"file": "assets/Foo-` + `.js"`, value = `DIwZRTuY`
- *
- * Stratégie simplifiée : on split sur les tokens alphanumériques et on compare.
+ * Split sur les délimiteurs structurels courants (espaces, ponctuation JSON/TS…).
+ * On ne split PAS sur `.`, `-`, `/` pour préserver les tokens composites
+ * comme les versions semver (`1.2.3`) et les UUIDs (`f47ac-...`).
  */
 function tokenizeLine(line: string): string[] {
   return line.split(/(\s+|[{}[\](),:;"'`=<>])/);
@@ -608,8 +732,11 @@ function detectValueOnlyChange(
         const isOursVolatile = VOLATILE_PATTERNS.some((p) => p.test(oursTokens[j]));
         const isTheirsVolatile = VOLATILE_PATTERNS.some((p) => p.test(theirsTokens[j]));
         if (!isOursVolatile && !isTheirsVolatile) {
-          allDiffsAreVolatile = false;
-          break;
+          // Vérification pairwise : les deux tokens ont la même structure sauf un hash
+          if (!isPairwiseVolatile(oursTokens[j], theirsTokens[j])) {
+            allDiffsAreVolatile = false;
+            break;
+          }
         }
       }
     }
@@ -621,8 +748,16 @@ function detectValueOnlyChange(
 
   // Calculer le ratio de différences pour ajuster la confiance
   const diffRatio = diffCount / Math.max(totalTokens, 1);
-  // typeClassification: 85 (volatile patterns reconnus) − pénalité ratio
-  const typeClassification = diffRatio <= 0.15 ? 85 : diffRatio <= 0.3 ? 70 : 50;
+  // Phase 7.2 — seuils affinés pour réduire les faux positifs :
+  //   ≤10% de tokens différents → typeClassification 88 (certain/high sûr)
+  //   ≤20% → 72 (high)
+  //   ≤30% → 55 (medium limit)
+  //   >30% → rejeté (trop de différences pour être sûr des patterns volatils)
+  const typeClassification =
+    diffRatio <= 0.10 ? 88
+    : diffRatio <= 0.20 ? 72
+    : diffRatio <= 0.30 ? 55
+    : 0; // rejet immédiat
 
   if (typeClassification < 55) return null; // Trop de différences pour être sûr
 
