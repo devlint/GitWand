@@ -15,6 +15,7 @@
 import type {
   ConflictHunk,
   Confidence,
+  ConfidenceScore,
   GitWandOptions,
   HunkResolution,
   MergeResult,
@@ -153,7 +154,7 @@ function resolveHunk(
   if (options.explainOnly) {
     return {
       lines: null,
-      reason: `Mode explain-only : résolution non appliquée (type: ${hunk.type}, confiance: ${hunk.confidence}).`,
+      reason: `Mode explain-only : résolution non appliquée (type: ${hunk.type}, confiance: ${hunk.confidence.label} [score: ${hunk.confidence.score}]).`,
     };
   }
 
@@ -186,10 +187,10 @@ function resolveHunk(
       : options.minConfidence;
 
   // Vérifier le niveau de confiance minimum
-  if (CONFIDENCE_ORDER[hunk.confidence] < CONFIDENCE_ORDER[effectiveMinConfidence]) {
+  if (CONFIDENCE_ORDER[hunk.confidence.label] < CONFIDENCE_ORDER[effectiveMinConfidence]) {
     return {
       lines: null,
-      reason: `Confiance ${hunk.confidence} insuffisante (minimum requis : ${effectiveMinConfidence}, politique : ${effectivePolicy}).${formatResult.resolverUsed !== "none" ? ` [${formatResult.reason}]` : ""}`,
+      reason: `Confiance ${hunk.confidence.label} (score: ${hunk.confidence.score}) insuffisante (minimum requis : ${effectiveMinConfidence}, politique : ${effectivePolicy}).${formatResult.resolverUsed !== "none" ? ` [${formatResult.reason}]` : ""}`,
     };
   }
 
@@ -231,9 +232,10 @@ function resolveHunk(
             : "Résolution whitespace désactivée par options (resolveWhitespace: false).",
         };
       }
+      const wsSide = policyCfg.preferOurs ? "ours" : "theirs";
       return {
-        lines: policyCfg.preferOurs ? [...hunk.oursLines] : [...hunk.oursLines],
-        reason: `Seul le whitespace diffère. Résolution : préférer ours (politique : ${effectivePolicy}).`,
+        lines: policyCfg.preferOurs ? [...hunk.oursLines] : [...hunk.theirsLines],
+        reason: `Seul le whitespace diffère. Résolution : préférer ${wsSide} (politique : ${effectivePolicy}).`,
       };
 
     case "non_overlapping": {
@@ -330,10 +332,17 @@ export function resolve(
 
       // Si fichier auto-généré et hunk classifié "complex", reclassifier en "generated_file"
       if (genInfo.generated && hunk.type === "complex") {
+        const generatedScore: ConfidenceScore = {
+          score: 72,
+          label: "high",
+          dimensions: { typeClassification: 90, dataRisk: 30, scopeImpact: 15 },
+          boosters: [`Chemin correspond au pattern de fichier auto-généré : ${genInfo.label}`],
+          penalties: ["Le contenu sera régénéré — theirs est supposé plus récent"],
+        };
         hunk = {
           ...hunk,
           type: "generated_file",
-          confidence: "medium",
+          confidence: generatedScore,
           explanation: `Fichier auto-généré (${genInfo.label}). Ce fichier sera régénéré après le merge. Résolution proposée : accepter theirs et relancer le build.`,
           // Update the trace to reflect the reclassification
           trace: {

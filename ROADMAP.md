@@ -301,8 +301,8 @@ interface DecisionTrace {
 - ✅ **Dispatcher automatique** (`resolvers/dispatcher.ts`) — `tryFormatAwareResolve(hunk, filePath)` ; `isJsonFile`/`isMarkdownFile` ; résolveur spécialisé tenté en premier pour les formats reconnus, fallback textuel sinon ; `resolverUsed` dans la réponse pour la trace
 - ✅ **Branché dans resolver.ts** — `resolveHunk` accepte `filePath`, appelle `tryFormatAwareResolve` avant le moteur textuel ; bypass du filtre de confiance pour les résolutions sémantiquement validées (JSON) ; `resolutionReason` préfixé `[json]` ou `[markdown]`
 - ✅ **44 nouveaux tests** dans `format-resolvers.test.ts` — `stripJsoncComments`, `tryResolveJsonConflict` (7 cas), objets imbriqués, base vide, JSON malformé, intégration via `resolve()`, `parseSections`, `extractFrontmatter`, `tryResolveMarkdownConflict` (5 cas), dispatcher (7 cas)
-- ⬜ **Formats restants** : YAML, Vue SFC, TS/JS/TSX, CSS — reporter en 7.3b
-- ⬜ **Score de confiance composite** : remplacer le label discret par un score multidimensionnel
+- ⬜ **Formats restants** : YAML, Vue SFC, TS/JS/TSX, CSS — reporté en Phase 7.3b
+- ✅ **Score de confiance composite** : `ConfidenceScore` remplace le label discret — `score` 0–100, `dimensions` (typeClassification / dataRisk / scopeImpact), `boosters[]`, `penalties[]`, `label` backward-compatible ; `makeScore()` dans `parser.ts` ; `hunk.confidence.label` partout dans le moteur et l'UI
 
 **Note d'implémentation** : le résolveur JSON fonctionne quand chaque section de conflit (ours/base/theirs) est un JSON autonome valide (ex: fichier entier en conflit). Pour les conflits partiels (fragment d'objet), il revient gracieusement au moteur textuel.
 

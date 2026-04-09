@@ -8,8 +8,62 @@
  * complète — chaque étape d'évaluation est enregistrée avec sa raison.
  */
 
-import type { ConflictHunk, ConflictType, Confidence, DecisionTrace, TraceStep } from "./types.js";
+import type { ConflictHunk, ConflictType, Confidence, ConfidenceScore, DecisionTrace, TraceStep } from "./types.js";
 import { mergeNonOverlapping } from "./diff.js";
+
+// ─── Score de confiance composite ────────────────────────
+//
+// Phase 7.3b : chaque classification produit un ConfidenceScore
+// avec les trois dimensions (typeClassification, dataRisk, scopeImpact)
+// et des listes de boosters/penalties lisibles.
+
+/**
+ * Calcule le scopeImpact à partir du nombre total de lignes concernées.
+ * 1–2 lignes → 0, 3–10 → 15, 11–30 → 35, >30 → 55
+ */
+function scopeImpact(lines: number): number {
+  if (lines <= 2) return 0;
+  if (lines <= 10) return 15;
+  if (lines <= 30) return 35;
+  return 55;
+}
+
+/**
+ * Dérive le label Confidence depuis un score numérique 0–100.
+ * - score ≥ 92 → "certain"
+ * - score ≥ 68 → "high"
+ * - score ≥ 44 → "medium"
+ * - score <  44 → "low"
+ */
+function labelFromScore(score: number): Confidence {
+  if (score >= 92) return "certain";
+  if (score >= 68) return "high";
+  if (score >= 44) return "medium";
+  return "low";
+}
+
+/**
+ * Construit un ConfidenceScore à partir des trois dimensions et des justifications.
+ *
+ * Formule : `score = typeClassification − dataRisk×0.4 − scopeImpact×0.15`
+ */
+function makeScore(
+  typeClassification: number,
+  dataRisk: number,
+  si: number,
+  boosters: string[],
+  penalties: string[],
+): ConfidenceScore {
+  const raw = typeClassification - dataRisk * 0.4 - si * 0.15;
+  const score = Math.round(Math.max(0, Math.min(100, raw)));
+  return {
+    score,
+    label: labelFromScore(score),
+    dimensions: { typeClassification, dataRisk, scopeImpact: si },
+    boosters,
+    penalties,
+  };
+}
 
 /** Marqueurs de conflit Git standard */
 const MARKER_OURS = /^<{7}\s/;
@@ -137,7 +191,7 @@ export function parseConflictMarkers(content: string): {
  */
 export function classifyConflict(conflict: RawConflict): {
   type: ConflictType;
-  confidence: Confidence;
+  confidence: ConfidenceScore;
   explanation: string;
   trace: DecisionTrace;
 } {
@@ -165,7 +219,9 @@ export function classifyConflict(conflict: RawConflict): {
     };
     return {
       type: "same_change",
-      confidence: "certain",
+      confidence: makeScore(100, 0, scopeImpact(oursLines.length), [
+        "Les deux branches ont exactement le même contenu",
+      ], []),
       explanation: "Les deux branches ont effectué exactement la même modification.",
       trace,
     };
@@ -196,7 +252,10 @@ export function classifyConflict(conflict: RawConflict): {
       };
       return {
         type: "delete_no_change",
-        confidence: "certain",
+        confidence: makeScore(100, 5, 0, [
+          "Base disponible",
+          "Ours a supprimé, theirs identique à la base",
+        ], []),
         explanation:
           "La branche courante (ours) a supprimé ce bloc, l'autre ne l'a pas modifié. Résolution : supprimer.",
         trace,
@@ -217,7 +276,10 @@ export function classifyConflict(conflict: RawConflict): {
       };
       return {
         type: "delete_no_change",
-        confidence: "certain",
+        confidence: makeScore(100, 5, 0, [
+          "Base disponible",
+          "Theirs a supprimé, ours identique à la base",
+        ], []),
         explanation:
           "La branche entrante (theirs) a supprimé ce bloc, l'autre ne l'a pas modifié. Résolution : supprimer.",
         trace,
@@ -247,7 +309,10 @@ export function classifyConflict(conflict: RawConflict): {
       };
       return {
         type: "one_side_change",
-        confidence: "certain",
+        confidence: makeScore(100, 0, scopeImpact(theirsLines.length), [
+          "Base disponible",
+          "Seul theirs a modifié le bloc",
+        ], []),
         explanation:
           "Seule la branche entrante (theirs) a modifié ce bloc. Résolution : accepter theirs.",
         trace,
@@ -268,7 +333,10 @@ export function classifyConflict(conflict: RawConflict): {
       };
       return {
         type: "one_side_change",
-        confidence: "certain",
+        confidence: makeScore(100, 0, scopeImpact(oursLines.length), [
+          "Base disponible",
+          "Seul ours a modifié le bloc",
+        ], []),
         explanation:
           "Seule la branche courante (ours) a modifié ce bloc. Résolution : accepter ours.",
         trace,
@@ -295,9 +363,13 @@ export function classifyConflict(conflict: RawConflict): {
         summary: "Modifications non-overlapping — fusion automatique par LCS 3-way.",
         hasBase,
       };
+      const mergedSize = Math.max(oursLines.length, theirsLines.length);
       return {
         type: "non_overlapping",
-        confidence: "high",
+        confidence: makeScore(90, 20, scopeImpact(mergedSize), [
+          "Base disponible",
+          "Merge LCS 3-way réussi sans chevauchement",
+        ], []),
         explanation:
           "Les deux branches ont modifié des zones différentes du même bloc. Fusion automatique possible.",
         trace,
@@ -342,7 +414,9 @@ export function classifyConflict(conflict: RawConflict): {
       };
       return {
         type: "delete_no_change",
-        confidence: "medium",
+        confidence: makeScore(60, 30, 0, [], [
+          "Sans base (diff2) — suppression non confirmée par rapport à l'ancêtre commun",
+        ]),
         explanation:
           "La branche courante (ours) a supprimé ce bloc. Sans base, confiance moyenne. Résolution proposée : supprimer.",
         trace,
@@ -363,7 +437,9 @@ export function classifyConflict(conflict: RawConflict): {
       };
       return {
         type: "delete_no_change",
-        confidence: "medium",
+        confidence: makeScore(60, 30, 0, [], [
+          "Sans base (diff2) — suppression non confirmée par rapport à l'ancêtre commun",
+        ]),
         explanation:
           "La branche entrante (theirs) a supprimé ce bloc. Sans base, confiance moyenne. Résolution proposée : supprimer.",
         trace,
@@ -389,7 +465,15 @@ export function classifyConflict(conflict: RawConflict): {
     };
     return {
       type: "whitespace_only",
-      confidence: "high",
+      confidence: makeScore(
+        hasBase ? 95 : 80,
+        10,
+        scopeImpact(Math.max(oursLines.length, theirsLines.length)),
+        hasBase
+          ? ["Base disponible — whitespace confirmé par rapport à l'ancêtre", "Seul le whitespace diffère après normalisation"]
+          : ["Seul le whitespace diffère après normalisation (trim)"],
+        hasBase ? [] : ["Sans base (diff2) — hypothèse basée sur la normalisation uniquement"],
+      ),
       explanation:
         "Les deux branches contiennent le même code avec des différences de whitespace uniquement.",
       trace,
@@ -418,7 +502,7 @@ export function classifyConflict(conflict: RawConflict): {
       };
       return {
         type: "value_only_change",
-        confidence: valResult.confidence,
+        confidence: valResult.confidenceScore,
         explanation: valResult.explanation,
         trace,
       };
@@ -457,7 +541,10 @@ export function classifyConflict(conflict: RawConflict): {
   };
   return {
     type: "complex",
-    confidence: "low",
+    confidence: makeScore(100, 100, 0, [], [
+      "Aucune heuristique automatique applicable",
+      "Les deux branches ont modifié le bloc de façon incompatible",
+    ]),
     explanation:
       "Conflit complexe nécessitant une résolution manuelle. Les deux branches ont modifié ce bloc différemment.",
     trace,
@@ -494,7 +581,7 @@ function tokenizeLine(line: string): string[] {
 function detectValueOnlyChange(
   oursLines: string[],
   theirsLines: string[],
-): { confidence: Confidence; explanation: string; traceReason: string } | null {
+): { confidenceScore: ConfidenceScore; explanation: string; traceReason: string } | null {
   if (oursLines.length !== theirsLines.length) return null;
   if (oursLines.length === 0) return null;
 
@@ -534,17 +621,30 @@ function detectValueOnlyChange(
 
   // Calculer le ratio de différences pour ajuster la confiance
   const diffRatio = diffCount / Math.max(totalTokens, 1);
-  const confidence: Confidence = diffRatio <= 0.15 ? "high" : diffRatio <= 0.3 ? "medium" : "low";
+  // typeClassification: 85 (volatile patterns reconnus) − pénalité ratio
+  const typeClassification = diffRatio <= 0.15 ? 85 : diffRatio <= 0.3 ? 70 : 50;
 
-  if (confidence === "low") return null; // Trop de différences pour être sûr
+  if (typeClassification < 55) return null; // Trop de différences pour être sûr
+
+  const si = scopeImpact(oursLines.length);
+  const confidenceScore = makeScore(typeClassification, 25, si, [
+    `${diffCount} token${diffCount > 1 ? "s" : ""} identifié${diffCount > 1 ? "s" : ""} comme volatile${diffCount > 1 ? "s" : ""} (hash, version, timestamp…)`,
+    "Même structure de lignes",
+  ], [
+    `Ratio de différences : ${(diffRatio * 100).toFixed(1)}%`,
+    "Sans base (diff2) — heuristique basée sur les patterns volatils",
+  ]);
+
+  // Rejeter si le label reste "low" après calcul
+  if (confidenceScore.label === "low") return null;
 
   const explanation =
     `Même structure avec ${diffCount} valeur${diffCount > 1 ? "s" : ""} volatile${diffCount > 1 ? "s" : ""} différente${diffCount > 1 ? "s" : ""} (hash, version, timestamp…). Résolution proposée : accepter la version la plus récente (theirs).`;
 
   const traceReason =
-    `${diffCount} token${diffCount > 1 ? "s" : ""} différent${diffCount > 1 ? "s" : ""} sur ${totalTokens} — tous identifiés comme volatiles (hash, version, timestamp…). Ratio : ${(diffRatio * 100).toFixed(1)}% → confiance ${confidence}.`;
+    `${diffCount} token${diffCount > 1 ? "s" : ""} différent${diffCount > 1 ? "s" : ""} sur ${totalTokens} — tous identifiés comme volatiles (hash, version, timestamp…). Ratio : ${(diffRatio * 100).toFixed(1)}% → score ${confidenceScore.score} (${confidenceScore.label}).`;
 
-  return { confidence, explanation, traceReason };
+  return { confidenceScore, explanation, traceReason };
 }
 
 /**

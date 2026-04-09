@@ -101,7 +101,7 @@ function hunkForSegment(seg: Segment): ConflictHunk | undefined {
 }
 
 function isAutoResolvable(hunk: ConflictHunk): boolean {
-  return hunk.type !== "complex" && hunk.confidence !== "low";
+  return hunk.type !== "complex" && hunk.confidence.label !== "low";
 }
 
 /**

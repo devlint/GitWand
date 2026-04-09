@@ -287,7 +287,7 @@ describe("@gitwand/core resolve", () => {
       expect(result.mergedContent).toContain('import { useEffect } from "react"');
       expect(result.mergedContent).not.toContain("<<<<<<<");
       expect(result.hunks[0].type).toBe("same_change");
-      expect(result.hunks[0].confidence).toBe("certain");
+      expect(result.hunks[0].confidence.label).toBe("certain");
     });
   });
 
@@ -335,7 +335,7 @@ describe("@gitwand/core resolve", () => {
 
       expect(result.stats.autoResolved).toBe(1);
       expect(result.hunks[0].type).toBe("non_overlapping");
-      expect(result.hunks[0].confidence).toBe("high");
+      expect(result.hunks[0].confidence.label).toBe("high");
       expect(result.mergedContent).toContain("useEffect");
       expect(result.mergedContent).toContain("dayjs");
       expect(result.mergedContent).toContain("React");
@@ -613,7 +613,7 @@ describe("@gitwand/core resolve", () => {
 }`;
       const result = resolve(manifest, "build/manifest.json");
       expect(result.hunks[0].type).toBe("value_only_change");
-      expect(result.hunks[0].confidence).toBe("high");
+      expect(result.hunks[0].confidence.label).toBe("high");
       expect(result.stats.autoResolved).toBe(1);
       // Should take theirs
       expect(result.mergedContent).toContain("Bv7I4tRv");
@@ -660,7 +660,7 @@ export const TIMEOUT = 5000;
 after`;
       const result = resolve(diff, "file.ts", { minConfidence: "medium" });
       expect(result.hunks[0].type).toBe("delete_no_change");
-      expect(result.hunks[0].confidence).toBe("medium");
+      expect(result.hunks[0].confidence.label).toBe("medium");
       expect(result.stats.autoResolved).toBe(1);
       expect(result.mergedContent).toBe("before\nafter");
     });

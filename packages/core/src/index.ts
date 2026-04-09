@@ -43,6 +43,8 @@ export type {
   ConflictHunk,
   ConflictType,
   Confidence,
+  // Phase 7.3b — Score de confiance composite
+  ConfidenceScore,
   HunkResolution,
   GitWandOptions,
   // Phase 7.1

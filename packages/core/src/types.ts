@@ -28,8 +28,50 @@ export type ConflictType =
   | "value_only_change"     // Même structure, seule une valeur change (hash, version, timestamp…)
   | "complex";              // Conflit réel nécessitant intervention humaine
 
-/** Niveau de confiance de la résolution */
+/** Niveau de confiance discret (label seuil, utilisé dans les options) */
 export type Confidence = "certain" | "high" | "medium" | "low";
+
+// ─── Phase 7.3b — Score de confiance composite ───────────
+//
+// Remplace le label discret par un score multidimensionnel.
+// Le `label` est dérivé automatiquement du `score` pour la
+// compatibilité avec les options `minConfidence`.
+
+/**
+ * Score de confiance composite pour la résolution automatique.
+ *
+ * Dimensions du score :
+ * - `typeClassification` : certitude du type détecté (0–100)
+ * - `dataRisk` : risque de perte de données si résolution auto (0–100, 0 = sûr)
+ * - `scopeImpact` : impact de la taille du changement (0–100, 0 = petit)
+ *
+ * Formule : `score = typeClassification − dataRisk×0.4 − scopeImpact×0.15`
+ *
+ * Label dérivé :
+ * - score ≥ 92 → `"certain"`
+ * - score ≥ 68 → `"high"`
+ * - score ≥ 44 → `"medium"`
+ * - score <  44 → `"low"`
+ */
+export interface ConfidenceScore {
+  /** Score global normalisé 0–100 */
+  score: number;
+  /** Label seuil backward-compatible, dérivé du score */
+  label: Confidence;
+  /** Dimensions explicatives du score */
+  dimensions: {
+    /** Certitude de la classification du type de conflit (0–100) */
+    typeClassification: number;
+    /** Risque de corruption/perte de données (0–100, 0 = sans risque) */
+    dataRisk: number;
+    /** Impact de la taille du changement (0–100, 0 = petit) */
+    scopeImpact: number;
+  };
+  /** Facteurs ayant augmenté le score (justifications de haute confiance) */
+  boosters: string[];
+  /** Facteurs ayant diminué le score (raisons de prudence) */
+  penalties: string[];
+}
 
 // ─── Phase 7.1 — DecisionTrace ────────────────────────────
 //
@@ -78,8 +120,8 @@ export interface ConflictHunk {
   startLine: number;
   /** Type de conflit détecté */
   type: ConflictType;
-  /** Niveau de confiance pour la résolution automatique */
-  confidence: Confidence;
+  /** Score de confiance composite pour la résolution automatique */
+  confidence: ConfidenceScore;
   /** Explication lisible de la résolution (pour l'audit) */
   explanation: string;
   /** Trace de la décision de classification (Phase 7.1) */
