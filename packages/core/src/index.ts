@@ -24,6 +24,15 @@ export { mergeNonOverlapping, computeDiff, lcs } from "./diff.js";
 
 // Phase 7.3 — Résolveurs spécialisés par format
 export { tryResolveJsonConflict, stripJsoncComments } from "./resolvers/json.js";
+
+// Phase 7.4 — Politiques de merge et configuration par projet
+export {
+  matchGlob,
+  effectivePolicyForFile,
+  policyToConfig,
+  parseGitwandrc,
+  DEFAULT_POLICY,
+} from "./config.js";
 export { tryResolveMarkdownConflict, parseSections, extractFrontmatter } from "./resolvers/markdown.js";
 export { tryFormatAwareResolve, isJsonFile, isMarkdownFile } from "./resolvers/dispatcher.js";
 
@@ -46,3 +55,4 @@ export type {
 export type { JsonMergeResult } from "./resolvers/json.js";
 export type { MarkdownMergeResult, MarkdownSection } from "./resolvers/markdown.js";
 export type { FormatResolveResult } from "./resolvers/dispatcher.js";
+export type { MergePolicy, PolicyConfig, GitWandrcConfig } from "./config.js";

@@ -1152,6 +1152,95 @@ fn git_stash_pop(cwd: String) -> Result<(), String> {
     Ok(())
 }
 
+// ─── Read .gitwandrc ──────────────────────────────────────
+
+/// Lit la configuration .gitwandrc du repo (Phase 7.4).
+/// Cherche dans cet ordre :
+///   1. {cwd}/.gitwandrc
+///   2. {cwd}/.gitwandrc.json
+///   3. Clé "gitwand" dans {cwd}/package.json
+/// Retourne la chaîne JSON brute ou "" si non trouvé.
+#[tauri::command]
+fn read_gitwandrc(cwd: String) -> String {
+    let cwd_path = std::path::Path::new(&cwd);
+
+    // 1. .gitwandrc
+    let rc_path = cwd_path.join(".gitwandrc");
+    if rc_path.exists() {
+        if let Ok(content) = std::fs::read_to_string(&rc_path) {
+            return content;
+        }
+    }
+
+    // 2. .gitwandrc.json
+    let rc_json_path = cwd_path.join(".gitwandrc.json");
+    if rc_json_path.exists() {
+        if let Ok(content) = std::fs::read_to_string(&rc_json_path) {
+            return content;
+        }
+    }
+
+    // 3. "gitwand" dans package.json
+    let pkg_path = cwd_path.join("package.json");
+    if pkg_path.exists() {
+        if let Ok(content) = std::fs::read_to_string(&pkg_path) {
+            // Parser manuellement pour éviter une dépendance serde_json supplémentaire
+            // On cherche "gitwand": { ... } et on retourne l'objet brut
+            if let Some(start) = find_json_key_value_start(&content, "gitwand") {
+                return start;
+            }
+        }
+    }
+
+    String::new()
+}
+
+/// Extrait la valeur d'une clé JSON de premier niveau depuis une chaîne JSON.
+/// Retourne la valeur brute (string JSON) ou None si non trouvée.
+fn find_json_key_value_start(json: &str, key: &str) -> Option<String> {
+    let search = format!("\"{}\"", key);
+    let key_pos = json.find(&search)?;
+    let after_key = &json[key_pos + search.len()..];
+    let colon_pos = after_key.find(':')?;
+    let value_start = after_key[colon_pos + 1..].trim_start();
+
+    // Extraire l'objet ou tableau complet (gestion basique des accolades)
+    if !value_start.starts_with('{') {
+        return None; // On n'attend qu'un objet
+    }
+
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escape_next = false;
+    let mut end = 0usize;
+
+    for (i, c) in value_start.char_indices() {
+        if escape_next {
+            escape_next = false;
+            continue;
+        }
+        match c {
+            '\\' if in_string => escape_next = true,
+            '"' => in_string = !in_string,
+            '{' if !in_string => depth += 1,
+            '}' if !in_string => {
+                depth -= 1;
+                if depth == 0 {
+                    end = i + 1;
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if end > 0 {
+        Some(value_start[..end].to_string())
+    } else {
+        None
+    }
+}
+
 // ─── Open in external editor ──────────────────────────────
 
 #[tauri::command]
@@ -1206,6 +1295,7 @@ pub fn run() {
             git_stash_pop,
             open_in_editor,
             set_git_config,
+            read_gitwandrc,
         ])
         .run(tauri::generate_context!())
         .expect("error while running GitWand");

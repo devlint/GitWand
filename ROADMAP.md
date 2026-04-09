@@ -306,12 +306,14 @@ interface DecisionTrace {
 
 **Note d'implémentation** : le résolveur JSON fonctionne quand chaque section de conflit (ours/base/theirs) est un JSON autonome valide (ex: fichier entier en conflit). Pour les conflits partiels (fragment d'objet), il revient gracieusement au moteur textuel.
 
-#### 7.4 — Rendre configurable : stratégies de merge (priorité moyenne)
+#### 7.4 — Rendre configurable : stratégies de merge (priorité moyenne) ✅
 
-- ⬜ **Politiques explicites** : `prefer-ours`, `prefer-theirs`, `prefer-safety`, `prefer-merge`, `strict`
-- ⬜ **Configuration par projet** : fichier `.gitwandrc` ou section dans `package.json`
-- ⬜ **Overrides par pattern** : stratégie différente selon le glob du fichier (ex: `*.lock` → `prefer-theirs`)
-- ⬜ **Documentation des conventions** : documenter les choix implicites actuels (quand ours vs theirs est préféré et pourquoi)
+- ✅ **Politiques explicites** : `prefer-ours`, `prefer-theirs`, `prefer-safety`, `prefer-merge`, `strict` — implémentées dans `packages/core/src/config.ts`
+- ✅ **Configuration par projet** : fichier `.gitwandrc` / `.gitwandrc.json` / `package.json#gitwand` — `parseGitwandrc()` + commande Rust `read_gitwandrc`
+- ✅ **Overrides par pattern** : stratégie différente selon le glob du fichier (ex: `*.lock` → `prefer-theirs`) — `matchGlob()` + `effectivePolicyForFile()` + `patternOverrides` dans `GitWandOptions`
+- ✅ **Documentation des conventions** : JSDoc complet dans `config.ts` — tableau des politiques, choix implicites du moteur, format `.gitwandrc`
+- ✅ **Intégration desktop** : `resolveOptions` ref dans `useGitWand.ts`, chargée depuis `.gitwandrc` au scan du repo, passée à tous les appels `resolve()`
+- ✅ **35 tests Phase 7.4** : matchGlob (11), effectivePolicyForFile (5), policyToConfig (5), parseGitwandrc (5), intégration via resolve() (14) — 181/181 tests au total
 
 #### 7.5 — Rendre mesurable : corpus et métriques (priorité basse)
 

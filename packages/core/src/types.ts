@@ -159,4 +159,20 @@ export interface GitWandOptions {
    * (Phase 7.1 — explain-only mode)
    */
   explainOnly?: boolean;
+  /**
+   * Politique de résolution automatique (Phase 7.4).
+   * Contrôle les choix ambigus et le niveau d'agressivité.
+   * - "prefer-ours"   : choix ambigus → ours
+   * - "prefer-theirs" : choix ambigus → theirs (défaut du moteur)
+   * - "prefer-merge"  : résoudre le plus possible (minConfidence: medium)
+   * - "prefer-safety" : ne résoudre que l'évident (whitespace/value_only skippés)
+   * - "strict"        : seulement same_change, one_side_change, delete_no_change
+   */
+  policy?: import("./config.js").MergePolicy;
+  /**
+   * Overrides de politique par pattern glob (Phase 7.4).
+   * La clé est un pattern glob, la valeur une MergePolicy.
+   * Exemple : `{ "*.lock": "prefer-theirs", "src/**\/*.ts": "prefer-ours" }`
+   */
+  patternOverrides?: Record<string, import("./config.js").MergePolicy>;
 }

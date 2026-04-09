@@ -1,10 +1,11 @@
 import { ref, computed } from "vue";
-import { resolve, type MergeResult, type ConflictHunk } from "@gitwand/core";
+import { resolve, parseGitwandrc, type MergeResult, type ConflictHunk, type GitWandOptions, type MergePolicy } from "@gitwand/core";
 import {
   pickFolder,
   getConflictedFiles,
   readFile,
   writeFile,
+  readGitwandrc,
 } from "../utils/backend";
 import { useFolderHistory } from "./useFolderHistory";
 
@@ -83,6 +84,9 @@ export function useGitWand() {
   const files = ref<ConflictFile[]>([]);
   const selectedPath = ref<string | null>(null);
   const folderPath = ref<string | null>(null);
+
+  // Phase 7.4 — Options de résolution issues du .gitwandrc du repo courant
+  const resolveOptions = ref<GitWandOptions>({});
 
   // ─── Undo / Redo ───────────────────────────────────────
   const undoStack = ref<Snapshot[]>([]);
@@ -194,6 +198,23 @@ export function useGitWand() {
       return;
     }
 
+    // Phase 7.4 — Charger la config .gitwandrc du repo
+    try {
+      const rcRaw = await readGitwandrc(cwd);
+      if (rcRaw.trim()) {
+        const cfg = parseGitwandrc(rcRaw);
+        if (cfg) {
+          resolveOptions.value = {
+            policy: cfg.policy,
+            patternOverrides: cfg.patterns,
+          };
+        }
+      }
+    } catch {
+      // .gitwandrc absent ou invalide → options par défaut
+      resolveOptions.value = {};
+    }
+
     // Read each file
     const loaded: ConflictFile[] = [];
     for (const filePath of conflictedPaths) {
@@ -201,7 +222,7 @@ export function useGitWand() {
       loaded.push({
         path: filePath,
         content,
-        result: resolve(content, filePath),
+        result: resolve(content, filePath, resolveOptions.value),
       });
     }
 
@@ -307,7 +328,7 @@ export async function fetchUsers() {
     files.value = demoFiles.map(({ path, content }) => ({
       path,
       content,
-      result: resolve(content, path),
+      result: resolve(content, path, resolveOptions.value),
     }));
 
     if (files.value.length > 0) {
@@ -330,7 +351,7 @@ export async function fetchUsers() {
         return {
           ...f,
           content: f.result.mergedContent,
-          result: resolve(f.result.mergedContent, f.path),
+          result: resolve(f.result.mergedContent, f.path, resolveOptions.value),
         };
       }
 
@@ -352,7 +373,7 @@ export async function fetchUsers() {
       return {
         ...f,
         content: newContent,
-        result: resolve(newContent, f.path),
+        result: resolve(newContent, f.path, resolveOptions.value),
       };
     });
   }
@@ -369,7 +390,7 @@ export async function fetchUsers() {
     files.value[idx] = {
       ...file,
       content: file.result.mergedContent,
-      result: resolve(file.result.mergedContent, file.path),
+      result: resolve(file.result.mergedContent, file.path, resolveOptions.value),
     };
   }
 
@@ -460,7 +481,7 @@ export async function fetchUsers() {
     files.value[idx] = {
       ...file,
       content: newContent,
-      result: resolve(newContent, file.path),
+      result: resolve(newContent, file.path, resolveOptions.value),
     };
   }
 
@@ -484,7 +505,7 @@ export async function fetchUsers() {
     files.value[idx] = {
       ...file,
       content: newContent,
-      result: resolve(newContent, file.path),
+      result: resolve(newContent, file.path, resolveOptions.value),
     };
   }
 

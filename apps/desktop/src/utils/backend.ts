@@ -855,6 +855,29 @@ export async function setGitConfig(gitPath: string): Promise<void> {
 }
 
 /**
+ * Read the .gitwandrc configuration from a repository root (Phase 7.4).
+ * Returns the raw JSON string, or "" if not found.
+ * Searches: .gitwandrc → .gitwandrc.json → package.json#gitwand
+ */
+export async function readGitwandrc(cwd: string): Promise<string> {
+  if (isTauri()) {
+    return (await tauriInvoke("read_gitwandrc", { cwd })) as string;
+  }
+  // In browser dev mode, try to fetch from a potential dev endpoint
+  try {
+    const res = await fetch(`${DEV_SERVER}/api/read-gitwandrc`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cwd }),
+    });
+    if (res.ok) return await res.text();
+  } catch {
+    // ignore — no .gitwandrc in dev mode is fine
+  }
+  return "";
+}
+
+/**
  * Delete a branch.
  */
 export async function gitDeleteBranch(cwd: string, name: string, force: boolean = false): Promise<void> {

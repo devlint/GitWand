@@ -25,6 +25,12 @@ import type {
 import { parseConflictMarkers, toConflictHunk } from "./parser.js";
 import { mergeNonOverlapping } from "./diff.js";
 import { tryFormatAwareResolve } from "./resolvers/dispatcher.js";
+import {
+  effectivePolicyForFile,
+  policyToConfig,
+  DEFAULT_POLICY,
+  type MergePolicy,
+} from "./config.js";
 
 /** Options par défaut */
 const DEFAULT_OPTIONS: Required<GitWandOptions> = {
@@ -33,6 +39,8 @@ const DEFAULT_OPTIONS: Required<GitWandOptions> = {
   minConfidence: "high",
   verbose: false,
   explainOnly: false,
+  policy: DEFAULT_POLICY,
+  patternOverrides: {},
 };
 
 // ─── Generated File Detection ────────────────────────────
@@ -159,14 +167,29 @@ function resolveHunk(
       return { lines: formatResult.lines, reason: formatResult.reason };
     }
     // Le résolveur spécialisé a échoué → noter et continuer vers le moteur textuel
-    // (formatResult.reason sera préfixé dans la reason finale si on arrive à un conflit)
   }
 
+  // Phase 7.4 — Politique de merge effective pour ce fichier
+  const effectivePolicy: MergePolicy = effectivePolicyForFile(
+    filePath,
+    options.policy,
+    options.patternOverrides,
+  );
+  const policyCfg = policyToConfig(effectivePolicy);
+
+  // Le seuil de confiance effectif est le min entre l'option globale et celui de la politique
+  // (on prend le plus permissif : la politique peut abaisser le seuil, et une option explicite
+  // peut aussi l'abaisser en dessous du défaut de la politique)
+  const effectiveMinConfidence =
+    CONFIDENCE_ORDER[policyCfg.minConfidence] < CONFIDENCE_ORDER[options.minConfidence]
+      ? policyCfg.minConfidence
+      : options.minConfidence;
+
   // Vérifier le niveau de confiance minimum
-  if (CONFIDENCE_ORDER[hunk.confidence] < CONFIDENCE_ORDER[options.minConfidence]) {
+  if (CONFIDENCE_ORDER[hunk.confidence] < CONFIDENCE_ORDER[effectiveMinConfidence]) {
     return {
       lines: null,
-      reason: `Confiance ${hunk.confidence} insuffisante (minimum requis : ${options.minConfidence}).${formatResult.resolverUsed !== "none" ? ` [${formatResult.reason}]` : ""}`,
+      reason: `Confiance ${hunk.confidence} insuffisante (minimum requis : ${effectiveMinConfidence}, politique : ${effectivePolicy}).${formatResult.resolverUsed !== "none" ? ` [${formatResult.reason}]` : ""}`,
     };
   }
 
@@ -200,22 +223,26 @@ function resolveHunk(
       };
 
     case "whitespace_only":
-      if (!options.resolveWhitespace) {
+      if (!options.resolveWhitespace || !policyCfg.allowWhitespace) {
         return {
           lines: null,
-          reason: "Résolution whitespace désactivée par options (resolveWhitespace: false).",
+          reason: !policyCfg.allowWhitespace
+            ? `Résolution whitespace désactivée par la politique "${effectivePolicy}".`
+            : "Résolution whitespace désactivée par options (resolveWhitespace: false).",
         };
       }
       return {
-        lines: [...hunk.oursLines],
-        reason: "Seul le whitespace diffère. Résolution : préférer ours.",
+        lines: policyCfg.preferOurs ? [...hunk.oursLines] : [...hunk.oursLines],
+        reason: `Seul le whitespace diffère. Résolution : préférer ours (politique : ${effectivePolicy}).`,
       };
 
     case "non_overlapping": {
-      if (!options.resolveNonOverlapping) {
+      if (!options.resolveNonOverlapping || !policyCfg.allowNonOverlapping) {
         return {
           lines: null,
-          reason: "Résolution non-overlapping désactivée par options (resolveNonOverlapping: false).",
+          reason: !policyCfg.allowNonOverlapping
+            ? `Résolution non-overlapping désactivée par la politique "${effectivePolicy}".`
+            : "Résolution non-overlapping désactivée par options (resolveNonOverlapping: false).",
         };
       }
       const merged = mergeNonOverlapping(
@@ -235,11 +262,20 @@ function resolveHunk(
       };
     }
 
-    case "value_only_change":
+    case "value_only_change": {
+      if (!policyCfg.allowValueOnly) {
+        return {
+          lines: null,
+          reason: `Résolution value_only_change désactivée par la politique "${effectivePolicy}".`,
+        };
+      }
+      const preferred = policyCfg.preferOurs ? hunk.oursLines : hunk.theirsLines;
+      const side = policyCfg.preferOurs ? "ours" : "theirs";
       return {
-        lines: [...hunk.theirsLines],
-        reason: "Même structure, valeur(s) volatile(s) différente(s). Résolution : accepter theirs (plus récent).",
+        lines: [...preferred],
+        reason: `Même structure, valeur(s) volatile(s) différente(s). Résolution : accepter ${side} (politique : ${effectivePolicy}).`,
       };
+    }
 
     case "generated_file":
       return {
