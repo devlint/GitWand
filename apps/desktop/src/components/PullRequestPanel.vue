@@ -994,8 +994,8 @@ watch(() => props.cwd, () => { loadRemote(); loadPrs(); selectedPr.value = null;
 
 .eco-btn:hover { background: var(--color-bg-tertiary); }
 .eco-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.eco-btn--primary { background: var(--color-accent); color: #1e1e2e; border-color: transparent; font-weight: 600; }
-.eco-btn--primary:hover { filter: brightness(1.1); background: var(--color-accent); }
+.eco-btn--primary { background: var(--color-accent); color: #fff; border-color: transparent; font-weight: 600; }
+.eco-btn--primary:hover { background: var(--color-accent-hover, var(--color-accent)); filter: brightness(1.05); }
 .eco-btn--xs { font-size: 11px; padding: 3px 8px; border-radius: 5px; }
 .eco-close { padding: 5px; border-color: transparent; color: var(--color-text-muted); }
 .eco-close:hover { color: var(--color-text); background: var(--color-bg-tertiary); }

@@ -9,10 +9,27 @@
  */
 
 import { createServer } from "node:http";
-import { execSync, execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
+import { execSync, execFileSync, spawnSync } from "node:child_process";
+import { readFileSync, writeFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { resolve, join, dirname, basename } from "node:path";
 import { homedir } from "node:os";
+
+/** Resolve the full path to a CLI binary, checking Homebrew paths on macOS. */
+function resolveBin(name) {
+  // Try common macOS Homebrew locations first
+  const candidates = [
+    `/opt/homebrew/bin/${name}`,
+    `/usr/local/bin/${name}`,
+    `/usr/bin/${name}`,
+    name, // fallback: rely on PATH
+  ];
+  for (const c of candidates) {
+    try { if (existsSync(c)) return c; } catch { /* ignore */ }
+  }
+  return name;
+}
+
+const GH = resolveBin("gh");
 
 const PORT = parseInt(process.argv.find((_, i, a) => a[i - 1] === "--port") ?? "3001", 10);
 
@@ -931,7 +948,7 @@ const server = createServer(async (req, res) => {
       const state = url.searchParams.get("state") || "open";
       if (!cwd) return jsonResponse(res, { error: "Missing cwd" }, 400);
       try {
-        const out = execFileSync("gh", [
+        const out = execFileSync(GH, [
           "pr", "list",
           "--state", state,
           "--json", "number,title,state,author,headRefName,baseRefName,isDraft,createdAt,updatedAt,url,additions,deletions,labels",
@@ -965,7 +982,7 @@ const server = createServer(async (req, res) => {
       const number = url.searchParams.get("number");
       if (!cwd || !number) return jsonResponse(res, { error: "Missing cwd or number" }, 400);
       try {
-        const out = execFileSync("gh", [
+        const out = execFileSync(GH, [
           "pr", "view", number,
           "--json", "number,title,body,state,author,headRefName,baseRefName,isDraft,createdAt,updatedAt,mergedAt,url,additions,deletions,changedFiles,comments,reviewRequests,reviews,labels,mergeable,statusCheckRollup",
         ], { cwd, encoding: "utf-8" });
@@ -1004,7 +1021,7 @@ const server = createServer(async (req, res) => {
       const number = url.searchParams.get("number");
       if (!cwd || !number) return jsonResponse(res, { error: "Missing cwd or number" }, 400);
       try {
-        const out = execFileSync("gh", ["pr", "diff", number], { cwd, encoding: "utf-8" });
+        const out = execFileSync(GH, ["pr", "diff", number], { cwd, encoding: "utf-8" });
         return jsonResponse(res, { diff: out });
       } catch (err) {
         return jsonResponse(res, { error: err.message }, 500);
@@ -1017,7 +1034,7 @@ const server = createServer(async (req, res) => {
       const number = url.searchParams.get("number");
       if (!cwd || !number) return jsonResponse(res, { error: "Missing cwd or number" }, 400);
       try {
-        const out = execFileSync("gh", ["pr", "checks", number, "--json", "name,state,conclusion,detailsUrl"], { cwd, encoding: "utf-8" });
+        const out = execFileSync(GH, ["pr", "checks", number, "--json", "name,state,conclusion,detailsUrl"], { cwd, encoding: "utf-8" });
         const checks = JSON.parse(out);
         return jsonResponse(res, checks.map((c) => ({
           name: c.name,
