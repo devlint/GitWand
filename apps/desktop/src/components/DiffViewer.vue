@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, nextTick } from "vue";
-import type { GitDiff, DiffHunk, DiffLine } from "../utils/backend";
+import type { GitDiff, DiffLine } from "../utils/backend";
 import { useI18n } from "../composables/useI18n";
 import type { DiffMode } from "../utils/diffMode";
 import { detectLanguage, highlightLine } from "../utils/highlight";
@@ -88,10 +88,6 @@ const pairedHunks = computed(() => {
   if (!props.diff || props.diffMode !== "side-by-side") return [];
   return props.diff.hunks.map((hunk) => pairLines(hunk.lines));
 });
-
-function toggleMode() {
-  emit("update:diffMode", props.diffMode === "inline" ? "side-by-side" : "inline");
-}
 
 // ─── Hunk navigation ────────────────────────────────────
 const contentEl = ref<HTMLElement | null>(null);
