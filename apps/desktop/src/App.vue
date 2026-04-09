@@ -65,80 +65,84 @@ const {
 // ─── Active tab's repo (computed proxies) ───────────────
 // Each computed reads from the active tab's useGitRepo instance.
 // When no tab is active, sensible defaults are returned.
-const repoFolderPath = computed(() => activeTab.value?.repo.folderPath.value ?? null);
-const repoStatus = computed(() => activeTab.value?.repo.status.value ?? null);
-const repoSelectedFile = computed(() => activeTab.value?.repo.selectedFilePath.value ?? null);
-const repoDiff = computed(() => activeTab.value?.repo.diff.value ?? null);
-const repoLog = computed(() => activeTab.value?.repo.log.value ?? []);
-const repoLoading = computed(() => activeTab.value?.repo.loading.value ?? false);
+// Helper to safely access the active repo — avoids optional chaining edge cases.
+function repo() { return activeTab.value?.repo ?? null; }
+
+const repoFolderPath = computed(() => repo()?.folderPath.value ?? null);
+const repoStatus = computed(() => repo()?.status.value ?? null);
+const repoSelectedFile = computed(() => repo()?.selectedFilePath.value ?? null);
+const repoDiff = computed(() => repo()?.diff.value ?? null);
+const repoLog = computed(() => repo()?.log.value ?? []);
+const repoLoading = computed(() => repo()?.loading.value ?? false);
 const repoError = computed({
-  get: () => activeTab.value?.repo.error.value ?? null,
-  set: (v) => { if (activeTab.value) activeTab.value.repo.error.value = v; },
+  get: () => repo()?.error.value ?? null,
+  set: (v) => { const r = repo(); if (r) r.error.value = v; },
 });
 const repoSuccess = computed({
-  get: () => activeTab.value?.repo.successMessage.value ?? null,
-  set: (v) => { if (activeTab.value) activeTab.value.repo.successMessage.value = v; },
+  get: () => repo()?.successMessage.value ?? null,
+  set: (v) => { const r = repo(); if (r) r.successMessage.value = v; },
 });
 const viewMode = computed({
-  get: () => activeTab.value?.repo.viewMode.value ?? "changes" as ViewMode,
-  set: (v: ViewMode) => { if (activeTab.value) activeTab.value.repo.viewMode.value = v; },
+  get: () => repo()?.viewMode.value ?? ("changes" as ViewMode),
+  set: (v: ViewMode) => { const r = repo(); if (r) r.viewMode.value = v; },
 });
-const hasRepo = computed(() => activeTab.value?.repo.hasRepo.value ?? false);
-const branchDisplay = computed(() => activeTab.value?.repo.branchDisplay.value ?? "");
-const isClean = computed(() => activeTab.value?.repo.isClean.value ?? true);
-const isSelectedFileConflicted = computed(() => activeTab.value?.repo.isSelectedFileConflicted.value ?? false);
-const hasConflicts = computed(() => activeTab.value?.repo.hasConflicts.value ?? false);
-const repoFiles = computed(() => activeTab.value?.repo.allFiles.value ?? []);
-const repoStats = computed(() => activeTab.value?.repo.repoStats.value ?? { staged: 0, unstaged: 0, untracked: 0, conflicted: 0 });
+const hasRepo = computed(() => repo()?.hasRepo.value ?? false);
+const branchDisplay = computed(() => repo()?.branchDisplay.value ?? "");
+const isClean = computed(() => repo()?.isClean.value ?? true);
+const isSelectedFileConflicted = computed(() => repo()?.isSelectedFileConflicted.value ?? false);
+const hasConflicts = computed(() => repo()?.hasConflicts.value ?? false);
+const repoFiles = computed(() => repo()?.allFiles.value ?? []);
+const repoStats = computed(() => repo()?.repoStats.value ?? { staged: 0, unstaged: 0, untracked: 0, conflicted: 0 });
 const commitSummary = computed({
-  get: () => activeTab.value?.repo.commitSummary.value ?? "",
-  set: (v) => { if (activeTab.value) activeTab.value.repo.commitSummary.value = v; },
+  get: () => repo()?.commitSummary.value ?? "",
+  set: (v) => { const r = repo(); if (r) r.commitSummary.value = v; },
 });
 const commitDescription = computed({
-  get: () => activeTab.value?.repo.commitDescription.value ?? "",
-  set: (v) => { if (activeTab.value) activeTab.value.repo.commitDescription.value = v; },
+  get: () => repo()?.commitDescription.value ?? "",
+  set: (v) => { const r = repo(); if (r) r.commitDescription.value = v; },
 });
-const canCommit = computed(() => activeTab.value?.repo.canCommit.value ?? false);
-const isCommitting = computed(() => activeTab.value?.repo.isCommitting.value ?? false);
-const canPush = computed(() => activeTab.value?.repo.canPush.value ?? false);
-const canPull = computed(() => activeTab.value?.repo.canPull.value ?? false);
-const aheadCount = computed(() => activeTab.value?.repo.aheadCount.value ?? 0);
-const behindCount = computed(() => activeTab.value?.repo.behindCount.value ?? 0);
-const isPushing = computed(() => activeTab.value?.repo.isPushing.value ?? false);
-const isPulling = computed(() => activeTab.value?.repo.isPulling.value ?? false);
-const branches = computed(() => activeTab.value?.repo.branches.value ?? []);
-const branchesLoading = computed(() => activeTab.value?.repo.branchesLoading.value ?? false);
+const canCommit = computed(() => repo()?.canCommit.value ?? false);
+const isCommitting = computed(() => repo()?.isCommitting.value ?? false);
+const canPush = computed(() => repo()?.canPush.value ?? false);
+const canPull = computed(() => repo()?.canPull.value ?? false);
+const aheadCount = computed(() => repo()?.aheadCount.value ?? 0);
+const behindCount = computed(() => repo()?.behindCount.value ?? 0);
+const isPushing = computed(() => repo()?.isPushing.value ?? false);
+const isPulling = computed(() => repo()?.isPulling.value ?? false);
+const branches = computed(() => repo()?.branches.value ?? []);
+const branchesLoading = computed(() => repo()?.branchesLoading.value ?? false);
 const isSwitchingBranch = computed({
-  get: () => activeTab.value?.repo.isSwitchingBranch.value ?? false,
-  set: (v) => { if (activeTab.value) activeTab.value.repo.isSwitchingBranch.value = v; },
+  get: () => repo()?.isSwitchingBranch.value ?? false,
+  set: (v) => { const r = repo(); if (r) r.isSwitchingBranch.value = v; },
 });
-const isMerging = computed(() => activeTab.value?.repo.isMerging.value ?? false);
-const selectedCommitHash = computed(() => activeTab.value?.repo.selectedCommitHash.value ?? null);
-const commitDiffs = computed(() => activeTab.value?.repo.commitDiffs.value ?? []);
+const isMerging = computed(() => repo()?.isMerging.value ?? false);
+const selectedCommitHash = computed(() => repo()?.selectedCommitHash.value ?? null);
+const commitDiffs = computed(() => repo()?.commitDiffs.value ?? []);
 
 // ─── Active tab's repo methods (delegated) ──────────────
-function repoRefresh() { return activeTab.value?.repo.refresh() ?? Promise.resolve(); }
-function repoSelectFile(path: string, staged: boolean) { return activeTab.value?.repo.selectFile(path, staged) ?? Promise.resolve(); }
-function loadLog() { return activeTab.value?.repo.loadLog() ?? Promise.resolve(); }
-function stageFiles(paths: string[]) { return activeTab.value?.repo.stageFiles(paths) ?? Promise.resolve(); }
-function stageAll() { return activeTab.value?.repo.stageAll() ?? Promise.resolve(); }
-function unstageFiles(paths: string[]) { return activeTab.value?.repo.unstageFiles(paths) ?? Promise.resolve(); }
-function unstageAll() { return activeTab.value?.repo.unstageAll() ?? Promise.resolve(); }
-function stagePatch(path: string, hunk: string) { return activeTab.value?.repo.stagePatch(path, hunk) ?? Promise.resolve(); }
-function unstagePatch(path: string, hunk: string) { return activeTab.value?.repo.unstagePatch(path, hunk) ?? Promise.resolve(); }
-function doCommit() { return activeTab.value?.repo.commit() ?? Promise.resolve(); }
-function doAmendCommit(summary: string, description: string) { return activeTab.value?.repo.amendCommit(summary, description) ?? Promise.resolve(); }
-function doPush() { return activeTab.value?.repo.push() ?? Promise.resolve(); }
-function doPull(rebase?: boolean) { return activeTab.value?.repo.pull(rebase) ?? Promise.resolve(); }
-function doMerge(name: string) { return activeTab.value?.repo.mergeBranch(name) ?? Promise.resolve(); }
-function doMergeContinue() { return activeTab.value?.repo.mergeContinue() ?? Promise.resolve(); }
-function doAbortMerge() { return activeTab.value?.repo.abortMerge() ?? Promise.resolve(); }
-function discardFiles(paths: string[]) { return activeTab.value?.repo.discardFiles(paths) ?? Promise.resolve(); }
-function selectCommit(hash: string) { return activeTab.value?.repo.selectCommit(hash) ?? Promise.resolve(); }
-function loadBranches() { return activeTab.value?.repo.loadBranches() ?? Promise.resolve(); }
-function createBranch(name: string) { return activeTab.value?.repo.createBranch(name) ?? Promise.resolve(); }
-function switchBranch(name: string) { return activeTab.value?.repo.switchBranch(name) ?? Promise.resolve(); }
-function deleteBranch(name: string) { return activeTab.value?.repo.deleteBranch(name) ?? Promise.resolve(); }
+const NOP = Promise.resolve();
+function repoRefresh() { return repo()?.refresh() ?? NOP; }
+function repoSelectFile(path: string, staged: boolean) { return repo()?.selectFile(path, staged) ?? NOP; }
+function loadLog() { return repo()?.loadLog() ?? NOP; }
+function stageFiles(paths: string[]) { return repo()?.stageFiles(paths) ?? NOP; }
+function stageAll() { return repo()?.stageAll() ?? NOP; }
+function unstageFiles(paths: string[]) { return repo()?.unstageFiles(paths) ?? NOP; }
+function unstageAll() { return repo()?.unstageAll() ?? NOP; }
+function stagePatch(path: string, hunk: string) { return repo()?.stagePatch(path, hunk) ?? NOP; }
+function unstagePatch(path: string, hunk: string) { return repo()?.unstagePatch(path, hunk) ?? NOP; }
+function doCommit() { return repo()?.commit() ?? NOP; }
+function doAmendCommit(summary: string, description: string) { return repo()?.amendCommit(summary, description) ?? NOP; }
+function doPush() { return repo()?.push() ?? NOP; }
+function doPull(rebase?: boolean) { return repo()?.pull(rebase) ?? NOP; }
+function doMerge(name: string) { return repo()?.mergeBranch(name) ?? NOP; }
+function doMergeContinue() { return repo()?.mergeContinue() ?? NOP; }
+function doAbortMerge() { return repo()?.abortMerge() ?? NOP; }
+function discardFiles(paths: string[]) { return repo()?.discardFiles(paths) ?? NOP; }
+function selectCommit(hash: string) { return repo()?.selectCommit(hash) ?? NOP; }
+function loadBranches() { return repo()?.loadBranches() ?? NOP; }
+function createBranch(name: string) { return repo()?.createBranch(name) ?? NOP; }
+function switchBranch(name: string) { return repo()?.switchBranch(name) ?? NOP; }
+function deleteBranch(name: string) { return repo()?.deleteBranch(name) ?? NOP; }
 function openRepo(path: string) { openTab(path); }
 
 // ─── Computed state ─────────────────────────────────────

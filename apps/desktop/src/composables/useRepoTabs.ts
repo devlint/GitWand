@@ -57,19 +57,20 @@ function nameFromPath(path: string): string {
 const tabs = ref<RepoTab[]>([]);
 const activeTabId = ref<number | null>(null);
 
+/** Singleton computed — shared across all callers. */
+const activeTab = computed<RepoTab | null>(() => {
+  if (activeTabId.value === null) return null;
+  return tabs.value.find((t) => t.id === activeTabId.value) ?? null;
+});
+
+const tabCount = computed(() => tabs.value.length);
+
 /**
  * Composable for managing multiple repo tabs.
  * Singleton — shared state across all components.
  */
 export function useRepoTabs() {
   const { addToHistory } = useFolderHistory();
-
-  const activeTab = computed<RepoTab | null>(() => {
-    if (activeTabId.value === null) return null;
-    return tabs.value.find((t) => t.id === activeTabId.value) ?? null;
-  });
-
-  const tabCount = computed(() => tabs.value.length);
 
   /**
    * Open a new repo in a tab. If the repo is already open, switch to it.
