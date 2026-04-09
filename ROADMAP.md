@@ -87,7 +87,7 @@ GitButler est le concurrent le plus proche de GitWand techniquement (même stack
 ### Core — moteur de résolution (Phases 1–7.5)
 - **8 patterns de résolution** : same_change, one_side_change, delete_no_change, whitespace_only, non_overlapping, value_only_change, generated_file, complex — LCS 3-way, diff2 + diff3
 - **Score de confiance composite** (`ConfidenceScore`) : score 0–100, dimensions typeClassification / dataRisk / scopeImpact, boosters[], penalties[], label backward-compatible
-- **Résolveurs par format** : JSON/JSONC sémantique (fusion clé-par-clé récursive), Markdown section-aware (heading ATX), dispatcher automatique par extension
+- **Résolveurs par format** : JSON/JSONC sémantique (fusion clé-par-clé récursive), Markdown section-aware (heading ATX), YAML par clés, imports TS/JS (union + tri par groupes), Vue SFC par blocs, CSS par règles, lockfiles sémantiques (npm/yarn/pnpm — merge par entrée de paquet), dispatcher automatique par extension
 - **Politiques configurables** (`.gitwandrc`) : prefer-ours, prefer-theirs, prefer-safety, prefer-merge, strict — par projet et par pattern glob
 - **DecisionTrace** : trace pas-à-pas de chaque décision de classification, mode explain-only
 - **Corpus de référence** : 20 fixtures réalistes, métriques auto-résolution/faux-positifs, benchmarks (vitest bench)
@@ -356,7 +356,10 @@ interface DecisionTrace {
 #### 8.1 — Smart merge (différenciateur unique) ✅
 
 - ✅ **Merge preview** : Simuler le résultat d'un merge avant de le faire — commande Rust `preview_merge` (merge-base + git show + git merge-file -p --diff3 zéro side-effect), composable `useMergePreview.ts`, `MergePreviewPanel.vue` ; badge clean/auto/warn, stats par catégorie, liste des fichiers conflictuels avec statut `auto-resolved`/`partial`/`manual`/`add-delete` ; bouton preview par branche dans le popover `AppHeader`
-- **Auto-resolve étendu** : Nouveaux patterns (import ordering, generated files, lockfiles) — appuyé par les résolveurs Phase 7.3
+- ✅ **Auto-resolve étendu** : Trois axes implémentés —
+  - **Lockfile sémantique** : résolveurs dédiés `lockfile-npm.ts` (package-lock.json — merge 3-way par entrée de paquet, merge propriété par propriété pour les conflits version/integrity), `lockfile-yarn.ts` (yarn.lock — merge par bloc header/body), `lockfile-pnpm.ts` (pnpm-lock.yaml — merge par section top-level + sous-entrées packages/snapshots). Dispatch automatique dans `dispatcher.ts` avant le résolveur JSON générique.
+  - **Import ordering amélioré** : détection Node.js built-ins (50+ modules), groupes configurables (built-in → npm → scoped → alias internes → relatifs parents → siblings → index), stratégies de tri (`default`, `eslint-import`, `type-last`), insertion optionnelle de séparateurs entre groupes. Type exporté `ImportSortStrategy`.
+  - **Generated files smart resolution** : comparaison structurelle après suppression des valeurs volatiles (SHA, integrity, timestamps, semver+build) — détecte les conflits cosmétiques dans les fichiers générés. Suggestion de régénération dans la raison de résolution.
 - **Suggestions IA** : Pour les conflits complexes, proposer des résolutions basées sur le contexte
 - ✅ **Conflict prevention** : Commande Rust `git_conflict_check` détecte les fichiers modifiés en commun entre la branche courante et une branche cible via merge-base + diff --name-only ; composant `ConflictAlert.vue` affiche un avertissement visuel avec badge warning/danger selon le nombre de fichiers en commun, liste des fichiers, et stats par branche ; wrapper TypeScript `gitConflictCheck` dans `backend.ts`
 

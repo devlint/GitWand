@@ -1,0 +1,273 @@
+/**
+ * Tests pour les résolveurs lockfile sémantiques (Phase 8.1 — Auto-resolve étendu)
+ */
+import { describe, it, expect } from "vitest";
+import { tryResolveLockfileNpmConflict } from "../resolvers/lockfile-npm.js";
+import { tryResolveYarnLockConflict } from "../resolvers/lockfile-yarn.js";
+import { tryResolvePnpmLockConflict } from "../resolvers/lockfile-pnpm.js";
+
+// ─── npm lockfile (package-lock.json) ────────────────────
+
+describe("tryResolveLockfileNpmConflict", () => {
+  it("should merge when ours adds a package and theirs adds a different one", () => {
+    const base = JSON.stringify(
+      {
+        name: "test",
+        lockfileVersion: 3,
+        packages: {
+          "": { name: "test", version: "1.0.0" },
+          "node_modules/react": { version: "18.2.0", resolved: "https://registry.npmjs.org/react/-/react-18.2.0.tgz" },
+        },
+      },
+      null,
+      2,
+    );
+
+    const ours = JSON.stringify(
+      {
+        name: "test",
+        lockfileVersion: 3,
+        packages: {
+          "": { name: "test", version: "1.0.0" },
+          "node_modules/react": { version: "18.2.0", resolved: "https://registry.npmjs.org/react/-/react-18.2.0.tgz" },
+          "node_modules/lodash": { version: "4.17.21", resolved: "https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz" },
+        },
+      },
+      null,
+      2,
+    );
+
+    const theirs = JSON.stringify(
+      {
+        name: "test",
+        lockfileVersion: 3,
+        packages: {
+          "": { name: "test", version: "1.0.0" },
+          "node_modules/react": { version: "18.2.0", resolved: "https://registry.npmjs.org/react/-/react-18.2.0.tgz" },
+          "node_modules/axios": { version: "1.6.0", resolved: "https://registry.npmjs.org/axios/-/axios-1.6.0.tgz" },
+        },
+      },
+      null,
+      2,
+    );
+
+    const result = tryResolveLockfileNpmConflict(base.split("\n"), ours.split("\n"), theirs.split("\n"));
+
+    expect(result.merged).not.toBeNull();
+    expect(result.versionConflicts).toBe(0);
+    // Both lodash and axios should be present
+    const parsed = JSON.parse(result.merged!);
+    expect(parsed.packages["node_modules/lodash"]).toBeDefined();
+    expect(parsed.packages["node_modules/axios"]).toBeDefined();
+    expect(parsed.packages["node_modules/react"]).toBeDefined();
+  });
+
+  it("should handle ours removing a package while theirs keeps it unchanged", () => {
+    const base = JSON.stringify(
+      {
+        name: "test",
+        lockfileVersion: 3,
+        packages: {
+          "node_modules/react": { version: "18.2.0" },
+          "node_modules/lodash": { version: "4.17.21" },
+        },
+      },
+      null,
+      2,
+    );
+
+    const ours = JSON.stringify(
+      {
+        name: "test",
+        lockfileVersion: 3,
+        packages: {
+          "node_modules/react": { version: "18.2.0" },
+        },
+      },
+      null,
+      2,
+    );
+
+    const theirs = base;
+
+    const result = tryResolveLockfileNpmConflict(base.split("\n"), ours.split("\n"), theirs.split("\n"));
+
+    expect(result.merged).not.toBeNull();
+    const parsed = JSON.parse(result.merged!);
+    // lodash should be removed (ours removed it, theirs didn't change it)
+    expect(parsed.packages["node_modules/lodash"]).toBeUndefined();
+    expect(parsed.packages["node_modules/react"]).toBeDefined();
+  });
+
+  it("should resolve property-level conflicts (ours updates version, theirs updates integrity)", () => {
+    const base = JSON.stringify(
+      {
+        name: "test",
+        lockfileVersion: 3,
+        packages: {
+          "node_modules/react": { version: "18.2.0", integrity: "sha512-old", resolved: "https://old" },
+        },
+      },
+      null,
+      2,
+    );
+
+    const ours = JSON.stringify(
+      {
+        name: "test",
+        lockfileVersion: 3,
+        packages: {
+          "node_modules/react": { version: "18.3.0", integrity: "sha512-old", resolved: "https://old" },
+        },
+      },
+      null,
+      2,
+    );
+
+    const theirs = JSON.stringify(
+      {
+        name: "test",
+        lockfileVersion: 3,
+        packages: {
+          "node_modules/react": { version: "18.2.0", integrity: "sha512-new", resolved: "https://new" },
+        },
+      },
+      null,
+      2,
+    );
+
+    const result = tryResolveLockfileNpmConflict(base.split("\n"), ours.split("\n"), theirs.split("\n"));
+
+    expect(result.merged).not.toBeNull();
+    const parsed = JSON.parse(result.merged!);
+    const react = parsed.packages["node_modules/react"];
+    // ours changed version, theirs changed integrity+resolved → both should be merged
+    expect(react.version).toBe("18.3.0");
+    expect(react.integrity).toBe("sha512-new");
+    expect(react.resolved).toBe("https://new");
+  });
+});
+
+// ─── yarn lockfile (yarn.lock) ───────────────────────────
+
+describe("tryResolveYarnLockConflict", () => {
+  const baseLock = `# THIS IS AN AUTOGENERATED FILE. DO NOT EDIT THIS FILE DIRECTLY.
+# yarn lockfile v1
+
+react@^18.0.0:
+  version "18.2.0"
+  resolved "https://registry.yarnpkg.com/react/-/react-18.2.0.tgz"
+  integrity sha512-xxx
+
+lodash@^4.0.0:
+  version "4.17.21"
+  resolved "https://registry.yarnpkg.com/lodash/-/lodash-4.17.21.tgz"
+  integrity sha512-yyy
+`;
+
+  it("should merge when ours adds a package and theirs adds a different one", () => {
+    const oursLock = baseLock + `\naxios@^1.0.0:\n  version "1.6.0"\n  resolved "https://registry.yarnpkg.com/axios/-/axios-1.6.0.tgz"\n  integrity sha512-aaa\n`;
+    const theirsLock = baseLock + `\ndate-fns@^3.0.0:\n  version "3.0.0"\n  resolved "https://registry.yarnpkg.com/date-fns/-/date-fns-3.0.0.tgz"\n  integrity sha512-bbb\n`;
+
+    const result = tryResolveYarnLockConflict(
+      baseLock.split("\n"),
+      oursLock.split("\n"),
+      theirsLock.split("\n"),
+    );
+
+    expect(result.merged).not.toBeNull();
+    expect(result.versionConflicts).toBe(0);
+    expect(result.merged).toContain("axios@^1.0.0:");
+    expect(result.merged).toContain("date-fns@^3.0.0:");
+    expect(result.merged).toContain("react@^18.0.0:");
+    expect(result.merged).toContain("lodash@^4.0.0:");
+  });
+
+  it("should handle deletion from one side", () => {
+    // Ours removes lodash
+    const oursLock = `# THIS IS AN AUTOGENERATED FILE. DO NOT EDIT THIS FILE DIRECTLY.
+# yarn lockfile v1
+
+react@^18.0.0:
+  version "18.2.0"
+  resolved "https://registry.yarnpkg.com/react/-/react-18.2.0.tgz"
+  integrity sha512-xxx
+`;
+
+    const result = tryResolveYarnLockConflict(
+      baseLock.split("\n"),
+      oursLock.split("\n"),
+      baseLock.split("\n"),
+    );
+
+    expect(result.merged).not.toBeNull();
+    expect(result.merged).not.toContain("lodash@^4.0.0:");
+    expect(result.merged).toContain("react@^18.0.0:");
+  });
+});
+
+// ─── pnpm lockfile (pnpm-lock.yaml) ─────────────────────
+
+describe("tryResolvePnpmLockConflict", () => {
+  const baseLock = `lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+
+packages:
+  /react@18.2.0:
+    resolution: {integrity: sha512-xxx}
+    engines: {node: '>=16'}
+
+  /lodash@4.17.21:
+    resolution: {integrity: sha512-yyy}
+`;
+
+  it("should merge when ours adds a package and theirs adds a different one", () => {
+    const oursLock = `lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+
+packages:
+  /react@18.2.0:
+    resolution: {integrity: sha512-xxx}
+    engines: {node: '>=16'}
+
+  /lodash@4.17.21:
+    resolution: {integrity: sha512-yyy}
+
+  /axios@1.6.0:
+    resolution: {integrity: sha512-aaa}
+`;
+
+    const theirsLock = `lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+
+packages:
+  /react@18.2.0:
+    resolution: {integrity: sha512-xxx}
+    engines: {node: '>=16'}
+
+  /lodash@4.17.21:
+    resolution: {integrity: sha512-yyy}
+
+  /date-fns@3.0.0:
+    resolution: {integrity: sha512-bbb}
+`;
+
+    const result = tryResolvePnpmLockConflict(
+      baseLock.split("\n"),
+      oursLock.split("\n"),
+      theirsLock.split("\n"),
+    );
+
+    expect(result.merged).not.toBeNull();
+    expect(result.conflicts).toBe(0);
+    expect(result.merged).toContain("axios");
+    expect(result.merged).toContain("date-fns");
+    expect(result.merged).toContain("react");
+  });
+});

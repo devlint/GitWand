@@ -9,17 +9,34 @@
  *
  *   resolver.ts
  *     └─ tryFormatAwareResolve(hunk, filePath)
- *          ├─ isJsonFile(filePath) → tryResolveJsonConflict()
+ *          ├─ isJsonFile(filePath)    → tryResolveJsonConflict()
  *          ├─ isMarkdownFile(filePath) → tryResolveMarkdownConflict()
+ *          ├─ isYamlFile(filePath)    → tryResolveYamlConflict()
+ *          ├─ isImportFile(filePath)  → tryResolveImportConflict() (si bloc d'imports)
+ *          ├─ isVueFile(filePath)     → tryResolveVueConflict()
+ *          ├─ isCssFile(filePath)     → tryResolveCssConflict()
  *          └─ null → moteur textuel standard (resolver.ts switch)
  *
  * Chaque résolveur spécialisé retourne des lignes résolues ou null
  * (null = le résolveur ne sait pas → fallback).
+ *
+ * Phase 7.3b — Nouveaux résolveurs :
+ *   - YAML (.yaml / .yml)
+ *   - TS/JS imports (.ts / .js / .tsx / .jsx / .mjs / .cjs)
+ *   - Vue SFC (.vue)
+ *   - CSS/SCSS/Less (.css / .scss / .less)
  */
 
 import type { ConflictHunk } from "../types.js";
 import { tryResolveJsonConflict } from "./json.js";
 import { tryResolveMarkdownConflict } from "./markdown.js";
+import { tryResolveYamlConflict } from "./yaml.js";
+import { tryResolveImportConflict, isImportBlock } from "./imports.js";
+import { tryResolveVueConflict } from "./vue.js";
+import { tryResolveCssConflict } from "./css.js";
+import { tryResolveLockfileNpmConflict } from "./lockfile-npm.js";
+import { tryResolveYarnLockConflict } from "./lockfile-yarn.js";
+import { tryResolvePnpmLockConflict } from "./lockfile-pnpm.js";
 
 // ─── Type detection ───────────────────────────────────────
 
@@ -33,6 +50,46 @@ export function isMarkdownFile(filePath: string): boolean {
   return /\.(md|mdx|markdown)$/i.test(filePath);
 }
 
+/** Vérifie si le fichier est YAML */
+export function isYamlFile(filePath: string): boolean {
+  return /\.(ya?ml)$/i.test(filePath);
+}
+
+/** Vérifie si le fichier est un module TS/JS/JSX/TSX */
+export function isJsFile(filePath: string): boolean {
+  return /\.(ts|tsx|js|jsx|mjs|cjs)$/i.test(filePath);
+}
+
+/** Vérifie si le fichier est un composant Vue SFC */
+export function isVueFile(filePath: string): boolean {
+  return /\.vue$/i.test(filePath);
+}
+
+/** Vérifie si le fichier est CSS, SCSS ou Less */
+export function isCssFile(filePath: string): boolean {
+  return /\.(css|scss|less|sass)$/i.test(filePath);
+}
+
+/** Vérifie si le fichier est un lockfile npm (package-lock.json) */
+export function isNpmLockfile(filePath: string): boolean {
+  return /package-lock\.json$/i.test(filePath);
+}
+
+/** Vérifie si le fichier est un lockfile yarn (yarn.lock) */
+export function isYarnLockfile(filePath: string): boolean {
+  return /yarn\.lock$/i.test(filePath);
+}
+
+/** Vérifie si le fichier est un lockfile pnpm (pnpm-lock.yaml) */
+export function isPnpmLockfile(filePath: string): boolean {
+  return /pnpm-lock\.ya?ml$/i.test(filePath);
+}
+
+/** Vérifie si le fichier est un lockfile quelconque */
+export function isLockfile(filePath: string): boolean {
+  return isNpmLockfile(filePath) || isYarnLockfile(filePath) || isPnpmLockfile(filePath);
+}
+
 // ─── Format-aware resolution result ──────────────────────
 
 export interface FormatResolveResult {
@@ -44,7 +101,7 @@ export interface FormatResolveResult {
    */
   reason: string;
   /** Résolveur utilisé (pour la trace) */
-  resolverUsed: "json" | "markdown" | "none";
+  resolverUsed: "json" | "markdown" | "yaml" | "imports" | "vue" | "css" | "lockfile-npm" | "lockfile-yarn" | "lockfile-pnpm" | "none";
 }
 
 // ─── Main dispatcher ──────────────────────────────────────
@@ -63,6 +120,73 @@ export function tryFormatAwareResolve(
   hunk: ConflictHunk,
   filePath: string,
 ): FormatResolveResult {
+  // ── Lockfiles (avant JSON car package-lock.json est un .json) ──
+  if (isNpmLockfile(filePath)) {
+    const result = tryResolveLockfileNpmConflict(
+      hunk.baseLines,
+      hunk.oursLines,
+      hunk.theirsLines,
+    );
+
+    if (result.merged !== null) {
+      return {
+        lines: result.merged.split("\n"),
+        reason: `[lockfile-npm] ${result.reason}`,
+        resolverUsed: "lockfile-npm",
+      };
+    }
+
+    return {
+      lines: null,
+      reason: `[lockfile-npm] ${result.reason}`,
+      resolverUsed: "lockfile-npm",
+    };
+  }
+
+  if (isYarnLockfile(filePath)) {
+    const result = tryResolveYarnLockConflict(
+      hunk.baseLines,
+      hunk.oursLines,
+      hunk.theirsLines,
+    );
+
+    if (result.merged !== null) {
+      return {
+        lines: result.merged.split("\n"),
+        reason: `[lockfile-yarn] ${result.reason}`,
+        resolverUsed: "lockfile-yarn",
+      };
+    }
+
+    return {
+      lines: null,
+      reason: `[lockfile-yarn] ${result.reason}`,
+      resolverUsed: "lockfile-yarn",
+    };
+  }
+
+  if (isPnpmLockfile(filePath)) {
+    const result = tryResolvePnpmLockConflict(
+      hunk.baseLines,
+      hunk.oursLines,
+      hunk.theirsLines,
+    );
+
+    if (result.merged !== null) {
+      return {
+        lines: result.merged.split("\n"),
+        reason: `[lockfile-pnpm] ${result.reason}`,
+        resolverUsed: "lockfile-pnpm",
+      };
+    }
+
+    return {
+      lines: null,
+      reason: `[lockfile-pnpm] ${result.reason}`,
+      resolverUsed: "lockfile-pnpm",
+    };
+  }
+
   // ── JSON / JSONC ──────────────────────────────────────
   if (isJsonFile(filePath)) {
     const result = tryResolveJsonConflict(
@@ -72,8 +196,6 @@ export function tryFormatAwareResolve(
     );
 
     if (result.merged !== null) {
-      // Le résolveur JSON retourne une string (le JSON reformaté)
-      // ou un objet — dans les deux cas on split en lignes
       const mergedText =
         typeof result.merged === "string"
           ? result.merged
@@ -114,6 +236,108 @@ export function tryFormatAwareResolve(
       reason: `[markdown] ${result.reason}`,
       resolverUsed: "markdown",
     };
+  }
+
+  // ── YAML ──────────────────────────────────────────────
+  if (isYamlFile(filePath)) {
+    const result = tryResolveYamlConflict(
+      hunk.baseLines,
+      hunk.oursLines,
+      hunk.theirsLines,
+    );
+
+    if (result.mergedLines !== null) {
+      return {
+        lines: result.mergedLines,
+        reason: `[yaml] ${result.reason}`,
+        resolverUsed: "yaml",
+      };
+    }
+
+    return {
+      lines: null,
+      reason: `[yaml] ${result.reason}`,
+      resolverUsed: "yaml",
+    };
+  }
+
+  // ── Vue SFC ───────────────────────────────────────────
+  if (isVueFile(filePath)) {
+    const result = tryResolveVueConflict(
+      hunk.baseLines,
+      hunk.oursLines,
+      hunk.theirsLines,
+    );
+
+    if (result.mergedLines !== null) {
+      return {
+        lines: result.mergedLines,
+        reason: `[vue] ${result.reason}`,
+        resolverUsed: "vue",
+      };
+    }
+
+    return {
+      lines: null,
+      reason: `[vue] ${result.reason}`,
+      resolverUsed: "vue",
+    };
+  }
+
+  // ── CSS / SCSS / Less ─────────────────────────────────
+  if (isCssFile(filePath)) {
+    const result = tryResolveCssConflict(
+      hunk.baseLines,
+      hunk.oursLines,
+      hunk.theirsLines,
+    );
+
+    if (result.mergedLines !== null) {
+      return {
+        lines: result.mergedLines,
+        reason: `[css] ${result.reason}`,
+        resolverUsed: "css",
+      };
+    }
+
+    return {
+      lines: null,
+      reason: `[css] ${result.reason}`,
+      resolverUsed: "css",
+    };
+  }
+
+  // ── TS/JS/TSX/JSX — résolveur d'imports ──────────────
+  // Uniquement si le bloc entier est composé d'import statements,
+  // et uniquement si les deux côtés sont différents (si ours === theirs,
+  // le moteur same_change gère la résolution sans réordonner les imports).
+  if (isJsFile(filePath)) {
+    if (
+      isImportBlock(hunk.oursLines) &&
+      isImportBlock(hunk.theirsLines) &&
+      hunk.oursLines.join("\n") !== hunk.theirsLines.join("\n")
+    ) {
+      const result = tryResolveImportConflict(
+        hunk.baseLines,
+        hunk.oursLines,
+        hunk.theirsLines,
+      );
+
+      if (result.mergedLines !== null) {
+        return {
+          lines: result.mergedLines,
+          reason: `[imports] ${result.reason}`,
+          resolverUsed: "imports",
+        };
+      }
+
+      return {
+        lines: null,
+        reason: `[imports] ${result.reason}`,
+        resolverUsed: "imports",
+      };
+    }
+    // Bloc non-import → pas de résolveur spécialisé pour TS/JS (fallback textuel)
   }
 
   // ── Pas de résolveur spécialisé ───────────────────────

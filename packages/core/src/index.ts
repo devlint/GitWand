@@ -24,6 +24,18 @@ export { mergeNonOverlapping, computeDiff, lcs } from "./diff.js";
 
 // Phase 7.3 — Résolveurs spécialisés par format
 export { tryResolveJsonConflict, stripJsoncComments } from "./resolvers/json.js";
+export { tryResolveMarkdownConflict, parseSections, extractFrontmatter } from "./resolvers/markdown.js";
+
+// Phase 7.3b — Résolveurs supplémentaires (YAML, imports TS/JS, Vue SFC, CSS)
+export { tryResolveYamlConflict } from "./resolvers/yaml.js";
+export { tryResolveImportConflict, isImportBlock } from "./resolvers/imports.js";
+export { tryResolveVueConflict, parseSfcBlocks } from "./resolvers/vue.js";
+export { tryResolveCssConflict, parseCssRules } from "./resolvers/css.js";
+
+// Phase 8.1 — Résolveurs lockfile sémantiques (auto-resolve étendu)
+export { tryResolveLockfileNpmConflict } from "./resolvers/lockfile-npm.js";
+export { tryResolveYarnLockConflict } from "./resolvers/lockfile-yarn.js";
+export { tryResolvePnpmLockConflict } from "./resolvers/lockfile-pnpm.js";
 
 // Phase 7.4 — Politiques de merge et configuration par projet
 export {
@@ -33,8 +45,19 @@ export {
   parseGitwandrc,
   DEFAULT_POLICY,
 } from "./config.js";
-export { tryResolveMarkdownConflict, parseSections, extractFrontmatter } from "./resolvers/markdown.js";
-export { tryFormatAwareResolve, isJsonFile, isMarkdownFile } from "./resolvers/dispatcher.js";
+export {
+  tryFormatAwareResolve,
+  isJsonFile,
+  isMarkdownFile,
+  isYamlFile,
+  isJsFile,
+  isVueFile,
+  isCssFile,
+  isNpmLockfile,
+  isYarnLockfile,
+  isPnpmLockfile,
+  isLockfile,
+} from "./resolvers/dispatcher.js";
 
 export type {
   MergeInput,
@@ -56,5 +79,13 @@ export type {
 
 export type { JsonMergeResult } from "./resolvers/json.js";
 export type { MarkdownMergeResult, MarkdownSection } from "./resolvers/markdown.js";
+export type { YamlMergeResult, YamlEntry } from "./resolvers/yaml.js";
+export type { ImportMergeResult, ImportStatement } from "./resolvers/imports.js";
+export type { VueMergeResult, SfcBlock } from "./resolvers/vue.js";
+export type { CssMergeResult, CssRule } from "./resolvers/css.js";
 export type { FormatResolveResult } from "./resolvers/dispatcher.js";
+export type { LockfileMergeResult } from "./resolvers/lockfile-npm.js";
+export type { YarnLockMergeResult } from "./resolvers/lockfile-yarn.js";
+export type { PnpmLockMergeResult } from "./resolvers/lockfile-pnpm.js";
+export type { ImportSortStrategy } from "./resolvers/imports.js";
 export type { MergePolicy, PolicyConfig, GitWandrcConfig } from "./config.js";

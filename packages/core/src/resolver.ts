@@ -78,6 +78,33 @@ const CONFIDENCE_ORDER: Record<Confidence, number> = {
   low: 1,
 };
 
+// ─── Smart generated file comparison ─────────────────────
+
+/**
+ * Supprime les valeurs volatiles (hashes, timestamps, resolved URLs, integrity)
+ * d'un bloc de lignes pour permettre une comparaison structurelle.
+ * Utilisé pour détecter les conflits cosmétiques dans les fichiers générés.
+ */
+function stripVolatileValues(lines: string[]): string {
+  return lines
+    .map((line) =>
+      line
+        // SHA/integrity hashes
+        .replace(/sha[0-9]+-[A-Za-z0-9+/=]+/g, "<hash>")
+        // npm resolved URLs with version+hash
+        .replace(/"resolved":\s*"[^"]+"/g, '"resolved": "<url>"')
+        // integrity fields
+        .replace(/"integrity":\s*"[^"]+"/g, '"integrity": "<hash>"')
+        // Generic hex hashes (7+ chars)
+        .replace(/\b[a-f0-9]{7,64}\b/g, "<hex>")
+        // ISO timestamps
+        .replace(/\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})?/g, "<ts>")
+        // Semver with build metadata
+        .replace(/\d+\.\d+\.\d+[-+][A-Za-z0-9.]+/g, "<ver>")
+    )
+    .join("\n");
+}
+
 // ─── Phase 7.2 — Validation post-merge ───────────────────
 
 /** Patterns de marqueurs de conflit résiduels */
@@ -160,11 +187,36 @@ function resolveHunk(
 
   // Phase 7.3 — Dispatch format-aware
   // Tenter le résolveur spécialisé avant le moteur textuel.
-  // Les résolveurs JSON/Markdown effectuent une validation sémantique,
+  // Les résolveurs JSON/YAML/Markdown/Vue/CSS effectuent une validation sémantique,
   // ce qui justifie de bypasser le filtre de confiance textuel.
+  //
+  // Exception : le résolveur `imports` est sémantiquement équivalent à `non_overlapping`
+  // (combinaison d'ajouts indépendants) — il doit respecter la politique `allowNonOverlapping`.
   const formatResult = tryFormatAwareResolve(hunk, filePath);
   if (formatResult.resolverUsed !== "none") {
     if (formatResult.lines !== null) {
+      // Gate politique pour le résolveur d'imports (≈ non_overlapping)
+      if (formatResult.resolverUsed === "imports") {
+        // Vérifier l'option globale resolveNonOverlapping
+        if (!options.resolveNonOverlapping) {
+          return {
+            lines: null,
+            reason: "Résolution d'imports (non-overlapping) désactivée par options (resolveNonOverlapping: false).",
+          };
+        }
+        const _effectivePolicy: MergePolicy = effectivePolicyForFile(
+          filePath,
+          options.policy,
+          options.patternOverrides,
+        );
+        const _policyCfg = policyToConfig(_effectivePolicy);
+        if (!_policyCfg.allowNonOverlapping) {
+          return {
+            lines: null,
+            reason: `Résolution d'imports (non-overlapping) désactivée par la politique "${_effectivePolicy}".`,
+          };
+        }
+      }
       return { lines: formatResult.lines, reason: formatResult.reason };
     }
     // Le résolveur spécialisé a échoué → noter et continuer vers le moteur textuel
@@ -279,11 +331,24 @@ function resolveHunk(
       };
     }
 
-    case "generated_file":
+    case "generated_file": {
+      // Smart resolution : si les deux côtés sont identiques après suppression
+      // des valeurs volatiles (hashes, timestamps), le conflit est cosmétique
+      const oursStripped = stripVolatileValues(hunk.oursLines);
+      const theirsStripped = stripVolatileValues(hunk.theirsLines);
+
+      if (oursStripped === theirsStripped) {
+        return {
+          lines: [...hunk.theirsLines],
+          reason: "Fichier auto-généré — contenu structurel identique (seules les valeurs volatiles diffèrent). Résolution : accepter theirs. Suggestion : relancer le build/install.",
+        };
+      }
+
       return {
         lines: [...hunk.theirsLines],
-        reason: "Fichier auto-généré — le fichier sera régénéré après merge. Résolution : accepter theirs.",
+        reason: "Fichier auto-généré — le fichier sera régénéré après merge. Résolution : accepter theirs. Suggestion : relancer le build/install.",
       };
+    }
 
     case "complex":
       return {
