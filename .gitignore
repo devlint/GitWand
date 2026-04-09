@@ -39,4 +39,5 @@ pnpm-debug.log*
 
 # Temp
 _tmp_*
+vite.config.ts.timestamp-*
 ROADMAP.md
