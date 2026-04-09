@@ -452,6 +452,26 @@ const server = createServer(async (req, res) => {
       }
     }
 
+    // POST /api/git-amend-commit  { cwd, message }
+    if (url.pathname === "/api/git-amend-commit" && req.method === "POST") {
+      const { cwd, message } = await readBody(req);
+      if (!cwd || !message) return jsonResponse(res, { error: "Missing cwd or message" }, 400);
+      try {
+        const resolvedCwd = resolve(cwd);
+        execFileSync("git", ["commit", "--amend", "-m", message], {
+          cwd: resolvedCwd,
+          encoding: "utf-8",
+        });
+        const hash = execSync("git rev-parse --short HEAD", {
+          cwd: resolvedCwd,
+          encoding: "utf-8",
+        }).trim();
+        return jsonResponse(res, { hash });
+      } catch (err) {
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
+
     // POST /api/git-push  { cwd }
     if (url.pathname === "/api/git-push" && req.method === "POST") {
       const { cwd } = await readBody(req);
