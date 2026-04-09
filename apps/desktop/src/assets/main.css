@@ -116,3 +116,74 @@ button:focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
+
+/* ─── Highlight.js syntax tokens (dark theme) ────────── */
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-built_in,
+.hljs-name { color: #c792ea; }
+
+.hljs-string,
+.hljs-attr { color: #c3e88d; }
+
+.hljs-number,
+.hljs-literal { color: #f78c6c; }
+
+.hljs-comment,
+.hljs-doctag { color: #676e95; font-style: italic; }
+
+.hljs-type,
+.hljs-class .hljs-title,
+.hljs-title { color: #ffcb6b; }
+
+.hljs-function .hljs-title,
+.hljs-title.function_ { color: #82aaff; }
+
+.hljs-variable,
+.hljs-params { color: var(--color-text); }
+
+.hljs-meta,
+.hljs-meta .hljs-keyword { color: #89ddff; }
+
+.hljs-tag { color: #f07178; }
+.hljs-attribute { color: #c792ea; }
+.hljs-symbol,
+.hljs-bullet { color: #f78c6c; }
+
+.hljs-regexp { color: #89ddff; }
+.hljs-addition { color: var(--color-success); }
+.hljs-deletion { color: var(--color-danger); }
+
+.hljs-selector-class,
+.hljs-selector-id { color: #ffcb6b; }
+
+.hljs-property { color: #82aaff; }
+
+/* ─── Light theme syntax tokens ──────────────────────── */
+[data-theme="light"] .hljs-keyword,
+[data-theme="light"] .hljs-selector-tag,
+[data-theme="light"] .hljs-built_in,
+[data-theme="light"] .hljs-name { color: #7c3aed; }
+
+[data-theme="light"] .hljs-string,
+[data-theme="light"] .hljs-attr { color: #16a34a; }
+
+[data-theme="light"] .hljs-number,
+[data-theme="light"] .hljs-literal { color: #ea580c; }
+
+[data-theme="light"] .hljs-comment,
+[data-theme="light"] .hljs-doctag { color: #9ca3af; font-style: italic; }
+
+[data-theme="light"] .hljs-type,
+[data-theme="light"] .hljs-class .hljs-title,
+[data-theme="light"] .hljs-title { color: #b45309; }
+
+[data-theme="light"] .hljs-function .hljs-title,
+[data-theme="light"] .hljs-title.function_ { color: #2563eb; }
+
+[data-theme="light"] .hljs-tag { color: #dc2626; }
+[data-theme="light"] .hljs-attribute { color: #7c3aed; }
+[data-theme="light"] .hljs-property { color: #2563eb; }
+
+[data-theme="light"] .hljs-meta,
+[data-theme="light"] .hljs-meta .hljs-keyword { color: #0891b2; }

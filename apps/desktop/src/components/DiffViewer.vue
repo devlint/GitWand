@@ -3,6 +3,7 @@ import { computed } from "vue";
 import type { GitDiff, DiffHunk, DiffLine } from "../utils/backend";
 import { useI18n } from "../composables/useI18n";
 import type { DiffMode } from "../utils/diffMode";
+import { detectLanguage, highlightLine } from "../utils/highlight";
 
 const { t } = useI18n();
 
@@ -35,6 +36,14 @@ const totalStats = computed(() => {
 
 function fileName(path: string): string {
   return path.split("/").pop() ?? path;
+}
+
+/** Detected language for syntax highlighting */
+const language = computed(() => props.filePath ? detectLanguage(props.filePath) : null);
+
+/** Highlight a line's content, returns HTML */
+function hl(content: string): string {
+  return highlightLine(content, language.value);
 }
 
 // ─── Side-by-side: pair lines into left/right rows ─────
@@ -152,7 +161,7 @@ function toggleMode() {
                 {{ line.type === 'add' ? '+' : line.type === 'delete' ? '-' : ' ' }}
               </td>
               <td class="line-content mono">
-                <span>{{ line.content || '\u00a0' }}</span>
+                <span v-html="hl(line.content) || '\u00a0'"></span>
               </td>
             </tr>
           </tbody>
@@ -186,7 +195,7 @@ function toggleMode() {
                 {{ pair.left?.type === 'delete' ? '-' : pair.left?.type === 'context' ? ' ' : '' }}
               </td>
               <td class="line-content mono sbs-content" :class="pair.left ? `sbs-cell--${pair.left.type}` : 'sbs-cell--empty'">
-                <span>{{ pair.left?.content || '\u00a0' }}</span>
+                <span v-html="pair.left ? (hl(pair.left.content) || '\u00a0') : '\u00a0'"></span>
               </td>
               <!-- Separator -->
               <td class="sbs-gutter"></td>
@@ -198,7 +207,7 @@ function toggleMode() {
                 {{ pair.right?.type === 'add' ? '+' : pair.right?.type === 'context' ? ' ' : '' }}
               </td>
               <td class="line-content mono sbs-content" :class="pair.right ? `sbs-cell--${pair.right.type}` : 'sbs-cell--empty'">
-                <span>{{ pair.right?.content || '\u00a0' }}</span>
+                <span v-html="pair.right ? (hl(pair.right.content) || '\u00a0') : '\u00a0'"></span>
               </td>
             </tr>
           </tbody>
