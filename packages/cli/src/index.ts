@@ -147,6 +147,47 @@ function buildCIReport(
 }
 
 /**
+ * Build partially-resolved file content: replace auto-resolved conflict
+ * blocks with their resolved lines, keep unresolved blocks intact.
+ */
+function buildPartialContent(
+  content: string,
+  resolutions: MergeResult["resolutions"],
+): string {
+  const lines = content.split("\n");
+  const result: string[] = [];
+  let conflictIdx = 0;
+  let inConflict = false;
+  let conflictBuffer: string[] = [];
+
+  for (const line of lines) {
+    if (line.startsWith("<<<<<<<")) {
+      inConflict = true;
+      conflictBuffer = [line];
+    } else if (line.startsWith(">>>>>>>") && inConflict) {
+      conflictBuffer.push(line);
+      const resolution = resolutions[conflictIdx];
+      if (resolution?.autoResolved && resolution.resolvedLines) {
+        // Replace this conflict with the auto-resolved content
+        result.push(...resolution.resolvedLines);
+      } else {
+        // Keep unresolved conflict markers intact
+        result.push(...conflictBuffer);
+      }
+      conflictIdx++;
+      inConflict = false;
+      conflictBuffer = [];
+    } else if (inConflict) {
+      conflictBuffer.push(line);
+    } else {
+      result.push(line);
+    }
+  }
+
+  return result.join("\n");
+}
+
+/**
  * Main command: resolve
  */
 function cmdResolve(files: string[], flags: Record<string, boolean>) {
@@ -232,7 +273,8 @@ function cmdResolve(files: string[], flags: Record<string, boolean>) {
     // Write resolved file (unless dry-run)
     if (!flags["dry-run"] && result.stats.autoResolved > 0) {
       // Use mergedContent if all resolved, otherwise rebuild with partial resolutions
-      const newContent = result.mergedContent ?? content;
+      const newContent =
+        result.mergedContent ?? buildPartialContent(content, result.resolutions);
       writeFileSync(filePath, newContent, "utf-8");
     }
   }

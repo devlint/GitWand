@@ -317,18 +317,43 @@ export async function fetchUsers() {
 
   /**
    * Resolve all trivial conflicts in all files.
+   * Handles mixed files (some auto-resolved, some not) by applying
+   * auto-resolved hunks individually via replaceConflictByIndex.
    */
   function resolveAll() {
     pushUndo();
     files.value = files.value.map((f) => {
-      if (f.result.stats.autoResolved > 0 && f.result.mergedContent) {
+      if (f.result.stats.autoResolved === 0) return f;
+
+      if (f.result.mergedContent) {
+        // All conflicts resolved — use merged content directly
         return {
           ...f,
           content: f.result.mergedContent,
           result: resolve(f.result.mergedContent, f.path),
         };
       }
-      return f;
+
+      // Mixed file: apply auto-resolved hunks individually (reverse order
+      // to preserve conflict indices as we replace earlier blocks).
+      let newContent = f.content;
+      const resolutions = f.result.resolutions;
+      for (let i = resolutions.length - 1; i >= 0; i--) {
+        const res = resolutions[i];
+        if (res.autoResolved && res.resolvedLines) {
+          newContent = replaceConflictByIndex(
+            newContent,
+            i,
+            res.resolvedLines.join("\n"),
+          );
+        }
+      }
+
+      return {
+        ...f,
+        content: newContent,
+        result: resolve(newContent, f.path),
+      };
     });
   }
 
@@ -368,20 +393,25 @@ export async function fetchUsers() {
     let conflictIdx = 0;
     let inConflict = false;
     let oursLines: string[] = [];
+    let baseLines: string[] = [];
     let theirsLines: string[] = [];
+    let hasBase = false;
     let inBase = false;
     let inTheirs = false;
 
     for (const line of lines) {
       if (line.startsWith("<<<<<<<")) {
         inConflict = true;
+        hasBase = false;
         inBase = false;
         inTheirs = false;
         oursLines = [];
+        baseLines = [];
         theirsLines = [];
       } else if (line.startsWith("|||||||") && inConflict) {
         // Entering base section (diff3) — stop collecting ours
         inBase = true;
+        hasBase = true;
       } else if (line.startsWith("=======") && inConflict) {
         inBase = false;
         inTheirs = true;
@@ -398,9 +428,13 @@ export async function fetchUsers() {
             newLines.push(...theirsLines, ...oursLines);
           }
         } else {
-          // Keep conflict markers intact for other hunks
+          // Keep conflict markers intact for other hunks (preserve diff3 format)
           newLines.push(`<<<<<<< ours`);
           newLines.push(...oursLines);
+          if (hasBase) {
+            newLines.push(`||||||| base`);
+            newLines.push(...baseLines);
+          }
           newLines.push(`=======`);
           newLines.push(...theirsLines);
           newLines.push(`>>>>>>> theirs`);
@@ -411,10 +445,11 @@ export async function fetchUsers() {
       } else if (inConflict) {
         if (inTheirs) {
           theirsLines.push(line);
-        } else if (!inBase) {
+        } else if (inBase) {
+          baseLines.push(line);
+        } else {
           oursLines.push(line);
         }
-        // base lines are discarded (not needed for manual resolution)
       } else {
         newLines.push(line);
       }
