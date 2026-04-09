@@ -84,10 +84,13 @@ GitButler est le concurrent le plus proche de GitWand techniquement (même stack
 
 ## Ce que GitWand a déjà (v0.1.0)
 
-### Core (inchangé)
-- Moteur de résolution automatique (5 patterns, LCS 3-way, 39 tests)
+### Core (v0.1.1 — bugfixes)
+- Moteur de résolution automatique (7 patterns : same_change, one_side_change, delete_no_change, whitespace_only, non_overlapping, value_only_change, generated_file — LCS 3-way, 39 tests)
 - CLI `gitwand resolve` / `gitwand status`, mode CI/JSON
 - Extension VS Code : diagnostics, CodeLens, status bar
+- ✅ Fix P1 : résolutions partielles CLI (`buildPartialContent` pour fichiers mixtes)
+- ✅ Fix P2 : préservation diff3 (`||||||| base`) dans `resolveHunkManual`
+- ✅ Fix P2 : `resolveAll` applique les hunks auto-résolus individuellement sur fichiers mixtes
 
 ### Desktop — Client Git fonctionnel
 - **Repository overview** : Statut du repo (branche courante, ahead/behind, clean/dirty), fichiers staged/unstaged/untracked, diff viewer par fichier
@@ -225,25 +228,111 @@ Paramètres implémentés :
 
 ---
 
-### LATER — Phase 7 : Workflows avancés & intelligence (3-6 mois)
+### NEXT — Phase 7 : Hardening du core de résolution (2-4 semaines)
+
+> Objectif : Rendre le moteur plus explicite, plus prévisible, plus format-aware et plus vérifiable.
+> Basé sur l'[analyse technique du core](./docs/core-analyse.md) — audit complet du pipeline parse → classify → resolve → merge.
+
+#### Constat
+
+Le core actuel est un moteur déterministe, lisible et sûr. Ses forces :
+
+- **Déterminisme** : même entrée = même sortie (fondamental pour CI, audit, debug)
+- **Typage fort** : `ConflictType`, `Confidence`, `ConflictHunk`, `MergeResult`, `HunkResolution` — contrat stable entre couches
+- **Explicabilité** : chaque classification renvoie une `explanation`
+- **Garde-fou** : le type `complex` évite la sur-résolution
+- **Extensibilité** : architecture ouverte à de nouveaux types et heuristiques
+
+Ses faiblesses identifiées :
+
+- Moteur purement textuel, pas syntax-aware (fragile sur JSON, YAML, Vue SFC, CSS, lockfiles)
+- `whitespace_only` trop naïf (trim ligne par ligne, pas d'indentation fine)
+- `value_only_change` heuristique (tokenisation simplifiée, regex, seuils — perçu comme "magique")
+- `non_overlapping` sensible au déplacement de blocs (LCS O(n*m))
+- Confiance discrète (label, pas score de preuve)
+- Pas de validation post-résolution (marqueurs résiduels, cohérence syntaxique)
+- Politiques implicites (`value_only_change` → theirs, `whitespace_only` → ours) non documentées ni configurables
+
+#### 7.1 — Rendre visible : `DecisionTrace` (priorité haute)
+
+- ⬜ **`DecisionTrace` par hunk** : trace structurée de la décision (candidates évaluées, selected, score, rejectedBy avec raisons)
+- ⬜ **Exposer les raisons de non-résolution** : pourquoi un hunk reste `complex` (quelles règles ont échoué, avec quel résultat)
+- ⬜ **"Explain only" mode** : mode dry-run qui ne modifie rien mais affiche les règles évaluées et le raisonnement complet
+- ⬜ **Enrichir les tests** : fixtures avec traces attendues pour chaque type de conflit
+
+```ts
+// Nouvelle interface à ajouter dans types.ts
+interface DecisionTrace {
+  candidates: ConflictType[];
+  selected: ConflictType;
+  score: number;
+  reason: string;
+  rejectedBy: Array<{ candidate: ConflictType; reason: string }>;
+}
+```
+
+#### 7.2 — Rendre plus fiable : validation post-merge (priorité haute)
+
+- ⬜ **Vérification post-fusion** : reparsing du fichier fusionné pour détecter les marqueurs résiduels
+- ⬜ **Validation syntaxique** : parse strict JSON, permissif YAML, syntaxique TS/JS si coût acceptable
+- ⬜ **Rejet si incohérent** : le moteur refuse la résolution si le fichier final est manifestement cassé
+- ⬜ **Meilleure normalisation whitespace** : indentation fine, whitespace interne, lignes vides — selon le langage
+- ⬜ **Réglage des seuils de confiance** : ajustement des seuils `value_only_change` et `non_overlapping` pour réduire les faux positifs
+
+#### 7.3 — Rendre plus intelligent : résolveurs par format (priorité moyenne)
+
+- ⬜ **Résolveurs spécialisés** par type de fichier : JSON/JSONC, YAML, Markdown, Vue SFC, TS/JS/TSX, CSS, lockfiles
+- ⬜ **Dispatch automatique** : brancher le résolveur spécialisé si le type est reconnu, fallback textuel sinon
+- ⬜ **Score de confiance composite** : remplacer le label discret par un score multidimensionnel
+
+```ts
+// Nouvelle interface à ajouter dans types.ts
+interface ConfidenceScore {
+  overall: number;   // 0..1
+  structure: number;  // cohérence structurelle
+  lexical: number;    // similarité lexicale
+  volatility: number; // détection de valeurs volatiles
+  overlapRisk: number; // risque de chevauchement
+}
+```
+
+#### 7.4 — Rendre configurable : stratégies de merge (priorité moyenne)
+
+- ⬜ **Politiques explicites** : `prefer-ours`, `prefer-theirs`, `prefer-safety`, `prefer-merge`, `strict`
+- ⬜ **Configuration par projet** : fichier `.gitwandrc` ou section dans `package.json`
+- ⬜ **Overrides par pattern** : stratégie différente selon le glob du fichier (ex: `*.lock` → `prefer-theirs`)
+- ⬜ **Documentation des conventions** : documenter les choix implicites actuels (quand ours vs theirs est préféré et pourquoi)
+
+#### 7.5 — Rendre mesurable : corpus et métriques (priorité basse)
+
+- ⬜ **Corpus de conflits réels** : set anonymisé de conflits pour mesurer faux positifs / faux négatifs
+- ⬜ **Métriques de résolution** : taux par type, stabilité de classification, impact des seuils
+- ⬜ **Détection de régression** : CI pipeline qui vérifie la stabilité des résolutions sur le corpus
+- ⬜ **Benchmarks de performance** : mesurer le temps de résolution sur des fichiers de taille variable
+
+**Effort estimé** : 2-4 semaines. 7.1 et 7.2 sont prioritaires et réduisent directement la perception de "magie" et les faux positifs.
+
+---
+
+### LATER — Phase 8 : Workflows avancés & intelligence (3-6 mois)
 
 > Objectif : Dépasser les concurrents avec des features que personne n'a.
 
-#### 7.1 — Smart merge (différenciateur unique)
+#### 8.1 — Smart merge (différenciateur unique)
 
-- **Auto-resolve étendu** : Nouveaux patterns (import ordering, generated files, lockfiles)
+- **Auto-resolve étendu** : Nouveaux patterns (import ordering, generated files, lockfiles) — appuyé par les résolveurs Phase 7.3
 - **Suggestions IA** : Pour les conflits complexes, proposer des résolutions basées sur le contexte
 - **Conflict prevention** : Alerter en amont quand deux branches touchent les mêmes fichiers
 - **Merge preview** : Simuler le résultat d'un merge avant de le faire
 
-#### 7.2 — Rebase & cherry-pick interactif
+#### 8.2 — Rebase & cherry-pick interactif
 
 - **Rebase interactif** : Drag-and-drop pour réordonner, squash, edit, drop
 - **Cherry-pick** : Sélectionner des commits d'une branche à copier dans une autre
 - **Amend** : Modifier le dernier commit (message et/ou contenu)
 - **Stash manager** : Liste, apply, drop, pop des stashes
 
-#### 7.3 — PR workflow
+#### 8.3 — PR workflow
 
 - **Créer une PR** : Formulaire intégré (titre, description, reviewers, labels)
 - **Vue PR** : Liste des PRs ouvertes avec statut CI
@@ -251,14 +340,14 @@ Paramètres implémentés :
 - **Merge PR** : Merge/squash/rebase depuis l'app
 - **Intégrations** : GitHub, GitLab, Bitbucket
 
-#### 7.4 — Multi-repo & workspace
+#### 8.4 — Multi-repo & workspace
 
 - **Repo switcher** : Sidebar avec tous les repos récents
 - **Monorepo awareness** : Afficher les packages/workspaces pour les monorepos pnpm/npm/yarn
 - **Tabs** : Ouvrir plusieurs repos en parallèle
 - **Raccourcis globaux** : Cmd+Shift+G pour ouvrir GitWand depuis n'importe où
 
-#### 7.5 — Terminal intégré
+#### 8.5 — Terminal intégré
 
 - **Terminal inline** : Pour les commandes Git avancées non couvertes par l'UI
 - **Autocomplete** : Suggestions de branches, remotes, fichiers
@@ -288,6 +377,11 @@ Paramètres implémentés :
 | Paramètres | localStorage + composable `useSettings()`, panneau UI dédié |
 | Commandes Git (status, add, commit, push, pull, log, branch) | Nouveaux Tauri commands en Rust exécutant des process Git |
 | Syntax highlighting | tree-sitter (Rust/WASM) ou highlight.js (JS) |
+| DecisionTrace / explain mode | Modification interne du core (`resolver.ts`, `types.ts`) |
+| Validation post-merge | Parseurs légers par format : `JSON.parse`, `yaml`, `@babel/parser`, `postcss` |
+| Résolveurs spécialisés | Parseurs structurels par type de fichier, dispatch dans `resolver.ts` |
+| Score de confiance composite | Refactoring `Confidence` → `ConfidenceScore` dans `types.ts` |
+| Corpus de conflits | Fixtures anonymisées, CI pipeline dédié |
 | Image diff | Canvas API côté frontend, lib Rust pour pixel diff |
 | Git graph | Algorithme de layout DAG (custom ou lib) |
 | PR workflow | API GitHub/GitLab/Bitbucket (REST ou GraphQL) |
@@ -299,11 +393,15 @@ Paramètres implémentés :
 
 | Risque | Impact | Mitigation |
 |--------|--------|------------|
-| Scope creep : trop de features Git = jamais fini | Haut | Livrer Phase 5 d'abord, itérer |
+| Scope creep : trop de features Git = jamais fini | Haut | Livrer phase par phase, itérer |
 | Performance sur gros repos (100k+ commits, monorepos) | Moyen | Rust pour le parsing Git, pagination, lazy loading |
 | Concurrence forte (GitKraken, Fork, GitButler) | Moyen | Se différencier par l'intelligence (auto-resolve, suggestions) |
 | Maintenance cross-platform | Moyen | CI/CD multi-OS déjà en place |
-| Complexité du rebase interactif | Moyen | Reporter à Phase 7, commencer par les cas simples |
+| Complexité du rebase interactif | Moyen | Reporter à Phase 8, commencer par les cas simples |
+| **Faux positifs "raisonnables" du core** | **Haut** | **Phase 7 : DecisionTrace + validation post-merge + corpus de tests réels** |
+| **Perception de "magie"** | **Moyen** | **Phase 7 : explain-only mode, politiques documentées, score composite** |
+| **Fragilité sur formats structurés** (JSON, YAML, Vue SFC, lockfiles) | **Moyen** | **Phase 7.3 : résolveurs spécialisés par format** |
+| **Heuristiques non contractuelles** (value_only, whitespace) | **Moyen** | **Phase 7.4 : politiques configurables + `.gitwandrc`** |
 
 ---
 
