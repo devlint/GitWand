@@ -5,83 +5,171 @@
 <h1 align="center">GitWand</h1>
 
 <p align="center">
-  <strong>A lightweight, elegant Git client with built-in smart conflict resolution</strong>
+  <strong>A fast, native Git client with built-in smart conflict resolution</strong>
 </p>
 
 <p align="center">
-  <a href="#desktop-app">Desktop app</a> &bull;
-  <a href="#smart-conflict-resolution">Conflict resolution</a> &bull;
-  <a href="#cli-usage">CLI</a> &bull;
-  <a href="#vs-code-extension">VS Code</a> &bull;
+  <a href="#desktop-app">Desktop</a> &bull;
+  <a href="#conflict-resolution-engine">Conflict engine</a> &bull;
+  <a href="#merge-preview">Merge preview</a> &bull;
+  <a href="#cli">CLI</a> &bull;
+  <a href="#architecture">Architecture</a> &bull;
   <a href="#roadmap">Roadmap</a>
 </p>
 
 <p align="center">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-8B5CF6">
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-100%25-3178C6">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-332%20passing-22c55e">
   <img alt="Version" src="https://img.shields.io/badge/version-0.1.0-FBBF24">
 </p>
 
 ---
 
-GitWand is a fast, minimal Git client built with Tauri and Vue 3. It gives you a clear view of your repository &mdash; changes, history, branches, push/pull &mdash; with a unique superpower: **automatic resolution of trivial merge conflicts**.
+GitWand is a lightweight, native Git client built with Tauri 2 and Vue 3. It covers the full daily workflow — changes, history, branches, push/pull — with one unique superpower: **automatic resolution of trivial merge conflicts**, backed by a typed resolution engine with composite confidence scoring.
 
 ## Desktop app
 
-The desktop app is GitWand's primary interface. It provides everything you need to work with a Git repo in a clean, focused UI.
+### Repository view
 
-**Repository view** &mdash; staged, unstaged, untracked and conflicted files in a sidebar, with inline diffs in the main area. Stage, unstage, discard and commit directly from the interface.
+Staged, unstaged, untracked and conflicted files in a sidebar with inline diffs in the main area. Stage, unstage, discard and commit without leaving the interface. Partial staging at the line or hunk level.
 
-**Commit history** &mdash; browse the log in the sidebar, click a commit to see its full diff with a file list panel and scroll-spy highlighting.
+### Commit workflow
 
-**Branches** &mdash; click the branch name in the header to search, switch, create or delete branches. A spinner shows during branch switches.
+Summary + description fields, optional commit signature, Ctrl+Enter shortcut. **Unpushed commits can be amended** directly from the history log — a pencil icon appears on hover, opening an overlay pre-filled with the existing message.
 
-**Push &amp; Pull** &mdash; one-click push and pull with badge counters showing ahead/behind status. Auto-fetch runs in the background every 30 seconds to keep counts accurate.
+### Branches
 
-**Conflict resolution** &mdash; when merge conflicts are detected, clicking a conflicted file opens the built-in 3-way merge editor inline &mdash; no mode switch needed.
+Click the branch name in the header to search, switch, create or delete branches. Merge any branch from the dedicated merge button. Each non-current branch shows a **merge preview button** that simulates the merge result before committing.
 
-**i18n** &mdash; French and English, auto-detected from your OS. Override in Settings.
+### Merge preview
 
-**Dark mode** &mdash; system, dark and light themes.
+Before merging a branch, GitWand predicts the outcome without touching the working tree — using `git merge-base`, `git show` and `git merge-file -p --diff3`. The result shows a per-file breakdown:
 
-### Running the desktop app
+- **Auto-resolvable** — GitWand can handle it automatically
+- **Partial** — some hunks need manual resolution
+- **Manual** — complex conflicts requiring human judgment
+- **Add/delete** — file added on one side, deleted on the other
+
+A badge summarises the overall result: `Clean merge`, `100% auto-resolvable`, or `N conflicts to review`.
+
+### Push & Pull
+
+One-click push and pull with badge counters showing ahead/behind commits. Auto-fetch runs in the background every 30 seconds.
+
+### History & graph
+
+Browse the full commit log in the sidebar. Click any commit to see its diff with a file list and scroll-spy highlighting. Long commit descriptions collapse to 2 lines with an expand toggle. A separate **DAG graph view** renders the full branch topology as an SVG with lane layout and ref badges.
+
+### Diff viewer
+
+Side-by-side or inline toggle, persisted across sessions. Syntax highlighting for 30+ languages, word-level diff using LCS, collapsible unchanged regions, canvas minimap, hunk navigation (prev/next), double-column line numbers.
+
+### File history & blame
+
+Full file history with `git log --follow`, blame view grouped by commit, time-travel diff between any two versions of a file.
+
+### Repo switcher
+
+The current repo name in the header opens a dropdown showing all recently opened repositories. Pin favourites, remove entries, switch instantly — no file picker needed.
+
+### Settings
+
+Language (FR/EN, OS auto-detected), theme (dark/light/system), commit signature, diff mode. All persisted in localStorage.
+
+### Running the app
 
 ```bash
 git clone https://github.com/devlint/GitWand.git
 cd GitWand
 pnpm install
-pnpm build
 
-# Browser dev mode (no Tauri needed)
-cd apps/desktop
-pnpm dev:web
+# Browser dev mode — no Rust needed
+cd apps/desktop && pnpm dev:web
 
-# Tauri dev mode (requires Rust toolchain)
-pnpm tauri dev
+# Tauri desktop mode — requires Rust toolchain
+# Install Rust: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source "$HOME/.cargo/env"
+pnpm --filter desktop tauri dev
 ```
 
-## Smart conflict resolution
+---
 
-GitWand's core engine automatically resolves trivial Git merge conflicts &mdash; the ones that waste your time but don't need human judgment. Complex conflicts are never auto-resolved.
+## Conflict resolution engine
+
+GitWand's core engine (`@gitwand/core`) automatically resolves trivial Git merge conflicts. It never touches complex or ambiguous hunks.
+
+### Resolution patterns
 
 | Pattern | Description | Confidence |
 |---|---|---|
-| **Same change** | Both branches made the exact same edit | Certain |
-| **One-side change** | Only one branch modified the block | Certain |
-| **Delete + no change** | One branch deleted, the other didn't touch it | Certain |
-| **Whitespace only** | Same code, different formatting | High |
-| **Non-overlapping** | Additions at different locations (e.g. imports) | High |
+| **same_change** | Both branches made the exact same edit | Certain |
+| **one_side_change** | Only one branch modified the block | Certain |
+| **delete_no_change** | One branch deleted, the other didn't touch it | Certain |
+| **non_overlapping** | Additions at different locations in the block | High |
+| **whitespace_only** | Same logic, different indentation/spacing | High |
+| **value_only_change** | Scalar value update (version number, constant) | Medium |
+| **generated_file** | File matches a known generated-file path pattern | High |
+| **complex** | Overlapping edits — never auto-resolved | — |
 
-Every auto-resolution comes with a human-readable explanation:
+### Composite confidence score
+
+Every resolution carries a `ConfidenceScore` object rather than a simple label:
+
+```ts
+{
+  score: 84,           // 0–100 composite score
+  label: "high",       // "certain" | "high" | "medium" | "low"
+  dimensions: {
+    typeClassification: 90,  // certainty of the detected pattern
+    dataRisk: 20,            // risk of data loss if auto-resolved
+    scopeImpact: 10,         // impact of change size
+  },
+  boosters: ["Path matches generated-file pattern: lockfile"],
+  penalties: ["Content will be regenerated — theirs assumed more recent"],
+}
+```
+
+Score formula: `score = typeClassification − dataRisk×0.4 − scopeImpact×0.15`
+
+### Format-aware resolvers
+
+For structured files, GitWand uses semantic resolvers before falling back to text matching:
+
+- **JSON / JSONC** — recursive key-by-key merge using `JSON.parse`/`JSON.stringify`. Handles nested objects, detects unresolvable scalar conflicts, strips comments in `.jsonc`.
+- **Markdown** — section-aware merge by ATX heading (H1–H6). Merges independent sections, falls back to text if the same section is modified on both sides.
+
+### Configurable merge policies
+
+Create a `.gitwandrc` file at the project root to define resolution strategies:
+
+```json
+{
+  "policy": "prefer-merge",
+  "patternOverrides": {
+    "*.lock": "prefer-theirs",
+    "src/generated/**": "prefer-theirs",
+    "CHANGELOG.md": "prefer-ours"
+  }
+}
+```
+
+Available policies: `prefer-ours`, `prefer-theirs`, `prefer-safety`, `prefer-merge`, `strict`.
+
+### Decision trace
+
+Every classification step is logged in a `DecisionTrace` for auditing and debugging:
 
 ```
 ✓ src/config.ts — 3/3 resolved
-  L12 [one_side_change] auto — Only the incoming branch modified this block.
-  L25 [same_change] auto — Both branches made the exact same edit.
-  L41 [delete_no_change] auto — Current branch deleted this block.
+  L12 [one_side_change] certain — Only the incoming branch modified this block.
+  L25 [same_change] certain — Both branches made the exact same edit.
+  L41 [value_only_change:json] high — Scalar value updated on one side (version field).
 ```
 
-## CLI usage
+---
+
+## CLI
 
 ```bash
 # Use directly with npx
@@ -92,16 +180,14 @@ npm install -g @gitwand/cli
 ```
 
 ```bash
-gitwand resolve              # Resolve all conflicted files
+gitwand resolve              # Resolve all conflicted files in the repo
 gitwand resolve --dry-run    # Preview without writing
-gitwand resolve --verbose    # Detailed explanations
-gitwand status               # Show conflict status
-gitwand resolve --ci         # CI mode: JSON output + exit codes
+gitwand resolve --verbose    # Detailed decision trace
+gitwand status               # Show conflict status per file
+gitwand resolve --ci         # CI mode: JSON output + semantic exit codes
 ```
 
-## VS Code extension
-
-The extension integrates into VS Code's merge workflow with CodeLens annotations, diagnostics in the Problems panel, a status bar indicator, and commands to resolve conflicts in the current file or across the repo.
+---
 
 ## Architecture
 
@@ -109,49 +195,93 @@ The extension integrates into VS Code's merge workflow with CodeLens annotations
 gitwand/
 ├── packages/
 │   ├── core/       @gitwand/core — Resolution engine (TypeScript)
+│   │               parser, resolver, classifier, format resolvers,
+│   │               confidence scoring, corpus tests (332 tests)
 │   ├── cli/        @gitwand/cli — Command-line interface
-│   └── vscode/     VS Code extension
-├── apps/
-│   └── desktop/    Desktop app — Tauri 2 + Vue 3
-└── ...
+│   └── vscode/     VS Code extension — CodeLens, diagnostics, status bar
+└── apps/
+    └── desktop/    Tauri 2 + Vue 3 desktop app
+                    src-tauri/  Rust backend (git commands, IPC)
+                    src/        Vue frontend
 ```
 
-The core engine is framework-agnostic and can be used as a library:
+The core engine is framework-agnostic and usable as a library:
 
 ```ts
 import { resolve } from "@gitwand/core";
 
 const result = resolve(conflictedContent, "src/app.ts");
 console.log(`${result.stats.autoResolved}/${result.stats.totalConflicts} resolved`);
+
+// With options
+const result = resolve(content, "package.json", {
+  policy: "prefer-merge",
+  minConfidence: "medium",
+  patternOverrides: { "*.lock": "prefer-theirs" },
+});
 ```
 
-## Roadmap
+---
 
-- [x] Core engine &mdash; conflict parser + 5 resolution patterns
-- [x] CLI &mdash; `gitwand resolve` and `gitwand status`
-- [x] VS Code extension &mdash; CodeLens, diagnostics, one-click resolve
-- [x] CI integration &mdash; JSON output and exit codes
-- [x] Desktop app &mdash; full Git client with repo view, history, branches, push/pull
-- [x] i18n &mdash; French/English with OS auto-detection
-- [x] Integrated conflict resolution &mdash; merge editor inline in the desktop app
-- [ ] Plugin system &mdash; custom resolution strategies per language/framework
-- [ ] Stash management
-- [ ] Interactive rebase
-
-## Contributing
+## Development
 
 ```bash
 git clone https://github.com/devlint/GitWand.git
 cd GitWand
 pnpm install
-pnpm build
-pnpm test    # 39 tests
+pnpm build          # Build all packages
+pnpm test           # 332 tests across core
 ```
+
+### Running benchmarks
+
+```bash
+cd packages/core
+pnpm test:bench     # vitest bench — ops/s per fixture size
+```
+
+Baseline results on Apple M-series:
+
+| Input | Throughput |
+|---|---|
+| 1 conflict / ~30 lines | ~249 000 ops/s |
+| 5 conflicts / ~140 lines | ~40 000 ops/s |
+| 50 conflicts / ~1350 lines | ~4 500 ops/s |
+| JSON/Markdown format-aware | ~137 000 ops/s |
 
 ### Internationalization
 
-GitWand uses a type-safe i18n system with no external dependency. French (`fr.ts`) is the reference locale defined with `as const`. English (`en.ts`) must match the same structure. The `useI18n()` composable provides `t(key, ...args)` for dotted key resolution with positional interpolation. OS language is auto-detected; users can override in Settings (persisted in localStorage).
+GitWand uses a zero-dependency type-safe i18n system. `fr.ts` is the reference locale defined with `as const`. `en.ts` must match the same structure — TypeScript enforces it. The `useI18n()` composable provides `t(key, ...args)` with dotted key resolution and positional interpolation. OS language is auto-detected; users can override in Settings.
+
+---
+
+## Roadmap
+
+- [x] Core engine — 8 conflict patterns, LCS 3-way, diff2 + diff3
+- [x] Composite confidence scoring (score 0–100 + dimensions)
+- [x] Format-aware resolvers — JSON/JSONC, Markdown
+- [x] Configurable merge policies — `.gitwandrc`, per-glob overrides
+- [x] Decision trace + explain-only mode
+- [x] Corpus of 20 reference fixtures + metrics
+- [x] CLI — `gitwand resolve`, `gitwand status`, CI mode
+- [x] VS Code extension — CodeLens, diagnostics, one-click resolve
+- [x] Desktop app — full Git client (changes, history, branches, push/pull)
+- [x] Diff viewer — side-by-side, word-level, syntax highlighting, staging
+- [x] File history + blame + time-travel diff
+- [x] DAG commit graph
+- [x] Merge preview — zero side-effect simulation before merging
+- [x] Repo switcher — recent repos with pin/unpin
+- [x] Amend commit message — for unpushed HEAD commits
+- [ ] Interactive rebase — reorder, squash, drop
+- [ ] Cherry-pick
+- [ ] Stash manager
+- [ ] PR workflow — create, review, merge from the app
+- [ ] Inline code review comments
+
+See [ROADMAP.md](./ROADMAP.md) for the full phased plan with competitive analysis.
+
+---
 
 ## License
 
-MIT &mdash; [Laurent Guitton](https://github.com/devlint)
+MIT — [Laurent Guitton](https://github.com/devlint)

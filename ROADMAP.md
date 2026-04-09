@@ -82,28 +82,37 @@ GitButler est le concurrent le plus proche de GitWand techniquement (même stack
 
 ---
 
-## Ce que GitWand a déjà (v0.1.0 → Phase 6 partielle)
+## Ce que GitWand a déjà (v0.1.0 → Phase 8 partielle)
 
-### Core (v0.1.1 — bugfixes)
-- Moteur de résolution automatique (7 patterns : same_change, one_side_change, delete_no_change, whitespace_only, non_overlapping, value_only_change, generated_file — LCS 3-way, 39 tests)
+### Core — moteur de résolution (Phases 1–7.5)
+- **8 patterns de résolution** : same_change, one_side_change, delete_no_change, whitespace_only, non_overlapping, value_only_change, generated_file, complex — LCS 3-way, diff2 + diff3
+- **Score de confiance composite** (`ConfidenceScore`) : score 0–100, dimensions typeClassification / dataRisk / scopeImpact, boosters[], penalties[], label backward-compatible
+- **Résolveurs par format** : JSON/JSONC sémantique (fusion clé-par-clé récursive), Markdown section-aware (heading ATX), dispatcher automatique par extension
+- **Politiques configurables** (`.gitwandrc`) : prefer-ours, prefer-theirs, prefer-safety, prefer-merge, strict — par projet et par pattern glob
+- **DecisionTrace** : trace pas-à-pas de chaque décision de classification, mode explain-only
+- **Corpus de référence** : 20 fixtures réalistes, métriques auto-résolution/faux-positifs, benchmarks (vitest bench)
+- **332 tests** (core) — config, resolver, format-resolvers, corpus
 - CLI `gitwand resolve` / `gitwand status`, mode CI/JSON
 - Extension VS Code : diagnostics, CodeLens, status bar
-- ✅ Fix P1 : résolutions partielles CLI (`buildPartialContent` pour fichiers mixtes)
-- ✅ Fix P2 : préservation diff3 (`||||||| base`) dans `resolveHunkManual`
-- ✅ Fix P2 : `resolveAll` applique les hunks auto-résolus individuellement sur fichiers mixtes
 
-### Desktop — Client Git fonctionnel
-- **Repository overview** : Statut du repo (branche courante, ahead/behind, clean/dirty), fichiers staged/unstaged/untracked, diff viewer par fichier
-- **Commit & Push** : Stage/unstage individuel + "Tout indexer", commit avec Summary (requis) + Description (optionnel), signature "🪄 Commit via GitWand" configurable, push/pull (Sync), Ctrl+Enter, indicateurs ahead/behind
-- **Branches** : Liste locale + remote, création/suppression, switch (avec spinner), tri par date (main/master en premier), popover dans le header
-- **Merge** : Détection des conflits (porcelain v2), merge editor VS Code-style avec recommandations inline, auto-save + git add + merge --continue automatique, pause auto-fetch pendant merge
-- **History / Log** : Vue chronologique des commits dans la sidebar, diff par commit avec liste de fichiers (scroll-spy), carte commit avec avatar/stats/badges, rechargement après commit/push/pull
-- **i18n** : Système type-safe `useI18n()`, locales FR/EN complètes, détection OS
-- **Settings** : Panneau dédié (langue, thème, signature de commit)
-- **Diff avancé** : Side-by-side toggle avec persistance, syntax highlighting (highlight.js, 30+ langages), navigation hunk (prev/next), collapse des zones inchangées, numéros de ligne double-colonne, word-level diff (LCS sur tokens), minimap canvas, staging partiel (lignes/hunks)
-- **File history** : Blame inline (`git blame --porcelain`) avec groupement par commit, historique du fichier (`git log --follow`), syntax highlighting, time-travel diff (comparer deux versions)
-- **DAG graph** : Visualisation du graphe de commits (toutes branches), layout en lanes, SVG interactif, ref badges
-- **UX** : Thème light/dark, toast notifications (dark card, slide-in/out), empty state avec repos récents en cartes, auto-fetch toutes les 30s, historique de dossiers/favoris
+### Desktop — Client Git complet (Phases 5–6)
+- **Repository overview** : statut (branche, ahead/behind, clean/dirty), fichiers staged/unstaged/untracked, diff viewer par fichier
+- **Commit & Push** : stage/unstage individuel + tout indexer, commit summary + description, signature configurable, push/pull (sync), Ctrl+Enter, indicateurs ahead/behind
+- **Branches** : liste locale + remote, création/suppression, switch (spinner), tri par date (main/master en premier), popover header
+- **Merge** : détection conflits (porcelain v2), merge editor VS Code-style avec recommandations inline, auto-save + git add + merge --continue automatique
+- **History / Log** : vue chronologique, diff par commit, scroll-spy, carte commit avec avatar/stats/badges, collapse description (2 lignes + expand)
+- **i18n** : système type-safe `useI18n()`, locales FR/EN complètes, détection OS, override dans Settings
+- **Settings** : panneau dédié (langue, thème, signature de commit, mode diff)
+- **Diff avancé** : side-by-side toggle, syntax highlighting (30+ langages), navigation hunk, collapse zones inchangées, numéros de ligne, word-level diff (LCS), minimap canvas, staging partiel lignes/hunks
+- **File history** : blame inline (`git blame --porcelain`), historique fichier (`git log --follow`), time-travel diff
+- **DAG graph** : visualisation graphe de commits (toutes branches), layout en lanes, SVG, ref badges
+- **UX** : thème light/dark/system, toast notifications, empty state avec repos récents en cartes, auto-fetch toutes les 30s, stash/stash-pop
+
+### Desktop — Workflows avancés (Phase 8 partielle)
+- **Merge Preview** (8.1) : simuler un merge avant de le faire — zéro side-effect (`git merge-base` + `git show` + `git merge-file -p --diff3`), badge clean/auto/warn, statut par fichier (auto-resolved / partial / manual / add-delete)
+- **Amend commit** (8.2 partiel) : modifier le message du dernier commit non-pushé — overlay pré-rempli (summary + description), validation Ctrl+Enter, commande Rust `git commit --amend`
+- **Repo switcher** (8.4) : dropdown depuis le nom du repo courant — repos récents avec pin/unpin/suppression, ouverture directe
+- **Infrastructure Tauri 2** : capabilities system (dialog:allow-open), config plugins corrigée, artefacts gen/ ignorés
 
 ---
 
@@ -344,11 +353,11 @@ interface DecisionTrace {
 - **Suggestions IA** : Pour les conflits complexes, proposer des résolutions basées sur le contexte
 - **Conflict prevention** : Alerter en amont quand deux branches touchent les mêmes fichiers
 
-#### 8.2 — Rebase & cherry-pick interactif
+#### 8.2 — Rebase & cherry-pick interactif (partiel)
 
+- ✅ **Amend** : Modifier le message du dernier commit non-pushé — overlay pré-rempli (summary + description), Ctrl+Enter, commande Rust `git commit --amend`, bouton crayon dans le log
 - **Rebase interactif** : Drag-and-drop pour réordonner, squash, edit, drop
 - **Cherry-pick** : Sélectionner des commits d'une branche à copier dans une autre
-- **Amend** : Modifier le dernier commit (message et/ou contenu)
 - **Stash manager** : Liste, apply, drop, pop des stashes
 
 #### 8.3 — PR workflow
