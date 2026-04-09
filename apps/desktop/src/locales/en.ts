@@ -72,6 +72,7 @@ const en: Locale = {
     tabChanges: "Changes",
     tabBranches: "Branches",
     tabLog: "Log",
+    tabGraph: "Graph",
     // Sections
     sectionConflicts: "Conflicts",
     sectionStaged: "Staged",
@@ -115,6 +116,15 @@ const en: Locale = {
     prevHunk: "Previous change",
     nextHunk: "Next change",
     fileHistory: "File history",
+    compare: "Compare",
+    compareHint: "Select two commits to compare versions",
+    compareFrom: "{0} selected — pick the second commit",
+    compareSelect: "Select for comparison",
+    compareEmpty: "Select two commits to compare",
+    compareGoLog: "Go to log",
+    stageHunk: "Stage hunk",
+    stageSelected: "Stage ({0})",
+    selectHunk: "Select hunk",
   },
 
   // ─── CommitLog ──────────────────────────────────────────

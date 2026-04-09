@@ -393,6 +393,8 @@ struct GitLogEntry {
     date: String,
     message: String,
     body: String,
+    parents: Vec<String>,
+    refs: String,
 }
 
 #[tauri::command]
@@ -400,11 +402,12 @@ fn git_log(cwd: String, count: Option<i32>) -> Result<Vec<GitLogEntry>, String> 
     let limit = count.unwrap_or(50);
 
     // Use unit separator (ASCII 0x1f) to delimit fields
-    let format = "%h%x1f%H%x1f%an%x1f%ae%x1f%aI%x1f%s%x1f%b%x1e";
+    let format = "%h%x1f%H%x1f%an%x1f%ae%x1f%aI%x1f%s%x1f%b%x1f%P%x1f%D%x1e";
 
     let output = std::process::Command::new("git")
         .args([
             "log",
+            "--all",
             &format!("-n{}", limit),
             &format!("--format={}", format),
         ])
@@ -427,9 +430,16 @@ fn git_log(cwd: String, count: Option<i32>) -> Result<Vec<GitLogEntry>, String> 
         }
 
         let fields: Vec<&str> = record.split('\x1f').collect();
-        if fields.len() < 7 {
+        if fields.len() < 9 {
             continue;
         }
+
+        let parents: Vec<String> = fields[7]
+            .trim()
+            .split_whitespace()
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .collect();
 
         entries.push(GitLogEntry {
             hash: fields[0].to_string(),
@@ -439,6 +449,8 @@ fn git_log(cwd: String, count: Option<i32>) -> Result<Vec<GitLogEntry>, String> 
             date: fields[4].to_string(),
             message: fields[5].to_string(),
             body: fields[6].trim().to_string(),
+            parents,
+            refs: fields[8].trim().to_string(),
         });
     }
 
@@ -580,6 +592,44 @@ fn git_unstage(cwd: String, paths: Vec<String>) -> Result<(), String> {
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!("git reset failed: {}", stderr));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn git_stage_patch(cwd: String, patch: String) -> Result<(), String> {
+    let mut cmd = std::process::Command::new("git");
+    cmd.args(["apply", "--cached", "--unidiff-zero", "-"])
+        .current_dir(&cwd)
+        .stdin(std::process::Stdio::piped());
+    let mut child = cmd.spawn().map_err(|e| format!("Failed to run git apply: {}", e))?;
+    if let Some(ref mut stdin) = child.stdin {
+        use std::io::Write;
+        stdin.write_all(patch.as_bytes()).map_err(|e| format!("Failed to write patch: {}", e))?;
+    }
+    let output = child.wait_with_output().map_err(|e| format!("Failed to wait for git apply: {}", e))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("git apply failed: {}", stderr));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn git_unstage_patch(cwd: String, patch: String) -> Result<(), String> {
+    let mut cmd = std::process::Command::new("git");
+    cmd.args(["apply", "--cached", "--reverse", "--unidiff-zero", "-"])
+        .current_dir(&cwd)
+        .stdin(std::process::Stdio::piped());
+    let mut child = cmd.spawn().map_err(|e| format!("Failed to run git apply: {}", e))?;
+    if let Some(ref mut stdin) = child.stdin {
+        use std::io::Write;
+        stdin.write_all(patch.as_bytes()).map_err(|e| format!("Failed to write patch: {}", e))?;
+    }
+    let output = child.wait_with_output().map_err(|e| format!("Failed to wait for git apply: {}", e))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("git apply --reverse failed: {}", stderr));
     }
     Ok(())
 }
@@ -1059,6 +1109,8 @@ pub fn run() {
             git_log,
             git_stage,
             git_unstage,
+            git_stage_patch,
+            git_unstage_patch,
             git_commit,
             git_push,
             git_pull,

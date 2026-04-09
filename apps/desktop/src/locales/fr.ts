@@ -74,6 +74,7 @@ const fr = {
     tabChanges: "Changements",
     tabBranches: "Branches",
     tabLog: "Log",
+    tabGraph: "Graphe",
     // Sections
     sectionConflicts: "Conflits",
     sectionStaged: "Indexés",
@@ -117,6 +118,15 @@ const fr = {
     prevHunk: "Changement précédent",
     nextHunk: "Changement suivant",
     fileHistory: "Historique du fichier",
+    compare: "Comparer",
+    compareHint: "Sélectionnez deux commits pour comparer les versions",
+    compareFrom: "{0} sélectionné — choisissez le second commit",
+    compareSelect: "Sélectionner pour comparaison",
+    compareEmpty: "Sélectionnez deux commits pour comparer",
+    compareGoLog: "Aller au log",
+    stageHunk: "Indexer ce bloc",
+    stageSelected: "Indexer ({0})",
+    selectHunk: "Sélectionner le bloc",
   },
 
   // ─── CommitLog ──────────────────────────────────────────

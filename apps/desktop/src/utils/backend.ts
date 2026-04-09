@@ -313,6 +313,10 @@ export interface GitLogEntry {
   date: string;
   message: string;
   body: string;
+  /** Parent commit full hashes */
+  parents: string[];
+  /** Ref decorations (branches, tags) */
+  refs: string;
 }
 
 /**
@@ -329,6 +333,8 @@ export async function getGitLog(cwd: string, count?: number): Promise<GitLogEntr
         date: string;
         message: string;
         body: string;
+        parents: string[];
+        refs: string;
       }>
     >("git_log", { cwd, count: count ?? 50 });
 
@@ -340,6 +346,8 @@ export async function getGitLog(cwd: string, count?: number): Promise<GitLogEntr
       date: e.date,
       message: e.message,
       body: e.body,
+      parents: e.parents,
+      refs: e.refs,
     }));
   }
 
@@ -381,6 +389,40 @@ export async function gitUnstage(cwd: string, paths: string[]): Promise<void> {
     body: JSON.stringify({ cwd, paths }),
   });
   if (!res.ok) throw new Error(`Failed to unstage files: ${res.status}`);
+}
+
+/**
+ * Stage a partial diff patch (git apply --cached).
+ * Used for hunk/line-level staging.
+ */
+export async function gitStagePatch(cwd: string, patch: string): Promise<void> {
+  if (isTauri()) {
+    await tauriInvoke("git_stage_patch", { cwd, patch });
+    return;
+  }
+  const res = await fetch(`${DEV_SERVER}/api/git-stage-patch`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, patch }),
+  });
+  if (!res.ok) throw new Error(`Failed to stage patch: ${res.status}`);
+}
+
+/**
+ * Unstage a partial diff patch (git apply --cached --reverse).
+ * Used for hunk/line-level unstaging.
+ */
+export async function gitUnstagePatch(cwd: string, patch: string): Promise<void> {
+  if (isTauri()) {
+    await tauriInvoke("git_unstage_patch", { cwd, patch });
+    return;
+  }
+  const res = await fetch(`${DEV_SERVER}/api/git-unstage-patch`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, patch }),
+  });
+  if (!res.ok) throw new Error(`Failed to unstage patch: ${res.status}`);
 }
 
 // ─── Git commit ───────────────────────────────────────────────
@@ -600,6 +642,59 @@ export async function getGitFileLog(cwd: string, path: string, count = 50): Prom
   const qs = `?cwd=${encodeURIComponent(cwd)}&path=${encodeURIComponent(path)}&count=${count}`;
   const res = await fetch(`${DEV_SERVER}/api/git-file-log${qs}`);
   if (!res.ok) throw new Error(`Failed to get file log: ${res.status}`);
+  return res.json();
+}
+
+// ─── Git file diff between two commits ─────────────────────────
+
+/**
+ * Get diff for a specific file between two commits (time-travel diff).
+ */
+export async function getGitFileDiff(
+  cwd: string,
+  path: string,
+  fromHash: string,
+  toHash: string,
+): Promise<GitDiff> {
+  if (isTauri()) {
+    const raw = await tauriInvoke<{
+      path: string;
+      hunks: Array<{
+        header: string;
+        old_start: number;
+        old_count: number;
+        new_start: number;
+        new_count: number;
+        lines: Array<{
+          type: string;
+          content: string;
+          old_line_no?: number;
+          new_line_no?: number;
+        }>;
+      }>;
+    }>("git_file_diff", { cwd, path, fromHash, toHash });
+
+    return {
+      path: raw.path,
+      hunks: raw.hunks.map((h) => ({
+        header: h.header,
+        oldStart: h.old_start,
+        oldCount: h.old_count,
+        newStart: h.new_start,
+        newCount: h.new_count,
+        lines: h.lines.map((l) => ({
+          type: l.type as "context" | "add" | "delete",
+          content: l.content,
+          oldLineNo: l.old_line_no,
+          newLineNo: l.new_line_no,
+        })),
+      })),
+    };
+  }
+
+  const qs = `?cwd=${encodeURIComponent(cwd)}&path=${encodeURIComponent(path)}&from=${encodeURIComponent(fromHash)}&to=${encodeURIComponent(toHash)}`;
+  const res = await fetch(`${DEV_SERVER}/api/git-file-diff${qs}`);
+  if (!res.ok) throw new Error(`Failed to get file diff: ${res.status}`);
   return res.json();
 }
 

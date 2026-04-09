@@ -100,8 +100,9 @@ GitButler est le concurrent le plus proche de GitWand techniquement (même stack
 - **History / Log** : Vue chronologique des commits dans la sidebar, diff par commit avec liste de fichiers (scroll-spy), carte commit avec avatar/stats/badges, rechargement après commit/push/pull
 - **i18n** : Système type-safe `useI18n()`, locales FR/EN complètes, détection OS
 - **Settings** : Panneau dédié (langue, thème, signature de commit)
-- **Diff avancé** : Side-by-side toggle avec persistance, syntax highlighting (highlight.js, 30+ langages), navigation hunk (prev/next), collapse des zones inchangées, numéros de ligne double-colonne
-- **File history** : Blame inline (`git blame --porcelain`) avec groupement par commit, historique du fichier (`git log --follow`), syntax highlighting
+- **Diff avancé** : Side-by-side toggle avec persistance, syntax highlighting (highlight.js, 30+ langages), navigation hunk (prev/next), collapse des zones inchangées, numéros de ligne double-colonne, word-level diff (LCS sur tokens), minimap canvas, staging partiel (lignes/hunks)
+- **File history** : Blame inline (`git blame --porcelain`) avec groupement par commit, historique du fichier (`git log --follow`), syntax highlighting, time-travel diff (comparer deux versions)
+- **DAG graph** : Visualisation du graphe de commits (toutes branches), layout en lanes, SVG interactif, ref badges
 - **UX** : Thème light/dark, toast notifications (dark card, slide-in/out), empty state avec repos récents en cartes, auto-fetch toutes les 30s, historique de dossiers/favoris
 
 ---
@@ -181,21 +182,21 @@ Paramètres implémentés :
 
 > Objectif : Rivaliser avec Kaleidoscope sur la qualité visuelle des diffs, tout en gardant l'intelligence GitWand.
 
-#### 6.0 — Reports Phase 5 (partiel)
+#### 6.0 — Reports Phase 5 ✅
 
 - ✅ **Diff side-by-side** : Toggle inline/côte-à-côte avec persistance Settings (DiffViewer + CommitDiffViewer)
-- ⬜ **Staging partiel** : Sélection de lignes/hunks à commiter, comme `git add -p`
-- ⬜ **Pull with rebase** : Option pour rebase au lieu de merge
-- ⬜ **Graphe simplifié** : Visualisation DAG des branches
-- ⬜ **Paramètres restants** : Comportement au switch, pull mode, taille de police, tab size, notifications
+- ✅ **Staging partiel** : Sélection de lignes/hunks à commiter, via `git apply --cached` — checkboxes par ligne et par hunk, bouton "Stage hunk" et "Stage selected", patch builder, trois couches (Rust + dev-server + TypeScript)
+- ✅ **Pull with rebase** : Option rebase dans Settings, paramètre persisté en localStorage
+- ✅ **Graphe simplifié** : Visualisation DAG des branches — layout en lanes, SVG graph (nodes + edges bezier), ref badges (branch/tag/remote), sélection de commit
+- ✅ **Paramètres restants** : Pull mode, comportement au switch, taille de police (10-18px slider), tab size (2/4/8), notifications — tous avec persistance localStorage et CSS custom properties
 
-#### 6.1 — Diff enrichi (partiel)
+#### 6.1 — Diff enrichi ✅
 
 - ✅ **Syntax highlighting** : highlight.js avec 30+ langages, détection auto par extension, thèmes dark/light
-- ⬜ **Word-level diff** : Diff sémantique, pas juste token-level
-- ⬜ **Minimap** : Vue miniature du fichier avec zones modifiées surlignées
+- ✅ **Word-level diff** : Algorithme LCS sur tokens mot, `DiffSegment[]` (equal/delete/insert), spans HTML `.wd-del`/`.wd-ins`, inline + side-by-side + compare views
+- ✅ **Minimap** : Canvas 48px, rendu proportionnel add/delete, viewport indicator, click-to-scroll, device pixel ratio aware
 - ✅ **Navigation hunk** : Boutons prev/next avec compteur (1/N), scroll-to-hunk
-- ✅ **Collapse unchanged** : Masquage automatique des longues séries context (>6 lignes), expand on click
+- ✅ **Collapse unchanged** : Masquage automatique des longues séries context (>6 lignes), expand on click, `IndexedLine` wrapper pour word-diff mapping
 - ✅ **Numéros de ligne** : Double-colonne (ancien/nouveau) — déjà présent depuis Phase 5
 
 #### 6.2 — Folder diff
@@ -216,7 +217,7 @@ Paramètres implémentés :
 
 - ✅ **Historique d'un fichier** : `git log --follow`, vue chronologique avec avatar/date/hash
 - ✅ **Blame inline** : `git blame --porcelain`, groupement par commit, syntax highlighting, clic → commit
-- ⬜ **Time-travel diff** : Comparer n'importe quelles deux versions d'un fichier
+- ✅ **Time-travel diff** : Comparer n'importe quelles deux versions d'un fichier — onglet "Compare", sélection de 2 commits dans le log, `git diff <from> <to> -- <file>`, vue SBS avec word-diff
 
 #### Bonus Phase 6 (non planifiés, implémentés)
 
@@ -224,7 +225,7 @@ Paramètres implémentés :
 - ✅ **Bouton File History** : Icône horloge dans le header du diff pour ouvrir l'historique du fichier
 - ✅ **i18n Phase 6** : Toutes les nouvelles clés traduites FR/EN (diff modes, collapsed, hunk nav, file history)
 
-**Effort estimé restant** : 2-3 semaines. Folder diff et image diff sont les plus coûteux.
+**Effort estimé restant** : 2-3 semaines. Folder diff (6.2) et image diff (6.3) sont les derniers éléments de cette phase.
 
 ---
 

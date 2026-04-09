@@ -13,6 +13,8 @@ import {
   gitMergeAbort,
   gitMergeContinue,
   gitDiscard,
+  gitStagePatch,
+  gitUnstagePatch,
   getGitShow,
   getGitBranches,
   gitCreateBranch,
@@ -26,7 +28,7 @@ import {
   type GitBranch,
 } from "../utils/backend";
 
-export type ViewMode = "changes" | "history";
+export type ViewMode = "changes" | "history" | "graph";
 
 export interface RepoFileEntry {
   path: string;
@@ -370,6 +372,32 @@ export function useGitRepo() {
     await unstageFiles(paths);
   }
 
+  /**
+   * Stage a partial diff patch (hunk/line level).
+   */
+  async function stagePatch(patch: string) {
+    if (!folderPath.value) return;
+    try {
+      await gitStagePatch(folderPath.value, patch);
+      await refresh();
+    } catch (err: any) {
+      error.value = `git apply: ${err.message}`;
+    }
+  }
+
+  /**
+   * Unstage a partial diff patch (hunk/line level).
+   */
+  async function unstagePatch(patch: string) {
+    if (!folderPath.value) return;
+    try {
+      await gitUnstagePatch(folderPath.value, patch);
+      await refresh();
+    } catch (err: any) {
+      error.value = `git apply --reverse: ${err.message}`;
+    }
+  }
+
   // ─── Commit ─────────────────────────────────────────────
 
   /**
@@ -639,6 +667,8 @@ export function useGitRepo() {
     stageAll,
     unstageFiles,
     unstageAll,
+    stagePatch,
+    unstagePatch,
     commit,
     push,
     pull,

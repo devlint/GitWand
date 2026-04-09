@@ -5,6 +5,7 @@ import { useI18n } from "../composables/useI18n";
 import type { DiffMode } from "../utils/diffMode";
 import { detectLanguage, highlightLine } from "../utils/highlight";
 import { wordDiff, segmentsToHtml } from "../utils/wordDiff";
+import { buildPatch, selectWholeHunk, type LineSelection } from "../utils/patchBuilder";
 
 const { t } = useI18n();
 
@@ -12,11 +13,15 @@ const props = defineProps<{
   diff: GitDiff | null;
   filePath: string | null;
   diffMode: DiffMode;
+  /** Enable line/hunk selection for partial staging */
+  selectable?: boolean;
 }>();
 
 const emit = defineEmits<{
   "update:diffMode": [mode: DiffMode];
   "open-file-history": [path: string];
+  /** Emitted when user wants to stage a partial patch */
+  "stage-patch": [patch: string];
 }>();
 
 const hasContent = computed(() => {
@@ -160,6 +165,89 @@ function goToHunk(idx: number) {
 
 function prevHunk() { goToHunk(currentHunkIdx.value - 1); }
 function nextHunk() { goToHunk(currentHunkIdx.value + 1); }
+
+// ─── Partial staging: line/hunk selection ───────────────
+/** Track which lines are selected: hunkIdx → Set of line indices */
+const lineSelection = ref<LineSelection>(new Map());
+
+/** Is a specific line selected? */
+function isLineSelected(hunkIdx: number, lineIdx: number): boolean {
+  return lineSelection.value.get(hunkIdx)?.has(lineIdx) ?? false;
+}
+
+/** Toggle a single line's selection */
+function toggleLine(hunkIdx: number, lineIdx: number) {
+  const sel = new Map(lineSelection.value);
+  if (!sel.has(hunkIdx)) sel.set(hunkIdx, new Set());
+  const lines = new Set(sel.get(hunkIdx)!);
+  if (lines.has(lineIdx)) lines.delete(lineIdx); else lines.add(lineIdx);
+  if (lines.size === 0) sel.delete(hunkIdx); else sel.set(hunkIdx, lines);
+  lineSelection.value = sel;
+}
+
+/** Toggle all change lines in a hunk */
+function toggleHunk(hunkIdx: number) {
+  if (!props.diff) return;
+  const hunk = props.diff.hunks[hunkIdx];
+  const changeIndices: number[] = [];
+  for (let i = 0; i < hunk.lines.length; i++) {
+    if (hunk.lines[i].type !== "context") changeIndices.push(i);
+  }
+  const sel = new Map(lineSelection.value);
+  const current = sel.get(hunkIdx);
+  const allSelected = current && changeIndices.every((i) => current.has(i));
+  if (allSelected) {
+    sel.delete(hunkIdx);
+  } else {
+    sel.set(hunkIdx, new Set(changeIndices));
+  }
+  lineSelection.value = sel;
+}
+
+/** Is the whole hunk selected? */
+function isHunkSelected(hunkIdx: number): boolean {
+  if (!props.diff) return false;
+  const hunk = props.diff.hunks[hunkIdx];
+  const current = lineSelection.value.get(hunkIdx);
+  if (!current) return false;
+  return hunk.lines.every((l, i) => l.type === "context" || current.has(i));
+}
+
+/** Is the hunk partially selected? */
+function isHunkIndeterminate(hunkIdx: number): boolean {
+  const current = lineSelection.value.get(hunkIdx);
+  if (!current || current.size === 0) return false;
+  return !isHunkSelected(hunkIdx);
+}
+
+/** Count of selected change lines */
+const selectedCount = computed(() => {
+  let count = 0;
+  for (const lines of lineSelection.value.values()) count += lines.size;
+  return count;
+});
+
+/** Stage the whole hunk directly */
+function stageHunk(hunkIdx: number) {
+  if (!props.diff) return;
+  const hunk = props.diff.hunks[hunkIdx];
+  const sel = selectWholeHunk(hunk, hunkIdx);
+  const patch = buildPatch(props.diff, sel);
+  if (patch) emit("stage-patch", patch);
+}
+
+/** Stage selected lines */
+function stageSelected() {
+  if (!props.diff || selectedCount.value === 0) return;
+  const patch = buildPatch(props.diff, lineSelection.value);
+  if (patch) {
+    emit("stage-patch", patch);
+    lineSelection.value = new Map(); // Clear selection after staging
+  }
+}
+
+/** Clear selection when diff changes */
+watch(() => props.diff, () => { lineSelection.value = new Map(); });
 
 // ─── Collapse unchanged: split long context runs ────────
 const CONTEXT_VISIBLE = 3; // lines to show before/after changes
@@ -371,6 +459,15 @@ function onDiffScroll() {
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="1" y="1" width="5" height="12" rx="1" stroke="currentColor" stroke-width="1.2" fill="none"/><rect x="8" y="1" width="5" height="12" rx="1" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>
           </button>
         </div>
+        <!-- Stage selected (partial staging) -->
+        <button
+          v-if="selectable && selectedCount > 0"
+          class="diff-stage-btn"
+          @click="stageSelected"
+          :title="t('diff.stageSelected', String(selectedCount))"
+        >
+          {{ t('diff.stageSelected', String(selectedCount)) }}
+        </button>
         <!-- File history button -->
         <button
           v-if="filePath"
@@ -395,7 +492,25 @@ function onDiffScroll() {
         :ref="(el) => setHunkRef(el, hunkIdx)"
       >
         <div class="hunk-header mono">
-          {{ hunk.header }}
+          <span class="hunk-header-text">{{ hunk.header }}</span>
+          <button
+            v-if="selectable"
+            class="hunk-stage-btn"
+            @click="stageHunk(hunkIdx)"
+            :title="t('diff.stageHunk')"
+          >{{ t('diff.stageHunk') }}</button>
+          <label
+            v-if="selectable"
+            class="hunk-check"
+            :title="t('diff.selectHunk')"
+          >
+            <input
+              type="checkbox"
+              :checked="isHunkSelected(hunkIdx)"
+              :indeterminate="isHunkIndeterminate(hunkIdx)"
+              @change="toggleHunk(hunkIdx)"
+            />
+          </label>
         </div>
 
         <template v-for="(section, sIdx) in collapseHunk(hunkIdx, hunk.lines)" :key="sIdx">
@@ -415,8 +530,19 @@ function onDiffScroll() {
                 v-for="(il, lineIdx) in section.lines"
                 :key="lineIdx"
                 class="diff-line"
-                :class="`diff-line--${il.line.type}`"
+                :class="[
+                  `diff-line--${il.line.type}`,
+                  { 'diff-line--selected': selectable && isLineSelected(hunkIdx, il.origIdx) },
+                ]"
               >
+                <td v-if="selectable" class="line-check">
+                  <input
+                    v-if="il.line.type !== 'context'"
+                    type="checkbox"
+                    :checked="isLineSelected(hunkIdx, il.origIdx)"
+                    @change="toggleLine(hunkIdx, il.origIdx)"
+                  />
+                </td>
                 <td class="line-no mono">{{ il.line.oldLineNo ?? '' }}</td>
                 <td class="line-no mono">{{ il.line.newLineNo ?? '' }}</td>
                 <td class="line-marker mono">
@@ -440,7 +566,25 @@ function onDiffScroll() {
         class="diff-hunk"
       >
         <div class="hunk-header mono">
-          {{ hunk.header }}
+          <span class="hunk-header-text">{{ hunk.header }}</span>
+          <button
+            v-if="selectable"
+            class="hunk-stage-btn"
+            @click="stageHunk(hunkIdx)"
+            :title="t('diff.stageHunk')"
+          >{{ t('diff.stageHunk') }}</button>
+          <label
+            v-if="selectable"
+            class="hunk-check"
+            :title="t('diff.selectHunk')"
+          >
+            <input
+              type="checkbox"
+              :checked="isHunkSelected(hunkIdx)"
+              :indeterminate="isHunkIndeterminate(hunkIdx)"
+              @change="toggleHunk(hunkIdx)"
+            />
+          </label>
         </div>
 
         <table class="diff-table diff-table--sbs">
@@ -905,5 +1049,86 @@ function onDiffScroll() {
 
 .diff-empty-hint {
   font-size: 12px;
+}
+
+/* ─── Partial staging controls ──────────────────────── */
+.diff-stage-btn {
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  border: none;
+  border-radius: 4px;
+  background: var(--color-accent);
+  color: #fff;
+  cursor: pointer;
+  transition: opacity 0.12s;
+  white-space: nowrap;
+}
+
+.diff-stage-btn:hover {
+  opacity: 0.85;
+}
+
+.hunk-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hunk-header-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hunk-stage-btn {
+  padding: 1px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  border: 1px solid var(--color-accent);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--color-accent);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.12s, color 0.12s;
+}
+
+.hunk-stage-btn:hover {
+  background: var(--color-accent);
+  color: #fff;
+}
+
+.hunk-check {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.hunk-check input[type="checkbox"] {
+  width: 13px;
+  height: 13px;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+
+.line-check {
+  width: 22px;
+  min-width: 22px;
+  padding: 0 2px;
+  text-align: center;
+  vertical-align: top;
+}
+
+.line-check input[type="checkbox"] {
+  width: 12px;
+  height: 12px;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+
+.diff-line--selected {
+  background: rgba(56, 132, 255, 0.1) !important;
 }
 </style>

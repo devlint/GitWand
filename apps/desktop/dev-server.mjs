@@ -330,8 +330,8 @@ const server = createServer(async (req, res) => {
 
       try {
         const resolvedCwd = resolve(cwd);
-        const format = "%h%x1f%H%x1f%an%x1f%ae%x1f%aI%x1f%s%x1f%b%x1e";
-        const stdout = execSync(`git log -n${count} --format="${format}"`, {
+        const format = "%h%x1f%H%x1f%an%x1f%ae%x1f%aI%x1f%s%x1f%b%x1f%P%x1f%D%x1e";
+        const stdout = execSync(`git log --all -n${count} --format="${format}"`, {
           cwd: resolvedCwd,
           encoding: "utf-8",
           shell: true,
@@ -343,7 +343,7 @@ const server = createServer(async (req, res) => {
           const trimmed = record.trim();
           if (!trimmed) continue;
           const fields = trimmed.split("\x1f");
-          if (fields.length < 7) continue;
+          if (fields.length < 9) continue;
 
           entries.push({
             hash: fields[0],
@@ -353,6 +353,8 @@ const server = createServer(async (req, res) => {
             date: fields[4],
             message: fields[5],
             body: fields[6].trim(),
+            parents: fields[7].trim().split(/\s+/).filter(Boolean),
+            refs: fields[8].trim(),
           });
         }
 
@@ -389,6 +391,40 @@ const server = createServer(async (req, res) => {
           cwd: resolvedCwd,
           encoding: "utf-8",
           shell: true,
+        });
+        return jsonResponse(res, { ok: true });
+      } catch (err) {
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
+
+    // POST /api/git-stage-patch  { cwd, patch }
+    if (url.pathname === "/api/git-stage-patch" && req.method === "POST") {
+      const { cwd, patch } = await readBody(req);
+      if (!cwd || !patch) return jsonResponse(res, { error: "Missing cwd or patch" }, 400);
+      try {
+        const resolvedCwd = resolve(cwd);
+        execSync("git apply --cached --unidiff-zero -", {
+          cwd: resolvedCwd,
+          input: patch,
+          encoding: "utf-8",
+        });
+        return jsonResponse(res, { ok: true });
+      } catch (err) {
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
+
+    // POST /api/git-unstage-patch  { cwd, patch }
+    if (url.pathname === "/api/git-unstage-patch" && req.method === "POST") {
+      const { cwd, patch } = await readBody(req);
+      if (!cwd || !patch) return jsonResponse(res, { error: "Missing cwd or patch" }, 400);
+      try {
+        const resolvedCwd = resolve(cwd);
+        execSync("git apply --cached --reverse --unidiff-zero -", {
+          cwd: resolvedCwd,
+          input: patch,
+          encoding: "utf-8",
         });
         return jsonResponse(res, { ok: true });
       } catch (err) {
@@ -527,6 +563,67 @@ const server = createServer(async (req, res) => {
         return jsonResponse(res, { success: true, message: stdout.trim() });
       } catch (err) {
         return jsonResponse(res, { success: false, message: err.stderr || err.message });
+      }
+    }
+
+    // GET /api/git-file-diff?cwd=<path>&path=<file>&from=<hash>&to=<hash>
+    if (url.pathname === "/api/git-file-diff" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd");
+      const filePath = url.searchParams.get("path");
+      const fromHash = url.searchParams.get("from");
+      const toHash = url.searchParams.get("to");
+      if (!cwd || !filePath || !fromHash || !toHash) return jsonResponse(res, { error: "Missing params" }, 400);
+      try {
+        const resolvedCwd = resolve(cwd);
+        const stdout = execSync(`git diff ${fromHash} ${toHash} -- "${filePath}"`, {
+          cwd: resolvedCwd,
+          encoding: "utf-8",
+          shell: true,
+          maxBuffer: 10 * 1024 * 1024,
+        });
+
+        const hunks = [];
+        let currentHunk = null;
+        let oldLineNo = 0;
+        let newLineNo = 0;
+
+        const diffLines = stdout.split("\n");
+        for (const line of diffLines) {
+          if (line.startsWith("@@")) {
+            if (currentHunk) hunks.push(currentHunk);
+            const header = line;
+            const match = line.match(/@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
+            const oldStart = match ? parseInt(match[1]) : 0;
+            const oldCount = match ? parseInt(match[2] || "1") : 1;
+            const newStart = match ? parseInt(match[3]) : 0;
+            const newCount = match ? parseInt(match[4] || "1") : 1;
+            oldLineNo = oldStart;
+            newLineNo = newStart;
+            currentHunk = { header, oldStart, oldCount, newStart, newCount, lines: [] };
+          } else if (currentHunk) {
+            if (line.startsWith("+") && !line.startsWith("+++")) {
+              currentHunk.lines.push({ type: "add", content: line.substring(1), oldLineNo: null, newLineNo });
+              newLineNo++;
+            } else if (line.startsWith("-") && !line.startsWith("---")) {
+              currentHunk.lines.push({ type: "delete", content: line.substring(1), oldLineNo, newLineNo: null });
+              oldLineNo++;
+            } else if (!line.startsWith("\\")) {
+              const content = line.length > 0 ? line.substring(1) : "";
+              currentHunk.lines.push({ type: "context", content, oldLineNo, newLineNo });
+              oldLineNo++;
+              newLineNo++;
+            }
+          }
+        }
+        if (currentHunk) hunks.push(currentHunk);
+
+        return jsonResponse(res, { path: filePath, hunks });
+      } catch (err) {
+        // Empty diff if identical
+        if (err.status === 0 || (err.stdout && err.stdout.trim() === "")) {
+          return jsonResponse(res, { path: filePath, hunks: [] });
+        }
+        return jsonResponse(res, { path: filePath, hunks: [] });
       }
     }
 

@@ -8,10 +8,11 @@ import RepoSidebar from "./components/RepoSidebar.vue";
 import DiffViewer from "./components/DiffViewer.vue";
 import CommitDiffViewer from "./components/CommitDiffViewer.vue";
 import FileHistoryViewer from "./components/FileHistoryViewer.vue";
+import CommitGraph from "./components/CommitGraph.vue";
 import SettingsPanel from "./components/SettingsPanel.vue";
 import { getPersistedDiffMode, persistDiffMode, type DiffMode } from "./utils/diffMode";
 import { useGitWand } from "./composables/useGitWand";
-import { useGitRepo } from "./composables/useGitRepo";
+import { useGitRepo, type ViewMode } from "./composables/useGitRepo";
 import { useTheme } from "./composables/useTheme";
 import { useI18n } from "./composables/useI18n";
 
@@ -78,6 +79,8 @@ const {
   stageAll,
   unstageFiles,
   unstageAll,
+  stagePatch,
+  unstagePatch,
   commit: doCommit,
   push: doPush,
   pull: doPull,
@@ -239,7 +242,7 @@ async function handleOpenPath(path: string) {
 
 // When switching tabs, load data as needed
 watch(viewMode, async (mode) => {
-  if (mode === "history" && hasRepo.value) {
+  if ((mode === "history" || mode === "graph") && hasRepo.value) {
     await loadLog();
   }
 });
@@ -249,7 +252,7 @@ function onRepoFileSelect(path: string, staged: boolean) {
   repoSelectFile(path, staged);
 }
 
-function onViewModeChange(mode: "changes" | "history") {
+function onViewModeChange(mode: ViewMode) {
   viewMode.value = mode;
 }
 
@@ -509,8 +512,10 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
               :diff="repoDiff"
               :file-path="repoSelectedFile"
               :diff-mode="diffMode"
+              :selectable="true"
               @update:diff-mode="onDiffModeChange"
               @open-file-history="openFileHistory"
+              @stage-patch="stagePatch"
             />
           </template>
 
@@ -522,6 +527,15 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
             :commit-info="repoLog.find(e => e.hashFull === selectedCommitHash) ?? null"
             :diff-mode="diffMode"
             @update:diff-mode="onDiffModeChange"
+          />
+
+          <!-- Graph view: DAG visualization -->
+          <CommitGraph
+            v-else-if="viewMode === 'graph'"
+            :commits="repoLog"
+            :selected-hash="selectedCommitHash"
+            :current-branch="branchDisplay"
+            @select-commit="(hash) => { selectCommit(hash); viewMode = 'history'; }"
           />
         </template>
       </main>

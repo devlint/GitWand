@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import type { RepoFileEntry, ViewMode } from "../composables/useGitRepo";
+import { type RepoFileEntry, type ViewMode } from "../composables/useGitRepo";
 import type { GitLogEntry } from "../utils/backend";
 import CommitLog from "./CommitLog.vue";
 import { useI18n } from "../composables/useI18n";
@@ -128,6 +128,13 @@ function onCommitKeydown(e: KeyboardEvent) {
         @click="emit('changeView', 'history')"
       >
         {{ t('sidebar.tabLog') }}
+      </button>
+      <button
+        class="view-tab"
+        :class="{ 'view-tab--active': viewMode === 'graph' }"
+        @click="emit('changeView', 'graph')"
+      >
+        {{ t('sidebar.tabGraph') }}
       </button>
     </div>
 
