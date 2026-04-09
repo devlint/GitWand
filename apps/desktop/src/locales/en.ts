@@ -18,8 +18,10 @@ const en: Locale = {
     no: "No",
     ok: "OK",
     open: "Open",
+    optional: "optional",
     refresh: "Refresh",
     save: "Save",
+    ctrlEnter: "Ctrl+Enter to confirm",
     yes: "Yes",
   },
 
@@ -137,6 +139,14 @@ const en: Locale = {
     unpushedOne: "unpushed commit",
     unpushedMany: "unpushed commits",
     pushed: "Pushed to remote",
+    editMessage: "Edit commit message",
+    amendConfirm: "Amend commit",
+  },
+  commit: {
+    summary: "Summary",
+    summaryPlaceholder: "Summary (required)",
+    description: "Description",
+    descriptionPlaceholder: "Description (optional)",
   },
 
   // ─── Relative dates ─────────────────────────────────────

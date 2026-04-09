@@ -13,6 +13,7 @@ import {
   gitMergeAbort,
   gitMergeContinue,
   gitDiscard,
+  gitAmendCommit,
   gitStagePatch,
   gitUnstagePatch,
   getGitShow,
@@ -424,6 +425,23 @@ export function useGitRepo() {
     }
   }
 
+  /**
+   * Amend the HEAD commit message (only works on unpushed HEAD).
+   */
+  async function amendCommit(summary: string, description: string) {
+    if (!folderPath.value) return;
+    const fullMessage = description.trim()
+      ? `${summary.trim()}\n\n${description.trim()}`
+      : summary.trim();
+    try {
+      await gitAmendCommit(folderPath.value, fullMessage);
+      await refresh();
+      await loadLog();
+    } catch (err: any) {
+      error.value = `amend: ${err.message}`;
+    }
+  }
+
   // ─── Push / Pull ────────────────────────────────────────
 
   async function push() {
@@ -670,6 +688,7 @@ export function useGitRepo() {
     stagePatch,
     unstagePatch,
     commit,
+    amendCommit,
     push,
     pull,
     mergeBranch,

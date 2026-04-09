@@ -20,8 +20,10 @@ const fr = {
     no: "Non",
     ok: "OK",
     open: "Ouvrir",
+    optional: "optionnel",
     refresh: "Rafra\u00eechir",
     save: "Sauvegarder",
+    ctrlEnter: "Ctrl+Entr\u00e9e pour valider",
     yes: "Oui",
   },
 
@@ -139,6 +141,14 @@ const fr = {
     unpushedOne: "commit non push\u00e9",
     unpushedMany: "commits non push\u00e9s",
     pushed: "Push\u00e9s sur le remote",
+    editMessage: "Modifier le message de commit",
+    amendConfirm: "Modifier le commit",
+  },
+  commit: {
+    summary: "R\u00e9sum\u00e9",
+    summaryPlaceholder: "R\u00e9sum\u00e9 (requis)",
+    description: "Description",
+    descriptionPlaceholder: "Description (optionnel)",
   },
 
   // ─── Relative dates ─────────────────────────────────────

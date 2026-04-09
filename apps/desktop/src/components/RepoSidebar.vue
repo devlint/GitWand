@@ -32,6 +32,7 @@ const emit = defineEmits<{
   "update:commitSummary": [value: string];
   "update:commitDescription": [value: string];
   selectCommit: [hash: string];
+  editCommit: [entry: GitLogEntry];
 }>();
 
 const { t } = useI18n();
@@ -275,6 +276,7 @@ function onCommitKeydown(e: KeyboardEvent) {
         :selected-hash="selectedCommitHash"
         :ahead-count="aheadCount"
         @select-commit="(hash: string) => emit('selectCommit', hash)"
+        @edit-commit="(entry) => emit('editCommit', entry)"
       />
     </div>
   </nav>

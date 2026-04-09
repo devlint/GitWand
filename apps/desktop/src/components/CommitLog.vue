@@ -13,6 +13,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   selectCommit: [hash: string];
+  editCommit: [entry: GitLogEntry];
 }>();
 
 function relativeDate(isoDate: string): string {
@@ -100,6 +101,17 @@ function authorColor(name: string): string {
               <time class="commit-date" :datetime="entry.date">{{ relativeDate(entry.date) }}</time>
             </div>
           </div>
+          <!-- Edit button — HEAD unpushed only -->
+          <button
+            v-if="aheadCount != null && idx === 0"
+            class="commit-edit-btn"
+            @click.stop="emit('editCommit', entry)"
+            :title="t('log.editMessage')"
+          >
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M11 2l3 3-8 8H3v-3l8-8z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+            </svg>
+          </button>
         </li>
       </template>
     </ul>
@@ -225,6 +237,31 @@ function authorColor(name: string): string {
 
 .commit-item:last-child {
   border-bottom: none;
+}
+
+.commit-edit-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  color: var(--color-text-muted);
+  background: none;
+  opacity: 0;
+  transition: opacity 0.12s, color 0.12s, background 0.12s;
+  align-self: center;
+}
+
+.commit-item:hover .commit-edit-btn {
+  opacity: 0.7;
+}
+
+.commit-edit-btn:hover {
+  opacity: 1 !important;
+  color: var(--color-accent);
+  background: var(--color-bg-tertiary);
 }
 
 .commit-avatar {

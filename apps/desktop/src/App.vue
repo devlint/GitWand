@@ -10,6 +10,8 @@ import CommitDiffViewer from "./components/CommitDiffViewer.vue";
 import FileHistoryViewer from "./components/FileHistoryViewer.vue";
 import CommitGraph from "./components/CommitGraph.vue";
 import SettingsPanel from "./components/SettingsPanel.vue";
+import EditCommitOverlay from "./components/EditCommitOverlay.vue";
+import type { GitLogEntry } from "./utils/backend";
 import { getPersistedDiffMode, persistDiffMode, type DiffMode } from "./utils/diffMode";
 import { useGitWand } from "./composables/useGitWand";
 import { useGitRepo, type ViewMode } from "./composables/useGitRepo";
@@ -85,6 +87,7 @@ const {
   stagePatch,
   unstagePatch,
   commit: doCommit,
+  amendCommit: doAmendCommit,
   push: doPush,
   pull: doPull,
   mergeBranch: doMerge,
@@ -230,6 +233,18 @@ function handleResolveFile(path: string) {
 function handleResolveHunkCustom(path: string, hunkIndex: number, content: string) {
   resolveHunkCustom(path, hunkIndex, content);
   checkAndSaveIfResolved(path);
+}
+
+// ─── Edit commit overlay ────────────────────────────────
+const editingCommit = ref<GitLogEntry | null>(null);
+
+function handleEditCommit(entry: GitLogEntry) {
+  editingCommit.value = entry;
+}
+
+async function handleAmendConfirm(summary: string, description: string) {
+  editingCommit.value = null;
+  await doAmendCommit(summary, description);
 }
 
 // ─── Folder opening ─────────────────────────────────────
@@ -539,6 +554,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
           @update:commit-summary="(val) => commitSummary = val"
           @update:commit-description="(val) => commitDescription = val"
           @select-commit="selectCommit"
+          @edit-commit="handleEditCommit"
         />
       </aside>
 
@@ -638,6 +654,13 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
       v-if="showFolderPicker"
       @select="onFolderSelected"
       @cancel="onFolderPickerCancel"
+    />
+
+    <!-- Edit commit overlay -->
+    <EditCommitOverlay
+      :entry="editingCommit"
+      @confirm="handleAmendConfirm"
+      @cancel="editingCommit = null"
     />
 
     <!-- Success toast -->

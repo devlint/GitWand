@@ -691,6 +691,29 @@ fn git_commit(cwd: String, message: String) -> Result<String, String> {
     Ok(hash)
 }
 
+#[tauri::command]
+fn git_amend_commit(cwd: String, message: String) -> Result<String, String> {
+    let output = std::process::Command::new(git_binary())
+        .args(["commit", "--amend", "-m", &message])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("Failed to run git commit --amend: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("git commit --amend failed: {}", stderr));
+    }
+
+    let log_output = std::process::Command::new(git_binary())
+        .args(["rev-parse", "--short", "HEAD"])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("Failed to get commit hash: {}", e))?;
+
+    let hash = String::from_utf8_lossy(&log_output.stdout).trim().to_string();
+    Ok(hash)
+}
+
 // ─── Git push / pull ─────────────────────────────────────────
 
 #[derive(Serialize)]
@@ -1491,6 +1514,7 @@ pub fn run() {
             git_stage_patch,
             git_unstage_patch,
             git_commit,
+            git_amend_commit,
             git_push,
             git_pull,
             git_fetch,

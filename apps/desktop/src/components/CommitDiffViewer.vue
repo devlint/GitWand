@@ -85,6 +85,24 @@ function cleanBody(raw: string): string {
   return raw.replace(/\\n/g, "\n").trim();
 }
 
+// ─── Body collapse ───────────────────────────────────────
+const BODY_PREVIEW_LINES = 2;
+const bodyExpanded = ref(false);
+
+const bodyLines = computed(() => {
+  if (!props.commitInfo?.body) return [];
+  return cleanBody(props.commitInfo.body).split("\n");
+});
+
+const bodyNeedsCollapse = computed(() => bodyLines.value.length > BODY_PREVIEW_LINES);
+
+const bodyPreview = computed(() =>
+  bodyLines.value.slice(0, BODY_PREVIEW_LINES).join("\n"),
+);
+
+// Reset when commit changes
+watch(() => props.commitHash, () => { bodyExpanded.value = false; });
+
 function formatDate(raw: string): string {
   try {
     const d = new Date(raw);
@@ -319,7 +337,14 @@ function onContentScroll(e: Event) {
         </div>
       </div>
       <!-- Row 2: body (if any) -->
-      <div class="cdv-commit-body" v-if="commitInfo.body">{{ cleanBody(commitInfo.body) }}</div>
+      <div class="cdv-commit-body" v-if="commitInfo.body">
+        <span class="cdv-body-text">{{ bodyExpanded || !bodyNeedsCollapse ? cleanBody(commitInfo.body) : bodyPreview }}</span>
+        <button
+          v-if="bodyNeedsCollapse"
+          class="cdv-body-toggle"
+          @click="bodyExpanded = !bodyExpanded"
+        >{{ bodyExpanded ? '▲ moins' : `▼ +${bodyLines.length - BODY_PREVIEW_LINES} ligne${bodyLines.length - BODY_PREVIEW_LINES > 1 ? 's' : ''}` }}</button>
+      </div>
       <!-- Row 3: stats badges -->
       <div class="cdv-commit-stats">
         <span class="cdv-badge cdv-badge--files">
@@ -575,8 +600,29 @@ function onContentScroll(e: Event) {
   font-weight: 400;
   color: var(--color-text-muted);
   line-height: 1.5;
-  white-space: pre-wrap;
   padding-left: 44px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cdv-body-text {
+  white-space: pre-wrap;
+}
+
+.cdv-body-toggle {
+  align-self: flex-start;
+  font-size: 11px;
+  color: var(--color-accent);
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  opacity: 0.8;
+  transition: opacity 0.1s;
+}
+
+.cdv-body-toggle:hover {
+  opacity: 1;
 }
 
 .cdv-commit-stats {

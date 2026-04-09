@@ -447,6 +447,23 @@ export async function gitCommit(cwd: string, message: string): Promise<string> {
   return data.hash;
 }
 
+export async function gitAmendCommit(cwd: string, message: string): Promise<string> {
+  if (isTauri()) {
+    return tauriInvoke<string>("git_amend_commit", { cwd, message });
+  }
+  const res = await fetch(`${DEV_SERVER}/api/git-amend-commit`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, message }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || `Failed to amend commit: ${res.status}`);
+  }
+  const data = await res.json();
+  return data.hash;
+}
+
 // ─── Git push / pull ──────────────────────────────────────────
 
 export interface GitPushPullResult {
