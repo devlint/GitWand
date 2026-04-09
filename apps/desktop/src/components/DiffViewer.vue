@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, nextTick } from "vue";
+import { ref, computed, nextTick, watch, onMounted } from "vue";
 import type { GitDiff, DiffLine } from "../utils/backend";
 import { useI18n } from "../composables/useI18n";
 import type { DiffMode } from "../utils/diffMode";
@@ -247,6 +247,82 @@ function collapseHunk(hunkIdx: number, lines: DiffLine[]): HunkSection[] {
   }
   return sections;
 }
+
+// ─── Minimap ──────────────────────────────────────────
+const minimapCanvas = ref<HTMLCanvasElement | null>(null);
+const MINIMAP_WIDTH = 48;
+
+/** Flattened list of line types for minimap rendering */
+const allLineTypes = computed(() => {
+  if (!props.diff) return [];
+  const types: Array<"context" | "add" | "delete"> = [];
+  for (const hunk of props.diff.hunks) {
+    for (const line of hunk.lines) {
+      types.push(line.type);
+    }
+  }
+  return types;
+});
+
+function drawMinimap() {
+  const canvas = minimapCanvas.value;
+  if (!canvas) return;
+  const types = allLineTypes.value;
+  if (types.length === 0) return;
+
+  const dpr = window.devicePixelRatio || 1;
+  const containerHeight = canvas.parentElement?.clientHeight ?? 300;
+  canvas.width = MINIMAP_WIDTH * dpr;
+  canvas.height = containerHeight * dpr;
+  canvas.style.width = `${MINIMAP_WIDTH}px`;
+  canvas.style.height = `${containerHeight}px`;
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, MINIMAP_WIDTH, containerHeight);
+
+  // Each line maps to a vertical slice
+  const lineH = Math.max(1, containerHeight / types.length);
+
+  for (let i = 0; i < types.length; i++) {
+    const t = types[i];
+    if (t === "context") continue; // skip context for cleaner look
+    ctx.fillStyle = t === "add" ? "rgba(34, 197, 94, 0.6)" : "rgba(239, 68, 68, 0.6)";
+    ctx.fillRect(0, i * lineH, MINIMAP_WIDTH, Math.max(lineH, 2));
+  }
+
+  // Draw viewport indicator
+  const contentArea = contentEl.value;
+  if (contentArea && contentArea.scrollHeight > 0) {
+    const ratio = contentArea.scrollTop / contentArea.scrollHeight;
+    const visibleRatio = contentArea.clientHeight / contentArea.scrollHeight;
+    const vpY = ratio * containerHeight;
+    const vpH = Math.max(visibleRatio * containerHeight, 10);
+    ctx.fillStyle = "rgba(255, 255, 255, 0.12)";
+    ctx.fillRect(0, vpY, MINIMAP_WIDTH, vpH);
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.2)";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(0.5, vpY + 0.5, MINIMAP_WIDTH - 1, vpH - 1);
+  }
+}
+
+function onMinimapClick(e: MouseEvent) {
+  const canvas = minimapCanvas.value;
+  const contentArea = contentEl.value;
+  if (!canvas || !contentArea) return;
+  const rect = canvas.getBoundingClientRect();
+  const y = e.clientY - rect.top;
+  const ratio = y / rect.height;
+  contentArea.scrollTop = ratio * contentArea.scrollHeight - contentArea.clientHeight / 2;
+}
+
+// Redraw minimap on diff change or scroll
+watch(allLineTypes, () => nextTick(drawMinimap));
+
+function onDiffScroll() {
+  drawMinimap();
+}
 </script>
 
 <template>
@@ -307,8 +383,11 @@ function collapseHunk(hunkIdx: number, lines: DiffLine[]): HunkSection[] {
       </div>
     </div>
 
+    <!-- Diff body: content + minimap -->
+    <div class="diff-body" v-if="hasContent">
+
     <!-- Diff content: INLINE mode -->
-    <div class="diff-content" ref="contentEl" v-if="hasContent && diffMode === 'inline'">
+    <div class="diff-content" ref="contentEl" v-if="diffMode === 'inline'" @scroll="onDiffScroll">
       <div
         v-for="(hunk, hunkIdx) in diff!.hunks"
         :key="hunkIdx"
@@ -354,7 +433,7 @@ function collapseHunk(hunkIdx: number, lines: DiffLine[]): HunkSection[] {
     </div>
 
     <!-- Diff content: SIDE-BY-SIDE mode -->
-    <div class="diff-content" v-else-if="hasContent && diffMode === 'side-by-side'">
+    <div class="diff-content" ref="contentEl" v-else-if="diffMode === 'side-by-side'" @scroll="onDiffScroll">
       <div
         v-for="(hunk, hunkIdx) in diff!.hunks"
         :key="hunkIdx"
@@ -398,6 +477,13 @@ function collapseHunk(hunkIdx: number, lines: DiffLine[]): HunkSection[] {
         </table>
       </div>
     </div>
+
+    <!-- Minimap -->
+    <div class="diff-minimap" @click="onMinimapClick">
+      <canvas ref="minimapCanvas"></canvas>
+    </div>
+
+    </div><!-- /diff-body -->
 
     <!-- Empty / no diff -->
     <div class="diff-empty" v-else-if="filePath">
@@ -518,10 +604,33 @@ function collapseHunk(hunkIdx: number, lines: DiffLine[]): HunkSection[] {
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 
-/* ─── Diff content ───────────────────────────────────── */
+/* ─── Diff body (content + minimap) ───────────────────── */
+.diff-body {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  position: relative;
+}
+
 .diff-content {
   flex: 1;
   overflow: auto;
+}
+
+/* ─── Minimap ────────────────────────────────────────── */
+.diff-minimap {
+  width: 48px;
+  flex-shrink: 0;
+  background: var(--color-bg-secondary);
+  border-left: 1px solid var(--color-border);
+  cursor: pointer;
+  position: relative;
+}
+
+.diff-minimap canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 .diff-hunk {
