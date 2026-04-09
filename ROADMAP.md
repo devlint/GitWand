@@ -82,7 +82,7 @@ GitButler est le concurrent le plus proche de GitWand techniquement (même stack
 
 ---
 
-## Ce que GitWand a déjà (v0.1.0)
+## Ce que GitWand a déjà (v0.1.0 → Phase 6 partielle)
 
 ### Core (v0.1.1 — bugfixes)
 - Moteur de résolution automatique (7 patterns : same_change, one_side_change, delete_no_change, whitespace_only, non_overlapping, value_only_change, generated_file — LCS 3-way, 39 tests)
@@ -152,20 +152,22 @@ GitButler est le concurrent le plus proche de GitWand techniquement (même stack
 
 Paramètres implémentés :
 
+> Légende : ✅ UI + persistance + logique câblée — ⚠️ UI + persistance uniquement (valeur stockée, pas encore consommée par la logique) — ⬜ non implémenté
+
 | Paramètre | Statut | Valeurs |
 |-----------|--------|---------|
 | **Langue** | ✅ | Automatique (OS), Français, English |
-| **Thème** | ✅ | Sombre, Clair |
+| **Thème** | ✅ | Sombre, Clair, Système (OS) |
 | **Signature de commit** | ✅ | Activée/Désactivée (🪄 Commit via GitWand) |
-| **Éditeur externe** | ⬜ | `code`, `vim`, `nano`, chemin personnalisé |
-| **Chemin Git** | ⬜ | Automatique (PATH) ou chemin personnalisé |
-| **Branche par défaut** | ⬜ | `main`, `master`, personnalisé |
-| **Comportement au switch** | ⬜ | Stash automatique, Demander, Refuser |
-| **Pull mode** | ⬜ | Merge (défaut), Rebase |
-| **Affichage diff** | ⬜ | Inline (unifié), Side-by-side |
-| **Taille de police** | ⬜ | 10-18px, défaut 12px |
-| **Tab size** | ⬜ | 2, 4, 8 espaces |
-| **Notifications** | ⬜ | Activées, Désactivées |
+| **Affichage diff** | ✅ | Inline (unifié), Side-by-side |
+| **Pull mode** | ✅ | Merge (défaut), Rebase |
+| **Taille de police** | ✅ | 10-18px, slider (défaut 12px), CSS custom property |
+| **Tab size** | ✅ | 2, 4, 8 espaces, CSS custom property |
+| **Éditeur externe** | ✅ | Champ texte libre — bouton dans le diff header, commande Tauri `open_in_editor`, fallback `code` |
+| **Chemin Git** | ✅ | Automatique (PATH) ou chemin personnalisé — `GIT_BINARY` OnceLock Rust + `set_git_config`, appliqué au démarrage et à la fermeture des Settings |
+| **Branche par défaut** | ✅ | `main`, `master`, personnalisé — `priorityNames` computed dans BranchPanel, toujours premier dans le tri |
+| **Comportement au switch** | ✅ | Stash automatique (`git stash --include-untracked` + pop), Demander (window.confirm), Refuser (erreur toast) |
+| **Notifications** | ✅ | Activées/Désactivées — gate dans le watcher `repoSuccess` de App.vue |
 | **Raccourcis clavier** | ⬜ | Tableau éditable (phase ultérieure) |
 
 #### Bonus Phase 5 (non planifiés, implémentés)
@@ -178,9 +180,10 @@ Paramètres implémentés :
 
 ---
 
-### NOW — Phase 6 : Diff & comparaison avancée (en cours)
+### NOW — Phase 6 : Diff & comparaison avancée (quasi-terminé — 6.2 et 6.3 restants)
 
 > Objectif : Rivaliser avec Kaleidoscope sur la qualité visuelle des diffs, tout en gardant l'intelligence GitWand.
+> **Statut** : 6.0, 6.1 et 6.4 sont terminés. Restent 6.2 (folder diff) et 6.3 (image diff).
 
 #### 6.0 — Reports Phase 5 ✅
 
@@ -225,7 +228,17 @@ Paramètres implémentés :
 - ✅ **Bouton File History** : Icône horloge dans le header du diff pour ouvrir l'historique du fichier
 - ✅ **i18n Phase 6** : Toutes les nouvelles clés traduites FR/EN (diff modes, collapsed, hunk nav, file history)
 
-**Effort estimé restant** : 2-3 semaines. Folder diff (6.2) et image diff (6.3) sont les derniers éléments de cette phase.
+#### 6.5 — Paramètres : câblage de la logique
+
+Les paramètres suivants ont leur UI et leur persistance mais ne sont pas encore consommés par la logique applicative.
+
+- ✅ **Notifications** : flag `notifications` consommé dans le système de toasts — aucun toast si désactivé
+- ✅ **Comportement au switch** : `switchBehavior` lu lors du switch — `stash` (stash auto + switch + pop), `ask` (window.confirm si dirty), `refuse` (erreur si working tree dirty)
+- ✅ **Branche par défaut** : `defaultBranch` consommé dans le tri des branches (`priorityNames` computed, remplace le hardcode `["main","master"]`)
+- ✅ **Éditeur externe** : commande Tauri `open_in_editor` + bouton dans le diff header — fallback `code` si non configuré
+- ✅ **Chemin Git** : `GIT_BINARY` OnceLock global en Rust, commande `set_git_config` pour le mettre à jour depuis le frontend — tous les 26 appels `Command::new` utilisent `git_binary()`, fallback `git` si vide
+
+**Effort estimé restant** : 2-3 semaines. Folder diff (6.2) et image diff (6.3) sont les derniers éléments structurants. La 6.5 est du câblage, estimé à 2-3 jours.
 
 ---
 
@@ -335,11 +348,14 @@ interface ConfidenceScore {
 
 #### 8.3 — PR workflow
 
-- **Créer une PR** : Formulaire intégré (titre, description, reviewers, labels)
-- **Vue PR** : Liste des PRs ouvertes avec statut CI
-- **Review inline** : Commenter directement depuis le diff
+- **Créer une PR** : Formulaire intégré (titre, description, reviewers, labels, draft)
+- **Vue PR** : Liste des PRs ouvertes avec statut CI, checks GitHub Actions / GitLab CI
+- **Checkout de PR** : Basculer localement sur la branche d'une PR depuis la liste
 - **Merge PR** : Merge/squash/rebase depuis l'app
-- **Intégrations** : GitHub, GitLab, Bitbucket
+- **Intégrations** : GitHub REST + GraphQL API, GitLab API, Bitbucket API (OAuth)
+
+> Le PR workflow est le point d'entrée naturel vers la Phase 9 — Code Review intégré.
+> Une fois les PRs affichables dans l'app, ajouter le review inline devient la suite logique.
 
 #### 8.4 — Multi-repo & workspace
 
@@ -353,6 +369,50 @@ interface ConfidenceScore {
 - **Terminal inline** : Pour les commandes Git avancées non couvertes par l'UI
 - **Autocomplete** : Suggestions de branches, remotes, fichiers
 - **History** : Historique des commandes avec résultats
+
+---
+
+### LATER — Phase 9 : Code Review intégré (6-12 mois)
+
+> Objectif : Faire de GitWand un outil de code review à part entière — pas un renvoi vers GitHub.
+> La fondation est déjà là : diff viewer side-by-side, word-level diff, syntax highlighting, navigation hunk, file history, DAG graph. Il manque la couche "collaboration" par-dessus.
+
+**Positionnement** : GitHub et GitLab ont des interfaces de review correctes mais déconnectées du contexte local. GitWand connaît *votre* repo en profondeur — historique, conflits passés, patterns de merge — et peut apporter de l'intelligence là où les autres affichent juste un diff statique.
+
+#### 9.1 — Visualisation de PR
+
+- ⬜ **Liste des PRs** : Toutes les PRs ouvertes (GitHub/GitLab), avec statut CI, auteur, âge, nombre de commentaires
+- ⬜ **Diff de PR complet** : Affichage du diff de la PR dans le diff viewer GitWand (toutes les forces de Phase 6 : SBS, word-diff, minimap, collapse, syntax highlighting)
+- ⬜ **Résumé de PR** : Titre, description, reviewers assignés, labels, checks CI — vue agrégée
+- ⬜ **Checkout local** : Basculer sur la branche de la PR en un clic pour tester localement
+- ⬜ **Liens croisés** : Lien commit ↔ PR ↔ CI run pour naviguer sans quitter l'app
+
+#### 9.2 — Commentaires inline
+
+- ⬜ **Lecture des commentaires** : Afficher les commentaires existants de la PR directement dans le diff, ancrés sur les lignes concernées
+- ⬜ **Répondre à un commentaire** : Thread de réponses inline, resolve/unresolve
+- ⬜ **Créer un commentaire** : Sélectionner une ligne ou une plage de lignes → popin d'écriture contextuelle
+- ⬜ **Commentaire multi-ligne** : Sélection de bloc (comme GitHub, drag de la gouttière)
+- ⬜ **Suggestions de code** : Insérer un bloc ` ```suggestion ``` ` qu'on peut appliquer directement
+
+#### 9.3 — Soumission de review
+
+- ⬜ **Approve / Request changes / Comment** : Soumettre une review complète depuis l'app (équivalent du bouton "Review changes" sur GitHub)
+- ⬜ **Brouillon de review** : Accumuler des commentaires localement avant de les envoyer tous en une fois
+- ⬜ **Résumé de review** : Message global en accompagnement de la review
+- ⬜ **Notification de merge possible** : Alerter quand tous les checks sont verts et les reviews approuvées
+
+#### 9.4 — Intelligence GitWand (différenciateur clé)
+
+C'est ici que GitWand se distingue vraiment des interfaces de review classiques :
+
+- ⬜ **Conflict prediction** : Avant de merger une PR, simuler le merge contre la branche cible et détecter les conflits probables — avec les suggestions de résolution du moteur GitWand. *Aucun autre client Git ne fait ça à l'étape de la review.*
+- ⬜ **Hotspot analysis** : Identifier les fichiers de la PR qui ont le plus souvent généré des conflits dans l'historique du repo — alerter le reviewer
+- ⬜ **Review scope** : Mesurer l'ampleur du changement (fichiers touchés, % de la codebase, profondeur dans l'arbre de dépendances) pour calibrer le niveau de vigilance
+- ⬜ **Suggestions de review IA** : Pour chaque hunk complexe, proposer des observations automatiques (breaking change potentiel, pattern inhabituel, divergence avec les conventions du repo) — en s'appuyant sur le moteur d'explication du core (Phase 7.1)
+- ⬜ **Historique de review** : Qui a reviewé quoi dans ce fichier, quelles lignes ont déjà été commentées dans des PRs précédentes
+
+**Effort estimé** : 3-6 mois. 9.1 est le prérequis naturel de 8.3, et peut être parallélisé avec 8.3. 9.4 (intelligence) vient en dernier, une fois 9.1-9.3 stables — et s'appuie directement sur les travaux Phase 7.
 
 ---
 
@@ -386,6 +446,9 @@ interface ConfidenceScore {
 | Image diff | Canvas API côté frontend, lib Rust pour pixel diff |
 | Git graph | Algorithme de layout DAG (custom ou lib) |
 | PR workflow | API GitHub/GitLab/Bitbucket (REST ou GraphQL) |
+| Code review — commentaires inline | API GitHub Review Comments / GitLab MR Notes, stockage local des brouillons |
+| Conflict prediction (Phase 9.4) | Simulation de merge en mémoire via le moteur Rust, sans toucher au working tree |
+| Hotspot analysis (Phase 9.4) | `git log --follow -p` + parsing historique des conflits passés |
 | Terminal intégré | tauri-plugin-shell ou pseudo-terminal |
 
 ---

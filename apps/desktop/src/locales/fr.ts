@@ -118,6 +118,7 @@ const fr = {
     prevHunk: "Changement précédent",
     nextHunk: "Changement suivant",
     fileHistory: "Historique du fichier",
+    openInEditor: "Ouvrir dans l'éditeur externe",
     compare: "Comparer",
     compareHint: "Sélectionnez deux commits pour comparer les versions",
     compareFrom: "{0} sélectionné — choisissez le second commit",

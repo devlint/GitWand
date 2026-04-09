@@ -116,6 +116,7 @@ const en: Locale = {
     prevHunk: "Previous change",
     nextHunk: "Next change",
     fileHistory: "File history",
+    openInEditor: "Open in external editor",
     compare: "Compare",
     compareHint: "Select two commits to compare versions",
     compareFrom: "{0} selected — pick the second commit",

@@ -20,6 +20,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   "update:diffMode": [mode: DiffMode];
   "open-file-history": [path: string];
+  /** Emitted when user wants to open the file in the configured external editor */
+  "open-in-editor": [path: string];
   /** Emitted when user wants to stage a partial patch */
   "stage-patch": [patch: string];
 }>();
@@ -476,6 +478,15 @@ function onDiffScroll() {
           :title="t('diff.fileHistory')"
         >
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.2"/><path d="M7 4.5V7l2 1.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <!-- Open in editor button -->
+        <button
+          v-if="filePath"
+          class="diff-history-btn"
+          @click="emit('open-in-editor', filePath!)"
+          :title="t('diff.openInEditor')"
+        >
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="2" y="2" width="10" height="10" rx="1.5" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M5 5l4 2-4 2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
       </div>
     </div>

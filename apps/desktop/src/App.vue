@@ -15,8 +15,11 @@ import { useGitWand } from "./composables/useGitWand";
 import { useGitRepo, type ViewMode } from "./composables/useGitRepo";
 import { useTheme } from "./composables/useTheme";
 import { useI18n } from "./composables/useI18n";
+import { useSettings } from "./composables/useSettings";
+import { gitStash, gitStashPop, openInEditor, setGitConfig } from "./utils/backend";
 
 const { t } = useI18n();
+const { settings, refreshSettings } = useSettings();
 import { isTauri, registerBrowserFolderPicker, pickFolder } from "./utils/backend";
 
 const { theme, toggle: toggleTheme } = useTheme();
@@ -139,6 +142,11 @@ function dismissToast() {
 
 watch(repoSuccess, (val) => {
   if (!val) return;
+  // Consume the success signal regardless (so it doesn't pile up)
+  repoSuccess.value = null;
+  // Respect the notifications setting
+  if (!settings.value.notifications) return;
+
   if (successTimer != null) { window.clearTimeout(successTimer); successTimer = null; }
   successToastLeaving.value = false;
 
@@ -154,7 +162,6 @@ watch(repoSuccess, (val) => {
   successToastDetail.value = new Date().toLocaleString(undefined, {
     weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit",
   });
-  repoSuccess.value = null;
   successTimer = window.setTimeout(dismissToast, 3000);
 });
 
@@ -265,6 +272,70 @@ function openFileHistory(path: string) {
 
 function closeFileHistory() {
   fileHistoryPath.value = null;
+}
+
+async function handleOpenInEditor(path: string) {
+  if (!repoFolderPath.value) return;
+  try {
+    await openInEditor(repoFolderPath.value, path, settings.value.editor);
+  } catch (err: any) {
+    repoError.value = `editor: ${err.message}`;
+  }
+}
+
+// ─── Switch branch with behavior ────────────────────────
+// Reads switchBehavior setting and applies stash / refuse / ask logic
+// before delegating to the composable's switchBranch.
+
+function isDirty(): boolean {
+  const s = repoStatus.value;
+  if (!s) return false;
+  return s.staged.length > 0 || s.unstaged.length > 0 || s.untracked.length > 0;
+}
+
+async function handleSwitchBranch(name: string) {
+  if (!repoFolderPath.value) return;
+  const behavior = settings.value.switchBehavior;
+  const dirty = isDirty();
+
+  if (!dirty || behavior === "ask" && !dirty) {
+    // Clean tree — just switch
+    await switchBranch(name);
+    return;
+  }
+
+  if (behavior === "refuse") {
+    repoError.value = t("branches.switchRefusedDirty" as any) ||
+      "Switch refusé : des changements non commités sont présents.";
+    return;
+  }
+
+  if (behavior === "stash") {
+    isSwitchingBranch.value = true;
+    try {
+      await gitStash(repoFolderPath.value);
+      await switchBranch(name);
+      await gitStashPop(repoFolderPath.value);
+    } catch (err: any) {
+      repoError.value = `switch (stash): ${err.message}`;
+    } finally {
+      isSwitchingBranch.value = false;
+    }
+    return;
+  }
+
+  if (behavior === "ask") {
+    // Show a simple confirm — Vue dialog would be nicer but window.confirm is universal
+    const msg = t("branches.switchConfirmDirty" as any) ||
+      "Des changements non commités seront perdus. Continuer quand même ?";
+    if (window.confirm(msg)) {
+      await switchBranch(name);
+    }
+    return;
+  }
+
+  // Fallback
+  await switchBranch(name);
 }
 
 // ─── Settings panel ─────────────────────────────────────
@@ -388,7 +459,25 @@ function onKeyDown(e: KeyboardEvent) {
   }
 }
 
-onMounted(() => window.addEventListener("keydown", onKeyDown));
+// Push git path to Tauri backend on startup and when settings change
+async function applyGitConfig() {
+  try {
+    await setGitConfig(settings.value.gitPath);
+  } catch {
+    // Non-fatal — falls back to system "git"
+  }
+}
+
+function onSettingsClose() {
+  showSettings.value = false;
+  refreshSettings();
+  applyGitConfig();
+}
+
+onMounted(() => {
+  window.addEventListener("keydown", onKeyDown);
+  applyGitConfig();
+});
 onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
 </script>
 
@@ -417,7 +506,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
       @pull="() => doPull(pullMode === 'rebase')"
       @merge-branch="doMerge"
       @open-settings="showSettings = true"
-      @switch-branch="switchBranch"
+      @switch-branch="handleSwitchBranch"
       @create-branch="createBranch"
       @delete-branch="deleteBranch"
       @load-branches="loadBranches"
@@ -515,6 +604,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
               :selectable="true"
               @update:diff-mode="onDiffModeChange"
               @open-file-history="openFileHistory"
+              @open-in-editor="handleOpenInEditor"
               @stage-patch="stagePatch"
             />
           </template>
@@ -565,7 +655,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
     <!-- Settings panel -->
     <SettingsPanel
       v-if="showSettings"
-      @close="showSettings = false"
+      @close="onSettingsClose"
       @update:commit-signature="onCommitSignatureChange"
       @update:diff-mode="onDiffModeChange"
       @update:pull-mode="onPullModeChange"

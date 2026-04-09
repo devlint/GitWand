@@ -1,5 +1,6 @@
 use serde::Serialize;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 
 /// GitWand Desktop — Tauri backend
 ///
@@ -9,11 +10,41 @@ use std::path::{Path, PathBuf};
 /// - Git command execution
 /// - Window management
 
+// ─── Configurable git binary ──────────────────────────────
+//
+// Defaults to "git" (resolved from PATH).
+// Updated at runtime via the `set_git_config` Tauri command when the user
+// sets a custom git path in Settings.
+
+static GIT_BINARY: OnceLock<Mutex<String>> = OnceLock::new();
+
+fn git_binary() -> String {
+    GIT_BINARY
+        .get_or_init(|| Mutex::new("git".to_string()))
+        .lock()
+        .unwrap()
+        .clone()
+}
+
+#[tauri::command]
+fn set_git_config(git_path: String) -> Result<(), String> {
+    let mut binary = GIT_BINARY
+        .get_or_init(|| Mutex::new("git".to_string()))
+        .lock()
+        .unwrap();
+    *binary = if git_path.trim().is_empty() {
+        "git".to_string()
+    } else {
+        git_path.trim().to_string()
+    };
+    Ok(())
+}
+
 // ─── Git commands ──────────────────────────────────────────
 
 #[tauri::command]
 fn get_conflicted_files(cwd: String) -> Result<Vec<String>, String> {
-    let output = std::process::Command::new("git")
+    let output = std::process::Command::new(git_binary())
         .args(["diff", "--name-only", "--diff-filter=U"])
         .current_dir(&cwd)
         .output()
@@ -57,7 +88,7 @@ struct GitStatus {
 
 #[tauri::command]
 fn git_status(cwd: String) -> Result<GitStatus, String> {
-    let output = std::process::Command::new("git")
+    let output = std::process::Command::new(git_binary())
         .args(["status", "--porcelain=v2", "--branch"])
         .current_dir(&cwd)
         .output()
@@ -210,7 +241,7 @@ fn git_status(cwd: String) -> Result<GitStatus, String> {
 
     // If upstream exists but ahead/behind are 0, try rev-list as fallback
     if remote.is_some() && ahead == 0 && behind == 0 {
-        if let Ok(rev_output) = std::process::Command::new("git")
+        if let Ok(rev_output) = std::process::Command::new(git_binary())
             .args(["rev-list", "--left-right", "--count", "HEAD...@{upstream}"])
             .current_dir(&cwd)
             .output()
@@ -270,7 +301,7 @@ struct GitDiff {
 
 #[tauri::command]
 fn git_diff(cwd: String, path: String, staged: bool) -> Result<GitDiff, String> {
-    let mut cmd = std::process::Command::new("git");
+    let mut cmd = std::process::Command::new(git_binary());
     if staged {
         cmd.arg("diff").arg("--cached");
     } else {
@@ -404,7 +435,7 @@ fn git_log(cwd: String, count: Option<i32>) -> Result<Vec<GitLogEntry>, String> 
     // Use unit separator (ASCII 0x1f) to delimit fields
     let format = "%h%x1f%H%x1f%an%x1f%ae%x1f%aI%x1f%s%x1f%b%x1f%P%x1f%D%x1e";
 
-    let output = std::process::Command::new("git")
+    let output = std::process::Command::new(git_binary())
         .args([
             "log",
             "--all",
@@ -568,7 +599,7 @@ fn list_dir(path: Option<String>) -> Result<ListDirResult, String> {
 
 #[tauri::command]
 fn git_stage(cwd: String, paths: Vec<String>) -> Result<(), String> {
-    let mut cmd = std::process::Command::new("git");
+    let mut cmd = std::process::Command::new(git_binary());
     cmd.arg("add").arg("--").current_dir(&cwd);
     for p in &paths {
         cmd.arg(p);
@@ -583,7 +614,7 @@ fn git_stage(cwd: String, paths: Vec<String>) -> Result<(), String> {
 
 #[tauri::command]
 fn git_unstage(cwd: String, paths: Vec<String>) -> Result<(), String> {
-    let mut cmd = std::process::Command::new("git");
+    let mut cmd = std::process::Command::new(git_binary());
     cmd.arg("reset").arg("HEAD").arg("--").current_dir(&cwd);
     for p in &paths {
         cmd.arg(p);
@@ -598,7 +629,7 @@ fn git_unstage(cwd: String, paths: Vec<String>) -> Result<(), String> {
 
 #[tauri::command]
 fn git_stage_patch(cwd: String, patch: String) -> Result<(), String> {
-    let mut cmd = std::process::Command::new("git");
+    let mut cmd = std::process::Command::new(git_binary());
     cmd.args(["apply", "--cached", "--unidiff-zero", "-"])
         .current_dir(&cwd)
         .stdin(std::process::Stdio::piped());
@@ -617,7 +648,7 @@ fn git_stage_patch(cwd: String, patch: String) -> Result<(), String> {
 
 #[tauri::command]
 fn git_unstage_patch(cwd: String, patch: String) -> Result<(), String> {
-    let mut cmd = std::process::Command::new("git");
+    let mut cmd = std::process::Command::new(git_binary());
     cmd.args(["apply", "--cached", "--reverse", "--unidiff-zero", "-"])
         .current_dir(&cwd)
         .stdin(std::process::Stdio::piped());
@@ -638,7 +669,7 @@ fn git_unstage_patch(cwd: String, patch: String) -> Result<(), String> {
 
 #[tauri::command]
 fn git_commit(cwd: String, message: String) -> Result<String, String> {
-    let output = std::process::Command::new("git")
+    let output = std::process::Command::new(git_binary())
         .args(["commit", "-m", &message])
         .current_dir(&cwd)
         .output()
@@ -650,7 +681,7 @@ fn git_commit(cwd: String, message: String) -> Result<String, String> {
     }
 
     // Return the new commit hash
-    let log_output = std::process::Command::new("git")
+    let log_output = std::process::Command::new(git_binary())
         .args(["rev-parse", "--short", "HEAD"])
         .current_dir(&cwd)
         .output()
@@ -672,7 +703,7 @@ struct GitPushPullResult {
 
 #[tauri::command]
 fn git_push(cwd: String) -> Result<GitPushPullResult, String> {
-    let output = std::process::Command::new("git")
+    let output = std::process::Command::new(git_binary())
         .args(["push"])
         .current_dir(&cwd)
         .output()
@@ -694,7 +725,7 @@ fn git_push(cwd: String) -> Result<GitPushPullResult, String> {
 
 #[tauri::command]
 fn git_fetch(cwd: String) -> Result<GitPushPullResult, String> {
-    let output = std::process::Command::new("git")
+    let output = std::process::Command::new(git_binary())
         .args(["fetch", "--prune"])
         .current_dir(&cwd)
         .output()
@@ -716,7 +747,7 @@ fn git_fetch(cwd: String) -> Result<GitPushPullResult, String> {
 
 #[tauri::command]
 fn git_merge(cwd: String, branch: String) -> Result<GitPushPullResult, String> {
-    let output = std::process::Command::new("git")
+    let output = std::process::Command::new(git_binary())
         .args(["merge", &branch])
         .current_dir(&cwd)
         .output()
@@ -742,7 +773,7 @@ fn git_merge(cwd: String, branch: String) -> Result<GitPushPullResult, String> {
 
 #[tauri::command]
 fn git_merge_abort(cwd: String) -> Result<GitPushPullResult, String> {
-    let output = std::process::Command::new("git")
+    let output = std::process::Command::new(git_binary())
         .args(["merge", "--abort"])
         .current_dir(&cwd)
         .output()
@@ -763,7 +794,7 @@ fn git_merge_abort(cwd: String) -> Result<GitPushPullResult, String> {
 
 #[tauri::command]
 fn git_merge_continue(cwd: String) -> Result<GitPushPullResult, String> {
-    let output = std::process::Command::new("git")
+    let output = std::process::Command::new(git_binary())
         .args(["-c", "core.editor=true", "merge", "--continue"])
         .current_dir(&cwd)
         .env("GIT_MERGE_AUTOEDIT", "no")
@@ -787,7 +818,7 @@ fn git_merge_continue(cwd: String) -> Result<GitPushPullResult, String> {
 
 #[tauri::command]
 fn git_pull(cwd: String) -> Result<GitPushPullResult, String> {
-    let output = std::process::Command::new("git")
+    let output = std::process::Command::new(git_binary())
         .args(["pull"])
         .current_dir(&cwd)
         .output()
@@ -812,7 +843,7 @@ fn git_pull(cwd: String) -> Result<GitPushPullResult, String> {
 #[tauri::command]
 fn git_discard(cwd: String, paths: Vec<String>) -> Result<(), String> {
     // Restore tracked files
-    let mut cmd = std::process::Command::new("git");
+    let mut cmd = std::process::Command::new(git_binary());
     cmd.arg("checkout").arg("--").current_dir(&cwd);
     for p in &paths {
         cmd.arg(p);
@@ -829,7 +860,7 @@ fn git_discard(cwd: String, paths: Vec<String>) -> Result<(), String> {
 
 #[tauri::command]
 fn git_show(cwd: String, hash: String) -> Result<Vec<GitDiff>, String> {
-    let output = std::process::Command::new("git")
+    let output = std::process::Command::new(git_binary())
         .args(["show", "-m", "--first-parent", "--format=", &hash])
         .current_dir(&cwd)
         .output()
@@ -969,7 +1000,7 @@ struct GitBranch {
 #[tauri::command]
 fn git_branches(cwd: String) -> Result<Vec<GitBranch>, String> {
     // Use git branch -a --format to get structured output
-    let output = std::process::Command::new("git")
+    let output = std::process::Command::new(git_binary())
         .args([
             "branch", "-a",
             "--format=%(HEAD)%(refname:short)\x1f%(upstream:short)\x1f%(upstream:track,nobracket)\x1f%(objectname:short) %(subject)\x1f%(creatordate:iso)",
@@ -1039,7 +1070,7 @@ fn git_branches(cwd: String) -> Result<Vec<GitBranch>, String> {
 #[tauri::command]
 fn git_create_branch(cwd: String, name: String, checkout: bool) -> Result<(), String> {
     if checkout {
-        let output = std::process::Command::new("git")
+        let output = std::process::Command::new(git_binary())
             .args(["checkout", "-b", &name])
             .current_dir(&cwd)
             .output()
@@ -1049,7 +1080,7 @@ fn git_create_branch(cwd: String, name: String, checkout: bool) -> Result<(), St
             return Err(format!("git checkout -b failed: {}", stderr));
         }
     } else {
-        let output = std::process::Command::new("git")
+        let output = std::process::Command::new(git_binary())
             .args(["branch", &name])
             .current_dir(&cwd)
             .output()
@@ -1064,7 +1095,7 @@ fn git_create_branch(cwd: String, name: String, checkout: bool) -> Result<(), St
 
 #[tauri::command]
 fn git_switch_branch(cwd: String, name: String) -> Result<(), String> {
-    let output = std::process::Command::new("git")
+    let output = std::process::Command::new(git_binary())
         .args(["checkout", &name])
         .current_dir(&cwd)
         .output()
@@ -1079,7 +1110,7 @@ fn git_switch_branch(cwd: String, name: String) -> Result<(), String> {
 #[tauri::command]
 fn git_delete_branch(cwd: String, name: String, force: bool) -> Result<(), String> {
     let flag = if force { "-D" } else { "-d" };
-    let output = std::process::Command::new("git")
+    let output = std::process::Command::new(git_binary())
         .args(["branch", flag, &name])
         .current_dir(&cwd)
         .output()
@@ -1088,6 +1119,53 @@ fn git_delete_branch(cwd: String, name: String, force: bool) -> Result<(), Strin
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!("git branch {} failed: {}", flag, stderr));
     }
+    Ok(())
+}
+
+// ─── Git stash ────────────────────────────────────────────
+
+#[tauri::command]
+fn git_stash(cwd: String) -> Result<(), String> {
+    let output = std::process::Command::new(git_binary())
+        .args(["stash", "--include-untracked"])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("Failed to run git stash: {}", e))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("git stash failed: {}", stderr));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn git_stash_pop(cwd: String) -> Result<(), String> {
+    let output = std::process::Command::new(git_binary())
+        .args(["stash", "pop"])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("Failed to run git stash pop: {}", e))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("git stash pop failed: {}", stderr));
+    }
+    Ok(())
+}
+
+// ─── Open in external editor ──────────────────────────────
+
+#[tauri::command]
+fn open_in_editor(cwd: String, path: String, editor: String) -> Result<(), String> {
+    let editor_cmd = if editor.trim().is_empty() {
+        "code".to_string()
+    } else {
+        editor.trim().to_string()
+    };
+    let full_path = std::path::Path::new(&cwd).join(&path);
+    std::process::Command::new(&editor_cmd)
+        .arg(&full_path)
+        .spawn()
+        .map_err(|e| format!("Failed to open editor '{}': {}", editor_cmd, e))?;
     Ok(())
 }
 
@@ -1124,6 +1202,10 @@ pub fn run() {
             git_create_branch,
             git_switch_branch,
             git_delete_branch,
+            git_stash,
+            git_stash_pop,
+            open_in_editor,
+            set_git_config,
         ])
         .run(tauri::generate_context!())
         .expect("error while running GitWand");

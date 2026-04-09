@@ -803,6 +803,32 @@ const server = createServer(async (req, res) => {
       }
     }
 
+    // POST /api/git-stash  { cwd }
+    if (url.pathname === "/api/git-stash" && req.method === "POST") {
+      const { cwd } = await readBody(req);
+      if (!cwd) return jsonResponse(res, { error: "Missing cwd" }, 400);
+      try {
+        const resolvedCwd = resolve(cwd);
+        execSync("git stash --include-untracked", { cwd: resolvedCwd, encoding: "utf-8", shell: true });
+        return jsonResponse(res, { ok: true });
+      } catch (err) {
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
+
+    // POST /api/git-stash-pop  { cwd }
+    if (url.pathname === "/api/git-stash-pop" && req.method === "POST") {
+      const { cwd } = await readBody(req);
+      if (!cwd) return jsonResponse(res, { error: "Missing cwd" }, 400);
+      try {
+        const resolvedCwd = resolve(cwd);
+        execSync("git stash pop", { cwd: resolvedCwd, encoding: "utf-8", shell: true });
+        return jsonResponse(res, { ok: true });
+      } catch (err) {
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
+
     // ─── Git blame ────────────────────────────────────────
     if (method === "GET" && pathname === "/api/git-blame") {
       const cwd = url.searchParams.get("cwd");

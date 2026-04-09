@@ -797,6 +797,64 @@ export async function gitSwitchBranch(cwd: string, name: string): Promise<void> 
 }
 
 /**
+ * Stash all local changes (staged + unstaged + untracked).
+ */
+export async function gitStash(cwd: string): Promise<void> {
+  if (isTauri()) {
+    await tauriInvoke("git_stash", { cwd });
+    return;
+  }
+  const res = await fetch(`${DEV_SERVER}/api/git-stash`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd }),
+  });
+  if (!res.ok) throw new Error(`Failed to stash: ${res.status}`);
+}
+
+/**
+ * Restore the most recent stash (git stash pop).
+ */
+export async function gitStashPop(cwd: string): Promise<void> {
+  if (isTauri()) {
+    await tauriInvoke("git_stash_pop", { cwd });
+    return;
+  }
+  const res = await fetch(`${DEV_SERVER}/api/git-stash-pop`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd }),
+  });
+  if (!res.ok) throw new Error(`Failed to stash pop: ${res.status}`);
+}
+
+/**
+ * Open a file in the configured external editor.
+ * @param editor - editor binary (e.g. "code", "vim"). Defaults to "code".
+ */
+export async function openInEditor(cwd: string, path: string, editor: string = ""): Promise<void> {
+  if (isTauri()) {
+    await tauriInvoke("open_in_editor", { cwd, path, editor });
+    return;
+  }
+  // In browser dev mode, just log — no meaningful way to open an editor
+  console.info(`[dev] openInEditor: ${cwd}/${path} (editor: ${editor || "code"})`);
+}
+
+/**
+ * Configure the git binary path used by all Rust git commands.
+ * Pass an empty string to reset to the system default ("git").
+ */
+export async function setGitConfig(gitPath: string): Promise<void> {
+  if (isTauri()) {
+    await tauriInvoke("set_git_config", { gitPath });
+    return;
+  }
+  // In browser dev mode, store for potential future use
+  (window as any).__gitwand_git_path = gitPath || "git";
+}
+
+/**
  * Delete a branch.
  */
 export async function gitDeleteBranch(cwd: string, name: string, force: boolean = false): Promise<void> {

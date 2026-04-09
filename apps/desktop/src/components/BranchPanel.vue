@@ -2,7 +2,9 @@
 import { ref, computed } from "vue";
 import type { GitBranch } from "../utils/backend";
 import { useI18n } from "../composables/useI18n";
+import { useSettings } from "../composables/useSettings";
 const { t } = useI18n();
+const { settings } = useSettings();
 
 const props = defineProps<{
   branches: GitBranch[];
@@ -21,14 +23,19 @@ const newBranchName = ref("");
 const showCreate = ref(false);
 const filter = ref("");
 
-const mainNames = ["main", "master"];
+/** Names treated as "main branch" for sorting priority (always first after current). */
+const priorityNames = computed(() => {
+  const configured = settings.value.defaultBranch.trim().toLowerCase();
+  const base = ["main", "master"];
+  return configured && !base.includes(configured) ? [...base, configured] : base;
+});
 
 function branchSort(a: typeof props.branches[0], b: typeof props.branches[0]): number {
   if (a.isCurrent !== b.isCurrent) return a.isCurrent ? -1 : 1;
   const aName = a.name.replace(/^origin\//, "").toLowerCase();
   const bName = b.name.replace(/^origin\//, "").toLowerCase();
-  const aMain = mainNames.includes(aName) ? 0 : 1;
-  const bMain = mainNames.includes(bName) ? 0 : 1;
+  const aMain = priorityNames.value.includes(aName) ? 0 : 1;
+  const bMain = priorityNames.value.includes(bName) ? 0 : 1;
   if (aMain !== bMain) return aMain - bMain;
   if (a.lastCommitDate && b.lastCommitDate) {
     const da = new Date(a.lastCommitDate).getTime();
