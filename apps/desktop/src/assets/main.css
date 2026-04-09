@@ -127,6 +127,27 @@ button:focus-visible {
   outline-offset: 2px;
 }
 
+/* ─── Word-level diff highlighting ────────────────────── */
+.wd-del {
+  background: rgba(239, 68, 68, 0.3);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+.wd-ins {
+  background: rgba(34, 197, 94, 0.3);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+[data-theme="light"] .wd-del {
+  background: rgba(239, 68, 68, 0.2);
+}
+
+[data-theme="light"] .wd-ins {
+  background: rgba(34, 197, 94, 0.2);
+}
+
 /* ─── Highlight.js syntax tokens (dark theme) ────────── */
 .hljs-keyword,
 .hljs-selector-tag,

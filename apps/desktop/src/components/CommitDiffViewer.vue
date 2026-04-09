@@ -4,6 +4,7 @@ import type { GitDiff, GitLogEntry, DiffLine } from "../utils/backend";
 import { useI18n } from "../composables/useI18n";
 import type { DiffMode } from "../utils/diffMode";
 import { detectLanguage, highlightLine } from "../utils/highlight";
+import { wordDiff, segmentsToHtml } from "../utils/wordDiff";
 
 const { t } = useI18n();
 
@@ -18,10 +19,12 @@ const emit = defineEmits<{
   "update:diffMode": [mode: DiffMode];
 }>();
 
-// ─── Side-by-side line pairing ────────────────────────
+// ─── Side-by-side line pairing with word-diff ────────
 interface SbsPair {
   left: DiffLine | null;
   right: DiffLine | null;
+  leftHtml?: string;
+  rightHtml?: string;
 }
 
 /** Highlight a line of content for a given file path */
@@ -50,10 +53,15 @@ function pairLines(lines: DiffLine[]): SbsPair[] {
       }
       const maxLen = Math.max(deletes.length, adds.length);
       for (let j = 0; j < maxLen; j++) {
-        pairs.push({
-          left: j < deletes.length ? deletes[j] : null,
-          right: j < adds.length ? adds[j] : null,
-        });
+        const del = j < deletes.length ? deletes[j] : null;
+        const add = j < adds.length ? adds[j] : null;
+        const pair: SbsPair = { left: del, right: add };
+        if (del && add) {
+          const wd = wordDiff(del.content, add.content);
+          pair.leftHtml = segmentsToHtml(wd.oldSegments);
+          pair.rightHtml = segmentsToHtml(wd.newSegments);
+        }
+        pairs.push(pair);
       }
     }
   }
@@ -418,7 +426,7 @@ function onContentScroll(e: Event) {
                       {{ pair.left?.type === 'delete' ? '-' : pair.left?.type === 'context' ? ' ' : '' }}
                     </td>
                     <td class="cdv-line-content mono cdv-sbs-content" :class="pair.left ? `cdv-sbs--${pair.left.type}` : 'cdv-sbs--empty'">
-                      <span v-html="pair.left ? (hl(pair.left.content, diffs[fileIdx - 1].path) || '\u00a0') : '\u00a0'"></span>
+                      <span v-html="pair.leftHtml ?? (pair.left ? (hl(pair.left.content, diffs[fileIdx - 1].path) || '\u00a0') : '\u00a0')"></span>
                     </td>
                     <td class="cdv-sbs-gutter"></td>
                     <td class="cdv-line-no mono" :class="pair.right ? `cdv-sbs--${pair.right.type}` : 'cdv-sbs--empty'">
@@ -428,7 +436,7 @@ function onContentScroll(e: Event) {
                       {{ pair.right?.type === 'add' ? '+' : pair.right?.type === 'context' ? ' ' : '' }}
                     </td>
                     <td class="cdv-line-content mono cdv-sbs-content" :class="pair.right ? `cdv-sbs--${pair.right.type}` : 'cdv-sbs--empty'">
-                      <span v-html="pair.right ? (hl(pair.right.content, diffs[fileIdx - 1].path) || '\u00a0') : '\u00a0'"></span>
+                      <span v-html="pair.rightHtml ?? (pair.right ? (hl(pair.right.content, diffs[fileIdx - 1].path) || '\u00a0') : '\u00a0')"></span>
                     </td>
                   </tr>
                 </tbody>

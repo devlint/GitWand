@@ -4,6 +4,7 @@ import type { GitDiff, DiffLine } from "../utils/backend";
 import { useI18n } from "../composables/useI18n";
 import type { DiffMode } from "../utils/diffMode";
 import { detectLanguage, highlightLine } from "../utils/highlight";
+import { wordDiff, segmentsToHtml } from "../utils/wordDiff";
 
 const { t } = useI18n();
 
@@ -51,6 +52,10 @@ function hl(content: string): string {
 interface SbsPair {
   left: DiffLine | null;
   right: DiffLine | null;
+  /** Word-diff HTML for the left (old) side, if available */
+  leftHtml?: string;
+  /** Word-diff HTML for the right (new) side, if available */
+  rightHtml?: string;
 }
 
 function pairLines(lines: DiffLine[]): SbsPair[] {
@@ -73,21 +78,67 @@ function pairLines(lines: DiffLine[]): SbsPair[] {
       }
       const maxLen = Math.max(deletes.length, adds.length);
       for (let j = 0; j < maxLen; j++) {
-        pairs.push({
-          left: j < deletes.length ? deletes[j] : null,
-          right: j < adds.length ? adds[j] : null,
-        });
+        const del = j < deletes.length ? deletes[j] : null;
+        const add = j < adds.length ? adds[j] : null;
+        const pair: SbsPair = { left: del, right: add };
+        // Compute word-level diff when both sides exist
+        if (del && add) {
+          const wd = wordDiff(del.content, add.content);
+          pair.leftHtml = segmentsToHtml(wd.oldSegments);
+          pair.rightHtml = segmentsToHtml(wd.newSegments);
+        }
+        pairs.push(pair);
       }
     }
   }
   return pairs;
 }
 
-/** Precomputed paired lines for each hunk (only used in side-by-side mode) */
+/** Precomputed paired lines for each hunk (SBS and inline word-diff) */
 const pairedHunks = computed(() => {
-  if (!props.diff || props.diffMode !== "side-by-side") return [];
+  if (!props.diff) return [];
   return props.diff.hunks.map((hunk) => pairLines(hunk.lines));
 });
+
+/**
+ * For inline mode: build a map from DiffLine index to word-diff HTML.
+ * We detect consecutive delete+add runs and pair them for word-diff.
+ */
+const inlineWordDiff = computed(() => {
+  if (!props.diff) return new Map<string, string>();
+  const map = new Map<string, string>();
+
+  for (let hIdx = 0; hIdx < props.diff.hunks.length; hIdx++) {
+    const lines = props.diff.hunks[hIdx].lines;
+    let i = 0;
+    while (i < lines.length) {
+      if (lines[i].type !== "delete") { i++; continue; }
+      // Collect consecutive delete+add run
+      const delStart = i;
+      while (i < lines.length && lines[i].type === "delete") i++;
+      const addStart = i;
+      while (i < lines.length && lines[i].type === "add") i++;
+      const delCount = addStart - delStart;
+      const addCount = i - addStart;
+      // Pair up for word-diff
+      const pairCount = Math.min(delCount, addCount);
+      for (let j = 0; j < pairCount; j++) {
+        const del = lines[delStart + j];
+        const add = lines[addStart + j];
+        const wd = wordDiff(del.content, add.content);
+        map.set(`${hIdx}:${delStart + j}`, segmentsToHtml(wd.oldSegments));
+        map.set(`${hIdx}:${addStart + j}`, segmentsToHtml(wd.newSegments));
+      }
+    }
+  }
+  return map;
+});
+
+/** Get word-diff HTML for a line in inline mode, falling back to syntax highlight */
+function hlWord(hunkIdx: number, lineIdx: number, content: string): string {
+  const key = `${hunkIdx}:${lineIdx}`;
+  return inlineWordDiff.value.get(key) ?? hl(content);
+}
 
 // ─── Hunk navigation ────────────────────────────────────
 const contentEl = ref<HTMLElement | null>(null);
@@ -113,9 +164,13 @@ function nextHunk() { goToHunk(currentHunkIdx.value + 1); }
 // ─── Collapse unchanged: split long context runs ────────
 const CONTEXT_VISIBLE = 3; // lines to show before/after changes
 
+interface IndexedLine {
+  line: DiffLine;
+  origIdx: number; // original index within the hunk's lines array
+}
 interface CollapsedSection {
   type: "lines";
-  lines: DiffLine[];
+  lines: IndexedLine[];
 }
 interface CollapsedPlaceholder {
   type: "collapsed";
@@ -138,10 +193,15 @@ function toggleSection(hunkIdx: number, sectionIdx: number) {
   expandedSections.value = s;
 }
 
+/** Wrap lines with their original index */
+function indexed(lines: DiffLine[], startIdx: number): IndexedLine[] {
+  return lines.map((line, i) => ({ line, origIdx: startIdx + i }));
+}
+
 /** Split a hunk's lines into sections, collapsing long context runs */
 function collapseHunk(hunkIdx: number, lines: DiffLine[]): HunkSection[] {
   if (lines.length <= CONTEXT_VISIBLE * 2 + 2) {
-    return [{ type: "lines", lines }];
+    return [{ type: "lines", lines: indexed(lines, 0) }];
   }
 
   const sections: HunkSection[] = [];
@@ -156,33 +216,32 @@ function collapseHunk(hunkIdx: number, lines: DiffLine[]): HunkSection[] {
       const runLen = i - runStart;
 
       if (runLen > CONTEXT_VISIBLE * 2 + 1) {
-        // Show first N context, collapse middle, show last N context
-        const headEnd = runStart === 0 ? CONTEXT_VISIBLE : CONTEXT_VISIBLE;
+        const headEnd = CONTEXT_VISIBLE;
         const tailStart = CONTEXT_VISIBLE;
 
-        sections.push({ type: "lines", lines: lines.slice(runStart, runStart + headEnd) });
+        sections.push({ type: "lines", lines: indexed(lines.slice(runStart, runStart + headEnd), runStart) });
         sectionIdx++;
 
         const collapsedCount = runLen - headEnd - tailStart;
         const key = sectionKey(hunkIdx, sectionIdx);
         if (expandedSections.value.has(key)) {
-          sections.push({ type: "lines", lines: lines.slice(runStart + headEnd, i - tailStart) });
+          sections.push({ type: "lines", lines: indexed(lines.slice(runStart + headEnd, i - tailStart), runStart + headEnd) });
         } else {
           sections.push({ type: "collapsed", count: collapsedCount, hunkIdx, sectionIdx });
         }
         sectionIdx++;
 
-        sections.push({ type: "lines", lines: lines.slice(i - tailStart, i) });
+        sections.push({ type: "lines", lines: indexed(lines.slice(i - tailStart, i), i - tailStart) });
         sectionIdx++;
       } else {
-        sections.push({ type: "lines", lines: lines.slice(runStart, i) });
+        sections.push({ type: "lines", lines: indexed(lines.slice(runStart, i), runStart) });
         sectionIdx++;
       }
     } else {
       // Non-context: collect until next context
       let runStart = i;
       while (i < lines.length && lines[i].type !== "context") i++;
-      sections.push({ type: "lines", lines: lines.slice(runStart, i) });
+      sections.push({ type: "lines", lines: indexed(lines.slice(runStart, i), runStart) });
       sectionIdx++;
     }
   }
@@ -274,18 +333,18 @@ function collapseHunk(hunkIdx: number, lines: DiffLine[]): HunkSection[] {
           <table v-else class="diff-table">
             <tbody>
               <tr
-                v-for="(line, lineIdx) in section.lines"
+                v-for="(il, lineIdx) in section.lines"
                 :key="lineIdx"
                 class="diff-line"
-                :class="`diff-line--${line.type}`"
+                :class="`diff-line--${il.line.type}`"
               >
-                <td class="line-no mono">{{ line.oldLineNo ?? '' }}</td>
-                <td class="line-no mono">{{ line.newLineNo ?? '' }}</td>
+                <td class="line-no mono">{{ il.line.oldLineNo ?? '' }}</td>
+                <td class="line-no mono">{{ il.line.newLineNo ?? '' }}</td>
                 <td class="line-marker mono">
-                  {{ line.type === 'add' ? '+' : line.type === 'delete' ? '-' : ' ' }}
+                  {{ il.line.type === 'add' ? '+' : il.line.type === 'delete' ? '-' : ' ' }}
                 </td>
                 <td class="line-content mono">
-                  <span v-html="hl(line.content) || '\u00a0'"></span>
+                  <span v-html="hlWord(hunkIdx, il.origIdx, il.line.content) || '\u00a0'"></span>
                 </td>
               </tr>
             </tbody>
@@ -320,7 +379,7 @@ function collapseHunk(hunkIdx: number, lines: DiffLine[]): HunkSection[] {
                 {{ pair.left?.type === 'delete' ? '-' : pair.left?.type === 'context' ? ' ' : '' }}
               </td>
               <td class="line-content mono sbs-content" :class="pair.left ? `sbs-cell--${pair.left.type}` : 'sbs-cell--empty'">
-                <span v-html="pair.left ? (hl(pair.left.content) || '\u00a0') : '\u00a0'"></span>
+                <span v-html="pair.leftHtml ?? (pair.left ? (hl(pair.left.content) || '\u00a0') : '\u00a0')"></span>
               </td>
               <!-- Separator -->
               <td class="sbs-gutter"></td>
@@ -332,7 +391,7 @@ function collapseHunk(hunkIdx: number, lines: DiffLine[]): HunkSection[] {
                 {{ pair.right?.type === 'add' ? '+' : pair.right?.type === 'context' ? ' ' : '' }}
               </td>
               <td class="line-content mono sbs-content" :class="pair.right ? `sbs-cell--${pair.right.type}` : 'sbs-cell--empty'">
-                <span v-html="pair.right ? (hl(pair.right.content) || '\u00a0') : '\u00a0'"></span>
+                <span v-html="pair.rightHtml ?? (pair.right ? (hl(pair.right.content) || '\u00a0') : '\u00a0')"></span>
               </td>
             </tr>
           </tbody>
