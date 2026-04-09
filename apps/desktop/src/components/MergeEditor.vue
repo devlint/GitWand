@@ -4,8 +4,10 @@ import type { ConflictFile } from "../composables/useGitWand";
 import type { ConflictHunk } from "@gitwand/core";
 import { highlightConflict } from "../utils/diffHighlight";
 import { useI18n } from "../composables/useI18n";
+import { useAIProvider, type ConflictContext } from "../composables/useAIProvider";
 
 const { t } = useI18n();
+const { isAvailable: aiAvailable, isLoading: aiLoading, lastError: aiError, suggest: aiSuggest } = useAIProvider();
 
 const props = defineProps<{
   file: ConflictFile;
@@ -45,6 +47,42 @@ function validateEditing(hunkIndex: number) {
   emit("resolveHunkCustom", props.file.path, hunkIndex, editContent.value);
   editingHunkIndex.value = null;
   editContent.value = "";
+}
+
+// ─── AI Suggestion ─────────────────────────────────────
+const aiSuggestionHunkIndex = ref<number | null>(null);
+const aiSuggestionContent = ref<string | null>(null);
+const aiSuggestionExplanation = ref<string | null>(null);
+
+async function requestAISuggestion(hunkIndex: number, hunk: ConflictHunk) {
+  aiSuggestionHunkIndex.value = hunkIndex;
+  aiSuggestionContent.value = null;
+  aiSuggestionExplanation.value = null;
+
+  const ctx: ConflictContext = {
+    filePath: props.file.path,
+    base: hunk.baseLines?.join("\n") ?? "",
+    ours: hunk.oursLines.join("\n"),
+    theirs: hunk.theirsLines.join("\n"),
+  };
+
+  try {
+    const suggestion = await aiSuggest(ctx);
+    aiSuggestionContent.value = suggestion.resolvedContent;
+    aiSuggestionExplanation.value = suggestion.explanation;
+    // Pre-fill the edit area so user can review and tweak
+    editContent.value = suggestion.resolvedContent;
+    editingHunkIndex.value = hunkIndex;
+  } catch {
+    // Error is already in aiError ref
+    aiSuggestionHunkIndex.value = null;
+  }
+}
+
+function dismissAISuggestion() {
+  aiSuggestionHunkIndex.value = null;
+  aiSuggestionContent.value = null;
+  aiSuggestionExplanation.value = null;
 }
 
 /** Parse file content into displayable segments (code + conflict hunks). */
@@ -226,16 +264,45 @@ function highlightedHtml(hunkIndex: number, panel: "ours" | "base" | "theirs"): 
                 href="#"
                 @click.prevent="startEditing(seg.hunkIndex!, hunkForSegment(seg)!)"
               >{{ t('merge.customEdit') }}</a>
+              <template v-if="aiAvailable">
+                <span class="inline-sep">|</span>
+                <a
+                  class="inline-action inline-action--ai"
+                  :class="{ 'inline-action--loading': aiLoading && aiSuggestionHunkIndex === seg.hunkIndex }"
+                  href="#"
+                  @click.prevent="requestAISuggestion(seg.hunkIndex!, hunkForSegment(seg)!)"
+                >
+                  <svg class="ai-icon" width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                    <path d="M8 1v2m0 10v2M1 8h2m10 0h2m-2.05-4.95-1.41 1.41m-7.08 7.08-1.41 1.41m0-9.9 1.41 1.41m7.08 7.08 1.41 1.41"/>
+                    <circle cx="8" cy="8" r="3"/>
+                  </svg>
+                  {{ aiLoading && aiSuggestionHunkIndex === seg.hunkIndex ? 'IA...' : 'IA' }}
+                </a>
+              </template>
               <span
                 v-if="recommendation(hunkForSegment(seg)!) !== null"
                 class="inline-badge inline-badge--recommended"
               >{{ t('merge.recommended') }}</span>
             </div>
 
+            <!-- ── AI error banner ──────────────────────── -->
+            <div v-if="aiError && aiSuggestionHunkIndex === seg.hunkIndex" class="ai-error-banner">
+              <span>IA : {{ aiError }}</span>
+              <a href="#" @click.prevent="dismissAISuggestion" class="ai-error-close">OK</a>
+            </div>
+
+            <!-- ── AI explanation banner ──────────────────── -->
+            <div v-if="aiSuggestionExplanation && editingHunkIndex === seg.hunkIndex && aiSuggestionHunkIndex === seg.hunkIndex" class="ai-explanation-banner">
+              <svg class="ai-explanation-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
+                <path d="M8 1v2m0 10v2M1 8h2m10 0h2"/><circle cx="8" cy="8" r="4"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/>
+              </svg>
+              <span>{{ aiSuggestionExplanation }}</span>
+            </div>
+
             <!-- ── Inline Edit Mode ─────────────────────── -->
             <div v-if="editingHunkIndex === seg.hunkIndex" class="hunk-edit">
               <div class="edit-header">
-                <span class="edit-label">{{ t('merge.customEdit') }}</span>
+                <span class="edit-label">{{ aiSuggestionHunkIndex === seg.hunkIndex ? 'Suggestion IA — vérifiez et ajustez' : t('merge.customEdit') }}</span>
                 <div class="edit-actions-inline">
                   <a
                     class="inline-action inline-action--validate"
@@ -452,6 +519,38 @@ function highlightedHtml(hunkIndex: number, panel: "ours" | "base" | "theirs"): 
   font-weight: 600;
 }
 
+/* ─── AI action ──────────────────────────────────────── */
+
+.inline-action--ai {
+  color: #a78bfa;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-weight: 600;
+}
+
+.inline-action--ai:hover {
+  color: #c4b5fd;
+}
+
+.inline-action--loading {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.ai-icon {
+  flex-shrink: 0;
+}
+
+@keyframes aiPulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
+.inline-action--loading .ai-icon {
+  animation: aiPulse 1s ease-in-out infinite;
+}
+
 /* ─── Recommended action ──────────────────────────────── */
 
 .inline-action--recommended {
@@ -625,5 +724,46 @@ function highlightedHtml(hunkIndex: number, panel: "ours" | "base" | "theirs"): 
   font-size: 12px;
   font-style: italic;
   border-top: 1px solid var(--color-border);
+}
+
+/* ─── AI banners ─────────────────────────────────────── */
+
+.ai-error-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 14px;
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+  font-size: 12px;
+  border-radius: 4px;
+  margin: 4px 12px;
+}
+
+.ai-error-close {
+  color: var(--color-danger);
+  font-weight: 600;
+  font-size: 11px;
+  text-decoration: none;
+}
+
+.ai-explanation-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 14px;
+  margin: 4px 12px;
+  background: rgba(167, 139, 250, 0.08);
+  border: 1px solid rgba(167, 139, 250, 0.2);
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #c4b5fd;
+}
+
+.ai-explanation-icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: #a78bfa;
 }
 </style>

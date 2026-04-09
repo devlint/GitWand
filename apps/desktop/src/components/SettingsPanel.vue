@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from "vue";
+import { ref, computed, onMounted } from "vue";
 import { useI18n } from "../composables/useI18n";
 import { useTheme } from "../composables/useTheme";
 import {
@@ -13,6 +13,7 @@ const { theme, setTheme } = useTheme();
 
 export type PullMode = "merge" | "rebase";
 export type SwitchBehavior = "stash" | "ask" | "refuse";
+export type AIProvider = "none" | "claude" | "openai-compat" | "ollama";
 
 const emit = defineEmits<{
   close: [];
@@ -39,16 +40,14 @@ interface Settings {
   fontSize: number;
   tabSize: number;
   notifications: boolean;
-}
-
-function loadSettings(): Settings {
-  try {
-    const raw = localStorage.getItem(SETTINGS_KEY);
-    if (raw) return { ...defaultSettings, ...JSON.parse(raw) };
-  } catch {
-    // ignore
-  }
-  return { ...defaultSettings };
+  // AI settings
+  aiEnabled: boolean;
+  aiProvider: AIProvider;
+  aiApiKey: string;
+  aiApiEndpoint: string;
+  aiModel: string;
+  aiOllamaUrl: string;
+  aiOllamaModel: string;
 }
 
 const defaultSettings: Settings = {
@@ -62,14 +61,28 @@ const defaultSettings: Settings = {
   fontSize: 12,
   tabSize: 4,
   notifications: true,
+  // AI defaults
+  aiEnabled: false,
+  aiProvider: "none",
+  aiApiKey: "",
+  aiApiEndpoint: "https://api.anthropic.com",
+  aiModel: "claude-sonnet-4-20250514",
+  aiOllamaUrl: "http://localhost:11434",
+  aiOllamaModel: "codellama",
 };
+
+function loadSettings(): Settings {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (raw) return { ...defaultSettings, ...JSON.parse(raw) };
+  } catch { /* ignore */ }
+  return { ...defaultSettings };
+}
 
 function saveSettings(s: Settings) {
   try {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
-  } catch {
-    // ignore
-  }
+  } catch { /* ignore */ }
 }
 
 const settings = ref<Settings>(loadSettings());
@@ -78,6 +91,17 @@ function updateSetting<K extends keyof Settings>(key: K, value: Settings[K]) {
   settings.value[key] = value;
   saveSettings(settings.value);
 }
+
+// ─── Tab navigation ──────────────────────────────────────
+type SettingsTab = "general" | "git" | "editor" | "ai";
+const activeSettingsTab = ref<SettingsTab>("general");
+
+const settingsTabs: { id: SettingsTab; icon: string }[] = [
+  { id: "general", icon: "general" },
+  { id: "git", icon: "git" },
+  { id: "editor", icon: "editor" },
+  { id: "ai", icon: "ai" },
+];
 
 // ─── Language ──────────────────────────────────────────
 const selectedLocale = computed({
@@ -108,9 +132,7 @@ function onThemeChange(val: ThemeSetting) {
   themeSetting.value = val;
   try {
     localStorage.setItem("gitwand-theme-setting", val);
-  } catch {
-    // ignore
-  }
+  } catch { /* ignore */ }
   if (val === "system") {
     const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
     setTheme(prefersDark ? "dark" : "light");
@@ -155,6 +177,70 @@ function onNotificationsChange(e: Event) {
   updateSetting("notifications", checked);
 }
 
+// ─── AI Provider ──────────────────────────────────────
+function onAIEnabledChange(e: Event) {
+  const checked = (e.target as HTMLInputElement).checked;
+  updateSetting("aiEnabled", checked);
+  if (checked && settings.value.aiProvider === "none") {
+    updateSetting("aiProvider", "claude");
+  }
+}
+
+function onAIProviderChange(val: AIProvider) {
+  updateSetting("aiProvider", val);
+  // Set sensible defaults per provider
+  if (val === "claude") {
+    if (!settings.value.aiApiEndpoint || settings.value.aiApiEndpoint === "https://api.openai.com/v1") {
+      updateSetting("aiApiEndpoint", "https://api.anthropic.com");
+    }
+    if (!settings.value.aiModel || settings.value.aiModel.startsWith("gpt-")) {
+      updateSetting("aiModel", "claude-sonnet-4-20250514");
+    }
+  } else if (val === "openai-compat") {
+    if (!settings.value.aiApiEndpoint || settings.value.aiApiEndpoint === "https://api.anthropic.com") {
+      updateSetting("aiApiEndpoint", "https://api.openai.com/v1");
+    }
+    if (!settings.value.aiModel || settings.value.aiModel.startsWith("claude-")) {
+      updateSetting("aiModel", "gpt-4o");
+    }
+  }
+}
+
+// Ollama detection
+const ollamaAvailable = ref(false);
+const ollamaModels = ref<string[]>([]);
+
+async function detectOllama() {
+  try {
+    const url = settings.value.aiOllamaUrl || "http://localhost:11434";
+    const res = await fetch(`${url}/api/tags`, { signal: AbortSignal.timeout(2000) });
+    if (res.ok) {
+      const data = await res.json();
+      ollamaAvailable.value = true;
+      if (data.models && Array.isArray(data.models)) {
+        ollamaModels.value = data.models.map((m: any) => m.name || m.model).filter(Boolean);
+      }
+    }
+  } catch {
+    ollamaAvailable.value = false;
+    ollamaModels.value = [];
+  }
+}
+
+// API key visibility toggle
+const showApiKey = ref(false);
+
+const maskedApiKey = computed(() => {
+  const key = settings.value.aiApiKey;
+  if (!key) return "";
+  if (key.length <= 8) return "••••••••";
+  return key.slice(0, 4) + "••••" + key.slice(-4);
+});
+
+onMounted(() => {
+  detectOllama();
+});
+
 function onKeyDown(e: KeyboardEvent) {
   if (e.key === "Escape") emit("close");
 }
@@ -173,186 +259,355 @@ function onKeyDown(e: KeyboardEvent) {
         </button>
       </div>
 
-      <!-- Settings form -->
+      <!-- Tab navigation -->
+      <div class="sp-tabs">
+        <button
+          v-for="tab in settingsTabs"
+          :key="tab.id"
+          class="sp-tab"
+          :class="{ 'sp-tab--active': activeSettingsTab === tab.id }"
+          @click="activeSettingsTab = tab.id"
+        >
+          <!-- General icon -->
+          <svg v-if="tab.icon === 'general'" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
+            <circle cx="8" cy="8" r="3" /><path d="M8 1v2m0 10v2m-7-7h2m10 0h2m-2.05-4.95-1.41 1.41m-7.08 7.08-1.41 1.41m0-9.9 1.41 1.41m7.08 7.08 1.41 1.41"/>
+          </svg>
+          <!-- Git icon -->
+          <svg v-else-if="tab.icon === 'git'" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
+            <circle cx="8" cy="3" r="2"/><circle cx="8" cy="13" r="2"/><path d="M8 5v6"/><circle cx="13" cy="8" r="2"/><path d="M11 8H9.5c-.83 0-1.5-.67-1.5-1.5V5"/>
+          </svg>
+          <!-- Editor icon -->
+          <svg v-else-if="tab.icon === 'editor'" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
+            <rect x="2" y="2" width="12" height="12" rx="2"/><path d="M5 6h6M5 8.5h4M5 11h5"/>
+          </svg>
+          <!-- AI icon -->
+          <svg v-else-if="tab.icon === 'ai'" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
+            <path d="M8 1v2m0 10v2M1 8h2m10 0h2"/><circle cx="8" cy="8" r="4"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/>
+          </svg>
+          <span>{{ tab.id === 'general' ? 'Général' : tab.id === 'git' ? 'Git' : tab.id === 'editor' ? 'Éditeur' : 'IA' }}</span>
+        </button>
+      </div>
+
+      <!-- Tab content -->
       <div class="sp-body">
-        <!-- Language -->
-        <div class="sp-row">
-          <label class="sp-label" for="setting-lang">{{ t('settings.language') }}</label>
-          <select
-            id="setting-lang"
-            class="sp-select"
-            v-model="selectedLocale"
-          >
-            <option value="auto">{{ t('settings.languageAuto') }}</option>
-            <option
-              v-for="loc in supportedLocales"
-              :key="loc"
-              :value="loc"
-            >
-              {{ localeLabels[loc] }}
-            </option>
-          </select>
-        </div>
 
-        <!-- Theme -->
-        <div class="sp-row">
-          <label class="sp-label" for="setting-theme">{{ t('settings.theme') }}</label>
-          <select
-            id="setting-theme"
-            class="sp-select"
-            :value="themeSetting"
-            @change="onThemeChange(($event.target as HTMLSelectElement).value as ThemeSetting)"
-          >
-            <option value="system">{{ t('settings.themeSystem') }}</option>
-            <option value="dark">{{ t('settings.themeDark') }}</option>
-            <option value="light">{{ t('settings.themeLight') }}</option>
-          </select>
-        </div>
-
-        <!-- External editor -->
-        <div class="sp-row">
-          <label class="sp-label" for="setting-editor">{{ t('settings.editor') }}</label>
-          <input
-            id="setting-editor"
-            class="sp-input mono"
-            type="text"
-            :value="settings.editor"
-            @input="updateSetting('editor', ($event.target as HTMLInputElement).value)"
-            :placeholder="t('settings.editorPlaceholder')"
-          />
-        </div>
-
-        <!-- Git path -->
-        <div class="sp-row">
-          <label class="sp-label" for="setting-git">{{ t('settings.gitPath') }}</label>
-          <input
-            id="setting-git"
-            class="sp-input mono"
-            type="text"
-            :value="settings.gitPath"
-            @input="updateSetting('gitPath', ($event.target as HTMLInputElement).value)"
-            :placeholder="t('settings.gitPathAuto')"
-          />
-        </div>
-
-        <!-- Default branch -->
-        <div class="sp-row">
-          <label class="sp-label" for="setting-branch">{{ t('settings.defaultBranch') }}</label>
-          <input
-            id="setting-branch"
-            class="sp-input mono"
-            type="text"
-            :value="settings.defaultBranch"
-            @input="updateSetting('defaultBranch', ($event.target as HTMLInputElement).value)"
-            placeholder="main"
-          />
-        </div>
-
-        <!-- Diff display -->
-        <div class="sp-row">
-          <label class="sp-label" for="setting-diff-mode">{{ t('settings.diffDisplay') }}</label>
-          <select
-            id="setting-diff-mode"
-            class="sp-select"
-            :value="settings.diffMode"
-            @change="onDiffModeChange(($event.target as HTMLSelectElement).value as DiffMode)"
-          >
-            <option value="inline">{{ t('settings.diffInline') }}</option>
-            <option value="side-by-side">{{ t('settings.diffSideBySide') }}</option>
-          </select>
-        </div>
-
-        <!-- Pull mode -->
-        <div class="sp-row">
-          <label class="sp-label" for="setting-pull-mode">{{ t('settings.pullMode') }}</label>
-          <select
-            id="setting-pull-mode"
-            class="sp-select"
-            :value="settings.pullMode"
-            @change="onPullModeChange(($event.target as HTMLSelectElement).value as PullMode)"
-          >
-            <option value="merge">{{ t('settings.pullMerge') }}</option>
-            <option value="rebase">{{ t('settings.pullRebase') }}</option>
-          </select>
-        </div>
-
-        <!-- Switch behavior -->
-        <div class="sp-row">
-          <label class="sp-label" for="setting-switch-behavior">{{ t('settings.switchBehavior') }}</label>
-          <select
-            id="setting-switch-behavior"
-            class="sp-select"
-            :value="settings.switchBehavior"
-            @change="onSwitchBehaviorChange(($event.target as HTMLSelectElement).value as SwitchBehavior)"
-          >
-            <option value="stash">{{ t('settings.switchStash') }}</option>
-            <option value="ask">{{ t('settings.switchAsk') }}</option>
-            <option value="refuse">{{ t('settings.switchRefuse') }}</option>
-          </select>
-        </div>
-
-        <!-- Font size -->
-        <div class="sp-row">
-          <label class="sp-label" for="setting-font-size">{{ t('settings.fontSize') }}</label>
-          <div class="sp-range-row">
-            <input
-              id="setting-font-size"
-              class="sp-range"
-              type="range"
-              min="10"
-              max="18"
-              step="1"
-              :value="settings.fontSize"
-              @input="onFontSizeChange(Number(($event.target as HTMLInputElement).value))"
-            />
-            <span class="sp-range-value mono">{{ settings.fontSize }}px</span>
+        <!-- ═══ GÉNÉRAL ═══ -->
+        <template v-if="activeSettingsTab === 'general'">
+          <!-- Language -->
+          <div class="sp-row">
+            <label class="sp-label" for="setting-lang">{{ t('settings.language') }}</label>
+            <select id="setting-lang" class="sp-select" v-model="selectedLocale">
+              <option value="auto">{{ t('settings.languageAuto') }}</option>
+              <option v-for="loc in supportedLocales" :key="loc" :value="loc">{{ localeLabels[loc] }}</option>
+            </select>
           </div>
-        </div>
 
-        <!-- Tab size -->
-        <div class="sp-row">
-          <label class="sp-label" for="setting-tab-size">{{ t('settings.tabSize') }}</label>
-          <select
-            id="setting-tab-size"
-            class="sp-select"
-            :value="settings.tabSize"
-            @change="onTabSizeChange(Number(($event.target as HTMLSelectElement).value))"
-          >
-            <option :value="2">2 {{ t('settings.spaces') }}</option>
-            <option :value="4">4 {{ t('settings.spaces') }}</option>
-            <option :value="8">8 {{ t('settings.spaces') }}</option>
-          </select>
-        </div>
+          <!-- Theme -->
+          <div class="sp-row">
+            <label class="sp-label" for="setting-theme">{{ t('settings.theme') }}</label>
+            <select
+              id="setting-theme"
+              class="sp-select"
+              :value="themeSetting"
+              @change="onThemeChange(($event.target as HTMLSelectElement).value as ThemeSetting)"
+            >
+              <option value="system">{{ t('settings.themeSystem') }}</option>
+              <option value="dark">{{ t('settings.themeDark') }}</option>
+              <option value="light">{{ t('settings.themeLight') }}</option>
+            </select>
+          </div>
 
-        <!-- Commit signature -->
-        <div class="sp-row sp-row--checkbox">
-          <label class="sp-checkbox-label" for="setting-signature">
+          <!-- Notifications -->
+          <div class="sp-row sp-row--checkbox">
+            <label class="sp-checkbox-label" for="setting-notifications">
+              <input id="setting-notifications" type="checkbox" class="sp-checkbox" :checked="settings.notifications" @change="onNotificationsChange" />
+              <span>{{ t('settings.notifications') }}</span>
+            </label>
+            <span class="sp-hint">{{ t('settings.notificationsHint') }}</span>
+          </div>
+        </template>
+
+        <!-- ═══ GIT ═══ -->
+        <template v-if="activeSettingsTab === 'git'">
+          <!-- Git path -->
+          <div class="sp-row">
+            <label class="sp-label" for="setting-git">{{ t('settings.gitPath') }}</label>
             <input
-              id="setting-signature"
-              type="checkbox"
-              class="sp-checkbox"
-              :checked="settings.commitSignature"
-              @change="onSignatureChange"
+              id="setting-git" class="sp-input mono" type="text"
+              :value="settings.gitPath"
+              @input="updateSetting('gitPath', ($event.target as HTMLInputElement).value)"
+              :placeholder="t('settings.gitPathAuto')"
             />
-            <span>{{ t('settings.commitSignature') }}</span>
-          </label>
-          <span class="sp-hint">{{ t('settings.commitSignatureHint') }}</span>
-        </div>
+          </div>
 
-        <!-- Notifications -->
-        <div class="sp-row sp-row--checkbox">
-          <label class="sp-checkbox-label" for="setting-notifications">
+          <!-- Default branch -->
+          <div class="sp-row">
+            <label class="sp-label" for="setting-branch">{{ t('settings.defaultBranch') }}</label>
             <input
-              id="setting-notifications"
-              type="checkbox"
-              class="sp-checkbox"
-              :checked="settings.notifications"
-              @change="onNotificationsChange"
+              id="setting-branch" class="sp-input mono" type="text"
+              :value="settings.defaultBranch"
+              @input="updateSetting('defaultBranch', ($event.target as HTMLInputElement).value)"
+              placeholder="main"
             />
-            <span>{{ t('settings.notifications') }}</span>
-          </label>
-          <span class="sp-hint">{{ t('settings.notificationsHint') }}</span>
-        </div>
+          </div>
+
+          <!-- Pull mode -->
+          <div class="sp-row">
+            <label class="sp-label" for="setting-pull-mode">{{ t('settings.pullMode') }}</label>
+            <select
+              id="setting-pull-mode" class="sp-select"
+              :value="settings.pullMode"
+              @change="onPullModeChange(($event.target as HTMLSelectElement).value as PullMode)"
+            >
+              <option value="merge">{{ t('settings.pullMerge') }}</option>
+              <option value="rebase">{{ t('settings.pullRebase') }}</option>
+            </select>
+          </div>
+
+          <!-- Switch behavior -->
+          <div class="sp-row">
+            <label class="sp-label" for="setting-switch-behavior">{{ t('settings.switchBehavior') }}</label>
+            <select
+              id="setting-switch-behavior" class="sp-select"
+              :value="settings.switchBehavior"
+              @change="onSwitchBehaviorChange(($event.target as HTMLSelectElement).value as SwitchBehavior)"
+            >
+              <option value="stash">{{ t('settings.switchStash') }}</option>
+              <option value="ask">{{ t('settings.switchAsk') }}</option>
+              <option value="refuse">{{ t('settings.switchRefuse') }}</option>
+            </select>
+          </div>
+
+          <!-- Commit signature -->
+          <div class="sp-row sp-row--checkbox">
+            <label class="sp-checkbox-label" for="setting-signature">
+              <input id="setting-signature" type="checkbox" class="sp-checkbox" :checked="settings.commitSignature" @change="onSignatureChange" />
+              <span>{{ t('settings.commitSignature') }}</span>
+            </label>
+            <span class="sp-hint">{{ t('settings.commitSignatureHint') }}</span>
+          </div>
+        </template>
+
+        <!-- ═══ ÉDITEUR ═══ -->
+        <template v-if="activeSettingsTab === 'editor'">
+          <!-- External editor -->
+          <div class="sp-row">
+            <label class="sp-label" for="setting-editor">{{ t('settings.editor') }}</label>
+            <input
+              id="setting-editor" class="sp-input mono" type="text"
+              :value="settings.editor"
+              @input="updateSetting('editor', ($event.target as HTMLInputElement).value)"
+              :placeholder="t('settings.editorPlaceholder')"
+            />
+          </div>
+
+          <!-- Diff display -->
+          <div class="sp-row">
+            <label class="sp-label" for="setting-diff-mode">{{ t('settings.diffDisplay') }}</label>
+            <select
+              id="setting-diff-mode" class="sp-select"
+              :value="settings.diffMode"
+              @change="onDiffModeChange(($event.target as HTMLSelectElement).value as DiffMode)"
+            >
+              <option value="inline">{{ t('settings.diffInline') }}</option>
+              <option value="side-by-side">{{ t('settings.diffSideBySide') }}</option>
+            </select>
+          </div>
+
+          <!-- Font size -->
+          <div class="sp-row">
+            <label class="sp-label" for="setting-font-size">{{ t('settings.fontSize') }}</label>
+            <div class="sp-range-row">
+              <input
+                id="setting-font-size" class="sp-range" type="range"
+                min="10" max="18" step="1"
+                :value="settings.fontSize"
+                @input="onFontSizeChange(Number(($event.target as HTMLInputElement).value))"
+              />
+              <span class="sp-range-value mono">{{ settings.fontSize }}px</span>
+            </div>
+          </div>
+
+          <!-- Tab size -->
+          <div class="sp-row">
+            <label class="sp-label" for="setting-tab-size">{{ t('settings.tabSize') }}</label>
+            <select
+              id="setting-tab-size" class="sp-select"
+              :value="settings.tabSize"
+              @change="onTabSizeChange(Number(($event.target as HTMLSelectElement).value))"
+            >
+              <option :value="2">2 {{ t('settings.spaces') }}</option>
+              <option :value="4">4 {{ t('settings.spaces') }}</option>
+              <option :value="8">8 {{ t('settings.spaces') }}</option>
+            </select>
+          </div>
+        </template>
+
+        <!-- ═══ INTELLIGENCE ARTIFICIELLE ═══ -->
+        <template v-if="activeSettingsTab === 'ai'">
+          <!-- Enable AI -->
+          <div class="sp-row sp-row--checkbox">
+            <label class="sp-checkbox-label" for="setting-ai-enabled">
+              <input id="setting-ai-enabled" type="checkbox" class="sp-checkbox" :checked="settings.aiEnabled" @change="onAIEnabledChange" />
+              <span>Activer les suggestions IA</span>
+            </label>
+            <span class="sp-hint">Propose des résolutions intelligentes pour les conflits complexes (confiance &lt; 60%)</span>
+          </div>
+
+          <template v-if="settings.aiEnabled">
+            <!-- Provider -->
+            <div class="sp-row">
+              <label class="sp-label" for="setting-ai-provider">Provider</label>
+              <select
+                id="setting-ai-provider" class="sp-select"
+                :value="settings.aiProvider"
+                @change="onAIProviderChange(($event.target as HTMLSelectElement).value as AIProvider)"
+              >
+                <option value="claude">Claude (Anthropic)</option>
+                <option value="openai-compat">API compatible OpenAI</option>
+                <option value="ollama" :disabled="!ollamaAvailable">
+                  Ollama (local){{ ollamaAvailable ? '' : ' — non détecté' }}
+                </option>
+              </select>
+            </div>
+
+            <!-- Claude provider -->
+            <template v-if="settings.aiProvider === 'claude'">
+              <div class="sp-row">
+                <label class="sp-label" for="setting-ai-key">Clé API Anthropic</label>
+                <div class="sp-key-row">
+                  <input
+                    id="setting-ai-key"
+                    class="sp-input mono sp-input--key"
+                    :type="showApiKey ? 'text' : 'password'"
+                    :value="settings.aiApiKey"
+                    @input="updateSetting('aiApiKey', ($event.target as HTMLInputElement).value)"
+                    placeholder="sk-ant-api03-..."
+                  />
+                  <button class="sp-key-toggle" @click="showApiKey = !showApiKey" :title="showApiKey ? 'Masquer' : 'Afficher'">
+                    <svg v-if="showApiKey" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
+                      <path d="M2 8s2.5-4 6-4 6 4 6 4-2.5 4-6 4-6-4-6-4z"/><circle cx="8" cy="8" r="2"/>
+                    </svg>
+                    <svg v-else width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
+                      <path d="M2 8s2.5-4 6-4 6 4 6 4-2.5 4-6 4-6-4-6-4z"/><circle cx="8" cy="8" r="2"/><path d="M3 13L13 3" stroke-width="1.5"/>
+                    </svg>
+                  </button>
+                </div>
+                <span class="sp-hint">Disponible sur <a href="https://console.anthropic.com/settings/keys" target="_blank" class="sp-link">console.anthropic.com</a></span>
+              </div>
+
+              <div class="sp-row">
+                <label class="sp-label" for="setting-ai-model-claude">Modèle</label>
+                <select
+                  id="setting-ai-model-claude" class="sp-select"
+                  :value="settings.aiModel"
+                  @change="updateSetting('aiModel', ($event.target as HTMLSelectElement).value)"
+                >
+                  <option value="claude-sonnet-4-20250514">Claude Sonnet 4 (recommandé)</option>
+                  <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5 (rapide)</option>
+                  <option value="claude-opus-4-20250514">Claude Opus 4 (premium)</option>
+                </select>
+              </div>
+            </template>
+
+            <!-- OpenAI-compatible provider -->
+            <template v-if="settings.aiProvider === 'openai-compat'">
+              <div class="sp-row">
+                <label class="sp-label" for="setting-ai-endpoint">Endpoint API</label>
+                <input
+                  id="setting-ai-endpoint" class="sp-input mono" type="text"
+                  :value="settings.aiApiEndpoint"
+                  @input="updateSetting('aiApiEndpoint', ($event.target as HTMLInputElement).value)"
+                  placeholder="https://api.openai.com/v1"
+                />
+                <span class="sp-hint">Compatible OpenAI, Mistral, Groq, Azure, etc.</span>
+              </div>
+
+              <div class="sp-row">
+                <label class="sp-label" for="setting-ai-key-compat">Clé API</label>
+                <div class="sp-key-row">
+                  <input
+                    id="setting-ai-key-compat"
+                    class="sp-input mono sp-input--key"
+                    :type="showApiKey ? 'text' : 'password'"
+                    :value="settings.aiApiKey"
+                    @input="updateSetting('aiApiKey', ($event.target as HTMLInputElement).value)"
+                    placeholder="sk-..."
+                  />
+                  <button class="sp-key-toggle" @click="showApiKey = !showApiKey" :title="showApiKey ? 'Masquer' : 'Afficher'">
+                    <svg v-if="showApiKey" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
+                      <path d="M2 8s2.5-4 6-4 6 4 6 4-2.5 4-6 4-6-4-6-4z"/><circle cx="8" cy="8" r="2"/>
+                    </svg>
+                    <svg v-else width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
+                      <path d="M2 8s2.5-4 6-4 6 4 6 4-2.5 4-6 4-6-4-6-4z"/><circle cx="8" cy="8" r="2"/><path d="M3 13L13 3" stroke-width="1.5"/>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+
+              <div class="sp-row">
+                <label class="sp-label" for="setting-ai-model-compat">Modèle</label>
+                <input
+                  id="setting-ai-model-compat" class="sp-input mono" type="text"
+                  :value="settings.aiModel"
+                  @input="updateSetting('aiModel', ($event.target as HTMLInputElement).value)"
+                  placeholder="gpt-4o"
+                />
+              </div>
+            </template>
+
+            <!-- Ollama provider -->
+            <template v-if="settings.aiProvider === 'ollama'">
+              <div class="sp-row">
+                <label class="sp-label" for="setting-ai-ollama-url">URL Ollama</label>
+                <div class="sp-key-row">
+                  <input
+                    id="setting-ai-ollama-url" class="sp-input mono sp-input--key" type="text"
+                    :value="settings.aiOllamaUrl"
+                    @input="updateSetting('aiOllamaUrl', ($event.target as HTMLInputElement).value)"
+                    placeholder="http://localhost:11434"
+                  />
+                  <button class="sp-key-toggle" @click="detectOllama" title="Tester la connexion">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
+                      <path d="M14 8A6 6 0 112 8" /><path d="M14 8l-2-2m2 2l-2 2"/>
+                    </svg>
+                  </button>
+                </div>
+                <span class="sp-hint" :class="{ 'sp-hint--ok': ollamaAvailable }">
+                  {{ ollamaAvailable ? `Connecté — ${ollamaModels.length} modèle(s) disponible(s)` : 'Non connecté. Installez Ollama sur ollama.com' }}
+                </span>
+              </div>
+
+              <div class="sp-row" v-if="ollamaAvailable">
+                <label class="sp-label" for="setting-ai-ollama-model">Modèle</label>
+                <select
+                  v-if="ollamaModels.length > 0"
+                  id="setting-ai-ollama-model" class="sp-select"
+                  :value="settings.aiOllamaModel"
+                  @change="updateSetting('aiOllamaModel', ($event.target as HTMLSelectElement).value)"
+                >
+                  <option v-for="model in ollamaModels" :key="model" :value="model">{{ model }}</option>
+                </select>
+                <input
+                  v-else
+                  id="setting-ai-ollama-model" class="sp-input mono" type="text"
+                  :value="settings.aiOllamaModel"
+                  @input="updateSetting('aiOllamaModel', ($event.target as HTMLInputElement).value)"
+                  placeholder="codellama"
+                />
+              </div>
+            </template>
+
+            <!-- AI info box -->
+            <div class="sp-info-box">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
+                <circle cx="8" cy="8" r="7"/><path d="M8 7v4" stroke-linecap="round"/><circle cx="8" cy="5" r="0.7" fill="currentColor" stroke="none"/>
+              </svg>
+              <p>L'IA analyse le contexte du conflit (base/ours/theirs, messages de commit, nom de fichier) pour proposer une résolution. Votre code n'est envoyé qu'au provider sélectionné. Aucune suggestion n'est appliquée automatiquement.</p>
+            </div>
+          </template>
+        </template>
+
       </div>
     </div>
   </div>
@@ -374,8 +629,8 @@ function onKeyDown(e: KeyboardEvent) {
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
   border-radius: 12px;
-  width: min(480px, 90vw);
-  max-height: 80vh;
+  width: min(520px, 90vw);
+  max-height: 85vh;
   display: flex;
   flex-direction: column;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
@@ -392,7 +647,6 @@ function onKeyDown(e: KeyboardEvent) {
   align-items: center;
   justify-content: space-between;
   padding: 16px 20px 12px;
-  border-bottom: 1px solid var(--color-border);
 }
 
 .sp-title {
@@ -417,12 +671,51 @@ function onKeyDown(e: KeyboardEvent) {
   background: rgba(255, 255, 255, 0.06);
 }
 
+/* ─── Tab bar ──────────────────────────────────────────── */
+.sp-tabs {
+  display: flex;
+  gap: 0;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.sp-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s;
+  white-space: nowrap;
+}
+
+.sp-tab:hover {
+  color: var(--color-text);
+}
+
+.sp-tab--active {
+  color: var(--color-text);
+  border-bottom-color: var(--color-accent);
+}
+
+.sp-tab svg {
+  flex-shrink: 0;
+}
+
+/* ─── Body ─────────────────────────────────────────────── */
 .sp-body {
   padding: 16px 20px;
   display: flex;
   flex-direction: column;
   gap: 16px;
   overflow-y: auto;
+  min-height: 180px;
 }
 
 .sp-row {
@@ -494,6 +787,19 @@ function onKeyDown(e: KeyboardEvent) {
   padding-left: 24px;
 }
 
+.sp-hint--ok {
+  color: var(--color-success, #22c55e);
+}
+
+.sp-link {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+.sp-link:hover {
+  text-decoration: underline;
+}
+
 .sp-range-row {
   display: flex;
   align-items: center;
@@ -512,5 +818,57 @@ function onKeyDown(e: KeyboardEvent) {
   color: var(--color-text-muted);
   min-width: 36px;
   text-align: right;
+}
+
+/* ─── API key row ──────────────────────────────────────── */
+.sp-key-row {
+  display: flex;
+  gap: 6px;
+}
+
+.sp-input--key {
+  flex: 1;
+  min-width: 0;
+}
+
+.sp-key-toggle {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s;
+}
+
+.sp-key-toggle:hover {
+  color: var(--color-text);
+  border-color: var(--color-accent);
+}
+
+/* ─── Info box ─────────────────────────────────────────── */
+.sp-info-box {
+  display: flex;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+}
+
+.sp-info-box svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.sp-info-box p {
+  margin: 0;
 }
 </style>
