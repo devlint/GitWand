@@ -111,6 +111,8 @@ const fr = {
     noDiff: "Pas de diff disponible pour ce fichier",
     noDiffHint: "Fichier nouveau ou binaire",
     selectFile: "S\u00e9lectionnez un fichier pour voir le diff",
+    modeInline: "Inline",
+    modeSideBySide: "Côte à côte",
   },
 
   // ─── CommitLog ──────────────────────────────────────────
@@ -202,6 +204,9 @@ const fr = {
     defaultBranch: "Branche par d\u00e9faut",
     commitSignature: "Ajouter \u00ab \u{1FA84} Commit via GitWand \u00bb dans la description",
     commitSignatureHint: "Un petit clin d\u2019\u0153il ajout\u00e9 automatiquement \u2014 supprimable \u00e0 tout moment",
+    diffDisplay: "Affichage des diffs",
+    diffInline: "Inline (unifi\u00e9)",
+    diffSideBySide: "C\u00f4te \u00e0 c\u00f4te",
   },
 } as const;
 

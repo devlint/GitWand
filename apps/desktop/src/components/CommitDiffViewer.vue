@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, watch, onUnmounted, nextTick } from "vue";
-import type { GitDiff, GitLogEntry } from "../utils/backend";
+import type { GitDiff, GitLogEntry, DiffLine } from "../utils/backend";
 import { useI18n } from "../composables/useI18n";
+import type { DiffMode } from "../utils/diffMode";
 
 const { t } = useI18n();
 
@@ -9,7 +10,48 @@ const props = defineProps<{
   diffs: GitDiff[];
   commitHash: string | null;
   commitInfo: GitLogEntry | null;
+  diffMode: DiffMode;
 }>();
+
+const emit = defineEmits<{
+  "update:diffMode": [mode: DiffMode];
+}>();
+
+// ─── Side-by-side line pairing ────────────────────────
+interface SbsPair {
+  left: DiffLine | null;
+  right: DiffLine | null;
+}
+
+function pairLines(lines: DiffLine[]): SbsPair[] {
+  const pairs: SbsPair[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    if (lines[i].type === "context") {
+      pairs.push({ left: lines[i], right: lines[i] });
+      i++;
+    } else {
+      const deletes: DiffLine[] = [];
+      const adds: DiffLine[] = [];
+      while (i < lines.length && lines[i].type === "delete") {
+        deletes.push(lines[i]);
+        i++;
+      }
+      while (i < lines.length && lines[i].type === "add") {
+        adds.push(lines[i]);
+        i++;
+      }
+      const maxLen = Math.max(deletes.length, adds.length);
+      for (let j = 0; j < maxLen; j++) {
+        pairs.push({
+          left: j < deletes.length ? deletes[j] : null,
+          right: j < adds.length ? adds[j] : null,
+        });
+      }
+    }
+  }
+  return pairs;
+}
 
 function fileName(path: string): string {
   return path.split("/").pop() ?? path;
@@ -271,6 +313,25 @@ function onContentScroll(e: Event) {
         <span class="cdv-large-diff-hint" v-if="diffs.length > MAX_INITIAL_FILES">
           ({{ renderedFileCount }}/{{ diffs.length }})
         </span>
+        <!-- Toggle inline / side-by-side -->
+        <div class="cdv-mode-toggle">
+          <button
+            class="cdv-mode-btn"
+            :class="{ 'cdv-mode-btn--active': diffMode === 'inline' }"
+            @click="emit('update:diffMode', 'inline')"
+            :title="t('diff.modeInline')"
+          >
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="1" y="2" width="12" height="2" rx="0.5" fill="currentColor" opacity="0.6"/><rect x="1" y="6" width="12" height="2" rx="0.5" fill="currentColor"/><rect x="1" y="10" width="12" height="2" rx="0.5" fill="currentColor" opacity="0.6"/></svg>
+          </button>
+          <button
+            class="cdv-mode-btn"
+            :class="{ 'cdv-mode-btn--active': diffMode === 'side-by-side' }"
+            @click="emit('update:diffMode', 'side-by-side')"
+            :title="t('diff.modeSideBySide')"
+          >
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="1" y="1" width="5" height="12" rx="1" stroke="currentColor" stroke-width="1.2" fill="none"/><rect x="8" y="1" width="5" height="12" rx="1" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>
+          </button>
+        </div>
       </div>
     </div>
 
@@ -313,7 +374,9 @@ function onContentScroll(e: Event) {
               class="cdv-hunk"
             >
               <div class="cdv-hunk-header mono">{{ hunk.header }}</div>
-              <table class="cdv-table">
+
+              <!-- INLINE mode -->
+              <table v-if="diffMode === 'inline'" class="cdv-table">
                 <tbody>
                   <tr
                     v-for="(line, lineIdx) in hunk.lines"
@@ -328,6 +391,37 @@ function onContentScroll(e: Event) {
                     </td>
                     <td class="cdv-line-content mono">
                       <span>{{ line.content || '\u00a0' }}</span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+
+              <!-- SIDE-BY-SIDE mode -->
+              <table v-else class="cdv-table cdv-table--sbs">
+                <tbody>
+                  <tr
+                    v-for="(pair, pairIdx) in pairLines(hunk.lines)"
+                    :key="pairIdx"
+                    class="cdv-line"
+                  >
+                    <td class="cdv-line-no mono" :class="pair.left ? `cdv-sbs--${pair.left.type}` : 'cdv-sbs--empty'">
+                      {{ pair.left?.oldLineNo ?? '' }}
+                    </td>
+                    <td class="cdv-line-marker mono" :class="pair.left ? `cdv-sbs--${pair.left.type}` : 'cdv-sbs--empty'">
+                      {{ pair.left?.type === 'delete' ? '-' : pair.left?.type === 'context' ? ' ' : '' }}
+                    </td>
+                    <td class="cdv-line-content mono cdv-sbs-content" :class="pair.left ? `cdv-sbs--${pair.left.type}` : 'cdv-sbs--empty'">
+                      <span>{{ pair.left?.content || '\u00a0' }}</span>
+                    </td>
+                    <td class="cdv-sbs-gutter"></td>
+                    <td class="cdv-line-no mono" :class="pair.right ? `cdv-sbs--${pair.right.type}` : 'cdv-sbs--empty'">
+                      {{ pair.right?.newLineNo ?? '' }}
+                    </td>
+                    <td class="cdv-line-marker mono" :class="pair.right ? `cdv-sbs--${pair.right.type}` : 'cdv-sbs--empty'">
+                      {{ pair.right?.type === 'add' ? '+' : pair.right?.type === 'context' ? ' ' : '' }}
+                    </td>
+                    <td class="cdv-line-content mono cdv-sbs-content" :class="pair.right ? `cdv-sbs--${pair.right.type}` : 'cdv-sbs--empty'">
+                      <span>{{ pair.right?.content || '\u00a0' }}</span>
                     </td>
                   </tr>
                 </tbody>
@@ -731,6 +825,76 @@ function onContentScroll(e: Event) {
   white-space: pre;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* ─── Side-by-side mode ──────────────────────────────── */
+.cdv-table--sbs {
+  table-layout: fixed;
+}
+
+.cdv-table--sbs .cdv-line-no {
+  width: 36px;
+  min-width: 36px;
+}
+
+.cdv-table--sbs .cdv-line-marker {
+  width: 16px;
+  min-width: 16px;
+}
+
+.cdv-sbs-content {
+  width: calc(50% - 56px);
+}
+
+.cdv-sbs-gutter {
+  width: 4px;
+  min-width: 4px;
+  background: var(--color-border);
+  padding: 0;
+}
+
+.cdv-sbs--context { background: var(--color-bg); }
+.cdv-sbs--delete { background: rgba(239, 68, 68, 0.1); }
+.cdv-sbs--add { background: rgba(34, 197, 94, 0.1); }
+.cdv-sbs--empty { background: var(--color-bg-tertiary); opacity: 0.5; }
+
+.cdv-sbs--delete.cdv-line-marker { color: var(--color-danger); font-weight: 700; }
+.cdv-sbs--add.cdv-line-marker { color: var(--color-success); font-weight: 700; }
+.cdv-sbs--delete.cdv-line-no { color: var(--color-danger); opacity: 0.7; }
+.cdv-sbs--add.cdv-line-no { color: var(--color-success); opacity: 0.7; }
+
+/* ─── Mode toggle ────────────────────────────────────── */
+.cdv-mode-toggle {
+  display: flex;
+  gap: 2px;
+  background: var(--color-bg-tertiary);
+  border-radius: 6px;
+  padding: 2px;
+  margin-left: auto;
+}
+
+.cdv-mode-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 24px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.cdv-mode-btn:hover {
+  color: var(--color-text);
+}
+
+.cdv-mode-btn--active {
+  background: var(--color-bg-secondary);
+  color: var(--color-accent);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 
 .cdv-truncated {

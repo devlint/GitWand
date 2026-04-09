@@ -2,12 +2,18 @@
 import { computed } from "vue";
 import type { GitDiff, DiffHunk, DiffLine } from "../utils/backend";
 import { useI18n } from "../composables/useI18n";
+import type { DiffMode } from "../utils/diffMode";
 
 const { t } = useI18n();
 
 const props = defineProps<{
   diff: GitDiff | null;
   filePath: string | null;
+  diffMode: DiffMode;
+}>();
+
+const emit = defineEmits<{
+  "update:diffMode": [mode: DiffMode];
 }>();
 
 const hasContent = computed(() => {
@@ -30,6 +36,52 @@ const totalStats = computed(() => {
 function fileName(path: string): string {
   return path.split("/").pop() ?? path;
 }
+
+// ─── Side-by-side: pair lines into left/right rows ─────
+interface SbsPair {
+  left: DiffLine | null;
+  right: DiffLine | null;
+}
+
+function pairLines(lines: DiffLine[]): SbsPair[] {
+  const pairs: SbsPair[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    if (lines[i].type === "context") {
+      pairs.push({ left: lines[i], right: lines[i] });
+      i++;
+    } else {
+      const deletes: DiffLine[] = [];
+      const adds: DiffLine[] = [];
+      while (i < lines.length && lines[i].type === "delete") {
+        deletes.push(lines[i]);
+        i++;
+      }
+      while (i < lines.length && lines[i].type === "add") {
+        adds.push(lines[i]);
+        i++;
+      }
+      const maxLen = Math.max(deletes.length, adds.length);
+      for (let j = 0; j < maxLen; j++) {
+        pairs.push({
+          left: j < deletes.length ? deletes[j] : null,
+          right: j < adds.length ? adds[j] : null,
+        });
+      }
+    }
+  }
+  return pairs;
+}
+
+/** Precomputed paired lines for each hunk (only used in side-by-side mode) */
+const pairedHunks = computed(() => {
+  if (!props.diff || props.diffMode !== "side-by-side") return [];
+  return props.diff.hunks.map((hunk) => pairLines(hunk.lines));
+});
+
+function toggleMode() {
+  emit("update:diffMode", props.diffMode === "inline" ? "side-by-side" : "inline");
+}
 </script>
 
 <template>
@@ -40,18 +92,39 @@ function fileName(path: string): string {
         <span class="diff-file-name mono">{{ fileName(filePath) }}</span>
         <span class="diff-file-path muted">{{ filePath }}</span>
       </div>
-      <div class="diff-stats" v-if="hasContent">
-        <span class="diff-stat diff-stat--add" v-if="totalStats.additions > 0">
-          +{{ totalStats.additions }}
-        </span>
-        <span class="diff-stat diff-stat--del" v-if="totalStats.deletions > 0">
-          -{{ totalStats.deletions }}
-        </span>
+      <div class="diff-header-right">
+        <div class="diff-stats" v-if="hasContent">
+          <span class="diff-stat diff-stat--add" v-if="totalStats.additions > 0">
+            +{{ totalStats.additions }}
+          </span>
+          <span class="diff-stat diff-stat--del" v-if="totalStats.deletions > 0">
+            -{{ totalStats.deletions }}
+          </span>
+        </div>
+        <!-- Toggle inline / side-by-side -->
+        <div class="diff-mode-toggle" v-if="hasContent">
+          <button
+            class="diff-mode-btn"
+            :class="{ 'diff-mode-btn--active': diffMode === 'inline' }"
+            @click="emit('update:diffMode', 'inline')"
+            :title="t('diff.modeInline')"
+          >
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="1" y="2" width="12" height="2" rx="0.5" fill="currentColor" opacity="0.6"/><rect x="1" y="6" width="12" height="2" rx="0.5" fill="currentColor"/><rect x="1" y="10" width="12" height="2" rx="0.5" fill="currentColor" opacity="0.6"/></svg>
+          </button>
+          <button
+            class="diff-mode-btn"
+            :class="{ 'diff-mode-btn--active': diffMode === 'side-by-side' }"
+            @click="emit('update:diffMode', 'side-by-side')"
+            :title="t('diff.modeSideBySide')"
+          >
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="1" y="1" width="5" height="12" rx="1" stroke="currentColor" stroke-width="1.2" fill="none"/><rect x="8" y="1" width="5" height="12" rx="1" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>
+          </button>
+        </div>
       </div>
     </div>
 
-    <!-- Diff content -->
-    <div class="diff-content" v-if="hasContent">
+    <!-- Diff content: INLINE mode -->
+    <div class="diff-content" v-if="hasContent && diffMode === 'inline'">
       <div
         v-for="(hunk, hunkIdx) in diff!.hunks"
         :key="hunkIdx"
@@ -80,6 +153,52 @@ function fileName(path: string): string {
               </td>
               <td class="line-content mono">
                 <span>{{ line.content || '\u00a0' }}</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Diff content: SIDE-BY-SIDE mode -->
+    <div class="diff-content" v-else-if="hasContent && diffMode === 'side-by-side'">
+      <div
+        v-for="(hunk, hunkIdx) in diff!.hunks"
+        :key="hunkIdx"
+        class="diff-hunk"
+      >
+        <div class="hunk-header mono">
+          {{ hunk.header }}
+        </div>
+
+        <table class="diff-table diff-table--sbs">
+          <tbody>
+            <tr
+              v-for="(pair, pairIdx) in pairedHunks[hunkIdx]"
+              :key="pairIdx"
+              class="diff-line"
+            >
+              <!-- Left side (old) -->
+              <td class="line-no mono" :class="pair.left ? `sbs-cell--${pair.left.type}` : 'sbs-cell--empty'">
+                {{ pair.left?.oldLineNo ?? '' }}
+              </td>
+              <td class="line-marker mono" :class="pair.left ? `sbs-cell--${pair.left.type}` : 'sbs-cell--empty'">
+                {{ pair.left?.type === 'delete' ? '-' : pair.left?.type === 'context' ? ' ' : '' }}
+              </td>
+              <td class="line-content mono sbs-content" :class="pair.left ? `sbs-cell--${pair.left.type}` : 'sbs-cell--empty'">
+                <span>{{ pair.left?.content || '\u00a0' }}</span>
+              </td>
+              <!-- Separator -->
+              <td class="sbs-gutter"></td>
+              <!-- Right side (new) -->
+              <td class="line-no mono" :class="pair.right ? `sbs-cell--${pair.right.type}` : 'sbs-cell--empty'">
+                {{ pair.right?.newLineNo ?? '' }}
+              </td>
+              <td class="line-marker mono" :class="pair.right ? `sbs-cell--${pair.right.type}` : 'sbs-cell--empty'">
+                {{ pair.right?.type === 'add' ? '+' : pair.right?.type === 'context' ? ' ' : '' }}
+              </td>
+              <td class="line-content mono sbs-content" :class="pair.right ? `sbs-cell--${pair.right.type}` : 'sbs-cell--empty'">
+                <span>{{ pair.right?.content || '\u00a0' }}</span>
               </td>
             </tr>
           </tbody>
@@ -145,6 +264,13 @@ function fileName(path: string): string {
   white-space: nowrap;
 }
 
+.diff-header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
 .diff-stats {
   display: flex;
   gap: 8px;
@@ -166,6 +292,40 @@ function fileName(path: string): string {
   color: var(--color-danger);
 }
 
+/* ─── Mode toggle ────────────────────────────────────── */
+.diff-mode-toggle {
+  display: flex;
+  gap: 2px;
+  background: var(--color-bg-tertiary);
+  border-radius: 6px;
+  padding: 2px;
+}
+
+.diff-mode-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 24px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.diff-mode-btn:hover {
+  color: var(--color-text);
+}
+
+.diff-mode-btn--active {
+  background: var(--color-bg-secondary);
+  color: var(--color-accent);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+/* ─── Diff content ───────────────────────────────────── */
 .diff-content {
   flex: 1;
   overflow: auto;
@@ -195,6 +355,7 @@ function fileName(path: string): string {
   table-layout: fixed;
 }
 
+/* ─── Inline mode lines ──────────────────────────────── */
 .diff-line {
   line-height: 1.5;
 }
@@ -272,6 +433,80 @@ function fileName(path: string): string {
   opacity: 0.8;
 }
 
+/* ─── Side-by-side mode ──────────────────────────────── */
+.diff-table--sbs {
+  table-layout: fixed;
+}
+
+.diff-table--sbs .line-no {
+  width: 40px;
+  min-width: 40px;
+  padding: 0 6px;
+}
+
+.diff-table--sbs .line-marker {
+  width: 18px;
+  min-width: 18px;
+  padding: 0 2px;
+}
+
+.diff-table--sbs .sbs-content {
+  width: calc(50% - 60px);
+  padding: 0 8px;
+  font-size: 12px;
+  white-space: pre;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sbs-gutter {
+  width: 4px;
+  min-width: 4px;
+  background: var(--color-border);
+  padding: 0;
+}
+
+.sbs-cell--context {
+  background: var(--color-bg);
+}
+
+.sbs-cell--delete {
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.sbs-cell--add {
+  background: rgba(34, 197, 94, 0.1);
+}
+
+.sbs-cell--empty {
+  background: var(--color-bg-tertiary);
+  opacity: 0.5;
+}
+
+.sbs-cell--delete.line-marker,
+.sbs-cell--add.line-marker {
+  font-weight: 700;
+}
+
+.sbs-cell--delete.line-marker {
+  color: var(--color-danger);
+}
+
+.sbs-cell--add.line-marker {
+  color: var(--color-success);
+}
+
+.sbs-cell--delete.line-no {
+  color: var(--color-danger);
+  opacity: 0.7;
+}
+
+.sbs-cell--add.line-no {
+  color: var(--color-success);
+  opacity: 0.7;
+}
+
+/* ─── Empty states ───────────────────────────────────── */
 .diff-empty {
   flex: 1;
   display: flex;

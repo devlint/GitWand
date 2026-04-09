@@ -8,6 +8,7 @@ import RepoSidebar from "./components/RepoSidebar.vue";
 import DiffViewer from "./components/DiffViewer.vue";
 import CommitDiffViewer from "./components/CommitDiffViewer.vue";
 import SettingsPanel from "./components/SettingsPanel.vue";
+import { getPersistedDiffMode, persistDiffMode, type DiffMode } from "./utils/diffMode";
 import { useGitWand } from "./composables/useGitWand";
 import { useGitRepo } from "./composables/useGitRepo";
 import { useTheme } from "./composables/useTheme";
@@ -253,6 +254,12 @@ function onViewModeChange(mode: "changes" | "history") {
 
 // ─── Settings panel ─────────────────────────────────────
 const showSettings = ref(false);
+const diffMode = ref<DiffMode>(getPersistedDiffMode());
+
+function onDiffModeChange(mode: DiffMode) {
+  diffMode.value = mode;
+  persistDiffMode(mode);
+}
 
 const COMMIT_SIGNATURE = "\u{1FA84} Commit via GitWand";
 function onCommitSignatureChange(enabled: boolean) {
@@ -430,6 +437,8 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
               v-else
               :diff="repoDiff"
               :file-path="repoSelectedFile"
+              :diff-mode="diffMode"
+              @update:diff-mode="onDiffModeChange"
             />
           </template>
 
@@ -439,6 +448,8 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
             :diffs="commitDiffs"
             :commit-hash="selectedCommitHash"
             :commit-info="repoLog.find(e => e.hashFull === selectedCommitHash) ?? null"
+            :diff-mode="diffMode"
+            @update:diff-mode="onDiffModeChange"
           />
         </template>
       </main>
@@ -470,6 +481,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
       v-if="showSettings"
       @close="showSettings = false"
       @update:commit-signature="onCommitSignatureChange"
+      @update:diff-mode="onDiffModeChange"
     />
   </div>
 </template>

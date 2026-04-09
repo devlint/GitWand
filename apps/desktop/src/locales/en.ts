@@ -109,6 +109,8 @@ const en: Locale = {
     noDiff: "No diff available for this file",
     noDiffHint: "New or binary file",
     selectFile: "Select a file to view the diff",
+    modeInline: "Inline",
+    modeSideBySide: "Side by side",
   },
 
   // ─── CommitLog ──────────────────────────────────────────
@@ -200,6 +202,9 @@ const en: Locale = {
     defaultBranch: "Default branch",
     commitSignature: "Add \u201c\u{1FA84} Commit via GitWand\u201d to description",
     commitSignatureHint: "A small signature added automatically \u2014 removable anytime",
+    diffDisplay: "Diff display",
+    diffInline: "Inline (unified)",
+    diffSideBySide: "Side by side",
   },
 } as const;
 

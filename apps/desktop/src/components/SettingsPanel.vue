@@ -14,16 +14,20 @@ const { theme, setTheme } = useTheme();
 const emit = defineEmits<{
   close: [];
   "update:commitSignature": [enabled: boolean];
+  "update:diffMode": [mode: DiffMode];
 }>();
 
 // ─── Settings state (persisted in localStorage) ────────
 const SETTINGS_KEY = "gitwand-settings";
+
+import type { DiffMode } from "../utils/diffMode";
 
 interface Settings {
   editor: string;
   gitPath: string;
   defaultBranch: string;
   commitSignature: boolean;
+  diffMode: DiffMode;
 }
 
 function loadSettings(): Settings {
@@ -41,6 +45,7 @@ const defaultSettings: Settings = {
   gitPath: "",
   defaultBranch: "main",
   commitSignature: true,
+  diffMode: "inline",
 };
 
 function saveSettings(s: Settings) {
@@ -102,6 +107,11 @@ function onSignatureChange(e: Event) {
   const checked = (e.target as HTMLInputElement).checked;
   updateSetting("commitSignature", checked);
   emit("update:commitSignature", checked);
+}
+
+function onDiffModeChange(val: DiffMode) {
+  updateSetting("diffMode", val);
+  emit("update:diffMode", val);
 }
 
 function onKeyDown(e: KeyboardEvent) {
@@ -195,6 +205,20 @@ function onKeyDown(e: KeyboardEvent) {
             @input="updateSetting('defaultBranch', ($event.target as HTMLInputElement).value)"
             placeholder="main"
           />
+        </div>
+
+        <!-- Diff display -->
+        <div class="sp-row">
+          <label class="sp-label" for="setting-diff-mode">{{ t('settings.diffDisplay') }}</label>
+          <select
+            id="setting-diff-mode"
+            class="sp-select"
+            :value="settings.diffMode"
+            @change="onDiffModeChange(($event.target as HTMLSelectElement).value as DiffMode)"
+          >
+            <option value="inline">{{ t('settings.diffInline') }}</option>
+            <option value="side-by-side">{{ t('settings.diffSideBySide') }}</option>
+          </select>
         </div>
 
         <!-- Commit signature -->
