@@ -1,6 +1,8 @@
 use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
+use tauri::{Emitter, Manager};
+use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
 /// GitWand Desktop — Tauri backend
 ///
@@ -2309,6 +2311,26 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .setup(|app| {
+            // Register Cmd+Shift+G (macOS) / Ctrl+Shift+G (Linux/Windows)
+            // to bring GitWand to the foreground from anywhere.
+            use tauri_plugin_global_shortcut::ShortcutState;
+            let handle = app.handle().clone();
+            app.global_shortcut().on_shortcut("CmdOrCtrl+Shift+G", move |_app, shortcut, event| {
+                if event.state == ShortcutState::Pressed {
+                    // Show + focus the main window
+                    if let Some(window) = handle.get_webview_window("main") {
+                        let _ = window.show();
+                        let _ = window.unminimize();
+                        let _ = window.set_focus();
+                    }
+                    // Emit event so frontend can react (e.g. open folder picker)
+                    let _ = handle.emit("global-shortcut-activate", ());
+                }
+            })?;
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             get_conflicted_files,
             read_file,

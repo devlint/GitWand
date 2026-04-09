@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from "vue";
 import AppHeader from "./components/AppHeader.vue";
+import RepoTabBar from "./components/RepoTabBar.vue";
 import MergeEditor from "./components/MergeEditor.vue";
 import EmptyState from "./components/EmptyState.vue";
 import FolderPicker from "./components/FolderPicker.vue";
@@ -14,7 +15,8 @@ import EditCommitOverlay from "./components/EditCommitOverlay.vue";
 import type { GitLogEntry } from "./utils/backend";
 import { getPersistedDiffMode, persistDiffMode, type DiffMode } from "./utils/diffMode";
 import { useGitWand } from "./composables/useGitWand";
-import { useGitRepo, type ViewMode } from "./composables/useGitRepo";
+import { useRepoTabs } from "./composables/useRepoTabs";
+import type { ViewMode } from "./composables/useGitRepo";
 import { useTheme } from "./composables/useTheme";
 import { useI18n } from "./composables/useI18n";
 import { useSettings } from "./composables/useSettings";
@@ -48,64 +50,96 @@ const {
   selectFile: mergeSelectFile,
 } = useGitWand();
 
-// ─── Repo mode (useGitRepo) ────────────────────────────
+// ─── Multi-repo tabs ────────────────────────────────────
 const {
-  folderPath: repoFolderPath,
-  status: repoStatus,
-  selectedFilePath: repoSelectedFile,
-  diff: repoDiff,
-  log: repoLog,
-  loading: repoLoading,
-  error: repoError,
-  successMessage: repoSuccess,
-  viewMode,
-  hasRepo,
-  branchDisplay,
-  isClean,
-  isSelectedFileConflicted,
-  hasConflicts,
-  allFiles: repoFiles,
-  repoStats,
-  commitSummary,
-  commitDescription,
-  canCommit,
-  isCommitting,
-  canPush,
-  canPull,
-  aheadCount,
-  behindCount,
-  isPushing,
-  isPulling,
-  openRepo,
-  refresh: repoRefresh,
-  selectFile: repoSelectFile,
-  loadLog,
-  stageFiles,
-  stageAll,
-  unstageFiles,
-  unstageAll,
-  stagePatch,
-  unstagePatch,
-  commit: doCommit,
-  amendCommit: doAmendCommit,
-  push: doPush,
-  pull: doPull,
-  mergeBranch: doMerge,
-  mergeContinue: doMergeContinue,
-  abortMerge: doAbortMerge,
-  discardFiles,
-  branches,
-  branchesLoading,
-  isSwitchingBranch,
-  isMerging,
-  selectedCommitHash,
-  commitDiffs,
-  selectCommit,
-  loadBranches,
-  createBranch,
-  switchBranch,
-  deleteBranch,
-} = useGitRepo();
+  tabs: repoTabs,
+  activeTabId,
+  activeTab,
+  tabCount,
+  openTab,
+  closeTab,
+  switchTab,
+  closeOtherTabs,
+} = useRepoTabs();
+
+// ─── Active tab's repo (computed proxies) ───────────────
+// Each computed reads from the active tab's useGitRepo instance.
+// When no tab is active, sensible defaults are returned.
+const repoFolderPath = computed(() => activeTab.value?.repo.folderPath.value ?? null);
+const repoStatus = computed(() => activeTab.value?.repo.status.value ?? null);
+const repoSelectedFile = computed(() => activeTab.value?.repo.selectedFilePath.value ?? null);
+const repoDiff = computed(() => activeTab.value?.repo.diff.value ?? null);
+const repoLog = computed(() => activeTab.value?.repo.log.value ?? []);
+const repoLoading = computed(() => activeTab.value?.repo.loading.value ?? false);
+const repoError = computed({
+  get: () => activeTab.value?.repo.error.value ?? null,
+  set: (v) => { if (activeTab.value) activeTab.value.repo.error.value = v; },
+});
+const repoSuccess = computed({
+  get: () => activeTab.value?.repo.successMessage.value ?? null,
+  set: (v) => { if (activeTab.value) activeTab.value.repo.successMessage.value = v; },
+});
+const viewMode = computed({
+  get: () => activeTab.value?.repo.viewMode.value ?? "changes" as ViewMode,
+  set: (v: ViewMode) => { if (activeTab.value) activeTab.value.repo.viewMode.value = v; },
+});
+const hasRepo = computed(() => activeTab.value?.repo.hasRepo.value ?? false);
+const branchDisplay = computed(() => activeTab.value?.repo.branchDisplay.value ?? "");
+const isClean = computed(() => activeTab.value?.repo.isClean.value ?? true);
+const isSelectedFileConflicted = computed(() => activeTab.value?.repo.isSelectedFileConflicted.value ?? false);
+const hasConflicts = computed(() => activeTab.value?.repo.hasConflicts.value ?? false);
+const repoFiles = computed(() => activeTab.value?.repo.allFiles.value ?? []);
+const repoStats = computed(() => activeTab.value?.repo.repoStats.value ?? { staged: 0, unstaged: 0, untracked: 0, conflicted: 0 });
+const commitSummary = computed({
+  get: () => activeTab.value?.repo.commitSummary.value ?? "",
+  set: (v) => { if (activeTab.value) activeTab.value.repo.commitSummary.value = v; },
+});
+const commitDescription = computed({
+  get: () => activeTab.value?.repo.commitDescription.value ?? "",
+  set: (v) => { if (activeTab.value) activeTab.value.repo.commitDescription.value = v; },
+});
+const canCommit = computed(() => activeTab.value?.repo.canCommit.value ?? false);
+const isCommitting = computed(() => activeTab.value?.repo.isCommitting.value ?? false);
+const canPush = computed(() => activeTab.value?.repo.canPush.value ?? false);
+const canPull = computed(() => activeTab.value?.repo.canPull.value ?? false);
+const aheadCount = computed(() => activeTab.value?.repo.aheadCount.value ?? 0);
+const behindCount = computed(() => activeTab.value?.repo.behindCount.value ?? 0);
+const isPushing = computed(() => activeTab.value?.repo.isPushing.value ?? false);
+const isPulling = computed(() => activeTab.value?.repo.isPulling.value ?? false);
+const branches = computed(() => activeTab.value?.repo.branches.value ?? []);
+const branchesLoading = computed(() => activeTab.value?.repo.branchesLoading.value ?? false);
+const isSwitchingBranch = computed({
+  get: () => activeTab.value?.repo.isSwitchingBranch.value ?? false,
+  set: (v) => { if (activeTab.value) activeTab.value.repo.isSwitchingBranch.value = v; },
+});
+const isMerging = computed(() => activeTab.value?.repo.isMerging.value ?? false);
+const selectedCommitHash = computed(() => activeTab.value?.repo.selectedCommitHash.value ?? null);
+const commitDiffs = computed(() => activeTab.value?.repo.commitDiffs.value ?? []);
+
+// ─── Active tab's repo methods (delegated) ──────────────
+function repoRefresh() { return activeTab.value?.repo.refresh() ?? Promise.resolve(); }
+function repoSelectFile(path: string, staged: boolean) { return activeTab.value?.repo.selectFile(path, staged) ?? Promise.resolve(); }
+function loadLog() { return activeTab.value?.repo.loadLog() ?? Promise.resolve(); }
+function stageFiles(paths: string[]) { return activeTab.value?.repo.stageFiles(paths) ?? Promise.resolve(); }
+function stageAll() { return activeTab.value?.repo.stageAll() ?? Promise.resolve(); }
+function unstageFiles(paths: string[]) { return activeTab.value?.repo.unstageFiles(paths) ?? Promise.resolve(); }
+function unstageAll() { return activeTab.value?.repo.unstageAll() ?? Promise.resolve(); }
+function stagePatch(path: string, hunk: string) { return activeTab.value?.repo.stagePatch(path, hunk) ?? Promise.resolve(); }
+function unstagePatch(path: string, hunk: string) { return activeTab.value?.repo.unstagePatch(path, hunk) ?? Promise.resolve(); }
+function doCommit() { return activeTab.value?.repo.commit() ?? Promise.resolve(); }
+function doAmendCommit(summary: string, description: string) { return activeTab.value?.repo.amendCommit(summary, description) ?? Promise.resolve(); }
+function doPush() { return activeTab.value?.repo.push() ?? Promise.resolve(); }
+function doPull(rebase?: boolean) { return activeTab.value?.repo.pull(rebase) ?? Promise.resolve(); }
+function doMerge(name: string) { return activeTab.value?.repo.mergeBranch(name) ?? Promise.resolve(); }
+function doMergeContinue() { return activeTab.value?.repo.mergeContinue() ?? Promise.resolve(); }
+function doAbortMerge() { return activeTab.value?.repo.abortMerge() ?? Promise.resolve(); }
+function discardFiles(paths: string[]) { return activeTab.value?.repo.discardFiles(paths) ?? Promise.resolve(); }
+function selectCommit(hash: string) { return activeTab.value?.repo.selectCommit(hash) ?? Promise.resolve(); }
+function loadBranches() { return activeTab.value?.repo.loadBranches() ?? Promise.resolve(); }
+function createBranch(name: string) { return activeTab.value?.repo.createBranch(name) ?? Promise.resolve(); }
+function switchBranch(name: string) { return activeTab.value?.repo.switchBranch(name) ?? Promise.resolve(); }
+function deleteBranch(name: string) { return activeTab.value?.repo.deleteBranch(name) ?? Promise.resolve(); }
+function openRepo(path: string) { openTab(path); }
 
 // ─── Computed state ─────────────────────────────────────
 const hasFiles = computed(() => repoFiles.value.length > 0);
@@ -251,7 +285,7 @@ async function handleAmendConfirm(summary: string, description: string) {
 async function handleOpenFolder() {
   const path = await pickFolder();
   if (path) {
-    await openRepo(path);
+    openTab(path);
     if (viewMode.value === "history") {
       await loadLog();
     }
@@ -259,7 +293,7 @@ async function handleOpenFolder() {
 }
 
 async function handleOpenPath(path: string) {
-  await openRepo(path);
+  openTab(path);
 }
 
 // When switching tabs, load data as needed
@@ -459,6 +493,16 @@ function onKeyDown(e: KeyboardEvent) {
   if (mod && e.key === "k") {
     e.preventDefault();
     handleOpenFolder();
+  } else if (mod && e.key === "t") {
+    // Cmd+T — new tab (open folder picker)
+    e.preventDefault();
+    handleOpenFolder();
+  } else if (mod && e.key === "w") {
+    // Cmd+W — close active tab
+    e.preventDefault();
+    if (activeTabId.value !== null) {
+      closeTab(activeTabId.value);
+    }
   } else if (mod && e.key === "z" && !e.shiftKey && showingMergeEditor.value) {
     e.preventDefault();
     undo();
@@ -471,6 +515,13 @@ function onKeyDown(e: KeyboardEvent) {
   } else if (mod && e.key === "s") {
     e.preventDefault();
     if (showingMergeEditor.value) saveAllFiles();
+  } else if (mod && e.key >= "1" && e.key <= "9") {
+    // Cmd+1..9 — switch to tab by position
+    e.preventDefault();
+    const idx = parseInt(e.key) - 1;
+    if (idx < repoTabs.value.length) {
+      switchTab(repoTabs.value[idx].id);
+    }
   }
 }
 
@@ -489,15 +540,45 @@ function onSettingsClose() {
   applyGitConfig();
 }
 
+// ─── Global shortcut listener (Cmd+Shift+G from anywhere) ─
+let unlistenGlobalShortcut: (() => void) | null = null;
+
+async function setupGlobalShortcutListener() {
+  if (!isTauri()) return;
+  try {
+    const { listen } = await import("@tauri-apps/api/event");
+    unlistenGlobalShortcut = await listen("global-shortcut-activate", () => {
+      // GitWand was activated via Cmd+Shift+G — if no repo is open, open the folder picker
+      if (!hasRepo.value) {
+        handleOpenFolder();
+      }
+    });
+  } catch {
+    // Global shortcut listener not available (e.g. browser dev mode)
+  }
+}
+
 onMounted(() => {
   window.addEventListener("keydown", onKeyDown);
   applyGitConfig();
+  setupGlobalShortcutListener();
 });
-onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
+onUnmounted(() => {
+  window.removeEventListener("keydown", onKeyDown);
+  unlistenGlobalShortcut?.();
+});
 </script>
 
 <template>
   <div class="app">
+    <RepoTabBar
+      :tabs="repoTabs"
+      :active-tab-id="activeTabId"
+      @switch-tab="switchTab"
+      @close-tab="closeTab"
+      @new-tab="handleOpenFolder"
+    />
+
     <AppHeader
       :has-files="hasFiles"
       :theme="theme"

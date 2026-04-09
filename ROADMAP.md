@@ -386,8 +386,8 @@ interface DecisionTrace {
 
 - ✅ **Repo switcher** : Dropdown depuis le nom du repo courant dans le header — liste des repos récents (`useFolderHistory` singleton), pin/unpin, suppression depuis l'historique, ouverture directe ; `openRepo` event vers `App.vue`
 - ✅ **Monorepo awareness** : Commande Rust `detect_monorepo` détecte pnpm-workspace.yaml, package.json workspaces (npm/yarn) ; scan des packages avec nom, chemin, version ; composant `MonorepoPanel.vue` avec filtre, icône par manager, liste cliquable ; wrapper TypeScript `detectMonorepo` dans `backend.ts`
-- **Tabs** : Ouvrir plusieurs repos en parallèle
-- **Raccourcis globaux** : Cmd+Shift+G pour ouvrir GitWand depuis n'importe où
+- ✅ **Tabs** : Composable `useRepoTabs` — chaque onglet contient sa propre instance `useGitRepo()`, état indépendant (branches, diff, log, staging) ; composant `RepoTabBar.vue` avec onglets visuels, close par middle-click ou bouton, bouton "+" pour nouveau repo ; raccourcis Cmd+T (nouveau), Cmd+W (fermer), Cmd+1..9 (switch) ; persistance des onglets ouverts dans localStorage ; max 10 onglets, auto-fermeture du plus ancien si dépassé ; App.vue refactorisé avec computed proxies délégant vers l'onglet actif
+- ✅ **Raccourcis globaux** : Plugin Tauri `tauri-plugin-global-shortcut` — Cmd+Shift+G (macOS) / Ctrl+Shift+G (Windows/Linux) pour amener GitWand au premier plan depuis n'importe quelle application ; enregistrement dans `lib.rs` setup, show + unminimize + focus de la fenêtre principale ; event `global-shortcut-activate` émis vers le frontend pour déclencher le folder picker si aucun repo n'est ouvert
 
 #### 8.5 — Terminal intégré ✅
 
