@@ -132,11 +132,19 @@ const totalStats = computed(() => {
 const MAX_INITIAL_FILES = 20;
 const MAX_LINES_PER_FILE = 500;
 
-/** Set of expanded file indices */
-const expandedFiles = ref(new Set<number>());
+/** Build initial set of expanded files from diffs already available at mount time */
+function buildInitialExpanded(count: number): Set<number> {
+  const s = new Set<number>();
+  const autoExpand = Math.min(count, 5);
+  for (let i = 0; i < autoExpand; i++) s.add(i);
+  return s;
+}
 
-/** How many files to show in the list (grows on scroll) */
-const renderedFileCount = ref(MAX_INITIAL_FILES);
+/** Set of expanded file indices — pre-seeded with whatever diffs are available at mount */
+const expandedFiles = ref(buildInitialExpanded(props.diffs.length));
+
+/** How many files to show in the list (grows on scroll) — capped at actual diff count */
+const renderedFileCount = ref(Math.min(props.diffs.length, MAX_INITIAL_FILES));
 
 function isExpanded(idx: number): boolean {
   return expandedFiles.value.has(idx);
@@ -187,17 +195,11 @@ function truncatedHunks(idx: number) {
   return result;
 }
 
-// Reset expansion and rendered count when diffs change
+// Reset expansion and rendered count when diffs change (subsequent prop updates)
 watch(
   () => props.diffs,
   () => {
-    // Auto-expand the first few files
-    const initial = new Set<number>();
-    const autoExpand = Math.min(props.diffs.length, 5);
-    for (let i = 0; i < autoExpand; i++) {
-      initial.add(i);
-    }
-    expandedFiles.value = initial;
+    expandedFiles.value = buildInitialExpanded(props.diffs.length);
     renderedFileCount.value = Math.min(props.diffs.length, MAX_INITIAL_FILES);
     visibleFileIdx.value = 0;
   },
