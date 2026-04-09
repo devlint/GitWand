@@ -16,7 +16,7 @@ import type { GitLogEntry } from "./utils/backend";
 import { getPersistedDiffMode, persistDiffMode, type DiffMode } from "./utils/diffMode";
 import { useGitWand } from "./composables/useGitWand";
 import { useRepoTabs } from "./composables/useRepoTabs";
-import type { ViewMode } from "./composables/useGitRepo";
+import { useGitRepo, type ViewMode } from "./composables/useGitRepo";
 import { useTheme } from "./composables/useTheme";
 import { useI18n } from "./composables/useI18n";
 import { useSettings } from "./composables/useSettings";
@@ -50,100 +50,81 @@ const {
   selectFile: mergeSelectFile,
 } = useGitWand();
 
-// ─── Multi-repo tabs ────────────────────────────────────
+// ─── Repo mode (useGitRepo) — single shared instance ────
+const {
+  folderPath: repoFolderPath,
+  status: repoStatus,
+  selectedFilePath: repoSelectedFile,
+  diff: repoDiff,
+  log: repoLog,
+  loading: repoLoading,
+  error: repoError,
+  successMessage: repoSuccess,
+  viewMode,
+  hasRepo,
+  branchDisplay,
+  isClean,
+  isSelectedFileConflicted,
+  hasConflicts,
+  allFiles: repoFiles,
+  repoStats,
+  commitSummary,
+  commitDescription,
+  canCommit,
+  isCommitting,
+  canPush,
+  canPull,
+  aheadCount,
+  behindCount,
+  isPushing,
+  isPulling,
+  openRepo,
+  refresh: repoRefresh,
+  selectFile: repoSelectFile,
+  loadLog,
+  stageFiles,
+  stageAll,
+  unstageFiles,
+  unstageAll,
+  stagePatch,
+  unstagePatch,
+  commit: doCommit,
+  amendCommit: doAmendCommit,
+  push: doPush,
+  pull: doPull,
+  mergeBranch: doMerge,
+  mergeContinue: doMergeContinue,
+  abortMerge: doAbortMerge,
+  discardFiles,
+  branches,
+  branchesLoading,
+  isSwitchingBranch,
+  isMerging,
+  selectedCommitHash,
+  commitDiffs,
+  selectCommit,
+  loadBranches,
+  createBranch,
+  switchBranch,
+  deleteBranch,
+} = useGitRepo();
+
+// ─── Multi-repo tabs (lightweight — paths only) ─────────
 const {
   tabs: repoTabs,
   activeTabId,
-  activeTab,
-  tabCount,
   openTab,
   closeTab,
   switchTab,
-  closeOtherTabs,
 } = useRepoTabs();
 
-// ─── Active tab's repo (computed proxies) ───────────────
-// Each computed reads from the active tab's useGitRepo instance.
-// When no tab is active, sensible defaults are returned.
-// Helper to safely access the active repo — avoids optional chaining edge cases.
-function repo() { return activeTab.value?.repo ?? null; }
-
-const repoFolderPath = computed(() => repo()?.folderPath.value ?? null);
-const repoStatus = computed(() => repo()?.status.value ?? null);
-const repoSelectedFile = computed(() => repo()?.selectedFilePath.value ?? null);
-const repoDiff = computed(() => repo()?.diff.value ?? null);
-const repoLog = computed(() => repo()?.log.value ?? []);
-const repoLoading = computed(() => repo()?.loading.value ?? false);
-const repoError = computed({
-  get: () => repo()?.error.value ?? null,
-  set: (v) => { const r = repo(); if (r) r.error.value = v; },
+// When tab changes, load that repo into the single useGitRepo instance
+watch(activeTabId, () => {
+  const tab = repoTabs.value.find((t) => t.id === activeTabId.value);
+  if (tab && tab.path !== repoFolderPath.value) {
+    openRepo(tab.path);
+  }
 });
-const repoSuccess = computed({
-  get: () => repo()?.successMessage.value ?? null,
-  set: (v) => { const r = repo(); if (r) r.successMessage.value = v; },
-});
-const viewMode = computed({
-  get: () => repo()?.viewMode.value ?? ("changes" as ViewMode),
-  set: (v: ViewMode) => { const r = repo(); if (r) r.viewMode.value = v; },
-});
-const hasRepo = computed(() => repo()?.hasRepo.value ?? false);
-const branchDisplay = computed(() => repo()?.branchDisplay.value ?? "");
-const isClean = computed(() => repo()?.isClean.value ?? true);
-const isSelectedFileConflicted = computed(() => repo()?.isSelectedFileConflicted.value ?? false);
-const hasConflicts = computed(() => repo()?.hasConflicts.value ?? false);
-const repoFiles = computed(() => repo()?.allFiles.value ?? []);
-const repoStats = computed(() => repo()?.repoStats.value ?? { staged: 0, unstaged: 0, untracked: 0, conflicted: 0 });
-const commitSummary = computed({
-  get: () => repo()?.commitSummary.value ?? "",
-  set: (v) => { const r = repo(); if (r) r.commitSummary.value = v; },
-});
-const commitDescription = computed({
-  get: () => repo()?.commitDescription.value ?? "",
-  set: (v) => { const r = repo(); if (r) r.commitDescription.value = v; },
-});
-const canCommit = computed(() => repo()?.canCommit.value ?? false);
-const isCommitting = computed(() => repo()?.isCommitting.value ?? false);
-const canPush = computed(() => repo()?.canPush.value ?? false);
-const canPull = computed(() => repo()?.canPull.value ?? false);
-const aheadCount = computed(() => repo()?.aheadCount.value ?? 0);
-const behindCount = computed(() => repo()?.behindCount.value ?? 0);
-const isPushing = computed(() => repo()?.isPushing.value ?? false);
-const isPulling = computed(() => repo()?.isPulling.value ?? false);
-const branches = computed(() => repo()?.branches.value ?? []);
-const branchesLoading = computed(() => repo()?.branchesLoading.value ?? false);
-const isSwitchingBranch = computed({
-  get: () => repo()?.isSwitchingBranch.value ?? false,
-  set: (v) => { const r = repo(); if (r) r.isSwitchingBranch.value = v; },
-});
-const isMerging = computed(() => repo()?.isMerging.value ?? false);
-const selectedCommitHash = computed(() => repo()?.selectedCommitHash.value ?? null);
-const commitDiffs = computed(() => repo()?.commitDiffs.value ?? []);
-
-// ─── Active tab's repo methods (delegated) ──────────────
-const NOP = Promise.resolve();
-function repoRefresh() { return repo()?.refresh() ?? NOP; }
-function repoSelectFile(path: string, staged: boolean) { return repo()?.selectFile(path, staged) ?? NOP; }
-function loadLog() { return repo()?.loadLog() ?? NOP; }
-function stageFiles(paths: string[]) { return repo()?.stageFiles(paths) ?? NOP; }
-function stageAll() { return repo()?.stageAll() ?? NOP; }
-function unstageFiles(paths: string[]) { return repo()?.unstageFiles(paths) ?? NOP; }
-function unstageAll() { return repo()?.unstageAll() ?? NOP; }
-function stagePatch(path: string, hunk: string) { return repo()?.stagePatch(path, hunk) ?? NOP; }
-function unstagePatch(path: string, hunk: string) { return repo()?.unstagePatch(path, hunk) ?? NOP; }
-function doCommit() { return repo()?.commit() ?? NOP; }
-function doAmendCommit(summary: string, description: string) { return repo()?.amendCommit(summary, description) ?? NOP; }
-function doPush() { return repo()?.push() ?? NOP; }
-function doPull(rebase?: boolean) { return repo()?.pull(rebase) ?? NOP; }
-function doMerge(name: string) { return repo()?.mergeBranch(name) ?? NOP; }
-function doMergeContinue() { return repo()?.mergeContinue() ?? NOP; }
-function doAbortMerge() { return repo()?.abortMerge() ?? NOP; }
-function discardFiles(paths: string[]) { return repo()?.discardFiles(paths) ?? NOP; }
-function selectCommit(hash: string) { return repo()?.selectCommit(hash) ?? NOP; }
-function loadBranches() { return repo()?.loadBranches() ?? NOP; }
-function createBranch(name: string) { return repo()?.createBranch(name) ?? NOP; }
-function switchBranch(name: string) { return repo()?.switchBranch(name) ?? NOP; }
-function deleteBranch(name: string) { return repo()?.deleteBranch(name) ?? NOP; }
-function openRepo(path: string) { openTab(path); }
 
 // ─── Computed state ─────────────────────────────────────
 const hasFiles = computed(() => repoFiles.value.length > 0);
@@ -290,6 +271,7 @@ async function handleOpenFolder() {
   const path = await pickFolder();
   if (path) {
     openTab(path);
+    await openRepo(path);
     if (viewMode.value === "history") {
       await loadLog();
     }
@@ -298,6 +280,7 @@ async function handleOpenFolder() {
 
 async function handleOpenPath(path: string) {
   openTab(path);
+  await openRepo(path);
 }
 
 // When switching tabs, load data as needed

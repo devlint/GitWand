@@ -1,5 +1,4 @@
-import { ref, computed, shallowRef, triggerRef } from "vue";
-import { useGitRepo } from "./useGitRepo";
+import { ref, computed } from "vue";
 import { useFolderHistory } from "./useFolderHistory";
 
 /**
@@ -14,37 +13,16 @@ export interface RepoTab {
   path: string;
   /** Display name (last path segment). */
   name: string;
-  /** The full useGitRepo() instance for this tab. */
-  repo: ReturnType<typeof useGitRepo>;
 }
 
 const STORAGE_KEY = "gitwand-open-tabs";
 const MAX_TABS = 10;
 
-/** Read persisted tab paths from localStorage. */
-function loadTabPaths(): string[] {
-  if (typeof localStorage === "undefined") return [];
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((p: unknown) => typeof p === "string");
-  } catch {
-    return [];
-  }
-}
-
 /** Persist open tab paths to localStorage. */
-function saveTabPaths(tabs: RepoTab[]) {
+function save(entries: RepoTab[]) {
   try {
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify(tabs.map((t) => t.path)),
-    );
-  } catch {
-    // Not fatal
-  }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(entries.map((t) => t.path)));
+  } catch { /* not fatal */ }
 }
 
 /** Extract display name from a path. */
@@ -57,29 +35,22 @@ function nameFromPath(path: string): string {
 const tabs = ref<RepoTab[]>([]);
 const activeTabId = ref<number | null>(null);
 
-/** Singleton computed — shared across all callers. */
-const activeTab = computed<RepoTab | null>(() => {
-  if (activeTabId.value === null) return null;
-  return tabs.value.find((t) => t.id === activeTabId.value) ?? null;
-});
-
-const tabCount = computed(() => tabs.value.length);
-
 /**
- * Composable for managing multiple repo tabs.
- * Singleton — shared state across all components.
+ * Lightweight tab tracker — stores only paths and display names.
+ * The actual repo state lives in a single useGitRepo() instance in App.vue,
+ * which reloads when the active tab changes.
  */
 export function useRepoTabs() {
   const { addToHistory } = useFolderHistory();
 
   /**
-   * Open a new repo in a tab. If the repo is already open, switch to it.
-   * Returns the tab that was opened or activated.
+   * Open a path in a tab. If already open, switch to it.
+   * Returns the tab.
    */
   function openTab(path: string): RepoTab {
     const normalized = path.replace(/\/+$/, "") || path;
 
-    // Already open? Just switch to it.
+    // Already open? Just switch.
     const existing = tabs.value.find((t) => t.path === normalized);
     if (existing) {
       activeTabId.value = existing.id;
@@ -88,37 +59,23 @@ export function useRepoTabs() {
 
     // Enforce max tabs
     if (tabs.value.length >= MAX_TABS) {
-      // Close the oldest non-active tab
       const toClose = tabs.value.find((t) => t.id !== activeTabId.value);
-      if (toClose) {
-        closeTab(toClose.id);
-      }
+      if (toClose) closeTab(toClose.id);
     }
 
     const id = nextTabId++;
-    const repo = useGitRepo();
-    const tab: RepoTab = {
-      id,
-      path: normalized,
-      name: nameFromPath(normalized),
-      repo,
-    };
+    const tab: RepoTab = { id, path: normalized, name: nameFromPath(normalized) };
 
     tabs.value.push(tab);
     activeTabId.value = id;
 
-    // Initialize the repo
-    repo.openRepo(normalized);
-
-    // Record in history
     addToHistory(normalized);
-
-    saveTabPaths(tabs.value);
+    save(tabs.value);
     return tab;
   }
 
   /**
-   * Close a tab by ID. If it's the active tab, switch to an adjacent one.
+   * Close a tab by ID. Switches to an adjacent tab if active.
    */
   function closeTab(tabId: number) {
     const index = tabs.value.findIndex((t) => t.id === tabId);
@@ -126,10 +83,8 @@ export function useRepoTabs() {
 
     tabs.value.splice(index, 1);
 
-    // If we closed the active tab, pick a new one
     if (activeTabId.value === tabId) {
       if (tabs.value.length > 0) {
-        // Prefer the tab at the same index, or the one before
         const newIndex = Math.min(index, tabs.value.length - 1);
         activeTabId.value = tabs.value[newIndex].id;
       } else {
@@ -137,7 +92,7 @@ export function useRepoTabs() {
       }
     }
 
-    saveTabPaths(tabs.value);
+    save(tabs.value);
   }
 
   /**
@@ -149,61 +104,11 @@ export function useRepoTabs() {
     }
   }
 
-  /**
-   * Move a tab from one position to another (for drag reorder).
-   */
-  function moveTab(fromIndex: number, toIndex: number) {
-    if (
-      fromIndex < 0 ||
-      fromIndex >= tabs.value.length ||
-      toIndex < 0 ||
-      toIndex >= tabs.value.length
-    ) {
-      return;
-    }
-    const [moved] = tabs.value.splice(fromIndex, 1);
-    tabs.value.splice(toIndex, 0, moved);
-    saveTabPaths(tabs.value);
-  }
-
-  /**
-   * Close all tabs except the specified one.
-   */
-  function closeOtherTabs(keepTabId: number) {
-    tabs.value = tabs.value.filter((t) => t.id === keepTabId);
-    if (tabs.value.length > 0) {
-      activeTabId.value = tabs.value[0].id;
-    } else {
-      activeTabId.value = null;
-    }
-    saveTabPaths(tabs.value);
-  }
-
-  /**
-   * Restore tabs from localStorage on app startup.
-   * Called once from App.vue onMounted.
-   */
-  function restoreTabs() {
-    const paths = loadTabPaths();
-    for (const path of paths) {
-      openTab(path);
-    }
-    // If nothing was restored, no active tab
-    if (tabs.value.length > 0 && activeTabId.value === null) {
-      activeTabId.value = tabs.value[0].id;
-    }
-  }
-
   return {
     tabs,
     activeTabId,
-    activeTab,
-    tabCount,
     openTab,
     closeTab,
     switchTab,
-    moveTab,
-    closeOtherTabs,
-    restoreTabs,
   };
 }
