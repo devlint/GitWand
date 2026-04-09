@@ -113,6 +113,9 @@ const fr = {
     selectFile: "S\u00e9lectionnez un fichier pour voir le diff",
     modeInline: "Inline",
     modeSideBySide: "Côte à côte",
+    collapsedLines: "{0} lignes masquées",
+    prevHunk: "Changement précédent",
+    nextHunk: "Changement suivant",
   },
 
   // ─── CommitLog ──────────────────────────────────────────

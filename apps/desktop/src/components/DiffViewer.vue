@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { ref, computed, nextTick } from "vue";
 import type { GitDiff, DiffHunk, DiffLine } from "../utils/backend";
 import { useI18n } from "../composables/useI18n";
 import type { DiffMode } from "../utils/diffMode";
@@ -91,6 +91,106 @@ const pairedHunks = computed(() => {
 function toggleMode() {
   emit("update:diffMode", props.diffMode === "inline" ? "side-by-side" : "inline");
 }
+
+// ─── Hunk navigation ────────────────────────────────────
+const contentEl = ref<HTMLElement | null>(null);
+const hunkEls = ref<HTMLElement[]>([]);
+const currentHunkIdx = ref(0);
+
+function setHunkRef(el: any, idx: number) {
+  if (el) hunkEls.value[idx] = el as HTMLElement;
+}
+
+const hunkCount = computed(() => props.diff?.hunks.length ?? 0);
+
+function goToHunk(idx: number) {
+  if (idx < 0 || idx >= hunkCount.value) return;
+  currentHunkIdx.value = idx;
+  const el = hunkEls.value[idx];
+  if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function prevHunk() { goToHunk(currentHunkIdx.value - 1); }
+function nextHunk() { goToHunk(currentHunkIdx.value + 1); }
+
+// ─── Collapse unchanged: split long context runs ────────
+const CONTEXT_VISIBLE = 3; // lines to show before/after changes
+
+interface CollapsedSection {
+  type: "lines";
+  lines: DiffLine[];
+}
+interface CollapsedPlaceholder {
+  type: "collapsed";
+  count: number;
+  hunkIdx: number;
+  sectionIdx: number;
+}
+type HunkSection = CollapsedSection | CollapsedPlaceholder;
+
+const expandedSections = ref(new Set<string>());
+
+function sectionKey(hunkIdx: number, sectionIdx: number) {
+  return `${hunkIdx}:${sectionIdx}`;
+}
+
+function toggleSection(hunkIdx: number, sectionIdx: number) {
+  const key = sectionKey(hunkIdx, sectionIdx);
+  const s = new Set(expandedSections.value);
+  if (s.has(key)) s.delete(key); else s.add(key);
+  expandedSections.value = s;
+}
+
+/** Split a hunk's lines into sections, collapsing long context runs */
+function collapseHunk(hunkIdx: number, lines: DiffLine[]): HunkSection[] {
+  if (lines.length <= CONTEXT_VISIBLE * 2 + 2) {
+    return [{ type: "lines", lines }];
+  }
+
+  const sections: HunkSection[] = [];
+  let sectionIdx = 0;
+  let i = 0;
+
+  while (i < lines.length) {
+    // Find runs of context lines
+    if (lines[i].type === "context") {
+      let runStart = i;
+      while (i < lines.length && lines[i].type === "context") i++;
+      const runLen = i - runStart;
+
+      if (runLen > CONTEXT_VISIBLE * 2 + 1) {
+        // Show first N context, collapse middle, show last N context
+        const headEnd = runStart === 0 ? CONTEXT_VISIBLE : CONTEXT_VISIBLE;
+        const tailStart = CONTEXT_VISIBLE;
+
+        sections.push({ type: "lines", lines: lines.slice(runStart, runStart + headEnd) });
+        sectionIdx++;
+
+        const collapsedCount = runLen - headEnd - tailStart;
+        const key = sectionKey(hunkIdx, sectionIdx);
+        if (expandedSections.value.has(key)) {
+          sections.push({ type: "lines", lines: lines.slice(runStart + headEnd, i - tailStart) });
+        } else {
+          sections.push({ type: "collapsed", count: collapsedCount, hunkIdx, sectionIdx });
+        }
+        sectionIdx++;
+
+        sections.push({ type: "lines", lines: lines.slice(i - tailStart, i) });
+        sectionIdx++;
+      } else {
+        sections.push({ type: "lines", lines: lines.slice(runStart, i) });
+        sectionIdx++;
+      }
+    } else {
+      // Non-context: collect until next context
+      let runStart = i;
+      while (i < lines.length && lines[i].type !== "context") i++;
+      sections.push({ type: "lines", lines: lines.slice(runStart, i) });
+      sectionIdx++;
+    }
+  }
+  return sections;
+}
 </script>
 
 <template>
@@ -109,6 +209,16 @@ function toggleMode() {
           <span class="diff-stat diff-stat--del" v-if="totalStats.deletions > 0">
             -{{ totalStats.deletions }}
           </span>
+        </div>
+        <!-- Hunk navigation -->
+        <div class="diff-hunk-nav" v-if="hasContent && hunkCount > 1">
+          <button class="diff-nav-btn" @click="prevHunk" :disabled="currentHunkIdx <= 0" :title="t('diff.prevHunk')">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 2L6 10M6 2L3 5M6 2L9 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <span class="diff-nav-count mono">{{ currentHunkIdx + 1 }}/{{ hunkCount }}</span>
+          <button class="diff-nav-btn" @click="nextHunk" :disabled="currentHunkIdx >= hunkCount - 1" :title="t('diff.nextHunk')">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 10L6 2M6 10L3 7M6 10L9 7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
         </div>
         <!-- Toggle inline / side-by-side -->
         <div class="diff-mode-toggle" v-if="hasContent">
@@ -133,39 +243,48 @@ function toggleMode() {
     </div>
 
     <!-- Diff content: INLINE mode -->
-    <div class="diff-content" v-if="hasContent && diffMode === 'inline'">
+    <div class="diff-content" ref="contentEl" v-if="hasContent && diffMode === 'inline'">
       <div
         v-for="(hunk, hunkIdx) in diff!.hunks"
         :key="hunkIdx"
         class="diff-hunk"
+        :ref="(el) => setHunkRef(el, hunkIdx)"
       >
         <div class="hunk-header mono">
           {{ hunk.header }}
         </div>
 
-        <table class="diff-table">
-          <tbody>
-            <tr
-              v-for="(line, lineIdx) in hunk.lines"
-              :key="lineIdx"
-              class="diff-line"
-              :class="`diff-line--${line.type}`"
-            >
-              <td class="line-no mono">
-                {{ line.oldLineNo ?? '' }}
-              </td>
-              <td class="line-no mono">
-                {{ line.newLineNo ?? '' }}
-              </td>
-              <td class="line-marker mono">
-                {{ line.type === 'add' ? '+' : line.type === 'delete' ? '-' : ' ' }}
-              </td>
-              <td class="line-content mono">
-                <span v-html="hl(line.content) || '\u00a0'"></span>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        <template v-for="(section, sIdx) in collapseHunk(hunkIdx, hunk.lines)" :key="sIdx">
+          <!-- Collapsed placeholder -->
+          <div
+            v-if="section.type === 'collapsed'"
+            class="diff-collapsed"
+            @click="toggleSection(section.hunkIdx, section.sectionIdx)"
+          >
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M4 6h4M6 4v4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+            <span>{{ t('diff.collapsedLines', String(section.count)) }}</span>
+          </div>
+          <!-- Visible lines -->
+          <table v-else class="diff-table">
+            <tbody>
+              <tr
+                v-for="(line, lineIdx) in section.lines"
+                :key="lineIdx"
+                class="diff-line"
+                :class="`diff-line--${line.type}`"
+              >
+                <td class="line-no mono">{{ line.oldLineNo ?? '' }}</td>
+                <td class="line-no mono">{{ line.newLineNo ?? '' }}</td>
+                <td class="line-marker mono">
+                  {{ line.type === 'add' ? '+' : line.type === 'delete' ? '-' : ' ' }}
+                </td>
+                <td class="line-content mono">
+                  <span v-html="hl(line.content) || '\u00a0'"></span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </template>
       </div>
     </div>
 
@@ -513,6 +632,65 @@ function toggleMode() {
 .sbs-cell--add.line-no {
   color: var(--color-success);
   opacity: 0.7;
+}
+
+/* ─── Hunk navigation ────────────────────────────────── */
+.diff-hunk-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.diff-nav-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 4px;
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.diff-nav-btn:hover:not(:disabled) {
+  background: var(--color-border);
+  color: var(--color-text);
+}
+
+.diff-nav-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.diff-nav-count {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  min-width: 28px;
+  text-align: center;
+}
+
+/* ─── Collapsed context ──────────────────────────────── */
+.diff-collapsed {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 4px 16px;
+  font-size: 11px;
+  color: var(--color-accent);
+  background: var(--color-bg-tertiary);
+  cursor: pointer;
+  user-select: none;
+  border-top: 1px dashed var(--color-border);
+  border-bottom: 1px dashed var(--color-border);
+  transition: background 0.12s;
+}
+
+.diff-collapsed:hover {
+  background: var(--color-bg-secondary);
 }
 
 /* ─── Empty states ───────────────────────────────────── */

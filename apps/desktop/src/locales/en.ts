@@ -111,6 +111,9 @@ const en: Locale = {
     selectFile: "Select a file to view the diff",
     modeInline: "Inline",
     modeSideBySide: "Side by side",
+    collapsedLines: "{0} hidden lines",
+    prevHunk: "Previous change",
+    nextHunk: "Next change",
   },
 
   // ─── CommitLog ──────────────────────────────────────────
