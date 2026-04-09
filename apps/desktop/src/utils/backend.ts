@@ -910,6 +910,373 @@ export async function gitDeleteBranch(cwd: string, name: string, force: boolean 
   if (!res.ok) throw new Error(`Failed to delete branch: ${res.status}`);
 }
 
+// ─── Conflict Prevention (Phase 8.1) ───────────────────────
+
+export interface ConflictRisk {
+  branch: string;
+  overlappingFiles: string[];
+  currentChanged: number;
+  targetChanged: number;
+}
+
+/**
+ * Check which files overlap between the current branch and a target branch.
+ * Useful for conflict prevention — alerts when two branches touch the same files.
+ */
+export async function gitConflictCheck(cwd: string, targetBranch: string): Promise<ConflictRisk> {
+  if (isTauri()) {
+    const raw = await tauriInvoke<{
+      branch: string;
+      overlapping_files: string[];
+      current_changed: number;
+      target_changed: number;
+    }>("git_conflict_check", { cwd, targetBranch });
+    return {
+      branch: raw.branch,
+      overlappingFiles: raw.overlapping_files,
+      currentChanged: raw.current_changed,
+      targetChanged: raw.target_changed,
+    };
+  }
+  // Dev mode fallback
+  return { branch: targetBranch, overlappingFiles: [], currentChanged: 0, targetChanged: 0 };
+}
+
+// ─── Cherry-pick (Phase 8.2) ───────────────────────────────
+
+/**
+ * Cherry-pick one or more commits onto the current branch.
+ */
+export async function gitCherryPick(cwd: string, hashes: string[]): Promise<GitPushPullResult> {
+  if (isTauri()) {
+    return tauriInvoke<GitPushPullResult>("git_cherry_pick", { cwd, hashes });
+  }
+  const res = await fetch(`${DEV_SERVER}/api/git-cherry-pick`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, hashes }),
+  });
+  return res.json();
+}
+
+/**
+ * Abort an in-progress cherry-pick.
+ */
+export async function gitCherryPickAbort(cwd: string): Promise<void> {
+  if (isTauri()) {
+    await tauriInvoke("git_cherry_pick_abort", { cwd });
+    return;
+  }
+  await fetch(`${DEV_SERVER}/api/git-cherry-pick-abort`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd }),
+  });
+}
+
+/**
+ * Continue a cherry-pick after resolving conflicts.
+ */
+export async function gitCherryPickContinue(cwd: string): Promise<GitPushPullResult> {
+  if (isTauri()) {
+    return tauriInvoke<GitPushPullResult>("git_cherry_pick_continue", { cwd });
+  }
+  const res = await fetch(`${DEV_SERVER}/api/git-cherry-pick-continue`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd }),
+  });
+  return res.json();
+}
+
+// ─── Stash Manager (Phase 8.2) ─────────────────────────────
+
+export interface StashEntry {
+  index: number;
+  message: string;
+  branch: string;
+  date: string;
+  hash: string;
+}
+
+/**
+ * List all stash entries.
+ */
+export async function gitStashList(cwd: string): Promise<StashEntry[]> {
+  if (isTauri()) {
+    return tauriInvoke<StashEntry[]>("git_stash_list", { cwd });
+  }
+  const res = await fetch(`${DEV_SERVER}/api/git-stash-list?cwd=${encodeURIComponent(cwd)}`);
+  if (!res.ok) throw new Error(`Failed to list stashes: ${res.status}`);
+  return res.json();
+}
+
+/**
+ * Apply a stash by index (without removing it).
+ */
+export async function gitStashApply(cwd: string, index: number): Promise<void> {
+  if (isTauri()) {
+    await tauriInvoke("git_stash_apply", { cwd, index });
+    return;
+  }
+  const res = await fetch(`${DEV_SERVER}/api/git-stash-apply`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, index }),
+  });
+  if (!res.ok) throw new Error(`Failed to apply stash: ${res.status}`);
+}
+
+/**
+ * Drop a stash by index.
+ */
+export async function gitStashDrop(cwd: string, index: number): Promise<void> {
+  if (isTauri()) {
+    await tauriInvoke("git_stash_drop", { cwd, index });
+    return;
+  }
+  const res = await fetch(`${DEV_SERVER}/api/git-stash-drop`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, index }),
+  });
+  if (!res.ok) throw new Error(`Failed to drop stash: ${res.status}`);
+}
+
+/**
+ * Show the diff of a stash entry.
+ */
+export async function gitStashShow(cwd: string, index: number): Promise<string> {
+  if (isTauri()) {
+    return tauriInvoke<string>("git_stash_show", { cwd, index });
+  }
+  const res = await fetch(`${DEV_SERVER}/api/git-stash-show?cwd=${encodeURIComponent(cwd)}&index=${index}`);
+  if (!res.ok) throw new Error(`Failed to show stash: ${res.status}`);
+  const data = await res.json();
+  return data.diff;
+}
+
+// ─── Monorepo Detection (Phase 8.4) ────────────────────────
+
+export interface MonorepoPackage {
+  name: string;
+  path: string;
+  version: string;
+}
+
+export interface MonorepoInfo {
+  isMonorepo: boolean;
+  manager: string;
+  packages: MonorepoPackage[];
+}
+
+/**
+ * Detect monorepo workspaces (pnpm, npm, yarn).
+ */
+export async function detectMonorepo(cwd: string): Promise<MonorepoInfo> {
+  if (isTauri()) {
+    const raw = await tauriInvoke<{
+      is_monorepo: boolean;
+      manager: string;
+      packages: Array<{ name: string; path: string; version: string }>;
+    }>("detect_monorepo", { cwd });
+    return {
+      isMonorepo: raw.is_monorepo,
+      manager: raw.manager,
+      packages: raw.packages,
+    };
+  }
+  // Dev mode fallback
+  return { isMonorepo: false, manager: "", packages: [] };
+}
+
+// ─── Terminal Execution (Phase 8.5) ─────────────────────────
+
+export interface TerminalResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+}
+
+/**
+ * Execute a git command in the repo directory. Returns stdout, stderr, and exit code.
+ */
+export async function gitExec(cwd: string, args: string[]): Promise<TerminalResult> {
+  if (isTauri()) {
+    const raw = await tauriInvoke<{
+      stdout: string;
+      stderr: string;
+      exit_code: number;
+    }>("git_exec", { cwd, args });
+    return {
+      stdout: raw.stdout,
+      stderr: raw.stderr,
+      exitCode: raw.exit_code,
+    };
+  }
+  const res = await fetch(`${DEV_SERVER}/api/git-exec`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, args }),
+  });
+  return res.json();
+}
+
+/**
+ * Get autocomplete suggestions for a partial git command.
+ */
+export async function gitAutocomplete(cwd: string, partial: string): Promise<string[]> {
+  if (isTauri()) {
+    return tauriInvoke<string[]>("git_autocomplete", { cwd, partial });
+  }
+  return [];
+}
+
+// ─── PR Workflow (Phase 8.3) ────────────────────────────────
+
+export interface RemoteInfo {
+  name: string;
+  url: string;
+  provider: "github" | "gitlab" | "bitbucket" | "unknown";
+  owner: string;
+  repo: string;
+}
+
+/**
+ * Get remote info (provider, owner, repo).
+ */
+export async function gitRemoteInfo(cwd: string): Promise<RemoteInfo> {
+  if (isTauri()) {
+    return tauriInvoke<RemoteInfo>("git_remote_info", { cwd });
+  }
+  return { name: "origin", url: "", provider: "unknown", owner: "", repo: "" };
+}
+
+export interface PullRequest {
+  number: number;
+  title: string;
+  state: string;
+  author: string;
+  branch: string;
+  base: string;
+  draft: boolean;
+  createdAt: string;
+  updatedAt: string;
+  url: string;
+  additions: number;
+  deletions: number;
+  labels: string[];
+}
+
+/**
+ * List pull requests (requires `gh` CLI).
+ */
+export async function ghListPrs(cwd: string, state: string = "open"): Promise<PullRequest[]> {
+  if (isTauri()) {
+    const raw = await tauriInvoke<
+      Array<{
+        number: number;
+        title: string;
+        state: string;
+        author: string;
+        branch: string;
+        base: string;
+        draft: boolean;
+        created_at: string;
+        updated_at: string;
+        url: string;
+        additions: number;
+        deletions: number;
+        labels: string[];
+      }>
+    >("gh_list_prs", { cwd, state });
+    return raw.map((pr) => ({
+      number: pr.number,
+      title: pr.title,
+      state: pr.state,
+      author: pr.author,
+      branch: pr.branch,
+      base: pr.base,
+      draft: pr.draft,
+      createdAt: pr.created_at,
+      updatedAt: pr.updated_at,
+      url: pr.url,
+      additions: pr.additions,
+      deletions: pr.deletions,
+      labels: pr.labels,
+    }));
+  }
+  return [];
+}
+
+/**
+ * Create a pull request (requires `gh` CLI).
+ */
+export async function ghCreatePr(
+  cwd: string,
+  title: string,
+  body: string,
+  base: string = "",
+  draft: boolean = false,
+): Promise<PullRequest> {
+  if (isTauri()) {
+    const raw = await tauriInvoke<{
+      number: number;
+      title: string;
+      state: string;
+      author: string;
+      branch: string;
+      base: string;
+      draft: boolean;
+      created_at: string;
+      updated_at: string;
+      url: string;
+      additions: number;
+      deletions: number;
+      labels: string[];
+    }>("gh_create_pr", { cwd, title, body, base, draft });
+    return {
+      number: raw.number,
+      title: raw.title,
+      state: raw.state,
+      author: raw.author,
+      branch: raw.branch,
+      base: raw.base,
+      draft: raw.draft,
+      createdAt: raw.created_at,
+      updatedAt: raw.updated_at,
+      url: raw.url,
+      additions: raw.additions,
+      deletions: raw.deletions,
+      labels: raw.labels,
+    };
+  }
+  throw new Error("PR creation not available in dev mode");
+}
+
+/**
+ * Checkout a PR branch locally (requires `gh` CLI).
+ */
+export async function ghCheckoutPr(cwd: string, number: number): Promise<void> {
+  if (isTauri()) {
+    await tauriInvoke("gh_checkout_pr", { cwd, number });
+    return;
+  }
+  throw new Error("PR checkout not available in dev mode");
+}
+
+/**
+ * Merge a PR (requires `gh` CLI).
+ * @param method - "merge", "squash", or "rebase"
+ */
+export async function ghMergePr(cwd: string, number: number, method: string = "merge"): Promise<void> {
+  if (isTauri()) {
+    await tauriInvoke("gh_merge_pr", { cwd, number, method });
+    return;
+  }
+  throw new Error("PR merge not available in dev mode");
+}
+
 // ─── Merge Preview (Phase 8.1) ─────────────────────────────
 
 /** Résultat brut d'un fichier analysé par preview_merge (Rust) */

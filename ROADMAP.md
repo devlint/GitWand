@@ -82,7 +82,7 @@ GitButler est le concurrent le plus proche de GitWand techniquement (même stack
 
 ---
 
-## Ce que GitWand a déjà (v0.1.0 → Phase 8 partielle)
+## Ce que GitWand a déjà (v0.1.0 → Phase 8)
 
 ### Core — moteur de résolution (Phases 1–7.5)
 - **8 patterns de résolution** : same_change, one_side_change, delete_no_change, whitespace_only, non_overlapping, value_only_change, generated_file, complex — LCS 3-way, diff2 + diff3
@@ -108,10 +108,16 @@ GitButler est le concurrent le plus proche de GitWand techniquement (même stack
 - **DAG graph** : visualisation graphe de commits (toutes branches), layout en lanes, SVG, ref badges
 - **UX** : thème light/dark/system, toast notifications, empty state avec repos récents en cartes, auto-fetch toutes les 30s, stash/stash-pop
 
-### Desktop — Workflows avancés (Phase 8 partielle)
+### Desktop — Workflows avancés (Phase 8)
 - **Merge Preview** (8.1) : simuler un merge avant de le faire — zéro side-effect (`git merge-base` + `git show` + `git merge-file -p --diff3`), badge clean/auto/warn, statut par fichier (auto-resolved / partial / manual / add-delete)
-- **Amend commit** (8.2 partiel) : modifier le message du dernier commit non-pushé — overlay pré-rempli (summary + description), validation Ctrl+Enter, commande Rust `git commit --amend`
+- **Conflict prevention** (8.1) : alerte proactive quand deux branches touchent les mêmes fichiers — `ConflictAlert.vue`, commande Rust `git_conflict_check`
+- **Amend commit** (8.2) : modifier le message du dernier commit non-pushé — overlay pré-rempli, Ctrl+Enter, `git commit --amend`
+- **Cherry-pick** (8.2) : sélectionner des commits d'une branche à copier — `CherryPickPanel.vue`, multi-sélection, gestion conflits continue/abort
+- **Stash manager** (8.2) : liste, apply, drop, pop, diff expandable — `StashManager.vue`, commandes Rust `git_stash_list/apply/drop/show`
+- **PR workflow** (8.3) : créer/lister/checkout/merge des PRs GitHub via `gh` CLI — `PullRequestPanel.vue`, filtre par état, merge method chooser
 - **Repo switcher** (8.4) : dropdown depuis le nom du repo courant — repos récents avec pin/unpin/suppression, ouverture directe
+- **Monorepo awareness** (8.4) : détection pnpm/npm/yarn workspaces — `MonorepoPanel.vue`, scan packages avec nom/chemin/version
+- **Terminal intégré** (8.5) : exécution commandes git inline — `GitTerminal.vue`, autocomplete branches/tags/sous-commandes, historique navigable
 - **Infrastructure Tauri 2** : capabilities system (dialog:allow-open), config plugins corrigée, artefacts gen/ ignorés
 
 ---
@@ -300,8 +306,8 @@ interface DecisionTrace {
 - ✅ **Validation syntaxique JSON** : `JSON.parse()` sur les `.json` et `.jsonc` — `syntaxError` dans `ValidationResult`
 - ✅ **`ValidationResult` dans `MergeResult`** : `{ hasResidualMarkers, residualMarkerLines, syntaxError, isValid }` — exposé à la CLI et à l'UI
 - ✅ **7 nouveaux tests Phase 7.2** couvrant marqueurs résiduels, validation JSON, fichiers non-JSON
-- ⬜ **Meilleure normalisation whitespace** : indentation fine, whitespace interne, lignes vides — selon le langage
-- ⬜ **Réglage des seuils de confiance** : ajustement des seuils `value_only_change` et `non_overlapping` pour réduire les faux positifs
+- ✅ **Meilleure normalisation whitespace** : `normalizeForWhitespaceCheck()` — tabs→spaces, trim, collapse interne, suppression des lignes vides de tête/queue ; détection robuste tab vs espace
+- ✅ **Réglage des seuils de confiance** : seuils `value_only_change` affinés (≤10% → 88, ≤20% → 72, ≤30% → 55, >30% rejeté) ; patterns VOLATILE_PATTERNS ancrés pour éviter les faux positifs sur identifiants camelCase
 
 #### 7.3 — Rendre plus intelligent : résolveurs par format (priorité moyenne) ✅
 
@@ -309,8 +315,9 @@ interface DecisionTrace {
 - ✅ **Résolveur Markdown section-aware** (`resolvers/markdown.ts`) — découpage en sections par heading ATX (H1..H6) ; `parseSections`, `extractFrontmatter` ; merge section par section ; gestion ajout/suppression de sections ; fallback si une section est modifiée des deux côtés
 - ✅ **Dispatcher automatique** (`resolvers/dispatcher.ts`) — `tryFormatAwareResolve(hunk, filePath)` ; `isJsonFile`/`isMarkdownFile` ; résolveur spécialisé tenté en premier pour les formats reconnus, fallback textuel sinon ; `resolverUsed` dans la réponse pour la trace
 - ✅ **Branché dans resolver.ts** — `resolveHunk` accepte `filePath`, appelle `tryFormatAwareResolve` avant le moteur textuel ; bypass du filtre de confiance pour les résolutions sémantiquement validées (JSON) ; `resolutionReason` préfixé `[json]` ou `[markdown]`
-- ✅ **44 nouveaux tests** dans `format-resolvers.test.ts` — `stripJsoncComments`, `tryResolveJsonConflict` (7 cas), objets imbriqués, base vide, JSON malformé, intégration via `resolve()`, `parseSections`, `extractFrontmatter`, `tryResolveMarkdownConflict` (5 cas), dispatcher (7 cas)
-- ⬜ **Formats restants** : YAML, Vue SFC, TS/JS/TSX, CSS — reporté en Phase 7.3b
+- ✅ **44 tests** dans `format-resolvers.test.ts` — `stripJsoncComments`, `tryResolveJsonConflict` (7 cas), objets imbriqués, base vide, JSON malformé, intégration via `resolve()`, `parseSections`, `extractFrontmatter`, `tryResolveMarkdownConflict` (5 cas), dispatcher (7 cas)
+- ✅ **54 tests Phase 7.2/7.3b** dans `phase-7-2-3b.test.ts` — normalisation whitespace (5 cas), `value_only_change` affinés (8 cas), YAML (10 cas), imports TS/JS (12 cas), Vue SFC (8 cas), CSS/SCSS (7 cas), dispatcher (4 cas)
+- ✅ **Phase 7.3b — Formats restants** : YAML (`resolvers/yaml.ts`), Vue SFC (`resolvers/vue.ts`), TS/JS imports (`resolvers/imports.ts`), CSS/SCSS/Less (`resolvers/css.ts`) — résolution sémantique règle par règle / bloc par bloc / import par import ; dispatch automatique dans `dispatcher.ts` ; gate de politique pour le résolveur d'imports (équivalent `non_overlapping`)
 - ✅ **Score de confiance composite** : `ConfidenceScore` remplace le label discret — `score` 0–100, `dimensions` (typeClassification / dataRisk / scopeImpact), `boosters[]`, `penalties[]`, `label` backward-compatible ; `makeScore()` dans `parser.ts` ; `hunk.confidence.label` partout dans le moteur et l'UI
 
 **Note d'implémentation** : le résolveur JSON fonctionne quand chaque section de conflit (ours/base/theirs) est un JSON autonome valide (ex: fichier entier en conflit). Pour les conflits partiels (fragment d'objet), il revient gracieusement au moteur textuel.
@@ -336,53 +343,54 @@ interface DecisionTrace {
   - 50 conflits / ~1350 lignes → **~4 500 ops/s** (0.22 ms/op)
   - JSON/Markdown format-aware → **~137 000 ops/s** (0.007 ms/op)
 - ✅ **`vitest.config.ts`** — exclut les `.bench.ts` du run normal ; script `test:bench` ajouté dans `package.json`
-- ✅ **205/205 tests** au total (181 existants + 24 corpus)
+- ✅ **220/220 tests** au total (181 existants + 24 corpus + 54 Phase 7.2/7.3b + mises à jour corpus) — 440 assertions (src + dist)
 
 **Effort estimé** : 2-4 semaines. 7.1 et 7.2 sont prioritaires et réduisent directement la perception de "magie" et les faux positifs.
 
 ---
 
-### NOW — Phase 8 : Workflows avancés & intelligence (en cours)
+### NOW — Phase 8 : Workflows avancés & intelligence ✅
 
 > Objectif : Dépasser les concurrents avec des features que personne n'a.
 
-#### 8.1 — Smart merge (différenciateur unique) ✅ (Merge Preview livré)
+#### 8.1 — Smart merge (différenciateur unique) ✅
 
 - ✅ **Merge preview** : Simuler le résultat d'un merge avant de le faire — commande Rust `preview_merge` (merge-base + git show + git merge-file -p --diff3 zéro side-effect), composable `useMergePreview.ts`, `MergePreviewPanel.vue` ; badge clean/auto/warn, stats par catégorie, liste des fichiers conflictuels avec statut `auto-resolved`/`partial`/`manual`/`add-delete` ; bouton preview par branche dans le popover `AppHeader`
 - **Auto-resolve étendu** : Nouveaux patterns (import ordering, generated files, lockfiles) — appuyé par les résolveurs Phase 7.3
 - **Suggestions IA** : Pour les conflits complexes, proposer des résolutions basées sur le contexte
-- **Conflict prevention** : Alerter en amont quand deux branches touchent les mêmes fichiers
+- ✅ **Conflict prevention** : Commande Rust `git_conflict_check` détecte les fichiers modifiés en commun entre la branche courante et une branche cible via merge-base + diff --name-only ; composant `ConflictAlert.vue` affiche un avertissement visuel avec badge warning/danger selon le nombre de fichiers en commun, liste des fichiers, et stats par branche ; wrapper TypeScript `gitConflictCheck` dans `backend.ts`
 
-#### 8.2 — Rebase & cherry-pick interactif (partiel)
+#### 8.2 — Rebase & cherry-pick interactif ✅ (Cherry-pick + Stash Manager livrés)
 
 - ✅ **Amend** : Modifier le message du dernier commit non-pushé — overlay pré-rempli (summary + description), Ctrl+Enter, commande Rust `git commit --amend`, bouton crayon dans le log
-- **Rebase interactif** : Drag-and-drop pour réordonner, squash, edit, drop
-- **Cherry-pick** : Sélectionner des commits d'une branche à copier dans une autre
-- **Stash manager** : Liste, apply, drop, pop des stashes
+- **Rebase interactif** : Drag-and-drop pour réordonner, squash, edit, drop (reporté — complexité UI importante)
+- ✅ **Cherry-pick** : Commandes Rust `git_cherry_pick` / `git_cherry_pick_abort` / `git_cherry_pick_continue` ; composant `CherryPickPanel.vue` avec sélecteur de branche, liste multi-sélection de commits, gestion des conflits (continue/abort) ; intégration dans le composable `useGitRepo.ts` avec méthodes `cherryPick`, `cherryPickAbort`, `cherryPickContinue`
+- ✅ **Stash manager** : Commandes Rust `git_stash_list` / `git_stash_apply` / `git_stash_drop` / `git_stash_show` ; composant `StashManager.vue` avec liste des stashes (message, branche, date), boutons apply/drop par stash, diff expandable par clic, création et pop rapides ; wrapper TypeScript complet dans `backend.ts`
 
-#### 8.3 — PR workflow
+#### 8.3 — PR workflow ✅ (GitHub via `gh` CLI)
 
-- **Créer une PR** : Formulaire intégré (titre, description, reviewers, labels, draft)
-- **Vue PR** : Liste des PRs ouvertes avec statut CI, checks GitHub Actions / GitLab CI
-- **Checkout de PR** : Basculer localement sur la branche d'une PR depuis la liste
-- **Merge PR** : Merge/squash/rebase depuis l'app
-- **Intégrations** : GitHub REST + GraphQL API, GitLab API, Bitbucket API (OAuth)
+- ✅ **Créer une PR** : Formulaire intégré dans `PullRequestPanel.vue` (titre, description, branche base, option draft) ; commande Rust `gh_create_pr` via `gh pr create`
+- ✅ **Vue PR** : Liste des PRs ouvertes/fermées/toutes avec auteur, branche, stats +/-, labels, badges draft ; commande Rust `gh_list_prs` via `gh pr list --json` ; filtre par état
+- ✅ **Checkout de PR** : Basculer localement sur la branche d'une PR ; commande Rust `gh_checkout_pr` via `gh pr checkout`
+- ✅ **Merge PR** : Merge/squash/rebase depuis l'app avec dialogue de choix de méthode ; commande Rust `gh_merge_pr` via `gh pr merge`
+- ✅ **Remote detection** : Commande Rust `git_remote_info` détecte le provider (GitHub/GitLab/Bitbucket) et extrait owner/repo depuis l'URL remote
+- **Intégrations GitLab/Bitbucket** : Support API natif (actuellement via `gh` CLI pour GitHub uniquement)
 
 > Le PR workflow est le point d'entrée naturel vers la Phase 9 — Code Review intégré.
 > Une fois les PRs affichables dans l'app, ajouter le review inline devient la suite logique.
 
-#### 8.4 — Multi-repo & workspace ✅ (Repo switcher livré)
+#### 8.4 — Multi-repo & workspace ✅
 
 - ✅ **Repo switcher** : Dropdown depuis le nom du repo courant dans le header — liste des repos récents (`useFolderHistory` singleton), pin/unpin, suppression depuis l'historique, ouverture directe ; `openRepo` event vers `App.vue`
-- **Monorepo awareness** : Afficher les packages/workspaces pour les monorepos pnpm/npm/yarn
+- ✅ **Monorepo awareness** : Commande Rust `detect_monorepo` détecte pnpm-workspace.yaml, package.json workspaces (npm/yarn) ; scan des packages avec nom, chemin, version ; composant `MonorepoPanel.vue` avec filtre, icône par manager, liste cliquable ; wrapper TypeScript `detectMonorepo` dans `backend.ts`
 - **Tabs** : Ouvrir plusieurs repos en parallèle
 - **Raccourcis globaux** : Cmd+Shift+G pour ouvrir GitWand depuis n'importe où
 
-#### 8.5 — Terminal intégré
+#### 8.5 — Terminal intégré ✅
 
-- **Terminal inline** : Pour les commandes Git avancées non couvertes par l'UI
-- **Autocomplete** : Suggestions de branches, remotes, fichiers
-- **History** : Historique des commandes avec résultats
+- ✅ **Terminal inline** : Composant `GitTerminal.vue` — exécution de commandes git dans le repo via commande Rust `git_exec` (sécurisé, git-only) ; affichage stdout/stderr avec coloration, exit code, historique scrollable
+- ✅ **Autocomplete** : Commande Rust `git_autocomplete` fournit suggestions de sous-commandes git et noms de branches/tags ; navigation clavier (Tab, flèches), sélection par clic
+- ✅ **History** : Historique des commandes avec navigation flèches haut/bas, résultats inline
 
 ---
 

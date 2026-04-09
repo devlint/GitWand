@@ -1173,6 +1173,817 @@ fn git_stash_pop(cwd: String) -> Result<(), String> {
     Ok(())
 }
 
+// ─── Conflict Prevention (Phase 8.1) ─────────────────────
+
+#[derive(serde::Serialize)]
+struct ConflictRisk {
+    /// Branch being compared
+    branch: String,
+    /// Files modified on both branches since merge-base
+    overlapping_files: Vec<String>,
+    /// Total files changed on current branch
+    current_changed: usize,
+    /// Total files changed on target branch
+    target_changed: usize,
+}
+
+/// Detect files that overlap between the current branch and a target branch.
+/// Returns the list of files modified on both sides since their merge-base.
+#[tauri::command]
+fn git_conflict_check(cwd: String, target_branch: String) -> Result<ConflictRisk, String> {
+    let git = git_binary();
+
+    // Find merge-base
+    let base_out = std::process::Command::new(&git)
+        .args(["merge-base", "HEAD", &target_branch])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("merge-base failed: {}", e))?;
+    if !base_out.status.success() {
+        return Err(format!(
+            "Cannot find merge-base between HEAD and {}: {}",
+            target_branch,
+            String::from_utf8_lossy(&base_out.stderr)
+        ));
+    }
+    let base = String::from_utf8_lossy(&base_out.stdout).trim().to_string();
+
+    let ours_files = git_changed_files(&git, &cwd, &base, "HEAD")?;
+    let theirs_files = git_changed_files(&git, &cwd, &base, &target_branch)?;
+
+    let ours_set: std::collections::HashSet<&String> = ours_files.iter().collect();
+    let overlapping: Vec<String> = theirs_files
+        .iter()
+        .filter(|f| ours_set.contains(f))
+        .cloned()
+        .collect();
+
+    Ok(ConflictRisk {
+        branch: target_branch,
+        overlapping_files: overlapping,
+        current_changed: ours_files.len(),
+        target_changed: theirs_files.len(),
+    })
+}
+
+// ─── Cherry-pick (Phase 8.2) ─────────────────────────────
+
+/// Cherry-pick one or more commits onto the current branch.
+#[tauri::command]
+fn git_cherry_pick(cwd: String, hashes: Vec<String>) -> Result<GitPushPullResult, String> {
+    let git = git_binary();
+    let mut args = vec!["cherry-pick".to_string()];
+    args.extend(hashes);
+
+    let output = std::process::Command::new(&git)
+        .args(&args)
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("Failed to run git cherry-pick: {}", e))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    let has_conflicts = stderr.contains("CONFLICT") || stderr.contains("conflict");
+
+    Ok(GitPushPullResult {
+        success: output.status.success(),
+        message: if output.status.success() { stdout } else { stderr },
+        conflicts: Some(has_conflicts),
+    })
+}
+
+/// Abort an in-progress cherry-pick.
+#[tauri::command]
+fn git_cherry_pick_abort(cwd: String) -> Result<(), String> {
+    let output = std::process::Command::new(git_binary())
+        .args(["cherry-pick", "--abort"])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("Failed to abort cherry-pick: {}", e))?;
+    if !output.status.success() {
+        return Err(format!(
+            "cherry-pick --abort failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    Ok(())
+}
+
+/// Continue a cherry-pick after resolving conflicts.
+#[tauri::command]
+fn git_cherry_pick_continue(cwd: String) -> Result<GitPushPullResult, String> {
+    let output = std::process::Command::new(git_binary())
+        .args(["cherry-pick", "--continue"])
+        .current_dir(&cwd)
+        .env("GIT_EDITOR", "true") // skip editor for commit message
+        .output()
+        .map_err(|e| format!("Failed to continue cherry-pick: {}", e))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    Ok(GitPushPullResult {
+        success: output.status.success(),
+        message: if output.status.success() { stdout } else { stderr },
+        conflicts: None,
+    })
+}
+
+// ─── Stash Manager (Phase 8.2) ───────────────────────────
+
+#[derive(serde::Serialize)]
+struct StashEntry {
+    index: usize,
+    message: String,
+    branch: String,
+    date: String,
+    hash: String,
+}
+
+/// List all stash entries.
+#[tauri::command]
+fn git_stash_list(cwd: String) -> Result<Vec<StashEntry>, String> {
+    let output = std::process::Command::new(git_binary())
+        .args(["stash", "list", "--format=%H%x00%gd%x00%gs%x00%ai"])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("Failed to list stashes: {}", e))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut entries = Vec::new();
+
+    for (i, line) in stdout.lines().enumerate() {
+        let parts: Vec<&str> = line.split('\0').collect();
+        if parts.len() >= 4 {
+            // Parse "On <branch>: <message>" from the stash subject
+            let subject = parts[2];
+            let (branch, message) = if subject.starts_with("On ") {
+                if let Some(colon_pos) = subject.find(": ") {
+                    (subject[3..colon_pos].to_string(), subject[colon_pos + 2..].to_string())
+                } else {
+                    (String::new(), subject.to_string())
+                }
+            } else {
+                (String::new(), subject.to_string())
+            };
+
+            entries.push(StashEntry {
+                index: i,
+                message,
+                branch,
+                date: parts[3].to_string(),
+                hash: parts[0].to_string(),
+            });
+        }
+    }
+
+    Ok(entries)
+}
+
+/// Apply a stash by index without removing it.
+#[tauri::command]
+fn git_stash_apply(cwd: String, index: usize) -> Result<(), String> {
+    let stash_ref = format!("stash@{{{}}}", index);
+    let output = std::process::Command::new(git_binary())
+        .args(["stash", "apply", &stash_ref])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("Failed to apply stash: {}", e))?;
+    if !output.status.success() {
+        return Err(format!(
+            "git stash apply failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    Ok(())
+}
+
+/// Drop a stash by index.
+#[tauri::command]
+fn git_stash_drop(cwd: String, index: usize) -> Result<(), String> {
+    let stash_ref = format!("stash@{{{}}}", index);
+    let output = std::process::Command::new(git_binary())
+        .args(["stash", "drop", &stash_ref])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("Failed to drop stash: {}", e))?;
+    if !output.status.success() {
+        return Err(format!(
+            "git stash drop failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    Ok(())
+}
+
+/// Show the diff of a stash entry.
+#[tauri::command]
+fn git_stash_show(cwd: String, index: usize) -> Result<String, String> {
+    let stash_ref = format!("stash@{{{}}}", index);
+    let output = std::process::Command::new(git_binary())
+        .args(["stash", "show", "-p", &stash_ref])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("Failed to show stash: {}", e))?;
+    if !output.status.success() {
+        return Err(format!(
+            "git stash show failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+// ─── Monorepo Awareness (Phase 8.4) ──────────────────────
+
+#[derive(serde::Serialize)]
+struct MonorepoPackage {
+    name: String,
+    path: String,
+    version: String,
+}
+
+#[derive(serde::Serialize)]
+struct MonorepoInfo {
+    is_monorepo: bool,
+    manager: String, // "pnpm", "npm", "yarn", ""
+    packages: Vec<MonorepoPackage>,
+}
+
+/// Detect monorepo workspaces (pnpm, npm, yarn).
+#[tauri::command]
+fn detect_monorepo(cwd: String) -> Result<MonorepoInfo, String> {
+    let cwd_path = std::path::Path::new(&cwd);
+
+    // Check pnpm-workspace.yaml
+    let pnpm_ws = cwd_path.join("pnpm-workspace.yaml");
+    if pnpm_ws.exists() {
+        let content = std::fs::read_to_string(&pnpm_ws)
+            .map_err(|e| format!("Failed to read pnpm-workspace.yaml: {}", e))?;
+        let packages = find_workspace_packages(&cwd, &content, "pnpm");
+        return Ok(MonorepoInfo {
+            is_monorepo: true,
+            manager: "pnpm".to_string(),
+            packages,
+        });
+    }
+
+    // Check package.json workspaces (npm/yarn)
+    let pkg_json = cwd_path.join("package.json");
+    if pkg_json.exists() {
+        let content = std::fs::read_to_string(&pkg_json)
+            .map_err(|e| format!("Failed to read package.json: {}", e))?;
+        if content.contains("\"workspaces\"") {
+            let packages = find_workspace_packages(&cwd, &content, "npm");
+            if !packages.is_empty() {
+                return Ok(MonorepoInfo {
+                    is_monorepo: true,
+                    manager: if cwd_path.join("yarn.lock").exists() {
+                        "yarn".to_string()
+                    } else {
+                        "npm".to_string()
+                    },
+                    packages,
+                });
+            }
+        }
+    }
+
+    Ok(MonorepoInfo {
+        is_monorepo: false,
+        manager: String::new(),
+        packages: Vec::new(),
+    })
+}
+
+/// Scan workspace glob patterns to find packages.
+fn find_workspace_packages(cwd: &str, config_content: &str, manager: &str) -> Vec<MonorepoPackage> {
+    let mut globs: Vec<String> = Vec::new();
+
+    if manager == "pnpm" {
+        // Parse YAML-like: look for lines starting with "  - "
+        for line in config_content.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("- ") {
+                let pattern = trimmed[2..].trim().trim_matches('\'').trim_matches('"');
+                globs.push(pattern.to_string());
+            }
+        }
+    } else {
+        // Parse JSON workspaces array — simple extraction
+        if let Some(start) = config_content.find("\"workspaces\"") {
+            let rest = &config_content[start..];
+            if let Some(arr_start) = rest.find('[') {
+                if let Some(arr_end) = rest[arr_start..].find(']') {
+                    let arr = &rest[arr_start + 1..arr_start + arr_end];
+                    for item in arr.split(',') {
+                        let pattern = item.trim().trim_matches('"').trim_matches('\'');
+                        if !pattern.is_empty() {
+                            globs.push(pattern.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let cwd_path = std::path::Path::new(cwd);
+    let mut packages = Vec::new();
+
+    for pattern in &globs {
+        // Resolve glob pattern to actual directories
+        let base_pattern = pattern.replace("/*", "").replace("/**", "");
+        let base_dir = cwd_path.join(&base_pattern);
+        if base_dir.is_dir() {
+            if let Ok(entries) = std::fs::read_dir(&base_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    let pkg_json_path = path.join("package.json");
+                    if pkg_json_path.exists() {
+                        if let Ok(pkg_content) = std::fs::read_to_string(&pkg_json_path) {
+                            let name = extract_json_string(&pkg_content, "name")
+                                .unwrap_or_else(|| entry.file_name().to_string_lossy().to_string());
+                            let version = extract_json_string(&pkg_content, "version")
+                                .unwrap_or_else(|| "0.0.0".to_string());
+                            let rel_path = path.strip_prefix(cwd_path)
+                                .map(|p| p.to_string_lossy().to_string())
+                                .unwrap_or_else(|_| path.to_string_lossy().to_string());
+                            packages.push(MonorepoPackage { name, path: rel_path, version });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    packages.sort_by(|a, b| a.name.cmp(&b.name));
+    packages
+}
+
+/// Simple JSON string extractor (no serde_json dependency needed).
+fn extract_json_string(json: &str, key: &str) -> Option<String> {
+    let needle = format!("\"{}\"", key);
+    let pos = json.find(&needle)?;
+    let rest = &json[pos + needle.len()..];
+    let colon = rest.find(':')?;
+    let after_colon = rest[colon + 1..].trim_start();
+    if !after_colon.starts_with('"') {
+        return None;
+    }
+    let value_start = 1;
+    let value_end = after_colon[value_start..].find('"')?;
+    Some(after_colon[value_start..value_start + value_end].to_string())
+}
+
+// ─── PR Workflow (Phase 8.3) ──────────────────────────────
+
+#[derive(serde::Serialize)]
+struct RemoteInfo {
+    name: String,
+    url: String,
+    /// "github", "gitlab", "bitbucket", or "unknown"
+    provider: String,
+    /// Owner/org (e.g. "dendreo")
+    owner: String,
+    /// Repo name (e.g. "GitWand")
+    repo: String,
+}
+
+/// Detect the remote provider and extract owner/repo from the URL.
+#[tauri::command]
+fn git_remote_info(cwd: String) -> Result<RemoteInfo, String> {
+    let output = std::process::Command::new(git_binary())
+        .args(["remote", "-v"])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("Failed to get remote info: {}", e))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // Parse the first fetch remote
+    for line in stdout.lines() {
+        if !line.contains("(fetch)") {
+            continue;
+        }
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() < 2 {
+            continue;
+        }
+        let name = parts[0].to_string();
+        let url = parts[1].to_string();
+
+        // Determine provider
+        let provider = if url.contains("github.com") {
+            "github"
+        } else if url.contains("gitlab.com") || url.contains("gitlab") {
+            "gitlab"
+        } else if url.contains("bitbucket.org") || url.contains("bitbucket") {
+            "bitbucket"
+        } else {
+            "unknown"
+        };
+
+        // Extract owner/repo from URL
+        // Handles: https://github.com/owner/repo.git and git@github.com:owner/repo.git
+        let (owner, repo) = parse_remote_owner_repo(&url);
+
+        return Ok(RemoteInfo {
+            name,
+            url,
+            provider: provider.to_string(),
+            owner,
+            repo,
+        });
+    }
+
+    Err("No remote found".to_string())
+}
+
+fn parse_remote_owner_repo(url: &str) -> (String, String) {
+    // SSH format: git@github.com:owner/repo.git
+    if let Some(colon_pos) = url.find(':') {
+        if url.starts_with("git@") {
+            let path = &url[colon_pos + 1..];
+            let clean = path.trim_end_matches(".git");
+            let parts: Vec<&str> = clean.splitn(2, '/').collect();
+            if parts.len() == 2 {
+                return (parts[0].to_string(), parts[1].to_string());
+            }
+        }
+    }
+    // HTTPS format: https://github.com/owner/repo.git
+    if let Some(host_end) = url.find("://") {
+        let path = &url[host_end + 3..];
+        // Skip the hostname
+        if let Some(slash_pos) = path.find('/') {
+            let clean = path[slash_pos + 1..].trim_end_matches(".git");
+            let parts: Vec<&str> = clean.splitn(2, '/').collect();
+            if parts.len() == 2 {
+                return (parts[0].to_string(), parts[1].to_string());
+            }
+        }
+    }
+    (String::new(), String::new())
+}
+
+#[derive(serde::Serialize)]
+struct PullRequest {
+    number: i64,
+    title: String,
+    state: String,
+    author: String,
+    branch: String,
+    base: String,
+    draft: bool,
+    created_at: String,
+    updated_at: String,
+    url: String,
+    additions: i64,
+    deletions: i64,
+    labels: Vec<String>,
+}
+
+/// List open pull requests using `gh` CLI.
+#[tauri::command]
+fn gh_list_prs(cwd: String, state: String) -> Result<Vec<PullRequest>, String> {
+    let st = if state.is_empty() { "open" } else { &state };
+    let output = std::process::Command::new("gh")
+        .args([
+            "pr", "list",
+            "--state", st,
+            "--json", "number,title,state,author,headRefName,baseRefName,isDraft,createdAt,updatedAt,url,additions,deletions,labels",
+            "--limit", "50",
+        ])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("Failed to run gh pr list (is GitHub CLI installed?): {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("gh pr list failed: {}", stderr));
+    }
+
+    // Parse JSON output from gh CLI
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    parse_gh_pr_json(&stdout)
+}
+
+fn parse_gh_pr_json(json: &str) -> Result<Vec<PullRequest>, String> {
+    // Minimal JSON array parser for gh pr list output
+    // Each element has: number, title, state, author{login}, headRefName, baseRefName, isDraft,
+    // createdAt, updatedAt, url, additions, deletions, labels[{name}]
+    let trimmed = json.trim();
+    if trimmed == "[]" || trimmed.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut prs = Vec::new();
+
+    // Split by objects — find each {...} block
+    let mut depth = 0;
+    let mut obj_start = None;
+    for (i, ch) in trimmed.char_indices() {
+        match ch {
+            '{' => {
+                if depth == 1 {
+                    obj_start = Some(i);
+                }
+                depth += 1;
+            }
+            '}' => {
+                depth -= 1;
+                if depth == 1 {
+                    if let Some(start) = obj_start {
+                        let obj = &trimmed[start..=i];
+                        if let Ok(pr) = parse_single_pr(obj) {
+                            prs.push(pr);
+                        }
+                    }
+                    obj_start = None;
+                }
+            }
+            '[' if depth == 0 => { depth = 1; }
+            ']' if depth == 1 => { depth = 0; }
+            _ => {}
+        }
+    }
+
+    Ok(prs)
+}
+
+fn parse_single_pr(json: &str) -> Result<PullRequest, String> {
+    let get_str = |key: &str| -> String {
+        extract_json_string(json, key).unwrap_or_default()
+    };
+    let get_num = |key: &str| -> i64 {
+        let needle = format!("\"{}\"", key);
+        if let Some(pos) = json.find(&needle) {
+            let rest = &json[pos + needle.len()..];
+            if let Some(colon) = rest.find(':') {
+                let after = rest[colon + 1..].trim_start();
+                let end = after.find(|c: char| !c.is_ascii_digit() && c != '-').unwrap_or(after.len());
+                return after[..end].parse().unwrap_or(0);
+            }
+        }
+        0
+    };
+    let get_bool = |key: &str| -> bool {
+        let needle = format!("\"{}\"", key);
+        if let Some(pos) = json.find(&needle) {
+            let rest = &json[pos + needle.len()..];
+            if let Some(colon) = rest.find(':') {
+                let after = rest[colon + 1..].trim_start();
+                return after.starts_with("true");
+            }
+        }
+        false
+    };
+
+    // Parse author.login
+    let author = if let Some(pos) = json.find("\"author\"") {
+        let rest = &json[pos..];
+        if let Some(login_pos) = rest.find("\"login\"") {
+            let login_rest = &rest[login_pos..];
+            extract_json_string(login_rest, "login").unwrap_or_default()
+        } else {
+            String::new()
+        }
+    } else {
+        String::new()
+    };
+
+    // Parse labels array
+    let mut labels = Vec::new();
+    if let Some(pos) = json.find("\"labels\"") {
+        let rest = &json[pos..];
+        if let Some(arr_start) = rest.find('[') {
+            if let Some(arr_end) = rest[arr_start..].find(']') {
+                let arr = &rest[arr_start..arr_start + arr_end + 1];
+                // Find all "name" values inside
+                let mut search_start = 0;
+                while let Some(name_pos) = arr[search_start..].find("\"name\"") {
+                    let abs_pos = search_start + name_pos;
+                    if let Some(val) = extract_json_string(&arr[abs_pos..], "name") {
+                        labels.push(val);
+                    }
+                    search_start = abs_pos + 6;
+                }
+            }
+        }
+    }
+
+    Ok(PullRequest {
+        number: get_num("number"),
+        title: get_str("title"),
+        state: get_str("state"),
+        author,
+        branch: get_str("headRefName"),
+        base: get_str("baseRefName"),
+        draft: get_bool("isDraft"),
+        created_at: get_str("createdAt"),
+        updated_at: get_str("updatedAt"),
+        url: get_str("url"),
+        additions: get_num("additions"),
+        deletions: get_num("deletions"),
+        labels,
+    })
+}
+
+/// Create a pull request using `gh` CLI.
+#[tauri::command]
+fn gh_create_pr(
+    cwd: String,
+    title: String,
+    body: String,
+    base: String,
+    draft: bool,
+) -> Result<PullRequest, String> {
+    let mut args = vec![
+        "pr".to_string(),
+        "create".to_string(),
+        "--title".to_string(),
+        title,
+        "--body".to_string(),
+        body,
+    ];
+
+    if !base.is_empty() {
+        args.push("--base".to_string());
+        args.push(base);
+    }
+
+    if draft {
+        args.push("--draft".to_string());
+    }
+
+    // Add JSON output
+    // Note: gh pr create doesn't support --json, but returns the URL
+    let output = std::process::Command::new("gh")
+        .args(&args)
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("Failed to create PR: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("gh pr create failed: {}", stderr));
+    }
+
+    let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+    // Fetch the PR details using the URL
+    let view_output = std::process::Command::new("gh")
+        .args([
+            "pr", "view",
+            &url,
+            "--json", "number,title,state,author,headRefName,baseRefName,isDraft,createdAt,updatedAt,url,additions,deletions,labels",
+        ])
+        .current_dir(&cwd)
+        .output();
+
+    if let Ok(view) = view_output {
+        if view.status.success() {
+            let json = String::from_utf8_lossy(&view.stdout);
+            if let Ok(pr) = parse_single_pr(&json) {
+                return Ok(pr);
+            }
+        }
+    }
+
+    // Fallback: return minimal info
+    Ok(PullRequest {
+        number: 0,
+        title: String::new(),
+        state: "open".to_string(),
+        author: String::new(),
+        branch: String::new(),
+        base: String::new(),
+        draft: false,
+        created_at: String::new(),
+        updated_at: String::new(),
+        url,
+        additions: 0,
+        deletions: 0,
+        labels: Vec::new(),
+    })
+}
+
+/// Checkout a PR branch locally using `gh` CLI.
+#[tauri::command]
+fn gh_checkout_pr(cwd: String, number: i64) -> Result<(), String> {
+    let output = std::process::Command::new("gh")
+        .args(["pr", "checkout", &number.to_string()])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("Failed to checkout PR: {}", e))?;
+    if !output.status.success() {
+        return Err(format!(
+            "gh pr checkout failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    Ok(())
+}
+
+/// Merge a PR using `gh` CLI.
+#[tauri::command]
+fn gh_merge_pr(cwd: String, number: i64, method: String) -> Result<(), String> {
+    let merge_flag = match method.as_str() {
+        "squash" => "--squash",
+        "rebase" => "--rebase",
+        _ => "--merge",
+    };
+
+    let output = std::process::Command::new("gh")
+        .args(["pr", "merge", &number.to_string(), merge_flag, "--delete-branch"])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("Failed to merge PR: {}", e))?;
+    if !output.status.success() {
+        return Err(format!(
+            "gh pr merge failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    Ok(())
+}
+
+// ─── Terminal Command Execution (Phase 8.5) ───────────────
+
+#[derive(serde::Serialize)]
+struct TerminalResult {
+    stdout: String,
+    stderr: String,
+    exit_code: i32,
+}
+
+/// Execute a git command in the repo directory. Only allows git commands for safety.
+#[tauri::command]
+fn git_exec(cwd: String, args: Vec<String>) -> Result<TerminalResult, String> {
+    // Safety: only allow git subcommands
+    if args.is_empty() {
+        return Err("No arguments provided".to_string());
+    }
+
+    let output = std::process::Command::new(git_binary())
+        .args(&args)
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("Failed to execute git command: {}", e))?;
+
+    Ok(TerminalResult {
+        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        exit_code: output.status.code().unwrap_or(-1),
+    })
+}
+
+/// List git subcommands and branch names for terminal autocomplete.
+#[tauri::command]
+fn git_autocomplete(cwd: String, partial: String) -> Result<Vec<String>, String> {
+    let mut suggestions = Vec::new();
+
+    // If the partial looks like it's completing a subcommand (no spaces yet)
+    if !partial.contains(' ') {
+        let subcommands = [
+            "add", "bisect", "blame", "branch", "checkout", "cherry-pick",
+            "clone", "commit", "config", "diff", "fetch", "grep", "init",
+            "log", "merge", "mv", "pull", "push", "rebase", "remote",
+            "reset", "restore", "revert", "rm", "show", "stash", "status",
+            "switch", "tag",
+        ];
+        for cmd in &subcommands {
+            if cmd.starts_with(&partial) {
+                suggestions.push(cmd.to_string());
+            }
+        }
+    } else {
+        // Completing an argument — suggest branch names and tags
+        let parts: Vec<&str> = partial.splitn(2, ' ').collect();
+        let arg_prefix = if parts.len() > 1 {
+            parts[1].split_whitespace().last().unwrap_or("")
+        } else {
+            ""
+        };
+
+        // Get branch names
+        let output = std::process::Command::new(git_binary())
+            .args(["for-each-ref", "--format=%(refname:short)", "refs/heads/", "refs/tags/"])
+            .current_dir(&cwd)
+            .output();
+
+        if let Ok(out) = output {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            for name in stdout.lines() {
+                if name.starts_with(arg_prefix) {
+                    suggestions.push(name.to_string());
+                }
+            }
+        }
+    }
+
+    Ok(suggestions)
+}
+
 // ─── Read .gitwandrc ──────────────────────────────────────
 
 /// Lit la configuration .gitwandrc du repo (Phase 7.4).
@@ -1530,6 +2341,22 @@ pub fn run() {
             set_git_config,
             read_gitwandrc,
             preview_merge,
+            git_conflict_check,
+            git_cherry_pick,
+            git_cherry_pick_abort,
+            git_cherry_pick_continue,
+            git_stash_list,
+            git_stash_apply,
+            git_stash_drop,
+            git_stash_show,
+            detect_monorepo,
+            git_remote_info,
+            gh_list_prs,
+            gh_create_pr,
+            gh_checkout_pr,
+            gh_merge_pr,
+            git_exec,
+            git_autocomplete,
         ])
         .run(tauri::generate_context!())
         .expect("error while running GitWand");

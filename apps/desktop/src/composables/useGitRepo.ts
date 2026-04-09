@@ -21,12 +21,19 @@ import {
   gitCreateBranch,
   gitSwitchBranch,
   gitDeleteBranch,
+  gitCherryPick,
+  gitCherryPickAbort,
+  gitCherryPickContinue,
+  gitStashList,
+  gitStashApply,
+  gitStashDrop,
   type GitStatus,
   type GitDiff,
   type GitLogEntry,
   type FileChange,
   type GitPushPullResult,
   type GitBranch,
+  type StashEntry,
 } from "../utils/backend";
 
 export type ViewMode = "changes" | "history" | "graph";
@@ -576,6 +583,98 @@ export function useGitRepo() {
     }
   }
 
+  // ─── Cherry-pick (Phase 8.2) ─────────────────────────────
+
+  const isCherryPicking = ref(false);
+
+  async function cherryPick(hashes: string[]) {
+    if (!folderPath.value || hashes.length === 0) return;
+    isCherryPicking.value = true;
+    try {
+      const result = await gitCherryPick(folderPath.value, hashes);
+      if (result.conflicts) {
+        error.value = "Cherry-pick has conflicts. Resolve them then continue.";
+      } else if (!result.success) {
+        error.value = `cherry-pick: ${result.message}`;
+      } else {
+        successMessage.value = "cherry-pick-done";
+      }
+      await refresh();
+      await loadLog();
+    } catch (err: any) {
+      error.value = `cherry-pick: ${err.message}`;
+    } finally {
+      isCherryPicking.value = false;
+    }
+  }
+
+  async function cherryPickAbort() {
+    if (!folderPath.value) return;
+    try {
+      await gitCherryPickAbort(folderPath.value);
+      successMessage.value = "cherry-pick-aborted";
+      await refresh();
+    } catch (err: any) {
+      error.value = `cherry-pick abort: ${err.message}`;
+    }
+  }
+
+  async function cherryPickContinue() {
+    if (!folderPath.value) return;
+    isCherryPicking.value = true;
+    try {
+      const result = await gitCherryPickContinue(folderPath.value);
+      if (result.success) {
+        successMessage.value = "cherry-pick-done";
+      } else {
+        error.value = `cherry-pick continue: ${result.message}`;
+      }
+      await refresh();
+      await loadLog();
+    } catch (err: any) {
+      error.value = `cherry-pick continue: ${err.message}`;
+    } finally {
+      isCherryPicking.value = false;
+    }
+  }
+
+  // ─── Stash Manager (Phase 8.2) ─────────────────────────
+
+  const stashes = ref<StashEntry[]>([]);
+  const stashesLoading = ref(false);
+
+  async function loadStashes() {
+    if (!folderPath.value) return;
+    stashesLoading.value = true;
+    try {
+      stashes.value = await gitStashList(folderPath.value);
+    } catch (err: any) {
+      error.value = `stash list: ${err.message}`;
+    } finally {
+      stashesLoading.value = false;
+    }
+  }
+
+  async function applyStash(index: number) {
+    if (!folderPath.value) return;
+    try {
+      await gitStashApply(folderPath.value, index);
+      await refresh();
+    } catch (err: any) {
+      error.value = `stash apply: ${err.message}`;
+    }
+  }
+
+  async function dropStash(index: number) {
+    if (!folderPath.value) return;
+    try {
+      await gitStashDrop(folderPath.value, index);
+      await loadStashes();
+    } catch (err: any) {
+      error.value = `stash drop: ${err.message}`;
+    }
+  }
+
   // ─── Discard ────────────────────────────────────────────
 
   // ─── Branches ────────────────────────────────────────────
@@ -700,5 +799,16 @@ export function useGitRepo() {
     createBranch,
     switchBranch,
     deleteBranch,
+    // Cherry-pick (Phase 8.2)
+    isCherryPicking,
+    cherryPick,
+    cherryPickAbort,
+    cherryPickContinue,
+    // Stash Manager (Phase 8.2)
+    stashes,
+    stashesLoading,
+    loadStashes,
+    applyStash,
+    dropStash,
   };
 }
