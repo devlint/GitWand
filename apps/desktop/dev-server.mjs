@@ -705,6 +705,81 @@ const server = createServer(async (req, res) => {
       }
     }
 
+    // ─── Git blame ────────────────────────────────────────
+    if (method === "GET" && pathname === "/api/git-blame") {
+      const cwd = url.searchParams.get("cwd");
+      const filePath = url.searchParams.get("path");
+      if (!cwd || !filePath) return jsonResponse(res, { error: "cwd and path required" }, 400);
+      try {
+        const resolvedCwd = resolve(cwd);
+        const raw = execSync(
+          `git blame --porcelain -- "${filePath}"`,
+          { cwd: resolvedCwd, encoding: "utf-8", maxBuffer: 10 * 1024 * 1024, shell: true },
+        );
+        const lines = raw.split("\n");
+        const blameLines = [];
+        let i = 0;
+        while (i < lines.length) {
+          const headerMatch = lines[i].match(/^([0-9a-f]{40})\s+(\d+)\s+(\d+)/);
+          if (!headerMatch) { i++; continue; }
+          const hash = headerMatch[1];
+          const origLine = parseInt(headerMatch[2], 10);
+          const finalLine = parseInt(headerMatch[3], 10);
+          i++;
+          let author = "";
+          let authorDate = "";
+          let summary = "";
+          while (i < lines.length && !lines[i].startsWith("\t")) {
+            if (lines[i].startsWith("author ")) author = lines[i].slice(7);
+            else if (lines[i].startsWith("author-time ")) authorDate = lines[i].slice(12);
+            else if (lines[i].startsWith("summary ")) summary = lines[i].slice(8);
+            i++;
+          }
+          const content = i < lines.length ? lines[i].slice(1) : "";
+          i++;
+          blameLines.push({ hash: hash.slice(0, 8), hashFull: hash, finalLine, origLine, author, authorDate, summary, content });
+        }
+        return jsonResponse(res, blameLines);
+      } catch (err) {
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
+
+    // ─── Git file log ───────────────────────────────────────
+    if (method === "GET" && pathname === "/api/git-file-log") {
+      const cwd = url.searchParams.get("cwd");
+      const filePath = url.searchParams.get("path");
+      const count = parseInt(url.searchParams.get("count") || "50", 10);
+      if (!cwd || !filePath) return jsonResponse(res, { error: "cwd and path required" }, 400);
+      try {
+        const resolvedCwd = resolve(cwd);
+        const format = "%H%n%h%n%an%n%aI%n%s%n%b%n---END---";
+        const raw = execSync(
+          `git log --follow -n ${count} --format="${format}" -- "${filePath}"`,
+          { cwd: resolvedCwd, encoding: "utf-8", maxBuffer: 10 * 1024 * 1024, shell: true },
+        );
+        const entries = [];
+        const blocks = raw.split("---END---\n");
+        for (const block of blocks) {
+          const trimmed = block.trim();
+          if (!trimmed) continue;
+          const parts = trimmed.split("\n");
+          if (parts.length < 5) continue;
+          entries.push({
+            hashFull: parts[0],
+            hash: parts[1],
+            author: parts[2],
+            date: parts[3],
+            message: parts[4],
+            body: parts.slice(5).join("\n").trim(),
+          });
+        }
+        return jsonResponse(res, entries);
+      } catch (err) {
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
+
     jsonResponse(res, { error: "Not found" }, 404);
   } catch (err) {
     jsonResponse(res, { error: err.message }, 500);

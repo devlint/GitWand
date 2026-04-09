@@ -15,6 +15,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   "update:diffMode": [mode: DiffMode];
+  "open-file-history": [path: string];
 }>();
 
 const hasContent = computed(() => {
@@ -239,6 +240,15 @@ function collapseHunk(hunkIdx: number, lines: DiffLine[]): HunkSection[] {
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="1" y="1" width="5" height="12" rx="1" stroke="currentColor" stroke-width="1.2" fill="none"/><rect x="8" y="1" width="5" height="12" rx="1" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>
           </button>
         </div>
+        <!-- File history button -->
+        <button
+          v-if="filePath"
+          class="diff-history-btn"
+          @click="emit('open-file-history', filePath!)"
+          :title="t('diff.fileHistory')"
+        >
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.2"/><path d="M7 4.5V7l2 1.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
       </div>
     </div>
 
@@ -632,6 +642,26 @@ function collapseHunk(hunkIdx: number, lines: DiffLine[]): HunkSection[] {
 .sbs-cell--add.line-no {
   color: var(--color-success);
   opacity: 0.7;
+}
+
+/* ─── File history button ────────────────────────────── */
+.diff-history-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 24px;
+  border: none;
+  border-radius: 4px;
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.diff-history-btn:hover {
+  background: var(--color-border);
+  color: var(--color-accent);
 }
 
 /* ─── Hunk navigation ────────────────────────────────── */

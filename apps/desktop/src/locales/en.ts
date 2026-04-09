@@ -114,6 +114,7 @@ const en: Locale = {
     collapsedLines: "{0} hidden lines",
     prevHunk: "Previous change",
     nextHunk: "Next change",
+    fileHistory: "File history",
   },
 
   // ─── CommitLog ──────────────────────────────────────────

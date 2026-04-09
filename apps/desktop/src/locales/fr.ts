@@ -116,6 +116,7 @@ const fr = {
     collapsedLines: "{0} lignes masquées",
     prevHunk: "Changement précédent",
     nextHunk: "Changement suivant",
+    fileHistory: "Historique du fichier",
   },
 
   // ─── CommitLog ──────────────────────────────────────────

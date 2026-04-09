@@ -553,6 +553,56 @@ export async function getGitShow(cwd: string, hash: string): Promise<GitDiff[]> 
   return res.json();
 }
 
+// ─── Git blame ───────────────────────────────────────────────
+
+export interface BlameLine {
+  hash: string;
+  hashFull: string;
+  finalLine: number;
+  origLine: number;
+  author: string;
+  authorDate: string;
+  summary: string;
+  content: string;
+}
+
+/**
+ * Get blame info for a file.
+ */
+export async function getGitBlame(cwd: string, path: string): Promise<BlameLine[]> {
+  if (isTauri()) {
+    return tauriInvoke<BlameLine[]>("git_blame", { cwd, path });
+  }
+  const qs = `?cwd=${encodeURIComponent(cwd)}&path=${encodeURIComponent(path)}`;
+  const res = await fetch(`${DEV_SERVER}/api/git-blame${qs}`);
+  if (!res.ok) throw new Error(`Failed to get blame: ${res.status}`);
+  return res.json();
+}
+
+// ─── Git file log ────────────────────────────────────────────
+
+export interface FileLogEntry {
+  hashFull: string;
+  hash: string;
+  author: string;
+  date: string;
+  message: string;
+  body: string;
+}
+
+/**
+ * Get commit history for a specific file.
+ */
+export async function getGitFileLog(cwd: string, path: string, count = 50): Promise<FileLogEntry[]> {
+  if (isTauri()) {
+    return tauriInvoke<FileLogEntry[]>("git_file_log", { cwd, path, count });
+  }
+  const qs = `?cwd=${encodeURIComponent(cwd)}&path=${encodeURIComponent(path)}&count=${count}`;
+  const res = await fetch(`${DEV_SERVER}/api/git-file-log${qs}`);
+  if (!res.ok) throw new Error(`Failed to get file log: ${res.status}`);
+  return res.json();
+}
+
 // ─── Git discard ──────────────────────────────────────────────
 
 /**

@@ -7,6 +7,7 @@ import FolderPicker from "./components/FolderPicker.vue";
 import RepoSidebar from "./components/RepoSidebar.vue";
 import DiffViewer from "./components/DiffViewer.vue";
 import CommitDiffViewer from "./components/CommitDiffViewer.vue";
+import FileHistoryViewer from "./components/FileHistoryViewer.vue";
 import SettingsPanel from "./components/SettingsPanel.vue";
 import { getPersistedDiffMode, persistDiffMode, type DiffMode } from "./utils/diffMode";
 import { useGitWand } from "./composables/useGitWand";
@@ -252,6 +253,17 @@ function onViewModeChange(mode: "changes" | "history") {
   viewMode.value = mode;
 }
 
+// ─── File history viewer ────────────────────────────────
+const fileHistoryPath = ref<string | null>(null);
+
+function openFileHistory(path: string) {
+  fileHistoryPath.value = path;
+}
+
+function closeFileHistory() {
+  fileHistoryPath.value = null;
+}
+
 // ─── Settings panel ─────────────────────────────────────
 const showSettings = ref(false);
 const diffMode = ref<DiffMode>(getPersistedDiffMode());
@@ -424,7 +436,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
             </button>
           </div>
 
-          <!-- Changes view: conflict editor or diff viewer -->
+          <!-- Changes view: conflict editor, file history, or diff viewer -->
           <template v-if="viewMode === 'changes'">
             <MergeEditor
               v-if="showingMergeEditor && mergeSelectedFile"
@@ -433,12 +445,20 @@ onUnmounted(() => window.removeEventListener("keydown", onKeyDown));
               @resolve-hunk="(path, idx, choice) => handleResolveHunk(path, idx, choice)"
               @resolve-hunk-custom="(path, idx, content) => handleResolveHunkCustom(path, idx, content)"
             />
+            <FileHistoryViewer
+              v-else-if="fileHistoryPath && repoFolderPath"
+              :file-path="fileHistoryPath"
+              :cwd="repoFolderPath"
+              @close="closeFileHistory"
+              @select-commit="(hash) => { closeFileHistory(); selectCommit(hash); viewMode = 'history'; }"
+            />
             <DiffViewer
               v-else
               :diff="repoDiff"
               :file-path="repoSelectedFile"
               :diff-mode="diffMode"
               @update:diff-mode="onDiffModeChange"
+              @open-file-history="openFileHistory"
             />
           </template>
 
