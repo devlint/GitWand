@@ -1241,6 +1241,218 @@ fn find_json_key_value_start(json: &str, key: &str) -> Option<String> {
     }
 }
 
+// ─── Merge Preview (Phase 8.1) ───────────────────────────
+//
+// Calcule un aperçu "sans effet de bord" de ce qui se passerait
+// si on mergait `source_branch` dans HEAD.
+//
+// Algorithme :
+//   1. git merge-base HEAD <branch>  → ancêtre commun
+//   2. git diff --name-only <base> HEAD   → fichiers modifiés côté ours
+//   3. git diff --name-only <base> <branch> → fichiers modifiés côté theirs
+//   4. intersection → fichiers potentiellement en conflit
+//   5. Pour chaque fichier : git show <ref>:<file> pour les 3 versions
+//   6. git merge-file -p (dans un répertoire temp) → contenu avec marqueurs
+//   7. Retourner la liste brute — le résolveur tourne côté frontend (TypeScript)
+
+#[derive(serde::Serialize, Clone)]
+pub struct FileMergePreview {
+    /// Chemin relatif du fichier dans le repo
+    file_path: String,
+    /// Contenu avec marqueurs de conflit (sortie de git merge-file -p)
+    /// Vide si les deux versions sont identiques après merge
+    conflict_content: String,
+    /// True si le contenu contient des marqueurs de conflit Git
+    has_conflicts: bool,
+    /// True si le fichier n'existe que d'un côté (ajout/suppression unilatérale)
+    is_add_delete: bool,
+}
+
+#[tauri::command]
+fn preview_merge(cwd: String, source_branch: String) -> Result<Vec<FileMergePreview>, String> {
+    let git = git_binary();
+
+    // 1. Merge-base
+    let base_out = std::process::Command::new(&git)
+        .args(["merge-base", "HEAD", &source_branch])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("merge-base failed: {}", e))?;
+    if !base_out.status.success() {
+        return Err(format!(
+            "Cannot find merge-base: {}",
+            String::from_utf8_lossy(&base_out.stderr)
+        ));
+    }
+    let base = String::from_utf8_lossy(&base_out.stdout).trim().to_string();
+
+    // 2. Fichiers modifiés dans HEAD depuis base
+    let ours_files = git_changed_files(&git, &cwd, &base, "HEAD")?;
+    // 3. Fichiers modifiés dans source_branch depuis base
+    let theirs_files = git_changed_files(&git, &cwd, &base, &source_branch)?;
+
+    // 4. Intersection : modifiés des deux côtés
+    let ours_set: std::collections::HashSet<&String> = ours_files.iter().collect();
+    let both_modified: Vec<&String> = theirs_files.iter().filter(|f| ours_set.contains(f)).collect();
+
+    // 5. Fichiers supprimés/ajoutés unilatéralement
+    let theirs_set: std::collections::HashSet<&String> = theirs_files.iter().collect();
+    let only_ours: Vec<&String> = ours_files.iter().filter(|f| !theirs_set.contains(f)).collect();
+    let only_theirs: Vec<&String> = theirs_files.iter().filter(|f| !ours_set.contains(f)).collect();
+
+    let tmp = std::env::temp_dir();
+    let mut results: Vec<FileMergePreview> = Vec::new();
+
+    // 6. Pour chaque fichier modifié des deux côtés → tenter git merge-file
+    for file_path in both_modified {
+        let preview = merge_file_preview(&git, &cwd, &base, "HEAD", &source_branch, file_path, &tmp);
+        results.push(preview);
+    }
+
+    // Fichiers seulement modifiés côté ours → pas de conflit
+    for file_path in only_ours {
+        results.push(FileMergePreview {
+            file_path: file_path.clone(),
+            conflict_content: String::new(),
+            has_conflicts: false,
+            is_add_delete: false,
+        });
+    }
+
+    // Fichiers seulement modifiés côté theirs → pas de conflit (theirs gagne)
+    for file_path in only_theirs {
+        results.push(FileMergePreview {
+            file_path: file_path.clone(),
+            conflict_content: String::new(),
+            has_conflicts: false,
+            is_add_delete: false,
+        });
+    }
+
+    // Trier : conflits en premier, puis par chemin
+    results.sort_by(|a, b| {
+        b.has_conflicts.cmp(&a.has_conflicts)
+            .then(a.file_path.cmp(&b.file_path))
+    });
+
+    Ok(results)
+}
+
+/// Retourne la liste des fichiers modifiés entre `base` et `rev` (noms relatifs uniquement).
+fn git_changed_files(git: &str, cwd: &str, base: &str, rev: &str) -> Result<Vec<String>, String> {
+    let out = std::process::Command::new(git)
+        .args(["diff", "--name-only", base, rev])
+        .current_dir(cwd)
+        .output()
+        .map_err(|e| format!("diff --name-only failed: {}", e))?;
+
+    Ok(String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| l.to_string())
+        .collect())
+}
+
+/// Tente de merger les trois versions d'un fichier avec git merge-file.
+/// Retourne le contenu résultant (avec ou sans marqueurs de conflit).
+fn merge_file_preview(
+    git: &str,
+    cwd: &str,
+    base_ref: &str,
+    ours_ref: &str,
+    theirs_ref: &str,
+    file_path: &str,
+    tmp: &std::path::Path,
+) -> FileMergePreview {
+    /// Lire le contenu d'un fichier à une révision donnée. Retourne None si absent.
+    fn git_show_file(git: &str, cwd: &str, rev: &str, path: &str) -> Option<Vec<u8>> {
+        let spec = format!("{}:{}", rev, path);
+        let out = std::process::Command::new(git)
+            .args(["show", &spec])
+            .current_dir(cwd)
+            .output()
+            .ok()?;
+        if out.status.success() { Some(out.stdout) } else { None }
+    }
+
+    let base_bytes = git_show_file(git, cwd, base_ref, file_path);
+    let ours_bytes = git_show_file(git, cwd, ours_ref, file_path);
+    let theirs_bytes = git_show_file(git, cwd, theirs_ref, file_path);
+
+    // Si un côté n'a pas le fichier → add/delete conflict
+    match (&ours_bytes, &theirs_bytes) {
+        (None, _) | (_, None) => {
+            return FileMergePreview {
+                file_path: file_path.to_string(),
+                conflict_content: String::new(),
+                has_conflicts: true,
+                is_add_delete: true,
+            };
+        }
+        _ => {}
+    }
+
+    // Écrire les trois versions dans des fichiers temporaires
+    let prefix = file_path.replace(['/', '\\', '.'], "_");
+    let tmp_base  = tmp.join(format!("{}_base.tmp", prefix));
+    let tmp_ours  = tmp.join(format!("{}_ours.tmp", prefix));
+    let tmp_theirs = tmp.join(format!("{}_theirs.tmp", prefix));
+
+    let write_or_empty = |path: &std::path::Path, bytes: &Option<Vec<u8>>| {
+        let content = bytes.as_deref().unwrap_or(b"");
+        std::fs::write(path, content)
+    };
+
+    if write_or_empty(&tmp_base, &base_bytes).is_err()
+        || write_or_empty(&tmp_ours, &ours_bytes).is_err()
+        || write_or_empty(&tmp_theirs, &theirs_bytes).is_err()
+    {
+        return FileMergePreview {
+            file_path: file_path.to_string(),
+            conflict_content: String::new(),
+            has_conflicts: true,
+            is_add_delete: false,
+        };
+    }
+
+    // git merge-file -p <ours> <base> <theirs>  (note: ordre ours/base/theirs)
+    let merge_out = std::process::Command::new("git")
+        .args([
+            "merge-file",
+            "-p",
+            "--diff3",
+            tmp_ours.to_str().unwrap_or(""),
+            tmp_base.to_str().unwrap_or(""),
+            tmp_theirs.to_str().unwrap_or(""),
+        ])
+        .output();
+
+    // Nettoyer
+    let _ = std::fs::remove_file(&tmp_base);
+    let _ = std::fs::remove_file(&tmp_ours);
+    let _ = std::fs::remove_file(&tmp_theirs);
+
+    match merge_out {
+        Ok(out) => {
+            let content = String::from_utf8_lossy(&out.stdout).to_string();
+            // git merge-file retourne exit code 1 si conflit, 0 si merge propre
+            let has_conflicts = !out.status.success() || content.contains("<<<<<<<");
+            FileMergePreview {
+                file_path: file_path.to_string(),
+                conflict_content: content,
+                has_conflicts,
+                is_add_delete: false,
+            }
+        }
+        Err(_) => FileMergePreview {
+            file_path: file_path.to_string(),
+            conflict_content: String::new(),
+            has_conflicts: true,
+            is_add_delete: false,
+        },
+    }
+}
+
 // ─── Open in external editor ──────────────────────────────
 
 #[tauri::command]
@@ -1296,6 +1508,7 @@ pub fn run() {
             open_in_editor,
             set_git_config,
             read_gitwandrc,
+            preview_merge,
         ])
         .run(tauri::generate_context!())
         .expect("error while running GitWand");

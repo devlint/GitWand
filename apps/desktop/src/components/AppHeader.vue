@@ -3,6 +3,9 @@ import { ref, computed, onMounted, onUnmounted } from "vue";
 import type { Theme } from "../composables/useTheme";
 import type { GitBranch } from "../utils/backend";
 import { useI18n } from "../composables/useI18n";
+import { useMergePreview } from "../composables/useMergePreview";
+import MergePreviewPanel from "./MergePreviewPanel.vue";
+import { useFolderHistory } from "../composables/useFolderHistory";
 
 const { t } = useI18n();
 
@@ -24,10 +27,13 @@ const props = defineProps<{
   branchesLoading: boolean;
   isSwitchingBranch: boolean;
   isMerging: boolean;
+  /** Path to the current repository (for merge preview) */
+  cwd: string;
 }>();
 
 const emit = defineEmits<{
   openFolder: [];
+  openRepo: [path: string];
   toggleTheme: [];
   push: [];
   pull: [];
@@ -38,6 +44,24 @@ const emit = defineEmits<{
   deleteBranch: [name: string];
   loadBranches: [];
 }>();
+
+// ─── Recent repos popover (Phase 8.4) ────────────────
+const { history: recentRepos, togglePin, removeFromHistory } = useFolderHistory();
+
+const showRecentPopover = ref(false);
+
+function toggleRecentPopover() {
+  showRecentPopover.value = !showRecentPopover.value;
+}
+
+function closeRecentPopover() {
+  showRecentPopover.value = false;
+}
+
+function openRecentRepo(path: string) {
+  emit("openRepo", path);
+  closeRecentPopover();
+}
 
 // ─── Branch popover ──────────────────────────────────
 const showBranchPopover = ref(false);
@@ -147,6 +171,33 @@ function handleMerge(name: string) {
   closeMergePopover();
 }
 
+// ─── Merge Preview (Phase 8.1) ──────────────────────────
+const {
+  loading: previewLoading,
+  error: previewError,
+  summary: previewSummary,
+  conflictingFiles: previewConflicts,
+  computePreview,
+  reset: resetPreview,
+} = useMergePreview(() => props.cwd);
+
+const previewingBranch = ref<string | null>(null);
+
+async function togglePreview(branchName: string) {
+  if (previewingBranch.value === branchName) {
+    previewingBranch.value = null;
+    resetPreview();
+    return;
+  }
+  previewingBranch.value = branchName;
+  await computePreview(branchName);
+}
+
+function closePreview() {
+  previewingBranch.value = null;
+  resetPreview();
+}
+
 // Close popovers on click outside
 function onDocClick(e: MouseEvent) {
   const target = e.target as HTMLElement;
@@ -155,6 +206,9 @@ function onDocClick(e: MouseEvent) {
   }
   if (showMergePopover.value && !target.closest(".merge-popover-wrapper")) {
     closeMergePopover();
+  }
+  if (showRecentPopover.value && !target.closest(".recent-popover-wrapper")) {
+    closeRecentPopover();
   }
 }
 
@@ -171,9 +225,78 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
       </svg>
       <h1 class="title">GitWand</h1>
 
-      <!-- Clickable folder name next to logo -->
+      <!-- Folder name + recent repos popover -->
+      <div class="recent-popover-wrapper" v-if="hasRepo && folderName">
+        <button
+          class="folder-trigger"
+          @click="toggleRecentPopover"
+          :title="t('header.openFolder')"
+        >
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M2 3.5A1.5 1.5 0 013.5 2H6l1.5 2H12.5A1.5 1.5 0 0114 5.5v7a1.5 1.5 0 01-1.5 1.5h-9A1.5 1.5 0 012 12.5v-9z" stroke="currentColor" stroke-width="1.5" fill="none"/>
+          </svg>
+          <span class="folder-name">{{ folderName }}</span>
+          <svg class="folder-chevron" :class="{ 'folder-chevron--open': showRecentPopover }" width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">
+            <path d="M2.5 3.5l2.5 3 2.5-3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+
+        <div v-if="showRecentPopover" class="recent-popover">
+          <!-- Open new folder option -->
+          <button class="rp-open-btn" @click="emit('openFolder'); closeRecentPopover()">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M2 3.5A1.5 1.5 0 013.5 2H6l1.5 2H12.5A1.5 1.5 0 0114 5.5v7a1.5 1.5 0 01-1.5 1.5h-9A1.5 1.5 0 012 12.5v-9z" stroke="currentColor" stroke-width="1.5" fill="none"/>
+            </svg>
+            <span>{{ t('header.openFolder') }}</span>
+          </button>
+
+          <div class="rp-divider" v-if="recentRepos.length > 0"></div>
+
+          <!-- Recent repos list -->
+          <div class="rp-list" v-if="recentRepos.length > 0">
+            <div class="rp-label">{{ t('empty.recentTitle') }}</div>
+            <ul>
+              <li
+                v-for="entry in recentRepos"
+                :key="entry.path"
+                class="rp-item"
+                :class="{ 'rp-item--active': entry.path === cwd }"
+              >
+                <button class="rp-item-name" @click="openRecentRepo(entry.path)" :title="entry.path">
+                  <svg v-if="entry.pinned" width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true" class="rp-pin-icon">
+                    <path d="M10 2L14 6L9 11L8 14L5 11L2 14L5 11L2 8L5 7L10 2Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+                  </svg>
+                  <span class="rp-item-repo-name">{{ entry.name }}</span>
+                </button>
+                <div class="rp-item-actions">
+                  <button
+                    class="rp-action"
+                    @click.stop="togglePin(entry.path)"
+                    :title="entry.pinned ? t('folderPicker.unpin') : t('folderPicker.pin')"
+                  >
+                    <svg width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                      <path d="M10 2L14 6L9 11L8 14L5 11L2 14L5 11L2 8L5 7L10 2Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+                    </svg>
+                  </button>
+                  <button
+                    class="rp-action rp-action--remove"
+                    @click.stop="removeFromHistory(entry.path)"
+                    :title="t('folderPicker.remove')"
+                  >
+                    <svg width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                      <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                    </svg>
+                  </button>
+                </div>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- Folder button when no repo open (no dropdown needed) -->
       <button
-        v-if="hasRepo && folderName"
+        v-else-if="!hasRepo"
         class="folder-trigger"
         @click="emit('openFolder')"
         :title="t('header.openFolder')"
@@ -181,7 +304,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
           <path d="M2 3.5A1.5 1.5 0 013.5 2H6l1.5 2H12.5A1.5 1.5 0 0114 5.5v7a1.5 1.5 0 01-1.5 1.5h-9A1.5 1.5 0 012 12.5v-9z" stroke="currentColor" stroke-width="1.5" fill="none"/>
         </svg>
-        <span class="folder-name">{{ folderName }}</span>
+        <span class="folder-name">{{ t('header.open') }}</span>
       </button>
     </div>
 
@@ -246,30 +369,51 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
               <div class="bp-section" v-if="localBranches.length > 0">
                 <div class="bp-section-label">{{ t('branches.local') }}</div>
                 <ul class="bp-list">
-                  <li
-                    v-for="branch in localBranches"
-                    :key="branch.name"
-                    class="bp-item"
-                    :class="{ 'bp-item--current': branch.isCurrent }"
-                    @click="!branch.isCurrent && handleBranchSwitch(branch.name)"
-                  >
-                    <span class="bp-current-dot" v-if="branch.isCurrent"></span>
-                    <span class="bp-item-name mono">{{ branch.name }}</span>
-                    <span class="bp-item-meta muted" v-if="branch.ahead > 0 || branch.behind > 0">
-                      <span v-if="branch.ahead > 0">&uarr;{{ branch.ahead }}</span>
-                      <span v-if="branch.behind > 0">&darr;{{ branch.behind }}</span>
-                    </span>
-                    <button
-                      v-if="!branch.isCurrent"
-                      class="bp-item-delete"
-                      @click.stop="emit('deleteBranch', branch.name)"
-                      :title="t('branches.deleteLabel')"
+                  <template v-for="branch in localBranches" :key="branch.name">
+                    <li
+                      class="bp-item"
+                      :class="{ 'bp-item--current': branch.isCurrent }"
+                      @click="!branch.isCurrent && handleBranchSwitch(branch.name)"
                     >
-                      <svg width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                        <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                      </svg>
-                    </button>
-                  </li>
+                      <span class="bp-current-dot" v-if="branch.isCurrent"></span>
+                      <span class="bp-item-name mono">{{ branch.name }}</span>
+                      <span class="bp-item-meta muted" v-if="branch.ahead > 0 || branch.behind > 0">
+                        <span v-if="branch.ahead > 0">&uarr;{{ branch.ahead }}</span>
+                        <span v-if="branch.behind > 0">&darr;{{ branch.behind }}</span>
+                      </span>
+                      <button
+                        v-if="!branch.isCurrent"
+                        class="bp-item-preview"
+                        :class="{ 'bp-item-preview--active': previewingBranch === branch.name }"
+                        @click.stop="togglePreview(branch.name)"
+                        :title="t('branches.previewMerge')"
+                      >
+                        <svg width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                          <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5"/>
+                          <path d="M8 5v3l2 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                        </svg>
+                      </button>
+                      <button
+                        v-if="!branch.isCurrent"
+                        class="bp-item-delete"
+                        @click.stop="emit('deleteBranch', branch.name)"
+                        :title="t('branches.deleteLabel')"
+                      >
+                        <svg width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                          <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                        </svg>
+                      </button>
+                    </li>
+                    <li v-if="previewingBranch === branch.name" class="bp-preview-row">
+                      <MergePreviewPanel
+                        :loading="previewLoading"
+                        :error="previewError"
+                        :summary="previewSummary"
+                        :conflicting-files="previewConflicts"
+                        @close="closePreview"
+                      />
+                    </li>
+                  </template>
                 </ul>
               </div>
               <!-- Remote -->
@@ -529,8 +673,8 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
   top: calc(100% + 6px);
   left: 50%;
   transform: translateX(-50%);
-  width: 320px;
-  max-height: 420px;
+  width: 340px;
+  max-height: 520px;
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
   border-radius: 10px;
@@ -709,6 +853,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
   flex-shrink: 0;
 }
 
+.bp-item-preview,
 .bp-item-delete {
   display: flex;
   align-items: center;
@@ -719,16 +864,33 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
   color: var(--color-text-muted);
   background: none;
   opacity: 0;
-  transition: opacity 0.1s, color 0.1s;
+  transition: opacity 0.1s, color 0.1s, background 0.1s;
 }
 
+.bp-item:hover .bp-item-preview,
 .bp-item:hover .bp-item-delete {
   opacity: 0.6;
+}
+
+.bp-item-preview:hover {
+  opacity: 1 !important;
+  color: var(--color-accent, #89b4fa);
+}
+
+.bp-item-preview--active {
+  opacity: 1 !important;
+  color: var(--color-accent, #89b4fa);
+  background: var(--color-accent-bg, #89b4fa20);
 }
 
 .bp-item-delete:hover {
   opacity: 1 !important;
   color: var(--color-danger);
+}
+
+.bp-preview-row {
+  list-style: none;
+  padding: 4px 8px 6px;
 }
 
 .bp-empty {
@@ -1042,5 +1204,153 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
   justify-content: center;
   padding: 20px;
   font-size: 12px;
+}
+
+/* ─── Recent Repos Popover (Phase 8.4) ──────────────── */
+
+.recent-popover-wrapper {
+  position: relative;
+}
+
+.folder-chevron {
+  transition: transform 0.15s;
+  opacity: 0.4;
+  margin-left: 2px;
+}
+
+.folder-chevron--open {
+  transform: rotate(180deg);
+}
+
+.recent-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  width: 280px;
+  max-height: 380px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  z-index: 50;
+  animation: bpSlide 0.15s ease-out;
+  overflow: hidden;
+}
+
+.rp-open-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text);
+  background: none;
+  text-align: left;
+  transition: background 0.1s;
+}
+
+.rp-open-btn:hover {
+  background: var(--color-bg-tertiary);
+}
+
+.rp-divider {
+  height: 1px;
+  background: var(--color-border);
+}
+
+.rp-list {
+  flex: 1;
+  overflow-y: auto;
+  max-height: 300px;
+}
+
+.rp-label {
+  padding: 6px 12px 4px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-muted);
+}
+
+.rp-list ul {
+  list-style: none;
+}
+
+.rp-item {
+  display: flex;
+  align-items: center;
+  padding: 0 6px 0 0;
+  transition: background 0.1s;
+}
+
+.rp-item:hover {
+  background: var(--color-bg-tertiary);
+}
+
+.rp-item--active {
+  background: var(--color-bg-tertiary);
+}
+
+.rp-item-name {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text);
+  background: none;
+  text-align: left;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.rp-pin-icon {
+  flex-shrink: 0;
+  color: var(--color-accent, #89b4fa);
+}
+
+.rp-item-repo-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rp-item-actions {
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.1s;
+  flex-shrink: 0;
+}
+
+.rp-item:hover .rp-item-actions {
+  opacity: 1;
+}
+
+.rp-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  color: var(--color-text-muted);
+  background: none;
+  transition: color 0.1s;
+}
+
+.rp-action:hover {
+  color: var(--color-accent, #89b4fa);
+}
+
+.rp-action--remove:hover {
+  color: var(--color-danger);
 }
 </style>

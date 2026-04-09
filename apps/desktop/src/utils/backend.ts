@@ -892,3 +892,46 @@ export async function gitDeleteBranch(cwd: string, name: string, force: boolean 
   });
   if (!res.ok) throw new Error(`Failed to delete branch: ${res.status}`);
 }
+
+// ─── Merge Preview (Phase 8.1) ─────────────────────────────
+
+/** Résultat brut d'un fichier analysé par preview_merge (Rust) */
+export interface FileMergePreview {
+  /** Chemin relatif du fichier dans le repo */
+  file_path: string;
+  /** Contenu avec marqueurs de conflit (vide si pas de conflit) */
+  conflict_content: string;
+  /** True si le contenu contient des marqueurs <<<<<<<  */
+  has_conflicts: boolean;
+  /** True si fichier ajouté d'un côté et supprimé de l'autre */
+  is_add_delete: boolean;
+}
+
+/**
+ * Calcule un aperçu de merge sans toucher au working tree.
+ * Utilise git merge-base + git show + git merge-file -p côté Rust.
+ */
+export async function previewMerge(
+  cwd: string,
+  sourceBranch: string,
+): Promise<FileMergePreview[]> {
+  if (isTauri()) {
+    return tauriInvoke<FileMergePreview[]>("preview_merge", {
+      cwd,
+      sourceBranch,
+    });
+  }
+  // Dev mode: endpoint optionnel (pas critique pour le dev)
+  try {
+    const res = await fetch(`${DEV_SERVER}/api/preview-merge`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cwd, sourceBranch }),
+    });
+    if (res.ok) return await res.json();
+  } catch {
+    // Pas de serveur dev → retourner un tableau vide
+  }
+  return [];
+}
+

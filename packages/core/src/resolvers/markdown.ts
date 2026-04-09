@@ -22,7 +22,7 @@
 
 // ─── Types internes ───────────────────────────────────────
 
-interface MarkdownSection {
+export interface MarkdownSection {
   /** Heading complet (ex: "## Mon titre") ou null pour le bloc avant le 1er heading */
   heading: string | null;
   /** Niveau du heading (1..6) ou 0 pour le prologue */

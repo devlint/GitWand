@@ -26,7 +26,7 @@ function makeHunk(base: string[], ours: string[], theirs: string[]): ConflictHun
     theirsLines: theirs,
     startLine: 1,
     type: "complex",
-    confidence: "low",
+    confidence: { score: 20, label: "low", dimensions: { typeClassification: 20, dataRisk: 0, scopeImpact: 0 }, boosters: [], penalties: [] },
     explanation: "test hunk",
     trace: {
       steps: [{ type: "complex", passed: true, reason: "test" }],

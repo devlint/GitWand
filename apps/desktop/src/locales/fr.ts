@@ -161,6 +161,23 @@ const fr = {
     switch: "Basculer",
     deleteLabel: "Supprimer",
     noBranch: "Aucune branche trouv\u00e9e",
+    previewMerge: "Aperçu du merge",
+  },
+
+  // ─── Merge Preview (Phase 8.1) ──────────────────────────
+  mergePreview: {
+    analyzing: "Analyse en cours\u2026",
+    noConflicts: "Merge propre",
+    fullyAuto: "100\u00a0% auto-résolvable",
+    needsReview: "Conflits à résoudre",
+    conflicting: "fichier(s) en conflit",
+    autoResolved: "auto-résolvable(s)",
+    manual: "manuel(s)",
+    clean: "propre(s)",
+    conflictsAutoResolved: "conflit(s) auto-résolu(s)",
+    partial: "auto-résolu(s)",
+    addDelete: "ajout/suppression",
+    conflictsManual: "conflit(s) manuel(s)",
   },
 
   // ─── EmptyState ─────────────────────────────────────────

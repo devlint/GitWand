@@ -159,6 +159,23 @@ const en: Locale = {
     switch: "Switch",
     deleteLabel: "Delete",
     noBranch: "No branches found",
+    previewMerge: "Preview merge",
+  },
+
+  // ─── Merge Preview (Phase 8.1) ──────────────────────────
+  mergePreview: {
+    analyzing: "Analyzing\u2026",
+    noConflicts: "Clean merge",
+    fullyAuto: "100\u00a0% auto-resolvable",
+    needsReview: "Conflicts to review",
+    conflicting: "conflicting file(s)",
+    autoResolved: "auto-resolvable",
+    manual: "manual",
+    clean: "clean",
+    conflictsAutoResolved: "conflict(s) auto-resolved",
+    partial: "auto-resolved",
+    addDelete: "add/delete",
+    conflictsManual: "manual conflict(s)",
   },
 
   // ─── EmptyState ─────────────────────────────────────────

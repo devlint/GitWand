@@ -333,16 +333,16 @@ interface DecisionTrace {
 
 ---
 
-### LATER — Phase 8 : Workflows avancés & intelligence (3-6 mois)
+### NOW — Phase 8 : Workflows avancés & intelligence (en cours)
 
 > Objectif : Dépasser les concurrents avec des features que personne n'a.
 
-#### 8.1 — Smart merge (différenciateur unique)
+#### 8.1 — Smart merge (différenciateur unique) ✅ (Merge Preview livré)
 
+- ✅ **Merge preview** : Simuler le résultat d'un merge avant de le faire — commande Rust `preview_merge` (merge-base + git show + git merge-file -p --diff3 zéro side-effect), composable `useMergePreview.ts`, `MergePreviewPanel.vue` ; badge clean/auto/warn, stats par catégorie, liste des fichiers conflictuels avec statut `auto-resolved`/`partial`/`manual`/`add-delete` ; bouton preview par branche dans le popover `AppHeader`
 - **Auto-resolve étendu** : Nouveaux patterns (import ordering, generated files, lockfiles) — appuyé par les résolveurs Phase 7.3
 - **Suggestions IA** : Pour les conflits complexes, proposer des résolutions basées sur le contexte
 - **Conflict prevention** : Alerter en amont quand deux branches touchent les mêmes fichiers
-- **Merge preview** : Simuler le résultat d'un merge avant de le faire
 
 #### 8.2 — Rebase & cherry-pick interactif
 
@@ -362,9 +362,9 @@ interface DecisionTrace {
 > Le PR workflow est le point d'entrée naturel vers la Phase 9 — Code Review intégré.
 > Une fois les PRs affichables dans l'app, ajouter le review inline devient la suite logique.
 
-#### 8.4 — Multi-repo & workspace
+#### 8.4 — Multi-repo & workspace ✅ (Repo switcher livré)
 
-- **Repo switcher** : Sidebar avec tous les repos récents
+- ✅ **Repo switcher** : Dropdown depuis le nom du repo courant dans le header — liste des repos récents (`useFolderHistory` singleton), pin/unpin, suppression depuis l'historique, ouverture directe ; `openRepo` event vers `App.vue`
 - **Monorepo awareness** : Afficher les packages/workspaces pour les monorepos pnpm/npm/yarn
 - **Tabs** : Ouvrir plusieurs repos en parallèle
 - **Raccourcis globaux** : Cmd+Shift+G pour ouvrir GitWand depuis n'importe où
