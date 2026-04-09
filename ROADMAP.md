@@ -267,12 +267,12 @@ Ses faiblesses identifiées :
 - Pas de validation post-résolution (marqueurs résiduels, cohérence syntaxique)
 - Politiques implicites (`value_only_change` → theirs, `whitespace_only` → ours) non documentées ni configurables
 
-#### 7.1 — Rendre visible : `DecisionTrace` (priorité haute)
+#### 7.1 — Rendre visible : `DecisionTrace` ✅
 
-- ⬜ **`DecisionTrace` par hunk** : trace structurée de la décision (candidates évaluées, selected, score, rejectedBy avec raisons)
-- ⬜ **Exposer les raisons de non-résolution** : pourquoi un hunk reste `complex` (quelles règles ont échoué, avec quel résultat)
-- ⬜ **"Explain only" mode** : mode dry-run qui ne modifie rien mais affiche les règles évaluées et le raisonnement complet
-- ⬜ **Enrichir les tests** : fixtures avec traces attendues pour chaque type de conflit
+- ✅ **`DecisionTrace` par hunk** : trace structurée dans chaque `ConflictHunk` — `steps[]` (type + passed + reason), `selected`, `summary`, `hasBase`
+- ✅ **Exposer les raisons de non-résolution** : `resolutionReason` dans chaque `HunkResolution` — explique pourquoi auto-résolu ou non
+- ✅ **"Explain only" mode** : option `explainOnly: true` dans `GitWandOptions` — classifie et trace sans appliquer de résolution
+- ✅ **Enrichir les tests** : 12 nouveaux tests Phase 7.1 couvrant trace, steps, resolutionReason, explainOnly, hasBase diff2/diff3
 
 ```ts
 // Nouvelle interface à ajouter dans types.ts
@@ -287,9 +287,10 @@ interface DecisionTrace {
 
 #### 7.2 — Rendre plus fiable : validation post-merge (priorité haute)
 
-- ⬜ **Vérification post-fusion** : reparsing du fichier fusionné pour détecter les marqueurs résiduels
-- ⬜ **Validation syntaxique** : parse strict JSON, permissif YAML, syntaxique TS/JS si coût acceptable
-- ⬜ **Rejet si incohérent** : le moteur refuse la résolution si le fichier final est manifestement cassé
+- ✅ **Vérification post-fusion** : `validateMergedContent()` scanne le contenu fusionné pour détecter les marqueurs résiduels (`<<<<<<<`, `>>>>>>>`, `|||||||`, `=======`) avec numéros de ligne
+- ✅ **Validation syntaxique JSON** : `JSON.parse()` sur les `.json` et `.jsonc` — `syntaxError` dans `ValidationResult`
+- ✅ **`ValidationResult` dans `MergeResult`** : `{ hasResidualMarkers, residualMarkerLines, syntaxError, isValid }` — exposé à la CLI et à l'UI
+- ✅ **7 nouveaux tests Phase 7.2** couvrant marqueurs résiduels, validation JSON, fichiers non-JSON
 - ⬜ **Meilleure normalisation whitespace** : indentation fine, whitespace interne, lignes vides — selon le langage
 - ⬜ **Réglage des seuils de confiance** : ajustement des seuils `value_only_change` et `non_overlapping` pour réduire les faux positifs
 

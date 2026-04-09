@@ -31,6 +31,41 @@ export type ConflictType =
 /** Niveau de confiance de la résolution */
 export type Confidence = "certain" | "high" | "medium" | "low";
 
+// ─── Phase 7.1 — DecisionTrace ────────────────────────────
+//
+// Trace structurée de la décision de classification d'un conflit.
+// Permet à un développeur de comprendre POURQUOI un hunk a été classifié
+// d'une certaine façon, sans magie.
+
+/** Une étape de l'évaluation de la classification */
+export interface TraceStep {
+  /** Type de conflit évalué à cette étape */
+  type: ConflictType;
+  /** Cette étape a-t-elle produit la classification finale ? */
+  passed: boolean;
+  /** Raison lisible — pourquoi ce type a été accepté ou rejeté */
+  reason: string;
+}
+
+/**
+ * Trace complète du raisonnement de classification d'un hunk.
+ *
+ * Exemple d'utilisation :
+ *   result.resolutions[0].hunk.trace.steps.forEach(s =>
+ *     console.log(`[${s.passed ? '✅' : '❌'}] ${s.type}: ${s.reason}`)
+ *   );
+ */
+export interface DecisionTrace {
+  /** Étapes d'évaluation dans l'ordre d'exécution */
+  steps: TraceStep[];
+  /** Type finalement sélectionné */
+  selected: ConflictType;
+  /** Résumé en une ligne lisible */
+  summary: string;
+  /** La base (diff3) était-elle disponible ? Conditionne les vérifications fines */
+  hasBase: boolean;
+}
+
 /** Un bloc (hunk) de différence identifié */
 export interface ConflictHunk {
   /** Lignes dans la version base */
@@ -47,6 +82,8 @@ export interface ConflictHunk {
   confidence: Confidence;
   /** Explication lisible de la résolution (pour l'audit) */
   explanation: string;
+  /** Trace de la décision de classification (Phase 7.1) */
+  trace: DecisionTrace;
 }
 
 /** Résultat de la résolution d'un seul hunk */
@@ -57,6 +94,25 @@ export interface HunkResolution {
   resolvedLines: string[] | null;
   /** Est-ce que la résolution est automatique ? */
   autoResolved: boolean;
+  /** Raison lisible de la résolution (ou du refus de résolution) */
+  resolutionReason: string;
+}
+
+// ─── Phase 7.2 — Validation post-merge ───────────────────
+
+/**
+ * Résultat de la validation du contenu fusionné.
+ * Détecte les problèmes résiduels après résolution.
+ */
+export interface ValidationResult {
+  /** Des marqueurs de conflit résiduels ont-ils été détectés ? */
+  hasResidualMarkers: boolean;
+  /** Marqueurs trouvés (exemples, pas la liste exhaustive) */
+  residualMarkerLines: number[];
+  /** Erreur de syntaxe pour les fichiers structurés (JSON) — null si valide ou non applicable */
+  syntaxError: string | null;
+  /** Le contenu fusionné est-il valide ? */
+  isValid: boolean;
 }
 
 /** Résultat complet de l'analyse et résolution d'un fichier */
@@ -71,6 +127,8 @@ export interface MergeResult {
   resolutions: HunkResolution[];
   /** Statistiques */
   stats: MergeStats;
+  /** Validation du contenu fusionné (Phase 7.2) */
+  validation: ValidationResult;
 }
 
 /** Statistiques de résolution */
@@ -95,4 +153,10 @@ export interface GitWandOptions {
   minConfidence?: Confidence;
   /** Mode verbose pour le logging (défaut: false) */
   verbose?: boolean;
+  /**
+   * Mode dry-run : classifier et tracer les hunks mais ne pas appliquer de résolution.
+   * Utile pour afficher le raisonnement sans toucher au fichier.
+   * (Phase 7.1 — explain-only mode)
+   */
+  explainOnly?: boolean;
 }

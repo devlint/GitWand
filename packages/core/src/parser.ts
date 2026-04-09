@@ -3,9 +3,12 @@
  *
  * Parse les fichiers contenant des marqueurs de conflit Git
  * et extrait les hunks structurés.
+ *
+ * Phase 7.1 : classifyConflict produit maintenant une DecisionTrace
+ * complète — chaque étape d'évaluation est enregistrée avec sa raison.
  */
 
-import type { ConflictHunk, ConflictType, Confidence } from "./types.js";
+import type { ConflictHunk, ConflictType, Confidence, DecisionTrace, TraceStep } from "./types.js";
 import { mergeNonOverlapping } from "./diff.js";
 
 /** Marqueurs de conflit Git standard */
@@ -118,139 +121,346 @@ export function parseConflictMarkers(content: string): {
   return { segments };
 }
 
+// ─── Classification avec DecisionTrace (Phase 7.1) ────────
+//
+// Chaque branche de classifyConflict enregistre une étape dans `steps`.
+// Les étapes rejetées (passed: false) expliquent POURQUOI un type n'a pas
+// été sélectionné. L'étape finale (passed: true) explique le choix retenu.
+//
+// La trace est conçue pour être affichée directement dans l'UI (mode explain)
+// ou loggée en CLI (--explain).
+
 /**
- * Classifie un conflit brut en déterminant son type et sa confiance.
+ * Classifie un conflit brut avec trace complète du raisonnement.
+ *
+ * @returns Résultat de classification incluant la DecisionTrace (7.1)
  */
 export function classifyConflict(conflict: RawConflict): {
   type: ConflictType;
   confidence: Confidence;
   explanation: string;
+  trace: DecisionTrace;
 } {
   const { oursLines, baseLines, theirsLines } = conflict;
 
   const oursText = oursLines.join("\n");
   const theirsText = theirsLines.join("\n");
   const baseText = baseLines.join("\n");
+  const hasBase = baseLines.length > 0;
 
-  // 1. Same change — les deux côtés ont fait la même modification
+  const steps: TraceStep[] = [];
+
+  // ─── 1. Same change ────────────────────────────────────
   if (oursText === theirsText) {
+    steps.push({
+      type: "same_change",
+      passed: true,
+      reason: "Les deux branches ont exactement le même contenu — modification identique des deux côtés.",
+    });
+    const trace: DecisionTrace = {
+      steps,
+      selected: "same_change",
+      summary: "Même modification des deux côtés → résolution triviale.",
+      hasBase,
+    };
     return {
       type: "same_change",
       confidence: "certain",
       explanation: "Les deux branches ont effectué exactement la même modification.",
+      trace,
     };
   }
+  steps.push({
+    type: "same_change",
+    passed: false,
+    reason: "Les deux branches ont des contenus différents.",
+  });
 
-  // Si on a la base (diff3), on peut faire des comparaisons plus fines
-  if (baseLines.length > 0) {
+  // ─── Vérifications avec base (diff3) ──────────────────
+  if (hasBase) {
     const oursMatchesBase = oursText === baseText;
     const theirsMatchesBase = theirsText === baseText;
 
-    // 2. Delete + no change — un côté supprime, l'autre n'a pas touché
-    //    (testé AVANT one_side_change car c'est un cas plus spécifique)
+    // ─── 2. Delete + no change ──────────────────────────
     if (oursLines.length === 0 && theirsMatchesBase) {
+      steps.push({
+        type: "delete_no_change",
+        passed: true,
+        reason: "Ours a supprimé le bloc (0 lignes) et theirs n'a pas modifié la base.",
+      });
+      const trace: DecisionTrace = {
+        steps,
+        selected: "delete_no_change",
+        summary: "Ours a supprimé ce bloc, theirs est resté identique à la base.",
+        hasBase,
+      };
       return {
         type: "delete_no_change",
         confidence: "certain",
         explanation:
           "La branche courante (ours) a supprimé ce bloc, l'autre ne l'a pas modifié. Résolution : supprimer.",
+        trace,
       };
     }
 
     if (theirsLines.length === 0 && oursMatchesBase) {
+      steps.push({
+        type: "delete_no_change",
+        passed: true,
+        reason: "Theirs a supprimé le bloc (0 lignes) et ours n'a pas modifié la base.",
+      });
+      const trace: DecisionTrace = {
+        steps,
+        selected: "delete_no_change",
+        summary: "Theirs a supprimé ce bloc, ours est resté identique à la base.",
+        hasBase,
+      };
       return {
         type: "delete_no_change",
         confidence: "certain",
         explanation:
           "La branche entrante (theirs) a supprimé ce bloc, l'autre ne l'a pas modifié. Résolution : supprimer.",
+        trace,
       };
     }
 
-    // 3. One-side change — seul un côté a changé par rapport à la base
+    steps.push({
+      type: "delete_no_change",
+      passed: false,
+      reason: hasBase
+        ? "Ni ours ni theirs n'est une suppression unilatérale avec l'autre côté identique à la base."
+        : "Base indisponible — vérification delete_no_change sautée.",
+    });
+
+    // ─── 3. One-side change ─────────────────────────────
     if (oursMatchesBase && !theirsMatchesBase) {
+      steps.push({
+        type: "one_side_change",
+        passed: true,
+        reason: "Ours est identique à la base, seul theirs a changé.",
+      });
+      const trace: DecisionTrace = {
+        steps,
+        selected: "one_side_change",
+        summary: "Seul theirs a modifié ce bloc — résolution : accepter theirs.",
+        hasBase,
+      };
       return {
         type: "one_side_change",
         confidence: "certain",
         explanation:
           "Seule la branche entrante (theirs) a modifié ce bloc. Résolution : accepter theirs.",
+        trace,
       };
     }
 
     if (!oursMatchesBase && theirsMatchesBase) {
+      steps.push({
+        type: "one_side_change",
+        passed: true,
+        reason: "Theirs est identique à la base, seul ours a changé.",
+      });
+      const trace: DecisionTrace = {
+        steps,
+        selected: "one_side_change",
+        summary: "Seul ours a modifié ce bloc — résolution : accepter ours.",
+        hasBase,
+      };
       return {
         type: "one_side_change",
         confidence: "certain",
         explanation:
           "Seule la branche courante (ours) a modifié ce bloc. Résolution : accepter ours.",
+        trace,
       };
     }
 
-    // 4. Non-overlapping — les deux côtés ont changé mais à des endroits différents
-    //    On tente un merge 3-way pour voir si les edits sont non-overlapping
+    steps.push({
+      type: "one_side_change",
+      passed: false,
+      reason: "Les deux branches ont modifié le bloc par rapport à la base.",
+    });
+
+    // ─── 4. Non-overlapping ─────────────────────────────
     const merged = mergeNonOverlapping(baseLines, oursLines, theirsLines);
     if (merged !== null) {
+      steps.push({
+        type: "non_overlapping",
+        passed: true,
+        reason: "Le merge 3-way LCS a réussi sans conflit — les modifications ne se chevauchent pas.",
+      });
+      const trace: DecisionTrace = {
+        steps,
+        selected: "non_overlapping",
+        summary: "Modifications non-overlapping — fusion automatique par LCS 3-way.",
+        hasBase,
+      };
       return {
         type: "non_overlapping",
         confidence: "high",
         explanation:
           "Les deux branches ont modifié des zones différentes du même bloc. Fusion automatique possible.",
+        trace,
       };
     }
-  }
 
-  // 5. Whitespace-only — différences de whitespace uniquement
-  const oursNormalized = oursLines.map((l) => l.trim()).join("\n");
-  const theirsNormalized = theirsLines.map((l) => l.trim()).join("\n");
+    steps.push({
+      type: "non_overlapping",
+      passed: false,
+      reason: "Le merge 3-way LCS détecte un chevauchement — les deux branches ont modifié les mêmes lignes.",
+    });
+  } else {
+    // Pas de base : on note que ces checks ont été sautés
+    steps.push({
+      type: "delete_no_change",
+      passed: false,
+      reason: "Base (diff3) indisponible — vérification basée sur la base sautée.",
+    });
+    steps.push({
+      type: "one_side_change",
+      passed: false,
+      reason: "Base (diff3) indisponible — impossible de déterminer quel côté a changé par rapport à la base.",
+    });
+    steps.push({
+      type: "non_overlapping",
+      passed: false,
+      reason: "Base (diff3) indisponible — merge 3-way LCS impossible.",
+    });
 
-  if (oursNormalized === theirsNormalized) {
-    return {
-      type: "whitespace_only",
-      confidence: "high",
-      explanation:
-        "Les deux branches contiennent le même code avec des différences de whitespace uniquement.",
-    };
-  }
-
-  // ═══════════════════════════════════════════════════════
-  // Heuristiques diff2 — pas de base disponible
-  // ═══════════════════════════════════════════════════════
-
-  // 6. Deletion sans base — un côté est vide
-  if (baseLines.length === 0) {
+    // ─── Suppression sans base (diff2) ──────────────────
     if (oursLines.length === 0 && theirsLines.length > 0) {
+      steps.push({
+        type: "delete_no_change",
+        passed: true,
+        reason: "Ours est vide (0 lignes) en diff2. Suppression probable mais incertaine sans base.",
+      });
+      const trace: DecisionTrace = {
+        steps,
+        selected: "delete_no_change",
+        summary: "Ours a supprimé ce bloc (diff2 — sans base, confiance moyenne).",
+        hasBase: false,
+      };
       return {
         type: "delete_no_change",
         confidence: "medium",
         explanation:
           "La branche courante (ours) a supprimé ce bloc. Sans base, confiance moyenne. Résolution proposée : supprimer.",
+        trace,
       };
     }
 
     if (theirsLines.length === 0 && oursLines.length > 0) {
+      steps.push({
+        type: "delete_no_change",
+        passed: true,
+        reason: "Theirs est vide (0 lignes) en diff2. Suppression probable mais incertaine sans base.",
+      });
+      const trace: DecisionTrace = {
+        steps,
+        selected: "delete_no_change",
+        summary: "Theirs a supprimé ce bloc (diff2 — sans base, confiance moyenne).",
+        hasBase: false,
+      };
       return {
         type: "delete_no_change",
         confidence: "medium",
         explanation:
           "La branche entrante (theirs) a supprimé ce bloc. Sans base, confiance moyenne. Résolution proposée : supprimer.",
+        trace,
       };
     }
   }
 
-  // 7. Value-only change (diff2) — même structure, seule une valeur atomique diffère
-  //    Ex: hash de build, version, timestamp, URL
-  if (baseLines.length === 0 && oursLines.length === theirsLines.length) {
+  // ─── 5. Whitespace-only ─────────────────────────────────
+  const oursNormalized = oursLines.map((l) => l.trim()).join("\n");
+  const theirsNormalized = theirsLines.map((l) => l.trim()).join("\n");
+
+  if (oursNormalized === theirsNormalized) {
+    steps.push({
+      type: "whitespace_only",
+      passed: true,
+      reason: "Après normalisation (trim), les deux versions sont identiques — seul le whitespace diffère.",
+    });
+    const trace: DecisionTrace = {
+      steps,
+      selected: "whitespace_only",
+      summary: "Même code, whitespace différent — résolution : préférer ours.",
+      hasBase,
+    };
+    return {
+      type: "whitespace_only",
+      confidence: "high",
+      explanation:
+        "Les deux branches contiennent le même code avec des différences de whitespace uniquement.",
+      trace,
+    };
+  }
+  steps.push({
+    type: "whitespace_only",
+    passed: false,
+    reason: "Après normalisation (trim), les deux versions restent différentes — pas seulement du whitespace.",
+  });
+
+  // ─── 6. Value-only change (diff2) ───────────────────────
+  if (!hasBase && oursLines.length === theirsLines.length) {
     const valResult = detectValueOnlyChange(oursLines, theirsLines);
     if (valResult !== null) {
-      return valResult;
+      steps.push({
+        type: "value_only_change",
+        passed: true,
+        reason: valResult.traceReason,
+      });
+      const trace: DecisionTrace = {
+        steps,
+        selected: "value_only_change",
+        summary: `Même structure, valeur(s) volatile(s) différente(s) — résolution : accepter theirs.`,
+        hasBase: false,
+      };
+      return {
+        type: "value_only_change",
+        confidence: valResult.confidence,
+        explanation: valResult.explanation,
+        trace,
+      };
     }
+    steps.push({
+      type: "value_only_change",
+      passed: false,
+      reason: "Les différences entre ours et theirs ne se limitent pas à des valeurs volatiles (hash, version, timestamp…).",
+    });
+  } else if (hasBase) {
+    // Avec base, on ne teste pas value_only_change (on a des mécanismes plus précis)
+    steps.push({
+      type: "value_only_change",
+      passed: false,
+      reason: "Base disponible — value_only_change est une heuristique diff2, non appliquée ici.",
+    });
+  } else {
+    steps.push({
+      type: "value_only_change",
+      passed: false,
+      reason: "Ours et theirs n'ont pas le même nombre de lignes — structure différente.",
+    });
   }
 
-  // 8. Fallback — conflit complexe
+  // ─── 7. Fallback — conflit complexe ─────────────────────
+  steps.push({
+    type: "complex",
+    passed: true,
+    reason: "Aucun pattern automatique ne s'applique — résolution manuelle requise.",
+  });
+  const trace: DecisionTrace = {
+    steps,
+    selected: "complex",
+    summary: "Conflit complexe — toutes les heuristiques automatiques ont échoué.",
+    hasBase,
+  };
   return {
     type: "complex",
     confidence: "low",
     explanation:
       "Conflit complexe nécessitant une résolution manuelle. Les deux branches ont modifié ce bloc différemment.",
+    trace,
   };
 }
 
@@ -278,11 +488,13 @@ function tokenizeLine(line: string): string[] {
 /**
  * Détecte si deux ensembles de lignes ne diffèrent que par des valeurs atomiques
  * (hashes, versions, timestamps, URLs).
+ *
+ * Retourne la classification avec sa raison de trace, ou null si non applicable.
  */
 function detectValueOnlyChange(
   oursLines: string[],
   theirsLines: string[],
-): { type: "value_only_change"; confidence: Confidence; explanation: string } | null {
+): { confidence: Confidence; explanation: string; traceReason: string } | null {
   if (oursLines.length !== theirsLines.length) return null;
   if (oursLines.length === 0) return null;
 
@@ -326,19 +538,20 @@ function detectValueOnlyChange(
 
   if (confidence === "low") return null; // Trop de différences pour être sûr
 
-  return {
-    type: "value_only_change",
-    confidence,
-    explanation:
-      `Même structure avec ${diffCount} valeur${diffCount > 1 ? "s" : ""} volatile${diffCount > 1 ? "s" : ""} différente${diffCount > 1 ? "s" : ""} (hash, version, timestamp…). Résolution proposée : accepter la version la plus récente (theirs).`,
-  };
+  const explanation =
+    `Même structure avec ${diffCount} valeur${diffCount > 1 ? "s" : ""} volatile${diffCount > 1 ? "s" : ""} différente${diffCount > 1 ? "s" : ""} (hash, version, timestamp…). Résolution proposée : accepter la version la plus récente (theirs).`;
+
+  const traceReason =
+    `${diffCount} token${diffCount > 1 ? "s" : ""} différent${diffCount > 1 ? "s" : ""} sur ${totalTokens} — tous identifiés comme volatiles (hash, version, timestamp…). Ratio : ${(diffRatio * 100).toFixed(1)}% → confiance ${confidence}.`;
+
+  return { confidence, explanation, traceReason };
 }
 
 /**
- * Convertit un conflit brut en ConflictHunk typé.
+ * Convertit un conflit brut en ConflictHunk typé avec trace (Phase 7.1).
  */
 export function toConflictHunk(conflict: RawConflict): ConflictHunk {
-  const { type, confidence, explanation } = classifyConflict(conflict);
+  const { type, confidence, explanation, trace } = classifyConflict(conflict);
 
   return {
     baseLines: conflict.baseLines,
@@ -348,5 +561,6 @@ export function toConflictHunk(conflict: RawConflict): ConflictHunk {
     type,
     confidence,
     explanation,
+    trace,
   };
 }
