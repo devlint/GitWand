@@ -315,12 +315,19 @@ interface DecisionTrace {
 - ✅ **Intégration desktop** : `resolveOptions` ref dans `useGitWand.ts`, chargée depuis `.gitwandrc` au scan du repo, passée à tous les appels `resolve()`
 - ✅ **35 tests Phase 7.4** : matchGlob (11), effectivePolicyForFile (5), policyToConfig (5), parseGitwandrc (5), intégration via resolve() (14) — 181/181 tests au total
 
-#### 7.5 — Rendre mesurable : corpus et métriques (priorité basse)
+#### 7.5 — Rendre mesurable : corpus et métriques (priorité basse) ✅
 
-- ⬜ **Corpus de conflits réels** : set anonymisé de conflits pour mesurer faux positifs / faux négatifs
-- ⬜ **Métriques de résolution** : taux par type, stabilité de classification, impact des seuils
-- ⬜ **Détection de régression** : CI pipeline qui vérifie la stabilité des résolutions sur le corpus
-- ⬜ **Benchmarks de performance** : mesurer le temps de résolution sur des fichiers de taille variable
+- ✅ **Corpus de 20 fixtures réalistes** (`corpus.ts`) — couvre tous les ConflictType (same_change, one_side_change, delete_no_change, non_overlapping, whitespace_only, value_only_change, generated_file, complex), diff2 + diff3, fichiers variés (TS, CSS, JSON, Markdown, lockfile, manifest)
+- ✅ **Métriques de résolution** (`corpus.test.ts`) — taux global d'auto-résolution, taux par catégorie, faux positifs/négatifs, score de confiance par type ; rapport console activable via `CORPUS_METRICS=1`
+- ✅ **Détection de régression** — les 24 tests corpus (`vitest run`) vérifient la stabilité de classification et de résolution à chaque changement du moteur
+- ✅ **Benchmarks de performance** (`bench.bench.ts`, `vitest bench --run`) — résultats baseline :
+  - 1 conflit / ~30 lignes  → **~249 000 ops/s** (0.004 ms/op)
+  - 5 conflits / ~140 lignes → **~40 000 ops/s** (0.025 ms/op)
+  - 20 conflits / ~530 lignes → **~9 900 ops/s** (0.10 ms/op)
+  - 50 conflits / ~1350 lignes → **~4 500 ops/s** (0.22 ms/op)
+  - JSON/Markdown format-aware → **~137 000 ops/s** (0.007 ms/op)
+- ✅ **`vitest.config.ts`** — exclut les `.bench.ts` du run normal ; script `test:bench` ajouté dans `package.json`
+- ✅ **205/205 tests** au total (181 existants + 24 corpus)
 
 **Effort estimé** : 2-4 semaines. 7.1 et 7.2 sont prioritaires et réduisent directement la perception de "magie" et les faux positifs.
 

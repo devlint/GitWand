@@ -18,6 +18,7 @@
     "build": "tsc",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:bench": "vitest bench",
     "clean": "rm -rf dist"
   },
   "license": "MIT",
