@@ -138,9 +138,9 @@ function onCommitKeydown(e: KeyboardEvent) {
         {{ t('sidebar.tabGraph') }}
       </button>
       <button
-        class="view-tab"
-        :class="{ 'view-tab--active': viewMode === 'prs' }"
+        class="view-tab view-tab--pr"
         @click="emit('changeView', 'prs')"
+        title="Pull Requests"
       >
         PRs
       </button>

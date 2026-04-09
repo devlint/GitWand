@@ -924,6 +924,112 @@ const server = createServer(async (req, res) => {
       }
     }
 
+    // ─── gh CLI endpoints ──────────────────────────────────
+    // GET /api/gh-list-prs?cwd=<path>&state=<open|closed|all>
+    if (url.pathname === "/api/gh-list-prs" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd");
+      const state = url.searchParams.get("state") || "open";
+      if (!cwd) return jsonResponse(res, { error: "Missing cwd" }, 400);
+      try {
+        const out = execFileSync("gh", [
+          "pr", "list",
+          "--state", state,
+          "--json", "number,title,state,author,headRefName,baseRefName,isDraft,createdAt,updatedAt,url,additions,deletions,labels",
+          "--limit", "50",
+        ], { cwd, encoding: "utf-8" });
+        const raw = JSON.parse(out);
+        const prs = raw.map((pr) => ({
+          number: pr.number,
+          title: pr.title,
+          state: pr.state,
+          author: pr.author?.login ?? pr.author ?? "",
+          branch: pr.headRefName,
+          base: pr.baseRefName,
+          draft: pr.isDraft,
+          created_at: pr.createdAt,
+          updated_at: pr.updatedAt,
+          url: pr.url,
+          additions: pr.additions ?? 0,
+          deletions: pr.deletions ?? 0,
+          labels: (pr.labels ?? []).map((l) => l.name ?? l),
+        }));
+        return jsonResponse(res, prs);
+      } catch (err) {
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
+
+    // GET /api/gh-pr-detail?cwd=<path>&number=<n>
+    if (url.pathname === "/api/gh-pr-detail" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd");
+      const number = url.searchParams.get("number");
+      if (!cwd || !number) return jsonResponse(res, { error: "Missing cwd or number" }, 400);
+      try {
+        const out = execFileSync("gh", [
+          "pr", "view", number,
+          "--json", "number,title,body,state,author,headRefName,baseRefName,isDraft,createdAt,updatedAt,mergedAt,url,additions,deletions,changedFiles,comments,reviewRequests,reviews,labels,mergeable,statusCheckRollup",
+        ], { cwd, encoding: "utf-8" });
+        const pr = JSON.parse(out);
+        return jsonResponse(res, {
+          number: pr.number,
+          title: pr.title,
+          body: pr.body ?? "",
+          state: pr.state,
+          author: pr.author?.login ?? "",
+          branch: pr.headRefName,
+          base: pr.baseRefName,
+          draft: pr.isDraft,
+          created_at: pr.createdAt,
+          updated_at: pr.updatedAt,
+          merged_at: pr.mergedAt ?? "",
+          url: pr.url,
+          additions: pr.additions ?? 0,
+          deletions: pr.deletions ?? 0,
+          changed_files: pr.changedFiles ?? 0,
+          comments: pr.comments?.totalCount ?? pr.comments ?? 0,
+          review_comments: pr.reviews?.totalCount ?? 0,
+          labels: (pr.labels ?? []).map((l) => l.name ?? l),
+          reviewers: (pr.reviewRequests ?? []).map((r) => r.login ?? r.name ?? ""),
+          mergeable: pr.mergeable ?? "UNKNOWN",
+          checks_status: pr.statusCheckRollup?.state ?? "",
+        });
+      } catch (err) {
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
+
+    // GET /api/gh-pr-diff?cwd=<path>&number=<n>
+    if (url.pathname === "/api/gh-pr-diff" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd");
+      const number = url.searchParams.get("number");
+      if (!cwd || !number) return jsonResponse(res, { error: "Missing cwd or number" }, 400);
+      try {
+        const out = execFileSync("gh", ["pr", "diff", number], { cwd, encoding: "utf-8" });
+        return jsonResponse(res, { diff: out });
+      } catch (err) {
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
+
+    // GET /api/gh-pr-checks?cwd=<path>&number=<n>
+    if (url.pathname === "/api/gh-pr-checks" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd");
+      const number = url.searchParams.get("number");
+      if (!cwd || !number) return jsonResponse(res, { error: "Missing cwd or number" }, 400);
+      try {
+        const out = execFileSync("gh", ["pr", "checks", number, "--json", "name,state,conclusion,detailsUrl"], { cwd, encoding: "utf-8" });
+        const checks = JSON.parse(out);
+        return jsonResponse(res, checks.map((c) => ({
+          name: c.name,
+          state: c.state,
+          conclusion: c.conclusion ?? "",
+          details_url: c.detailsUrl ?? "",
+        })));
+      } catch (err) {
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
+
     jsonResponse(res, { error: "Not found" }, 404);
   } catch (err) {
     jsonResponse(res, { error: err.message }, 500);
@@ -940,5 +1046,9 @@ server.listen(PORT, () => {
   console.log(`    GET  /api/list-dir?path=<path>`);
   console.log(`    GET  /api/git-status?cwd=<path>`);
   console.log(`    GET  /api/git-diff?cwd=<path>&path=<file>&staged=<bool>`);
-  console.log(`    GET  /api/git-log?cwd=<path>&count=<n>\n`);
+  console.log(`    GET  /api/git-log?cwd=<path>&count=<n>`);
+  console.log(`    GET  /api/gh-list-prs?cwd=<path>&state=<state>`);
+  console.log(`    GET  /api/gh-pr-detail?cwd=<path>&number=<n>`);
+  console.log(`    GET  /api/gh-pr-diff?cwd=<path>&number=<n>`);
+  console.log(`    GET  /api/gh-pr-checks?cwd=<path>&number=<n>\n`);
 });

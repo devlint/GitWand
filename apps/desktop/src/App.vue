@@ -377,6 +377,7 @@ async function handleSwitchBranch(name: string) {
 
 // ─── Settings panel ─────────────────────────────────────
 const showSettings = ref(false);
+const showPrOverlay = ref(false);
 const diffMode = ref<DiffMode>(getPersistedDiffMode());
 
 function onDiffModeChange(mode: DiffMode) {
@@ -603,7 +604,7 @@ onUnmounted(() => {
         <RepoSidebar
           :files="repoFiles"
           :selected-file="repoSelectedFile"
-          :view-mode="viewMode"
+          :view-mode="viewMode === 'prs' ? 'changes' : viewMode"
           :repo-stats="repoStats"
           :commit-summary="commitSummary"
           :commit-description="commitDescription"
@@ -614,7 +615,7 @@ onUnmounted(() => {
           :selected-commit-hash="selectedCommitHash"
           :ahead-count="aheadCount"
           @select="onRepoFileSelect"
-          @change-view="onViewModeChange"
+          @change-view="(mode) => mode === 'prs' ? (showPrOverlay = true) : onViewModeChange(mode)"
           @stage-file="(path) => stageFiles([path])"
           @unstage-file="(path) => unstageFiles([path])"
           @stage-all="stageAll"
@@ -715,13 +716,13 @@ onUnmounted(() => {
             @select-commit="(hash) => { selectCommit(hash); viewMode = 'history'; }"
           />
 
-          <!-- Pull Requests view -->
+          <!-- Pull Requests overlay (shown via sidebar button) -->
           <PullRequestPanel
-            v-else-if="viewMode === 'prs'"
             :cwd="repoFolderPath ?? ''"
+            :show="showPrOverlay"
             @refresh="repoRefresh"
-            @close="viewMode = 'changes'"
-            @navigate-commit="(hash) => { selectCommit(hash); viewMode = 'history'; }"
+            @close="showPrOverlay = false"
+            @navigate-commit="(hash) => { selectCommit(hash); viewMode = 'history'; showPrOverlay = false; }"
           />
         </template>
       </main>

@@ -1206,7 +1206,26 @@ export async function ghListPrs(cwd: string, state: string = "open"): Promise<Pu
       labels: pr.labels,
     }));
   }
-  return [];
+  // Browser dev mode — call dev server
+  const res = await fetch(`${DEV_SERVER}/api/gh-list-prs?cwd=${encodeURIComponent(cwd)}&state=${state}`);
+  if (!res.ok) throw new Error(`gh pr list failed: ${res.status}`);
+  const raw = await res.json();
+  if (raw.error) throw new Error(raw.error);
+  return raw.map((pr: any) => ({
+    number: pr.number,
+    title: pr.title,
+    state: pr.state,
+    author: pr.author,
+    branch: pr.branch,
+    base: pr.base,
+    draft: pr.draft,
+    createdAt: pr.created_at,
+    updatedAt: pr.updated_at,
+    url: pr.url,
+    additions: pr.additions,
+    deletions: pr.deletions,
+    labels: pr.labels,
+  }));
 }
 
 /**
@@ -1362,7 +1381,19 @@ export async function ghPrDetail(cwd: string, number: number): Promise<PullReque
       checksStatus: raw.checks_status,
     };
   }
-  throw new Error("PR detail not available in dev mode");
+  // Browser dev mode
+  const res = await fetch(`${DEV_SERVER}/api/gh-pr-detail?cwd=${encodeURIComponent(cwd)}&number=${number}`);
+  if (!res.ok) throw new Error(`gh pr detail failed: ${res.status}`);
+  const raw = await res.json();
+  if (raw.error) throw new Error(raw.error);
+  return {
+    number: raw.number, title: raw.title, body: raw.body, state: raw.state,
+    author: raw.author, branch: raw.branch, base: raw.base, draft: raw.draft,
+    createdAt: raw.created_at, updatedAt: raw.updated_at, mergedAt: raw.merged_at,
+    url: raw.url, additions: raw.additions, deletions: raw.deletions,
+    changedFiles: raw.changed_files, comments: raw.comments, reviewComments: raw.review_comments,
+    labels: raw.labels, reviewers: raw.reviewers, mergeable: raw.mergeable, checksStatus: raw.checks_status,
+  };
 }
 
 /**
@@ -1372,7 +1403,11 @@ export async function ghPrDiff(cwd: string, number: number): Promise<string> {
   if (isTauri()) {
     return await tauriInvoke<string>("gh_pr_diff", { cwd, number });
   }
-  throw new Error("PR diff not available in dev mode");
+  const res = await fetch(`${DEV_SERVER}/api/gh-pr-diff?cwd=${encodeURIComponent(cwd)}&number=${number}`);
+  if (!res.ok) throw new Error(`gh pr diff failed: ${res.status}`);
+  const data = await res.json();
+  if (data.error) throw new Error(data.error);
+  return data.diff;
 }
 
 /**
@@ -1393,7 +1428,13 @@ export async function ghPrChecks(cwd: string, number: number): Promise<CICheck[]
       detailsUrl: c.details_url,
     }));
   }
-  throw new Error("PR checks not available in dev mode");
+  const res = await fetch(`${DEV_SERVER}/api/gh-pr-checks?cwd=${encodeURIComponent(cwd)}&number=${number}`);
+  if (!res.ok) throw new Error(`gh pr checks failed: ${res.status}`);
+  const raw = await res.json();
+  if (raw.error) throw new Error(raw.error);
+  return raw.map((c: any) => ({
+    name: c.name, state: c.state, conclusion: c.conclusion, detailsUrl: c.details_url,
+  }));
 }
 
 // ─── Merge Preview (Phase 8.1) ─────────────────────────────

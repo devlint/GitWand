@@ -23,15 +23,16 @@ import { getPersistedDiffMode } from "../utils/diffMode";
 
 const props = defineProps<{
   cwd: string;
+  show: boolean;
 }>();
 
 const emit = defineEmits<{
-  (e: "refresh"): void;
   (e: "close"): void;
+  (e: "refresh"): void;
   (e: "navigate-commit", hash: string): void;
 }>();
 
-// State
+// ─── State ─────────────────────────────────────────────
 const remote = ref<RemoteInfo | null>(null);
 const prs = ref<PullRequest[]>([]);
 const loading = ref(false);
@@ -51,11 +52,10 @@ const isCreating = ref(false);
 const mergingPr = ref<PullRequest | null>(null);
 const mergeMethod = ref<"merge" | "squash" | "rebase">("merge");
 
-// Detail view
-const expandedPrNumber = ref<number | null>(null);
+// Detail panel (right column)
+const selectedPr = ref<PullRequest | null>(null);
 const prDetail = ref<PullRequestDetail | null>(null);
 const prChecks = ref<CICheck[]>([]);
-const prDiffRaw = ref<string>("");
 const prDiffFiles = ref<GitDiff[]>([]);
 const detailLoading = ref(false);
 const detailError = ref<string | null>(null);
@@ -64,108 +64,61 @@ const selectedDiffFile = ref<string | null>(null);
 const diffMode = ref<DiffMode>(getPersistedDiffMode());
 
 const isGitHub = computed(() => remote.value?.provider === "github");
+const hasDetail = computed(() => !!selectedPr.value);
 
-// ─── Parse unified diff into GitDiff[] ─────────────────
-
+// ─── Parse unified diff ─────────────────────────────────
 function parseUnifiedDiff(rawDiff: string): GitDiff[] {
   const files: GitDiff[] = [];
   if (!rawDiff.trim()) return files;
-
   const lines = rawDiff.split("\n");
   let currentFile: GitDiff | null = null;
   let currentHunk: DiffHunk | null = null;
-  let oldLine = 0;
-  let newLine = 0;
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-
-    // New file header: diff --git a/... b/...
+  let oldLine = 0, newLine = 0;
+  for (const line of lines) {
     if (line.startsWith("diff --git ")) {
       if (currentFile) files.push(currentFile);
       const match = line.match(/diff --git a\/(.+) b\/(.+)/);
-      const path = match ? match[2] : "unknown";
-      currentFile = { path, hunks: [] };
+      currentFile = { path: match ? match[2] : "unknown", hunks: [] };
       currentHunk = null;
       continue;
     }
-
-    // Skip diff metadata lines
-    if (
-      line.startsWith("index ") ||
-      line.startsWith("--- ") ||
-      line.startsWith("+++ ") ||
-      line.startsWith("old mode ") ||
-      line.startsWith("new mode ") ||
-      line.startsWith("new file ") ||
-      line.startsWith("deleted file ") ||
-      line.startsWith("similarity index ") ||
-      line.startsWith("rename from ") ||
-      line.startsWith("rename to ") ||
-      line.startsWith("Binary files ")
-    ) {
-      continue;
-    }
-
-    // Hunk header
+    if (line.startsWith("index ") || line.startsWith("--- ") || line.startsWith("+++ ") ||
+        line.startsWith("old mode ") || line.startsWith("new mode ") || line.startsWith("new file ") ||
+        line.startsWith("deleted file ") || line.startsWith("similarity index ") ||
+        line.startsWith("rename from ") || line.startsWith("rename to ") || line.startsWith("Binary files ")) continue;
     const hunkMatch = line.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)/);
     if (hunkMatch && currentFile) {
-      const oldStart = parseInt(hunkMatch[1], 10);
-      const oldCount = parseInt(hunkMatch[2] ?? "1", 10);
-      const newStart = parseInt(hunkMatch[3], 10);
-      const newCount = parseInt(hunkMatch[4] ?? "1", 10);
       currentHunk = {
         header: line,
-        oldStart,
-        oldCount,
-        newStart,
-        newCount,
+        oldStart: parseInt(hunkMatch[1], 10),
+        oldCount: parseInt(hunkMatch[2] ?? "1", 10),
+        newStart: parseInt(hunkMatch[3], 10),
+        newCount: parseInt(hunkMatch[4] ?? "1", 10),
         lines: [],
       };
       currentFile.hunks.push(currentHunk);
-      oldLine = oldStart;
-      newLine = newStart;
+      oldLine = parseInt(hunkMatch[1], 10);
+      newLine = parseInt(hunkMatch[3], 10);
       continue;
     }
-
-    // Diff lines
     if (currentHunk) {
       if (line.startsWith("+")) {
-        currentHunk.lines.push({
-          type: "add",
-          content: line.substring(1),
-          newLineNo: newLine++,
-        });
+        currentHunk.lines.push({ type: "add", content: line.substring(1), newLineNo: newLine++ });
       } else if (line.startsWith("-")) {
-        currentHunk.lines.push({
-          type: "delete",
-          content: line.substring(1),
-          oldLineNo: oldLine++,
-        });
+        currentHunk.lines.push({ type: "delete", content: line.substring(1), oldLineNo: oldLine++ });
       } else if (line.startsWith(" ") || line === "") {
-        currentHunk.lines.push({
-          type: "context",
-          content: line.startsWith(" ") ? line.substring(1) : line,
-          oldLineNo: oldLine++,
-          newLineNo: newLine++,
-        });
+        currentHunk.lines.push({ type: "context", content: line.startsWith(" ") ? line.substring(1) : line, oldLineNo: oldLine++, newLineNo: newLine++ });
       }
-      // Skip "\ No newline at end of file"
     }
   }
-
   if (currentFile) files.push(currentFile);
   return files;
 }
 
-// ─── Data loading ──────────────────────────────────────
-
+// ─── Data loading ───────────────────────────────────────
 async function loadRemote() {
-  try {
-    remote.value = await gitRemoteInfo(props.cwd);
-  } catch {
-    remote.value = null;
-  }
+  try { remote.value = await gitRemoteInfo(props.cwd); }
+  catch { remote.value = null; }
 }
 
 async function loadPrs() {
@@ -182,31 +135,20 @@ async function loadPrs() {
   }
 }
 
-async function toggleDetail(prNumber: number) {
-  if (expandedPrNumber.value === prNumber) {
-    expandedPrNumber.value = null;
-    prDetail.value = null;
-    prChecks.value = [];
-    prDiffRaw.value = "";
-    prDiffFiles.value = [];
-    selectedDiffFile.value = null;
-    return;
-  }
-
-  expandedPrNumber.value = prNumber;
+async function selectPr(pr: PullRequest) {
+  if (selectedPr.value?.number === pr.number) return;
+  selectedPr.value = pr;
+  prDetail.value = null;
+  prChecks.value = [];
+  prDiffFiles.value = [];
+  selectedDiffFile.value = null;
   detailTab.value = "info";
   detailLoading.value = true;
   detailError.value = null;
-  prDetail.value = null;
-  prChecks.value = [];
-  prDiffRaw.value = "";
-  prDiffFiles.value = [];
-  selectedDiffFile.value = null;
-
   try {
     const [detail, checks] = await Promise.all([
-      ghPrDetail(props.cwd, prNumber),
-      ghPrChecks(props.cwd, prNumber).catch(() => [] as CICheck[]),
+      ghPrDetail(props.cwd, pr.number),
+      ghPrChecks(props.cwd, pr.number).catch(() => [] as CICheck[]),
     ]);
     prDetail.value = detail;
     prChecks.value = checks;
@@ -218,14 +160,12 @@ async function toggleDetail(prNumber: number) {
 }
 
 async function loadDiff() {
-  if (!expandedPrNumber.value || prDiffRaw.value) return;
+  if (!selectedPr.value || prDiffFiles.value.length) return;
   detailLoading.value = true;
   try {
-    prDiffRaw.value = await ghPrDiff(props.cwd, expandedPrNumber.value);
-    prDiffFiles.value = parseUnifiedDiff(prDiffRaw.value);
-    if (prDiffFiles.value.length > 0) {
-      selectedDiffFile.value = prDiffFiles.value[0].path;
-    }
+    const raw = await ghPrDiff(props.cwd, selectedPr.value.number);
+    prDiffFiles.value = parseUnifiedDiff(raw);
+    if (prDiffFiles.value.length) selectedDiffFile.value = prDiffFiles.value[0].path;
   } catch (err: any) {
     detailError.value = err.message;
   } finally {
@@ -233,121 +173,95 @@ async function loadDiff() {
   }
 }
 
-// Load diff when switching to diff tab
-watch(detailTab, (tab) => {
-  if (tab === "diff") loadDiff();
-});
+watch(detailTab, (tab) => { if (tab === "diff") loadDiff(); });
 
-const selectedDiff = computed<GitDiff | null>(() => {
-  if (!selectedDiffFile.value) return null;
-  return prDiffFiles.value.find((f) => f.path === selectedDiffFile.value) ?? null;
-});
+const selectedDiff = computed<GitDiff | null>(() =>
+  selectedDiffFile.value ? (prDiffFiles.value.find((f) => f.path === selectedDiffFile.value) ?? null) : null
+);
 
-// ─── Actions ───────────────────────────────────────────
-
+// ─── Actions ────────────────────────────────────────────
 async function createPr() {
   if (!props.cwd || !newPrTitle.value.trim()) return;
   isCreating.value = true;
   error.value = null;
   try {
-    const pr = await ghCreatePr(
-      props.cwd,
-      newPrTitle.value.trim(),
-      newPrBody.value.trim(),
-      newPrBase.value.trim(),
-      newPrDraft.value,
-    );
-    success.value = `PR #${pr.number} created: ${pr.url}`;
+    const pr = await ghCreatePr(props.cwd, newPrTitle.value.trim(), newPrBody.value.trim(), newPrBase.value.trim(), newPrDraft.value);
+    success.value = `PR #${pr.number} créée`;
     showCreateForm.value = false;
-    newPrTitle.value = "";
-    newPrBody.value = "";
-    newPrDraft.value = false;
+    newPrTitle.value = ""; newPrBody.value = ""; newPrDraft.value = false;
     await loadPrs();
-  } catch (err: any) {
-    error.value = err.message;
-  } finally {
-    isCreating.value = false;
-  }
+  } catch (err: any) { error.value = err.message; }
+  finally { isCreating.value = false; }
 }
 
 async function checkoutPr(pr: PullRequest) {
   try {
     await ghCheckoutPr(props.cwd, pr.number);
-    success.value = `Checked out PR #${pr.number} (${pr.branch})`;
+    success.value = `Checkout PR #${pr.number}`;
     emit("refresh");
-  } catch (err: any) {
-    error.value = err.message;
-  }
+  } catch (err: any) { error.value = err.message; }
 }
 
 async function mergePr() {
   if (!mergingPr.value) return;
   try {
     await ghMergePr(props.cwd, mergingPr.value.number, mergeMethod.value);
-    success.value = `PR #${mergingPr.value.number} merged!`;
+    success.value = `PR #${mergingPr.value.number} mergée !`;
     mergingPr.value = null;
     await loadPrs();
     emit("refresh");
-  } catch (err: any) {
-    error.value = err.message;
-  }
+  } catch (err: any) { error.value = err.message; }
 }
 
-function openInBrowser(url: string) {
-  window.open(url, "_blank");
-}
+function openInBrowser(url: string) { window.open(url, "_blank"); }
 
 function timeAgo(dateStr: string): string {
   try {
-    const d = new Date(dateStr);
-    const now = new Date();
+    const d = new Date(dateStr), now = new Date();
     const diff = now.getTime() - d.getTime();
     const mins = Math.floor(diff / 60000);
-    if (mins < 60) return `${mins}m ago`;
+    if (mins < 60) return `${mins}m`;
     const hours = Math.floor(mins / 60);
-    if (hours < 24) return `${hours}h ago`;
-    const days = Math.floor(hours / 24);
-    return `${days}d ago`;
-  } catch {
-    return dateStr;
-  }
+    if (hours < 24) return `${hours}h`;
+    return `${Math.floor(hours / 24)}j`;
+  } catch { return dateStr; }
 }
 
-function mergeableIcon(status: string): string {
-  switch (status.toUpperCase()) {
+function mergeableIcon(s: string) {
+  switch (s.toUpperCase()) {
     case "MERGEABLE": return "✅";
     case "CONFLICTING": return "⚠️";
-    case "UNKNOWN": return "❓";
     default: return "—";
   }
 }
 
-function checkIcon(check: CICheck): string {
-  const c = (check.conclusion || check.state || "").toUpperCase();
-  if (c === "SUCCESS") return "✅";
-  if (c === "FAILURE" || c === "ERROR" || c === "CANCELLED") return "❌";
-  if (c === "PENDING" || c === "IN_PROGRESS" || c === "QUEUED") return "⏳";
-  if (c === "SKIPPED") return "⏭️";
+function checkIcon(c: CICheck): string {
+  const s = (c.conclusion || c.state || "").toUpperCase();
+  if (s === "SUCCESS") return "✅";
+  if (["FAILURE","ERROR","CANCELLED"].includes(s)) return "❌";
+  if (["PENDING","IN_PROGRESS","QUEUED"].includes(s)) return "⏳";
+  if (s === "SKIPPED") return "⏭️";
   return "❓";
 }
 
-function checksStatusIcon(status: string): string {
+function checksIcon(status: string): string {
   const s = status.toUpperCase();
   if (s === "SUCCESS" || s === "PASS") return "✅";
-  if (s === "FAILURE" || s === "FAIL" || s === "ERROR") return "❌";
+  if (["FAILURE","FAIL","ERROR"].includes(s)) return "❌";
   if (s === "PENDING") return "⏳";
-  return "—";
+  return "";
 }
 
 function renderBody(body: string): string {
-  // Simple markdown-ish rendering: preserve newlines, bold, code
   return body
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
     .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-    .replace(/`(.+?)`/g, '<code class="pr-inline-code">$1</code>')
+    .replace(/`(.+?)`/g, '<code class="pr-code">$1</code>')
     .replace(/\n/g, "<br />");
+}
+
+function handleKeydown(e: KeyboardEvent) {
+  if (e.key === "Escape") emit("close");
 }
 
 onMounted(() => {
@@ -355,411 +269,335 @@ onMounted(() => {
   loadPrs();
 });
 
+watch(() => props.show, (v) => { if (v) { loadRemote(); loadPrs(); } });
 watch(filterState, loadPrs);
-watch(() => props.cwd, () => {
-  loadRemote();
-  loadPrs();
-  expandedPrNumber.value = null;
-});
+watch(() => props.cwd, () => { loadRemote(); loadPrs(); selectedPr.value = null; });
 </script>
 
 <template>
-  <div class="pr-panel">
-    <div class="pr-header">
-      <h3>🔀 Pull Requests</h3>
-      <div class="pr-header-actions">
-        <select v-model="filterState" class="pr-filter">
-          <option value="open">Open</option>
-          <option value="closed">Closed</option>
-          <option value="all">All</option>
-        </select>
-        <button class="btn btn-sm btn-primary" @click="showCreateForm = !showCreateForm">
-          + New PR
-        </button>
-        <button class="btn btn-sm btn-ghost" @click="loadPrs" title="Refresh">↻</button>
-        <button class="btn btn-sm btn-ghost" @click="$emit('close')">✕</button>
-      </div>
-    </div>
-
-    <div v-if="error" class="pr-error">{{ error }}</div>
-    <div v-if="success" class="pr-success" @click="success = null">{{ success }}</div>
-
-    <!-- Create PR Form -->
-    <div v-if="showCreateForm" class="pr-create-form">
-      <input
-        v-model="newPrTitle"
-        class="pr-input"
-        type="text"
-        placeholder="PR title…"
-        @keydown.enter="createPr"
-      />
-      <textarea
-        v-model="newPrBody"
-        class="pr-textarea"
-        placeholder="Description (optional)…"
-        rows="3"
-      />
-      <div class="pr-create-options">
-        <input
-          v-model="newPrBase"
-          class="pr-input pr-input-sm"
-          type="text"
-          placeholder="Base branch (default: main)"
-        />
-        <label class="pr-draft-label">
-          <input type="checkbox" v-model="newPrDraft" />
-          Draft
-        </label>
-        <button
-          class="btn btn-sm btn-primary"
-          :disabled="!newPrTitle.trim() || isCreating"
-          @click="createPr"
-        >
-          {{ isCreating ? "Creating…" : "Create PR" }}
-        </button>
-      </div>
-    </div>
-
-    <!-- Merge dialog -->
-    <div v-if="mergingPr" class="pr-merge-dialog">
-      <p>Merge PR #{{ mergingPr.number }}: <strong>{{ mergingPr.title }}</strong></p>
-      <div class="pr-merge-options">
-        <label><input type="radio" v-model="mergeMethod" value="merge" /> Merge commit</label>
-        <label><input type="radio" v-model="mergeMethod" value="squash" /> Squash and merge</label>
-        <label><input type="radio" v-model="mergeMethod" value="rebase" /> Rebase and merge</label>
-      </div>
-      <div class="pr-merge-actions">
-        <button class="btn btn-primary" @click="mergePr">Merge</button>
-        <button class="btn" @click="mergingPr = null">Cancel</button>
-      </div>
-    </div>
-
-    <!-- PR List -->
-    <div v-if="loading" class="pr-loading">Loading pull requests…</div>
-
-    <div v-else-if="prs.length === 0" class="pr-empty">
-      No {{ filterState === "all" ? "" : filterState }} pull requests found.
-    </div>
-
-    <div v-else class="pr-list">
-      <div v-for="pr in prs" :key="pr.number" class="pr-item" :class="{ 'pr-item-expanded': expandedPrNumber === pr.number }">
-        <div class="pr-item-header">
-          <span class="pr-number">#{{ pr.number }}</span>
-          <span class="pr-title" @click="toggleDetail(pr.number)">{{ pr.title }}</span>
-          <span v-if="pr.draft" class="pr-badge pr-badge-draft">Draft</span>
-          <span v-for="label in pr.labels" :key="label" class="pr-badge">{{ label }}</span>
-          <button
-            class="btn-expand"
-            :class="{ 'btn-expand-active': expandedPrNumber === pr.number }"
-            @click="toggleDetail(pr.number)"
-            :title="expandedPrNumber === pr.number ? 'Collapse' : 'Expand details'"
-          >
-            ▸
-          </button>
-        </div>
-        <div class="pr-item-meta">
-          <span>{{ pr.author }}</span>
-          <span class="pr-branch-info">{{ pr.branch }} → {{ pr.base }}</span>
-          <span class="pr-stats">
-            <span class="pr-additions">+{{ pr.additions }}</span>
-            <span class="pr-deletions">-{{ pr.deletions }}</span>
-          </span>
-          <span class="pr-time">{{ timeAgo(pr.updatedAt || pr.createdAt) }}</span>
-        </div>
-        <div class="pr-item-actions">
-          <button class="btn btn-xs" @click="checkoutPr(pr)" title="Checkout this PR locally">
-            Checkout
-          </button>
-          <button
-            v-if="pr.state === 'OPEN' || pr.state === 'open'"
-            class="btn btn-xs btn-primary"
-            @click="mergingPr = pr"
-            title="Merge this PR"
-          >
-            Merge
-          </button>
-          <button class="btn btn-xs" @click="openInBrowser(pr.url)" title="Open in browser">
-            ↗
-          </button>
-        </div>
-
-        <!-- ─── Expanded Detail View ─── -->
-        <div v-if="expandedPrNumber === pr.number" class="pr-detail">
-          <div v-if="detailLoading && !prDetail" class="pr-detail-loading">
-            Loading PR details…
+  <Teleport to="body">
+    <div
+      v-if="show"
+      class="pr-backdrop"
+      @click.self="emit('close')"
+      @keydown="handleKeydown"
+    >
+      <div class="pr-overlay" role="dialog" aria-modal="true" aria-label="Pull Requests">
+        <!-- Header -->
+        <div class="pr-overlay-header">
+          <span class="pr-overlay-title">🔀 Pull Requests</span>
+          <div class="pr-overlay-actions">
+            <select v-model="filterState" class="pr-filter">
+              <option value="open">Ouvertes</option>
+              <option value="closed">Fermées</option>
+              <option value="all">Toutes</option>
+            </select>
+            <button class="eco-btn eco-btn--primary" @click="showCreateForm = !showCreateForm">
+              + Nouvelle PR
+            </button>
+            <button class="eco-btn" @click="loadPrs" title="Rafraîchir">
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M13.5 8A5.5 5.5 0 1 1 8 2.5M13.5 2.5v3h-3" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+            <button class="eco-btn eco-close" @click="emit('close')" title="Fermer">
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+              </svg>
+            </button>
           </div>
-          <div v-else-if="detailError && !prDetail" class="pr-error">{{ detailError }}</div>
-          <template v-else-if="prDetail">
-            <!-- Detail Tabs -->
-            <div class="pr-detail-tabs">
-              <button
-                :class="['pr-detail-tab', { active: detailTab === 'info' }]"
-                @click="detailTab = 'info'"
-              >
-                📋 Info
-              </button>
-              <button
-                :class="['pr-detail-tab', { active: detailTab === 'diff' }]"
-                @click="detailTab = 'diff'"
-              >
-                📝 Diff
-                <span v-if="prDetail.changedFiles" class="tab-badge">{{ prDetail.changedFiles }}</span>
-              </button>
-              <button
-                :class="['pr-detail-tab', { active: detailTab === 'checks' }]"
-                @click="detailTab = 'checks'"
-              >
-                {{ checksStatusIcon(prDetail.checksStatus) }} CI
-                <span v-if="prChecks.length" class="tab-badge">{{ prChecks.length }}</span>
-              </button>
-            </div>
+        </div>
 
-            <!-- ─── Info Tab ─── -->
-            <div v-if="detailTab === 'info'" class="pr-detail-content">
-              <!-- Summary row -->
-              <div class="pr-detail-summary">
-                <div class="pr-detail-stat">
-                  <span class="stat-label">Mergeable</span>
-                  <span>{{ mergeableIcon(prDetail.mergeable) }} {{ prDetail.mergeable }}</span>
+        <!-- Messages -->
+        <div v-if="error" class="pr-msg pr-msg--error">{{ error }}</div>
+        <div v-if="success" class="pr-msg pr-msg--success" @click="success = null">{{ success }}</div>
+
+        <!-- Create form -->
+        <div v-if="showCreateForm" class="pr-create-form">
+          <input v-model="newPrTitle" class="eco-input" type="text" placeholder="Titre de la PR…" @keydown.enter="createPr" />
+          <textarea v-model="newPrBody" class="eco-input eco-textarea" placeholder="Description (optionnelle)…" rows="2" />
+          <div class="pr-create-row">
+            <input v-model="newPrBase" class="eco-input eco-input--sm" type="text" placeholder="Branche cible (défaut : main)" />
+            <label class="pr-draft-label">
+              <input type="checkbox" v-model="newPrDraft" /> Draft
+            </label>
+            <button class="eco-btn eco-btn--primary" :disabled="!newPrTitle.trim() || isCreating" @click="createPr">
+              {{ isCreating ? "Création…" : "Créer" }}
+            </button>
+          </div>
+        </div>
+
+        <!-- Merge dialog -->
+        <div v-if="mergingPr" class="pr-merge-dialog">
+          <p>Merger la PR #{{ mergingPr.number }} : <strong>{{ mergingPr.title }}</strong></p>
+          <div class="pr-merge-options">
+            <label><input type="radio" v-model="mergeMethod" value="merge" /> Merge commit</label>
+            <label><input type="radio" v-model="mergeMethod" value="squash" /> Squash and merge</label>
+            <label><input type="radio" v-model="mergeMethod" value="rebase" /> Rebase and merge</label>
+          </div>
+          <div class="pr-merge-actions">
+            <button class="eco-btn eco-btn--primary" @click="mergePr">Merger</button>
+            <button class="eco-btn" @click="mergingPr = null">Annuler</button>
+          </div>
+        </div>
+
+        <!-- Body: two columns -->
+        <div class="pr-body">
+          <!-- Left: PR list -->
+          <div class="pr-list-col">
+            <div v-if="loading" class="pr-placeholder">Chargement…</div>
+            <div v-else-if="prs.length === 0" class="pr-placeholder">Aucune PR {{ filterState !== 'all' ? filterState === 'open' ? 'ouverte' : 'fermée' : '' }} trouvée.</div>
+            <div v-else class="pr-list">
+              <button
+                v-for="pr in prs"
+                :key="pr.number"
+                :class="['pr-item', { 'pr-item--active': selectedPr?.number === pr.number }]"
+                @click="selectPr(pr)"
+              >
+                <div class="pr-item-top">
+                  <span class="pr-num">#{{ pr.number }}</span>
+                  <span v-if="pr.draft" class="pr-chip pr-chip--draft">Draft</span>
+                  <span class="pr-time">{{ timeAgo(pr.updatedAt || pr.createdAt) }}</span>
                 </div>
-                <div class="pr-detail-stat">
-                  <span class="stat-label">Files changed</span>
-                  <span>{{ prDetail.changedFiles }}</span>
-                </div>
-                <div class="pr-detail-stat">
-                  <span class="stat-label">Changes</span>
-                  <span>
-                    <span class="pr-additions">+{{ prDetail.additions }}</span>
-                    <span class="pr-deletions"> -{{ prDetail.deletions }}</span>
+                <div class="pr-item-title">{{ pr.title }}</div>
+                <div class="pr-item-meta">
+                  <span class="pr-author">{{ pr.author }}</span>
+                  <span class="pr-branch mono">{{ pr.branch }} → {{ pr.base }}</span>
+                  <span class="pr-stats">
+                    <span class="add">+{{ pr.additions }}</span>
+                    <span class="del"> -{{ pr.deletions }}</span>
                   </span>
                 </div>
-                <div class="pr-detail-stat">
-                  <span class="stat-label">Comments</span>
-                  <span>{{ prDetail.comments }} + {{ prDetail.reviewComments }} review</span>
+                <div class="pr-item-chips">
+                  <span v-for="label in pr.labels" :key="label" class="pr-chip">{{ label }}</span>
                 </div>
-              </div>
-
-              <!-- Reviewers -->
-              <div v-if="prDetail.reviewers.length" class="pr-detail-reviewers">
-                <span class="stat-label">Reviewers</span>
-                <div class="reviewer-list">
-                  <span
-                    v-for="reviewer in prDetail.reviewers"
-                    :key="reviewer"
-                    class="reviewer-badge"
-                  >
-                    {{ reviewer }}
-                  </span>
+                <div class="pr-item-actions" @click.stop>
+                  <button class="eco-btn eco-btn--xs" @click="checkoutPr(pr)">Checkout</button>
+                  <button v-if="pr.state === 'OPEN' || pr.state === 'open'" class="eco-btn eco-btn--xs eco-btn--primary" @click="mergingPr = pr">Merger</button>
+                  <button class="eco-btn eco-btn--xs" @click="openInBrowser(pr.url)" title="Ouvrir sur GitHub">↗</button>
                 </div>
-              </div>
-
-              <!-- Body -->
-              <div v-if="prDetail.body" class="pr-detail-body">
-                <div class="pr-body-content" v-html="renderBody(prDetail.body)" />
-              </div>
-              <div v-else class="pr-detail-body pr-detail-empty">No description provided.</div>
-
-              <!-- Cross-links -->
-              <div class="pr-detail-links">
-                <span class="stat-label">Links</span>
-                <div class="pr-links-row">
-                  <button class="btn btn-xs" @click="openInBrowser(prDetail.url)">
-                    🌐 View on GitHub
-                  </button>
-                  <button class="btn btn-xs" @click="openInBrowser(prDetail.url + '/commits')">
-                    📦 Commits
-                  </button>
-                  <button class="btn btn-xs" @click="openInBrowser(prDetail.url + '/files')">
-                    📄 Files changed
-                  </button>
-                  <button
-                    v-if="prDetail.checksStatus"
-                    class="btn btn-xs"
-                    @click="openInBrowser(prDetail.url + '/checks')"
-                  >
-                    🔗 CI Runs
-                  </button>
-                </div>
-              </div>
-
-              <!-- Timestamps -->
-              <div class="pr-detail-timestamps">
-                <span>Created {{ timeAgo(prDetail.createdAt) }}</span>
-                <span v-if="prDetail.mergedAt"> · Merged {{ timeAgo(prDetail.mergedAt) }}</span>
-                <span v-else> · Updated {{ timeAgo(prDetail.updatedAt) }}</span>
-              </div>
+              </button>
             </div>
+          </div>
 
-            <!-- ─── Diff Tab ─── -->
-            <div v-if="detailTab === 'diff'" class="pr-detail-content pr-detail-diff">
-              <div v-if="detailLoading && !prDiffRaw" class="pr-detail-loading">
-                Loading diff…
+          <!-- Right: Detail panel -->
+          <div class="pr-detail-col">
+            <div v-if="!selectedPr" class="pr-placeholder pr-placeholder--detail">
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" opacity="0.3">
+                <circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/>
+                <path d="M6 9v6M18 15V9a3 3 0 0 0-3-3H9"/>
+              </svg>
+              <span>Sélectionnez une PR</span>
+            </div>
+            <div v-else-if="detailLoading && !prDetail" class="pr-placeholder">Chargement des détails…</div>
+            <div v-else-if="detailError && !prDetail" class="pr-msg pr-msg--error">{{ detailError }}</div>
+            <template v-else-if="prDetail">
+              <!-- Detail header -->
+              <div class="pr-detail-header">
+                <div class="pr-detail-title">
+                  <span class="pr-num">#{{ prDetail.number }}</span>
+                  <span>{{ prDetail.title }}</span>
+                </div>
+                <div class="pr-detail-subtitle">
+                  <span>{{ prDetail.author }}</span>
+                  <span class="mono">{{ prDetail.branch }} → {{ prDetail.base }}</span>
+                  <span>{{ timeAgo(prDetail.createdAt) }}</span>
+                  <span v-if="prDetail.mergedAt">· Mergée {{ timeAgo(prDetail.mergedAt) }}</span>
+                </div>
               </div>
-              <template v-else-if="prDiffFiles.length > 0">
-                <!-- File list sidebar -->
-                <div class="pr-diff-sidebar">
-                  <div class="pr-diff-file-count">
-                    {{ prDiffFiles.length }} file{{ prDiffFiles.length !== 1 ? "s" : "" }} changed
+
+              <!-- Detail tabs -->
+              <div class="pr-detail-tabs">
+                <button :class="['pr-tab', { active: detailTab === 'info' }]" @click="detailTab = 'info'">Info</button>
+                <button :class="['pr-tab', { active: detailTab === 'diff' }]" @click="detailTab = 'diff'">
+                  Diff <span v-if="prDetail.changedFiles" class="pr-tab-count">{{ prDetail.changedFiles }}</span>
+                </button>
+                <button :class="['pr-tab', { active: detailTab === 'checks' }]" @click="detailTab = 'checks'">
+                  {{ checksIcon(prDetail.checksStatus) }} CI
+                  <span v-if="prChecks.length" class="pr-tab-count">{{ prChecks.length }}</span>
+                </button>
+                <div class="pr-tab-spacer" />
+                <button class="eco-btn eco-btn--xs" @click="openInBrowser(prDetail.url)">↗ GitHub</button>
+              </div>
+
+              <!-- Info tab -->
+              <div v-if="detailTab === 'info'" class="pr-detail-body">
+                <div class="pr-stats-grid">
+                  <div class="pr-stat">
+                    <span class="pr-stat-label">Merge</span>
+                    <span>{{ mergeableIcon(prDetail.mergeable) }} {{ prDetail.mergeable }}</span>
                   </div>
-                  <div
-                    v-for="file in prDiffFiles"
-                    :key="file.path"
-                    :class="['pr-diff-file-entry', { active: selectedDiffFile === file.path }]"
-                    @click="selectedDiffFile = file.path"
-                  >
-                    <span class="pr-diff-file-name">{{ file.path.split('/').pop() }}</span>
-                    <span class="pr-diff-file-path">{{ file.path }}</span>
+                  <div class="pr-stat">
+                    <span class="pr-stat-label">Fichiers</span>
+                    <span>{{ prDetail.changedFiles }}</span>
+                  </div>
+                  <div class="pr-stat">
+                    <span class="pr-stat-label">Diff</span>
+                    <span><span class="add">+{{ prDetail.additions }}</span><span class="del"> -{{ prDetail.deletions }}</span></span>
+                  </div>
+                  <div class="pr-stat">
+                    <span class="pr-stat-label">Commentaires</span>
+                    <span>{{ prDetail.comments + prDetail.reviewComments }}</span>
                   </div>
                 </div>
-                <!-- Diff viewer -->
-                <div class="pr-diff-viewer-wrapper">
-                  <DiffViewer
-                    v-if="selectedDiff"
-                    :diff="selectedDiff"
-                    :file-path="selectedDiffFile"
-                    :diff-mode="diffMode"
-                    @update:diff-mode="diffMode = $event"
-                  />
-                </div>
-              </template>
-              <div v-else class="pr-detail-empty">No diff available.</div>
-            </div>
 
-            <!-- ─── Checks Tab ─── -->
-            <div v-if="detailTab === 'checks'" class="pr-detail-content">
-              <div v-if="prChecks.length === 0" class="pr-detail-empty">
-                No CI checks found for this PR.
-              </div>
-              <div v-else class="pr-checks-list">
-                <div
-                  v-for="check in prChecks"
-                  :key="check.name"
-                  class="pr-check-item"
-                >
-                  <span class="pr-check-icon">{{ checkIcon(check) }}</span>
-                  <span class="pr-check-name">{{ check.name }}</span>
-                  <span class="pr-check-state">{{ check.conclusion || check.state }}</span>
-                  <button
-                    v-if="check.detailsUrl"
-                    class="btn btn-xs"
-                    @click="openInBrowser(check.detailsUrl)"
-                    title="View CI run details"
-                  >
-                    🔗
-                  </button>
+                <div v-if="prDetail.reviewers.length" class="pr-reviewers">
+                  <span class="pr-section-label">Reviewers</span>
+                  <div class="pr-reviewer-list">
+                    <span v-for="r in prDetail.reviewers" :key="r" class="pr-chip">{{ r }}</span>
+                  </div>
+                </div>
+
+                <div v-if="prDetail.labels.length" class="pr-labels">
+                  <span class="pr-section-label">Labels</span>
+                  <div class="pr-label-list">
+                    <span v-for="l in prDetail.labels" :key="l" class="pr-chip">{{ l }}</span>
+                  </div>
+                </div>
+
+                <div class="pr-section-label">Description</div>
+                <div v-if="prDetail.body" class="pr-body-text" v-html="renderBody(prDetail.body)" />
+                <div v-else class="pr-placeholder pr-placeholder--sm">Aucune description.</div>
+
+                <div class="pr-links">
+                  <button class="eco-btn eco-btn--xs" @click="openInBrowser(prDetail.url + '/commits')">📦 Commits</button>
+                  <button class="eco-btn eco-btn--xs" @click="openInBrowser(prDetail.url + '/files')">📄 Fichiers</button>
+                  <button v-if="prDetail.checksStatus" class="eco-btn eco-btn--xs" @click="openInBrowser(prDetail.url + '/checks')">🔗 CI</button>
                 </div>
               </div>
-            </div>
-          </template>
+
+              <!-- Diff tab -->
+              <div v-if="detailTab === 'diff'" class="pr-detail-body pr-diff-body">
+                <div v-if="detailLoading && !prDiffFiles.length" class="pr-placeholder">Chargement du diff…</div>
+                <template v-else-if="prDiffFiles.length">
+                  <div class="pr-diff-sidebar">
+                    <div class="pr-diff-file-count">{{ prDiffFiles.length }} fichier{{ prDiffFiles.length > 1 ? 's' : '' }}</div>
+                    <button
+                      v-for="file in prDiffFiles"
+                      :key="file.path"
+                      :class="['pr-diff-file', { active: selectedDiffFile === file.path }]"
+                      @click="selectedDiffFile = file.path"
+                    >
+                      <span class="pr-diff-file-name">{{ file.path.split('/').pop() }}</span>
+                      <span class="pr-diff-file-path">{{ file.path }}</span>
+                    </button>
+                  </div>
+                  <div class="pr-diff-viewer">
+                    <DiffViewer v-if="selectedDiff" :diff="selectedDiff" :file-path="selectedDiffFile" :diff-mode="diffMode" @update:diff-mode="diffMode = $event" />
+                  </div>
+                </template>
+                <div v-else class="pr-placeholder">Aucun diff disponible.</div>
+              </div>
+
+              <!-- CI tab -->
+              <div v-if="detailTab === 'checks'" class="pr-detail-body">
+                <div v-if="prChecks.length === 0" class="pr-placeholder">Aucun check CI trouvé.</div>
+                <div v-else class="pr-checks">
+                  <div v-for="c in prChecks" :key="c.name" class="pr-check">
+                    <span class="pr-check-icon">{{ checkIcon(c) }}</span>
+                    <span class="pr-check-name">{{ c.name }}</span>
+                    <span class="pr-check-state">{{ c.conclusion || c.state }}</span>
+                    <button v-if="c.detailsUrl" class="eco-btn eco-btn--xs" @click="openInBrowser(c.detailsUrl)">↗</button>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </div>
         </div>
       </div>
     </div>
-  </div>
+  </Teleport>
 </template>
 
 <style scoped>
-.pr-panel {
+/* ─── Backdrop + overlay ──────────────────────────────── */
+.pr-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  animation: pr-fade 0.12s ease-out;
+}
+
+@keyframes pr-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.pr-overlay {
+  width: 92vw;
+  max-width: 1200px;
+  height: 85vh;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5);
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 12px;
-  background: var(--bg-secondary, #1e1e2e);
-  border-radius: 8px;
-  border: 1px solid var(--border-color, #313244);
-  max-height: 80vh;
-  overflow-y: auto;
+  overflow: hidden;
+  animation: pr-slide 0.15s ease-out;
 }
 
-.pr-header {
+@keyframes pr-slide {
+  from { opacity: 0; transform: translateY(-8px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* ─── Header ──────────────────────────────────────────── */
+.pr-overlay-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
 }
 
-.pr-header h3 {
-  margin: 0;
-  font-size: 14px;
+.pr-overlay-title {
+  font-size: 13px;
   font-weight: 600;
+  flex: 1;
 }
 
-.pr-header-actions {
+.pr-overlay-actions {
   display: flex;
-  gap: 4px;
   align-items: center;
+  gap: 6px;
 }
 
 .pr-filter {
-  background: var(--bg-tertiary, #11111b);
-  border: 1px solid var(--border-color, #313244);
-  border-radius: 4px;
-  color: inherit;
-  font-size: 11px;
-  padding: 2px 6px;
-}
-
-.pr-error {
-  color: var(--color-error, #f38ba8);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-text);
   font-size: 12px;
-  padding: 6px 8px;
-  background: rgba(243, 139, 168, 0.1);
-  border-radius: 4px;
-}
-
-.pr-success {
-  color: var(--color-success, #a6e3a1);
-  font-size: 12px;
-  padding: 6px 8px;
-  background: rgba(166, 227, 161, 0.1);
-  border-radius: 4px;
+  padding: 4px 8px;
   cursor: pointer;
 }
 
-.pr-loading, .pr-empty {
-  font-size: 13px;
-  color: var(--text-muted, #6c7086);
-  text-align: center;
-  padding: 16px;
+/* ─── Messages ────────────────────────────────────────── */
+.pr-msg {
+  font-size: 12px;
+  padding: 6px 16px;
+  flex-shrink: 0;
 }
+.pr-msg--error { color: var(--color-error, #f38ba8); background: rgba(243,139,168,0.1); }
+.pr-msg--success { color: var(--color-success, #a6e3a1); background: rgba(166,227,161,0.1); cursor: pointer; }
 
-/* Create form */
+/* ─── Create form ─────────────────────────────────────── */
 .pr-create-form {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 8px;
-  background: var(--bg-tertiary, #11111b);
-  border-radius: 6px;
-  border: 1px solid var(--border-color, #313244);
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
 }
 
-.pr-input {
-  background: var(--bg-secondary, #1e1e2e);
-  border: 1px solid var(--border-color, #313244);
-  border-radius: 4px;
-  padding: 6px 8px;
-  color: inherit;
-  font-size: 13px;
-  outline: none;
-}
-
-.pr-input:focus { border-color: var(--color-accent, #cba6f7); }
-.pr-input-sm { font-size: 12px; padding: 4px 6px; flex: 1; }
-
-.pr-textarea {
-  background: var(--bg-secondary, #1e1e2e);
-  border: 1px solid var(--border-color, #313244);
-  border-radius: 4px;
-  padding: 6px 8px;
-  color: inherit;
-  font-size: 12px;
-  resize: vertical;
-  outline: none;
-  font-family: inherit;
-}
-
-.pr-textarea:focus { border-color: var(--color-accent, #cba6f7); }
-
-.pr-create-options {
+.pr-create-row {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -771,131 +609,137 @@ watch(() => props.cwd, () => {
   gap: 4px;
   font-size: 12px;
   white-space: nowrap;
+  color: var(--color-text-muted);
 }
 
-/* Merge dialog */
+/* ─── Merge dialog ────────────────────────────────────── */
 .pr-merge-dialog {
-  padding: 10px;
-  background: var(--bg-tertiary, #11111b);
-  border-radius: 6px;
-  border: 1px solid var(--border-color, #313244);
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+  background: var(--color-bg-tertiary);
+}
+.pr-merge-dialog p { margin: 0 0 8px; font-size: 13px; }
+.pr-merge-options { display: flex; gap: 16px; margin-bottom: 10px; }
+.pr-merge-options label { font-size: 12px; display: flex; align-items: center; gap: 5px; cursor: pointer; }
+.pr-merge-actions { display: flex; gap: 6px; }
+
+/* ─── Body: two columns ───────────────────────────────── */
+.pr-body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
 }
 
-.pr-merge-dialog p { margin: 0 0 8px; font-size: 13px; }
-
-.pr-merge-options {
+/* Left column: PR list */
+.pr-list-col {
+  width: 320px;
+  min-width: 260px;
+  border-right: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  margin-bottom: 8px;
+  overflow-y: auto;
+  flex-shrink: 0;
 }
 
-.pr-merge-options label {
-  font-size: 12px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.pr-merge-actions {
-  display: flex;
-  gap: 6px;
-}
-
-/* PR list */
 .pr-list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  padding: 6px;
+  gap: 2px;
 }
 
+.pr-placeholder {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  padding: 24px;
+  text-align: center;
+}
+
+.pr-placeholder--detail { opacity: 0.6; }
+.pr-placeholder--sm { padding: 8px; font-size: 12px; color: var(--color-text-muted); font-style: italic; }
+
 .pr-item {
-  padding: 8px 10px;
-  border-radius: 6px;
-  border: 1px solid var(--border-color, #313244);
   display: flex;
   flex-direction: column;
   gap: 4px;
-  transition: border-color 0.15s;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  text-align: left;
+  background: transparent;
+  color: var(--color-text);
+  transition: background 0.1s, border-color 0.1s;
+  width: 100%;
 }
 
-.pr-item-expanded {
-  border-color: var(--color-accent, #cba6f7);
+.pr-item:hover { background: var(--color-bg-tertiary); }
+.pr-item--active {
+  background: var(--color-bg-tertiary);
+  border-color: var(--color-accent);
 }
 
-.pr-item-header {
+.pr-item-top {
   display: flex;
   align-items: center;
   gap: 6px;
-  flex-wrap: wrap;
 }
 
-.pr-number {
+.pr-num {
+  font-size: 11px;
   font-weight: 700;
-  color: var(--color-accent, #cba6f7);
-  font-size: 12px;
+  color: var(--color-accent);
 }
 
-.pr-title {
+.pr-time {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.pr-item-title {
   font-size: 13px;
   font-weight: 500;
-  cursor: pointer;
-  flex: 1;
-  min-width: 0;
-  white-space: nowrap;
+  line-height: 1.4;
   overflow: hidden;
-  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
-
-.pr-title:hover { text-decoration: underline; }
-
-.pr-badge {
-  font-size: 10px;
-  padding: 1px 6px;
-  border-radius: 10px;
-  background: var(--bg-tertiary, #11111b);
-  border: 1px solid var(--border-color, #313244);
-}
-
-.pr-badge-draft {
-  color: var(--text-muted, #6c7086);
-  border-color: var(--text-muted, #6c7086);
-}
-
-.btn-expand {
-  background: none;
-  border: none;
-  color: var(--text-muted, #6c7086);
-  font-size: 12px;
-  cursor: pointer;
-  padding: 2px 4px;
-  transition: transform 0.15s, color 0.15s;
-  line-height: 1;
-}
-
-.btn-expand:hover { color: var(--color-accent, #cba6f7); }
-.btn-expand-active { transform: rotate(90deg); color: var(--color-accent, #cba6f7); }
 
 .pr-item-meta {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   font-size: 11px;
-  color: var(--text-muted, #6c7086);
+  color: var(--color-text-muted);
+  flex-wrap: wrap;
 }
 
-.pr-branch-info {
-  font-family: "JetBrains Mono", "Fira Code", monospace;
+.pr-branch {
   font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 160px;
 }
 
-.pr-stats {
+.pr-stats { display: flex; gap: 3px; }
+.add { color: var(--color-success, #a6e3a1); }
+.del { color: var(--color-error, #f38ba8); }
+
+.pr-item-chips {
   display: flex;
-  gap: 4px;
+  flex-wrap: wrap;
+  gap: 3px;
 }
-
-.pr-additions { color: var(--color-success, #a6e3a1); }
-.pr-deletions { color: var(--color-error, #f38ba8); }
 
 .pr-item-actions {
   display: flex;
@@ -903,269 +747,275 @@ watch(() => props.cwd, () => {
   margin-top: 2px;
 }
 
-/* ─── Detail View ─── */
-.pr-detail {
-  margin-top: 8px;
-  border-top: 1px solid var(--border-color, #313244);
-  padding-top: 8px;
+.pr-chip {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
 }
 
-.pr-detail-loading {
-  font-size: 12px;
-  color: var(--text-muted, #6c7086);
-  text-align: center;
-  padding: 12px;
+.pr-chip--draft {
+  color: var(--color-text-muted);
+  border-color: var(--color-text-muted);
+}
+
+/* Right column: Detail */
+.pr-detail-col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.pr-detail-header {
+  padding: 12px 16px 10px;
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.pr-detail-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 4px;
+  line-height: 1.4;
+}
+
+.pr-detail-subtitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  flex-wrap: wrap;
 }
 
 .pr-detail-tabs {
   display: flex;
-  gap: 2px;
-  margin-bottom: 8px;
-  border-bottom: 1px solid var(--border-color, #313244);
-  padding-bottom: 0;
+  align-items: center;
+  gap: 0;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
 }
 
-.pr-detail-tab {
+.pr-tab {
   background: none;
   border: none;
   border-bottom: 2px solid transparent;
-  color: var(--text-muted, #6c7086);
+  color: var(--color-text-muted);
   font-size: 12px;
-  padding: 6px 12px;
+  padding: 8px 12px;
   cursor: pointer;
   display: flex;
   align-items: center;
-  gap: 4px;
-  transition: color 0.15s, border-color 0.15s;
+  gap: 5px;
+  transition: color 0.12s, border-color 0.12s;
+  margin-bottom: -1px;
 }
 
-.pr-detail-tab:hover { color: inherit; }
-.pr-detail-tab.active {
-  color: var(--color-accent, #cba6f7);
-  border-bottom-color: var(--color-accent, #cba6f7);
-}
+.pr-tab:hover { color: var(--color-text); }
+.pr-tab.active { color: var(--color-accent); border-bottom-color: var(--color-accent); }
 
-.tab-badge {
+.pr-tab-count {
   font-size: 10px;
-  background: var(--bg-tertiary, #11111b);
+  background: var(--color-bg-tertiary);
   border-radius: 8px;
   padding: 0 5px;
   min-width: 16px;
   text-align: center;
+  color: var(--color-text-muted);
 }
 
-.pr-detail-content {
-  font-size: 12px;
-}
+.pr-tab-spacer { flex: 1; }
 
-.pr-detail-empty {
-  color: var(--text-muted, #6c7086);
-  font-style: italic;
-  padding: 8px;
+.pr-detail-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 /* Info tab */
-.pr-detail-summary {
+.pr-stats-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  grid-template-columns: repeat(4, 1fr);
   gap: 8px;
-  margin-bottom: 10px;
 }
 
-.pr-detail-stat {
+.pr-stat {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 6px 8px;
-  background: var(--bg-tertiary, #11111b);
-  border-radius: 4px;
+  padding: 8px;
+  background: var(--color-bg-tertiary);
+  border-radius: 6px;
+  font-size: 12px;
 }
 
-.stat-label {
+.pr-stat-label {
   font-size: 10px;
-  color: var(--text-muted, #6c7086);
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  color: var(--color-text-muted);
 }
 
-.pr-detail-reviewers {
-  margin-bottom: 10px;
+.pr-section-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
 }
 
-.reviewer-list {
+.pr-reviewer-list, .pr-label-list {
   display: flex;
-  gap: 4px;
   flex-wrap: wrap;
+  gap: 4px;
   margin-top: 4px;
 }
 
-.reviewer-badge {
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 12px;
-  background: rgba(203, 166, 247, 0.15);
-  color: var(--color-accent, #cba6f7);
-  border: 1px solid rgba(203, 166, 247, 0.3);
-}
-
-.pr-detail-body {
-  margin-bottom: 10px;
-  padding: 8px;
-  background: var(--bg-tertiary, #11111b);
-  border-radius: 4px;
+.pr-body-text {
+  font-size: 12px;
+  line-height: 1.6;
+  padding: 10px;
+  background: var(--color-bg-tertiary);
+  border-radius: 6px;
   max-height: 200px;
   overflow-y: auto;
-}
-
-.pr-body-content {
-  font-size: 12px;
-  line-height: 1.5;
   word-break: break-word;
 }
 
-.pr-body-content :deep(.pr-inline-code) {
-  background: rgba(203, 166, 247, 0.15);
+.pr-body-text :deep(.pr-code) {
+  background: rgba(203,166,247,0.15);
   padding: 1px 4px;
   border-radius: 3px;
   font-family: "JetBrains Mono", "Fira Code", monospace;
   font-size: 11px;
 }
 
-.pr-detail-links {
-  margin-bottom: 10px;
-}
-
-.pr-links-row {
+.pr-links {
   display: flex;
-  gap: 4px;
+  gap: 6px;
   flex-wrap: wrap;
-  margin-top: 4px;
-}
-
-.pr-detail-timestamps {
-  font-size: 11px;
-  color: var(--text-muted, #6c7086);
-  padding-top: 6px;
-  border-top: 1px solid var(--border-color, #313244);
 }
 
 /* Diff tab */
-.pr-detail-diff {
-  display: flex;
-  gap: 8px;
-  max-height: 400px;
+.pr-diff-body {
+  flex-direction: row !important;
+  padding: 0 !important;
+  gap: 0 !important;
 }
 
 .pr-diff-sidebar {
   width: 200px;
   min-width: 160px;
-  max-height: 400px;
   overflow-y: auto;
-  border-right: 1px solid var(--border-color, #313244);
-  padding-right: 8px;
+  border-right: 1px solid var(--color-border);
+  padding: 8px;
   flex-shrink: 0;
 }
 
 .pr-diff-file-count {
   font-size: 11px;
-  color: var(--text-muted, #6c7086);
-  margin-bottom: 6px;
-  padding-bottom: 4px;
-  border-bottom: 1px solid var(--border-color, #313244);
+  color: var(--color-text-muted);
+  padding-bottom: 6px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--color-border);
 }
 
-.pr-diff-file-entry {
+.pr-diff-file {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
   padding: 4px 6px;
-  border-radius: 3px;
+  border-radius: 4px;
   cursor: pointer;
-  margin-bottom: 2px;
+  background: transparent;
+  border: none;
+  text-align: left;
+  color: var(--color-text);
   transition: background 0.1s;
+  margin-bottom: 2px;
 }
 
-.pr-diff-file-entry:hover { background: var(--bg-hover, rgba(255, 255, 255, 0.05)); }
-.pr-diff-file-entry.active { background: rgba(203, 166, 247, 0.15); }
+.pr-diff-file:hover { background: var(--color-bg-tertiary); }
+.pr-diff-file.active { background: rgba(203,166,247,0.12); }
 
-.pr-diff-file-name {
-  display: block;
-  font-size: 12px;
-  font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
+.pr-diff-file-name { font-size: 12px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pr-diff-file-path { font-size: 10px; color: var(--color-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-.pr-diff-file-path {
-  display: block;
-  font-size: 10px;
-  color: var(--text-muted, #6c7086);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.pr-diff-viewer-wrapper {
+.pr-diff-viewer {
   flex: 1;
   min-width: 0;
   overflow: auto;
-  max-height: 400px;
 }
 
-/* Checks tab */
-.pr-checks-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
+/* CI tab */
+.pr-checks { display: flex; flex-direction: column; gap: 4px; }
 
-.pr-check-item {
+.pr-check {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 8px;
-  background: var(--bg-tertiary, #11111b);
-  border-radius: 4px;
-}
-
-.pr-check-icon {
-  font-size: 14px;
-  flex-shrink: 0;
-}
-
-.pr-check-name {
-  flex: 1;
+  padding: 7px 10px;
+  background: var(--color-bg-tertiary);
+  border-radius: 6px;
   font-size: 12px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
-.pr-check-state {
-  font-size: 11px;
-  color: var(--text-muted, #6c7086);
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-}
+.pr-check-icon { font-size: 14px; flex-shrink: 0; }
+.pr-check-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pr-check-state { font-size: 11px; color: var(--color-text-muted); text-transform: uppercase; }
 
-/* Button styles */
-.btn {
+/* ─── Shared button system ───────────────────────────── */
+.eco-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--border-color, #313244);
-  border-radius: 4px;
+  gap: 4px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
   background: transparent;
-  color: inherit;
+  color: var(--color-text);
   cursor: pointer;
   font-size: 12px;
-  padding: 4px 8px;
-  transition: all 0.15s;
+  padding: 5px 10px;
+  transition: background 0.12s, border-color 0.12s;
+  white-space: nowrap;
 }
 
-.btn:hover { background: var(--bg-hover, rgba(255, 255, 255, 0.08)); }
-.btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.btn-sm { font-size: 12px; padding: 3px 8px; }
-.btn-xs { font-size: 11px; padding: 2px 6px; }
-.btn-primary { background: var(--color-accent, #cba6f7); color: #1e1e2e; border-color: transparent; }
-.btn-primary:hover { filter: brightness(1.1); }
-.btn-ghost { border-color: transparent; }
+.eco-btn:hover { background: var(--color-bg-tertiary); }
+.eco-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.eco-btn--primary { background: var(--color-accent); color: #1e1e2e; border-color: transparent; font-weight: 600; }
+.eco-btn--primary:hover { filter: brightness(1.1); background: var(--color-accent); }
+.eco-btn--xs { font-size: 11px; padding: 3px 8px; border-radius: 5px; }
+.eco-close { padding: 5px; border-color: transparent; color: var(--color-text-muted); }
+.eco-close:hover { color: var(--color-text); background: var(--color-bg-tertiary); }
+
+.eco-input {
+  width: 100%;
+  padding: 7px 10px;
+  font-size: 13px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  outline: none;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.eco-input:focus { border-color: var(--color-accent); }
+.eco-input--sm { font-size: 12px; padding: 5px 8px; flex: 1; }
+.eco-textarea { resize: vertical; min-height: 52px; }
+
+.mono { font-family: "JetBrains Mono", "Fira Code", monospace; }
 </style>
