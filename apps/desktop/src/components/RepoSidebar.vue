@@ -24,6 +24,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   select: [path: string, staged: boolean];
   changeView: [mode: ViewMode];
+  /** Fired when user clicks the PRs tab — opens the PR overlay. */
+  openPrs: [];
   stageFile: [path: string];
   unstageFile: [path: string];
   stageAll: [];
@@ -139,7 +141,7 @@ function onCommitKeydown(e: KeyboardEvent) {
       </button>
       <button
         class="view-tab view-tab--pr"
-        @click="emit('changeView', 'prs')"
+        @click="emit('openPrs')"
         title="Pull Requests"
       >
         PRs

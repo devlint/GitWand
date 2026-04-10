@@ -604,7 +604,7 @@ onUnmounted(() => {
         <RepoSidebar
           :files="repoFiles"
           :selected-file="repoSelectedFile"
-          :view-mode="viewMode === 'prs' ? 'changes' : viewMode"
+          :view-mode="viewMode"
           :repo-stats="repoStats"
           :commit-summary="commitSummary"
           :commit-description="commitDescription"
@@ -615,7 +615,8 @@ onUnmounted(() => {
           :selected-commit-hash="selectedCommitHash"
           :ahead-count="aheadCount"
           @select="onRepoFileSelect"
-          @change-view="(mode) => mode === 'prs' ? (showPrOverlay = true) : onViewModeChange(mode)"
+          @change-view="onViewModeChange"
+          @open-prs="showPrOverlay = true"
           @stage-file="(path) => stageFiles([path])"
           @unstage-file="(path) => unstageFiles([path])"
           @stage-all="stageAll"

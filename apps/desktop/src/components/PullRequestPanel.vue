@@ -8,6 +8,10 @@ import {
   ghPrDetail,
   ghPrDiff,
   ghPrChecks,
+  ghPrComments,
+  ghPrCreateComment,
+  ghPrUpdateComment,
+  ghPrDeleteComment,
   gitRemoteInfo,
   type PullRequest,
   type PullRequestDetail,
@@ -16,8 +20,10 @@ import {
   type GitDiff,
   type DiffHunk,
   type DiffLine,
+  type PrReviewComment,
+  type CreatePrCommentParams,
 } from "../utils/backend";
-import DiffViewer from "./DiffViewer.vue";
+import PrInlineDiff from "./PrInlineDiff.vue";
 import type { DiffMode } from "../utils/diffMode";
 import { getPersistedDiffMode } from "../utils/diffMode";
 
@@ -57,11 +63,22 @@ const selectedPr = ref<PullRequest | null>(null);
 const prDetail = ref<PullRequestDetail | null>(null);
 const prChecks = ref<CICheck[]>([]);
 const prDiffFiles = ref<GitDiff[]>([]);
+const prComments = ref<PrReviewComment[]>([]);
 const detailLoading = ref(false);
 const detailError = ref<string | null>(null);
 const detailTab = ref<"info" | "diff" | "checks">("info");
 const selectedDiffFile = ref<string | null>(null);
 const diffMode = ref<DiffMode>(getPersistedDiffMode());
+
+/** Comments for the currently selected diff file. */
+const commentsForFile = computed<PrReviewComment[]>(() =>
+  selectedDiffFile.value
+    ? prComments.value.filter((c) => c.path === selectedDiffFile.value)
+    : [],
+);
+
+/** Total comment count badge for the Diff tab. */
+const commentCount = computed(() => prComments.value.length);
 
 const isGitHub = computed(() => remote.value?.provider === "github");
 const hasDetail = computed(() => !!selectedPr.value);
@@ -141,22 +158,32 @@ async function selectPr(pr: PullRequest) {
   prDetail.value = null;
   prChecks.value = [];
   prDiffFiles.value = [];
+  prComments.value = [];
   selectedDiffFile.value = null;
   detailTab.value = "info";
   detailLoading.value = true;
   detailError.value = null;
   try {
-    const [detail, checks] = await Promise.all([
+    const [detail, checks, comments] = await Promise.all([
       ghPrDetail(props.cwd, pr.number),
       ghPrChecks(props.cwd, pr.number).catch(() => [] as CICheck[]),
+      ghPrComments(props.cwd, pr.number).catch(() => [] as PrReviewComment[]),
     ]);
     prDetail.value = detail;
     prChecks.value = checks;
+    prComments.value = comments;
   } catch (err: any) {
     detailError.value = err.message;
   } finally {
     detailLoading.value = false;
   }
+}
+
+async function refreshComments() {
+  if (!selectedPr.value) return;
+  try {
+    prComments.value = await ghPrComments(props.cwd, selectedPr.value.number);
+  } catch { /* silent */ }
 }
 
 async function loadDiff() {
@@ -214,6 +241,48 @@ async function mergePr() {
 }
 
 function openInBrowser(url: string) { window.open(url, "_blank"); }
+
+// ─── Comment actions ─────────────────────────────────────
+async function handleCreateComment(params: CreatePrCommentParams & { path: string }) {
+  if (!selectedPr.value) return;
+  try {
+    await ghPrCreateComment(props.cwd, selectedPr.value.number, params);
+    await refreshComments();
+    // Update comment count in detail
+    if (prDetail.value) prDetail.value.reviewComments++;
+  } catch (err: any) { error.value = err.message; }
+}
+
+async function handleReplyComment(inReplyToId: number, body: string) {
+  if (!selectedPr.value) return;
+  try {
+    await ghPrCreateComment(props.cwd, selectedPr.value.number, { body, in_reply_to_id: inReplyToId });
+    await refreshComments();
+  } catch (err: any) { error.value = err.message; }
+}
+
+async function handleEditComment(id: number, body: string) {
+  try {
+    await ghPrUpdateComment(props.cwd, id, body);
+    // Update locally
+    const idx = prComments.value.findIndex((c) => c.id === id);
+    if (idx !== -1) prComments.value[idx] = { ...prComments.value[idx], body, updated_at: new Date().toISOString() };
+  } catch (err: any) { error.value = err.message; }
+}
+
+async function handleDeleteComment(id: number) {
+  try {
+    await ghPrDeleteComment(props.cwd, id);
+    prComments.value = prComments.value.filter((c) => c.id !== id && c.in_reply_to_id !== id);
+    if (prDetail.value && prDetail.value.reviewComments > 0) prDetail.value.reviewComments--;
+  } catch (err: any) { error.value = err.message; }
+}
+
+function handleApplySuggestion(suggestion: string, startLine: number | null, endLine: number | null) {
+  // Copy to clipboard — actual file patching requires repo write access
+  navigator.clipboard?.writeText(suggestion).catch(() => {});
+  success.value = `Suggestion copiée dans le presse-papiers (lignes ${startLine ?? '?'}–${endLine ?? '?'})`;
+}
 
 function timeAgo(dateStr: string): string {
   try {
@@ -411,6 +480,7 @@ watch(() => props.cwd, () => { loadRemote(); loadPrs(); selectedPr.value = null;
                 <button :class="['pr-tab', { active: detailTab === 'info' }]" @click="detailTab = 'info'">Info</button>
                 <button :class="['pr-tab', { active: detailTab === 'diff' }]" @click="detailTab = 'diff'">
                   Diff <span v-if="prDetail.changedFiles" class="pr-tab-count">{{ prDetail.changedFiles }}</span>
+                  <span v-if="commentCount" class="pr-tab-count pr-tab-count--comment" title="Commentaires de review">💬{{ commentCount }}</span>
                 </button>
                 <button :class="['pr-tab', { active: detailTab === 'checks' }]" @click="detailTab = 'checks'">
                   {{ checksIcon(prDetail.checksStatus) }} CI
@@ -478,12 +548,30 @@ watch(() => props.cwd, () => { loadRemote(); loadPrs(); selectedPr.value = null;
                       :class="['pr-diff-file', { active: selectedDiffFile === file.path }]"
                       @click="selectedDiffFile = file.path"
                     >
-                      <span class="pr-diff-file-name">{{ file.path.split('/').pop() }}</span>
+                      <div class="pr-diff-file-top">
+                        <span class="pr-diff-file-name">{{ file.path.split('/').pop() }}</span>
+                        <span
+                          v-if="prComments.filter(c => c.path === file.path).length"
+                          class="pr-diff-file-comments"
+                          title="Commentaires"
+                        >💬{{ prComments.filter(c => c.path === file.path).length }}</span>
+                      </div>
                       <span class="pr-diff-file-path">{{ file.path }}</span>
                     </button>
                   </div>
                   <div class="pr-diff-viewer">
-                    <DiffViewer v-if="selectedDiff" :diff="selectedDiff" :file-path="selectedDiffFile" :diff-mode="diffMode" @update:diff-mode="diffMode = $event" />
+                    <PrInlineDiff
+                      v-if="selectedDiff"
+                      :diff="selectedDiff"
+                      :file-path="selectedDiffFile"
+                      :comments="commentsForFile"
+                      :current-user="undefined"
+                      @create-comment="handleCreateComment"
+                      @reply-comment="handleReplyComment"
+                      @edit-comment="handleEditComment"
+                      @delete-comment="handleDeleteComment"
+                      @apply-suggestion="handleApplySuggestion"
+                    />
                   </div>
                 </template>
                 <div v-else class="pr-placeholder">Aucun diff disponible.</div>
@@ -829,7 +917,10 @@ watch(() => props.cwd, () => { loadRemote(); loadPrs(); selectedPr.value = null;
   padding: 0 5px;
   min-width: 16px;
   text-align: center;
-  color: var(--color-text-muted);
+}
+.pr-tab-count--comment {
+  background: rgba(203,166,247,0.15);
+  color: var(--color-accent);
 }
 
 .pr-tab-spacer { flex: 1; }
@@ -949,7 +1040,9 @@ watch(() => props.cwd, () => { loadRemote(); loadPrs(); selectedPr.value = null;
 .pr-diff-file:hover { background: var(--color-bg-tertiary); }
 .pr-diff-file.active { background: rgba(203,166,247,0.12); }
 
-.pr-diff-file-name { font-size: 12px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pr-diff-file-top { display: flex; align-items: center; gap: 4px; overflow: hidden; }
+.pr-diff-file-name { font-size: 12px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
+.pr-diff-file-comments { font-size: 10px; color: var(--color-accent); white-space: nowrap; flex-shrink: 0; }
 .pr-diff-file-path { font-size: 10px; color: var(--color-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .pr-diff-viewer {

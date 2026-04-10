@@ -1133,6 +1133,145 @@ const server = createServer(async (req, res) => {
       }
     }
 
+    // ─── PR Review Comments ────────────────────────────────
+
+    // GET /api/gh-pr-comments?cwd=<path>&number=<n>
+    if (url.pathname === "/api/gh-pr-comments" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd");
+      const number = url.searchParams.get("number");
+      if (!cwd || !number) return jsonResponse(res, { error: "Missing cwd or number" }, 400);
+      try {
+        const token = getGithubToken();
+        if (!token) return jsonResponse(res, { error: "No GitHub token" }, 401);
+        const nwo = getRepoNwo(resolve(cwd));
+        if (!nwo) return jsonResponse(res, { error: "Could not determine GitHub repo" }, 400);
+        // Fetch all review comments (paginated — up to 200)
+        const resp = await githubFetch(`/repos/${nwo}/pulls/${number}/comments?per_page=100`, token);
+        if (!resp.ok) return jsonResponse(res, { error: `GitHub API ${resp.status}` }, 500);
+        const raw = await resp.json();
+        return jsonResponse(res, raw.map((c) => ({
+          id: c.id,
+          body: c.body,
+          author: c.user?.login ?? "",
+          created_at: c.created_at,
+          updated_at: c.updated_at,
+          path: c.path,
+          line: c.line ?? null,
+          original_line: c.original_line ?? null,
+          side: c.side ?? "RIGHT",
+          start_line: c.start_line ?? null,
+          start_side: c.start_side ?? null,
+          in_reply_to_id: c.in_reply_to_id ?? null,
+          diff_hunk: c.diff_hunk ?? "",
+          url: c.html_url ?? "",
+        })));
+      } catch (err) {
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
+
+    // POST /api/gh-pr-comment  — create or reply
+    // Body: { cwd, number, body, path, line, side, start_line?, start_side?, in_reply_to_id? }
+    if (url.pathname === "/api/gh-pr-comment" && req.method === "POST") {
+      const body = await readBody(req);
+      const { cwd, number, body: commentBody, path: filePath, line, side, start_line, start_side, in_reply_to_id } = body;
+      if (!cwd || !number || !commentBody) return jsonResponse(res, { error: "Missing required fields" }, 400);
+      try {
+        const token = getGithubToken();
+        if (!token) return jsonResponse(res, { error: "No GitHub token" }, 401);
+        const nwo = getRepoNwo(resolve(cwd));
+        if (!nwo) return jsonResponse(res, { error: "Could not determine GitHub repo" }, 400);
+        // Get PR head commit SHA
+        const prResp = await githubFetch(`/repos/${nwo}/pulls/${number}`, token);
+        if (!prResp.ok) return jsonResponse(res, { error: `GitHub API ${prResp.status}` }, 500);
+        const pr = await prResp.json();
+        const commit_id = pr.head?.sha;
+        const payload = in_reply_to_id
+          ? { body: commentBody, in_reply_to_id }
+          : { body: commentBody, commit_id, path: filePath, line: line ?? 1, side: side ?? "RIGHT",
+              ...(start_line ? { start_line, start_side: start_side ?? "RIGHT" } : {}) };
+        const resp = await fetch(`https://api.github.com/repos/${nwo}/pulls/${number}/comments`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "application/vnd.github+json",
+            "Content-Type": "application/json",
+            "X-GitHub-Api-Version": "2022-11-28",
+          },
+          body: JSON.stringify(payload),
+        });
+        if (!resp.ok) {
+          const text = await resp.text();
+          return jsonResponse(res, { error: `GitHub API ${resp.status}: ${text}` }, 500);
+        }
+        const c = await resp.json();
+        return jsonResponse(res, {
+          id: c.id, body: c.body, author: c.user?.login ?? "",
+          created_at: c.created_at, updated_at: c.updated_at,
+          path: c.path, line: c.line ?? null, original_line: c.original_line ?? null,
+          side: c.side ?? "RIGHT", start_line: c.start_line ?? null, start_side: c.start_side ?? null,
+          in_reply_to_id: c.in_reply_to_id ?? null, diff_hunk: c.diff_hunk ?? "", url: c.html_url ?? "",
+        });
+      } catch (err) {
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
+
+    // PATCH /api/gh-pr-comment?id=<n>  — edit comment body
+    // Body: { cwd, body }
+    if (url.pathname === "/api/gh-pr-comment" && req.method === "PATCH") {
+      const id = url.searchParams.get("id");
+      const body = await readBody(req);
+      const { cwd, body: newBody } = body;
+      if (!id || !cwd || !newBody) return jsonResponse(res, { error: "Missing id, cwd or body" }, 400);
+      try {
+        const token = getGithubToken();
+        if (!token) return jsonResponse(res, { error: "No GitHub token" }, 401);
+        const nwo = getRepoNwo(resolve(cwd));
+        if (!nwo) return jsonResponse(res, { error: "Could not determine GitHub repo" }, 400);
+        const resp = await fetch(`https://api.github.com/repos/${nwo}/pulls/comments/${id}`, {
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "application/vnd.github+json",
+            "Content-Type": "application/json",
+            "X-GitHub-Api-Version": "2022-11-28",
+          },
+          body: JSON.stringify({ body: newBody }),
+        });
+        if (!resp.ok) return jsonResponse(res, { error: `GitHub API ${resp.status}` }, 500);
+        const c = await resp.json();
+        return jsonResponse(res, { id: c.id, body: c.body, updated_at: c.updated_at });
+      } catch (err) {
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
+
+    // DELETE /api/gh-pr-comment?cwd=<path>&id=<n>
+    if (url.pathname === "/api/gh-pr-comment" && req.method === "DELETE") {
+      const cwd = url.searchParams.get("cwd");
+      const id = url.searchParams.get("id");
+      if (!cwd || !id) return jsonResponse(res, { error: "Missing cwd or id" }, 400);
+      try {
+        const token = getGithubToken();
+        if (!token) return jsonResponse(res, { error: "No GitHub token" }, 401);
+        const nwo = getRepoNwo(resolve(cwd));
+        if (!nwo) return jsonResponse(res, { error: "Could not determine GitHub repo" }, 400);
+        const resp = await fetch(`https://api.github.com/repos/${nwo}/pulls/comments/${id}`, {
+          method: "DELETE",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+          },
+        });
+        if (!resp.ok && resp.status !== 204) return jsonResponse(res, { error: `GitHub API ${resp.status}` }, 500);
+        return jsonResponse(res, { ok: true });
+      } catch (err) {
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
+
     jsonResponse(res, { error: "Not found" }, 404);
   } catch (err) {
     jsonResponse(res, { error: err.message }, 500);

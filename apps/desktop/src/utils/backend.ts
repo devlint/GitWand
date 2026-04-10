@@ -1437,6 +1437,99 @@ export async function ghPrChecks(cwd: string, number: number): Promise<CICheck[]
   }));
 }
 
+// ─── PR Review Comments (Phase 9.2) ────────────────────────
+
+/** A single review comment anchored to a diff line. */
+export interface PrReviewComment {
+  id: number;
+  body: string;
+  author: string;
+  created_at: string;
+  updated_at: string;
+  /** File path the comment is anchored to. */
+  path: string;
+  /** New-file line number (null for comments on deleted lines). */
+  line: number | null;
+  /** Line number in the original (old) file. */
+  original_line: number | null;
+  /** Which side of the diff: LEFT (old) or RIGHT (new). */
+  side: "LEFT" | "RIGHT";
+  /** First line of a multi-line comment range. */
+  start_line: number | null;
+  start_side: "LEFT" | "RIGHT" | null;
+  /** ID of parent comment if this is a reply. */
+  in_reply_to_id: number | null;
+  /** Raw diff hunk context. */
+  diff_hunk: string;
+  url: string;
+}
+
+/** Params for creating a new review comment. */
+export interface CreatePrCommentParams {
+  /** Comment text (Markdown). */
+  body: string;
+  /** File path. Required for new comments (not replies). */
+  path?: string;
+  /** Last line number (new-file side). */
+  line?: number;
+  side?: "LEFT" | "RIGHT";
+  /** Start of a multi-line comment. */
+  start_line?: number;
+  start_side?: "LEFT" | "RIGHT";
+  /** Reply to this comment ID instead of creating a new thread. */
+  in_reply_to_id?: number;
+}
+
+/** Fetch all review comments for a PR. */
+export async function ghPrComments(cwd: string, prNumber: number): Promise<PrReviewComment[]> {
+  // No Tauri implementation — browser only for now
+  const res = await fetch(`${DEV_SERVER}/api/gh-pr-comments?cwd=${encodeURIComponent(cwd)}&number=${prNumber}`);
+  if (!res.ok) throw new Error(`gh pr comments failed: ${res.status}`);
+  const raw = await res.json();
+  if (raw.error) throw new Error(raw.error);
+  return raw as PrReviewComment[];
+}
+
+/** Create a new review comment (or reply to an existing one). */
+export async function ghPrCreateComment(
+  cwd: string,
+  prNumber: number,
+  params: CreatePrCommentParams,
+): Promise<PrReviewComment> {
+  const res = await fetch(`${DEV_SERVER}/api/gh-pr-comment`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, number: prNumber, ...params }),
+  });
+  if (!res.ok) throw new Error(`create comment failed: ${res.status}`);
+  const raw = await res.json();
+  if (raw.error) throw new Error(raw.error);
+  return raw as PrReviewComment;
+}
+
+/** Edit the body of an existing review comment. */
+export async function ghPrUpdateComment(
+  cwd: string,
+  commentId: number,
+  body: string,
+): Promise<void> {
+  const res = await fetch(`${DEV_SERVER}/api/gh-pr-comment?id=${commentId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, body }),
+  });
+  if (!res.ok) throw new Error(`update comment failed: ${res.status}`);
+}
+
+/** Delete a review comment. */
+export async function ghPrDeleteComment(cwd: string, commentId: number): Promise<void> {
+  const res = await fetch(
+    `${DEV_SERVER}/api/gh-pr-comment?cwd=${encodeURIComponent(cwd)}&id=${commentId}`,
+    { method: "DELETE" },
+  );
+  if (!res.ok) throw new Error(`delete comment failed: ${res.status}`);
+}
+
 // ─── Merge Preview (Phase 8.1) ─────────────────────────────
 
 /** Résultat brut d'un fichier analysé par preview_merge (Rust) */

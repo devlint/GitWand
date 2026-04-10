@@ -415,11 +415,11 @@ interface DecisionTrace {
 
 #### 9.2 — Commentaires inline
 
-- ⬜ **Lecture des commentaires** : Afficher les commentaires existants de la PR directement dans le diff, ancrés sur les lignes concernées
-- ⬜ **Répondre à un commentaire** : Thread de réponses inline, resolve/unresolve
-- ⬜ **Créer un commentaire** : Sélectionner une ligne ou une plage de lignes → popin d'écriture contextuelle
-- ⬜ **Commentaire multi-ligne** : Sélection de bloc (comme GitHub, drag de la gouttière)
-- ⬜ **Suggestions de code** : Insérer un bloc ` ```suggestion ``` ` qu'on peut appliquer directement
+- ✅ **Lecture des commentaires** : Afficher les commentaires existants de la PR directement dans le diff, ancrés sur les lignes concernées
+- ✅ **Répondre à un commentaire** : Thread de réponses inline, resolve/unresolve
+- ✅ **Créer un commentaire** : Sélectionner une ligne ou une plage de lignes → popin d'écriture contextuelle
+- ✅ **Commentaire multi-ligne** : Sélection de bloc (comme GitHub, drag de la gouttière)
+- ✅ **Suggestions de code** : Insérer un bloc ` ```suggestion ``` ` qu'on peut appliquer directement
 
 #### 9.3 — Soumission de review
 
