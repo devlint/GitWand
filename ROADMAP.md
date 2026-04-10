@@ -457,30 +457,87 @@ C'est ici que GitWand se distingue vraiment des interfaces de review classiques 
 
 ---
 
+### LATER — Phase 10 : Productivité avancée & différenciateurs forts
+
+> Inspiré des releases récentes de GitHub Desktop, GitButler et Git Tower.
+> Objectif : couvrir les workflows power users et consolider GitWand comme le client Git le plus complet.
+
+#### 10.1 — Rebase interactif (priorité haute)
+
+*Concurrent principal : GitHub Desktop, Git Tower, GitButler `but move`*
+
+- **Drag-and-drop dans le log** : Réordonner les commits par glisser-déposer dans le log
+- **Actions par commit** : Menu contextuel squash, edit message, drop, fixup
+- **Squash multi-sélection** : Sélectionner N commits → merge en un seul avec message combiné
+- **Rebase sur branche** : Rebaser la branche courante sur une cible depuis l'UI (sans terminal)
+- **Gestion des conflits en cours de rebase** : Interface continue/abort/skip équivalente au cherry-pick déjà implémenté
+
+#### 10.2 — Absorb (priorité haute, différenciateur GitWand)
+
+*Inspiré de GitButler — feature la plus saluée dans leurs releases récentes*
+
+- **Clic droit sur un fichier modifié → "Absorber dans un commit"** : Choisir dans quel commit existant intégrer les changements non commités
+- **Absorb automatique** : Détection des commits candidats en analysant les lignes modifiées et leur origine (`git blame`) — suggérer le commit le plus pertinent
+- **Absorb partiel** : Sélectionner les hunks à absorber (intégration avec le staging partiel Phase 6)
+- Idéal pour les workflows `git add -p` / "j'aurais dû mettre ça dans le commit précédent"
+
+#### 10.3 — Undo universel (priorité moyenne)
+
+*Inspiré de Git Tower "undo everything" — feature différenciante très appréciée*
+
+- **Historique d'opérations GitWand** : Stack de toutes les actions réalisées (commit, merge, rebase, cherry-pick, stash, discard…)
+- **Undo en un clic** : Annuler la dernière opération Git quelle qu'elle soit — `git reset`, `git reflog`, `git stash pop` selon le cas
+- **Panel d'historique** : Vue de toutes les opérations avec timestamp, possibilité de revenir à n'importe quel état (`git reflog` visualisé)
+- Cible les utilisateurs qui font des erreurs et cherchent la sécurité (segment Tower/Fork)
+
+#### 10.4 — AI commit messages (priorité haute)
+
+*Concurrent : GitButler `--ai`, GitHub Copilot dans GH Desktop*
+
+- **Génération automatique du message** : Bouton ✨ dans la zone de commit → analyse du diff staged → suggestion summary + description
+- **Provider configurable** : Claude (prioritaire — déjà intégré), OpenAI, Ollama local
+- **Affinage itératif** : Régénérer, raccourcir, détailler, changer de langue (FR/EN) sans quitter la zone de commit
+- Effort minimal côté implémentation car `useAIProvider.ts` est déjà en place (Phase 8.1)
+
+#### 10.5 — Submodules & Worktrees (priorité moyenne)
+
+*Inspiré de Git Tower — feature récurrente dans leurs release notes*
+
+- **Submodule support** : Initialiser, mettre à jour, naviguer dans les submodules depuis l'UI — vue dédiée dans MonorepoPanel
+- **Git worktrees** : Créer, lister, supprimer des worktrees — chaque worktree s'ouvre dans un nouvel onglet (s'intègre naturellement avec les tabs Phase 8.4)
+- **Checkout rapide** : Créer un worktree depuis une branche en un clic pour tester sans switcher
+
+#### 10.6 — Folder diff & Image diff (priorité moyenne)
+
+*Rival direct de Kaleidoscope — différenciateur visuel fort*
+
+- **Folder diff (6.2)** : Comparer deux dossiers/branches/commits — arbre récursif avec indicateurs ajouté/supprimé/modifié, filtrage par type/pattern
+- **Image diff (6.3)** : Side-by-side, overlay, blink, slider split — PNG, JPEG, SVG, WebP — heatmap des zones modifiées
+- Ces deux features manquent à tous les concurrents open-source (sauf Kaleidoscope, macOS-only et payant)
+
+#### 10.7 — Intégrations forge (priorité basse)
+
+*GitLab multi-comptes dans GitButler, API native dans Tower*
+
+- **GitLab MRs** : API REST/GraphQL pour lister, reviewer, merger des MRs (actuellement GitHub-only via `gh`)
+- **Bitbucket PRs** : Support Bitbucket Cloud via API
+- **Multi-compte GitHub/GitLab** : Gérer plusieurs identités dans la même app (personnel + pro)
+- **Draft PR convert** : Convertir une PR en/depuis draft depuis l'app (GitButler feature récente)
+
+---
+
 ### LATER — Post-1.0 : Fonctionnalités différenciantes restantes
 
-> La v1.0.0 couvre l'intégralité du workflow Git quotidien + code review + intelligence. Ces fonctionnalités sont des différenciateurs supplémentaires pour une v1.x.
+> La v1.0.0 couvre l'intégralité du workflow Git quotidien + code review + intelligence. La Phase 10 couvre les features les plus demandées chez les concurrents.
 
-#### Rebase interactif
-- Réordonner, squash, edit, drop de commits — drag-and-drop dans le log
-- UI complexe, planifié comme feature phare post-1.0
+#### Rebase interactif → Phase 10.1
+#### Folder diff / Image diff → Phase 10.6
+#### Intégrations GitLab / Bitbucket → Phase 10.7
 
-#### Folder diff (6.2)
-- Comparer deux dossiers, deux branches, deux commits — arbre récursif
-- Rival direct de Kaleidoscope sur ce point
-
-#### Image diff (6.3)
-- Side-by-side, overlay, blink, slider — différenciateur fort
-- Formats : PNG, JPEG, SVG, WebP
-
-#### Intégrations GitLab / Bitbucket
-- Actuellement GitHub uniquement (via `gh` CLI)
-- API REST/GraphQL pour GitLab MRs et Bitbucket PRs
-
-#### Build & distribution
-- Pipeline CI/CD multi-OS (macOS arm64/x64, Windows, Linux)
-- Signature du binaire macOS (notarization Apple)
-- Auto-update via Tauri updater plugin
+#### Build & distribution ✅
+- ~~Pipeline CI/CD multi-OS (macOS arm64/x64, Windows, Linux)~~ → **Livré**
+- Signature du binaire macOS (notarization Apple) — *reste à faire*
+- ~~Auto-update via Tauri updater plugin~~ → **Livré**
 
 ---
 
@@ -545,5 +602,8 @@ C'est ici que GitWand se distingue vraiment des interfaces de review classiques 
 - [GitHub Desktop — About (GitHub Docs)](https://docs.github.com/en/desktop/overview/about-github-desktop)
 - [Best Git GUI Clients 2025 (DEV Community)](https://dev.to/_d7eb1c1703182e3ce1782/best-git-gui-clients-in-2025-gitkraken-sourcetree-fork-and-more-compared-4gjd)
 - [GitButler — Virtual Branches & Stacked PRs](https://github.com/gitbutlerapp/gitbutler)
+- [GitButler — Release notes](https://github.com/gitbutlerapp/gitbutler/releases)
+- [GitHub Desktop — Release notes](https://desktop.github.com/release-notes/)
+- [Git Tower — Release notes](https://www.git-tower.com/release-notes)
 - [GitButler Documentation](https://docs.gitbutler.com/)
 - [Top Git GUI Clients 2026 (LithiumGit)](https://lithiumgit.com/most-popular-git-gui-clients)
