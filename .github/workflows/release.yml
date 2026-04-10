@@ -7,6 +7,8 @@ on:
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
 
 jobs:
   release:
@@ -56,6 +58,8 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: apps/desktop
           tagName: ${{ github.ref_name }}
@@ -75,3 +79,44 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+          updaterJsonPreferNsis: true
+          updaterJsonKeepUniversal: true
+
+  # After all platform builds succeed, generate update.json and publish to GitHub Pages
+  publish-update-manifest:
+    name: Publish update manifest
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate update.json for Tauri updater
+        run: |
+          VERSION="${{ github.ref_name }}"
+          BASE="https://github.com/devlint/GitWand/releases/download/${VERSION}"
+          cat > update.json <<EOF
+          {
+            "version": "${VERSION}",
+            "notes": "See https://github.com/devlint/GitWand/releases/tag/${VERSION}",
+            "pub_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "platforms": {
+              "darwin-universal": { "url": "${BASE}/GitWand_${VERSION#v}_universal.dmg.tar.gz", "signature": "" },
+              "linux-x86_64":     { "url": "${BASE}/git-wand_${VERSION#v}_amd64.AppImage.tar.gz", "signature": "" },
+              "windows-x86_64":   { "url": "${BASE}/GitWand_${VERSION#v}_x64-setup.nsis.zip",    "signature": "" }
+            }
+          }
+          EOF
+          mkdir -p website/public/update
+          cp update.json website/public/update/latest.json
+
+      - name: Build website with update manifest
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --filter gitwand-website build
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: website/.vitepress/dist
+      - name: Deploy to GitHub Pages
+        uses: actions/deploy-pages@v4

@@ -59,6 +59,13 @@
     "dialog": null,
     "shell": {
       "open": true
+    },
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDczRTI4ODgxNDVFMzY0REEKUldUYVpPTkZnWWppYzBoOEFsSEN4elhHcENJRkxDZjV1VHM4M1hsbk4raFNOUVdCckowRFgwcS8K",
+      "endpoints": [
+        "https://devlint.github.io/GitWand/update/{{target}}/{{arch}}/{{current_version}}"
+      ],
+      "dialog": true
     }
   }
 }
