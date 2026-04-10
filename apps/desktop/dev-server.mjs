@@ -30,7 +30,9 @@ function resolveBin(name) {
 }
 
 const GH = resolveBin("gh");
-console.log(`[dev-server] gh binary: ${GH}`);
+const GIT = resolveBin("git");
+console.log(`[dev-server] gh binary:  ${GH}`);
+console.log(`[dev-server] git binary: ${GIT}`);
 
 /**
  * Get a GitHub OAuth token — tries in order:
@@ -61,7 +63,18 @@ function getGithubToken() {
  * Handles both https://github.com/owner/repo.git and git@github.com:owner/repo.git
  */
 function getRepoNwo(cwd) {
-  const r = spawnSync("git", ["remote", "get-url", "origin"], { cwd, encoding: "utf-8" });
+  // Strategy 1: read .git/config directly — no binary needed
+  try {
+    const gitConfig = readFileSync(join(cwd, ".git", "config"), "utf-8");
+    const m = gitConfig.match(/\[remote\s+"origin"\][\s\S]*?url\s*=\s*(.+)/);
+    if (m) {
+      const url = m[1].trim();
+      const rm = url.match(/github\.com[:/](.+?)\/(.+?)(?:\.git)?$/);
+      if (rm) return `${rm[1]}/${rm[2]}`;
+    }
+  } catch { /* ignore */ }
+  // Strategy 2: git binary fallback
+  const r = spawnSync(GIT, ["remote", "get-url", "origin"], { cwd, encoding: "utf-8" });
   if (r.status !== 0) return null;
   const url = r.stdout.trim();
   const m = url.match(/github\.com[:/](.+?)\/(.+?)(?:\.git)?$/);
@@ -915,7 +928,7 @@ const server = createServer(async (req, res) => {
     }
 
     // ─── Git blame ────────────────────────────────────────
-    if (method === "GET" && pathname === "/api/git-blame") {
+    if (req.method === "GET" && url.pathname === "/api/git-blame") {
       const cwd = url.searchParams.get("cwd");
       const filePath = url.searchParams.get("path");
       if (!cwd || !filePath) return jsonResponse(res, { error: "cwd and path required" }, 400);
@@ -955,7 +968,7 @@ const server = createServer(async (req, res) => {
     }
 
     // ─── Git file log ───────────────────────────────────────
-    if (method === "GET" && pathname === "/api/git-file-log") {
+    if (req.method === "GET" && url.pathname === "/api/git-file-log") {
       const cwd = url.searchParams.get("cwd");
       const filePath = url.searchParams.get("path");
       const count = parseInt(url.searchParams.get("count") || "50", 10);
@@ -990,7 +1003,6 @@ const server = createServer(async (req, res) => {
     }
 
     // ─── GitHub REST API endpoints (no gh binary needed) ──────
-    // Helpers defined inline for clarity
 
     // GET /api/gh-list-prs?cwd=<path>&state=<open|closed|all>
     if (url.pathname === "/api/gh-list-prs" && req.method === "GET") {
@@ -1002,11 +1014,9 @@ const server = createServer(async (req, res) => {
         if (!token) return jsonResponse(res, { error: "No GitHub token found. Run: gh auth login" }, 401);
         const nwo = getRepoNwo(resolve(cwd));
         if (!nwo) return jsonResponse(res, { error: "Could not determine GitHub repo from git remote origin" }, 400);
-        console.log(`[gh-list-prs] repo=${nwo} state=${state}`);
         const resp = await githubFetch(`/repos/${nwo}/pulls?state=${state}&per_page=50`, token);
         if (!resp.ok) {
           const text = await resp.text();
-          console.error(`[gh-list-prs] GitHub API ${resp.status}:`, text);
           return jsonResponse(res, { error: `GitHub API ${resp.status}: ${text}` }, 500);
         }
         const raw = await resp.json();
