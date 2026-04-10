@@ -1272,6 +1272,72 @@ const server = createServer(async (req, res) => {
       }
     }
 
+    // ─── PR Reviews ────────────────────────────────────────
+
+    // GET /api/gh-pr-reviews?cwd=<path>&number=<n>
+    if (url.pathname === "/api/gh-pr-reviews" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd");
+      const number = url.searchParams.get("number");
+      if (!cwd || !number) return jsonResponse(res, { error: "Missing cwd or number" }, 400);
+      try {
+        const token = getGithubToken();
+        if (!token) return jsonResponse(res, { error: "No GitHub token" }, 401);
+        const nwo = getRepoNwo(resolve(cwd));
+        if (!nwo) return jsonResponse(res, { error: "Could not determine GitHub repo" }, 400);
+        const resp = await githubFetch(`/repos/${nwo}/pulls/${number}/reviews`, token);
+        if (!resp.ok) return jsonResponse(res, { error: `GitHub API ${resp.status}` }, 500);
+        const reviews = await resp.json();
+        return jsonResponse(res, reviews);
+      } catch (err) {
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
+
+    // POST /api/gh-pr-submit-review
+    // Body: { cwd, number, event, body, comments? }
+    // event: "APPROVE" | "REQUEST_CHANGES" | "COMMENT"
+    // comments: [{ path, line, side, start_line?, start_side?, body }]
+    if (url.pathname === "/api/gh-pr-submit-review" && req.method === "POST") {
+      const body = await readBody(req);
+      const { cwd, number, event: reviewEvent, body: reviewBody, comments = [] } = body;
+      if (!cwd || !number || !reviewEvent) return jsonResponse(res, { error: "Missing cwd, number, or event" }, 400);
+      try {
+        const token = getGithubToken();
+        if (!token) return jsonResponse(res, { error: "No GitHub token" }, 401);
+        const nwo = getRepoNwo(resolve(cwd));
+        if (!nwo) return jsonResponse(res, { error: "Could not determine GitHub repo" }, 400);
+
+        // Get PR head SHA (required by GitHub API)
+        const prResp = await githubFetch(`/repos/${nwo}/pulls/${number}`, token);
+        if (!prResp.ok) return jsonResponse(res, { error: `GitHub API ${prResp.status}` }, 500);
+        const pr = await prResp.json();
+        const commitId = pr.head.sha;
+
+        const payload = { commit_id: commitId, event: reviewEvent };
+        if (reviewBody) payload.body = reviewBody;
+        if (comments.length > 0) payload.comments = comments;
+
+        const resp = await fetch(`https://api.github.com/repos/${nwo}/pulls/${number}/reviews`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        });
+        if (!resp.ok) {
+          const errBody = await resp.json().catch(() => ({}));
+          return jsonResponse(res, { error: errBody.message || `GitHub API ${resp.status}` }, 500);
+        }
+        const review = await resp.json();
+        return jsonResponse(res, review);
+      } catch (err) {
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
+
     jsonResponse(res, { error: "Not found" }, 404);
   } catch (err) {
     jsonResponse(res, { error: err.message }, 500);

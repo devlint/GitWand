@@ -12,6 +12,8 @@ import {
   ghPrCreateComment,
   ghPrUpdateComment,
   ghPrDeleteComment,
+  ghPrListReviews,
+  ghPrSubmitReview,
   gitRemoteInfo,
   type PullRequest,
   type PullRequestDetail,
@@ -22,8 +24,11 @@ import {
   type DiffLine,
   type PrReviewComment,
   type CreatePrCommentParams,
+  type PendingReviewComment,
+  type PrReview,
 } from "../utils/backend";
 import PrInlineDiff from "./PrInlineDiff.vue";
+import PrReviewModal from "./PrReviewModal.vue";
 import type { DiffMode } from "../utils/diffMode";
 import { getPersistedDiffMode } from "../utils/diffMode";
 
@@ -64,11 +69,17 @@ const prDetail = ref<PullRequestDetail | null>(null);
 const prChecks = ref<CICheck[]>([]);
 const prDiffFiles = ref<GitDiff[]>([]);
 const prComments = ref<PrReviewComment[]>([]);
+const prReviews = ref<PrReview[]>([]);
 const detailLoading = ref(false);
 const detailError = ref<string | null>(null);
 const detailTab = ref<"info" | "diff" | "checks">("info");
 const selectedDiffFile = ref<string | null>(null);
 const diffMode = ref<DiffMode>(getPersistedDiffMode());
+
+// ─── Draft review state ──────────────────────────────────
+const draftReviewComments = ref<PendingReviewComment[]>([]);
+const showReviewModal = ref(false);
+const submittingReview = ref(false);
 
 /** Comments for the currently selected diff file. */
 const commentsForFile = computed<PrReviewComment[]>(() =>
@@ -79,6 +90,29 @@ const commentsForFile = computed<PrReviewComment[]>(() =>
 
 /** Total comment count badge for the Diff tab. */
 const commentCount = computed(() => prComments.value.length);
+
+/**
+ * Merge readiness: all checks green AND at least one APPROVED review
+ * AND no unresolved REQUEST_CHANGES.
+ */
+const mergeReadiness = computed<{ ready: boolean; reason: string } | null>(() => {
+  if (!prReviews.value.length && !prChecks.value.length) return null;
+  const checksOk = prChecks.value.length === 0 ||
+    prChecks.value.every((c) => {
+      const s = (c.conclusion || c.state || "").toUpperCase();
+      return ["SUCCESS", "SKIPPED", "NEUTRAL"].includes(s);
+    });
+  const hasApproval = prReviews.value.some((r) => r.state === "APPROVED");
+  const hasChangesRequested = prReviews.value.some((r) => r.state === "CHANGES_REQUESTED");
+  if (checksOk && hasApproval && !hasChangesRequested) {
+    return { ready: true, reason: "Tous les checks sont verts et la PR est approuvée." };
+  }
+  const reasons: string[] = [];
+  if (!checksOk) reasons.push("des checks CI en échec");
+  if (!hasApproval) reasons.push("aucune approbation");
+  if (hasChangesRequested) reasons.push("des modifications demandées");
+  return { ready: false, reason: `En attente de : ${reasons.join(", ")}.` };
+});
 
 const isGitHub = computed(() => remote.value?.provider === "github");
 const hasDetail = computed(() => !!selectedPr.value);
@@ -159,19 +193,23 @@ async function selectPr(pr: PullRequest) {
   prChecks.value = [];
   prDiffFiles.value = [];
   prComments.value = [];
+  prReviews.value = [];
+  draftReviewComments.value = [];
   selectedDiffFile.value = null;
   detailTab.value = "info";
   detailLoading.value = true;
   detailError.value = null;
   try {
-    const [detail, checks, comments] = await Promise.all([
+    const [detail, checks, comments, reviews] = await Promise.all([
       ghPrDetail(props.cwd, pr.number),
       ghPrChecks(props.cwd, pr.number).catch(() => [] as CICheck[]),
       ghPrComments(props.cwd, pr.number).catch(() => [] as PrReviewComment[]),
+      ghPrListReviews(props.cwd, pr.number).catch(() => [] as PrReview[]),
     ]);
     prDetail.value = detail;
     prChecks.value = checks;
     prComments.value = comments;
+    prReviews.value = reviews;
   } catch (err: any) {
     detailError.value = err.message;
   } finally {
@@ -282,6 +320,52 @@ function handleApplySuggestion(suggestion: string, startLine: number | null, end
   // Copy to clipboard — actual file patching requires repo write access
   navigator.clipboard?.writeText(suggestion).catch(() => {});
   success.value = `Suggestion copiée dans le presse-papiers (lignes ${startLine ?? '?'}–${endLine ?? '?'})`;
+}
+
+// ─── Draft review handlers ────────────────────────────────
+function handleAddToReview(params: {
+  path: string;
+  line: number;
+  side: "LEFT" | "RIGHT";
+  start_line?: number;
+  start_side?: "LEFT" | "RIGHT";
+  body: string;
+}) {
+  draftReviewComments.value.push({
+    path: params.path,
+    line: params.line,
+    side: params.side,
+    ...(params.start_line !== undefined ? { start_line: params.start_line } : {}),
+    ...(params.start_side !== undefined ? { start_side: params.start_side } : {}),
+    body: params.body,
+  });
+  success.value = `Commentaire ajouté à la review (${draftReviewComments.value.length} en attente)`;
+}
+
+async function handleSubmitReview(opts: {
+  event: "APPROVE" | "REQUEST_CHANGES" | "COMMENT";
+  body: string;
+  comments: PendingReviewComment[];
+}) {
+  if (!selectedPr.value) return;
+  submittingReview.value = true;
+  try {
+    await ghPrSubmitReview(props.cwd, selectedPr.value.number, opts);
+    showReviewModal.value = false;
+    draftReviewComments.value = [];
+    // Refresh reviews + comments
+    const [reviews, comments] = await Promise.all([
+      ghPrListReviews(props.cwd, selectedPr.value.number).catch(() => [] as PrReview[]),
+      ghPrComments(props.cwd, selectedPr.value.number).catch(() => [] as PrReviewComment[]),
+    ]);
+    prReviews.value = reviews;
+    prComments.value = comments;
+    success.value = `Review soumise (${opts.event})`;
+  } catch (err: any) {
+    error.value = err.message;
+  } finally {
+    submittingReview.value = false;
+  }
 }
 
 function timeAgo(dateStr: string): string {
@@ -487,11 +571,37 @@ watch(() => props.cwd, () => { loadRemote(); loadPrs(); selectedPr.value = null;
                   <span v-if="prChecks.length" class="pr-tab-count">{{ prChecks.length }}</span>
                 </button>
                 <div class="pr-tab-spacer" />
+                <button
+                  v-if="draftReviewComments.length > 0"
+                  class="eco-btn eco-btn--xs eco-btn--primary pr-review-btn"
+                  @click="showReviewModal = true"
+                  title="Soumettre la review"
+                >
+                  ✍️ Review ({{ draftReviewComments.length }})
+                </button>
+                <button
+                  v-else
+                  class="eco-btn eco-btn--xs pr-review-btn"
+                  @click="showReviewModal = true"
+                  title="Soumettre une review"
+                >
+                  ✍️ Review
+                </button>
                 <button class="eco-btn eco-btn--xs" @click="openInBrowser(prDetail.url)">↗ GitHub</button>
               </div>
 
               <!-- Info tab -->
               <div v-if="detailTab === 'info'" class="pr-detail-body">
+                <!-- Merge readiness banner -->
+                <div
+                  v-if="mergeReadiness"
+                  class="pr-readiness-banner"
+                  :class="mergeReadiness.ready ? 'pr-readiness-banner--ready' : 'pr-readiness-banner--wait'"
+                >
+                  <span class="pr-readiness-icon">{{ mergeReadiness.ready ? '✅' : '⏳' }}</span>
+                  <span>{{ mergeReadiness.reason }}</span>
+                </div>
+
                 <div class="pr-stats-grid">
                   <div class="pr-stat">
                     <span class="pr-stat-label">Merge</span>
@@ -566,7 +676,9 @@ watch(() => props.cwd, () => { loadRemote(); loadPrs(); selectedPr.value = null;
                       :file-path="selectedDiffFile"
                       :comments="commentsForFile"
                       :current-user="undefined"
+                      :review-draft-count="draftReviewComments.length"
                       @create-comment="handleCreateComment"
+                      @add-to-review="handleAddToReview"
                       @reply-comment="handleReplyComment"
                       @edit-comment="handleEditComment"
                       @delete-comment="handleDeleteComment"
@@ -594,6 +706,18 @@ watch(() => props.cwd, () => { loadRemote(); loadPrs(); selectedPr.value = null;
         </div>
       </div>
     </div>
+  </Teleport>
+
+  <!-- Review modal (rendered outside the PR overlay so it stacks correctly) -->
+  <Teleport to="body">
+    <PrReviewModal
+      v-if="showReviewModal && selectedPr"
+      :pr-number="selectedPr.number"
+      :draft-comments="draftReviewComments"
+      :submitting="submittingReview"
+      @submit="handleSubmitReview"
+      @close="showReviewModal = false"
+    />
   </Teleport>
 </template>
 
@@ -1067,6 +1191,31 @@ watch(() => props.cwd, () => { loadRemote(); loadPrs(); selectedPr.value = null;
 .pr-check-icon { font-size: 14px; flex-shrink: 0; }
 .pr-check-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pr-check-state { font-size: 11px; color: var(--color-text-muted); text-transform: uppercase; }
+
+/* ─── Merge readiness banner ─────────────────────────── */
+.pr-readiness-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+.pr-readiness-banner--ready {
+  background: rgba(166,227,161,0.12);
+  border: 1px solid rgba(166,227,161,0.35);
+  color: #a6e3a1;
+}
+.pr-readiness-banner--wait {
+  background: rgba(250,219,107,0.08);
+  border: 1px solid rgba(250,219,107,0.25);
+  color: var(--color-text-muted);
+}
+.pr-readiness-icon { font-size: 14px; flex-shrink: 0; }
+
+/* Review submit button */
+.pr-review-btn { font-weight: 600; }
 
 /* ─── Shared button system ───────────────────────────── */
 .eco-btn {

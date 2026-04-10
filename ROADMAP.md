@@ -423,10 +423,10 @@ interface DecisionTrace {
 
 #### 9.3 — Soumission de review
 
-- ⬜ **Approve / Request changes / Comment** : Soumettre une review complète depuis l'app (équivalent du bouton "Review changes" sur GitHub)
-- ⬜ **Brouillon de review** : Accumuler des commentaires localement avant de les envoyer tous en une fois
-- ⬜ **Résumé de review** : Message global en accompagnement de la review
-- ⬜ **Notification de merge possible** : Alerter quand tous les checks sont verts et les reviews approuvées
+- ✅ **Approve / Request changes / Comment** : Soumettre une review complète depuis l'app (équivalent du bouton "Review changes" sur GitHub)
+- ✅ **Brouillon de review** : Accumuler des commentaires localement avant de les envoyer tous en une fois
+- ✅ **Résumé de review** : Message global en accompagnement de la review
+- ✅ **Notification de merge possible** : Alerter quand tous les checks sont verts et les reviews approuvées
 
 #### 9.4 — Intelligence GitWand (différenciateur clé)
 

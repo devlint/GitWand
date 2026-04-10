@@ -1530,6 +1530,61 @@ export async function ghPrDeleteComment(cwd: string, commentId: number): Promise
   if (!res.ok) throw new Error(`delete comment failed: ${res.status}`);
 }
 
+// ─── PR Reviews (Phase 9.3) ────────────────────────────────
+
+/** A top-level pull-request review (Approve / Request Changes / Comment). */
+export interface PrReview {
+  id: number;
+  /** "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED" | "DISMISSED" | "PENDING" */
+  state: string;
+  body: string;
+  user: { login: string; avatar_url: string };
+  submitted_at: string;
+  html_url: string;
+}
+
+/** A pending inline comment included when submitting a review. */
+export interface PendingReviewComment {
+  path: string;
+  line: number;
+  side: "LEFT" | "RIGHT";
+  start_line?: number;
+  start_side?: "LEFT" | "RIGHT";
+  body: string;
+}
+
+/** Fetch all reviews for a PR. */
+export async function ghPrListReviews(cwd: string, prNumber: number): Promise<PrReview[]> {
+  const res = await fetch(
+    `${DEV_SERVER}/api/gh-pr-reviews?cwd=${encodeURIComponent(cwd)}&number=${prNumber}`,
+  );
+  if (!res.ok) throw new Error(`gh pr reviews failed: ${res.status}`);
+  const raw = await res.json();
+  if (raw.error) throw new Error(raw.error);
+  return raw as PrReview[];
+}
+
+/** Submit a review (Approve / Request Changes / Comment) with optional inline comments. */
+export async function ghPrSubmitReview(
+  cwd: string,
+  prNumber: number,
+  opts: {
+    event: "APPROVE" | "REQUEST_CHANGES" | "COMMENT";
+    body?: string;
+    comments?: PendingReviewComment[];
+  },
+): Promise<PrReview> {
+  const res = await fetch(`${DEV_SERVER}/api/gh-pr-submit-review`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, number: prNumber, ...opts }),
+  });
+  if (!res.ok) throw new Error(`gh pr submit review failed: ${res.status}`);
+  const raw = await res.json();
+  if (raw.error) throw new Error(raw.error);
+  return raw as PrReview;
+}
+
 // ─── Merge Preview (Phase 8.1) ─────────────────────────────
 
 /** Résultat brut d'un fichier analysé par preview_merge (Rust) */

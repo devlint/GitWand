@@ -21,18 +21,24 @@ const props = defineProps<{
   comments: PrReviewComment[];
   /** GitHub login of the authenticated user. */
   currentUser?: string;
+  /** Number of comments already staged in the pending review draft. */
+  reviewDraftCount?: number;
 }>();
 
+interface CommentParams {
+  path: string;
+  line: number;
+  side: "LEFT" | "RIGHT";
+  start_line?: number;
+  start_side?: "LEFT" | "RIGHT";
+  body: string;
+}
+
 const emit = defineEmits<{
-  /** User wants to post a new comment or reply. */
-  (e: "create-comment", params: {
-    path: string;
-    line: number;
-    side: "LEFT" | "RIGHT";
-    start_line?: number;
-    start_side?: "LEFT" | "RIGHT";
-    body: string;
-  }): void;
+  /** User wants to post an immediate comment (no review). */
+  (e: "create-comment", params: CommentParams): void;
+  /** User wants to stage a comment in the pending review draft. */
+  (e: "add-to-review", params: CommentParams): void;
   (e: "reply-comment", inReplyToId: number, body: string): void;
   (e: "edit-comment", id: number, body: string): void;
   (e: "delete-comment", id: number): void;
@@ -120,21 +126,32 @@ function closeCompose() {
   selectionEnd.value = null;
 }
 
-function submitCompose() {
-  if (!composeLine.value || !composeText.value.trim() || !props.filePath) return;
+function buildComposeParams(): CommentParams | null {
+  if (!composeLine.value || !composeText.value.trim() || !props.filePath) return null;
   const body = composeText.value.trim();
   const { line, side } = composeLine.value;
-  const baseParams = { path: props.filePath, line, side, body };
-  // Add multi-line range if selected
+  const base: CommentParams = { path: props.filePath, line, side, body };
   if (selectionStart.value && selectionStart.value.line !== line) {
-    emit("create-comment", {
-      ...baseParams,
+    return {
+      ...base,
       start_line: Math.min(selectionStart.value.line, line),
       start_side: selectionStart.value.side,
-    });
-  } else {
-    emit("create-comment", baseParams);
+    };
   }
+  return base;
+}
+
+function submitCompose() {
+  const params = buildComposeParams();
+  if (!params) return;
+  emit("create-comment", params);
+  closeCompose();
+}
+
+function submitToReview() {
+  const params = buildComposeParams();
+  if (!params) return;
+  emit("add-to-review", params);
   closeCompose();
 }
 
@@ -256,6 +273,14 @@ function handleApplySuggestion(suggestion: string, startLine: number | null, end
                 />
                 <div class="pid-compose-actions">
                   <button class="pid-cancel-btn" @click="closeCompose">Annuler</button>
+                  <button
+                    class="pid-review-btn"
+                    :disabled="!composeText.trim()"
+                    @click="submitToReview"
+                    :title="reviewDraftCount ? `Ajouter à la review (${reviewDraftCount} en attente)` : 'Ajouter à la review'"
+                  >
+                    {{ reviewDraftCount ? `+ Review (${reviewDraftCount})` : '+ Review' }}
+                  </button>
                   <button
                     class="pid-submit-btn"
                     :disabled="!composeText.trim()"
@@ -419,6 +444,19 @@ function handleApplySuggestion(suggestion: string, startLine: number | null, end
   cursor: pointer;
 }
 .pid-cancel-btn:hover { border-color: var(--color-text-muted); }
+
+.pid-review-btn {
+  background: none;
+  border: 1px solid var(--color-accent);
+  border-radius: 4px;
+  color: var(--color-accent);
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.pid-review-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.pid-review-btn:not(:disabled):hover { background: rgba(203,166,247,0.12); }
 
 .pid-submit-btn {
   background: var(--color-accent);
