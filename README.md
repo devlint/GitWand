@@ -21,12 +21,12 @@
   <img alt="License" src="https://img.shields.io/badge/license-MIT-8B5CF6">
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-100%25-3178C6">
   <img alt="Tests" src="https://img.shields.io/badge/tests-332%20passing-22c55e">
-  <img alt="Version" src="https://img.shields.io/badge/version-0.1.0-FBBF24">
+  <img alt="Version" src="https://img.shields.io/badge/version-1.0.0-22c55e">
 </p>
 
 ---
 
-GitWand is a lightweight, native Git client built with Tauri 2 and Vue 3. It covers the full daily workflow — changes, history, branches, push/pull — with one unique superpower: **automatic resolution of trivial merge conflicts**, backed by a typed resolution engine with composite confidence scoring.
+GitWand is a lightweight, native Git client built with Tauri 2 and Vue 3. It covers the full daily workflow — changes, history, branches, push/pull — and goes further with **automatic resolution of trivial merge conflicts**, **integrated code review** with inline comments and intelligence analysis, and a typed resolution engine with composite confidence scoring.
 
 ## Desktop app
 
@@ -73,9 +73,17 @@ Full file history with `git log --follow`, blame view grouped by commit, time-tr
 
 The current repo name in the header opens a dropdown showing all recently opened repositories. Pin favourites, remove entries, switch instantly — no file picker needed.
 
+### Pull Requests & Code Review
+
+Browse, create, checkout and merge GitHub PRs without leaving the app. The PR list sits in the sidebar (like the commit log) and the full detail — diff, CI checks, comments, inline review — fills the main area.
+
+- **Inline comments** — read and write review comments anchored to diff lines, with full threading and code suggestions (` ```suggestion ``` ` blocks applicable in one click)
+- **Review submission** — Approve / Request changes / Comment, with a draft queue to accumulate comments before sending
+- **🧠 Intelligence panel** — conflict prediction (`git merge-tree` before merging), hotspot analysis (files that caused conflicts historically), review scope (% of codebase touched), static AI suggestions (breaking changes, missing migrations, removed exports), file review history
+
 ### Settings
 
-Language (FR/EN, OS auto-detected), theme (dark/light/system), commit signature, diff mode. All persisted in localStorage.
+Language (FR/EN, OS auto-detected), theme (dark/light/system), commit signature, diff mode, AI provider (Claude / OpenAI-compatible / Ollama), external editor, Git binary path, switch behavior (stash/ask/refuse). All persisted in localStorage.
 
 ### Running the app
 
@@ -257,26 +265,35 @@ GitWand uses a zero-dependency type-safe i18n system. `fr.ts` is the reference l
 
 ## Roadmap
 
-- [x] Core engine — 8 conflict patterns, LCS 3-way, diff2 + diff3
+### v1.0.0 — Shipped ✅
+
+- [x] Core engine — 8 conflict patterns, LCS 3-way, diff2 + diff3, format-aware resolvers (JSON, Markdown, YAML, Vue SFC, CSS, lockfiles)
 - [x] Composite confidence scoring (score 0–100 + dimensions)
-- [x] Format-aware resolvers — JSON/JSONC, Markdown
 - [x] Configurable merge policies — `.gitwandrc`, per-glob overrides
 - [x] Decision trace + explain-only mode
-- [x] Corpus of 20 reference fixtures + metrics
+- [x] Corpus of 20 reference fixtures + metrics + benchmarks
 - [x] CLI — `gitwand resolve`, `gitwand status`, CI mode
 - [x] VS Code extension — CodeLens, diagnostics, one-click resolve
 - [x] Desktop app — full Git client (changes, history, branches, push/pull)
-- [x] Diff viewer — side-by-side, word-level, syntax highlighting, staging
+- [x] Diff viewer — side-by-side, word-level, syntax highlighting, staging, minimap
 - [x] File history + blame + time-travel diff
 - [x] DAG commit graph
 - [x] Merge preview — zero side-effect simulation before merging
-- [x] Repo switcher — recent repos with pin/unpin
-- [x] Amend commit message — for unpushed HEAD commits
-- [ ] Interactive rebase — reorder, squash, drop
-- [ ] Cherry-pick
-- [ ] Stash manager
-- [ ] PR workflow — create, review, merge from the app
-- [ ] Inline code review comments
+- [x] Cherry-pick, stash manager, amend commit
+- [x] Repo switcher, multi-repo tabs, monorepo awareness
+- [x] AI suggestions — Claude / OpenAI-compatible / Ollama for conflict resolution
+- [x] PR workflow — list, create, checkout, merge (GitHub via `gh` CLI)
+- [x] Inline code review — comments, threads, suggestions, multi-line selection
+- [x] Review submission — Approve / Request changes / Comment, draft queue
+- [x] 🧠 Intelligence panel — conflict prediction, hotspot analysis, review scope, AI suggestions, file review history
+
+### Post-1.0
+
+- [ ] Interactive rebase — reorder, squash, drop (drag-and-drop)
+- [ ] Folder diff — compare two folders, branches, or commits
+- [ ] Image diff — side-by-side, blink, slider (PNG, JPEG, SVG, WebP)
+- [ ] GitLab / Bitbucket integration
+- [ ] Build pipeline — macOS notarization, auto-update
 
 See [ROADMAP.md](./ROADMAP.md) for the full phased plan with competitive analysis.
 

@@ -448,6 +448,9 @@ const server = createServer(async (req, res) => {
       if (!cwd || !paths) return jsonResponse(res, { error: "Missing cwd or paths" }, 400);
       try {
         const resolvedCwd = resolve(cwd);
+        // Remove stale index.lock if present (can happen after a crash)
+        const lockFile = `${resolvedCwd}/.git/index.lock`;
+        try { execSync(`rm -f "${lockFile}"`, { shell: true }); } catch { /* ignore */ }
         execSync(`git add -- ${paths.map((p) => `"${p}"`).join(" ")}`, {
           cwd: resolvedCwd,
           encoding: "utf-8",
@@ -455,7 +458,8 @@ const server = createServer(async (req, res) => {
         });
         return jsonResponse(res, { ok: true });
       } catch (err) {
-        return jsonResponse(res, { error: err.message }, 500);
+        const detail = err.stderr?.toString().trim() || err.stdout?.toString().trim() || err.message;
+        return jsonResponse(res, { error: detail }, 500);
       }
     }
 
@@ -472,7 +476,8 @@ const server = createServer(async (req, res) => {
         });
         return jsonResponse(res, { ok: true });
       } catch (err) {
-        return jsonResponse(res, { error: err.message }, 500);
+        const detail = err.stderr?.toString().trim() || err.stdout?.toString().trim() || err.message;
+        return jsonResponse(res, { error: detail }, 500);
       }
     }
 

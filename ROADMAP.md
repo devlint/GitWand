@@ -82,7 +82,7 @@ GitButler est le concurrent le plus proche de GitWand techniquement (même stack
 
 ---
 
-## Ce que GitWand a déjà (v0.1.0 → Phase 8)
+## Ce que GitWand a déjà (v1.0.0 → Phase 9)
 
 ### Core — moteur de résolution (Phases 1–7.5)
 - **8 patterns de résolution** : same_change, one_side_change, delete_no_change, whitespace_only, non_overlapping, value_only_change, generated_file, complex — LCS 3-way, diff2 + diff3
@@ -118,6 +118,14 @@ GitButler est le concurrent le plus proche de GitWand techniquement (même stack
 - **Repo switcher** (8.4) : dropdown depuis le nom du repo courant — repos récents avec pin/unpin/suppression, ouverture directe
 - **Monorepo awareness** (8.4) : détection pnpm/npm/yarn workspaces — `MonorepoPanel.vue`, scan packages avec nom/chemin/version
 - **Terminal intégré** (8.5) : exécution commandes git inline — `GitTerminal.vue`, autocomplete branches/tags/sous-commandes, historique navigable
+
+### Desktop — Code Review intégré (Phase 9)
+- **Vue PR intégrée** (architecture) : liste des PRs dans la sidebar (comme le log), détail dans la zone principale — `usePrPanel.ts` singleton composable via `provide/inject`, `PrListSidebar.vue`, `PrDetailView.vue`, `viewMode: "prs"` dans `useGitRepo`
+- **Visualisation de PR** (9.1) : liste paginée avec état/CI/âge, diff complet de la PR dans le viewer GitWand (SBS, word-diff, minimap, collapse, syntax highlighting), résumé enrichi (Info/Diff/CI), checkout local en un clic, liens croisés PR↔commit↔CI
+- **Commentaires inline** (9.2) : lecture des commentaires ancrés sur les lignes, threads de réponses, création par sélection de ligne ou plage, suggestions de code (` ```suggestion ``` ` applicables en un clic)
+- **Soumission de review** (9.3) : Approve / Request changes / Comment depuis l'app (`PrReviewModal.vue`), brouillon de review (accumulation locale de commentaires), message de review global, alerte de merge-readiness quand checks verts + approvals OK
+- **Intelligence GitWand** (9.4) : `PrIntelligencePanel.vue` — conflict prediction (`git merge-tree`), hotspot analysis (`git log --merges` par fichier), review scope (% codebase touchée, profondeur arbre), suggestions IA statiques (breaking changes, migrations, exports supprimés, hunks complexes), historique de review par fichier (`gh pr list` filtré)
+- **Contraste et accessibilité** : badges sémantiques dark-mode-safe (`#1d4ed8`, `#6d28d9`, `#16a34a`) remplaçant les couleurs Catppuccin Mocha — lisibles en thème clair et sombre
 - **Infrastructure Tauri 2** : capabilities system (dialog:allow-open), config plugins corrigée, artefacts gen/ ignorés
 
 ---
@@ -397,12 +405,12 @@ interface DecisionTrace {
 
 ---
 
-### LATER — Phase 9 : Code Review intégré (6-12 mois)
+### NOW — Phase 9 : Code Review intégré ✅ (Terminé)
 
 > Objectif : Faire de GitWand un outil de code review à part entière — pas un renvoi vers GitHub.
-> La fondation est déjà là : diff viewer side-by-side, word-level diff, syntax highlighting, navigation hunk, file history, DAG graph. Il manque la couche "collaboration" par-dessus.
+> **Statut : TERMINÉ** — Toutes les features 9.1 à 9.4 sont implémentées, plus l'architecture intégrée sidebar+main.
 
-**Positionnement** : GitHub et GitLab ont des interfaces de review correctes mais déconnectées du contexte local. GitWand connaît *votre* repo en profondeur — historique, conflits passés, patterns de merge — et peut apporter de l'intelligence là où les autres affichent juste un diff statique.
+**Positionnement** : GitHub et GitLab ont des interfaces de review correctes mais déconnectées du contexte local. GitWand connaît *votre* repo en profondeur — historique, conflits passés, patterns de merge — et apporte de l'intelligence là où les autres affichent juste un diff statique.
 
 #### 9.1 — Visualisation de PR ✅
 
@@ -438,7 +446,41 @@ C'est ici que GitWand se distingue vraiment des interfaces de review classiques 
 - ✅ **Suggestions de review IA** : Pour chaque hunk complexe, proposer des observations automatiques (breaking change potentiel, pattern inhabituel, divergence avec les conventions du repo) — en s'appuyant sur le moteur d'explication du core (Phase 7.1)
 - ✅ **Historique de review** : Qui a reviewé quoi dans ce fichier, quelles lignes ont déjà été commentées dans des PRs précédentes
 
-**Effort estimé** : 3-6 mois. 9.1 est le prérequis naturel de 8.3, et peut être parallélisé avec 8.3. 9.4 (intelligence) vient en dernier, une fois 9.1-9.3 stables — et s'appuie directement sur les travaux Phase 7.
+#### 9.5 — Architecture vue intégrée ✅ (bonus non planifié)
+
+- ✅ **Refactoring modal → sidebar+main** : La PR list remplace les fichiers dans la sidebar quand l'onglet "PRs" est actif (même pattern que le log) ; le détail complet s'affiche dans la zone principale — surface d'affichage maximale pour le contenu dense des PRs
+- ✅ **`usePrPanel.ts`** : Composable singleton extracted de `PullRequestPanel.vue` — tout l'état PR centralisé, partagé via `provide(PR_PANEL_KEY, prPanel)` dans `App.vue`, injecté dans `PrListSidebar` et `PrDetailView` sans prop drilling
+- ✅ **`PrListSidebar.vue`** : Liste compacte dans la sidebar — filtre open/closed/all, formulaire de création inline, chips d'état colorés, item actif mis en évidence
+- ✅ **`PrDetailView.vue`** : Vue détail dans `<main>` — 4 onglets (Info/Diff/CI/🧠 Intelligence), header PR, actions (Checkout/Merger/GitHub), `PrInlineDiff` avec commentaires, `PrReviewModal` via Teleport
+
+**Phase 9 entièrement livrée avec `vue-tsc --noEmit` à 0 erreur.**
+
+---
+
+### LATER — Post-1.0 : Fonctionnalités différenciantes restantes
+
+> La v1.0.0 couvre l'intégralité du workflow Git quotidien + code review + intelligence. Ces fonctionnalités sont des différenciateurs supplémentaires pour une v1.x.
+
+#### Rebase interactif
+- Réordonner, squash, edit, drop de commits — drag-and-drop dans le log
+- UI complexe, planifié comme feature phare post-1.0
+
+#### Folder diff (6.2)
+- Comparer deux dossiers, deux branches, deux commits — arbre récursif
+- Rival direct de Kaleidoscope sur ce point
+
+#### Image diff (6.3)
+- Side-by-side, overlay, blink, slider — différenciateur fort
+- Formats : PNG, JPEG, SVG, WebP
+
+#### Intégrations GitLab / Bitbucket
+- Actuellement GitHub uniquement (via `gh` CLI)
+- API REST/GraphQL pour GitLab MRs et Bitbucket PRs
+
+#### Build & distribution
+- Pipeline CI/CD multi-OS (macOS arm64/x64, Windows, Linux)
+- Signature du binaire macOS (notarization Apple)
+- Auto-update via Tauri updater plugin
 
 ---
 
