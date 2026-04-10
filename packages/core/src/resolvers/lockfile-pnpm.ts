@@ -107,11 +107,11 @@ function parseSubEntries(bodyLines: string[]): Map<string, string> {
   let currentBody: string[] = [];
 
   for (const line of bodyLines) {
-    // Sub-entry key: indented 2 spaces (or 4 in some formats), key ends with ':'
-    const subMatch = line.match(/^(\s{2,4})(\S[^:]*?):\s*$/);
-    const subInlineMatch = line.match(/^(\s{2,4})(\S[^:]*?):\s+(.+)$/);
+    // Sub-entry key: indented exactly 2 spaces (top-level sub-entries only), key ends with ':'
+    const subMatch = line.match(/^(\s{2})(\S[^:]*?):\s*$/);
+    const subInlineMatch = line.match(/^(\s{2})(\S[^:]*?):\s+(.+)$/);
 
-    if ((subMatch || subInlineMatch) && !line.startsWith("      ")) {
+    if (subMatch || subInlineMatch) {
       // Save previous sub-entry
       if (currentKey !== null) {
         entries.set(currentKey, currentBody.join("\n"));

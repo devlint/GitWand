@@ -299,6 +299,10 @@ export function tryResolveImportConflict(
   const oursMap   = new Map(oursImports.map((s) => [importKey(s), s]));
   const theirsMap = new Map(theirsImports.map((s) => [importKey(s), s]));
 
+  // Indexer par source (pour détecter les conflits cross-kind : namespace vs default, même source)
+  const oursBySource   = new Map(oursImports.map((s) => [s.source, s]));
+  const theirsBySource = new Map(theirsImports.map((s) => [s.source, s]));
+
   // Ensemble de toutes les clés
   const allKeys = new Set([...baseMap.keys(), ...oursMap.keys(), ...theirsMap.keys()]);
 
@@ -344,9 +348,31 @@ export function tryResolveImportConflict(
           };
         }
       } else if (ours) {
+        // Vérifier si theirs a un import du même module avec un kind incompatible
+        const theirsSameSource = theirsBySource.get(ours.source);
+        if (theirsSameSource && theirsSameSource.kind !== ours.kind && ours.kind !== "named") {
+          unresolvedImports++;
+          return {
+            mergedLines: null,
+            reason: `Conflit sur l'import '${ours.source}' — types incompatibles (${ours.kind} vs ${theirsSameSource.kind}).`,
+            resolvedImports,
+            unresolvedImports,
+          };
+        }
         resultLines.push(ours.raw);
         resolvedImports++;
       } else if (theirs) {
+        // Vérifier si ours a un import du même module avec un kind incompatible
+        const oursSameSource = oursBySource.get(theirs.source);
+        if (oursSameSource && oursSameSource.kind !== theirs.kind && theirs.kind !== "named") {
+          unresolvedImports++;
+          return {
+            mergedLines: null,
+            reason: `Conflit sur l'import '${theirs.source}' — types incompatibles (${oursSameSource.kind} vs ${theirs.kind}).`,
+            resolvedImports,
+            unresolvedImports,
+          };
+        }
         resultLines.push(theirs.raw);
         resolvedImports++;
       }
@@ -497,7 +523,6 @@ function importGroup(source: string, strategy: ImportSortStrategy = "default"): 
   if (source.startsWith(".")) return 3;
   if (source.startsWith("@/") || source.startsWith("~/") || source.startsWith("#/")) return 2;
   if (source.startsWith("@")) return 1;
-  if (/^[a-z]/.test(source)) return 0;
   return 1;
 }
 
