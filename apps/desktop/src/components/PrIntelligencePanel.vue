@@ -66,10 +66,10 @@ const scope = computed(() => {
     critical: "Critique",
   };
   const riskColor: Record<string, string> = {
-    low: "#a6e3a1",
-    medium: "#f9e2af",
-    high: "#fab387",
-    critical: "#f38ba8",
+    low: "#16a34a",
+    medium: "#c07a00",
+    high: "#ea580c",
+    critical: "#dc2626",
   };
 
   return { changedFiles, additions, deletions, totalLines, pct, risk, riskLabel: riskLabel[risk], riskColor: riskColor[risk] };
@@ -212,8 +212,8 @@ watch(() => props.prDiffFiles, (files) => {
         <span class="pi-section-icon">📐</span>
         <span class="pi-section-title">Review Scope</span>
         <span
-          class="pi-badge"
-          :style="{ background: scope.riskColor + '22', color: scope.riskColor, borderColor: scope.riskColor + '55' }"
+          class="pi-badge pi-badge--risk"
+          :style="{ background: scope.riskColor + '28', color: scope.riskColor, borderColor: scope.riskColor + '70' }"
         >{{ scope.riskLabel }}</span>
       </div>
 
@@ -385,27 +385,25 @@ watch(() => props.prDiffFiles, (files) => {
 }
 
 .pi-section-icon { font-size: 15px; }
-.pi-section-title { font-size: 13px; font-weight: 600; color: var(--color-text); }
+.pi-section-title { font-size: 13px; font-weight: 700; color: var(--color-text); letter-spacing: -0.01em; }
 .pi-spacer { flex: 1; }
 
 .pi-badge {
-  font-size: 10px;
-  font-weight: 600;
-  padding: 2px 7px;
-  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 9px;
+  border-radius: 5px;
   border: 1px solid;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
 }
 .pi-badge--info {
-  background: rgba(137,180,250,0.1);
-  color: #89b4fa;
-  border-color: rgba(137,180,250,0.3);
+  background: rgba(37,99,235,0.1);
+  color: #1d4ed8;
+  border-color: rgba(37,99,235,0.35);
 }
 .pi-badge--ai {
-  background: rgba(203,166,247,0.1);
-  color: var(--color-accent);
-  border-color: rgba(203,166,247,0.3);
+  background: rgba(109,40,217,0.1);
+  color: #6d28d9;
+  border-color: rgba(109,40,217,0.35);
 }
 
 .pi-empty {
@@ -515,8 +513,8 @@ watch(() => props.prDiffFiles, (files) => {
 }
 .pi-scope-value { font-size: 16px; font-weight: 700; color: var(--color-text); margin-bottom: 2px; }
 .pi-scope-label { font-size: 10px; color: var(--color-text-muted); text-transform: uppercase; }
-.pi-add { color: #a6e3a1; }
-.pi-del { color: #f38ba8; }
+.pi-add { color: #16a34a; }
+.pi-del { color: #dc2626; }
 
 .pi-risk-bar-track {
   height: 4px;
