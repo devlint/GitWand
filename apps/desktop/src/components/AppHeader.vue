@@ -219,9 +219,18 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
 <template>
   <header class="app-header">
     <div class="header-left">
-      <svg class="logo" width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <path d="M12 2L13.5 8.5L20 10L13.5 11.5L12 18L10.5 11.5L4 10L10.5 8.5L12 2Z" fill="var(--color-accent)" />
-        <path d="M18 14L19 17L22 18L19 19L18 22L17 19L14 18L17 17L18 14Z" fill="var(--color-warning)" opacity="0.8" />
+      <!-- 3D hex cube logo — flat-top R=30, inner r=15, viewBox 80×70 -->
+      <svg class="logo" width="28" height="24" viewBox="0 0 80 70" fill="none" aria-hidden="true">
+        <!-- back wall -->
+        <path d="M 55,35 L 47.5,22 L 32.5,22 L 25,35 L 32.5,48 L 47.5,48 Z" fill="#1e1b4b"/>
+        <!-- top face — lightest -->
+        <path d="M 10,35 L 25,9 L 55,9 L 70,35 L 55,35 L 47.5,22 L 32.5,22 L 25,35 Z" fill="#8B5CF6"/>
+        <!-- lower-right face — darkest -->
+        <path d="M 70,35 L 55,61 L 47.5,48 L 55,35 Z" fill="#4C1D95"/>
+        <!-- lower-left face — medium -->
+        <path d="M 10,35 L 25,35 L 32.5,48 L 25,61 Z" fill="#6D28D9"/>
+        <!-- bottom face — medium-dark -->
+        <path d="M 25,61 L 55,61 L 47.5,48 L 32.5,48 Z" fill="#5B21B6"/>
       </svg>
       <h1 class="title">GitWand</h1>
 

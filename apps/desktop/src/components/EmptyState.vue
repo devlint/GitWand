@@ -19,11 +19,30 @@ const isMac = navigator.platform.toUpperCase().includes("MAC");
 <template>
   <div class="empty-state" role="status">
     <div class="empty-visual" aria-hidden="true">
-      <svg width="80" height="80" viewBox="0 0 80 80" fill="none">
-        <circle cx="40" cy="40" r="36" stroke="var(--color-border)" stroke-width="2" stroke-dasharray="6 4" />
-        <path d="M40 18L43 28.5L53 31L43 33.5L40 44L37 33.5L27 31L37 28.5L40 18Z" fill="var(--color-accent)" opacity="0.6" />
-        <path d="M54 38L56 43L61 45L56 47L54 52L52 47L47 45L52 43L54 38Z" fill="var(--color-warning)" opacity="0.4" />
-        <path d="M28 42L29.5 46L33 47.5L29.5 49L28 53L26.5 49L23 47.5L26.5 46L28 42Z" fill="var(--color-theirs)" opacity="0.4" />
+      <!-- Full GitWand logo: cube + code icon left + git graph right -->
+      <svg width="210" height="84" viewBox="0 0 300 120" fill="none">
+        <!-- signal wave -->
+        <path d="M 10,58 L 22,58 L 26,42 L 30,74 L 34,52 L 38,58 L 52,58"
+              stroke="#7C3AED" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="0.75"/>
+        <circle cx="72" cy="58" r="3.5" fill="#7C3AED" opacity="0.75"/>
+        <line x1="52" y1="58" x2="112" y2="58" stroke="#7C3AED" stroke-width="1.5" opacity="0.75"/>
+        <text x="72" y="78" font-family="'Courier New', monospace"
+              font-size="10" font-weight="700" fill="#7C3AED" text-anchor="middle" opacity="0.75">&lt;/&gt;</text>
+        <!-- cube back wall -->
+        <path d="M 171,60 L 161,42.7 L 141,42.7 L 131,60 L 141,77.3 L 161,77.3 Z" fill="#1e1b4b"/>
+        <!-- cube top face -->
+        <path d="M 111,60 L 131,25.4 L 171,25.4 L 191,60 L 171,60 L 161,42.7 L 141,42.7 L 131,60 Z" fill="#8B5CF6"/>
+        <!-- cube lower-right -->
+        <path d="M 191,60 L 171,94.6 L 161,77.3 L 171,60 Z" fill="#4C1D95"/>
+        <!-- cube lower-left -->
+        <path d="M 111,60 L 131,60 L 141,77.3 L 131,94.6 Z" fill="#6D28D9"/>
+        <!-- cube bottom -->
+        <path d="M 131,94.6 L 171,94.6 L 161,77.3 L 141,77.3 Z" fill="#5B21B6"/>
+        <!-- green line + dots -->
+        <line x1="191" y1="60" x2="288" y2="60" stroke="#10B981" stroke-width="1.5" opacity="0.75"/>
+        <circle cx="214" cy="60" r="4.5" fill="#10B981" opacity="0.75"/>
+        <circle cx="248" cy="60" r="4.5" fill="#10B981" opacity="0.75"/>
+        <circle cx="282" cy="60" r="4.5" fill="#10B981" opacity="0.75"/>
       </svg>
     </div>
 

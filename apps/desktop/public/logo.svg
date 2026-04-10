@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 120" fill="none" role="img" aria-label="GitWand logo">
+
+  <!-- ═══ LEFT ELEMENTS: signal wave + </> + purple line ═══ -->
+
+  <!-- Signal / wave icon (ECG-style) -->
+  <path d="M 10,58 L 22,58 L 26,42 L 30,74 L 34,52 L 38,58 L 52,58"
+        stroke="#7C3AED" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Dot on left line -->
+  <circle cx="72" cy="58" r="3.5" fill="#7C3AED"/>
+
+  <!-- Purple horizontal line from wave to cube -->
+  <line x1="52" y1="58" x2="112" y2="58" stroke="#7C3AED" stroke-width="1.5"/>
+
+  <!-- </> symbol below the dot -->
+  <text x="72" y="78" font-family="'Courier New', 'Lucida Console', monospace"
+        font-size="10" font-weight="700" fill="#7C3AED" text-anchor="middle">&lt;/&gt;</text>
+
+  <!-- ═══ CENTER: 3D Hexagonal Cube ═══
+       Flat-top hex, outer R=40, inner r=20, center (151, 60)
+       Outer vertices:
+         RIGHT       (191, 60)
+         UPPER_RIGHT (171, 25.4)
+         UPPER_LEFT  (131, 25.4)
+         LEFT        (111, 60)
+         LOWER_LEFT  (131, 94.6)
+         LOWER_RIGHT (171, 94.6)
+       Inner vertices (r=20):
+         RIGHT       (171, 60)
+         UPPER_RIGHT (161, 42.7)
+         UPPER_LEFT  (141, 42.7)
+         LEFT        (131, 60)
+         LOWER_LEFT  (141, 77.3)
+         LOWER_RIGHT (161, 77.3)
+  ═══ -->
+
+  <!-- Inner hexagon "back wall" — darkest -->
+  <path d="M 171,60 L 161,42.7 L 141,42.7 L 131,60 L 141,77.3 L 161,77.3 Z"
+        fill="#1e1b4b"/>
+
+  <!-- TOP face (upper ring) — lightest purple -->
+  <path d="M 111,60 L 131,25.4 L 171,25.4 L 191,60 L 171,60 L 161,42.7 L 141,42.7 L 131,60 Z"
+        fill="#8B5CF6"/>
+
+  <!-- LOWER-RIGHT face — darkest -->
+  <path d="M 191,60 L 171,94.6 L 161,77.3 L 171,60 Z"
+        fill="#4C1D95"/>
+
+  <!-- LOWER-LEFT face — medium purple -->
+  <path d="M 111,60 L 131,60 L 141,77.3 L 131,94.6 Z"
+        fill="#6D28D9"/>
+
+  <!-- BOTTOM face — medium-dark purple -->
+  <path d="M 131,94.6 L 171,94.6 L 161,77.3 L 141,77.3 Z"
+        fill="#5B21B6"/>
+
+  <!-- ═══ RIGHT ELEMENTS: green git-graph line + dots ═══ -->
+
+  <!-- Green horizontal line from cube to dots -->
+  <line x1="191" y1="60" x2="288" y2="60" stroke="#10B981" stroke-width="1.5"/>
+
+  <!-- 3 green dots (commit graph nodes) -->
+  <circle cx="214" cy="60" r="4.5" fill="#10B981"/>
+  <circle cx="248" cy="60" r="4.5" fill="#10B981"/>
+  <circle cx="282" cy="60" r="4.5" fill="#10B981"/>
+
+</svg>
