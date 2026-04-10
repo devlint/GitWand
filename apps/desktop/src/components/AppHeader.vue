@@ -222,7 +222,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
       <!-- 3D hex cube logo — flat-top R=30, inner r=15, viewBox 80×70 -->
       <svg class="logo" width="28" height="24" viewBox="0 0 80 70" fill="none" aria-hidden="true">
         <!-- back wall -->
-        <path d="M 55,35 L 47.5,22 L 32.5,22 L 25,35 L 32.5,48 L 47.5,48 Z" fill="#1e1b4b"/>
+        <path d="M 55,35 L 47.5,22 L 32.5,22 L 25,35 L 32.5,48 L 47.5,48 Z" fill="none"/>
         <!-- top face — lightest -->
         <path d="M 10,35 L 25,9 L 55,9 L 70,35 L 55,35 L 47.5,22 L 32.5,22 L 25,35 Z" fill="#8B5CF6"/>
         <!-- lower-right face — darkest -->

@@ -29,7 +29,7 @@ const isMac = navigator.platform.toUpperCase().includes("MAC");
         <text x="72" y="78" font-family="'Courier New', monospace"
               font-size="10" font-weight="700" fill="#7C3AED" text-anchor="middle" opacity="0.75">&lt;/&gt;</text>
         <!-- cube back wall -->
-        <path d="M 171,60 L 161,42.7 L 141,42.7 L 131,60 L 141,77.3 L 161,77.3 Z" fill="#1e1b4b"/>
+        <path d="M 171,60 L 161,42.7 L 141,42.7 L 131,60 L 141,77.3 L 161,77.3 Z" fill="none"/>
         <!-- cube top face -->
         <path d="M 111,60 L 131,25.4 L 171,25.4 L 191,60 L 171,60 L 161,42.7 L 141,42.7 L 131,60 Z" fill="#8B5CF6"/>
         <!-- cube lower-right -->
