@@ -20,6 +20,8 @@ const props = defineProps<{
   logLoading: boolean;
   selectedCommitHash: string | null;
   aheadCount: number;
+  /** Files inside the currently-selected untracked directory */
+  dirFiles?: string[];
 }>();
 
 const emit = defineEmits<{
@@ -34,6 +36,8 @@ const emit = defineEmits<{
   "update:commitDescription": [value: string];
   selectCommit: [hash: string];
   editCommit: [entry: GitLogEntry];
+  /** Select a specific file inside an expanded untracked directory */
+  "select-dir-file": [path: string];
 }>();
 
 const { t } = useI18n();
@@ -177,43 +181,67 @@ function onCommitKeydown(e: KeyboardEvent) {
           </div>
 
           <ul class="file-items" role="listbox">
-            <li
+            <template
               v-for="file in sections[sectionKey]"
               :key="`${file.section}-${file.path}`"
-              class="file-item"
-              :class="{ 'file-item--selected': selectedFile === file.path }"
-              role="option"
-              :aria-selected="selectedFile === file.path"
-              tabindex="0"
-              @click="emit('select', file.path, file.section === 'staged')"
-              @keydown.enter="emit('select', file.path, file.section === 'staged')"
-              @keydown.space.prevent="emit('select', file.path, file.section === 'staged')"
             >
-              <span
-                class="file-status-badge mono"
-                :style="{ color: statusColor(file.status) }"
-                :title="file.status"
+              <!-- Directory or regular file item -->
+              <li
+                class="file-item"
+                :class="{ 'file-item--selected': selectedFile === file.path }"
+                role="option"
+                :aria-selected="selectedFile === file.path"
+                tabindex="0"
+                @click="emit('select', file.path, file.section === 'staged')"
+                @keydown.enter="emit('select', file.path, file.section === 'staged')"
+                @keydown.space.prevent="emit('select', file.path, file.section === 'staged')"
               >
-                {{ statusBadge(file.status) }}
-              </span>
-              <div class="file-info">
-                <span class="file-name mono">{{ fileName(file.path) }}</span>
-                <span class="file-dir muted" v-if="fileDir(file.path)">{{ fileDir(file.path) }}</span>
-              </div>
-              <!-- Stage / Unstage per file -->
-              <button
-                v-if="file.section === 'unstaged' || file.section === 'untracked'"
-                class="file-action"
-                @click="onStageClick($event, file.path)"
-                :title="t('sidebar.stage')"
-              >+</button>
-              <button
-                v-if="file.section === 'staged'"
-                class="file-action"
-                @click="onUnstageClick($event, file.path)"
-                :title="t('sidebar.unstage')"
-              >-</button>
-            </li>
+                <span
+                  class="file-status-badge mono"
+                  :style="{ color: statusColor(file.status) }"
+                  :title="file.status"
+                >
+                  {{ statusBadge(file.status) }}
+                </span>
+                <div class="file-info">
+                  <span class="file-name mono">{{ fileName(file.path) }}</span>
+                  <span class="file-dir muted" v-if="fileDir(file.path)">{{ fileDir(file.path) }}</span>
+                </div>
+                <!-- Stage / Unstage per file -->
+                <button
+                  v-if="file.section === 'unstaged' || file.section === 'untracked'"
+                  class="file-action"
+                  @click="onStageClick($event, file.path)"
+                  :title="t('sidebar.stage')"
+                >+</button>
+                <button
+                  v-if="file.section === 'staged'"
+                  class="file-action"
+                  @click="onUnstageClick($event, file.path)"
+                  :title="t('sidebar.unstage')"
+                >-</button>
+              </li>
+
+              <!-- Sub-files for expanded untracked directory -->
+              <!-- Stay expanded when directory OR one of its sub-files is selected -->
+              <li
+                v-if="file.path.endsWith('/') && dirFiles?.length && (selectedFile === file.path || dirFiles.includes(selectedFile ?? ''))"
+                v-for="subFile in dirFiles"
+                :key="`dir-sub-${subFile}`"
+                class="file-item file-item--sub"
+                :class="{ 'file-item--selected': selectedFile === subFile }"
+                role="option"
+                tabindex="0"
+                @click.stop="emit('select-dir-file', subFile)"
+                @keydown.enter.stop="emit('select-dir-file', subFile)"
+              >
+                <span class="file-status-badge mono" style="color: #16a34a">A</span>
+                <div class="file-info">
+                  <span class="file-name mono">{{ fileName(subFile) }}</span>
+                  <span class="file-dir muted">{{ subFile }}</span>
+                </div>
+              </li>
+            </template>
           </ul>
         </div>
       </template>
@@ -442,6 +470,38 @@ function onCommitKeydown(e: KeyboardEvent) {
 }
 
 .file-item--selected {
+  background: var(--color-bg-tertiary);
+  border-left-color: var(--color-accent);
+}
+
+/* Sub-files inside an expanded untracked directory */
+.file-item--sub {
+  padding-left: 30px;
+  background: var(--color-bg);
+  border-left-color: transparent;
+  border-left-width: 1px;
+  position: relative;
+}
+
+.file-item--sub::before {
+  content: '';
+  position: absolute;
+  left: 17px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--color-border);
+}
+
+.file-item--sub:first-of-type::before {
+  top: 50%;
+}
+
+.file-item--sub:hover {
+  background: var(--color-bg-tertiary);
+}
+
+.file-item--sub.file-item--selected {
   background: var(--color-bg-tertiary);
   border-left-color: var(--color-accent);
 }

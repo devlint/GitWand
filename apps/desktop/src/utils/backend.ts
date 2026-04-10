@@ -251,6 +251,10 @@ export interface DiffHunk {
 export interface GitDiff {
   path: string;
   hunks: DiffHunk[];
+  /** True when the "file" is actually a new untracked directory */
+  isDirectory?: boolean;
+  /** List of new files inside the directory (when isDirectory=true) */
+  newFiles?: string[];
 }
 
 /**

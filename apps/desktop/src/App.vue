@@ -136,6 +136,24 @@ watch(activeTabId, () => {
 // ─── Computed state ─────────────────────────────────────
 const hasFiles = computed(() => repoFiles.value.length > 0);
 
+/**
+ * Files inside the currently-open untracked directory.
+ * Persisted while navigating between sub-files — only cleared when
+ * the selected file is outside the expanded directory.
+ */
+const expandedDirFiles = ref<string[]>([]);
+
+watch(repoDiff, (diff) => {
+  if (diff?.isDirectory && diff.newFiles?.length) {
+    // Just opened a directory → remember its files
+    expandedDirFiles.value = diff.newFiles ?? [];
+  } else if (diff?.path && !expandedDirFiles.value.includes(diff.path)) {
+    // Navigated to a file that is NOT one of the sub-files → collapse
+    expandedDirFiles.value = [];
+  }
+  // If diff.path IS in expandedDirFiles → keep them (navigating within dir)
+});
+
 /** Name of the current folder (last segment of path). */
 const folderName = computed(() => {
   const p = repoFolderPath.value;
@@ -619,8 +637,10 @@ onUnmounted(() => {
           :log-loading="repoLoading"
           :selected-commit-hash="selectedCommitHash"
           :ahead-count="aheadCount"
+          :dir-files="expandedDirFiles"
           @select="onRepoFileSelect"
           @change-view="onViewModeChange"
+          @select-dir-file="(path) => repoSelectFile(path, false)"
           @stage-file="(path) => stageFiles([path])"
           @unstage-file="(path) => unstageFiles([path])"
           @stage-all="stageAll"
@@ -699,6 +719,7 @@ onUnmounted(() => {
               @open-file-history="openFileHistory"
               @open-in-editor="handleOpenInEditor"
               @stage-patch="stagePatch"
+              @select-dir-file="(path) => repoSelectFile(path, false)"
             />
           </template>
 

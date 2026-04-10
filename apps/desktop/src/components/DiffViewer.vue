@@ -24,6 +24,8 @@ const emit = defineEmits<{
   "open-in-editor": [path: string];
   /** Emitted when user wants to stage a partial patch */
   "stage-patch": [patch: string];
+  /** Emitted when user clicks a file inside a new untracked directory */
+  "select-dir-file": [path: string];
 }>();
 
 const hasContent = computed(() => {
@@ -640,7 +642,42 @@ function onDiffScroll() {
 
     </div><!-- /diff-body -->
 
-    <!-- Empty / no diff -->
+    <!-- New untracked directory: list its files -->
+    <div class="diff-new-dir" v-else-if="diff?.isDirectory">
+      <!-- Dir header -->
+      <div class="diff-dir-header">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"
+            stroke="var(--color-accent)" stroke-width="1.5" fill="rgba(139,92,246,0.08)"/>
+        </svg>
+        <span class="diff-dir-header-title">Nouveau dossier</span>
+        <span class="diff-dir-header-count muted">{{ diff.newFiles?.length ?? 0 }} fichier{{ (diff.newFiles?.length ?? 0) > 1 ? 's' : '' }}</span>
+      </div>
+      <!-- File list -->
+      <ul class="diff-dir-files" v-if="diff.newFiles?.length">
+        <li
+          v-for="f in diff.newFiles"
+          :key="f"
+          class="diff-dir-file"
+          :class="{ 'diff-dir-file--active': filePath === f }"
+          tabindex="0"
+          role="button"
+          @click="emit('select-dir-file', f)"
+          @keydown.enter="emit('select-dir-file', f)"
+        >
+          <span class="diff-dir-badge">A</span>
+          <div class="diff-dir-info">
+            <span class="mono diff-dir-name">{{ f.split('/').pop() }}</span>
+            <span class="diff-dir-path muted">{{ f }}</span>
+          </div>
+          <svg class="diff-dir-arrow" width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+            <path d="M5 3l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </li>
+      </ul>
+    </div>
+
+    <!-- Empty / no diff (binary or truly empty file) -->
     <div class="diff-empty" v-else-if="filePath">
       <svg width="40" height="40" viewBox="0 0 24 24" fill="none" aria-hidden="true">
         <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" stroke="var(--color-text-muted)" stroke-width="1.5" opacity="0.4"/>
@@ -1060,6 +1097,119 @@ function onDiffScroll() {
 
 .diff-empty-hint {
   font-size: 12px;
+}
+
+/* New directory listing */
+.diff-new-dir {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.diff-dir-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 20px 10px;
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+  background: var(--color-bg-secondary);
+}
+
+.diff-dir-header-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.diff-dir-header-count {
+  font-size: 11px;
+  margin-left: 4px;
+}
+
+.diff-dir-files {
+  list-style: none;
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.diff-dir-file {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  border-radius: 6px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  cursor: pointer;
+  /* inset shadow = no layout shift */
+  box-shadow: inset 3px 0 0 transparent;
+  transition: background 0.1s, box-shadow 0.1s;
+}
+
+.diff-dir-file:hover {
+  background: var(--color-bg-tertiary);
+}
+
+.diff-dir-file:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.diff-dir-file--active {
+  background: var(--color-bg-tertiary);
+  box-shadow: inset 3px 0 0 var(--color-accent);
+}
+
+.diff-dir-badge {
+  font-size: 11px;
+  font-weight: 700;
+  color: #16a34a;
+  width: 14px;
+  text-align: center;
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+}
+
+.diff-dir-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.diff-dir-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diff-dir-path {
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diff-dir-arrow {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+
+.diff-dir-file:hover .diff-dir-arrow,
+.diff-dir-file--active .diff-dir-arrow {
+  opacity: 1;
 }
 
 /* ─── Partial staging controls ──────────────────────── */

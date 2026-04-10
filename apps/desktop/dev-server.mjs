@@ -332,12 +332,40 @@ const server = createServer(async (req, res) => {
 
       try {
         const resolvedCwd = resolve(cwd);
+
+        // ── Directory: list new files inside instead of diffing ──────────
+        if (path.endsWith("/")) {
+          const absDir = join(resolvedCwd, path);
+          let newFiles = [];
+          try {
+            const r = spawnSync("git", ["ls-files", "--others", "--exclude-standard", absDir], {
+              cwd: resolvedCwd, encoding: "utf-8",
+            });
+            newFiles = (r.stdout || "").trim().split("\n").filter(Boolean);
+          } catch { /* ignore */ }
+          return jsonResponse(res, { path, hunks: [], isDirectory: true, newFiles });
+        }
+
         const args = staged ? ["diff", "--cached", "--", path] : ["diff", "--", path];
-        const stdout = execSync(`git ${args.join(" ")}`, {
-          cwd: resolvedCwd,
-          encoding: "utf-8",
-          shell: true,
-        });
+        let stdout;
+        try {
+          stdout = execSync(`git ${args.join(" ")}`, {
+            cwd: resolvedCwd,
+            encoding: "utf-8",
+            shell: true,
+          });
+        } catch { stdout = ""; }
+
+        // ── New untracked file: fall back to --no-index diff (all lines green) ──
+        if (!stdout.trim() && !staged) {
+          const absFile = join(resolvedCwd, path);
+          if (existsSync(absFile) && !statSync(absFile).isDirectory()) {
+            const r = spawnSync("git", ["diff", "--no-index", "--", "/dev/null", absFile], {
+              cwd: resolvedCwd, encoding: "utf-8",
+            });
+            stdout = r.stdout || "";
+          }
+        }
 
         const hunks = [];
         let currentHunk = null;
