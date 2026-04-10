@@ -36,7 +36,7 @@ import {
   type StashEntry,
 } from "../utils/backend";
 
-export type ViewMode = "changes" | "history" | "graph";
+export type ViewMode = "changes" | "history" | "graph" | "prs";
 
 export interface RepoFileEntry {
   path: string;

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from "vue";
+import { ref, computed, watch, onMounted, onUnmounted, provide } from "vue";
 import AppHeader from "./components/AppHeader.vue";
 import RepoTabBar from "./components/RepoTabBar.vue";
 import MergeEditor from "./components/MergeEditor.vue";
@@ -11,8 +11,9 @@ import CommitDiffViewer from "./components/CommitDiffViewer.vue";
 import FileHistoryViewer from "./components/FileHistoryViewer.vue";
 import CommitGraph from "./components/CommitGraph.vue";
 import SettingsPanel from "./components/SettingsPanel.vue";
-import PullRequestPanel from "./components/PullRequestPanel.vue";
+import PrDetailView from "./components/PrDetailView.vue";
 import EditCommitOverlay from "./components/EditCommitOverlay.vue";
+import { usePrPanel, PR_PANEL_KEY } from "./composables/usePrPanel";
 import type { GitLogEntry } from "./utils/backend";
 import { getPersistedDiffMode, persistDiffMode, type DiffMode } from "./utils/diffMode";
 import { useGitWand } from "./composables/useGitWand";
@@ -109,6 +110,11 @@ const {
   switchBranch,
   deleteBranch,
 } = useGitRepo();
+
+// ─── PR panel (shared state via provide/inject) ──────────
+const prCwd = computed(() => repoFolderPath.value ?? "");
+const prPanel = usePrPanel(prCwd);
+provide(PR_PANEL_KEY, prPanel);
 
 // ─── Multi-repo tabs (lightweight — paths only) ─────────
 const {
@@ -377,7 +383,6 @@ async function handleSwitchBranch(name: string) {
 
 // ─── Settings panel ─────────────────────────────────────
 const showSettings = ref(false);
-const showPrOverlay = ref(false);
 const diffMode = ref<DiffMode>(getPersistedDiffMode());
 
 function onDiffModeChange(mode: DiffMode) {
@@ -616,7 +621,6 @@ onUnmounted(() => {
           :ahead-count="aheadCount"
           @select="onRepoFileSelect"
           @change-view="onViewModeChange"
-          @open-prs="showPrOverlay = true"
           @stage-file="(path) => stageFiles([path])"
           @unstage-file="(path) => unstageFiles([path])"
           @stage-all="stageAll"
@@ -717,13 +721,11 @@ onUnmounted(() => {
             @select-commit="(hash) => { selectCommit(hash); viewMode = 'history'; }"
           />
 
-          <!-- Pull Requests overlay (shown via sidebar button) -->
-          <PullRequestPanel
-            :cwd="repoFolderPath ?? ''"
-            :show="showPrOverlay"
+          <!-- PRs view: detail panel fills the main area -->
+          <PrDetailView
+            v-else-if="viewMode === 'prs'"
             @refresh="repoRefresh"
-            @close="showPrOverlay = false"
-            @navigate-commit="(hash) => { selectCommit(hash); viewMode = 'history'; showPrOverlay = false; }"
+            @navigate-commit="(hash) => { selectCommit(hash); viewMode = 'history'; }"
           />
         </template>
       </main>

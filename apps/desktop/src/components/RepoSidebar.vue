@@ -3,6 +3,7 @@ import { computed } from "vue";
 import { type RepoFileEntry, type ViewMode } from "../composables/useGitRepo";
 import type { GitLogEntry } from "../utils/backend";
 import CommitLog from "./CommitLog.vue";
+import PrListSidebar from "./PrListSidebar.vue";
 import { useI18n } from "../composables/useI18n";
 
 const props = defineProps<{
@@ -24,8 +25,6 @@ const props = defineProps<{
 const emit = defineEmits<{
   select: [path: string, staged: boolean];
   changeView: [mode: ViewMode];
-  /** Fired when user clicks the PRs tab — opens the PR overlay. */
-  openPrs: [];
   stageFile: [path: string];
   unstageFile: [path: string];
   stageAll: [];
@@ -141,7 +140,8 @@ function onCommitKeydown(e: KeyboardEvent) {
       </button>
       <button
         class="view-tab view-tab--pr"
-        @click="emit('openPrs')"
+        :class="{ 'view-tab--active': viewMode === 'prs' }"
+        @click="emit('changeView', 'prs')"
         title="Pull Requests"
       >
         PRs
@@ -288,6 +288,11 @@ function onCommitKeydown(e: KeyboardEvent) {
         @edit-commit="(entry) => emit('editCommit', entry)"
       />
     </div>
+
+    <!-- PRs view: compact PR list in sidebar -->
+    <div class="sidebar-prs" v-if="viewMode === 'prs'">
+      <PrListSidebar />
+    </div>
   </nav>
 </template>
 
@@ -346,6 +351,11 @@ function onCommitKeydown(e: KeyboardEvent) {
 }
 
 .sidebar-log {
+  flex: 1;
+  overflow: hidden;
+}
+
+.sidebar-prs {
   flex: 1;
   overflow: hidden;
 }
