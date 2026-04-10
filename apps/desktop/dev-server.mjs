@@ -30,6 +30,54 @@ function resolveBin(name) {
 }
 
 const GH = resolveBin("gh");
+console.log(`[dev-server] gh binary: ${GH}`);
+
+/**
+ * Get a GitHub OAuth token — tries in order:
+ *  1. GH_TOKEN / GITHUB_TOKEN env vars
+ *  2. `gh auth token` CLI
+ *  3. Parse ~/.config/gh/hosts.yml directly
+ */
+function getGithubToken() {
+  if (process.env.GH_TOKEN) return process.env.GH_TOKEN;
+  if (process.env.GITHUB_TOKEN) return process.env.GITHUB_TOKEN;
+  // Try gh CLI
+  try {
+    const r = spawnSync(GH, ["auth", "token"], { encoding: "utf-8" });
+    if (r.status === 0 && r.stdout.trim()) return r.stdout.trim();
+  } catch { /* ignore */ }
+  // Fallback: parse hosts.yml
+  try {
+    const hostsFile = join(homedir(), ".config", "gh", "hosts.yml");
+    const content = readFileSync(hostsFile, "utf-8");
+    const m = content.match(/oauth_token:\s*(\S+)/);
+    if (m) return m[1];
+  } catch { /* ignore */ }
+  return null;
+}
+
+/**
+ * Return "owner/repo" from the git remote origin URL in `cwd`.
+ * Handles both https://github.com/owner/repo.git and git@github.com:owner/repo.git
+ */
+function getRepoNwo(cwd) {
+  const r = spawnSync("git", ["remote", "get-url", "origin"], { cwd, encoding: "utf-8" });
+  if (r.status !== 0) return null;
+  const url = r.stdout.trim();
+  const m = url.match(/github\.com[:/](.+?)\/(.+?)(?:\.git)?$/);
+  return m ? `${m[1]}/${m[2]}` : null;
+}
+
+/** Fetch from GitHub REST API with auth. `accept` overrides the default JSON accept header. */
+async function githubFetch(path, token, accept = "application/vnd.github+json") {
+  return fetch(`https://api.github.com${path}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: accept,
+      "X-GitHub-Api-Version": "2022-11-28",
+    },
+  });
+}
 
 const PORT = parseInt(process.argv.find((_, i, a) => a[i - 1] === "--port") ?? "3001", 10);
 
@@ -941,37 +989,45 @@ const server = createServer(async (req, res) => {
       }
     }
 
-    // ─── gh CLI endpoints ──────────────────────────────────
+    // ─── GitHub REST API endpoints (no gh binary needed) ──────
+    // Helpers defined inline for clarity
+
     // GET /api/gh-list-prs?cwd=<path>&state=<open|closed|all>
     if (url.pathname === "/api/gh-list-prs" && req.method === "GET") {
       const cwd = url.searchParams.get("cwd");
       const state = url.searchParams.get("state") || "open";
       if (!cwd) return jsonResponse(res, { error: "Missing cwd" }, 400);
       try {
-        const out = execFileSync(GH, [
-          "pr", "list",
-          "--state", state,
-          "--json", "number,title,state,author,headRefName,baseRefName,isDraft,createdAt,updatedAt,url,additions,deletions,labels",
-          "--limit", "50",
-        ], { cwd, encoding: "utf-8" });
-        const raw = JSON.parse(out);
+        const token = getGithubToken();
+        if (!token) return jsonResponse(res, { error: "No GitHub token found. Run: gh auth login" }, 401);
+        const nwo = getRepoNwo(resolve(cwd));
+        if (!nwo) return jsonResponse(res, { error: "Could not determine GitHub repo from git remote origin" }, 400);
+        console.log(`[gh-list-prs] repo=${nwo} state=${state}`);
+        const resp = await githubFetch(`/repos/${nwo}/pulls?state=${state}&per_page=50`, token);
+        if (!resp.ok) {
+          const text = await resp.text();
+          console.error(`[gh-list-prs] GitHub API ${resp.status}:`, text);
+          return jsonResponse(res, { error: `GitHub API ${resp.status}: ${text}` }, 500);
+        }
+        const raw = await resp.json();
         const prs = raw.map((pr) => ({
           number: pr.number,
           title: pr.title,
           state: pr.state,
-          author: pr.author?.login ?? pr.author ?? "",
-          branch: pr.headRefName,
-          base: pr.baseRefName,
-          draft: pr.isDraft,
-          created_at: pr.createdAt,
-          updated_at: pr.updatedAt,
-          url: pr.url,
+          author: pr.user?.login ?? "",
+          branch: pr.head?.ref ?? "",
+          base: pr.base?.ref ?? "",
+          draft: pr.draft ?? false,
+          created_at: pr.created_at,
+          updated_at: pr.updated_at,
+          url: pr.html_url,
           additions: pr.additions ?? 0,
           deletions: pr.deletions ?? 0,
-          labels: (pr.labels ?? []).map((l) => l.name ?? l),
+          labels: (pr.labels ?? []).map((l) => l.name),
         }));
         return jsonResponse(res, prs);
       } catch (err) {
+        console.error("[gh-list-prs]", err.message);
         return jsonResponse(res, { error: err.message }, 500);
       }
     }
@@ -982,33 +1038,35 @@ const server = createServer(async (req, res) => {
       const number = url.searchParams.get("number");
       if (!cwd || !number) return jsonResponse(res, { error: "Missing cwd or number" }, 400);
       try {
-        const out = execFileSync(GH, [
-          "pr", "view", number,
-          "--json", "number,title,body,state,author,headRefName,baseRefName,isDraft,createdAt,updatedAt,mergedAt,url,additions,deletions,changedFiles,comments,reviewRequests,reviews,labels,mergeable,statusCheckRollup",
-        ], { cwd, encoding: "utf-8" });
-        const pr = JSON.parse(out);
+        const token = getGithubToken();
+        if (!token) return jsonResponse(res, { error: "No GitHub token" }, 401);
+        const nwo = getRepoNwo(resolve(cwd));
+        if (!nwo) return jsonResponse(res, { error: "Could not determine GitHub repo" }, 400);
+        const resp = await githubFetch(`/repos/${nwo}/pulls/${number}`, token);
+        if (!resp.ok) return jsonResponse(res, { error: `GitHub API ${resp.status}` }, 500);
+        const pr = await resp.json();
         return jsonResponse(res, {
           number: pr.number,
           title: pr.title,
           body: pr.body ?? "",
           state: pr.state,
-          author: pr.author?.login ?? "",
-          branch: pr.headRefName,
-          base: pr.baseRefName,
-          draft: pr.isDraft,
-          created_at: pr.createdAt,
-          updated_at: pr.updatedAt,
-          merged_at: pr.mergedAt ?? "",
-          url: pr.url,
+          author: pr.user?.login ?? "",
+          branch: pr.head?.ref ?? "",
+          base: pr.base?.ref ?? "",
+          draft: pr.draft ?? false,
+          created_at: pr.created_at,
+          updated_at: pr.updated_at,
+          merged_at: pr.merged_at ?? "",
+          url: pr.html_url,
           additions: pr.additions ?? 0,
           deletions: pr.deletions ?? 0,
-          changed_files: pr.changedFiles ?? 0,
-          comments: pr.comments?.totalCount ?? pr.comments ?? 0,
-          review_comments: pr.reviews?.totalCount ?? 0,
-          labels: (pr.labels ?? []).map((l) => l.name ?? l),
-          reviewers: (pr.reviewRequests ?? []).map((r) => r.login ?? r.name ?? ""),
-          mergeable: pr.mergeable ?? "UNKNOWN",
-          checks_status: pr.statusCheckRollup?.state ?? "",
+          changed_files: pr.changed_files ?? 0,
+          comments: pr.comments ?? 0,
+          review_comments: pr.review_comments ?? 0,
+          labels: (pr.labels ?? []).map((l) => l.name),
+          reviewers: (pr.requested_reviewers ?? []).map((r) => r.login ?? ""),
+          mergeable: pr.mergeable_state ?? "unknown",
+          checks_status: "",
         });
       } catch (err) {
         return jsonResponse(res, { error: err.message }, 500);
@@ -1021,8 +1079,14 @@ const server = createServer(async (req, res) => {
       const number = url.searchParams.get("number");
       if (!cwd || !number) return jsonResponse(res, { error: "Missing cwd or number" }, 400);
       try {
-        const out = execFileSync(GH, ["pr", "diff", number], { cwd, encoding: "utf-8" });
-        return jsonResponse(res, { diff: out });
+        const token = getGithubToken();
+        if (!token) return jsonResponse(res, { error: "No GitHub token" }, 401);
+        const nwo = getRepoNwo(resolve(cwd));
+        if (!nwo) return jsonResponse(res, { error: "Could not determine GitHub repo" }, 400);
+        const resp = await githubFetch(`/repos/${nwo}/pulls/${number}`, token, "application/vnd.github.v3.diff");
+        if (!resp.ok) return jsonResponse(res, { error: `GitHub API ${resp.status}` }, 500);
+        const diff = await resp.text();
+        return jsonResponse(res, { diff });
       } catch (err) {
         return jsonResponse(res, { error: err.message }, 500);
       }
@@ -1034,13 +1098,25 @@ const server = createServer(async (req, res) => {
       const number = url.searchParams.get("number");
       if (!cwd || !number) return jsonResponse(res, { error: "Missing cwd or number" }, 400);
       try {
-        const out = execFileSync(GH, ["pr", "checks", number, "--json", "name,state,conclusion,detailsUrl"], { cwd, encoding: "utf-8" });
-        const checks = JSON.parse(out);
-        return jsonResponse(res, checks.map((c) => ({
+        const token = getGithubToken();
+        if (!token) return jsonResponse(res, { error: "No GitHub token" }, 401);
+        const nwo = getRepoNwo(resolve(cwd));
+        if (!nwo) return jsonResponse(res, { error: "Could not determine GitHub repo" }, 400);
+        // Get PR head SHA first
+        const prResp = await githubFetch(`/repos/${nwo}/pulls/${number}`, token);
+        if (!prResp.ok) return jsonResponse(res, { error: `GitHub API ${prResp.status}` }, 500);
+        const pr = await prResp.json();
+        const sha = pr.head?.sha;
+        if (!sha) return jsonResponse(res, []);
+        // Get check runs for that commit
+        const checksResp = await githubFetch(`/repos/${nwo}/commits/${sha}/check-runs?per_page=100`, token);
+        if (!checksResp.ok) return jsonResponse(res, { error: `GitHub API ${checksResp.status}` }, 500);
+        const data = await checksResp.json();
+        return jsonResponse(res, (data.check_runs ?? []).map((c) => ({
           name: c.name,
-          state: c.state,
+          state: c.status === "completed" ? c.conclusion : c.status,
           conclusion: c.conclusion ?? "",
-          details_url: c.detailsUrl ?? "",
+          details_url: c.html_url ?? "",
         })));
       } catch (err) {
         return jsonResponse(res, { error: err.message }, 500);
