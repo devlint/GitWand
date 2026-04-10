@@ -34,6 +34,7 @@ import {
   type GitPushPullResult,
   type GitBranch,
   type StashEntry,
+  gitAddToGitignore,
 } from "../utils/backend";
 
 export type ViewMode = "changes" | "history" | "graph" | "prs";
@@ -728,13 +729,23 @@ export function useGitRepo() {
 
   // ─── Discard ────────────────────────────────────────────
 
-  async function discardFiles(paths: string[]) {
+  async function discardFiles(paths: string[], untracked = false) {
     if (!folderPath.value) return;
     try {
-      await gitDiscard(folderPath.value, paths);
+      await gitDiscard(folderPath.value, paths, untracked);
       await refresh();
     } catch (err: any) {
       error.value = `discard: ${err.message}`;
+    }
+  }
+
+  async function addToGitignore(path: string) {
+    if (!folderPath.value) return;
+    try {
+      await gitAddToGitignore(folderPath.value, path);
+      await refresh();
+    } catch (err: any) {
+      error.value = `gitignore: ${err.message}`;
     }
   }
 
@@ -794,6 +805,7 @@ export function useGitRepo() {
     mergeContinue,
     abortMerge,
     discardFiles,
+    addToGitignore,
     selectCommit,
     loadBranches,
     createBranch,

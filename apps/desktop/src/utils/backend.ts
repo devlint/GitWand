@@ -722,19 +722,35 @@ export async function getGitFileDiff(
 // ─── Git discard ──────────────────────────────────────────────
 
 /**
- * Discard changes to tracked files (git checkout --).
+ * Discard changes to tracked files (git restore) or delete untracked files (git clean -f).
  */
-export async function gitDiscard(cwd: string, paths: string[]): Promise<void> {
+export async function gitDiscard(cwd: string, paths: string[], untracked = false): Promise<void> {
   if (isTauri()) {
-    await tauriInvoke("git_discard", { cwd, paths });
+    await tauriInvoke("git_discard", { cwd, paths, untracked });
     return;
   }
   const res = await fetch(`${DEV_SERVER}/api/git-discard`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ cwd, paths }),
+    body: JSON.stringify({ cwd, paths, untracked }),
   });
   if (!res.ok) throw new Error(`Failed to discard changes: ${res.status}`);
+}
+
+/**
+ * Append a path to the repo's .gitignore file.
+ */
+export async function gitAddToGitignore(cwd: string, path: string): Promise<void> {
+  if (isTauri()) {
+    await tauriInvoke("git_add_to_gitignore", { cwd, path });
+    return;
+  }
+  const res = await fetch(`${DEV_SERVER}/api/git-gitignore`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, path }),
+  });
+  if (!res.ok) throw new Error(`Failed to add to .gitignore: ${res.status}`);
 }
 
 // ─── Git branches ─────────────────────────────────────────────

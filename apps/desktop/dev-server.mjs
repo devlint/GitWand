@@ -758,17 +758,54 @@ const server = createServer(async (req, res) => {
       }
     }
 
-    // POST /api/git-discard  { cwd, paths }
+    // POST /api/git-discard  { cwd, paths, untracked? }
+    // Pour les fichiers non-suivis (untracked), utiliser git clean -f
+    // Pour les fichiers suivis modifiés, utiliser git restore (ou checkout --)
     if (url.pathname === "/api/git-discard" && req.method === "POST") {
-      const { cwd, paths } = await readBody(req);
+      const { cwd, paths, untracked } = await readBody(req);
       if (!cwd || !paths) return jsonResponse(res, { error: "Missing cwd or paths" }, 400);
       try {
         const resolvedCwd = resolve(cwd);
-        execSync(`git checkout -- ${paths.map((p) => `"${p}"`).join(" ")}`, {
-          cwd: resolvedCwd,
-          encoding: "utf-8",
-          shell: true,
-        });
+        if (untracked) {
+          // Fichiers non-suivis → git clean -f
+          execSync(`git clean -f -- ${paths.map((p) => `"${p}"`).join(" ")}`, {
+            cwd: resolvedCwd,
+            encoding: "utf-8",
+            shell: true,
+          });
+        } else {
+          // Fichiers suivis modifiés → git restore
+          execSync(`git restore -- ${paths.map((p) => `"${p}"`).join(" ")}`, {
+            cwd: resolvedCwd,
+            encoding: "utf-8",
+            shell: true,
+          });
+        }
+        return jsonResponse(res, { ok: true });
+      } catch (err) {
+        return jsonResponse(res, { error: err.message, stderr: err.stderr }, 500);
+      }
+    }
+
+    // POST /api/git-gitignore  { cwd, path }
+    // Ajoute le chemin au fichier .gitignore du repo
+    if (url.pathname === "/api/git-gitignore" && req.method === "POST") {
+      const { cwd, path: filePath } = await readBody(req);
+      if (!cwd || !filePath) return jsonResponse(res, { error: "Missing cwd or path" }, 400);
+      try {
+        const resolvedCwd = resolve(cwd);
+        const gitignorePath = join(resolvedCwd, ".gitignore");
+        // Lire le .gitignore existant (ou créer vide)
+        let existing = "";
+        try { existing = readFileSync(gitignorePath, "utf-8"); } catch {}
+        // Vérifier si l'entrée existe déjà
+        const lines = existing.split("\n");
+        if (!lines.includes(filePath)) {
+          const newContent = existing.endsWith("\n") || existing === ""
+            ? existing + filePath + "\n"
+            : existing + "\n" + filePath + "\n";
+          writeFileSync(gitignorePath, newContent, "utf-8");
+        }
         return jsonResponse(res, { ok: true });
       } catch (err) {
         return jsonResponse(res, { error: err.message }, 500);

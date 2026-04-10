@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref, onMounted, onUnmounted } from "vue";
 import { type RepoFileEntry, type ViewMode } from "../composables/useGitRepo";
 import type { GitLogEntry } from "../utils/backend";
 import CommitLog from "./CommitLog.vue";
@@ -38,9 +38,56 @@ const emit = defineEmits<{
   editCommit: [entry: GitLogEntry];
   /** Select a specific file inside an expanded untracked directory */
   "select-dir-file": [path: string];
+  /** Discard changes to a file (tracked: restore, untracked: delete) */
+  discard: [path: string, section: string];
+  /** Append file path to .gitignore */
+  addToGitignore: [path: string];
 }>();
 
 const { t } = useI18n();
+
+// ─── Context menu ─────────────────────────────────────────────
+interface CtxMenu {
+  visible: boolean;
+  x: number;
+  y: number;
+  file: RepoFileEntry | null;
+}
+const ctxMenu = ref<CtxMenu>({ visible: false, x: 0, y: 0, file: null });
+
+function openContextMenu(e: MouseEvent, file: RepoFileEntry) {
+  e.preventDefault();
+  e.stopPropagation();
+  ctxMenu.value = { visible: true, x: e.clientX, y: e.clientY, file };
+}
+
+function closeContextMenu() {
+  ctxMenu.value.visible = false;
+}
+
+function onCtxDiscard() {
+  if (!ctxMenu.value.file) return;
+  emit("discard", ctxMenu.value.file.path, ctxMenu.value.file.section);
+  closeContextMenu();
+}
+
+function onCtxGitignore() {
+  if (!ctxMenu.value.file) return;
+  emit("addToGitignore", ctxMenu.value.file.path);
+  closeContextMenu();
+}
+
+onMounted(() => {
+  window.addEventListener("click", closeContextMenu);
+  window.addEventListener("contextmenu", closeContextMenu);
+  window.addEventListener("keydown", (e: KeyboardEvent) => {
+    if (e.key === "Escape") closeContextMenu();
+  });
+});
+onUnmounted(() => {
+  window.removeEventListener("click", closeContextMenu);
+  window.removeEventListener("contextmenu", closeContextMenu);
+});
 
 const sections = computed(() => {
   const map: Record<string, RepoFileEntry[]> = {
@@ -195,6 +242,7 @@ function onCommitKeydown(e: KeyboardEvent) {
                 @click="emit('select', file.path, file.section === 'staged')"
                 @keydown.enter="emit('select', file.path, file.section === 'staged')"
                 @keydown.space.prevent="emit('select', file.path, file.section === 'staged')"
+                @contextmenu.prevent.stop="openContextMenu($event, file)"
               >
                 <span
                   class="file-status-badge mono"
@@ -322,6 +370,42 @@ function onCommitKeydown(e: KeyboardEvent) {
       <PrListSidebar />
     </div>
   </nav>
+
+  <!-- Context menu (Teleport to body to avoid overflow clipping) -->
+  <Teleport to="body">
+    <div
+      v-if="ctxMenu.visible && ctxMenu.file"
+      class="ctx-menu"
+      :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
+      @click.stop
+      @contextmenu.prevent.stop
+    >
+      <!-- Discard : libellé selon la section -->
+      <button
+        v-if="ctxMenu.file.section !== 'staged'"
+        class="ctx-item ctx-item--danger"
+        @click="onCtxDiscard"
+      >
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+        </svg>
+        <span>{{ ctxMenu.file.section === 'untracked' ? 'Supprimer le fichier' : 'Annuler les modifications' }}</span>
+      </button>
+
+      <!-- Separator -->
+      <div class="ctx-separator" v-if="ctxMenu.file.section !== 'staged'"></div>
+
+      <!-- Add to .gitignore -->
+      <button class="ctx-item" @click="onCtxGitignore">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M8 1v14M1 8h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" opacity="0.5"/>
+          <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.5"/>
+          <path d="M5.5 5.5l5 5M10.5 5.5l-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+        <span>Ajouter à .gitignore</span>
+      </button>
+    </div>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -701,5 +785,62 @@ function onCommitKeydown(e: KeyboardEvent) {
 .commit-hint {
   font-size: 10px;
   text-align: center;
+}
+</style>
+
+<style>
+/* Context menu — non-scoped pour Teleport */
+.ctx-menu {
+  position: fixed;
+  z-index: 9999;
+  min-width: 200px;
+  background: var(--color-bg-secondary, #1e1e2e);
+  border: 1px solid var(--color-border, #313244);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  animation: ctx-fade-in 0.1s ease;
+}
+
+@keyframes ctx-fade-in {
+  from { opacity: 0; transform: scale(0.95) translateY(-4px); }
+  to   { opacity: 1; transform: scale(1)   translateY(0); }
+}
+
+.ctx-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text, #cdd6f4);
+  background: none;
+  border-radius: 5px;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+
+.ctx-item:hover {
+  background: var(--color-bg-tertiary, #313244);
+}
+
+.ctx-item--danger {
+  color: var(--color-danger, #f38ba8);
+}
+
+.ctx-item--danger:hover {
+  background: rgba(243, 139, 168, 0.12);
+}
+
+.ctx-separator {
+  height: 1px;
+  background: var(--color-border, #313244);
+  margin: 3px 6px;
 }
 </style>

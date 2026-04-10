@@ -22,7 +22,7 @@ import { useGitRepo, type ViewMode } from "./composables/useGitRepo";
 import { useTheme } from "./composables/useTheme";
 import { useI18n } from "./composables/useI18n";
 import { useSettings } from "./composables/useSettings";
-import { gitStash, gitStashPop, openInEditor, setGitConfig } from "./utils/backend";
+import { gitStash, gitStashPop, openInEditor, setGitConfig, gitDiscard, gitAddToGitignore } from "./utils/backend";
 
 const { t } = useI18n();
 const { settings, refreshSettings } = useSettings();
@@ -98,6 +98,7 @@ const {
   mergeContinue: doMergeContinue,
   abortMerge: doAbortMerge,
   discardFiles,
+  addToGitignore,
   branches,
   branchesLoading,
   isSwitchingBranch,
@@ -650,6 +651,8 @@ onUnmounted(() => {
           @update:commit-description="(val) => commitDescription = val"
           @select-commit="selectCommit"
           @edit-commit="handleEditCommit"
+          @discard="(path, section) => discardFiles([path], section === 'untracked')"
+          @add-to-gitignore="(path) => addToGitignore(path)"
         />
       </aside>
 
