@@ -432,11 +432,11 @@ interface DecisionTrace {
 
 C'est ici que GitWand se distingue vraiment des interfaces de review classiques :
 
-- ⬜ **Conflict prediction** : Avant de merger une PR, simuler le merge contre la branche cible et détecter les conflits probables — avec les suggestions de résolution du moteur GitWand. *Aucun autre client Git ne fait ça à l'étape de la review.*
-- ⬜ **Hotspot analysis** : Identifier les fichiers de la PR qui ont le plus souvent généré des conflits dans l'historique du repo — alerter le reviewer
-- ⬜ **Review scope** : Mesurer l'ampleur du changement (fichiers touchés, % de la codebase, profondeur dans l'arbre de dépendances) pour calibrer le niveau de vigilance
-- ⬜ **Suggestions de review IA** : Pour chaque hunk complexe, proposer des observations automatiques (breaking change potentiel, pattern inhabituel, divergence avec les conventions du repo) — en s'appuyant sur le moteur d'explication du core (Phase 7.1)
-- ⬜ **Historique de review** : Qui a reviewé quoi dans ce fichier, quelles lignes ont déjà été commentées dans des PRs précédentes
+- ✅ **Conflict prediction** : Avant de merger une PR, simuler le merge contre la branche cible et détecter les conflits probables — avec les suggestions de résolution du moteur GitWand. *Aucun autre client Git ne fait ça à l'étape de la review.*
+- ✅ **Hotspot analysis** : Identifier les fichiers de la PR qui ont le plus souvent généré des conflits dans l'historique du repo — alerter le reviewer
+- ✅ **Review scope** : Mesurer l'ampleur du changement (fichiers touchés, % de la codebase, profondeur dans l'arbre de dépendances) pour calibrer le niveau de vigilance
+- ✅ **Suggestions de review IA** : Pour chaque hunk complexe, proposer des observations automatiques (breaking change potentiel, pattern inhabituel, divergence avec les conventions du repo) — en s'appuyant sur le moteur d'explication du core (Phase 7.1)
+- ✅ **Historique de review** : Qui a reviewé quoi dans ce fichier, quelles lignes ont déjà été commentées dans des PRs précédentes
 
 **Effort estimé** : 3-6 mois. 9.1 est le prérequis naturel de 8.3, et peut être parallélisé avec 8.3. 9.4 (intelligence) vient en dernier, une fois 9.1-9.3 stables — et s'appuie directement sur les travaux Phase 7.
 

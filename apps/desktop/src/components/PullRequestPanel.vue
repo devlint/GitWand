@@ -14,6 +14,10 @@ import {
   ghPrDeleteComment,
   ghPrListReviews,
   ghPrSubmitReview,
+  ghPrConflictPreview,
+  ghPrHotspots,
+  gitFileCount,
+  ghPrFileHistory,
   gitRemoteInfo,
   type PullRequest,
   type PullRequestDetail,
@@ -26,9 +30,13 @@ import {
   type CreatePrCommentParams,
   type PendingReviewComment,
   type PrReview,
+  type PrConflictPreview,
+  type PrHotspot,
+  type PrFileHistory,
 } from "../utils/backend";
 import PrInlineDiff from "./PrInlineDiff.vue";
 import PrReviewModal from "./PrReviewModal.vue";
+import PrIntelligencePanel from "./PrIntelligencePanel.vue";
 import type { DiffMode } from "../utils/diffMode";
 import { getPersistedDiffMode } from "../utils/diffMode";
 
@@ -72,7 +80,7 @@ const prComments = ref<PrReviewComment[]>([]);
 const prReviews = ref<PrReview[]>([]);
 const detailLoading = ref(false);
 const detailError = ref<string | null>(null);
-const detailTab = ref<"info" | "diff" | "checks">("info");
+const detailTab = ref<"info" | "diff" | "checks" | "intelligence">("info");
 const selectedDiffFile = ref<string | null>(null);
 const diffMode = ref<DiffMode>(getPersistedDiffMode());
 
@@ -80,6 +88,16 @@ const diffMode = ref<DiffMode>(getPersistedDiffMode());
 const draftReviewComments = ref<PendingReviewComment[]>([]);
 const showReviewModal = ref(false);
 const submittingReview = ref(false);
+
+// ─── Phase 9.4 Intelligence state ────────────────────────
+const conflictPreview = ref<PrConflictPreview | null>(null);
+const conflictLoading = ref(false);
+const conflictError = ref<string | null>(null);
+const hotspots = ref<PrHotspot[]>([]);
+const hotspotsLoading = ref(false);
+const totalRepoFiles = ref(0);
+const fileHistory = ref<Record<string, PrFileHistory>>({});
+const fileHistoryLoading = ref(false);
 
 /** Comments for the currently selected diff file. */
 const commentsForFile = computed<PrReviewComment[]>(() =>
@@ -195,21 +213,27 @@ async function selectPr(pr: PullRequest) {
   prComments.value = [];
   prReviews.value = [];
   draftReviewComments.value = [];
+  conflictPreview.value = null;
+  conflictError.value = null;
+  hotspots.value = [];
+  fileHistory.value = {};
   selectedDiffFile.value = null;
   detailTab.value = "info";
   detailLoading.value = true;
   detailError.value = null;
   try {
-    const [detail, checks, comments, reviews] = await Promise.all([
+    const [detail, checks, comments, reviews, fileCount] = await Promise.all([
       ghPrDetail(props.cwd, pr.number),
       ghPrChecks(props.cwd, pr.number).catch(() => [] as CICheck[]),
       ghPrComments(props.cwd, pr.number).catch(() => [] as PrReviewComment[]),
       ghPrListReviews(props.cwd, pr.number).catch(() => [] as PrReview[]),
+      gitFileCount(props.cwd).catch(() => 0),
     ]);
     prDetail.value = detail;
     prChecks.value = checks;
     prComments.value = comments;
     prReviews.value = reviews;
+    totalRepoFiles.value = fileCount;
   } catch (err: any) {
     detailError.value = err.message;
   } finally {
@@ -367,6 +391,54 @@ async function handleSubmitReview(opts: {
     submittingReview.value = false;
   }
 }
+
+// ─── Intelligence handlers (Phase 9.4) ───────────────────
+async function loadConflictPreview() {
+  if (!selectedPr.value || conflictLoading.value) return;
+  conflictLoading.value = true;
+  conflictError.value = null;
+  try {
+    conflictPreview.value = await ghPrConflictPreview(props.cwd, selectedPr.value.number);
+  } catch (err: any) {
+    conflictError.value = err.message;
+  } finally {
+    conflictLoading.value = false;
+  }
+}
+
+async function loadHotspots() {
+  if (!prDiffFiles.value.length || hotspotsLoading.value) return;
+  hotspotsLoading.value = true;
+  try {
+    const paths = prDiffFiles.value.map((f) => f.path);
+    hotspots.value = await ghPrHotspots(props.cwd, paths);
+  } catch { /* silent */ } finally {
+    hotspotsLoading.value = false;
+  }
+}
+
+async function loadFileHistory() {
+  if (!prDiffFiles.value.length || fileHistoryLoading.value) return;
+  fileHistoryLoading.value = true;
+  try {
+    const paths = prDiffFiles.value.map((f) => f.path);
+    fileHistory.value = await ghPrFileHistory(props.cwd, paths);
+  } catch { /* silent */ } finally {
+    fileHistoryLoading.value = false;
+  }
+}
+
+// Load hotspots/history when diff tab is opened (files may not be loaded yet)
+watch(detailTab, async (tab) => {
+  if (tab === "intelligence" && prDiffFiles.value.length === 0) {
+    // Load diff first if not already loaded
+    await loadDiff();
+  }
+  if (tab === "intelligence") {
+    if (!hotspots.value.length) loadHotspots();
+    if (!Object.keys(fileHistory.value).length) loadFileHistory();
+  }
+});
 
 function timeAgo(dateStr: string): string {
   try {
@@ -570,6 +642,9 @@ watch(() => props.cwd, () => { loadRemote(); loadPrs(); selectedPr.value = null;
                   {{ checksIcon(prDetail.checksStatus) }} CI
                   <span v-if="prChecks.length" class="pr-tab-count">{{ prChecks.length }}</span>
                 </button>
+                <button :class="['pr-tab', { active: detailTab === 'intelligence' }]" @click="detailTab = 'intelligence'">
+                  🧠 Intelligence
+                </button>
                 <div class="pr-tab-spacer" />
                 <button
                   v-if="draftReviewComments.length > 0"
@@ -700,6 +775,26 @@ watch(() => props.cwd, () => { loadRemote(); loadPrs(); selectedPr.value = null;
                     <button v-if="c.detailsUrl" class="eco-btn eco-btn--xs" @click="openInBrowser(c.detailsUrl)">↗</button>
                   </div>
                 </div>
+              </div>
+
+              <!-- Intelligence tab -->
+              <div v-if="detailTab === 'intelligence'" class="pr-detail-body pr-intelligence-body">
+                <PrIntelligencePanel
+                  :cwd="cwd"
+                  :pr-detail="prDetail"
+                  :pr-diff-files="prDiffFiles"
+                  :total-repo-files="totalRepoFiles"
+                  :conflict-preview="conflictPreview"
+                  :conflict-loading="conflictLoading"
+                  :conflict-error="conflictError"
+                  :hotspots="hotspots"
+                  :hotspots-loading="hotspotsLoading"
+                  :file-history="fileHistory"
+                  :file-history-loading="fileHistoryLoading"
+                  @load-conflict-preview="loadConflictPreview"
+                  @load-hotspots="loadHotspots"
+                  @load-file-history="loadFileHistory"
+                />
               </div>
             </template>
           </div>
@@ -1216,6 +1311,14 @@ watch(() => props.cwd, () => { loadRemote(); loadPrs(); selectedPr.value = null;
 
 /* Review submit button */
 .pr-review-btn { font-weight: 600; }
+
+/* Intelligence tab */
+.pr-intelligence-body {
+  padding: 0 !important;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
 
 /* ─── Shared button system ───────────────────────────── */
 .eco-btn {

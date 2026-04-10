@@ -1585,6 +1585,87 @@ export async function ghPrSubmitReview(
   return raw as PrReview;
 }
 
+// ─── Phase 9.4 — Intelligence GitWand ──────────────────────
+
+/** Result of a conflict simulation (merge-tree analysis). */
+export interface PrConflictPreview {
+  /** GitHub mergeable flag (true/false/null=unknown). */
+  mergeable: boolean | null;
+  mergeableState: string;
+  /** Files very likely to conflict (appear on both sides since merge-base). */
+  conflictingFiles: string[];
+  /** Files changed only in the PR — no conflict risk. */
+  cleanFiles: string[];
+  /** Files that both sides changed (potential conflicts even if GH says clean). */
+  overlappingFiles: string[];
+  totalPrFiles: number;
+  summary: string;
+}
+
+/** Hotspot score for a file — how often it has been involved in merge commits. */
+export interface PrHotspot {
+  path: string;
+  /** Number of merge commits that touched this file. */
+  mergeCount: number;
+  /** Total commits touching this file. */
+  totalCount: number;
+  /** Percentage of commits that were merges (0–100). */
+  score: number;
+  lastChange: string;
+}
+
+/** Historical review activity on a specific file. */
+export interface PrFileHistory {
+  reviewCommentCount: number;
+  reviewers: string[];
+  lastComment: { author: string; body: string; pr_number: string } | null;
+}
+
+/** Fetch conflict prediction for a PR (git merge-tree analysis). */
+export async function ghPrConflictPreview(cwd: string, prNumber: number): Promise<PrConflictPreview> {
+  const res = await fetch(
+    `${DEV_SERVER}/api/gh-pr-conflict-preview?cwd=${encodeURIComponent(cwd)}&number=${prNumber}`,
+  );
+  if (!res.ok) throw new Error(`conflict preview failed: ${res.status}`);
+  const raw = await res.json();
+  if (raw.error) throw new Error(raw.error);
+  return raw as PrConflictPreview;
+}
+
+/** Fetch hotspot scores for a list of file paths. */
+export async function ghPrHotspots(cwd: string, paths: string[]): Promise<PrHotspot[]> {
+  const res = await fetch(
+    `${DEV_SERVER}/api/gh-pr-hotspots?cwd=${encodeURIComponent(cwd)}&paths=${encodeURIComponent(paths.join(","))}`,
+  );
+  if (!res.ok) throw new Error(`hotspots failed: ${res.status}`);
+  const raw = await res.json();
+  if (raw.error) throw new Error(raw.error);
+  return raw as PrHotspot[];
+}
+
+/** Total number of tracked files in the repo (for scope %). */
+export async function gitFileCount(cwd: string): Promise<number> {
+  const res = await fetch(`${DEV_SERVER}/api/git-file-count?cwd=${encodeURIComponent(cwd)}`);
+  if (!res.ok) throw new Error(`file count failed: ${res.status}`);
+  const raw = await res.json();
+  if (raw.error) throw new Error(raw.error);
+  return raw.count as number;
+}
+
+/** Fetch past review activity on a set of files (last 100 review comments from repo). */
+export async function ghPrFileHistory(
+  cwd: string,
+  paths: string[],
+): Promise<Record<string, PrFileHistory>> {
+  const res = await fetch(
+    `${DEV_SERVER}/api/gh-pr-file-history?cwd=${encodeURIComponent(cwd)}&paths=${encodeURIComponent(paths.join(","))}`,
+  );
+  if (!res.ok) throw new Error(`file history failed: ${res.status}`);
+  const raw = await res.json();
+  if (raw.error) throw new Error(raw.error);
+  return raw as Record<string, PrFileHistory>;
+}
+
 // ─── Merge Preview (Phase 8.1) ─────────────────────────────
 
 /** Résultat brut d'un fichier analysé par preview_merge (Rust) */

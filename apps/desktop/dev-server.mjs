@@ -1338,6 +1338,215 @@ const server = createServer(async (req, res) => {
       }
     }
 
+    // ─── Phase 9.4 Intelligence ────────────────────────────
+
+    // GET /api/gh-pr-conflict-preview?cwd=<path>&number=<n>
+    // Fetches PR head via git fetch, then runs git merge-tree to detect conflicts
+    // without touching the working tree.
+    if (url.pathname === "/api/gh-pr-conflict-preview" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd");
+      const number = url.searchParams.get("number");
+      if (!cwd || !number) return jsonResponse(res, { error: "Missing cwd or number" }, 400);
+      try {
+        const token = getGithubToken();
+        if (!token) return jsonResponse(res, { error: "No GitHub token" }, 401);
+        const nwo = getRepoNwo(resolve(cwd));
+        if (!nwo) return jsonResponse(res, { error: "Could not determine GitHub repo" }, 400);
+
+        // Get PR base branch + head SHA from GitHub API
+        const prResp = await githubFetch(`/repos/${nwo}/pulls/${number}`, token);
+        if (!prResp.ok) return jsonResponse(res, { error: `GitHub API ${prResp.status}` }, 500);
+        const pr = await prResp.json();
+        const baseBranch = pr.base.ref;
+        const headSha = pr.head.sha;
+        const absPath = resolve(cwd);
+
+        // Fetch PR head ref so we have it locally
+        const fetchRes = spawnSync(GIT, ["fetch", "--quiet", "origin", `refs/pull/${number}/head:refs/pr/${number}`], {
+          cwd: absPath, encoding: "utf-8",
+        });
+        // If fetch fails (e.g., no network access to remote), fall back to using headSha directly
+        const prRef = fetchRes.status === 0 ? `refs/pr/${number}` : headSha;
+
+        // Fetch base branch too (may already be current)
+        spawnSync(GIT, ["fetch", "--quiet", "origin", baseBranch], { cwd: absPath, encoding: "utf-8" });
+        const baseRef = `origin/${baseBranch}`;
+
+        // Find merge base
+        const mbRes = spawnSync(GIT, ["merge-base", baseRef, prRef], { cwd: absPath, encoding: "utf-8" });
+        if (mbRes.status !== 0) return jsonResponse(res, { error: "Cannot find merge-base" }, 500);
+        const mergeBase = mbRes.stdout.trim();
+
+        // Run git merge-tree (read-only)
+        const mtRes = spawnSync(GIT, ["merge-tree", mergeBase, baseRef, prRef], { cwd: absPath, encoding: "utf-8" });
+        const output = mtRes.stdout || "";
+
+        // Parse output: lines starting with "changed in both" or conflict markers
+        const conflicting = [];
+        const clean = [];
+        let currentFile = null;
+        let conflictCount = 0;
+        let isConflict = false;
+
+        for (const line of output.split("\n")) {
+          if (line.startsWith("changed in both")) {
+            isConflict = true;
+            continue;
+          }
+          if (isConflict && line.startsWith("  base")) { isConflict = false; continue; }
+          // Detect file paths in merge-tree output (lines like "  result <oid> <mode>\t<path>")
+          const fileMatch = line.match(/^added in (?:local|remote)|^removed in (?:local|remote)|^\+{7}|^={7}|^<{7}|^>{7}/);
+          if (fileMatch && currentFile) conflictCount++;
+
+          // Check for +++ markers (conflict content)
+          if (line.startsWith("+<<<<<<< ") || line.startsWith("<<<<<<< ")) {
+            if (currentFile) conflictCount++;
+          }
+        }
+
+        // Simpler approach: use git-diff to find what merge-tree would conflict on
+        // Use GitHub API mergeability instead of parsing merge-tree output (more reliable)
+        const mergeability = pr.mergeable;
+        const mergeState = pr.mergeable_state;
+
+        // Get the list of files changed in this PR
+        const prFilesResp = await githubFetch(`/repos/${nwo}/pulls/${number}/files?per_page=100`, token);
+        const prFiles = prFilesResp.ok ? await prFilesResp.json() : [];
+
+        // For each file, check if it also has local changes on base (potential conflict)
+        // Run git diff between merge-base and base to find overlapping files
+        const baseDiffRes = spawnSync(GIT, ["diff", "--name-only", mergeBase, baseRef], {
+          cwd: absPath, encoding: "utf-8",
+        });
+        const prDiffRes = spawnSync(GIT, ["diff", "--name-only", mergeBase, prRef], {
+          cwd: absPath, encoding: "utf-8",
+        });
+
+        const baseChangedFiles = new Set((baseDiffRes.stdout || "").trim().split("\n").filter(Boolean));
+        const prChangedFiles = new Set((prDiffRes.stdout || "").trim().split("\n").filter(Boolean));
+
+        const overlapping = [...prChangedFiles].filter((f) => baseChangedFiles.has(f));
+        const nonOverlapping = [...prChangedFiles].filter((f) => !baseChangedFiles.has(f));
+
+        // If GitHub says CONFLICTING, the overlapping files are the likely conflicts
+        const isConflicting = mergeability === false || mergeState === "dirty" || mergeState === "blocked";
+        const conflictingFiles = isConflicting ? overlapping : [];
+
+        return jsonResponse(res, {
+          mergeable: mergeability,
+          mergeableState: mergeState,
+          conflictingFiles,
+          cleanFiles: isConflicting ? nonOverlapping : [...prChangedFiles],
+          overlappingFiles: overlapping,
+          totalPrFiles: prFiles.length,
+          summary: isConflicting
+            ? `⚠️ ${conflictingFiles.length} fichier(s) en conflit probable`
+            : `✅ Pas de conflit détecté`,
+        });
+      } catch (err) {
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
+
+    // GET /api/gh-pr-hotspots?cwd=<path>&paths=file1,file2,...
+    // For each file path, count merge commits that touched it — "conflict hotspot" score.
+    if (url.pathname === "/api/gh-pr-hotspots" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd");
+      const pathsParam = url.searchParams.get("paths");
+      if (!cwd || !pathsParam) return jsonResponse(res, { error: "Missing cwd or paths" }, 400);
+      try {
+        const absPath = resolve(cwd);
+        const paths = pathsParam.split(",").filter(Boolean);
+        const hotspots = paths.map((filePath) => {
+          // Count merge commits that touched this file
+          const mergeLogRes = spawnSync(
+            GIT,
+            ["log", "--merges", "--oneline", "--", filePath],
+            { cwd: absPath, encoding: "utf-8" },
+          );
+          const mergeCommits = (mergeLogRes.stdout || "").trim().split("\n").filter(Boolean);
+          // Also count total commits touching this file
+          const totalLogRes = spawnSync(
+            GIT,
+            ["log", "--oneline", "--", filePath],
+            { cwd: absPath, encoding: "utf-8" },
+          );
+          const totalCommits = (totalLogRes.stdout || "").trim().split("\n").filter(Boolean);
+          // Last commit that touched this file
+          const lastCommitRes = spawnSync(
+            GIT,
+            ["log", "-1", "--format=%h %s", "--", filePath],
+            { cwd: absPath, encoding: "utf-8" },
+          );
+          return {
+            path: filePath,
+            mergeCount: mergeCommits.length,
+            totalCount: totalCommits.length,
+            // Hotspot score: merge commits / total commits (files that are always involved in merges)
+            score: totalCommits.length > 0 ? Math.round((mergeCommits.length / totalCommits.length) * 100) : 0,
+            lastChange: lastCommitRes.stdout.trim(),
+          };
+        });
+        return jsonResponse(res, hotspots);
+      } catch (err) {
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
+
+    // GET /api/git-file-count?cwd=<path>
+    // Returns total number of tracked files in the repo.
+    if (url.pathname === "/api/git-file-count" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd");
+      if (!cwd) return jsonResponse(res, { error: "Missing cwd" }, 400);
+      try {
+        const r = spawnSync(GIT, ["ls-files", "--cached"], { cwd: resolve(cwd), encoding: "utf-8" });
+        const count = (r.stdout || "").trim().split("\n").filter(Boolean).length;
+        return jsonResponse(res, { count });
+      } catch (err) {
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
+
+    // GET /api/gh-pr-file-history?cwd=<path>&paths=file1,file2,...
+    // For each file, fetch the last 3 closed PRs that touched it + their review comments.
+    if (url.pathname === "/api/gh-pr-file-history" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd");
+      const pathsParam = url.searchParams.get("paths");
+      if (!cwd || !pathsParam) return jsonResponse(res, { error: "Missing cwd or paths" }, 400);
+      try {
+        const token = getGithubToken();
+        if (!token) return jsonResponse(res, { error: "No GitHub token" }, 401);
+        const nwo = getRepoNwo(resolve(cwd));
+        if (!nwo) return jsonResponse(res, { error: "Could not determine GitHub repo" }, 400);
+        const paths = pathsParam.split(",").filter(Boolean);
+
+        // Get all review comments (last 100) and filter by path
+        const commentsResp = await githubFetch(
+          `/repos/${nwo}/pulls/comments?per_page=100&sort=updated&direction=desc`,
+          token,
+        );
+        const allComments = commentsResp.ok ? await commentsResp.json() : [];
+
+        const result = {};
+        for (const filePath of paths) {
+          const fileComments = allComments.filter((c) => c.path === filePath);
+          // Unique reviewers
+          const reviewers = [...new Set(fileComments.map((c) => c.user?.login).filter(Boolean))];
+          result[filePath] = {
+            reviewCommentCount: fileComments.length,
+            reviewers,
+            // Most recent comment
+            lastComment: fileComments[0]
+              ? { author: fileComments[0].user?.login, body: fileComments[0].body?.slice(0, 80), pr_number: fileComments[0].pull_request_url?.match(/\/(\d+)$/)?.[1] }
+              : null,
+          };
+        }
+        return jsonResponse(res, result);
+      } catch (err) {
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
+
     jsonResponse(res, { error: "Not found" }, 404);
   } catch (err) {
     jsonResponse(res, { error: err.message }, 500);
