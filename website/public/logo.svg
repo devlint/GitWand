@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="wand-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#8B5CF6"/>
+      <stop offset="100%" stop-color="#6D28D9"/>
+    </linearGradient>
+    <linearGradient id="star-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FBBF24"/>
+      <stop offset="100%" stop-color="#F59E0B"/>
+    </linearGradient>
+    <linearGradient id="sparkle-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FDE68A"/>
+      <stop offset="100%" stop-color="#FBBF24"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Baguette (diagonale bas-gauche → haut-droite) -->
+  <rect x="100" y="280" width="260" height="28" rx="14"
+        transform="rotate(-45 230 294)"
+        fill="url(#wand-gradient)"/>
+  <!-- Poignée -->
+  <rect x="80" y="340" width="80" height="28" rx="14"
+        transform="rotate(-45 120 354)"
+        fill="#7C3AED" opacity="0.8"/>
+
+  <!-- Étoile principale (bout de la baguette) -->
+  <g transform="translate(320, 120)">
+    <polygon points="0,-40 12,-12 40,-12 18,8 28,40 0,20 -28,40 -18,8 -40,-12 -12,-12"
+             fill="url(#star-gradient)"/>
+  </g>
+
+  <!-- Sparkles autour de l'étoile -->
+  <g fill="url(#sparkle-gradient)">
+    <!-- Sparkle haut-droite -->
+    <polygon points="0,-14 4,-4 14,0 4,4 0,14 -4,4 -14,0 -4,-4"
+             transform="translate(390, 80)"/>
+    <!-- Sparkle droite -->
+    <polygon points="0,-10 3,-3 10,0 3,3 0,10 -3,3 -10,0 -3,-3"
+             transform="translate(400, 140)"/>
+    <!-- Sparkle haut -->
+    <polygon points="0,-10 3,-3 10,0 3,3 0,10 -3,3 -10,0 -3,-3"
+             transform="translate(280, 65)"/>
+    <!-- Sparkle petit -->
+    <polygon points="0,-7 2,-2 7,0 2,2 0,7 -2,2 -7,0 -2,-2"
+             transform="translate(360, 55)"/>
+    <!-- Sparkle gauche -->
+    <polygon points="0,-8 2,-2 8,0 2,2 0,8 -2,2 -8,0 -2,-2"
+             transform="translate(255, 110)"/>
+  </g>
+
+  <!-- Branches Git (3 lignes convergeant vers la baguette) -->
+  <g stroke="#A78BFA" stroke-width="3" stroke-linecap="round" opacity="0.6">
+    <path d="M 200,200 Q 260,170 310,130" fill="none"/>
+    <path d="M 170,230 Q 240,190 310,130" fill="none"/>
+    <path d="M 230,175 Q 270,155 310,130" fill="none"/>
+    <!-- Petits cercles (commits) au début des branches -->
+    <circle cx="200" cy="200" r="5" fill="#A78BFA" stroke="none"/>
+    <circle cx="170" cy="230" r="5" fill="#A78BFA" stroke="none"/>
+    <circle cx="230" cy="175" r="5" fill="#C4B5FD" stroke="none"/>
+  </g>
+</svg>
