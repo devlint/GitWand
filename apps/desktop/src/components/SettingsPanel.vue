@@ -1027,7 +1027,7 @@ function onKeyDown(e: KeyboardEvent) {
 
 .sp-auth-btn--active {
   background: var(--color-accent);
-  color: #1e1e2e;
+  color: #fff;
   font-weight: 600;
 }
 
