@@ -13,6 +13,7 @@
   <a href="#conflict-resolution-engine">Conflict engine</a> &bull;
   <a href="#merge-preview">Merge preview</a> &bull;
   <a href="#cli">CLI</a> &bull;
+  <a href="#mcp-server">MCP Server</a> &bull;
   <a href="#architecture">Architecture</a> &bull;
   <a href="#roadmap">Roadmap</a>
 </p>
@@ -195,6 +196,145 @@ gitwand status               # Show conflict status per file
 gitwand resolve --ci         # CI mode: JSON output + semantic exit codes
 ```
 
+### Enriched JSON output
+
+The `--ci` / `--json` flag now returns a full structured report with composite confidence scores, decision traces, and pending hunks for LLM-assisted resolution:
+
+```json
+{
+  "version": "0.1.0",
+  "timestamp": "2025-04-14T12:00:00.000Z",
+  "summary": {
+    "files": 2,
+    "totalConflicts": 5,
+    "autoResolved": 4,
+    "remaining": 1,
+    "allResolved": false
+  },
+  "files": [
+    {
+      "path": "src/config.ts",
+      "totalConflicts": 3,
+      "autoResolved": 3,
+      "remaining": 0,
+      "validation": {
+        "isValid": true,
+        "hasResidualMarkers": false,
+        "syntaxError": null
+      },
+      "resolutions": [
+        {
+          "line": 15,
+          "type": "one_side_change",
+          "resolved": true,
+          "explanation": "Only one side modified this block",
+          "confidence": {
+            "score": 95,
+            "label": "certain",
+            "typeClassification": 100,
+            "dataRisk": 5,
+            "scopeImpact": 10
+          },
+          "trace": {
+            "selected": "theirs",
+            "hasBase": true,
+            "summary": "One-side change detected — incoming accepted.",
+            "steps": ["..."]
+          }
+        }
+      ],
+      "pendingHunks": []
+    },
+    {
+      "path": "src/complex.ts",
+      "totalConflicts": 2,
+      "autoResolved": 1,
+      "remaining": 1,
+      "validation": {
+        "isValid": false,
+        "hasResidualMarkers": true,
+        "syntaxError": null
+      },
+      "resolutions": ["..."],
+      "pendingHunks": [
+        {
+          "line": 42,
+          "type": "complex",
+          "explanation": "Overlapping edits on both sides.",
+          "ours": "const timeout = 5000;",
+          "theirs": "const timeout = 10000;\nconst retries = 3;",
+          "base": "const timeout = 3000;",
+          "trace": {
+            "selected": null,
+            "summary": "Both sides modified — manual resolution required.",
+            "steps": ["..."]
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+The `pendingHunks` array gives AI agents and CI scripts everything they need to handle the conflicts that GitWand can't auto-resolve — the ours/theirs/base content, the classification trace, and the confidence breakdown.
+
+---
+
+## MCP Server
+
+GitWand ships an MCP (Model Context Protocol) server that exposes its conflict resolution engine to AI agents — Claude Code, Claude Desktop, Cursor, Windsurf, and any MCP-compatible client.
+
+### Setup
+
+Add this to your MCP client configuration (e.g. `claude_desktop_config.json` or `.claude/settings.json`):
+
+```json
+{
+  "mcpServers": {
+    "gitwand": {
+      "command": "npx",
+      "args": ["@gitwand/mcp", "--cwd", "/path/to/your/repo"]
+    }
+  }
+}
+```
+
+### Tools
+
+| Tool | Description |
+|------|-------------|
+| `gitwand_status` | List conflicted files with their complexity and auto-resolvability |
+| `gitwand_resolve_conflicts` | Auto-resolve trivial conflicts, return DecisionTrace + pendingHunks |
+| `gitwand_preview_merge` | Dry-run resolution — stats and risk assessment without writing files |
+| `gitwand_explain_hunk` | Explain why a specific hunk was classified its type (full trace + context) |
+| `gitwand_apply_resolution` | Apply a custom (LLM-provided) resolution to a specific complex hunk |
+
+### Resources
+
+| URI | Description |
+|-----|-------------|
+| `gitwand://repo/conflicts` | Current conflict state — files, counts, types |
+| `gitwand://repo/policy` | Active `.gitwandrc` configuration |
+| `gitwand://hunk/{file}/{line}` | Raw hunk content for a specific conflict |
+
+### The human ↔ LLM collaboration loop
+
+The MCP server enables a powerful workflow where GitWand handles the trivial conflicts automatically and the LLM tackles the complex ones:
+
+1. **LLM calls `gitwand_preview_merge`** — sees how many conflicts exist and how many GitWand can handle
+2. **LLM calls `gitwand_resolve_conflicts`** — GitWand auto-resolves the easy ones, returns `pendingHunks` for the rest
+3. **LLM reads the `pendingHunks`** — each one contains ours/theirs/base content and a full decision trace
+4. **LLM calls `gitwand_apply_resolution`** for each pending hunk — writes its resolution directly
+
+### Claude Code slash commands
+
+GitWand also ships `.claude/commands/` for Claude Code:
+
+```bash
+/resolve   # Full conflict resolution workflow
+/preview   # Merge preview and risk assessment
+```
+
 ---
 
 ## Architecture
@@ -206,11 +346,15 @@ gitwand/
 │   │               parser, resolver, classifier, format resolvers,
 │   │               confidence scoring, corpus tests (332 tests)
 │   ├── cli/        @gitwand/cli — Command-line interface
+│   ├── mcp/        @gitwand/mcp — MCP server (stdio transport)
+│   │               tools (5), resources (3), Claude Code commands
 │   └── vscode/     VS Code extension — CodeLens, diagnostics, status bar
-└── apps/
-    └── desktop/    Tauri 2 + Vue 3 desktop app
-                    src-tauri/  Rust backend (git commands, IPC)
-                    src/        Vue frontend
+├── apps/
+│   └── desktop/    Tauri 2 + Vue 3 desktop app
+│                   src-tauri/  Rust backend (git commands, IPC)
+│                   src/        Vue frontend
+└── .claude/
+    └── commands/   Claude Code slash commands (/resolve, /preview)
 ```
 
 The core engine is framework-agnostic and usable as a library:
@@ -287,8 +431,16 @@ GitWand uses a zero-dependency type-safe i18n system. `fr.ts` is the reference l
 - [x] Review submission — Approve / Request changes / Comment, draft queue
 - [x] 🧠 Intelligence panel — conflict prediction, hotspot analysis, review scope, AI suggestions, file review history
 
-### Post-1.0
+### v1.1.0 — LLM Integration ✅
 
+- [x] MCP server (`@gitwand/mcp`) — 5 tools + 3 resources, stdio transport
+- [x] Claude Code slash commands — `/resolve` and `/preview` workflows
+- [x] Enriched CLI JSON output — confidence scores, decision traces, `pendingHunks`
+- [x] Human ↔ LLM collaboration loop for complex conflict resolution
+
+### Post-1.1
+
+- [ ] MCP Registry submission (npm publish + official listing)
 - [ ] Interactive rebase — reorder, squash, drop (drag-and-drop)
 - [ ] Folder diff — compare two folders, branches, or commits
 - [ ] Image diff — side-by-side, blink, slider (PNG, JPEG, SVG, WebP)

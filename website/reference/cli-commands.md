@@ -73,12 +73,12 @@ With `--verbose`, each hunk shows:
 ```json
 {
   "version": "0.1.0",
-  "timestamp": "2024-01-15T10:30:00.000Z",
+  "timestamp": "2025-04-14T12:00:00.000Z",
   "summary": {
-    "files": 3,
-    "totalConflicts": 6,
-    "autoResolved": 3,
-    "remaining": 3,
+    "files": 2,
+    "totalConflicts": 5,
+    "autoResolved": 4,
+    "remaining": 1,
     "allResolved": false
   },
   "files": [
@@ -87,18 +87,73 @@ With `--verbose`, each hunk shows:
       "totalConflicts": 2,
       "autoResolved": 2,
       "remaining": 0,
+      "validation": {
+        "isValid": true,
+        "hasResidualMarkers": false,
+        "syntaxError": null
+      },
       "resolutions": [
         {
           "line": 15,
           "type": "one_side_change",
           "resolved": true,
-          "explanation": "Only one side modified this block"
+          "explanation": "Only one side modified this block",
+          "confidence": {
+            "score": 95,
+            "label": "certain",
+            "typeClassification": 100,
+            "dataRisk": 5,
+            "scopeImpact": 10
+          },
+          "trace": {
+            "selected": "theirs",
+            "hasBase": true,
+            "summary": "One-side change detected — incoming accepted.",
+            "steps": ["..."]
+          }
+        }
+      ],
+      "pendingHunks": []
+    },
+    {
+      "path": "src/complex.ts",
+      "totalConflicts": 3,
+      "autoResolved": 2,
+      "remaining": 1,
+      "validation": {
+        "isValid": false,
+        "hasResidualMarkers": true,
+        "syntaxError": null
+      },
+      "resolutions": ["..."],
+      "pendingHunks": [
+        {
+          "line": 42,
+          "type": "complex",
+          "explanation": "Overlapping edits on both sides.",
+          "ours": "const timeout = 5000;",
+          "theirs": "const timeout = 10000;\nconst retries = 3;",
+          "base": "const timeout = 3000;",
+          "trace": {
+            "selected": null,
+            "summary": "Both sides modified — manual resolution required.",
+            "steps": ["..."]
+          }
         }
       ]
     }
   ]
 }
 ```
+
+**New fields in v1.1:**
+
+| Field | Description |
+|-------|-------------|
+| `validation` | Post-resolution check: residual markers, syntax errors |
+| `confidence` | Composite score (0–100) with dimensional breakdown |
+| `trace` | Full DecisionTrace: selected side, base availability, step-by-step reasoning |
+| `pendingHunks` | Unresolved conflicts with ours/theirs/base content for LLM-assisted resolution |
 
 ---
 

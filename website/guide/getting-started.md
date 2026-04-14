@@ -45,6 +45,29 @@ Install from the VS Code marketplace:
 
 The extension activates automatically when it detects conflict markers in your files.
 
+## MCP Server (AI Agents)
+
+GitWand exposes its engine as an MCP server for Claude Code, Claude Desktop, Cursor, Windsurf, and any MCP-compatible client.
+
+```bash
+npx @gitwand/mcp
+```
+
+Add to your MCP client configuration:
+
+```json
+{
+  "mcpServers": {
+    "gitwand": {
+      "command": "npx",
+      "args": ["@gitwand/mcp", "--cwd", "/path/to/your/repo"]
+    }
+  }
+}
+```
+
+See the [MCP Server guide](/guide/mcp) for the full tool and resource reference.
+
 ## Quick Start
 
 ### Resolve conflicts with the CLI
