@@ -438,6 +438,128 @@ Objectif : industrialiser la qualité.
 - métriques de résolution
 - détection de régression
 
+### Phase 5 - Ouvrir au LLM : package MCP + commandes Claude Code
+
+Objectif : exposer la résolution intelligente de conflits comme service MCP pour les agents de code (Claude Code, Cursor, Windsurf), et enrichir l'intégration `.claude/` existante.
+
+#### Pourquoi GitWand en MCP et pas un MCP Git générique
+
+Les serveurs MCP Git existants (git-mcp-server, gitMCP) font des opérations Git basiques (status, diff, commit). GitWand apporterait quelque chose d'unique : la résolution intelligente de conflits avec scoring de confiance et `DecisionTrace` structuré. Le core `@gitwand/core` est déjà framework-agnostic, la CLI est séparée, et le JSON de sortie est propre — exactement ce qu'un LLM peut consommer.
+
+#### Étape 1 — Quick win : enrichir `.claude/commands/` (effort : minimal)
+
+Le dossier `.claude/` existe déjà dans le repo. Ajouter des commandes Claude Code qui décrivent les workflows GitWand pour que Claude les utilise via `bash_tool` sans nouveau package :
+
+```
+.claude/commands/resolve.md      → instructions pour lancer gitwand resolve --ci
+.claude/commands/preview.md      → workflow merge preview + analyse des risques
+```
+
+En parallèle, enrichir le payload `--ci` existant : le mode JSON retourne déjà les résolutions, mais il manque les hunks non résolus dans le payload. Ajouter `pendingHunks` avec leur contenu brut permettrait à Claude Code d'utiliser la CLI directement sans attendre le serveur MCP.
+
+#### Étape 2 — Package `@gitwand/mcp` (effort : moyen)
+
+Nouveau package dans le monorepo, utilisant le SDK officiel `@modelcontextprotocol/sdk` TypeScript.
+
+**Structure du package :**
+
+```
+packages/
+  mcp/                    ← nouveau @gitwand/mcp
+    src/
+      server.ts           ← point d'entrée MCP (stdio ou HTTP)
+      tools/
+        resolve.ts        ← gitwand_resolve_conflicts
+        preview.ts        ← gitwand_preview_merge
+        status.ts         ← gitwand_status
+        explain.ts        ← gitwand_explain_hunk
+        apply.ts          ← gitwand_apply_resolution
+      resources/
+        conflicts.ts      ← gitwand://repo/conflicts
+        policy.ts         ← gitwand://repo/policy
+        hunk.ts           ← gitwand://hunk/{file}/{line}
+      schemas/            ← JSON Schema des inputs/outputs (réutilise les types core)
+```
+
+**Tools exposés (ce que le LLM peut invoquer) :**
+
+| Tool | Description |
+|---|---|
+| `gitwand_resolve_conflicts` | Lance le core sur un fichier, retourne le résultat + DecisionTrace |
+| `gitwand_preview_merge` | Simule un merge, retourne la liste ours/partial/manual |
+| `gitwand_status` | Liste les fichiers en conflit + leur complexité estimée |
+| `gitwand_explain_hunk` | Explique pourquoi un hunk est "complex" (pour que le LLM décide) |
+| `gitwand_apply_resolution` | Applique une résolution suggérée par le LLM sur un hunk manual |
+
+**Resources exposées (contexte que le LLM peut lire) :**
+
+| Resource | Description |
+|---|---|
+| `gitwand://repo/conflicts` | État actuel des conflits |
+| `gitwand://repo/policy` | Contenu du .gitwandrc |
+| `gitwand://hunk/{file}/{line}` | Le hunk brut d'un conflit pour que le LLM le lise |
+
+Le tool `gitwand_apply_resolution` est la clé de voûte : il crée une boucle de collaboration — GitWand résout ce qu'il peut avec certitude, passe les hunks `complex` au LLM avec leur contexte, le LLM propose une résolution, GitWand l'applique de façon sécurisée.
+
+**Configuration pour l'utilisateur final :**
+
+```json
+{
+  "mcpServers": {
+    "gitwand": {
+      "command": "npx",
+      "args": ["@gitwand/mcp"]
+    }
+  }
+}
+```
+
+#### Étape 3 — Publication au registre MCP (effort : faible)
+
+Une fois publié sur npm, soumettre sur `github.com/modelcontextprotocol/servers` et le MCP Registry officiel. C'est là que les développeurs utilisant Claude Desktop, Cursor ou Windsurf cherchent des outils.
+
+#### Améliorations du core nécessaires pour le MCP
+
+**1. Output JSON structuré enrichi.** Le `DecisionTrace` actuel est lisible humain. Pour MCP, il faudrait un mode `--output json` (le `--ci` existe déjà, à étoffer) avec un payload structuré incluant les hunks pendants :
+
+```json
+{
+  "file": "src/config.ts",
+  "autoResolved": 3,
+  "pendingHunks": [
+    {
+      "line": 41,
+      "pattern": "complex",
+      "ours": "...",
+      "theirs": "...",
+      "context": "...",
+      "suggestedResolution": null
+    }
+  ]
+}
+```
+
+**2. Mode explain pour les hunks complex.** Actuellement les hunks `complex` sont skippés sans explication. Ajouter une explication textuelle du *pourquoi* (overlapping at lines X–Y, both sides modified the same function signature) pour que le LLM comprenne le contexte sans lire tout le diff.
+
+**3. Streaming du DecisionTrace.** Pour les gros repos, permettre un output streaming (NDJSON line-by-line) pour que le LLM affiche la progression en temps réel via MCP.
+
+#### Ce que ça change concrètement pour un dev avec Claude Code
+
+1. Détection automatique des conflits après un `git pull` / `git merge`
+2. Lancement de `gitwand_preview_merge` avant de merger une branche pour résumer les risques
+3. Auto-résolution des conflits certains/high sans intervention
+4. Soumission **uniquement** des hunks `complex` avec leur contexte pour décision humaine ou LLM
+5. Logging de l'historique des résolutions pour alimenter le hotspot analysis
+
+#### Récapitulatif effort / valeur
+
+| Approche | Effort | Public cible | Disponibilité |
+|---|---|---|---|
+| `.claude/commands/` enrichi | Minimal | Devs Claude Code sur le repo | Immédiat |
+| Payload `--ci` enrichi (pendingHunks) | Faible | Devs utilisant la CLI via bash_tool | Court terme |
+| `@gitwand/mcp` sur npm | Moyen | Tout dev avec Claude Desktop/Code/Cursor | Moyen terme |
+| Soumission MCP Registry | Faible (soumission) | Communauté Claude/Cursor/Windsurf | Après publish |
+
 ---
 
 ## Risques si on ne change rien
@@ -481,3 +603,5 @@ La meilleure évolution n’est pas de le rendre “plus magique”, mais de le 
 3. Introduire des stratégies par type de fichier
 4. Calibrer la confiance avec un score composite
 5. Rendre les politiques de merge configurables
+6. Enrichir `.claude/commands/` et le payload `--ci` (quick win MCP)
+7. Packager `@gitwand/mcp` et publier sur le MCP Registry
