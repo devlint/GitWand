@@ -404,13 +404,13 @@ function shortHash(hash: string): string {
 }
 
 .fhv-file-name {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--text-md);
+  font-weight: var(--font-semibold);
   flex-shrink: 0;
 }
 
 .fhv-file-path {
-  font-size: 11px;
+  font-size: var(--text-xs);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -427,14 +427,14 @@ function shortHash(hash: string): string {
 
 .fhv-tab {
   padding: 4px 12px;
-  font-size: 11px;
-  font-weight: 600;
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--color-text-muted);
   cursor: pointer;
-  transition: background 0.12s, color 0.12s;
+  transition: background var(--transition-fast), color var(--transition-fast);
 }
 
 .fhv-tab:hover {
@@ -444,14 +444,14 @@ function shortHash(hash: string): string {
 .fhv-tab--active {
   background: var(--color-bg-secondary);
   color: var(--color-accent);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--shadow-xs);
 }
 
 .fhv-close {
   display: flex;
   align-items: center;
   padding: 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: none;
   color: var(--color-text-muted);
   cursor: pointer;
@@ -501,7 +501,7 @@ function shortHash(hash: string): string {
   width: 200px;
   min-width: 200px;
   padding: 2px 8px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   vertical-align: top;
   border-right: 1px solid var(--color-border);
   background: var(--color-bg-secondary);
@@ -515,7 +515,7 @@ function shortHash(hash: string): string {
 }
 
 .fhv-blame-hash {
-  font-size: 10px;
+  font-size: var(--text-xs);
   color: var(--color-accent);
   cursor: pointer;
   margin-right: 6px;
@@ -527,12 +527,12 @@ function shortHash(hash: string): string {
 
 .fhv-blame-author {
   color: var(--color-text);
-  font-weight: 500;
+  font-weight: var(--font-medium);
   margin-right: 6px;
 }
 
 .fhv-blame-date {
-  font-size: 10px;
+  font-size: var(--text-xs);
 }
 
 .fhv-blame-lineno {
@@ -540,8 +540,8 @@ function shortHash(hash: string): string {
   min-width: 44px;
   padding: 0 6px;
   text-align: right;
-  font-size: 11px;
-  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  color: var(--color-text-subtle);
   opacity: 0.5;
   user-select: none;
   border-right: 1px solid var(--color-border);
@@ -549,7 +549,7 @@ function shortHash(hash: string): string {
 
 .fhv-blame-content {
   padding: 0 10px;
-  font-size: 12px;
+  font-size: var(--text-base);
   white-space: pre;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -565,7 +565,7 @@ function shortHash(hash: string): string {
 .fhv-log-entry {
   padding: 10px 16px;
   cursor: pointer;
-  transition: background 0.12s;
+  transition: background var(--transition-fast);
   border-bottom: 1px solid var(--color-border);
 }
 
@@ -586,8 +586,8 @@ function shortHash(hash: string): string {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
-  font-weight: 700;
+  font-size: var(--text-base);
+  font-weight: var(--font-bold);
   color: #fff;
   flex-shrink: 0;
 }
@@ -598,8 +598,8 @@ function shortHash(hash: string): string {
 }
 
 .fhv-log-message {
-  font-size: 12px;
-  font-weight: 600;
+  font-size: var(--text-base);
+  font-weight: var(--font-semibold);
   color: var(--color-text);
   line-height: 1.3;
 }
@@ -608,7 +608,7 @@ function shortHash(hash: string): string {
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   margin-top: 3px;
 }
 
@@ -617,7 +617,7 @@ function shortHash(hash: string): string {
 }
 
 .fhv-log-hash {
-  font-size: 10px;
+  font-size: var(--text-xs);
   color: var(--color-accent);
 }
 
@@ -630,7 +630,7 @@ function shortHash(hash: string): string {
 /* ─── Compare hint ──────────────────────────────────── */
 .fhv-compare-hint {
   padding: 8px 16px;
-  font-size: 12px;
+  font-size: var(--text-base);
   border-bottom: 1px solid var(--color-border);
 }
 
@@ -638,15 +638,15 @@ function shortHash(hash: string): string {
   display: flex;
   align-items: center;
   gap: 8px;
-  background: var(--color-accent-bg, rgba(56, 132, 255, 0.08));
+  background: var(--color-accent-soft);
   color: var(--color-accent);
 }
 
 .fhv-compare-clear {
   padding: 2px 8px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   border: 1px solid var(--color-border);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: var(--color-bg-secondary);
   color: var(--color-text-muted);
   cursor: pointer;
@@ -664,29 +664,29 @@ function shortHash(hash: string): string {
   width: 24px;
   height: 24px;
   border: 1px solid var(--color-border);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: var(--color-bg-secondary);
   color: var(--color-text-muted);
   cursor: pointer;
   flex-shrink: 0;
-  transition: background 0.12s, color 0.12s;
+  transition: background var(--transition-fast), color var(--transition-fast);
 }
 
 .fhv-compare-btn:hover {
   color: var(--color-accent);
   border-color: var(--color-accent);
-  background: var(--color-accent-bg, rgba(56, 132, 255, 0.08));
+  background: var(--color-accent-soft);
 }
 
 /* Selected log entries */
 .fhv-log-entry--from {
-  background: rgba(56, 132, 255, 0.08);
+  background: var(--color-accent-soft);
   border-left: 3px solid var(--color-accent);
 }
 
 .fhv-log-entry--to {
-  background: rgba(80, 200, 120, 0.08);
-  border-left: 3px solid var(--color-success, #50c878);
+  background: var(--color-success-soft);
+  border-left: 3px solid var(--color-success);
 }
 
 /* ─── Compare tab ───────────────────────────────────── */
@@ -707,14 +707,14 @@ function shortHash(hash: string): string {
 
 .fhv-compare-go-log {
   padding: 6px 16px;
-  font-size: 12px;
-  font-weight: 600;
+  font-size: var(--text-base);
+  font-weight: var(--font-semibold);
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--color-bg-secondary);
   color: var(--color-accent);
   cursor: pointer;
-  transition: background 0.12s;
+  transition: background var(--transition-fast);
 }
 
 .fhv-compare-go-log:hover {
@@ -731,19 +731,19 @@ function shortHash(hash: string): string {
   align-items: center;
   gap: 8px;
   padding: 8px 16px;
-  font-size: 12px;
+  font-size: var(--text-base);
   background: var(--color-bg-secondary);
   border-bottom: 1px solid var(--color-border);
 }
 
 .fhv-compare-label--from {
   color: var(--color-accent);
-  font-weight: 600;
+  font-weight: var(--font-semibold);
 }
 
 .fhv-compare-label--to {
-  color: var(--color-success, #50c878);
-  font-weight: 600;
+  color: var(--color-success);
+  font-weight: var(--font-semibold);
 }
 
 .fhv-compare-diff {
@@ -757,8 +757,8 @@ function shortHash(hash: string): string {
 /* ─── Diff table styles (replicated from DiffViewer) ── */
 .hunk-header {
   padding: 4px 10px;
-  font-size: 11px;
-  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  color: var(--color-text-subtle);
   background: var(--color-bg-tertiary);
   border-bottom: 1px solid var(--color-border);
 }
@@ -783,8 +783,8 @@ function shortHash(hash: string): string {
   min-width: 44px;
   padding: 0 6px;
   text-align: right;
-  font-size: 11px;
-  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  color: var(--color-text-subtle);
   opacity: 0.5;
   user-select: none;
   border-right: 1px solid var(--color-border);
@@ -792,7 +792,7 @@ function shortHash(hash: string): string {
 
 .line-content {
   padding: 0 10px;
-  font-size: var(--code-font-size, 12px);
+  font-size: var(--text-base);
   white-space: pre;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -813,11 +813,11 @@ function shortHash(hash: string): string {
 }
 
 .sbs-cell--delete {
-  background: var(--color-diff-del-bg, rgba(255, 0, 0, 0.06));
+  background: var(--color-danger-soft);
 }
 
 .sbs-cell--add {
-  background: var(--color-diff-add-bg, rgba(0, 180, 0, 0.06));
+  background: var(--color-success-soft);
 }
 
 .sbs-cell--empty {

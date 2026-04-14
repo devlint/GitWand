@@ -552,8 +552,8 @@ function onContentScroll(e: Event) {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
-  font-weight: 700;
+  font-size: var(--text-lg);
+  font-weight: var(--font-bold);
   color: #fff;
   flex-shrink: 0;
 }
@@ -564,8 +564,8 @@ function onContentScroll(e: Event) {
 }
 
 .cdv-commit-subject {
-  font-size: 12px;
-  font-weight: 600;
+  font-size: var(--text-base);
+  font-weight: var(--font-semibold);
   color: var(--color-text);
   line-height: 1.4;
 }
@@ -575,7 +575,7 @@ function onContentScroll(e: Event) {
   align-items: center;
   gap: 6px;
   margin-top: 4px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
 }
 
@@ -584,20 +584,20 @@ function onContentScroll(e: Event) {
 }
 
 .cdv-author {
-  font-weight: 500;
+  font-weight: var(--font-medium);
 }
 
 .cdv-hash {
-  font-size: 10px;
+  font-size: var(--text-xs);
   color: var(--color-accent);
   background: var(--color-bg-tertiary);
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 
 .cdv-commit-body {
-  font-size: 12px;
-  font-weight: 400;
+  font-size: var(--text-base);
+  font-weight: var(--font-normal);
   color: var(--color-text-muted);
   line-height: 1.5;
   padding-left: 44px;
@@ -612,13 +612,13 @@ function onContentScroll(e: Event) {
 
 .cdv-body-toggle {
   align-self: flex-start;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-accent);
   background: none;
   padding: 0;
   cursor: pointer;
   opacity: 0.8;
-  transition: opacity 0.1s;
+  transition: opacity var(--transition-fast);
 }
 
 .cdv-body-toggle:hover {
@@ -633,10 +633,10 @@ function onContentScroll(e: Event) {
 }
 
 .cdv-badge {
-  font-size: 11px;
-  font-weight: 600;
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
   padding: 2px 8px;
-  border-radius: 10px;
+  border-radius: var(--radius-pill);
 }
 
 .cdv-badge--files {
@@ -645,29 +645,29 @@ function onContentScroll(e: Event) {
 }
 
 .cdv-badge--add {
-  background: rgba(63, 185, 80, 0.15);
+  background: var(--color-success-soft);
   color: var(--color-success);
 }
 
 .cdv-badge--del {
-  background: rgba(248, 81, 73, 0.15);
+  background: var(--color-danger-soft);
   color: var(--color-danger);
 }
 
 .cdv-summary {
-  font-size: 12px;
+  font-size: var(--text-base);
   color: var(--color-text-muted);
 }
 
 .cdv-large-diff-hint {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
   opacity: 0.6;
 }
 
 .cdv-stat {
-  font-size: 11px;
-  font-weight: 600;
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
   font-family: var(--font-mono);
 }
 
@@ -706,11 +706,11 @@ function onContentScroll(e: Event) {
 
 .cdv-filelist-title {
   padding: 8px 12px;
-  font-size: 10px;
-  font-weight: 700;
+  font-size: var(--text-xs);
+  font-weight: var(--font-bold);
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--color-text-muted);
+  color: var(--color-text-subtle);
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
 }
@@ -728,9 +728,9 @@ function onContentScroll(e: Event) {
   align-items: center;
   gap: 6px;
   padding: 5px 12px;
-  font-size: 12px;
+  font-size: var(--text-base);
   cursor: pointer;
-  transition: background 0.12s;
+  transition: background var(--transition-fast);
   border-left: 2px solid transparent;
 }
 
@@ -744,8 +744,8 @@ function onContentScroll(e: Event) {
 }
 
 .cdv-filelist-icon {
-  font-size: 10px;
-  font-weight: 700;
+  font-size: var(--text-xs);
+  font-weight: var(--font-bold);
   width: 16px;
   text-align: center;
   flex-shrink: 0;
@@ -764,7 +764,7 @@ function onContentScroll(e: Event) {
 }
 
 .cdv-filelist-item--active .cdv-filelist-name {
-  font-weight: 600;
+  font-weight: var(--font-semibold);
 }
 
 .cdv-filelist-stats {
@@ -795,7 +795,7 @@ function onContentScroll(e: Event) {
   z-index: 2;
   cursor: pointer;
   user-select: none;
-  transition: background 0.12s;
+  transition: background var(--transition-fast);
 }
 
 .cdv-file-header:hover {
@@ -803,9 +803,9 @@ function onContentScroll(e: Event) {
 }
 
 .cdv-collapse-icon {
-  font-size: 10px;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
-  transition: transform 0.15s ease;
+  transition: transform var(--transition-base);
   flex-shrink: 0;
   width: 14px;
   text-align: center;
@@ -816,13 +816,13 @@ function onContentScroll(e: Event) {
 }
 
 .cdv-file-name {
-  font-size: 12px;
-  font-weight: 600;
+  font-size: var(--text-base);
+  font-weight: var(--font-semibold);
   flex-shrink: 0;
 }
 
 .cdv-file-path {
-  font-size: 11px;
+  font-size: var(--text-xs);
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -837,8 +837,8 @@ function onContentScroll(e: Event) {
 
 .cdv-hunk-header {
   padding: 4px 16px;
-  font-size: 11px;
-  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  color: var(--color-text-subtle);
   background: var(--color-bg-tertiary);
   border-bottom: 1px solid var(--color-border);
 }
@@ -854,16 +854,16 @@ function onContentScroll(e: Event) {
 }
 
 .cdv-line--context { background: var(--color-bg); }
-.cdv-line--add { background: rgba(34, 197, 94, 0.1); }
-.cdv-line--delete { background: rgba(239, 68, 68, 0.1); }
+.cdv-line--add { background: var(--color-success-soft); }
+.cdv-line--delete { background: var(--color-danger-soft); }
 
 .cdv-line-no {
   width: 44px;
   min-width: 44px;
   padding: 0 6px;
   text-align: right;
-  font-size: 11px;
-  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  color: var(--color-text-subtle);
   opacity: 0.5;
   user-select: none;
   border-right: 1px solid var(--color-border);
@@ -874,17 +874,17 @@ function onContentScroll(e: Event) {
   min-width: 18px;
   padding: 0 3px;
   text-align: center;
-  font-size: 12px;
+  font-size: var(--text-base);
   color: var(--color-text-muted);
   user-select: none;
 }
 
-.cdv-line--add .cdv-line-marker { color: var(--color-success); font-weight: 700; }
-.cdv-line--delete .cdv-line-marker { color: var(--color-danger); font-weight: 700; }
+.cdv-line--add .cdv-line-marker { color: var(--color-success); font-weight: var(--font-bold); }
+.cdv-line--delete .cdv-line-marker { color: var(--color-danger); font-weight: var(--font-bold); }
 
 .cdv-line-content {
   padding: 0 10px;
-  font-size: 12px;
+  font-size: var(--text-base);
   white-space: pre;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -917,12 +917,12 @@ function onContentScroll(e: Event) {
 }
 
 .cdv-sbs--context { background: var(--color-bg); }
-.cdv-sbs--delete { background: rgba(239, 68, 68, 0.1); }
-.cdv-sbs--add { background: rgba(34, 197, 94, 0.1); }
+.cdv-sbs--delete { background: var(--color-danger-soft); }
+.cdv-sbs--add { background: var(--color-success-soft); }
 .cdv-sbs--empty { background: var(--color-bg-tertiary); opacity: 0.5; }
 
-.cdv-sbs--delete.cdv-line-marker { color: var(--color-danger); font-weight: 700; }
-.cdv-sbs--add.cdv-line-marker { color: var(--color-success); font-weight: 700; }
+.cdv-sbs--delete.cdv-line-marker { color: var(--color-danger); font-weight: var(--font-bold); }
+.cdv-sbs--add.cdv-line-marker { color: var(--color-success); font-weight: var(--font-bold); }
 .cdv-sbs--delete.cdv-line-no { color: var(--color-danger); opacity: 0.7; }
 .cdv-sbs--add.cdv-line-no { color: var(--color-success); opacity: 0.7; }
 
@@ -931,7 +931,7 @@ function onContentScroll(e: Event) {
   display: flex;
   gap: 2px;
   background: var(--color-bg-tertiary);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 2px;
   margin-left: auto;
 }
@@ -943,11 +943,11 @@ function onContentScroll(e: Event) {
   width: 26px;
   height: 24px;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--color-text-muted);
   cursor: pointer;
-  transition: background 0.12s, color 0.12s;
+  transition: background var(--transition-fast), color var(--transition-fast);
 }
 
 .cdv-mode-btn:hover {
@@ -957,12 +957,12 @@ function onContentScroll(e: Event) {
 .cdv-mode-btn--active {
   background: var(--color-bg-secondary);
   color: var(--color-accent);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--shadow-xs);
 }
 
 .cdv-truncated {
   padding: 8px 16px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
   background: var(--color-bg-tertiary);
   text-align: center;
@@ -971,7 +971,7 @@ function onContentScroll(e: Event) {
 
 .cdv-load-more {
   padding: 12px 16px;
-  font-size: 12px;
+  font-size: var(--text-base);
   color: var(--color-text-muted);
   text-align: center;
 }

@@ -1,20 +1,110 @@
-/* ─── GitWand Desktop — Global Styles ──────────────────────────── */
+/* ─── GitWand Desktop — Global Styles ───────────────────────────
+   Design System v1.0  —  see docs/design-system.md
+   Tokens: colors, typography, spacing, radius, shadows, motion
+   + primitives: .btn, .input, .card, .badge, .popover, .segmented
+   ──────────────────────────────────────────────────────────── */
 
-/* ─── Dark theme (default) ─────────────────────────────────────── */
+/* ─── Shared tokens (theme-agnostic) ───────────────────────── */
+:root {
+  /* Typography */
+  --font-mono: "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+
+  --font-size-xs: 10px;
+  --font-size-sm: 11px;
+  --font-size-base: 12px;
+  --font-size-md: 13px;
+  --font-size-lg: 14px;
+  --font-size-xl: 16px;
+  --font-size-2xl: 20px;
+  --font-size-3xl: 26px;
+
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  --line-height-tight: 1.2;
+  --line-height-snug: 1.35;
+  --line-height-normal: 1.5;
+
+  /* Spacing scale (4px base) */
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 12px;
+  --space-6: 16px;
+  --space-7: 20px;
+  --space-8: 24px;
+  --space-9: 32px;
+  --space-10: 40px;
+  --space-11: 48px;
+  --space-12: 64px;
+
+  /* Radius scale */
+  --radius-xs: 3px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+  --radius-2xl: 20px;
+  --radius-pill: 9999px;
+
+  /* Motion */
+  --ease-out: cubic-bezier(.2, .8, .2, 1);
+  --transition-fast: 100ms var(--ease-out);
+  --transition-base: 160ms var(--ease-out);
+  --transition-slow: 240ms var(--ease-out);
+
+  /* Layout */
+  --sidebar-width: 340px;
+  --header-height: 56px;
+  --tabbar-height: 40px;
+
+  /* Code */
+  --code-font-size: 12px;
+  --code-tab-size: 4;
+}
+
+/* ─── Dark theme (default) ─────────────────────────────────── */
 :root,
 [data-theme="dark"] {
-  --color-bg: #0f0f14;
-  --color-bg-secondary: #1a1a24;
-  --color-bg-tertiary: #24243a;
-  --color-border: #2e2e48;
-  --color-text: #e4e4ef;
-  --color-text-muted: #8888a8;
+  /* Surfaces */
+  --color-bg: #0d0d13;
+  --color-bg-secondary: #15151f;
+  --color-bg-tertiary: #1f1f2d;
+  --color-surface-inverse: #f4f4f8;
+  --color-surface-inverse-text: #15151f;
+  --color-surface-inverse-muted: #5b5b78;
+
+  /* Borders */
+  --color-border: #262638;
+  --color-border-strong: #353550;
+
+  /* Text */
+  --color-text: #ebebf5;
+  --color-text-muted: #8a8aa8;
+  --color-text-subtle: #5d5d78;
+
+  /* Accent (identité GitWand) */
   --color-accent: #8b5cf6;
   --color-accent-hover: #a78bfa;
+  --color-accent-soft: rgba(139, 92, 246, 0.16);
+  --color-accent-text: #ffffff;
+
+  /* Severity — fort + soft (pour fonds tintés) */
   --color-success: #22c55e;
+  --color-success-soft: rgba(34, 197, 94, 0.14);
   --color-warning: #f59e0b;
+  --color-warning-soft: rgba(245, 158, 11, 0.16);
   --color-danger: #ef4444;
-  --color-danger-bg: rgba(239, 68, 68, 0.15);
+  --color-danger-soft: rgba(239, 68, 68, 0.16);
+  --color-danger-bg: rgba(239, 68, 68, 0.15); /* legacy alias */
+  --color-info: #60a5fa;
+  --color-info-soft: rgba(96, 165, 250, 0.16);
+
+  /* Merge lanes */
   --color-ours: #3b82f6;
   --color-ours-bg: rgba(59, 130, 246, 0.1);
   --color-theirs: #a855f7;
@@ -22,38 +112,77 @@
   --color-resolved-bg: rgba(34, 197, 94, 0.08);
   --color-overlay: rgba(0, 0, 0, 0.6);
 
-  --font-mono: "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
-  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  /* Focus */
+  --color-focus-ring: rgba(139, 92, 246, 0.55);
 
-  --sidebar-width: 340px;
-  --header-height: 48px;
+  /* Legacy aliases (kept so older components keep working) */
+  --color-bg-hover: var(--color-bg-tertiary);
+  --color-text-secondary: var(--color-text-muted);
 
-  --code-font-size: 12px;
-  --code-tab-size: 4;
+  /* Shadows */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.55);
+  --shadow-xl: 0 24px 60px rgba(0, 0, 0, 0.6);
 }
 
-/* ─── Light theme ──────────────────────────────────────────────── */
+/* ─── Light theme ──────────────────────────────────────────── */
 [data-theme="light"] {
-  --color-bg: #f8f8fc;
+  /* Surfaces */
+  --color-bg: #f4f4f8;
   --color-bg-secondary: #ffffff;
-  --color-bg-tertiary: #eeeef5;
-  --color-border: #d4d4e0;
-  --color-text: #1e1e2e;
-  --color-text-muted: #6b6b88;
+  --color-bg-tertiary: #eceef4;
+  --color-surface-inverse: #15151f;
+  --color-surface-inverse-text: #f4f4f8;
+  --color-surface-inverse-muted: #9a9ab0;
+
+  /* Borders */
+  --color-border: #e4e4ed;
+  --color-border-strong: #cccfda;
+
+  /* Text */
+  --color-text: #15151f;
+  --color-text-muted: #5b5b78;
+  --color-text-subtle: #9a9ab0;
+
+  /* Accent */
   --color-accent: #7c3aed;
   --color-accent-hover: #6d28d9;
+  --color-accent-soft: rgba(124, 58, 237, 0.12);
+  --color-accent-text: #ffffff;
+
+  /* Severity */
   --color-success: #16a34a;
+  --color-success-soft: rgba(22, 163, 74, 0.12);
   --color-warning: #d97706;
+  --color-warning-soft: rgba(217, 119, 6, 0.14);
   --color-danger: #dc2626;
+  --color-danger-soft: rgba(220, 38, 38, 0.1);
   --color-danger-bg: rgba(220, 38, 38, 0.1);
+  --color-info: #2563eb;
+  --color-info-soft: rgba(37, 99, 235, 0.12);
+
+  /* Merge lanes */
   --color-ours: #2563eb;
   --color-ours-bg: rgba(37, 99, 235, 0.08);
   --color-theirs: #9333ea;
   --color-theirs-bg: rgba(147, 51, 234, 0.08);
   --color-resolved-bg: rgba(22, 163, 74, 0.06);
-  --color-overlay: rgba(0, 0, 0, 0.3);
+  --color-overlay: rgba(20, 20, 35, 0.35);
+
+  /* Focus */
+  --color-focus-ring: rgba(124, 58, 237, 0.4);
+
+  /* Shadows */
+  --shadow-xs: 0 1px 2px rgba(20, 20, 35, 0.04);
+  --shadow-sm: 0 2px 8px rgba(20, 20, 35, 0.06);
+  --shadow-md: 0 10px 30px rgba(20, 20, 35, 0.1);
+  --shadow-lg: 0 16px 40px rgba(20, 20, 35, 0.14);
+  --shadow-xl: 0 24px 60px rgba(20, 20, 35, 0.18);
 }
 
+/* ─── Reset ────────────────────────────────────────────────── */
 * {
   margin: 0;
   padding: 0;
@@ -67,47 +196,37 @@ html, body, #app {
 
 body {
   font-family: var(--font-sans);
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-normal);
   background: var(--color-bg);
   color: var(--color-text);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-/* ─── Scrollbar ──────────────────────────────────────────────── */
-
+/* ─── Scrollbar ─────────────────────────────────────────────── */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
-
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
+::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
   background: var(--color-border);
-  border-radius: 4px;
+  border-radius: var(--radius-pill);
 }
+::-webkit-scrollbar-thumb:hover { background: var(--color-text-subtle); }
 
-::-webkit-scrollbar-thumb:hover {
-  background: var(--color-text-muted);
-}
-
-/* ─── Utilities ──────────────────────────────────────────────── */
-
+/* ─── Typography utilities ─────────────────────────────────── */
 .mono {
   font-family: var(--font-mono);
   tab-size: var(--code-tab-size);
   -moz-tab-size: var(--code-tab-size);
 }
 
-/* Applied to code/diff content areas — uses configurable font size */
-.line-content {
-  font-size: var(--code-font-size) !important;
-}
+.line-content { font-size: var(--code-font-size) !important; }
 
-.muted {
-  color: var(--color-text-muted);
-}
+.muted    { color: var(--color-text-muted); }
+.subtle   { color: var(--color-text-subtle); }
 
 .truncate {
   overflow: hidden;
@@ -115,40 +234,225 @@ body {
   white-space: nowrap;
 }
 
+/* ─── Buttons (primitives) ─────────────────────────────────── */
 button {
-  font-family: var(--font-sans);
+  font-family: inherit;
+  font-size: inherit;
   cursor: pointer;
   border: none;
   outline: none;
+  background: none;
+  color: inherit;
 }
 
-button:focus-visible {
-  outline: 2px solid var(--color-accent);
+button:focus-visible,
+.input:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
   outline-offset: 2px;
 }
 
-/* ─── Word-level diff highlighting ────────────────────── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-5);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text);
+  background: transparent;
+  transition: background var(--transition-base), color var(--transition-base), border-color var(--transition-base), transform var(--transition-fast);
+  white-space: nowrap;
+  user-select: none;
+}
+.btn:active:not(:disabled) { transform: translateY(1px); }
+.btn:disabled,
+.btn--disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btn--primary {
+  background: var(--color-accent);
+  color: var(--color-accent-text);
+}
+.btn--primary:hover:not(:disabled) { background: var(--color-accent-hover); }
+
+.btn--secondary {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text);
+}
+.btn--secondary:hover:not(:disabled) { background: var(--color-border); }
+
+.btn--ghost {
+  background: transparent;
+  color: var(--color-text-muted);
+}
+.btn--ghost:hover:not(:disabled) {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text);
+}
+
+.btn--danger {
+  background: var(--color-danger);
+  color: #fff;
+}
+.btn--danger:hover:not(:disabled) { filter: brightness(1.08); }
+
+.btn--success {
+  background: var(--color-success);
+  color: #fff;
+}
+.btn--success:hover:not(:disabled) { filter: brightness(1.08); }
+
+.btn--pill { border-radius: var(--radius-pill); padding-inline: var(--space-6); }
+
+.btn--icon {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: var(--radius-md);
+  color: var(--color-text-muted);
+}
+.btn--icon:hover:not(:disabled) {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text);
+}
+
+.btn--sm { padding: var(--space-2) var(--space-4); font-size: var(--font-size-base); border-radius: var(--radius-sm); }
+.btn--lg { padding: var(--space-5) var(--space-7); font-size: var(--font-size-lg); }
+
+/* ─── Inputs ───────────────────────────────────────────────── */
+.input {
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  font-family: inherit;
+  font-size: var(--font-size-base);
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  outline: none;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.input:hover { border-color: var(--color-border-strong); }
+.input:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
+}
+.input--pill { border-radius: var(--radius-pill); padding-inline: var(--space-5); }
+
+/* ─── Surfaces ─────────────────────────────────────────────── */
+.card {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-xs);
+}
+.card--hero {
+  background: var(--color-surface-inverse);
+  color: var(--color-surface-inverse-text);
+  border-color: transparent;
+  border-radius: var(--radius-2xl);
+  box-shadow: var(--shadow-md);
+}
+.card--hero .muted { color: var(--color-surface-inverse-muted); }
+
+.popover {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  animation: popoverSlide var(--transition-slow);
+}
+@keyframes popoverSlide {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ─── Badges / pills ───────────────────────────────────────── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-4);
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.badge--accent  { background: var(--color-accent-soft);  color: var(--color-accent); }
+.badge--success { background: var(--color-success-soft); color: var(--color-success); }
+.badge--warning { background: var(--color-warning-soft); color: var(--color-warning); }
+.badge--danger  { background: var(--color-danger-soft);  color: var(--color-danger); }
+.badge--info    { background: var(--color-info-soft);    color: var(--color-info); }
+.badge--solid   { background: var(--color-accent); color: var(--color-accent-text); }
+
+.stat-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  flex-shrink: 0;
+}
+.stat-dot--success { background: var(--color-success); }
+.stat-dot--warning { background: var(--color-warning); }
+.stat-dot--danger  { background: var(--color-danger); }
+.stat-dot--info    { background: var(--color-info); }
+.stat-dot--muted   { background: var(--color-text-muted); }
+
+/* ─── Segmented control (tabs in pill group) ───────────────── */
+.segmented {
+  display: inline-flex;
+  padding: var(--space-1);
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-pill);
+}
+.segmented__item {
+  padding: var(--space-2) var(--space-5);
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-muted);
+  transition: background var(--transition-base), color var(--transition-base);
+}
+.segmented__item:hover { color: var(--color-text); }
+.segmented__item--active {
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+  box-shadow: var(--shadow-xs);
+}
+
+/* ─── Spinner ──────────────────────────────────────────────── */
+.spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-accent);
+  border-radius: var(--radius-pill);
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ─── Word-level diff highlighting ─────────────────────────── */
 .wd-del {
   background: rgba(239, 68, 68, 0.3);
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
   padding: 0 1px;
 }
-
 .wd-ins {
   background: rgba(34, 197, 94, 0.3);
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
   padding: 0 1px;
 }
+[data-theme="light"] .wd-del { background: rgba(239, 68, 68, 0.2); }
+[data-theme="light"] .wd-ins { background: rgba(34, 197, 94, 0.2); }
 
-[data-theme="light"] .wd-del {
-  background: rgba(239, 68, 68, 0.2);
-}
-
-[data-theme="light"] .wd-ins {
-  background: rgba(34, 197, 94, 0.2);
-}
-
-/* ─── Highlight.js syntax tokens (dark theme) ────────── */
+/* ─── Highlight.js syntax tokens (dark theme) ──────────────── */
 .hljs-keyword,
 .hljs-selector-tag,
 .hljs-built_in,
@@ -190,7 +494,7 @@ button:focus-visible {
 
 .hljs-property { color: #82aaff; }
 
-/* ─── Light theme syntax tokens ──────────────────────── */
+/* ─── Light theme syntax tokens ────────────────────────────── */
 [data-theme="light"] .hljs-keyword,
 [data-theme="light"] .hljs-selector-tag,
 [data-theme="light"] .hljs-built_in,

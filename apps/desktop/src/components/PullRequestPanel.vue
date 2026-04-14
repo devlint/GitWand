@@ -891,8 +891,8 @@ watch(() => props.cwd, () => { loadRemote(); loadPrs(); selectedPr.value = null;
   padding: 6px 16px;
   flex-shrink: 0;
 }
-.pr-msg--error { color: var(--color-error, #f38ba8); background: rgba(243,139,168,0.1); }
-.pr-msg--success { color: var(--color-success, #a6e3a1); background: rgba(166,227,161,0.1); cursor: pointer; }
+.pr-msg--error { color: var(--color-danger); background: var(--color-danger-soft); }
+.pr-msg--success { color: var(--color-success); background: var(--color-success-soft); cursor: pointer; }
 
 /* ─── Create form ─────────────────────────────────────── */
 .pr-create-form {
@@ -1039,8 +1039,8 @@ watch(() => props.cwd, () => { loadRemote(); loadPrs(); selectedPr.value = null;
 }
 
 .pr-stats { display: flex; gap: 3px; }
-.add { color: var(--color-success, #a6e3a1); }
-.del { color: var(--color-error, #f38ba8); }
+.add { color: var(--color-success); }
+.del { color: var(--color-danger); }
 
 .pr-item-chips {
   display: flex;
@@ -1138,7 +1138,7 @@ watch(() => props.cwd, () => { loadRemote(); loadPrs(); selectedPr.value = null;
   text-align: center;
 }
 .pr-tab-count--comment {
-  background: rgba(203,166,247,0.15);
+  background: var(--color-accent-soft);
   color: var(--color-accent);
 }
 
@@ -1204,7 +1204,7 @@ watch(() => props.cwd, () => { loadRemote(); loadPrs(); selectedPr.value = null;
 }
 
 .pr-body-text :deep(.pr-code) {
-  background: rgba(203,166,247,0.15);
+  background: var(--color-accent-soft);
   padding: 1px 4px;
   border-radius: 3px;
   font-family: "JetBrains Mono", "Fira Code", monospace;
@@ -1257,7 +1257,7 @@ watch(() => props.cwd, () => { loadRemote(); loadPrs(); selectedPr.value = null;
 }
 
 .pr-diff-file:hover { background: var(--color-bg-tertiary); }
-.pr-diff-file.active { background: rgba(203,166,247,0.12); }
+.pr-diff-file.active { background: var(--color-accent-soft); }
 
 .pr-diff-file-top { display: flex; align-items: center; gap: 4px; overflow: hidden; }
 .pr-diff-file-name { font-size: 12px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
@@ -1298,14 +1298,14 @@ watch(() => props.cwd, () => { loadRemote(); loadPrs(); selectedPr.value = null;
   margin-bottom: 10px;
 }
 .pr-readiness-banner--ready {
-  background: rgba(166,227,161,0.12);
-  border: 1px solid rgba(166,227,161,0.35);
-  color: #a6e3a1;
+  background: var(--color-success-soft);
+  border: 1px solid var(--color-success);
+  color: var(--color-success);
 }
 .pr-readiness-banner--wait {
-  background: rgba(250,219,107,0.08);
-  border: 1px solid rgba(250,219,107,0.25);
-  color: var(--color-text-muted);
+  background: var(--color-warning-soft);
+  border: 1px solid var(--color-warning);
+  color: var(--color-warning);
 }
 .pr-readiness-icon { font-size: 14px; flex-shrink: 0; }
 
@@ -1339,7 +1339,7 @@ watch(() => props.cwd, () => { loadRemote(); loadPrs(); selectedPr.value = null;
 
 .eco-btn:hover { background: var(--color-bg-tertiary); }
 .eco-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.eco-btn--primary { background: var(--color-accent); color: #fff; border-color: transparent; font-weight: 600; }
+.eco-btn--primary { background: var(--color-accent); color: var(--color-accent-text); border-color: transparent; font-weight: 600; }
 .eco-btn--primary:hover { background: var(--color-accent-hover, var(--color-accent)); filter: brightness(1.05); }
 .eco-btn--xs { font-size: 11px; padding: 3px 8px; border-radius: 5px; }
 .eco-close { padding: 5px; border-color: transparent; color: var(--color-text-muted); }

@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<title>GitWand — Design System Preview</title>
+<style>
+/* Tokens (copie de main.css — pour preview autonome) */
+:root {
+  --font-sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", "Fira Code", monospace;
+  --font-size-xs: 10px; --font-size-sm: 11px; --font-size-base: 12px;
+  --font-size-md: 13px; --font-size-lg: 14px; --font-size-xl: 16px;
+  --font-size-2xl: 20px; --font-size-3xl: 26px;
+  --font-weight-medium: 500; --font-weight-semibold: 600; --font-weight-bold: 700;
+  --space-1: 2px; --space-2: 4px; --space-3: 6px; --space-4: 8px;
+  --space-5: 12px; --space-6: 16px; --space-7: 20px; --space-8: 24px;
+  --space-9: 32px; --space-10: 40px;
+  --radius-sm: 6px; --radius-md: 8px; --radius-lg: 10px;
+  --radius-xl: 14px; --radius-2xl: 20px; --radius-pill: 9999px;
+  --ease-out: cubic-bezier(.2,.8,.2,1);
+  --transition-fast: 100ms var(--ease-out);
+  --transition-base: 160ms var(--ease-out);
+  --header-height: 56px; --tabbar-height: 40px;
+}
+.theme-dark {
+  --color-bg: #0d0d13; --color-bg-secondary: #15151f; --color-bg-tertiary: #1f1f2d;
+  --color-surface-inverse: #f4f4f8; --color-surface-inverse-text: #15151f;
+  --color-border: #262638; --color-border-strong: #353550;
+  --color-text: #ebebf5; --color-text-muted: #8a8aa8; --color-text-subtle: #5d5d78;
+  --color-accent: #8b5cf6; --color-accent-hover: #a78bfa;
+  --color-accent-soft: rgba(139,92,246,.16); --color-accent-text: #fff;
+  --color-success: #22c55e; --color-success-soft: rgba(34,197,94,.14);
+  --color-warning: #f59e0b; --color-warning-soft: rgba(245,158,11,.16);
+  --color-danger: #ef4444; --color-danger-soft: rgba(239,68,68,.16);
+  --color-info: #60a5fa; --color-info-soft: rgba(96,165,250,.16);
+  --shadow-xs: 0 1px 2px rgba(0,0,0,.35);
+  --shadow-md: 0 8px 24px rgba(0,0,0,.45);
+}
+.theme-light {
+  --color-bg: #f4f4f8; --color-bg-secondary: #ffffff; --color-bg-tertiary: #eceef4;
+  --color-surface-inverse: #15151f; --color-surface-inverse-text: #f4f4f8;
+  --color-border: #e4e4ed; --color-border-strong: #cccfda;
+  --color-text: #15151f; --color-text-muted: #5b5b78; --color-text-subtle: #9a9ab0;
+  --color-accent: #7c3aed; --color-accent-hover: #6d28d9;
+  --color-accent-soft: rgba(124,58,237,.12); --color-accent-text: #fff;
+  --color-success: #16a34a; --color-success-soft: rgba(22,163,74,.12);
+  --color-warning: #d97706; --color-warning-soft: rgba(217,119,6,.14);
+  --color-danger: #dc2626; --color-danger-soft: rgba(220,38,38,.1);
+  --color-info: #2563eb; --color-info-soft: rgba(37,99,235,.12);
+  --shadow-xs: 0 1px 2px rgba(20,20,35,.04);
+  --shadow-md: 0 10px 30px rgba(20,20,35,.1);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: var(--font-sans); background: #e8e8f0; padding: 32px; display: flex; flex-direction: column; gap: 48px; }
+.frame { background: var(--color-bg); border-radius: 24px; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,.15); border: 1px solid rgba(0,0,0,.05); }
+.label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #6b6b88; margin-bottom: 12px; }
+
+/* Header */
+.app-header {
+  display: flex; align-items: center; justify-content: space-between;
+  height: var(--header-height); padding: 0 var(--space-6);
+  background: var(--color-bg-secondary);
+  border-bottom: 1px solid var(--color-border); gap: var(--space-6);
+}
+.left, .right, .center { display: flex; align-items: center; gap: var(--space-4); }
+.center { flex: 1; justify-content: center; }
+.title { font-size: var(--font-size-xl); font-weight: 600; color: var(--color-text); letter-spacing: -0.01em; }
+.logo-dot { width: 20px; height: 20px; border-radius: 6px; background: linear-gradient(135deg, #8b5cf6 0%, #5b21b6 100%); }
+
+.folder-trigger {
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-3) var(--space-5); border-radius: var(--radius-pill);
+  color: var(--color-text-muted); font-size: var(--font-size-base);
+  font-weight: 500; cursor: pointer; transition: background var(--transition-base);
+}
+.folder-trigger:hover { color: var(--color-text); background: var(--color-bg-tertiary); }
+
+.branch-trigger {
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-3) var(--space-5); border-radius: var(--radius-pill);
+  background: var(--color-bg-tertiary); color: var(--color-text);
+  font-size: var(--font-size-md); font-weight: 500; cursor: pointer;
+}
+.branch-name { font-family: var(--font-mono); }
+
+.repo-stat {
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  padding: var(--space-2) var(--space-4); border-radius: var(--radius-pill);
+  background: var(--color-bg-tertiary); font-size: var(--font-size-sm);
+  font-weight: 500; color: var(--color-text-muted); font-variant-numeric: tabular-nums;
+}
+.stat-dot { width: 6px; height: 6px; border-radius: 50%; }
+.dot-success { background: var(--color-success); }
+.dot-warning { background: var(--color-warning); }
+.dot-info    { background: var(--color-info); }
+.dot-danger  { background: var(--color-danger); }
+
+.btn {
+  display: inline-flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-3) var(--space-5); border-radius: var(--radius-pill);
+  font-size: var(--font-size-md); font-weight: 500; border: none; cursor: pointer;
+  font-family: inherit; transition: background var(--transition-base);
+}
+.btn-sync { background: var(--color-bg-tertiary); color: var(--color-text); }
+.btn-sync:hover { background: var(--color-border); }
+.btn-push-active { background: var(--color-accent); color: var(--color-accent-text); }
+.sync-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 20px; padding: 2px 6px; border-radius: var(--radius-pill);
+  font-size: 10px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1;
+  background: rgba(255,255,255,.22); color: #fff;
+}
+
+.btn-icon {
+  width: 32px; height: 32px; border-radius: var(--radius-pill);
+  background: transparent; color: var(--color-text-muted);
+  display: inline-flex; align-items: center; justify-content: center; cursor: pointer; border: none;
+  transition: background var(--transition-base), color var(--transition-base);
+}
+.btn-icon:hover { background: var(--color-bg-tertiary); color: var(--color-text); }
+
+.sep { width: 1px; height: 20px; background: var(--color-border); margin-inline: 4px; }
+
+/* Tab bar */
+.tab-bar {
+  display: flex; align-items: center; gap: var(--space-3);
+  background: var(--color-bg-secondary);
+  border-bottom: 1px solid var(--color-border);
+  height: var(--tabbar-height); padding: 0 var(--space-5);
+}
+.tab-list { display: flex; gap: var(--space-2); flex: 1; }
+.tab {
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-3) var(--space-5); border-radius: var(--radius-pill);
+  font-size: var(--font-size-base); font-weight: 500; color: var(--color-text-muted);
+  cursor: pointer; transition: all var(--transition-base);
+}
+.tab:hover { color: var(--color-text); background: var(--color-bg-tertiary); }
+.tab--active { color: var(--color-accent); background: var(--color-accent-soft); }
+.tab-close { width: 18px; height: 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: var(--color-text-muted); opacity: .6; font-size: 14px; cursor: pointer; }
+.tab-close:hover { background: var(--color-danger-soft); color: var(--color-danger); opacity: 1; }
+.tab-new {
+  width: 28px; height: 28px; border-radius: var(--radius-pill); margin-left: auto;
+  color: var(--color-text-muted); background: transparent; border: none;
+  display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+  font-size: 16px; transition: background var(--transition-base);
+}
+.tab-new:hover { background: var(--color-bg-tertiary); color: var(--color-text); }
+
+/* Demo surface */
+.demo-surface { padding: 32px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.card {
+  background: var(--color-bg-secondary); border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl); padding: 20px; box-shadow: var(--shadow-xs);
+  color: var(--color-text);
+}
+.card h4 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--color-text-muted); margin-bottom: 8px; }
+.card .big { font-size: var(--font-size-3xl); font-weight: 700; letter-spacing: -0.02em; }
+.card.card-hero {
+  background: var(--color-surface-inverse); color: var(--color-surface-inverse-text);
+  border-color: transparent; border-radius: var(--radius-2xl);
+  box-shadow: var(--shadow-md); grid-row: span 2;
+}
+.card.card-hero h4 { color: #8a8aa8; }
+.badge {
+  display: inline-block; padding: 3px 10px; border-radius: var(--radius-pill);
+  font-size: 10px; font-weight: 600;
+  background: var(--color-accent-soft); color: var(--color-accent);
+}
+.badge-solid { background: var(--color-accent); color: var(--color-accent-text); }
+</style>
+</head>
+<body>
+
+<section>
+  <div class="label">Light theme — AppHeader + RepoTabBar</div>
+  <div class="frame theme-light">
+    <header class="app-header">
+      <div class="left">
+        <div class="logo-dot"></div>
+        <div class="title">GitWand</div>
+        <button class="folder-trigger">
+          📁 gitwand-desktop <span style="opacity:.5">▾</span>
+        </button>
+      </div>
+      <div class="center">
+        <button class="branch-trigger">
+          ⑃ <span class="branch-name">feature/design-system</span> <span style="opacity:.5">▾</span>
+        </button>
+        <div style="display:flex; gap:6px;">
+          <span class="repo-stat"><span class="stat-dot dot-success"></span>3 staged</span>
+          <span class="repo-stat"><span class="stat-dot dot-warning"></span>7 modified</span>
+          <span class="repo-stat"><span class="stat-dot dot-info"></span>2 untracked</span>
+        </div>
+      </div>
+      <div class="right">
+        <button class="btn btn-sync">↓ Sync</button>
+        <button class="btn btn-push-active">↑ Push <span class="sync-badge">4</span></button>
+        <button class="btn btn-sync">⑃ Merge</button>
+        <div class="sep"></div>
+        <button class="btn-icon">☾</button>
+        <button class="btn-icon">≡</button>
+      </div>
+    </header>
+    <div class="tab-bar">
+      <div class="tab-list">
+        <div class="tab tab--active">📁 gitwand-desktop <span class="tab-close">×</span></div>
+        <div class="tab">📁 gitwand-cli <span class="tab-close">×</span></div>
+        <div class="tab">📁 docs-site <span class="tab-close">×</span></div>
+      </div>
+      <button class="tab-new">+</button>
+    </div>
+    <div class="demo-surface">
+      <div class="card card-hero">
+        <h4>Commit activity</h4>
+        <div class="big">142</div>
+        <div style="opacity:.6; font-size:12px; margin-top:4px;">commits this week</div>
+        <div style="margin-top:20px; display:flex; gap:6px; flex-wrap:wrap;">
+          <span class="badge badge-solid">main</span>
+          <span class="badge" style="background:rgba(255,255,255,.1); color:#f4f4f8;">feature/*</span>
+        </div>
+      </div>
+      <div class="card">
+        <h4>Open PRs</h4>
+        <div class="big">7</div>
+        <span class="badge">3 approved</span>
+      </div>
+      <div class="card">
+        <h4>Conflicts resolved</h4>
+        <div class="big">23</div>
+        <span class="badge">+12% this week</span>
+      </div>
+      <div class="card">
+        <h4>Branches</h4>
+        <div class="big">14</div>
+        <span class="badge">2 stale</span>
+      </div>
+      <div class="card">
+        <h4>Merge queue</h4>
+        <div class="big">3</div>
+        <span class="badge">ready</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="label">Dark theme — AppHeader + RepoTabBar</div>
+  <div class="frame theme-dark">
+    <header class="app-header">
+      <div class="left">
+        <div class="logo-dot"></div>
+        <div class="title" style="color: var(--color-text);">GitWand</div>
+        <button class="folder-trigger">
+          📁 gitwand-desktop <span style="opacity:.5">▾</span>
+        </button>
+      </div>
+      <div class="center">
+        <button class="branch-trigger">
+          ⑃ <span class="branch-name">feature/design-system</span> <span style="opacity:.5">▾</span>
+        </button>
+        <div style="display:flex; gap:6px;">
+          <span class="repo-stat"><span class="stat-dot dot-success"></span>3 staged</span>
+          <span class="repo-stat"><span class="stat-dot dot-warning"></span>7 modified</span>
+          <span class="repo-stat"><span class="stat-dot dot-danger"></span>1 conflict</span>
+        </div>
+      </div>
+      <div class="right">
+        <button class="btn btn-sync">↓ Sync</button>
+        <button class="btn btn-push-active">↑ Push <span class="sync-badge">4</span></button>
+        <button class="btn btn-sync">⑃ Merge</button>
+        <div class="sep"></div>
+        <button class="btn-icon">☀</button>
+        <button class="btn-icon">≡</button>
+      </div>
+    </header>
+    <div class="tab-bar">
+      <div class="tab-list">
+        <div class="tab tab--active">📁 gitwand-desktop <span class="tab-close">×</span></div>
+        <div class="tab">📁 gitwand-cli <span class="tab-close">×</span></div>
+        <div class="tab">📁 docs-site <span class="tab-close">×</span></div>
+      </div>
+      <button class="tab-new">+</button>
+    </div>
+    <div class="demo-surface">
+      <div class="card card-hero">
+        <h4>Commit activity</h4>
+        <div class="big">142</div>
+        <div style="opacity:.6; font-size:12px; margin-top:4px;">commits this week</div>
+      </div>
+      <div class="card"><h4>Open PRs</h4><div class="big">7</div><span class="badge">3 approved</span></div>
+      <div class="card"><h4>Conflicts resolved</h4><div class="big">23</div><span class="badge">+12% this week</span></div>
+      <div class="card"><h4>Branches</h4><div class="big">14</div><span class="badge">2 stale</span></div>
+      <div class="card"><h4>Merge queue</h4><div class="big">3</div><span class="badge">ready</span></div>
+    </div>
+  </div>
+</section>
+
+</body>
+</html>

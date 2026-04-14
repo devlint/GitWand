@@ -55,31 +55,31 @@ watch(() => props.targetBranch, checkConflicts, { immediate: true });
 
 <style scoped>
 .conflict-alert {
-  padding: 10px 12px;
-  border-radius: 6px;
-  border: 1px solid var(--color-warning, #f9e2af);
-  background: rgba(249, 226, 175, 0.08);
-  font-size: 13px;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-danger);
+  background: var(--color-danger-soft);
+  font-size: var(--font-size-md);
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-1);
 }
 
 .conflict-alert.warn {
-  border-color: var(--color-warning, #fab387);
-  background: rgba(250, 179, 135, 0.1);
+  border-color: var(--color-warning);
+  background: var(--color-warning-soft);
 }
 
 .conflict-alert.danger {
-  border-color: var(--color-error, #f38ba8);
-  background: rgba(243, 139, 168, 0.1);
+  border-color: var(--color-danger);
+  background: var(--color-danger-soft);
 }
 
 .conflict-alert-header {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-weight: 500;
+  gap: var(--space-1);
+  font-weight: var(--font-weight-medium);
 }
 
 .conflict-icon {
@@ -96,20 +96,20 @@ watch(() => props.targetBranch, checkConflicts, { immediate: true });
 }
 
 .conflict-file {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   font-family: "JetBrains Mono", "Fira Code", monospace;
-  color: var(--text-secondary, #a6adc8);
+  color: var(--color-text-secondary);
 }
 
 .conflict-file::before {
   content: "·";
-  margin-right: 6px;
-  color: var(--text-muted, #6c7086);
+  margin-right: var(--space-1);
+  color: var(--color-text-muted);
 }
 
 .conflict-stats {
-  font-size: 11px;
-  color: var(--text-muted, #6c7086);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
   padding-left: 28px;
 }
 </style>

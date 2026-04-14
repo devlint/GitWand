@@ -37,7 +37,7 @@ import {
   gitAddToGitignore,
 } from "../utils/backend";
 
-export type ViewMode = "changes" | "history" | "graph" | "prs";
+export type ViewMode = "dashboard" | "changes" | "history" | "graph" | "prs";
 
 export interface RepoFileEntry {
   path: string;
@@ -59,7 +59,7 @@ export function useGitRepo() {
   const loading = ref(false);
   const error = ref<string | null>(null);
   const successMessage = ref<string | null>(null);
-  const viewMode = ref<ViewMode>("changes");
+  const viewMode = ref<ViewMode>("dashboard");
 
   // Commit editor state
   const COMMIT_SIGNATURE = "\u{1FA84} Commit via GitWand";

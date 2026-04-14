@@ -95,54 +95,55 @@ const isMac = navigator.platform.toUpperCase().includes("MAC");
   align-items: center;
   justify-content: center;
   height: 100%;
-  gap: 16px;
-  padding: 40px;
+  gap: var(--space-6);
+  padding: var(--space-10);
   text-align: center;
 }
 
 .empty-visual {
-  margin-bottom: 8px;
+  margin-bottom: var(--space-4);
   animation: float 4s ease-in-out infinite;
 }
 
 @keyframes float {
   0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-6px); }
+  50%     { transform: translateY(-6px); }
 }
 
 .empty-title {
-  font-size: 18px;
-  font-weight: 600;
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: -0.01em;
 }
 
 .empty-desc {
-  font-size: 14px;
-  line-height: 1.6;
-  max-width: 320px;
+  font-size: var(--font-size-lg);
+  line-height: var(--line-height-normal);
+  max-width: 360px;
 }
 
 .empty-btn {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 24px;
-  border-radius: 8px;
-  font-size: 14px;
-  font-weight: 600;
+  gap: var(--space-4);
+  padding: var(--space-5) var(--space-8);
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
   background: var(--color-accent);
-  color: #fff;
-  transition: background 0.15s, transform 0.1s;
-  margin-top: 8px;
+  color: var(--color-accent-text);
+  transition: background var(--transition-base), transform var(--transition-fast), box-shadow var(--transition-base);
+  margin-top: var(--space-4);
+  box-shadow: var(--shadow-sm);
 }
 
 .empty-btn:hover {
   background: var(--color-accent-hover);
   transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
 }
 
-.empty-btn:active {
-  transform: translateY(0);
-}
+.empty-btn:active { transform: translateY(0); box-shadow: var(--shadow-xs); }
 
 /* ─── Recent repos ───────────────────────────────────── */
 
@@ -150,13 +151,13 @@ const isMac = navigator.platform.toUpperCase().includes("MAC");
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
-  margin-top: 16px;
+  gap: var(--space-5);
+  margin-top: var(--space-6);
 }
 
 .recent-label {
-  font-size: 11px;
-  font-weight: 600;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
@@ -164,29 +165,31 @@ const isMac = navigator.platform.toUpperCase().includes("MAC");
 .recent-cards {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--space-3);
   justify-content: center;
+  max-width: 560px;
 }
 
 .recent-card {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
-  border-radius: 8px;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-6);
+  border-radius: var(--radius-pill);
   border: 1px solid var(--color-border);
-  background: var(--color-bg);
+  background: var(--color-bg-secondary);
   color: var(--color-text);
-  font-size: 13px;
-  font-weight: 500;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-medium);
   cursor: pointer;
-  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+  transition: border-color var(--transition-base), background var(--transition-base), box-shadow var(--transition-base), transform var(--transition-fast);
 }
 
 .recent-card:hover {
   border-color: var(--color-accent);
-  background: var(--color-bg-secondary);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+  background: var(--color-accent-soft);
+  box-shadow: var(--shadow-xs);
+  transform: translateY(-1px);
 }
 
 .recent-card svg {
@@ -194,28 +197,25 @@ const isMac = navigator.platform.toUpperCase().includes("MAC");
   flex-shrink: 0;
 }
 
-.recent-card:hover svg {
-  color: var(--color-accent);
-}
+.recent-card:hover svg { color: var(--color-accent); }
+.recent-card:hover .recent-card-name { color: var(--color-accent); }
 
-.recent-card-name {
-  white-space: nowrap;
-}
+.recent-card-name { white-space: nowrap; }
 
 /* ─── Hint ────────────────────────────────────────────── */
 
 .empty-hint {
-  font-size: 12px;
-  margin-top: 8px;
+  font-size: var(--font-size-base);
+  margin-top: var(--space-4);
 }
 
 .empty-hint kbd {
   display: inline-block;
-  padding: 1px 6px;
-  font-size: 11px;
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--font-size-sm);
   font-family: var(--font-mono);
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 </style>

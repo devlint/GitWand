@@ -759,12 +759,12 @@ function onKeyDown(e: KeyboardEvent) {
 .settings-panel {
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
-  border-radius: 12px;
+  border-radius: var(--radius-2xl);
   width: min(520px, 90vw);
   max-height: 85vh;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-xl);
   animation: spSlideIn 0.2s ease-out;
 }
 
@@ -777,12 +777,12 @@ function onKeyDown(e: KeyboardEvent) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 20px 12px;
+  padding: var(--space-6) var(--space-7) var(--space-5);
 }
 
 .sp-title {
-  font-size: 15px;
-  font-weight: 600;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
   margin: 0;
 }
 
@@ -791,38 +791,38 @@ function onKeyDown(e: KeyboardEvent) {
   border: none;
   color: var(--color-text-muted);
   cursor: pointer;
-  padding: 4px;
-  border-radius: 4px;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
   display: flex;
   align-items: center;
 }
 
 .sp-close:hover {
   color: var(--color-text);
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--color-bg-tertiary);
 }
 
 /* ─── Tab bar ──────────────────────────────────────────── */
 .sp-tabs {
   display: flex;
   gap: 0;
-  padding: 0 20px;
+  padding: 0 var(--space-7);
   border-bottom: 1px solid var(--color-border);
 }
 
 .sp-tab {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 14px;
-  font-size: 12px;
-  font-weight: 500;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
   color: var(--color-text-muted);
   background: none;
   border: none;
   border-bottom: 2px solid transparent;
   cursor: pointer;
-  transition: color 0.12s, border-color 0.12s;
+  transition: color var(--transition-fast), border-color var(--transition-fast);
   white-space: nowrap;
 }
 
@@ -841,10 +841,10 @@ function onKeyDown(e: KeyboardEvent) {
 
 /* ─── Body ─────────────────────────────────────────────── */
 .sp-body {
-  padding: 16px 20px;
+  padding: var(--space-6) var(--space-7);
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: var(--space-6);
   overflow-y: auto;
   min-height: 180px;
 }
@@ -852,12 +852,12 @@ function onKeyDown(e: KeyboardEvent) {
 .sp-row {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-3);
 }
 
 .sp-label {
-  font-size: 12px;
-  font-weight: 600;
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
   color: var(--color-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -865,14 +865,14 @@ function onKeyDown(e: KeyboardEvent) {
 
 .sp-select,
 .sp-input {
-  padding: 8px 10px;
-  font-size: 13px;
+  padding: var(--space-4) var(--space-3);
+  font-size: var(--font-size-md);
   background: var(--color-bg);
   color: var(--color-text);
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   outline: none;
-  transition: border-color 0.15s;
+  transition: border-color var(--transition-base);
 }
 
 .sp-select:focus,
@@ -885,8 +885,8 @@ function onKeyDown(e: KeyboardEvent) {
   appearance: none;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5l3 3 3-3' stroke='%23888' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
-  background-position: right 10px center;
-  padding-right: 30px;
+  background-position: right var(--space-3) center;
+  padding-right: var(--space-8);
 }
 
 .sp-input::placeholder {
@@ -894,14 +894,14 @@ function onKeyDown(e: KeyboardEvent) {
 }
 
 .sp-row--checkbox {
-  gap: 4px;
+  gap: var(--space-2);
 }
 
 .sp-checkbox-label {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 13px;
+  gap: var(--space-4);
+  font-size: var(--font-size-md);
   cursor: pointer;
 }
 
@@ -913,13 +913,13 @@ function onKeyDown(e: KeyboardEvent) {
 }
 
 .sp-hint {
-  font-size: 11px;
+  font-size: var(--font-size-sm);
   color: var(--color-text-muted);
-  padding-left: 24px;
+  padding-left: var(--space-8);
 }
 
 .sp-hint--ok {
-  color: var(--color-success, #22c55e);
+  color: var(--color-success);
 }
 
 .sp-link {
@@ -934,7 +934,7 @@ function onKeyDown(e: KeyboardEvent) {
 .sp-range-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-3);
 }
 
 .sp-range {
@@ -945,7 +945,7 @@ function onKeyDown(e: KeyboardEvent) {
 }
 
 .sp-range-value {
-  font-size: 12px;
+  font-size: var(--font-size-base);
   color: var(--color-text-muted);
   min-width: 36px;
   text-align: right;
@@ -954,7 +954,7 @@ function onKeyDown(e: KeyboardEvent) {
 /* ─── API key row ──────────────────────────────────────── */
 .sp-key-row {
   display: flex;
-  gap: 6px;
+  gap: var(--space-3);
 }
 
 .sp-input--key {
@@ -970,10 +970,10 @@ function onKeyDown(e: KeyboardEvent) {
   width: 36px;
   background: var(--color-bg);
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   color: var(--color-text-muted);
   cursor: pointer;
-  transition: color 0.12s, border-color 0.12s;
+  transition: color var(--transition-fast), border-color var(--transition-fast);
 }
 
 .sp-key-toggle:hover {
@@ -984,12 +984,12 @@ function onKeyDown(e: KeyboardEvent) {
 /* ─── Info box ─────────────────────────────────────────── */
 .sp-info-box {
   display: flex;
-  gap: 10px;
-  padding: 12px 14px;
-  border-radius: 8px;
+  gap: var(--space-3);
+  padding: var(--space-5) var(--space-5);
+  border-radius: var(--radius-md);
   background: var(--color-bg);
   border: 1px solid var(--color-border);
-  font-size: 12px;
+  font-size: var(--font-size-base);
   line-height: 1.5;
   color: var(--color-text-muted);
 }
@@ -1008,84 +1008,84 @@ function onKeyDown(e: KeyboardEvent) {
   display: flex;
   gap: 0;
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   overflow: hidden;
 }
 
 .sp-auth-btn {
   flex: 1;
-  padding: 5px 12px;
-  font-size: 12px;
+  padding: var(--space-1) var(--space-5);
+  font-size: var(--font-size-base);
   background: transparent;
   border: none;
   color: var(--color-text-muted);
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all var(--transition-base);
 }
 
 .sp-auth-btn:first-child { border-right: 1px solid var(--color-border); }
 
 .sp-auth-btn--active {
   background: var(--color-accent);
-  color: #fff;
-  font-weight: 600;
+  color: var(--color-accent-text);
+  font-weight: var(--font-weight-semibold);
 }
 
 .sp-connect-flow {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-4);
 }
 
 .sp-connect-start {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-2);
 }
 
 .sp-connect-btn {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 16px;
-  border-radius: 8px;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-6);
+  border-radius: var(--radius-md);
   border: 1px solid var(--color-accent);
-  background: rgba(203, 166, 247, 0.1);
+  background: var(--color-accent-soft);
   color: var(--color-accent);
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all var(--transition-base);
 }
 
 .sp-connect-btn:hover {
-  background: rgba(203, 166, 247, 0.2);
+  opacity: 0.8;
 }
 
 .sp-connect-waiting {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-4);
 }
 
 .sp-connect-instruction {
-  font-size: 12px;
+  font-size: var(--font-size-base);
   color: var(--color-text-muted);
   line-height: 1.6;
   margin: 0;
 }
 
 .sp-connect-save-btn {
-  padding: 4px 12px;
-  border-radius: 4px;
+  padding: var(--space-2) var(--space-5);
+  border-radius: var(--radius-sm);
   border: 1px solid transparent;
   background: var(--color-accent);
-  color: #1e1e2e;
-  font-size: 12px;
-  font-weight: 600;
+  color: var(--color-accent-text);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
   cursor: pointer;
   white-space: nowrap;
-  transition: filter 0.15s;
+  transition: filter var(--transition-base);
 }
 
 .sp-connect-save-btn:hover { filter: brightness(1.1); }
@@ -1093,22 +1093,22 @@ function onKeyDown(e: KeyboardEvent) {
 
 .sp-connect-error {
   font-size: 12px;
-  color: var(--color-error, #f38ba8);
+  color: var(--color-danger);
 }
 
 .sp-connect-error-block {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-2);
 }
 
 .sp-connect-success {
-  font-size: 13px;
-  color: var(--color-success, #a6e3a1);
-  font-weight: 600;
-  padding: 8px;
-  background: rgba(166, 227, 161, 0.1);
-  border-radius: 6px;
+  font-size: var(--font-size-md);
+  color: var(--color-success);
+  font-weight: var(--font-weight-semibold);
+  padding: var(--space-4);
+  background: var(--color-success-soft);
+  border-radius: var(--radius-sm);
   text-align: center;
 }
 
@@ -1116,7 +1116,7 @@ function onKeyDown(e: KeyboardEvent) {
   background: none;
   border: none;
   color: var(--color-text-muted);
-  font-size: 11px;
+  font-size: var(--font-size-sm);
   cursor: pointer;
   text-decoration: underline;
   padding: 0;
@@ -1128,33 +1128,33 @@ function onKeyDown(e: KeyboardEvent) {
 .sp-connected-badge {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-radius: 6px;
-  background: rgba(166, 227, 161, 0.1);
-  border: 1px solid rgba(166, 227, 161, 0.3);
-  font-size: 12px;
-  color: var(--color-success, #a6e3a1);
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-sm);
+  background: var(--color-success-soft);
+  border: 1px solid var(--color-success);
+  font-size: var(--font-size-base);
+  color: var(--color-success);
 }
 
 .sp-connected-dot {
   width: 8px;
   height: 8px;
-  border-radius: 50%;
-  background: var(--color-success, #a6e3a1);
+  border-radius: var(--radius-pill);
+  background: var(--color-success);
   flex-shrink: 0;
 }
 
 .sp-disconnect-btn {
   margin-left: auto;
-  padding: 2px 8px;
-  border-radius: 4px;
+  padding: var(--space-1) var(--space-4);
+  border-radius: var(--radius-sm);
   border: 1px solid rgba(243, 139, 168, 0.4);
   background: transparent;
   color: var(--color-error, #f38ba8);
-  font-size: 11px;
+  font-size: var(--font-size-sm);
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all var(--transition-base);
 }
 
 .sp-disconnect-btn:hover {

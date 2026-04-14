@@ -93,11 +93,11 @@ function managerIcon(manager: string): string {
 .monorepo-panel {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 8px 10px;
-  background: var(--bg-secondary, #1e1e2e);
-  border-radius: 6px;
-  border: 1px solid var(--border-color, #313244);
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-2);
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
 }
 
 .monorepo-header {
@@ -107,27 +107,28 @@ function managerIcon(manager: string): string {
 }
 
 .monorepo-title {
-  font-size: 12px;
-  font-weight: 600;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
 }
 
 .monorepo-count {
-  color: var(--text-muted, #6c7086);
+  color: var(--color-text-muted);
   font-weight: 400;
 }
 
 .monorepo-filter {
-  background: var(--bg-tertiary, #11111b);
-  border: 1px solid var(--border-color, #313244);
-  border-radius: 4px;
-  padding: 4px 8px;
-  font-size: 12px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--font-size-xs);
   color: inherit;
   outline: none;
 }
 
 .monorepo-filter:focus {
-  border-color: var(--color-accent, #cba6f7);
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
 }
 
 .monorepo-list {
@@ -141,37 +142,37 @@ function managerIcon(manager: string): string {
 .monorepo-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 5px 8px;
-  border-radius: 4px;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: background 0.15s;
-  font-size: 12px;
+  transition: background var(--transition-base);
+  font-size: var(--font-size-xs);
 }
 
 .monorepo-item:hover {
-  background: var(--bg-hover, rgba(255, 255, 255, 0.05));
+  background: var(--color-bg-hover);
 }
 
 .monorepo-pkg-name {
-  font-weight: 600;
-  color: var(--color-accent, #cba6f7);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-accent);
   white-space: nowrap;
 }
 
 .monorepo-pkg-path {
   flex: 1;
-  color: var(--text-muted, #6c7086);
+  color: var(--color-text-muted);
   font-family: "JetBrains Mono", "Fira Code", monospace;
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .monorepo-pkg-version {
-  color: var(--text-muted, #6c7086);
-  font-size: 11px;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
   flex-shrink: 0;
 }
 </style>

@@ -169,6 +169,19 @@ function onCommitKeydown(e: KeyboardEvent) {
     <div class="view-tabs">
       <button
         class="view-tab"
+        :class="{ 'view-tab--active': viewMode === 'dashboard' }"
+        @click="emit('changeView', 'dashboard')"
+        title="Dashboard"
+      >
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style="vertical-align: -2px;">
+          <rect x="1" y="1" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.3"/>
+          <rect x="8" y="1" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.3"/>
+          <rect x="1" y="8" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.3"/>
+          <rect x="8" y="8" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.3"/>
+        </svg>
+      </button>
+      <button
+        class="view-tab"
         :class="{ 'view-tab--active': viewMode === 'changes' }"
         @click="emit('changeView', 'changes')"
       >
@@ -426,14 +439,14 @@ function onCommitKeydown(e: KeyboardEvent) {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  padding: 10px 12px;
-  font-size: 12px;
-  font-weight: 500;
+  gap: var(--space-3);
+  padding: var(--space-5) var(--space-5);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
   color: var(--color-text-muted);
   background: none;
   border-bottom: 2px solid transparent;
-  transition: color 0.15s, border-color 0.15s;
+  transition: color var(--transition-base), border-color var(--transition-base);
 }
 
 .view-tab:hover {
@@ -446,12 +459,12 @@ function onCommitKeydown(e: KeyboardEvent) {
 }
 
 .tab-badge {
-  font-size: 10px;
-  font-weight: 600;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
   background: var(--color-accent);
-  color: #fff;
-  padding: 1px 5px;
-  border-radius: 8px;
+  color: var(--color-accent-text);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-pill);
   font-variant-numeric: tabular-nums;
 }
 
@@ -483,10 +496,10 @@ function onCommitKeydown(e: KeyboardEvent) {
 .section-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 14px;
-  font-size: 11px;
-  font-weight: 600;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-6);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--color-text-muted);
@@ -498,8 +511,8 @@ function onCommitKeydown(e: KeyboardEvent) {
 
 .section-icon {
   font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 700;
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-bold);
   width: 16px;
   text-align: center;
 }
@@ -511,8 +524,8 @@ function onCommitKeydown(e: KeyboardEvent) {
 .section-count {
   font-variant-numeric: tabular-nums;
   background: var(--color-bg-tertiary);
-  padding: 1px 6px;
-  border-radius: 8px;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-pill);
 }
 
 .section-action {
@@ -521,13 +534,13 @@ function onCommitKeydown(e: KeyboardEvent) {
   justify-content: center;
   width: 20px;
   height: 20px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   font-family: var(--font-mono);
-  font-size: 14px;
-  font-weight: 700;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
   color: var(--color-text-muted);
   background: none;
-  transition: background 0.1s, color 0.1s;
+  transition: background var(--transition-fast), color var(--transition-fast);
 }
 
 .section-action:hover {
@@ -542,10 +555,10 @@ function onCommitKeydown(e: KeyboardEvent) {
 .file-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 14px 6px 18px;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-6) var(--space-3) 18px;
   cursor: pointer;
-  transition: background 0.1s;
+  transition: background var(--transition-fast);
   border-left: 3px solid transparent;
 }
 
@@ -596,8 +609,8 @@ function onCommitKeydown(e: KeyboardEvent) {
 }
 
 .file-status-badge {
-  font-size: 12px;
-  font-weight: 700;
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-bold);
   width: 16px;
   text-align: center;
   flex-shrink: 0;
@@ -612,15 +625,15 @@ function onCommitKeydown(e: KeyboardEvent) {
 }
 
 .file-name {
-  font-size: 12px;
-  font-weight: 500;
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .file-dir {
-  font-size: 10px;
+  font-size: var(--font-size-xs);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -632,14 +645,14 @@ function onCommitKeydown(e: KeyboardEvent) {
   justify-content: center;
   width: 20px;
   height: 20px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   font-family: var(--font-mono);
-  font-size: 14px;
-  font-weight: 700;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
   color: var(--color-text-muted);
   background: none;
   opacity: 0;
-  transition: opacity 0.1s, background 0.1s, color 0.1s;
+  transition: opacity var(--transition-fast), background var(--transition-fast), color var(--transition-fast);
   flex-shrink: 0;
 }
 
@@ -657,41 +670,42 @@ function onCommitKeydown(e: KeyboardEvent) {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 12px;
-  padding: 40px 20px;
+  gap: var(--space-5);
+  padding: var(--space-10) var(--space-7);
 }
 
 .empty-text {
-  font-size: 13px;
+  font-size: var(--font-size-md);
   color: var(--color-text-muted);
 }
 
 /* Commit panel — fixed at bottom of sidebar */
 .commit-panel {
   border-top: 1px solid var(--color-border);
-  padding: 10px 12px;
+  padding: var(--space-5) var(--space-5);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-4);
   background: var(--color-bg-secondary);
   flex-shrink: 0;
 }
 
 .commit-summary {
   width: 100%;
-  padding: 7px 10px;
-  font-size: 11px;
+  padding: var(--space-3) var(--space-5);
+  font-size: var(--font-size-sm);
   line-height: 1.5;
   background: var(--color-bg);
   color: var(--color-text);
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   outline: none;
-  transition: border-color 0.15s;
+  transition: border-color var(--transition-base);
 }
 
 .commit-summary:focus {
   border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
 }
 
 .commit-summary::placeholder {
@@ -700,22 +714,23 @@ function onCommitKeydown(e: KeyboardEvent) {
 
 .commit-description {
   width: 100%;
-  padding: 7px 10px;
-  font-size: 11px;
+  padding: var(--space-3) var(--space-5);
+  font-size: var(--font-size-sm);
   line-height: 1.5;
   background: var(--color-bg);
   color: var(--color-text);
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   resize: vertical;
   min-height: 38px;
   max-height: 120px;
   outline: none;
-  transition: border-color 0.15s;
+  transition: border-color var(--transition-base);
 }
 
 .commit-description:focus {
   border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
 }
 
 .commit-description::placeholder {
@@ -725,22 +740,22 @@ function onCommitKeydown(e: KeyboardEvent) {
 
 .commit-actions {
   display: flex;
-  gap: 6px;
+  gap: var(--space-3);
 }
 
 .commit-stage-all {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
-  padding: 7px 10px;
-  font-size: 11px;
-  font-weight: 500;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-5);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
   background: var(--color-bg-tertiary);
   color: var(--color-text);
   border: 1px solid var(--color-border);
-  border-radius: 6px;
-  transition: background 0.15s, border-color 0.15s;
+  border-radius: var(--radius-md);
+  transition: background var(--transition-base), border-color var(--transition-base);
   white-space: nowrap;
 }
 
@@ -755,14 +770,14 @@ function onCommitKeydown(e: KeyboardEvent) {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  padding: 7px 14px;
-  font-size: 12px;
-  font-weight: 600;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-6);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
   background: var(--color-accent);
-  color: #fff;
-  border-radius: 6px;
-  transition: background 0.15s, opacity 0.15s;
+  color: var(--color-accent-text);
+  border-radius: var(--radius-pill);
+  transition: background var(--transition-base), opacity var(--transition-base);
 }
 
 .commit-btn:hover:not(:disabled) {
@@ -783,7 +798,7 @@ function onCommitKeydown(e: KeyboardEvent) {
 }
 
 .commit-hint {
-  font-size: 10px;
+  font-size: var(--font-size-xs);
   text-align: center;
 }
 </style>
@@ -796,13 +811,13 @@ function onCommitKeydown(e: KeyboardEvent) {
   min-width: 200px;
   background: var(--color-bg-secondary, #1e1e2e);
   border: 1px solid var(--color-border, #313244);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-  padding: 4px;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  padding: var(--space-2);
   display: flex;
   flex-direction: column;
-  gap: 1px;
-  animation: ctx-fade-in 0.1s ease;
+  gap: var(--space-1);
+  animation: ctx-fade-in var(--transition-fast) ease;
 }
 
 @keyframes ctx-fade-in {
@@ -813,17 +828,17 @@ function onCommitKeydown(e: KeyboardEvent) {
 .ctx-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 7px 10px;
-  font-size: 12px;
-  font-weight: 500;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-5);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
   color: var(--color-text, #cdd6f4);
   background: none;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   width: 100%;
   text-align: left;
   cursor: pointer;
-  transition: background 0.1s, color 0.1s;
+  transition: background var(--transition-fast), color var(--transition-fast);
 }
 
 .ctx-item:hover {
@@ -841,6 +856,6 @@ function onCommitKeydown(e: KeyboardEvent) {
 .ctx-separator {
   height: 1px;
   background: var(--color-border, #313244);
-  margin: 3px 6px;
+  margin: var(--space-xs) var(--space-3);
 }
 </style>

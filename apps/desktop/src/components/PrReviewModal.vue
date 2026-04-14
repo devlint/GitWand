@@ -169,7 +169,7 @@ function handleKeydown(e: KeyboardEvent) {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  box-shadow: 0 16px 48px rgba(0,0,0,0.4);
+  box-shadow: var(--shadow-xl);
 }
 
 .prm-header {
@@ -204,8 +204,8 @@ function handleKeydown(e: KeyboardEvent) {
   gap: 8px;
   margin: 12px 16px 0;
   padding: 8px 12px;
-  background: rgba(203,166,247,0.08);
-  border: 1px solid rgba(203,166,247,0.25);
+  background: var(--color-accent-soft);
+  border: 1px solid var(--color-accent);
   border-radius: 6px;
   font-size: 12px;
   color: var(--color-text);
@@ -234,7 +234,7 @@ function handleKeydown(e: KeyboardEvent) {
   align-items: center;
 }
 
-.prm-required { color: #f38ba8; font-weight: 500; text-transform: none; }
+.prm-required { color: var(--color-danger); font-weight: 500; text-transform: none; }
 .prm-optional { color: var(--color-text-muted); font-weight: 400; text-transform: none; }
 
 /* Radio group */
@@ -256,8 +256,8 @@ function handleKeydown(e: KeyboardEvent) {
   color: var(--color-text);
   transition: border-color 0.15s, background 0.15s;
 }
-.prm-radio-label:hover { border-color: var(--color-accent); background: rgba(203,166,247,0.06); }
-.prm-radio-label--active { border-color: var(--color-accent); background: rgba(203,166,247,0.10); }
+.prm-radio-label:hover { border-color: var(--color-accent); background: var(--color-accent-soft); }
+.prm-radio-label--active { border-color: var(--color-accent); background: var(--color-accent-soft); }
 
 .prm-radio { display: none; }
 .prm-radio-icon { font-size: 15px; }
@@ -307,12 +307,12 @@ function handleKeydown(e: KeyboardEvent) {
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  color: #fff;
+  color: var(--color-accent-text);
   background: var(--color-accent);
   transition: filter 0.15s;
 }
-.prm-submit-btn--approve { background: #a6e3a1; color: #1e1e2e; }
-.prm-submit-btn--request-changes { background: #f38ba8; color: #1e1e2e; }
+.prm-submit-btn--approve { background: var(--color-success); color: var(--color-success-text); }
+.prm-submit-btn--request-changes { background: var(--color-danger); color: var(--color-danger-text); }
 .prm-submit-btn--comment { background: var(--color-accent); }
 .prm-submit-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .prm-submit-btn:not(:disabled):hover { filter: brightness(1.1); }

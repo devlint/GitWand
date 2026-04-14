@@ -33,20 +33,20 @@ const graphWidth = computed(() => {
 
 const totalHeight = computed(() => props.commits.length * ROW_H);
 
-// ─── Lane colours ────────────────────────────────────
-const LANE_COLORS = [
-  "#3b82f6", // blue
-  "#22c55e", // green
-  "#f59e0b", // amber
-  "#ef4444", // red
-  "#a855f7", // purple
-  "#06b6d4", // cyan
-  "#ec4899", // pink
-  "#84cc16", // lime
+// ─── Lane colours (use CSS tokens via computed) ────────
+const LANE_COLORS_TOKENS = [
+  "var(--color-info)",       // blue
+  "var(--color-success)",    // green
+  "var(--color-warning)",    // amber
+  "var(--color-danger)",     // red
+  "var(--color-accent)",     // purple
+  "var(--color-info)",       // cyan (reuse info)
+  "var(--color-accent)",     // pink (reuse accent)
+  "var(--color-success)",    // lime (reuse success)
 ];
 
 function laneColor(lane: number): string {
-  return LANE_COLORS[lane % LANE_COLORS.length];
+  return LANE_COLORS_TOKENS[lane % LANE_COLORS_TOKENS.length];
 }
 
 // ─── SVG path helpers ────────────────────────────────
@@ -249,7 +249,7 @@ function commitRefs(entry: GitLogEntry) {
 .cg-ref--branch,
 .cg-ref--head {
   background: var(--color-accent);
-  color: #fff;
+  color: var(--color-accent-text);
 }
 
 .cg-ref--remote {
@@ -259,8 +259,8 @@ function commitRefs(entry: GitLogEntry) {
 }
 
 .cg-ref--tag {
-  background: #f59e0b;
-  color: #fff;
+  background: var(--color-warning);
+  color: var(--color-accent-text);
 }
 
 .cg-msg {

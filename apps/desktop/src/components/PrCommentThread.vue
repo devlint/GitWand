@@ -226,7 +226,7 @@ function timeAgo(dateStr: string): string {
   height: 20px;
   border-radius: 50%;
   background: var(--color-accent);
-  color: #fff;
+  color: var(--color-accent-text);
   font-size: 10px;
   font-weight: 700;
   display: flex;
@@ -264,7 +264,7 @@ function timeAgo(dateStr: string): string {
   transition: opacity 0.1s;
 }
 .pct-action-btn:hover { opacity: 1; background: var(--color-bg-tertiary); }
-.pct-action-btn--del:hover { background: rgba(243,139,168,0.15); }
+.pct-action-btn--del:hover { background: var(--color-danger-soft); }
 
 .pct-body {
   color: var(--color-text);
@@ -302,7 +302,7 @@ function timeAgo(dateStr: string): string {
 }
 
 :deep(.comment-suggestion-label) {
-  background: rgba(203,166,247,0.15);
+  background: var(--color-accent-soft);
   padding: 3px 8px;
   font-size: 10px;
   font-weight: 600;
@@ -323,16 +323,16 @@ function timeAgo(dateStr: string): string {
 }
 
 .pct-apply-btn {
-  background: rgba(166,227,161,0.15);
-  border: 1px solid rgba(166,227,161,0.4);
+  background: var(--color-success-soft);
+  border: 1px solid var(--color-success);
   border-radius: 4px;
-  color: #a6e3a1;
+  color: var(--color-success);
   padding: 3px 10px;
   font-size: 11px;
   cursor: pointer;
   transition: background 0.15s;
 }
-.pct-apply-btn:hover { background: rgba(166,227,161,0.25); }
+.pct-apply-btn:hover { background: var(--color-success); color: var(--color-success-text); }
 
 /* Edit box */
 .pct-edit-box { display: flex; flex-direction: column; gap: 6px; }
@@ -387,7 +387,7 @@ function timeAgo(dateStr: string): string {
   background: var(--color-accent);
   border: none;
   border-radius: 4px;
-  color: #fff;
+  color: var(--color-accent-text);
   padding: 3px 12px;
   font-size: 11px;
   cursor: pointer;

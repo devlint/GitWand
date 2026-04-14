@@ -154,7 +154,7 @@ function stateChip(state: string) {
   background: var(--color-accent);
   border: none;
   border-radius: 5px;
-  color: #fff;
+  color: var(--color-accent-text);
   font-size: 11px;
   font-weight: 600;
   padding: 5px 10px;
@@ -205,7 +205,7 @@ function stateChip(state: string) {
   background: var(--color-accent);
   border: none;
   border-radius: 4px;
-  color: #fff;
+  color: var(--color-accent-text);
   font-size: 11px;
   font-weight: 600;
   padding: 3px 10px;
@@ -221,8 +221,8 @@ function stateChip(state: string) {
   font-size: 11px;
   flex-shrink: 0;
 }
-.pls-msg--error { background: rgba(243,139,168,0.1); color: #f38ba8; }
-.pls-msg--success { background: rgba(166,227,161,0.1); color: #a6e3a1; cursor: pointer; }
+.pls-msg--error { background: var(--color-danger-soft); color: var(--color-danger); }
+.pls-msg--success { background: var(--color-success-soft); color: var(--color-success); cursor: pointer; }
 
 /* Placeholder */
 .pls-placeholder {
@@ -261,8 +261,8 @@ function stateChip(state: string) {
 }
 .pls-item:hover { background: var(--color-bg-tertiary); }
 .pls-item--active {
-  background: rgba(203,166,247,0.1);
-  border-color: rgba(203,166,247,0.35);
+  background: var(--color-accent-soft);
+  border-color: var(--color-accent);
 }
 
 .pls-item-top {
@@ -285,9 +285,9 @@ function stateChip(state: string) {
   border-radius: 3px;
   border: 1px solid;
 }
-.pls-chip--open { background: rgba(166,227,161,0.15); color: #16a34a; border-color: rgba(22,163,74,0.3); }
-.pls-chip--merged { background: rgba(203,166,247,0.15); color: #6d28d9; border-color: rgba(109,40,217,0.3); }
-.pls-chip--closed { background: rgba(243,139,168,0.12); color: #dc2626; border-color: rgba(220,38,38,0.3); }
+.pls-chip--open { background: var(--color-success-soft); color: var(--color-success); border-color: var(--color-success); }
+.pls-chip--merged { background: var(--color-accent-soft); color: var(--color-accent); border-color: var(--color-accent); }
+.pls-chip--closed { background: var(--color-danger-soft); color: var(--color-danger); border-color: var(--color-danger); }
 .pls-chip--draft { background: var(--color-bg-tertiary); color: var(--color-text-muted); border-color: var(--color-border); }
 
 .pls-time {
@@ -328,6 +328,6 @@ function stateChip(state: string) {
   font-weight: 600;
 }
 
-.pls-add { color: #16a34a; }
-.pls-del { color: #dc2626; }
+.pls-add { color: var(--color-success); }
+.pls-del { color: var(--color-danger); }
 </style>
