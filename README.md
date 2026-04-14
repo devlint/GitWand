@@ -22,7 +22,7 @@
   <img alt="License" src="https://img.shields.io/badge/license-MIT-8B5CF6">
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-100%25-3178C6">
   <img alt="Tests" src="https://img.shields.io/badge/tests-332%20passing-22c55e">
-  <img alt="Version" src="https://img.shields.io/badge/version-1.0.1-22c55e">
+  <img alt="Version" src="https://img.shields.io/badge/version-1.1.0-22c55e">
 </p>
 
 ---

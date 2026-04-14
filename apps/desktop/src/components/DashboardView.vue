@@ -143,28 +143,54 @@ function formatNumber(n: number): string {
 
 // ─── Markdown → HTML (basic) ───────────────────────────────
 function renderMarkdown(md: string): string {
-  let html = md
+  // ── Phase 0: strip the HTML header block (logo + title + nav + badges)
+  // GitHub READMEs often start with raw HTML for centering — we render
+  // a clean version ourselves instead of trying to parse it.
+  const headerInfo = extractReadmeHeader(md);
+  let body = headerInfo.rest;
+
+  let html = body
     // Code blocks (fenced)
     .replace(/```(\w*)\n([\s\S]*?)```/g, (_m, _lang, code) => {
       return `<pre class="md-code-block"><code>${escapeHtml(code.trimEnd())}</code></pre>`;
     })
-    // Headings
-    .replace(/^######\s+(.+)$/gm, "<h6>$1</h6>")
-    .replace(/^#####\s+(.+)$/gm, "<h5>$1</h5>")
-    .replace(/^####\s+(.+)$/gm, "<h4>$1</h4>")
-    .replace(/^###\s+(.+)$/gm, "<h3>$1</h3>")
-    .replace(/^##\s+(.+)$/gm, "<h2>$1</h2>")
-    .replace(/^#\s+(.+)$/gm, "<h1>$1</h1>")
+    // Tables (simple GFM: | col | col |)
+    .replace(/(?:^\|.+\|\s*\n)(^\|[-| :]+\|\s*\n)((?:^\|.+\|\s*\n)*)/gm, (_m, _sep, bodyRows, _o, fullStr) => {
+      // Re-extract header from the match (line before separator)
+      const lines = _m.trim().split("\n");
+      const headCells = lines[0].split("|").filter(c => c.trim()).map(c => `<th>${c.trim()}</th>`).join("");
+      const rows = lines.slice(2).map(line => {
+        const cells = line.split("|").filter(c => c.trim()).map(c => `<td>${c.trim()}</td>`).join("");
+        return `<tr>${cells}</tr>`;
+      }).join("");
+      return `<table class="md-table"><thead><tr>${headCells}</tr></thead><tbody>${rows}</tbody></table>`;
+    })
+    // Headings (with auto-generated IDs for anchor links)
+    .replace(/^######\s+(.+)$/gm, (_m, t) => `<h6 id="${slugify(t)}">${t}</h6>`)
+    .replace(/^#####\s+(.+)$/gm, (_m, t) => `<h5 id="${slugify(t)}">${t}</h5>`)
+    .replace(/^####\s+(.+)$/gm, (_m, t) => `<h4 id="${slugify(t)}">${t}</h4>`)
+    .replace(/^###\s+(.+)$/gm, (_m, t) => `<h3 id="${slugify(t)}">${t}</h3>`)
+    .replace(/^##\s+(.+)$/gm, (_m, t) => `<h2 id="${slugify(t)}">${t}</h2>`)
+    .replace(/^#\s+(.+)$/gm, (_m, t) => `<h1 id="${slugify(t)}">${t}</h1>`)
+    // Checkboxes (must come before generic lists)
+    .replace(/^[\s]*[-*]\s+\[x\]\s+(.+)$/gm, '<li class="md-check md-checked">$1</li>')
+    .replace(/^[\s]*[-*]\s+\[ \]\s+(.+)$/gm, '<li class="md-check">$1</li>')
     // Bold & italic
     .replace(/\*\*\*(.+?)\*\*\*/g, "<strong><em>$1</em></strong>")
     .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
     .replace(/\*(.+?)\*/g, "<em>$1</em>")
     // Inline code
     .replace(/`([^`]+)`/g, '<code class="md-inline-code">$1</code>')
+    // Images (must come BEFORE links to avoid ![...](...) being eaten by link regex)
+    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_m, alt: string, src: string) => {
+      // Skip relative paths that won't resolve in the dashboard context
+      if (src.startsWith("assets/") || src.startsWith("./") || src.startsWith("../")) {
+        return `<span class="md-img-placeholder" title="${escapeHtml(alt)}">${escapeHtml(alt || "image")}</span>`;
+      }
+      return `<img src="${src}" alt="${escapeHtml(alt)}" class="md-img">`;
+    })
     // Links
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" class="md-link">$1</a>')
-    // Images (render as alt text)
-    .replace(/!\[([^\]]*)\]\([^)]+\)/g, '<span class="md-img-alt">[$1]</span>')
     // Horizontal rules
     .replace(/^---+$/gm, '<hr class="md-hr">')
     // Unordered lists
@@ -172,10 +198,12 @@ function renderMarkdown(md: string): string {
     // Ordered lists
     .replace(/^[\s]*\d+\.\s+(.+)$/gm, '<li>$1</li>')
     // Blockquote
-    .replace(/^>\s+(.+)$/gm, '<blockquote class="md-blockquote">$1</blockquote>');
+    .replace(/^>\s+(.+)$/gm, '<blockquote class="md-blockquote">$1</blockquote>')
+    // Passthrough remaining HTML blocks (img, a, p, div, details, summary)
+    // Already valid HTML → keep as-is
 
   // Wrap consecutive <li> in <ul>
-  html = html.replace(/((?:<li>.*<\/li>\s*)+)/g, "<ul>$1</ul>");
+  html = html.replace(/((?:<li[^>]*>.*<\/li>\s*)+)/g, "<ul>$1</ul>");
 
   // Paragraphs — wrap standalone lines
   html = html
@@ -185,12 +213,17 @@ function renderMarkdown(md: string): string {
       if (!trimmed) return "";
       if (
         trimmed.startsWith("<h") ||
+        trimmed.startsWith("<p") ||
         trimmed.startsWith("<pre") ||
         trimmed.startsWith("<ul") ||
         trimmed.startsWith("<ol") ||
+        trimmed.startsWith("<table") ||
         trimmed.startsWith("<blockquote") ||
         trimmed.startsWith("<hr") ||
-        trimmed.startsWith("<li")
+        trimmed.startsWith("<li") ||
+        trimmed.startsWith("<img") ||
+        trimmed.startsWith("<div") ||
+        trimmed.startsWith("<details")
       ) {
         return trimmed;
       }
@@ -198,7 +231,87 @@ function renderMarkdown(md: string): string {
     })
     .join("\n");
 
-  return html;
+  return headerInfo.headerHtml + html;
+}
+
+/**
+ * Extract the GitHub-style HTML header from a README:
+ * logo image, title, tagline, navigation links, badges.
+ * Returns clean rendered HTML + the remaining markdown body.
+ */
+function extractReadmeHeader(md: string): { headerHtml: string; rest: string } {
+  // Detect HTML header blocks: lines starting with < until we hit a markdown
+  // heading (## ...) or a line that doesn't start with < and isn't blank
+  const lines = md.split("\n");
+  let headerEnd = 0;
+  let inHtmlBlock = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) { headerEnd = i + 1; continue; }
+    if (line.startsWith("<")) { inHtmlBlock = true; headerEnd = i + 1; continue; }
+    if (line === "---") { headerEnd = i + 1; break; }
+    if (inHtmlBlock && !line.startsWith("#")) { headerEnd = i + 1; continue; }
+    break;
+  }
+
+  if (headerEnd === 0) return { headerHtml: "", rest: md };
+
+  const headerBlock = lines.slice(0, headerEnd).join("\n");
+  const rest = lines.slice(headerEnd).join("\n");
+
+  // Parse out useful bits from the HTML header
+  const imgMatch = headerBlock.match(/<img[^>]+src="([^"]+)"[^>]*>/);
+  const titleMatch = headerBlock.match(/<h1[^>]*>([^<]+)<\/h1>/);
+  const strongMatch = headerBlock.match(/<strong>([^<]+)<\/strong>/);
+
+  // Extract nav links: <a href="...">text</a>
+  const navLinks: { text: string; href: string }[] = [];
+  const navRegex = /<a\s+href="([^"]+)">([^<]+)<\/a>/g;
+  let navMatch;
+  while ((navMatch = navRegex.exec(headerBlock)) !== null) {
+    navLinks.push({ href: navMatch[1], text: navMatch[2] });
+  }
+
+  // Extract badges: <img alt="..." src="...">
+  const badges: { alt: string; src: string }[] = [];
+  const badgeRegex = /<img\s+alt="([^"]*)"[^>]*src="([^"]+)"[^>]*>/g;
+  let badgeMatch;
+  while ((badgeMatch = badgeRegex.exec(headerBlock)) !== null) {
+    if (badgeMatch[2].includes("shields.io") || badgeMatch[2].includes("badge")) {
+      badges.push({ alt: badgeMatch[1], src: badgeMatch[2] });
+    }
+  }
+
+  // Build clean header HTML
+  let headerHtml = '<div class="md-readme-header">';
+
+  if (titleMatch) {
+    headerHtml += `<h1 class="md-readme-title">${titleMatch[1]}</h1>`;
+  }
+  if (strongMatch) {
+    headerHtml += `<p class="md-readme-tagline">${strongMatch[1]}</p>`;
+  }
+  if (navLinks.length > 0) {
+    headerHtml += `<nav class="md-readme-nav">${navLinks.map(l => `<a href="${l.href}" class="md-link">${l.text}</a>`).join('<span class="md-readme-sep">&bull;</span>')}</nav>`;
+  }
+  if (badges.length > 0) {
+    headerHtml += `<div class="md-readme-badges">${badges.map(b => `<img src="${b.src}" alt="${b.alt}" class="md-badge">`).join(" ")}</div>`;
+  }
+
+  headerHtml += '</div>';
+
+  return { headerHtml, rest };
+}
+
+function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/<[^>]+>/g, "")       // strip HTML tags
+    .replace(/[^\w\s-]/g, "")      // remove non-word chars
+    .replace(/\s+/g, "-")          // spaces → hyphens
+    .replace(/-+/g, "-")           // collapse hyphens
+    .trim();
 }
 
 function escapeHtml(str: string): string {
@@ -811,6 +924,103 @@ button.stat-card:hover {
 
 .readme-formatted :deep(strong) {
   font-weight: 600;
+}
+
+/* ─── README header (parsed from HTML header block) ─── */
+.readme-formatted :deep(.md-readme-header) {
+  text-align: center;
+  padding: var(--space-7) 0 var(--space-5);
+  margin-bottom: var(--space-5);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.readme-formatted :deep(.md-readme-title) {
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-bold);
+  margin: 0 0 var(--space-3);
+}
+
+.readme-formatted :deep(.md-readme-tagline) {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-md);
+  margin: 0 0 var(--space-5);
+}
+
+.readme-formatted :deep(.md-readme-nav) {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-5);
+  font-size: var(--font-size-sm);
+}
+
+.readme-formatted :deep(.md-readme-sep) {
+  color: var(--color-text-subtle);
+  margin: 0 var(--space-1);
+}
+
+.readme-formatted :deep(.md-readme-badges) {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.readme-formatted :deep(.md-badge) {
+  height: 20px;
+}
+
+/* ─── Tables ─── */
+.readme-formatted :deep(.md-table) {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0 0 var(--space-5) 0;
+  font-size: var(--font-size-sm);
+}
+
+.readme-formatted :deep(.md-table th),
+.readme-formatted :deep(.md-table td) {
+  text-align: left;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border);
+}
+
+.readme-formatted :deep(.md-table th) {
+  background: var(--color-bg-tertiary);
+  font-weight: var(--font-weight-semibold);
+}
+
+.readme-formatted :deep(.md-table tr:nth-child(even) td) {
+  background: var(--color-bg);
+}
+
+/* ─── Checkboxes ─── */
+.readme-formatted :deep(.md-check) {
+  list-style: none;
+  margin-left: calc(-1 * var(--space-7));
+  padding-left: 0;
+}
+
+.readme-formatted :deep(.md-check::before) {
+  content: "☐ ";
+  color: var(--color-text-muted);
+}
+
+.readme-formatted :deep(.md-checked::before) {
+  content: "☑ ";
+  color: var(--color-success);
+}
+
+/* ─── Images ─── */
+.readme-formatted :deep(.md-img) {
+  max-width: 100%;
+  border-radius: var(--radius-md);
+  margin: var(--space-3) 0;
+}
+
+.readme-formatted :deep(.md-img-placeholder) {
+  display: none; /* Hide broken relative images gracefully */
 }
 
 .readme-raw {
