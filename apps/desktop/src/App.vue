@@ -14,6 +14,7 @@ import SettingsPanel from "./components/SettingsPanel.vue";
 import PrDetailView from "./components/PrDetailView.vue";
 import DashboardView from "./components/DashboardView.vue";
 import EditCommitOverlay from "./components/EditCommitOverlay.vue";
+import MergeSuccessModal from "./components/MergeSuccessModal.vue";
 import { usePrPanel, PR_PANEL_KEY } from "./composables/usePrPanel";
 import type { GitLogEntry } from "./utils/backend";
 import { getPersistedDiffMode, persistDiffMode, type DiffMode } from "./utils/diffMode";
@@ -173,6 +174,20 @@ watch(repoError, (val) => {
   }
 });
 
+// ─── Merge success modal ──────────────────────────────────
+const showMergeSuccess = ref(false);
+
+function onMergeSuccessClose() {
+  showMergeSuccess.value = false;
+  viewMode.value = "dashboard";
+}
+
+async function onMergeSuccessPush() {
+  showMergeSuccess.value = false;
+  viewMode.value = "dashboard";
+  await doPush();
+}
+
 // Auto-dismiss success toast after 3s
 const successToast = ref<string | null>(null);
 const successToastDetail = ref<string | null>(null);
@@ -193,6 +208,8 @@ watch(repoSuccess, (val) => {
   if (!val) return;
   // Consume the success signal regardless (so it doesn't pile up)
   repoSuccess.value = null;
+  // Skip toast when the merge success modal is handling the feedback
+  if (val === "merge-done" && showMergeSuccess.value) return;
   // Respect the notifications setting
   if (!settings.value.notifications) return;
 
@@ -257,8 +274,9 @@ async function checkAndSaveIfResolved(filePath: string) {
     if (repoStatus.value && repoStatus.value.conflicted.length > 0) {
       await repoSelectFile(repoStatus.value.conflicted[0], false);
     } else {
-      // All conflicts resolved → finalize the merge commit
+      // All conflicts resolved → finalize the merge commit, then show modal
       await doMergeContinue();
+      showMergeSuccess.value = true;
     }
   } catch (err: any) {
     repoError.value = `save: ${err?.message || String(err)}`;
@@ -779,6 +797,13 @@ onUnmounted(() => {
       :entry="editingCommit"
       @confirm="handleAmendConfirm"
       @cancel="editingCommit = null"
+    />
+
+    <!-- Merge success modal -->
+    <MergeSuccessModal
+      v-if="showMergeSuccess"
+      @close="onMergeSuccessClose"
+      @push="onMergeSuccessPush"
     />
 
     <!-- Success toast -->

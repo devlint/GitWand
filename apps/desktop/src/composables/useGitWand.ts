@@ -380,18 +380,65 @@ export async function fetchUsers() {
 
   /**
    * Resolve a single file.
+   * If the core produced a full mergedContent (all hunks resolved), use it.
+   * Otherwise, build a partial resolution: apply resolved hunks and keep
+   * conflict markers for the remaining ones.
    */
   function resolveFile(path: string) {
     const file = files.value.find((f) => f.path === path);
-    if (!file || !file.result.mergedContent) return;
+    if (!file) return;
+
+    // If core resolved everything → use mergedContent directly
+    // Otherwise → build partial content from resolutions
+    const newContent = file.result.mergedContent ?? buildPartialContent(file.content, file.result.resolutions);
+    if (!newContent || newContent === file.content) return;
 
     pushUndo();
     const idx = files.value.indexOf(file);
     files.value[idx] = {
       ...file,
-      content: file.result.mergedContent,
-      result: resolve(file.result.mergedContent, file.path, resolveOptions.value),
+      content: newContent,
+      result: resolve(newContent, file.path, resolveOptions.value),
     };
+  }
+
+  /**
+   * Build partially resolved content: replace auto-resolved hunks with their
+   * resolved lines, keep conflict markers for unresolved hunks.
+   */
+  function buildPartialContent(
+    original: string,
+    resolutions: MergeResult["resolutions"],
+  ): string {
+    const lines = original.split("\n");
+    const output: string[] = [];
+    let conflictIdx = 0;
+    let inConflict = false;
+    let conflictBuffer: string[] = [];
+
+    for (const line of lines) {
+      if (line.startsWith("<<<<<<<")) {
+        inConflict = true;
+        conflictBuffer = [line];
+      } else if (line.startsWith(">>>>>>>") && inConflict) {
+        conflictBuffer.push(line);
+        const resolution = resolutions[conflictIdx];
+        if (resolution?.autoResolved && resolution.resolvedLines) {
+          output.push(...resolution.resolvedLines);
+        } else {
+          output.push(...conflictBuffer);
+        }
+        conflictIdx++;
+        inConflict = false;
+        conflictBuffer = [];
+      } else if (inConflict) {
+        conflictBuffer.push(line);
+      } else {
+        output.push(line);
+      }
+    }
+
+    return output.join("\n");
   }
 
   /**

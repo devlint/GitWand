@@ -1617,6 +1617,43 @@ const server = createServer(async (req, res) => {
       }
     }
 
+    // POST /api/read-gitwandrc  { cwd }
+    // Searches: .gitwandrc → .gitwandrc.json → package.json#gitwand
+    if (url.pathname === "/api/read-gitwandrc" && req.method === "POST") {
+      try {
+        const { cwd } = await readBody(req);
+        const base = resolve(cwd);
+
+        // 1. .gitwandrc
+        const rcPath = join(base, ".gitwandrc");
+        if (existsSync(rcPath)) {
+          return res.writeHead(200, { "Content-Type": "text/plain" }).end(readFileSync(rcPath, "utf-8"));
+        }
+
+        // 2. .gitwandrc.json
+        const rcJsonPath = join(base, ".gitwandrc.json");
+        if (existsSync(rcJsonPath)) {
+          return res.writeHead(200, { "Content-Type": "text/plain" }).end(readFileSync(rcJsonPath, "utf-8"));
+        }
+
+        // 3. "gitwand" key in package.json
+        const pkgPath = join(base, "package.json");
+        if (existsSync(pkgPath)) {
+          try {
+            const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
+            if (pkg.gitwand) {
+              return res.writeHead(200, { "Content-Type": "text/plain" }).end(JSON.stringify(pkg.gitwand));
+            }
+          } catch { /* ignore parse errors */ }
+        }
+
+        // Not found — return empty string (same as Rust backend)
+        return res.writeHead(200, { "Content-Type": "text/plain" }).end("");
+      } catch (err) {
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
+
     jsonResponse(res, { error: "Not found" }, 404);
   } catch (err) {
     jsonResponse(res, { error: err.message }, 500);
@@ -1630,6 +1667,7 @@ server.listen(PORT, () => {
   console.log(`    GET  /api/conflicted-files?cwd=<path>`);
   console.log(`    POST /api/read-file   { cwd, path }`);
   console.log(`    POST /api/write-file  { cwd, path, content }`);
+  console.log(`    POST /api/read-gitwandrc  { cwd }`);
   console.log(`    GET  /api/list-dir?path=<path>`);
   console.log(`    GET  /api/git-status?cwd=<path>`);
   console.log(`    GET  /api/git-diff?cwd=<path>&path=<file>&staged=<bool>`);

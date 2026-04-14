@@ -226,6 +226,10 @@ const en: Locale = {
     resolvedManually: "Manually resolved",
     analysing: "Analysing conflicts\u2026",
     loadingRepo: "Loading repository\u2026",
+    successTitle: "Merge completed successfully",
+    successDesc: "All conflicts have been resolved and the merge commit has been created.",
+    successClose: "Close",
+    successPush: "Push",
   },
 
   // ─── Settings ───────────────────────────────────────────

@@ -228,6 +228,10 @@ const fr = {
     resolvedManually: "R\u00e9solu manuellement",
     analysing: "Analyse des conflits\u2026",
     loadingRepo: "Chargement du repo\u2026",
+    successTitle: "Merge terminé avec succès",
+    successDesc: "Tous les conflits ont été résolus et le merge commit a été créé.",
+    successClose: "Fermer",
+    successPush: "Push",
   },
 
   // ─── Settings ───────────────────────────────────────────
