@@ -66,15 +66,16 @@ function onCloseClick(e: MouseEvent, tabId: number) {
 </template>
 
 <style scoped>
+/* ─── Tab bar — pill-style, inspired by segmented controls ─── */
 .tab-bar {
   display: flex;
   align-items: center;
-  gap: 0;
+  gap: var(--space-3);
   background: var(--color-bg-secondary);
   border-bottom: 1px solid var(--color-border);
-  height: 36px;
+  height: var(--tabbar-height);
   flex-shrink: 0;
-  padding: 0 4px;
+  padding: 0 var(--space-5);
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: thin;
@@ -82,8 +83,8 @@ function onCloseClick(e: MouseEvent, tabId: number) {
 
 .tab-list {
   display: flex;
-  align-items: stretch;
-  gap: 1px;
+  align-items: center;
+  gap: var(--space-2);
   flex: 1;
   min-width: 0;
 }
@@ -91,16 +92,15 @@ function onCloseClick(e: MouseEvent, tabId: number) {
 .tab {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 0 10px;
-  height: 36px;
-  font-size: 12px;
-  font-weight: 500;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-5);
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
   color: var(--color-text-muted);
   cursor: pointer;
-  border-bottom: 2px solid transparent;
-  transition: color 0.12s, border-color 0.12s, background 0.12s;
-  max-width: 180px;
+  transition: color var(--transition-base), background var(--transition-base);
+  max-width: 200px;
   min-width: 0;
   flex-shrink: 1;
   user-select: none;
@@ -112,14 +112,13 @@ function onCloseClick(e: MouseEvent, tabId: number) {
 }
 
 .tab--active {
-  color: var(--color-text);
-  border-bottom-color: var(--color-accent);
-  background: var(--color-bg);
+  color: var(--color-accent);
+  background: var(--color-accent-soft);
 }
 
 .tab-icon {
   flex-shrink: 0;
-  opacity: 0.6;
+  opacity: 0.65;
 }
 
 .tab--active .tab-icon {
@@ -136,45 +135,40 @@ function onCloseClick(e: MouseEvent, tabId: number) {
 
 .tab-close {
   flex-shrink: 0;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 18px;
   height: 18px;
-  border-radius: 4px;
-  background: none;
-  border: none;
+  border-radius: var(--radius-pill);
   color: var(--color-text-muted);
   opacity: 0;
-  cursor: pointer;
-  transition: opacity 0.12s, background 0.12s, color 0.12s;
+  transition: opacity var(--transition-fast), background var(--transition-fast), color var(--transition-fast);
   padding: 0;
 }
 
-.tab:hover .tab-close {
-  opacity: 0.6;
+.tab:hover .tab-close,
+.tab--active .tab-close {
+  opacity: 0.7;
 }
 
 .tab-close:hover {
   opacity: 1 !important;
-  background: var(--color-danger-bg);
+  background: var(--color-danger-soft);
   color: var(--color-danger);
 }
 
 .tab-new {
   flex-shrink: 0;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 28px;
   height: 28px;
-  border-radius: 6px;
-  background: none;
-  border: none;
+  border-radius: var(--radius-pill);
   color: var(--color-text-muted);
-  cursor: pointer;
-  transition: background 0.12s, color 0.12s;
-  margin-left: 2px;
+  transition: background var(--transition-fast), color var(--transition-fast);
+  margin-left: auto;
 }
 
 .tab-new:hover {

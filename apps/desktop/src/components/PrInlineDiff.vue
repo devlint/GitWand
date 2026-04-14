@@ -333,8 +333,8 @@ function handleApplySuggestion(suggestion: string, startLine: number | null, end
   border-bottom: 1px solid transparent;
 }
 
-.pid-row--add { background: rgba(166,227,161,0.12); }
-.pid-row--del { background: rgba(243,139,168,0.12); }
+.pid-row--add { background: var(--color-success-soft); }
+.pid-row--del { background: var(--color-danger-soft); }
 .pid-row--ctx { background: transparent; }
 
 /* Line numbers */
@@ -365,7 +365,7 @@ function handleApplySuggestion(suggestion: string, startLine: number | null, end
 }
 
 .pid-lno--clickable { cursor: pointer; }
-.pid-lno--clickable:hover { background: rgba(203,166,247,0.15); }
+.pid-lno--clickable:hover { background: var(--color-accent-soft); }
 .pid-lno--clickable:hover .pid-lno-icon { opacity: 1; }
 
 /* Marker column */
@@ -376,8 +376,8 @@ function handleApplySuggestion(suggestion: string, startLine: number | null, end
   color: var(--color-text-muted);
   border-right: 1px solid var(--color-border);
 }
-.pid-row--add .pid-marker { color: #a6e3a1; }
-.pid-row--del .pid-marker { color: #f38ba8; }
+.pid-row--add .pid-marker { color: var(--color-success); }
+.pid-row--del .pid-marker { color: var(--color-danger); }
 
 /* Content column */
 .pid-content {
@@ -456,13 +456,13 @@ function handleApplySuggestion(suggestion: string, startLine: number | null, end
   cursor: pointer;
 }
 .pid-review-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.pid-review-btn:not(:disabled):hover { background: rgba(203,166,247,0.12); }
+.pid-review-btn:not(:disabled):hover { background: var(--color-accent-soft); }
 
 .pid-submit-btn {
   background: var(--color-accent);
   border: none;
   border-radius: 4px;
-  color: #fff;
+  color: var(--color-accent-text);
   padding: 3px 12px;
   font-size: 11px;
   font-weight: 600;

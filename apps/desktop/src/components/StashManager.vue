@@ -186,11 +186,11 @@ watch(() => props.cwd, loadStashes);
 .stash-manager {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 12px;
-  background: var(--bg-secondary, #1e1e2e);
-  border-radius: 8px;
-  border: 1px solid var(--border-color, #313244);
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
   max-height: 400px;
   overflow-y: auto;
 }
@@ -203,60 +203,60 @@ watch(() => props.cwd, loadStashes);
 
 .stash-header h3 {
   margin: 0;
-  font-size: 14px;
-  font-weight: 600;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
 }
 
 .stash-actions {
   display: flex;
-  gap: 4px;
+  gap: var(--space-1);
 }
 
 .stash-error {
-  color: var(--color-error, #f38ba8);
-  font-size: 12px;
-  padding: 4px 8px;
-  background: var(--bg-error, rgba(243, 139, 168, 0.1));
-  border-radius: 4px;
+  color: var(--color-danger);
+  font-size: var(--font-size-xs);
+  padding: var(--space-1) var(--space-2);
+  background: var(--color-danger-soft);
+  border-radius: var(--radius-sm);
 }
 
 .stash-loading,
 .stash-empty {
-  font-size: 13px;
-  color: var(--text-muted, #6c7086);
+  font-size: var(--font-size-md);
+  color: var(--color-text-muted);
   text-align: center;
-  padding: 16px 8px;
+  padding: var(--space-4) var(--space-2);
 }
 
 .stash-list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-1);
 }
 
 .stash-item {
-  border-radius: 6px;
-  border: 1px solid var(--border-color, #313244);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
   overflow: hidden;
 }
 
 .stash-item-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-2);
   cursor: pointer;
-  transition: background 0.15s;
+  transition: background var(--transition-base);
 }
 
 .stash-item-header:hover {
-  background: var(--bg-hover, rgba(255, 255, 255, 0.05));
+  background: var(--color-bg-hover);
 }
 
 .stash-index {
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--text-muted, #6c7086);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-muted);
   min-width: 20px;
   text-align: center;
 }
@@ -270,41 +270,41 @@ watch(() => props.cwd, loadStashes);
 }
 
 .stash-message {
-  font-size: 13px;
-  font-weight: 500;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-medium);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .stash-meta {
-  font-size: 11px;
-  color: var(--text-muted, #6c7086);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .stash-branch {
-  color: var(--color-accent, #cba6f7);
+  color: var(--color-accent);
 }
 
 .stash-item-actions {
   display: flex;
-  gap: 4px;
+  gap: var(--space-1);
   flex-shrink: 0;
 }
 
 .stash-diff {
-  border-top: 1px solid var(--border-color, #313244);
-  padding: 8px;
-  background: var(--bg-tertiary, #11111b);
+  border-top: 1px solid var(--color-border);
+  padding: var(--space-2);
+  background: var(--color-bg);
   max-height: 200px;
   overflow: auto;
 }
 
 .stash-diff pre {
   margin: 0;
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   font-family: "JetBrains Mono", "Fira Code", monospace;
   white-space: pre-wrap;
   word-break: break-all;
@@ -315,22 +315,22 @@ watch(() => props.cwd, loadStashes);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--border-color, #313244);
-  border-radius: 4px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
   background: transparent;
   color: inherit;
   cursor: pointer;
-  font-size: 12px;
-  padding: 4px 8px;
-  transition: all 0.15s;
+  font-size: var(--font-size-xs);
+  padding: var(--space-1) var(--space-2);
+  transition: all var(--transition-base);
 }
 
-.btn:hover { background: var(--bg-hover, rgba(255, 255, 255, 0.08)); }
+.btn:hover { background: var(--color-bg-hover); }
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.btn-sm { font-size: 12px; padding: 3px 8px; }
-.btn-xs { font-size: 11px; padding: 2px 6px; }
-.btn-primary { background: var(--color-accent, #cba6f7); color: #1e1e2e; border-color: transparent; }
+.btn-sm { font-size: var(--font-size-xs); padding: var(--space-1) var(--space-2); }
+.btn-xs { font-size: var(--font-size-xs); padding: 2px 6px; }
+.btn-primary { background: var(--color-accent); color: var(--color-accent-text); border-color: transparent; }
 .btn-primary:hover { filter: brightness(1.1); }
-.btn-danger:hover { background: var(--color-error, #f38ba8); color: #1e1e2e; }
+.btn-danger:hover { background: var(--color-danger); color: var(--color-accent-text); }
 .btn-ghost { border-color: transparent; }
 </style>

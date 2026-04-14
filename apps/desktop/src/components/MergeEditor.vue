@@ -400,12 +400,12 @@ function highlightedHtml(hunkIndex: number, panel: "ours" | "base" | "theirs"): 
 }
 
 .editor-filename {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--text-md);
+  font-weight: var(--font-semibold);
 }
 
 .editor-stats {
-  font-size: 12px;
+  font-size: var(--text-base);
 }
 
 .btn--resolve {
@@ -413,12 +413,12 @@ function highlightedHtml(hunkIndex: number, panel: "ours" | "base" | "theirs"): 
   align-items: center;
   gap: 6px;
   padding: 5px 12px;
-  border-radius: 6px;
-  font-size: 12px;
-  font-weight: 500;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-base);
+  font-weight: var(--font-medium);
   background: var(--color-accent);
-  color: #fff;
-  transition: background 0.15s;
+  color: var(--color-accent-text);
+  transition: background var(--transition-base);
 }
 
 .btn--resolve:hover {
@@ -438,7 +438,7 @@ function highlightedHtml(hunkIndex: number, panel: "ours" | "base" | "theirs"): 
 .code-block {
   margin: 0;
   padding: 4px 20px;
-  font-size: 13px;
+  font-size: var(--text-md);
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-all;
@@ -449,7 +449,7 @@ function highlightedHtml(hunkIndex: number, panel: "ours" | "base" | "theirs"): 
 .conflict-hunk {
   margin: 2px 0;
   border-left: 3px solid var(--color-danger);
-  background: rgba(239, 68, 68, 0.04);
+  background: var(--color-danger-soft);
 }
 
 .conflict-hunk--resolvable {
@@ -469,12 +469,12 @@ function highlightedHtml(hunkIndex: number, panel: "ours" | "base" | "theirs"): 
 }
 
 .inline-action {
-  font-size: 12px;
-  font-weight: 500;
+  font-size: var(--text-base);
+  font-weight: var(--font-medium);
   text-decoration: none;
   padding: 2px 0;
   cursor: pointer;
-  transition: color 0.12s;
+  transition: color var(--transition-fast);
   color: var(--color-text-muted);
 }
 
@@ -522,15 +522,16 @@ function highlightedHtml(hunkIndex: number, panel: "ours" | "base" | "theirs"): 
 /* ─── AI action ──────────────────────────────────────── */
 
 .inline-action--ai {
-  color: #a78bfa;
+  color: var(--color-accent);
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  font-weight: 600;
+  font-weight: var(--font-semibold);
 }
 
 .inline-action--ai:hover {
-  color: #c4b5fd;
+  color: var(--color-accent);
+  opacity: 0.8;
 }
 
 .inline-action--loading {
@@ -554,7 +555,7 @@ function highlightedHtml(hunkIndex: number, panel: "ours" | "base" | "theirs"): 
 /* ─── Recommended action ──────────────────────────────── */
 
 .inline-action--recommended {
-  font-weight: 700;
+  font-weight: var(--font-bold);
   display: inline-flex;
   align-items: center;
   gap: 3px;
@@ -568,19 +569,19 @@ function highlightedHtml(hunkIndex: number, panel: "ours" | "base" | "theirs"): 
 .inline-sep {
   color: var(--color-border);
   padding: 0 8px;
-  font-size: 12px;
+  font-size: var(--text-base);
   user-select: none;
 }
 
 .inline-badge--recommended {
   margin-left: auto;
-  font-size: 10px;
-  font-weight: 700;
+  font-size: var(--text-xs);
+  font-weight: var(--font-bold);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   padding: 1px 6px;
-  border-radius: 3px;
-  background: rgba(34, 197, 94, 0.12);
+  border-radius: var(--radius-xs);
+  background: var(--color-success-soft);
   color: var(--color-success);
 }
 
@@ -608,11 +609,11 @@ function highlightedHtml(hunkIndex: number, panel: "ours" | "base" | "theirs"): 
   align-items: center;
   gap: 6px;
   padding: 4px 12px;
-  font-size: 10px;
-  font-weight: 600;
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: var(--color-text-muted);
+  color: var(--color-text-subtle);
   border-bottom: 1px solid var(--color-border);
 }
 
@@ -629,7 +630,7 @@ function highlightedHtml(hunkIndex: number, panel: "ours" | "base" | "theirs"): 
 .panel-code {
   margin: 0;
   padding: 8px 12px;
-  font-size: 12px;
+  font-size: var(--text-base);
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-all;
@@ -662,8 +663,8 @@ function highlightedHtml(hunkIndex: number, panel: "ours" | "base" | "theirs"): 
 }
 
 .edit-label {
-  font-size: 12px;
-  font-weight: 600;
+  font-size: var(--text-base);
+  font-weight: var(--font-semibold);
   color: var(--color-accent);
 }
 
@@ -681,7 +682,7 @@ function highlightedHtml(hunkIndex: number, panel: "ours" | "base" | "theirs"): 
   color: var(--color-text);
   border: none;
   border-bottom: 1px solid var(--color-border);
-  font-size: 13px;
+  font-size: var(--text-md);
   line-height: 1.6;
   resize: vertical;
   outline: none;
@@ -696,21 +697,21 @@ function highlightedHtml(hunkIndex: number, panel: "ours" | "base" | "theirs"): 
 /* ─── Diff Highlighting ────────────────────────────────── */
 
 .panel-code :deep(.diff-add) {
-  background: rgba(34, 197, 94, 0.2);
+  background: var(--color-success-soft);
   border-radius: 2px;
   padding: 0 1px;
 }
 
 .hunk-panel--ours .panel-code :deep(.diff-add) {
-  background: rgba(96, 165, 250, 0.25);
+  background: var(--color-info-soft);
 }
 
 .hunk-panel--theirs .panel-code :deep(.diff-add) {
-  background: rgba(168, 85, 247, 0.25);
+  background: var(--color-accent-soft);
 }
 
 .panel-code :deep(.diff-del) {
-  background: rgba(239, 68, 68, 0.2);
+  background: var(--color-danger-soft);
   border-radius: 2px;
   padding: 0 1px;
   text-decoration: line-through;
@@ -721,7 +722,7 @@ function highlightedHtml(hunkIndex: number, panel: "ours" | "base" | "theirs"): 
 
 .hunk-explanation {
   padding: 6px 20px 8px;
-  font-size: 12px;
+  font-size: var(--text-base);
   font-style: italic;
   border-top: 1px solid var(--color-border);
 }
@@ -733,17 +734,17 @@ function highlightedHtml(hunkIndex: number, panel: "ours" | "base" | "theirs"): 
   align-items: center;
   justify-content: space-between;
   padding: 6px 14px;
-  background: var(--color-danger-bg);
+  background: var(--color-danger-soft);
   color: var(--color-danger);
-  font-size: 12px;
-  border-radius: 4px;
+  font-size: var(--text-base);
+  border-radius: var(--radius-sm);
   margin: 4px 12px;
 }
 
 .ai-error-close {
   color: var(--color-danger);
-  font-weight: 600;
-  font-size: 11px;
+  font-weight: var(--font-semibold);
+  font-size: var(--text-xs);
   text-decoration: none;
 }
 
@@ -753,17 +754,17 @@ function highlightedHtml(hunkIndex: number, panel: "ours" | "base" | "theirs"): 
   gap: 8px;
   padding: 8px 14px;
   margin: 4px 12px;
-  background: rgba(167, 139, 250, 0.08);
-  border: 1px solid rgba(167, 139, 250, 0.2);
-  border-radius: 6px;
-  font-size: 12px;
+  background: var(--color-accent-soft);
+  border: 1px solid var(--color-accent-soft);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-base);
   line-height: 1.4;
-  color: #c4b5fd;
+  color: var(--color-accent);
 }
 
 .ai-explanation-icon {
   flex-shrink: 0;
   margin-top: 1px;
-  color: #a78bfa;
+  color: var(--color-accent);
 }
 </style>

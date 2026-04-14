@@ -611,17 +611,17 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
   align-items: center;
   justify-content: space-between;
   height: var(--header-height);
-  padding: 0 16px;
+  padding: 0 var(--space-6);
   background: var(--color-bg-secondary);
   border-bottom: 1px solid var(--color-border);
-  gap: 16px;
+  gap: var(--space-6);
   flex-shrink: 0;
 }
 
 .header-left {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-4);
 }
 
 .logo {
@@ -629,8 +629,8 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
 }
 
 .title {
-  font-size: 15px;
-  font-weight: 600;
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-semibold);
   letter-spacing: -0.01em;
 }
 
@@ -643,17 +643,17 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
 .branch-trigger {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  border-radius: 6px;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-5);
+  border-radius: var(--radius-pill);
   color: var(--color-text);
-  background: none;
-  transition: background 0.12s;
+  background: var(--color-bg-tertiary);
+  transition: background var(--transition-base), color var(--transition-base);
   cursor: pointer;
 }
 
 .branch-trigger:hover {
-  background: var(--color-bg-tertiary);
+  background: var(--color-border);
 }
 
 .branch-trigger--loading {
@@ -662,12 +662,12 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
 }
 
 .branch-name {
-  font-size: 13px;
-  font-weight: 500;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-medium);
 }
 
 .branch-chevron {
-  transition: transform 0.15s;
+  transition: transform var(--transition-base);
   opacity: 0.5;
 }
 
@@ -679,19 +679,20 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
 
 .branch-popover {
   position: absolute;
-  top: calc(100% + 6px);
+  top: calc(100% + var(--space-3));
   left: 50%;
   transform: translateX(-50%);
   width: 340px;
   max-height: 520px;
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
-  border-radius: 10px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-md);
   display: flex;
   flex-direction: column;
   z-index: 50;
-  animation: bpSlide 0.15s ease-out;
+  animation: bpSlide var(--transition-slow);
+  overflow: hidden;
 }
 
 @keyframes bpSlide {
@@ -702,36 +703,38 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
 .bp-header {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 10px;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
   border-bottom: 1px solid var(--color-border);
 }
 
 .bp-filter {
   flex: 1;
-  padding: 5px 8px;
-  font-size: 12px;
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--font-size-base);
   background: var(--color-bg);
   color: var(--color-text);
   border: 1px solid var(--color-border);
-  border-radius: 5px;
+  border-radius: var(--radius-pill);
   outline: none;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .bp-filter:focus {
   border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
 }
 
 .bp-action-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 5px;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-pill);
   color: var(--color-text-muted);
   background: none;
-  transition: background 0.1s, color 0.1s;
+  transition: background var(--transition-fast), color var(--transition-fast);
 }
 
 .bp-action-btn:hover {
@@ -741,33 +744,34 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
 
 .bp-create {
   display: flex;
-  gap: 6px;
-  padding: 8px 10px;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
   border-bottom: 1px solid var(--color-border);
 }
 
 .bp-create-input {
   flex: 1;
-  padding: 5px 8px;
-  font-size: 12px;
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--font-size-base);
   background: var(--color-bg);
   color: var(--color-text);
   border: 1px solid var(--color-border);
-  border-radius: 5px;
+  border-radius: var(--radius-pill);
   outline: none;
 }
 
 .bp-create-input:focus {
   border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
 }
 
 .bp-create-btn {
-  padding: 5px 10px;
-  font-size: 11px;
-  font-weight: 600;
+  padding: var(--space-3) var(--space-5);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
   background: var(--color-accent);
-  color: #fff;
-  border-radius: 5px;
+  color: var(--color-accent-text);
+  border-radius: var(--radius-pill);
 }
 
 .bp-create-btn:disabled {
@@ -786,7 +790,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
   height: 16px;
   border: 2px solid var(--color-border);
   border-top-color: var(--color-accent);
-  border-radius: 50%;
+  border-radius: var(--radius-pill);
   animation: spin 0.7s linear infinite;
 }
 
@@ -805,9 +809,9 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
 }
 
 .bp-section-label {
-  padding: 5px 12px;
-  font-size: 10px;
-  font-weight: 600;
+  padding: var(--space-3) var(--space-5);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--color-text-muted);
@@ -821,11 +825,11 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
 .bp-item {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 5px 12px;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-5);
   cursor: pointer;
-  transition: background 0.1s;
-  font-size: 12px;
+  transition: background var(--transition-fast);
+  font-size: var(--font-size-base);
 }
 
 .bp-item:hover {
@@ -840,7 +844,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
 .bp-current-dot {
   width: 6px;
   height: 6px;
-  border-radius: 50%;
+  border-radius: var(--radius-pill);
   background: var(--color-accent);
   flex-shrink: 0;
 }
@@ -850,7 +854,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
 }
 
 .bp-item--remote .bp-item-name {
@@ -858,7 +862,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
 }
 
 .bp-item-meta {
-  font-size: 10px;
+  font-size: var(--font-size-xs);
   flex-shrink: 0;
 }
 
@@ -867,13 +871,13 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 4px;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-pill);
   color: var(--color-text-muted);
   background: none;
   opacity: 0;
-  transition: opacity 0.1s, color 0.1s, background 0.1s;
+  transition: opacity var(--transition-fast), color var(--transition-fast), background var(--transition-fast);
 }
 
 .bp-item:hover .bp-item-preview,
@@ -883,13 +887,13 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
 
 .bp-item-preview:hover {
   opacity: 1 !important;
-  color: var(--color-accent, #89b4fa);
+  color: var(--color-accent);
 }
 
 .bp-item-preview--active {
   opacity: 1 !important;
-  color: var(--color-accent, #89b4fa);
-  background: var(--color-accent-bg, #89b4fa20);
+  color: var(--color-accent);
+  background: var(--color-accent-soft);
 }
 
 .bp-item-delete:hover {
@@ -899,36 +903,41 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
 
 .bp-preview-row {
   list-style: none;
-  padding: 4px 8px 6px;
+  padding: var(--space-2) var(--space-4) var(--space-3);
 }
 
 .bp-empty {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 20px;
-  font-size: 12px;
+  padding: var(--space-7);
+  font-size: var(--font-size-base);
 }
 
 .repo-stat-group {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-left: 16px;
+  gap: var(--space-2);
+  margin-left: var(--space-5);
 }
 
 .repo-stat {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 5px;
-  font-size: 11px;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-pill);
+  background: var(--color-bg-tertiary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
   color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .repo-stat-dot {
   width: 6px;
   height: 6px;
-  border-radius: 50%;
+  border-radius: var(--radius-pill);
   flex-shrink: 0;
 }
 
@@ -937,29 +946,29 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: var(--space-4);
 }
 
 /* Folder trigger */
 .folder-trigger {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  margin-left: 8px;
-  border-left: 1px solid var(--color-border);
-  padding-left: 16px;
-  border-radius: 0;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-5);
+  margin-left: var(--space-2);
+  border-radius: var(--radius-pill);
   color: var(--color-text-muted);
-  background: none;
-  font-size: 12px;
-  transition: background 0.12s, color 0.12s;
+  background: transparent;
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
+  transition: background var(--transition-base), color var(--transition-base);
   cursor: pointer;
-  max-width: 200px;
+  max-width: 220px;
 }
 
 .folder-trigger:hover {
   color: var(--color-text);
+  background: var(--color-bg-tertiary);
 }
 
 .folder-name {
@@ -972,7 +981,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
 .header-right {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-3);
 }
 
 .header-separator {
@@ -980,36 +989,37 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
   height: 20px;
   background: var(--color-border);
   flex-shrink: 0;
+  margin-inline: var(--space-2);
 }
 
+/* Local button override — pill-style header buttons.
+   Note: global .btn lives in main.css; these scoped rules refine the
+   header variants (sync / merge / icon) to match the design system. */
 .btn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  border-radius: 6px;
-  font-size: 13px;
-  font-weight: 500;
-  transition: background 0.15s, color 0.15s;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-5);
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-medium);
+  transition: background var(--transition-base), color var(--transition-base), transform var(--transition-fast);
+  white-space: nowrap;
 }
+
+.btn:active:not(:disabled) { transform: translateY(1px); }
 
 .btn--secondary {
   background: var(--color-bg-tertiary);
   color: var(--color-text);
 }
-
-.btn--secondary:hover {
-  background: var(--color-border);
-}
+.btn--secondary:hover:not(:disabled) { background: var(--color-border); }
 
 .btn--primary {
   background: var(--color-accent);
-  color: #fff;
+  color: var(--color-accent-text);
 }
-
-.btn--primary:hover {
-  background: var(--color-accent-hover);
-}
+.btn--primary:hover:not(:disabled) { background: var(--color-accent-hover); }
 
 /* Sync buttons (Push/Pull) */
 .btn--sync {
@@ -1018,86 +1028,75 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
   color: var(--color-text);
 }
 
-.btn--sync:hover:not(:disabled) {
-  background: var(--color-border);
-}
+.btn--sync:hover:not(:disabled) { background: var(--color-border); }
 
 .btn--sync-active {
-  background: var(--color-bg-tertiary);
-  color: var(--color-text);
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
 }
 
 .btn--push.btn--sync-active {
   background: var(--color-accent);
-  color: #fff;
+  color: var(--color-accent-text);
 }
 
-.btn--push.btn--sync-active:hover:not(:disabled) {
-  background: var(--color-accent-hover);
-}
+.btn--push.btn--sync-active:hover:not(:disabled) { background: var(--color-accent-hover); }
 
 .sync-badge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 18px;
-  padding: 2px 5px;
-  border-radius: 9px;
-  font-size: 10px;
-  font-weight: 700;
+  min-width: 20px;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
   font-variant-numeric: tabular-nums;
   line-height: 1;
 }
 
 .sync-badge--push {
-  background: rgba(255, 255, 255, 0.25);
-  color: #fff;
+  background: rgba(255, 255, 255, 0.22);
+  color: var(--color-accent-text);
 }
 
 .sync-badge--pull {
   background: var(--color-accent);
-  color: #fff;
+  color: var(--color-accent-text);
 }
 
 .btn--save {
   background: var(--color-success);
-  color: #fff;
+  color: var(--color-accent-text);
 }
-
-.btn--save:hover {
-  filter: brightness(1.1);
-}
+.btn--save:hover { filter: brightness(1.08); }
 
 .btn--icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   padding: 0;
-  border-radius: 6px;
-  background: none;
+  border-radius: var(--radius-pill);
+  background: transparent;
   color: var(--color-text-muted);
-  transition: color 0.12s;
+  transition: background var(--transition-base), color var(--transition-base);
 }
-
 .btn--icon:hover:not(:disabled) {
+  background: var(--color-bg-tertiary);
   color: var(--color-text);
 }
 
 .btn--icon:disabled,
 .btn--disabled {
-  opacity: 0.3;
+  opacity: 0.35;
   cursor: not-allowed;
 }
 
-.btn-spinner {
-  animation: spin 0.7s linear infinite;
-}
+.btn-spinner { animation: spin 0.7s linear infinite; }
 
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
+@keyframes spin { to { transform: rotate(360deg); } }
 
 /* ─── Merge Popover ──────────────────────────────────── */
 
@@ -1107,39 +1106,42 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
 
 .merge-popover {
   position: absolute;
-  top: calc(100% + 6px);
+  top: calc(100% + var(--space-3));
   right: 0;
   width: 300px;
   max-height: 360px;
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
-  border-radius: 10px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-md);
   display: flex;
   flex-direction: column;
   z-index: 50;
-  animation: bpSlide 0.15s ease-out;
+  animation: bpSlide var(--transition-slow);
+  overflow: hidden;
 }
 
 .mp-header {
-  padding: 8px 10px;
+  padding: var(--space-4) var(--space-5);
   border-bottom: 1px solid var(--color-border);
 }
 
 .mp-filter {
   width: 100%;
-  padding: 5px 8px;
-  font-size: 12px;
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--font-size-base);
   background: var(--color-bg);
   color: var(--color-text);
   border: 1px solid var(--color-border);
-  border-radius: 5px;
+  border-radius: var(--radius-pill);
   outline: none;
   box-sizing: border-box;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .mp-filter:focus {
   border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
 }
 
 .mp-loading {
@@ -1154,7 +1156,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
   height: 16px;
   border: 2px solid var(--color-border);
   border-top-color: var(--color-accent);
-  border-radius: 50%;
+  border-radius: var(--radius-pill);
   animation: spin 0.7s linear infinite;
 }
 
@@ -1164,45 +1166,39 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
   max-height: 280px;
 }
 
-.mp-list {
-  list-style: none;
-}
+.mp-list { list-style: none; }
 
 .mp-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-5);
   cursor: pointer;
-  transition: background 0.1s;
-  font-size: 12px;
+  transition: background var(--transition-fast);
+  font-size: var(--font-size-base);
   color: var(--color-text);
 }
 
-.mp-item:hover {
-  background: var(--color-bg-tertiary);
-}
+.mp-item:hover { background: var(--color-bg-tertiary); }
 
-.mp-item--remote {
-  opacity: 0.7;
-}
+.mp-item--remote { opacity: 0.7; }
 
 .mp-item-name {
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
 }
 
 .mp-item-tag {
-  font-size: 9px;
-  font-weight: 600;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  padding: 1px 5px;
-  border-radius: 3px;
-  background: var(--color-bg);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-pill);
+  background: var(--color-bg-tertiary);
   color: var(--color-text-muted);
   flex-shrink: 0;
 }
@@ -1211,8 +1207,8 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 20px;
-  font-size: 12px;
+  padding: var(--space-7);
+  font-size: var(--font-size-base);
 }
 
 /* ─── Recent Repos Popover (Phase 8.4) ──────────────── */
@@ -1222,49 +1218,45 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
 }
 
 .folder-chevron {
-  transition: transform 0.15s;
+  transition: transform var(--transition-base);
   opacity: 0.4;
-  margin-left: 2px;
+  margin-left: var(--space-1);
 }
 
-.folder-chevron--open {
-  transform: rotate(180deg);
-}
+.folder-chevron--open { transform: rotate(180deg); }
 
 .recent-popover {
   position: absolute;
-  top: calc(100% + 6px);
+  top: calc(100% + var(--space-3));
   left: 0;
   width: 280px;
   max-height: 380px;
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
-  border-radius: 10px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-md);
   display: flex;
   flex-direction: column;
   z-index: 50;
-  animation: bpSlide 0.15s ease-out;
+  animation: bpSlide var(--transition-slow);
   overflow: hidden;
 }
 
 .rp-open-btn {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-4);
   width: 100%;
-  padding: 10px 12px;
-  font-size: 12px;
-  font-weight: 500;
+  padding: var(--space-5) var(--space-5);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
   color: var(--color-text);
   background: none;
   text-align: left;
-  transition: background 0.1s;
+  transition: background var(--transition-fast);
 }
 
-.rp-open-btn:hover {
-  background: var(--color-bg-tertiary);
-}
+.rp-open-btn:hover { background: var(--color-bg-tertiary); }
 
 .rp-divider {
   height: 1px;
@@ -1278,29 +1270,24 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
 }
 
 .rp-label {
-  padding: 6px 12px 4px;
-  font-size: 10px;
-  font-weight: 600;
+  padding: var(--space-4) var(--space-5) var(--space-2);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--color-text-muted);
 }
 
-.rp-list ul {
-  list-style: none;
-}
+.rp-list ul { list-style: none; }
 
 .rp-item {
   display: flex;
   align-items: center;
-  padding: 0 6px 0 0;
-  transition: background 0.1s;
+  padding: 0 var(--space-3) 0 0;
+  transition: background var(--transition-fast);
 }
 
-.rp-item:hover {
-  background: var(--color-bg-tertiary);
-}
-
+.rp-item:hover,
 .rp-item--active {
   background: var(--color-bg-tertiary);
 }
@@ -1309,10 +1296,10 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
   flex: 1;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  font-size: 12px;
-  font-weight: 500;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-5);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
   color: var(--color-text);
   background: none;
   text-align: left;
@@ -1322,7 +1309,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
 
 .rp-pin-icon {
   flex-shrink: 0;
-  color: var(--color-accent, #89b4fa);
+  color: var(--color-accent);
 }
 
 .rp-item-repo-name {
@@ -1333,33 +1320,33 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
 
 .rp-item-actions {
   display: flex;
-  gap: 2px;
+  gap: var(--space-1);
   opacity: 0;
-  transition: opacity 0.1s;
+  transition: opacity var(--transition-fast);
   flex-shrink: 0;
 }
 
-.rp-item:hover .rp-item-actions {
-  opacity: 1;
-}
+.rp-item:hover .rp-item-actions { opacity: 1; }
 
 .rp-action {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 4px;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-pill);
   color: var(--color-text-muted);
   background: none;
-  transition: color 0.1s;
+  transition: color var(--transition-fast), background var(--transition-fast);
 }
 
 .rp-action:hover {
-  color: var(--color-accent, #89b4fa);
+  color: var(--color-accent);
+  background: var(--color-accent-soft);
 }
 
 .rp-action--remove:hover {
   color: var(--color-danger);
+  background: var(--color-danger-soft);
 }
 </style>

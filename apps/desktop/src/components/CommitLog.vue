@@ -134,8 +134,8 @@ function authorColor(name: string): string {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  padding: 30px;
+  gap: var(--space-2);
+  padding: var(--space-8);
 }
 
 .loading-spinner {
@@ -162,10 +162,10 @@ function authorColor(name: string): string {
 .log-section-label {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 16px;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-4);
   font-size: 10px;
-  font-weight: 700;
+  font-weight: var(--font-weight-bold);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   border-bottom: 1px solid var(--color-border);
@@ -175,9 +175,9 @@ function authorColor(name: string): string {
 }
 
 .log-section-label--unpushed {
-  color: #f59e0b;
+  color: var(--color-warning);
   background: var(--color-bg-secondary);
-  border-left: 3px solid #f59e0b;
+  border-left: 3px solid var(--color-warning);
 }
 
 .log-section-label--pushed {
@@ -190,34 +190,35 @@ function authorColor(name: string): string {
 
 .commit-item {
   display: flex;
-  gap: 10px;
-  padding: 10px 16px;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
   border-bottom: 1px solid var(--color-border);
   cursor: pointer;
-  transition: background 0.1s;
+  transition: background var(--transition-fast);
   border-left: 3px solid transparent;
 }
 
 .commit-item--unpushed {
-  border-left-color: #f59e0b;
-  background: rgba(245, 158, 11, 0.04);
+  border-left-color: var(--color-warning);
+  background: var(--color-warning-soft);
 }
 
 .commit-item--unpushed:hover {
-  background: rgba(245, 158, 11, 0.08);
+  background: var(--color-warning-soft);
+  opacity: 0.9;
 }
 
 .unpushed-badge {
   display: inline-block;
   font-size: 9px;
-  font-weight: 700;
+  font-weight: var(--font-weight-bold);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   padding: 1px 5px;
-  border-radius: 3px;
-  background: rgba(245, 158, 11, 0.15);
-  color: #f59e0b;
-  margin-left: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+  margin-left: var(--space-1);
   vertical-align: middle;
 }
 
@@ -246,11 +247,11 @@ function authorColor(name: string): string {
   justify-content: center;
   width: 22px;
   height: 22px;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   color: var(--color-text-muted);
   background: none;
   opacity: 0;
-  transition: opacity 0.12s, color 0.12s, background 0.12s;
+  transition: opacity var(--transition-fast), color var(--transition-fast), background var(--transition-fast);
   align-self: center;
 }
 
@@ -261,7 +262,7 @@ function authorColor(name: string): string {
 .commit-edit-btn:hover {
   opacity: 1 !important;
   color: var(--color-accent);
-  background: var(--color-bg-tertiary);
+  background: var(--color-bg);
 }
 
 .commit-avatar {
@@ -272,8 +273,8 @@ function authorColor(name: string): string {
   align-items: center;
   justify-content: center;
   font-size: 10px;
-  font-weight: 700;
-  color: #fff;
+  font-weight: var(--font-weight-bold);
+  color: var(--color-accent-text);
   flex-shrink: 0;
   margin-top: 2px;
 }
@@ -284,8 +285,8 @@ function authorColor(name: string): string {
 }
 
 .commit-message {
-  font-size: 13px;
-  font-weight: 500;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-medium);
   line-height: 1.4;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -295,14 +296,14 @@ function authorColor(name: string): string {
 .commit-meta {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-1);
   margin-top: 3px;
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   color: var(--color-text-muted);
 }
 
 .commit-hash {
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   color: var(--color-accent);
 }
 
@@ -324,6 +325,6 @@ function authorColor(name: string): string {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 40px;
+  padding: var(--space-10);
 }
 </style>

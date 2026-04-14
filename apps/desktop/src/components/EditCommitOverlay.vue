@@ -121,7 +121,7 @@ function handleKeydown(e: KeyboardEvent) {
   align-items: center;
   justify-content: center;
   z-index: 200;
-  animation: eco-fade 0.12s ease-out;
+  animation: eco-fade var(--transition-fast) ease-out;
 }
 
 @keyframes eco-fade {
@@ -134,11 +134,11 @@ function handleKeydown(e: KeyboardEvent) {
   max-width: calc(100vw - 48px);
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
-  border-radius: 12px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  border-radius: var(--radius-2xl);
+  box-shadow: var(--shadow-xl);
   display: flex;
   flex-direction: column;
-  animation: eco-slide 0.15s ease-out;
+  animation: eco-slide var(--transition-base) ease-out;
 }
 
 @keyframes eco-slide {
@@ -149,24 +149,24 @@ function handleKeydown(e: KeyboardEvent) {
 .eco-header {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 14px 16px 12px;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4) var(--space-3);
   border-bottom: 1px solid var(--color-border);
 }
 
 .eco-title {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
   color: var(--color-text);
   flex: 1;
 }
 
 .eco-hash {
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   color: var(--color-accent);
-  background: var(--color-bg-tertiary);
+  background: var(--color-bg);
   padding: 2px 7px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 
 .eco-close {
@@ -175,37 +175,37 @@ function handleKeydown(e: KeyboardEvent) {
   justify-content: center;
   width: 22px;
   height: 22px;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   color: var(--color-text-muted);
   background: none;
-  transition: color 0.1s, background 0.1s;
+  transition: color var(--transition-fast), background var(--transition-fast);
 }
 
 .eco-close:hover {
   color: var(--color-text);
-  background: var(--color-bg-tertiary);
+  background: var(--color-bg);
 }
 
 .eco-body {
-  padding: 16px;
+  padding: var(--space-4);
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-1);
 }
 
 .eco-label {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  font-weight: 600;
+  gap: var(--space-1);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--color-text-muted);
 }
 
 .eco-label--optional {
-  margin-top: 10px;
+  margin-top: var(--space-2);
 }
 
 .eco-label-hint {
@@ -217,17 +217,17 @@ function handleKeydown(e: KeyboardEvent) {
 
 .eco-input {
   width: 100%;
-  padding: 8px 10px;
-  font-size: 13px;
+  padding: var(--space-2) var(--space-2);
+  font-size: var(--font-size-md);
   background: var(--color-bg);
   color: var(--color-text);
   border: 1px solid var(--color-border);
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   outline: none;
   resize: none;
   line-height: 1.5;
   box-sizing: border-box;
-  transition: border-color 0.12s;
+  transition: border-color var(--transition-fast);
   font-family: var(--font-sans);
 }
 
@@ -237,35 +237,36 @@ function handleKeydown(e: KeyboardEvent) {
 
 .eco-input:focus {
   border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
 }
 
 .eco-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px;
+  padding: var(--space-3) var(--space-4);
   border-top: 1px solid var(--color-border);
 }
 
 .eco-hint {
-  font-size: 11px;
+  font-size: var(--font-size-xs);
 }
 
 .eco-actions {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .eco-btn {
-  padding: 6px 14px;
-  border-radius: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  transition: background 0.12s, opacity 0.12s;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  transition: background var(--transition-fast), opacity var(--transition-fast);
 }
 
 .eco-btn--cancel {
-  background: var(--color-bg-tertiary);
+  background: var(--color-bg);
   color: var(--color-text);
 }
 
@@ -275,7 +276,7 @@ function handleKeydown(e: KeyboardEvent) {
 
 .eco-btn--confirm {
   background: var(--color-accent);
-  color: #fff;
+  color: var(--color-accent-text);
 }
 
 .eco-btn--confirm:hover:not(:disabled) {

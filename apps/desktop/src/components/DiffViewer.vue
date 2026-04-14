@@ -723,13 +723,13 @@ function onDiffScroll() {
 }
 
 .diff-file-name {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--text-md);
+  font-weight: var(--font-semibold);
   flex-shrink: 0;
 }
 
 .diff-file-path {
-  font-size: 11px;
+  font-size: var(--text-xs);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -749,8 +749,8 @@ function onDiffScroll() {
 }
 
 .diff-stat {
-  font-size: 12px;
-  font-weight: 600;
+  font-size: var(--text-base);
+  font-weight: var(--font-semibold);
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
@@ -779,11 +779,11 @@ function onDiffScroll() {
   width: 26px;
   height: 24px;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--color-text-muted);
   cursor: pointer;
-  transition: background 0.12s, color 0.12s;
+  transition: background var(--transition-fast), color var(--transition-fast);
 }
 
 .diff-mode-btn:hover {
@@ -793,7 +793,7 @@ function onDiffScroll() {
 .diff-mode-btn--active {
   background: var(--color-bg-secondary);
   color: var(--color-accent);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--shadow-xs);
 }
 
 /* ─── Diff body (content + minimap) ───────────────────── */
@@ -831,8 +831,8 @@ function onDiffScroll() {
 
 .hunk-header {
   padding: 6px 16px;
-  font-size: 11px;
-  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  color: var(--color-text-subtle);
   background: var(--color-bg-tertiary);
   border-bottom: 1px solid var(--color-border);
   position: sticky;
@@ -859,11 +859,11 @@ function onDiffScroll() {
 }
 
 .diff-line--add {
-  background: rgba(34, 197, 94, 0.1);
+  background: var(--color-success-soft);
 }
 
 .diff-line--delete {
-  background: rgba(239, 68, 68, 0.1);
+  background: var(--color-danger-soft);
 }
 
 .line-no {
@@ -871,8 +871,8 @@ function onDiffScroll() {
   min-width: 48px;
   padding: 0 8px;
   text-align: right;
-  font-size: 11px;
-  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  color: var(--color-text-subtle);
   opacity: 0.5;
   user-select: none;
   vertical-align: top;
@@ -894,7 +894,7 @@ function onDiffScroll() {
   min-width: 20px;
   padding: 0 4px;
   text-align: center;
-  font-size: 12px;
+  font-size: var(--text-base);
   color: var(--color-text-muted);
   user-select: none;
   vertical-align: top;
@@ -902,17 +902,17 @@ function onDiffScroll() {
 
 .diff-line--add .line-marker {
   color: var(--color-success);
-  font-weight: 700;
+  font-weight: var(--font-bold);
 }
 
 .diff-line--delete .line-marker {
   color: var(--color-danger);
-  font-weight: 700;
+  font-weight: var(--font-bold);
 }
 
 .line-content {
   padding: 0 12px;
-  font-size: 12px;
+  font-size: var(--text-base);
   white-space: pre;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -947,7 +947,7 @@ function onDiffScroll() {
 .diff-table--sbs .sbs-content {
   width: calc(50% - 60px);
   padding: 0 8px;
-  font-size: 12px;
+  font-size: var(--text-base);
   white-space: pre;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -965,11 +965,11 @@ function onDiffScroll() {
 }
 
 .sbs-cell--delete {
-  background: rgba(239, 68, 68, 0.1);
+  background: var(--color-danger-soft);
 }
 
 .sbs-cell--add {
-  background: rgba(34, 197, 94, 0.1);
+  background: var(--color-success-soft);
 }
 
 .sbs-cell--empty {
@@ -979,7 +979,7 @@ function onDiffScroll() {
 
 .sbs-cell--delete.line-marker,
 .sbs-cell--add.line-marker {
-  font-weight: 700;
+  font-weight: var(--font-bold);
 }
 
 .sbs-cell--delete.line-marker {
@@ -1008,11 +1008,11 @@ function onDiffScroll() {
   width: 26px;
   height: 24px;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: var(--color-bg-tertiary);
   color: var(--color-text-muted);
   cursor: pointer;
-  transition: background 0.12s, color 0.12s;
+  transition: background var(--transition-fast), color var(--transition-fast);
 }
 
 .diff-history-btn:hover {
@@ -1034,11 +1034,11 @@ function onDiffScroll() {
   width: 22px;
   height: 22px;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: var(--color-bg-tertiary);
   color: var(--color-text-muted);
   cursor: pointer;
-  transition: background 0.12s, color 0.12s;
+  transition: background var(--transition-fast), color var(--transition-fast);
 }
 
 .diff-nav-btn:hover:not(:disabled) {
@@ -1052,7 +1052,7 @@ function onDiffScroll() {
 }
 
 .diff-nav-count {
-  font-size: 10px;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
   min-width: 28px;
   text-align: center;
@@ -1065,14 +1065,14 @@ function onDiffScroll() {
   justify-content: center;
   gap: 6px;
   padding: 4px 16px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--color-accent);
   background: var(--color-bg-tertiary);
   cursor: pointer;
   user-select: none;
   border-top: 1px dashed var(--color-border);
   border-bottom: 1px dashed var(--color-border);
-  transition: background 0.12s;
+  transition: background var(--transition-fast);
 }
 
 .diff-collapsed:hover {
@@ -1091,12 +1091,12 @@ function onDiffScroll() {
 }
 
 .diff-empty-text {
-  font-size: 14px;
+  font-size: var(--text-lg);
   color: var(--color-text-muted);
 }
 
 .diff-empty-hint {
-  font-size: 12px;
+  font-size: var(--text-base);
 }
 
 /* New directory listing */
@@ -1167,9 +1167,9 @@ function onDiffScroll() {
 }
 
 .diff-dir-badge {
-  font-size: 11px;
-  font-weight: 700;
-  color: #16a34a;
+  font-size: var(--text-xs);
+  font-weight: var(--font-bold);
+  color: var(--color-success);
   width: 14px;
   text-align: center;
   flex-shrink: 0;
@@ -1185,8 +1185,8 @@ function onDiffScroll() {
 }
 
 .diff-dir-name {
-  font-size: 12px;
-  font-weight: 500;
+  font-size: var(--text-base);
+  font-weight: var(--font-medium);
   color: var(--color-text);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1194,7 +1194,7 @@ function onDiffScroll() {
 }
 
 .diff-dir-path {
-  font-size: 10px;
+  font-size: var(--text-xs);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1204,7 +1204,7 @@ function onDiffScroll() {
   color: var(--color-text-muted);
   flex-shrink: 0;
   opacity: 0;
-  transition: opacity 0.1s;
+  transition: opacity var(--transition-fast);
 }
 
 .diff-dir-file:hover .diff-dir-arrow,
@@ -1215,14 +1215,14 @@ function onDiffScroll() {
 /* ─── Partial staging controls ──────────────────────── */
 .diff-stage-btn {
   padding: 3px 10px;
-  font-size: 11px;
-  font-weight: 600;
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: var(--color-accent);
-  color: #fff;
+  color: var(--color-accent-text);
   cursor: pointer;
-  transition: opacity 0.12s;
+  transition: opacity var(--transition-fast);
   white-space: nowrap;
 }
 
@@ -1244,20 +1244,20 @@ function onDiffScroll() {
 
 .hunk-stage-btn {
   padding: 1px 8px;
-  font-size: 10px;
-  font-weight: 600;
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
   border: 1px solid var(--color-accent);
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   background: transparent;
   color: var(--color-accent);
   cursor: pointer;
   flex-shrink: 0;
-  transition: background 0.12s, color 0.12s;
+  transition: background var(--transition-fast), color var(--transition-fast);
 }
 
 .hunk-stage-btn:hover {
   background: var(--color-accent);
-  color: #fff;
+  color: var(--color-accent-text);
 }
 
 .hunk-check {
@@ -1290,6 +1290,6 @@ function onDiffScroll() {
 }
 
 .diff-line--selected {
-  background: rgba(56, 132, 255, 0.1) !important;
+  background: var(--color-accent-soft) !important;
 }
 </style>

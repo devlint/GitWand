@@ -87,25 +87,25 @@ function statusLabel(file: ConflictFile): string {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px;
+  padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--color-border);
 }
 
 .file-list-title {
-  font-size: 11px;
-  font-weight: 600;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--color-text-muted);
 }
 
 .file-list-count {
-  font-size: 11px;
-  font-weight: 600;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
   color: var(--color-text-muted);
-  background: var(--color-bg-tertiary);
+  background: var(--color-bg);
   padding: 1px 6px;
-  border-radius: 10px;
+  border-radius: var(--radius-pill);
   font-variant-numeric: tabular-nums;
 }
 
@@ -118,15 +118,15 @@ function statusLabel(file: ConflictFile): string {
 .file-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 16px;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
   cursor: pointer;
-  transition: background 0.12s;
+  transition: background var(--transition-fast);
   border-left: 3px solid transparent;
 }
 
 .file-item:hover {
-  background: var(--color-bg-tertiary);
+  background: var(--color-bg-hover);
 }
 
 .file-item--selected {
@@ -172,28 +172,28 @@ function statusLabel(file: ConflictFile): string {
 }
 
 .file-name {
-  font-size: 13px;
-  font-weight: 500;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-medium);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .file-dir {
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .file-badge {
-  font-size: 11px;
-  font-weight: 600;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
   font-variant-numeric: tabular-nums;
   color: var(--color-text-muted);
   background: var(--color-bg);
   padding: 1px 7px;
-  border-radius: 10px;
+  border-radius: var(--radius-pill);
   flex-shrink: 0;
 }
 </style>

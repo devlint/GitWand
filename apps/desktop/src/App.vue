@@ -12,6 +12,7 @@ import FileHistoryViewer from "./components/FileHistoryViewer.vue";
 import CommitGraph from "./components/CommitGraph.vue";
 import SettingsPanel from "./components/SettingsPanel.vue";
 import PrDetailView from "./components/PrDetailView.vue";
+import DashboardView from "./components/DashboardView.vue";
 import EditCommitOverlay from "./components/EditCommitOverlay.vue";
 import { usePrPanel, PR_PANEL_KEY } from "./composables/usePrPanel";
 import type { GitLogEntry } from "./utils/backend";
@@ -696,8 +697,19 @@ onUnmounted(() => {
             </button>
           </div>
 
+          <!-- Dashboard view (default when opening a repo) -->
+          <DashboardView
+            v-if="viewMode === 'dashboard'"
+            :cwd="repoFolderPath ?? ''"
+            :branch="branchDisplay"
+            :status="repoStats"
+            :ahead="aheadCount"
+            :behind="behindCount"
+            @change-view="onViewModeChange"
+          />
+
           <!-- Changes view: conflict editor, file history, or diff viewer -->
-          <template v-if="viewMode === 'changes'">
+          <template v-else-if="viewMode === 'changes'">
             <MergeEditor
               v-if="showingMergeEditor && mergeSelectedFile"
               :file="mergeSelectedFile"

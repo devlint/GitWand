@@ -66,10 +66,10 @@ const scope = computed(() => {
     critical: "Critique",
   };
   const riskColor: Record<string, string> = {
-    low: "#16a34a",
-    medium: "#c07a00",
+    low: "var(--color-success)",
+    medium: "var(--color-warning)",
     high: "#ea580c",
-    critical: "#dc2626",
+    critical: "var(--color-danger)",
   };
 
   return { changedFiles, additions, deletions, totalLines, pct, risk, riskLabel: riskLabel[risk], riskColor: riskColor[risk] };
@@ -396,14 +396,14 @@ watch(() => props.prDiffFiles, (files) => {
   border: 1px solid;
 }
 .pi-badge--info {
-  background: rgba(37,99,235,0.1);
-  color: #1d4ed8;
-  border-color: rgba(37,99,235,0.35);
+  background: var(--color-info-soft);
+  color: var(--color-info);
+  border-color: var(--color-info);
 }
 .pi-badge--ai {
-  background: rgba(109,40,217,0.1);
-  color: #6d28d9;
-  border-color: rgba(109,40,217,0.35);
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  border-color: var(--color-accent);
 }
 
 .pi-empty {
@@ -419,7 +419,7 @@ watch(() => props.prDiffFiles, (files) => {
   background: var(--color-accent);
   border: none;
   border-radius: 5px;
-  color: #fff;
+  color: var(--color-accent-text);
   font-size: 11px;
   font-weight: 600;
   padding: 3px 12px;
@@ -429,7 +429,7 @@ watch(() => props.prDiffFiles, (files) => {
 
 .pi-msg--error {
   font-size: 12px;
-  color: #f38ba8;
+  color: var(--color-danger);
   padding: 4px 0;
 }
 
@@ -454,14 +454,14 @@ watch(() => props.prDiffFiles, (files) => {
   margin-bottom: 10px;
 }
 .pi-conflict-summary--ok {
-  background: rgba(166,227,161,0.12);
-  border: 1px solid rgba(166,227,161,0.35);
-  color: #a6e3a1;
+  background: var(--color-success-soft);
+  border: 1px solid var(--color-success);
+  color: var(--color-success);
 }
 .pi-conflict-summary--bad {
-  background: rgba(243,139,168,0.12);
-  border: 1px solid rgba(243,139,168,0.35);
-  color: #f38ba8;
+  background: var(--color-danger-soft);
+  border: 1px solid var(--color-danger);
+  color: var(--color-danger);
 }
 
 .pi-conflict-detail { margin-bottom: 10px; }
@@ -478,8 +478,8 @@ watch(() => props.prDiffFiles, (files) => {
   font-size: 12px;
   background: var(--color-bg-tertiary);
 }
-.pi-file-row--conflict { border-left: 2px solid #f38ba8; }
-.pi-file-row--overlap { border-left: 2px solid #f9e2af; }
+.pi-file-row--conflict { border-left: 2px solid var(--color-danger); }
+.pi-file-row--overlap { border-left: 2px solid var(--color-warning); }
 .pi-file-icon { font-size: 13px; }
 .pi-file-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pi-file-label { font-size: 10px; color: var(--color-text-muted); white-space: nowrap; flex-shrink: 0; }
@@ -493,7 +493,7 @@ watch(() => props.prDiffFiles, (files) => {
   color: var(--color-text-muted);
   white-space: nowrap;
 }
-.pi-chip--clean { color: #a6e3a1; border-color: rgba(166,227,161,0.3); }
+.pi-chip--clean { color: var(--color-success); border-color: var(--color-success); }
 .pi-chip--more { color: var(--color-accent); }
 
 /* Scope */
@@ -513,8 +513,8 @@ watch(() => props.prDiffFiles, (files) => {
 }
 .pi-scope-value { font-size: 16px; font-weight: 700; color: var(--color-text); margin-bottom: 2px; }
 .pi-scope-label { font-size: 10px; color: var(--color-text-muted); text-transform: uppercase; }
-.pi-add { color: #16a34a; }
-.pi-del { color: #dc2626; }
+.pi-add { color: var(--color-success); }
+.pi-del { color: var(--color-danger); }
 
 .pi-risk-bar-track {
   height: 4px;
@@ -549,7 +549,7 @@ watch(() => props.prDiffFiles, (files) => {
 }
 .pi-hotspot-bar-fill {
   height: 100%;
-  background: #fab387;
+  background: var(--color-warning);
   border-radius: 3px;
 }
 .pi-hotspot-count { font-size: 11px; color: var(--color-text-muted); white-space: nowrap; width: 70px; text-align: right; flex-shrink: 0; }
@@ -566,9 +566,9 @@ watch(() => props.prDiffFiles, (files) => {
   background: var(--color-bg-tertiary);
   font-size: 12px;
 }
-.pi-ai-row--error { border-color: #f38ba8; }
-.pi-ai-row--warn { border-color: #f9e2af; }
-.pi-ai-row--info { border-color: #89b4fa; }
+.pi-ai-row--error { border-color: var(--color-danger); }
+.pi-ai-row--warn { border-color: var(--color-warning); }
+.pi-ai-row--info { border-color: var(--color-info); }
 .pi-ai-icon { font-size: 13px; flex-shrink: 0; margin-top: 1px; }
 .pi-ai-content { display: flex; flex-direction: column; gap: 2px; }
 .pi-ai-file { font-weight: 600; color: var(--color-text); font-size: 11px; }

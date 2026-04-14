@@ -220,11 +220,11 @@ onMounted(() => {
 .git-terminal {
   display: flex;
   flex-direction: column;
-  background: var(--bg-terminal, #11111b);
-  border-radius: 8px;
-  border: 1px solid var(--border-color, #313244);
+  background: var(--color-bg);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
   font-family: "JetBrains Mono", "Fira Code", "Consolas", monospace;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   height: 300px;
   overflow: hidden;
 }
@@ -233,34 +233,34 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 10px;
-  background: var(--bg-secondary, #1e1e2e);
-  border-bottom: 1px solid var(--border-color, #313244);
+  padding: var(--space-1) var(--space-2);
+  background: var(--color-bg-secondary);
+  border-bottom: 1px solid var(--color-border);
 }
 
 .terminal-title {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
   font-family: inherit;
 }
 
 .terminal-output {
   flex: 1;
   overflow-y: auto;
-  padding: 8px 10px;
+  padding: var(--space-2) var(--space-2);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .terminal-welcome {
-  color: var(--text-muted, #6c7086);
-  font-size: 12px;
-  padding: 12px 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  padding: var(--space-3) 0;
 }
 
 .terminal-welcome code {
-  background: var(--bg-secondary, #1e1e2e);
+  background: var(--color-bg-secondary);
   padding: 1px 4px;
   border-radius: 3px;
 }
@@ -273,44 +273,44 @@ onMounted(() => {
 
 .terminal-cmd {
   display: flex;
-  gap: 6px;
-  color: var(--text-primary, #cdd6f4);
-  font-weight: 600;
+  gap: var(--space-1);
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-semibold);
 }
 
 .terminal-prompt {
-  color: var(--color-success, #a6e3a1);
-  font-weight: 700;
+  color: var(--color-success);
+  font-weight: var(--font-weight-bold);
   user-select: none;
 }
 
 .terminal-stdout {
   margin: 0;
-  color: var(--text-secondary, #a6adc8);
+  color: var(--color-text-secondary);
   white-space: pre-wrap;
   word-break: break-all;
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   line-height: 1.5;
 }
 
 .terminal-stderr {
   margin: 0;
-  color: var(--color-error, #f38ba8);
+  color: var(--color-danger);
   white-space: pre-wrap;
   word-break: break-all;
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   line-height: 1.5;
 }
 
 .terminal-exit {
   font-size: 10px;
-  color: var(--color-error, #f38ba8);
+  color: var(--color-danger);
   opacity: 0.7;
 }
 
 .terminal-input-area {
   position: relative;
-  border-top: 1px solid var(--border-color, #313244);
+  border-top: 1px solid var(--color-border);
 }
 
 .terminal-suggestions {
@@ -318,8 +318,8 @@ onMounted(() => {
   bottom: 100%;
   left: 0;
   right: 0;
-  background: var(--bg-secondary, #1e1e2e);
-  border: 1px solid var(--border-color, #313244);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
   border-bottom: none;
   border-radius: 4px 4px 0 0;
   max-height: 160px;
@@ -327,27 +327,27 @@ onMounted(() => {
 }
 
 .terminal-suggestion {
-  padding: 4px 10px;
+  padding: var(--space-1) var(--space-2);
   cursor: pointer;
-  transition: background 0.1s;
+  transition: background var(--transition-fast);
 }
 
 .terminal-suggestion:hover,
 .terminal-suggestion.active {
-  background: var(--bg-hover, rgba(255, 255, 255, 0.08));
+  background: var(--color-bg-hover);
 }
 
 .terminal-input-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 10px;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-2);
 }
 
 .terminal-git-prefix {
-  color: var(--color-accent, #cba6f7);
+  color: var(--color-accent);
   user-select: none;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
 }
 
 .terminal-input {
@@ -361,7 +361,7 @@ onMounted(() => {
 }
 
 .terminal-input::placeholder {
-  color: var(--text-muted, #45475a);
+  color: var(--color-text-muted);
 }
 
 .terminal-spinner {
@@ -378,17 +378,17 @@ onMounted(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--border-color, #313244);
-  border-radius: 4px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
   background: transparent;
   color: inherit;
   cursor: pointer;
-  font-size: 12px;
-  padding: 3px 8px;
-  transition: all 0.15s;
+  font-size: var(--font-size-xs);
+  padding: var(--space-1) var(--space-2);
+  transition: all var(--transition-base);
 }
 
-.btn:hover { background: var(--bg-hover, rgba(255, 255, 255, 0.08)); }
-.btn-sm { font-size: 12px; }
+.btn:hover { background: var(--color-bg-hover); }
+.btn-sm { font-size: var(--font-size-xs); }
 .btn-ghost { border-color: transparent; }
 </style>
