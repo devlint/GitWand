@@ -1,0 +1,26 @@
+{
+  "name": "@gitwand/mcp",
+  "version": "0.1.0",
+  "description": "GitWand MCP server — smart conflict resolution for AI agents",
+  "type": "module",
+  "main": "dist/server.js",
+  "bin": {
+    "gitwand-mcp": "dist/server.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@gitwand/core": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.12.1"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "typescript": "^5.4.0"
+  },
+  "license": "MIT"
+}
