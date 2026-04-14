@@ -1,5 +1,113 @@
+<script setup lang="ts">
+import { ref, computed } from 'vue'
+
+const locale = ref<'fr' | 'en'>((typeof navigator !== 'undefined' && navigator.language?.startsWith('en')) ? 'en' : 'fr')
+
+const i18n = {
+  fr: {
+    badge: 'v1.0.1 · Open Source · MIT',
+    heroH1a: 'Git, sans',
+    heroH1b: 'maux de tête.',
+    heroSub: 'GitWand est un client Git natif avec résolution intelligente des conflits de fusion. Desktop, CLI, et extension VS Code — un seul outil, partout.',
+    download: 'Télécharger',
+    docs: 'Documentation →',
+    platforms: 'macOS · Linux · Windows',
+    statPatterns: 'patterns de résolution',
+    statResolved: 'conflits résolus automatiquement',
+    statInterfaces: 'interfaces (Desktop, CLI, VS Code)',
+    featTitle: 'Tout ce qu\'il faut pour Git',
+    featSub: 'Un workflow complet, sans compromis sur les performances.',
+    featPerf: 'Performances natives',
+    featPerfDesc: 'Construit avec Tauri 2 et Vue 3. Démarrage en moins d\'une seconde. Aucun overhead Electron.',
+    featResolve: 'Résolution intelligente',
+    featResolveDesc: '8 patterns de résolution avec scoring de confiance. 95%+ des conflits triviaux résolus sans intervention.',
+    featDiff: 'Diff visuel',
+    featDiffDesc: 'Viewer de diff unifié avec coloration syntaxique, staging au niveau du hunk, et preview de merge.',
+    featHistory: 'Historique & Graph',
+    featHistoryDesc: 'Historique complet, graphe DAG interactif, blame de fichier, et recherche dans les commits.',
+    featPR: 'Pull Requests intégrées',
+    featPRDesc: 'Revue de PR GitHub directement dans l\'app. Commentaires, reviews, statuts CI et aperçu des conflits.',
+    featUI: '3 interfaces',
+    featUIDesc: 'App desktop (macOS/Linux/Windows), outil CLI gitwand resolve pour CI/CD, et extension VS Code.',
+    conflictTitle: 'Les conflits de merge, résolus automatiquement',
+    conflictSub: 'GitWand analyse la sémantique du code, pas seulement les lignes. Il choisit la bonne résolution à votre place.',
+    conflictBefore: 'Avant — conflit brut',
+    conflictAfter: 'Après — résolu automatiquement',
+    conflictBadge: 'Confiance 97% · prefer-theirs · sémantique',
+    previewTitle: 'Un client Git que vous allez aimer',
+    previewSub: 'Interface épurée, thème sombre, toutes les fonctionnalités Git au même endroit.',
+    platformsTitle: 'Disponible partout',
+    plMacSub: 'Intel + Apple Silicon',
+    plLinuxSub: '.deb · .AppImage · .rpm',
+    plWinSub: 'Installeur .exe · .msi',
+    plCli: 'CLI npm',
+    plCliSub: 'npm i -g gitwand',
+    plVscode: 'VS Code',
+    plVscodeSub: 'Extension Marketplace',
+    ctaTitle: 'Prêt à simplifier votre workflow Git ?',
+    ctaSub: 'Gratuit, open source, et conçu pour les développeurs qui veulent aller vite.',
+    ctaDownload: 'Télécharger GitWand',
+  },
+  en: {
+    badge: 'v1.0.1 · Open Source · MIT',
+    heroH1a: 'Git, without',
+    heroH1b: 'the headaches.',
+    heroSub: 'GitWand is a native Git client with smart merge conflict resolution. Desktop, CLI, and VS Code extension — one tool, everywhere.',
+    download: 'Download',
+    docs: 'Documentation →',
+    platforms: 'macOS · Linux · Windows',
+    statPatterns: 'resolution patterns',
+    statResolved: 'conflicts auto-resolved',
+    statInterfaces: 'interfaces (Desktop, CLI, VS Code)',
+    featTitle: 'Everything you need for Git',
+    featSub: 'A complete workflow with no performance compromise.',
+    featPerf: 'Native performance',
+    featPerfDesc: 'Built with Tauri 2 and Vue 3. Sub-second startup. Zero Electron overhead.',
+    featResolve: 'Smart resolution',
+    featResolveDesc: '8 resolution patterns with confidence scoring. 95%+ of trivial conflicts resolved without intervention.',
+    featDiff: 'Visual diff',
+    featDiffDesc: 'Unified diff viewer with syntax highlighting, hunk-level staging, and merge preview.',
+    featHistory: 'History & Graph',
+    featHistoryDesc: 'Full history, interactive DAG graph, file blame, and commit search.',
+    featPR: 'Integrated Pull Requests',
+    featPRDesc: 'Review GitHub PRs directly in the app. Comments, reviews, CI status, and conflict preview.',
+    featUI: '3 interfaces',
+    featUIDesc: 'Desktop app (macOS/Linux/Windows), gitwand resolve CLI for CI/CD, and VS Code extension.',
+    conflictTitle: 'Merge conflicts, resolved automatically',
+    conflictSub: 'GitWand analyzes code semantics, not just lines. It picks the right resolution for you.',
+    conflictBefore: 'Before — raw conflict',
+    conflictAfter: 'After — auto-resolved',
+    conflictBadge: 'Confidence 97% · prefer-theirs · semantic',
+    previewTitle: 'A Git client you\'ll love',
+    previewSub: 'Clean interface, dark theme, every Git feature in one place.',
+    platformsTitle: 'Available everywhere',
+    plMacSub: 'Intel + Apple Silicon',
+    plLinuxSub: '.deb · .AppImage · .rpm',
+    plWinSub: 'Installer .exe · .msi',
+    plCli: 'CLI npm',
+    plCliSub: 'npm i -g gitwand',
+    plVscode: 'VS Code',
+    plVscodeSub: 'Extension Marketplace',
+    ctaTitle: 'Ready to simplify your Git workflow?',
+    ctaSub: 'Free, open source, and built for developers who want to move fast.',
+    ctaDownload: 'Download GitWand',
+  },
+}
+
+const t = computed(() => i18n[locale.value])
+
+function toggleLocale() {
+  locale.value = locale.value === 'fr' ? 'en' : 'fr'
+}
+</script>
+
 <template>
   <div class="gw-landing">
+
+    <!-- Language toggle -->
+    <button class="lang-toggle" @click="toggleLocale" :title="locale === 'fr' ? 'Switch to English' : 'Passer en français'">
+      {{ locale === 'fr' ? 'EN' : 'FR' }}
+    </button>
 
     <!-- ══════════════════════════════════════
          HERO
@@ -9,25 +117,24 @@
 
         <!-- Left: text -->
         <div class="hero-text">
-          <span class="badge">v1.0.1 · Open Source · MIT</span>
+          <span class="badge">{{ t.badge }}</span>
           <h1 class="hero-h1">
-            Git, without<br>
-            <span class="gradient">the headaches.</span>
+            {{ t.heroH1a }}<br>
+            <span class="gradient">{{ t.heroH1b }}</span>
           </h1>
           <p class="hero-sub">
-            GitWand est un client Git natif avec résolution intelligente des conflits de fusion.
-            Desktop, CLI, et extension VS Code — un seul outil, partout.
+            {{ t.heroSub }}
           </p>
           <div class="hero-ctas">
             <a href="https://github.com/devlint/GitWand/releases" class="btn-primary">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 1v10M4 7l4 4 4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 13h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-              Télécharger
+              {{ t.download }}
             </a>
             <a href="/GitWand/guide/getting-started" class="btn-ghost">
-              Documentation →
+              {{ t.docs }}
             </a>
           </div>
-          <p class="hero-platforms">macOS · Linux · Windows</p>
+          <p class="hero-platforms">{{ t.platforms }}</p>
         </div>
 
         <!-- Right: app window mockup -->
@@ -93,17 +200,17 @@
     <section class="stats-bar">
       <div class="stat">
         <span class="stat-n">8</span>
-        <span class="stat-l">patterns de résolution</span>
+        <span class="stat-l">{{ t.statPatterns }}</span>
       </div>
       <div class="stat-sep"></div>
       <div class="stat">
         <span class="stat-n">95%+</span>
-        <span class="stat-l">conflits résolus automatiquement</span>
+        <span class="stat-l">{{ t.statResolved }}</span>
       </div>
       <div class="stat-sep"></div>
       <div class="stat">
         <span class="stat-n">3</span>
-        <span class="stat-l">interfaces (Desktop, CLI, VS Code)</span>
+        <span class="stat-l">{{ t.statInterfaces }}</span>
       </div>
     </section>
 
@@ -112,56 +219,56 @@
     ══════════════════════════════════════ -->
     <section class="features">
       <div class="section-inner">
-        <h2 class="section-title">Tout ce qu'il faut pour Git</h2>
-        <p class="section-sub">Un workflow complet, sans compromis sur les performances.</p>
+        <h2 class="section-title">{{ t.featTitle }}</h2>
+        <p class="section-sub">{{ t.featSub }}</p>
         <div class="features-grid">
 
           <div class="feat-card">
             <div class="feat-icon">
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" stroke="#7C3AED" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </div>
-            <h3>Performances natives</h3>
-            <p>Construit avec Tauri 2 et Vue 3. Démarrage en moins d'une seconde. Aucun overhead Electron.</p>
+            <h3>{{ t.featPerf }}</h3>
+            <p>{{ t.featPerfDesc }}</p>
           </div>
 
           <div class="feat-card">
             <div class="feat-icon">
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 2a7 7 0 100 14A7 7 0 0012 2z" stroke="#7C3AED" stroke-width="1.8"/><path d="M9 12l2 2 4-4" stroke="#7C3AED" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </div>
-            <h3>Résolution intelligente</h3>
-            <p>8 patterns de résolution avec scoring de confiance. 95%+ des conflits triviaux résolus sans intervention.</p>
+            <h3>{{ t.featResolve }}</h3>
+            <p>{{ t.featResolveDesc }}</p>
           </div>
 
           <div class="feat-card">
             <div class="feat-icon">
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="14" rx="2" stroke="#7C3AED" stroke-width="1.8"/><path d="M8 21h8M12 17v4" stroke="#7C3AED" stroke-width="1.8" stroke-linecap="round"/></svg>
             </div>
-            <h3>Diff visuel</h3>
-            <p>Viewer de diff unifié avec coloration syntaxique, staging au niveau du hunk, et preview de merge.</p>
+            <h3>{{ t.featDiff }}</h3>
+            <p>{{ t.featDiffDesc }}</p>
           </div>
 
           <div class="feat-card">
             <div class="feat-icon">
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="6" cy="6" r="2" stroke="#7C3AED" stroke-width="1.8"/><circle cx="18" cy="6" r="2" stroke="#7C3AED" stroke-width="1.8"/><circle cx="12" cy="18" r="2" stroke="#7C3AED" stroke-width="1.8"/><path d="M8 6h8M7 8l-2 8M17 8l2 8" stroke="#7C3AED" stroke-width="1.8" stroke-linecap="round"/></svg>
             </div>
-            <h3>Historique &amp; Graph</h3>
-            <p>Historique complet, graphe DAG interactif, blame de fichier, et recherche dans les commits.</p>
+            <h3>{{ t.featHistory }}</h3>
+            <p>{{ t.featHistoryDesc }}</p>
           </div>
 
           <div class="feat-card">
             <div class="feat-icon">
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 00-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0020 4.77 5.07 5.07 0 0019.91 1S18.73.65 16 2.48a13.38 13.38 0 00-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 005 4.77a5.44 5.44 0 00-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 009 18.13V22" stroke="#7C3AED" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </div>
-            <h3>Pull Requests intégrées</h3>
-            <p>Revue de PR GitHub directement dans l'app. Commentaires, reviews, statuts CI et aperçu des conflits.</p>
+            <h3>{{ t.featPR }}</h3>
+            <p>{{ t.featPRDesc }}</p>
           </div>
 
           <div class="feat-card">
             <div class="feat-icon">
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" stroke="#7C3AED" stroke-width="1.8" stroke-linecap="round"/><circle cx="9" cy="7" r="4" stroke="#7C3AED" stroke-width="1.8"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" stroke="#7C3AED" stroke-width="1.8" stroke-linecap="round"/></svg>
             </div>
-            <h3>3 interfaces</h3>
-            <p>App desktop (macOS/Linux/Windows), outil CLI <code>gitwand resolve</code> pour CI/CD, et extension VS Code.</p>
+            <h3>{{ t.featUI }}</h3>
+            <p>{{ t.featUIDesc }}</p>
           </div>
 
         </div>
@@ -173,15 +280,15 @@
     ══════════════════════════════════════ -->
     <section class="conflict-section">
       <div class="section-inner">
-        <h2 class="section-title">Les conflits de merge, résolus automatiquement</h2>
-        <p class="section-sub">GitWand analyse la sémantique du code, pas seulement les lignes. Il choisit la bonne résolution à votre place.</p>
+        <h2 class="section-title">{{ t.conflictTitle }}</h2>
+        <p class="section-sub">{{ t.conflictSub }}</p>
 
         <div class="conflict-demo">
           <!-- Before -->
           <div class="conflict-panel">
             <div class="conflict-panel-head conflict-panel-head--before">
               <span class="panel-dot panel-dot--red"></span>
-              Avant — conflit brut
+              {{ t.conflictBefore }}
             </div>
             <div class="conflict-code">
               <div class="cc-line cc-conflict">  &lt;&lt;&lt;&lt;&lt;&lt;&lt; HEAD</div>
@@ -202,14 +309,14 @@
           <div class="conflict-panel">
             <div class="conflict-panel-head conflict-panel-head--after">
               <span class="panel-dot panel-dot--green"></span>
-              Après — résolu automatiquement
+              {{ t.conflictAfter }}
             </div>
             <div class="conflict-code">
               <div class="cc-line cc-resolved">    <span class="k">const</span> theme = localStorage.<span class="fn">getItem</span>(<span class="s">'theme'</span>) ?? <span class="s">'dark'</span></div>
             </div>
             <div class="conflict-badge">
               <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M13.5 3.5l-7 7L3 7" stroke="#10B981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              Confiance 97% · prefer-theirs · sémantique
+              {{ t.conflictBadge }}
             </div>
           </div>
         </div>
@@ -221,8 +328,8 @@
     ══════════════════════════════════════ -->
     <section class="preview-section">
       <div class="section-inner">
-        <h2 class="section-title">Un client Git que vous allez aimer</h2>
-        <p class="section-sub">Interface épurée, thème sombre, toutes les fonctionnalités Git au même endroit.</p>
+        <h2 class="section-title">{{ t.previewTitle }}</h2>
+        <p class="section-sub">{{ t.previewSub }}</p>
 
         <div class="preview-window">
           <div class="win-bar">
@@ -315,32 +422,32 @@
     ══════════════════════════════════════ -->
     <section class="platforms-section">
       <div class="section-inner">
-        <h2 class="section-title">Disponible partout</h2>
+        <h2 class="section-title">{{ t.platformsTitle }}</h2>
         <div class="platforms-grid">
           <div class="platform-card">
             <svg width="32" height="32" viewBox="0 0 24 24" fill="none"><path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2z" stroke="#8B5CF6" stroke-width="1.5"/><path d="M8 12.5c0-2.2 1.8-4 4-4s4 1.8 4 4-1.8 4-4 4-4-1.8-4-4z" stroke="#8B5CF6" stroke-width="1.5"/></svg>
             <span class="pl-name">macOS</span>
-            <span class="pl-sub">Intel + Apple Silicon</span>
+            <span class="pl-sub">{{ t.plMacSub }}</span>
           </div>
           <div class="platform-card">
             <svg width="32" height="32" viewBox="0 0 24 24" fill="none"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="#8B5CF6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
             <span class="pl-name">Linux</span>
-            <span class="pl-sub">.deb · .AppImage · .rpm</span>
+            <span class="pl-sub">{{ t.plLinuxSub }}</span>
           </div>
           <div class="platform-card">
             <svg width="32" height="32" viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="8" height="8" rx="1" stroke="#8B5CF6" stroke-width="1.5"/><rect x="13" y="3" width="8" height="8" rx="1" stroke="#8B5CF6" stroke-width="1.5"/><rect x="3" y="13" width="8" height="8" rx="1" stroke="#8B5CF6" stroke-width="1.5"/><rect x="13" y="13" width="8" height="8" rx="1" stroke="#8B5CF6" stroke-width="1.5"/></svg>
             <span class="pl-name">Windows</span>
-            <span class="pl-sub">Installeur .exe · .msi</span>
+            <span class="pl-sub">{{ t.plWinSub }}</span>
           </div>
           <div class="platform-card">
             <svg width="32" height="32" viewBox="0 0 24 24" fill="none"><path d="M12 2l3 7h7l-5.5 4 2 7L12 16l-6.5 4 2-7L2 9h7l3-7z" stroke="#10B981" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            <span class="pl-name">CLI npm</span>
-            <span class="pl-sub">npm i -g gitwand</span>
+            <span class="pl-name">{{ t.plCli }}</span>
+            <span class="pl-sub">{{ t.plCliSub }}</span>
           </div>
           <div class="platform-card">
             <svg width="32" height="32" viewBox="0 0 24 24" fill="none"><rect x="2" y="2" width="20" height="20" rx="4" stroke="#10B981" stroke-width="1.5"/><path d="M8 14l2.5-5L13 14M9 12h3" stroke="#10B981" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M15 9v6" stroke="#10B981" stroke-width="1.5" stroke-linecap="round"/></svg>
-            <span class="pl-name">VS Code</span>
-            <span class="pl-sub">Extension Marketplace</span>
+            <span class="pl-name">{{ t.plVscode }}</span>
+            <span class="pl-sub">{{ t.plVscodeSub }}</span>
           </div>
         </div>
       </div>
@@ -359,12 +466,12 @@
           <path d="M 10,35 L 25,35 L 32.5,48 L 25,61 Z" fill="#6D28D9"/>
           <path d="M 25,61 L 55,61 L 47.5,48 L 32.5,48 Z" fill="#5B21B6"/>
         </svg>
-        <h2 class="cta-title">Prêt à simplifier votre workflow Git ?</h2>
-        <p class="cta-sub">Gratuit, open source, et conçu pour les développeurs qui veulent aller vite.</p>
+        <h2 class="cta-title">{{ t.ctaTitle }}</h2>
+        <p class="cta-sub">{{ t.ctaSub }}</p>
         <div class="cta-btns">
           <a href="https://github.com/devlint/GitWand/releases" class="btn-primary btn-lg">
             <svg width="18" height="18" viewBox="0 0 16 16" fill="none"><path d="M8 1v10M4 7l4 4 4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 13h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-            Télécharger GitWand
+            {{ t.ctaDownload }}
           </a>
           <a href="https://github.com/devlint/GitWand" class="btn-ghost btn-lg" target="_blank" rel="noopener">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 00-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0020 4.77 5.07 5.07 0 0019.91 1S18.73.65 16 2.48a13.38 13.38 0 00-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 005 4.77a5.44 5.44 0 00-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 009 18.13V22" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -378,6 +485,32 @@
 </template>
 
 <style scoped>
+/* ───────────────────────────────────────────
+   Language toggle
+─────────────────────────────────────────── */
+.lang-toggle {
+  position: fixed;
+  top: 78px;
+  right: 20px;
+  z-index: 100;
+  background: rgba(124, 58, 237, 0.15);
+  border: 1px solid rgba(124, 58, 237, 0.35);
+  color: #c4b5fd;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 6px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  transition: all 0.2s ease;
+}
+.lang-toggle:hover {
+  background: rgba(124, 58, 237, 0.3);
+  color: #e9e5ff;
+  border-color: rgba(124, 58, 237, 0.5);
+}
+
 /* ───────────────────────────────────────────
    Base
 ─────────────────────────────────────────── */

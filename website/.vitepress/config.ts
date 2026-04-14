@@ -25,6 +25,7 @@ export default defineConfig({
             { text: 'Getting Started', link: '/guide/getting-started' },
             { text: 'Desktop App', link: '/guide/desktop' },
             { text: 'CLI', link: '/guide/cli' },
+            { text: 'MCP Server', link: '/guide/mcp' },
             { text: 'VS Code Extension', link: '/guide/vscode' },
             { text: 'Conflict Resolution', link: '/guide/conflict-resolution' },
           ],
@@ -48,7 +49,7 @@ export default defineConfig({
 
     footer: {
       message: 'Released under the MIT License.',
-      copyright: 'Copyright © 2024-present Laurent Guitton',
+      copyright: 'Copyright © 2026 <a href="https://github.com/devlint" target="_blank">Devlint</a>',
     },
   },
 })

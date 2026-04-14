@@ -203,7 +203,7 @@ The `--ci` / `--json` flag now returns a full structured report with composite c
 ```json
 {
   "version": "0.1.0",
-  "timestamp": "2025-04-14T12:00:00.000Z",
+  "timestamp": "2026-04-14T12:00:00.000Z",
   "summary": {
     "files": 2,
     "totalConflicts": 5,
