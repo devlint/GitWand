@@ -685,6 +685,7 @@ onUnmounted(() => {
             <span class="loading-text">{{ t('merge.loadingRepo') }}</span>
           </div>
 
+          <template v-else>
           <div v-if="repoError" class="error-banner" role="alert">
             <svg class="error-icon" width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
               <circle cx="9" cy="9" r="8" stroke="currentColor" stroke-width="1.5"/>
@@ -781,6 +782,7 @@ onUnmounted(() => {
             @refresh="repoRefresh"
             @navigate-commit="(hash) => { selectCommit(hash); viewMode = 'history'; }"
           />
+          </template>
         </template>
       </main>
     </div>
