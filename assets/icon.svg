@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none" role="img" aria-label="GitWand icon">
+
+  <!-- 3D Hexagonal Cube — centered in 512×512
+       Scaled from viewBox 80×70 to fill ~80% of the canvas.
+       Center: (256, 256), outer R ≈ 180, inner r ≈ 90 -->
+
+  <!-- Inner hexagon "back wall" -->
+  <path d="M 346,256 L 301,186 L 211,186 L 166,256 L 211,326 L 301,326 Z" fill="none"/>
+
+  <!-- TOP face — lightest purple -->
+  <path d="M 76,256 L 166,100 L 346,100 L 436,256 L 346,256 L 301,186 L 211,186 L 166,256 Z"
+        fill="#8B5CF6"/>
+
+  <!-- LOWER-RIGHT face — darkest -->
+  <path d="M 436,256 L 346,412 L 301,326 L 346,256 Z"
+        fill="#4C1D95"/>
+
+  <!-- LOWER-LEFT face — medium purple -->
+  <path d="M 76,256 L 166,256 L 211,326 L 166,412 Z"
+        fill="#6D28D9"/>
+
+  <!-- BOTTOM face — medium-dark purple -->
+  <path d="M 166,412 L 346,412 L 301,326 L 211,326 Z"
+        fill="#5B21B6"/>
+
+</svg>

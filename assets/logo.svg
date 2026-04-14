@@ -1,61 +1,51 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
-  <defs>
-    <linearGradient id="wand-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#8B5CF6"/>
-      <stop offset="100%" stop-color="#6D28D9"/>
-    </linearGradient>
-    <linearGradient id="star-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#FBBF24"/>
-      <stop offset="100%" stop-color="#F59E0B"/>
-    </linearGradient>
-    <linearGradient id="sparkle-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#FDE68A"/>
-      <stop offset="100%" stop-color="#FBBF24"/>
-    </linearGradient>
-  </defs>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 120" fill="none" role="img" aria-label="GitWand logo">
 
-  <!-- Baguette (diagonale bas-gauche → haut-droite) -->
-  <rect x="100" y="280" width="260" height="28" rx="14"
-        transform="rotate(-45 230 294)"
-        fill="url(#wand-gradient)"/>
-  <!-- Poignée -->
-  <rect x="80" y="340" width="80" height="28" rx="14"
-        transform="rotate(-45 120 354)"
-        fill="#7C3AED" opacity="0.8"/>
+  <!-- ═══ LEFT ELEMENTS: signal wave + </> + purple line ═══ -->
 
-  <!-- Étoile principale (bout de la baguette) -->
-  <g transform="translate(320, 120)">
-    <polygon points="0,-40 12,-12 40,-12 18,8 28,40 0,20 -28,40 -18,8 -40,-12 -12,-12"
-             fill="url(#star-gradient)"/>
-  </g>
+  <!-- Signal / wave icon (ECG-style) -->
+  <path d="M 10,58 L 22,58 L 26,42 L 30,74 L 34,52 L 38,58 L 52,58"
+        stroke="#7C3AED" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
 
-  <!-- Sparkles autour de l'étoile -->
-  <g fill="url(#sparkle-gradient)">
-    <!-- Sparkle haut-droite -->
-    <polygon points="0,-14 4,-4 14,0 4,4 0,14 -4,4 -14,0 -4,-4"
-             transform="translate(390, 80)"/>
-    <!-- Sparkle droite -->
-    <polygon points="0,-10 3,-3 10,0 3,3 0,10 -3,3 -10,0 -3,-3"
-             transform="translate(400, 140)"/>
-    <!-- Sparkle haut -->
-    <polygon points="0,-10 3,-3 10,0 3,3 0,10 -3,3 -10,0 -3,-3"
-             transform="translate(280, 65)"/>
-    <!-- Sparkle petit -->
-    <polygon points="0,-7 2,-2 7,0 2,2 0,7 -2,2 -7,0 -2,-2"
-             transform="translate(360, 55)"/>
-    <!-- Sparkle gauche -->
-    <polygon points="0,-8 2,-2 8,0 2,2 0,8 -2,2 -8,0 -2,-2"
-             transform="translate(255, 110)"/>
-  </g>
+  <!-- Dot on left line -->
+  <circle cx="72" cy="58" r="3.5" fill="#7C3AED"/>
 
-  <!-- Branches Git (3 lignes convergeant vers la baguette) -->
-  <g stroke="#A78BFA" stroke-width="3" stroke-linecap="round" opacity="0.6">
-    <path d="M 200,200 Q 260,170 310,130" fill="none"/>
-    <path d="M 170,230 Q 240,190 310,130" fill="none"/>
-    <path d="M 230,175 Q 270,155 310,130" fill="none"/>
-    <!-- Petits cercles (commits) au début des branches -->
-    <circle cx="200" cy="200" r="5" fill="#A78BFA" stroke="none"/>
-    <circle cx="170" cy="230" r="5" fill="#A78BFA" stroke="none"/>
-    <circle cx="230" cy="175" r="5" fill="#C4B5FD" stroke="none"/>
-  </g>
+  <!-- Purple horizontal line from wave to cube -->
+  <line x1="52" y1="58" x2="112" y2="58" stroke="#7C3AED" stroke-width="1.5"/>
+
+  <!-- </> symbol below the dot -->
+  <text x="72" y="78" font-family="'Courier New', 'Lucida Console', monospace"
+        font-size="10" font-weight="700" fill="#7C3AED" text-anchor="middle">&lt;/&gt;</text>
+
+  <!-- ═══ CENTER: 3D Hexagonal Cube ═══ -->
+
+  <!-- Inner hexagon "back wall" — darkest -->
+  <path d="M 171,60 L 161,42.7 L 141,42.7 L 131,60 L 141,77.3 L 161,77.3 Z"
+        fill="none"/>
+
+  <!-- TOP face (upper ring) — lightest purple -->
+  <path d="M 111,60 L 131,25.4 L 171,25.4 L 191,60 L 171,60 L 161,42.7 L 141,42.7 L 131,60 Z"
+        fill="#8B5CF6"/>
+
+  <!-- LOWER-RIGHT face — darkest -->
+  <path d="M 191,60 L 171,94.6 L 161,77.3 L 171,60 Z"
+        fill="#4C1D95"/>
+
+  <!-- LOWER-LEFT face — medium purple -->
+  <path d="M 111,60 L 131,60 L 141,77.3 L 131,94.6 Z"
+        fill="#6D28D9"/>
+
+  <!-- BOTTOM face — medium-dark purple -->
+  <path d="M 131,94.6 L 171,94.6 L 161,77.3 L 141,77.3 Z"
+        fill="#5B21B6"/>
+
+  <!-- ═══ RIGHT ELEMENTS: green git-graph line + dots ═══ -->
+
+  <!-- Green horizontal line from cube to dots -->
+  <line x1="191" y1="60" x2="288" y2="60" stroke="#10B981" stroke-width="1.5"/>
+
+  <!-- 3 green dots (commit graph nodes) -->
+  <circle cx="214" cy="60" r="4.5" fill="#10B981"/>
+  <circle cx="248" cy="60" r="4.5" fill="#10B981"/>
+  <circle cx="282" cy="60" r="4.5" fill="#10B981"/>
+
 </svg>
