@@ -9,7 +9,7 @@
  */
 
 import { createServer } from "node:http";
-import { execSync, execFileSync, spawnSync } from "node:child_process";
+import { execSync, execFileSync, spawnSync, spawn } from "node:child_process";
 import { readFileSync, writeFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { resolve, join, dirname, basename } from "node:path";
 import { homedir } from "node:os";
@@ -33,6 +33,37 @@ const GH = resolveBin("gh");
 const GIT = resolveBin("git");
 console.log(`[dev-server] gh binary:  ${GH}`);
 console.log(`[dev-server] git binary: ${GIT}`);
+
+/**
+ * Run `git` with the given args, streaming stdout into memory.
+ *
+ * Unlike `execSync`, there's no `maxBuffer` cap — useful for huge diffs
+ * (e.g. `git show` on a merge commit touching hundreds of files in a
+ * monorepo, where a 10 MB cap reliably blows up).
+ *
+ * Resolves with the full stdout as a UTF-8 string. Rejects if git exits
+ * non-zero or the process fails to spawn.
+ */
+function gitSpawn(args, cwd) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(GIT, args, { cwd });
+    const stdoutChunks = [];
+    const stderrChunks = [];
+
+    child.stdout.on("data", (chunk) => stdoutChunks.push(chunk));
+    child.stderr.on("data", (chunk) => stderrChunks.push(chunk));
+
+    child.on("error", (err) => reject(err));
+    child.on("close", (code) => {
+      if (code !== 0) {
+        const stderr = Buffer.concat(stderrChunks).toString("utf-8");
+        reject(new Error(`git ${args.join(" ")} exited with ${code}: ${stderr.trim()}`));
+        return;
+      }
+      resolve(Buffer.concat(stdoutChunks).toString("utf-8"));
+    });
+  });
+}
 
 /**
  * Get a GitHub OAuth token — tries in order:
@@ -823,13 +854,13 @@ const server = createServer(async (req, res) => {
 
       try {
         const resolvedCwd = resolve(cwd);
-        // Use -m --first-parent to handle merge commits (otherwise diff is empty/combined)
-        const stdout = execSync(`git show -m --first-parent --format= "${hash}"`, {
-          cwd: resolvedCwd,
-          encoding: "utf-8",
-          shell: true,
-          maxBuffer: 10 * 1024 * 1024, // 10MB for large diffs
-        });
+        // Use -m --first-parent to handle merge commits (otherwise diff is empty/combined).
+        // Stream stdout via spawn — execSync's maxBuffer (10 MB) is exceeded by large
+        // merge commits in monorepos and causes a 500.
+        const stdout = await gitSpawn(
+          ["show", "-m", "--first-parent", "--format=", hash],
+          resolvedCwd,
+        );
 
         const diffs = [];
         let currentPath = null;
