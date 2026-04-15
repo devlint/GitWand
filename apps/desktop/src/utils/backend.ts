@@ -1274,6 +1274,7 @@ export async function ghCreatePr(
   body: string,
   base: string = "",
   draft: boolean = false,
+  reviewers: string[] = [],
 ): Promise<PullRequest> {
   if (isTauri()) {
     const raw = await tauriInvoke<{
@@ -1290,7 +1291,7 @@ export async function ghCreatePr(
       additions: number;
       deletions: number;
       labels: string[];
-    }>("gh_create_pr", { cwd, title, body, base, draft });
+    }>("gh_create_pr", { cwd, title, body, base, draft, reviewers });
     return {
       number: raw.number,
       title: raw.title,

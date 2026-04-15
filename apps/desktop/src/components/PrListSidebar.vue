@@ -35,38 +35,14 @@ function stateChip(state: string) {
       <button class="pls-refresh" @click="panel.loadPrs" title="Rafraîchir">↺</button>
     </div>
 
-    <!-- New PR button -->
-    <button class="pls-new-btn" @click="panel.showCreateForm.value = !panel.showCreateForm.value">
+    <!-- New PR button — opens the full creation view in the main area -->
+    <button
+      class="pls-new-btn"
+      :class="{ 'pls-new-btn--active': panel.showCreateForm.value }"
+      @click="panel.showCreateForm.value = true"
+    >
       + Nouvelle PR
     </button>
-
-    <!-- Create form (inline compact) -->
-    <div v-if="panel.showCreateForm.value" class="pls-create-form">
-      <input
-        v-model="panel.newPrTitle.value"
-        class="pls-input"
-        type="text"
-        placeholder="Titre…"
-        @keydown.enter="panel.createPr"
-        @keydown.escape="panel.showCreateForm.value = false"
-      />
-      <input
-        v-model="panel.newPrBase.value"
-        class="pls-input"
-        type="text"
-        placeholder="Branche cible (main)"
-      />
-      <div class="pls-create-row">
-        <label class="pls-draft-label">
-          <input type="checkbox" v-model="panel.newPrDraft.value" /> Draft
-        </label>
-        <button
-          class="pls-create-btn"
-          :disabled="!panel.newPrTitle.value.trim() || panel.isCreating.value"
-          @click="panel.createPr"
-        >{{ panel.isCreating.value ? "…" : "Créer" }}</button>
-      </div>
-    </div>
 
     <!-- Messages -->
     <div v-if="panel.error.value" class="pls-msg pls-msg--error">{{ panel.error.value }}</div>
@@ -162,56 +138,9 @@ function stateChip(state: string) {
   flex-shrink: 0;
 }
 .pls-new-btn:hover { filter: brightness(1.1); }
-
-/* Create form */
-.pls-create-form {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 0 8px 8px;
-  flex-shrink: 0;
+.pls-new-btn--active {
+  box-shadow: 0 0 0 2px var(--color-accent-soft);
 }
-
-.pls-input {
-  background: var(--color-bg);
-  border: 1px solid var(--color-border);
-  border-radius: 4px;
-  color: var(--color-text);
-  font-size: 11px;
-  padding: 4px 7px;
-  width: 100%;
-  box-sizing: border-box;
-}
-.pls-input:focus { outline: none; border-color: var(--color-accent); }
-
-.pls-create-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  justify-content: flex-end;
-}
-
-.pls-draft-label {
-  font-size: 11px;
-  color: var(--color-text-muted);
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  cursor: pointer;
-  flex: 1;
-}
-
-.pls-create-btn {
-  background: var(--color-accent);
-  border: none;
-  border-radius: 4px;
-  color: var(--color-accent-text);
-  font-size: 11px;
-  font-weight: 600;
-  padding: 3px 10px;
-  cursor: pointer;
-}
-.pls-create-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* Messages */
 .pls-msg {

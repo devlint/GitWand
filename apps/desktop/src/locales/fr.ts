@@ -314,6 +314,55 @@ const fr = {
     successPush: "Push",
   },
 
+  // ─── PR creation ────────────────────────────────────────
+  pr: {
+    create: {
+      title: "Nouvelle pull request",
+      subtitle: "Ouvre une PR pour proposer tes changements à la review. Remplis le titre, choisis la branche cible, et ajoute une description.",
+      branchesLabel: "Branches",
+      fromLabel: "Depuis",
+      intoLabel: "Vers",
+      branchesHint: "Les commits présents dans la branche de gauche mais pas dans la branche cible seront inclus dans la PR.",
+      sameBranchWarn: "La branche cible doit être différente de la branche courante.",
+      titleLabel: "Titre",
+      titlePlaceholder: "Court, explicite, à l'impératif (ex : « Fix: éviter le double-render du loader »)",
+      titleHint: "Un bon titre tient en moins de 72 caractères et décrit le « quoi » — le « pourquoi » va dans la description.",
+      bodyLabel: "Description",
+      bodyPlaceholder: "Explique le contexte, les changements, et comment tester. Markdown supporté.",
+      bodyHint: "Astuce : utilise les templates ci-dessus pour démarrer rapidement.",
+      templateLabel: "Template :",
+      draftLabel: "Ouvrir en draft",
+      draftHint: "Une PR draft ne peut pas être mergée et n'envoie pas de notifications aux reviewers. Utile pour un WIP.",
+      submit: "Créer la pull request",
+      submitDraft: "Créer en draft",
+      submitting: "Création\u2026",
+      replaceBodyConfirm: "Remplacer le texte existant par ce template ?",
+      // RTE
+      tabWrite: "Écrire",
+      tabPreview: "Aperçu",
+      previewEmpty: "Rien à prévisualiser\u2026",
+      mdBold: "Gras (Ctrl+B)",
+      mdItalic: "Italique (Ctrl+I)",
+      mdCode: "Code inline",
+      mdCodeBlock: "Bloc de code",
+      mdH1: "Titre 1",
+      mdH2: "Titre 2",
+      mdH3: "Titre 3",
+      mdUl: "Liste à puces",
+      mdOl: "Liste numérotée",
+      mdQuote: "Citation",
+      mdLink: "Lien",
+      // Template modal
+      templateModalTitle: "Remplacer la description ?",
+      templateModalDesc: "La description actuelle sera remplacée par le template « {0} ». Cette action ne peut pas être annulée.",
+      templateModalConfirm: "Remplacer",
+      // Reviewers
+      reviewersLabel: "Reviewers",
+      reviewersPlaceholder: "Ajouter un reviewer (username GitHub ou org/team)\u2026",
+      reviewersHint: "Tape un nom puis Entrée, espace ou virgule. Utilise org/team-slug pour une équipe. Les reviewers recevront une notification à la création.",
+    },
+  },
+
   // ─── Settings ───────────────────────────────────────────
   settings: {
     title: "Param\u00e8tres",

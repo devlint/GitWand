@@ -1817,6 +1817,7 @@ fn gh_create_pr(
     body: String,
     base: String,
     draft: bool,
+    reviewers: Option<Vec<String>>,
 ) -> Result<PullRequest, String> {
     let mut args = vec![
         "pr".to_string(),
@@ -1834,6 +1835,20 @@ fn gh_create_pr(
 
     if draft {
         args.push("--draft".to_string());
+    }
+
+    // Reviewers: gh expects a single comma-separated --reviewer list
+    // (GitHub usernames or org/team-slug).
+    if let Some(revs) = reviewers {
+        let cleaned: Vec<String> = revs
+            .into_iter()
+            .map(|r| r.trim().trim_start_matches('@').to_string())
+            .filter(|r| !r.is_empty())
+            .collect();
+        if !cleaned.is_empty() {
+            args.push("--reviewer".to_string());
+            args.push(cleaned.join(","));
+        }
     }
 
     // Add JSON output

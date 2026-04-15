@@ -12,6 +12,7 @@ import FileHistoryViewer from "./components/FileHistoryViewer.vue";
 import CommitGraph from "./components/CommitGraph.vue";
 import SettingsPanel from "./components/SettingsPanel.vue";
 import PrDetailView from "./components/PrDetailView.vue";
+import PrCreateView from "./components/PrCreateView.vue";
 import DashboardView from "./components/DashboardView.vue";
 import EditCommitOverlay from "./components/EditCommitOverlay.vue";
 import MergeSuccessModal from "./components/MergeSuccessModal.vue";
@@ -810,6 +811,13 @@ onUnmounted(() => {
             :selected-hash="selectedCommitHash"
             :current-branch="branchDisplay"
             @select-commit="(hash) => { selectCommit(hash); viewMode = 'history'; }"
+          />
+
+          <!-- PRs view: creation form takes over when showCreateForm is true -->
+          <PrCreateView
+            v-else-if="viewMode === 'prs' && prPanel.showCreateForm.value"
+            :current-branch="branchDisplay"
+            :branches="branches"
           />
 
           <!-- PRs view: detail panel fills the main area -->

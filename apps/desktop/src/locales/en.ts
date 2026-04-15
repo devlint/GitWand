@@ -312,6 +312,55 @@ const en: Locale = {
     successPush: "Push",
   },
 
+  // ─── PR creation ────────────────────────────────────────
+  pr: {
+    create: {
+      title: "New pull request",
+      subtitle: "Open a PR to get your changes reviewed. Set a title, pick a target branch, and add a description.",
+      branchesLabel: "Branches",
+      fromLabel: "From",
+      intoLabel: "Into",
+      branchesHint: "Commits present in the left branch but not in the target branch will be included in the PR.",
+      sameBranchWarn: "The target branch must differ from the current branch.",
+      titleLabel: "Title",
+      titlePlaceholder: "Short, clear, imperative (e.g. \u201cFix: avoid double-render of loader\u201d)",
+      titleHint: "A good title is under 72 chars and describes the \u201cwhat\u201d \u2014 the \u201cwhy\u201d goes in the description.",
+      bodyLabel: "Description",
+      bodyPlaceholder: "Explain the context, changes, and how to test. Markdown supported.",
+      bodyHint: "Tip: use the templates above to get started quickly.",
+      templateLabel: "Template:",
+      draftLabel: "Open as draft",
+      draftHint: "A draft PR can't be merged and won't notify reviewers. Useful for WIP.",
+      submit: "Create pull request",
+      submitDraft: "Create as draft",
+      submitting: "Creating\u2026",
+      replaceBodyConfirm: "Replace the existing text with this template?",
+      // RTE
+      tabWrite: "Write",
+      tabPreview: "Preview",
+      previewEmpty: "Nothing to preview\u2026",
+      mdBold: "Bold (Ctrl+B)",
+      mdItalic: "Italic (Ctrl+I)",
+      mdCode: "Inline code",
+      mdCodeBlock: "Code block",
+      mdH1: "Heading 1",
+      mdH2: "Heading 2",
+      mdH3: "Heading 3",
+      mdUl: "Bulleted list",
+      mdOl: "Numbered list",
+      mdQuote: "Blockquote",
+      mdLink: "Link",
+      // Template modal
+      templateModalTitle: "Replace description?",
+      templateModalDesc: "The current description will be replaced by the \u201c{0}\u201d template. This action can't be undone.",
+      templateModalConfirm: "Replace",
+      // Reviewers
+      reviewersLabel: "Reviewers",
+      reviewersPlaceholder: "Add a reviewer (GitHub username or org/team)\u2026",
+      reviewersHint: "Type a name then press Enter, space or comma. Use org/team-slug for a team. Reviewers will be notified on creation.",
+    },
+  },
+
   // ─── Settings ───────────────────────────────────────────
   settings: {
     title: "Settings",
