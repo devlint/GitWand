@@ -12,6 +12,9 @@ import {
   type RemoteInfo,
 } from "../utils/backend";
 import type { ViewMode } from "../composables/useGitRepo";
+import { useI18n } from "../composables/useI18n";
+
+const { t } = useI18n();
 
 const props = defineProps<{
   cwd: string;
@@ -28,6 +31,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   changeView: [mode: ViewMode];
+  sync: [];
+  push: [];
 }>();
 
 // ─── Dashboard data ────────────────────────────────────────
@@ -37,12 +42,14 @@ const branches = ref<GitBranch[]>([]);
 const remoteInfo = ref<RemoteInfo | null>(null);
 const fileCount = ref(0);
 const openPrs = ref(0);
+const mergedPrs = ref(0);
 const readmeContent = ref<string | null>(null);
 const readmeError = ref(false);
 const readmeTab = ref<"formatted" | "raw">("formatted");
 const contributorCount = ref(0);
 const lastCommitDate = ref("");
 const weeklyCommits = ref(0);
+const previousWeekCommits = ref(0);
 
 // ─── Computed stats ────────────────────────────────────────
 const totalChanges = computed(
@@ -51,9 +58,235 @@ const totalChanges = computed(
 const localBranches = computed(
   () => branches.value.filter((b) => !b.isRemote)
 );
-const remoteBranches = computed(
-  () => branches.value.filter((b) => b.isRemote)
-);
+
+/** Commits per day for the last 7 days (oldest → newest). Used for sparkline. */
+const sparklinePoints = computed(() => {
+  const counts = new Array(7).fill(0);
+  const now = Date.now();
+  for (const c of recentCommits.value) {
+    const daysAgo = Math.floor((now - new Date(c.date).getTime()) / (24 * 3600 * 1000));
+    if (daysAgo >= 0 && daysAgo < 7) counts[6 - daysAgo]++;
+  }
+  return counts;
+});
+
+/** Trend vs previous 7d: positive means acceleration. */
+const commitTrendPct = computed(() => {
+  if (previousWeekCommits.value === 0) {
+    return weeklyCommits.value > 0 ? 100 : 0;
+  }
+  return Math.round(
+    ((weeklyCommits.value - previousWeekCommits.value) / previousWeekCommits.value) * 100
+  );
+});
+
+/** Commits grouped by type (feat, fix, docs, chore, other) based on conventional prefix. */
+const commitsByType = computed(() => {
+  const buckets = { feat: 0, fix: 0, docs: 0, chore: 0, other: 0 };
+  for (const c of recentCommits.value) {
+    const prefix = c.message.toLowerCase().match(/^(feat|fix|docs|chore|refactor|test|style|perf|build|ci)/);
+    const key = prefix?.[1] ?? "other";
+    if (key === "feat") buckets.feat++;
+    else if (key === "fix") buckets.fix++;
+    else if (key === "docs") buckets.docs++;
+    else if (key === "other") buckets.other++;
+    else buckets.chore++; // everything else (refactor, test, chore, …)
+  }
+  const total = Object.values(buckets).reduce((a, b) => a + b, 0) || 1;
+  return {
+    ...buckets,
+    total,
+    featPct: Math.round((buckets.feat / total) * 100),
+    fixPct: Math.round((buckets.fix / total) * 100),
+    docsPct: Math.round((buckets.docs / total) * 100),
+    chorePct: Math.round((buckets.chore / total) * 100),
+    otherPct: Math.round((buckets.other / total) * 100),
+  };
+});
+
+/** Top contributors (max 3) with commit count in the loaded window. */
+const topContributors = computed(() => {
+  const counts = new Map<string, { name: string; email: string; count: number }>();
+  for (const c of recentCommits.value) {
+    const key = c.email || c.author;
+    const existing = counts.get(key);
+    if (existing) existing.count++;
+    else counts.set(key, { name: c.author, email: c.email, count: 1 });
+  }
+  const list = Array.from(counts.values()).sort((a, b) => b.count - a.count);
+  const max = list[0]?.count ?? 1;
+  return list.slice(0, 4).map((c) => ({ ...c, pct: Math.round((c.count / max) * 100) }));
+});
+
+/** Commits per day for the last 14 days (oldest → newest). Used for bar chart. */
+const barChartDays = computed(() => {
+  const days: { count: number; label: string; isWeekend: boolean }[] = [];
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+
+  for (let i = 13; i >= 0; i--) {
+    const day = new Date(now);
+    day.setDate(day.getDate() - i);
+    const dayStart = day.getTime();
+    const dayEnd = dayStart + 24 * 3600 * 1000;
+    const count = recentCommits.value.filter((c) => {
+      const t = new Date(c.date).getTime();
+      return t >= dayStart && t < dayEnd;
+    }).length;
+    const dow = day.getDay();
+    days.push({
+      count,
+      label: ["D", "L", "M", "M", "J", "V", "S"][dow],
+      isWeekend: dow === 0 || dow === 6,
+    });
+  }
+  return days;
+});
+
+const barChartMax = computed(() => Math.max(1, ...barChartDays.value.map((d) => d.count)));
+
+/** Heatmap: 7 rows (Mon-Sun) × 26 columns (weeks). Values are commit counts. */
+const heatmapCells = computed(() => {
+  // Build a map of YYYY-MM-DD → count
+  const counts = new Map<string, number>();
+  for (const c of recentCommits.value) {
+    const d = new Date(c.date);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  // Start: 26 weeks ago, aligned on Monday
+  const start = new Date(today);
+  start.setDate(start.getDate() - 26 * 7);
+  // Align to Monday
+  const offset = (start.getDay() + 6) % 7;
+  start.setDate(start.getDate() - offset);
+
+  const cols: { week: string; cells: { date: string; count: number; level: number }[] }[] = [];
+  for (let w = 0; w < 26; w++) {
+    const weekCells = [];
+    for (let d = 0; d < 7; d++) {
+      const day = new Date(start);
+      day.setDate(day.getDate() + w * 7 + d);
+      if (day > today) {
+        weekCells.push({ date: "", count: 0, level: 0 });
+        continue;
+      }
+      const key = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
+      const count = counts.get(key) ?? 0;
+      let level = 0;
+      if (count >= 10) level = 4;
+      else if (count >= 5) level = 3;
+      else if (count >= 2) level = 2;
+      else if (count >= 1) level = 1;
+      weekCells.push({ date: key, count, level });
+    }
+    cols.push({ week: `w${w}`, cells: weekCells });
+  }
+  return cols;
+});
+
+/** Month labels to position under the heatmap (locale-aware). */
+const heatmapMonths = computed(() => {
+  const today = new Date();
+  const locale = typeof navigator !== "undefined" ? navigator.language : "fr-FR";
+  const labels: string[] = [];
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(today);
+    d.setMonth(d.getMonth() - i);
+    labels.push(d.toLocaleDateString(locale, { month: "short" }));
+  }
+  return labels;
+});
+
+/** Smooth polyline points string for the sparkline (viewBox 100x24). */
+const sparklinePath = computed(() => {
+  const vals = sparklinePoints.value;
+  const max = Math.max(1, ...vals);
+  const step = 100 / (vals.length - 1);
+  return vals.map((v, i) => `${(i * step).toFixed(1)},${(22 - (v / max) * 18).toFixed(1)}`).join(" ");
+});
+
+const sparklineArea = computed(() => `${sparklinePath.value} 100,24 0,24`);
+
+/** Health score — lightweight heuristic: penalties for conflicts, stale divergence, dirty tree. */
+const healthScore = computed(() => {
+  let score = 100;
+  if (props.status.conflicted > 0) score -= 30;
+  if (props.behind > 20) score -= 15;
+  else if (props.behind > 5) score -= 8;
+  if (totalChanges.value > 30) score -= 10;
+  if (weeklyCommits.value === 0) score -= 5;
+  return Math.max(0, Math.min(100, score));
+});
+
+const healthLabel = computed(() => {
+  const s = healthScore.value;
+  if (s >= 90) return t("dashboard.healthExcellent");
+  if (s >= 70) return t("dashboard.healthGood");
+  if (s >= 50) return t("dashboard.healthFair");
+  return t("dashboard.healthPoor");
+});
+
+/** Suggested next action based on repo state. */
+const nextAction = computed(() => {
+  if (props.status.conflicted > 0) {
+    return { label: t("dashboard.nextResolveConflicts", props.status.conflicted), view: "changes" as ViewMode, action: null };
+  }
+  if (totalChanges.value > 0) {
+    return { label: t("dashboard.nextCommit", totalChanges.value), view: "changes" as ViewMode, action: null };
+  }
+  if (props.ahead > 0) {
+    return { label: t("dashboard.nextPush", props.ahead), view: null, action: "push" as const };
+  }
+  if (props.behind > 0) {
+    return { label: t("dashboard.nextSync", props.behind), view: null, action: "sync" as const };
+  }
+  if (openPrs.value > 0) {
+    return { label: t("dashboard.nextReviewPrs", openPrs.value), view: "prs" as ViewMode, action: null };
+  }
+  return { label: t("dashboard.nextAllCaughtUp"), view: "history" as ViewMode, action: null };
+});
+
+function runNextAction() {
+  if (nextAction.value.action === "push") emit("push");
+  else if (nextAction.value.action === "sync") emit("sync");
+  else if (nextAction.value.view) emit("changeView", nextAction.value.view);
+}
+
+/** Deterministic hue for an avatar from a string (same author → same color). */
+function hueFor(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return Math.abs(h) % 360;
+}
+
+function avatarStyle(key: string) {
+  const h = hueFor(key);
+  return {
+    background: `linear-gradient(135deg, hsl(${h} 70% 55%), hsl(${(h + 40) % 360} 70% 45%))`,
+  };
+}
+
+function initials(name: string): string {
+  if (!name) return "?";
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+/** Detect conventional-commit type for tag colouring. */
+function commitType(msg: string): string {
+  const m = msg.toLowerCase().match(/^(feat|fix|docs|chore|refactor|test|style|perf|build|ci)/);
+  return m?.[1] ?? "";
+}
+
+/** Message stripped of its `type(scope):` prefix for cleaner display. */
+function commitMessageBody(msg: string): string {
+  return msg.replace(/^(feat|fix|docs|chore|refactor|test|style|perf|build|ci)(\([^)]+\))?:\s*/i, "");
+}
 
 // ─── Load dashboard data ───────────────────────────────────
 async function loadDashboard() {
@@ -61,11 +294,12 @@ async function loadDashboard() {
   loading.value = true;
 
   const results = await Promise.allSettled([
-    getGitLog(props.cwd, 50),
+    getGitLog(props.cwd, 250),
     getGitBranches(props.cwd),
     gitRemoteInfo(props.cwd),
     gitFileCount(props.cwd).catch(() => 0),
     ghListPrs(props.cwd, "open").catch(() => []),
+    ghListPrs(props.cwd, "merged").catch(() => []),
     loadReadme(),
   ]);
 
@@ -79,11 +313,16 @@ async function loadDashboard() {
     if (recentCommits.value.length > 0) {
       lastCommitDate.value = recentCommits.value[0].date;
     }
-    // Commits in last 7 days
-    const oneWeekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    // Commits in last 7 days + previous 7 days for trend
+    const now = Date.now();
+    const weekMs = 7 * 24 * 60 * 60 * 1000;
     weeklyCommits.value = recentCommits.value.filter(
-      (c) => new Date(c.date).getTime() > oneWeekAgo
+      (c) => now - new Date(c.date).getTime() < weekMs
     ).length;
+    previousWeekCommits.value = recentCommits.value.filter((c) => {
+      const diff = now - new Date(c.date).getTime();
+      return diff >= weekMs && diff < 2 * weekMs;
+    }).length;
   }
   // Branches
   if (results[1].status === "fulfilled") {
@@ -97,9 +336,17 @@ async function loadDashboard() {
   if (results[3].status === "fulfilled") {
     fileCount.value = results[3].value as number;
   }
-  // PRs
+  // PRs (open + merged for the "N merged this week" hint)
   if (results[4].status === "fulfilled") {
     openPrs.value = (results[4].value as any[]).length;
+  }
+  if (results[5].status === "fulfilled") {
+    const list = results[5].value as any[];
+    const weekAgo = Date.now() - 7 * 24 * 3600 * 1000;
+    mergedPrs.value = list.filter((p) => {
+      const d = p.mergedAt || p.closedAt || p.updatedAt;
+      return d && new Date(d).getTime() > weekAgo;
+    }).length;
   }
 
   loading.value = false;
@@ -107,7 +354,6 @@ async function loadDashboard() {
 
 async function loadReadme() {
   readmeError.value = false;
-  // Try common README names
   const candidates = ["README.md", "readme.md", "Readme.md", "README.MD"];
   for (const name of candidates) {
     try {
@@ -127,13 +373,13 @@ function formatDate(dateStr: string): string {
   const now = new Date();
   const diffMs = now.getTime() - d.getTime();
   const diffMins = Math.floor(diffMs / 60000);
-  if (diffMins < 1) return "just now";
-  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffMins < 1) return t("date.now");
+  if (diffMins < 60) return t("date.minutesAgo", diffMins);
   const diffHrs = Math.floor(diffMins / 60);
-  if (diffHrs < 24) return `${diffHrs}h ago`;
+  if (diffHrs < 24) return t("date.hoursAgo", diffHrs);
   const diffDays = Math.floor(diffHrs / 24);
-  if (diffDays < 7) return `${diffDays}d ago`;
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  if (diffDays < 7) return t("date.daysAgo", diffDays);
+  return d.toLocaleDateString();
 }
 
 function formatNumber(n: number): string {
@@ -143,20 +389,14 @@ function formatNumber(n: number): string {
 
 // ─── Markdown → HTML (basic) ───────────────────────────────
 function renderMarkdown(md: string): string {
-  // ── Phase 0: strip the HTML header block (logo + title + nav + badges)
-  // GitHub READMEs often start with raw HTML for centering — we render
-  // a clean version ourselves instead of trying to parse it.
   const headerInfo = extractReadmeHeader(md);
   let body = headerInfo.rest;
 
   let html = body
-    // Code blocks (fenced)
     .replace(/```(\w*)\n([\s\S]*?)```/g, (_m, _lang, code) => {
       return `<pre class="md-code-block"><code>${escapeHtml(code.trimEnd())}</code></pre>`;
     })
-    // Tables (simple GFM: | col | col |)
-    .replace(/(?:^\|.+\|\s*\n)(^\|[-| :]+\|\s*\n)((?:^\|.+\|\s*\n)*)/gm, (_m, _sep, bodyRows, _o, fullStr) => {
-      // Re-extract header from the match (line before separator)
+    .replace(/(?:^\|.+\|\s*\n)(^\|[-| :]+\|\s*\n)((?:^\|.+\|\s*\n)*)/gm, (_m) => {
       const lines = _m.trim().split("\n");
       const headCells = lines[0].split("|").filter(c => c.trim()).map(c => `<th>${c.trim()}</th>`).join("");
       const rows = lines.slice(2).map(line => {
@@ -165,47 +405,32 @@ function renderMarkdown(md: string): string {
       }).join("");
       return `<table class="md-table"><thead><tr>${headCells}</tr></thead><tbody>${rows}</tbody></table>`;
     })
-    // Headings (with auto-generated IDs for anchor links)
     .replace(/^######\s+(.+)$/gm, (_m, t) => `<h6 id="${slugify(t)}">${t}</h6>`)
     .replace(/^#####\s+(.+)$/gm, (_m, t) => `<h5 id="${slugify(t)}">${t}</h5>`)
     .replace(/^####\s+(.+)$/gm, (_m, t) => `<h4 id="${slugify(t)}">${t}</h4>`)
     .replace(/^###\s+(.+)$/gm, (_m, t) => `<h3 id="${slugify(t)}">${t}</h3>`)
     .replace(/^##\s+(.+)$/gm, (_m, t) => `<h2 id="${slugify(t)}">${t}</h2>`)
     .replace(/^#\s+(.+)$/gm, (_m, t) => `<h1 id="${slugify(t)}">${t}</h1>`)
-    // Checkboxes (must come before generic lists)
     .replace(/^[\s]*[-*]\s+\[x\]\s+(.+)$/gm, '<li class="md-check md-checked">$1</li>')
     .replace(/^[\s]*[-*]\s+\[ \]\s+(.+)$/gm, '<li class="md-check">$1</li>')
-    // Bold & italic
     .replace(/\*\*\*(.+?)\*\*\*/g, "<strong><em>$1</em></strong>")
     .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
     .replace(/\*(.+?)\*/g, "<em>$1</em>")
-    // Inline code
     .replace(/`([^`]+)`/g, '<code class="md-inline-code">$1</code>')
-    // Images (must come BEFORE links to avoid ![...](...) being eaten by link regex)
     .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_m, alt: string, src: string) => {
-      // Skip relative paths that won't resolve in the dashboard context
       if (src.startsWith("assets/") || src.startsWith("./") || src.startsWith("../")) {
         return `<span class="md-img-placeholder" title="${escapeHtml(alt)}">${escapeHtml(alt || "image")}</span>`;
       }
       return `<img src="${src}" alt="${escapeHtml(alt)}" class="md-img">`;
     })
-    // Links
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" class="md-link">$1</a>')
-    // Horizontal rules
     .replace(/^---+$/gm, '<hr class="md-hr">')
-    // Unordered lists
     .replace(/^[\s]*[-*]\s+(.+)$/gm, '<li>$1</li>')
-    // Ordered lists
     .replace(/^[\s]*\d+\.\s+(.+)$/gm, '<li>$1</li>')
-    // Blockquote
-    .replace(/^>\s+(.+)$/gm, '<blockquote class="md-blockquote">$1</blockquote>')
-    // Passthrough remaining HTML blocks (img, a, p, div, details, summary)
-    // Already valid HTML → keep as-is
+    .replace(/^>\s+(.+)$/gm, '<blockquote class="md-blockquote">$1</blockquote>');
 
-  // Wrap consecutive <li> in <ul>
   html = html.replace(/((?:<li[^>]*>.*<\/li>\s*)+)/g, "<ul>$1</ul>");
 
-  // Paragraphs — wrap standalone lines
   html = html
     .split("\n\n")
     .map((block) => {
@@ -234,14 +459,7 @@ function renderMarkdown(md: string): string {
   return headerInfo.headerHtml + html;
 }
 
-/**
- * Extract the GitHub-style HTML header from a README:
- * logo image, title, tagline, navigation links, badges.
- * Returns clean rendered HTML + the remaining markdown body.
- */
 function extractReadmeHeader(md: string): { headerHtml: string; rest: string } {
-  // Detect HTML header blocks: lines starting with < until we hit a markdown
-  // heading (## ...) or a line that doesn't start with < and isn't blank
   const lines = md.split("\n");
   let headerEnd = 0;
   let inHtmlBlock = false;
@@ -260,12 +478,9 @@ function extractReadmeHeader(md: string): { headerHtml: string; rest: string } {
   const headerBlock = lines.slice(0, headerEnd).join("\n");
   const rest = lines.slice(headerEnd).join("\n");
 
-  // Parse out useful bits from the HTML header
-  const imgMatch = headerBlock.match(/<img[^>]+src="([^"]+)"[^>]*>/);
   const titleMatch = headerBlock.match(/<h1[^>]*>([^<]+)<\/h1>/);
   const strongMatch = headerBlock.match(/<strong>([^<]+)<\/strong>/);
 
-  // Extract nav links: <a href="...">text</a>
   const navLinks: { text: string; href: string }[] = [];
   const navRegex = /<a\s+href="([^"]+)">([^<]+)<\/a>/g;
   let navMatch;
@@ -273,7 +488,6 @@ function extractReadmeHeader(md: string): { headerHtml: string; rest: string } {
     navLinks.push({ href: navMatch[1], text: navMatch[2] });
   }
 
-  // Extract badges: <img alt="..." src="...">
   const badges: { alt: string; src: string }[] = [];
   const badgeRegex = /<img\s+alt="([^"]*)"[^>]*src="([^"]+)"[^>]*>/g;
   let badgeMatch;
@@ -283,22 +497,15 @@ function extractReadmeHeader(md: string): { headerHtml: string; rest: string } {
     }
   }
 
-  // Build clean header HTML
   let headerHtml = '<div class="md-readme-header">';
-
-  if (titleMatch) {
-    headerHtml += `<h1 class="md-readme-title">${titleMatch[1]}</h1>`;
-  }
-  if (strongMatch) {
-    headerHtml += `<p class="md-readme-tagline">${strongMatch[1]}</p>`;
-  }
+  if (titleMatch) headerHtml += `<h1 class="md-readme-title">${titleMatch[1]}</h1>`;
+  if (strongMatch) headerHtml += `<p class="md-readme-tagline">${strongMatch[1]}</p>`;
   if (navLinks.length > 0) {
     headerHtml += `<nav class="md-readme-nav">${navLinks.map(l => `<a href="${l.href}" class="md-link">${l.text}</a>`).join('<span class="md-readme-sep">&bull;</span>')}</nav>`;
   }
   if (badges.length > 0) {
     headerHtml += `<div class="md-readme-badges">${badges.map(b => `<img src="${b.src}" alt="${b.alt}" class="md-badge">`).join(" ")}</div>`;
   }
-
   headerHtml += '</div>';
 
   return { headerHtml, rest };
@@ -307,10 +514,10 @@ function extractReadmeHeader(md: string): { headerHtml: string; rest: string } {
 function slugify(text: string): string {
   return text
     .toLowerCase()
-    .replace(/<[^>]+>/g, "")       // strip HTML tags
-    .replace(/[^\w\s-]/g, "")      // remove non-word chars
-    .replace(/\s+/g, "-")          // spaces → hyphens
-    .replace(/-+/g, "-")           // collapse hyphens
+    .replace(/<[^>]+>/g, "")
+    .replace(/[^\w\s-]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
     .trim();
 }
 
@@ -331,155 +538,344 @@ watch(() => props.cwd, loadDashboard);
     <!-- Loading skeleton -->
     <div v-if="loading" class="dashboard-loading">
       <div class="spinner"></div>
-      <span>Loading dashboard…</span>
+      <span>{{ t("dashboard.loading") }}</span>
     </div>
 
     <template v-else>
-      <!-- Stat cards grid -->
-      <div class="stats-grid">
-        <!-- Commits this week -->
+      <!-- ─── Hero row ───────────────────────────────────── -->
+      <section class="hero">
+        <!-- Card 1: Repo state -->
+        <div class="hero-card hero-card--primary">
+          <div class="hero-eyebrow">{{ t("dashboard.repoState") }}</div>
+          <h2 class="hero-title">
+            <template v-if="status.conflicted > 0">{{ t("dashboard.stateConflicts") }}</template>
+            <template v-else-if="totalChanges > 0">{{ t("dashboard.stateDirty", totalChanges) }}</template>
+            <template v-else-if="ahead > 0">{{ t("dashboard.stateAhead", ahead) }}</template>
+            <template v-else-if="behind > 0">{{ t("dashboard.stateBehind", behind) }}</template>
+            <template v-else>{{ t("dashboard.stateClean") }}</template>
+          </h2>
+          <p class="hero-sub">
+            <template v-if="ahead > 0 || behind > 0">
+              {{ t("dashboard.stateVsRemote", branch) }}
+            </template>
+            <template v-else>{{ t("dashboard.stateOnBranch", branch) }}</template>
+          </p>
+          <div class="hero-chips">
+            <span class="chip" :class="status.conflicted > 0 ? 'chip--danger' : 'chip--success'">
+              ● {{ status.conflicted > 0 ? t("dashboard.chipConflicts", status.conflicted) : t("dashboard.chipNoConflict") }}
+            </span>
+            <span class="chip chip--info" v-if="ahead > 0">↑ {{ t("dashboard.chipAhead", ahead) }}</span>
+            <span class="chip" v-else>↑ 0</span>
+            <span class="chip chip--warning" v-if="behind > 0">↓ {{ t("dashboard.chipBehind", behind) }}</span>
+            <span class="chip" v-else>↓ 0</span>
+          </div>
+        </div>
+
+        <!-- Card 2: Health score -->
+        <div class="hero-card">
+          <div class="hero-eyebrow">{{ t("dashboard.healthTitle") }}</div>
+          <div class="health-score" :class="{
+            'health-score--good': healthScore >= 70,
+            'health-score--fair': healthScore >= 50 && healthScore < 70,
+            'health-score--poor': healthScore < 50,
+          }">
+            {{ healthScore }}<span class="health-denom">/100</span>
+          </div>
+          <p class="hero-sub">{{ healthLabel }}</p>
+          <div class="health-bar">
+            <span :style="{ width: healthScore + '%' }"></span>
+          </div>
+        </div>
+
+        <!-- Card 3: Next action -->
+        <div class="hero-card">
+          <div class="hero-eyebrow">{{ t("dashboard.nextStep") }}</div>
+          <div class="next-title">{{ nextAction.label }}</div>
+          <p class="hero-sub" v-if="lastCommitDate">
+            {{ t("dashboard.lastActivity") }} {{ formatDate(lastCommitDate) }}
+          </p>
+          <button class="btn-hero" @click="runNextAction">
+            {{ t("dashboard.openAction") }} →
+          </button>
+        </div>
+      </section>
+
+      <!-- ─── Metric cards ──────────────────────────────── -->
+      <section class="stats-grid">
+        <!-- Commits 7d with sparkline -->
         <button class="stat-card" @click="emit('changeView', 'history')">
-          <div class="stat-icon stat-icon--accent">
-            <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-              <circle cx="9" cy="9" r="3" stroke="currentColor" stroke-width="1.5"/>
-              <path d="M9 2v4M9 12v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-            </svg>
+          <div class="stat-head">
+            <div class="stat-icon stat-icon--accent">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+              </svg>
+            </div>
+            <span v-if="commitTrendPct !== 0" class="trend" :class="commitTrendPct > 0 ? 'trend--up' : 'trend--down'">
+              {{ commitTrendPct > 0 ? "▲" : "▼" }} {{ Math.abs(commitTrendPct) }}%
+            </span>
           </div>
-          <div class="stat-body">
-            <span class="stat-value">{{ weeklyCommits }}</span>
-            <span class="stat-label">Commits (7d)</span>
-          </div>
+          <div class="stat-value">{{ weeklyCommits }}</div>
+          <div class="stat-label">{{ t("dashboard.metricCommits") }}</div>
+          <svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none">
+            <polyline
+              :points="sparklineArea"
+              fill="var(--color-accent-soft)"
+              stroke="none"
+            />
+            <polyline
+              :points="sparklinePath"
+              fill="none"
+              stroke="var(--color-accent)"
+              stroke-width="1.5"
+              stroke-linejoin="round"
+            />
+          </svg>
         </button>
 
         <!-- Branches -->
         <button class="stat-card" @click="emit('changeView', 'graph')">
-          <div class="stat-icon stat-icon--info">
-            <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-              <circle cx="5" cy="5" r="2" stroke="currentColor" stroke-width="1.5"/>
-              <circle cx="13" cy="5" r="2" stroke="currentColor" stroke-width="1.5"/>
-              <circle cx="9" cy="14" r="2" stroke="currentColor" stroke-width="1.5"/>
-              <path d="M5 7v3a4 4 0 004 4M13 7v3a4 4 0 01-4 4" stroke="currentColor" stroke-width="1.5"/>
-            </svg>
+          <div class="stat-head">
+            <div class="stat-icon stat-icon--info">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="12" r="3"/>
+                <path d="M6 9v6"/><path d="M18 9a9 9 0 0 1-9 9"/>
+              </svg>
+            </div>
           </div>
-          <div class="stat-body">
-            <span class="stat-value">{{ localBranches.length }}</span>
-            <span class="stat-label">Branches</span>
+          <div class="stat-value">{{ localBranches.length }}</div>
+          <div class="stat-label">{{ t("dashboard.metricBranches") }}</div>
+          <div class="bullet-row">
+            <div class="bullet bullet--success" :style="{ flex: Math.max(1, localBranches.length) }"></div>
+            <div class="bullet bullet--warning" :style="{ flex: branches.length - localBranches.length || 0.001 }"></div>
           </div>
         </button>
 
         <!-- Contributors -->
         <div class="stat-card">
-          <div class="stat-icon stat-icon--success">
-            <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-              <circle cx="9" cy="6" r="3" stroke="currentColor" stroke-width="1.5"/>
-              <path d="M3 16c0-3.314 2.686-6 6-6s6 2.686 6 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-            </svg>
+          <div class="stat-head">
+            <div class="stat-icon stat-icon--success">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="7" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>
+              </svg>
+            </div>
           </div>
-          <div class="stat-body">
-            <span class="stat-value">{{ contributorCount }}</span>
-            <span class="stat-label">Contributors</span>
+          <div class="stat-value">{{ contributorCount }}</div>
+          <div class="stat-label">{{ t("dashboard.metricContributors") }}</div>
+          <div class="avatar-stack">
+            <span
+              v-for="(c, i) in topContributors.slice(0, 4)"
+              :key="c.email"
+              class="avatar avatar--sm"
+              :style="{ ...avatarStyle(c.email || c.name), zIndex: 10 - i }"
+              :title="c.name"
+            >{{ initials(c.name) }}</span>
           </div>
         </div>
 
         <!-- Working tree -->
         <button class="stat-card" :class="{ 'stat-card--alert': totalChanges > 0 }" @click="emit('changeView', 'changes')">
-          <div class="stat-icon" :class="totalChanges > 0 ? 'stat-icon--warning' : 'stat-icon--muted'">
-            <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-              <path d="M10 2H5a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7l-5-5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
-              <path d="M10 2v5h5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
+          <div class="stat-head">
+            <div class="stat-icon" :class="totalChanges > 0 ? 'stat-icon--warning' : 'stat-icon--muted'">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                <polyline points="14 2 14 8 20 8"/>
+              </svg>
+            </div>
+            <span v-if="totalChanges === 0" class="chip chip--success chip--sm">{{ t("dashboard.chipClean") }}</span>
           </div>
-          <div class="stat-body">
-            <span class="stat-value">{{ totalChanges }}</span>
-            <span class="stat-label">Changes</span>
-          </div>
+          <div class="stat-value">{{ totalChanges }}</div>
+          <div class="stat-label">{{ t("dashboard.metricChanges") }}</div>
           <div v-if="totalChanges > 0" class="stat-breakdown">
-            <span v-if="status.staged > 0" class="stat-pill stat-pill--success">{{ status.staged }} staged</span>
-            <span v-if="status.unstaged > 0" class="stat-pill stat-pill--warning">{{ status.unstaged }} modified</span>
-            <span v-if="status.untracked > 0" class="stat-pill stat-pill--muted">{{ status.untracked }} new</span>
+            <span v-if="status.staged > 0" class="stat-pill stat-pill--success">{{ status.staged }} {{ t("dashboard.staged") }}</span>
+            <span v-if="status.unstaged > 0" class="stat-pill stat-pill--warning">{{ status.unstaged }} {{ t("dashboard.modified") }}</span>
+            <span v-if="status.untracked > 0" class="stat-pill stat-pill--muted">{{ status.untracked }} {{ t("dashboard.new") }}</span>
           </div>
         </button>
 
-        <!-- Tracked files -->
+        <!-- Files tracked -->
         <div class="stat-card">
-          <div class="stat-icon stat-icon--muted">
-            <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-              <rect x="2" y="2" width="14" height="14" rx="2" stroke="currentColor" stroke-width="1.5"/>
-              <path d="M5 6h8M5 9h6M5 12h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-            </svg>
+          <div class="stat-head">
+            <div class="stat-icon stat-icon--accent">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M4 7h16M4 12h16M4 17h10"/>
+              </svg>
+            </div>
           </div>
-          <div class="stat-body">
-            <span class="stat-value">{{ formatNumber(fileCount) }}</span>
-            <span class="stat-label">Files tracked</span>
-          </div>
+          <div class="stat-value">{{ formatNumber(fileCount) }}</div>
+          <div class="stat-label">{{ t("dashboard.metricFiles") }}</div>
+          <div class="filler"></div>
         </div>
 
         <!-- Open PRs -->
         <button class="stat-card" @click="emit('changeView', 'prs')">
-          <div class="stat-icon" :class="openPrs > 0 ? 'stat-icon--accent' : 'stat-icon--muted'">
-            <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-              <circle cx="6" cy="5" r="2" stroke="currentColor" stroke-width="1.5"/>
-              <circle cx="12" cy="13" r="2" stroke="currentColor" stroke-width="1.5"/>
-              <path d="M6 7v6M12 5v6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-            </svg>
-          </div>
-          <div class="stat-body">
-            <span class="stat-value">{{ openPrs }}</span>
-            <span class="stat-label">Open PRs</span>
-          </div>
-        </button>
-      </div>
-
-      <!-- Sync status bar -->
-      <div class="sync-bar" v-if="ahead > 0 || behind > 0">
-        <span v-if="ahead > 0" class="sync-pill sync-pill--ahead">
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-            <path d="M6 2v8M3 5l3-3 3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-          {{ ahead }} ahead
-        </span>
-        <span v-if="behind > 0" class="sync-pill sync-pill--behind">
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-            <path d="M6 10V2M3 7l3 3 3-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-          {{ behind }} behind
-        </span>
-      </div>
-
-      <!-- Recent activity -->
-      <div class="section-row">
-        <!-- Recent commits -->
-        <div class="card recent-commits">
-          <div class="card-header">
-            <h3 class="card-title">Recent commits</h3>
-            <button class="card-link" @click="emit('changeView', 'history')">
-              View all
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                <path d="M4.5 2.5l4 3.5-4 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <div class="stat-head">
+            <div class="stat-icon" :class="openPrs > 0 ? 'stat-icon--accent' : 'stat-icon--muted'">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/>
+                <path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" y1="9" x2="6" y2="21"/>
               </svg>
+            </div>
+          </div>
+          <div class="stat-value">{{ openPrs }}</div>
+          <div class="stat-label">{{ t("dashboard.metricPrs") }}</div>
+          <div class="stat-hint" v-if="mergedPrs > 0">
+            {{ t("dashboard.prsMergedThisWeek", mergedPrs) }}
+          </div>
+          <div class="stat-hint" v-else>&nbsp;</div>
+        </button>
+      </section>
+
+      <!-- ─── Heatmap + Contributors ───────────────────── -->
+      <section class="grid-2">
+        <div class="panel">
+          <div class="panel-head">
+            <h3 class="panel-title">{{ t("dashboard.heatmapTitle") }}</h3>
+            <button class="panel-link" @click="emit('changeView', 'history')">
+              {{ t("dashboard.viewAll") }} →
             </button>
           </div>
-          <ul class="commit-list">
+          <div class="heatmap">
+            <div class="heatmap-days">
+              <span>{{ t("dashboard.dayMon") }}</span>
+              <span></span>
+              <span>{{ t("dashboard.dayWed") }}</span>
+              <span></span>
+              <span>{{ t("dashboard.dayFri") }}</span>
+              <span></span>
+              <span></span>
+            </div>
+            <div class="heatmap-grid-wrap">
+              <div class="heatmap-grid">
+                <div
+                  v-for="col in heatmapCells"
+                  :key="col.week"
+                  class="heatmap-col"
+                >
+                  <div
+                    v-for="(cell, i) in col.cells"
+                    :key="i"
+                    class="heatmap-cell"
+                    :class="`heatmap-cell--l${cell.level}`"
+                    :title="cell.date ? `${cell.date}: ${cell.count}` : ''"
+                  ></div>
+                </div>
+              </div>
+              <div class="heatmap-foot">
+                <span v-for="m in heatmapMonths" :key="m">{{ m }}</span>
+                <div class="heatmap-legend">
+                  <span class="legend-label">{{ t("dashboard.less") }}</span>
+                  <span class="heatmap-cell heatmap-cell--l0"></span>
+                  <span class="heatmap-cell heatmap-cell--l1"></span>
+                  <span class="heatmap-cell heatmap-cell--l2"></span>
+                  <span class="heatmap-cell heatmap-cell--l3"></span>
+                  <span class="heatmap-cell heatmap-cell--l4"></span>
+                  <span class="legend-label">{{ t("dashboard.more") }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h3 class="panel-title">{{ t("dashboard.contributorsTitle") }}</h3>
+          </div>
+          <div class="contributors">
+            <div v-for="c in topContributors" :key="c.email" class="contrib">
+              <span class="avatar" :style="avatarStyle(c.email || c.name)">{{ initials(c.name) }}</span>
+              <div class="contrib-body">
+                <div class="contrib-name">{{ c.name }}</div>
+                <div class="contrib-bar"><span :style="{ width: c.pct + '%' }"></span></div>
+              </div>
+              <div class="contrib-stat">{{ c.count }}</div>
+            </div>
+            <div v-if="topContributors.length === 0" class="contrib-empty">
+              {{ t("dashboard.noContributors") }}
+            </div>
+
+            <div class="contrib-divider" v-if="commitsByType.total > 0"></div>
+
+            <div v-if="commitsByType.total > 0" class="type-section">
+              <div class="type-label">{{ t("dashboard.commitTypes") }}</div>
+              <div class="type-bar">
+                <span class="type-bar--feat" :style="{ flex: commitsByType.feat || 0.001 }" :title="`feat ${commitsByType.featPct}%`"></span>
+                <span class="type-bar--fix" :style="{ flex: commitsByType.fix || 0.001 }" :title="`fix ${commitsByType.fixPct}%`"></span>
+                <span class="type-bar--docs" :style="{ flex: commitsByType.docs || 0.001 }" :title="`docs ${commitsByType.docsPct}%`"></span>
+                <span class="type-bar--chore" :style="{ flex: commitsByType.chore || 0.001 }" :title="`chore ${commitsByType.chorePct}%`"></span>
+                <span class="type-bar--other" :style="{ flex: commitsByType.other || 0.001 }" :title="`other ${commitsByType.otherPct}%`"></span>
+              </div>
+              <div class="type-legend">
+                <span v-if="commitsByType.feat > 0"><span class="dot dot--feat"></span>feat {{ commitsByType.featPct }}%</span>
+                <span v-if="commitsByType.fix > 0"><span class="dot dot--fix"></span>fix {{ commitsByType.fixPct }}%</span>
+                <span v-if="commitsByType.docs > 0"><span class="dot dot--docs"></span>docs {{ commitsByType.docsPct }}%</span>
+                <span v-if="commitsByType.chore > 0"><span class="dot dot--chore"></span>chore {{ commitsByType.chorePct }}%</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ─── Commits + Bar chart ──────────────────────── -->
+      <section class="grid-2">
+        <div class="panel">
+          <div class="panel-head">
+            <h3 class="panel-title">{{ t("dashboard.recentCommits") }}</h3>
+            <button class="panel-link" @click="emit('changeView', 'history')">
+              {{ t("dashboard.viewAll") }} →
+            </button>
+          </div>
+          <ul class="commits">
             <li
-              v-for="c in recentCommits.slice(0, 8)"
+              v-for="c in recentCommits.slice(0, 6)"
               :key="c.hashFull"
-              class="commit-item"
+              class="commit"
+              @click="emit('changeView', 'history')"
             >
+              <span class="avatar avatar--sm" :style="avatarStyle(c.email || c.author)">{{ initials(c.author) }}</span>
+              <div class="commit-body">
+                <div class="commit-title">
+                  <span v-if="commitType(c.message)" class="tag" :class="`tag--${commitType(c.message)}`">
+                    {{ commitType(c.message) }}
+                  </span>
+                  <span class="commit-msg">{{ commitMessageBody(c.message) }}</span>
+                </div>
+                <div class="commit-sub">{{ c.author }} · {{ formatDate(c.date) }}</div>
+              </div>
               <code class="commit-hash">{{ c.hash }}</code>
-              <span class="commit-msg">{{ c.message }}</span>
-              <span class="commit-meta">
-                <span class="commit-author">{{ c.author }}</span>
-                <span class="commit-date">{{ formatDate(c.date) }}</span>
-              </span>
+            </li>
+            <li v-if="recentCommits.length === 0" class="commit-empty">
+              {{ t("dashboard.noCommits") }}
             </li>
           </ul>
         </div>
-      </div>
 
-      <!-- README card -->
+        <div class="panel">
+          <div class="panel-head">
+            <h3 class="panel-title">{{ t("dashboard.chartTitle") }}</h3>
+          </div>
+          <div class="chart" role="img" :aria-label="t('dashboard.chartTitle')">
+            <div
+              v-for="(day, i) in barChartDays"
+              :key="i"
+              class="bar-wrap"
+              :title="`${day.count}`"
+            >
+              <div class="bar-val" v-if="day.count > 0">{{ day.count }}</div>
+              <div
+                class="bar"
+                :class="{ 'bar--weekend': day.isWeekend, 'bar--empty': day.count === 0 }"
+                :style="{ height: `${(day.count / barChartMax) * 82}%` }"
+              ></div>
+              <div class="bar-label">{{ day.label }}</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ─── README card (kept, slight styling refresh) ─── -->
       <div class="card readme-card" v-if="readmeContent !== null">
         <div class="card-header">
-          <h3 class="card-title">
+          <h3 class="panel-title">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
               <path d="M2 3h5l1 1h6v9H2V3z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
             </svg>
@@ -491,14 +887,14 @@ watch(() => props.cwd, loadDashboard);
               :class="{ 'readme-tab--active': readmeTab === 'formatted' }"
               @click="readmeTab = 'formatted'"
             >
-              Formatted
+              {{ t("dashboard.formatted") }}
             </button>
             <button
               class="readme-tab"
               :class="{ 'readme-tab--active': readmeTab === 'raw' }"
               @click="readmeTab = 'raw'"
             >
-              Raw
+              {{ t("dashboard.raw") }}
             </button>
           </div>
         </div>
@@ -518,7 +914,7 @@ watch(() => props.cwd, loadDashboard);
             <rect x="3" y="3" width="18" height="18" rx="3" stroke="currentColor" stroke-width="1.5" opacity="0.4"/>
             <path d="M8 9h8M8 12h6M8 15h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.4"/>
           </svg>
-          <span>No README.md found in this repository</span>
+          <span>{{ t("dashboard.noReadme") }}</span>
         </div>
       </div>
     </template>
@@ -527,12 +923,12 @@ watch(() => props.cwd, loadDashboard);
 
 <style scoped>
 .dashboard {
-  padding: var(--space-8) var(--space-9);
+  padding: var(--space-7) var(--space-8);
   overflow-y: auto;
   height: 100%;
   display: flex;
   flex-direction: column;
-  gap: var(--space-7);
+  gap: var(--space-6);
 }
 
 .dashboard-loading {
@@ -546,158 +942,621 @@ watch(() => props.cwd, loadDashboard);
   font-size: var(--font-size-base);
 }
 
-/* ─── Stats grid ─────────────────────────────────────── */
+.spinner {
+  width: 28px; height: 28px; border-radius: 50%;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-accent);
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ───────── Hero ───────── */
+.hero {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr 1fr;
+  gap: var(--space-5);
+}
+
+.hero-card {
+  padding: var(--space-6) var(--space-6);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-height: 160px;
+}
+
+.hero-card--primary {
+  background:
+    radial-gradient(circle at 100% 0%, var(--color-accent-soft), transparent 55%),
+    linear-gradient(135deg, var(--color-bg-secondary), var(--color-bg-tertiary));
+  border-color: var(--color-accent-soft);
+}
+
+.hero-eyebrow {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+}
+
+.hero-title {
+  font-size: var(--font-size-xl);
+  font-weight: 600;
+  margin: 0;
+  line-height: 1.2;
+}
+
+.hero-sub {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  margin: 0;
+}
+
+.hero-chips {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: auto;
+  flex-wrap: wrap;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-3);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  border-radius: var(--radius-pill);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-muted);
+}
+.chip--sm { padding: 1px var(--space-2); font-size: var(--font-size-sm); }
+.chip--success { background: var(--color-success-soft); color: var(--color-success); }
+.chip--danger { background: var(--color-danger-soft); color: var(--color-danger); }
+.chip--info { background: var(--color-info-soft); color: var(--color-info); }
+.chip--warning { background: var(--color-warning-soft); color: var(--color-warning); }
+
+/* Health score */
+.health-score {
+  font-size: 38px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  color: var(--color-success);
+  margin-top: var(--space-1);
+}
+.health-score--fair { color: var(--color-warning); }
+.health-score--poor { color: var(--color-danger); }
+.health-denom {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  font-weight: 500;
+}
+.health-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--color-bg-tertiary);
+  overflow: hidden;
+  margin-top: auto;
+}
+.health-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--color-accent), var(--color-accent-hover));
+  transition: width var(--transition-base);
+}
+.health-score--fair ~ .health-bar > span { background: linear-gradient(90deg, var(--color-warning), #fbbf24); }
+.health-score--poor ~ .health-bar > span { background: linear-gradient(90deg, var(--color-danger), #f87171); }
+
+/* Next action */
+.next-title {
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  margin-top: var(--space-1);
+  line-height: 1.35;
+}
+.btn-hero {
+  margin-top: auto;
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-accent);
+  color: var(--color-accent-text);
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-weight: 500;
+  font-size: var(--font-size-sm);
+  transition: background var(--transition-fast);
+}
+.btn-hero:hover { background: var(--color-accent-hover); }
+
+/* ───────── Stat cards ───────── */
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
-  gap: var(--space-5);
+  grid-template-columns: repeat(6, 1fr);
+  gap: var(--space-4);
+}
+
+@media (max-width: 1100px) {
+  .stats-grid { grid-template-columns: repeat(3, 1fr); }
 }
 
 .stat-card {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
-  padding: var(--space-6);
+  gap: var(--space-2);
+  padding: var(--space-5);
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-xl);
   cursor: default;
-  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
   text-align: left;
   font-family: inherit;
   color: inherit;
+  overflow: hidden;
 }
 
-button.stat-card {
-  cursor: pointer;
-}
-
+button.stat-card { cursor: pointer; }
 button.stat-card:hover {
   border-color: var(--color-accent);
   box-shadow: 0 0 0 3px var(--color-accent-soft);
+  transform: translateY(-1px);
 }
 
-.stat-card--alert {
-  border-color: var(--color-warning);
+.stat-card--alert { border-color: var(--color-warning); }
+
+.stat-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
 }
 
 .stat-icon {
-  width: 36px;
-  height: 36px;
+  width: 32px; height: 32px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
 }
+.stat-icon--accent { background: var(--color-accent-soft); color: var(--color-accent); }
+.stat-icon--info { background: var(--color-info-soft); color: var(--color-info); }
+.stat-icon--success { background: var(--color-success-soft); color: var(--color-success); }
+.stat-icon--warning { background: var(--color-warning-soft); color: var(--color-warning); }
+.stat-icon--muted { background: var(--color-bg-tertiary); color: var(--color-text-muted); }
 
-.stat-icon--accent {
-  background: var(--color-accent-soft);
-  color: var(--color-accent);
+.trend {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-pill);
 }
-
-.stat-icon--info {
-  background: var(--color-info-soft);
-  color: var(--color-info);
-}
-
-.stat-icon--success {
-  background: var(--color-success-soft);
-  color: var(--color-success);
-}
-
-.stat-icon--warning {
-  background: var(--color-warning-soft);
-  color: var(--color-warning);
-}
-
-.stat-icon--muted {
-  background: var(--color-bg-tertiary);
-  color: var(--color-text-muted);
-}
-
-.stat-body {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
+.trend--up { color: var(--color-success); background: var(--color-success-soft); }
+.trend--down { color: var(--color-danger); background: var(--color-danger-soft); }
 
 .stat-value {
-  font-size: var(--font-size-3xl);
+  font-size: var(--font-size-2xl);
   font-weight: 700;
-  line-height: 1;
-  color: var(--color-text);
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  margin-top: var(--space-2);
 }
 
 .stat-label {
   font-size: var(--font-size-sm);
-  color: var(--color-text-muted);
-  font-weight: 500;
+  color: var(--color-text-subtle);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
+  font-weight: 600;
 }
+
+.stat-hint {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-subtle);
+  margin-top: var(--space-1);
+  min-height: 1em;
+}
+
+.spark { width: 100%; height: 22px; margin-top: var(--space-2); }
+.filler { flex: 1; }
+
+.bullet-row { display: flex; gap: 3px; margin-top: var(--space-2); }
+.bullet { height: 4px; border-radius: 2px; }
+.bullet--success { background: var(--color-success); }
+.bullet--warning { background: var(--color-warning); }
+
+.avatar-stack {
+  display: flex;
+  margin-top: var(--space-2);
+}
+.avatar-stack .avatar + .avatar { margin-left: -6px; }
 
 .stat-breakdown {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-2);
-  margin-top: var(--space-1);
+  gap: var(--space-1);
+  margin-top: var(--space-2);
 }
 
 .stat-pill {
   font-size: var(--font-size-sm);
-  padding: 1px var(--space-3);
+  padding: 1px var(--space-2);
   border-radius: var(--radius-pill);
   font-weight: 500;
 }
+.stat-pill--success { background: var(--color-success-soft); color: var(--color-success); }
+.stat-pill--warning { background: var(--color-warning-soft); color: var(--color-warning); }
+.stat-pill--muted { background: var(--color-bg-tertiary); color: var(--color-text-muted); }
 
-.stat-pill--success {
-  background: var(--color-success-soft);
-  color: var(--color-success);
-}
-
-.stat-pill--warning {
-  background: var(--color-warning-soft);
-  color: var(--color-warning);
-}
-
-.stat-pill--muted {
-  background: var(--color-bg-tertiary);
-  color: var(--color-text-muted);
-}
-
-/* ─── Sync bar ───────────────────────────────────────── */
-.sync-bar {
-  display: flex;
-  gap: var(--space-3);
-}
-
-.sync-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-size: var(--font-size-sm);
-  font-weight: 600;
-  padding: var(--space-2) var(--space-4);
-  border-radius: var(--radius-pill);
-}
-
-.sync-pill--ahead {
-  background: var(--color-success-soft);
-  color: var(--color-success);
-}
-
-.sync-pill--behind {
-  background: var(--color-warning-soft);
-  color: var(--color-warning);
-}
-
-/* ─── Cards ──────────────────────────────────────────── */
-.section-row {
+/* ───────── Avatar ───────── */
+.avatar {
+  width: 28px; height: 28px;
+  border-radius: 50%;
   display: grid;
-  grid-template-columns: 1fr;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: white;
+  flex-shrink: 0;
+  border: 2px solid var(--color-bg-secondary);
+}
+.avatar--sm {
+  width: 22px; height: 22px;
+  font-size: 10px;
+  border-width: 2px;
+}
+
+/* ───────── Grid 2-col panels ───────── */
+.grid-2 {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr;
   gap: var(--space-5);
 }
 
+@media (max-width: 1100px) {
+  .grid-2 { grid-template-columns: 1fr; }
+}
+
+.panel {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.panel-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  margin: 0;
+}
+
+.panel-link {
+  font-size: var(--font-size-sm);
+  color: var(--color-accent);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-pill);
+  transition: background var(--transition-fast);
+}
+.panel-link:hover { background: var(--color-accent-soft); }
+
+/* ───────── Heatmap ───────── */
+.heatmap {
+  padding: var(--space-5);
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  gap: var(--space-3);
+}
+
+.heatmap-days {
+  display: grid;
+  grid-template-rows: repeat(7, 12px);
+  gap: 3px;
+  font-size: 11px;
+  color: var(--color-text-subtle);
+  padding-top: 2px;
+}
+
+.heatmap-grid-wrap { min-width: 0; }
+
+.heatmap-grid {
+  display: grid;
+  grid-template-columns: repeat(26, 1fr);
+  gap: 3px;
+}
+
+.heatmap-col {
+  display: grid;
+  grid-template-rows: repeat(7, 12px);
+  gap: 3px;
+}
+
+.heatmap-cell {
+  background: var(--color-bg-tertiary);
+  border-radius: 2px;
+  width: 100%;
+  transition: transform var(--transition-fast);
+}
+.heatmap-cell:hover { transform: scale(1.2); }
+.heatmap-cell--l0 { background: var(--color-bg-tertiary); }
+.heatmap-cell--l1 { background: rgba(139, 92, 246, 0.25); }
+.heatmap-cell--l2 { background: rgba(139, 92, 246, 0.5); }
+.heatmap-cell--l3 { background: rgba(139, 92, 246, 0.75); }
+.heatmap-cell--l4 { background: var(--color-accent); }
+
+.heatmap-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: var(--space-3);
+  font-size: 11px;
+  color: var(--color-text-subtle);
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.heatmap-foot .heatmap-cell { width: 10px; height: 10px; display: inline-block; }
+
+.heatmap-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: auto;
+}
+
+.legend-label { margin: 0 2px; }
+
+/* ───────── Contributors ───────── */
+.contributors {
+  padding: var(--space-4) var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.contrib {
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.contrib-body { min-width: 0; }
+
+.contrib-name {
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.contrib-bar {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--color-bg-tertiary);
+  overflow: hidden;
+  margin-top: 3px;
+}
+.contrib-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--color-accent);
+  border-radius: 2px;
+  transition: width var(--transition-base);
+}
+
+.contrib-stat {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.contrib-divider {
+  height: 1px;
+  background: var(--color-border);
+  margin: var(--space-2) 0;
+}
+
+.contrib-empty {
+  padding: var(--space-5);
+  color: var(--color-text-subtle);
+  font-size: var(--font-size-sm);
+  text-align: center;
+}
+
+.type-section { display: flex; flex-direction: column; gap: var(--space-2); }
+
+.type-label {
+  font-size: var(--font-size-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  color: var(--color-text-subtle);
+}
+
+.type-bar {
+  display: flex;
+  gap: 3px;
+  height: 8px;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.type-bar > span { display: block; height: 100%; }
+.type-bar--feat { background: var(--color-success); }
+.type-bar--fix { background: var(--color-danger); }
+.type-bar--docs { background: var(--color-info); }
+.type-bar--chore { background: var(--color-warning); }
+.type-bar--other { background: var(--color-text-subtle); }
+
+.type-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+.type-legend span { display: inline-flex; align-items: center; gap: var(--space-1); }
+
+.dot { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+.dot--feat { background: var(--color-success); }
+.dot--fix { background: var(--color-danger); }
+.dot--docs { background: var(--color-info); }
+.dot--chore { background: var(--color-warning); }
+
+/* ───────── Commits ───────── */
+.commits {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-2) 0;
+}
+
+.commit {
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-3) var(--space-5);
+  border-left: 2px solid transparent;
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+.commit:hover {
+  background: var(--color-bg-tertiary);
+  border-left-color: var(--color-accent);
+}
+
+.commit-body { min-width: 0; }
+
+.commit-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.commit-msg {
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.commit-sub {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-subtle);
+  margin-top: 1px;
+}
+
+.tag {
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: 11px;
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  flex-shrink: 0;
+  text-transform: lowercase;
+}
+.tag--feat { background: var(--color-success-soft); color: var(--color-success); }
+.tag--fix { background: var(--color-danger-soft); color: var(--color-danger); }
+.tag--docs { background: var(--color-info-soft); color: var(--color-info); }
+.tag--chore,
+.tag--refactor,
+.tag--test,
+.tag--style,
+.tag--perf,
+.tag--build,
+.tag--ci { background: var(--color-bg-tertiary); color: var(--color-text-muted); }
+
+.commit-hash {
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: var(--font-size-sm);
+  color: var(--color-accent);
+  background: var(--color-accent-soft);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+}
+
+.commit-empty {
+  padding: var(--space-6);
+  color: var(--color-text-subtle);
+  font-size: var(--font-size-sm);
+  text-align: center;
+}
+
+/* ───────── Bar chart ───────── */
+.chart {
+  padding: var(--space-5);
+  height: 220px;
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+  position: relative;
+}
+
+.bar-wrap {
+  flex: 1;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  position: relative;
+  min-width: 0;
+  padding-bottom: 18px;
+}
+
+.bar-val {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  margin-bottom: 3px;
+}
+
+.bar {
+  width: 100%;
+  border-radius: 4px 4px 0 0;
+  background: linear-gradient(180deg, var(--color-accent), var(--color-accent-soft));
+  min-height: 2px;
+  transition: opacity var(--transition-fast);
+}
+.bar--weekend { background: linear-gradient(180deg, var(--color-info), rgba(96, 165, 250, 0.25)); }
+.bar--empty { background: var(--color-bg-tertiary); min-height: 3px; }
+.bar-wrap:hover .bar { opacity: 0.8; }
+
+.bar-label {
+  position: absolute;
+  bottom: 2px;
+  font-size: 11px;
+  color: var(--color-text-subtle);
+}
+
+/* ───────── README card (trimmed — only styling deltas kept) ───────── */
 .card {
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
@@ -709,91 +1568,11 @@ button.stat-card:hover {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: var(--space-5) var(--space-6);
+  padding: var(--space-4) var(--space-5);
   border-bottom: 1px solid var(--color-border);
 }
 
-.card-title {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  font-size: var(--font-size-md);
-  font-weight: 600;
-  color: var(--color-text);
-  margin: 0;
-}
-
-.card-link {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  font-size: var(--font-size-sm);
-  font-weight: 500;
-  color: var(--color-accent);
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: var(--space-1) var(--space-3);
-  border-radius: var(--radius-pill);
-  transition: background var(--transition-fast);
-}
-
-.card-link:hover {
-  background: var(--color-accent-soft);
-}
-
-/* ─── Recent commits ─────────────────────────────────── */
-.commit-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.commit-item {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: var(--space-3);
-  align-items: center;
-  padding: var(--space-3) var(--space-6);
-  border-bottom: 1px solid var(--color-border);
-  font-size: var(--font-size-sm);
-}
-
-.commit-item:last-child {
-  border-bottom: none;
-}
-
-.commit-hash {
-  font-family: "SF Mono", "Fira Code", monospace;
-  font-size: var(--font-size-sm);
-  color: var(--color-accent);
-  background: var(--color-accent-soft);
-  padding: 1px var(--space-2);
-  border-radius: var(--radius-sm);
-}
-
-.commit-msg {
-  color: var(--color-text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.commit-meta {
-  display: flex;
-  gap: var(--space-3);
-  color: var(--color-text-muted);
-  white-space: nowrap;
-}
-
-.commit-author {
-  font-weight: 500;
-}
-
-/* ─── README card ────────────────────────────────────── */
 .readme-card {
-  flex: 1;
-  min-height: 200px;
   display: flex;
   flex-direction: column;
 }
@@ -816,7 +1595,6 @@ button.stat-card:hover {
   cursor: pointer;
   transition: all var(--transition-fast);
 }
-
 .readme-tab--active {
   background: var(--color-bg-secondary);
   color: var(--color-text);
@@ -843,7 +1621,6 @@ button.stat-card:hover {
   padding-bottom: var(--space-3);
   border-bottom: 1px solid var(--color-border);
 }
-
 .readme-formatted :deep(h2) {
   font-size: var(--font-size-xl);
   font-weight: 600;
@@ -851,13 +1628,11 @@ button.stat-card:hover {
   padding-bottom: var(--space-2);
   border-bottom: 1px solid var(--color-border);
 }
-
 .readme-formatted :deep(h3) {
   font-size: var(--font-size-lg);
   font-weight: 600;
   margin: var(--space-6) 0 var(--space-3) 0;
 }
-
 .readme-formatted :deep(h4),
 .readme-formatted :deep(h5),
 .readme-formatted :deep(h6) {
@@ -865,20 +1640,13 @@ button.stat-card:hover {
   font-weight: 600;
   margin: var(--space-5) 0 var(--space-2) 0;
 }
-
-.readme-formatted :deep(p) {
-  margin: 0 0 var(--space-4) 0;
-}
-
+.readme-formatted :deep(p) { margin: 0 0 var(--space-4) 0; }
 .readme-formatted :deep(ul),
 .readme-formatted :deep(ol) {
   margin: 0 0 var(--space-4) 0;
   padding-left: var(--space-7);
 }
-
-.readme-formatted :deep(li) {
-  margin-bottom: var(--space-2);
-}
+.readme-formatted :deep(li) { margin-bottom: var(--space-2); }
 
 .readme-formatted :deep(.md-code-block) {
   background: var(--color-bg-tertiary);
@@ -891,7 +1659,6 @@ button.stat-card:hover {
   font-size: var(--font-size-sm);
   line-height: 1.5;
 }
-
 .readme-formatted :deep(.md-inline-code) {
   background: var(--color-bg-tertiary);
   padding: 1px var(--space-2);
@@ -899,15 +1666,11 @@ button.stat-card:hover {
   font-family: "SF Mono", "Fira Code", monospace;
   font-size: 0.9em;
 }
-
 .readme-formatted :deep(.md-link) {
   color: var(--color-accent);
   text-decoration: none;
 }
-
-.readme-formatted :deep(.md-link:hover) {
-  text-decoration: underline;
-}
+.readme-formatted :deep(.md-link:hover) { text-decoration: underline; }
 
 .readme-formatted :deep(.md-blockquote) {
   border-left: 3px solid var(--color-accent-soft);
@@ -915,37 +1678,33 @@ button.stat-card:hover {
   color: var(--color-text-muted);
   margin: 0 0 var(--space-4) 0;
 }
-
 .readme-formatted :deep(.md-hr) {
   border: none;
   border-top: 1px solid var(--color-border);
   margin: var(--space-6) 0;
 }
+.readme-formatted :deep(strong) { font-weight: 600; }
 
-.readme-formatted :deep(strong) {
-  font-weight: 600;
-}
-
-/* ─── README header (parsed from HTML header block) ─── */
 .readme-formatted :deep(.md-readme-header) {
   text-align: center;
   padding: var(--space-7) 0 var(--space-5);
   margin-bottom: var(--space-5);
   border-bottom: 1px solid var(--color-border);
 }
-
 .readme-formatted :deep(.md-readme-title) {
   font-size: var(--font-size-2xl);
   font-weight: var(--font-weight-bold);
   margin: 0 0 var(--space-3);
+  background: linear-gradient(135deg, var(--color-accent), #d946ef);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
-
 .readme-formatted :deep(.md-readme-tagline) {
   color: var(--color-text-muted);
   font-size: var(--font-size-md);
   margin: 0 0 var(--space-5);
 }
-
 .readme-formatted :deep(.md-readme-nav) {
   display: flex;
   justify-content: center;
@@ -954,74 +1713,58 @@ button.stat-card:hover {
   margin-bottom: var(--space-5);
   font-size: var(--font-size-sm);
 }
-
 .readme-formatted :deep(.md-readme-sep) {
   color: var(--color-text-subtle);
   margin: 0 var(--space-1);
 }
-
 .readme-formatted :deep(.md-readme-badges) {
   display: flex;
   justify-content: center;
   flex-wrap: wrap;
   gap: var(--space-3);
 }
+.readme-formatted :deep(.md-badge) { height: 20px; }
 
-.readme-formatted :deep(.md-badge) {
-  height: 20px;
-}
-
-/* ─── Tables ─── */
 .readme-formatted :deep(.md-table) {
   width: 100%;
   border-collapse: collapse;
   margin: 0 0 var(--space-5) 0;
   font-size: var(--font-size-sm);
 }
-
 .readme-formatted :deep(.md-table th),
 .readme-formatted :deep(.md-table td) {
   text-align: left;
   padding: var(--space-3) var(--space-4);
   border: 1px solid var(--color-border);
 }
-
 .readme-formatted :deep(.md-table th) {
   background: var(--color-bg-tertiary);
   font-weight: var(--font-weight-semibold);
 }
-
 .readme-formatted :deep(.md-table tr:nth-child(even) td) {
   background: var(--color-bg);
 }
 
-/* ─── Checkboxes ─── */
 .readme-formatted :deep(.md-check) {
   list-style: none;
   margin-left: calc(-1 * var(--space-7));
   padding-left: 0;
 }
-
 .readme-formatted :deep(.md-check::before) {
   content: "☐ ";
   color: var(--color-text-muted);
 }
-
 .readme-formatted :deep(.md-checked::before) {
   content: "☑ ";
   color: var(--color-success);
 }
 
-/* ─── Images ─── */
 .readme-formatted :deep(.md-img) {
   max-width: 100%;
   border-radius: var(--radius-md);
   margin: var(--space-3) 0;
 }
-
-.readme-formatted :deep(.md-img-placeholder) {
-  display: none; /* Hide broken relative images gracefully */
-}
+.readme-formatted :deep(.md-img-placeholder) { display: none; }
 
 .readme-raw {
   padding: var(--space-6) var(--space-7);
@@ -1035,17 +1778,13 @@ button.stat-card:hover {
   white-space: pre-wrap;
   word-break: break-word;
 }
-
-.readme-raw code {
-  font-family: inherit;
-}
+.readme-raw code { font-family: inherit; }
 
 .readme-empty {
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-xl);
 }
-
 .readme-empty-inner {
   display: flex;
   align-items: center;

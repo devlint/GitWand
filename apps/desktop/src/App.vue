@@ -344,6 +344,20 @@ watch(viewMode, async (mode) => {
   if ((mode === "history" || mode === "graph") && hasRepo.value) {
     await loadLog();
   }
+  // Dashboard sidebar needs branches + recent log entries to show
+  // pinned branches & activity feed.
+  if (mode === "dashboard" && hasRepo.value) {
+    if (branches.value.length === 0) loadBranches();
+    if (repoLog.value.length === 0) loadLog();
+  }
+});
+
+// Also refresh the dashboard sidebar data when the repo itself changes.
+watch(hasRepo, (has) => {
+  if (has && viewMode.value === "dashboard") {
+    if (branches.value.length === 0) loadBranches();
+    if (repoLog.value.length === 0) loadLog();
+  }
 });
 
 // ─── Repo sidebar events ────────────────────────────────
@@ -671,6 +685,7 @@ onUnmounted(() => {
           :selected-commit-hash="selectedCommitHash"
           :ahead-count="aheadCount"
           :dir-files="expandedDirFiles"
+          :branches="branches"
           @select="onRepoFileSelect"
           @change-view="onViewModeChange"
           @select-dir-file="(path) => repoSelectFile(path, false)"
@@ -739,6 +754,8 @@ onUnmounted(() => {
             :ahead="aheadCount"
             :behind="behindCount"
             @change-view="onViewModeChange"
+            @push="doPush"
+            @sync="() => doPull(pullMode === 'rebase')"
           />
 
           <!-- Changes view: conflict editor, file history, or diff viewer -->
