@@ -130,11 +130,17 @@ const {
   switchTab,
 } = useRepoTabs();
 
-// When tab changes, load that repo into the single useGitRepo instance
-watch(activeTabId, () => {
+// When tab changes, load that repo into the single useGitRepo instance.
+// If the user is currently on the history/graph view, also reload the log —
+// otherwise the log would stay empty (openRepo clears it but doesn't refetch,
+// and the viewMode watcher only fires on actual mode changes).
+watch(activeTabId, async () => {
   const tab = repoTabs.value.find((t) => t.id === activeTabId.value);
   if (tab && tab.path !== repoFolderPath.value) {
-    openRepo(tab.path);
+    await openRepo(tab.path);
+    if (viewMode.value === "history" || viewMode.value === "graph") {
+      await loadLog();
+    }
   }
 });
 
@@ -319,7 +325,7 @@ async function handleOpenFolder() {
   if (path) {
     openTab(path);
     await openRepo(path);
-    if (viewMode.value === "history") {
+    if (viewMode.value === "history" || viewMode.value === "graph") {
       await loadLog();
     }
   }
@@ -328,6 +334,9 @@ async function handleOpenFolder() {
 async function handleOpenPath(path: string) {
   openTab(path);
   await openRepo(path);
+  if (viewMode.value === "history" || viewMode.value === "graph") {
+    await loadLog();
+  }
 }
 
 // When switching tabs, load data as needed
