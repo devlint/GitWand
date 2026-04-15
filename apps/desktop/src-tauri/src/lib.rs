@@ -2688,6 +2688,260 @@ fn merge_file_preview(
     }
 }
 
+// ─── Claude Code CLI (piggyback on user's local install) ─────
+//
+// Wraps the official `claude` CLI (Claude Code) so GitWand can use the
+// user's existing Claude Max/Pro subscription without implementing OAuth
+// ourselves. Inspired by Solo's approach, but headless (no PTY): we only
+// need one-shot prompts for commit messages, merge resolution and PR review.
+
+#[derive(Serialize)]
+struct ClaudeCliInfo {
+    found: bool,
+    /// Absolute path of the resolved binary (empty when `found == false`).
+    path: String,
+    /// Raw `claude --version` output (e.g. "2.0.14 (Claude Code)").
+    version: String,
+    /// True if `claude -p "ping"` answered without an auth error.
+    logged_in: bool,
+    /// Human-readable status: "ok", "not_found", "not_logged_in", "error".
+    status: String,
+    /// Optional detail line surfaced to the UI on errors.
+    detail: String,
+}
+
+/// Resolve the path to the `claude` binary, checking the usual install
+/// locations on macOS / Linux / Windows in addition to PATH.
+fn resolve_claude_binary() -> Option<String> {
+    // 1) Try PATH first via `which` / `where`.
+    let which_cmd = if cfg!(windows) { "where" } else { "which" };
+    if let Ok(out) = std::process::Command::new(which_cmd).arg("claude").output() {
+        if out.status.success() {
+            let raw = String::from_utf8_lossy(&out.stdout);
+            let first = raw.lines().next().unwrap_or("").trim();
+            if !first.is_empty() && std::path::Path::new(first).exists() {
+                return Some(first.to_string());
+            }
+        }
+    }
+
+    // 2) Fall back to common install locations.
+    let home = dirs::home_dir();
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Some(h) = home.as_ref() {
+        candidates.push(h.join(".claude/local/claude"));
+        candidates.push(h.join(".local/bin/claude"));
+        candidates.push(h.join(".npm-global/bin/claude"));
+        // Windows npm global
+        candidates.push(h.join("AppData/Roaming/npm/claude.cmd"));
+        candidates.push(h.join("AppData/Roaming/npm/claude"));
+    }
+    candidates.push(PathBuf::from("/opt/homebrew/bin/claude"));
+    candidates.push(PathBuf::from("/usr/local/bin/claude"));
+    candidates.push(PathBuf::from("/usr/bin/claude"));
+
+    for c in candidates {
+        if c.exists() {
+            return Some(c.to_string_lossy().to_string());
+        }
+    }
+    None
+}
+
+#[tauri::command]
+fn detect_claude_cli() -> Result<ClaudeCliInfo, String> {
+    let binary = match resolve_claude_binary() {
+        Some(b) => b,
+        None => {
+            return Ok(ClaudeCliInfo {
+                found: false,
+                path: String::new(),
+                version: String::new(),
+                logged_in: false,
+                status: "not_found".to_string(),
+                detail: "Binaire `claude` introuvable. Installez-le avec `npm install -g @anthropic-ai/claude-code`."
+                    .to_string(),
+            });
+        }
+    };
+
+    // Query version
+    let version = std::process::Command::new(&binary)
+        .arg("--version")
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default();
+
+    // Ping with a tiny prompt to check auth. Timeout is enforced by the
+    // caller via the Tauri command; here we just run synchronously with a
+    // short output cap. The CLI exits non-zero when auth is missing.
+    let ping = std::process::Command::new(&binary)
+        .args(["-p", "ping", "--output-format", "text"])
+        .output();
+
+    match ping {
+        Ok(out) if out.status.success() => Ok(ClaudeCliInfo {
+            found: true,
+            path: binary,
+            version,
+            logged_in: true,
+            status: "ok".to_string(),
+            detail: String::new(),
+        }),
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+            let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            let combined = if stderr.is_empty() { stdout } else { stderr };
+            let lower = combined.to_lowercase();
+            let looks_like_auth = lower.contains("login")
+                || lower.contains("authenticat")
+                || lower.contains("unauthor")
+                || lower.contains("api key");
+            Ok(ClaudeCliInfo {
+                found: true,
+                path: binary,
+                version,
+                logged_in: false,
+                status: if looks_like_auth { "not_logged_in" } else { "error" }.to_string(),
+                detail: combined,
+            })
+        }
+        Err(e) => Ok(ClaudeCliInfo {
+            found: true,
+            path: binary,
+            version,
+            logged_in: false,
+            status: "error".to_string(),
+            detail: format!("Impossible d'exécuter `claude`: {}", e),
+        }),
+    }
+}
+
+/// Run `claude -p <prompt>` and return stdout.
+///
+/// The CLI already handles auth via the user's subscription — we just pipe
+/// text in and get text back.
+#[tauri::command]
+fn claude_cli_prompt(
+    prompt: String,
+    system_prompt: Option<String>,
+    cwd: Option<String>,
+    output_format: Option<String>,
+) -> Result<String, String> {
+    let binary = resolve_claude_binary()
+        .ok_or_else(|| "Binaire `claude` introuvable".to_string())?;
+
+    // Compose the full prompt: if a system prompt is provided, prepend it
+    // as a Markdown-delimited section. `claude -p` doesn't expose a separate
+    // system/user channel, so this is the simplest portable shape.
+    let full_prompt = match system_prompt {
+        Some(sys) if !sys.trim().is_empty() => {
+            format!(
+                "# System\n{}\n\n# User\n{}",
+                sys.trim(),
+                prompt.trim()
+            )
+        }
+        _ => prompt,
+    };
+
+    let fmt = output_format.unwrap_or_else(|| "text".to_string());
+
+    let mut cmd = std::process::Command::new(&binary);
+    cmd.args(["-p", &full_prompt, "--output-format", &fmt]);
+    if let Some(dir) = cwd {
+        if !dir.trim().is_empty() {
+            cmd.current_dir(dir);
+        }
+    }
+
+    let output = cmd
+        .output()
+        .map_err(|e| format!("Failed to run claude CLI: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let detail = if stderr.is_empty() { stdout } else { stderr };
+        return Err(if detail.is_empty() {
+            "Claude CLI a échoué sans message".to_string()
+        } else {
+            detail
+        });
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+/// Launch `claude login` in the user's native terminal emulator. We don't
+/// embed a PTY because this is a one-shot setup flow: the user validates
+/// in their browser and comes back to GitWand.
+#[tauri::command]
+fn claude_cli_login() -> Result<(), String> {
+    let binary = resolve_claude_binary()
+        .ok_or_else(|| "Binaire `claude` introuvable. Installez-le d'abord.".to_string())?;
+
+    #[cfg(target_os = "macos")]
+    {
+        // Open Terminal.app with the login command. `osascript` keeps the
+        // window focused so the user sees the OAuth prompt in the browser
+        // that Claude Code opens automatically.
+        let script = format!(
+            "tell application \"Terminal\" to do script \"{} login\"",
+            binary.replace('"', "\\\"")
+        );
+        std::process::Command::new("osascript")
+            .args(["-e", &script])
+            .spawn()
+            .map_err(|e| format!("Failed to open Terminal: {}", e))?;
+        return Ok(());
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        // cmd /k keeps the window open after login completes so the user
+        // can read any status message.
+        std::process::Command::new("cmd")
+            .args(["/c", "start", "cmd", "/k", &format!("\"{}\" login", binary)])
+            .spawn()
+            .map_err(|e| format!("Failed to open cmd: {}", e))?;
+        return Ok(());
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        // Try the common Linux terminal emulators in order of popularity.
+        // Each entry's last slot is where the shell command gets appended.
+        let candidates: [&[&str]; 6] = [
+            &["gnome-terminal", "--", "sh", "-c"],
+            &["konsole", "-e", "sh", "-c"],
+            &["xfce4-terminal", "-e"],
+            &["kitty", "sh", "-c"],
+            &["alacritty", "-e", "sh", "-c"],
+            &["x-terminal-emulator", "-e", "sh", "-c"],
+        ];
+        let inner = format!("{} login; echo; read -p 'Press enter to close...'", binary);
+        for args in candidates.iter() {
+            let (prog, rest) = args.split_first().unwrap();
+            let mut cmd = std::process::Command::new(prog);
+            for a in *rest {
+                cmd.arg(a);
+            }
+            cmd.arg(&inner);
+            if cmd.spawn().is_ok() {
+                return Ok(());
+            }
+        }
+        return Err(
+            "Aucun terminal compatible trouvé. Ouvrez un terminal et tapez: claude login"
+                .to_string(),
+        );
+    }
+
+    #[allow(unreachable_code)]
+    Err("Plateforme non supportée".to_string())
+}
+
 // ─── Open in external editor ──────────────────────────────
 
 #[tauri::command]
@@ -2787,6 +3041,9 @@ pub fn run() {
             git_exec,
             git_autocomplete,
             git_get_user,
+            detect_claude_cli,
+            claude_cli_prompt,
+            claude_cli_login,
         ])
         .run(tauri::generate_context!())
         .expect("error while running GitWand");
