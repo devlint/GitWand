@@ -9,7 +9,7 @@
  */
 
 import { createServer } from "node:http";
-import { execSync, execFileSync, spawnSync } from "node:child_process";
+import { execSync, execFileSync, spawnSync, spawn } from "node:child_process";
 import { readFileSync, writeFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { resolve, join, dirname, basename } from "node:path";
 import { homedir } from "node:os";
@@ -33,6 +33,37 @@ const GH = resolveBin("gh");
 const GIT = resolveBin("git");
 console.log(`[dev-server] gh binary:  ${GH}`);
 console.log(`[dev-server] git binary: ${GIT}`);
+
+/**
+ * Run `git` with the given args, streaming stdout into memory.
+ *
+ * Unlike `execSync`, there's no `maxBuffer` cap — useful for huge diffs
+ * (e.g. `git show` on a merge commit touching hundreds of files in a
+ * monorepo, where a 10 MB cap reliably blows up).
+ *
+ * Resolves with the full stdout as a UTF-8 string. Rejects if git exits
+ * non-zero or the process fails to spawn.
+ */
+function gitSpawn(args, cwd) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(GIT, args, { cwd });
+    const stdoutChunks = [];
+    const stderrChunks = [];
+
+    child.stdout.on("data", (chunk) => stdoutChunks.push(chunk));
+    child.stderr.on("data", (chunk) => stderrChunks.push(chunk));
+
+    child.on("error", (err) => reject(err));
+    child.on("close", (code) => {
+      if (code !== 0) {
+        const stderr = Buffer.concat(stderrChunks).toString("utf-8");
+        reject(new Error(`git ${args.join(" ")} exited with ${code}: ${stderr.trim()}`));
+        return;
+      }
+      resolve(Buffer.concat(stdoutChunks).toString("utf-8"));
+    });
+  });
+}
 
 /**
  * Get a GitHub OAuth token — tries in order:
@@ -349,11 +380,9 @@ const server = createServer(async (req, res) => {
         const args = staged ? ["diff", "--cached", "--", path] : ["diff", "--", path];
         let stdout;
         try {
-          stdout = execSync(`git ${args.join(" ")}`, {
-            cwd: resolvedCwd,
-            encoding: "utf-8",
-            shell: true,
-          });
+          // Stream via spawn — execSync's default 1 MB cap blows up on large files
+          // (lockfiles, generated assets, big migrations…).
+          stdout = await gitSpawn(args, resolvedCwd);
         } catch { stdout = ""; }
 
         // ── New untracked file: fall back to --no-index diff (all lines green) ──
@@ -427,21 +456,24 @@ const server = createServer(async (req, res) => {
       }
     }
 
-    // GET /api/git-log?cwd=<path>&count=<n>
+    // GET /api/git-log?cwd=<path>&count=<n>&all=<bool>
     if (url.pathname === "/api/git-log" && req.method === "GET") {
       const cwd = url.searchParams.get("cwd");
       const count = parseInt(url.searchParams.get("count") || "50");
+      // Default: current branch only (like `git log`). Pass `all=true` for all refs.
+      const all = url.searchParams.get("all") === "true";
 
       if (!cwd) return jsonResponse(res, { error: "Missing cwd param" }, 400);
 
       try {
         const resolvedCwd = resolve(cwd);
         const format = "%h%x1f%H%x1f%an%x1f%ae%x1f%aI%x1f%s%x1f%b%x1f%P%x1f%D%x1e";
-        const stdout = execSync(`git log --all -n${count} --format="${format}"`, {
-          cwd: resolvedCwd,
-          encoding: "utf-8",
-          shell: true,
-        });
+        const args = ["log"];
+        if (all) args.push("--all");
+        args.push(`-n${count}`, `--format=${format}`);
+        // Stream via spawn — execSync's default 1 MB cap can be exceeded with
+        // large `count` values or commits with very long bodies.
+        const stdout = await gitSpawn(args, resolvedCwd);
 
         const entries = [];
         const records = stdout.split("\x1e");
@@ -583,13 +615,16 @@ const server = createServer(async (req, res) => {
       }
     }
 
-    // POST /api/git-push  { cwd }
+    // POST /api/git-push  { cwd, setUpstream? }
     if (url.pathname === "/api/git-push" && req.method === "POST") {
-      const { cwd } = await readBody(req);
+      const { cwd, setUpstream } = await readBody(req);
       if (!cwd) return jsonResponse(res, { error: "Missing cwd" }, 400);
       try {
         const resolvedCwd = resolve(cwd);
-        const stdout = execSync("git push 2>&1", {
+        const cmd = setUpstream
+          ? "git push --set-upstream origin HEAD 2>&1"
+          : "git push 2>&1";
+        const stdout = execSync(cmd, {
           cwd: resolvedCwd,
           encoding: "utf-8",
           shell: true,
@@ -706,12 +741,12 @@ const server = createServer(async (req, res) => {
       if (!cwd || !filePath || !fromHash || !toHash) return jsonResponse(res, { error: "Missing params" }, 400);
       try {
         const resolvedCwd = resolve(cwd);
-        const stdout = execSync(`git diff ${fromHash} ${toHash} -- "${filePath}"`, {
-          cwd: resolvedCwd,
-          encoding: "utf-8",
-          shell: true,
-          maxBuffer: 10 * 1024 * 1024,
-        });
+        // Stream via spawn — explicit 10 MB cap can still be exceeded on
+        // large file rewrites between two distant commits.
+        const stdout = await gitSpawn(
+          ["diff", fromHash, toHash, "--", filePath],
+          resolvedCwd,
+        );
 
         const hunks = [];
         let currentHunk = null;
@@ -820,13 +855,13 @@ const server = createServer(async (req, res) => {
 
       try {
         const resolvedCwd = resolve(cwd);
-        // Use -m --first-parent to handle merge commits (otherwise diff is empty/combined)
-        const stdout = execSync(`git show -m --first-parent --format= "${hash}"`, {
-          cwd: resolvedCwd,
-          encoding: "utf-8",
-          shell: true,
-          maxBuffer: 10 * 1024 * 1024, // 10MB for large diffs
-        });
+        // Use -m --first-parent to handle merge commits (otherwise diff is empty/combined).
+        // Stream stdout via spawn — execSync's maxBuffer (10 MB) is exceeded by large
+        // merge commits in monorepos and causes a 500.
+        const stdout = await gitSpawn(
+          ["show", "-m", "--first-parent", "--format=", hash],
+          resolvedCwd,
+        );
 
         const diffs = [];
         let currentPath = null;
@@ -1108,6 +1143,161 @@ const server = createServer(async (req, res) => {
         return jsonResponse(res, prs);
       } catch (err) {
         console.error("[gh-list-prs]", err.message);
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
+
+    // POST /api/gh-create-pr
+    // Body: { cwd, title, body, base?, head?, draft?, reviewers? }
+    // Creates the PR via REST, then requests reviewers in a second call
+    // (GitHub requires a POST to /requested_reviewers after creation).
+    if (url.pathname === "/api/gh-create-pr" && req.method === "POST") {
+      const payload = await readBody(req);
+      const { cwd, title, body: prBody, base, head, draft, reviewers } = payload;
+      if (!cwd || !title) return jsonResponse(res, { error: "Missing cwd or title" }, 400);
+      try {
+        const token = getGithubToken();
+        if (!token) return jsonResponse(res, { error: "No GitHub token found. Run: gh auth login" }, 401);
+        const repoCwd = resolve(cwd);
+        const nwo = getRepoNwo(repoCwd);
+        if (!nwo) return jsonResponse(res, { error: "Could not determine GitHub repo from git remote origin" }, 400);
+
+        // Resolve head: default to current branch (git symbolic-ref HEAD)
+        let headBranch = (head ?? "").trim();
+        if (!headBranch) {
+          const r = spawnSync(GIT, ["symbolic-ref", "--short", "HEAD"], { cwd: repoCwd, encoding: "utf-8" });
+          if (r.status !== 0) return jsonResponse(res, { error: "Could not determine current branch" }, 500);
+          headBranch = r.stdout.trim();
+        }
+        if (!headBranch) return jsonResponse(res, { error: "Empty head branch" }, 400);
+
+        // Resolve base: explicit → repo's default branch on GitHub
+        let baseBranch = (base ?? "").trim();
+        if (!baseBranch) {
+          const repoResp = await githubFetch(`/repos/${nwo}`, token);
+          if (repoResp.ok) {
+            const info = await repoResp.json();
+            baseBranch = info.default_branch ?? "main";
+          } else {
+            baseBranch = "main";
+          }
+        }
+
+        if (baseBranch === headBranch) {
+          return jsonResponse(res, { error: `Base and head branches are the same (${headBranch})` }, 400);
+        }
+
+        // Create the PR
+        const createResp = await fetch(`https://api.github.com/repos/${nwo}/pulls`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "application/vnd.github+json",
+            "Content-Type": "application/json",
+            "X-GitHub-Api-Version": "2022-11-28",
+          },
+          body: JSON.stringify({
+            title,
+            body: prBody ?? "",
+            base: baseBranch,
+            head: headBranch,
+            draft: draft === true,
+          }),
+        });
+        if (!createResp.ok) {
+          const text = await createResp.text();
+          return jsonResponse(res, { error: `GitHub API ${createResp.status}: ${text}` }, 500);
+        }
+        const pr = await createResp.json();
+
+        // Request reviewers (user logins and org/team-slug supported)
+        const cleaned = Array.isArray(reviewers)
+          ? reviewers.map((r) => String(r).trim().replace(/^@/, "")).filter(Boolean)
+          : [];
+        if (cleaned.length > 0) {
+          const users = cleaned.filter((r) => !r.includes("/"));
+          const teams = cleaned
+            .filter((r) => r.includes("/"))
+            .map((r) => r.split("/", 2)[1])
+            .filter(Boolean);
+          try {
+            const rvResp = await fetch(
+              `https://api.github.com/repos/${nwo}/pulls/${pr.number}/requested_reviewers`,
+              {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                  Accept: "application/vnd.github+json",
+                  "Content-Type": "application/json",
+                  "X-GitHub-Api-Version": "2022-11-28",
+                },
+                body: JSON.stringify({ reviewers: users, team_reviewers: teams }),
+              },
+            );
+            if (!rvResp.ok) {
+              // PR was created — log the reviewer failure but don't surface it as a hard error.
+              const text = await rvResp.text();
+              console.warn(`[gh-create-pr] reviewers request failed: ${rvResp.status} ${text}`);
+            }
+          } catch (rvErr) {
+            console.warn("[gh-create-pr] reviewers request threw:", rvErr.message);
+          }
+        }
+
+        return jsonResponse(res, {
+          number: pr.number,
+          title: pr.title,
+          state: pr.state,
+          author: pr.user?.login ?? "",
+          branch: pr.head?.ref ?? headBranch,
+          base: pr.base?.ref ?? baseBranch,
+          draft: pr.draft ?? false,
+          created_at: pr.created_at,
+          updated_at: pr.updated_at,
+          url: pr.html_url,
+          additions: pr.additions ?? 0,
+          deletions: pr.deletions ?? 0,
+          labels: (pr.labels ?? []).map((l) => l.name),
+        });
+      } catch (err) {
+        console.error("[gh-create-pr]", err.message);
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
+
+    // GET /api/gh-reviewer-candidates?cwd=<path>
+    // Lists assignees (users with push access) for autocomplete.
+    if (url.pathname === "/api/gh-reviewer-candidates" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd");
+      if (!cwd) return jsonResponse(res, { error: "Missing cwd" }, 400);
+      try {
+        const token = getGithubToken();
+        if (!token) return jsonResponse(res, { error: "No GitHub token" }, 401);
+        const nwo = getRepoNwo(resolve(cwd));
+        if (!nwo) return jsonResponse(res, { error: "Could not determine GitHub repo" }, 400);
+        // Paginate up to 3 pages of 100 = 300 candidates.
+        const all = [];
+        const seen = new Set();
+        for (let page = 1; page <= 3; page++) {
+          const resp = await githubFetch(`/repos/${nwo}/assignees?per_page=100&page=${page}`, token);
+          if (!resp.ok) break;
+          const raw = await resp.json();
+          if (!Array.isArray(raw) || raw.length === 0) break;
+          for (const u of raw) {
+            if (!u.login || seen.has(u.login)) continue;
+            seen.add(u.login);
+            all.push({
+              login: u.login,
+              name: u.name ?? null,
+              avatar_url: u.avatar_url ?? null,
+            });
+          }
+          if (raw.length < 100) break;
+        }
+        all.sort((a, b) => a.login.toLowerCase().localeCompare(b.login.toLowerCase()));
+        return jsonResponse(res, all);
+      } catch (err) {
+        console.error("[gh-reviewer-candidates]", err.message);
         return jsonResponse(res, { error: err.message }, 500);
       }
     }
@@ -1399,7 +1589,19 @@ const server = createServer(async (req, res) => {
         });
         if (!resp.ok) {
           const errBody = await resp.json().catch(() => ({}));
-          return jsonResponse(res, { error: errBody.message || `GitHub API ${resp.status}` }, 500);
+          console.warn("[gh-pr-submit-review] GitHub error", resp.status, errBody);
+          // GitHub's 422 body for reviews uses two shapes:
+          //   { message: "...", errors: ["Can not approve your own pull request"] }   ← array of strings
+          //   { message: "...", errors: [{ message: "...", code: "..." }] }           ← array of objects
+          // Handle both and fall back to stringifying the body.
+          let detail = "";
+          if (Array.isArray(errBody.errors) && errBody.errors.length > 0) {
+            const first = errBody.errors[0];
+            const text = typeof first === "string" ? first : (first?.message || first?.code || JSON.stringify(first));
+            if (text) detail = ` — ${text}`;
+          }
+          const message = `${errBody.message || `GitHub API ${resp.status}`}${detail}`;
+          return jsonResponse(res, { error: message }, resp.status);
         }
         const review = await resp.json();
         return jsonResponse(res, review);
@@ -1671,8 +1873,10 @@ server.listen(PORT, () => {
   console.log(`    GET  /api/list-dir?path=<path>`);
   console.log(`    GET  /api/git-status?cwd=<path>`);
   console.log(`    GET  /api/git-diff?cwd=<path>&path=<file>&staged=<bool>`);
-  console.log(`    GET  /api/git-log?cwd=<path>&count=<n>`);
+  console.log(`    GET  /api/git-log?cwd=<path>&count=<n>&all=<bool>`);
   console.log(`    GET  /api/gh-list-prs?cwd=<path>&state=<state>`);
+  console.log(`    POST /api/gh-create-pr  { cwd, title, body, base?, draft?, reviewers? }`);
+  console.log(`    GET  /api/gh-reviewer-candidates?cwd=<path>`);
   console.log(`    GET  /api/gh-pr-detail?cwd=<path>&number=<n>`);
   console.log(`    GET  /api/gh-pr-diff?cwd=<path>&number=<n>`);
   console.log(`    GET  /api/gh-pr-checks?cwd=<path>&number=<n>\n`);

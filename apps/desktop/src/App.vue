@@ -12,6 +12,7 @@ import FileHistoryViewer from "./components/FileHistoryViewer.vue";
 import CommitGraph from "./components/CommitGraph.vue";
 import SettingsPanel from "./components/SettingsPanel.vue";
 import PrDetailView from "./components/PrDetailView.vue";
+import PrCreateView from "./components/PrCreateView.vue";
 import DashboardView from "./components/DashboardView.vue";
 import EditCommitOverlay from "./components/EditCommitOverlay.vue";
 import MergeSuccessModal from "./components/MergeSuccessModal.vue";
@@ -61,6 +62,7 @@ const {
   selectedFilePath: repoSelectedFile,
   diff: repoDiff,
   log: repoLog,
+  logScope,
   loading: repoLoading,
   error: repoError,
   successMessage: repoSuccess,
@@ -78,6 +80,7 @@ const {
   isCommitting,
   canPush,
   canPull,
+  needsPublish,
   aheadCount,
   behindCount,
   isPushing,
@@ -86,6 +89,7 @@ const {
   refresh: repoRefresh,
   selectFile: repoSelectFile,
   loadLog,
+  setLogScope,
   stageFiles,
   stageAll,
   unstageFiles,
@@ -128,11 +132,17 @@ const {
   switchTab,
 } = useRepoTabs();
 
-// When tab changes, load that repo into the single useGitRepo instance
-watch(activeTabId, () => {
+// When tab changes, load that repo into the single useGitRepo instance.
+// If the user is currently on the history/graph view, also reload the log —
+// otherwise the log would stay empty (openRepo clears it but doesn't refetch,
+// and the viewMode watcher only fires on actual mode changes).
+watch(activeTabId, async () => {
   const tab = repoTabs.value.find((t) => t.id === activeTabId.value);
   if (tab && tab.path !== repoFolderPath.value) {
-    openRepo(tab.path);
+    await openRepo(tab.path);
+    if (viewMode.value === "history" || viewMode.value === "graph") {
+      await loadLog();
+    }
   }
 });
 
@@ -317,7 +327,7 @@ async function handleOpenFolder() {
   if (path) {
     openTab(path);
     await openRepo(path);
-    if (viewMode.value === "history") {
+    if (viewMode.value === "history" || viewMode.value === "graph") {
       await loadLog();
     }
   }
@@ -326,12 +336,29 @@ async function handleOpenFolder() {
 async function handleOpenPath(path: string) {
   openTab(path);
   await openRepo(path);
+  if (viewMode.value === "history" || viewMode.value === "graph") {
+    await loadLog();
+  }
 }
 
 // When switching tabs, load data as needed
 watch(viewMode, async (mode) => {
   if ((mode === "history" || mode === "graph") && hasRepo.value) {
     await loadLog();
+  }
+  // Dashboard sidebar needs branches + recent log entries to show
+  // pinned branches & activity feed.
+  if (mode === "dashboard" && hasRepo.value) {
+    if (branches.value.length === 0) loadBranches();
+    if (repoLog.value.length === 0) loadLog();
+  }
+});
+
+// Also refresh the dashboard sidebar data when the repo itself changes.
+watch(hasRepo, (has) => {
+  if (has && viewMode.value === "dashboard") {
+    if (branches.value.length === 0) loadBranches();
+    if (repoLog.value.length === 0) loadLog();
   }
 });
 
@@ -620,6 +647,7 @@ onUnmounted(() => {
       :folder-name="folderName"
       :can-push="canPush"
       :can-pull="canPull"
+      :needs-publish="needsPublish"
       :ahead-count="aheadCount"
       :behind-count="behindCount"
       :is-pushing="isPushing"
@@ -655,21 +683,27 @@ onUnmounted(() => {
           :is-committing="isCommitting"
           :log-entries="repoLog"
           :log-loading="repoLoading"
+          :log-scope="logScope"
+          :current-branch="repoStatus?.branch ?? ''"
           :selected-commit-hash="selectedCommitHash"
           :ahead-count="aheadCount"
+          :needs-publish="needsPublish"
           :dir-files="expandedDirFiles"
+          :branches="branches"
           @select="onRepoFileSelect"
           @change-view="onViewModeChange"
           @select-dir-file="(path) => repoSelectFile(path, false)"
           @stage-file="(path) => stageFiles([path])"
           @unstage-file="(path) => unstageFiles([path])"
           @stage-all="stageAll"
+          @stage-paths="(paths) => stageFiles(paths)"
           @unstage-all="unstageAll"
           @commit="doCommit"
           @update:commit-summary="(val) => commitSummary = val"
           @update:commit-description="(val) => commitDescription = val"
           @select-commit="selectCommit"
           @edit-commit="handleEditCommit"
+          @update:log-scope="setLogScope"
           @discard="(path, section) => discardFiles([path], section === 'untracked')"
           @add-to-gitignore="(path) => addToGitignore(path)"
         />
@@ -685,6 +719,7 @@ onUnmounted(() => {
             <span class="loading-text">{{ t('merge.loadingRepo') }}</span>
           </div>
 
+          <template v-else>
           <div v-if="repoError" class="error-banner" role="alert">
             <svg class="error-icon" width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
               <circle cx="9" cy="9" r="8" stroke="currentColor" stroke-width="1.5"/>
@@ -723,7 +758,10 @@ onUnmounted(() => {
             :status="repoStats"
             :ahead="aheadCount"
             :behind="behindCount"
+            :needs-publish="needsPublish"
             @change-view="onViewModeChange"
+            @push="doPush"
+            @sync="() => doPull(pullMode === 'rebase')"
           />
 
           <!-- Changes view: conflict editor, file history, or diff viewer -->
@@ -775,12 +813,21 @@ onUnmounted(() => {
             @select-commit="(hash) => { selectCommit(hash); viewMode = 'history'; }"
           />
 
+          <!-- PRs view: creation form takes over when showCreateForm is true -->
+          <PrCreateView
+            v-else-if="viewMode === 'prs' && prPanel.showCreateForm.value"
+            :current-branch="branchDisplay"
+            :branches="branches"
+            :cwd="repoFolderPath ?? ''"
+          />
+
           <!-- PRs view: detail panel fills the main area -->
           <PrDetailView
             v-else-if="viewMode === 'prs'"
             @refresh="repoRefresh"
             @navigate-commit="(hash) => { selectCommit(hash); viewMode = 'history'; }"
           />
+          </template>
         </template>
       </main>
     </div>

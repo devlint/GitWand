@@ -18,6 +18,8 @@ const props = defineProps<{
   folderName: string;
   canPush: boolean;
   canPull: boolean;
+  /** True when the current branch has no upstream (first push will publish it). */
+  needsPublish?: boolean;
   aheadCount: number;
   behindCount: number;
   isPushing: boolean;
@@ -488,10 +490,13 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
         </button>
         <button
           class="btn btn--sync btn--push"
-          :class="{ 'btn--disabled': !canPush, 'btn--sync-active': aheadCount > 0 }"
+          :class="{
+            'btn--disabled': !canPush,
+            'btn--sync-active': aheadCount > 0 || needsPublish,
+          }"
           :disabled="!canPush"
           @click="emit('push')"
-          :title="`Push (${aheadCount})`"
+          :title="needsPublish ? t('header.publishTooltip') : `${t('header.push')} (${aheadCount})`"
         >
           <svg v-if="isPushing" class="btn-spinner" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
             <circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.5" fill="none" opacity="0.3"/>
@@ -500,7 +505,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
           <svg v-else width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <path d="M8 13V3M5 6l3-3 3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
-          <span>{{ t('header.push') }}</span>
+          <span>{{ needsPublish ? t('header.publish') : t('header.push') }}</span>
           <span v-if="aheadCount > 0" class="sync-badge sync-badge--push">{{ aheadCount }}</span>
         </button>
 

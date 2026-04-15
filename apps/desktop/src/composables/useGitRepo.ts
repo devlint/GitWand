@@ -56,6 +56,10 @@ export function useGitRepo() {
   const selectedFileStaged = ref(false);
   const diff = ref<GitDiff | null>(null);
   const log = ref<GitLogEntry[]>([]);
+  // Scope of the commit log:
+  //   "current" → only commits reachable from the current branch HEAD (default, like `git log`)
+  //   "all"     → all refs (`git log --all`)
+  const logScope = ref<"current" | "all">("current");
   const loading = ref(false);
   const error = ref<string | null>(null);
   const successMessage = ref<string | null>(null);
@@ -174,10 +178,24 @@ export function useGitRepo() {
     return repoStats.value.staged > 0 && commitSummary.value.trim().length > 0 && !isCommitting.value;
   });
 
-  /** Can we push? */
+  /**
+   * True when the current branch has no upstream configured.
+   * In that case a push must use `--set-upstream` to publish the branch.
+   */
+  const needsPublish = computed(() => {
+    if (!status.value) return false;
+    return !status.value.remote;
+  });
+
+  /**
+   * Can we push?
+   * - Yes when we have local commits ahead of the upstream.
+   * - Yes when the branch has no upstream yet (first push publishes it).
+   */
   const canPush = computed(() => {
     if (!status.value) return false;
-    return status.value.ahead > 0 && !isPushing.value;
+    if (isPushing.value) return false;
+    return status.value.ahead > 0 || needsPublish.value;
   });
 
   /** Can we pull? Enabled whenever a remote is configured. */
@@ -301,12 +319,16 @@ export function useGitRepo() {
   }
 
   /**
-   * Load the commit log.
+   * Load the commit log. Honors `logScope` (current branch vs all refs).
    */
   async function loadLog(count?: number) {
     if (!folderPath.value) return;
     try {
-      log.value = await getGitLog(folderPath.value, count);
+      log.value = await getGitLog(
+        folderPath.value,
+        count,
+        logScope.value === "all",
+      );
       // If a commit was selected but its diffs were lost, reload them
       if (selectedCommitHash.value && commitDiffs.value.length === 0) {
         commitDiffs.value = await getGitShow(folderPath.value, selectedCommitHash.value);
@@ -314,6 +336,15 @@ export function useGitRepo() {
     } catch (err: any) {
       error.value = `git log: ${err.message}`;
     }
+  }
+
+  /**
+   * Switch the log scope (current branch vs all refs) and reload the log.
+   */
+  async function setLogScope(scope: "current" | "all") {
+    if (logScope.value === scope) return;
+    logScope.value = scope;
+    await loadLog();
   }
 
   /**
@@ -424,6 +455,11 @@ export function useGitRepo() {
       lastCommitHash.value = hash;
       commitSummary.value = "";
       commitDescription.value = getCommitSignatureDefault();
+      // Clear the diff viewer: the committed file is no longer in the
+      // working tree, so keeping it selected would show a stale/empty diff.
+      selectedFilePath.value = null;
+      selectedFileStaged.value = false;
+      diff.value = null;
       await refresh();
       await loadLog();
     } catch (err: any) {
@@ -443,6 +479,11 @@ export function useGitRepo() {
       : summary.trim();
     try {
       await gitAmendCommit(folderPath.value, fullMessage);
+      // Reset the diff viewer — the amended file(s) are no longer in the
+      // working tree, so the previously selected diff would be stale.
+      selectedFilePath.value = null;
+      selectedFileStaged.value = false;
+      diff.value = null;
       await refresh();
       await loadLog();
     } catch (err: any) {
@@ -456,7 +497,9 @@ export function useGitRepo() {
     if (!folderPath.value) return;
     isPushing.value = true;
     try {
-      const result = await gitPush(folderPath.value);
+      // If the current branch has no upstream, publish it with --set-upstream.
+      const publish = needsPublish.value;
+      const result = await gitPush(folderPath.value, publish);
       if (!result.success) {
         error.value = `push: ${result.message}`;
       } else {
@@ -757,6 +800,7 @@ export function useGitRepo() {
     selectedFileStaged,
     diff,
     log,
+    logScope,
     loading,
     error,
     successMessage,
@@ -784,6 +828,7 @@ export function useGitRepo() {
     canCommit,
     canPush,
     canPull,
+    needsPublish,
     aheadCount,
     behindCount,
     // Actions
@@ -791,6 +836,7 @@ export function useGitRepo() {
     refresh,
     selectFile,
     loadLog,
+    setLogScope,
     stageFiles,
     stageAll,
     unstageFiles,

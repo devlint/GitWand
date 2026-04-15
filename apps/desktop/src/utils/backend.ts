@@ -325,8 +325,17 @@ export interface GitLogEntry {
 
 /**
  * Get recent commits from a Git repository.
+ *
+ * @param cwd  Repository path.
+ * @param count  Max number of commits to return (default 50).
+ * @param all  When `true`, include commits from all refs (`git log --all`).
+ *             Default `false` → only commits reachable from the current branch HEAD.
  */
-export async function getGitLog(cwd: string, count?: number): Promise<GitLogEntry[]> {
+export async function getGitLog(
+  cwd: string,
+  count?: number,
+  all?: boolean,
+): Promise<GitLogEntry[]> {
   if (isTauri()) {
     const raw = await tauriInvoke<
       Array<{
@@ -340,7 +349,7 @@ export async function getGitLog(cwd: string, count?: number): Promise<GitLogEntr
         parents: string[];
         refs: string;
       }>
-    >("git_log", { cwd, count: count ?? 50 });
+    >("git_log", { cwd, count: count ?? 50, all: all ?? false });
 
     return raw.map((e) => ({
       hash: e.hash,
@@ -355,7 +364,7 @@ export async function getGitLog(cwd: string, count?: number): Promise<GitLogEntr
     }));
   }
 
-  const qs = `?cwd=${encodeURIComponent(cwd)}&count=${count ?? 50}`;
+  const qs = `?cwd=${encodeURIComponent(cwd)}&count=${count ?? 50}&all=${all ? "true" : "false"}`;
   const res = await fetch(`${DEV_SERVER}/api/git-log${qs}`);
   if (!res.ok) throw new Error(`Failed to get git log: ${res.status}`);
   return res.json();
@@ -478,15 +487,23 @@ export interface GitPushPullResult {
 
 /**
  * Push to remote.
+ *
+ * When `setUpstream` is true, runs `git push --set-upstream origin HEAD`,
+ * which publishes the current branch to a same-named branch on origin and
+ * records it as the upstream. Used when pushing a branch that has no
+ * tracking configured yet.
  */
-export async function gitPush(cwd: string): Promise<GitPushPullResult> {
+export async function gitPush(
+  cwd: string,
+  setUpstream: boolean = false,
+): Promise<GitPushPullResult> {
   if (isTauri()) {
-    return tauriInvoke<GitPushPullResult>("git_push", { cwd });
+    return tauriInvoke<GitPushPullResult>("git_push", { cwd, setUpstream });
   }
   const res = await fetch(`${DEV_SERVER}/api/git-push`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ cwd }),
+    body: JSON.stringify({ cwd, setUpstream }),
   });
   return res.json();
 }
@@ -1257,6 +1274,7 @@ export async function ghCreatePr(
   body: string,
   base: string = "",
   draft: boolean = false,
+  reviewers: string[] = [],
 ): Promise<PullRequest> {
   if (isTauri()) {
     const raw = await tauriInvoke<{
@@ -1273,7 +1291,7 @@ export async function ghCreatePr(
       additions: number;
       deletions: number;
       labels: string[];
-    }>("gh_create_pr", { cwd, title, body, base, draft });
+    }>("gh_create_pr", { cwd, title, body, base, draft, reviewers });
     return {
       number: raw.number,
       title: raw.title,
@@ -1290,7 +1308,67 @@ export async function ghCreatePr(
       labels: raw.labels,
     };
   }
-  throw new Error("PR creation not available in dev mode");
+  // Browser dev mode — call dev server (uses GitHub REST API directly)
+  const res = await fetch(`${DEV_SERVER}/api/gh-create-pr`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, title, body, base, draft, reviewers }),
+  });
+  const raw = await res.json();
+  if (!res.ok || raw.error) {
+    throw new Error(raw.error || `gh create pr failed: ${res.status}`);
+  }
+  return {
+    number: raw.number,
+    title: raw.title,
+    state: raw.state,
+    author: raw.author,
+    branch: raw.branch,
+    base: raw.base,
+    draft: raw.draft,
+    createdAt: raw.created_at,
+    updatedAt: raw.updated_at,
+    url: raw.url,
+    additions: raw.additions,
+    deletions: raw.deletions,
+    labels: raw.labels,
+  };
+}
+
+/**
+ * Reviewer suggestion (assignee/collaborator candidate from the GitHub repo).
+ */
+export interface ReviewerCandidate {
+  login: string;
+  name?: string | null;
+  avatarUrl?: string | null;
+}
+
+/**
+ * List candidate reviewers for the current repo (requires `gh` CLI).
+ * Returns assignees from `gh api /repos/:owner/:repo/assignees` — i.e. users with push access.
+ */
+export async function ghListReviewerCandidates(cwd: string): Promise<ReviewerCandidate[]> {
+  if (isTauri()) {
+    const raw = await tauriInvoke<
+      Array<{ login: string; name?: string | null; avatar_url?: string | null }>
+    >("gh_list_reviewer_candidates", { cwd });
+    return raw.map((u) => ({
+      login: u.login,
+      name: u.name ?? null,
+      avatarUrl: u.avatar_url ?? null,
+    }));
+  }
+  // Browser dev mode — call dev server (uses GitHub REST API directly)
+  const res = await fetch(`${DEV_SERVER}/api/gh-reviewer-candidates?cwd=${encodeURIComponent(cwd)}`);
+  if (!res.ok) return [];
+  const raw = await res.json();
+  if (!Array.isArray(raw)) return [];
+  return raw.map((u: { login: string; name?: string | null; avatar_url?: string | null }) => ({
+    login: u.login,
+    name: u.name ?? null,
+    avatarUrl: u.avatar_url ?? null,
+  }));
 }
 
 /**
@@ -1599,9 +1677,12 @@ export async function ghPrSubmitReview(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ cwd, number: prNumber, ...opts }),
   });
-  if (!res.ok) throw new Error(`gh pr submit review failed: ${res.status}`);
-  const raw = await res.json();
-  if (raw.error) throw new Error(raw.error);
+  // Prefer the server's JSON error body over a generic status message.
+  const raw = await res.json().catch(() => null);
+  if (!res.ok || (raw && raw.error)) {
+    const msg = raw?.error || `gh pr submit review failed (HTTP ${res.status})`;
+    throw new Error(msg);
+  }
   return raw as PrReview;
 }
 

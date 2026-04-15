@@ -431,19 +431,27 @@ struct GitLogEntry {
 }
 
 #[tauri::command]
-fn git_log(cwd: String, count: Option<i32>) -> Result<Vec<GitLogEntry>, String> {
+fn git_log(
+    cwd: String,
+    count: Option<i32>,
+    all: Option<bool>,
+) -> Result<Vec<GitLogEntry>, String> {
     let limit = count.unwrap_or(50);
+    // Default: current branch only (like `git log`). Pass `all: true` to include all refs.
+    let include_all = all.unwrap_or(false);
 
     // Use unit separator (ASCII 0x1f) to delimit fields
     let format = "%h%x1f%H%x1f%an%x1f%ae%x1f%aI%x1f%s%x1f%b%x1f%P%x1f%D%x1e";
 
+    let mut args: Vec<String> = vec!["log".to_string()];
+    if include_all {
+        args.push("--all".to_string());
+    }
+    args.push(format!("-n{}", limit));
+    args.push(format!("--format={}", format));
+
     let output = std::process::Command::new(git_binary())
-        .args([
-            "log",
-            "--all",
-            &format!("-n{}", limit),
-            &format!("--format={}", format),
-        ])
+        .args(&args)
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to run git log: {}", e))?;
@@ -725,9 +733,14 @@ struct GitPushPullResult {
 }
 
 #[tauri::command]
-fn git_push(cwd: String) -> Result<GitPushPullResult, String> {
+fn git_push(cwd: String, set_upstream: Option<bool>) -> Result<GitPushPullResult, String> {
+    let mut args: Vec<&str> = vec!["push"];
+    if set_upstream.unwrap_or(false) {
+        // Publish the current branch to origin with the same name and set upstream
+        args.extend(["--set-upstream", "origin", "HEAD"]);
+    }
     let output = std::process::Command::new(git_binary())
-        .args(["push"])
+        .args(&args)
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to run git push: {}", e))?;
@@ -738,7 +751,13 @@ fn git_push(cwd: String) -> Result<GitPushPullResult, String> {
     Ok(GitPushPullResult {
         success: output.status.success(),
         message: if output.status.success() {
-            stdout.trim().to_string()
+            // git push prints most info to stderr; prefer it when stdout is empty
+            let trimmed_out = stdout.trim();
+            if trimmed_out.is_empty() {
+                stderr.trim().to_string()
+            } else {
+                trimmed_out.to_string()
+            }
         } else {
             stderr.trim().to_string()
         },
@@ -1798,6 +1817,7 @@ fn gh_create_pr(
     body: String,
     base: String,
     draft: bool,
+    reviewers: Option<Vec<String>>,
 ) -> Result<PullRequest, String> {
     let mut args = vec![
         "pr".to_string(),
@@ -1815,6 +1835,20 @@ fn gh_create_pr(
 
     if draft {
         args.push("--draft".to_string());
+    }
+
+    // Reviewers: gh expects a single comma-separated --reviewer list
+    // (GitHub usernames or org/team-slug).
+    if let Some(revs) = reviewers {
+        let cleaned: Vec<String> = revs
+            .into_iter()
+            .map(|r| r.trim().trim_start_matches('@').to_string())
+            .filter(|r| !r.is_empty())
+            .collect();
+        if !cleaned.is_empty() {
+            args.push("--reviewer".to_string());
+            args.push(cleaned.join(","));
+        }
     }
 
     // Add JSON output
@@ -1867,6 +1901,90 @@ fn gh_create_pr(
         deletions: 0,
         labels: Vec::new(),
     })
+}
+
+/// Reviewer candidate (assignable user on the GitHub repo).
+#[derive(serde::Serialize)]
+struct ReviewerCandidate {
+    login: String,
+    name: Option<String>,
+    avatar_url: Option<String>,
+}
+
+/// List candidate reviewers for the current repo using `gh` CLI.
+///
+/// Calls `gh api /repos/:owner/:repo/assignees` (paginated) which returns
+/// users with push access — exactly the set GitHub allows as reviewers.
+#[tauri::command]
+fn gh_list_reviewer_candidates(cwd: String) -> Result<Vec<ReviewerCandidate>, String> {
+    // Discover owner/repo from the current repo.
+    let view = std::process::Command::new("gh")
+        .args(["repo", "view", "--json", "owner,name"])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("Failed to inspect repo: {}", e))?;
+    if !view.status.success() {
+        return Err(format!(
+            "gh repo view failed: {}",
+            String::from_utf8_lossy(&view.stderr)
+        ));
+    }
+    #[derive(serde::Deserialize)]
+    struct OwnerLogin { login: String }
+    #[derive(serde::Deserialize)]
+    struct RepoView { owner: OwnerLogin, name: String }
+    let repo: RepoView = serde_json::from_slice(&view.stdout)
+        .map_err(|e| format!("Failed to parse repo view: {}", e))?;
+    let endpoint = format!("/repos/{}/{}/assignees", repo.owner.login, repo.name);
+
+    // Fetch up to ~300 candidates (3 pages of 100). Plenty for typical repos.
+    let output = std::process::Command::new("gh")
+        .args([
+            "api",
+            "--paginate",
+            "-H", "Accept: application/vnd.github+json",
+            &endpoint,
+            "--jq", "[.[] | {login: .login, name: .name, avatar_url: .avatar_url}]",
+        ])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("Failed to list reviewer candidates: {}", e))?;
+    if !output.status.success() {
+        return Err(format!(
+            "gh api assignees failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    // --paginate concatenates JSON arrays page-by-page (one per line).
+    // Parse each non-empty line as a JSON array and flatten.
+    let raw = String::from_utf8_lossy(&output.stdout);
+    let mut all: Vec<ReviewerCandidate> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for chunk in raw.split('\n') {
+        let trimmed = chunk.trim();
+        if trimmed.is_empty() { continue; }
+        // gh might return either a single array per chunk (--jq with array wrapper)
+        // or NDJSON of arrays. Try to parse as Value and walk.
+        let value: serde_json::Value = match serde_json::from_str(trimmed) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        if let Some(arr) = value.as_array() {
+            for item in arr {
+                let login = item.get("login").and_then(|v| v.as_str()).unwrap_or("");
+                if login.is_empty() || !seen.insert(login.to_string()) { continue; }
+                all.push(ReviewerCandidate {
+                    login: login.to_string(),
+                    name: item.get("name").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    avatar_url: item.get("avatar_url").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                });
+            }
+        }
+    }
+    // Sort alphabetically by login for stable UX.
+    all.sort_by(|a, b| a.login.to_lowercase().cmp(&b.login.to_lowercase()));
+    Ok(all)
 }
 
 /// Checkout a PR branch locally using `gh` CLI.
@@ -2637,6 +2755,7 @@ pub fn run() {
             git_remote_info,
             gh_list_prs,
             gh_create_pr,
+            gh_list_reviewer_candidates,
             gh_checkout_pr,
             gh_merge_pr,
             gh_pr_detail,

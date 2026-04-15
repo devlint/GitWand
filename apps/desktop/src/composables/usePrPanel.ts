@@ -61,6 +61,7 @@ export function usePrPanel(cwd: Ref<string>) {
   const newPrBody = ref("");
   const newPrBase = ref("");
   const newPrDraft = ref(false);
+  const newPrReviewers = ref<string[]>([]);
   const isCreating = ref(false);
 
   // Merge dialog
@@ -283,10 +284,18 @@ export function usePrPanel(cwd: Ref<string>) {
     isCreating.value = true;
     error.value = null;
     try {
-      const pr = await ghCreatePr(cwd.value, newPrTitle.value.trim(), newPrBody.value.trim(), newPrBase.value.trim(), newPrDraft.value);
+      const pr = await ghCreatePr(
+        cwd.value,
+        newPrTitle.value.trim(),
+        newPrBody.value.trim(),
+        newPrBase.value.trim(),
+        newPrDraft.value,
+        newPrReviewers.value.slice(),
+      );
       success.value = `PR #${pr.number} créée`;
       showCreateForm.value = false;
       newPrTitle.value = ""; newPrBody.value = ""; newPrDraft.value = false;
+      newPrReviewers.value = [];
       await loadPrs();
     } catch (err: any) { error.value = err.message; }
     finally { isCreating.value = false; }
@@ -471,7 +480,7 @@ export function usePrPanel(cwd: Ref<string>) {
   return {
     // State
     remote, prs, loading, error, success, filterState,
-    showCreateForm, newPrTitle, newPrBody, newPrBase, newPrDraft, isCreating,
+    showCreateForm, newPrTitle, newPrBody, newPrBase, newPrDraft, newPrReviewers, isCreating,
     mergingPr, mergeMethod,
     selectedPr, prDetail, prChecks, prDiffFiles, prComments, prReviews,
     detailLoading, detailError, detailTab, selectedDiffFile, diffMode,

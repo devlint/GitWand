@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted } from "vue";
 import { type RepoFileEntry, type ViewMode } from "../composables/useGitRepo";
-import type { GitLogEntry } from "../utils/backend";
+import type { GitLogEntry, GitBranch } from "../utils/backend";
 import CommitLog from "./CommitLog.vue";
 import PrListSidebar from "./PrListSidebar.vue";
 import { useI18n } from "../composables/useI18n";
@@ -20,8 +20,16 @@ const props = defineProps<{
   logLoading: boolean;
   selectedCommitHash: string | null;
   aheadCount: number;
+  /** True when the current branch has no upstream (no origin/<branch>). */
+  needsPublish?: boolean;
+  /** Scope of the commit log: only the current branch, or all refs. */
+  logScope: "current" | "all";
+  /** Display name of the current branch (for the toggle label). */
+  currentBranch: string;
   /** Files inside the currently-selected untracked directory */
   dirFiles?: string[];
+  /** All branches (local + remote) — used by the dashboard sidebar section. */
+  branches?: GitBranch[];
 }>();
 
 const emit = defineEmits<{
@@ -30,12 +38,16 @@ const emit = defineEmits<{
   stageFile: [path: string];
   unstageFile: [path: string];
   stageAll: [];
+  /** Stage a specific list of file paths (used by section "+" buttons). */
+  stagePaths: [paths: string[]];
   unstageAll: [];
   commit: [];
   "update:commitSummary": [value: string];
   "update:commitDescription": [value: string];
   selectCommit: [hash: string];
   editCommit: [entry: GitLogEntry];
+  /** Change the log scope toggle (current branch vs all refs). */
+  "update:logScope": [scope: "current" | "all"];
   /** Select a specific file inside an expanded untracked directory */
   "select-dir-file": [path: string];
   /** Discard changes to a file (tracked: restore, untracked: delete) */
@@ -161,6 +173,52 @@ function onCommitKeydown(e: KeyboardEvent) {
     if (props.canCommit) emit("commit");
   }
 }
+
+// ─── Dashboard sidebar helpers ────────────────────────────────
+/** Local branches sorted with the current branch first, then by activity. */
+const pinnedBranches = computed(() => {
+  const list = (props.branches ?? []).filter((b) => !b.isRemote);
+  return list
+    .slice()
+    .sort((a, b) => {
+      if (a.isCurrent) return -1;
+      if (b.isCurrent) return 1;
+      return (b.ahead + b.behind) - (a.ahead + a.behind);
+    })
+    .slice(0, 5);
+});
+
+/** Up to 3 most recent commits — shown as a mini-activity feed. */
+const recentActivity = computed(() => props.logEntries.slice(0, 3));
+
+function activityInitials(name: string): string {
+  if (!name) return "?";
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+function activityAvatarStyle(key: string) {
+  let h = 0;
+  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) | 0;
+  const hue = Math.abs(h) % 360;
+  return {
+    background: `linear-gradient(135deg, hsl(${hue} 70% 55%), hsl(${(hue + 40) % 360} 70% 45%))`,
+  };
+}
+
+function formatActivityDate(dateStr: string): string {
+  if (!dateStr) return "—";
+  const d = new Date(dateStr);
+  const diffMs = Date.now() - d.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  if (diffMins < 1) return t("date.now");
+  if (diffMins < 60) return t("date.minutesAgo", diffMins);
+  const diffHrs = Math.floor(diffMins / 60);
+  if (diffHrs < 24) return t("date.hoursAgo", diffHrs);
+  const diffDays = Math.floor(diffHrs / 24);
+  return t("date.daysAgo", diffDays);
+}
 </script>
 
 <template>
@@ -229,7 +287,7 @@ function onCommitKeydown(e: KeyboardEvent) {
             <button
               v-if="sectionKey === 'unstaged' || sectionKey === 'untracked'"
               class="section-action"
-              @click="emit('stageAll')"
+              @click="emit('stagePaths', sections[sectionKey].map(f => f.path))"
               :title="t('sidebar.stageAll')"
             >+</button>
             <button
@@ -368,11 +426,39 @@ function onCommitKeydown(e: KeyboardEvent) {
 
     <!-- History view: commit log in sidebar -->
     <div class="sidebar-log" v-if="viewMode === 'history'">
+      <!-- Scope toggle: current branch vs all refs -->
+      <div
+        class="log-scope-toggle"
+        role="tablist"
+        :aria-label="t('sidebar.logScopeLabel')"
+      >
+        <button
+          class="log-scope-btn"
+          :class="{ 'log-scope-btn--active': logScope === 'current' }"
+          role="tab"
+          :aria-selected="logScope === 'current'"
+          :title="currentBranch ? t('sidebar.logScopeCurrentTitle', currentBranch) : t('sidebar.logScopeCurrent')"
+          @click="emit('update:logScope', 'current')"
+        >
+          {{ t('sidebar.logScopeCurrent') }}
+        </button>
+        <button
+          class="log-scope-btn"
+          :class="{ 'log-scope-btn--active': logScope === 'all' }"
+          role="tab"
+          :aria-selected="logScope === 'all'"
+          :title="t('sidebar.logScopeAllTitle')"
+          @click="emit('update:logScope', 'all')"
+        >
+          {{ t('sidebar.logScopeAll') }}
+        </button>
+      </div>
       <CommitLog
         :entries="logEntries"
         :loading="logLoading"
         :selected-hash="selectedCommitHash"
         :ahead-count="aheadCount"
+        :needs-publish="needsPublish"
         @select-commit="(hash: string) => emit('selectCommit', hash)"
         @edit-commit="(entry) => emit('editCommit', entry)"
       />
@@ -381,6 +467,105 @@ function onCommitKeydown(e: KeyboardEvent) {
     <!-- PRs view: compact PR list in sidebar -->
     <div class="sidebar-prs" v-if="viewMode === 'prs'">
       <PrListSidebar />
+    </div>
+
+    <!-- Dashboard view: pinned branches, activity, quick actions -->
+    <div class="sidebar-dashboard" v-if="viewMode === 'dashboard'">
+      <!-- Pinned branches -->
+      <div class="side-block">
+        <div class="side-label">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/>
+            <circle cx="18" cy="12" r="3"/><path d="M6 9v6"/><path d="M18 9a9 9 0 0 1-9 9"/>
+          </svg>
+          {{ t('sidebar.pinnedBranches') }}
+        </div>
+        <div class="branch-list">
+          <button
+            v-for="b in pinnedBranches"
+            :key="b.name"
+            class="branch-item"
+            :class="{ 'branch-item--current': b.isCurrent }"
+            @click="emit('changeView', 'graph')"
+            :title="b.name"
+          >
+            <span class="branch-name mono">{{ b.name }}</span>
+            <span class="branch-indicator" v-if="b.ahead > 0 || b.behind > 0">
+              <span v-if="b.ahead > 0" class="branch-up">↑{{ b.ahead }}</span>
+              <span v-if="b.behind > 0" class="branch-down">↓{{ b.behind }}</span>
+            </span>
+          </button>
+          <div class="side-empty" v-if="pinnedBranches.length === 0">
+            {{ t('sidebar.noBranches') }}
+          </div>
+        </div>
+      </div>
+
+      <!-- Recent activity -->
+      <div class="side-block" v-if="recentActivity.length > 0">
+        <div class="side-label">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+          </svg>
+          {{ t('sidebar.recentActivity') }}
+        </div>
+        <button
+          v-for="c in recentActivity"
+          :key="c.hashFull"
+          class="activity-item"
+          @click="emit('changeView', 'history')"
+          :title="c.message"
+        >
+          <span class="activity-dot" :style="activityAvatarStyle(c.email || c.author)">
+            {{ activityInitials(c.author) }}
+          </span>
+          <div class="activity-body">
+            <div class="activity-msg">{{ c.message }}</div>
+            <div class="activity-time">{{ formatActivityDate(c.date) }}</div>
+          </div>
+        </button>
+      </div>
+
+      <!-- Quick actions -->
+      <div class="side-block">
+        <div class="side-label">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+          </svg>
+          {{ t('sidebar.quickActions') }}
+        </div>
+        <div class="quick-actions">
+          <button class="qa" @click="emit('changeView', 'changes')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <polyline points="14 2 14 8 20 8"/>
+            </svg>
+            {{ t('sidebar.tabChanges') }}
+          </button>
+          <button class="qa" @click="emit('changeView', 'history')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/>
+              <line x1="8" y1="18" x2="21" y2="18"/>
+              <circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/>
+            </svg>
+            {{ t('sidebar.tabLog') }}
+          </button>
+          <button class="qa" @click="emit('changeView', 'graph')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/>
+              <circle cx="18" cy="12" r="3"/><path d="M6 9v6"/><path d="M18 9a9 9 0 0 1-9 9"/>
+            </svg>
+            {{ t('sidebar.tabGraph') }}
+          </button>
+          <button class="qa" @click="emit('changeView', 'prs')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/>
+              <path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" y1="9" x2="6" y2="21"/>
+            </svg>
+            PRs
+          </button>
+        </div>
+      </div>
     </div>
   </nav>
 
@@ -478,6 +663,49 @@ function onCommitKeydown(e: KeyboardEvent) {
 .sidebar-log {
   flex: 1;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Log scope toggle (current branch vs all refs) */
+.log-scope-toggle {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-6);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.log-scope-btn {
+  flex: 1;
+  padding: var(--space-2) var(--space-4);
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm, 4px);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 50%;
+}
+
+.log-scope-btn:hover {
+  background: var(--color-bg-hover, rgba(0, 0, 0, 0.04));
+  color: var(--color-text);
+}
+
+.log-scope-btn--active {
+  background: var(--color-accent, #3b82f6);
+  color: var(--color-accent-text, #ffffff);
+  border-color: var(--color-accent, #3b82f6);
+}
+
+.log-scope-btn--active:hover {
+  background: var(--color-accent, #3b82f6);
+  color: var(--color-accent-text, #ffffff);
 }
 
 .sidebar-prs {
@@ -800,6 +1028,153 @@ function onCommitKeydown(e: KeyboardEvent) {
 .commit-hint {
   font-size: var(--font-size-xs);
   text-align: center;
+}
+
+/* ─── Dashboard sidebar ──────────────────────────────── */
+.sidebar-dashboard {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-4) var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.side-block { display: flex; flex-direction: column; gap: var(--space-2); }
+
+.side-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-subtle);
+}
+
+.branch-list { display: flex; flex-direction: column; gap: 2px; }
+
+.branch-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: none;
+  border: none;
+  color: var(--color-text);
+  cursor: pointer;
+  text-align: left;
+  font-size: var(--font-size-sm);
+  transition: background var(--transition-fast);
+}
+
+.branch-item:hover { background: var(--color-bg-tertiary); }
+
+.branch-item--current {
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+}
+
+.branch-item--current .branch-name { font-weight: 600; }
+
+.branch-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: var(--font-size-sm);
+}
+
+.branch-indicator {
+  display: inline-flex;
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+}
+
+.branch-up { color: var(--color-success); }
+.branch-down { color: var(--color-info); }
+
+.side-empty {
+  padding: var(--space-3);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-subtle);
+  text-align: center;
+}
+
+.activity-item {
+  display: grid;
+  grid-template-columns: 24px 1fr;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  transition: background var(--transition-fast);
+}
+
+.activity-item:hover { background: var(--color-bg-tertiary); }
+
+.activity-dot {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  font-weight: 600;
+  color: white;
+  flex-shrink: 0;
+}
+
+.activity-body { min-width: 0; }
+
+.activity-msg {
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.35;
+}
+
+.activity-time {
+  font-size: 11px;
+  color: var(--color-text-subtle);
+  margin-top: 2px;
+}
+
+.quick-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
+}
+
+.qa {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  font-size: var(--font-size-sm);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-muted);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: border-color var(--transition-fast), color var(--transition-fast);
+}
+
+.qa:hover {
+  color: var(--color-text);
+  border-color: var(--color-border-strong);
 }
 </style>
 
