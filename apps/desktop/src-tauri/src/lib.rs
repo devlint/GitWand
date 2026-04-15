@@ -431,10 +431,28 @@ struct GitLogEntry {
 }
 
 #[tauri::command]
+fn git_get_user(cwd: String) -> Result<serde_json::Value, String> {
+    let name_out = std::process::Command::new(git_binary())
+        .args(["config", "user.name"])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("Failed to run git config: {}", e))?;
+    let email_out = std::process::Command::new(git_binary())
+        .args(["config", "user.email"])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("Failed to run git config: {}", e))?;
+    let name = String::from_utf8_lossy(&name_out.stdout).trim().to_string();
+    let email = String::from_utf8_lossy(&email_out.stdout).trim().to_string();
+    Ok(serde_json::json!({ "name": name, "email": email }))
+}
+
+#[tauri::command]
 fn git_log(
     cwd: String,
     count: Option<i32>,
     all: Option<bool>,
+    author: Option<String>,
 ) -> Result<Vec<GitLogEntry>, String> {
     let limit = count.unwrap_or(50);
     // Default: current branch only (like `git log`). Pass `all: true` to include all refs.
@@ -446,6 +464,11 @@ fn git_log(
     let mut args: Vec<String> = vec!["log".to_string()];
     if include_all {
         args.push("--all".to_string());
+    }
+    if let Some(ref author_filter) = author {
+        if !author_filter.is_empty() {
+            args.push(format!("--author={}", author_filter));
+        }
     }
     args.push(format!("-n{}", limit));
     args.push(format!("--format={}", format));
@@ -2763,6 +2786,7 @@ pub fn run() {
             gh_pr_checks,
             git_exec,
             git_autocomplete,
+            git_get_user,
         ])
         .run(tauri::generate_context!())
         .expect("error while running GitWand");

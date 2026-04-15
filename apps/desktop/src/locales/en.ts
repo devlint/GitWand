@@ -83,6 +83,10 @@ const en: Locale = {
     logScopeCurrentTitle: "Only show commits reachable from branch \u201c{0}\u201d",
     logScopeAll: "All branches",
     logScopeAllTitle: "Show commits from all branches",
+    // Author filter
+    logAuthorMine: "My commits",
+    logAuthorMineTitle: "Showing only your commits \u2014 click to show all",
+    logAuthorAllTitle: "Filter by author \u2014 click to show only your commits",
     // Sections
     sectionConflicts: "Conflicts",
     sectionStaged: "Staged",

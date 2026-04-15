@@ -456,12 +456,28 @@ const server = createServer(async (req, res) => {
       }
     }
 
-    // GET /api/git-log?cwd=<path>&count=<n>&all=<bool>
+    // GET /api/git-get-user?cwd=<path>
+    if (url.pathname === "/api/git-get-user" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd");
+      if (!cwd) return jsonResponse(res, { error: "Missing cwd param" }, 400);
+      try {
+        const resolvedCwd = resolve(cwd);
+        const { execSync } = await import("child_process");
+        const name = execSync("git config user.name", { cwd: resolvedCwd, encoding: "utf8" }).trim();
+        const email = execSync("git config user.email", { cwd: resolvedCwd, encoding: "utf8" }).trim();
+        return jsonResponse(res, { name, email });
+      } catch (err) {
+        return jsonResponse(res, { name: "", email: "" });
+      }
+    }
+
+    // GET /api/git-log?cwd=<path>&count=<n>&all=<bool>&author=<email>
     if (url.pathname === "/api/git-log" && req.method === "GET") {
       const cwd = url.searchParams.get("cwd");
       const count = parseInt(url.searchParams.get("count") || "50");
       // Default: current branch only (like `git log`). Pass `all=true` for all refs.
       const all = url.searchParams.get("all") === "true";
+      const author = url.searchParams.get("author") || "";
 
       if (!cwd) return jsonResponse(res, { error: "Missing cwd param" }, 400);
 
@@ -470,6 +486,7 @@ const server = createServer(async (req, res) => {
         const format = "%h%x1f%H%x1f%an%x1f%ae%x1f%aI%x1f%s%x1f%b%x1f%P%x1f%D%x1e";
         const args = ["log"];
         if (all) args.push("--all");
+        if (author) args.push(`--author=${author}`);
         args.push(`-n${count}`, `--format=${format}`);
         // Stream via spawn — execSync's default 1 MB cap can be exceeded with
         // large `count` values or commits with very long bodies.

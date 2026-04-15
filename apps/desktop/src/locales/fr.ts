@@ -85,6 +85,9 @@ const fr = {
     logScopeCurrentTitle: "Afficher uniquement les commits de la branche « {0} »",
     logScopeAll: "Toutes les branches",
     logScopeAllTitle: "Afficher les commits de toutes les branches",
+    logAuthorMine: "Mes commits",
+    logAuthorMineTitle: "Afficher uniquement mes commits",
+    logAuthorAllTitle: "Filtrer par auteur — cliquer pour afficher uniquement mes commits",
     // Sections
     sectionConflicts: "Conflits",
     sectionStaged: "Indexés",

@@ -24,6 +24,8 @@ const props = defineProps<{
   needsPublish?: boolean;
   /** Scope of the commit log: only the current branch, or all refs. */
   logScope: "current" | "all";
+  /** Author filter: show all commits, or only those by the current git user. */
+  logAuthorFilter: "all" | "mine";
   /** Display name of the current branch (for the toggle label). */
   currentBranch: string;
   /** Files inside the currently-selected untracked directory */
@@ -48,6 +50,8 @@ const emit = defineEmits<{
   editCommit: [entry: GitLogEntry];
   /** Change the log scope toggle (current branch vs all refs). */
   "update:logScope": [scope: "current" | "all"];
+  /** Toggle the author filter (all commits vs mine only). */
+  "update:logAuthorFilter": [filter: "all" | "mine"];
   /** Select a specific file inside an expanded untracked directory */
   "select-dir-file": [path: string];
   /** Discard changes to a file (tracked: restore, untracked: delete) */
@@ -453,6 +457,21 @@ function formatActivityDate(dateStr: string): string {
           {{ t('sidebar.logScopeAll') }}
         </button>
       </div>
+      <!-- Author filter: all commits vs mine only -->
+      <div class="log-author-filter">
+        <button
+          class="log-author-btn"
+          :class="{ 'log-author-btn--active': logAuthorFilter === 'mine' }"
+          :aria-pressed="logAuthorFilter === 'mine'"
+          :title="logAuthorFilter === 'mine' ? t('sidebar.logAuthorMineTitle') : t('sidebar.logAuthorAllTitle')"
+          @click="emit('update:logAuthorFilter', logAuthorFilter === 'mine' ? 'all' : 'mine')"
+        >
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true" style="flex-shrink:0">
+            <circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>
+          </svg>
+          {{ t('sidebar.logAuthorMine') }}
+        </button>
+      </div>
       <CommitLog
         :entries="logEntries"
         :loading="logLoading"
@@ -704,6 +723,45 @@ function formatActivityDate(dateStr: string): string {
 }
 
 .log-scope-btn--active:hover {
+  background: var(--color-accent, #3b82f6);
+  color: var(--color-accent-text, #ffffff);
+}
+
+/* Author filter row */
+.log-author-filter {
+  display: flex;
+  padding: var(--space-2) var(--space-6);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.log-author-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm, 4px);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
+  white-space: nowrap;
+}
+
+.log-author-btn:hover {
+  background: var(--color-bg-hover, rgba(0, 0, 0, 0.04));
+  color: var(--color-text);
+}
+
+.log-author-btn--active {
+  background: var(--color-accent, #3b82f6);
+  color: var(--color-accent-text, #ffffff);
+  border-color: var(--color-accent, #3b82f6);
+}
+
+.log-author-btn--active:hover {
   background: var(--color-accent, #3b82f6);
   color: var(--color-accent-text, #ffffff);
 }

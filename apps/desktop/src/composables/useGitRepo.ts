@@ -3,6 +3,7 @@ import {
   getGitStatus,
   getGitDiff,
   getGitLog,
+  getGitUser,
   gitStage,
   gitUnstage,
   gitCommit,
@@ -30,6 +31,7 @@ import {
   type GitStatus,
   type GitDiff,
   type GitLogEntry,
+  type GitUser,
   type FileChange,
   type GitPushPullResult,
   type GitBranch,
@@ -60,6 +62,9 @@ export function useGitRepo() {
   //   "current" → only commits reachable from the current branch HEAD (default, like `git log`)
   //   "all"     → all refs (`git log --all`)
   const logScope = ref<"current" | "all">("current");
+  // Author filter: "all" → no filter, "mine" → only commits by the current git user
+  const logAuthorFilter = ref<"all" | "mine">("all");
+  const currentGitUser = ref<GitUser | null>(null);
   const loading = ref(false);
   const error = ref<string | null>(null);
   const successMessage = ref<string | null>(null);
@@ -319,15 +324,19 @@ export function useGitRepo() {
   }
 
   /**
-   * Load the commit log. Honors `logScope` (current branch vs all refs).
+   * Load the commit log. Honors `logScope` (current branch vs all refs)
+   * and `logAuthorFilter` (all authors vs current user only).
    */
   async function loadLog(count?: number) {
     if (!folderPath.value) return;
     try {
+      const authorEmail =
+        logAuthorFilter.value === "mine" ? (currentGitUser.value?.email ?? "") : undefined;
       log.value = await getGitLog(
         folderPath.value,
         count,
         logScope.value === "all",
+        authorEmail,
       );
       // If a commit was selected but its diffs were lost, reload them
       if (selectedCommitHash.value && commitDiffs.value.length === 0) {
@@ -344,6 +353,19 @@ export function useGitRepo() {
   async function setLogScope(scope: "current" | "all") {
     if (logScope.value === scope) return;
     logScope.value = scope;
+    await loadLog();
+  }
+
+  /**
+   * Toggle the author filter between "all" and "mine" and reload the log.
+   * Fetches the current git user the first time "mine" is requested.
+   */
+  async function setLogAuthorFilter(filter: "all" | "mine") {
+    if (logAuthorFilter.value === filter) return;
+    if (filter === "mine" && !currentGitUser.value && folderPath.value) {
+      currentGitUser.value = await getGitUser(folderPath.value);
+    }
+    logAuthorFilter.value = filter;
     await loadLog();
   }
 
@@ -801,6 +823,8 @@ export function useGitRepo() {
     diff,
     log,
     logScope,
+    logAuthorFilter,
+    currentGitUser,
     loading,
     error,
     successMessage,
@@ -837,6 +861,7 @@ export function useGitRepo() {
     selectFile,
     loadLog,
     setLogScope,
+    setLogAuthorFilter,
     stageFiles,
     stageAll,
     unstageFiles,

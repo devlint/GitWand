@@ -63,6 +63,8 @@ const {
   diff: repoDiff,
   log: repoLog,
   logScope,
+  logAuthorFilter,
+  setLogAuthorFilter,
   loading: repoLoading,
   error: repoError,
   successMessage: repoSuccess,
@@ -684,6 +686,7 @@ onUnmounted(() => {
           :log-entries="repoLog"
           :log-loading="repoLoading"
           :log-scope="logScope"
+          :log-author-filter="logAuthorFilter"
           :current-branch="repoStatus?.branch ?? ''"
           :selected-commit-hash="selectedCommitHash"
           :ahead-count="aheadCount"
@@ -704,6 +707,7 @@ onUnmounted(() => {
           @select-commit="selectCommit"
           @edit-commit="handleEditCommit"
           @update:log-scope="setLogScope"
+          @update:log-author-filter="setLogAuthorFilter"
           @discard="(path, section) => discardFiles([path], section === 'untracked')"
           @add-to-gitignore="(path) => addToGitignore(path)"
         />

@@ -307,6 +307,27 @@ export async function getGitDiff(
   return res.json();
 }
 
+// ─── Git user ─────────────────────────────────────────────
+
+export interface GitUser {
+  name: string;
+  email: string;
+}
+
+/**
+ * Get the current git user from `git config user.name` / `git config user.email`.
+ */
+export async function getGitUser(cwd: string): Promise<GitUser> {
+  if (isTauri()) {
+    const raw = await tauriInvoke<{ name: string; email: string }>("git_get_user", { cwd });
+    return { name: raw.name, email: raw.email };
+  }
+  const qs = `?cwd=${encodeURIComponent(cwd)}`;
+  const res = await fetch(`${DEV_SERVER}/api/git-get-user${qs}`);
+  if (!res.ok) return { name: "", email: "" };
+  return res.json();
+}
+
 // ─── Git log ───────────────────────────────────────────────
 
 export interface GitLogEntry {
@@ -330,11 +351,13 @@ export interface GitLogEntry {
  * @param count  Max number of commits to return (default 50).
  * @param all  When `true`, include commits from all refs (`git log --all`).
  *             Default `false` → only commits reachable from the current branch HEAD.
+ * @param author  When set, only show commits matching this author (passed as `--author`).
  */
 export async function getGitLog(
   cwd: string,
   count?: number,
   all?: boolean,
+  author?: string,
 ): Promise<GitLogEntry[]> {
   if (isTauri()) {
     const raw = await tauriInvoke<
@@ -349,7 +372,7 @@ export async function getGitLog(
         parents: string[];
         refs: string;
       }>
-    >("git_log", { cwd, count: count ?? 50, all: all ?? false });
+    >("git_log", { cwd, count: count ?? 50, all: all ?? false, author: author ?? null });
 
     return raw.map((e) => ({
       hash: e.hash,
@@ -364,7 +387,7 @@ export async function getGitLog(
     }));
   }
 
-  const qs = `?cwd=${encodeURIComponent(cwd)}&count=${count ?? 50}&all=${all ? "true" : "false"}`;
+  const qs = `?cwd=${encodeURIComponent(cwd)}&count=${count ?? 50}&all=${all ? "true" : "false"}${author ? `&author=${encodeURIComponent(author)}` : ""}`;
   const res = await fetch(`${DEV_SERVER}/api/git-log${qs}`);
   if (!res.ok) throw new Error(`Failed to get git log: ${res.status}`);
   return res.json();
