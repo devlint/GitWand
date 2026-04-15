@@ -1147,6 +1147,161 @@ const server = createServer(async (req, res) => {
       }
     }
 
+    // POST /api/gh-create-pr
+    // Body: { cwd, title, body, base?, head?, draft?, reviewers? }
+    // Creates the PR via REST, then requests reviewers in a second call
+    // (GitHub requires a POST to /requested_reviewers after creation).
+    if (url.pathname === "/api/gh-create-pr" && req.method === "POST") {
+      const payload = await readBody(req);
+      const { cwd, title, body: prBody, base, head, draft, reviewers } = payload;
+      if (!cwd || !title) return jsonResponse(res, { error: "Missing cwd or title" }, 400);
+      try {
+        const token = getGithubToken();
+        if (!token) return jsonResponse(res, { error: "No GitHub token found. Run: gh auth login" }, 401);
+        const repoCwd = resolve(cwd);
+        const nwo = getRepoNwo(repoCwd);
+        if (!nwo) return jsonResponse(res, { error: "Could not determine GitHub repo from git remote origin" }, 400);
+
+        // Resolve head: default to current branch (git symbolic-ref HEAD)
+        let headBranch = (head ?? "").trim();
+        if (!headBranch) {
+          const r = spawnSync(GIT, ["symbolic-ref", "--short", "HEAD"], { cwd: repoCwd, encoding: "utf-8" });
+          if (r.status !== 0) return jsonResponse(res, { error: "Could not determine current branch" }, 500);
+          headBranch = r.stdout.trim();
+        }
+        if (!headBranch) return jsonResponse(res, { error: "Empty head branch" }, 400);
+
+        // Resolve base: explicit → repo's default branch on GitHub
+        let baseBranch = (base ?? "").trim();
+        if (!baseBranch) {
+          const repoResp = await githubFetch(`/repos/${nwo}`, token);
+          if (repoResp.ok) {
+            const info = await repoResp.json();
+            baseBranch = info.default_branch ?? "main";
+          } else {
+            baseBranch = "main";
+          }
+        }
+
+        if (baseBranch === headBranch) {
+          return jsonResponse(res, { error: `Base and head branches are the same (${headBranch})` }, 400);
+        }
+
+        // Create the PR
+        const createResp = await fetch(`https://api.github.com/repos/${nwo}/pulls`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "application/vnd.github+json",
+            "Content-Type": "application/json",
+            "X-GitHub-Api-Version": "2022-11-28",
+          },
+          body: JSON.stringify({
+            title,
+            body: prBody ?? "",
+            base: baseBranch,
+            head: headBranch,
+            draft: draft === true,
+          }),
+        });
+        if (!createResp.ok) {
+          const text = await createResp.text();
+          return jsonResponse(res, { error: `GitHub API ${createResp.status}: ${text}` }, 500);
+        }
+        const pr = await createResp.json();
+
+        // Request reviewers (user logins and org/team-slug supported)
+        const cleaned = Array.isArray(reviewers)
+          ? reviewers.map((r) => String(r).trim().replace(/^@/, "")).filter(Boolean)
+          : [];
+        if (cleaned.length > 0) {
+          const users = cleaned.filter((r) => !r.includes("/"));
+          const teams = cleaned
+            .filter((r) => r.includes("/"))
+            .map((r) => r.split("/", 2)[1])
+            .filter(Boolean);
+          try {
+            const rvResp = await fetch(
+              `https://api.github.com/repos/${nwo}/pulls/${pr.number}/requested_reviewers`,
+              {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                  Accept: "application/vnd.github+json",
+                  "Content-Type": "application/json",
+                  "X-GitHub-Api-Version": "2022-11-28",
+                },
+                body: JSON.stringify({ reviewers: users, team_reviewers: teams }),
+              },
+            );
+            if (!rvResp.ok) {
+              // PR was created — log the reviewer failure but don't surface it as a hard error.
+              const text = await rvResp.text();
+              console.warn(`[gh-create-pr] reviewers request failed: ${rvResp.status} ${text}`);
+            }
+          } catch (rvErr) {
+            console.warn("[gh-create-pr] reviewers request threw:", rvErr.message);
+          }
+        }
+
+        return jsonResponse(res, {
+          number: pr.number,
+          title: pr.title,
+          state: pr.state,
+          author: pr.user?.login ?? "",
+          branch: pr.head?.ref ?? headBranch,
+          base: pr.base?.ref ?? baseBranch,
+          draft: pr.draft ?? false,
+          created_at: pr.created_at,
+          updated_at: pr.updated_at,
+          url: pr.html_url,
+          additions: pr.additions ?? 0,
+          deletions: pr.deletions ?? 0,
+          labels: (pr.labels ?? []).map((l) => l.name),
+        });
+      } catch (err) {
+        console.error("[gh-create-pr]", err.message);
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
+
+    // GET /api/gh-reviewer-candidates?cwd=<path>
+    // Lists assignees (users with push access) for autocomplete.
+    if (url.pathname === "/api/gh-reviewer-candidates" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd");
+      if (!cwd) return jsonResponse(res, { error: "Missing cwd" }, 400);
+      try {
+        const token = getGithubToken();
+        if (!token) return jsonResponse(res, { error: "No GitHub token" }, 401);
+        const nwo = getRepoNwo(resolve(cwd));
+        if (!nwo) return jsonResponse(res, { error: "Could not determine GitHub repo" }, 400);
+        // Paginate up to 3 pages of 100 = 300 candidates.
+        const all = [];
+        const seen = new Set();
+        for (let page = 1; page <= 3; page++) {
+          const resp = await githubFetch(`/repos/${nwo}/assignees?per_page=100&page=${page}`, token);
+          if (!resp.ok) break;
+          const raw = await resp.json();
+          if (!Array.isArray(raw) || raw.length === 0) break;
+          for (const u of raw) {
+            if (!u.login || seen.has(u.login)) continue;
+            seen.add(u.login);
+            all.push({
+              login: u.login,
+              name: u.name ?? null,
+              avatar_url: u.avatar_url ?? null,
+            });
+          }
+          if (raw.length < 100) break;
+        }
+        all.sort((a, b) => a.login.toLowerCase().localeCompare(b.login.toLowerCase()));
+        return jsonResponse(res, all);
+      } catch (err) {
+        console.error("[gh-reviewer-candidates]", err.message);
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
+
     // GET /api/gh-pr-detail?cwd=<path>&number=<n>
     if (url.pathname === "/api/gh-pr-detail" && req.method === "GET") {
       const cwd = url.searchParams.get("cwd");
@@ -1708,6 +1863,8 @@ server.listen(PORT, () => {
   console.log(`    GET  /api/git-diff?cwd=<path>&path=<file>&staged=<bool>`);
   console.log(`    GET  /api/git-log?cwd=<path>&count=<n>&all=<bool>`);
   console.log(`    GET  /api/gh-list-prs?cwd=<path>&state=<state>`);
+  console.log(`    POST /api/gh-create-pr  { cwd, title, body, base?, draft?, reviewers? }`);
+  console.log(`    GET  /api/gh-reviewer-candidates?cwd=<path>`);
   console.log(`    GET  /api/gh-pr-detail?cwd=<path>&number=<n>`);
   console.log(`    GET  /api/gh-pr-diff?cwd=<path>&number=<n>`);
   console.log(`    GET  /api/gh-pr-checks?cwd=<path>&number=<n>\n`);

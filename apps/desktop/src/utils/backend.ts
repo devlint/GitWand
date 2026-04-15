@@ -1308,7 +1308,31 @@ export async function ghCreatePr(
       labels: raw.labels,
     };
   }
-  throw new Error("PR creation not available in dev mode");
+  // Browser dev mode — call dev server (uses GitHub REST API directly)
+  const res = await fetch(`${DEV_SERVER}/api/gh-create-pr`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, title, body, base, draft, reviewers }),
+  });
+  const raw = await res.json();
+  if (!res.ok || raw.error) {
+    throw new Error(raw.error || `gh create pr failed: ${res.status}`);
+  }
+  return {
+    number: raw.number,
+    title: raw.title,
+    state: raw.state,
+    author: raw.author,
+    branch: raw.branch,
+    base: raw.base,
+    draft: raw.draft,
+    createdAt: raw.created_at,
+    updatedAt: raw.updated_at,
+    url: raw.url,
+    additions: raw.additions,
+    deletions: raw.deletions,
+    labels: raw.labels,
+  };
 }
 
 /**
@@ -1335,8 +1359,16 @@ export async function ghListReviewerCandidates(cwd: string): Promise<ReviewerCan
       avatarUrl: u.avatar_url ?? null,
     }));
   }
-  // Browser dev mode — not available
-  return [];
+  // Browser dev mode — call dev server (uses GitHub REST API directly)
+  const res = await fetch(`${DEV_SERVER}/api/gh-reviewer-candidates?cwd=${encodeURIComponent(cwd)}`);
+  if (!res.ok) return [];
+  const raw = await res.json();
+  if (!Array.isArray(raw)) return [];
+  return raw.map((u: { login: string; name?: string | null; avatar_url?: string | null }) => ({
+    login: u.login,
+    name: u.name ?? null,
+    avatarUrl: u.avatar_url ?? null,
+  }));
 }
 
 /**
