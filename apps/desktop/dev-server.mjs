@@ -380,11 +380,9 @@ const server = createServer(async (req, res) => {
         const args = staged ? ["diff", "--cached", "--", path] : ["diff", "--", path];
         let stdout;
         try {
-          stdout = execSync(`git ${args.join(" ")}`, {
-            cwd: resolvedCwd,
-            encoding: "utf-8",
-            shell: true,
-          });
+          // Stream via spawn — execSync's default 1 MB cap blows up on large files
+          // (lockfiles, generated assets, big migrations…).
+          stdout = await gitSpawn(args, resolvedCwd);
         } catch { stdout = ""; }
 
         // ── New untracked file: fall back to --no-index diff (all lines green) ──
@@ -470,12 +468,12 @@ const server = createServer(async (req, res) => {
       try {
         const resolvedCwd = resolve(cwd);
         const format = "%h%x1f%H%x1f%an%x1f%ae%x1f%aI%x1f%s%x1f%b%x1f%P%x1f%D%x1e";
-        const allFlag = all ? "--all " : "";
-        const stdout = execSync(`git log ${allFlag}-n${count} --format="${format}"`, {
-          cwd: resolvedCwd,
-          encoding: "utf-8",
-          shell: true,
-        });
+        const args = ["log"];
+        if (all) args.push("--all");
+        args.push(`-n${count}`, `--format=${format}`);
+        // Stream via spawn — execSync's default 1 MB cap can be exceeded with
+        // large `count` values or commits with very long bodies.
+        const stdout = await gitSpawn(args, resolvedCwd);
 
         const entries = [];
         const records = stdout.split("\x1e");
@@ -740,12 +738,12 @@ const server = createServer(async (req, res) => {
       if (!cwd || !filePath || !fromHash || !toHash) return jsonResponse(res, { error: "Missing params" }, 400);
       try {
         const resolvedCwd = resolve(cwd);
-        const stdout = execSync(`git diff ${fromHash} ${toHash} -- "${filePath}"`, {
-          cwd: resolvedCwd,
-          encoding: "utf-8",
-          shell: true,
-          maxBuffer: 10 * 1024 * 1024,
-        });
+        // Stream via spawn — explicit 10 MB cap can still be exceeded on
+        // large file rewrites between two distant commits.
+        const stdout = await gitSpawn(
+          ["diff", fromHash, toHash, "--", filePath],
+          resolvedCwd,
+        );
 
         const hunks = [];
         let currentHunk = null;
