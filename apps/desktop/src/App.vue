@@ -695,6 +695,7 @@ onUnmounted(() => {
           @stage-file="(path) => stageFiles([path])"
           @unstage-file="(path) => unstageFiles([path])"
           @stage-all="stageAll"
+          @stage-paths="(paths) => stageFiles(paths)"
           @unstage-all="unstageAll"
           @commit="doCommit"
           @update:commit-summary="(val) => commitSummary = val"

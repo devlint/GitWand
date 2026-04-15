@@ -38,6 +38,8 @@ const emit = defineEmits<{
   stageFile: [path: string];
   unstageFile: [path: string];
   stageAll: [];
+  /** Stage a specific list of file paths (used by section "+" buttons). */
+  stagePaths: [paths: string[]];
   unstageAll: [];
   commit: [];
   "update:commitSummary": [value: string];
@@ -285,7 +287,7 @@ function formatActivityDate(dateStr: string): string {
             <button
               v-if="sectionKey === 'unstaged' || sectionKey === 'untracked'"
               class="section-action"
-              @click="emit('stageAll')"
+              @click="emit('stagePaths', sections[sectionKey].map(f => f.path))"
               :title="t('sidebar.stageAll')"
             >+</button>
             <button
