@@ -733,9 +733,14 @@ struct GitPushPullResult {
 }
 
 #[tauri::command]
-fn git_push(cwd: String) -> Result<GitPushPullResult, String> {
+fn git_push(cwd: String, set_upstream: Option<bool>) -> Result<GitPushPullResult, String> {
+    let mut args: Vec<&str> = vec!["push"];
+    if set_upstream.unwrap_or(false) {
+        // Publish the current branch to origin with the same name and set upstream
+        args.extend(["--set-upstream", "origin", "HEAD"]);
+    }
     let output = std::process::Command::new(git_binary())
-        .args(["push"])
+        .args(&args)
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to run git push: {}", e))?;
@@ -746,7 +751,13 @@ fn git_push(cwd: String) -> Result<GitPushPullResult, String> {
     Ok(GitPushPullResult {
         success: output.status.success(),
         message: if output.status.success() {
-            stdout.trim().to_string()
+            // git push prints most info to stderr; prefer it when stdout is empty
+            let trimmed_out = stdout.trim();
+            if trimmed_out.is_empty() {
+                stderr.trim().to_string()
+            } else {
+                trimmed_out.to_string()
+            }
         } else {
             stderr.trim().to_string()
         },

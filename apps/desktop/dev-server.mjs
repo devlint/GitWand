@@ -615,13 +615,16 @@ const server = createServer(async (req, res) => {
       }
     }
 
-    // POST /api/git-push  { cwd }
+    // POST /api/git-push  { cwd, setUpstream? }
     if (url.pathname === "/api/git-push" && req.method === "POST") {
-      const { cwd } = await readBody(req);
+      const { cwd, setUpstream } = await readBody(req);
       if (!cwd) return jsonResponse(res, { error: "Missing cwd" }, 400);
       try {
         const resolvedCwd = resolve(cwd);
-        const stdout = execSync("git push 2>&1", {
+        const cmd = setUpstream
+          ? "git push --set-upstream origin HEAD 2>&1"
+          : "git push 2>&1";
+        const stdout = execSync(cmd, {
           cwd: resolvedCwd,
           encoding: "utf-8",
           shell: true,

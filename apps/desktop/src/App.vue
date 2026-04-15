@@ -79,6 +79,7 @@ const {
   isCommitting,
   canPush,
   canPull,
+  needsPublish,
   aheadCount,
   behindCount,
   isPushing,
@@ -645,6 +646,7 @@ onUnmounted(() => {
       :folder-name="folderName"
       :can-push="canPush"
       :can-pull="canPull"
+      :needs-publish="needsPublish"
       :ahead-count="aheadCount"
       :behind-count="behindCount"
       :is-pushing="isPushing"
@@ -753,6 +755,7 @@ onUnmounted(() => {
             :status="repoStats"
             :ahead="aheadCount"
             :behind="behindCount"
+            :needs-publish="needsPublish"
             @change-view="onViewModeChange"
             @push="doPush"
             @sync="() => doPull(pullMode === 'rebase')"

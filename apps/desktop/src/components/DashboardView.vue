@@ -27,6 +27,8 @@ const props = defineProps<{
   };
   ahead: number;
   behind: number;
+  /** True when the current branch has no upstream configured. */
+  needsPublish?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -240,6 +242,9 @@ const nextAction = computed(() => {
   }
   if (props.ahead > 0) {
     return { label: t("dashboard.nextPush", props.ahead), view: null, action: "push" as const };
+  }
+  if (props.needsPublish) {
+    return { label: t("dashboard.nextPublish"), view: null, action: "push" as const };
   }
   if (props.behind > 0) {
     return { label: t("dashboard.nextSync", props.behind), view: null, action: "sync" as const };

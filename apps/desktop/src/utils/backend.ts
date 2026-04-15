@@ -487,15 +487,23 @@ export interface GitPushPullResult {
 
 /**
  * Push to remote.
+ *
+ * When `setUpstream` is true, runs `git push --set-upstream origin HEAD`,
+ * which publishes the current branch to a same-named branch on origin and
+ * records it as the upstream. Used when pushing a branch that has no
+ * tracking configured yet.
  */
-export async function gitPush(cwd: string): Promise<GitPushPullResult> {
+export async function gitPush(
+  cwd: string,
+  setUpstream: boolean = false,
+): Promise<GitPushPullResult> {
   if (isTauri()) {
-    return tauriInvoke<GitPushPullResult>("git_push", { cwd });
+    return tauriInvoke<GitPushPullResult>("git_push", { cwd, setUpstream });
   }
   const res = await fetch(`${DEV_SERVER}/api/git-push`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ cwd }),
+    body: JSON.stringify({ cwd, setUpstream }),
   });
   return res.json();
 }

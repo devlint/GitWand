@@ -178,10 +178,24 @@ export function useGitRepo() {
     return repoStats.value.staged > 0 && commitSummary.value.trim().length > 0 && !isCommitting.value;
   });
 
-  /** Can we push? */
+  /**
+   * True when the current branch has no upstream configured.
+   * In that case a push must use `--set-upstream` to publish the branch.
+   */
+  const needsPublish = computed(() => {
+    if (!status.value) return false;
+    return !status.value.remote;
+  });
+
+  /**
+   * Can we push?
+   * - Yes when we have local commits ahead of the upstream.
+   * - Yes when the branch has no upstream yet (first push publishes it).
+   */
   const canPush = computed(() => {
     if (!status.value) return false;
-    return status.value.ahead > 0 && !isPushing.value;
+    if (isPushing.value) return false;
+    return status.value.ahead > 0 || needsPublish.value;
   });
 
   /** Can we pull? Enabled whenever a remote is configured. */
@@ -473,7 +487,9 @@ export function useGitRepo() {
     if (!folderPath.value) return;
     isPushing.value = true;
     try {
-      const result = await gitPush(folderPath.value);
+      // If the current branch has no upstream, publish it with --set-upstream.
+      const publish = needsPublish.value;
+      const result = await gitPush(folderPath.value, publish);
       if (!result.success) {
         error.value = `push: ${result.message}`;
       } else {
@@ -802,6 +818,7 @@ export function useGitRepo() {
     canCommit,
     canPush,
     canPull,
+    needsPublish,
     aheadCount,
     behindCount,
     // Actions
