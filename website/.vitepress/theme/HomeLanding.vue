@@ -2,6 +2,10 @@
 import { ref, computed } from 'vue'
 
 const locale = ref<'fr' | 'en'>((typeof navigator !== 'undefined' && navigator.language?.startsWith('en')) ? 'en' : 'fr')
+const faqOpen = ref<number | null>(null)
+function toggleFaq(i: number) {
+  faqOpen.value = faqOpen.value === i ? null : i
+}
 
 const i18n = {
   fr: {
@@ -47,6 +51,26 @@ const i18n = {
     ctaTitle: 'Prêt à simplifier votre workflow Git ?',
     ctaSub: 'Gratuit, open source, et conçu pour les développeurs qui veulent aller vite.',
     ctaDownload: 'Télécharger GitWand',
+    llmTitle: 'Vos agents IA dans la boucle',
+    llmSub: 'Le serveur MCP de GitWand expose son moteur de conflits aux agents IA. GitWand résout le trivial — votre agent prend le relais pour les cas complexes.',
+    llmBadge: 'MCP Server · stdio · Sans clé API',
+    llmStep1: 'Analyse',
+    llmStep1Desc: 'L\'agent appelle gitwand_preview_merge pour évaluer le nombre de conflits, leur complexité, et le pourcentage que GitWand peut résoudre seul.',
+    llmStep2: 'Auto-résolution',
+    llmStep2Desc: 'GitWand résout instantanément les patterns triviaux (whitespace, one-side-change, same-change…) et retourne les hunks ambigus avec leur trace de classification.',
+    llmStep3: 'Résolution IA',
+    llmStep3Desc: 'Pour chaque conflit complexe, l\'agent dispose du contexte complet : contenu ours/theirs/base, trace de classification et scores de confiance.',
+    llmCompat: 'Compatible avec',
+    llmDocs: 'Voir la documentation MCP →',
+    faqTitle: 'Questions fréquentes',
+    faqItems: [
+      { q: 'GitWand est-il vraiment gratuit ?', a: 'Oui, GitWand est entièrement open source sous licence MIT. Vous pouvez l\'utiliser, le modifier et le redistribuer librement.' },
+      { q: 'Comment fonctionne la résolution intelligente des conflits ?', a: 'GitWand analyse la sémantique du code avec 8 patterns de résolution (whitespace_only, same_change, one_side_change…) et un scoring de confiance par hunk. Les conflits triviaux sont résolus automatiquement ; les cas complexes sont remontés avec une trace d\'explication complète.' },
+      { q: 'Qu\'est-ce que le serveur MCP et pourquoi l\'utiliser ?', a: 'Le serveur MCP expose le moteur de GitWand aux agents IA — Claude Code, Cursor, Windsurf, et d\'autres. Il tourne en local via stdio, sans clé API ni accès réseau. GitWand gère 95%+ des conflits triviaux, l\'agent IA s\'occupe des cas ambigus avec tout le contexte nécessaire.' },
+      { q: 'GitWand fonctionne-t-il avec n\'importe quel dépôt Git ?', a: 'Oui. GitWand fonctionne avec tous les dépôts Git locaux, quel que soit l\'hébergement (GitHub, GitLab, Bitbucket, Gitea…). La vue Pull Requests est pour l\'instant limitée à GitHub.' },
+      { q: 'Quelle est la différence avec les autres clients Git ?', a: 'GitWand se distingue par son moteur de résolution intégré, son architecture native Tauri (pas d\'Electron), ses 3 interfaces cohérentes (desktop, CLI, VS Code), et son serveur MCP pour l\'intégration avec les agents IA.' },
+      { q: 'Comment installer le serveur MCP ?', a: 'Aucune installation n\'est nécessaire : npx @gitwand/mcp suffit. Ajoutez la configuration dans Claude Desktop, Claude Code ou votre client MCP préféré — la documentation détaille chaque cas.' },
+    ],
   },
   en: {
     badge: 'v1.1.0 · Open Source · MIT',
@@ -91,6 +115,26 @@ const i18n = {
     ctaTitle: 'Ready to simplify your Git workflow?',
     ctaSub: 'Free, open source, and built for developers who want to move fast.',
     ctaDownload: 'Download GitWand',
+    llmTitle: 'Your AI agents in the loop',
+    llmSub: 'GitWand\'s MCP server exposes its conflict engine to AI agents. GitWand resolves the trivial — your agent takes over for the complex cases.',
+    llmBadge: 'MCP Server · stdio · No API key',
+    llmStep1: 'Preview',
+    llmStep1Desc: 'The agent calls gitwand_preview_merge to assess the number of conflicts, their complexity, and the percentage GitWand can resolve on its own.',
+    llmStep2: 'Auto-resolve',
+    llmStep2Desc: 'GitWand instantly resolves trivial patterns (whitespace, one-side-change, same-change…) and returns ambiguous hunks with their classification trace.',
+    llmStep3: 'AI resolution',
+    llmStep3Desc: 'For each complex conflict, the agent has full context: ours/theirs/base content, classification trace, and confidence scores.',
+    llmCompat: 'Compatible with',
+    llmDocs: 'View MCP documentation →',
+    faqTitle: 'Frequently asked questions',
+    faqItems: [
+      { q: 'Is GitWand really free?', a: 'Yes, GitWand is fully open source under the MIT license. You can use, modify, and redistribute it freely.' },
+      { q: 'How does smart conflict resolution work?', a: 'GitWand analyzes code semantics using 8 resolution patterns (whitespace_only, same_change, one_side_change…) with per-hunk confidence scoring. Trivial conflicts are resolved automatically; complex cases are surfaced with a full explanation trace.' },
+      { q: 'What is the MCP server and why use it?', a: 'The MCP server exposes GitWand\'s engine to AI agents — Claude Code, Cursor, Windsurf, and others. It runs locally over stdio, with no API key or network access required. GitWand handles 95%+ of trivial conflicts; the AI agent tackles the ambiguous ones with full context.' },
+      { q: 'Does GitWand work with any Git repository?', a: 'Yes. GitWand works with any local Git repository, regardless of hosting (GitHub, GitLab, Bitbucket, Gitea…). The Pull Request view is currently limited to GitHub.' },
+      { q: 'What sets GitWand apart from other Git clients?', a: 'GitWand stands out with its built-in resolution engine, native Tauri architecture (no Electron), three consistent interfaces (desktop, CLI, VS Code), and an MCP server for AI agent integration.' },
+      { q: 'How do I install the MCP server?', a: 'No installation needed: npx @gitwand/mcp is all it takes. Add the configuration to Claude Desktop, Claude Code, or your preferred MCP client — the documentation covers each case.' },
+    ],
   },
 }
 
@@ -324,6 +368,79 @@ function toggleLocale() {
     </section>
 
     <!-- ══════════════════════════════════════
+         LLM / MCP SECTION
+    ══════════════════════════════════════ -->
+    <section class="llm-section">
+      <div class="section-inner">
+        <span class="badge">{{ t.llmBadge }}</span>
+        <h2 class="section-title" style="margin-top:16px">{{ t.llmTitle }}</h2>
+        <p class="section-sub">{{ t.llmSub }}</p>
+
+        <div class="llm-layout">
+          <!-- Steps -->
+          <div class="llm-steps">
+            <div class="llm-step">
+              <div class="llm-step-num">1</div>
+              <div class="llm-step-body">
+                <h3 class="llm-step-title">{{ t.llmStep1 }}</h3>
+                <p class="llm-step-desc">{{ t.llmStep1Desc }}</p>
+              </div>
+            </div>
+            <div class="llm-connector"></div>
+            <div class="llm-step">
+              <div class="llm-step-num">2</div>
+              <div class="llm-step-body">
+                <h3 class="llm-step-title">{{ t.llmStep2 }}</h3>
+                <p class="llm-step-desc">{{ t.llmStep2Desc }}</p>
+              </div>
+            </div>
+            <div class="llm-connector"></div>
+            <div class="llm-step">
+              <div class="llm-step-num llm-step-num--ai">AI</div>
+              <div class="llm-step-body">
+                <h3 class="llm-step-title">{{ t.llmStep3 }}</h3>
+                <p class="llm-step-desc">{{ t.llmStep3Desc }}</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Code card -->
+          <div class="llm-code-card">
+            <div class="llm-code-bar">
+              <span class="tl tl-r"></span>
+              <span class="tl tl-y"></span>
+              <span class="tl tl-g"></span>
+              <span class="llm-code-title">claude_desktop_config.json</span>
+            </div>
+            <pre class="llm-code-block"><span class="lc-p">{</span>
+  <span class="lc-k">"mcpServers"</span><span class="lc-p">:</span> <span class="lc-p">{</span>
+    <span class="lc-k">"gitwand"</span><span class="lc-p">:</span> <span class="lc-p">{</span>
+      <span class="lc-k">"command"</span><span class="lc-p">:</span> <span class="lc-s">"npx"</span><span class="lc-p">,</span>
+      <span class="lc-k">"args"</span><span class="lc-p">:</span> <span class="lc-p">[</span>
+        <span class="lc-s">"@gitwand/mcp"</span><span class="lc-p">,</span>
+        <span class="lc-s">"--cwd"</span><span class="lc-p">,</span>
+        <span class="lc-s">"/path/to/repo"</span>
+      <span class="lc-p">]</span>
+    <span class="lc-p">}</span>
+  <span class="lc-p">}</span>
+<span class="lc-p">}</span></pre>
+            <div class="llm-compat">
+              <span class="llm-compat-label">{{ t.llmCompat }}</span>
+              <div class="llm-compat-chips">
+                <span class="llm-chip">Claude Code</span>
+                <span class="llm-chip">Claude Desktop</span>
+                <span class="llm-chip">Cursor</span>
+                <span class="llm-chip">Windsurf</span>
+                <span class="llm-chip">Continue</span>
+              </div>
+            </div>
+            <a href="/GitWand/guide/mcp" class="llm-docs-link">{{ t.llmDocs }}</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════
          APP PREVIEW (larger mockup)
     ══════════════════════════════════════ -->
     <section class="preview-section">
@@ -448,6 +565,34 @@ function toggleLocale() {
             <svg width="32" height="32" viewBox="0 0 24 24" fill="none"><rect x="2" y="2" width="20" height="20" rx="4" stroke="#10B981" stroke-width="1.5"/><path d="M8 14l2.5-5L13 14M9 12h3" stroke="#10B981" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M15 9v6" stroke="#10B981" stroke-width="1.5" stroke-linecap="round"/></svg>
             <span class="pl-name">{{ t.plVscode }}</span>
             <span class="pl-sub">{{ t.plVscodeSub }}</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════
+         FAQ
+    ══════════════════════════════════════ -->
+    <section class="faq-section">
+      <div class="section-inner">
+        <h2 class="section-title">{{ t.faqTitle }}</h2>
+        <div class="faq-list">
+          <div
+            v-for="(item, i) in t.faqItems"
+            :key="i"
+            class="faq-item"
+            :class="{ 'faq-item--open': faqOpen === i }"
+            @click="toggleFaq(i)"
+          >
+            <div class="faq-q">
+              <span>{{ item.q }}</span>
+              <svg class="faq-chevron" width="18" height="18" viewBox="0 0 24 24" fill="none">
+                <path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </div>
+            <div class="faq-a" v-show="faqOpen === i">
+              <p>{{ item.a }}</p>
+            </div>
           </div>
         </div>
       </div>
@@ -1150,6 +1295,210 @@ function toggleLocale() {
 }
 
 /* ───────────────────────────────────────────
+   LLM / MCP SECTION
+─────────────────────────────────────────── */
+.llm-section {
+  padding: 96px 0;
+  background: linear-gradient(180deg, var(--gw-bg-2) 0%, var(--gw-bg) 100%);
+  border-top: 1px solid var(--gw-border-soft);
+  border-bottom: 1px solid var(--gw-border-soft);
+}
+.llm-section .section-sub {
+  margin-bottom: 60px;
+}
+.llm-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 56px;
+  align-items: start;
+}
+.llm-steps {
+  display: flex;
+  flex-direction: column;
+}
+.llm-step {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+}
+.llm-step-num {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgba(124,58,237,0.15);
+  border: 1.5px solid rgba(124,58,237,0.4);
+  color: var(--gw-purple-light);
+  font-size: 14px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  letter-spacing: 0;
+}
+.llm-step-num--ai {
+  background: linear-gradient(135deg, rgba(124,58,237,0.25), rgba(16,185,129,0.2));
+  border-color: rgba(16,185,129,0.5);
+  color: #6ee7b7;
+  font-size: 12px;
+}
+.llm-step-body {
+  padding-top: 8px;
+}
+.llm-step-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--gw-text);
+  margin: 0 0 6px;
+}
+.llm-step-desc {
+  font-size: 14px;
+  color: var(--gw-text-muted);
+  line-height: 1.65;
+  margin: 0;
+}
+.llm-connector {
+  width: 1.5px;
+  height: 32px;
+  background: linear-gradient(180deg, rgba(124,58,237,0.4), rgba(124,58,237,0.15));
+  margin: 6px 0 6px 19px;
+}
+.llm-code-card {
+  background: var(--gw-bg-card);
+  border: 1px solid var(--gw-border);
+  border-radius: var(--gw-radius);
+  overflow: hidden;
+}
+.llm-code-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: #1a1a2e;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.llm-code-title {
+  font-size: 11px;
+  color: #6c7086;
+  margin-left: 6px;
+}
+.llm-code-block {
+  margin: 0;
+  padding: 20px 22px;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--gw-text);
+  background: transparent;
+  border: none;
+  overflow-x: auto;
+}
+.lc-k { color: #c4b5fd; }
+.lc-s { color: #a6e3a1; }
+.lc-p { color: #94a3b8; }
+.llm-compat {
+  padding: 16px 20px;
+  border-top: 1px solid rgba(255,255,255,0.05);
+}
+.llm-compat-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--gw-text-muted);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  display: block;
+  margin-bottom: 10px;
+}
+.llm-compat-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.llm-chip {
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 20px;
+  border: 1px solid var(--gw-border);
+  color: var(--gw-purple-light);
+  background: rgba(124,58,237,0.07);
+}
+.llm-docs-link {
+  display: block;
+  padding: 14px 20px;
+  border-top: 1px solid rgba(255,255,255,0.05);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--gw-purple-light);
+  text-decoration: none;
+  transition: color 0.15s;
+}
+.llm-docs-link:hover {
+  color: var(--gw-green);
+}
+
+/* ───────────────────────────────────────────
+   FAQ SECTION
+─────────────────────────────────────────── */
+.faq-section {
+  padding: 96px 0;
+  background: var(--gw-bg-2);
+  border-top: 1px solid var(--gw-border-soft);
+}
+.faq-section .section-title {
+  margin-bottom: 48px;
+}
+.faq-list {
+  max-width: 760px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.faq-item {
+  border-bottom: 1px solid var(--gw-border-soft);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.faq-item:first-child {
+  border-top: 1px solid var(--gw-border-soft);
+}
+.faq-item:hover .faq-q {
+  color: var(--gw-text);
+}
+.faq-q {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 4px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--gw-text-muted);
+  transition: color 0.15s;
+  user-select: none;
+}
+.faq-item--open .faq-q {
+  color: var(--gw-text);
+}
+.faq-chevron {
+  flex-shrink: 0;
+  color: var(--gw-purple-light);
+  transition: transform 0.2s ease;
+}
+.faq-item--open .faq-chevron {
+  transform: rotate(180deg);
+}
+.faq-a {
+  padding: 0 4px 20px;
+}
+.faq-a p {
+  margin: 0;
+  font-size: 14px;
+  color: var(--gw-text-muted);
+  line-height: 1.75;
+}
+
+/* ───────────────────────────────────────────
    RESPONSIVE
 ─────────────────────────────────────────── */
 @media (max-width: 900px) {
@@ -1163,6 +1512,7 @@ function toggleLocale() {
   .stat-sep { width: 60px; height: 1px; }
   .conflict-demo { flex-direction: column; }
   .conflict-arrow { flex-direction: row; }
+  .llm-layout { grid-template-columns: 1fr; gap: 40px; }
 }
 @media (max-width: 600px) {
   .features-grid { grid-template-columns: 1fr; }
