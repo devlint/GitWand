@@ -31,6 +31,19 @@ function resolveBin(name) {
 
 const GH = resolveBin("gh");
 const GIT = resolveBin("git");
+
+/**
+ * Environment passed when spawning the `claude` CLI. We strip API-key env
+ * vars so the CLI falls back to the OAuth session (`claude login`) — same
+ * rationale as the Rust backend's `strip_claude_auth_env`.
+ */
+const claudeSpawnEnv = (() => {
+  const clean = { ...process.env };
+  delete clean.ANTHROPIC_API_KEY;
+  delete clean.CLAUDE_API_KEY;
+  delete clean.ANTHROPIC_AUTH_TOKEN;
+  return clean;
+})();
 console.log(`[dev-server] gh binary:  ${GH}`);
 console.log(`[dev-server] git binary: ${GIT}`);
 
@@ -1838,6 +1851,12 @@ const server = createServer(async (req, res) => {
 
     // ─── Claude Code CLI (dev mirror) ─────────────────────
     //
+    // When spawning the `claude` binary, we strip API-key env vars (see
+    // `claudeSpawnEnv` at module scope) so the CLI uses the user's OAuth
+    // subscription instead of a stale key that may be lying around in
+    // their shell. Matches the Rust backend.
+
+    //
     // Wraps the user's locally-installed `claude` binary so GitWand can
     // piggyback on their Claude Max/Pro subscription without implementing
     // OAuth. Mirrors the Rust commands `detect_claude_cli`, `claude_cli_prompt`
@@ -1888,7 +1907,7 @@ const server = createServer(async (req, res) => {
         let status = "error";
         let detail = "";
         try {
-          const r = spawnSync(resolved, ["-p", "ping", "--output-format", "text"], { encoding: "utf-8" });
+          const r = spawnSync(resolved, ["-p", "ping", "--output-format", "text"], { encoding: "utf-8", env: claudeSpawnEnv });
           if (r.status === 0) {
             loggedIn = true;
             status = "ok";
@@ -1929,6 +1948,7 @@ const server = createServer(async (req, res) => {
           cwd: body.cwd || undefined,
           encoding: "utf-8",
           maxBuffer: 20 * 1024 * 1024,
+          env: claudeSpawnEnv,
         });
         if (r.status !== 0) {
           const detail = (r.stderr || r.stdout || "").trim() || "Claude CLI a échoué sans message";

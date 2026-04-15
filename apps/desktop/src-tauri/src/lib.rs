@@ -2710,6 +2710,24 @@ struct ClaudeCliInfo {
     detail: String,
 }
 
+/// Environment variables that make the Claude Code CLI fall back to
+/// API-key auth instead of using the OAuth session from `claude login`.
+/// When the user explicitly picks the "Claude Code CLI" provider in GitWand,
+/// they've asked to use their Max/Pro subscription — so we strip these to
+/// avoid a stale/invalid key in the shell hijacking the call.
+const CLAUDE_AUTH_OVERRIDE_ENV: &[&str] = &[
+    "ANTHROPIC_API_KEY",
+    "CLAUDE_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+];
+
+/// Apply the API-key env strip to a `std::process::Command` before spawning.
+fn strip_claude_auth_env(cmd: &mut std::process::Command) {
+    for var in CLAUDE_AUTH_OVERRIDE_ENV {
+        cmd.env_remove(var);
+    }
+}
+
 /// Resolve the path to the `claude` binary, checking the usual install
 /// locations on macOS / Linux / Windows in addition to PATH.
 fn resolve_claude_binary() -> Option<String> {
@@ -2775,9 +2793,14 @@ fn detect_claude_cli() -> Result<ClaudeCliInfo, String> {
     // Ping with a tiny prompt to check auth. Timeout is enforced by the
     // caller via the Tauri command; here we just run synchronously with a
     // short output cap. The CLI exits non-zero when auth is missing.
-    let ping = std::process::Command::new(&binary)
-        .args(["-p", "ping", "--output-format", "text"])
-        .output();
+    //
+    // We strip API-key env vars here too so the detection reflects the
+    // actual OAuth-session state that prompts will use — otherwise a stale
+    // `ANTHROPIC_API_KEY` in the shell would mask the real auth status.
+    let mut ping_cmd = std::process::Command::new(&binary);
+    ping_cmd.args(["-p", "ping", "--output-format", "text"]);
+    strip_claude_auth_env(&mut ping_cmd);
+    let ping = ping_cmd.output();
 
     match ping {
         Ok(out) if out.status.success() => Ok(ClaudeCliInfo {
@@ -2849,6 +2872,7 @@ fn claude_cli_prompt(
 
     let mut cmd = std::process::Command::new(&binary);
     cmd.args(["-p", &full_prompt, "--output-format", &fmt]);
+    strip_claude_auth_env(&mut cmd);
     if let Some(dir) = cwd {
         if !dir.trim().is_empty() {
             cmd.current_dir(dir);
