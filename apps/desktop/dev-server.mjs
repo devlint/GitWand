@@ -427,17 +427,20 @@ const server = createServer(async (req, res) => {
       }
     }
 
-    // GET /api/git-log?cwd=<path>&count=<n>
+    // GET /api/git-log?cwd=<path>&count=<n>&all=<bool>
     if (url.pathname === "/api/git-log" && req.method === "GET") {
       const cwd = url.searchParams.get("cwd");
       const count = parseInt(url.searchParams.get("count") || "50");
+      // Default: current branch only (like `git log`). Pass `all=true` for all refs.
+      const all = url.searchParams.get("all") === "true";
 
       if (!cwd) return jsonResponse(res, { error: "Missing cwd param" }, 400);
 
       try {
         const resolvedCwd = resolve(cwd);
         const format = "%h%x1f%H%x1f%an%x1f%ae%x1f%aI%x1f%s%x1f%b%x1f%P%x1f%D%x1e";
-        const stdout = execSync(`git log --all -n${count} --format="${format}"`, {
+        const allFlag = all ? "--all " : "";
+        const stdout = execSync(`git log ${allFlag}-n${count} --format="${format}"`, {
           cwd: resolvedCwd,
           encoding: "utf-8",
           shell: true,
@@ -1671,7 +1674,7 @@ server.listen(PORT, () => {
   console.log(`    GET  /api/list-dir?path=<path>`);
   console.log(`    GET  /api/git-status?cwd=<path>`);
   console.log(`    GET  /api/git-diff?cwd=<path>&path=<file>&staged=<bool>`);
-  console.log(`    GET  /api/git-log?cwd=<path>&count=<n>`);
+  console.log(`    GET  /api/git-log?cwd=<path>&count=<n>&all=<bool>`);
   console.log(`    GET  /api/gh-list-prs?cwd=<path>&state=<state>`);
   console.log(`    GET  /api/gh-pr-detail?cwd=<path>&number=<n>`);
   console.log(`    GET  /api/gh-pr-diff?cwd=<path>&number=<n>`);

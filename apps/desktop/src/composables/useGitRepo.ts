@@ -56,6 +56,10 @@ export function useGitRepo() {
   const selectedFileStaged = ref(false);
   const diff = ref<GitDiff | null>(null);
   const log = ref<GitLogEntry[]>([]);
+  // Scope of the commit log:
+  //   "current" → only commits reachable from the current branch HEAD (default, like `git log`)
+  //   "all"     → all refs (`git log --all`)
+  const logScope = ref<"current" | "all">("current");
   const loading = ref(false);
   const error = ref<string | null>(null);
   const successMessage = ref<string | null>(null);
@@ -301,12 +305,16 @@ export function useGitRepo() {
   }
 
   /**
-   * Load the commit log.
+   * Load the commit log. Honors `logScope` (current branch vs all refs).
    */
   async function loadLog(count?: number) {
     if (!folderPath.value) return;
     try {
-      log.value = await getGitLog(folderPath.value, count);
+      log.value = await getGitLog(
+        folderPath.value,
+        count,
+        logScope.value === "all",
+      );
       // If a commit was selected but its diffs were lost, reload them
       if (selectedCommitHash.value && commitDiffs.value.length === 0) {
         commitDiffs.value = await getGitShow(folderPath.value, selectedCommitHash.value);
@@ -314,6 +322,15 @@ export function useGitRepo() {
     } catch (err: any) {
       error.value = `git log: ${err.message}`;
     }
+  }
+
+  /**
+   * Switch the log scope (current branch vs all refs) and reload the log.
+   */
+  async function setLogScope(scope: "current" | "all") {
+    if (logScope.value === scope) return;
+    logScope.value = scope;
+    await loadLog();
   }
 
   /**
@@ -757,6 +774,7 @@ export function useGitRepo() {
     selectedFileStaged,
     diff,
     log,
+    logScope,
     loading,
     error,
     successMessage,
@@ -791,6 +809,7 @@ export function useGitRepo() {
     refresh,
     selectFile,
     loadLog,
+    setLogScope,
     stageFiles,
     stageAll,
     unstageFiles,

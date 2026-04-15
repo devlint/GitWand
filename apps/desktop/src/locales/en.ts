@@ -75,6 +75,12 @@ const en: Locale = {
     tabBranches: "Branches",
     tabLog: "Log",
     tabGraph: "Graph",
+    // Log scope toggle (current branch vs all refs)
+    logScopeLabel: "Log scope",
+    logScopeCurrent: "Current branch",
+    logScopeCurrentTitle: "Only show commits reachable from branch \u201c{0}\u201d",
+    logScopeAll: "All branches",
+    logScopeAllTitle: "Show commits from all branches",
     // Sections
     sectionConflicts: "Conflicts",
     sectionStaged: "Staged",

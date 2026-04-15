@@ -431,19 +431,27 @@ struct GitLogEntry {
 }
 
 #[tauri::command]
-fn git_log(cwd: String, count: Option<i32>) -> Result<Vec<GitLogEntry>, String> {
+fn git_log(
+    cwd: String,
+    count: Option<i32>,
+    all: Option<bool>,
+) -> Result<Vec<GitLogEntry>, String> {
     let limit = count.unwrap_or(50);
+    // Default: current branch only (like `git log`). Pass `all: true` to include all refs.
+    let include_all = all.unwrap_or(false);
 
     // Use unit separator (ASCII 0x1f) to delimit fields
     let format = "%h%x1f%H%x1f%an%x1f%ae%x1f%aI%x1f%s%x1f%b%x1f%P%x1f%D%x1e";
 
+    let mut args: Vec<String> = vec!["log".to_string()];
+    if include_all {
+        args.push("--all".to_string());
+    }
+    args.push(format!("-n{}", limit));
+    args.push(format!("--format={}", format));
+
     let output = std::process::Command::new(git_binary())
-        .args([
-            "log",
-            "--all",
-            &format!("-n{}", limit),
-            &format!("--format={}", format),
-        ])
+        .args(&args)
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to run git log: {}", e))?;

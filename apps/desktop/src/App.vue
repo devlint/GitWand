@@ -61,6 +61,7 @@ const {
   selectedFilePath: repoSelectedFile,
   diff: repoDiff,
   log: repoLog,
+  logScope,
   loading: repoLoading,
   error: repoError,
   successMessage: repoSuccess,
@@ -86,6 +87,7 @@ const {
   refresh: repoRefresh,
   selectFile: repoSelectFile,
   loadLog,
+  setLogScope,
   stageFiles,
   stageAll,
   unstageFiles,
@@ -655,6 +657,8 @@ onUnmounted(() => {
           :is-committing="isCommitting"
           :log-entries="repoLog"
           :log-loading="repoLoading"
+          :log-scope="logScope"
+          :current-branch="repoStatus?.branch ?? ''"
           :selected-commit-hash="selectedCommitHash"
           :ahead-count="aheadCount"
           :dir-files="expandedDirFiles"
@@ -670,6 +674,7 @@ onUnmounted(() => {
           @update:commit-description="(val) => commitDescription = val"
           @select-commit="selectCommit"
           @edit-commit="handleEditCommit"
+          @update:log-scope="setLogScope"
           @discard="(path, section) => discardFiles([path], section === 'untracked')"
           @add-to-gitignore="(path) => addToGitignore(path)"
         />

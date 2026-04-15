@@ -20,6 +20,10 @@ const props = defineProps<{
   logLoading: boolean;
   selectedCommitHash: string | null;
   aheadCount: number;
+  /** Scope of the commit log: only the current branch, or all refs. */
+  logScope: "current" | "all";
+  /** Display name of the current branch (for the toggle label). */
+  currentBranch: string;
   /** Files inside the currently-selected untracked directory */
   dirFiles?: string[];
 }>();
@@ -36,6 +40,8 @@ const emit = defineEmits<{
   "update:commitDescription": [value: string];
   selectCommit: [hash: string];
   editCommit: [entry: GitLogEntry];
+  /** Change the log scope toggle (current branch vs all refs). */
+  "update:logScope": [scope: "current" | "all"];
   /** Select a specific file inside an expanded untracked directory */
   "select-dir-file": [path: string];
   /** Discard changes to a file (tracked: restore, untracked: delete) */
@@ -368,6 +374,33 @@ function onCommitKeydown(e: KeyboardEvent) {
 
     <!-- History view: commit log in sidebar -->
     <div class="sidebar-log" v-if="viewMode === 'history'">
+      <!-- Scope toggle: current branch vs all refs -->
+      <div
+        class="log-scope-toggle"
+        role="tablist"
+        :aria-label="t('sidebar.logScopeLabel')"
+      >
+        <button
+          class="log-scope-btn"
+          :class="{ 'log-scope-btn--active': logScope === 'current' }"
+          role="tab"
+          :aria-selected="logScope === 'current'"
+          :title="currentBranch ? t('sidebar.logScopeCurrentTitle', currentBranch) : t('sidebar.logScopeCurrent')"
+          @click="emit('update:logScope', 'current')"
+        >
+          {{ t('sidebar.logScopeCurrent') }}
+        </button>
+        <button
+          class="log-scope-btn"
+          :class="{ 'log-scope-btn--active': logScope === 'all' }"
+          role="tab"
+          :aria-selected="logScope === 'all'"
+          :title="t('sidebar.logScopeAllTitle')"
+          @click="emit('update:logScope', 'all')"
+        >
+          {{ t('sidebar.logScopeAll') }}
+        </button>
+      </div>
       <CommitLog
         :entries="logEntries"
         :loading="logLoading"
@@ -478,6 +511,49 @@ function onCommitKeydown(e: KeyboardEvent) {
 .sidebar-log {
   flex: 1;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Log scope toggle (current branch vs all refs) */
+.log-scope-toggle {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-6);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.log-scope-btn {
+  flex: 1;
+  padding: var(--space-2) var(--space-4);
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm, 4px);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 50%;
+}
+
+.log-scope-btn:hover {
+  background: var(--color-bg-hover, rgba(0, 0, 0, 0.04));
+  color: var(--color-text);
+}
+
+.log-scope-btn--active {
+  background: var(--color-accent, #3b82f6);
+  color: var(--color-accent-text, #ffffff);
+  border-color: var(--color-accent, #3b82f6);
+}
+
+.log-scope-btn--active:hover {
+  background: var(--color-accent, #3b82f6);
+  color: var(--color-accent-text, #ffffff);
 }
 
 .sidebar-prs {

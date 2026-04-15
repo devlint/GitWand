@@ -77,6 +77,12 @@ const fr = {
     tabBranches: "Branches",
     tabLog: "Log",
     tabGraph: "Graphe",
+    // Log scope toggle (current branch vs all refs)
+    logScopeLabel: "Portée du log",
+    logScopeCurrent: "Branche courante",
+    logScopeCurrentTitle: "Afficher uniquement les commits de la branche « {0} »",
+    logScopeAll: "Toutes les branches",
+    logScopeAllTitle: "Afficher les commits de toutes les branches",
     // Sections
     sectionConflicts: "Conflits",
     sectionStaged: "Indexés",

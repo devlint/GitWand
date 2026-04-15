@@ -325,8 +325,17 @@ export interface GitLogEntry {
 
 /**
  * Get recent commits from a Git repository.
+ *
+ * @param cwd  Repository path.
+ * @param count  Max number of commits to return (default 50).
+ * @param all  When `true`, include commits from all refs (`git log --all`).
+ *             Default `false` → only commits reachable from the current branch HEAD.
  */
-export async function getGitLog(cwd: string, count?: number): Promise<GitLogEntry[]> {
+export async function getGitLog(
+  cwd: string,
+  count?: number,
+  all?: boolean,
+): Promise<GitLogEntry[]> {
   if (isTauri()) {
     const raw = await tauriInvoke<
       Array<{
@@ -340,7 +349,7 @@ export async function getGitLog(cwd: string, count?: number): Promise<GitLogEntr
         parents: string[];
         refs: string;
       }>
-    >("git_log", { cwd, count: count ?? 50 });
+    >("git_log", { cwd, count: count ?? 50, all: all ?? false });
 
     return raw.map((e) => ({
       hash: e.hash,
@@ -355,7 +364,7 @@ export async function getGitLog(cwd: string, count?: number): Promise<GitLogEntr
     }));
   }
 
-  const qs = `?cwd=${encodeURIComponent(cwd)}&count=${count ?? 50}`;
+  const qs = `?cwd=${encodeURIComponent(cwd)}&count=${count ?? 50}&all=${all ? "true" : "false"}`;
   const res = await fetch(`${DEV_SERVER}/api/git-log${qs}`);
   if (!res.ok) throw new Error(`Failed to get git log: ${res.status}`);
   return res.json();
