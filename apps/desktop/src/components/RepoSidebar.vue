@@ -20,6 +20,8 @@ const props = defineProps<{
   logLoading: boolean;
   selectedCommitHash: string | null;
   aheadCount: number;
+  /** True when the current branch has no upstream (no origin/<branch>). */
+  needsPublish?: boolean;
   /** Scope of the commit log: only the current branch, or all refs. */
   logScope: "current" | "all";
   /** Display name of the current branch (for the toggle label). */
@@ -454,6 +456,7 @@ function formatActivityDate(dateStr: string): string {
         :loading="logLoading"
         :selected-hash="selectedCommitHash"
         :ahead-count="aheadCount"
+        :needs-publish="needsPublish"
         @select-commit="(hash: string) => emit('selectCommit', hash)"
         @edit-commit="(entry) => emit('editCommit', entry)"
       />

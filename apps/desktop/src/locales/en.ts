@@ -216,6 +216,8 @@ const en: Locale = {
     noDiffForCommit: "No diff for this commit",
     unpushedOne: "unpushed commit",
     unpushedMany: "unpushed commits",
+    unpublishedBranch: "Unpublished branch",
+    unpublishedBadge: "unpublished",
     pushed: "Pushed to remote",
     editMessage: "Edit commit message",
     amendConfirm: "Amend commit",

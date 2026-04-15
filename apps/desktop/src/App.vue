@@ -686,6 +686,7 @@ onUnmounted(() => {
           :current-branch="repoStatus?.branch ?? ''"
           :selected-commit-hash="selectedCommitHash"
           :ahead-count="aheadCount"
+          :needs-publish="needsPublish"
           :dir-files="expandedDirFiles"
           :branches="branches"
           @select="onRepoFileSelect"

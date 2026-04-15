@@ -9,7 +9,22 @@ const props = defineProps<{
   loading: boolean;
   selectedHash: string | null;
   aheadCount?: number;
+  /**
+   * True when the current branch has no upstream configured yet.
+   * In that case every local commit is effectively "unpushed" because
+   * origin does not know about this branch at all.
+   */
+  needsPublish?: boolean;
 }>();
+
+/**
+ * Effective count of unpushed commits used for styling:
+ * - when the branch has no upstream, every local commit is unpushed
+ * - otherwise, use aheadCount reported by git status
+ */
+const effectiveAhead = computed(() =>
+  props.needsPublish ? props.entries.length : (props.aheadCount ?? 0),
+);
 
 const emit = defineEmits<{
   selectCommit: [hash: string];
@@ -60,15 +75,20 @@ function authorColor(name: string): string {
 
     <ul class="log-list" v-else-if="entries.length > 0">
       <template v-for="(entry, idx) in entries" :key="entry.hashFull">
-        <!-- Section label before first unpushed commit -->
-        <li v-if="aheadCount && aheadCount > 0 && idx === 0" class="log-section-label log-section-label--unpushed">
+        <!-- Section label before first unpushed commit (or unpublished branch) -->
+        <li
+          v-if="effectiveAhead > 0 && idx === 0"
+          class="log-section-label"
+          :class="needsPublish ? 'log-section-label--unpublished' : 'log-section-label--unpushed'"
+        >
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <path d="M8 13V3M5 6l3-3 3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
-          <span>{{ aheadCount }} {{ aheadCount === 1 ? t('log.unpushedOne') : t('log.unpushedMany') }}</span>
+          <span v-if="needsPublish">{{ t('log.unpublishedBranch') }}</span>
+          <span v-else>{{ effectiveAhead }} {{ effectiveAhead === 1 ? t('log.unpushedOne') : t('log.unpushedMany') }}</span>
         </li>
         <!-- Section label before first pushed commit -->
-        <li v-if="aheadCount && aheadCount > 0 && idx === aheadCount" class="log-section-label log-section-label--pushed">
+        <li v-if="!needsPublish && effectiveAhead > 0 && idx === effectiveAhead" class="log-section-label log-section-label--pushed">
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <path d="M13.5 3.5l-7 7L3 7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
@@ -79,7 +99,7 @@ function authorColor(name: string): string {
           class="commit-item"
           :class="{
             'commit-item--selected': selectedHash === entry.hashFull,
-            'commit-item--unpushed': aheadCount != null && idx < aheadCount,
+            'commit-item--unpushed': idx < effectiveAhead,
           }"
           @click="emit('selectCommit', entry.hashFull)"
           tabindex="0"
@@ -91,7 +111,7 @@ function authorColor(name: string): string {
           <div class="commit-info">
             <div class="commit-message">
               {{ entry.message }}
-              <span v-if="aheadCount != null && idx < aheadCount" class="unpushed-badge">unpushed</span>
+              <span v-if="idx < effectiveAhead" class="unpushed-badge">{{ needsPublish ? t('log.unpublishedBadge') : 'unpushed' }}</span>
             </div>
             <div class="commit-meta">
               <span class="commit-hash mono">{{ entry.hash }}</span>
@@ -178,6 +198,12 @@ function authorColor(name: string): string {
   color: var(--color-warning);
   background: var(--color-bg-secondary);
   border-left: 3px solid var(--color-warning);
+}
+
+.log-section-label--unpublished {
+  color: var(--color-accent);
+  background: var(--color-bg-secondary);
+  border-left: 3px solid var(--color-accent);
 }
 
 .log-section-label--pushed {

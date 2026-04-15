@@ -218,6 +218,8 @@ const fr = {
     noDiffForCommit: "Pas de diff pour ce commit",
     unpushedOne: "commit non push\u00e9",
     unpushedMany: "commits non push\u00e9s",
+    unpublishedBranch: "Branche non publi\u00e9e",
+    unpublishedBadge: "non publi\u00e9",
     pushed: "Push\u00e9s sur le remote",
     editMessage: "Modifier le message de commit",
     amendConfirm: "Modifier le commit",
