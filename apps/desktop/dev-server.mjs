@@ -1589,7 +1589,19 @@ const server = createServer(async (req, res) => {
         });
         if (!resp.ok) {
           const errBody = await resp.json().catch(() => ({}));
-          return jsonResponse(res, { error: errBody.message || `GitHub API ${resp.status}` }, 500);
+          console.warn("[gh-pr-submit-review] GitHub error", resp.status, errBody);
+          // GitHub's 422 body for reviews uses two shapes:
+          //   { message: "...", errors: ["Can not approve your own pull request"] }   ← array of strings
+          //   { message: "...", errors: [{ message: "...", code: "..." }] }           ← array of objects
+          // Handle both and fall back to stringifying the body.
+          let detail = "";
+          if (Array.isArray(errBody.errors) && errBody.errors.length > 0) {
+            const first = errBody.errors[0];
+            const text = typeof first === "string" ? first : (first?.message || first?.code || JSON.stringify(first));
+            if (text) detail = ` — ${text}`;
+          }
+          const message = `${errBody.message || `GitHub API ${resp.status}`}${detail}`;
+          return jsonResponse(res, { error: message }, resp.status);
         }
         const review = await resp.json();
         return jsonResponse(res, review);

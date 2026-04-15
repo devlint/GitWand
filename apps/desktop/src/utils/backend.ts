@@ -1677,9 +1677,12 @@ export async function ghPrSubmitReview(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ cwd, number: prNumber, ...opts }),
   });
-  if (!res.ok) throw new Error(`gh pr submit review failed: ${res.status}`);
-  const raw = await res.json();
-  if (raw.error) throw new Error(raw.error);
+  // Prefer the server's JSON error body over a generic status message.
+  const raw = await res.json().catch(() => null);
+  if (!res.ok || (raw && raw.error)) {
+    const msg = raw?.error || `gh pr submit review failed (HTTP ${res.status})`;
+    throw new Error(msg);
+  }
   return raw as PrReview;
 }
 
