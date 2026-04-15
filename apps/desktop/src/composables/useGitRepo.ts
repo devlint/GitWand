@@ -455,6 +455,11 @@ export function useGitRepo() {
       lastCommitHash.value = hash;
       commitSummary.value = "";
       commitDescription.value = getCommitSignatureDefault();
+      // Clear the diff viewer: the committed file is no longer in the
+      // working tree, so keeping it selected would show a stale/empty diff.
+      selectedFilePath.value = null;
+      selectedFileStaged.value = false;
+      diff.value = null;
       await refresh();
       await loadLog();
     } catch (err: any) {
@@ -474,6 +479,11 @@ export function useGitRepo() {
       : summary.trim();
     try {
       await gitAmendCommit(folderPath.value, fullMessage);
+      // Reset the diff viewer — the amended file(s) are no longer in the
+      // working tree, so the previously selected diff would be stale.
+      selectedFilePath.value = null;
+      selectedFileStaged.value = false;
+      diff.value = null;
       await refresh();
       await loadLog();
     } catch (err: any) {
