@@ -1312,6 +1312,34 @@ export async function ghCreatePr(
 }
 
 /**
+ * Reviewer suggestion (assignee/collaborator candidate from the GitHub repo).
+ */
+export interface ReviewerCandidate {
+  login: string;
+  name?: string | null;
+  avatarUrl?: string | null;
+}
+
+/**
+ * List candidate reviewers for the current repo (requires `gh` CLI).
+ * Returns assignees from `gh api /repos/:owner/:repo/assignees` — i.e. users with push access.
+ */
+export async function ghListReviewerCandidates(cwd: string): Promise<ReviewerCandidate[]> {
+  if (isTauri()) {
+    const raw = await tauriInvoke<
+      Array<{ login: string; name?: string | null; avatar_url?: string | null }>
+    >("gh_list_reviewer_candidates", { cwd });
+    return raw.map((u) => ({
+      login: u.login,
+      name: u.name ?? null,
+      avatarUrl: u.avatar_url ?? null,
+    }));
+  }
+  // Browser dev mode — not available
+  return [];
+}
+
+/**
  * Checkout a PR branch locally (requires `gh` CLI).
  */
 export async function ghCheckoutPr(cwd: string, number: number): Promise<void> {

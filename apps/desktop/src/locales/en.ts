@@ -358,6 +358,7 @@ const en: Locale = {
       reviewersLabel: "Reviewers",
       reviewersPlaceholder: "Add a reviewer (GitHub username or org/team)\u2026",
       reviewersHint: "Type a name then press Enter, space or comma. Use org/team-slug for a team. Reviewers will be notified on creation.",
+      reviewersLoading: "Loading reviewers\u2026",
     },
   },
 

@@ -360,6 +360,7 @@ const fr = {
       reviewersLabel: "Reviewers",
       reviewersPlaceholder: "Ajouter un reviewer (username GitHub ou org/team)\u2026",
       reviewersHint: "Tape un nom puis Entrée, espace ou virgule. Utilise org/team-slug pour une équipe. Les reviewers recevront une notification à la création.",
+      reviewersLoading: "Chargement des reviewers\u2026",
     },
   },
 

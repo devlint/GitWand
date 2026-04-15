@@ -1903,6 +1903,90 @@ fn gh_create_pr(
     })
 }
 
+/// Reviewer candidate (assignable user on the GitHub repo).
+#[derive(serde::Serialize)]
+struct ReviewerCandidate {
+    login: String,
+    name: Option<String>,
+    avatar_url: Option<String>,
+}
+
+/// List candidate reviewers for the current repo using `gh` CLI.
+///
+/// Calls `gh api /repos/:owner/:repo/assignees` (paginated) which returns
+/// users with push access — exactly the set GitHub allows as reviewers.
+#[tauri::command]
+fn gh_list_reviewer_candidates(cwd: String) -> Result<Vec<ReviewerCandidate>, String> {
+    // Discover owner/repo from the current repo.
+    let view = std::process::Command::new("gh")
+        .args(["repo", "view", "--json", "owner,name"])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("Failed to inspect repo: {}", e))?;
+    if !view.status.success() {
+        return Err(format!(
+            "gh repo view failed: {}",
+            String::from_utf8_lossy(&view.stderr)
+        ));
+    }
+    #[derive(serde::Deserialize)]
+    struct OwnerLogin { login: String }
+    #[derive(serde::Deserialize)]
+    struct RepoView { owner: OwnerLogin, name: String }
+    let repo: RepoView = serde_json::from_slice(&view.stdout)
+        .map_err(|e| format!("Failed to parse repo view: {}", e))?;
+    let endpoint = format!("/repos/{}/{}/assignees", repo.owner.login, repo.name);
+
+    // Fetch up to ~300 candidates (3 pages of 100). Plenty for typical repos.
+    let output = std::process::Command::new("gh")
+        .args([
+            "api",
+            "--paginate",
+            "-H", "Accept: application/vnd.github+json",
+            &endpoint,
+            "--jq", "[.[] | {login: .login, name: .name, avatar_url: .avatar_url}]",
+        ])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("Failed to list reviewer candidates: {}", e))?;
+    if !output.status.success() {
+        return Err(format!(
+            "gh api assignees failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    // --paginate concatenates JSON arrays page-by-page (one per line).
+    // Parse each non-empty line as a JSON array and flatten.
+    let raw = String::from_utf8_lossy(&output.stdout);
+    let mut all: Vec<ReviewerCandidate> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for chunk in raw.split('\n') {
+        let trimmed = chunk.trim();
+        if trimmed.is_empty() { continue; }
+        // gh might return either a single array per chunk (--jq with array wrapper)
+        // or NDJSON of arrays. Try to parse as Value and walk.
+        let value: serde_json::Value = match serde_json::from_str(trimmed) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        if let Some(arr) = value.as_array() {
+            for item in arr {
+                let login = item.get("login").and_then(|v| v.as_str()).unwrap_or("");
+                if login.is_empty() || !seen.insert(login.to_string()) { continue; }
+                all.push(ReviewerCandidate {
+                    login: login.to_string(),
+                    name: item.get("name").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    avatar_url: item.get("avatar_url").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                });
+            }
+        }
+    }
+    // Sort alphabetically by login for stable UX.
+    all.sort_by(|a, b| a.login.to_lowercase().cmp(&b.login.to_lowercase()));
+    Ok(all)
+}
+
 /// Checkout a PR branch locally using `gh` CLI.
 #[tauri::command]
 fn gh_checkout_pr(cwd: String, number: i64) -> Result<(), String> {
@@ -2671,6 +2755,7 @@ pub fn run() {
             git_remote_info,
             gh_list_prs,
             gh_create_pr,
+            gh_list_reviewer_candidates,
             gh_checkout_pr,
             gh_merge_pr,
             gh_pr_detail,

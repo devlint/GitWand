@@ -10,14 +10,15 @@
  * - Confirmation modal (not native confirm()) when switching templates
  *   on a non-empty body
  */
-import { computed, inject, nextTick, ref, useTemplateRef, watch } from "vue";
+import { computed, inject, nextTick, onMounted, ref, useTemplateRef, watch } from "vue";
 import { PR_PANEL_KEY, type PrPanelState } from "../composables/usePrPanel";
-import type { GitBranch } from "../utils/backend";
+import { ghListReviewerCandidates, type GitBranch, type ReviewerCandidate } from "../utils/backend";
 import { useI18n } from "../composables/useI18n";
 
 const props = defineProps<{
   currentBranch: string;
   branches: GitBranch[];
+  cwd: string;
 }>();
 
 const emit = defineEmits<{ (e: "cancel"): void }>();
@@ -320,36 +321,131 @@ function onBaseInput(e: Event) {
 }
 
 // ─── Reviewers ──────────────────────────────────────────
-// Simple tag-style input: user types a username (or org/team-slug), press
-// Enter, space or comma to add. Backspace on empty input removes the last.
+// Tag-style input with autocomplete: candidates are fetched from
+// gh api /repos/:owner/:repo/assignees on mount, then filtered locally
+// as the user types. Enter/Tab on the active suggestion adds it.
 const reviewerInput = ref("");
+const reviewerCandidates = ref<ReviewerCandidate[]>([]);
+const reviewerCandidatesLoading = ref(false);
+const reviewerSuggestOpen = ref(false);
+const reviewerActiveIdx = ref(0);
+
+onMounted(async () => {
+  if (!props.cwd) return;
+  reviewerCandidatesLoading.value = true;
+  try {
+    reviewerCandidates.value = await ghListReviewerCandidates(props.cwd);
+  } catch {
+    // Silently ignore — autocomplete is optional, manual typing still works.
+    reviewerCandidates.value = [];
+  } finally {
+    reviewerCandidatesLoading.value = false;
+  }
+});
+
+const filteredCandidates = computed<ReviewerCandidate[]>(() => {
+  const q = reviewerInput.value.trim().replace(/^@/, "").toLowerCase();
+  const already = new Set(p.newPrReviewers.value.map((r) => r.toLowerCase()));
+  return reviewerCandidates.value
+    .filter((c) => !already.has(c.login.toLowerCase()))
+    .filter((c) => {
+      if (!q) return true;
+      const login = c.login.toLowerCase();
+      const name = (c.name ?? "").toLowerCase();
+      return login.includes(q) || name.includes(q);
+    })
+    .slice(0, 8);
+});
+
+watch(reviewerInput, () => {
+  reviewerActiveIdx.value = 0;
+  reviewerSuggestOpen.value = true;
+});
+
+watch(filteredCandidates, (list) => {
+  if (reviewerActiveIdx.value >= list.length) reviewerActiveIdx.value = 0;
+});
 
 function addReviewer(raw: string) {
   const name = raw.trim().replace(/^@/, "").replace(/,+$/, "");
   if (!name) return;
-  if (p.newPrReviewers.value.includes(name)) return;
+  if (p.newPrReviewers.value.some((r) => r.toLowerCase() === name.toLowerCase())) return;
   p.newPrReviewers.value = [...p.newPrReviewers.value, name];
 }
 
+function pickCandidate(c: ReviewerCandidate) {
+  addReviewer(c.login);
+  reviewerInput.value = "";
+  reviewerActiveIdx.value = 0;
+  reviewerSuggestOpen.value = true;
+  // refocus input
+  nextTick(() => {
+    const el = document.getElementById("pcv-reviewer-input") as HTMLInputElement | null;
+    el?.focus();
+  });
+}
+
 function onReviewerKeydown(e: KeyboardEvent) {
+  const list = filteredCandidates.value;
+  // Navigation when suggestions are visible
+  if (reviewerSuggestOpen.value && list.length > 0) {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      reviewerActiveIdx.value = (reviewerActiveIdx.value + 1) % list.length;
+      return;
+    }
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      reviewerActiveIdx.value = (reviewerActiveIdx.value - 1 + list.length) % list.length;
+      return;
+    }
+    if (e.key === "Tab" && reviewerInput.value.trim()) {
+      e.preventDefault();
+      pickCandidate(list[reviewerActiveIdx.value]);
+      return;
+    }
+    if (e.key === "Enter") {
+      // Prefer the highlighted candidate; fall back to raw input.
+      e.preventDefault();
+      if (list[reviewerActiveIdx.value]) {
+        pickCandidate(list[reviewerActiveIdx.value]);
+      } else if (reviewerInput.value.trim()) {
+        addReviewer(reviewerInput.value);
+        reviewerInput.value = "";
+      }
+      return;
+    }
+  }
+
+  if (e.key === "Escape") {
+    reviewerSuggestOpen.value = false;
+    return;
+  }
+
   if (e.key === "Enter" || e.key === "," || e.key === " ") {
     if (reviewerInput.value.trim()) {
       e.preventDefault();
       addReviewer(reviewerInput.value);
       reviewerInput.value = "";
-    } else if (e.key === "Enter") {
-      // let Ctrl+Enter global handler still submit
     }
   } else if (e.key === "Backspace" && reviewerInput.value === "" && p.newPrReviewers.value.length > 0) {
     p.newPrReviewers.value = p.newPrReviewers.value.slice(0, -1);
   }
 }
 
+function onReviewerFocus() {
+  reviewerSuggestOpen.value = true;
+}
+
 function onReviewerBlur() {
+  // Commit any pending raw text, then close the dropdown after a short delay
+  // so click events on suggestions can fire first.
   if (reviewerInput.value.trim()) {
-    addReviewer(reviewerInput.value);
-    reviewerInput.value = "";
+    // Don't auto-add raw text on blur — let users dismiss without surprises
+    // (they can use Enter/Tab/comma to add explicitly). Keeping this allows
+    // clicking outside to cancel a partial entry.
   }
+  setTimeout(() => { reviewerSuggestOpen.value = false; }, 120);
 }
 
 function removeReviewer(name: string) {
@@ -525,8 +621,42 @@ function removeReviewer(name: string) {
             spellcheck="false"
             autocomplete="off"
             @keydown="onReviewerKeydown"
+            @focus="onReviewerFocus"
             @blur="onReviewerBlur"
           />
+
+          <!-- Autocomplete dropdown -->
+          <div
+            v-if="reviewerSuggestOpen && (filteredCandidates.length > 0 || reviewerCandidatesLoading)"
+            class="pcv-reviewer-suggest"
+            @mousedown.prevent
+          >
+            <div v-if="reviewerCandidatesLoading && filteredCandidates.length === 0" class="pcv-suggest-empty">
+              {{ t("pr.create.reviewersLoading") }}
+            </div>
+            <button
+              v-for="(c, idx) in filteredCandidates"
+              :key="c.login"
+              type="button"
+              class="pcv-suggest-item"
+              :class="{ 'pcv-suggest-item--active': idx === reviewerActiveIdx }"
+              @click="pickCandidate(c)"
+              @mouseenter="reviewerActiveIdx = idx"
+            >
+              <img
+                v-if="c.avatarUrl"
+                :src="c.avatarUrl"
+                :alt="c.login"
+                class="pcv-suggest-avatar"
+                referrerpolicy="no-referrer"
+              />
+              <span v-else class="pcv-suggest-avatar" aria-hidden="true"></span>
+              <span class="pcv-suggest-text">
+                <span class="pcv-suggest-login">{{ c.login }}</span>
+                <span v-if="c.name" class="pcv-suggest-name">{{ c.name }}</span>
+              </span>
+            </button>
+          </div>
         </div>
         <p class="pcv-hint">{{ t("pr.create.reviewersHint") }}</p>
       </section>
@@ -586,52 +716,60 @@ function removeReviewer(name: string) {
 </template>
 
 <style scoped>
-/* ─── Root: full-bleed, theme bg ─────────────────────── */
+/* ─── Root: full-bleed, white page bg ────────────────── */
 .pcv-root {
   position: relative;
   width: 100%;
   height: 100%;
-  background: var(--color-bg);
+  background: var(--color-bg-secondary);
   overflow-y: auto;
   box-sizing: border-box;
 }
 
 .pcv-container {
-  max-width: 920px;
+  max-width: 880px;
   margin: 0 auto;
-  padding: var(--space-6) var(--space-8) var(--space-8);
+  padding: var(--space-9) var(--space-9) var(--space-8);
   display: flex;
   flex-direction: column;
-  gap: var(--space-5);
+  gap: var(--space-9);
   min-height: 100%;
   box-sizing: border-box;
 }
 
 /* ─── Header ─────────────────────────────────────────── */
 .pcv-header {
-  padding-bottom: var(--space-4);
+  padding-bottom: var(--space-6);
   border-bottom: 1px solid var(--color-border);
 }
 .pcv-title {
-  font-size: var(--font-size-xl, 18px);
+  font-size: var(--font-size-2xl);
   font-weight: var(--font-weight-bold);
-  margin: 0 0 4px 0;
+  margin: 0 0 var(--space-3) 0;
   color: var(--color-text);
+  letter-spacing: -0.01em;
+  line-height: 1.2;
 }
 .pcv-subtitle {
   margin: 0;
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-md);
   color: var(--color-text-muted);
-  line-height: 1.4;
+  line-height: 1.5;
+  max-width: 640px;
 }
 
 /* ─── Sections ───────────────────────────────────────── */
-.pcv-section { display: flex; flex-direction: column; gap: var(--space-2); }
+.pcv-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
 .pcv-label {
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-bold);
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
   color: var(--color-text);
-  letter-spacing: 0.02em;
+  letter-spacing: -0.005em;
+  line-height: 1.3;
 }
 .pcv-label-row {
   display: flex;
@@ -645,93 +783,135 @@ function removeReviewer(name: string) {
 .pcv-flow {
   display: flex;
   align-items: stretch;
-  gap: var(--space-2);
+  gap: var(--space-4);
   flex-wrap: wrap;
 }
 .pcv-branch {
   flex: 1 1 260px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: var(--space-2) var(--space-3);
+  gap: var(--space-3);
+  padding: var(--space-5) var(--space-6);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-md, 6px);
-  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
   min-width: 0;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
-.pcv-branch--from { border-left: 3px solid var(--color-accent); }
-.pcv-branch--to   { border-left: 3px solid var(--color-success); }
-.pcv-branch--invalid { border-color: var(--color-danger); background: var(--color-danger-soft); }
+.pcv-branch--from {
+  border-left: 3px solid var(--color-accent);
+}
+.pcv-branch--to {
+  border-left: 3px solid var(--color-success);
+}
+.pcv-branch--invalid {
+  border-color: var(--color-danger);
+  background: var(--color-danger-soft);
+}
 .pcv-branch-role {
-  font-size: 10px;
+  font-size: var(--font-size-xs);
   font-weight: var(--font-weight-bold);
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.1em;
   color: var(--color-text-muted);
 }
 .pcv-branch-name {
   font-size: var(--font-size-md);
-  font-weight: var(--font-weight-medium);
+  font-weight: var(--font-weight-semibold);
   color: var(--color-text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .pcv-branch-select {
-  background: var(--color-bg);
+  background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   color: var(--color-text);
   font-size: var(--font-size-md);
   font-family: var(--font-mono, monospace);
-  padding: 4px 8px;
+  padding: var(--space-3) var(--space-4);
   outline: none;
-  transition: border-color var(--transition-fast);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
-.pcv-branch-select:focus { border-color: var(--color-accent); }
-.pcv-arrow { color: var(--color-text-muted); align-self: center; flex-shrink: 0; }
+.pcv-branch-select:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
+}
+.pcv-arrow {
+  color: var(--color-text-muted);
+  align-self: center;
+  flex-shrink: 0;
+  opacity: 0.6;
+}
 
 /* ─── Inputs ─────────────────────────────────────────── */
 .pcv-input {
   background: var(--color-bg);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   color: var(--color-text);
   font-size: var(--font-size-md);
-  padding: 8px 10px;
+  padding: var(--space-4) var(--space-5);
   outline: none;
-  transition: border-color var(--transition-fast);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
   font-family: inherit;
   box-sizing: border-box;
   width: 100%;
 }
-.pcv-input:focus { border-color: var(--color-accent); }
+.pcv-input:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
+}
 .pcv-input--title {
-  font-size: var(--font-size-lg, 14px);
+  font-size: var(--font-size-xl);
   font-weight: var(--font-weight-medium);
+  padding: var(--space-5) var(--space-6);
 }
 
 .pcv-hint {
   font-size: var(--font-size-sm);
   color: var(--color-text-muted);
   margin: 0;
-  line-height: 1.4;
+  line-height: 1.5;
 }
 .pcv-hint--warn { color: var(--color-danger); }
-.pcv-hint-row { display: flex; justify-content: space-between; gap: var(--space-2); }
-.pcv-counter { font-size: var(--font-size-sm); color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
-.pcv-counter--over { color: var(--color-warning); font-weight: var(--font-weight-bold); }
+.pcv-hint-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  align-items: baseline;
+}
+.pcv-counter {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.pcv-counter--over {
+  color: var(--color-warning);
+  font-weight: var(--font-weight-bold);
+}
 
 /* ─── Templates ──────────────────────────────────────── */
-.pcv-templates { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.pcv-template-label { font-size: var(--font-size-sm); color: var(--color-text-muted); }
+.pcv-templates {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.pcv-template-label {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  font-weight: var(--font-weight-medium);
+}
 .pcv-tpl-btn {
-  background: var(--color-bg-tertiary);
+  background: var(--color-bg);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-pill);
   color: var(--color-text-muted);
   font-size: var(--font-size-sm);
-  padding: 2px 10px;
+  font-weight: var(--font-weight-medium);
+  padding: var(--space-2) var(--space-5);
   cursor: pointer;
   transition: color var(--transition-fast), border-color var(--transition-fast), background var(--transition-fast);
 }
@@ -744,60 +924,88 @@ function removeReviewer(name: string) {
 /* ─── Editor chrome (RTE) ────────────────────────────── */
 .pcv-editor {
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-md, 6px);
+  border-radius: var(--radius-md);
   overflow: hidden;
-  background: var(--color-bg);
+  background: var(--color-bg-secondary);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.pcv-editor:focus-within {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
 }
 .pcv-editor-head {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  background: var(--color-bg-secondary);
+  gap: var(--space-5);
+  background: var(--color-bg);
   border-bottom: 1px solid var(--color-border);
-  padding: 4px 6px;
+  padding: var(--space-3) var(--space-4);
   flex-wrap: wrap;
 }
-.pcv-tabs { display: flex; gap: 2px; }
+
+/* Pill-style segmented control (matches main.css .segmented) */
+.pcv-tabs {
+  display: inline-flex;
+  padding: var(--space-1);
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-pill);
+  gap: 0;
+}
 .pcv-tab {
   background: transparent;
   border: none;
   color: var(--color-text-muted);
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-medium);
-  padding: 4px 10px;
-  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-5);
+  border-radius: var(--radius-pill);
   cursor: pointer;
-  transition: background var(--transition-fast), color var(--transition-fast);
+  transition: background var(--transition-fast), color var(--transition-fast), box-shadow var(--transition-fast);
+  line-height: 1.4;
 }
-.pcv-tab:hover { background: var(--color-bg-tertiary); color: var(--color-text); }
+.pcv-tab:hover { color: var(--color-text); }
 .pcv-tab--active {
-  background: var(--color-bg);
+  background: var(--color-bg-secondary);
   color: var(--color-text);
-  box-shadow: inset 0 -2px 0 var(--color-accent);
+  box-shadow: var(--shadow-xs, 0 1px 2px rgba(0, 0, 0, 0.06));
 }
 
-.pcv-toolbar { display: flex; gap: 1px; align-items: center; flex-wrap: wrap; margin-left: auto; }
+.pcv-toolbar {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
 .pcv-tb-btn {
   background: transparent;
   border: none;
   color: var(--color-text-muted);
   font-size: var(--font-size-sm);
   font-family: inherit;
-  padding: 4px 7px;
+  padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-sm);
   cursor: pointer;
-  min-width: 26px;
+  min-width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   line-height: 1;
   transition: background var(--transition-fast), color var(--transition-fast);
 }
 .pcv-tb-btn:hover { background: var(--color-bg-tertiary); color: var(--color-text); }
-.pcv-tb-btn b, .pcv-tb-btn i { font-family: var(--font-mono, monospace); font-style: normal; font-weight: 700; }
+.pcv-tb-btn b, .pcv-tb-btn i {
+  font-family: var(--font-mono, monospace);
+  font-style: normal;
+  font-weight: 700;
+}
 .pcv-tb-btn i { font-style: italic; }
 .pcv-tb-sep {
   width: 1px;
-  height: 16px;
+  height: 18px;
   background: var(--color-border);
-  margin: 0 4px;
+  margin: 0 var(--space-2);
 }
 
 .pcv-textarea {
@@ -806,23 +1014,27 @@ function removeReviewer(name: string) {
   border: none;
   outline: none;
   resize: vertical;
-  min-height: 220px;
-  padding: var(--space-3);
-  background: var(--color-bg);
+  min-height: 260px;
+  padding: var(--space-5) var(--space-6);
+  background: var(--color-bg-secondary);
   color: var(--color-text);
   font-family: var(--font-mono, monospace);
-  font-size: var(--font-size-sm);
-  line-height: 1.6;
+  font-size: var(--font-size-md);
+  line-height: 1.65;
   box-sizing: border-box;
+}
+.pcv-textarea::placeholder {
+  color: var(--color-text-muted);
+  opacity: 0.7;
 }
 
 .pcv-preview {
-  min-height: 220px;
-  padding: var(--space-3) var(--space-4);
-  background: var(--color-bg);
+  min-height: 260px;
+  padding: var(--space-5) var(--space-6);
+  background: var(--color-bg-secondary);
   color: var(--color-text);
   font-size: var(--font-size-md);
-  line-height: 1.6;
+  line-height: 1.65;
 }
 .pcv-preview :deep(h1),
 .pcv-preview :deep(h2),
@@ -876,29 +1088,35 @@ function removeReviewer(name: string) {
 
 /* ─── Reviewers ──────────────────────────────────────── */
 .pcv-reviewers {
+  position: relative;
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: var(--space-2);
   align-items: center;
-  padding: 6px 8px;
+  padding: var(--space-3) var(--space-4);
   background: var(--color-bg);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   cursor: text;
-  min-height: 36px;
+  min-height: 44px;
   box-sizing: border-box;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
-.pcv-reviewers:focus-within { border-color: var(--color-accent); }
+.pcv-reviewers:focus-within {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
+}
 .pcv-reviewer-tag {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-2);
   background: var(--color-accent-soft);
   color: var(--color-accent);
   border: 1px solid var(--color-accent);
   border-radius: var(--radius-pill);
   font-size: var(--font-size-sm);
-  padding: 1px 4px 1px 8px;
+  font-weight: var(--font-weight-medium);
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-4);
   line-height: 1.4;
   font-family: var(--font-mono, monospace);
 }
@@ -923,37 +1141,135 @@ function removeReviewer(name: string) {
 }
 .pcv-reviewer-input {
   flex: 1;
-  min-width: 120px;
+  min-width: 160px;
   background: transparent;
   border: none;
   outline: none;
   color: var(--color-text);
   font-size: var(--font-size-md);
   font-family: inherit;
-  padding: 2px 4px;
+  padding: var(--space-2) var(--space-3);
+}
+
+/* Suggestion dropdown */
+.pcv-reviewer-suggest {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 30;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg, 0 8px 24px rgba(0, 0, 0, 0.18));
+  max-height: 240px;
+  overflow-y: auto;
+  padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.pcv-suggest-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  color: var(--color-text);
+  font-size: var(--font-size-md);
+  font-family: inherit;
+  transition: background var(--transition-fast);
+}
+.pcv-suggest-item:hover,
+.pcv-suggest-item--active {
+  background: var(--color-accent-soft);
+}
+.pcv-suggest-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--color-bg-tertiary);
+  flex-shrink: 0;
+  object-fit: cover;
+}
+.pcv-suggest-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+  flex: 1;
+}
+.pcv-suggest-login {
+  font-family: var(--font-mono, monospace);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pcv-suggest-name {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pcv-suggest-empty {
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  font-style: italic;
 }
 
 /* ─── Options ────────────────────────────────────────── */
 .pcv-check {
   display: flex;
   align-items: flex-start;
-  gap: var(--space-2);
-  padding: var(--space-3);
+  gap: var(--space-4);
+  padding: var(--space-5) var(--space-6);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-md, 6px);
+  border-radius: var(--radius-md);
   cursor: pointer;
-  transition: background var(--transition-fast);
+  background: var(--color-bg);
+  transition: background var(--transition-fast), border-color var(--transition-fast);
 }
-.pcv-check:hover { background: var(--color-bg-secondary); }
-.pcv-check input[type="checkbox"] { margin-top: 2px; flex-shrink: 0; }
-.pcv-check-text { display: flex; flex-direction: column; gap: 2px; }
-.pcv-check-title { font-size: var(--font-size-md); font-weight: var(--font-weight-medium); color: var(--color-text); }
-.pcv-check-hint { font-size: var(--font-size-sm); color: var(--color-text-muted); line-height: 1.4; }
+.pcv-check:hover {
+  background: var(--color-bg-tertiary);
+  border-color: var(--color-text-muted);
+}
+.pcv-check input[type="checkbox"] {
+  margin-top: 3px;
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-accent);
+}
+.pcv-check-text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.pcv-check-title {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
+}
+.pcv-check-hint {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  line-height: 1.5;
+}
 
 /* ─── Messages ───────────────────────────────────────── */
 .pcv-msg {
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-sm);
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-md);
   font-size: var(--font-size-sm);
   border: 1px solid transparent;
 }
@@ -967,25 +1283,25 @@ function removeReviewer(name: string) {
 .pcv-footer {
   display: flex;
   justify-content: flex-end;
-  gap: var(--space-2);
-  padding-top: var(--space-4);
+  gap: var(--space-3);
+  padding: var(--space-5) 0;
   border-top: 1px solid var(--color-border);
   position: sticky;
   bottom: 0;
-  background: var(--color-bg);
+  background: var(--color-bg-secondary);
   margin-top: auto;
 }
 .pcv-btn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 16px;
-  border-radius: var(--radius-sm);
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-7);
+  border-radius: var(--radius-md);
   font-size: var(--font-size-md);
-  font-weight: var(--font-weight-medium);
+  font-weight: var(--font-weight-semibold);
   cursor: pointer;
   border: 1px solid transparent;
-  transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+  transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), filter var(--transition-fast);
 }
 .pcv-btn--ghost {
   background: transparent;
@@ -1037,7 +1353,7 @@ function removeReviewer(name: string) {
 }
 .pcv-modal-icon { margin-bottom: var(--space-4); color: var(--color-warning); }
 .pcv-modal-title {
-  font-size: var(--font-size-lg, 16px);
+  font-size: var(--font-size-xl);
   font-weight: var(--font-weight-bold);
   color: var(--color-text);
   margin: 0 0 var(--space-3);

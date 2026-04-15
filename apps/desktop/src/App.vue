@@ -818,6 +818,7 @@ onUnmounted(() => {
             v-else-if="viewMode === 'prs' && prPanel.showCreateForm.value"
             :current-branch="branchDisplay"
             :branches="branches"
+            :cwd="repoFolderPath ?? ''"
           />
 
           <!-- PRs view: detail panel fills the main area -->
