@@ -6,7 +6,7 @@ export default defineConfig({
   base: '/GitWand/',
 
   head: [
-    ['link', { rel: 'icon', href: '/GitWand/logo.svg' }],
+    ['link', { rel: 'icon', type: 'image/svg+xml', href: '/GitWand/favicon.svg' }],
   ],
 
   themeConfig: {
