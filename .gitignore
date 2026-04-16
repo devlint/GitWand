@@ -51,3 +51,4 @@ packages/core/vitest.config.ts.timestamp-1775816046655-f531427259ff3.mjs
 website/.vitepress/cache
 website/.vitepress/dist
 research/
+.claude/scheduled_tasks.lock
