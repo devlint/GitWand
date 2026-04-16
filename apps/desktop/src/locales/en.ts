@@ -184,6 +184,17 @@ const en: Locale = {
     formatted: "Formatted",
     raw: "Raw",
     noReadme: "No README.md found in this repository",
+    // Release notes
+    releaseNotes: "Release notes",
+    releaseNotesHint: "Generate Markdown release notes with AI",
+    releaseNotesTitle: "Release notes generator",
+    releaseNotesDesc: "Pick a reference range (tags or branches). GitWand analyses the commits and produces a Markdown changelog ready to paste.",
+    releaseNotesFrom: "From",
+    releaseNotesTo: "To",
+    releaseNotesGenerate: "Generate",
+    releaseNotesPlaceholder: "The changelog will appear here once generated.",
+    releaseNotesCopy: "Copy",
+    releaseNotesCopied: "Copied \u2713",
   },
 
   // ─── FileList (merge mode) ──────────────────────────────
