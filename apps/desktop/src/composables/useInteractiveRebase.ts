@@ -1,8 +1,8 @@
 /**
- * useInteractiveRebase — composable for interactive rebase in GitWand.
+ * useInteractiveRebase — Vue composable for interactive rebase in GitWand.
  *
  * Workflow:
- *   1. User picks a base (branch or commit).
+ *   1. User picks a base (branch or commit) in the RebaseEditor UI.
  *   2. `listCommits(cwd, base)` fetches the rebase-eligible commits.
  *   3. User reorders / changes actions in the UI.
  *   4. `startRebase(cwd, base, entries)` calls a dedicated backend
