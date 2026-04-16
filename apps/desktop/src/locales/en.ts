@@ -278,6 +278,31 @@ const en: Locale = {
     conflictsManual: "manual conflict(s)",
   },
 
+  // ─── Interactive Rebase (Phase 1.2.1) ──────────────────
+  rebase: {
+    title: "Interactive rebase",
+    button: "Rebase",
+    baseLabel: "Target branch",
+    baseHint: "Select the branch to rebase your commits onto.",
+    basePlaceholder: "Filter branches\u2026",
+    commitsLabel: "Commits to rebase",
+    commitsHint: "Drag to reorder, click the action badge to cycle. Double-click a message to edit it.",
+    changeBase: "Change base",
+    cycleAction: "Cycle action (click)",
+    dragHint: "Drag to move",
+    start: "Start rebase",
+    running: "Rebasing\u2026",
+    inProgress: "Rebase in progress",
+    conflict: "Conflict",
+    continue: "Continue",
+    abort: "Abort",
+    skip: "Skip",
+    reword: "Edit message",
+    drop: "Drop",
+    restore: "Restore",
+    done: "Rebase completed",
+  },
+
   // ─── EmptyState ─────────────────────────────────────────
   empty: {
     title: "No repository open",

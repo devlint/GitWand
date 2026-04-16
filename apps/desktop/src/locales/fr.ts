@@ -279,6 +279,31 @@ const fr = {
     conflictsManual: "conflit(s) manuel(s)",
   },
 
+  // ─── Interactive Rebase (Phase 1.2.1) ──────────────────
+  rebase: {
+    title: "Rebase interactif",
+    button: "Rebase",
+    baseLabel: "Branche cible",
+    baseHint: "S\u00e9lectionnez la branche sur laquelle rebaser vos commits.",
+    basePlaceholder: "Filtrer les branches\u2026",
+    commitsLabel: "Commits \u00e0 rebaser",
+    commitsHint: "Glissez pour r\u00e9ordonner, cliquez sur l\u2019action pour la changer. Double-clic sur le message pour le modifier.",
+    changeBase: "Changer la base",
+    cycleAction: "Changer l\u2019action (clic)",
+    dragHint: "Glisser pour d\u00e9placer",
+    start: "Lancer le rebase",
+    running: "Rebase en cours\u2026",
+    inProgress: "Rebase en cours",
+    conflict: "Conflit",
+    continue: "Continuer",
+    abort: "Annuler",
+    skip: "Passer",
+    reword: "Modifier le message",
+    drop: "Supprimer",
+    restore: "Restaurer",
+    done: "Rebase termin\u00e9",
+  },
+
   // ─── EmptyState ─────────────────────────────────────────
   empty: {
     title: "Aucun d\u00e9p\u00f4t ouvert",

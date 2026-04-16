@@ -47,6 +47,7 @@ const emit = defineEmits<{
   deleteBranch: [name: string];
   loadBranches: [];
   undoPerformed: [];
+  openRebase: [];
 }>();
 
 // ─── Recent repos popover (Phase 8.4) ────────────────
@@ -632,6 +633,21 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
             </div>
           </div>
         </div>
+
+        <!-- Rebase interactif (Phase 1.2.1) -->
+        <button
+          class="btn btn--sync"
+          @click="emit('openRebase')"
+          :title="t('rebase.title')"
+        >
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <circle cx="4" cy="3" r="2" stroke="currentColor" stroke-width="1.3" fill="none"/>
+            <circle cx="4" cy="13" r="2" stroke="currentColor" stroke-width="1.3" fill="none"/>
+            <circle cx="12" cy="8" r="2" stroke="currentColor" stroke-width="1.3" fill="none"/>
+            <path d="M4 5v6M4 5c0 2 2 3 6 3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+          </svg>
+          <span>{{ t('rebase.button') }}</span>
+        </button>
 
         <!-- Undo (Phase 1.2.4) -->
         <div class="undo-popover-wrapper">

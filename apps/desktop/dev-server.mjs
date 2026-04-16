@@ -10,9 +10,9 @@
 
 import { createServer } from "node:http";
 import { execSync, execFileSync, spawnSync, spawn } from "node:child_process";
-import { readFileSync, writeFileSync, readdirSync, statSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync, statSync, existsSync, unlinkSync } from "node:fs";
 import { resolve, join, dirname, basename } from "node:path";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 
 /** Resolve the full path to a CLI binary, checking Homebrew paths on macOS. */
 function resolveBin(name) {
@@ -2014,6 +2014,53 @@ const server = createServer(async (req, res) => {
           return jsonResponse(res, { error: detail }, 500);
         }
         return jsonResponse(res, { ok: true });
+      } catch (err) {
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
+
+    // POST /api/git-interactive-rebase  { cwd, base, todoLines }
+    // Starts an interactive rebase with a custom todo list.
+    // Writes a temp file and uses GIT_SEQUENCE_EDITOR to inject it.
+    if (url.pathname === "/api/git-interactive-rebase" && req.method === "POST") {
+      try {
+        const { cwd, base, todoLines } = await readBody(req);
+        if (!cwd || !base || !todoLines) {
+          return jsonResponse(res, { error: "Missing cwd, base, or todoLines" }, 400);
+        }
+        const resolvedCwd = resolve(cwd);
+        const todoContent = todoLines.join("\n") + "\n";
+        const tmpFile = join(tmpdir(), `gitwand-rebase-todo-${Date.now()}.txt`);
+        writeFileSync(tmpFile, todoContent, "utf-8");
+
+        try {
+          // Use cp on macOS/Linux to copy our todo into the rebase-todo file
+          const editorCmd = process.platform === "win32"
+            ? `copy /Y "${tmpFile}"`
+            : `cp "${tmpFile}"`;
+
+          const r = spawnSync(GIT, ["rebase", "-i", base], {
+            cwd: resolvedCwd,
+            encoding: "utf-8",
+            maxBuffer: 20 * 1024 * 1024,
+            env: {
+              ...process.env,
+              GIT_SEQUENCE_EDITOR: editorCmd,
+            },
+          });
+
+          // Check for conflicts (exit code 1 with CONFLICT in stderr)
+          if (r.status !== 0) {
+            const stderr = r.stderr ?? "";
+            if (stderr.includes("CONFLICT") || stderr.includes("could not apply")) {
+              return jsonResponse(res, { ok: true, conflict: true });
+            }
+            return jsonResponse(res, { error: stderr || "Rebase failed" }, 500);
+          }
+          return jsonResponse(res, { ok: true });
+        } finally {
+          try { unlinkSync(tmpFile); } catch { /* ignore */ }
+        }
       } catch (err) {
         return jsonResponse(res, { error: err.message }, 500);
       }
