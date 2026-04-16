@@ -123,10 +123,22 @@ async function onCtxAbsorb() {
       return;
     }
     absorbCandidate.value = results[0];
-    // Confirm
-    const msg = t("absorb.confirmDesc")
+    // Confirm. When the AI picked the target because blame returned
+    // multiple candidates, flag it in the dialog so the user knows to
+    // sanity-check before confirming.
+    let msg = t("absorb.confirmDesc")
       .replace("{0}", file.path)
       .replace("{1}", results[0].targetShortHash + " " + results[0].targetMessage);
+    if (results[0].aiRanked) {
+      msg += `\n\n${t("absorb.aiRanked")}`;
+      if (results[0].aiReason) msg += `\n${results[0].aiReason}`;
+      if (results[0].alternates && results[0].alternates.length > 0) {
+        msg += `\n\n${t("absorb.aiAlternates")}`;
+        for (const alt of results[0].alternates) {
+          msg += `\n  ${alt.targetShortHash} ${alt.targetMessage}`;
+        }
+      }
+    }
     if (!confirm(msg)) {
       absorbCandidate.value = null;
       return;

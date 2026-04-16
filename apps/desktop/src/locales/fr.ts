@@ -501,6 +501,9 @@ const fr = {
     confirmTitle: "Absorber dans ce commit ?",
     confirmDesc: "Les modifications de {0} seront int\u00e9gr\u00e9es dans le commit {1}.",
     lines: "Lignes {0}",
+    aiRanked: "\u2728 Cible choisie par l'IA (plusieurs commits touchent ces lignes) \u2014 v\u00e9rifie avant de confirmer.",
+    aiAlternates: "Autres candidats propos\u00e9s :",
+    noCandidateAiUnavailable: "Les modifications touchent plusieurs commits. Active un provider IA dans les r\u00e9glages pour obtenir un classement.",
   },
 } as const;
 

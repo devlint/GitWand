@@ -500,6 +500,9 @@ const en: Locale = {
     confirmTitle: "Absorb into this commit?",
     confirmDesc: "Changes in {0} will be folded into commit {1}.",
     lines: "Lines {0}",
+    aiRanked: "\u2728 Target picked by the AI (several commits touch these lines) \u2014 double-check before confirming.",
+    aiAlternates: "Other candidates proposed:",
+    noCandidateAiUnavailable: "The changes touch multiple commits. Enable an AI provider in Settings to get a ranked suggestion.",
   },
 } as const;
 
