@@ -156,6 +156,36 @@ const { isGenerating, lastError: aiError, generate: generateCommitMsg, transform
 const aiMenuOpen = ref(false);
 const aiLangMenuOpen = ref(false);
 
+/** Read the commit-message language from settings (empty string = follow UI locale). */
+function getCommitMessageLang(): string {
+  try {
+    const raw = localStorage.getItem("gitwand-settings");
+    if (raw) {
+      const s = JSON.parse(raw);
+      if (s.commitMessageLang) return s.commitMessageLang;
+    }
+  } catch { /* ignore */ }
+  return "";
+}
+
+/** Resolve the effective language code for AI generation. */
+function resolveCommitLang(): string {
+  const explicit = getCommitMessageLang();
+  if (explicit) return explicit;
+  // Fallback: derive from UI locale
+  return locale.value.startsWith("en") ? "en" : locale.value.split("-")[0] || "fr";
+}
+
+/** Persist the commit-message language setting. */
+function setCommitMessageLang(lang: string) {
+  try {
+    const raw = localStorage.getItem("gitwand-settings");
+    const s = raw ? JSON.parse(raw) : {};
+    s.commitMessageLang = lang;
+    localStorage.setItem("gitwand-settings", JSON.stringify(s));
+  } catch { /* ignore */ }
+}
+
 /** Close AI menu when clicking outside */
 function onDocClick(e: MouseEvent) {
   const target = e.target as HTMLElement;
@@ -170,16 +200,27 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
 function applyMessage(msg: string) {
   const [summary, ...rest] = msg.split("\n");
   emit("update:commitSummary", summary.trim());
-  const body = rest.join("\n").trim();
+  let body = rest.join("\n").trim();
+
+  // Append signature if setting is enabled
+  try {
+    const raw = localStorage.getItem("gitwand-settings");
+    const sig = !raw || JSON.parse(raw).commitSignature !== false;
+    if (sig) {
+      const signature = "\u{1FA84} Commit via GitWand";
+      body = body ? `${body}\n\n${signature}` : signature;
+    }
+  } catch { /* ignore */ }
+
   emit("update:commitDescription", body);
 }
 
 async function onGenerateCommitMessage() {
   if (!props.cwd || isGenerating.value) return;
   aiMenuOpen.value = false;
-  const lang = locale.value.startsWith("en") ? "en" : "fr";
+  const lang = resolveCommitLang();
   try {
-    const msg = await generateCommitMsg(props.cwd, { locale: lang as "fr" | "en" });
+    const msg = await generateCommitMsg(props.cwd, { locale: lang as string });
     applyMessage(msg);
   } catch {
     // lastError is already set by the composable — the UI shows it.
@@ -193,6 +234,10 @@ async function onAiAction(action: "regenerate" | "shorten" | "detail" | "changeL
   if (action === "regenerate") {
     await onGenerateCommitMessage();
     return;
+  }
+  // When changing language, also persist as new default
+  if (action === "changeLang" && targetLocale) {
+    setCommitMessageLang(targetLocale);
   }
   const currentMsg = [props.commitSummary, props.commitDescription].filter(Boolean).join("\n");
   if (!currentMsg.trim()) return;
@@ -535,7 +580,8 @@ function formatActivityDate(dateStr: string): string {
               {{ t('sidebar.aiChangeLang') }}
               <svg class="commit-ai-menu-arrow" width="8" height="8" viewBox="0 0 8 8" fill="none"><path d="M3 1.5L5.5 4L3 6.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
               <ul v-if="aiLangMenuOpen" class="commit-ai-submenu">
-                <li v-for="loc in supportedLocales" :key="loc" @click.stop="onAiAction('changeLang', loc)">
+                <li v-for="loc in supportedLocales" :key="loc" @click.stop="onAiAction('changeLang', loc)" :class="{ 'is-active': loc === resolveCommitLang() }">
+                  <svg v-if="loc === resolveCommitLang()" class="commit-ai-check" width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2.5 6.5L5 9l4.5-6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
                   {{ localeLabels[loc] }}
                 </li>
               </ul>
@@ -1292,7 +1338,7 @@ function formatActivityDate(dateStr: string): string {
 .commit-ai-submenu li {
   display: flex;
   align-items: center;
-  padding: 6px 12px;
+  padding: 6px 12px 6px 30px;
   font-size: var(--font-size-sm);
   color: var(--color-text);
   cursor: pointer;
@@ -1301,6 +1347,16 @@ function formatActivityDate(dateStr: string): string {
 
 .commit-ai-submenu li:hover {
   background: var(--color-bg-tertiary);
+}
+
+.commit-ai-submenu li.is-active {
+  font-weight: 600;
+  padding-left: 12px;
+}
+
+.commit-ai-check {
+  margin-right: 6px;
+  flex-shrink: 0;
 }
 
 .commit-ai-error {

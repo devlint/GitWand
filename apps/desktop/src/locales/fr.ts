@@ -376,8 +376,11 @@ const fr = {
   // ─── Settings ───────────────────────────────────────────
   settings: {
     title: "Param\u00e8tres",
-    language: "Langue",
+    language: "Langue de l\u2019interface",
     languageAuto: "Automatique (syst\u00e8me)",
+    commitMessageLang: "Langue des messages de commit",
+    commitMessageLangAuto: "Suivre la langue de l\u2019interface",
+    commitMessageLangHint: "Langue utilis\u00e9e par l\u2019IA pour g\u00e9n\u00e9rer les messages de commit",
     theme: "Th\u00e8me",
     themeDark: "Sombre",
     themeLight: "Clair",

@@ -375,8 +375,11 @@ const en: Locale = {
   // ─── Settings ───────────────────────────────────────────
   settings: {
     title: "Settings",
-    language: "Language",
+    language: "Interface language",
     languageAuto: "Automatic (system)",
+    commitMessageLang: "Commit message language",
+    commitMessageLangAuto: "Follow interface language",
+    commitMessageLangHint: "Language used by AI to generate commit messages",
     theme: "Theme",
     themeDark: "Dark",
     themeLight: "Light",
