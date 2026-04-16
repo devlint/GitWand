@@ -5,8 +5,47 @@ import { getGitBlame, getGitFileLog, getGitFileDiff } from "../utils/backend";
 import { useI18n } from "../composables/useI18n";
 import { detectLanguage, highlightLine } from "../utils/highlight";
 import { wordDiff, segmentsToHtml } from "../utils/wordDiff";
+import { useAIProvider } from "../composables/useAIProvider";
+import { useBlameContext } from "../composables/useBlameContext";
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
+const ai = useAIProvider();
+const { isGenerating: isExplainingBlame, explain: explainBlame } = useBlameContext();
+
+// ─── Blame context explanation (Phase 1.3.4) ─────────────
+const blameExplainHash = ref<string | null>(null);
+const blameExplainText = ref<string | null>(null);
+const blameExplainError = ref<string | null>(null);
+
+async function requestBlameExplain(hashFull: string) {
+  // Toggle off when clicking the same commit again.
+  if (blameExplainHash.value === hashFull) {
+    closeBlameExplain();
+    return;
+  }
+  blameExplainHash.value = hashFull;
+  blameExplainText.value = null;
+  blameExplainError.value = null;
+  try {
+    const text = await explainBlame(props.cwd, hashFull, props.filePath, {
+      locale: locale.value,
+    });
+    // Guard against the user switching commits mid-flight.
+    if (blameExplainHash.value === hashFull) {
+      blameExplainText.value = text;
+    }
+  } catch (err: any) {
+    if (blameExplainHash.value === hashFull) {
+      blameExplainError.value = err?.message ?? String(err);
+    }
+  }
+}
+
+function closeBlameExplain() {
+  blameExplainHash.value = null;
+  blameExplainText.value = null;
+  blameExplainError.value = null;
+}
 
 const props = defineProps<{
   filePath: string;
@@ -266,6 +305,13 @@ function shortHash(hash: string): string {
                 :title="line.summary"
                 @click="emit('select-commit', line.hashFull)"
               >{{ line.hash }}</span>
+              <button
+                v-if="ai.isAvailable.value"
+                class="fhv-blame-explain"
+                :class="{ 'fhv-blame-explain--active': blameExplainHash === line.hashFull }"
+                :title="locale === 'fr' ? 'Expliquer ce changement avec IA' : 'Explain this change with AI'"
+                @click.stop="requestBlameExplain(line.hashFull)"
+              >✨</button>
               <span class="fhv-blame-author">{{ line.author }}</span>
               <span class="fhv-blame-date muted">{{ formatDateFromTimestamp(line.authorDate) }}</span>
             </td>
@@ -277,6 +323,23 @@ function shortHash(hash: string): string {
           </tr>
         </tbody>
       </table>
+
+      <!-- Blame context explanation panel (Phase 1.3.4) -->
+      <div v-if="blameExplainHash" class="fhv-blame-explain-panel">
+        <div class="fhv-blame-explain-head">
+          <span class="fhv-blame-explain-title">
+            ✨ {{ locale === 'fr' ? 'Pourquoi ce changement ?' : 'Why did this change?' }}
+          </span>
+          <button class="fhv-blame-explain-close" @click="closeBlameExplain" aria-label="Close">✕</button>
+        </div>
+        <div class="fhv-blame-explain-body">
+          <span v-if="blameExplainError" class="fhv-blame-explain-error">{{ blameExplainError }}</span>
+          <span v-else-if="isExplainingBlame && !blameExplainText">
+            {{ locale === 'fr' ? 'Analyse du commit en cours…' : 'Analysing commit…' }}
+          </span>
+          <span v-else>{{ blameExplainText }}</span>
+        </div>
+      </div>
     </div>
 
     <!-- Log tab -->
@@ -523,6 +586,76 @@ function shortHash(hash: string): string {
 
 .fhv-blame-hash:hover {
   text-decoration: underline;
+}
+
+.fhv-blame-explain {
+  font-size: 10px;
+  margin-right: 6px;
+  padding: 0 4px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+}
+
+.fhv-blame-line:hover .fhv-blame-explain {
+  opacity: 1;
+}
+
+.fhv-blame-explain:hover,
+.fhv-blame-explain--active {
+  opacity: 1;
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft, rgba(139, 92, 246, 0.08));
+}
+
+.fhv-blame-explain-panel {
+  position: sticky;
+  bottom: 0;
+  background: var(--color-bg);
+  border-top: 1px solid var(--color-accent);
+  padding: 10px 14px;
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.12);
+  z-index: 2;
+}
+
+.fhv-blame-explain-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.fhv-blame-explain-title {
+  flex: 1;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-accent);
+}
+
+.fhv-blame-explain-close {
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 4px;
+}
+
+.fhv-blame-explain-close:hover { color: var(--color-text); }
+
+.fhv-blame-explain-body {
+  font-size: var(--text-sm);
+  line-height: 1.45;
+  color: var(--color-text);
+}
+
+.fhv-blame-explain-error {
+  color: var(--color-danger, #ef4444);
 }
 
 .fhv-blame-author {
