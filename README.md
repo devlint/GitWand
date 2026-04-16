@@ -448,7 +448,21 @@ GitWand uses a zero-dependency type-safe i18n system. `fr.ts` is the reference l
 - [x] `gh-merge-pr` dev-server endpoint + TypeScript wrapper
 - [x] Website — LLM/MCP section and FAQ on homepage
 
-### Next — v1.3.0
+### Next — v1.3.0 — AI Everywhere
+
+- [ ] AI PR description from commit range
+- [ ] AI hunk-level review critique in the Intelligence panel
+- [ ] AI branch-name suggestion from diff or description
+- [ ] Natural-language conflict explanation in the merge editor
+- [ ] Pre-rebase / pre-merge AI risk summary
+- [ ] AI stash message from unstaged diff
+- [ ] Semantic squash grouping in interactive rebase
+- [ ] AI-ranked Absorb candidates
+- [ ] Natural-language commit log search
+- [ ] Blame context — "why did this line change?"
+- [ ] AI release notes / changelog generator
+
+### Later — v1.4.0
 
 - [ ] MCP Registry submission (npm publish + official listing)
 - [ ] Folder diff — compare two folders, branches, or commits

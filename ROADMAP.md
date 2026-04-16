@@ -137,36 +137,64 @@ Productivité du workflow quotidien : opérations Git avancées accessibles, IA 
 
 ---
 
-## Now — v1.3.0
+## Now — v1.3.0 — AI Everywhere
 
-### 1.3.1 — Folder diff
+L'IA n'est plus cantonnée au merge editor et au commit message : elle s'infuse dans chaque étape du workflow Git. On réutilise la plomberie existante (`useAIProvider.rawPrompt()`, `@gitwand/mcp`) pour ajouter de l'intelligence là où elle apporte un gain mesurable.
+
+**Principe** : chaque suggestion IA reste optionnelle, explicite (bouton ou raccourci), et traçable (l'utilisateur voit le prompt et le provider utilisé).
+
+### 1.3.1 — AI code review & PR
+
+- **Description de PR auto-générée** : bouton dans `PrCreateView` → analyse des commits du diff (`currentBranch..base`) → titre + body structurés (summary, test plan, breaking changes)
+- **Critique IA par hunk dans le panneau Review** : le `PrIntelligencePanel` passe de "analyse statique" à "feedback IA par hunk" (risques, régressions potentielles, suggestions concrètes)
+- **Suggestion de nom de branche** : depuis une description ou le diff staged → `feat/user-auth-oauth2` plutôt que saisie manuelle
+
+### 1.3.2 — AI conflict & merge insight
+
+- **Explication de conflit en langage naturel** : le `DecisionTrace` existant est rendu lisible par un LLM ("ce hunk modifie la signature de `login()` des deux côtés — manuel obligatoire") et surfacé dans le merge editor desktop
+- **Prévention de conflit avant rebase/merge** : la simulation `merge-tree` + `git show` actuelle est complétée par un résumé IA du risque ("3 fichiers touchent l'auth, haute probabilité de régression si non testés")
+- Exposition desktop du tool MCP `gitwand_explain_hunk` déjà présent côté core
+
+### 1.3.3 — AI commit workflow
+
+- **Message de stash auto** : avant `git stash`, l'IA propose un message depuis le diff unstaged (`wip: refactor user service tests`)
+- **Squash sémantique en rebase interactif** : l'IA regroupe les commits candidats au squash par intention ("ces 4 commits touchent le même test") et propose le message combiné
+- **Classement IA pour Absorb** : plutôt que prendre le premier commit via `git blame`, ranking sémantique des commits candidats (message + diff) pour suggérer la meilleure cible
+
+### 1.3.4 — AI history & search
+
+- **Recherche de commits en langage naturel** dans le `CommitLog` : "quand a-t-on introduit la pagination du log ?" → requête sémantique sur l'historique
+- **Blame contextuel** : bouton dans le `FileHistoryViewer` / blame → "explique pourquoi cette ligne a changé" avec contexte des commits voisins
+- **Générateur de release notes / changelog** : depuis `git log <tag>..<tag>` → markdown structuré (Added / Changed / Fixed), pré-rempli dans les release notes GitHub
+
+---
+
+## Next — v1.4.0 — Visual diff & distribution
+
+### 1.4.1 — Folder diff
 
 - Comparer deux dossiers, branches ou commits — arbre récursif avec indicateurs ajouté/supprimé/modifié
 - Filtrage par type de fichier, pattern glob, type de changement
+- Résumé IA des changements de dossier (bonus : réutilise la plomberie v1.3)
 
-### 1.3.2 — Image diff (différenciateur fort)
+### 1.4.2 — Image diff (différenciateur fort)
 
 - Comparaison visuelle : side-by-side, overlay, blink, slider split
 - Formats : PNG, JPEG, SVG, WebP, GIF
 - Heatmap des zones modifiées, métadonnées (taille, dimensions, profil couleur)
+- Description IA des changements visuels (alt text, zones d'attention)
 
-### 1.3.3 — Submodules & Worktrees
+### 1.4.3 — Submodules & Worktrees
 
 - Initialiser, mettre à jour, naviguer dans les submodules depuis l'UI
 - Git worktrees : créer, lister, supprimer — chaque worktree dans un onglet
 - Checkout rapide via worktree sans switcher
 
-### 1.3.4 — MCP Registry & npm publish
+### 1.4.4 — MCP Registry & npm publish
 
 - Publier `@gitwand/mcp` sur npm
 - Soumettre au MCP Registry officiel
 - Publier `@gitwand/cli` sur npm
-
----
-
-## Next — v1.4.0
-
-- Fonctionnalités additionnelles à planifier — voir les pistes dans la section **Later**
 
 ---
 
