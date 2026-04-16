@@ -1036,13 +1036,18 @@ const server = createServer(async (req, res) => {
       }
     }
 
-    // POST /api/git-stash  { cwd }
+    // POST /api/git-stash  { cwd, message? }
     if (url.pathname === "/api/git-stash" && req.method === "POST") {
-      const { cwd } = await readBody(req);
+      const { cwd, message } = await readBody(req);
       if (!cwd) return jsonResponse(res, { error: "Missing cwd" }, 400);
       try {
         const resolvedCwd = resolve(cwd);
-        execSync("git stash --include-untracked", { cwd: resolvedCwd, encoding: "utf-8", shell: true });
+        const args = ["stash", "push", "--include-untracked"];
+        const trimmed = typeof message === "string" ? message.trim() : "";
+        if (trimmed) {
+          args.push("-m", trimmed);
+        }
+        execFileSync("git", args, { cwd: resolvedCwd, encoding: "utf-8" });
         return jsonResponse(res, { ok: true });
       } catch (err) {
         return jsonResponse(res, { error: err.message }, 500);

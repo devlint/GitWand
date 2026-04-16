@@ -9,6 +9,9 @@ import {
   gitStashShow,
   type StashEntry,
 } from "../utils/backend";
+import { useStashMessage } from "../composables/useStashMessage";
+import { useAIProvider } from "../composables/useAIProvider";
+import { useI18n } from "../composables/useI18n";
 
 const props = defineProps<{
   cwd: string;
@@ -24,7 +27,13 @@ const loading = ref(false);
 const error = ref<string | null>(null);
 const expandedIndex = ref<number | null>(null);
 const expandedDiff = ref<string>("");
+
+const composerOpen = ref(false);
 const stashMessage = ref("");
+const { isGenerating: isGeneratingMessage, generate: generateStashMessage } =
+  useStashMessage();
+const ai = useAIProvider();
+const { locale } = useI18n();
 
 async function loadStashes() {
   if (!props.cwd) return;
@@ -39,10 +48,35 @@ async function loadStashes() {
   }
 }
 
+function openComposer() {
+  stashMessage.value = "";
+  error.value = null;
+  composerOpen.value = true;
+}
+
+function closeComposer() {
+  composerOpen.value = false;
+  stashMessage.value = "";
+}
+
+async function suggestMessage() {
+  if (!props.cwd) return;
+  error.value = null;
+  try {
+    const suggestion = await generateStashMessage(props.cwd, {
+      locale: locale.value,
+    });
+    if (suggestion) stashMessage.value = suggestion;
+  } catch (err: any) {
+    error.value = err.message;
+  }
+}
+
 async function createStash() {
   if (!props.cwd) return;
   try {
-    await gitStash(props.cwd);
+    await gitStash(props.cwd, stashMessage.value);
+    closeComposer();
     await loadStashes();
     emit("refresh");
   } catch (err: any) {
@@ -118,7 +152,12 @@ watch(() => props.cwd, loadStashes);
     <div class="stash-header">
       <h3>📦 Stash Manager</h3>
       <div class="stash-actions">
-        <button class="btn btn-sm btn-primary" @click="createStash" title="Stash all changes">
+        <button
+          class="btn btn-sm btn-primary"
+          @click="openComposer"
+          :disabled="composerOpen"
+          title="Stash all changes"
+        >
           + Stash
         </button>
         <button
@@ -131,6 +170,34 @@ watch(() => props.cwd, loadStashes);
         </button>
         <button class="btn btn-sm btn-ghost" @click="$emit('close')" title="Close">✕</button>
       </div>
+    </div>
+
+    <div v-if="composerOpen" class="stash-composer">
+      <input
+        v-model="stashMessage"
+        type="text"
+        class="stash-composer-input"
+        :placeholder="locale === 'fr' ? 'Message optionnel — laisse vide pour le label par défaut' : 'Optional message — leave empty for the default label'"
+        maxlength="120"
+        @keydown.enter.prevent="createStash"
+        @keydown.esc.prevent="closeComposer"
+      />
+      <button
+        v-if="ai.isAvailable.value"
+        class="btn btn-xs btn-ai"
+        :disabled="isGeneratingMessage"
+        @click="suggestMessage"
+        :title="locale === 'fr' ? 'Suggérer un message avec IA' : 'Suggest a message with AI'"
+      >
+        <span v-if="isGeneratingMessage">…</span>
+        <span v-else>✨ {{ locale === 'fr' ? 'IA' : 'AI' }}</span>
+      </button>
+      <button class="btn btn-xs btn-primary" @click="createStash">
+        {{ locale === 'fr' ? 'Stasher' : 'Stash' }}
+      </button>
+      <button class="btn btn-xs btn-ghost" @click="closeComposer">
+        {{ locale === 'fr' ? 'Annuler' : 'Cancel' }}
+      </button>
     </div>
 
     <div v-if="error" class="stash-error">{{ error }}</div>
@@ -210,6 +277,42 @@ watch(() => props.cwd, loadStashes);
 .stash-actions {
   display: flex;
   gap: var(--space-1);
+}
+
+.stash-composer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.stash-composer-input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: inherit;
+  font-size: var(--font-size-md);
+  padding: var(--space-1) var(--space-2);
+  outline: none;
+}
+
+.stash-composer-input:focus {
+  border-color: var(--color-accent);
+}
+
+.btn-ai {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.btn-ai:hover:not(:disabled) {
+  background: var(--color-accent);
+  color: var(--color-accent-text);
 }
 
 .stash-error {

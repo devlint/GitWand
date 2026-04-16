@@ -875,16 +875,18 @@ export async function gitSwitchBranch(cwd: string, name: string): Promise<void> 
 
 /**
  * Stash all local changes (staged + unstaged + untracked).
+ * Passes an optional custom message (shown in `git stash list`).
  */
-export async function gitStash(cwd: string): Promise<void> {
+export async function gitStash(cwd: string, message?: string): Promise<void> {
+  const trimmed = message?.trim() || undefined;
   if (isTauri()) {
-    await tauriInvoke("git_stash", { cwd });
+    await tauriInvoke("git_stash", { cwd, message: trimmed });
     return;
   }
   const res = await fetch(`${DEV_SERVER}/api/git-stash`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ cwd }),
+    body: JSON.stringify({ cwd, message: trimmed }),
   });
   if (!res.ok) throw new Error(`Failed to stash: ${res.status}`);
 }

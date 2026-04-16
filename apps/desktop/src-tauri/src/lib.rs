@@ -1190,9 +1190,15 @@ fn git_delete_branch(cwd: String, name: String, force: bool) -> Result<(), Strin
 // ─── Git stash ────────────────────────────────────────────
 
 #[tauri::command]
-fn git_stash(cwd: String) -> Result<(), String> {
+fn git_stash(cwd: String, message: Option<String>) -> Result<(), String> {
+    let mut args: Vec<&str> = vec!["stash", "push", "--include-untracked"];
+    let trimmed = message.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    if let Some(m) = trimmed {
+        args.push("-m");
+        args.push(m);
+    }
     let output = std::process::Command::new(git_binary())
-        .args(["stash", "--include-untracked"])
+        .args(&args)
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to run git stash: {}", e))?;
