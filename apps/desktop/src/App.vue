@@ -17,6 +17,9 @@ import DashboardView from "./components/DashboardView.vue";
 import EditCommitOverlay from "./components/EditCommitOverlay.vue";
 import MergeSuccessModal from "./components/MergeSuccessModal.vue";
 import RebaseEditor from "./components/RebaseEditor.vue";
+import StashManager from "./components/StashManager.vue";
+import { useStashMessage } from "./composables/useStashMessage";
+import { useAIProvider } from "./composables/useAIProvider";
 import { usePrPanel, PR_PANEL_KEY } from "./composables/usePrPanel";
 import type { GitLogEntry } from "./utils/backend";
 import { getPersistedDiffMode, persistDiffMode, type DiffMode } from "./utils/diffMode";
@@ -422,16 +425,10 @@ async function handleSwitchBranch(name: string) {
   }
 
   if (behavior === "stash") {
-    isSwitchingBranch.value = true;
-    try {
-      await gitStash(repoFolderPath.value);
-      await switchBranch(name);
-      await gitStashPop(repoFolderPath.value);
-    } catch (err: any) {
-      repoError.value = `switch (stash): ${err.message}`;
-    } finally {
-      isSwitchingBranch.value = false;
-    }
+    // Open the stash-message modal; the actual stash/switch/pop is driven
+    // by confirmSwitchStash() when the user confirms.
+    pendingSwitchBranch.value = name;
+    switchStashMessage.value = "";
     return;
   }
 
@@ -454,6 +451,55 @@ const showSettings = ref(false);
 
 // ─── Interactive rebase panel ────────────────────────────
 const showRebase = ref(false);
+
+// ─── Stash manager panel ────────────────────────────────
+const showStash = ref(false);
+
+// ─── Stash-and-switch modal (Phase 1.3.3) ──────────────
+const pendingSwitchBranch = ref<string | null>(null);
+const switchStashMessage = ref("");
+const {
+  isGenerating: isGeneratingSwitchStashMessage,
+  generate: generateSwitchStashMessage,
+  lastError: switchStashAiError,
+} = useStashMessage();
+const aiProvider = useAIProvider();
+const { locale: uiLocale } = useI18n();
+
+async function suggestSwitchStashMessage() {
+  if (!repoFolderPath.value) return;
+  try {
+    const suggestion = await generateSwitchStashMessage(repoFolderPath.value, {
+      locale: uiLocale.value,
+    });
+    if (suggestion) switchStashMessage.value = suggestion;
+  } catch {
+    // Error already captured on the composable — surfaced via switchStashAiError
+  }
+}
+
+async function confirmSwitchStash() {
+  const name = pendingSwitchBranch.value;
+  if (!name || !repoFolderPath.value) return;
+  const msg = switchStashMessage.value;
+  pendingSwitchBranch.value = null;
+  switchStashMessage.value = "";
+  isSwitchingBranch.value = true;
+  try {
+    await gitStash(repoFolderPath.value, msg);
+    await switchBranch(name);
+    await gitStashPop(repoFolderPath.value);
+  } catch (err: any) {
+    repoError.value = `switch (stash): ${err.message}`;
+  } finally {
+    isSwitchingBranch.value = false;
+  }
+}
+
+function cancelSwitchStash() {
+  pendingSwitchBranch.value = null;
+  switchStashMessage.value = "";
+}
 
 function handleRebaseDone() {
   showRebase.value = false;
@@ -723,6 +769,7 @@ onUnmounted(() => {
           @discard="(path, section) => discardFiles([path], section === 'untracked')"
           @add-to-gitignore="(path) => addToGitignore(path)"
           @refresh="repoRefresh()"
+          @open-stash="showStash = true"
         />
       </aside>
 
@@ -893,6 +940,61 @@ onUnmounted(() => {
       @close="showRebase = false"
       @done="handleRebaseDone"
     />
+
+    <!-- Stash manager overlay -->
+    <div v-if="showStash && repoFolderPath" class="stash-overlay" @click.self="showStash = false">
+      <div class="stash-overlay-body">
+        <StashManager
+          :cwd="repoFolderPath"
+          @close="showStash = false"
+          @refresh="repoRefresh()"
+        />
+      </div>
+    </div>
+
+    <!-- Stash-and-switch modal (asks for a stash label before switching branches) -->
+    <div v-if="pendingSwitchBranch" class="switch-stash-overlay" @click.self="cancelSwitchStash">
+      <div class="switch-stash-modal" role="dialog" aria-modal="true">
+        <h3 class="switch-stash-title">
+          {{ uiLocale === 'fr' ? 'Stasher avant de changer de branche' : 'Stash before switching branch' }}
+        </h3>
+        <p class="switch-stash-desc">
+          {{ uiLocale === 'fr'
+            ? `Tes changements seront mis de côté, puis restaurés après le switch vers « ${pendingSwitchBranch} ». Donne-lui un label pour le retrouver.`
+            : `Your changes will be stashed then restored after switching to "${pendingSwitchBranch}". Give it a label so you can find it.` }}
+        </p>
+        <div class="switch-stash-row">
+          <input
+            v-model="switchStashMessage"
+            type="text"
+            class="switch-stash-input"
+            :placeholder="uiLocale === 'fr' ? 'Message optionnel (laisse vide pour le label par défaut)' : 'Optional message (empty = default label)'"
+            maxlength="120"
+            @keydown.enter.prevent="confirmSwitchStash"
+            @keydown.esc.prevent="cancelSwitchStash"
+          />
+          <button
+            v-if="aiProvider.isAvailable.value"
+            type="button"
+            class="switch-stash-ai-btn"
+            :disabled="isGeneratingSwitchStashMessage"
+            @click="suggestSwitchStashMessage"
+          >
+            <span v-if="isGeneratingSwitchStashMessage">…</span>
+            <span v-else>✨ {{ uiLocale === 'fr' ? 'IA' : 'AI' }}</span>
+          </button>
+        </div>
+        <p v-if="switchStashAiError" class="switch-stash-error">{{ switchStashAiError }}</p>
+        <div class="switch-stash-actions">
+          <button type="button" class="switch-stash-cancel" @click="cancelSwitchStash">
+            {{ uiLocale === 'fr' ? 'Annuler' : 'Cancel' }}
+          </button>
+          <button type="button" class="switch-stash-confirm" @click="confirmSwitchStash">
+            {{ uiLocale === 'fr' ? 'Stasher &amp; changer' : 'Stash &amp; switch' }}
+          </button>
+        </div>
+      </div>
+    </div>
 
     <!-- Settings panel -->
     <SettingsPanel
@@ -1110,5 +1212,150 @@ onUnmounted(() => {
 @keyframes toastSlideOut {
   from { opacity: 1; transform: translateY(0) scale(1); }
   to   { opacity: 0; transform: translateY(8px) scale(0.96); }
+}
+
+/* ─── Stash overlay (Phase 1.3.3) ────────────────────────── */
+
+.stash-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--color-overlay, rgba(0, 0, 0, 0.55));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 40;
+  padding: 32px;
+}
+
+.stash-overlay-body {
+  width: min(640px, 100%);
+  max-height: 80vh;
+  overflow: hidden;
+  box-shadow: var(--shadow-lg, 0 12px 40px rgba(0,0,0,0.35));
+  border-radius: var(--radius-md);
+}
+
+/* ─── Stash-and-switch modal (Phase 1.3.3) ──────────────── */
+
+.switch-stash-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--color-overlay, rgba(0, 0, 0, 0.55));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 45;
+  padding: 24px;
+}
+
+.switch-stash-modal {
+  width: min(520px, 100%);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg, 0 12px 40px rgba(0,0,0,0.35));
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.switch-stash-title {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
+}
+
+.switch-stash-desc {
+  margin: 0;
+  font-size: var(--font-size-md);
+  color: var(--color-text-muted);
+  line-height: 1.5;
+}
+
+.switch-stash-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.switch-stash-input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 12px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  font-size: var(--font-size-md);
+  outline: none;
+}
+
+.switch-stash-input:focus {
+  border-color: var(--color-accent);
+}
+
+.switch-stash-ai-btn {
+  padding: 6px 12px;
+  background: var(--color-accent-soft, rgba(139, 92, 246, 0.1));
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  color: var(--color-accent);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+}
+
+.switch-stash-ai-btn:hover:not(:disabled) {
+  background: var(--color-accent);
+  color: var(--color-accent-text);
+}
+
+.switch-stash-ai-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.switch-stash-error {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-danger, #ef4444);
+}
+
+.switch-stash-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.switch-stash-cancel,
+.switch-stash-confirm {
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+}
+
+.switch-stash-cancel {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+}
+
+.switch-stash-cancel:hover {
+  background: var(--color-bg-hover);
+}
+
+.switch-stash-confirm {
+  background: var(--color-accent);
+  border: 1px solid var(--color-accent);
+  color: var(--color-accent-text);
+}
+
+.switch-stash-confirm:hover {
+  filter: brightness(1.08);
 }
 </style>

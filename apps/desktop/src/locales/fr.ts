@@ -79,6 +79,7 @@ const fr = {
     tabBranches: "Branches",
     tabLog: "Log",
     tabGraph: "Graphe",
+    stashTitle: "Gestionnaire de stash",
     // Log scope toggle (current branch vs all refs)
     logScopeLabel: "Portée du log",
     logScopeCurrent: "Branche courante",

@@ -66,6 +66,8 @@ const emit = defineEmits<{
   addToGitignore: [path: string];
   /** Request a full repo state refresh (after absorb, etc.) */
   refresh: [];
+  /** Open the stash manager panel. */
+  openStash: [];
 }>();
 
 const { t, locale } = useI18n();
@@ -415,6 +417,18 @@ function formatActivityDate(dateStr: string): string {
         title="Pull Requests"
       >
         PRs
+      </button>
+      <button
+        class="view-tab view-tab--stash"
+        @click="emit('openStash')"
+        :title="t('sidebar.stashTitle')"
+        :aria-label="t('sidebar.stashTitle')"
+      >
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M2 6h12v7a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V6Z" stroke="currentColor" stroke-width="1.3"/>
+          <path d="M3 6V4a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v2" stroke="currentColor" stroke-width="1.3"/>
+          <path d="M6 9h4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+        </svg>
       </button>
     </div>
 
@@ -878,6 +892,11 @@ function formatActivityDate(dateStr: string): string {
 .view-tab--active {
   color: var(--color-text);
   border-bottom-color: var(--color-accent);
+}
+
+.view-tab--stash {
+  flex: 0 0 auto;
+  padding: var(--space-5) var(--space-4);
 }
 
 .tab-badge {

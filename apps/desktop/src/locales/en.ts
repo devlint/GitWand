@@ -77,6 +77,7 @@ const en: Locale = {
     tabBranches: "Branches",
     tabLog: "Log",
     tabGraph: "Graph",
+    stashTitle: "Stash manager",
     // Log scope toggle (current branch vs all refs)
     logScopeLabel: "Log scope",
     logScopeCurrent: "Current branch",
