@@ -1729,9 +1729,9 @@ button.stat-card:hover {
 }
 
 .readme-body {
+  /* No max-height: let the README flow with the outer dashboard scroll
+     rather than nesting a second scroll area inside the card. */
   flex: 1;
-  overflow-y: auto;
-  max-height: 500px;
 }
 
 .readme-formatted {

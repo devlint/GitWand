@@ -1230,9 +1230,7 @@ onUnmounted(() => {
 .stash-overlay-body {
   width: min(640px, 100%);
   max-height: 80vh;
-  overflow: hidden;
-  box-shadow: var(--shadow-lg, 0 12px 40px rgba(0,0,0,0.35));
-  border-radius: var(--radius-md);
+  display: flex;
 }
 
 /* ─── Stash-and-switch modal (Phase 1.3.3) ──────────────── */
