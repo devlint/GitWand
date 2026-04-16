@@ -106,9 +106,38 @@ const actionDescriptions: Record<RebaseAction, { fr: string; en: string }> = {
 
 /** Index of the todo item whose action dropdown is open, or null. */
 const actionMenuIndex = ref<number | null>(null);
+const actionMenuStyle = ref<Record<string, string>>({});
 
-function toggleActionMenu(index: number) {
-  actionMenuIndex.value = actionMenuIndex.value === index ? null : index;
+function toggleActionMenu(index: number, e: MouseEvent) {
+  if (actionMenuIndex.value === index) {
+    actionMenuIndex.value = null;
+    return;
+  }
+  actionMenuIndex.value = index;
+
+  // Position the menu near the badge, using fixed positioning
+  const btn = e.currentTarget as HTMLElement;
+  const rect = btn.getBoundingClientRect();
+  const spaceBelow = window.innerHeight - rect.bottom;
+  const menuHeight = 220; // approximate
+
+  if (spaceBelow < menuHeight) {
+    // Open above
+    actionMenuStyle.value = {
+      position: "fixed",
+      left: `${rect.left}px`,
+      bottom: `${window.innerHeight - rect.top + 4}px`,
+      top: "auto",
+    };
+  } else {
+    // Open below
+    actionMenuStyle.value = {
+      position: "fixed",
+      left: `${rect.left}px`,
+      top: `${rect.bottom + 4}px`,
+      bottom: "auto",
+    };
+  }
 }
 
 function pickAction(index: number, action: RebaseAction) {
@@ -336,14 +365,14 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
               <button
                 class="rb-action-badge"
                 :class="actionClass(entry.action)"
-                @click.stop="toggleActionMenu(index)"
+                @click.stop="toggleActionMenu(index, $event)"
               >
                 {{ entry.action }}
                 <svg width="8" height="8" viewBox="0 0 8 8" fill="none" aria-hidden="true">
                   <path d="M1.5 3L4 5.5L6.5 3" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
               </button>
-              <ul v-if="actionMenuIndex === index" class="rb-action-menu">
+              <ul v-if="actionMenuIndex === index" class="rb-action-menu" :style="actionMenuStyle">
                 <li
                   v-for="a in actions"
                   :key="a"
@@ -673,10 +702,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
 }
 
 .rb-action-menu {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  margin-top: 4px;
+  /* position is set inline (fixed) */
   min-width: 220px;
   background: var(--color-bg);
   border: 1px solid var(--color-border);
@@ -684,7 +710,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
   list-style: none;
   padding: 4px 0;
-  z-index: 10;
+  z-index: 300;
 }
 
 .rb-action-menu-item {
