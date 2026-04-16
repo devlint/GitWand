@@ -53,3 +53,4 @@ website/.vitepress/dist
 research/
 .claude/scheduled_tasks.lock
 .claude/launch.json
+/docs
