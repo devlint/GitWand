@@ -14,6 +14,8 @@ import { computed, inject, nextTick, onMounted, ref, useTemplateRef, watch } fro
 import { PR_PANEL_KEY, type PrPanelState } from "../composables/usePrPanel";
 import { ghListReviewerCandidates, type GitBranch, type ReviewerCandidate } from "../utils/backend";
 import { useI18n } from "../composables/useI18n";
+import { useAIProvider } from "../composables/useAIProvider";
+import { usePrDescription } from "../composables/usePrDescription";
 
 const props = defineProps<{
   currentBranch: string;
@@ -24,7 +26,28 @@ const props = defineProps<{
 const emit = defineEmits<{ (e: "cancel"): void }>();
 
 const p = inject<PrPanelState>(PR_PANEL_KEY)!;
-const { t } = useI18n();
+const { t, locale } = useI18n();
+const ai = useAIProvider();
+const { isGenerating: isGeneratingPrDescription, generate: generatePrDescription } = usePrDescription();
+const aiPrError = ref<string | null>(null);
+
+async function generateWithAI() {
+  aiPrError.value = null;
+  const hasContent = p.newPrTitle.value.trim() || p.newPrBody.value.trim();
+  if (hasContent && !confirm(t("pr.create.aiReplaceConfirm"))) return;
+  try {
+    const result = await generatePrDescription(
+      props.cwd,
+      props.currentBranch,
+      p.newPrBase.value,
+      { locale: locale.value },
+    );
+    if (result.title) p.newPrTitle.value = result.title;
+    if (result.body) p.newPrBody.value = result.body;
+  } catch (err: any) {
+    aiPrError.value = err?.message ?? String(err);
+  }
+}
 
 // ─── Base branch candidates ─────────────────────────────
 const baseCandidates = computed<string[]>(() => {
@@ -498,7 +521,20 @@ function removeReviewer(name: string) {
 
       <!-- Title -->
       <section class="pcv-section">
-        <label class="pcv-label" for="pcv-title-input">{{ t("pr.create.titleLabel") }}</label>
+        <div class="pcv-label-row">
+          <label class="pcv-label" for="pcv-title-input">{{ t("pr.create.titleLabel") }}</label>
+          <button
+            v-if="ai.isAvailable.value"
+            type="button"
+            class="pcv-ai-btn"
+            :disabled="isGeneratingPrDescription || baseIsSameAsHead"
+            :title="t('pr.create.aiHint')"
+            @click="generateWithAI"
+          >
+            <span v-if="isGeneratingPrDescription">… {{ t('pr.create.aiGenerating') }}</span>
+            <span v-else>✨ {{ t('pr.create.aiGenerate') }}</span>
+          </button>
+        </div>
         <input
           id="pcv-title-input"
           v-model="p.newPrTitle.value"
@@ -512,6 +548,7 @@ function removeReviewer(name: string) {
           <span class="pcv-hint">{{ t("pr.create.titleHint") }}</span>
           <span class="pcv-counter" :class="{ 'pcv-counter--over': titleLen > 72 }">{{ titleLen }}/72</span>
         </div>
+        <p v-if="aiPrError" class="pcv-hint pcv-hint--warn">{{ aiPrError }}</p>
       </section>
 
       <!-- Description RTE -->
@@ -914,6 +951,26 @@ function removeReviewer(name: string) {
   padding: var(--space-2) var(--space-5);
   cursor: pointer;
   transition: color var(--transition-fast), border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.pcv-ai-btn {
+  background: var(--color-accent-soft, rgba(139, 92, 246, 0.1));
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-pill);
+  color: var(--color-accent);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  padding: var(--space-2) var(--space-5);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+.pcv-ai-btn:hover:not(:disabled) {
+  background: var(--color-accent);
+  color: var(--color-accent-text);
+}
+.pcv-ai-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 .pcv-tpl-btn:hover {
   color: var(--color-accent);

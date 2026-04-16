@@ -415,6 +415,11 @@ const fr = {
       reviewersPlaceholder: "Ajouter un reviewer (username GitHub ou org/team)\u2026",
       reviewersHint: "Tape un nom puis Entrée, espace ou virgule. Utilise org/team-slug pour une équipe. Les reviewers recevront une notification à la création.",
       reviewersLoading: "Chargement des reviewers\u2026",
+      // AI
+      aiGenerate: "G\u00e9n\u00e9rer avec l'IA",
+      aiGenerating: "G\u00e9n\u00e9ration\u2026",
+      aiHint: "Analyse les commits entre les deux branches pour proposer un titre et une description.",
+      aiReplaceConfirm: "Le titre et la description actuels seront remplac\u00e9s. Continuer ?",
     },
   },
 

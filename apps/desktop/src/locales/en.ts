@@ -414,6 +414,11 @@ const en: Locale = {
       reviewersPlaceholder: "Add a reviewer (GitHub username or org/team)\u2026",
       reviewersHint: "Type a name then press Enter, space or comma. Use org/team-slug for a team. Reviewers will be notified on creation.",
       reviewersLoading: "Loading reviewers\u2026",
+      // AI
+      aiGenerate: "Generate with AI",
+      aiGenerating: "Generating\u2026",
+      aiHint: "Analyses the commits between the two branches to draft a title and a description.",
+      aiReplaceConfirm: "The current title and description will be replaced. Continue?",
     },
   },
 
