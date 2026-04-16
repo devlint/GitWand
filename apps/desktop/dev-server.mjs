@@ -1991,6 +1991,11 @@ const server = createServer(async (req, res) => {
             return jsonResponse(res, { error: "Aucun terminal compatible trouvé. Ouvrez un terminal et tapez: claude login" }, 500);
           }
         }
+        return jsonResponse(res, { ok: true });
+      } catch (err) {
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
 
     // POST /api/gh-merge-pr  { cwd, number, method }
     if (url.pathname === "/api/gh-merge-pr" && req.method === "POST") {

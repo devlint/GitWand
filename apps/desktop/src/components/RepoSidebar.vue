@@ -7,6 +7,7 @@ import PrListSidebar from "./PrListSidebar.vue";
 import { useI18n } from "../composables/useI18n";
 import { useCommitMessage } from "../composables/useCommitMessage";
 import { useAIProvider } from "../composables/useAIProvider";
+import { supportedLocales, localeLabels } from "../locales";
 
 const props = defineProps<{
   /** Repo directory, used by AI commit message generation. */
@@ -111,20 +112,55 @@ onUnmounted(() => {
 
 // ─── AI commit message generation ─────────────────────────
 const ai = useAIProvider();
-const { isGenerating, lastError: aiError, generate: generateCommitMsg } = useCommitMessage();
+const { isGenerating, lastError: aiError, generate: generateCommitMsg, transform: transformCommitMsg } = useCommitMessage();
+const aiMenuOpen = ref(false);
+const aiLangMenuOpen = ref(false);
+
+/** Close AI menu when clicking outside */
+function onDocClick(e: MouseEvent) {
+  const target = e.target as HTMLElement;
+  if (!target.closest(".commit-ai-wrapper")) {
+    aiMenuOpen.value = false;
+    aiLangMenuOpen.value = false;
+  }
+}
+onMounted(() => document.addEventListener("click", onDocClick));
+onUnmounted(() => document.removeEventListener("click", onDocClick));
+
+function applyMessage(msg: string) {
+  const [summary, ...rest] = msg.split("\n");
+  emit("update:commitSummary", summary.trim());
+  const body = rest.join("\n").trim();
+  emit("update:commitDescription", body);
+}
 
 async function onGenerateCommitMessage() {
   if (!props.cwd || isGenerating.value) return;
+  aiMenuOpen.value = false;
   const lang = locale.value.startsWith("en") ? "en" : "fr";
   try {
     const msg = await generateCommitMsg(props.cwd, { locale: lang as "fr" | "en" });
-    // Split on first newline: summary = first line, description = rest.
-    const [summary, ...rest] = msg.split("\n");
-    emit("update:commitSummary", summary.trim());
-    const body = rest.join("\n").trim();
-    if (body) emit("update:commitDescription", body);
+    applyMessage(msg);
   } catch {
     // lastError is already set by the composable — the UI shows it.
+  }
+}
+
+async function onAiAction(action: "regenerate" | "shorten" | "detail" | "changeLang", targetLocale?: string) {
+  aiMenuOpen.value = false;
+  aiLangMenuOpen.value = false;
+  if (isGenerating.value) return;
+  if (action === "regenerate") {
+    await onGenerateCommitMessage();
+    return;
+  }
+  const currentMsg = [props.commitSummary, props.commitDescription].filter(Boolean).join("\n");
+  if (!currentMsg.trim()) return;
+  try {
+    const msg = await transformCommitMsg(action, currentMsg, targetLocale);
+    applyMessage(msg);
+  } catch {
+    // aiError is set by the composable.
   }
 }
 
@@ -414,23 +450,58 @@ function formatActivityDate(dateStr: string): string {
           @keydown="onCommitKeydown"
           :placeholder="t('sidebar.summaryPlaceholder')"
         />
-        <!-- AI generate commit message button -->
-        <button
-          v-if="ai.isAvailable.value"
-          class="commit-ai-btn"
-          :class="{ 'commit-ai-btn--loading': isGenerating }"
-          :disabled="isGenerating || repoStats.staged === 0"
-          :title="isGenerating ? t('sidebar.aiGeneratingTooltip') : t('sidebar.aiGenerateTooltip')"
-          @click="onGenerateCommitMessage"
-        >
-          <svg v-if="isGenerating" class="commit-spinner" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
-            <circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.5" fill="none" opacity="0.3"/>
-            <path d="M7 1.5A5.5 5.5 0 0112.5 7" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/>
-          </svg>
-          <svg v-else width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <path d="M8 2l1.5 3.5L13 7l-3.5 1.5L8 12l-1.5-3.5L3 7l3.5-1.5L8 2z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" fill="none"/>
-          </svg>
-        </button>
+        <!-- AI commit message: split-button with dropdown -->
+        <div v-if="ai.isAvailable.value" class="commit-ai-wrapper">
+          <button
+            class="commit-ai-btn"
+            :class="{ 'commit-ai-btn--loading': isGenerating }"
+            :disabled="isGenerating || repoStats.staged === 0"
+            :title="isGenerating ? t('sidebar.aiGeneratingTooltip') : t('sidebar.aiGenerateTooltip')"
+            @click="onGenerateCommitMessage"
+          >
+            <svg v-if="isGenerating" class="commit-spinner" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+              <circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.5" fill="none" opacity="0.3"/>
+              <path d="M7 1.5A5.5 5.5 0 0112.5 7" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+            </svg>
+            <svg v-else width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M8 2l1.5 3.5L13 7l-3.5 1.5L8 12l-1.5-3.5L3 7l3.5-1.5L8 2z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" fill="none"/>
+            </svg>
+          </button>
+          <button
+            class="commit-ai-chevron"
+            :disabled="isGenerating"
+            @click.stop="aiMenuOpen = !aiMenuOpen"
+            aria-label="AI actions"
+          >
+            <svg width="8" height="8" viewBox="0 0 8 8" fill="none" aria-hidden="true">
+              <path d="M1.5 3L4 5.5L6.5 3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+          <ul v-if="aiMenuOpen" class="commit-ai-menu">
+            <li @click="onAiAction('regenerate')" :class="{ disabled: repoStats.staged === 0 }">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 8a6 6 0 0110.47-4M14 8a6 6 0 01-10.47 4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M12 1v3h-3M4 15v-3h3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              {{ t('sidebar.aiRegenerate') }}
+            </li>
+            <li @click="onAiAction('shorten')" :class="{ disabled: !commitSummary }">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3 4h10M3 8h6M3 12h8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+              {{ t('sidebar.aiShorten') }}
+            </li>
+            <li @click="onAiAction('detail')" :class="{ disabled: !commitSummary }">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3 4h10M3 8h10M3 12h10" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+              {{ t('sidebar.aiDetail') }}
+            </li>
+            <li class="commit-ai-menu-parent" :class="{ disabled: !commitSummary }" @click.stop="commitSummary && (aiLangMenuOpen = !aiLangMenuOpen)">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="5.5" stroke="currentColor" stroke-width="1.2"/><path d="M2.5 8h11M8 2.5c-1.5 2-1.5 9 0 11M8 2.5c1.5 2 1.5 9 0 11" stroke="currentColor" stroke-width="1.2"/></svg>
+              {{ t('sidebar.aiChangeLang') }}
+              <svg class="commit-ai-menu-arrow" width="8" height="8" viewBox="0 0 8 8" fill="none"><path d="M3 1.5L5.5 4L3 6.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <ul v-if="aiLangMenuOpen" class="commit-ai-submenu">
+                <li v-for="loc in supportedLocales" :key="loc" @click.stop="onAiAction('changeLang', loc)">
+                  {{ localeLabels[loc] }}
+                </li>
+              </ul>
+            </li>
+          </ul>
+        </div>
       </div>
       <!-- AI error feedback -->
       <div v-if="aiError" class="commit-ai-error">{{ aiError }}</div>
@@ -1040,23 +1111,54 @@ function formatActivityDate(dateStr: string): string {
   transition: border-color var(--transition-base);
 }
 
-.commit-ai-btn {
+.commit-ai-wrapper {
+  position: relative;
+  display: flex;
   flex-shrink: 0;
+}
+
+.commit-ai-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
+  width: 28px;
   background: var(--color-bg-tertiary);
   color: var(--color-accent);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-md) 0 0 var(--radius-md);
   cursor: pointer;
   transition: background var(--transition-base), border-color var(--transition-base), color var(--transition-base);
+}
+
+.commit-ai-chevron {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  background: var(--color-bg-tertiary);
+  color: var(--color-accent);
+  border: 1px solid var(--color-border);
+  margin-left: -1px;
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  cursor: pointer;
+  transition: background var(--transition-base), border-color var(--transition-base);
+}
+
+.commit-ai-chevron:hover:not(:disabled) {
+  background: var(--color-bg);
+  border-color: var(--color-accent);
+  z-index: 1;
+}
+
+.commit-ai-chevron:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 .commit-ai-btn:hover:not(:disabled) {
   background: var(--color-bg);
   border-color: var(--color-accent);
+  z-index: 1;
 }
 
 .commit-ai-btn:disabled {
@@ -1066,6 +1168,82 @@ function formatActivityDate(dateStr: string): string {
 
 .commit-ai-btn--loading {
   color: var(--color-warning);
+}
+
+.commit-ai-menu {
+  position: absolute;
+  right: 0;
+  bottom: 100%;
+  margin-bottom: 4px;
+  min-width: 180px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 100;
+  list-style: none;
+  padding: 4px 0;
+}
+
+.commit-ai-menu li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+  cursor: pointer;
+  transition: background var(--transition-base);
+}
+
+.commit-ai-menu li:hover:not(.disabled) {
+  background: var(--color-bg-tertiary);
+}
+
+.commit-ai-menu li.disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.commit-ai-menu-parent {
+  position: relative;
+}
+
+.commit-ai-menu-arrow {
+  margin-left: auto;
+  opacity: 0.5;
+}
+
+.commit-ai-submenu {
+  position: absolute;
+  right: 100%;
+  bottom: 0;
+  margin-right: 2px;
+  min-width: 130px;
+  max-height: 300px;
+  overflow-y: auto;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  list-style: none;
+  padding: 4px 0;
+  z-index: 101;
+}
+
+.commit-ai-submenu li {
+  display: flex;
+  align-items: center;
+  padding: 6px 12px;
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+  cursor: pointer;
+  transition: background var(--transition-base);
+}
+
+.commit-ai-submenu li:hover {
+  background: var(--color-bg-tertiary);
 }
 
 .commit-ai-error {

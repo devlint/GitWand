@@ -107,6 +107,10 @@ const fr = {
     commitHint: "Ctrl+Enter pour valider",
     aiGenerateTooltip: "Générer un message avec l'IA",
     aiGeneratingTooltip: "Génération en cours\u2026",
+    aiRegenerate: "Régénérer",
+    aiShorten: "Raccourcir",
+    aiDetail: "Détailler",
+    aiChangeLang: "Changer de langue",
     // Empty
     cleanTree: "Espace de travail propre",
     // Dashboard-specific sidebar blocks

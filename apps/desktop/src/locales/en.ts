@@ -106,6 +106,10 @@ const en: Locale = {
     commitHint: "Ctrl+Enter to commit",
     aiGenerateTooltip: "Generate message with AI",
     aiGeneratingTooltip: "Generating\u2026",
+    aiRegenerate: "Regenerate",
+    aiShorten: "Shorten",
+    aiDetail: "Add detail",
+    aiChangeLang: "Change language",
     // Empty
     cleanTree: "Working tree clean",
     // Dashboard-specific sidebar blocks
