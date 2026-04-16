@@ -346,7 +346,7 @@ function highlightedHtml(hunkIndex: number, panel: "ours" | "base" | "theirs"): 
             </div>
 
             <!-- ── Hunk NL explanation (Phase 1.3.2) ──────── -->
-            <div v-if="explanationHunkIndex === seg.hunkIndex && (hunkExplanations[seg.hunkIndex!] || aiExplainLoading || explanationError)" class="hunk-explanation-banner">
+            <div v-if="explanationHunkIndex === seg.hunkIndex && (hunkExplanations[seg.hunkIndex!] || aiExplainLoading || explanationError)" class="hunk-explanation-banner" role="status" aria-live="polite">
               <svg class="hunk-explanation-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true">
                 <path d="M8 1.5a4.5 4.5 0 0 0-3 7.85V11h6V9.35A4.5 4.5 0 0 0 8 1.5Z"/>
                 <path d="M6.5 13h3M7 14.5h2"/>
@@ -580,7 +580,7 @@ function highlightedHtml(hunkIndex: number, panel: "ours" | "base" | "theirs"): 
 /* ─── AI action ──────────────────────────────────────── */
 
 .inline-action--ai {
-  color: var(--color-accent);
+  color: var(--color-ai);
   display: inline-flex;
   align-items: center;
   gap: 3px;
@@ -588,8 +588,8 @@ function highlightedHtml(hunkIndex: number, panel: "ours" | "base" | "theirs"): 
 }
 
 .inline-action--ai:hover {
-  color: var(--color-accent);
-  opacity: 0.8;
+  color: var(--color-ai-hover);
+  opacity: 1;
 }
 
 .inline-action--loading {
@@ -865,6 +865,10 @@ function highlightedHtml(hunkIndex: number, panel: "ours" | "base" | "theirs"): 
 }
 
 .inline-action--explain {
-  color: var(--color-accent);
+  color: var(--color-ai);
+}
+.inline-action--explain:hover {
+  color: var(--color-ai-hover);
+  opacity: 1;
 }
 </style>

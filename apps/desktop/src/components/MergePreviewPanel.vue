@@ -23,8 +23,7 @@
       <span class="preview-branch">← {{ summary.sourceBranch }}</span>
       <button
         v-if="ai.isAvailable.value && summary.files.length > 0"
-        class="preview-ai"
-        :class="{ 'preview-ai--loading': isMergeRiskAssessing }"
+        class="btn btn--ai preview-ai"
         :disabled="isMergeRiskAssessing"
         :title="t('mergePreview.aiRiskHint')"
         @click="requestMergeRisk"
@@ -36,7 +35,7 @@
     </div>
 
     <!-- AI risk assessment panel -->
-    <div v-if="riskOpen" class="preview-risk">
+    <div v-if="riskOpen" class="preview-risk" role="status" aria-live="polite">
       <div class="preview-risk-body">
         <span v-if="mergeRiskError" class="preview-risk-error">{{ mergeRiskError }}</span>
         <span v-else-if="isMergeRiskAssessing && !riskText">{{ t('mergePreview.aiRiskAnalyzing') }}</span>
@@ -234,27 +233,13 @@ function basename(path: string): string {
 }
 .preview-close:hover { color: var(--color-text, #cdd6f4); }
 
+/* Tight-packing override so the global .btn--ai fits the compact
+   preview header (the default 32px min-height is too tall here). */
 .preview-ai {
   margin-left: auto;
+  min-height: 22px;
+  padding: 1px 10px;
   font-size: 11px;
-  font-weight: 600;
-  background: var(--color-accent-soft, rgba(139, 92, 246, 0.15));
-  color: var(--color-accent);
-  border: 1px solid var(--color-accent);
-  border-radius: 999px;
-  padding: 1px 8px;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.preview-ai:hover:not(:disabled) {
-  background: var(--color-accent);
-  color: var(--color-accent-text);
-}
-
-.preview-ai:disabled {
-  opacity: 0.6;
-  cursor: wait;
 }
 
 .preview-risk {

@@ -254,8 +254,8 @@ function handleApplySuggestion(suggestion: string, startLine: number | null, end
           <span class="pid-hunk-header-text">{{ hunk.header }}</span>
           <button
             v-if="ai.isAvailable.value"
-            class="pid-hunk-ai"
-            :class="{ 'pid-hunk-ai--loading': critiqueLoadingIdx === hunkIdx, 'pid-hunk-ai--active': critiqueOpenIdx === hunkIdx }"
+            class="btn btn--ai pid-hunk-ai"
+            :class="{ 'pid-hunk-ai--active': critiqueOpenIdx === hunkIdx }"
             :disabled="critiqueLoadingIdx === hunkIdx"
             :title="locale === 'fr' ? 'Critique IA de ce hunk' : 'AI critique of this hunk'"
             @click="requestHunkCritique(hunkIdx)"
@@ -270,6 +270,8 @@ function handleApplySuggestion(suggestion: string, startLine: number | null, end
           v-if="critiqueOpenIdx === hunkIdx && (critiqueResults[hunkIdx] || critiqueLoadingIdx === hunkIdx || critiqueAiError)"
           class="pid-critique"
           :class="critiqueResults[hunkIdx] ? verdictClass(critiqueResults[hunkIdx]!.verdict) : ''"
+          role="status"
+          aria-live="polite"
         >
           <span class="pid-critique-icon">
             {{ critiqueResults[hunkIdx] ? verdictIcon(critiqueResults[hunkIdx]!.verdict) : '✨' }}
@@ -429,30 +431,18 @@ function handleApplySuggestion(suggestion: string, startLine: number | null, end
   min-width: 0;
 }
 
+/* Tight-packing override so the global .btn--ai fits the per-hunk
+   header row (default 32px min-height is too tall for a sub-row). */
 .pid-hunk-ai {
   flex-shrink: 0;
-  padding: 2px 8px;
-  border-radius: 999px;
-  border: 1px solid var(--color-accent);
-  background: var(--color-accent-soft, rgba(139, 92, 246, 0.12));
-  color: var(--color-accent);
-  font-family: inherit;
+  min-height: 20px;
+  padding: 1px 10px;
   font-size: 10.5px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background var(--transition-fast), color var(--transition-fast);
+  font-family: inherit;
 }
-
-.pid-hunk-ai:hover:not(:disabled),
 .pid-hunk-ai--active {
-  background: var(--color-accent);
-  color: var(--color-accent-text);
-}
-
-.pid-hunk-ai--loading,
-.pid-hunk-ai:disabled {
-  opacity: 0.6;
-  cursor: wait;
+  background: var(--color-ai);
+  color: var(--color-ai-text);
 }
 
 /* ── Critique panel ────────────────────────────────── */

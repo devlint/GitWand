@@ -1257,14 +1257,21 @@ function formatActivityDate(dateStr: string): string {
   flex-shrink: 0;
 }
 
+/*
+ * Split-button: main ✨ action + dropdown chevron for alternative AI
+ * actions. We keep the split because the chevron opens a menu — the
+ * global `.btn--ai` can't represent that affordance on its own. Color
+ * comes from the shared `--color-ai` token so it still reads as "AI"
+ * and not "brand accent".
+ */
 .commit-ai-btn {
   display: flex;
   align-items: center;
   justify-content: center;
   width: 28px;
-  background: var(--color-bg-tertiary);
-  color: var(--color-accent);
-  border: 1px solid var(--color-border);
+  background: var(--color-ai-soft);
+  color: var(--color-ai);
+  border: 1px solid var(--color-ai);
   border-radius: var(--radius-md) 0 0 var(--radius-md);
   cursor: pointer;
   transition: background var(--transition-base), border-color var(--transition-base), color var(--transition-base);
@@ -1275,9 +1282,9 @@ function formatActivityDate(dateStr: string): string {
   align-items: center;
   justify-content: center;
   width: 18px;
-  background: var(--color-bg-tertiary);
-  color: var(--color-accent);
-  border: 1px solid var(--color-border);
+  background: var(--color-ai-soft);
+  color: var(--color-ai);
+  border: 1px solid var(--color-ai);
   margin-left: -1px;
   border-radius: 0 var(--radius-md) var(--radius-md) 0;
   cursor: pointer;
@@ -1285,8 +1292,8 @@ function formatActivityDate(dateStr: string): string {
 }
 
 .commit-ai-chevron:hover:not(:disabled) {
-  background: var(--color-bg);
-  border-color: var(--color-accent);
+  background: var(--color-ai);
+  color: var(--color-ai-text);
   z-index: 1;
 }
 
@@ -1296,8 +1303,8 @@ function formatActivityDate(dateStr: string): string {
 }
 
 .commit-ai-btn:hover:not(:disabled) {
-  background: var(--color-bg);
-  border-color: var(--color-accent);
+  background: var(--color-ai);
+  color: var(--color-ai-text);
   z-index: 1;
 }
 

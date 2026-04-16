@@ -902,7 +902,7 @@ watch(() => props.cwd, loadDashboard);
             <div class="panel-actions">
               <button
                 v-if="ai.isAvailable.value"
-                class="panel-link panel-link--ai"
+                class="btn btn--ai panel-link-ai"
                 :title="t('dashboard.releaseNotesHint')"
                 @click="openReleaseNotes"
               >
@@ -1011,7 +1011,7 @@ watch(() => props.cwd, loadDashboard);
     <!-- ── Release notes modal (Phase 1.3.4) ────────────── -->
     <div
       v-if="releaseNotesOpen"
-      class="rn-overlay"
+      class="rn-overlay overlay-backdrop"
       @click.self="closeReleaseNotes"
     >
       <div class="rn-modal" role="dialog" aria-modal="true">
@@ -1949,27 +1949,22 @@ button.stat-card:hover {
   gap: var(--space-2);
 }
 
-.panel-link--ai {
-  color: var(--color-accent);
-  border: 1px solid var(--color-accent);
-  background: var(--color-accent-soft, rgba(139, 92, 246, 0.08));
-}
-
-.panel-link--ai:hover {
-  background: var(--color-accent);
-  color: var(--color-accent-text);
+.panel-link-ai {
+  min-height: 26px;
+  padding: 4px 12px;
+  font-size: var(--font-size-sm);
 }
 
 /* ─── Release notes modal ────────────────────────────── */
 .rn-overlay {
   position: fixed;
   inset: 0;
-  background: var(--color-overlay, rgba(0, 0, 0, 0.55));
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 50;
   padding: 24px;
+  /* backdrop tint + blur come from the global .overlay-backdrop class */
 }
 
 .rn-modal {

@@ -450,9 +450,10 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
               <button
                 v-if="ai.isAvailable.value"
                 type="button"
-                class="bp-create-ai"
+                class="btn btn--ai btn--icon"
                 :disabled="isGeneratingBranchName"
                 :title="t('branches.aiHint')"
+                :aria-label="t('branches.aiHint')"
                 @click="handleBranchNameAI"
               >
                 <span v-if="isGeneratingBranchName">…</span>
@@ -950,27 +951,6 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
 
 .bp-create-btn:disabled {
   opacity: 0.4;
-}
-
-.bp-create-ai {
-  padding: var(--space-3) var(--space-4);
-  font-size: var(--font-size-base);
-  background: var(--color-accent-soft);
-  color: var(--color-accent);
-  border: 1px solid var(--color-accent);
-  border-radius: var(--radius-pill);
-  cursor: pointer;
-  transition: background var(--transition-fast), color var(--transition-fast);
-}
-
-.bp-create-ai:hover:not(:disabled) {
-  background: var(--color-accent);
-  color: var(--color-accent-text);
-}
-
-.bp-create-ai:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 .bp-create-error {

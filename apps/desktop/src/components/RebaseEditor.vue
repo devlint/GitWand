@@ -368,7 +368,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
             <div class="rb-section-actions">
               <button
                 v-if="ai.isAvailable.value && rebase.todoEntries.value.length >= 2"
-                class="rb-ai-btn"
+                class="btn btn--ai"
                 :disabled="isSuggestingSquash"
                 :title="t('rebase.aiSquashHint')"
                 @click="handleSquashSuggest"
@@ -663,25 +663,6 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
   gap: 6px;
 }
 
-.rb-ai-btn {
-  background: var(--color-accent-soft, rgba(139, 92, 246, 0.12));
-  color: var(--color-accent);
-  border: 1px solid var(--color-accent);
-  border-radius: var(--radius-pill);
-  cursor: pointer;
-  font-size: var(--font-size-xs);
-  font-weight: 600;
-  padding: 3px 10px;
-  transition: background var(--transition-fast), color var(--transition-fast);
-}
-.rb-ai-btn:hover:not(:disabled) {
-  background: var(--color-accent);
-  color: var(--color-accent-text);
-}
-.rb-ai-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
 
 .rb-hint--error {
   color: var(--color-danger, #ef4444);

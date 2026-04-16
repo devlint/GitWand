@@ -193,7 +193,7 @@ watch(() => props.cwd, loadStashes);
       />
       <button
         v-if="ai.isAvailable.value"
-        class="btn btn-composer btn-ai-solid"
+        class="btn btn--ai btn--ai-solid btn-composer"
         :disabled="isGeneratingMessage"
         @click="suggestMessage"
         :title="locale === 'fr' ? 'Suggérer un message avec IA' : 'Suggest a message with AI'"
@@ -330,37 +330,24 @@ watch(() => props.cwd, loadStashes);
   box-shadow: 0 0 0 3px var(--color-accent-soft);
 }
 
-.btn-composer {
+/*
+ * Scoped sizing override for the composer row. The generic `.btn`
+ * from main.css carries 6×12 padding; we need 36px high + matching
+ * horizontal padding so the input + three buttons align pixel-perfect.
+ * Double-class selector (.btn.btn-composer) raises specificity above
+ * the global `.btn { padding }` so the override actually lands.
+ */
+.btn.btn-composer {
   height: 36px;
+  min-height: 36px;
   padding: 0 14px;
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-semibold);
   white-space: nowrap;
 }
 
-/*
- * Solid IA variant — the soft variant (.btn-ai) was too easy to
- * miss against the composer's own soft grey background. The solid
- * variant uses a gradient fill and a subtle glow so the CTA reads
- * as primary-level importance.
- */
-.btn-ai-solid {
-  background: linear-gradient(135deg, var(--color-accent) 0%, #6d28d9 100%);
-  color: var(--color-accent-text);
-  border: 1px solid var(--color-accent);
-  box-shadow: 0 2px 8px var(--color-accent-soft, rgba(139, 92, 246, 0.35));
-}
-
-.btn-ai-solid:hover:not(:disabled) {
-  background: linear-gradient(135deg, var(--color-accent) 0%, #5b21b6 100%);
-  border-color: var(--color-accent);
-  color: var(--color-accent-text);
-  filter: brightness(1.05);
-}
-
-/* Outline variant for secondary actions like Cancel — keeps the
-   same footprint as the primary button but without fill, so the
-   row stays symmetric. */
+/* Outline variant for the Cancel action — keeps the same footprint
+   as the primary button so the row stays symmetric. */
 .btn-outline {
   background: var(--color-bg);
   color: var(--color-text);

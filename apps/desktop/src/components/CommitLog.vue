@@ -150,9 +150,10 @@ function authorColor(name: string): string {
       <button
         v-if="ai.isAvailable.value && searchQuery.trim()"
         type="button"
-        class="log-search-ai"
+        class="btn btn--ai btn--icon"
         :disabled="isAiSearching"
         :title="t('log.searchAiHint')"
+        :aria-label="t('log.searchAiHint')"
         @click="runAiSearch"
       >
         <span v-if="isAiSearching">…</span>
@@ -492,7 +493,6 @@ function authorColor(name: string): string {
   color: var(--color-text-muted);
 }
 
-.log-search-ai,
 .log-search-clear {
   flex-shrink: 0;
   padding: 2px 8px;
@@ -502,22 +502,6 @@ function authorColor(name: string): string {
   color: var(--color-text-muted);
   cursor: pointer;
   font-size: var(--font-size-xs);
-}
-
-.log-search-ai {
-  color: var(--color-accent);
-  border-color: var(--color-accent);
-  background: var(--color-accent-soft, rgba(139, 92, 246, 0.08));
-}
-
-.log-search-ai:hover:not(:disabled) {
-  background: var(--color-accent);
-  color: var(--color-accent-text);
-}
-
-.log-search-ai:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 .log-search-clear:hover {

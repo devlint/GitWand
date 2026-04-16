@@ -93,6 +93,17 @@
   --color-accent-soft: rgba(139, 92, 246, 0.16);
   --color-accent-text: #ffffff;
 
+  /* AI (dedicated token — distinct from brand so AI features read
+     as a separate pattern at a glance, not just "more purple"). */
+  --color-ai: #6366f1;
+  --color-ai-hover: #818cf8;
+  --color-ai-soft: rgba(99, 102, 241, 0.16);
+  --color-ai-text: #ffffff;
+
+  /* Modal overlay — dark theme: slightly tinted + blur for depth */
+  --modal-backdrop: rgba(10, 10, 18, 0.72);
+  --modal-backdrop-blur: 8px;
+
   /* Severity — fort + soft (pour fonds tintés) */
   --color-success: #22c55e;
   --color-success-soft: rgba(34, 197, 94, 0.14);
@@ -151,6 +162,16 @@
   --color-accent-hover: #6d28d9;
   --color-accent-soft: rgba(124, 58, 237, 0.12);
   --color-accent-text: #ffffff;
+
+  /* AI — distinct indigo so AI CTAs don't compete with brand purple */
+  --color-ai: #4f46e5;
+  --color-ai-hover: #4338ca;
+  --color-ai-soft: rgba(79, 70, 229, 0.1);
+  --color-ai-text: #ffffff;
+
+  /* Modal overlay — light theme */
+  --modal-backdrop: rgba(20, 20, 35, 0.4);
+  --modal-backdrop-blur: 8px;
 
   /* Severity */
   --color-success: #16a34a;
@@ -323,6 +344,69 @@ button:focus-visible,
 
 .btn--sm { padding: var(--space-2) var(--space-4); font-size: var(--font-size-base); border-radius: var(--radius-sm); }
 .btn--lg { padding: var(--space-5) var(--space-7); font-size: var(--font-size-lg); }
+
+/*
+ * AI CTA — single source of truth for every ✨ action in the app.
+ * Uses the dedicated --color-ai token (indigo, not brand purple) so
+ * AI-assisted actions read as a distinct pattern at a glance.
+ *
+ * Usage:
+ *   <button class="btn btn--ai">✨ IA</button>
+ *   <button class="btn btn--ai btn--icon" aria-label="Suggérer avec l'IA">✨</button>
+ *
+ * Two selectors (`.btn.btn--ai`) to win specificity against any
+ * sibling `.btn-*` variant that a component might still declare.
+ */
+.btn.btn--ai {
+  background: var(--color-ai-soft);
+  color: var(--color-ai);
+  border: 1px solid var(--color-ai);
+  border-radius: var(--radius-pill);
+  font-weight: var(--font-weight-semibold);
+  min-height: 32px;
+  padding: var(--space-2) var(--space-5);
+  gap: var(--space-2);
+}
+.btn.btn--ai:hover:not(:disabled) {
+  background: var(--color-ai);
+  color: var(--color-ai-text);
+  border-color: var(--color-ai);
+}
+.btn.btn--ai:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+/* Icon-only variant — keeps the pill shape but sized for a single glyph. */
+.btn.btn--ai.btn--icon {
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0;
+}
+/* Solid variant for hero CTAs (e.g. stash composer primary IA action). */
+.btn.btn--ai.btn--ai-solid {
+  background: linear-gradient(135deg, var(--color-ai) 0%, var(--color-ai-hover) 100%);
+  color: var(--color-ai-text);
+  border-color: var(--color-ai);
+  box-shadow: 0 2px 10px var(--color-ai-soft);
+}
+.btn.btn--ai.btn--ai-solid:hover:not(:disabled) {
+  filter: brightness(1.08);
+  color: var(--color-ai-text);
+}
+
+/*
+ * Modal backdrop — tinted + blurred so overlays register as modal
+ * even on dark themes (where `rgba(0,0,0,0.6)` is imperceptible).
+ *
+ * Usage: apply `.overlay-backdrop` on the fullscreen dim layer that
+ * sits behind a modal. Combine with positioning / z-index locally.
+ */
+.overlay-backdrop {
+  background: var(--modal-backdrop);
+  backdrop-filter: blur(var(--modal-backdrop-blur));
+  -webkit-backdrop-filter: blur(var(--modal-backdrop-blur));
+}
 
 /* ─── Inputs ───────────────────────────────────────────────── */
 .input {

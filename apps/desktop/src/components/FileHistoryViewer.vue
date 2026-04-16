@@ -307,9 +307,10 @@ function shortHash(hash: string): string {
               >{{ line.hash }}</span>
               <button
                 v-if="ai.isAvailable.value"
-                class="fhv-blame-explain"
+                class="btn btn--ai btn--icon fhv-blame-explain"
                 :class="{ 'fhv-blame-explain--active': blameExplainHash === line.hashFull }"
                 :title="locale === 'fr' ? 'Expliquer ce changement avec IA' : 'Explain this change with AI'"
+                :aria-label="locale === 'fr' ? 'Expliquer ce changement avec IA' : 'Explain this change with AI'"
                 @click.stop="requestBlameExplain(line.hashFull)"
               >✨</button>
               <span class="fhv-blame-author">{{ line.author }}</span>
@@ -325,7 +326,7 @@ function shortHash(hash: string): string {
       </table>
 
       <!-- Blame context explanation panel (Phase 1.3.4) -->
-      <div v-if="blameExplainHash" class="fhv-blame-explain-panel">
+      <div v-if="blameExplainHash" class="fhv-blame-explain-panel" role="status" aria-live="polite">
         <div class="fhv-blame-explain-head">
           <span class="fhv-blame-explain-title">
             ✨ {{ locale === 'fr' ? 'Pourquoi ce changement ?' : 'Why did this change?' }}
@@ -588,29 +589,28 @@ function shortHash(hash: string): string {
   text-decoration: underline;
 }
 
+/* Tight-packing override for the blame row — the default 30×30 icon
+   button would push the row too tall. Also stays semi-transparent at
+   rest (previously opacity:0 made it a hidden easter egg). */
 .fhv-blame-explain {
-  font-size: 10px;
+  width: 22px;
+  height: 22px;
+  min-height: 22px;
+  padding: 0;
   margin-right: 6px;
-  padding: 0 4px;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 4px;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+  font-size: 10px;
+  opacity: 0.5;
+  transition: opacity var(--transition-fast);
 }
 
-.fhv-blame-line:hover .fhv-blame-explain {
-  opacity: 1;
-}
-
-.fhv-blame-explain:hover,
+.fhv-blame-line:hover .fhv-blame-explain,
 .fhv-blame-explain--active {
   opacity: 1;
-  color: var(--color-accent);
-  border-color: var(--color-accent);
-  background: var(--color-accent-soft, rgba(139, 92, 246, 0.08));
+}
+
+.fhv-blame-explain--active {
+  background: var(--color-ai);
+  color: var(--color-ai-text);
 }
 
 .fhv-blame-explain-panel {

@@ -501,6 +501,27 @@ function cancelSwitchStash() {
   switchStashMessage.value = "";
 }
 
+/**
+ * Global Escape handler — closes the topmost open overlay. Preferred
+ * over per-component `@keydown.esc` because those only fire while a
+ * specific input inside the modal has focus; Escape should work from
+ * anywhere. Priority follows z-index: switch-stash (45) beats stash
+ * manager (40).
+ */
+function onGlobalKeydown(e: KeyboardEvent) {
+  if (e.key !== "Escape") return;
+  if (pendingSwitchBranch.value) {
+    cancelSwitchStash();
+    return;
+  }
+  if (showStash.value) {
+    showStash.value = false;
+    return;
+  }
+}
+onMounted(() => window.addEventListener("keydown", onGlobalKeydown));
+onUnmounted(() => window.removeEventListener("keydown", onGlobalKeydown));
+
 function handleRebaseDone() {
   showRebase.value = false;
   repoRefresh();
@@ -942,7 +963,7 @@ onUnmounted(() => {
     />
 
     <!-- Stash manager overlay -->
-    <div v-if="showStash && repoFolderPath" class="stash-overlay" @click.self="showStash = false">
+    <div v-if="showStash && repoFolderPath" class="stash-overlay overlay-backdrop" @click.self="showStash = false">
       <div class="stash-overlay-body">
         <StashManager
           :cwd="repoFolderPath"
@@ -953,7 +974,7 @@ onUnmounted(() => {
     </div>
 
     <!-- Stash-and-switch modal (asks for a stash label before switching branches) -->
-    <div v-if="pendingSwitchBranch" class="switch-stash-overlay" @click.self="cancelSwitchStash">
+    <div v-if="pendingSwitchBranch" class="switch-stash-overlay overlay-backdrop" @click.self="cancelSwitchStash">
       <div class="switch-stash-modal" role="dialog" aria-modal="true">
         <h3 class="switch-stash-title">
           {{ uiLocale === 'fr' ? 'Stasher avant de changer de branche' : 'Stash before switching branch' }}
@@ -1219,12 +1240,12 @@ onUnmounted(() => {
 .stash-overlay {
   position: fixed;
   inset: 0;
-  background: var(--color-overlay, rgba(0, 0, 0, 0.55));
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 40;
   padding: 32px;
+  /* backdrop tint + blur come from the global .overlay-backdrop class */
 }
 
 .stash-overlay-body {
@@ -1238,12 +1259,12 @@ onUnmounted(() => {
 .switch-stash-overlay {
   position: fixed;
   inset: 0;
-  background: var(--color-overlay, rgba(0, 0, 0, 0.55));
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 45;
   padding: 24px;
+  /* backdrop tint + blur come from the global .overlay-backdrop class */
 }
 
 .switch-stash-modal {

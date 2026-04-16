@@ -526,7 +526,7 @@ function removeReviewer(name: string) {
           <button
             v-if="ai.isAvailable.value"
             type="button"
-            class="pcv-ai-btn"
+            class="btn btn--ai"
             :disabled="isGeneratingPrDescription || baseIsSameAsHead"
             :title="t('pr.create.aiHint')"
             @click="generateWithAI"
@@ -953,25 +953,6 @@ function removeReviewer(name: string) {
   transition: color var(--transition-fast), border-color var(--transition-fast), background var(--transition-fast);
 }
 
-.pcv-ai-btn {
-  background: var(--color-accent-soft, rgba(139, 92, 246, 0.1));
-  border: 1px solid var(--color-accent);
-  border-radius: var(--radius-pill);
-  color: var(--color-accent);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-semibold);
-  padding: var(--space-2) var(--space-5);
-  cursor: pointer;
-  transition: background var(--transition-fast), color var(--transition-fast);
-}
-.pcv-ai-btn:hover:not(:disabled) {
-  background: var(--color-accent);
-  color: var(--color-accent-text);
-}
-.pcv-ai-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
 .pcv-tpl-btn:hover {
   color: var(--color-accent);
   border-color: var(--color-accent);
