@@ -1067,6 +1067,100 @@ const server = createServer(async (req, res) => {
       }
     }
 
+    // GET /api/git-stash-list?cwd=<path>
+    // Returns StashEntry[] — empty array when there are no stashes (not an error).
+    if (url.pathname === "/api/git-stash-list" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd");
+      if (!cwd) return jsonResponse(res, { error: "Missing cwd" }, 400);
+      try {
+        const resolvedCwd = resolve(cwd);
+        const out = execFileSync(
+          "git",
+          ["stash", "list", "--format=%gd%x09%gs%x09%ct"],
+          { cwd: resolvedCwd, encoding: "utf-8" },
+        );
+        const entries = out
+          .split("\n")
+          .map((line) => line.trim())
+          .filter(Boolean)
+          .map((line) => {
+            const [ref, message, ts] = line.split("\t");
+            const indexMatch = /stash@\{(\d+)\}/.exec(ref ?? "");
+            const date = ts ? new Date(parseInt(ts, 10) * 1000).toISOString() : "";
+            // `message` looks like "WIP on <branch>: <subject>" or
+            // "On <branch>: <subject>" when the user gave a custom label.
+            const onMatch = /^(?:WIP )?on ([^:]+):\s*(.*)$/.exec(message ?? "");
+            const branch = onMatch ? onMatch[1] : "";
+            const subject = onMatch ? onMatch[2] : (message ?? "");
+            return {
+              index: indexMatch ? parseInt(indexMatch[1], 10) : 0,
+              message: subject,
+              branch,
+              date,
+            };
+          });
+        return jsonResponse(res, entries);
+      } catch (err) {
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
+
+    // POST /api/git-stash-apply  { cwd, index }
+    if (url.pathname === "/api/git-stash-apply" && req.method === "POST") {
+      const { cwd, index } = await readBody(req);
+      if (!cwd || typeof index !== "number") {
+        return jsonResponse(res, { error: "Missing cwd or index" }, 400);
+      }
+      try {
+        const resolvedCwd = resolve(cwd);
+        execFileSync("git", ["stash", "apply", `stash@{${index}}`], {
+          cwd: resolvedCwd,
+          encoding: "utf-8",
+        });
+        return jsonResponse(res, { ok: true });
+      } catch (err) {
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
+
+    // POST /api/git-stash-drop  { cwd, index }
+    if (url.pathname === "/api/git-stash-drop" && req.method === "POST") {
+      const { cwd, index } = await readBody(req);
+      if (!cwd || typeof index !== "number") {
+        return jsonResponse(res, { error: "Missing cwd or index" }, 400);
+      }
+      try {
+        const resolvedCwd = resolve(cwd);
+        execFileSync("git", ["stash", "drop", `stash@{${index}}`], {
+          cwd: resolvedCwd,
+          encoding: "utf-8",
+        });
+        return jsonResponse(res, { ok: true });
+      } catch (err) {
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
+
+    // GET /api/git-stash-show?cwd=<path>&index=<n>
+    if (url.pathname === "/api/git-stash-show" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd");
+      const idx = url.searchParams.get("index");
+      if (!cwd || idx === null) {
+        return jsonResponse(res, { error: "Missing cwd or index" }, 400);
+      }
+      try {
+        const resolvedCwd = resolve(cwd);
+        const out = execFileSync(
+          "git",
+          ["stash", "show", "-p", `stash@{${parseInt(idx, 10)}}`],
+          { cwd: resolvedCwd, encoding: "utf-8" },
+        );
+        return jsonResponse(res, { diff: out });
+      } catch (err) {
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
+
     // ─── Git blame ────────────────────────────────────────
     if (req.method === "GET" && url.pathname === "/api/git-blame") {
       const cwd = url.searchParams.get("cwd");

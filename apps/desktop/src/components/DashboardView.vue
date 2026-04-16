@@ -453,10 +453,22 @@ function renderMarkdown(md: string): string {
   const headerInfo = extractReadmeHeader(md);
   let body = headerInfo.rest;
 
+  // Code blocks are replaced with opaque placeholders BEFORE any other
+  // markdown transformation runs. Otherwise shell comments inside them
+  // (like `# Browser dev mode`) get picked up by the H1 regex below
+  // and rendered as huge headings.
+  const codeBlocks: string[] = [];
+  body = body.replace(/```(\w*)\n([\s\S]*?)```/g, (_m, _lang, code) => {
+    const placeholder = `\u0000CODE_BLOCK_${codeBlocks.length}\u0000`;
+    codeBlocks.push(`<pre class="md-code-block"><code>${escapeHtml(code.trimEnd())}</code></pre>`);
+    return placeholder;
+  });
+
+  // Also strip HTML comments early — the README often uses them as
+  // section dividers, and we don't want them dumped as raw text.
+  body = body.replace(/<!--[\s\S]*?-->/g, "");
+
   let html = body
-    .replace(/```(\w*)\n([\s\S]*?)```/g, (_m, _lang, code) => {
-      return `<pre class="md-code-block"><code>${escapeHtml(code.trimEnd())}</code></pre>`;
-    })
     .replace(/(?:^\|.+\|\s*\n)(^\|[-| :]+\|\s*\n)((?:^\|.+\|\s*\n)*)/gm, (_m) => {
       const lines = _m.trim().split("\n");
       const headCells = lines[0].split("|").filter(c => c.trim()).map(c => `<th>${c.trim()}</th>`).join("");
@@ -516,6 +528,12 @@ function renderMarkdown(md: string): string {
       return `<p>${trimmed.replace(/\n/g, "<br>")}</p>`;
     })
     .join("\n");
+
+  // Restore the code blocks last.
+  html = html.replace(/\u0000CODE_BLOCK_(\d+)\u0000/g, (_m, idx) => {
+    const i = parseInt(idx, 10);
+    return codeBlocks[i] ?? "";
+  });
 
   return headerInfo.headerHtml + html;
 }
@@ -1702,6 +1720,10 @@ button.stat-card:hover {
 .readme-card {
   display: flex;
   flex-direction: column;
+  /* Override the generic `.card { overflow: hidden }` so long READMEs
+     aren't clipped at the card boundary. The outer dashboard scroll
+     handles vertical overflow. */
+  overflow: visible;
 }
 
 .readme-tabs {

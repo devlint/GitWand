@@ -42,7 +42,16 @@ async function loadStashes() {
   try {
     stashes.value = await gitStashList(props.cwd);
   } catch (err: any) {
-    error.value = err.message;
+    const msg = String(err?.message ?? err);
+    // "Failed to list stashes: 404" means the dev-server endpoint is
+    // not registered (older dev-server version). There are no stashes
+    // to show, so treat it as an empty list instead of surfacing the
+    // error — real failures (500 / offline) will still surface.
+    if (/stash.*:\s*404/i.test(msg)) {
+      stashes.value = [];
+    } else {
+      error.value = msg;
+    }
   } finally {
     loading.value = false;
   }
