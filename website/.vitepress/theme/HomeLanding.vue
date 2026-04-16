@@ -181,59 +181,9 @@ function toggleLocale() {
           <p class="hero-platforms">{{ t.platforms }}</p>
         </div>
 
-        <!-- Right: app window mockup -->
+        <!-- Right: app screenshot -->
         <div class="hero-visual">
-          <div class="app-window">
-            <div class="win-bar">
-              <span class="tl tl-r"></span>
-              <span class="tl tl-y"></span>
-              <span class="tl tl-g"></span>
-              <span class="win-title">GitWand — my-project</span>
-            </div>
-            <div class="win-body">
-              <!-- Sidebar -->
-              <div class="win-sidebar">
-                <div class="sb-section-head">
-                  <span>STAGED</span><span class="sb-count">1</span>
-                </div>
-                <div class="sb-file">
-                  <span class="sb-badge sb-added">A</span>
-                  <span class="sb-name">package.json</span>
-                </div>
-                <div class="sb-section-head" style="margin-top:8px">
-                  <span>MODIFIED</span><span class="sb-count">2</span>
-                </div>
-                <div class="sb-file sb-file--active">
-                  <span class="sb-badge sb-mod">M</span>
-                  <span class="sb-name">App.vue</span>
-                </div>
-                <div class="sb-file">
-                  <span class="sb-badge sb-mod">M</span>
-                  <span class="sb-name">index.ts</span>
-                </div>
-                <div class="sb-commit">
-                  <input class="sb-input" placeholder="feat: add auth…" readonly />
-                  <button class="sb-btn">Commit 2</button>
-                </div>
-              </div>
-              <!-- Diff viewer -->
-              <div class="win-diff">
-                <div class="diff-tab">App.vue</div>
-                <div class="diff-lines">
-                  <div class="dl dl-n"><span class="ln">1</span><span class="dc"> import { ref } from <span class="s">'vue'</span></span></div>
-                  <div class="dl dl-a"><span class="ln">2</span><span class="dc">+import { useAuth } from <span class="s">'./composables/auth'</span></span></div>
-                  <div class="dl dl-n"><span class="ln">3</span><span class="dc"> </span></div>
-                  <div class="dl dl-n"><span class="ln">4</span><span class="dc"> export <span class="k">default</span> {</span></div>
-                  <div class="dl dl-n"><span class="ln">5</span><span class="dc">   <span class="k">setup</span>() {</span></div>
-                  <div class="dl dl-d"><span class="ln">6</span><span class="dc">-    <span class="k">return</span> {}</span></div>
-                  <div class="dl dl-a"><span class="ln">6</span><span class="dc">+    <span class="k">const</span> { user } = useAuth()</span></div>
-                  <div class="dl dl-a"><span class="ln">7</span><span class="dc">+    <span class="k">return</span> { user }</span></div>
-                  <div class="dl dl-n"><span class="ln">8</span><span class="dc">   }</span></div>
-                  <div class="dl dl-n"><span class="ln">9</span><span class="dc"> }</span></div>
-                </div>
-              </div>
-            </div>
-          </div>
+          <img src="/screenshots/app-log-diff.png" alt="GitWand — diff viewer with syntax highlighting" class="app-window app-screenshot" />
         </div>
       </div>
     </section>
@@ -448,89 +398,7 @@ function toggleLocale() {
         <h2 class="section-title">{{ t.previewTitle }}</h2>
         <p class="section-sub">{{ t.previewSub }}</p>
 
-        <div class="preview-window">
-          <div class="win-bar">
-            <span class="tl tl-r"></span>
-            <span class="tl tl-y"></span>
-            <span class="tl tl-g"></span>
-            <span class="win-title">GitWand — my-project · main</span>
-            <div class="win-bar-right">
-              <span class="win-tab win-tab--active">Changements</span>
-              <span class="win-tab">Log</span>
-              <span class="win-tab">Graphe</span>
-              <span class="win-tab">PRs</span>
-            </div>
-          </div>
-          <div class="win-body">
-            <!-- Sidebar -->
-            <div class="win-sidebar win-sidebar--lg">
-              <div class="sb-section-head">
-                <span style="color:#f38ba8">!</span>&nbsp;CONFLITS&nbsp;<span class="sb-count sb-count--red">1</span>
-              </div>
-              <div class="sb-file sb-file--conflict">
-                <span class="sb-badge sb-conflict">!</span>
-                <span class="sb-name">merge.ts</span>
-              </div>
-              <div class="sb-section-head" style="margin-top:10px">
-                <span style="color:#a6e3a1">+</span>&nbsp;STAGED&nbsp;<span class="sb-count sb-count--green">3</span>
-              </div>
-              <div class="sb-file">
-                <span class="sb-badge sb-added">A</span>
-                <span class="sb-name">auth.ts</span>
-              </div>
-              <div class="sb-file">
-                <span class="sb-badge sb-added">A</span>
-                <span class="sb-name">useAuth.ts</span>
-              </div>
-              <div class="sb-file">
-                <span class="sb-badge sb-mod">M</span>
-                <span class="sb-name">App.vue</span>
-              </div>
-              <div class="sb-section-head" style="margin-top:10px">
-                <span style="color:#f9e2af">~</span>&nbsp;MODIFIÉS&nbsp;<span class="sb-count sb-count--yellow">2</span>
-              </div>
-              <div class="sb-file">
-                <span class="sb-badge sb-mod">M</span>
-                <span class="sb-name">config.ts</span>
-              </div>
-              <div class="sb-file sb-file--active">
-                <span class="sb-badge sb-mod">M</span>
-                <span class="sb-name">router.ts</span>
-              </div>
-              <div class="sb-commit">
-                <input class="sb-input" placeholder="feat: user authentication" readonly />
-                <button class="sb-btn">Commit 3</button>
-              </div>
-            </div>
-            <!-- Diff viewer -->
-            <div class="win-diff win-diff--lg">
-              <div class="diff-toolbar">
-                <div class="diff-tabs">
-                  <span class="diff-tab diff-tab--active">router.ts</span>
-                </div>
-                <div class="diff-actions">
-                  <span class="diff-pill">Unified</span>
-                  <span class="diff-pill diff-pill--ghost">Split</span>
-                </div>
-              </div>
-              <div class="diff-lines">
-                <div class="dl dl-n"><span class="ln">1</span><span class="dc"><span class="k">import</span> { createRouter } <span class="k">from</span> <span class="s">'vue-router'</span></span></div>
-                <div class="dl dl-a"><span class="ln">2</span><span class="dc">+<span class="k">import</span> { useAuth } <span class="k">from</span> <span class="s">'./composables/auth'</span></span></div>
-                <div class="dl dl-n"><span class="ln">3</span><span class="dc"> </span></div>
-                <div class="dl dl-n"><span class="ln">4</span><span class="dc"><span class="k">const</span> routes = [</span></div>
-                <div class="dl dl-n"><span class="ln">5</span><span class="dc">  { path: <span class="s">'/'</span>, component: Home },</span></div>
-                <div class="dl dl-a"><span class="ln">6</span><span class="dc">+  { path: <span class="s">'/login'</span>, component: Login },</span></div>
-                <div class="dl dl-a"><span class="ln">7</span><span class="dc">+  { path: <span class="s">'/profile'</span>, component: Profile, meta: { requiresAuth: <span class="k">true</span> } },</span></div>
-                <div class="dl dl-n"><span class="ln">8</span><span class="dc">]</span></div>
-                <div class="dl dl-n"><span class="ln">9</span><span class="dc"> </span></div>
-                <div class="dl dl-d"><span class="ln">10</span><span class="dc">-<span class="k">export default</span> createRouter({ history: createWebHistory(), routes })</span></div>
-                <div class="dl dl-a"><span class="ln">10</span><span class="dc">+<span class="k">const</span> router = createRouter({ history: createWebHistory(), routes })</span></div>
-                <div class="dl dl-a"><span class="ln">11</span><span class="dc">+router.beforeEach(useAuth().requireAuth)</span></div>
-                <div class="dl dl-a"><span class="ln">12</span><span class="dc">+<span class="k">export default</span> router</span></div>
-              </div>
-            </div>
-          </div>
-        </div>
+        <img src="/screenshots/app-dashboard.png" alt="GitWand — dashboard with repo health, commit history and contributors" class="preview-window preview-screenshot" />
       </div>
     </section>
 
@@ -814,6 +682,17 @@ function toggleLocale() {
   border: 1px solid rgba(255,255,255,0.08);
   box-shadow: 0 24px 60px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.04);
   background: #12121f;
+}
+.app-screenshot {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.preview-screenshot {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin-top: 8px;
 }
 .win-bar {
   display: flex;
@@ -1208,6 +1087,9 @@ function toggleLocale() {
   box-shadow: 0 32px 80px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.04);
   background: #12121f;
   margin-top: 8px;
+}
+.preview-window.preview-screenshot {
+  background: transparent;
 }
 .preview-window .win-body {
   height: 380px;
