@@ -262,6 +262,7 @@ const en: Locale = {
     deleteLabel: "Delete",
     noBranch: "No branches found",
     previewMerge: "Preview merge",
+    aiHint: "Suggest a name with AI (from your description or the current diff)",
   },
 
   // ─── Merge Preview (Phase 8.1) ──────────────────────────

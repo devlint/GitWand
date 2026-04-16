@@ -263,6 +263,7 @@ const fr = {
     deleteLabel: "Supprimer",
     noBranch: "Aucune branche trouv\u00e9e",
     previewMerge: "Aperçu du merge",
+    aiHint: "Sugg\u00e9rer un nom via l'IA (depuis ta description ou le diff courant)",
   },
 
   // ─── Merge Preview (Phase 8.1) ──────────────────────────

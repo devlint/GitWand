@@ -607,7 +607,7 @@ function onContentScroll(e: Event) {
 }
 
 .cdv-body-text {
-  white-space: pre-wrap;
+  margin-right: 44px;
 }
 
 .cdv-body-toggle {

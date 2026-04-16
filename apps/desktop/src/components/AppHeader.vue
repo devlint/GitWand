@@ -7,6 +7,8 @@ import { useMergePreview } from "../composables/useMergePreview";
 import MergePreviewPanel from "./MergePreviewPanel.vue";
 import { useFolderHistory } from "../composables/useFolderHistory";
 import { useUndoStack, type UndoEntry, type UndoOpType } from "../composables/useUndoStack";
+import { useAIProvider } from "../composables/useAIProvider";
+import { useBranchName } from "../composables/useBranchName";
 
 const { t } = useI18n();
 
@@ -73,6 +75,23 @@ const showBranchPopover = ref(false);
 const branchFilter = ref("");
 const showBranchCreate = ref(false);
 const newBranchName = ref("");
+
+// ─── AI branch-name suggestion (Phase 1.3.1) ─────────
+const ai = useAIProvider();
+const {
+  isGenerating: isGeneratingBranchName,
+  suggest: suggestBranchName,
+  lastError: branchNameAiError,
+} = useBranchName();
+
+async function handleBranchNameAI() {
+  try {
+    const suggestion = await suggestBranchName(props.cwd, newBranchName.value);
+    if (suggestion) newBranchName.value = suggestion;
+  } catch {
+    // Surfaced via branchNameAiError ref in the template
+  }
+}
 
 function toggleBranchPopover() {
   showBranchPopover.value = !showBranchPopover.value;
@@ -429,11 +448,26 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
                 autofocus
               />
               <button
+                v-if="ai.isAvailable.value"
+                type="button"
+                class="bp-create-ai"
+                :disabled="isGeneratingBranchName"
+                :title="t('branches.aiHint')"
+                @click="handleBranchNameAI"
+              >
+                <span v-if="isGeneratingBranchName">…</span>
+                <span v-else>✨</span>
+              </button>
+              <button
                 class="bp-create-btn"
                 :disabled="!newBranchName.trim()"
                 @click="handleBranchCreate"
               >{{ t('common.create') }}</button>
             </div>
+            <p
+              v-if="showBranchCreate && branchNameAiError"
+              class="bp-create-error"
+            >{{ branchNameAiError }}</p>
 
             <div class="bp-loading" v-if="branchesLoading">
               <div class="bp-spinner"></div>
@@ -915,6 +949,35 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
 
 .bp-create-btn:disabled {
   opacity: 0.4;
+}
+
+.bp-create-ai {
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--font-size-base);
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.bp-create-ai:hover:not(:disabled) {
+  background: var(--color-accent);
+  color: var(--color-accent-text);
+}
+
+.bp-create-ai:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.bp-create-error {
+  margin: 0;
+  padding: 0 var(--space-5) var(--space-3);
+  font-size: var(--font-size-xs);
+  color: var(--color-danger, #ef4444);
+  border-bottom: 1px solid var(--color-border);
 }
 
 .bp-loading {
