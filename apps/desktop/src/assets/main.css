@@ -58,7 +58,7 @@
   --transition-slow: 240ms var(--ease-out);
 
   /* Layout */
-  --sidebar-width: 340px;
+  --sidebar-width: 380px;
   --header-height: 56px;
   --tabbar-height: 40px;
 

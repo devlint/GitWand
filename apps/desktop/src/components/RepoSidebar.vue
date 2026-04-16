@@ -424,11 +424,7 @@ function formatActivityDate(dateStr: string): string {
         :title="t('sidebar.stashTitle')"
         :aria-label="t('sidebar.stashTitle')"
       >
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-          <path d="M2 6h12v7a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V6Z" stroke="currentColor" stroke-width="1.3"/>
-          <path d="M3 6V4a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v2" stroke="currentColor" stroke-width="1.3"/>
-          <path d="M6 9h4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
-        </svg>
+        {{ t('sidebar.tabStash') }}
       </button>
     </div>
 
@@ -868,21 +864,31 @@ function formatActivityDate(dateStr: string): string {
   display: flex;
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.view-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .view-tab {
-  flex: 1;
+  flex: 1 1 0;
+  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: var(--space-3);
-  padding: var(--space-5) var(--space-5);
+  gap: var(--space-2);
+  padding: var(--space-5) var(--space-3);
   font-size: var(--font-size-base);
   font-weight: var(--font-weight-medium);
   color: var(--color-text-muted);
   background: none;
   border-bottom: 2px solid transparent;
   transition: color var(--transition-base), border-color var(--transition-base);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .view-tab:hover {
