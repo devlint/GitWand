@@ -518,6 +518,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
                         :error="previewError"
                         :summary="previewSummary"
                         :conflicting-files="previewConflicts"
+                        :target-branch="branchDisplay"
                         @close="closePreview"
                       />
                     </li>

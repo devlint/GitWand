@@ -280,6 +280,9 @@ const en: Locale = {
 
   // ─── Merge Preview (Phase 8.1) ──────────────────────────
   mergePreview: {
+    aiRisk: "Risk assessment",
+    aiRiskHint: "Ask the AI whether this merge looks safe.",
+    aiRiskAnalyzing: "Analysing risks\u2026",
     analyzing: "Analyzing\u2026",
     noConflicts: "Clean merge",
     fullyAuto: "100\u00a0% auto-resolvable",

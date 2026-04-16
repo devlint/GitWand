@@ -21,7 +21,28 @@
         :class="badgeClass"
       >{{ badgeLabel }}</span>
       <span class="preview-branch">← {{ summary.sourceBranch }}</span>
+      <button
+        v-if="ai.isAvailable.value && summary.files.length > 0"
+        class="preview-ai"
+        :class="{ 'preview-ai--loading': isMergeRiskAssessing }"
+        :disabled="isMergeRiskAssessing"
+        :title="t('mergePreview.aiRiskHint')"
+        @click="requestMergeRisk"
+      >
+        <span v-if="isMergeRiskAssessing">… {{ t('mergePreview.aiRiskAnalyzing') }}</span>
+        <span v-else>✨ {{ t('mergePreview.aiRisk') }}</span>
+      </button>
       <button class="preview-close" @click="$emit('close')">✕</button>
+    </div>
+
+    <!-- AI risk assessment panel -->
+    <div v-if="riskOpen" class="preview-risk">
+      <div class="preview-risk-body">
+        <span v-if="mergeRiskError" class="preview-risk-error">{{ mergeRiskError }}</span>
+        <span v-else-if="isMergeRiskAssessing && !riskText">{{ t('mergePreview.aiRiskAnalyzing') }}</span>
+        <span v-else>{{ riskText }}</span>
+      </div>
+      <button v-if="!isMergeRiskAssessing" class="preview-risk-close" @click="dismissRisk">✕</button>
     </div>
 
     <!-- Stats row -->
@@ -71,20 +92,51 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import { useI18n } from "../composables/useI18n.js";
 import type { MergePreviewSummary, PreviewFileResult, PreviewFileStatus } from "../composables/useMergePreview.js";
+import { useAIProvider } from "../composables/useAIProvider.js";
+import { useMergeRisk } from "../composables/useMergeRisk.js";
 
 const props = defineProps<{
   loading: boolean;
   error: string | null;
   summary: MergePreviewSummary | null;
   conflictingFiles: PreviewFileResult[];
+  /** Current/target branch name (what we'd merge INTO). Used by the AI risk assessment. */
+  targetBranch?: string;
 }>();
 
 defineEmits<{ close: [] }>();
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
+const ai = useAIProvider();
+const { isAssessing: isMergeRiskAssessing, assess: assessMergeRisk, lastError: mergeRiskError } = useMergeRisk();
+
+// ─── AI risk assessment (Phase 1.3.2) ──────────────────
+const riskText = ref<string | null>(null);
+const riskOpen = ref(false);
+
+async function requestMergeRisk() {
+  if (!props.summary) return;
+  riskText.value = null;
+  riskOpen.value = true;
+  try {
+    const text = await assessMergeRisk(
+      props.targetBranch ?? "HEAD",
+      props.summary,
+      { locale: locale.value },
+    );
+    riskText.value = text;
+  } catch {
+    // error exposed via mergeRiskError
+  }
+}
+
+function dismissRisk() {
+  riskOpen.value = false;
+  riskText.value = null;
+}
 
 const badgeClass = computed(() => {
   if (!props.summary) return "";
@@ -181,6 +233,64 @@ function basename(path: string): string {
   line-height: 1;
 }
 .preview-close:hover { color: var(--color-text, #cdd6f4); }
+
+.preview-ai {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--color-accent-soft, rgba(139, 92, 246, 0.15));
+  color: var(--color-accent);
+  border: 1px solid var(--color-accent);
+  border-radius: 999px;
+  padding: 1px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.preview-ai:hover:not(:disabled) {
+  background: var(--color-accent);
+  color: var(--color-accent-text);
+}
+
+.preview-ai:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.preview-risk {
+  margin: 8px 0;
+  padding: 8px 10px;
+  background: var(--color-accent-soft, rgba(139, 92, 246, 0.08));
+  border: 1px solid var(--color-accent);
+  border-radius: 6px;
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--color-text);
+}
+
+.preview-risk-body {
+  flex: 1;
+}
+
+.preview-risk-error {
+  color: var(--color-danger);
+}
+
+.preview-risk-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--color-subtext);
+  font-size: 12px;
+  line-height: 1;
+  padding: 0 2px;
+  flex-shrink: 0;
+}
+
+.preview-risk-close:hover { color: var(--color-text); }
 
 /* Stats row */
 .preview-stats {

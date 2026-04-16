@@ -281,6 +281,9 @@ const fr = {
 
   // ─── Merge Preview (Phase 8.1) ──────────────────────────
   mergePreview: {
+    aiRisk: "Analyse des risques",
+    aiRiskHint: "Demande \u00e0 l'IA un avis sur la s\u00e9curit\u00e9 de ce merge.",
+    aiRiskAnalyzing: "Analyse des risques\u2026",
     analyzing: "Analyse en cours\u2026",
     noConflicts: "Merge propre",
     fullyAuto: "100\u00a0% auto-résolvable",
