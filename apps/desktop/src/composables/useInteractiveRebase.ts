@@ -94,60 +94,52 @@ export function useInteractiveRebase() {
 
   async function detectRebaseState(cwd: string): Promise<RebaseProgress | null> {
     try {
-      // Quick check: does REBASE_HEAD exist?
-      const rh = await gitExec(cwd, ["rev-parse", "--verify", "--quiet", "REBASE_HEAD"]);
-      const hasRebaseHead = rh.exitCode === 0;
+      // Most reliable check: `git status` long-form mentions
+      // "interactive rebase in progress" (English) or
+      // "rebase interactif en cours" (French) when a rebase is active.
+      // We force English output with LC_ALL=C via a harmless -c flag.
+      const st = await gitExec(cwd, [
+        "-c", "advice.statusHints=true",
+        "status",
+      ]);
+      const statusText = st.stdout;
 
-      if (!hasRebaseHead) {
-        // Also check rebase-merge dir (rebase may be paused before first apply)
-        const dirCheck = await gitExec(cwd, [
-          "rev-parse", "--git-path", "rebase-merge/interactive",
-        ]);
-        // The file only exists during interactive rebase
-        const interactivePath = dirCheck.stdout.trim();
-        // We can't `cat` via gitExec, but we can check if rebase-merge/msgnum exists
-        const msgnumCheck = await gitExec(cwd, [
-          "rev-parse", "--git-path", "rebase-merge/msgnum",
-        ]);
-        // If these files exist in .git, ls-files won't work.
-        // Simpler: run `git status` and parse for "interactive rebase in progress"
-        const st = await gitExec(cwd, ["status"]);
-        if (!st.stdout.includes("interactive rebase in progress") && !st.stdout.includes("rebase interactif en cours")) {
-          progress.value = null;
-          return null;
-        }
+      // Match specifically the rebase-in-progress message, NOT the branch name
+      const isRebasing =
+        /interactive rebase in progress/.test(statusText) ||
+        /rebase interactif en cours/.test(statusText) ||
+        /You are currently rebasing/.test(statusText) ||
+        /Vous êtes en train de rebaser/.test(statusText);
+
+      if (!isRebasing) {
+        progress.value = null;
+        return null;
       }
 
-      // Parse step info from git status long output
-      const statusResult = await gitExec(cwd, ["status"]);
-      const statusText = statusResult.stdout;
-
+      // Parse step/total from status output
       let step = 0;
       let total = 0;
       let headName = "";
-      let hasConflict = false;
 
-      // English: "interactive rebase in progress; onto abc1234"
-      // Also: "You are currently rebasing branch 'foo' on 'abc1234'."
       const branchMatch = statusText.match(/rebasing branch '([^']+)'/);
       if (branchMatch) headName = branchMatch[1];
 
-      // "Last commands done (2 commands done):"
-      // or "Last command done (1 command done):"
       const doneMatch = statusText.match(/\((\d+) commands? done\)/);
       if (doneMatch) step = parseInt(doneMatch[1], 10);
 
-      // "Next commands to do (3 remaining commands):"
-      // or "(1 remaining command)"
       const remainMatch = statusText.match(/\((\d+) remaining commands?\)/);
       if (remainMatch) total = step + parseInt(remainMatch[1], 10);
-      else total = step; // all done, last step
+      else total = step;
 
-      // Conflict detection
+      // Get REBASE_HEAD for current hash
+      const rh = await gitExec(cwd, ["rev-parse", "--verify", "--quiet", "REBASE_HEAD"]);
+      const currentHash = rh.exitCode === 0 ? rh.stdout.trim().slice(0, 7) : "";
+
+      // Conflict detection via porcelain status
       const conflictCheck = await gitExec(cwd, ["status", "--porcelain"]);
-      hasConflict = conflictCheck.stdout.split("\n").some((l) => l.startsWith("UU ") || l.startsWith("AA ") || l.startsWith("UD ") || l.startsWith("DU "));
-
-      const currentHash = hasRebaseHead ? rh.stdout.trim().slice(0, 7) : "";
+      const hasConflict = conflictCheck.stdout.split("\n").some(
+        (l) => l.startsWith("UU ") || l.startsWith("AA ") || l.startsWith("UD ") || l.startsWith("DU "),
+      );
 
       const state: RebaseProgress = {
         inProgress: true,

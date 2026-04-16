@@ -6,7 +6,7 @@ import {
   type RebaseTodoEntry,
   type RebaseAction,
 } from "../composables/useInteractiveRebase";
-import type { GitBranch } from "../utils/backend";
+import { getGitBranches, type GitBranch } from "../utils/backend";
 
 const props = defineProps<{
   cwd: string;
@@ -14,12 +14,24 @@ const props = defineProps<{
   branches: GitBranch[];
 }>();
 
+// ─── Local branches (fetched on mount for freshness) ─────────
+const localBranches = ref<GitBranch[]>([]);
+const branchesLoading = ref(false);
+
+async function fetchBranches() {
+  branchesLoading.value = true;
+  try {
+    localBranches.value = await getGitBranches(props.cwd);
+  } catch { /* ignore */ }
+  finally { branchesLoading.value = false; }
+}
+
 const emit = defineEmits<{
   close: [];
   done: [];
 }>();
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
 const rebase = useInteractiveRebase();
 
 // ─── Base selection ──────────────────────────────────────────
@@ -29,8 +41,7 @@ const showBasePicker = ref(true);
 
 const baseCandidates = computed(() => {
   const filter = baseFilter.value.toLowerCase();
-  // Show local branches (except current) + recent tags
-  return props.branches
+  return localBranches.value
     .filter(
       (b) =>
         !b.isCurrent &&
@@ -84,10 +95,26 @@ function onDragEnd() {
 // ─── Actions ─────────────────────────────────────────────────
 const actions: RebaseAction[] = ["pick", "reword", "squash", "fixup", "edit", "drop"];
 
-function cycleAction(index: number) {
-  const current = rebase.todoEntries.value[index].action;
-  const next = actions[(actions.indexOf(current) + 1) % actions.length];
-  rebase.setAction(index, next);
+const actionDescriptions: Record<RebaseAction, { fr: string; en: string }> = {
+  pick:    { fr: "Garder tel quel",               en: "Keep as is" },
+  reword:  { fr: "Modifier le message",           en: "Edit message" },
+  squash:  { fr: "Fusionner (garder les messages)", en: "Merge (keep messages)" },
+  fixup:   { fr: "Fusionner (ignorer le message)", en: "Merge (discard message)" },
+  edit:    { fr: "S\u2019arr\u00eater pour modifier", en: "Pause to edit" },
+  drop:    { fr: "Supprimer le commit",            en: "Remove commit" },
+};
+
+/** Index of the todo item whose action dropdown is open, or null. */
+const actionMenuIndex = ref<number | null>(null);
+
+function toggleActionMenu(index: number) {
+  actionMenuIndex.value = actionMenuIndex.value === index ? null : index;
+}
+
+function pickAction(index: number, action: RebaseAction) {
+  rebase.setAction(index, action);
+  actionMenuIndex.value = null;
+  if (action === "reword") startReword(index);
 }
 
 // ─── Reword inline edit ──────────────────────────────────────
@@ -144,9 +171,12 @@ async function doSkip() {
   }
 }
 
-// ─── Detect existing rebase on open ──────────────────────────
+// ─── Init on open ────────────────────────────────────────────
 onMounted(async () => {
-  await rebase.detectRebaseState(props.cwd);
+  await Promise.all([
+    fetchBranches(),
+    rebase.detectRebaseState(props.cwd),
+  ]);
 });
 
 // Action badge colors
@@ -162,10 +192,20 @@ function actionClass(action: RebaseAction): string {
   return map[action];
 }
 
+// Close action menu on outside click
+function onPanelClick(e: MouseEvent) {
+  const target = e.target as HTMLElement;
+  if (!target.closest(".rb-action-dropdown")) {
+    actionMenuIndex.value = null;
+  }
+}
+
 // Keyboard shortcut: Escape to close
 function onKeydown(e: KeyboardEvent) {
   if (e.key === "Escape") {
-    if (editingIndex.value !== null) {
+    if (actionMenuIndex.value !== null) {
+      actionMenuIndex.value = null;
+    } else if (editingIndex.value !== null) {
       cancelReword();
     } else {
       emit("close");
@@ -178,7 +218,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
 
 <template>
   <div class="rb-overlay" @click.self="emit('close')">
-    <div class="rb-panel" role="dialog" :aria-label="t('rebase.title')">
+    <div class="rb-panel" role="dialog" :aria-label="t('rebase.title')" @click="onPanelClick">
 
       <!-- Header -->
       <div class="rb-header">
@@ -291,15 +331,32 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
               </svg>
             </div>
 
-            <!-- Action badge (click to cycle) -->
-            <button
-              class="rb-action-badge"
-              :class="actionClass(entry.action)"
-              @click="cycleAction(index)"
-              :title="t('rebase.cycleAction')"
-            >
-              {{ entry.action }}
-            </button>
+            <!-- Action badge (click to open dropdown) -->
+            <div class="rb-action-dropdown">
+              <button
+                class="rb-action-badge"
+                :class="actionClass(entry.action)"
+                @click.stop="toggleActionMenu(index)"
+              >
+                {{ entry.action }}
+                <svg width="8" height="8" viewBox="0 0 8 8" fill="none" aria-hidden="true">
+                  <path d="M1.5 3L4 5.5L6.5 3" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </button>
+              <ul v-if="actionMenuIndex === index" class="rb-action-menu">
+                <li
+                  v-for="a in actions"
+                  :key="a"
+                  class="rb-action-menu-item"
+                  :class="[actionClass(a), { 'rb-action-menu-item--active': entry.action === a }]"
+                  @click.stop="pickAction(index, a)"
+                >
+                  <span class="rb-action-menu-dot" :class="actionClass(a)"></span>
+                  <span class="rb-action-menu-name">{{ a }}</span>
+                  <span class="rb-action-menu-desc">{{ locale.startsWith('fr') ? actionDescriptions[a].fr : actionDescriptions[a].en }}</span>
+                </li>
+              </ul>
+            </div>
 
             <!-- Commit info -->
             <span class="rb-hash mono">{{ entry.hash }}</span>
@@ -347,6 +404,15 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
                 <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
               </button>
             </div>
+          </div>
+        </div>
+
+        <!-- Legend -->
+        <div class="rb-legend">
+          <div v-for="a in actions" :key="a" class="rb-legend-item">
+            <span class="rb-legend-dot" :class="actionClass(a)"></span>
+            <span class="rb-legend-name">{{ a }}</span>
+            <span class="rb-legend-desc">{{ locale.startsWith('fr') ? actionDescriptions[a].fr : actionDescriptions[a].en }}</span>
           </div>
         </div>
 
@@ -595,6 +661,73 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
   color: var(--color-danger, #da3633);
 }
 
+/* ─── Action dropdown ──────────────────────────────────────── */
+.rb-action-dropdown {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.rb-action-badge svg {
+  margin-left: 2px;
+  opacity: 0.6;
+}
+
+.rb-action-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  min-width: 220px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  list-style: none;
+  padding: 4px 0;
+  z-index: 10;
+}
+
+.rb-action-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  transition: background 0.1s;
+  background: none !important;
+  color: var(--color-text) !important;
+}
+.rb-action-menu-item:hover {
+  background: var(--color-bg-secondary) !important;
+}
+.rb-action-menu-item--active {
+  font-weight: 600;
+}
+
+.rb-action-menu-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.rb-action-menu-dot.rb-action--pick { background: var(--color-success, #2ea043); }
+.rb-action-menu-dot.rb-action--reword { background: #8250df; }
+.rb-action-menu-dot.rb-action--squash { background: #da821a; }
+.rb-action-menu-dot.rb-action--fixup { background: #828282; }
+.rb-action-menu-dot.rb-action--edit { background: #3884ff; }
+.rb-action-menu-dot.rb-action--drop { background: var(--color-danger, #da3633); }
+
+.rb-action-menu-name {
+  font-weight: 600;
+  min-width: 48px;
+}
+
+.rb-action-menu-desc {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
 /* ─── Commit info ──────────────────────────────────────────── */
 .rb-hash {
   font-size: var(--font-size-xs);
@@ -667,6 +800,46 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
 }
 .rb-item-btn--drop:hover {
   color: var(--color-danger);
+}
+
+/* ─── Legend ────────────────────────────────────────────────── */
+.rb-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  padding: 8px 20px;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+}
+
+.rb-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+}
+
+.rb-legend-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.rb-legend-dot.rb-action--pick { background: var(--color-success, #2ea043); }
+.rb-legend-dot.rb-action--reword { background: #8250df; }
+.rb-legend-dot.rb-action--squash { background: #da821a; }
+.rb-legend-dot.rb-action--fixup { background: #828282; }
+.rb-legend-dot.rb-action--edit { background: #3884ff; }
+.rb-legend-dot.rb-action--drop { background: var(--color-danger, #da3633); }
+
+.rb-legend-name {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.rb-legend-desc {
+  color: var(--color-text-muted);
 }
 
 /* ─── Action bar ───────────────────────────────────────────── */
