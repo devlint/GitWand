@@ -22,7 +22,7 @@
   <img alt="License" src="https://img.shields.io/badge/license-MIT-8B5CF6">
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-100%25-3178C6">
   <img alt="Tests" src="https://img.shields.io/badge/tests-332%20passing-22c55e">
-  <img alt="Version" src="https://img.shields.io/badge/version-1.1.0-22c55e">
+  <img alt="Version" src="https://img.shields.io/badge/version-1.2.0-22c55e">
 </p>
 
 ---
@@ -438,12 +438,22 @@ GitWand uses a zero-dependency type-safe i18n system. `fr.ts` is the reference l
 - [x] Enriched CLI JSON output — confidence scores, decision traces, `pendingHunks`
 - [x] Human ↔ LLM collaboration loop for complex conflict resolution
 
-### Post-1.1
+### v1.2.0 — Interactive Rebase & AI Commits ✅
+
+- [x] Interactive rebase — drag-and-drop reorder, squash, edit message, drop, fixup
+- [x] Squash multi-sélection with combined message
+- [x] Rebase onto branch from UI, conflict handling (continue/abort/skip)
+- [x] AI commit message transforms — dropdown menu (Claude Code CLI / Claude / OpenAI / Ollama)
+- [x] Undo stack scaffolding (commit, merge, rebase, cherry-pick, stash, discard)
+- [x] `gh-merge-pr` dev-server endpoint + TypeScript wrapper
+- [x] Website — LLM/MCP section and FAQ on homepage
+
+### Next — v1.3.0
 
 - [ ] MCP Registry submission (npm publish + official listing)
-- [ ] Interactive rebase — reorder, squash, drop (drag-and-drop)
 - [ ] Folder diff — compare two folders, branches, or commits
 - [ ] Image diff — side-by-side, blink, slider (PNG, JPEG, SVG, WebP)
+- [ ] Submodules & Git worktrees in the UI
 - [ ] GitLab / Bitbucket integration
 - [ ] Build pipeline — macOS notarization, auto-update
 

@@ -72,7 +72,7 @@ Tout le socle d'un client Git quotidien, livré et testé.
 - Auto-update Tauri updater
 - VitePress documentation website
 
-### v1.1.0 — LLM Integration (current)
+### v1.1.0 — LLM Integration
 
 Ouverture de GitWand aux agents IA via MCP et enrichissement de la sortie CLI.
 
@@ -105,39 +105,39 @@ Ouverture de GitWand aux agents IA via MCP et enrichissement de la sortie CLI.
 - Nouveau logo 3D hexagonal cube (remplace l'ancien magic wand)
 - Icônes app Tauri regénérées (ico, icns, png multi-tailles)
 
----
+### v1.2.0 — Interactive Rebase, Absorb, AI commits & Undo (current)
 
-## Now — v1.2.0
+Productivité du workflow quotidien : opérations Git avancées accessibles, IA dans la zone de commit, filet de sécurité universel.
 
-### 1.2.1 — Rebase interactif
-
+**Rebase interactif (1.2.1)**
 - Drag-and-drop dans le log pour réordonner les commits
 - Actions par commit : squash, edit message, drop, fixup
 - Squash multi-sélection avec message combiné
 - Rebase sur branche depuis l'UI
 - Gestion des conflits en cours de rebase (continue/abort/skip)
 
-### 1.2.2 — Absorb (inspiré GitButler)
-
+**Absorb (1.2.2, inspiré GitButler)**
 - Clic droit sur fichier modifié → "Absorber dans un commit"
 - Détection auto du commit candidat via `git blame`
-- Absorb partiel (sélection de hunks)
+- Absorb partiel (sélection de hunks) via `useAbsorb.ts`
 
-### 1.2.3 — AI commit messages
-
-- Bouton dans la zone de commit → analyse du diff staged → suggestion summary + description
-- Provider configurable (Claude / OpenAI / Ollama — déjà intégré via `useAIProvider.ts`)
+**AI commit messages (1.2.3)**
+- Menu déroulant IA dans la zone de commit → analyse du diff staged → summary + description
+- Provider configurable : Claude Code CLI, Claude API, OpenAI-compatible, Ollama
 - Régénérer, raccourcir, détailler, changer de langue
 
-### 1.2.4 — Undo universel
-
+**Undo universel (1.2.4)**
 - Stack d'opérations GitWand (commit, merge, rebase, cherry-pick, stash, discard…)
 - Undo en un clic via `git reset` / `git reflog` selon le cas
 - Panel d'historique des opérations avec retour à n'importe quel état
 
+**Autres améliorations**
+- Endpoint dev-server `gh-merge-pr` + wrapper TypeScript
+- Website : section LLM/MCP et FAQ sur la homepage
+
 ---
 
-## Next — v1.3.0
+## Now — v1.3.0
 
 ### 1.3.1 — Folder diff
 
@@ -161,6 +161,12 @@ Ouverture de GitWand aux agents IA via MCP et enrichissement de la sortie CLI.
 - Publier `@gitwand/mcp` sur npm
 - Soumettre au MCP Registry officiel
 - Publier `@gitwand/cli` sur npm
+
+---
+
+## Next — v1.4.0
+
+- Fonctionnalités additionnelles à planifier — voir les pistes dans la section **Later**
 
 ---
 

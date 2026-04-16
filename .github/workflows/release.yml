@@ -76,7 +76,7 @@ jobs:
             | Windows | `.msi` · `.exe` |
 
             See the [changelog](https://github.com/devlint/GitWand/commits/${{ github.ref_name }}) for details.
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
           updaterJsonPreferNsis: true

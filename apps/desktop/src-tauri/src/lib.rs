@@ -2948,7 +2948,7 @@ fn claude_cli_login() -> Result<(), String> {
         for args in candidates.iter() {
             let (prog, rest) = args.split_first().unwrap();
             let mut cmd = std::process::Command::new(prog);
-            for a in *rest {
+            for a in rest.iter() {
                 cmd.arg(a);
             }
             cmd.arg(&inner);

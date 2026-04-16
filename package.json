@@ -1,6 +1,6 @@
 {
   "name": "gitwand",
-  "version": "1.0.1",
+  "version": "1.2.0",
   "private": true,
   "description": "Git's magic wand — automatic conflict resolution and smart merge tools",
   "author": "Laurent Guitton <lb.guitton@gmail.com>",

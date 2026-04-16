@@ -9,7 +9,7 @@ function toggleFaq(i: number) {
 
 const i18n = {
   fr: {
-    badge: 'v1.1.0 · Open Source · MIT',
+    badge: 'v1.2.0 · Open Source · MIT',
     heroH1a: 'Git, sans',
     heroH1b: 'maux de tête.',
     heroSub: 'GitWand est un client Git natif avec résolution intelligente des conflits de fusion. Desktop, CLI, et extension VS Code — un seul outil, partout.',
@@ -73,7 +73,7 @@ const i18n = {
     ],
   },
   en: {
-    badge: 'v1.1.0 · Open Source · MIT',
+    badge: 'v1.2.0 · Open Source · MIT',
     heroH1a: 'Git, without',
     heroH1b: 'the headaches.',
     heroSub: 'GitWand is a native Git client with smart merge conflict resolution. Desktop, CLI, and VS Code extension — one tool, everywhere.',

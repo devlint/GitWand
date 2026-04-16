@@ -1,6 +1,6 @@
 {
   "name": "@gitwand/mcp",
-  "version": "0.1.0",
+  "version": "1.2.0",
   "description": "GitWand MCP server — smart conflict resolution for AI agents",
   "type": "module",
   "main": "dist/server.js",
