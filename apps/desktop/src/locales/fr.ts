@@ -279,6 +279,31 @@ const fr = {
     conflictsManual: "conflit(s) manuel(s)",
   },
 
+  // ─── Interactive Rebase (Phase 1.2.1) ──────────────────
+  rebase: {
+    title: "Rebase interactif",
+    button: "Rebase",
+    baseLabel: "Branche cible",
+    baseHint: "S\u00e9lectionnez la branche sur laquelle rebaser vos commits.",
+    basePlaceholder: "Filtrer les branches\u2026",
+    commitsLabel: "Commits \u00e0 rebaser",
+    commitsHint: "Glissez pour r\u00e9ordonner, cliquez sur l\u2019action pour la changer. Double-clic sur le message pour le modifier.",
+    changeBase: "Changer la base",
+    cycleAction: "Changer l\u2019action (clic)",
+    dragHint: "Glisser pour d\u00e9placer",
+    start: "Lancer le rebase",
+    running: "Rebase en cours\u2026",
+    inProgress: "Rebase en cours",
+    conflict: "Conflit",
+    continue: "Continuer",
+    abort: "Annuler",
+    skip: "Passer",
+    reword: "Modifier le message",
+    drop: "Supprimer",
+    restore: "Restaurer",
+    done: "Rebase termin\u00e9",
+  },
+
   // ─── EmptyState ─────────────────────────────────────────
   empty: {
     title: "Aucun d\u00e9p\u00f4t ouvert",
@@ -376,8 +401,11 @@ const fr = {
   // ─── Settings ───────────────────────────────────────────
   settings: {
     title: "Param\u00e8tres",
-    language: "Langue",
+    language: "Langue de l\u2019interface",
     languageAuto: "Automatique (syst\u00e8me)",
+    commitMessageLang: "Langue des messages de commit",
+    commitMessageLangAuto: "Suivre la langue de l\u2019interface",
+    commitMessageLangHint: "Langue utilis\u00e9e par l\u2019IA pour g\u00e9n\u00e9rer les messages de commit",
     theme: "Th\u00e8me",
     themeDark: "Sombre",
     themeLight: "Clair",
@@ -404,6 +432,43 @@ const fr = {
     spaces: "espaces",
     notifications: "Notifications",
     notificationsHint: "Afficher les notifications toast (sync, push, erreurs)",
+  },
+
+  // ─── Undo ───────────────────────────────────────────────
+  undoStack: {
+    title: "Historique des opérations",
+    undoButton: "Rembobiner",
+    undoTooltip: "Rembobiner la dernière opération Git",
+    noHistory: "Aucune opération récente",
+    undone: "Opération annulée",
+    undoConfirm: "Annuler cette opération ? Les changements seront restaurés.",
+    undoHardConfirm: "Annuler cette opération ? ⚠️ Les modifications non committées seront perdues.",
+    // Operation types
+    opCommit: "Commit",
+    opAmend: "Amend",
+    opMerge: "Merge",
+    opCherryPick: "Cherry-pick",
+    opRebase: "Rebase",
+    opPull: "Pull",
+    opReset: "Reset",
+    opCheckout: "Checkout",
+    opStash: "Stash",
+    opOther: "Opération",
+  },
+
+  // ─── Absorb ─────────────────────────────────────────────
+  absorb: {
+    action: "Absorber",
+    tooltip: "Absorber dans le commit d'origine",
+    analyzing: "Analyse en cours\u2026",
+    absorbing: "Absorption en cours\u2026",
+    noCandidate: "Aucun commit cible trouv\u00e9 — les modifications touchent plusieurs commits",
+    candidate: "Absorber dans {0}",
+    candidateHint: "{0} hunk(s) \u2192 {1}",
+    done: "Modifications absorb\u00e9es dans {0}",
+    confirmTitle: "Absorber dans ce commit ?",
+    confirmDesc: "Les modifications de {0} seront int\u00e9gr\u00e9es dans le commit {1}.",
+    lines: "Lignes {0}",
   },
 } as const;
 

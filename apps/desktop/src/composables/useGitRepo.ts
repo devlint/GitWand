@@ -1,4 +1,5 @@
 import { ref, computed, watch } from "vue";
+import { gitExec } from "../utils/backend";
 import {
   getGitStatus,
   getGitDiff,
@@ -262,6 +263,50 @@ export function useGitRepo() {
   }
 
   /**
+   * Lightweight status polling — runs `git status --porcelain` every 2s
+   * and only triggers a full `loadStatus` when the output changes.
+   * This detects external file changes (editor saves, branch operations
+   * from CLI, etc.) with minimal overhead (~20ms per check).
+   */
+  let statusPollInterval: ReturnType<typeof setInterval> | null = null;
+  let lastStatusSnapshot = "";
+
+  async function pollStatus() {
+    if (!folderPath.value || isMerging.value || loading.value) return;
+    try {
+      const result = await gitExec(folderPath.value, [
+        "status",
+        "--porcelain",
+        "--branch",
+      ]);
+      if (result.exitCode !== 0) return;
+      const snapshot = result.stdout ?? "";
+      if (snapshot !== lastStatusSnapshot) {
+        lastStatusSnapshot = snapshot;
+        await loadStatus(folderPath.value);
+        // Also refresh diff if a file is selected
+        if (selectedFilePath.value) {
+          await loadDiff(selectedFilePath.value, selectedFileStaged.value);
+        }
+      }
+    } catch {
+      // Silently ignore — polling errors are non-critical
+    }
+  }
+
+  function startStatusPoll() {
+    stopStatusPoll();
+    statusPollInterval = setInterval(pollStatus, 2_000);
+  }
+
+  function stopStatusPoll() {
+    if (statusPollInterval) {
+      clearInterval(statusPollInterval);
+      statusPollInterval = null;
+    }
+  }
+
+  /**
    * Open a repository folder.
    */
   async function openRepo(path: string) {
@@ -287,6 +332,10 @@ export function useGitRepo() {
     // Background fetch then refresh status — awaited so UI updates before user interacts
     fetchRemote();
     startAutoFetch();
+
+    // Start lightweight status polling to detect external changes
+    lastStatusSnapshot = ""; // Reset so first poll picks up current state
+    startStatusPoll();
   }
 
   /**
@@ -568,6 +617,7 @@ export function useGitRepo() {
   async function mergeBranch(branchName: string) {
     if (!folderPath.value || !branchName) return;
     stopAutoFetch();
+    stopStatusPoll();
     isMerging.value = true;
     try {
       const result = await gitMerge(folderPath.value, branchName);
@@ -608,7 +658,10 @@ export function useGitRepo() {
     } finally {
       isMerging.value = false;
       // Restart auto-fetch only if no conflicts remain (conflicts = merge still in progress)
-      if (!hasConflicts.value) startAutoFetch();
+      if (!hasConflicts.value) {
+        startAutoFetch();
+        startStatusPoll();
+      }
     }
   }
 
@@ -623,6 +676,7 @@ export function useGitRepo() {
       error.value = `abort merge: ${err?.message || String(err)}`;
     } finally {
       startAutoFetch();
+      startStatusPoll();
     }
   }
 
@@ -646,6 +700,7 @@ export function useGitRepo() {
     } finally {
       isMerging.value = false;
       startAutoFetch();
+      startStatusPoll();
     }
   }
 

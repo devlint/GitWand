@@ -16,6 +16,7 @@ import PrCreateView from "./components/PrCreateView.vue";
 import DashboardView from "./components/DashboardView.vue";
 import EditCommitOverlay from "./components/EditCommitOverlay.vue";
 import MergeSuccessModal from "./components/MergeSuccessModal.vue";
+import RebaseEditor from "./components/RebaseEditor.vue";
 import { usePrPanel, PR_PANEL_KEY } from "./composables/usePrPanel";
 import type { GitLogEntry } from "./utils/backend";
 import { getPersistedDiffMode, persistDiffMode, type DiffMode } from "./utils/diffMode";
@@ -450,6 +451,14 @@ async function handleSwitchBranch(name: string) {
 
 // ─── Settings panel ─────────────────────────────────────
 const showSettings = ref(false);
+
+// ─── Interactive rebase panel ────────────────────────────
+const showRebase = ref(false);
+
+function handleRebaseDone() {
+  showRebase.value = false;
+  repoRefresh();
+}
 const diffMode = ref<DiffMode>(getPersistedDiffMode());
 
 function onDiffModeChange(mode: DiffMode) {
@@ -670,6 +679,8 @@ onUnmounted(() => {
       @create-branch="createBranch"
       @delete-branch="deleteBranch"
       @load-branches="loadBranches"
+      @undo-performed="repoRefresh()"
+      @open-rebase="showRebase = true"
     />
 
     <div class="app-body">
@@ -711,6 +722,7 @@ onUnmounted(() => {
           @update:log-author-filter="setLogAuthorFilter"
           @discard="(path, section) => discardFiles([path], section === 'untracked')"
           @add-to-gitignore="(path) => addToGitignore(path)"
+          @refresh="repoRefresh()"
         />
       </aside>
 
@@ -871,6 +883,16 @@ onUnmounted(() => {
       </div>
       <button class="toast-dismiss" @click="dismissToast">OK</button>
     </div>
+
+    <!-- Interactive rebase panel -->
+    <RebaseEditor
+      v-if="showRebase && repoFolderPath"
+      :cwd="repoFolderPath"
+      :current-branch="branchDisplay"
+      :branches="branches"
+      @close="showRebase = false"
+      @done="handleRebaseDone"
+    />
 
     <!-- Settings panel -->
     <SettingsPanel

@@ -10,9 +10,9 @@
 
 import { createServer } from "node:http";
 import { execSync, execFileSync, spawnSync, spawn } from "node:child_process";
-import { readFileSync, writeFileSync, readdirSync, statSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync, statSync, existsSync, unlinkSync } from "node:fs";
 import { resolve, join, dirname, basename } from "node:path";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 
 /** Resolve the full path to a CLI binary, checking Homebrew paths on macOS. */
 function resolveBin(name) {
@@ -2015,6 +2015,80 @@ const server = createServer(async (req, res) => {
         }
         return jsonResponse(res, { ok: true });
       } catch (err) {
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
+
+    // POST /api/git-interactive-rebase  { cwd, base, todoLines }
+    // Starts an interactive rebase with a custom todo list.
+    // Writes a temp file and uses GIT_SEQUENCE_EDITOR to inject it.
+    // Uses async spawn (NOT spawnSync) to avoid blocking the event loop.
+    if (url.pathname === "/api/git-interactive-rebase" && req.method === "POST") {
+      try {
+        const { cwd, base, todoLines } = await readBody(req);
+        if (!cwd || !base || !todoLines) {
+          return jsonResponse(res, { error: "Missing cwd, base, or todoLines" }, 400);
+        }
+        const resolvedCwd = resolve(cwd);
+        const todoContent = todoLines.join("\n") + "\n";
+        const tmpFile = join(tmpdir(), `gitwand-rebase-todo-${Date.now()}.txt`);
+        writeFileSync(tmpFile, todoContent, "utf-8");
+
+        const editorCmd = process.platform === "win32"
+          ? `copy /Y "${tmpFile}"`
+          : `cp "${tmpFile}"`;
+
+        console.log("[rebase] Starting: git rebase -i", base, "in", resolvedCwd);
+
+        const result = await new Promise((resolveP, rejectP) => {
+          const child = spawn(GIT, ["rebase", "-i", base], {
+            cwd: resolvedCwd,
+            env: {
+              ...process.env,
+              GIT_SEQUENCE_EDITOR: editorCmd,
+              GIT_EDITOR: "true",
+              EDITOR: "true",
+            },
+            stdio: ["pipe", "pipe", "pipe"],
+          });
+          // Close stdin immediately so git never blocks waiting for input
+          child.stdin.end();
+
+          let stdout = "";
+          let stderr = "";
+          child.stdout.on("data", (d) => { stdout += d.toString(); });
+          child.stderr.on("data", (d) => { stderr += d.toString(); });
+
+          const timer = setTimeout(() => {
+            child.kill("SIGKILL");
+            rejectP(new Error("Rebase timed out after 30s"));
+          }, 30_000);
+
+          child.on("close", (code) => {
+            clearTimeout(timer);
+            console.log("[rebase] Done, exit code:", code, "stderr:", stderr.slice(0, 200));
+            resolveP({ code, stdout, stderr });
+          });
+          child.on("error", (err) => {
+            clearTimeout(timer);
+            console.error("[rebase] spawn error:", err);
+            rejectP(err);
+          });
+        });
+
+        // Clean up temp file
+        try { unlinkSync(tmpFile); } catch { /* ignore */ }
+
+        if (result.code !== 0) {
+          const stderr = result.stderr ?? "";
+          if (stderr.includes("CONFLICT") || stderr.includes("could not apply")) {
+            return jsonResponse(res, { ok: true, conflict: true });
+          }
+          return jsonResponse(res, { error: stderr || "Rebase failed" }, 500);
+        }
+        return jsonResponse(res, { ok: true });
+      } catch (err) {
+        console.error("[rebase] Error:", err);
         return jsonResponse(res, { error: err.message }, 500);
       }
     }

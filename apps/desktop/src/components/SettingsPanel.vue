@@ -40,6 +40,7 @@ interface Settings {
   gitPath: string;
   defaultBranch: string;
   commitSignature: boolean;
+  commitMessageLang: string; // "" = follow UI locale
   diffMode: DiffMode;
   pullMode: PullMode;
   switchBehavior: SwitchBehavior;
@@ -61,6 +62,7 @@ const defaultSettings: Settings = {
   gitPath: "",
   defaultBranch: "main",
   commitSignature: true,
+  commitMessageLang: "",
   diffMode: "inline",
   pullMode: "merge",
   switchBehavior: "ask",
@@ -400,13 +402,27 @@ function onKeyDown(e: KeyboardEvent) {
 
         <!-- ═══ GÉNÉRAL ═══ -->
         <template v-if="activeSettingsTab === 'general'">
-          <!-- Language -->
+          <!-- Interface language -->
           <div class="sp-row">
             <label class="sp-label" for="setting-lang">{{ t('settings.language') }}</label>
             <select id="setting-lang" class="sp-select" v-model="selectedLocale">
               <option value="auto">{{ t('settings.languageAuto') }}</option>
               <option v-for="loc in supportedLocales" :key="loc" :value="loc">{{ localeLabels[loc] }}</option>
             </select>
+          </div>
+
+          <!-- Commit message language -->
+          <div class="sp-row">
+            <label class="sp-label" for="setting-commit-lang">{{ t('settings.commitMessageLang') }}</label>
+            <select
+              id="setting-commit-lang" class="sp-select"
+              :value="settings.commitMessageLang"
+              @change="updateSetting('commitMessageLang', ($event.target as HTMLSelectElement).value)"
+            >
+              <option value="">{{ t('settings.commitMessageLangAuto') }}</option>
+              <option v-for="loc in supportedLocales" :key="loc" :value="loc">{{ localeLabels[loc] }}</option>
+            </select>
+            <span class="sp-hint">{{ t('settings.commitMessageLangHint') }}</span>
           </div>
 
           <!-- Theme -->
@@ -1038,6 +1054,9 @@ function onKeyDown(e: KeyboardEvent) {
 .sp-hint {
   font-size: var(--font-size-sm);
   color: var(--color-text-muted);
+}
+
+.sp-row--checkbox .sp-hint {
   padding-left: var(--space-8);
 }
 

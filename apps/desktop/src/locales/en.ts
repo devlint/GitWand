@@ -278,6 +278,31 @@ const en: Locale = {
     conflictsManual: "manual conflict(s)",
   },
 
+  // ─── Interactive Rebase (Phase 1.2.1) ──────────────────
+  rebase: {
+    title: "Interactive rebase",
+    button: "Rebase",
+    baseLabel: "Target branch",
+    baseHint: "Select the branch to rebase your commits onto.",
+    basePlaceholder: "Filter branches\u2026",
+    commitsLabel: "Commits to rebase",
+    commitsHint: "Drag to reorder, click the action badge to cycle. Double-click a message to edit it.",
+    changeBase: "Change base",
+    cycleAction: "Cycle action (click)",
+    dragHint: "Drag to move",
+    start: "Start rebase",
+    running: "Rebasing\u2026",
+    inProgress: "Rebase in progress",
+    conflict: "Conflict",
+    continue: "Continue",
+    abort: "Abort",
+    skip: "Skip",
+    reword: "Edit message",
+    drop: "Drop",
+    restore: "Restore",
+    done: "Rebase completed",
+  },
+
   // ─── EmptyState ─────────────────────────────────────────
   empty: {
     title: "No repository open",
@@ -375,8 +400,11 @@ const en: Locale = {
   // ─── Settings ───────────────────────────────────────────
   settings: {
     title: "Settings",
-    language: "Language",
+    language: "Interface language",
     languageAuto: "Automatic (system)",
+    commitMessageLang: "Commit message language",
+    commitMessageLangAuto: "Follow interface language",
+    commitMessageLangHint: "Language used by AI to generate commit messages",
     theme: "Theme",
     themeDark: "Dark",
     themeLight: "Light",
@@ -403,6 +431,43 @@ const en: Locale = {
     spaces: "spaces",
     notifications: "Notifications",
     notificationsHint: "Show toast notifications (sync, push, errors)",
+  },
+
+  // ─── Undo ───────────────────────────────────────────────
+  undoStack: {
+    title: "Operation history",
+    undoButton: "Rewind",
+    undoTooltip: "Rewind last Git operation",
+    noHistory: "No recent operations",
+    undone: "Operation undone",
+    undoConfirm: "Undo this operation? Changes will be restored to staging.",
+    undoHardConfirm: "Undo this operation? \u26a0\ufe0f Uncommitted changes will be lost.",
+    // Operation types
+    opCommit: "Commit",
+    opAmend: "Amend",
+    opMerge: "Merge",
+    opCherryPick: "Cherry-pick",
+    opRebase: "Rebase",
+    opPull: "Pull",
+    opReset: "Reset",
+    opCheckout: "Checkout",
+    opStash: "Stash",
+    opOther: "Operation",
+  },
+
+  // ─── Absorb ─────────────────────────────────────────────
+  absorb: {
+    action: "Absorb",
+    tooltip: "Absorb into original commit",
+    analyzing: "Analyzing\u2026",
+    absorbing: "Absorbing\u2026",
+    noCandidate: "No target commit found \u2014 changes span multiple commits",
+    candidate: "Absorb into {0}",
+    candidateHint: "{0} hunk(s) \u2192 {1}",
+    done: "Changes absorbed into {0}",
+    confirmTitle: "Absorb into this commit?",
+    confirmDesc: "Changes in {0} will be folded into commit {1}.",
+    lines: "Lines {0}",
   },
 } as const;
 
