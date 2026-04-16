@@ -670,6 +670,7 @@ onUnmounted(() => {
       @create-branch="createBranch"
       @delete-branch="deleteBranch"
       @load-branches="loadBranches"
+      @undo-performed="repoRefresh()"
     />
 
     <div class="app-body">
@@ -711,6 +712,7 @@ onUnmounted(() => {
           @update:log-author-filter="setLogAuthorFilter"
           @discard="(path, section) => discardFiles([path], section === 'untracked')"
           @add-to-gitignore="(path) => addToGitignore(path)"
+          @refresh="repoRefresh()"
         />
       </aside>
 

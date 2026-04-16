@@ -8,6 +8,7 @@ import { useI18n } from "../composables/useI18n";
 import { useCommitMessage } from "../composables/useCommitMessage";
 import { useAIProvider } from "../composables/useAIProvider";
 import { supportedLocales, localeLabels } from "../locales";
+import { useAbsorb, type AbsorbCandidate } from "../composables/useAbsorb";
 
 const props = defineProps<{
   /** Repo directory, used by AI commit message generation. */
@@ -63,6 +64,8 @@ const emit = defineEmits<{
   discard: [path: string, section: string];
   /** Append file path to .gitignore */
   addToGitignore: [path: string];
+  /** Request a full repo state refresh (after absorb, etc.) */
+  refresh: [];
 }>();
 
 const { t, locale } = useI18n();
@@ -96,6 +99,43 @@ function onCtxGitignore() {
   if (!ctxMenu.value.file) return;
   emit("addToGitignore", ctxMenu.value.file.path);
   closeContextMenu();
+}
+
+// ─── Absorb ────────────────────────────────────────────
+const absorbApi = useAbsorb();
+const absorbCandidate = ref<AbsorbCandidate | null>(null);
+const absorbError = ref<string | null>(null);
+
+async function onCtxAbsorb() {
+  const file = ctxMenu.value.file;
+  if (!file || !props.cwd) return;
+  closeContextMenu();
+  absorbCandidate.value = null;
+  absorbError.value = null;
+
+  try {
+    const staged = file.section === "staged";
+    const results = await absorbApi.analyze(props.cwd, [file.path], staged);
+    if (results.length === 0) {
+      absorbError.value = t("absorb.noCandidate");
+      return;
+    }
+    absorbCandidate.value = results[0];
+    // Confirm
+    const msg = t("absorb.confirmDesc")
+      .replace("{0}", file.path)
+      .replace("{1}", results[0].targetShortHash + " " + results[0].targetMessage);
+    if (!confirm(msg)) {
+      absorbCandidate.value = null;
+      return;
+    }
+    await absorbApi.absorb(props.cwd, results[0]);
+    absorbCandidate.value = null;
+    // Trigger repo refresh
+    emit("refresh");
+  } catch (err: unknown) {
+    absorbError.value = err instanceof Error ? err.message : String(err);
+  }
 }
 
 onMounted(() => {
@@ -726,6 +766,23 @@ function formatActivityDate(dateStr: string): string {
 
       <!-- Separator -->
       <div class="ctx-separator" v-if="ctxMenu.file.section !== 'staged'"></div>
+
+      <!-- Absorb into original commit -->
+      <button
+        v-if="ctxMenu.file.section === 'unstaged' || ctxMenu.file.section === 'staged'"
+        class="ctx-item"
+        @click="onCtxAbsorb"
+      >
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <circle cx="8" cy="4" r="2.5" stroke="currentColor" stroke-width="1.3"/>
+          <circle cx="8" cy="12" r="2.5" stroke="currentColor" stroke-width="1.3"/>
+          <path d="M8 6.5v3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+          <path d="M5.5 8l2.5 2 2.5-2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span>{{ t('absorb.action') }}</span>
+      </button>
+
+      <div class="ctx-separator" v-if="ctxMenu.file.section === 'unstaged' || ctxMenu.file.section === 'staged'"></div>
 
       <!-- Add to .gitignore -->
       <button class="ctx-item" @click="onCtxGitignore">

@@ -405,6 +405,43 @@ const fr = {
     notifications: "Notifications",
     notificationsHint: "Afficher les notifications toast (sync, push, erreurs)",
   },
+
+  // ─── Undo ───────────────────────────────────────────────
+  undoStack: {
+    title: "Historique des opérations",
+    undoButton: "Rembobiner",
+    undoTooltip: "Rembobiner la dernière opération Git",
+    noHistory: "Aucune opération récente",
+    undone: "Opération annulée",
+    undoConfirm: "Annuler cette opération ? Les changements seront restaurés.",
+    undoHardConfirm: "Annuler cette opération ? ⚠️ Les modifications non committées seront perdues.",
+    // Operation types
+    opCommit: "Commit",
+    opAmend: "Amend",
+    opMerge: "Merge",
+    opCherryPick: "Cherry-pick",
+    opRebase: "Rebase",
+    opPull: "Pull",
+    opReset: "Reset",
+    opCheckout: "Checkout",
+    opStash: "Stash",
+    opOther: "Opération",
+  },
+
+  // ─── Absorb ─────────────────────────────────────────────
+  absorb: {
+    action: "Absorber",
+    tooltip: "Absorber dans le commit d'origine",
+    analyzing: "Analyse en cours\u2026",
+    absorbing: "Absorption en cours\u2026",
+    noCandidate: "Aucun commit cible trouv\u00e9 — les modifications touchent plusieurs commits",
+    candidate: "Absorber dans {0}",
+    candidateHint: "{0} hunk(s) \u2192 {1}",
+    done: "Modifications absorb\u00e9es dans {0}",
+    confirmTitle: "Absorber dans ce commit ?",
+    confirmDesc: "Les modifications de {0} seront int\u00e9gr\u00e9es dans le commit {1}.",
+    lines: "Lignes {0}",
+  },
 } as const;
 
 // Widen literal string types to plain `string` for locale compatibility

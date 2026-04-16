@@ -404,6 +404,43 @@ const en: Locale = {
     notifications: "Notifications",
     notificationsHint: "Show toast notifications (sync, push, errors)",
   },
+
+  // ─── Undo ───────────────────────────────────────────────
+  undoStack: {
+    title: "Operation history",
+    undoButton: "Rewind",
+    undoTooltip: "Rewind last Git operation",
+    noHistory: "No recent operations",
+    undone: "Operation undone",
+    undoConfirm: "Undo this operation? Changes will be restored to staging.",
+    undoHardConfirm: "Undo this operation? \u26a0\ufe0f Uncommitted changes will be lost.",
+    // Operation types
+    opCommit: "Commit",
+    opAmend: "Amend",
+    opMerge: "Merge",
+    opCherryPick: "Cherry-pick",
+    opRebase: "Rebase",
+    opPull: "Pull",
+    opReset: "Reset",
+    opCheckout: "Checkout",
+    opStash: "Stash",
+    opOther: "Operation",
+  },
+
+  // ─── Absorb ─────────────────────────────────────────────
+  absorb: {
+    action: "Absorb",
+    tooltip: "Absorb into original commit",
+    analyzing: "Analyzing\u2026",
+    absorbing: "Absorbing\u2026",
+    noCandidate: "No target commit found \u2014 changes span multiple commits",
+    candidate: "Absorb into {0}",
+    candidateHint: "{0} hunk(s) \u2192 {1}",
+    done: "Changes absorbed into {0}",
+    confirmTitle: "Absorb into this commit?",
+    confirmDesc: "Changes in {0} will be folded into commit {1}.",
+    lines: "Lines {0}",
+  },
 } as const;
 
 export default en;

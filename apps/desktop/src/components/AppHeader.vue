@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from "vue";
+import { ref, computed, watch, onMounted, onUnmounted } from "vue";
 import type { Theme } from "../composables/useTheme";
 import type { GitBranch } from "../utils/backend";
 import { useI18n } from "../composables/useI18n";
 import { useMergePreview } from "../composables/useMergePreview";
 import MergePreviewPanel from "./MergePreviewPanel.vue";
 import { useFolderHistory } from "../composables/useFolderHistory";
+import { useUndoStack, type UndoEntry, type UndoOpType } from "../composables/useUndoStack";
 
 const { t } = useI18n();
 
@@ -45,6 +46,7 @@ const emit = defineEmits<{
   createBranch: [name: string];
   deleteBranch: [name: string];
   loadBranches: [];
+  undoPerformed: [];
 }>();
 
 // ─── Recent repos popover (Phase 8.4) ────────────────
@@ -212,7 +214,67 @@ function onDocClick(e: MouseEvent) {
   if (showRecentPopover.value && !target.closest(".recent-popover-wrapper")) {
     closeRecentPopover();
   }
+  if (showUndoPopover.value && !target.closest(".undo-popover-wrapper")) {
+    closeUndoPopover();
+  }
 }
+
+// ─── Undo stack (Phase 1.2.4) ──────────────────────────
+const undoStack = useUndoStack();
+const showUndoPopover = ref(false);
+
+function toggleUndoPopover() {
+  showUndoPopover.value = !showUndoPopover.value;
+  if (showUndoPopover.value && props.cwd) {
+    undoStack.refresh(props.cwd);
+  }
+}
+
+function closeUndoPopover() {
+  showUndoPopover.value = false;
+}
+
+/** Map operation type to i18n key suffix. */
+function opLabel(type: UndoOpType): string {
+  const map: Record<UndoOpType, string> = {
+    commit: t("undoStack.opCommit"),
+    amend: t("undoStack.opAmend"),
+    merge: t("undoStack.opMerge"),
+    "cherry-pick": t("undoStack.opCherryPick"),
+    rebase: t("undoStack.opRebase"),
+    pull: t("undoStack.opPull"),
+    reset: t("undoStack.opReset"),
+    checkout: t("undoStack.opCheckout"),
+    stash: t("undoStack.opStash"),
+    other: t("undoStack.opOther"),
+  };
+  return map[type] ?? type;
+}
+
+/** True when the undo is a hard reset (destructive). */
+function isHardUndo(entry: UndoEntry): boolean {
+  return entry.type !== "commit" && entry.type !== "amend";
+}
+
+async function handleUndo(entry: UndoEntry) {
+  const msg = isHardUndo(entry)
+    ? t("undoStack.undoHardConfirm")
+    : t("undoStack.undoConfirm");
+  if (!confirm(msg)) return;
+  try {
+    await undoStack.undo(props.cwd, entry);
+    closeUndoPopover();
+    // Emit a lightweight signal so App.vue can refresh the repo state.
+    emit("undoPerformed");
+  } catch {
+    // lastError is set by the composable — shown in the popover.
+  }
+}
+
+// Auto-load reflog when repo is available (so the Undo button reflects state)
+watch(() => props.cwd, (cwd) => {
+  if (cwd) undoStack.refresh(cwd);
+}, { immediate: true });
 
 onMounted(() => document.addEventListener("click", onDocClick, true));
 onUnmounted(() => document.removeEventListener("click", onDocClick, true));
@@ -568,6 +630,62 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
                 <span class="muted">{{ t('branches.noBranch') }}</span>
               </div>
             </div>
+          </div>
+        </div>
+
+        <!-- Undo (Phase 1.2.4) -->
+        <div class="undo-popover-wrapper">
+          <button
+            class="btn btn--sync"
+            :class="{ 'btn--sync-active': undoStack.lastUndoable.value }"
+            :disabled="!undoStack.lastUndoable.value"
+            @click="toggleUndoPopover"
+            :title="t('undoStack.undoTooltip')"
+          >
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M3.5 6.5A6 6 0 1 1 3.5 11.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none"/>
+              <path d="M9 6.4V9l2.5 1.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M3.5 3v3.5H7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span>{{ t('undoStack.undoButton') }}</span>
+          </button>
+
+          <!-- Undo history popover -->
+          <div v-if="showUndoPopover" class="undo-popover">
+            <div class="undo-popover-title">{{ t('undoStack.title') }}</div>
+            <div v-if="undoStack.lastError.value" class="undo-error">{{ undoStack.lastError.value }}</div>
+            <div v-if="undoStack.isLoading.value" class="undo-loading">
+              <div class="mp-spinner"></div>
+            </div>
+            <ul v-else-if="undoStack.entries.value.length > 0" class="undo-list">
+              <li
+                v-for="entry in undoStack.entries.value.slice(0, 20)"
+                :key="entry.index"
+                class="undo-entry"
+                :class="{ 'undo-entry--undoable': undoStack.canUndo(entry) }"
+              >
+                <div class="undo-entry-info">
+                  <span class="undo-entry-type">{{ opLabel(entry.type) }}</span>
+                  <span class="undo-entry-summary mono">{{ entry.summary }}</span>
+                  <span class="undo-entry-date muted">{{ entry.date }}</span>
+                </div>
+                <button
+                  v-if="undoStack.canUndo(entry)"
+                  class="undo-entry-btn"
+                  :class="{ 'undo-entry-btn--hard': isHardUndo(entry) }"
+                  @click="handleUndo(entry)"
+                  :title="t('undoStack.undoButton')"
+                >
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                    <circle cx="9" cy="9" r="6" stroke="currentColor" stroke-width="1.4" fill="none"/>
+                    <path d="M9 6.4V9l2.5 1.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M3.5 3v3.5H7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M3.5 6.5A6 6 0 019 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none"/>
+                  </svg>
+                </button>
+              </li>
+            </ul>
+            <div v-else class="undo-empty">{{ t('undoStack.noHistory') }}</div>
           </div>
         </div>
 
@@ -1353,5 +1471,141 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
 .rp-action--remove:hover {
   color: var(--color-danger);
   background: var(--color-danger-soft);
+}
+
+/* ─── Undo popover ──────────────────────────────────── */
+.undo-popover-wrapper {
+  position: relative;
+}
+
+.undo-popover {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 6px;
+  width: 340px;
+  max-height: 420px;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+  z-index: 200;
+  overflow: hidden;
+}
+
+.undo-popover-title {
+  padding: 10px 14px;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text);
+}
+
+.undo-error {
+  padding: 8px 14px;
+  font-size: var(--font-size-xs);
+  color: var(--color-danger);
+}
+
+.undo-loading {
+  padding: 20px;
+  display: flex;
+  justify-content: center;
+}
+
+.undo-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.undo-entry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--color-border-light, var(--color-border));
+  transition: background var(--transition-base);
+}
+
+.undo-entry:last-child {
+  border-bottom: none;
+}
+
+.undo-entry:hover {
+  background: var(--color-bg-tertiary);
+}
+
+.undo-entry-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.undo-entry-type {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-accent);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.undo-entry-summary {
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.undo-entry-date {
+  font-size: var(--font-size-xs);
+}
+
+.undo-entry-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg);
+  color: var(--color-accent);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--transition-base), background var(--transition-base), border-color var(--transition-base);
+}
+
+.undo-entry:hover .undo-entry-btn {
+  opacity: 1;
+}
+
+.undo-entry-btn:hover {
+  background: var(--color-accent-soft);
+  border-color: var(--color-accent);
+}
+
+.undo-entry-btn--hard {
+  color: var(--color-warning);
+}
+
+.undo-entry-btn--hard:hover {
+  background: var(--color-warning-soft, rgba(234, 179, 8, 0.1));
+  border-color: var(--color-warning);
+}
+
+.undo-empty {
+  padding: 20px 14px;
+  text-align: center;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
 }
 </style>
