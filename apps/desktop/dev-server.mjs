@@ -1991,6 +1991,23 @@ const server = createServer(async (req, res) => {
             return jsonResponse(res, { error: "Aucun terminal compatible trouvé. Ouvrez un terminal et tapez: claude login" }, 500);
           }
         }
+
+    // POST /api/gh-merge-pr  { cwd, number, method }
+    if (url.pathname === "/api/gh-merge-pr" && req.method === "POST") {
+      try {
+        const { cwd, number, method } = await readBody(req);
+        if (!cwd || !number) return jsonResponse(res, { error: "Missing cwd or number" }, 400);
+        const mergeFlag = method === "squash" ? "--squash"
+          : method === "rebase" ? "--rebase"
+          : "--merge";
+        const r = spawnSync(GH, ["pr", "merge", String(number), mergeFlag, "--delete-branch"], {
+          cwd: resolve(cwd),
+          encoding: "utf-8",
+        });
+        if (r.status !== 0) {
+          const detail = (r.stderr || r.stdout || "").trim() || "gh pr merge failed";
+          return jsonResponse(res, { error: detail }, 500);
+        }
         return jsonResponse(res, { ok: true });
       } catch (err) {
         return jsonResponse(res, { error: err.message }, 500);

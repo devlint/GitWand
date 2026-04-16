@@ -1417,7 +1417,13 @@ export async function ghMergePr(cwd: string, number: number, method: string = "m
     await tauriInvoke("gh_merge_pr", { cwd, number, method });
     return;
   }
-  throw new Error("PR merge not available in dev mode");
+  const resp = await fetch(`${DEV_SERVER}/api/gh-merge-pr`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, number, method }),
+  });
+  const data = await resp.json();
+  if (data.error) throw new Error(data.error);
 }
 
 // ─── PR Detail, Diff & Checks (Phase 9.1) ──────────────────
