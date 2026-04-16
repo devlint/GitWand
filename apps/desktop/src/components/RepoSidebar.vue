@@ -551,7 +551,7 @@ function formatActivityDate(dateStr: string): string {
         @input="onDescriptionInput"
         @keydown="onCommitKeydown"
         :placeholder="t('sidebar.descriptionPlaceholder')"
-        rows="2"
+        rows="4"
       ></textarea>
       <div class="commit-actions">
         <button
