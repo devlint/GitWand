@@ -304,6 +304,10 @@ const en: Locale = {
     drop: "Drop",
     restore: "Restore",
     done: "Rebase completed",
+    aiSquashSuggest: "Suggest a squash",
+    aiSquashHint: "Analyses commits to propose squash groups by intent.",
+    aiSquashApplying: "Analysing\u2026",
+    aiSquashApply: "Apply",
   },
 
   // ─── EmptyState ─────────────────────────────────────────

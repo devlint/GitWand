@@ -7,6 +7,8 @@ import {
   type RebaseAction,
 } from "../composables/useInteractiveRebase";
 import { getGitBranches, type GitBranch } from "../utils/backend";
+import { useAIProvider } from "../composables/useAIProvider";
+import { useSquashSuggestion, type SquashSuggestion } from "../composables/useSquashSuggestion";
 
 const props = defineProps<{
   cwd: string;
@@ -33,6 +35,42 @@ const emit = defineEmits<{
 
 const { t, locale } = useI18n();
 const rebase = useInteractiveRebase();
+const ai = useAIProvider();
+const {
+  isGenerating: isSuggestingSquash,
+  suggest: suggestSquashPlan,
+  lastError: squashAiError,
+} = useSquashSuggestion();
+const squashSuggestion = ref<SquashSuggestion | null>(null);
+
+async function handleSquashSuggest() {
+  squashSuggestion.value = null;
+  try {
+    const plan = await suggestSquashPlan(props.cwd, rebase.todoEntries.value, {
+      locale: locale.value,
+    });
+    squashSuggestion.value = plan;
+  } catch {
+    // surfaced via squashAiError
+  }
+}
+
+function applySquashSuggestion() {
+  const plan = squashSuggestion.value;
+  if (!plan) return;
+  for (const group of plan.groups) {
+    // Leave the first commit of the group as 'pick'; squash the rest
+    // into it. The user can still tweak actions manually afterwards.
+    for (let i = 1; i < group.indices.length; i++) {
+      rebase.setAction(group.indices[i], "squash");
+    }
+  }
+  squashSuggestion.value = null;
+}
+
+function dismissSquashSuggestion() {
+  squashSuggestion.value = null;
+}
 
 // ─── Base selection ──────────────────────────────────────────
 const baseInput = ref("");
@@ -327,11 +365,58 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
               {{ t('rebase.commitsLabel') }}
               <span class="rb-count">({{ rebase.todoEntries.value.length }})</span>
             </label>
-            <button class="rb-back-btn" @click="showBasePicker = true; rebase.reset()">
-              {{ t('rebase.changeBase') }}
-            </button>
+            <div class="rb-section-actions">
+              <button
+                v-if="ai.isAvailable.value && rebase.todoEntries.value.length >= 2"
+                class="rb-ai-btn"
+                :disabled="isSuggestingSquash"
+                :title="t('rebase.aiSquashHint')"
+                @click="handleSquashSuggest"
+              >
+                <span v-if="isSuggestingSquash">… {{ t('rebase.aiSquashApplying') }}</span>
+                <span v-else>✨ {{ t('rebase.aiSquashSuggest') }}</span>
+              </button>
+              <button class="rb-back-btn" @click="showBasePicker = true; rebase.reset()">
+                {{ t('rebase.changeBase') }}
+              </button>
+            </div>
           </div>
           <p class="rb-hint">{{ t('rebase.commitsHint') }}</p>
+          <p v-if="squashAiError" class="rb-hint rb-hint--error">{{ squashAiError }}</p>
+
+          <!-- Squash suggestion panel -->
+          <div v-if="squashSuggestion" class="rb-squash-suggestion">
+            <div class="rb-squash-header">
+              <span class="rb-squash-title">
+                ✨ {{ squashSuggestion.summary || t('rebase.aiSquashSuggest') }}
+              </span>
+              <button class="rb-squash-dismiss" @click="dismissSquashSuggestion" aria-label="Close">✕</button>
+            </div>
+            <p v-if="squashSuggestion.groups.length === 0" class="rb-squash-empty">
+              {{ locale === 'fr' ? "L'IA n'a rien trouvé à squasher — chaque commit a une intention distincte." : "The AI found nothing to squash — every commit has a distinct intent." }}
+            </p>
+            <ul v-else class="rb-squash-groups">
+              <li v-for="(group, gi) in squashSuggestion.groups" :key="gi" class="rb-squash-group">
+                <div class="rb-squash-group-head">
+                  <span class="rb-squash-group-indices mono">
+                    {{ group.indices.map(i => `#${i + 1}`).join(', ') }}
+                  </span>
+                  <span v-if="group.combinedSubject" class="rb-squash-group-subject">
+                    → {{ group.combinedSubject }}
+                  </span>
+                </div>
+                <p v-if="group.reason" class="rb-squash-group-reason">{{ group.reason }}</p>
+              </li>
+            </ul>
+            <div v-if="squashSuggestion.groups.length > 0" class="rb-squash-actions">
+              <button class="rb-squash-apply" @click="applySquashSuggestion">
+                {{ t('rebase.aiSquashApply') }}
+              </button>
+              <button class="rb-squash-cancel" @click="dismissSquashSuggestion">
+                {{ t('common.cancel') }}
+              </button>
+            </div>
+          </div>
         </div>
 
         <div class="rb-todo-list">
@@ -571,6 +656,152 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
 .rb-back-btn:hover {
   background: var(--color-bg-secondary);
 }
+
+.rb-section-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rb-ai-btn {
+  background: var(--color-accent-soft, rgba(139, 92, 246, 0.12));
+  color: var(--color-accent);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  padding: 3px 10px;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+.rb-ai-btn:hover:not(:disabled) {
+  background: var(--color-accent);
+  color: var(--color-accent-text);
+}
+.rb-ai-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.rb-hint--error {
+  color: var(--color-danger, #ef4444);
+}
+
+/* ─── Squash suggestion panel ──────────────────────────── */
+.rb-squash-suggestion {
+  margin: 8px 0 4px;
+  padding: 10px 12px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+}
+
+.rb-squash-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.rb-squash-title {
+  flex: 1;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.rb-squash-dismiss {
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 4px;
+}
+
+.rb-squash-dismiss:hover { color: var(--color-text); }
+
+.rb-squash-empty {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.rb-squash-groups {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rb-squash-group {
+  padding: 6px 8px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.rb-squash-group-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.rb-squash-group-indices {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--color-accent);
+}
+
+.rb-squash-group-subject {
+  flex: 1;
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+}
+
+.rb-squash-group-reason {
+  margin: 4px 0 0;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  line-height: 1.4;
+}
+
+.rb-squash-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.rb-squash-apply,
+.rb-squash-cancel {
+  padding: 4px 12px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--color-border);
+}
+
+.rb-squash-apply {
+  background: var(--color-accent);
+  color: var(--color-accent-text);
+  border-color: var(--color-accent);
+}
+
+.rb-squash-apply:hover { filter: brightness(1.08); }
+
+.rb-squash-cancel {
+  background: transparent;
+  color: var(--color-text);
+}
+
+.rb-squash-cancel:hover { background: var(--color-bg-secondary); }
 
 /* ─── Base picker ──────────────────────────────────────────── */
 .rb-base-input {

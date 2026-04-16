@@ -305,6 +305,10 @@ const fr = {
     drop: "Supprimer",
     restore: "Restaurer",
     done: "Rebase termin\u00e9",
+    aiSquashSuggest: "Sugg\u00e9rer un squash",
+    aiSquashHint: "Analyse les commits pour proposer des groupes \u00e0 squasher par intention.",
+    aiSquashApplying: "Analyse\u2026",
+    aiSquashApply: "Appliquer",
   },
 
   // ─── EmptyState ─────────────────────────────────────────
