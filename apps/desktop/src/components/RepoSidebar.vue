@@ -873,7 +873,7 @@ function formatActivityDate(dateStr: string): string {
 }
 
 .view-tab {
-  flex: 1 1 0;
+  flex: 1 0 auto;
   min-width: 0;
   display: flex;
   align-items: center;
