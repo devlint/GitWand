@@ -193,7 +193,7 @@ watch(() => props.cwd, loadStashes);
       />
       <button
         v-if="ai.isAvailable.value"
-        class="btn btn-xs btn-ai"
+        class="btn btn-composer btn-ai-solid"
         :disabled="isGeneratingMessage"
         @click="suggestMessage"
         :title="locale === 'fr' ? 'Suggérer un message avec IA' : 'Suggest a message with AI'"
@@ -201,10 +201,10 @@ watch(() => props.cwd, loadStashes);
         <span v-if="isGeneratingMessage">…</span>
         <span v-else>✨ {{ locale === 'fr' ? 'IA' : 'AI' }}</span>
       </button>
-      <button class="btn btn-xs btn-primary" @click="createStash">
+      <button class="btn btn-composer btn-primary" @click="createStash">
         {{ locale === 'fr' ? 'Stasher' : 'Stash' }}
       </button>
-      <button class="btn btn-xs btn-ghost" @click="closeComposer">
+      <button class="btn btn-composer btn-outline" @click="closeComposer">
         {{ locale === 'fr' ? 'Annuler' : 'Cancel' }}
       </button>
     </div>
@@ -297,11 +297,16 @@ watch(() => props.cwd, loadStashes);
 }
 
 /* ── Composer ─────────────────────────────────────────── */
+/*
+ * Rule of thumb here: the input and every sibling button share the
+ * SAME box dimensions (36 px height, identical padding) so the row
+ * stays visually aligned no matter the locale / label length.
+ */
 .stash-composer {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 12px 18px;
+  align-items: stretch;
+  gap: 8px;
+  padding: 14px 18px;
   border-bottom: 1px solid var(--color-border);
   background: var(--color-bg-secondary);
 }
@@ -309,19 +314,62 @@ watch(() => props.cwd, loadStashes);
 .stash-composer-input {
   flex: 1;
   min-width: 0;
+  height: 36px;
   background: var(--color-bg);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   color: var(--color-text);
-  font-size: var(--font-size-sm);
-  padding: 6px 10px;
+  font-size: var(--font-size-md);
+  padding: 0 12px;
   outline: none;
-  transition: border-color var(--transition-fast);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .stash-composer-input:focus {
   border-color: var(--color-accent);
   box-shadow: 0 0 0 3px var(--color-accent-soft);
+}
+
+.btn-composer {
+  height: 36px;
+  padding: 0 14px;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  white-space: nowrap;
+}
+
+/*
+ * Solid IA variant — the soft variant (.btn-ai) was too easy to
+ * miss against the composer's own soft grey background. The solid
+ * variant uses a gradient fill and a subtle glow so the CTA reads
+ * as primary-level importance.
+ */
+.btn-ai-solid {
+  background: linear-gradient(135deg, var(--color-accent) 0%, #6d28d9 100%);
+  color: var(--color-accent-text);
+  border: 1px solid var(--color-accent);
+  box-shadow: 0 2px 8px var(--color-accent-soft, rgba(139, 92, 246, 0.35));
+}
+
+.btn-ai-solid:hover:not(:disabled) {
+  background: linear-gradient(135deg, var(--color-accent) 0%, #5b21b6 100%);
+  border-color: var(--color-accent);
+  color: var(--color-accent-text);
+  filter: brightness(1.05);
+}
+
+/* Outline variant for secondary actions like Cancel — keeps the
+   same footprint as the primary button but without fill, so the
+   row stays symmetric. */
+.btn-outline {
+  background: var(--color-bg);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+}
+
+.btn-outline:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+  border-color: var(--color-text-muted);
 }
 
 /* ── Error / empty states ─────────────────────────────── */
