@@ -15,7 +15,7 @@
 import { ref, computed } from "vue";
 import { gitExec, isTauri } from "../utils/backend";
 
-const DEV_SERVER = "http://localhost:24842";
+const DEV_SERVER = "http://localhost:3001";
 
 // ─── Types ──────────────────────────────────────────────────
 
