@@ -105,6 +105,8 @@ const fr = {
     commitButton: "Commiter ({0})",
     commitButtonLoading: "En cours\u2026",
     commitHint: "Ctrl+Enter pour valider",
+    aiGenerateTooltip: "Générer un message avec l'IA",
+    aiGeneratingTooltip: "Génération en cours\u2026",
     // Empty
     cleanTree: "Espace de travail propre",
     // Dashboard-specific sidebar blocks

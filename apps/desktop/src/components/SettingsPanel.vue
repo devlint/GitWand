@@ -7,13 +7,19 @@ import {
   supportedLocales,
   type SupportedLocale,
 } from "../locales";
+import { detectClaudeCli, claudeCliLogin, type ClaudeCliInfo } from "../utils/backend";
 
 const { t, locale, isAuto, setLocale } = useI18n();
 const { theme, setTheme } = useTheme();
 
 export type PullMode = "merge" | "rebase";
 export type SwitchBehavior = "stash" | "ask" | "refuse";
-export type AIProvider = "none" | "claude" | "openai-compat" | "ollama";
+export type AIProvider =
+  | "none"
+  | "claude"
+  | "claude-code-cli"
+  | "openai-compat"
+  | "ollama";
 
 const emit = defineEmits<{
   close: [];
@@ -189,7 +195,10 @@ function onAIEnabledChange(e: Event) {
 function onAIProviderChange(val: AIProvider) {
   updateSetting("aiProvider", val);
   // Set sensible defaults per provider
-  if (val === "claude") {
+  if (val === "claude-code-cli") {
+    // Refresh detection when the user picks this provider.
+    runClaudeCliDetect();
+  } else if (val === "claude") {
     if (!settings.value.aiApiEndpoint || settings.value.aiApiEndpoint === "https://api.openai.com/v1") {
       updateSetting("aiApiEndpoint", "https://api.anthropic.com");
     }
@@ -283,8 +292,60 @@ function disconnectClaude() {
 
 const claudeConnectKeyInput = ref("");
 
+// ─── Claude Code CLI detection ──────────────────────────
+const claudeCliInfo = ref<ClaudeCliInfo | null>(null);
+const claudeCliDetecting = ref(false);
+const claudeCliLoginLoading = ref(false);
+
+async function runClaudeCliDetect() {
+  claudeCliDetecting.value = true;
+  try {
+    claudeCliInfo.value = await detectClaudeCli();
+  } catch (e) {
+    claudeCliInfo.value = {
+      found: false,
+      path: "",
+      version: "",
+      logged_in: false,
+      status: "error",
+      detail: (e as Error).message,
+    };
+  } finally {
+    claudeCliDetecting.value = false;
+  }
+}
+
+async function runClaudeCliLogin() {
+  claudeCliLoginLoading.value = true;
+  try {
+    await claudeCliLogin();
+    // After launching the terminal, re-poll a few times so the UI flips to
+    // "logged in" without the user having to click Detect again.
+    for (let i = 0; i < 12; i++) {
+      await new Promise((r) => setTimeout(r, 5000));
+      await runClaudeCliDetect();
+      if (claudeCliInfo.value?.logged_in) break;
+    }
+  } catch (e) {
+    claudeCliInfo.value = {
+      found: claudeCliInfo.value?.found ?? false,
+      path: claudeCliInfo.value?.path ?? "",
+      version: claudeCliInfo.value?.version ?? "",
+      logged_in: false,
+      status: "error",
+      detail: (e as Error).message,
+    };
+  } finally {
+    claudeCliLoginLoading.value = false;
+  }
+}
+
 onMounted(() => {
   detectOllama();
+  // Lazy-detect Claude CLI only when the user has that provider active,
+  // or run a background detect so the option can be highlighted in the
+  // dropdown. We do a one-shot detect at mount — it's fast (just `which`).
+  runClaudeCliDetect();
 });
 
 function onKeyDown(e: KeyboardEvent) {
@@ -509,7 +570,10 @@ function onKeyDown(e: KeyboardEvent) {
                 :value="settings.aiProvider"
                 @change="onAIProviderChange(($event.target as HTMLSelectElement).value as AIProvider)"
               >
-                <option value="claude">Claude (Anthropic)</option>
+                <option value="claude">Claude (Anthropic API)</option>
+                <option value="claude-code-cli">
+                  Claude Code CLI (abonnement Max/Pro){{ claudeCliInfo && !claudeCliInfo.found ? ' — non détecté' : '' }}
+                </option>
                 <option value="openai-compat">API compatible OpenAI</option>
                 <option value="ollama" :disabled="!ollamaAvailable">
                   Ollama (local){{ ollamaAvailable ? '' : ' — non détecté' }}
@@ -638,6 +702,65 @@ function onKeyDown(e: KeyboardEvent) {
                   <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5 (rapide)</option>
                   <option value="claude-opus-4-20250514">Claude Opus 4 (premium)</option>
                 </select>
+              </div>
+            </template>
+
+            <!-- Claude Code CLI provider (piggyback on user's subscription) -->
+            <template v-if="settings.aiProvider === 'claude-code-cli'">
+              <div class="sp-row">
+                <label class="sp-label">État du CLI</label>
+                <div class="sp-cli-status">
+                  <template v-if="claudeCliDetecting">
+                    <span class="sp-hint">Détection en cours…</span>
+                  </template>
+                  <template v-else-if="!claudeCliInfo || !claudeCliInfo.found">
+                    <div class="sp-connect-error-block">
+                      <div class="sp-connect-error">
+                        Binaire <code>claude</code> introuvable.
+                      </div>
+                      <span class="sp-hint">
+                        Installez-le avec
+                        <code>npm install -g @anthropic-ai/claude-code</code>
+                        puis cliquez sur Re-détecter.
+                      </span>
+                      <button class="sp-text-btn" @click="runClaudeCliDetect">Re-détecter</button>
+                    </div>
+                  </template>
+                  <template v-else-if="claudeCliInfo.logged_in">
+                    <div class="sp-connected-badge">
+                      <span class="sp-connected-dot"></span>
+                      <span>Connecté — {{ claudeCliInfo.version || 'claude' }}</span>
+                      <button class="sp-disconnect-btn" @click="runClaudeCliDetect">Re-détecter</button>
+                    </div>
+                    <span class="sp-hint">Les appels utiliseront votre abonnement Claude Max/Pro.</span>
+                  </template>
+                  <template v-else>
+                    <div class="sp-connect-error-block">
+                      <div class="sp-connect-error">
+                        CLI trouvé mais non authentifié.
+                      </div>
+                      <span class="sp-hint">{{ claudeCliInfo.detail || "Lance `claude login` pour te connecter." }}</span>
+                      <button
+                        class="sp-connect-btn"
+                        :disabled="claudeCliLoginLoading"
+                        @click="runClaudeCliLogin"
+                      >
+                        {{ claudeCliLoginLoading ? 'En attente de connexion…' : 'Se connecter (ouvre un terminal)' }}
+                      </button>
+                    </div>
+                  </template>
+                </div>
+              </div>
+
+              <div v-if="claudeCliInfo?.logged_in" class="sp-info-box">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
+                  <circle cx="8" cy="8" r="7"/><path d="M8 7v4" stroke-linecap="round"/><circle cx="8" cy="5" r="0.7" fill="currentColor" stroke="none"/>
+                </svg>
+                <p>
+                  GitWand exécute <code>claude -p</code> localement.
+                  Aucune clé API n'est requise : la session utilise l'authentification
+                  stockée par Claude Code sur votre machine.
+                </p>
               </div>
             </template>
 
@@ -1124,6 +1247,20 @@ function onKeyDown(e: KeyboardEvent) {
 }
 
 .sp-text-btn:hover { color: var(--color-text); }
+
+.sp-cli-status {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.sp-cli-status code {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.9em;
+  padding: 0 var(--space-2);
+  background: var(--color-bg);
+  border-radius: var(--radius-xs);
+}
 
 .sp-connected-badge {
   display: flex;

@@ -5,8 +5,12 @@ import type { GitLogEntry, GitBranch } from "../utils/backend";
 import CommitLog from "./CommitLog.vue";
 import PrListSidebar from "./PrListSidebar.vue";
 import { useI18n } from "../composables/useI18n";
+import { useCommitMessage } from "../composables/useCommitMessage";
+import { useAIProvider } from "../composables/useAIProvider";
 
 const props = defineProps<{
+  /** Repo directory, used by AI commit message generation. */
+  cwd: string;
   files: RepoFileEntry[];
   selectedFile: string | null;
   viewMode: ViewMode;
@@ -60,7 +64,7 @@ const emit = defineEmits<{
   addToGitignore: [path: string];
 }>();
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
 
 // ─── Context menu ─────────────────────────────────────────────
 interface CtxMenu {
@@ -104,6 +108,25 @@ onUnmounted(() => {
   window.removeEventListener("click", closeContextMenu);
   window.removeEventListener("contextmenu", closeContextMenu);
 });
+
+// ─── AI commit message generation ─────────────────────────
+const ai = useAIProvider();
+const { isGenerating, lastError: aiError, generate: generateCommitMsg } = useCommitMessage();
+
+async function onGenerateCommitMessage() {
+  if (!props.cwd || isGenerating.value) return;
+  const lang = locale.value.startsWith("en") ? "en" : "fr";
+  try {
+    const msg = await generateCommitMsg(props.cwd, { locale: lang as "fr" | "en" });
+    // Split on first newline: summary = first line, description = rest.
+    const [summary, ...rest] = msg.split("\n");
+    emit("update:commitSummary", summary.trim());
+    const body = rest.join("\n").trim();
+    if (body) emit("update:commitDescription", body);
+  } catch {
+    // lastError is already set by the composable — the UI shows it.
+  }
+}
 
 const sections = computed(() => {
   const map: Record<string, RepoFileEntry[]> = {
@@ -382,14 +405,35 @@ function formatActivityDate(dateStr: string): string {
 
     <!-- Commit panel — fixed at bottom, always visible in changes view -->
     <div class="commit-panel" v-if="viewMode === 'changes'">
-      <input
-        class="commit-summary mono"
-        type="text"
-        :value="commitSummary"
-        @input="onSummaryInput"
-        @keydown="onCommitKeydown"
-        :placeholder="t('sidebar.summaryPlaceholder')"
-      />
+      <div class="commit-summary-row">
+        <input
+          class="commit-summary mono"
+          type="text"
+          :value="commitSummary"
+          @input="onSummaryInput"
+          @keydown="onCommitKeydown"
+          :placeholder="t('sidebar.summaryPlaceholder')"
+        />
+        <!-- AI generate commit message button -->
+        <button
+          v-if="ai.isAvailable.value"
+          class="commit-ai-btn"
+          :class="{ 'commit-ai-btn--loading': isGenerating }"
+          :disabled="isGenerating || repoStats.staged === 0"
+          :title="isGenerating ? t('sidebar.aiGeneratingTooltip') : t('sidebar.aiGenerateTooltip')"
+          @click="onGenerateCommitMessage"
+        >
+          <svg v-if="isGenerating" class="commit-spinner" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+            <circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.5" fill="none" opacity="0.3"/>
+            <path d="M7 1.5A5.5 5.5 0 0112.5 7" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+          </svg>
+          <svg v-else width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M8 2l1.5 3.5L13 7l-3.5 1.5L8 12l-1.5-3.5L3 7l3.5-1.5L8 2z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" fill="none"/>
+          </svg>
+        </button>
+      </div>
+      <!-- AI error feedback -->
+      <div v-if="aiError" class="commit-ai-error">{{ aiError }}</div>
       <textarea
         class="commit-description mono"
         :value="commitDescription"
@@ -976,8 +1020,15 @@ function formatActivityDate(dateStr: string): string {
   flex-shrink: 0;
 }
 
+.commit-summary-row {
+  display: flex;
+  gap: var(--space-2);
+  align-items: stretch;
+}
+
 .commit-summary {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   padding: var(--space-3) var(--space-5);
   font-size: var(--font-size-sm);
   line-height: 1.5;
@@ -987,6 +1038,41 @@ function formatActivityDate(dateStr: string): string {
   border-radius: var(--radius-md);
   outline: none;
   transition: border-color var(--transition-base);
+}
+
+.commit-ai-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  background: var(--color-bg-tertiary);
+  color: var(--color-accent);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background var(--transition-base), border-color var(--transition-base), color var(--transition-base);
+}
+
+.commit-ai-btn:hover:not(:disabled) {
+  background: var(--color-bg);
+  border-color: var(--color-accent);
+}
+
+.commit-ai-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.commit-ai-btn--loading {
+  color: var(--color-warning);
+}
+
+.commit-ai-error {
+  font-size: var(--font-size-xs);
+  color: var(--color-danger);
+  padding: 0 var(--space-2);
+  line-height: 1.4;
 }
 
 .commit-summary:focus {

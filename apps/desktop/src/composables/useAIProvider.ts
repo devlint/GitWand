@@ -1,9 +1,21 @@
 import { ref, computed } from "vue";
+import { claudeCliPrompt } from "../utils/backend";
 
 /**
  * AI provider types matching SettingsPanel configuration.
+ *
+ * - `claude`         : direct Anthropic API with user-provided API key
+ * - `claude-code-cli`: piggyback on the user's locally-installed Claude Code
+ *                     CLI (uses their Max/Pro subscription, no API key needed)
+ * - `openai-compat`  : any OpenAI-compatible endpoint
+ * - `ollama`         : local Ollama instance
  */
-export type AIProvider = "none" | "claude" | "openai-compat" | "ollama";
+export type AIProvider =
+  | "none"
+  | "claude"
+  | "claude-code-cli"
+  | "openai-compat"
+  | "ollama";
 
 export interface AISettings {
   aiEnabled: boolean;
@@ -185,6 +197,18 @@ async function callOpenAICompat(
 }
 
 /**
+ * Call the local Claude Code CLI (`claude -p`). Uses the user's Max/Pro
+ * subscription — no API key required as long as they've run `claude login`.
+ */
+async function callClaudeCodeCli(
+  systemPrompt: string,
+  userPrompt: string,
+): Promise<string> {
+  const result = await claudeCliPrompt(userPrompt, systemPrompt, undefined, "text");
+  return result ?? "";
+}
+
+/**
  * Call Ollama's local API.
  */
 async function callOllama(
@@ -255,6 +279,10 @@ export function useAIProvider() {
     if (s.aiProvider === "claude" && !s.aiApiKey) return false;
     if (s.aiProvider === "openai-compat" && (!s.aiApiKey || !s.aiApiEndpoint)) return false;
     if (s.aiProvider === "ollama") return true; // Ollama doesn't need a key
+    // claude-code-cli: availability is verified at runtime via detectClaudeCli()
+    // so we optimistically consider it available here. The actual call will
+    // surface a clear error if the CLI is missing or not logged in.
+    if (s.aiProvider === "claude-code-cli") return true;
     if (s.aiProvider === "none") return false;
     return true;
   });
@@ -278,6 +306,9 @@ export function useAIProvider() {
         case "claude":
           rawResponse = await callClaude(s, systemPrompt, userPrompt);
           break;
+        case "claude-code-cli":
+          rawResponse = await callClaudeCodeCli(systemPrompt, userPrompt);
+          break;
         case "openai-compat":
           rawResponse = await callOpenAICompat(s, systemPrompt, userPrompt);
           break;
@@ -299,11 +330,36 @@ export function useAIProvider() {
     }
   }
 
+  /**
+   * Free-form prompt dispatch — same provider selection as `suggest()`,
+   * but without the conflict-resolution-specific scaffolding. Used by
+   * commit-message generation, PR summaries, and other single-shot tasks.
+   */
+  async function rawPrompt(
+    systemPrompt: string,
+    userPrompt: string,
+  ): Promise<string> {
+    const s = loadAISettings();
+    switch (s.aiProvider) {
+      case "claude":
+        return callClaude(s, systemPrompt, userPrompt);
+      case "claude-code-cli":
+        return callClaudeCodeCli(systemPrompt, userPrompt);
+      case "openai-compat":
+        return callOpenAICompat(s, systemPrompt, userPrompt);
+      case "ollama":
+        return callOllama(s, systemPrompt, userPrompt);
+      default:
+        throw new Error("Aucun provider IA configuré");
+    }
+  }
+
   return {
     isAvailable,
     isLoading,
     lastError,
     lastSuggestion,
     suggest,
+    rawPrompt,
   };
 }

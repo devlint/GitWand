@@ -1163,15 +1163,13 @@ export interface TerminalResult {
  */
 export async function gitExec(cwd: string, args: string[]): Promise<TerminalResult> {
   if (isTauri()) {
-    const raw = await tauriInvoke<{
-      stdout: string;
-      stderr: string;
-      exit_code: number;
-    }>("git_exec", { cwd, args });
+    // Tauri 2 may serialize the Rust struct field `exit_code` as either
+    // snake_case or camelCase depending on the serde config — accept both.
+    const raw = await tauriInvoke<Record<string, unknown>>("git_exec", { cwd, args });
     return {
-      stdout: raw.stdout,
-      stderr: raw.stderr,
-      exitCode: raw.exit_code,
+      stdout: (raw.stdout as string) ?? "",
+      stderr: (raw.stderr as string) ?? "",
+      exitCode: (raw.exitCode ?? raw.exit_code ?? -1) as number,
     };
   }
   const res = await fetch(`${DEV_SERVER}/api/git-exec`, {
@@ -1179,7 +1177,12 @@ export async function gitExec(cwd: string, args: string[]): Promise<TerminalResu
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ cwd, args }),
   });
-  return res.json();
+  const data = await res.json();
+  return {
+    stdout: data.stdout ?? "",
+    stderr: data.stderr ?? "",
+    exitCode: data.exitCode ?? data.exit_code ?? -1,
+  };
 }
 
 /**
@@ -1788,6 +1791,118 @@ export async function ghPrFileHistory(
   const raw = await res.json();
   if (raw.error) throw new Error(raw.error);
   return raw as Record<string, PrFileHistory>;
+}
+
+// ─── Claude Code CLI wrapper ─────────────────────────────
+//
+// Thin wrappers around the Rust/dev-server commands that shell out to the
+// user's locally-installed `claude` binary (official Claude Code CLI).
+// This is how we piggyback on the user's Max/Pro subscription without
+// implementing OAuth ourselves — same trick as Solo / SoloTerm.
+
+export interface ClaudeCliInfo {
+  /** True when the `claude` binary was found on disk. */
+  found: boolean;
+  /** Absolute path to the binary, or "" if not found. */
+  path: string;
+  /** Raw `claude --version` output. */
+  version: string;
+  /** True if a ping prompt answered without an auth error. */
+  logged_in: boolean;
+  /** Machine-readable status: "ok" | "not_found" | "not_logged_in" | "error". */
+  status: "ok" | "not_found" | "not_logged_in" | "error" | string;
+  /** Optional error detail line. */
+  detail: string;
+}
+
+/**
+ * Detect whether the Claude Code CLI is installed and authenticated.
+ * Safe to call on app boot — returns `found: false` instead of throwing
+ * when the binary is missing.
+ */
+export async function detectClaudeCli(): Promise<ClaudeCliInfo> {
+  if (isTauri()) {
+    return tauriInvoke<ClaudeCliInfo>("detect_claude_cli");
+  }
+  try {
+    const res = await fetch(`${DEV_SERVER}/api/claude-cli-detect`);
+    if (res.ok) return (await res.json()) as ClaudeCliInfo;
+  } catch {
+    // Dev server unavailable
+  }
+  return {
+    found: false,
+    path: "",
+    version: "",
+    logged_in: false,
+    status: "not_found",
+    detail: "",
+  };
+}
+
+/**
+ * Run a prompt through the local Claude Code CLI.
+ *
+ * @param prompt User prompt (main content).
+ * @param systemPrompt Optional system-level instructions (prepended as a
+ *                     `# System` section since `claude -p` has no separate
+ *                     system channel).
+ * @param cwd Optional working directory for the CLI process.
+ * @param outputFormat "text" (default) or "json".
+ * @returns Raw stdout from the CLI.
+ */
+export async function claudeCliPrompt(
+  prompt: string,
+  systemPrompt?: string,
+  cwd?: string,
+  outputFormat: "text" | "json" = "text",
+): Promise<string> {
+  if (isTauri()) {
+    return tauriInvoke<string>("claude_cli_prompt", {
+      prompt,
+      systemPrompt,
+      cwd,
+      outputFormat,
+    });
+  }
+  const res = await fetch(`${DEV_SERVER}/api/claude-cli-prompt`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt, systemPrompt, cwd, outputFormat }),
+  });
+  if (!res.ok) {
+    let msg = `claude CLI error ${res.status}`;
+    try {
+      const body = await res.json();
+      if (body?.error) msg = body.error;
+    } catch { /* ignore */ }
+    throw new Error(msg);
+  }
+  return await res.text();
+}
+
+/**
+ * Open the native terminal with `claude login` so the user can complete
+ * the OAuth-style setup. Not a PTY integration — just a one-shot bootstrap.
+ */
+export async function claudeCliLogin(): Promise<void> {
+  if (isTauri()) {
+    await tauriInvoke("claude_cli_login");
+    return;
+  }
+  const res = await fetch(`${DEV_SERVER}/api/claude-cli-login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+  });
+  if (!res.ok) {
+    let msg = `claude login failed (${res.status})`;
+    try {
+      const body = await res.json();
+      if (body?.error) msg = body.error;
+    } catch { /* ignore */ }
+    throw new Error(msg);
+  }
 }
 
 // ─── Merge Preview (Phase 8.1) ─────────────────────────────

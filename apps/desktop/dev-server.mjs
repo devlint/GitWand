@@ -31,6 +31,19 @@ function resolveBin(name) {
 
 const GH = resolveBin("gh");
 const GIT = resolveBin("git");
+
+/**
+ * Environment passed when spawning the `claude` CLI. We strip API-key env
+ * vars so the CLI falls back to the OAuth session (`claude login`) — same
+ * rationale as the Rust backend's `strip_claude_auth_env`.
+ */
+const claudeSpawnEnv = (() => {
+  const clean = { ...process.env };
+  delete clean.ANTHROPIC_API_KEY;
+  delete clean.CLAUDE_API_KEY;
+  delete clean.ANTHROPIC_AUTH_TOKEN;
+  return clean;
+})();
 console.log(`[dev-server] gh binary:  ${GH}`);
 console.log(`[dev-server] git binary: ${GIT}`);
 
@@ -1831,6 +1844,178 @@ const server = createServer(async (req, res) => {
           };
         }
         return jsonResponse(res, result);
+      } catch (err) {
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
+
+    // ─── Claude Code CLI (dev mirror) ─────────────────────
+    //
+    // When spawning the `claude` binary, we strip API-key env vars (see
+    // `claudeSpawnEnv` at module scope) so the CLI uses the user's OAuth
+    // subscription instead of a stale key that may be lying around in
+    // their shell. Matches the Rust backend.
+
+    //
+    // Wraps the user's locally-installed `claude` binary so GitWand can
+    // piggyback on their Claude Max/Pro subscription without implementing
+    // OAuth. Mirrors the Rust commands `detect_claude_cli`, `claude_cli_prompt`
+    // and `claude_cli_login`.
+
+    // GET /api/claude-cli-detect
+    if (url.pathname === "/api/claude-cli-detect" && req.method === "GET") {
+      try {
+        const CLAUDE = resolveBin("claude");
+        // `resolveBin` falls back to the bare name on PATH; if nothing
+        // matches, we consider it not found.
+        const exists = (() => {
+          try {
+            return existsSync(CLAUDE);
+          } catch { return false; }
+        })();
+
+        // Also try explicit PATH lookup via `which`.
+        let resolved = exists ? CLAUDE : "";
+        if (!resolved) {
+          try {
+            const r = spawnSync(process.platform === "win32" ? "where" : "which", ["claude"], { encoding: "utf-8" });
+            if (r.status === 0 && r.stdout.trim()) {
+              resolved = r.stdout.split(/\r?\n/)[0].trim();
+            }
+          } catch { /* ignore */ }
+        }
+
+        if (!resolved) {
+          return jsonResponse(res, {
+            found: false,
+            path: "",
+            version: "",
+            logged_in: false,
+            status: "not_found",
+            detail: "Binaire `claude` introuvable. Installez-le avec `npm install -g @anthropic-ai/claude-code`.",
+          });
+        }
+
+        let version = "";
+        try {
+          const r = spawnSync(resolved, ["--version"], { encoding: "utf-8" });
+          if (r.status === 0) version = r.stdout.trim();
+        } catch { /* ignore */ }
+
+        // Ping to check auth.
+        let loggedIn = false;
+        let status = "error";
+        let detail = "";
+        try {
+          const r = spawnSync(resolved, ["-p", "ping", "--output-format", "text"], { encoding: "utf-8", env: claudeSpawnEnv });
+          if (r.status === 0) {
+            loggedIn = true;
+            status = "ok";
+          } else {
+            const combined = (r.stderr || r.stdout || "").trim();
+            const lower = combined.toLowerCase();
+            const authy = lower.includes("login") || lower.includes("authenticat") || lower.includes("unauthor") || lower.includes("api key");
+            status = authy ? "not_logged_in" : "error";
+            detail = combined;
+          }
+        } catch (err) {
+          detail = `Impossible d'exécuter claude: ${err.message}`;
+        }
+
+        return jsonResponse(res, {
+          found: true,
+          path: resolved,
+          version,
+          logged_in: loggedIn,
+          status,
+          detail,
+        });
+      } catch (err) {
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
+
+    // POST /api/claude-cli-prompt  { prompt, systemPrompt?, cwd?, outputFormat? }
+    if (url.pathname === "/api/claude-cli-prompt" && req.method === "POST") {
+      try {
+        const body = await readBody(req);
+        const CLAUDE = resolveBin("claude");
+        const fullPrompt = body.systemPrompt && body.systemPrompt.trim()
+          ? `# System\n${body.systemPrompt.trim()}\n\n# User\n${(body.prompt || "").trim()}`
+          : (body.prompt || "");
+        const fmt = body.outputFormat || "text";
+        const r = spawnSync(CLAUDE, ["-p", fullPrompt, "--output-format", fmt], {
+          cwd: body.cwd || undefined,
+          encoding: "utf-8",
+          maxBuffer: 20 * 1024 * 1024,
+          env: claudeSpawnEnv,
+        });
+        if (r.status !== 0) {
+          const detail = (r.stderr || r.stdout || "").trim() || "Claude CLI a échoué sans message";
+          return jsonResponse(res, { error: detail }, 500);
+        }
+        return res.writeHead(200, { ...CORS, "Content-Type": "text/plain" }).end(r.stdout);
+      } catch (err) {
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
+
+    // POST /api/claude-cli-login  (opens a terminal with `claude login`)
+    if (url.pathname === "/api/claude-cli-login" && req.method === "POST") {
+      try {
+        const CLAUDE = resolveBin("claude");
+        if (process.platform === "darwin") {
+          const script = `tell application "Terminal" to do script "${CLAUDE.replace(/"/g, '\\"')} login"`;
+          spawn("osascript", ["-e", script], { detached: true, stdio: "ignore" }).unref();
+        } else if (process.platform === "win32") {
+          spawn("cmd", ["/c", "start", "cmd", "/k", `"${CLAUDE}" login`], { detached: true, stdio: "ignore" }).unref();
+        } else {
+          const inner = `${CLAUDE} login; echo; read -p 'Press enter to close...'`;
+          const tried = [
+            ["gnome-terminal", ["--", "sh", "-c", inner]],
+            ["konsole", ["-e", "sh", "-c", inner]],
+            ["xfce4-terminal", ["-e", inner]],
+            ["kitty", ["sh", "-c", inner]],
+            ["alacritty", ["-e", "sh", "-c", inner]],
+            ["x-terminal-emulator", ["-e", "sh", "-c", inner]],
+          ];
+          let ok = false;
+          for (const [prog, args] of tried) {
+            try {
+              spawn(prog, args, { detached: true, stdio: "ignore" }).unref();
+              ok = true;
+              break;
+            } catch { /* try next */ }
+          }
+          if (!ok) {
+            return jsonResponse(res, { error: "Aucun terminal compatible trouvé. Ouvrez un terminal et tapez: claude login" }, 500);
+          }
+        }
+        return jsonResponse(res, { ok: true });
+      } catch (err) {
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
+
+    // POST /api/git-exec  { cwd, args }
+    // Generic git command execution — mirrors the Rust `git_exec` Tauri command.
+    // Used by useCommitMessage to get the staged diff.
+    if (url.pathname === "/api/git-exec" && req.method === "POST") {
+      try {
+        const { cwd: execCwd, args } = await readBody(req);
+        if (!args || !Array.isArray(args) || args.length === 0) {
+          return jsonResponse(res, { error: "No arguments provided" }, 400);
+        }
+        const r = spawnSync(GIT, args, {
+          cwd: resolve(execCwd),
+          encoding: "utf-8",
+          maxBuffer: 20 * 1024 * 1024,
+        });
+        return jsonResponse(res, {
+          stdout: r.stdout ?? "",
+          stderr: r.stderr ?? "",
+          exitCode: r.status ?? -1,
+        });
       } catch (err) {
         return jsonResponse(res, { error: err.message }, 500);
       }
