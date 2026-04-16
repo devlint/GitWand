@@ -6,8 +6,11 @@ import { highlightConflict } from "../utils/diffHighlight";
 import { useI18n } from "../composables/useI18n";
 import { useAIProvider, type ConflictContext } from "../composables/useAIProvider";
 
-const { t } = useI18n();
+import { useHunkExplanation } from "../composables/useHunkExplanation";
+
+const { t, locale } = useI18n();
 const { isAvailable: aiAvailable, isLoading: aiLoading, lastError: aiError, suggest: aiSuggest } = useAIProvider();
+const { isGenerating: aiExplainLoading, explain: aiExplain } = useHunkExplanation();
 
 const props = defineProps<{
   file: ConflictFile;
@@ -83,6 +86,35 @@ function dismissAISuggestion() {
   aiSuggestionHunkIndex.value = null;
   aiSuggestionContent.value = null;
   aiSuggestionExplanation.value = null;
+}
+
+// ─── AI Explanation (Phase 1.3.2) ───────────────────────
+const hunkExplanations = ref<Record<number, string>>({});
+const explanationHunkIndex = ref<number | null>(null);
+const explanationError = ref<string | null>(null);
+
+async function requestHunkExplanation(hunkIndex: number, hunk: ConflictHunk) {
+  explanationError.value = null;
+  // Toggle off if already open for this hunk
+  if (explanationHunkIndex.value === hunkIndex && hunkExplanations.value[hunkIndex]) {
+    explanationHunkIndex.value = null;
+    return;
+  }
+  explanationHunkIndex.value = hunkIndex;
+  try {
+    const text = await aiExplain(hunk, {
+      locale: locale.value,
+      filePath: props.file.path,
+    });
+    hunkExplanations.value = { ...hunkExplanations.value, [hunkIndex]: text };
+  } catch (err: any) {
+    explanationError.value = err?.message ?? String(err);
+  }
+}
+
+function dismissExplanation() {
+  explanationHunkIndex.value = null;
+  explanationError.value = null;
 }
 
 /** Parse file content into displayable segments (code + conflict hunks). */
@@ -278,6 +310,20 @@ function highlightedHtml(hunkIndex: number, panel: "ours" | "base" | "theirs"): 
                   </svg>
                   {{ aiLoading && aiSuggestionHunkIndex === seg.hunkIndex ? 'IA...' : 'IA' }}
                 </a>
+                <span class="inline-sep">|</span>
+                <a
+                  class="inline-action inline-action--explain"
+                  :class="{ 'inline-action--loading': aiExplainLoading && explanationHunkIndex === seg.hunkIndex }"
+                  href="#"
+                  :title="locale === 'fr' ? 'Expliquer ce conflit en langage naturel' : 'Explain this conflict in plain language'"
+                  @click.prevent="requestHunkExplanation(seg.hunkIndex!, hunkForSegment(seg)!)"
+                >
+                  <svg class="ai-icon" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+                    <path d="M8 14.5a.75.75 0 0 0 .75-.75v-1h-1.5v1a.75.75 0 0 0 .75.75Z" fill="currentColor" stroke="none"/>
+                    <path d="M8 1.5a4.5 4.5 0 0 0-3 7.85V11h6V9.35A4.5 4.5 0 0 0 8 1.5Z"/>
+                  </svg>
+                  {{ aiExplainLoading && explanationHunkIndex === seg.hunkIndex ? (locale === 'fr' ? 'Analyse…' : 'Analysing…') : (locale === 'fr' ? 'Expliquer' : 'Explain') }}
+                </a>
               </template>
               <span
                 v-if="recommendation(hunkForSegment(seg)!) !== null"
@@ -297,6 +343,18 @@ function highlightedHtml(hunkIndex: number, panel: "ours" | "base" | "theirs"): 
                 <path d="M8 1v2m0 10v2M1 8h2m10 0h2"/><circle cx="8" cy="8" r="4"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/>
               </svg>
               <span>{{ aiSuggestionExplanation }}</span>
+            </div>
+
+            <!-- ── Hunk NL explanation (Phase 1.3.2) ──────── -->
+            <div v-if="explanationHunkIndex === seg.hunkIndex && (hunkExplanations[seg.hunkIndex!] || aiExplainLoading || explanationError)" class="hunk-explanation-banner">
+              <svg class="hunk-explanation-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true">
+                <path d="M8 1.5a4.5 4.5 0 0 0-3 7.85V11h6V9.35A4.5 4.5 0 0 0 8 1.5Z"/>
+                <path d="M6.5 13h3M7 14.5h2"/>
+              </svg>
+              <span v-if="explanationError" class="hunk-explanation-error">{{ explanationError }}</span>
+              <span v-else-if="aiExplainLoading && !hunkExplanations[seg.hunkIndex!]">{{ locale === 'fr' ? 'Analyse du conflit en cours…' : 'Analysing conflict…' }}</span>
+              <span v-else>{{ hunkExplanations[seg.hunkIndex!] }}</span>
+              <a v-if="!aiExplainLoading" class="hunk-explanation-close" href="#" @click.prevent="dismissExplanation">✕</a>
             </div>
 
             <!-- ── Inline Edit Mode ─────────────────────── -->
@@ -765,6 +823,48 @@ function highlightedHtml(hunkIndex: number, panel: "ours" | "base" | "theirs"): 
 .ai-explanation-icon {
   flex-shrink: 0;
   margin-top: 1px;
+  color: var(--color-accent);
+}
+
+.hunk-explanation-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 14px;
+  margin: 4px 12px;
+  background: var(--color-bg-secondary, rgba(148, 163, 184, 0.08));
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-base);
+  line-height: 1.4;
+  color: var(--color-text);
+}
+
+.hunk-explanation-icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--color-accent);
+}
+
+.hunk-explanation-error {
+  color: var(--color-danger, #ef4444);
+  flex: 1;
+}
+
+.hunk-explanation-close {
+  margin-left: auto;
+  color: var(--color-text-muted);
+  text-decoration: none;
+  font-size: var(--text-sm);
+  padding: 0 4px;
+}
+
+.hunk-explanation-close:hover {
+  color: var(--color-text);
+}
+
+.inline-action--explain {
   color: var(--color-accent);
 }
 </style>
