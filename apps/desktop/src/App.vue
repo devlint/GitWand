@@ -675,6 +675,7 @@ onUnmounted(() => {
     <div class="app-body">
       <aside class="sidebar" v-if="hasRepo">
         <RepoSidebar
+          :cwd="repoFolderPath ?? ''"
           :files="repoFiles"
           :selected-file="repoSelectedFile"
           :view-mode="viewMode"
