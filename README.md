@@ -461,6 +461,7 @@ GitWand uses a zero-dependency type-safe i18n system. `fr.ts` is the reference l
 - [ ] Natural-language commit log search
 - [ ] Blame context — "why did this line change?"
 - [ ] AI release notes / changelog generator
+- [ ] Home screen: rotating feature tips before repo selection
 
 ### Later — v1.4.0
 

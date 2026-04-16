@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useFolderHistory } from "../composables/useFolderHistory";
 import { useI18n } from "../composables/useI18n";
+import { locales, type SupportedLocale } from "../locales";
 
 const emit = defineEmits<{
   openFolder: [];
@@ -9,11 +10,48 @@ const emit = defineEmits<{
 }>();
 
 const { history } = useFolderHistory();
-const { t } = useI18n();
+const { t, locale } = useI18n();
 
 const recentFolders = computed(() => history.value.slice(0, 5));
 
 const isMac = navigator.platform.toUpperCase().includes("MAC");
+
+// ─── Rotating tips (Phase 1.3.5) ──────────────────────
+const TIP_ROTATION_MS = 30_000;
+
+const tips = computed<readonly string[]>(() => {
+  const l = locale.value as SupportedLocale;
+  return locales[l]?.empty?.tips ?? locales.fr.empty.tips;
+});
+
+/**
+ * Start at a random index each mount so consecutive app opens don't
+ * always land on the same tip. Rotate sequentially from there so the
+ * user doesn't see a tip twice in a short window.
+ */
+const tipIndex = ref(
+  tips.value.length > 0 ? Math.floor(Math.random() * tips.value.length) : 0,
+);
+
+const currentTip = computed(() => tips.value[tipIndex.value % tips.value.length] ?? "");
+
+let rotationTimer: ReturnType<typeof setInterval> | null = null;
+
+function advanceTip() {
+  if (tips.value.length === 0) return;
+  tipIndex.value = (tipIndex.value + 1) % tips.value.length;
+}
+
+onMounted(() => {
+  rotationTimer = setInterval(advanceTip, TIP_ROTATION_MS);
+});
+
+onUnmounted(() => {
+  if (rotationTimer) {
+    clearInterval(rotationTimer);
+    rotationTimer = null;
+  }
+});
 </script>
 
 <template>
@@ -59,6 +97,14 @@ const isMac = navigator.platform.toUpperCase().includes("MAC");
       </svg>
       {{ t('empty.openButton') }}
     </button>
+
+    <!-- Rotating feature tip -->
+    <div v-if="currentTip" class="empty-tip" role="note" aria-live="polite">
+      <span class="empty-tip-label">✨ {{ t('empty.tipLabel') }}</span>
+      <Transition name="tip-fade" mode="out-in">
+        <p :key="tipIndex" class="empty-tip-text">{{ currentTip }}</p>
+      </Transition>
+    </div>
 
     <!-- Recent repos -->
     <div v-if="recentFolders.length > 0" class="recent-section">
@@ -144,6 +190,52 @@ const isMac = navigator.platform.toUpperCase().includes("MAC");
 }
 
 .empty-btn:active { transform: translateY(0); box-shadow: var(--shadow-xs); }
+
+/* ─── Rotating tip ───────────────────────────────────── */
+
+.empty-tip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 520px;
+  margin-top: var(--space-4);
+  padding: var(--space-4) var(--space-6);
+  border-radius: var(--radius-md);
+  background: var(--color-accent-soft, rgba(139, 92, 246, 0.08));
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-accent);
+}
+
+.empty-tip-label {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-accent);
+}
+
+.empty-tip-text {
+  margin: 0;
+  font-size: var(--font-size-md);
+  line-height: var(--line-height-normal);
+  color: var(--color-text);
+}
+
+.tip-fade-enter-active,
+.tip-fade-leave-active {
+  transition: opacity 400ms ease, transform 400ms ease;
+}
+
+.tip-fade-enter-from {
+  opacity: 0;
+  transform: translateY(4px);
+}
+
+.tip-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
 
 /* ─── Recent repos ───────────────────────────────────── */
 

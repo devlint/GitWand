@@ -167,6 +167,13 @@ L'IA n'est plus cantonnée au merge editor et au commit message : elle s'infuse 
 - **Blame contextuel** : bouton dans le `FileHistoryViewer` / blame → "explique pourquoi cette ligne a changé" avec contexte des commits voisins
 - **Générateur de release notes / changelog** : depuis `git log <tag>..<tag>` → markdown structuré (Added / Changed / Fixed), pré-rempli dans les release notes GitHub
 
+### 1.3.5 — Tips tournants sur la page d'accueil
+
+- Avant sélection d'un repo, afficher un encart "tip" qui présente une fonctionnalité de GitWand
+- Pool de ~15-20 tips (résolution auto, merge editor, MCP, rebase interactif, Absorb, Undo, commit IA…)
+- Pick initial aléatoire à l'ouverture de l'app, rotation toutes les 30 s tant que l'utilisateur reste sur le dashboard
+- Contenu localisé FR/EN
+
 ---
 
 ## Next — v1.4.0 — Visual diff & distribution
