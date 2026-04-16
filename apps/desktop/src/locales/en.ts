@@ -233,6 +233,8 @@ const en: Locale = {
     pushed: "Pushed to remote",
     editMessage: "Edit commit message",
     amendConfirm: "Amend commit",
+    searchPlaceholder: "Filter (subject, author, hash\u2026) \u2014 Enter for AI search",
+    searchAiHint: "AI search: type a plain-language question then Enter or ✨",
   },
   commit: {
     summary: "Summary",

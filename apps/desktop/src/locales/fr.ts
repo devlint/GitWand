@@ -234,6 +234,8 @@ const fr = {
     pushed: "Push\u00e9s sur le remote",
     editMessage: "Modifier le message de commit",
     amendConfirm: "Modifier le commit",
+    searchPlaceholder: "Filtrer (sujet, auteur, hash\u2026) \u2014 Entr\u00e9e pour une recherche IA",
+    searchAiHint: "Recherche IA : tape une question en langage naturel puis Entr\u00e9e ou ✨",
   },
   commit: {
     summary: "R\u00e9sum\u00e9",

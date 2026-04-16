@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref, watch } from "vue";
 import type { GitLogEntry } from "../utils/backend";
 import { useI18n } from "../composables/useI18n";
-const { t } = useI18n();
+import { useAIProvider } from "../composables/useAIProvider";
+import { useCommitSearch, filterCommitsLocal, type CommitMatch } from "../composables/useCommitSearch";
+const { t, locale } = useI18n();
 
 const props = defineProps<{
   entries: GitLogEntry[];
@@ -30,6 +32,69 @@ const emit = defineEmits<{
   selectCommit: [hash: string];
   editCommit: [entry: GitLogEntry];
 }>();
+
+// ─── Search (Phase 1.3.4) ─────────────────────────────────
+const ai = useAIProvider();
+const { isSearching: isAiSearching, searchAI, lastError: aiSearchError } = useCommitSearch();
+const searchQuery = ref("");
+const aiMatches = ref<CommitMatch[] | null>(null);
+
+const displayedEntries = computed<GitLogEntry[]>(() => {
+  if (aiMatches.value !== null) return aiMatches.value.map((m) => m.entry);
+  return filterCommitsLocal(props.entries, searchQuery.value);
+});
+
+const isSearchActive = computed(
+  () => aiMatches.value !== null || searchQuery.value.trim().length > 0,
+);
+
+/** Hashes of the commits considered "unpushed" in the original list. */
+const unpushedHashes = computed<Set<string>>(() => {
+  const set = new Set<string>();
+  const ahead = props.needsPublish ? props.entries.length : (props.aheadCount ?? 0);
+  for (let i = 0; i < ahead; i++) {
+    const e = props.entries[i];
+    if (e) set.add(e.hashFull);
+  }
+  return set;
+});
+
+function isUnpushed(entry: GitLogEntry): boolean {
+  return unpushedHashes.value.has(entry.hashFull);
+}
+
+const reasonByHash = computed(() => {
+  const map = new Map<string, string>();
+  if (aiMatches.value) {
+    for (const m of aiMatches.value) {
+      if (m.reason) map.set(m.entry.hashFull, m.reason);
+    }
+  }
+  return map;
+});
+
+async function runAiSearch() {
+  if (!searchQuery.value.trim()) return;
+  try {
+    const matches = await searchAI(searchQuery.value, props.entries, {
+      locale: locale.value,
+    });
+    aiMatches.value = matches;
+  } catch {
+    // surfaced via aiSearchError
+  }
+}
+
+function clearSearch() {
+  searchQuery.value = "";
+  aiMatches.value = null;
+}
+
+// Clear AI match set when the query changes (typing invalidates the
+// prior AI result — the user is refining).
+watch(searchQuery, () => {
+  aiMatches.value = null;
+});
 
 function relativeDate(isoDate: string): string {
   const date = new Date(isoDate);
@@ -68,16 +133,56 @@ function authorColor(name: string): string {
 
 <template>
   <div class="commit-log">
+    <!-- Search bar -->
+    <div v-if="entries.length > 0" class="log-search">
+      <svg class="log-search-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.4"/>
+        <path d="M11 11l3 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+      </svg>
+      <input
+        v-model="searchQuery"
+        type="text"
+        class="log-search-input"
+        :placeholder="t('log.searchPlaceholder')"
+        @keydown.enter.prevent="runAiSearch"
+        @keydown.esc.prevent="clearSearch"
+      />
+      <button
+        v-if="ai.isAvailable.value && searchQuery.trim()"
+        type="button"
+        class="log-search-ai"
+        :disabled="isAiSearching"
+        :title="t('log.searchAiHint')"
+        @click="runAiSearch"
+      >
+        <span v-if="isAiSearching">…</span>
+        <span v-else>✨</span>
+      </button>
+      <button
+        v-if="searchQuery || aiMatches !== null"
+        type="button"
+        class="log-search-clear"
+        :title="t('common.close')"
+        @click="clearSearch"
+      >✕</button>
+    </div>
+    <p v-if="aiSearchError" class="log-search-error">{{ aiSearchError }}</p>
+    <p v-if="aiMatches !== null" class="log-search-status">
+      ✨ {{ locale === 'fr'
+        ? `Recherche IA : ${displayedEntries.length} commit(s) correspondent.`
+        : `AI search: ${displayedEntries.length} matching commit(s).` }}
+    </p>
+
     <div class="log-loading" v-if="loading">
       <div class="loading-spinner"></div>
       <span class="muted">{{ t('common.loading') }}</span>
     </div>
 
-    <ul class="log-list" v-else-if="entries.length > 0">
-      <template v-for="(entry, idx) in entries" :key="entry.hashFull">
+    <ul class="log-list" v-else-if="displayedEntries.length > 0">
+      <template v-for="(entry, idx) in displayedEntries" :key="entry.hashFull">
         <!-- Section label before first unpushed commit (or unpublished branch) -->
         <li
-          v-if="effectiveAhead > 0 && idx === 0"
+          v-if="!isSearchActive && effectiveAhead > 0 && idx === 0"
           class="log-section-label"
           :class="needsPublish ? 'log-section-label--unpublished' : 'log-section-label--unpushed'"
         >
@@ -88,7 +193,7 @@ function authorColor(name: string): string {
           <span v-else>{{ effectiveAhead }} {{ effectiveAhead === 1 ? t('log.unpushedOne') : t('log.unpushedMany') }}</span>
         </li>
         <!-- Section label before first pushed commit -->
-        <li v-if="!needsPublish && effectiveAhead > 0 && idx === effectiveAhead" class="log-section-label log-section-label--pushed">
+        <li v-if="!isSearchActive && !needsPublish && effectiveAhead > 0 && idx === effectiveAhead" class="log-section-label log-section-label--pushed">
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <path d="M13.5 3.5l-7 7L3 7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
@@ -99,7 +204,7 @@ function authorColor(name: string): string {
           class="commit-item"
           :class="{
             'commit-item--selected': selectedHash === entry.hashFull,
-            'commit-item--unpushed': idx < effectiveAhead,
+            'commit-item--unpushed': isUnpushed(entry),
           }"
           @click="emit('selectCommit', entry.hashFull)"
           tabindex="0"
@@ -111,7 +216,10 @@ function authorColor(name: string): string {
           <div class="commit-info">
             <div class="commit-message">
               {{ entry.message }}
-              <span v-if="idx < effectiveAhead" class="unpushed-badge">{{ needsPublish ? t('log.unpublishedBadge') : 'unpushed' }}</span>
+              <span v-if="isUnpushed(entry)" class="unpushed-badge">{{ needsPublish ? t('log.unpublishedBadge') : 'unpushed' }}</span>
+            </div>
+            <div v-if="reasonByHash.get(entry.hashFull)" class="commit-ai-reason">
+              ✨ {{ reasonByHash.get(entry.hashFull) }}
             </div>
             <div class="commit-meta">
               <span class="commit-hash mono">{{ entry.hash }}</span>
@@ -121,9 +229,9 @@ function authorColor(name: string): string {
               <time class="commit-date" :datetime="entry.date">{{ relativeDate(entry.date) }}</time>
             </div>
           </div>
-          <!-- Edit button — HEAD unpushed only -->
+          <!-- Edit button — HEAD unpushed only (hidden in search mode) -->
           <button
-            v-if="aheadCount != null && idx === 0"
+            v-if="!isSearchActive && aheadCount != null && idx === 0"
             class="commit-edit-btn"
             @click.stop="emit('editCommit', entry)"
             :title="t('log.editMessage')"
@@ -352,5 +460,93 @@ function authorColor(name: string): string {
   align-items: center;
   justify-content: center;
   padding: var(--space-10);
+}
+
+/* ─── Search bar (Phase 1.3.4) ────────────────────────────── */
+.log-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+}
+
+.log-search-icon {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.log-search-input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+  padding: 2px 0;
+}
+
+.log-search-input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.log-search-ai,
+.log-search-clear {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: var(--font-size-xs);
+}
+
+.log-search-ai {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft, rgba(139, 92, 246, 0.08));
+}
+
+.log-search-ai:hover:not(:disabled) {
+  background: var(--color-accent);
+  color: var(--color-accent-text);
+}
+
+.log-search-ai:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.log-search-clear:hover {
+  color: var(--color-text);
+  background: var(--color-bg-hover);
+}
+
+.log-search-error,
+.log-search-status {
+  margin: 0;
+  padding: 6px var(--space-3);
+  font-size: var(--font-size-xs);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.log-search-error {
+  color: var(--color-danger, #ef4444);
+  background: var(--color-danger-soft, rgba(239, 68, 68, 0.06));
+}
+
+.log-search-status {
+  color: var(--color-accent);
+  background: var(--color-accent-soft, rgba(139, 92, 246, 0.06));
+}
+
+.commit-ai-reason {
+  margin-top: 2px;
+  font-size: var(--font-size-xs);
+  color: var(--color-accent);
+  line-height: 1.3;
 }
 </style>
