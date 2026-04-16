@@ -13,6 +13,9 @@ import { ref, computed } from "vue";
 import type { GitDiff, DiffLine, PrReviewComment } from "../utils/backend";
 import PrCommentThread from "./PrCommentThread.vue";
 import { detectLanguage, highlightLine } from "../utils/highlight";
+import { useAIProvider } from "../composables/useAIProvider";
+import { usePrHunkCritique, type HunkCritiqueResult } from "../composables/usePrHunkCritique";
+import { useI18n } from "../composables/useI18n";
 
 const props = defineProps<{
   diff: GitDiff | null;
@@ -49,6 +52,60 @@ const emit = defineEmits<{
 const language = computed(() => props.filePath ? detectLanguage(props.filePath) : null);
 function hl(content: string): string {
   return highlightLine(content, language.value);
+}
+
+// ─── AI hunk critique (Phase 1.3.1) ─────────────────────
+const ai = useAIProvider();
+const { isGenerating: isCritiquing, critique: critiqueHunk, lastError: critiqueAiError } = usePrHunkCritique();
+const { locale } = useI18n();
+/** Per-hunk cache: hunkIdx → result (or null while loading). */
+const critiqueResults = ref<Record<number, HunkCritiqueResult | null>>({});
+/** Which hunk is currently being analysed (only one at a time). */
+const critiqueLoadingIdx = ref<number | null>(null);
+/** Which hunk has its critique panel open. */
+const critiqueOpenIdx = ref<number | null>(null);
+
+async function requestHunkCritique(hunkIdx: number) {
+  if (!props.diff || !props.filePath) return;
+  const hunk = props.diff.hunks[hunkIdx];
+  if (!hunk) return;
+
+  // Toggle off if already shown.
+  if (critiqueOpenIdx.value === hunkIdx && critiqueResults.value[hunkIdx]) {
+    critiqueOpenIdx.value = null;
+    return;
+  }
+
+  critiqueOpenIdx.value = hunkIdx;
+  // Use the cached result if we have it.
+  if (critiqueResults.value[hunkIdx]) return;
+
+  critiqueLoadingIdx.value = hunkIdx;
+  try {
+    const res = await critiqueHunk(props.filePath, hunk, { locale: locale.value });
+    critiqueResults.value = { ...critiqueResults.value, [hunkIdx]: res };
+  } catch {
+    // surfaced via critiqueAiError
+  } finally {
+    if (critiqueLoadingIdx.value === hunkIdx) critiqueLoadingIdx.value = null;
+  }
+}
+
+function dismissCritique() {
+  critiqueOpenIdx.value = null;
+}
+
+function verdictClass(v: HunkCritiqueResult["verdict"]): string {
+  return `pid-critique--${v}`;
+}
+
+function verdictIcon(v: HunkCritiqueResult["verdict"]): string {
+  switch (v) {
+    case "ok":         return "✓";
+    case "nit":        return "·";
+    case "suggestion": return "💡";
+    case "risk":       return "⚠";
+  }
 }
 
 // ─── Thread grouping ─────────────────────────────────────
@@ -193,7 +250,47 @@ function handleApplySuggestion(suggestion: string, startLine: number | null, end
         class="pid-hunk"
       >
         <!-- Hunk header -->
-        <div class="pid-hunk-header mono">{{ hunk.header }}</div>
+        <div class="pid-hunk-header mono">
+          <span class="pid-hunk-header-text">{{ hunk.header }}</span>
+          <button
+            v-if="ai.isAvailable.value"
+            class="pid-hunk-ai"
+            :class="{ 'pid-hunk-ai--loading': critiqueLoadingIdx === hunkIdx, 'pid-hunk-ai--active': critiqueOpenIdx === hunkIdx }"
+            :disabled="critiqueLoadingIdx === hunkIdx"
+            :title="locale === 'fr' ? 'Critique IA de ce hunk' : 'AI critique of this hunk'"
+            @click="requestHunkCritique(hunkIdx)"
+          >
+            <span v-if="critiqueLoadingIdx === hunkIdx">…</span>
+            <span v-else>✨ {{ locale === 'fr' ? 'Review' : 'Review' }}</span>
+          </button>
+        </div>
+
+        <!-- AI critique panel -->
+        <div
+          v-if="critiqueOpenIdx === hunkIdx && (critiqueResults[hunkIdx] || critiqueLoadingIdx === hunkIdx || critiqueAiError)"
+          class="pid-critique"
+          :class="critiqueResults[hunkIdx] ? verdictClass(critiqueResults[hunkIdx]!.verdict) : ''"
+        >
+          <span class="pid-critique-icon">
+            {{ critiqueResults[hunkIdx] ? verdictIcon(critiqueResults[hunkIdx]!.verdict) : '✨' }}
+          </span>
+          <span class="pid-critique-body">
+            <span v-if="critiqueAiError && !critiqueResults[hunkIdx]" class="pid-critique-error">{{ critiqueAiError }}</span>
+            <span v-else-if="critiqueLoadingIdx === hunkIdx && !critiqueResults[hunkIdx]">
+              {{ locale === 'fr' ? 'Analyse du hunk en cours…' : 'Analysing hunk…' }}
+            </span>
+            <template v-else-if="critiqueResults[hunkIdx]">
+              <span class="pid-critique-verdict">{{ critiqueResults[hunkIdx]!.verdict }}</span>
+              <span class="pid-critique-summary">{{ critiqueResults[hunkIdx]!.summary }}</span>
+            </template>
+          </span>
+          <button
+            v-if="critiqueLoadingIdx !== hunkIdx"
+            class="pid-critique-close"
+            @click="dismissCritique"
+            aria-label="Close"
+          >✕</button>
+        </div>
 
         <!-- Lines -->
         <template v-for="(dl, lineIdx) in hunk.lines" :key="lineIdx">
@@ -322,7 +419,100 @@ function handleApplySuggestion(suggestion: string, startLine: number | null, end
   padding: 3px 8px;
   font-size: 11px;
   border-bottom: 1px solid var(--color-border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
+
+.pid-hunk-header-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.pid-hunk-ai {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--color-accent);
+  background: var(--color-accent-soft, rgba(139, 92, 246, 0.12));
+  color: var(--color-accent);
+  font-family: inherit;
+  font-size: 10.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.pid-hunk-ai:hover:not(:disabled),
+.pid-hunk-ai--active {
+  background: var(--color-accent);
+  color: var(--color-accent-text);
+}
+
+.pid-hunk-ai--loading,
+.pid-hunk-ai:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+/* ── Critique panel ────────────────────────────────── */
+.pid-critique {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-text);
+}
+
+.pid-critique--ok         { background: var(--color-success-soft, rgba(34, 197, 94, 0.08));  border-left: 3px solid var(--color-success, #22c55e); }
+.pid-critique--nit        { background: var(--color-bg-secondary);                            border-left: 3px solid var(--color-text-muted); }
+.pid-critique--suggestion { background: var(--color-accent-soft, rgba(139, 92, 246, 0.08)); border-left: 3px solid var(--color-accent); }
+.pid-critique--risk       { background: var(--color-warning-soft, rgba(234, 179, 8, 0.08));   border-left: 3px solid var(--color-warning, #eab308); }
+
+.pid-critique-icon {
+  flex-shrink: 0;
+  font-size: 14px;
+  line-height: 1;
+  padding-top: 1px;
+}
+
+.pid-critique-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pid-critique-verdict {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}
+
+.pid-critique-summary {
+  color: var(--color-text);
+}
+
+.pid-critique-error {
+  color: var(--color-danger);
+}
+
+.pid-critique-close {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  padding: 0 4px;
+}
+
+.pid-critique-close:hover { color: var(--color-text); }
 
 /* Diff rows */
 .pid-row {
