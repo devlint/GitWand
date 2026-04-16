@@ -204,7 +204,8 @@ async function callClaudeCodeCli(
   systemPrompt: string,
   userPrompt: string,
 ): Promise<string> {
-  return claudeCliPrompt(userPrompt, systemPrompt, undefined, "text");
+  const result = await claudeCliPrompt(userPrompt, systemPrompt, undefined, "text");
+  return result ?? "";
 }
 
 /**

@@ -48,7 +48,8 @@ Write the commit message.`;
 }
 
 /** Strip code fences / leading labels the model sometimes adds anyway. */
-function cleanMessage(raw: string): string {
+function cleanMessage(raw: string | undefined | null): string {
+  if (!raw) return "";
   let msg = raw.trim();
   const fence = msg.match(/^```(?:[a-z]*)?\s*\n([\s\S]*?)\n```\s*$/i);
   if (fence) msg = fence[1].trim();
@@ -88,18 +89,31 @@ export function useCommitMessage() {
 
       // Pull the staged diff + a short status summary via the existing
       // git_exec primitive — no new backend command needed.
-      const [diffRes, statusRes] = await Promise.all([
-        gitExec(cwd, ["diff", "--cached", "--no-color"]),
-        gitExec(cwd, ["diff", "--cached", "--name-status"]),
-      ]);
+      if (!cwd) {
+        throw new Error("Aucun repo ouvert (cwd vide).");
+      }
 
-      if (diffRes.exitCode !== 0) {
+      let diffRes, statusRes;
+      try {
+        [diffRes, statusRes] = await Promise.all([
+          gitExec(cwd, ["diff", "--cached", "--no-color"]),
+          gitExec(cwd, ["diff", "--cached", "--name-status"]),
+        ]);
+      } catch (execErr: unknown) {
         throw new Error(
-          diffRes.stderr.trim() || "git diff --cached a échoué",
+          `git exec failed: ${execErr instanceof Error ? execErr.message : String(execErr)}`,
         );
       }
 
-      let diff = diffRes.stdout;
+      if (diffRes.exitCode !== 0) {
+        const stderr = (diffRes.stderr ?? "").trim();
+        throw new Error(
+          stderr
+            || `git diff --cached a échoué (exit ${diffRes.exitCode}, cwd: ${cwd})`,
+        );
+      }
+
+      let diff = diffRes.stdout ?? "";
       if (diff.length === 0) {
         throw new Error("Aucun changement stagé — stage des fichiers avant de générer un message.");
       }
@@ -117,10 +131,13 @@ export function useCommitMessage() {
       // call from useAIProvider. For now we go direct via the CLI / HTTP
       // layers by piggybacking on the existing provider config.
       const systemPrompt = buildSystemPrompt(locale);
-      const userPrompt = buildUserPrompt(diff, statusRes.stdout);
+      const userPrompt = buildUserPrompt(diff, statusRes.stdout ?? "");
 
       // Use the provider's own free-form prompt entry point.
       const raw = await ai.rawPrompt(systemPrompt, userPrompt);
+      if (!raw) {
+        throw new Error("Le provider IA n'a retourné aucune réponse.");
+      }
       const message = cleanMessage(raw);
       lastMessage.value = message;
       return message;

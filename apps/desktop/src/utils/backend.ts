@@ -1163,15 +1163,13 @@ export interface TerminalResult {
  */
 export async function gitExec(cwd: string, args: string[]): Promise<TerminalResult> {
   if (isTauri()) {
-    const raw = await tauriInvoke<{
-      stdout: string;
-      stderr: string;
-      exit_code: number;
-    }>("git_exec", { cwd, args });
+    // Tauri 2 may serialize the Rust struct field `exit_code` as either
+    // snake_case or camelCase depending on the serde config — accept both.
+    const raw = await tauriInvoke<Record<string, unknown>>("git_exec", { cwd, args });
     return {
-      stdout: raw.stdout,
-      stderr: raw.stderr,
-      exitCode: raw.exit_code,
+      stdout: (raw.stdout as string) ?? "",
+      stderr: (raw.stderr as string) ?? "",
+      exitCode: (raw.exitCode ?? raw.exit_code ?? -1) as number,
     };
   }
   const res = await fetch(`${DEV_SERVER}/api/git-exec`, {
@@ -1179,7 +1177,12 @@ export async function gitExec(cwd: string, args: string[]): Promise<TerminalResu
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ cwd, args }),
   });
-  return res.json();
+  const data = await res.json();
+  return {
+    stdout: data.stdout ?? "",
+    stderr: data.stderr ?? "",
+    exitCode: data.exitCode ?? data.exit_code ?? -1,
+  };
 }
 
 /**

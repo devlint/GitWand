@@ -1997,6 +1997,30 @@ const server = createServer(async (req, res) => {
       }
     }
 
+    // POST /api/git-exec  { cwd, args }
+    // Generic git command execution — mirrors the Rust `git_exec` Tauri command.
+    // Used by useCommitMessage to get the staged diff.
+    if (url.pathname === "/api/git-exec" && req.method === "POST") {
+      try {
+        const { cwd: execCwd, args } = await readBody(req);
+        if (!args || !Array.isArray(args) || args.length === 0) {
+          return jsonResponse(res, { error: "No arguments provided" }, 400);
+        }
+        const r = spawnSync(GIT, args, {
+          cwd: resolve(execCwd),
+          encoding: "utf-8",
+          maxBuffer: 20 * 1024 * 1024,
+        });
+        return jsonResponse(res, {
+          stdout: r.stdout ?? "",
+          stderr: r.stderr ?? "",
+          exitCode: r.status ?? -1,
+        });
+      } catch (err) {
+        return jsonResponse(res, { error: err.message }, 500);
+      }
+    }
+
     // POST /api/read-gitwandrc  { cwd }
     // Searches: .gitwandrc → .gitwandrc.json → package.json#gitwand
     if (url.pathname === "/api/read-gitwandrc" && req.method === "POST") {
