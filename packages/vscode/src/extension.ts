@@ -48,6 +48,8 @@ const TYPE_LABELS: Record<ConflictType, string> = {
   non_overlapping: "Non-overlapping changes",
   generated_file: "Auto-generated file (lockfile, build output…)",
   value_only_change: "Only volatile values differ (hashes, versions…)",
+  reorder_only: "Same lines, different order (pure reordering)",
+  insertion_at_boundary: "Pure insertions on both sides, base intact",
   complex: "Complex conflict",
 };
 
@@ -60,6 +62,8 @@ const TYPE_ICONS: Record<ConflictType, string> = {
   non_overlapping: "\u2713",
   generated_file: "\u2713",
   value_only_change: "\u2713",
+  reorder_only: "\u2713",
+  insertion_at_boundary: "\u2713",
   complex: "\u2717",
 };
 
