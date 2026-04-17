@@ -15,7 +15,8 @@
   <a href="#cli">CLI</a> &bull;
   <a href="#mcp-server">MCP Server</a> &bull;
   <a href="#architecture">Architecture</a> &bull;
-  <a href="#roadmap">Roadmap</a>
+  <a href="#roadmap">Roadmap</a> &bull;
+  <a href="#code-signing-policy">Code signing</a>
 </p>
 
 <p align="center">
@@ -507,6 +508,19 @@ GitWand uses a zero-dependency type-safe i18n system. `fr.ts` is the reference l
 - [ ] macOS notarization + Windows code signing
 
 See [ROADMAP.md](./ROADMAP.md) for the full phased plan with competitive analysis.
+
+---
+
+## Code signing policy
+
+Windows builds of GitWand are code-signed. Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org).
+
+| Role | Member |
+|------|--------|
+| Committers / Reviewers | [Laurent Guitton](https://github.com/devlint) |
+| Approvers | [Laurent Guitton](https://github.com/devlint) |
+
+This program will not transfer any information to other networked systems unless specifically requested by the user.
 
 ---
 
