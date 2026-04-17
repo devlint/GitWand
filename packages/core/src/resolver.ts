@@ -275,6 +275,49 @@ function resolveHunk(
         reason: "Un côté a supprimé le bloc, l'autre n'a pas touché. Résolution : supprimer (0 lignes).",
       };
 
+    case "reorder_only": {
+      // Résolution : accepter theirs (intent de réordonnancement le plus récent).
+      // Exception : si la base est disponible et que son ordre correspond à theirs,
+      // c'est ours qui a réordonné → accepter ours.
+      const hasBase = hunk.baseLines.length > 0;
+      let preferred: string[];
+      let side: string;
+      if (hasBase && hunk.baseLines.join("\n") === hunk.theirsLines.join("\n")) {
+        preferred = [...hunk.oursLines];
+        side = "ours";
+      } else {
+        preferred = [...hunk.theirsLines];
+        side = "theirs";
+      }
+      return {
+        lines: preferred,
+        reason: `Permutation pure — mêmes lignes, ordre différent. Résolution : accepter ${side}.`,
+      };
+    }
+
+    case "insertion_at_boundary": {
+      // Résolution : base + insertions ours + insertions theirs (diff3)
+      //              ou ours + lignes de theirs absentes de ours (diff2)
+      const hasBase = hunk.baseLines.length > 0;
+      let merged: string[];
+      if (hasBase) {
+        // Trouver les lignes ajoutées par chaque côté via inclusion dans l'ensemble de base
+        const baseSet = new Set(hunk.baseLines);
+        const oursInsertions = hunk.oursLines.filter((l) => !baseSet.has(l));
+        const theirsInsertions = hunk.theirsLines.filter((l) => !baseSet.has(l));
+        merged = [...hunk.baseLines, ...oursInsertions, ...theirsInsertions];
+      } else {
+        // Heuristique diff2 : union (ours ordre préservé, on ajoute ce qui manque de theirs)
+        const oursSet = new Set(hunk.oursLines);
+        const theirsOnly = hunk.theirsLines.filter((l) => !oursSet.has(l));
+        merged = [...hunk.oursLines, ...theirsOnly];
+      }
+      return {
+        lines: merged,
+        reason: `Insertions pures — union des ${hasBase ? "insertions (base + ours + theirs)" : "lignes (heuristique diff2)"}. ${merged.length} lignes dans le résultat.`,
+      };
+    }
+
     case "whitespace_only":
       if (!options.resolveWhitespace || !policyCfg.allowWhitespace) {
         return {
@@ -389,18 +432,52 @@ export function resolve(
   // Détecter si le fichier est auto-généré
   const genInfo = isGeneratedFile(filePath);
 
+  // v1.4 — fileFrequency : compteur de hunks "complex" déjà vus dans ce fichier.
+  // Appliqué comme pénalité sur la dimension fileFrequency du score de confiance.
+  let priorComplexHunks = 0;
+
   for (const segment of segments) {
     if (segment.type === "text") {
       outputLines.push(...segment.lines);
     } else {
       let hunk = toConflictHunk(segment.conflict);
 
+      // v1.4 — Appliquer la pénalité fileFrequency si des hunks complexes ont déjà été vus
+      if (priorComplexHunks > 0 && hunk.type !== "complex") {
+        const ff = Math.min(100, priorComplexHunks * 20);
+        const d  = hunk.confidence.dimensions;
+        const raw =
+          d.typeClassification
+          - d.dataRisk        * 0.40
+          - d.scopeImpact     * 0.15
+          - ff                * 0.10
+          + (d.baseAvailability ?? 0) * 0.05;
+        const newScore = Math.round(Math.max(0, Math.min(100, raw)));
+        const newLabel = newScore >= 92 ? "certain" as const
+                       : newScore >= 68 ? "high"    as const
+                       : newScore >= 44 ? "medium"  as const
+                       : "low"    as const;
+        hunk = {
+          ...hunk,
+          confidence: {
+            ...hunk.confidence,
+            score: newScore,
+            label: newLabel,
+            dimensions: { ...d, fileFrequency: ff },
+            penalties: [
+              ...hunk.confidence.penalties,
+              `Zone chaude — ${priorComplexHunks} hunk${priorComplexHunks > 1 ? "s" : ""} complexe${priorComplexHunks > 1 ? "s" : ""} déjà vus dans ce fichier (−${(ff * 0.10).toFixed(1)} pts)`,
+            ],
+          },
+        };
+      }
+
       // Si fichier auto-généré et hunk classifié "complex", reclassifier en "generated_file"
       if (genInfo.generated && hunk.type === "complex") {
         const generatedScore: ConfidenceScore = {
           score: 72,
           label: "high",
-          dimensions: { typeClassification: 90, dataRisk: 30, scopeImpact: 15 },
+          dimensions: { typeClassification: 90, dataRisk: 30, scopeImpact: 15, fileFrequency: 0, baseAvailability: 0 },
           boosters: [`Chemin correspond au pattern de fichier auto-généré : ${genInfo.label}`],
           penalties: ["Le contenu sera régénéré — theirs est supposé plus récent"],
         };
@@ -435,6 +512,11 @@ export function resolve(
 
       const { lines: resolvedLines, reason: resolutionReason } = resolveHunk(hunk, filePath, options);
       const autoResolved = resolvedLines !== null;
+
+      // v1.4 — Incrémenter le compteur de hunks complexes non résolus pour fileFrequency
+      if (!autoResolved && hunk.type === "complex") {
+        priorComplexHunks++;
+      }
 
       resolutions.push({ hunk, resolvedLines, autoResolved, resolutionReason });
 

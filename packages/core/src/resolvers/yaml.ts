@@ -54,6 +54,28 @@ const RE_COMMENT   = /^\s*#/;
 const RE_ANCHOR    = /[&*]/;
 
 /**
+ * Vérifie si un bloc de lignes est entièrement une séquence scalaire YAML.
+ * Une séquence scalaire = chaque élément est `- <valeur>` sans clé imbriquée.
+ * Les commentaires et lignes vides sont tolérés.
+ */
+function isAllScalarSequence(lines: string[]): boolean {
+  if (lines.length === 0) return false;
+  let hasItem = false;
+  for (const l of lines) {
+    const trimmed = l.trim();
+    if (trimmed === "" || RE_COMMENT.test(trimmed)) continue;
+    if (!RE_LIST_ITEM.test(l)) return false;
+    // Item value must be scalar: no unquoted colon (would indicate a mapping)
+    const itemVal = trimmed.replace(/^-\s+/, "");
+    const isQuoted = itemVal.startsWith('"') || itemVal.startsWith("'");
+    if (!isQuoted && /:\s/.test(itemVal)) return false; // nested mapping
+    if (itemVal.startsWith("{") || itemVal.startsWith("[")) return false; // flow collection
+    hasItem = true;
+  }
+  return hasItem;
+}
+
+/**
  * Détecte si un bloc YAML contient des constructions non gérées (anchors, block scalars).
  */
 function hasUnsupportedConstruct(lines: string[]): boolean {
@@ -391,6 +413,27 @@ export function tryResolveYamlConflict(
     return {
       mergedLines: null,
       reason: "YAML contient des anchors, aliases ou block scalars — fusion structurelle non supportée (fallback textuel).",
+      resolvedKeys: 0,
+      unresolvedKeys: 1,
+    };
+  }
+
+  // ── Cas spécial v1.4 : séquence scalaire de premier niveau ──
+  // Quand tout le hunk est une liste `- item` sans imbrication,
+  // appeler mergeSequences directement (le parser clé-valeur ne gère pas ce cas).
+  if (isAllScalarSequence(oursLines) && isAllScalarSequence(theirsLines)) {
+    const merged = mergeSequences(baseLines, oursLines, theirsLines);
+    if (merged !== null) {
+      return {
+        mergedLines: merged,
+        reason: `YAML séquence scalaire — union des éléments (${merged.length} entrées).`,
+        resolvedKeys: 1,
+        unresolvedKeys: 0,
+      };
+    }
+    return {
+      mergedLines: null,
+      reason: "YAML séquence scalaire — fusion impossible (éléments en conflit).",
       resolvedKeys: 0,
       unresolvedKeys: 1,
     };

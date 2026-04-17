@@ -30,7 +30,7 @@ function makeHunk(base: string[], ours: string[], theirs: string[]): ConflictHun
     type: "complex",
     confidence: {
       score: 20, label: "low",
-      dimensions: { typeClassification: 20, dataRisk: 0, scopeImpact: 0 },
+      dimensions: { typeClassification: 20, dataRisk: 0, scopeImpact: 0, fileFrequency: 0, baseAvailability: 0 },
       boosters: [], penalties: [],
     },
     explanation: "test hunk",

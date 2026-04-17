@@ -37,6 +37,9 @@ import { tryResolveCssConflict } from "./css.js";
 import { tryResolveLockfileNpmConflict } from "./lockfile-npm.js";
 import { tryResolveYarnLockConflict } from "./lockfile-yarn.js";
 import { tryResolvePnpmLockConflict } from "./lockfile-pnpm.js";
+import { tryResolveCargoConflict } from "./cargo.js";
+import { tryResolveDotenvConflict } from "./dotenv.js";
+import { tryResolveDockerfileConflict } from "./dockerfile.js";
 
 // ─── Type detection ───────────────────────────────────────
 
@@ -90,6 +93,21 @@ export function isLockfile(filePath: string): boolean {
   return isNpmLockfile(filePath) || isYarnLockfile(filePath) || isPnpmLockfile(filePath);
 }
 
+/** Vérifie si le fichier est un Cargo.toml ou Cargo.lock */
+export function isCargoFile(filePath: string): boolean {
+  return /Cargo\.(toml|lock)$/i.test(filePath);
+}
+
+/** Vérifie si le fichier est un .env, .env.*, ou *.env */
+export function isDotenvFile(filePath: string): boolean {
+  return /(?:^|[\\/])\.env(?:\.|$)|\.env$/i.test(filePath);
+}
+
+/** Vérifie si le fichier est un Dockerfile */
+export function isDockerfile(filePath: string): boolean {
+  return /(?:^|[\\/])Dockerfile(?:\.|$)|\.dockerfile$/i.test(filePath);
+}
+
 // ─── Format-aware resolution result ──────────────────────
 
 export interface FormatResolveResult {
@@ -101,7 +119,7 @@ export interface FormatResolveResult {
    */
   reason: string;
   /** Résolveur utilisé (pour la trace) */
-  resolverUsed: "json" | "markdown" | "yaml" | "imports" | "vue" | "css" | "lockfile-npm" | "lockfile-yarn" | "lockfile-pnpm" | "none";
+  resolverUsed: "json" | "markdown" | "yaml" | "imports" | "vue" | "css" | "lockfile-npm" | "lockfile-yarn" | "lockfile-pnpm" | "cargo" | "dotenv" | "dockerfile" | "none";
 }
 
 // ─── Main dispatcher ──────────────────────────────────────
@@ -120,6 +138,49 @@ export function tryFormatAwareResolve(
   hunk: ConflictHunk,
   filePath: string,
 ): FormatResolveResult {
+  // ── Cargo.toml / Cargo.lock (avant JSON) ──────────────────
+  if (isCargoFile(filePath)) {
+    const result = tryResolveCargoConflict(
+      filePath,
+      hunk.baseLines,
+      hunk.oursLines,
+      hunk.theirsLines,
+    );
+
+    if (result.lines !== null) {
+      return { lines: result.lines, reason: `[cargo] ${result.reason}`, resolverUsed: "cargo" };
+    }
+    return { lines: null, reason: `[cargo] ${result.reason}`, resolverUsed: "cargo" };
+  }
+
+  // ── .env / .env.* ─────────────────────────────────────────
+  if (isDotenvFile(filePath)) {
+    const result = tryResolveDotenvConflict(
+      hunk.baseLines,
+      hunk.oursLines,
+      hunk.theirsLines,
+    );
+
+    if (result.lines !== null) {
+      return { lines: result.lines, reason: `[dotenv] ${result.reason}`, resolverUsed: "dotenv" };
+    }
+    return { lines: null, reason: `[dotenv] ${result.reason}`, resolverUsed: "dotenv" };
+  }
+
+  // ── Dockerfile ────────────────────────────────────────────
+  if (isDockerfile(filePath)) {
+    const result = tryResolveDockerfileConflict(
+      hunk.baseLines,
+      hunk.oursLines,
+      hunk.theirsLines,
+    );
+
+    if (result.lines !== null) {
+      return { lines: result.lines, reason: `[dockerfile] ${result.reason}`, resolverUsed: "dockerfile" };
+    }
+    return { lines: null, reason: `[dockerfile] ${result.reason}`, resolverUsed: "dockerfile" };
+  }
+
   // ── Lockfiles (avant JSON car package-lock.json est un .json) ──
   if (isNpmLockfile(filePath)) {
     const result = tryResolveLockfileNpmConflict(

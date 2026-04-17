@@ -425,9 +425,10 @@ const F15: CorpusFixture = {
 
 const F16: CorpusFixture = {
   id: "F16",
-  // diff2, ours ≠ theirs (contenu différent) → complex ; le résolveur Markdown
-  // détecte un conflit bilatéral sur la section [2.1.0] → ne peut pas résoudre
-  description: "format-aware Markdown — conflit bilatéral sur une section (diff2, non résolu)",
+  // v1.4 — Le résolveur Markdown merge maintenant les listes à puces en union.
+  // theirs a ajouté "- fix: memory leak in session handler" dans [2.1.0].
+  // Le merge bullet-list produit: ours items ∪ theirs items → résolu automatiquement.
+  description: "format-aware Markdown — bullet-list merge dans une section (diff2, résolu en v1.4)",
   filePath: "CHANGELOG.md",
   category: "format-aware",
   input: [
@@ -454,9 +455,9 @@ const F16: CorpusFixture = {
     `- Initial release`,
     `>>>>>>> theirs`,
   ].join("\n"),
-  expectedType: "complex",
-  expectedResolved: false,
-  expectedOutput: null,
+  expectedType: "complex",       // Le type textuel reste complex (pas de base diff3)
+  expectedResolved: true,        // v1.4 : bullet-list merge résout ce cas
+  expectedOutput: undefined,     // Contenu vérifié dans les tests Markdown dédiés
 };
 
 // ─── Complex — résolution manuelle requise ──────────────────
@@ -493,9 +494,12 @@ const F17: CorpusFixture = {
 
 const F18: CorpusFixture = {
   id: "F18",
-  description: "complex — logique métier conflictuelle dans un reducer (diff3)",
+  // v1.4 : les deux branches ont uniquement inséré des gardes différentes
+  // sans supprimer de lignes de la base → insertion_at_boundary résout par union.
+  // Résultat : [case block] + [cart-full guard] + [dedup guard] + [return] + [}]
+  description: "insertion_at_boundary — gardes additives dans un reducer (diff3)",
   filePath: "src/store/cart.ts",
-  category: "complex",
+  category: "structural",
   input: [
     `<<<<<<< ours`,
     `case "ADD_ITEM": {`,
@@ -514,9 +518,8 @@ const F18: CorpusFixture = {
     `}`,
     `>>>>>>> theirs`,
   ].join("\n"),
-  expectedType: "complex",
-  expectedResolved: false,
-  expectedOutput: null,
+  expectedType: "insertion_at_boundary",
+  expectedResolved: true,
 };
 
 // ─── Edge cases ────────────────────────────────────────────

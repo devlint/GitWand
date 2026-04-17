@@ -170,17 +170,152 @@ function linesEqual(a: string[], b: string[]): boolean {
 
 /**
  * Vérifie qu'un tableau de lignes de propriétés contient uniquement des
- * déclarations CSS valides (prop: value) ou des commentaires/blancs.
- * Si une ligne non-commentaire/non-blank ne contient pas `:`, le bloc
- * n'est pas du CSS valide → le résolveur doit rejeter.
+ * déclarations CSS valides (prop: value) ou des commentaires/blancs/règles imbriquées.
+ * Retourne false uniquement si une ligne n'est ni une déclaration, ni un commentaire,
+ * ni une règle imbriquée (un bloc SCSS `selector { ... }`).
  */
 function hasValidCssProperties(propLines: string[]): boolean {
+  let depth = 0;
   for (const line of propLines) {
     const t = line.trim();
     if (!t || RE_COMMENT_LINE.test(t) || RE_BLANK.test(t)) continue;
-    if (!t.includes(":")) return false; // Pas une déclaration CSS
+    if (t.endsWith("{")) { depth++; continue; }
+    if (t === "}") { depth--; continue; }
+    if (depth > 0) continue; // Inside a nested block — accepted
+    if (!t.includes(":")) return false;
   }
   return true;
+}
+
+// ─── SCSS one-level nesting (v1.4) ───────────────────────────
+
+interface NestedBlock {
+  selector: string;
+  innerLines: string[]; // lines between { and }
+  rawLines: string[];   // full raw representation
+  indent: string;
+}
+
+/**
+ * Vérifie si un bloc de propriétés contient des sélecteurs imbriqués (SCSS).
+ */
+function hasNestedSelectors(propLines: string[]): boolean {
+  return propLines.some((l) => {
+    const t = l.trim();
+    return t.endsWith("{") && !t.startsWith("@") && !t.includes(":");
+  });
+}
+
+/**
+ * Découpe les lignes de propriétés en déclarations plates et blocs imbriqués.
+ * Supporte un seul niveau de nesting.
+ */
+function splitProperties(propLines: string[]): {
+  flatDecls: string[];
+  nested: Map<string, NestedBlock>;
+} {
+  const flatDecls: string[] = [];
+  const nested = new Map<string, NestedBlock>();
+  let i = 0;
+
+  while (i < propLines.length) {
+    const line = propLines[i];
+    const t = line.trim();
+    const indent = line.match(/^(\s*)/)?.[1] ?? "";
+
+    // Nested selector block: `  .child {`
+    if (t.endsWith("{") && !t.startsWith("@") && !t.includes(":")) {
+      const selector = t.slice(0, -1).trim();
+      const rawLines: string[] = [line];
+      const innerLines: string[] = [];
+      i++;
+      let depth = 1;
+      while (i < propLines.length && depth > 0) {
+        const inner = propLines[i];
+        rawLines.push(inner);
+        const it = inner.trim();
+        if (it.endsWith("{")) depth++;
+        else if (it === "}") {
+          depth--;
+          if (depth === 0) { i++; break; }
+        }
+        if (depth > 0) innerLines.push(inner);
+        i++;
+      }
+      nested.set(selector, { selector, innerLines, rawLines, indent });
+      continue;
+    }
+
+    if (t) flatDecls.push(line);
+    i++;
+  }
+
+  return { flatDecls, nested };
+}
+
+/**
+ * Fusionne les propriétés CSS avec support pour les sélecteurs imbriqués SCSS (un niveau).
+ * Si aucun sélecteur imbriqué n'est détecté, délègue à `mergeCssProperties`.
+ */
+function mergeWithNestedSelectors(
+  base: string[],
+  ours: string[],
+  theirs: string[],
+): string[] | null {
+  if (!hasNestedSelectors(ours) && !hasNestedSelectors(theirs)) {
+    return mergeCssProperties(base, ours, theirs);
+  }
+
+  const { flatDecls: baseFlat, nested: baseNested } = splitProperties(base);
+  const { flatDecls: oursFlat, nested: oursNested }   = splitProperties(ours);
+  const { flatDecls: theirsFlat, nested: theirsNested } = splitProperties(theirs);
+
+  // Merge flat declarations
+  const mergedFlat = mergeCssProperties(baseFlat, oursFlat, theirsFlat);
+  if (mergedFlat === null) return null;
+
+  // Merge nested blocks by selector (union)
+  const mergedNested: string[] = [];
+  const seen = new Set<string>();
+
+  for (const [sel, oursBlock] of oursNested) {
+    seen.add(sel);
+    const theirsBlock = theirsNested.get(sel);
+    const baseBlock   = baseNested.get(sel);
+
+    if (!theirsBlock) {
+      mergedNested.push(...oursBlock.rawLines);
+      continue;
+    }
+
+    // Both sides have this nested selector
+    if (linesEqual(oursBlock.innerLines, theirsBlock.innerLines)) {
+      mergedNested.push(...oursBlock.rawLines);
+      continue;
+    }
+
+    // Try to merge the nested block's properties
+    const mergedInner = mergeCssProperties(
+      baseBlock?.innerLines ?? [],
+      oursBlock.innerLines,
+      theirsBlock.innerLines,
+    );
+    if (mergedInner === null) return null;
+
+    const ind = oursBlock.indent;
+    mergedNested.push(`${ind}${sel} {`);
+    mergedNested.push(...mergedInner);
+    mergedNested.push(`${ind}}`);
+  }
+
+  // Nested selectors only in theirs
+  for (const [sel, theirsBlock] of theirsNested) {
+    if (!seen.has(sel)) {
+      mergedNested.push(...theirsBlock.rawLines);
+    }
+  }
+
+  return [...mergedFlat, ...mergedNested];
 }
 
 /**
@@ -342,8 +477,8 @@ export function tryResolveCssConflict(
           resultLines.push(...ours.rawLines);
           resolvedRules++;
         } else if (ours.kind === "rule" && theirs.kind === "rule") {
-          // Tenter fusion des propriétés
-          const merged = mergeCssProperties([], ours.properties, theirs.properties);
+          // Tenter fusion des propriétés (avec support SCSS one-level nesting)
+          const merged = mergeWithNestedSelectors([], ours.properties, theirs.properties);
           if (merged !== null) {
             const indent = ours.rawLines[0].match(/^(\s*)/)?.[1] ?? "";
             resultLines.push(`${indent}${selector} {`);
@@ -419,8 +554,8 @@ export function tryResolveCssConflict(
       resultLines.push(...ours.rawLines);
       resolvedRules++;
     } else if (ours.kind === "rule" && theirs.kind === "rule") {
-      // Les deux ont modifié le même sélecteur → fusion des propriétés
-      const merged = mergeCssProperties(base.properties, ours.properties, theirs.properties);
+      // Les deux ont modifié le même sélecteur → fusion des propriétés (avec SCSS one-level nesting)
+      const merged = mergeWithNestedSelectors(base.properties, ours.properties, theirs.properties);
       if (merged !== null) {
         const indent = ours.rawLines[0].match(/^(\s*)/)?.[1] ?? "";
         resultLines.push(`${indent}${selector} {`);

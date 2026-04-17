@@ -19,14 +19,16 @@ export interface MergeInput {
 
 /** Classification du type de conflit */
 export type ConflictType =
-  | "one_side_change"       // Seul un côté a modifié par rapport à la base
-  | "same_change"           // Les deux côtés ont fait la même modification
-  | "non_overlapping"       // Ajouts à des endroits différents (ex: imports)
-  | "whitespace_only"       // Différences de whitespace uniquement
-  | "delete_no_change"      // Un côté supprime, l'autre n'a pas touché
-  | "generated_file"        // Fichier auto-généré (lock, manifest, min.js…)
-  | "value_only_change"     // Même structure, seule une valeur change (hash, version, timestamp…)
-  | "complex";              // Conflit réel nécessitant intervention humaine
+  | "one_side_change"           // Seul un côté a modifié par rapport à la base
+  | "same_change"               // Les deux côtés ont fait la même modification
+  | "non_overlapping"           // Ajouts à des endroits différents (ex: imports)
+  | "whitespace_only"           // Différences de whitespace uniquement
+  | "delete_no_change"          // Un côté supprime, l'autre n'a pas touché
+  | "generated_file"            // Fichier auto-généré (lock, manifest, min.js…)
+  | "value_only_change"         // Même structure, seule une valeur change (hash, version, timestamp…)
+  | "reorder_only"              // v1.4 — mêmes lignes, ordre différent (permutation pure)
+  | "insertion_at_boundary"     // v1.4 — insertions pures des deux côtés, base intacte
+  | "complex";                  // Conflit réel nécessitant intervention humaine
 
 /** Niveau de confiance discret (label seuil, utilisé dans les options) */
 export type Confidence = "certain" | "high" | "medium" | "low";
@@ -42,10 +44,17 @@ export type Confidence = "certain" | "high" | "medium" | "low";
  *
  * Dimensions du score :
  * - `typeClassification` : certitude du type détecté (0–100)
- * - `dataRisk` : risque de perte de données si résolution auto (0–100, 0 = sûr)
- * - `scopeImpact` : impact de la taille du changement (0–100, 0 = petit)
+ * - `dataRisk`           : risque de perte de données si résolution auto (0–100, 0 = sûr)
+ * - `scopeImpact`        : impact de la taille du changement (0–100, 0 = petit)
+ * - `fileFrequency`      : v1.4 — pénalité si le fichier a déjà des hunks complexes (0–100)
+ * - `baseAvailability`   : v1.4 — bonus si la base diff3/zdiff3 est disponible (0 ou 100)
  *
- * Formule : `score = typeClassification − dataRisk×0.4 − scopeImpact×0.15`
+ * Formule v1.4 :
+ *   `score = typeClassification
+ *           − dataRisk        × 0.40
+ *           − scopeImpact     × 0.15
+ *           − fileFrequency   × 0.10
+ *           + baseAvailability × 0.05`
  *
  * Label dérivé :
  * - score ≥ 92 → `"certain"`
@@ -66,6 +75,17 @@ export interface ConfidenceScore {
     dataRisk: number;
     /** Impact de la taille du changement (0–100, 0 = petit) */
     scopeImpact: number;
+    /**
+     * v1.4 — Pénalité "zone chaude" : nombre de hunks complexes déjà vus dans le même fichier.
+     * Réduit la confiance pour éviter la sur-résolution dans les fichiers très conflictuels.
+     * `fileFrequency = min(100, priorComplexHunksInFile × 20)`
+     */
+    fileFrequency: number;
+    /**
+     * v1.4 — Bonus de disponibilité de la base diff3/zdiff3.
+     * 100 si la base est disponible (diff3 ou zdiff3), 0 sinon (diff2).
+     */
+    baseAvailability: number;
   };
   /** Facteurs ayant augmenté le score (justifications de haute confiance) */
   boosters: string[];
@@ -108,6 +128,50 @@ export interface DecisionTrace {
   hasBase: boolean;
 }
 
+// ─── Phase v1.4 — Pattern Registry ──────────────────────────
+
+/**
+ * Input canonique pour la classification d'un hunk.
+ * Identique à RawConflict (défini dans parser.ts comme alias de ce type).
+ */
+export interface ClassifyInput {
+  oursLines: string[];
+  baseLines: string[];
+  theirsLines: string[];
+  startLine: number;
+  endLine: number;
+}
+
+/** Résultat complet de la classification d'un hunk */
+export interface ClassifyResult {
+  type: ConflictType;
+  confidence: ConfidenceScore;
+  explanation: string;
+  trace: DecisionTrace;
+}
+
+/**
+ * Interface implémentée par chaque pattern du registre.
+ *
+ * - `priority` : ordre d'évaluation (plus petit = testé en premier)
+ * - `requires` : diff3 (base disponible), diff2 (pas de base), both (toujours évalué)
+ * - `detect`   : vrai si le pattern s'applique à ce hunk
+ * - `confidence` : score composite quand le pattern a matché
+ * - `explanation` : texte lisible pour l'UI (mode explain)
+ * - `passReason` : raison dans la DecisionTrace quand passed=true
+ * - `failReason` : raison dans la DecisionTrace quand passed=false
+ */
+export interface PatternPlugin {
+  type: ConflictType;
+  priority: number;
+  requires: "diff3" | "diff2" | "both";
+  detect(h: ClassifyInput): boolean;
+  confidence(h: ClassifyInput): ConfidenceScore;
+  explanation(h: ClassifyInput): string;
+  passReason(h: ClassifyInput): string;
+  failReason(h: ClassifyInput): string;
+}
+
 /** Un bloc (hunk) de différence identifié */
 export interface ConflictHunk {
   /** Lignes dans la version base */
@@ -126,6 +190,12 @@ export interface ConflictHunk {
   explanation: string;
   /** Trace de la décision de classification (Phase 7.1) */
   trace: DecisionTrace;
+  /**
+   * v1.4 — Le conflit a-t-il été détecté en format zdiff3 ?
+   * zdiff3 (Git 2.35+) produit une section base tronquée aux seules lignes divergentes.
+   * Quand true, `baseAvailability` est fixé à 100 (même traitement que diff3).
+   */
+  zdiff3?: boolean;
 }
 
 /** Résultat de la résolution d'un seul hunk */

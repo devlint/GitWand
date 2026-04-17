@@ -319,6 +319,49 @@ interface SectionResolution {
   lines: string[];
 }
 
+// ─── Bullet list merge (v1.4) ─────────────────────────────
+
+const RE_BULLET = /^(\s*)[*-]\s/;
+
+/**
+ * Vérifie si un ensemble de lignes est une liste à puces cohérente.
+ * Toutes les lignes non-vides doivent commencer par `- ` ou `* ` à l'indentation de base.
+ */
+function isBulletList(lines: string[]): boolean {
+  const contentLines = lines.filter((l) => l.trim() !== "");
+  if (contentLines.length === 0) return false;
+  return contentLines.every((l) => RE_BULLET.test(l));
+}
+
+/**
+ * Fusionne deux listes à puces Markdown en union d'items (ours order preserved,
+ * items de theirs absents de ours ajoutés à la fin).
+ * Retourne null si les items sont en conflit irréductible (même item différent).
+ */
+function mergeBulletLists(
+  baseLines: string[],
+  oursLines: string[],
+  theirsLines: string[],
+): string[] | null {
+  // Normaliser : retirer trailing whitespace des items
+  const normalize = (l: string) => l.trimEnd();
+  const oursNorm   = oursLines.map(normalize);
+  const theirsNorm = theirsLines.map(normalize);
+
+  if (oursNorm.join("\n") === theirsNorm.join("\n")) return oursNorm;
+
+  const baseNorm = baseLines.map(normalize);
+  if (oursNorm.join("\n") === baseNorm.join("\n")) return theirsNorm;
+  if (theirsNorm.join("\n") === baseNorm.join("\n")) return oursNorm;
+
+  // Union par valeur d'item (text after bullet marker)
+  const stripBullet = (l: string) => l.replace(/^\s*[*-]\s+/, "").trimEnd();
+  const oursSet = new Set(oursNorm.map(stripBullet));
+  const extra   = theirsNorm.filter((l) => !oursSet.has(stripBullet(l)));
+
+  return [...oursNorm, ...extra];
+}
+
 /**
  * Résout un conflit pour une section donnée.
  */
@@ -381,6 +424,18 @@ function resolveSectionConflict(
     return { resolved: true, lines: toLines(t) };
   }
 
-  // Les deux ont changé différemment → conflit
+  // Les deux ont changé différemment
+  // v1.4 — Tenter un merge bullet-list si les deux sections sont des listes à puces
+  if (isBulletList(o.lines) && isBulletList(t.lines)) {
+    const merged = mergeBulletLists(b.lines, o.lines, t.lines);
+    if (merged !== null) {
+      const resultLines: string[] = [];
+      if (o.heading) resultLines.push(o.heading);
+      resultLines.push(...merged);
+      return { resolved: true, lines: resultLines };
+    }
+  }
+
+  // Conflit non résolvable
   return { resolved: false, lines: [] };
 }
