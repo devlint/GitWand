@@ -14,6 +14,32 @@ Download the latest release for your platform:
 
 Open the app, select a Git repository, and you're ready to go.
 
+### macOS — first launch workaround
+
+GitWand is not yet Apple-notarized (on the v1.5 roadmap), so macOS Gatekeeper will refuse to open the app the first time with a message like *"GitWand can't be opened because Apple cannot check it for malicious software"*. Three ways to bypass it:
+
+**Option 1 — Right-click → Open** *(simplest)*
+
+1. Open Finder → **Applications**
+2. Right-click (or Ctrl-click) **GitWand.app** → choose **Open**
+3. In the dialog, click **Open** again
+
+macOS remembers the choice; subsequent launches work normally.
+
+**Option 2 — System Settings** *(if option 1 is blocked)*
+
+1. Try to open **GitWand.app** once — macOS will refuse and log the block
+2. Open **System Settings → Privacy & Security**
+3. Scroll to the message *"GitWand was blocked to protect your Mac"* → click **Open Anyway**
+
+**Option 3 — Terminal** *(removes the quarantine flag)*
+
+```bash
+xattr -dr com.apple.quarantine /Applications/GitWand.app
+```
+
+After this, the app opens normally like any signed app. Only run this on the GitWand build you downloaded from the official [GitHub Releases](https://github.com/devlint/GitWand/releases) page.
+
 ## CLI
 
 Install globally via npm:

@@ -86,7 +86,28 @@ Browse, create, checkout and merge GitHub PRs without leaving the app. The PR li
 
 Language (FR/EN, OS auto-detected), theme (dark/light/system), commit signature, diff mode, AI provider (Claude / OpenAI-compatible / Ollama), external editor, Git binary path, switch behavior (stash/ask/refuse). All persisted in localStorage.
 
-### Running the app
+### Installing
+
+Download the latest build for your platform from [GitHub Releases](https://github.com/devlint/GitWand/releases):
+
+- **macOS** — `.dmg` (Universal: Apple Silicon + Intel)
+- **Linux** — `.AppImage` or `.deb`
+- **Windows** — `.msi` or `.exe`
+
+#### macOS — first launch workaround
+
+GitWand is not yet Apple-notarized (on the v1.5 roadmap), so Gatekeeper will refuse the first launch with *"GitWand can't be opened because Apple cannot check it for malicious software"*. Pick one of:
+
+1. **Right-click → Open** — in Finder, right-click (or Ctrl-click) `GitWand.app` → **Open** → **Open** again in the dialog. macOS remembers the choice.
+2. **System Settings** — try to open the app once, then go to **System Settings → Privacy & Security** → click **Open Anyway** next to the blocked-app message.
+3. **Terminal** — remove the quarantine flag:
+   ```bash
+   xattr -dr com.apple.quarantine /Applications/GitWand.app
+   ```
+
+Only apply this to builds you downloaded from the official [GitHub Releases](https://github.com/devlint/GitWand/releases) page.
+
+### Running from source
 
 ```bash
 git clone https://github.com/devlint/GitWand.git
