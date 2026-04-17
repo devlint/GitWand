@@ -33,7 +33,7 @@ import { gitStash, gitStashPop, openInEditor, setGitConfig, gitDiscard, gitAddTo
 
 const { t } = useI18n();
 const { settings, refreshSettings } = useSettings();
-import { isTauri, registerBrowserFolderPicker, pickFolder } from "./utils/backend";
+import { isTauri, registerBrowserFolderPicker, pickFolder, checkForUpdates } from "./utils/backend";
 
 const { theme, toggle: toggleTheme } = useTheme();
 
@@ -699,6 +699,9 @@ onMounted(() => {
   window.addEventListener("keydown", onKeyDown);
   applyGitConfig();
   setupGlobalShortcutListener();
+  // Check for updates after a short delay so the app renders first.
+  // The updater plugin shows a native OS dialog if a newer version is available.
+  setTimeout(() => checkForUpdates(), 5_000);
 });
 onUnmounted(() => {
   window.removeEventListener("keydown", onKeyDown);

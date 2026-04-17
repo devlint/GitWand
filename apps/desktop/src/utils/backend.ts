@@ -1955,3 +1955,25 @@ export async function previewMerge(
   return [];
 }
 
+// ─── Updater ────────────────────────────────────────────
+
+/**
+ * Check for app updates via the Tauri updater plugin.
+ *
+ * With `"dialog": true` in tauri.conf.json, Tauri handles the entire flow:
+ * - Fetches the update endpoint
+ * - If a newer version exists, shows a native OS dialog
+ * - User accepts → download + install + restart
+ *
+ * This is a no-op in browser (dev) mode.
+ */
+export async function checkForUpdates(): Promise<void> {
+  if (!isTauri()) return;
+  try {
+    await tauriInvoke("plugin:updater|check");
+  } catch {
+    // Silently ignore — updater errors shouldn't affect the app UX.
+    // Common non-error cases: no internet, endpoint returns 204 (no update).
+  }
+}
+

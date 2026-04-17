@@ -16,6 +16,9 @@ const recentFolders = computed(() => history.value.slice(0, 5));
 
 const isMac = navigator.platform.toUpperCase().includes("MAC");
 
+/** Version injected at build time by vite.config.ts */
+const appVersion = __APP_VERSION__;
+
 // ─── Rotating tips (Phase 1.3.5) ──────────────────────
 const TIP_ROTATION_MS = 30_000;
 
@@ -132,6 +135,9 @@ onUnmounted(() => {
     <div class="empty-hint muted">
       <kbd>{{ isMac ? '⌘' : 'Ctrl' }}</kbd> + <kbd>K</kbd> {{ t('empty.shortcut') }}
     </div>
+
+    <!-- App version — subtle, bottom-right corner -->
+    <span class="app-version subtle" aria-label="Version de l'application">v{{ appVersion }}</span>
   </div>
 </template>
 
@@ -158,6 +164,7 @@ onUnmounted(() => {
 }
 
 .empty-state {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -331,5 +338,16 @@ onUnmounted(() => {
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
+}
+
+/* ─── Version badge ──────────────────────────────────── */
+.app-version {
+  position: absolute;
+  bottom: var(--space-5);
+  right: var(--space-6);
+  font-size: var(--font-size-xs);
+  font-family: var(--font-mono);
+  user-select: none;
+  pointer-events: none;
 }
 </style>
