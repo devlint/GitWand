@@ -9,7 +9,7 @@ function toggleFaq(i: number) {
 
 const i18n = {
   fr: {
-    badge: 'v1.2.0 · Open Source · MIT',
+    badge: 'v1.4.0 · Open Source · MIT',
     heroH1a: 'Git, sans',
     heroH1b: 'maux de tête.',
     heroSub: 'GitWand est un client Git natif avec résolution intelligente des conflits de fusion. Desktop, CLI, et extension VS Code — un seul outil, partout.',
@@ -24,15 +24,21 @@ const i18n = {
     featPerf: 'Performances natives',
     featPerfDesc: 'Construit avec Tauri 2 et Vue 3. Démarrage en moins d\'une seconde. Aucun overhead Electron.',
     featResolve: 'Résolution intelligente',
-    featResolveDesc: '8 patterns de résolution avec scoring de confiance. 95%+ des conflits triviaux résolus sans intervention.',
+    featResolveDesc: '10 patterns de résolution avec pattern registry (v1.4) et scoring de confiance. 95%+ des conflits triviaux résolus sans intervention.',
     featDiff: 'Diff visuel',
     featDiffDesc: 'Viewer de diff unifié avec coloration syntaxique, staging au niveau du hunk, et preview de merge.',
     featHistory: 'Historique & Graph',
-    featHistoryDesc: 'Historique complet, graphe DAG interactif, blame de fichier, et recherche dans les commits.',
+    featHistoryDesc: 'Historique complet, graphe DAG interactif, blame de fichier, et recherche en langage naturel dans les commits.',
     featPR: 'Pull Requests intégrées',
     featPRDesc: 'Revue de PR GitHub directement dans l\'app. Commentaires, reviews, statuts CI et aperçu des conflits.',
     featUI: '3 interfaces',
     featUIDesc: 'App desktop (macOS/Linux/Windows), outil CLI gitwand resolve pour CI/CD, et extension VS Code.',
+    featAIPR: 'AI code review & PR',
+    featAIPRDesc: 'Titre et description de PR auto-générés, critique IA par hunk dans le panneau Review, suggestion de nom de branche depuis le diff.',
+    featAIMerge: 'AI merge insight',
+    featAIMergeDesc: 'Explication de conflit en langage naturel, résumé IA du risque avant rebase/merge, squash sémantique en rebase interactif.',
+    featAIFlow: 'AI commit & history',
+    featAIFlowDesc: 'Messages de commit et de stash générés, Absorb classé sémantiquement, blame contextuel et release notes depuis git log.',
     conflictTitle: 'Les conflits de merge, résolus automatiquement',
     conflictSub: 'GitWand analyse la sémantique du code, pas seulement les lignes. Il choisit la bonne résolution à votre place.',
     conflictBefore: 'Avant — conflit brut',
@@ -65,7 +71,7 @@ const i18n = {
     faqTitle: 'Questions fréquentes',
     faqItems: [
       { q: 'GitWand est-il vraiment gratuit ?', a: 'Oui, GitWand est entièrement open source sous licence MIT. Vous pouvez l\'utiliser, le modifier et le redistribuer librement.' },
-      { q: 'Comment fonctionne la résolution intelligente des conflits ?', a: 'GitWand analyse la sémantique du code avec 8 patterns de résolution (whitespace_only, same_change, one_side_change…) et un scoring de confiance par hunk. Les conflits triviaux sont résolus automatiquement ; les cas complexes sont remontés avec une trace d\'explication complète.' },
+      { q: 'Comment fonctionne la résolution intelligente des conflits ?', a: 'GitWand analyse la sémantique du code avec 10 patterns de résolution (whitespace_only, same_change, one_side_change, reorder_only, insertion_at_boundary…) orchestrés par un pattern registry (v1.4) et un scoring de confiance par hunk. Les conflits triviaux sont résolus automatiquement ; les cas complexes sont remontés avec une trace d\'explication complète.' },
       { q: 'Qu\'est-ce que le serveur MCP et pourquoi l\'utiliser ?', a: 'Le serveur MCP expose le moteur de GitWand aux agents IA — Claude Code, Cursor, Windsurf, et d\'autres. Il tourne en local via stdio, sans clé API ni accès réseau. GitWand gère 95%+ des conflits triviaux, l\'agent IA s\'occupe des cas ambigus avec tout le contexte nécessaire.' },
       { q: 'GitWand fonctionne-t-il avec n\'importe quel dépôt Git ?', a: 'Oui. GitWand fonctionne avec tous les dépôts Git locaux, quel que soit l\'hébergement (GitHub, GitLab, Bitbucket, Gitea…). La vue Pull Requests est pour l\'instant limitée à GitHub.' },
       { q: 'Quelle est la différence avec les autres clients Git ?', a: 'GitWand se distingue par son moteur de résolution intégré, son architecture native Tauri (pas d\'Electron), ses 3 interfaces cohérentes (desktop, CLI, VS Code), et son serveur MCP pour l\'intégration avec les agents IA.' },
@@ -73,7 +79,7 @@ const i18n = {
     ],
   },
   en: {
-    badge: 'v1.2.0 · Open Source · MIT',
+    badge: 'v1.4.0 · Open Source · MIT',
     heroH1a: 'Git, without',
     heroH1b: 'the headaches.',
     heroSub: 'GitWand is a native Git client with smart merge conflict resolution. Desktop, CLI, and VS Code extension — one tool, everywhere.',
@@ -88,15 +94,21 @@ const i18n = {
     featPerf: 'Native performance',
     featPerfDesc: 'Built with Tauri 2 and Vue 3. Sub-second startup. Zero Electron overhead.',
     featResolve: 'Smart resolution',
-    featResolveDesc: '8 resolution patterns with confidence scoring. 95%+ of trivial conflicts resolved without intervention.',
+    featResolveDesc: '10 resolution patterns with pattern registry (v1.4) and confidence scoring. 95%+ of trivial conflicts resolved without intervention.',
     featDiff: 'Visual diff',
     featDiffDesc: 'Unified diff viewer with syntax highlighting, hunk-level staging, and merge preview.',
     featHistory: 'History & Graph',
-    featHistoryDesc: 'Full history, interactive DAG graph, file blame, and commit search.',
+    featHistoryDesc: 'Full history, interactive DAG graph, file blame, and natural-language commit search.',
     featPR: 'Integrated Pull Requests',
     featPRDesc: 'Review GitHub PRs directly in the app. Comments, reviews, CI status, and conflict preview.',
     featUI: '3 interfaces',
     featUIDesc: 'Desktop app (macOS/Linux/Windows), gitwand resolve CLI for CI/CD, and VS Code extension.',
+    featAIPR: 'AI code review & PR',
+    featAIPRDesc: 'Auto-generated PR title and description, per-hunk AI critique in the Review panel, branch-name suggestions from the diff.',
+    featAIMerge: 'AI merge insight',
+    featAIMergeDesc: 'Plain-English conflict explanation, AI risk summary before rebase/merge, semantic squash in interactive rebase.',
+    featAIFlow: 'AI commit & history',
+    featAIFlowDesc: 'Generated commit and stash messages, semantically-ranked Absorb, blame context and release notes from git log.',
     conflictTitle: 'Merge conflicts, resolved automatically',
     conflictSub: 'GitWand analyzes code semantics, not just lines. It picks the right resolution for you.',
     conflictBefore: 'Before — raw conflict',
@@ -129,7 +141,7 @@ const i18n = {
     faqTitle: 'Frequently asked questions',
     faqItems: [
       { q: 'Is GitWand really free?', a: 'Yes, GitWand is fully open source under the MIT license. You can use, modify, and redistribute it freely.' },
-      { q: 'How does smart conflict resolution work?', a: 'GitWand analyzes code semantics using 8 resolution patterns (whitespace_only, same_change, one_side_change…) with per-hunk confidence scoring. Trivial conflicts are resolved automatically; complex cases are surfaced with a full explanation trace.' },
+      { q: 'How does smart conflict resolution work?', a: 'GitWand analyzes code semantics using 10 resolution patterns (whitespace_only, same_change, one_side_change, reorder_only, insertion_at_boundary…) orchestrated by a pattern registry (v1.4) with per-hunk confidence scoring. Trivial conflicts are resolved automatically; complex cases are surfaced with a full explanation trace.' },
       { q: 'What is the MCP server and why use it?', a: 'The MCP server exposes GitWand\'s engine to AI agents — Claude Code, Cursor, Windsurf, and others. It runs locally over stdio, with no API key or network access required. GitWand handles 95%+ of trivial conflicts; the AI agent tackles the ambiguous ones with full context.' },
       { q: 'Does GitWand work with any Git repository?', a: 'Yes. GitWand works with any local Git repository, regardless of hosting (GitHub, GitLab, Bitbucket, Gitea…). The Pull Request view is currently limited to GitHub.' },
       { q: 'What sets GitWand apart from other Git clients?', a: 'GitWand stands out with its built-in resolution engine, native Tauri architecture (no Electron), three consistent interfaces (desktop, CLI, VS Code), and an MCP server for AI agent integration.' },
@@ -193,7 +205,7 @@ function toggleLocale() {
     ══════════════════════════════════════ -->
     <section class="stats-bar">
       <div class="stat">
-        <span class="stat-n">8</span>
+        <span class="stat-n">10</span>
         <span class="stat-l">{{ t.statPatterns }}</span>
       </div>
       <div class="stat-sep"></div>
@@ -263,6 +275,30 @@ function toggleLocale() {
             </div>
             <h3>{{ t.featUI }}</h3>
             <p>{{ t.featUIDesc }}</p>
+          </div>
+
+          <div class="feat-card feat-card--ai">
+            <div class="feat-icon feat-icon--ai">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" stroke="#10B981" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="12" r="3" stroke="#10B981" stroke-width="1.8"/></svg>
+            </div>
+            <h3>{{ t.featAIPR }}</h3>
+            <p>{{ t.featAIPRDesc }}</p>
+          </div>
+
+          <div class="feat-card feat-card--ai">
+            <div class="feat-icon feat-icon--ai">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M6 3v12M6 21a3 3 0 100-6 3 3 0 000 6zM18 9a3 3 0 100-6 3 3 0 000 6zM18 9v4a2 2 0 01-2 2H8" stroke="#10B981" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <h3>{{ t.featAIMerge }}</h3>
+            <p>{{ t.featAIMergeDesc }}</p>
+          </div>
+
+          <div class="feat-card feat-card--ai">
+            <div class="feat-icon feat-icon--ai">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="#10B981" stroke-width="1.8"/><path d="M12 7v5l3 2" stroke="#10B981" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <h3>{{ t.featAIFlow }}</h3>
+            <p>{{ t.featAIFlowDesc }}</p>
           </div>
 
         </div>
@@ -980,6 +1016,15 @@ function toggleLocale() {
   align-items: center;
   justify-content: center;
   margin-bottom: 16px;
+}
+.feat-icon--ai {
+  background: linear-gradient(135deg, rgba(124,58,237,0.12), rgba(16,185,129,0.14));
+}
+.feat-card--ai {
+  border-color: rgba(16,185,129,0.28);
+}
+.feat-card--ai:hover {
+  border-color: var(--gw-green);
 }
 .feat-card h3 {
   font-size: 16px;

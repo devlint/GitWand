@@ -1,6 +1,6 @@
 # Conflict Resolution Engine
 
-GitWand's core engine classifies merge conflicts into 8 patterns, scores each with a composite confidence metric, and auto-resolves the ones it's confident about — leaving the complex ones for human judgment.
+GitWand's core engine classifies merge conflicts into 10 patterns, scores each with a composite confidence metric, and auto-resolves the ones it's confident about — leaving the complex ones for human judgment.
 
 ## Pipeline
 
@@ -9,12 +9,31 @@ Conflicted text → parseConflictMarkers → classifyConflict → resolveHunk �
 ```
 
 1. **Parse** — Extract conflict markers from the file, producing `ConflictHunk` objects with `base`, `ours`, and `theirs` lines
-2. **Classify** — Determine the conflict type by evaluating each pattern in order
+2. **Classify** — Evaluate patterns in the **pattern registry** (v1.4) in priority order; each pattern declares whether it requires `diff3` (base available), `diff2`, or works on `both`
 3. **Score** — Compute a composite confidence score for the classification
 4. **Resolve** — Apply the appropriate resolution strategy (or mark as manual)
 5. **Validate** — Check the merged output for residual markers and syntax errors
 
-## The 8 Conflict Types
+## Pattern Registry (v1.4)
+
+In v1.4, the classifier was rewritten around a prioritised pattern registry. Each pattern implements a common interface:
+
+```typescript
+interface ConflictPattern {
+  type: ConflictType
+  priority: number                          // smaller = evaluated first
+  requires: 'diff3' | 'diff2' | 'both'      // base availability required
+  detect(h: ClassifyInput): boolean
+  confidence(h: ClassifyInput): ConfidenceScore
+  explanation(h: ClassifyInput): string
+  passReason(h: ClassifyInput): string
+  failReason(h: ClassifyInput): string
+}
+```
+
+Patterns are evaluated in priority order until one matches. The full evaluation trace (passed/failed + reason for each step) lives in the `DecisionTrace` and is available via the `--verbose` CLI flag or the `gitwand_explain_hunk` MCP tool.
+
+## The 10 Conflict Types
 
 ### `same_change`
 
@@ -35,6 +54,14 @@ Both sides made changes, but at different locations within the block. Resolution
 ### `whitespace_only`
 
 The only differences are whitespace (indentation, trailing spaces, line endings). Resolution: prefer ours (preserve local formatting).
+
+### `reorder_only` *(v1.4)*
+
+Both sides contain the same lines as the base, but in a different order — a pure permutation with no content changes. Common with import sorters, alphabetised keys, or table-of-contents updates. Resolution: take either side (content is identical).
+
+### `insertion_at_boundary` *(v1.4)*
+
+Both sides only insert new lines around an intact base — no modifications to existing content. Resolution: concatenate both insertions, preserving the original base lines between them.
 
 ### `value_only_change`
 
@@ -109,6 +136,8 @@ The default resolution strategy can be overridden per-project with a [`.gitwandr
 | `delete_no_change` | Accept deletion | Intentional removal |
 | `non_overlapping` | LCS merge | Both changes coexist |
 | `whitespace_only` | Ours | Preserve local formatting |
+| `reorder_only` | Either side | Same content, different order |
+| `insertion_at_boundary` | Merge both | Independent additions around intact base |
 | `value_only_change` | Theirs | Incoming values are newer |
 | `generated_file` | Theirs | Will be regenerated |
 | `complex` | No auto-resolution | Too risky |

@@ -105,7 +105,7 @@ Ouverture de GitWand aux agents IA via MCP et enrichissement de la sortie CLI.
 - Nouveau logo 3D hexagonal cube (remplace l'ancien magic wand)
 - Icônes app Tauri regénérées (ico, icns, png multi-tailles)
 
-### v1.2.0 — Interactive Rebase, Absorb, AI commits & Undo (current)
+### v1.2.0 — Interactive Rebase, Absorb, AI commits & Undo
 
 Productivité du workflow quotidien : opérations Git avancées accessibles, IA dans la zone de commit, filet de sécurité universel.
 
@@ -135,69 +135,74 @@ Productivité du workflow quotidien : opérations Git avancées accessibles, IA 
 - Endpoint dev-server `gh-merge-pr` + wrapper TypeScript
 - Website : section LLM/MCP et FAQ sur la homepage
 
+### v1.3.0 — AI Everywhere
+
+L'IA s'infuse dans chaque étape du workflow Git (réutilise `useAIProvider.rawPrompt()` et `@gitwand/mcp`). Chaque suggestion reste optionnelle, explicite, et traçable (prompt + provider visibles).
+
+**1.3.1 — AI code review & PR**
+- Description de PR auto-générée (`PrCreateView` → titre + body structurés à partir de `currentBranch..base`)
+- Critique IA par hunk dans le panneau Review (feedback, risques, régressions, suggestions)
+- Suggestion de nom de branche depuis description ou diff staged
+
+**1.3.2 — AI conflict & merge insight**
+- Explication de conflit en langage naturel dans le merge editor (traduction du `DecisionTrace`)
+- Résumé IA du risque avant rebase/merge (complète la simulation `merge-tree`)
+- Exposition desktop de `gitwand_explain_hunk` (MCP)
+
+**1.3.3 — AI commit workflow**
+- Message de stash auto depuis le diff unstaged (y compris flow switch-branch)
+- Squash sémantique en rebase interactif (groupement par intention + message combiné)
+- Classement IA pour Absorb (ranking sémantique quand les lignes couvrent plusieurs commits)
+
+**1.3.4 — AI history & search**
+- Recherche de commits en langage naturel dans le `CommitLog`
+- Blame contextuel — "pourquoi cette ligne a changé ?" par bloc de blame
+- Générateur de release notes / changelog depuis `git log <tag>..<tag>`
+
+**1.3.5 — Tips tournants**
+- Encart tip tournant sur la page d'accueil avant sélection de repo (~20 tips FR/EN, rotation 30 s)
+
+### v1.4.0 — Pattern registry & auto-update
+
+Refonte du moteur de classification et outillage desktop de distribution. Livré en même temps que la phase v1.3 dans la release `1.4.0`.
+
+**Core — Pattern registry**
+- Pipeline de classification réécrit autour d'un registre priorisé (`priority`, `requires: diff3 | diff2 | both`, `detect`, `confidence`, `explanation`)
+- Nouveau résolveur **`reorder_only`** — permutations pures (mêmes lignes, ordre différent), auto-résolu
+- Nouveau résolveur **`insertion_at_boundary`** — insertions pures des deux côtés, base intacte, auto-résolu
+- Scoring de confiance affiné (boosters, pénalités, garde-fous renforcés sur `complex`)
+
+**Desktop — Distribution**
+- Vérification d'auto-update au lancement (GitHub Releases) avec toast + lien changelog
+- Affichage de la version courante (footer / About)
+
+**Branding**
+- Favicon hex-cube partagé entre l'app desktop et le website
+
 ---
 
-## Now — v1.3.0 — AI Everywhere
+## Next — v1.5.0 — Visual diff & distribution
 
-L'IA n'est plus cantonnée au merge editor et au commit message : elle s'infuse dans chaque étape du workflow Git. On réutilise la plomberie existante (`useAIProvider.rawPrompt()`, `@gitwand/mcp`) pour ajouter de l'intelligence là où elle apporte un gain mesurable.
-
-**Principe** : chaque suggestion IA reste optionnelle, explicite (bouton ou raccourci), et traçable (l'utilisateur voit le prompt et le provider utilisé).
-
-### 1.3.1 — AI code review & PR
-
-- **Description de PR auto-générée** : bouton dans `PrCreateView` → analyse des commits du diff (`currentBranch..base`) → titre + body structurés (summary, test plan, breaking changes)
-- **Critique IA par hunk dans le panneau Review** : le `PrIntelligencePanel` passe de "analyse statique" à "feedback IA par hunk" (risques, régressions potentielles, suggestions concrètes)
-- **Suggestion de nom de branche** : depuis une description ou le diff staged → `feat/user-auth-oauth2` plutôt que saisie manuelle
-
-### 1.3.2 — AI conflict & merge insight
-
-- **Explication de conflit en langage naturel** : le `DecisionTrace` existant est rendu lisible par un LLM ("ce hunk modifie la signature de `login()` des deux côtés — manuel obligatoire") et surfacé dans le merge editor desktop
-- **Prévention de conflit avant rebase/merge** : la simulation `merge-tree` + `git show` actuelle est complétée par un résumé IA du risque ("3 fichiers touchent l'auth, haute probabilité de régression si non testés")
-- Exposition desktop du tool MCP `gitwand_explain_hunk` déjà présent côté core
-
-### 1.3.3 — AI commit workflow
-
-- **Message de stash auto** : avant `git stash`, l'IA propose un message depuis le diff unstaged (`wip: refactor user service tests`)
-- **Squash sémantique en rebase interactif** : l'IA regroupe les commits candidats au squash par intention ("ces 4 commits touchent le même test") et propose le message combiné
-- **Classement IA pour Absorb** : plutôt que prendre le premier commit via `git blame`, ranking sémantique des commits candidats (message + diff) pour suggérer la meilleure cible
-
-### 1.3.4 — AI history & search
-
-- **Recherche de commits en langage naturel** dans le `CommitLog` : "quand a-t-on introduit la pagination du log ?" → requête sémantique sur l'historique
-- **Blame contextuel** : bouton dans le `FileHistoryViewer` / blame → "explique pourquoi cette ligne a changé" avec contexte des commits voisins
-- **Générateur de release notes / changelog** : depuis `git log <tag>..<tag>` → markdown structuré (Added / Changed / Fixed), pré-rempli dans les release notes GitHub
-
-### 1.3.5 — Tips tournants sur la page d'accueil
-
-- Avant sélection d'un repo, afficher un encart "tip" qui présente une fonctionnalité de GitWand
-- Pool de ~15-20 tips (résolution auto, merge editor, MCP, rebase interactif, Absorb, Undo, commit IA…)
-- Pick initial aléatoire à l'ouverture de l'app, rotation toutes les 30 s tant que l'utilisateur reste sur le dashboard
-- Contenu localisé FR/EN
-
----
-
-## Next — v1.4.0 — Visual diff & distribution
-
-### 1.4.1 — Folder diff
+### 1.5.1 — Folder diff
 
 - Comparer deux dossiers, branches ou commits — arbre récursif avec indicateurs ajouté/supprimé/modifié
 - Filtrage par type de fichier, pattern glob, type de changement
-- Résumé IA des changements de dossier (bonus : réutilise la plomberie v1.3)
+- Résumé IA des changements de dossier (réutilise la plomberie v1.3)
 
-### 1.4.2 — Image diff (différenciateur fort)
+### 1.5.2 — Image diff (différenciateur fort)
 
 - Comparaison visuelle : side-by-side, overlay, blink, slider split
 - Formats : PNG, JPEG, SVG, WebP, GIF
 - Heatmap des zones modifiées, métadonnées (taille, dimensions, profil couleur)
 - Description IA des changements visuels (alt text, zones d'attention)
 
-### 1.4.3 — Submodules & Worktrees
+### 1.5.3 — Submodules & Worktrees
 
 - Initialiser, mettre à jour, naviguer dans les submodules depuis l'UI
 - Git worktrees : créer, lister, supprimer — chaque worktree dans un onglet
 - Checkout rapide via worktree sans switcher
 
-### 1.4.4 — MCP Registry & npm publish
+### 1.5.4 — MCP Registry & npm publish
 
 - Publier `@gitwand/mcp` sur npm
 - Soumettre au MCP Registry officiel

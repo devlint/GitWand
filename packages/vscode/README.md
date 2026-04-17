@@ -43,6 +43,8 @@ Open the Command Palette (`Cmd+Shift+P` / `Ctrl+Shift+P`) and type "GitWand":
 | **Delete + no change** | One branch deleted, the other didn't touch it | Certain |
 | **Whitespace only** | Same code, different formatting | High |
 | **Non-overlapping** | Additions at different locations (e.g. imports) | High |
+| **Reorder only** *(v1.4)* | Same lines, different order — pure permutation | High |
+| **Insertion at boundary** *(v1.4)* | Pure insertions on both sides, base intact | High |
 | **Generated file** | Lockfiles, build outputs, `.min.js`… | Medium |
 | **Value-only change** | Same structure, only hashes/versions differ | Medium |
 

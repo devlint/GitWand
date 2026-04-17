@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-04-17
+
+### Added
+
+#### AI Everywhere (Phase 1.3.x)
+
+- **AI branch-name suggestion** (1.3.1) — generate `feat/…` / `fix/…` branch names from a description or the staged diff.
+- **AI PR title & description** (1.3.1) — `PrCreateView` analyses the `currentBranch..base` diff and produces a structured title + body (summary, test plan, breaking changes).
+- **Hunk-level AI critique in PR Review** (1.3.1) — the Intelligence panel now surfaces per-hunk feedback (risks, regressions, concrete suggestions) instead of static heuristics.
+- **Natural-language conflict explanation** (1.3.2) — the DecisionTrace is translated into plain English inside the merge editor ("this hunk changes the `login()` signature on both sides — manual resolution required").
+- **Pre-merge AI risk summary** (1.3.2) — `MergePreview` complements the `merge-tree` simulation with an AI summary of risk ("3 files touch auth, high regression probability if untested").
+- **AI stash message** (1.3.3) — the stash flow (including the switch-branch modal) proposes a message from the unstaged diff.
+- **AI semantic squash grouping** (1.3.3) — interactive rebase groups candidate commits by intent and proposes a combined message.
+- **AI-ranked Absorb target** (1.3.3) — when lines span multiple commits, the best candidate is picked from a semantic ranking rather than the first `git blame` hit.
+- **Natural-language commit search** (1.3.4) — query the log with plain-English questions ("when did we introduce log pagination?").
+- **AI blame context** (1.3.4) — "why did this line change?" button on each blame block, with context from neighbouring commits.
+- **AI release notes generator** (1.3.4) — structured markdown (Added / Changed / Fixed) from `git log <tag>..<tag>`, ready to paste into a GitHub release.
+- **Rotating feature tips on the empty state** (1.3.5) — a pool of ~20 localised tips cycles every 30 s on the dashboard before repo selection.
+
+#### Conflict engine — v1.4
+
+- **Pattern registry** — classification pipeline rewritten around a prioritised pattern registry; each pattern declares its `priority`, `requires` (`diff3` / `diff2` / `both`), `detect`, `confidence`, and `explanation`.
+- **New resolver: `reorder_only`** — detects pure permutations (same lines on both sides, different order). Auto-resolved.
+- **New resolver: `insertion_at_boundary`** — detects pure insertions on both sides with an intact base. Auto-resolved.
+- **Refined confidence scoring** — boosters, penalties, and dimensions tuned for the two new patterns and for stricter guarding on `complex`.
+
+#### Desktop
+
+- **Auto-update check** — background check against the GitHub Releases feed on app launch, with a toast + changelog link when a new version is available.
+- **App version display** — current version now visible in the footer / About section.
+
+#### Branding
+
+- Shared hex-cube favicon across desktop app and website.
+
+### Changed
+
+- `@gitwand/core`, `@gitwand/cli`, `@gitwand/mcp`, `gitwand-vscode`, `gitwand-website`, `@gitwand/desktop` versions aligned to `1.4.0`.
+- `ConflictType` union extended with `reorder_only` and `insertion_at_boundary`.
+- Replaced hardcoded CSS values with design tokens across desktop views.
+
 ## [1.2.0] - 2026-04-16
 
 ### Added
@@ -73,7 +114,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI pipeline via GitHub Actions (Node 18, 20, 22)
 - 28 tests covering all patterns + real-world scenarios (package.json, Laravel routes, Vue SFC, CSS, .env files)
 
-[Unreleased]: https://github.com/devlint/GitWand/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/devlint/GitWand/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/devlint/GitWand/releases/tag/v1.4.0
 [1.2.0]: https://github.com/devlint/GitWand/releases/tag/v1.2.0
 [1.1.0]: https://github.com/devlint/GitWand/releases/tag/v1.1.0
 [1.0.0]: https://github.com/devlint/GitWand/releases/tag/v1.0.0

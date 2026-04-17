@@ -21,13 +21,13 @@
 <p align="center">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-8B5CF6">
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-100%25-3178C6">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-332%20passing-22c55e">
-  <img alt="Version" src="https://img.shields.io/badge/version-1.2.0-22c55e">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-322%20passing-22c55e">
+  <img alt="Version" src="https://img.shields.io/badge/version-1.4.0-22c55e">
 </p>
 
 ---
 
-GitWand is a lightweight, native Git client built with Tauri 2 and Vue 3. It covers the full daily workflow — changes, history, branches, push/pull — and goes further with **automatic resolution of trivial merge conflicts**, **integrated code review** with inline comments and intelligence analysis, and a typed resolution engine with composite confidence scoring.
+GitWand is a lightweight, native Git client built with Tauri 2 and Vue 3. It covers the full daily workflow — changes, history, branches, push/pull — and goes further with **automatic resolution of trivial merge conflicts**, **integrated code review** with inline comments and intelligence analysis, and a typed resolution engine with composite confidence scoring. Since v1.3, AI assists every step of the workflow — branch naming, PR writing, hunk-level review, semantic squash, natural-language commit search, and more.
 
 ## Desktop app
 
@@ -110,6 +110,8 @@ GitWand's core engine (`@gitwand/core`) automatically resolves trivial Git merge
 
 ### Resolution patterns
 
+GitWand v1.4 introduced a **pattern registry** — the classifier evaluates patterns in priority order, each declaring whether it requires diff3 (base available), diff2, or works on both.
+
 | Pattern | Description | Confidence |
 |---|---|---|
 | **same_change** | Both branches made the exact same edit | Certain |
@@ -117,6 +119,8 @@ GitWand's core engine (`@gitwand/core`) automatically resolves trivial Git merge
 | **delete_no_change** | One branch deleted, the other didn't touch it | Certain |
 | **non_overlapping** | Additions at different locations in the block | High |
 | **whitespace_only** | Same logic, different indentation/spacing | High |
+| **reorder_only** | Same lines, different order — pure permutation (v1.4) | High |
+| **insertion_at_boundary** | Pure insertions on both sides, base intact (v1.4) | High |
 | **value_only_change** | Scalar value update (version number, constant) | Medium |
 | **generated_file** | File matches a known generated-file path pattern | High |
 | **complex** | Overlapping edits — never auto-resolved | — |
@@ -344,7 +348,7 @@ gitwand/
 ├── packages/
 │   ├── core/       @gitwand/core — Resolution engine (TypeScript)
 │   │               parser, resolver, classifier, format resolvers,
-│   │               confidence scoring, corpus tests (332 tests)
+│   │               confidence scoring, corpus tests (322 tests)
 │   ├── cli/        @gitwand/cli — Command-line interface
 │   ├── mcp/        @gitwand/mcp — MCP server (stdio transport)
 │   │               tools (5), resources (3), Claude Code commands
@@ -382,7 +386,7 @@ git clone https://github.com/devlint/GitWand.git
 cd GitWand
 pnpm install
 pnpm build          # Build all packages
-pnpm test           # 332 tests across core
+pnpm test           # 322 tests across core
 ```
 
 ### Running benchmarks
@@ -448,29 +452,38 @@ GitWand uses a zero-dependency type-safe i18n system. `fr.ts` is the reference l
 - [x] `gh-merge-pr` dev-server endpoint + TypeScript wrapper
 - [x] Website — LLM/MCP section and FAQ on homepage
 
-### Next — v1.3.0 — AI Everywhere
+### v1.3.0 — AI Everywhere ✅
 
-- [ ] AI PR description from commit range
-- [ ] AI hunk-level review critique in the Intelligence panel
-- [ ] AI branch-name suggestion from diff or description
-- [ ] Natural-language conflict explanation in the merge editor
-- [ ] Pre-rebase / pre-merge AI risk summary
-- [ ] AI stash message from unstaged diff
-- [ ] Semantic squash grouping in interactive rebase
-- [ ] AI-ranked Absorb candidates
-- [ ] Natural-language commit log search
-- [ ] Blame context — "why did this line change?"
-- [ ] AI release notes / changelog generator
-- [ ] Home screen: rotating feature tips before repo selection
+- [x] AI branch-name suggestion from diff or description
+- [x] AI PR title & description from commit range
+- [x] Hunk-level AI critique in the Intelligence panel
+- [x] Natural-language conflict explanation in the merge editor
+- [x] Pre-merge AI risk summary in the merge preview
+- [x] AI stash message from unstaged diff (including switch-branch flow)
+- [x] Semantic squash grouping in interactive rebase
+- [x] AI-ranked Absorb target when lines span multiple commits
+- [x] Natural-language commit log search
+- [x] Blame context — "why did this line change?"
+- [x] AI release notes / changelog generator
+- [x] Dashboard: rotating feature tips before repo selection
 
-### Later — v1.4.0
+### v1.4.0 — Pattern Registry & Auto-Update ✅
 
-- [ ] MCP Registry submission (npm publish + official listing)
+- [x] Pattern registry — prioritised, `diff3` / `diff2` / `both` declarative patterns
+- [x] New resolver `reorder_only` — pure permutations auto-resolved
+- [x] New resolver `insertion_at_boundary` — pure insertions on both sides, base intact
+- [x] Refined composite confidence scoring (boosters/penalties tuned for v1.4 patterns)
+- [x] Desktop — auto-update check against GitHub Releases + app version display
+- [x] Shared hex-cube favicon across desktop app and website
+
+### Next — v1.5.0 — Visual diff & distribution
+
 - [ ] Folder diff — compare two folders, branches, or commits
-- [ ] Image diff — side-by-side, blink, slider (PNG, JPEG, SVG, WebP)
+- [ ] Image diff — side-by-side, blink, slider (PNG, JPEG, SVG, WebP, GIF)
 - [ ] Submodules & Git worktrees in the UI
+- [ ] MCP Registry submission (npm publish + official listing)
 - [ ] GitLab / Bitbucket integration
-- [ ] Build pipeline — macOS notarization, auto-update
+- [ ] macOS notarization + Windows code signing
 
 See [ROADMAP.md](./ROADMAP.md) for the full phased plan with competitive analysis.
 

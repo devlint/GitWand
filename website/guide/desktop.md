@@ -81,9 +81,45 @@ Browse, create, checkout, and merge GitHub PRs without leaving the app:
 - Inline comments anchored to diff lines with full threading
 - Code suggestions via ` ```suggestion ``` ` blocks, applicable in one click
 
+## AI Everywhere (v1.3)
+
+AI is woven into every step of the workflow. Each suggestion is opt-in (explicit button or shortcut) and traceable (the prompt and provider used are visible). Works with any configured AI provider — Claude Code CLI, Claude API, OpenAI-compatible, or Ollama.
+
+### PR & branch workflow
+
+- **AI branch name** — propose a `feat/…` / `fix/…` name from a description or the staged diff instead of typing one
+- **AI PR title & description** — `PrCreateView` analyses the commits in `currentBranch..base` and drafts a structured title + body (summary, test plan, breaking changes)
+- **Hunk-level critique in the PR Intelligence panel** — per-hunk feedback on risks, regressions, and concrete suggestions (replaces the static-heuristics panel)
+
+### Merge & rebase insight
+
+- **Natural-language conflict explanation** — in the merge editor, the `DecisionTrace` is rendered in plain English ("this hunk changes the `login()` signature on both sides — manual required")
+- **Pre-merge AI risk summary** — the merge preview complements the `merge-tree` simulation with an AI risk read ("3 files touch auth, high regression probability if untested")
+- **Semantic squash in interactive rebase** — AI groups candidate commits by intent and proposes a combined message
+
+### Commit & stash
+
+- **AI stash message** — before `git stash` (and in the switch-branch flow), AI proposes a message from the unstaged diff
+- **AI-ranked Absorb target** — when the selected lines span multiple commits, AI ranks candidates semantically instead of taking the first `git blame` hit
+
+### History & search
+
+- **Natural-language commit search** — query the log with plain-English questions ("when did we introduce log pagination?")
+- **Blame context** — "why did this line change?" button on each blame block, answered with context from neighbouring commits
+- **AI release notes generator** — produce structured markdown (Added / Changed / Fixed) from `git log <tag>..<tag>`, ready to paste into a GitHub release
+
+### Dashboard
+
+- **Rotating feature tips** — the empty state before repo selection cycles through ~20 localised tips every 30 s to surface features you might not have discovered
+
+## Auto-update & version (v1.4)
+
+On launch, GitWand checks the GitHub Releases feed for a newer version and shows a toast with a changelog link when one is available. The current version is displayed in the footer / About view.
+
 ## Settings
 
 - **Language**: French / English
 - **Theme**: Light / Dark
 - **Commit signature**: Optional GPG signing
 - **Diff mode**: Side-by-side or inline (default)
+- **AI provider**: Claude Code CLI / Claude API / OpenAI-compatible / Ollama (used for every AI feature above)
