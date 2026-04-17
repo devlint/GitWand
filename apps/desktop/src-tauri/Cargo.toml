@@ -1,6 +1,6 @@
 [package]
 name = "gitwand-desktop"
-version = "0.0.1"
+version = "1.4.0"
 description = "GitWand Desktop — standalone merge conflict resolution"
 authors = ["Laurent Guitton <lb.guitton@gmail.com>"]
 license = "MIT"
