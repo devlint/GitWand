@@ -58,29 +58,30 @@ onUnmounted(() => {
   <div class="empty-state" role="status">
     <div class="empty-visual" aria-hidden="true">
       <!-- Full GitWand logo: cube + code icon left + git graph right -->
-      <svg width="210" height="84" viewBox="0 0 300 120" fill="none">
+      <!-- Colors driven by CSS custom properties so they adapt to theming -->
+      <svg class="logo-svg" width="210" height="84" viewBox="0 0 300 120" fill="none">
         <!-- signal wave -->
         <path d="M 10,58 L 22,58 L 26,42 L 30,74 L 34,52 L 38,58 L 52,58"
-              stroke="#7C3AED" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="0.75"/>
-        <circle cx="72" cy="58" r="3.5" fill="#7C3AED" opacity="0.75"/>
-        <line x1="52" y1="58" x2="112" y2="58" stroke="#7C3AED" stroke-width="1.5" opacity="0.75"/>
+              stroke="var(--logo-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="0.75"/>
+        <circle cx="72" cy="58" r="3.5" fill="var(--logo-accent)" opacity="0.75"/>
+        <line x1="52" y1="58" x2="112" y2="58" stroke="var(--logo-accent)" stroke-width="1.5" opacity="0.75"/>
         <text x="72" y="78" font-family="'Courier New', monospace"
-              font-size="10" font-weight="700" fill="#7C3AED" text-anchor="middle" opacity="0.75">&lt;/&gt;</text>
+              font-size="10" font-weight="700" fill="var(--logo-accent)" text-anchor="middle" opacity="0.75">&lt;/&gt;</text>
         <!-- cube back wall -->
         <path d="M 171,60 L 161,42.7 L 141,42.7 L 131,60 L 141,77.3 L 161,77.3 Z" fill="none"/>
         <!-- cube top face -->
-        <path d="M 111,60 L 131,25.4 L 171,25.4 L 191,60 L 171,60 L 161,42.7 L 141,42.7 L 131,60 Z" fill="#8B5CF6"/>
+        <path d="M 111,60 L 131,25.4 L 171,25.4 L 191,60 L 171,60 L 161,42.7 L 141,42.7 L 131,60 Z" fill="var(--logo-top)"/>
         <!-- cube lower-right -->
-        <path d="M 191,60 L 171,94.6 L 161,77.3 L 171,60 Z" fill="#4C1D95"/>
+        <path d="M 191,60 L 171,94.6 L 161,77.3 L 171,60 Z" fill="var(--logo-dark)"/>
         <!-- cube lower-left -->
-        <path d="M 111,60 L 131,60 L 141,77.3 L 131,94.6 Z" fill="#6D28D9"/>
+        <path d="M 111,60 L 131,60 L 141,77.3 L 131,94.6 Z" fill="var(--logo-mid)"/>
         <!-- cube bottom -->
-        <path d="M 131,94.6 L 171,94.6 L 161,77.3 L 141,77.3 Z" fill="#5B21B6"/>
-        <!-- green line + dots -->
-        <line x1="191" y1="60" x2="288" y2="60" stroke="#10B981" stroke-width="1.5" opacity="0.75"/>
-        <circle cx="214" cy="60" r="4.5" fill="#10B981" opacity="0.75"/>
-        <circle cx="248" cy="60" r="4.5" fill="#10B981" opacity="0.75"/>
-        <circle cx="282" cy="60" r="4.5" fill="#10B981" opacity="0.75"/>
+        <path d="M 131,94.6 L 171,94.6 L 161,77.3 L 141,77.3 Z" fill="var(--logo-shadow)"/>
+        <!-- green line + dots (git graph) -->
+        <line x1="191" y1="60" x2="288" y2="60" stroke="var(--logo-graph)" stroke-width="1.5" opacity="0.75"/>
+        <circle cx="214" cy="60" r="4.5" fill="var(--logo-graph)" opacity="0.75"/>
+        <circle cx="248" cy="60" r="4.5" fill="var(--logo-graph)" opacity="0.75"/>
+        <circle cx="282" cy="60" r="4.5" fill="var(--logo-graph)" opacity="0.75"/>
       </svg>
     </div>
 
@@ -135,6 +136,27 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+/* ─── Logo SVG tokens — dark theme (default) ────────────
+   Violet cube faces use the brand accent family so they
+   adapt if the palette ever shifts. Graph uses --color-success.
+   ────────────────────────────────────────────────────── */
+.logo-svg {
+  --logo-accent: var(--color-accent);      /* wave, code icon, dots label */
+  --logo-top:    var(--color-accent);      /* cube top face   (#8B5CF6) */
+  --logo-dark:   #4C1D95;                 /* cube lower-right (deepest shade) */
+  --logo-mid:    #6D28D9;                 /* cube lower-left */
+  --logo-shadow: #5B21B6;                 /* cube bottom */
+  --logo-graph:  var(--color-success);    /* git graph line + commits */
+}
+
+/* Light-theme overrides: accent shifts to --color-accent automatically;
+   cube shadow faces stay dark for contrast against the light surface. */
+:global([data-theme="light"]) .logo-svg {
+  --logo-dark:   #3B0764;
+  --logo-mid:    #5B21B6;
+  --logo-shadow: #4C1D95;
+}
+
 .empty-state {
   display: flex;
   flex-direction: column;

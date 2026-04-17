@@ -1239,7 +1239,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
 }
 
 .sync-badge--push {
-  background: rgba(255, 255, 255, 0.22);
+  background: var(--color-surface-inverse-action-hover);
   color: var(--color-accent-text);
 }
 
@@ -1550,7 +1550,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
   background: var(--color-bg);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+  box-shadow: var(--shadow-popover);
   z-index: 200;
   overflow: hidden;
 }

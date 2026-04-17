@@ -524,7 +524,7 @@ function formatActivityDate(dateStr: string): string {
                 @click.stop="emit('select-dir-file', subFile)"
                 @keydown.enter.stop="emit('select-dir-file', subFile)"
               >
-                <span class="file-status-badge mono" style="color: #16a34a">A</span>
+                <span class="file-status-badge mono file-status-badge--added">A</span>
                 <div class="file-info">
                   <span class="file-name mono">{{ fileName(subFile) }}</span>
                   <span class="file-dir muted">{{ subFile }}</span>
@@ -1157,6 +1157,8 @@ function formatActivityDate(dateStr: string): string {
   flex-shrink: 0;
 }
 
+.file-status-badge--added { color: var(--color-status-added); }
+
 .file-info {
   flex: 1;
   min-width: 0;
@@ -1321,22 +1323,22 @@ function formatActivityDate(dateStr: string): string {
   position: absolute;
   right: 0;
   bottom: 100%;
-  margin-bottom: 4px;
+  margin-bottom: var(--space-2);
   min-width: 180px;
   background: var(--color-bg);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--shadow-popover);
   z-index: 100;
   list-style: none;
-  padding: 4px 0;
+  padding: var(--space-2) 0;
 }
 
 .commit-ai-menu li {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-5);
   font-size: var(--font-size-sm);
   color: var(--color-text);
   cursor: pointer;
@@ -1366,16 +1368,16 @@ function formatActivityDate(dateStr: string): string {
   position: absolute;
   right: 100%;
   bottom: 0;
-  margin-right: 2px;
+  margin-right: var(--space-1);
   min-width: 130px;
   max-height: 300px;
   overflow-y: auto;
   background: var(--color-bg);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--shadow-popover);
   list-style: none;
-  padding: 4px 0;
+  padding: var(--space-2) 0;
   z-index: 101;
 }
 
@@ -1704,7 +1706,7 @@ function formatActivityDate(dateStr: string): string {
 }
 
 .ctx-item--danger:hover {
-  background: rgba(243, 139, 168, 0.12);
+  background: var(--color-danger-soft);
 }
 
 .ctx-separator {

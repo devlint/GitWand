@@ -14,6 +14,9 @@ const emit = defineEmits<{
   closeOtherTabs: [tabId: number];
 }>();
 
+/** Show the bar whenever at least one repo is open (always shows the + button). */
+const showBar = computed(() => props.tabs.length >= 1);
+/** Show individual tab chips only when there are multiple repos open. */
 const showTabs = computed(() => props.tabs.length > 1);
 
 function onMiddleClick(e: MouseEvent, tabId: number) {
@@ -30,8 +33,9 @@ function onCloseClick(e: MouseEvent, tabId: number) {
 </script>
 
 <template>
-  <div class="tab-bar" v-if="showTabs">
-    <div class="tab-list">
+  <div class="tab-bar" v-if="showBar">
+    <!-- Tab chips — only rendered when 2+ repos are open -->
+    <div class="tab-list" v-if="showTabs">
       <div
         v-for="tab in tabs"
         :key="tab.id"
@@ -57,7 +61,14 @@ function onCloseClick(e: MouseEvent, tabId: number) {
       </div>
     </div>
 
-    <button class="tab-new" @click="emit('newTab')" title="Open new repo tab">
+    <!-- + button: always visible so users can discover multi-repo support -->
+    <button
+      class="tab-new"
+      :class="{ 'tab-new--solo': !showTabs }"
+      @click="emit('newTab')"
+      title="Open new repo tab"
+      aria-label="Open new repo tab"
+    >
       <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
         <path d="M7 1.5a.5.5 0 01.5.5v4.5H12a.5.5 0 010 1H7.5V12a.5.5 0 01-1 0V7.5H2a.5.5 0 010-1h4.5V2a.5.5 0 01.5-.5z"/>
       </svg>
@@ -169,6 +180,11 @@ function onCloseClick(e: MouseEvent, tabId: number) {
   color: var(--color-text-muted);
   transition: background var(--transition-fast), color var(--transition-fast);
   margin-left: auto;
+}
+
+/* When it's the only element (no tab list), keep it left-aligned */
+.tab-new--solo {
+  margin-left: 0;
 }
 
 .tab-new:hover {

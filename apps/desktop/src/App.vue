@@ -1123,28 +1123,28 @@ onUnmounted(() => {
   justify-content: center;
   width: 24px;
   height: 24px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: none;
   color: var(--color-danger);
   opacity: 0.6;
-  transition: opacity 0.15s, background 0.15s;
+  transition: opacity var(--transition-fast), background var(--transition-fast);
 }
 .error-close:hover {
   opacity: 1;
-  background: rgba(239, 68, 68, 0.15);
+  background: var(--color-danger-bg);
 }
 
 /* ─── Merge conflict banner ──────────────────────────── */
 .conflict-banner {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 16px;
-  background: var(--color-warning-bg, rgba(234, 179, 8, 0.1));
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-6);
+  background: var(--color-warning-bg);
   border-left: 3px solid var(--color-warning);
   color: var(--color-warning);
-  font-size: 13px;
-  font-weight: 500;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-medium);
   flex-shrink: 0;
 }
 
@@ -1153,15 +1153,15 @@ onUnmounted(() => {
 }
 
 .conflict-abort-btn {
-  padding: 4px 12px;
-  border-radius: 5px;
-  font-size: 12px;
-  font-weight: 600;
+  padding: var(--space-2) var(--space-5);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
   background: var(--color-bg-tertiary);
   color: var(--color-text);
   border: 1px solid var(--color-border);
   cursor: pointer;
-  transition: background 0.12s;
+  transition: background var(--transition-fast);
 }
 
 .conflict-abort-btn:hover {
@@ -1171,16 +1171,16 @@ onUnmounted(() => {
 /* ─── Toast ──────────────────────────────────────────── */
 .toast {
   position: fixed;
-  bottom: 24px;
-  right: 24px;
+  bottom: var(--space-8);
+  right: var(--space-8);
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 14px 16px;
-  background: #1a1a1a;
-  border-radius: 12px;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.06);
-  color: #fff;
+  gap: var(--space-6);
+  padding: var(--space-5) var(--space-6);
+  background: var(--color-surface-inverse);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-modal);
+  color: var(--color-surface-inverse-text);
   z-index: 200;
   min-width: 260px;
   max-width: 380px;
@@ -1197,32 +1197,32 @@ onUnmounted(() => {
 }
 
 .toast-title {
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 1.3;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--line-height-snug);
 }
 
 .toast-detail {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.5);
-  margin-top: 2px;
+  font-size: var(--font-size-sm);
+  color: var(--color-surface-inverse-muted);
+  margin-top: var(--space-1);
 }
 
 .toast-dismiss {
   flex-shrink: 0;
-  padding: 5px 14px;
-  font-size: 12px;
-  font-weight: 600;
-  background: rgba(255, 255, 255, 0.12);
-  color: #fff;
+  padding: var(--space-3) var(--space-5);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
+  background: var(--color-surface-inverse-action);
+  color: var(--color-surface-inverse-text);
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: background 0.15s;
+  transition: background var(--transition-fast);
 }
 
 .toast-dismiss:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--color-surface-inverse-action-hover);
 }
 
 @keyframes toastSlideIn {
