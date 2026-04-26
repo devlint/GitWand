@@ -86,6 +86,19 @@ export interface ConfidenceScore {
      * 100 si la base est disponible (diff3 ou zdiff3), 0 sinon (diff2).
      */
     baseAvailability: number;
+    /**
+     * v2.1 — Pénalité « instabilité algorithmique » : 0 = pas de signal, 100 =
+     * refactoring massif détecté des deux côtés (block-moves majoritaires).
+     * Optionnel pour rétro-compat — les patterns qui ne la set pas voient
+     * `undefined`. Consommée par `makeScore` avec un poids de −0.10.
+     *
+     * Alimentée à terme par `detectBlockMove` (primitive livrée en v2.1,
+     * branchement scoring repoussé à v2.6 refactoring-aware merge où le signal
+     * devient actionnable). En v2.1 la dimension existe et est modélisée, mais
+     * aucun pattern ne la set encore — le score reste numériquement identique
+     * pour la rétro-compat stricte.
+     */
+    algorithmStability?: number;
   };
   /** Facteurs ayant augmenté le score (justifications de haute confiance) */
   boosters: string[];

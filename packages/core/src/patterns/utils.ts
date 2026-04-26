@@ -37,15 +37,18 @@ export function labelFromScore(score: number): Confidence {
 /**
  * Construit un ConfidenceScore à partir des dimensions et des justifications.
  *
- * Formule v1.4 :
+ * Formule v2.1 :
  *   `score = typeClassification
- *           − dataRisk        × 0.40
- *           − scopeImpact     × 0.15
- *           − fileFrequency   × 0.10
- *           + baseAvailability × 0.05`
+ *           − dataRisk           × 0.40
+ *           − scopeImpact        × 0.15
+ *           − fileFrequency      × 0.10
+ *           + baseAvailability   × 0.05
+ *           − algorithmStability × 0.10`
  *
- * `fileFrequency` et `baseAvailability` sont optionnels (défaut 0) pour
- * la compatibilité ascendante avec les patterns existants.
+ * Tous les paramètres après `penalties` sont optionnels (défaut 0). Quand un
+ * pattern n'set pas `algorithmStability`, son score est numériquement
+ * identique à v1.4 — la dimension est *présente dans le type* mais reste à 0
+ * tant que les producteurs (block-move detection en v2.6) ne l'alimentent pas.
  */
 export function makeScore(
   typeClassification: number,
@@ -55,18 +58,34 @@ export function makeScore(
   penalties: string[],
   fileFrequency = 0,
   baseAvailability = 0,
+  algorithmStability = 0,
 ): ConfidenceScore {
   const raw =
     typeClassification
-    - dataRisk        * 0.40
-    - si              * 0.15
-    - fileFrequency   * 0.10
-    + baseAvailability * 0.05;
+    - dataRisk            * 0.40
+    - si                  * 0.15
+    - fileFrequency       * 0.10
+    + baseAvailability    * 0.05
+    - algorithmStability  * 0.10;
   const score = Math.round(Math.max(0, Math.min(100, raw)));
+  // On ne pousse `algorithmStability` dans `dimensions` que s'il est non-zéro,
+  // pour que les snapshots de tests existants (qui asserent l'objet exact)
+  // restent verts. Les nouveaux consommateurs peuvent toujours le lire (le
+  // type le marque optionnel).
+  const dimensions: ConfidenceScore["dimensions"] = {
+    typeClassification,
+    dataRisk,
+    scopeImpact: si,
+    fileFrequency,
+    baseAvailability,
+  };
+  if (algorithmStability !== 0) {
+    dimensions.algorithmStability = algorithmStability;
+  }
   return {
     score,
     label: labelFromScore(score),
-    dimensions: { typeClassification, dataRisk, scopeImpact: si, fileFrequency, baseAvailability },
+    dimensions,
     boosters,
     penalties,
   };
