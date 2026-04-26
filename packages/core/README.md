@@ -45,6 +45,34 @@ Format-aware resolvers layer on top: JSON / JSONC, Markdown (ATX-heading-aware),
 
 See the [main README](https://github.com/devlint/GitWand#conflict-resolution-engine) for the full pattern list, confidence scoring details, and `.gitwandrc` configuration.
 
+## Diff backend (v2.1+)
+
+Since `2.1.0`, the underlying diff algorithm is **Histogram diff** (rare-anchor splitting with JGit-style forward/backward extension). Histogram produces more stable alignments on real source code than the previous LCS-only backend, which lifts auto-resolution rates on `non_overlapping` and `insertion_at_boundary` patterns.
+
+The public signatures are unchanged — `lcs(a, b)`, `computeDiff(base, branch)`, and `mergeNonOverlapping(base, ours, theirs)` keep their contracts. The switch is opaque to consumers.
+
+To roll back to the legacy LCS DP / Hirschberg backend (e.g. for reproducibility, debugging a tie-break difference, or perf comparison on a specific input):
+
+```bash
+GITWAND_DIFF=lcs node ./your-script.mjs
+```
+
+The flag is read at call time, so you can also set it inside a Node process. On runtimes where `process.env` is undefined (pure browser), the default Histogram path is always used.
+
+Two new primitives ship alongside:
+
+```ts
+import { histogramDiff, detectBlockMove } from "@gitwand/core";
+
+// Direct Histogram call — same return shape as lcs().
+const pairs = histogramDiff(linesA, linesB);
+
+// Detect blocks moved between ours and theirs but absent (or at a
+// different position) in base. Used downstream by the refactor-aware
+// merge work scheduled for v2.6.
+const moves = detectBlockMove(base, ours, theirs);
+```
+
 ## Links
 
 - 📖 [Documentation](https://github.com/devlint/GitWand#conflict-resolution-engine)
