@@ -1,6 +1,6 @@
 {
   "name": "@gitwand/core",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "description": "GitWand core — automatic Git conflict resolution engine (powers @gitwand/cli, @gitwand/mcp, and the GitWand desktop app)",
   "type": "module",
   "main": "dist/index.js",
