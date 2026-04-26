@@ -19,40 +19,23 @@
 
 import type { ClassifyInput, ConfidenceScore, PatternPlugin } from "../types.js";
 import { scopeImpact, makeScore, normalizeLine } from "./utils.js";
+import { lcs } from "../diff/index.js";
 
 // ─── LCS helpers ─────────────────────────────────────────────
+//
+// v2.1 : on utilise le backend `lcs` partagé (Histogram par défaut, legacy via
+// `GITWAND_DIFF=lcs`) plutôt que le DP plein local. Le code retiré ressemblait
+// au DP de `lcs.ts` mais avec une structure de retour différente — on adapte
+// donc juste la sortie de `lcs()` (paires `[i, j]`) en un Set d'indices côté
+// `modified`.
 
 /**
- * Calcule la Longest Common Subsequence entre deux tableaux de lignes.
- * Retourne les indices des lignes de `a` qui sont dans le LCS.
+ * Calcule l'ensemble des indices de `a` qui sont dans le LCS avec `b`.
+ * Wrapper sur le backend partagé.
  */
 function lcsIndices(a: string[], b: string[]): Set<number> {
-  const m = a.length;
-  const n = b.length;
-  // dp[i][j] = longueur du LCS de a[0..i-1] et b[0..j-1]
-  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      dp[i][j] = a[i - 1] === b[j - 1]
-        ? dp[i - 1][j - 1] + 1
-        : Math.max(dp[i - 1][j], dp[i][j - 1]);
-    }
-  }
-  // Backtrack pour récupérer les indices dans `a`
   const inLcs = new Set<number>();
-  let i = m;
-  let j = n;
-  while (i > 0 && j > 0) {
-    if (a[i - 1] === b[j - 1]) {
-      inLcs.add(i - 1);
-      i--;
-      j--;
-    } else if (dp[i - 1][j] > dp[i][j - 1]) {
-      i--;
-    } else {
-      j--;
-    }
-  }
+  for (const [i] of lcs(a, b)) inLcs.add(i);
   return inLcs;
 }
 
@@ -61,8 +44,8 @@ function lcsIndices(a: string[], b: string[]): Set<number> {
  * Ces lignes sont les "additions" par rapport à la base.
  */
 function lcsAdditions(base: string[], modified: string[]): string[] {
-  const lcs = lcsIndices(modified, base); // indices dans modified qui sont dans le LCS
-  return modified.filter((_, i) => !lcs.has(i));
+  const lcsSet = lcsIndices(modified, base); // indices dans modified qui sont dans le LCS
+  return modified.filter((_, i) => !lcsSet.has(i));
 }
 
 /**
@@ -70,8 +53,8 @@ function lcsAdditions(base: string[], modified: string[]): string[] {
  * Ces lignes sont les "suppressions" par rapport à la base.
  */
 function lcsRemovals(base: string[], modified: string[]): string[] {
-  const lcs = lcsIndices(base, modified); // indices dans base qui sont dans le LCS
-  return base.filter((_, i) => !lcs.has(i));
+  const lcsSet = lcsIndices(base, modified); // indices dans base qui sont dans le LCS
+  return base.filter((_, i) => !lcsSet.has(i));
 }
 
 /** Vérifie si deux tableaux ont des éléments communs */
