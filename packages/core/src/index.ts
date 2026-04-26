@@ -22,6 +22,16 @@ export { resolve } from "./resolver.js";
 export { parseConflictMarkers, classifyConflict } from "./parser.js";
 export { mergeNonOverlapping, computeDiff, lcs } from "./diff.js";
 
+// v2.1 — nouveaux backends diff exposés
+export {
+  histogramDiff,
+  detectBlockMove,
+  lcsLegacy,
+  type HistogramOptions,
+  type MovedBlock,
+  type BlockMoveOptions,
+} from "./diff/index.js";
+
 // Phase 7.3 — Résolveurs spécialisés par format
 export { tryResolveJsonConflict, stripJsoncComments } from "./resolvers/json.js";
 export { tryResolveMarkdownConflict, parseSections, extractFrontmatter } from "./resolvers/markdown.js";
