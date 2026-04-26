@@ -13,6 +13,7 @@
 
 import { describe, bench } from "vitest";
 import { resolve } from "../resolver.js";
+import { histogramDiff, lcsLegacy } from "../diff/index.js";
 
 // ─── Générateurs de contenu ───────────────────────────────
 
@@ -147,5 +148,49 @@ describe("resolve() — benchmarks de performance", () => {
       `>>>>>>> theirs`,
     ].join("\n");
     resolve(mdConflict, "README.md");
+  });
+});
+
+// ─── v2.1 — Bench direct des backends LCS ─────────────────
+
+/**
+ * Génère deux tableaux de lignes "code-source-like" : majoritairement uniques,
+ * avec quelques lignes répétées pour donner un peu de complexité au LCS.
+ */
+function makeCodeLikePair(n: number, m: number): { a: string[]; b: string[] } {
+  const a: string[] = [];
+  const b: string[] = [];
+  for (let i = 0; i < n; i++) {
+    a.push(`const value_a_${i} = compute(${i}, ${i * 2});`);
+  }
+  for (let j = 0; j < m; j++) {
+    // 70 % de matches avec a, 30 % de lignes propres
+    if (j < n && j % 10 !== 0) {
+      b.push(a[j]); // match
+    } else {
+      b.push(`const value_b_${j} = compute(${j}, ${j * 3});`);
+    }
+  }
+  return { a, b };
+}
+
+const BENCH_100 = makeCodeLikePair(100, 100);
+const BENCH_3000 = makeCodeLikePair(3000, 3000);
+
+describe("LCS backends — direct", () => {
+  bench("histogramDiff — 100×100", () => {
+    histogramDiff(BENCH_100.a, BENCH_100.b);
+  });
+
+  bench("lcsLegacy — 100×100", () => {
+    lcsLegacy(BENCH_100.a, BENCH_100.b);
+  });
+
+  bench("histogramDiff — 3000×3000", () => {
+    histogramDiff(BENCH_3000.a, BENCH_3000.b);
+  });
+
+  bench("lcsLegacy — 3000×3000", () => {
+    lcsLegacy(BENCH_3000.a, BENCH_3000.b);
   });
 });
