@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { lcs, computeDiff, _lcsHirschberg } from "../diff.js";
+import { lcs, computeDiff, _lcsHirschberg, lcsLegacy } from "../diff.js";
 
 describe("lcs — cas triviaux", () => {
   it("deux tableaux vides", () => {
@@ -170,6 +170,10 @@ describe("lcs — Hirschberg (P2.1)", () => {
 
   it("Hirschberg et DP plein produisent la même longueur sur des inputs aléatoires", () => {
     // Stress test : 20 runs sur des inputs pseudo-aléatoires reproductibles.
+    // v2.1 : on compare `lcsLegacy` (DP plein) à `_lcsHirschberg` directement —
+    // `lcs()` route désormais vers Histogram, qui est une heuristique et
+    // n'est pas garantie produire un LCS de longueur optimale sur de l'input
+    // aléatoire (la parité tient sur le code source, pas sur du bruit).
     const rng = mulberry32(42);
     for (let run = 0; run < 20; run++) {
       const n = 5 + Math.floor(rng() * 20);
@@ -177,7 +181,7 @@ describe("lcs — Hirschberg (P2.1)", () => {
       const alphabet = ["a", "b", "c", "d", "e"];
       const a = Array.from({ length: n }, () => alphabet[Math.floor(rng() * alphabet.length)]);
       const b = Array.from({ length: m }, () => alphabet[Math.floor(rng() * alphabet.length)]);
-      const dense = lcs(a, b);
+      const dense = lcsLegacy(a, b);
       const hirsch = _lcsHirschberg(a, b);
       expect(hirsch.length).toBe(dense.length);
       // Validité des paires
