@@ -572,6 +572,201 @@ const F20: CorpusFixture = {
   expectedOutput: null,
 };
 
+// ─── v2.1 — Fixtures « refactor + edit » ────────────────────
+//
+// Cible les cas où v2.1 (Histogram diff) doit améliorer l'alignement et donc
+// soit auto-résoudre, soit promouvoir la classification. `expectedResolved`
+// est calibré sur le comportement *réel* après bascule Histogram. Ces fixtures
+// servent de filet de régression — si v2.2 (format profiles) déplace une de
+// ces lignes vers `expectedResolved: true`, on actualise la fixture.
+
+const F21: CorpusFixture = {
+  id: "F21",
+  description: "v2.1 — refactor d'imports d'un côté + ajout fonction de l'autre (TS)",
+  filePath: "src/handler.ts",
+  category: "structural",
+  input: [
+    `<<<<<<< ours`,
+    `import { bar } from "./bar";`,
+    `import { foo } from "./foo";`,
+    ``,
+    `export function main() { return foo() + bar(); }`,
+    `||||||| base`,
+    `import { foo } from "./foo";`,
+    `import { bar } from "./bar";`,
+    ``,
+    `export function main() { return foo() + bar(); }`,
+    `=======`,
+    `import { foo } from "./foo";`,
+    `import { bar } from "./bar";`,
+    ``,
+    `export function main() { return foo() + bar(); }`,
+    ``,
+    `export function helper() { return 42; }`,
+    `>>>>>>> theirs`,
+  ].join("\n"),
+  expectedType: "non_overlapping",
+  expectedResolved: true,
+};
+
+const F22: CorpusFixture = {
+  id: "F22",
+  description: "v2.1 — déplacement bloc CSS d'un côté + modif règle de l'autre",
+  filePath: "src/styles/theme.css",
+  category: "format-aware",
+  input: [
+    `<<<<<<< ours`,
+    `.header { color: red; }`,
+    `.footer { color: green; }`,
+    `.body { color: blue; }`,
+    `||||||| base`,
+    `.header { color: red; }`,
+    `.body { color: blue; }`,
+    `.footer { color: green; }`,
+    `=======`,
+    `.header { color: red; }`,
+    `.body { color: navy; }`,
+    `.footer { color: green; }`,
+    `>>>>>>> theirs`,
+  ].join("\n"),
+  // v2.1 — la classification reste `complex` (le pipeline structural arrive
+  // en v2.3, tree-sitter), mais le résolveur format-aware CSS auto-résout
+  // grâce au meilleur alignement Histogram en amont.
+  expectedType: "complex",
+  expectedResolved: true,
+};
+
+const F23: CorpusFixture = {
+  id: "F23",
+  description: "v2.1 — réordonnancement deps package.json + ajout dep côté theirs",
+  filePath: "package.json",
+  category: "format-aware",
+  input: [
+    `<<<<<<< ours`,
+    `{`,
+    `  "name": "demo",`,
+    `  "dependencies": {`,
+    `    "lodash": "^4.17.0",`,
+    `    "react": "^18.2.0"`,
+    `  }`,
+    `}`,
+    `||||||| base`,
+    `{`,
+    `  "name": "demo",`,
+    `  "dependencies": {`,
+    `    "react": "^18.2.0",`,
+    `    "lodash": "^4.17.0"`,
+    `  }`,
+    `}`,
+    `=======`,
+    `{`,
+    `  "name": "demo",`,
+    `  "dependencies": {`,
+    `    "react": "^18.2.0",`,
+    `    "lodash": "^4.17.0",`,
+    `    "zod": "^3.22.0"`,
+    `  }`,
+    `}`,
+    `>>>>>>> theirs`,
+  ].join("\n"),
+  // v2.1 — la combinaison Histogram diff + résolveur JSON sémantique fait
+  // passer cette fixture en auto-résolu. L'output exact dépend de l'ordre
+  // produit par `mergeObjects`, qu'on ne fige pas ici.
+  expectedType: "complex",
+  expectedResolved: true,
+};
+
+const F24: CorpusFixture = {
+  id: "F24",
+  description: "v2.1 — k8s yaml : block shuffle d'un côté + edit env var de l'autre",
+  filePath: "k8s/deployment.yaml",
+  category: "format-aware",
+  input: [
+    `<<<<<<< ours`,
+    `apiVersion: apps/v1`,
+    `kind: Deployment`,
+    `spec:`,
+    `  template:`,
+    `    spec:`,
+    `      containers:`,
+    `        - name: sidecar`,
+    `          image: sidecar:1.0`,
+    `        - name: app`,
+    `          image: app:2.0`,
+    `||||||| base`,
+    `apiVersion: apps/v1`,
+    `kind: Deployment`,
+    `spec:`,
+    `  template:`,
+    `    spec:`,
+    `      containers:`,
+    `        - name: app`,
+    `          image: app:1.0`,
+    `        - name: sidecar`,
+    `          image: sidecar:1.0`,
+    `=======`,
+    `apiVersion: apps/v1`,
+    `kind: Deployment`,
+    `spec:`,
+    `  template:`,
+    `    spec:`,
+    `      containers:`,
+    `        - name: app`,
+    `          image: app:2.0`,
+    `        - name: sidecar`,
+    `          image: sidecar:1.0`,
+    `>>>>>>> theirs`,
+  ].join("\n"),
+  // v2.1 — la classification reste `complex` (résolveur YAML structurel
+  // arrivera en v2.2 / v2.3) mais Histogram réaligne bien les blocs et le
+  // pipeline auto-résout par fallback non-textuel.
+  expectedType: "complex",
+  expectedResolved: true,
+};
+
+const F25: CorpusFixture = {
+  id: "F25",
+  description: "v2.1 — markdown : swap de sections H2 d'un côté + edit dans une section de l'autre",
+  filePath: "docs/guide.md",
+  category: "format-aware",
+  input: [
+    `<<<<<<< ours`,
+    `# Guide`,
+    ``,
+    `## Installation`,
+    ``,
+    `Run \`npm install\`.`,
+    ``,
+    `## Usage`,
+    ``,
+    `Import the module.`,
+    `||||||| base`,
+    `# Guide`,
+    ``,
+    `## Usage`,
+    ``,
+    `Import the module.`,
+    ``,
+    `## Installation`,
+    ``,
+    `Run \`npm install\`.`,
+    `=======`,
+    `# Guide`,
+    ``,
+    `## Usage`,
+    ``,
+    `Import the module via \`import x from "y"\`.`,
+    ``,
+    `## Installation`,
+    ``,
+    `Run \`npm install\`.`,
+    `>>>>>>> theirs`,
+  ].join("\n"),
+  expectedType: "complex",
+  expectedResolved: false,
+  expectedOutput: null,
+};
+
 // ─── Export ─────────────────────────────────────────────────
 
 export const CORPUS: CorpusFixture[] = [
@@ -579,6 +774,8 @@ export const CORPUS: CorpusFixture[] = [
   F06, F07, F08, F09, F10,
   F11, F12, F13, F14, F15,
   F16, F17, F18, F19, F20,
+  // v2.1
+  F21, F22, F23, F24, F25,
 ];
 
 /** Résumé par catégorie */
