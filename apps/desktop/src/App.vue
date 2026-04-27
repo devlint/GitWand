@@ -163,6 +163,11 @@ const prCwd = computed(() => repoFolderPath.value ?? "");
 const prPanel = usePrPanel(prCwd);
 provide(PR_PANEL_KEY, prPanel);
 
+// Load branches when the PR create form opens (they're needed to compute baseCandidates).
+watch(() => prPanel.showCreateForm.value, (val) => {
+  if (val && branches.value.length === 0) loadBranches();
+});
+
 // ─── Bridges: native menu → owning components ────────────
 // Each counter is bumped by a menu action; the consumer watches and opens
 // its popover / focuses its input. See branchPickerBridge.ts for the
@@ -1445,7 +1450,7 @@ onUnmounted(() => {
           <!-- PRs view: creation form takes over when showCreateForm is true -->
           <PrCreateView
             v-else-if="viewMode === 'prs' && prPanel.showCreateForm.value"
-            :current-branch="branchDisplay"
+            :current-branch="repoStatus?.branch ?? ''"
             :branches="branches"
             :cwd="repoFolderPath ?? ''"
           />
