@@ -11,14 +11,24 @@
  *  3. Si tous les conflits de clés sont trivialement résolvables → merge
  *  4. Sinon → retourner null (fallback textuel dans resolver.ts)
  *
+ * v2.2 — Hook profil de format : si un FormatProfile est applicable au
+ * filePath, ses stratégies par path (set / ordered-list / merge-keys / opaque)
+ * routent vers mergeArrayAsSet ou mergeOrderedListViaPatch au lieu du fallback
+ * "tableau impossible à merger". Ouvre l'auto-résolution sur /dependencies,
+ * /scripts, tsconfig#/include, etc.
+ *
  * Cas gérés :
  *  - Clé ajoutée des deux côtés avec valeurs différentes → conflit non résolvable
  *  - Clé ajoutée d'un seul côté → accepter l'ajout
  *  - Clé supprimée d'un seul côté, pas modifiée de l'autre → supprimer
  *  - Clé modifiée des deux côtés de la même façon → prendre la valeur
  *  - Clé modifiée des deux côtés différemment → conflit non résolvable
- *  - Merge récursif pour les objets imbriqués
+ *  - Merge récursif pour les objets imbriqués (avec stratégie de profil par path)
  */
+
+import { profileForFile, strategyForPath } from "../format-profiles/index.js";
+import type { FormatProfile } from "../format-profiles/types.js";
+import { applyStrategy } from "../format-profiles/merge-strategies.js";
 
 /** Résultat d'une fusion JSON */
 export interface JsonMergeResult {
@@ -137,6 +147,8 @@ function mergeObjects(
   base: JsonObject,
   ours: JsonObject,
   theirs: JsonObject,
+  profile: FormatProfile | null = null,
+  currentPath: string = "",
 ): { merged: JsonObject | null; resolvedKeys: number; unresolvedKeys: number } {
   const result: JsonObject = {};
   let resolvedKeys = 0;
@@ -158,6 +170,10 @@ function mergeObjects(
     const oursVal = ours[key];
     const theirsVal = theirs[key];
 
+    // v2.2 — Path JSON Pointer pour cette clé (escape RFC 6901 : ~ → ~0, / → ~1)
+    const pointerKey = key.replace(/~/g, "~0").replace(/\//g, "~1");
+    const childPath = currentPath + "/" + pointerKey;
+
     // Clé présente dans les deux branches, absente de la base → ajout des deux côtés
     if (!inBase && inOurs && inTheirs) {
       if (jsonEqual(oursVal, theirsVal)) {
@@ -166,7 +182,7 @@ function mergeObjects(
         resolvedKeys++;
       } else if (isObject(oursVal) && isObject(theirsVal)) {
         // Objets ajoutés différemment → fusion récursive depuis base vide
-        const sub = mergeObjects({}, oursVal, theirsVal);
+        const sub = mergeObjects({}, oursVal, theirsVal, profile, childPath);
         if (sub.merged !== null) {
           result[key] = sub.merged;
           resolvedKeys += sub.resolvedKeys + 1;
@@ -175,6 +191,23 @@ function mergeObjects(
           unresolvedKeys++;
           return { merged: null, resolvedKeys, unresolvedKeys };
         }
+      } else if (
+        profile !== null &&
+        Array.isArray(oursVal) &&
+        Array.isArray(theirsVal)
+      ) {
+        // v2.2 — Tableau ajouté différemment des deux côtés. Si le profil
+        // annote ce path comme "set" ou "ordered-list", on tente la stratégie
+        // avec une base vide.
+        const strategy = strategyForPath(profile, childPath);
+        const applied = applyStrategy(strategy, [], oursVal, theirsVal);
+        if (applied.handled && applied.value !== null) {
+          result[key] = applied.value as JsonValue;
+          resolvedKeys++;
+          continue;
+        }
+        unresolvedKeys++;
+        return { merged: null, resolvedKeys, unresolvedKeys };
       } else {
         // Valeurs scalaires différentes → conflit non résolvable
         unresolvedKeys++;
@@ -255,11 +288,27 @@ function mergeObjects(
         resolvedKeys++;
       } else if (isObject(oursVal) && isObject(theirsVal) && isObject(baseVal)) {
         // Les deux ont modifié des objets → fusion récursive
-        const sub = mergeObjects(baseVal, oursVal, theirsVal);
+        const sub = mergeObjects(baseVal, oursVal, theirsVal, profile, childPath);
         if (sub.merged !== null) {
           result[key] = sub.merged;
           resolvedKeys += sub.resolvedKeys + 1;
           unresolvedKeys += sub.unresolvedKeys;
+        } else {
+          unresolvedKeys++;
+          return { merged: null, resolvedKeys, unresolvedKeys };
+        }
+      } else if (
+        profile !== null &&
+        Array.isArray(oursVal) &&
+        Array.isArray(theirsVal) &&
+        Array.isArray(baseVal)
+      ) {
+        // v2.2 — Tableau modifié des deux côtés. Routage selon le profil.
+        const strategy = strategyForPath(profile, childPath);
+        const applied = applyStrategy(strategy, baseVal, oursVal, theirsVal);
+        if (applied.handled && applied.value !== null) {
+          result[key] = applied.value as JsonValue;
+          resolvedKeys++;
         } else {
           unresolvedKeys++;
           return { merged: null, resolvedKeys, unresolvedKeys };
@@ -303,12 +352,16 @@ function detectIndentation(jsonText: string): string | number {
  * @param baseLines  - Lignes de la version base
  * @param oursLines  - Lignes de la version ours
  * @param theirsLines - Lignes de la version theirs
+ * @param filePath   - (v2.2) Chemin du fichier — utilisé pour résoudre un
+ *                     FormatProfile applicable. Optionnel : sans filePath,
+ *                     comportement identique à v2.1 (pas de profil consulté).
  * @returns `JsonMergeResult` avec `merged !== null` si résolu, `null` sinon
  */
 export function tryResolveJsonConflict(
   baseLines: string[],
   oursLines: string[],
   theirsLines: string[],
+  filePath?: string,
 ): JsonMergeResult {
   const baseText = baseLines.join("\n");
   const oursText = oursLines.join("\n");
@@ -380,11 +433,16 @@ export function tryResolveJsonConflict(
 
   const baseObj = isObject(baseJson) ? baseJson : {};
 
-  // Fusion sémantique
+  // v2.2 — Lookup du profil applicable au filePath (null si aucun)
+  const profile = filePath ? profileForFile(filePath) : null;
+
+  // Fusion sémantique (avec routage par profil sur les paths annotés)
   const { merged, resolvedKeys, unresolvedKeys } = mergeObjects(
     baseObj,
     oursJson,
     theirsJson,
+    profile,
+    "",
   );
 
   if (merged === null) {

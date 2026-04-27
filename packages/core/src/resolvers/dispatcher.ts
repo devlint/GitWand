@@ -133,11 +133,18 @@ export interface FormatResolveResult {
  *
  * @param hunk - Le hunk de conflit à résoudre
  * @param filePath - Le chemin du fichier (pour déterminer le résolveur)
+ * @param opts - (v2.2) `disableFormatProfiles` désactive le hook FormatProfile
+ *               dans les résolveurs JSON / YAML — comportement v2.1 strict.
  */
 export function tryFormatAwareResolve(
   hunk: ConflictHunk,
   filePath: string,
+  opts?: { disableFormatProfiles?: boolean },
 ): FormatResolveResult {
+  // v2.2 — si disableFormatProfiles, on coupe le filePath transmis aux
+  // résolveurs JSON/YAML, ce qui désactive leur lookup profil.
+  const profileFilePath = opts?.disableFormatProfiles ? undefined : filePath;
+
   // ── Cargo.toml / Cargo.lock (avant JSON) ──────────────────
   if (isCargoFile(filePath)) {
     const result = tryResolveCargoConflict(
@@ -254,6 +261,7 @@ export function tryFormatAwareResolve(
       hunk.baseLines,
       hunk.oursLines,
       hunk.theirsLines,
+      profileFilePath,
     );
 
     if (result.merged !== null) {
@@ -305,6 +313,7 @@ export function tryFormatAwareResolve(
       hunk.baseLines,
       hunk.oursLines,
       hunk.theirsLines,
+      profileFilePath,
     );
 
     if (result.mergedLines !== null) {

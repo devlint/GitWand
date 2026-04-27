@@ -4,7 +4,13 @@
  * Résout les conflits dans les fichiers YAML (.yaml / .yml) en analysant
  * la structure indentée et en fusionnant clé par clé, similaire au résolveur JSON.
  *
- * Implémenté sans dépendance externe — parsing structurel basé sur l'indentation.
+ * v2.2 — Si un FormatProfile s'applique au filePath, un fast path parse-merge-
+ * serialize est tenté en premier (perd les commentaires mais débloque
+ * helm/values.yaml et kubernetes manifests sur containers/env/volumes/…).
+ * Le pipeline line-based reste le défaut quand aucun profil n'est applicable.
+ *
+ * Implémenté sans dépendance externe pour le pipeline line-based — la lib
+ * `yaml` est utilisée uniquement par le fast path profil.
  *
  * Stratégie :
  *  1. Parser chaque version en "entrées" hiérarchiques (clé + contenu indenté)
@@ -404,7 +410,21 @@ export function tryResolveYamlConflict(
   baseLines: string[],
   oursLines: string[],
   theirsLines: string[],
+  filePath?: string,
 ): YamlMergeResult {
+  // v2.2 — Fast path profil-aware. Si un FormatProfile s'applique au filePath
+  // (ex: helm/values.yaml ou kubernetes/deployment.yaml) ET que les trois
+  // versions parsent comme des objets propres, on tente le merge sémantique
+  // avec routage par stratégie (set sur containers/env/volumes…). Si ça
+  // échoue (parse impossible, merge en conflit), on retombe sur le pipeline
+  // line-based existant qui préserve les commentaires.
+  if (filePath) {
+    const profileResult = tryProfileBasedYamlMerge(
+      baseLines, oursLines, theirsLines, filePath,
+    );
+    if (profileResult !== null) return profileResult;
+  }
+
   // Rejeter les constructions non supportées
   if (
     hasUnsupportedConstruct(oursLines) ||
@@ -460,4 +480,160 @@ export function tryResolveYamlConflict(
     resolvedKeys,
     unresolvedKeys,
   };
+}
+
+// ─── v2.2 — Fast path parse-merge-serialize via FormatProfile ────────────
+
+import * as YAML from "yaml";
+import { profileForFile, strategyForPath } from "../format-profiles/index.js";
+import type { FormatProfile, PathStrategy } from "../format-profiles/types.js";
+import { applyStrategy } from "../format-profiles/merge-strategies.js";
+
+/**
+ * Tente le merge YAML sémantique via parse → merge avec profil → serialize.
+ * Retourne `null` si pas applicable (pas de profil, parse échoue, ou merge
+ * en conflit) ; le caller retombera sur le pipeline line-based.
+ */
+function tryProfileBasedYamlMerge(
+  baseLines: string[],
+  oursLines: string[],
+  theirsLines: string[],
+  filePath: string,
+): YamlMergeResult | null {
+  const profile = profileForFile(filePath);
+  if (profile === null) return null;
+
+  let baseObj: unknown;
+  let oursObj: unknown;
+  let theirsObj: unknown;
+  try {
+    const baseText = baseLines.join("\n").trim();
+    baseObj = baseText.length === 0 ? {} : (YAML.parse(baseText) ?? {});
+    oursObj = YAML.parse(oursLines.join("\n")) ?? {};
+    theirsObj = YAML.parse(theirsLines.join("\n")) ?? {};
+  } catch {
+    return null; // parse échoué → fallback line-based
+  }
+
+  if (!isPlainObject(oursObj) || !isPlainObject(theirsObj)) return null;
+  const baseObjSafe: Record<string, unknown> = isPlainObject(baseObj) ? baseObj : {};
+
+  const merged = mergeProfileObjects(
+    baseObjSafe,
+    oursObj,
+    theirsObj,
+    profile,
+    "",
+  );
+  if (merged === null) return null;
+
+  // Serialize avec un style proche du source (line width par défaut, indent 2).
+  const serialized = YAML.stringify(merged, { indent: 2, lineWidth: 0 }).trimEnd();
+  return {
+    mergedLines: serialized.split("\n"),
+    reason: `Fusion YAML via profil '${profile.name}'.`,
+    resolvedKeys: 1,
+    unresolvedKeys: 0,
+  };
+}
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+/**
+ * Merge récursif d'objets parsés YAML, avec routage par profil.
+ * Variante simplifiée du `mergeObjects` de json.ts — pas de tracking précis
+ * resolved/unresolved (le caller utilise un total binaire 0 ou 1).
+ */
+function mergeProfileObjects(
+  base: Record<string, unknown>,
+  ours: Record<string, unknown>,
+  theirs: Record<string, unknown>,
+  profile: FormatProfile,
+  currentPath: string,
+): Record<string, unknown> | null {
+  const result: Record<string, unknown> = {};
+  const allKeys = new Set([
+    ...Object.keys(base),
+    ...Object.keys(ours),
+    ...Object.keys(theirs),
+  ]);
+
+  for (const key of allKeys) {
+    const inBase = key in base;
+    const inOurs = key in ours;
+    const inTheirs = key in theirs;
+    const baseVal = base[key];
+    const oursVal = ours[key];
+    const theirsVal = theirs[key];
+    const pointerKey = key.replace(/~/g, "~0").replace(/\//g, "~1");
+    const childPath = currentPath + "/" + pointerKey;
+
+    // Cas symétriques : ajouts simples, suppressions sans modif
+    if (inOurs && !inTheirs) {
+      if (inBase && !structEqual(baseVal, oursVal)) return null;
+      if (!inBase) result[key] = oursVal;
+      continue;
+    }
+    if (!inOurs && inTheirs) {
+      if (inBase && !structEqual(baseVal, theirsVal)) return null;
+      if (!inBase) result[key] = theirsVal;
+      continue;
+    }
+    if (!inOurs && !inTheirs) continue;
+
+    // Présent partout — modifs éventuelles
+    if (structEqual(oursVal, theirsVal)) {
+      result[key] = oursVal;
+      continue;
+    }
+    const oursChanged = !inBase || !structEqual(baseVal, oursVal);
+    const theirsChanged = !inBase || !structEqual(baseVal, theirsVal);
+    if (oursChanged && !theirsChanged) {
+      result[key] = oursVal;
+      continue;
+    }
+    if (!oursChanged && theirsChanged) {
+      result[key] = theirsVal;
+      continue;
+    }
+
+    // Les deux ont changé différemment — routage par stratégie de profil
+    const strategy: PathStrategy = strategyForPath(profile, childPath);
+    if (Array.isArray(oursVal) && Array.isArray(theirsVal)) {
+      const baseArr = Array.isArray(baseVal) ? baseVal : [];
+      const applied = applyStrategy(strategy, baseArr, oursVal, theirsVal);
+      if (applied.handled && applied.value !== null) {
+        result[key] = applied.value;
+        continue;
+      }
+      return null;
+    }
+    if (isPlainObject(oursVal) && isPlainObject(theirsVal)) {
+      const baseObj = isPlainObject(baseVal) ? baseVal : {};
+      const sub = mergeProfileObjects(baseObj, oursVal, theirsVal, profile, childPath);
+      if (sub === null) return null;
+      result[key] = sub;
+      continue;
+    }
+    // Scalaires divergents → conflit
+    return null;
+  }
+  return result;
+}
+
+function structEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false;
+    return a.every((v, i) => structEqual(v, b[i]));
+  }
+  if (isPlainObject(a) && isPlainObject(b)) {
+    const ak = Object.keys(a);
+    const bk = Object.keys(b);
+    if (ak.length !== bk.length) return false;
+    return ak.every((k) => k in b && structEqual(a[k], b[k]));
+  }
+  return false;
 }
