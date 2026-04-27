@@ -767,6 +767,182 @@ const F25: CorpusFixture = {
   expectedOutput: null,
 };
 
+// ─── v2.2 — Fixtures « format profiles » ─────────────────────
+//
+// Cible les cas que v2.2 (registre de profils + RFC 6902) doit débloquer :
+// arrays JSON/YAML modifiés des deux côtés sur des paths annotés (set ou
+// merge-keys par identité). Les expectedResolved sont calibrés sur le
+// comportement réel après hook profils.
+
+const F26: CorpusFixture = {
+  id: "F26",
+  description: "v2.2 — package.json /keywords ajoutés des deux côtés (set)",
+  filePath: "package.json",
+  category: "format-aware",
+  input: [
+    `<<<<<<< ours`,
+    `{`,
+    `  "name": "demo",`,
+    `  "keywords": ["git", "merge"]`,
+    `}`,
+    `||||||| base`,
+    `{`,
+    `  "name": "demo",`,
+    `  "keywords": ["git"]`,
+    `}`,
+    `=======`,
+    `{`,
+    `  "name": "demo",`,
+    `  "keywords": ["git", "diff"]`,
+    `}`,
+    `>>>>>>> theirs`,
+  ].join("\n"),
+  expectedType: "complex",
+  expectedResolved: true,
+};
+
+const F27: CorpusFixture = {
+  id: "F27",
+  description: "v2.2 — package.json /scripts merge-keys (clés différentes des deux côtés)",
+  filePath: "package.json",
+  category: "format-aware",
+  input: [
+    `<<<<<<< ours`,
+    `{`,
+    `  "name": "demo",`,
+    `  "scripts": {`,
+    `    "build": "tsc",`,
+    `    "lint": "eslint ."`,
+    `  }`,
+    `}`,
+    `||||||| base`,
+    `{`,
+    `  "name": "demo",`,
+    `  "scripts": {`,
+    `    "build": "tsc"`,
+    `  }`,
+    `}`,
+    `=======`,
+    `{`,
+    `  "name": "demo",`,
+    `  "scripts": {`,
+    `    "build": "tsc",`,
+    `    "test": "vitest"`,
+    `  }`,
+    `}`,
+    `>>>>>>> theirs`,
+  ].join("\n"),
+  expectedType: "non_overlapping",
+  expectedResolved: true,
+};
+
+const F28: CorpusFixture = {
+  id: "F28",
+  description: "v2.2 — tsconfig.json /include divergent (set)",
+  filePath: "tsconfig.json",
+  category: "format-aware",
+  input: [
+    `<<<<<<< ours`,
+    `{`,
+    `  "compilerOptions": { "strict": true },`,
+    `  "include": ["src", "tests"]`,
+    `}`,
+    `||||||| base`,
+    `{`,
+    `  "compilerOptions": { "strict": true },`,
+    `  "include": ["src"]`,
+    `}`,
+    `=======`,
+    `{`,
+    `  "compilerOptions": { "strict": true },`,
+    `  "include": ["src", "scripts"]`,
+    `}`,
+    `>>>>>>> theirs`,
+  ].join("\n"),
+  expectedType: "complex",
+  expectedResolved: true,
+};
+
+const F29: CorpusFixture = {
+  id: "F29",
+  description: "v2.2 — kubernetes Deployment containers mergés par 'name'",
+  filePath: "k8s/deployment.yaml",
+  category: "format-aware",
+  input: [
+    `<<<<<<< ours`,
+    `apiVersion: apps/v1`,
+    `kind: Deployment`,
+    `spec:`,
+    `  template:`,
+    `    spec:`,
+    `      containers:`,
+    `        - name: app`,
+    `          image: app:2.0`,
+    `        - name: sidecar`,
+    `          image: sidecar:1.0`,
+    `||||||| base`,
+    `apiVersion: apps/v1`,
+    `kind: Deployment`,
+    `spec:`,
+    `  template:`,
+    `    spec:`,
+    `      containers:`,
+    `        - name: app`,
+    `          image: app:1.0`,
+    `=======`,
+    `apiVersion: apps/v1`,
+    `kind: Deployment`,
+    `spec:`,
+    `  template:`,
+    `    spec:`,
+    `      containers:`,
+    `        - name: app`,
+    `          image: app:1.0`,
+    `        - name: log-shipper`,
+    `          image: fluent-bit:2.0`,
+    `>>>>>>> theirs`,
+  ].join("\n"),
+  expectedType: "complex",
+  expectedResolved: true,
+};
+
+const F30: CorpusFixture = {
+  id: "F30",
+  description: "v2.2 — helm/values.yaml containers env mergés (set par 'name')",
+  filePath: "charts/myapp/values.yaml",
+  category: "format-aware",
+  input: [
+    `<<<<<<< ours`,
+    `spec:`,
+    `  template:`,
+    `    spec:`,
+    `      containers:`,
+    `        - name: app`,
+    `          image: app:1.0`,
+    `        - name: cache`,
+    `          image: redis:7`,
+    `||||||| base`,
+    `spec:`,
+    `  template:`,
+    `    spec:`,
+    `      containers:`,
+    `        - name: app`,
+    `          image: app:1.0`,
+    `=======`,
+    `spec:`,
+    `  template:`,
+    `    spec:`,
+    `      containers:`,
+    `        - name: app`,
+    `          image: app:1.0`,
+    `        - name: metrics`,
+    `          image: prom-exporter:0.5`,
+    `>>>>>>> theirs`,
+  ].join("\n"),
+  expectedType: "complex",
+  expectedResolved: true,
+};
+
 // ─── Export ─────────────────────────────────────────────────
 
 export const CORPUS: CorpusFixture[] = [
@@ -776,6 +952,8 @@ export const CORPUS: CorpusFixture[] = [
   F16, F17, F18, F19, F20,
   // v2.1
   F21, F22, F23, F24, F25,
+  // v2.2
+  F26, F27, F28, F29, F30,
 ];
 
 /** Résumé par catégorie */

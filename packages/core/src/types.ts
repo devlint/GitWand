@@ -306,4 +306,16 @@ export interface GitWandOptions {
    * Exemple : `["src/**\/*.generated.ts", "*.pb.go", "api/openapi-client/**"]`.
    */
   generatedFiles?: string[];
+  /**
+   * v2.2 — Désactive globalement les FormatProfile.
+   *
+   * Quand `true`, les résolveurs JSON et YAML sautent le lookup `profileForFile`
+   * et se comportent exactement comme en v2.1 (les arrays modifiés des deux
+   * côtés retombent en fallback textuel). Utile pour rollback ponctuel,
+   * debug d'un profil mal calibré, ou scénarios où un profil tiers introduit
+   * des suppressions silencieuses inattendues.
+   *
+   * Défaut: `false` (profils actifs).
+   */
+  disableFormatProfiles?: boolean;
 }

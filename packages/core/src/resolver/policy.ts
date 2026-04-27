@@ -33,6 +33,8 @@ export const DEFAULT_OPTIONS: Required<GitWandOptions> = {
   policy: DEFAULT_POLICY,
   patternOverrides: {},
   generatedFiles: [],
+  // v2.2 — profils de format actifs par défaut
+  disableFormatProfiles: false,
 };
 
 /** Ordre de confiance pour comparaison. */

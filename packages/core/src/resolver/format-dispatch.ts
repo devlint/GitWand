@@ -36,7 +36,9 @@ export function dispatchFormatAware(
   filePath: string,
   options: Required<GitWandOptions>,
 ): FormatDispatchResult {
-  const formatResult = tryFormatAwareResolve(hunk, filePath);
+  const formatResult = tryFormatAwareResolve(hunk, filePath, {
+    disableFormatProfiles: options.disableFormatProfiles,
+  });
   if (formatResult.resolverUsed === "none") {
     return { status: "not-applicable", note: "" };
   }
