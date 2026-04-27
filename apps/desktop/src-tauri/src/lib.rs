@@ -427,37 +427,31 @@ struct GitDiff {
     old_path: Option<String>,
 }
 
-#[tauri::command]
-fn git_diff(cwd: String, path: String, staged: bool) -> Result<GitDiff, String> {
-    let mut cmd = std::process::Command::new(git_binary());
-    if staged {
-        cmd.arg("diff").arg("--cached");
-    } else {
-        cmd.arg("diff");
-    }
-    cmd.arg("--").arg(&path).current_dir(&cwd);
-
-    let output = cmd
-        .output()
-        .map_err(|e| format!("Failed to run git diff: {}", e))?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
+/// Parse the stdout of a `git diff` (or `git diff --no-index`) command into
+/// a list of `DiffHunk`s. The `status` return value is `Some("added")` when
+/// a `new file mode` header is detected in the diff preamble.
+fn parse_diff_hunks(stdout: &str) -> (Vec<DiffHunk>, Option<String>) {
     let mut hunks: Vec<DiffHunk> = Vec::new();
-
     let mut current_hunk: Option<DiffHunk> = None;
-    let mut old_line_no = 0;
-    let mut new_line_no = 0;
+    let mut old_line_no = 0u32;
+    let mut new_line_no = 0u32;
+    let mut detected_status: Option<String> = None;
 
     for line in stdout.lines() {
+        // Detect "new file mode …" in the diff preamble (before any @@).
+        if line.starts_with("new file mode") {
+            detected_status = Some("added".to_string());
+            continue;
+        }
+
         if line.starts_with("@@") {
             // Save previous hunk if exists
             if let Some(hunk) = current_hunk.take() {
                 hunks.push(hunk);
             }
 
-            // Parse hunk header
+            // Parse hunk header: @@ -oldStart,oldCount +newStart,newCount @@
             let header = line.to_string();
-            // Parse @@ -oldStart,oldCount +newStart,newCount @@
             let parts: Vec<&str> = line.split_whitespace().collect();
             let mut old_start = 0;
             let mut old_count = 1;
@@ -537,10 +531,50 @@ fn git_diff(cwd: String, path: String, staged: bool) -> Result<GitDiff, String> 
         hunks.push(hunk);
     }
 
+    (hunks, detected_status)
+}
+
+#[tauri::command]
+fn git_diff(cwd: String, path: String, staged: bool) -> Result<GitDiff, String> {
+    let mut cmd = std::process::Command::new(git_binary());
+    if staged {
+        cmd.arg("diff").arg("--cached");
+    } else {
+        cmd.arg("diff");
+    }
+    cmd.arg("--").arg(&path).current_dir(&cwd);
+
+    let output = cmd
+        .output()
+        .map_err(|e| format!("Failed to run git diff: {}", e))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let (mut hunks, mut status) = parse_diff_hunks(&stdout);
+
+    // Untracked (not-yet-staged) files produce no output from `git diff`.
+    // Fall back to `git diff --no-index -- /dev/null <path>` which generates
+    // a proper "new file" diff with every line shown as an addition.
+    // Note: --no-index always exits with code 1 when files differ, so we
+    // ignore the exit status and only look at stdout.
+    if !staged && hunks.is_empty() {
+        if let Ok(fb) = std::process::Command::new(git_binary())
+            .args(["diff", "--no-index", "--", "/dev/null", &path])
+            .current_dir(&cwd)
+            .output()
+        {
+            let fb_stdout = String::from_utf8_lossy(&fb.stdout);
+            let (fb_hunks, fb_status) = parse_diff_hunks(&fb_stdout);
+            if !fb_hunks.is_empty() {
+                hunks = fb_hunks;
+                status = fb_status.or(Some("added".to_string()));
+            }
+        }
+    }
+
     Ok(GitDiff {
         path,
         hunks,
-        status: None,
+        status,
         old_path: None,
     })
 }

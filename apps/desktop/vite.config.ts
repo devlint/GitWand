@@ -17,6 +17,15 @@ const pkg = JSON.parse(
 
 export default defineConfig({
   plugins: [vue()],
+  resolve: {
+    alias: {
+      // Point directly at the TypeScript source so Vite never needs a
+      // pre-built dist/ for @gitwand/core during development or CI.
+      // Production builds go through the same alias, so no separate
+      // `pnpm --filter @gitwand/core build` step is required.
+      "@gitwand/core": resolve(__dirname, "../../packages/core/src/index.ts"),
+    },
+  },
   define: {
     // Injected at build time from package.json — use as __APP_VERSION__ anywhere in the app.
     __APP_VERSION__: JSON.stringify(pkg.version),
