@@ -2,6 +2,57 @@
 
 All notable changes to this package will be documented in this file. Format inspired by [Keep a Changelog](https://keepachangelog.com/), with deltas grouped by minor version of the v2 sequence (see [`CORE-V2-ROADMAP.md`](../../CORE-V2-ROADMAP.md) for the full plan).
 
+## [2.2.0] — 2026-04-27
+
+### Format profile registry
+
+Adds a registry of **format profiles** that annotate JSON Pointer paths with a merge strategy. The JSON and YAML resolvers consult the registry before falling back to textual conflict markers, which closes two long-standing functional gaps:
+
+- **JSON arrays** at `/dependencies`, `/scripts`, `/keywords`, `/files`, etc. now merge semantically (set-by-identity or merge-keys) instead of bailing out on `Array.isArray` check.
+- **YAML sequences** in `helm/values.yaml` and Kubernetes manifests (containers, volumes, env vars, ports) merge by `name` (or `port` / `host` per resource) instead of failing on a single divergent line.
+
+Five built-in profiles ship in 2.2.0:
+
+| Profile | File matchers | Highlights |
+|---|---|---|
+| `package.json` | basename `package.json` | `/dependencies`, `/devDependencies`, `/peerDependencies`, `/optionalDependencies` (merge-keys); `/scripts` (merge-keys); `/keywords`, `/files`, `/workspaces` (set) |
+| `tsconfig.json` | `tsconfig.json`, `tsconfig.<variant>.json` | `/compilerOptions/lib`, `/compilerOptions/types`, `/include`, `/exclude`, `/files` (set); `/references` (set by `path`) |
+| `composer.json` | basename `composer.json` | `/require`, `/require-dev`, `/conflict`, `/provide`, `/replace`, `/suggest`, `/scripts`, `/autoload` (merge-keys); `/keywords` (set); `/authors` (set by `email`) |
+| `helm/values.yaml` | `values.yaml` or `values.<env>.yaml` under `helm/` or `charts/` | `/spec/template/spec/containers`, `/initContainers`, `/volumes`, `/imagePullSecrets` (set by `name`) |
+| `kubernetes` | `*.ya?ml` under `k8s/`, `kubernetes/`, `manifests/`, or named `deployment|service|ingress|configmap|...yaml` | name-keyed lists for containers / volumes / etc., `/spec/ports` (set by `port`), `/spec/rules` (set by `host`) |
+
+### RFC 6902 (JSON Patch) — minimal in-house implementation
+
+`diffJson(base, target)` produces an op sequence (`add` / `remove` / `replace`), `applyJsonPatch(doc, ops)` applies it (immutable), and `mergeJsonPatches(ours, theirs)` returns the concatenation when paths are disjoint or `null` plus a list of conflicting paths otherwise. Path semantics include the JSON Pointer escapes (`~0`, `~1`). `move` and `copy` are deliberately not supported (express them via `add` + `remove`). Round-trip property `applyJsonPatch(base, diffJson(base, x)) ≡ x` verified on 100 random JSON inputs.
+
+### New exports
+
+- `profileForFile(filePath)`, `registerFormatProfile(profile)`, `strategyForPath(profile, pointer)` — registry API. `registerFormatProfile` returns an unregister function for clean teardown in tests.
+- `diffJson`, `applyJsonPatch`, `mergeJsonPatches`, `parseJsonPointer`, `buildJsonPointer`, `jsonStructEqual` — patch primitives.
+- `FormatProfile`, `PathStrategy`, `JsonPatchOp` — types.
+
+### Rollback
+
+A new `GitWandOptions.disableFormatProfiles?: boolean` (default `false`) reverts the JSON and YAML resolvers to their v2.1 behavior — useful when a third-party profile causes unexpected silent deletions, or for A/B comparison on a specific repo.
+
+```ts
+resolve(content, "package.json", { disableFormatProfiles: true });
+```
+
+### Internals
+
+- New module: `src/format-profiles/{index,types,json-patch,merge-strategies,profiles/*}.ts`.
+- `tryResolveJsonConflict` and `tryResolveYamlConflict` gain an optional `filePath` parameter (back-compat: callers without `filePath` keep the v2.1 behavior). The dispatcher passes `filePath` through, conditional on `disableFormatProfiles`.
+- The YAML resolver gets a parse-merge-serialize fast path that runs only when a profile applies — comments are lost on this path, but the line-based pipeline remains the default for unprofiled YAML.
+- Tests: `__tests__/format-profiles/{json-patch,registry,integration}.test.ts` (≈ +47 tests). Corpus extended with fixtures F26–F30.
+
+### Notes
+
+- Cargo.toml profile is intentionally deferred — the existing `cargo.ts` resolver has its own TOML pipeline and integrating it into the registry warrants a separate refactor.
+- The roadmap's reference to `gh workflow run publish.yml -f package=core` is obsolete: `publish.yml` only accepts `dry_run`; the per-package `npm view` skip in each publish step makes core-only releases work without an input filter.
+
+---
+
 ## [2.1.0] — 2026-04-27
 
 ### Diff backend — Histogram by default

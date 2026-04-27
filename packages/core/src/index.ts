@@ -32,6 +32,24 @@ export {
   type BlockMoveOptions,
 } from "./diff/index.js";
 
+// v2.2 — registre de profils de format + RFC 6902
+export {
+  profileForFile,
+  registerFormatProfile,
+  strategyForPath,
+  type FormatProfile,
+  type PathStrategy,
+} from "./format-profiles/index.js";
+export {
+  diffJson,
+  applyJsonPatch,
+  mergeJsonPatches,
+  parseJsonPointer,
+  buildJsonPointer,
+  jsonStructEqual,
+} from "./format-profiles/json-patch.js";
+export type { JsonPatchOp } from "./format-profiles/types.js";
+
 // Phase 7.3 — Résolveurs spécialisés par format
 export { tryResolveJsonConflict, stripJsoncComments } from "./resolvers/json.js";
 export { tryResolveMarkdownConflict, parseSections, extractFrontmatter } from "./resolvers/markdown.js";

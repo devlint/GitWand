@@ -73,6 +73,36 @@ const pairs = histogramDiff(linesA, linesB);
 const moves = detectBlockMove(base, ours, theirs);
 ```
 
+## Format profiles (v2.2+)
+
+Since `2.2.0`, the JSON and YAML resolvers consult a registry of **format profiles** before falling back to textual conflict markers. A profile annotates JSON Pointer paths with a merge strategy: `set` (merge as a set with custom identity), `merge-keys` (recurse key-by-key), `ordered-list` (RFC 6902 add/remove), or `opaque` (skip). Built-in profiles cover `package.json`, `tsconfig.json`, `composer.json`, `helm/values.yaml`, and Kubernetes manifests.
+
+Concrete impact: `package.json` with divergent `keywords` arrays, `tsconfig.json` with split `include` paths, or a Kubernetes Deployment with new containers added on each side — all auto-resolve where v2.1 fell back to a textual conflict marker.
+
+```ts
+import { profileForFile, registerFormatProfile } from "@gitwand/core";
+
+const profile = profileForFile("package.json");
+// → { name: "package.json", paths: { "/keywords": { kind: "set" }, ... } }
+
+// Register a custom profile (inserted ahead of built-ins, useful for
+// monorepo-specific paths). The returned function unregisters it.
+const unregister = registerFormatProfile({
+  name: "my-config",
+  matches: (fp) => fp.endsWith("/myconfig.json"),
+  paths: { "/plugins": { kind: "set", identity: (p) => (p as { id: string }).id } },
+  default: { kind: "merge-keys" },
+});
+```
+
+Roll back to the v2.1 behavior (no profile lookup) globally:
+
+```ts
+resolve(content, "package.json", { disableFormatProfiles: true });
+```
+
+The RFC 6902 primitives are also exported (`diffJson`, `applyJsonPatch`, `mergeJsonPatches`) for consumers that want to compose their own merge logic.
+
 ## Links
 
 - 📖 [Documentation](https://github.com/devlint/GitWand#conflict-resolution-engine)
