@@ -30,12 +30,20 @@ function printHelp(): void {
   console.log(`  gitwand --help                  Show this help`);
   console.log();
   console.log(`${c.bold}Options:${c.reset}`);
-  console.log(`  --dry-run         Analyze without writing files`);
-  console.log(`  --verbose         Show details for each resolution`);
-  console.log(`  --no-whitespace   Don't resolve whitespace-only conflicts`);
-  console.log(`  --concurrency=N   Parallel file workers (default ${DEFAULT_CONCURRENCY}, min 1)`);
-  console.log(`  --ci              CI mode: JSON output + exit code 1 if unresolved`);
-  console.log(`  --json            Output results as JSON (implies --ci behavior)`);
+  console.log(`  --dry-run             Analyze without writing files`);
+  console.log(`  --verbose             Show details for each resolution`);
+  console.log(`  --no-whitespace       Don't resolve whitespace-only conflicts`);
+  console.log(`  --concurrency=N       Parallel file workers (default ${DEFAULT_CONCURRENCY}, min 1)`);
+  console.log(`  --ci                  CI mode: JSON output + exit code 1 if unresolved`);
+  console.log(`  --json                Output results as JSON (implies --ci behavior)`);
+  console.log(`  --llm-fallback        Enable LLM fallback for unresolved conflicts (opt-in, experimental)`);
+  console.log(`  --llm-provider=X      LLM provider: claude (default) | openai | ollama`);
+  console.log(`  --llm-model=X         Model name (e.g. claude-sonnet-4-6, gpt-4o-mini, llama3)`);
+  console.log();
+  console.log(`${c.bold}LLM environment:${c.reset}`);
+  console.log(`  ANTHROPIC_API_KEY     Required for --llm-provider=claude`);
+  console.log(`  OPENAI_API_KEY        Required for --llm-provider=openai`);
+  console.log(`  OLLAMA_URL            Optional override (default http://localhost:11434)`);
   console.log();
 }
 

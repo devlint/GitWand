@@ -1,17 +1,21 @@
 /**
  * MCP Tools — what the LLM can invoke.
  *
- * gitwand_status              → list conflicted files + complexity
- * gitwand_resolve_conflicts   → auto-resolve and return results + DecisionTrace
- * gitwand_preview_merge       → dry-run: simulate resolution, return stats
- * gitwand_explain_hunk        → explain why a specific hunk is "complex"
- * gitwand_apply_resolution    → apply a custom resolution to a specific hunk
+ * gitwand_status                → list conflicted files + complexity
+ * gitwand_resolve_conflicts     → auto-resolve and return results + DecisionTrace
+ * gitwand_preview_merge         → dry-run: simulate resolution, return stats
+ * gitwand_explain_hunk          → explain why a specific hunk is "complex"
+ * gitwand_apply_resolution      → apply a custom resolution to a specific hunk
+ * gitwand_resolve_hunk          → ask the connected agent to propose a resolution
+ *                                 (inversion of `--llm-fallback`: the agent IS the LLM)
+ * gitwand_resolve_hunk_llm      → validate + apply an LLM-proposed resolution
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { resolve as resolvePath } from "node:path";
 import { resolve, type MergeResult } from "@gitwand/core";
+import { resolveHunkToolDefinition, handleResolveHunk } from "./resolve_hunk.js";
 
 // ─── Tool definitions ──────────────────────────────────────
 
@@ -123,7 +127,11 @@ export function registerTools() {
         required: ["file", "line", "content"],
       },
     },
-    // v2.5 — LLM fallback tool
+    // v2.5 — inversion-of-loop: GitWand asks the connected agent (Claude Code,
+    // Cursor, Windsurf…) to propose a resolution. The server returns a structured
+    // prompt; the agent replies with { resolution, reasoning }.
+    resolveHunkToolDefinition,
+    // v2.5 — validate + apply an LLM-proposed resolution
     {
       name: "gitwand_resolve_hunk_llm",
       description:
@@ -288,6 +296,8 @@ export async function handleToolCall(
       return toolExplain(cwd, args);
     case "gitwand_apply_resolution":
       return toolApply(cwd, args);
+    case "gitwand_resolve_hunk":
+      return handleResolveHunk(args);
     case "gitwand_resolve_hunk_llm":
       return toolResolvHunkLlm(cwd, args);
     default:

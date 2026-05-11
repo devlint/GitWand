@@ -909,6 +909,40 @@ const zhCN: Locale = {
     aiOllamaTest: "测试连接",
     aiOllamaConnected: "已连接 — {0} 个可用模型",
     aiOllamaNotConnected: "未连接。请在 ollama.com 安装 Ollama",
+    // AI 选项卡 — LLM 回退（v2.5 — 按仓库 .gitwandrc）
+    ai: {
+      fallback: {
+        title: "未解决冲突的 LLM 回退",
+        enable: {
+          label: "启用 LLM 回退（实验性）",
+          help: "仅在确定性引擎无法独立解决冲突块时使用。",
+        },
+        warning: "您的代码将被发送到配置的 AI 提供商。请在提交前仔细审查。",
+        provider: {
+          label: "提供商",
+        },
+        minScore: {
+          label: "拒绝低于此分数的 LLM 解决方案",
+          help: "在拟议合并后计算的验证分数（0–100）。分数越高越严格。",
+        },
+        contextLines: {
+          label: "冲突块周围的上下文行数",
+        },
+        minMode: {
+          label: "验证级别",
+        },
+        save: {
+          button: "保存到 .gitwandrc",
+        },
+        noRepo: {
+          message: "请打开一个仓库以配置其 LLM 回退。设置按仓库保存在 .gitwandrc 中。",
+        },
+        policyConflict: {
+          warning: "当前策略（prefer-safety / strict）即使启用也会跳过 LLM 回退。请在 .gitwandrc 中放宽策略才能使用。",
+        },
+        providerMissing: "已在 .gitwandrc 中启用 LLM 回退，但尚未配置 AI 提供方。请打开 设置 → AI 选择一个，然后重新加载仓库。",
+      },
+    },
     language: "界面语言",
     languageAuto: "自动（跟随系统）",
     commitMessageLang: "提交信息语言",
@@ -1123,7 +1157,13 @@ const zhCN: Locale = {
     memoryBannerHint: "已保存规则：{0}",
     memorySaveOffer: "记住此次解决方案以供下次使用？",
     memorySave: "保存",
-
+    // v2.5 — LLM 解决方案审计（LlmTracePanel）
+    llmResolution: {
+      title: "由 LLM 解决（实验性）",
+      reject: "拒绝 → 手动解决",
+      accept: "接受",
+      details: "追踪详情",
+    },
   },
 
   // ─── PR inline diff — AI review ─────────────────────────

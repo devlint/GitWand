@@ -1,0 +1,6 @@
+{
+  "filePath": "config/flags.json",
+  "description": "JSON: each side adds 2 different feature flags + diverges on rolloutPct.",
+  "difficulty": "medium",
+  "category": "json"
+}

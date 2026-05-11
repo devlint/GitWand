@@ -1,0 +1,11 @@
+import { logger } from "./logger";
+import { Cache } from "./cache";
+import { metrics } from "./metrics";
+
+export function fetchUser(id: string) {
+  const cached = Cache.get(id);
+  if (cached) return cached;
+  metrics.incr("user.fetch");
+  logger.debug("cache miss, fetching user", { id, source: "api" });
+  return api.get(`/users/${id}`);
+}

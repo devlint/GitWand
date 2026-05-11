@@ -29,6 +29,44 @@ pub(crate) fn write_file(cwd: String, path: String, content: String) -> Result<(
     std::fs::write(&full, &content).map_err(|e| format!("Failed to write {}: {}", path, e))
 }
 
+/// v2.5 — Write `.gitwandrc` (or `.gitwandrc.json` if it already exists).
+///
+/// Detects which format is present in the repo:
+///   - `.gitwandrc.json` exists → writes there (keeps the existing format)
+///   - otherwise → writes `.gitwandrc` (JSONC-friendly default)
+///
+/// `content` MUST parse as JSON — comments aren't accepted on write
+/// (we serialize from a structured object on the TS side). Validation
+/// uses `serde_json::from_str` to fail loudly on malformed input rather
+/// than silently corrupting the user's config file.
+///
+/// Path traversal: `cwd` is the repo root, the filename is hard-coded
+/// here (`.gitwandrc` / `.gitwandrc.json`), so no user-supplied path
+/// component reaches the filesystem.
+#[tauri::command]
+pub(crate) fn write_gitwandrc(cwd: String, content: String) -> Result<(), String> {
+    if cwd.trim().is_empty() {
+        return Err("cwd must not be empty".to_string());
+    }
+
+    // Validate: must parse as JSON. We don't enforce schema here — the
+    // structured object comes from the TS wrapper, this is a guard
+    // against accidental corruption.
+    serde_json::from_str::<serde_json::Value>(&content)
+        .map_err(|e| format!("Invalid JSON for .gitwandrc: {}", e))?;
+
+    let cwd_path = std::path::Path::new(&cwd);
+    let rc_json = cwd_path.join(".gitwandrc.json");
+    let rc_jsonc = cwd_path.join(".gitwandrc");
+
+    // Mirror read_gitwandrc detection: if .gitwandrc.json exists, write
+    // there; otherwise default to .gitwandrc (JSONC-friendly filename).
+    let target = if rc_json.exists() { rc_json } else { rc_jsonc };
+
+    std::fs::write(&target, &content)
+        .map_err(|e| format!("Failed to write {}: {}", target.display(), e))
+}
+
 #[tauri::command]
 pub(crate) fn read_file_at_revision(
     cwd: String,

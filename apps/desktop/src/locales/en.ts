@@ -945,6 +945,40 @@ const en = {
     aiOllamaTest: "Test connection",
     aiOllamaConnected: "Connected \u2014 {0} model(s) available",
     aiOllamaNotConnected: "Not connected. Install Ollama at ollama.com",
+    // AI tab \u2014 LLM fallback (v2.5 \u2014 .gitwandrc per-repo)
+    ai: {
+      fallback: {
+        title: "LLM fallback for unresolved conflicts",
+        enable: {
+          label: "Enable LLM fallback (experimental)",
+          help: "Used only when the deterministic engine cannot resolve a hunk on its own.",
+        },
+        warning: "Your code will be sent to the configured AI provider. Review carefully before commit.",
+        provider: {
+          label: "Provider",
+        },
+        minScore: {
+          label: "Reject LLM resolutions scoring below",
+          help: "Validation score (0\u2013100) computed after the proposed merge. Higher is stricter.",
+        },
+        contextLines: {
+          label: "Context lines around the hunk",
+        },
+        minMode: {
+          label: "Validation level",
+        },
+        save: {
+          button: "Save to .gitwandrc",
+        },
+        noRepo: {
+          message: "Open a repository to configure its LLM fallback. Settings are saved per-repo in .gitwandrc.",
+        },
+        policyConflict: {
+          warning: "Active policy (prefer-safety / strict) will skip the LLM fallback even when enabled. Relax the policy in .gitwandrc to use it.",
+        },
+        providerMissing: "LLM fallback is enabled in .gitwandrc but no AI provider is configured. Open Settings → AI to pick one, then reload the repository.",
+      },
+    },
     language: "Interface language",
     languageAuto: "Automatic (system)",
     commitMessageLang: "Commit message language",
@@ -1165,6 +1199,13 @@ const en = {
     memoryBannerHint: "Saved rule: {0}",
     memorySaveOffer: "Remember this resolution for next time?",
     memorySave: "Save",
+    // v2.5 LLM resolution audit (LlmTracePanel)
+    llmResolution: {
+      title: "Resolved by LLM (experimental)",
+      reject: "Reject \u2192 resolve manually",
+      accept: "Accept",
+      details: "Trace details",
+    },
   },
 
   // ─── PR inline diff — AI review ─────────────────────────

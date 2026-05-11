@@ -1368,6 +1368,38 @@ export async function readGitwandrc(cwd: string): Promise<string> {
 }
 
 /**
+ * v2.5 — Write the repo's `.gitwandrc` (or `.gitwandrc.json` if present).
+ *
+ * The config object is serialized as pretty-printed JSON (2-space indent).
+ * Comments in an existing `.gitwandrc` JSONC file are NOT preserved —
+ * the round-trip is pure JSON. Documented in the .gitwandrc doc page.
+ *
+ * Throws on:
+ *   - empty `cwd`
+ *   - JSON.stringify failures (circular refs, BigInt, …)
+ *   - filesystem errors on the Rust / dev-server side
+ */
+export async function writeGitwandrc(cwd: string, config: object): Promise<void> {
+  if (!cwd || !cwd.trim()) {
+    throw new Error("writeGitwandrc: cwd must not be empty");
+  }
+  const content = JSON.stringify(config, null, 2);
+  if (isTauri()) {
+    await tauriInvoke("write_gitwandrc", { cwd, content });
+    return;
+  }
+  const res = await devFetch(`${DEV_SERVER}/api/write-gitwandrc`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, content }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`Failed to write .gitwandrc: ${res.status} ${body}`);
+  }
+}
+
+/**
  * Delete a branch.
  */
 export async function gitDeleteBranch(cwd: string, name: string, force: boolean = false): Promise<void> {

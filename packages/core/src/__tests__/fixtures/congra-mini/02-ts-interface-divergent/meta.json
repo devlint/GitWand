@@ -1,0 +1,6 @@
+{
+  "filePath": "src/types/Config.ts",
+  "description": "TS: each side adds a different optional field to an interface — additive merge.",
+  "difficulty": "easy",
+  "category": "ts"
+}

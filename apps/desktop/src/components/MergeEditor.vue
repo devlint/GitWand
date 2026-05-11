@@ -15,6 +15,7 @@ import {
   applyMemory,
   type ResolutionStrategy,
 } from "../composables/useResolutionMemory";
+import LlmTracePanel from "./LlmTracePanel.vue";
 
 const { t, locale } = useI18n();
 const { isAvailable: aiAvailable, isLoading: aiLoading, lastError: aiError, suggest: aiSuggest } = useAIProvider();
@@ -225,9 +226,91 @@ function resolveHunkCustomWithMemory(path: string, hunkIndex: number, content: s
   }
 }
 
-const canResolve = computed(() => props.file.result.stats.autoResolved > 0);
+// ─── v2.5 — LLM trace UX state ─────────────────────────
+//
+// `llm_proposed` hunks come back from the core with an audit trail
+// (`hunk.trace.llmTrace`). The user can:
+//   - accept (default) → resolution applies through the normal auto-resolve
+//     path, the panel just locks in visually
+//   - reject → this specific hunk is downgraded to "needs manual handling",
+//     even though the rest of the file's `llm_proposed` hunks stay accepted
+//
+// We track rejection client-side (per file path) because the core has
+// already produced the resolution — we don't want to re-run it. The set
+// is reset when the active file changes.
+const rejectedLlmHunks = ref<Set<number>>(new Set());
+
+watch(
+  () => props.file.path,
+  () => {
+    rejectedLlmHunks.value = new Set();
+  },
+);
+
+/** Number of `llm_proposed` hunks the user explicitly rejected (this file). */
+const rejectedLlmCount = computed(() => rejectedLlmHunks.value.size);
+
+/**
+ * `file.result.stats.autoResolved` counts every hunk the core marked as
+ * auto-resolvable, including `llm_proposed` ones. If the user rejected
+ * some, we should not light up the "Resolve auto" button on their
+ * behalf. Subtract rejections so the count reflects what *would*
+ * actually be applied.
+ */
+const canResolve = computed(
+  () => props.file.result.stats.autoResolved - rejectedLlmCount.value > 0,
+);
 
 const hunks = computed(() => props.file.result.hunks);
+
+/** Does a given hunk carry an `llm_proposed` decision with a trace? */
+function hasLlmTrace(hunk: ConflictHunk): boolean {
+  return (
+    hunk.type === "llm_proposed" &&
+    hunk.trace?.llmTrace != null
+  );
+}
+
+/**
+ * Should we show the LLM panel for this hunk? Hidden after rejection so
+ * the user falls back to the 3-way diff (already rendered below).
+ */
+function showLlmPanelFor(hunkIndex: number, hunk: ConflictHunk): boolean {
+  if (!hasLlmTrace(hunk)) return false;
+  if (rejectedLlmHunks.value.has(hunkIndex)) return false;
+  return true;
+}
+
+/** Visual badge — `true` once the user clicked Accept. UX-only, no state mutation. */
+const acceptedLlmHunks = ref<Set<number>>(new Set());
+
+watch(
+  () => props.file.path,
+  () => {
+    acceptedLlmHunks.value = new Set();
+  },
+);
+
+function onLlmAccept(hunkId: string | number) {
+  const idx = Number(hunkId);
+  if (!Number.isFinite(idx)) return;
+  acceptedLlmHunks.value = new Set([...acceptedLlmHunks.value, idx]);
+}
+
+function onLlmReject(hunkId: string | number) {
+  const idx = Number(hunkId);
+  if (!Number.isFinite(idx)) return;
+  // Use a fresh Set so reactivity fires (computed `canResolve` recomputes).
+  const next = new Set(rejectedLlmHunks.value);
+  next.add(idx);
+  rejectedLlmHunks.value = next;
+  // Drop a previously-recorded accept so the UX badge doesn't lie.
+  if (acceptedLlmHunks.value.has(idx)) {
+    const a = new Set(acceptedLlmHunks.value);
+    a.delete(idx);
+    acceptedLlmHunks.value = a;
+  }
+}
 
 /** Parse file content into displayable segments (code + conflict hunks). */
 interface Segment {
@@ -571,6 +654,16 @@ onMounted(() => {
         <!-- Conflict hunk -->
         <template v-else>
           <div class="conflict-hunk" :class="{ 'conflict-hunk--resolvable': hunkForSegment(seg) && isAutoResolvable(hunkForSegment(seg)!) }">
+
+            <!-- ── v2.5 LLM trace audit (when llm_proposed and not rejected) ─── -->
+            <LlmTracePanel
+              v-if="hunkForSegment(seg) && seg.hunkIndex != null && showLlmPanelFor(seg.hunkIndex, hunkForSegment(seg)!)"
+              :trace="hunkForSegment(seg)!.trace.llmTrace!"
+              :file-path="file.path"
+              :hunk-id="seg.hunkIndex"
+              @accept="onLlmAccept"
+              @reject="onLlmReject"
+            />
 
             <!-- ── VS Code-style inline action bar ─────────── -->
             <div class="inline-actions" v-if="hunkForSegment(seg) && editingHunkIndex !== seg.hunkIndex">

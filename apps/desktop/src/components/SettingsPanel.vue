@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, onMounted, watch } from "vue";
 import { useI18n } from "../composables/useI18n";
 import { useTheme } from "../composables/useTheme";
 import BaseModal from "./BaseModal.vue";
@@ -10,7 +10,15 @@ import {
   supportedLocales,
   type SupportedLocale,
 } from "../locales";
-import { detectClaudeCli, claudeCliLogin, type ClaudeCliInfo, detectCodexCli, type CodexCliInfo } from "../utils/backend";
+import {
+  detectClaudeCli,
+  claudeCliLogin,
+  type ClaudeCliInfo,
+  detectCodexCli,
+  type CodexCliInfo,
+  readGitwandrc,
+  writeGitwandrc,
+} from "../utils/backend";
 
 const { t, locale, isAuto, setLocale } = useI18n();
 const { theme, setTheme } = useTheme();
@@ -410,6 +418,180 @@ async function runClaudeCliLogin() {
   }
 }
 
+// ─── LLM fallback (v2.5 — .gitwandrc) ───────────────────
+//
+// Persisted in the repo's `.gitwandrc` (per-repo, not localStorage),
+// because the LLM fallback config travels with the repository and is
+// also consumed by the CLI / MCP / CI runners. The `endpoint` field
+// itself is NOT written to disk — it's injected programmatically by
+// useGitWand at call time (cf. PLAN-v2.5-tie-in §2.1).
+//
+// TDZ caveat: all refs / computeds below MUST be declared BEFORE the
+// `watch(..., { immediate: true })` that reloads on `props.cwd` change,
+// otherwise the watcher fires during script setup and reads `undefined`.
+
+type LlmFallbackProvider =
+  | "claude"
+  | "claude-code-cli"
+  | "codex-cli"
+  | "openai-compat"
+  | "ollama"
+  | "mcp";
+
+type MinMode = "off" | "balanced" | "strict";
+
+interface LlmFallbackState {
+  enabled: boolean;
+  provider: LlmFallbackProvider;
+  minPostMergeScore: number;
+  contextLines: number;
+  minMode: MinMode;
+}
+
+const DEFAULT_LLM_FALLBACK: LlmFallbackState = {
+  enabled: false,
+  provider: "claude",
+  minPostMergeScore: 80,
+  contextLines: 50,
+  minMode: "strict",
+};
+
+const llmFallback = ref<LlmFallbackState>({ ...DEFAULT_LLM_FALLBACK });
+const llmFallbackLoading = ref(false);
+const llmFallbackSaving = ref(false);
+const llmFallbackSaveError = ref<string | null>(null);
+const llmFallbackSaveSuccess = ref(false);
+// The full parsed .gitwandrc — needed so that Save round-trips the rest
+// of the user's config (policy, structural, refmerge, …) unchanged.
+const llmFallbackRcCache = ref<Record<string, unknown>>({});
+// Policy read from .gitwandrc (read-only here, edited elsewhere or by hand).
+// Used to surface a warning when the active policy will skip the LLM
+// fallback (see PLAN-v2.5-tie-in §Risques #4).
+const llmFallbackPolicy = ref<string | null>(null);
+
+const llmFallbackHasRepo = computed(() => !!(props.cwd && props.cwd.trim()));
+
+const llmFallbackPolicyConflict = computed(() => {
+  const p = llmFallbackPolicy.value;
+  return p === "prefer-safety" || p === "strict";
+});
+
+async function loadLlmFallback() {
+  if (!llmFallbackHasRepo.value) {
+    llmFallback.value = { ...DEFAULT_LLM_FALLBACK };
+    llmFallbackRcCache.value = {};
+    llmFallbackPolicy.value = null;
+    return;
+  }
+  llmFallbackLoading.value = true;
+  llmFallbackSaveError.value = null;
+  llmFallbackSaveSuccess.value = false;
+  try {
+    const raw = await readGitwandrc(props.cwd!);
+    let parsed: Record<string, unknown> = {};
+    if (raw && raw.trim()) {
+      try {
+        parsed = JSON.parse(raw) as Record<string, unknown>;
+      } catch {
+        // .gitwandrc may be JSONC with comments — best-effort strip
+        // single-line comments, then retry once. If that still fails,
+        // we surface an error rather than silently overwrite.
+        try {
+          const stripped = raw
+            .replace(/\/\*[\s\S]*?\*\//g, "")
+            .replace(/(^|[^:])\/\/.*$/gm, "$1");
+          parsed = JSON.parse(stripped) as Record<string, unknown>;
+        } catch {
+          llmFallbackSaveError.value = t("settings.ai.fallback.warning");
+          parsed = {};
+        }
+      }
+    }
+    llmFallbackRcCache.value = parsed;
+
+    const llm = (parsed.llmFallback ?? {}) as Partial<LlmFallbackState>;
+    const merged: LlmFallbackState = {
+      enabled: typeof llm.enabled === "boolean" ? llm.enabled : DEFAULT_LLM_FALLBACK.enabled,
+      provider: (typeof llm.provider === "string" && llm.provider
+        ? (llm.provider as LlmFallbackProvider)
+        : DEFAULT_LLM_FALLBACK.provider),
+      minPostMergeScore: typeof llm.minPostMergeScore === "number"
+        ? Math.max(50, Math.min(100, llm.minPostMergeScore))
+        : DEFAULT_LLM_FALLBACK.minPostMergeScore,
+      contextLines: typeof llm.contextLines === "number"
+        ? Math.max(10, Math.min(200, llm.contextLines))
+        : DEFAULT_LLM_FALLBACK.contextLines,
+      minMode: (llm.minMode === "off" || llm.minMode === "balanced" || llm.minMode === "strict")
+        ? llm.minMode
+        : DEFAULT_LLM_FALLBACK.minMode,
+    };
+    llmFallback.value = merged;
+
+    const policy = parsed.policy;
+    llmFallbackPolicy.value = typeof policy === "string" ? policy : null;
+  } catch (e) {
+    // No .gitwandrc yet (most common case) → keep defaults silently.
+    llmFallback.value = { ...DEFAULT_LLM_FALLBACK };
+    llmFallbackRcCache.value = {};
+    llmFallbackPolicy.value = null;
+  } finally {
+    llmFallbackLoading.value = false;
+  }
+}
+
+async function saveLlmFallback() {
+  if (!llmFallbackHasRepo.value) return;
+  llmFallbackSaving.value = true;
+  llmFallbackSaveError.value = null;
+  llmFallbackSaveSuccess.value = false;
+  try {
+    // Round-trip the rest of the .gitwandrc untouched; replace only
+    // the llmFallback key. Endpoint is never persisted (cf. §1.0).
+    const next = {
+      ...llmFallbackRcCache.value,
+      llmFallback: {
+        enabled: llmFallback.value.enabled,
+        provider: llmFallback.value.provider,
+        minPostMergeScore: llmFallback.value.minPostMergeScore,
+        contextLines: llmFallback.value.contextLines,
+        minMode: llmFallback.value.minMode,
+      },
+    };
+    await writeGitwandrc(props.cwd!, next);
+    llmFallbackRcCache.value = next;
+    llmFallbackSaveSuccess.value = true;
+    // Auto-dismiss the success message after 2s, same UX as the
+    // Claude Connect success badge above.
+    setTimeout(() => {
+      llmFallbackSaveSuccess.value = false;
+    }, 2000);
+  } catch (e) {
+    llmFallbackSaveError.value = (e as Error).message || String(e);
+  } finally {
+    llmFallbackSaving.value = false;
+  }
+}
+
+function onLlmFallbackEnabledChange(e: Event) {
+  llmFallback.value.enabled = (e.target as HTMLInputElement).checked;
+}
+
+function onLlmFallbackProviderChange(val: LlmFallbackProvider) {
+  llmFallback.value.provider = val;
+}
+
+function onLlmFallbackMinScoreChange(val: number) {
+  llmFallback.value.minPostMergeScore = Math.max(50, Math.min(100, Math.round(val)));
+}
+
+function onLlmFallbackContextLinesChange(val: number) {
+  llmFallback.value.contextLines = Math.max(10, Math.min(200, Math.round(val)));
+}
+
+function onLlmFallbackMinModeChange(val: MinMode) {
+  llmFallback.value.minMode = val;
+}
+
 onMounted(() => {
   detectOllama();
   // Lazy-detect both CLI providers at mount so the dropdown can grey out
@@ -418,6 +600,17 @@ onMounted(() => {
   runClaudeCliDetect();
   runCodexCliDetect();
 });
+
+// Reload `.gitwandrc` when the active repo changes (or on first mount
+// if `cwd` is already set). All refs read inside the handler are
+// declared above, so this `immediate: true` watcher is TDZ-safe.
+watch(
+  () => props.cwd,
+  () => {
+    loadLlmFallback();
+  },
+  { immediate: true },
+);
 
 </script>
 
@@ -1072,6 +1265,136 @@ onMounted(() => {
               <p>{{ t('settings.aiPrivacyNote') }}</p>
             </div>
           </template>
+
+          <!-- ─── AI fallback (v2.5 — .gitwandrc per-repo) ─────── -->
+          <div class="sp-section-divider"></div>
+
+          <h3 class="sp-section-title">{{ t('settings.ai.fallback.title') }}</h3>
+
+          <!-- No repo open → disable the entire block with an info message -->
+          <div v-if="!llmFallbackHasRepo" class="sp-info-box">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
+              <circle cx="8" cy="8" r="7"/><path d="M8 7v4" stroke-linecap="round"/><circle cx="8" cy="5" r="0.7" fill="currentColor" stroke="none"/>
+            </svg>
+            <p>{{ t('settings.ai.fallback.noRepo.message') }}</p>
+          </div>
+
+          <template v-else>
+            <!-- Enable toggle + disclaimer -->
+            <div class="sp-row sp-row--checkbox">
+              <label class="sp-checkbox-label" for="setting-llm-fallback-enabled">
+                <input
+                  id="setting-llm-fallback-enabled"
+                  type="checkbox"
+                  class="sp-checkbox"
+                  :checked="llmFallback.enabled"
+                  :disabled="llmFallbackLoading"
+                  @change="onLlmFallbackEnabledChange"
+                />
+                <span>{{ t('settings.ai.fallback.enable.label') }}</span>
+              </label>
+              <span class="sp-hint">{{ t('settings.ai.fallback.enable.help') }}</span>
+            </div>
+
+            <div v-if="llmFallback.enabled" class="sp-warning-box">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4">
+                <path d="M8 1.5L1 14h14L8 1.5z" stroke-linejoin="round"/>
+                <path d="M8 6v4" stroke-linecap="round"/>
+                <circle cx="8" cy="12" r="0.7" fill="currentColor" stroke="none"/>
+              </svg>
+              <p>{{ t('settings.ai.fallback.warning') }}</p>
+            </div>
+
+            <!-- Policy conflict warning -->
+            <div v-if="llmFallback.enabled && llmFallbackPolicyConflict" class="sp-info-box sp-info-box--warning">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
+                <circle cx="8" cy="8" r="7"/><path d="M8 5v4" stroke-linecap="round"/><circle cx="8" cy="11.5" r="0.7" fill="currentColor" stroke="none"/>
+              </svg>
+              <p>{{ t('settings.ai.fallback.policyConflict.warning') }}</p>
+            </div>
+
+            <template v-if="llmFallback.enabled">
+              <!-- Provider -->
+              <div class="sp-row">
+                <label class="sp-label" for="setting-llm-fallback-provider">{{ t('settings.ai.fallback.provider.label') }}</label>
+                <select
+                  id="setting-llm-fallback-provider"
+                  class="sp-select"
+                  :value="llmFallback.provider"
+                  @change="onLlmFallbackProviderChange(($event.target as HTMLSelectElement).value as LlmFallbackProvider)"
+                >
+                  <option value="claude">{{ t('settings.aiProviderClaude') }}</option>
+                  <option value="claude-code-cli">{{ t('settings.aiProviderClaudeCli') }}</option>
+                  <option value="codex-cli">{{ t('settings.aiProviderCodexCli') }}</option>
+                  <option value="openai-compat">{{ t('settings.aiProviderOpenAiCompat') }}</option>
+                  <option value="ollama">{{ t('settings.aiProviderOllama') }}</option>
+                  <option value="mcp">MCP (Claude Code / Cursor)</option>
+                </select>
+              </div>
+
+              <!-- Min post-merge score (slider 50-100) -->
+              <div class="sp-row">
+                <label class="sp-label" for="setting-llm-fallback-min-score">{{ t('settings.ai.fallback.minScore.label') }}</label>
+                <div class="sp-range-row">
+                  <input
+                    id="setting-llm-fallback-min-score"
+                    type="range"
+                    class="sp-range"
+                    min="50"
+                    max="100"
+                    step="1"
+                    :value="llmFallback.minPostMergeScore"
+                    @input="onLlmFallbackMinScoreChange(Number(($event.target as HTMLInputElement).value))"
+                  />
+                  <span class="sp-range-value">{{ llmFallback.minPostMergeScore }}</span>
+                </div>
+                <span class="sp-hint">{{ t('settings.ai.fallback.minScore.help') }}</span>
+              </div>
+
+              <!-- Context lines (input number 10-200) -->
+              <div class="sp-row">
+                <label class="sp-label" for="setting-llm-fallback-context-lines">{{ t('settings.ai.fallback.contextLines.label') }}</label>
+                <input
+                  id="setting-llm-fallback-context-lines"
+                  type="number"
+                  class="sp-input"
+                  min="10"
+                  max="200"
+                  step="1"
+                  :value="llmFallback.contextLines"
+                  @input="onLlmFallbackContextLinesChange(Number(($event.target as HTMLInputElement).value))"
+                />
+              </div>
+
+              <!-- Min mode -->
+              <div class="sp-row">
+                <label class="sp-label" for="setting-llm-fallback-min-mode">{{ t('settings.ai.fallback.minMode.label') }}</label>
+                <select
+                  id="setting-llm-fallback-min-mode"
+                  class="sp-select"
+                  :value="llmFallback.minMode"
+                  @change="onLlmFallbackMinModeChange(($event.target as HTMLSelectElement).value as MinMode)"
+                >
+                  <option value="off">off</option>
+                  <option value="balanced">balanced</option>
+                  <option value="strict">strict</option>
+                </select>
+              </div>
+            </template>
+
+            <!-- Save button (always visible when a repo is open) -->
+            <div class="sp-row">
+              <button
+                class="bm-btn bm-btn--primary sp-llm-save-btn"
+                :disabled="llmFallbackSaving || llmFallbackLoading"
+                @click="saveLlmFallback"
+              >
+                {{ llmFallbackSaving ? t('common.loading') : t('settings.ai.fallback.save.button') }}
+              </button>
+              <span v-if="llmFallbackSaveSuccess" class="sp-hint sp-hint--ok">{{ t('settings.ai.fallback.save.button') }} OK</span>
+              <span v-if="llmFallbackSaveError" class="sp-connect-error">{{ llmFallbackSaveError }}</span>
+            </div>
+          </template>
         </template>
 
         <!-- ═══ AUTOMATIONS ═══ -->
@@ -1568,6 +1891,50 @@ onMounted(() => {
 .sp-log-msg {
   color: var(--color-error, #f38ba8);
   word-break: break-word;
+}
+
+/* ─── v2.5 LLM fallback section ─────────────────────────── */
+.sp-section-divider {
+  height: 1px;
+  background: var(--color-border);
+  margin: var(--space-3) 0;
+}
+
+.sp-section-title {
+  margin: 0;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
+}
+
+.sp-warning-box {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-md);
+  background: var(--color-danger-soft, rgba(220, 80, 80, 0.08));
+  border: 1px solid var(--color-danger, #d65d5d);
+  color: var(--color-danger, #d65d5d);
+  font-size: var(--font-size-base);
+  line-height: 1.5;
+}
+
+.sp-warning-box svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.sp-warning-box p {
+  margin: 0;
+}
+
+.sp-info-box--warning {
+  border-color: var(--color-warning, #d39e3a);
+  color: var(--color-warning, #d39e3a);
+}
+
+.sp-llm-save-btn {
+  align-self: flex-start;
 }
 
 </style>

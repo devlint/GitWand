@@ -1,0 +1,18 @@
+<<<<<<< ours
+export interface Config {
+  retries: number;
+  timeout: number | { connect: number; read: number };
+  debug: boolean;
+}
+||||||| base
+export interface Config {
+  retries: number;
+  timeout: number;
+}
+=======
+export interface Config {
+  retries: number;
+  timeout: string;
+  cacheKey: string;
+}
+>>>>>>> theirs

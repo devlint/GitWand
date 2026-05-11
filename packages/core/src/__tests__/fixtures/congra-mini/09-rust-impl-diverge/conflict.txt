@@ -1,0 +1,24 @@
+<<<<<<< ours
+impl Parser {
+    pub fn parse(&self, input: &str) -> Result<Ast, ParseError> {
+        let tokens = self.lexer.tokenize(input)?;
+        let normalized = self.normalize(&tokens);
+        self.build_ast(&normalized)
+    }
+}
+||||||| base
+impl Parser {
+    pub fn parse(&self, input: &str) -> Result<Ast, ParseError> {
+        let tokens = self.lexer.tokenize(input)?;
+        self.build_ast(&tokens)
+    }
+}
+=======
+impl Parser {
+    pub fn parse(&self, input: &str) -> Result<Ast, ParseError> {
+        let tokens = self.lexer.tokenize(input)?;
+        self.validate_tokens(&tokens)?;
+        self.build_ast(&tokens)
+    }
+}
+>>>>>>> theirs

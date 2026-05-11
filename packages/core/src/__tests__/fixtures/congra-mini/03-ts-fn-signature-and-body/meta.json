@@ -1,0 +1,6 @@
+{
+  "filePath": "src/http/buildUrl.ts",
+  "description": "TS: ours adds port parameter; theirs adds query parameter — both must coexist.",
+  "difficulty": "hard",
+  "category": "ts"
+}

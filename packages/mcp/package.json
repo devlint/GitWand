@@ -1,6 +1,6 @@
 {
   "name": "@gitwand/mcp",
-  "version": "2.8.2",
+  "version": "2.8.3",
   "mcpName": "io.github.devlint/gitwand",
   "description": "GitWand MCP server — smart Git conflict resolution for AI agents (Claude, Cursor, Windsurf, Claude Code)",
   "type": "module",

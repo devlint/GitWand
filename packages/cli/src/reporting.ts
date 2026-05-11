@@ -10,7 +10,7 @@
  * `version`.
  */
 
-import type { MergeResult } from "@gitwand/core";
+import type { LlmTrace, MergeResult } from "@gitwand/core";
 
 /** Forme stable du rapport JSON émis par `gitwand resolve --ci`. */
 export interface CIReport {
@@ -54,6 +54,11 @@ export interface CIReport {
           reason: string;
         }>;
       };
+      /**
+       * v2.5 — Trace LLM, présente uniquement quand `type === "llm_proposed"`.
+       * Audit trail intégral : modèle, latence, hash prompt, score validation.
+       */
+      llmTrace?: LlmTrace;
     }>;
     pendingHunks: Array<{
       line: number;
@@ -129,6 +134,8 @@ export function buildCIReport(
             reason: s.reason,
           })),
         },
+        // v2.5 — clé optionnelle, présente uniquement pour les hunks `llm_proposed`.
+        ...(r.hunk.trace.llmTrace ? { llmTrace: r.hunk.trace.llmTrace } : {}),
       })),
       pendingHunks: result.resolutions
         .filter((r) => !r.autoResolved)

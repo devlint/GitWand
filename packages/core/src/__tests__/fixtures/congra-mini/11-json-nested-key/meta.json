@@ -1,0 +1,6 @@
+{
+  "filePath": "config/database.json",
+  "description": "JSON: host diverges across sides; each side adds a different sibling key.",
+  "difficulty": "hard",
+  "category": "json"
+}

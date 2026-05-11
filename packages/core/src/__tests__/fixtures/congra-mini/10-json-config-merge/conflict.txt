@@ -1,0 +1,30 @@
+<<<<<<< ours
+{
+  "name": "my-app",
+  "version": "2.1.0",
+  "scripts": {
+    "build": "vite build",
+    "test": "vitest run",
+    "lint": "eslint ."
+  }
+}
+||||||| base
+{
+  "name": "my-app",
+  "version": "2.0.0",
+  "scripts": {
+    "build": "vite build",
+    "test": "vitest run"
+  }
+}
+=======
+{
+  "name": "my-app",
+  "version": "2.0.1",
+  "scripts": {
+    "build": "vite build",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  }
+}
+>>>>>>> theirs

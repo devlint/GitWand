@@ -1,0 +1,15 @@
+## [Unreleased]
+
+<<<<<<< ours
+### Added
+- LLM fallback for unresolved conflicts (opt-in, experimental — Claude only)
+- Audit trail with prompt hash and validation score
+||||||| base
+### Added
+- LLM fallback for unresolved conflicts (opt-in)
+=======
+### Added
+- LLM fallback for unresolved conflicts (opt-in, multiple providers)
+- Settings panel for AI provider configuration
+- MCP transport for self-hosted agents
+>>>>>>> theirs

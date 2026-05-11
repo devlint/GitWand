@@ -1,0 +1,12 @@
+func (s *Server) HandleRequest(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	defer func() {
+		s.metrics.RecordLatency(r.URL.Path, time.Since(start))
+	}()
+	s.logger.Info("incoming", "path", r.URL.Path)
+	if !s.auth.Validate(r) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	s.router.ServeHTTP(w, instrument(r.WithContext(s.ctx)))
+}

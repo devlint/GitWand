@@ -1,0 +1,27 @@
+<<<<<<< ours
+{
+  "database": {
+    "host": "db.prod.internal",
+    "port": 5432,
+    "poolSize": 20,
+    "ssl": true
+  }
+}
+||||||| base
+{
+  "database": {
+    "host": "localhost",
+    "port": 5432,
+    "poolSize": 10
+  }
+}
+=======
+{
+  "database": {
+    "host": "db.staging.internal",
+    "port": 5432,
+    "poolSize": 10,
+    "readReplica": "db-replica.internal"
+  }
+}
+>>>>>>> theirs

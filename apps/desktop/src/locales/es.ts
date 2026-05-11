@@ -920,6 +920,40 @@ const es: Locale = {
     aiOllamaTest: "Probar conexión",
     aiOllamaConnected: "Conectado — {0} modelo(s) disponible(s)",
     aiOllamaNotConnected: "No conectado. Instala Ollama en ollama.com",
+    // Pestaña IA — fallback LLM (v2.5 — .gitwandrc por repositorio)
+    ai: {
+      fallback: {
+        title: "Fallback LLM para conflictos sin resolver",
+        enable: {
+          label: "Activar fallback LLM (experimental)",
+          help: "Se usa sólo cuando el motor determinista no puede resolver un hunk por sí solo.",
+        },
+        warning: "Tu código será enviado al proveedor de IA configurado. Revísalo cuidadosamente antes de hacer commit.",
+        provider: {
+          label: "Proveedor",
+        },
+        minScore: {
+          label: "Rechazar resoluciones LLM por debajo de",
+          help: "Puntuación de validación (0–100) calculada tras el merge propuesto. Más alta = más estricta.",
+        },
+        contextLines: {
+          label: "Líneas de contexto alrededor del hunk",
+        },
+        minMode: {
+          label: "Nivel de validación",
+        },
+        save: {
+          button: "Guardar en .gitwandrc",
+        },
+        noRepo: {
+          message: "Abre un repositorio para configurar su fallback LLM. Los ajustes se guardan por repo en .gitwandrc.",
+        },
+        policyConflict: {
+          warning: "La política activa (prefer-safety / strict) ignorará el fallback LLM aunque esté activado. Relaja la política en .gitwandrc para usarlo.",
+        },
+        providerMissing: "El fallback LLM está activado en .gitwandrc pero no hay proveedor de IA configurado. Abre Ajustes → IA para elegir uno y vuelve a cargar el repositorio.",
+      },
+    },
     language: "Idioma de la interfaz",
     languageAuto: "Automático (sistema)",
     commitMessageLang: "Idioma de los mensajes de commit",
@@ -1136,7 +1170,13 @@ const es: Locale = {
     memoryBannerHint: "Regla guardada: {0}",
     memorySaveOffer: "¿Recordar esta resolución para la próxima vez?",
     memorySave: "Guardar",
-
+    // v2.5 — Auditoría de resolución LLM (LlmTracePanel)
+    llmResolution: {
+      title: "Resuelto por LLM (experimental)",
+      reject: "Rechazar → resolver manualmente",
+      accept: "Aceptar",
+      details: "Detalles de la traza",
+    },
   },
 
   // ─── PR inline diff — AI review ─────────────────────────

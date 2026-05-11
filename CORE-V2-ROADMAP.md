@@ -509,9 +509,11 @@ export type { ValidationConfig } from "./config.js";  // étendu
 
 ---
 
-## v2.5.0 — LLM fallback opt-in via MCP
+## v2.5.0 — LLM fallback opt-in via MCP ✅
 
 > **Pattern de dernier recours, désactivé par défaut. Sérialise le hunk + la `DecisionTrace` + le contexte, appelle un agent LLM via MCP, valide agressivement le résultat avant acceptation.**
+>
+> **Livré le 2026-05-12** — core + tie-ins desktop, CLI, MCP, docs, bench. Critère « done » atteint : bench ConGra-mini interne (15 fixtures TS/Python/Go/Rust/JSON/Markdown) → **15/15 = 100 % résolus** avec mock endpoint déterministe, validation score 100 partout. 901/901 tests core + 76/76 tests desktop verts. Détail tie-in : [PLAN-v2.5-tie-in.md](./PLAN-v2.5-tie-in.md).
 
 ### But
 

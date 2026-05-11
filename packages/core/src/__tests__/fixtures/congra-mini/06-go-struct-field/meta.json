@@ -1,0 +1,6 @@
+{
+  "filePath": "internal/server/server.go",
+  "description": "Go: ours adds Timeout+TLS fields; theirs adds MaxClients+BufferSize — additive merge.",
+  "difficulty": "easy",
+  "category": "go"
+}

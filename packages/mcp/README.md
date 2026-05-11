@@ -49,7 +49,7 @@ Same config shape as Claude Desktop — drop it into the `mcpServers` block of y
 
 ## What the agent can do
 
-Five tools are exposed:
+Seven tools are exposed:
 
 | Tool | What it does |
 |------|--------------|
@@ -58,8 +58,54 @@ Five tools are exposed:
 | `gitwand_resolve_conflicts` | Auto-resolve trivial conflicts, return resolutions + pending hunks |
 | `gitwand_explain_hunk` | Full decision trace for one hunk (ours / theirs / base / reasoning) |
 | `gitwand_apply_resolution` | Apply an agent-provided resolution to a specific complex hunk |
+| `gitwand_resolve_hunk` | Ask the connected agent (the caller) to propose a resolution for one hunk — inversion of the CLI `--llm-fallback` |
+| `gitwand_resolve_hunk_llm` | Validate + apply an LLM-proposed resolution (residual-markers check, JSON/YAML syntax, score threshold) |
 
 Plus three resources (`gitwand://repo/conflicts`, `gitwand://repo/policy`, `gitwand://hunk/{file}/{line}`) for ambient context.
+
+### `gitwand_resolve_hunk` — inversion of `--llm-fallback`
+
+The CLI's `--llm-fallback` flag (v2.5) lets GitWand call *out* to an LLM API
+(Anthropic, OpenAI, Ollama…) when it hits a `complex` hunk it cannot resolve
+deterministically. That flow requires the user to provide an API key and to
+trust an external provider with their code.
+
+`gitwand_resolve_hunk` flips this around. GitWand desktop/cli can call this
+MCP tool to delegate the resolution to the **agent that is already driving
+the session** (Claude Code, Cursor, Windsurf…). The agent *is* the LLM, and
+no extra API key, billing relationship, or outbound HTTP call is needed.
+
+**Input**
+
+```ts
+{
+  base:      string,    // hunk content in the merge base (may be empty)
+  ours:      string,    // hunk content from HEAD (ours side)
+  theirs:    string,    // hunk content from the incoming branch (theirs side)
+  filePath:  string,    // path of the conflicted file (drives language inference)
+  context?:  string,    // optional ±N lines around the hunk
+  language?: string     // optional hint, e.g. "typescript", "python", "rust"
+}
+```
+
+**Output**
+
+The server returns a fully-formed prompt as MCP `text` content. The agent
+reads it, performs the merge inference itself, and replies with a JSON
+object of shape:
+
+```json
+{
+  "resolution": "<merged code that replaces the hunk — no conflict markers>",
+  "reasoning":  "<one or two sentences explaining the merge decision>"
+}
+```
+
+The server does **not** call any LLM. It is a pure prompt formatter — which
+keeps `@gitwand/mcp` dependency-free (no Anthropic SDK, no API key handling,
+no outbound HTTP). The agent's reply can then be fed to
+`gitwand_apply_resolution` (or `gitwand_resolve_hunk_llm` if you want
+validation gating) to write it back to disk.
 
 ## How it works — the collaboration loop
 

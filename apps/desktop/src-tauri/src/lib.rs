@@ -239,6 +239,7 @@ pub fn run() {
             commands::ops::get_conflicted_files,
             commands::files::read_file,
             commands::files::write_file,
+            commands::files::write_gitwandrc,
             commands::files::read_file_at_revision,
             commands::files::folder_diff,
             commands::files::list_dir,

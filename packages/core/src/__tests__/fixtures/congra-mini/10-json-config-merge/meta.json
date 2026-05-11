@@ -1,0 +1,6 @@
+{
+  "filePath": "config/app.json",
+  "description": "JSON: version diverges (2.1.0 vs 2.0.1) and each side adds a different script.",
+  "difficulty": "medium",
+  "category": "json"
+}

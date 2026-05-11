@@ -1,0 +1,16 @@
+<<<<<<< ours
+{
+  "features": ["auth", "cache", "logging", "metrics"],
+  "rolloutPct": 50
+}
+||||||| base
+{
+  "features": ["auth", "cache"],
+  "rolloutPct": 10
+}
+=======
+{
+  "features": ["auth", "cache", "ratelimit", "tracing"],
+  "rolloutPct": 25
+}
+>>>>>>> theirs

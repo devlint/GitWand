@@ -1,0 +1,6 @@
+export interface Config {
+  retries: number;
+  timeout: number | string | { connect: number; read: number };
+  debug: boolean;
+  cacheKey: string;
+}

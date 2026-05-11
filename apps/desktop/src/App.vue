@@ -110,6 +110,7 @@ const {
   undo,
   redo,
   selectFile: mergeSelectFile,
+  refreshLlmFallbackConfig: mergeRefreshLlmFallbackConfig,
 } = useGitWand();
 
 // ─── Repo mode (useGitRepo) — single shared instance ────
@@ -1299,6 +1300,11 @@ function onSettingsClose() {
   showSettings.value = false;
   refreshSettings();
   applyGitConfig();
+  // v2.5 — `.gitwandrc.llmFallback` may have been edited in the AI tab.
+  // Re-read it so the next merge resolution picks up the new config
+  // without needing to re-open the repo. Fire-and-forget — failure is
+  // already handled silently inside the composable.
+  void mergeRefreshLlmFallbackConfig();
 }
 
 

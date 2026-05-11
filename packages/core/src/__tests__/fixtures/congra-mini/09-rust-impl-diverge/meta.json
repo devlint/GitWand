@@ -1,0 +1,6 @@
+{
+  "filePath": "src/parser/mod.rs",
+  "description": "Rust: ours inserts normalize step; theirs inserts validation step — both should run.",
+  "difficulty": "medium",
+  "category": "rust"
+}

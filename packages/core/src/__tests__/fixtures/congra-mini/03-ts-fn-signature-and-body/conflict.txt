@@ -1,0 +1,15 @@
+<<<<<<< ours
+export function buildUrl(host: string, path: string, port: number): string {
+  const portPart = port === 80 ? "" : `:${port}`;
+  return `https://${host}${portPart}${path}`;
+}
+||||||| base
+export function buildUrl(host: string, path: string): string {
+  return `https://${host}${path}`;
+}
+=======
+export function buildUrl(host: string, path: string, query?: Record<string, string>): string {
+  const qs = query ? "?" + new URLSearchParams(query).toString() : "";
+  return `https://${host}${path}${qs}`;
+}
+>>>>>>> theirs

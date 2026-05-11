@@ -19,13 +19,15 @@
 
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve as resolvePath } from "node:path";
-import { resolve, type MergeResult } from "@gitwand/core";
+import { resolve, resolveAsync, type MergeResult } from "@gitwand/core";
 
 import { c, printBanner, WAND } from "../ui.js";
 import { getConflictedFiles } from "../git.js";
 import { parseConcurrency, runPool } from "../concurrency.js";
 import { buildPartialContent } from "../partial-content.js";
 import { buildCIReport } from "../reporting.js";
+import { buildLlmEndpoint } from "../llm-endpoint.js";
+import { resolveLlmConfig, buildResolveLlmOptions } from "../llm-config.js";
 
 export async function cmdResolve(
   files: string[],
@@ -35,6 +37,33 @@ export async function cmdResolve(
   const verbose = !isCIMode && (flags.verbose === true || typeof flags.verbose === "string");
   const resolveWhitespace = !(flags["no-whitespace"] === true);
   const concurrency = parseConcurrency(flags.concurrency);
+  const llmFallbackEnabled = flags["llm-fallback"] === true;
+
+  // v2.5 — LLM fallback opt-in. Bascule de `resolve()` vers `resolveAsync()`
+  // et injecte un endpoint Node (fetch natif) qui wrap Claude / OpenAI / Ollama.
+  // Le fichier `.gitwandrc.llmFallback` est mergé avec les flags CLI (flags
+  // prioritaires). Aucune dep npm ajoutée : tout passe par `fetch` natif Node 20+.
+  let llmCliConfig: ReturnType<typeof resolveLlmConfig>["config"] | null = null;
+  let llmFileConfig: ReturnType<typeof resolveLlmConfig>["fileConfig"] | null = null;
+  if (llmFallbackEnabled) {
+    try {
+      const resolved = resolveLlmConfig(flags);
+      llmCliConfig = resolved.config;
+      llmFileConfig = resolved.fileConfig;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`${c.red}${msg}${c.reset}`);
+      process.exit(2);
+    }
+    // TS ne sait pas que `process.exit` ne revient pas — garde explicite.
+    if (llmCliConfig === null) process.exit(2);
+    // Avertissement stderr (toujours visible, même en --json) — l'utilisateur
+    // doit savoir que du code va sortir de sa machine. Aucune télémétrie,
+    // mais l'opt-in mérite un disclaimer clair à chaque invocation.
+    console.error(
+      `${c.yellow}[GitWand] LLM fallback enabled — your code will be sent to "${llmCliConfig.provider}" (model: ${llmCliConfig.model}). Review before commit.${c.reset}`,
+    );
+  }
 
   if (!isCIMode) {
     printBanner();
@@ -82,10 +111,22 @@ export async function cmdResolve(
       };
     }
 
-    const result = resolve(content, file, {
-      verbose: false,
-      resolveWhitespace,
-    });
+    // Rétro-compat : sans `--llm-fallback`, on garde le `resolve()` synchrone
+    // — comportement v2.4 intact. Avec le flag, on passe par `resolveAsync()`
+    // qui supporte le pattern `llm_proposed` (priorité 998 dans le core).
+    const result: MergeResult = llmFallbackEnabled && llmCliConfig !== null
+      ? await resolveAsync(content, file, {
+          verbose: false,
+          resolveWhitespace,
+          llmFallback: {
+            ...buildResolveLlmOptions(llmCliConfig, llmFileConfig),
+            endpoint: buildLlmEndpoint(llmCliConfig),
+          },
+        })
+      : resolve(content, file, {
+          verbose: false,
+          resolveWhitespace,
+        });
 
     // Écriture sur disque (sauf dry-run). L'écriture est concurrente entre
     // fichiers distincts, mais chaque fichier n'a qu'un seul writer — il n'y

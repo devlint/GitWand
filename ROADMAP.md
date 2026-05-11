@@ -506,9 +506,17 @@ Le grand saut. Merge entité-par-entité aligné Mergiraf/Weave : parse base/our
 
 Livré comme `2.4.1` (resync `cli`/`mcp` qui étaient restés à 2.3.0). Étend `validateMergedContent` avec une couche parse-tree validity multi-langage via tree-sitter (`validate-parse-tree.ts`) ; `tsc --noEmit` et `eslint` deviennent opt-in via `.gitwandrc` (`validation.level: "strict"`, nouveau tier en plus de `off` et `balanced`). `ValidationLevel` renomme l'ancien `standard` → `balanced`. `ValidationResult` expose `parseTreeErrors` + `parseTreeErrorRanges`, et `strictErrors` est remplacé par un `ExternalValidationResult { tool, errors, passed }` typé. Nouvelle dimension `postMergeRisk` dans `makeScore()` (poids −0.20) qui retire rétroactivement les résolutions dont le résultat ne parse plus. `resolveAsync()` populate `externalValidation` sur tous les return paths. +5 fixtures corpus (F31–F35), 2 nouvelles suites de tests (`v2-core-scenarios.test.ts` 829 lignes, `validation-parse-tree.test.ts` 274 lignes). **841/841 tests passing.** Cible roadmap −50 % de faux positifs parse-tree-cassé atteinte.
 
-**`@gitwand/core@2.5.0` — LLM fallback opt-in via MCP** _(tag aligné — desktop tie-in)_
+**`@gitwand/core@2.5.0` — LLM fallback opt-in via MCP ✅** _(tag aligné — desktop tie-in)_
 
 Pattern `llm_proposed` priorité 998, **désactivé par défaut**. Sérialise le hunk + DecisionTrace partielle + contexte ±50 lignes, appelle un endpoint injecté par le consommateur (MCP server externe / API / custom), valide agressivement contre la pipeline v2.4 avant acceptation. Audit trail complet (modèle, hash du prompt, score de validation), `temperature: 0` pour reproductibilité. Nouveau `resolveAsync()` exporté côte à côte avec `resolve()` synchrone. **+10-20 %** global avec LLM activé, 0 % sans (rétro-compat stricte).
+
+**Tie-in livré (cf. [PLAN-v2.5-tie-in.md](./PLAN-v2.5-tie-in.md))** :
+
+- **Desktop** : section "AI fallback" dans `SettingsPanel.vue` (toggle + provider picker + seuils), persistance `.gitwandrc` via nouvelle commande `write_gitwandrc` (3-layer Rust + dev-server + TS), wiring `useGitWand` ↔ `useAIProvider.toLlmEndpoint()`, composant `LlmTracePanel.vue` (audit + bouton Reject) intégré au `MergeEditor.vue` quand `decision.type === "llm_proposed"`, ~80 entrées i18n (16 clés × 5 locales)
+- **CLI** : flag `--llm-fallback --llm-provider {claude,openai,ollama}`, endpoint Node `fetch` natif (zéro dep), `--json` enrichi avec `llmTrace`, 13 tests unitaires endpoint, garde rétro-compat stricte sans flag
+- **MCP** : tool `gitwand_resolve_hunk` exposé par `@gitwand/mcp` (inversion de boucle : l'agent connecté répond, pas le serveur)
+- **Docs** : page `website/guide/llm-fallback.md` (sécurité, providers, coût, audit, FAQ) + article blog `v2-5-llm-fallback.md`
+- **Validation** : bench ConGra-mini 15 fixtures (TS/Python/Go/Rust/JSON/Markdown), **15/15 = 100 % résolus** (cible ≥80 % atteinte), 4 scénarios d'intégration desktop ↔ core (happy path, rejet, disabled, provider missing). **901 tests core + 76 tests desktop verts.**
 
 **`@gitwand/core@2.6.0` — Refactoring-aware merge (expérimental) ✅**
 

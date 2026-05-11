@@ -1,0 +1,8 @@
+type Server struct {
+	Host       string
+	Port       int
+	Timeout    time.Duration
+	TLS        bool
+	MaxClients int
+	BufferSize int
+}

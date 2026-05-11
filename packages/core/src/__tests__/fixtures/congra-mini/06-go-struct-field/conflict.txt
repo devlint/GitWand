@@ -1,0 +1,20 @@
+<<<<<<< ours
+type Server struct {
+	Host    string
+	Port    int
+	Timeout time.Duration
+	TLS     bool
+}
+||||||| base
+type Server struct {
+	Host string
+	Port int
+}
+=======
+type Server struct {
+	Host       string
+	Port       int
+	MaxClients int
+	BufferSize int
+}
+>>>>>>> theirs

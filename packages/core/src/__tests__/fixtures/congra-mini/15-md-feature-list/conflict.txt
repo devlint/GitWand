@@ -1,0 +1,22 @@
+## Features
+
+<<<<<<< ours
+GitWand resolves conflicts with deterministic patterns when possible. For
+ambiguous cases, an opt-in LLM fallback is available.
+
+- Zero false positives by design
+- Strict post-merge validation (tsc + eslint)
+- Audit trail per resolution
+||||||| base
+GitWand resolves conflicts with deterministic patterns.
+
+- Zero false positives by design
+- Strict post-merge validation
+=======
+GitWand resolves conflicts using a curated set of heuristics, format-aware
+resolvers, and structural (AST) merge for TS/JS/Python/Go/Rust.
+
+- Zero false positives by design
+- Format-aware resolvers (JSON, YAML, Markdown, …)
+- Structural merge via tree-sitter
+>>>>>>> theirs

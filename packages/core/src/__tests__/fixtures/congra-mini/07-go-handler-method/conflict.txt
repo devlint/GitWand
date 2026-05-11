@@ -1,0 +1,22 @@
+<<<<<<< ours
+func (s *Server) HandleRequest(w http.ResponseWriter, r *http.Request) {
+	s.logger.Info("incoming", "path", r.URL.Path)
+	if !s.auth.Validate(r) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	s.router.ServeHTTP(w, r.WithContext(s.ctx))
+}
+||||||| base
+func (s *Server) HandleRequest(w http.ResponseWriter, r *http.Request) {
+	s.router.ServeHTTP(w, r)
+}
+=======
+func (s *Server) HandleRequest(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	defer func() {
+		s.metrics.RecordLatency(r.URL.Path, time.Since(start))
+	}()
+	s.router.ServeHTTP(w, instrument(r))
+}
+>>>>>>> theirs

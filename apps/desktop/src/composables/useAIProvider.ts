@@ -1,4 +1,5 @@
 import { ref, computed } from "vue";
+import type { LlmEndpoint } from "@gitwand/core";
 import { claudeCliPrompt, codexCliPrompt } from "../utils/backend";
 import { t } from "./useI18n";
 
@@ -13,6 +14,11 @@ import { t } from "./useI18n";
  *                     subscription via `codex login`, or OPENAI_API_KEY
  * - `openai-compat`  : any OpenAI-compatible endpoint
  * - `ollama`         : local Ollama instance
+ * - `mcp`            : route the LLM call through a connected MCP agent
+ *                     (Claude Code / Cursor / Windsurf via `@gitwand/mcp`).
+ *                     v2.5 fallback only — the regular `suggest()` /
+ *                     `rawPrompt()` paths still throw for this value
+ *                     until the §5 tie-in lands.
  */
 export type AIProvider =
   | "none"
@@ -20,7 +26,8 @@ export type AIProvider =
   | "claude-code-cli"
   | "codex-cli"
   | "openai-compat"
-  | "ollama";
+  | "ollama"
+  | "mcp";
 
 export interface AISettings {
   aiEnabled: boolean;
@@ -377,6 +384,42 @@ export function useAIProvider() {
     }
   }
 
+  /**
+   * v2.5 — Adapter for `@gitwand/core`'s `LlmEndpoint` interface.
+   *
+   * Returns `null` when:
+   *   - AI is globally disabled (`aiEnabled === false`)
+   *   - No provider is selected (`aiProvider === "none"`)
+   *   - The selected provider needs configuration the user hasn't supplied
+   *     (Claude API without `aiApiKey`, OpenAI-compat without endpoint/key…)
+   *   - The provider is `"mcp"` — the actual wiring is deferred to §5.2 of
+   *     PLAN-v2.5-tie-in (Phase 2). For now this lands in `null` so the
+   *     LLM fallback is silently skipped instead of hitting the default
+   *     `throw` in `rawPrompt()`.
+   *
+   * When non-null, the returned object's `call()` forwards the (already
+   * fully-formatted) prompt produced by `@gitwand/core` to the same
+   * provider dispatcher used by `suggest()` and `rawPrompt()`. The system
+   * prompt is left empty: the core builds a self-contained prompt that
+   * carries its own instructions, so adding a second layer of system
+   * preamble would only dilute it.
+   */
+  function toLlmEndpoint(): LlmEndpoint | null {
+    const s = loadAISettings();
+    if (!s.aiEnabled || s.aiProvider === "none") return null;
+    if (s.aiProvider === "mcp") return null; // wired in PLAN §5.2 (Phase 2)
+    if (s.aiProvider === "claude" && !s.aiApiKey) return null;
+    if (s.aiProvider === "openai-compat" && (!s.aiApiKey || !s.aiApiEndpoint)) return null;
+    return {
+      async call(prompt: string): Promise<string> {
+        // Forward the core's prompt verbatim — it already contains the
+        // base/ours/theirs hunk, surrounding context, and resolution
+        // instructions. An empty system prompt avoids double-instructing.
+        return rawPrompt("", prompt);
+      },
+    };
+  }
+
   return {
     isAvailable,
     isLoading,
@@ -384,5 +427,6 @@ export function useAIProvider() {
     lastSuggestion,
     suggest,
     rawPrompt,
+    toLlmEndpoint,
   };
 }

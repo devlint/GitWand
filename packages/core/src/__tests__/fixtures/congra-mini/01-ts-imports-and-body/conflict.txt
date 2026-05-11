@@ -1,0 +1,27 @@
+<<<<<<< ours
+import { logger } from "./logger";
+import { Cache } from "./cache";
+
+export function fetchUser(id: string) {
+  const cached = Cache.get(id);
+  if (cached) return cached;
+  logger.info("cache miss, fetching user", { id });
+  return api.get(`/users/${id}`);
+}
+||||||| base
+import { logger } from "./logger";
+
+export function fetchUser(id: string) {
+  logger.info("fetching user", { id });
+  return api.get(`/users/${id}`);
+}
+=======
+import { logger } from "./logger";
+import { metrics } from "./metrics";
+
+export function fetchUser(id: string) {
+  metrics.incr("user.fetch");
+  logger.debug("fetching user", { id, source: "api" });
+  return api.get(`/users/${id}`);
+}
+>>>>>>> theirs

@@ -931,6 +931,40 @@ const fr: Locale = {
     aiOllamaTest: "Tester la connexion",
     aiOllamaConnected: "Connect\u00e9 \u2014 {0} mod\u00e8le(s) disponible(s)",
     aiOllamaNotConnected: "Non connect\u00e9. Installez Ollama sur ollama.com",
+    // AI tab \u2014 LLM fallback (v2.5 \u2014 .gitwandrc par repo)
+    ai: {
+      fallback: {
+        title: "Repli LLM pour les conflits non r\u00e9solus",
+        enable: {
+          label: "Activer le repli LLM (exp\u00e9rimental)",
+          help: "Utilis\u00e9 uniquement quand le moteur d\u00e9terministe ne peut pas r\u00e9soudre un hunk seul.",
+        },
+        warning: "Votre code sera envoy\u00e9 au fournisseur d\u2019IA configur\u00e9. Relisez attentivement avant de committer.",
+        provider: {
+          label: "Fournisseur",
+        },
+        minScore: {
+          label: "Rejeter les r\u00e9solutions LLM en dessous de",
+          help: "Score de validation (0\u2013100) calcul\u00e9 apr\u00e8s le merge propos\u00e9. Plus \u00e9lev\u00e9 = plus strict.",
+        },
+        contextLines: {
+          label: "Lignes de contexte autour du hunk",
+        },
+        minMode: {
+          label: "Niveau de validation",
+        },
+        save: {
+          button: "Enregistrer dans .gitwandrc",
+        },
+        noRepo: {
+          message: "Ouvrez un d\u00e9p\u00f4t pour configurer son repli LLM. Les r\u00e9glages sont enregistr\u00e9s par repo dans .gitwandrc.",
+        },
+        policyConflict: {
+          warning: "La politique active (prefer-safety / strict) ignorera le repli LLM m\u00eame s\u2019il est activ\u00e9. Assouplissez la politique dans .gitwandrc pour l\u2019utiliser.",
+        },
+        providerMissing: "Le repli LLM est activ\u00e9 dans .gitwandrc mais aucun fournisseur d\u2019IA n\u2019est configur\u00e9. Ouvrez R\u00e9glages \u2192 IA pour en choisir un, puis rechargez le d\u00e9p\u00f4t.",
+      },
+    },
     language: "Langue de l\u2019interface",
     languageAuto: "Automatique (syst\u00e8me)",
     commitMessageLang: "Langue des messages de commit",
@@ -1148,7 +1182,13 @@ const fr: Locale = {
     memoryBannerHint: "Règle mémorisée : {0}",
     memorySaveOffer: "Retenir cette résolution pour la prochaine fois ?",
     memorySave: "Retenir",
-
+    // v2.5 — Trace d'audit LLM (LlmTracePanel)
+    llmResolution: {
+      title: "Résolu par LLM (expérimental)",
+      reject: "Rejeter → résolution manuelle",
+      accept: "Accepter",
+      details: "Détails de la trace",
+    },
   },
 
   // ─── PR inline diff — AI review ─────────────────────────

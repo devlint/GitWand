@@ -1,0 +1,6 @@
+{
+  "filePath": "src/billing/totals.py",
+  "description": "Python: ours adds discount arg; theirs adds tax_rate arg — both should coexist.",
+  "difficulty": "medium",
+  "category": "python"
+}

@@ -1,0 +1,6 @@
+{
+  "filePath": "internal/server/handler.go",
+  "description": "Go: ours adds auth+logging; theirs adds metrics middleware — both layers needed.",
+  "difficulty": "hard",
+  "category": "go"
+}

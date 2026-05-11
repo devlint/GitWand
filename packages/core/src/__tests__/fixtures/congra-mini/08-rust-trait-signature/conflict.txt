@@ -1,0 +1,21 @@
+<<<<<<< ours
+pub trait Storage {
+    fn get(&self, key: &str) -> Option<Vec<u8>>;
+    fn put(&mut self, key: &str, value: Vec<u8>, ttl: Duration) -> Result<(), StorageError>;
+    fn delete(&mut self, key: &str) -> Result<bool, StorageError>;
+    fn flush(&mut self) -> Result<(), StorageError>;
+}
+||||||| base
+pub trait Storage {
+    fn get(&self, key: &str) -> Option<Vec<u8>>;
+    fn put(&mut self, key: &str, value: Vec<u8>) -> Result<(), StorageError>;
+    fn delete(&mut self, key: &str) -> Result<bool, StorageError>;
+}
+=======
+pub trait Storage {
+    fn get(&self, key: &str) -> Result<Option<Vec<u8>>, StorageError>;
+    fn put(&mut self, key: &str, value: Vec<u8>) -> Result<(), StorageError>;
+    fn delete(&mut self, key: &str) -> Result<bool, StorageError>;
+    fn keys(&self) -> Box<dyn Iterator<Item = String> + '_>;
+}
+>>>>>>> theirs

@@ -1,0 +1,6 @@
+{
+  "filePath": "src/net/http_client.py",
+  "description": "Python: __init__ gets a new arg on each side (timeout vs retries).",
+  "difficulty": "medium",
+  "category": "python"
+}

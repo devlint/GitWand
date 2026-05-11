@@ -6,6 +6,12 @@ description: Technical articles on Git workflows, AI-powered conflict resolution
 # Blog
 
 <div class="blog-list">
+  <a href="/blog/v2-5-llm-fallback" class="blog-card">
+    <div class="blog-meta">May 11, 2026 · 14 min read</div>
+    <h2 class="blog-title">Why we made LLM resolution opt-in (and how): GitWand v2.5</h2>
+    <p class="blog-excerpt">The new <code>llm_proposed</code> pattern sits at priority 998, off by default. Why opt-in, why the v2.4 post-merge validator is the gate, why <code>@gitwand/core</code> still ships zero <code>fetch()</code> calls — and the MCP path that needs no API key.</p>
+    <span class="blog-read">Read article →</span>
+  </a>
   <a href="/blog/agent-sessions-automations-v2-8" class="blog-card">
     <div class="blog-meta">May 2, 2026 · 18 min read</div>
     <h2 class="blog-title">Hooks, workspaces, agent sessions, and automations: what went into GitWand v2.7 and v2.8</h2>

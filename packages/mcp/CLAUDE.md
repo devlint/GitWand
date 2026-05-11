@@ -24,9 +24,13 @@ src/
 
 | Outil | Description |
 |-------|-------------|
-| `resolve_conflict` | Résoudre les conflits d'un fichier ou de tout le repo |
-| `merge_preview` | Simuler un merge sans l'appliquer |
-| `get_conflict_status` | Lister les fichiers en conflit avec confidence scores |
+| `gitwand_status` | Lister les fichiers en conflit avec confidence scores |
+| `gitwand_preview_merge` | Simuler un merge sans l'appliquer |
+| `gitwand_resolve_conflicts` | Résoudre les conflits d'un fichier ou de tout le repo |
+| `gitwand_explain_hunk` | DecisionTrace complet pour un hunk précis |
+| `gitwand_apply_resolution` | Appliquer une résolution fournie par l'agent à un hunk |
+| `gitwand_resolve_hunk` | v2.5 — inverser la boucle : GitWand demande à l'agent connecté de proposer la résolution (retourne un prompt structuré, l'agent répond `{resolution, reasoning}`) |
+| `gitwand_resolve_hunk_llm` | v2.5 — valider + appliquer une résolution proposée par un LLM (markers résiduels, syntaxe JSON/YAML, score) |
 
 ## Resources disponibles
 

@@ -1,0 +1,18 @@
+<<<<<<< ours
+class HttpClient:
+    def __init__(self, base_url, timeout=30):
+        self.base_url = base_url
+        self.timeout = timeout
+        self.session = requests.Session()
+||||||| base
+class HttpClient:
+    def __init__(self, base_url):
+        self.base_url = base_url
+        self.session = requests.Session()
+=======
+class HttpClient:
+    def __init__(self, base_url, retries=3):
+        self.base_url = base_url
+        self.retries = retries
+        self.session = requests.Session()
+>>>>>>> theirs

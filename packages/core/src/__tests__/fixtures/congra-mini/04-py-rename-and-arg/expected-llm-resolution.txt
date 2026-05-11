@@ -1,0 +1,4 @@
+def compute_total(items, discount=0.0, tax_rate=0.0):
+    subtotal = sum(item.price for item in items)
+    discounted = subtotal * (1 - discount)
+    return discounted + discounted * tax_rate

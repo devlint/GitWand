@@ -1,0 +1,9 @@
+{
+  "database": {
+    "host": "db.prod.internal",
+    "port": 5432,
+    "poolSize": 20,
+    "ssl": true,
+    "readReplica": "db-replica.internal"
+  }
+}

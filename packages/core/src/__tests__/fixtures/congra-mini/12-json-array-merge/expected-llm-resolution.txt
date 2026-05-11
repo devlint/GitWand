@@ -1,0 +1,4 @@
+{
+  "features": ["auth", "cache", "logging", "metrics", "ratelimit", "tracing"],
+  "rolloutPct": 50
+}

@@ -1,0 +1,5 @@
+export function buildUrl(host: string, path: string, port: number, query?: Record<string, string>): string {
+  const portPart = port === 80 ? "" : `:${port}`;
+  const qs = query ? "?" + new URLSearchParams(query).toString() : "";
+  return `https://${host}${portPart}${path}${qs}`;
+}

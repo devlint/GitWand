@@ -1,0 +1,9 @@
+Install via npm:
+
+```bash
+npm install @gitwand/core
+```
+
+The package now ships ESM-only — make sure your project uses `"type": "module"`.
+
+For local development, clone the repo and run `pnpm install`.

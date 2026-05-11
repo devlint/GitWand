@@ -1,0 +1,6 @@
+{
+  "filePath": "src/users/fetchUser.ts",
+  "description": "TS: ours adds cache import + cache check; theirs adds metrics import + metrics call.",
+  "difficulty": "medium",
+  "category": "ts"
+}

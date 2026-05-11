@@ -3035,6 +3035,36 @@ async function handleRequest(req, res) {
       }
     }
 
+    // POST /api/write-gitwandrc  { cwd, content }
+    // Mirror of read-gitwandrc: writes .gitwandrc.json if present,
+    // otherwise .gitwandrc (JSONC-friendly default). Validates content
+    // as JSON before persisting — fails loudly on malformed input.
+    if (url.pathname === "/api/write-gitwandrc" && req.method === "POST") {
+      try {
+        const { cwd, content } = await readBody(req);
+        if (!cwd || typeof cwd !== "string") {
+          return jsonResponse(req, res, { error: "cwd must be a non-empty string" }, 400);
+        }
+        if (typeof content !== "string") {
+          return jsonResponse(req, res, { error: "content must be a string" }, 400);
+        }
+        // Validate JSON shape — same guard as the Rust path.
+        try {
+          JSON.parse(content);
+        } catch (e) {
+          return jsonResponse(req, res, { error: `Invalid JSON for .gitwandrc: ${e.message}` }, 400);
+        }
+        const base = resolve(cwd);
+        const rcJsonPath = join(base, ".gitwandrc.json");
+        const rcPath = join(base, ".gitwandrc");
+        const target = existsSync(rcJsonPath) ? rcJsonPath : rcPath;
+        writeFileSync(target, content, "utf-8");
+        return jsonResponse(req, res, { ok: true });
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.message }, 500);
+      }
+    }
+
     // ─── Git Hooks ──────────────────────────────────────────────
 
     const HOOK_NAMES_ORDER = [
@@ -3991,6 +4021,7 @@ server.listen(PORT, "127.0.0.1", () => {
   console.log(`    POST /api/read-file-at-revision  { cwd, rev, path }`);
   console.log(`    POST /api/folder-diff  { cwd, refA, refB }`);
   console.log(`    POST /api/read-gitwandrc  { cwd }`);
+  console.log(`    POST /api/write-gitwandrc { cwd, content }`);
   console.log(`    GET  /api/list-dir?path=<path>`);
   console.log(`    GET  /api/git-status?cwd=<path>`);
   console.log(`    GET  /api/git-diff?cwd=<path>&path=<file>&staged=<bool>`);

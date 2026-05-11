@@ -1,0 +1,6 @@
+{
+  "filePath": "src/storage/mod.rs",
+  "description": "Rust: ours adds delete(); theirs adds keys() — additive trait merge.",
+  "difficulty": "easy",
+  "category": "rust"
+}

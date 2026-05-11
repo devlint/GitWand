@@ -1,5 +1,5 @@
 import { ref, computed } from "vue";
-import { resolve, resolveAsync, parseGitwandrc, type MergeResult, type ConflictHunk, type GitWandOptions, type MergePolicy } from "@gitwand/core";
+import { resolve, resolveAsync, parseGitwandrc, type MergeResult, type ConflictHunk, type GitWandOptions, type MergePolicy, type LlmFallbackConfig } from "@gitwand/core";
 import {
   pickFolder,
   getConflictedFiles,
@@ -8,6 +8,8 @@ import {
   readGitwandrc,
 } from "../utils/backend";
 import { useFolderHistory } from "./useFolderHistory";
+import { useAIProvider } from "./useAIProvider";
+import { t } from "./useI18n";
 
 export interface ConflictFile {
   path: string;
@@ -30,6 +32,49 @@ function cloneFiles(files: ConflictFile[]): Snapshot {
 }
 
 const MAX_HISTORY = 50;
+
+/**
+ * v2.5 — Best-effort parse of the `llmFallback` block in a raw `.gitwandrc`.
+ *
+ * Mirrors the JSONC-tolerant logic in `SettingsPanel.vue#loadLlmFallback`
+ * (single-line `//` + block `/* *\/` comments stripped before retry).
+ * The endpoint field is never persisted, so it's stripped here too — it
+ * gets injected programmatically by `loadRealFiles` later.
+ *
+ * Returns:
+ *   - `null` if the file is empty, JSON-invalid, or has no `llmFallback` key
+ *   - a clean `LlmFallbackConfig` (no `endpoint`) otherwise
+ */
+function parseLlmFallbackFromRc(rawRc: string): LlmFallbackConfig | null {
+  if (!rawRc || !rawRc.trim()) return null;
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(rawRc) as Record<string, unknown>;
+  } catch {
+    try {
+      const stripped = rawRc
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/(^|[^:])\/\/.*$/gm, "$1");
+      parsed = JSON.parse(stripped) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  }
+  const llm = parsed.llmFallback;
+  if (!llm || typeof llm !== "object") return null;
+  const obj = llm as Partial<LlmFallbackConfig> & { endpoint?: unknown };
+  // Strip any (illegitimate) endpoint that may have slipped into the file —
+  // it's never serialisable and must be injected programmatically.
+  const { endpoint: _drop, enabled: rawEnabled, ...rest } = obj;
+  void _drop;
+  // `enabled` is required on the core type; default to false if absent so
+  // the resolver simply skips LLM resolution (silent opt-out, by design).
+  const cfg: LlmFallbackConfig = {
+    enabled: typeof rawEnabled === "boolean" ? rawEnabled : false,
+    ...rest,
+  };
+  return cfg;
+}
 
 /**
  * Replace a specific conflict block (by index) with replacement text,
@@ -87,6 +132,17 @@ export function useGitWand() {
 
   // Phase 7.4 — Options de résolution issues du .gitwandrc du repo courant
   const resolveOptions = ref<GitWandOptions>({});
+
+  // v2.5 — LLM fallback config (lue depuis `.gitwandrc.llmFallback`).
+  // L'`endpoint` n'est PAS persisté ici : il est injecté à la volée par
+  // `loadRealFiles` via `useAIProvider().toLlmEndpoint()` (cf. PLAN §2).
+  // `null` = pas de `.gitwandrc` lisible OU clé absente OU JSON invalide.
+  const llmFallbackConfig = ref<LlmFallbackConfig | null>(null);
+
+  // Adapter AI — utilisé pour fabriquer un `LlmEndpoint` au moment du
+  // resolveAsync. Instancié une seule fois pour partager le state du
+  // composable parent (settings localStorage, etc.).
+  const ai = useAIProvider();
 
   // ─── Undo / Redo ───────────────────────────────────────
   const undoStack = ref<Snapshot[]>([]);
@@ -210,10 +266,19 @@ export function useGitWand() {
             generatedFiles: cfg.generatedFiles,
           };
         }
+        // v2.5 — `llmFallback` n'est pas géré par `parseGitwandrc` (qui
+        // est strict sur les patterns Phase 7.4). On le relit nous-mêmes
+        // depuis le JSON brut, en best-effort : silencieux si la clé est
+        // absente ou si le JSON est invalide (déjà tracé par les autres
+        // consommateurs côté Settings).
+        llmFallbackConfig.value = parseLlmFallbackFromRc(rcRaw);
+      } else {
+        llmFallbackConfig.value = null;
       }
     } catch {
       // .gitwandrc absent ou invalide → options par défaut
       resolveOptions.value = {};
+      llmFallbackConfig.value = null;
     }
 
     // Read each file (parallel — I/O bound, order preserved by Promise.all)
@@ -237,13 +302,36 @@ export function useGitWand() {
       },
     };
 
+    // v2.5 — Construire les options avec LLM fallback si activé. L'endpoint
+    // n'est pas dans `.gitwandrc` (non-sérialisable) : on l'injecte ici via
+    // l'adapter `useAIProvider().toLlmEndpoint()`. Garde-fou : si la config
+    // dit `enabled: true` mais qu'aucun provider n'est utilisable (clé API
+    // manquante, etc.), on logge un avertissement, on remonte un message
+    // (réutilise le ref `error` existant pour le toast App.vue), MAIS on
+    // continue la résolution sans LLM — pas de crash silencieux ni de
+    // blocage.
+    const llmCfg = llmFallbackConfig.value;
+    const aiEndpoint = llmCfg?.enabled ? ai.toLlmEndpoint() : null;
+    if (llmCfg?.enabled && !aiEndpoint) {
+      const msg = t("settings.ai.fallback.providerMissing");
+      console.warn("[gitwand] LLM fallback enabled in .gitwandrc but no AI provider is configured — skipping LLM. " + msg);
+      // Non-fatal : visible dans le toast d'erreur, mais on continue.
+      error.value = msg;
+    }
+    const resolveOptionsWithLlm: GitWandOptions = (llmCfg?.enabled && aiEndpoint)
+      ? {
+          ...resolveOptions.value,
+          llmFallback: { ...llmCfg, endpoint: aiEndpoint },
+        }
+      : resolveOptions.value;
+
     const loaded: ConflictFile[] = await Promise.all(
       conflictedPaths.map(async (filePath) => {
         const content = await readFile(cwd, filePath);
         return {
           path: filePath,
           content,
-          result: await resolveAsync(content, filePath, resolveOptions.value, structuralOpts),
+          result: await resolveAsync(content, filePath, resolveOptionsWithLlm, structuralOpts),
         };
       }),
     );
@@ -639,6 +727,29 @@ export async function fetchUsers() {
     selectedPath.value = path;
   }
 
+  /**
+   * v2.5 — Re-read `.gitwandrc.llmFallback` from disk for the active repo.
+   *
+   * Called by `App.vue` when the user closes the Settings panel, so the
+   * next `loadRealFiles()` picks up changes made through the UI without
+   * having to re-open the repo.
+   *
+   * No-op when no repo is open. Failure to read is silent (falls back to
+   * `null`, matching the constructor behaviour).
+   */
+  async function refreshLlmFallbackConfig() {
+    if (!folderPath.value) {
+      llmFallbackConfig.value = null;
+      return;
+    }
+    try {
+      const rcRaw = await readGitwandrc(folderPath.value);
+      llmFallbackConfig.value = parseLlmFallbackFromRc(rcRaw);
+    } catch {
+      llmFallbackConfig.value = null;
+    }
+  }
+
   return {
     files,
     selectedFile,
@@ -659,5 +770,6 @@ export async function fetchUsers() {
     undo,
     redo,
     selectFile,
+    refreshLlmFallbackConfig,
   };
 }

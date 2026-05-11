@@ -1,6 +1,6 @@
 {
   "name": "@gitwand/cli",
-  "version": "2.8.2",
+  "version": "2.8.3",
   "description": "GitWand CLI — resolve Git conflicts from your terminal or CI pipeline",
   "type": "module",
   "main": "dist/index.js",
@@ -35,6 +35,8 @@
   },
   "scripts": {
     "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "clean": "rm -rf dist"
   },
   "dependencies": {
@@ -42,7 +44,8 @@
   },
   "devDependencies": {
     "@types/node": "^25.5.0",
-    "typescript": "^5.4.0"
+    "typescript": "^5.4.0",
+    "vitest": "^3.0.0"
   },
   "author": "Laurent Guitton <lb.guitton@gmail.com>",
   "license": "MIT"

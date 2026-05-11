@@ -1,0 +1,12 @@
+<<<<<<< ours
+def compute_total(items, discount=0.0):
+    subtotal = sum(item.price for item in items)
+    return subtotal * (1 - discount)
+||||||| base
+def compute_total(items):
+    return sum(item.price for item in items)
+=======
+def compute_total(items, tax_rate=0.0):
+    subtotal = sum(item.price for item in items)
+    return subtotal + subtotal * tax_rate
+>>>>>>> theirs
