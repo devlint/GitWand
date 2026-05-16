@@ -1,7 +1,7 @@
 {
   "attribution": {
-    "commit": false,
-    "pr": false
+    "commit": "disabled",
+    "pr": "disabled"
   },
   "permissions": {
     "deny": [
