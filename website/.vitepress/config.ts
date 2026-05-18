@@ -106,7 +106,7 @@ export default defineConfig({
   ],
 
   themeConfig: {
-    logo: '/logo.png',
+    logo: '/logo-small.png',
 
     nav: [
       { text: 'Guide', link: '/guide/getting-started' },

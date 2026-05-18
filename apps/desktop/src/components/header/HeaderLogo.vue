@@ -18,7 +18,7 @@ const { t } = useI18n();
     <!-- 3D hex cube — flat-top R=30, inner r=15, viewBox 80×70.
          Same geometry as the pre-extraction inline version so the
          pixel-by-pixel look is unchanged. -->
-    <img class="header-logo__mark" src="/logo.png" alt="" width="22" height="22" aria-hidden="true">
+    <img class="header-logo__mark" src="/logo-small.png" alt="" width="22" height="22" aria-hidden="true">
     <h1 class="header-logo__title">{{ t('header.title') }}</h1>
   </div>
 </template>
