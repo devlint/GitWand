@@ -65,7 +65,7 @@ onUnmounted(() => {
     <div class="empty-visual" aria-hidden="true">
       <!-- Full GitWand logo: cube + code icon left + git graph right -->
       <!-- Colors driven by CSS custom properties so they adapt to theming -->
-      <img src="/logo.png" alt="GitWand" width="160" class="logo-img">
+      <img src="/logo.png" alt="GitWand" width="200" class="logo-img">
     </div>
 
     <h2 class="empty-title">{{ t('empty.title') }}</h2>
