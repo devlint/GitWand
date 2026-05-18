@@ -127,7 +127,7 @@ const en = {
 
   // ─── Branch menu (header dropdown) ─────────────────────
   branchMenu: {
-    title: "Branch",
+    title: "Actions",
     mergeInto: "Merge into current\u2026",
     rebaseOnto: "Rebase current onto\u2026",
     rename: "Rename branch\u2026",

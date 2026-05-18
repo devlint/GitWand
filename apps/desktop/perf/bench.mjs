@@ -46,6 +46,8 @@ function makeFixture() {
   git(dir, "init", "--initial-branch=main", "--quiet");
   git(dir, "config", "user.name", "Bench Bot");
   git(dir, "config", "user.email", "bench@gitwand.local");
+  git(dir, "config", "gc.auto", "0");
+  git(dir, "config", "gc.autoDetach", "false");
 
   // 50 tracked files, 200 commits
   for (let i = 0; i < 200; i++) {

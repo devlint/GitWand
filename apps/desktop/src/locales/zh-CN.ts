@@ -132,7 +132,7 @@ const zhCN: Locale = {
 
   // ─── Branch menu (header dropdown) ─────────────────────
   branchMenu: {
-    title: "\u5206\u652f",
+    title: "\u64cd\u4f5c",
     mergeInto: "\u5408\u5e76\u5230\u5f53\u524d\u5206\u652f\u2026",
     rebaseOnto: "\u5c06\u5f53\u524d\u5206\u652f\u53d8\u57fa\u5230\u2026",
     rename: "\u91cd\u547d\u540d\u5206\u652f\u2026",

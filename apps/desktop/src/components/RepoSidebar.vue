@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted, watch } from "vue";
 import { type RepoFileEntry, type ViewMode } from "../composables/useGitRepo";
-import { gitRemoteInfo, gitStashList, getGitUser, type GitLogEntry, type GitBranch, type RemoteInfo, type GitUser } from "../utils/backend";
+import { gitRemoteInfo, getGitUser, type GitLogEntry, type GitBranch, type RemoteInfo, type GitUser } from "../utils/backend";
 import CommitLog from "./CommitLog.vue";
 import PrListSidebar from "./PrListSidebar.vue";
 import { useI18n } from "../composables/useI18n";
@@ -204,31 +204,6 @@ async function loadRemoteInfo() {
 onMounted(loadRemoteInfo);
 watch(() => props.cwd, loadRemoteInfo);
 
-// ─── Stash count (badge on the icon-only stash button) ────────
-// Re-fetched on cwd change AND on repo-state mutations (staging a
-// file, committing, popping a stash from the modal…), since the
-// only in-app stash mutations come from the StashManager modal which
-// emits `@refresh` → App.vue calls `repoRefresh()` → props change.
-const stashCount = ref<number>(0);
-
-async function loadStashCount() {
-  if (!props.cwd) { stashCount.value = 0; return; }
-  try {
-    const list = await gitStashList(props.cwd);
-    stashCount.value = Array.isArray(list) ? list.length : 0;
-  } catch {
-    stashCount.value = 0;
-  }
-}
-onMounted(loadStashCount);
-watch(() => props.cwd, loadStashCount);
-// Cheap "repo state mutated" signature — any staged/unstaged/untracked/
-// conflicted count delta triggers a reload. Covers stash create (wt goes
-// clean) and pop (files come back) via StashManager's refresh emit.
-watch(
-  () => props.repoStats.staged + props.repoStats.unstaged + props.repoStats.untracked + props.repoStats.conflicted,
-  loadStashCount,
-);
 
 /**
  * Browser-friendly URL of the current repo's remote, or null if unknown.
@@ -717,6 +692,13 @@ function formatActivityDate(dateStr: string): string {
   <nav class="repo-sidebar" :aria-label="t('sidebar.tabChanges')">
     <!-- ── Navigation tabs (content-switching) ─────────────────── -->
     <div class="view-tabs">
+      <button
+        class="view-tab"
+        :class="{ 'view-tab--active': viewMode === 'dashboard' }"
+        @click="emit('changeView', 'dashboard')"
+      >
+        {{ t('sidebar.tabDashboard') }}
+      </button>
       <button
         class="view-tab"
         :class="{ 'view-tab--active': viewMode === 'changes' }"
@@ -1344,92 +1326,6 @@ function formatActivityDate(dateStr: string): string {
         </div>
       </div>
     </div>
-    <!-- ── Footer toolbar (utility actions + dashboard) ───────── -->
-    <div class="sidebar-footer">
-      <button
-        class="sf-btn"
-        :class="{ 'sf-btn--active': viewMode === 'dashboard' }"
-        @click="emit('changeView', 'dashboard')"
-        :title="t('sidebar.tabDashboard')"
-        :aria-label="t('sidebar.tabDashboard')"
-      >
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-          <rect x="1" y="1" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.3"/>
-          <rect x="8" y="1" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.3"/>
-          <rect x="1" y="8" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.3"/>
-          <rect x="8" y="8" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.3"/>
-        </svg>
-        <span class="sf-btn__label">{{ t('sidebar.footerDashboard') }}</span>
-      </button>
-      <div class="sf-sep" aria-hidden="true"></div>
-      <button
-        class="sf-btn"
-        @click="emit('openStash')"
-        :title="t('sidebar.stashTitle')"
-        :aria-label="t('sidebar.stashTitle')"
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M21 8v13H3V8"/>
-          <path d="M1 3h22v5H1z"/>
-          <path d="M10 12h4"/>
-        </svg>
-        <span class="sf-btn__label">{{ t('sidebar.footerStash') }}<template v-if="stashCount > 0"> ({{ stashCount }})</template></span>
-      </button>
-      <button
-        class="sf-btn"
-        @click="emit('openTags')"
-        :title="t('tags.title')"
-        :aria-label="t('tags.title')"
-      >
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-          <path d="M2 2h6l6 6-6 6-6-6V2z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
-          <circle cx="5.5" cy="5.5" r="1.2" fill="currentColor"/>
-        </svg>
-        <span class="sf-btn__label">{{ t('sidebar.footerTags') }}</span>
-      </button>
-      <button
-        class="sf-btn"
-        :class="{ 'sf-btn--active': viewMode === 'launchpad' }"
-        @click="emit('openLaunchpad')"
-        :title="t('sidebar.launchpad')"
-        :aria-label="t('sidebar.launchpad')"
-      >
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
-          <rect x="1" y="1" width="6" height="6" rx="1.2"/>
-          <rect x="9" y="1" width="6" height="6" rx="1.2"/>
-          <rect x="1" y="9" width="6" height="6" rx="1.2"/>
-          <rect x="9" y="9" width="6" height="6" rx="1.2"/>
-        </svg>
-        <span class="sf-btn__label">{{ t('sidebar.footerLaunchpad') }}</span>
-      </button>
-      <button
-        class="sf-btn"
-        @click="emit('openWorkspace')"
-        :title="t('workspace.title')"
-        :aria-label="t('workspace.title')"
-      >
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
-          <rect x="1" y="4" width="14" height="10" rx="2"/>
-          <path d="M1 7h14M5 4V3a2 2 0 014 0v1" stroke-linejoin="round"/>
-        </svg>
-        <span class="sf-btn__label">{{ t('sidebar.footerWorkspaces') }}</span>
-      </button>
-      <button
-        class="sf-btn"
-        @click="emit('openAgents')"
-        :title="t('agents.sidebarTooltip')"
-        :aria-label="t('agents.title')"
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <rect x="3" y="11" width="18" height="11" rx="2"/>
-          <path d="M12 2v4M8 11V9a4 4 0 0 1 8 0v2"/>
-          <circle cx="9" cy="16" r="1" fill="currentColor" stroke="none"/>
-          <circle cx="15" cy="16" r="1" fill="currentColor" stroke="none"/>
-          <path d="M9 20h6"/>
-        </svg>
-        <span class="sf-btn__label">{{ t('sidebar.footerAgents') }}</span>
-      </button>
-    </div>
   </nav>
 
   <!-- Context menu (Teleport to body to avoid overflow clipping) -->
@@ -1499,6 +1395,7 @@ function formatActivityDate(dateStr: string): string {
   flex-shrink: 0;
   overflow-x: auto;
   scrollbar-width: none;
+  height: 49px;
 }
 
 .view-tabs::-webkit-scrollbar {
@@ -1533,86 +1430,6 @@ function formatActivityDate(dateStr: string): string {
   border-bottom-color: var(--color-accent);
 }
 
-/* ── Footer toolbar ────────────────────────────────────────── */
-.sidebar-footer {
-  display: flex;
-  align-items: stretch;
-  justify-content: space-around;
-  gap: 0;
-  padding: 4px 2px;
-  border-top: 1px solid var(--color-border);
-  flex-shrink: 0;
-  /* Always pin to the bottom of the flex column, regardless of content height */
-  margin-top: auto;
-  background: var(--color-bg-secondary, var(--color-surface-alt, rgba(0,0,0,0.03)));
-}
-
-.sf-sep {
-  width: 1px;
-  align-self: stretch;
-  background: var(--color-border);
-  margin: 4px 4px;
-  flex-shrink: 0;
-}
-
-.sf-btn {
-  position: relative;
-  display: inline-flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-  padding: 4px 6px;
-  min-width: 38px;
-  border-radius: var(--radius-sm, 5px);
-  background: none;
-  color: var(--color-text-muted);
-  border: 1px solid transparent;
-  cursor: pointer;
-  transition: color var(--transition-hover), background var(--transition-hover);
-  flex-shrink: 0;
-}
-
-.sf-btn:hover {
-  color: var(--color-text);
-  background: var(--color-bg-tertiary, rgba(0,0,0,0.06));
-}
-
-.sf-btn--active {
-  color: var(--color-accent);
-  background: var(--color-accent-soft, rgba(99,102,241,0.1));
-}
-
-.sf-btn--active:hover {
-  background: var(--color-accent-soft, rgba(99,102,241,0.15));
-}
-
-.sf-btn__label {
-  font-size: 9px;
-  font-weight: 500;
-  letter-spacing: 0.01em;
-  line-height: 1;
-  white-space: nowrap;
-  color: inherit;
-}
-
-.sf-btn__badge {
-  position: absolute;
-  top: 2px;
-  right: 2px;
-  min-width: 13px;
-  height: 13px;
-  padding: 0 3px;
-  font-size: 8px;
-  font-weight: var(--font-weight-semibold);
-  line-height: 13px;
-  text-align: center;
-  background: var(--color-accent);
-  color: var(--color-accent-text);
-  border-radius: var(--radius-pill);
-  font-variant-numeric: tabular-nums;
-  pointer-events: none;
-}
 
 .tab-badge {
   font-size: var(--font-size-xs);

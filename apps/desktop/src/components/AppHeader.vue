@@ -3,11 +3,11 @@
  * AppHeader — header refondu.
  *
  * Layout:
- *   ┌─ Tabs row (RepoTabStrip, n'apparait que si ≥ 1 repo ouvert) ─┐
- *   │  [repo1]  [repo2]  +                                         │
- *   ├──────────────────────────────────────────────────────────────┤
- *   │ [logo] GitWand   [branch ▾]   stats          [sync▾] [branch▾] [🔍] [🌙] [⚙] │
- *   └──────────────────────────────────────────────────────────────┘
+ *   ┌─ Logo + Tabs row ─────────────────────────────────────────┐
+ *   │  [logo] | [repo1]  [repo2]  +                             │
+ *   ├───────────────────────────────────────────────────────────┤
+ *   │  [branch ▾]   stats          [sync▾] [branch▾] [🔍] [🌙] [⚙] │
+ *   └───────────────────────────────────────────────────────────┘
  *
  * Composition
  * ───────────
@@ -84,6 +84,8 @@ const props = defineProps<{
   activeTabId: number | null;
   /** Number of accumulated errors; drives the badge on the settings button. */
   errorCount?: number;
+  /** Stash entry count — drives the badge on the Stash button. */
+  stashCount?: number;
 }>();
 
 const emit = defineEmits<{
@@ -129,6 +131,10 @@ const emit = defineEmits<{
   undoPerformed: [];
   toggleTheme: [];
   openHelp: [];
+  openStash: [];
+  openTags: [];
+  openWorkspace: [];
+  openAgents: [];
 }>();
 
 // ─── Merge-into picker popover (triggered by BranchMenu) ──────────
@@ -293,9 +299,12 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
 
 <template>
   <header class="app-header">
-    <!-- ── Row 1: Repo tabs ─────────────────────────────────── -->
-    <div v-if="tabs.length >= 1" class="app-header__tabs">
+    <!-- ── Row 1: Logo + Repo tabs + top-right buttons ─────── -->
+    <div class="app-header__tabs">
+      <HeaderLogo />
+      <div v-if="tabs.length >= 1" class="header-separator header-separator--left" aria-hidden="true"></div>
       <RepoTabStrip
+        v-if="tabs.length >= 1"
         :tabs="tabs"
         :active-tab-id="activeTabId"
         @switch-tab="(id) => emit('switchTab', id)"
@@ -305,22 +314,100 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
         @open-fork="emit('openFork')"
         @open-recent="(path) => emit('openRepo', path)"
       />
+
+      <div class="app-header__tabs-spacer"></div>
+
+      <!-- Workspace button -->
+      <button
+        v-if="hasRepo"
+        class="btn btn--icon"
+        :title="t('workspace.title')"
+        :aria-label="t('workspace.title')"
+        @click="emit('openWorkspace')"
+      >
+        <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+          <rect x="1" y="4" width="14" height="10" rx="2"/>
+          <path d="M1 7h14M5 4V3a2 2 0 014 0v1" stroke-linejoin="round"/>
+        </svg>
+      </button>
+
+      <!-- Agents button -->
+      <button
+        v-if="hasRepo"
+        class="btn btn--icon"
+        :title="t('agents.sidebarTooltip')"
+        :aria-label="t('agents.title')"
+        @click="emit('openAgents')"
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="3" y="11" width="18" height="11" rx="2"/>
+          <path d="M12 2v4M8 11V9a4 4 0 0 1 8 0v2"/>
+          <circle cx="9" cy="16" r="1" fill="currentColor" stroke="none"/>
+          <circle cx="15" cy="16" r="1" fill="currentColor" stroke="none"/>
+          <path d="M9 20h6"/>
+        </svg>
+      </button>
+
+      <!-- Theme toggle -->
+      <button
+        class="btn btn--icon theme-toggle"
+        :aria-label="theme === 'dark' ? t('header.themeLight') : t('header.themeDark')"
+        :title="theme === 'dark' ? t('header.themeLightLabel') : t('header.themeDarkLabel')"
+        @click="emit('toggleTheme')"
+      >
+        <svg v-if="theme === 'dark'" width="18" height="18" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <circle cx="8" cy="8" r="3" stroke="currentColor" stroke-width="1.4" />
+          <path d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M3.4 12.6l1.1-1.1M11.5 4.5l1.1-1.1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+        </svg>
+        <svg v-else width="18" height="18" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M14 9.3A6 6 0 016.7 2 6 6 0 1014 9.3z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />
+        </svg>
+      </button>
+
+      <!-- Help -->
+      <button
+        class="btn btn--icon"
+        :aria-label="t('header.openHelp')"
+        :title="t('header.openHelp')"
+        @click="emit('openHelp')"
+      >
+        <svg width="18" height="18" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.4" />
+          <path d="M8 11v.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+          <path d="M8 5.5c1 0 1.8.8 1.8 1.8S9 8.6 8 8.6V9.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </button>
+
+      <!-- Settings -->
+      <div class="settings-btn-wrap">
+        <button
+          class="btn btn--icon"
+          :aria-label="t('settings.title')"
+          :title="t('settings.title')"
+          @click="emit('openSettings')"
+        >
+          <svg width="18" height="18" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M2.5 4h11M2.5 8h11M2.5 12h11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+            <circle cx="5.5" cy="4" r="1.5" fill="var(--color-bg-secondary)" stroke="currentColor" stroke-width="1.2" />
+            <circle cx="10.5" cy="8" r="1.5" fill="var(--color-bg-secondary)" stroke="currentColor" stroke-width="1.2" />
+            <circle cx="7" cy="12" r="1.5" fill="var(--color-bg-secondary)" stroke="currentColor" stroke-width="1.2" />
+          </svg>
+        </button>
+        <button
+          v-if="(props.errorCount ?? 0) > 0"
+          type="button"
+          class="settings-error-dot"
+          :title="t('statusBar.errorsTooltip', props.errorCount ?? 0)"
+          :aria-label="t('statusBar.errorsTooltip', props.errorCount ?? 0)"
+          @click.stop="emit('openLogs')"
+        >{{ (props.errorCount ?? 0) > 99 ? '99+' : props.errorCount }}</button>
+      </div>
     </div>
 
     <!-- ── Row 2: Main action row ───────────────────────────── -->
     <div class="app-header__row">
-      <!-- Left cluster: logo + branch selector (ex-folder spot) -->
+      <!-- Left cluster: branch selector + sync + branch actions -->
       <div class="header-left">
-        <HeaderLogo />
-
-        <!--
-          Vertical separator between the logo and whatever comes next
-          (branch chip when a repo is open, "Open" fallback otherwise).
-          Same .header-separator used on the right side — keeps the
-          divider vocabulary consistent across the header.
-        -->
-        <div class="header-separator header-separator--left" aria-hidden="true"></div>
-
         <!-- Fallback: "Open" button when no repo is open -->
         <button
           v-if="!hasRepo"
@@ -334,36 +421,22 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
           <span class="folder-name">{{ t('header.open') }}</span>
         </button>
 
-        <!-- Branch selector: trigger chip + popover, extracted component. -->
-        <BranchSelector
-          v-if="hasRepo"
-          :branch-display="branchDisplay"
-          :repo-stats="repoStats"
-          :branches="branches"
-          :branches-loading="branchesLoading"
-          :is-switching-branch="isSwitchingBranch"
-          :cwd="cwd"
-          @switch-branch="(name) => emit('switchBranch', name)"
-          @create-branch="(name) => emit('createBranch', name)"
-          @delete-branch="(name) => emit('deleteBranch', name)"
-          @open-worktrees="(branch) => emit('openWorktrees', branch)"
-          @load-branches="emit('loadBranches')"
-        />
-      </div>
-
-      <!--
-        Center: global search input.
-        The repo-stats that used to live here now render inside the
-        branch-trigger on line 2 — freeing the center for an always-
-        visible search field. SearchTrigger owns the Cmd/Ctrl+K shortcut.
-      -->
-      <div class="header-center">
-        <SearchTrigger v-if="hasRepo" @open-search="emit('openSearch')" />
-      </div>
-
-      <!-- Right cluster: sync action, branch menu, search, theme, settings -->
-      <div class="header-right">
         <template v-if="hasRepo">
+          <!-- Branch selector: trigger chip + popover, extracted component. -->
+          <BranchSelector
+            :branch-display="branchDisplay"
+            :repo-stats="repoStats"
+            :branches="branches"
+            :branches-loading="branchesLoading"
+            :is-switching-branch="isSwitchingBranch"
+            :cwd="cwd"
+            @switch-branch="(name) => emit('switchBranch', name)"
+            @create-branch="(name) => emit('createBranch', name)"
+            @delete-branch="(name) => emit('deleteBranch', name)"
+            @open-worktrees="(branch) => emit('openWorktrees', branch)"
+            @load-branches="emit('loadBranches')"
+          />
+
           <!-- Offline indicator pill -->
           <div v-if="isOffline" class="offline-pill" :title="t('offline.tooltip')">
             <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -372,6 +445,23 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
             </svg>
             <span>{{ t('offline.label') }}</span>
           </div>
+
+          <!-- BranchMenu + its two piggy-backed popovers.
+               The popovers anchor on their own wrappers so the click-outside
+               rules can target them precisely. header-left is position:relative
+               so they drop below the row from the left edge. -->
+          <BranchMenu
+            :current-branch="branchDisplay"
+            :disabled="isMerging || isSwitchingBranch"
+            @open-merge-picker="onBranchMenuMerge"
+            @open-rebase-picker="onBranchMenuRebase"
+            @open-rename-modal="onBranchMenuRename"
+            @open-delete-modal="onBranchMenuDelete"
+            @open-rewind="onBranchMenuRewind"
+            @open-worktrees="onBranchMenuWorktrees"
+            @open-submodules="onBranchMenuSubmodules"
+          />
+
           <SyncSplitButton
             :ahead-count="aheadCount"
             :behind-count="behindCount"
@@ -393,20 +483,34 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
             @merge-remote="emit('mergeRemote')"
           />
 
-          <!-- BranchMenu + its two piggy-backed popovers.
-               The popovers anchor on their own wrappers so the click-outside
-               rules can target them precisely. -->
-          <BranchMenu
-            :current-branch="branchDisplay"
-            :disabled="isMerging || isSwitchingBranch"
-            @open-merge-picker="onBranchMenuMerge"
-            @open-rebase-picker="onBranchMenuRebase"
-            @open-rename-modal="onBranchMenuRename"
-            @open-delete-modal="onBranchMenuDelete"
-            @open-rewind="onBranchMenuRewind"
-            @open-worktrees="onBranchMenuWorktrees"
-            @open-submodules="onBranchMenuSubmodules"
-          />
+          <!-- Stash button -->
+          <div class="header-action-sep" aria-hidden="true"></div>
+          <button
+            class="btn btn--icon header-action-btn"
+            :title="t('sidebar.stashTitle')"
+            :aria-label="t('sidebar.stashTitle')"
+            @click="emit('openStash')"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 8v13H3V8"/>
+              <path d="M1 3h22v5H1z"/>
+              <path d="M10 12h4"/>
+            </svg>
+            <span v-if="(stashCount ?? 0) > 0" class="header-action-btn__badge">{{ stashCount }}</span>
+          </button>
+
+          <!-- Tags button -->
+          <button
+            class="btn btn--icon header-action-btn"
+            :title="t('tags.title')"
+            :aria-label="t('tags.title')"
+            @click="emit('openTags')"
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M2 2h6l6 6-6 6-6-6V2z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+              <circle cx="5.5" cy="5.5" r="1.2" fill="currentColor"/>
+            </svg>
+          </button>
 
           <!-- Merge-into picker (triggered by BranchMenu → onBranchMenuMerge) -->
           <div v-if="showMergePopover" class="merge-popover-anchor">
@@ -488,65 +592,11 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
               <div v-else class="undo-empty">{{ t('undoStack.noHistory') }}</div>
             </div>
           </div>
-
-          <div class="header-separator"></div>
         </template>
-
-        <!-- Theme toggle -->
-        <button
-          class="btn btn--icon theme-toggle"
-          :aria-label="theme === 'dark' ? t('header.themeLight') : t('header.themeDark')"
-          :title="theme === 'dark' ? t('header.themeLightLabel') : t('header.themeDarkLabel')"
-          @click="emit('toggleTheme')"
-        >
-          <svg v-if="theme === 'dark'" width="18" height="18" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <circle cx="8" cy="8" r="3" stroke="currentColor" stroke-width="1.4" />
-            <path d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M3.4 12.6l1.1-1.1M11.5 4.5l1.1-1.1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
-          </svg>
-          <svg v-else width="18" height="18" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <path d="M14 9.3A6 6 0 016.7 2 6 6 0 1014 9.3z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />
-          </svg>
-        </button>
-
-        <!-- Help -->
-        <button
-          class="btn btn--icon"
-          :aria-label="t('header.openHelp')"
-          :title="t('header.openHelp')"
-          @click="emit('openHelp')"
-        >
-          <svg width="18" height="18" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.4" />
-            <path d="M8 11v.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
-            <path d="M8 5.5c1 0 1.8.8 1.8 1.8S9 8.6 8 8.6V9.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
-          </svg>
-        </button>
-
-        <!-- Settings -->
-        <div class="settings-btn-wrap">
-          <button
-            class="btn btn--icon"
-            :aria-label="t('settings.title')"
-            :title="t('settings.title')"
-            @click="emit('openSettings')"
-          >
-            <svg width="18" height="18" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <path d="M2.5 4h11M2.5 8h11M2.5 12h11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
-              <circle cx="5.5" cy="4" r="1.5" fill="var(--color-bg-secondary)" stroke="currentColor" stroke-width="1.2" />
-              <circle cx="10.5" cy="8" r="1.5" fill="var(--color-bg-secondary)" stroke="currentColor" stroke-width="1.2" />
-              <circle cx="7" cy="12" r="1.5" fill="var(--color-bg-secondary)" stroke="currentColor" stroke-width="1.2" />
-            </svg>
-          </button>
-          <button
-            v-if="(props.errorCount ?? 0) > 0"
-            type="button"
-            class="settings-error-dot"
-            :title="t('statusBar.errorsTooltip', props.errorCount ?? 0)"
-            :aria-label="t('statusBar.errorsTooltip', props.errorCount ?? 0)"
-            @click.stop="emit('openLogs')"
-          >{{ (props.errorCount ?? 0) > 99 ? '99+' : props.errorCount }}</button>
-        </div>
       </div>
+
+      <SearchTrigger v-if="hasRepo" class="header-search" @open-search="emit('openSearch')" />
+
     </div>
   </header>
 </template>
@@ -562,18 +612,23 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
 }
 
 .app-header__tabs {
-  /* Tabs row sits above the logo. No heavy chrome; the RepoTabStrip
-     renders its own hit-targets. */
-  padding: var(--space-2) var(--space-5) 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-5);
   min-height: var(--tabbar-height);
   border-bottom: 1px solid var(--color-border);
   box-sizing: border-box;
+  overflow: hidden;
+}
+
+.app-header__tabs-spacer {
+  flex: 1;
 }
 
 .app-header__row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: var(--space-6);
   height: var(--header-height);
   padding: 0 var(--space-6);
@@ -584,22 +639,47 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
   align-items: center;
   gap: var(--space-4);
   min-width: 0;
+  position: relative; /* anchor for merge + undo popovers */
 }
 
-.header-center {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-4);
-  min-width: 0;
+.header-search {
+  margin-left: auto;
 }
 
-.header-right {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  position: relative; /* anchor for the two piggy-backed popovers */
+.header-action-sep {
+  width: 1px;
+  height: 16px;
+  background: var(--color-border);
+  flex-shrink: 0;
+  margin-inline: var(--space-1);
+}
+
+.header-action-btn {
+  position: relative;
+  min-height: 37px;
+}
+
+.header-left :deep(.branch-trigger),
+.header-left :deep(.btn--sync) {
+  min-height: 37px;
+}
+
+.header-action-btn__badge {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  min-width: 13px;
+  height: 13px;
+  padding: 0 3px;
+  font-size: 8px;
+  font-weight: var(--font-weight-semibold);
+  line-height: 13px;
+  text-align: center;
+  background: var(--color-accent);
+  color: var(--color-accent-text);
+  border-radius: var(--radius-pill);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
 }
 
 .header-separator {
@@ -658,20 +738,14 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
 .btn--primary:hover:not(:disabled) { background: var(--color-accent-hover); }
 
 /*
- * `.btn--sync` (primary/accent fill) lives in main.css — it has to be
- * global because SyncSplitButton and BranchMenu are scoped child
- * components whose inner <button> elements don't receive our scope hash.
- *
- * BranchMenu is a SECONDARY entry in the header, so we use `:deep()`
- * here to demote its specific trigger back to neutral. The `:deep()`
- * selector is Vue's escape hatch for reaching into a child component
- * from a parent's scoped CSS.
+ * BranchMenu is a SECONDARY action, so demote its trigger to neutral.
+ * Selector moved to header-left since BranchMenu now lives there.
  */
-.header-right :deep(.branch-menu__trigger) {
+.header-left :deep(.branch-menu__trigger) {
   background: var(--color-bg-tertiary);
   color: var(--color-text);
 }
-.header-right :deep(.branch-menu__trigger:hover:not(:disabled)) {
+.header-left :deep(.branch-menu__trigger:hover:not(:disabled)) {
   background: var(--color-border);
 }
 
@@ -702,7 +776,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
 .merge-popover-anchor {
   position: absolute;
   top: 100%;
-  right: 0;
+  left: 0;
   margin-top: var(--space-3);
   z-index: 50;
 }
@@ -816,7 +890,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
 .undo-popover-anchor {
   position: absolute;
   top: 100%;
-  right: 0;
+  left: 0;
   margin-top: var(--space-3);
   z-index: 50;
 }

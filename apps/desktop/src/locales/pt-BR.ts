@@ -128,7 +128,7 @@ const ptBR: Locale = {
 
   // ─── Branch menu (header dropdown) ─────────────────────
   branchMenu: {
-    title: "Branch",
+    title: "Ações",
     mergeInto: "Merge na atual\u2026",
     rebaseOnto: "Rebase da atual sobre\u2026",
     rename: "Renomear branch\u2026",

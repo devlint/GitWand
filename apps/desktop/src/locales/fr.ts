@@ -121,7 +121,7 @@ const fr: Locale = {
 
   // ─── Branch menu (header dropdown) ─────────────────────
   branchMenu: {
-    title: "Branche",
+    title: "Actions",
     mergeInto: "Merger dans la courante\u2026",
     rebaseOnto: "Rebase la courante sur\u2026",
     rename: "Renommer la branche\u2026",

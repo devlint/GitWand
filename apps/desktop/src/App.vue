@@ -84,7 +84,7 @@ import {
   LOG_FOCUS_SEARCH_KEY,
   LAUNCHPAD_OPEN_REQUEST_KEY,
 } from "./composables/branchPickerBridge";
-import { gitStash, gitStashPop, openInEditor, setGitConfig, gitDiscard, gitAddToGitignore, gitDeleteBranch, gitDeleteRemoteTag, gitRemoteInfo, gitUnpushedTags, gitPushTags, workspaceRead, gitMergeBase } from "./utils/backend";
+import { gitStash, gitStashPop, gitStashList, openInEditor, setGitConfig, gitDiscard, gitAddToGitignore, gitDeleteBranch, gitDeleteRemoteTag, gitRemoteInfo, gitUnpushedTags, gitPushTags, workspaceRead, gitMergeBase } from "./utils/backend";
 import { useCommitActions } from "./composables/useCommitActions";
 
 const { t } = useI18n();
@@ -1045,6 +1045,22 @@ const showWorkspace = ref(false);
 const showAgents = ref(false);
 const showCommandLog = ref(false);
 
+const stashCount = ref(0);
+async function loadStashCount() {
+  if (!repoFolderPath.value) { stashCount.value = 0; return; }
+  try {
+    const list = await gitStashList(repoFolderPath.value);
+    stashCount.value = Array.isArray(list) ? list.length : 0;
+  } catch {
+    stashCount.value = 0;
+  }
+}
+watch(repoFolderPath, loadStashCount, { immediate: true });
+watch(
+  () => repoStats.value.staged + repoStats.value.unstaged + repoStats.value.untracked + repoStats.value.conflicted,
+  loadStashCount,
+);
+
 // ─── Launchpad panel ─────────────────────────────────────
 // showLaunchpad removed — Launchpad is now a first-class viewMode ("launchpad").
 // launchpadRepos holds the workspace repos list loaded on demand; the
@@ -1638,7 +1654,10 @@ onUnmounted(() => {
       @open-delete-modal="showBranchDeleteModal = true" @load-branches="loadBranches" @undo-performed="repoRefresh()"
       @open-rebase="showRebase = true"
       @open-worktrees="(branch) => { pendingWorktreeBranch = branch; showWorktrees = true; }"
-      @open-submodules="showSubmodules = true" @open-search="handleOpenSearch" @open-help="showHelp = true" />
+      @open-submodules="showSubmodules = true" @open-search="handleOpenSearch" @open-help="showHelp = true"
+      :stash-count="stashCount"
+      @open-stash="showStash = true" @open-tags="showTags = true"
+      @open-workspace="showWorkspace = true" @open-agents="showAgents = true" />
 
     <div class="app-body">
       <aside class="sidebar" v-if="hasRepo && showSidebar">
@@ -1661,9 +1680,7 @@ onUnmounted(() => {
           @tag-commit="handleTagCommit" @cherry-pick-commit="handleCherryPickCommit" @view-on-forge="handleViewOnForge"
           @update:log-scope="setLogScope" @update:log-author-filter="setLogAuthorFilter"
           @discard="(path, section) => discardFiles([path], section === 'untracked')"
-          @add-to-gitignore="(path) => addToGitignore(path)" @refresh="repoRefresh()" @open-stash="showStash = true"
-          @open-tags="showTags = true" @open-workspace="showWorkspace = true" @open-agents="showAgents = true"
-          @open-launchpad="handleLaunchpadShortcut" />
+          @add-to-gitignore="(path) => addToGitignore(path)" @refresh="repoRefresh()" />
       </aside>
 
       <main class="main">
