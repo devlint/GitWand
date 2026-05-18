@@ -394,6 +394,7 @@ const zhCN: Locale = {
     summaryPlaceholder: "概要（必填）",
     description: "描述",
     descriptionPlaceholder: "描述（可选）",
+    templatePicker: "Templates", // TODO: translate
     identityDefault: "全局配置",
   },
 

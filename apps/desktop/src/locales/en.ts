@@ -407,6 +407,7 @@ const en = {
     summaryPlaceholder: "Summary (required)",
     description: "Description",
     descriptionPlaceholder: "Description (optional)",
+    templatePicker: "Templates",
     // v2.12 identity selector
     identityDefault: "Global config",
   },

@@ -401,6 +401,7 @@ const fr: Locale = {
     summaryPlaceholder: "R\u00e9sum\u00e9 (requis)",
     description: "Description",
     descriptionPlaceholder: "Description (optionnel)",
+    templatePicker: "Templates", // TODO: translate
     identityDefault: "Config globale",
   },
 
