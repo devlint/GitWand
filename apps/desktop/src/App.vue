@@ -639,6 +639,14 @@ function onViewModeChange(mode: ViewMode) {
   viewMode.value = mode;
 }
 
+async function onDiscardSection(sectionKey: string, paths: string[]) {
+  if (!window.confirm(t('sidebar.discardAllConfirm', paths.length))) return;
+  if (sectionKey === 'staged') {
+    await unstageFiles(paths);
+  }
+  await discardFiles(paths, sectionKey === 'untracked');
+}
+
 // ─── File history viewer ────────────────────────────────
 const fileHistoryPath = ref<string | null>(null);
 
@@ -1680,7 +1688,10 @@ onUnmounted(() => {
           @tag-commit="handleTagCommit" @cherry-pick-commit="handleCherryPickCommit" @view-on-forge="handleViewOnForge"
           @update:log-scope="setLogScope" @update:log-author-filter="setLogAuthorFilter"
           @discard="(path, section) => discardFiles([path], section === 'untracked')"
-          @add-to-gitignore="(path) => addToGitignore(path)" @refresh="repoRefresh()" />
+          @discard-section="onDiscardSection"
+          @add-to-gitignore="(path) => addToGitignore(path)" @refresh="repoRefresh()" @open-stash="showStash = true"
+          @open-tags="showTags = true" @open-workspace="showWorkspace = true" @open-agents="showAgents = true"
+          @open-launchpad="handleLaunchpadShortcut" />
       </aside>
 
       <main class="main">

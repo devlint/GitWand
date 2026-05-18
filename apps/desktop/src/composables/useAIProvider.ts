@@ -1,6 +1,6 @@
 import { ref, computed } from "vue";
 import type { LlmEndpoint } from "@gitwand/core";
-import { claudeCliPrompt, codexCliPrompt } from "../utils/backend";
+import { claudeCliPrompt, codexCliPrompt, detectClaudeCli } from "../utils/backend";
 import { t } from "./useI18n";
 
 /**
@@ -289,6 +289,16 @@ function parseAIResponse(raw: string): AISuggestion {
   }
 }
 
+// ─── Auto-detection ─────────────────────────────────────
+// Populated once at module load; null = detection still pending.
+const _claudeCliAvailable = ref<boolean | null>(null);
+
+detectClaudeCli().then(info => {
+  _claudeCliAvailable.value = info.found && info.logged_in;
+}).catch(() => {
+  _claudeCliAvailable.value = false;
+});
+
 // ─── Composable ─────────────────────────────────────────
 const isLoading = ref(false);
 const lastError = ref<string | null>(null);
@@ -299,17 +309,17 @@ export function useAIProvider() {
 
   const isAvailable = computed(() => {
     const s = settings.value;
-    if (!s.aiEnabled) return false;
-    if (s.aiProvider === "claude" && !s.aiApiKey) return false;
-    if (s.aiProvider === "openai-compat" && (!s.aiApiKey || !s.aiApiEndpoint)) return false;
-    if (s.aiProvider === "ollama") return true; // Ollama doesn't need a key
-    // CLI providers: availability is verified at runtime via the matching
-    // detectXxxCli() — optimistically considered available here so the
-    // first actual call surfaces a clear error if missing / not logged in.
-    if (s.aiProvider === "claude-code-cli") return true;
-    if (s.aiProvider === "codex-cli") return true;
-    if (s.aiProvider === "none") return false;
-    return true;
+    if (s.aiEnabled) {
+      if (s.aiProvider === "claude" && s.aiApiKey) return true;
+      if (s.aiProvider === "openai-compat" && s.aiApiKey && s.aiApiEndpoint) return true;
+      if (s.aiProvider === "ollama") return true;
+      if (s.aiProvider === "claude-code-cli") return true;
+      if (s.aiProvider === "codex-cli") return true;
+      // misconfigured explicit provider — fall through to CLI auto-detect
+    }
+    // Auto-fallback: use Claude Code CLI if installed and logged in,
+    // even when the user hasn't configured any explicit AI provider.
+    return _claudeCliAvailable.value === true;
   });
 
   /**
@@ -327,7 +337,16 @@ export function useAIProvider() {
 
       let rawResponse: string;
 
-      switch (s.aiProvider) {
+      const misconfigured =
+        !s.aiEnabled ||
+        s.aiProvider === "none" ||
+        (s.aiProvider === "claude" && !s.aiApiKey) ||
+        (s.aiProvider === "openai-compat" && (!s.aiApiKey || !s.aiApiEndpoint));
+      const provider = misconfigured && _claudeCliAvailable.value
+        ? "claude-code-cli"
+        : s.aiProvider;
+
+      switch (provider) {
         case "claude":
           rawResponse = await callClaude(s, systemPrompt, userPrompt);
           break;
@@ -368,7 +387,15 @@ export function useAIProvider() {
     userPrompt: string,
   ): Promise<string> {
     const s = loadAISettings();
-    switch (s.aiProvider) {
+    const misconfigured =
+      !s.aiEnabled ||
+      s.aiProvider === "none" ||
+      (s.aiProvider === "claude" && !s.aiApiKey) ||
+      (s.aiProvider === "openai-compat" && (!s.aiApiKey || !s.aiApiEndpoint));
+    const provider = misconfigured && _claudeCliAvailable.value
+      ? "claude-code-cli"
+      : s.aiProvider;
+    switch (provider) {
       case "claude":
         return callClaude(s, systemPrompt, userPrompt);
       case "claude-code-cli":

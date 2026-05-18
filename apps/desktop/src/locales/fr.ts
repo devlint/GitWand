@@ -165,6 +165,8 @@ const fr: Locale = {
     // Actions
     stageAll: "Tout indexer",
     unstageAll: "Tout désindexer",
+    discardAll: "Tout supprimer",
+    discardAllConfirm: "Supprimer {0} fichier(s) ? Cette action est irréversible.",
     stage: "Indexer",
     unstage: "Désindexer",
     // Commit panel
@@ -195,6 +197,7 @@ const fr: Locale = {
     trailerSobHelp: "Ajoute « Signed-off-by : ton nom» au commit. Certifie que tu as le droit de soumettre ce code sous la licence du projet (Developer Certificate of Origin, DCO). Exigé par certains projets open source comme le noyau Linux.",
     trailerRbLabel: "Relu par",
     trailerRbHelp: "Ajoute « Reviewed-by : nom» au commit. Enregistre qui a relu et approuvé ce changement. Visible dans l’historique git pour la traçabilité.",
+    aiLabel: "IA",
     aiGenerateTooltip: "Générer un message avec l'IA",
     aiGeneratingTooltip: "Génération en cours\u2026",
     aiRegenerate: "Régénérer",

@@ -172,6 +172,8 @@ const en = {
     // Actions
     stageAll: "Stage all",
     unstageAll: "Unstage all",
+    discardAll: "Discard all",
+    discardAllConfirm: "Discard all {0} file(s)? This cannot be undone.",
     stage: "Stage",
     unstage: "Unstage",
     // Commit panel
@@ -201,6 +203,7 @@ const en = {
     trailerSobHelp: "Adds \u201cSigned-off-by: your name\u201d to the commit. Certifies you have the right to submit this code under the project\u2019s license (Developer Certificate of Origin, DCO). Required by some open-source projects (e.g. Linux kernel).",
     trailerRbLabel: "Reviewed by",
     trailerRbHelp: "Adds \u201cReviewed-by: name\u201d to the commit. Records who reviewed and approved this change. Appears in the git history for traceability.",
+    aiLabel: "AI",
     aiGenerateTooltip: "Generate message with AI",
     aiGeneratingTooltip: "Generating\u2026",
     aiRegenerate: "Regenerate",

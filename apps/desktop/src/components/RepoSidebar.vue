@@ -85,6 +85,8 @@ const emit = defineEmits<{
   "select-dir-file": [path: string];
   /** Discard changes to a file (tracked: restore, untracked: delete) */
   discard: [path: string, section: string];
+  /** Discard all changes in a section */
+  discardSection: [sectionKey: string, paths: string[]];
   /** Append file path to .gitignore */
   addToGitignore: [path: string];
   /** Request a full repo state refresh (after absorb, etc.) */
@@ -743,7 +745,22 @@ function formatActivityDate(dateStr: string): string {
             </span>
             <span class="section-label">{{ sectionMeta[sectionKey].label }}</span>
             <span class="section-count">{{ sections[sectionKey].length }}</span>
-            <!-- Stage all / Unstage all buttons -->
+            <span class="section-spacer"></span>
+            <!-- Discard all / Stage all / Unstage all buttons -->
+            <button
+              v-if="sectionKey === 'staged' || sectionKey === 'unstaged' || sectionKey === 'untracked'"
+              class="section-action section-action--danger"
+              @click.stop="emit('discardSection', sectionKey, sections[sectionKey].map(f => f.path))"
+              :title="t('sidebar.discardAll')"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="3 6 5 6 21 6"/>
+                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+                <path d="M10 11v6"/>
+                <path d="M14 11v6"/>
+                <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+              </svg>
+            </button>
             <button
               v-if="sectionKey === 'unstaged' || sectionKey === 'untracked'"
               class="section-action"
@@ -864,6 +881,7 @@ function formatActivityDate(dateStr: string): string {
         </div>
         <input
           class="commit-summary mono"
+          :class="{ 'commit-summary--ai': ai.isAvailable.value }"
           type="text"
           :value="commitSummary"
           @input="onSummaryInput"
@@ -871,7 +889,7 @@ function formatActivityDate(dateStr: string): string {
           @blur="templateSlashOpen = false"
           :placeholder="t('sidebar.summaryPlaceholder')"
         />
-        <!-- AI commit message: split-button with dropdown -->
+        <!-- AI commit message: overlaid split-button at top-right of summary input -->
         <div v-if="ai.isAvailable.value" class="commit-ai-wrapper">
           <button
             class="commit-ai-btn"
@@ -880,13 +898,11 @@ function formatActivityDate(dateStr: string): string {
             :title="isGenerating ? t('sidebar.aiGeneratingTooltip') : t('sidebar.aiGenerateTooltip')"
             @click="onGenerateCommitMessage"
           >
-            <svg v-if="isGenerating" class="commit-spinner" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+            <svg v-if="isGenerating" class="commit-spinner" width="12" height="12" viewBox="0 0 14 14" aria-hidden="true">
               <circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.5" fill="none" opacity="0.3"/>
               <path d="M7 1.5A5.5 5.5 0 0112.5 7" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/>
             </svg>
-            <svg v-else width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <path d="M8 2l1.5 3.5L13 7l-3.5 1.5L8 12l-1.5-3.5L3 7l3.5-1.5L8 2z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" fill="none"/>
-            </svg>
+            <span v-else class="commit-ai-label">{{ t('sidebar.aiLabel') }}</span>
           </button>
           <button
             class="commit-ai-chevron"
@@ -1555,6 +1571,7 @@ function formatActivityDate(dateStr: string): string {
   padding: var(--space-4) var(--space-6);
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-semibold);
+  line-height: 1;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--color-text-muted);
@@ -1572,15 +1589,18 @@ function formatActivityDate(dateStr: string): string {
   text-align: center;
 }
 
-.section-label {
+.section-spacer {
   flex: 1;
 }
 
 .section-count {
   font-variant-numeric: tabular-nums;
   background: var(--color-bg-tertiary);
-  padding: var(--space-1) var(--space-3);
+  padding: 0 var(--space-3);
   border-radius: var(--radius-pill);
+  height: 16px;
+  display: flex;
+  align-items: center;
 }
 
 .section-action {
@@ -1593,6 +1613,7 @@ function formatActivityDate(dateStr: string): string {
   font-family: var(--font-mono);
   font-size: var(--font-size-lg);
   font-weight: var(--font-weight-bold);
+  line-height: 1;
   color: var(--color-text-muted);
   background: none;
   transition: background var(--transition-hover), color var(--transition-hover);
@@ -1601,6 +1622,11 @@ function formatActivityDate(dateStr: string): string {
 .section-action:hover {
   background: var(--color-bg-tertiary);
   color: var(--color-text);
+}
+
+.section-action--danger:hover {
+  background: color-mix(in srgb, var(--color-danger) 15%, transparent);
+  color: var(--color-danger);
 }
 
 .file-items {
@@ -1748,6 +1774,7 @@ function formatActivityDate(dateStr: string): string {
 }
 
 .commit-summary-row {
+  position: relative;
   display: flex;
   gap: var(--space-2);
   align-items: stretch;
@@ -1767,42 +1794,51 @@ function formatActivityDate(dateStr: string): string {
   transition: border-color var(--transition-hover);
 }
 
-.commit-ai-wrapper {
-  position: relative;
-  display: flex;
-  flex-shrink: 0;
+.commit-summary--ai {
+  padding-right: 52px;
 }
 
-/*
- * Split-button: main sparkle action + dropdown chevron for alternative AI
- * actions. We keep the split because the chevron opens a menu — the
- * global `.btn--ai` can't represent that affordance on its own. Color
- * comes from the shared `--color-ai` token so it still reads as "AI"
- * and not "brand accent".
- */
+.commit-ai-wrapper {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  bottom: 3px;
+  display: flex;
+  z-index: 1;
+  border-radius: var(--radius-xs);
+  overflow: visible;
+}
+
 .commit-ai-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
+  padding: 0 5px;
   background: var(--color-ai-soft);
   color: var(--color-ai);
   border: 1px solid var(--color-ai);
-  border-radius: var(--radius-md) 0 0 var(--radius-md);
+  border-radius: calc(var(--radius-md) - 3px) 0 0 calc(var(--radius-md) - 3px);
   cursor: pointer;
   transition: background var(--transition-hover), border-color var(--transition-hover), color var(--transition-hover);
+}
+
+.commit-ai-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: 1;
 }
 
 .commit-ai-chevron {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
+  width: 14px;
   background: var(--color-ai-soft);
   color: var(--color-ai);
   border: 1px solid var(--color-ai);
   margin-left: -1px;
-  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  border-radius: 0 calc(var(--radius-md) - 3px) calc(var(--radius-md) - 3px) 0;
   cursor: pointer;
   transition: background var(--transition-hover), border-color var(--transition-hover);
 }
