@@ -18,13 +18,7 @@ const { t } = useI18n();
     <!-- 3D hex cube — flat-top R=30, inner r=15, viewBox 80×70.
          Same geometry as the pre-extraction inline version so the
          pixel-by-pixel look is unchanged. -->
-    <svg class="header-logo__mark" width="22" height="19" viewBox="0 0 80 70" fill="none" aria-hidden="true">
-      <path d="M 55,35 L 47.5,22 L 32.5,22 L 25,35 L 32.5,48 L 47.5,48 Z" fill="none" />
-      <path d="M 10,35 L 25,9 L 55,9 L 70,35 L 55,35 L 47.5,22 L 32.5,22 L 25,35 Z" fill="#8B5CF6" />
-      <path d="M 70,35 L 55,61 L 47.5,48 L 55,35 Z" fill="#4C1D95" />
-      <path d="M 10,35 L 25,35 L 32.5,48 L 25,61 Z" fill="#6D28D9" />
-      <path d="M 25,61 L 55,61 L 47.5,48 L 32.5,48 Z" fill="#5B21B6" />
-    </svg>
+    <img class="header-logo__mark" src="/logo.png" alt="" width="22" height="22" aria-hidden="true">
     <h1 class="header-logo__title">{{ t('header.title') }}</h1>
   </div>
 </template>

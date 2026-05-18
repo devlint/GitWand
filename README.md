@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.svg" alt="GitWand" width="300" height="120">
+  <img src="assets/logo.png" alt="GitWand" width="400">
 </p>
 
 <h1 align="center">GitWand</h1>

@@ -1542,14 +1542,7 @@ function cellClass(v: CompareValue | undefined): string {
     ══════════════════════════════════════ -->
     <section class="cta-section">
       <div class="cta-inner">
-        <!-- Logo cube -->
-        <svg width="56" height="49" viewBox="0 0 80 70" fill="none" class="cta-logo" aria-hidden="true">
-          <path d="M 55,35 L 47.5,22 L 32.5,22 L 25,35 L 32.5,48 L 47.5,48 Z" fill="none"/>
-          <path d="M 10,35 L 25,9 L 55,9 L 70,35 L 55,35 L 47.5,22 L 32.5,22 L 25,35 Z" fill="#8B5CF6"/>
-          <path d="M 70,35 L 55,61 L 47.5,48 L 55,35 Z" fill="#4C1D95"/>
-          <path d="M 10,35 L 25,35 L 32.5,48 L 25,61 Z" fill="#6D28D9"/>
-          <path d="M 25,61 L 55,61 L 47.5,48 L 32.5,48 Z" fill="#5B21B6"/>
-        </svg>
+        <img src="/logo.png" width="56" height="56" class="cta-logo" aria-hidden="true">
         <h2 class="cta-title">{{ t.ctaTitle }}</h2>
         <p class="cta-sub">{{ t.ctaSub }}</p>
         <div class="cta-btns">
