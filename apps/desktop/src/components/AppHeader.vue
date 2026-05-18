@@ -486,30 +486,32 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
           <!-- Stash button -->
           <div class="header-action-sep" aria-hidden="true"></div>
           <button
-            class="btn btn--icon header-action-btn"
-            :title="t('sidebar.stashTitle')"
-            :aria-label="t('sidebar.stashTitle')"
+            class="btn btn--secondary header-action-btn"
+            :title="t('stash.title')"
+            :aria-label="t('stash.title')"
             @click="emit('openStash')"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M21 8v13H3V8"/>
               <path d="M1 3h22v5H1z"/>
               <path d="M10 12h4"/>
             </svg>
-            <span v-if="(stashCount ?? 0) > 0" class="header-action-btn__badge">{{ stashCount }}</span>
+            <span>{{ t('stash.title') }}</span>
+            <span v-if="(stashCount ?? 0) > 0" class="header-action-btn__count">{{ stashCount }}</span>
           </button>
 
           <!-- Tags button -->
           <button
-            class="btn btn--icon header-action-btn"
+            class="btn btn--secondary header-action-btn"
             :title="t('tags.title')"
             :aria-label="t('tags.title')"
             @click="emit('openTags')"
           >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
               <path d="M2 2h6l6 6-6 6-6-6V2z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
               <circle cx="5.5" cy="5.5" r="1.2" fill="currentColor"/>
             </svg>
+            <span>{{ t('tags.title') }}</span>
           </button>
 
           <!-- Merge-into picker (triggered by BranchMenu → onBranchMenuMerge) -->
@@ -655,7 +657,6 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
 }
 
 .header-action-btn {
-  position: relative;
   min-height: 37px;
 }
 
@@ -664,22 +665,18 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
   min-height: 37px;
 }
 
-.header-action-btn__badge {
-  position: absolute;
-  top: 1px;
-  right: 1px;
-  min-width: 13px;
-  height: 13px;
-  padding: 0 3px;
-  font-size: 8px;
+.header-action-btn__count {
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  font-size: 10px;
   font-weight: var(--font-weight-semibold);
-  line-height: 13px;
+  line-height: 16px;
   text-align: center;
-  background: var(--color-accent);
-  color: var(--color-accent-text);
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
   border-radius: var(--radius-pill);
   font-variant-numeric: tabular-nums;
-  pointer-events: none;
 }
 
 .header-separator {
