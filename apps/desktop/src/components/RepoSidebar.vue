@@ -113,6 +113,30 @@ interface CtxMenu {
 }
 const ctxMenu = ref<CtxMenu>({ visible: false, x: 0, y: 0, file: null });
 
+// ─── Collapsible sections ──────────────────────────────────────
+const COLLAPSED_SECTIONS_KEY = "gitwand-collapsed-sections";
+
+function loadCollapsedSections(): Record<string, boolean> {
+  try {
+    const raw = localStorage.getItem(COLLAPSED_SECTIONS_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {
+    // ignore
+  }
+  return {};
+}
+
+const collapsedSections = ref<Record<string, boolean>>(loadCollapsedSections());
+
+function toggleSection(sectionKey: string) {
+  collapsedSections.value[sectionKey] = !collapsedSections.value[sectionKey];
+  try {
+    localStorage.setItem(COLLAPSED_SECTIONS_KEY, JSON.stringify(collapsedSections.value));
+  } catch {
+    // ignore
+  }
+}
+
 function openContextMenu(e: MouseEvent, file: RepoFileEntry) {
   e.preventDefault();
   e.stopPropagation();
@@ -754,8 +778,16 @@ function formatActivityDate(dateStr: string): string {
         <div
           v-if="sections[sectionKey].length > 0"
           class="section"
+          :class="{ 'section--collapsed': collapsedSections[sectionKey] }"
         >
-          <div class="section-header">
+          <div class="section-header" @click="toggleSection(sectionKey)" style="cursor: pointer;">
+            <svg
+              class="section-chevron"
+              :class="{ 'section-chevron--collapsed': collapsedSections[sectionKey] }"
+              width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+            >
+              <polyline points="6 9 12 15 18 9"/>
+            </svg>
             <span class="section-icon" :style="{ color: sectionMeta[sectionKey].color }">
               {{ sectionMeta[sectionKey].icon }}
             </span>
@@ -780,18 +812,18 @@ function formatActivityDate(dateStr: string): string {
             <button
               v-if="sectionKey === 'unstaged' || sectionKey === 'untracked'"
               class="section-action"
-              @click="emit('stagePaths', sections[sectionKey].map(f => f.path))"
+              @click.stop="emit('stagePaths', sections[sectionKey].map(f => f.path))"
               :title="t('sidebar.stageAll')"
             >+</button>
             <button
               v-if="sectionKey === 'staged'"
               class="section-action"
-              @click="emit('unstageAll')"
+              @click.stop="emit('unstageAll')"
               :title="t('sidebar.unstageAll')"
             >-</button>
           </div>
 
-          <ul class="file-items" role="listbox">
+          <ul v-if="!collapsedSections[sectionKey]" class="file-items" role="listbox">
             <template
               v-for="file in sections[sectionKey]"
               :key="`${file.section}-${file.path}`"
@@ -1622,6 +1654,20 @@ function formatActivityDate(dateStr: string): string {
   position: sticky;
   top: 0;
   z-index: 1;
+}
+
+.section-header:hover {
+  background: var(--color-bg-secondary);
+}
+
+.section-chevron {
+  transition: transform 0.2s ease;
+  color: var(--color-text-subtle);
+  flex-shrink: 0;
+}
+
+.section-chevron--collapsed {
+  transform: rotate(-90deg);
 }
 
 .section-icon {
