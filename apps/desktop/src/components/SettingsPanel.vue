@@ -172,22 +172,22 @@ const defaultSettings: Settings = {
   launchpadActiveTab: "wip",
   launchpadTeamTabEnabled: true,
   automations: {
-    autoResolve:   { enabled: false },
-    nightlyPull:   { enabled: false, hour: 8, minute: 0 },
-    releaseNotes:  { enabled: false },
+    autoResolve: { enabled: false },
+    nightlyPull: { enabled: false, hour: 8, minute: 0 },
+    releaseNotes: { enabled: false },
     aiCommitBatch: { enabled: false },
   },
   // v2.12
-  archivedBranches:       {},
-  pinnedBranchesByRepo:   {},
-  inactiveBranchDays:     30,
-  identities:             [],
-  activeIdentityId:       null,
+  archivedBranches: {},
+  pinnedBranchesByRepo: {},
+  inactiveBranchDays: 30,
+  identities: [],
+  activeIdentityId: null,
   identityOverrideByRepo: {},
-  commitTemplates:        [],
+  commitTemplates: [],
   // v2.13
-  aiPromptPresets:        [],
-  activePresetIdByRepo:   {},
+  aiPromptPresets: [],
+  activePresetIdByRepo: {},
 };
 
 function loadSettings(): Settings {
@@ -233,9 +233,9 @@ const {
 function logLevelLabel(level: LogEntry["level"]): string {
   switch (level) {
     case "error": return t("settings.logsLevelError");
-    case "warn":  return t("settings.logsLevelWarn");
-    case "info":  return t("settings.logsLevelInfo");
-    default:      return String(level).toUpperCase();
+    case "warn": return t("settings.logsLevelWarn");
+    case "info": return t("settings.logsLevelInfo");
+    default: return String(level).toUpperCase();
   }
 }
 
@@ -278,22 +278,22 @@ const settingsTabs: { id: SettingsTab; icon: string }[] = [
 // ─── Nav sidebar groups (OpenCode-style left nav) ────────
 const settingsNavGroups: Array<{ label: string | null; tabs: SettingsTab[] }> = [
   { label: "Application", tabs: ["general", "editor"] },
-  { label: "Dépôt",       tabs: ["git", "hooks", "accounts"] },
+  { label: "Dépôt", tabs: ["git", "hooks", "accounts"] },
   { label: "IA & Agents", tabs: ["ai", "mcp", "automations"] },
-  { label: "Système",     tabs: ["logs"] },
+  { label: "Système", tabs: ["logs"] },
 ];
 
 function tabLabel(id: SettingsTab): string {
   switch (id) {
-    case "general":     return t("settings.tabGeneral");
-    case "git":         return t("settings.tabGit");
-    case "editor":      return t("settings.tabEditor");
-    case "ai":          return t("settings.tabAi");
-    case "accounts":    return t("settings.tabAccounts");
-    case "mcp":         return t("settings.tabMcp");
+    case "general": return t("settings.tabGeneral");
+    case "git": return t("settings.tabGit");
+    case "editor": return t("settings.tabEditor");
+    case "ai": return t("settings.tabAi");
+    case "accounts": return t("settings.tabAccounts");
+    case "mcp": return t("settings.tabMcp");
     case "automations": return t("settings.tabAutomations");
-    case "hooks":       return t("settings.tabHooks");
-    case "logs":        return t("settings.tabLogs");
+    case "hooks": return t("settings.tabHooks");
+    case "logs": return t("settings.tabLogs");
   }
 }
 
@@ -874,13 +874,17 @@ function savePresetForm() {
 </script>
 
 <template>
-  <BaseModal
-    size="xl"
-    :title="t('settings.title')"
-    :bodyFlush="true"
-    :scrollOwn="true"
-    @close="emit('close')"
-  >
+  <BaseModal size="xl" :title="t('settings.title')" :bodyFlush="true" :scrollOwn="true" @close="emit('close')">
+    <template #title-icon>
+      <span class="bm-title-icon" aria-hidden="true">
+        <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
+          <path d="M2.5 4h11M2.5 8h11M2.5 12h11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+          <circle cx="5.5" cy="4" r="1.5" fill="var(--color-bg-secondary)" stroke="currentColor" stroke-width="1.2"/>
+          <circle cx="10.5" cy="8" r="1.5" fill="var(--color-bg-secondary)" stroke="currentColor" stroke-width="1.2"/>
+          <circle cx="7" cy="12" r="1.5" fill="var(--color-bg-secondary)" stroke="currentColor" stroke-width="1.2"/>
+        </svg>
+      </span>
+    </template>
 
     <!-- Two-column layout: left nav + right content -->
     <div class="sp-layout">
@@ -890,42 +894,61 @@ function savePresetForm() {
         <template v-for="group in settingsNavGroups" :key="group.label ?? group.tabs[0]">
           <div class="sp-nav-group">
             <span v-if="group.label" class="sp-nav-group-label">{{ group.label }}</span>
-            <button
-              v-for="tab in settingsTabs.filter(t => (group.tabs as string[]).includes(t.id))"
-              :key="tab.id"
-              class="sp-nav-item"
-              :class="{ 'sp-nav-item--active': activeSettingsTab === tab.id }"
-              @click="activeSettingsTab = tab.id"
-            >
-              <svg v-if="tab.icon === 'general'" width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4">
-                <circle cx="8" cy="8" r="3" /><path d="M8 1v2m0 10v2m-7-7h2m10 0h2m-2.05-4.95-1.41 1.41m-7.08 7.08-1.41 1.41m0-9.9 1.41 1.41m7.08 7.08 1.41 1.41"/>
+            <button v-for="tab in settingsTabs.filter(t => (group.tabs as string[]).includes(t.id))" :key="tab.id"
+              class="sp-nav-item" :class="{ 'sp-nav-item--active': activeSettingsTab === tab.id }"
+              @click="activeSettingsTab = tab.id">
+              <svg v-if="tab.icon === 'general'" width="15" height="15" viewBox="0 0 16 16" fill="none"
+                stroke="currentColor" stroke-width="1.4">
+                <circle cx="8" cy="8" r="3" />
+                <path
+                  d="M8 1v2m0 10v2m-7-7h2m10 0h2m-2.05-4.95-1.41 1.41m-7.08 7.08-1.41 1.41m0-9.9 1.41 1.41m7.08 7.08 1.41 1.41" />
               </svg>
-              <svg v-else-if="tab.icon === 'git'" width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4">
-                <circle cx="8" cy="3" r="2"/><circle cx="8" cy="13" r="2"/><path d="M8 5v6"/><circle cx="13" cy="8" r="2"/><path d="M11 8H9.5c-.83 0-1.5-.67-1.5-1.5V5"/>
+              <svg v-else-if="tab.icon === 'git'" width="15" height="15" viewBox="0 0 16 16" fill="none"
+                stroke="currentColor" stroke-width="1.4">
+                <circle cx="8" cy="3" r="2" />
+                <circle cx="8" cy="13" r="2" />
+                <path d="M8 5v6" />
+                <circle cx="13" cy="8" r="2" />
+                <path d="M11 8H9.5c-.83 0-1.5-.67-1.5-1.5V5" />
               </svg>
-              <svg v-else-if="tab.icon === 'editor'" width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4">
-                <rect x="2" y="2" width="12" height="12" rx="2"/><path d="M5 6h6M5 8.5h4M5 11h5"/>
+              <svg v-else-if="tab.icon === 'editor'" width="15" height="15" viewBox="0 0 16 16" fill="none"
+                stroke="currentColor" stroke-width="1.4">
+                <rect x="2" y="2" width="12" height="12" rx="2" />
+                <path d="M5 6h6M5 8.5h4M5 11h5" />
               </svg>
-              <svg v-else-if="tab.icon === 'ai'" width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4">
-                <path d="M8 1v2m0 10v2M1 8h2m10 0h2"/><circle cx="8" cy="8" r="4"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/>
+              <svg v-else-if="tab.icon === 'ai'" width="15" height="15" viewBox="0 0 16 16" fill="none"
+                stroke="currentColor" stroke-width="1.4">
+                <path d="M8 1v2m0 10v2M1 8h2m10 0h2" />
+                <circle cx="8" cy="8" r="4" />
+                <circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none" />
               </svg>
-              <svg v-else-if="tab.icon === 'hooks'" width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M3 4l2 2-2 2M7 8h6"/><path d="M3 12h10"/>
+              <svg v-else-if="tab.icon === 'hooks'" width="15" height="15" viewBox="0 0 16 16" fill="none"
+                stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 4l2 2-2 2M7 8h6" />
+                <path d="M3 12h10" />
               </svg>
-              <svg v-else-if="tab.icon === 'automations'" width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M8 1v2m0 10v2M1 8h2m10 0h2"/>
-                <path d="M5.5 5.5L4 4M11.5 11.5L10 10M10.5 5.5L12 4M4.5 11.5L3 13"/>
-                <circle cx="8" cy="8" r="2.5"/>
+              <svg v-else-if="tab.icon === 'automations'" width="15" height="15" viewBox="0 0 16 16" fill="none"
+                stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M8 1v2m0 10v2M1 8h2m10 0h2" />
+                <path d="M5.5 5.5L4 4M11.5 11.5L10 10M10.5 5.5L12 4M4.5 11.5L3 13" />
+                <circle cx="8" cy="8" r="2.5" />
               </svg>
-              <svg v-else-if="tab.icon === 'accounts'" width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="6" cy="5" r="2.5"/><path d="M1 14c0-2.76 2.24-5 5-5s5 2.24 5 5"/><path d="M13 7v4m-2-2h4"/>
+              <svg v-else-if="tab.icon === 'accounts'" width="15" height="15" viewBox="0 0 16 16" fill="none"
+                stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="6" cy="5" r="2.5" />
+                <path d="M1 14c0-2.76 2.24-5 5-5s5 2.24 5 5" />
+                <path d="M13 7v4m-2-2h4" />
               </svg>
-              <svg v-else-if="tab.icon === 'mcp'" width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="8" cy="3" r="1.5"/><circle cx="3" cy="11" r="1.5"/><circle cx="13" cy="11" r="1.5"/>
-                <path d="M8 4.5v3L3 9.6M8 7.5l5 2.1"/>
+              <svg v-else-if="tab.icon === 'mcp'" width="15" height="15" viewBox="0 0 16 16" fill="none"
+                stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="8" cy="3" r="1.5" />
+                <circle cx="3" cy="11" r="1.5" />
+                <circle cx="13" cy="11" r="1.5" />
+                <path d="M8 4.5v3L3 9.6M8 7.5l5 2.1" />
               </svg>
-              <svg v-else-if="tab.icon === 'logs'" width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4">
-                <path d="M2 4h12M2 8h8M2 12h6" stroke-linecap="round"/>
+              <svg v-else-if="tab.icon === 'logs'" width="15" height="15" viewBox="0 0 16 16" fill="none"
+                stroke="currentColor" stroke-width="1.4">
+                <path d="M2 4h12M2 8h8M2 12h6" stroke-linecap="round" />
               </svg>
               <span>{{ tabLabel(tab.id) }}</span>
               <span v-if="tab.id === 'logs' && (props.errorLog?.length ?? 0) > 0" class="sp-nav-badge">
@@ -937,38 +960,40 @@ function savePresetForm() {
 
         <!-- Check for updates — action, not a tab -->
         <div class="sp-nav-group">
-          <button
-            class="sp-nav-item sp-nav-action"
-            :class="{ 'sp-nav-action--ok': updateCheckStatus === 'upToDate' }"
-            :disabled="updateCheckStatus === 'checking'"
-            @click="runUpdateCheck"
-          >
+          <button class="sp-nav-item sp-nav-action" :class="{ 'sp-nav-action--ok': updateCheckStatus === 'upToDate' }"
+            :disabled="updateCheckStatus === 'checking'" @click="runUpdateCheck">
             <!-- Spinner while checking -->
-            <svg v-if="updateCheckStatus === 'checking'" class="sp-nav-action-spin" width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
-              <path d="M8 1.5A6.5 6.5 0 1 1 1.5 8"/>
+            <svg v-if="updateCheckStatus === 'checking'" class="sp-nav-action-spin" width="15" height="15"
+              viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+              <path d="M8 1.5A6.5 6.5 0 1 1 1.5 8" />
             </svg>
             <!-- Check mark when up to date -->
-            <svg v-else-if="updateCheckStatus === 'upToDate'" width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M3 8.5l3.5 3.5 6.5-7"/>
+            <svg v-else-if="updateCheckStatus === 'upToDate'" width="15" height="15" viewBox="0 0 16 16" fill="none"
+              stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 8.5l3.5 3.5 6.5-7" />
             </svg>
             <!-- Refresh icon (idle) -->
-            <svg v-else width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M13.5 8A5.5 5.5 0 1 1 8 2.5"/>
-              <path d="M11 1v4h4"/>
+            <svg v-else width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"
+              stroke-linecap="round" stroke-linejoin="round">
+              <path d="M13.5 8A5.5 5.5 0 1 1 8 2.5" />
+              <path d="M11 1v4h4" />
             </svg>
             <span>{{
               updateCheckStatus === 'checking' ? t('common.loading') :
-              updateCheckStatus === 'upToDate' ? t('settings.upToDate') :
-              t('settings.checkForUpdates')
+                updateCheckStatus === 'upToDate' ? t('settings.upToDate') :
+                  t('settings.checkForUpdates')
             }}</span>
           </button>
         </div>
 
         <div class="sp-nav-spacer" />
         <div class="sp-nav-footer">
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <circle cx="8" cy="3" r="1.5"/><circle cx="3" cy="11" r="1.5"/><circle cx="13" cy="11" r="1.5"/>
-            <path d="M8 4.5v3L3 9.6M8 7.5l5 2.1"/>
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"
+            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="8" cy="3" r="1.5" />
+            <circle cx="3" cy="11" r="1.5" />
+            <circle cx="13" cy="11" r="1.5" />
+            <path d="M8 4.5v3L3 9.6M8 7.5l5 2.1" />
           </svg>
           <span class="sp-nav-footer-name">GitWand</span>
           <span class="sp-nav-footer-version">v{{ appVersion }}</span>
@@ -978,7 +1003,7 @@ function savePresetForm() {
       <!-- ── Right content area ── -->
       <div class="sp-content">
 
-      <!-- ═══ GÉNÉRAL ═══ -->
+        <!-- ═══ GÉNÉRAL ═══ -->
         <template v-if="activeSettingsTab === 'general'">
           <!-- Interface language -->
           <div class="sp-row">
@@ -992,11 +1017,8 @@ function savePresetForm() {
           <!-- Commit message language -->
           <div class="sp-row">
             <label class="sp-label" for="setting-commit-lang">{{ t('settings.commitMessageLang') }}</label>
-            <select
-              id="setting-commit-lang" class="sp-select"
-              :value="settings.commitMessageLang"
-              @change="updateSetting('commitMessageLang', ($event.target as HTMLSelectElement).value)"
-            >
+            <select id="setting-commit-lang" class="sp-select" :value="settings.commitMessageLang"
+              @change="updateSetting('commitMessageLang', ($event.target as HTMLSelectElement).value)">
               <option value="">{{ t('settings.commitMessageLangAuto') }}</option>
               <option v-for="loc in supportedLocales" :key="loc" :value="loc">{{ localeLabels[loc] }}</option>
             </select>
@@ -1006,12 +1028,8 @@ function savePresetForm() {
           <!-- Theme -->
           <div class="sp-row">
             <label class="sp-label" for="setting-theme">{{ t('settings.theme') }}</label>
-            <select
-              id="setting-theme"
-              class="sp-select"
-              :value="themeSetting"
-              @change="onThemeChange(($event.target as HTMLSelectElement).value as ThemeSetting)"
-            >
+            <select id="setting-theme" class="sp-select" :value="themeSetting"
+              @change="onThemeChange(($event.target as HTMLSelectElement).value as ThemeSetting)">
               <option value="system">{{ t('settings.themeSystem') }}</option>
               <option value="dark">{{ t('settings.themeDark') }}</option>
               <option value="light">{{ t('settings.themeLight') }}</option>
@@ -1021,7 +1039,8 @@ function savePresetForm() {
           <!-- Notifications -->
           <div class="sp-row sp-row--checkbox">
             <label class="sp-checkbox-label" for="setting-notifications">
-              <input id="setting-notifications" type="checkbox" class="sp-checkbox" :checked="settings.notifications" @change="onNotificationsChange" />
+              <input id="setting-notifications" type="checkbox" class="sp-checkbox" :checked="settings.notifications"
+                @change="onNotificationsChange" />
               <span>{{ t('settings.notifications') }}</span>
             </label>
             <span class="sp-hint">{{ t('settings.notificationsHint') }}</span>
@@ -1030,16 +1049,14 @@ function savePresetForm() {
           <!-- Auto-update channel (v2.0) -->
           <div class="sp-row">
             <label class="sp-label" for="setting-update-channel">{{ t('settings.updateChannelLabel') }}</label>
-            <select
-              id="setting-update-channel" class="sp-select"
-              :value="settings.updateChannel"
-              @change="updateSetting('updateChannel', ($event.target as HTMLSelectElement).value as 'stable' | 'beta')"
-            >
+            <select id="setting-update-channel" class="sp-select" :value="settings.updateChannel"
+              @change="updateSetting('updateChannel', ($event.target as HTMLSelectElement).value as 'stable' | 'beta')">
               <option value="stable">{{ t('settings.updateChannelStable') }}</option>
               <option value="beta">{{ t('settings.updateChannelBeta') }}</option>
             </select>
             <span class="sp-hint">
-              {{ settings.updateChannel === 'beta' ? t('settings.updateChannelBetaHint') : t('settings.updateChannelStableHint') }}
+              {{ settings.updateChannel === 'beta' ? t('settings.updateChannelBetaHint') :
+                t('settings.updateChannelStableHint') }}
             </span>
           </div>
 
@@ -1047,11 +1064,9 @@ function savePresetForm() {
                checkbox is friendlier when the default is "enabled". -->
           <div class="sp-row sp-row--checkbox">
             <label class="sp-checkbox-label" for="setting-launchpad-team">
-              <input
-                id="setting-launchpad-team" type="checkbox" class="sp-checkbox"
+              <input id="setting-launchpad-team" type="checkbox" class="sp-checkbox"
                 :checked="!settings.launchpadTeamTabEnabled"
-                @change="updateSetting('launchpadTeamTabEnabled', !($event.target as HTMLInputElement).checked)"
-              />
+                @change="updateSetting('launchpadTeamTabEnabled', !($event.target as HTMLInputElement).checked)" />
               <span>{{ t('settings.launchpad.disableTeamTab.label') }}</span>
             </label>
             <span class="sp-hint">{{ t('settings.launchpad.disableTeamTab.help') }}</span>
@@ -1063,33 +1078,23 @@ function savePresetForm() {
           <!-- Git path -->
           <div class="sp-row">
             <label class="sp-label" for="setting-git">{{ t('settings.gitPath') }}</label>
-            <input
-              id="setting-git" class="sp-input mono" type="text"
-              :value="settings.gitPath"
+            <input id="setting-git" class="sp-input mono" type="text" :value="settings.gitPath"
               @input="updateSetting('gitPath', ($event.target as HTMLInputElement).value)"
-              :placeholder="t('settings.gitPathAuto')"
-            />
+              :placeholder="t('settings.gitPathAuto')" />
           </div>
 
           <!-- Default branch -->
           <div class="sp-row">
             <label class="sp-label" for="setting-branch">{{ t('settings.defaultBranch') }}</label>
-            <input
-              id="setting-branch" class="sp-input mono" type="text"
-              :value="settings.defaultBranch"
-              @input="updateSetting('defaultBranch', ($event.target as HTMLInputElement).value)"
-              placeholder="main"
-            />
+            <input id="setting-branch" class="sp-input mono" type="text" :value="settings.defaultBranch"
+              @input="updateSetting('defaultBranch', ($event.target as HTMLInputElement).value)" placeholder="main" />
           </div>
 
           <!-- Pull mode -->
           <div class="sp-row">
             <label class="sp-label" for="setting-pull-mode">{{ t('settings.pullMode') }}</label>
-            <select
-              id="setting-pull-mode" class="sp-select"
-              :value="settings.pullMode"
-              @change="onPullModeChange(($event.target as HTMLSelectElement).value as PullMode)"
-            >
+            <select id="setting-pull-mode" class="sp-select" :value="settings.pullMode"
+              @change="onPullModeChange(($event.target as HTMLSelectElement).value as PullMode)">
               <option value="merge">{{ t('settings.pullMerge') }}</option>
               <option value="rebase">{{ t('settings.pullRebase') }}</option>
             </select>
@@ -1098,11 +1103,8 @@ function savePresetForm() {
           <!-- Switch behavior -->
           <div class="sp-row">
             <label class="sp-label" for="setting-switch-behavior">{{ t('settings.switchBehavior') }}</label>
-            <select
-              id="setting-switch-behavior" class="sp-select"
-              :value="settings.switchBehavior"
-              @change="onSwitchBehaviorChange(($event.target as HTMLSelectElement).value as SwitchBehavior)"
-            >
+            <select id="setting-switch-behavior" class="sp-select" :value="settings.switchBehavior"
+              @change="onSwitchBehaviorChange(($event.target as HTMLSelectElement).value as SwitchBehavior)">
               <option value="stash">{{ t('settings.switchStash') }}</option>
               <option value="ask">{{ t('settings.switchAsk') }}</option>
               <option value="refuse">{{ t('settings.switchRefuse') }}</option>
@@ -1112,7 +1114,8 @@ function savePresetForm() {
           <!-- Commit signature -->
           <div class="sp-row sp-row--checkbox">
             <label class="sp-checkbox-label" for="setting-signature">
-              <input id="setting-signature" type="checkbox" class="sp-checkbox" :checked="settings.commitSignature" @change="onSignatureChange" />
+              <input id="setting-signature" type="checkbox" class="sp-checkbox" :checked="settings.commitSignature"
+                @change="onSignatureChange" />
               <span>{{ t('settings.commitSignature') }}</span>
             </label>
             <span class="sp-hint">{{ t('settings.commitSignatureHint') }}</span>
@@ -1121,12 +1124,8 @@ function savePresetForm() {
           <!-- Blame diff algorithm -->
           <div class="sp-row">
             <label class="sp-label" for="setting-blame-algo">{{ t('settings.blameAlgorithm') }}</label>
-            <select
-              id="setting-blame-algo"
-              class="sp-select"
-              :value="settings.blameAlgorithm"
-              @change="updateSetting('blameAlgorithm', ($event.target as HTMLSelectElement).value as BlameAlgorithm)"
-            >
+            <select id="setting-blame-algo" class="sp-select" :value="settings.blameAlgorithm"
+              @change="updateSetting('blameAlgorithm', ($event.target as HTMLSelectElement).value as BlameAlgorithm)">
               <option value="histogram">histogram {{ t('settings.blameAlgoRecommended') }}</option>
               <option value="patience">patience</option>
               <option value="minimal">minimal</option>
@@ -1139,107 +1138,165 @@ function savePresetForm() {
           <div class="sp-row">
             <label class="sp-label" for="setting-inactive-days">{{ t('settings.git.inactiveDays') }}</label>
             <div class="sp-range-row">
-              <input
-                id="setting-inactive-days" class="sp-range" type="range"
-                min="0" max="180" step="7"
+              <input id="setting-inactive-days" class="sp-range" type="range" min="0" max="180" step="7"
                 :value="settings.inactiveBranchDays"
-                @input="updateSetting('inactiveBranchDays', Number(($event.target as HTMLInputElement).value))"
-              />
+                @input="updateSetting('inactiveBranchDays', Number(($event.target as HTMLInputElement).value))" />
               <span class="sp-range-value mono">
-                {{ settings.inactiveBranchDays === 0 ? t('settings.git.inactiveDaysOff') : `${settings.inactiveBranchDays}j` }}
+                {{ settings.inactiveBranchDays === 0 ? t('settings.git.inactiveDaysOff') :
+                  `${settings.inactiveBranchDays}j` }}
               </span>
             </div>
             <span class="sp-hint">{{ t('settings.git.inactiveDaysHint') }}</span>
           </div>
 
           <!-- ── Identités ── -->
-          <div class="sp-section-header">{{ t('settings.git.identities') }}</div>
-
-          <div v-if="identities.length === 0" class="sp-empty-hint">{{ t('settings.git.identitiesEmpty') }}</div>
-          <div v-for="p in identities" :key="p.id" class="sp-identity-row">
-            <div class="sp-identity-info">
-              <span class="sp-identity-label">{{ p.label }}</span>
-              <span class="sp-identity-meta mono">{{ p.gitName }} &lt;{{ p.gitEmail }}&gt;</span>
-              <span v-if="p.gpgKey" class="sp-identity-gpg">GPG: {{ p.gpgKey }}</span>
-            </div>
-            <div class="sp-identity-actions">
-              <button class="sp-icon-btn" @click="openEditIdentity(p)" :title="t('settings.git.identityEdit')">
-                <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M11.5 2.5l2 2L5 13H3v-2L11.5 2.5z"/></svg>
-              </button>
-              <button class="sp-icon-btn sp-icon-btn--danger" @click="deleteIdentity(p.id)" :title="t('settings.git.identityDelete')">
-                <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+          <div class="sp-group">
+            <div class="sp-group__head">
+              <span class="sp-group__label">{{ t('settings.git.identities') }}</span>
+              <button v-if="!showIdentityForm" class="sp-group__action" @click="openAddIdentity">
+                <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.5"
+                  aria-hidden="true">
+                  <path d="M8 3v10M3 8h10" />
+                </svg>
+                {{ t('settings.git.identityAdd') }}
               </button>
             </div>
-          </div>
 
-          <div v-if="showIdentityForm" class="sp-sub-form">
-            <div class="sp-sub-form-row">
-              <input class="sp-input sp-input--sm" v-model="identityForm.label" :placeholder="t('settings.git.identityLabel')" />
-            </div>
-            <div class="sp-sub-form-row">
-              <input class="sp-input sp-input--sm" v-model="identityForm.gitName" :placeholder="t('settings.git.identityName')" />
-            </div>
-            <div class="sp-sub-form-row">
-              <input class="sp-input sp-input--sm" v-model="identityForm.gitEmail" :placeholder="t('settings.git.identityEmail')" type="email" />
-            </div>
-            <div class="sp-sub-form-row">
-              <input class="sp-input sp-input--sm mono" v-model="identityForm.gpgKey" :placeholder="t('settings.git.identityGpg')" />
-            </div>
-            <div class="sp-sub-form-actions">
-              <button class="sp-btn sp-btn--primary sp-btn--sm" @click="saveIdentityForm">{{ t('common.save') }}</button>
-              <button class="sp-btn sp-btn--sm" @click="showIdentityForm = false">{{ t('common.cancel') }}</button>
+            <div class="sp-group__body">
+              <div v-if="identities.length === 0 && !showIdentityForm" class="sp-group__empty">
+                {{ t('settings.git.identitiesEmpty') }}
+              </div>
+
+              <div v-for="p in identities" :key="p.id" class="sp-group__row">
+                <div class="sp-group__row-info">
+                  <span class="sp-group__row-name">{{ p.label }}</span>
+                  <span class="sp-group__row-meta mono">{{ p.gitName }} &lt;{{ p.gitEmail }}&gt;</span>
+                </div>
+                <div class="sp-group__row-aside">
+                  <span v-if="p.gpgKey" class="sp-tag">GPG</span>
+                  <button class="sp-ghost-btn" @click="openEditIdentity(p)" :title="t('settings.git.identityEdit')">
+                    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                      stroke-width="1.5">
+                      <path d="M11.5 2.5l2 2L5 13H3v-2L11.5 2.5z" />
+                    </svg>
+                  </button>
+                  <button class="sp-ghost-btn sp-ghost-btn--danger" @click="deleteIdentity(p.id)"
+                    :title="t('settings.git.identityDelete')">
+                    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                      stroke-width="1.5">
+                      <path d="M4 4l8 8M12 4l-8 8" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+
+              <div v-if="showIdentityForm" class="sp-group__form">
+                <div class="sp-group__form-grid">
+                  <div class="sp-field">
+                    <label class="sp-field__label">{{ t('settings.git.identityLabel') }}</label>
+                    <input class="sp-input sp-input--sm" v-model="identityForm.label" placeholder="Ex. Perso" />
+                  </div>
+                  <div class="sp-field">
+                    <label class="sp-field__label">{{ t('settings.git.identityName') }}</label>
+                    <input class="sp-input sp-input--sm" v-model="identityForm.gitName" placeholder="Jean Dupont" />
+                  </div>
+                  <div class="sp-field sp-field--wide">
+                    <label class="sp-field__label">{{ t('settings.git.identityEmail') }}</label>
+                    <input class="sp-input sp-input--sm" v-model="identityForm.gitEmail" placeholder="jean@example.com"
+                      type="email" />
+                  </div>
+                  <div class="sp-field sp-field--wide">
+                    <label class="sp-field__label">{{ t('settings.git.identityGpg') }} <span
+                        class="sp-field__optional">— optionnel</span></label>
+                    <input class="sp-input sp-input--sm mono" v-model="identityForm.gpgKey" placeholder="ABC123…" />
+                  </div>
+                </div>
+                <div class="sp-group__form-footer">
+                  <button class="btn btn--ghost sp-btn--sm" @click="showIdentityForm = false">{{ t('common.cancel')
+                  }}</button>
+                  <button class="btn btn--primary sp-btn--sm" @click="saveIdentityForm">{{ t('common.save') }}</button>
+                </div>
+              </div>
             </div>
           </div>
-
-          <button v-if="!showIdentityForm" class="sp-add-btn" @click="openAddIdentity">
-            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3v10M3 8h10"/></svg>
-            {{ t('settings.git.identityAdd') }}
-          </button>
 
           <!-- ── Templates de commit ── -->
-          <div class="sp-section-header">{{ t('settings.git.templates') }}</div>
+          <div class="sp-group">
+            <div class="sp-group__head">
+              <span class="sp-group__label">{{ t('settings.git.templates') }}</span>
+              <div v-if="!showTemplateForm" class="sp-group__actions">
+                <button class="sp-group__action" @click="openAddTemplate">
+                  <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.5"
+                    aria-hidden="true">
+                    <path d="M8 3v10M3 8h10" />
+                  </svg>
+                  {{ t('settings.git.templateAdd') }}
+                </button>
+                <button v-if="props.cwd" class="sp-group__action sp-group__action--muted"
+                  @click="doImportFromGitMessage" :disabled="importingTemplate">
+                  <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"
+                    aria-hidden="true">
+                    <path d="M8 2v8M4 7l4 4 4-4" />
+                    <path d="M2 13h12" />
+                  </svg>
+                  {{ importingTemplate ? '…' : t('settings.git.templateImport') }}
+                </button>
+              </div>
+            </div>
 
-          <div v-if="templates.length === 0" class="sp-empty-hint">{{ t('settings.git.templatesEmpty') }}</div>
-          <div v-for="tmpl in templates" :key="tmpl.id" class="sp-template-row">
-            <div class="sp-template-info">
-              <span class="sp-template-name">{{ tmpl.name }}</span>
-              <span class="sp-template-subject mono">{{ tmpl.subject || '—' }}</span>
-            </div>
-            <div class="sp-identity-actions">
-              <button class="sp-icon-btn" @click="openEditTemplate(tmpl)" :title="t('settings.git.identityEdit')">
-                <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M11.5 2.5l2 2L5 13H3v-2L11.5 2.5z"/></svg>
-              </button>
-              <button class="sp-icon-btn sp-icon-btn--danger" @click="removeTemplate(tmpl.id)" :title="t('settings.git.identityDelete')">
-                <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4l8 8M12 4l-8 8"/></svg>
-              </button>
-            </div>
-          </div>
+            <div class="sp-group__body">
+              <div v-if="templates.length === 0 && !showTemplateForm" class="sp-group__empty">
+                {{ t('settings.git.templatesEmpty') }}
+              </div>
 
-          <div v-if="showTemplateForm" class="sp-sub-form">
-            <div class="sp-sub-form-row">
-              <input class="sp-input sp-input--sm" v-model="templateForm.name" :placeholder="t('settings.git.templateName')" />
-            </div>
-            <div class="sp-sub-form-row">
-              <input class="sp-input sp-input--sm mono" v-model="templateForm.subject" :placeholder="t('settings.git.templateSubject')" />
-            </div>
-            <div class="sp-sub-form-row">
-              <textarea class="sp-textarea sp-input--sm mono" v-model="templateForm.body" :placeholder="t('settings.git.templateBody')" rows="4" />
-            </div>
-            <div class="sp-sub-form-actions">
-              <button class="sp-btn sp-btn--primary sp-btn--sm" @click="saveTemplateForm">{{ t('common.save') }}</button>
-              <button class="sp-btn sp-btn--sm" @click="showTemplateForm = false">{{ t('common.cancel') }}</button>
-            </div>
-          </div>
+              <div v-for="tmpl in templates" :key="tmpl.id" class="sp-group__row">
+                <div class="sp-group__row-info">
+                  <span class="sp-group__row-name">{{ tmpl.name }}</span>
+                  <span class="sp-group__row-meta mono">{{ tmpl.subject || '—' }}</span>
+                </div>
+                <div class="sp-group__row-aside">
+                  <button class="sp-ghost-btn" @click="openEditTemplate(tmpl)" :title="t('settings.git.identityEdit')">
+                    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                      stroke-width="1.5">
+                      <path d="M11.5 2.5l2 2L5 13H3v-2L11.5 2.5z" />
+                    </svg>
+                  </button>
+                  <button class="sp-ghost-btn sp-ghost-btn--danger" @click="removeTemplate(tmpl.id)"
+                    :title="t('settings.git.identityDelete')">
+                    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                      stroke-width="1.5">
+                      <path d="M4 4l8 8M12 4l-8 8" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
 
-          <div v-if="!showTemplateForm" class="sp-template-actions">
-            <button class="sp-add-btn" @click="openAddTemplate">
-              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3v10M3 8h10"/></svg>
-              {{ t('settings.git.templateAdd') }}
-            </button>
-            <button v-if="props.cwd" class="sp-add-btn" @click="doImportFromGitMessage" :disabled="importingTemplate">
-              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 2v9M4 7l4 4 4-4"/><path d="M2 14h12"/></svg>
-              {{ importingTemplate ? '…' : t('settings.git.templateImport') }}
-            </button>
+              <div v-if="showTemplateForm" class="sp-group__form">
+                <div class="sp-group__form-grid">
+                  <div class="sp-field sp-field--wide">
+                    <label class="sp-field__label">{{ t('settings.git.templateName') }}</label>
+                    <input class="sp-input sp-input--sm" v-model="templateForm.name"
+                      placeholder="Ex. Conventional commit" />
+                  </div>
+                  <div class="sp-field sp-field--wide">
+                    <label class="sp-field__label">{{ t('settings.git.templateSubject') }}</label>
+                    <input class="sp-input sp-input--sm mono" v-model="templateForm.subject"
+                      placeholder="feat(${cursor}): " />
+                  </div>
+                  <div class="sp-field sp-field--wide">
+                    <label class="sp-field__label">{{ t('settings.git.templateBody') }} <span
+                        class="sp-field__optional">— optionnel</span></label>
+                    <textarea class="sp-textarea sp-input--sm mono" v-model="templateForm.body"
+                      placeholder="Corps du commit…" rows="3" />
+                  </div>
+                </div>
+                <div class="sp-group__form-footer">
+                  <button class="btn btn--ghost sp-btn--sm" @click="showTemplateForm = false">{{ t('common.cancel')
+                  }}</button>
+                  <button class="btn btn--primary sp-btn--sm" @click="saveTemplateForm">{{ t('common.save') }}</button>
+                </div>
+              </div>
+            </div>
           </div>
         </template>
 
@@ -1248,22 +1305,16 @@ function savePresetForm() {
           <!-- External editor -->
           <div class="sp-row">
             <label class="sp-label" for="setting-editor">{{ t('settings.editor') }}</label>
-            <input
-              id="setting-editor" class="sp-input mono" type="text"
-              :value="settings.editor"
+            <input id="setting-editor" class="sp-input mono" type="text" :value="settings.editor"
               @input="updateSetting('editor', ($event.target as HTMLInputElement).value)"
-              :placeholder="t('settings.editorPlaceholder')"
-            />
+              :placeholder="t('settings.editorPlaceholder')" />
           </div>
 
           <!-- Diff display -->
           <div class="sp-row">
             <label class="sp-label" for="setting-diff-mode">{{ t('settings.diffDisplay') }}</label>
-            <select
-              id="setting-diff-mode" class="sp-select"
-              :value="settings.diffMode"
-              @change="onDiffModeChange(($event.target as HTMLSelectElement).value as DiffMode)"
-            >
+            <select id="setting-diff-mode" class="sp-select" :value="settings.diffMode"
+              @change="onDiffModeChange(($event.target as HTMLSelectElement).value as DiffMode)">
               <option value="inline">{{ t('settings.diffInline') }}</option>
               <option value="side-by-side">{{ t('settings.diffSideBySide') }}</option>
             </select>
@@ -1273,12 +1324,9 @@ function savePresetForm() {
           <div class="sp-row">
             <label class="sp-label" for="setting-font-size">{{ t('settings.fontSize') }}</label>
             <div class="sp-range-row">
-              <input
-                id="setting-font-size" class="sp-range" type="range"
-                min="10" max="18" step="1"
+              <input id="setting-font-size" class="sp-range" type="range" min="10" max="18" step="1"
                 :value="settings.fontSize"
-                @input="onFontSizeChange(Number(($event.target as HTMLInputElement).value))"
-              />
+                @input="onFontSizeChange(Number(($event.target as HTMLInputElement).value))" />
               <span class="sp-range-value mono">{{ settings.fontSize }}px</span>
             </div>
           </div>
@@ -1286,11 +1334,8 @@ function savePresetForm() {
           <!-- Tab size -->
           <div class="sp-row">
             <label class="sp-label" for="setting-tab-size">{{ t('settings.tabSize') }}</label>
-            <select
-              id="setting-tab-size" class="sp-select"
-              :value="settings.tabSize"
-              @change="onTabSizeChange(Number(($event.target as HTMLSelectElement).value))"
-            >
+            <select id="setting-tab-size" class="sp-select" :value="settings.tabSize"
+              @change="onTabSizeChange(Number(($event.target as HTMLSelectElement).value))">
               <option :value="2">2 {{ t('settings.spaces') }}</option>
               <option :value="4">4 {{ t('settings.spaces') }}</option>
               <option :value="8">8 {{ t('settings.spaces') }}</option>
@@ -1303,7 +1348,8 @@ function savePresetForm() {
           <!-- Enable AI -->
           <div class="sp-row sp-row--checkbox">
             <label class="sp-checkbox-label" for="setting-ai-enabled">
-              <input id="setting-ai-enabled" type="checkbox" class="sp-checkbox" :checked="settings.aiEnabled" @change="onAIEnabledChange" />
+              <input id="setting-ai-enabled" type="checkbox" class="sp-checkbox" :checked="settings.aiEnabled"
+                @change="onAIEnabledChange" />
               <span>{{ t('settings.aiEnable') }}</span>
             </label>
             <span class="sp-hint">{{ t('settings.aiEnableHint') }}</span>
@@ -1313,21 +1359,21 @@ function savePresetForm() {
             <!-- Provider -->
             <div class="sp-row">
               <label class="sp-label" for="setting-ai-provider">{{ t('settings.aiProviderLabel') }}</label>
-              <select
-                id="setting-ai-provider" class="sp-select"
-                :value="settings.aiProvider"
-                @change="onAIProviderChange(($event.target as HTMLSelectElement).value as AIProvider)"
-              >
+              <select id="setting-ai-provider" class="sp-select" :value="settings.aiProvider"
+                @change="onAIProviderChange(($event.target as HTMLSelectElement).value as AIProvider)">
                 <option value="claude">{{ t('settings.aiProviderClaude') }}</option>
                 <option value="claude-code-cli">
-                  {{ t('settings.aiProviderClaudeCli') }}{{ claudeCliInfo && !claudeCliInfo.found ? t('settings.aiProviderClaudeCliNotFound') : '' }}
+                  {{ t('settings.aiProviderClaudeCli') }}{{ claudeCliInfo && !claudeCliInfo.found ?
+                    t('settings.aiProviderClaudeCliNotFound') : '' }}
                 </option>
                 <option value="codex-cli">
-                  {{ t('settings.aiProviderCodexCli') }}{{ codexCliInfo && !codexCliInfo.found ? t('settings.aiProviderCodexCliNotFound') : '' }}
+                  {{ t('settings.aiProviderCodexCli') }}{{ codexCliInfo && !codexCliInfo.found ?
+                    t('settings.aiProviderCodexCliNotFound') : '' }}
                 </option>
                 <option value="openai-compat">{{ t('settings.aiProviderOpenAiCompat') }}</option>
                 <option value="ollama" :disabled="!ollamaAvailable">
-                  {{ t('settings.aiProviderOllama') }}{{ ollamaAvailable ? '' : t('settings.aiProviderOllamaNotFound') }}
+                  {{ t('settings.aiProviderOllama') }}{{ ollamaAvailable ? '' : t('settings.aiProviderOllamaNotFound')
+                  }}
                 </option>
               </select>
             </div>
@@ -1338,16 +1384,12 @@ function savePresetForm() {
               <div class="sp-row">
                 <div class="sp-label">{{ t('settings.aiAuthLabel') }}</div>
                 <div class="sp-auth-toggle">
-                  <button
-                    :class="['sp-auth-btn', { 'sp-auth-btn--active': claudeAuthMode === 'connect' }]"
-                    @click="claudeAuthMode = 'connect'"
-                  >
+                  <button :class="['sp-auth-btn', { 'sp-auth-btn--active': claudeAuthMode === 'connect' }]"
+                    @click="claudeAuthMode = 'connect'">
                     {{ t('settings.aiAuthConnect') }}
                   </button>
-                  <button
-                    :class="['sp-auth-btn', { 'sp-auth-btn--active': claudeAuthMode === 'apikey' }]"
-                    @click="claudeAuthMode = 'apikey'"
-                  >
+                  <button :class="['sp-auth-btn', { 'sp-auth-btn--active': claudeAuthMode === 'apikey' }]"
+                    @click="claudeAuthMode = 'apikey'">
                     {{ t('settings.aiAuthApiKey') }}
                   </button>
                 </div>
@@ -1359,7 +1401,8 @@ function savePresetForm() {
                   <div class="sp-connected-badge">
                     <span class="sp-connected-dot"></span>
                     <span>{{ t('settings.aiAuthConnected', maskedApiKey) }}</span>
-                    <button class="sp-disconnect-btn" @click="disconnectClaude">{{ t('settings.aiAuthDisconnect') }}</button>
+                    <button class="sp-disconnect-btn" @click="disconnectClaude">{{ t('settings.aiAuthDisconnect')
+                    }}</button>
                   </div>
                 </div>
                 <div v-else class="sp-row">
@@ -1367,9 +1410,10 @@ function savePresetForm() {
                     <!-- Step 1: Start -->
                     <div v-if="claudeConnectStep === 'idle'" class="sp-connect-start">
                       <button class="sp-connect-btn" @click="startClaudeConnect">
-                        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5">
-                          <path d="M9 1C4.58 1 1 4.58 1 9s3.58 8 8 8 8-3.58 8-8-3.58-8-8-8z"/>
-                          <path d="M6 9h6M9 6v6"/>
+                        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor"
+                          stroke-width="1.5">
+                          <path d="M9 1C4.58 1 1 4.58 1 9s3.58 8 8 8 8-3.58 8-8-3.58-8-8-8z" />
+                          <path d="M6 9h6M9 6v6" />
                         </svg>
                         {{ t('settings.aiConnectButton') }}
                       </button>
@@ -1383,23 +1427,17 @@ function savePresetForm() {
                         {{ t('settings.aiConnectInstruction2') }}
                       </p>
                       <div class="sp-key-row">
-                        <input
-                          v-model="claudeConnectKeyInput"
-                          class="sp-input mono sp-input--key"
-                          type="password"
+                        <input v-model="claudeConnectKeyInput" class="sp-input mono sp-input--key" type="password"
                           placeholder="sk-ant-api03-..."
-                          @keydown.enter="validateAndSaveClaudeKey(claudeConnectKeyInput)"
-                        />
-                        <button
-                          class="sp-connect-save-btn"
-                          :disabled="!claudeConnectKeyInput.trim()"
-                          @click="validateAndSaveClaudeKey(claudeConnectKeyInput)"
-                        >
+                          @keydown.enter="validateAndSaveClaudeKey(claudeConnectKeyInput)" />
+                        <button class="sp-connect-save-btn" :disabled="!claudeConnectKeyInput.trim()"
+                          @click="validateAndSaveClaudeKey(claudeConnectKeyInput)">
                           {{ t('settings.aiConnectSave') }}
                         </button>
                       </div>
                       <div v-if="claudeConnectError" class="sp-connect-error">{{ claudeConnectError }}</div>
-                      <button class="sp-text-btn" @click="claudeConnectStep = 'idle'">{{ t('settings.aiConnectCancel') }}</button>
+                      <button class="sp-text-btn" @click="claudeConnectStep = 'idle'">{{ t('settings.aiConnectCancel')
+                      }}</button>
                     </div>
 
                     <!-- Step 3: Success -->
@@ -1410,7 +1448,8 @@ function savePresetForm() {
                     <!-- Step 3b: Error -->
                     <div v-if="claudeConnectStep === 'error'" class="sp-connect-error-block">
                       <div class="sp-connect-error">{{ claudeConnectError }}</div>
-                      <button class="sp-text-btn" @click="claudeConnectStep = 'waiting'">{{ t('settings.aiConnectRetry') }}</button>
+                      <button class="sp-text-btn" @click="claudeConnectStep = 'waiting'">{{ t('settings.aiConnectRetry')
+                      }}</button>
                     </div>
                   </div>
                 </div>
@@ -1421,34 +1460,35 @@ function savePresetForm() {
                 <div class="sp-row">
                   <label class="sp-label" for="setting-ai-key">{{ t('settings.aiApiKeyLabel') }}</label>
                   <div class="sp-key-row">
-                    <input
-                      id="setting-ai-key"
-                      class="sp-input mono sp-input--key"
-                      :type="showApiKey ? 'text' : 'password'"
-                      :value="settings.aiApiKey"
+                    <input id="setting-ai-key" class="sp-input mono sp-input--key"
+                      :type="showApiKey ? 'text' : 'password'" :value="settings.aiApiKey"
                       @input="updateSetting('aiApiKey', ($event.target as HTMLInputElement).value)"
-                      placeholder="sk-ant-api03-..."
-                    />
-                    <button class="sp-key-toggle" @click="showApiKey = !showApiKey" :title="showApiKey ? t('settings.aiHideKey') : t('settings.aiShowKey')">
-                      <svg v-if="showApiKey" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
-                        <path d="M2 8s2.5-4 6-4 6 4 6 4-2.5 4-6 4-6-4-6-4z"/><circle cx="8" cy="8" r="2"/>
+                      placeholder="sk-ant-api03-..." />
+                    <button class="sp-key-toggle" @click="showApiKey = !showApiKey"
+                      :title="showApiKey ? t('settings.aiHideKey') : t('settings.aiShowKey')">
+                      <svg v-if="showApiKey" width="16" height="16" viewBox="0 0 16 16" fill="none"
+                        stroke="currentColor" stroke-width="1.3">
+                        <path d="M2 8s2.5-4 6-4 6 4 6 4-2.5 4-6 4-6-4-6-4z" />
+                        <circle cx="8" cy="8" r="2" />
                       </svg>
-                      <svg v-else width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
-                        <path d="M2 8s2.5-4 6-4 6 4 6 4-2.5 4-6 4-6-4-6-4z"/><circle cx="8" cy="8" r="2"/><path d="M3 13L13 3" stroke-width="1.5"/>
+                      <svg v-else width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                        stroke-width="1.3">
+                        <path d="M2 8s2.5-4 6-4 6 4 6 4-2.5 4-6 4-6-4-6-4z" />
+                        <circle cx="8" cy="8" r="2" />
+                        <path d="M3 13L13 3" stroke-width="1.5" />
                       </svg>
                     </button>
                   </div>
-                  <span class="sp-hint">{{ t('settings.aiApiKeyAvailable') }} <a href="https://console.anthropic.com/settings/keys" target="_blank" class="sp-link">console.anthropic.com</a></span>
+                  <span class="sp-hint">{{ t('settings.aiApiKeyAvailable') }} <a
+                      href="https://console.anthropic.com/settings/keys" target="_blank"
+                      class="sp-link">console.anthropic.com</a></span>
                 </div>
               </template>
 
               <div class="sp-row">
                 <label class="sp-label" for="setting-ai-model-claude">{{ t('settings.aiModelLabel') }}</label>
-                <select
-                  id="setting-ai-model-claude" class="sp-select"
-                  :value="settings.aiModel"
-                  @change="updateSetting('aiModel', ($event.target as HTMLSelectElement).value)"
-                >
+                <select id="setting-ai-model-claude" class="sp-select" :value="settings.aiModel"
+                  @change="updateSetting('aiModel', ($event.target as HTMLSelectElement).value)">
                   <option value="claude-sonnet-4-20250514">{{ t('settings.aiModelSonnet') }}</option>
                   <option value="claude-haiku-4-5-20251001">{{ t('settings.aiModelHaiku') }}</option>
                   <option value="claude-opus-4-20250514">{{ t('settings.aiModelOpus') }}</option>
@@ -1481,7 +1521,8 @@ function savePresetForm() {
                     <div class="sp-connected-badge">
                       <span class="sp-connected-dot"></span>
                       <span>{{ t('settings.aiCliConnected', claudeCliInfo.version || 'claude') }}</span>
-                      <button class="sp-disconnect-btn" @click="runClaudeCliDetect">{{ t('settings.aiCliRedetect') }}</button>
+                      <button class="sp-disconnect-btn" @click="runClaudeCliDetect">{{ t('settings.aiCliRedetect')
+                      }}</button>
                     </div>
                     <span class="sp-hint">{{ t('settings.aiCliConnectedHint') }}</span>
                   </template>
@@ -1494,7 +1535,8 @@ function savePresetForm() {
                     <div class="sp-connected-badge">
                       <span class="sp-connected-dot sp-connected-dot--neutral"></span>
                       <span>{{ t('settings.aiCliDetected', claudeCliInfo.version || 'claude') }}</span>
-                      <button class="sp-disconnect-btn" @click="runClaudeCliDetect">{{ t('settings.aiCliRedetect') }}</button>
+                      <button class="sp-disconnect-btn" @click="runClaudeCliDetect">{{ t('settings.aiCliRedetect')
+                      }}</button>
                     </div>
                     <span class="sp-hint">{{ t('settings.aiCliDetectedHint') }}</span>
                   </template>
@@ -1504,11 +1546,7 @@ function savePresetForm() {
                         {{ t('settings.aiCliNotAuthenticated') }}
                       </div>
                       <span class="sp-hint">{{ claudeCliInfo.detail || t('settings.aiCliLoginHint') }}</span>
-                      <button
-                        class="sp-connect-btn"
-                        :disabled="claudeCliLoginLoading"
-                        @click="runClaudeCliLogin"
-                      >
+                      <button class="sp-connect-btn" :disabled="claudeCliLoginLoading" @click="runClaudeCliLogin">
                         {{ claudeCliLoginLoading ? t('settings.aiCliLoginWaiting') : t('settings.aiCliLoginButton') }}
                       </button>
                     </div>
@@ -1518,7 +1556,9 @@ function savePresetForm() {
 
               <div v-if="claudeCliInfo?.logged_in" class="sp-info-box">
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
-                  <circle cx="8" cy="8" r="7"/><path d="M8 7v4" stroke-linecap="round"/><circle cx="8" cy="5" r="0.7" fill="currentColor" stroke="none"/>
+                  <circle cx="8" cy="8" r="7" />
+                  <path d="M8 7v4" stroke-linecap="round" />
+                  <circle cx="8" cy="5" r="0.7" fill="currentColor" stroke="none" />
                 </svg>
                 <p>{{ t('settings.aiCliInfoBox') }}</p>
               </div>
@@ -1549,7 +1589,8 @@ function savePresetForm() {
                     <div class="sp-connected-badge">
                       <span class="sp-connected-dot"></span>
                       <span>{{ t('settings.aiCliConnected', codexCliInfo.version || 'codex') }}</span>
-                      <button class="sp-disconnect-btn" @click="runCodexCliDetect">{{ t('settings.aiCliRedetect') }}</button>
+                      <button class="sp-disconnect-btn" @click="runCodexCliDetect">{{ t('settings.aiCliRedetect')
+                      }}</button>
                     </div>
                     <span class="sp-hint">{{ t('settings.aiCodexCliConnectedHint') }}</span>
                   </template>
@@ -1558,7 +1599,8 @@ function savePresetForm() {
                     <div class="sp-connected-badge">
                       <span class="sp-connected-dot sp-connected-dot--neutral"></span>
                       <span>{{ t('settings.aiCliDetected', codexCliInfo.version || 'codex') }}</span>
-                      <button class="sp-disconnect-btn" @click="runCodexCliDetect">{{ t('settings.aiCliRedetect') }}</button>
+                      <button class="sp-disconnect-btn" @click="runCodexCliDetect">{{ t('settings.aiCliRedetect')
+                      }}</button>
                     </div>
                     <span class="sp-hint">{{ t('settings.aiCliDetectedHint') }}</span>
                   </template>
@@ -1576,7 +1618,9 @@ function savePresetForm() {
 
               <div v-if="codexCliInfo?.logged_in" class="sp-info-box">
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
-                  <circle cx="8" cy="8" r="7"/><path d="M8 7v4" stroke-linecap="round"/><circle cx="8" cy="5" r="0.7" fill="currentColor" stroke="none"/>
+                  <circle cx="8" cy="8" r="7" />
+                  <path d="M8 7v4" stroke-linecap="round" />
+                  <circle cx="8" cy="5" r="0.7" fill="currentColor" stroke="none" />
                 </svg>
                 <p>{{ t('settings.aiCodexCliInfoBox') }}</p>
               </div>
@@ -1586,32 +1630,31 @@ function savePresetForm() {
             <template v-if="settings.aiProvider === 'openai-compat'">
               <div class="sp-row">
                 <label class="sp-label" for="setting-ai-endpoint">{{ t('settings.aiCompatEndpoint') }}</label>
-                <input
-                  id="setting-ai-endpoint" class="sp-input mono" type="text"
-                  :value="settings.aiApiEndpoint"
+                <input id="setting-ai-endpoint" class="sp-input mono" type="text" :value="settings.aiApiEndpoint"
                   @input="updateSetting('aiApiEndpoint', ($event.target as HTMLInputElement).value)"
-                  placeholder="https://api.openai.com/v1"
-                />
+                  placeholder="https://api.openai.com/v1" />
                 <span class="sp-hint">{{ t('settings.aiCompatEndpointHint') }}</span>
               </div>
 
               <div class="sp-row">
                 <label class="sp-label" for="setting-ai-key-compat">{{ t('settings.aiCompatApiKey') }}</label>
                 <div class="sp-key-row">
-                  <input
-                    id="setting-ai-key-compat"
-                    class="sp-input mono sp-input--key"
-                    :type="showApiKey ? 'text' : 'password'"
-                    :value="settings.aiApiKey"
+                  <input id="setting-ai-key-compat" class="sp-input mono sp-input--key"
+                    :type="showApiKey ? 'text' : 'password'" :value="settings.aiApiKey"
                     @input="updateSetting('aiApiKey', ($event.target as HTMLInputElement).value)"
-                    placeholder="sk-..."
-                  />
-                  <button class="sp-key-toggle" @click="showApiKey = !showApiKey" :title="showApiKey ? t('settings.aiHideKey') : t('settings.aiShowKey')">
-                    <svg v-if="showApiKey" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
-                      <path d="M2 8s2.5-4 6-4 6 4 6 4-2.5 4-6 4-6-4-6-4z"/><circle cx="8" cy="8" r="2"/>
+                    placeholder="sk-..." />
+                  <button class="sp-key-toggle" @click="showApiKey = !showApiKey"
+                    :title="showApiKey ? t('settings.aiHideKey') : t('settings.aiShowKey')">
+                    <svg v-if="showApiKey" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                      stroke-width="1.3">
+                      <path d="M2 8s2.5-4 6-4 6 4 6 4-2.5 4-6 4-6-4-6-4z" />
+                      <circle cx="8" cy="8" r="2" />
                     </svg>
-                    <svg v-else width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
-                      <path d="M2 8s2.5-4 6-4 6 4 6 4-2.5 4-6 4-6-4-6-4z"/><circle cx="8" cy="8" r="2"/><path d="M3 13L13 3" stroke-width="1.5"/>
+                    <svg v-else width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                      stroke-width="1.3">
+                      <path d="M2 8s2.5-4 6-4 6 4 6 4-2.5 4-6 4-6-4-6-4z" />
+                      <circle cx="8" cy="8" r="2" />
+                      <path d="M3 13L13 3" stroke-width="1.5" />
                     </svg>
                   </button>
                 </div>
@@ -1619,12 +1662,8 @@ function savePresetForm() {
 
               <div class="sp-row">
                 <label class="sp-label" for="setting-ai-model-compat">{{ t('settings.aiModelLabel') }}</label>
-                <input
-                  id="setting-ai-model-compat" class="sp-input mono" type="text"
-                  :value="settings.aiModel"
-                  @input="updateSetting('aiModel', ($event.target as HTMLInputElement).value)"
-                  placeholder="gpt-4o"
-                />
+                <input id="setting-ai-model-compat" class="sp-input mono" type="text" :value="settings.aiModel"
+                  @input="updateSetting('aiModel', ($event.target as HTMLInputElement).value)" placeholder="gpt-4o" />
               </div>
             </template>
 
@@ -1633,110 +1672,137 @@ function savePresetForm() {
               <div class="sp-row">
                 <label class="sp-label" for="setting-ai-ollama-url">{{ t('settings.aiOllamaUrl') }}</label>
                 <div class="sp-key-row">
-                  <input
-                    id="setting-ai-ollama-url" class="sp-input mono sp-input--key" type="text"
+                  <input id="setting-ai-ollama-url" class="sp-input mono sp-input--key" type="text"
                     :value="settings.aiOllamaUrl"
                     @input="updateSetting('aiOllamaUrl', ($event.target as HTMLInputElement).value)"
-                    placeholder="http://localhost:11434"
-                  />
+                    placeholder="http://localhost:11434" />
                   <button class="sp-key-toggle" @click="detectOllama" :title="t('settings.aiOllamaTest')">
-                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
-                      <path d="M14 8A6 6 0 112 8" /><path d="M14 8l-2-2m2 2l-2 2"/>
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                      stroke-width="1.3">
+                      <path d="M14 8A6 6 0 112 8" />
+                      <path d="M14 8l-2-2m2 2l-2 2" />
                     </svg>
                   </button>
                 </div>
                 <span class="sp-hint" :class="{ 'sp-hint--ok': ollamaAvailable }">
-                  {{ ollamaAvailable ? t('settings.aiOllamaConnected', ollamaModels.length) : t('settings.aiOllamaNotConnected') }}
+                  {{ ollamaAvailable ? t('settings.aiOllamaConnected', ollamaModels.length) :
+                    t('settings.aiOllamaNotConnected') }}
                 </span>
               </div>
 
               <div class="sp-row" v-if="ollamaAvailable">
                 <label class="sp-label" for="setting-ai-ollama-model">{{ t('settings.aiModelLabel') }}</label>
-                <select
-                  v-if="ollamaModels.length > 0"
-                  id="setting-ai-ollama-model" class="sp-select"
+                <select v-if="ollamaModels.length > 0" id="setting-ai-ollama-model" class="sp-select"
                   :value="settings.aiOllamaModel"
-                  @change="updateSetting('aiOllamaModel', ($event.target as HTMLSelectElement).value)"
-                >
+                  @change="updateSetting('aiOllamaModel', ($event.target as HTMLSelectElement).value)">
                   <option v-for="model in ollamaModels" :key="model" :value="model">{{ model }}</option>
                 </select>
-                <input
-                  v-else
-                  id="setting-ai-ollama-model" class="sp-input mono" type="text"
+                <input v-else id="setting-ai-ollama-model" class="sp-input mono" type="text"
                   :value="settings.aiOllamaModel"
                   @input="updateSetting('aiOllamaModel', ($event.target as HTMLInputElement).value)"
-                  placeholder="codellama"
-                />
+                  placeholder="codellama" />
               </div>
             </template>
 
             <!-- ─── Prompt Presets (v2.13) ─────────────────── -->
             <div class="sp-section-divider sp-section-divider--inner"></div>
-            <div class="sp-section-header">{{ t('settings.ai.presets.title') }}</div>
-            <span class="sp-hint">{{ t('settings.ai.presets.hint') }}</span>
-
-            <!-- Built-in presets (non-editable) -->
-            <div class="sp-preset-group-label">{{ t('settings.ai.presets.builtinLabel') }}</div>
-            <div v-for="preset in BUILTIN_PRESETS" :key="preset.id" class="sp-template-row sp-preset-row--builtin">
-              <div class="sp-template-info">
-                <span class="sp-template-name">{{ preset.name }}</span>
-                <span class="sp-template-subject">{{ preset.description }}</span>
-              </div>
-              <span class="sp-preset-builtin-badge">{{ t('settings.ai.presets.builtinBadge') }}</span>
-            </div>
-
-            <!-- User presets -->
-            <div class="sp-preset-group-label">{{ t('settings.ai.presets.customLabel') }}</div>
-            <div v-if="userPresets.length === 0" class="sp-empty-hint">{{ t('settings.ai.presets.empty') }}</div>
-            <div v-for="preset in userPresets" :key="preset.id" class="sp-template-row">
-              <div class="sp-template-info">
-                <span class="sp-template-name">{{ preset.name }}</span>
-                <span class="sp-template-subject">{{ preset.description || '—' }}</span>
-              </div>
-              <div class="sp-identity-actions">
-                <button class="sp-icon-btn" @click="openEditPreset(preset)" :title="t('settings.git.identityEdit')">
-                  <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M11.5 2.5l2 2L5 13H3v-2L11.5 2.5z"/></svg>
-                </button>
-                <button class="sp-icon-btn sp-icon-btn--danger" @click="removePreset(preset.id)" :title="t('settings.git.identityDelete')">
-                  <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+            <div class="sp-group">
+              <div class="sp-group__head">
+                <div class="sp-group__head-text">
+                  <span class="sp-group__label">{{ t('settings.ai.presets.title') }}</span>
+                  <span class="sp-group__sublabel">{{ t('settings.ai.presets.hint') }}</span>
+                </div>
+                <button v-if="!showPresetForm" class="sp-group__action" @click="openAddPreset">
+                  <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.5"
+                    aria-hidden="true">
+                    <path d="M8 3v10M3 8h10" />
+                  </svg>
+                  {{ t('settings.ai.presets.add') }}
                 </button>
               </div>
-            </div>
 
-            <!-- Preset add/edit form -->
-            <div v-if="showPresetForm" class="sp-sub-form">
-              <div class="sp-sub-form-row">
-                <input class="sp-input sp-input--sm" v-model="presetForm.name" :placeholder="t('settings.ai.presets.formName')" />
-              </div>
-              <div class="sp-sub-form-row">
-                <input class="sp-input sp-input--sm" v-model="presetForm.description" :placeholder="t('settings.ai.presets.formDescription')" />
-              </div>
-              <div class="sp-sub-form-row">
-                <textarea
-                  class="sp-textarea sp-input--sm mono"
-                  v-model="presetForm.systemPrompt"
-                  :placeholder="t('settings.ai.presets.formPromptPlaceholder')"
-                  rows="7"
-                />
-              </div>
-              <div class="sp-sub-form-hint">{{ t('settings.ai.presets.formLangHint') }}</div>
-              <div class="sp-sub-form-actions">
-                <button class="sp-btn sp-btn--primary sp-btn--sm" @click="savePresetForm" :disabled="!presetForm.name.trim() || !presetForm.systemPrompt.trim()">{{ t('common.save') }}</button>
-                <button class="sp-btn sp-btn--sm" @click="showPresetForm = false">{{ t('common.cancel') }}</button>
-              </div>
-            </div>
+              <div class="sp-group__body">
+                <!-- Built-in presets -->
+                <div v-for="preset in BUILTIN_PRESETS" :key="preset.id" class="sp-group__row sp-group__row--muted">
+                  <div class="sp-group__row-info">
+                    <span class="sp-group__row-name">{{ preset.name }}</span>
+                    <span class="sp-group__row-meta">{{ preset.description }}</span>
+                  </div>
+                  <div class="sp-group__row-aside" style="opacity:1">
+                    <span class="sp-tag">{{ t('settings.ai.presets.builtinBadge') }}</span>
+                  </div>
+                </div>
 
-            <div v-if="!showPresetForm" class="sp-template-actions">
-              <button class="sp-add-btn" @click="openAddPreset">
-                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3v10M3 8h10"/></svg>
-                {{ t('settings.ai.presets.add') }}
-              </button>
+                <!-- Divider built-in → custom -->
+                <div class="sp-group__sep">{{ t('settings.ai.presets.customLabel') }}</div>
+
+                <!-- Custom presets empty -->
+                <div v-if="userPresets.length === 0 && !showPresetForm" class="sp-group__empty">
+                  {{ t('settings.ai.presets.empty') }}
+                </div>
+
+                <!-- Custom preset rows -->
+                <div v-for="preset in userPresets" :key="preset.id" class="sp-group__row">
+                  <div class="sp-group__row-info">
+                    <span class="sp-group__row-name">{{ preset.name }}</span>
+                    <span class="sp-group__row-meta">{{ preset.description || '—' }}</span>
+                  </div>
+                  <div class="sp-group__row-aside">
+                    <button class="sp-ghost-btn" @click="openEditPreset(preset)"
+                      :title="t('settings.git.identityEdit')">
+                      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                        stroke-width="1.5">
+                        <path d="M11.5 2.5l2 2L5 13H3v-2L11.5 2.5z" />
+                      </svg>
+                    </button>
+                    <button class="sp-ghost-btn sp-ghost-btn--danger" @click="removePreset(preset.id)"
+                      :title="t('settings.git.identityDelete')">
+                      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                        stroke-width="1.5">
+                        <path d="M4 4l8 8M12 4l-8 8" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Preset add/edit form -->
+                <div v-if="showPresetForm" class="sp-group__form">
+                  <div class="sp-group__form-grid sp-group__form-grid--1col">
+                    <div class="sp-field">
+                      <label class="sp-field__label">{{ t('settings.ai.presets.formName') }}</label>
+                      <input class="sp-input sp-input--sm" v-model="presetForm.name"
+                        :placeholder="t('settings.ai.presets.formName')" />
+                    </div>
+                    <div class="sp-field">
+                      <label class="sp-field__label">{{ t('settings.ai.presets.formDescription') }} <span
+                          class="sp-field__optional">— optionnel</span></label>
+                      <input class="sp-input sp-input--sm" v-model="presetForm.description"
+                        :placeholder="t('settings.ai.presets.formDescription')" />
+                    </div>
+                    <div class="sp-field">
+                      <label class="sp-field__label">Prompt système</label>
+                      <textarea class="sp-textarea sp-input--sm mono" v-model="presetForm.systemPrompt"
+                        :placeholder="t('settings.ai.presets.formPromptPlaceholder')" rows="6" />
+                      <span class="sp-field__hint">{{ t('settings.ai.presets.formLangHint') }}</span>
+                    </div>
+                  </div>
+                  <div class="sp-group__form-footer">
+                    <button class="btn btn--ghost sp-btn--sm" @click="showPresetForm = false">{{ t('common.cancel')
+                    }}</button>
+                    <button class="btn btn--primary sp-btn--sm" @click="savePresetForm"
+                      :disabled="!presetForm.name.trim() || !presetForm.systemPrompt.trim()">{{ t('common.save')
+                      }}</button>
+                  </div>
+                </div>
+              </div>
             </div>
 
             <!-- AI info box -->
             <div class="sp-info-box">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
-                <circle cx="8" cy="8" r="7"/><path d="M8 7v4" stroke-linecap="round"/><circle cx="8" cy="5" r="0.7" fill="currentColor" stroke="none"/>
+                <circle cx="8" cy="8" r="7" />
+                <path d="M8 7v4" stroke-linecap="round" />
+                <circle cx="8" cy="5" r="0.7" fill="currentColor" stroke="none" />
               </svg>
               <p>{{ t('settings.aiPrivacyNote') }}</p>
             </div>
@@ -1750,7 +1816,9 @@ function savePresetForm() {
           <!-- No repo open → disable the entire block with an info message -->
           <div v-if="!llmFallbackHasRepo" class="sp-info-box">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
-              <circle cx="8" cy="8" r="7"/><path d="M8 7v4" stroke-linecap="round"/><circle cx="8" cy="5" r="0.7" fill="currentColor" stroke="none"/>
+              <circle cx="8" cy="8" r="7" />
+              <path d="M8 7v4" stroke-linecap="round" />
+              <circle cx="8" cy="5" r="0.7" fill="currentColor" stroke="none" />
             </svg>
             <p>{{ t('settings.ai.fallback.noRepo.message') }}</p>
           </div>
@@ -1759,14 +1827,8 @@ function savePresetForm() {
             <!-- Enable toggle + disclaimer -->
             <div class="sp-row sp-row--checkbox">
               <label class="sp-checkbox-label" for="setting-llm-fallback-enabled">
-                <input
-                  id="setting-llm-fallback-enabled"
-                  type="checkbox"
-                  class="sp-checkbox"
-                  :checked="llmFallback.enabled"
-                  :disabled="llmFallbackLoading"
-                  @change="onLlmFallbackEnabledChange"
-                />
+                <input id="setting-llm-fallback-enabled" type="checkbox" class="sp-checkbox"
+                  :checked="llmFallback.enabled" :disabled="llmFallbackLoading" @change="onLlmFallbackEnabledChange" />
                 <span>{{ t('settings.ai.fallback.enable.label') }}</span>
               </label>
               <span class="sp-hint">{{ t('settings.ai.fallback.enable.help') }}</span>
@@ -1774,9 +1836,9 @@ function savePresetForm() {
 
             <div v-if="llmFallback.enabled" class="sp-warning-box">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4">
-                <path d="M8 1.5L1 14h14L8 1.5z" stroke-linejoin="round"/>
-                <path d="M8 6v4" stroke-linecap="round"/>
-                <circle cx="8" cy="12" r="0.7" fill="currentColor" stroke="none"/>
+                <path d="M8 1.5L1 14h14L8 1.5z" stroke-linejoin="round" />
+                <path d="M8 6v4" stroke-linecap="round" />
+                <circle cx="8" cy="12" r="0.7" fill="currentColor" stroke="none" />
               </svg>
               <p>{{ t('settings.ai.fallback.warning') }}</p>
             </div>
@@ -1784,7 +1846,9 @@ function savePresetForm() {
             <!-- Policy conflict warning -->
             <div v-if="llmFallback.enabled && llmFallbackPolicyConflict" class="sp-info-box sp-info-box--warning">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
-                <circle cx="8" cy="8" r="7"/><path d="M8 5v4" stroke-linecap="round"/><circle cx="8" cy="11.5" r="0.7" fill="currentColor" stroke="none"/>
+                <circle cx="8" cy="8" r="7" />
+                <path d="M8 5v4" stroke-linecap="round" />
+                <circle cx="8" cy="11.5" r="0.7" fill="currentColor" stroke="none" />
               </svg>
               <p>{{ t('settings.ai.fallback.policyConflict.warning') }}</p>
             </div>
@@ -1792,13 +1856,10 @@ function savePresetForm() {
             <template v-if="llmFallback.enabled">
               <!-- Provider -->
               <div class="sp-row">
-                <label class="sp-label" for="setting-llm-fallback-provider">{{ t('settings.ai.fallback.provider.label') }}</label>
-                <select
-                  id="setting-llm-fallback-provider"
-                  class="sp-select"
-                  :value="llmFallback.provider"
-                  @change="onLlmFallbackProviderChange(($event.target as HTMLSelectElement).value as LlmFallbackProvider)"
-                >
+                <label class="sp-label" for="setting-llm-fallback-provider">{{ t('settings.ai.fallback.provider.label')
+                }}</label>
+                <select id="setting-llm-fallback-provider" class="sp-select" :value="llmFallback.provider"
+                  @change="onLlmFallbackProviderChange(($event.target as HTMLSelectElement).value as LlmFallbackProvider)">
                   <option value="claude">{{ t('settings.aiProviderClaude') }}</option>
                   <option value="claude-code-cli">{{ t('settings.aiProviderClaudeCli') }}</option>
                   <option value="codex-cli">{{ t('settings.aiProviderCodexCli') }}</option>
@@ -1810,18 +1871,12 @@ function savePresetForm() {
 
               <!-- Min post-merge score (slider 50-100) -->
               <div class="sp-row">
-                <label class="sp-label" for="setting-llm-fallback-min-score">{{ t('settings.ai.fallback.minScore.label') }}</label>
+                <label class="sp-label" for="setting-llm-fallback-min-score">{{ t('settings.ai.fallback.minScore.label')
+                }}</label>
                 <div class="sp-range-row">
-                  <input
-                    id="setting-llm-fallback-min-score"
-                    type="range"
-                    class="sp-range"
-                    min="50"
-                    max="100"
-                    step="1"
+                  <input id="setting-llm-fallback-min-score" type="range" class="sp-range" min="50" max="100" step="1"
                     :value="llmFallback.minPostMergeScore"
-                    @input="onLlmFallbackMinScoreChange(Number(($event.target as HTMLInputElement).value))"
-                  />
+                    @input="onLlmFallbackMinScoreChange(Number(($event.target as HTMLInputElement).value))" />
                   <span class="sp-range-value">{{ llmFallback.minPostMergeScore }}</span>
                 </div>
                 <span class="sp-hint">{{ t('settings.ai.fallback.minScore.help') }}</span>
@@ -1829,28 +1884,19 @@ function savePresetForm() {
 
               <!-- Context lines (input number 10-200) -->
               <div class="sp-row">
-                <label class="sp-label" for="setting-llm-fallback-context-lines">{{ t('settings.ai.fallback.contextLines.label') }}</label>
-                <input
-                  id="setting-llm-fallback-context-lines"
-                  type="number"
-                  class="sp-input"
-                  min="10"
-                  max="200"
-                  step="1"
-                  :value="llmFallback.contextLines"
-                  @input="onLlmFallbackContextLinesChange(Number(($event.target as HTMLInputElement).value))"
-                />
+                <label class="sp-label" for="setting-llm-fallback-context-lines">{{
+                  t('settings.ai.fallback.contextLines.label') }}</label>
+                <input id="setting-llm-fallback-context-lines" type="number" class="sp-input" min="10" max="200"
+                  step="1" :value="llmFallback.contextLines"
+                  @input="onLlmFallbackContextLinesChange(Number(($event.target as HTMLInputElement).value))" />
               </div>
 
               <!-- Min mode -->
               <div class="sp-row">
-                <label class="sp-label" for="setting-llm-fallback-min-mode">{{ t('settings.ai.fallback.minMode.label') }}</label>
-                <select
-                  id="setting-llm-fallback-min-mode"
-                  class="sp-select"
-                  :value="llmFallback.minMode"
-                  @change="onLlmFallbackMinModeChange(($event.target as HTMLSelectElement).value as MinMode)"
-                >
+                <label class="sp-label" for="setting-llm-fallback-min-mode">{{ t('settings.ai.fallback.minMode.label')
+                }}</label>
+                <select id="setting-llm-fallback-min-mode" class="sp-select" :value="llmFallback.minMode"
+                  @change="onLlmFallbackMinModeChange(($event.target as HTMLSelectElement).value as MinMode)">
                   <option value="off">off</option>
                   <option value="balanced">balanced</option>
                   <option value="strict">strict</option>
@@ -1860,14 +1906,12 @@ function savePresetForm() {
 
             <!-- Save button (always visible when a repo is open) -->
             <div class="sp-row">
-              <button
-                class="bm-btn bm-btn--primary sp-llm-save-btn"
-                :disabled="llmFallbackSaving || llmFallbackLoading"
-                @click="saveLlmFallback"
-              >
+              <button class="bm-btn bm-btn--primary sp-llm-save-btn" :disabled="llmFallbackSaving || llmFallbackLoading"
+                @click="saveLlmFallback">
                 {{ llmFallbackSaving ? t('common.loading') : t('settings.ai.fallback.save.button') }}
               </button>
-              <span v-if="llmFallbackSaveSuccess" class="sp-hint sp-hint--ok">{{ t('settings.ai.fallback.save.button') }} OK</span>
+              <span v-if="llmFallbackSaveSuccess" class="sp-hint sp-hint--ok">{{ t('settings.ai.fallback.save.button')
+              }} OK</span>
               <span v-if="llmFallbackSaveError" class="sp-connect-error">{{ llmFallbackSaveError }}</span>
             </div>
           </template>
@@ -1899,18 +1943,10 @@ function savePresetForm() {
           <div class="sp-logs-header">
             <h3 class="sp-section-title">{{ t('settings.logsTitle') }}</h3>
             <div class="sp-logs-actions">
-              <button
-                v-if="(props.errorLog?.length ?? 0) > 0"
-                class="bm-btn bm-btn--ghost"
-                @click="copyAllLogs"
-              >
+              <button v-if="(props.errorLog?.length ?? 0) > 0" class="bm-btn bm-btn--ghost" @click="copyAllLogs">
                 {{ t('settings.logsCopyAll') }}
               </button>
-              <button
-                v-if="(props.errorLog?.length ?? 0) > 0"
-                class="bm-btn bm-btn--ghost"
-                @click="emit('clearLogs')"
-              >
+              <button v-if="(props.errorLog?.length ?? 0) > 0" class="bm-btn bm-btn--ghost" @click="emit('clearLogs')">
                 {{ t('settings.logsClear') }}
               </button>
             </div>
@@ -1919,12 +1955,9 @@ function savePresetForm() {
           <ul v-else class="sp-logs-list">
             <!-- Newest entries first — the underlying buffer is append-only,
                  so we reverse a shallow copy at render time. -->
-            <li
-              v-for="entry in [...(props.errorLog ?? [])].reverse()"
-              :key="entry.id ?? (entry.timestamp + ':' + entry.message)"
-              class="sp-log-entry"
-              :class="`sp-log-entry--${entry.level}`"
-            >
+            <li v-for="entry in [...(props.errorLog ?? [])].reverse()"
+              :key="entry.id ?? (entry.timestamp + ':' + entry.message)" class="sp-log-entry"
+              :class="`sp-log-entry--${entry.level}`">
               <span class="sp-log-line">
                 <span class="log-ts">{{ formatLogTimestamp(entry.timestamp) }}</span>
                 <span class="log-level" :class="`log-level--${entry.level}`">{{ logLevelLabel(entry.level) }}</span>
@@ -1935,12 +1968,14 @@ function savePresetForm() {
           </ul>
         </template>
 
-    </div><!-- sp-content -->
+      </div><!-- sp-content -->
     </div><!-- sp-layout -->
   </BaseModal>
 </template>
 
 <style scoped>
+/* .sp-title-icon removed — use global .bm-title-icon from BaseModal instead */
+
 /* ─── Two-column layout ────────────────────────────────── */
 .sp-layout {
   display: flex;
@@ -2040,7 +2075,9 @@ function savePresetForm() {
 }
 
 @keyframes sp-spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .sp-nav-action-spin {
@@ -2275,7 +2312,9 @@ function savePresetForm() {
   transition: all var(--transition-base);
 }
 
-.sp-auth-btn:first-child { border-right: 1px solid var(--color-border); }
+.sp-auth-btn:first-child {
+  border-right: 1px solid var(--color-border);
+}
 
 .sp-auth-btn--active {
   background: var(--color-accent);
@@ -2340,8 +2379,14 @@ function savePresetForm() {
   transition: filter var(--transition-base);
 }
 
-.sp-connect-save-btn:hover { filter: brightness(1.1); }
-.sp-connect-save-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.sp-connect-save-btn:hover {
+  filter: brightness(1.1);
+}
+
+.sp-connect-save-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
 
 .sp-connect-error {
   font-size: 12px;
@@ -2375,7 +2420,9 @@ function savePresetForm() {
   align-self: flex-start;
 }
 
-.sp-text-btn:hover { color: var(--color-text); }
+.sp-text-btn:hover {
+  color: var(--color-text);
+}
 
 .sp-cli-status {
   display: flex;
@@ -2609,21 +2656,95 @@ function savePresetForm() {
   padding: var(--space-2) 0;
 }
 
-/* ── Identity rows ── */
-.sp-identity-row,
-.sp-template-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-bg-secondary);
-  margin-bottom: var(--space-1);
+/* ── sp-group (identities / templates) ── */
+.sp-group {
+  margin-top: var(--space-5);
 }
 
-.sp-identity-info,
-.sp-template-info {
+.sp-group__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-2);
+}
+
+.sp-group__label {
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+}
+
+.sp-group__actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.sp-group__action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 var(--space-2);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-accent);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  transition: background var(--transition-base);
+}
+
+.sp-group__action:hover:not(:disabled) {
+  background: var(--color-accent-soft, rgba(var(--color-accent-rgb, 100 100 255) / 0.1));
+}
+
+.sp-group__action:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.sp-group__action--muted {
+  color: var(--color-text-muted);
+}
+
+.sp-group__action--muted:hover:not(:disabled) {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text);
+}
+
+.sp-group__body {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+/* ── Group rows ── */
+.sp-group__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg);
+  border-bottom: 1px solid var(--color-border);
+  transition: background var(--transition-base);
+}
+
+.sp-group__row:last-child {
+  border-bottom: none;
+}
+
+.sp-group__row:hover {
+  background: var(--color-bg-secondary);
+}
+
+.sp-group__row:hover .sp-group__row-aside {
+  opacity: 1;
+}
+
+.sp-group__row-info {
   flex: 1;
   min-width: 0;
   display: flex;
@@ -2631,15 +2752,13 @@ function savePresetForm() {
   gap: 1px;
 }
 
-.sp-identity-label,
-.sp-template-name {
+.sp-group__row-name {
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-medium);
   color: var(--color-text);
 }
 
-.sp-identity-meta,
-.sp-template-subject {
+.sp-group__row-meta {
   font-size: var(--font-size-xs);
   color: var(--color-text-muted);
   white-space: nowrap;
@@ -2647,26 +2766,52 @@ function savePresetForm() {
   text-overflow: ellipsis;
 }
 
-.sp-identity-gpg {
-  font-size: var(--font-size-xs);
-  color: var(--color-text-subtle);
-  font-family: monospace;
-}
-
-.sp-identity-actions {
+.sp-group__row-aside {
   display: flex;
+  align-items: center;
   gap: var(--space-1);
   flex-shrink: 0;
+  opacity: 0;
+  transition: opacity var(--transition-base);
 }
 
-/* ── Icon buttons ── */
-.sp-icon-btn {
+/* ── Empty state ── */
+.sp-group__empty {
+  padding: var(--space-4) var(--space-3);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-subtle);
+  text-align: center;
+  background: var(--color-bg);
+}
+
+/* ── Inline form ── */
+.sp-group__form {
+  padding: var(--space-4);
+}
+
+.sp-group__form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3) var(--space-4);
+}
+
+.sp-group__form-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+
+/* ── Ghost icon buttons ── */
+.sp-ghost-btn {
   display: flex;
   align-items: center;
   justify-content: center;
   width: 26px;
   height: 26px;
-  border: 1px solid var(--color-border);
+  border: none;
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--color-text-muted);
@@ -2674,37 +2819,64 @@ function savePresetForm() {
   transition: background var(--transition-base), color var(--transition-base);
 }
 
-.sp-icon-btn:hover {
+.sp-ghost-btn:hover {
   background: var(--color-bg-tertiary);
   color: var(--color-text);
 }
 
-.sp-icon-btn--danger:hover {
-  background: var(--color-danger-soft);
+.sp-ghost-btn--danger:hover {
+  background: var(--color-danger-soft, rgba(220 80 80 / 0.1));
   color: var(--color-danger);
-  border-color: var(--color-danger);
 }
 
-/* ── Sub-form (identity / template creation) ── */
-.sp-sub-form {
+/* ── Tag chip (GPG etc.) ── */
+.sp-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.04em;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-muted);
+}
+
+/* ── Form fields ── */
+.sp-field {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-3);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-bg-secondary);
-  margin-bottom: var(--space-2);
+  gap: var(--space-1);
 }
 
-.sp-sub-form-row {
-  display: flex;
+.sp-field--wide {
+  grid-column: span 2;
 }
 
-.sp-sub-form-actions {
-  display: flex;
-  gap: var(--space-2);
-  padding-top: var(--space-1);
+.sp-field__label {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-muted);
+  letter-spacing: 0.02em;
+}
+
+.sp-field__optional {
+  font-weight: var(--font-weight-normal);
+  color: var(--color-text-subtle);
+  font-style: italic;
+}
+
+/* inputs inside sp-group__form get a slightly stronger border */
+.sp-group__form .sp-input {
+  border-color: var(--color-border);
+  transition: border-color var(--transition-base), box-shadow var(--transition-base);
+}
+
+.sp-group__form .sp-input:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-focus-ring);
 }
 
 .sp-input--sm {
@@ -2743,73 +2915,62 @@ function savePresetForm() {
   font-size: var(--font-size-sm);
 }
 
-/* ── Add buttons ── */
-.sp-add-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  padding: var(--space-1) var(--space-3);
-  height: 28px;
-  border: 1px dashed var(--color-border);
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--color-text-muted);
-  font-size: var(--font-size-sm);
-  cursor: pointer;
-  transition: border-color var(--transition-base), color var(--transition-base), background var(--transition-base);
-  margin-top: var(--space-1);
-}
-
-.sp-add-btn:hover:not(:disabled) {
-  border-color: var(--color-accent);
-  color: var(--color-accent);
-  background: var(--color-accent-soft);
-}
-
-.sp-add-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.sp-template-actions {
-  display: flex;
-  gap: var(--space-2);
-  flex-wrap: wrap;
-}
-
-/* ── v2.13 Preset styles ──────────────────────────────── */
+/* ── v2.13 / sp-group extensions ─────────────────────── */
 .sp-section-divider--inner {
   margin: var(--space-4) 0 var(--space-2);
 }
 
-.sp-preset-group-label {
+/* Head with stacked label + sublabel */
+.sp-group__head-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sp-group__sublabel {
   font-size: var(--font-size-xs);
-  font-weight: 600;
-  letter-spacing: 0.06em;
+  color: var(--color-text-subtle);
+  font-weight: var(--font-weight-normal);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* Muted row (built-ins) — no hover, slightly dimmed */
+.sp-group__row--muted {
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.sp-group__row--muted .sp-group__row-aside {
+  pointer-events: all;
+}
+
+/* Separator between built-ins and custom */
+.sp-group__sep {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
+  height: 28px;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
   text-transform: uppercase;
-  color: var(--color-text-muted);
-  margin: var(--space-3) 0 var(--space-1);
+  letter-spacing: 0.06em;
+  color: var(--color-text-subtle);
+  background: var(--color-bg-secondary);
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
 }
 
-.sp-preset-row--builtin {
-  opacity: 0.75;
+/* 1-column form grid override */
+.sp-group__form-grid--1col {
+  grid-template-columns: 1fr;
 }
 
-.sp-preset-builtin-badge {
-  font-size: 10px;
-  padding: 1px 6px;
-  border-radius: 8px;
-  background: var(--color-bg-tertiary);
-  color: var(--color-text-muted);
-  border: 1px solid var(--color-border);
-  flex-shrink: 0;
-  align-self: center;
-}
-
-.sp-sub-form-hint {
+/* Hint text below a field */
+.sp-field__hint {
   font-size: var(--font-size-xs);
   color: var(--color-text-muted);
-  margin-top: calc(var(--space-1) * -1);
+  margin-top: 2px;
 }
-
 </style>

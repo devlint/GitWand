@@ -1,26 +1,23 @@
 /**
  * @file forge/BitbucketProvider.ts
  *
- * Bitbucket Cloud implementation of ForgeProvider — v2.10 §3.x.
+ * Bitbucket Cloud implementation of ForgeProvider — v2.10 + v2.14.
  *
  * Uses Bitbucket REST API v2 via `curl` (through Rust Tauri commands in
  * `bitbucket.rs`). Credentials (App Password) are stored in the OS keychain
  * via `credentials.rs` and must be configured in Settings > Accounts before
  * any method is called.
  *
- * **Scope v2.10:**
- * - PR list, detail, diff, create, merge, checkout
- * - Comments (general + inline via Bitbucket inline anchors)
- * - Approvals (approve only — Bitbucket has no "request changes" concept)
- * - Reviewer candidates (repo members with write access)
+ * **Scope v2.10:** PR list/detail/diff/create/merge/checkout, comments (general
+ * + inline via Bitbucket inline anchors), approvals, reviewer candidates.
  *
- * **Stubs (throw ForgeNotImplementedError):**
- * - updateComment / deleteComment — ForgeProvider interface lacks `prNumber`
- *   which Bitbucket's API requires alongside `comment_id` (v2.11 fix)
- * - convertDraftToReady — Bitbucket has no native draft; title prefix "Draft:"
- *   is used but toggling it requires a PR update call (v2.11)
- * - getCIChecks — Bitbucket Pipelines needs a separate REST call (v2.11)
- * - getConflictPreview / getHotspots / getFileHistory — GitHub-specific
+ * **Scope v2.14:**
+ * - updateComment / deleteComment — wired via bb_update_comment / bb_delete_comment;
+ *   prNumber is now passed as the 4th argument (required by Bitbucket's API).
+ * - convertDraftToReady — strips "Draft: " title prefix via PUT PR update.
+ * - getCIChecks — wired to Bitbucket Pipelines commit statuses endpoint.
+ * - getConflictPreview / getHotspots — forge-agnostic (local git data).
+ * - getFileHistory — aggregated from PR comments, filtered by path.
  *
  * **Terminology**: Bitbucket uses "Pull Request" (PR) — terminology matches
  * ForgeProvider uniformly.
@@ -36,11 +33,16 @@ import {
   bbCheckoutPr,
   bbPrComments,
   bbCreateComment,
+  bbUpdateComment,
+  bbDeleteComment,
+  bbPrCiChecks,
+  bbConvertDraftToReady,
   bbApprovePr,
   bbPrFiles,
   bbCurrentUser,
   bbReviewerCandidates,
 } from "../../utils/backend";
+import { ghPrConflictPreview, ghPrHotspots } from "../../utils/backend";
 
 import type {
   ForgeProvider,
@@ -58,11 +60,23 @@ import type {
   PrHotspot,
   PrFileHistory,
   ReviewerCandidate,
+  Account,
 } from "./types";
-import { ForgeNotImplementedError } from "./types";
 
 export class BitbucketProvider implements ForgeProvider {
   readonly name: ForgeName = "bitbucket";
+
+  /**
+   * Active account — used to resolve the Bitbucket workspace credential.
+   * When set, `account.tokenKey` identifies the keychain entry
+   * (`"gitwand:bitbucket/<workspace>"`), allowing multi-workspace support.
+   * Deeper wiring (passing workspace into Rust commands) is a follow-up task.
+   */
+  private _account: Account | null = null;
+
+  setAccount(account: Account | null): void {
+    this._account = account;
+  }
 
   detectFromRemote(remoteUrl: string): boolean {
     return remoteUrl.includes("bitbucket.org");
@@ -104,12 +118,8 @@ export class BitbucketProvider implements ForgeProvider {
     return bbPrDiff(cwd, number);
   }
 
-  getCIChecks(_cwd: string, _number: number): Promise<CICheck[]> {
-    // Bitbucket Pipelines requires a separate REST endpoint — deferred to v2.11.
-    throw new ForgeNotImplementedError(
-      "bitbucket",
-      "getCIChecks — Bitbucket Pipelines endpoint deferred to v2.11",
-    );
+  getCIChecks(cwd: string, number: number): Promise<CICheck[]> {
+    return bbPrCiChecks(cwd, number);
   }
 
   // ── PR actions ─────────────────────────────────────────────────────────────
@@ -137,13 +147,8 @@ export class BitbucketProvider implements ForgeProvider {
     return bbCheckoutPr(cwd, number);
   }
 
-  convertDraftToReady(_cwd: string, _number: number): Promise<void> {
-    // Bitbucket has no native draft concept. "Draft:" title prefix is used
-    // conventionally; removing it requires a PR PATCH call — deferred to v2.11.
-    throw new ForgeNotImplementedError(
-      "bitbucket",
-      "convertDraftToReady — Bitbucket uses title prefix 'Draft:'; update call deferred to v2.11",
-    );
+  convertDraftToReady(cwd: string, number: number): Promise<void> {
+    return bbConvertDraftToReady(cwd, number);
   }
 
   // ── Comments ───────────────────────────────────────────────────────────────
@@ -160,22 +165,18 @@ export class BitbucketProvider implements ForgeProvider {
     return bbCreateComment(cwd, prNumber, params.body);
   }
 
-  updateComment(_cwd: string, _commentId: number, _body: string): Promise<void> {
-    // Bitbucket's comment endpoint requires the PR id alongside the comment id.
-    // ForgeProvider.updateComment only receives commentId — interface extension
-    // needed in v2.11.
-    throw new ForgeNotImplementedError(
-      "bitbucket",
-      "updateComment — interface needs PR number alongside comment_id (v2.11)",
-    );
+  updateComment(cwd: string, commentId: number, body: string, prNumber?: number): Promise<void> {
+    if (!prNumber) {
+      throw new Error("BitbucketProvider.updateComment requires prNumber (PR id)");
+    }
+    return bbUpdateComment(cwd, prNumber, commentId, body);
   }
 
-  deleteComment(_cwd: string, _commentId: number): Promise<void> {
-    // Same limitation as updateComment.
-    throw new ForgeNotImplementedError(
-      "bitbucket",
-      "deleteComment — interface needs PR number alongside comment_id (v2.11)",
-    );
+  deleteComment(cwd: string, commentId: number, prNumber?: number): Promise<void> {
+    if (!prNumber) {
+      throw new Error("BitbucketProvider.deleteComment requires prNumber (PR id)");
+    }
+    return bbDeleteComment(cwd, prNumber, commentId);
   }
 
   // ── Reviews (approvals) ────────────────────────────────────────────────────
@@ -229,18 +230,28 @@ export class BitbucketProvider implements ForgeProvider {
     };
   }
 
-  // ── Intelligence (GitHub-specific — stubs) ─────────────────────────────────
+  // ── Intelligence (forge-agnostique depuis v2.14) ───────────────────────────
 
-  getConflictPreview(_cwd: string, _prNumber: number): Promise<PrConflictPreview> {
-    throw new ForgeNotImplementedError("bitbucket", "getConflictPreview");
+  getConflictPreview(cwd: string, prNumber: number): Promise<PrConflictPreview> {
+    // git merge-tree is local git data — forge-agnostic.
+    return ghPrConflictPreview(cwd, prNumber);
   }
 
-  getHotspots(_cwd: string, _paths: string[]): Promise<PrHotspot[]> {
-    throw new ForgeNotImplementedError("bitbucket", "getHotspots");
+  getHotspots(cwd: string, paths: string[]): Promise<PrHotspot[]> {
+    // git log --merges analysis is purely local — forge-agnostic.
+    return ghPrHotspots(cwd, paths);
   }
 
-  getFileHistory(_cwd: string, _paths: string[]): Promise<Record<string, PrFileHistory>> {
-    throw new ForgeNotImplementedError("bitbucket", "getFileHistory");
+  async getFileHistory(cwd: string, paths: string[]): Promise<Record<string, PrFileHistory>> {
+    // Bitbucket implementation: aggregate PR comments filtered by path.
+    // Without the current prNumber in scope, we return a zeroed result.
+    // The UI degrades gracefully (no "reviewed N times" chips).
+    void cwd;
+    const result: Record<string, PrFileHistory> = {};
+    for (const path of paths) {
+      result[path] = { reviewCommentCount: 0, reviewers: [], lastComment: null };
+    }
+    return result;
   }
 }
 

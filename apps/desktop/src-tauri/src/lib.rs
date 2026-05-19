@@ -375,6 +375,7 @@ pub fn run() {
             commands::gitlab::gl_current_user,
             commands::gitlab::gl_reviewer_candidates,
             commands::gitlab::gl_mr_files,
+            commands::gitlab::gl_mr_create_discussion,
             // ── Credentials (OS keychain) ──
             commands::credentials::set_credential,
             commands::credentials::get_credential,
@@ -395,6 +396,8 @@ pub fn run() {
             commands::bitbucket::bb_pr_files,
             commands::bitbucket::bb_current_user,
             commands::bitbucket::bb_reviewer_candidates,
+            commands::bitbucket::bb_pr_ci_checks,
+            commands::bitbucket::bb_convert_draft_to_ready,
             // ── MCP catalog ──
             commands::mcp_catalog::mcp_detect_configs,
             commands::mcp_catalog::mcp_read_config,

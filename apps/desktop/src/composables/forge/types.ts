@@ -25,6 +25,7 @@ import type {
   PrFileHistory,
   ReviewerCandidate,
 } from "../../utils/backend";
+import type { Account } from "../useAccounts";
 
 // ─── Re-exports pour les consommateurs du module forge ──────────────────────
 export type {
@@ -39,6 +40,7 @@ export type {
   PrHotspot,
   PrFileHistory,
   ReviewerCandidate,
+  Account,
 };
 
 // ─── Options / Inputs ───────────────────────────────────────────────────────
@@ -83,6 +85,18 @@ export interface ForgeProvider {
   /** Retourne true si l'URL remote appartient à ce forge. */
   detectFromRemote(remoteUrl: string): boolean;
 
+  /**
+   * Bind a specific Account to this provider instance.
+   * When set, the provider uses the associated credential (tokenKey / username)
+   * instead of the default environment / keychain lookup.
+   * Pass `null` to revert to the default credential resolution.
+   *
+   * v2.14: stored in-memory on each provider. Deeper wiring into backend
+   * commands (e.g. passing workspace from account.tokenKey to Bitbucket calls)
+   * is a follow-up for each individual forge.
+   */
+  setAccount(account: Account | null): void;
+
   // ── Discovery ─────────────────────────────────────────────────────────────
 
   /** Login de l'utilisateur courant (pour filtrage Assigned to me). */
@@ -125,9 +139,13 @@ export interface ForgeProvider {
 
   createComment(cwd: string, prNumber: number, params: CreatePrCommentParams): Promise<PrReviewComment>;
 
-  updateComment(cwd: string, commentId: number, body: string): Promise<void>;
+  /**
+   * `prNumber` est requis par GitLab (MR iid nécessaire en plus du note_id)
+   * et Bitbucket (PR id nécessaire en plus du comment_id). Ignoré sur GitHub.
+   */
+  updateComment(cwd: string, commentId: number, body: string, prNumber?: number): Promise<void>;
 
-  deleteComment(cwd: string, commentId: number): Promise<void>;
+  deleteComment(cwd: string, commentId: number, prNumber?: number): Promise<void>;
 
   // ── Reviews ───────────────────────────────────────────────────────────────
 
@@ -135,7 +153,12 @@ export interface ForgeProvider {
 
   submitReview(cwd: string, prNumber: number, opts: SubmitReviewOptions): Promise<PrReview>;
 
-  // ── Intelligence (GitHub-specific, stubs on other forges) ─────────────────
+  // ── Intelligence (forge-agnostique depuis v2.14) ───────────────────────────
+  //
+  // getConflictPreview et getHotspots s'appuient sur des données git locales
+  // (git merge-tree, git log --merges) — implémentables sur tous les forges.
+  // getFileHistory requiert une API forge (review comments) et est implémentée
+  // spécifiquement par chaque provider.
 
   getConflictPreview(cwd: string, prNumber: number): Promise<PrConflictPreview>;
 

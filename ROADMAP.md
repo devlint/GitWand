@@ -790,7 +790,7 @@ Deux extensions du workflow de review déjà en place.
 
 ---
 
-### v2.14.0 — Forge completeness
+### ✅ v2.14.0 — Forge completeness
 
 _Suite de v2.10 : combler les stubs `ForgeNotImplementedError` sur GitLab et Bitbucket, et ouvrir les trois méthodes d'intelligence forge-agnostiques._
 

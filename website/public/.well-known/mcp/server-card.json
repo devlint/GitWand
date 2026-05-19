@@ -2,7 +2,7 @@
   "schemaVersion": "1.0",
   "serverInfo": {
     "name": "GitWand MCP Server",
-    "version": "2.13.1",
+    "version": "2.14.0",
     "description": "Smart Git conflict resolution for AI agents — auto-resolves trivial merge conflicts and guides AI through complex ones with a full DecisionTrace.",
     "homepage": "https://gitwand.devlint.fr/guide/mcp",
     "license": "MIT",

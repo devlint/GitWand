@@ -15,10 +15,7 @@ import {
   ghPrDeleteComment,
   ghPrListReviews,
   ghPrSubmitReview,
-  ghPrConflictPreview,
-  ghPrHotspots,
   gitFileCount,
-  ghPrFileHistory,
   gitRemoteInfo,
   type PullRequest,
   type PullRequestDetail,
@@ -38,6 +35,7 @@ import {
 import PrInlineDiff from "./PrInlineDiff.vue";
 import PrReviewModal from "./PrReviewModal.vue";
 import PrIntelligencePanel from "./PrIntelligencePanel.vue";
+import { forgeFromRemoteInfo, githubProvider } from "../composables/forge/useForge";
 import type { DiffMode } from "../utils/diffMode";
 import { getPersistedDiffMode } from "../utils/diffMode";
 
@@ -132,6 +130,11 @@ const mergeReadiness = computed<{ ready: boolean; reason: string } | null>(() =>
   if (hasChangesRequested) reasons.push("des modifications demandées");
   return { ready: false, reason: `En attente de : ${reasons.join(", ")}.` };
 });
+
+/** Active ForgeProvider — derived from remote once loaded, github as fallback. */
+const forge = computed(() =>
+  remote.value ? forgeFromRemoteInfo(remote.value) : githubProvider,
+);
 
 const isGitHub = computed(() => remote.value?.provider === "github");
 const hasDetail = computed(() => !!selectedPr.value);
@@ -399,7 +402,7 @@ async function loadConflictPreview() {
   conflictLoading.value = true;
   conflictError.value = null;
   try {
-    conflictPreview.value = await ghPrConflictPreview(props.cwd, selectedPr.value.number);
+    conflictPreview.value = await forge.value.getConflictPreview(props.cwd, selectedPr.value.number);
   } catch (err: any) {
     conflictError.value = err.message;
   } finally {
@@ -412,7 +415,7 @@ async function loadHotspots() {
   hotspotsLoading.value = true;
   try {
     const paths = prDiffFiles.value.map((f) => f.path);
-    hotspots.value = await ghPrHotspots(props.cwd, paths);
+    hotspots.value = await forge.value.getHotspots(props.cwd, paths);
   } catch { /* silent */ } finally {
     hotspotsLoading.value = false;
   }
@@ -423,7 +426,7 @@ async function loadFileHistory() {
   fileHistoryLoading.value = true;
   try {
     const paths = prDiffFiles.value.map((f) => f.path);
-    fileHistory.value = await ghPrFileHistory(props.cwd, paths);
+    fileHistory.value = await forge.value.getFileHistory(props.cwd, paths);
   } catch { /* silent */ } finally {
     fileHistoryLoading.value = false;
   }

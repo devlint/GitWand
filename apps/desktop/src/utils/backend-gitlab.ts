@@ -219,6 +219,44 @@ export async function glReviewerCandidates(cwd: string): Promise<ReviewerCandida
   return tauriInvoke<ReviewerCandidate[]>("gl_reviewer_candidates", { cwd });
 }
 
+/**
+ * Create a diff-line anchored discussion on a MR via the GitLab Discussions API.
+ *
+ * When `path`, `headSha`, and `baseSha` are all provided, the discussion is
+ * anchored to the specific diff line (parité with GitHub inline review comments).
+ * Falls back to a general MR note if position fields are empty.
+ */
+export async function glMrCreateDiscussion(
+  cwd: string,
+  iid: number,
+  body: string,
+  opts: {
+    baseSha?: string;
+    startSha?: string;
+    headSha?: string;
+    oldLine?: number | null;
+    newLine?: number | null;
+    path?: string;
+  } = {},
+): Promise<PrReviewComment> {
+  if (!isTauri()) throw new Error("glMrCreateDiscussion requires Tauri");
+  const raw = await tauriInvoke<Record<string, unknown>>("gl_mr_create_discussion", {
+    cwd,
+    iid,
+    body,
+    baseSha: opts.baseSha ?? "",
+    startSha: opts.startSha ?? opts.baseSha ?? "",
+    headSha: opts.headSha ?? "",
+    oldLine: opts.oldLine ?? null,
+    newLine: opts.newLine ?? null,
+    path: opts.path ?? "",
+  });
+  // The Discussions API returns { id, notes: [{...}], ...}. Extract the first note.
+  const notes = (raw.notes as Record<string, unknown>[] | undefined) ?? [];
+  const note = notes[0] ?? raw;
+  return glNoteToComment(note as Record<string, unknown>);
+}
+
 /** List file paths changed in a MR. */
 export async function glMrFiles(cwd: string, iid: number): Promise<string[]> {
   if (!isTauri()) return [];

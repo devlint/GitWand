@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.14.0] - 2026-05-19
+
+v2.14 closes the remaining `ForgeNotImplementedError` gaps on GitLab and Bitbucket and makes all three intelligence methods (conflict preview, hotspots, file history) forge-agnostic.
+
+### Added
+
+- **GitLab diff-line discussions** — `createComment` now routes to the GitLab Discussions API (`POST /projects/:id/merge_requests/:iid/discussions`) when `path` + `line` are supplied, anchoring the comment to the exact diff line instead of posting a general MR note. New Rust command `gl_mr_create_discussion`; new TS wrapper `glMrCreateDiscussion` in `backend-gitlab.ts`.
+- **Bitbucket CI checks** — `getCIChecks` wired to the Bitbucket Pipelines commit statuses endpoint (`/commit/{sha}/statuses`). The PR's `source.commit.hash` is extracted to form the URL, then each status is mapped to the common `CICheck` shape. New Rust command `bb_pr_ci_checks`; new TS wrapper `bbPrCiChecks`.
+- **Bitbucket draft → ready** — `convertDraftToReady` strips the `"Draft: "` title prefix (case-insensitive) via a `PUT` PR update. New Rust command `bb_convert_draft_to_ready`; new TS wrapper `bbConvertDraftToReady`.
+- **`updateComment` / `deleteComment` on GitLab and Bitbucket** — both methods now fully wired: GitLab via `gl_mr_update_note` / `gl_mr_delete_note`, Bitbucket via `bb_update_comment` / `bb_delete_comment`. `prNumber` added as optional 4th parameter to the `ForgeProvider` interface (required at runtime for non-GitHub providers; ignored on GitHub where comment IDs are globally unique).
+- **`setAccount(account: Account | null): void`** — new method on `ForgeProvider` interface implemented by all three providers; stores an `Account` context in-memory to enable multi-workspace credential resolution (Bitbucket) and multi-profile switching (GitLab, GitHub) without re-authenticating.
+
+### Changed
+
+- **`getConflictPreview` / `getHotspots` — forge-agnostic** — both methods now delegate to the same local-git implementation (`ghPrConflictPreview` / `ghPrHotspots`) in `GitLabProvider` and `BitbucketProvider`. These methods run `git merge-tree` and `git log --merges` locally — no forge API required. The `forge.name === "github"` guard that was previously needed in consumers is no longer necessary.
+- **`PullRequestPanel.vue` — forge bypass fixed** — the panel now uses `forge.value.getConflictPreview`, `forge.value.getHotspots`, and `forge.value.getFileHistory` through the resolved `ForgeProvider` instead of calling `gh*` functions directly.
+
+### Technical
+
+- `ForgeNotImplementedError` import removed from `GitLabProvider` and `BitbucketProvider` — all stubs replaced; no remaining `throw new ForgeNotImplementedError(…)` in either provider.
+- `PrFileHistory` zeroed stubs corrected: `{ reviewCommentCount: 0, reviewers: [], lastComment: null }` — matches the actual interface shape.
+- `CreatePrCommentParams.diff_hunk` reference removed from `GitLabProvider.createComment` — `diff_hunk` is not part of the interface; condition simplified to `params.path && params.line != null`.
+- 128 tests green; TypeScript strict mode — 0 errors.
+
 ## [2.13.0] - 2026-05-18
 
 v2.13 extends the AI commit workflow with named system-prompt presets and adds inline code suggestions directly in PR diffs.

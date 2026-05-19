@@ -106,9 +106,9 @@ const totalAccounts = computed(() => accounts.value.length);
     <!-- ── Empty state ── -->
     <div v-if="totalAccounts === 0 && !showForm" class="sa-empty">
       <svg width="36" height="36" viewBox="0 0 36 36" fill="none" stroke="currentColor" stroke-width="1.4">
-        <circle cx="13" cy="11" r="5.5"/>
-        <path d="M2 32c0-6.07 4.93-11 11-11s11 4.93 11 11" stroke-linecap="round"/>
-        <path d="M29 16v10m-5-5h10" stroke-linecap="round"/>
+        <circle cx="13" cy="11" r="5.5" />
+        <path d="M2 32c0-6.07 4.93-11 11-11s11 4.93 11 11" stroke-linecap="round" />
+        <path d="M29 16v10m-5-5h10" stroke-linecap="round" />
       </svg>
       <p>{{ t('settings.accountsEmpty') }}</p>
     </div>
@@ -118,12 +118,8 @@ const totalAccounts = computed(() => accounts.value.length);
       <div class="sa-group">
         <div class="sa-group-title">{{ forgeLabel[forge] }}</div>
         <div class="sa-list">
-          <div
-            v-for="acc in accountsByForge[forge]"
-            :key="acc.id"
-            class="sa-row"
-            :class="{ 'sa-row--active': activeAccount(forge)?.id === acc.id }"
-          >
+          <div v-for="acc in accountsByForge[forge]" :key="acc.id" class="sa-row"
+            :class="{ 'sa-row--active': activeAccount(forge)?.id === acc.id }">
             <div class="sa-row-left">
               <span class="sa-name">{{ acc.label }}</span>
               <span class="sa-user">@{{ acc.username }}</span>
@@ -132,11 +128,7 @@ const totalAccounts = computed(() => accounts.value.length);
               <span v-if="activeAccount(forge)?.id === acc.id" class="sa-badge">
                 {{ t('settings.accountsActiveBadge') }}
               </span>
-              <button
-                v-else
-                class="sa-link-btn"
-                @click="setActiveAccount(forge, acc.id)"
-              >
+              <button v-else class="sa-link-btn" @click="setActiveAccount(forge, acc.id)">
                 {{ t('settings.accountsSetActive') }}
               </button>
               <button class="sa-link-btn sa-link-btn--danger" @click="onRemove(acc.id)">
@@ -209,8 +201,9 @@ const totalAccounts = computed(() => accounts.value.length);
     <!-- ── Add button ── -->
     <div v-if="!showForm" class="sa-add">
       <button class="sa-ghost-btn" @click="openForm">
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
-          <path d="M6 1v10M1 6h10"/>
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8"
+          stroke-linecap="round">
+          <path d="M6 1v10M1 6h10" />
         </svg>
         {{ t('settings.accountsAdd') }}
       </button>
@@ -241,7 +234,11 @@ const totalAccounts = computed(() => accounts.value.length);
 }
 
 /* ── Group (per forge) ── */
-.sa-group { display: flex; flex-direction: column; gap: 8px; }
+.sa-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
 
 .sa-group-title {
   font-size: 11px;
@@ -252,7 +249,11 @@ const totalAccounts = computed(() => accounts.value.length);
 }
 
 /* ── Account rows ── */
-.sa-list { display: flex; flex-direction: column; gap: 4px; }
+.sa-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
 
 .sa-row {
   display: flex;
@@ -261,7 +262,7 @@ const totalAccounts = computed(() => accounts.value.length);
   padding: 10px 12px;
   border-radius: var(--radius-sm, 6px);
   background: var(--color-bg, #1e1e1e);
-  border: 1px solid var(--color-border, rgba(255,255,255,0.08));
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
   gap: 12px;
 }
 
@@ -318,10 +319,17 @@ const totalAccounts = computed(() => accounts.value.length);
   text-underline-offset: 2px;
 }
 
-.sa-link-btn:hover { color: var(--color-text, #eee); }
+.sa-link-btn:hover {
+  color: var(--color-text, #eee);
+}
 
-.sa-link-btn--danger { color: var(--color-danger, #e55); }
-.sa-link-btn--danger:hover { color: var(--color-danger-light, #f77); }
+.sa-link-btn--danger {
+  color: var(--color-danger, #e55);
+}
+
+.sa-link-btn--danger:hover {
+  color: var(--color-danger-light, #f77);
+}
 
 /* ── Add-account form ── */
 .sa-form {
@@ -330,8 +338,7 @@ const totalAccounts = computed(() => accounts.value.length);
   gap: 14px;
   padding: 16px;
   border-radius: var(--radius-md, 8px);
-  background: var(--color-bg, #1e1e1e);
-  border: 1px solid var(--color-border, rgba(255,255,255,0.08));
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
 }
 
 .sa-form-title {
@@ -362,18 +369,22 @@ const totalAccounts = computed(() => accounts.value.length);
   box-sizing: border-box;
   padding: 8px 10px;
   font-size: 13px;
-  background: var(--color-bg-subtle, rgba(255,255,255,0.04));
+  background: var(--color-bg-subtle, rgba(255, 255, 255, 0.04));
   color: var(--color-text, #eee);
-  border: 1px solid var(--color-border, rgba(255,255,255,0.1));
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.1));
   border-radius: var(--radius-sm, 5px);
   outline: none;
   transition: border-color 0.15s;
 }
 
 .sa-input:focus,
-.sa-select:focus { border-color: var(--color-accent, #0a84ff); }
+.sa-select:focus {
+  border-color: var(--color-accent, #0a84ff);
+}
 
-.sa-input::placeholder { color: var(--color-text-muted, #666); }
+.sa-input::placeholder {
+  color: var(--color-text-muted, #666);
+}
 
 .sa-select {
   cursor: pointer;
@@ -394,15 +405,24 @@ const totalAccounts = computed(() => accounts.value.length);
 .sa-note code {
   font-family: monospace;
   font-size: 11px;
-  background: rgba(255,255,255,0.07);
+  background: rgba(255, 255, 255, 0.07);
   padding: 1px 5px;
   border-radius: 3px;
 }
 
 /* ── Messages ── */
-.sa-msg { font-size: 12px; margin: 0; }
-.sa-msg--error { color: var(--color-danger, #e55); }
-.sa-msg--ok { color: var(--color-success, #4c4); }
+.sa-msg {
+  font-size: 12px;
+  margin: 0;
+}
+
+.sa-msg--error {
+  color: var(--color-danger, #e55);
+}
+
+.sa-msg--ok {
+  color: var(--color-success, #4c4);
+}
 
 /* ── Form footer ── */
 .sa-form-footer {
@@ -421,7 +441,7 @@ const totalAccounts = computed(() => accounts.value.length);
   font-size: 12px;
   border-radius: var(--radius-sm, 5px);
   background: transparent;
-  border: 1px solid var(--color-border, rgba(255,255,255,0.12));
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.12));
   color: var(--color-text-muted, #aaa);
   cursor: pointer;
   transition: border-color 0.12s, color 0.12s;
@@ -432,7 +452,10 @@ const totalAccounts = computed(() => accounts.value.length);
   color: var(--color-text, #eee);
 }
 
-.sa-ghost-btn:disabled { opacity: 0.4; cursor: default; }
+.sa-ghost-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
 
 .sa-primary-btn {
   padding: 6px 16px;
@@ -446,9 +469,17 @@ const totalAccounts = computed(() => accounts.value.length);
   transition: opacity 0.12s;
 }
 
-.sa-primary-btn:hover { opacity: 0.88; }
-.sa-primary-btn:disabled { opacity: 0.4; cursor: default; }
+.sa-primary-btn:hover {
+  opacity: 0.88;
+}
+
+.sa-primary-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
 
 /* ── Add row ── */
-.sa-add { display: flex; }
+.sa-add {
+  display: flex;
+}
 </style>

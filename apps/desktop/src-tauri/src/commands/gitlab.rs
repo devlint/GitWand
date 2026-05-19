@@ -758,3 +758,72 @@ pub(crate) fn gl_mr_files(cwd: String, iid: i64) -> Result<Vec<String>, String> 
         .filter_map(|d| d.get("new_path").and_then(|v| v.as_str()).map(String::from))
         .collect())
 }
+
+/// Create a diff-line anchored discussion on a MR via the GitLab Discussions API.
+///
+/// This provides parité with GitHub's inline review comment anchoring.
+/// When `path`, `head_sha`, `base_sha`, and `start_sha` are all non-empty, a
+/// position object is included so the discussion is anchored to the diff line.
+/// When they are empty, falls back to a general MR note.
+///
+/// GitLab Discussions API:
+///   POST /projects/:fullpath/merge_requests/:iid/discussions
+///   Body: { body, position: { base_sha, start_sha, head_sha, position_type,
+///            new_path, new_line, old_path, old_line } }
+#[tauri::command]
+pub(crate) fn gl_mr_create_discussion(
+    cwd: String,
+    iid: i64,
+    body: String,
+    base_sha: String,
+    start_sha: String,
+    head_sha: String,
+    old_line: Option<i64>,
+    new_line: Option<i64>,
+    path: String,
+) -> Result<serde_json::Value, String> {
+    let endpoint = format!("projects/:fullpath/merge_requests/{}/discussions", iid);
+
+    // Build args for `glab api -X POST`.
+    let mut args: Vec<String> = vec![
+        "api".to_string(),
+        "-X".to_string(), "POST".to_string(),
+        endpoint.clone(),
+        "-f".to_string(), format!("body={}", body),
+    ];
+
+    // Attach diff-line position when we have enough context.
+    let has_position = !base_sha.is_empty() && !head_sha.is_empty() && !path.is_empty();
+    if has_position {
+        args.extend([
+            "-f".to_string(), format!("position[base_sha]={}", base_sha),
+            "-f".to_string(), format!("position[start_sha]={}", start_sha),
+            "-f".to_string(), format!("position[head_sha]={}", head_sha),
+            "-f".to_string(), "position[position_type]=text".to_string(),
+            "-f".to_string(), format!("position[new_path]={}", path),
+            "-f".to_string(), format!("position[old_path]={}", path),
+        ]);
+        if let Some(nl) = new_line {
+            args.extend(["-f".to_string(), format!("position[new_line]={}", nl)]);
+        }
+        if let Some(ol) = old_line {
+            args.extend(["-f".to_string(), format!("position[old_line]={}", ol)]);
+        }
+    }
+
+    let output = hidden_cmd("glab")
+        .args(&args)
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("glab api create discussion: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "gl create discussion failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    serde_json::from_str(stdout.trim()).map_err(|e| format!("Parse discussion: {}", e))
+}

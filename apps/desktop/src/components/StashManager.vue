@@ -161,7 +161,7 @@ watch(() => props.cwd, loadStashes);
     @close="emit('close')"
   >
     <template #title-icon>
-      <span class="sm-title-icon" aria-hidden="true">
+      <span class="bm-title-icon" aria-hidden="true">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
           <path
             d="M3 7l9-4 9 4-9 4-9-4z"
@@ -290,17 +290,7 @@ watch(() => props.cwd, loadStashes);
 </template>
 
 <style scoped>
-.sm-title-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: var(--radius-pill);
-  background: var(--color-accent-soft, rgba(124, 58, 237, 0.14));
-  color: var(--color-accent);
-  flex-shrink: 0;
-}
+/* .sm-title-icon removed — use global .bm-title-icon from BaseModal instead */
 
 .sm-header-actions {
   display: inline-flex;

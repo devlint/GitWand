@@ -6,6 +6,7 @@ import { isTauri, tauriInvoke } from "./backend-core";
 import {
   PullRequest,
   PullRequestDetail,
+  CICheck,
   PrReviewComment,
   ReviewerCandidate,
 } from "./backend-pr";
@@ -148,6 +149,18 @@ export async function bbApprovePr(cwd: string, prId: number): Promise<void> {
 export async function bbPrFiles(cwd: string, prId: number): Promise<string[]> {
   if (!isTauri()) return [];
   return tauriInvoke<string[]>("bb_pr_files", { cwd, prId });
+}
+
+/** Get CI status checks for a PR via Bitbucket Pipelines commit statuses. */
+export async function bbPrCiChecks(cwd: string, prId: number): Promise<CICheck[]> {
+  if (!isTauri()) return [];
+  return tauriInvoke<CICheck[]>("bb_pr_ci_checks", { cwd, prId });
+}
+
+/** Convert a "Draft: …" Bitbucket PR to ready-for-review (strips title prefix). */
+export async function bbConvertDraftToReady(cwd: string, prId: number): Promise<void> {
+  if (!isTauri()) throw new Error("bbConvertDraftToReady requires Tauri");
+  return tauriInvoke<void>("bb_convert_draft_to_ready", { cwd, prId });
 }
 
 /** Get the current Bitbucket user (from stored credentials). */

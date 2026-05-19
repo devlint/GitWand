@@ -845,3 +845,99 @@ pub(crate) fn bb_reviewer_candidates(cwd: String) -> Result<Vec<ReviewerCandidat
     candidates.sort_by(|a, b| a.login.to_lowercase().cmp(&b.login.to_lowercase()));
     Ok(candidates)
 }
+
+/// Get CI status checks for a PR via Bitbucket Pipelines commit statuses endpoint.
+///
+/// Endpoint: GET /2.0/repositories/{ws}/{slug}/commit/{sha}/statuses
+/// The head commit SHA is read from the PR's `source.commit.hash` field.
+#[tauri::command]
+pub(crate) fn bb_pr_ci_checks(cwd: String, pr_id: i64) -> Result<Vec<CICheck>, String> {
+    let (workspace, slug) = parse_workspace_slug(&cwd)?;
+    let (username, app_password) = get_bb_creds(&cwd)?;
+    let auth = basic_auth_header(&username, &app_password);
+
+    // Step 1: get the PR to find the head commit SHA.
+    let pr_url = format!("{}/pullrequests/{}", repo_api(&workspace, &slug), pr_id);
+    let pr = bb_curl("GET", &pr_url, None, &auth)?;
+    let head_sha = jdeep(&pr, "source", "commit", "hash");
+    if head_sha.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Step 2: fetch commit statuses.
+    let url = format!(
+        "https://api.bitbucket.org/2.0/repositories/{}/{}/commit/{}/statuses?pagelen=30",
+        workspace, slug, head_sha
+    );
+    let resp = bb_curl("GET", &url, None, &auth).unwrap_or(serde_json::Value::Null);
+    let values = resp
+        .get("values")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let checks: Vec<CICheck> = values
+        .iter()
+        .map(|s| {
+            // Bitbucket status states: SUCCESSFUL, FAILED, INPROGRESS, STOPPED
+            let bb_state = js(s, "state");
+            let conclusion = match bb_state.as_str() {
+                "SUCCESSFUL" => "success".to_string(),
+                "FAILED"     => "failure".to_string(),
+                "STOPPED"    => "cancelled".to_string(),
+                _            => "pending".to_string(),
+            };
+            let status = if bb_state == "INPROGRESS" {
+                "in_progress".to_string()
+            } else {
+                "completed".to_string()
+            };
+            CICheck {
+                name: js(s, "name"),
+                status,
+                conclusion,
+                url: {
+                    let u = jnested(s, "url", "href");
+                    if u.is_empty() { js(s, "url") } else { u }
+                },
+            }
+        })
+        .collect();
+
+    Ok(checks)
+}
+
+/// Convert a "Draft: …" Bitbucket PR to ready-for-review by stripping the prefix.
+///
+/// Bitbucket has no native draft concept — the convention is a "Draft: " title
+/// prefix. This command strips it via a PUT update on the PR.
+#[tauri::command]
+pub(crate) fn bb_convert_draft_to_ready(cwd: String, pr_id: i64) -> Result<(), String> {
+    let (workspace, slug) = parse_workspace_slug(&cwd)?;
+    let (username, app_password) = get_bb_creds(&cwd)?;
+    let auth = basic_auth_header(&username, &app_password);
+
+    // Step 1: get current title.
+    let pr_url = format!("{}/pullrequests/{}", repo_api(&workspace, &slug), pr_id);
+    let pr = bb_curl("GET", &pr_url, None, &auth)?;
+    let title = js(&pr, "title");
+
+    // Step 2: strip "Draft: " prefix (case-insensitive).
+    let ready_title = if title.to_lowercase().starts_with("draft: ") {
+        title[7..].to_string()
+    } else if title.to_lowercase().starts_with("draft:") {
+        title[6..].trim_start().to_string()
+    } else {
+        // Already not a draft — nothing to do.
+        return Ok(());
+    };
+
+    if ready_title.is_empty() {
+        return Err("Cannot remove 'Draft:' prefix — resulting title would be empty.".to_string());
+    }
+
+    // Step 3: PATCH the title via PUT (Bitbucket uses PUT for PR updates).
+    let body = serde_json::json!({ "title": ready_title }).to_string();
+    bb_curl("PUT", &pr_url, Some(&body), &auth)?;
+    Ok(())
+}

@@ -51,10 +51,18 @@ import type {
   PrHotspot,
   PrFileHistory,
   ReviewerCandidate,
+  Account,
 } from "./types";
 
 export class GitHubProvider implements ForgeProvider {
   readonly name: ForgeName = "github";
+
+  /** Active account — auth is managed by `gh` CLI; field stored for API completeness. */
+  private _account: Account | null = null;
+
+  setAccount(account: Account | null): void {
+    this._account = account;
+  }
 
   detectFromRemote(remoteUrl: string): boolean {
     return remoteUrl.includes("github.com");
@@ -126,11 +134,13 @@ export class GitHubProvider implements ForgeProvider {
     return ghPrCreateComment(cwd, prNumber, params);
   }
 
-  updateComment(cwd: string, commentId: number, body: string): Promise<void> {
+  updateComment(cwd: string, commentId: number, body: string, _prNumber?: number): Promise<void> {
+    // _prNumber is ignored on GitHub — the comment_id is globally unique.
     return ghPrUpdateComment(cwd, commentId, body);
   }
 
-  deleteComment(cwd: string, commentId: number): Promise<void> {
+  deleteComment(cwd: string, commentId: number, _prNumber?: number): Promise<void> {
+    // _prNumber is ignored on GitHub — the comment_id is globally unique.
     return ghPrDeleteComment(cwd, commentId);
   }
 

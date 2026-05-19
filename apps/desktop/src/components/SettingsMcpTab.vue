@@ -12,6 +12,8 @@
  */
 
 import { ref, computed, onMounted } from "vue";
+import BaseModal from "./BaseModal.vue";
+import { useI18n } from "../composables/useI18n";
 import {
   useMcpRegistry,
   buildInstallFragment,
@@ -30,6 +32,8 @@ import {
 } from "../utils/backend";
 
 const props = defineProps<{ cwd?: string }>();
+
+const { t } = useI18n();
 
 const { loading, error: registryError, loaded, load, refresh, filteredServers, findById } =
   useMcpRegistry();
@@ -161,32 +165,32 @@ function togglePath(path: string) {
 }
 
 const installFragmentPreview = computed<string>(() => {
-  const t = installTarget.value;
-  if (!t) return "";
-  if (t.type === "gitwand") return gitwandFragment();
-  if (t.type === "registry") return buildInstallFragment(t.server);
-  if (t.type === "package") return JSON.stringify({ command: "npx", args: ["-y", t.identifier] });
-  if (t.type === "http") return JSON.stringify({ url: t.url });
+  const target = installTarget.value;
+  if (!target) return "";
+  if (target.type === "gitwand") return gitwandFragment();
+  if (target.type === "registry") return buildInstallFragment(target.server);
+  if (target.type === "package") return JSON.stringify({ command: "npx", args: ["-y", target.identifier] });
+  if (target.type === "http") return JSON.stringify({ url: target.url });
   return "";
 });
 
 const installKey = computed<string>(() => {
-  const t = installTarget.value;
-  if (!t) return "";
-  if (t.type === "gitwand") return GITWAND_KEY;
-  if (t.type === "registry") return serverInstallKey(t.server);
-  if (t.type === "package") return t.identifier.replace(/^@[^/]+\//, "");
-  if (t.type === "http") return new URL(t.url).hostname.replace(/\./g, "-");
+  const target = installTarget.value;
+  if (!target) return "";
+  if (target.type === "gitwand") return GITWAND_KEY;
+  if (target.type === "registry") return serverInstallKey(target.server);
+  if (target.type === "package") return target.identifier.replace(/^@[^/]+\//, "");
+  if (target.type === "http") return new URL(target.url).hostname.replace(/\./g, "-");
   return "server";
 });
 
 const installTitle = computed<string>(() => {
-  const t = installTarget.value;
-  if (!t) return "";
-  if (t.type === "gitwand") return "@gitwand/mcp";
-  if (t.type === "registry") return t.server.name || t.server.id;
-  if (t.type === "package") return t.identifier;
-  if (t.type === "http") return t.url;
+  const target = installTarget.value;
+  if (!target) return "";
+  if (target.type === "gitwand") return "@gitwand/mcp";
+  if (target.type === "registry") return target.server.name || target.server.id;
+  if (target.type === "package") return target.identifier;
+  if (target.type === "http") return target.url;
   return "";
 });
 
@@ -250,10 +254,10 @@ function shortId(id: string): string {
         </svg>
         <div class="sm-feature-meta">
           <span class="sm-feature-name">@gitwand/mcp</span>
-          <span class="sm-feature-publisher">by Devlint · Official · npm · stdio</span>
+          <span class="sm-feature-publisher">{{ t('settings.mcp.featurePublisher') }}</span>
           <span class="sm-feature-desc">
-            Expose GitWand's conflict resolution, repo status and PR tools to any MCP-compatible AI agent.
-            <template v-if="props.cwd"> Install will include <code>--cwd {{ props.cwd }}</code>.</template>
+            {{ t('settings.mcp.featureDesc') }}
+            <template v-if="props.cwd"> {{ t('settings.mcp.featureCwdHint', props.cwd) }}</template>
           </span>
         </div>
       </div>
@@ -262,8 +266,8 @@ function shortId(id: string): string {
           <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6l3 3 5-5"/></svg>
           {{ pluralConfig(gitwandInstalledConfigs.length) }}
         </span>
-        <button v-if="gitwandInstalledConfigs.length" class="sm-uninstall-btn" @click="uninstallGitwand">Remove</button>
-        <button v-else class="sm-install-btn sm-install-btn--accent" @click="openInstall({ type: 'gitwand' })">Install</button>
+        <button v-if="gitwandInstalledConfigs.length" class="sm-uninstall-btn" @click="uninstallGitwand">{{ t('settings.mcp.featureRemove') }}</button>
+        <button v-else class="sm-install-btn sm-install-btn--accent" @click="openInstall({ type: 'gitwand' })">{{ t('settings.mcp.featureInstall') }}</button>
       </div>
     </div>
 
@@ -287,7 +291,7 @@ function shortId(id: string): string {
           v-model="rawInput"
           class="sm-search"
           type="text"
-          placeholder="Search servers, paste a URL or an npm package name…"
+          :placeholder="t('settings.mcp.searchPlaceholder')"
           @keydown.enter="inputMode !== 'search' && handleDirectInstall()"
         />
         <button
@@ -295,9 +299,9 @@ function shortId(id: string): string {
           class="sm-install-btn sm-input-action-btn"
           @click="handleDirectInstall"
         >
-          <template v-if="inputMode === 'url' && !urlResolvedServer">Add HTTP server</template>
-          <template v-else-if="inputMode === 'url' && urlResolvedServer">Install {{ urlResolvedServer.name }}</template>
-          <template v-else-if="inputMode === 'package'">Install package</template>
+          <template v-if="inputMode === 'url' && !urlResolvedServer">{{ t('settings.mcp.searchAddHttp') }}</template>
+          <template v-else-if="inputMode === 'url' && urlResolvedServer">{{ t('settings.mcp.searchInstallServer', urlResolvedServer.name) }}</template>
+          <template v-else-if="inputMode === 'package'">{{ t('settings.mcp.searchInstallPackage') }}</template>
         </button>
         <button v-if="rawInput" class="sm-clear-btn" @click="rawInput = ''" title="Clear">
           <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
@@ -308,14 +312,14 @@ function shortId(id: string): string {
 
       <!-- Hint for URL mode -->
       <p v-if="inputMode === 'url' && !urlResolvedServer && !isHttpServer" class="sm-input-hint">
-        URL non reconnue comme registry MCP — sera installé comme serveur HTTP/SSE.
+        {{ t('settings.mcp.searchUrlUnknown') }}
       </p>
       <p v-if="inputMode === 'url' && urlResolvedServer" class="sm-input-hint sm-input-hint--ok">
-        Serveur trouvé dans le registry : {{ urlResolvedServer.name }}
+        {{ t('settings.mcp.searchUrlFound', urlResolvedServer?.name ?? '') }}
       </p>
 
       <div v-if="inputMode === 'search'" class="sm-searchbar-controls">
-        <span class="sm-section-title">MCP Registry</span>
+        <span class="sm-section-title">{{ t('settings.mcp.searchRegistryTitle') }}</span>
         <button class="sm-refresh-btn" :disabled="loading" @click="refresh" title="Refresh registry">
           <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" :class="{ 'sm-spin': loading }">
             <path d="M13.5 2.5A7 7 0 1 1 4 2.7"/>
@@ -328,7 +332,7 @@ function shortId(id: string): string {
     <!-- ── Loading ── -->
     <div v-if="loading && !loaded" class="sm-loading">
       <div class="sm-spinner"></div>
-      <span>Loading registry…</span>
+      <span>{{ t('settings.mcp.listLoading') }}</span>
     </div>
 
     <!-- ── Registry error ── -->
@@ -343,7 +347,7 @@ function shortId(id: string): string {
 
     <!-- ── Search results (text mode) ── -->
     <div v-else-if="inputMode === 'search' && loaded" class="sm-list">
-      <div v-if="!searchResults.length" class="sm-empty">No servers match "{{ rawInput }}".</div>
+      <div v-if="!searchResults.length" class="sm-empty">{{ t('settings.mcp.listNoMatch', rawInput) }}</div>
       <div v-for="server in searchResults" :key="server.id" class="sm-card">
         <div class="sm-card-body">
           <div class="sm-card-top">
@@ -362,10 +366,10 @@ function shortId(id: string): string {
         <div class="sm-card-action">
           <span v-if="isInstalled(serverInstallKey(server))" class="sm-installed-chip">
             <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6l3 3 5-5"/></svg>
-            Installed
+            {{ t('settings.mcp.listInstalled') }}
           </span>
           <button v-else class="sm-install-btn" @click="openInstall({ type: 'registry', server })">
-            Install
+            {{ t('settings.mcp.featureInstall') }}
           </button>
         </div>
       </div>
@@ -373,118 +377,118 @@ function shortId(id: string): string {
 
     <!-- Placeholder when no input yet and not loading -->
     <div v-else-if="inputMode === 'search' && !loaded && !loading" class="sm-empty">
-      Type to search servers from the MCP registry.
+      {{ t('settings.mcp.listHint') }}
     </div>
 
   </div>
 
   <!-- ── Install modal ── -->
-  <Teleport to="body">
-    <div v-if="installTarget" class="sm-modal-overlay" @click.self="closeInstall">
-      <div class="sm-modal">
-        <div class="sm-modal-header">
-          <span class="sm-modal-title">Install {{ installTitle }}</span>
-          <button class="sm-modal-close" @click="closeInstall">
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
-              <path d="M3 3l8 8M11 3l-8 8"/>
-            </svg>
-          </button>
+  <BaseModal
+    v-if="installTarget"
+    :title="t('settings.mcp.modalTitle', installTitle)"
+    size="md"
+    @close="closeInstall"
+  >
+    <template #title-icon>
+      <span class="bm-title-icon" aria-hidden="true">
+        <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M10 3v10M6 10l4 4 4-4"/><path d="M4 17h12"/>
+        </svg>
+      </span>
+    </template>
+    <!-- Fragment preview -->
+    <div class="sm-modal-section">
+      <span class="sm-modal-label">{{ t('settings.mcp.modalFragmentLabel') }}</span>
+      <pre class="sm-modal-code">{{ JSON.stringify({ [installKey]: JSON.parse(installFragmentPreview) }, null, 2) }}</pre>
+    </div>
+
+    <p class="sm-modal-desc">{{ t('settings.mcp.modalConfigsLabel') }}</p>
+
+    <div class="sm-modal-configs">
+      <div v-for="cfg in configs" :key="cfg.path" class="sm-modal-cfg">
+        <label class="sm-modal-cfg-label">
+          <input type="checkbox" :checked="selectedPaths.includes(cfg.path)" @change="togglePath(cfg.path)" />
+          <span class="sm-modal-cfg-name">{{ cfg.label }}</span>
+          <span class="sm-badge" :class="cfg.exists ? 'sm-badge--type' : 'sm-badge--new'">
+            {{ cfg.exists ? t('settings.mcp.modalCfgExists') : t('settings.mcp.modalCfgWillCreate') }}
+          </span>
+        </label>
+        <span class="sm-modal-cfg-path">{{ cfg.path }}</span>
+      </div>
+
+      <!-- Fallback: browser/dev mode — manual copy -->
+      <template v-if="showManualFallback">
+        <div class="sm-manual-note">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+            <circle cx="8" cy="8" r="6.5"/>
+            <path d="M8 7v4M8 5v.5"/>
+          </svg>
+          <span>
+            <template v-if="!isTauri()">{{ t('settings.mcp.modalDevMode') }}</template>
+            <template v-else>{{ t('settings.mcp.modalNoConfigs') }}</template>
+          </span>
         </div>
 
-        <!-- Fragment preview -->
-        <div class="sm-modal-fragment">
-          <span class="sm-modal-fragment-label">mcpServers entry</span>
+        <div class="sm-manual-fragment">
+          <div class="sm-manual-fragment-header">
+            <span class="sm-modal-label">{{ t('settings.mcp.modalJsonLabel') }}</span>
+            <button class="sm-copy-btn" @click="copyToClipboard(installFragmentPreview, 'fragment')">
+              <template v-if="copiedFragment">
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6l3 3 5-5"/></svg>
+                {{ t('settings.mcp.modalCopied') }}
+              </template>
+              <template v-else>
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="4" y="4" width="6" height="7" rx="1"/>
+                  <path d="M2 8V3a1 1 0 0 1 1-1h5"/>
+                </svg>
+                {{ t('settings.mcp.modalCopyJson') }}
+              </template>
+            </button>
+          </div>
           <pre class="sm-modal-code">{{ JSON.stringify({ [installKey]: JSON.parse(installFragmentPreview) }, null, 2) }}</pre>
         </div>
 
-        <p class="sm-modal-desc">Select config files to update:</p>
-
-        <div class="sm-modal-configs">
-          <div v-for="cfg in configs" :key="cfg.path" class="sm-modal-cfg">
-            <label class="sm-modal-cfg-label">
-              <input type="checkbox" :checked="selectedPaths.includes(cfg.path)" @change="togglePath(cfg.path)" />
-              <span class="sm-modal-cfg-name">{{ cfg.label }}</span>
-              <span class="sm-badge" :class="cfg.exists ? 'sm-badge--type' : 'sm-badge--new'">
-                {{ cfg.exists ? 'exists' : 'will create' }}
-              </span>
-            </label>
-            <span class="sm-modal-cfg-path">{{ cfg.path }}</span>
+        <div class="sm-manual-paths">
+          <p class="sm-manual-paths-label">{{ t('settings.mcp.modalPathsLabel') }}</p>
+          <div v-for="fp in FALLBACK_PATHS" :key="fp.path" class="sm-manual-path-row">
+            <span class="sm-manual-path-label">{{ fp.label }}</span>
+            <code class="sm-manual-path-code">{{ fp.path }}</code>
+            <button class="sm-copy-btn" @click="copyToClipboard(fp.path, fp.path)">
+              <template v-if="copiedPath === fp.path">
+                <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6l3 3 5-5"/></svg>
+                {{ t('settings.mcp.modalCopiedShort') }}
+              </template>
+              <template v-else>
+                <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="4" y="4" width="6" height="7" rx="1"/>
+                  <path d="M2 8V3a1 1 0 0 1 1-1h5"/>
+                </svg>
+              </template>
+            </button>
           </div>
-          <!-- Fallback: browser/dev mode — show paths for manual copy -->
-          <template v-if="showManualFallback">
-            <div class="sm-manual-note">
-              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
-                <circle cx="8" cy="8" r="6.5"/>
-                <path d="M8 7v4M8 5v.5"/>
-              </svg>
-              <span>
-                <template v-if="!isTauri()">Browser / dev mode — config files can't be written automatically. Copy the JSON below and paste it into the right file manually.</template>
-                <template v-else>No config files detected on this machine yet.</template>
-              </span>
-            </div>
-
-            <!-- Fragment to copy -->
-            <div class="sm-manual-fragment">
-              <div class="sm-manual-fragment-header">
-                <span class="sm-modal-fragment-label">JSON to add under <code>mcpServers</code></span>
-                <button class="sm-copy-btn" @click="copyToClipboard(installFragmentPreview, 'fragment')">
-                  <template v-if="copiedFragment">
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6l3 3 5-5"/></svg>
-                    Copied!
-                  </template>
-                  <template v-else>
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                      <rect x="4" y="4" width="6" height="7" rx="1"/>
-                      <path d="M2 8V3a1 1 0 0 1 1-1h5"/>
-                    </svg>
-                    Copy JSON
-                  </template>
-                </button>
-              </div>
-              <pre class="sm-modal-code">{{ JSON.stringify({ [installKey]: JSON.parse(installFragmentPreview) }, null, 2) }}</pre>
-            </div>
-
-            <!-- Known paths to copy -->
-            <div class="sm-manual-paths">
-              <p class="sm-manual-paths-label">Standard config file locations:</p>
-              <div v-for="fp in FALLBACK_PATHS" :key="fp.path" class="sm-manual-path-row">
-                <span class="sm-manual-path-label">{{ fp.label }}</span>
-                <code class="sm-manual-path-code">{{ fp.path }}</code>
-                <button class="sm-copy-btn" @click="copyToClipboard(fp.path, fp.path)">
-                  <template v-if="copiedPath === fp.path">
-                    <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6l3 3 5-5"/></svg>
-                    Copied
-                  </template>
-                  <template v-else>
-                    <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                      <rect x="4" y="4" width="6" height="7" rx="1"/>
-                      <path d="M2 8V3a1 1 0 0 1 1-1h5"/>
-                    </svg>
-                  </template>
-                </button>
-              </div>
-            </div>
-          </template>
         </div>
-
-        <p v-if="installError" class="sm-msg sm-msg--error">{{ installError }}</p>
-        <p v-if="installSuccess" class="sm-msg sm-msg--ok">Installed!</p>
-
-        <div class="sm-modal-footer">
-          <button class="sm-ghost-btn" :disabled="installing" @click="closeInstall">Cancel</button>
-          <button
-            class="sm-primary-btn"
-            :disabled="installing || !selectedPaths.length"
-            @click="confirmInstall"
-          >{{ installing ? 'Installing…' : 'Confirm' }}</button>
-        </div>
-      </div>
+      </template>
     </div>
-  </Teleport>
+
+    <p v-if="installError" class="sm-msg sm-msg--error">{{ installError }}</p>
+    <p v-if="installSuccess" class="sm-msg sm-msg--ok">{{ t('settings.mcp.modalSuccess') }}</p>
+
+    <template #footer>
+      <button class="bm-btn bm-btn--ghost" :disabled="installing" @click="closeInstall">{{ t('common.cancel') }}</button>
+      <button
+        class="bm-btn bm-btn--primary"
+        :disabled="installing || !selectedPaths.length"
+        @click="confirmInstall"
+      >{{ installing ? t('settings.mcp.modalInstalling') : t('settings.mcp.modalConfirm') }}</button>
+    </template>
+  </BaseModal>
 </template>
 
 <style scoped>
 .sm { display: flex; flex-direction: column; gap: 20px; }
+
+/* .sm-title-icon removed — use global .bm-title-icon from BaseModal instead */
 
 /* ── Feature card ── */
 .sm-feature-card {
@@ -683,36 +687,9 @@ function shortId(id: string): string {
 }
 .sm-uninstall-btn:hover { color: var(--color-danger-light, #f77); }
 
-/* ── Modal ── */
-.sm-modal-overlay {
-  position: fixed; inset: 0;
-  background: rgba(0,0,0,0.5);
-  display: flex; align-items: center; justify-content: center;
-  z-index: 9999; backdrop-filter: blur(2px);
-}
-.sm-modal {
-  width: 460px; max-width: 92vw; max-height: 80vh; overflow-y: auto;
-  background: var(--color-bg-secondary, #252525);
-  border: 1px solid var(--color-border-strong, rgba(255,255,255,0.12));
-  border-radius: var(--radius-md, 8px);
-  padding: 20px; display: flex; flex-direction: column; gap: 14px;
-  box-shadow: 0 16px 48px rgba(0,0,0,0.5);
-}
-.sm-modal-header { display: flex; align-items: center; justify-content: space-between; }
-.sm-modal-title { font-size: 14px; font-weight: 600; color: var(--color-text, #eee); }
-.sm-modal-close {
-  display: flex; align-items: center; justify-content: center;
-  width: 24px; height: 24px; padding: 0;
-  background: transparent; border: none;
-  color: var(--color-text-muted, #888); cursor: pointer;
-}
-.sm-modal-close:hover { color: var(--color-text, #eee); }
-
-/* Fragment preview */
-.sm-modal-fragment {
-  display: flex; flex-direction: column; gap: 4px;
-}
-.sm-modal-fragment-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-muted, #888); }
+/* ── Modal body content ── */
+.sm-modal-section { display: flex; flex-direction: column; gap: 4px; }
+.sm-modal-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-muted, #888); }
 .sm-modal-code {
   margin: 0;
   padding: 10px 12px;
@@ -745,30 +722,6 @@ function shortId(id: string): string {
 .sm-msg--error { color: var(--color-danger, #e55); }
 .sm-msg--ok { color: var(--color-success, #3fb950); }
 
-.sm-modal-footer { display: flex; justify-content: flex-end; gap: 8px; }
-
-.sm-ghost-btn {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 6px 14px; font-size: 12px;
-  border-radius: var(--radius-sm, 5px);
-  background: transparent;
-  border: 1px solid var(--color-border, rgba(255,255,255,0.12));
-  color: var(--color-text-muted, #aaa); cursor: pointer;
-  transition: border-color 0.12s, color 0.12s;
-}
-.sm-ghost-btn:hover { border-color: var(--color-text-muted, #888); color: var(--color-text, #eee); }
-.sm-ghost-btn:disabled { opacity: 0.4; cursor: default; }
-
-.sm-primary-btn {
-  padding: 6px 16px; font-size: 12px; font-weight: 600;
-  border-radius: var(--radius-sm, 5px);
-  background: var(--color-accent, #0a84ff);
-  border: none; color: #fff; cursor: pointer;
-  transition: opacity 0.12s;
-}
-.sm-primary-btn:hover { opacity: 0.88; }
-.sm-primary-btn:disabled { opacity: 0.4; cursor: default; }
-
 /* ── Manual fallback (browser mode) ── */
 .sm-manual-note {
   display: flex;
@@ -791,7 +744,7 @@ function shortId(id: string): string {
   align-items: center;
   justify-content: space-between;
 }
-.sm-manual-fragment-header .sm-modal-fragment-label { flex: 1; }
+.sm-manual-fragment-header .sm-modal-label { flex: 1; }
 .sm-manual-fragment-header code {
   font-family: var(--font-mono, monospace);
   font-size: 10px;

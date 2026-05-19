@@ -209,6 +209,13 @@ watch(workspaceDir, (dir) => { if (dir) persistDir(dir); });
     size="lg"
     @close="emit('close')"
   >
+    <template #title-icon>
+      <span class="bm-title-icon" aria-hidden="true">
+        <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 5a2 2 0 0 1 2-2h3l2 2h5a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5z"/>
+        </svg>
+      </span>
+    </template>
   <div class="wp-panel">
 
     <!-- No workspace open -->
@@ -325,6 +332,13 @@ watch(workspaceDir, (dir) => { if (dir) persistDir(dir); });
 
     <!-- Create workspace modal -->
     <BaseModal v-if="showCreateForm" :title="t('workspace.newWorkspace')" @close="showCreateForm = false">
+      <template #title-icon>
+        <span class="bm-title-icon" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M10 4v12M4 10h12"/>
+          </svg>
+        </span>
+      </template>
       <div class="wp-form">
         <label class="wp-form-label">{{ t("workspace.workspaceName") }}</label>
         <input
@@ -356,6 +370,14 @@ watch(workspaceDir, (dir) => { if (dir) persistDir(dir); });
 
     <!-- Add repo modal -->
     <BaseModal v-if="showAddRepo" :title="t('workspace.addRepo')" @close="showAddRepo = false">
+      <template #title-icon>
+        <span class="bm-title-icon" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="5" cy="5" r="1.5"/><circle cx="5" cy="10" r="1.5"/><circle cx="5" cy="15" r="1.5"/>
+            <path d="M8 5h8M8 10h8M8 15h8"/>
+          </svg>
+        </span>
+      </template>
       <div class="wp-form">
         <label class="wp-form-label">{{ t("workspace.repoPath") }}</label>
         <div class="wp-dir-row">
@@ -383,6 +405,8 @@ watch(workspaceDir, (dir) => { if (dir) persistDir(dir); });
 </template>
 
 <style scoped>
+/* .wp-title-icon removed — use global .bm-title-icon from BaseModal instead */
+
 .wp-panel {
   height: 100%;
   display: flex;

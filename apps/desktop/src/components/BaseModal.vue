@@ -294,10 +294,23 @@ onUnmounted(() => {
 }
 </style>
 
-<!-- Non-scoped helpers: canonical button styles usable from modal footer slots.
-     Kept at (0,1,0) specificity so modifier classes (--primary / --danger)
-     can win over the base style without needing !important. -->
+<!-- Non-scoped helpers: canonical button styles usable from modal footer slots
+     and title-icon slots (slot content can't reliably receive scoped attributes).
+     Kept at (0,1,0) specificity so modifier classes can win without !important. -->
 <style>
+/* ── Title icon pill ── */
+.bm-title-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-pill);
+  background: var(--color-accent-soft, rgba(124, 58, 237, 0.14));
+  color: var(--color-accent);
+  flex-shrink: 0;
+}
+
 .bm-btn {
   display: inline-flex;
   align-items: center;
