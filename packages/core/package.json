@@ -65,7 +65,7 @@
     "@types/node": "^25.5.0",
     "tree-sitter-wasms": "^0.1.13",
     "typescript": "^5.4.0",
-    "vitest": "^3.0.0",
+    "vitest": "^4.1.0",
     "web-tree-sitter": "~0.20.7"
   }
 }
