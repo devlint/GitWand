@@ -15,7 +15,7 @@ overrides:
   # is the latest SDK, so it can't be bumped to escape them — pin the patched
   # versions here. The SDK's own ranges (hono ^4.11.4, express ^5.2.1,
   # ajv ^8.17.1) all accept these.
-  hono: "^4.12.23"                 # bumped from 4.12.14 — clears 5 hono CVEs (#6,#7,#9,#10,#11)
+  hono: "^4.12.25"                 # bumped from 4.12.14 — clears 8 hono CVEs (#6,#7,#9,#10,#11 + #41,#42,#43)
   # Security: force tmp >= 0.2.6 (CVE fix). @vscode/vsce pins it lower (0.2.5).
   tmp: "^0.2.7"
   # Security (Dependabot): transitive deps their parents cap below the patch.
@@ -30,3 +30,4 @@ overrides:
   "shell-quote@1": ">=1.8.4"       # GHSA-w7jw-789q-3m8p, critical — newline escaping (#26)
   "form-data@4": ">=4.0.6"         # GHSA-hmw2-7cc7-3qxx, high — CRLF injection (#31)
   "js-yaml@4": ">=4.2.0"           # GHSA-h67p-54hq-rp68, medium — quadratic DoS (#28)
+  "esbuild@>=0.27.3 <0.28.1": ">=0.28.1"   # GHSA-g7r4-m6w7-qqqr, low — dev-server file read; via vite 7 (vitepress 2) (#40)
