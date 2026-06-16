@@ -25,3 +25,8 @@ overrides:
   "ip-address@10": ">=10.2.0"      # via express-rate-limit → MCP SDK (#5)
   "ws@8": ">=8.20.1"               # CVE-2026-45736, via jsdom (#15)
   "brace-expansion@5": ">=5.0.6"   # CVE-2026-45149, v5 only via minimatch@10 (#14)
+  # Dependabot transitive advisories (the three direct deps — dompurify,
+  # markdown-it, vite — are bumped in their own Dependabot PRs #41/#42/#43).
+  "shell-quote@1": ">=1.8.4"       # GHSA-w7jw-789q-3m8p, critical — newline escaping (#26)
+  "form-data@4": ">=4.0.6"         # GHSA-hmw2-7cc7-3qxx, high — CRLF injection (#31)
+  "js-yaml@4": ">=4.2.0"           # GHSA-h67p-54hq-rp68, medium — quadratic DoS (#28)
