@@ -692,6 +692,11 @@ const ptBR: Locale = {
     incomingBranch: "Branch recebido",
     resolveAuto: "Resolver auto",
     resolveAutoLabel: "Resolver conflitos automaticamente",
+    bulkLabel: "Aceitar tudo:",
+    bulkOurs: "Atual",
+    bulkTheirs: "Recebido",
+    bulkBoth: "Ambos",
+    bulkGeneratedWarning: "⚠ Concatenar pode quebrar um arquivo gerado",
     recommended: "recomendado",
     autoResolved: "auto",
     resolvedManually: "Resolvido manualmente",
@@ -1435,6 +1440,9 @@ const ptBR: Locale = {
     // Resolution memory
     memoryApply: "Memória",
     memoryBannerHint: "Regra salva: {0}",
+    memoryApplyAll: "Aplicar regra a {0} hunks",
+    memoryApplyAllPartial: "{0} para revisar",
+    memorizeFileOffer: "Lembrar esta regra para {0}?",
     memorySaveOffer: "Lembrar desta resolução para a próxima vez?",
     memorySave: "Salvar",
     // v2.5 — Auditoria de resolução LLM (LlmTracePanel)

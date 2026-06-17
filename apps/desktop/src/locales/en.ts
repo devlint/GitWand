@@ -705,6 +705,11 @@ const en = {
     incomingBranch: "Incoming branch",
     resolveAuto: "Resolve auto",
     resolveAutoLabel: "Automatically resolve conflicts",
+    bulkLabel: "Accept all:",
+    bulkOurs: "Current",
+    bulkTheirs: "Incoming",
+    bulkBoth: "Both",
+    bulkGeneratedWarning: "⚠ Concatenating may break a generated file",
     recommended: "recommended",
     autoResolved: "auto",
     resolvedManually: "Manually resolved",
@@ -1469,6 +1474,9 @@ const en = {
     // Resolution memory
     memoryApply: "Memory",
     memoryBannerHint: "Saved rule: {0}",
+    memoryApplyAll: "Apply rule to {0} hunks",
+    memoryApplyAllPartial: "{0} to review",
+    memorizeFileOffer: "Remember this rule for {0}?",
     memorySaveOffer: "Remember this resolution for next time?",
     memorySave: "Save",
     // v2.5 LLM resolution audit (LlmTracePanel)

@@ -681,6 +681,11 @@ const zhCN: Locale = {
     incomingBranch: "传入分支",
     resolveAuto: "自动解决",
     resolveAutoLabel: "自动解决冲突",
+    bulkLabel: "全部接受：",
+    bulkOurs: "当前",
+    bulkTheirs: "传入",
+    bulkBoth: "两者",
+    bulkGeneratedWarning: "⚠ 合并可能会破坏生成文件",
     recommended: "推荐",
     autoResolved: "自动",
     resolvedManually: "已手动解决",
@@ -1420,6 +1425,9 @@ const zhCN: Locale = {
     // Resolution memory
     memoryApply: "记忆",
     memoryBannerHint: "已保存规则：{0}",
+    memoryApplyAll: "将规则应用于 {0} 个 hunk",
+    memoryApplyAllPartial: "{0} 待审查",
+    memorizeFileOffer: "为 {0} 记住此规则？",
     memorySaveOffer: "记住此次解决方案以供下次使用？",
     memorySave: "保存",
     // v2.5 — LLM 解决方案审计（LlmTracePanel）

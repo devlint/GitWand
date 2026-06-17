@@ -691,6 +691,11 @@ const es: Locale = {
     incomingBranch: "Rama entrante",
     resolveAuto: "Resolver auto",
     resolveAutoLabel: "Resolver conflictos automáticamente",
+    bulkLabel: "Aceptar todo:",
+    bulkOurs: "Actual",
+    bulkTheirs: "Entrante",
+    bulkBoth: "Ambos",
+    bulkGeneratedWarning: "⚠ Concatenar puede dañar un archivo generado",
     recommended: "recomendado",
     autoResolved: "auto",
     resolvedManually: "Resuelto manualmente",
@@ -1435,6 +1440,9 @@ const es: Locale = {
     // Resolution memory
     memoryApply: "Memoria",
     memoryBannerHint: "Regla guardada: {0}",
+    memoryApplyAll: "Aplicar regla a {0} hunks",
+    memoryApplyAllPartial: "{0} por revisar",
+    memorizeFileOffer: "¿Recordar esta regla para {0}?",
     memorySaveOffer: "¿Recordar esta resolución para la próxima vez?",
     memorySave: "Guardar",
     // v2.5 — Auditoría de resolución LLM (LlmTracePanel)

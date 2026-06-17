@@ -698,6 +698,11 @@ const fr: Locale = {
     incomingBranch: "Branche entrante",
     resolveAuto: "R\u00e9soudre auto",
     resolveAutoLabel: "R\u00e9soudre automatiquement les conflits",
+    bulkLabel: "Tout accepter :",
+    bulkOurs: "Courante",
+    bulkTheirs: "Entrante",
+    bulkBoth: "Les deux",
+    bulkGeneratedWarning: "\u26a0 Concat\u00e9ner peut casser un fichier g\u00e9n\u00e9r\u00e9",
     recommended: "recommand\u00e9",
     autoResolved: "auto",
     resolvedManually: "R\u00e9solu manuellement",
@@ -1447,6 +1452,9 @@ const fr: Locale = {
     // Resolution memory
     memoryApply: "Mémoire",
     memoryBannerHint: "Règle mémorisée : {0}",
+    memoryApplyAll: "Appliquer la règle à {0} hunks",
+    memoryApplyAllPartial: "{0} à vérifier",
+    memorizeFileOffer: "Mémoriser cette règle pour {0} ?",
     memorySaveOffer: "Retenir cette résolution pour la prochaine fois ?",
     memorySave: "Retenir",
     // v2.5 — Trace d'audit LLM (LlmTracePanel)
