@@ -272,6 +272,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::ops::get_conflicted_files,
             commands::ops::get_tree_conflicts,
+            commands::ops::resolve_tree_conflict,
             commands::files::read_file,
             commands::files::write_file,
             commands::files::write_gitwandrc,

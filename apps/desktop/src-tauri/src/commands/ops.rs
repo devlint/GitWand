@@ -2529,6 +2529,48 @@ pub(crate) async fn get_tree_conflicts(cwd: String) -> Result<Vec<crate::types::
     collect_tree_conflicts(&cwd)
 }
 
+// ─── Tree conflict resolution ────────────────────────────────
+
+/// Run a git command (args array, no shell interpolation) in `cwd`, mapping failure to a message.
+fn run_git_checked(cwd: &str, args: &[&str], what: &str) -> Result<(), String> {
+    let output = git_cmd()
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .map_err(|e| format!("Failed to run git {}: {}", what, e))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("git {} failed: {}", what, stderr.trim()));
+    }
+    Ok(())
+}
+
+/// Synchronous implementation — tested directly to avoid async test runtimes.
+fn apply_tree_resolution(cwd: &str, path: &str, choice: &str) -> Result<(), String> {
+    // Guard against path traversal; we still pass the *relative* path to git.
+    let _ = safe_repo_path(cwd, path)?;
+    match choice {
+        "ours" => {
+            run_git_checked(cwd, &["checkout", "--ours", "--", path], "checkout --ours")?;
+            run_git_checked(cwd, &["add", "--", path], "add")?;
+        }
+        "theirs" => {
+            run_git_checked(cwd, &["checkout", "--theirs", "--", path], "checkout --theirs")?;
+            run_git_checked(cwd, &["add", "--", path], "add")?;
+        }
+        "delete" => {
+            run_git_checked(cwd, &["rm", "-f", "--", path], "rm")?;
+        }
+        other => return Err(format!("unknown choice: {}", other)),
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) async fn resolve_tree_conflict(cwd: String, path: String, choice: String) -> Result<(), String> {
+    apply_tree_resolution(&cwd, &path, &choice)
+}
+
 // ─── Git remote info ─────────────────────────────────────────
 
 #[tauri::command]
@@ -2992,6 +3034,34 @@ mod tree_conflict_tests {
         assert!(tc.has_ours, "feature (ours) modified it → stage 2 present");
         assert!(!tc.has_theirs, "main (theirs) deleted it → stage 3 absent");
         assert_eq!(tc.code, "UD");
+    }
+
+    #[test]
+    fn resolve_keep_ours_stages_modified_version() {
+        let repo = TempRepo::new();
+        make_modify_delete(&repo); // feature(ours) modified doomed.txt, main(theirs) deleted it
+        apply_tree_resolution(&repo.cwd(), "doomed.txt", "ours").unwrap();
+        // No longer unmerged:
+        assert!(collect_tree_conflicts(&repo.cwd()).unwrap().iter().all(|c| c.path != "doomed.txt"));
+        // Working tree keeps the modified version:
+        assert_eq!(std::fs::read_to_string(repo.path.join("doomed.txt")).unwrap(), "MODIFIED by feature\n");
+    }
+
+    #[test]
+    fn resolve_delete_removes_the_file() {
+        let repo = TempRepo::new();
+        make_modify_delete(&repo);
+        apply_tree_resolution(&repo.cwd(), "doomed.txt", "delete").unwrap();
+        assert!(collect_tree_conflicts(&repo.cwd()).unwrap().iter().all(|c| c.path != "doomed.txt"));
+        assert!(!repo.path.join("doomed.txt").exists(), "file removed from working tree");
+    }
+
+    #[test]
+    fn resolve_rejects_unknown_choice() {
+        let repo = TempRepo::new();
+        make_modify_delete(&repo);
+        let err = apply_tree_resolution(&repo.cwd(), "doomed.txt", "bogus");
+        assert!(err.is_err(), "unknown choice must error");
     }
 
     #[test]
