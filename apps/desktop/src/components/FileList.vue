@@ -63,14 +63,26 @@ function statusLabel(file: ConflictFile): string {
         @keydown.enter="emit('select', file.path)"
         @keydown.space.prevent="emit('select', file.path)"
       >
-        <div class="file-status-dot" :title="statusLabel(file)" aria-hidden="true" />
-        <div class="file-info">
-          <span class="file-name mono">{{ fileName(file.path) }}</span>
-          <span class="file-dir muted">{{ fileDir(file.path) }}</span>
-        </div>
-        <span class="file-badge" :aria-label="statusLabel(file)">
-          {{ file.result.stats.totalConflicts }}
-        </span>
+        <template v-if="file.tree">
+          <span class="file-status file-status--tree" :title="t('merge.treeBadge')" aria-hidden="true" />
+          <div class="file-info">
+            <span class="file-name mono">{{ fileName(file.path) }}</span>
+            <span class="file-dir muted">{{ fileDir(file.path) }}</span>
+          </div>
+          <span class="file-badge file-badge--tree" :aria-label="t('merge.treeBadge')">
+            {{ t('merge.treeBadge') }}
+          </span>
+        </template>
+        <template v-else>
+          <div class="file-status-dot" :title="statusLabel(file)" aria-hidden="true" />
+          <div class="file-info">
+            <span class="file-name mono">{{ fileName(file.path) }}</span>
+            <span class="file-dir muted">{{ fileDir(file.path) }}</span>
+          </div>
+          <span class="file-badge" :aria-label="statusLabel(file)">
+            {{ file.result.stats.totalConflicts }}
+          </span>
+        </template>
       </li>
     </ul>
   </nav>
@@ -194,6 +206,24 @@ function statusLabel(file: ConflictFile): string {
   background: var(--color-bg);
   padding: 1px 7px;
   border-radius: var(--radius-pill);
+  flex-shrink: 0;
+}
+
+.file-status--tree {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--color-warning, #b8860b);
+}
+
+.file-badge--tree {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--color-warning-bg, rgba(184, 134, 11, 0.15));
+  color: var(--color-warning, #b8860b);
+  font-weight: var(--font-weight-semibold);
   flex-shrink: 0;
 }
 </style>
