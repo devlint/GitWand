@@ -266,6 +266,23 @@ const canResolve = computed(
 
 const hunks = computed(() => props.file.result.hunks);
 
+/** How many of this file's hunks the saved rule can actually resolve. */
+const memoryApplicableCount = computed(() => {
+  const mem = fileMemory.value;
+  if (!mem) return 0;
+  return hunks.value.reduce(
+    (n, h) => (applyMemory(mem, h) !== null ? n + 1 : n),
+    0,
+  );
+});
+
+/** Apply the saved rule to every hunk in the file (one click). */
+function applyMemoryToWholeFile() {
+  if (!fileMemory.value) return;
+  emit("applyFileMemory", props.file.path, fileMemory.value);
+  markUsed(fileMemory.value.id);
+}
+
 // ─── File-level bulk resolution + memorize offer ────────
 /** Strategy offered for memorization after a file-level bulk action. */
 const fileMemoryOfferStrategy = ref<ResolutionStrategy | null>(null);
@@ -671,12 +688,22 @@ onMounted(() => {
       <button class="me-automation-btn me-automation-btn--dismiss" @click="dismissAutomation">{{ t("common.close") }}</button>
     </div>
 
-    <!-- Resolution Memory suggestion banner -->
+    <!-- Resolution Memory suggestion banner (actionable) -->
     <div v-if="fileMemory && !matchingRule" class="me-memory-banner">
       <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
         <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm.75 10.5h-1.5v-1.5h1.5v1.5zm0-3h-1.5V4.5h1.5V8.5z"/>
       </svg>
       <span class="me-memory-text">{{ t("mergeEditor.memoryBannerHint", fileMemory.description) }}</span>
+      <button
+        v-if="memoryApplicableCount > 0"
+        class="me-memory-btn me-memory-btn--save"
+        @click="applyMemoryToWholeFile"
+      >
+        {{ t("mergeEditor.memoryApplyAll", memoryApplicableCount) }}
+      </button>
+      <span v-if="memoryApplicableCount < hunks.length" class="muted">
+        {{ t("mergeEditor.memoryApplyAllPartial", hunks.length - memoryApplicableCount) }}
+      </span>
     </div>
 
     <!-- Memory offer toast (after a manual choice) -->
