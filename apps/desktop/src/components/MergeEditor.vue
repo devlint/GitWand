@@ -701,7 +701,7 @@ onMounted(() => {
       >
         {{ t("mergeEditor.memoryApplyAll", memoryApplicableCount) }}
       </button>
-      <span v-if="memoryApplicableCount < hunks.length" class="muted">
+      <span v-if="memoryApplicableCount > 0 && memoryApplicableCount < hunks.length" class="muted">
         {{ t("mergeEditor.memoryApplyAllPartial", hunks.length - memoryApplicableCount) }}
       </span>
     </div>
