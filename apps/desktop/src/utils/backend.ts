@@ -1898,8 +1898,23 @@ export async function detectMonorepo(cwd: string): Promise<MonorepoInfo> {
       packages: raw.packages,
     };
   }
-  // Dev mode fallback
-  return { isMonorepo: false, manager: "", packages: [] };
+  // Dev mode: real detection via dev-server
+  try {
+    const res = await devFetch(`${DEV_SERVER}/api/detect-monorepo?cwd=${encodeURIComponent(cwd)}`);
+    if (!res.ok) return { isMonorepo: false, manager: "", packages: [] };
+    const raw = await res.json() as {
+      is_monorepo: boolean;
+      manager: string;
+      packages: Array<{ name: string; path: string; version: string }>;
+    };
+    return {
+      isMonorepo: raw.is_monorepo,
+      manager: raw.manager,
+      packages: raw.packages,
+    };
+  } catch {
+    return { isMonorepo: false, manager: "", packages: [] };
+  }
 }
 
 // ─── Terminal Execution (Phase 8.5) ─────────────────────────

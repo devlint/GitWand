@@ -401,6 +401,272 @@ function tcpProbe(host, port, timeoutMs) {
   });
 }
 
+// ── Monorepo detection helpers (mirrors Rust find_workspace_packages) ────────
+
+/**
+ * Extract npm/yarn workspace glob patterns from package.json content and
+ * expand them to MonorepoPackage entries. Mirrors `find_npm_workspace_packages`
+ * and `extract_npm_workspace_globs` in `src/git/parse.rs`.
+ */
+function extractNpmWorkspacePackages(cwdResolved, pkgContent) {
+  let globs = [];
+  try {
+    const pkg = JSON.parse(pkgContent);
+    if (Array.isArray(pkg.workspaces)) {
+      globs = pkg.workspaces;
+    } else if (pkg.workspaces && Array.isArray(pkg.workspaces.packages)) {
+      globs = pkg.workspaces.packages;
+    }
+  } catch { /* malformed JSON — return empty */ }
+
+  const packages = [];
+  for (const pattern of globs) {
+    const noTrail = String(pattern).replace(/\/\*\*?$/, "").replace(/\*$/, "");
+    const baseAbs = join(cwdResolved, noTrail);
+    if (!baseAbs.startsWith(cwdResolved + sep) && baseAbs !== cwdResolved) continue;
+    try {
+      const entries = readdirSync(baseAbs, { withFileTypes: true });
+      for (const e of entries) {
+        if (!e.isDirectory()) continue;
+        const pkgJsonAbs = join(baseAbs, e.name, "package.json");
+        if (!existsSync(pkgJsonAbs)) continue;
+        let name = e.name, version = "";
+        try {
+          const meta = JSON.parse(readFileSync(pkgJsonAbs, "utf-8"));
+          if (meta.name) name = meta.name;
+          if (meta.version) version = meta.version;
+        } catch { /* ignore — use defaults */ }
+        const relPath = `${noTrail}/${e.name}`;
+        packages.push({ name, path: relPath, version });
+      }
+    } catch { /* dir missing */ }
+  }
+  packages.sort((a, b) => a.name.localeCompare(b.name));
+  return packages;
+}
+
+/**
+ * Parse Cargo.toml `[workspace] members` globs and read each member's
+ * Cargo.toml for name/version. Mirrors `find_cargo_packages` in parse.rs.
+ */
+function findCargoPackages(cwdResolved, tomlContent) {
+  const members = parseTomlStringArray(tomlContent, "members");
+  const exclude = parseTomlStringArray(tomlContent, "exclude");
+  const packages = [];
+
+  for (const pattern of members) {
+    const dirs = expandCargoGlob(cwdResolved, pattern);
+    for (const dirRel of dirs) {
+      if (exclude.includes(dirRel)) continue;
+      const absDir = join(cwdResolved, dirRel);
+      if (!absDir.startsWith(cwdResolved + sep) && absDir !== cwdResolved) continue;
+      const memberToml = join(absDir, "Cargo.toml");
+      if (!existsSync(memberToml)) continue;
+      let name = basename(dirRel), version = "";
+      try {
+        const content = readFileSync(memberToml, "utf-8");
+        const n = parseTomlScalar(content, "name");
+        const v = parseTomlScalar(content, "version");
+        if (n) name = n;
+        if (v) version = v;
+      } catch { /* ignore */ }
+      packages.push({ name, path: dirRel, version });
+    }
+  }
+  packages.sort((a, b) => a.name.localeCompare(b.name));
+  return packages;
+}
+
+/** Expand a single Cargo glob like `crates/*` to relative dir paths. */
+function expandCargoGlob(cwdResolved, pattern) {
+  if (pattern.includes("*")) {
+    const base = pattern.replace(/\/\*.*$/, "").replace(/\*.*$/, "");
+    const baseAbs = join(cwdResolved, base);
+    if (!baseAbs.startsWith(cwdResolved + sep) && baseAbs !== cwdResolved) return [];
+    const results = [];
+    try {
+      const entries = readdirSync(baseAbs, { withFileTypes: true });
+      for (const e of entries) {
+        if (e.isDirectory()) {
+          results.push(base ? `${base}/${e.name}` : e.name);
+        }
+      }
+    } catch { /* ignore */ }
+    return results;
+  }
+  // Literal path
+  const abs = join(cwdResolved, pattern);
+  if (!abs.startsWith(cwdResolved + sep) && abs !== cwdResolved) return [];
+  try { return statSync(abs).isDirectory() ? [pattern] : []; } catch { return []; }
+}
+
+/** Parse a `key = "value"` scalar from TOML content. */
+function parseTomlScalar(content, key) {
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("[") || trimmed.startsWith("#")) continue;
+    const eqIdx = trimmed.indexOf("=");
+    if (eqIdx < 0) continue;
+    const k = trimmed.slice(0, eqIdx).trim();
+    if (k !== key) continue;
+    const val = trimmed.slice(eqIdx + 1).trim().replace(/^["']|["']$/g, "");
+    if (val) return val;
+  }
+  return null;
+}
+
+/**
+ * Parse a TOML `key = [ ... ]` (possibly multi-line) array.
+ * Mirrors `parse_toml_string_array` in parse.rs.
+ */
+function parseTomlStringArray(content, key) {
+  const needle = `${key} `;
+  const needle2 = `${key}=`;
+  let startIdx = -1;
+  let offset = 0;
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (
+      (trimmed.startsWith(needle) || trimmed.startsWith(needle2) || trimmed === key) &&
+      trimmed.includes("=")
+    ) {
+      startIdx = offset;
+      break;
+    }
+    offset += line.length + 1;
+  }
+  if (startIdx < 0) return [];
+  const rest = content.slice(startIdx);
+  const afterEq = rest.slice(rest.indexOf("=") + 1).trimStart();
+  if (!afterEq.startsWith("[")) return [];
+
+  let depth = 0, buf = "", found = false;
+  for (const ch of afterEq) {
+    if (ch === "[") {
+      depth++;
+      if (depth === 1) continue;
+    } else if (ch === "]") {
+      depth--;
+      if (depth === 0) { found = true; break; }
+    }
+    if (depth > 0) buf += ch;
+  }
+  if (!found) return [];
+
+  // Strip comments, split on commas
+  const clean = buf.split("\n").map((l) => {
+    const t = l.trim();
+    if (t.startsWith("#")) return "";
+    const ci = t.indexOf("#");
+    return ci >= 0 ? t.slice(0, ci) : t;
+  }).join(" ");
+
+  return clean.split(",")
+    .map((s) => s.trim().replace(/^["']|["']$/g, "").trim())
+    .filter(Boolean);
+}
+
+/**
+ * Parse go.work `use (...)` and `use ./x` directives.
+ * Mirrors `find_go_packages` in parse.rs.
+ */
+function findGoPackages(cwdResolved, goWorkContent) {
+  const packages = [];
+  let inUseBlock = false;
+
+  for (const line of goWorkContent.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed === "use (" || trimmed.startsWith("use (")) {
+      inUseBlock = true;
+      continue;
+    }
+    if (inUseBlock) {
+      if (trimmed === ")") { inUseBlock = false; continue; }
+      if (trimmed && !trimmed.startsWith("//")) {
+        const pkg = goWorkDirToPackage(cwdResolved, trimmed);
+        if (pkg) packages.push(pkg);
+      }
+    } else if (trimmed.startsWith("use ")) {
+      const dir = trimmed.slice(4).trim();
+      if (!dir.startsWith("(")) {
+        const pkg = goWorkDirToPackage(cwdResolved, dir);
+        if (pkg) packages.push(pkg);
+      }
+    }
+  }
+  packages.sort((a, b) => a.name.localeCompare(b.name));
+  return packages;
+}
+
+function goWorkDirToPackage(cwdResolved, dir) {
+  const rel = dir.replace(/^\.\//, "") || ".";
+  if (rel === ".") return null;
+  const abs = join(cwdResolved, rel);
+  if (!abs.startsWith(cwdResolved + sep) && abs !== cwdResolved) return null;
+  try { if (!statSync(abs).isDirectory()) return null; } catch { return null; }
+  const name = basename(rel);
+  return { name, path: rel, version: "" };
+}
+
+/**
+ * Scan apps/ and libs/ dirs (respecting nx.json workspaceLayout) for
+ * subdirs with project.json or package.json. Mirrors `find_nx_packages`.
+ */
+function findNxPackages(cwdResolved, nxJsonContent) {
+  let appsDir = "apps", libsDir = "libs";
+  try {
+    const nxConf = JSON.parse(nxJsonContent);
+    if (nxConf.workspaceLayout) {
+      if (nxConf.workspaceLayout.appsDir) appsDir = nxConf.workspaceLayout.appsDir;
+      if (nxConf.workspaceLayout.libsDir) libsDir = nxConf.workspaceLayout.libsDir;
+    }
+  } catch { /* use defaults */ }
+
+  const scanDirs = appsDir === libsDir ? [appsDir] : [appsDir, libsDir];
+  const packages = [];
+
+  for (const dirName of scanDirs) {
+    const dirAbs = join(cwdResolved, dirName);
+    if (!dirAbs.startsWith(cwdResolved + sep) && dirAbs !== cwdResolved) continue;
+    try {
+      const entries = readdirSync(dirAbs, { withFileTypes: true });
+      for (const e of entries) {
+        if (!e.isDirectory()) continue;
+        const subAbs = join(dirAbs, e.name);
+        const hasProjectJson = existsSync(join(subAbs, "project.json"));
+        const hasPkgJson = existsSync(join(subAbs, "package.json"));
+        if (!hasProjectJson && !hasPkgJson) continue;
+
+        let name = e.name, version = "";
+        if (hasProjectJson) {
+          try {
+            const pj = JSON.parse(readFileSync(join(subAbs, "project.json"), "utf-8"));
+            if (pj.name) name = pj.name;
+          } catch { /* use dirname */ }
+        } else if (hasPkgJson) {
+          try {
+            const pkg = JSON.parse(readFileSync(join(subAbs, "package.json"), "utf-8"));
+            if (pkg.name) name = pkg.name;
+            if (pkg.version) version = pkg.version;
+          } catch { /* use dirname */ }
+        }
+        if (hasPkgJson) {
+          try {
+            const pkg = JSON.parse(readFileSync(join(subAbs, "package.json"), "utf-8"));
+            if (pkg.version) version = pkg.version;
+          } catch { /* ignore */ }
+        }
+        const relPath = `${dirName}/${e.name}`;
+        packages.push({ name, path: relPath, version });
+      }
+    } catch { /* dir missing */ }
+  }
+  packages.sort((a, b) => a.name.localeCompare(b.name));
+  return packages;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+
 const server = createServer((req, res) => {
   // Wrap the entire async handler so any unhandled rejection sends a 500
   // instead of crashing the server process.
@@ -4949,6 +5215,167 @@ async function handleRequest(req, res) {
       }
     }
 
+    // GET /api/detect-monorepo?cwd=<path>
+    // Mirrors the Tauri `detect_monorepo` command (v2.21.0 monorepo scope).
+    // Precedence: pnpm > cargo > go.work > nx > turbo > npm/yarn
+    // Returns { is_monorepo, manager, packages: [{ name, path, version }] }
+    if (url.pathname === "/api/detect-monorepo" && req.method === "GET") {
+      const cwdParam = url.searchParams.get("cwd");
+      if (!cwdParam) return jsonResponse(req, res, { error: "Missing cwd param" }, 400);
+
+      let cwdResolved;
+      try {
+        cwdResolved = realpathSync(resolve(cwdParam));
+      } catch {
+        return jsonResponse(req, res, { is_monorepo: false, manager: "", packages: [] });
+      }
+
+      // Path-traversal guard: cwd must be absolute (already is after resolve).
+      // Child reads below all go through safeReadJson / safeReadText which
+      // themselves validate paths stay inside cwdResolved.
+      function safeReadText(relPath) {
+        try {
+          const abs = join(cwdResolved, relPath);
+          // Validate the abs path stays inside cwd.
+          const real = (() => {
+            try { return realpathSync(abs); }
+            catch {
+              // file may not exist yet — canonicalize parent, reassemble
+              const parent = dirname(abs);
+              try { return join(realpathSync(parent), basename(abs)); }
+              catch { return abs; }
+            }
+          })();
+          if (real !== cwdResolved && !real.startsWith(cwdResolved + sep)) return null;
+          return readFileSync(real, "utf-8");
+        } catch { return null; }
+      }
+
+      function safeReadJson(relPath) {
+        const text = safeReadText(relPath);
+        if (!text) return null;
+        try { return JSON.parse(text); } catch { return null; }
+      }
+
+      function fileExists(relPath) {
+        try {
+          const abs = join(cwdResolved, relPath);
+          if (abs !== cwdResolved && !abs.startsWith(cwdResolved + sep)) return false;
+          return existsSync(abs);
+        } catch { return false; }
+      }
+
+      // Read name/version from a package.json at relDir
+      function pkgMeta(relDir) {
+        const pkg = safeReadJson(join(relDir, "package.json").replace(/\\/g, "/"));
+        return {
+          name: (pkg && pkg.name) ? String(pkg.name) : basename(relDir),
+          version: (pkg && pkg.version) ? String(pkg.version) : "",
+        };
+      }
+
+      // Expand a simple glob pattern like "packages/*" → immediate subdirs that
+      // contain a package.json. Only supports single `*` at the last segment.
+      function expandGlob(pattern) {
+        const noSlash = pattern.replace(/\/\*\*?$/, "").replace(/\*$/, "");
+        const baseRel = noSlash.replace(/\\/g, "/");
+        const baseAbs = join(cwdResolved, baseRel);
+        if (!baseAbs.startsWith(cwdResolved + sep) && baseAbs !== cwdResolved) return [];
+        const results = [];
+        try {
+          const entries = readdirSync(baseAbs, { withFileTypes: true });
+          for (const e of entries) {
+            if (!e.isDirectory()) continue;
+            const subRel = baseRel ? `${baseRel}/${e.name}` : e.name;
+            const pkgJsonAbs = join(baseAbs, e.name, "package.json");
+            if (existsSync(pkgJsonAbs)) {
+              const meta = pkgMeta(subRel);
+              results.push({ name: meta.name, path: subRel, version: meta.version });
+            }
+          }
+        } catch { /* dir missing — return empty */ }
+        return results;
+      }
+
+      try {
+        // ── 1. pnpm ────────────────────────────────────────────────────────
+        if (fileExists("pnpm-workspace.yaml")) {
+          const content = safeReadText("pnpm-workspace.yaml") || "";
+          // Parse only the `packages:` block — stop at the next top-level key.
+          // A top-level YAML key is a non-empty line that starts with a word
+          // character (not whitespace, not `#`, not `-`).
+          const globs = [];
+          let inPackages = false;
+          for (const line of content.split("\n")) {
+            const trimmed = line.trim();
+            if (trimmed === "" || trimmed.startsWith("#")) continue;
+            // Detect top-level key (no leading whitespace, ends with colon)
+            const isTopLevel = /^\w/.test(line) && /:\s*$/.test(trimmed);
+            if (isTopLevel) {
+              if (/^packages\s*:/.test(trimmed)) { inPackages = true; continue; }
+              if (inPackages) break; // hit the next top-level key → done
+              inPackages = false;
+              continue;
+            }
+            if (inPackages && trimmed.startsWith("- ")) {
+              const pattern = trimmed.slice(2).trim().replace(/^['"]|['"]$/g, "");
+              if (pattern) globs.push(pattern);
+            }
+          }
+          const packages = globs.flatMap(expandGlob).sort((a, b) => a.name.localeCompare(b.name));
+          return jsonResponse(req, res, { is_monorepo: true, manager: "pnpm", packages });
+        }
+
+        // ── 2. Cargo workspace ─────────────────────────────────────────────
+        if (fileExists("Cargo.toml")) {
+          const content = safeReadText("Cargo.toml") || "";
+          if (content.includes("[workspace]")) {
+            const packages = findCargoPackages(cwdResolved, content);
+            return jsonResponse(req, res, { is_monorepo: true, manager: "cargo", packages });
+          }
+        }
+
+        // ── 3. go.work ─────────────────────────────────────────────────────
+        if (fileExists("go.work")) {
+          const content = safeReadText("go.work") || "";
+          const packages = findGoPackages(cwdResolved, content);
+          return jsonResponse(req, res, { is_monorepo: true, manager: "go", packages });
+        }
+
+        // ── 4. nx ──────────────────────────────────────────────────────────
+        if (fileExists("nx.json")) {
+          const nxContent = safeReadText("nx.json") || "";
+          const packages = findNxPackages(cwdResolved, nxContent);
+          return jsonResponse(req, res, { is_monorepo: true, manager: "nx", packages });
+        }
+
+        // ── 5. turbo ───────────────────────────────────────────────────────
+        if (fileExists("turbo.json")) {
+          const pkgContent = safeReadText("package.json") || "";
+          const packages = extractNpmWorkspacePackages(cwdResolved, pkgContent);
+          return jsonResponse(req, res, { is_monorepo: true, manager: "turbo", packages });
+        }
+
+        // ── 6. npm / yarn ──────────────────────────────────────────────────
+        if (fileExists("package.json")) {
+          const pkgContent = safeReadText("package.json") || "";
+          if (pkgContent.includes('"workspaces"')) {
+            const packages = extractNpmWorkspacePackages(cwdResolved, pkgContent);
+            if (packages.length > 0) {
+              const manager = fileExists("yarn.lock") ? "yarn" : "npm";
+              return jsonResponse(req, res, { is_monorepo: true, manager, packages });
+            }
+          }
+        }
+
+        return jsonResponse(req, res, { is_monorepo: false, manager: "", packages: [] });
+      } catch (err) {
+        // Never throw — return empty on unexpected error
+        console.error("[detect-monorepo] error:", err);
+        return jsonResponse(req, res, { is_monorepo: false, manager: "", packages: [] });
+      }
+    }
+
     // POST /api/git-branch-merged  { cwd }
     // Mirrors the Tauri `git_branch_merged` command: returns the list of
     // local branches fully merged into the default branch, excluding the
@@ -5014,5 +5441,6 @@ server.listen(PORT, "127.0.0.1", () => {
   console.log(`    GET  /api/git-remote-info?cwd=<path>`);
   console.log(`    GET  /api/git-merge-base?cwd=<path>&ref1=<ref>&ref2=<ref>`);
   console.log(`    POST /api/git-branch-merged  { cwd }`);
-  console.log(`    POST /api/check-remote-reachable  { url, timeoutMs }\n`);
+  console.log(`    POST /api/check-remote-reachable  { url, timeoutMs }`);
+  console.log(`    GET  /api/detect-monorepo?cwd=<path>\n`);
 });
