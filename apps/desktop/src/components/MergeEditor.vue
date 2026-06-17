@@ -617,6 +617,13 @@ onMounted(() => {
           </template>
         </span>
       </div>
+      <div class="me-bulk-actions" v-if="file.result.stats.totalConflicts > 0">
+        <span class="me-bulk-label muted">{{ t('merge.bulkLabel') }}</span>
+        <button class="me-bulk-btn" @click="bulkResolve('ours')">{{ t('merge.bulkOurs') }}</button>
+        <button class="me-bulk-btn" @click="bulkResolve('theirs')">{{ t('merge.bulkTheirs') }}</button>
+        <button class="me-bulk-btn" @click="bulkResolve('both')">{{ t('merge.bulkBoth') }}</button>
+        <span v-if="isGeneratedFileLocal" class="me-bulk-warn">{{ t('merge.bulkGeneratedWarning') }}</span>
+      </div>
       <button
         v-if="canResolve"
         class="btn btn--resolve"
@@ -628,13 +635,6 @@ onMounted(() => {
         </svg>
         {{ t('merge.resolveAuto') }}
       </button>
-      <div class="me-bulk-actions" v-if="file.result.stats.totalConflicts > 0">
-        <span class="me-bulk-label muted">{{ t('merge.bulkLabel') }}</span>
-        <button class="me-bulk-btn" @click="bulkResolve('ours')">{{ t('merge.bulkOurs') }}</button>
-        <button class="me-bulk-btn" @click="bulkResolve('theirs')">{{ t('merge.bulkTheirs') }}</button>
-        <button class="me-bulk-btn" @click="bulkResolve('both')">{{ t('merge.bulkBoth') }}</button>
-        <span v-if="isGeneratedFileLocal" class="me-bulk-warn">{{ t('merge.bulkGeneratedWarning') }}</span>
-      </div>
     </div>
 
     <!-- Custom Automation banner -->
@@ -964,6 +964,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 16px;
   padding: 10px 20px;
   border-bottom: 1px solid var(--color-border);
   background: var(--color-bg-secondary);
@@ -974,6 +975,8 @@ onMounted(() => {
   display: flex;
   align-items: baseline;
   gap: 12px;
+  /* Pin the filename to the far left so the action clusters group on the right. */
+  margin-right: auto;
 }
 
 .editor-filename {
