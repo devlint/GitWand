@@ -24,7 +24,7 @@
  *   select-file   (path)  — user picked a file to open in the diff viewer
  *   clear-filter  ()      — user asked to drop the folder filter
  */
-import { computed, ref, watch, nextTick } from "vue";
+import { computed, ref, watch, nextTick, onMounted, onUnmounted } from "vue";
 import type { FolderDiffNode } from "../utils/backend";
 import { useI18n } from "../composables/useI18n";
 
@@ -43,6 +43,8 @@ const emit = defineEmits<{
   "select-folder": [path: string];
   "select-file": [path: string];
   "clear-filter": [];
+  /** Right-click "Scope here" on a folder row → set the monorepo scope (v2.21.0). */
+  "scope-here": [path: string];
 }>();
 
 // ─── Expanded state ──────────────────────────────────────────
@@ -156,6 +158,41 @@ function activateRow(idx: number) {
     emit("select-file", row.path);
   }
 }
+
+// ─── "Scope here" context menu (v2.21.0) ─────────────────────
+interface ScopeCtxMenu {
+  visible: boolean;
+  x: number;
+  y: number;
+  path: string;
+}
+const scopeCtx = ref<ScopeCtxMenu>({ visible: false, x: 0, y: 0, path: "" });
+
+function openScopeCtx(e: MouseEvent, row: Row) {
+  // Only folders can be scoped.
+  if (row.kind !== "folder") return;
+  e.preventDefault();
+  e.stopPropagation();
+  scopeCtx.value = { visible: true, x: e.clientX, y: e.clientY, path: row.path };
+}
+
+function closeScopeCtx() {
+  scopeCtx.value.visible = false;
+}
+
+function onScopeHere() {
+  if (scopeCtx.value.path) emit("scope-here", scopeCtx.value.path);
+  closeScopeCtx();
+}
+
+onMounted(() => {
+  window.addEventListener("click", closeScopeCtx);
+  window.addEventListener("contextmenu", closeScopeCtx);
+});
+onUnmounted(() => {
+  window.removeEventListener("click", closeScopeCtx);
+  window.removeEventListener("contextmenu", closeScopeCtx);
+});
 
 function onKeydown(e: KeyboardEvent) {
   if (rows.value.length === 0) return;
@@ -308,6 +345,7 @@ function isFileSelected(path: string): boolean {
         :aria-expanded="row.kind === 'folder' ? row.isExpanded : undefined"
         :aria-selected="row.kind === 'file' && isFileSelected(row.path)"
         @click="activateRow(i); cursor = i"
+        @contextmenu="openScopeCtx($event, row)"
       >
         <span
           class="folder-diff-indent"
@@ -342,6 +380,18 @@ function isFileSelected(path: string): boolean {
       </li>
     </ul>
     <p v-else class="folder-diff-empty">{{ t("folderDiff.noChanges") }}</p>
+
+    <!-- "Scope here" context menu (v2.21.0) -->
+    <ul
+      v-if="scopeCtx.visible"
+      class="folder-diff-ctx"
+      :style="{ left: `${scopeCtx.x}px`, top: `${scopeCtx.y}px` }"
+      @click.stop
+    >
+      <li class="folder-diff-ctx-item" @click="onScopeHere">
+        {{ t("scope.here") }}
+      </li>
+    </ul>
   </nav>
 </template>
 
@@ -352,6 +402,27 @@ function isFileSelected(path: string): boolean {
   min-height: 0;
   outline: none;
   font-size: 13px;
+}
+.folder-diff-ctx {
+  position: fixed;
+  z-index: 1000;
+  margin: 0;
+  padding: var(--space-1);
+  list-style: none;
+  min-width: 140px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+}
+.folder-diff-ctx-item {
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: var(--font-size-xs);
+}
+.folder-diff-ctx-item:hover {
+  background: var(--color-bg-hover);
 }
 .folder-diff-tree:focus-visible {
   outline: 2px solid var(--color-accent, #3b82f6);

@@ -322,8 +322,14 @@ export interface GitStatus {
 
 /**
  * Get the full status of a Git repository.
+ *
+ * @param cwd  Repository path.
+ * @param pathspec  When set, scope the status to this sub-tree (passed as
+ *                  `-- <path>`). Used by the monorepo scope feature (v2.21.0).
+ *                  When set, the Rust side skips the libgit2 fast path and uses
+ *                  the CLI with the pathspec.
  */
-export async function getGitStatus(cwd: string): Promise<GitStatus> {
+export async function getGitStatus(cwd: string, pathspec?: string): Promise<GitStatus> {
   if (isTauri()) {
     const raw = await tauriInvoke<{
       branch: string;
@@ -337,7 +343,7 @@ export async function getGitStatus(cwd: string): Promise<GitStatus> {
       unstaged: Array<{ path: string; status: string; old_path?: string }>;
       untracked: string[];
       conflicted: string[];
-    }>("git_status", { cwd });
+    }>("git_status", { cwd, pathspec: pathspec ?? null });
 
     return {
       branch: raw.branch,
@@ -362,7 +368,7 @@ export async function getGitStatus(cwd: string): Promise<GitStatus> {
     };
     }
 
-    const res = await devFetch(`${DEV_SERVER}/api/git-status?cwd=${encodeURIComponent(cwd)}`);
+    const res = await devFetch(`${DEV_SERVER}/api/git-status?cwd=${encodeURIComponent(cwd)}${pathspec ? `&pathspec=${encodeURIComponent(pathspec)}` : ""}`);
     if (!res.ok) throw new Error(`Failed to get git status: ${res.status}`);
     const data = await res.json();
     // dev-server doesn't compute push remote — fill defaults
@@ -508,6 +514,8 @@ export interface GitLogEntry {
  * @param all  When `true`, include commits from all refs (`git log --all`).
  *             Default `true` → show commits from all branches.
  * @param author  When set, only show commits matching this author (passed as `--author`).
+ * @param pathspec  When set, only show commits touching this sub-tree (passed as `-- <path>`).
+ *                  Used by the monorepo scope feature (v2.21.0).
  */
 export async function getGitLog(
   cwd: string,
@@ -516,6 +524,7 @@ export async function getGitLog(
   author?: string,
   offset?: number,
   branch?: string,
+  pathspec?: string,
 ): Promise<GitLogEntry[]> {
   if (isTauri()) {
     const raw = await tauriInvoke<
@@ -530,7 +539,7 @@ export async function getGitLog(
         parents: string[];
         refs: string;
       }>
-    >("git_log", { cwd, count: count ?? 100, all: all ?? true, author: author ?? null, offset: offset ?? 0, branch: branch ?? null });
+    >("git_log", { cwd, count: count ?? 100, all: all ?? true, author: author ?? null, offset: offset ?? 0, branch: branch ?? null, pathspec: pathspec ?? null });
 
     return raw.map((e) => ({
       hash: e.hash,
@@ -545,10 +554,44 @@ export async function getGitLog(
     }));
   }
 
-  const qs = `?cwd=${encodeURIComponent(cwd)}&count=${count ?? 100}&all=${(all ?? true) ? "true" : "false"}${author ? `&author=${encodeURIComponent(author)}` : ""}${offset ? `&offset=${offset}` : ""}${branch ? `&branch=${encodeURIComponent(branch)}` : ""}`;
+  const qs = `?cwd=${encodeURIComponent(cwd)}&count=${count ?? 100}&all=${(all ?? true) ? "true" : "false"}${author ? `&author=${encodeURIComponent(author)}` : ""}${offset ? `&offset=${offset}` : ""}${branch ? `&branch=${encodeURIComponent(branch)}` : ""}${pathspec ? `&pathspec=${encodeURIComponent(pathspec)}` : ""}`;
   const res = await devFetch(`${DEV_SERVER}/api/git-log${qs}`);
   if (!res.ok) throw new Error(`Failed to get git log: ${res.status}`);
   return res.json();
+}
+
+/**
+ * Count reachable commits, mirroring `getGitLog`'s ref selection.
+ *
+ * Used by the monorepo scope feature (v2.21.0) to compute the hidden-commit
+ * badge: `getGitRevCount(cwd)` (unscoped total) minus
+ * `getGitRevCount(cwd, undefined, undefined, scope)` (scoped total).
+ *
+ * @param cwd  Repository path.
+ * @param branch  Specific ref to count from; defaults to HEAD when `all` is falsy.
+ * @param all  When `true`, count across all refs (`--all`).
+ * @param pathspec  When set, only count commits touching this sub-tree.
+ */
+export async function getGitRevCount(
+  cwd: string,
+  branch?: string,
+  all?: boolean,
+  pathspec?: string,
+): Promise<number> {
+  if (isTauri()) {
+    return tauriInvoke<number>("git_rev_count", {
+      cwd,
+      branch: branch ?? null,
+      all: all ?? false,
+      pathspec: pathspec ?? null,
+    });
+  }
+
+  const qs = `?cwd=${encodeURIComponent(cwd)}${branch ? `&branch=${encodeURIComponent(branch)}` : ""}&all=${(all ?? false) ? "true" : "false"}${pathspec ? `&pathspec=${encodeURIComponent(pathspec)}` : ""}`;
+  const res = await devFetch(`${DEV_SERVER}/api/git-rev-count${qs}`);
+  if (!res.ok) throw new Error(`Failed to get git rev count: ${res.status}`);
+  const data = await res.json();
+  return typeof data === "number" ? data : (data.count ?? 0);
 }
 
 // ─── Git stage / unstage ──────────────────────────────────────
@@ -2243,6 +2286,12 @@ export interface WorkspaceRepo {
 export interface WorkspaceConfig {
   name: string;
   repos: WorkspaceRepo[];
+  /**
+   * Active monorepo scope — a repo-relative directory path (v2.21.0).
+   * Absent / undefined === whole repo. Additive: older config files without
+   * this field round-trip unchanged.
+   */
+  scope?: string;
 }
 
 export interface WorkspaceRepoStatus {
@@ -2342,6 +2391,25 @@ export async function workspaceWrite(path: string, workspace: WorkspaceConfig): 
     body: JSON.stringify({ path, workspace }),
   });
   if (!res.ok) throw new Error(`Failed to write workspace: ${res.status}`);
+}
+
+/**
+ * Check whether a repo-relative path exists inside `cwd`.
+ *
+ * Goes through Rust `safe_repo_path()` so path traversal is rejected (returns
+ * false rather than throwing for an escaping path). Used by the monorepo scope
+ * feature (v2.21.0) to validate a persisted scope still exists on load.
+ */
+export async function pathExists(cwd: string, rel: string): Promise<boolean> {
+  if (isTauri()) {
+    return tauriInvoke<boolean>("path_exists", { cwd, rel });
+  }
+  const res = await devFetch(
+    `${DEV_SERVER}/api/path-exists?cwd=${encodeURIComponent(cwd)}&rel=${encodeURIComponent(rel)}`,
+  );
+  if (!res.ok) return false;
+  const data = await res.json();
+  return typeof data === "boolean" ? data : !!data.exists;
 }
 
 /** Get the status of all repos in a workspace. */

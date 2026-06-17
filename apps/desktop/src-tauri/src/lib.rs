@@ -183,7 +183,7 @@ use tauri_plugin_global_shortcut::GlobalShortcutExt;
 /// parity tests must compare against the CLI implementation that the Node
 /// dev-server also uses. Don't redirect this to the libgit2 version.
 pub fn git_status_parity(cwd: String) -> Result<GitStatus, String> {
-    commands::read::git_status_cli(cwd)
+    commands::read::git_status_cli(cwd, None)
 }
 
 /// Bench entry point — calls the libgit2 fast path *in isolation*, so the
@@ -206,7 +206,7 @@ pub fn git_log_parity(
     // Command fns are now `async` (run off the UI thread). These `*_parity`
     // wrappers are sync entry points for the parity-probe example, so block on
     // the future here to keep their signatures unchanged.
-    tauri::async_runtime::block_on(commands::read::git_log(cwd, count, all, author, None, None))
+    tauri::async_runtime::block_on(commands::read::git_log(cwd, count, all, author, None, None, None))
 }
 
 pub fn git_branches_parity(cwd: String) -> Result<Vec<types::GitBranch>, String> {
@@ -383,6 +383,7 @@ pub fn run() {
             commands::ops::shell_exec,
             commands::workspace::workspace_read,
             commands::workspace::workspace_write,
+            commands::workspace::path_exists,
             commands::workspace::workspace_status_all,
             commands::workspace::workspace_fetch_all,
             commands::workspace::workspace_pull_all,
@@ -489,6 +490,8 @@ pub fn run() {
             commands::read::git_branch_merged,
             commands::read::git_config_identity,
             commands::read::git_commit_template_path,
+            // ── v2.21.0 Monorepo Scope ──
+            commands::read::git_rev_count,
         ])
         .run(tauri::generate_context!())
         .expect("error while running GitWand");

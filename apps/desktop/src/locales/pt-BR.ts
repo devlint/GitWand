@@ -1929,6 +1929,17 @@ const ptBR: Locale = {
       label: "Conectividade",
     },
   },
+  // ─── Escopo de monorepo (v2.21.0) ───────────────────────
+  scope: {
+    picker: "Escopo",
+    wholeRepo: "Repositório inteiro",
+    here: "Definir escopo aqui",
+    custom: "Pasta personalizada…",
+    active: "Escopo em {0}",
+    hidden: "{0} commits ocultos",
+    invalidNotice: "O escopo salvo \"{0}\" não existe mais — exibindo o repositório inteiro.",
+    persistError: "Não foi possível salvar o escopo do espaço de trabalho.",
+  },
 };
 
 export default ptBR;

@@ -1942,6 +1942,17 @@ const fr: Locale = {
       label: "Connectivité",
     },
   },
+  // ─── Périmètre monorepo (v2.21.0) ───────────────────────
+  scope: {
+    picker: "Périmètre",
+    wholeRepo: "Dépôt entier",
+    here: "Limiter ici",
+    custom: "Dossier personnalisé…",
+    active: "Limité à {0}",
+    hidden: "{0} commits masqués",
+    invalidNotice: "Le périmètre enregistré « {0} » n'existe plus — affichage du dépôt entier.",
+    persistError: "Impossible d'enregistrer le périmètre de l'espace de travail.",
+  },
 };
 
 export default fr;

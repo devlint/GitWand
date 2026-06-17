@@ -66,6 +66,7 @@ import { isImagePath } from "./utils/imagePath";
 import { useGitWand } from "./composables/useGitWand";
 import { useRepoTabs } from "./composables/useRepoTabs";
 import { useGitRepo, type ViewMode } from "./composables/useGitRepo";
+import { useWorkspaceScope } from "./composables/useWorkspaceScope";
 import { useTheme } from "./composables/useTheme";
 import { useI18n } from "./composables/useI18n";
 import { useSettings } from "./composables/useSettings";
@@ -177,6 +178,7 @@ const {
   selectFile: repoSelectFile,
   loadLog,
   loadMoreLog,
+  hiddenCommitCount,
   stageFiles,
   stageAll,
   unstageFiles,
@@ -222,6 +224,9 @@ const {
   dropStash,
   worktreeBranches,
 } = useGitRepo();
+
+// Monorepo scope (v2.21.0) — restore persisted scope on repo open.
+const { loadScope } = useWorkspaceScope();
 
 function switchToChangesWithFirstFile() {
   viewMode.value = "changes";
@@ -379,6 +384,9 @@ watch(
     }
     const tab = repoTabs.value.find((t) => t.id === id);
     if (tab && tab.path !== repoFolderPath.value) {
+      // Restore the persisted monorepo scope before loading, so the first
+      // status/log fetch is already scoped (avoids a flash of the full repo).
+      await loadScope(tab.path);
       await openRepo(tab.path);
       if (viewMode.value === "history" || showGitTree.value) {
         await loadLog();
@@ -2368,6 +2376,7 @@ onUnmounted(() => {
             :fork-point-sha="graphForkPointSha" :repo-stats="repoStats" :branches="branches" :worktree-branches="worktreeBranches" :stashes="stashes"
             :submodule-changes="submoduleChanges"
             :has-more="logHasMore" :loading-more="logLoadingMore"
+            :hidden-commit-count="hiddenCommitCount"
             @select-commit="(hash) => { selectCommit(hash); viewMode = 'history'; }"
             @change-view="onViewModeChange"
             @edit-commit="handleEditCommit"

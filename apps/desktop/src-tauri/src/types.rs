@@ -681,6 +681,10 @@ pub struct WorkspaceRepo {
 pub struct WorkspaceConfig {
     pub name: String,
     pub repos: Vec<WorkspaceRepo>,
+    /// Active monorepo scope — a repo-relative directory path (v2.21.0).
+    /// Optional + skipped when None so older config files round-trip unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
 }
 
 #[derive(Serialize)]

@@ -4,6 +4,7 @@ import { TOGGLE_GIT_TREE_KEY } from "../composables/branchPickerBridge";
 import { type RepoFileEntry, type ViewMode } from "../composables/useGitRepo";
 import { gitRemoteInfo, getGitUser, type GitLogEntry, type GitBranch, type RemoteInfo, type GitUser, type GitDiff } from "../utils/backend";
 import PrListSidebar from "./PrListSidebar.vue";
+import ScopePicker from "./ScopePicker.vue";
 import { useI18n } from "../composables/useI18n";
 import { avatarStyle, avatarInitials } from "../composables/useAvatar";
 import { useCommitMessage } from "../composables/useCommitMessage";
@@ -829,6 +830,11 @@ function formatActivityDate(dateStr: string): string {
       </button>
     </div>
 
+    <!-- Monorepo scope picker (v2.21.0) — only when a repo is open -->
+    <div class="scope-picker-row" v-if="cwd">
+      <ScopePicker :cwd="cwd" />
+    </div>
+
     <!-- History file list -->
     <div class="sections" v-if="viewMode === 'history'">
       <div class="section">
@@ -1541,6 +1547,14 @@ function formatActivityDate(dateStr: string): string {
 
 .view-tabs::-webkit-scrollbar {
   display: none;
+}
+
+.scope-picker-row {
+  display: flex;
+  align-items: center;
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
 }
 
 .view-tab {

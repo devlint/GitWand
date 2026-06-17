@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Monorepo Scope** — pick a single sub-workspace and scope the commit graph, commit search, and repo stats to its file tree. A scope picker in the repo sidebar lists auto-detected packages across six workspace formats (`pnpm-workspace.yaml`, `package.json` `workspaces` for npm/yarn, `Cargo.toml [workspace]`, `nx.json`, `turbo.json`, `go.work`) — all parsed natively in Rust with no new dependencies, base paths validated through `safe_repo_path()`, and a documented precedence (pnpm > Cargo > go.work > nx > turbo > npm/yarn) when manifests coexist; malformed manifests degrade to empty rather than erroring. The active scope is persisted per repo as an additive optional `scope` field in `.gitwand-workspace.json`, restored on open and validated against a new `path_exists` command (falls back to the whole repo with a one-time notice if the path was deleted). When a scope is active, `git_log` filters history to the sub-tree via a pathspec and the graph header shows the active-scope chip plus an "N commits hidden" badge — the hidden count is `unscopedTotal − scopedTotal` (both from a new lightweight `git_rev_count` command) so it stays stable across pagination; clicking either clears the scope. A "Custom folder…" entry in the picker scopes to any directory ad-hoc. Backed by a `useWorkspaceScope` composable, `backend.ts` wrappers for every new/changed command, dev-server routes for `dev:web` parity, `scope.*` i18n keys in all 5 locales, and real-temp-repo Rust tests (one per detection format + precedence) plus composable unit tests.
+
 ## [2.20.1] - 2026-06-17
 
 ### Fixed

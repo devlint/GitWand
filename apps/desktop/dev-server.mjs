@@ -736,14 +736,19 @@ async function handleRequest(req, res) {
       }
     }
 
-    // GET /api/git-status?cwd=<path>
+    // GET /api/git-status?cwd=<path>&pathspec=<path>
     if (url.pathname === "/api/git-status" && req.method === "GET") {
       const cwd = url.searchParams.get("cwd");
+      const pathspec = url.searchParams.get("pathspec") || "";
       if (!cwd) return jsonResponse(req, res, { error: "Missing cwd param" }, 400);
 
       try {
         const resolvedCwd = resolve(cwd);
-        const stdout = execSync("git status --porcelain=v2 --branch", {
+        // Discrete args so the optional pathspec can be passed after `--`
+        // without string interpolation (v2.21.0 monorepo scope).
+        const statusArgs = ["status", "--porcelain=v2", "--branch"];
+        if (pathspec) statusArgs.push("--", pathspec);
+        const stdout = execFileSync(GIT, statusArgs, {
           cwd: resolvedCwd,
           encoding: "utf-8",
         });
@@ -1071,6 +1076,58 @@ async function handleRequest(req, res) {
         return jsonResponse(req, res, entries.filter((e) => !e.message.startsWith("index on ") && !e.message.startsWith("untracked files on ")));
       } catch (err) {
         return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
+      }
+    }
+
+    // GET /api/git-rev-count?cwd=<path>&branch=<name>&all=<bool>&pathspec=<path>
+    // v2.21.0 monorepo scope — count reachable commits (optionally scoped).
+    if (url.pathname === "/api/git-rev-count" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd");
+      const branch = url.searchParams.get("branch") || "";
+      const all = url.searchParams.get("all") === "true";
+      const pathspec = url.searchParams.get("pathspec") || "";
+
+      if (!cwd) return jsonResponse(req, res, { error: "Missing cwd param" }, 400);
+
+      try {
+        const resolvedCwd = resolve(cwd);
+        const args = ["rev-list", "--count"];
+        if (all) args.push("--all");
+        else args.push(branch || "HEAD");
+        // Discrete args — `--` then the pathspec, never interpolated.
+        if (pathspec) args.push("--", pathspec);
+        let count = 0;
+        try {
+          const stdout = execFileSync(GIT, args, { cwd: resolvedCwd, encoding: "utf-8" });
+          count = parseInt(stdout.trim(), 10) || 0;
+        } catch (_) {
+          // Empty repo (no HEAD) → 0, mirroring the Rust command.
+          count = 0;
+        }
+        return jsonResponse(req, res, count);
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
+      }
+    }
+
+    // GET /api/path-exists?cwd=<path>&rel=<relpath>
+    // v2.21.0 monorepo scope — validate a persisted scope path still exists.
+    if (url.pathname === "/api/path-exists" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd");
+      const rel = url.searchParams.get("rel");
+
+      if (!cwd || !rel) return jsonResponse(req, res, false);
+
+      try {
+        const resolvedCwd = realpathSync(resolve(cwd));
+        const target = resolve(resolvedCwd, rel);
+        // Path-traversal guard: the resolved target must stay inside cwd.
+        if (target !== resolvedCwd && !target.startsWith(resolvedCwd + sep)) {
+          return jsonResponse(req, res, false);
+        }
+        return jsonResponse(req, res, existsSync(target));
+      } catch {
+        return jsonResponse(req, res, false);
       }
     }
 

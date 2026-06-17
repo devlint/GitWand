@@ -1914,6 +1914,17 @@ const zhCN: Locale = {
       label: "连接性",
     },
   },
+  // ─── 单仓库范围 (v2.21.0) ───────────────────────────────
+  scope: {
+    picker: "范围",
+    wholeRepo: "整个仓库",
+    here: "限定到此处",
+    custom: "自定义文件夹…",
+    active: "已限定到 {0}",
+    hidden: "已隐藏 {0} 个提交",
+    invalidNotice: "已保存的范围“{0}”不再存在 — 正在显示整个仓库。",
+    persistError: "无法保存工作区范围。",
+  },
 };
 
 export default zhCN;

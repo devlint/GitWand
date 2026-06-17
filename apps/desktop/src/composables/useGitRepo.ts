@@ -3,6 +3,7 @@ import {
   getGitStatus,
   getGitDiff,
   getGitLog,
+  getGitRevCount,
   getGitUser,
   gitStage,
   gitUnstage,
@@ -46,6 +47,7 @@ import {
 } from "../utils/backend";
 import { requireOnline } from "../utils/networkGuard";
 import { t } from "./useI18n";
+import { useWorkspaceScope } from "./useWorkspaceScope";
 
 export type ViewMode = "dashboard" | "changes" | "history" | "graph" | "prs" | "launchpad";
 
@@ -78,6 +80,35 @@ export function useGitRepo() {
   const successMessage = ref<string | null>(null);
   const viewMode = ref<ViewMode>("dashboard");
   const forcePushPreferred = ref(false);
+
+  // ── Monorepo scope (v2.21.0) ────────────────────────────────────────────
+  const { activeScope } = useWorkspaceScope();
+  /** Total commits across all refs, ignoring scope. Drives the hidden badge. */
+  const totalUnscopedCount = ref(0);
+  /** Total commits across all refs touching the active scope sub-tree. */
+  const scopedTotalCount = ref(0);
+
+  /**
+   * Number of commits hidden by the active scope.
+   * Locked decision: unscopedTotal − scopedTotal (stable across pagination),
+   * NOT scoped.length. Zero when no scope is active.
+   */
+  const hiddenCommitCount = computed(() =>
+    activeScope.value ? Math.max(0, totalUnscopedCount.value - scopedTotalCount.value) : 0,
+  );
+
+  /** Refresh the unscoped + scoped rev counts for the hidden-commit badge. */
+  async function loadRevCounts() {
+    if (!folderPath.value) return;
+    try {
+      totalUnscopedCount.value = await getGitRevCount(folderPath.value, undefined, true);
+      scopedTotalCount.value = activeScope.value
+        ? await getGitRevCount(folderPath.value, undefined, true, activeScope.value)
+        : totalUnscopedCount.value;
+    } catch {
+      // Non-fatal — the badge just won't update. Don't surface to the user.
+    }
+  }
 
   function forcePushKey(): string | null {
     const path = folderPath.value;
@@ -159,6 +190,20 @@ export function useGitRepo() {
   watch(folderPath, () => {
     branches.value = [];
     log.value = [];
+  });
+
+  /**
+   * Monorepo scope changed → re-fetch the scoped log, status and rev counts.
+   *
+   * Shallow watch on the ref only — never `{ deep: true }` (perf rule: deep
+   * tracking on reactive structures is exponential). `activeScope` is a plain
+   * `Ref<string | null>`, so identity change is all we need to react to.
+   */
+  watch(activeScope, () => {
+    if (!folderPath.value) return;
+    void loadStatus(folderPath.value);
+    void loadLog();
+    void loadRevCounts();
   });
 
   /** Whether a repo is loaded. */
@@ -313,7 +358,9 @@ export function useGitRepo() {
    */
   async function loadStatus(cwd: string) {
     try {
-      status.value = await getGitStatus(cwd);
+      // When a monorepo scope is active, scope the status to the sub-tree so
+      // repoStats reflects only the scoped changes. None → libgit2 fast path.
+      status.value = await getGitStatus(cwd, activeScope.value ?? undefined);
     } catch (err: any) {
       error.value = `git status: ${err.message}`;
     }
@@ -462,10 +509,14 @@ export function useGitRepo() {
         true, // all refs
         authorEmail,
         0,
+        undefined, // branch
+        activeScope.value ?? undefined, // pathspec (monorepo scope)
       );
       log.value = entries;
       // When the result is exactly one full page, assume more exist.
       logHasMore.value = entries.length >= pageSize;
+      // Refresh the hidden-commit badge counts alongside the scoped log.
+      await loadRevCounts();
       // If a commit was selected but its diffs were lost, reload them
       if (selectedCommitHash.value && commitDiffs.value.length === 0) {
         commitDiffs.value = await getGitShow(folderPath.value, selectedCommitHash.value);
@@ -492,6 +543,8 @@ export function useGitRepo() {
         true, // all refs
         authorEmail,
         offset,
+        undefined, // branch
+        activeScope.value ?? undefined, // pathspec (monorepo scope)
       );
       if (next.length > 0) {
         log.value = [...log.value, ...next];
@@ -1107,6 +1160,12 @@ export function useGitRepo() {
     mainCommitCount,
     pushRemote,
     aheadPushCount,
+    // Monorepo scope (v2.21.0)
+    activeScope,
+    totalUnscopedCount,
+    scopedTotalCount,
+    hiddenCommitCount,
+    loadRevCounts,
     // Actions
     openRepo,
     closeRepo,

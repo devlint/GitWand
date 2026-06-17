@@ -2546,16 +2546,18 @@ pub(crate) async fn git_get_user(cwd: String) -> Result<serde_json::Value, Strin
 
 // ─── Monorepo detection ──────────────────────────────────────
 
-/// Detect monorepo workspaces (pnpm, npm, yarn).
+/// Detect monorepo workspaces.
+///
+/// Precedence: pnpm > Cargo > go.work > nx > turbo > npm/yarn
 #[tauri::command]
 pub(crate) async fn detect_monorepo(cwd: String) -> Result<MonorepoInfo, String> {
     let cwd_path = std::path::Path::new(&cwd);
 
-    // Check pnpm-workspace.yaml
+    // ── 1. pnpm ──────────────────────────────────────────────────────────
     let pnpm_ws = cwd_path.join("pnpm-workspace.yaml");
     if pnpm_ws.exists() {
         let content = std::fs::read_to_string(&pnpm_ws)
-            .map_err(|e| format!("Failed to read pnpm-workspace.yaml: {}", e))?;
+            .unwrap_or_default();
         let packages = find_workspace_packages(&cwd, &content, "pnpm");
         return Ok(MonorepoInfo {
             is_monorepo: true,
@@ -2564,11 +2566,66 @@ pub(crate) async fn detect_monorepo(cwd: String) -> Result<MonorepoInfo, String>
         });
     }
 
-    // Check package.json workspaces (npm/yarn)
+    // ── 2. Cargo workspace ───────────────────────────────────────────────
+    let cargo_toml = cwd_path.join("Cargo.toml");
+    if cargo_toml.exists() {
+        let content = std::fs::read_to_string(&cargo_toml).unwrap_or_default();
+        if content.contains("[workspace]") {
+            let packages = find_workspace_packages(&cwd, &content, "cargo");
+            return Ok(MonorepoInfo {
+                is_monorepo: true,
+                manager: "cargo".to_string(),
+                packages,
+            });
+        }
+    }
+
+    // ── 3. go.work ───────────────────────────────────────────────────────
+    let go_work = cwd_path.join("go.work");
+    if go_work.exists() {
+        let content = std::fs::read_to_string(&go_work).unwrap_or_default();
+        let packages = find_workspace_packages(&cwd, &content, "go");
+        return Ok(MonorepoInfo {
+            is_monorepo: true,
+            manager: "go".to_string(),
+            packages,
+        });
+    }
+
+    // ── 4. nx ────────────────────────────────────────────────────────────
+    let nx_json = cwd_path.join("nx.json");
+    if nx_json.exists() {
+        let content = std::fs::read_to_string(&nx_json).unwrap_or_default();
+        let packages = find_workspace_packages(&cwd, &content, "nx");
+        return Ok(MonorepoInfo {
+            is_monorepo: true,
+            manager: "nx".to_string(),
+            packages,
+        });
+    }
+
+    // ── 5. turbo ─────────────────────────────────────────────────────────
+    let turbo_json = cwd_path.join("turbo.json");
+    if turbo_json.exists() {
+        // turbo defers workspace layout to package.json
+        let pkg_json = cwd_path.join("package.json");
+        let pkg_content = if pkg_json.exists() {
+            std::fs::read_to_string(&pkg_json).unwrap_or_default()
+        } else {
+            String::new()
+        };
+        let packages = find_workspace_packages(&cwd, &pkg_content, "turbo");
+        return Ok(MonorepoInfo {
+            is_monorepo: true,
+            manager: "turbo".to_string(),
+            packages,
+        });
+    }
+
+    // ── 6. npm / yarn (package.json workspaces) ──────────────────────────
     let pkg_json = cwd_path.join("package.json");
     if pkg_json.exists() {
-        let content = std::fs::read_to_string(&pkg_json)
-            .map_err(|e| format!("Failed to read package.json: {}", e))?;
+        let content = std::fs::read_to_string(&pkg_json).unwrap_or_default();
         if content.contains("\"workspaces\"") {
             let packages = find_workspace_packages(&cwd, &content, "npm");
             if !packages.is_empty() {

@@ -42,6 +42,20 @@ pub(crate) async fn workspace_write(path: String, workspace: WorkspaceConfig) ->
         .map_err(|e| format!("Failed to write workspace: {}", e))
 }
 
+/// Check whether `rel`, resolved under `cwd`, exists on disk.
+///
+/// Validates the path through `safe_repo_path()` (rejecting traversal /
+/// escaping paths by returning `false` rather than erroring). Used by the
+/// monorepo scope feature (v2.21.0) to validate a persisted scope still exists.
+#[tauri::command]
+pub(crate) async fn path_exists(cwd: String, rel: String) -> Result<bool, String> {
+    match safe_repo_path(&cwd, &rel) {
+        Ok(p) => Ok(p.exists()),
+        // An escaping / invalid path simply doesn't count as existing.
+        Err(_) => Ok(false),
+    }
+}
+
 /// Get the status of all repos in a workspace (branch, ahead/behind, modified count).
 ///
 /// Each repo runs through libgit2 (P3.3a) with rayon parallelism (P3.2).

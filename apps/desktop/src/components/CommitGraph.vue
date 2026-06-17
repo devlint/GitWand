@@ -5,8 +5,10 @@ import { computeDagLayout, parseRefs, type DagLayout, type DagNode } from "../ut
 import { useI18n } from "../composables/useI18n";
 import { avatarStyle, avatarInitials as initials } from "../composables/useAvatar";
 import { filterCommitsLocal } from "../composables/useCommitSearch";
+import { useWorkspaceScope } from "../composables/useWorkspaceScope";
 
 const { t } = useI18n();
+const { activeScope, clearScope } = useWorkspaceScope();
 
 const props = defineProps<{
   commits: GitLogEntry[];
@@ -28,6 +30,8 @@ const props = defineProps<{
   submoduleChanges?: Record<string, Array<{ path: string; pointedSha: string }>>;
   hasMore?: boolean;
   loadingMore?: boolean;
+  /** Number of commits hidden by the active monorepo scope (v2.21.0). */
+  hiddenCommitCount?: number;
 }>();
 
 type CommitEvent =
@@ -854,6 +858,28 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
 <template>
   <div class="cg" v-if="displayCommits.length > 0">
     <div class="cg-search-bar">
+      <!-- Active-scope chip (v2.21.0) — click ✕ to clear -->
+      <button
+        v-if="activeScope"
+        class="cg-scope-chip"
+        :title="t('scope.active', activeScope)"
+        @click="clearScope()"
+      >
+        <span class="cg-scope-chip-label">{{ t('scope.active', activeScope) }}</span>
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <line x1="18" y1="6" x2="6" y2="18" />
+          <line x1="6" y1="6" x2="18" y2="18" />
+        </svg>
+      </button>
+      <!-- Hidden-commit badge — only when commits are masked by the scope -->
+      <button
+        v-if="(hiddenCommitCount ?? 0) > 0"
+        class="cg-scope-badge"
+        :title="t('scope.hidden', hiddenCommitCount ?? 0)"
+        @click="clearScope()"
+      >
+        {{ t('scope.hidden', hiddenCommitCount ?? 0) }}
+      </button>
       <input
         v-model="searchQuery"
         class="cg-search-input"
@@ -1674,6 +1700,45 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
   padding: 4px 6px;
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
+}
+
+.cg-scope-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 200px;
+  height: 24px;
+  padding: 0 8px;
+  font-size: 11px;
+  background: var(--color-accent-soft);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-pill);
+  color: var(--color-accent);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.cg-scope-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cg-scope-badge {
+  height: 24px;
+  padding: 0 8px;
+  font-size: 11px;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.cg-scope-badge:hover {
+  color: var(--color-text);
+  border-color: var(--color-accent);
 }
 
 .cg-search-input {

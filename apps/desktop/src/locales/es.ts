@@ -1929,6 +1929,17 @@ const es: Locale = {
       label: "Conectividad",
     },
   },
+  // ─── Ámbito de monorepo (v2.21.0) ───────────────────────
+  scope: {
+    picker: "Ámbito",
+    wholeRepo: "Todo el repositorio",
+    here: "Acotar aquí",
+    custom: "Carpeta personalizada…",
+    active: "Acotado a {0}",
+    hidden: "{0} commits ocultos",
+    invalidNotice: "El ámbito guardado «{0}» ya no existe — mostrando todo el repositorio.",
+    persistError: "No se pudo guardar el ámbito del espacio de trabajo.",
+  },
 };
 
 export default es;

@@ -1969,6 +1969,17 @@ const en = {
       label: "Connectivity",
     },
   },
+  // ─── Monorepo scope (v2.21.0) ───────────────────────────
+  scope: {
+    picker: "Scope",
+    wholeRepo: "Whole repo",
+    here: "Scope here",
+    custom: "Custom folder…",
+    active: "Scoped to {0}",
+    hidden: "{0} commits hidden",
+    invalidNotice: "Saved scope '{0}' no longer exists — showing the whole repo.",
+    persistError: "Could not save the workspace scope.",
+  },
 } as const;
 
 // Widen literal string types to plain `string` for locale compatibility

@@ -44,14 +44,27 @@ use crate::types::*;
 // fallback ensures we never regress vs. the v2.8 baseline.
 
 #[tauri::command]
-pub(crate) async fn git_status(cwd: String) -> Result<GitStatus, String> {
+pub(crate) async fn git_status(
+    cwd: String,
+    pathspec: Option<String>,
+) -> Result<GitStatus, String> {
+    // When a pathspec is provided, skip the libgit2 fast path and use the CLI
+    // directly — libgit2's status API does not accept a pathspec filter the
+    // same way `git status -- <path>` does.
+    if let Some(ref p) = pathspec {
+        let p = p.trim();
+        if !p.is_empty() {
+            return git_status_cli(cwd, Some(p.to_string()));
+        }
+    }
+    // No pathspec: try libgit2 fast-path, fall back to CLI (parity reference).
     match git_status_libgit2(&cwd) {
         Ok(s) => Ok(s),
         Err(e) => {
             // Soft-fail: log but keep going. Don't surface libgit2 errors
             // to the UI when CLI works.
             eprintln!("[git_status] libgit2 fast path failed ({}); falling back to CLI", e);
-            git_status_cli(cwd)
+            git_status_cli(cwd, None)
         }
     }
 }
@@ -288,9 +301,21 @@ fn compute_push_remote_via_cli(cwd: &str, upstream: Option<&str>) -> (Option<Str
 /// The user-facing Tauri command `git_status` (above) routes to the libgit2
 /// implementation `git_status_libgit2` instead, with this CLI version as a
 /// fallback on libgit2 errors.
-pub(crate) fn git_status_cli(cwd: String) -> Result<GitStatus, String> {
+pub(crate) fn git_status_cli(cwd: String, pathspec: Option<String>) -> Result<GitStatus, String> {
+    let mut args: Vec<String> = vec![
+        "status".to_string(),
+        "--porcelain=v2".to_string(),
+        "--branch".to_string(),
+    ];
+    if let Some(ref p) = pathspec {
+        let p = p.trim();
+        if !p.is_empty() {
+            args.push("--".to_string());
+            args.push(p.to_string());
+        }
+    }
     let output = git_cmd()
-        .args(["status", "--porcelain=v2", "--branch"])
+        .args(&args)
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to run git status: {}", e))?;
@@ -615,6 +640,7 @@ pub(crate) async fn git_log(
     author: Option<String>,
     offset: Option<i32>,
     branch: Option<String>,
+    pathspec: Option<String>,
 ) -> Result<Vec<GitLogEntry>, String> {
     let limit = count.unwrap_or(100);
     let skip  = offset.unwrap_or(0).max(0);
@@ -658,6 +684,15 @@ pub(crate) async fn git_log(
                     args.push(hash.to_string());
                 }
             }
+        }
+    }
+
+    // Pathspec: append `-- <path>` as discrete args (no string interpolation).
+    if let Some(ref p) = pathspec {
+        let p = p.trim();
+        if !p.is_empty() {
+            args.push("--".to_string());
+            args.push(p.to_string());
         }
     }
 
@@ -709,6 +744,67 @@ pub(crate) async fn git_log(
     entries.retain(|e| !e.message.starts_with("index on ") && !e.message.starts_with("untracked files on "));
 
     Ok(entries)
+}
+
+// ─── Git rev count ───────────────────────────────────────────
+
+/// Count reachable commits, mirroring git_log's ref selection.
+///
+/// - `all: Some(true)` → `--all`
+/// - `branch: Some(b)` → specific branch ref; otherwise HEAD
+/// - `pathspec: Some(p)` → limit to commits touching that sub-tree via `-- <p>`
+///
+/// Returns the commit count as a `usize`. Stash commits are excluded (they are
+/// unreachable from normal refs / --all without explicit reflog traversal).
+#[tauri::command]
+pub(crate) async fn git_rev_count(
+    cwd: String,
+    branch: Option<String>,
+    all: Option<bool>,
+    pathspec: Option<String>,
+) -> Result<usize, String> {
+    let include_all = all.unwrap_or(false);
+
+    let mut args: Vec<String> = vec![
+        "rev-list".to_string(),
+        "--count".to_string(),
+    ];
+
+    if include_all {
+        args.push("--all".to_string());
+    } else if let Some(ref b) = branch {
+        if !b.is_empty() {
+            args.push(b.clone());
+        } else {
+            args.push("HEAD".to_string());
+        }
+    } else {
+        args.push("HEAD".to_string());
+    }
+
+    // Pathspec: discrete args, never interpolated
+    if let Some(ref p) = pathspec {
+        let p = p.trim();
+        if !p.is_empty() {
+            args.push("--".to_string());
+            args.push(p.to_string());
+        }
+    }
+
+    let output = git_cmd()
+        .args(&args)
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("Failed to run git rev-list --count: {}", e))?;
+
+    if !output.status.success() {
+        // On an empty repo git rev-list HEAD fails; treat as 0
+        return Ok(0);
+    }
+
+    let count_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let count: usize = count_str.parse().unwrap_or(0);
+    Ok(count)
 }
 
 // ─── Git repo state (rebase / merge in progress) ─────────────
@@ -1946,5 +2042,254 @@ mod predictor_tests {
             rev_parse_verify(&git, repo.cwd(), &parent_spec).is_err(),
             "root commit parent must not resolve"
         );
+    }
+}
+
+// ─── Tests: Steps 3, 4, 5 (git_log pathspec, git_rev_count, scoped git_status) ─
+
+#[cfg(test)]
+mod pathspec_tests {
+    use super::*;
+    use std::path::PathBuf;
+    use std::process::Command;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static COUNTER2: AtomicU64 = AtomicU64::new(0);
+
+    struct TempRepo {
+        path: PathBuf,
+    }
+
+    impl Drop for TempRepo {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+
+    impl TempRepo {
+        fn new() -> Self {
+            let n = COUNTER2.fetch_add(1, Ordering::SeqCst);
+            let pid = std::process::id();
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let dir = std::env::temp_dir()
+                .join(format!("gitwand-pathspec-test-{}-{}-{}", pid, n, nanos));
+            std::fs::create_dir_all(&dir).unwrap();
+            let repo = TempRepo { path: dir };
+            repo.git(&["init", "-q", "-b", "main"]);
+            repo.git(&["config", "user.name", "Test"]);
+            repo.git(&["config", "user.email", "test@example.com"]);
+            repo.git(&["config", "commit.gpgsign", "false"]);
+            repo
+        }
+
+        fn cwd(&self) -> String {
+            self.path.to_str().unwrap().to_string()
+        }
+
+        fn git(&self, args: &[&str]) -> std::process::Output {
+            let out = Command::new(git_binary())
+                .args(args)
+                .current_dir(&self.path)
+                .output()
+                .unwrap_or_else(|e| panic!("git {:?} failed to spawn: {}", args, e));
+            assert!(
+                out.status.success(),
+                "git {:?} failed: {}",
+                args,
+                String::from_utf8_lossy(&out.stderr)
+            );
+            out
+        }
+
+        fn write(&self, rel: &str, content: &str) {
+            let p = self.path.join(rel);
+            if let Some(parent) = p.parent() {
+                std::fs::create_dir_all(parent).unwrap();
+            }
+            std::fs::write(p, content).unwrap();
+        }
+
+        fn commit_all(&self, msg: &str) {
+            self.git(&["add", "-A"]);
+            self.git(&["commit", "-q", "-m", msg]);
+        }
+    }
+
+    // ── Step 3: git_log pathspec ──────────────────────────────
+
+    #[test]
+    fn git_log_pathspec_filters_correctly() {
+        let repo = TempRepo::new();
+
+        // Commit touching packages/a
+        repo.write("packages/a/file.txt", "hello");
+        repo.commit_all("add packages/a");
+
+        // Commit touching packages/b
+        repo.write("packages/b/file.txt", "world");
+        repo.commit_all("add packages/b");
+
+        // Commit touching both
+        repo.write("packages/a/other.txt", "more");
+        repo.write("packages/b/other.txt", "more");
+        repo.commit_all("touch both");
+
+        let all_entries = tauri::async_runtime::block_on(git_log(
+            repo.cwd(),
+            None, None, None, None, None, None,
+        ))
+        .expect("git_log(all) failed");
+
+        let scoped_a = tauri::async_runtime::block_on(git_log(
+            repo.cwd(),
+            None, None, None, None, None,
+            Some("packages/a".to_string()),
+        ))
+        .expect("git_log(pathspec=a) failed");
+
+        let scoped_b = tauri::async_runtime::block_on(git_log(
+            repo.cwd(),
+            None, None, None, None, None,
+            Some("packages/b".to_string()),
+        ))
+        .expect("git_log(pathspec=b) failed");
+
+        // All: 3 commits
+        assert_eq!(all_entries.len(), 3, "expected 3 unscoped commits");
+        // packages/a: commits 1 (add a) + 3 (touch both) = 2
+        assert_eq!(scoped_a.len(), 2, "expected 2 commits for packages/a, got {:?}",
+            scoped_a.iter().map(|e| &e.message).collect::<Vec<_>>());
+        // packages/b: commits 2 (add b) + 3 (touch both) = 2
+        assert_eq!(scoped_b.len(), 2, "expected 2 commits for packages/b, got {:?}",
+            scoped_b.iter().map(|e| &e.message).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn git_log_no_pathspec_returns_all() {
+        let repo = TempRepo::new();
+        repo.write("root.txt", "root");
+        repo.commit_all("root commit");
+
+        let entries = tauri::async_runtime::block_on(git_log(
+            repo.cwd(),
+            None, None, None, None, None, None,
+        ))
+        .expect("git_log failed");
+
+        assert_eq!(entries.len(), 1);
+    }
+
+    // ── Step 4: git_rev_count ──────────────────────────────────
+
+    #[test]
+    fn git_rev_count_matches_git_log_len() {
+        let repo = TempRepo::new();
+        repo.write("a.txt", "1");
+        repo.commit_all("c1");
+        repo.write("a.txt", "2");
+        repo.commit_all("c2");
+        repo.write("a.txt", "3");
+        repo.commit_all("c3");
+
+        let count = tauri::async_runtime::block_on(git_rev_count(
+            repo.cwd(), None, None, None,
+        ))
+        .expect("git_rev_count failed");
+
+        let log = tauri::async_runtime::block_on(git_log(
+            repo.cwd(),
+            Some(1000), None, None, None, None, None,
+        ))
+        .expect("git_log failed");
+
+        assert_eq!(count, log.len(), "rev_count ({}) should match log len ({})", count, log.len());
+    }
+
+    #[test]
+    fn git_rev_count_scoped_matches_scoped_log() {
+        let repo = TempRepo::new();
+        // 2 commits only in packages/a
+        repo.write("packages/a/f.txt", "v1");
+        repo.commit_all("a1");
+        repo.write("packages/a/f.txt", "v2");
+        repo.commit_all("a2");
+        // 1 commit only in packages/b
+        repo.write("packages/b/f.txt", "b1");
+        repo.commit_all("b1");
+
+        let count_a = tauri::async_runtime::block_on(git_rev_count(
+            repo.cwd(), None, None, Some("packages/a".to_string()),
+        ))
+        .expect("git_rev_count(a) failed");
+
+        let log_a = tauri::async_runtime::block_on(git_log(
+            repo.cwd(),
+            Some(1000), None, None, None, None,
+            Some("packages/a".to_string()),
+        ))
+        .expect("git_log(a) failed");
+
+        assert_eq!(count_a, log_a.len(),
+            "scoped rev_count ({}) should match scoped log len ({})", count_a, log_a.len());
+        assert_eq!(count_a, 2, "packages/a has 2 commits");
+    }
+
+    #[test]
+    fn git_rev_count_empty_repo_returns_zero() {
+        let repo = TempRepo::new();
+        // fresh repo — HEAD doesn't exist yet
+        let count = tauri::async_runtime::block_on(git_rev_count(
+            repo.cwd(), None, None, None,
+        ))
+        .expect("git_rev_count on empty repo failed");
+        assert_eq!(count, 0);
+    }
+
+    // ── Step 5: scoped git_status ─────────────────────────────
+
+    #[test]
+    fn git_status_scoped_reports_only_subtree_changes() {
+        let repo = TempRepo::new();
+        // Initial commit so HEAD exists
+        repo.write("root.txt", "root");
+        repo.commit_all("root");
+
+        // Dirty files in packages/a and packages/b (unstaged)
+        repo.write("packages/a/dirty.txt", "dirty a");
+        repo.write("packages/b/dirty.txt", "dirty b");
+
+        // Scoped to packages/a: should see only packages/a/dirty.txt
+        let status_a = git_status_cli(repo.cwd(), Some("packages/a".to_string()))
+            .expect("git_status_cli(a) failed");
+
+        let untracked_a: Vec<&str> = status_a.untracked.iter().map(|s| s.as_str()).collect();
+        assert!(
+            untracked_a.iter().any(|p| p.contains("packages/a")),
+            "expected packages/a in untracked: {:?}", untracked_a
+        );
+        assert!(
+            !untracked_a.iter().any(|p| p.contains("packages/b")),
+            "packages/b should NOT appear in packages/a scope: {:?}", untracked_a
+        );
+    }
+
+    #[test]
+    fn git_status_no_pathspec_reports_all() {
+        let repo = TempRepo::new();
+        repo.write("root.txt", "root");
+        repo.commit_all("root");
+        repo.write("packages/a/dirty.txt", "dirty a");
+        repo.write("packages/b/dirty.txt", "dirty b");
+
+        let status = git_status_cli(repo.cwd(), None)
+            .expect("git_status_cli(None) failed");
+
+        let all_paths: Vec<&str> = status.untracked.iter().map(|s| s.as_str()).collect();
+        // Both subtrees should appear
+        let has_a = all_paths.iter().any(|p| p.contains("packages/a") || p.contains("packages/"));
+        assert!(has_a, "unscoped status should show all changes: {:?}", all_paths);
     }
 }
