@@ -601,10 +601,12 @@ function handleResolveHunkCustom(path: string, hunkIndex: number, content: strin
 
 function handleResolveFileBulk(path: string, choice: "ours" | "theirs" | "both") {
   resolveFileBulk(path, choice);
+  checkAndSaveIfResolved(path);
 }
 
 function handleApplyFileMemory(path: string, entry: ResolutionMemoryEntry) {
   applyMemoryToFile(path, entry);
+  checkAndSaveIfResolved(path);
 }
 
 // ─── Edit commit overlay ────────────────────────────────
