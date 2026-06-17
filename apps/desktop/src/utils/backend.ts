@@ -93,6 +93,28 @@ export async function getConflictedFiles(cwd: string): Promise<string[]> {
   return data.files;
 }
 
+export interface TreeConflict {
+  path: string;
+  /** git short-status code, e.g. "UD", "DU", "DD", "AU", "UA" */
+  code: string;
+  hasBase: boolean;
+  hasOurs: boolean;
+  hasTheirs: boolean;
+}
+
+/**
+ * Return unmerged paths that are markerless tree conflicts (modify/delete,
+ * both-deleted). Pure content conflicts (UU/AA with <<<<<<< markers) are
+ * excluded — they are already handled by the existing conflict flow.
+ */
+export async function getTreeConflicts(cwd: string): Promise<TreeConflict[]> {
+  if (isTauri()) {
+    return tauriInvoke<TreeConflict[]>("get_tree_conflicts", { cwd });
+  }
+  // Dev-server fallback: return empty (tree conflicts are rare in dev mode)
+  return [];
+}
+
 /**
  * Read a file's content.
  */
