@@ -425,7 +425,10 @@ export function useGitWand() {
           return {
             path: filePath,
             content,
-            result: await resolveAsync(content, filePath, resolveOptionsWithLlm, structuralOpts),
+            // Tree conflicts render the dedicated panel, never hunks — produce a
+            // trivial empty MergeResult instead of running the full resolver on
+            // (possibly large) working-tree content. `content` above is kept for the preview.
+            result: await resolveAsync("", filePath, resolveOptionsWithLlm, structuralOpts),
             tree: { code: tc.code, hasOurs: tc.hasOurs, hasTheirs: tc.hasTheirs, hasBase: tc.hasBase },
           };
         }
