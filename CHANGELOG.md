@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **File-level bulk conflict resolution** — in the merge editor header, "Accept all: Current · Incoming · Both" resolves *every* hunk of a file in one click (including complex/low-confidence hunks the safe "Resolve auto" leaves behind), with a non-blocking "⚠ may break a generated file" hint on Both for build-generated files. After a bulk action, a memorize offer surfaces as a persistent app-level toast (survives the auto-advance to the next conflicted file) so the rule can be saved; the saved-rule banner becomes one-click actionable ("Apply rule to N hunks") with an applicability count, gracefully skipping hunks the rule can't apply. Built on a single pure `resolveAllConflictBlocks` engine (one marker pass, callback-driven) with `resolveFileBulk` / `applyMemoryToFile` composable methods; reuses the existing undo and save/stage/advance flow. No `packages/core` change. New `merge.bulk*` / `mergeEditor.memory*` i18n keys in all 5 locales; pure-engine unit tests.
+- **Tree-conflict resolution (modify/delete, both-deleted, add/delete)** — conflicts with no `<<<<<<<` markers (a file modified on one side and deleted on the other, deleted on both, etc.) previously showed as "0 conflit" with no way to act. A new Rust `get_tree_conflicts` reads unmerged index stages from `git status --porcelain=v2`, and `resolve_tree_conflict` applies a choice via `git checkout --ours/--theirs` + `add` or `git rm -f` (args as arrays, path guarded by `safe_repo_path()`). The file list now shows a distinct "deleted" badge instead of a resolved state, and the editor renders a dedicated panel explaining the case ("Modified on current side, deleted on incoming side", …) with availability-driven actions (Keep current / Keep incoming / Accept deletion) and a read-only preview of the surviving content; resolving advances the merge through a shared `advanceToNextConflictOrFinalize` helper. New `merge.tree*` i18n keys in all 5 locales; real-temp-repo Rust tests.
+
 ## [2.21.0] - 2026-06-17
 
 ### Added
