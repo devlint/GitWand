@@ -830,10 +830,8 @@ function formatActivityDate(dateStr: string): string {
       </button>
     </div>
 
-    <!-- Monorepo scope picker (v2.21.0) — only when a repo is open -->
-    <div class="scope-picker-row" v-if="cwd">
-      <ScopePicker :cwd="cwd" />
-    </div>
+    <!-- Monorepo scope picker (v2.21.0) — self-hides unless the repo is a detected monorepo -->
+    <ScopePicker v-if="cwd" :cwd="cwd" />
 
     <!-- History file list -->
     <div class="sections" v-if="viewMode === 'history'">
@@ -1547,14 +1545,6 @@ function formatActivityDate(dateStr: string): string {
 
 .view-tabs::-webkit-scrollbar {
   display: none;
-}
-
-.scope-picker-row {
-  display: flex;
-  align-items: center;
-  padding: var(--space-2);
-  border-bottom: 1px solid var(--color-border);
-  flex-shrink: 0;
 }
 
 .view-tab {

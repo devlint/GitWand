@@ -50,6 +50,8 @@ const triggerLabel = computed(() =>
   activeScope.value ? activeScope.value : t("scope.wholeRepo"),
 );
 
+const isMonorepo = computed(() => !!info.value?.isMonorepo);
+
 const packages = computed(() => info.value?.packages ?? []);
 
 function selectPackage(path: string) {
@@ -104,84 +106,97 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
 </script>
 
 <template>
-  <div class="scope-picker">
-    <button
-      class="scope-picker-trigger"
-      :class="{ 'scope-picker-trigger--active': activeScope }"
-      :title="t('scope.picker')"
-      @click.stop="open = !open"
-    >
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-      </svg>
-      <span class="scope-picker-label">{{ triggerLabel }}</span>
-      <svg class="scope-picker-caret" width="8" height="8" viewBox="0 0 8 8" fill="none" aria-hidden="true">
-        <path d="M1.5 3L4 5.5L6.5 3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" />
-      </svg>
-    </button>
-
-    <ul v-if="open" class="scope-picker-menu" role="listbox">
-      <li
-        class="scope-picker-item"
-        :class="{ 'scope-picker-item--selected': !activeScope }"
-        role="option"
-        :aria-selected="!activeScope"
-        @click="selectWholeRepo"
+  <div v-if="isMonorepo" class="scope-picker-row">
+    <div class="scope-picker">
+      <button
+        class="scope-picker-trigger"
+        :class="{ 'scope-picker-trigger--active': activeScope }"
+        :title="t('scope.picker')"
+        @click.stop="open = !open"
       >
-        {{ t('scope.wholeRepo') }}
-      </li>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+        </svg>
+        <span class="scope-picker-label">{{ triggerLabel }}</span>
+        <svg class="scope-picker-caret" width="8" height="8" viewBox="0 0 8 8" fill="none" aria-hidden="true">
+          <path d="M1.5 3L4 5.5L6.5 3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </button>
 
-      <li v-if="packages.length > 0" class="scope-picker-sep" role="separator" aria-hidden="true" />
+      <ul v-if="open" class="scope-picker-menu" role="listbox">
+        <li
+          class="scope-picker-item"
+          :class="{ 'scope-picker-item--selected': !activeScope }"
+          role="option"
+          :aria-selected="!activeScope"
+          @click="selectWholeRepo"
+        >
+          {{ t('scope.wholeRepo') }}
+        </li>
 
-      <li
-        v-for="pkg in packages"
-        :key="pkg.path"
-        class="scope-picker-item"
-        :class="{ 'scope-picker-item--selected': activeScope === pkg.path }"
-        role="option"
-        :aria-selected="activeScope === pkg.path"
-        @click="selectPackage(pkg.path)"
-      >
-        <span class="scope-picker-pkg-name">{{ pkg.name }}</span>
-        <span class="scope-picker-pkg-path">{{ pkg.path }}</span>
-      </li>
+        <li v-if="packages.length > 0" class="scope-picker-sep" role="separator" aria-hidden="true" />
 
-      <li class="scope-picker-sep" role="separator" aria-hidden="true" />
+        <li
+          v-for="pkg in packages"
+          :key="pkg.path"
+          class="scope-picker-item"
+          :class="{ 'scope-picker-item--selected': activeScope === pkg.path }"
+          role="option"
+          :aria-selected="activeScope === pkg.path"
+          @click="selectPackage(pkg.path)"
+        >
+          <span class="scope-picker-pkg-name">{{ pkg.name }}</span>
+          <span class="scope-picker-pkg-path">{{ pkg.path }}</span>
+        </li>
 
-      <li
-        class="scope-picker-item scope-picker-item--custom"
-        role="option"
-        @click="selectCustomFolder"
-      >
-        {{ t('scope.custom') }}
-      </li>
-    </ul>
+        <li class="scope-picker-sep" role="separator" aria-hidden="true" />
+
+        <li
+          class="scope-picker-item scope-picker-item--custom"
+          role="option"
+          @click="selectCustomFolder"
+        >
+          {{ t('scope.custom') }}
+        </li>
+      </ul>
+    </div>
   </div>
 </template>
 
 <style scoped>
+.scope-picker-row {
+  display: flex;
+  align-items: center;
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
 .scope-picker {
   position: relative;
-  display: inline-flex;
+  display: block;
+  width: 100%;
 }
 
 .scope-picker-trigger {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: var(--space-1);
-  max-width: 180px;
-  padding: var(--space-1) var(--space-2);
-  background: var(--color-bg-secondary);
+  gap: var(--space-2);
+  width: 100%;
+  padding: 3px var(--space-3);
+  background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-sm);
   color: var(--color-text);
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
   cursor: pointer;
-  transition: background var(--transition-base), border-color var(--transition-base);
+  transition: background var(--transition-hover), color var(--transition-hover);
 }
 
 .scope-picker-trigger:hover {
-  background: var(--color-bg-hover);
+  background: var(--color-bg-elevated);
+  color: var(--color-text);
 }
 
 .scope-picker-trigger--active {
@@ -190,6 +205,9 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
 }
 
 .scope-picker-label {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -204,7 +222,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
   position: absolute;
   top: calc(100% + 4px);
   left: 0;
-  z-index: 50;
+  z-index: 200;
   min-width: 200px;
   max-width: 320px;
   max-height: 320px;
@@ -212,9 +230,9 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
   margin: 0;
   padding: var(--space-1);
   list-style: none;
-  background: var(--color-bg);
+  background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-lg);
   box-shadow: var(--shadow-md);
 }
 
@@ -222,15 +240,15 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
   display: flex;
   flex-direction: column;
   gap: 1px;
-  padding: var(--space-1) var(--space-2);
+  padding: var(--space-2) var(--space-4);
   border-radius: var(--radius-sm);
   cursor: pointer;
-  font-size: var(--font-size-xs);
-  transition: background var(--transition-base);
+  font-size: var(--font-size-sm);
+  transition: background var(--transition-hover);
 }
 
 .scope-picker-item:hover {
-  background: var(--color-bg-hover);
+  background: var(--color-bg-tertiary);
 }
 
 .scope-picker-item--selected {
@@ -243,7 +261,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick));
 
 .scope-picker-pkg-name {
   font-weight: var(--font-weight-semibold);
-  color: var(--color-accent);
+  color: var(--color-text);
 }
 
 .scope-picker-pkg-path {
