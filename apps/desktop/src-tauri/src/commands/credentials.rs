@@ -17,11 +17,14 @@
 //!   entries for the same service (e.g. `"workspace:username"`).
 //!
 //! **keyring 2.x API**:
-//! ```rust
+//! ```rust,no_run
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let entry = keyring::Entry::new("service", "account")?;
 //! entry.set_password("secret")?;
 //! let secret = entry.get_password()?;
 //! entry.delete_password()?;
+//! # Ok(())
+//! # }
 //! ```
 
 /// Store a credential in the OS keychain.
