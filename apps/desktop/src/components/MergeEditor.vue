@@ -40,6 +40,7 @@ const emit = defineEmits<{
   applyFileMemory: [path: string, entry: ResolutionMemoryEntry];
   /** Custom automation ran and committed; parent should refresh status */
   automationDone: [commitHash: string];
+  resolveTreeConflict: [path: string, choice: "ours" | "theirs" | "delete"];
 }>();
 
 // ─── Inline Edit State ──────────────────────────────────
@@ -265,6 +266,15 @@ const canResolve = computed(
 );
 
 const hunks = computed(() => props.file.result.hunks);
+
+const treeExplanation = computed(() => {
+  const tr = props.file.tree;
+  if (!tr) return "";
+  if (tr.hasOurs && !tr.hasTheirs) return t("merge.treeModifiedOursDeletedTheirs");
+  if (!tr.hasOurs && tr.hasTheirs) return t("merge.treeDeletedOursModifiedTheirs");
+  if (!tr.hasOurs && !tr.hasTheirs) return t("merge.treeBothDeleted");
+  return t("merge.treeBothPresent");
+});
 
 /** How many of this file's hunks the saved rule can actually resolve. */
 const memoryApplicableCount = computed(() => {
@@ -690,8 +700,29 @@ onMounted(() => {
       <button class="me-memory-btn" @click="dismissMemoryOffer">{{ t("common.close") }}</button>
     </div>
 
+    <!-- Tree conflict panel (modify/delete, both-deleted, …) -->
+    <div v-if="file.tree" class="me-tree-panel">
+      <h3 class="me-tree-title">{{ t('merge.treeTitle') }} — <span class="mono">{{ file.path }}</span></h3>
+      <p class="me-tree-explanation">{{ treeExplanation }}</p>
+      <div class="me-tree-actions">
+        <button v-if="file.tree.hasOurs" class="me-bulk-btn" @click="emit('resolveTreeConflict', file.path, 'ours')">
+          {{ t('merge.treeKeepOurs') }}
+        </button>
+        <button v-if="file.tree.hasTheirs" class="me-bulk-btn" @click="emit('resolveTreeConflict', file.path, 'theirs')">
+          {{ t('merge.treeKeepTheirs') }}
+        </button>
+        <button class="me-bulk-btn me-tree-delete" @click="emit('resolveTreeConflict', file.path, 'delete')">
+          {{ t('merge.treeAcceptDelete') }}
+        </button>
+      </div>
+      <template v-if="file.content">
+        <div class="me-tree-preview-label muted">{{ t('merge.treePreviewLabel') }}</div>
+        <pre class="me-tree-preview">{{ file.content }}</pre>
+      </template>
+    </div>
+
     <!-- Editor body: code + minimap -->
-    <div class="merge-body">
+    <div class="merge-body" v-if="!file.tree">
     <div
       class="editor-content"
       ref="contentEl"
@@ -1641,5 +1672,17 @@ onMounted(() => {
 
 .me-memory-btn--save:hover {
   background: var(--color-success-soft, rgba(34,197,94,.12));
+}
+
+.me-tree-panel { padding: 20px; overflow: auto; }
+.me-tree-title { font-size: 14px; margin: 0 0 8px; }
+.me-tree-explanation { margin: 0 0 14px; color: var(--color-text-secondary, #888); }
+.me-tree-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+.me-tree-delete { color: var(--color-danger, #c0392b); }
+.me-tree-preview-label { font-size: 11px; margin-bottom: 4px; }
+.me-tree-preview {
+  margin: 0; padding: 10px; max-height: 320px; overflow: auto;
+  background: var(--color-bg-secondary, #f5f5f5); border-radius: 6px;
+  font-family: var(--font-mono, monospace); font-size: 12px; white-space: pre-wrap;
 }
 </style>

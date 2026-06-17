@@ -128,6 +128,7 @@ const {
   resolveHunkManual,
   resolveHunkCustom,
   resolveFileBulk,
+  resolveTreeConflictFile,
   applyMemoryToFile,
   saveFile,
   saveAllFiles,
@@ -553,6 +554,18 @@ watch(
  * After resolving a hunk or file, check if the file is fully resolved.
  * If so: save to disk, git add, refresh status, move to next conflicted file.
  */
+async function advanceToNextConflictOrFinalize() {
+  await repoRefresh();
+  if (repoStatus.value && repoStatus.value.conflicted.length > 0) {
+    await repoSelectFile(repoStatus.value.conflicted[0], false);
+  } else if (isCherryPicking.value) {
+    await doCherryPickContinue();
+  } else {
+    await doMergeContinue();
+    showMergeSuccess.value = true;
+  }
+}
+
 async function checkAndSaveIfResolved(filePath: string) {
   const file = mergeFiles.value.find((f) => f.path === filePath);
   if (!file) return;
@@ -566,20 +579,7 @@ async function checkAndSaveIfResolved(filePath: string) {
   try {
     await saveFile(filePath);
     await stageFiles([filePath]);
-    await repoRefresh();
-
-    // Move to the next conflicted file, if any
-    if (repoStatus.value && repoStatus.value.conflicted.length > 0) {
-      await repoSelectFile(repoStatus.value.conflicted[0], false);
-    } else if (isCherryPicking.value) {
-      // Cherry-pick in progress — run cherry-pick --continue
-      await doCherryPickContinue();
-      // No merge-success modal for cherry-pick; a toast is enough
-    } else {
-      // Merge in progress — finalize the merge commit, then show modal
-      await doMergeContinue();
-      showMergeSuccess.value = true;
-    }
+    await advanceToNextConflictOrFinalize();
   } catch (err: any) {
     repoError.value = `save: ${err?.message || String(err)}`;
   }
@@ -605,6 +605,15 @@ function handleResolveFileBulk(path: string, choice: "ours" | "theirs" | "both")
   resolveFileBulk(path, choice);
   checkAndSaveIfResolved(path);
   memorizeToast.value = { path, strategy: choice };
+}
+
+async function handleResolveTreeConflict(path: string, choice: "ours" | "theirs" | "delete") {
+  try {
+    await resolveTreeConflictFile(path, choice);
+    await advanceToNextConflictOrFinalize();
+  } catch (err: any) {
+    repoError.value = `tree-resolve: ${err?.message || String(err)}`;
+  }
 }
 
 function acceptMemorizeToast() {
@@ -2347,7 +2356,8 @@ onUnmounted(() => {
                 @resolve="handleResolveFile" @resolve-hunk="(path, idx, choice) => handleResolveHunk(path, idx, choice)"
                 @resolve-hunk-custom="(path, idx, content) => handleResolveHunkCustom(path, idx, content)"
                 @resolve-file-bulk="(path, choice) => handleResolveFileBulk(path, choice)"
-                @apply-file-memory="(path, entry) => handleApplyFileMemory(path, entry)" />
+                @apply-file-memory="(path, entry) => handleApplyFileMemory(path, entry)"
+                @resolve-tree-conflict="(path, choice) => handleResolveTreeConflict(path, choice)" />
               <FileHistoryViewer v-else-if="fileHistoryPath && repoFolderPath" :file-path="fileHistoryPath"
                 :cwd="repoFolderPath" @close="closeFileHistory"
                 @select-commit="(hash) => { closeFileHistory(); selectCommit(hash); viewMode = 'history'; }" />
