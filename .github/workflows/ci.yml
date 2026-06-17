@@ -31,6 +31,19 @@ jobs:
 
       - run: pnpm test
 
+  appimage-env-repro:
+    name: AppImage curl env repro (#48)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Headless regression check: reproduces issue #48 (AppRun's
+      # LD_LIBRARY_PATH pollution breaking the spawned curl) and verifies the
+      # hidden_cmd env scrub resolves it. Needs only bash + curl, both present
+      # on ubuntu-latest — no Tauri toolchain or AppImage build required.
+      - name: Reproduce issue #48 and verify the fix
+        run: bash scripts/repro-issue-48-appimage-curl.sh
+
   desktop:
     name: Desktop Build (${{ matrix.platform }})
     needs: test

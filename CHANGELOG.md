@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **GitHub & Azure OAuth in the Linux AppImage** — sign-in failed in the released AppImage with `Failed to parse device-code response: EOF while parsing a value at line 1 column 0` (worked under `pnpm tauri dev`). The forge HTTP transport shells out to the system `curl`, which inherited the AppImage `AppRun`'s `LD_LIBRARY_PATH` pollution and loaded ABI-incompatible bundled libs, dying before the TLS request completed (empty body → JSON parse error). `hidden_cmd` now de-pollutes the child environment inside an AppImage (restore each `<VAR>_ORIG` saved by AppRun, else drop the override; no-op outside an AppImage), and the curl transport now adds `--show-error` and reports a non-zero curl exit as an explicit transport error instead of a misleading parse error. Reproduced and verified end-to-end on Linux via `scripts/repro-issue-48-appimage-curl.sh`. (#48)
+
 ## [2.20.0] - 2026-06-17
 
 ### Added
