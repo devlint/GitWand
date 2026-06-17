@@ -119,6 +119,81 @@ function replaceConflictByIndex(
 }
 
 /**
+ * Walk a file's conflict markers once and replace every block via `resolver`.
+ * Returns the new content plus counts. A resolver returning `null` leaves that
+ * block conflicted (markers kept, diff3 base preserved). Generalizes the
+ * single-hunk parser used by resolveHunkManual to the whole-file case.
+ */
+export function resolveAllConflictBlocks(
+  content: string,
+  resolver: (
+    block: { oursLines: string[]; baseLines: string[]; theirsLines: string[] },
+    index: number,
+  ) => string | null,
+): { content: string; applied: number; total: number } {
+  const lines = content.split("\n");
+  const newLines: string[] = [];
+  let conflictIdx = 0;
+  let applied = 0;
+  let total = 0;
+  let inConflict = false;
+  let oursLines: string[] = [];
+  let baseLines: string[] = [];
+  let theirsLines: string[] = [];
+  let hasBase = false;
+  let inBase = false;
+  let inTheirs = false;
+
+  for (const line of lines) {
+    if (line.startsWith("<<<<<<<")) {
+      inConflict = true;
+      hasBase = false;
+      inBase = false;
+      inTheirs = false;
+      oursLines = [];
+      baseLines = [];
+      theirsLines = [];
+    } else if (line.startsWith("|||||||") && inConflict) {
+      inBase = true;
+      hasBase = true;
+    } else if (line.startsWith("=======") && inConflict) {
+      inBase = false;
+      inTheirs = true;
+    } else if (line.startsWith(">>>>>>>") && inConflict) {
+      total++;
+      const replacement = resolver({ oursLines, baseLines, theirsLines }, conflictIdx);
+      if (replacement !== null) {
+        applied++;
+        if (replacement.length > 0) {
+          newLines.push(...replacement.split("\n"));
+        }
+      } else {
+        newLines.push("<<<<<<< ours");
+        newLines.push(...oursLines);
+        if (hasBase) {
+          newLines.push("||||||| base");
+          newLines.push(...baseLines);
+        }
+        newLines.push("=======");
+        newLines.push(...theirsLines);
+        newLines.push(">>>>>>> theirs");
+      }
+      conflictIdx++;
+      inConflict = false;
+      inTheirs = false;
+    } else if (inConflict) {
+      if (inTheirs) theirsLines.push(line);
+      else if (inBase) baseLines.push(line);
+      else oursLines.push(line);
+    } else {
+      newLines.push(line);
+    }
+  }
+
+  return { content: newLines.join("\n"), applied, total };
+}
+
+/**
  * Main composable for GitWand Desktop.
  * Manages file list, conflict analysis, resolution state,
  * undo/redo history, and inline editing.
