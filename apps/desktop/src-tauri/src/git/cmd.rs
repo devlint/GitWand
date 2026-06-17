@@ -116,6 +116,61 @@ pub(crate) fn git_binary() -> String {
         .clone()
 }
 
+/// Environment variables an AppImage's `AppRun` rewrites to point at the
+/// bundle's own libraries. Any external process we spawn (`curl`, `gh`,
+/// `git`…) inherits them and then loads ABI-incompatible bundled libs — e.g.
+/// the system `curl` crashing at TLS init and emitting an empty body, which
+/// surfaced as the OAuth "Failed to parse device-code response: EOF" failure
+/// in the released Linux AppImage (GitHub issue #48). We undo the pollution
+/// for child processes so they pick up the *system* libraries.
+const APPIMAGE_POLLUTED_VARS: &[&str] = &[
+    "LD_LIBRARY_PATH",
+    "LD_PRELOAD",
+    "GTK_PATH",
+    "GIO_MODULE_DIR",
+    "GSETTINGS_SCHEMA_DIR",
+    "GDK_PIXBUF_MODULE_FILE",
+    "GDK_PIXBUF_MODULEDIR",
+    "GST_PLUGIN_SYSTEM_PATH",
+    "GST_PLUGIN_PATH",
+    "QT_PLUGIN_PATH",
+    "PYTHONPATH",
+    "PYTHONHOME",
+    "PERLLIB",
+];
+
+/// One fix to apply to a spawned child's environment.
+#[derive(Debug, PartialEq, Eq)]
+enum EnvFix {
+    /// Restore the value `AppRun` saved (in `<VAR>_ORIG`) before overriding it.
+    Restore(String),
+    /// No saved original — drop the override so the system default applies.
+    Remove,
+}
+
+/// Compute the environment fixes needed so a spawned process uses *system*
+/// libraries instead of the AppImage's bundled ones.
+///
+/// `get` is the environment lookup (injected for testability). Returns no
+/// fixes when not running inside an AppImage: on a normal install
+/// `LD_LIBRARY_PATH` and friends may be set intentionally and must be left
+/// untouched. AppImage's `AppRun` always exports `APPDIR`; `APPIMAGE` points at
+/// the `.AppImage` file — either marks the bundled runtime.
+fn appimage_env_fixes(get: &dyn Fn(&str) -> Option<String>) -> Vec<(&'static str, EnvFix)> {
+    if get("APPDIR").is_none() && get("APPIMAGE").is_none() {
+        return Vec::new();
+    }
+    let mut fixes = Vec::new();
+    for &var in APPIMAGE_POLLUTED_VARS {
+        match get(&format!("{var}_ORIG")) {
+            Some(orig) => fixes.push((var, EnvFix::Restore(orig))),
+            None if get(var).is_some() => fixes.push((var, EnvFix::Remove)),
+            None => {}
+        }
+    }
+    fixes
+}
+
 /// Builds a `Command` for any binary with CREATE_NO_WINDOW on Windows.
 /// Prevents black CMD console windows from flashing when spawning child processes.
 ///
@@ -141,6 +196,18 @@ pub(crate) fn hidden_cmd(bin: &str) -> std::process::Command {
             }
         }
         cmd.env("PATH", enriched);
+    }
+    // Undo AppImage library-path pollution so the spawned binary loads system
+    // libs, not the bundle's. No-op unless we're running inside an AppImage
+    // (gated by APPDIR/APPIMAGE), so it's safe to run on every platform. See
+    // `appimage_env_fixes` — this is the fix for the Linux OAuth failure in
+    // GitHub issue #48.
+    let get_env = |k: &str| std::env::var(k).ok();
+    for (var, fix) in appimage_env_fixes(&get_env) {
+        match fix {
+            EnvFix::Restore(value) => { cmd.env(var, value); }
+            EnvFix::Remove         => { cmd.env_remove(var); }
+        }
     }
     // Defensive: propagate auth tokens explicitly to every subprocess so
     // `gh` (and any other CLI that respects these env vars) bypasses the
@@ -213,6 +280,59 @@ pub(crate) fn resolve_git_dir(cwd: &str) -> Result<PathBuf, String> {
 
     cache.lock().unwrap().insert(cwd.to_string(), path.clone());
     Ok(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    /// Build an env-lookup closure backed by a fixed map (no global state).
+    fn lookup<'a>(map: &'a HashMap<&'a str, &'a str>) -> impl Fn(&str) -> Option<String> + 'a {
+        move |k: &str| map.get(k).map(|s| s.to_string())
+    }
+
+    #[test]
+    fn appimage_env_fixes_left_alone_outside_appimage() {
+        // No APPDIR/APPIMAGE → a legitimately-set LD_LIBRARY_PATH is untouched.
+        let env: HashMap<&str, &str> = [("LD_LIBRARY_PATH", "/usr/lib/x86_64-linux-gnu")]
+            .into_iter()
+            .collect();
+        assert!(appimage_env_fixes(&lookup(&env)).is_empty());
+    }
+
+    #[test]
+    fn appimage_env_fixes_removes_polluted_var_without_orig() {
+        // Inside an AppImage, a bundled LD_LIBRARY_PATH with no saved original
+        // is dropped so the child falls back to the system default.
+        let env: HashMap<&str, &str> =
+            [("APPDIR", "/tmp/.mount_app"), ("LD_LIBRARY_PATH", "/tmp/.mount_app/usr/lib")]
+                .into_iter()
+                .collect();
+        assert_eq!(
+            appimage_env_fixes(&lookup(&env)),
+            vec![("LD_LIBRARY_PATH", EnvFix::Remove)]
+        );
+    }
+
+    #[test]
+    fn appimage_env_fixes_restores_apprun_saved_original() {
+        // AppRun stashes the pre-override value in <VAR>_ORIG; restore it.
+        let env: HashMap<&str, &str> = [
+            ("APPIMAGE", "/home/u/GitWand.AppImage"),
+            ("LD_LIBRARY_PATH", "/tmp/.mount_app/usr/lib"),
+            ("LD_LIBRARY_PATH_ORIG", "/usr/lib:/usr/local/lib"),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(
+            appimage_env_fixes(&lookup(&env)),
+            vec![(
+                "LD_LIBRARY_PATH",
+                EnvFix::Restore("/usr/lib:/usr/local/lib".to_string())
+            )]
+        );
+    }
 }
 
 
