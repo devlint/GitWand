@@ -6,16 +6,26 @@ import {
   readFile,
   writeFile,
   readGitwandrc,
+  getTreeConflicts,
+  resolveTreeConflict,
 } from "../utils/backend";
 import { useFolderHistory } from "./useFolderHistory";
 import { useAIProvider } from "./useAIProvider";
 import { t } from "./useI18n";
 import { applyMemory, type ResolutionMemoryEntry } from "./useResolutionMemory";
 
+export interface TreeConflictInfo {
+  code: string;
+  hasOurs: boolean;
+  hasTheirs: boolean;
+  hasBase: boolean;
+}
+
 export interface ConflictFile {
   path: string;
   content: string;
   result: MergeResult;
+  tree?: TreeConflictInfo;
 }
 
 export interface GlobalStats {
@@ -323,8 +333,12 @@ export function useGitWand() {
    */
   async function loadRealFiles(cwd: string) {
     const conflictedPaths = await getConflictedFiles(cwd);
+    const treeConflicts = await getTreeConflicts(cwd);
+    const treeMap = new Map(treeConflicts.map(t => [t.path, t]));
+    // Union: tree conflicts may include paths (e.g. both-deleted) the marker scan would choke on.
+    const allPaths = Array.from(new Set([...conflictedPaths, ...treeConflicts.map(t => t.path)]));
 
-    if (conflictedPaths.length === 0) {
+    if (allPaths.length === 0) {
       error.value = "Aucun fichier en conflit trouvé dans ce dossier.";
       files.value = [];
       return;
@@ -402,7 +416,19 @@ export function useGitWand() {
       : resolveOptions.value;
 
     const loaded: ConflictFile[] = await Promise.all(
-      conflictedPaths.map(async (filePath) => {
+      allPaths.map(async (filePath) => {
+        const tc = treeMap.get(filePath);
+        if (tc) {
+          // Tree conflict: do not parse markers. Read working-tree content best-effort (for preview).
+          let content = "";
+          try { content = await readFile(cwd, filePath); } catch { /* file may be absent (both-deleted) */ }
+          return {
+            path: filePath,
+            content,
+            result: await resolveAsync(content, filePath, resolveOptionsWithLlm, structuralOpts),
+            tree: { code: tc.code, hasOurs: tc.hasOurs, hasTheirs: tc.hasTheirs, hasBase: tc.hasBase },
+          };
+        }
         const content = await readFile(cwd, filePath);
         return {
           path: filePath,
@@ -776,6 +802,23 @@ export async function fetchUsers() {
   }
 
   /**
+   * Resolve a tree conflict (modify/delete, both-deleted, …) via the backend,
+   * then drop the file from the conflict list. The backend stages/removes the
+   * path, so no save is needed. Throws on backend error.
+   */
+  async function resolveTreeConflictFile(
+    path: string,
+    choice: "ours" | "theirs" | "delete",
+  ): Promise<void> {
+    if (!folderPath.value) return;
+    await resolveTreeConflict(folderPath.value, path, choice);
+    files.value = files.value.filter((f) => f.path !== path);
+    if (selectedPath.value === path) {
+      selectedPath.value = files.value[0]?.path ?? null;
+    }
+  }
+
+  /**
    * Apply a memorized resolution rule to every hunk in a file. Hunks where the
    * rule can't apply (e.g. "date-latest" but content is no longer a date) keep
    * their conflict markers and are reported via the returned counts.
@@ -915,5 +958,6 @@ export async function fetchUsers() {
     redo,
     selectFile,
     refreshLlmFallbackConfig,
+    resolveTreeConflictFile,
   };
 }
