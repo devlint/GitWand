@@ -1973,7 +1973,6 @@ const en = {
   scope: {
     picker: "Scope",
     wholeRepo: "Whole repo",
-    here: "Scope here",
     custom: "Custom folder…",
     active: "Scoped to {0}",
     hidden: "{0} commits hidden",

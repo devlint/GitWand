@@ -1933,7 +1933,6 @@ const ptBR: Locale = {
   scope: {
     picker: "Escopo",
     wholeRepo: "Repositório inteiro",
-    here: "Definir escopo aqui",
     custom: "Pasta personalizada…",
     active: "Escopo em {0}",
     hidden: "{0} commits ocultos",

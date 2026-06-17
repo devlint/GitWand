@@ -13,7 +13,9 @@ _Inspired by GitSquid. Makes GitWand ergonomic on large monorepos (pnpm, Cargo, 
 - **Workspace scope picker**: select a sub-workspace — the graph, commit search, and stats all scope to its file tree
 - **Auto-detection**: reads `pnpm-workspace.yaml`, `Cargo.toml [workspace]`, `nx.json`, `turbo.json`, `go.work`
 - **Scope persisted per repo** in `.gitwand-workspace.json`
-- **Right-click on a folder** in the folder tree → "Scope here" — ad-hoc scope without config
+- **Ad-hoc scope without config**: a "Custom folder…" entry in the picker opens the native folder picker → scope to any directory
+
+**Follow-up (separate PR):** an in-app repo **folder-browser** panel (recursive working-tree tree) with a right-click **"Scope here"** — the gesture the roadmap originally envisioned. Deferred because the only existing tree (`FolderDiffTree`) is a *diff* tree (changed folders between two refs), the wrong substrate for general scoping, and is currently unmounted. Ad-hoc scoping already ships via the native picker above, so this is a UX nicety, not a capability gap.
 
 ---
 

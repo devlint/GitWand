@@ -1933,7 +1933,6 @@ const es: Locale = {
   scope: {
     picker: "Ámbito",
     wholeRepo: "Todo el repositorio",
-    here: "Acotar aquí",
     custom: "Carpeta personalizada…",
     active: "Acotado a {0}",
     hidden: "{0} commits ocultos",

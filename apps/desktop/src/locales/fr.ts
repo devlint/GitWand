@@ -1946,7 +1946,6 @@ const fr: Locale = {
   scope: {
     picker: "Périmètre",
     wholeRepo: "Dépôt entier",
-    here: "Limiter ici",
     custom: "Dossier personnalisé…",
     active: "Limité à {0}",
     hidden: "{0} commits masqués",

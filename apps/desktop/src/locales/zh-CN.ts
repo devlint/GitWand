@@ -1918,7 +1918,6 @@ const zhCN: Locale = {
   scope: {
     picker: "范围",
     wholeRepo: "整个仓库",
-    here: "限定到此处",
     custom: "自定义文件夹…",
     active: "已限定到 {0}",
     hidden: "已隐藏 {0} 个提交",
