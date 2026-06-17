@@ -64,7 +64,7 @@ import type { GitLogEntry } from "./utils/backend";
 import { getPersistedDiffMode, persistDiffMode, type DiffMode } from "./utils/diffMode";
 import { isImagePath } from "./utils/imagePath";
 import { useGitWand } from "./composables/useGitWand";
-import type { ResolutionMemoryEntry } from "./composables/useResolutionMemory";
+import { useResolutionMemory, type ResolutionMemoryEntry, type ResolutionStrategy } from "./composables/useResolutionMemory";
 import { useRepoTabs } from "./composables/useRepoTabs";
 import { useGitRepo, type ViewMode } from "./composables/useGitRepo";
 import { useWorkspaceScope } from "./composables/useWorkspaceScope";
@@ -97,6 +97,7 @@ import { useCommitActions } from "./composables/useCommitActions";
 
 const { t } = useI18n();
 const { settings, refreshSettings } = useSettings();
+const { saveMemory } = useResolutionMemory();
 // `useNetworkStatus` covers `navigator.onLine` — kept around because
 // `useScheduler` already consumes it and we don't want to retire that path
 // in this commit. `useConnectivity` (F1) adds a real probe-based signal
@@ -487,6 +488,7 @@ async function onMergeSuccessDeleteBranch(branch: string, alsoRemote: boolean) {
 const successToast = ref<string | null>(null);
 const successToastDetail = ref<string | null>(null);
 const successToastLeaving = ref(false);
+const memorizeToast = ref<{ path: string; strategy: ResolutionStrategy } | null>(null);
 let successTimer: number | null = null;
 
 function dismissToast() {
@@ -602,6 +604,19 @@ function handleResolveHunkCustom(path: string, hunkIndex: number, content: strin
 function handleResolveFileBulk(path: string, choice: "ours" | "theirs" | "both") {
   resolveFileBulk(path, choice);
   checkAndSaveIfResolved(path);
+  memorizeToast.value = { path, strategy: choice };
+}
+
+function acceptMemorizeToast() {
+  if (!memorizeToast.value) return;
+  const { path, strategy } = memorizeToast.value;
+  const label = `${strategy} — ${path.split("/").pop()}`;
+  saveMemory(path, strategy, label, null);
+  memorizeToast.value = null;
+}
+
+function dismissMemorizeToast() {
+  memorizeToast.value = null;
 }
 
 function handleApplyFileMemory(path: string, entry: ResolutionMemoryEntry) {
@@ -2323,6 +2338,11 @@ onUnmounted(() => {
 
             <!-- Changes view: conflict editor, file history, or diff viewer -->
             <template v-else-if="viewMode === 'changes'">
+              <div v-if="memorizeToast && showingMergeEditor" class="me-memory-offer">
+                <span>{{ t("mergeEditor.memorizeFileOffer", memorizeToast.path.split('/').pop() || memorizeToast.path) }}</span>
+                <button class="me-memory-btn me-memory-btn--save" @click="acceptMemorizeToast">{{ t("mergeEditor.memorySave") }}</button>
+                <button class="me-memory-btn" @click="dismissMemorizeToast">{{ t("common.close") }}</button>
+              </div>
               <MergeEditor v-if="showingMergeEditor && mergeSelectedFile" :file="mergeSelectedFile"
                 @resolve="handleResolveFile" @resolve-hunk="(path, idx, choice) => handleResolveHunk(path, idx, choice)"
                 @resolve-hunk-custom="(path, idx, content) => handleResolveHunkCustom(path, idx, content)"
@@ -3481,5 +3501,42 @@ onUnmounted(() => {
 .cam-radio-hint {
   font-size: var(--font-size-xs);
   color: var(--color-text-muted);
+}
+
+/* ── App-level bulk-resolution memorize toast ── */
+.me-memory-offer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  background: var(--color-bg-secondary);
+  border-bottom: 1px solid var(--color-border);
+  font-size: 11px;
+  color: var(--color-text-primary);
+}
+
+.me-memory-btn {
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+  padding: 2px 7px;
+  color: var(--color-text-muted);
+  transition: background 0.12s;
+}
+
+.me-memory-btn:hover {
+  background: var(--color-bg-tertiary);
+}
+
+.me-memory-btn--save {
+  color: var(--color-success, #22c55e);
+  border-color: var(--color-success, #22c55e);
+}
+
+.me-memory-btn--save:hover {
+  background: var(--color-success-soft, rgba(34,197,94,.12));
 }
 </style>

@@ -283,37 +283,14 @@ function applyMemoryToWholeFile() {
   markUsed(fileMemory.value.id);
 }
 
-// ─── File-level bulk resolution + memorize offer ────────
-/** Strategy offered for memorization after a file-level bulk action. */
-const fileMemoryOfferStrategy = ref<ResolutionStrategy | null>(null);
-
+// ─── File-level bulk resolution ─────────────────────────
 /** True when the core flagged any hunk as a generated (build) file. */
 const isGeneratedFileLocal = computed(() =>
   hunks.value.some((h) => h.type === "generated_file"),
 );
 
-watch(
-  () => props.file.path,
-  () => {
-    fileMemoryOfferStrategy.value = null;
-  },
-);
-
 function bulkResolve(choice: "ours" | "theirs" | "both") {
   emit("resolveFileBulk", props.file.path, choice);
-  // ours/theirs/both are all valid memorizable strategies
-  setTimeout(() => { fileMemoryOfferStrategy.value = choice; }, 200);
-}
-
-function acceptFileMemoryOffer() {
-  if (!fileMemoryOfferStrategy.value) return;
-  const label = `${fileMemoryOfferStrategy.value} — ${props.file.path.split("/").pop()}`;
-  saveMemory(props.file.path, fileMemoryOfferStrategy.value, label, null);
-  fileMemoryOfferStrategy.value = null;
-}
-
-function dismissFileMemoryOffer() {
-  fileMemoryOfferStrategy.value = null;
 }
 
 /** Does a given hunk carry an `llm_proposed` decision with a trace? */
@@ -711,13 +688,6 @@ onMounted(() => {
       <span>{{ t("mergeEditor.memorySaveOffer") }}</span>
       <button class="me-memory-btn me-memory-btn--save" @click="acceptMemoryOffer">{{ t("mergeEditor.memorySave") }}</button>
       <button class="me-memory-btn" @click="dismissMemoryOffer">{{ t("common.close") }}</button>
-    </div>
-
-    <!-- File-level memorize offer (after a bulk action) -->
-    <div v-if="fileMemoryOfferStrategy !== null" class="me-memory-offer">
-      <span>{{ t("mergeEditor.memorizeFileOffer", file.path.split('/').pop() || file.path) }}</span>
-      <button class="me-memory-btn me-memory-btn--save" @click="acceptFileMemoryOffer">{{ t("mergeEditor.memorySave") }}</button>
-      <button class="me-memory-btn" @click="dismissFileMemoryOffer">{{ t("common.close") }}</button>
     </div>
 
     <!-- Editor body: code + minimap -->
