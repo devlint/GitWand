@@ -14,6 +14,7 @@ import {
   detectPattern,
   applyMemory,
   type ResolutionStrategy,
+  type ResolutionMemoryEntry,
 } from "../composables/useResolutionMemory";
 import LlmTracePanel from "./LlmTracePanel.vue";
 
@@ -35,6 +36,8 @@ const emit = defineEmits<{
   resolve: [path: string];
   resolveHunk: [path: string, hunkIndex: number, choice: ManualChoice];
   resolveHunkCustom: [path: string, hunkIndex: number, content: string];
+  resolveFileBulk: [path: string, choice: "ours" | "theirs" | "both"];
+  applyFileMemory: [path: string, entry: ResolutionMemoryEntry];
   /** Custom automation ran and committed; parent should refresh status */
   automationDone: [commitHash: string];
 }>();
@@ -262,6 +265,39 @@ const canResolve = computed(
 );
 
 const hunks = computed(() => props.file.result.hunks);
+
+// ─── File-level bulk resolution + memorize offer ────────
+/** Strategy offered for memorization after a file-level bulk action. */
+const fileMemoryOfferStrategy = ref<ResolutionStrategy | null>(null);
+
+/** True when the core flagged any hunk as a generated (build) file. */
+const isGeneratedFileLocal = computed(() =>
+  hunks.value.some((h) => h.type === "generated_file"),
+);
+
+watch(
+  () => props.file.path,
+  () => {
+    fileMemoryOfferStrategy.value = null;
+  },
+);
+
+function bulkResolve(choice: "ours" | "theirs" | "both") {
+  emit("resolveFileBulk", props.file.path, choice);
+  // ours/theirs/both are all valid memorizable strategies
+  setTimeout(() => { fileMemoryOfferStrategy.value = choice; }, 200);
+}
+
+function acceptFileMemoryOffer() {
+  if (!fileMemoryOfferStrategy.value) return;
+  const label = `${fileMemoryOfferStrategy.value} — ${props.file.path.split("/").pop()}`;
+  saveMemory(props.file.path, fileMemoryOfferStrategy.value, label, null);
+  fileMemoryOfferStrategy.value = null;
+}
+
+function dismissFileMemoryOffer() {
+  fileMemoryOfferStrategy.value = null;
+}
 
 /** Does a given hunk carry an `llm_proposed` decision with a trace? */
 function hasLlmTrace(hunk: ConflictHunk): boolean {
@@ -598,6 +634,13 @@ onMounted(() => {
         </svg>
         {{ t('merge.resolveAuto') }}
       </button>
+      <div class="me-bulk-actions" v-if="file.result.stats.totalConflicts > 0">
+        <span class="me-bulk-label muted">{{ t('merge.bulkLabel') }}</span>
+        <button class="me-bulk-btn" @click="bulkResolve('ours')">{{ t('merge.bulkOurs') }}</button>
+        <button class="me-bulk-btn" @click="bulkResolve('theirs')">{{ t('merge.bulkTheirs') }}</button>
+        <button class="me-bulk-btn" @click="bulkResolve('both')">{{ t('merge.bulkBoth') }}</button>
+        <span v-if="isGeneratedFileLocal" class="me-bulk-warn">{{ t('merge.bulkGeneratedWarning') }}</span>
+      </div>
     </div>
 
     <!-- Custom Automation banner -->
@@ -641,6 +684,13 @@ onMounted(() => {
       <span>{{ t("mergeEditor.memorySaveOffer") }}</span>
       <button class="me-memory-btn me-memory-btn--save" @click="acceptMemoryOffer">{{ t("mergeEditor.memorySave") }}</button>
       <button class="me-memory-btn" @click="dismissMemoryOffer">{{ t("common.close") }}</button>
+    </div>
+
+    <!-- File-level memorize offer (after a bulk action) -->
+    <div v-if="fileMemoryOfferStrategy !== null" class="me-memory-offer">
+      <span>{{ t("mergeEditor.memorizeFileOffer", file.path.split('/').pop() || file.path) }}</span>
+      <button class="me-memory-btn me-memory-btn--save" @click="acceptFileMemoryOffer">{{ t("mergeEditor.memorySave") }}</button>
+      <button class="me-memory-btn" @click="dismissFileMemoryOffer">{{ t("common.close") }}</button>
     </div>
 
     <!-- Editor body: code + minimap -->
@@ -1512,6 +1562,32 @@ onMounted(() => {
   word-break: break-word;
   max-height: 120px;
   overflow-y: auto;
+}
+
+/* ─── File-level bulk actions ──────────────────────────── */
+.me-bulk-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.me-bulk-label {
+  font-size: 12px;
+}
+.me-bulk-btn {
+  font-size: 12px;
+  padding: 2px 8px;
+  border: 1px solid var(--border-color, #d0d0d0);
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+}
+.me-bulk-btn:hover {
+  background: var(--hover-bg, rgba(0, 0, 0, 0.05));
+}
+.me-bulk-warn {
+  font-size: 11px;
+  color: var(--warning-color, #b8860b);
 }
 
 /* ─── Resolution Memory banner ─────────────────────────── */
