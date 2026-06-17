@@ -10,6 +10,7 @@ import {
 import { useFolderHistory } from "./useFolderHistory";
 import { useAIProvider } from "./useAIProvider";
 import { t } from "./useI18n";
+import { applyMemory, type ResolutionMemoryEntry } from "./useResolutionMemory";
 
 export interface ConflictFile {
   path: string;
@@ -742,6 +743,72 @@ export async function fetchUsers() {
   }
 
   /**
+   * Resolve EVERY hunk in a file with a single choice (ours/theirs/both),
+   * including complex/low-confidence hunks. Distinct from `resolveFile`
+   * (which only applies the core's safe auto-resolutions). Reversible via undo.
+   */
+  function resolveFileBulk(
+    path: string,
+    choice: "ours" | "theirs" | "both",
+  ): { applied: number; total: number } {
+    const file = files.value.find((f) => f.path === path);
+    if (!file) return { applied: 0, total: 0 };
+
+    const { content: newContent, applied, total } = resolveAllConflictBlocks(
+      file.content,
+      (b) => {
+        if (choice === "ours") return b.oursLines.join("\n");
+        if (choice === "theirs") return b.theirsLines.join("\n");
+        return [...b.oursLines, ...b.theirsLines].join("\n");
+      },
+    );
+
+    if (newContent !== file.content) {
+      pushUndo();
+      const idx = files.value.indexOf(file);
+      files.value[idx] = {
+        ...file,
+        content: newContent,
+        result: resolve(newContent, file.path, resolveOptions.value),
+      };
+    }
+    return { applied, total };
+  }
+
+  /**
+   * Apply a memorized resolution rule to every hunk in a file. Hunks where the
+   * rule can't apply (e.g. "date-latest" but content is no longer a date) keep
+   * their conflict markers and are reported via the returned counts.
+   */
+  function applyMemoryToFile(
+    path: string,
+    entry: ResolutionMemoryEntry,
+  ): { applied: number; total: number } {
+    const file = files.value.find((f) => f.path === path);
+    if (!file) return { applied: 0, total: 0 };
+
+    const { content: newContent, applied, total } = resolveAllConflictBlocks(
+      file.content,
+      (b) =>
+        applyMemory(entry, {
+          oursLines: b.oursLines,
+          theirsLines: b.theirsLines,
+        } as ConflictHunk),
+    );
+
+    if (newContent !== file.content) {
+      pushUndo();
+      const idx = files.value.indexOf(file);
+      files.value[idx] = {
+        ...file,
+        content: newContent,
+        result: resolve(newContent, file.path, resolveOptions.value),
+      };
+    }
+    return { applied, total };
+  }
+
+  /**
    * Save a resolved file back to disk.
    */
   async function saveFile(path: string) {
@@ -839,6 +906,8 @@ export async function fetchUsers() {
     resolveFile,
     resolveHunkManual,
     resolveHunkCustom,
+    resolveFileBulk,
+    applyMemoryToFile,
     saveFile,
     saveAllFiles,
     openPath,

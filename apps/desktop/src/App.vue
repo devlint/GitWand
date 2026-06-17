@@ -64,6 +64,7 @@ import type { GitLogEntry } from "./utils/backend";
 import { getPersistedDiffMode, persistDiffMode, type DiffMode } from "./utils/diffMode";
 import { isImagePath } from "./utils/imagePath";
 import { useGitWand } from "./composables/useGitWand";
+import type { ResolutionMemoryEntry } from "./composables/useResolutionMemory";
 import { useRepoTabs } from "./composables/useRepoTabs";
 import { useGitRepo, type ViewMode } from "./composables/useGitRepo";
 import { useWorkspaceScope } from "./composables/useWorkspaceScope";
@@ -125,6 +126,8 @@ const {
   resolveFile,
   resolveHunkManual,
   resolveHunkCustom,
+  resolveFileBulk,
+  applyMemoryToFile,
   saveFile,
   saveAllFiles,
   undo,
@@ -594,6 +597,14 @@ function handleResolveFile(path: string) {
 function handleResolveHunkCustom(path: string, hunkIndex: number, content: string) {
   resolveHunkCustom(path, hunkIndex, content);
   checkAndSaveIfResolved(path);
+}
+
+function handleResolveFileBulk(path: string, choice: "ours" | "theirs" | "both") {
+  resolveFileBulk(path, choice);
+}
+
+function handleApplyFileMemory(path: string, entry: ResolutionMemoryEntry) {
+  applyMemoryToFile(path, entry);
 }
 
 // ─── Edit commit overlay ────────────────────────────────
@@ -2312,7 +2323,9 @@ onUnmounted(() => {
             <template v-else-if="viewMode === 'changes'">
               <MergeEditor v-if="showingMergeEditor && mergeSelectedFile" :file="mergeSelectedFile"
                 @resolve="handleResolveFile" @resolve-hunk="(path, idx, choice) => handleResolveHunk(path, idx, choice)"
-                @resolve-hunk-custom="(path, idx, content) => handleResolveHunkCustom(path, idx, content)" />
+                @resolve-hunk-custom="(path, idx, content) => handleResolveHunkCustom(path, idx, content)"
+                @resolve-file-bulk="(path, choice) => handleResolveFileBulk(path, choice)"
+                @apply-file-memory="(path, entry) => handleApplyFileMemory(path, entry)" />
               <FileHistoryViewer v-else-if="fileHistoryPath && repoFolderPath" :file-path="fileHistoryPath"
                 :cwd="repoFolderPath" @close="closeFileHistory"
                 @select-commit="(hash) => { closeFileHistory(); selectCommit(hash); viewMode = 'history'; }" />
