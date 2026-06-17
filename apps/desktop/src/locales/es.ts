@@ -707,7 +707,16 @@ const es: Locale = {
     successPush: "Push",
     deleteMergedBranch: "Eliminar «{0}»",
     deleteAlsoRemote: "Eliminar también en el remote",
-
+    treeTitle: "Conflicto de árbol",
+    treeBadge: "eliminado",
+    treeKeepOurs: "Mantener versión actual",
+    treeKeepTheirs: "Mantener versión entrante",
+    treeAcceptDelete: "Aceptar eliminación",
+    treeModifiedOursDeletedTheirs: "Modificado en lado actual, eliminado en lado entrante",
+    treeDeletedOursModifiedTheirs: "Eliminado en lado actual, modificado en lado entrante",
+    treeBothDeleted: "Eliminado en ambos lados",
+    treeBothPresent: "Agregado en ambos lados",
+    treePreviewLabel: "Vista previa del contenido conservado",
   },
 
   // ─── PR creation ────────────────────────────────────────

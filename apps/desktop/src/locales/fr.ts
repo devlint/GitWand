@@ -714,7 +714,16 @@ const fr: Locale = {
     successPush: "Push",
     deleteMergedBranch: "Supprimer « {0} »",
     deleteAlsoRemote: "Supprimer aussi sur le remote",
-
+    treeTitle: "Conflit d'arborescence",
+    treeBadge: "supprimé",
+    treeKeepOurs: "Garder la version courante",
+    treeKeepTheirs: "Garder la version entrante",
+    treeAcceptDelete: "Accepter la suppression",
+    treeModifiedOursDeletedTheirs: "Modifié côté courant, supprimé côté entrant",
+    treeDeletedOursModifiedTheirs: "Supprimé côté courant, modifié côté entrant",
+    treeBothDeleted: "Supprimé des deux côtés",
+    treeBothPresent: "Ajouté des deux côtés",
+    treePreviewLabel: "Aperçu du contenu conservé",
   },
 
   // ─── PR creation ────────────────────────────────────────

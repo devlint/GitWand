@@ -721,6 +721,16 @@ const en = {
     successPush: "Push",
     deleteMergedBranch: "Delete \u201c{0}\u201d",
     deleteAlsoRemote: "Also delete from remote",
+    treeTitle: "Tree conflict",
+    treeBadge: "deleted",
+    treeKeepOurs: "Keep current version",
+    treeKeepTheirs: "Keep incoming version",
+    treeAcceptDelete: "Accept deletion",
+    treeModifiedOursDeletedTheirs: "Modified on current side, deleted on incoming side",
+    treeDeletedOursModifiedTheirs: "Deleted on current side, modified on incoming side",
+    treeBothDeleted: "Deleted on both sides",
+    treeBothPresent: "Added on both sides",
+    treePreviewLabel: "Preview of the kept content",
   },
 
   // ─── PR creation ────────────────────────────────────────

@@ -708,7 +708,16 @@ const ptBR: Locale = {
     successPush: "Push",
     deleteMergedBranch: "Excluir “{0}”",
     deleteAlsoRemote: "Excluir também no remote",
-
+    treeTitle: "Conflito de árvore",
+    treeBadge: "excluído",
+    treeKeepOurs: "Manter versão atual",
+    treeKeepTheirs: "Manter versão recebida",
+    treeAcceptDelete: "Aceitar exclusão",
+    treeModifiedOursDeletedTheirs: "Modificado no lado atual, excluído no lado recebido",
+    treeDeletedOursModifiedTheirs: "Excluído no lado atual, modificado no lado recebido",
+    treeBothDeleted: "Excluído em ambos os lados",
+    treeBothPresent: "Adicionado em ambos os lados",
+    treePreviewLabel: "Visualização do conteúdo mantido",
   },
 
   // ─── PR creation ────────────────────────────────────────

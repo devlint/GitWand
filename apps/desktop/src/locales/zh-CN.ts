@@ -697,7 +697,16 @@ const zhCN: Locale = {
     successPush: "推送",
     deleteMergedBranch: "删除“{0}”",
     deleteAlsoRemote: "同时从远程删除",
-
+    treeTitle: "树冲突",
+    treeBadge: "已删除",
+    treeKeepOurs: "保留当前版本",
+    treeKeepTheirs: "保留传入版本",
+    treeAcceptDelete: "接受删除",
+    treeModifiedOursDeletedTheirs: "当前侧已修改，传入侧已删除",
+    treeDeletedOursModifiedTheirs: "当前侧已删除，传入侧已修改",
+    treeBothDeleted: "两侧均已删除",
+    treeBothPresent: "两侧均已添加",
+    treePreviewLabel: "保留内容的预览",
   },
 
   pr: {
