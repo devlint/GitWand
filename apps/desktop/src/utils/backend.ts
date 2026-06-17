@@ -115,6 +115,18 @@ export async function getTreeConflicts(cwd: string): Promise<TreeConflict[]> {
   return [];
 }
 
+export async function resolveTreeConflict(
+  cwd: string,
+  path: string,
+  choice: "ours" | "theirs" | "delete",
+): Promise<void> {
+  if (isTauri()) {
+    await tauriInvoke("resolve_tree_conflict", { cwd, path, choice });
+    return;
+  }
+  throw new Error("resolveTreeConflict is not available in dev-server mode");
+}
+
 /**
  * Read a file's content.
  */
