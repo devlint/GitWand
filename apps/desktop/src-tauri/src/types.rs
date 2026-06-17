@@ -850,3 +850,16 @@ pub struct ShortlogEntry {
     pub email: String,
     pub count: u32,
 }
+
+// ─── Tree conflict types ───────────────────────────────────────────
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TreeConflict {
+    pub path: String,
+    /// git short-status code, e.g. "UD", "DU", "DD", "AU", "UA"
+    pub code: String,
+    pub has_base: bool,
+    pub has_ours: bool,
+    pub has_theirs: bool,
+}

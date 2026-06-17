@@ -2473,6 +2473,62 @@ pub(crate) async fn get_conflicted_files(cwd: String) -> Result<Vec<String>, Str
     Ok(files)
 }
 
+// ─── Tree conflicts (markerless: modify/delete, both-deleted) ─────
+
+/// Parse `git status --porcelain=v2` and return unmerged paths that are *tree*
+/// conflicts (not pure content conflicts). A porcelain-v2 unmerged line looks like:
+///   u <XY> <sub> <m1> <m2> <m3> <mW> <h1> <h2> <h3> <path>
+/// where m1/m2/m3 are the octal modes for stages 1/2/3 ("000000" when the stage
+/// is absent) and mW is the worktree mode. We treat a path as a tree conflict
+/// when NOT (stage2 && stage3), i.e. at least one of ours/theirs is missing —
+/// modify/delete, both-deleted, add/delete. Pure content conflicts (UU, AA)
+/// have both stages and carry `<<<<<<<` markers, so the existing content flow
+/// handles them.
+fn collect_tree_conflicts(cwd: &str) -> Result<Vec<crate::types::TreeConflict>, String> {
+    let output = git_cmd()
+        .args(["status", "--porcelain=v2", "--untracked-files=no"])
+        .current_dir(cwd)
+        .output()
+        .map_err(|e| format!("Failed to run git status: {}", e))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("git status failed: {}", stderr));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut result = Vec::new();
+    for line in stdout.lines() {
+        // Unmerged entries start with "u ".
+        let Some(rest) = line.strip_prefix("u ") else { continue };
+        // Porcelain-v2 unmerged format (10 space-separated tokens):
+        //   XY sub m1 m2 m3 mW h1 h2 h3 path
+        // splitn(10, ' ') puts path at index 9.
+        let mut parts = rest.splitn(10, ' ');
+        let code = parts.next().unwrap_or("").to_string();   // XY
+        let _sub = parts.next();                              // submodule state
+        let m1 = parts.next().unwrap_or("000000");           // stage 1 (base)
+        let m2 = parts.next().unwrap_or("000000");           // stage 2 (ours)
+        let m3 = parts.next().unwrap_or("000000");           // stage 3 (theirs)
+        let _mw = parts.next();                               // worktree mode
+        let _h1 = parts.next();
+        let _h2 = parts.next();
+        let _h3 = parts.next();
+        let path = parts.next().unwrap_or("").to_string();   // remainder = path
+        if path.is_empty() { continue; }
+        let has_base = m1 != "000000";
+        let has_ours = m2 != "000000";
+        let has_theirs = m3 != "000000";
+        // Only markerless tree conflicts: at least one side missing.
+        if has_ours && has_theirs { continue; }
+        result.push(crate::types::TreeConflict { path, code, has_base, has_ours, has_theirs });
+    }
+    Ok(result)
+}
+
+#[tauri::command]
+pub(crate) async fn get_tree_conflicts(cwd: String) -> Result<Vec<crate::types::TreeConflict>, String> {
+    collect_tree_conflicts(&cwd)
+}
+
 // ─── Git remote info ─────────────────────────────────────────
 
 #[tauri::command]
@@ -2865,4 +2921,93 @@ pub(crate) async fn open_in_editor(cwd: String, path: String, editor: String) ->
 #[tauri::command]
 pub(crate) async fn get_command_log() -> Vec<crate::git::cmd::CmdLogEntry> {
     crate::git::cmd::cmd_log_snapshot()
+}
+
+#[cfg(test)]
+mod tree_conflict_tests {
+    use super::*;
+    use crate::git::cmd::git_binary;
+    use std::path::PathBuf;
+    use std::process::Command;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    struct TempRepo { path: PathBuf }
+    impl Drop for TempRepo { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.path); } }
+    impl TempRepo {
+        fn new() -> Self {
+            let n = COUNTER.fetch_add(1, Ordering::SeqCst);
+            let pid = std::process::id();
+            let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+            let dir = std::env::temp_dir().join(format!("gitwand-tree-test-{}-{}-{}", pid, n, nanos));
+            std::fs::create_dir_all(&dir).unwrap();
+            let repo = TempRepo { path: dir };
+            repo.git(&["init", "-q", "-b", "main"]);
+            repo.git(&["config", "user.name", "Test"]);
+            repo.git(&["config", "user.email", "test@example.com"]);
+            repo.git(&["config", "commit.gpgsign", "false"]);
+            repo
+        }
+        fn cwd(&self) -> String { self.path.to_str().unwrap().to_string() }
+        fn git(&self, args: &[&str]) -> std::process::Output {
+            let out = Command::new(git_binary()).args(args).current_dir(&self.path).output()
+                .unwrap_or_else(|e| panic!("git {:?} spawn: {}", args, e));
+            out
+        }
+        fn git_ok(&self, args: &[&str]) {
+            let out = self.git(args);
+            assert!(out.status.success(), "git {:?} failed: {}", args, String::from_utf8_lossy(&out.stderr));
+        }
+        fn write(&self, rel: &str, content: &str) {
+            let p = self.path.join(rel);
+            if let Some(parent) = p.parent() { std::fs::create_dir_all(parent).unwrap(); }
+            std::fs::write(p, content).unwrap();
+        }
+        fn commit_all(&self, msg: &str) { self.git_ok(&["add", "-A"]); self.git_ok(&["commit", "-q", "-m", msg]); }
+    }
+
+    /// Build a modify/delete conflict: main deletes the file, feature modifies it,
+    /// then merge main into feature → "UD" (modified by us / deleted by them).
+    fn make_modify_delete(repo: &TempRepo) {
+        repo.write("doomed.txt", "original\n");
+        repo.commit_all("base");
+        repo.git_ok(&["checkout", "-q", "-b", "feature"]);
+        repo.write("doomed.txt", "MODIFIED by feature\n");
+        repo.commit_all("feature modifies");
+        repo.git_ok(&["checkout", "-q", "main"]);
+        repo.git_ok(&["rm", "-q", "doomed.txt"]);
+        repo.commit_all("main deletes");
+        repo.git_ok(&["checkout", "-q", "feature"]);
+        // Merge main into feature — conflicts, returns non-zero; ignore status.
+        let _ = repo.git(&["merge", "--no-edit", "main"]);
+    }
+
+    #[test]
+    fn detects_modify_delete_as_tree_conflict() {
+        let repo = TempRepo::new();
+        make_modify_delete(&repo);
+        let conflicts = collect_tree_conflicts(&repo.cwd()).expect("collect_tree_conflicts failed");
+        let tc = conflicts.iter().find(|c| c.path == "doomed.txt").expect("doomed.txt is a tree conflict");
+        assert!(tc.has_ours, "feature (ours) modified it → stage 2 present");
+        assert!(!tc.has_theirs, "main (theirs) deleted it → stage 3 absent");
+        assert_eq!(tc.code, "UD");
+    }
+
+    #[test]
+    fn excludes_pure_content_conflict() {
+        let repo = TempRepo::new();
+        repo.write("shared.txt", "a\nb\nc\n");
+        repo.commit_all("base");
+        repo.git_ok(&["checkout", "-q", "-b", "feature"]);
+        repo.write("shared.txt", "a\nFEATURE\nc\n");
+        repo.commit_all("feature");
+        repo.git_ok(&["checkout", "-q", "main"]);
+        repo.write("shared.txt", "a\nMAIN\nc\n");
+        repo.commit_all("main");
+        repo.git_ok(&["checkout", "-q", "feature"]);
+        let _ = repo.git(&["merge", "--no-edit", "main"]);
+        let conflicts = collect_tree_conflicts(&repo.cwd()).expect("collect_tree_conflicts failed");
+        assert!(conflicts.iter().all(|c| c.path != "shared.txt"), "content conflict (UU) must NOT be reported as a tree conflict");
+    }
 }
