@@ -10,7 +10,7 @@
 
 import { createServer } from "node:http";
 import { execSync, execFileSync, spawnSync, spawn } from "node:child_process";
-import { readFileSync, writeFileSync, readdirSync, statSync, existsSync, unlinkSync, realpathSync, renameSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync, statSync, existsSync, unlinkSync, realpathSync, renameSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { resolve, join, dirname, basename, sep, isAbsolute } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { Socket } from "node:net";
@@ -716,6 +716,86 @@ async function handleRequest(req, res) {
           .map((f) => f.replace(/^\.\//, ""));
         return jsonResponse(req, res, { cwd: resolvedCwd, files });
       }
+    }
+
+    // GET /api/tree-conflicts?cwd=/path/to/repo  — mirrors Rust collect_tree_conflicts
+    if (url.pathname === "/api/tree-conflicts" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd");
+      if (!cwd) return jsonResponse(req, res, { error: "Missing cwd param" }, 400);
+      const resolvedCwd = resolve(cwd);
+      const out = spawnSync(GIT, ["status", "--porcelain=v2", "--untracked-files=no"], {
+        cwd: resolvedCwd, encoding: "utf-8",
+      });
+      if (out.status !== 0) return jsonResponse(req, res, { cwd: resolvedCwd, conflicts: [] });
+      const conflicts = [];
+      for (const line of (out.stdout || "").split("\n")) {
+        if (!line.startsWith("u ")) continue;
+        const rest = line.slice(2);
+        // u <XY> <sub> <m1> <m2> <m3> <mW> <h1> <h2> <h3> <path>
+        const parts = rest.split(" ");
+        if (parts.length < 10) continue;
+        const code = parts[0];
+        const m1 = parts[2], m2 = parts[3], m3 = parts[4];
+        const path = parts.slice(9).join(" ");
+        if (!path) continue;
+        const hasBase = m1 !== "000000";
+        const hasOurs = m2 !== "000000";
+        const hasTheirs = m3 !== "000000";
+        if (hasOurs && hasTheirs) continue; // content conflict (UU/AA) — not a tree conflict
+        conflicts.push({ path, code, hasBase, hasOurs, hasTheirs });
+      }
+      return jsonResponse(req, res, { cwd: resolvedCwd, conflicts });
+    }
+
+    // POST /api/resolve-tree-conflict {cwd, path, choice}  — mirrors Rust resolve_tree_conflict
+    if (url.pathname === "/api/resolve-tree-conflict" && req.method === "POST") {
+      const { cwd, path, choice } = await readBody(req);
+      if (!cwd || !path) return jsonResponse(req, res, { error: "Missing cwd or path" }, 400);
+      const resolvedCwd = resolve(cwd);
+      const run = (args) => {
+        const r = spawnSync(GIT, args, { cwd: resolvedCwd, encoding: "utf-8" });
+        if (r.status !== 0) throw new Error(`git ${args.join(" ")}: ${r.stderr || ""}`);
+      };
+      try {
+        if (choice === "ours") { run(["checkout", "--ours", "--", path]); run(["add", "--", path]); }
+        else if (choice === "theirs") { run(["checkout", "--theirs", "--", path]); run(["add", "--", path]); }
+        else if (choice === "delete") { run(["rm", "-f", "--", path]); }
+        else return jsonResponse(req, res, { error: `unknown choice: ${choice}` }, 400);
+      } catch (e) {
+        return jsonResponse(req, res, { error: String(e.message || e) }, 500);
+      }
+      return jsonResponse(req, res, { ok: true });
+    }
+
+    // POST /api/reconstruct-conflict {cwd, path}  — mirrors Rust reconstruct_conflict
+    if (url.pathname === "/api/reconstruct-conflict" && req.method === "POST") {
+      const { cwd, path } = await readBody(req);
+      if (!cwd || !path) return jsonResponse(req, res, { error: "Missing cwd or path" }, 400);
+      const resolvedCwd = resolve(cwd);
+      const blob = (stage) => {
+        const r = spawnSync(GIT, ["show", `:${stage}:${path}`], { cwd: resolvedCwd, encoding: "buffer" });
+        return r.status === 0 ? r.stdout : Buffer.alloc(0);
+      };
+      const base = blob(1), ours = blob(2), theirs = blob(3);
+      if (ours.length === 0 && theirs.length === 0) {
+        return jsonResponse(req, res, { error: `no index stages for ${path}` }, 404);
+      }
+      const dir = mkdtempSync(join(tmpdir(), "gitwand-recon-"));
+      let content = "";
+      try {
+        const oursP = join(dir, "ours"), baseP = join(dir, "base"), theirsP = join(dir, "theirs");
+        writeFileSync(oursP, ours); writeFileSync(baseP, base); writeFileSync(theirsP, theirs);
+        const r = spawnSync(GIT, ["merge-file", "-p", "--diff3", "-L", "ours", "-L", "base", "-L", "theirs", oursP, baseP, theirsP], { cwd: resolvedCwd, encoding: "utf-8" });
+        if (r.status === 255) return jsonResponse(req, res, { error: `git merge-file error: ${r.stderr || ""}` }, 500);
+        content = r.stdout || "";
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+      let wt = Buffer.alloc(0);
+      try { wt = readFileSync(join(resolvedCwd, path)); } catch { /* absent */ }
+      const wtMatchesSide = (ours.length > 0 && Buffer.compare(wt, ours) === 0) ||
+                            (theirs.length > 0 && Buffer.compare(wt, theirs) === 0);
+      return jsonResponse(req, res, { content, wtMatchesSide });
     }
 
     // POST /api/read-file  { cwd, path }
