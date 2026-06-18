@@ -707,6 +707,11 @@ const zhCN: Locale = {
     treeBothDeleted: "两侧均已删除",
     treeBothPresent: "两侧均已添加",
     treePreviewLabel: "保留内容的预览",
+    reconstructedBanner: "冲突从索引重建 — 文件中没有冲突标记",
+    markerlessTitle: "索引中有冲突，文件中没有标记",
+    markerlessExplanation: "Git 为此文件记录了冲突，但工作副本没有冲突标记，且与任何一方都不匹配。",
+    reconstructConflict: "重建冲突",
+    keepWorkingTree: "保留我的版本（直接暂存）",
   },
 
   pr: {

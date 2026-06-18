@@ -717,6 +717,11 @@ const es: Locale = {
     treeBothDeleted: "Eliminado en ambos lados",
     treeBothPresent: "Agregado en ambos lados",
     treePreviewLabel: "Vista previa del contenido conservado",
+    reconstructedBanner: "Conflicto reconstruido desde el índice — el archivo no tenía marcadores",
+    markerlessTitle: "Conflicto en el índice, sin marcadores en el archivo",
+    markerlessExplanation: "Git registra un conflicto para este archivo, pero la copia de trabajo no tiene marcadores y no coincide con ningún lado.",
+    reconstructConflict: "Reconstruir conflicto",
+    keepWorkingTree: "Mantener mi versión (preparar tal cual)",
   },
 
   // ─── PR creation ────────────────────────────────────────

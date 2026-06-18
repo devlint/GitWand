@@ -724,6 +724,11 @@ const fr: Locale = {
     treeBothDeleted: "Supprimé des deux côtés",
     treeBothPresent: "Ajouté des deux côtés",
     treePreviewLabel: "Aperçu du contenu conservé",
+    reconstructedBanner: "Conflit reconstruit depuis l'index — le fichier n'avait pas de marqueurs",
+    markerlessTitle: "Conflit dans l'index, pas de marqueurs dans le fichier",
+    markerlessExplanation: "Git enregistre un conflit pour ce fichier, mais la copie de travail n'a pas de marqueurs et ne correspond à aucun des deux côtés.",
+    reconstructConflict: "Reconstruire le conflit",
+    keepWorkingTree: "Garder ma version (stager tel quel)",
   },
 
   // ─── PR creation ────────────────────────────────────────
