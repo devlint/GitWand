@@ -2571,6 +2571,82 @@ pub(crate) async fn resolve_tree_conflict(cwd: String, path: String, choice: Str
     apply_tree_resolution(&cwd, &path, &choice)
 }
 
+// ─── Reconstruct content conflict from index stages ──────────
+
+use crate::types::ReconstructedConflict;
+
+/// Read the blob bytes for a given index stage of `path`, or empty if the stage is absent.
+fn read_stage_blob(cwd: &str, stage: u8, path: &str) -> Vec<u8> {
+    let spec = format!(":{}:{}", stage, path);
+    match git_cmd().args(["show", &spec]).current_dir(cwd).output() {
+        Ok(o) if o.status.success() => o.stdout,
+        _ => Vec::new(),
+    }
+}
+
+/// Reconstruct a content conflict from the index stages. Sync so it is unit-testable
+/// without an async runtime; the #[tauri::command] is a thin wrapper.
+fn reconstruct_conflict_impl(cwd: &str, path: &str) -> Result<ReconstructedConflict, String> {
+    let _ = safe_repo_path(cwd, path)?; // traversal guard
+
+    let base = read_stage_blob(cwd, 1, path);   // may be empty (add/add)
+    let ours = read_stage_blob(cwd, 2, path);
+    let theirs = read_stage_blob(cwd, 3, path);
+    if ours.is_empty() && theirs.is_empty() {
+        return Err(format!("no index stages for {}", path));
+    }
+
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("gitwand-recon-{}-{}", std::process::id(), nanos));
+    std::fs::create_dir_all(&dir).map_err(|e| format!("temp dir: {}", e))?;
+
+    let write_tmp = |name: &str, data: &[u8]| -> Result<std::path::PathBuf, String> {
+        let p = dir.join(name);
+        std::fs::File::create(&p)
+            .and_then(|mut f| { use std::io::Write; f.write_all(data) })
+            .map_err(|e| format!("write {}: {}", name, e))?;
+        Ok(p)
+    };
+
+    let result = (|| -> Result<String, String> {
+        let ours_p = write_tmp("ours", &ours)?;
+        let base_p = write_tmp("base", &base)?;
+        let theirs_p = write_tmp("theirs", &theirs)?;
+        let out = git_cmd()
+            .args([
+                "merge-file", "-p", "--diff3",
+                "-L", "ours", "-L", "base", "-L", "theirs",
+                ours_p.to_str().ok_or("bad temp path")?,
+                base_p.to_str().ok_or("bad temp path")?,
+                theirs_p.to_str().ok_or("bad temp path")?,
+            ])
+            .current_dir(cwd)
+            .output()
+            .map_err(|e| format!("git merge-file: {}", e))?;
+        // exit 255 = real error; 0/N = clean/conflicts (stdout is the merged content either way)
+        if out.status.code() == Some(255) {
+            return Err(format!("git merge-file error: {}", String::from_utf8_lossy(&out.stderr)));
+        }
+        Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+    })();
+
+    let _ = std::fs::remove_dir_all(&dir); // always clean up
+    let content = result?;
+
+    let wt = std::fs::read(safe_repo_path(cwd, path)?).unwrap_or_default();
+    let wt_matches_side = (!ours.is_empty() && wt == ours) || (!theirs.is_empty() && wt == theirs);
+
+    Ok(ReconstructedConflict { content, wt_matches_side })
+}
+
+#[tauri::command]
+pub(crate) async fn reconstruct_conflict(cwd: String, path: String) -> Result<ReconstructedConflict, String> {
+    reconstruct_conflict_impl(&cwd, &path)
+}
+
 // ─── Git remote info ─────────────────────────────────────────
 
 #[tauri::command]
@@ -3079,5 +3155,42 @@ mod tree_conflict_tests {
         let _ = repo.git(&["merge", "--no-edit", "main"]);
         let conflicts = collect_tree_conflicts(&repo.cwd()).expect("collect_tree_conflicts failed");
         assert!(conflicts.iter().all(|c| c.path != "shared.txt"), "content conflict (UU) must NOT be reported as a tree conflict");
+    }
+
+    /// Build a UU content conflict on `shared.txt`, leaving markers in the working tree.
+    fn make_content_conflict(repo: &TempRepo) {
+        repo.write("shared.txt", "line1\nbase\nline3\n");
+        repo.commit_all("base");
+        repo.git_ok(&["checkout", "-q", "-b", "feature"]);
+        repo.write("shared.txt", "line1\nFEATURE\nline3\n");
+        repo.commit_all("feature");
+        repo.git_ok(&["checkout", "-q", "main"]);
+        repo.write("shared.txt", "line1\nMAIN\nline3\n");
+        repo.commit_all("main");
+        repo.git_ok(&["checkout", "-q", "feature"]);
+        let _ = repo.git(&["merge", "--no-edit", "main"]); // conflicts; non-zero status expected
+    }
+
+    #[test]
+    fn reconstruct_produces_markers_and_matches_side_after_checkout_ours() {
+        let repo = TempRepo::new();
+        make_content_conflict(&repo);
+        // Remove markers, leave working tree == ours (stage 2).
+        repo.git_ok(&["checkout", "--ours", "--", "shared.txt"]);
+        let rec = reconstruct_conflict_impl(&repo.cwd(), "shared.txt").unwrap();
+        assert!(rec.content.contains("<<<<<<<"), "reconstructed content must carry conflict markers");
+        assert!(rec.content.contains(">>>>>>>"));
+        assert!(rec.wt_matches_side, "working tree == ours → matches a side");
+    }
+
+    #[test]
+    fn reconstruct_flags_manual_edit_when_wt_matches_no_side() {
+        let repo = TempRepo::new();
+        make_content_conflict(&repo);
+        // Working tree is a distinct manual resolution (matches neither ours nor theirs).
+        repo.write("shared.txt", "line1\nMANUAL RESOLUTION\nline3\n");
+        let rec = reconstruct_conflict_impl(&repo.cwd(), "shared.txt").unwrap();
+        assert!(rec.content.contains("<<<<<<<"));
+        assert!(!rec.wt_matches_side, "working tree matches neither side → manual edit");
     }
 }

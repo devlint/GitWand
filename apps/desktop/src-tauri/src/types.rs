@@ -863,3 +863,14 @@ pub struct TreeConflict {
     pub has_ours: bool,
     pub has_theirs: bool,
 }
+
+// ─── Reconstructed conflict (content conflict from index stages) ────
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReconstructedConflict {
+    /// 3-way merge of the index stages, with diff3 conflict markers.
+    pub content: String,
+    /// Whether the current working-tree bytes equal stage 2 (ours) or stage 3 (theirs).
+    pub wt_matches_side: bool,
+}
