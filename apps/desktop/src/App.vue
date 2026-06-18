@@ -46,7 +46,6 @@ const StashManager = defineAsyncComponent(() => import("./components/StashManage
 const TagsPanel = defineAsyncComponent(() => import("./components/TagsPanel.vue"));
 const WorktreeManager = defineAsyncComponent(() => import("./components/WorktreeManager.vue"));
 const SubmodulePanel = defineAsyncComponent(() => import("./components/SubmodulePanel.vue"));
-const WorkspacePanel = defineAsyncComponent(() => import("./components/WorkspacePanel.vue"));
 const LaunchpadView = defineAsyncComponent(() => import("./components/LaunchpadView.vue"));
 const AgentSessionsPanel = defineAsyncComponent(() => import("./components/AgentSessionsPanel.vue"));
 const CommandLogPanel = defineAsyncComponent(() => import("./components/CommandLogPanel.vue"));
@@ -1376,7 +1375,6 @@ watch(repoOperationState, (op) => {
 // ─── Stash manager panel ────────────────────────────────
 const showStash = ref(false);
 const showTags = ref(false);
-const showWorkspace = ref(false);
 const showAgents = ref(false);
 const showCommandLog = ref(false);
 
@@ -1400,7 +1398,6 @@ const launchpadRepos = computed<WorkspaceRepo[]>(() =>
 );
 function openLaunchpad() {
   viewMode.value = "launchpad";
-  showWorkspace.value = false;
 }
 
 /**
@@ -2303,7 +2300,7 @@ onUnmounted(() => {
       @open-worktrees="(branch) => { pendingWorktreeBranch = branch; showWorktrees = true; }"
       @open-submodules="showSubmodules = true" @open-submodule="handleOpenSubmodule" @open-search="handleOpenSearch" @open-help="showHelp = true"
       :stash-count="stashCount" @open-stash="showStash = true" @open-tags="showTags = true"
-      @open-workspace="showWorkspace = true" @open-agents="showAgents = true"
+      @open-agents="showAgents = true"
       :active-view="viewMode" @open-launchpad="handleLaunchpadShortcut" />
 
     <div class="app-body" :style="{ '--sidebar-width': sidebarWidth + 'px' }">
@@ -2323,7 +2320,7 @@ onUnmounted(() => {
           @discard="(path, section) => discardFiles([path], section === 'untracked')"
           @discard-section="onDiscardSection" @add-to-gitignore="(path) => addToGitignore(path)"
           @refresh="repoRefresh()" @open-stash="showStash = true" @open-tags="showTags = true"
-          @open-workspace="showWorkspace = true" @open-agents="showAgents = true"
+          @open-agents="showAgents = true"
           @open-launchpad="handleLaunchpadShortcut" @scroll-to-file="onHistoryScrollToFile"
           @delete-branch="handleDeleteBranchRequest" />
       </aside>
@@ -2557,10 +2554,6 @@ onUnmounted(() => {
 
     <!-- Fork modal (v2.0) -->
     <ForkModal v-if="showForkModal" @close="showForkModal = false" @forked="onForked" />
-
-    <!-- Workspace panel -->
-    <WorkspacePanel v-if="showWorkspace" @close="showWorkspace = false"
-      @open-tab="(path) => { openTab(path); showWorkspace = false; }" />
 
     <!-- Agent Sessions panel -->
     <AgentSessionsPanel v-if="showAgents && repoFolderPath" :cwd="repoFolderPath" @close="showAgents = false"

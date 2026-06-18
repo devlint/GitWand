@@ -146,7 +146,6 @@ const emit = defineEmits<{
   openHelp: [];
   openStash: [];
   openTags: [];
-  openWorkspace: [];
   openLaunchpad: [];
   openAgents: [];
   discardAll: [];
@@ -351,19 +350,6 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
             <circle cx="15" cy="9" r="1.2"/>
           </svg>
           <span>{{ t('launchpad.title') }}</span>
-        </button>
-
-        <button
-          class="btn btn--secondary header-feature-btn"
-          v-tooltip="t('workspace.title')"
-          :aria-label="t('workspace.title')"
-          @click="emit('openWorkspace')"
-        >
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-            <rect x="1" y="4" width="14" height="10" rx="2"/>
-            <path d="M1 7h14M5 4V3a2 2 0 014 0v1" stroke-linejoin="round"/>
-          </svg>
-          <span>{{ t('workspace.headerLabel') }}</span>
         </button>
 
         <button
