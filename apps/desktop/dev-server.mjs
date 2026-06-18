@@ -1206,6 +1206,47 @@ async function handleRequest(req, res) {
           }
         }
 
+        // ── Remote branch existence (no upstream configured) ───────────────
+        // Mirror git_status_cli: when there's no `@{u}`, the branch may still
+        // be on a remote. Detect a matching remote-tracking ref and compute
+        // ahead/behind against it so the UI doesn't offer to "publish" an
+        // already-pushed branch. `remote` stays null — a first push still needs
+        // --set-upstream.
+        let remoteBranchExists = remote != null;
+        if (remote == null && branch && branch !== "unknown") {
+          try {
+            const remotesOut = spawnSync(GIT, ["remote"], {
+              cwd: resolvedCwd, encoding: "utf-8",
+            });
+            const names = (remotesOut.stdout || "")
+              .split("\n").map((s) => s.trim()).filter(Boolean);
+            const ordered = [
+              ...(names.includes("origin") ? ["origin"] : []),
+              ...names.filter((n) => n !== "origin"),
+            ];
+            for (const remoteName of ordered) {
+              const candidate = `${remoteName}/${branch}`;
+              const rp = spawnSync(GIT, [
+                "rev-parse", "--verify", "--quiet", `refs/remotes/${candidate}`,
+              ], { cwd: resolvedCwd, encoding: "utf-8" });
+              if (rp.status === 0) {
+                remoteBranchExists = true;
+                const rl = spawnSync(GIT, [
+                  "rev-list", "--left-right", "--count", `${candidate}...HEAD`,
+                ], { cwd: resolvedCwd, encoding: "utf-8" });
+                if (rl.status === 0) {
+                  const [b, a] = (rl.stdout || "").trim().split(/\s+/).map(Number);
+                  if (!isNaN(b)) behind = b;
+                  if (!isNaN(a)) ahead = a;
+                }
+                break;
+              }
+            }
+          } catch {
+            // no remotes / detached — leave remoteBranchExists = false
+          }
+        }
+
         // ── Triangular / fork workflow ─────────────────────────────────────
         // Mirror git_status_cli: resolve @{push}; only report a separate push
         // remote (+ ahead count) when it differs from the upstream.
@@ -1248,7 +1289,7 @@ async function handleRequest(req, res) {
           }
         }
 
-        return jsonResponse(req, res, { branch, remote, ahead, behind, mainCommitCount, pushRemote, aheadPush, staged, unstaged, untracked, conflicted });
+        return jsonResponse(req, res, { branch, remote, remoteBranchExists, ahead, behind, mainCommitCount, pushRemote, aheadPush, staged, unstaged, untracked, conflicted });
       } catch (err) {
         return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
       }

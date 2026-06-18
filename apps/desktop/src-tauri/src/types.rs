@@ -59,6 +59,11 @@ pub struct FileChange {
 pub struct GitStatus {
     pub branch: String,
     pub remote: Option<String>,
+    /// True when a remote-tracking branch matching the current branch exists,
+    /// even if no upstream is configured (`@{u}` missing). Lets the UI tell
+    /// "never pushed" apart from "pushed but not tracked" so it doesn't offer
+    /// to publish an already-published branch.
+    pub remote_branch_exists: bool,
     pub ahead: i32,
     pub behind: i32,
     pub main_commit_count: i32,

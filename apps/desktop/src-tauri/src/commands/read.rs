@@ -90,7 +90,7 @@ pub(crate) fn git_status_libgit2(cwd: &str) -> Result<GitStatus, String> {
         .map_err(|e| format!("git2 open: {}", e))?;
 
     // ── Branch + upstream + ahead/behind ────────────────────────────────
-    let (branch, ahead, behind, remote) = libgit2_branch_status(&repo);
+    let (branch, ahead, behind, remote, remote_branch_exists) = libgit2_branch_status(&repo);
 
     // ── File status buckets ─────────────────────────────────────────────
     let (staged, unstaged, untracked, conflicted) = libgit2_file_statuses(&repo)?;
@@ -104,6 +104,7 @@ pub(crate) fn git_status_libgit2(cwd: &str) -> Result<GitStatus, String> {
     Ok(GitStatus {
         branch,
         remote,
+        remote_branch_exists,
         ahead,
         behind,
         main_commit_count,
@@ -116,28 +117,38 @@ pub(crate) fn git_status_libgit2(cwd: &str) -> Result<GitStatus, String> {
     })
 }
 
-/// Branch shorthand + ahead/behind + upstream name (e.g. "origin/main").
-/// Returns ("unknown", 0, 0, None) on any failure path so the caller can
-/// still produce a valid GitStatus.
-fn libgit2_branch_status(repo: &git2::Repository) -> (String, i32, i32, Option<String>) {
+/// Branch shorthand + ahead/behind + upstream name (e.g. "origin/main") +
+/// whether a matching remote-tracking branch exists.
+///
+/// Returns ("unknown", 0, 0, None, false) on any failure path so the caller
+/// can still produce a valid GitStatus. The trailing bool is
+/// `remote_branch_exists`: true whenever an upstream is configured, or — when
+/// none is — a remote-tracking ref matching the branch name was found.
+fn libgit2_branch_status(repo: &git2::Repository) -> (String, i32, i32, Option<String>, bool) {
     let head = match repo.head() {
         Ok(h) => h,
-        Err(_) => return (String::from("unknown"), 0, 0, None),
+        Err(_) => return (String::from("unknown"), 0, 0, None, false),
     };
     let branch = head.shorthand().unwrap_or("").to_string();
     let local_oid = match head.target() {
         Some(o) => o,
-        None => return (branch, 0, 0, None),
+        None => return (branch, 0, 0, None, false),
     };
     // Detached HEAD (or shorthand resolves to "HEAD") → no local branch object,
     // therefore no upstream. CLI returns the same in that case.
     let local_branch = match repo.find_branch(&branch, git2::BranchType::Local) {
         Ok(b) => b,
-        Err(_) => return (branch, 0, 0, None),
+        Err(_) => return (branch, 0, 0, None, false),
     };
     let upstream = match local_branch.upstream() {
         Ok(u) => u,
-        Err(_) => return (branch, 0, 0, None), // no upstream configured
+        // No configured upstream. The branch may still live on a remote
+        // (pushed without --set-upstream, `gh pr checkout`, fork checkout…).
+        // Probe for a matching remote-tracking ref so the UI doesn't offer to
+        // "publish" an already-published branch. `remote` stays None (no
+        // `@{u}` — a first push still needs --set-upstream), but ahead/behind
+        // are computed against the discovered ref and the bool flips to true.
+        Err(_) => return detect_untracked_remote_branch(repo, &branch, local_oid),
     };
     // upstream.name() returns Result<Option<&str>>: None when the ref name
     // is non-UTF-8 (extremely rare). Keep ahead/behind=0 in that case.
@@ -148,13 +159,52 @@ fn libgit2_branch_status(repo: &git2::Repository) -> (String, i32, i32, Option<S
         .map(|s| s.to_string());
     let upstream_oid = match upstream.get().target() {
         Some(o) => o,
-        None => return (branch, 0, 0, upstream_name),
+        None => return (branch, 0, 0, upstream_name, true),
     };
     let (a, b) = match repo.graph_ahead_behind(local_oid, upstream_oid) {
         Ok(pair) => pair,
-        Err(_) => return (branch, 0, 0, upstream_name),
+        Err(_) => return (branch, 0, 0, upstream_name, true),
     };
-    (branch, a as i32, b as i32, upstream_name)
+    (branch, a as i32, b as i32, upstream_name, true)
+}
+
+/// When no upstream is configured, look for a remote-tracking branch whose
+/// short name is "<remote>/<branch>" (origin preferred). On a match, returns
+/// ahead/behind against it with `remote_branch_exists = true`; `remote` is
+/// kept None because there is no `@{u}` to push to yet. No match → all-zero
+/// counts and false.
+fn detect_untracked_remote_branch(
+    repo: &git2::Repository,
+    branch: &str,
+    local_oid: git2::Oid,
+) -> (String, i32, i32, Option<String>, bool) {
+    if branch.is_empty() {
+        return (branch.to_string(), 0, 0, None, false);
+    }
+    for candidate in remote_tracking_candidates(repo, branch) {
+        if let Ok(rb) = repo.find_branch(&candidate, git2::BranchType::Remote) {
+            if let Some(remote_oid) = rb.get().target() {
+                let (a, b) = repo.graph_ahead_behind(local_oid, remote_oid).unwrap_or((0, 0));
+                return (branch.to_string(), a as i32, b as i32, None, true);
+            }
+        }
+    }
+    (branch.to_string(), 0, 0, None, false)
+}
+
+/// Candidate remote-tracking short names for `branch`, origin first so the
+/// canonical remote wins when several carry the same branch name.
+fn remote_tracking_candidates(repo: &git2::Repository, branch: &str) -> Vec<String> {
+    let mut candidates = vec![format!("origin/{}", branch)];
+    if let Ok(remotes) = repo.remotes() {
+        for name in remotes.iter().flatten() {
+            if name == "origin" {
+                continue;
+            }
+            candidates.push(format!("{}/{}", name, branch));
+        }
+    }
+    candidates
 }
 
 /// Build (staged, unstaged, untracked, conflicted) from `repo.statuses()`.
@@ -487,6 +537,42 @@ pub(crate) fn git_status_cli(cwd: String, pathspec: Option<String>) -> Result<Gi
         }
     }
 
+    // ── Remote branch existence (no upstream configured) ─────────────────────
+    // Mirror the libgit2 path: when there is no `@{u}`, the branch may still be
+    // on a remote. Detect a matching remote-tracking ref and compute ahead/
+    // behind against it so the UI doesn't offer to "publish" an already-pushed
+    // branch. `remote` stays None — a first push still needs --set-upstream.
+    let mut remote_branch_exists = remote.is_some();
+    if remote.is_none() && !branch.is_empty() && branch != "unknown" {
+        if let Some(remote_ref) = find_untracked_remote_ref_cli(&cwd, &branch) {
+            remote_branch_exists = true;
+            if let Ok(rl) = git_cmd()
+                .args([
+                    "rev-list",
+                    "--left-right",
+                    "--count",
+                    &format!("{}...HEAD", remote_ref),
+                ])
+                .current_dir(&cwd)
+                .output()
+            {
+                if rl.status.success() {
+                    let nums: Vec<i32> = String::from_utf8_lossy(&rl.stdout)
+                        .trim()
+                        .split_whitespace()
+                        .filter_map(|s| s.parse().ok())
+                        .collect();
+                    if nums.len() >= 2 {
+                        // left = commits on the remote ref not in HEAD (behind),
+                        // right = commits on HEAD not on the remote ref (ahead).
+                        behind = nums[0];
+                        ahead = nums[1];
+                    }
+                }
+            }
+        }
+    }
+
     // ── Triangular / fork workflow ───────────────────────────────────────────
     // When push.default = "upstream" or a fork is set up, the push remote may
     // differ from the upstream (fetch) remote. Detect this and compute a
@@ -526,6 +612,7 @@ pub(crate) fn git_status_cli(cwd: String, pathspec: Option<String>) -> Result<Gi
     Ok(GitStatus {
         branch,
         remote,
+        remote_branch_exists,
         ahead,
         behind,
         main_commit_count,
@@ -536,6 +623,52 @@ pub(crate) fn git_status_cli(cwd: String, pathspec: Option<String>) -> Result<Gi
         untracked,
         conflicted,
     })
+}
+
+/// Find a remote-tracking ref "<remote>/<branch>" (origin preferred) when no
+/// upstream is configured. Returns the short ref name (e.g.
+/// "origin/feature") or None. Uses exact `rev-parse --verify` lookups so a
+/// branch named "x" never matches an unrelated "remote/foo/x".
+fn find_untracked_remote_ref_cli(cwd: &str, branch: &str) -> Option<String> {
+    let remotes_out = git_cmd()
+        .args(["remote"])
+        .current_dir(cwd)
+        .output()
+        .ok()?;
+    if !remotes_out.status.success() {
+        return None;
+    }
+    let remotes_raw = String::from_utf8_lossy(&remotes_out.stdout);
+    let names: Vec<String> = remotes_raw
+        .lines()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    // origin first, then the rest in declared order.
+    let ordered = std::iter::once("origin")
+        .filter(|o| names.iter().any(|n| n == o))
+        .map(|s| s.to_string())
+        .chain(names.iter().filter(|n| *n != "origin").cloned());
+
+    for remote_name in ordered {
+        let candidate = format!("{}/{}", remote_name, branch);
+        if let Ok(o) = git_cmd()
+            .args([
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                &format!("refs/remotes/{}", candidate),
+            ])
+            .current_dir(cwd)
+            .output()
+        {
+            if o.status.success() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
 }
 
 /// Helper to compute the number of commits the *remote-tracking* branch
@@ -2291,5 +2424,105 @@ mod pathspec_tests {
         // Both subtrees should appear
         let has_a = all_paths.iter().any(|p| p.contains("packages/a") || p.contains("packages/"));
         assert!(has_a, "unscoped status should show all changes: {:?}", all_paths);
+    }
+
+    // ── Remote branch existence without configured upstream ───────
+    //
+    // Reproduces the "GitWand offers to publish an already-published branch"
+    // bug: a branch that lives on the remote but lost its `@{u}` tracking
+    // config (pushed without -u, `gh pr checkout`, fork checkout…).
+
+    /// Create a bare repo to act as `origin`. Returns its path; caller removes.
+    fn init_bare_remote() -> PathBuf {
+        let n = COUNTER2.fetch_add(1, Ordering::SeqCst);
+        let pid = std::process::id();
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir()
+            .join(format!("gitwand-bare-remote-{}-{}-{}", pid, n, nanos));
+        let out = Command::new(git_binary())
+            .args(["init", "--bare", "-q", "-b", "main"])
+            .arg(&dir)
+            .output()
+            .expect("git init --bare failed to spawn");
+        assert!(out.status.success(), "git init --bare failed");
+        dir
+    }
+
+    #[test]
+    fn git_status_detects_remote_branch_when_upstream_unset() {
+        let repo = TempRepo::new();
+        repo.write("a.txt", "1");
+        repo.commit_all("c1");
+
+        let bare = init_bare_remote();
+        repo.git(&["remote", "add", "origin", bare.to_str().unwrap()]);
+        // Publish, then drop the tracking config — the exact user scenario.
+        repo.git(&["push", "-q", "-u", "origin", "main"]);
+        repo.git(&["branch", "--unset-upstream"]);
+        // One local commit ahead of what the remote ref points at.
+        repo.write("b.txt", "2");
+        repo.commit_all("c2");
+
+        // libgit2 fast path
+        let s = tauri::async_runtime::block_on(git_status(repo.cwd(), None))
+            .expect("git_status failed");
+        assert_eq!(s.remote, None, "no upstream should be configured");
+        assert!(s.remote_branch_exists, "remote-tracking ref should be detected");
+        assert_eq!(s.ahead, 1, "one local commit ahead of origin/main");
+        assert_eq!(s.behind, 0);
+
+        // CLI fallback path must agree.
+        let c = git_status_cli(repo.cwd(), None).expect("git_status_cli failed");
+        assert_eq!(c.remote, None);
+        assert!(c.remote_branch_exists, "CLI path should also detect the remote ref");
+        assert_eq!(c.ahead, 1);
+        assert_eq!(c.behind, 0);
+
+        let _ = std::fs::remove_dir_all(&bare);
+    }
+
+    #[test]
+    fn git_status_no_remote_branch_means_unpublished() {
+        let repo = TempRepo::new();
+        repo.write("a.txt", "1");
+        repo.commit_all("c1");
+
+        let bare = init_bare_remote();
+        repo.git(&["remote", "add", "origin", bare.to_str().unwrap()]);
+        // A branch that was never pushed: genuinely "to publish".
+        repo.git(&["checkout", "-q", "-b", "feature/new"]);
+        repo.write("c.txt", "3");
+        repo.commit_all("c2");
+
+        let s = tauri::async_runtime::block_on(git_status(repo.cwd(), None))
+            .expect("git_status failed");
+        assert_eq!(s.remote, None);
+        assert!(!s.remote_branch_exists, "unpushed branch must not look published");
+
+        let c = git_status_cli(repo.cwd(), None).expect("git_status_cli failed");
+        assert!(!c.remote_branch_exists, "CLI path agrees: branch is unpublished");
+
+        let _ = std::fs::remove_dir_all(&bare);
+    }
+
+    #[test]
+    fn git_status_tracked_branch_reports_remote_exists() {
+        let repo = TempRepo::new();
+        repo.write("a.txt", "1");
+        repo.commit_all("c1");
+
+        let bare = init_bare_remote();
+        repo.git(&["remote", "add", "origin", bare.to_str().unwrap()]);
+        repo.git(&["push", "-q", "-u", "origin", "main"]); // keeps upstream
+
+        let s = tauri::async_runtime::block_on(git_status(repo.cwd(), None))
+            .expect("git_status failed");
+        assert_eq!(s.remote.as_deref(), Some("origin/main"));
+        assert!(s.remote_branch_exists, "configured upstream implies it exists");
+
+        let _ = std::fs::remove_dir_all(&bare);
     }
 }

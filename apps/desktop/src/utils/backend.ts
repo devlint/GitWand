@@ -369,6 +369,12 @@ export interface FileChange {
 export interface GitStatus {
   branch: string;
   remote: string | null;
+  /**
+   * True when a remote-tracking branch matching the current branch exists,
+   * even without a configured upstream (`@{u}`). Lets the UI distinguish
+   * "never pushed" (offer Publish) from "pushed but not tracked" (offer Push).
+   */
+  remoteBranchExists: boolean;
   ahead: number;
   behind: number;
   mainCommitCount: number;
@@ -396,6 +402,7 @@ export async function getGitStatus(cwd: string, pathspec?: string): Promise<GitS
     const raw = await tauriInvoke<{
       branch: string;
       remote: string | null;
+      remote_branch_exists: boolean;
       ahead: number;
       behind: number;
       main_commit_count: number;
@@ -410,6 +417,7 @@ export async function getGitStatus(cwd: string, pathspec?: string): Promise<GitS
     return {
       branch: raw.branch,
       remote: raw.remote,
+      remoteBranchExists: raw.remote_branch_exists ?? raw.remote != null,
       ahead: raw.ahead,
       behind: raw.behind,
       mainCommitCount: raw.main_commit_count,
@@ -434,7 +442,7 @@ export async function getGitStatus(cwd: string, pathspec?: string): Promise<GitS
     if (!res.ok) throw new Error(`Failed to get git status: ${res.status}`);
     const data = await res.json();
     // dev-server doesn't compute push remote — fill defaults
-    return { pushRemote: null, aheadPush: 0, mainCommitCount: 1, ...data };}
+    return { pushRemote: null, aheadPush: 0, mainCommitCount: 1, remoteBranchExists: data.remote != null, ...data };}
 
 // ─── Git diff ──────────────────────────────────────────────
 
