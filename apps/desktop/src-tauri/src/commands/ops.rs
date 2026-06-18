@@ -2661,6 +2661,13 @@ pub(crate) async fn git_remote_info(cwd: String) -> Result<RemoteInfo, String> {
             .map_err(|e| format!("Failed to get remote info: {}", e))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
+        // Prefer `origin` (the canonical remote) over whatever sorts first.
+        // `git remote -v` lists remotes alphabetically, so a `fork` remote
+        // would otherwise shadow `origin` and make every origin-targeted
+        // operation (unpushed-tag detection, PR lookups, connectivity probe…)
+        // point at the wrong repository.
+        let mut first: Option<(String, String)> = None;
+        let mut origin: Option<(String, String)> = None;
         for line in stdout.lines() {
             if !line.contains("(fetch)") {
                 continue;
@@ -2671,7 +2678,16 @@ pub(crate) async fn git_remote_info(cwd: String) -> Result<RemoteInfo, String> {
             }
             let name = parts[0].to_string();
             let url = parts[1].to_string();
+            if name == "origin" {
+                origin = Some((name, url));
+                break;
+            }
+            if first.is_none() {
+                first = Some((name, url));
+            }
+        }
 
+        if let Some((name, url)) = origin.or(first) {
             let provider = if url.contains("github.com") {
                 "github"
             } else if url.contains("gitlab.com") || url.contains("gitlab") {
@@ -3217,5 +3233,91 @@ mod tree_conflict_tests {
         let rec = reconstruct_conflict_impl(&repo.cwd(), "shared.txt").unwrap();
         assert!(rec.content.contains("<<<<<<<"));
         assert!(!rec.wt_matches_side, "working tree matches neither side → manual edit");
+    }
+
+    // ── Remote selection + unpushed-tag detection ─────────────
+    //
+    // Reproduces the "push modal lists already-pushed tags" bug: with two
+    // remotes (`fork` + `origin`), `git remote -v` sorts `fork` first, so the
+    // old code probed the fork (which has no tags) and reported every local
+    // tag as unpushed.
+
+    fn make_bare_remote() -> PathBuf {
+        let n = COUNTER.fetch_add(1, Ordering::SeqCst);
+        let pid = std::process::id();
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("gitwand-ops-bare-{}-{}-{}", pid, n, nanos));
+        let out = Command::new(git_binary())
+            .args(["init", "--bare", "-q", "-b", "main"])
+            .arg(&dir)
+            .output()
+            .expect("git init --bare spawn");
+        assert!(out.status.success(), "git init --bare failed: {}", String::from_utf8_lossy(&out.stderr));
+        dir
+    }
+
+    #[test]
+    fn git_remote_info_prefers_origin_over_alphabetically_first() {
+        let repo = TempRepo::new();
+        // `fork` sorts before `origin` in `git remote -v`.
+        repo.git_ok(&["remote", "add", "fork", "git@github.com:someone/fork.git"]);
+        repo.git_ok(&["remote", "add", "origin", "git@github.com:owner/repo.git"]);
+
+        let info = tauri::async_runtime::block_on(git_remote_info(repo.cwd()))
+            .expect("git_remote_info failed");
+        assert_eq!(
+            info.name, "origin",
+            "origin must win over an alphabetically-earlier remote"
+        );
+    }
+
+    #[test]
+    fn git_remote_info_falls_back_to_sole_remote() {
+        let repo = TempRepo::new();
+        repo.git_ok(&["remote", "add", "upstream", "git@github.com:up/stream.git"]);
+
+        let info = tauri::async_runtime::block_on(git_remote_info(repo.cwd()))
+            .expect("git_remote_info failed");
+        assert_eq!(info.name, "upstream", "the only remote is the answer");
+    }
+
+    #[test]
+    fn git_unpushed_tags_reflects_what_the_remote_actually_has() {
+        let repo = TempRepo::new();
+        repo.write("a.txt", "1");
+        repo.commit_all("c1");
+        let bare = make_bare_remote();
+        repo.git_ok(&["remote", "add", "origin", bare.to_str().unwrap()]);
+        repo.git_ok(&["push", "-q", "origin", "main"]);
+
+        // A tag that lives on origin must NOT be reported as unpushed.
+        repo.git_ok(&["tag", "v1.0.0"]);
+        repo.git_ok(&["push", "-q", "origin", "v1.0.0"]);
+        let unpushed = tauri::async_runtime::block_on(
+            git_unpushed_tags(repo.cwd(), "origin".to_string()),
+        )
+        .expect("git_unpushed_tags failed");
+        assert!(
+            unpushed.is_empty(),
+            "v1.0.0 is on origin, expected none unpushed, got {:?}",
+            unpushed
+        );
+
+        // A local-only tag IS unpushed.
+        repo.git_ok(&["tag", "v2.0.0"]);
+        let unpushed2 = tauri::async_runtime::block_on(
+            git_unpushed_tags(repo.cwd(), "origin".to_string()),
+        )
+        .expect("git_unpushed_tags failed");
+        assert_eq!(
+            unpushed2,
+            vec!["v2.0.0".to_string()],
+            "only the local-only tag is unpushed"
+        );
+
+        let _ = std::fs::remove_dir_all(&bare);
     }
 }

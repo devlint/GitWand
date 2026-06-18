@@ -5002,15 +5002,30 @@ async function handleRequest(req, res) {
           return jsonResponse(req, res, { error: r.stderr || "git remote failed" }, 500);
         }
         const lines = (r.stdout || "").split("\n");
+        // Prefer `origin` over whatever sorts first — `git remote -v` lists
+        // remotes alphabetically, so a `fork` remote would otherwise shadow
+        // `origin` and target the wrong repo. Mirrors the Rust command.
         let name = "";
         let remoteUrl = "";
+        let firstName = "";
+        let firstUrl = "";
         for (const line of lines) {
           if (!line.includes("(fetch)")) continue;
           const parts = line.split(/\s+/).filter(Boolean);
           if (parts.length < 2) continue;
-          name = parts[0];
-          remoteUrl = parts[1];
-          break;
+          if (parts[0] === "origin") {
+            name = parts[0];
+            remoteUrl = parts[1];
+            break;
+          }
+          if (!firstUrl) {
+            firstName = parts[0];
+            firstUrl = parts[1];
+          }
+        }
+        if (!remoteUrl) {
+          name = firstName;
+          remoteUrl = firstUrl;
         }
         if (!remoteUrl) {
           return jsonResponse(req, res, { error: "No remote found" }, 404);
