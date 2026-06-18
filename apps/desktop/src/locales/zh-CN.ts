@@ -1350,6 +1350,13 @@ const zhCN: Locale = {
     scopeAll: "全部",
     scopeCount: "{0} 个仓库",
     scopeTooltip: "显示范围",
+    localSection: "你的仓库",
+    card: {
+      commit: "{0} 个待提交",
+      push: "{0} 个待推送",
+      publish: "发布分支",
+      sync: "{0} 个待拉取",
+    },
     inboxTab: "待处理",
     inboxEmpty: "目前没有需要你处理的事项。🎉",
     inbox: {

@@ -1441,6 +1441,19 @@ async function openLaunchpadIssue(issue: { number: number; repoPath?: string }) 
 }
 
 /**
+ * Open a repo's Changes view from a Launchpad local-action card (commit / push
+ * / publish / sync). Switches the active repo if needed, then shows Changes
+ * where the commit area + header sync controls live.
+ */
+async function openLaunchpadRepoChanges(repoPath: string) {
+  if (repoPath && repoPath !== repoFolderPath.value) {
+    await handleOpenPath(repoPath);
+    await nextTick();
+  }
+  viewMode.value = "changes";
+}
+
+/**
  * Handle the ⌘L / Ctrl+L shortcut (and the header Launchpad pill / menu item):
  * just switch to the Launchpad view. Its repos come from the open tabs, so
  * there is nothing to resolve — if no repo is open, the EmptyState shows.
@@ -2434,7 +2447,7 @@ onUnmounted(() => {
             <IssueDetailView v-else-if="viewMode === 'issue'" />
 
             <!-- Launchpad view: cross-repo dashboard (v2.10 nav revamp) -->
-            <LaunchpadView v-else-if="viewMode === 'launchpad'" :repos="launchpadRepos" @open-pr="openLaunchpadPr" @open-issue="openLaunchpadIssue" />
+            <LaunchpadView v-else-if="viewMode === 'launchpad'" :repos="launchpadRepos" @open-pr="openLaunchpadPr" @open-issue="openLaunchpadIssue" @open-repo-changes="openLaunchpadRepoChanges" />
           </template>
         </template>
       </main>

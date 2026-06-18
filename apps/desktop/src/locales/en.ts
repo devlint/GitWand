@@ -1397,6 +1397,13 @@ const en = {
     scopeAll: "All",
     scopeCount: "{0} repos",
     scopeTooltip: "Display scope",
+    localSection: "On your repos",
+    card: {
+      commit: "{0} to commit",
+      push: "{0} to push",
+      publish: "Publish branch",
+      sync: "{0} to pull",
+    },
     inboxTab: "To handle",
     inboxEmpty: "Nothing needs your action right now. 🎉",
     inbox: {

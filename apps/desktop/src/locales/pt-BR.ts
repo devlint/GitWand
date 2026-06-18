@@ -1363,6 +1363,13 @@ const ptBR: Locale = {
     scopeAll: "Todos",
     scopeCount: "{0} repositórios",
     scopeTooltip: "Escopo de exibição",
+    localSection: "Nos seus repositórios",
+    card: {
+      commit: "{0} para commitar",
+      push: "{0} para enviar",
+      publish: "Publicar branch",
+      sync: "{0} para puxar",
+    },
     inboxTab: "A tratar",
     inboxEmpty: "Nada requer sua ação no momento. 🎉",
     inbox: {

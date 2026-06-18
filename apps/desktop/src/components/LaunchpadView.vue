@@ -7,6 +7,7 @@ import { useLaunchpadPrs } from "../composables/useLaunchpadPrs";
 import { useLaunchpadInbox, type InboxBucketKey } from "../composables/useLaunchpadInbox";
 import { useLaunchpadIssues } from "../composables/useLaunchpadIssues";
 import { useLaunchpadScope } from "../composables/useLaunchpadScope";
+import { useRepoActionCards, type RepoCardKind } from "../composables/useRepoActionCards";
 import { useLaunchpadPins } from "../composables/useLaunchpadPins";
 import { useLaunchpadTeam } from "../composables/useLaunchpadTeam";
 import type { TeamMemberActivity, OverlappingPr } from "../composables/useLaunchpadTeam";
@@ -25,6 +26,8 @@ const emit = defineEmits<{
   (e: "open-pr", pr: PrWithRepo): void;
   /** Open an issue in the in-app IssueDetailView — handled by App.vue. */
   (e: "open-issue", issue: IssueWithRepo): void;
+  /** Open a repo's Changes view (local action card CTA) — handled by App.vue. */
+  (e: "open-repo-changes", repoPath: string): void;
 }>();
 
 // close event removed — navigation is now handled by the sidebar viewMode switch
@@ -63,10 +66,19 @@ const { allPrs, snoozedPrs, repos: prRepos, loading: prsLoading, error: prsError
 // Inbox — "À traiter": derives the action-grouped subset of allPrs (review
 // requested of me, changes requested / failing CI / approved on my own PRs).
 const { buckets: inboxBuckets, totalCount: inboxTotal, loadUser: loadInboxUser } = useLaunchpadInbox(allPrs);
+// Local action cards (commit / push / publish / sync) derived from cross-repo
+// WIP — the other pluggable source of the inbox-journal alongside PR buckets.
+const { cards: localCards, totalCount: localTotal } = useRepoActionCards(wip);
+/** Total inbox items = local action cards + PR buckets (drives badge + empty state). */
+const inboxCount = computed(() => localTotal.value + inboxTotal.value);
 
 /** i18n label for an inbox bucket header. */
 function inboxBucketLabel(key: InboxBucketKey): string {
   return t(`launchpad.inbox.${key}`);
+}
+/** i18n label for a local action card (count-aware). */
+function localCardLabel(kind: RepoCardKind, count: number): string {
+  return t(`launchpad.card.${kind}`, count);
 }
 const { allIssues, snoozedIssues, repos: issueRepos, loading: issuesLoading, error: issuesError, activeFilter: issueFilter, totalCount: issuesTotal, refresh: refreshIssues } = useLaunchpadIssues();
 const { pin, unpin, snooze, unsnooze, isPinned, isSnoozed, snoozedUntil } = useLaunchpadPins();
@@ -360,8 +372,8 @@ watch(scopedRepos, () => {
         @click="setTab('inbox')"
       >
         {{ t("launchpad.inboxTab") }}
-        <span v-if="inboxTotal > 0" class="launchpad-view__tab-badge">
-          {{ inboxTotal }}
+        <span v-if="inboxCount > 0" class="launchpad-view__tab-badge">
+          {{ inboxCount }}
         </span>
       </button>
       <button
@@ -423,10 +435,33 @@ watch(scopedRepos, () => {
         </span>
         <span class="launchpad-view__loading-label">{{ t("launchpad.loading") }}</span>
       </div>
-      <p v-else-if="inboxTotal === 0" class="launchpad-view__empty">
+      <p v-else-if="inboxCount === 0" class="launchpad-view__empty">
         {{ t("launchpad.inboxEmpty") }}
       </p>
       <template v-else>
+        <!-- Local action cards (commit / push / publish / sync) — "sur tes dépôts". -->
+        <div v-if="localCards.length > 0" class="launchpad-view__inbox-section">
+          <div class="launchpad-view__inbox-header launchpad-view__inbox-header--local">
+            <span class="launchpad-view__inbox-dot" aria-hidden="true"></span>
+            <span class="launchpad-view__inbox-label">{{ t("launchpad.localSection") }}</span>
+            <span class="launchpad-view__inbox-count">{{ localCards.length }}</span>
+          </div>
+          <ul class="launchpad-view__pr-list">
+            <li
+              v-for="card in localCards"
+              :key="card.id"
+              class="launchpad-view__pr-item"
+            >
+              <span class="launchpad-view__pr-repo">{{ card.repoName }}</span>
+              <span class="launchpad-view__pr-title">
+                <button type="button" class="launchpad-view__pr-link" @click="emit('open-repo-changes', card.repoPath)">
+                  {{ localCardLabel(card.kind, card.count) }}
+                </button>
+              </span>
+            </li>
+          </ul>
+        </div>
+
         <div
           v-for="bucket in inboxBuckets"
           :key="bucket.key"
@@ -1461,6 +1496,7 @@ watch(scopedRepos, () => {
 .launchpad-view__inbox-header--changes .launchpad-view__inbox-dot { background: var(--color-danger); }
 .launchpad-view__inbox-header--ci .launchpad-view__inbox-dot { background: var(--color-warning); }
 .launchpad-view__inbox-header--merge .launchpad-view__inbox-dot { background: var(--color-success); }
+.launchpad-view__inbox-header--local .launchpad-view__inbox-dot { background: var(--color-text-muted); }
 
 .launchpad-view__inbox-count {
   display: inline-flex;

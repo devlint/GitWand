@@ -1363,6 +1363,13 @@ const es: Locale = {
     scopeAll: "Todos",
     scopeCount: "{0} repos",
     scopeTooltip: "Ámbito de visualización",
+    localSection: "En tus repos",
+    card: {
+      commit: "{0} para confirmar",
+      push: "{0} para enviar",
+      publish: "Publicar rama",
+      sync: "{0} para traer",
+    },
     inboxTab: "Por hacer",
     inboxEmpty: "Nada requiere tu acción ahora mismo. 🎉",
     inbox: {

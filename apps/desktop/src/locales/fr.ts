@@ -1374,6 +1374,13 @@ const fr: Locale = {
     scopeAll: "Tous",
     scopeCount: "{0} dépôts",
     scopeTooltip: "Périmètre d'affichage",
+    localSection: "Sur tes dépôts",
+    card: {
+      commit: "{0} à commiter",
+      push: "{0} à pousser",
+      publish: "Branche à publier",
+      sync: "{0} à récupérer",
+    },
     inboxTab: "À traiter",
     inboxEmpty: "Rien ne requiert ton action pour le moment. 🎉",
     inbox: {
