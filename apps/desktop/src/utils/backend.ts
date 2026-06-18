@@ -111,8 +111,10 @@ export async function getTreeConflicts(cwd: string): Promise<TreeConflict[]> {
   if (isTauri()) {
     return tauriInvoke<TreeConflict[]>("get_tree_conflicts", { cwd });
   }
-  // Dev-server fallback: return empty (tree conflicts are rare in dev mode)
-  return [];
+  const res = await fetch(`${DEV_SERVER}/api/tree-conflicts?cwd=${encodeURIComponent(cwd)}`);
+  if (!res.ok) throw new Error(`Dev server error: ${res.status}`);
+  const data = await res.json();
+  return data.conflicts;
 }
 
 export async function resolveTreeConflict(
@@ -124,7 +126,12 @@ export async function resolveTreeConflict(
     await tauriInvoke("resolve_tree_conflict", { cwd, path, choice });
     return;
   }
-  throw new Error("resolveTreeConflict is not available in dev-server mode");
+  const res = await devFetch(`${DEV_SERVER}/api/resolve-tree-conflict`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, path, choice }),
+  });
+  if (!res.ok) throw new Error(`Failed to resolve tree conflict: ${res.status}`);
 }
 
 export interface ReconstructedConflict {
@@ -139,7 +146,13 @@ export async function reconstructConflict(
   if (isTauri()) {
     return tauriInvoke<ReconstructedConflict>("reconstruct_conflict", { cwd, path });
   }
-  throw new Error("reconstructConflict is not available in dev-server mode");
+  const res = await devFetch(`${DEV_SERVER}/api/reconstruct-conflict`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, path }),
+  });
+  if (!res.ok) throw new Error(`Failed to reconstruct conflict: ${res.status}`);
+  return res.json();
 }
 
 /**
