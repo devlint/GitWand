@@ -4,6 +4,7 @@ import { saveSettings as persistAppSettings } from "../composables/useSettings";
 import { avatarStyle, avatarInitials } from "../composables/useAvatar";
 import { useLaunchpadWip } from "../composables/useLaunchpadWip";
 import { useLaunchpadPrs } from "../composables/useLaunchpadPrs";
+import { useLaunchpadInbox, type InboxBucketKey } from "../composables/useLaunchpadInbox";
 import { useLaunchpadIssues } from "../composables/useLaunchpadIssues";
 import { useLaunchpadPins } from "../composables/useLaunchpadPins";
 import { useLaunchpadTeam } from "../composables/useLaunchpadTeam";
@@ -11,10 +12,18 @@ import type { TeamMemberActivity, OverlappingPr } from "../composables/useLaunch
 import { useI18n } from "../composables/useI18n";
 import { useSettings } from "../composables/useSettings";
 import type { WorkspaceRepo } from "../utils/backend";
-import type { IssueFilter } from "../composables/useLaunchpadIssues";
+import type { PrWithRepo } from "../composables/useLaunchpadPrs";
+import type { IssueFilter, IssueWithRepo } from "../composables/useLaunchpadIssues";
 
 const props = defineProps<{
   repos: WorkspaceRepo[];
+}>();
+
+const emit = defineEmits<{
+  /** Open a PR in the in-app review surface (PrDetailView) — handled by App.vue. */
+  (e: "open-pr", pr: PrWithRepo): void;
+  /** Open an issue in the in-app IssueDetailView — handled by App.vue. */
+  (e: "open-issue", issue: IssueWithRepo): void;
 }>();
 
 // close event removed — navigation is now handled by the sidebar viewMode switch
@@ -34,7 +43,15 @@ const teamLoaded = ref(false);
 
 const { wip, loading: wipLoading, error: wipError, refresh: refreshWip } = useLaunchpadWip();
 const { allPrs, snoozedPrs, repos: prRepos, loading: prsLoading, error: prsError, refresh: refreshPrs } = useLaunchpadPrs();
-const { allIssues, snoozedIssues, repos: issueRepos, loading: issuesLoading, error: issuesError, activeFilter: issueFilter, refresh: refreshIssues } = useLaunchpadIssues();
+// Inbox — "À traiter": derives the action-grouped subset of allPrs (review
+// requested of me, changes requested / failing CI / approved on my own PRs).
+const { buckets: inboxBuckets, totalCount: inboxTotal, loadUser: loadInboxUser } = useLaunchpadInbox(allPrs);
+
+/** i18n label for an inbox bucket header. */
+function inboxBucketLabel(key: InboxBucketKey): string {
+  return t(`launchpad.inbox.${key}`);
+}
+const { allIssues, snoozedIssues, repos: issueRepos, loading: issuesLoading, error: issuesError, activeFilter: issueFilter, totalCount: issuesTotal, refresh: refreshIssues } = useLaunchpadIssues();
 const { pin, unpin, snooze, unsnooze, isPinned, isSnoozed, snoozedUntil } = useLaunchpadPins();
 const {
   teamActivity,
@@ -43,7 +60,7 @@ const {
   refresh: refreshTeam,
 } = useLaunchpadTeam();
 
-type Tab = "wip" | "prs" | "issues" | "team";
+type Tab = "inbox" | "wip" | "prs" | "issues" | "team";
 
 // Persist active tab across openings (v2.9 §1.3). Source of truth is
 // `settings.launchpadActiveTab` — read once at boot so the user lands back on
@@ -158,8 +175,9 @@ async function handleRefreshAll() {
 }
 
 function setIssueFilter(filter: IssueFilter) {
+  // The three filters are already cached by useLaunchpadIssues.refresh(), so
+  // switching sub-filter is a pure view change — no refetch needed.
   issueFilter.value = filter;
-  refreshIssues(props.repos);
 }
 
 const isLoading = () => wipLoading.value || prsLoading.value || issuesLoading.value || teamLoading.value;
@@ -216,6 +234,8 @@ onMounted(() => {
   refreshWip(props.repos);
   refreshPrs(props.repos);
   refreshIssues(props.repos);
+  // Resolve the forge identity once so the Inbox can classify PRs by action.
+  void loadInboxUser();
   // If the user persisted "team" as their last active tab (v2.9 §1.3),
   // honor the lazy-load contract by fetching it now — otherwise the
   // restored panel would render an empty placeholder until they switch
@@ -271,6 +291,16 @@ onMounted(() => {
     <div class="launchpad-view__tabs">
       <button
         class="launchpad-view__tab"
+        :class="{ 'launchpad-view__tab--active': activeTab === 'inbox' }"
+        @click="setTab('inbox')"
+      >
+        {{ t("launchpad.inboxTab") }}
+        <span v-if="inboxTotal > 0" class="launchpad-view__tab-badge">
+          {{ inboxTotal }}
+        </span>
+      </button>
+      <button
+        class="launchpad-view__tab"
         :class="{ 'launchpad-view__tab--active': activeTab === 'wip' }"
         @click="setTab('wip')"
       >
@@ -292,8 +322,8 @@ onMounted(() => {
         @click="setTab('issues')"
       >
         {{ t("launchpad.issuesTab") }}
-        <span v-if="allIssues.length > 0" class="launchpad-view__tab-badge">
-          {{ allIssues.length }}
+        <span v-if="issuesTotal > 0" class="launchpad-view__tab-badge">
+          {{ issuesTotal }}
         </span>
       </button>
       <button
@@ -304,6 +334,72 @@ onMounted(() => {
       >
         {{ t("launchpad.teamTab") }}
       </button>
+    </div>
+
+    <!-- Inbox tab — "À traiter" : action-grouped subset of open PRs -->
+    <div v-if="activeTab === 'inbox'" class="launchpad-view__panel">
+      <span
+        v-if="prsLoading && allPrs.length > 0"
+        class="launchpad-view__refresh-spinner"
+        :aria-label="t('launchpad.loading')"
+      >
+        <svg viewBox="0 0 24 24" width="16" height="16">
+          <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-dasharray="14 42"></circle>
+        </svg>
+      </span>
+      <div v-if="prsError" class="launchpad-view__error">
+        {{ t("launchpad.errorFetch", prsError) }}
+      </div>
+      <div v-else-if="prsLoading && allPrs.length === 0" class="launchpad-view__loading-block">
+        <span class="launchpad-view__spinner" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="24" height="24">
+            <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-dasharray="14 42"></circle>
+          </svg>
+        </span>
+        <span class="launchpad-view__loading-label">{{ t("launchpad.loading") }}</span>
+      </div>
+      <p v-else-if="inboxTotal === 0" class="launchpad-view__empty">
+        {{ t("launchpad.inboxEmpty") }}
+      </p>
+      <template v-else>
+        <div
+          v-for="bucket in inboxBuckets"
+          :key="bucket.key"
+          class="launchpad-view__inbox-section"
+        >
+          <div
+            class="launchpad-view__inbox-header"
+            :class="`launchpad-view__inbox-header--${bucket.key}`"
+          >
+            <span class="launchpad-view__inbox-dot" aria-hidden="true"></span>
+            <span class="launchpad-view__inbox-label">{{ inboxBucketLabel(bucket.key) }}</span>
+            <span class="launchpad-view__inbox-count">{{ bucket.prs.length }}</span>
+          </div>
+          <ul class="launchpad-view__pr-list">
+            <li
+              v-for="pr in bucket.prs"
+              :key="`${pr.repoPath}/${pr.number}`"
+              class="launchpad-view__pr-item"
+            >
+              <span class="launchpad-view__pr-repo">{{ pr.repoName }}</span>
+              <span class="launchpad-view__pr-title">
+                <button type="button" class="launchpad-view__pr-link" @click="emit('open-pr', pr)">
+                  #{{ pr.number }} {{ pr.title }}
+                </button>
+              </span>
+              <span class="launchpad-view__pr-author">@{{ pr.author }}</span>
+              <span
+                v-if="pr.checksRollup === 'FAILURE'"
+                class="launchpad-view__pr-badge launchpad-view__pr-badge--ci-failure"
+              >{{ t("launchpad.prCiFailure") }}</span>
+              <span
+                v-else-if="pr.checksRollup === 'PENDING'"
+                class="launchpad-view__pr-badge launchpad-view__pr-badge--ci-pending"
+              >{{ t("launchpad.prCiPending") }}</span>
+            </li>
+          </ul>
+        </div>
+      </template>
     </div>
 
     <!-- WIP tab -->
@@ -407,9 +503,9 @@ onMounted(() => {
           </span>
           <span class="launchpad-view__pr-repo">{{ pr.repoName }}</span>
           <span class="launchpad-view__pr-title">
-            <a :href="pr.url" target="_blank" rel="noopener noreferrer">
+            <button type="button" class="launchpad-view__pr-link" @click="emit('open-pr', pr)">
               #{{ pr.number }} {{ pr.title }}
-            </a>
+            </button>
           </span>
           <span v-if="pr.draft" class="launchpad-view__pr-badge launchpad-view__pr-badge--draft">
             {{ t("launchpad.prDraft") }}
@@ -647,9 +743,9 @@ onMounted(() => {
           </span>
           <span class="launchpad-view__pr-repo">{{ issue.repoName }}</span>
           <span class="launchpad-view__issue-title">
-            <a :href="issue.url" target="_blank" rel="noopener noreferrer">
+            <button type="button" class="launchpad-view__pr-link" @click="emit('open-issue', issue)">
               #{{ issue.number }} {{ issue.title }}
-            </a>
+            </button>
           </span>
           <span v-if="issue.milestone" class="launchpad-view__issue-milestone">
             {{ t("launchpad.issueMilestone", issue.milestone) }}
@@ -860,9 +956,9 @@ onMounted(() => {
                 class="launchpad-view__team-pr-row"
               >
                 <span class="launchpad-view__repo-badge">{{ pr.repoName }}</span>
-                <a :href="pr.url" class="launchpad-view__team-pr-link" target="_blank" rel="noopener noreferrer">
+                <button type="button" class="launchpad-view__team-pr-link" @click="emit('open-pr', pr)">
                   #{{ pr.number }} {{ pr.title }}
-                </a>
+                </button>
                 <template
                   v-for="overlap in ([member.overlappingPrs.find((op) => op.url === pr.url)].filter(Boolean) as OverlappingPr[])"
                   :key="overlap.url"
@@ -931,9 +1027,9 @@ onMounted(() => {
                 class="launchpad-view__team-pr-row"
               >
                 <span class="launchpad-view__repo-badge">{{ pr.repoName }}</span>
-                <a :href="pr.url" class="launchpad-view__team-pr-link" target="_blank" rel="noopener noreferrer">
+                <button type="button" class="launchpad-view__team-pr-link" @click="emit('open-pr', pr)">
                   #{{ pr.number }} {{ pr.title }}
-                </a>
+                </button>
               </div>
             </div>
           </div>
@@ -1194,6 +1290,59 @@ onMounted(() => {
   font-size: var(--font-size-sm);
 }
 
+/* ── Inbox ("À traiter") ───────────────────────────────── */
+.launchpad-view__inbox-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-bottom: var(--space-5);
+}
+
+.launchpad-view__inbox-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.launchpad-view__inbox-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-pill);
+  flex-shrink: 0;
+  background: var(--color-text-muted);
+}
+.launchpad-view__inbox-header--review .launchpad-view__inbox-dot { background: var(--color-accent); }
+.launchpad-view__inbox-header--changes .launchpad-view__inbox-dot { background: var(--color-danger); }
+.launchpad-view__inbox-header--ci .launchpad-view__inbox-dot { background: var(--color-warning); }
+.launchpad-view__inbox-header--merge .launchpad-view__inbox-dot { background: var(--color-success); }
+
+.launchpad-view__inbox-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  font-variant-numeric: tabular-nums;
+}
+
+.launchpad-view__pr-author {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
 /* ── PR list ───────────────────────────────────────────── */
 .launchpad-view__pr-list {
   list-style: none;
@@ -1251,6 +1400,26 @@ onMounted(() => {
 }
 
 .launchpad-view__pr-title a:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+/* Internal-nav trigger (opens PrDetailView) — styled to read as a link, not a button. */
+.launchpad-view__pr-link {
+  padding: 0;
+  background: none;
+  border: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.launchpad-view__pr-link:hover {
+  color: var(--color-accent);
+  text-decoration: underline;
+}
+.launchpad-view__pr-link:focus-visible {
   outline: 2px solid var(--color-focus-ring);
   outline-offset: 2px;
   border-radius: var(--radius-xs);
@@ -1801,6 +1970,16 @@ onMounted(() => {
   flex: 1;
   min-width: 0;
   font-size: var(--font-size-sm);
+  /* Button reset — renders as a link but navigates in-app (emits open-pr). */
+  padding: 0;
+  background: none;
+  border: none;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .launchpad-view__team-pr-link:hover {

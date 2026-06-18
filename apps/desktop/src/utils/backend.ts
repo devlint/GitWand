@@ -2686,6 +2686,84 @@ export async function workspaceIssuesAll(
   }));
 }
 
+// ─── Issue detail / comments (v2.22 — IssueDetailView) ──────────────────────
+
+/** Detailed view of a single GitHub issue (mirrors the Rust `IssueDetail`). */
+export interface IssueDetail {
+  number: number;
+  title: string;
+  body: string;
+  /** "open"/"closed" (REST) or "OPEN"/"CLOSED" (gh CLI) — compare case-insensitively. */
+  state: string;
+  author: string;
+  assignees: string[];
+  labels: string[];
+  url: string;
+  createdAt: string;
+  updatedAt: string;
+  milestone: string;
+  /** Conversation comment count. */
+  comments: number;
+}
+
+/** A single conversation comment on an issue. */
+export interface IssueComment {
+  id: number;
+  body: string;
+  author: string;
+  created_at: string;
+  updated_at: string;
+  url: string;
+}
+
+/** Fetch a single issue's detail (body + metadata + comment count). */
+export async function ghIssueDetail(cwd: string, number: number): Promise<IssueDetail> {
+  if (isTauri()) return tauriInvoke<IssueDetail>("gh_issue_detail", { cwd, number });
+  const res = await devFetch(`${DEV_SERVER}/api/gh-issue-detail?cwd=${encodeURIComponent(cwd)}&number=${number}`);
+  if (!res.ok) throw new Error(`gh issue detail failed: ${res.status}`);
+  const raw = await res.json();
+  if (raw.error) throw new Error(raw.error);
+  return raw as IssueDetail;
+}
+
+/** List the conversation comments on an issue. */
+export async function ghIssueComments(cwd: string, number: number): Promise<IssueComment[]> {
+  if (isTauri()) return tauriInvoke<IssueComment[]>("gh_issue_comments", { cwd, number });
+  const res = await devFetch(`${DEV_SERVER}/api/gh-issue-comments?cwd=${encodeURIComponent(cwd)}&number=${number}`);
+  if (!res.ok) throw new Error(`gh issue comments failed: ${res.status}`);
+  const raw = await res.json();
+  if (raw.error) throw new Error(raw.error);
+  return raw as IssueComment[];
+}
+
+/** Add a comment to an issue; returns the created comment. */
+export async function ghIssueAddComment(cwd: string, number: number, body: string): Promise<IssueComment> {
+  if (isTauri()) return tauriInvoke<IssueComment>("gh_issue_add_comment", { cwd, number, body });
+  const res = await devFetch(`${DEV_SERVER}/api/gh-issue-comment`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, number, body }),
+  });
+  const raw = await res.json();
+  if (!res.ok || raw.error) throw new Error(raw.error || `gh issue comment failed: ${res.status}`);
+  return raw as IssueComment;
+}
+
+/** Close (`state="closed"`) or reopen (`state="open"`) an issue. */
+export async function ghIssueSetState(cwd: string, number: number, state: "closed" | "open"): Promise<void> {
+  if (isTauri()) {
+    await tauriInvoke<void>("gh_issue_set_state", { cwd, number, state });
+    return;
+  }
+  const res = await devFetch(`${DEV_SERVER}/api/gh-issue-state`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, number, state }),
+  });
+  const raw = await res.json().catch(() => ({}));
+  if (!res.ok || raw.error) throw new Error(raw.error || `gh issue state failed: ${res.status}`);
+}
+
 /** Get the cross-worktree status for a repository (ahead/behind + modified per worktree). */
 export async function gitWorktreeStatusAll(cwd: string): Promise<WorkspaceRepoStatus[]> {
   if (isTauri()) {

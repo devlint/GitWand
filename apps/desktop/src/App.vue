@@ -33,6 +33,7 @@ const CommitDiffViewer = defineAsyncComponent(() => import("./components/CommitD
 const FileHistoryViewer = defineAsyncComponent(() => import("./components/FileHistoryViewer.vue"));
 const CommitGraph = defineAsyncComponent(() => import("./components/CommitGraph.vue"));
 const PrDetailView = defineAsyncComponent(() => import("./components/PrDetailView.vue"));
+const IssueDetailView = defineAsyncComponent(() => import("./components/IssueDetailView.vue"));
 const PrCreateView = defineAsyncComponent(() => import("./components/PrCreateView.vue"));
 const DashboardView = defineAsyncComponent(() => import("./components/DashboardView.vue"));
 const SettingsPanel = defineAsyncComponent(() => import("./components/SettingsPanel.vue"));
@@ -62,6 +63,7 @@ const BranchNameField = defineAsyncComponent(() => import("./components/BranchNa
 import { useStashMessage } from "./composables/useStashMessage";
 import { useAIProvider } from "./composables/useAIProvider";
 import { usePrPanel, PR_PANEL_KEY } from "./composables/usePrPanel";
+import { useIssuePanel, ISSUE_PANEL_KEY } from "./composables/useIssuePanel";
 import { useSplitCommit } from "./composables/useSplitCommit";
 import type { GitLogEntry } from "./utils/backend";
 import { getPersistedDiffMode, persistDiffMode, type DiffMode } from "./utils/diffMode";
@@ -110,7 +112,7 @@ const { isOffline: navIsOffline } = useNetworkStatus();
 const { isOnline: probedOnline, probeConnectivity } = useConnectivity();
 const isOffline = computed(() => navIsOffline.value || !probedOnline.value);
 import { isTauri, registerBrowserFolderPicker, pickFolder, checkForUpdates, fetchBetaUpdate, installUpdate, gitRepoState, openExternalUrl } from "./utils/backend";
-import type { UpdateInfo, RepoOperationState, WorkspaceRepo } from "./utils/backend";
+import type { UpdateInfo, RepoOperationState, WorkspaceRepo, PullRequest } from "./utils/backend";
 import { onMarkdownLinkClick } from "./composables/useSafeHtml";
 // UpdateModal moved above (lazy-loaded) — type imported as UpdateModalType for the template ref
 
@@ -333,6 +335,8 @@ watch(
 const prCwd = computed(() => repoFolderPath.value ?? "");
 const prPanel = usePrPanel(prCwd);
 provide(PR_PANEL_KEY, prPanel);
+const issuePanel = useIssuePanel(prCwd);
+provide(ISSUE_PANEL_KEY, issuePanel);
 
 // Load branches when the PR create form opens (they're needed to compute baseCandidates).
 watch(() => prPanel.showCreateForm.value, (val) => {
@@ -1399,6 +1403,43 @@ function openLaunchpad(repos: WorkspaceRepo[]) {
 }
 
 /**
+ * Open a PR picked in the Launchpad inside the in-app review surface
+ * (PrDetailView) instead of bouncing to the browser. The Launchpad is
+ * cross-repo, so we first switch the active repo to the PR's repo when it
+ * differs from the one currently open, then select the PR.
+ *
+ * `pr` is a `PullRequest` enriched with `repoPath` (PrWithRepo) — selectPr only
+ * needs the PullRequest shape and reads `cwd` (now the PR's repo) for its fetches.
+ */
+async function openLaunchpadPr(pr: PullRequest & { repoPath?: string }) {
+  if (pr.repoPath && pr.repoPath !== repoFolderPath.value) {
+    await handleOpenPath(pr.repoPath);
+    // Let the cwd watcher in usePrPanel run (it resets selectedPr / re-inits
+    // for the new repo) before we select, so our selection isn't clobbered.
+    await nextTick();
+  }
+  viewMode.value = "prs";
+  // Ensure the forge is resolved for this repo (GitLab/Bitbucket/Azure) before
+  // the detail bundle is fetched — selectPr derives the provider from `remote`.
+  await prPanel.loadRemote();
+  await prPanel.selectPr(pr);
+}
+
+/**
+ * Open an issue picked in the Launchpad inside the in-app IssueDetailView.
+ * Same cross-repo switch as `openLaunchpadPr`. `issue` carries `repoPath`
+ * (IssueWithRepo); issuePanel reads `cwd` (the issue's repo) for its fetches.
+ */
+async function openLaunchpadIssue(issue: { number: number; repoPath?: string }) {
+  if (issue.repoPath && issue.repoPath !== repoFolderPath.value) {
+    await handleOpenPath(issue.repoPath);
+    await nextTick();
+  }
+  viewMode.value = "issue";
+  await issuePanel.selectIssue(issue.number);
+}
+
+/**
  * Handle the ⌘L / Ctrl+L shortcut.
  *
  * Resolves the active workspace lazily — Launchpad needs the repo list and
@@ -2290,7 +2331,8 @@ onUnmounted(() => {
       @open-worktrees="(branch) => { pendingWorktreeBranch = branch; showWorktrees = true; }"
       @open-submodules="showSubmodules = true" @open-submodule="handleOpenSubmodule" @open-search="handleOpenSearch" @open-help="showHelp = true"
       :stash-count="stashCount" @open-stash="showStash = true" @open-tags="showTags = true"
-      @open-workspace="showWorkspace = true" @open-agents="showAgents = true" />
+      @open-workspace="showWorkspace = true" @open-agents="showAgents = true"
+      :active-view="viewMode" @open-launchpad="handleLaunchpadShortcut" />
 
     <div class="app-body" :style="{ '--sidebar-width': sidebarWidth + 'px' }">
       <aside class="sidebar" v-if="hasRepo && showSidebar">
@@ -2429,8 +2471,11 @@ onUnmounted(() => {
             <PrDetailView v-else-if="viewMode === 'prs'" @refresh="repoRefresh"
               @navigate-commit="(hash) => { selectCommit(hash); viewMode = 'history'; }" />
 
+            <!-- Issue detail view: in-app issue review (v2.22) -->
+            <IssueDetailView v-else-if="viewMode === 'issue'" />
+
             <!-- Launchpad view: cross-repo dashboard (v2.10 nav revamp) -->
-            <LaunchpadView v-else-if="viewMode === 'launchpad'" :repos="launchpadRepos" />
+            <LaunchpadView v-else-if="viewMode === 'launchpad'" :repos="launchpadRepos" @open-pr="openLaunchpadPr" @open-issue="openLaunchpadIssue" />
           </template>
         </template>
       </main>

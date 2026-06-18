@@ -96,6 +96,58 @@ describe("useLaunchpadIssues", () => {
   });
 });
 
+describe("useLaunchpadIssues — totalCount (union across filters)", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    _resetPinsForTesting();
+    mockFetch.mockReset();
+  });
+
+  function issue(url: string, number: number): Issue {
+    return { ...MOCK_ISSUE, number, url };
+  }
+  const X = "https://github.com/org/alpha/issues/1"; // assigned only
+  const Y = "https://github.com/org/alpha/issues/2"; // assigned AND created
+  const Z = "https://github.com/org/beta/issues/3"; // mentioned only
+
+  function perFilter(filter: string): WorkspaceRepoIssues[] {
+    const map: Record<string, Issue[]> = {
+      assigned: [issue(X, 1), issue(Y, 2)],
+      mentioned: [issue(Z, 3)],
+      created: [issue(Y, 2)], // Y duplicates the assigned one
+    };
+    return [
+      { repoPath: "/repo/a", repoName: "alpha", issues: map[filter] ?? [], filter, error: null },
+    ];
+  }
+
+  it("counts each issue once even when it matches multiple filters", async () => {
+    mockFetch.mockImplementation(async (_repos: WorkspaceRepo[], filter?: string) =>
+      perFilter(filter ?? "assigned")
+    );
+    const { totalCount, allIssues, refresh } = useLaunchpadIssues();
+    await refresh(REPOS);
+
+    // Union of {X,Y} ∪ {Z} ∪ {Y} = {X,Y,Z} = 3 — not 4.
+    expect(totalCount.value).toBe(3);
+    // The visible list still reflects only the active ("assigned") filter.
+    expect(allIssues.value).toHaveLength(2);
+  });
+
+  it("excludes snoozed issues from totalCount", async () => {
+    mockFetch.mockImplementation(async (_repos: WorkspaceRepo[], filter?: string) =>
+      perFilter(filter ?? "assigned")
+    );
+    const pins = useLaunchpadPins();
+    pins.snooze(Z, "issue", 1);
+
+    const { totalCount, refresh } = useLaunchpadIssues();
+    await refresh(REPOS);
+
+    expect(totalCount.value).toBe(2); // {X,Y}, Z snoozed out
+  });
+});
+
 describe("useLaunchpadIssues — pin/snooze integration", () => {
   const ISSUE1_URL = "https://github.com/org/alpha/issues/10";
   const ISSUE2_URL = "https://github.com/org/alpha/issues/20";

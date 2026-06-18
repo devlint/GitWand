@@ -49,7 +49,7 @@ import { requireOnline } from "../utils/networkGuard";
 import { t } from "./useI18n";
 import { useWorkspaceScope } from "./useWorkspaceScope";
 
-export type ViewMode = "dashboard" | "changes" | "history" | "graph" | "prs" | "launchpad";
+export type ViewMode = "dashboard" | "changes" | "history" | "graph" | "prs" | "launchpad" | "issue";
 
 export interface RepoFileEntry {
   path: string;

@@ -51,11 +51,16 @@ const snoozedIssuesRef = ref<unknown[]>([]);
 const issueReposRef = ref<unknown[]>([]);
 const issuesLoadingRef = ref(false);
 const issuesErrorRef = ref<string | null>(null);
+const issuesTotalRef = ref(0);
 const issueFilterRef = ref<"" | "assigned" | "mentioned" | "created">("assigned");
 
 const teamActivityRef = ref<unknown[]>([]);
 const teamLoadingRef = ref(false);
 const teamErrorRef = ref<string | null>(null);
+
+const inboxBucketsRef = ref<unknown[]>([]);
+const inboxTotalRef = ref(0);
+const loadInboxUserMock = vi.fn(async () => {});
 
 // Reactive AppSettings stand-in. Default shape mirrors `defaultAppSettings`
 // closely enough for LaunchpadView's needs (it only reads
@@ -109,6 +114,7 @@ vi.mock("../../composables/useLaunchpadIssues", () => ({
     loading: issuesLoadingRef,
     error: issuesErrorRef,
     activeFilter: issueFilterRef,
+    totalCount: issuesTotalRef,
     refresh: refreshIssuesMock,
   }),
 }));
@@ -134,29 +140,61 @@ vi.mock("../../composables/useLaunchpadTeam", () => ({
   }),
 }));
 
+vi.mock("../../composables/useLaunchpadInbox", () => ({
+  useLaunchpadInbox: () => ({
+    buckets: inboxBucketsRef,
+    totalCount: inboxTotalRef,
+    loadUser: loadInboxUserMock,
+  }),
+}));
+
 // ─── Helpers ──────────────────────────────────────────────
 
 interface MountResult {
   app: App;
   container: HTMLDivElement;
-  emitted: { close: number };
+  emitted: { close: number; openPr: unknown[]; openIssue: unknown[] };
 }
 
 function mountLaunchpad(repos: { path: string; name: string }[] = []): MountResult {
   const container = document.createElement("div");
   document.body.appendChild(container);
 
-  const emitted = { close: 0 };
+  const emitted = { close: 0, openPr: [] as unknown[], openIssue: [] as unknown[] };
 
   const app = createApp(LaunchpadView, {
     repos,
     onClose: () => {
       emitted.close += 1;
     },
+    onOpenPr: (pr: unknown) => {
+      emitted.openPr.push(pr);
+    },
+    onOpenIssue: (issue: unknown) => {
+      emitted.openIssue.push(issue);
+    },
   });
   app.mount(container);
 
   return { app, container, emitted };
+}
+
+function fakeIssue(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    number: 21,
+    title: "Sample issue",
+    state: "OPEN",
+    author: "octocat",
+    assignees: [],
+    labels: [],
+    url: "https://github.com/org/repo/issues/21",
+    createdAt: "2026-06-01T10:00:00Z",
+    updatedAt: "2026-06-01T10:00:00Z",
+    milestone: "",
+    repoName: "repo",
+    repoPath: "/tmp/repo",
+    ...overrides,
+  };
 }
 
 function unmount({ app, container }: MountResult): void {
@@ -207,10 +245,13 @@ beforeEach(() => {
   issueReposRef.value = [];
   issuesLoadingRef.value = false;
   issuesErrorRef.value = null;
+  issuesTotalRef.value = 0;
   issueFilterRef.value = "assigned";
   teamActivityRef.value = [];
   teamLoadingRef.value = false;
   teamErrorRef.value = null;
+  inboxBucketsRef.value = [];
+  inboxTotalRef.value = 0;
   settingsRef.value = {
     launchpadActiveTab: "wip",
     launchpadTeamTabEnabled: true,
@@ -227,18 +268,19 @@ afterEach(() => {
 // ─── Tests ────────────────────────────────────────────────
 
 describe("LaunchpadView — UI smoke", () => {
-  it("renders 4 tabs (WIP / PRs / Issues / Team) when team toggle is on", async () => {
+  it("renders 5 tabs (Inbox / WIP / PRs / Issues / Team) when team toggle is on", async () => {
     const mounted = mountLaunchpad();
     await nextTick();
 
     const tabs = mounted.container.querySelectorAll(".launchpad-view__tab");
-    expect(tabs).toHaveLength(4);
-    // Tab order: wip, prs, issues, team — match the locale keys returned by t().
+    expect(tabs).toHaveLength(5);
+    // Tab order: inbox, wip, prs, issues, team — match the locale keys returned by t().
     const labels = Array.from(tabs).map((t) => t.textContent?.trim() ?? "");
-    expect(labels[0]).toContain("launchpad.wipTab");
-    expect(labels[1]).toContain("launchpad.prsTab");
-    expect(labels[2]).toContain("launchpad.issuesTab");
-    expect(labels[3]).toContain("launchpad.teamTab");
+    expect(labels[0]).toContain("launchpad.inboxTab");
+    expect(labels[1]).toContain("launchpad.wipTab");
+    expect(labels[2]).toContain("launchpad.prsTab");
+    expect(labels[3]).toContain("launchpad.issuesTab");
+    expect(labels[4]).toContain("launchpad.teamTab");
 
     unmount(mounted);
   });
@@ -249,7 +291,7 @@ describe("LaunchpadView — UI smoke", () => {
     await nextTick();
 
     const tabs = mounted.container.querySelectorAll(".launchpad-view__tab");
-    expect(tabs).toHaveLength(3);
+    expect(tabs).toHaveLength(4);
     const labels = Array.from(tabs).map((t) => t.textContent ?? "");
     expect(labels.some((l) => l.includes("teamTab"))).toBe(false);
 
@@ -275,12 +317,51 @@ describe("LaunchpadView — UI smoke", () => {
     await nextTick();
 
     const tabs = mounted.container.querySelectorAll<HTMLButtonElement>(".launchpad-view__tab");
-    // PRs is the 2nd tab.
-    tabs[1].click();
+    // Tab order is inbox, wip, prs, … → PRs is the 3rd tab.
+    tabs[2].click();
     await nextTick();
 
     const active = mounted.container.querySelector(".launchpad-view__tab--active");
     expect(active?.textContent).toContain("launchpad.prsTab");
+
+    unmount(mounted);
+  });
+
+  it("clicking a PR title emits open-pr with the PR (internal navigation, not target=_blank)", async () => {
+    allPrsRef.value = [fakePr()];
+    settingsRef.value.launchpadActiveTab = "prs";
+    const mounted = mountLaunchpad();
+    await nextTick();
+
+    const link = mounted.container.querySelector<HTMLButtonElement>(".launchpad-view__pr-link");
+    expect(link).not.toBeNull();
+    // It's a button (internal nav), not an external anchor.
+    expect(link!.tagName).toBe("BUTTON");
+    link!.click();
+    await nextTick();
+
+    expect(mounted.emitted.openPr).toHaveLength(1);
+    expect((mounted.emitted.openPr[0] as { number: number }).number).toBe(42);
+
+    unmount(mounted);
+  });
+
+  it("clicking an issue title emits open-issue (internal navigation)", async () => {
+    allIssuesRef.value = [fakeIssue()];
+    settingsRef.value.launchpadActiveTab = "issues";
+    const mounted = mountLaunchpad();
+    await nextTick();
+
+    const link = mounted.container.querySelector<HTMLButtonElement>(
+      ".launchpad-view__issue-title .launchpad-view__pr-link",
+    );
+    expect(link).not.toBeNull();
+    expect(link!.tagName).toBe("BUTTON");
+    link!.click();
+    await nextTick();
+
+    expect(mounted.emitted.openIssue).toHaveLength(1);
+    expect((mounted.emitted.openIssue[0] as { number: number }).number).toBe(21);
 
     unmount(mounted);
   });
@@ -386,16 +467,43 @@ describe("LaunchpadView — UI smoke", () => {
     const mounted = mountLaunchpad();
     await nextTick();
 
-    // Click the Team tab (4th).
+    // Click the Team tab (5th now: inbox, wip, prs, issues, team).
     const tabs = mounted.container.querySelectorAll<HTMLButtonElement>(".launchpad-view__tab");
     refreshTeamMock.mockClear();
-    tabs[3].click();
+    tabs[4].click();
     await nextTick();
 
     // setTab("team") kicks loadTeam() automatically — placeholder should not
     // appear because teamLoaded becomes true. Instead the panel is rendered
     // empty (no `teamActivity`, no `loading`, no `error`).
     expect(refreshTeamMock).toHaveBeenCalledTimes(1);
+
+    unmount(mounted);
+  });
+
+  it("clicking a Team PR emits open-pr (internal navigation)", async () => {
+    const teamPr = fakePr({ number: 99, repoPath: "/tmp/other", repoName: "other" });
+    teamActivityRef.value = [
+      {
+        login: "octocat",
+        prs: [teamPr],
+        // An overlapping PR auto-expands the member row so the link renders.
+        overlappingPrs: [{ ...teamPr, overlappingFiles: ["src/a.ts"], myContext: "wip" }],
+      },
+    ];
+    settingsRef.value.launchpadActiveTab = "team";
+    const mounted = mountLaunchpad();
+    await nextTick();
+    await nextTick(); // loadTeam resolves → teamLoaded + expanded members
+
+    const link = mounted.container.querySelector<HTMLButtonElement>(".launchpad-view__team-pr-link");
+    expect(link).not.toBeNull();
+    expect(link!.tagName).toBe("BUTTON");
+    link!.click();
+    await nextTick();
+
+    expect(mounted.emitted.openPr).toHaveLength(1);
+    expect((mounted.emitted.openPr[0] as { number: number }).number).toBe(99);
 
     unmount(mounted);
   });

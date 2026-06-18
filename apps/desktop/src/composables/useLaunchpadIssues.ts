@@ -8,6 +8,10 @@ export type { WorkspaceRepoIssues };
 /** Valid filter values for the Issues tab. */
 export type IssueFilter = "" | "assigned" | "mentioned" | "created";
 
+/** The three concrete filters the Issues tab fetches and unions for its badge. */
+const FILTERS = ["assigned", "mentioned", "created"] as const;
+type ConcreteFilter = (typeof FILTERS)[number];
+
 /** An issue enriched with its repo context (for flat list rendering). */
 export interface IssueWithRepo extends Issue {
   repoName: string;
@@ -18,22 +22,40 @@ export interface IssueWithRepo extends Issue {
  * Composable for the Launchpad Issues panel.
  * Aggregates open GitHub Issues from all repos in a workspace.
  * Each call returns a fresh reactive scope — no shared singleton.
+ *
+ * The three filters (assigned / mentioned / created) are fetched together and
+ * cached, so:
+ *   - switching the active sub-filter is instant (no refetch), and
+ *   - the tab badge (`totalCount`) is the *deduplicated union* of all three —
+ *     a stable number that doesn't jump around when you change sub-filter.
  */
 export function useLaunchpadIssues() {
-  const repos = ref<WorkspaceRepoIssues[]>([]);
+  const reposByFilter = ref<Record<ConcreteFilter, WorkspaceRepoIssues[]>>({
+    assigned: [],
+    mentioned: [],
+    created: [],
+  });
   const loading = ref(false);
   const error = ref<string | null>(null);
-  /** Currently active filter. Defaults to "assigned". Change before calling refresh(). */
+  /** Currently active filter (drives the visible list). Defaults to "assigned". */
   const activeFilter = ref<IssueFilter>("assigned");
 
   const { isPinned, isSnoozed } = useLaunchpadPins();
 
-  /** Flat list of all non-snoozed issues: pinned first, then by updatedAt descending. */
+  /** Repos for the active filter — used for per-repo error display. */
+  const repos = computed<WorkspaceRepoIssues[]>(
+    () => reposByFilter.value[(activeFilter.value || "assigned") as ConcreteFilter] ?? []
+  );
+
+  function flatten(list: WorkspaceRepoIssues[]): IssueWithRepo[] {
+    return list.flatMap((r) =>
+      r.issues.map((issue) => ({ ...issue, repoName: r.repoName, repoPath: r.repoPath }))
+    );
+  }
+
+  /** Flat list of all non-snoozed issues for the active filter: pinned first, then by updatedAt desc. */
   const allIssues = computed<IssueWithRepo[]>(() =>
-    repos.value
-      .flatMap((r) =>
-        r.issues.map((issue) => ({ ...issue, repoName: r.repoName, repoPath: r.repoPath }))
-      )
+    flatten(repos.value)
       .filter((issue) => !isSnoozed(issue.url))
       .sort((a, b) => {
         const aPinned = isPinned(a.url) ? 0 : 1;
@@ -43,20 +65,35 @@ export function useLaunchpadIssues() {
       })
   );
 
-  /** Flat list of currently-snoozed issues (hidden from allIssues). */
+  /** Flat list of currently-snoozed issues for the active filter (hidden from allIssues). */
   const snoozedIssues = computed<IssueWithRepo[]>(() =>
-    repos.value
-      .flatMap((r) =>
-        r.issues.map((issue) => ({ ...issue, repoName: r.repoName, repoPath: r.repoPath }))
-      )
-      .filter((issue) => isSnoozed(issue.url))
+    flatten(repos.value).filter((issue) => isSnoozed(issue.url))
   );
+
+  /**
+   * Deduplicated union of non-snoozed issues across ALL three filters — drives
+   * the Issues tab badge. An issue assigned-to-me AND created-by-me counts once.
+   */
+  const totalCount = computed<number>(() => {
+    const seen = new Set<string>();
+    for (const f of FILTERS) {
+      for (const r of reposByFilter.value[f] ?? []) {
+        for (const issue of r.issues) {
+          if (!isSnoozed(issue.url)) seen.add(issue.url);
+        }
+      }
+    }
+    return seen.size;
+  });
 
   async function refresh(workspaceRepos: WorkspaceRepo[]): Promise<void> {
     loading.value = true;
     error.value = null;
     try {
-      repos.value = await workspaceIssuesAll(workspaceRepos, activeFilter.value);
+      const [assigned, mentioned, created] = await Promise.all(
+        FILTERS.map((f) => workspaceIssuesAll(workspaceRepos, f))
+      );
+      reposByFilter.value = { assigned, mentioned, created };
     } catch (e) {
       error.value = (e as Error).message ?? String(e);
     } finally {
@@ -64,5 +101,5 @@ export function useLaunchpadIssues() {
     }
   }
 
-  return { repos, allIssues, snoozedIssues, loading, error, activeFilter, refresh };
+  return { repos, allIssues, snoozedIssues, loading, error, activeFilter, totalCount, refresh };
 }

@@ -18,7 +18,7 @@ import type { AIProvider } from "./useAIProvider";
 
 export type PullMode = "merge" | "rebase";
 export type SwitchBehavior = "stash" | "ask" | "refuse";
-export type LaunchpadTab = "wip" | "prs" | "issues" | "team";
+export type LaunchpadTab = "inbox" | "wip" | "prs" | "issues" | "team";
 /** Granularity of PR-activity OS notifications (v2.16). */
 export type NotificationLevel = "all" | "reviews" | "ci" | "none";
 
@@ -219,7 +219,7 @@ export const defaultAppSettings: AppSettings = {
   aiModelByProvider: {},
   aiOllamaUrl: "http://localhost:11434",
   aiOllamaModel: "codellama",
-  launchpadActiveTab: "wip",
+  launchpadActiveTab: "inbox",
   launchpadTeamTabEnabled: true,
   automations: {
     autoResolve:    { enabled: false },

@@ -93,6 +93,8 @@ const props = defineProps<{
   errorCount?: number;
   /** Stash entry count — drives the badge on the Stash button. */
   stashCount?: number;
+  /** Current main-content view — drives the active state of the Launchpad button. */
+  activeView?: string;
 }>();
 
 const emit = defineEmits<{
@@ -145,6 +147,7 @@ const emit = defineEmits<{
   openStash: [];
   openTags: [];
   openWorkspace: [];
+  openLaunchpad: [];
   openAgents: [];
   discardAll: [];
   changeView: [mode: 'dashboard' | 'changes' | 'history' | 'prs' | 'launchpad'];
@@ -329,36 +332,58 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
         <div class="header-separator header-separator--offline" aria-hidden="true"></div>
       </template>
 
-      <!-- Workspace button -->
-      <button
-        v-if="hasRepo"
-        class="btn btn--icon"
-        v-tooltip="t('workspace.title')"
-        :aria-label="t('workspace.title')"
-        @click="emit('openWorkspace')"
-      >
-        <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
-          <rect x="1" y="4" width="14" height="10" rx="2"/>
-          <path d="M1 7h14M5 4V3a2 2 0 014 0v1" stroke-linejoin="round"/>
-        </svg>
-      </button>
+      <!-- Primary destinations — labeled pills so they stand out from the
+           utility icons (theme / help / settings) that follow the divider. -->
+      <template v-if="hasRepo">
+        <button
+          class="btn btn--secondary header-feature-btn"
+          :class="{ 'btn--feature-active': activeView === 'launchpad' }"
+          v-tooltip="t('launchpad.openTooltip')"
+          :aria-label="t('launchpad.openTooltip')"
+          :aria-pressed="activeView === 'launchpad'"
+          @click="emit('openLaunchpad')"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M4.5 16.5c-1.5 1-2 4-2 4s3-.5 4-2c.6-.85.5-2 .5-2"/>
+            <path d="M12 15l-3-3a11 11 0 0 1 7-9c2.5 0 4 1.5 4 4a11 11 0 0 1-9 7l1 1z"/>
+            <path d="M9 12H5s.5-2.5 2-3.5c1.3-.85 3-.5 3-.5"/>
+            <path d="M12 15v4s2.5-.5 3.5-2c.85-1.3.5-3 .5-3"/>
+            <circle cx="15" cy="9" r="1.2"/>
+          </svg>
+          <span>{{ t('launchpad.title') }}</span>
+        </button>
 
-      <!-- Agents button -->
-      <button
-        v-if="hasRepo"
-        class="btn btn--icon"
-        v-tooltip="t('agents.sidebarTooltip')"
-        :aria-label="t('agents.title')"
-        @click="emit('openAgents')"
-      >
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <rect x="3" y="11" width="18" height="11" rx="2"/>
-          <path d="M12 2v4M8 11V9a4 4 0 0 1 8 0v2"/>
-          <circle cx="9" cy="16" r="1" fill="currentColor" stroke="none"/>
-          <circle cx="15" cy="16" r="1" fill="currentColor" stroke="none"/>
-          <path d="M9 20h6"/>
-        </svg>
-      </button>
+        <button
+          class="btn btn--secondary header-feature-btn"
+          v-tooltip="t('workspace.title')"
+          :aria-label="t('workspace.title')"
+          @click="emit('openWorkspace')"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <rect x="1" y="4" width="14" height="10" rx="2"/>
+            <path d="M1 7h14M5 4V3a2 2 0 014 0v1" stroke-linejoin="round"/>
+          </svg>
+          <span>{{ t('workspace.headerLabel') }}</span>
+        </button>
+
+        <button
+          class="btn btn--secondary header-feature-btn"
+          v-tooltip="t('agents.sidebarTooltip')"
+          :aria-label="t('agents.title')"
+          @click="emit('openAgents')"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3" y="11" width="18" height="11" rx="2"/>
+            <path d="M12 2v4M8 11V9a4 4 0 0 1 8 0v2"/>
+            <circle cx="9" cy="16" r="1" fill="currentColor" stroke="none"/>
+            <circle cx="15" cy="16" r="1" fill="currentColor" stroke="none"/>
+            <path d="M9 20h6"/>
+          </svg>
+          <span>{{ t('agents.headerLabel') }}</span>
+        </button>
+
+        <div class="header-separator" aria-hidden="true"></div>
+      </template>
 
       <!-- Theme toggle -->
       <button
@@ -775,6 +800,21 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
 
 .btn--secondary { background: var(--color-bg-tertiary); color: var(--color-text); }
 .btn--secondary:hover:not(:disabled) { background: var(--color-border); }
+
+/* Header feature pills (Launchpad / Workspace / Agents) — labeled, slightly
+   tighter than row-2 actions, with an accent active state for the open view. */
+.header-feature-btn {
+  height: 32px;
+  padding: 0 var(--space-4);
+  font-size: var(--font-size-sm);
+}
+.header-feature-btn svg { flex-shrink: 0; opacity: 0.85; }
+.btn--feature-active,
+.btn--feature-active:hover:not(:disabled) {
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+}
+.btn--feature-active svg { opacity: 1; }
 
 .btn--primary { background: var(--color-accent); color: var(--color-accent-text); }
 .btn--primary:hover:not(:disabled) { background: var(--color-accent-hover); }

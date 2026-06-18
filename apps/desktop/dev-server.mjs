@@ -3237,6 +3237,129 @@ async function handleRequest(req, res) {
       }
     }
 
+    // ─── Issues (detail / comments / comment / state) ─────────────────────
+    // GET /api/gh-issue-detail?cwd=<path>&number=<n>
+    if (url.pathname === "/api/gh-issue-detail" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd");
+      const number = url.searchParams.get("number");
+      if (!cwd || !number) return jsonResponse(req, res, { error: "Missing cwd or number" }, 400);
+      try {
+        const token = getGithubToken();
+        if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
+        const nwo = getRepoNwo(resolve(cwd));
+        if (!nwo) return jsonResponse(req, res, { error: "Could not determine GitHub repo" }, 400);
+        const resp = await githubFetch(`/repos/${nwo}/issues/${number}`, token);
+        if (!resp.ok) return jsonResponse(req, res, { error: `GitHub API ${resp.status}` }, 500);
+        const i = await resp.json();
+        return jsonResponse(req, res, {
+          number: i.number,
+          title: i.title,
+          body: i.body ?? "",
+          state: i.state,
+          author: i.user?.login ?? "",
+          assignees: (i.assignees ?? []).map((a) => a.login),
+          labels: (i.labels ?? []).map((l) => l.name),
+          url: i.html_url ?? "",
+          createdAt: i.created_at,
+          updatedAt: i.updated_at,
+          milestone: i.milestone?.title ?? "",
+          comments: i.comments ?? 0,
+        });
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
+      }
+    }
+
+    // GET /api/gh-issue-comments?cwd=<path>&number=<n>
+    if (url.pathname === "/api/gh-issue-comments" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd");
+      const number = url.searchParams.get("number");
+      if (!cwd || !number) return jsonResponse(req, res, { error: "Missing cwd or number" }, 400);
+      try {
+        const token = getGithubToken();
+        if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
+        const nwo = getRepoNwo(resolve(cwd));
+        if (!nwo) return jsonResponse(req, res, { error: "Could not determine GitHub repo" }, 400);
+        const resp = await githubFetch(`/repos/${nwo}/issues/${number}/comments?per_page=100`, token);
+        if (!resp.ok) return jsonResponse(req, res, { error: `GitHub API ${resp.status}` }, 500);
+        const raw = await resp.json();
+        return jsonResponse(req, res, raw.map((c) => ({
+          id: c.id,
+          body: c.body,
+          author: c.user?.login ?? "",
+          created_at: c.created_at,
+          updated_at: c.updated_at,
+          url: c.html_url ?? "",
+        })));
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
+      }
+    }
+
+    // POST /api/gh-issue-comment  { cwd, number, body }
+    if (url.pathname === "/api/gh-issue-comment" && req.method === "POST") {
+      const body = await readBody(req);
+      const { cwd, number, body: commentBody } = body;
+      if (!cwd || !number || !commentBody) return jsonResponse(req, res, { error: "Missing required fields" }, 400);
+      try {
+        const token = getGithubToken();
+        if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
+        const nwo = getRepoNwo(resolve(cwd));
+        if (!nwo) return jsonResponse(req, res, { error: "Could not determine GitHub repo" }, 400);
+        const resp = await fetch(`https://api.github.com/repos/${nwo}/issues/${number}/comments`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "application/vnd.github+json",
+            "Content-Type": "application/json",
+            "X-GitHub-Api-Version": "2022-11-28",
+          },
+          body: JSON.stringify({ body: commentBody }),
+        });
+        if (!resp.ok) {
+          const text = await resp.text();
+          return jsonResponse(req, res, { error: `GitHub API ${resp.status}: ${text}` }, 500);
+        }
+        const c = await resp.json();
+        return jsonResponse(req, res, {
+          id: c.id, body: c.body, author: c.user?.login ?? "",
+          created_at: c.created_at, updated_at: c.updated_at, url: c.html_url ?? "",
+        });
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
+      }
+    }
+
+    // POST /api/gh-issue-state  { cwd, number, state }  (state = "closed" | "open")
+    if (url.pathname === "/api/gh-issue-state" && req.method === "POST") {
+      const body = await readBody(req);
+      const { cwd, number, state } = body;
+      if (!cwd || !number || !state) return jsonResponse(req, res, { error: "Missing required fields" }, 400);
+      try {
+        const token = getGithubToken();
+        if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
+        const nwo = getRepoNwo(resolve(cwd));
+        if (!nwo) return jsonResponse(req, res, { error: "Could not determine GitHub repo" }, 400);
+        const resp = await fetch(`https://api.github.com/repos/${nwo}/issues/${number}`, {
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "application/vnd.github+json",
+            "Content-Type": "application/json",
+            "X-GitHub-Api-Version": "2022-11-28",
+          },
+          body: JSON.stringify({ state }),
+        });
+        if (!resp.ok) {
+          const text = await resp.text();
+          return jsonResponse(req, res, { error: `GitHub API ${resp.status}: ${text}` }, 500);
+        }
+        return jsonResponse(req, res, { ok: true });
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
+      }
+    }
+
     // POST /api/gh-pr-comment  — create or reply
     // Body: { cwd, number, body, path, line, side, start_line?, start_side?, in_reply_to_id? }
     if (url.pathname === "/api/gh-pr-comment" && req.method === "POST") {

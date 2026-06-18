@@ -1296,6 +1296,7 @@ const zhCN: Locale = {
 
   workspace: {
     title: "工作区",
+    headerLabel: "工作区",
     panelTitle: "工作区",
     empty: "尚无工作区。创建一个以对多个仓库进行分组。",
     newWorkspace: "新建工作区",
@@ -1326,8 +1327,34 @@ const zhCN: Locale = {
     errorStatus: "获取状态失败：{0}",
   },
 
+  issue: {
+    loadingLabel: "正在加载 issue…",
+    empty: "请选择一个 issue。",
+    openBadge: "未关闭",
+    closedBadge: "已关闭",
+    close: "关闭 issue",
+    reopen: "重新打开",
+    openOnWeb: "在网页打开",
+    noBody: "暂无描述。",
+    commentsTitle: "评论",
+    noComments: "暂无评论。",
+    commentPlaceholder: "添加评论…",
+    addComment: "评论",
+    posting: "发送中…",
+    milestone: "里程碑",
+  },
+
   launchpad: {
     title: "启动台",
+    openTooltip: "启动台 — 跨仓库总览 (⌘L)",
+    inboxTab: "待处理",
+    inboxEmpty: "目前没有需要你处理的事项。🎉",
+    inbox: {
+      review: "等待你审查",
+      changes: "你的 PR 被要求修改",
+      ci: "你的 PR CI 失败",
+      merge: "已批准 — 可合并",
+    },
     wipTab: "进行中",
     noRepos: "此工作区中没有仓库。",
     refresh: "刷新",
@@ -1610,6 +1637,7 @@ const zhCN: Locale = {
   // ─── Agent Sessions (v2.8) ───────────────────────
   agents: {
     title: "代理会话",
+    headerLabel: "代理",
     sidebarTooltip: "此仓库工作树上的活跃代理会话",
     empty: "未检测到代理会话。请在 Claude Code、Cursor 或 Windsurf 中打开工作树以在此查看。",
     reload: "刷新",

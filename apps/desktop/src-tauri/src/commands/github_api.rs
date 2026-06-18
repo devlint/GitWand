@@ -711,6 +711,75 @@ pub(crate) fn rest_pr_issue_comments(cwd: &str, number: i64, token: &str) -> Res
     Ok(map_comments(&v, true))
 }
 
+// ─── Issues (REST) ───────────────────────────────────────────────────────────
+//
+// Issues live in `origin` (they are never cross-fork like PRs), so the `nwo` is
+// always the origin's owner/repo — no upstream fallback needed.
+
+/// Map a GitHub REST issue object into the `IssueDetail` IPC shape.
+fn json_to_issue_detail(v: &serde_json::Value) -> IssueDetail {
+    let assignees = v
+        .get("assignees")
+        .and_then(|a| a.as_array())
+        .map(|arr| arr.iter().map(|u| js(u, "login")).filter(|s| !s.is_empty()).collect())
+        .unwrap_or_default();
+    let labels = v
+        .get("labels")
+        .and_then(|a| a.as_array())
+        .map(|arr| arr.iter().map(|l| js(l, "name")).filter(|s| !s.is_empty()).collect())
+        .unwrap_or_default();
+    // `milestone` is null when unset — js() on a non-object yields "".
+    let milestone = v.get("milestone").map(|m| js(m, "title")).unwrap_or_default();
+    IssueDetail {
+        number: ji(v, "number"),
+        title: js(v, "title"),
+        body: js(v, "body"),
+        state: js(v, "state"),
+        author: jnested(v, "user", "login"),
+        assignees,
+        labels,
+        url: js(v, "html_url"),
+        created_at: js(v, "created_at"),
+        updated_at: js(v, "updated_at"),
+        milestone,
+        comments: ji(v, "comments"),
+    }
+}
+
+/// Fetch a single issue's detail (REST).
+pub(crate) fn rest_issue_detail(cwd: &str, number: i64, token: &str) -> Result<IssueDetail, String> {
+    let (owner, repo) = owner_repo(cwd)?;
+    let url = format!("{}/repos/{}/{}/issues/{}", API_BASE, owner, repo, number);
+    let v = api_json("GET", &url, token, None)?;
+    Ok(json_to_issue_detail(&v))
+}
+
+/// List conversation comments for an issue (REST).
+pub(crate) fn rest_issue_comments(cwd: &str, number: i64, token: &str) -> Result<Vec<serde_json::Value>, String> {
+    let (owner, repo) = owner_repo(cwd)?;
+    let url = format!("{}/repos/{}/{}/issues/{}/comments?per_page=100", API_BASE, owner, repo, number);
+    let v = api_json("GET", &url, token, None)?;
+    Ok(map_comments(&v, true))
+}
+
+/// Add a comment to an issue (REST). Returns the created comment, mapped.
+pub(crate) fn rest_issue_add_comment(cwd: &str, number: i64, body: &str, token: &str) -> Result<serde_json::Value, String> {
+    let (owner, repo) = owner_repo(cwd)?;
+    let url = format!("{}/repos/{}/{}/issues/{}/comments", API_BASE, owner, repo, number);
+    let payload = serde_json::json!({ "body": body });
+    let v = api_json("POST", &url, token, Some(&payload.to_string()))?;
+    Ok(map_comment(&v, true))
+}
+
+/// Close or reopen an issue (REST). `state` is "closed" or "open".
+pub(crate) fn rest_issue_set_state(cwd: &str, number: i64, state: &str, token: &str) -> Result<(), String> {
+    let (owner, repo) = owner_repo(cwd)?;
+    let url = format!("{}/repos/{}/{}/issues/{}", API_BASE, owner, repo, number);
+    let payload = serde_json::json!({ "state": state });
+    api_json("PATCH", &url, token, Some(&payload.to_string()))?;
+    Ok(())
+}
+
 /// Map a GitHub review object to the snake_case shape the frontend `PrReview`
 /// interface expects.
 pub(crate) fn map_review(r: &serde_json::Value) -> serde_json::Value {

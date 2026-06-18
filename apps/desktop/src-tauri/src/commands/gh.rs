@@ -590,6 +590,137 @@ pub(crate) async fn gh_pr_detail(cwd: String, number: i64) -> Result<PullRequest
         .map_err(|e| e.to_string())?
 }
 
+// ─── Issues (detail / comments / comment / state) ────────────────────────────
+//
+// Mirrors the PR commands: a Settings-managed token routes through the tokenless
+// REST path (`github_api::rest_issue_*`); otherwise we shell out to `gh`. The
+// CLI comment paths use `gh api …/issues/{n}/comments` so they return the same
+// REST comment shape as the token path (uniform `map_comment`).
+
+fn gh_issue_detail_inner(cwd: String, number: i64) -> Result<IssueDetail, String> {
+    if let Some(tok) = github_api::settings_github_token() {
+        return github_api::rest_issue_detail(&cwd, number, &tok);
+    }
+    let num = number.to_string();
+    let output = hidden_cmd("gh")
+        .args([
+            "issue", "view", &num,
+            "--json", "number,title,body,state,author,assignees,labels,url,createdAt,updatedAt,milestone,comments",
+        ])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("gh issue view: {}", e))?;
+    if !output.status.success() {
+        return Err(format!("gh issue view failed: {}", String::from_utf8_lossy(&output.stderr)));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let raw: GhIssueDetailRaw = serde_json::from_str(stdout.trim())
+        .map_err(|e| format!("Failed to parse gh issue view output: {}", e))?;
+    Ok(IssueDetail {
+        number: raw.number,
+        title: raw.title,
+        body: raw.body,
+        state: raw.state,
+        author: raw.author.login,
+        assignees: raw.assignees.into_iter().map(|a| a.login).collect(),
+        labels: raw.labels.into_iter().map(|l| l.name).collect(),
+        url: raw.url,
+        created_at: raw.created_at,
+        updated_at: raw.updated_at,
+        milestone: raw.milestone.map(|m| m.title).unwrap_or_default(),
+        comments: raw.comments.len() as i64,
+    })
+}
+
+/// Detailed view of a single GitHub issue (body + comment count).
+#[tauri::command]
+pub(crate) async fn gh_issue_detail(cwd: String, number: i64) -> Result<IssueDetail, String> {
+    tauri::async_runtime::spawn_blocking(move || gh_issue_detail_inner(cwd, number))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn gh_issue_comments_inner(cwd: String, number: i64) -> Result<Vec<serde_json::Value>, String> {
+    if let Some(tok) = github_api::settings_github_token() {
+        return github_api::rest_issue_comments(&cwd, number, &tok);
+    }
+    let nwo = gh_current_nwo(&cwd).ok_or_else(|| "Could not resolve owner/repo".to_string())?;
+    let path = format!("repos/{}/issues/{}/comments?per_page=100", nwo, number);
+    let output = hidden_cmd("gh")
+        .args(["api", &path])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("gh api issue comments: {}", e))?;
+    if !output.status.success() {
+        return Err(format!("gh api issue comments failed: {}", String::from_utf8_lossy(&output.stderr)));
+    }
+    let v: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .map_err(|e| format!("parse issue comments: {}", e))?;
+    Ok(github_api::map_comments(&v, true))
+}
+
+/// List conversation comments on an issue.
+#[tauri::command]
+pub(crate) async fn gh_issue_comments(cwd: String, number: i64) -> Result<Vec<serde_json::Value>, String> {
+    tauri::async_runtime::spawn_blocking(move || gh_issue_comments_inner(cwd, number))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn gh_issue_add_comment_inner(cwd: String, number: i64, body: String) -> Result<serde_json::Value, String> {
+    if let Some(tok) = github_api::settings_github_token() {
+        return github_api::rest_issue_add_comment(&cwd, number, &body, &tok);
+    }
+    let nwo = gh_current_nwo(&cwd).ok_or_else(|| "Could not resolve owner/repo".to_string())?;
+    let path = format!("repos/{}/issues/{}/comments", nwo, number);
+    let field = format!("body={}", body);
+    let output = hidden_cmd("gh")
+        .args(["api", &path, "-X", "POST", "-f", &field])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("gh api add comment: {}", e))?;
+    if !output.status.success() {
+        return Err(format!("gh api add comment failed: {}", String::from_utf8_lossy(&output.stderr)));
+    }
+    let v: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .map_err(|e| format!("parse created comment: {}", e))?;
+    Ok(github_api::map_comment(&v, true))
+}
+
+/// Add a comment to an issue. Returns the created comment (mapped shape).
+#[tauri::command]
+pub(crate) async fn gh_issue_add_comment(cwd: String, number: i64, body: String) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || gh_issue_add_comment_inner(cwd, number, body))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn gh_issue_set_state_inner(cwd: String, number: i64, state: String) -> Result<(), String> {
+    if let Some(tok) = github_api::settings_github_token() {
+        return github_api::rest_issue_set_state(&cwd, number, &state, &tok);
+    }
+    let num = number.to_string();
+    // "closed" → `gh issue close`, anything else → `gh issue reopen`.
+    let sub = if state == "closed" { "close" } else { "reopen" };
+    let output = hidden_cmd("gh")
+        .args(["issue", sub, &num])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("gh issue {}: {}", sub, e))?;
+    if !output.status.success() {
+        return Err(format!("gh issue {} failed: {}", sub, String::from_utf8_lossy(&output.stderr)));
+    }
+    Ok(())
+}
+
+/// Close (`state="closed"`) or reopen (`state="open"`) an issue.
+#[tauri::command]
+pub(crate) async fn gh_issue_set_state(cwd: String, number: i64, state: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || gh_issue_set_state_inner(cwd, number, state))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 // ─── Private sync helpers ────────────────────────────────────────────────────
 
 /// When `cwd` is a GitHub fork, returns the upstream parent `owner/repo` slug.

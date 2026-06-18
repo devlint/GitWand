@@ -1320,6 +1320,7 @@ const fr: Locale = {
 
   workspace: {
     title: "Espaces de travail",
+    headerLabel: "Espaces",
     panelTitle: "Espace de travail",
     empty: "Aucun espace de travail ouvert. Créez-en un pour regrouper plusieurs dépôts.",
     newWorkspace: "Nouvel espace de travail",
@@ -1350,8 +1351,34 @@ const fr: Locale = {
     errorStatus: "Impossible d\'obtenir le statut\u00a0: {0}",
   },
 
+  issue: {
+    loadingLabel: "Chargement de l'issue…",
+    empty: "Sélectionnez une issue.",
+    openBadge: "Ouverte",
+    closedBadge: "Fermée",
+    close: "Fermer l'issue",
+    reopen: "Rouvrir",
+    openOnWeb: "Ouvrir sur le web",
+    noBody: "Aucune description.",
+    commentsTitle: "Commentaires",
+    noComments: "Aucun commentaire pour l'instant.",
+    commentPlaceholder: "Ajouter un commentaire…",
+    addComment: "Commenter",
+    posting: "Envoi…",
+    milestone: "Jalon",
+  },
+
   launchpad: {
     title: "Launchpad",
+    openTooltip: "Launchpad — vue d'ensemble multi-dépôts (⌘L)",
+    inboxTab: "À traiter",
+    inboxEmpty: "Rien ne requiert ton action pour le moment. 🎉",
+    inbox: {
+      review: "À reviewer par toi",
+      changes: "Modifications demandées sur tes PR",
+      ci: "CI en échec sur tes PR",
+      merge: "Approuvées — prêtes à merger",
+    },
     wipTab: "En cours",
     noRepos: "Aucun dépôt dans cet espace de travail.",
     refresh: "Actualiser",
@@ -1637,6 +1664,7 @@ const fr: Locale = {
   // ─── Agent Sessions (v2.8) ───────────────────────
   agents: {
     title: "Sessions agents",
+    headerLabel: "Agents",
     sidebarTooltip: "Sessions agents actives sur les worktrees de ce dépôt",
     empty: "Aucune session agent détectée. Ouvrez un worktree dans Claude Code, Cursor ou Windsurf pour le voir ici.",
     reload: "Actualiser",

@@ -796,6 +796,51 @@ pub struct WorkspaceRepoIssues {
     pub error: Option<String>,
 }
 
+/// Detailed view of a single GitHub issue (body + comment count) — backs the
+/// in-app IssueDetailView. Mirrors `Issue` plus `body` and `comments` (count).
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IssueDetail {
+    pub number: i64,
+    pub title: String,
+    pub body: String,
+    pub state: String,
+    pub author: String,
+    pub assignees: Vec<String>,
+    pub labels: Vec<String>,
+    pub url: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub milestone: String,
+    /// Number of conversation comments on the issue.
+    pub comments: i64,
+}
+
+/// Raw `gh issue view --json …` shape for the detail endpoint.
+#[derive(Deserialize)]
+pub struct GhIssueDetailRaw {
+    pub number: i64,
+    pub title: String,
+    #[serde(default)]
+    pub body: String,
+    pub state: String,
+    pub author: GhIssueAuthor,
+    #[serde(default)]
+    pub assignees: Vec<GhIssueAssignee>,
+    #[serde(default)]
+    pub labels: Vec<GhIssueLabel>,
+    pub url: String,
+    #[serde(rename = "createdAt")]
+    pub created_at: String,
+    #[serde(rename = "updatedAt")]
+    pub updated_at: String,
+    pub milestone: Option<GhIssueMilestone>,
+    /// `gh issue view --json comments` returns the full comment array; we only
+    /// need its length for the detail header badge.
+    #[serde(default)]
+    pub comments: Vec<serde_json::Value>,
+}
+
 // ─── Worktree types ────────────────────────────────────────────────
 
 #[derive(Serialize, Clone)]
