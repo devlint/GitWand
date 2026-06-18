@@ -41,6 +41,8 @@ const emit = defineEmits<{
   /** Custom automation ran and committed; parent should refresh status */
   automationDone: [commitHash: string];
   resolveTreeConflict: [path: string, choice: "ours" | "theirs" | "delete"];
+  reconstructConflict: [path: string];
+  keepWorkingTree: [path: string];
 }>();
 
 // ─── Inline Edit State ──────────────────────────────────
@@ -721,8 +723,32 @@ onMounted(() => {
       </template>
     </div>
 
+    <!-- Markerless content conflict: working tree matches no side (possible manual edit) -->
+    <div v-if="file.markerless" class="me-tree-panel">
+      <h3 class="me-tree-title">{{ t('merge.markerlessTitle') }} — <span class="mono">{{ file.path }}</span></h3>
+      <p class="me-tree-explanation">{{ t('merge.markerlessExplanation') }}</p>
+      <div class="me-tree-actions">
+        <button class="me-bulk-btn" @click="emit('reconstructConflict', file.path)">
+          {{ t('merge.reconstructConflict') }}
+        </button>
+        <button class="me-bulk-btn" @click="emit('keepWorkingTree', file.path)">
+          {{ t('merge.keepWorkingTree') }}
+        </button>
+      </div>
+      <template v-if="file.content">
+        <div class="me-tree-preview-label muted">{{ t('merge.treePreviewLabel') }}</div>
+        <pre class="me-tree-preview">{{ file.content }}</pre>
+      </template>
+    </div>
+
     <!-- Editor body: code + minimap -->
-    <div class="merge-body" v-if="!file.tree">
+    <div class="merge-body" v-if="!file.tree && !file.markerless">
+      <div v-if="file.reconstructed" class="me-reconstructed-banner">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+          <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm.75 10.5h-1.5v-1.5h1.5v1.5zm0-3h-1.5V4.5h1.5V8.5z"/>
+        </svg>
+        <span>{{ t('merge.reconstructedBanner') }}</span>
+      </div>
     <div
       class="editor-content"
       ref="contentEl"
@@ -1684,5 +1710,17 @@ onMounted(() => {
   margin: 0; padding: 10px; max-height: 320px; overflow: auto;
   background: var(--color-bg-secondary, #f5f5f5); border-radius: 6px;
   font-family: var(--font-mono, monospace); font-size: 12px; white-space: pre-wrap;
+}
+
+/* ─── Reconstructed-from-index info banner ─────────────── */
+.me-reconstructed-banner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--color-text-secondary, #888);
+  background: var(--color-bg-secondary, rgba(0,0,0,0.03));
+  border-bottom: 1px solid var(--color-border, #e0e0e0);
 }
 </style>
