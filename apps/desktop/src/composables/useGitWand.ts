@@ -8,6 +8,8 @@ import {
   readGitwandrc,
   getTreeConflicts,
   resolveTreeConflict,
+  reconstructConflict,
+  gitStage,
 } from "../utils/backend";
 import { useFolderHistory } from "./useFolderHistory";
 import { useAIProvider } from "./useAIProvider";
@@ -26,6 +28,10 @@ export interface ConflictFile {
   content: string;
   result: MergeResult;
   tree?: TreeConflictInfo;
+  /** True when content was rebuilt from the index because the working tree had no markers. */
+  reconstructed?: boolean;
+  /** Set when an unmerged file has no markers AND the working tree matches no side (possible manual edit). */
+  markerless?: { reconstructed: string };
 }
 
 export interface GlobalStats {
@@ -433,11 +439,27 @@ export function useGitWand() {
           };
         }
         const content = await readFile(cwd, filePath);
-        return {
-          path: filePath,
-          content,
-          result: await resolveAsync(content, filePath, resolveOptionsWithLlm, structuralOpts),
-        };
+        const result = await resolveAsync(content, filePath, resolveOptionsWithLlm, structuralOpts);
+        // Unmerged file with no parseable markers → reconstruct the 3-way from the index.
+        if (result.stats.totalConflicts === 0) {
+          try {
+            const rec = await reconstructConflict(cwd, filePath);
+            if (rec.content.includes("<<<<<<<")) {
+              if (rec.wtMatchesSide) {
+                // Working tree is just one side → swap in reconstructed markers and resolve normally.
+                return {
+                  path: filePath,
+                  content: rec.content,
+                  result: await resolveAsync(rec.content, filePath, resolveOptionsWithLlm, structuralOpts),
+                  reconstructed: true,
+                };
+              }
+              // Working tree matches no side → possible manual edit; keep it, offer a choice.
+              return { path: filePath, content, result, markerless: { reconstructed: rec.content } };
+            }
+          } catch { /* not reconstructable → fall through to plain result */ }
+        }
+        return { path: filePath, content, result };
       }),
     );
 
@@ -821,6 +843,30 @@ export async function fetchUsers() {
     }
   }
 
+  /** Markerless file → swap to the reconstructed conflict content and resolve via the normal pipeline. */
+  function reconstructAndResolve(path: string): void {
+    const file = files.value.find((f) => f.path === path);
+    if (!file?.markerless) return;
+    const newContent = file.markerless.reconstructed;
+    const idx = files.value.indexOf(file);
+    files.value[idx] = {
+      path: file.path,
+      content: newContent,
+      result: resolve(newContent, file.path, resolveOptions.value),
+      reconstructed: true,
+    };
+  }
+
+  /** Resolve an unmerged file by staging the current working-tree content as the resolution. */
+  async function resolveByStaging(path: string): Promise<void> {
+    if (!folderPath.value) return;
+    await gitStage(folderPath.value, [path]);
+    files.value = files.value.filter((f) => f.path !== path);
+    if (selectedPath.value === path) {
+      selectedPath.value = files.value[0]?.path ?? null;
+    }
+  }
+
   /**
    * Apply a memorized resolution rule to every hunk in a file. Hunks where the
    * rule can't apply (e.g. "date-latest" but content is no longer a date) keep
@@ -962,5 +1008,7 @@ export async function fetchUsers() {
     selectFile,
     refreshLlmFallbackConfig,
     resolveTreeConflictFile,
+    reconstructAndResolve,
+    resolveByStaging,
   };
 }
