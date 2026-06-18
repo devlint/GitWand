@@ -129,6 +129,8 @@ const {
   resolveHunkCustom,
   resolveFileBulk,
   resolveTreeConflictFile,
+  reconstructAndResolve,
+  resolveByStaging,
   applyMemoryToFile,
   saveFile,
   saveAllFiles,
@@ -613,6 +615,20 @@ async function handleResolveTreeConflict(path: string, choice: "ours" | "theirs"
     await advanceToNextConflictOrFinalize();
   } catch (err: any) {
     repoError.value = `tree-resolve: ${err?.message || String(err)}`;
+  }
+}
+
+function handleReconstructConflict(path: string) {
+  // Swap to reconstructed markers; the file now flows through the normal hunk UI.
+  reconstructAndResolve(path);
+}
+
+async function handleKeepWorkingTree(path: string) {
+  try {
+    await resolveByStaging(path);
+    await advanceToNextConflictOrFinalize();
+  } catch (err: any) {
+    repoError.value = `keep-working-tree: ${err?.message || String(err)}`;
   }
 }
 
@@ -2357,7 +2373,9 @@ onUnmounted(() => {
                 @resolve-hunk-custom="(path, idx, content) => handleResolveHunkCustom(path, idx, content)"
                 @resolve-file-bulk="(path, choice) => handleResolveFileBulk(path, choice)"
                 @apply-file-memory="(path, entry) => handleApplyFileMemory(path, entry)"
-                @resolve-tree-conflict="(path, choice) => handleResolveTreeConflict(path, choice)" />
+                @resolve-tree-conflict="(path, choice) => handleResolveTreeConflict(path, choice)"
+                @reconstruct-conflict="(path) => handleReconstructConflict(path)"
+                @keep-working-tree="(path) => handleKeepWorkingTree(path)" />
               <FileHistoryViewer v-else-if="fileHistoryPath && repoFolderPath" :file-path="fileHistoryPath"
                 :cwd="repoFolderPath" @close="closeFileHistory"
                 @select-commit="(hash) => { closeFileHistory(); selectCommit(hash); viewMode = 'history'; }" />
