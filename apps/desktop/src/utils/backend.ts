@@ -127,6 +127,21 @@ export async function resolveTreeConflict(
   throw new Error("resolveTreeConflict is not available in dev-server mode");
 }
 
+export interface ReconstructedConflict {
+  content: string;
+  wtMatchesSide: boolean;
+}
+
+export async function reconstructConflict(
+  cwd: string,
+  path: string,
+): Promise<ReconstructedConflict> {
+  if (isTauri()) {
+    return tauriInvoke<ReconstructedConflict>("reconstruct_conflict", { cwd, path });
+  }
+  throw new Error("reconstructConflict is not available in dev-server mode");
+}
+
 /**
  * Read a file's content.
  */
