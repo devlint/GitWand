@@ -723,14 +723,16 @@ async function handleRequest(req, res) {
       const cwd = url.searchParams.get("cwd");
       if (!cwd) return jsonResponse(req, res, { error: "Missing cwd param" }, 400);
       const resolvedCwd = resolve(cwd);
-      const out = spawnSync(GIT, ["status", "--porcelain=v2", "--untracked-files=no"], {
+      // `-z` => NUL-terminated records with verbatim paths (mirrors Rust collect_tree_conflicts),
+      // so paths with quotes/newlines/non-ASCII parse correctly.
+      const out = spawnSync(GIT, ["status", "--porcelain=v2", "-z", "--untracked-files=no"], {
         cwd: resolvedCwd, encoding: "utf-8",
       });
       if (out.status !== 0) return jsonResponse(req, res, { cwd: resolvedCwd, conflicts: [] });
       const conflicts = [];
-      for (const line of (out.stdout || "").split("\n")) {
-        if (!line.startsWith("u ")) continue;
-        const rest = line.slice(2);
+      for (const record of (out.stdout || "").split("\0")) {
+        if (!record.startsWith("u ")) continue;
+        const rest = record.slice(2);
         // u <XY> <sub> <m1> <m2> <m3> <mW> <h1> <h2> <h3> <path>
         const parts = rest.split(" ");
         if (parts.length < 10) continue;
@@ -752,6 +754,9 @@ async function handleRequest(req, res) {
       const { cwd, path, choice } = await readBody(req);
       if (!cwd || !path) return jsonResponse(req, res, { error: "Missing cwd or path" }, 400);
       const resolvedCwd = resolve(cwd);
+      // Traversal guard (mirrors Rust apply_tree_resolution); git still gets the relative path.
+      try { safeRepoPath(resolvedCwd, path); }
+      catch (e) { return jsonResponse(req, res, { error: e.message }, 400); }
       const run = (args) => {
         const r = spawnSync(GIT, args, { cwd: resolvedCwd, encoding: "utf-8" });
         if (r.status !== 0) throw new Error(`git ${args.join(" ")}: ${r.stderr || ""}`);
@@ -772,6 +777,9 @@ async function handleRequest(req, res) {
       const { cwd, path } = await readBody(req);
       if (!cwd || !path) return jsonResponse(req, res, { error: "Missing cwd or path" }, 400);
       const resolvedCwd = resolve(cwd);
+      // Traversal guard (mirrors Rust reconstruct_conflict_impl); git still gets the relative path.
+      try { safeRepoPath(resolvedCwd, path); }
+      catch (e) { return jsonResponse(req, res, { error: e.message }, 400); }
       const blob = (stage) => {
         const r = spawnSync(GIT, ["show", `:${stage}:${path}`], { cwd: resolvedCwd, encoding: "buffer" });
         return r.status === 0 ? r.stdout : Buffer.alloc(0);

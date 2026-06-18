@@ -73,6 +73,16 @@ function statusLabel(file: ConflictFile): string {
             {{ t('merge.treeBadge') }}
           </span>
         </template>
+        <template v-else-if="file.markerless">
+          <span class="file-status file-status--tree" :title="t('merge.markerlessBadge')" aria-hidden="true" />
+          <div class="file-info">
+            <span class="file-name mono">{{ fileName(file.path) }}</span>
+            <span class="file-dir muted">{{ fileDir(file.path) }}</span>
+          </div>
+          <span class="file-badge file-badge--tree" :aria-label="t('merge.markerlessBadge')">
+            {{ t('merge.markerlessBadge') }}
+          </span>
+        </template>
         <template v-else>
           <div class="file-status-dot" :title="statusLabel(file)" aria-hidden="true" />
           <div class="file-info">

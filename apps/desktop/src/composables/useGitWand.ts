@@ -14,7 +14,7 @@ import {
 import { useFolderHistory } from "./useFolderHistory";
 import { useAIProvider } from "./useAIProvider";
 import { t } from "./useI18n";
-import { applyMemory, type ResolutionMemoryEntry } from "./useResolutionMemory";
+import { applyMemory, isGeneralizableStrategy, type ResolutionMemoryEntry } from "./useResolutionMemory";
 
 export interface TreeConflictInfo {
   code: string;
@@ -856,6 +856,7 @@ export async function fetchUsers() {
     const file = files.value.find((f) => f.path === path);
     if (!file?.markerless) return;
     const newContent = file.markerless.reconstructed;
+    pushUndo();
     const idx = files.value.indexOf(file);
     files.value[idx] = {
       path: file.path,
@@ -886,6 +887,9 @@ export async function fetchUsers() {
   ): { applied: number; total: number } {
     const file = files.value.find((f) => f.path === path);
     if (!file) return { applied: 0, total: 0 };
+    // A "custom" rule is a verbatim blob bound to one hunk — applying it to every
+    // hunk would clobber the file. Bulk apply only generalizable strategies.
+    if (!isGeneralizableStrategy(entry.strategy)) return { applied: 0, total: 0 };
 
     const { content: newContent, applied, total } = resolveAllConflictBlocks(
       file.content,

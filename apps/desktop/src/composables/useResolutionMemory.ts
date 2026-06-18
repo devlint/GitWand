@@ -28,6 +28,18 @@ export type ResolutionStrategy =
   | "number-max"
   | "custom";
 
+/**
+ * Whether a strategy generalizes across the multiple hunks of a file.
+ * `ours`/`theirs`/`both`/`date-latest`/`number-max` derive their result from
+ * each hunk's own content (the latter two skip hunks they can't apply to).
+ * `custom` stores one verbatim blob tied to a single hunk — bulk-applying it
+ * would stamp that same blob into every conflict, so it must never be applied
+ * file-wide.
+ */
+export function isGeneralizableStrategy(strategy: ResolutionStrategy): boolean {
+  return strategy !== "custom";
+}
+
 export interface ResolutionMemoryEntry {
   id: string;
   /** Relative file path this entry applies to */

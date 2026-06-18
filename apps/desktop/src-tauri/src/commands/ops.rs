@@ -2486,7 +2486,9 @@ pub(crate) async fn get_conflicted_files(cwd: String) -> Result<Vec<String>, Str
 /// handles them.
 fn collect_tree_conflicts(cwd: &str) -> Result<Vec<crate::types::TreeConflict>, String> {
     let output = git_cmd()
-        .args(["status", "--porcelain=v2", "--untracked-files=no"])
+        // `-z` => NUL-terminated records with verbatim (un-C-quoted) paths, so a
+        // path containing a quote, newline or non-ASCII byte parses correctly.
+        .args(["status", "--porcelain=v2", "-z", "--untracked-files=no"])
         .current_dir(cwd)
         .output()
         .map_err(|e| format!("Failed to run git status: {}", e))?;
@@ -2496,9 +2498,9 @@ fn collect_tree_conflicts(cwd: &str) -> Result<Vec<crate::types::TreeConflict>, 
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
     let mut result = Vec::new();
-    for line in stdout.lines() {
+    for record in stdout.split('\0') {
         // Unmerged entries start with "u ".
-        let Some(rest) = line.strip_prefix("u ") else { continue };
+        let Some(rest) = record.strip_prefix("u ") else { continue };
         // Porcelain-v2 unmerged format (10 space-separated tokens):
         //   XY sub m1 m2 m3 mW h1 h2 h3 path
         // splitn(10, ' ') puts path at index 9.
@@ -3110,6 +3112,29 @@ mod tree_conflict_tests {
         assert!(tc.has_ours, "feature (ours) modified it → stage 2 present");
         assert!(!tc.has_theirs, "main (theirs) deleted it → stage 3 absent");
         assert_eq!(tc.code, "UD");
+    }
+
+    #[test]
+    fn detects_modify_delete_with_spaced_path() {
+        // Locks in the `-z` parsing: a path containing a space must still be
+        // captured whole (porcelain v2 only C-quotes paths in non-`-z` mode).
+        let repo = TempRepo::new();
+        repo.write("my doomed file.txt", "original\n");
+        repo.commit_all("base");
+        repo.git_ok(&["checkout", "-q", "-b", "feature"]);
+        repo.write("my doomed file.txt", "MODIFIED by feature\n");
+        repo.commit_all("feature modifies");
+        repo.git_ok(&["checkout", "-q", "main"]);
+        repo.git_ok(&["rm", "-q", "my doomed file.txt"]);
+        repo.commit_all("main deletes");
+        repo.git_ok(&["checkout", "-q", "feature"]);
+        let _ = repo.git(&["merge", "--no-edit", "main"]);
+        let conflicts = collect_tree_conflicts(&repo.cwd()).expect("collect_tree_conflicts failed");
+        let tc = conflicts
+            .iter()
+            .find(|c| c.path == "my doomed file.txt")
+            .expect("spaced path is captured verbatim");
+        assert!(tc.has_ours && !tc.has_theirs);
     }
 
     #[test]

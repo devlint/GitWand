@@ -13,6 +13,7 @@ import {
   useResolutionMemory,
   detectPattern,
   applyMemory,
+  isGeneralizableStrategy,
   type ResolutionStrategy,
   type ResolutionMemoryEntry,
 } from "../composables/useResolutionMemory";
@@ -274,14 +275,19 @@ const treeExplanation = computed(() => {
   if (!tr) return "";
   if (tr.hasOurs && !tr.hasTheirs) return t("merge.treeModifiedOursDeletedTheirs");
   if (!tr.hasOurs && tr.hasTheirs) return t("merge.treeDeletedOursModifiedTheirs");
-  if (!tr.hasOurs && !tr.hasTheirs) return t("merge.treeBothDeleted");
-  return t("merge.treeBothPresent");
+  // Neither side present → both-deleted. Tree conflicts always have ≥1 side
+  // missing (add/add carries markers and flows through the content path), so
+  // there is no "added on both sides" case to handle here.
+  return t("merge.treeBothDeleted");
 });
 
 /** How many of this file's hunks the saved rule can actually resolve. */
 const memoryApplicableCount = computed(() => {
   const mem = fileMemory.value;
   if (!mem) return 0;
+  // A "custom" rule is one verbatim blob bound to a single hunk; never offer to
+  // stamp it across the whole file (would corrupt every other conflict).
+  if (!isGeneralizableStrategy(mem.strategy)) return 0;
   return hunks.value.reduce(
     (n, h) => (applyMemory(mem, h) !== null ? n + 1 : n),
     0,
