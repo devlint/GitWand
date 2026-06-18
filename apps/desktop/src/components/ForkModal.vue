@@ -51,7 +51,7 @@ async function browseForParent() {
 
 async function onFork() {
   if (!canFork.value) return;
-  if (!requireOnline("fork")) {
+  if (!(await requireOnline("fork"))) {
     error.value = t("connectivity.offline.disabledOp");
     return;
   }

@@ -25,7 +25,7 @@
  * can tell which action was suppressed.
  */
 
-import { isOnline } from "../composables/useConnectivity";
+import { confirmOnline } from "../composables/useConnectivity";
 import { useLogs } from "../composables/useLogs";
 
 const { pushLog } = useLogs();
@@ -33,18 +33,25 @@ const { pushLog } = useLogs();
 /**
  * Guard a network operation against the offline state.
  *
- * Returns `true` when the operation may proceed (`isOnline === true`).
- * Returns `false` when offline — and in that case appends a `WARN` entry
- * to the in-app log so the suppressed action becomes visible in the
- * Settings → Logs panel (the status-bar badge lights up).
+ * Async, because it asks `confirmOnline()` for an AUTHORITATIVE answer rather
+ * than reading the smoothed `isOnline` display flag: a fresh probe runs at
+ * action time (unless a successful one is seconds old), so a spurious/stale
+ * "offline" reading — the macOS WKWebView false positive — can never block an
+ * action that would actually succeed, and a real outage blocks before git
+ * hangs on a dead socket.
  *
- * The caller is expected to short-circuit immediately on `false`:
+ * Returns `true` when the operation may proceed. Returns `false` only when a
+ * fresh probe confirms we're offline — and appends a `WARN` entry to the
+ * in-app log so the suppressed action shows up in Settings → Logs (status-bar
+ * badge lights up).
  *
- *     if (!requireOnline("push")) return;
+ * The caller short-circuits immediately on `false`:
+ *
+ *     if (!(await requireOnline("push"))) return;
  *     // proceed with the network call
  */
-export function requireOnline(operationLabel: string): boolean {
-  if (isOnline.value) return true;
+export async function requireOnline(operationLabel: string): Promise<boolean> {
+  if (await confirmOnline()) return true;
   pushLog("warn", `Operation '${operationLabel}' skipped — offline`);
   return false;
 }

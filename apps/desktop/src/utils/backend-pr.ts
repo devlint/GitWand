@@ -207,7 +207,7 @@ export async function ghPrCount(cwd: string, state: string = "open"): Promise<nu
   // Local require to avoid a circular import at module init time
   // (networkGuard → useLogs → … → could touch backend in the future).
   const { requireOnline } = await import("./networkGuard");
-  if (!requireOnline("gh pr count")) return 0;
+  if (!(await requireOnline("gh pr count"))) return 0;
   try {
     if (isTauri()) {
       return await tauriInvoke<number>("gh_pr_count", { cwd, state });

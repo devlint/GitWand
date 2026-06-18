@@ -393,7 +393,7 @@ export function useGitRepo() {
     if (!folderPath.value || isFetching.value || isMerging.value || hasConflicts.value) return;
     // F1 — Mode hors-ligne: short-circuit before hitting the IPC so we
     // can never hang on the 5-min NETWORK timeout when the link is dead.
-    if (!requireOnline("fetch")) return;
+    if (!(await requireOnline("fetch"))) return;
     isFetching.value = true;
     try {
       await gitFetch(folderPath.value);
@@ -735,7 +735,7 @@ export function useGitRepo() {
 
   async function push(force: boolean = false) {
     if (!folderPath.value) return;
-    if (!requireOnline("push")) return;
+    if (!(await requireOnline("push"))) return;
     isPushing.value = true;
     try {
       // If the current branch has no upstream, push it with --set-upstream —
@@ -759,7 +759,7 @@ export function useGitRepo() {
 
   async function pull(rebase: boolean = false) {
     if (!folderPath.value) return;
-    if (!requireOnline("pull")) return;
+    if (!(await requireOnline("pull"))) return;
     isPulling.value = true;
     try {
       // Fetch all branches first (updates origin/master, etc.)

@@ -395,7 +395,7 @@ export function usePrPanel(cwd: Ref<string>) {
     // F1 — Mode hors-ligne: short-circuit before the gh subprocess.
     // `gh pr list` itself would hang on DNS / TCP timeout for the user
     // visible duration of the IPC, leaving the panel stuck on a spinner.
-    if (!requireOnline("gh pr list")) {
+    if (!(await requireOnline("gh pr list"))) {
       // Keep cached data on screen when offline; only wipe when we have none.
       if (!cached) {
         prs.value = [];
@@ -471,7 +471,7 @@ export function usePrPanel(cwd: Ref<string>) {
     // fires a second `listPRs` (e.g. offset 4) concurrently with the in-flight
     // page-0 refresh — doubling slow forge calls (Azure: ~1.8s each).
     if (!cwd.value || loadingMore.value || !hasMore.value || loading.value || refreshing.value) return;
-    if (!requireOnline("gh pr list (more)")) {
+    if (!(await requireOnline("gh pr list (more)"))) {
       hasMore.value = false;
       return;
     }
@@ -698,7 +698,7 @@ export function usePrPanel(cwd: Ref<string>) {
   // ─── PR actions ─────────────────────────────────────────
   async function createPr() {
     if (!cwd.value || !newPrTitle.value.trim()) return;
-    if (!requireOnline("gh pr create")) {
+    if (!(await requireOnline("gh pr create"))) {
       error.value = t("connectivity.offline.disabledOp");
       return;
     }
@@ -727,7 +727,7 @@ export function usePrPanel(cwd: Ref<string>) {
   }
 
   async function checkoutPr(pr: PullRequest) {
-    if (!requireOnline("gh pr checkout")) {
+    if (!(await requireOnline("gh pr checkout"))) {
       error.value = t("connectivity.offline.disabledOp");
       return;
     }
@@ -743,7 +743,7 @@ export function usePrPanel(cwd: Ref<string>) {
    * On success, refreshes the PR detail so the draft badge disappears.
    */
   async function convertDraftToReady(pr: PullRequest) {
-    if (!requireOnline("pr ready")) {
+    if (!(await requireOnline("pr ready"))) {
       error.value = t("connectivity.offline.disabledOp");
       return;
     }
@@ -766,7 +766,7 @@ export function usePrPanel(cwd: Ref<string>) {
 
   async function mergePr() {
     if (!mergingPr.value) return;
-    if (!requireOnline("gh pr merge")) {
+    if (!(await requireOnline("gh pr merge"))) {
       error.value = t("connectivity.offline.disabledOp");
       return;
     }

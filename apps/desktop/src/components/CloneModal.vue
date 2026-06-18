@@ -126,7 +126,7 @@ async function browseForParent() {
 
 async function onClone() {
   if (!canClone.value) return;
-  if (!requireOnline("clone")) {
+  if (!(await requireOnline("clone"))) {
     error.value = t("connectivity.offline.disabledOp");
     return;
   }
