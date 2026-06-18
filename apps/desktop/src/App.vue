@@ -97,7 +97,7 @@ import {
   TOGGLE_GIT_TREE_KEY,
   OPEN_SETTINGS_KEY,
 } from "./composables/branchPickerBridge";
-import { gitStash, gitStashPop, gitStashList, openInEditor, setGitConfig, gitDiscard, gitAddToGitignore, gitDeleteBranch, gitDeleteTag, gitDeleteRemoteTag, gitRemoteInfo, gitUnpushedTags, gitPushTags, workspaceRead, gitMergeBase, gitResetToCommit, gitCommitSubmoduleChanges, type CommitSubmoduleChange } from "./utils/backend";
+import { gitStash, gitStashPop, gitStashList, openInEditor, setGitConfig, gitDiscard, gitAddToGitignore, gitDeleteBranch, gitDeleteTag, gitDeleteRemoteTag, gitRemoteInfo, gitUnpushedTags, gitPushTags, gitMergeBase, gitResetToCommit, gitCommitSubmoduleChanges, type CommitSubmoduleChange } from "./utils/backend";
 import { useCommitActions } from "./composables/useCommitActions";
 
 const { t } = useI18n();
@@ -1392,12 +1392,13 @@ watch(
 );
 
 // ─── Launchpad panel ─────────────────────────────────────
-// showLaunchpad removed — Launchpad is now a first-class viewMode ("launchpad").
-// launchpadRepos holds the workspace repos list loaded on demand; the
-// <LaunchpadView :repos="…"> in the main-content area consumes it.
-const launchpadRepos = ref<WorkspaceRepo[]>([]);
-function openLaunchpad(repos: WorkspaceRepo[]) {
-  launchpadRepos.value = repos;
+// Launchpad is a first-class viewMode ("launchpad"). Its repo set is the
+// currently open repo tabs (v3 nav: tabs are the source of truth — no more
+// workspace file). <LaunchpadView :repos="launchpadRepos"> consumes it.
+const launchpadRepos = computed<WorkspaceRepo[]>(() =>
+  repoTabs.value.map((t) => ({ path: t.path, name: t.name }))
+);
+function openLaunchpad() {
   viewMode.value = "launchpad";
   showWorkspace.value = false;
 }
@@ -1440,45 +1441,12 @@ async function openLaunchpadIssue(issue: { number: number; repoPath?: string }) 
 }
 
 /**
- * Handle the ⌘L / Ctrl+L shortcut.
- *
- * Resolves the active workspace lazily — Launchpad needs the repo list and
- * the user might have a workspace persisted from a previous session that
- * App.vue hasn't loaded yet (WorkspacePanel owns that state). We read the
- * same localStorage key WorkspacePanel uses (`gitwand-workspace-dir`) and
- * call `workspaceRead` directly. If no workspace is configured, surface a
- * warning in the existing error-toast and pop WorkspacePanel so the user
- * can create one.
+ * Handle the ⌘L / Ctrl+L shortcut (and the header Launchpad pill / menu item):
+ * just switch to the Launchpad view. Its repos come from the open tabs, so
+ * there is nothing to resolve — if no repo is open, the EmptyState shows.
  */
 async function handleLaunchpadShortcut(): Promise<void> {
-  // If Launchpad already open with repos, just keep it visible (no-op).
-  if (viewMode.value === "launchpad" && launchpadRepos.value.length > 0) return;
-
-  // Re-use repos already loaded for this session (e.g. WorkspacePanel was
-  // opened earlier) — fastest path, no IPC.
-  if (launchpadRepos.value.length > 0) {
-    openLaunchpad(launchpadRepos.value);
-    return;
-  }
-
-  const savedDir = localStorage.getItem("gitwand-workspace-dir");
-  if (savedDir) {
-    try {
-      const cfg = await workspaceRead(savedDir);
-      if (cfg.repos.length > 0) {
-        openLaunchpad(cfg.repos);
-        return;
-      }
-    } catch {
-      // Fall through to the no-workspace branch — best-effort.
-    }
-  }
-
-  // No workspace defined (or empty) → toast + open WorkspacePanel so the
-  // user can configure one. Reuses the error-toast pipeline so the message
-  // dismisses on its own after 3s.
-  repoError.value = t("launchpad.noWorkspace.warning");
-  showWorkspace.value = true;
+  openLaunchpad();
 }
 
 // Watch the bridge counter — each menu invocation bumps it and triggers a
@@ -1495,18 +1463,9 @@ watch(launchpadOpenRequest, () => {
 // foreground the Launchpad updates visually and we just advance the snapshot.
 const { allPrs: notifyPrs, refresh: refreshNotifyPrs } = useLaunchpadPrs();
 
-/** Resolve workspace repos for the poll — uses the open Launchpad's list, else
- *  the persisted workspace (so notifications work even before opening it). */
+/** Repos for the background PR-activity poll — the open repo tabs. */
 async function resolveNotifyRepos(): Promise<WorkspaceRepo[]> {
-  if (launchpadRepos.value.length > 0) return launchpadRepos.value;
-  const savedDir = localStorage.getItem("gitwand-workspace-dir");
-  if (!savedDir) return [];
-  try {
-    const cfg = await workspaceRead(savedDir);
-    return cfg.repos;
-  } catch {
-    return [];
-  }
+  return launchpadRepos.value;
 }
 
 /** Granularity + "by people" gate for a single event. */
