@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from "vue";
+import { ref, onMounted, computed, watch, toRef } from "vue";
 import { saveSettings as persistAppSettings } from "../composables/useSettings";
 import { avatarStyle, avatarInitials } from "../composables/useAvatar";
 import { useLaunchpadWip } from "../composables/useLaunchpadWip";
 import { useLaunchpadPrs } from "../composables/useLaunchpadPrs";
 import { useLaunchpadInbox, type InboxBucketKey } from "../composables/useLaunchpadInbox";
 import { useLaunchpadIssues } from "../composables/useLaunchpadIssues";
+import { useLaunchpadScope } from "../composables/useLaunchpadScope";
 import { useLaunchpadPins } from "../composables/useLaunchpadPins";
 import { useLaunchpadTeam } from "../composables/useLaunchpadTeam";
 import type { TeamMemberActivity, OverlappingPr } from "../composables/useLaunchpadTeam";
@@ -30,6 +31,22 @@ const emit = defineEmits<{
 
 const { t } = useI18n();
 const { settings } = useSettings();
+
+// Scope (v3): which of the open repo tabs the Launchpad shows. `scopedRepos`
+// drives every fetch; the selection is persisted (see useLaunchpadScope).
+const {
+  scopedRepos,
+  isAll: scopeIsAll,
+  isSelected: scopeIsSelected,
+  setAll: scopeSetAll,
+  toggle: scopeToggle,
+} = useLaunchpadScope(toRef(props, "repos"));
+const scopeMenuOpen = ref(false);
+const scopeLabel = computed(() => {
+  if (scopeIsAll.value) return t("launchpad.scopeAll");
+  const sel = props.repos.filter((r) => scopeIsSelected(r.path));
+  return sel.length === 1 ? sel[0].name : t("launchpad.scopeCount", sel.length);
+});
 
 // Whether the Team tab is enabled at all. When false, the tab is hidden and
 // the team activity is never fetched (perf-sensitive setups / solo teams).
@@ -106,7 +123,7 @@ const membersWithoutOverlap = computed(() =>
 );
 
 function loadTeam(): void {
-  refreshTeam(props.repos)
+  refreshTeam(scopedRepos.value)
     .then(() => {
       teamLoaded.value = true;
       initExpandedMembers(teamActivity.value);
@@ -130,9 +147,9 @@ function setTab(tab: Tab) {
 }
 
 function handleRefresh() {
-  if (activeTab.value === "wip") refreshWip(props.repos);
-  else if (activeTab.value === "prs") refreshPrs(props.repos);
-  else if (activeTab.value === "issues") refreshIssues(props.repos);
+  if (activeTab.value === "wip") refreshWip(scopedRepos.value);
+  else if (activeTab.value === "prs") refreshPrs(scopedRepos.value);
+  else if (activeTab.value === "issues") refreshIssues(scopedRepos.value);
   else if (activeTab.value === "team") {
     loadTeam();
   }
@@ -151,13 +168,13 @@ async function handleRefreshAll() {
   loadingAll.value = true;
   try {
     const tasks: Promise<unknown>[] = [
-      refreshWip(props.repos),
-      refreshPrs(props.repos),
-      refreshIssues(props.repos),
+      refreshWip(scopedRepos.value),
+      refreshPrs(scopedRepos.value),
+      refreshIssues(scopedRepos.value),
     ];
     if (teamTabEnabled.value) {
       tasks.push(
-        refreshTeam(props.repos)
+        refreshTeam(scopedRepos.value)
           .then(() => {
             teamLoaded.value = true;
             initExpandedMembers(teamActivity.value);
@@ -196,6 +213,7 @@ function toggleMenu(url: string): void {
 function closeMenu(): void {
   openMenuUrl.value = null;
   openSnoozeFor.value = null;
+  scopeMenuOpen.value = false;
 }
 
 function pinAndClose(url: string, type: "pr" | "issue"): void {
@@ -231,9 +249,9 @@ onMounted(() => {
   // (concurrentMap cap 5, but still N round-trips); on a 50-PR workspace
   // that's ~10s of fetch the user pays for at boot whether they ever open
   // the Team tab or not. Lazy-loaded via `setTab("team")` instead.
-  refreshWip(props.repos);
-  refreshPrs(props.repos);
-  refreshIssues(props.repos);
+  refreshWip(scopedRepos.value);
+  refreshPrs(scopedRepos.value);
+  refreshIssues(scopedRepos.value);
   // Resolve the forge identity once so the Inbox can classify PRs by action.
   void loadInboxUser();
   // If the user persisted "team" as their last active tab (v2.9 §1.3),
@@ -244,6 +262,15 @@ onMounted(() => {
     loadTeam();
   }
 });
+
+// Re-fetch whenever the scope changes — the user toggled the filter, or opened
+// /closed a repo tab (which shifts `scopedRepos`). Team only if already loaded.
+watch(scopedRepos, () => {
+  refreshWip(scopedRepos.value);
+  refreshPrs(scopedRepos.value);
+  refreshIssues(scopedRepos.value);
+  if (teamLoaded.value && teamTabEnabled.value) loadTeam();
+});
 </script>
 
 <template>
@@ -251,6 +278,44 @@ onMounted(() => {
     <div class="launchpad-view__frame" @click.stop="closeMenu()">
     <div class="launchpad-view__header">
       <h2 class="launchpad-view__title">{{ t("launchpad.title") }}</h2>
+
+      <!-- Scope selector — narrows the Launchpad to a subset of the open repos. -->
+      <div class="launchpad-view__scope" @click.stop>
+        <button
+          class="launchpad-view__scope-trigger"
+          :class="{ 'launchpad-view__scope-trigger--filtered': !scopeIsAll }"
+          :title="t('launchpad.scopeTooltip')"
+          :aria-expanded="scopeMenuOpen"
+          @click="scopeMenuOpen = !scopeMenuOpen"
+        >
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <path d="M2 3h12l-4.5 5.5V13L6.5 11V8.5L2 3z" stroke-linejoin="round"/>
+          </svg>
+          <span>{{ scopeLabel }}</span>
+          <span class="launchpad-view__scope-caret" aria-hidden="true">▾</span>
+        </button>
+        <div v-if="scopeMenuOpen" class="launchpad-view__scope-menu">
+          <button
+            class="launchpad-view__scope-item"
+            :class="{ 'launchpad-view__scope-item--active': scopeIsAll }"
+            @click="scopeSetAll()"
+          >
+            <span class="launchpad-view__scope-check">{{ scopeIsAll ? "✓" : "" }}</span>
+            {{ t("launchpad.scopeAll") }}
+          </button>
+          <div class="launchpad-view__scope-sep" aria-hidden="true"></div>
+          <button
+            v-for="repo in props.repos"
+            :key="repo.path"
+            class="launchpad-view__scope-item"
+            @click="scopeToggle(repo.path)"
+          >
+            <span class="launchpad-view__scope-check">{{ scopeIsSelected(repo.path) ? "✓" : "" }}</span>
+            {{ repo.name }}
+          </button>
+        </div>
+      </div>
+
       <button
         class="launchpad-view__refresh"
         :disabled="isLoading() || loadingAll"
@@ -1093,6 +1158,82 @@ onMounted(() => {
   font-weight: var(--font-weight-semibold);
   letter-spacing: -0.01em;
   margin: 0;
+}
+
+/* ── Scope selector ────────────────────────────────────── */
+.launchpad-view__scope {
+  position: relative;
+}
+
+.launchpad-view__scope-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+.launchpad-view__scope-trigger:hover {
+  background: var(--color-bg-tertiary);
+  border-color: var(--color-border-strong);
+}
+.launchpad-view__scope-trigger--filtered {
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+.launchpad-view__scope-caret { font-size: 9px; opacity: 0.7; }
+
+.launchpad-view__scope-menu {
+  position: absolute;
+  top: calc(100% + var(--space-2));
+  left: 0;
+  z-index: 50;
+  min-width: 200px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: var(--space-2);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-popover, var(--shadow-md));
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.launchpad-view__scope-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+}
+.launchpad-view__scope-item:hover { background: var(--color-bg-tertiary); }
+.launchpad-view__scope-item--active { color: var(--color-accent); }
+.launchpad-view__scope-check {
+  width: 14px;
+  flex-shrink: 0;
+  color: var(--color-accent);
+  font-weight: var(--font-weight-semibold);
+}
+.launchpad-view__scope-sep {
+  height: 1px;
+  background: var(--color-border);
+  margin: var(--space-1) 0;
 }
 
 .launchpad-view__refresh {

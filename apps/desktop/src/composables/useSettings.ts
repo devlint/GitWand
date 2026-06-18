@@ -125,6 +125,13 @@ export interface AppSettings {
    * triggered. Default: true.
    */
   launchpadTeamTabEnabled: boolean;
+  /**
+   * Launchpad repo scope (v3): explicit list of repo paths to show. Empty array
+   * means "all open repos" (the default). Persisted so the user's filter
+   * (e.g. only Dendreo) survives across sessions; stale paths are ignored at
+   * read time (intersected with the currently-open tabs).
+   */
+  launchpadScopePaths: string[];
   /** Automation settings (v2.8). */
   automations: {
     /** Auto-resolve conflicts the moment MERGE_HEAD appears. */
@@ -221,6 +228,7 @@ export const defaultAppSettings: AppSettings = {
   aiOllamaModel: "codellama",
   launchpadActiveTab: "inbox",
   launchpadTeamTabEnabled: true,
+  launchpadScopePaths: [],
   automations: {
     autoResolve:    { enabled: false },
     nightlyPull:    { enabled: false, hour: 8, minute: 0 },

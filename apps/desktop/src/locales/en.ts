@@ -1394,6 +1394,9 @@ const en = {
   launchpad: {
     title: "Launchpad",
     openTooltip: "Launchpad — cross-repo overview (⌘L)",
+    scopeAll: "All",
+    scopeCount: "{0} repos",
+    scopeTooltip: "Display scope",
     inboxTab: "To handle",
     inboxEmpty: "Nothing needs your action right now. 🎉",
     inbox: {

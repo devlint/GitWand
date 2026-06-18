@@ -1347,6 +1347,9 @@ const zhCN: Locale = {
   launchpad: {
     title: "启动台",
     openTooltip: "启动台 — 跨仓库总览 (⌘L)",
+    scopeAll: "全部",
+    scopeCount: "{0} 个仓库",
+    scopeTooltip: "显示范围",
     inboxTab: "待处理",
     inboxEmpty: "目前没有需要你处理的事项。🎉",
     inbox: {

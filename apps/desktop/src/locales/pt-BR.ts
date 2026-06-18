@@ -1360,6 +1360,9 @@ const ptBR: Locale = {
   launchpad: {
     title: "Launchpad",
     openTooltip: "Launchpad — visão geral multi-repositórios (⌘L)",
+    scopeAll: "Todos",
+    scopeCount: "{0} repositórios",
+    scopeTooltip: "Escopo de exibição",
     inboxTab: "A tratar",
     inboxEmpty: "Nada requer sua ação no momento. 🎉",
     inbox: {

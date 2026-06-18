@@ -1371,6 +1371,9 @@ const fr: Locale = {
   launchpad: {
     title: "Launchpad",
     openTooltip: "Launchpad — vue d'ensemble multi-dépôts (⌘L)",
+    scopeAll: "Tous",
+    scopeCount: "{0} dépôts",
+    scopeTooltip: "Périmètre d'affichage",
     inboxTab: "À traiter",
     inboxEmpty: "Rien ne requiert ton action pour le moment. 🎉",
     inbox: {

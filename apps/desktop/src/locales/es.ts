@@ -1360,6 +1360,9 @@ const es: Locale = {
   launchpad: {
     title: "Launchpad",
     openTooltip: "Launchpad — vista general multi-repos (⌘L)",
+    scopeAll: "Todos",
+    scopeCount: "{0} repos",
+    scopeTooltip: "Ámbito de visualización",
     inboxTab: "Por hacer",
     inboxEmpty: "Nada requiere tu acción ahora mismo. 🎉",
     inbox: {
