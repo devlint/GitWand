@@ -34,6 +34,8 @@ import { useScratchWorktree } from "../../composables/useScratchWorktree";
 import { useRepoTabs } from "../../composables/useRepoTabs";
 import { useAIProvider } from "../../composables/useAIProvider";
 import { useBranchName } from "../../composables/useBranchName";
+import { usePinnedBranches } from "../../composables/usePinnedBranches";
+import { useArchivedBranches } from "../../composables/useArchivedBranches";
 import { BRANCH_CREATE_REQUEST_KEY } from "../../composables/branchPickerBridge";
 // Lazy: the merge-preview panel only mounts when the user expands a branch's
 // preview row inside the (already v-if'd) popover. BranchSelector is eager via
@@ -206,9 +208,27 @@ function openSubmoduleTree(path: string) {
   closePopover();
 }
 
+// ─── Archived branches (relocated from the Dashboard sidebar, v3) ──
+const archives = useArchivedBranches(() => props.cwd);
+const showArchived = ref(false);
+const archivedBranchList = computed(() => {
+  const byName = new Map(props.branches.filter((b) => !b.isRemote).map((b) => [b.name, b]));
+  return archives.archived.value
+    .map((name) => byName.get(name))
+    .filter((b): b is GitBranch => !!b)
+    .filter((b) => !branchFilter.value || b.name.toLowerCase().includes(branchFilter.value.toLowerCase()));
+});
+function toggleArchive(name: string) {
+  if (archives.isArchived(name)) archives.unarchive(name);
+  else archives.archive(name);
+}
+
 const localBranches = computed(() =>
   props.branches
     .filter((b) => !b.isRemote)
+    // Archived branches are hidden from the main list (shown in their own
+    // collapsible section), but the current branch is always visible.
+    .filter((b) => b.isCurrent || !archives.isArchived(b.name))
     .filter((b) => !branchFilter.value || b.name.toLowerCase().includes(branchFilter.value.toLowerCase()))
     .sort(branchSort),
 );
@@ -219,6 +239,21 @@ const remoteBranches = computed(() =>
     .filter((b) => !branchFilter.value || b.name.toLowerCase().includes(branchFilter.value.toLowerCase()))
     .sort(branchSort),
 );
+
+// ─── Pinned branches (relocated from the Dashboard sidebar, v3) ──
+const pins = usePinnedBranches(() => props.cwd);
+/** Pinned local branches, in pin order, filtered by the search box. */
+const pinnedBranches = computed(() => {
+  const byName = new Map(props.branches.filter((b) => !b.isRemote).map((b) => [b.name, b]));
+  return pins.pinned.value
+    .map((name) => byName.get(name))
+    .filter((b): b is GitBranch => !!b)
+    .filter((b) => !branchFilter.value || b.name.toLowerCase().includes(branchFilter.value.toLowerCase()));
+});
+function togglePin(name: string) {
+  if (pins.isPinned(name)) pins.unpin(name);
+  else pins.pin(name);
+}
 
 function handleBranchSwitch(name: string) {
   emit("switchBranch", name);
@@ -491,6 +526,40 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
         <div class="bp-spinner"></div>
       </div>
       <div v-else class="bp-lists">
+        <!-- Pinned branches (relocated from the Dashboard, v3) -->
+        <div v-if="pinnedBranches.length > 0" class="bp-section">
+          <div class="bp-section-toggle" style="cursor: default;">
+            <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" style="opacity:0.7;">
+              <path d="M8 1l2 4.5 5 .5-3.7 3.3L12.5 15 8 12.3 3.5 15l1.2-5.7L1 6l5-.5z"/>
+            </svg>
+            <span>{{ t('sidebar.pinnedBranches') }}</span>
+            <span class="bp-section-toggle__count">{{ pinnedBranches.length }}</span>
+          </div>
+          <ul class="bp-list">
+            <li
+              v-for="branch in pinnedBranches"
+              :key="`pin-${branch.name}`"
+              class="bp-item"
+              :class="{ 'bp-item--current': branch.isCurrent }"
+              @click="!branch.isCurrent && handleBranchSwitch(branch.name)"
+            >
+              <span v-if="branch.isCurrent" class="bp-current-dot"></span>
+              <span class="bp-item-name mono" :title="branch.name"><span class="bp-item-name__text">{{ branch.name }}</span></span>
+              <span v-if="branch.ahead > 0 || branch.behind > 0" class="bp-item-meta muted">
+                <span v-if="branch.ahead > 0">&uarr;{{ branch.ahead }}</span>
+                <span v-if="branch.behind > 0">&darr;{{ branch.behind }}</span>
+              </span>
+              <span class="bp-item-actions" @click.stop>
+                <button class="bp-item-action bp-item-action--active" :title="t('branch.unpin')" @click.stop="pins.unpin(branch.name)">
+                  <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                    <path d="M8 1l2 4.5 5 .5-3.7 3.3L12.5 15 8 12.3 3.5 15l1.2-5.7L1 6l5-.5z"/>
+                  </svg>
+                </button>
+              </span>
+            </li>
+          </ul>
+        </div>
+
         <div v-if="localBranches.length > 0" class="bp-section">
           <button class="bp-section-toggle" :aria-expanded="showLocal ? 'true' : 'false'" @click.stop="showLocal = !showLocal">
             <svg class="bp-section-toggle__chevron" :class="{ 'bp-section-toggle__chevron--open': showLocal }" width="9" height="9" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -519,6 +588,27 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
                   <span v-if="branch.behind > 0">&darr;{{ branch.behind }}</span>
                 </span>
                 <span v-if="!branch.isCurrent" class="bp-item-actions" @click.stop>
+                  <button
+                    class="bp-item-action"
+                    :class="{ 'bp-item-action--active': pins.isPinned(branch.name) }"
+                    :title="pins.isPinned(branch.name) ? t('branch.unpin') : t('branch.pin')"
+                    @click.stop="togglePin(branch.name)"
+                  >
+                    <svg width="11" height="11" viewBox="0 0 16 16" :fill="pins.isPinned(branch.name) ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="1.3" aria-hidden="true">
+                      <path d="M8 1l2 4.5 5 .5-3.7 3.3L12.5 15 8 12.3 3.5 15l1.2-5.7L1 6l5-.5z" stroke-linejoin="round"/>
+                    </svg>
+                  </button>
+                  <button
+                    class="bp-item-action"
+                    :class="{ 'bp-item-action--active': archives.isArchived(branch.name) }"
+                    :title="archives.isArchived(branch.name) ? t('branch.unarchive') : t('branch.archive')"
+                    @click.stop="toggleArchive(branch.name)"
+                  >
+                    <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true">
+                      <path d="M1.5 2.5h13v3h-13zM2.5 5.5h11v8h-11z" stroke-linejoin="round"/>
+                      <path d="M6.5 8.5h3" stroke-linecap="round"/>
+                    </svg>
+                  </button>
                   <button
                     class="bp-item-action"
                     :class="{ 'bp-item-action--active': previewingBranch === branch.name }"
@@ -597,6 +687,37 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
             </template>
           </ul>
         </div>
+        <!-- Archived branches (relocated from the Dashboard, v3) — collapsible -->
+        <div v-if="archivedBranchList.length > 0" class="bp-section">
+          <button class="bp-section-toggle" :aria-expanded="showArchived ? 'true' : 'false'" @click.stop="showArchived = !showArchived">
+            <svg class="bp-section-toggle__chevron" :class="{ 'bp-section-toggle__chevron--open': showArchived }" width="9" height="9" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M3 6l5 5 5-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            <span>{{ t('sidebar.archivedBranches') }}</span>
+            <span class="bp-section-toggle__count">{{ archivedBranchList.length }}</span>
+          </button>
+          <ul v-if="showArchived" class="bp-list">
+            <li
+              v-for="branch in archivedBranchList"
+              :key="`arch-${branch.name}`"
+              class="bp-item bp-item--remote"
+              :class="{ 'bp-item--current': branch.isCurrent }"
+              @click="!branch.isCurrent && handleBranchSwitch(branch.name)"
+            >
+              <span v-if="branch.isCurrent" class="bp-current-dot"></span>
+              <span class="bp-item-name mono" :title="branch.name"><span class="bp-item-name__text">{{ branch.name }}</span></span>
+              <span class="bp-item-actions" @click.stop>
+                <button class="bp-item-action" :title="t('branch.unarchive')" @click.stop="archives.unarchive(branch.name)">
+                  <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true">
+                    <path d="M1.5 2.5h13v3h-13zM2.5 5.5h11v8h-11z" stroke-linejoin="round"/>
+                    <path d="M8 12V7.5M6 9.5L8 7.5l2 2" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                </button>
+              </span>
+            </li>
+          </ul>
+        </div>
+
         <div v-if="remoteBranches.length > 0" class="bp-section">
           <button class="bp-section-toggle" :aria-expanded="showRemote ? 'true' : 'false'" @click.stop="showRemote = !showRemote">
             <svg class="bp-section-toggle__chevron" :class="{ 'bp-section-toggle__chevron--open': showRemote }" width="9" height="9" viewBox="0 0 16 16" fill="none" aria-hidden="true">
