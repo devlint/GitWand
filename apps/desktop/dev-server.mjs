@@ -792,7 +792,7 @@ async function handleRequest(req, res) {
         rmSync(dir, { recursive: true, force: true });
       }
       let wt = Buffer.alloc(0);
-      try { wt = readFileSync(join(resolvedCwd, path)); } catch { /* absent */ }
+      try { wt = readFileSync(safeRepoPath(resolvedCwd, path)); } catch { /* absent */ }
       const wtMatchesSide = (ours.length > 0 && Buffer.compare(wt, ours) === 0) ||
                             (theirs.length > 0 && Buffer.compare(wt, theirs) === 0);
       return jsonResponse(req, res, { content, wtMatchesSide });
