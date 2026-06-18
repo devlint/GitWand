@@ -339,7 +339,15 @@ export function useGitWand() {
    */
   async function loadRealFiles(cwd: string) {
     const conflictedPaths = await getConflictedFiles(cwd);
-    const treeConflicts = await getTreeConflicts(cwd);
+    // Tree-conflict detection is enrichment, not core loading: if it fails (e.g. a
+    // stale dev-server without the /api/tree-conflicts route), degrade to "no tree
+    // conflicts" so the merge editor still loads, rather than blanking the whole view.
+    let treeConflicts: Awaited<ReturnType<typeof getTreeConflicts>> = [];
+    try {
+      treeConflicts = await getTreeConflicts(cwd);
+    } catch (err) {
+      console.warn("getTreeConflicts failed; continuing without tree-conflict detection", err);
+    }
     const treeMap = new Map(treeConflicts.map(t => [t.path, t]));
     // Union: tree conflicts may include paths (e.g. both-deleted) the marker scan would choke on.
     const allPaths = Array.from(new Set([...conflictedPaths, ...treeConflicts.map(t => t.path)]));
