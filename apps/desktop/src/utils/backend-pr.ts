@@ -10,21 +10,29 @@ let _currentUserPromise: Promise<string> | null = null;
 
 /**
  * Returns the GitHub login of the currently authenticated user (via `gh` CLI or token).
- * Result is cached for the lifetime of the app session.
+ * A successful result is cached for the lifetime of the app session; a failure is
+ * not cached, so a transient error can be retried by the next caller.
  */
 export function ghCurrentUser(): Promise<string> {
   if (_currentUserPromise) return _currentUserPromise;
-  if (isTauri()) {
-    _currentUserPromise = tauriInvoke<string>("gh_current_user");
-  } else {
-    _currentUserPromise = devFetch(`${DEV_SERVER}/api/gh-current-user`).then(
-      async (res) => {
-        if (!res.ok) throw new Error(`Failed to get current user: ${res.status}`);
+  const p = isTauri()
+    ? tauriInvoke<string>("gh_current_user")
+    : devFetch(`${DEV_SERVER}/api/gh-current-user`).then(async (res) => {
+        if (!res.ok) {
+          // Surface the server's error body (e.g. "GitHub API 403: rate limit")
+          // — the bare status code alone is undiagnosable.
+          const body = await res.text().catch(() => "");
+          throw new Error(`Failed to get current user: ${res.status}${body ? ` — ${body}` : ""}`);
+        }
         return res.json() as Promise<string>;
-      }
-    );
-  }
-  return _currentUserPromise;
+      });
+  _currentUserPromise = p;
+  // Cache only on success: evict on rejection so a transient failure (rate-limit
+  // blip, momentary 5xx) doesn't poison the identity for the whole app session.
+  p.catch(() => {
+    if (_currentUserPromise === p) _currentUserPromise = null;
+  });
+  return p;
 }
 
 /** GitHub fork relationship for the repo at `cwd`. */

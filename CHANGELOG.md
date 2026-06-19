@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **PR panel stuck after a transient "current user" failure** — `ghCurrentUser()` cached its result promise unconditionally, so a one-off failure (a rate-limit blip or momentary GitHub 5xx surfacing as `Failed to get current user: 500`) poisoned the cached identity for the whole app session — the PR panel stayed broken until restart. Only successful results are cached now; a failure is evicted so the next caller retries. The thrown error also carries the server's response body instead of a bare status code.
+
 ## [2.24.0] - 2026-06-19
 
 ### Added
