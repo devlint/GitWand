@@ -10,9 +10,6 @@ import RepoSidebar from "./components/RepoSidebar.vue";
 import DiffViewer from "./components/DiffViewer.vue";
 import AiSparkle from "./components/AiSparkle.vue";
 import BaseModal from "./components/BaseModal.vue";
-// Always-mounted (state-driven internally — must stay eager):
-import EditCommitOverlay from "./components/EditCommitOverlay.vue";
-import SplitCommitModal from "./components/SplitCommitModal.vue";
 
 // ─── Type-only imports ───────────────────────────────────────────────────────
 // SearchPalette exports a named type used in computed paletteActions.
@@ -59,6 +56,11 @@ const UpdateModal = defineAsyncComponent(() => import("./components/UpdateModal.
 // Shared create-branch field — only mounted inside the v-if'd create-branch
 // modal, so keep it lazy (also lazy in BranchSelector) to stay out of main.
 const BranchNameField = defineAsyncComponent(() => import("./components/BranchNameField.vue"));
+// Commit edit/split modals — gated by `v-if` in the template (entry set /
+// split.open), so they only pull their chunk when the user actually edits or
+// splits a commit. Kept lazy to stay out of the main bundle (bundle budget).
+const EditCommitOverlay = defineAsyncComponent(() => import("./components/EditCommitOverlay.vue"));
+const SplitCommitModal = defineAsyncComponent(() => import("./components/SplitCommitModal.vue"));
 import { useStashMessage } from "./composables/useStashMessage";
 import { useAIProvider } from "./composables/useAIProvider";
 import { usePrPanel, PR_PANEL_KEY } from "./composables/usePrPanel";
@@ -2511,16 +2513,17 @@ onUnmounted(() => {
     <!-- Folder picker modal (browser mode) -->
     <FolderPicker v-if="showFolderPicker" @select="onFolderSelected" @cancel="onFolderPickerCancel" />
 
-    <!-- Edit commit overlay -->
-    <EditCommitOverlay :entry="editingCommit" @confirm="handleAmendConfirm" @cancel="editingCommit = null" />
+    <!-- Edit commit overlay (lazy — only mounted while editing a commit) -->
+    <EditCommitOverlay v-if="editingCommit" :entry="editingCommit" @confirm="handleAmendConfirm" @cancel="editingCommit = null" />
 
     <!-- Merge success modal -->
     <MergeSuccessModal v-if="showMergeSuccess" :merged-branch="lastMergedBranch ?? undefined"
       @close="onMergeSuccessClose" @push="onMergeSuccessPush" @delete-branch="onMergeSuccessDeleteBranch" />
 
     <!-- Split commit modal (driven by the useSplitCommit composable's
-         module-level state — mounting once here is sufficient) -->
-    <SplitCommitModal @split-completed="handleSplitCompleted" @close="handleSplitClose" />
+         module-level state). Lazy — the `v-if` keeps its chunk out of main
+         until the user opens the split flow. -->
+    <SplitCommitModal v-if="splitCommit.open.value" @split-completed="handleSplitCompleted" @close="handleSplitClose" />
 
     <!-- Success toast -->
     <div v-if="successToast" class="toast" :class="{ 'toast--leaving': successToastLeaving }" role="status">
