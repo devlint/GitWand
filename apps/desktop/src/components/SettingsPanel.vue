@@ -142,10 +142,6 @@ interface Settings {
   launchpadActiveTab: "inbox" | "wip" | "prs" | "issues" | "team";
   // Today view — Team tab enable/disable (v2.9). Hides tab + skips fetch.
   launchpadTeamTabEnabled: boolean;
-  // Today view — group-by mode for unified inbox (Phase 2 / v2.29)
-  launchpadGroupBy: "priority" | "repo" | "type";
-  // Today view — active filter chip for unified inbox (Phase 2 / v2.29)
-  launchpadFilter: "all" | "mine" | "review" | "issues" | "deps";
   // Automation settings (v2.8)
   automations: {
     autoResolve: { enabled: boolean };
@@ -194,8 +190,6 @@ const defaultSettings: Settings = {
   blameAlgorithm: "histogram",
   launchpadActiveTab: "inbox",
   launchpadTeamTabEnabled: true,
-  launchpadGroupBy: "priority",
-  launchpadFilter: "all",
   automations: {
     autoResolve: { enabled: false },
     nightlyPull: { enabled: false, hour: 8, minute: 0 },

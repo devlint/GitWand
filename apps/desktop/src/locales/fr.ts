@@ -1398,10 +1398,13 @@ const fr: Locale = {
     timeHour: "{0} h",
     timeDay: "{0} j",
     timeWeek: "{0} sem",
-    tier: {
-      now: "À traiter",
-      waiting: "En attente",
-      later: "Plus tard",
+    section: {
+      repos: "État des dépôts",
+      mine: "Mes PRs",
+      assigned: "PRs assignés",
+      review: "PRs à review",
+      issues: "Issues",
+      deps: "Dépendances",
     },
     action: {
       merge: "Merger",
@@ -1413,24 +1416,6 @@ const fr: Locale = {
       nudge: "Relancer",
       autoMerge: "Auto-merge",
       view: "Voir",
-    },
-    filter: {
-      all: "Tout",
-      mine: "Mes PRs",
-      review: "À relire",
-      issues: "Issues",
-      deps: "Dépendances",
-    },
-    groupByLabel: "Regrouper par",
-    groupBy: {
-      priority: "Priorité",
-      repo: "Dépôt",
-      type: "Type",
-    },
-    typeGroup: {
-      pr: "PULL REQUESTS",
-      issue: "ISSUES",
-      dep: "DÉPENDANCES",
     },
     case: {
       review: "Relecture demandée",

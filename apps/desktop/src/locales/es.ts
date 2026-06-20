@@ -1387,10 +1387,13 @@ const es: Locale = {
     timeHour: "{0} h",
     timeDay: "{0} d",
     timeWeek: "{0} sem",
-    tier: {
-      now: "Por hacer",
-      waiting: "En espera",
-      later: "Más tarde",
+    section: {
+      repos: "Estado del repositorio",
+      mine: "Mis PRs",
+      assigned: "PRs asignados",
+      review: "PRs a revisar",
+      issues: "Issues",
+      deps: "Dependencias",
     },
     action: {
       merge: "Fusionar",
@@ -1402,24 +1405,6 @@ const es: Locale = {
       nudge: "Recordar",
       autoMerge: "Auto-merge",
       view: "Ver",
-    },
-    filter: {
-      all: "Todo",
-      mine: "Mis PRs",
-      review: "Por revisar",
-      issues: "Issues",
-      deps: "Dependencias",
-    },
-    groupByLabel: "Agrupar por",
-    groupBy: {
-      priority: "Prioridad",
-      repo: "Repositorio",
-      type: "Tipo",
-    },
-    typeGroup: {
-      pr: "PULL REQUESTS",
-      issue: "ISSUES",
-      dep: "DEPENDENCIAS",
     },
     case: {
       review: "Revisión solicitada",

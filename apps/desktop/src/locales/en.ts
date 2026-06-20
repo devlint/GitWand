@@ -1421,10 +1421,13 @@ const en = {
     timeHour: "{0} h",
     timeDay: "{0} d",
     timeWeek: "{0} w",
-    tier: {
-      now: "To handle",
-      waiting: "Waiting",
-      later: "Later",
+    section: {
+      repos: "Repository status",
+      mine: "My PRs",
+      assigned: "Assigned PRs",
+      review: "PRs to review",
+      issues: "Issues",
+      deps: "Dependencies",
     },
     action: {
       merge: "Merge",
@@ -1436,24 +1439,6 @@ const en = {
       nudge: "Nudge",
       autoMerge: "Auto-merge",
       view: "View",
-    },
-    filter: {
-      all: "All",
-      mine: "My PRs",
-      review: "To review",
-      issues: "Issues",
-      deps: "Dependencies",
-    },
-    groupByLabel: "Group by",
-    groupBy: {
-      priority: "Priority",
-      repo: "Repo",
-      type: "Type",
-    },
-    typeGroup: {
-      pr: "PULL REQUESTS",
-      issue: "ISSUES",
-      dep: "DEPENDENCIES",
     },
     case: {
       review: "Review requested",

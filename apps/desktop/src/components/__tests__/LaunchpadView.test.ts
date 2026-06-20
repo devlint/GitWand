@@ -1,19 +1,19 @@
 /**
- * LaunchpadView.vue — UI smoke tests (Phase 2 / v2.29).
+ * LaunchpadView.vue — UI smoke tests (Phase 2 / v2.29 sections rework).
  *
- * Coverage goal: minimal vital surface — not exhaustive.
- *   - chip bar renders 5 filter chips (All / Mine / Review / Issues / Deps)
- *   - group-by segmented toggle renders 3 buttons (Priority / Repo / Type)
- *   - Team tab is a secondary surface (one tab + toggled by teamTabEnabled)
- *   - inbox panel renders unified item list using currentGroups
+ * Coverage goal:
+ *   - inbox tab renders; Team tab toggleable by teamTabEnabled
+ *   - NO filter chips, NO group-by toggle (removed in v2.29 sections rework)
+ *   - repos section rendered first only when non-empty (local action cards)
+ *   - each section from the composable renders as a titled collapsible header
+ *   - sections are only rendered when non-empty (count > 0)
+ *   - collapsing a section header hides its rows
  *   - action buttons emit open-pr / open-issue
- *   - collapsing a group header hides its rows
  *   - Refresh-all fans out to all data source refreshes
  *   - Team lazy placeholder renders + Load button triggers refreshTeam
  *
- * We mount with the native `createApp` (no @vue/test-utils dep — that package
- * is not installed) into a jsdom container, then assert against the live DOM
- * and observe spy calls on the mocked composables.
+ * We mount with the native `createApp` (no @vue/test-utils dep) into a jsdom
+ * container, then assert against the live DOM and spy calls on mocked composables.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -22,8 +22,6 @@ import LaunchpadView from "../LaunchpadView.vue";
 import type { AppSettings } from "../../composables/useSettings";
 
 // ─── Mocks ────────────────────────────────────────────────
-//
-// All Launchpad composables are stubbed at module level.
 
 const refreshWipMock = vi.fn(async (_repos: unknown) => {});
 const refreshPrsMock = vi.fn(async (_repos: unknown) => {});
@@ -45,21 +43,16 @@ const teamActivityRef = ref<unknown[]>([]);
 const teamLoadingRef = ref(false);
 const teamErrorRef = ref<string | null>(null);
 
-// Phase 2: inbox composable exposes tiers + groupedItems + filterCounts
+// Phase 2 sections-based inbox API.
 const inboxTotalRef = ref(0);
 const inboxNowCountRef = ref(0);
-const inboxFilterCountsRef = ref({ all: 0, mine: 0, review: 0, issues: 0, deps: 0 });
-// groupedItems is a function — we return a ref-backed impl so tests can control it.
-const groupedItemsResult = ref<unknown[]>([]);
-const groupedItemsMock = vi.fn(() => groupedItemsResult.value);
+const sectionsRef = ref<unknown[]>([]);
 const loadInboxUserMock = vi.fn(async () => {});
 
-// Reactive AppSettings stand-in.
+// Reactive AppSettings stand-in — no launchpadFilter / launchpadGroupBy.
 const settingsRef = ref<Partial<AppSettings>>({
   launchpadActiveTab: "inbox",
   launchpadTeamTabEnabled: true,
-  launchpadGroupBy: "priority",
-  launchpadFilter: "all",
 });
 
 vi.mock("../../composables/useSettings", () => ({
@@ -114,8 +107,7 @@ vi.mock("../../composables/useLaunchpadInbox", () => ({
   useLaunchpadInbox: () => ({
     totalCount: inboxTotalRef,
     nowCount: inboxNowCountRef,
-    filterCounts: inboxFilterCountsRef,
-    groupedItems: groupedItemsMock,
+    sections: sectionsRef,
     allItems: ref([]),
     loadUser: loadInboxUserMock,
   }),
@@ -204,7 +196,6 @@ function fakePr(overrides: Record<string, unknown> = {}): Record<string, unknown
 // ─── Lifecycle ────────────────────────────────────────────
 
 beforeEach(() => {
-  // Reset reactive state between tests.
   wipRef.value = [];
   wipLoadingRef.value = false;
   allPrsRef.value = [];
@@ -217,14 +208,10 @@ beforeEach(() => {
   teamErrorRef.value = null;
   inboxTotalRef.value = 0;
   inboxNowCountRef.value = 0;
-  inboxFilterCountsRef.value = { all: 0, mine: 0, review: 0, issues: 0, deps: 0 };
-  groupedItemsResult.value = [];
-  groupedItemsMock.mockClear();
+  sectionsRef.value = [];
   settingsRef.value = {
     launchpadActiveTab: "inbox",
     launchpadTeamTabEnabled: true,
-    launchpadGroupBy: "priority",
-    launchpadFilter: "all",
   };
 });
 
@@ -234,13 +221,12 @@ afterEach(() => {
 
 // ─── Tests ────────────────────────────────────────────────
 
-describe("LaunchpadView — Phase 2 surface bar", () => {
-  it("renders the inbox tab and Team tab (2 tabs total when teamTabEnabled)", async () => {
+describe("LaunchpadView — tab bar", () => {
+  it("renders 2 tabs when teamTabEnabled is true (inbox + team)", async () => {
     const mounted = mountLaunchpad();
     await nextTick();
 
     const tabs = mounted.container.querySelectorAll(".launchpad-view__tab");
-    // Phase 2: only 2 tabs — inbox (unified) + team (secondary).
     expect(tabs).toHaveLength(2);
     const labels = Array.from(tabs).map((t) => t.textContent?.trim() ?? "");
     expect(labels[0]).toContain("launchpad.inboxTab");
@@ -249,7 +235,7 @@ describe("LaunchpadView — Phase 2 surface bar", () => {
     unmount(mounted);
   });
 
-  it("hides the Team tab when launchpadTeamTabEnabled is false", async () => {
+  it("renders only 1 tab when teamTabEnabled is false", async () => {
     settingsRef.value.launchpadTeamTabEnabled = false;
     const mounted = mountLaunchpad();
     await nextTick();
@@ -261,54 +247,34 @@ describe("LaunchpadView — Phase 2 surface bar", () => {
     unmount(mounted);
   });
 
-  it("renders 5 filter chips when inbox is active", async () => {
+  it("does NOT render filter chips (removed in sections rework)", async () => {
     const mounted = mountLaunchpad();
     await nextTick();
 
+    // Filter chips were removed — the CSS class must not appear.
     const chips = mounted.container.querySelectorAll(".launchpad-view__chip-btn");
-    expect(chips).toHaveLength(5);
-    const labels = Array.from(chips).map((c) => c.textContent?.trim() ?? "");
-    expect(labels[0]).toContain("launchpad.filter.all");
-    expect(labels[1]).toContain("launchpad.filter.mine");
-    expect(labels[2]).toContain("launchpad.filter.review");
-    expect(labels[3]).toContain("launchpad.filter.issues");
-    expect(labels[4]).toContain("launchpad.filter.deps");
+    expect(chips).toHaveLength(0);
 
     unmount(mounted);
   });
 
-  it("renders 3 group-by buttons (Priority / Repo / Type)", async () => {
+  it("does NOT render group-by toggle (removed in sections rework)", async () => {
     const mounted = mountLaunchpad();
     await nextTick();
 
     const groupBtns = mounted.container.querySelectorAll(".launchpad-view__groupby-btn");
-    expect(groupBtns).toHaveLength(3);
-    const labels = Array.from(groupBtns).map((b) => b.textContent?.trim() ?? "");
-    expect(labels[0]).toContain("launchpad.groupBy.priority");
-    expect(labels[1]).toContain("launchpad.groupBy.repo");
-    expect(labels[2]).toContain("launchpad.groupBy.type");
-
-    unmount(mounted);
-  });
-
-  it("hides filter chips and group-by toggle when Team tab is active", async () => {
-    settingsRef.value.launchpadActiveTab = "team";
-    const mounted = mountLaunchpad();
-    await nextTick();
-
-    expect(mounted.container.querySelector(".launchpad-view__chips")).toBeNull();
-    expect(mounted.container.querySelector(".launchpad-view__groupby")).toBeNull();
+    expect(groupBtns).toHaveLength(0);
 
     unmount(mounted);
   });
 });
 
-describe("LaunchpadView — unified inbox rendering", () => {
-  function tierGroupFixture() {
+describe("LaunchpadView — sections inbox rendering", () => {
+  function sectionsFixture() {
     return [
       {
-        key: "tier:now",
-        label: "now",
+        key: "mine",
+        titleKey: "launchpad.section.mine",
         count: 2,
         items: [
           {
@@ -322,22 +288,22 @@ describe("LaunchpadView — unified inbox rendering", () => {
         ],
       },
       {
-        key: "tier:waiting",
-        label: "waiting",
+        key: "review",
+        titleKey: "launchpad.section.review",
         count: 1,
         items: [
           {
             pr: fakePr({ number: 44 }),
-            classification: { tier: "waiting", case: "waiting", action: "follow", kind: "pr" },
+            classification: { tier: "now", case: "review", action: "review", kind: "pr" },
           },
         ],
       },
     ];
   }
 
-  it("renders urgency tiers with counts and state-aware action buttons", async () => {
+  it("renders section headers with titles and counts", async () => {
     settingsRef.value.launchpadActiveTab = "inbox";
-    groupedItemsResult.value = tierGroupFixture();
+    sectionsRef.value = sectionsFixture();
     inboxTotalRef.value = 3;
     inboxNowCountRef.value = 2;
 
@@ -348,28 +314,69 @@ describe("LaunchpadView — unified inbox rendering", () => {
     const summary = mounted.container.querySelector(".launchpad-view__inbox-summary");
     expect(summary?.textContent).toContain("launchpad.inboxSummary");
 
-    // Two group headers (no local-cards band: wip is empty).
+    // Two section headers (no local-cards band: wip is empty).
     const headers = mounted.container.querySelectorAll(".launchpad-view__inbox-header");
     expect(headers).toHaveLength(2);
-    expect(headers[0].textContent).toContain("launchpad.tier.now");
+    expect(headers[0].textContent).toContain("launchpad.section.mine");
     expect(headers[0].textContent).toContain("2");
-    expect(headers[1].textContent).toContain("launchpad.tier.waiting");
+    expect(headers[1].textContent).toContain("launchpad.section.review");
     expect(headers[1].textContent).toContain("1");
 
-    // One action button per item, labelled by the classification action.
+    // One action button per item.
     const actions = mounted.container.querySelectorAll(".launchpad-view__pr-action");
     expect(actions).toHaveLength(3);
     const labels = Array.from(actions).map((a) => a.textContent?.trim() ?? "");
     expect(labels[0]).toContain("launchpad.action.merge");
     expect(labels[1]).toContain("launchpad.action.resolve");
-    expect(labels[2]).toContain("launchpad.action.follow");
+    expect(labels[2]).toContain("launchpad.action.review");
 
     unmount(mounted);
   });
 
-  it("emits open-pr when a tier action button is clicked", async () => {
+  it("renders sections with all 6 section keys when provided", async () => {
     settingsRef.value.launchpadActiveTab = "inbox";
-    groupedItemsResult.value = tierGroupFixture();
+    sectionsRef.value = [
+      { key: "mine",     titleKey: "launchpad.section.mine",     count: 1, items: [{ pr: fakePr({ number: 1 }),  classification: { tier: "now", case: "merge",  action: "merge",  kind: "pr"    } }] },
+      { key: "assigned", titleKey: "launchpad.section.assigned", count: 1, items: [{ pr: fakePr({ number: 2 }),  classification: { tier: "now", case: "review", action: "view",   kind: "pr"    } }] },
+      { key: "review",   titleKey: "launchpad.section.review",   count: 1, items: [{ pr: fakePr({ number: 3 }),  classification: { tier: "now", case: "review", action: "review", kind: "pr"    } }] },
+      { key: "issues",   titleKey: "launchpad.section.issues",   count: 1, items: [{ issue: fakeIssue({ number: 4 }), classification: { tier: "now", case: "issue",  action: "view",   kind: "issue" } }] },
+      { key: "deps",     titleKey: "launchpad.section.deps",     count: 1, items: [{ pr: fakePr({ number: 5 }),  classification: { tier: "later", case: "merge", action: "autoMerge", kind: "dep" } }] },
+    ];
+    inboxTotalRef.value = 5;
+
+    const mounted = mountLaunchpad();
+    await nextTick();
+
+    const headers = mounted.container.querySelectorAll(".launchpad-view__inbox-header");
+    // 5 sections = 5 headers (repos section absent because wip is empty).
+    expect(headers).toHaveLength(5);
+    const headerTexts = Array.from(headers).map((h) => h.textContent ?? "");
+    expect(headerTexts[0]).toContain("launchpad.section.mine");
+    expect(headerTexts[1]).toContain("launchpad.section.assigned");
+    expect(headerTexts[2]).toContain("launchpad.section.review");
+    expect(headerTexts[3]).toContain("launchpad.section.issues");
+    expect(headerTexts[4]).toContain("launchpad.section.deps");
+
+    unmount(mounted);
+  });
+
+  it("does NOT render a section header when sections array is empty", async () => {
+    settingsRef.value.launchpadActiveTab = "inbox";
+    sectionsRef.value = [];
+    inboxTotalRef.value = 0;
+
+    const mounted = mountLaunchpad();
+    await nextTick();
+
+    const headers = mounted.container.querySelectorAll(".launchpad-view__inbox-header");
+    expect(headers).toHaveLength(0);
+
+    unmount(mounted);
+  });
+
+  it("emits open-pr when a section action button is clicked", async () => {
+    settingsRef.value.launchpadActiveTab = "inbox";
+    sectionsRef.value = sectionsFixture();
     inboxTotalRef.value = 3;
     inboxNowCountRef.value = 2;
 
@@ -387,23 +394,23 @@ describe("LaunchpadView — unified inbox rendering", () => {
     unmount(mounted);
   });
 
-  it("collapses a group when its header is clicked", async () => {
+  it("collapses a section when its header is clicked", async () => {
     settingsRef.value.launchpadActiveTab = "inbox";
-    groupedItemsResult.value = tierGroupFixture();
+    sectionsRef.value = sectionsFixture();
     inboxTotalRef.value = 3;
     inboxNowCountRef.value = 2;
 
     const mounted = mountLaunchpad();
     await nextTick();
 
-    // Both groups expanded: 3 action buttons visible.
+    // Both sections expanded: 3 action buttons visible.
     expect(mounted.container.querySelectorAll(".launchpad-view__pr-action")).toHaveLength(3);
 
     const firstHeader = mounted.container.querySelector<HTMLButtonElement>(".launchpad-view__inbox-header");
     firstHeader!.click();
     await nextTick();
 
-    // Collapsing "now" removes its 2 rows; the "waiting" row remains.
+    // Collapsing "mine" removes its 2 rows; the "review" row remains.
     expect(mounted.container.querySelectorAll(".launchpad-view__pr-action")).toHaveLength(1);
 
     unmount(mounted);
@@ -411,10 +418,10 @@ describe("LaunchpadView — unified inbox rendering", () => {
 
   it("renders issue items with open-issue emit", async () => {
     settingsRef.value.launchpadActiveTab = "inbox";
-    groupedItemsResult.value = [
+    sectionsRef.value = [
       {
-        key: "tier:now",
-        label: "now",
+        key: "issues",
+        titleKey: "launchpad.section.issues",
         count: 1,
         items: [
           {
@@ -430,7 +437,6 @@ describe("LaunchpadView — unified inbox rendering", () => {
     const mounted = mountLaunchpad();
     await nextTick();
 
-    // Action button should be present.
     const action = mounted.container.querySelector<HTMLButtonElement>(".launchpad-view__pr-action");
     expect(action).not.toBeNull();
     expect(action!.textContent?.trim()).toContain("launchpad.action.view");
@@ -443,116 +449,80 @@ describe("LaunchpadView — unified inbox rendering", () => {
     unmount(mounted);
   });
 
-  it("renders repo-grouped sections when group-by is 'repo'", async () => {
+  it("repos section renders first when local cards (wip) are non-empty", async () => {
     settingsRef.value.launchpadActiveTab = "inbox";
-    settingsRef.value.launchpadGroupBy = "repo";
-    groupedItemsResult.value = [
+    // Provide a valid WorkspaceWipItem with ahead > 0 so useRepoActionCards generates a card.
+    wipRef.value = [{
+      path: "/tmp/myrepo",
+      name: "myrepo",
+      branch: "main",
+      ahead: 2,
+      behind: 0,
+      stagedCount: 0,
+      unstagedCount: 0,
+      untrackedCount: 0,
+      lastCommitAt: "2026-06-01T10:00:00Z",
+      hasNoUpstream: false,
+      error: null,
+      changedFiles: [],
+    }];
+    sectionsRef.value = [
       {
-        key: "repo:alpha",
-        label: "alpha",
-        count: 2,
+        key: "mine",
+        titleKey: "launchpad.section.mine",
+        count: 1,
+        items: [{ pr: fakePr({ number: 10 }), classification: { tier: "now", case: "merge", action: "merge", kind: "pr" } }],
+      },
+    ];
+    inboxTotalRef.value = 1;
+
+    const mounted = mountLaunchpad();
+    await nextTick();
+
+    const headers = mounted.container.querySelectorAll(".launchpad-view__inbox-header");
+    // repos section first, then mine section.
+    expect(headers).toHaveLength(2);
+    expect(headers[0].textContent).toContain("launchpad.section.repos");
+    expect(headers[1].textContent).toContain("launchpad.section.mine");
+
+    unmount(mounted);
+  });
+
+  it("assigned section action is 'view'", async () => {
+    settingsRef.value.launchpadActiveTab = "inbox";
+    sectionsRef.value = [
+      {
+        key: "assigned",
+        titleKey: "launchpad.section.assigned",
+        count: 1,
         items: [
-          { pr: fakePr({ number: 1, repoName: "alpha" }), classification: { tier: "now", case: "review", action: "review", kind: "pr" } },
-          { pr: fakePr({ number: 2, repoName: "alpha" }), classification: { tier: "now", case: "merge", action: "merge", kind: "pr" } },
+          {
+            pr: fakePr({ number: 55 }),
+            classification: { tier: "now", case: "review", action: "view", kind: "pr" },
+          },
         ],
       },
     ];
-    inboxTotalRef.value = 2;
+    inboxTotalRef.value = 1;
 
     const mounted = mountLaunchpad();
     await nextTick();
 
-    const headers = mounted.container.querySelectorAll(".launchpad-view__inbox-header");
-    expect(headers).toHaveLength(1);
-    // Repo group label is the repo name directly (not a t() key).
-    expect(headers[0].textContent).toContain("alpha");
-    expect(headers[0].textContent).toContain("2");
-
-    unmount(mounted);
-  });
-
-  it("renders type-grouped sections (PULL REQUESTS / ISSUES / DEPS) when group-by is 'type'", async () => {
-    settingsRef.value.launchpadActiveTab = "inbox";
-    settingsRef.value.launchpadGroupBy = "type";
-    groupedItemsResult.value = [
-      {
-        key: "type:pr",
-        label: "pr",
-        count: 1,
-        items: [{ pr: fakePr({ number: 1 }), classification: { tier: "now", case: "review", action: "review", kind: "pr" } }],
-      },
-      {
-        key: "type:issue",
-        label: "issue",
-        count: 1,
-        items: [{ issue: fakeIssue({ number: 10 }), classification: { tier: "now", case: "issue", action: "view", kind: "issue" } }],
-      },
-    ];
-    inboxTotalRef.value = 2;
-
-    const mounted = mountLaunchpad();
-    await nextTick();
-
-    const headers = mounted.container.querySelectorAll(".launchpad-view__inbox-header");
-    expect(headers).toHaveLength(2);
-    // Type group labels use t(`launchpad.typeGroup.${label}`) which returns the key in tests.
-    expect(headers[0].textContent).toContain("launchpad.typeGroup.pr");
-    expect(headers[1].textContent).toContain("launchpad.typeGroup.issue");
-
-    unmount(mounted);
-  });
-});
-
-describe("LaunchpadView — filter chips", () => {
-  it("shows live counts on filter chips", async () => {
-    inboxFilterCountsRef.value = { all: 5, mine: 2, review: 1, issues: 1, deps: 1 };
-    const mounted = mountLaunchpad();
-    await nextTick();
-
-    const chips = mounted.container.querySelectorAll(".launchpad-view__chip-btn");
-    // Count badges only appear when count > 0.
-    const allChipText = chips[0].textContent ?? "";
-    expect(allChipText).toContain("5");
-
-    unmount(mounted);
-  });
-
-  it("marks the active filter chip with --active modifier", async () => {
-    settingsRef.value.launchpadFilter = "review";
-    const mounted = mountLaunchpad();
-    await nextTick();
-
-    const activeChips = mounted.container.querySelectorAll(".launchpad-view__chip-btn--active");
-    expect(activeChips).toHaveLength(1);
-    expect(activeChips[0].textContent).toContain("launchpad.filter.review");
-
-    unmount(mounted);
-  });
-
-  it("shows inboxFilterEmpty message when filter yields 0 groups but inboxCount > 0", async () => {
-    // UX 3: per-filter empty state — inboxCount has items but active filter matches nothing.
-    inboxTotalRef.value = 3;
-    inboxNowCountRef.value = 2;
-    groupedItemsResult.value = []; // filter returns no matching groups
-    const mounted = mountLaunchpad();
-    await nextTick();
-
-    const emptyMsg = mounted.container.querySelector(".launchpad-view__empty");
-    expect(emptyMsg).not.toBeNull();
-    expect(emptyMsg!.textContent).toContain("launchpad.inboxFilterEmpty");
+    const action = mounted.container.querySelector<HTMLButtonElement>(".launchpad-view__pr-action");
+    expect(action).not.toBeNull();
+    expect(action!.textContent?.trim()).toContain("launchpad.action.view");
 
     unmount(mounted);
   });
 });
 
 describe("LaunchpadView — Team surface", () => {
-  it("Team tab shows lazy-load and triggers refreshTeam on first visit", async () => {
+  it("Team tab triggers refreshTeam on first visit", async () => {
     const mounted = mountLaunchpad();
     await nextTick();
 
     const tabs = mounted.container.querySelectorAll<HTMLButtonElement>(".launchpad-view__tab");
     refreshTeamMock.mockClear();
-    // Team is the 2nd tab (index 1).
     tabs[1].click();
     await nextTick();
 
@@ -561,7 +531,7 @@ describe("LaunchpadView — Team surface", () => {
     unmount(mounted);
   });
 
-  it("clicking a Team PR emits open-pr (internal navigation)", async () => {
+  it("clicking a Team PR emits open-pr", async () => {
     const teamPr = fakePr({ number: 99, repoPath: "/tmp/other", repoName: "other" });
     teamActivityRef.value = [
       {
@@ -573,7 +543,7 @@ describe("LaunchpadView — Team surface", () => {
     settingsRef.value.launchpadActiveTab = "team";
     const mounted = mountLaunchpad();
     await nextTick();
-    await nextTick(); // loadTeam resolves
+    await nextTick();
 
     const link = mounted.container.querySelector<HTMLButtonElement>(".launchpad-view__team-pr-link");
     expect(link).not.toBeNull();
@@ -614,19 +584,7 @@ describe("LaunchpadView — Refresh-all", () => {
   });
 });
 
-describe("LaunchpadView — legacy compat", () => {
-  it("⋮ menu opens with Pin + Snooze items; clicking Pin calls pin()", async () => {
-    allPrsRef.value = [fakePr()];
-    // The prs tab no longer exists, but allPrs is still used for badge counts etc.
-    // In Phase 2 the ⋮ menu is in the inbox grouped list. For this test we
-    // use the PRs tab v-if=false panel (dead but compiled) — instead, assert
-    // via the inbox grouped items path.
-    // Actually the ⋮ menu only appears in the old PRs/Issues panel which is now dead code.
-    // Skip this test for Phase 2 — the menu was on the PRs tab list which no longer renders.
-    // The unified inbox list does not yet have per-row ⋮ menus (Phase 3).
-    expect(true).toBe(true);
-  });
-
+describe("LaunchpadView — onMounted eager refresh", () => {
   it("eager onMounted refreshes wip / prs / issues with the supplied repos", async () => {
     refreshWipMock.mockClear();
     refreshPrsMock.mockClear();
@@ -641,111 +599,7 @@ describe("LaunchpadView — legacy compat", () => {
     expect(refreshPrsMock).toHaveBeenCalledTimes(1);
     expect(refreshIssuesMock).toHaveBeenCalledTimes(1);
     // Team must NOT auto-fetch on mount (lazy contract).
-
-    unmount(mounted);
-  });
-});
-
-describe("LaunchpadView — inbox tiers (backward compat alias)", () => {
-  // These tests mirror the Phase 1 contract as expressed through the new groupedItems
-  // path (which is what the component uses now).
-
-  function tierFixture() {
-    return [
-      {
-        key: "tier:now",
-        label: "now",
-        count: 2,
-        items: [
-          {
-            pr: fakePr({ number: 42, reviewDecision: "APPROVED" }),
-            classification: { tier: "now", case: "merge", action: "merge", kind: "pr" },
-          },
-          {
-            pr: fakePr({ number: 43, mergeStateStatus: "DIRTY" }),
-            classification: { tier: "now", case: "conflicts", action: "resolve", kind: "pr" },
-          },
-        ],
-      },
-      {
-        key: "tier:waiting",
-        label: "waiting",
-        count: 1,
-        items: [
-          {
-            pr: fakePr({ number: 44 }),
-            classification: { tier: "waiting", case: "waiting", action: "follow", kind: "pr" },
-          },
-        ],
-      },
-    ];
-  }
-
-  it("renders urgency tiers with counts and state-aware action buttons", async () => {
-    settingsRef.value.launchpadActiveTab = "inbox";
-    groupedItemsResult.value = tierFixture();
-    inboxTotalRef.value = 3;
-    inboxNowCountRef.value = 2;
-
-    const mounted = mountLaunchpad();
-    await nextTick();
-
-    const summary = mounted.container.querySelector(".launchpad-view__inbox-summary");
-    expect(summary?.textContent).toContain("launchpad.inboxSummary");
-
-    const headers = mounted.container.querySelectorAll(".launchpad-view__inbox-header");
-    expect(headers).toHaveLength(2);
-    expect(headers[0].textContent).toContain("launchpad.tier.now");
-    expect(headers[0].textContent).toContain("2");
-    expect(headers[1].textContent).toContain("launchpad.tier.waiting");
-    expect(headers[1].textContent).toContain("1");
-
-    const actions = mounted.container.querySelectorAll(".launchpad-view__pr-action");
-    expect(actions).toHaveLength(3);
-    const labels = Array.from(actions).map((a) => a.textContent?.trim() ?? "");
-    expect(labels[0]).toContain("launchpad.action.merge");
-    expect(labels[1]).toContain("launchpad.action.resolve");
-    expect(labels[2]).toContain("launchpad.action.follow");
-
-    unmount(mounted);
-  });
-
-  it("emits open-pr when a tier action button is clicked", async () => {
-    settingsRef.value.launchpadActiveTab = "inbox";
-    groupedItemsResult.value = tierFixture();
-    inboxTotalRef.value = 3;
-    inboxNowCountRef.value = 2;
-
-    const mounted = mountLaunchpad();
-    await nextTick();
-
-    const action = mounted.container.querySelector<HTMLButtonElement>(".launchpad-view__pr-action");
-    expect(action).not.toBeNull();
-    action!.click();
-    await nextTick();
-
-    expect(mounted.emitted.openPr).toHaveLength(1);
-    expect((mounted.emitted.openPr[0] as { number: number }).number).toBe(42);
-
-    unmount(mounted);
-  });
-
-  it("collapses a tier when its header is clicked", async () => {
-    settingsRef.value.launchpadActiveTab = "inbox";
-    groupedItemsResult.value = tierFixture();
-    inboxTotalRef.value = 3;
-    inboxNowCountRef.value = 2;
-
-    const mounted = mountLaunchpad();
-    await nextTick();
-
-    expect(mounted.container.querySelectorAll(".launchpad-view__pr-action")).toHaveLength(3);
-
-    const firstHeader = mounted.container.querySelector<HTMLButtonElement>(".launchpad-view__inbox-header");
-    firstHeader!.click();
-    await nextTick();
-
-    expect(mounted.container.querySelectorAll(".launchpad-view__pr-action")).toHaveLength(1);
+    expect(refreshTeamMock).not.toHaveBeenCalled();
 
     unmount(mounted);
   });

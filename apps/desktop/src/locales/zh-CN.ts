@@ -1374,10 +1374,13 @@ const zhCN: Locale = {
     timeHour: "{0} 小时",
     timeDay: "{0} 天",
     timeWeek: "{0} 周",
-    tier: {
-      now: "待处理",
-      waiting: "等待中",
-      later: "稍后处理",
+    section: {
+      repos: "仓库状态",
+      mine: "我的 PR",
+      assigned: "分配给我的 PR",
+      review: "待审查的 PR",
+      issues: "Issues",
+      deps: "依赖项",
     },
     action: {
       merge: "合并",
@@ -1389,24 +1392,6 @@ const zhCN: Locale = {
       nudge: "提醒",
       autoMerge: "自动合并",
       view: "查看",
-    },
-    filter: {
-      all: "全部",
-      mine: "我的 PR",
-      review: "待审查",
-      issues: "Issues",
-      deps: "依赖",
-    },
-    groupByLabel: "分组方式",
-    groupBy: {
-      priority: "优先级",
-      repo: "仓库",
-      type: "类型",
-    },
-    typeGroup: {
-      pr: "PULL REQUESTS",
-      issue: "ISSUES",
-      dep: "依赖项",
     },
     case: {
       review: "请求你审查",

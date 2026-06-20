@@ -4,7 +4,7 @@ import { saveSettings as persistAppSettings } from "../composables/useSettings";
 import { avatarStyle, avatarInitials } from "../composables/useAvatar";
 import { useLaunchpadWip } from "../composables/useLaunchpadWip";
 import { useLaunchpadPrs } from "../composables/useLaunchpadPrs";
-import { useLaunchpadInbox, type InboxAction, type InboxCase, type InboxFilter, type InboxGroupBy } from "../composables/useLaunchpadInbox";
+import { useLaunchpadInbox, type InboxAction, type InboxCase } from "../composables/useLaunchpadInbox";
 import { useLaunchpadIssues } from "../composables/useLaunchpadIssues";
 import { useLaunchpadScope } from "../composables/useLaunchpadScope";
 import { useRepoActionCards, type RepoCardKind } from "../composables/useRepoActionCards";
@@ -64,56 +64,13 @@ const { wip, loading: wipLoading, refresh: refreshWip } = useLaunchpadWip();
 const { allPrs, loading: prsLoading, error: prsError, refresh: refreshPrs } = useLaunchpadPrs();
 // Issues — declared early so allIssues can be passed into useLaunchpadInbox below.
 const { allIssues, loading: issuesLoading, refresh: refreshIssues } = useLaunchpadIssues();
-// Inbox — unified action surface: derives the action-grouped subset of allPrs +
-// allIssues (review requested, changes requested, CI failures, approved PRs,
-// issues assigned/created/mentioned). Group-by and filter chip state is wired
-// to settings so it persists across sessions.
-const { nowCount, totalCount: inboxTotal, loadUser: loadInboxUser, filterCounts, groupedItems } = useLaunchpadInbox(allPrs, allIssues);
+// Inbox — unified fixed-section inbox: mine / assigned / review / issues / deps.
+const { nowCount, totalCount: inboxTotal, loadUser: loadInboxUser, sections } = useLaunchpadInbox(allPrs, allIssues);
 
-// Active filter chip (persisted in settings).
-const inboxFilter = computed<InboxFilter>({
-  get: () => (settings.value.launchpadFilter as InboxFilter) ?? "all",
-  set: (val) => {
-    settings.value.launchpadFilter = val;
-    persistAppSettings(settings.value);
-  },
-});
-// Active group-by mode (persisted in settings).
-const inboxGroupBy = computed<InboxGroupBy>({
-  get: () => (settings.value.launchpadGroupBy as InboxGroupBy) ?? "priority",
-  set: (val) => {
-    settings.value.launchpadGroupBy = val;
-    persistAppSettings(settings.value);
-  },
-});
-// Current grouped view — recomputed whenever filter/groupBy/data changes.
-const currentGroups = computed(() => groupedItems(inboxGroupBy.value, inboxFilter.value));
-/** i18n label for a group header — resolved from the group's label token. */
-function groupHeaderLabel(groupLabel: string, groupBy: InboxGroupBy): string {
-  if (groupBy === "priority") {
-    // groupLabel is an InboxTier value: "now" | "waiting" | "later"
-    const tierKeys: Record<string, string> = {
-      now: t("launchpad.tier.now"),
-      waiting: t("launchpad.tier.waiting"),
-      later: t("launchpad.tier.later"),
-    };
-    return tierKeys[groupLabel] ?? groupLabel;
-  }
-  if (groupBy === "type") {
-    // groupLabel is an InboxEntityKind: "pr" | "issue" | "dep"
-    const typeKeys: Record<string, string> = {
-      pr: t("launchpad.typeGroup.pr"),
-      issue: t("launchpad.typeGroup.issue"),
-      dep: t("launchpad.typeGroup.dep"),
-    };
-    return typeKeys[groupLabel] ?? groupLabel;
-  }
-  return groupLabel; // repo name — already human-readable
-}
 // Local action cards (commit / push / publish / sync) derived from cross-repo
-// WIP — the other pluggable source of the inbox-journal alongside PR buckets.
+// WIP — prepended as the "repos" section above the PR/issue sections.
 const { cards: localCards, totalCount: localTotal } = useRepoActionCards(wip);
-/** Total inbox items = local action cards + PR buckets (drives badge + empty state). */
+/** Total inbox items = local action cards + PR/issue sections (drives badge + empty state). */
 const inboxCount = computed(() => localTotal.value + inboxTotal.value);
 
 /** i18n label for an inbox action button. */
@@ -121,14 +78,14 @@ function inboxActionLabel(action: InboxAction): string {
   return t(`launchpad.action.${action}`);
 }
 
-// Ephemeral collapsed-group state (keyed by group.key — works for tier/repo/type groups).
+// Ephemeral collapsed-section state (keyed by section.key).
 // Use a new Set on each toggle so Vue detects the reference change and re-renders.
-const collapsedTiers = ref<Set<string>>(new Set());
-function toggleTierCollapse(groupKey: string): void {
-  const next = new Set(collapsedTiers.value);
-  if (next.has(groupKey)) next.delete(groupKey);
-  else next.add(groupKey);
-  collapsedTiers.value = next;
+const collapsedSections = ref<Set<string>>(new Set());
+function toggleSectionCollapse(sectionKey: string): void {
+  const next = new Set(collapsedSections.value);
+  if (next.has(sectionKey)) next.delete(sectionKey);
+  else next.add(sectionKey);
+  collapsedSections.value = next;
 }
 /** i18n label for a local action card (count-aware). */
 function localCardLabel(kind: RepoCardKind, count: number): string {
@@ -432,35 +389,7 @@ watch(scopedRepos, () => {
       </button>
     </div>
 
-    <!-- Filter chips (unified inbox only) -->
-    <div v-if="activeTab === 'inbox'" class="launchpad-view__chips">
-      <button
-        v-for="f in (['all', 'mine', 'review', 'issues', 'deps'] as const)"
-        :key="f"
-        class="launchpad-view__chip-btn"
-        :class="{ 'launchpad-view__chip-btn--active': inboxFilter === f }"
-        @click="inboxFilter = f"
-      >
-        {{ t(`launchpad.filter.${f}`) }}
-        <span v-if="filterCounts[f] > 0" class="launchpad-view__chip-count">
-          {{ filterCounts[f] }}
-        </span>
-      </button>
-      <!-- Group-by segmented toggle -->
-      <div class="launchpad-view__groupby" role="group" :aria-label="t('launchpad.groupByLabel')">
-        <button
-          v-for="g in (['priority', 'repo', 'type'] as const)"
-          :key="g"
-          class="launchpad-view__groupby-btn"
-          :class="{ 'launchpad-view__groupby-btn--active': inboxGroupBy === g }"
-          @click="inboxGroupBy = g"
-        >
-          {{ t(`launchpad.groupBy.${g}`) }}
-        </button>
-      </div>
-    </div>
-
-    <!-- Inbox tab — triaged action inbox: local cards + 3 urgency tiers -->
+    <!-- Inbox tab — fixed-section scrolling inbox: repos + mine + assigned + review + issues + deps -->
     <div v-if="activeTab === 'inbox'" class="launchpad-view__panel">
       <span
         v-if="prsLoading && allPrs.length > 0"
@@ -485,75 +414,85 @@ watch(scopedRepos, () => {
       <p v-else-if="inboxCount === 0" class="launchpad-view__empty">
         {{ t("launchpad.inboxEmpty") }}
       </p>
-      <p v-else-if="currentGroups.length === 0" class="launchpad-view__empty">
-        {{ t("launchpad.inboxFilterEmpty") }}
-      </p>
       <template v-else>
         <!-- Summary line: total items · items needing immediate action -->
         <p class="launchpad-view__inbox-summary">
           {{ t("launchpad.inboxSummary", inboxCount, nowCount) }}
         </p>
 
-        <!-- Local action cards (commit / push / publish / sync) — prominent band above tiers. -->
-        <div v-if="localCards.length > 0" class="launchpad-view__local-band">
-          <div
-            v-for="card in localCards"
-            :key="card.id"
-            class="launchpad-view__local-card"
-          >
-            <span class="launchpad-view__local-icon" aria-hidden="true">
-              <svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="5" cy="3" r="1.6" />
-                <circle cx="5" cy="13" r="1.6" />
-                <circle cx="11" cy="6" r="1.6" />
-                <path d="M5 4.6v6.8M5 5C5 7.6 11 7.4 11 5.4" />
-              </svg>
-            </span>
-            <div class="launchpad-view__local-text">
-              <span class="launchpad-view__local-title">{{ localCardLabel(card.kind, card.count) }}</span>
-              <span class="launchpad-view__local-sub">{{ card.repoName }}</span>
-            </div>
-            <button
-              type="button"
-              class="launchpad-view__pr-action launchpad-view__pr-action--merge"
-              @click="emit('open-repo-changes', card.repoPath)"
-            >
-              {{ cardActionLabel(card.kind) }}
-            </button>
-          </div>
-        </div>
-
-        <!-- Grouped unified list: priority tiers / per-repo sections / type groups -->
-        <div
-          v-for="group in currentGroups"
-          :key="group.key"
-          class="launchpad-view__inbox-section"
-        >
+        <!-- Section 1: Repo status — local action cards (commit / push / publish / sync). ALWAYS FIRST. -->
+        <div v-if="localCards.length > 0" class="launchpad-view__inbox-section" data-section="repos">
           <button
             type="button"
             class="launchpad-view__inbox-header"
-            :class="group.key.startsWith('tier:') ? `launchpad-view__inbox-header--${group.label}` : ''"
-            :aria-expanded="!collapsedTiers.has(group.key)"
-            @click.stop="toggleTierCollapse(group.key)"
+            :aria-expanded="!collapsedSections.has('repos')"
+            @click.stop="toggleSectionCollapse('repos')"
           >
-            <span class="launchpad-view__tier-icon" aria-hidden="true">
-              <svg v-if="group.label === 'now'" viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M13 2 4.5 13.5H11l-1 8.5L19.5 10H13l0-8Z"/></svg>
-              <svg v-else-if="group.label === 'waiting'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2h12M6 22h12M6 2c0 5 12 5 12 0M6 22c0-5 12-5 12 0"/></svg>
-              <svg v-else-if="group.label === 'later'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>
-            </span>
-            <span class="launchpad-view__inbox-label">{{ groupHeaderLabel(group.label, inboxGroupBy) }}</span>
-            <span class="launchpad-view__inbox-count">{{ group.count }}</span>
+            <span class="launchpad-view__inbox-label">{{ t("launchpad.section.repos") }}</span>
+            <span class="launchpad-view__inbox-count">{{ localCards.length }}</span>
             <span
               class="launchpad-view__tier-chevron"
-              :class="{ 'launchpad-view__tier-chevron--collapsed': collapsedTiers.has(group.key) }"
+              :class="{ 'launchpad-view__tier-chevron--collapsed': collapsedSections.has('repos') }"
               aria-hidden="true"
             >
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
             </span>
           </button>
-          <ul v-if="!collapsedTiers.has(group.key)" class="launchpad-view__inbox-list">
+          <div v-if="!collapsedSections.has('repos')" class="launchpad-view__local-band">
+            <div
+              v-for="card in localCards"
+              :key="card.id"
+              class="launchpad-view__local-card"
+            >
+              <span class="launchpad-view__local-icon" aria-hidden="true">
+                <svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="5" cy="3" r="1.6" />
+                  <circle cx="5" cy="13" r="1.6" />
+                  <circle cx="11" cy="6" r="1.6" />
+                  <path d="M5 4.6v6.8M5 5C5 7.6 11 7.4 11 5.4" />
+                </svg>
+              </span>
+              <div class="launchpad-view__local-text">
+                <span class="launchpad-view__local-title">{{ localCardLabel(card.kind, card.count) }}</span>
+                <span class="launchpad-view__local-sub">{{ card.repoName }}</span>
+              </div>
+              <button
+                type="button"
+                class="launchpad-view__pr-action launchpad-view__pr-action--merge"
+                @click="emit('open-repo-changes', card.repoPath)"
+              >
+                {{ cardActionLabel(card.kind) }}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sections 2-6: mine / assigned / review / issues / deps (non-empty only, fixed order) -->
+        <div
+          v-for="section in sections"
+          :key="section.key"
+          class="launchpad-view__inbox-section"
+          :data-section="section.key"
+        >
+          <button
+            type="button"
+            class="launchpad-view__inbox-header"
+            :aria-expanded="!collapsedSections.has(section.key)"
+            @click.stop="toggleSectionCollapse(section.key)"
+          >
+            <span class="launchpad-view__inbox-label">{{ t(section.titleKey) }}</span>
+            <span class="launchpad-view__inbox-count">{{ section.count }}</span>
+            <span
+              class="launchpad-view__tier-chevron"
+              :class="{ 'launchpad-view__tier-chevron--collapsed': collapsedSections.has(section.key) }"
+              aria-hidden="true"
+            >
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+            </span>
+          </button>
+          <ul v-if="!collapsedSections.has(section.key)" class="launchpad-view__inbox-list">
             <li
-              v-for="item in group.items"
+              v-for="item in section.items"
               :key="item.pr ? `pr:${item.pr.repoPath}/${item.pr.number}` : `issue:${item.issue?.repoPath}/${item.issue?.number}`"
               class="launchpad-view__inbox-card"
               :class="`launchpad-view__inbox-card--${inboxAccent(item.classification.case)}`"
@@ -911,104 +850,9 @@ watch(scopedRepos, () => {
 /* Centered content column — caps line length on wide windows, mirrors the mockup. */
 .launchpad-view__header,
 .launchpad-view__tabs,
-.launchpad-view__chips,
 .launchpad-view__panel {
   width: 100%;
   max-width: 960px;
-}
-
-/* ── Filter chips + group-by toggle (unified inbox) ────── */
-.launchpad-view__chips {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-3);
-}
-
-.launchpad-view__chip-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-4);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
-  cursor: pointer;
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-pill);
-  color: var(--color-text-muted);
-  transition: color var(--transition-fast), border-color var(--transition-fast),
-    background var(--transition-fast);
-}
-.launchpad-view__chip-btn:hover {
-  color: var(--color-text);
-  border-color: var(--color-border-strong);
-}
-.launchpad-view__chip-btn:focus-visible {
-  outline: 2px solid var(--color-focus-ring);
-  outline-offset: 2px;
-}
-.launchpad-view__chip-btn--active {
-  background: var(--color-accent);
-  border-color: var(--color-accent);
-  color: var(--color-accent-text);
-  font-weight: var(--font-weight-semibold);
-}
-
-.launchpad-view__chip-count {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 5px;
-  border-radius: var(--radius-pill);
-  background: var(--color-bg-tertiary);
-  color: var(--color-text-muted);
-  font-size: 10px;
-  font-weight: var(--font-weight-semibold);
-  font-variant-numeric: tabular-nums;
-}
-.launchpad-view__chip-btn--active .launchpad-view__chip-count {
-  background: rgba(255, 255, 255, 0.25);
-  color: var(--color-accent-text);
-}
-
-/* Segmented group-by control — pushed to the right of the chip row. */
-.launchpad-view__groupby {
-  margin-left: auto;
-  display: inline-flex;
-  align-items: center;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  overflow: hidden;
-}
-.launchpad-view__groupby-btn {
-  padding: var(--space-2) var(--space-4);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
-  cursor: pointer;
-  background: var(--color-bg-secondary);
-  border: none;
-  border-left: 1px solid var(--color-border);
-  color: var(--color-text-muted);
-  transition: color var(--transition-fast), background var(--transition-fast);
-}
-.launchpad-view__groupby-btn:first-child {
-  border-left: none;
-}
-.launchpad-view__groupby-btn:hover {
-  color: var(--color-text);
-  background: var(--color-bg-tertiary);
-}
-.launchpad-view__groupby-btn:focus-visible {
-  outline: 2px solid var(--color-focus-ring);
-  outline-offset: -2px;
-}
-.launchpad-view__groupby-btn--active {
-  background: var(--color-accent);
-  color: var(--color-accent-text);
-  font-weight: var(--font-weight-semibold);
 }
 
 /* ── Header ────────────────────────────────────────────── */

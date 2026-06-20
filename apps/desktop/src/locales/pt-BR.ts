@@ -1387,10 +1387,13 @@ const ptBR: Locale = {
     timeHour: "{0} h",
     timeDay: "{0} d",
     timeWeek: "{0} sem",
-    tier: {
-      now: "A tratar",
-      waiting: "Aguardando",
-      later: "Mais tarde",
+    section: {
+      repos: "Status do repositório",
+      mine: "Minhas PRs",
+      assigned: "PRs atribuídas",
+      review: "PRs para revisar",
+      issues: "Issues",
+      deps: "Dependências",
     },
     action: {
       merge: "Mesclar",
@@ -1402,24 +1405,6 @@ const ptBR: Locale = {
       nudge: "Lembrar",
       autoMerge: "Auto-merge",
       view: "Ver",
-    },
-    filter: {
-      all: "Tudo",
-      mine: "Minhas PRs",
-      review: "Para revisar",
-      issues: "Issues",
-      deps: "Dependências",
-    },
-    groupByLabel: "Agrupar por",
-    groupBy: {
-      priority: "Prioridade",
-      repo: "Repositório",
-      type: "Tipo",
-    },
-    typeGroup: {
-      pr: "PULL REQUESTS",
-      issue: "ISSUES",
-      dep: "DEPENDÊNCIAS",
     },
     case: {
       review: "Revisão solicitada",
