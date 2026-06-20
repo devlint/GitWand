@@ -58,8 +58,9 @@ const teamActivityRef = ref<unknown[]>([]);
 const teamLoadingRef = ref(false);
 const teamErrorRef = ref<string | null>(null);
 
-const inboxBucketsRef = ref<unknown[]>([]);
+const inboxTiersRef = ref<unknown[]>([]);
 const inboxTotalRef = ref(0);
+const inboxNowCountRef = ref(0);
 const loadInboxUserMock = vi.fn(async () => {});
 
 // Reactive AppSettings stand-in. Default shape mirrors `defaultAppSettings`
@@ -142,8 +143,9 @@ vi.mock("../../composables/useLaunchpadTeam", () => ({
 
 vi.mock("../../composables/useLaunchpadInbox", () => ({
   useLaunchpadInbox: () => ({
-    buckets: inboxBucketsRef,
+    tiers: inboxTiersRef,
     totalCount: inboxTotalRef,
+    nowCount: inboxNowCountRef,
     loadUser: loadInboxUserMock,
   }),
 }));
@@ -250,8 +252,9 @@ beforeEach(() => {
   teamActivityRef.value = [];
   teamLoadingRef.value = false;
   teamErrorRef.value = null;
-  inboxBucketsRef.value = [];
+  inboxTiersRef.value = [];
   inboxTotalRef.value = 0;
+  inboxNowCountRef.value = 0;
   settingsRef.value = {
     launchpadActiveTab: "wip",
     launchpadTeamTabEnabled: true,
@@ -539,6 +542,109 @@ describe("LaunchpadView — UI smoke", () => {
     // Simpler: clear & re-mount with team disabled to be deterministic. The
     // active assertion is above; we rely on the dedicated lazy-placeholder
     // test for the lazy contract.
+
+    unmount(mounted);
+  });
+});
+
+describe("LaunchpadView — inbox tiers", () => {
+  function tierFixture() {
+    return [
+      {
+        tier: "now",
+        items: [
+          {
+            pr: fakePr({ number: 42, reviewDecision: "APPROVED" }),
+            classification: { tier: "now", case: "merge", action: "merge" },
+          },
+          {
+            pr: fakePr({ number: 43, mergeStateStatus: "DIRTY" }),
+            classification: { tier: "now", case: "conflicts", action: "resolve" },
+          },
+        ],
+      },
+      {
+        tier: "waiting",
+        items: [
+          {
+            pr: fakePr({ number: 44 }),
+            classification: { tier: "waiting", case: "waiting", action: "follow" },
+          },
+        ],
+      },
+    ];
+  }
+
+  it("renders urgency tiers with counts and state-aware action buttons", async () => {
+    settingsRef.value.launchpadActiveTab = "inbox";
+    inboxTiersRef.value = tierFixture();
+    inboxTotalRef.value = 3;
+    inboxNowCountRef.value = 2;
+
+    const mounted = mountLaunchpad();
+    await nextTick();
+
+    // Summary line present.
+    const summary = mounted.container.querySelector(".launchpad-view__inbox-summary");
+    expect(summary?.textContent).toContain("launchpad.inboxSummary");
+
+    // Two tier headers (no local-cards band: wip is empty), each with its count.
+    const headers = mounted.container.querySelectorAll(".launchpad-view__inbox-header");
+    expect(headers).toHaveLength(2);
+    expect(headers[0].textContent).toContain("launchpad.tier.now");
+    expect(headers[0].textContent).toContain("2");
+    expect(headers[1].textContent).toContain("launchpad.tier.waiting");
+    expect(headers[1].textContent).toContain("1");
+
+    // One action button per item, labelled by the classification action.
+    const actions = mounted.container.querySelectorAll(".launchpad-view__pr-action");
+    expect(actions).toHaveLength(3);
+    const labels = Array.from(actions).map((a) => a.textContent?.trim() ?? "");
+    expect(labels[0]).toContain("launchpad.action.merge");
+    expect(labels[1]).toContain("launchpad.action.resolve");
+    expect(labels[2]).toContain("launchpad.action.follow");
+
+    unmount(mounted);
+  });
+
+  it("emits open-pr when a tier action button is clicked", async () => {
+    settingsRef.value.launchpadActiveTab = "inbox";
+    inboxTiersRef.value = tierFixture();
+    inboxTotalRef.value = 3;
+    inboxNowCountRef.value = 2;
+
+    const mounted = mountLaunchpad();
+    await nextTick();
+
+    const action = mounted.container.querySelector<HTMLButtonElement>(".launchpad-view__pr-action");
+    expect(action).not.toBeNull();
+    action!.click();
+    await nextTick();
+
+    expect(mounted.emitted.openPr).toHaveLength(1);
+    expect((mounted.emitted.openPr[0] as { number: number }).number).toBe(42);
+
+    unmount(mounted);
+  });
+
+  it("collapses a tier when its header is clicked", async () => {
+    settingsRef.value.launchpadActiveTab = "inbox";
+    inboxTiersRef.value = tierFixture();
+    inboxTotalRef.value = 3;
+    inboxNowCountRef.value = 2;
+
+    const mounted = mountLaunchpad();
+    await nextTick();
+
+    // "now" tier starts expanded: its 2 rows are visible.
+    expect(mounted.container.querySelectorAll(".launchpad-view__pr-action")).toHaveLength(3);
+
+    const firstHeader = mounted.container.querySelector<HTMLButtonElement>(".launchpad-view__inbox-header");
+    firstHeader!.click();
+    await nextTick();
+
+    // Collapsing "now" removes its 2 rows; the "waiting" row remains.
+    expect(mounted.container.querySelectorAll(".launchpad-view__pr-action")).toHaveLength(1);
 
     unmount(mounted);
   });

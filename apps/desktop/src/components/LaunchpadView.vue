@@ -4,7 +4,7 @@ import { saveSettings as persistAppSettings } from "../composables/useSettings";
 import { avatarStyle, avatarInitials } from "../composables/useAvatar";
 import { useLaunchpadWip } from "../composables/useLaunchpadWip";
 import { useLaunchpadPrs } from "../composables/useLaunchpadPrs";
-import { useLaunchpadInbox, type InboxBucketKey } from "../composables/useLaunchpadInbox";
+import { useLaunchpadInbox, type InboxTier, type InboxAction, type InboxCase } from "../composables/useLaunchpadInbox";
 import { useLaunchpadIssues } from "../composables/useLaunchpadIssues";
 import { useLaunchpadScope } from "../composables/useLaunchpadScope";
 import { useRepoActionCards, type RepoCardKind } from "../composables/useRepoActionCards";
@@ -65,20 +65,74 @@ const { wip, loading: wipLoading, error: wipError, refresh: refreshWip } = useLa
 const { allPrs, snoozedPrs, repos: prRepos, loading: prsLoading, error: prsError, refresh: refreshPrs } = useLaunchpadPrs();
 // Inbox — "À traiter": derives the action-grouped subset of allPrs (review
 // requested of me, changes requested / failing CI / approved on my own PRs).
-const { buckets: inboxBuckets, totalCount: inboxTotal, loadUser: loadInboxUser } = useLaunchpadInbox(allPrs);
+const { tiers: inboxTiers, nowCount, totalCount: inboxTotal, loadUser: loadInboxUser } = useLaunchpadInbox(allPrs);
 // Local action cards (commit / push / publish / sync) derived from cross-repo
 // WIP — the other pluggable source of the inbox-journal alongside PR buckets.
 const { cards: localCards, totalCount: localTotal } = useRepoActionCards(wip);
 /** Total inbox items = local action cards + PR buckets (drives badge + empty state). */
 const inboxCount = computed(() => localTotal.value + inboxTotal.value);
 
-/** i18n label for an inbox bucket header. */
-function inboxBucketLabel(key: InboxBucketKey): string {
-  return t(`launchpad.inbox.${key}`);
+/** i18n label for an inbox tier header. */
+function inboxTierLabel(tier: InboxTier): string {
+  return t(`launchpad.tier.${tier}`);
+}
+/** i18n label for an inbox action button. */
+function inboxActionLabel(action: InboxAction): string {
+  return t(`launchpad.action.${action}`);
+}
+
+// Ephemeral collapsed-tier state — no persistence in Phase 1.
+// Use a new Set on each toggle so Vue detects the reference change and re-renders.
+const collapsedTiers = ref<Set<InboxTier>>(new Set());
+function toggleTierCollapse(tier: InboxTier): void {
+  const next = new Set(collapsedTiers.value);
+  if (next.has(tier)) next.delete(tier);
+  else next.add(tier);
+  collapsedTiers.value = next;
 }
 /** i18n label for a local action card (count-aware). */
 function localCardLabel(kind: RepoCardKind, count: number): string {
   return t(`launchpad.card.${kind}`, count);
+}
+/** i18n label for the local action card's CTA button. */
+function cardActionLabel(kind: RepoCardKind): string {
+  return t(`launchpad.cardAction.${kind}`);
+}
+/** i18n state-pill label for an inbox case. */
+function inboxStateLabel(c: InboxCase): string {
+  return t(`launchpad.case.${c}`);
+}
+/**
+ * Accent colour name for an inbox case — drives the card's left border, the
+ * state-pill dot, and its text colour. One of: success | accent | danger |
+ * warning | info | muted.
+ */
+const CASE_ACCENT: Record<InboxCase, string> = {
+  merge: "success",
+  review: "accent",
+  conflicts: "danger",
+  ci: "danger",
+  changes: "warning",
+  waiting: "muted",
+  ciRunning: "info",
+  blocked: "warning",
+};
+function inboxAccent(c: InboxCase): string {
+  return CASE_ACCENT[c];
+}
+/** Compact, locale-aware relative time (e.g. "12 min", "3 h", "2 j"). */
+function relativeTime(iso: string): string {
+  if (!iso) return "";
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return "";
+  const sec = Math.max(0, Math.round((Date.now() - then) / 1000));
+  const min = Math.max(1, Math.round(sec / 60));
+  if (min < 60) return t("launchpad.timeMin", min);
+  const hr = Math.round(min / 60);
+  if (hr < 24) return t("launchpad.timeHour", hr);
+  const day = Math.round(hr / 24);
+  if (day < 7) return t("launchpad.timeDay", day);
+  return t("launchpad.timeWeek", Math.round(day / 7));
 }
 const { allIssues, snoozedIssues, repos: issueRepos, loading: issuesLoading, error: issuesError, activeFilter: issueFilter, totalCount: issuesTotal, refresh: refreshIssues } = useLaunchpadIssues();
 const { pin, unpin, snooze, unsnooze, isPinned, isSnoozed, snoozedUntil } = useLaunchpadPins();
@@ -413,7 +467,7 @@ watch(scopedRepos, () => {
       </button>
     </div>
 
-    <!-- Inbox tab — "À traiter" : action-grouped subset of open PRs -->
+    <!-- Inbox tab — triaged action inbox: local cards + 3 urgency tiers -->
     <div v-if="activeTab === 'inbox'" class="launchpad-view__panel">
       <span
         v-if="prsLoading && allPrs.length > 0"
@@ -439,63 +493,149 @@ watch(scopedRepos, () => {
         {{ t("launchpad.inboxEmpty") }}
       </p>
       <template v-else>
-        <!-- Local action cards (commit / push / publish / sync) — "sur tes dépôts". -->
-        <div v-if="localCards.length > 0" class="launchpad-view__inbox-section">
-          <div class="launchpad-view__inbox-header launchpad-view__inbox-header--local">
-            <span class="launchpad-view__inbox-dot" aria-hidden="true"></span>
-            <span class="launchpad-view__inbox-label">{{ t("launchpad.localSection") }}</span>
-            <span class="launchpad-view__inbox-count">{{ localCards.length }}</span>
-          </div>
-          <ul class="launchpad-view__pr-list">
-            <li
-              v-for="card in localCards"
-              :key="card.id"
-              class="launchpad-view__pr-item"
+        <!-- Summary line: total items · items needing immediate action -->
+        <p class="launchpad-view__inbox-summary">
+          {{ t("launchpad.inboxSummary", inboxCount, nowCount) }}
+        </p>
+
+        <!-- Local action cards (commit / push / publish / sync) — prominent band above tiers. -->
+        <div v-if="localCards.length > 0" class="launchpad-view__local-band">
+          <div
+            v-for="card in localCards"
+            :key="card.id"
+            class="launchpad-view__local-card"
+          >
+            <span class="launchpad-view__local-icon" aria-hidden="true">
+              <svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="5" cy="3" r="1.6" />
+                <circle cx="5" cy="13" r="1.6" />
+                <circle cx="11" cy="6" r="1.6" />
+                <path d="M5 4.6v6.8M5 5C5 7.6 11 7.4 11 5.4" />
+              </svg>
+            </span>
+            <div class="launchpad-view__local-text">
+              <span class="launchpad-view__local-title">{{ localCardLabel(card.kind, card.count) }}</span>
+              <span class="launchpad-view__local-sub">{{ card.repoName }}</span>
+            </div>
+            <button
+              type="button"
+              class="launchpad-view__pr-action launchpad-view__pr-action--merge"
+              @click="emit('open-repo-changes', card.repoPath)"
             >
-              <span class="launchpad-view__pr-repo">{{ card.repoName }}</span>
-              <span class="launchpad-view__pr-title">
-                <button type="button" class="launchpad-view__pr-link" @click="emit('open-repo-changes', card.repoPath)">
-                  {{ localCardLabel(card.kind, card.count) }}
-                </button>
-              </span>
-            </li>
-          </ul>
+              {{ cardActionLabel(card.kind) }}
+            </button>
+          </div>
         </div>
 
+        <!-- 3 urgency tiers: now / waiting / later -->
         <div
-          v-for="bucket in inboxBuckets"
-          :key="bucket.key"
+          v-for="group in inboxTiers"
+          :key="group.tier"
           class="launchpad-view__inbox-section"
         >
-          <div
+          <button
+            type="button"
             class="launchpad-view__inbox-header"
-            :class="`launchpad-view__inbox-header--${bucket.key}`"
+            :class="`launchpad-view__inbox-header--${group.tier}`"
+            :aria-expanded="!collapsedTiers.has(group.tier)"
+            @click.stop="toggleTierCollapse(group.tier)"
           >
-            <span class="launchpad-view__inbox-dot" aria-hidden="true"></span>
-            <span class="launchpad-view__inbox-label">{{ inboxBucketLabel(bucket.key) }}</span>
-            <span class="launchpad-view__inbox-count">{{ bucket.prs.length }}</span>
-          </div>
-          <ul class="launchpad-view__pr-list">
-            <li
-              v-for="pr in bucket.prs"
-              :key="`${pr.repoPath}/${pr.number}`"
-              class="launchpad-view__pr-item"
+            <span class="launchpad-view__tier-icon" aria-hidden="true">
+              <svg v-if="group.tier === 'now'" viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M13 2 4.5 13.5H11l-1 8.5L19.5 10H13l0-8Z"/></svg>
+              <svg v-else-if="group.tier === 'waiting'" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2h12M6 22h12M6 2c0 5 12 5 12 0M6 22c0-5 12-5 12 0"/></svg>
+              <svg v-else viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>
+            </span>
+            <span class="launchpad-view__inbox-label">{{ inboxTierLabel(group.tier) }}</span>
+            <span class="launchpad-view__inbox-count">{{ group.items.length }}</span>
+            <span
+              class="launchpad-view__tier-chevron"
+              :class="{ 'launchpad-view__tier-chevron--collapsed': collapsedTiers.has(group.tier) }"
+              aria-hidden="true"
             >
-              <span class="launchpad-view__pr-repo">{{ pr.repoName }}</span>
-              <span class="launchpad-view__pr-title">
-                <button type="button" class="launchpad-view__pr-link" @click="emit('open-pr', pr)">
-                  #{{ pr.number }} {{ pr.title }}
-                </button>
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+            </span>
+          </button>
+          <ul v-if="!collapsedTiers.has(group.tier)" class="launchpad-view__inbox-list">
+            <li
+              v-for="item in group.items"
+              :key="`${item.pr.repoPath}/${item.pr.number}`"
+              class="launchpad-view__inbox-card"
+              :class="`launchpad-view__inbox-card--${inboxAccent(item.classification.case)}`"
+            >
+              <span
+                class="launchpad-view__inbox-unread"
+                :class="{ 'launchpad-view__inbox-unread--on': group.tier === 'now' }"
+                aria-hidden="true"
+              ></span>
+              <span class="launchpad-view__inbox-type" aria-hidden="true">
+                <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="4" cy="4" r="1.6" />
+                  <circle cx="4" cy="12" r="1.6" />
+                  <circle cx="12" cy="8" r="1.6" />
+                  <path d="M4 5.6v4.8M12 9.6V11a1.5 1.5 0 0 1-1.5 1.5H8M12 6.4 12 5" />
+                </svg>
               </span>
-              <span class="launchpad-view__pr-author">@{{ pr.author }}</span>
-              <span
-                v-if="pr.checksRollup === 'FAILURE'"
-                class="launchpad-view__pr-badge launchpad-view__pr-badge--ci-failure"
-              >{{ t("launchpad.prCiFailure") }}</span>
-              <span
-                v-else-if="pr.checksRollup === 'PENDING'"
-                class="launchpad-view__pr-badge launchpad-view__pr-badge--ci-pending"
-              >{{ t("launchpad.prCiPending") }}</span>
+              <span class="launchpad-view__inbox-avatar" :style="avatarStyle(item.pr.author)">
+                {{ avatarInitials(item.pr.author) }}
+              </span>
+              <div class="launchpad-view__inbox-body">
+                <div class="launchpad-view__inbox-line1">
+                  <button
+                    type="button"
+                    class="launchpad-view__pr-link launchpad-view__inbox-title"
+                    @click="emit('open-pr', item.pr)"
+                  >{{ item.pr.title }}</button>
+                  <span
+                    v-if="item.pr.checksRollup === 'SUCCESS'"
+                    class="launchpad-view__chip launchpad-view__chip--ci-ok"
+                  >✓ CI</span>
+                  <span
+                    v-else-if="item.pr.checksRollup === 'FAILURE'"
+                    class="launchpad-view__chip launchpad-view__chip--ci-fail"
+                  >✕ CI</span>
+                  <span
+                    v-else-if="item.pr.checksRollup === 'PENDING'"
+                    class="launchpad-view__chip launchpad-view__chip--ci-run"
+                  >CI</span>
+                  <span
+                    v-if="item.pr.reviewDecision === 'APPROVED'"
+                    class="launchpad-view__chip launchpad-view__chip--approved"
+                  >{{ t("launchpad.prApproved") }}</span>
+                </div>
+                <div class="launchpad-view__inbox-line2">
+                  <span class="launchpad-view__pr-repo">{{ item.pr.repoName }}</span>
+                  <span class="launchpad-view__inbox-num">#{{ item.pr.number }}</span>
+                  <span
+                    class="launchpad-view__inbox-state"
+                    :class="`launchpad-view__inbox-state--${inboxAccent(item.classification.case)}`"
+                  >
+                    <span class="launchpad-view__inbox-state-dot" aria-hidden="true"></span>
+                    {{ inboxStateLabel(item.classification.case) }}
+                  </span>
+                  <span class="launchpad-view__inbox-time">{{ relativeTime(item.pr.updatedAt) }}</span>
+                  <span
+                    v-if="item.pr.additions > 0 || item.pr.deletions > 0"
+                    class="launchpad-view__inbox-diff"
+                  >
+                    <span class="launchpad-view__inbox-diff-add">+{{ item.pr.additions }}</span>
+                    <span class="launchpad-view__inbox-diff-del">−{{ item.pr.deletions }}</span>
+                  </span>
+                  <span
+                    v-for="label in item.pr.labels"
+                    :key="label"
+                    class="launchpad-view__pr-label"
+                  >{{ label }}</span>
+                </div>
+              </div>
+              <button
+                type="button"
+                class="launchpad-view__pr-action"
+                :class="`launchpad-view__pr-action--${item.classification.action}`"
+                :title="inboxActionLabel(item.classification.action)"
+                @click="emit('open-pr', item.pr)"
+              >
+                {{ inboxActionLabel(item.classification.action) }}
+              </button>
             </li>
           </ul>
         </div>
@@ -1172,10 +1312,19 @@ watch(scopedRepos, () => {
   flex: 1;
   display: flex;
   flex-direction: column;
+  align-items: center; /* centre the capped-width content column (mockup layout) */
   gap: var(--space-5);
   padding: var(--space-6) var(--space-7);
   overflow-y: auto;
   min-height: 0;
+}
+
+/* Centered content column — caps line length on wide windows, mirrors the mockup. */
+.launchpad-view__header,
+.launchpad-view__tabs,
+.launchpad-view__panel {
+  width: 100%;
+  max-width: 960px;
 }
 
 /* ── Header ────────────────────────────────────────────── */
@@ -1331,22 +1480,22 @@ watch(scopedRepos, () => {
 /* ── Tab bar ───────────────────────────────────────────── */
 .launchpad-view__tabs {
   display: flex;
-  gap: var(--space-2);
-  border-bottom: 1px solid var(--color-border);
+  flex-wrap: wrap;
+  gap: var(--space-3);
 }
 
+/* Pill-chip filters (mockup style) — rounded, bordered, active = filled accent. */
 .launchpad-view__tab {
   display: inline-flex;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-3) var(--space-5);
-  margin-bottom: -1px; /* sit on top of the divider so the active bar covers it */
+  padding: var(--space-2) var(--space-5);
   font-size: var(--font-size-md);
   font-weight: var(--font-weight-medium);
   cursor: pointer;
-  background: none;
-  border: none;
-  border-bottom: 2px solid transparent;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
   color: var(--color-text-muted);
   transition: color var(--transition-fast), border-color var(--transition-fast),
     background var(--transition-fast);
@@ -1354,17 +1503,19 @@ watch(scopedRepos, () => {
 
 .launchpad-view__tab:hover {
   color: var(--color-text);
+  border-color: var(--color-border-strong);
 }
 
 .launchpad-view__tab:focus-visible {
   outline: 2px solid var(--color-focus-ring);
-  outline-offset: -2px;
-  border-radius: var(--radius-sm);
+  outline-offset: 2px;
+  border-radius: var(--radius-pill);
 }
 
 .launchpad-view__tab--active {
-  color: var(--color-text);
-  border-bottom-color: var(--color-accent);
+  color: var(--color-accent-text);
+  background: var(--color-accent);
+  border-color: var(--color-accent);
   font-weight: var(--font-weight-semibold);
 }
 
@@ -1376,15 +1527,15 @@ watch(scopedRepos, () => {
   height: 18px;
   padding: 0 var(--space-2);
   border-radius: var(--radius-pill);
-  background: var(--color-accent-soft);
-  color: var(--color-accent);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-muted);
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-semibold);
   font-variant-numeric: tabular-nums;
 }
 
 .launchpad-view__tab--active .launchpad-view__tab-badge {
-  background: var(--color-accent);
+  background: rgba(255, 255, 255, 0.25);
   color: var(--color-accent-text);
 }
 
@@ -1466,7 +1617,66 @@ watch(scopedRepos, () => {
   font-size: var(--font-size-sm);
 }
 
-/* ── Inbox ("À traiter") ───────────────────────────────── */
+/* ── Inbox (triaged action inbox) ──────────────────────── */
+.launchpad-view__inbox-summary {
+  margin: 0 0 var(--space-4);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+/* Local action-card band (commit / push / publish / sync) */
+.launchpad-view__local-band {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-bottom: var(--space-5);
+}
+
+.launchpad-view__local-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+}
+
+.launchpad-view__local-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border-radius: var(--radius-md);
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+}
+
+.launchpad-view__local-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.launchpad-view__local-title {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
+}
+
+.launchpad-view__local-sub {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+.launchpad-view__local-card .launchpad-view__pr-action {
+  margin-left: auto;
+}
+
+/* Tier section + collapsible header */
 .launchpad-view__inbox-section {
   display: flex;
   flex-direction: column;
@@ -1478,25 +1688,31 @@ watch(scopedRepos, () => {
   display: flex;
   align-items: center;
   gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-2) 0;
+  background: none;
+  border: none;
+  cursor: pointer;
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-semibold);
-  color: var(--color-text);
+  color: var(--color-text-muted);
   text-transform: uppercase;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.04em;
 }
 
-.launchpad-view__inbox-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: var(--radius-pill);
+.launchpad-view__tier-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
-  background: var(--color-text-muted);
 }
-.launchpad-view__inbox-header--review .launchpad-view__inbox-dot { background: var(--color-accent); }
-.launchpad-view__inbox-header--changes .launchpad-view__inbox-dot { background: var(--color-danger); }
-.launchpad-view__inbox-header--ci .launchpad-view__inbox-dot { background: var(--color-warning); }
-.launchpad-view__inbox-header--merge .launchpad-view__inbox-dot { background: var(--color-success); }
-.launchpad-view__inbox-header--local .launchpad-view__inbox-dot { background: var(--color-text-muted); }
+.launchpad-view__inbox-header--now .launchpad-view__tier-icon { color: var(--color-accent); }
+.launchpad-view__inbox-header--waiting .launchpad-view__tier-icon { color: var(--color-warning); }
+.launchpad-view__inbox-header--later .launchpad-view__tier-icon { color: var(--color-text-subtle); }
+
+.launchpad-view__inbox-label {
+  flex-shrink: 0;
+}
 
 .launchpad-view__inbox-count {
   display: inline-flex;
@@ -1513,11 +1729,222 @@ watch(scopedRepos, () => {
   font-variant-numeric: tabular-nums;
 }
 
-.launchpad-view__pr-author {
+.launchpad-view__tier-chevron {
+  display: inline-flex;
+  align-items: center;
+  margin-left: auto;
+  color: var(--color-text-subtle);
+  transition: transform var(--transition-fast);
+}
+.launchpad-view__tier-chevron--collapsed {
+  transform: rotate(-90deg);
+}
+
+/* Inbox card list */
+.launchpad-view__inbox-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.launchpad-view__inbox-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+  transition: border-color var(--transition-fast), background var(--transition-fast), box-shadow var(--transition-fast);
+}
+.launchpad-view__inbox-card:hover {
+  background: var(--color-bg-tertiary);
+  box-shadow: var(--shadow-sm);
+}
+.launchpad-view__inbox-card--success { border-left-color: var(--color-success); }
+.launchpad-view__inbox-card--accent  { border-left-color: var(--color-accent); }
+.launchpad-view__inbox-card--danger  { border-left-color: var(--color-danger); }
+.launchpad-view__inbox-card--warning { border-left-color: var(--color-warning); }
+.launchpad-view__inbox-card--info    { border-left-color: var(--color-info); }
+.launchpad-view__inbox-card--muted   { border-left-color: var(--color-text-subtle); }
+
+.launchpad-view__inbox-unread {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: var(--radius-pill);
+  border: 1.5px solid var(--color-text-subtle);
+  background: transparent;
+}
+.launchpad-view__inbox-unread--on {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+}
+
+.launchpad-view__inbox-type {
+  display: inline-flex;
+  align-items: center;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.launchpad-view__inbox-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: var(--radius-pill);
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.02em;
+}
+
+.launchpad-view__inbox-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  flex: 1;
+  min-width: 0;
+}
+
+.launchpad-view__inbox-line1 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.launchpad-view__inbox-title {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.launchpad-view__inbox-line2 {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.launchpad-view__inbox-num {
   font-size: var(--font-size-xs);
   color: var(--color-text-muted);
-  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Inline CI / review chips */
+.launchpad-view__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.4;
   white-space: nowrap;
+  flex-shrink: 0;
+}
+.launchpad-view__chip--ci-ok,
+.launchpad-view__chip--approved { background: var(--color-success-soft); color: var(--color-success); }
+.launchpad-view__chip--ci-fail  { background: var(--color-danger-soft); color: var(--color-danger); }
+.launchpad-view__chip--ci-run   { background: var(--color-info-soft); color: var(--color-info); }
+
+/* State pill (leading dot, colour by case) */
+.launchpad-view__inbox-state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  white-space: nowrap;
+}
+.launchpad-view__inbox-state-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: currentColor;
+}
+.launchpad-view__inbox-state--success { color: var(--color-success); }
+.launchpad-view__inbox-state--accent  { color: var(--color-accent); }
+.launchpad-view__inbox-state--danger  { color: var(--color-danger); }
+.launchpad-view__inbox-state--warning { color: var(--color-warning); }
+.launchpad-view__inbox-state--info    { color: var(--color-info); }
+.launchpad-view__inbox-state--muted   { color: var(--color-text-muted); }
+
+.launchpad-view__inbox-time {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.launchpad-view__inbox-diff {
+  display: inline-flex;
+  gap: var(--space-2);
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+}
+.launchpad-view__inbox-diff-add { color: var(--color-success); }
+.launchpad-view__inbox-diff-del { color: var(--color-danger); }
+
+/* Primary action button — hierarchy by urgency */
+.launchpad-view__pr-action {
+  margin-left: auto;
+  flex-shrink: 0;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: filter var(--transition-fast), background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+}
+.launchpad-view__pr-action:hover { filter: brightness(1.06); }
+.launchpad-view__pr-action:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}
+/* Solid — high-priority actions */
+.launchpad-view__pr-action--merge { background: var(--color-success); color: #fff; }
+.launchpad-view__pr-action--review { background: var(--color-accent); color: var(--color-accent-text); }
+.launchpad-view__pr-action--resolve { background: var(--color-danger); color: #fff; }
+/* Soft — opportunistic */
+.launchpad-view__pr-action--autoMerge { background: var(--color-accent-soft); color: var(--color-accent); }
+/* Outlined — medium-priority */
+.launchpad-view__pr-action--reply,
+.launchpad-view__pr-action--seeFailure {
+  background: transparent;
+  border-color: var(--color-border-strong);
+  color: var(--color-text);
+}
+.launchpad-view__pr-action--reply:hover,
+.launchpad-view__pr-action--seeFailure:hover {
+  background: var(--color-bg-tertiary);
+  filter: none;
+}
+/* Ghost — passive (waiting tier) */
+.launchpad-view__pr-action--follow,
+.launchpad-view__pr-action--nudge {
+  background: transparent;
+  color: var(--color-text-muted);
+}
+.launchpad-view__pr-action--follow:hover,
+.launchpad-view__pr-action--nudge:hover {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text);
+  filter: none;
 }
 
 /* ── PR list ───────────────────────────────────────────── */
