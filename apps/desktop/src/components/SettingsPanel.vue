@@ -137,10 +137,15 @@ interface Settings {
   aiModelByProvider: Partial<Record<AIProvider, string>>;
   aiOllamaUrl: string;
   aiOllamaModel: string;
-  // Launchpad — last active tab persisted between openings (v2.9)
-  launchpadActiveTab: "wip" | "prs" | "issues" | "team";
-  // Launchpad — Team tab enable/disable (v2.9). Hides tab + skips fetch.
+  // Today view — last active surface persisted between openings (v2.9 / Phase 2)
+  // Only "inbox" and "team" are live surfaces after Phase 2.
+  launchpadActiveTab: "inbox" | "wip" | "prs" | "issues" | "team";
+  // Today view — Team tab enable/disable (v2.9). Hides tab + skips fetch.
   launchpadTeamTabEnabled: boolean;
+  // Today view — group-by mode for unified inbox (Phase 2 / v2.29)
+  launchpadGroupBy: "priority" | "repo" | "type";
+  // Today view — active filter chip for unified inbox (Phase 2 / v2.29)
+  launchpadFilter: "all" | "mine" | "review" | "issues" | "deps";
   // Automation settings (v2.8)
   automations: {
     autoResolve: { enabled: boolean };
@@ -187,8 +192,10 @@ const defaultSettings: Settings = {
   aiOllamaUrl: "http://localhost:11434",
   aiOllamaModel: "codellama",
   blameAlgorithm: "histogram",
-  launchpadActiveTab: "wip",
+  launchpadActiveTab: "inbox",
   launchpadTeamTabEnabled: true,
+  launchpadGroupBy: "priority",
+  launchpadFilter: "all",
   automations: {
     autoResolve: { enabled: false },
     nightlyPull: { enabled: false, hour: 8, minute: 0 },

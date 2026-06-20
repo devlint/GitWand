@@ -18,7 +18,12 @@ import type { AIProvider } from "./useAIProvider";
 
 export type PullMode = "merge" | "rebase";
 export type SwitchBehavior = "stash" | "ask" | "refuse";
+/** Active tab in the Today view — only "inbox" (unified list) and "team" survive Phase 2. */
 export type LaunchpadTab = "inbox" | "wip" | "prs" | "issues" | "team";
+/** How items in the unified inbox are grouped. */
+export type InboxGroupBy = "priority" | "repo" | "type";
+/** Active filter chip in the unified inbox. */
+export type InboxFilter = "all" | "mine" | "review" | "issues" | "deps";
 /** Granularity of PR-activity OS notifications (v2.16). */
 export type NotificationLevel = "all" | "reviews" | "ci" | "none";
 
@@ -116,15 +121,31 @@ export interface AppSettings {
   aiOllamaUrl: string;
   /** Ollama model name. */
   aiOllamaModel: string;
-  /** Last active tab in Launchpad — persisted between openings (v2.9). */
+  /**
+   * Last active tab in Today view — persisted between openings (v2.9).
+   * After Phase 2 only "inbox" and "team" are live surfaces; legacy values
+   * ("wip"|"prs"|"issues") are migrated to "inbox" at read time.
+   */
   launchpadActiveTab: LaunchpadTab;
   /**
-   * Whether the Launchpad Team tab is enabled (v2.9). When false, the tab
+   * Whether the Today Team tab is enabled (v2.9). When false, the tab
    * is hidden and the (expensive) team activity fetch — one `gh pr view
    * --json files` per colleague PR, ~10s on a 50-PR workspace — is never
    * triggered. Default: true.
    */
   launchpadTeamTabEnabled: boolean;
+  /**
+   * How items in the unified inbox are grouped (Phase 2 / v2.29).
+   * "priority" = 3 urgency tiers (default), "repo" = per-repo sections,
+   * "type" = PR / Issue / Dep / Local headers.
+   */
+  launchpadGroupBy: InboxGroupBy;
+  /**
+   * Active filter chip in the unified inbox (Phase 2 / v2.29).
+   * "all" = everything, "mine" = my PRs only, "review" = PRs needing my review,
+   * "issues" = issues assigned/created/mentioned, "deps" = dependency PRs.
+   */
+  launchpadFilter: InboxFilter;
   /**
    * Launchpad repo scope (v3): explicit list of repo paths to show. Empty array
    * means "all open repos" (the default). Persisted so the user's filter
@@ -228,6 +249,8 @@ export const defaultAppSettings: AppSettings = {
   aiOllamaModel: "codellama",
   launchpadActiveTab: "inbox",
   launchpadTeamTabEnabled: true,
+  launchpadGroupBy: "priority",
+  launchpadFilter: "all",
   launchpadScopePaths: [],
   automations: {
     autoResolve:    { enabled: false },
