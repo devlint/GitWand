@@ -205,23 +205,21 @@ describe("classifyInboxPr", () => {
 
   // ─── New: assigned PRs ───────────────────────────────────────────────────
 
-  it("classifies a PR assigned to me (not author, not review-requested) as assigned with action view", () => {
+  it("classifies a PR assigned to me (not author, not review-requested) as { case:'assigned', action:'view' }", () => {
     const result = classifyInboxPr(
       pr({ author: "alice", reviewRequested: [], assignees: [ME] }),
       ME
     );
-    expect(result).toEqual({ tier: "now", case: "review", action: "view", kind: "pr" });
-    // NOTE: assigned PRs use kind:"pr" but action:"view" and case:"review" is wrong
-    // Actually per spec: assigned goes to section "assigned", kind:"pr", action:"view"
-    // Let's check the spec: "For an assigned PR that is not otherwise actionable, use action `view`"
-    // The case — we need a new case or reuse. Per spec, assigned section uses action:"view".
-    // Let's re-examine: assigned PR classification should be kind:"pr", action:"view"
-    // The case drives the state pill label. We'll use "review" as case (it shows in the pill).
-    // Actually spec says: classify into "assigned" section with action "view".
-    // The InboxCase for assigned: we'll use a new "assigned" case OR reuse existing.
-    // Let's just verify action:"view" is set — the case can be "review" or another.
-    expect(result?.action).toBe("view");
-    expect(result?.kind).toBe("pr");
+    // Distinct "assigned" case so the state pill reads "Assigned", not "Review requested".
+    expect(result).toEqual({ tier: "now", case: "assigned", action: "view", kind: "pr" });
+  });
+
+  it("matches the 'Dependencies' label case-insensitively (dep bump)", () => {
+    const result = classifyInboxPr(
+      pr({ author: "alice", reviewRequested: [ME], labels: ["Dependencies"] }),
+      ME
+    );
+    expect(result?.kind).toBe("dep");
   });
 
   it("dep PR via assignee (isDependencyBump + assignees.includes(me)) classifies as dep", () => {

@@ -1449,6 +1449,7 @@ const en = {
       waiting: "Awaiting review",
       ciRunning: "CI running",
       blocked: "Merge blocked",
+      assigned: "Assigned to you",
       issue: "Issue",
     },
     wipTab: "WIP",

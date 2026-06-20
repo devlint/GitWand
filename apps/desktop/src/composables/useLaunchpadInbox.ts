@@ -32,6 +32,7 @@ export type InboxCase =
   | "waiting"     // my PR is awaiting others' review
   | "ciRunning"   // my PR has a CI run in progress
   | "blocked"     // my PR is approved but branch protection blocks merge
+  | "assigned"    // a PR assigned to me (not author, review not requested)
   | "issue";      // issue assigned/mentioned/created
 
 export type InboxAction =
@@ -80,7 +81,9 @@ export const TIER_ORDER: InboxTier[] = ["now", "waiting", "later"];
 /** Dependency-bump heuristic: author matches bot pattern OR labels include "dependencies". */
 function isDependencyBump(pr: PrWithRepo): boolean {
   const botPattern = /^(dependabot|renovate)(\[bot\])?$/i;
-  return botPattern.test(pr.author) || pr.labels.includes("dependencies");
+  // Label match is case-insensitive: GitHub's default is "dependencies" but
+  // repos commonly use "Dependencies".
+  return botPattern.test(pr.author) || pr.labels.some((l) => l.toLowerCase() === "dependencies");
 }
 
 /**
@@ -150,7 +153,7 @@ export function classifyInboxPr(pr: PrWithRepo, me: string): InboxClassification
 
   // Assigned to me (not author, not review-requested): actionable via "view"
   if (isAssigned) {
-    return { tier: "now", case: "review", action: "view", kind: "pr" };
+    return { tier: "now", case: "assigned", action: "view", kind: "pr" };
   }
 
   return null;
@@ -172,7 +175,7 @@ export function classifyIssue(issue: IssueWithRepo): InboxClassification {
 function prSectionKey(classification: InboxClassification, pr: PrWithRepo, me: string): string {
   if (classification.kind === "dep") return "deps";
   if (pr.author === me) return "mine";
-  if (classification.action === "review") return "review";
+  if (classification.case === "review") return "review";
   return "assigned";
 }
 

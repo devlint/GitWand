@@ -113,6 +113,7 @@ const CASE_ACCENT: Record<InboxCase, string> = {
   waiting: "muted",
   ciRunning: "info",
   blocked: "warning",
+  assigned: "info",
   issue: "accent",
 };
 function inboxAccent(c: InboxCase): string {

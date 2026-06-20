@@ -1415,6 +1415,7 @@ const ptBR: Locale = {
       waiting: "Aguardando revisão",
       ciRunning: "CI em andamento",
       blocked: "Mesclagem bloqueada",
+      assigned: "Atribuído a você",
       issue: "Issue",
     },
     wipTab: "Em andamento",

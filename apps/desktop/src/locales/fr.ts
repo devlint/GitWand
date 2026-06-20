@@ -1426,6 +1426,7 @@ const fr: Locale = {
       waiting: "En attente de relecture",
       ciRunning: "CI en cours",
       blocked: "Fusion bloquée",
+      assigned: "Qui t'est assigné",
       issue: "Issue",
     },
     wipTab: "En cours",

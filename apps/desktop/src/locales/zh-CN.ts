@@ -1402,6 +1402,7 @@ const zhCN: Locale = {
       waiting: "等待审查",
       ciRunning: "CI 进行中",
       blocked: "合并被阻止",
+      assigned: "已分配给你",
       issue: "Issue",
     },
     wipTab: "进行中",

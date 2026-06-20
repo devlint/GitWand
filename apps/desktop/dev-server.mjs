@@ -4682,7 +4682,7 @@ async function handleRequest(req, res) {
               labels: (pr.labels ?? []).map(l => l.name),
               assignees: (pr.assignees ?? []).map(a => a.login).filter(Boolean),
               review_requested: (pr.reviewRequests ?? [])
-                .map(rr => rr.requestedReviewer?.login)
+                .map(rr => rr.login)
                 .filter(Boolean),
               review_decision: pr.reviewDecision ?? "",
               merge_state_status: pr.mergeStateStatus ?? "",

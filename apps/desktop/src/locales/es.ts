@@ -1415,6 +1415,7 @@ const es: Locale = {
       waiting: "Esperando revisión",
       ciRunning: "CI en curso",
       blocked: "Fusión bloqueada",
+      assigned: "Asignado a ti",
       issue: "Issue",
     },
     wipTab: "En progreso",
