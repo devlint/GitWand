@@ -245,8 +245,8 @@ const es: Locale = {
     quickStash: "Stash rápido",
     quickStashAi: "Stash rápido IA",
     footerTags: "Tags",
-    footerLaunchpad: "Launchpad",
-    launchpad: "Launchpad",
+    footerLaunchpad: "Today",
+    launchpad: "Today",
     footerWorkspaces: "Workspaces",
     footerAgents: "Agents",
   },
@@ -1180,7 +1180,7 @@ const es: Locale = {
     // Launchpad — Pestaña Equipo (v2.9)
     launchpad: {
       disableTeamTab: {
-        label: "Desactivar la pestaña Equipo del Launchpad",
+        label: "Desactivar la pestaña Equipo de Today",
         help: "La pestaña Equipo hace una llamada API por cada PR de un compañero (~10s en workspaces grandes). Desactívala si no necesitas la vista de solapamientos.",
       },
     },
@@ -1331,7 +1331,7 @@ const es: Locale = {
     pullAll: "Pull all",
     pullingAll: "Descargando\u2026",
     openAll: "Abrir todo en pestañas",
-    openLaunchpad: "Launchpad",
+    openLaunchpad: "Today",
     statusAll: "Actualizar",
     ahead: "\u2191{0}",
     behind: "\u2193{0}",
@@ -1361,8 +1361,8 @@ const es: Locale = {
   },
 
   launchpad: {
-    title: "Launchpad",
-    openTooltip: "Launchpad — vista general multi-repos (⌘L)",
+    title: "Today",
+    openTooltip: "Today — vista general multi-repos (⌘L)",
     scopeAll: "Todos",
     scopeCount: "{0} repos",
     scopeTooltip: "Ámbito de visualización",
@@ -1466,7 +1466,7 @@ const es: Locale = {
     refreshAll: "Actualizar todo",
     refreshAllTooltip: "Actualizar las 4 pestañas en paralelo",
     noWorkspace: {
-      warning: "Crea un workspace primero para usar Launchpad",
+      warning: "Crea un workspace primero para usar Today",
     },
   },
 
@@ -1882,7 +1882,7 @@ const es: Locale = {
     openOnForge: "Abrir en GitHub",
     toggleSidebar: "Mostrar / ocultar barra lateral",
     toggleTheme: "Alternar modo claro/oscuro",
-    openLaunchpad: "Abrir Launchpad",
+    openLaunchpad: "Abrir Today",
     documentation: "Documentación de GitWand",
     whatsNew: "Novedades",
     reportIssue: "Reportar un problema…",

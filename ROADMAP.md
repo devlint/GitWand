@@ -73,9 +73,11 @@ The paradigm: short stacked branches (`feat/step-1` → `feat/step-2` → `feat/
 
 ---
 
-### v2.29.0 — Launchpad: triaged action inbox
+### v2.29.0 — Today: triaged action inbox (renamed from Launchpad)
 
-_Evolves the Launchpad (v2.9.0, + in-app review & action inbox in v2.24.0) from a PR/issue table with a generic "Open in GitHub" action into a prioritized, state-aware action inbox — the daily "what do I do next" surface. Mockup-driven. The differentiator vs GitKraken/Tower: each item routes to a **native GitWand surface**, not back to the forge._
+_Evolves the Launchpad (v2.9.0, + in-app review & action inbox in v2.24.0) from a PR/issue table with a generic "Open in GitHub" action into a prioritized, state-aware action inbox — the daily "what do I do next" surface. **Renamed "Launchpad" → "Today"** ("Launchpad" was GitKraken's term; "Today" frames it as the daily-driver). Mockup-driven. The differentiator vs GitKraken/Tower: each item routes to a **native GitWand surface**, not back to the forge._
+
+**Status** — _Phase 1 shipped_: 3 urgency tiers, state-aware primary action per row, local working-state band, reworked card UI (left accent · state pills · avatars · CI/review chips · diff stat · action hierarchy), pill-chip tab bar, centered max-width layout. _Phase 2 (in progress)_: rename Launchpad → Today; counted filter chips + group-by toggle (Priority/Repo/Type) over a unified list; issues / `@`-mentions / dependency PRs as first-class items. _Deferred (Phase 3)_: active mutations — real nudge / auto-merge, and a direct jump from "Resolve" into the conflict resolver (today routes to in-app PR review).
 
 **Urgency tiers** — three collapsible buckets above the current review/changes/ci/merge granularity:
 - **À traiter** — needs me now (review requested, changes requested, CI failed, ready to merge, merge conflicts, mention)

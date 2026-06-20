@@ -249,8 +249,8 @@ const zhCN: Locale = {
     quickStash: "快速 Stash",
     quickStashAi: "快速 AI Stash",
     footerTags: "Tags",
-    footerLaunchpad: "启动台",
-    launchpad: "启动台",
+    footerLaunchpad: "Today",
+    launchpad: "Today",
     footerWorkspaces: "Workspaces",
     footerAgents: "Agents",
   },
@@ -1167,7 +1167,7 @@ const zhCN: Locale = {
     // Launchpad \u2014 \u56e2\u961f\u6807\u7b7e\u9875 (v2.9)
     launchpad: {
       disableTeamTab: {
-        label: "\u7981\u7528 Launchpad \u56e2\u961f\u6807\u7b7e",
+        label: "\u7981\u7528 Today \u56e2\u961f\u6807\u7b7e",
         help: "\u56e2\u961f\u6807\u7b7e\u6bcf\u4e2a\u540c\u4e8b PR \u90fd\u4f1a\u8c03\u7528\u4e00\u6b21 API\uff08\u5728\u5927\u578b\u5de5\u4f5c\u533a\u4e0a\u7ea6 10 \u79d2\uff09\u3002\u5982\u679c\u4f60\u4e0d\u9700\u8981\u6587\u4ef6\u91cd\u53e0\u89c6\u56fe\uff0c\u53ef\u4ee5\u5173\u95ed\u3002",
       },
     },
@@ -1318,7 +1318,7 @@ const zhCN: Locale = {
     pullAll: "全部 Pull",
     pullingAll: "拉取中\u2026",
     openAll: "在标签页中全部打开",
-    openLaunchpad: "Launchpad",
+    openLaunchpad: "Today",
     statusAll: "刷新",
     ahead: "\u2191{0}",
     behind: "\u2193{0}",
@@ -1348,8 +1348,8 @@ const zhCN: Locale = {
   },
 
   launchpad: {
-    title: "启动台",
-    openTooltip: "启动台 — 跨仓库总览 (⌘L)",
+    title: "Today",
+    openTooltip: "Today — 跨仓库总览 (⌘L)",
     scopeAll: "全部",
     scopeCount: "{0} 个仓库",
     scopeTooltip: "显示范围",
@@ -1453,7 +1453,7 @@ const zhCN: Locale = {
     refreshAll: "全部刷新",
     refreshAllTooltip: "并行刷新所有 4 个标签页",
     noWorkspace: {
-      warning: "请先创建工作区以使用 Launchpad",
+      warning: "请先创建工作区以使用 Today",
     },
   },
 
@@ -1867,7 +1867,7 @@ const zhCN: Locale = {
     openOnForge: "在 GitHub 中打开",
     toggleSidebar: "显示 / 隐藏侧边栏",
     toggleTheme: "切换浅色 / 深色模式",
-    openLaunchpad: "打开 Launchpad",
+    openLaunchpad: "打开 Today",
     documentation: "GitWand 文档",
     whatsNew: "新功能",
     reportIssue: "报告问题…",

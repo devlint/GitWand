@@ -246,8 +246,8 @@ const ptBR: Locale = {
     quickStash: "Stash rápido",
     quickStashAi: "Stash rápido IA",
     footerTags: "Tags",
-    footerLaunchpad: "Launchpad",
-    launchpad: "Launchpad",
+    footerLaunchpad: "Today",
+    launchpad: "Today",
     footerWorkspaces: "Workspaces",
     footerAgents: "Agents",
   },
@@ -1180,7 +1180,7 @@ const ptBR: Locale = {
     // Launchpad \u2014 Aba Equipe (v2.9)
     launchpad: {
       disableTeamTab: {
-        label: "Desativar a aba Equipe do Launchpad",
+        label: "Desativar a aba Equipe de Today",
         help: "A aba Equipe faz uma chamada de API por PR de colega (~10s em workspaces grandes). Desative se voc\u00ea n\u00e3o precisa da vis\u00e3o de sobreposi\u00e7\u00e3o.",
       },
     },
@@ -1331,7 +1331,7 @@ const ptBR: Locale = {
     pullAll: "Pull all",
     pullingAll: "Baixando\u2026",
     openAll: "Abrir tudo em abas",
-    openLaunchpad: "Launchpad",
+    openLaunchpad: "Today",
     statusAll: "Atualizar",
     ahead: "\u2191{0}",
     behind: "\u2193{0}",
@@ -1361,8 +1361,8 @@ const ptBR: Locale = {
   },
 
   launchpad: {
-    title: "Launchpad",
-    openTooltip: "Launchpad — visão geral multi-repositórios (⌘L)",
+    title: "Today",
+    openTooltip: "Today — visão geral multi-repositórios (⌘L)",
     scopeAll: "Todos",
     scopeCount: "{0} repositórios",
     scopeTooltip: "Escopo de exibição",
@@ -1466,7 +1466,7 @@ const ptBR: Locale = {
     refreshAll: "Atualizar tudo",
     refreshAllTooltip: "Atualizar as 4 abas em paralelo",
     noWorkspace: {
-      warning: "Crie um workspace primeiro para usar o Launchpad",
+      warning: "Crie um workspace primeiro para usar Today",
     },
   },
 
@@ -1882,7 +1882,7 @@ const ptBR: Locale = {
     openOnForge: "Abrir no GitHub",
     toggleSidebar: "Mostrar / ocultar barra lateral",
     toggleTheme: "Alternar modo claro/escuro",
-    openLaunchpad: "Abrir Launchpad",
+    openLaunchpad: "Abrir Today",
     documentation: "Documentação do GitWand",
     whatsNew: "Novidades",
     reportIssue: "Relatar um problema…",

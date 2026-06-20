@@ -245,8 +245,8 @@ const fr: Locale = {
     quickStash: "Stash rapide",
     quickStashAi: "Stash rapide IA",
     footerTags: "Tags",
-    footerLaunchpad: "Launchpad",
-    launchpad: "Launchpad",
+    footerLaunchpad: "Today",
+    launchpad: "Today",
     footerWorkspaces: "Workspaces",
     footerAgents: "Agents",
   },
@@ -1191,7 +1191,7 @@ const fr: Locale = {
     // Launchpad — Onglet Équipe (v2.9)
     launchpad: {
       disableTeamTab: {
-        label: "Désactiver l'onglet Équipe du Launchpad",
+        label: "Désactiver l'onglet Équipe de Today",
         help: "L'onglet Équipe fait un appel API par PR de collègue (~10s sur un gros workspace). Désactive-le si tu n'as pas besoin de la vue chevauchement.",
       },
     },
@@ -1342,7 +1342,7 @@ const fr: Locale = {
     pullAll: "Pull all",
     pullingAll: "Pull en cours\u2026",
     openAll: "Tout ouvrir dans des onglets",
-    openLaunchpad: "Launchpad",
+    openLaunchpad: "Today",
     statusAll: "Actualiser",
     ahead: "\u2191{0}",
     behind: "\u2193{0}",
@@ -1372,8 +1372,8 @@ const fr: Locale = {
   },
 
   launchpad: {
-    title: "Launchpad",
-    openTooltip: "Launchpad — vue d'ensemble multi-dépôts (⌘L)",
+    title: "Today",
+    openTooltip: "Today — vue d'ensemble multi-dépôts (⌘L)",
     scopeAll: "Tous",
     scopeCount: "{0} dépôts",
     scopeTooltip: "Périmètre d'affichage",
@@ -1477,7 +1477,7 @@ const fr: Locale = {
     refreshAll: "Tout rafraîchir",
     refreshAllTooltip: "Rafraîchir les 4 onglets en parallèle",
     noWorkspace: {
-      warning: "Créez d'abord un workspace pour utiliser le Launchpad",
+      warning: "Créez d'abord un workspace pour utiliser Today",
     },
   },
 
@@ -1894,7 +1894,7 @@ const fr: Locale = {
     openOnForge: "Ouvrir sur GitHub",
     toggleSidebar: "Afficher / masquer la sidebar",
     toggleTheme: "Basculer le thème clair/sombre",
-    openLaunchpad: "Ouvrir le Launchpad",
+    openLaunchpad: "Ouvrir Today",
     documentation: "Documentation GitWand",
     whatsNew: "Nouveautés",
     reportIssue: "Signaler un problème…",

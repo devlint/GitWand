@@ -252,8 +252,8 @@ const en = {
     quickStash: "Quick Stash",
     quickStashAi: "Quick Stash AI",
     footerTags: "Tags",
-    footerLaunchpad: "Launchpad",
-    launchpad: "Launchpad",
+    footerLaunchpad: "Today",
+    launchpad: "Today",
     footerWorkspaces: "Workspaces",
     footerAgents: "Agents",
   },
@@ -1207,7 +1207,7 @@ const en = {
     // Launchpad \u2014 Team tab toggle (v2.9)
     launchpad: {
       disableTeamTab: {
-        label: "Disable Launchpad Team tab",
+        label: "Disable Today Team tab",
         help: "The Team tab fires one API call per colleague PR (~10s on large workspaces). Turn this off if you don't need the overlap view.",
       },
     },
@@ -1365,7 +1365,7 @@ const en = {
     pullAll: "Pull all",
     pullingAll: "Pulling\u2026",
     openAll: "Open all in tabs",
-    openLaunchpad: "Launchpad",
+    openLaunchpad: "Today",
     statusAll: "Refresh",
     ahead: "\u2191{0}",
     behind: "\u2193{0}",
@@ -1395,8 +1395,8 @@ const en = {
   },
 
   launchpad: {
-    title: "Launchpad",
-    openTooltip: "Launchpad — cross-repo overview (⌘L)",
+    title: "Today",
+    openTooltip: "Today — cross-repo overview (⌘L)",
     scopeAll: "All",
     scopeCount: "{0} repos",
     scopeTooltip: "Display scope",
@@ -1500,7 +1500,7 @@ const en = {
     refreshAll: "Refresh all",
     refreshAllTooltip: "Refresh all tabs in parallel",
     noWorkspace: {
-      warning: "Create a workspace first to use the Launchpad",
+      warning: "Create a workspace first to use Today",
     },
   },
 
@@ -1921,7 +1921,7 @@ const en = {
     // View
     toggleSidebar: "Toggle Sidebar",
     toggleTheme: "Toggle Light/Dark Mode",
-    openLaunchpad: "Open Launchpad",
+    openLaunchpad: "Open Today",
     // Help
     documentation: "GitWand Documentation",
     whatsNew: "What's New",

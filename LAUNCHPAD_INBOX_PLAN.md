@@ -260,3 +260,190 @@ Listed so the roadmap follow-up dependency is explicit (per AGENTS.md "When a fe
 5. **Local merge-conflict cards** in the header band — requires the backend `WorkspaceWipItem` to expose a conflicted-file count (the **only identified backend gap**: `useRepoActionCards.ts` documents that WIP carries no conflicted count today). Cheapest fill: add `conflictedCount: number` to `WorkspaceWipItem` in Rust (`workspace_wip_all`) + dev-server mock — a small additive field, deferred because Phase 1's local cards already cover commit/push/publish/sync.
 6. **Read/unread dot, diff-stat, full pill set** richer per-row state beyond the CI/review pills reused in Phase 1.
 7. **Persisted tier collapse state** (Phase 1 collapse is ephemeral local UI state; persisting it would add a settings field to both `useSettings.ts` and `SettingsPanel.vue`).
+
+---
+---
+
+# Implementation Plan — v2.29.0 Today: triaged action inbox (Phase 2)
+
+> Source of truth: `ROADMAP.md` → "v2.29.0 — Today: triaged action inbox (renamed from Launchpad)".
+> Phase 1 (above) shipped at commit `00630db`. This plan scopes **Phase 2** and defers active mutations + direct-resolve jump to **Phase 3**.
+> Planner artifact — implementation done by another agent. No source code is written here.
+
+## P2.0 Verified findings (read before planning)
+
+Facts established by reading the code, not assumptions.
+
+- **Internal symbols stay `Launchpad*` (intentional).** `LaunchpadView.vue`, `useLaunchpad*`, the `launchpad.*` i18n KEY namespace, the `viewMode === "launchpad"` literal, `LAUNCHPAD_OPEN_REQUEST_KEY`, and all CSS classes (`launchpad-view__*`) are kept. Phase 2 renames only the **display values**. This caps churn and keeps diffs reviewable.
+- **The user-visible "Launchpad" string set is small and fully enumerated** (8 distinct keys × 5 locales). The exhaustive list (file:line for `en.ts`, mirrored in the other four):
+  - `sidebar.footerLaunchpad` (`en.ts:255`) — AppDock label fallback / footer.
+  - `sidebar.launchpad` (`en.ts:256`) — sidebar label.
+  - `workspace.openLaunchpad` (`en.ts:1368`) — "Open all in tabs" toolbar row, value `"Launchpad"`.
+  - `launchpad.title` (`en.ts:1398`) — view `<h2>` (`LaunchpadView.vue:346`) **and** AppDock dock-label (`AppDock.vue:63`).
+  - `launchpad.openTooltip` (`en.ts:1399`) — AppDock button title / ⌘L tooltip (`AppDock.vue:53`), value contains "Launchpad — cross-repo overview (⌘L)".
+  - `launchpad.noWorkspace.warning` (`en.ts:1503`) — empty/guard state, "...to use the Launchpad".
+  - `menu.openLaunchpad` (`en.ts:1924`) — command palette / native menu item, value `"Open Launchpad"`.
+  - `settings.launchpad.disableTeamTab.label` (`en.ts:1210`) — "Disable Launchpad Team tab" (Phase 2: if the Team tab is removed per OPEN DECISION 2, this string disappears with it; otherwise reword to "Today").
+- **No `tauri.conf.json` / `index.html` window title says "Launchpad"** — verified empty. No version-managed file needs touching for the rename. (The window title is the product name "GitWand", unaffected.)
+- **The `mentioned` issue filter is already wired end-to-end.** `useLaunchpadIssues.ts:12` fetches `assigned/mentioned/created` in parallel; `workspaceIssuesAll(repos, "mentioned")` exists in `backend.ts:2663`; the Rust command + dev-server route `/api/workspace-issues-all` both handle `filter === "mentioned"` (`dev-server.mjs:4719` → `gh issue list --search mentions:@me`). **→ issue @-mentions need NO new backend work.**
+- **Backend gap — mentions on PRs.** `gh issue list --search mentions:@me` returns **issues only**; `gh` treats PRs separately. So "@-mention on a PR thread" is not in any current payload. Cheapest fill documented in P2.7.
+- **`workspace_prs_all` enriched payload already carries** `author`, `labels`, `mergeStateStatus`, `reviewDecision`, `checksRollup`, `reviewRequested`, `assignees` (`useLaunchpadInbox.ts` consumes them; `PullRequest` in `backend-pr.ts:61`). Dependency-bump detection (`isDependencyBump`, `useLaunchpadInbox.ts:62`) already exists. **→ the "Dependencies" filter is a pure client-side classification of existing data, no new round-trip.**
+- **Tabs today** (`LaunchpadView.vue:146`): `type Tab = "inbox" | "wip" | "prs" | "issues" | "team"`. Persisted via `settings.launchpadActiveTab: LaunchpadTab` (`useSettings.ts:21,120`, default `"inbox"`). **Type drift found**: `SettingsPanel.vue:141` local `Settings.launchpadActiveTab` is typed `"wip" | "prs" | "issues" | "team"` (missing `"inbox"`) and defaults to `"wip"` (`SettingsPanel.vue:190`) — a pre-existing latent mismatch. Phase 2 settings work must realign these two per AGENTS.md "Settings must be kept in sync".
+- **Team fetch is the expensive one** (lazy-loaded, `N × gh pr view --json files`, ~10s — `LaunchpadView.vue:316` comment). Any decision about the Team tab must preserve its lazy-load contract (perf P6.4).
+- **AppDock** renders the nav label via `t('launchpad.title')` and tooltip via `t('launchpad.openTooltip')` (`AppDock.vue:53,63`) — these are the nav/⌘L surfaces to rename.
+- **Existing tests to honor/extend**: `useLaunchpadInbox.test.ts` (classifier contract), `LaunchpadView.test.ts` (mocks composable refs `inboxTiersRef`/`inboxTotalRef`/`inboxNowCountRef`, asserts `.launchpad-view__pr-action` counts — `LaunchpadView.test.ts:600-650`), `useRepoActionCards.test.ts`, `useLaunchpadIssues` coverage.
+
+## P2.1 Open decisions (HUMAN CHECKPOINT — numbered, each with a recommendation)
+
+These need user input before P2b lands. P2a (rename) is low-risk and can proceed in parallel.
+
+1. **Localize "Today" per locale, or keep an English brand everywhere?**
+   - *Recommendation*: **Localize it.** Unlike "Launchpad" (a GitKraken-derived proper noun the team chose to keep English in-brand), "Today" is a plain temporal word that reads as a label, not a brand — every locale already localizes "Aujourd'hui"-class UI words. Use: `en: Today`, `fr: Aujourd'hui`, `es: Hoy`, `pt-BR: Hoje`, `zh-CN: 今日`. The ⌘L tooltip body ("cross-repo overview (⌘L)") is already localized prose; just swap the leading noun.
+   - *If you disagree* (keep "Today" as an English brand for recognizability): set all 5 display values to "Today" and we still avoid touching keys/symbols. Trivial to flip either way since only display VALUES change.
+
+2. **Fate of the WIP tab.** The unified inbox already surfaces local working state as action cards (`useRepoActionCards`: commit/push/publish/sync) in the header band. The standalone WIP tab is now a raw per-repo status table that overlaps with that band.
+   - *Recommendation*: **Fold WIP into the unified list, remove the standalone tab.** Local cards already represent the actionable subset; the remaining WIP info (clean repos, ahead/behind with no action) is low-signal for a "what do I do next" surface. Keep a "Repo" group-by view (DECISION 4) to recover the per-repo overview if needed. This reduces the tab count and matches the mockup's tab-less filter+group model.
+   - *Alternative*: keep WIP reachable behind the "Repo" group-by rather than a tab.
+
+3. **Fate of the Team tab.** Team is expensive (lazy `gh pr view --json files` fan-out) and conceptually orthogonal to a personal action inbox (it's "what are my colleagues touching", not "what do I do next").
+   - *Recommendation*: **Keep Team as a separate, explicitly-opt-in surface OUTSIDE the filter+group inbox** — i.e. retain it as the single remaining secondary tab (or move it behind a header toggle), preserving its lazy-load contract and the `launchpadTeamTabEnabled` setting. Do NOT pull team items into the counted filter chips (they're not personal actions and would pollute the counts + force the expensive fetch on the hot path, violating P6.4).
+   - *Alternative*: drop Team entirely in v2.29 and re-introduce later — not recommended, it's a shipped v2.9 feature with its own setting.
+
+4. **Does the unified inbox + filters fully REPLACE the tabs, or coexist? And what does "group by Repo/Type" produce?**
+   - *Recommendation*: **The unified inbox + counted filter chips + group-by toggle REPLACE the inbox/wip/prs/issues tabs** (collapsing four tabs into one filterable list), with **Team as the only surviving secondary surface** (DECISION 3). The mockup is tab-less for the action surface; the chips are the new IA.
+     - **Group by Priority** (default): the 3 existing urgency tiers (now/waiting/later) — unchanged from Phase 1.
+     - **Group by Repo**: section headers per repo (`repoName`, with a per-repo count), items sorted by urgency within. Recovers the WIP per-repo overview (DECISION 2).
+     - **Group by Type**: section headers per item type with the count baked in — e.g. `PULL REQUESTS 11`, `ISSUES 4`, `MENTIONS 2`, `DEPENDENCIES 3`, `LOCAL 1` (matches the mockup's "PULL REQUESTS 11" header).
+   - *Coexistence fallback* (lower-ambition): keep the unified inbox AS the inbox tab and leave prs/issues tabs as-is. Not recommended — it contradicts the mockup and leaves duplicate surfaces.
+
+5. **`launchpadActiveTab` persistence under the new model.** With tabs collapsing, the persisted "active tab" loses meaning for the inbox surface.
+   - *Recommendation*: **Repurpose persistence to the group-by mode and the active filter chip** — add `launchpadGroupBy: "priority" | "repo" | "type"` (default `"priority"`) and `launchpadFilter: "all" | "myPrs" | "toReview" | "issues" | "deps" | "mentions"` (default `"all"`) to settings; keep `launchpadActiveTab` ONLY if Team survives as a tab (then it degrades to `"today" | "team"`). Realign the `SettingsPanel.vue` type drift noted in P2.0 at the same time (same-commit rule).
+
+## P2.2 Sub-phasing (each independently mergeable, test-first)
+
+| Sub-phase | Scope | Risk | Depends on |
+|---|---|---|---|
+| **P2a** | Rename Launchpad → Today (display values only) + counted filter chips + group-by toggle (Priority/Repo/Type) over the **current PR-derived inbox** | Low | none (can ship before decisions 2-4 if filters operate over the existing inbox tier data) |
+| **P2b** | Issues / @-mentions / dependency PRs as first-class **union** inbox items (generalize `useLaunchpadInbox` to a union item type), wiring the new filter chips to real per-type counts; reconcile/remove tabs per DECISIONS 2-4 | Medium | DECISIONS 1-5; P2a |
+
+Rationale: P2a is a UX/IA reshape over data that already exists (PRs + local cards), so it ships value and the rename immediately with no backend dependency. P2b is the data-model generalization and tab reconciliation, which needs the open decisions resolved.
+
+---
+
+## P2a — Rename + filter chips + group-by (PR inbox only)
+
+### P2a-1 — Rename display values (i18n only)
+
+**Files**: `apps/desktop/src/locales/{en,fr,es,pt-BR,zh-CN}.ts`.
+
+Change ONLY the 8 enumerated VALUES (P2.0) from "Launchpad" → "Today" (localized per DECISION 1). Keys, key paths, and the `launchpad.*` namespace are unchanged.
+
+- `sidebar.footerLaunchpad`, `sidebar.launchpad`, `workspace.openLaunchpad`, `launchpad.title` → "Today" (localized).
+- `launchpad.openTooltip` → swap leading noun: e.g. en "Today — cross-repo overview (⌘L)", fr "Aujourd'hui — vue d'ensemble multi-dépôts (⌘L)". Keep the ⌘L token verbatim.
+- `menu.openLaunchpad` → "Open Today" (localized; fr "Ouvrir Aujourd'hui", etc.).
+- `launchpad.noWorkspace.warning` → reword to reference "Today".
+- `settings.launchpad.disableTeamTab.label` → reword "Launchpad" → "Today" (only if Team survives; else removed with the tab in P2b).
+
+**No code change** — `AppDock.vue`, `LaunchpadView.vue`, `App.vue` already read these keys. The structural `Locale` type guarantees all 5 locales stay parallel at build.
+
+**Acceptance**: grep for `"Launchpad"` / `启动台` across `locales/` returns zero user-visible occurrences (the team-tab label may remain if Team stays); `pnpm --filter @gitwand/desktop build` (vue-tsc) passes; AppDock label + ⌘L tooltip + view title + command palette all read "Today".
+
+**Test**: extend `AppDock` / `LaunchpadView.test.ts` assertions that previously matched the title to the new key value (tests assert against `t()` output which returns the key in the test i18n stub — verify whether the suite stubs `t` to echo keys; if so, no test change needed for VALUE-only edits).
+
+### P2a-2 — Filter chips + group-by toggle over the existing tier data (composable)
+
+**File**: `apps/desktop/src/composables/useLaunchpadInbox.ts` (extend; keep `classifyInboxPr` pure).
+
+Add, as `computed` derivations over the already-classified items (no new fetch, no watcher, O(n)):
+
+- `type InboxFilter = "all" | "myPrs" | "toReview" | "issues" | "deps" | "mentions"` and `type InboxGroupBy = "priority" | "repo" | "type"`.
+- A per-item **type tag** derived from the classification (P2a: only `pr` exists from this source; `deps` = items whose `case`/`action` is the dependency-bump path; `toReview` = `case: "review"`; `myPrs` = mine). `issues`/`mentions` counts are 0 until P2b (chips render with count 0 / disabled).
+- `filterCounts: ComputedRef<Record<InboxFilter, number>>` — live counts driving the chip badges.
+- `filteredTiers(filter)` and `groupedItems(groupBy, filter)` — return `InboxGroup[]` where a group is `{ key, label, count, items }`. For `priority` → existing tiers; `repo` → group by `pr.repoName`; `type` → group by type tag (the mockup's "PULL REQUESTS 11" header).
+
+Keep everything `computed`; the active `filter`/`groupBy` come from settings refs passed in (or local refs synced to settings in the component — DECISION 5).
+
+**Test-first** (`useLaunchpadInbox.test.ts`): add cases asserting `filterCounts` for a mixed fixture (my-PRs, review-requested, dependabot), `filteredTiers("toReview")` returns only review items, `groupedItems("repo", "all")` groups by repo with correct counts, `groupedItems("type", "all")` yields a `PULL REQUESTS` group with the right count. Issues/mentions counts assert 0 in P2a.
+
+### P2a-3 — Render chips + segmented group-by; wire settings (component)
+
+**Files**: `apps/desktop/src/components/LaunchpadView.vue` (inbox panel only); `useSettings.ts` + `SettingsPanel.vue` (same-commit settings pair, DECISION 5).
+
+- Render the counted filter chips row (`Tout / Mes PRs / À relire / Issues / Dépendances [/ Mentions]`) and the "Regrouper" segmented toggle (`Priority / Repo / Type`) above the list. Thin component: bind to composable computeds; click handlers set the settings-backed refs.
+- Replace the Phase-1 tier loop with `groupedItems(groupBy, filter)` rendering. Reuse the existing row markup, action button, accent CSS — no new per-row logic.
+- Add settings fields `launchpadGroupBy` + `launchpadFilter` to **both** `useSettings.ts` (`AppSettings` + defaults) and `SettingsPanel.vue` (local `Settings` + defaults), and fix the pre-existing `launchpadActiveTab` type drift (add `"inbox"`, default to `"inbox"`).
+- i18n: new keys under `launchpad.*` for chip labels (`launchpad.filter.all|myPrs|toReview|issues|deps|mentions`) and group labels (`launchpad.groupBy.priority|repo|type`, `launchpad.typeGroup.prs|issues|mentions|deps|local`), in all 5 locales.
+
+**Perf (P6.4)**: chips/group are `computed`-only over already-fetched data; no new poll, no `{deep:true}`, inbox still gated by its `v-if`. No `<img>`. The expensive Team fetch is untouched.
+
+**Test**: extend `LaunchpadView.test.ts` — the suite mocks composable refs, so add `filterCountsRef`/`groupedItemsRef` mocks (mirror the existing `inboxTiersRef` pattern), assert chip counts render, clicking a chip swaps the rendered group set, group-by toggle changes section headers.
+
+---
+
+## P2b — Issues / @-mentions / dependency PRs as first-class union items
+
+### P2b-1 — Union item model in `useLaunchpadInbox`
+
+**File**: `apps/desktop/src/composables/useLaunchpadInbox.ts` (generalize).
+
+- Introduce a discriminated union `InboxEntity = { kind: "pr"; pr: PrWithRepo } | { kind: "issue"; issue: IssueWithRepo } | { kind: "mention"; ... } | { kind: "dep"; pr: PrWithRepo } | { kind: "local"; card: RepoActionCard }` and an `InboxItem` carrying `{ entity, classification }`.
+- Generalize the classifier: `classifyInboxPr` stays for PRs; add `classifyIssue(issue, me)` (assigned/created/mentioned → tier+action `reply`/`view`) and a mention classifier. Local cards map to `tier: "now"`, type `local`.
+- The composable now takes `allPrs`, `allIssues` (and the `mentioned`-filter subset) + `wip`-derived cards as inputs and unifies them; `filterCounts` now returns real `issues`/`mentions`/`deps` numbers.
+- Dependencies: `deps` = PRs passing `isDependencyBump` (already exists); they get their own type tag and the `autoMerge` action **label** (display-only until Phase 3).
+
+**Test-first**: extend `useLaunchpadInbox.test.ts` with issue/mention/dep entities; assert union grouping, per-type counts, and that the dependency PRs are pulled out of the generic PR group into `deps`.
+
+### P2b-2 — Wire issues + mentions data (mostly existing)
+
+**Files**: `LaunchpadView.vue` (pass `allIssues` / mentioned subset into `useLaunchpadInbox`), `useLaunchpadIssues.ts` (expose a `mentionedIssues` computed if not already separable).
+
+- Issue assigned/created/mentioned data already fetched (`useLaunchpadIssues`); reuse it — **no new fetch on the inbox hot path**. The `mentioned` filter subset feeds the `mentions` chip.
+- `open-issue` emit + `App.vue` `openLaunchpadIssue` handler already exist (Phase 1 verified) — reuse for the issue/mention row actions.
+
+### P2b-3 — Reconcile / remove tabs (DECISIONS 2-4)
+
+**File**: `LaunchpadView.vue` (+ `useSettings.ts`/`SettingsPanel.vue` if `launchpadActiveTab` changes shape).
+
+- Per DECISION 4 (recommended): remove the `wip`/`prs`/`issues` standalone tabs; the unified filtered+grouped list is the single action surface. Keep Team as the lone secondary surface (DECISION 3) with its lazy-load + `launchpadTeamTabEnabled` intact.
+- Remove now-dead markup/handlers for the dropped tabs (the snoozed bandeaux move into the unified list's footer; pin/snooze ⋮ menus reused per-row). Keep `useLaunchpadPins` wiring.
+- Update `LaunchpadTab` type + `launchpadActiveTab` (DECISION 5) and realign `SettingsPanel.vue`.
+
+**Test**: `LaunchpadView.test.ts` — assert the removed tabs no longer render; the unified list renders PR + issue + mention + dep + local rows; Team tab still gated by `teamTabEnabled`.
+
+### P2b-4 — (Backend gap) PR @-mentions — DEFER or cheap-fill
+
+- **Gap**: `mentions:@me` via `gh issue list` returns issues only; PR-thread mentions are absent.
+- **Recommendation**: **DEFER PR-mentions to a follow-up** and ship issue-mentions only in v2.29 (label the chip "Mentions" = issue mentions). The cheapest real fill is a `gh search prs --mentions=@me` (or `gh api search/issues?q=mentions:@me+is:pr`) call; in this repo that means a new `workspace_pr_mentions_all` Tauri command + `backend.ts` wrapper + dev-server route + Rust impl — a non-trivial new forge round-trip that would violate "no new forge round-trips on the hot path" if eager. If pursued, it must be lazy (only when the Mentions chip is selected) and cached like the issue filters.
+- **Flag**: this is the one place P2b may need a new Tauri command. The plan recommends NOT taking it in v2.29; the executor should confirm with the user before adding any command.
+
+---
+
+## P2.7 Files touched (summary)
+
+| File | P2a | P2b |
+|---|---|---|
+| `locales/{en,fr,es,pt-BR,zh-CN}.ts` | rename 8 values + add filter/group keys | add issue/mention/dep type-group keys |
+| `composables/useLaunchpadInbox.ts` | filter/group computeds over PR data | generalize to union entity + issue/mention/dep classifiers |
+| `composables/__tests__/useLaunchpadInbox.test.ts` | filter/group cases | union/issue/mention/dep cases |
+| `components/LaunchpadView.vue` | chips + segmented toggle render; settings wiring | union rendering; remove wip/prs/issues tabs |
+| `components/__tests__/LaunchpadView.test.ts` | chip/group mocks + assertions | union rows; removed-tab assertions |
+| `composables/useSettings.ts` | + `launchpadGroupBy`, `launchpadFilter`; fix `launchpadActiveTab` | shape `launchpadActiveTab` per DECISION 5 |
+| `components/SettingsPanel.vue` | mirror settings fields (same commit) | mirror |
+| `composables/useLaunchpadIssues.ts` | — | expose `mentionedIssues` if needed |
+
+**Not touched (Phase 2)**: `App.vue` handlers (`openLaunchpadPr/Issue/RepoChanges` reused), `AppDock.vue` (reads renamed keys), Rust (`gh.rs`/`lib.rs`), `dev-server.mjs` (issue-mentions route already present), version-managed files. **One possible exception**: PR-mentions backend (P2b-4) — recommended deferred.
+
+## P2.8 Constraints honored (checklist)
+
+- **Composition API `<script setup>`**: unchanged; logic stays in composables, view stays thin.
+- **IPC via `backend.ts`**: no new `invoke()`. Issue-mentions reuse existing `workspaceIssuesAll`. The only candidate new command (PR-mentions) is flagged and recommended deferred.
+- **Perf P6.4**: all chip/group/union derivation is `computed` over already-fetched data; no new poll, no `{deep:true}`, no eager expensive fetch; Team stays lazy; inbox gated by `v-if`; no external `<img>`.
+- **5-locale i18n**: rename touches all 5; new keys added to all 5; structural `Locale` type enforces parity at build.
+- **Settings sync**: every new field added to `useSettings.ts` AND `SettingsPanel.vue` in the same commit; pre-existing `launchpadActiveTab` drift fixed.
+- **No manual version edits**: no version-managed file touched (window title verified to not say "Launchpad").
+- **Test-first**: composable tests precede each render change; component tests follow the existing ref-mock pattern.
+
+## P2.9 Deferred to Phase 3 (NOT planned)
+
+- Active mutations: real **Nudge** (post a comment), **Auto-merge** (enable forge auto-merge), and the direct **Resolve** jump (checkout PR branch → open the GitWand conflict resolver in one click — the headline differentiator). Phase 2 keeps these as display-only labels routing to in-app PR review.
+- PR-thread @-mentions backend (P2b-4) unless the user opts in during P2b.
