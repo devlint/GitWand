@@ -346,6 +346,7 @@ pub fn run() {
             commands::gh::gh_issue_comments,
             commands::gh::gh_issue_add_comment,
             commands::gh::gh_issue_set_state,
+            commands::gh::gh_list_issues,
             commands::gh::gh_pr_reviews,
             commands::gh::gh_check_annotations,
             commands::gh::gh_list_reactions,
