@@ -1165,6 +1165,24 @@ fn bb_issue_to_issue(v: &serde_json::Value) -> crate::types::Issue {
 ///
 /// Bitbucket open issue states are `"new"` and `"open"`. A 404 means the
 /// issue tracker is disabled for this repo — treated as an empty list, not an error.
+///
+/// Minimal percent-encoding for a query-param value. `curl_with_status` sends
+/// the URL as a raw positional arg (no encoding), so the spaces, quotes and
+/// parens in a BIQL `q=` expression must be encoded here or curl rejects the URL.
+/// Keeps RFC-3986 unreserved chars; percent-encodes everything else.
+fn bb_urlenc(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{:02X}", b)),
+        }
+    }
+    out
+}
+
 #[tauri::command]
 pub(crate) async fn bb_list_issues(
     cwd: String,
@@ -1177,23 +1195,28 @@ pub(crate) async fn bb_list_issues(
     let pagelen = limit.unwrap_or(100).max(1);
 
     // Open Bitbucket issue states are "new" and "open".
-    let mut url = format!(
-        "{}/issues?q=(state=\"new\" OR state=\"open\")&pagelen={}&sort=-updated_on",
-        repo_api(&workspace, &slug),
-        pagelen
-    );
     // Resolve "me" once for assigned/created filters.
     let me = match filter.as_str() {
         "assigned" | "created" => bb_current_user(cwd.clone()).await.unwrap_or_default(),
         _ => String::new(),
     };
+    // Build the BIQL query first, then percent-encode the whole `q` value.
+    // curl_with_status sends the URL as a raw arg (no encoding), so the spaces,
+    // quotes and parens in BIQL must be encoded here or curl rejects the URL.
+    let mut q = String::from("(state=\"new\" OR state=\"open\")");
     if !me.is_empty() {
         match filter.as_str() {
-            "assigned" => url = format!("{} AND assignee.nickname=\"{}\"", url, me),
-            "created"  => url = format!("{} AND reporter.nickname=\"{}\"", url, me),
+            "assigned" => q.push_str(&format!(" AND assignee.nickname=\"{}\"", me)),
+            "created" => q.push_str(&format!(" AND reporter.nickname=\"{}\"", me)),
             _ => {}
         }
     }
+    let url = format!(
+        "{}/issues?q={}&pagelen={}&sort=-updated_on",
+        repo_api(&workspace, &slug),
+        bb_urlenc(&q),
+        pagelen
+    );
 
     let resp = match bb_curl("GET", &url, None, &auth_config) {
         Ok(v) => v,
@@ -1258,7 +1281,21 @@ pub(crate) async fn bb_convert_draft_to_ready(cwd: String, pr_id: i64) -> Result
 
 #[cfg(test)]
 mod bb_list_issues_tests {
-    use super::bb_issue_to_issue;
+    use super::{bb_issue_to_issue, bb_urlenc};
+
+    #[test]
+    fn urlenc_encodes_biql_query_chars() {
+        // The base BIQL query must come out with no raw spaces/quotes/parens,
+        // which curl would reject in a positional URL arg.
+        let q = r#"(state="new" OR state="open") AND assignee.nickname="al ice""#;
+        let enc = bb_urlenc(q);
+        assert!(!enc.contains(' '), "spaces must be encoded: {enc}");
+        assert!(!enc.contains('"'), "quotes must be encoded: {enc}");
+        assert!(!enc.contains('('), "parens must be encoded: {enc}");
+        assert_eq!(bb_urlenc("(\"a b\")"), "%28%22a%20b%22%29");
+        // Unreserved chars (incl. the dot in assignee.nickname) are preserved.
+        assert_eq!(bb_urlenc("assignee.nickname"), "assignee.nickname");
+    }
 
     #[test]
     fn maps_bitbucket_issue_json_to_issue() {
