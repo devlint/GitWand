@@ -1,6 +1,7 @@
 import { ref, computed } from "vue";
-import { workspacePrsAll } from "../utils/backend";
 import type { WorkspaceRepoPrs, WorkspaceRepo, PullRequest } from "../utils/backend";
+import { forgeForRepo, isForgeConnected } from "./forge/useForge";
+import type { ForgeName } from "./forge/types";
 import { useLaunchpadPins } from "./useLaunchpadPins";
 
 export type { WorkspaceRepoPrs };
@@ -13,11 +14,12 @@ export interface PrWithRepo extends PullRequest {
 
 /**
  * Composable for the Launchpad PRs panel.
- * Aggregates open PRs from all repos in a workspace.
+ * Aggregates open PRs from all repos in a workspace via per-repo ForgeProvider dispatch.
  * Each call returns a fresh reactive scope — no shared singleton.
  */
 export function useLaunchpadPrs() {
   const repos = ref<WorkspaceRepoPrs[]>([]);
+  const needsConnection = ref<ForgeName[]>([]);
   const loading = ref(false);
   const error = ref<string | null>(null);
 
@@ -46,8 +48,29 @@ export function useLaunchpadPrs() {
   async function refresh(workspaceRepos: WorkspaceRepo[]): Promise<void> {
     loading.value = true;
     error.value = null;
+    const unconnected = new Set<ForgeName>();
     try {
-      repos.value = await workspacePrsAll(workspaceRepos);
+      const results = await Promise.all(
+        workspaceRepos.map(async (repo): Promise<WorkspaceRepoPrs | null> => {
+          const provider = await forgeForRepo(repo.path);
+          const forge = provider.name as ForgeName;
+          if (!isForgeConnected(forge)) {
+            unconnected.add(forge);
+            return null;
+          }
+          try {
+            const prs = await provider.listPRs(repo.path, { state: "open", limit: 10 });
+            return { repoPath: repo.path, repoName: repo.name, prs, error: null };
+          } catch (e) {
+            return {
+              repoPath: repo.path, repoName: repo.name, prs: [],
+              error: (e as Error).message ?? String(e),
+            };
+          }
+        })
+      );
+      repos.value = results.filter((r): r is WorkspaceRepoPrs => r !== null);
+      needsConnection.value = [...unconnected];
     } catch (e) {
       error.value = (e as Error).message ?? String(e);
     } finally {
@@ -55,5 +78,5 @@ export function useLaunchpadPrs() {
     }
   }
 
-  return { repos, allPrs, snoozedPrs, loading, error, refresh };
+  return { repos, allPrs, snoozedPrs, needsConnection, loading, error, refresh };
 }
