@@ -1464,6 +1464,16 @@ const zhCN: Locale = {
     },
   },
 
+  // ─── Forge connect banners (multi-forge Today) ──────────
+  forgeConnect: {
+    banner: "连接你的 {0} 账户以查看其拉取请求和问题",
+    github: "GitHub",
+    gitlab: "GitLab",
+    bitbucket: "Bitbucket",
+    azure: "Azure DevOps",
+    action: "打开设置",
+  },
+
   undoStack: {
     title: "操作历史",
     undoTitle: "回退操作？",

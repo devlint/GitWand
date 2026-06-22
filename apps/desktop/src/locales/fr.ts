@@ -1488,6 +1488,16 @@ const fr: Locale = {
     },
   },
 
+  // ─── Forge connect banners (multi-forge Today) ──────────
+  forgeConnect: {
+    banner: "Connectez votre compte {0} pour voir ses pull requests et issues",
+    github: "GitHub",
+    gitlab: "GitLab",
+    bitbucket: "Bitbucket",
+    azure: "Azure DevOps",
+    action: "Ouvrir les Réglages",
+  },
+
   // ─── Undo ───────────────────────────────────────────────
   undoStack: {
     title: "Historique des opérations",

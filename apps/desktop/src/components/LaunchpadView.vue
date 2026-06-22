@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch, toRef } from "vue";
+import { ref, onMounted, computed, watch, toRef, inject } from "vue";
 import { saveSettings as persistAppSettings } from "../composables/useSettings";
 import { avatarStyle, avatarInitials } from "../composables/useAvatar";
 import { useLaunchpadWip } from "../composables/useLaunchpadWip";
@@ -12,6 +12,8 @@ import { useLaunchpadTeam } from "../composables/useLaunchpadTeam";
 import type { TeamMemberActivity, OverlappingPr } from "../composables/useLaunchpadTeam";
 import { useI18n } from "../composables/useI18n";
 import { useSettings } from "../composables/useSettings";
+import { OPEN_SETTINGS_KEY } from "../composables/branchPickerBridge";
+import type { ForgeName } from "../composables/forge/types";
 import type { WorkspaceRepo } from "../utils/backend";
 import type { PrWithRepo } from "../composables/useLaunchpadPrs";
 import type { IssueWithRepo } from "../composables/useLaunchpadIssues";
@@ -61,7 +63,7 @@ const teamTabEnabled = computed(() => settings.value.launchpadTeamTabEnabled !==
 const teamLoaded = ref(false);
 
 const { wip, loading: wipLoading, refresh: refreshWip } = useLaunchpadWip();
-const { allPrs, loading: prsLoading, error: prsError, refresh: refreshPrs } = useLaunchpadPrs();
+const { allPrs, needsConnection: prNeedsConnection, loading: prsLoading, error: prsError, refresh: refreshPrs } = useLaunchpadPrs();
 // Issues — declared early so allIssues can be passed into useLaunchpadInbox below.
 const { allIssues, loading: issuesLoading, refresh: refreshIssues } = useLaunchpadIssues();
 // Inbox — unified fixed-section inbox: mine / assigned / review / issues / deps.
@@ -257,6 +259,17 @@ function closeMenu(): void {
   scopeMenuOpen.value = false;
 }
 
+// ── Forge connect banner helpers ──────────────────────────────────────────
+const openSettings = inject(OPEN_SETTINGS_KEY, undefined);
+
+function forgeLabel(forge: ForgeName): string {
+  return t(`forgeConnect.${forge}` as Parameters<typeof t>[0]);
+}
+
+function openSettingsAccounts(): void {
+  openSettings?.("accounts");
+}
+
 onMounted(() => {
   // Eager boot for WIP / PRs / Issues — these power the tab badges and
   // are bounded fast calls (~1-2s, parallel-friendly). Team is NOT fetched
@@ -401,6 +414,20 @@ watch(scopedRepos, () => {
           <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-dasharray="14 42"></circle>
         </svg>
       </span>
+      <!-- Per-forge "connect your account" banners (multi-forge Today) — independent of loading state -->
+      <div
+        v-for="forge in prNeedsConnection"
+        :key="forge"
+        class="launchpad-view__forge-banner"
+        @click="openSettingsAccounts()"
+      >
+        <span>{{ t("forgeConnect.banner", forgeLabel(forge)) }}</span>
+        <button
+          type="button"
+          class="launchpad-view__forge-banner-action"
+          @click.stop="openSettingsAccounts()"
+        >{{ t("forgeConnect.action") }}</button>
+      </div>
       <div v-if="prsError" class="launchpad-view__error">
         {{ t("launchpad.errorFetch", prsError ?? "") }}
       </div>
@@ -1695,6 +1722,39 @@ watch(scopedRepos, () => {
   animation: launchpad-spin 0.9s linear infinite;
   z-index: 1;
   pointer-events: none;
+}
+
+/* ── Forge connect banner ──────────────────────────────── */
+.launchpad-view__forge-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  margin: 6px 0;
+  border: 1px solid var(--gw-border-soft, #2a2a3a);
+  border-radius: 8px;
+  background: var(--gw-bg-elev, rgba(255,255,255,0.03));
+  font-size: 13px;
+  cursor: pointer;
+}
+.launchpad-view__forge-banner:hover {
+  background: var(--color-bg-secondary);
+}
+.launchpad-view__forge-banner-action {
+  white-space: nowrap;
+  flex-shrink: 0;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-strong);
+  background: transparent;
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+}
+.launchpad-view__forge-banner-action:hover {
+  background: var(--color-bg-tertiary);
 }
 
 

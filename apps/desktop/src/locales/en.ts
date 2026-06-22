@@ -1511,6 +1511,16 @@ const en = {
     },
   },
 
+  // ─── Forge connect banners (multi-forge Today) ──────────
+  forgeConnect: {
+    banner: "Connect your {0} account to see its pull requests and issues",
+    github: "GitHub",
+    gitlab: "GitLab",
+    bitbucket: "Bitbucket",
+    azure: "Azure DevOps",
+    action: "Open Settings",
+  },
+
   // ─── Undo ───────────────────────────────────────────────
   undoStack: {
     title: "Operation history",
