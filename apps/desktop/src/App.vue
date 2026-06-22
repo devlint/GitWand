@@ -936,34 +936,28 @@ async function handleSwitchBranch(name: string, isRemote = false) {
   const behavior = settings.value.switchBehavior;
   const dirty = isDirty();
 
-  if (!dirty || behavior === "ask" && !dirty) {
-    // Clean tree — just switch
-    await switchBranch(name);
-    await promptPullIfBehind();
-    return;
-  }
-
-  if (behavior === "refuse") {
-    repoError.value = t("branches.switchRefusedDirty");
-    return;
-  }
-
-  if (behavior === "stash") {
-    // Open the stash-message modal; the actual stash/switch/pop is driven
-    // by confirmSwitchStash() when the user confirms.
+  // Stash mode keeps its dedicated stash-message modal for switching. The
+  // generic decision helper maps stash → "direct" (only correct for the
+  // create-branch path), so intercept it here before delegating.
+  if (dirty && behavior === "stash") {
+    // The actual stash/switch/pop is driven by confirmSwitchStash().
     pendingSwitchBranch.value = name;
     switchStashMessage.value = "";
     return;
   }
 
-  if (behavior === "ask") {
-    pendingDirtySwitch.value = { name, isCreate: false };
-    return;
+  switch (resolveDirtySwitchAction(dirty, behavior)) {
+    case "modal":
+      pendingDirtySwitch.value = { name, isCreate: false };
+      return;
+    case "refuse":
+      repoError.value = t("branches.switchRefusedDirty");
+      return;
+    default: // "direct" — clean tree (any mode) falls through to a plain switch
+      await switchBranch(name);
+      await promptPullIfBehind();
+      return;
   }
-
-  // Fallback
-  await switchBranch(name);
-  await promptPullIfBehind();
 }
 
 async function promptPullIfBehind() {
@@ -1861,9 +1855,12 @@ async function confirmDirtyCarry() {
     ? await createBranch(pending.name)
     : await switchBranch(pending.name);
   if (!ok) {
-    // switchBranch/createBranch already set repoError to the underlying git error;
-    // wrap it in a clear carry-specific message.
-    repoError.value = t("branches.dirtySwitchCarryFailed", repoError.value ?? "");
+    // switchBranch/createBranch already set repoError to the underlying git
+    // error, prefixed with internal context ("switch branch: " / "create
+    // branch: "). Strip that prefix before surfacing it inside the
+    // user-facing carry-failure message.
+    const detail = (repoError.value ?? "").replace(/^(?:switch|create) branch:\s*/, "");
+    repoError.value = t("branches.dirtySwitchCarryFailed", detail);
     return;
   }
   if (!pending.isCreate) await promptPullIfBehind();
