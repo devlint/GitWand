@@ -484,7 +484,7 @@ const es: Locale = {
     dirtySwitchCarry: "Llevar los cambios",
     dirtySwitchCommitFirst: "Confirmar primero",
     dirtySwitchCancel: "Cancelar",
-    dirtySwitchCarryFailed: "No se pudieron llevar tus cambios: entran en conflicto con la rama destino. Confírmalos o guárdalos en stash primero. ({0})",
+    dirtySwitchCarryFailed: "No se pudieron llevar tus cambios: confírmalos o guárdalos en stash primero y vuelve a intentarlo. ({0})",
     pullAfterCheckout: "Esta rama está por detrás de su remoto. ¿Hacer pull de los últimos cambios?",
     pullAfterCheckoutTitle: "¿Hacer pull de los cambios?",
     reset: "Restaurar",

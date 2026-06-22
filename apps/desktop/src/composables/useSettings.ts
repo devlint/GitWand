@@ -13,11 +13,14 @@ import { ref } from "vue";
 import type { DiffMode } from "../utils/diffMode";
 import type { BlameAlgorithm } from "../utils/backend";
 import type { AIProvider } from "./useAIProvider";
+import type { SwitchBehavior } from "../utils/branchSwitchDecision";
 
 // ─── Types ────────────────────────────────────────────────
 
 export type PullMode = "merge" | "rebase";
-export type SwitchBehavior = "stash" | "ask" | "refuse";
+// SwitchBehavior is owned by the pure branch-switch decision helper (lowest
+// layer) and re-exported here so settings consumers keep a single source of truth.
+export type { SwitchBehavior };
 export type LaunchpadTab = "inbox" | "wip" | "prs" | "issues" | "team";
 /** Granularity of PR-activity OS notifications (v2.16). */
 export type NotificationLevel = "all" | "reviews" | "ci" | "none";

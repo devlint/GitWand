@@ -120,7 +120,7 @@ const isOffline = computed(() => navIsOffline.value || !probedOnline.value);
 import { isTauri, registerBrowserFolderPicker, pickFolder, checkForUpdates, fetchBetaUpdate, installUpdate, gitRepoState, openExternalUrl } from "./utils/backend";
 import type { UpdateInfo, RepoOperationState, WorkspaceRepo, PullRequest } from "./utils/backend";
 import { onMarkdownLinkClick } from "./composables/useSafeHtml";
-import { resolveDirtySwitchAction } from "./utils/branchSwitchDecision";
+import { resolveDirtySwitchAction, type DirtyFile } from "./utils/branchSwitchDecision";
 // UpdateModal moved above (lazy-loaded) — type imported as UpdateModalType for the template ref
 
 const { theme, toggle: toggleTheme } = useTheme();
@@ -409,13 +409,15 @@ const folderName = computed(() => {
   return parts[parts.length - 1] || p;
 });
 
-// Auto-dismiss error after 3s
+// Auto-dismiss error after a delay that scales with message length, so long
+// multi-line errors (e.g. a git carry-failure with file list) stay readable.
 let errorTimer: ReturnType<typeof setTimeout> | null = null;
 watch(repoError, (val) => {
   if (errorTimer) { clearTimeout(errorTimer); errorTimer = null; }
   if (val) {
     pushErrorLog(val);
-    errorTimer = setTimeout(() => { repoError.value = null; }, 3000);
+    const delay = Math.min(12000, 3000 + val.length * 40);
+    errorTimer = setTimeout(() => { repoError.value = null; }, delay);
   }
 });
 
@@ -1746,9 +1748,9 @@ async function deleteTagInModal(tagName: string) {
 // ─── Dirty-switch modal (carry / commit-first flow) ─────
 const pendingDirtySwitch = ref<{ name: string; isCreate: boolean } | null>(null);
 
-const pendingDirtySwitchFiles = computed(() => {
+const pendingDirtySwitchFiles = computed<DirtyFile[]>(() => {
   const s = repoStatus.value;
-  if (!s) return [] as { path: string; kind: "staged" | "unstaged" | "untracked" }[];
+  if (!s) return [];
   return [
     ...s.staged.map((f) => ({ path: f.path, kind: "staged" as const })),
     ...s.unstaged.map((f) => ({ path: f.path, kind: "unstaged" as const })),

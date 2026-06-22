@@ -498,7 +498,7 @@ const en = {
     dirtySwitchCarry: "Bring changes along",
     dirtySwitchCommitFirst: "Commit first",
     dirtySwitchCancel: "Cancel",
-    dirtySwitchCarryFailed: "Couldn't bring your changes — they conflict with the target branch. Commit or stash them first. ({0})",
+    dirtySwitchCarryFailed: "Couldn't bring your changes along — commit or stash them first, then try again. ({0})",
     pullAfterCheckout: "This branch is behind its remote. Pull the latest changes?",
     pullAfterCheckoutTitle: "Pull changes?",
     reset: "Reset",

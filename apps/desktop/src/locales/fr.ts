@@ -491,7 +491,7 @@ const fr: Locale = {
     dirtySwitchCarry: "Emporter les changements",
     dirtySwitchCommitFirst: "Commiter d'abord",
     dirtySwitchCancel: "Annuler",
-    dirtySwitchCarryFailed: "Impossible d'emporter vos modifications — elles sont en conflit avec la branche cible. Commitez ou stashez-les d'abord. ({0})",
+    dirtySwitchCarryFailed: "Impossible d'emporter vos modifications — commitez ou stashez-les d'abord, puis réessayez. ({0})",
     pullAfterCheckout: "Cette branche est en retard sur son remote. Récupérer les dernières modifications ?",
     pullAfterCheckoutTitle: "Puller les changements ?",
     reset: "Réinitialiser",

@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import BaseModal from "./BaseModal.vue";
 import { useI18n } from "../composables/useI18n";
+import type { DirtyFile, DirtyFileKind } from "../utils/branchSwitchDecision";
 
-const props = defineProps<{
+defineProps<{
   targetBranch: string;
   isCreate: boolean;
-  files: { path: string; kind: "staged" | "unstaged" | "untracked" }[];
+  files: DirtyFile[];
 }>();
 
 const emit = defineEmits<{
@@ -15,6 +16,14 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useI18n();
+
+// Distinct, git-conventional glyphs per area so the badge is self-describing
+// without relying on colour alone (staged / modified-unstaged / untracked).
+const KIND_BADGE: Record<DirtyFileKind, string> = {
+  staged: "S",
+  unstaged: "M",
+  untracked: "?",
+};
 </script>
 
 <template>
@@ -26,15 +35,15 @@ const { t } = useI18n();
   >
     <p class="dsm-hint">
       {{ isCreate
-        ? t('branches.dirtySwitchCreateHint', props.targetBranch)
-        : t('branches.dirtySwitchSwitchHint', props.targetBranch) }}
+        ? t('branches.dirtySwitchCreateHint', targetBranch)
+        : t('branches.dirtySwitchSwitchHint', targetBranch) }}
     </p>
 
     <div v-if="files.length" class="dsm-files">
       <div class="dsm-files__label">{{ t('branches.dirtySwitchFilesLabel') }} ({{ files.length }})</div>
       <ul class="dsm-files__list">
         <li v-for="f in files" :key="f.kind + ':' + f.path" class="dsm-files__item">
-          <span class="dsm-files__badge" :class="`dsm-files__badge--${f.kind}`">{{ f.kind.charAt(0).toUpperCase() }}</span>
+          <span class="dsm-files__badge" :class="`dsm-files__badge--${f.kind}`">{{ KIND_BADGE[f.kind] }}</span>
           <span class="dsm-files__path">{{ f.path }}</span>
         </li>
       </ul>

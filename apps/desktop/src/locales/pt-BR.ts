@@ -485,7 +485,7 @@ const ptBR: Locale = {
     dirtySwitchCarry: "Levar as alterações",
     dirtySwitchCommitFirst: "Confirmar primeiro",
     dirtySwitchCancel: "Cancelar",
-    dirtySwitchCarryFailed: "Não foi possível levar suas alterações — elas conflitam com a branch de destino. Confirme ou guarde-as no stash primeiro. ({0})",
+    dirtySwitchCarryFailed: "Não foi possível levar suas alterações — confirme ou guarde-as no stash primeiro e tente novamente. ({0})",
     pullAfterCheckout: "Este branch está atrás do seu remoto. Deseja fazer pull das últimas alterações?",
     pullAfterCheckoutTitle: "Fazer pull das alterações?",
     reset: "Redefinir",

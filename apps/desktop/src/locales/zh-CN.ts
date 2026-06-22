@@ -481,7 +481,7 @@ const zhCN: Locale = {
     dirtySwitchCarry: "带上更改",
     dirtySwitchCommitFirst: "先提交",
     dirtySwitchCancel: "取消",
-    dirtySwitchCarryFailed: "无法带走你的更改 — 它们与目标分支冲突。请先提交或储藏。({0})",
+    dirtySwitchCarryFailed: "无法带走你的更改 — 请先提交或储藏，然后重试。({0})",
     pullAfterCheckout: "此分支落后于远程。是否拉取最新更改？",
     pullAfterCheckoutTitle: "拉取更改？",
     reset: "重置",

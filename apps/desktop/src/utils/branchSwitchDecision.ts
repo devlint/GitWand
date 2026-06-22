@@ -1,6 +1,15 @@
 /** The three behaviors a user can set for switching with a dirty working tree. */
 export type SwitchBehavior = "ask" | "refuse" | "stash";
 
+/** Which part of the working tree a dirty file belongs to. */
+export type DirtyFileKind = "staged" | "unstaged" | "untracked";
+
+/** A working-tree change shown in the dirty-switch modal. */
+export interface DirtyFile {
+  path: string;
+  kind: DirtyFileKind;
+}
+
 /**
  * Decide what to do when the user triggers a branch switch / create.
  *
