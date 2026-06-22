@@ -754,6 +754,77 @@ pub(crate) fn rest_issue_detail(cwd: &str, number: i64, token: &str) -> Result<I
     Ok(json_to_issue_detail(&v))
 }
 
+/// Map a GitHub REST issue object into the lightweight `Issue` list IPC shape
+/// (no body / comment-count — that's `IssueDetail`).
+fn json_to_issue(v: &serde_json::Value) -> Issue {
+    let assignees = v
+        .get("assignees")
+        .and_then(|a| a.as_array())
+        .map(|arr| arr.iter().map(|u| js(u, "login")).filter(|s| !s.is_empty()).collect())
+        .unwrap_or_default();
+    let labels = v
+        .get("labels")
+        .and_then(|a| a.as_array())
+        .map(|arr| arr.iter().map(|l| js(l, "name")).filter(|s| !s.is_empty()).collect())
+        .unwrap_or_default();
+    let milestone = v.get("milestone").map(|m| js(m, "title")).unwrap_or_default();
+    Issue {
+        number: ji(v, "number"),
+        title: js(v, "title"),
+        state: js(v, "state"),
+        author: jnested(v, "user", "login"),
+        assignees,
+        labels,
+        url: js(v, "html_url"),
+        created_at: js(v, "created_at"),
+        updated_at: js(v, "updated_at"),
+        milestone,
+    }
+}
+
+/// List a repo's open issues (REST), mirroring `gh issue list`'s `--state open`
+/// behaviour and its `assigned` / `created` / `mentioned` filters.
+///
+/// `me` is the authenticated login, required for the filtered modes; pass `""`
+/// for the unfiltered list (or when the login could not be resolved — the
+/// filter then degrades to "all open" rather than returning nothing).
+///
+/// The REST `/issues` endpoint returns pull requests as issues (each carries a
+/// `pull_request` key); we drop those so the Launchpad's Issues tab matches
+/// `gh issue list`, which never includes PRs.
+pub(crate) fn rest_list_issues(
+    cwd: &str,
+    filter: &str,
+    me: &str,
+    limit: i64,
+    token: &str,
+) -> Result<Vec<Issue>, String> {
+    let (owner, repo) = owner_repo(cwd)?;
+    let per_page = limit.clamp(1, 100);
+    let mut url = format!(
+        "{}/repos/{}/{}/issues?state=open&per_page={}&sort=updated&direction=desc",
+        API_BASE, owner, repo, per_page
+    );
+    if !me.is_empty() {
+        match filter {
+            "assigned" => url.push_str(&format!("&assignee={}", me)),
+            "created" => url.push_str(&format!("&creator={}", me)),
+            "mentioned" => url.push_str(&format!("&mentioned={}", me)),
+            _ => {}
+        }
+    }
+    let raw = api_json("GET", &url, token, None)?
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let issues = raw
+        .iter()
+        .filter(|v| v.get("pull_request").is_none())
+        .map(json_to_issue)
+        .collect();
+    Ok(issues)
+}
+
 /// List conversation comments for an issue (REST).
 pub(crate) fn rest_issue_comments(cwd: &str, number: i64, token: &str) -> Result<Vec<serde_json::Value>, String> {
     let (owner, repo) = owner_repo(cwd)?;
