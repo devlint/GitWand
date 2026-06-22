@@ -442,6 +442,7 @@ pub fn run() {
             commands::network::check_remote_reachable,
             commands::gitlab::detect_glab,
             commands::gitlab::gl_list_mrs,
+            commands::gitlab::gl_list_issues,
             commands::gitlab::gl_mr_count,
             commands::gitlab::gl_get_mr,
             commands::gitlab::gl_mr_diff,
