@@ -1632,6 +1632,16 @@ function cellClass(v: CompareValue | undefined): string {
       </div>
     </section>
 
+    <!-- Featured badges -->
+    <section class="badge-section">
+      <a href="https://nicklaunches.com/products/gitwand/?utm_source=gitwand.devlint.fr&utm_medium=badge&utm_campaign=featured" target="_blank" rel="noopener">
+        <img src="https://nicklaunches.com/badges/featured-dark.png" alt="GitWand on Nick Launches" width="244" height="56" />
+      </a>
+      <a href="https://www.foundrlist.com/product/gitwand?utm_source=badge&utm_medium=embed" target="_blank" rel="noopener">
+        <img src="https://www.foundrlist.com/api/badge/gitwand" alt="Featured on FoundrList" width="150" height="48" />
+      </a>
+    </section>
+
   </div>
 </template>
 
@@ -2357,6 +2367,19 @@ function cellClass(v: CompareValue | undefined): string {
   gap: 16px;
 }
 .cta-logo { opacity: 0.9; }
+.badge-section {
+  padding: 40px 0 60px;
+  background: var(--gw-bg);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+}
+.badge-section img {
+  display: block;
+  border: 0;
+}
 .cta-title {
   font-size: clamp(24px, 4vw, 36px);
   font-weight: 800;
