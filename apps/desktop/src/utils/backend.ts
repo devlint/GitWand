@@ -2686,6 +2686,46 @@ export async function workspaceIssuesAll(
   }));
 }
 
+// ─── Per-repo issue lists (multi-forge Today) ──────────────────────────────
+// Issue is camelCase end-to-end (Rust #[serde(rename_all = "camelCase")]),
+// so the Tauri branch is a direct cast — no snake→camel mapping (unlike PRs).
+
+/** Open GitHub issues for one repo. `filter`: "" | "assigned" | "mentioned" | "created". */
+export async function ghListIssues(cwd: string, filter: string, limit = 100): Promise<Issue[]> {
+  if (isTauri()) {
+    return tauriInvoke<Issue[]>("gh_list_issues", { cwd, filter, limit });
+  }
+  const res = await devFetch(
+    `${DEV_SERVER}/api/gh-list-issues?cwd=${encodeURIComponent(cwd)}&filter=${encodeURIComponent(filter)}&limit=${limit}`,
+  );
+  if (!res.ok) throw new Error(`gh_list_issues failed: ${res.status}`);
+  return res.json();
+}
+
+/** Open GitLab issues for one repo. */
+export async function glListIssues(cwd: string, filter: string, limit = 100): Promise<Issue[]> {
+  if (isTauri()) {
+    return tauriInvoke<Issue[]>("gl_list_issues", { cwd, filter, limit });
+  }
+  const res = await devFetch(
+    `${DEV_SERVER}/api/gl-list-issues?cwd=${encodeURIComponent(cwd)}&filter=${encodeURIComponent(filter)}&limit=${limit}`,
+  );
+  if (!res.ok) throw new Error(`gl_list_issues failed: ${res.status}`);
+  return res.json();
+}
+
+/** Open Bitbucket issues for one repo (empty if the tracker is disabled). */
+export async function bbListIssues(cwd: string, filter: string, limit = 100): Promise<Issue[]> {
+  if (isTauri()) {
+    return tauriInvoke<Issue[]>("bb_list_issues", { cwd, filter, limit });
+  }
+  const res = await devFetch(
+    `${DEV_SERVER}/api/bb-list-issues?cwd=${encodeURIComponent(cwd)}&filter=${encodeURIComponent(filter)}&limit=${limit}`,
+  );
+  if (!res.ok) throw new Error(`bb_list_issues failed: ${res.status}`);
+  return res.json();
+}
+
 // ─── Issue detail / comments (v2.22 — IssueDetailView) ──────────────────────
 
 /** Detailed view of a single GitHub issue (mirrors the Rust `IssueDetail`). */
