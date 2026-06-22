@@ -4744,6 +4744,59 @@ async function handleRequest(req, res) {
       }
     }
 
+    // GET /api/gh-list-issues?cwd=<path>&filter=<""|assigned|mentioned|created>&limit=<n>
+    if (url.pathname === "/api/gh-list-issues" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd");
+      const filter = url.searchParams.get("filter") || "";
+      const limit = url.searchParams.get("limit") || "100";
+      if (!cwd) return jsonResponse(req, res, { error: "Missing cwd param" }, 400);
+      try {
+        let cmd = `gh issue list --state open --json number,title,state,author,assignees,labels,url,createdAt,updatedAt,milestone --limit ${parseInt(limit)}`;
+        if (filter === "assigned") cmd += " --assignee @me";
+        else if (filter === "created") cmd += " --author @me";
+        else if (filter === "mentioned") cmd += " --search mentions:@me";
+        const raw = execSync(cmd, { cwd: resolve(cwd), encoding: "utf-8" });
+        const ghIssues = JSON.parse(raw || "[]");
+        const issues = ghIssues.map((issue) => ({
+          number: issue.number,
+          title: issue.title ?? "",
+          state: issue.state ?? "",
+          author: issue.author?.login ?? "",
+          assignees: (issue.assignees ?? []).map((a) => a.login).filter(Boolean),
+          labels: (issue.labels ?? []).map((l) => l.name),
+          url: issue.url ?? "",
+          createdAt: issue.createdAt ?? "",
+          updatedAt: issue.updatedAt ?? "",
+          milestone: issue.milestone?.title ?? "",
+        }));
+        return jsonResponse(req, res, issues);
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
+      }
+    }
+
+    // GET /api/gl-list-issues — dev mock (no glab in dev:web)
+    if (url.pathname === "/api/gl-list-issues" && req.method === "GET") {
+      return jsonResponse(req, res, [
+        {
+          number: 101, title: "[mock] GitLab issue", state: "open", author: "devuser",
+          assignees: ["devuser"], labels: ["mock"], url: "https://gitlab.com/mock/repo/-/issues/101",
+          createdAt: "2026-06-01T00:00:00Z", updatedAt: "2026-06-20T00:00:00Z", milestone: "",
+        },
+      ]);
+    }
+
+    // GET /api/bb-list-issues — dev mock (no curl creds in dev:web)
+    if (url.pathname === "/api/bb-list-issues" && req.method === "GET") {
+      return jsonResponse(req, res, [
+        {
+          number: 5, title: "[mock] Bitbucket issue", state: "new", author: "devuser",
+          assignees: [], labels: [], url: "https://bitbucket.org/mock/repo/issues/5",
+          createdAt: "2026-06-01T00:00:00Z", updatedAt: "2026-06-19T00:00:00Z", milestone: "",
+        },
+      ]);
+    }
+
     // GET /api/git-worktree-status-all?cwd=<path>
     if (url.pathname === "/api/git-worktree-status-all" && req.method === "GET") {
       try {
