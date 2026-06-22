@@ -43,6 +43,7 @@ import {
   bbPrFiles,
   bbCurrentUser,
   bbReviewerCandidates,
+  bbListIssues,
 } from "../../utils/backend";
 import { ghPrConflictPreview, ghPrHotspots } from "../../utils/backend";
 
@@ -50,6 +51,7 @@ import type {
   ForgeProvider,
   ForgeName,
   ListPRsOptions,
+  ListIssuesOptions,
   CreatePRInput,
   SubmitReviewOptions,
   PullRequest,
@@ -63,6 +65,7 @@ import type {
   PrHotspot,
   PrFileHistory,
   ReviewerCandidate,
+  Issue,
   Account,
 } from "./types";
 
@@ -101,6 +104,10 @@ export class BitbucketProvider implements ForgeProvider {
     // Map ForgeProvider "open" → Bitbucket "OPEN"
     const state = (opts.state ?? "open").toUpperCase();
     return bbListPrs(cwd, state, opts.limit ?? 10, opts.offset ?? 0);
+  }
+
+  listIssues(cwd: string, opts: ListIssuesOptions = {}): Promise<Issue[]> {
+    return bbListIssues(cwd, opts.filter ?? "", opts.limit ?? 100);
   }
 
   getPRCount(cwd: string, state: string = "open"): Promise<number> {

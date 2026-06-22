@@ -25,6 +25,7 @@ import type {
   PrHotspot,
   PrFileHistory,
   ReviewerCandidate,
+  Issue,
 } from "../../utils/backend";
 import type { Account } from "../useAccounts";
 
@@ -42,6 +43,7 @@ export type {
   PrHotspot,
   PrFileHistory,
   ReviewerCandidate,
+  Issue,
   Account,
 };
 
@@ -51,6 +53,11 @@ export interface ListPRsOptions {
   state?: "open" | "closed" | "all";
   limit?: number;
   offset?: number;
+}
+
+export interface ListIssuesOptions {
+  filter?: "" | "assigned" | "mentioned" | "created";
+  limit?: number;
 }
 
 export interface CreatePRInput {
@@ -116,6 +123,12 @@ export interface ForgeProvider {
   // ── PR / MR listing ───────────────────────────────────────────────────────
 
   listPRs(cwd: string, opts?: ListPRsOptions): Promise<PullRequest[]>;
+
+  /**
+   * Open issues for the repo. Optional: forges without an issue concept
+   * (Azure → Work Items) omit it; callers treat absence as "unsupported".
+   */
+  listIssues?(cwd: string, opts?: ListIssuesOptions): Promise<Issue[]>;
 
   getPRCount(cwd: string, state?: string): Promise<number>;
 

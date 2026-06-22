@@ -128,6 +128,21 @@ export function getForgeAccountFromRemote(info: {
   return getCurrentForgeAccount(provider.name as ForgeName);
 }
 
+/**
+ * Whether Today should attempt to fetch from `forge`.
+ * GitHub is always attempted (gh CLI / ambient token / OAuth keychain resolve
+ * downstream). Other forges require an explicit in-app account.
+ */
+export function isForgeConnected(forge: ForgeName): boolean {
+  if (forge === "github") return true;
+  return useAccounts().hasAccounts(forge);
+}
+
+/** Resolve the ForgeProvider for a local repo (thin alias over useForge). */
+export async function forgeForRepo(cwd: string): Promise<ForgeProvider> {
+  return useForge(cwd);
+}
+
 // ─── Re-exports ─────────────────────────────────────────────────────────────
 // gitlabProvider / bitbucketProvider ne sont plus re-exportés ici pour éviter
 // de les faire remonter dans le bundle principal. Les consommateurs qui en ont
