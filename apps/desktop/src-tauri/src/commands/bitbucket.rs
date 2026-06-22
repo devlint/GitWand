@@ -1199,11 +1199,17 @@ pub(crate) async fn bb_list_issues(
         Ok(v) => v,
         // Issue tracker disabled for this repo ⇒ treat as empty, not an error.
         // bb_curl formats 404 as "Bitbucket API error: HTTP 404" (no JSON body)
-        // or "Bitbucket API error: <message>" where message may contain "not found".
-        Err(e) if e.contains("404") || e.to_lowercase().contains("not found") => {
-            return Ok(vec![]);
+        // or "Bitbucket API error: <message>". A repo with the tracker turned
+        // off returns a JSON-bodied 404 whose message mentions the issue
+        // tracker (e.g. "Repository has no issue tracker") and contains neither
+        // "404" nor "not found" — so match that wording too.
+        Err(e) => {
+            let le = e.to_lowercase();
+            if e.contains("404") || le.contains("not found") || le.contains("issue track") {
+                return Ok(vec![]);
+            }
+            return Err(e);
         }
-        Err(e) => return Err(e),
     };
     let values = resp
         .get("values")

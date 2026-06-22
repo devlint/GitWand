@@ -619,7 +619,8 @@ pub(crate) async fn gl_list_issues(
     filter: String,
     limit: Option<i64>,
 ) -> Result<Vec<crate::types::Issue>, String> {
-    let lim = limit.unwrap_or(100).max(1).to_string();
+    // GitLab caps --per-page at 100; clamp so an over-large limit doesn't error.
+    let lim = limit.unwrap_or(100).clamp(1, 100).to_string();
     let mut args: Vec<String> = vec![
         "issue".into(), "list".into(),
         "--state".into(), "opened".into(),
