@@ -471,6 +471,7 @@ pub fn run() {
             commands::credentials::delete_credential,
             // ── Bitbucket Cloud REST v2 ──
             commands::bitbucket::bb_list_prs,
+            commands::bitbucket::bb_list_issues,
             commands::bitbucket::bb_pr_count,
             commands::bitbucket::bb_get_pr,
             commands::bitbucket::bb_pr_diff,

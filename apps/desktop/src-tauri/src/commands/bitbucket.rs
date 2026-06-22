@@ -1117,6 +1117,102 @@ pub(crate) fn bb_pr_annotations(cwd: String, pr_id: i64) -> Result<Vec<CIAnnotat
     Ok(annotations)
 }
 
+// ─── Issue mapping ─────────────────────────────────────────────────────────────
+
+/// Map a Bitbucket issue JSON object to a canonical Issue.
+///
+/// Bitbucket issue shape:
+/// ```json
+/// {
+///   "id": 5, "title": "Broken", "state": "new",
+///   "reporter": {"nickname": "alice"},
+///   "assignee": {"nickname": "bob"},
+///   "created_on": "...", "updated_on": "...",
+///   "links": {"html": {"href": "https://bitbucket.org/o/r/issues/5"}}
+/// }
+/// ```
+/// Note: `links.html` is an object `{"href": "..."}`, not a plain string.
+/// Bitbucket issues have no labels array or milestone in the same shape as GitHub.
+fn bb_issue_to_issue(v: &serde_json::Value) -> crate::types::Issue {
+    let assignee = jnested(v, "assignee", "nickname");
+    let assignees = if assignee.is_empty() { vec![] } else { vec![assignee] };
+    // links.html is {"href": "..."} — extract the nested href string explicitly.
+    let url = v
+        .get("links")
+        .and_then(|l| l.get("html"))
+        .and_then(|h| h.get("href"))
+        .and_then(|s| s.as_str())
+        .unwrap_or("")
+        .to_string();
+    crate::types::Issue {
+        number: ji(v, "id"),
+        title: js(v, "title"),
+        state: js(v, "state"),
+        author: jnested(v, "reporter", "nickname"),
+        assignees,
+        labels: vec![],
+        url,
+        created_at: js(v, "created_on"),
+        updated_at: js(v, "updated_on"),
+        milestone: String::new(),
+    }
+}
+
+/// List issues for the current repo via Bitbucket REST API v2.
+///
+/// `filter` accepts: `""` / `"all"` (open issues), `"assigned"` (assigned to me),
+/// `"created"` (created by me).
+///
+/// Bitbucket open issue states are `"new"` and `"open"`. A 404 means the
+/// issue tracker is disabled for this repo — treated as an empty list, not an error.
+#[tauri::command]
+pub(crate) async fn bb_list_issues(
+    cwd: String,
+    filter: String,
+    limit: Option<i64>,
+) -> Result<Vec<crate::types::Issue>, String> {
+    let (workspace, slug) = parse_workspace_slug(&cwd)?;
+    let (username, app_password) = get_bb_creds(&cwd)?;
+    let auth_config = basic_auth_config(&username, &app_password);
+    let pagelen = limit.unwrap_or(100).max(1);
+
+    // Open Bitbucket issue states are "new" and "open".
+    let mut url = format!(
+        "{}/issues?q=(state=\"new\" OR state=\"open\")&pagelen={}&sort=-updated_on",
+        repo_api(&workspace, &slug),
+        pagelen
+    );
+    // Resolve "me" once for assigned/created filters.
+    let me = match filter.as_str() {
+        "assigned" | "created" => bb_current_user(cwd.clone()).await.unwrap_or_default(),
+        _ => String::new(),
+    };
+    if !me.is_empty() {
+        match filter.as_str() {
+            "assigned" => url = format!("{} AND assignee.nickname=\"{}\"", url, me),
+            "created"  => url = format!("{} AND reporter.nickname=\"{}\"", url, me),
+            _ => {}
+        }
+    }
+
+    let resp = match bb_curl("GET", &url, None, &auth_config) {
+        Ok(v) => v,
+        // Issue tracker disabled for this repo ⇒ treat as empty, not an error.
+        // bb_curl formats 404 as "Bitbucket API error: HTTP 404" (no JSON body)
+        // or "Bitbucket API error: <message>" where message may contain "not found".
+        Err(e) if e.contains("404") || e.to_lowercase().contains("not found") => {
+            return Ok(vec![]);
+        }
+        Err(e) => return Err(e),
+    };
+    let values = resp
+        .get("values")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    Ok(values.iter().map(bb_issue_to_issue).collect())
+}
+
 /// Convert a "Draft: …" Bitbucket PR to ready-for-review by stripping the prefix.
 ///
 /// Bitbucket has no native draft concept — the convention is a "Draft: " title
@@ -1150,4 +1246,31 @@ pub(crate) async fn bb_convert_draft_to_ready(cwd: String, pr_id: i64) -> Result
     let body = serde_json::json!({ "title": ready_title }).to_string();
     bb_curl("PUT", &pr_url, Some(&body), &auth_config)?;
     Ok(())
+}
+
+// ─── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod bb_list_issues_tests {
+    use super::bb_issue_to_issue;
+
+    #[test]
+    fn maps_bitbucket_issue_json_to_issue() {
+        let v: serde_json::Value = serde_json::from_str(r#"{
+            "id": 5, "title": "Broken", "state": "new",
+            "reporter": {"nickname": "alice"},
+            "assignee": {"nickname": "bob"},
+            "created_on": "2026-01-01T00:00:00Z",
+            "updated_on": "2026-01-02T00:00:00Z",
+            "links": {"html": {"href": "https://bitbucket.org/o/r/issues/5"}}
+        }"#).unwrap();
+        let i = bb_issue_to_issue(&v);
+        assert_eq!(i.number, 5);
+        assert_eq!(i.state, "new");
+        assert_eq!(i.author, "alice");
+        assert_eq!(i.assignees, vec!["bob".to_string()]);
+        assert_eq!(i.url, "https://bitbucket.org/o/r/issues/5");
+        assert!(i.labels.is_empty());
+        assert_eq!(i.milestone, "");
+    }
 }
