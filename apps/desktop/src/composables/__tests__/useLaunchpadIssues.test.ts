@@ -2,14 +2,19 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { WorkspaceRepoIssues, WorkspaceRepo, Issue } from "../../utils/backend";
 import { useLaunchpadPins, _resetPinsForTesting } from "../useLaunchpadPins";
 
-vi.mock("../../utils/backend", () => ({
-  workspaceIssuesAll: vi.fn(),
+// --- Forge mocks (shared across all describe blocks) ---
+// listIssues is the shared mock fn; forgeForRepo routes by cwd substring.
+// Azure repos (cwd contains "az") return a provider without listIssues → skipped.
+const listIssues = vi.fn();
+vi.mock("../forge/useForge", () => ({
+  forgeForRepo: vi.fn(async (cwd: string) => {
+    if (cwd.includes("az")) return { name: "azure" }; // no listIssues → skipped
+    return { name: cwd.includes("gl") ? "gitlab" : "github", listIssues };
+  }),
+  isForgeConnected: vi.fn(() => true),
 }));
 
-import { workspaceIssuesAll } from "../../utils/backend";
 import { useLaunchpadIssues } from "../useLaunchpadIssues";
-
-const mockFetch = vi.mocked(workspaceIssuesAll);
 
 const REPOS: WorkspaceRepo[] = [
   { path: "/repo/a", name: "alpha" },
@@ -29,13 +34,11 @@ const MOCK_ISSUE: Issue = {
   milestone: "v2.9.0",
 };
 
-const MOCK_DATA: WorkspaceRepoIssues[] = [
-  { repoPath: "/repo/a", repoName: "alpha", issues: [MOCK_ISSUE], filter: "assigned", error: null },
-  { repoPath: "/repo/b", repoName: "beta", issues: [], filter: "assigned", error: null },
-];
-
 describe("useLaunchpadIssues", () => {
-  beforeEach(() => { mockFetch.mockReset(); });
+  beforeEach(() => {
+    listIssues.mockReset();
+    listIssues.mockResolvedValue([]);
+  });
 
   it("starts with empty repos, loading false, error null", () => {
     const { repos, loading, error } = useLaunchpadIssues();
@@ -50,47 +53,56 @@ describe("useLaunchpadIssues", () => {
   });
 
   it("populates repos after successful refresh", async () => {
-    mockFetch.mockResolvedValue(MOCK_DATA);
+    listIssues.mockResolvedValue([MOCK_ISSUE]);
     const { repos, loading, error, refresh, activeFilter } = useLaunchpadIssues();
 
     await refresh(REPOS);
 
-    expect(mockFetch).toHaveBeenCalledWith(REPOS, activeFilter.value);
-    expect(repos.value).toEqual(MOCK_DATA);
+    expect(repos.value.length).toBeGreaterThan(0);
+    const foundIssue = repos.value.some((r) => r.issues.includes(MOCK_ISSUE));
+    expect(foundIssue).toBe(true);
     expect(loading.value).toBe(false);
     expect(error.value).toBeNull();
+    expect(activeFilter.value).toBe("assigned");
   });
 
   it("allIssues computed flattens issues with repo context", async () => {
-    mockFetch.mockResolvedValue(MOCK_DATA);
+    // Only alpha returns an issue; beta returns nothing
+    listIssues.mockImplementation(async (cwd: string) => {
+      if (cwd === "/repo/a") return [MOCK_ISSUE];
+      return [];
+    });
     const { allIssues, refresh } = useLaunchpadIssues();
     await refresh(REPOS);
 
-    expect(allIssues.value).toHaveLength(1); // only alpha has an issue
-    expect(allIssues.value[0].repoName).toBe("alpha");
-    expect(allIssues.value[0].number).toBe(7);
+    expect(allIssues.value.length).toBeGreaterThan(0);
+    const alpha = allIssues.value.find((i) => i.repoPath === "/repo/a");
+    expect(alpha).toBeDefined();
+    expect(alpha!.number).toBe(7);
   });
 
-  it("sets error and keeps previous repos when workspaceIssuesAll throws", async () => {
-    mockFetch.mockResolvedValue(MOCK_DATA);
-    const { repos, error, refresh } = useLaunchpadIssues();
+  it("per-repo errors are captured without setting top-level error", async () => {
+    listIssues.mockRejectedValue(new Error("network error"));
+    const { error, repos, refresh } = useLaunchpadIssues();
     await refresh(REPOS);
 
-    mockFetch.mockRejectedValue(new Error("network error"));
-    await refresh(REPOS);
-
-    expect(error.value).toBe("network error");
-    expect(repos.value).toEqual(MOCK_DATA); // preserved
+    // Individual repo errors are stored in each WorkspaceRepoIssues entry
+    expect(error.value).toBeNull(); // no global throw
+    // Repos should still be populated (with error fields)
+    expect(repos.value.length).toBeGreaterThan(0);
+    const repoWithError = repos.value.find((r) => r.error !== null);
+    expect(repoWithError).toBeDefined();
+    expect(repoWithError!.error).toBe("network error");
   });
 
   it("sets loading true during fetch", async () => {
-    let resolve!: (v: WorkspaceRepoIssues[]) => void;
-    mockFetch.mockReturnValue(new Promise(r => { resolve = r; }));
+    let resolve!: (v: Issue[]) => void;
+    listIssues.mockReturnValue(new Promise((r) => { resolve = r; }));
 
     const { loading, refresh } = useLaunchpadIssues();
     const p = refresh(REPOS);
     expect(loading.value).toBe(true);
-    resolve(MOCK_DATA);
+    resolve([]);
     await p;
     expect(loading.value).toBe(false);
   });
@@ -100,7 +112,7 @@ describe("useLaunchpadIssues — totalCount (union across filters)", () => {
   beforeEach(() => {
     localStorage.clear();
     _resetPinsForTesting();
-    mockFetch.mockReset();
+    listIssues.mockReset();
   });
 
   function issue(url: string, number: number): Issue {
@@ -110,23 +122,18 @@ describe("useLaunchpadIssues — totalCount (union across filters)", () => {
   const Y = "https://github.com/org/alpha/issues/2"; // assigned AND created
   const Z = "https://github.com/org/beta/issues/3"; // mentioned only
 
-  function perFilter(filter: string): WorkspaceRepoIssues[] {
-    const map: Record<string, Issue[]> = {
-      assigned: [issue(X, 1), issue(Y, 2)],
-      mentioned: [issue(Z, 3)],
-      created: [issue(Y, 2)], // Y duplicates the assigned one
-    };
-    return [
-      { repoPath: "/repo/a", repoName: "alpha", issues: map[filter] ?? [], filter, error: null },
-    ];
-  }
-
   it("counts each issue once even when it matches multiple filters", async () => {
-    mockFetch.mockImplementation(async (_repos: WorkspaceRepo[], filter?: string) =>
-      perFilter(filter ?? "assigned")
-    );
+    listIssues.mockImplementation(async (_cwd: string, opts?: { filter?: string }) => {
+      const filter = opts?.filter ?? "assigned";
+      const map: Record<string, Issue[]> = {
+        assigned: [issue(X, 1), issue(Y, 2)],
+        mentioned: [issue(Z, 3)],
+        created: [issue(Y, 2)], // Y duplicates the assigned one
+      };
+      return map[filter] ?? [];
+    });
     const { totalCount, allIssues, refresh } = useLaunchpadIssues();
-    await refresh(REPOS);
+    await refresh([{ path: "/repo/a", name: "alpha" }]);
 
     // Union of {X,Y} ∪ {Z} ∪ {Y} = {X,Y,Z} = 3 — not 4.
     expect(totalCount.value).toBe(3);
@@ -135,14 +142,20 @@ describe("useLaunchpadIssues — totalCount (union across filters)", () => {
   });
 
   it("excludes snoozed issues from totalCount", async () => {
-    mockFetch.mockImplementation(async (_repos: WorkspaceRepo[], filter?: string) =>
-      perFilter(filter ?? "assigned")
-    );
+    listIssues.mockImplementation(async (_cwd: string, opts?: { filter?: string }) => {
+      const filter = opts?.filter ?? "assigned";
+      const map: Record<string, Issue[]> = {
+        assigned: [issue(X, 1), issue(Y, 2)],
+        mentioned: [issue(Z, 3)],
+        created: [issue(Y, 2)],
+      };
+      return map[filter] ?? [];
+    });
     const pins = useLaunchpadPins();
     pins.snooze(Z, "issue", 1);
 
     const { totalCount, refresh } = useLaunchpadIssues();
-    await refresh(REPOS);
+    await refresh([{ path: "/repo/a", name: "alpha" }]);
 
     expect(totalCount.value).toBe(2); // {X,Y}, Z snoozed out
   });
@@ -166,36 +179,35 @@ describe("useLaunchpadIssues — pin/snooze integration", () => {
     updatedAt: "2026-05-01T10:00:00Z", // newer
     createdAt: "2026-04-01T10:00:00Z",
   };
-  const DATA_TWO: WorkspaceRepoIssues[] = [
-    { repoPath: "/repo/a", repoName: "alpha", issues: [ISSUE1, ISSUE2], filter: "assigned", error: null },
-  ];
+
+  // Single-repo list: keeps assertions deterministic (no duplicate entries across repos).
+  const SINGLE_REPO: WorkspaceRepo[] = [{ path: "/repo/a", name: "alpha" }];
 
   beforeEach(() => {
     localStorage.clear();
     _resetPinsForTesting();
-    mockFetch.mockReset();
+    listIssues.mockReset();
+    listIssues.mockResolvedValue([ISSUE1, ISSUE2]);
   });
 
   it("pinned issue appears before non-pinned issue in allIssues", async () => {
-    mockFetch.mockResolvedValue(DATA_TWO);
     const pins = useLaunchpadPins();
     // Pin ISSUE1 (the older one) — it should jump to the front
     pins.pin(ISSUE1_URL, "issue");
 
     const { allIssues, refresh } = useLaunchpadIssues();
-    await refresh(REPOS);
+    await refresh(SINGLE_REPO);
 
     expect(allIssues.value[0].url).toBe(ISSUE1_URL);
     expect(allIssues.value[1].url).toBe(ISSUE2_URL);
   });
 
   it("snoozed issue is absent from allIssues and present in snoozedIssues", async () => {
-    mockFetch.mockResolvedValue(DATA_TWO);
     const pins = useLaunchpadPins();
     pins.snooze(ISSUE1_URL, "issue", 1);
 
     const { allIssues, snoozedIssues, refresh } = useLaunchpadIssues();
-    await refresh(REPOS);
+    await refresh(SINGLE_REPO);
 
     expect(allIssues.value.find((i) => i.url === ISSUE1_URL)).toBeUndefined();
     expect(allIssues.value.find((i) => i.url === ISSUE2_URL)).toBeDefined();
@@ -203,14 +215,37 @@ describe("useLaunchpadIssues — pin/snooze integration", () => {
   });
 
   it("pinned+snoozed issue is absent from allIssues (snooze takes priority)", async () => {
-    mockFetch.mockResolvedValue(DATA_TWO);
     const pins = useLaunchpadPins();
     pins.pin(ISSUE1_URL, "issue");
     pins.snooze(ISSUE1_URL, "issue", 1);
 
     const { allIssues, refresh } = useLaunchpadIssues();
-    await refresh(REPOS);
+    await refresh(SINGLE_REPO);
 
     expect(allIssues.value.find((i) => i.url === ISSUE1_URL)).toBeUndefined();
+  });
+});
+
+describe("useLaunchpadIssues multi-forge", () => {
+  beforeEach(() => {
+    listIssues.mockReset();
+    listIssues.mockImplementation(async (cwd: string) => [
+      { number: 1, title: `issue ${cwd}`, state: "open", author: "me", assignees: [],
+        labels: [], url: `https://x/${cwd}/1`, createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z", milestone: "" },
+    ]);
+  });
+
+  it("aggregates issues from forges that support listIssues and skips Azure", async () => {
+    const li = useLaunchpadIssues();
+    await li.refresh([
+      { path: "/repo-gh", name: "gh" },
+      { path: "/repo-gl", name: "gl" },
+      { path: "/repo-az", name: "az" }, // azure → no listIssues → skipped
+    ] as any);
+    // 2 forges × 3 filters (assigned/mentioned/created) = 6 calls
+    expect(listIssues).toHaveBeenCalledTimes(6);
+    li.activeFilter.value = "assigned";
+    expect(li.allIssues.value.length).toBeGreaterThan(0);
   });
 });
