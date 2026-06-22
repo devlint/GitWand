@@ -464,7 +464,7 @@ function removeReviewer(name: string) {
           <button
             v-if="ai.isAvailable.value"
             type="button"
-            class="pcv-ai-btn"
+            class="btn btn--ai pcv-ai-btn"
             :disabled="isGeneratingPrDescription || baseIsSameAsHead"
             :title="t('pr.create.aiHint')"
             @click="generateWithAI"
@@ -721,7 +721,8 @@ function removeReviewer(name: string) {
 }
 
 .pcv-container {
-  max-width: 880px;
+  max-width: 1240px;
+  width: 100%;
   margin: 0 auto;
   /* Extra bottom padding clears the floating AppDock so the in-flow
      footer buttons aren't covered when scrolled to the end. */
@@ -863,7 +864,7 @@ function removeReviewer(name: string) {
   letter-spacing: 0.12em;
   color: var(--color-text-muted);
   padding: 2px var(--space-3);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-sm);
   background: var(--color-bg-tertiary);
 }
 .pcv-branch--from .pcv-branch-role {
@@ -955,7 +956,7 @@ function removeReviewer(name: string) {
   letter-spacing: 0.08em;
   color: var(--color-text-muted);
   padding: 2px var(--space-3);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-sm);
   background: var(--color-bg-tertiary);
 }
 .pcv-fork-opt--active .pcv-fork-badge {
@@ -1048,32 +1049,20 @@ function removeReviewer(name: string) {
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
 }
 
-/* ─── AI generate pill (ghost → accent) ─────────────── */
-.pcv-ai-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: 5px var(--space-4);
-  background: var(--color-bg);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-pill);
-  color: var(--color-text-muted);
+/* ─── AI generate button (matches dashboard .panel-link-ai) ─────────────── */
+.btn.btn--ai.pcv-ai-btn {
+  min-height: 26px;
+  padding: 4px 12px;
   font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-semibold);
-  font-family: inherit;
-  cursor: pointer;
-  line-height: 1.4;
-  transition: color var(--transition-fast), border-color var(--transition-fast), background var(--transition-fast), box-shadow var(--transition-fast);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
 }
-.pcv-ai-btn:hover:not(:disabled) {
-  color: var(--color-accent);
-  border-color: var(--color-accent);
-  background: var(--color-accent-soft);
-  box-shadow: 0 0 0 3px var(--color-accent-soft);
-}
-.pcv-ai-btn:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
+.btn.btn--ai.pcv-ai-btn:hover:not(:disabled) {
+  color: var(--color-ai-text);
+  transform: none;
+  background:
+    linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-hover) 100%) padding-box,
+    linear-gradient(135deg, var(--color-accent) 0%, #c084fc 50%, var(--color-accent) 100%) border-box;
 }
 .pcv-spinner--sm {
   width: 10px;
@@ -1103,12 +1092,12 @@ function removeReviewer(name: string) {
   flex-wrap: wrap;
 }
 
-/* Pill-style segmented control (matches main.css .segmented) */
+/* Segmented control (matches main.css .segmented) */
 .pcv-tabs {
   display: inline-flex;
   padding: var(--space-1);
   background: var(--color-bg-tertiary);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-md);
   gap: 0;
 }
 .pcv-tab {
@@ -1118,7 +1107,7 @@ function removeReviewer(name: string) {
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-medium);
   padding: var(--space-2) var(--space-5);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-sm);
   cursor: pointer;
   transition: background var(--transition-fast), color var(--transition-fast), box-shadow var(--transition-fast);
   line-height: 1.4;

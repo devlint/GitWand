@@ -24,9 +24,10 @@
  * against the wrapper class on this component's root, so clicks on
  * either the trigger OR the popover count as "inside".
  */
-import { ref, computed, inject, onMounted, onUnmounted, watch, defineAsyncComponent, type Ref } from "vue";
-import { gitSubmoduleList, gitSubmoduleBranches, getGitLog, type GitBranch, type SubmoduleEntry, type SubmoduleBranch } from "../../utils/backend";
+import { ref, computed, inject, nextTick, onMounted, onUnmounted, watch, defineAsyncComponent, type Ref } from "vue";
+import { gitSubmoduleList, gitSubmoduleBranches, getGitLog, getGitBranchTopAuthors, type GitBranch, type SubmoduleEntry, type SubmoduleBranch, type BranchTopAuthor } from "../../utils/backend";
 import { branchSort } from "../../utils/branchSort";
+import { avatarStyle, avatarInitials } from "../../composables/useAvatar";
 import { useI18n } from "../../composables/useI18n";
 import type { LocaleKey } from "../../locales";
 import { useMergePreview, type PreviewOperation } from "../../composables/useMergePreview";
@@ -42,6 +43,7 @@ import { BRANCH_CREATE_REQUEST_KEY } from "../../composables/branchPickerBridge"
 // AppHeader, so importing this 600-line panel statically would pin it in main.
 const MergePreviewPanel = defineAsyncComponent(() => import("../MergePreviewPanel.vue"));
 import BaseModal from "../BaseModal.vue";
+import BranchRowActions from "./BranchRowActions.vue";
 // Lazy too — only mounted inside the v-if'd create-branch modal.
 const BranchNameField = defineAsyncComponent(() => import("../BranchNameField.vue"));
 
@@ -110,8 +112,32 @@ const branchFilter = ref("");
 const showCreate = ref(false);
 const newBranchName = ref("");
 
-// Collapsible LOCAL / REMOTE sections — open by default, toggled via
+// Root wrapper — used to measure how much vertical space is left below the
+// trigger so the popover never spills past the bottom of the window.
+const wrapperEl = ref<HTMLElement | null>(null);
+// Computed cap (px). Empty string = let CSS drive (initial render).
+const popoverMaxHeight = ref("");
+
+/** Clamp the popover's height to the space between the trigger and the
+ *  viewport bottom (with a small margin), capped at the design max. */
+function recomputeMaxHeight() {
+  const el = wrapperEl.value;
+  if (!el) return;
+  const rect = el.getBoundingClientRect();
+  const GAP = 16; // breathing room above the window edge + the top offset
+  const available = window.innerHeight - rect.bottom - GAP;
+  // Never below a usable floor; never above the design ceiling (880px / 88vh).
+  const ceiling = Math.min(880, window.innerHeight * 0.88);
+  popoverMaxHeight.value = `${Math.max(200, Math.min(ceiling, available))}px`;
+}
+
+function onWindowResize() {
+  if (showPopover.value) recomputeMaxHeight();
+}
+
+// Collapsible PINNED / LOCAL / REMOTE sections — open by default, toggled via
 // their section headers (same affordance as the submodules section).
+const showPinned = ref(true);
 const showLocal = ref(true);
 const showRemote = ref(true);
 
@@ -126,6 +152,7 @@ if (createRequest) {
     branchFilter.value = "";
     newBranchName.value = "";
     emit("loadBranches");
+    void nextTick(recomputeMaxHeight);
   });
 }
 
@@ -151,6 +178,8 @@ function togglePopover() {
     branchFilter.value = "";
     emit("loadBranches");
     void loadSubmodules();
+    void loadTopAuthors();
+    void nextTick(recomputeMaxHeight);
   }
 }
 
@@ -173,6 +202,40 @@ function openCreate() {
 function cancelCreate() {
   resetCreate();
 }
+
+// ─── Per-branch top contributor (avatar in the list) ─────────────
+// Keyed by branch name → the author with the most commits on that branch.
+// Loaded lazily when the popover opens (one git spawn per branch on the
+// backend, fanned out with rayon), so it never runs on a hot path.
+const topAuthors = ref<Map<string, BranchTopAuthor>>(new Map());
+
+async function loadTopAuthors() {
+  const names = props.branches.map((b) => b.name);
+  if (names.length === 0) {
+    topAuthors.value = new Map();
+    return;
+  }
+  try {
+    const entries = await getGitBranchTopAuthors(props.cwd, names);
+    topAuthors.value = new Map(entries.map((e) => [e.branch, e]));
+  } catch {
+    topAuthors.value = new Map();
+  }
+}
+
+/** Top contributor for a branch, or null if none resolved yet. */
+function authorFor(name: string): BranchTopAuthor | null {
+  return topAuthors.value.get(name) ?? null;
+}
+
+// Refresh contributors whenever the branch set changes while the popover is
+// open (e.g. after a create/delete reload).
+watch(
+  () => props.branches.map((b) => b.name).join("\n"),
+  () => {
+    if (showPopover.value) void loadTopAuthors();
+  },
+);
 
 // ─── Submodules section (v2.15.1) ────────────────────────────────
 const submodules = ref<SubmoduleEntry[]>([]);
@@ -223,15 +286,21 @@ function toggleArchive(name: string) {
   else archives.archive(name);
 }
 
-const localBranches = computed(() =>
-  props.branches
+const localBranches = computed(() => {
+  // Read the reactive archived/pinned lists (not the isArchived()/isPinned()
+  // helpers) so toggling either removes/adds the branch here immediately.
+  const archivedSet = new Set(archives.archived.value);
+  const pinnedSet = new Set(pins.pinned.value);
+  return props.branches
     .filter((b) => !b.isRemote)
     // Archived branches are hidden from the main list (shown in their own
     // collapsible section), but the current branch is always visible.
-    .filter((b) => b.isCurrent || !archives.isArchived(b.name))
+    .filter((b) => b.isCurrent || !archivedSet.has(b.name))
+    // Pinned branches live only in the Pinned section — drop them here.
+    .filter((b) => !pinnedSet.has(b.name))
     .filter((b) => !branchFilter.value || b.name.toLowerCase().includes(branchFilter.value.toLowerCase()))
-    .sort(branchSort),
-);
+    .sort(branchSort);
+});
 
 const remoteBranches = computed(() =>
   props.branches
@@ -429,12 +498,18 @@ function onDocClick(e: MouseEvent) {
   }
 }
 
-onMounted(() => document.addEventListener("click", onDocClick, true));
-onUnmounted(() => document.removeEventListener("click", onDocClick, true));
+onMounted(() => {
+  document.addEventListener("click", onDocClick, true);
+  window.addEventListener("resize", onWindowResize);
+});
+onUnmounted(() => {
+  document.removeEventListener("click", onDocClick, true);
+  window.removeEventListener("resize", onWindowResize);
+});
 </script>
 
 <template>
-  <div class="branch-popover-wrapper">
+  <div ref="wrapperEl" class="branch-popover-wrapper">
     <!--
       2-line layout:
         Line 1 — branch icon + branch name + chevron
@@ -511,7 +586,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
       </button>
     </div>
 
-    <div v-if="showPopover" class="branch-popover">
+    <div v-if="showPopover" class="branch-popover" :style="popoverMaxHeight ? { maxHeight: popoverMaxHeight } : undefined">
       <div class="bp-header">
         <input
           v-model="branchFilter"
@@ -528,14 +603,14 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
       <div v-else class="bp-lists">
         <!-- Pinned branches (relocated from the Dashboard, v3) -->
         <div v-if="pinnedBranches.length > 0" class="bp-section">
-          <div class="bp-section-toggle" style="cursor: default;">
-            <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" style="opacity:0.7;">
-              <path d="M8 1l2 4.5 5 .5-3.7 3.3L12.5 15 8 12.3 3.5 15l1.2-5.7L1 6l5-.5z"/>
+          <button class="bp-section-toggle" :aria-expanded="showPinned ? 'true' : 'false'" @click.stop="showPinned = !showPinned">
+            <svg class="bp-section-toggle__chevron" :class="{ 'bp-section-toggle__chevron--open': showPinned }" width="9" height="9" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M3 6l5 5 5-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
             </svg>
             <span>{{ t('sidebar.pinnedBranches') }}</span>
             <span class="bp-section-toggle__count">{{ pinnedBranches.length }}</span>
-          </div>
-          <ul class="bp-list">
+          </button>
+          <ul v-if="showPinned" class="bp-list">
             <li
               v-for="branch in pinnedBranches"
               :key="`pin-${branch.name}`"
@@ -543,19 +618,29 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
               :class="{ 'bp-item--current': branch.isCurrent }"
               @click="!branch.isCurrent && handleBranchSwitch(branch.name)"
             >
-              <span v-if="branch.isCurrent" class="bp-current-dot"></span>
+              <span v-if="branch.isCurrent" class="bp-current-trait"></span>
+              <span
+                v-if="authorFor(branch.name)"
+                class="bp-author-avatar"
+                :style="avatarStyle(authorFor(branch.name)!.email || authorFor(branch.name)!.name)"
+                :title="t('branches.topContributor', authorFor(branch.name)!.name, authorFor(branch.name)!.count)"
+              >{{ avatarInitials(authorFor(branch.name)!.name) }}</span>
               <span class="bp-item-name mono" :title="branch.name"><span class="bp-item-name__text">{{ branch.name }}</span></span>
               <span v-if="branch.ahead > 0 || branch.behind > 0" class="bp-item-meta muted">
                 <span v-if="branch.ahead > 0">&uarr;{{ branch.ahead }}</span>
                 <span v-if="branch.behind > 0">&darr;{{ branch.behind }}</span>
               </span>
-              <span class="bp-item-actions" @click.stop>
-                <button class="bp-item-action bp-item-action--active" :title="t('branch.unpin')" @click.stop="pins.unpin(branch.name)">
-                  <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-                    <path d="M8 1l2 4.5 5 .5-3.7 3.3L12.5 15 8 12.3 3.5 15l1.2-5.7L1 6l5-.5z"/>
-                  </svg>
-                </button>
-              </span>
+              <BranchRowActions
+                :pinned="pins.isPinned(branch.name)"
+                :archived="archives.isArchived(branch.name)"
+                :previewing="previewingBranch === branch.name"
+                :is-current="branch.isCurrent"
+                @toggle-pin="togglePin(branch.name)"
+                @toggle-archive="toggleArchive(branch.name)"
+                @toggle-preview="togglePreview(branch.name)"
+                @open-worktree="emit('openWorktrees', branch.name); closePopover();"
+                @delete-branch="emit('deleteBranch', branch.name)"
+              />
             </li>
           </ul>
         </div>
@@ -575,7 +660,13 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
                 :class="{ 'bp-item--current': branch.isCurrent }"
                 @click="!branch.isCurrent && handleBranchSwitch(branch.name)"
               >
-                <span v-if="branch.isCurrent" class="bp-current-dot"></span>
+                <span v-if="branch.isCurrent" class="bp-current-trait"></span>
+                <span
+                  v-if="authorFor(branch.name)"
+                  class="bp-author-avatar"
+                  :style="avatarStyle(authorFor(branch.name)!.email || authorFor(branch.name)!.name)"
+                  :title="t('branches.topContributor', authorFor(branch.name)!.name, authorFor(branch.name)!.count)"
+                >{{ avatarInitials(authorFor(branch.name)!.name) }}</span>
                 <svg v-if="props.worktreeBranches?.has(branch.name)" class="branch-wt-icon" width="12" height="12" viewBox="0 0 16 16" fill="currentColor" style="margin-right: 6px; color: var(--color-success); flex-shrink: 0;">
                   <circle cx="8" cy="4.5" r="2.5" />
                   <circle cx="4.5" cy="8.5" r="2.5" />
@@ -587,61 +678,17 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
                   <span v-if="branch.ahead > 0">&uarr;{{ branch.ahead }}</span>
                   <span v-if="branch.behind > 0">&darr;{{ branch.behind }}</span>
                 </span>
-                <span v-if="!branch.isCurrent" class="bp-item-actions" @click.stop>
-                  <button
-                    class="bp-item-action"
-                    :class="{ 'bp-item-action--active': pins.isPinned(branch.name) }"
-                    :title="pins.isPinned(branch.name) ? t('branch.unpin') : t('branch.pin')"
-                    @click.stop="togglePin(branch.name)"
-                  >
-                    <svg width="11" height="11" viewBox="0 0 16 16" :fill="pins.isPinned(branch.name) ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="1.3" aria-hidden="true">
-                      <path d="M8 1l2 4.5 5 .5-3.7 3.3L12.5 15 8 12.3 3.5 15l1.2-5.7L1 6l5-.5z" stroke-linejoin="round"/>
-                    </svg>
-                  </button>
-                  <button
-                    class="bp-item-action"
-                    :class="{ 'bp-item-action--active': archives.isArchived(branch.name) }"
-                    :title="archives.isArchived(branch.name) ? t('branch.unarchive') : t('branch.archive')"
-                    @click.stop="toggleArchive(branch.name)"
-                  >
-                    <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true">
-                      <path d="M1.5 2.5h13v3h-13zM2.5 5.5h11v8h-11z" stroke-linejoin="round"/>
-                      <path d="M6.5 8.5h3" stroke-linecap="round"/>
-                    </svg>
-                  </button>
-                  <button
-                    class="bp-item-action"
-                    :class="{ 'bp-item-action--active': previewingBranch === branch.name }"
-                    :title="t('branches.previewMerge')"
-                    @click.stop="togglePreview(branch.name)"
-                  >
-                    <svg width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                      <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5" />
-                      <path d="M8 5v3l2 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-                    </svg>
-                  </button>
-                  <button
-                    class="bp-item-action"
-                    :title="t('worktree.openInWorktreeTabTooltip')"
-                    @click.stop="emit('openWorktrees', branch.name); closePopover();"
-                  >
-                    <svg width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                      <rect x="2" y="2" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.5" fill="none" />
-                      <rect x="9" y="2" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.5" fill="none" />
-                      <rect x="5.5" y="9" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.5" fill="none" />
-                      <path d="M4.5 7v1.5M11.5 7v1.5M4.5 8.5h7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
-                    </svg>
-                  </button>
-                  <button
-                    class="bp-item-action bp-item-action--danger"
-                    :title="t('branches.deleteLabel')"
-                    @click.stop="emit('deleteBranch', branch.name)"
-                  >
-                    <svg width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                      <path d="M2 4h12M5 4V3a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1M3 4v9a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
-                    </svg>
-                  </button>
-                </span>
+                <BranchRowActions
+                  :pinned="pins.isPinned(branch.name)"
+                  :archived="archives.isArchived(branch.name)"
+                  :previewing="previewingBranch === branch.name"
+                  :is-current="branch.isCurrent"
+                  @toggle-pin="togglePin(branch.name)"
+                  @toggle-archive="toggleArchive(branch.name)"
+                  @toggle-preview="togglePreview(branch.name)"
+                  @open-worktree="emit('openWorktrees', branch.name); closePopover();"
+                  @delete-branch="emit('deleteBranch', branch.name)"
+                />
               </li>
               <li v-if="previewingBranch === branch.name" class="bp-preview-row">
                 <!-- Commit picker — only visible when cherry-pick is selected -->
@@ -704,7 +751,13 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
               :class="{ 'bp-item--current': branch.isCurrent }"
               @click="!branch.isCurrent && handleBranchSwitch(branch.name)"
             >
-              <span v-if="branch.isCurrent" class="bp-current-dot"></span>
+              <span v-if="branch.isCurrent" class="bp-current-trait"></span>
+              <span
+                v-if="authorFor(branch.name)"
+                class="bp-author-avatar"
+                :style="avatarStyle(authorFor(branch.name)!.email || authorFor(branch.name)!.name)"
+                :title="t('branches.topContributor', authorFor(branch.name)!.name, authorFor(branch.name)!.count)"
+              >{{ avatarInitials(authorFor(branch.name)!.name) }}</span>
               <span class="bp-item-name mono" :title="branch.name"><span class="bp-item-name__text">{{ branch.name }}</span></span>
               <span class="bp-item-actions" @click.stop>
                 <button class="bp-item-action" :title="t('branch.unarchive')" @click.stop="archives.unarchive(branch.name)">
@@ -733,6 +786,12 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
               class="bp-item bp-item--remote"
               @click="handleBranchSwitch(branch.name.replace(/^origin\//, ''))"
             >
+              <span
+                v-if="authorFor(branch.name)"
+                class="bp-author-avatar"
+                :style="avatarStyle(authorFor(branch.name)!.email || authorFor(branch.name)!.name)"
+                :title="t('branches.topContributor', authorFor(branch.name)!.name, authorFor(branch.name)!.count)"
+              >{{ avatarInitials(authorFor(branch.name)!.name) }}</span>
               <span class="bp-item-name mono" :title="branch.name"><span class="bp-item-name__text">{{ branch.name }}</span></span>
             </li>
           </ul>
@@ -978,9 +1037,9 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
   position: absolute;
   top: calc(100% + var(--space-3));
   left: 0;
-  width: 420px;
+  width: 560px;
   max-width: calc(100vw - var(--space-7));
-  max-height: min(720px, 80vh);
+  max-height: min(880px, 88vh);
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-xl);
@@ -1051,6 +1110,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
 .bp-list { list-style: none; }
 
 .bp-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--space-3);
@@ -1068,6 +1128,38 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
   border-radius: var(--radius-pill);
   background: var(--color-accent);
   flex-shrink: 0;
+}
+
+/* Selected-branch marker — a vertical trait (bar) rather than a dot. Sits at
+   the left edge of the current row as a "you are here" rail. */
+.bp-current-trait {
+  /* Absolutely positioned left-edge rail — does not occupy layout space, so
+     the current row's content lines up with every other row. */
+  position: absolute;
+  left: var(--space-2);
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 16px;
+  border-radius: var(--radius-pill);
+  background: var(--color-accent);
+}
+
+/* Per-branch top-contributor avatar — colored-initials disk, same visual
+   language as useAvatar() elsewhere (commit log, PR views). */
+.bp-author-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  border: 1.5px solid currentColor;
+  border-radius: var(--radius-pill);
+  font-size: 9px;
+  font-weight: var(--font-weight-semibold);
+  line-height: 1;
+  background: transparent;
 }
 
 .bp-item-name {

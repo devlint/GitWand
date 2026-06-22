@@ -87,7 +87,7 @@ const props = defineProps<{
   /** Accumulated error log passed down from App.vue */
   errorLog?: LogEntry[];
   /** Open directly on this tab (e.g. "logs" when clicking the error badge) */
-  initialTab?: "general" | "git" | "editor" | "ai" | "automations" | "logs" | "hooks" | "accounts" | "mcp";
+  initialTab?: "general" | "dashboard" | "git" | "editor" | "ai" | "automations" | "logs" | "hooks" | "accounts" | "mcp";
   /** Current repo path (for Hooks tab) */
   cwd?: string;
 }>();
@@ -137,10 +137,16 @@ interface Settings {
   aiModelByProvider: Partial<Record<AIProvider, string>>;
   aiOllamaUrl: string;
   aiOllamaModel: string;
-  // Launchpad — last active tab persisted between openings (v2.9)
-  launchpadActiveTab: "wip" | "prs" | "issues" | "team";
-  // Launchpad — Team tab enable/disable (v2.9). Hides tab + skips fetch.
+  // Today view — last active surface persisted between openings (v2.9 / Phase 2)
+  // Only "inbox" and "team" are live surfaces after Phase 2.
+  launchpadActiveTab: "inbox" | "wip" | "prs" | "issues" | "team";
+  // Today view — Team tab enable/disable (v2.9). Hides tab + skips fetch.
   launchpadTeamTabEnabled: boolean;
+  // Dashboard layout
+  dashboardReadmeFirst: boolean;
+  dashboardHideContributors: boolean;
+  dashboardHideActivity: boolean;
+  dashboardHideReadme: boolean;
   // Automation settings (v2.8)
   automations: {
     autoResolve: { enabled: boolean };
@@ -187,8 +193,12 @@ const defaultSettings: Settings = {
   aiOllamaUrl: "http://localhost:11434",
   aiOllamaModel: "codellama",
   blameAlgorithm: "histogram",
-  launchpadActiveTab: "wip",
+  launchpadActiveTab: "inbox",
   launchpadTeamTabEnabled: true,
+  dashboardReadmeFirst: false,
+  dashboardHideContributors: false,
+  dashboardHideActivity: false,
+  dashboardHideReadme: false,
   automations: {
     autoResolve: { enabled: false },
     nightlyPull: { enabled: false, hour: 8, minute: 0 },
@@ -230,7 +240,7 @@ function updateSetting<K extends keyof Settings>(key: K, value: Settings[K]) {
 }
 
 // ─── Tab navigation ──────────────────────────────────────
-type SettingsTab = "general" | "git" | "editor" | "ai" | "automations" | "logs" | "hooks" | "accounts" | "mcp";
+type SettingsTab = "general" | "dashboard" | "git" | "editor" | "ai" | "automations" | "logs" | "hooks" | "accounts" | "mcp";
 const activeSettingsTab = ref<SettingsTab>(props.initialTab ?? "general");
 
 // ─── Logs tab — formatting + clipboard ──────────────────
@@ -283,6 +293,7 @@ async function copyAllLogs() {
 
 const settingsTabs: { id: SettingsTab; icon: string }[] = [
   { id: "general", icon: "general" },
+  { id: "dashboard", icon: "dashboard" },
   { id: "git", icon: "git" },
   { id: "editor", icon: "editor" },
   { id: "ai", icon: "ai" },
@@ -295,7 +306,7 @@ const settingsTabs: { id: SettingsTab; icon: string }[] = [
 
 // ─── Nav sidebar groups (OpenCode-style left nav) ────────
 const settingsNavGroups: Array<{ label: string | null; tabs: SettingsTab[] }> = [
-  { label: "Application", tabs: ["general", "editor"] },
+  { label: "Application", tabs: ["general", "dashboard", "editor"] },
   { label: "Dépôt", tabs: ["git", "hooks", "accounts"] },
   { label: "IA & Agents", tabs: ["ai", "mcp", "automations"] },
   { label: "Système", tabs: ["logs"] },
@@ -304,6 +315,7 @@ const settingsNavGroups: Array<{ label: string | null; tabs: SettingsTab[] }> = 
 function tabLabel(id: SettingsTab): string {
   switch (id) {
     case "general": return t("settings.tabGeneral");
+    case "dashboard": return t("settings.tabDashboard");
     case "git": return t("settings.tabGit");
     case "editor": return t("settings.tabEditor");
     case "ai": return t("settings.tabAi");
@@ -1019,6 +1031,13 @@ function savePresetForm() {
                 <path
                   d="M8 1v2m0 10v2m-7-7h2m10 0h2m-2.05-4.95-1.41 1.41m-7.08 7.08-1.41 1.41m0-9.9 1.41 1.41m7.08 7.08 1.41 1.41" />
               </svg>
+              <svg v-else-if="tab.icon === 'dashboard'" width="15" height="15" viewBox="0 0 16 16" fill="none"
+                stroke="currentColor" stroke-width="1.4">
+                <rect x="2" y="2" width="5" height="5" rx="1" />
+                <rect x="9" y="2" width="5" height="5" rx="1" />
+                <rect x="2" y="9" width="5" height="5" rx="1" />
+                <rect x="9" y="9" width="5" height="5" rx="1" />
+              </svg>
               <svg v-else-if="tab.icon === 'git'" width="15" height="15" viewBox="0 0 16 16" fill="none"
                 stroke="currentColor" stroke-width="1.4">
                 <circle cx="8" cy="3" r="2" />
@@ -1219,6 +1238,53 @@ function savePresetForm() {
               <span>{{ t('settings.launchpad.disableTeamTab.label') }}</span>
             </label>
             <span class="sp-hint">{{ t('settings.launchpad.disableTeamTab.help') }}</span>
+          </div>
+        </template>
+
+        <!-- ═══ DASHBOARD ═══ -->
+        <template v-if="activeSettingsTab === 'dashboard'">
+          <!-- README first row -->
+          <div class="sp-row sp-row--checkbox">
+            <label class="sp-checkbox-label" for="setting-dashboard-readme-first">
+              <input id="setting-dashboard-readme-first" type="checkbox" class="sp-checkbox"
+                :checked="settings.dashboardReadmeFirst"
+                @change="updateSetting('dashboardReadmeFirst', ($event.target as HTMLInputElement).checked)" />
+              <span>{{ t('settings.dashboard.readmeFirst.label') }}</span>
+            </label>
+            <span class="sp-hint">{{ t('settings.dashboard.readmeFirst.help') }}</span>
+          </div>
+
+          <!-- Hide contributors row -->
+          <div class="sp-row sp-row--checkbox">
+            <label class="sp-checkbox-label" for="setting-dashboard-hide-contributors">
+              <input id="setting-dashboard-hide-contributors" type="checkbox" class="sp-checkbox"
+                :checked="settings.dashboardHideContributors"
+                @change="updateSetting('dashboardHideContributors', ($event.target as HTMLInputElement).checked)" />
+              <span>{{ t('settings.dashboard.hideContributors.label') }}</span>
+            </label>
+            <span class="sp-hint">{{ t('settings.dashboard.hideContributors.help') }}</span>
+          </div>
+
+          <!-- Hide activity row -->
+          <div class="sp-row sp-row--checkbox">
+            <label class="sp-checkbox-label" for="setting-dashboard-hide-activity">
+              <input id="setting-dashboard-hide-activity" type="checkbox" class="sp-checkbox"
+                :checked="settings.dashboardHideActivity"
+                @change="updateSetting('dashboardHideActivity', ($event.target as HTMLInputElement).checked)" />
+              <span>{{ t('settings.dashboard.hideActivity.label') }}</span>
+            </label>
+            <span class="sp-hint">{{ t('settings.dashboard.hideActivity.help') }}</span>
+          </div>
+
+          <!-- Hide README -->
+          <div class="sp-row sp-row--checkbox">
+            <label class="sp-checkbox-label" for="setting-dashboard-hide-readme">
+              <input id="setting-dashboard-hide-readme" type="checkbox" class="sp-checkbox"
+                :checked="settings.dashboardHideReadme"
+                @change="updateSetting('dashboardHideReadme', ($event.target as HTMLInputElement).checked)" />
+              <span>{{ t('settings.dashboard.hideReadme.label') }}</span>
+            </label>
+            <span class="sp-hint">{{ t('settings.dashboard.hideReadme.help') }}</span>
           </div>
         </template>
 

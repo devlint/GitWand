@@ -37,6 +37,13 @@ const props = defineProps<{
    * panel's perspective.
    */
   hunkId: string | number;
+  /**
+   * Whether the parent has recorded this hunk as accepted. When true the
+   * primary action swaps to a non-interactive "✓ Accepted" badge (the
+   * resolution is already applied by the core — this is the visual lock-in).
+   * Reject stays available so the user can still back out to manual.
+   */
+  accepted?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -208,7 +215,19 @@ function onReject() {
 
     <!-- Actions -->
     <div class="llm-trace__actions">
+      <span
+        v-if="accepted"
+        class="llm-trace__accepted"
+        role="status"
+        :data-hunk-id="String(hunkId)"
+      >
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M3 8.5L6.5 12L13 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        {{ t('mergeEditor.llmResolution.accepted') }}
+      </span>
       <button
+        v-else
         type="button"
         class="llm-trace__btn llm-trace__btn--primary"
         :data-hunk-id="String(hunkId)"
@@ -423,5 +442,18 @@ function onReject() {
 
 .llm-trace__btn--secondary:hover {
   border-color: var(--color-text);
+}
+
+/* Non-interactive "locked in" badge shown once the user accepted. */
+.llm-trace__accepted {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 12px;
+  padding: var(--space-3) var(--space-5);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-success);
+  color: var(--color-success);
+  background: transparent;
 }
 </style>

@@ -581,6 +581,75 @@ pub(crate) fn gl_mr_annotations(cwd: String, iid: i64) -> Result<Vec<CIAnnotatio
     Ok(annotations)
 }
 
+// ─── Issue → Issue mapping ────────────────────────────────────────────────────
+
+/// Map a GitLab issue JSON object to an Issue.
+///
+/// GitLab issue fields: iid, title, state (`opened`/`closed`), author.username,
+/// assignees[].username, labels[] (array of strings), web_url, created_at,
+/// updated_at, milestone.title.
+fn gl_issue_to_issue(v: &serde_json::Value) -> crate::types::Issue {
+    let labels = v
+        .get("labels")
+        .and_then(|l| l.as_array())
+        .map(|arr| arr.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+        .unwrap_or_default();
+    let milestone = v.get("milestone").map(|m| js(m, "title")).unwrap_or_default();
+    crate::types::Issue {
+        number: ji(v, "iid"),
+        title: js(v, "title"),
+        state: gl_state(&js(v, "state")),
+        author: juser(v, "author"),
+        assignees: jusernames(v, "assignees"),
+        labels,
+        url: js(v, "web_url"),
+        created_at: js(v, "created_at"),
+        updated_at: js(v, "updated_at"),
+        milestone,
+    }
+}
+
+/// List issues using `glab issue list`.
+///
+/// `filter` accepts "assigned" (assigned to me), "created" (created by me), or "" (all open).
+/// Pagination: glab's `--per-page` to limit results.
+#[tauri::command]
+pub(crate) async fn gl_list_issues(
+    cwd: String,
+    filter: String,
+    limit: Option<i64>,
+) -> Result<Vec<crate::types::Issue>, String> {
+    // GitLab caps --per-page at 100; clamp so an over-large limit doesn't error.
+    let lim = limit.unwrap_or(100).clamp(1, 100).to_string();
+    let mut args: Vec<String> = vec![
+        "issue".into(), "list".into(),
+        "--state".into(), "opened".into(),
+        "--per-page".into(), lim,
+        "--output".into(), "json".into(),
+    ];
+    // glab filter flags: --assignee / --author accept usernames or "@me".
+    match filter.as_str() {
+        "assigned" => { args.push("--assignee".into()); args.push("@me".into()); }
+        "created"  => { args.push("--author".into());   args.push("@me".into()); }
+        // "mentioned" has no native glab flag → fall back to all-open.
+        _ => {}
+    }
+    let output = hidden_cmd("glab")
+        .args(&args)
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("glab not available: {}", e))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("glab issue list failed: {}", stderr.trim()));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let raw: serde_json::Value = serde_json::from_str(stdout.trim())
+        .map_err(|e| format!("Failed to parse glab issue list output: {}", e))?;
+    let arr = raw.as_array().cloned().unwrap_or_default();
+    Ok(arr.iter().map(gl_issue_to_issue).collect())
+}
+
 /// Create a MR using `glab mr create`.
 #[tauri::command]
 pub(crate) async fn gl_create_mr(
@@ -1142,4 +1211,31 @@ pub(crate) async fn gl_delete_reaction(
         glab_api(&cwd, "DELETE", &path, &[])?;
         Ok(())
     }).await.map_err(|e| e.to_string())?
+}
+
+#[cfg(test)]
+mod gl_list_issues_tests {
+    use super::gl_issue_to_issue;
+
+    #[test]
+    fn maps_gitlab_issue_json_to_issue() {
+        let v: serde_json::Value = serde_json::from_str(r#"{
+            "iid": 12, "title": "Crash", "state": "opened",
+            "author": {"username": "alice"},
+            "assignees": [{"username": "bob"}],
+            "labels": ["bug","p1"],
+            "web_url": "https://gitlab.com/o/r/-/issues/12",
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-02T00:00:00Z",
+            "milestone": {"title": "M1"}
+        }"#).unwrap();
+        let i = gl_issue_to_issue(&v);
+        assert_eq!(i.number, 12);
+        assert_eq!(i.state, "open");
+        assert_eq!(i.author, "alice");
+        assert_eq!(i.assignees, vec!["bob".to_string()]);
+        assert_eq!(i.labels, vec!["bug".to_string(), "p1".to_string()]);
+        assert_eq!(i.milestone, "M1");
+        assert_eq!(i.url, "https://gitlab.com/o/r/-/issues/12");
+    }
 }

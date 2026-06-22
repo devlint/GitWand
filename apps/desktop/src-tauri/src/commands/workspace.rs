@@ -11,6 +11,7 @@
 //!
 //! See `src/git/libgit2.rs` for the per-repo helpers used here.
 
+use crate::commands::github_api;
 use crate::git::*;
 use crate::types::*;
 use rayon::prelude::*;
@@ -157,9 +158,26 @@ pub(crate) async fn workspace_wip_all(repos: Vec<WorkspaceRepo>) -> Vec<Workspac
 /// from a single user fit well within the 5000 req/h authenticated budget.
 #[tauri::command]
 pub(crate) async fn workspace_prs_all(repos: Vec<WorkspaceRepo>) -> Vec<WorkspaceRepoPrs> {
+    // OAuth/REST path (#73): when a Settings-managed GitHub token exists, drive
+    // the Launchpad through the REST API instead of spawning `gh` — so users who
+    // signed in via Settings > Accounts (and have no `gh` binary installed) get a
+    // working dashboard instead of "gh not available" on every row. Mirrors the
+    // routing rule used by the sidebar `gh_*` commands (see `github_api`).
+    let rest_token = github_api::settings_github_token();
+
     repos.into_par_iter().map(|repo| {
         let repo_path = repo.path.clone();
         let repo_name = repo.name.clone();
+
+        if let Some(tok) = rest_token.as_deref() {
+            // `rest_list_prs` returns the same enriched `Vec<PullRequest>` the
+            // notification diff consumes (CI rollup + mergeable state). Per-repo
+            // errors (non-GitHub remote, network) are captured, not fatal.
+            return match github_api::rest_list_prs(&repo_path, "open", 10, 0, tok) {
+                Ok(prs) => WorkspaceRepoPrs { repo_path, repo_name, prs, error: None },
+                Err(e) => WorkspaceRepoPrs { repo_path, repo_name, prs: vec![], error: Some(e) },
+            };
+        }
 
         // GH_TOKEN propagation: centralized in `hidden_cmd` (cf. git/cmd.rs).
         // v2.16: the Launchpad notification diff (useLaunchpadNotifications)
@@ -225,6 +243,32 @@ pub(crate) async fn workspace_prs_all(repos: Vec<WorkspaceRepo>) -> Vec<Workspac
 /// so it's safe to share across threads.
 #[tauri::command]
 pub(crate) async fn workspace_issues_all(repos: Vec<WorkspaceRepo>, filter: String) -> Vec<WorkspaceRepoIssues> {
+    // OAuth/REST path (#73): same routing rule as `workspace_prs_all`. The
+    // assigned/created/mentioned filters map `@me` to a concrete login, so we
+    // resolve the authenticated user once (a single REST round-trip) and pass it
+    // into every per-repo call rather than re-resolving N times.
+    let rest_token = github_api::settings_github_token();
+    if let Some(tok) = rest_token.as_deref() {
+        let me = match filter.as_str() {
+            "assigned" | "created" | "mentioned" => {
+                github_api::rest_current_user(tok).unwrap_or_default()
+            }
+            _ => String::new(),
+        };
+        return repos.into_par_iter().map(|repo| {
+            let repo_path = repo.path.clone();
+            let repo_name = repo.name.clone();
+            match github_api::rest_list_issues(&repo_path, &filter, &me, 100, tok) {
+                Ok(issues) => WorkspaceRepoIssues {
+                    repo_path, repo_name, issues, filter: filter.clone(), error: None,
+                },
+                Err(e) => WorkspaceRepoIssues {
+                    repo_path, repo_name, issues: vec![], filter: filter.clone(), error: Some(e),
+                },
+            }
+        }).collect();
+    }
+
     repos.into_par_iter().map(|repo| {
         let repo_path = repo.path.clone();
         let repo_name = repo.name.clone();

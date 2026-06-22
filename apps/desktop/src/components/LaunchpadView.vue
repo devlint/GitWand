@@ -1,21 +1,22 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch, toRef } from "vue";
+import { ref, onMounted, computed, watch, toRef, inject } from "vue";
 import { saveSettings as persistAppSettings } from "../composables/useSettings";
 import { avatarStyle, avatarInitials } from "../composables/useAvatar";
 import { useLaunchpadWip } from "../composables/useLaunchpadWip";
 import { useLaunchpadPrs } from "../composables/useLaunchpadPrs";
-import { useLaunchpadInbox, type InboxBucketKey } from "../composables/useLaunchpadInbox";
+import { useLaunchpadInbox, type InboxAction, type InboxCase } from "../composables/useLaunchpadInbox";
 import { useLaunchpadIssues } from "../composables/useLaunchpadIssues";
 import { useLaunchpadScope } from "../composables/useLaunchpadScope";
 import { useRepoActionCards, type RepoCardKind } from "../composables/useRepoActionCards";
-import { useLaunchpadPins } from "../composables/useLaunchpadPins";
 import { useLaunchpadTeam } from "../composables/useLaunchpadTeam";
 import type { TeamMemberActivity, OverlappingPr } from "../composables/useLaunchpadTeam";
 import { useI18n } from "../composables/useI18n";
 import { useSettings } from "../composables/useSettings";
+import { OPEN_SETTINGS_KEY } from "../composables/branchPickerBridge";
+import type { ForgeName } from "../composables/forge/types";
 import type { WorkspaceRepo } from "../utils/backend";
 import type { PrWithRepo } from "../composables/useLaunchpadPrs";
-import type { IssueFilter, IssueWithRepo } from "../composables/useLaunchpadIssues";
+import type { IssueWithRepo } from "../composables/useLaunchpadIssues";
 
 const props = defineProps<{
   repos: WorkspaceRepo[];
@@ -61,27 +62,79 @@ const teamTabEnabled = computed(() => settings.value.launchpadTeamTabEnabled !==
 // stay eager because their per-tab badges need real numbers at boot.
 const teamLoaded = ref(false);
 
-const { wip, loading: wipLoading, error: wipError, refresh: refreshWip } = useLaunchpadWip();
-const { allPrs, snoozedPrs, repos: prRepos, loading: prsLoading, error: prsError, refresh: refreshPrs } = useLaunchpadPrs();
-// Inbox — "À traiter": derives the action-grouped subset of allPrs (review
-// requested of me, changes requested / failing CI / approved on my own PRs).
-const { buckets: inboxBuckets, totalCount: inboxTotal, loadUser: loadInboxUser } = useLaunchpadInbox(allPrs);
+const { wip, loading: wipLoading, refresh: refreshWip } = useLaunchpadWip();
+const { allPrs, needsConnection: prNeedsConnection, loading: prsLoading, error: prsError, refresh: refreshPrs } = useLaunchpadPrs();
+// Issues — declared early so allIssues can be passed into useLaunchpadInbox below.
+const { allIssues, loading: issuesLoading, refresh: refreshIssues } = useLaunchpadIssues();
+// Inbox — unified fixed-section inbox: mine / assigned / review / issues / deps.
+const { nowCount, totalCount: inboxTotal, loadUser: loadInboxUser, sections } = useLaunchpadInbox(allPrs, allIssues);
+
 // Local action cards (commit / push / publish / sync) derived from cross-repo
-// WIP — the other pluggable source of the inbox-journal alongside PR buckets.
+// WIP — prepended as the "repos" section above the PR/issue sections.
 const { cards: localCards, totalCount: localTotal } = useRepoActionCards(wip);
-/** Total inbox items = local action cards + PR buckets (drives badge + empty state). */
+/** Total inbox items = local action cards + PR/issue sections (drives badge + empty state). */
 const inboxCount = computed(() => localTotal.value + inboxTotal.value);
 
-/** i18n label for an inbox bucket header. */
-function inboxBucketLabel(key: InboxBucketKey): string {
-  return t(`launchpad.inbox.${key}`);
+/** i18n label for an inbox action button. */
+function inboxActionLabel(action: InboxAction): string {
+  return t(`launchpad.action.${action}`);
+}
+
+// Ephemeral collapsed-section state (keyed by section.key).
+// Use a new Set on each toggle so Vue detects the reference change and re-renders.
+const collapsedSections = ref<Set<string>>(new Set());
+function toggleSectionCollapse(sectionKey: string): void {
+  const next = new Set(collapsedSections.value);
+  if (next.has(sectionKey)) next.delete(sectionKey);
+  else next.add(sectionKey);
+  collapsedSections.value = next;
 }
 /** i18n label for a local action card (count-aware). */
 function localCardLabel(kind: RepoCardKind, count: number): string {
   return t(`launchpad.card.${kind}`, count);
 }
-const { allIssues, snoozedIssues, repos: issueRepos, loading: issuesLoading, error: issuesError, activeFilter: issueFilter, totalCount: issuesTotal, refresh: refreshIssues } = useLaunchpadIssues();
-const { pin, unpin, snooze, unsnooze, isPinned, isSnoozed, snoozedUntil } = useLaunchpadPins();
+/** i18n label for the local action card's CTA button. */
+function cardActionLabel(kind: RepoCardKind): string {
+  return t(`launchpad.cardAction.${kind}`);
+}
+/** i18n state-pill label for an inbox case. */
+function inboxStateLabel(c: InboxCase): string {
+  return t(`launchpad.case.${c}`);
+}
+/**
+ * Accent colour name for an inbox case — drives the card's left border, the
+ * state-pill dot, and its text colour. One of: success | accent | danger |
+ * warning | info | muted.
+ */
+const CASE_ACCENT: Record<InboxCase, string> = {
+  merge: "success",
+  review: "accent",
+  conflicts: "danger",
+  ci: "danger",
+  changes: "warning",
+  waiting: "muted",
+  ciRunning: "info",
+  blocked: "warning",
+  assigned: "info",
+  issue: "accent",
+};
+function inboxAccent(c: InboxCase): string {
+  return CASE_ACCENT[c];
+}
+/** Compact, locale-aware relative time (e.g. "12 min", "3 h", "2 j"). */
+function relativeTime(iso: string): string {
+  if (!iso) return "";
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return "";
+  const sec = Math.max(0, Math.round((Date.now() - then) / 1000));
+  const min = Math.max(1, Math.round(sec / 60));
+  if (min < 60) return t("launchpad.timeMin", min);
+  const hr = Math.round(min / 60);
+  if (hr < 24) return t("launchpad.timeHour", hr);
+  const day = Math.round(hr / 24);
+  if (day < 7) return t("launchpad.timeDay", day);
+  return t("launchpad.timeWeek", Math.round(day / 7));
+}
 const {
   teamActivity,
   loading: teamLoading,
@@ -89,27 +142,22 @@ const {
   refresh: refreshTeam,
 } = useLaunchpadTeam();
 
-type Tab = "inbox" | "wip" | "prs" | "issues" | "team";
+// Phase 2: the tab model collapses to "inbox" (unified list) | "team" (secondary).
+// Legacy values from Phase 1 ("wip"|"prs"|"issues") are migrated to "inbox" at read time.
+type ActiveTab = "inbox" | "team";
 
-// Persist active tab across openings (v2.9 §1.3). Source of truth is
-// `settings.launchpadActiveTab` — read once at boot so the user lands back on
-// the tab they were on last session, then write through `setTab()` on every
-// change. A computed getter/setter keeps the template binding ergonomic.
-const activeTab = computed<Tab>({
-  get: () => settings.value.launchpadActiveTab,
+// Persist active tab across openings. Legacy values migrate to "inbox".
+const activeTab = computed<ActiveTab>({
+  get: () => {
+    const raw = settings.value.launchpadActiveTab;
+    // Migrate legacy tab values to "inbox"
+    return (raw === "team") ? "team" : "inbox";
+  },
   set: (val) => {
     settings.value.launchpadActiveTab = val;
     persistAppSettings(settings.value);
   },
 });
-
-// ── ⋮ menu state ──────────────────────────────────────────────────────────────
-const openMenuUrl = ref<string | null>(null);
-const openSnoozeFor = ref<string | null>(null);
-
-// ── Snoozed bandeau visibility ─────────────────────────────────────────────────
-const showSnoozedPrs = ref(false);
-const showSnoozedIssues = ref(false);
 
 // ── Team expanded state ────────────────────────────────────────────────────────
 const expandedTeamMembers = ref<Set<string>>(new Set());
@@ -148,7 +196,7 @@ function loadTeam(): void {
     });
 }
 
-function setTab(tab: Tab) {
+function setTab(tab: ActiveTab) {
   activeTab.value = tab;
   // Lazy fetch on first visit to the Team tab. After this, the Refresh
   // button re-fetches but `teamLoaded` stays true so the placeholder is
@@ -159,11 +207,13 @@ function setTab(tab: Tab) {
 }
 
 function handleRefresh() {
-  if (activeTab.value === "wip") refreshWip(scopedRepos.value);
-  else if (activeTab.value === "prs") refreshPrs(scopedRepos.value);
-  else if (activeTab.value === "issues") refreshIssues(scopedRepos.value);
-  else if (activeTab.value === "team") {
+  if (activeTab.value === "team") {
     loadTeam();
+  } else {
+    // Unified inbox: refresh all data sources.
+    refreshWip(scopedRepos.value);
+    refreshPrs(scopedRepos.value);
+    refreshIssues(scopedRepos.value);
   }
 }
 
@@ -203,55 +253,21 @@ async function handleRefreshAll() {
   }
 }
 
-function setIssueFilter(filter: IssueFilter) {
-  // The three filters are already cached by useLaunchpadIssues.refresh(), so
-  // switching sub-filter is a pure view change — no refetch needed.
-  issueFilter.value = filter;
-}
-
 const isLoading = () => wipLoading.value || prsLoading.value || issuesLoading.value || teamLoading.value;
 
-// ── Menu helpers ──────────────────────────────────────────────────────────────
-function toggleMenu(url: string): void {
-  if (openMenuUrl.value === url) {
-    openMenuUrl.value = null;
-    openSnoozeFor.value = null;
-  } else {
-    openMenuUrl.value = url;
-    openSnoozeFor.value = null;
-  }
-}
-
 function closeMenu(): void {
-  openMenuUrl.value = null;
-  openSnoozeFor.value = null;
   scopeMenuOpen.value = false;
 }
 
-function pinAndClose(url: string, type: "pr" | "issue"): void {
-  pin(url, type);
-  closeMenu();
+// ── Forge connect banner helpers ──────────────────────────────────────────
+const openSettings = inject(OPEN_SETTINGS_KEY, undefined);
+
+function forgeLabel(forge: ForgeName): string {
+  return t(`forgeConnect.${forge}` as Parameters<typeof t>[0]);
 }
 
-function unpinAndClose(url: string): void {
-  unpin(url);
-  closeMenu();
-}
-
-function snoozeAndClose(url: string, type: "pr" | "issue", days: 1 | 3 | 7 | 14): void {
-  snooze(url, type, days);
-  closeMenu();
-}
-
-function unsnoozeAndClose(url: string): void {
-  unsnooze(url);
-  closeMenu();
-}
-
-function formatSnoozedUntil(url: string): string {
-  const d = snoozedUntil(url);
-  if (!d) return "";
-  return new Date(d).toLocaleDateString();
+function openSettingsAccounts(): void {
+  openSettings?.("accounts");
 }
 
 onMounted(() => {
@@ -364,7 +380,7 @@ watch(scopedRepos, () => {
       </button>
     </div>
 
-    <!-- Tab bar -->
+    <!-- Surface bar: unified inbox pill + Team secondary pill -->
     <div class="launchpad-view__tabs">
       <button
         class="launchpad-view__tab"
@@ -376,36 +392,10 @@ watch(scopedRepos, () => {
           {{ inboxCount }}
         </span>
       </button>
-      <button
-        class="launchpad-view__tab"
-        :class="{ 'launchpad-view__tab--active': activeTab === 'wip' }"
-        @click="setTab('wip')"
-      >
-        {{ t("launchpad.wipTab") }}
-      </button>
-      <button
-        class="launchpad-view__tab"
-        :class="{ 'launchpad-view__tab--active': activeTab === 'prs' }"
-        @click="setTab('prs')"
-      >
-        {{ t("launchpad.prsTab") }}
-        <span v-if="allPrs.length > 0" class="launchpad-view__tab-badge">
-          {{ allPrs.length }}
-        </span>
-      </button>
-      <button
-        class="launchpad-view__tab"
-        :class="{ 'launchpad-view__tab--active': activeTab === 'issues' }"
-        @click="setTab('issues')"
-      >
-        {{ t("launchpad.issuesTab") }}
-        <span v-if="issuesTotal > 0" class="launchpad-view__tab-badge">
-          {{ issuesTotal }}
-        </span>
-      </button>
+      <!-- Team: secondary surface, lazy-loaded, preserved lazy-load contract -->
       <button
         v-if="teamTabEnabled"
-        class="launchpad-view__tab"
+        class="launchpad-view__tab launchpad-view__tab--team"
         :class="{ 'launchpad-view__tab--active': activeTab === 'team' }"
         @click="setTab('team')"
       >
@@ -413,7 +403,7 @@ watch(scopedRepos, () => {
       </button>
     </div>
 
-    <!-- Inbox tab — "À traiter" : action-grouped subset of open PRs -->
+    <!-- Inbox tab — fixed-section scrolling inbox: repos + mine + assigned + review + issues + deps -->
     <div v-if="activeTab === 'inbox'" class="launchpad-view__panel">
       <span
         v-if="prsLoading && allPrs.length > 0"
@@ -424,8 +414,22 @@ watch(scopedRepos, () => {
           <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-dasharray="14 42"></circle>
         </svg>
       </span>
+      <!-- Per-forge "connect your account" banners (multi-forge Today) — independent of loading state -->
+      <div
+        v-for="forge in prNeedsConnection"
+        :key="forge"
+        class="launchpad-view__forge-banner"
+        @click="openSettingsAccounts()"
+      >
+        <span>{{ t("forgeConnect.banner", forgeLabel(forge)) }}</span>
+        <button
+          type="button"
+          class="launchpad-view__forge-banner-action"
+          @click.stop="openSettingsAccounts()"
+        >{{ t("forgeConnect.action") }}</button>
+      </div>
       <div v-if="prsError" class="launchpad-view__error">
-        {{ t("launchpad.errorFetch", prsError) }}
+        {{ t("launchpad.errorFetch", prsError ?? "") }}
       </div>
       <div v-else-if="prsLoading && allPrs.length === 0" class="launchpad-view__loading-block">
         <span class="launchpad-view__spinner" aria-hidden="true">
@@ -439,512 +443,204 @@ watch(scopedRepos, () => {
         {{ t("launchpad.inboxEmpty") }}
       </p>
       <template v-else>
-        <!-- Local action cards (commit / push / publish / sync) — "sur tes dépôts". -->
-        <div v-if="localCards.length > 0" class="launchpad-view__inbox-section">
-          <div class="launchpad-view__inbox-header launchpad-view__inbox-header--local">
-            <span class="launchpad-view__inbox-dot" aria-hidden="true"></span>
-            <span class="launchpad-view__inbox-label">{{ t("launchpad.localSection") }}</span>
+        <!-- Summary line: total items · items needing immediate action -->
+        <p class="launchpad-view__inbox-summary">
+          {{ t("launchpad.inboxSummary", inboxCount, nowCount) }}
+        </p>
+
+        <!-- Section 1: Repo status — local action cards (commit / push / publish / sync). ALWAYS FIRST. -->
+        <div v-if="localCards.length > 0" class="launchpad-view__inbox-section" data-section="repos">
+          <button
+            type="button"
+            class="launchpad-view__inbox-header"
+            :aria-expanded="!collapsedSections.has('repos')"
+            @click.stop="toggleSectionCollapse('repos')"
+          >
+            <span class="launchpad-view__inbox-label">{{ t("launchpad.section.repos") }}</span>
             <span class="launchpad-view__inbox-count">{{ localCards.length }}</span>
-          </div>
-          <ul class="launchpad-view__pr-list">
-            <li
+            <span
+              class="launchpad-view__tier-chevron"
+              :class="{ 'launchpad-view__tier-chevron--collapsed': collapsedSections.has('repos') }"
+              aria-hidden="true"
+            >
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+            </span>
+          </button>
+          <div v-if="!collapsedSections.has('repos')" class="launchpad-view__local-band">
+            <div
               v-for="card in localCards"
               :key="card.id"
-              class="launchpad-view__pr-item"
+              class="launchpad-view__local-card"
             >
-              <span class="launchpad-view__pr-repo">{{ card.repoName }}</span>
-              <span class="launchpad-view__pr-title">
-                <button type="button" class="launchpad-view__pr-link" @click="emit('open-repo-changes', card.repoPath)">
-                  {{ localCardLabel(card.kind, card.count) }}
-                </button>
+              <span class="launchpad-view__local-icon" aria-hidden="true">
+                <svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="5" cy="3" r="1.6" />
+                  <circle cx="5" cy="13" r="1.6" />
+                  <circle cx="11" cy="6" r="1.6" />
+                  <path d="M5 4.6v6.8M5 5C5 7.6 11 7.4 11 5.4" />
+                </svg>
               </span>
-            </li>
-          </ul>
+              <div class="launchpad-view__local-text">
+                <span class="launchpad-view__local-title">{{ localCardLabel(card.kind, card.count) }}</span>
+                <span class="launchpad-view__local-sub">{{ card.repoName }}</span>
+              </div>
+              <button
+                type="button"
+                class="launchpad-view__pr-action launchpad-view__pr-action--merge"
+                @click="emit('open-repo-changes', card.repoPath)"
+              >
+                {{ cardActionLabel(card.kind) }}
+              </button>
+            </div>
+          </div>
         </div>
 
+        <!-- Sections 2-6: mine / assigned / review / issues / deps (non-empty only, fixed order) -->
         <div
-          v-for="bucket in inboxBuckets"
-          :key="bucket.key"
+          v-for="section in sections"
+          :key="section.key"
           class="launchpad-view__inbox-section"
+          :data-section="section.key"
         >
-          <div
+          <button
+            type="button"
             class="launchpad-view__inbox-header"
-            :class="`launchpad-view__inbox-header--${bucket.key}`"
+            :aria-expanded="!collapsedSections.has(section.key)"
+            @click.stop="toggleSectionCollapse(section.key)"
           >
-            <span class="launchpad-view__inbox-dot" aria-hidden="true"></span>
-            <span class="launchpad-view__inbox-label">{{ inboxBucketLabel(bucket.key) }}</span>
-            <span class="launchpad-view__inbox-count">{{ bucket.prs.length }}</span>
-          </div>
-          <ul class="launchpad-view__pr-list">
-            <li
-              v-for="pr in bucket.prs"
-              :key="`${pr.repoPath}/${pr.number}`"
-              class="launchpad-view__pr-item"
+            <span class="launchpad-view__inbox-label">{{ t(section.titleKey) }}</span>
+            <span class="launchpad-view__inbox-count">{{ section.count }}</span>
+            <span
+              class="launchpad-view__tier-chevron"
+              :class="{ 'launchpad-view__tier-chevron--collapsed': collapsedSections.has(section.key) }"
+              aria-hidden="true"
             >
-              <span class="launchpad-view__pr-repo">{{ pr.repoName }}</span>
-              <span class="launchpad-view__pr-title">
-                <button type="button" class="launchpad-view__pr-link" @click="emit('open-pr', pr)">
-                  #{{ pr.number }} {{ pr.title }}
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+            </span>
+          </button>
+          <ul v-if="!collapsedSections.has(section.key)" class="launchpad-view__inbox-list">
+            <li
+              v-for="item in section.items"
+              :key="item.pr ? `pr:${item.pr.repoPath}/${item.pr.number}` : `issue:${item.issue?.repoPath}/${item.issue?.number}`"
+              class="launchpad-view__inbox-card"
+              :class="`launchpad-view__inbox-card--${inboxAccent(item.classification.case)}`"
+            >
+              <span
+                class="launchpad-view__inbox-unread"
+                :class="{ 'launchpad-view__inbox-unread--on': item.classification.tier === 'now' }"
+                aria-hidden="true"
+              ></span>
+              <!-- PR item -->
+              <template v-if="item.pr">
+                <span class="launchpad-view__inbox-type" aria-hidden="true">
+                  <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="4" cy="4" r="1.6" />
+                    <circle cx="4" cy="12" r="1.6" />
+                    <circle cx="12" cy="8" r="1.6" />
+                    <path d="M4 5.6v4.8M12 9.6V11a1.5 1.5 0 0 1-1.5 1.5H8M12 6.4 12 5" />
+                  </svg>
+                </span>
+                <span class="launchpad-view__inbox-avatar" :style="avatarStyle(item.pr.author)">
+                  {{ avatarInitials(item.pr.author) }}
+                </span>
+                <div class="launchpad-view__inbox-body">
+                  <div class="launchpad-view__inbox-line1">
+                    <button
+                      type="button"
+                      class="launchpad-view__pr-link launchpad-view__inbox-title"
+                      @click="emit('open-pr', item.pr)"
+                    >{{ item.pr.title }}</button>
+                    <span
+                      v-if="item.pr.checksRollup === 'SUCCESS'"
+                      class="launchpad-view__chip launchpad-view__chip--ci-ok"
+                    >✓ CI</span>
+                    <span
+                      v-else-if="item.pr.checksRollup === 'FAILURE'"
+                      class="launchpad-view__chip launchpad-view__chip--ci-fail"
+                    >✕ CI</span>
+                    <span
+                      v-else-if="item.pr.checksRollup === 'PENDING'"
+                      class="launchpad-view__chip launchpad-view__chip--ci-run"
+                    >CI</span>
+                    <span
+                      v-if="item.pr.reviewDecision === 'APPROVED'"
+                      class="launchpad-view__chip launchpad-view__chip--approved"
+                    >{{ t("launchpad.prApproved") }}</span>
+                  </div>
+                  <div class="launchpad-view__inbox-line2">
+                    <span class="launchpad-view__pr-repo">{{ item.pr.repoName }}</span>
+                    <span class="launchpad-view__inbox-num">#{{ item.pr.number }}</span>
+                    <span
+                      class="launchpad-view__inbox-state"
+                      :class="`launchpad-view__inbox-state--${inboxAccent(item.classification.case)}`"
+                    >
+                      <span class="launchpad-view__inbox-state-dot" aria-hidden="true"></span>
+                      {{ inboxStateLabel(item.classification.case) }}
+                    </span>
+                    <span class="launchpad-view__inbox-time">{{ relativeTime(item.pr.updatedAt) }}</span>
+                    <span
+                      v-if="item.pr.additions > 0 || item.pr.deletions > 0"
+                      class="launchpad-view__inbox-diff"
+                    >
+                      <span class="launchpad-view__inbox-diff-add">+{{ item.pr.additions }}</span>
+                      <span class="launchpad-view__inbox-diff-del">−{{ item.pr.deletions }}</span>
+                    </span>
+                    <span
+                      v-for="label in item.pr.labels"
+                      :key="label"
+                      class="launchpad-view__pr-label"
+                    >{{ label }}</span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  class="launchpad-view__pr-action"
+                  :class="`launchpad-view__pr-action--${item.classification.action}`"
+                  :title="inboxActionLabel(item.classification.action)"
+                  @click="emit('open-pr', item.pr)"
+                >
+                  {{ inboxActionLabel(item.classification.action) }}
                 </button>
-              </span>
-              <span class="launchpad-view__pr-author">@{{ pr.author }}</span>
-              <span
-                v-if="pr.checksRollup === 'FAILURE'"
-                class="launchpad-view__pr-badge launchpad-view__pr-badge--ci-failure"
-              >{{ t("launchpad.prCiFailure") }}</span>
-              <span
-                v-else-if="pr.checksRollup === 'PENDING'"
-                class="launchpad-view__pr-badge launchpad-view__pr-badge--ci-pending"
-              >{{ t("launchpad.prCiPending") }}</span>
+              </template>
+              <!-- Issue item -->
+              <template v-else-if="item.issue">
+                <span class="launchpad-view__inbox-type" aria-hidden="true">
+                  <!-- Issue icon (circle with dot) -->
+                  <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="8" cy="8" r="6" />
+                    <circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none" />
+                  </svg>
+                </span>
+                <span class="launchpad-view__inbox-avatar" :style="avatarStyle(item.issue.author)">
+                  {{ avatarInitials(item.issue.author) }}
+                </span>
+                <div class="launchpad-view__inbox-body">
+                  <div class="launchpad-view__inbox-line1">
+                    <button
+                      type="button"
+                      class="launchpad-view__pr-link launchpad-view__inbox-title"
+                      @click="emit('open-issue', item.issue)"
+                    >{{ item.issue.title }}</button>
+                  </div>
+                  <div class="launchpad-view__inbox-line2">
+                    <span class="launchpad-view__pr-repo">{{ item.issue.repoName }}</span>
+                    <span class="launchpad-view__inbox-num">#{{ item.issue.number }}</span>
+                    <span class="launchpad-view__inbox-time">{{ relativeTime(item.issue.updatedAt) }}</span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  class="launchpad-view__pr-action launchpad-view__pr-action--view"
+                  :title="inboxActionLabel(item.classification.action)"
+                  @click="emit('open-issue', item.issue)"
+                >
+                  {{ inboxActionLabel(item.classification.action) }}
+                </button>
+              </template>
             </li>
           </ul>
         </div>
       </template>
-    </div>
-
-    <!-- WIP tab -->
-    <div v-if="activeTab === 'wip'" class="launchpad-view__panel">
-      <span
-        v-if="wipLoading && wip.length > 0"
-        class="launchpad-view__refresh-spinner"
-        :aria-label="t('launchpad.loading')"
-      >
-        <svg viewBox="0 0 24 24" width="16" height="16">
-          <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-dasharray="14 42"></circle>
-        </svg>
-      </span>
-      <div v-if="wipError" class="launchpad-view__error">
-        {{ t("launchpad.errorFetch", wipError) }}
-      </div>
-      <div v-else-if="wipLoading && wip.length === 0" class="launchpad-view__loading-block">
-        <span class="launchpad-view__spinner" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="24" height="24">
-            <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-dasharray="14 42"></circle>
-          </svg>
-        </span>
-        <span class="launchpad-view__loading-label">{{ t("launchpad.loading") }}</span>
-      </div>
-      <p v-else-if="!wipLoading && wip.length === 0" class="launchpad-view__empty">
-        {{ t("launchpad.noRepos") }}
-      </p>
-      <ul v-else class="launchpad-view__repo-list">
-        <li
-          v-for="item in wip"
-          :key="item.path"
-          class="launchpad-view__repo-item"
-        >
-          <span class="launchpad-view__repo-name">{{ item.name }}</span>
-          <span class="launchpad-view__repo-branch">{{ item.branch }}</span>
-          <span v-if="item.hasNoUpstream" class="launchpad-view__no-upstream">
-            {{ t("launchpad.noUpstream") }}
-          </span>
-          <template v-else>
-            <span v-if="item.ahead > 0" class="launchpad-view__ahead">↑{{ item.ahead }}</span>
-            <span v-if="item.behind > 0" class="launchpad-view__behind">↓{{ item.behind }}</span>
-          </template>
-          <template v-if="item.stagedCount === 0 && item.unstagedCount === 0 && item.untrackedCount === 0">
-            <span class="launchpad-view__clean">{{ t("launchpad.clean") }}</span>
-          </template>
-          <template v-else>
-            <span v-if="item.stagedCount > 0" class="launchpad-view__staged">
-              {{ t("launchpad.staged", item.stagedCount) }}
-            </span>
-            <span v-if="item.unstagedCount > 0" class="launchpad-view__unstaged">
-              {{ t("launchpad.unstaged", item.unstagedCount) }}
-            </span>
-            <span v-if="item.untrackedCount > 0" class="launchpad-view__untracked">
-              {{ t("launchpad.untracked", item.untrackedCount) }}
-            </span>
-          </template>
-          <span v-if="item.lastCommitAt" class="launchpad-view__last-commit">
-            {{ t("launchpad.lastCommit", item.lastCommitAt) }}
-          </span>
-          <span v-if="item.error" class="launchpad-view__repo-error">{{ item.error }}</span>
-        </li>
-      </ul>
-    </div>
-
-    <!-- PRs tab -->
-    <div v-if="activeTab === 'prs'" class="launchpad-view__panel">
-      <span
-        v-if="prsLoading && (allPrs.length > 0 || snoozedPrs.length > 0)"
-        class="launchpad-view__refresh-spinner"
-        :aria-label="t('launchpad.loading')"
-      >
-        <svg viewBox="0 0 24 24" width="16" height="16">
-          <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-dasharray="14 42"></circle>
-        </svg>
-      </span>
-      <div v-if="prsError" class="launchpad-view__error">
-        {{ t("launchpad.errorFetch", prsError) }}
-      </div>
-      <div v-else-if="prsLoading && allPrs.length === 0 && snoozedPrs.length === 0" class="launchpad-view__loading-block">
-        <span class="launchpad-view__spinner" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="24" height="24">
-            <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-dasharray="14 42"></circle>
-          </svg>
-        </span>
-        <span class="launchpad-view__loading-label">{{ t("launchpad.loading") }}</span>
-      </div>
-      <p v-else-if="!prsLoading && allPrs.length === 0 && snoozedPrs.length === 0" class="launchpad-view__empty">
-        {{ t("launchpad.noPrs") }}
-      </p>
-      <ul v-else class="launchpad-view__pr-list">
-        <li
-          v-for="pr in allPrs"
-          :key="`${pr.repoPath}/${pr.number}`"
-          class="launchpad-view__pr-item"
-        >
-          <!-- Pin badge — always visible on pinned items -->
-          <span v-if="isPinned(pr.url)" class="launchpad-view__pin-badge" :aria-label="t('launchpad.pinBadge')">
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true">
-              <path d="M9.828.722a.5.5 0 0 1 .354.146l4.95 4.95a.5.5 0 0 1 0 .708c-.48.48-1.072.588-1.503.588-.177 0-.335-.018-.46-.039l-3.134 3.134a5.927 5.927 0 0 1 .16 1.013c.046.702-.032 1.687-.72 2.375a.5.5 0 0 1-.707 0l-2.829-2.828-3.182 3.182c-.195.195-1.219.902-1.414.707-.195-.195.512-1.22.707-1.414l3.182-3.182-2.828-2.829a.5.5 0 0 1 0-.707c.688-.688 1.673-.767 2.375-.72a5.922 5.922 0 0 1 1.013.16l3.134-3.133a2.772 2.772 0 0 1-.04-.461c0-.43.108-1.022.589-1.503a.5.5 0 0 1 .353-.146z"/>
-            </svg>
-          </span>
-          <span class="launchpad-view__pr-repo">{{ pr.repoName }}</span>
-          <span class="launchpad-view__pr-title">
-            <button type="button" class="launchpad-view__pr-link" @click="emit('open-pr', pr)">
-              #{{ pr.number }} {{ pr.title }}
-            </button>
-          </span>
-          <span v-if="pr.draft" class="launchpad-view__pr-badge launchpad-view__pr-badge--draft">
-            {{ t("launchpad.prDraft") }}
-          </span>
-          <span
-            v-if="pr.reviewDecision === 'APPROVED'"
-            class="launchpad-view__pr-badge launchpad-view__pr-badge--approved"
-          >
-            {{ t("launchpad.prApproved") }}
-          </span>
-          <span
-            v-else-if="pr.reviewDecision === 'CHANGES_REQUESTED'"
-            class="launchpad-view__pr-badge launchpad-view__pr-badge--changes"
-          >
-            {{ t("launchpad.prChangesRequested") }}
-          </span>
-          <span
-            v-else-if="pr.reviewDecision === 'REVIEW_REQUIRED'"
-            class="launchpad-view__pr-badge launchpad-view__pr-badge--review"
-          >
-            {{ t("launchpad.prReviewRequired") }}
-          </span>
-          <span
-            v-if="pr.checksRollup === 'SUCCESS'"
-            class="launchpad-view__pr-badge launchpad-view__pr-badge--ci-success"
-          >
-            {{ t("launchpad.prCiSuccess") }}
-          </span>
-          <span
-            v-else-if="pr.checksRollup === 'FAILURE'"
-            class="launchpad-view__pr-badge launchpad-view__pr-badge--ci-failure"
-          >
-            {{ t("launchpad.prCiFailure") }}
-          </span>
-          <span
-            v-else-if="pr.checksRollup === 'PENDING'"
-            class="launchpad-view__pr-badge launchpad-view__pr-badge--ci-pending"
-          >
-            {{ t("launchpad.prCiPending") }}
-          </span>
-          <span class="launchpad-view__pr-labels">
-            <span
-              v-for="label in pr.labels"
-              :key="label"
-              class="launchpad-view__pr-label"
-            >{{ label }}</span>
-          </span>
-          <!-- ⋮ action menu -->
-          <div class="launchpad-view__item-menu" @click.stop>
-            <button
-              class="launchpad-view__menu-btn"
-              :class="{ 'launchpad-view__menu-btn--open': openMenuUrl === pr.url }"
-              :aria-label="t('launchpad.prMenuLabel', pr.number)"
-              @click="toggleMenu(pr.url)"
-            >⋮</button>
-            <div v-if="openMenuUrl === pr.url" class="launchpad-view__menu-dropdown">
-              <button v-if="!isPinned(pr.url)" class="launchpad-view__menu-item" @click="pinAndClose(pr.url, 'pr')">
-                <span class="launchpad-view__menu-icon" aria-hidden="true">
-                  <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor">
-                    <path d="M9.828.722a.5.5 0 0 1 .354.146l4.95 4.95a.5.5 0 0 1 0 .708c-.48.48-1.072.588-1.503.588-.177 0-.335-.018-.46-.039l-3.134 3.134a5.927 5.927 0 0 1 .16 1.013c.046.702-.032 1.687-.72 2.375a.5.5 0 0 1-.707 0l-2.829-2.828-3.182 3.182c-.195.195-1.219.902-1.414.707-.195-.195.512-1.22.707-1.414l3.182-3.182-2.828-2.829a.5.5 0 0 1 0-.707c.688-.688 1.673-.767 2.375-.72a5.922 5.922 0 0 1 1.013.16l3.134-3.133a2.772 2.772 0 0 1-.04-.461c0-.43.108-1.022.589-1.503a.5.5 0 0 1 .353-.146z"/>
-                  </svg>
-                </span>
-                {{ t("launchpad.pin") }}
-              </button>
-              <button v-else class="launchpad-view__menu-item" @click="unpinAndClose(pr.url)">
-                <span class="launchpad-view__menu-icon" aria-hidden="true">
-                  <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor">
-                    <path d="M9.828.722a.5.5 0 0 1 .354.146l4.95 4.95a.5.5 0 0 1 0 .708c-.48.48-1.072.588-1.503.588-.177 0-.335-.018-.46-.039l-3.134 3.134a5.927 5.927 0 0 1 .16 1.013c.046.702-.032 1.687-.72 2.375a.5.5 0 0 1-.707 0l-2.829-2.828-3.182 3.182c-.195.195-1.219.902-1.414.707-.195-.195.512-1.22.707-1.414l3.182-3.182-2.828-2.829a.5.5 0 0 1 0-.707c.688-.688 1.673-.767 2.375-.72a5.922 5.922 0 0 1 1.013.16l3.134-3.133a2.772 2.772 0 0 1-.04-.461c0-.43.108-1.022.589-1.503a.5.5 0 0 1 .353-.146z"/>
-                  </svg>
-                </span>
-                {{ t("launchpad.unpin") }}
-              </button>
-              <template v-if="!isSnoozed(pr.url)">
-                <button class="launchpad-view__menu-item" @click="openSnoozeFor = pr.url">
-                  <span class="launchpad-view__menu-icon" aria-hidden="true">
-                    <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor">
-                      <path d="M6 .278a.768.768 0 0 1 .08.858 7.208 7.208 0 0 0-.878 3.46c0 4.021 3.278 7.277 7.318 7.277.527 0 1.04-.055 1.533-.16a.787.787 0 0 1 .81.316.733.733 0 0 1-.031.893A8.349 8.349 0 0 1 8.344 16C3.734 16 0 12.286 0 7.71 0 4.266 2.114 1.312 5.124.06A.752.752 0 0 1 6 .278z"/>
-                    </svg>
-                  </span>
-                  {{ t("launchpad.snooze") }}
-                </button>
-                <div v-if="openSnoozeFor === pr.url" class="launchpad-view__snooze-options">
-                  <button class="launchpad-view__menu-item launchpad-view__menu-item--sub" @click="snoozeAndClose(pr.url, 'pr', 1)">{{ t("launchpad.snooze1d") }}</button>
-                  <button class="launchpad-view__menu-item launchpad-view__menu-item--sub" @click="snoozeAndClose(pr.url, 'pr', 3)">{{ t("launchpad.snooze3d") }}</button>
-                  <button class="launchpad-view__menu-item launchpad-view__menu-item--sub" @click="snoozeAndClose(pr.url, 'pr', 7)">{{ t("launchpad.snooze1w") }}</button>
-                  <button class="launchpad-view__menu-item launchpad-view__menu-item--sub" @click="snoozeAndClose(pr.url, 'pr', 14)">{{ t("launchpad.snooze2w") }}</button>
-                </div>
-              </template>
-              <button v-else class="launchpad-view__menu-item" @click="unsnoozeAndClose(pr.url)">
-                <span class="launchpad-view__menu-icon" aria-hidden="true">
-                  <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor">
-                    <path d="M6 .278a.768.768 0 0 1 .08.858 7.208 7.208 0 0 0-.878 3.46c0 4.021 3.278 7.277 7.318 7.277.527 0 1.04-.055 1.533-.16a.787.787 0 0 1 .81.316.733.733 0 0 1-.031.893A8.349 8.349 0 0 1 8.344 16C3.734 16 0 12.286 0 7.71 0 4.266 2.114 1.312 5.124.06A.752.752 0 0 1 6 .278z"/>
-                  </svg>
-                </span>
-                {{ t("launchpad.unsnooze") }}
-              </button>
-            </div>
-          </div>
-          <!-- Secondary row: assignees & reviewers (§2.1) -->
-          <div
-            v-if="(pr.assignees && pr.assignees.length > 0) || (pr.reviewRequested && pr.reviewRequested.length > 0)"
-            class="launchpad-view__pr-people"
-          >
-            <span
-              v-if="pr.assignees && pr.assignees.length > 0"
-              class="launchpad-view__pr-people-group"
-            >
-              <span class="launchpad-view__pr-people-label">{{ t("launchpad.assignedShort") }}:</span>
-              <span
-                v-for="login in pr.assignees.slice(0, 3)"
-                :key="`a-${login}`"
-                class="launchpad-view__pr-chip launchpad-view__pr-chip--assignee"
-              >{{ login }}</span>
-              <span
-                v-if="pr.assignees.length > 3"
-                class="launchpad-view__pr-chip launchpad-view__pr-chip--more"
-              >+{{ pr.assignees.length - 3 }}</span>
-            </span>
-            <span
-              v-if="pr.reviewRequested && pr.reviewRequested.length > 0"
-              class="launchpad-view__pr-people-group"
-            >
-              <span class="launchpad-view__pr-people-label">{{ t("launchpad.reviewersShort") }}:</span>
-              <span
-                v-for="login in pr.reviewRequested.slice(0, 3)"
-                :key="`r-${login}`"
-                class="launchpad-view__pr-chip launchpad-view__pr-chip--reviewer"
-              >{{ login }}</span>
-              <span
-                v-if="pr.reviewRequested.length > 3"
-                class="launchpad-view__pr-chip launchpad-view__pr-chip--more"
-              >+{{ pr.reviewRequested.length - 3 }}</span>
-            </span>
-          </div>
-        </li>
-      </ul>
-      <!-- Per-repo errors -->
-      <template v-for="repo in prRepos" :key="repo.repoPath">
-        <p v-if="repo.error" class="launchpad-view__repo-error">
-          {{ repo.repoName }}: {{ repo.error }}
-        </p>
-      </template>
-      <!-- Snoozed PRs bandeau -->
-      <div
-        v-if="snoozedPrs.length > 0"
-        class="launchpad-view__snoozed-bandeau"
-        role="button"
-        tabindex="0"
-        @click="showSnoozedPrs = !showSnoozedPrs"
-        @keydown.enter="showSnoozedPrs = !showSnoozedPrs"
-        @keydown.space.prevent="showSnoozedPrs = !showSnoozedPrs"
-      >
-        <span class="launchpad-view__bandeau-icon" aria-hidden="true">
-          <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor">
-            <path d="M6 .278a.768.768 0 0 1 .08.858 7.208 7.208 0 0 0-.878 3.46c0 4.021 3.278 7.277 7.318 7.277.527 0 1.04-.055 1.533-.16a.787.787 0 0 1 .81.316.733.733 0 0 1-.031.893A8.349 8.349 0 0 1 8.344 16C3.734 16 0 12.286 0 7.71 0 4.266 2.114 1.312 5.124.06A.752.752 0 0 1 6 .278z"/>
-          </svg>
-        </span>
-        {{ t("launchpad.snoozedCount", snoozedPrs.length) }}
-        <span v-if="!showSnoozedPrs" class="launchpad-view__snoozed-show-label">{{ t("launchpad.showSnoozed") }} ▼</span>
-        <span v-else class="launchpad-view__snoozed-show-label">▲</span>
-      </div>
-      <ul v-if="showSnoozedPrs && snoozedPrs.length > 0" class="launchpad-view__snoozed-list">
-        <li v-for="pr in snoozedPrs" :key="pr.url" class="launchpad-view__snoozed-item">
-          <span class="launchpad-view__pr-repo">{{ pr.repoName }}</span>
-          <span class="launchpad-view__snoozed-title">{{ pr.title }}</span>
-          <span class="launchpad-view__snoozed-until">{{ t("launchpad.snoozedUntil", formatSnoozedUntil(pr.url)) }}</span>
-          <button class="launchpad-view__snooze-cancel" @click="unsnooze(pr.url)">
-            {{ t("launchpad.unsnooze") }}
-          </button>
-        </li>
-      </ul>
-    </div>
-
-    <!-- Issues tab -->
-    <div v-if="activeTab === 'issues'" class="launchpad-view__panel">
-      <!-- Filter buttons -->
-      <div class="launchpad-view__issue-filters">
-        <button
-          class="launchpad-view__filter-btn"
-          :class="{ 'launchpad-view__filter-btn--active': issueFilter === 'assigned' }"
-          @click="setIssueFilter('assigned')"
-        >
-          {{ t("launchpad.issueFilterAssigned") }}
-        </button>
-        <button
-          class="launchpad-view__filter-btn"
-          :class="{ 'launchpad-view__filter-btn--active': issueFilter === 'mentioned' }"
-          @click="setIssueFilter('mentioned')"
-        >
-          {{ t("launchpad.issueFilterMentioned") }}
-        </button>
-        <button
-          class="launchpad-view__filter-btn"
-          :class="{ 'launchpad-view__filter-btn--active': issueFilter === 'created' }"
-          @click="setIssueFilter('created')"
-        >
-          {{ t("launchpad.issueFilterCreated") }}
-        </button>
-      </div>
-
-      <span
-        v-if="issuesLoading && (allIssues.length > 0 || snoozedIssues.length > 0)"
-        class="launchpad-view__refresh-spinner"
-        :aria-label="t('launchpad.loading')"
-      >
-        <svg viewBox="0 0 24 24" width="16" height="16">
-          <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-dasharray="14 42"></circle>
-        </svg>
-      </span>
-      <div v-if="issuesError" class="launchpad-view__error">
-        {{ t("launchpad.errorFetch", issuesError) }}
-      </div>
-      <div v-else-if="issuesLoading && allIssues.length === 0 && snoozedIssues.length === 0" class="launchpad-view__loading-block">
-        <span class="launchpad-view__spinner" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="24" height="24">
-            <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-dasharray="14 42"></circle>
-          </svg>
-        </span>
-        <span class="launchpad-view__loading-label">{{ t("launchpad.loading") }}</span>
-      </div>
-      <p v-else-if="!issuesLoading && allIssues.length === 0 && snoozedIssues.length === 0" class="launchpad-view__empty">
-        {{ t("launchpad.noIssues") }}
-      </p>
-      <ul v-else class="launchpad-view__issue-list">
-        <li
-          v-for="issue in allIssues"
-          :key="`${issue.repoPath}/${issue.number}`"
-          class="launchpad-view__issue-item"
-        >
-          <!-- Pin badge — always visible on pinned items -->
-          <span v-if="isPinned(issue.url)" class="launchpad-view__pin-badge" :aria-label="t('launchpad.pinBadge')">
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true">
-              <path d="M9.828.722a.5.5 0 0 1 .354.146l4.95 4.95a.5.5 0 0 1 0 .708c-.48.48-1.072.588-1.503.588-.177 0-.335-.018-.46-.039l-3.134 3.134a5.927 5.927 0 0 1 .16 1.013c.046.702-.032 1.687-.72 2.375a.5.5 0 0 1-.707 0l-2.829-2.828-3.182 3.182c-.195.195-1.219.902-1.414.707-.195-.195.512-1.22.707-1.414l3.182-3.182-2.828-2.829a.5.5 0 0 1 0-.707c.688-.688 1.673-.767 2.375-.72a5.922 5.922 0 0 1 1.013.16l3.134-3.133a2.772 2.772 0 0 1-.04-.461c0-.43.108-1.022.589-1.503a.5.5 0 0 1 .353-.146z"/>
-            </svg>
-          </span>
-          <span class="launchpad-view__pr-repo">{{ issue.repoName }}</span>
-          <span class="launchpad-view__issue-title">
-            <button type="button" class="launchpad-view__pr-link" @click="emit('open-issue', issue)">
-              #{{ issue.number }} {{ issue.title }}
-            </button>
-          </span>
-          <span v-if="issue.milestone" class="launchpad-view__issue-milestone">
-            {{ t("launchpad.issueMilestone", issue.milestone) }}
-          </span>
-          <span class="launchpad-view__pr-labels">
-            <span
-              v-for="label in issue.labels"
-              :key="label"
-              class="launchpad-view__pr-label"
-            >{{ label }}</span>
-          </span>
-          <!-- ⋮ action menu -->
-          <div class="launchpad-view__item-menu" @click.stop>
-            <button
-              class="launchpad-view__menu-btn"
-              :class="{ 'launchpad-view__menu-btn--open': openMenuUrl === issue.url }"
-              :aria-label="t('launchpad.issueMenuLabel', issue.number)"
-              @click="toggleMenu(issue.url)"
-            >⋮</button>
-            <div v-if="openMenuUrl === issue.url" class="launchpad-view__menu-dropdown">
-              <button v-if="!isPinned(issue.url)" class="launchpad-view__menu-item" @click="pinAndClose(issue.url, 'issue')">
-                <span class="launchpad-view__menu-icon" aria-hidden="true">
-                  <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor">
-                    <path d="M9.828.722a.5.5 0 0 1 .354.146l4.95 4.95a.5.5 0 0 1 0 .708c-.48.48-1.072.588-1.503.588-.177 0-.335-.018-.46-.039l-3.134 3.134a5.927 5.927 0 0 1 .16 1.013c.046.702-.032 1.687-.72 2.375a.5.5 0 0 1-.707 0l-2.829-2.828-3.182 3.182c-.195.195-1.219.902-1.414.707-.195-.195.512-1.22.707-1.414l3.182-3.182-2.828-2.829a.5.5 0 0 1 0-.707c.688-.688 1.673-.767 2.375-.72a5.922 5.922 0 0 1 1.013.16l3.134-3.133a2.772 2.772 0 0 1-.04-.461c0-.43.108-1.022.589-1.503a.5.5 0 0 1 .353-.146z"/>
-                  </svg>
-                </span>
-                {{ t("launchpad.pin") }}
-              </button>
-              <button v-else class="launchpad-view__menu-item" @click="unpinAndClose(issue.url)">
-                <span class="launchpad-view__menu-icon" aria-hidden="true">
-                  <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor">
-                    <path d="M9.828.722a.5.5 0 0 1 .354.146l4.95 4.95a.5.5 0 0 1 0 .708c-.48.48-1.072.588-1.503.588-.177 0-.335-.018-.46-.039l-3.134 3.134a5.927 5.927 0 0 1 .16 1.013c.046.702-.032 1.687-.72 2.375a.5.5 0 0 1-.707 0l-2.829-2.828-3.182 3.182c-.195.195-1.219.902-1.414.707-.195-.195.512-1.22.707-1.414l3.182-3.182-2.828-2.829a.5.5 0 0 1 0-.707c.688-.688 1.673-.767 2.375-.72a5.922 5.922 0 0 1 1.013.16l3.134-3.133a2.772 2.772 0 0 1-.04-.461c0-.43.108-1.022.589-1.503a.5.5 0 0 1 .353-.146z"/>
-                  </svg>
-                </span>
-                {{ t("launchpad.unpin") }}
-              </button>
-              <template v-if="!isSnoozed(issue.url)">
-                <button class="launchpad-view__menu-item" @click="openSnoozeFor = issue.url">
-                  <span class="launchpad-view__menu-icon" aria-hidden="true">
-                    <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor">
-                      <path d="M6 .278a.768.768 0 0 1 .08.858 7.208 7.208 0 0 0-.878 3.46c0 4.021 3.278 7.277 7.318 7.277.527 0 1.04-.055 1.533-.16a.787.787 0 0 1 .81.316.733.733 0 0 1-.031.893A8.349 8.349 0 0 1 8.344 16C3.734 16 0 12.286 0 7.71 0 4.266 2.114 1.312 5.124.06A.752.752 0 0 1 6 .278z"/>
-                    </svg>
-                  </span>
-                  {{ t("launchpad.snooze") }}
-                </button>
-                <div v-if="openSnoozeFor === issue.url" class="launchpad-view__snooze-options">
-                  <button class="launchpad-view__menu-item launchpad-view__menu-item--sub" @click="snoozeAndClose(issue.url, 'issue', 1)">{{ t("launchpad.snooze1d") }}</button>
-                  <button class="launchpad-view__menu-item launchpad-view__menu-item--sub" @click="snoozeAndClose(issue.url, 'issue', 3)">{{ t("launchpad.snooze3d") }}</button>
-                  <button class="launchpad-view__menu-item launchpad-view__menu-item--sub" @click="snoozeAndClose(issue.url, 'issue', 7)">{{ t("launchpad.snooze1w") }}</button>
-                  <button class="launchpad-view__menu-item launchpad-view__menu-item--sub" @click="snoozeAndClose(issue.url, 'issue', 14)">{{ t("launchpad.snooze2w") }}</button>
-                </div>
-              </template>
-              <button v-else class="launchpad-view__menu-item" @click="unsnoozeAndClose(issue.url)">
-                <span class="launchpad-view__menu-icon" aria-hidden="true">
-                  <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor">
-                    <path d="M6 .278a.768.768 0 0 1 .08.858 7.208 7.208 0 0 0-.878 3.46c0 4.021 3.278 7.277 7.318 7.277.527 0 1.04-.055 1.533-.16a.787.787 0 0 1 .81.316.733.733 0 0 1-.031.893A8.349 8.349 0 0 1 8.344 16C3.734 16 0 12.286 0 7.71 0 4.266 2.114 1.312 5.124.06A.752.752 0 0 1 6 .278z"/>
-                    </svg>
-                </span>
-                {{ t("launchpad.unsnooze") }}
-              </button>
-            </div>
-          </div>
-        </li>
-      </ul>
-      <!-- Per-repo errors -->
-      <template v-for="repo in issueRepos" :key="repo.repoPath">
-        <p v-if="repo.error" class="launchpad-view__repo-error">
-          {{ repo.repoName }}: {{ repo.error }}
-        </p>
-      </template>
-      <!-- Snoozed Issues bandeau -->
-      <div
-        v-if="snoozedIssues.length > 0"
-        class="launchpad-view__snoozed-bandeau"
-        role="button"
-        tabindex="0"
-        @click="showSnoozedIssues = !showSnoozedIssues"
-        @keydown.enter="showSnoozedIssues = !showSnoozedIssues"
-        @keydown.space.prevent="showSnoozedIssues = !showSnoozedIssues"
-      >
-        <span class="launchpad-view__bandeau-icon" aria-hidden="true">
-          <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor">
-            <path d="M6 .278a.768.768 0 0 1 .08.858 7.208 7.208 0 0 0-.878 3.46c0 4.021 3.278 7.277 7.318 7.277.527 0 1.04-.055 1.533-.16a.787.787 0 0 1 .81.316.733.733 0 0 1-.031.893A8.349 8.349 0 0 1 8.344 16C3.734 16 0 12.286 0 7.71 0 4.266 2.114 1.312 5.124.06A.752.752 0 0 1 6 .278z"/>
-          </svg>
-        </span>
-        {{ t("launchpad.snoozedCount", snoozedIssues.length) }}
-        <span v-if="!showSnoozedIssues" class="launchpad-view__snoozed-show-label">{{ t("launchpad.showSnoozed") }} ▼</span>
-        <span v-else class="launchpad-view__snoozed-show-label">▲</span>
-      </div>
-      <ul v-if="showSnoozedIssues && snoozedIssues.length > 0" class="launchpad-view__snoozed-list">
-        <li v-for="issue in snoozedIssues" :key="issue.url" class="launchpad-view__snoozed-item">
-          <span class="launchpad-view__pr-repo">{{ issue.repoName }}</span>
-          <span class="launchpad-view__snoozed-title">{{ issue.title }}</span>
-          <span class="launchpad-view__snoozed-until">{{ t("launchpad.snoozedUntil", formatSnoozedUntil(issue.url)) }}</span>
-          <button class="launchpad-view__snooze-cancel" @click="unsnooze(issue.url)">
-            {{ t("launchpad.unsnooze") }}
-          </button>
-        </li>
-      </ul>
     </div>
 
     <!-- ── Team panel ─────────────────────────────────────────── -->
@@ -990,7 +686,7 @@ watch(scopedRepos, () => {
 
       <!-- Error -->
       <div v-else-if="teamError" class="launchpad-view__error">
-        {{ t("launchpad.errorFetch", teamError) }}
+        {{ t("launchpad.errorFetch", teamError ?? "") }}
       </div>
 
       <!-- Empty state — only after a successful load, so we don't show
@@ -1172,10 +868,19 @@ watch(scopedRepos, () => {
   flex: 1;
   display: flex;
   flex-direction: column;
+  align-items: center; /* centre the capped-width content column (mockup layout) */
   gap: var(--space-5);
   padding: var(--space-6) var(--space-7);
   overflow-y: auto;
   min-height: 0;
+}
+
+/* Centered content column — caps line length on wide windows, mirrors the mockup. */
+.launchpad-view__header,
+.launchpad-view__tabs,
+.launchpad-view__panel {
+  width: 100%;
+  max-width: 960px;
 }
 
 /* ── Header ────────────────────────────────────────────── */
@@ -1331,22 +1036,22 @@ watch(scopedRepos, () => {
 /* ── Tab bar ───────────────────────────────────────────── */
 .launchpad-view__tabs {
   display: flex;
-  gap: var(--space-2);
-  border-bottom: 1px solid var(--color-border);
+  flex-wrap: wrap;
+  gap: var(--space-3);
 }
 
+/* Pill-chip filters (mockup style) — rounded, bordered, active = filled accent. */
 .launchpad-view__tab {
   display: inline-flex;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-3) var(--space-5);
-  margin-bottom: -1px; /* sit on top of the divider so the active bar covers it */
+  padding: var(--space-2) var(--space-5);
   font-size: var(--font-size-md);
   font-weight: var(--font-weight-medium);
   cursor: pointer;
-  background: none;
-  border: none;
-  border-bottom: 2px solid transparent;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
   color: var(--color-text-muted);
   transition: color var(--transition-fast), border-color var(--transition-fast),
     background var(--transition-fast);
@@ -1354,17 +1059,19 @@ watch(scopedRepos, () => {
 
 .launchpad-view__tab:hover {
   color: var(--color-text);
+  border-color: var(--color-border-strong);
 }
 
 .launchpad-view__tab:focus-visible {
   outline: 2px solid var(--color-focus-ring);
-  outline-offset: -2px;
-  border-radius: var(--radius-sm);
+  outline-offset: 2px;
+  border-radius: var(--radius-pill);
 }
 
 .launchpad-view__tab--active {
-  color: var(--color-text);
-  border-bottom-color: var(--color-accent);
+  color: var(--color-accent-text);
+  background: var(--color-accent);
+  border-color: var(--color-accent);
   font-weight: var(--font-weight-semibold);
 }
 
@@ -1376,15 +1083,15 @@ watch(scopedRepos, () => {
   height: 18px;
   padding: 0 var(--space-2);
   border-radius: var(--radius-pill);
-  background: var(--color-accent-soft);
-  color: var(--color-accent);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-muted);
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-semibold);
   font-variant-numeric: tabular-nums;
 }
 
 .launchpad-view__tab--active .launchpad-view__tab-badge {
-  background: var(--color-accent);
+  background: rgba(255, 255, 255, 0.25);
   color: var(--color-accent-text);
 }
 
@@ -1405,68 +1112,66 @@ watch(scopedRepos, () => {
   margin: 0;
 }
 
-/* ── WIP list ──────────────────────────────────────────── */
-.launchpad-view__repo-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+/* ── Inbox (triaged action inbox) ──────────────────────── */
+.launchpad-view__inbox-summary {
+  margin: 0 0 var(--space-4);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+/* Local action-card band (commit / push / publish / sync) */
+.launchpad-view__local-band {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+  margin-bottom: var(--space-5);
 }
 
-.launchpad-view__repo-item {
+.launchpad-view__local-card {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
   gap: var(--space-4);
   padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
+}
+
+.launchpad-view__local-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border-radius: var(--radius-md);
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+}
+
+.launchpad-view__local-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.launchpad-view__local-title {
   font-size: var(--font-size-md);
-  transition: border-color var(--transition-fast), background var(--transition-fast);
-}
-
-.launchpad-view__repo-item:hover {
-  border-color: var(--color-border-strong);
-  background: var(--color-bg-tertiary);
-}
-
-.launchpad-view__repo-name {
   font-weight: var(--font-weight-semibold);
-  min-width: 120px;
   color: var(--color-text);
 }
 
-.launchpad-view__repo-branch {
+.launchpad-view__local-sub {
+  font-size: var(--font-size-xs);
   color: var(--color-text-muted);
-  font-family: var(--font-mono);
-  font-size: var(--font-size-sm);
 }
 
-.launchpad-view__ahead { color: var(--color-success); font-variant-numeric: tabular-nums; }
-.launchpad-view__behind { color: var(--color-warning); font-variant-numeric: tabular-nums; }
-.launchpad-view__staged { color: var(--color-accent); font-size: var(--font-size-sm); }
-.launchpad-view__unstaged { color: var(--color-warning); font-size: var(--font-size-sm); }
-.launchpad-view__untracked { color: var(--color-text-muted); font-size: var(--font-size-sm); }
-.launchpad-view__clean { color: var(--color-success); font-size: var(--font-size-sm); }
-.launchpad-view__no-upstream {
-  color: var(--color-text-muted);
-  font-style: italic;
-  font-size: var(--font-size-sm);
-}
-.launchpad-view__last-commit {
-  color: var(--color-text-subtle);
-  font-size: var(--font-size-sm);
+.launchpad-view__local-card .launchpad-view__pr-action {
   margin-left: auto;
 }
-.launchpad-view__repo-error {
-  color: var(--color-danger);
-  font-size: var(--font-size-sm);
-}
 
-/* ── Inbox ("À traiter") ───────────────────────────────── */
+/* Tier section + collapsible header */
 .launchpad-view__inbox-section {
   display: flex;
   flex-direction: column;
@@ -1478,25 +1183,31 @@ watch(scopedRepos, () => {
   display: flex;
   align-items: center;
   gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-2) 0;
+  background: none;
+  border: none;
+  cursor: pointer;
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-semibold);
-  color: var(--color-text);
+  color: var(--color-text-muted);
   text-transform: uppercase;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.04em;
 }
 
-.launchpad-view__inbox-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: var(--radius-pill);
+.launchpad-view__tier-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
-  background: var(--color-text-muted);
 }
-.launchpad-view__inbox-header--review .launchpad-view__inbox-dot { background: var(--color-accent); }
-.launchpad-view__inbox-header--changes .launchpad-view__inbox-dot { background: var(--color-danger); }
-.launchpad-view__inbox-header--ci .launchpad-view__inbox-dot { background: var(--color-warning); }
-.launchpad-view__inbox-header--merge .launchpad-view__inbox-dot { background: var(--color-success); }
-.launchpad-view__inbox-header--local .launchpad-view__inbox-dot { background: var(--color-text-muted); }
+.launchpad-view__inbox-header--now .launchpad-view__tier-icon { color: var(--color-accent); }
+.launchpad-view__inbox-header--waiting .launchpad-view__tier-icon { color: var(--color-warning); }
+.launchpad-view__inbox-header--later .launchpad-view__tier-icon { color: var(--color-text-subtle); }
+
+.launchpad-view__inbox-label {
+  flex-shrink: 0;
+}
 
 .launchpad-view__inbox-count {
   display: inline-flex;
@@ -1513,15 +1224,19 @@ watch(scopedRepos, () => {
   font-variant-numeric: tabular-nums;
 }
 
-.launchpad-view__pr-author {
-  font-size: var(--font-size-xs);
-  color: var(--color-text-muted);
-  font-family: var(--font-mono);
-  white-space: nowrap;
+.launchpad-view__tier-chevron {
+  display: inline-flex;
+  align-items: center;
+  margin-left: auto;
+  color: var(--color-text-subtle);
+  transition: transform var(--transition-fast);
+}
+.launchpad-view__tier-chevron--collapsed {
+  transform: rotate(-90deg);
 }
 
-/* ── PR list ───────────────────────────────────────────── */
-.launchpad-view__pr-list {
+/* Inbox card list */
+.launchpad-view__inbox-list {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -1530,23 +1245,201 @@ watch(scopedRepos, () => {
   gap: var(--space-3);
 }
 
-.launchpad-view__pr-item {
+.launchpad-view__inbox-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+  transition: border-color var(--transition-fast), background var(--transition-fast), box-shadow var(--transition-fast);
+}
+.launchpad-view__inbox-card:hover {
+  background: var(--color-bg-tertiary);
+  box-shadow: var(--shadow-sm);
+}
+.launchpad-view__inbox-card--success { border-left-color: var(--color-success); }
+.launchpad-view__inbox-card--accent  { border-left-color: var(--color-accent); }
+.launchpad-view__inbox-card--danger  { border-left-color: var(--color-danger); }
+.launchpad-view__inbox-card--warning { border-left-color: var(--color-warning); }
+.launchpad-view__inbox-card--info    { border-left-color: var(--color-info); }
+.launchpad-view__inbox-card--muted   { border-left-color: var(--color-text-subtle); }
+
+.launchpad-view__inbox-unread {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: var(--radius-pill);
+  border: 1.5px solid var(--color-text-subtle);
+  background: transparent;
+}
+.launchpad-view__inbox-unread--on {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+}
+
+.launchpad-view__inbox-type {
+  display: inline-flex;
+  align-items: center;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.launchpad-view__inbox-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: var(--radius-pill);
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.02em;
+}
+
+.launchpad-view__inbox-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  flex: 1;
+  min-width: 0;
+}
+
+.launchpad-view__inbox-line1 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.launchpad-view__inbox-title {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.launchpad-view__inbox-line2 {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: var(--space-3);
-  padding: var(--space-4) var(--space-5);
-  border-radius: var(--radius-md);
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  font-size: var(--font-size-md);
-  position: relative;
-  transition: border-color var(--transition-fast), background var(--transition-fast);
 }
 
-.launchpad-view__pr-item:hover {
+.launchpad-view__inbox-num {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Inline CI / review chips */
+.launchpad-view__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.4;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.launchpad-view__chip--ci-ok,
+.launchpad-view__chip--approved { background: var(--color-success-soft); color: var(--color-success); }
+.launchpad-view__chip--ci-fail  { background: var(--color-danger-soft); color: var(--color-danger); }
+.launchpad-view__chip--ci-run   { background: var(--color-info-soft); color: var(--color-info); }
+
+/* State pill (leading dot, colour by case) */
+.launchpad-view__inbox-state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  white-space: nowrap;
+}
+.launchpad-view__inbox-state-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: currentColor;
+}
+.launchpad-view__inbox-state--success { color: var(--color-success); }
+.launchpad-view__inbox-state--accent  { color: var(--color-accent); }
+.launchpad-view__inbox-state--danger  { color: var(--color-danger); }
+.launchpad-view__inbox-state--warning { color: var(--color-warning); }
+.launchpad-view__inbox-state--info    { color: var(--color-info); }
+.launchpad-view__inbox-state--muted   { color: var(--color-text-muted); }
+
+.launchpad-view__inbox-time {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.launchpad-view__inbox-diff {
+  display: inline-flex;
+  gap: var(--space-2);
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+}
+.launchpad-view__inbox-diff-add { color: var(--color-success); }
+.launchpad-view__inbox-diff-del { color: var(--color-danger); }
+
+/* Primary action button — hierarchy by urgency */
+.launchpad-view__pr-action {
+  margin-left: auto;
+  flex-shrink: 0;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: filter var(--transition-fast), background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+}
+.launchpad-view__pr-action:hover { filter: brightness(1.06); }
+.launchpad-view__pr-action:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}
+/* Solid — high-priority actions */
+.launchpad-view__pr-action--merge { background: var(--color-success); color: #fff; }
+.launchpad-view__pr-action--review { background: var(--color-accent); color: var(--color-accent-text); }
+.launchpad-view__pr-action--resolve { background: var(--color-danger); color: #fff; }
+/* Soft — opportunistic */
+.launchpad-view__pr-action--autoMerge { background: var(--color-accent-soft); color: var(--color-accent); }
+/* Outlined — medium-priority */
+.launchpad-view__pr-action--reply,
+.launchpad-view__pr-action--seeFailure {
+  background: transparent;
   border-color: var(--color-border-strong);
+  color: var(--color-text);
+}
+.launchpad-view__pr-action--reply:hover,
+.launchpad-view__pr-action--seeFailure:hover {
   background: var(--color-bg-tertiary);
+  filter: none;
+}
+/* Ghost — passive (waiting tier) */
+.launchpad-view__pr-action--follow,
+.launchpad-view__pr-action--nudge {
+  background: transparent;
+  color: var(--color-text-muted);
+}
+.launchpad-view__pr-action--follow:hover,
+.launchpad-view__pr-action--nudge:hover {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text);
+  filter: none;
 }
 
 .launchpad-view__pr-repo {
@@ -1557,29 +1450,6 @@ watch(scopedRepos, () => {
   padding: var(--space-1) var(--space-3);
   border-radius: var(--radius-sm);
   white-space: nowrap;
-}
-
-.launchpad-view__pr-title {
-  flex: 1;
-  min-width: 200px;
-  font-weight: var(--font-weight-medium);
-  color: var(--color-text);
-}
-
-.launchpad-view__pr-title a {
-  color: inherit;
-  text-decoration: none;
-}
-
-.launchpad-view__pr-title a:hover {
-  color: var(--color-accent);
-  text-decoration: underline;
-}
-
-.launchpad-view__pr-title a:focus-visible {
-  outline: 2px solid var(--color-focus-ring);
-  outline-offset: 2px;
-  border-radius: var(--radius-xs);
 }
 
 /* Internal-nav trigger (opens PrDetailView) — styled to read as a link, not a button. */
@@ -1602,38 +1472,6 @@ watch(scopedRepos, () => {
   border-radius: var(--radius-xs);
 }
 
-/* ── Badges (PR review / CI) — token-driven, mirror .badge primitives ── */
-.launchpad-view__pr-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: var(--space-1) var(--space-3);
-  border-radius: var(--radius-pill);
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-semibold);
-  line-height: 1.2;
-  white-space: nowrap;
-}
-
-.launchpad-view__pr-badge--draft {
-  background: var(--color-bg-tertiary);
-  color: var(--color-text-muted);
-}
-.launchpad-view__pr-badge--approved,
-.launchpad-view__pr-badge--ci-success {
-  background: var(--color-success-soft);
-  color: var(--color-success);
-}
-.launchpad-view__pr-badge--changes,
-.launchpad-view__pr-badge--ci-failure {
-  background: var(--color-danger-soft);
-  color: var(--color-danger);
-}
-.launchpad-view__pr-badge--review,
-.launchpad-view__pr-badge--ci-pending {
-  background: var(--color-warning-soft);
-  color: var(--color-warning);
-}
-
 .launchpad-view__pr-labels {
   display: flex;
   gap: var(--space-2);
@@ -1647,36 +1485,6 @@ watch(scopedRepos, () => {
   background: var(--color-bg-tertiary);
   color: var(--color-text-muted);
   border: 1px solid var(--color-border);
-}
-
-/* ── Pin badge ─────────────────────────────────────────── */
-.launchpad-view__pin-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  color: var(--color-accent);
-  line-height: 1;
-}
-
-/* Icon slot for menu items (pin / snooze / unsnooze entries). */
-.launchpad-view__menu-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 14px;
-  height: 14px;
-  flex-shrink: 0;
-  color: var(--color-text-muted);
-}
-
-/* Icon slot for the snoozed bandeau. */
-.launchpad-view__bandeau-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  color: var(--color-text-muted);
 }
 
 /* Icon slot for warning markers (team overlaps). */
@@ -1903,7 +1711,7 @@ watch(scopedRepos, () => {
   padding: var(--space-2) var(--space-4);
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-medium);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-md);
   border: 1px solid var(--color-border);
   background: var(--color-bg-secondary);
   cursor: pointer;
@@ -2224,55 +2032,38 @@ watch(scopedRepos, () => {
   pointer-events: none;
 }
 
-/* ── PR people row (§2.1) ──────────────────────────────── */
-.launchpad-view__pr-people {
-  flex-basis: 100%;
+/* ── Forge connect banner ──────────────────────────────── */
+.launchpad-view__forge-banner {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-4);
-  margin-top: var(--space-2);
-  padding-top: var(--space-3);
-  border-top: 1px dashed var(--color-border);
-  font-size: var(--font-size-xs);
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  margin: 6px 0;
+  border: 1px solid var(--gw-border-soft, #2a2a3a);
+  border-radius: 8px;
+  background: var(--gw-bg-elev, rgba(255,255,255,0.03));
+  font-size: 13px;
+  cursor: pointer;
 }
-
-.launchpad-view__pr-people-group {
-  display: inline-flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-2);
+.launchpad-view__forge-banner:hover {
+  background: var(--color-bg-secondary);
 }
-
-.launchpad-view__pr-people-label {
-  color: var(--color-text-muted);
-  font-size: var(--font-size-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  font-weight: var(--font-weight-semibold);
-}
-
-.launchpad-view__pr-chip {
-  padding: var(--space-1) var(--space-3);
-  border-radius: var(--radius-pill);
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-medium);
+.launchpad-view__forge-banner-action {
   white-space: nowrap;
+  flex-shrink: 0;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-strong);
+  background: transparent;
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
 }
-
-.launchpad-view__pr-chip--assignee {
-  background: var(--color-accent-soft);
-  color: var(--color-accent);
-}
-
-.launchpad-view__pr-chip--reviewer {
-  background: var(--color-warning-soft);
-  color: var(--color-warning);
-}
-
-.launchpad-view__pr-chip--more {
+.launchpad-view__forge-banner-action:hover {
   background: var(--color-bg-tertiary);
-  color: var(--color-text-muted);
-  font-style: italic;
 }
+
+
 </style>

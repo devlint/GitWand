@@ -343,7 +343,7 @@ pub(crate) fn gh_pr_detail_raw_to_detail(r: GhPrDetailRaw) -> PullRequestDetail 
     let labels: Vec<String> = r.labels.into_iter().map(|l| l.name).collect();
     let reviewers: Vec<String> = r.review_requests
         .into_iter()
-        .filter_map(|rr| rr.requested_reviewer?.login)
+        .filter_map(|rr| rr.login)
         .collect();
     // Same aggregation as the list dot (any failure ⇒ red, else pending ⇒
     // yellow, else green). The old inline logic only looked at `conclusion`,
@@ -412,7 +412,7 @@ pub(crate) fn parse_gh_pr_json(json: &str) -> Result<Vec<PullRequest>, String> {
 pub(crate) fn gh_pr_raw_to_pr(r: GhPrRaw) -> PullRequest {
     let review_requested = r.review_requests
         .into_iter()
-        .filter_map(|rr| rr.requested_reviewer?.login)
+        .filter_map(|rr| rr.login)
         .collect();
     let checks_rollup = rollup_status_checks(&r.status_check_rollup);
     let comment_count = r.comments.len() as i64;

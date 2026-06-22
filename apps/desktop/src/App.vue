@@ -77,6 +77,7 @@ import { isImagePath } from "./utils/imagePath";
 import { useGitWand } from "./composables/useGitWand";
 import { useResolutionMemory, type ResolutionMemoryEntry, type ResolutionStrategy } from "./composables/useResolutionMemory";
 import { useRepoTabs } from "./composables/useRepoTabs";
+import { usePinnedBranches } from "./composables/usePinnedBranches";
 import { useGitRepo, type ViewMode } from "./composables/useGitRepo";
 import { useWorkspaceScope } from "./composables/useWorkspaceScope";
 import { useTheme } from "./composables/useTheme";
@@ -243,7 +244,7 @@ const {
   popStash: popStashRepo,
   dropStash,
   worktreeBranches,
-} = useGitRepo();
+} = useGitRepo({ confirm: askConfirm });
 
 // Monorepo scope (v2.21.0) — restore persisted scope on repo open.
 const { loadScope } = useWorkspaceScope();
@@ -727,7 +728,7 @@ const {
   repoRefresh,
   onReset: () => {
     forcePushPreferred.value = true;
-    switchToChangesWithFirstFile();
+    // Stay on the Git Tree after any reset (soft/mixed/hard) — don't jump to Changes.
   },
   cherryPick: doCherryPick,
   deleteBranch,
@@ -2312,6 +2313,16 @@ function handleRebaseOntoCurrent(branchName: string) {
   showRebase.value = true;
 }
 
+// ─── Pinned branches in the Git Tree (shared with the sidebar) ──
+const _graphPins = usePinnedBranches(() => repoFolderPath.value ?? "");
+const graphPinnedBranches = _graphPins.pinned;
+function handlePinBranch(name: string) {
+  _graphPins.pin(name);
+}
+function handleUnpinBranch(name: string) {
+  _graphPins.unpin(name);
+}
+
 async function onRebaseDone() {
   showRebase.value = false;
   rebaseInitialBase.value = undefined;
@@ -2359,6 +2370,12 @@ function onGraphSelectCommit(hash: string) {
   graphFileIdx.value = null;
   graphScrollIdx.value = null;
   selectCommit(hash);
+}
+
+/** Dashboard → click a recent commit: open the Git Tree on that commit. */
+function onDashboardSelectCommit(hash: string) {
+  onViewModeChange("graph");
+  onGraphSelectCommit(hash);
 }
 
 /** Graph → click a file in the right rail: open the diff scrolled to it. */
@@ -2479,7 +2496,7 @@ onUnmounted(() => {
             <DashboardView v-if="viewMode === 'dashboard'" class="view__content"
               :cwd="repoFolderPath ?? ''" :branch="branchDisplay"
               :status="repoStats" :ahead="aheadCount" :behind="behindCount" :needs-publish="needsPublish"
-              @change-view="onViewModeChange" @push="handlePush" @sync="() => doPull(pullMode === 'rebase')" />
+              @change-view="onViewModeChange" @select-commit="onDashboardSelectCommit" @push="handlePush" @sync="() => doPull(pullMode === 'rebase')" />
 
             <!-- ── Changes view: diff │ collapsible right rail (files + commit) ── -->
             <div v-else-if="viewMode === 'changes'" class="view view--changes">
@@ -2588,6 +2605,7 @@ onUnmounted(() => {
                   :submodule-changes="submoduleChanges"
                   :has-more="logHasMore" :loading-more="logLoadingMore"
                   :hidden-commit-count="hiddenCommitCount"
+                  :pinned-branches="graphPinnedBranches"
                   @select-commit="onGraphSelectCommit"
                   @change-view="onViewModeChange"
                   @edit-commit="handleEditCommit"
@@ -2605,6 +2623,8 @@ onUnmounted(() => {
                   @merge-into-current="doMerge"
                   @rebase-onto-current="handleRebaseOntoCurrent"
                   @force-push-branch="doForcePush"
+                  @pin-branch="handlePinBranch"
+                  @unpin-branch="handleUnpinBranch"
                   @view-submodule="handleOpenSubmodule"
                   @apply-stash="applyStash"
                   @pop-stash="popStash"

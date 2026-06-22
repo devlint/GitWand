@@ -2451,6 +2451,65 @@ pub(crate) async fn git_shortlog(cwd: String) -> Result<Vec<ShortlogEntry>, Stri
     Ok(entries)
 }
 
+/// Top author (most commits) on each branch — counting only the commits that
+/// are unique to the branch, i.e. the `<base>..<branch>` range where `<base>`
+/// is the repo's main branch. This is the person who did most of the work *on
+/// that branch*, not the most prolific author across its whole history.
+///
+/// For the base branch itself (or any branch with no commits ahead of base)
+/// the range is empty, so we fall back to the branch's full history.
+///
+/// Branches are processed in parallel (rayon) since each is an independent
+/// `git` spawn — invoked on-demand when the branch picker opens, not on a hot
+/// path, but the fan-out keeps it snappy on repos with many branches. Branches
+/// with no resolvable author are omitted.
+#[tauri::command]
+pub(crate) async fn git_branch_top_authors(
+    cwd: String,
+    branches: Vec<String>,
+) -> Result<Vec<BranchTopAuthor>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let base = get_main_branch_name(&cwd);
+        let results: Vec<BranchTopAuthor> = branches
+            .into_par_iter()
+            .filter_map(|branch| {
+                // Commits unique to this branch first; fall back to the branch's
+                // full history when that range is empty (the base branch itself,
+                // or a branch with nothing ahead of base).
+                let range = format!("{}..{}", base, branch);
+                let top = shortlog_top(&cwd, &range)
+                    .or_else(|| shortlog_top(&cwd, &branch))?;
+                Some(BranchTopAuthor {
+                    branch,
+                    name: top.name,
+                    email: top.email,
+                    count: top.count,
+                })
+            })
+            .collect();
+        Ok(results)
+    })
+    .await
+    .map_err(|e| format!("git_branch_top_authors join error: {}", e))?
+}
+
+/// Author with the most commits in a `git shortlog -sne <revspec>`, or None if
+/// the spec resolves to no commits / fails.
+fn shortlog_top(cwd: &str, revspec: &str) -> Option<ShortlogEntry> {
+    let output = git_cmd()
+        .args(["shortlog", "-sne", revspec])
+        .current_dir(cwd)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(parse_shortlog_line)
+        .max_by_key(|e| e.count)
+}
+
 // ─── Git exec / autocomplete ─────────────────────────────────
 
 // Async + spawn_blocking: a synchronous Tauri command runs on the webview main

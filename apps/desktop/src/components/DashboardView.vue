@@ -1,20 +1,16 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from "vue";
+import { ref, computed, onMounted, watch, nextTick } from "vue";
 import {
   getGitLog,
-  getGitBranches,
-  gitRemoteInfo,
-  gitFileCount,
   getGitShortlog,
   readFile,
-  ghPrCount,
+  openExternalUrl,
   type GitLogEntry,
-  type GitBranch,
-  type RemoteInfo,
   type ShortlogEntry,
 } from "../utils/backend";
 import type { ViewMode } from "../composables/useGitRepo";
 import { useI18n } from "../composables/useI18n";
+import { useSettings } from "../composables/useSettings";
 import { avatarStyle, avatarInitials as initials } from "../composables/useAvatar";
 import { useAIProvider } from "../composables/useAIProvider";
 import { useReleaseNotes, latestTag as findLatestTag } from "../composables/useReleaseNotes";
@@ -22,6 +18,7 @@ import { renderMarkdown, safeHtml } from "../composables/useSafeHtml";
 import AiSparkle from "./AiSparkle.vue";
 
 const { t, locale } = useI18n();
+const { settings } = useSettings();
 const ai = useAIProvider();
 const {
   isGenerating: isGeneratingReleaseNotes,
@@ -94,6 +91,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   changeView: [mode: ViewMode];
+  selectCommit: [hashFull: string];
   sync: [];
   push: [];
 }>();
@@ -101,14 +99,13 @@ const emit = defineEmits<{
 // ─── Dashboard data ────────────────────────────────────────
 const loading = ref(true);
 const recentCommits = ref<GitLogEntry[]>([]);
-const branches = ref<GitBranch[]>([]);
-const remoteInfo = ref<RemoteInfo | null>(null);
-const fileCount = ref(0);
-const openPrs = ref(0);
-const mergedPrs = ref(0);
 const readmeContent = ref<string | null>(null);
 const readmeError = ref(false);
 const readmeTab = ref<"formatted" | "raw">("formatted");
+const readmeFormattedEl = ref<HTMLElement | null>(null);
+// Path (repo-relative) of the doc currently shown in the README pane. Relative
+// `.md` links inside the README swap this out; `README.md` is the home doc.
+const readmeDoc = ref("README.md");
 /**
  * Full-history per-author commit counts. Populated from `git shortlog -sne HEAD`,
  * which sums the entire HEAD history rather than just a recent window — way more
@@ -116,36 +113,17 @@ const readmeTab = ref<"formatted" | "raw">("formatted");
  * Sorted desc by count (already done by `-n` flag, defended in Rust as well).
  */
 const allContributors = ref<ShortlogEntry[]>([]);
-const lastCommitDate = ref("");
-const weeklyCommits = ref(0);
-const previousWeekCommits = ref(0);
+const fortnightCommits = ref(0);
+const previousFortnightCommits = ref(0);
 
 // ─── Computed stats ────────────────────────────────────────
-const totalChanges = computed(
-  () => props.status.staged + props.status.unstaged + props.status.untracked
-);
-const localBranches = computed(
-  () => branches.value.filter((b) => !b.isRemote)
-);
-
-/** Commits per day for the last 7 days (oldest → newest). Used for sparkline. */
-const sparklinePoints = computed(() => {
-  const counts = new Array(7).fill(0);
-  const now = Date.now();
-  for (const c of recentCommits.value) {
-    const daysAgo = Math.floor((now - new Date(c.date).getTime()) / (24 * 3600 * 1000));
-    if (daysAgo >= 0 && daysAgo < 7) counts[6 - daysAgo]++;
-  }
-  return counts;
-});
-
-/** Trend vs previous 7d: positive means acceleration. */
-const commitTrendPct = computed(() => {
-  if (previousWeekCommits.value === 0) {
-    return weeklyCommits.value > 0 ? 100 : 0;
+/** Trend vs previous 14d: positive means acceleration. */
+const fortnightTrendPct = computed(() => {
+  if (previousFortnightCommits.value === 0) {
+    return fortnightCommits.value > 0 ? 100 : 0;
   }
   return Math.round(
-    ((weeklyCommits.value - previousWeekCommits.value) / previousWeekCommits.value) * 100
+    ((fortnightCommits.value - previousFortnightCommits.value) / previousFortnightCommits.value) * 100
   );
 });
 
@@ -273,65 +251,6 @@ const heatmapMonths = computed(() => {
   return labels;
 });
 
-/** Smooth polyline points string for the sparkline (viewBox 100x24). */
-const sparklinePath = computed(() => {
-  const vals = sparklinePoints.value;
-  const max = Math.max(1, ...vals);
-  const step = 100 / (vals.length - 1);
-  return vals.map((v, i) => `${(i * step).toFixed(1)},${(22 - (v / max) * 18).toFixed(1)}`).join(" ");
-});
-
-const sparklineArea = computed(() => `${sparklinePath.value} 100,24 0,24`);
-
-/** Health score — lightweight heuristic: penalties for conflicts, stale divergence, dirty tree. */
-const healthScore = computed(() => {
-  let score = 100;
-  if (props.status.conflicted > 0) score -= 30;
-  if (props.behind > 20) score -= 15;
-  else if (props.behind > 5) score -= 8;
-  if (totalChanges.value > 30) score -= 10;
-  if (weeklyCommits.value === 0) score -= 5;
-  return Math.max(0, Math.min(100, score));
-});
-
-const healthLabel = computed(() => {
-  const s = healthScore.value;
-  if (s >= 90) return t("dashboard.healthExcellent");
-  if (s >= 70) return t("dashboard.healthGood");
-  if (s >= 50) return t("dashboard.healthFair");
-  return t("dashboard.healthPoor");
-});
-
-/** Suggested next action based on repo state. */
-const nextAction = computed(() => {
-  if (props.status.conflicted > 0) {
-    return { label: t("dashboard.nextResolveConflicts", props.status.conflicted), view: "changes" as ViewMode, action: null };
-  }
-  if (totalChanges.value > 0) {
-    return { label: t("dashboard.nextCommit", totalChanges.value), view: "changes" as ViewMode, action: null };
-  }
-  if (props.ahead > 0) {
-    return { label: t("dashboard.nextPush", props.ahead), view: null, action: "push" as const };
-  }
-  if (props.needsPublish) {
-    return { label: t("dashboard.nextPublish"), view: null, action: "push" as const };
-  }
-  if (props.behind > 0) {
-    return { label: t("dashboard.nextSync", props.behind), view: null, action: "sync" as const };
-  }
-  if (openPrs.value > 0) {
-    return { label: t("dashboard.nextReviewPrs", openPrs.value), view: "prs" as ViewMode, action: null };
-  }
-  return { label: t("dashboard.nextAllCaughtUp"), view: "history" as ViewMode, action: null };
-});
-
-function runNextAction() {
-  if (nextAction.value.action === "push") emit("push");
-  else if (nextAction.value.action === "sync") emit("sync");
-  else if (nextAction.value.view) emit("changeView", nextAction.value.view);
-}
-
-
 /** Detect conventional-commit type for tag colouring. */
 function commitType(msg: string): string {
   const m = msg.toLowerCase().match(/^(feat|fix|docs|chore|refactor|test|style|perf|build|ci)/);
@@ -348,25 +267,12 @@ async function loadDashboard() {
   if (!props.cwd) return;
   loading.value = true;
 
-  // v2.8.5 boot-perf: replaced the two `ghListPrs(open/merged)` calls
-  // — each one expanded `statusCheckRollup` + `mergeStateStatus` per PR
-  // (a per-PR GitHub API roundtrip × 50 PRs × 2 lists) — with a single
-  // lightweight `ghPrCount(open)` GraphQL totalCount call. The dashboard
-  // only needs the open-PR count; the full list is loaded lazily when
-  // the user actually opens the PRs tab.
-  //
-  // `mergedPrs` (the "N merged this week" hint) is intentionally skipped
-  // for the v2.8.5 lot — a precise weekly count needs either a list
-  // walk or a search query, both lazier than what we want at boot. The
-  // hint is hidden until then (mergedPrs stays at 0).
-  // TODO Phase 2 (v2.9): bring it back via a `ghMergedSinceCount(cwd, since)`
-  // backed by GitHub `search?q=is:merged merged:>=YYYY-MM-DD`.
+  // Boot-perf: only fetch what the trimmed dashboard renders — commit log
+  // (heatmap / bar chart / commit-types), the README, and the full-history
+  // shortlog (contributors panel). The branch / PR-count / file-count probes
+  // were dropped when their cards were removed; those tabs load lazily.
   const results = await Promise.allSettled([
     getGitLog(props.cwd, 250, true),
-    getGitBranches(props.cwd),
-    gitRemoteInfo(props.cwd),
-    gitFileCount(props.cwd).catch(() => 0),
-    ghPrCount(props.cwd, "open").catch(() => 0),
     loadReadme(),
     getGitShortlog(props.cwd).catch(() => [] as ShortlogEntry[]),
   ]);
@@ -374,44 +280,22 @@ async function loadDashboard() {
   // Commits
   if (results[0].status === "fulfilled") {
     recentCommits.value = results[0].value;
-    // Last commit date (the shortlog index drives contributor count now;
-    // recentCommits still feeds the heatmap / sparkline / commit-types bar).
-    if (recentCommits.value.length > 0) {
-      lastCommitDate.value = recentCommits.value[0].date;
-    }
-    // Commits in last 7 days + previous 7 days for trend
+    // Commits in last 14 days + previous 14 days for trend
     const now = Date.now();
-    const weekMs = 7 * 24 * 60 * 60 * 1000;
-    weeklyCommits.value = recentCommits.value.filter(
-      (c) => now - new Date(c.date).getTime() < weekMs
+    const fortnightMs = 14 * 24 * 60 * 60 * 1000;
+    fortnightCommits.value = recentCommits.value.filter(
+      (c) => now - new Date(c.date).getTime() < fortnightMs
     ).length;
-    previousWeekCommits.value = recentCommits.value.filter((c) => {
+    previousFortnightCommits.value = recentCommits.value.filter((c) => {
       const diff = now - new Date(c.date).getTime();
-      return diff >= weekMs && diff < 2 * weekMs;
+      return diff >= fortnightMs && diff < 2 * fortnightMs;
     }).length;
   }
-  // Branches
-  if (results[1].status === "fulfilled") {
-    branches.value = results[1].value;
-  }
-  // Remote
-  if (results[2].status === "fulfilled") {
-    remoteInfo.value = results[2].value;
-  }
-  // File count
-  if (results[3].status === "fulfilled") {
-    fileCount.value = results[3].value as number;
-  }
-  // PR count (open only) — single totalCount call, no list walk
-  if (results[4].status === "fulfilled") {
-    openPrs.value = results[4].value as number;
-  }
-  // mergedPrs intentionally left at 0 — see boot Promise.allSettled comment.
   // Shortlog (full-history per-author) — drives contributorCount + the
-  // contributors panel. results[5] is loadReadme (no return value to
-  // capture); results[6] is the shortlog.
-  if (results[6].status === "fulfilled") {
-    allContributors.value = results[6].value;
+  // contributors panel. results[1] is loadReadme (no return value to
+  // capture); results[2] is the shortlog.
+  if (results[2].status === "fulfilled") {
+    allContributors.value = results[2].value;
   }
 
   loading.value = false;
@@ -423,6 +307,7 @@ async function loadReadme() {
   for (const name of candidates) {
     try {
       readmeContent.value = await readFile(props.cwd, name);
+      readmeDoc.value = name;
       return;
     } catch {
       // try next
@@ -430,6 +315,41 @@ async function loadReadme() {
   }
   readmeContent.value = null;
   readmeError.value = true;
+}
+
+// Resolve a repo-relative href (`./ROADMAP.md`, `docs/x.md`, `../FOO.md`)
+// against the directory of the doc currently shown, stripping any query/hash.
+// Returns a clean repo-relative path; `safe_repo_path()` on the Rust side
+// rejects anything that escapes the repo.
+function resolveRepoPath(href: string): string {
+  const clean = href.replace(/[?#].*$/, "");
+  const baseDir = readmeDoc.value.includes("/")
+    ? readmeDoc.value.replace(/\/[^/]*$/, "")
+    : "";
+  const segments = (baseDir ? baseDir.split("/") : []).concat(clean.split("/"));
+  const out: string[] = [];
+  for (const seg of segments) {
+    if (!seg || seg === ".") continue;
+    if (seg === "..") out.pop();
+    else out.push(seg);
+  }
+  return out.join("/");
+}
+
+// Load another markdown doc from the repo into the README pane. Returns false
+// when the file can't be read so the caller can fall back.
+async function openRepoDoc(href: string): Promise<boolean> {
+  const path = resolveRepoPath(href);
+  if (!/\.(md|markdown)$/i.test(path)) return false;
+  try {
+    readmeContent.value = await readFile(props.cwd, path);
+    readmeDoc.value = path;
+    readmeError.value = false;
+    readmeFormattedEl.value?.scrollTo({ top: 0 });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function formatDate(dateStr: string): string {
@@ -445,11 +365,6 @@ function formatDate(dateStr: string): string {
   const diffDays = Math.floor(diffHrs / 24);
   if (diffDays < 7) return t("date.daysAgo", diffDays);
   return d.toLocaleDateString();
-}
-
-function formatNumber(n: number): string {
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
-  return n.toString();
 }
 
 // ─── README rendering ──────────────────────────────────────
@@ -468,6 +383,42 @@ function renderReadme(md: string): string {
   // READMEs soft-wrap single newlines (GitHub behaviour) — disable `breaks` so
   // wrapped prose isn't broken up with spurious <br> tags.
   return headerHtml + renderMarkdown(cleaned, { breaks: false });
+}
+
+// The README is injected via `v-html`, so its anchors are plain DOM links the
+// Tauri webview can't act on by itself: `http(s)` links would navigate the app
+// away (or no-op), and in-page `#anchor` links don't reliably scroll inside the
+// dashboard's own scroll container. Intercept every click here:
+//   - external `http(s)` → hand off to the OS browser (same as PR markdown)
+//   - `#anchor` → scroll the matching heading (slug `id`) into view
+//   - repo-relative `.md` (e.g. `./ROADMAP.md`) → render it in the pane in-place
+//   - anything else → swallow so the webview never navigates away from the app
+function onReadmeLinkClick(e: MouseEvent) {
+  const anchor = (e.target as HTMLElement | null)?.closest("a");
+  const href = anchor?.getAttribute("href");
+  if (!href) return;
+
+  if (/^https?:\/\//i.test(href)) {
+    e.preventDefault();
+    void openExternalUrl(href);
+    return;
+  }
+
+  if (href.startsWith("#")) {
+    e.preventDefault();
+    const id = decodeURIComponent(href.slice(1));
+    const target = readmeFormattedEl.value?.querySelector(
+      `#${CSS.escape(id)}`,
+    );
+    target?.scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+
+  // Repo-relative link (e.g. `./ROADMAP.md`). The webview would otherwise
+  // navigate to the dev/app origin (`http://localhost:1420/ROADMAP.md`) and
+  // break out of the app. Try to render the target markdown in-place instead.
+  e.preventDefault();
+  void openRepoDoc(href);
 }
 
 function extractReadmeHeader(md: string): { headerHtml: string; rest: string } {
@@ -534,6 +485,41 @@ function extractReadmeHeader(md: string): { headerHtml: string; rest: string } {
 
 onMounted(loadDashboard);
 watch(() => props.cwd, loadDashboard);
+
+// ─── Contributors rail — arrow navigation ──────────────────
+const contribScroll = ref<HTMLElement | null>(null);
+const contribCanLeft = ref(false);
+const contribCanRight = ref(false);
+
+function updateContribArrows() {
+  const el = contribScroll.value;
+  if (!el) return;
+  // 20px dead-zone at each end so the arrow stays hidden near the edges.
+  const edge = 20;
+  contribCanLeft.value = el.scrollLeft > edge;
+  contribCanRight.value = el.scrollLeft + el.clientWidth < el.scrollWidth - edge;
+}
+
+// `scroll` fires per frame during momentum scroll, and updateContribArrows
+// reads layout (scrollWidth → forced reflow). Coalesce to one read per frame.
+let arrowTick = false;
+function onContribScroll() {
+  if (arrowTick) return;
+  arrowTick = true;
+  requestAnimationFrame(() => {
+    arrowTick = false;
+    updateContribArrows();
+  });
+}
+
+function scrollContrib(dir: 1 | -1) {
+  const el = contribScroll.value;
+  if (!el) return;
+  el.scrollBy({ left: dir * el.clientWidth * 0.8, behavior: "smooth" });
+}
+
+// Recompute arrow visibility whenever the list changes.
+watch(topContributors, () => nextTick(updateContribArrows), { immediate: true });
 </script>
 
 <template>
@@ -545,268 +531,66 @@ watch(() => props.cwd, loadDashboard);
     </div>
 
     <template v-else>
-      <!-- ─── Hero row ───────────────────────────────────── -->
-      <section class="hero">
-        <!-- Card 1: Repo state -->
-        <div class="hero-card hero-card--primary">
-          <div class="hero-eyebrow">{{ t("dashboard.repoState") }}</div>
-          <h2 class="hero-title">
-            <template v-if="status.conflicted > 0">{{ t("dashboard.stateConflicts") }}</template>
-            <template v-else-if="totalChanges > 0">{{ t("dashboard.stateDirty", totalChanges) }}</template>
-            <template v-else-if="ahead > 0">{{ t("dashboard.stateAhead", ahead) }}</template>
-            <template v-else-if="behind > 0">{{ t("dashboard.stateBehind", behind) }}</template>
-            <template v-else>{{ t("dashboard.stateClean") }}</template>
-          </h2>
-          <p class="hero-sub">
-            <template v-if="ahead > 0 || behind > 0">
-              {{ t("dashboard.stateVsRemote", branch) }}
-            </template>
-            <template v-else>{{ t("dashboard.stateOnBranch", branch) }}</template>
-          </p>
-          <div class="hero-chips">
-            <span class="chip" :class="status.conflicted > 0 ? 'chip--danger' : 'chip--success'">
-              ● {{ status.conflicted > 0 ? t("dashboard.chipConflicts", status.conflicted) : t("dashboard.chipNoConflict") }}
-            </span>
-            <span class="chip chip--info" v-if="ahead > 0">↑ {{ t("dashboard.chipAhead", ahead) }}</span>
-            <span class="chip" v-else>↑ 0</span>
-            <span class="chip chip--warning" v-if="behind > 0">↓ {{ t("dashboard.chipBehind", behind) }}</span>
-            <span class="chip" v-else>↓ 0</span>
-          </div>
-        </div>
-
-        <!-- Card 2: Health score -->
-        <div class="hero-card">
-          <div class="hero-eyebrow">{{ t("dashboard.healthTitle") }}</div>
-          <div class="health-score" :class="{
-            'health-score--good': healthScore >= 70,
-            'health-score--fair': healthScore >= 50 && healthScore < 70,
-            'health-score--poor': healthScore < 50,
-          }">
-            {{ healthScore }}<span class="health-denom">/100</span>
-          </div>
-          <p class="hero-sub">{{ healthLabel }}</p>
-          <div class="health-bar">
-            <span :style="{ width: healthScore + '%' }"></span>
-          </div>
-        </div>
-
-        <!-- Card 3: Next action -->
-        <div class="hero-card">
-          <div class="hero-eyebrow">{{ t("dashboard.nextStep") }}</div>
-          <div class="next-title">{{ nextAction.label }}</div>
-          <p class="hero-sub" v-if="lastCommitDate">
-            {{ t("dashboard.lastActivity") }} {{ formatDate(lastCommitDate) }}
-          </p>
-          <button class="btn-hero" @click="runNextAction">
-            {{ t("dashboard.openAction") }} →
-          </button>
-        </div>
-      </section>
-
-      <!-- ─── Metric cards ──────────────────────────────── -->
-      <section class="stats-grid">
-        <!-- Commits 7d with sparkline -->
-        <button class="stat-card" @click="emit('changeView', 'history')">
-          <div class="stat-head">
-            <div class="stat-icon stat-icon--accent">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
-              </svg>
-            </div>
-            <span v-if="commitTrendPct !== 0" class="trend" :class="commitTrendPct > 0 ? 'trend--up' : 'trend--down'">
-              {{ commitTrendPct > 0 ? "▲" : "▼" }} {{ Math.abs(commitTrendPct) }}%
-            </span>
-          </div>
-          <div class="stat-value">{{ weeklyCommits }}</div>
-          <div class="stat-label">{{ t("dashboard.metricCommits") }}</div>
-          <svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none">
-            <polyline
-              :points="sparklineArea"
-              fill="var(--color-accent-soft)"
-              stroke="none"
-            />
-            <polyline
-              :points="sparklinePath"
-              fill="none"
-              stroke="var(--color-accent)"
-              stroke-width="1.5"
-              stroke-linejoin="round"
-            />
-          </svg>
-        </button>
-
-        <!-- Branches -->
-        <button class="stat-card" @click="emit('changeView', 'graph')">
-          <div class="stat-head">
-            <div class="stat-icon stat-icon--info">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="12" r="3"/>
-                <path d="M6 9v6"/><path d="M18 9a9 9 0 0 1-9 9"/>
-              </svg>
-            </div>
-          </div>
-          <div class="stat-value">{{ localBranches.length }}</div>
-          <div class="stat-label">{{ t("dashboard.metricBranches") }}</div>
-          <div class="bullet-row">
-            <div class="bullet bullet--success" :style="{ flex: Math.max(1, localBranches.length) }"></div>
-            <div class="bullet bullet--warning" :style="{ flex: branches.length - localBranches.length || 0.001 }"></div>
-          </div>
-        </button>
-
+      <!-- ─── Contributors + Recent commits ─────────────── -->
+      <section v-if="!settings.dashboardHideContributors" class="row-contrib">
         <!-- Contributors -->
-        <div class="stat-card">
-          <div class="stat-head">
-            <div class="stat-icon stat-icon--success">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="12" cy="7" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>
-              </svg>
-            </div>
-          </div>
-          <div class="stat-value">{{ contributorCount }}</div>
-          <div class="stat-label">{{ t("dashboard.metricContributors") }}</div>
-          <div class="avatar-stack">
-            <span
-              v-for="(c, i) in topContributors.slice(0, 4)"
-              :key="c.email"
-              class="avatar avatar--sm"
-              :style="{ ...avatarStyle(c.email || c.name), background: 'var(--color-bg-secondary)', zIndex: 10 - i }"
-              :title="c.name"
-            >{{ initials(c.name) }}</span>
-          </div>
-        </div>
-
-        <!-- Working tree -->
-        <button class="stat-card" :class="{ 'stat-card--alert': totalChanges > 0 }" @click="emit('changeView', 'changes')">
-          <div class="stat-head">
-            <div class="stat-icon" :class="totalChanges > 0 ? 'stat-icon--warning' : 'stat-icon--muted'">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                <polyline points="14 2 14 8 20 8"/>
-              </svg>
-            </div>
-            <span v-if="totalChanges === 0" class="chip chip--success chip--sm">{{ t("dashboard.chipClean") }}</span>
-          </div>
-          <div class="stat-value">{{ totalChanges }}</div>
-          <div class="stat-label">{{ t("dashboard.metricChanges") }}</div>
-          <div v-if="totalChanges > 0" class="stat-breakdown">
-            <span v-if="status.staged > 0" class="stat-pill stat-pill--success">{{ status.staged }} {{ t("dashboard.staged") }}</span>
-            <span v-if="status.unstaged > 0" class="stat-pill stat-pill--warning">{{ status.unstaged }} {{ t("dashboard.modified") }}</span>
-            <span v-if="status.untracked > 0" class="stat-pill stat-pill--muted">{{ status.untracked }} {{ t("dashboard.new") }}</span>
-          </div>
-        </button>
-
-        <!-- Files tracked -->
-        <div class="stat-card">
-          <div class="stat-head">
-            <div class="stat-icon stat-icon--accent">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M4 7h16M4 12h16M4 17h10"/>
-              </svg>
-            </div>
-          </div>
-          <div class="stat-value">{{ formatNumber(fileCount) }}</div>
-          <div class="stat-label">{{ t("dashboard.metricFiles") }}</div>
-          <div class="filler"></div>
-        </div>
-
-        <!-- Open PRs -->
-        <button class="stat-card" @click="emit('changeView', 'prs')">
-          <div class="stat-head">
-            <div class="stat-icon" :class="openPrs > 0 ? 'stat-icon--accent' : 'stat-icon--muted'">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/>
-                <path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" y1="9" x2="6" y2="21"/>
-              </svg>
-            </div>
-          </div>
-          <div class="stat-value">{{ openPrs }}</div>
-          <div class="stat-label">{{ t("dashboard.metricPrs") }}</div>
-          <div class="stat-hint" v-if="mergedPrs > 0">
-            {{ t("dashboard.prsMergedThisWeek", mergedPrs) }}
-          </div>
-          <div class="stat-hint" v-else>&nbsp;</div>
-        </button>
-      </section>
-
-      <!-- ─── Heatmap + Contributors ───────────────────── -->
-      <section class="grid-2">
         <div class="panel">
           <div class="panel-head">
-            <h3 class="panel-title">{{ t("dashboard.heatmapTitle") }}</h3>
-            <button class="panel-link" @click="emit('changeView', 'history')">
-              {{ t("dashboard.viewAll") }} →
-            </button>
-          </div>
-          <div class="heatmap">
-            <div class="heatmap-days">
-              <span>{{ t("dashboard.dayMon") }}</span>
-              <span></span>
-              <span>{{ t("dashboard.dayWed") }}</span>
-              <span></span>
-              <span>{{ t("dashboard.dayFri") }}</span>
-              <span></span>
-              <span></span>
-            </div>
-            <div class="heatmap-grid-wrap">
-              <div class="heatmap-grid">
-                <div
-                  v-for="col in heatmapCells"
-                  :key="col.week"
-                  class="heatmap-col"
-                >
-                  <div
-                    v-for="(cell, i) in col.cells"
-                    :key="i"
-                    class="heatmap-cell"
-                    :class="`heatmap-cell--l${cell.level}`"
-                    :title="cell.date ? `${cell.date}: ${cell.count}` : ''"
-                  ></div>
-                </div>
-              </div>
-              <div class="heatmap-foot">
-                <span v-for="m in heatmapMonths" :key="m">{{ m }}</span>
-                <div class="heatmap-legend">
-                  <span class="legend-label">{{ t("dashboard.less") }}</span>
-                  <span class="heatmap-cell heatmap-cell--l0"></span>
-                  <span class="heatmap-cell heatmap-cell--l1"></span>
-                  <span class="heatmap-cell heatmap-cell--l2"></span>
-                  <span class="heatmap-cell heatmap-cell--l3"></span>
-                  <span class="heatmap-cell heatmap-cell--l4"></span>
-                  <span class="legend-label">{{ t("dashboard.more") }}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="panel">
-          <div class="panel-head">
-            <h3 class="panel-title">{{ t("dashboard.contributorsTitle") }}</h3>
+            <h3 class="panel-title">
+              {{ t("dashboard.contributorsTitle") }}
+              <span class="panel-count">{{ contributorCount }}</span>
+            </h3>
           </div>
           <div class="contributors">
             <!-- Horizontal scrollable list (v2.0) — every contributor over the
                  entire HEAD history, not just a recent window. Card width is
                  ~33% so a third card peeks in to cue the scroll. -->
-            <div
-              v-if="topContributors.length > 0"
-              class="contributors-scroll"
-              role="list"
-              :aria-label="t('dashboard.contributorsTitle')"
-            >
-              <div
-                v-for="c in topContributors"
-                :key="c.email"
-                class="contrib"
-                role="listitem"
-                :title="`${c.name} <${c.email}> · ${c.count}`"
+            <div v-if="topContributors.length > 0" class="contributors-rail">
+              <button
+                v-if="contribCanLeft"
+                type="button"
+                class="contrib-arrow contrib-arrow--left"
+                :aria-label="t('common.previous')"
+                @click="scrollContrib(-1)"
               >
-                <span class="avatar" :style="avatarStyle(c.email || c.name)">{{ initials(c.name) }}</span>
-                <div class="contrib-body">
-                  <div class="contrib-name">{{ c.name }}</div>
-                  <div class="contrib-bar"><span :style="{ width: c.pct + '%' }"></span></div>
+                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                  <path d="M15 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+              </button>
+              <div
+                ref="contribScroll"
+                class="contributors-scroll"
+                :class="{ 'contributors-scroll--dense': topContributors.length > 4 }"
+                role="list"
+                :aria-label="t('dashboard.contributorsTitle')"
+                @scroll="onContribScroll"
+              >
+                <div
+                  v-for="c in topContributors"
+                  :key="c.email"
+                  class="contrib"
+                  role="listitem"
+                  :title="`${c.name} <${c.email}> · ${c.count}`"
+                >
+                  <span class="avatar" :style="avatarStyle(c.email || c.name)">{{ initials(c.name) }}</span>
+                  <div class="contrib-body">
+                    <div class="contrib-name">{{ c.name }}</div>
+                    <div class="contrib-bar"><span :style="{ width: c.pct + '%' }"></span></div>
+                  </div>
+                  <div class="contrib-stat">{{ c.count }}</div>
                 </div>
-                <div class="contrib-stat">{{ c.count }}</div>
               </div>
+              <button
+                v-if="contribCanRight"
+                type="button"
+                class="contrib-arrow contrib-arrow--right"
+                :aria-label="t('common.next')"
+                @click="scrollContrib(1)"
+              >
+                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                  <path d="M9 18l6-6-6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+              </button>
             </div>
             <div v-else class="contrib-empty">
               {{ t("dashboard.noContributors") }}
@@ -834,56 +618,67 @@ watch(() => props.cwd, loadDashboard);
         </div>
       </section>
 
-      <!-- ─── Commits + Bar chart ──────────────────────── -->
-      <section class="grid-2">
+      <!-- ─── Activity + Commits/day + Recent commits ──── -->
+      <section v-if="!settings.dashboardHideActivity" class="row-activity">
+        <!-- Activity — last 6 months (far left) -->
         <div class="panel">
           <div class="panel-head">
-            <h3 class="panel-title">{{ t("dashboard.recentCommits") }}</h3>
-            <div class="panel-actions">
-              <button
-                v-if="ai.isAvailable.value"
-                class="btn btn--ai panel-link-ai"
-                :title="t('dashboard.releaseNotesHint')"
-                @click="openReleaseNotes"
+            <h3 class="panel-title">{{ t("dashboard.heatmapTitle") }}</h3>
+          </div>
+          <div class="heatmap">
+            <div class="heatmap-days">
+              <span>{{ t("dashboard.dayMon") }}</span>
+              <span>{{ t("dashboard.dayTue") }}</span>
+              <span>{{ t("dashboard.dayWed") }}</span>
+              <span>{{ t("dashboard.dayThu") }}</span>
+              <span>{{ t("dashboard.dayFri") }}</span>
+              <span>{{ t("dashboard.daySat") }}</span>
+              <span>{{ t("dashboard.daySun") }}</span>
+            </div>
+            <div class="heatmap-grid">
+              <div
+                v-for="col in heatmapCells"
+                :key="col.week"
+                class="heatmap-col"
               >
-                <span class="dv-ai-label">
-                  <AiSparkle :size="13" />
-                  {{ t('dashboard.releaseNotes') }}
-                </span>
-              </button>
-              <button class="panel-link" @click="emit('changeView', 'history')">
-                {{ t("dashboard.viewAll") }} →
-              </button>
+                <div
+                  v-for="(cell, i) in col.cells"
+                  :key="i"
+                  class="heatmap-cell"
+                  :class="`heatmap-cell--l${cell.level}`"
+                  :title="cell.date ? `${cell.date}: ${cell.count}` : ''"
+                ></div>
+              </div>
+            </div>
+            <div class="heatmap-foot">
+              <div class="heatmap-months">
+                <span v-for="m in heatmapMonths" :key="m">{{ m }}</span>
+              </div>
             </div>
           </div>
-          <ul class="commits">
-            <li
-              v-for="c in recentCommits.slice(0, 6)"
-              :key="c.hashFull"
-              class="commit"
-              @click="emit('changeView', 'history')"
-            >
-              <span class="avatar avatar--sm" :style="avatarStyle(c.email || c.author)">{{ initials(c.author) }}</span>
-              <div class="commit-body">
-                <div class="commit-title">
-                  <span v-if="commitType(c.message)" class="tag" :class="`tag--${commitType(c.message)}`">
-                    {{ commitType(c.message) }}
-                  </span>
-                  <span class="commit-msg">{{ commitMessageBody(c.message) }}</span>
-                </div>
-                <div class="commit-sub">{{ c.author }} · {{ formatDate(c.date) }}</div>
-              </div>
-              <code class="commit-hash">{{ c.hash }}</code>
-            </li>
-            <li v-if="recentCommits.length === 0" class="commit-empty">
-              {{ t("dashboard.noCommits") }}
-            </li>
-          </ul>
+          <div class="heatmap-legend">
+            <span class="legend-label">{{ t("dashboard.less") }}</span>
+            <span class="heatmap-cell heatmap-cell--l0"></span>
+            <span class="heatmap-cell heatmap-cell--l1"></span>
+            <span class="heatmap-cell heatmap-cell--l2"></span>
+            <span class="heatmap-cell heatmap-cell--l3"></span>
+            <span class="heatmap-cell heatmap-cell--l4"></span>
+            <span class="legend-label">{{ t("dashboard.more") }}</span>
+          </div>
         </div>
 
+        <!-- Commits per day (14d) -->
         <div class="panel">
-          <div class="panel-head">
+          <div class="panel-head panel-head--chart">
             <h3 class="panel-title">{{ t("dashboard.chartTitle") }}</h3>
+            <span class="chart-total panel-count">{{ fortnightCommits }} {{ t("dashboard.chartCommits") }}</span>
+            <span
+              v-if="fortnightTrendPct !== 0"
+              class="trend chart-trend"
+              :class="fortnightTrendPct > 0 ? 'trend--up' : 'trend--down'"
+            >
+              {{ fortnightTrendPct > 0 ? "▲" : "▼" }} {{ Math.abs(fortnightTrendPct) }}%
+            </span>
           </div>
           <div class="chart" role="img" :aria-label="t('dashboard.chartTitle')">
             <div
@@ -902,16 +697,69 @@ watch(() => props.cwd, loadDashboard);
             </div>
           </div>
         </div>
+
+        <!-- Recent commits -->
+        <div class="panel">
+          <div class="panel-head">
+            <h3 class="panel-title">{{ t("dashboard.recentCommits") }}</h3>
+            <div class="panel-actions">
+              <button
+                v-if="ai.isAvailable.value"
+                class="btn btn--ai panel-link-ai"
+                :title="t('dashboard.releaseNotesHint')"
+                @click="openReleaseNotes"
+              >
+                <span class="dv-ai-label">
+                  <AiSparkle :size="13" />
+                  {{ t('dashboard.releaseNotes') }}
+                </span>
+              </button>
+            </div>
+          </div>
+          <ul class="commits">
+            <li
+              v-for="c in recentCommits.slice(0, 6)"
+              :key="c.hashFull"
+              class="commit"
+              @click="emit('selectCommit', c.hashFull)"
+            >
+              <span class="avatar avatar--sm" :style="avatarStyle(c.email || c.author)">{{ initials(c.author) }}</span>
+              <div class="commit-body">
+                <div class="commit-title">
+                  <span v-if="commitType(c.message)" class="tag" :class="`tag--${commitType(c.message)}`">
+                    {{ commitType(c.message) }}
+                  </span>
+                  <span class="commit-msg">{{ commitMessageBody(c.message) }}</span>
+                </div>
+                <div class="commit-sub">{{ c.author }} · {{ formatDate(c.date) }}</div>
+              </div>
+              <code class="commit-hash">{{ c.hash }}</code>
+            </li>
+            <li v-if="recentCommits.length === 0" class="commit-empty">
+              {{ t("dashboard.noCommits") }}
+            </li>
+          </ul>
+        </div>
       </section>
 
       <!-- ─── README card (kept, slight styling refresh) ─── -->
-      <div class="card readme-card" v-if="readmeContent !== null">
+      <div class="card readme-card" :class="{ 'readme--first': settings.dashboardReadmeFirst }" v-if="!settings.dashboardHideReadme && readmeContent !== null">
         <div class="card-header">
           <h3 class="panel-title">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <button
+              v-if="readmeDoc !== 'README.md'"
+              class="readme-back"
+              :title="t('dashboard.backToReadme')"
+              @click="loadReadme"
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                <path d="M10 3 5 8l5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+            <svg v-else width="16" height="16" viewBox="0 0 16 16" fill="none">
               <path d="M2 3h5l1 1h6v9H2V3z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
             </svg>
-            README.md
+            {{ readmeDoc }}
           </h3>
           <div class="readme-tabs">
             <button
@@ -933,14 +781,16 @@ watch(() => props.cwd, loadDashboard);
         <div class="readme-body">
           <div
             v-if="readmeTab === 'formatted'"
+            ref="readmeFormattedEl"
             class="readme-formatted"
+            @click="onReadmeLinkClick"
             v-html="safeHtml(renderReadme(readmeContent))"
           />
           <pre v-else class="readme-raw"><code>{{ readmeContent }}</code></pre>
         </div>
       </div>
 
-      <div class="card readme-empty" v-else-if="readmeError">
+      <div class="card readme-empty" :class="{ 'readme--first': settings.dashboardReadmeFirst }" v-else-if="!settings.dashboardHideReadme && readmeError">
         <div class="readme-empty-inner">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
             <rect x="3" y="3" width="18" height="18" rx="3" stroke="currentColor" stroke-width="1.5" opacity="0.4"/>
@@ -1022,6 +872,10 @@ watch(() => props.cwd, loadDashboard);
   gap: var(--space-6);
 }
 
+/* "README first" dashboard option — pull the README card above the
+   contributors / activity rows without reordering the DOM. */
+.readme--first { order: -1; }
+
 .dashboard-loading {
   display: flex;
   flex-direction: column;
@@ -1041,186 +895,27 @@ watch(() => props.cwd, loadDashboard);
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* ───────── Hero ───────── */
-.hero {
+/* ───────── Dashboard rows ───────── */
+/* Contributors — full width on its own row. */
+.row-contrib {
   display: grid;
-  grid-template-columns: 1.3fr 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-5);
 }
 
-.hero-card {
-  padding: var(--space-6) var(--space-6);
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-xl);
-  position: relative;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  min-height: 160px;
-}
-
-.hero-card--primary {
-  background:
-    radial-gradient(circle at 100% 0%, var(--color-accent-soft), transparent 55%),
-    linear-gradient(135deg, var(--color-bg-secondary), var(--color-bg-tertiary));
-  border-color: var(--color-accent-soft);
-}
-
-.hero-eyebrow {
-  font-size: var(--font-size-sm);
-  color: var(--color-text-subtle);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  font-weight: 600;
-}
-
-.hero-title {
-  font-size: var(--font-size-xl);
-  font-weight: 600;
-  margin: 0;
-  line-height: 1.2;
-}
-
-.hero-sub {
-  color: var(--color-text-muted);
-  font-size: var(--font-size-sm);
-  margin: 0;
-}
-
-.hero-chips {
-  display: flex;
-  gap: var(--space-2);
-  margin-top: auto;
-  flex-wrap: wrap;
-}
-
-.chip {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  padding: 2px var(--space-3);
-  font-size: var(--font-size-sm);
-  font-weight: 500;
-  border-radius: var(--radius-pill);
-  background: var(--color-bg-tertiary);
-  color: var(--color-text-muted);
-}
-.chip--sm { padding: 1px var(--space-2); font-size: var(--font-size-sm); }
-.chip--success { background: var(--color-success-soft); color: var(--color-success); }
-.chip--danger { background: var(--color-danger-soft); color: var(--color-danger); }
-.chip--info { background: var(--color-info-soft); color: var(--color-info); }
-.chip--warning { background: var(--color-warning-soft); color: var(--color-warning); }
-
-/* Health score */
-.health-score {
-  font-size: 38px;
-  font-weight: 700;
-  line-height: 1;
-  letter-spacing: -0.03em;
-  color: var(--color-success);
-  margin-top: var(--space-1);
-}
-.health-score--fair { color: var(--color-warning); }
-.health-score--poor { color: var(--color-danger); }
-.health-denom {
-  font-size: var(--font-size-sm);
-  color: var(--color-text-muted);
-  font-weight: 500;
-}
-.health-bar {
-  height: 6px;
-  border-radius: 3px;
-  background: var(--color-bg-tertiary);
-  overflow: hidden;
-  margin-top: auto;
-}
-.health-bar > span {
-  display: block;
-  height: 100%;
-  border-radius: 3px;
-  background: linear-gradient(90deg, var(--color-accent), var(--color-accent-hover));
-  transition: width var(--transition-base);
-}
-.health-score--fair ~ .health-bar > span { background: linear-gradient(90deg, var(--color-warning), #fbbf24); }
-.health-score--poor ~ .health-bar > span { background: linear-gradient(90deg, var(--color-danger), #f87171); }
-
-/* Next action */
-.next-title {
-  font-size: var(--font-size-md);
-  font-weight: 600;
-  margin-top: var(--space-1);
-  line-height: 1.35;
-}
-.btn-hero {
-  margin-top: auto;
-  padding: var(--space-3) var(--space-4);
-  background: var(--color-accent);
-  color: var(--color-accent-text);
-  border: none;
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  font-weight: 500;
-  font-size: var(--font-size-sm);
-  transition: background var(--transition-fast);
-}
-.btn-hero:hover { background: var(--color-accent-hover); }
-
-/* ───────── Stat cards ───────── */
-.stats-grid {
+/* Activity heatmap · Commits/day · Recent commits — three equal columns.
+   `minmax(0, …)` lets the panels shrink so their inner scroll/ellipsis
+   content can't blow out the grid. */
+.row-activity {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
-  gap: var(--space-4);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-5);
 }
 
 @media (max-width: 1100px) {
-  .stats-grid { grid-template-columns: repeat(3, 1fr); }
+  .row-contrib,
+  .row-activity { grid-template-columns: 1fr; }
 }
-
-.stat-card {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-5);
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-xl);
-  cursor: default;
-  transition: border-color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
-  text-align: left;
-  font-family: inherit;
-  color: inherit;
-  overflow: hidden;
-}
-
-button.stat-card { cursor: pointer; }
-button.stat-card:hover {
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 3px var(--color-accent-soft);
-  transform: translateY(-1px);
-}
-
-.stat-card--alert { border-color: var(--color-warning); }
-
-.stat-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-}
-
-.stat-icon {
-  width: 32px; height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--radius-md);
-}
-.stat-icon--accent { background: var(--color-accent-soft); color: var(--color-accent); }
-.stat-icon--info { background: var(--color-info-soft); color: var(--color-info); }
-.stat-icon--success { background: var(--color-success-soft); color: var(--color-success); }
-.stat-icon--warning { background: var(--color-warning-soft); color: var(--color-warning); }
-.stat-icon--muted { background: var(--color-bg-tertiary); color: var(--color-text-muted); }
 
 .trend {
   font-size: var(--font-size-sm);
@@ -1230,68 +925,6 @@ button.stat-card:hover {
 }
 .trend--up { color: var(--color-success); background: var(--color-success-soft); }
 .trend--down { color: var(--color-danger); background: var(--color-danger-soft); }
-
-.stat-value {
-  font-size: var(--font-size-2xl);
-  font-weight: 700;
-  line-height: 1.1;
-  letter-spacing: -0.02em;
-  margin-top: var(--space-2);
-}
-
-.stat-label {
-  font-size: var(--font-size-sm);
-  color: var(--color-text-subtle);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  font-weight: 600;
-}
-
-.stat-hint {
-  font-size: var(--font-size-sm);
-  color: var(--color-text-subtle);
-  margin-top: var(--space-1);
-  min-height: 1em;
-}
-
-.spark { width: 100%; height: 22px; margin-top: var(--space-2); }
-.filler { flex: 1; }
-
-.bullet-row { display: flex; gap: 3px; margin-top: var(--space-2); }
-.bullet { height: 4px; border-radius: 2px; }
-.bullet--success { background: var(--color-success); }
-.bullet--warning { background: var(--color-warning); }
-
-.avatar-stack {
-  display: flex;
-  margin-top: var(--space-2);
-}
-.avatar-stack .avatar + .avatar { margin-left: -6px; }
-.avatar-stack .avatar {
-  box-shadow: 0 0 0 2px var(--color-bg-secondary);
-  transition: transform var(--transition-fast), z-index 0s;
-}
-.avatar-stack .avatar:hover {
-  transform: translateY(-3px) scale(1.15);
-  z-index: 20 !important;
-}
-
-.stat-breakdown {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1);
-  margin-top: var(--space-2);
-}
-
-.stat-pill {
-  font-size: var(--font-size-sm);
-  padding: 1px var(--space-2);
-  border-radius: var(--radius-pill);
-  font-weight: 500;
-}
-.stat-pill--success { background: var(--color-success-soft); color: var(--color-success); }
-.stat-pill--warning { background: var(--color-warning-soft); color: var(--color-warning); }
-.stat-pill--muted { background: var(--color-bg-tertiary); color: var(--color-text-muted); }
 
 /* ───────── Avatar ───────── */
 .avatar {
@@ -1309,17 +942,6 @@ button.stat-card:hover {
   font-size: 10px;
 }
 
-/* ───────── Grid 2-col panels ───────── */
-.grid-2 {
-  display: grid;
-  grid-template-columns: 1.5fr 1fr;
-  gap: var(--space-5);
-}
-
-@media (max-width: 1100px) {
-  .grid-2 { grid-template-columns: 1fr; }
-}
-
 .panel {
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
@@ -1335,6 +957,14 @@ button.stat-card:hover {
   align-items: center;
   padding: var(--space-4) var(--space-5);
   border-bottom: 1px solid var(--color-border);
+}
+
+.panel-head--chart {
+  justify-content: flex-start;
+  gap: var(--space-2);
+}
+.chart-trend {
+  margin-left: auto;
 }
 
 .panel-title {
@@ -1361,23 +991,39 @@ button.stat-card:hover {
 /* ───────── Heatmap ───────── */
 .heatmap {
   padding: var(--space-5);
+  /* Cell band (row 1) + foot (row 2). Days and cells share row 1 so their
+     7 tracks line up exactly. Capped at 210px, anchored to the top. */
   display: grid;
   grid-template-columns: 28px 1fr;
+  grid-template-rows: minmax(0, 1fr) auto;
   gap: var(--space-3);
+  height: 210px;
+  max-height: 210px;
+  min-height: 0;
 }
 
 .heatmap-days {
+  grid-column: 1;
+  grid-row: 1;
   display: grid;
-  grid-template-rows: repeat(7, 12px);
+  grid-template-rows: repeat(7, 1fr);
   gap: 3px;
   font-size: 11px;
   color: var(--color-text-subtle);
-  padding-top: 2px;
 }
 
-.heatmap-grid-wrap { min-width: 0; }
+/* Center each label vertically within its 12px row so the day lines up
+   with the heatmap cell instead of sitting at the top of the track. */
+.heatmap-days span {
+  display: flex;
+  align-items: center;
+  line-height: 1;
+}
 
 .heatmap-grid {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
   display: grid;
   grid-template-columns: repeat(26, 1fr);
   gap: 3px;
@@ -1385,7 +1031,7 @@ button.stat-card:hover {
 
 .heatmap-col {
   display: grid;
-  grid-template-rows: repeat(7, 12px);
+  grid-template-rows: repeat(7, 1fr);
   gap: 3px;
 }
 
@@ -1403,23 +1049,36 @@ button.stat-card:hover {
 .heatmap-cell--l4 { background: var(--color-accent); }
 
 .heatmap-foot {
+  grid-column: 2;
+  grid-row: 2;
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  flex-direction: column;
   margin-top: var(--space-3);
   font-size: 11px;
   color: var(--color-text-subtle);
   gap: var(--space-2);
-  flex-wrap: wrap;
 }
 
-.heatmap-foot .heatmap-cell { width: 10px; height: 10px; display: inline-block; }
+/* Months span the full grid width on their own row so they line up under
+   the columns instead of fighting the legend for horizontal space. */
+.heatmap-months {
+  display: flex;
+  justify-content: space-between;
+}
 
+.heatmap-legend .heatmap-cell { width: 14px; height: 14px; display: inline-block; }
+
+/* Legend sits outside the heatmap and fills the leftover space below it,
+   centered both vertically and horizontally in that gap. */
 .heatmap-legend {
-  display: inline-flex;
+  flex: 1;
+  display: flex;
   align-items: center;
+  justify-content: center;
   gap: 3px;
-  margin-left: auto;
+  padding: 0 var(--space-4) var(--space-6);
+  font-size: 13px;
+  color: var(--color-text-subtle);
 }
 
 .legend-label { margin: 0 2px; }
@@ -1432,10 +1091,15 @@ button.stat-card:hover {
   gap: var(--space-3);
 }
 
+/* Rail = scroll viewport + overlaid prev/next arrows. */
+.contributors-rail {
+  position: relative;
+}
+
 /* Horizontal scrollable rail (v2.0). The full contributor list lives here;
    each card snaps to the start, and ~33% width means a third card peeks
-   in to make the scrollability obvious. `mask-image` fades the right edge
-   when there's overflow as an extra cue. */
+   in to make the scrollability obvious. `mask-image` fades both edges
+   as an extra cue; navigation is driven by the overlaid arrows. */
 .contributors-scroll {
   display: flex;
   flex-direction: row;
@@ -1443,26 +1107,80 @@ button.stat-card:hover {
   overflow-x: auto;
   overflow-y: hidden;
   scroll-snap-type: x mandatory;
-  scrollbar-width: thin;
+  /* Arrows replace the scrollbar as the navigation affordance. */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
   /* Negative margin + matching padding lets the cards bleed to the panel
      edges visually while keeping the scrollbar clear of the panel border. */
-  margin: 0 calc(var(--space-5) * -1);
-  padding: 0 var(--space-5) var(--space-2);
+  padding: 0 var(--space-5) 0;
+  /* Fade both edges so cards appear to slide behind the panel sides. */
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 var(--space-6),
+    #000 calc(100% - var(--space-6)),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 var(--space-6),
+    #000 calc(100% - var(--space-6)),
+    transparent 100%
+  );
+}
+.contributors-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+/* Prev/next arrows — overlaid on the rail edges, replacing the scrollbar. */
+.contrib-arrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+  cursor: pointer;
+  box-shadow: 0 2px 8px -2px rgba(0, 0, 0, 0.25);
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+.contrib-arrow:hover {
+  background: var(--color-bg-tertiary);
+  border-color: var(--color-accent);
+}
+.contrib-arrow--left {
+  left: calc(var(--space-2) * -1);
+}
+.contrib-arrow--right {
+  right: calc(var(--space-2) * -1);
 }
 
 .contrib {
-  flex: 0 0 calc((100% - var(--space-3) * 2) / 3);
-  min-width: 180px;
+  flex: 0 0 calc((100% - var(--space-3) * 3) / 4);
+  min-width: 150px;
   scroll-snap-align: start;
   display: grid;
   grid-template-columns: 28px 1fr auto;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-3);
+  padding: var(--space-4);
   border-radius: var(--radius-md);
   background: var(--color-bg);
   border: 1px solid var(--color-border);
   transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+/* >4 contributors: shrink cards so more fit and a partial card peeks in. */
+.contributors-scroll--dense .contrib {
+  flex-basis: calc((100% - var(--space-3) * 4) / 6);
 }
 
 .contrib:hover {
@@ -1543,7 +1261,7 @@ button.stat-card:hover {
 .type-legend {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-3);
+  gap: var(--space-6);
   font-size: var(--font-size-sm);
   color: var(--color-text-muted);
 }
@@ -1642,11 +1360,32 @@ button.stat-card:hover {
 /* ───────── Bar chart ───────── */
 .chart {
   padding: var(--space-5);
-  height: 220px;
+  /* flex:1 + min-height lets the chart grow to fill the panel so the bars
+     and weekday labels stay anchored to the bottom edge of the block. */
+  flex: 1;
+  min-height: 220px;
   display: flex;
   align-items: flex-end;
   gap: var(--space-2);
   position: relative;
+}
+
+.chart-total {
+  font-size: var(--font-size-md);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Count badge beside a panel title (contributors). */
+.panel-count {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--color-text-muted);
+  background: var(--color-bg-tertiary);
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-pill);
+  font-variant-numeric: tabular-nums;
+  padding: 1px 6px;
 }
 
 .bar-wrap {
@@ -1701,6 +1440,24 @@ button.stat-card:hover {
   justify-content: space-between;
   padding: var(--space-4) var(--space-5);
   border-bottom: 1px solid var(--color-border);
+}
+
+.readme-back {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.readme-back:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-tertiary);
 }
 
 .readme-card {
@@ -1940,10 +1697,19 @@ button.stat-card:hover {
   gap: var(--space-2);
 }
 
-.panel-link-ai {
+.btn.btn--ai.panel-link-ai {
   min-height: 26px;
   padding: 4px 12px;
   font-size: var(--font-size-sm);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+}
+.btn.btn--ai.panel-link-ai:hover:not(:disabled) {
+  color: var(--color-ai-text);
+  transform: none;
+  background:
+    linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-hover) 100%) padding-box,
+    linear-gradient(135deg, var(--color-accent) 0%, #c084fc 50%, var(--color-accent) 100%) border-box;
 }
 .dv-ai-label {
   display: inline-flex;

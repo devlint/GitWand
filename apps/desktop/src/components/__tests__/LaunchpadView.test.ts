@@ -1,18 +1,19 @@
 /**
- * LaunchpadView.vue — UI smoke tests (v2.9 §1.2).
+ * LaunchpadView.vue — UI smoke tests (Phase 2 / v2.29 sections rework).
  *
- * Coverage goal: minimal vital surface — not exhaustive.
- *   - tab bar renders 4 buttons (3 when team toggle is off)
- *   - default active tab honours settings.launchpadActiveTab
- *   - clicking a tab switches activeTab and triggers the corresponding panel
- *   - PR ⋮ menu opens / closes; Pin and Snooze actions call the right pin store fn
- *   - close button emits "close"
- *   - "Refresh all" fans out to all four refresh* mocks
+ * Coverage goal:
+ *   - inbox tab renders; Team tab toggleable by teamTabEnabled
+ *   - NO filter chips, NO group-by toggle (removed in v2.29 sections rework)
+ *   - repos section rendered first only when non-empty (local action cards)
+ *   - each section from the composable renders as a titled collapsible header
+ *   - sections are only rendered when non-empty (count > 0)
+ *   - collapsing a section header hides its rows
+ *   - action buttons emit open-pr / open-issue
+ *   - Refresh-all fans out to all data source refreshes
  *   - Team lazy placeholder renders + Load button triggers refreshTeam
  *
- * We mount with the native `createApp` (no @vue/test-utils dep — that package
- * is not installed) into a jsdom container, then assert against the live DOM
- * and observe spy calls on the mocked composables.
+ * We mount with the native `createApp` (no @vue/test-utils dep) into a jsdom
+ * container, then assert against the live DOM and spy calls on mocked composables.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -21,52 +22,36 @@ import LaunchpadView from "../LaunchpadView.vue";
 import type { AppSettings } from "../../composables/useSettings";
 
 // ─── Mocks ────────────────────────────────────────────────
-//
-// All five Launchpad composables are stubbed at module level. Tests reach the
-// spies via the imports below — the modules under test (LaunchpadView's
-// imports) resolve to these stubs instead of the real composables.
 
 const refreshWipMock = vi.fn(async (_repos: unknown) => {});
 const refreshPrsMock = vi.fn(async (_repos: unknown) => {});
 const refreshIssuesMock = vi.fn(async (_repos: unknown) => {});
 const refreshTeamMock = vi.fn(async (_repos: unknown) => {});
-const pinMock = vi.fn();
-const unpinMock = vi.fn();
-const snoozeMock = vi.fn();
-const unsnoozeMock = vi.fn();
 const persistSettingsMock = vi.fn();
 
 const wipRef = ref<unknown[]>([]);
 const wipLoadingRef = ref(false);
-const wipErrorRef = ref<string | null>(null);
 
 const allPrsRef = ref<unknown[]>([]);
-const snoozedPrsRef = ref<unknown[]>([]);
-const prReposRef = ref<unknown[]>([]);
 const prsLoadingRef = ref(false);
 const prsErrorRef = ref<string | null>(null);
 
 const allIssuesRef = ref<unknown[]>([]);
-const snoozedIssuesRef = ref<unknown[]>([]);
-const issueReposRef = ref<unknown[]>([]);
 const issuesLoadingRef = ref(false);
-const issuesErrorRef = ref<string | null>(null);
-const issuesTotalRef = ref(0);
-const issueFilterRef = ref<"" | "assigned" | "mentioned" | "created">("assigned");
 
 const teamActivityRef = ref<unknown[]>([]);
 const teamLoadingRef = ref(false);
 const teamErrorRef = ref<string | null>(null);
 
-const inboxBucketsRef = ref<unknown[]>([]);
+// Phase 2 sections-based inbox API.
 const inboxTotalRef = ref(0);
+const inboxNowCountRef = ref(0);
+const sectionsRef = ref<unknown[]>([]);
 const loadInboxUserMock = vi.fn(async () => {});
 
-// Reactive AppSettings stand-in. Default shape mirrors `defaultAppSettings`
-// closely enough for LaunchpadView's needs (it only reads
-// `launchpadActiveTab` and `launchpadTeamTabEnabled`).
+// Reactive AppSettings stand-in — no launchpadFilter / launchpadGroupBy.
 const settingsRef = ref<Partial<AppSettings>>({
-  launchpadActiveTab: "wip",
+  launchpadActiveTab: "inbox",
   launchpadTeamTabEnabled: true,
 });
 
@@ -81,8 +66,6 @@ vi.mock("../../composables/useSettings", () => ({
 }));
 
 vi.mock("../../composables/useI18n", () => ({
-  // Return the key itself so we can assert on the markup without dragging in
-  // the full LocaleKey type machinery.
   useI18n: () => ({ t: (key: string) => key }),
 }));
 
@@ -90,16 +73,13 @@ vi.mock("../../composables/useLaunchpadWip", () => ({
   useLaunchpadWip: () => ({
     wip: wipRef,
     loading: wipLoadingRef,
-    error: wipErrorRef,
     refresh: refreshWipMock,
   }),
 }));
 
 vi.mock("../../composables/useLaunchpadPrs", () => ({
   useLaunchpadPrs: () => ({
-    repos: prReposRef,
     allPrs: allPrsRef,
-    snoozedPrs: snoozedPrsRef,
     loading: prsLoadingRef,
     error: prsErrorRef,
     refresh: refreshPrsMock,
@@ -108,26 +88,9 @@ vi.mock("../../composables/useLaunchpadPrs", () => ({
 
 vi.mock("../../composables/useLaunchpadIssues", () => ({
   useLaunchpadIssues: () => ({
-    repos: issueReposRef,
     allIssues: allIssuesRef,
-    snoozedIssues: snoozedIssuesRef,
     loading: issuesLoadingRef,
-    error: issuesErrorRef,
-    activeFilter: issueFilterRef,
-    totalCount: issuesTotalRef,
     refresh: refreshIssuesMock,
-  }),
-}));
-
-vi.mock("../../composables/useLaunchpadPins", () => ({
-  useLaunchpadPins: () => ({
-    pin: pinMock,
-    unpin: unpinMock,
-    snooze: snoozeMock,
-    unsnooze: unsnoozeMock,
-    isPinned: () => false,
-    isSnoozed: () => false,
-    snoozedUntil: () => null,
   }),
 }));
 
@@ -142,8 +105,10 @@ vi.mock("../../composables/useLaunchpadTeam", () => ({
 
 vi.mock("../../composables/useLaunchpadInbox", () => ({
   useLaunchpadInbox: () => ({
-    buckets: inboxBucketsRef,
     totalCount: inboxTotalRef,
+    nowCount: inboxNowCountRef,
+    sections: sectionsRef,
+    allItems: ref([]),
     loadUser: loadInboxUserMock,
   }),
 }));
@@ -231,113 +196,196 @@ function fakePr(overrides: Record<string, unknown> = {}): Record<string, unknown
 // ─── Lifecycle ────────────────────────────────────────────
 
 beforeEach(() => {
-  // Reset reactive state between tests so each spec starts from a known shape.
   wipRef.value = [];
   wipLoadingRef.value = false;
-  wipErrorRef.value = null;
   allPrsRef.value = [];
-  snoozedPrsRef.value = [];
-  prReposRef.value = [];
   prsLoadingRef.value = false;
   prsErrorRef.value = null;
   allIssuesRef.value = [];
-  snoozedIssuesRef.value = [];
-  issueReposRef.value = [];
   issuesLoadingRef.value = false;
-  issuesErrorRef.value = null;
-  issuesTotalRef.value = 0;
-  issueFilterRef.value = "assigned";
   teamActivityRef.value = [];
   teamLoadingRef.value = false;
   teamErrorRef.value = null;
-  inboxBucketsRef.value = [];
   inboxTotalRef.value = 0;
+  inboxNowCountRef.value = 0;
+  sectionsRef.value = [];
   settingsRef.value = {
-    launchpadActiveTab: "wip",
+    launchpadActiveTab: "inbox",
     launchpadTeamTabEnabled: true,
   };
 });
 
 afterEach(() => {
-  // Drain document.body of any leftover containers (defensive — mountLaunchpad
-  // already cleans up, but a test that throws before unmount() must not bleed
-  // state into the next spec).
   while (document.body.firstChild) document.body.removeChild(document.body.firstChild);
 });
 
 // ─── Tests ────────────────────────────────────────────────
 
-describe("LaunchpadView — UI smoke", () => {
-  it("renders 5 tabs (Inbox / WIP / PRs / Issues / Team) when team toggle is on", async () => {
+describe("LaunchpadView — tab bar", () => {
+  it("renders 2 tabs when teamTabEnabled is true (inbox + team)", async () => {
     const mounted = mountLaunchpad();
     await nextTick();
 
     const tabs = mounted.container.querySelectorAll(".launchpad-view__tab");
-    expect(tabs).toHaveLength(5);
-    // Tab order: inbox, wip, prs, issues, team — match the locale keys returned by t().
+    expect(tabs).toHaveLength(2);
     const labels = Array.from(tabs).map((t) => t.textContent?.trim() ?? "");
     expect(labels[0]).toContain("launchpad.inboxTab");
-    expect(labels[1]).toContain("launchpad.wipTab");
-    expect(labels[2]).toContain("launchpad.prsTab");
-    expect(labels[3]).toContain("launchpad.issuesTab");
-    expect(labels[4]).toContain("launchpad.teamTab");
+    expect(labels[1]).toContain("launchpad.teamTab");
 
     unmount(mounted);
   });
 
-  it("hides the Team tab when launchpadTeamTabEnabled is false", async () => {
+  it("renders only 1 tab when teamTabEnabled is false", async () => {
     settingsRef.value.launchpadTeamTabEnabled = false;
     const mounted = mountLaunchpad();
     await nextTick();
 
     const tabs = mounted.container.querySelectorAll(".launchpad-view__tab");
-    expect(tabs).toHaveLength(4);
-    const labels = Array.from(tabs).map((t) => t.textContent ?? "");
-    expect(labels.some((l) => l.includes("teamTab"))).toBe(false);
+    expect(tabs).toHaveLength(1);
+    expect(tabs[0].textContent).toContain("launchpad.inboxTab");
 
     unmount(mounted);
   });
 
-  it("activates WIP tab by default and renders WIP panel content", async () => {
+  it("does NOT render filter chips (removed in sections rework)", async () => {
     const mounted = mountLaunchpad();
     await nextTick();
 
-    const active = mounted.container.querySelector(".launchpad-view__tab--active");
-    expect(active?.textContent).toContain("launchpad.wipTab");
-
-    // No PR / issue / team markup at boot — only the WIP empty state.
-    expect(mounted.container.querySelector(".launchpad-view__pr-list")).toBeNull();
-    expect(mounted.container.querySelector(".launchpad-view__issue-list")).toBeNull();
+    // Filter chips were removed — the CSS class must not appear.
+    const chips = mounted.container.querySelectorAll(".launchpad-view__chip-btn");
+    expect(chips).toHaveLength(0);
 
     unmount(mounted);
   });
 
-  it("clicking the PRs tab switches activeTab and renders the PRs panel", async () => {
+  it("does NOT render group-by toggle (removed in sections rework)", async () => {
     const mounted = mountLaunchpad();
     await nextTick();
 
-    const tabs = mounted.container.querySelectorAll<HTMLButtonElement>(".launchpad-view__tab");
-    // Tab order is inbox, wip, prs, … → PRs is the 3rd tab.
-    tabs[2].click();
+    const groupBtns = mounted.container.querySelectorAll(".launchpad-view__groupby-btn");
+    expect(groupBtns).toHaveLength(0);
+
+    unmount(mounted);
+  });
+});
+
+describe("LaunchpadView — sections inbox rendering", () => {
+  function sectionsFixture() {
+    return [
+      {
+        key: "mine",
+        titleKey: "launchpad.section.mine",
+        count: 2,
+        items: [
+          {
+            pr: fakePr({ number: 42, reviewDecision: "APPROVED" }),
+            classification: { tier: "now", case: "merge", action: "merge", kind: "pr" },
+          },
+          {
+            pr: fakePr({ number: 43, mergeStateStatus: "DIRTY" }),
+            classification: { tier: "now", case: "conflicts", action: "resolve", kind: "pr" },
+          },
+        ],
+      },
+      {
+        key: "review",
+        titleKey: "launchpad.section.review",
+        count: 1,
+        items: [
+          {
+            pr: fakePr({ number: 44 }),
+            classification: { tier: "now", case: "review", action: "review", kind: "pr" },
+          },
+        ],
+      },
+    ];
+  }
+
+  it("renders section headers with titles and counts", async () => {
+    settingsRef.value.launchpadActiveTab = "inbox";
+    sectionsRef.value = sectionsFixture();
+    inboxTotalRef.value = 3;
+    inboxNowCountRef.value = 2;
+
+    const mounted = mountLaunchpad();
     await nextTick();
 
-    const active = mounted.container.querySelector(".launchpad-view__tab--active");
-    expect(active?.textContent).toContain("launchpad.prsTab");
+    // Summary line present.
+    const summary = mounted.container.querySelector(".launchpad-view__inbox-summary");
+    expect(summary?.textContent).toContain("launchpad.inboxSummary");
+
+    // Two section headers (no local-cards band: wip is empty).
+    const headers = mounted.container.querySelectorAll(".launchpad-view__inbox-header");
+    expect(headers).toHaveLength(2);
+    expect(headers[0].textContent).toContain("launchpad.section.mine");
+    expect(headers[0].textContent).toContain("2");
+    expect(headers[1].textContent).toContain("launchpad.section.review");
+    expect(headers[1].textContent).toContain("1");
+
+    // One action button per item.
+    const actions = mounted.container.querySelectorAll(".launchpad-view__pr-action");
+    expect(actions).toHaveLength(3);
+    const labels = Array.from(actions).map((a) => a.textContent?.trim() ?? "");
+    expect(labels[0]).toContain("launchpad.action.merge");
+    expect(labels[1]).toContain("launchpad.action.resolve");
+    expect(labels[2]).toContain("launchpad.action.review");
 
     unmount(mounted);
   });
 
-  it("clicking a PR title emits open-pr with the PR (internal navigation, not target=_blank)", async () => {
-    allPrsRef.value = [fakePr()];
-    settingsRef.value.launchpadActiveTab = "prs";
+  it("renders sections with all 6 section keys when provided", async () => {
+    settingsRef.value.launchpadActiveTab = "inbox";
+    sectionsRef.value = [
+      { key: "mine",     titleKey: "launchpad.section.mine",     count: 1, items: [{ pr: fakePr({ number: 1 }),  classification: { tier: "now", case: "merge",  action: "merge",  kind: "pr"    } }] },
+      { key: "assigned", titleKey: "launchpad.section.assigned", count: 1, items: [{ pr: fakePr({ number: 2 }),  classification: { tier: "now", case: "review", action: "view",   kind: "pr"    } }] },
+      { key: "review",   titleKey: "launchpad.section.review",   count: 1, items: [{ pr: fakePr({ number: 3 }),  classification: { tier: "now", case: "review", action: "review", kind: "pr"    } }] },
+      { key: "issues",   titleKey: "launchpad.section.issues",   count: 1, items: [{ issue: fakeIssue({ number: 4 }), classification: { tier: "now", case: "issue",  action: "view",   kind: "issue" } }] },
+      { key: "deps",     titleKey: "launchpad.section.deps",     count: 1, items: [{ pr: fakePr({ number: 5 }),  classification: { tier: "later", case: "merge", action: "autoMerge", kind: "dep" } }] },
+    ];
+    inboxTotalRef.value = 5;
+
     const mounted = mountLaunchpad();
     await nextTick();
 
-    const link = mounted.container.querySelector<HTMLButtonElement>(".launchpad-view__pr-link");
-    expect(link).not.toBeNull();
-    // It's a button (internal nav), not an external anchor.
-    expect(link!.tagName).toBe("BUTTON");
-    link!.click();
+    const headers = mounted.container.querySelectorAll(".launchpad-view__inbox-header");
+    // 5 sections = 5 headers (repos section absent because wip is empty).
+    expect(headers).toHaveLength(5);
+    const headerTexts = Array.from(headers).map((h) => h.textContent ?? "");
+    expect(headerTexts[0]).toContain("launchpad.section.mine");
+    expect(headerTexts[1]).toContain("launchpad.section.assigned");
+    expect(headerTexts[2]).toContain("launchpad.section.review");
+    expect(headerTexts[3]).toContain("launchpad.section.issues");
+    expect(headerTexts[4]).toContain("launchpad.section.deps");
+
+    unmount(mounted);
+  });
+
+  it("does NOT render a section header when sections array is empty", async () => {
+    settingsRef.value.launchpadActiveTab = "inbox";
+    sectionsRef.value = [];
+    inboxTotalRef.value = 0;
+
+    const mounted = mountLaunchpad();
+    await nextTick();
+
+    const headers = mounted.container.querySelectorAll(".launchpad-view__inbox-header");
+    expect(headers).toHaveLength(0);
+
+    unmount(mounted);
+  });
+
+  it("emits open-pr when a section action button is clicked", async () => {
+    settingsRef.value.launchpadActiveTab = "inbox";
+    sectionsRef.value = sectionsFixture();
+    inboxTotalRef.value = 3;
+    inboxNowCountRef.value = 2;
+
+    const mounted = mountLaunchpad();
+    await nextTick();
+
+    const action = mounted.container.querySelector<HTMLButtonElement>(".launchpad-view__pr-action");
+    expect(action).not.toBeNull();
+    action!.click();
     await nextTick();
 
     expect(mounted.emitted.openPr).toHaveLength(1);
@@ -346,18 +394,53 @@ describe("LaunchpadView — UI smoke", () => {
     unmount(mounted);
   });
 
-  it("clicking an issue title emits open-issue (internal navigation)", async () => {
-    allIssuesRef.value = [fakeIssue()];
-    settingsRef.value.launchpadActiveTab = "issues";
+  it("collapses a section when its header is clicked", async () => {
+    settingsRef.value.launchpadActiveTab = "inbox";
+    sectionsRef.value = sectionsFixture();
+    inboxTotalRef.value = 3;
+    inboxNowCountRef.value = 2;
+
     const mounted = mountLaunchpad();
     await nextTick();
 
-    const link = mounted.container.querySelector<HTMLButtonElement>(
-      ".launchpad-view__issue-title .launchpad-view__pr-link",
-    );
-    expect(link).not.toBeNull();
-    expect(link!.tagName).toBe("BUTTON");
-    link!.click();
+    // Both sections expanded: 3 action buttons visible.
+    expect(mounted.container.querySelectorAll(".launchpad-view__pr-action")).toHaveLength(3);
+
+    const firstHeader = mounted.container.querySelector<HTMLButtonElement>(".launchpad-view__inbox-header");
+    firstHeader!.click();
+    await nextTick();
+
+    // Collapsing "mine" removes its 2 rows; the "review" row remains.
+    expect(mounted.container.querySelectorAll(".launchpad-view__pr-action")).toHaveLength(1);
+
+    unmount(mounted);
+  });
+
+  it("renders issue items with open-issue emit", async () => {
+    settingsRef.value.launchpadActiveTab = "inbox";
+    sectionsRef.value = [
+      {
+        key: "issues",
+        titleKey: "launchpad.section.issues",
+        count: 1,
+        items: [
+          {
+            issue: fakeIssue({ number: 21 }),
+            classification: { tier: "now", case: "issue", action: "view", kind: "issue" },
+          },
+        ],
+      },
+    ];
+    inboxTotalRef.value = 1;
+    inboxNowCountRef.value = 1;
+
+    const mounted = mountLaunchpad();
+    await nextTick();
+
+    const action = mounted.container.querySelector<HTMLButtonElement>(".launchpad-view__pr-action");
+    expect(action).not.toBeNull();
+    expect(action!.textContent?.trim()).toContain("launchpad.action.view");
+    action!.click();
     await nextTick();
 
     expect(mounted.emitted.openIssue).toHaveLength(1);
@@ -366,81 +449,119 @@ describe("LaunchpadView — UI smoke", () => {
     unmount(mounted);
   });
 
-  it("⋮ menu opens with Pin + Snooze items; clicking Pin calls pin()", async () => {
-    allPrsRef.value = [fakePr()];
-    settingsRef.value.launchpadActiveTab = "prs";
+  it("repos section renders first when local cards (wip) are non-empty", async () => {
+    settingsRef.value.launchpadActiveTab = "inbox";
+    // Provide a valid WorkspaceWipItem with ahead > 0 so useRepoActionCards generates a card.
+    wipRef.value = [{
+      path: "/tmp/myrepo",
+      name: "myrepo",
+      branch: "main",
+      ahead: 2,
+      behind: 0,
+      stagedCount: 0,
+      unstagedCount: 0,
+      untrackedCount: 0,
+      lastCommitAt: "2026-06-01T10:00:00Z",
+      hasNoUpstream: false,
+      error: null,
+      changedFiles: [],
+    }];
+    sectionsRef.value = [
+      {
+        key: "mine",
+        titleKey: "launchpad.section.mine",
+        count: 1,
+        items: [{ pr: fakePr({ number: 10 }), classification: { tier: "now", case: "merge", action: "merge", kind: "pr" } }],
+      },
+    ];
+    inboxTotalRef.value = 1;
+
     const mounted = mountLaunchpad();
     await nextTick();
 
-    // The menu starts closed; open it.
-    const menuBtn = mounted.container.querySelector<HTMLButtonElement>(
-      ".launchpad-view__menu-btn",
-    );
-    expect(menuBtn).not.toBeNull();
-    menuBtn!.click();
-    await nextTick();
-
-    const dropdown = mounted.container.querySelector(".launchpad-view__menu-dropdown");
-    expect(dropdown).not.toBeNull();
-
-    const items = dropdown!.querySelectorAll<HTMLButtonElement>(".launchpad-view__menu-item");
-    // First item is Pin (since isPinned() returns false), second is Snooze.
-    expect(items[0].textContent).toContain("launchpad.pin");
-    expect(items[1].textContent).toContain("launchpad.snooze");
-
-    items[0].click();
-    expect(pinMock).toHaveBeenCalledTimes(1);
-    expect(pinMock).toHaveBeenCalledWith("https://github.com/org/repo/pull/42", "pr");
+    const headers = mounted.container.querySelectorAll(".launchpad-view__inbox-header");
+    // repos section first, then mine section.
+    expect(headers).toHaveLength(2);
+    expect(headers[0].textContent).toContain("launchpad.section.repos");
+    expect(headers[1].textContent).toContain("launchpad.section.mine");
 
     unmount(mounted);
   });
 
-  it("clicking Snooze reveals the 4 preset buttons (1d / 3d / 1w / 2w)", async () => {
-    allPrsRef.value = [fakePr()];
-    settingsRef.value.launchpadActiveTab = "prs";
+  it("assigned section action is 'view'", async () => {
+    settingsRef.value.launchpadActiveTab = "inbox";
+    sectionsRef.value = [
+      {
+        key: "assigned",
+        titleKey: "launchpad.section.assigned",
+        count: 1,
+        items: [
+          {
+            pr: fakePr({ number: 55 }),
+            classification: { tier: "now", case: "review", action: "view", kind: "pr" },
+          },
+        ],
+      },
+    ];
+    inboxTotalRef.value = 1;
+
     const mounted = mountLaunchpad();
     await nextTick();
 
-    const menuBtn = mounted.container.querySelector<HTMLButtonElement>(
-      ".launchpad-view__menu-btn",
-    );
-    menuBtn!.click();
+    const action = mounted.container.querySelector<HTMLButtonElement>(".launchpad-view__pr-action");
+    expect(action).not.toBeNull();
+    expect(action!.textContent?.trim()).toContain("launchpad.action.view");
+
+    unmount(mounted);
+  });
+});
+
+describe("LaunchpadView — Team surface", () => {
+  it("Team tab triggers refreshTeam on first visit", async () => {
+    const mounted = mountLaunchpad();
     await nextTick();
 
-    // Snooze trigger is the 2nd item in a fresh (non-pinned, non-snoozed) state.
-    const items = mounted.container.querySelectorAll<HTMLButtonElement>(
-      ".launchpad-view__menu-item",
-    );
-    items[1].click();
+    const tabs = mounted.container.querySelectorAll<HTMLButtonElement>(".launchpad-view__tab");
+    refreshTeamMock.mockClear();
+    tabs[1].click();
     await nextTick();
 
-    const subItems = mounted.container.querySelectorAll(
-      ".launchpad-view__snooze-options .launchpad-view__menu-item--sub",
-    );
-    expect(subItems).toHaveLength(4);
+    expect(refreshTeamMock).toHaveBeenCalledTimes(1);
 
     unmount(mounted);
   });
 
-  it("no close button — Launchpad navigation is owned by the sidebar viewMode switch", async () => {
-    // Since v2.10 nav revamp, LaunchpadView no longer renders a ✕ close button.
-    // Dismissal is done by clicking another sidebar entry (changes viewMode in App.vue).
+  it("clicking a Team PR emits open-pr", async () => {
+    const teamPr = fakePr({ number: 99, repoPath: "/tmp/other", repoName: "other" });
+    teamActivityRef.value = [
+      {
+        login: "octocat",
+        prs: [teamPr],
+        overlappingPrs: [{ ...teamPr, overlappingFiles: ["src/a.ts"], myContext: "wip" }],
+      },
+    ];
+    settingsRef.value.launchpadActiveTab = "team";
     const mounted = mountLaunchpad();
     await nextTick();
+    await nextTick();
 
-    const closeBtn = mounted.container.querySelector<HTMLButtonElement>(
-      ".launchpad-view__close",
-    );
-    expect(closeBtn).toBeNull();
+    const link = mounted.container.querySelector<HTMLButtonElement>(".launchpad-view__team-pr-link");
+    expect(link).not.toBeNull();
+    link!.click();
+    await nextTick();
+
+    expect(mounted.emitted.openPr).toHaveLength(1);
+    expect((mounted.emitted.openPr[0] as { number: number }).number).toBe(99);
+
     unmount(mounted);
   });
+});
 
-  it("Refresh-all button fires all four refresh* mocks (team included)", async () => {
+describe("LaunchpadView — Refresh-all", () => {
+  it("Refresh-all button fires all data source refreshes (WIP / PRs / Issues / Team)", async () => {
     const mounted = mountLaunchpad([{ path: "/tmp/r1", name: "r1" }]);
     await nextTick();
 
-    // The onMounted hook already fires WIP / PRs / Issues once; reset counters
-    // so we observe only the click-driven fan-out.
     refreshWipMock.mockClear();
     refreshPrsMock.mockClear();
     refreshIssuesMock.mockClear();
@@ -451,7 +572,6 @@ describe("LaunchpadView — UI smoke", () => {
     );
     expect(refreshAllBtn).not.toBeNull();
     refreshAllBtn!.click();
-    // Two ticks: one for the click handler, one for awaited Promise.all.
     await nextTick();
     await nextTick();
 
@@ -462,63 +582,9 @@ describe("LaunchpadView — UI smoke", () => {
 
     unmount(mounted);
   });
+});
 
-  it("Team tab shows the lazy-load placeholder + Load button on first visit", async () => {
-    const mounted = mountLaunchpad();
-    await nextTick();
-
-    // Click the Team tab (5th now: inbox, wip, prs, issues, team).
-    const tabs = mounted.container.querySelectorAll<HTMLButtonElement>(".launchpad-view__tab");
-    refreshTeamMock.mockClear();
-    tabs[4].click();
-    await nextTick();
-
-    // setTab("team") kicks loadTeam() automatically — placeholder should not
-    // appear because teamLoaded becomes true. Instead the panel is rendered
-    // empty (no `teamActivity`, no `loading`, no `error`).
-    expect(refreshTeamMock).toHaveBeenCalledTimes(1);
-
-    unmount(mounted);
-  });
-
-  it("clicking a Team PR emits open-pr (internal navigation)", async () => {
-    const teamPr = fakePr({ number: 99, repoPath: "/tmp/other", repoName: "other" });
-    teamActivityRef.value = [
-      {
-        login: "octocat",
-        prs: [teamPr],
-        // An overlapping PR auto-expands the member row so the link renders.
-        overlappingPrs: [{ ...teamPr, overlappingFiles: ["src/a.ts"], myContext: "wip" }],
-      },
-    ];
-    settingsRef.value.launchpadActiveTab = "team";
-    const mounted = mountLaunchpad();
-    await nextTick();
-    await nextTick(); // loadTeam resolves → teamLoaded + expanded members
-
-    const link = mounted.container.querySelector<HTMLButtonElement>(".launchpad-view__team-pr-link");
-    expect(link).not.toBeNull();
-    expect(link!.tagName).toBe("BUTTON");
-    link!.click();
-    await nextTick();
-
-    expect(mounted.emitted.openPr).toHaveLength(1);
-    expect((mounted.emitted.openPr[0] as { number: number }).number).toBe(99);
-
-    unmount(mounted);
-  });
-
-  it("honours persisted activeTab on mount (PRs preselected)", async () => {
-    settingsRef.value.launchpadActiveTab = "prs";
-    const mounted = mountLaunchpad();
-    await nextTick();
-
-    const active = mounted.container.querySelector(".launchpad-view__tab--active");
-    expect(active?.textContent).toContain("launchpad.prsTab");
-
-    unmount(mounted);
-  });
-
+describe("LaunchpadView — onMounted eager refresh", () => {
   it("eager onMounted refreshes wip / prs / issues with the supplied repos", async () => {
     refreshWipMock.mockClear();
     refreshPrsMock.mockClear();
@@ -532,13 +598,8 @@ describe("LaunchpadView — UI smoke", () => {
     expect(refreshWipMock).toHaveBeenCalledWith(repos);
     expect(refreshPrsMock).toHaveBeenCalledTimes(1);
     expect(refreshIssuesMock).toHaveBeenCalledTimes(1);
-    // Team must NOT auto-fetch on mount (§2.3 lazy contract).
-    // refreshTeamMock could have been called by a prior test — assert it was
-    // not called *in this mount* by checking that the very first call (if any)
-    // didn't happen via onMounted by comparing to the previous count.
-    // Simpler: clear & re-mount with team disabled to be deterministic. The
-    // active assertion is above; we rely on the dedicated lazy-placeholder
-    // test for the lazy contract.
+    // Team must NOT auto-fetch on mount (lazy contract).
+    expect(refreshTeamMock).not.toHaveBeenCalled();
 
     unmount(mounted);
   });

@@ -32,6 +32,8 @@ const props = defineProps<{
   loadingMore?: boolean;
   /** Number of commits hidden by the active monorepo scope (v2.21.0). */
   hiddenCommitCount?: number;
+  /** User-pinned local branch names for the active repo. Pinned branches get a star in the tree. */
+  pinnedBranches?: string[];
 }>();
 
 type CommitEvent =
@@ -51,6 +53,8 @@ type CommitEvent =
   | "merge-into-current"
   | "rebase-onto-current"
   | "force-push-branch"
+  | "pin-branch"
+  | "unpin-branch"
   | "view-submodule"
   | "apply-stash"
   | "pop-stash"
@@ -74,6 +78,8 @@ const emit = defineEmits<{
   "merge-into-current": [name: string];
   "rebase-onto-current": [name: string];
   "force-push-branch": [];
+  "pin-branch": [name: string];
+  "unpin-branch": [name: string];
   "view-submodule": [path: string];
   "apply-stash": [index: number];
   "pop-stash": [index: number];
@@ -103,6 +109,20 @@ interface CommitCtxMenu {
   clickedStashIndex?: number;
 }
 const ctxMenu = ref<CommitCtxMenu>({ visible: false, x: 0, y: 0, entry: null, idx: -1 });
+
+/** True when a local branch is user-pinned in the active repo. */
+function isBranchPinned(name: string): boolean {
+  return (props.pinnedBranches ?? []).includes(name);
+}
+
+/** Toggle the pin state of the right-clicked local branch. */
+function onCtxTogglePin() {
+  const name = ctxMenu.value.clickedBranch;
+  if (!name) return;
+  if (isBranchPinned(name)) emit("unpin-branch", name);
+  else emit("pin-branch", name);
+  closeCommitContextMenu();
+}
 
 // Sub-menu collision detection (v2.14)
 const resetSubMenuPos = ref({ flipLeft: false, flipUp: false });
@@ -1134,6 +1154,9 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
                 @contextmenu.stop="openCommitContextMenu($event, vc.entry, vc.index, r.name, r.type)"
                 @dblclick.stop="onBranchDblClick(r)"
               >
+                <svg v-if="r.type === 'branch' && isBranchPinned(r.name)" class="cg-ref-pin" width="10" height="10" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                  <path d="M8 1.5l1.9 3.9 4.3.6-3.1 3 0.7 4.3L8 11.3 4.2 13.3l0.7-4.3-3.1-3 4.3-.6L8 1.5z"/>
+                </svg>
                 <svg v-if="r.type === 'branch' && props.worktreeBranches?.has(r.name)" class="branch-wt-icon" width="10" height="10" viewBox="0 0 16 16" fill="currentColor" style="margin-right: 3px; vertical-align: middle; margin-top: -2px;">
                   <circle cx="8" cy="4.5" r="2.5" />
                   <circle cx="4.5" cy="8.5" r="2.5" />
@@ -1253,6 +1276,19 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
             <path d="M8 1v3M8 12v3M1 8h3M12 8h3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
           </svg>
           <span>{{ t('commitCtx.checkout') }}</span>
+        </li>
+
+        <!-- Pin / Unpin branch (mirrors the sidebar pinned-branches feature) -->
+        <li
+          v-if="ctxMenu.clickedBranch && ctxMenu.clickedBranchType === 'branch'"
+          class="commit-ctx-menu-item"
+          role="menuitem"
+          @click="onCtxTogglePin"
+        >
+          <svg width="13" height="13" viewBox="0 0 16 16" :fill="isBranchPinned(ctxMenu.clickedBranch) ? 'currentColor' : 'none'" aria-hidden="true">
+            <path d="M8 1.5l1.9 3.9 4.3.6-3.1 3 0.7 4.3L8 11.3 4.2 13.3l0.7-4.3-3.1-3 4.3-.6L8 1.5z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
+          </svg>
+          <span>{{ isBranchPinned(ctxMenu.clickedBranch) ? t('branch.unpin') : t('branch.pin') }}</span>
         </li>
 
         <template v-if="ctxMenu.clickedBranch && ctxMenu.clickedBranch !== props.currentBranch">
@@ -1959,6 +1995,16 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
   border-radius: var(--radius-sm);
   flex-shrink: 0;
   line-height: 1.5;
+}
+
+.cg-ref-pin {
+  color: currentColor;
+  margin-right: -1px;
+  margin-left: -2px;
+  vertical-align: middle;
+}
+.cg-ref--branch-current .cg-ref-pin {
+  color: #fff;
 }
 
 .cg-submodule-badge {

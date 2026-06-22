@@ -51,6 +51,15 @@ import { useWorkspaceScope } from "./useWorkspaceScope";
 
 export type ViewMode = "dashboard" | "changes" | "history" | "graph" | "prs" | "launchpad" | "issue";
 
+/** Modal-based confirmation (App.vue's `askConfirm`), injected to avoid native `confirm()`. */
+export type ConfirmFn = (opts: {
+  title: string;
+  message: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  danger?: boolean;
+}) => Promise<boolean>;
+
 export interface RepoFileEntry {
   path: string;
   status: "added" | "modified" | "deleted" | "renamed";
@@ -61,7 +70,7 @@ export interface RepoFileEntry {
  * Main composable for the Git repository view.
  * Manages repo status, file changes, diff, log, staging, committing, push/pull.
  */
-export function useGitRepo() {
+export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
   const folderPath = ref<string | null>(null);
   const status = ref<GitStatus | null>(null);
   const selectedFilePath = ref<string | null>(null);
@@ -1052,14 +1061,28 @@ export function useGitRepo() {
     }
   }
 
-  async function deleteBranch(name: string) {
+  async function deleteBranch(name: string, force = false) {
     if (!folderPath.value) return;
     try {
-      await gitDeleteBranch(folderPath.value, name, false);
+      await gitDeleteBranch(folderPath.value, name, force);
       await loadBranches();
       await loadLog();
     } catch (err: any) {
-      error.value = `delete branch: ${err.message}`;
+      const msg = err?.message ?? String(err);
+      // `git branch -d` refuses to drop a branch that isn't fully merged
+      // (e.g. squash-merged or cherry-picked work). Offer a forced `-D` after
+      // explicit confirmation instead of dead-ending on the error.
+      if (!force && /not fully merged/i.test(msg) && opts.confirm) {
+        const ok = await opts.confirm({
+          title: t("branchMenu.deleteModalTitle"),
+          message: t("branchMenu.forceDeleteConfirm", name),
+          confirmLabel: t("branchMenu.deleteModalConfirm"),
+          danger: true,
+        });
+        if (ok) await deleteBranch(name, true);
+        return;
+      }
+      error.value = `delete branch: ${msg}`;
     }
   }
 

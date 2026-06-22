@@ -6,7 +6,34 @@
 
 ## What's Next
 
-### v2.25.0 — Safety Bundle: pre-commit secrets scanner
+### v2.25.0 — Terminal tabs & AI workspace
+
+_Inspired by t1gu1's feedback: "How can I code with AI in GitWand?" — GitWand as a native AI workspace._
+
+**Prerequisite fix — "Launch Claude Code" opens no usable session** _(follow-up to v2.8.0 Agent Sessions)_
+
+The Agent Sessions launch action is wired end-to-end but doesn't produce a working session — a blocker for the AI-workspace vision below.
+
+- **Root cause**: `agent_session_launch` spawns the `claude` CLI via `hidden_cmd` with `stdin`/`stdout`/`stderr` redirected to `null` and no terminal window (`hidden_cmd` is the *headless* helper — it sets `CREATE_NO_WINDOW` on Windows). But Claude Code is an interactive TUI requiring a TTY, so the process exits immediately / runs invisibly — the user clicks and nothing happens.
+- **Fix**: open a real terminal in the worktree's cwd and run `claude` there, reusing the cross-platform pattern already implemented in `claude_cli_login` (`osascript` → Terminal.app on macOS, `cmd /k start` on Windows, `gnome-terminal`/`konsole`/`kitty`/… on Linux). Factor that terminal-launch logic into a shared helper.
+- **Drop the fake "active" state**: the frontend sets `active = true` optimistically after a 1.5 s `setTimeout` with no confirmation the agent actually started — re-poll `agent_session_list` after launch instead.
+- **Make Cursor/Windsurf launchable too**: today the Launch button only shows for `claude`/`other`; those GUI editors have no launch path from the panel.
+
+**Terminal with tabs**
+
+- The integrated terminal extended with tabs: multiple simultaneous shell sessions (`⌘T` new, `⌘W` close, `⌘1..9` switch)
+- Automatic title from the first command, or editable with a double-click
+- Terminal panel anchored at the bottom, resizable height
+
+**AI workspace (exploratory phase)**
+
+- "New AI task" button: opens a blank worktree + launches a Claude Code (or Codex CLI) session in a dedicated terminal tab — the worktree diff displays live in GitWand
+- Vision: GitWand as the command center for coding with AI — see what the agent changes, stage what you want, commit — without leaving the app
+- User feedback expected to shape v2.25.0+
+
+---
+
+### v2.26.0 — Safety Bundle: pre-commit secrets scanner
 
 _Inspired by GitSquid. A "safety" feature with zero network dependency — everything local._
 
@@ -18,7 +45,7 @@ _Inspired by GitSquid. A "safety" feature with zero network dependency — every
 
 ---
 
-### v2.26.0 — Stacked Branches (native)
+### v2.27.0 — Stacked Branches (native)
 
 _A differentiating feature: stacked PRs workflow without an external CLI (Graphite, ghstack…)._
 
@@ -36,7 +63,7 @@ The paradigm: short stacked branches (`feat/step-1` → `feat/step-2` → `feat/
 
 ---
 
-### v2.27.0 — Voice Input (experimental)
+### v2.28.0 — Voice Input (experimental)
 
 - **Local dictation**: microphone button in the commit panel — transcription via embedded Whisper (`whisper-rs` Rust) — zero cloud
 - **Optional AI enrichment**: pass dictated text through `useAIProvider` for conventional commit formatting
@@ -46,21 +73,40 @@ The paradigm: short stacked branches (`feat/step-1` → `feat/step-2` → `feat/
 
 ---
 
-### v2.28.0 — Terminal tabs & AI workspace
+### v2.29.0 — Today: triaged action inbox (renamed from Launchpad)
 
-_Inspired by t1gu1's feedback: "How can I code with AI in GitWand?" — GitWand as a native AI workspace._
+_Evolves the Launchpad (v2.9.0, + in-app review & action inbox in v2.24.0) from a PR/issue table with a generic "Open in GitHub" action into a prioritized, state-aware action inbox — the daily "what do I do next" surface. **Renamed "Launchpad" → "Today"** ("Launchpad" was GitKraken's term; "Today" frames it as the daily-driver). Mockup-driven. The differentiator vs GitKraken/Tower: each item routes to a **native GitWand surface**, not back to the forge._
 
-**Terminal with tabs**
+**Status** — _Phase 1 shipped_: 3 urgency tiers, state-aware primary action per row, local working-state band, reworked card UI (left accent · state pills · avatars · CI/review chips · diff stat · action hierarchy), pill-chip tab bar, centered max-width layout. _Phase 2 (in progress)_: rename Launchpad → Today; counted filter chips + group-by toggle (Priority/Repo/Type) over a unified list; issues / `@`-mentions / dependency PRs as first-class items. _Deferred (Phase 3)_: active mutations — real nudge / auto-merge, and a direct jump from "Resolve" into the conflict resolver (today routes to in-app PR review).
 
-- The integrated terminal extended with tabs: multiple simultaneous shell sessions (`⌘T` new, `⌘W` close, `⌘1..9` switch)
-- Automatic title from the first command, or editable with a double-click
-- Terminal panel anchored at the bottom, resizable height
+**Urgency tiers** — three collapsible buckets above the current review/changes/ci/merge granularity:
+- **À traiter** — needs me now (review requested, changes requested, CI failed, ready to merge, merge conflicts, mention)
+- **En attente** — waiting on others / CI running / approved-but-not-mergeable
+- **Plus tard** — dependency bumps, auto-mergeable, low-priority
 
-**AI workspace (exploratory phase)**
+Subtitle shows "N items · M to handle" (inbox-zero signal). Group-by toggle: **Priority** (default) · **Repo** · **Type**.
 
-- "New AI task" button: opens a blank worktree + launches a Claude Code (or Codex CLI) session in a dedicated terminal tab — the worktree diff displays live in GitWand
-- Vision: GitWand as the command center for coding with AI — see what the agent changes, stage what you want, commit — without leaving the app
-- User feedback expected to shape v2.28+
+**State-aware primary action** — the single most relevant next action replaces the generic "Open in GitHub", each routing to an existing GitWand surface:
+
+| Item state | Action | Routes to |
+|---|---|---|
+| Ready to merge | **Merge** | native merge |
+| Review requested | **Review** | in-app PR review (v2.24) |
+| CI failed | **See failure** | CI annotations (v2.18) |
+| Changes requested / mention | **Reply** | in-app PR/issue thread |
+| Merge conflicts | **Resolve** | GitWand conflict resolver — the key differentiator |
+| Waiting / CI running | **Follow / Nudge** | — |
+| Dependency bump | **Auto-merge** | — |
+
+**Local working state as inbox items** — surface uncommitted changes ("1 uncommitted change on `main` → Commit") and local conflicts at the top, so the inbox spans local + remote. Wires the existing `useRepoActionCards` (commit/publish/push/sync) into the Launchpad header.
+
+**Issues, mentions & dependencies first-class** — extend the inbox beyond *my PRs*: `@`-mentions on issues/PRs, assigned/authored issues, and dependency-update PRs each get their own type, count and action.
+
+**Richer per-row state** — explicit pills (Ready to merge · Review requested · CI failed · Changes requested · Merge conflicts · Mention), CI chip (✓ / ✗ / running), review chip (Approved / Changes requested), read/unread dot, diff stat, labels.
+
+**Counted filter chips** — All · My PRs · To review · Issues · Dependencies · Mentions, each with a live count.
+
+**Implementation** — generalize `useLaunchpadInbox` (today PR-only, 4 buckets) into a tiered classifier over a union item type (PR · issue · mention · dep · local-action card); reuse `useRepoActionCards`, `useLaunchpadScope`, the v2.24 review/issue panels. No new forge round-trips on the hot path — drive off the existing `workspace_prs_all` enriched payload + the Launchpad poller.
 
 ---
 

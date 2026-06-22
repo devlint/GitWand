@@ -793,6 +793,7 @@ onMounted(() => {
               :trace="hunkForSegment(seg)!.trace.llmTrace!"
               :file-path="file.path"
               :hunk-id="seg.hunkIndex"
+              :accepted="acceptedLlmHunks.has(seg.hunkIndex)"
               @accept="onLlmAccept"
               @reject="onLlmReject"
             />

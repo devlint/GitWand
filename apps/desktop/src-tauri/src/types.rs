@@ -356,14 +356,12 @@ pub struct GhPrAssignee {
 }
 
 #[derive(Deserialize)]
-pub struct GhPrReviewee {
-    pub login: Option<String>,
-}
-
-#[derive(Deserialize)]
 pub struct GhPrReviewRequest {
-    #[serde(rename = "requestedReviewer")]
-    pub requested_reviewer: Option<GhPrReviewee>,
+    /// `gh pr list --json reviewRequests` emits each requested reviewer
+    /// directly on the element (`{"__typename":"User","login":"…"}`), NOT
+    /// nested under `requestedReviewer`. Teams carry no `login` → None.
+    #[serde(default)]
+    pub login: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -896,6 +894,17 @@ pub struct CommitSubmoduleChange {
 
 #[derive(Serialize)]
 pub struct ShortlogEntry {
+    pub name: String,
+    pub email: String,
+    pub count: u32,
+}
+
+/// Top contributor (most commits) for a single branch. Powers the
+/// per-branch contributor avatar in the branch picker.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchTopAuthor {
+    pub branch: String,
     pub name: String,
     pub email: String,
     pub count: u32,

@@ -15,6 +15,10 @@ src/
 └── main.ts             # Entry point
 ```
 
+## UI — Forme des boutons
+
+Ne **jamais** créer de bouton totalement arrondi (pilule / `border-radius: var(--radius-pill)` / `border-radius: 9999px`). Tous les boutons doivent être des carrés arrondis : utiliser `--radius-sm`, `--radius-md` ou `--radius-lg`.
+
 ## Architecture — Composables vs Composants
 
 Séparation stricte :

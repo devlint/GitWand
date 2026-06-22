@@ -1230,3 +1230,83 @@ pub(crate) fn gh_check_annotations(cwd: String, number: i64) -> Result<Vec<CIAnn
 
     Ok(annotations)
 }
+
+fn gh_list_issues_inner(
+    cwd: String,
+    filter: String,
+    limit: Option<i64>,
+) -> Result<Vec<crate::types::Issue>, String> {
+    let lim = limit.unwrap_or(100).max(1);
+
+    // Settings-managed OAuth token present → tokenless REST path (no `gh`).
+    if let Some(tok) = github_api::settings_github_token() {
+        let me = match filter.as_str() {
+            "assigned" | "created" | "mentioned" => {
+                github_api::rest_current_user(&tok).unwrap_or_default()
+            }
+            _ => String::new(),
+        };
+        return github_api::rest_list_issues(&cwd, &filter, &me, lim, &tok);
+    }
+
+    // Fallback: shell `gh issue list` (mirrors workspace_issues_all gh path).
+    let mut cmd = hidden_cmd("gh");
+    cmd.args([
+        "issue", "list",
+        "--state", "open",
+        "--json", "number,title,state,author,assignees,labels,url,createdAt,updatedAt,milestone",
+        "--limit", &lim.to_string(),
+    ]);
+    match filter.as_str() {
+        "assigned" => { cmd.args(["--assignee", "@me"]); }
+        "created" => { cmd.args(["--author", "@me"]); }
+        "mentioned" => { cmd.args(["--search", "mentions:@me"]); }
+        _ => {}
+    }
+    let output = cmd
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("gh not available: {}", e))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("gh issue list failed: {}", stderr.trim()));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    crate::git::parse::parse_gh_issue_json(&stdout)
+}
+
+#[tauri::command]
+pub(crate) async fn gh_list_issues(
+    cwd: String,
+    filter: String,
+    limit: Option<i64>,
+) -> Result<Vec<crate::types::Issue>, String> {
+    tauri::async_runtime::spawn_blocking(move || gh_list_issues_inner(cwd, filter, limit))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[cfg(test)]
+mod gh_list_issues_tests {
+    use crate::git::parse::parse_gh_issue_json;
+
+    #[test]
+    fn parses_gh_issue_list_json_into_issues() {
+        let json = r#"[
+            {"number":7,"title":"Bug","state":"OPEN",
+             "author":{"login":"alice"},
+             "assignees":[{"login":"bob"}],
+             "labels":[{"name":"bug"}],
+             "url":"https://github.com/o/r/issues/7",
+             "createdAt":"2026-01-01T00:00:00Z",
+             "updatedAt":"2026-01-02T00:00:00Z",
+             "milestone":{"title":"v1"}}
+        ]"#;
+        let issues = parse_gh_issue_json(json).expect("parses");
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].number, 7);
+        assert_eq!(issues[0].author, "alice");
+        assert_eq!(issues[0].assignees, vec!["bob".to_string()]);
+        assert_eq!(issues[0].milestone, "v1");
+    }
+}

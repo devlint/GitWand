@@ -43,6 +43,7 @@ import {
   glCurrentUser,
   glReviewerCandidates,
   glMrFiles,
+  glListIssues,
 } from "../../utils/backend";
 import { ghPrConflictPreview, ghPrHotspots } from "../../utils/backend";
 
@@ -50,6 +51,7 @@ import type {
   ForgeProvider,
   ForgeName,
   ListPRsOptions,
+  ListIssuesOptions,
   CreatePRInput,
   SubmitReviewOptions,
   PullRequest,
@@ -63,6 +65,7 @@ import type {
   PrHotspot,
   PrFileHistory,
   ReviewerCandidate,
+  Issue,
   Account,
 } from "./types";
 
@@ -96,6 +99,10 @@ export class GitLabProvider implements ForgeProvider {
     // Map ForgeProvider "open" → GitLab "opened"
     const state = opts.state === "open" ? "opened" : (opts.state ?? "opened");
     return glListMrs(cwd, state, opts.limit ?? 10, opts.offset ?? 0);
+  }
+
+  listIssues(cwd: string, opts: ListIssuesOptions = {}): Promise<Issue[]> {
+    return glListIssues(cwd, opts.filter ?? "", opts.limit ?? 100);
   }
 
   getPRCount(cwd: string, state: string = "open"): Promise<number> {

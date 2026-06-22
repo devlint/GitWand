@@ -1,6 +1,7 @@
 import { ref, computed } from "vue";
-import { workspaceIssuesAll } from "../utils/backend";
 import type { WorkspaceRepoIssues, WorkspaceRepo, Issue } from "../utils/backend";
+import { forgeForRepo, isForgeConnected } from "./forge/useForge";
+import type { ForgeName } from "./forge/types";
 import { useLaunchpadPins } from "./useLaunchpadPins";
 
 export type { WorkspaceRepoIssues };
@@ -20,7 +21,11 @@ export interface IssueWithRepo extends Issue {
 
 /**
  * Composable for the Launchpad Issues panel.
- * Aggregates open GitHub Issues from all repos in a workspace.
+ * Aggregates open Issues from all repos in a workspace, dispatching to each
+ * repo's ForgeProvider. Repos whose provider has no `listIssues` (Azure) are
+ * silently skipped. Repos whose forge is not connected are collected in
+ * `needsConnection`.
+ *
  * Each call returns a fresh reactive scope — no shared singleton.
  *
  * The three filters (assigned / mentioned / created) are fetched together and
@@ -39,6 +44,8 @@ export function useLaunchpadIssues() {
   const error = ref<string | null>(null);
   /** Currently active filter (drives the visible list). Defaults to "assigned". */
   const activeFilter = ref<IssueFilter>("assigned");
+  /** Forges that have repos in the workspace but are not connected yet. */
+  const needsConnection = ref<ForgeName[]>([]);
 
   const { isPinned, isSnoozed } = useLaunchpadPins();
 
@@ -89,11 +96,43 @@ export function useLaunchpadIssues() {
   async function refresh(workspaceRepos: WorkspaceRepo[]): Promise<void> {
     loading.value = true;
     error.value = null;
+    const unconnected = new Set<ForgeName>();
     try {
-      const [assigned, mentioned, created] = await Promise.all(
-        FILTERS.map((f) => workspaceIssuesAll(workspaceRepos, f))
+      // Resolve each repo's provider once, then fetch all three filters per repo.
+      const resolved = await Promise.all(
+        workspaceRepos.map(async (repo) => ({ repo, provider: await forgeForRepo(repo.path) }))
       );
+
+      async function listFor(filter: ConcreteFilter): Promise<WorkspaceRepoIssues[]> {
+        const out = await Promise.all(
+          resolved.map(async ({ repo, provider }): Promise<WorkspaceRepoIssues | null> => {
+            const forge = provider.name as ForgeName;
+            if (!isForgeConnected(forge)) {
+              unconnected.add(forge);
+              return null;
+            }
+            if (typeof provider.listIssues !== "function") return null; // Azure: unsupported
+            try {
+              const issues = await provider.listIssues(repo.path, { filter, limit: 100 });
+              return { repoPath: repo.path, repoName: repo.name, issues, filter, error: null };
+            } catch (e) {
+              return {
+                repoPath: repo.path, repoName: repo.name, issues: [], filter,
+                error: (e as Error).message ?? String(e),
+              };
+            }
+          })
+        );
+        return out.filter((r): r is WorkspaceRepoIssues => r !== null);
+      }
+
+      const [assigned, mentioned, created] = await Promise.all([
+        listFor("assigned"),
+        listFor("mentioned"),
+        listFor("created"),
+      ]);
       reposByFilter.value = { assigned, mentioned, created };
+      needsConnection.value = [...unconnected];
     } catch (e) {
       error.value = (e as Error).message ?? String(e);
     } finally {
@@ -101,5 +140,5 @@ export function useLaunchpadIssues() {
     }
   }
 
-  return { repos, allIssues, snoozedIssues, loading, error, activeFilter, totalCount, refresh };
+  return { repos, allIssues, snoozedIssues, loading, error, activeFilter, totalCount, needsConnection, refresh };
 }

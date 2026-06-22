@@ -11,7 +11,7 @@
  */
 
 import { computed } from "vue";
-import { loadSettings, saveSettings } from "./useSettings";
+import { loadSettings, saveSettings, settingsRevision } from "./useSettings";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -76,7 +76,11 @@ export function isArchived(cwd: string, name: string): boolean {
  * Reactivity is intentionally thin — components re-read after mutations.
  */
 export function useArchivedBranches(cwd: () => string) {
-  const archived = computed(() => archivedForRepo(cwd()));
+  const archived = computed(() => {
+    // Depend on the settings revision so archive/unarchive reflect immediately.
+    void settingsRevision.value;
+    return archivedForRepo(cwd());
+  });
   const count = computed(() => archived.value.length);
 
   return {

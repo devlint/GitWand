@@ -739,7 +739,22 @@ pub(crate) async fn git_diff(cwd: String, path: String, staged: bool) -> Result<
     // a proper "new file" diff with every line shown as an addition.
     // Note: --no-index always exits with code 1 when files differ, so we
     // ignore the exit status and only look at stdout.
-    if !staged && hunks.is_empty() && truncated_from_bytes.is_none() {
+    //
+    // Guard: only fall back for genuinely UNTRACKED files. A tracked file
+    // whose change is already staged also yields an empty unstaged `git diff`;
+    // without this check the --no-index fallback would render the entire file
+    // as an addition (all green) instead of showing no unstaged change.
+    let is_untracked = !staged
+        && hunks.is_empty()
+        && truncated_from_bytes.is_none()
+        && !git_cmd()
+            .args(["ls-files", "--error-unmatch", "--", &path])
+            .current_dir(&cwd)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+
+    if is_untracked {
         if let Ok(fb) = git_cmd()
             .args(["diff", "--no-index", "--", "/dev/null", &path])
             .current_dir(&cwd)

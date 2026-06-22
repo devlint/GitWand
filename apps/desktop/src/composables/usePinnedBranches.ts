@@ -10,7 +10,7 @@
  */
 
 import { computed } from "vue";
-import { loadSettings, saveSettings } from "./useSettings";
+import { loadSettings, saveSettings, settingsRevision } from "./useSettings";
 
 const MAX_PINS = 20;
 
@@ -78,7 +78,11 @@ export function isPinned(cwd: string, name: string): boolean {
 // ─── composable ──────────────────────────────────────────────────────────────
 
 export function usePinnedBranches(cwd: () => string) {
-  const pinned = computed(() => pinnedForRepo(cwd()));
+  const pinned = computed(() => {
+    // Depend on the settings revision so pin/unpin reflect immediately.
+    void settingsRevision.value;
+    return pinnedForRepo(cwd());
+  });
   const count = computed(() => pinned.value.length);
 
   return {
