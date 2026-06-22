@@ -20,9 +20,8 @@ import type { SwitchBehavior } from "../utils/branchSwitchDecision";
 export type PullMode = "merge" | "rebase";
 // SwitchBehavior is owned by the pure branch-switch decision helper (lowest
 // layer) and re-exported here so settings consumers keep a single source of truth.
-export type SwitchBehavior = "stash" | "ask" | "refuse";
-/** Active tab in the Today view — only "inbox" (unified list) and "team" survive Phase 2. */
 export type { SwitchBehavior };
+/** Active tab in the Today view — only "inbox" (unified list) and "team" survive Phase 2. */
 export type LaunchpadTab = "inbox" | "wip" | "prs" | "issues" | "team";
 /** Granularity of PR-activity OS notifications (v2.16). */
 export type NotificationLevel = "all" | "reviews" | "ci" | "none";
