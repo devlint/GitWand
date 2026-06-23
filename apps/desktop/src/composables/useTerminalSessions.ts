@@ -70,7 +70,9 @@ export function useTerminalSessions() {
     const sessionId = await terminalOpen(
       cwd,
       { cols: 80, rows: 24 },
-      (chunk) => onChunk(tab.sessionId, chunk),
+      (chunk) => {
+        if (tab.sessionId >= 0) onChunk(tab.sessionId, chunk);
+      },
     );
     tab.sessionId = sessionId;
     return tab;
@@ -81,6 +83,7 @@ export function useTerminalSessions() {
     const idx = list.findIndex((t) => t.id === tabId);
     if (idx === -1) return;
     const [tab] = list.splice(idx, 1);
+    tab.alive = false;
     if (tab.sessionId >= 0) await terminalClose(tab.sessionId);
     if (activeByRepo.get(repoPath) === tabId) {
       activeByRepo.set(repoPath, list.length ? list[list.length - 1].id : null);
@@ -105,6 +108,8 @@ export function useTerminalSessions() {
   }
 
   async function disposeRepo(repoPath: string): Promise<void> {
+    const t = debounceTimers.get(repoPath);
+    if (t) { clearTimeout(t); debounceTimers.delete(repoPath); }
     const list = listFor(repoPath);
     for (const tab of list) {
       if (tab.sessionId >= 0) await terminalClose(tab.sessionId);

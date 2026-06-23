@@ -60,6 +60,26 @@ describe("useTerminalSessions", () => {
     vi.useRealTimers();
   });
 
+  it("notifyOutput coalesce : appels multiples dans la fenêtre ne déclenchent le handler qu'une fois", async () => {
+    vi.useFakeTimers();
+    const s = useTerminalSessions();
+    const cb = vi.fn();
+    s.setMutationHandler(cb);
+    await s.openTab("/repo/a", "/repo/a", () => {});
+    s.notifyOutput("/repo/a");
+    vi.advanceTimersByTime(400);
+    // second call resets the debounce window
+    s.notifyOutput("/repo/a");
+    // 400ms past the second call — not yet at 800ms
+    vi.advanceTimersByTime(400);
+    expect(cb).not.toHaveBeenCalled();
+    // advance past the full 800ms window from the last call
+    vi.advanceTimersByTime(401);
+    expect(cb).toHaveBeenCalledTimes(1);
+    expect(cb).toHaveBeenCalledWith("/repo/a");
+    vi.useRealTimers();
+  });
+
   it("disposeRepo ferme toutes les sessions du repo", async () => {
     const s = useTerminalSessions();
     await s.openTab("/repo/b", "/repo/b", () => {});
