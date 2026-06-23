@@ -50,6 +50,7 @@ base64 = "0.22"
 # Used for data-parallel iteration in workspace_*_all (P3.2). Each repo's
 # git/gh subprocess runs on its own rayon thread instead of in series.
 rayon = "1"
+portable-pty = "0.9"
 
 # libgit2 bindings for in-process git operations (P3.3). Used in the
 # workspace_*_all hot paths to read branch + ahead/behind + file statuses

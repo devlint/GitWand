@@ -557,7 +557,16 @@ pub fn run() {
             commands::read::git_commit_template_path,
             // ── v2.21.0 Monorepo Scope ──
             commands::read::git_rev_count,
+            commands::terminal::terminal_open,
+            commands::terminal::terminal_write,
+            commands::terminal::terminal_resize,
+            commands::terminal::terminal_close,
         ])
+        .on_window_event(|_window, event| {
+            if let tauri::WindowEvent::Destroyed = event {
+                commands::terminal::terminal_close_all();
+            }
+        })
         .run(tauri::generate_context!())
         .expect("error while running GitWand");
 }
