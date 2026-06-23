@@ -23,8 +23,6 @@
 // ─── Infrastructure (shared with sub-modules via backend-core.ts) ────────────
 import { isTauri, tauriInvoke, devFetch, DEV_SERVER, IPC_TIMEOUT, devTerminalOpen } from './backend-core';
 export { isTauri };
-import { Channel } from "@tauri-apps/api/core";
-
 // ─── Cross-module type imports for workspace helpers ─────────────────────────
 // PullRequest is defined in backend-pr.ts but used by workspacePrsAll here.
 import type { PullRequest } from './backend-pr';
@@ -3044,6 +3042,7 @@ export async function terminalOpen(
   onOutput: (chunk: string) => void,
 ): Promise<number> {
   if (isTauri()) {
+    const { Channel } = await import("@tauri-apps/api/core");
     const channel = new Channel<string>();
     channel.onmessage = onOutput;
     return tauriInvoke<number>("terminal_open", {

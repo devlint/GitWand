@@ -5808,7 +5808,7 @@ async function handleRequest(req, res) {
       proc.stdout.on("data", send);
       proc.stderr.on("data", send);
       proc.on("close", () => {
-        res.write(`data: ${JSON.stringify({ eof: true })}\n\n`);
+        if (!res.writableEnded) res.write(`data: ${JSON.stringify({ eof: true })}\n\n`);
         devPtys.delete(id);
       });
       devPtys.set(id, { proc, res });
