@@ -2,10 +2,12 @@
 import { ref, onBeforeUnmount, watch, nextTick, computed } from "vue";
 import { useTerminalSessions, type TerminalTab } from "../composables/useTerminalSessions";
 import { useI18n } from "../composables/useI18n";
+import { useSettings } from "../composables/useSettings";
 
 const props = defineProps<{ repoPath: string }>();
 const emit = defineEmits<{ (e: "close"): void; (e: "new"): void }>();
 const { t } = useI18n();
+const { settings } = useSettings();
 
 const sessions = useTerminalSessions();
 const tabs = computed(() => sessions.tabsFor(props.repoPath));
@@ -41,7 +43,7 @@ async function mountTab(tab: TerminalTab) {
   const el = hostRefs.value[tab.id];
   if (!el || xterms.has(tab.id)) return;
 
-  const term = new XtermCtor({ fontSize: 13, cursorBlink: true });
+  const term = new XtermCtor({ fontSize: settings.value.terminalFontSize ?? 13, cursorBlink: true });
   const fit = new FitCtor();
   term.loadAddon(fit);
   term.open(el);

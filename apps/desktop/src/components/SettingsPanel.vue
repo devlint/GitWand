@@ -181,6 +181,9 @@ interface Settings {
   // v3 Release Note Templates
   releaseNoteTemplates: ReleaseNoteTemplate[];
   activeReleaseNoteTemplateIdByRepo: Record<string, string | null>;
+  // v3.x terminal
+  terminalFontSize: number;
+  terminalShell: string;
 }
 
 const defaultSettings: Settings = {
@@ -245,6 +248,9 @@ const defaultSettings: Settings = {
   // v3 Release Note Templates
   releaseNoteTemplates: [],
   activeReleaseNoteTemplateIdByRepo: {},
+  // v3.x terminal
+  terminalFontSize: 13,
+  terminalShell: "",
 };
 
 function loadSettings(): Settings {
@@ -1827,6 +1833,25 @@ function deleteReleaseNoteTemplate(id: string) {
               <option :value="4">4 {{ t('settings.spaces') }}</option>
               <option :value="8">8 {{ t('settings.spaces') }}</option>
             </select>
+          </div>
+
+          <!-- Terminal font size -->
+          <div class="sp-row">
+            <label class="sp-label" for="setting-terminal-font-size">{{ t('settings.terminalFontSize') }}</label>
+            <div class="sp-range-row">
+              <input id="setting-terminal-font-size" class="sp-range" type="range" min="10" max="24" step="1"
+                :value="settings.terminalFontSize"
+                @input="updateSetting('terminalFontSize', Math.max(10, Math.min(24, Number(($event.target as HTMLInputElement).value))))" />
+              <span class="sp-range-value mono">{{ settings.terminalFontSize }}px</span>
+            </div>
+          </div>
+
+          <!-- Terminal shell override -->
+          <div class="sp-row">
+            <label class="sp-label" for="setting-terminal-shell">{{ t('settings.terminalShell') }}</label>
+            <input id="setting-terminal-shell" class="sp-input mono" type="text" :value="settings.terminalShell"
+              @input="updateSetting('terminalShell', ($event.target as HTMLInputElement).value)"
+              :placeholder="t('settings.terminalShellHint')" />
           </div>
         </template>
 

@@ -293,7 +293,6 @@ export interface AppSettings {
    * "use the default prompt". Special value "__builtin_*" for built-in presets.
    */
   activePresetIdByRepo: Record<string, string | null>;
-
   // ── v3 Release Note Templates ─────────────────────────────
   /** Saved release note templates (v3). */
   releaseNoteTemplates: ReleaseNoteTemplate[];
@@ -303,6 +302,16 @@ export interface AppSettings {
    * Null / absent / "__builtin_default" means "use the default prompt".
    */
   activeReleaseNoteTemplateIdByRepo: Record<string, string | null>;
+
+  // ── v3.x Terminal ─────────────────────────────────────────
+
+  /** Font size for the integrated PTY terminal (px). Default: 13. */
+  terminalFontSize: number;
+  /**
+   * Shell override for the integrated PTY terminal.
+   * Empty string = auto (OS default shell). E.g. "/bin/zsh", "pwsh".
+   */
+  terminalShell: string;
 }
 
 // ─── Defaults ─────────────────────────────────────────────
@@ -369,6 +378,9 @@ export const defaultAppSettings: AppSettings = {
   // v3
   releaseNoteTemplates:              [],
   activeReleaseNoteTemplateIdByRepo: {},
+  // v3.x terminal
+  terminalFontSize:                  13,
+  terminalShell:                     "",
 };
 
 const SETTINGS_KEY = "gitwand-settings";

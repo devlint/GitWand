@@ -68,6 +68,7 @@ export function useTerminalSessions() {
     repoPath: string,
     cwd: string,
     onChunk: (sessionId: number, chunk: string) => void,
+    opts?: { shell?: string },
   ): Promise<TerminalTab> {
     const tab: TerminalTab = {
       id: nextLocalId++,
@@ -82,7 +83,7 @@ export function useTerminalSessions() {
     // Taille initiale standard ; le panel re-fit au mount.
     const sessionId = await terminalOpen(
       cwd,
-      { cols: 80, rows: 24 },
+      { cols: 80, rows: 24, shell: opts?.shell || undefined },
       (chunk) => {
         if (tab.sessionId >= 0) onChunk(tab.sessionId, chunk);
       },
