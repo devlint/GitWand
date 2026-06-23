@@ -1281,7 +1281,7 @@ const terminalPanelRef = ref<any>(null);
 async function openTerminalTab(cwd?: string) {
   if (!repoFolderPath.value) return;
   showTerminal.value = true;
-  await termSessions.openTab(
+  const tab = await termSessions.openTab(
     repoFolderPath.value,
     cwd ?? repoFolderPath.value,
     (sessionId, chunk) => {
@@ -1289,6 +1289,7 @@ async function openTerminalTab(cwd?: string) {
       termSessions.notifyOutput(repoFolderPath.value!);
     },
   );
+  return tab;
 }
 
 termSessions.setMutationHandler((repoPath) => {
@@ -1297,9 +1298,7 @@ termSessions.setMutationHandler((repoPath) => {
 
 async function onLaunchAgent(payload: { path: string; tool: string }) {
   if (!repoFolderPath.value) return;
-  await openTerminalTab(payload.path);
-  const tabs = termSessions.tabsFor(repoFolderPath.value);
-  const tab = tabs[tabs.length - 1];
+  const tab = await openTerminalTab(payload.path);
   if (tab) await termSessions.write(tab.sessionId, `${payload.tool}\n`);
 }
 
