@@ -2168,6 +2168,11 @@ const fr: Locale = {
     invalidNotice: "Le périmètre enregistré « {0} » n'existe plus — affichage du dépôt entier.",
     persistError: "Impossible d'enregistrer le périmètre de l'espace de travail.",
   },
+  terminal: {
+    newTab: "Nouvel onglet",
+    hide: "Masquer le terminal",
+    closeTab: "Fermer l'onglet",
+  },
 };
 
 export default fr;

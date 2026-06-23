@@ -2196,6 +2196,11 @@ const en = {
     invalidNotice: "Saved scope '{0}' no longer exists — showing the whole repo.",
     persistError: "Could not save the workspace scope.",
   },
+  terminal: {
+    newTab: "New tab",
+    hide: "Hide terminal",
+    closeTab: "Close tab",
+  },
 } as const;
 
 // Widen literal string types to plain `string` for locale compatibility

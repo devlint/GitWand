@@ -2142,6 +2142,11 @@ const zhCN: Locale = {
     invalidNotice: "已保存的范围“{0}”不再存在 — 正在显示整个仓库。",
     persistError: "无法保存工作区范围。",
   },
+  terminal: {
+    newTab: "新标签页",
+    hide: "隐藏终端",
+    closeTab: "关闭标签页",
+  },
 };
 
 export default zhCN;

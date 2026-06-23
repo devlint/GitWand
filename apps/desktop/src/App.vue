@@ -55,7 +55,7 @@ const BranchRenameModal = defineAsyncComponent(() => import("./components/header
 const BranchDeleteModal = defineAsyncComponent(() => import("./components/header/BranchDeleteModal.vue"));
 const CloneModal = defineAsyncComponent(() => import("./components/CloneModal.vue"));
 const ForkModal = defineAsyncComponent(() => import("./components/ForkModal.vue"));
-const GitTerminal = defineAsyncComponent(() => import("./components/GitTerminal.vue"));
+const TerminalPanel = defineAsyncComponent(() => import("./components/TerminalPanel.vue"));
 const UpdateModal = defineAsyncComponent(() => import("./components/UpdateModal.vue"));
 // Shared create-branch field — only mounted inside the v-if'd create-branch
 // modal, so keep it lazy (also lazy in BranchSelector) to stay out of main.
@@ -95,6 +95,7 @@ import { useReleaseNotes } from "./composables/useReleaseNotes";
 import { useFolderHistory } from "./composables/useFolderHistory";
 import { useAppMenu } from "./composables/useAppMenu";
 import { useLogs } from "./composables/useLogs";
+import { useTerminalSessions } from "./composables/useTerminalSessions";
 import {
   BRANCH_CREATE_REQUEST_KEY,
   MERGE_POPOVER_REQUEST_KEY,
@@ -1274,6 +1275,25 @@ const showHelp = ref(false);
 // ─── Integrated git terminal (v2.0) ──────────────────────
 // Mounted as a docked panel below the main content when toggled on.
 const showTerminal = ref(false);
+const termSessions = useTerminalSessions();
+const terminalPanelRef = ref<any>(null);
+
+async function openTerminalTab(cwd?: string) {
+  if (!repoFolderPath.value) return;
+  showTerminal.value = true;
+  await termSessions.openTab(
+    repoFolderPath.value,
+    cwd ?? repoFolderPath.value,
+    (sessionId, chunk) => {
+      terminalPanelRef.value?.writeChunk(sessionId, chunk);
+      termSessions.notifyOutput(repoFolderPath.value!);
+    },
+  );
+}
+
+termSessions.setMutationHandler((repoPath) => {
+  if (repoPath === repoFolderPath.value) repoRefresh();
+});
 
 // ─── Sidebar visibility (v2.0) ───────────────────────────
 // View menu → Toggle Sidebar. Defaults to visible; we hide when the user
@@ -2775,6 +2795,16 @@ onUnmounted(() => {
         </template>
       </main>
 
+      <!-- Integrated git terminal (v3.0) — docked panel anchored at the bottom
+           of app-body, below main, above the floating AppDock. -->
+      <TerminalPanel
+        v-if="showTerminal && repoFolderPath"
+        ref="terminalPanelRef"
+        :repo-path="repoFolderPath"
+        @close="showTerminal = false"
+        @new="openTerminalTab()"
+      />
+
       <!-- Floating bottom-center navigation dock -->
       <AppDock v-if="hasRepo" :view-mode="viewMode" :changes-count="repoFiles.length"
         :pr-count="prPanel.prs.value.length" @change-view="onViewModeChange" />
@@ -2817,15 +2847,6 @@ onUnmounted(() => {
     <!-- Stash manager (uses BaseModal, owns its own overlay) -->
     <StashManager v-if="showStash && repoFolderPath" :cwd="repoFolderPath" @close="showStash = false"
       @refresh="repoRefresh()" />
-
-    <!-- Integrated git terminal (v2.0) — reuses the stash-overlay shell
-         so it lives in the same overlay layer as worktrees / submodules. -->
-    <div v-if="showTerminal && repoFolderPath" class="stash-overlay overlay-backdrop"
-      @click.self="showTerminal = false">
-      <div class="stash-overlay-body">
-        <GitTerminal :cwd="repoFolderPath" @close="showTerminal = false" @refresh="repoRefresh()" />
-      </div>
-    </div>
 
     <!-- Clone modal (v2.0) -->
     <CloneModal v-if="showCloneModal" @close="showCloneModal = false" @cloned="onCloned" />
