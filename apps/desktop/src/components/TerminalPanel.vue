@@ -19,6 +19,10 @@ const xterms = new Map<number, XtermEntry>(); // key = tab.id (local)
 let XtermCtor: any = null;
 let FitCtor: any = null;
 
+// Pending buffer for output chunks that arrive before the xterm is mounted.
+// Keyed by tab.id (same key space as xterms). Not reactive — plain Map.
+const pendingChunks = new Map<number, string[]>();
+
 const hostRefs = ref<Record<number, HTMLElement | undefined>>({});
 
 // Panel height — persisted.
@@ -61,15 +65,27 @@ async function mountTab(tab: TerminalTab) {
   ro.observe(el);
 
   xterms.set(tab.id, { term, fit, ro, sessionId: tab.sessionId });
+
+  // Flush any output that arrived before the xterm was mounted.
+  const buffered = pendingChunks.get(tab.id);
+  if (buffered) {
+    for (const chunk of buffered) term.write(chunk);
+    pendingChunks.delete(tab.id);
+  }
 }
 
 // Exposed so App.vue can route PTY chunks to the correct xterm instance.
-function writeChunk(sessionId: number, chunk: string) {
-  for (const [, entry] of xterms) {
-    if (entry.sessionId === sessionId) {
-      entry.term.write(chunk);
-      return;
-    }
+// Routes by stable tab.id (the Map key). If the xterm is not yet mounted,
+// buffers the chunk so it is flushed when mountTab completes.
+function writeChunk(tabId: number, chunk: string) {
+  const entry = xterms.get(tabId);
+  if (entry) {
+    entry.term.write(chunk);
+  } else {
+    // xterm not yet mounted — buffer until mountTab flushes.
+    let buf = pendingChunks.get(tabId);
+    if (!buf) { buf = []; pendingChunks.set(tabId, buf); }
+    buf.push(chunk);
   }
 }
 defineExpose({ writeChunk });

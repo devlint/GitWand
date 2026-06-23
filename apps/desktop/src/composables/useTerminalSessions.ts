@@ -67,7 +67,7 @@ export function useTerminalSessions() {
   async function openTab(
     repoPath: string,
     cwd: string,
-    onChunk: (sessionId: number, chunk: string) => void,
+    onChunk: (tabId: number, chunk: string) => void,
     opts?: { shell?: string },
   ): Promise<TerminalTab> {
     const tab: TerminalTab = {
@@ -81,12 +81,12 @@ export function useTerminalSessions() {
     list.push(tab);
     activeByRepo.set(repoPath, tab.id);
     // Taille initiale standard ; le panel re-fit au mount.
+    // Route output by stable tab.id so chunks arriving before terminalOpen
+    // resolves (and before sessionId is assigned) are never dropped.
     const sessionId = await terminalOpen(
       cwd,
       { cols: 80, rows: 24, shell: opts?.shell || undefined },
-      (chunk) => {
-        if (tab.sessionId >= 0) onChunk(tab.sessionId, chunk);
-      },
+      (chunk) => onChunk(tab.id, chunk),
     );
     tab.sessionId = sessionId;
     return tab;

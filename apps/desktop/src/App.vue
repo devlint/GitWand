@@ -1285,8 +1285,8 @@ async function openTerminalTab(cwd?: string) {
   const tab = await termSessions.openTab(
     repoFolderPath.value,
     cwd ?? repoFolderPath.value,
-    (sessionId, chunk) => {
-      terminalPanelRef.value?.writeChunk(sessionId, chunk);
+    (tabId, chunk) => {
+      terminalPanelRef.value?.writeChunk(tabId, chunk);
       termSessions.notifyOutput(repoFolderPath.value!);
     },
     shell !== undefined ? { shell } : undefined,
@@ -1302,6 +1302,20 @@ async function onLaunchAgent(payload: { path: string; tool: string }) {
   if (!repoFolderPath.value) return;
   const tab = await openTerminalTab(payload.path);
   if (tab) await termSessions.write(tab.sessionId, `${payload.tool}\n`);
+}
+
+/**
+ * Definitively close a repo tab: dispose its PTY sessions first, then remove
+ * the tab from the strip. Must be used instead of bare `closeTab` everywhere
+ * a repo tab is REMOVED (not just switched away from).
+ */
+function closeRepoTab(tabId: number) {
+  const found = repoTabs.value.find((t) => t.id === tabId);
+  if (found) {
+    // Fire-and-forget: PTY cleanup is best-effort; don't block UI on it.
+    termSessions.disposeRepo(found.path).catch(() => {});
+  }
+  closeTab(tabId);
 }
 
 // ─── Sidebar visibility (v2.0) ───────────────────────────
@@ -2180,7 +2194,7 @@ function onKeyDown(e: KeyboardEvent) {
     // Cmd+W — close active tab
     e.preventDefault();
     if (activeTabId.value !== null) {
-      closeTab(activeTabId.value);
+      closeRepoTab(activeTabId.value);
     }
   } else if (mod && e.key === "z" && !e.shiftKey && showingMergeEditor.value) {
     e.preventDefault();
@@ -2384,7 +2398,7 @@ useAppMenu(
       showForkModal.value = true;
     },
     closeWindow: () => {
-      if (activeTabId.value !== null) closeTab(activeTabId.value);
+      if (activeTabId.value !== null) closeRepoTab(activeTabId.value);
     },
     fetch: doFetch,
     pull: () => doPull(pullMode.value === "rebase"),
@@ -2576,7 +2590,7 @@ onUnmounted(() => {
       :force-push-preferred="forcePushPreferred" :is-fetching="isFetching"
       :cwd="repoFolderPath ?? ''" :branches="branches" :worktree-branches="worktreeBranches" :branches-loading="branchesLoading"
       :is-switching-branch="isSwitchingBranch" :is-merging="isMerging" :tabs="repoTabs" :active-tab-id="activeTabId"
-      @open-folder="handleOpenFolder" @open-repo="handleOpenPath" @switch-tab="switchTab" @close-tab="closeTab"
+      @open-folder="handleOpenFolder" @open-repo="handleOpenPath" @switch-tab="switchTab" @close-tab="closeRepoTab"
       @reorder-tabs="reorderTabs"
       @new-tab="handleOpenFolder" @open-clone="showCloneModal = true" @open-fork="showForkModal = true"
       @toggle-theme="toggleTheme" @push="handlePush" @pull="() => doPull(pullMode === 'rebase')" @fetch="doFetch"
