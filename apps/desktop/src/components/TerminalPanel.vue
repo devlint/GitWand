@@ -73,30 +73,27 @@ function writeChunk(sessionId: number, chunk: string) {
 defineExpose({ writeChunk });
 
 watch(
-  tabs,
+  () => tabs.value.map((t) => `${t.id}:${t.sessionId}`).join("|"),
   async () => {
-    // Mount new tabs.
+    // Mount new tabs and refresh sessionId on existing ones.
     for (const tab of tabs.value) {
-      if (!xterms.has(tab.id)) {
-        await mountTab(tab);
-      } else {
-        // Update sessionId in case it was set after mount (openTab sets it async).
-        const entry = xterms.get(tab.id)!;
-        if (entry.sessionId !== tab.sessionId && tab.sessionId >= 0) {
-          entry.sessionId = tab.sessionId;
-        }
+      await mountTab(tab);
+      const entry = xterms.get(tab.id);
+      if (entry && entry.sessionId !== tab.sessionId && tab.sessionId >= 0) {
+        entry.sessionId = tab.sessionId;
       }
     }
     // Dispose xterms for closed tabs.
-    for (const [id, entry] of [...xterms.entries()]) {
+    for (const id of [...xterms.keys()]) {
       if (!tabs.value.some((t) => t.id === id)) {
-        entry.ro.disconnect();
-        entry.term.dispose();
+        const entry = xterms.get(id);
+        entry?.ro.disconnect();
+        entry?.term.dispose();
         xterms.delete(id);
       }
     }
   },
-  { immediate: true, deep: false },
+  { immediate: true },
 );
 
 function onFocusIn() {
@@ -139,6 +136,8 @@ function onDragEnd() {
 }
 
 onBeforeUnmount(() => {
+  window.removeEventListener("mousemove", onDragMove);
+  window.removeEventListener("mouseup", onDragEnd);
   for (const [, entry] of xterms) {
     entry.ro.disconnect();
     entry.term.dispose();
