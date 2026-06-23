@@ -1,0 +1,71 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+vi.mock("../../utils/backend", () => ({
+  terminalOpen: vi.fn(async () => 42),
+  terminalWrite: vi.fn(async () => {}),
+  terminalResize: vi.fn(async () => {}),
+  terminalClose: vi.fn(async () => {}),
+}));
+
+import { useTerminalSessions, __resetForTests } from "../useTerminalSessions";
+import { terminalClose } from "../../utils/backend";
+
+describe("useTerminalSessions", () => {
+  beforeEach(() => {
+    __resetForTests();
+    vi.clearAllMocks();
+  });
+
+  it("scope les onglets par repoPath", async () => {
+    const s = useTerminalSessions();
+    await s.openTab("/repo/a", "/repo/a", () => {});
+    expect(s.tabsFor("/repo/a")).toHaveLength(1);
+    expect(s.tabsFor("/repo/b")).toHaveLength(0);
+  });
+
+  it("openTab crée un onglet actif avec un sessionId backend", async () => {
+    const s = useTerminalSessions();
+    const tab = await s.openTab("/repo/a", "/repo/a", () => {});
+    expect(tab.sessionId).toBe(42);
+    expect(s.activeTabId("/repo/a")).toBe(tab.id);
+    expect(tab.alive).toBe(true);
+  });
+
+  it("closeTab appelle le backend et retire l'onglet", async () => {
+    const s = useTerminalSessions();
+    const tab = await s.openTab("/repo/a", "/repo/a", () => {});
+    await s.closeTab("/repo/a", tab.id);
+    expect(terminalClose).toHaveBeenCalledWith(42);
+    expect(s.tabsFor("/repo/a")).toHaveLength(0);
+  });
+
+  it("setTitleFromShell n'écrase pas un titre manuel", async () => {
+    const s = useTerminalSessions();
+    const tab = await s.openTab("/repo/a", "/repo/a", () => {});
+    s.renameTab("/repo/a", tab.id, "build");
+    s.setTitleFromShell("/repo/a", tab.id, "vim");
+    expect(s.tabsFor("/repo/a")[0].title).toBe("build");
+  });
+
+  it("notifyOutput appelle le mutation handler après debounce", async () => {
+    vi.useFakeTimers();
+    const s = useTerminalSessions();
+    const cb = vi.fn();
+    s.setMutationHandler(cb);
+    await s.openTab("/repo/a", "/repo/a", () => {});
+    s.notifyOutput("/repo/a");
+    expect(cb).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(800);
+    expect(cb).toHaveBeenCalledWith("/repo/a");
+    vi.useRealTimers();
+  });
+
+  it("disposeRepo ferme toutes les sessions du repo", async () => {
+    const s = useTerminalSessions();
+    await s.openTab("/repo/b", "/repo/b", () => {});
+    await s.openTab("/repo/b", "/repo/b", () => {});
+    await s.disposeRepo("/repo/b");
+    expect(s.tabsFor("/repo/b")).toHaveLength(0);
+    expect(terminalClose).toHaveBeenCalled();
+  });
+});
