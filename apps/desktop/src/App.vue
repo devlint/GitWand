@@ -1295,6 +1295,14 @@ termSessions.setMutationHandler((repoPath) => {
   if (repoPath === repoFolderPath.value) repoRefresh();
 });
 
+async function onLaunchAgent(payload: { path: string; tool: string }) {
+  if (!repoFolderPath.value) return;
+  await openTerminalTab(payload.path);
+  const tabs = termSessions.tabsFor(repoFolderPath.value);
+  const tab = tabs[tabs.length - 1];
+  if (tab) await termSessions.write(tab.sessionId, `${payload.tool}\n`);
+}
+
 // ─── Sidebar visibility (v2.0) ───────────────────────────
 // View menu → Toggle Sidebar. Defaults to visible; we hide when the user
 // wants more horizontal real estate for the diff / log views.
@@ -2875,7 +2883,8 @@ onUnmounted(() => {
 
     <!-- Agent Sessions panel -->
     <AgentSessionsPanel v-if="showAgents && repoFolderPath" :cwd="repoFolderPath" @close="showAgents = false"
-      @open-tab="(path) => { openTab(path); showAgents = false; }" />
+      @open-tab="(path) => { openTab(path); showAgents = false; }"
+      @launch-agent="onLaunchAgent" />
 
     <!-- Command Log panel (⌘⇧L) — transparent git command audit trail (v2.11) -->
     <CommandLogPanel :visible="showCommandLog" @close="showCommandLog = false" />

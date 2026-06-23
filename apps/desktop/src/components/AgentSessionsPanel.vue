@@ -15,6 +15,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: "close"): void;
   (e: "open-tab", path: string): void;
+  (e: "launch-agent", payload: { path: string; tool: string }): void;
 }>();
 
 const { t } = useI18n();
@@ -69,15 +70,18 @@ async function launch(session: AgentSession) {
   launching.value = session.path;
   error.value = null;
   try {
-    await agentSessionLaunch(session.path, session.tool === "other" ? "claude" : session.tool);
-    // Small delay then mark as potentially active
-    setTimeout(() => {
-      const s = sessions.value.find((s) => s.path === session.path);
-      if (s) s.active = true;
-      launching.value = null;
-    }, 1500);
+    if (session.tool === "cursor" || session.tool === "windsurf") {
+      // GUI editors: open externally via the existing command.
+      await agentSessionLaunch(session.path, session.tool);
+    } else {
+      // claude / other: integrated PTY tab.
+      emit("launch-agent", { path: session.path, tool: "claude" });
+    }
+    // Re-poll to reflect real state instead of a fake optimistic active flag.
+    await loadSessions();
   } catch (err: any) {
     error.value = t("agents.errorLaunch").replace("{0}", String(err?.message ?? err));
+  } finally {
     launching.value = null;
   }
 }
