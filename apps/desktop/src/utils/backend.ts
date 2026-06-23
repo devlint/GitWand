@@ -21,8 +21,9 @@
  */
 
 // ─── Infrastructure (shared with sub-modules via backend-core.ts) ────────────
-import { isTauri, tauriInvoke, devFetch, DEV_SERVER, IPC_TIMEOUT } from './backend-core';
+import { isTauri, tauriInvoke, devFetch, DEV_SERVER, IPC_TIMEOUT, devTerminalOpen } from './backend-core';
 export { isTauri };
+import { Channel } from "@tauri-apps/api/core";
 
 // ─── Cross-module type imports for workspace helpers ─────────────────────────
 // PullRequest is defined in backend-pr.ts but used by workspacePrsAll here.
@@ -3029,6 +3030,70 @@ export async function agentSessionLaunch(cwd: string, tool: string): Promise<voi
     body: JSON.stringify({ cwd, tool }),
   });
   if (!res.ok) throw new Error(`Failed to launch agent session: ${res.status}`);
+}
+
+// ─── Terminal (PTY) ───────────────────────────────────────
+
+/**
+ * Open a PTY shell session. `onOutput` is called with each raw output chunk.
+ * Returns the backend session id (used by write/resize/close).
+ */
+export async function terminalOpen(
+  cwd: string,
+  opts: { shell?: string; cols: number; rows: number },
+  onOutput: (chunk: string) => void,
+): Promise<number> {
+  if (isTauri()) {
+    const channel = new Channel<string>();
+    channel.onmessage = onOutput;
+    return tauriInvoke<number>("terminal_open", {
+      cwd,
+      shell: opts.shell ?? null,
+      cols: opts.cols,
+      rows: opts.rows,
+      onOutput: channel,
+    });
+  }
+  // Dev mode : SSE. Le serveur renvoie l'id en premier message JSON, puis
+  // les chunks bruts.
+  const id = await devTerminalOpen(cwd, opts, onOutput);
+  return id;
+}
+
+export async function terminalWrite(id: number, data: string): Promise<void> {
+  if (isTauri()) {
+    await tauriInvoke("terminal_write", { id, data });
+    return;
+  }
+  await devFetch(`${DEV_SERVER}/api/terminal-write`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id, data }),
+  });
+}
+
+export async function terminalResize(id: number, cols: number, rows: number): Promise<void> {
+  if (isTauri()) {
+    await tauriInvoke("terminal_resize", { id, cols, rows });
+    return;
+  }
+  await devFetch(`${DEV_SERVER}/api/terminal-resize`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id, cols, rows }),
+  });
+}
+
+export async function terminalClose(id: number): Promise<void> {
+  if (isTauri()) {
+    await tauriInvoke("terminal_close", { id });
+    return;
+  }
+  await devFetch(`${DEV_SERVER}/api/terminal-close`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id }),
+  });
 }
 
 // ─── Submodules ──────────────────────────────────────────

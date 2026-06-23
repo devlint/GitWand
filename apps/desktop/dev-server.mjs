@@ -158,6 +158,10 @@ function gitSpawn(args, cwd) {
 // you in — it just returns a static code then "succeeds" after a couple polls.
 let _mockGithubPolls = 0;
 
+// ── Terminal PTY state (dev:web only) ────────────────────────────────────────
+const devPtys = new Map(); // id -> { proc, res }
+let devPtyNextId = 1;
+
 /**
  * Get a GitHub OAuth token — tries in order:
  *  1. GH_TOKEN / GITHUB_TOKEN env vars
@@ -5784,6 +5788,46 @@ async function handleRequest(req, res) {
       } catch (err) {
         return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
       }
+    }
+
+    // ── Terminal PTY (dev echo) ───────────────────────────────────────────────
+    if (url.pathname === "/api/terminal-open" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd") || process.cwd();
+      const shell = url.searchParams.get("shell") || process.env.SHELL || "/bin/bash";
+      const id = devPtyNextId++;
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      });
+      res.write(`data: ${JSON.stringify({ id })}\n\n`);
+      // Shell en mode pipe (pas de vrai TTY en dev — best effort).
+      const proc = spawn(shell, ["-i"], { cwd, env: process.env });
+      const send = (buf) =>
+        res.write(`data: ${JSON.stringify({ chunk: buf.toString() })}\n\n`);
+      proc.stdout.on("data", send);
+      proc.stderr.on("data", send);
+      proc.on("close", () => {
+        res.write(`data: ${JSON.stringify({ eof: true })}\n\n`);
+        devPtys.delete(id);
+      });
+      devPtys.set(id, { proc, res });
+      req.on("close", () => { proc.kill(); devPtys.delete(id); });
+      return;
+    }
+    if (url.pathname === "/api/terminal-write" && req.method === "POST") {
+      const { id, data } = await readBody(req);
+      devPtys.get(id)?.proc.stdin.write(data);
+      return jsonResponse(req, res, { ok: true });
+    }
+    if (url.pathname === "/api/terminal-resize" && req.method === "POST") {
+      return jsonResponse(req, res, { ok: true }); // pas de winsize en mode pipe
+    }
+    if (url.pathname === "/api/terminal-close" && req.method === "POST") {
+      const { id } = await readBody(req);
+      devPtys.get(id)?.proc.kill();
+      devPtys.delete(id);
+      return jsonResponse(req, res, { ok: true });
     }
 
     jsonResponse(req, res, { error: "Not found" }, 404);

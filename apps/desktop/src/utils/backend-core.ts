@@ -101,3 +101,40 @@ export const IPC_TIMEOUT = {
   /** AI prompts — no timeout, can run arbitrarily long. */
   NONE: 0,
 } as const;
+
+/**
+ * Dev-mode PTY open over Server-Sent Events. First SSE message is
+ * `{"id": <number>}`; subsequent messages are raw output chunks (JSON-encoded
+ * strings to preserve control bytes).
+ */
+export async function devTerminalOpen(
+  cwd: string,
+  opts: { shell?: string; cols: number; rows: number },
+  onOutput: (chunk: string) => void,
+): Promise<number> {
+  const params = new URLSearchParams({
+    cwd,
+    cols: String(opts.cols),
+    rows: String(opts.rows),
+  });
+  if (opts.shell) params.set("shell", opts.shell);
+  return new Promise((resolve, reject) => {
+    const es = new EventSource(`${DEV_SERVER}/api/terminal-open?${params}`);
+    let resolved = false;
+    es.onmessage = (ev) => {
+      const payload = JSON.parse(ev.data);
+      if (!resolved && typeof payload?.id === "number") {
+        resolved = true;
+        resolve(payload.id);
+      } else if (typeof payload?.chunk === "string") {
+        onOutput(payload.chunk);
+      } else if (payload?.eof) {
+        es.close();
+      }
+    };
+    es.onerror = () => {
+      if (!resolved) reject(new Error("dev terminal SSE failed"));
+      es.close();
+    };
+  });
+}
