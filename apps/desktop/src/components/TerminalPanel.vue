@@ -108,7 +108,12 @@ watch(
         entry?.ro.disconnect();
         entry?.term.dispose();
         xterms.delete(id);
+        pendingChunks.delete(id);
       }
+    }
+    // Purge buffered chunks for tabs that closed before their xterm mounted.
+    for (const id of pendingChunks.keys()) {
+      if (!tabs.value.some((t) => t.id === id)) pendingChunks.delete(id);
     }
   },
   { immediate: true },
