@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use tauri::ipc::Channel;
@@ -12,13 +12,19 @@ use tauri::ipc::Channel;
 /// Une session PTY vivante. Le thread lecteur est détaché ; il sort sur EOF.
 struct PtyHandle {
     master: Box<dyn portable_pty::MasterPty + Send>,
-    writer: Box<dyn Write + Send>,
+    /// Writer wrappé dans son propre Arc<Mutex> pour découpler les I/O du verrou du registre.
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
 }
 
 fn sessions() -> &'static Mutex<HashMap<u64, PtyHandle>> {
     static S: OnceLock<Mutex<HashMap<u64, PtyHandle>>> = OnceLock::new();
     S.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Verrouille le registre global de sessions en gérant proprement le poison.
+fn lock_sessions() -> std::sync::MutexGuard<'static, HashMap<u64, PtyHandle>> {
+    sessions().lock().unwrap_or_else(|e| e.into_inner())
 }
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
@@ -90,10 +96,11 @@ pub(crate) fn terminal_open(
         .map_err(|e| format!("take writer failed: {e}"))?;
 
     let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
+    let writer_arc: Arc<Mutex<Box<dyn Write + Send>>> = Arc::new(Mutex::new(writer));
 
-    sessions().lock().unwrap().insert(
+    lock_sessions().insert(
         id,
-        PtyHandle { master: pair.master, writer, child },
+        PtyHandle { master: pair.master, writer: writer_arc, child },
     );
 
     // Thread lecteur : pousse les chunks vers le frontend.
@@ -112,7 +119,7 @@ pub(crate) fn terminal_open(
             }
         }
         // Nettoyage : retirer la session du registre quand le PTY se ferme.
-        sessions().lock().unwrap().remove(&id);
+        lock_sessions().remove(&id);
     });
 
     Ok(id)
@@ -120,17 +127,25 @@ pub(crate) fn terminal_open(
 
 #[tauri::command]
 pub(crate) fn terminal_write(id: u64, data: String) -> Result<(), String> {
-    let mut map = sessions().lock().unwrap();
-    let h = map.get_mut(&id).ok_or("session not found")?;
-    h.writer
+    // Clone l'Arc sous le verrou du registre, puis relâche immédiatement ce verrou
+    // avant d'effectuer l'écriture bloquante, évitant de bloquer toutes les autres
+    // commandes terminal si le buffer PTY du noyau est plein.
+    let writer_arc = {
+        let map = lock_sessions();
+        map.get(&id)
+            .map(|h| Arc::clone(&h.writer))
+            .ok_or("session not found")?
+    };
+    let mut writer = writer_arc.lock().unwrap_or_else(|e| e.into_inner());
+    writer
         .write_all(data.as_bytes())
         .map_err(|e| format!("write failed: {e}"))?;
-    h.writer.flush().map_err(|e| format!("flush failed: {e}"))
+    writer.flush().map_err(|e| format!("flush failed: {e}"))
 }
 
 #[tauri::command]
 pub(crate) fn terminal_resize(id: u64, cols: u16, rows: u16) -> Result<(), String> {
-    let map = sessions().lock().unwrap();
+    let map = lock_sessions();
     let h = map.get(&id).ok_or("session not found")?;
     h.master
         .resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
@@ -139,7 +154,7 @@ pub(crate) fn terminal_resize(id: u64, cols: u16, rows: u16) -> Result<(), Strin
 
 #[tauri::command]
 pub(crate) fn terminal_close(id: u64) -> Result<(), String> {
-    if let Some(mut h) = sessions().lock().unwrap().remove(&id) {
+    if let Some(mut h) = lock_sessions().remove(&id) {
         let _ = h.child.kill();
     }
     Ok(())
@@ -147,7 +162,7 @@ pub(crate) fn terminal_close(id: u64) -> Result<(), String> {
 
 /// Tue toutes les sessions (appelé au quit de l'app).
 pub(crate) fn terminal_close_all() {
-    let mut map = sessions().lock().unwrap();
+    let mut map = lock_sessions();
     for (_, mut h) in map.drain() {
         let _ = h.child.kill();
     }
@@ -160,15 +175,20 @@ fn enriched_path() -> Option<String> {
     #[cfg(target_os = "macos")]
     {
         let extras = ["/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin"];
+        let mut added = false;
         let mut path = current.clone();
         for e in extras {
             if !current.split(':').any(|p| p == e) {
                 path = format!("{e}:{path}");
+                added = true;
             }
         }
-        return Some(path);
+        if added {
+            return Some(path);
+        }
+        return None;
     }
-    #[allow(unreachable_code)]
+    #[cfg(not(target_os = "macos"))]
     {
         let _ = current;
         None
