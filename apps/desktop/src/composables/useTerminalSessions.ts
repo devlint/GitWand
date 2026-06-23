@@ -1,4 +1,17 @@
 import { ref, reactive, type Ref } from "vue";
+
+export type TerminalShortcut = "new" | "close" | { switch: number } | null;
+
+/** Route un keydown vers une action terminal si le terminal a le focus. */
+export function resolveTerminalShortcut(e: KeyboardEvent, focused: boolean): TerminalShortcut {
+  if (!focused) return null;
+  const mod = e.metaKey || e.ctrlKey;
+  if (!mod) return null;
+  if (e.key === "t") return "new";
+  if (e.key === "w") return "close";
+  if (/^[1-9]$/.test(e.key)) return { switch: Number(e.key) - 1 };
+  return null;
+}
 import {
   terminalOpen,
   terminalWrite,

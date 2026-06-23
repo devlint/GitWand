@@ -95,7 +95,7 @@ import { useReleaseNotes } from "./composables/useReleaseNotes";
 import { useFolderHistory } from "./composables/useFolderHistory";
 import { useAppMenu } from "./composables/useAppMenu";
 import { useLogs } from "./composables/useLogs";
-import { useTerminalSessions } from "./composables/useTerminalSessions";
+import { useTerminalSessions, resolveTerminalShortcut } from "./composables/useTerminalSessions";
 import {
   BRANCH_CREATE_REQUEST_KEY,
   MERGE_POPOVER_REQUEST_KEY,
@@ -2144,6 +2144,25 @@ function onKeyDown(e: KeyboardEvent) {
   // the command palette (SearchTrigger owns that shortcut). Open-folder
   // is reachable via Cmd+T (new tab) below, which matches the browser
   // "new tab" convention users already know.
+  const termAction = resolveTerminalShortcut(e, termSessions.terminalFocused.value);
+  if (termAction) {
+    e.preventDefault();
+    if (termAction === "new") {
+      openTerminalTab();
+    } else if (termAction === "close") {
+      if (repoFolderPath.value) {
+        const active = termSessions.activeTabId(repoFolderPath.value);
+        if (active != null) termSessions.closeTab(repoFolderPath.value, active);
+      }
+    } else {
+      if (repoFolderPath.value) {
+        const tabs = termSessions.tabsFor(repoFolderPath.value);
+        const target = tabs[termAction.switch];
+        if (target) termSessions.setActive(repoFolderPath.value, target.id);
+      }
+    }
+    return;
+  }
   if (mod && e.key === "t") {
     // Cmd+T — new tab (open folder picker)
     e.preventDefault();
