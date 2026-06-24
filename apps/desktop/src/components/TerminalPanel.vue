@@ -330,7 +330,7 @@ onBeforeUnmount(() => {
   border: none;
   cursor: pointer;
   color: inherit;
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
 }
 
 .tp__tab--active {
@@ -338,12 +338,20 @@ onBeforeUnmount(() => {
 }
 
 .tp__close {
-  opacity: 0.6;
-  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  opacity: 0.5;
+  flex-shrink: 0;
 }
 
 .tp__close:hover {
   opacity: 1;
+  background: var(--color-bg-hover);
 }
 
 .tp__new {
@@ -354,7 +362,7 @@ onBeforeUnmount(() => {
   padding: 4px 8px;
   border-radius: var(--radius-sm);
   color: inherit;
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
 }
 
 .tp__hide {
@@ -365,7 +373,7 @@ onBeforeUnmount(() => {
   padding: 4px 8px;
   border-radius: var(--radius-sm);
   color: inherit;
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
 }
 
 .tp__new:hover,
@@ -403,7 +411,7 @@ onBeforeUnmount(() => {
 .tp__menu {
   position: absolute;
   top: 100%;
-  right: 0;
+  left: 0;
   background: var(--bg-elevated, var(--color-bg-secondary));
   border: 1px solid var(--border, var(--color-border));
   border-radius: var(--radius-sm);
@@ -421,7 +429,7 @@ onBeforeUnmount(() => {
   background: none;
   border: none;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text, var(--color-text));
   white-space: nowrap;
 }
