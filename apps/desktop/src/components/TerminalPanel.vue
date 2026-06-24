@@ -202,21 +202,26 @@ function commitRename(tab: TerminalTab) {
 let dragStartY = 0;
 let dragStartH = 0;
 function onDragStart(e: MouseEvent) {
+  e.preventDefault();
   dragStartY = e.clientY;
   dragStartH = height.value;
-  window.addEventListener("mousemove", onDragMove);
+  document.body.style.userSelect = "none";
+  window.addEventListener("mousemove", onDragMove, { passive: false });
   window.addEventListener("mouseup", onDragEnd);
 }
 function onDragMove(e: MouseEvent) {
+  e.preventDefault();
   height.value = Math.max(120, Math.min(700, dragStartH + (dragStartY - e.clientY)));
 }
 function onDragEnd() {
   localStorage.setItem(HEIGHT_KEY, String(height.value));
+  document.body.style.userSelect = "";
   window.removeEventListener("mousemove", onDragMove);
   window.removeEventListener("mouseup", onDragEnd);
 }
 
 onBeforeUnmount(() => {
+  document.body.style.userSelect = "";
   window.removeEventListener("mousemove", onDragMove);
   window.removeEventListener("mouseup", onDragEnd);
   for (const [, entry] of xterms) {
@@ -316,7 +321,7 @@ onBeforeUnmount(() => {
   display: flex;
   gap: 2px;
   align-items: center;
-  padding: 0 6px;
+  padding: 4px 6px;
   flex-shrink: 0;
 }
 
