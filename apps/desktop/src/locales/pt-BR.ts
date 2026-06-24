@@ -2164,6 +2164,12 @@ const ptBR: Locale = {
     newTab: "Nova aba",
     hide: "Ocultar terminal",
     closeTab: "Fechar aba",
+    headerLabel: "Terminal",
+    headerTooltip: "Abrir terminal",
+    menuShell: "Shell",
+    menuClaude: "Claude Code",
+    menuCodex: "Codex",
+    menuSessions: "Ver sessões",
   },
 };
 

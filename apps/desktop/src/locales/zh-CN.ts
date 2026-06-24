@@ -2149,6 +2149,12 @@ const zhCN: Locale = {
     newTab: "新标签页",
     hide: "隐藏终端",
     closeTab: "关闭标签页",
+    headerLabel: "终端",
+    headerTooltip: "打开终端",
+    menuShell: "Shell",
+    menuClaude: "Claude Code",
+    menuCodex: "Codex",
+    menuSessions: "查看会话",
   },
 };
 
