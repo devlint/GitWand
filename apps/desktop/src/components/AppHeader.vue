@@ -144,7 +144,7 @@ const emit = defineEmits<{
   openHelp: [];
   openStash: [];
   openTags: [];
-  openAgents: [];
+  openTerminal: [];
   discardAll: [];
   changeView: [mode: 'dashboard' | 'changes' | 'history' | 'prs' | 'launchpad'];
 }>();
@@ -333,18 +333,15 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
       <template v-if="hasRepo">
         <button
           class="btn btn--secondary header-feature-btn"
-          v-tooltip="t('agents.sidebarTooltip')"
-          :aria-label="t('agents.title')"
-          @click="emit('openAgents')"
+          v-tooltip="t('terminal.headerTooltip')"
+          :aria-label="t('terminal.headerLabel')"
+          @click="emit('openTerminal')"
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <rect x="3" y="11" width="18" height="11" rx="2"/>
-            <path d="M12 2v4M8 11V9a4 4 0 0 1 8 0v2"/>
-            <circle cx="9" cy="16" r="1" fill="currentColor" stroke="none"/>
-            <circle cx="15" cy="16" r="1" fill="currentColor" stroke="none"/>
-            <path d="M9 20h6"/>
+            <polyline points="4 17 10 11 4 5"/>
+            <line x1="12" y1="19" x2="20" y2="19"/>
           </svg>
-          <span>{{ t('agents.headerLabel') }}</span>
+          <span>{{ t('terminal.headerLabel') }}</span>
         </button>
 
         <div class="header-separator" aria-hidden="true"></div>

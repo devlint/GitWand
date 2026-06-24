@@ -2606,7 +2606,7 @@ onUnmounted(() => {
       @open-worktrees="(branch) => { pendingWorktreeBranch = branch; showWorktrees = true; }"
       @open-submodules="showSubmodules = true" @open-submodule="handleOpenSubmodule" @open-search="handleOpenSearch" @open-help="showHelp = true"
       :stash-count="stashCount" @open-stash="showStash = true" @open-tags="showTags = true"
-      @open-agents="showAgents = true" />
+      @open-terminal="openTerminalTab()" />
 
     <div class="app-body" :style="{ '--sidebar-width': sidebarWidth + 'px' }">
       <main class="main" :class="{ 'main--dashboard': viewMode === 'dashboard' || viewMode === 'launchpad' }">
