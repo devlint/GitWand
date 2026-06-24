@@ -201,10 +201,12 @@ function commitRename(tab: TerminalTab) {
 // Drag-to-resize.
 let dragStartY = 0;
 let dragStartH = 0;
+const isDragging = ref(false);
 function onDragStart(e: MouseEvent) {
   e.preventDefault();
   dragStartY = e.clientY;
   dragStartH = height.value;
+  isDragging.value = true;
   document.body.style.userSelect = "none";
   window.addEventListener("mousemove", onDragMove, { passive: false });
   window.addEventListener("mouseup", onDragEnd);
@@ -215,6 +217,7 @@ function onDragMove(e: MouseEvent) {
 }
 function onDragEnd() {
   localStorage.setItem(HEIGHT_KEY, String(height.value));
+  isDragging.value = false;
   document.body.style.userSelect = "";
   window.removeEventListener("mousemove", onDragMove);
   window.removeEventListener("mouseup", onDragEnd);
@@ -241,7 +244,7 @@ onBeforeUnmount(() => {
     @focusout="onFocusOut"
   >
     <!-- Drag handle — drag upward to grow the panel -->
-    <div class="tp__drag" @mousedown="onDragStart" />
+    <div class="tp__drag" :class="{ 'tp__drag--active': isDragging }" @mousedown="onDragStart" />
 
     <!-- Tab bar -->
     <div class="tp__tabs">
@@ -315,6 +318,12 @@ onBeforeUnmount(() => {
   height: 5px;
   cursor: ns-resize;
   flex-shrink: 0;
+  transition: background 0.15s;
+}
+
+.tp__drag:hover,
+.tp__drag--active {
+  background: var(--color-accent);
 }
 
 .tp__tabs {
