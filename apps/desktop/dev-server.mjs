@@ -5801,23 +5801,48 @@ async function handleRequest(req, res) {
         Connection: "keep-alive",
       });
       res.write(`data: ${JSON.stringify({ id })}\n\n`);
-      // Shell en mode pipe (pas de vrai TTY en dev — best effort).
-      const proc = spawn(shell, ["-i"], { cwd, env: process.env });
-      const send = (buf) =>
-        res.write(`data: ${JSON.stringify({ chunk: buf.toString() })}\n\n`);
+      // Shell en mode pipe (pas de vrai PTY en dev — best effort).
+      // LF only: no PTY line discipline → convert \n → \r\n so xterm
+      // moves the cursor to column 0 (PTY output processing does this normally).
+      const proc = spawn(shell, ["-i"], { cwd, env: process.env, stdio: ["pipe", "pipe", "pipe"] });
+      const send = (buf) => {
+        const str = buf.toString().replace(/\r\n/g, "\n").replace(/\n/g, "\r\n");
+        res.write(`data: ${JSON.stringify({ chunk: str })}\n\n`);
+      };
       proc.stdout.on("data", send);
       proc.stderr.on("data", send);
       proc.on("close", () => {
         if (!res.writableEnded) res.write(`data: ${JSON.stringify({ eof: true })}\n\n`);
         devPtys.delete(id);
       });
-      devPtys.set(id, { proc, res });
+      devPtys.set(id, { proc, res, send });
       req.on("close", () => { proc.kill(); devPtys.delete(id); });
       return;
     }
     if (url.pathname === "/api/terminal-write" && req.method === "POST") {
       const { id, data } = await readBody(req);
-      devPtys.get(id)?.proc.stdin.write(data);
+      const pty = devPtys.get(id);
+      if (pty) {
+        // Simulate PTY echo — the TTY line discipline normally echoes typed
+        // chars back to the display. With a pipe there is no line discipline,
+        // so we echo manually. Only echo printable ASCII, CR (Enter), and DEL.
+        let echo = "";
+        for (const ch of data) {
+          const code = ch.charCodeAt(0);
+          if (ch === "\r") {
+            echo += "\r\n";           // Enter → move to next line in xterm
+          } else if (ch === "\x7f" || ch === "\x08") {
+            echo += "\b \b";          // Backspace / DEL → erase last char
+          } else if (code >= 0x20 && code <= 0x7e) {
+            echo += ch;               // Printable ASCII — echo as-is
+          }
+          // Control chars / escape sequences: skip (don't echo to xterm)
+        }
+        if (echo) pty.send(Buffer.from(echo));
+        // Convert CR → LF before writing to bash stdin: without a TTY the
+        // line discipline is absent and bash only terminates lines on LF.
+        pty.proc.stdin.write(data.replace(/\r/g, "\n"));
+      }
       return jsonResponse(req, res, { ok: true });
     }
     if (url.pathname === "/api/terminal-resize" && req.method === "POST") {
