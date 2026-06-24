@@ -136,10 +136,11 @@ export async function devTerminalOpen(
       }
     };
     es.onerror = () => {
-      if (!resolved) reject(new Error("dev terminal SSE failed"));
-      // Fix 5 — Close unconditionally on error to prevent browser auto-reconnect
-      // after the PTY process has exited (stream closed by the dev server).
-      es.close();
+      if (resolved) {
+        // Shell exited — close to prevent browser auto-reconnect spawning a new shell
+        es.close();
+      }
+      // !resolved: transient connection error — let EventSource retry naturally
     };
   });
 }
