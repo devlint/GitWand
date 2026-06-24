@@ -52,6 +52,11 @@ let FitCtor: any = null;
 // Keyed by tab.id (same key space as xterms). Not reactive — plain Map.
 const pendingChunks = new Map<number, string[]>();
 
+// Fix 6 — Keystroke input buffer for keystrokes typed before the PTY is ready
+// (i.e. while tab.sessionId is still -1). Flushed to the PTY once sessionId
+// transitions from -1 to a positive value. Keyed by tab.id. Not reactive.
+const pendingInput = new Map<number, string[]>();
+
 const hostRefs = ref<Record<number, HTMLElement | undefined>>({});
 
 // Panel height — persisted.
@@ -82,7 +87,19 @@ async function mountTab(tab: TerminalTab) {
   term.open(el);
   fit.fit();
 
-  term.onData((data: string) => sessions.write(tab.sessionId, data));
+  // Fix 6 — Buffer keystrokes when the PTY is not yet ready (sessionId is -1).
+  // Keystrokes typed while awaiting terminalOpen would otherwise call
+  // terminalWrite(-1) which returns "session not found" and silently drops input.
+  term.onData((data: string) => {
+    if (tab.sessionId >= 0) {
+      sessions.write(tab.sessionId, data);
+    } else {
+      // PTY not ready yet — buffer until sessionId is assigned.
+      let buf = pendingInput.get(tab.id);
+      if (!buf) { buf = []; pendingInput.set(tab.id, buf); }
+      buf.push(data);
+    }
+  });
   term.onTitleChange((title: string) =>
     sessions.setTitleFromShell(props.repoPath, tab.id, title),
   );
@@ -128,6 +145,13 @@ watch(
       const entry = xterms.get(tab.id);
       if (entry && entry.sessionId !== tab.sessionId && tab.sessionId >= 0) {
         entry.sessionId = tab.sessionId;
+        // Fix 6 — PTY is now ready: flush any keystrokes buffered while
+        // sessionId was -1 (typed before terminalOpen resolved).
+        const queued = pendingInput.get(tab.id);
+        if (queued?.length) {
+          queued.forEach(d => sessions.write(tab.sessionId, d));
+          pendingInput.delete(tab.id);
+        }
       }
     }
     // Dispose xterms for closed tabs.
@@ -138,11 +162,16 @@ watch(
         entry?.term.dispose();
         xterms.delete(id);
         pendingChunks.delete(id);
+        pendingInput.delete(id); // Fix 6 — purge input buffer for closed tabs
       }
     }
     // Purge buffered chunks for tabs that closed before their xterm mounted.
     for (const id of pendingChunks.keys()) {
       if (!tabs.value.some((t) => t.id === id)) pendingChunks.delete(id);
+    }
+    // Fix 6 — Purge input buffer for tabs that closed before their PTY was ready.
+    for (const id of pendingInput.keys()) {
+      if (!tabs.value.some((t) => t.id === id)) pendingInput.delete(id);
     }
   },
   { immediate: true },

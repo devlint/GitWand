@@ -83,12 +83,37 @@ export function useTerminalSessions() {
     // Taille initiale standard ; le panel re-fit au mount.
     // Route output by stable tab.id so chunks arriving before terminalOpen
     // resolves (and before sessionId is assigned) are never dropped.
-    const sessionId = await terminalOpen(
-      cwd,
-      { cols: 80, rows: 24, shell: opts?.shell || undefined },
-      (chunk) => onChunk(tab.id, chunk),
-    );
-    tab.sessionId = sessionId;
+    try {
+      const sessionId = await terminalOpen(
+        cwd,
+        { cols: 80, rows: 24, shell: opts?.shell || undefined },
+        (chunk) => onChunk(tab.id, chunk),
+      );
+
+      // Fix 3 — Check if the tab was closed while we were awaiting the PTY spawn.
+      // If closeTab() fired during the await window, it skipped terminalClose()
+      // because sessionId was still -1. Now that we have the real sessionId, we
+      // must clean up the orphaned PTY process.
+      const stillExists = list.includes(tab);
+      if (!stillExists) {
+        await terminalClose(sessionId);
+        return tab; // caller has the ref; the tab is already gone from the list
+      }
+
+      tab.sessionId = sessionId;
+    } catch (err) {
+      // Fix 4 — PTY spawn failed (backend error, invalid cwd, PTY exhaustion, etc.).
+      // Remove the ghost tab that was pushed before the await, so the UI doesn't
+      // render a non-functional tab.
+      const idx = list.indexOf(tab);
+      if (idx !== -1) list.splice(idx, 1);
+      tab.alive = false;
+      // Restore focus to the previous active tab if we displaced it.
+      if (activeByRepo.get(repoPath) === tab.id) {
+        activeByRepo.set(repoPath, list.length ? list[list.length - 1].id : null);
+      }
+      throw err; // re-throw so the caller (App.vue) can surface the error
+    }
     return tab;
   }
 

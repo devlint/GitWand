@@ -31,20 +31,35 @@ static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
 /// Résout le shell à lancer : override explicite, sinon $SHELL (Unix) /
 /// %ComSpec% ou powershell (Windows).
+///
+/// Fix 2 — Shell path validation: a relative path with directory components
+/// (e.g. `../../bin/evil`) could otherwise reach `CommandBuilder` verbatim.
+/// We accept:
+///   - bare names like `"zsh"` or `"bash"` (no path separator)
+///   - absolute paths like `"/bin/zsh"` or `"C:\\Windows\\System32\\cmd.exe"`
+/// We reject (fall back to default) any path that contains a separator
+/// but is not absolute, to prevent directory-traversal attacks via settings.
 fn resolve_shell(shell: &Option<String>) -> String {
+    fn default_shell() -> String {
+        #[cfg(windows)]
+        { std::env::var("ComSpec").unwrap_or_else(|_| "powershell.exe".to_string()) }
+        #[cfg(not(windows))]
+        { std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string()) }
+    }
+
     if let Some(s) = shell {
-        if !s.trim().is_empty() {
-            return s.clone();
+        let shell = s.trim();
+        if !shell.is_empty() {
+            let p = std::path::Path::new(shell);
+            // Reject relative paths that have directory components (e.g. "../../evil").
+            // Bare names (no separator) and absolute paths are both acceptable.
+            if p.components().count() > 1 && !p.is_absolute() {
+                return default_shell();
+            }
+            return shell.to_string();
         }
     }
-    #[cfg(windows)]
-    {
-        std::env::var("ComSpec").unwrap_or_else(|_| "powershell.exe".to_string())
-    }
-    #[cfg(not(windows))]
-    {
-        std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string())
-    }
+    default_shell()
 }
 
 #[tauri::command]
@@ -58,8 +73,28 @@ pub(crate) fn terminal_open(
     if cwd.trim().is_empty() {
         return Err("cwd must not be empty".to_string());
     }
-    // Validation du cwd : doit être un dossier existant et résolu (anti-traversal).
-    let canon = std::fs::canonicalize(&cwd).map_err(|e| format!("invalid cwd: {e}"))?;
+    // Fix 1 — CWD validation (safe_repo_path applicability note).
+    //
+    // `safe_repo_path(cwd, rel_path)` validates that `rel_path` resolves
+    // inside `cwd`; it requires a second argument and is designed for
+    // file-within-repo access, not for validating the working directory
+    // itself. It cannot be called here with just `cwd`.
+    //
+    // Instead we apply the same defence-in-depth steps manually:
+    //   (a) reject relative paths — only absolute cwd accepted
+    //   (b) canonicalize to resolve symlinks and eliminate `..` components
+    //   (c) check is_dir() — must be an existing directory
+    //
+    // This mirrors AGENTS.md's intent: every user-supplied filesystem path
+    // must be resolved canonically before use, with no hand-crafted join
+    // that could be escaped via `..` traversal.
+    let cwd_path = std::path::Path::new(cwd.trim());
+    if !cwd_path.is_absolute() {
+        return Err(format!("cwd must be absolute (got: {})", cwd));
+    }
+    let canon = cwd_path
+        .canonicalize()
+        .map_err(|e| format!("invalid cwd: {e}"))?;
     if !canon.is_dir() {
         return Err("cwd is not a directory".to_string());
     }

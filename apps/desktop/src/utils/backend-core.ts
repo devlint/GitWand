@@ -129,11 +129,16 @@ export async function devTerminalOpen(
       } else if (typeof payload?.chunk === "string") {
         onOutput(payload.chunk);
       } else if (payload?.eof) {
+        // Fix 5 — Explicitly close the EventSource when the shell exits so that
+        // the browser's built-in auto-reconnect logic does not fire and spawn an
+        // untracked shell process by hitting /api/terminal-open again.
         es.close();
       }
     };
     es.onerror = () => {
       if (!resolved) reject(new Error("dev terminal SSE failed"));
+      // Fix 5 — Close unconditionally on error to prevent browser auto-reconnect
+      // after the PTY process has exited (stream closed by the dev server).
       es.close();
     };
   });
