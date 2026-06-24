@@ -2164,6 +2164,12 @@ const es: Locale = {
     newTab: "Nueva pestaña",
     hide: "Ocultar terminal",
     closeTab: "Cerrar pestaña",
+    headerLabel: "Terminal",
+    headerTooltip: "Abrir terminal",
+    menuShell: "Shell",
+    menuClaude: "Claude Code",
+    menuCodex: "Codex",
+    menuSessions: "Ver sesiones",
   },
 };
 
