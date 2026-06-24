@@ -14,6 +14,11 @@ import { readFileSync, writeFileSync, readdirSync, statSync, existsSync, unlinkS
 import { resolve, join, dirname, basename, sep, isAbsolute } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { Socket } from "node:net";
+import { createRequire } from "node:module";
+const _require = createRequire(import.meta.url);
+// node-pty provides a real PTY in dev mode — proper echo, backspace, unbuffered
+// output, resize, and control sequences without any manual workarounds.
+const nodePty = _require("node-pty");
 
 // ── Crash guards ────────────────────────────────────────────────────────────
 // Without these, any unhandled exception or rejected promise kills the process
@@ -5793,7 +5798,9 @@ async function handleRequest(req, res) {
     // ── Terminal PTY (dev echo) ───────────────────────────────────────────────
     if (url.pathname === "/api/terminal-open" && req.method === "GET") {
       const cwd = url.searchParams.get("cwd") || process.cwd();
-      const shell = url.searchParams.get("shell") || process.env.SHELL || "/bin/bash";
+      const shell = url.searchParams.get("shell") || process.env.SHELL || "/bin/zsh";
+      const cols = Math.max(1, parseInt(url.searchParams.get("cols") || "80", 10));
+      const rows = Math.max(1, parseInt(url.searchParams.get("rows") || "24", 10));
       const id = devPtyNextId++;
       res.writeHead(200, {
         "Content-Type": "text/event-stream",
@@ -5801,57 +5808,41 @@ async function handleRequest(req, res) {
         Connection: "keep-alive",
       });
       res.write(`data: ${JSON.stringify({ id })}\n\n`);
-      // Shell en mode pipe (pas de vrai PTY en dev — best effort).
-      // LF only: no PTY line discipline → convert \n → \r\n so xterm
-      // moves the cursor to column 0 (PTY output processing does this normally).
-      const proc = spawn(shell, ["-i"], { cwd, env: process.env, stdio: ["pipe", "pipe", "pipe"] });
-      const send = (buf) => {
-        const str = buf.toString().replace(/\r\n/g, "\n").replace(/\n/g, "\r\n");
-        res.write(`data: ${JSON.stringify({ chunk: str })}\n\n`);
-      };
-      proc.stdout.on("data", send);
-      proc.stderr.on("data", send);
-      proc.on("close", () => {
+      // Real PTY via node-pty — handles echo, backspace, CRLF conversion,
+      // unbuffered output, resize, and control sequences natively.
+      const proc = nodePty.spawn(shell, [], {
+        name: "xterm-256color",
+        cols,
+        rows,
+        cwd,
+        env: process.env,
+      });
+      proc.onData((chunk) => {
+        if (!res.writableEnded) res.write(`data: ${JSON.stringify({ chunk })}\n\n`);
+      });
+      proc.onExit(() => {
         if (!res.writableEnded) res.write(`data: ${JSON.stringify({ eof: true })}\n\n`);
         devPtys.delete(id);
       });
-      devPtys.set(id, { proc, res, send });
-      req.on("close", () => { proc.kill(); devPtys.delete(id); });
+      devPtys.set(id, { proc });
+      req.on("close", () => { try { proc.kill(); } catch (_) {} devPtys.delete(id); });
       return;
     }
     if (url.pathname === "/api/terminal-write" && req.method === "POST") {
       const { id, data } = await readBody(req);
-      const pty = devPtys.get(id);
-      if (pty) {
-        // Simulate PTY echo — the TTY line discipline normally echoes typed
-        // chars back to the display. With a pipe there is no line discipline,
-        // so we echo manually. Only echo printable ASCII, CR (Enter), and DEL.
-        let echo = "";
-        for (const ch of data) {
-          const code = ch.charCodeAt(0);
-          if (ch === "\r") {
-            echo += "\r\n";           // Enter → move to next line in xterm
-          } else if (ch === "\x7f" || ch === "\x08") {
-            echo += "\b \b";          // Backspace / DEL → erase last char
-          } else if (code >= 0x20 && code <= 0x7e) {
-            echo += ch;               // Printable ASCII — echo as-is
-          }
-          // Control chars / escape sequences: skip (don't echo to xterm)
-        }
-        if (echo) pty.send(Buffer.from(echo));
-        // Convert CR → LF before writing to bash stdin: without a TTY the
-        // line discipline is absent and bash only terminates lines on LF.
-        pty.proc.stdin.write(data.replace(/\r/g, "\n"));
-      }
+      devPtys.get(id)?.proc.write(data);
       return jsonResponse(req, res, { ok: true });
     }
     if (url.pathname === "/api/terminal-resize" && req.method === "POST") {
-      return jsonResponse(req, res, { ok: true }); // pas de winsize en mode pipe
+      const { id, cols, rows } = await readBody(req);
+      const entry = devPtys.get(id);
+      if (entry && cols > 0 && rows > 0) entry.proc.resize(cols, rows);
+      return jsonResponse(req, res, { ok: true });
     }
     if (url.pathname === "/api/terminal-close" && req.method === "POST") {
       const { id } = await readBody(req);
-      devPtys.get(id)?.proc.kill();
-      devPtys.delete(id);
+      const entry = devPtys.get(id);
+      if (entry) { try { entry.proc.kill(); } catch (_) {} devPtys.delete(id); }
       return jsonResponse(req, res, { ok: true });
     }
 
