@@ -895,7 +895,6 @@ const repoSidebarListeners = {
   refresh: () => repoRefresh(),
   openStash: () => { showStash.value = true; },
   openTags: () => { showTags.value = true; },
-  openAgents: () => { showAgents.value = true; },
   openLaunchpad: () => handleLaunchpadShortcut(),
   scrollToFile: (idx: number) => onHistoryScrollToFile(idx),
   deleteBranch: (name: string, hasLocal: boolean, hasRemote: boolean, remoteName?: string) =>

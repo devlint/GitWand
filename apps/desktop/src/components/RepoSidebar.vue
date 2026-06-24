@@ -85,7 +85,6 @@ const emit = defineEmits<{
   /** Open the stash manager panel. */
   openStash: [];
   openTags: [];
-  openAgents: [];
   openLaunchpad: [];
   /** Scroll to a specific file in the history view */
   scrollToFile: [index: number];
