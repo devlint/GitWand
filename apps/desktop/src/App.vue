@@ -2844,6 +2844,8 @@ onUnmounted(() => {
         :repo-path="repoFolderPath"
         @close="showTerminal = false"
         @new="openTerminalTab()"
+        @new-agent="(tool: string) => repoFolderPath && onLaunchAgent({ path: repoFolderPath, tool })"
+        @open-sessions="showAgents = true"
       />
 
       <!-- Floating bottom-center navigation dock -->

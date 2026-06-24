@@ -5,13 +5,42 @@ import { useI18n } from "../composables/useI18n";
 import { useSettings } from "../composables/useSettings";
 
 const props = defineProps<{ repoPath: string }>();
-const emit = defineEmits<{ (e: "close"): void; (e: "new"): void }>();
+const emit = defineEmits<{
+  (e: "close"): void;
+  (e: "new"): void;
+  (e: "new-agent", tool: string): void;
+  (e: "open-sessions"): void;
+}>();
 const { t } = useI18n();
 const { settings } = useSettings();
 
 const sessions = useTerminalSessions();
 const tabs = computed(() => sessions.tabsFor(props.repoPath));
 const activeId = computed(() => sessions.activeTabId(props.repoPath));
+
+// ─── "+" dropdown ────────────────────────────────────────
+const showDropdown = ref(false);
+
+function onDocumentClickClose() {
+  showDropdown.value = false;
+}
+
+function openDropdown(e: MouseEvent) {
+  e.stopPropagation();
+  if (showDropdown.value) {
+    showDropdown.value = false;
+    document.removeEventListener("click", onDocumentClickClose);
+  } else {
+    showDropdown.value = true;
+    document.addEventListener("click", onDocumentClickClose);
+  }
+}
+
+function selectDropdownItem(action: () => void) {
+  showDropdown.value = false;
+  document.removeEventListener("click", onDocumentClickClose);
+  action();
+}
 
 // xterm instances kept OUTSIDE Vue reactivity — plain Map only.
 type XtermEntry = { term: any; fit: any; ro: ResizeObserver; sessionId: number };
@@ -166,6 +195,7 @@ onBeforeUnmount(() => {
     entry.term.dispose();
   }
   xterms.clear();
+  document.removeEventListener("click", onDocumentClickClose);
 });
 </script>
 
@@ -205,7 +235,23 @@ onBeforeUnmount(() => {
         >×</span>
       </button>
 
-      <button class="tp__new" :title="t('terminal.newTab')" @click="emit('new')">+</button>
+      <div class="tp__new-wrap">
+        <button class="tp__new" :title="t('terminal.newTab')" @click="openDropdown">+</button>
+        <div v-if="showDropdown" class="tp__menu" @click.stop>
+          <button class="tp__menu-item" @click="selectDropdownItem(() => emit('new'))">
+            {{ t('terminal.menuShell') }}
+          </button>
+          <button class="tp__menu-item" @click="selectDropdownItem(() => emit('new-agent', 'claude'))">
+            {{ t('terminal.menuClaude') }}
+          </button>
+          <button class="tp__menu-item" @click="selectDropdownItem(() => emit('new-agent', 'codex'))">
+            {{ t('terminal.menuCodex') }}
+          </button>
+          <button class="tp__menu-item" @click="selectDropdownItem(() => emit('open-sessions'))">
+            {{ t('terminal.menuSessions') }}
+          </button>
+        </div>
+      </div>
       <button class="tp__hide" :title="t('terminal.hide')" @click="emit('close')">⌄</button>
     </div>
 
@@ -319,5 +365,39 @@ onBeforeUnmount(() => {
   color: inherit;
   font-size: inherit;
   padding: 0 4px;
+}
+
+.tp__new-wrap {
+  position: relative;
+}
+
+.tp__menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  background: var(--bg-elevated, var(--color-bg-secondary));
+  border: 1px solid var(--border, var(--color-border));
+  border-radius: var(--radius-sm);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 100;
+  min-width: 140px;
+  padding: 2px 0;
+}
+
+.tp__menu-item {
+  display: block;
+  width: 100%;
+  padding: 6px 12px;
+  text-align: left;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text, var(--color-text));
+  white-space: nowrap;
+}
+
+.tp__menu-item:hover {
+  background: var(--hover, var(--color-hover));
 }
 </style>
