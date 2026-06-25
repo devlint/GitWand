@@ -2020,11 +2020,11 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
   display: flex;
   flex-direction: column;
   height: 100%;
-  overflow: hidden;
 }
 
 .cg-scroll {
   flex: 1;
+  min-height: 0;
   overflow: auto;
   display: flex;
   position: relative;
