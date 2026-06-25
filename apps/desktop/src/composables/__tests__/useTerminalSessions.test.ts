@@ -7,7 +7,7 @@ vi.mock("../../utils/backend", () => ({
   terminalClose: vi.fn(async () => {}),
 }));
 
-import { useTerminalSessions, __resetForTests } from "../useTerminalSessions";
+import { useTerminalSessions, __resetForTests, simulateChunkForTab } from "../useTerminalSessions";
 import { terminalClose } from "../../utils/backend";
 
 describe("useTerminalSessions", () => {
@@ -113,7 +113,7 @@ describe("useTerminalSessions", () => {
     const tabB = await s.openTab("/repo/a", "/repo/a", () => {});
     // tabB is now active; tabA is background
     // Simulate a chunk arriving for tabA (not active)
-    s.simulateChunkForTab("/repo/a", tabA.id);
+    simulateChunkForTab("/repo/a", tabA.id);
     expect(tabA.hasUnread).toBe(true);
     s.markRead("/repo/a", tabA.id);
     expect(tabA.hasUnread).toBe(false);

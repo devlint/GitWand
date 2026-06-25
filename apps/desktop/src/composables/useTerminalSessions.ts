@@ -190,15 +190,6 @@ export function useTerminalSessions() {
     if (tab) tab.hasUnread = false;
   }
 
-  // Test-only helper: simulates a PTY chunk arriving for a tab.
-  // Used in tests to trigger the hasUnread path without a real PTY.
-  function simulateChunkForTab(repoPath: string, tabId: number): void {
-    if (activeByRepo.get(repoPath) !== tabId) {
-      const tab = listFor(repoPath).find((t) => t.id === tabId);
-      if (tab) tab.hasUnread = true;
-    }
-  }
-
   function write(sessionId: number, data: string) {
     return terminalWrite(sessionId, data);
   }
@@ -221,7 +212,16 @@ export function useTerminalSessions() {
     write,
     resize,
     markRead,
-    simulateChunkForTab,
     terminalFocused: terminalFocused as Ref<boolean>,
   };
+}
+
+/** Test-only helper: simulates a PTY chunk arriving for a tab.
+ * Used in tests to trigger the hasUnread path without a real PTY.
+ */
+export function simulateChunkForTab(repoPath: string, tabId: number): void {
+  if (activeByRepo.get(repoPath) !== tabId) {
+    const tab = listFor(repoPath).find((t) => t.id === tabId);
+    if (tab) tab.hasUnread = true;
+  }
 }
