@@ -5849,12 +5849,13 @@ async function handleRequest(req, res) {
     // POST /api/scratch-worktree-create  { cwd, sourceBranch? }
     if (url.pathname === "/api/scratch-worktree-create" && req.method === "POST") {
       const { cwd, sourceBranch } = await readBody(req);
+      const resolvedCwd = resolve(cwd);
       const ts = Date.now();
       const branchName = `gitwand-scratch-dev-${ts}`;
-      const scratchPath = join(resolve(cwd, ".."), branchName);
+      const scratchPath = join(resolve(resolvedCwd, ".."), branchName);
       const ref = sourceBranch ?? "HEAD";
       try {
-        execFileSync("git", ["worktree", "add", "-b", branchName, scratchPath, ref], { cwd, encoding: "utf-8" });
+        execFileSync("git", ["worktree", "add", "-b", branchName, scratchPath, ref], { cwd: resolvedCwd, encoding: "utf-8" });
         return jsonResponse(req, res, {
           path: scratchPath,
           branch: branchName,
