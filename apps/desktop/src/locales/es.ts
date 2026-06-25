@@ -404,6 +404,8 @@ const es: Locale = {
     graphSearchNext: "Siguiente coincidencia",
     graphSearchCount: "{0} / {1}",
     graphSearchClear: "Borrar búsqueda",
+    graphSearchFilter: "Filtrar",
+    graphSearchFilterTitle: "Mostrar solo los commits coincidentes",
   },
   commit: {
     summary: "Resumen",

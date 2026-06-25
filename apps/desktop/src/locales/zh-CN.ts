@@ -404,6 +404,8 @@ const zhCN: Locale = {
     graphSearchNext: "下一个匹配",
     graphSearchCount: "{0} / {1}",
     graphSearchClear: "清除搜索",
+    graphSearchFilter: "筛选",
+    graphSearchFilterTitle: "仅显示匹配的提交",
   },
   commit: {
     summary: "概要",

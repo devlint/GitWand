@@ -405,6 +405,8 @@ const ptBR: Locale = {
     graphSearchNext: "Próxima correspondência",
     graphSearchCount: "{0} / {1}",
     graphSearchClear: "Limpar pesquisa",
+    graphSearchFilter: "Filtrar",
+    graphSearchFilterTitle: "Mostrar apenas os commits correspondentes",
   },
   commit: {
     summary: "Resumo",

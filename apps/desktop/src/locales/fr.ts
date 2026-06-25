@@ -409,6 +409,8 @@ const fr: Locale = {
     graphSearchNext: "Correspondance suivante",
     graphSearchCount: "{0} / {1}",
     graphSearchClear: "Effacer la recherche",
+    graphSearchFilter: "Filtrer",
+    graphSearchFilterTitle: "Afficher uniquement les commits correspondants",
   },
   commit: {
     summary: "R\u00e9sum\u00e9",
