@@ -5801,7 +5801,6 @@ async function handleRequest(req, res) {
       const shell = url.searchParams.get("shell") || process.env.SHELL || "/bin/zsh";
       const cols = Math.max(1, parseInt(url.searchParams.get("cols") || "80", 10));
       const rows = Math.max(1, parseInt(url.searchParams.get("rows") || "24", 10));
-      console.log("[pty] terminal-open request", { cwd, shell, cols, rows, origin: req.headers.origin });
       const id = devPtyNextId++;
       const sseOrigin = req.headers.origin;
       const sseAllowOrigin = sseOrigin && ALLOWED_ORIGINS.has(sseOrigin) ? sseOrigin : "";
@@ -5817,9 +5816,7 @@ async function handleRequest(req, res) {
       let proc;
       try {
         proc = nodePty.spawn(shell, [], { name: "xterm-256color", cols, rows, cwd, env: process.env });
-        console.log("[pty] node-pty spawned pid=", proc.pid);
       } catch (spawnErr) {
-        console.error("[pty] node-pty spawn FAILED", spawnErr);
         res.write(`data: ${JSON.stringify({ error: String(spawnErr) })}\n\n`);
         res.end();
         return;

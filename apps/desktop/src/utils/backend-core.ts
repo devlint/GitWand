@@ -118,15 +118,11 @@ export async function devTerminalOpen(
     rows: String(opts.rows),
   });
   if (opts.shell) params.set("shell", opts.shell);
-  const url = `${DEV_SERVER}/api/terminal-open?${params}`;
-  console.log('[pty] opening SSE', url);
   return new Promise((resolve, reject) => {
-    const es = new EventSource(url);
+    const es = new EventSource(`${DEV_SERVER}/api/terminal-open?${params}`);
     let resolved = false;
-    es.onopen = () => console.log('[pty] SSE onopen — connection established');
     es.onmessage = (ev) => {
       const payload = JSON.parse(ev.data);
-      console.log('[pty] SSE onmessage', payload);
       if (!resolved && typeof payload?.id === "number") {
         resolved = true;
         resolve(payload.id);
@@ -139,8 +135,7 @@ export async function devTerminalOpen(
         es.close();
       }
     };
-    es.onerror = (e) => {
-      console.warn('[pty] SSE onerror', { resolved, readyState: es.readyState, e });
+    es.onerror = () => {
       if (resolved) {
         // Shell exited — close to prevent browser auto-reconnect spawning a new shell
         es.close();
