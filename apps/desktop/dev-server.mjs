@@ -5802,10 +5802,13 @@ async function handleRequest(req, res) {
       const cols = Math.max(1, parseInt(url.searchParams.get("cols") || "80", 10));
       const rows = Math.max(1, parseInt(url.searchParams.get("rows") || "24", 10));
       const id = devPtyNextId++;
+      const sseOrigin = req.headers.origin;
+      const sseAllowOrigin = sseOrigin && ALLOWED_ORIGINS.has(sseOrigin) ? sseOrigin : "";
       res.writeHead(200, {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",
         Connection: "keep-alive",
+        ...(sseAllowOrigin ? { "Access-Control-Allow-Origin": sseAllowOrigin, Vary: "Origin" } : {}),
       });
       res.write(`data: ${JSON.stringify({ id })}\n\n`);
       // Real PTY via node-pty — handles echo, backspace, CRLF conversion,

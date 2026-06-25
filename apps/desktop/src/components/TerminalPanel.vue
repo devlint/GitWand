@@ -162,7 +162,6 @@ function writeChunk(tabId: number, chunk: string) {
   if (entry) {
     entry.term.write(chunk);
   } else {
-    // xterm not yet mounted — buffer until mountTab flushes.
     let buf = pendingChunks.get(tabId);
     if (!buf) { buf = []; pendingChunks.set(tabId, buf); }
     buf.push(chunk);
