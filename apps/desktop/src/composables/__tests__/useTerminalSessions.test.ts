@@ -88,4 +88,34 @@ describe("useTerminalSessions", () => {
     expect(s.tabsFor("/repo/b")).toHaveLength(0);
     expect(terminalClose).toHaveBeenCalled();
   });
+
+  it("openTab crée un onglet de type 'shell' par défaut", async () => {
+    const s = useTerminalSessions();
+    const tab = await s.openTab("/repo/a", "/repo/a", () => {});
+    expect(tab.type).toBe("shell");
+  });
+
+  it("openTab crée un onglet de type 'claude' quand opts.type='claude'", async () => {
+    const s = useTerminalSessions();
+    const tab = await s.openTab("/repo/a", "/repo/a", () => {}, { type: "claude" });
+    expect(tab.type).toBe("claude");
+  });
+
+  it("hasUnread est faux à l'ouverture", async () => {
+    const s = useTerminalSessions();
+    const tab = await s.openTab("/repo/a", "/repo/a", () => {});
+    expect(tab.hasUnread).toBe(false);
+  });
+
+  it("markRead vide le flag hasUnread", async () => {
+    const s = useTerminalSessions();
+    const tabA = await s.openTab("/repo/a", "/repo/a", () => {});
+    const tabB = await s.openTab("/repo/a", "/repo/a", () => {});
+    // tabB is now active; tabA is background
+    // Simulate a chunk arriving for tabA (not active)
+    s.simulateChunkForTab("/repo/a", tabA.id);
+    expect(tabA.hasUnread).toBe(true);
+    s.markRead("/repo/a", tabA.id);
+    expect(tabA.hasUnread).toBe(false);
+  });
 });

@@ -327,7 +327,7 @@ onBeforeUnmount(() => {
         :key="tab.id"
         class="tp__tab"
         :class="{ 'tp__tab--active': tab.id === activeId }"
-        @click="sessions.setActive(props.repoPath, tab.id)"
+        @click="() => { sessions.setActive(props.repoPath, tab.id); sessions.markRead(props.repoPath, tab.id); }"
         @dblclick="startRename(tab)"
       >
         <input
@@ -337,7 +337,13 @@ onBeforeUnmount(() => {
           @keyup.enter="commitRename(tab)"
           @blur="commitRename(tab)"
         />
-        <span v-else>{{ tab.title }}</span>
+        <span v-else class="tp__tab-label">
+          <span class="tp__tab-icon" :class="`tp__tab-icon--${tab.type}`">
+            {{ tab.type === 'claude' ? 'C' : tab.type === 'codex' ? '⚡' : '$' }}
+          </span>
+          {{ tab.title }}
+          <span v-if="tab.hasUnread && tab.id !== activeId" class="tp__unread" />
+        </span>
         <span
           class="tp__close"
           role="button"
@@ -604,5 +610,38 @@ onBeforeUnmount(() => {
 .tp__search-close:hover {
   opacity: 1;
   background: var(--color-bg-hover);
+}
+
+.tp__tab-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tp__tab-icon {
+  font-size: 10px;
+  opacity: 0.6;
+  font-family: monospace;
+  min-width: 12px;
+}
+
+.tp__tab-icon--claude {
+  color: var(--color-accent);
+  opacity: 1;
+  font-weight: bold;
+}
+
+.tp__tab-icon--codex {
+  color: #a370f7;
+  opacity: 1;
+}
+
+.tp__unread {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  flex-shrink: 0;
 }
 </style>

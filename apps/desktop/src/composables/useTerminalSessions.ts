@@ -19,12 +19,16 @@ import {
   terminalClose,
 } from "../utils/backend";
 
+export type TerminalTabType = "shell" | "claude" | "codex";
+
 export interface TerminalTab {
   id: number; // id local (mémoire)
   sessionId: number; // id PTY backend
   title: string;
   titleManual: boolean;
   alive: boolean;
+  type: TerminalTabType;
+  hasUnread: boolean;
 }
 
 // État module (pattern store-composable, pas de Pinia).
@@ -68,14 +72,17 @@ export function useTerminalSessions() {
     repoPath: string,
     cwd: string,
     onChunk: (tabId: number, chunk: string) => void,
-    opts?: { shell?: string },
+    opts?: { shell?: string; type?: TerminalTabType },
   ): Promise<TerminalTab> {
+    const tabType = opts?.type ?? "shell";
     const tab: TerminalTab = {
       id: nextLocalId++,
       sessionId: -1,
-      title: "shell",
+      title: tabType === "claude" ? "Claude Code" : tabType === "codex" ? "Codex" : "shell",
       titleManual: false,
       alive: true,
+      type: tabType,
+      hasUnread: false,
     };
     const list = listFor(repoPath);
     list.push(tab);
@@ -87,7 +94,12 @@ export function useTerminalSessions() {
       const sessionId = await terminalOpen(
         cwd,
         { cols: 80, rows: 24, shell: opts?.shell || undefined },
-        (chunk) => onChunk(tab.id, chunk),
+        (chunk) => {
+          if (activeByRepo.get(repoPath) !== tab.id) {
+            tab.hasUnread = true;
+          }
+          onChunk(tab.id, chunk);
+        },
       );
 
       // Fix 3 — Check if the tab was closed while we were awaiting the PTY spawn.
@@ -173,6 +185,20 @@ export function useTerminalSessions() {
     mutationHandler = cb;
   }
 
+  function markRead(repoPath: string, tabId: number): void {
+    const tab = listFor(repoPath).find((t) => t.id === tabId);
+    if (tab) tab.hasUnread = false;
+  }
+
+  // Test-only helper: simulates a PTY chunk arriving for a tab.
+  // Used in tests to trigger the hasUnread path without a real PTY.
+  function simulateChunkForTab(repoPath: string, tabId: number): void {
+    if (activeByRepo.get(repoPath) !== tabId) {
+      const tab = listFor(repoPath).find((t) => t.id === tabId);
+      if (tab) tab.hasUnread = true;
+    }
+  }
+
   function write(sessionId: number, data: string) {
     return terminalWrite(sessionId, data);
   }
@@ -194,6 +220,8 @@ export function useTerminalSessions() {
     setMutationHandler,
     write,
     resize,
+    markRead,
+    simulateChunkForTab,
     terminalFocused: terminalFocused as Ref<boolean>,
   };
 }
