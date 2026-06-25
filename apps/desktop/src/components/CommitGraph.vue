@@ -503,7 +503,7 @@ let _pinTrunkHash: string | undefined = undefined;
 let _pinSecondaryHashes: string[] = [];
 
 const layout = computed<DagLayout>(() => {
-  const commits = displayCommits.value;
+  const commits = renderedCommits.value;
   const n = commits.length;
   // Include currentBranch + hasChanges in fingerprint: branch change or WIP
   // state change must recompute layout even when commit hashes are identical.
@@ -554,14 +554,20 @@ const layout = computed<DagLayout>(() => {
 // ─── Commit search / highlight ───────────────────────
 const searchQuery = ref("");
 const currentMatchIdx = ref(-1);
+const filterMode = ref(false);
+
+const renderedCommits = computed(() => {
+  if (!filterMode.value || !searchQuery.value.trim()) return displayCommits.value;
+  return filterCommitsLocal(displayCommits.value, searchQuery.value);
+});
 
 const matchedIndices = computed<number[]>(() => {
   const q = searchQuery.value.trim();
   if (!q) return [];
-  const matched = filterCommitsLocal(displayCommits.value, q);
+  const matched = filterCommitsLocal(renderedCommits.value, q);
   const matchSet = new Set(matched.map((e) => e.hashFull));
   const indices: number[] = [];
-  displayCommits.value.forEach((e, i) => { if (matchSet.has(e.hashFull)) indices.push(i); });
+  renderedCommits.value.forEach((e, i) => { if (matchSet.has(e.hashFull)) indices.push(i); });
   return indices;
 });
 
@@ -575,7 +581,10 @@ watch(matchedIndices, (indices) => {
 });
 
 watch(searchQuery, (q) => {
-  if (!q.trim()) currentMatchIdx.value = -1;
+  if (!q.trim()) {
+    currentMatchIdx.value = -1;
+    filterMode.value = false;
+  }
 });
 
 function scrollToIndex(index: number) {
@@ -600,13 +609,22 @@ function navigateSearch(dir: 1 | -1) {
   scrollToIndex(matchedIndices.value[next]);
 }
 
+function toggleFilterMode() {
+  if (!searchQuery.value.trim()) return;
+  filterMode.value = !filterMode.value;
+  if (filterMode.value) {
+    if (scrollContainer.value) scrollContainer.value.scrollTop = 0;
+    currentMatchIdx.value = -1;
+  }
+}
+
 const matchedHashSet = computed<Set<string>>(() => {
-  return new Set(matchedIndices.value.map((i) => displayCommits.value[i]?.hashFull ?? ""));
+  return new Set(matchedIndices.value.map((i) => renderedCommits.value[i]?.hashFull ?? ""));
 });
 
 const activeMatchHash = computed<string | null>(() => {
   const idx = matchedIndices.value[currentMatchIdx.value];
-  return idx !== undefined ? (displayCommits.value[idx]?.hashFull ?? null) : null;
+  return idx !== undefined ? (renderedCommits.value[idx]?.hashFull ?? null) : null;
 });
 
 // ─── Rendering constants ─────────────────────────────
@@ -620,7 +638,7 @@ const graphWidth = computed(() => {
   return Math.max(SVG_MIN_W, GRAPH_PAD + (layout.value.maxLane + 1) * LANE_W + GRAPH_PAD);
 });
 
-const totalHeight = computed(() => displayCommits.value.length * ROW_H);
+const totalHeight = computed(() => renderedCommits.value.length * ROW_H);
 
 // ─── Lane colours — rainbow spectrum left-to-right ───────
 // 45° hue steps: purple → pink → red → orange → yellow → green → cyan → blue
@@ -771,7 +789,7 @@ function isCurrent(entry: GitLogEntry): boolean {
 type NodeKind = 'stash' | 'trunk' | 'merge' | 'normal';
 
 function nodeKind(node: DagNode): NodeKind {
-  const entry = displayCommits.value[node.index];
+  const entry = renderedCommits.value[node.index];
   if (!entry) return 'normal';
   const refs = commitRefs(entry);
   if (refs.some(r => r.type === 'stash')) return 'stash';
@@ -833,7 +851,7 @@ onUnmounted(() => {
 });
 
 const visibleRange = computed(() => {
-  const total = displayCommits.value.length;
+  const total = renderedCommits.value.length;
   if (total === 0) return { first: 0, last: -1 };
   // Before mount or during a 0-height layout, clientHeight is 0 and we'd
   // render only the overscan. Fall back to a safe minimum so first paint
@@ -866,7 +884,7 @@ interface VisibleCommit { entry: GitLogEntry; index: number }
 const visibleCommits = computed<VisibleCommit[]>(() => {
   const { first, last } = visibleRange.value;
   const out: VisibleCommit[] = [];
-  const commits = displayCommits.value;
+  const commits = renderedCommits.value;
   for (let i = first; i <= last; i++) {
     const entry = commits[i];
     if (entry) out.push({ entry, index: i });
@@ -933,6 +951,19 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
           <polyline points="6 9 12 15 18 9"/>
         </svg>
       </button>
+      <!-- Filter mode toggle (turns accent when active) -->
+      <button
+        class="cg-search-nav cg-filter-btn"
+        :class="{ 'cg-filter-btn--active': filterMode }"
+        :disabled="!searchQuery.trim()"
+        :title="t('log.graphSearchFilterTitle')"
+        :aria-label="t('log.graphSearchFilter')"
+        @click="toggleFilterMode"
+      >
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>
+        </svg>
+      </button>
       <button
         v-if="searchQuery"
         class="cg-search-nav"
@@ -983,7 +1014,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
           :fill="nodeKind(node) === 'trunk' ? 'url(#trunk-gradient-tint)' : laneColorTint(node.lane)"
           rx="8"
           @click="node.hash === 'WIP' ? emit('change-view', 'changes') : emit('select-commit', node.hash)"
-          @contextmenu="openCommitContextMenu($event, displayCommits[node.index], node.index)"
+          @contextmenu="openCommitContextMenu($event, renderedCommits[node.index], node.index)"
         />
         <!-- Edges first (behind nodes). R6: only visible edges are emitted.
              Key uses content (lanes + indices) so Vue can re-use DOM nodes
@@ -994,7 +1025,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
           :d="edgePath(edge)"
           :stroke="laneColor(edge.fromLane)"
           :stroke-width="edge.isMerge ? 1.2 : 1.6"
-          :stroke-dasharray="edge.isMerge || (hasChanges && edge.fromIndex === 0) || stashByHash.has(displayCommits[edge.fromIndex]?.hashFull) ? '3,3' : 'none'"
+          :stroke-dasharray="edge.isMerge || (hasChanges && edge.fromIndex === 0) || stashByHash.has(renderedCommits[edge.fromIndex]?.hashFull) ? '3,3' : 'none'"
           fill="none"
           stroke-linecap="round"
         />
@@ -1004,7 +1035,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
           :key="'n' + node.index"
           class="cg-node"
           @click="node.hash === 'WIP' ? emit('change-view', 'changes') : emit('select-commit', node.hash)"
-          @contextmenu="openCommitContextMenu($event, displayCommits[node.index], node.index)"
+          @contextmenu="openCommitContextMenu($event, renderedCommits[node.index], node.index)"
         >
           <!-- WIP Node: dashed circle -->
           <circle
@@ -1020,7 +1051,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
 
           <!-- Current commit indicator: outer ring -->
           <circle
-            v-else-if="isCurrent(displayCommits[node.index])"
+            v-else-if="isCurrent(renderedCommits[node.index])"
             :cx="cx(node.lane)"
             :cy="cy(node.index)"
             :r="nodeKind(node) === 'trunk' ? NODE_R + 4 : (nodeKind(node) === 'merge' ? NODE_R + 3.5 : NODE_R + 2.5)"
@@ -1830,6 +1861,18 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
 .cg-search-nav:disabled {
   opacity: 0.35;
   cursor: not-allowed;
+}
+
+.cg-filter-btn--active {
+  background: var(--color-accent-soft);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.cg-filter-btn--active:hover:not(:disabled) {
+  background: var(--color-accent-soft);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
 }
 
 .cg {
