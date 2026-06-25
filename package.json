@@ -14,7 +14,8 @@
     "build": "pnpm -r run build",
     "test": "pnpm -r run test",
     "lint": "pnpm -r run lint",
-    "clean": "pnpm -r run clean"
+    "clean": "pnpm -r run clean",
+    "postinstall": "find node_modules/.pnpm -name 'spawn-helper' -exec chmod +x {} +"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.10.1"
