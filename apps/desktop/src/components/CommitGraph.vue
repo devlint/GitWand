@@ -592,9 +592,10 @@ function onSearchKeydown(e: KeyboardEvent) {
       activeSuggestionIdx.value = Math.max(activeSuggestionIdx.value - 1, -1);
       return;
     }
-    if (e.key === "Enter" && activeSuggestionIdx.value >= 0) {
+    if (e.key === "Enter") {
       e.preventDefault();
-      selectSuggestion(branchSuggestions.value[activeSuggestionIdx.value].name);
+      const idx = activeSuggestionIdx.value >= 0 ? activeSuggestionIdx.value : 0;
+      selectSuggestion(branchSuggestions.value[idx].name);
       return;
     }
     if (e.key === "Escape") {
@@ -1034,8 +1035,8 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
         class="cg-search-nav cg-filter-btn"
         :class="{ 'cg-filter-btn--active': filterMode }"
         :disabled="!searchQuery.trim()"
-        :title="t('log.graphSearchFilterTitle')"
-        :aria-label="t('log.graphSearchFilter')"
+        :title="t('log.graphSearchFilter')"
+        :aria-label="t('log.graphSearchFilterTitle')"
         @click="toggleFilterMode"
       >
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
