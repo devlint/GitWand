@@ -10,6 +10,7 @@ const emit = defineEmits<{
   (e: "new"): void;
   (e: "new-agent", tool: string): void;
   (e: "open-sessions"): void;
+  (e: "new-ai-task"): void;
 }>();
 const { t } = useI18n();
 const { settings } = useSettings();
@@ -367,6 +368,9 @@ onBeforeUnmount(() => {
           <button class="tp__menu-item" @click="selectDropdownItem(() => emit('open-sessions'))">
             {{ t('terminal.menuSessions') }}
           </button>
+          <button class="tp__menu-item tp__menu-item--accent" @click="selectDropdownItem(() => emit('new-ai-task'))">
+            {{ t('terminal.menuNewAiTask') }}
+          </button>
         </div>
       </div>
       <button class="tp__hide" :title="t('terminal.hide')" @click="emit('close')">⌄</button>
@@ -554,6 +558,14 @@ onBeforeUnmount(() => {
 
 .tp__menu-item:hover {
   background: var(--hover, var(--color-hover));
+}
+
+.tp__menu-item--accent {
+  color: var(--color-accent);
+  font-weight: 500;
+  border-top: 1px solid var(--color-border);
+  margin-top: 2px;
+  padding-top: 8px;
 }
 
 .tp__search {

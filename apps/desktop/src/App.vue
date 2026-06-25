@@ -105,7 +105,7 @@ import {
   TOGGLE_GIT_TREE_KEY,
   OPEN_SETTINGS_KEY,
 } from "./composables/branchPickerBridge";
-import { gitStash, gitStashPop, gitStashList, openInEditor, setGitConfig, gitDiscard, gitAddToGitignore, gitDeleteBranch, gitDeleteTag, gitDeleteRemoteTag, gitRemoteInfo, gitUnpushedTags, gitPushTags, gitMergeBase, gitResetToCommit, gitCommitSubmoduleChanges, type CommitSubmoduleChange } from "./utils/backend";
+import { gitStash, gitStashPop, gitStashList, openInEditor, setGitConfig, gitDiscard, gitAddToGitignore, gitDeleteBranch, gitDeleteTag, gitDeleteRemoteTag, gitRemoteInfo, gitUnpushedTags, gitPushTags, gitMergeBase, gitResetToCommit, gitCommitSubmoduleChanges, scratchWorktreeCreate, type CommitSubmoduleChange } from "./utils/backend";
 import { useCommitActions } from "./composables/useCommitActions";
 
 const { t } = useI18n();
@@ -1311,6 +1311,18 @@ async function onLaunchAgent(payload: { path: string; tool: string }) {
     : payload.tool === "codex" ? "codex"
     : "shell";
   await openTerminalTab(payload.path, tabType);
+}
+
+async function onNewAiTask() {
+  if (!repoFolderPath.value) return;
+  try {
+    const scratch = await scratchWorktreeCreate(repoFolderPath.value);
+    openTab(scratch.path);
+    await openRepo(scratch.path);
+    await openTerminalTab(scratch.path, "claude");
+  } catch (err) {
+    console.error("New AI task failed:", err);
+  }
 }
 
 /**
@@ -2856,6 +2868,7 @@ onUnmounted(() => {
         @new="openTerminalTab()"
         @new-agent="(tool: string) => repoFolderPath && onLaunchAgent({ path: repoFolderPath, tool })"
         @open-sessions="showAgents = true"
+        @new-ai-task="onNewAiTask"
       />
 
       <!-- Floating bottom-center navigation dock -->

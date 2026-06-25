@@ -2170,6 +2170,7 @@ const es: Locale = {
     menuClaude: "Claude Code",
     menuCodex: "Codex",
     menuSessions: "Ver sesiones",
+    menuNewAiTask: "Nueva tarea IA",
     searchPlaceholder: "Buscar…",
     searchNoResult: "Sin resultados",
   },

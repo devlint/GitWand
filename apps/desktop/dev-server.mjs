@@ -5846,6 +5846,26 @@ async function handleRequest(req, res) {
       return jsonResponse(req, res, { ok: true });
     }
 
+    // POST /api/scratch-worktree-create  { cwd, sourceBranch? }
+    if (url.pathname === "/api/scratch-worktree-create" && req.method === "POST") {
+      const { cwd, sourceBranch } = await readBody(req);
+      const ts = Date.now();
+      const branchName = `gitwand-scratch-dev-${ts}`;
+      const scratchPath = join(resolve(cwd, ".."), branchName);
+      const ref = sourceBranch ?? "HEAD";
+      try {
+        execFileSync("git", ["worktree", "add", "-b", branchName, scratchPath, ref], { cwd, encoding: "utf-8" });
+        return jsonResponse(req, res, {
+          path: scratchPath,
+          branch: branchName,
+          source_branch: sourceBranch ?? "HEAD",
+          created_at: Math.floor(ts / 1000),
+        });
+      } catch (e) {
+        return jsonResponse(req, res, { error: e.message }, 500);
+      }
+    }
+
     jsonResponse(req, res, { error: "Not found" }, 404);
   } catch (err) {
     jsonResponse(req, res, { error: err.message }, 500);

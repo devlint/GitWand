@@ -2386,10 +2386,18 @@ export async function scratchWorktreeCreate(
   cwd: string,
   sourceBranch?: string,
 ): Promise<ScratchWorktree> {
-  return tauriInvoke<ScratchWorktree>("scratch_worktree_create", {
-    cwd,
-    sourceBranch: sourceBranch ?? null,
+  if (isTauri()) {
+    return tauriInvoke<ScratchWorktree>("scratch_worktree_create", {
+      cwd,
+      sourceBranch: sourceBranch ?? null,
+    });
+  }
+  const res = await devFetch(`${DEV_SERVER}/api/scratch-worktree-create`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, sourceBranch: sourceBranch ?? null }),
   });
+  return res.json() as Promise<ScratchWorktree>;
 }
 
 /**
