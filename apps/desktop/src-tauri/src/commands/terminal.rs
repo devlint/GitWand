@@ -141,17 +141,43 @@ pub(crate) fn terminal_open(
     // Thread lecteur : pousse les chunks vers le frontend.
     std::thread::spawn(move || {
         let mut buf = [0u8; 8192];
+        let mut carry: Vec<u8> = Vec::new();
         loop {
             match reader.read(&mut buf) {
                 Ok(0) => break, // EOF : shell terminé
                 Ok(n) => {
-                    let chunk = String::from_utf8_lossy(&buf[..n]).to_string();
-                    if on_output.send(chunk).is_err() {
+                    // Prepend carry bytes from the previous iteration.
+                    let data: Vec<u8> = if carry.is_empty() {
+                        buf[..n].to_vec()
+                    } else {
+                        let mut v = std::mem::take(&mut carry);
+                        v.extend_from_slice(&buf[..n]);
+                        v
+                    };
+
+                    // Find the last valid UTF-8 boundary.
+                    let (chunk, remainder) = match std::str::from_utf8(&data) {
+                        Ok(s) => (s.to_string(), vec![]),
+                        Err(e) => {
+                            let valid_end = e.valid_up_to();
+                            (
+                                String::from_utf8_lossy(&data[..valid_end]).to_string(),
+                                data[valid_end..].to_vec(),
+                            )
+                        }
+                    };
+
+                    carry = remainder;
+                    if !chunk.is_empty() && on_output.send(chunk).is_err() {
                         break; // frontend parti
                     }
                 }
                 Err(_) => break,
             }
+        }
+        // Flush any remaining carry bytes on EOF.
+        if !carry.is_empty() {
+            let _ = on_output.send(String::from_utf8_lossy(&carry).to_string());
         }
         // Nettoyage : retirer la session du registre quand le PTY se ferme.
         lock_sessions().remove(&id);

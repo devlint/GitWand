@@ -2184,6 +2184,8 @@ const fr: Locale = {
     menuNewAiTask: "Nouvelle tâche IA",
     searchPlaceholder: "Rechercher…",
     searchNoResult: "Aucun résultat",
+    searchPrev: "Précédent (Maj+Entrée)",
+    searchNext: "Suivant (Entrée)",
   },
 };
 

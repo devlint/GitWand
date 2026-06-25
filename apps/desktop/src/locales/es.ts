@@ -2173,6 +2173,8 @@ const es: Locale = {
     menuNewAiTask: "Nueva tarea IA",
     searchPlaceholder: "Buscar…",
     searchNoResult: "Sin resultados",
+    searchPrev: "Anterior (Shift+Enter)",
+    searchNext: "Siguiente (Enter)",
   },
 };
 

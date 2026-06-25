@@ -388,8 +388,8 @@ onBeforeUnmount(() => {
           @keyup.enter="doSearch('next')"
           @keyup.shift.enter="doSearch('prev')"
         />
-        <button class="tp__search-btn" @click="doSearch('prev')" title="Previous (Shift+Enter)">↑</button>
-        <button class="tp__search-btn" @click="doSearch('next')" title="Next (Enter)">↓</button>
+        <button class="tp__search-btn" @click="doSearch('prev')" :title="t('terminal.searchPrev')">↑</button>
+        <button class="tp__search-btn" @click="doSearch('next')" :title="t('terminal.searchNext')">↓</button>
         <span v-if="!searchHasResult" class="tp__search-noresult">{{ t('terminal.searchNoResult') }}</span>
         <button class="tp__search-close" @click="closeSearch">×</button>
       </div>

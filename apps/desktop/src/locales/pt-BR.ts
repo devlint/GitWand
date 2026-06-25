@@ -2170,8 +2170,11 @@ const ptBR: Locale = {
     menuClaude: "Claude Code",
     menuCodex: "Codex",
     menuSessions: "Ver sessões",
+    menuNewAiTask: "Nova tarefa IA",
     searchPlaceholder: "Pesquisar…",
     searchNoResult: "Nenhum resultado",
+    searchPrev: "Anterior (Shift+Enter)",
+    searchNext: "Próximo (Enter)",
   },
 };
 
