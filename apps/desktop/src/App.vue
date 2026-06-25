@@ -95,7 +95,7 @@ import { useReleaseNotes } from "./composables/useReleaseNotes";
 import { useFolderHistory } from "./composables/useFolderHistory";
 import { useAppMenu } from "./composables/useAppMenu";
 import { useLogs } from "./composables/useLogs";
-import { useTerminalSessions, resolveTerminalShortcut } from "./composables/useTerminalSessions";
+import { useTerminalSessions, resolveTerminalShortcut, type TerminalTabType } from "./composables/useTerminalSessions";
 import {
   BRANCH_CREATE_REQUEST_KEY,
   MERGE_POPOVER_REQUEST_KEY,
@@ -1277,10 +1277,17 @@ const showTerminal = ref(false);
 const termSessions = useTerminalSessions();
 const terminalPanelRef = ref<any>(null);
 
-async function openTerminalTab(cwd?: string) {
+async function openTerminalTab(cwd?: string, type?: TerminalTabType) {
   if (!repoFolderPath.value) return;
   showTerminal.value = true;
   const shell = settings.value.terminalShell || undefined;
+  const opts: { shell?: string; type?: TerminalTabType } = {};
+  if (type) {
+    opts.type = type;
+    opts.shell = type !== "shell" ? type : (shell ?? undefined);
+  } else if (shell !== undefined) {
+    opts.shell = shell;
+  }
   const tab = await termSessions.openTab(
     repoFolderPath.value,
     cwd ?? repoFolderPath.value,
@@ -1288,7 +1295,7 @@ async function openTerminalTab(cwd?: string) {
       terminalPanelRef.value?.writeChunk(tabId, chunk);
       termSessions.notifyOutput(repoFolderPath.value!);
     },
-    shell !== undefined ? { shell } : undefined,
+    Object.keys(opts).length > 0 ? opts : undefined,
   );
   return tab;
 }
@@ -1299,8 +1306,11 @@ termSessions.setMutationHandler((repoPath) => {
 
 async function onLaunchAgent(payload: { path: string; tool: string }) {
   if (!repoFolderPath.value) return;
-  const tab = await openTerminalTab(payload.path);
-  if (tab) await termSessions.write(tab.sessionId, `${payload.tool}\n`);
+  const tabType: TerminalTabType =
+    payload.tool === "claude" ? "claude"
+    : payload.tool === "codex" ? "codex"
+    : "shell";
+  await openTerminalTab(payload.path, tabType);
 }
 
 /**
