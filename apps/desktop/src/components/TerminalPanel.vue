@@ -43,10 +43,19 @@ function selectDropdownItem(action: () => void) {
 }
 
 // xterm instances kept OUTSIDE Vue reactivity — plain Map only.
-type XtermEntry = { term: any; fit: any; ro: ResizeObserver; sessionId: number };
+type XtermEntry = {
+  term: any;
+  fit: any;
+  search: any;       // SearchAddon — used by the search bar
+  ro: ResizeObserver;
+  sessionId: number;
+};
 const xterms = new Map<number, XtermEntry>(); // key = tab.id (local)
 let XtermCtor: any = null;
 let FitCtor: any = null;
+let WebglCtor: any = null;
+let SearchCtor: any = null;
+let WebLinksCtor: any = null;
 
 // Pending buffer for output chunks that arrive before the xterm is mounted.
 // Keyed by tab.id (same key space as xterms). Not reactive — plain Map.
@@ -65,13 +74,24 @@ const height = ref(Number(localStorage.getItem(HEIGHT_KEY)) || 260);
 
 async function ensureXtermLibs() {
   if (XtermCtor) return;
-  const [{ Terminal }, { FitAddon }] = await Promise.all([
+  const [
+    { Terminal },
+    { FitAddon },
+    { WebglAddon },
+    { SearchAddon },
+    { WebLinksAddon },
+  ] = await Promise.all([
     import("@xterm/xterm"),
     import("@xterm/addon-fit"),
+    import("@xterm/addon-webgl"),
+    import("@xterm/addon-search"),
+    import("@xterm/addon-web-links"),
   ]);
   XtermCtor = Terminal;
   FitCtor = FitAddon;
-  // CSS loaded once — dynamic import deduplicated by Vite.
+  WebglCtor = WebglAddon;
+  SearchCtor = SearchAddon;
+  WebLinksCtor = WebLinksAddon;
   await import("@xterm/xterm/css/xterm.css");
 }
 
@@ -83,8 +103,21 @@ async function mountTab(tab: TerminalTab) {
 
   const term = new XtermCtor({ fontSize: settings.value.terminalFontSize ?? 13, cursorBlink: true });
   const fit = new FitCtor();
+  const search = new SearchCtor();
   term.loadAddon(fit);
+  term.loadAddon(search);
+  term.loadAddon(new WebLinksCtor());
   term.open(el);
+
+  // WebGL2 renderer — GPU-accelerated rendering like Terax.
+  // Falls back silently to the built-in canvas renderer if WebGL2 is unavailable.
+  const webgl = new WebglCtor();
+  try {
+    term.loadAddon(webgl);
+  } catch {
+    webgl.dispose();
+  }
+
   fit.fit();
 
   // Fix 6 — Buffer keystrokes when the PTY is not yet ready (sessionId is -1).
@@ -110,7 +143,7 @@ async function mountTab(tab: TerminalTab) {
   });
   ro.observe(el);
 
-  xterms.set(tab.id, { term, fit, ro, sessionId: tab.sessionId });
+  xterms.set(tab.id, { term, fit, search, ro, sessionId: tab.sessionId });
 
   // Flush any output that arrived before the xterm was mounted.
   const buffered = pendingChunks.get(tab.id);
@@ -184,6 +217,46 @@ function onFocusOut() {
   sessions.terminalFocused.value = false;
 }
 
+// Inline search bar state — one shared bar, operates on the active tab's SearchAddon.
+const searchVisible = ref(false);
+const searchQuery = ref("");
+const searchHasResult = ref(true);
+
+function openSearch() {
+  searchVisible.value = true;
+  nextTick(() => {
+    const input = document.querySelector<HTMLInputElement>(".tp__search-input");
+    input?.focus();
+  });
+}
+
+function closeSearch() {
+  searchVisible.value = false;
+  searchQuery.value = "";
+}
+
+function doSearch(direction: "next" | "prev") {
+  const active = tabs.value.find(t => t.id === activeId.value);
+  if (!active) return;
+  const entry = xterms.get(active.id);
+  if (!entry?.search || !searchQuery.value) return;
+  const found =
+    direction === "next"
+      ? entry.search.findNext(searchQuery.value, { regex: false, caseSensitive: false })
+      : entry.search.findPrevious(searchQuery.value, { regex: false, caseSensitive: false });
+  searchHasResult.value = found !== false;
+}
+
+function onKeyDown(e: KeyboardEvent) {
+  if ((e.metaKey || e.ctrlKey) && e.key === "f") {
+    e.preventDefault();
+    openSearch();
+  }
+  if (e.key === "Escape" && searchVisible.value) {
+    closeSearch();
+  }
+}
+
 // Inline rename.
 const editingId = ref<number | null>(null);
 const editValue = ref("");
@@ -242,6 +315,7 @@ onBeforeUnmount(() => {
     :style="{ height: height + 'px' }"
     @focusin="onFocusIn"
     @focusout="onFocusOut"
+    @keydown="onKeyDown"
   >
     <!-- Drag handle — drag upward to grow the panel -->
     <div class="tp__drag" :class="{ 'tp__drag--active': isDragging }" @mousedown="onDragStart" />
@@ -294,13 +368,30 @@ onBeforeUnmount(() => {
 
     <!-- xterm host elements — one per tab, visibility toggled via v-show -->
     <div class="tp__body">
-      <div
-        v-for="tab in tabs"
-        :key="tab.id"
-        class="tp__host"
-        :ref="(el) => { if (el) hostRefs[tab.id] = el as HTMLElement; }"
-        v-show="tab.id === activeId"
-      />
+      <!-- Search bar — shown when searchVisible is true -->
+      <div v-if="searchVisible" class="tp__search">
+        <input
+          class="tp__search-input"
+          :placeholder="t('terminal.searchPlaceholder')"
+          v-model="searchQuery"
+          @input="doSearch('next')"
+          @keyup.enter="doSearch('next')"
+          @keyup.shift.enter="doSearch('prev')"
+        />
+        <button class="tp__search-btn" @click="doSearch('prev')" title="Previous (Shift+Enter)">↑</button>
+        <button class="tp__search-btn" @click="doSearch('next')" title="Next (Enter)">↓</button>
+        <span v-if="!searchHasResult" class="tp__search-noresult">{{ t('terminal.searchNoResult') }}</span>
+        <button class="tp__search-close" @click="closeSearch">×</button>
+      </div>
+      <div class="tp__hosts">
+        <div
+          v-for="tab in tabs"
+          :key="tab.id"
+          class="tp__host"
+          :ref="(el) => { if (el) hostRefs[tab.id] = el as HTMLElement; }"
+          v-show="tab.id === activeId"
+        />
+      </div>
     </div>
   </div>
 </template>
@@ -398,6 +489,13 @@ onBeforeUnmount(() => {
 
 .tp__body {
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.tp__hosts {
+  flex: 1;
   position: relative;
   overflow: hidden;
   min-height: 0;
@@ -450,5 +548,61 @@ onBeforeUnmount(() => {
 
 .tp__menu-item:hover {
   background: var(--hover, var(--color-hover));
+}
+
+.tp__search {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border, var(--color-border));
+  flex-shrink: 0;
+  background: var(--bg-elevated, var(--color-bg-secondary));
+}
+
+.tp__search-input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-base, var(--color-bg));
+  color: inherit;
+  font-size: var(--font-size-sm);
+  padding: 2px 6px;
+}
+
+.tp__search-btn {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  color: inherit;
+  font-size: var(--font-size-sm);
+}
+
+.tp__search-btn:hover {
+  background: var(--color-bg-hover);
+}
+
+.tp__search-noresult {
+  font-size: var(--font-size-xs, 11px);
+  color: var(--color-danger, #e05c5c);
+}
+
+.tp__search-close {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  color: inherit;
+  font-size: 14px;
+  opacity: 0.5;
+}
+
+.tp__search-close:hover {
+  opacity: 1;
+  background: var(--color-bg-hover);
 }
 </style>

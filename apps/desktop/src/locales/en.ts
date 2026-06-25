@@ -2209,6 +2209,8 @@ const en = {
     menuClaude: "Claude Code",
     menuCodex: "Codex",
     menuSessions: "View sessions",
+    searchPlaceholder: "Search…",
+    searchNoResult: "No results",
   },
 } as const;
 

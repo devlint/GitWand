@@ -2155,6 +2155,8 @@ const zhCN: Locale = {
     menuClaude: "Claude Code",
     menuCodex: "Codex",
     menuSessions: "查看会话",
+    searchPlaceholder: "搜索…",
+    searchNoResult: "无结果",
   },
 };
 
