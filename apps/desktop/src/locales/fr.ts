@@ -1007,6 +1007,7 @@ const fr: Locale = {
     tabDashboard: "Tableau de bord",
     tabGit: "Git",
     tabEditor: "\u00c9diteur",
+    tabTerminal: "Terminal",
     tabAi: "IA",
     tabLogs: "Journaux",
     checkForUpdates: "Vérifier les mises à jour",

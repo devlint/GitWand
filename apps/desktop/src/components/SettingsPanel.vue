@@ -89,7 +89,7 @@ const props = defineProps<{
   /** Accumulated error log passed down from App.vue */
   errorLog?: LogEntry[];
   /** Open directly on this tab (e.g. "logs" when clicking the error badge) */
-  initialTab?: "general" | "dock" | "dashboard" | "git" | "editor" | "ai" | "automations" | "logs" | "hooks" | "accounts" | "mcp" | "releaseNotes";
+  initialTab?: "general" | "dock" | "dashboard" | "git" | "editor" | "terminal" | "ai" | "automations" | "logs" | "hooks" | "accounts" | "mcp" | "releaseNotes";
   /** Current repo path (for Hooks tab) */
   cwd?: string;
 }>();
@@ -305,7 +305,7 @@ function resetDockPosition() {
 }
 
 // ─── Tab navigation ──────────────────────────────────────
-type SettingsTab = "general" | "dock" | "dashboard" | "git" | "editor" | "ai" | "automations" | "logs" | "hooks" | "accounts" | "mcp" | "releaseNotes";
+type SettingsTab = "general" | "dock" | "dashboard" | "git" | "editor" | "terminal" | "ai" | "automations" | "logs" | "hooks" | "accounts" | "mcp" | "releaseNotes";
 const activeSettingsTab = ref<SettingsTab>(props.initialTab ?? "general");
 
 // ─── Logs tab — formatting + clipboard ──────────────────
@@ -362,6 +362,7 @@ const settingsTabs: { id: SettingsTab; icon: string }[] = [
   { id: "dashboard", icon: "dashboard" },
   { id: "git", icon: "git" },
   { id: "editor", icon: "editor" },
+  { id: "terminal", icon: "terminal" },
   { id: "ai", icon: "ai" },
   { id: "releaseNotes", icon: "releaseNotes" },
   { id: "accounts", icon: "accounts" },
@@ -373,7 +374,7 @@ const settingsTabs: { id: SettingsTab; icon: string }[] = [
 
 // ─── Nav sidebar groups (OpenCode-style left nav) ────────
 const settingsNavGroups: Array<{ label: string | null; tabs: SettingsTab[] }> = [
-  { label: "Application", tabs: ["general", "dock", "dashboard", "editor"] },
+  { label: "Application", tabs: ["general", "dock", "dashboard", "editor", "terminal"] },
   { label: "Dépôt", tabs: ["git", "hooks", "accounts"] },
   { label: "IA & Agents", tabs: ["ai", "releaseNotes", "mcp", "automations"] },
   { label: "Système", tabs: ["logs"] },
@@ -386,6 +387,7 @@ function tabLabel(id: SettingsTab): string {
     case "dashboard": return t("settings.tabDashboard");
     case "git": return t("settings.tabGit");
     case "editor": return t("settings.tabEditor");
+    case "terminal": return t("settings.tabTerminal");
     case "ai": return t("settings.tabAi");
     case "releaseNotes": return t("settings.tabReleaseNotes");
     case "accounts": return t("settings.tabAccounts");
@@ -1835,6 +1837,10 @@ function deleteReleaseNoteTemplate(id: string) {
             </select>
           </div>
 
+        </template>
+
+        <!-- ═══ TERMINAL ═══ -->
+        <template v-if="activeSettingsTab === 'terminal'">
           <!-- Terminal font size -->
           <div class="sp-row">
             <label class="sp-label" for="setting-terminal-font-size">{{ t('settings.terminalFontSize') }}</label>

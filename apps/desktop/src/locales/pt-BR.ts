@@ -999,6 +999,7 @@ const ptBR: Locale = {
     tabDashboard: "Painel",
     tabGit: "Git",
     tabEditor: "Editor",
+    tabTerminal: "Terminal",
     tabAi: "IA",
     tabLogs: "Registros",
     checkForUpdates: "Verificar atualizações",

@@ -1050,6 +1050,7 @@ const zhCN: Locale = {
     tabDashboard: "仪表盘",
     tabGit: "Git",
     tabEditor: "编辑器",
+    tabTerminal: "终端",
     tabAi: "AI",
     tabLogs: "日志",
     checkForUpdates: "检查更新",
