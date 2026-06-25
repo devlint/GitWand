@@ -1280,6 +1280,7 @@ const terminalPanelRef = ref<any>(null);
 async function openTerminalTab(cwd?: string, type?: TerminalTabType) {
   if (!repoFolderPath.value) return;
   showTerminal.value = true;
+  await nextTick(); // ensure TerminalPanel is mounted before PTY chunks arrive
   const shell = settings.value.terminalShell || undefined;
   const opts: { shell?: string; type?: TerminalTabType } = {};
   if (type) {
