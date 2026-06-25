@@ -388,7 +388,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       // repoStats reflects only the scoped changes. None → libgit2 fast path.
       status.value = await getGitStatus(cwd, activeScope.value ?? undefined);
     } catch (err: any) {
-      error.value = `git status: ${err.message}`;
+      error.value = `git status: ${err?.message ?? err}`;
     }
   }
 
@@ -439,7 +439,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     try {
       await loadStatus(path);
     } catch (err: any) {
-      error.value = err.message;
+      error.value = err?.message ?? err;
     } finally {
       loading.value = false;
     }
@@ -548,7 +548,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
         commitDiffs.value = await getGitShow(folderPath.value, selectedCommitHash.value);
       }
     } catch (err: any) {
-      error.value = `git log: ${err.message}`;
+      error.value = `git log: ${err?.message ?? err}`;
     }
   }
 
@@ -577,7 +577,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       }
       logHasMore.value = next.length >= LOG_PAGE;
     } catch (err: any) {
-      error.value = `git log (page): ${err.message}`;
+      error.value = `git log (page): ${err?.message ?? err}`;
     } finally {
       logLoadingMore.value = false;
     }
@@ -606,7 +606,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       commitDiffs.value = await getGitShow(folderPath.value, hash);
     } catch (err: any) {
       commitDiffs.value = [];
-      error.value = `git show: ${err.message}`;
+      error.value = `git show: ${err?.message ?? err}`;
     }
   }
 
@@ -621,7 +621,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       await gitStage(folderPath.value, paths);
       await refresh();
     } catch (err: any) {
-      error.value = `git add: ${err.message}`;
+      error.value = `git add: ${err?.message ?? err}`;
     }
   }
 
@@ -647,7 +647,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       await gitUnstage(folderPath.value, paths);
       await refresh();
     } catch (err: any) {
-      error.value = `git reset: ${err.message}`;
+      error.value = `git reset: ${err?.message ?? err}`;
     }
   }
 
@@ -670,7 +670,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       await gitStagePatch(folderPath.value, patch);
       await refresh();
     } catch (err: any) {
-      error.value = `git apply: ${err.message}`;
+      error.value = `git apply: ${err?.message ?? err}`;
     }
   }
 
@@ -683,7 +683,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       await gitUnstagePatch(folderPath.value, patch);
       await refresh();
     } catch (err: any) {
-      error.value = `git apply --reverse: ${err.message}`;
+      error.value = `git apply --reverse: ${err?.message ?? err}`;
     }
   }
 
@@ -715,7 +715,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       diff.value = null;
       await refresh();
     } catch (err: any) {
-      error.value = `commit: ${err.message}`;
+      error.value = `commit: ${err?.message ?? err}`;
     } finally {
       isCommitting.value = false;
     }
@@ -738,7 +738,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       diff.value = null;
       await refresh();
     } catch (err: any) {
-      error.value = `amend: ${err.message}`;
+      error.value = `amend: ${err?.message ?? err}`;
     }
   }
 
@@ -765,7 +765,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       // (e.g. the PR-create publish guard) see the new tracking state.
       await loadBranches();
     } catch (err: any) {
-      error.value = `push: ${err.message}`;
+      error.value = `push: ${err?.message ?? err}`;
     } finally {
       isPushing.value = false;
     }
@@ -793,7 +793,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       }
       await refresh();
     } catch (err: any) {
-      error.value = `pull: ${err.message}`;
+      error.value = `pull: ${err?.message ?? err}`;
     } finally {
       isPulling.value = false;
     }
@@ -907,7 +907,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
         successMessage.value = "cherry-pick-done";
       }
     } catch (err: any) {
-      error.value = `cherry-pick: ${err.message}`;
+      error.value = `cherry-pick: ${err?.message ?? err}`;
     } finally {
       if (!hasConflicts.value) {
         isCherryPicking.value = false;
@@ -922,7 +922,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       successMessage.value = "cherry-pick-aborted";
       await refresh();
     } catch (err: any) {
-      error.value = `cherry-pick abort: ${err.message}`;
+      error.value = `cherry-pick abort: ${err?.message ?? err}`;
     } finally {
       isCherryPicking.value = false;
     }
@@ -947,7 +947,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
         error.value = `cherry-pick continue: ${result.message}`;
       }
     } catch (err: any) {
-      error.value = `cherry-pick continue: ${err.message}`;
+      error.value = `cherry-pick continue: ${err?.message ?? err}`;
     } finally {
       if (!hasConflicts.value) {
         isCherryPicking.value = false;
@@ -966,7 +966,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     try {
       stashes.value = await gitStashList(folderPath.value);
     } catch (err: any) {
-      error.value = `stash list: ${err.message}`;
+      error.value = `stash list: ${err?.message ?? err}`;
     } finally {
       stashesLoading.value = false;
     }
@@ -978,7 +978,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       await gitStashApply(folderPath.value, index);
       await refresh();
     } catch (err: any) {
-      error.value = `stash apply: ${err.message}`;
+      error.value = `stash apply: ${err?.message ?? err}`;
     }
   }
 
@@ -991,7 +991,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       await loadStashes();
       await loadLog();
     } catch (err: any) {
-      error.value = `stash pop: ${err.message}`;
+      error.value = `stash pop: ${err?.message ?? err}`;
     }
   }
 
@@ -1002,7 +1002,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       await loadStashes();
       await loadLog();
     } catch (err: any) {
-      error.value = `stash drop: ${err.message}`;
+      error.value = `stash drop: ${err?.message ?? err}`;
     }
   }
 
@@ -1016,7 +1016,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     try {
       branches.value = await getGitBranches(folderPath.value);
     } catch (err: any) {
-      error.value = `branches: ${err.message}`;
+      error.value = `branches: ${err?.message ?? err}`;
     } finally {
       branchesLoading.value = false;
     }
@@ -1039,7 +1039,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       await loadBranches();
       return true;
     } catch (err: any) {
-      error.value = `create branch: ${err.message}`;
+      error.value = `create branch: ${err?.message ?? err}`;
       return false;
     }
   }
@@ -1055,10 +1055,10 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       await loadWorktrees();
       return true;
     } catch (err: any) {
-      if (err.message?.includes("already used by worktree")) {
+      if ((err?.message ?? String(err)).includes("already used by worktree")) {
         error.value = t("branches.switchWorktree");
       } else {
-        error.value = `switch branch: ${err.message}`;
+        error.value = `switch branch: ${err?.message ?? err}`;
       }
       return false;
     } finally {
@@ -1089,7 +1089,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       await gitStashPop(folderPath.value);
       return switched;
     } catch (err: any) {
-      error.value = `switch (stash): ${err.message}`;
+      error.value = `switch (stash): ${err?.message ?? err}`;
       return false;
     } finally {
       isSwitchingBranch.value = false;
@@ -1128,7 +1128,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       await loadBranches();
       await loadLog();
     } catch (err: any) {
-      error.value = `delete remote branch: ${err.message}`;
+      error.value = `delete remote branch: ${err?.message ?? err}`;
     }
   }
 
@@ -1138,7 +1138,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       await gitDeleteTag(folderPath.value, name);
       await loadLog();
     } catch (err: any) {
-      error.value = `delete tag: ${err.message}`;
+      error.value = `delete tag: ${err?.message ?? err}`;
     }
   }
 
@@ -1148,7 +1148,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       await gitDeleteRemoteTag(folderPath.value, remote, name);
       await loadLog();
     } catch (err: any) {
-      error.value = `delete remote tag: ${err.message}`;
+      error.value = `delete remote tag: ${err?.message ?? err}`;
     }
   }
 
@@ -1165,7 +1165,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       }
       await loadLog();
     } catch (err: any) {
-      error.value = `rename branch: ${err.message}`;
+      error.value = `rename branch: ${err?.message ?? err}`;
     }
   }
 
@@ -1177,7 +1177,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       await gitDiscard(folderPath.value, paths, untracked);
       await refresh();
     } catch (err: any) {
-      error.value = `discard: ${err.message}`;
+      error.value = `discard: ${err?.message ?? err}`;
     }
   }
 
@@ -1187,7 +1187,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       await gitAddToGitignore(folderPath.value, path);
       await refresh();
     } catch (err: any) {
-      error.value = `gitignore: ${err.message}`;
+      error.value = `gitignore: ${err?.message ?? err}`;
     }
   }
 
