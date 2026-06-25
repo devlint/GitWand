@@ -89,6 +89,9 @@ const emit = defineEmits<{
   "wip-quick-stash": [];
   "wip-quick-stash-ai": [];
   "load-more": [];
+  /** Asks the parent to lazy-load branches — fired on search focus so the
+   * branch autocomplete has data even when the graph is the first view. */
+  "load-branches": [];
 }>();
 
 // ─── Context menu (v1.9) ─────────────────────────────
@@ -584,6 +587,13 @@ function selectSuggestion(name: string) {
   activeSuggestionIdx.value = -1;
 }
 
+function onSearchFocus() {
+  showSuggestions.value = true;
+  // Branches are lazy-loaded by the parent and may be empty when the graph
+  // is the first view opened. Ask for them so the autocomplete has data.
+  if (!props.branches?.length) emit("load-branches");
+}
+
 function onSearchKeydown(e: KeyboardEvent) {
   if (showSuggestions.value && branchSuggestions.value.length > 0) {
     if (e.key === "ArrowDown") {
@@ -982,7 +992,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
         type="search"
         :placeholder="t('log.graphSearchPlaceholder')"
         @keydown="onSearchKeydown"
-        @focus="showSuggestions = true"
+        @focus="onSearchFocus"
         @blur="showSuggestions = false"
       />
       <!-- Branch autocomplete dropdown — teleported to body to escape overflow:hidden ancestors -->

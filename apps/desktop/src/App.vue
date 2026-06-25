@@ -2718,6 +2718,7 @@ onUnmounted(() => {
                   @wip-stash="handleWipStash"
                   @wip-quick-stash="handleWipQuickStash"
                   @wip-quick-stash-ai="handleWipQuickStashAi"
+                  @load-branches="loadBranches"
                   @load-more="loadMoreLog" />
               </div>
               <div v-if="showGraphRail && selectedCommitHash" class="sidebar-handle"
