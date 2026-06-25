@@ -2396,6 +2396,29 @@ function handleRebaseOntoCurrent(branchName: string) {
   showRebase.value = true;
 }
 
+// The rebase editor's empty-state ("no commits to rebase") offers to move the
+// current branch onto the chosen base instead. Owned here — like the "reset to
+// origin" shortcut — so the destructive reset shares the app's confirm modal,
+// refresh and error surface rather than a bespoke flow inside the editor.
+async function handleRebaseResetOnto(base: string) {
+  if (!repoFolderPath.value) return;
+  const branch = repoStatus.value?.branch ?? "";
+  if (!(await askConfirm({
+    title: t("rebase.resetTitle"),
+    message: t("rebase.resetWarn", branch, base),
+    confirmLabel: t("rebase.resetConfirm"),
+    danger: true,
+  }))) return;
+  try {
+    await gitResetToCommit(repoFolderPath.value, base, "hard");
+    showRebase.value = false;
+    rebaseInitialBase.value = undefined;
+    await repoRefresh();
+  } catch (err: any) {
+    repoError.value = `reset: ${err?.message ?? String(err)}`;
+  }
+}
+
 // ─── Pinned branches in the Git Tree (shared with the sidebar) ──
 const _graphPins = usePinnedBranches(() => repoFolderPath.value ?? "");
 const graphPinnedBranches = _graphPins.pinned;
@@ -2779,7 +2802,8 @@ onUnmounted(() => {
 
     <!-- Interactive rebase panel -->
     <RebaseEditor v-if="showRebase && repoFolderPath" :cwd="repoFolderPath" :current-branch="repoStatus?.branch ?? ''"
-      :branches="branches" :initial-base="rebaseInitialBase" @close="showRebase = false" @done="onRebaseDone" />
+      :branches="branches" :initial-base="rebaseInitialBase" @close="showRebase = false" @done="onRebaseDone"
+      @reset-onto="handleRebaseResetOnto" />
 
 
     <!-- Stash manager (uses BaseModal, owns its own overlay) -->

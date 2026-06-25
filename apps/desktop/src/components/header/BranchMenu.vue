@@ -150,7 +150,7 @@ const hasBranch = computed(() => !!props.currentBranch);
         type="button"
         role="menuitem"
         class="branch-menu__item"
-        :disabled="!hasBranch || mainCommitCount === 0"
+        :disabled="!hasBranch"
         @click="onMergeInto"
       >
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -166,7 +166,7 @@ const hasBranch = computed(() => !!props.currentBranch);
         type="button"
         role="menuitem"
         class="branch-menu__item"
-        :disabled="!hasBranch || mainCommitCount === 0"
+        :disabled="!hasBranch"
         @click="onRebaseOnto"
       >
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">

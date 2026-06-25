@@ -26,28 +26,39 @@ const props = defineProps<{
 // ─── Local branches (fetched on mount for freshness) ─────────
 const localBranches = ref<GitBranch[]>([]);
 const branchesLoading = ref(false);
+// Surfaced in the picker when the branch fetch fails — previously swallowed,
+// which left the modal blank with no explanation.
+const branchError = ref<string | null>(null);
 
 async function fetchBranches() {
   branchesLoading.value = true;
+  branchError.value = null;
   try {
     // Sort once here (order is invariant across filter keystrokes) using the
     // app-wide canonical branch ordering.
     localBranches.value = (await getGitBranches(props.cwd)).sort(branchSort);
+  } catch (e: any) {
+    branchError.value = e?.message ?? String(e);
+  } finally {
+    branchesLoading.value = false;
+  }
 
-    // If initialBase is provided, select it immediately after branches are loaded
-    if (props.initialBase) {
-      const match = localBranches.value.find(b => b.name === props.initialBase);
-      if (match) {
-        selectBase(match.name);
-      }
-    }
-  } catch { /* ignore */ }
-  finally { branchesLoading.value = false; }
+  // Right-click entry ("rebase onto <branch>") passes an initial base. Select it
+  // directly rather than matching it against the local list — the base may be a
+  // remote-tracking ref, a tag, or a SHA, none of which need to appear in
+  // `localBranches`. `listCommits` validates the ref.
+  if (props.initialBase) {
+    await selectBase(props.initialBase);
+  }
 }
 
 const emit = defineEmits<{
   close: [];
   done: [];
+  // Destructive hard-reset of the current branch onto `base`. App-level owns the
+  // confirmation, execution, refresh and error reporting (same path as the
+  // "reset to origin" shortcut) — the editor only signals intent.
+  resetOnto: [base: string];
 }>();
 
 const { t, locale } = useI18n();
@@ -97,22 +108,55 @@ const showBasePicker = ref(true);
 const baseCandidates = computed(() => {
   const filter = baseFilter.value.toLowerCase();
   return localBranches.value
+    // Exclude only the current branch (rebasing onto yourself replays nothing).
+    // Remote-tracking branches are valid, common bases — keep them, tagged in
+    // the UI — so a repo whose only local branch is the current one still has
+    // something to pick.
     .filter(
       (b) =>
         !b.isCurrent &&
-        !b.isRemote &&
         b.name.toLowerCase().includes(filter),
     )
     // localBranches is already sorted (branchSort) at fetch time; filtering
-    // preserves order, so just project to names here.
-    .map((b) => b.name);
+    // preserves order.
+    .map((b) => ({ name: b.name, isRemote: b.isRemote }));
 });
+
+// Let the user type any ref (tag, SHA, or a branch not in the list) as the base.
+// Offered when the filter text matches no candidate by exact name.
+const typedRef = computed(() => baseFilter.value.trim());
+const showUseTyped = computed(
+  () =>
+    typedRef.value.length > 0 &&
+    !baseCandidates.value.some((c) => c.name === typedRef.value),
+);
+
+function onBaseInputEnter() {
+  if (showUseTyped.value) selectBase(typedRef.value);
+  else if (baseCandidates.value.length === 1) selectBase(baseCandidates.value[0].name);
+}
 
 async function selectBase(name: string) {
   baseInput.value = name;
-  showBasePicker.value = false;
-  await rebase.listCommits(props.cwd, name);
+  const entries = await rebase.listCommits(props.cwd, name);
+  // Hide the picker only when there's a todo to edit. With nothing to replay we
+  // keep the picker open so the user can pick a different base, and surface a
+  // reset-to-base shortcut below it.
+  showBasePicker.value = entries.length === 0;
 }
+
+// A base was chosen but the rebase has no commits to replay (base is equal to
+// or ahead of HEAD). Distinct from loading/error/in-progress so the modal can
+// show a recoverable empty-state — the picker stays open, plus a reset shortcut.
+const noCommitsForBase = computed(
+  () =>
+    !!baseInput.value &&
+    !inProgress.value &&
+    !rebase.isLoading.value &&
+    !rebase.error.value &&
+    rebase.todoEntries.value.length === 0,
+);
+
 
 // ─── Drag & drop ─────────────────────────────────────────────
 const dragIndex = ref<number | null>(null);
@@ -426,7 +470,7 @@ const hasTodo = computed(
 
       <!-- Base selection -->
       <template v-if="showBasePicker && !inProgress">
-        <div class="rb-section">
+        <div class="rb-section rb-section--picker">
           <label class="rb-label rb-label--base" for="rb-base-input">{{ t('rebase.baseLabel') }}</label>
           <p class="rb-hint">{{ t('rebase.baseHint') }}</p>
           <input
@@ -435,18 +479,32 @@ const hasTodo = computed(
             v-model="baseFilter"
             :placeholder="t('rebase.basePlaceholder')"
             autofocus
+            @keydown.enter.prevent="onBaseInputEnter"
           />
-          <ul class="rb-base-list" v-if="baseCandidates.length > 0">
+          <p v-if="branchError" class="rb-hint rb-hint--error">{{ branchError }}</p>
+          <ul class="rb-base-list" v-if="baseCandidates.length > 0 || showUseTyped">
+            <!-- Free-text ref: pick any tag, SHA, or branch the user typed. -->
             <li
-              v-for="name in baseCandidates"
-              :key="name"
+              v-if="showUseTyped"
+              class="rb-base-item rb-base-item--typed"
+              @click="selectBase(typedRef)"
+            >
+              <svg class="rb-base-icon" width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                <path d="M8 1a.75.75 0 0 1 .75.75v5.5h5.5a.75.75 0 0 1 0 1.5h-5.5v5.5a.75.75 0 0 1-1.5 0v-5.5h-5.5a.75.75 0 0 1 0-1.5h5.5v-5.5A.75.75 0 0 1 8 1Z"/>
+              </svg>
+              <span class="mono">{{ t('rebase.useRef', typedRef) }}</span>
+            </li>
+            <li
+              v-for="cand in baseCandidates"
+              :key="cand.name"
               class="rb-base-item"
-              @click="selectBase(name)"
+              @click="selectBase(cand.name)"
             >
               <svg class="rb-base-icon" width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
                 <path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.492 2.492 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"/>
               </svg>
-              <span class="mono">{{ name }}</span>
+              <span class="mono">{{ cand.name }}</span>
+              <span v-if="cand.isRemote" class="rb-base-tag">{{ t('rebase.remoteTag') }}</span>
             </li>
           </ul>
         </div>
@@ -636,6 +694,16 @@ const hasTodo = computed(
         {{ rebase.error.value }}
       </div>
     </div>
+    <!-- Empty-state pinned at the bottom of the modal body (outside the scroll
+         region) so its reset/cancel actions stay visible on short screens. The
+         picker above keeps scrolling so the user can still pick another base. -->
+    <div v-if="noCommitsForBase" class="rb-empty">
+      <p class="rb-empty-title">{{ t('rebase.noCommits') }}</p>
+      <p class="rb-hint">{{ t('rebase.noCommitsHint', baseInput) }}</p>
+      <button class="bm-btn bm-btn--danger" @click="emit('resetOnto', baseInput)">
+        {{ t('rebase.resetOntoBase', baseInput) }}
+      </button>
+    </div>
     <!-- Legend pinned at the bottom of the modal body, above the footer -->
     <div v-if="hasTodo" class="rb-legend">
       <div v-for="a in actions" :key="a" class="rb-legend-item">
@@ -696,11 +764,26 @@ const hasTodo = computed(
   min-height: 0;
   overflow-y: auto;
   padding: var(--space-4) 0;
+  /* Flex column so the picker section can fill the free vertical space and let
+     its branch list scroll internally (see .rb-section--picker). Other sections
+     keep their natural height and overflow the scroll container as before. */
+  display: flex;
+  flex-direction: column;
 }
 
 /* ─── Sections ─────────────────────────────────────────────── */
 .rb-section {
   padding: var(--space-4) var(--space-7);
+}
+
+/* Base picker fills the available height so its branch list adapts to the free
+   space (shrinking when the pinned empty-state below claims room on short
+   screens) and scrolls internally instead of growing the modal. */
+.rb-section--picker {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .rb-section-header {
@@ -916,9 +999,10 @@ const hasTodo = computed(
   list-style: none;
   padding: 0;
   margin: var(--space-3) 0 0;
-  /* Tall enough to show many branches; capped to viewport so the modal
-     itself grows toward its 85vh ceiling instead of an inner 200px scroll. */
-  max-height: min(64vh, 580px);
+  /* Fill the free space left by the input/hint above (and the pinned
+     empty-state below), scrolling internally so the modal keeps its size. */
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   /* Breathing room so branch rows don't butt against the scrollbar. */
   padding-right: var(--space-2);
@@ -955,6 +1039,45 @@ const hasTodo = computed(
 }
 .rb-base-item:active {
   transform: translateY(1px);
+}
+/* Remote-tracking marker — muted pill so it reads as metadata, not an action. */
+.rb-base-tag {
+  margin-left: auto;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  background: var(--color-bg-subtle, rgba(127, 127, 127, 0.12));
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-2);
+}
+.rb-base-item:hover .rb-base-tag {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+/* Free-text ref row: dashed outline so it reads as "type your own" rather than
+   a concrete branch you can click. */
+.rb-base-item--typed {
+  border-style: dashed;
+}
+
+/* ─── Empty-state (no commits to rebase) ───────────────────── */
+/* Pinned at the bottom of the modal body (sibling of .rb-legend, outside
+   .rb-scroll) so the reset/cancel actions stay visible on short screens. */
+.rb-empty {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-7) var(--space-7);
+  border-top: 1px solid var(--color-border);
+  background: var(--color-bg);
+}
+.rb-empty-title {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--color-text);
 }
 
 /* ─── Todo list ────────────────────────────────────────────── */
