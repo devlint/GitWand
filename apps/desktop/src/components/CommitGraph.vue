@@ -1001,7 +1001,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
             <path d="M18 9a9 9 0 0 1-9 9"/>
           </svg>
           <span class="cg-branch-item-name">{{ branch.name }}</span>
-          <span v-if="branch.isRemote" class="cg-branch-item-remote-tag">remote</span>
+          <span v-if="branch.isRemote" class="cg-branch-item-remote-tag">{{ t('branches.remote') }}</span>
         </button>
       </div>
       <span v-if="matchedIndices.length > 0" class="cg-search-count">
