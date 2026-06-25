@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onBeforeUnmount, watch, nextTick, computed } from "vue";
+import { ref, onBeforeUnmount, watch, nextTick, computed, onMounted } from "vue";
 import { useTerminalSessions, type TerminalTab } from "../composables/useTerminalSessions";
 import { useI18n } from "../composables/useI18n";
 import { useSettings } from "../composables/useSettings";
@@ -69,9 +69,27 @@ const pendingInput = new Map<number, string[]>();
 
 const hostRefs = ref<Record<number, HTMLElement | undefined>>({});
 
-// Panel height — persisted.
+// Panel size + position — persisted.
 const HEIGHT_KEY = "gitwand-terminal-height";
+const LEFT_KEY   = "gitwand-terminal-left";
+const WIDTH_KEY  = "gitwand-terminal-width";
 const height = ref(Number(localStorage.getItem(HEIGHT_KEY)) || 260);
+const left   = ref(Number(localStorage.getItem(LEFT_KEY))   || 16);
+const width  = ref(Number(localStorage.getItem(WIDTH_KEY))  || 0); // 0 = not yet set; initialised on mount
+
+const tpRef = ref<HTMLElement | null>(null);
+
+onMounted(() => {
+  if (!width.value) {
+    width.value = Math.round((tpRef.value?.parentElement?.offsetWidth ?? window.innerWidth) * 0.5);
+  }
+});
+
+const panelStyle = computed(() => ({
+  height: height.value + "px",
+  left:   left.value   + "px",
+  width:  width.value  ? width.value + "px" : "50%",
+}));
 
 async function ensureXtermLibs() {
   if (XtermCtor) return;
@@ -271,7 +289,7 @@ function commitRename(tab: TerminalTab) {
   editingId.value = null;
 }
 
-// Drag-to-resize.
+// Drag-to-resize (vertical).
 let dragStartY = 0;
 let dragStartH = 0;
 const isDragging = ref(false);
@@ -296,10 +314,78 @@ function onDragEnd() {
   window.removeEventListener("mouseup", onDragEnd);
 }
 
+// Drag-to-move (horizontal — tab bar).
+let moveStartX    = 0;
+let moveStartLeft = 0;
+let isMoving      = false;
+function onMoveStart(e: MouseEvent) {
+  if ((e.target as HTMLElement).closest("button, .tp__tab, .tp__rename, .tp__menu")) return;
+  e.preventDefault();
+  moveStartX    = e.clientX;
+  moveStartLeft = left.value;
+  isMoving      = true;
+  document.body.style.userSelect = "none";
+  document.body.style.cursor     = "grabbing";
+  window.addEventListener("mousemove", onMoveMove, { passive: false });
+  window.addEventListener("mouseup",   onMoveEnd);
+}
+function onMoveMove(e: MouseEvent) {
+  if (!isMoving) return;
+  e.preventDefault();
+  const containerW = tpRef.value?.parentElement?.offsetWidth ?? window.innerWidth;
+  const panelW     = tpRef.value?.offsetWidth ?? width.value;
+  const maxLeft    = containerW - panelW - 8;
+  left.value = Math.max(0, Math.min(maxLeft, moveStartLeft + (e.clientX - moveStartX)));
+}
+function onMoveEnd() {
+  localStorage.setItem(LEFT_KEY, String(left.value));
+  isMoving                    = false;
+  document.body.style.userSelect = "";
+  document.body.style.cursor     = "";
+  window.removeEventListener("mousemove", onMoveMove);
+  window.removeEventListener("mouseup",   onMoveEnd);
+}
+
+// Drag-to-resize-width (right edge handle).
+let resizeXStartX = 0;
+let resizeXStartW = 0;
+const isResizingX = ref(false);
+function onResizeXStart(e: MouseEvent) {
+  e.preventDefault();
+  e.stopPropagation();
+  resizeXStartX = e.clientX;
+  resizeXStartW = tpRef.value?.offsetWidth ?? width.value;
+  isResizingX.value = true;
+  document.body.style.userSelect = "none";
+  document.body.style.cursor     = "ew-resize";
+  window.addEventListener("mousemove", onResizeXMove, { passive: false });
+  window.addEventListener("mouseup",   onResizeXEnd);
+}
+function onResizeXMove(e: MouseEvent) {
+  if (!isResizingX.value) return;
+  e.preventDefault();
+  const containerW = tpRef.value?.parentElement?.offsetWidth ?? window.innerWidth;
+  const newW = resizeXStartW + (e.clientX - resizeXStartX);
+  width.value = Math.max(300, Math.min(containerW - left.value - 8, newW));
+}
+function onResizeXEnd() {
+  localStorage.setItem(WIDTH_KEY, String(width.value));
+  isResizingX.value = false;
+  document.body.style.userSelect = "";
+  document.body.style.cursor     = "";
+  window.removeEventListener("mousemove", onResizeXMove);
+  window.removeEventListener("mouseup",   onResizeXEnd);
+}
+
 onBeforeUnmount(() => {
   document.body.style.userSelect = "";
+  document.body.style.cursor     = "";
   window.removeEventListener("mousemove", onDragMove);
-  window.removeEventListener("mouseup", onDragEnd);
+  window.removeEventListener("mouseup",   onDragEnd);
+  window.removeEventListener("mousemove", onMoveMove);
+  window.removeEventListener("mouseup",   onMoveEnd);
+  window.removeEventListener("mousemove", onResizeXMove);
+  window.removeEventListener("mouseup",   onResizeXEnd);
   for (const [, entry] of xterms) {
     entry.ro.disconnect();
     entry.term.dispose();
@@ -311,8 +397,9 @@ onBeforeUnmount(() => {
 
 <template>
   <div
+    ref="tpRef"
     class="tp"
-    :style="{ height: height + 'px' }"
+    :style="panelStyle"
     @focusin="onFocusIn"
     @focusout="onFocusOut"
     @keydown="onKeyDown"
@@ -320,8 +407,8 @@ onBeforeUnmount(() => {
     <!-- Drag handle — drag upward to grow the panel -->
     <div class="tp__drag" :class="{ 'tp__drag--active': isDragging }" @mousedown="onDragStart" />
 
-    <!-- Tab bar -->
-    <div class="tp__tabs">
+    <!-- Tab bar — drag on empty space to move the panel -->
+    <div class="tp__tabs" @mousedown="onMoveStart">
       <button
         v-for="tab in tabs"
         :key="tab.id"
@@ -375,6 +462,13 @@ onBeforeUnmount(() => {
       <button class="tp__hide" :title="t('terminal.hide')" @click="emit('close')">⌄</button>
     </div>
 
+    <!-- Right-edge resize handle -->
+    <div
+      class="tp__resize-x"
+      :class="{ 'tp__resize-x--active': isResizingX }"
+      @mousedown="onResizeXStart"
+    />
+
     <!-- xterm host elements — one per tab, visibility toggled via v-show -->
     <div class="tp__body">
       <!-- Search bar — shown when searchVisible is true -->
@@ -407,17 +501,27 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .tp {
+  position: absolute;
+  bottom: 0;
+  /* left + width are set via :style binding */
+  min-width: 300px;
   display: flex;
   flex-direction: column;
-  border-top: 1px solid var(--border, var(--color-border));
-  background: var(--bg-elevated, var(--color-bg-secondary));
-  flex-shrink: 0;
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  background: color-mix(in srgb, var(--color-bg-tertiary) 88%, transparent);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--color-border-strong);
+  border-bottom: none;
+  box-shadow: var(--shadow-xl);
+  z-index: 20;
 }
 
 .tp__drag {
   height: 5px;
   cursor: ns-resize;
   flex-shrink: 0;
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
   transition: background 0.15s;
 }
 
@@ -426,12 +530,35 @@ onBeforeUnmount(() => {
   background: var(--color-accent);
 }
 
+.tp__resize-x {
+  position: absolute;
+  top: 0;
+  right: -4px;
+  width: 8px;
+  height: 100%;
+  cursor: ew-resize;
+  border-radius: 0 var(--radius-xl) 0 0;
+  z-index: 1;
+  transition: background 0.15s;
+}
+
+.tp__resize-x:hover,
+.tp__resize-x--active {
+  background: var(--color-accent);
+  opacity: 0.5;
+}
+
 .tp__tabs {
   display: flex;
   gap: 2px;
   align-items: center;
-  padding: 4px 6px;
+  padding: 4px 6px 6px;
   flex-shrink: 0;
+  cursor: grab;
+}
+
+.tp__tabs:active {
+  cursor: grabbing;
 }
 
 .tp__tab {
@@ -512,7 +639,7 @@ onBeforeUnmount(() => {
 
 .tp__host {
   position: absolute;
-  inset: 0;
+  inset: 4px 10px;
 }
 
 .tp__rename {
