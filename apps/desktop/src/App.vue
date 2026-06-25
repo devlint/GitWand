@@ -304,7 +304,14 @@ watch(
 
 // ─── PR panel (shared state via provide/inject) ──────────
 const prCwd = computed(() => repoFolderPath.value ?? "");
-const prPanel = usePrPanel(prCwd);
+const prPanel = usePrPanel(prCwd, {
+  // After a PR checkout switches the branch on disk, refresh repo state +
+  // branch list so the UI follows — mirrors what switchBranch() does.
+  onRepoMutated: async () => {
+    await repoRefresh();
+    await loadBranches();
+  },
+});
 provide(PR_PANEL_KEY, prPanel);
 const issuePanel = useIssuePanel(prCwd);
 provide(ISSUE_PANEL_KEY, issuePanel);

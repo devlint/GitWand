@@ -1021,12 +1021,29 @@ pub(crate) fn rest_pr_ready(cwd: &str, number: i64, token: &str) -> Result<(), S
 }
 
 pub(crate) fn rest_checkout_pr(cwd: &str, number: i64) -> Result<(), String> {
-    // Local git fetch of the PR head ref — token not needed (git uses its own
-    // credential helper). Works for same-repo and fork PRs alike.
+    // Resolve which repo the PR actually lives in. When the local repo is a
+    // fork, the listed PRs belong to the upstream *parent*, so `pull/N/head`
+    // exists on the parent's refs — fetching it from `origin` (the fork) 404s.
+    let (owner, repo) = owner_repo(cwd)?;
+    let origin = format!("{}/{}", owner, repo);
+    let pr_repo = settings_github_token()
+        .and_then(|tok| get_pr_json(cwd, number, &tok).ok())
+        .map(|(repo, _)| repo)
+        .unwrap_or_else(|| origin.clone());
+
+    // Fetch the PR head ref. When the PR lives in `origin` use the configured
+    // remote; otherwise fetch straight from the upstream repo URL (no remote is
+    // configured for it). git's credential helper supplies auth for private
+    // upstreams, same as the origin path — no token in process args.
+    let fetch_target = if pr_repo == origin {
+        "origin".to_string()
+    } else {
+        format!("https://github.com/{}.git", pr_repo)
+    };
     let local = format!("pr-{}", number);
     let refspec = format!("pull/{}/head:{}", number, local);
     let fetch = git_cmd()
-        .args(["fetch", "origin", &refspec])
+        .args(["fetch", &fetch_target, &refspec])
         .current_dir(cwd)
         .output()
         .map_err(|e| format!("git fetch failed: {}", e))?;
