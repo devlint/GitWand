@@ -233,6 +233,32 @@ pub fn git_commit_submodule_changes_parity(
 // ─── Tauri entry point ─────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+#[cfg(not(debug_assertions))]
+/// Returns the anonymous install ID, creating it on first launch.
+///
+/// Stored at `{data_local_dir}/gitwand/install_id` as a plain UUID v4.
+/// Random, not derived from hardware — not personal data under GDPR.
+fn get_or_create_install_id() -> String {
+    let path = dirs::data_local_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("gitwand")
+        .join("install_id");
+
+    if let Ok(id) = std::fs::read_to_string(&path) {
+        let id = id.trim().to_string();
+        if !id.is_empty() {
+            return id;
+        }
+    }
+
+    let id = uuid::Uuid::new_v4().to_string();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(&path, &id);
+    id
+}
+
 pub fn run() {
     // macOS GUI apps launched from Finder/Dock get a minimal launchd env
     // (no SSH_AUTH_SOCK, GH_TOKEN, XDG_*, or anything from ~/.zshrc).
@@ -267,6 +293,33 @@ pub fn run() {
                     let _ = handle.emit("global-shortcut-activate", ());
                 }
             })?;
+
+            // Anonymous launch telemetry via Umami — fire-and-forget POST.
+            // No personal data: UUID is random (not hardware-derived), IP is
+            // anonymised server-side by Umami. Skipped in debug builds.
+            #[cfg(not(debug_assertions))]
+            std::thread::spawn(|| {
+                let install_id = get_or_create_install_id();
+                let language = sys_locale::get_locale().unwrap_or_else(|| "en".to_string());
+                let version = env!("CARGO_PKG_VERSION");
+                let _ = ureq::post("https://cloud.umami.is/api/send")
+                    .set("Content-Type", "application/json")
+                    .send_json(serde_json::json!({
+                        "payload": {
+                            "website": "171a9307-29ca-4524-8772-6187daacd9ca",
+                            "hostname": "app.gitwand.devlint.fr",
+                            "url": "/launch",
+                            "language": language,
+                            "name": "launch",
+                            "data": {
+                                "version": version,
+                                "install_id": install_id
+                            }
+                        },
+                        "type": "event"
+                    }));
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
