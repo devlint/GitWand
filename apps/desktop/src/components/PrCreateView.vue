@@ -784,7 +784,7 @@ function removeReviewer(name: string) {
   margin-left: auto;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  background: transparent;
+  background: var(--color-bg-secondary);
   color: var(--color-text-muted);
   cursor: pointer;
   flex-shrink: 0;
@@ -792,6 +792,7 @@ function removeReviewer(name: string) {
   position: sticky;
   top: 20px;
   right: 20px;
+  z-index: 6;
 }
 .pcv-close:hover {
   background: var(--color-bg-tertiary);
