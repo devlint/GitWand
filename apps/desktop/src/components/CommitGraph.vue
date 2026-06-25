@@ -556,8 +556,15 @@ const searchQuery = ref("");
 const currentMatchIdx = ref(-1);
 const filterMode = ref(false);
 
+const searchBarEl = ref<HTMLElement | null>(null);
 const showSuggestions = ref(false);
 const activeSuggestionIdx = ref(-1);
+
+const dropdownRect = computed(() => {
+  if (!showSuggestions.value || !searchBarEl.value) return null;
+  const r = searchBarEl.value.getBoundingClientRect();
+  return { top: r.bottom + 2, left: r.left, width: r.width };
+});
 
 const branchSuggestions = computed(() => {
   const q = searchQuery.value.trim().toLowerCase();
@@ -946,7 +953,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
 
 <template>
   <div class="cg" v-if="displayCommits.length > 0">
-    <div class="cg-search-bar">
+    <div class="cg-search-bar" ref="searchBarEl">
       <!-- Active-scope chip (v2.21.0) — click ✕ to clear -->
       <button
         v-if="activeScope"
@@ -978,33 +985,36 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
         @focus="showSuggestions = true"
         @blur="showSuggestions = false"
       />
-      <!-- Branch autocomplete dropdown -->
-      <div
-        v-if="showSuggestions && branchSuggestions.length > 0"
-        class="cg-branch-dropdown"
-      >
-        <button
-          v-for="(branch, idx) in branchSuggestions"
-          :key="branch.name"
-          class="cg-branch-item"
-          :class="{ 'cg-branch-item--active': activeSuggestionIdx === idx }"
-          @mousedown.prevent="selectSuggestion(branch.name)"
+      <!-- Branch autocomplete dropdown — teleported to body to escape overflow:hidden ancestors -->
+      <Teleport to="body">
+        <div
+          v-if="showSuggestions && branchSuggestions.length > 0 && dropdownRect"
+          class="cg-branch-dropdown"
+          :style="{ top: dropdownRect.top + 'px', left: dropdownRect.left + 'px', width: dropdownRect.width + 'px' }"
         >
-          <svg
-            class="cg-branch-item-icon"
-            :class="branch.isRemote ? 'cg-branch-remote' : 'cg-branch-local'"
-            width="10" height="10" viewBox="0 0 24 24" fill="none"
-            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+          <button
+            v-for="(branch, idx) in branchSuggestions"
+            :key="branch.name"
+            class="cg-branch-item"
+            :class="{ 'cg-branch-item--active': activeSuggestionIdx === idx }"
+            @mousedown.prevent="selectSuggestion(branch.name)"
           >
-            <line x1="6" y1="3" x2="6" y2="15"/>
-            <circle cx="18" cy="6" r="3"/>
-            <circle cx="6" cy="18" r="3"/>
-            <path d="M18 9a9 9 0 0 1-9 9"/>
-          </svg>
-          <span class="cg-branch-item-name">{{ branch.name }}</span>
-          <span v-if="branch.isRemote" class="cg-branch-item-remote-tag">{{ t('branches.remote') }}</span>
-        </button>
-      </div>
+            <svg
+              class="cg-branch-item-icon"
+              :class="branch.isRemote ? 'cg-branch-remote' : 'cg-branch-local'"
+              width="10" height="10" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+            >
+              <line x1="6" y1="3" x2="6" y2="15"/>
+              <circle cx="18" cy="6" r="3"/>
+              <circle cx="6" cy="18" r="3"/>
+              <path d="M18 9a9 9 0 0 1-9 9"/>
+            </svg>
+            <span class="cg-branch-item-name">{{ branch.name }}</span>
+            <span v-if="branch.isRemote" class="cg-branch-item-remote-tag">{{ t('branches.remote') }}</span>
+          </button>
+        </div>
+      </Teleport>
       <span v-if="matchedIndices.length > 0" class="cg-search-count">
         {{ t('log.graphSearchCount', currentMatchIdx + 1, matchedIndices.length) }}
       </span>
@@ -1944,11 +1954,8 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
 }
 
 .cg-branch-dropdown {
-  position: absolute;
-  top: calc(100% + 2px);
-  left: 0;
-  right: 0;
-  z-index: 100;
+  position: fixed;
+  z-index: 9999;
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
   border-radius: 6px;
