@@ -556,6 +556,56 @@ const searchQuery = ref("");
 const currentMatchIdx = ref(-1);
 const filterMode = ref(false);
 
+const showSuggestions = ref(false);
+const activeSuggestionIdx = ref(-1);
+
+const branchSuggestions = computed(() => {
+  const q = searchQuery.value.trim().toLowerCase();
+  if (!q || !props.branches?.length) return [];
+  return props.branches
+    .filter((b) => b.name.toLowerCase().includes(q))
+    .slice(0, 8);
+});
+
+watch(branchSuggestions, () => {
+  activeSuggestionIdx.value = -1;
+});
+
+function selectSuggestion(name: string) {
+  searchQuery.value = name;
+  showSuggestions.value = false;
+  activeSuggestionIdx.value = -1;
+}
+
+function onSearchKeydown(e: KeyboardEvent) {
+  if (showSuggestions.value && branchSuggestions.value.length > 0) {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      activeSuggestionIdx.value = Math.min(
+        activeSuggestionIdx.value + 1,
+        branchSuggestions.value.length - 1,
+      );
+      return;
+    }
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      activeSuggestionIdx.value = Math.max(activeSuggestionIdx.value - 1, -1);
+      return;
+    }
+    if (e.key === "Enter" && activeSuggestionIdx.value >= 0) {
+      e.preventDefault();
+      selectSuggestion(branchSuggestions.value[activeSuggestionIdx.value].name);
+      return;
+    }
+    if (e.key === "Escape") {
+      showSuggestions.value = false;
+      return;
+    }
+  }
+  if (e.key === "Enter") navigateSearch(1);
+  if (e.key === "Escape") searchQuery.value = "";
+}
+
 const renderedCommits = computed(() => {
   if (!filterMode.value || !searchQuery.value.trim()) return displayCommits.value;
   return filterCommitsLocal(displayCommits.value, searchQuery.value);
@@ -923,9 +973,37 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
         class="cg-search-input"
         type="search"
         :placeholder="t('log.graphSearchPlaceholder')"
-        @keydown.enter="navigateSearch(1)"
-        @keydown.escape="searchQuery = ''"
+        @keydown="onSearchKeydown"
+        @focus="showSuggestions = true"
+        @blur="showSuggestions = false"
       />
+      <!-- Branch autocomplete dropdown -->
+      <div
+        v-if="showSuggestions && branchSuggestions.length > 0"
+        class="cg-branch-dropdown"
+      >
+        <button
+          v-for="(branch, idx) in branchSuggestions"
+          :key="branch.name"
+          class="cg-branch-item"
+          :class="{ 'cg-branch-item--active': activeSuggestionIdx === idx }"
+          @mousedown.prevent="selectSuggestion(branch.name)"
+        >
+          <svg
+            class="cg-branch-item-icon"
+            :class="branch.isRemote ? 'cg-branch-remote' : 'cg-branch-local'"
+            width="10" height="10" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+          >
+            <line x1="6" y1="3" x2="6" y2="15"/>
+            <circle cx="18" cy="6" r="3"/>
+            <circle cx="6" cy="18" r="3"/>
+            <path d="M18 9a9 9 0 0 1-9 9"/>
+          </svg>
+          <span class="cg-branch-item-name">{{ branch.name }}</span>
+          <span v-if="branch.isRemote" class="cg-branch-item-remote-tag">remote</span>
+        </button>
+      </div>
       <span v-if="matchedIndices.length > 0" class="cg-search-count">
         {{ t('log.graphSearchCount', currentMatchIdx + 1, matchedIndices.length) }}
       </span>
@@ -1761,6 +1839,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
 }
 
 .cg-search-bar {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 2px;
@@ -1861,6 +1940,67 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
 .cg-search-nav:disabled {
   opacity: 0.35;
   cursor: not-allowed;
+}
+
+.cg-branch-dropdown {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  right: 0;
+  z-index: 100;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  overflow: hidden;
+}
+
+.cg-branch-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 8px;
+  font-size: 11px;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.cg-branch-item:hover,
+.cg-branch-item--active {
+  background: var(--color-bg-tertiary);
+}
+
+.cg-branch-item-icon {
+  flex-shrink: 0;
+}
+
+.cg-branch-local {
+  color: var(--color-accent);
+}
+
+.cg-branch-remote {
+  color: var(--color-text-muted);
+}
+
+.cg-branch-item-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cg-branch-item-remote-tag {
+  font-size: 9px;
+  color: var(--color-text-muted);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  padding: 1px 4px;
+  flex-shrink: 0;
 }
 
 .cg-filter-btn--active {
