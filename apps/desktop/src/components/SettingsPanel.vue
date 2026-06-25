@@ -1179,6 +1179,11 @@ function deleteReleaseNoteTemplate(id: string) {
                 <rect x="2" y="2" width="12" height="12" rx="2" />
                 <path d="M5 6h6M5 8.5h4M5 11h5" />
               </svg>
+              <svg v-else-if="tab.icon === 'terminal'" width="15" height="15" viewBox="0 0 16 16" fill="none"
+                stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="2" y="2" width="12" height="12" rx="2" />
+                <path d="M5 6l2.5 2L5 10M9 10h3" />
+              </svg>
               <svg v-else-if="tab.icon === 'ai'" width="15" height="15" viewBox="0 0 16 16" fill="none"
                 stroke="currentColor" stroke-width="1.4">
                 <path d="M8 1v2m0 10v2M1 8h2m10 0h2" />
