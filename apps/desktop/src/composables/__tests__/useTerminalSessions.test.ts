@@ -80,6 +80,24 @@ describe("useTerminalSessions", () => {
     vi.useRealTimers();
   });
 
+  it("notifyOutput : un flux continu ne peut pas repousser le refresh indéfiniment (cap maxWait)", async () => {
+    vi.useFakeTimers();
+    const s = useTerminalSessions();
+    const cb = vi.fn();
+    s.setMutationHandler(cb);
+    await s.openTab("/repo/a", "/repo/a", () => {});
+    // Output every 400ms — never lets the 800ms debounce window elapse, the
+    // exact starvation case (tail -f, dev server, streaming agent) that would
+    // otherwise prevent a post-commit refresh from ever firing.
+    for (let t = 0; t < 5000; t += 400) {
+      s.notifyOutput("/repo/a");
+      vi.advanceTimersByTime(400);
+    }
+    // Despite the unbroken stream, the 4000ms maxWait cap must have fired.
+    expect(cb).toHaveBeenCalledWith("/repo/a");
+    vi.useRealTimers();
+  });
+
   it("disposeRepo ferme toutes les sessions du repo", async () => {
     const s = useTerminalSessions();
     await s.openTab("/repo/b", "/repo/b", () => {});

@@ -1281,27 +1281,46 @@ const terminalPanelRef = ref<any>(null);
 
 async function openTerminalTab(cwd?: string, type?: TerminalTabType) {
   if (!repoFolderPath.value) return;
+  // Capture the repo this tab belongs to at open time. The output callback
+  // below must notify THIS repo, not whatever repo happens to be active when a
+  // chunk arrives — a long-running command keeps emitting after the user
+  // switches/closes the repo, and reading repoFolderPath.value at fire time
+  // would refresh the wrong (or a closed/null) repo.
+  const repoPath = repoFolderPath.value;
   showTerminal.value = true;
   // defineAsyncComponent needs multiple ticks to load; wait until ref is set.
   if (!terminalPanelRef.value) {
-    await new Promise<void>(resolve => {
-      const stop = watch(terminalPanelRef, val => { if (val) { stop(); resolve(); } });
-    });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        // Guard against a chunk-load failure or JS error in the TerminalPanel
+        // dynamic import: if the component never mounts, the watch fires on
+        // nothing and the Promise hangs forever, leaving the UI frozen with
+        // showTerminal=true but nothing rendered.
+        const timer = setTimeout(() => {
+          stop();
+          reject(new Error("TerminalPanel mount timeout"));
+        }, 10_000);
+        const stop = watch(terminalPanelRef, val => {
+          if (val) { clearTimeout(timer); stop(); resolve(); }
+        });
+      });
+    } catch {
+      showTerminal.value = false;
+      return;
+    }
   }
   const shell = settings.value.terminalShell || undefined;
+  // `type` carries the agent identity ("claude"/"codex"); `shell` is always the
+  // user's configured shell. openTab maps the type to a first-class agent spawn.
   const opts: { shell?: string; type?: TerminalTabType } = {};
-  if (type) {
-    opts.type = type;
-    opts.shell = type !== "shell" ? type : (shell ?? undefined);
-  } else if (shell !== undefined) {
-    opts.shell = shell;
-  }
+  if (type) opts.type = type;
+  if (shell !== undefined) opts.shell = shell;
   const tab = await termSessions.openTab(
-    repoFolderPath.value,
-    cwd ?? repoFolderPath.value,
+    repoPath,
+    cwd ?? repoPath,
     (tabId, chunk) => {
       terminalPanelRef.value?.writeChunk(tabId, chunk);
-      termSessions.notifyOutput(repoFolderPath.value!);
+      termSessions.notifyOutput(repoPath);
     },
     Object.keys(opts).length > 0 ? opts : undefined,
   );
@@ -2241,7 +2260,12 @@ function onKeyDown(e: KeyboardEvent) {
       if (repoFolderPath.value) {
         const tabs = termSessions.tabsFor(repoFolderPath.value);
         const target = tabs[termAction.switch];
-        if (target) termSessions.setActive(repoFolderPath.value, target.id);
+        if (target) {
+          termSessions.setActive(repoFolderPath.value, target.id);
+          // Mirror the mouse-click handler (TerminalPanel) — viewing a tab via
+          // the keyboard must clear its unread dot too, else it stays lit forever.
+          termSessions.markRead(repoFolderPath.value, target.id);
+        }
       }
     }
     return;

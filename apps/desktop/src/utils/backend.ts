@@ -3046,7 +3046,7 @@ export async function agentSessionLaunch(cwd: string, tool: string): Promise<voi
  */
 export async function terminalOpen(
   cwd: string,
-  opts: { shell?: string; cols: number; rows: number },
+  opts: { shell?: string; agent?: string; cols: number; rows: number },
   onOutput: (chunk: string) => void,
 ): Promise<number> {
   if (isTauri()) {
@@ -3056,6 +3056,7 @@ export async function terminalOpen(
     return tauriInvoke<number>("terminal_open", {
       cwd,
       shell: opts.shell ?? null,
+      agent: opts.agent ?? null,
       cols: opts.cols,
       rows: opts.rows,
       onOutput: channel,
@@ -3063,8 +3064,7 @@ export async function terminalOpen(
   }
   // Dev mode : SSE. Le serveur renvoie l'id en premier message JSON, puis
   // les chunks bruts.
-  const id = await devTerminalOpen(cwd, opts, onOutput);
-  return id;
+  return devTerminalOpen(cwd, opts, onOutput);
 }
 
 export async function terminalWrite(id: number, data: string): Promise<void> {

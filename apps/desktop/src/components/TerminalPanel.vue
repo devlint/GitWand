@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onBeforeUnmount, watch, nextTick, computed, onMounted, onActivated } from "vue";
+import { ref, onBeforeUnmount, watch, nextTick, computed, onMounted, onActivated, watchEffect } from "vue";
 import { useTerminalSessions, type TerminalTab } from "../composables/useTerminalSessions";
 import { useI18n } from "../composables/useI18n";
 import { useSettings } from "../composables/useSettings";
@@ -22,24 +22,23 @@ const activeId = computed(() => sessions.activeTabId(props.repoPath));
 // ─── "+" dropdown ────────────────────────────────────────
 const showDropdown = ref(false);
 
-function onDocumentClickClose() {
-  showDropdown.value = false;
-}
+// Single source of truth for the outside-click listener. watchEffect adds the
+// listener when showDropdown is true and removes it when false — no manual
+// add/remove scattered across openDropdown and selectDropdownItem.
+watchEffect((onCleanup) => {
+  if (!showDropdown.value) return;
+  function close() { showDropdown.value = false; }
+  document.addEventListener("click", close);
+  onCleanup(() => document.removeEventListener("click", close));
+});
 
 function openDropdown(e: MouseEvent) {
   e.stopPropagation();
-  if (showDropdown.value) {
-    showDropdown.value = false;
-    document.removeEventListener("click", onDocumentClickClose);
-  } else {
-    showDropdown.value = true;
-    document.addEventListener("click", onDocumentClickClose);
-  }
+  showDropdown.value = !showDropdown.value;
 }
 
 function selectDropdownItem(action: () => void) {
   showDropdown.value = false;
-  document.removeEventListener("click", onDocumentClickClose);
   action();
 }
 
@@ -62,10 +61,19 @@ let WebLinksCtor: any = null;
 // Keyed by tab.id (same key space as xterms). Not reactive — plain Map.
 const pendingChunks = new Map<number, string[]>();
 
-// Fix 6 — Keystroke input buffer for keystrokes typed before the PTY is ready
+// Keystroke input buffer for keystrokes typed before the PTY is ready
 // (i.e. while tab.sessionId is still -1). Flushed to the PTY once sessionId
 // transitions from -1 to a positive value. Keyed by tab.id. Not reactive.
 const pendingInput = new Map<number, string[]>();
+
+/** Get the buffer array for `id`, creating it if absent. Single source of
+ *  truth for the get-or-create pattern shared by pendingChunks and
+ *  pendingInput — a future max-buffer-size guard only needs to live here. */
+function getOrCreateBuf(map: Map<number, string[]>, id: number): string[] {
+  let buf = map.get(id);
+  if (!buf) { buf = []; map.set(id, buf); }
+  return buf;
+}
 
 const hostRefs = ref<Record<number, HTMLElement | undefined>>({});
 
@@ -242,9 +250,7 @@ async function mountTab(tab: TerminalTab) {
       sessions.write(tab.sessionId, data);
     } else {
       // PTY not ready yet — buffer until sessionId is assigned.
-      let buf = pendingInput.get(tab.id);
-      if (!buf) { buf = []; pendingInput.set(tab.id, buf); }
-      buf.push(data);
+      getOrCreateBuf(pendingInput, tab.id).push(data);
     }
   });
   term.onTitleChange((title: string) =>
@@ -253,7 +259,12 @@ async function mountTab(tab: TerminalTab) {
 
   const ro = new ResizeObserver(() => {
     fit.fit();
-    sessions.resize(tab.sessionId, term.cols, term.rows);
+    // Only sync the PTY once it actually exists. During the window before
+    // terminalOpen resolves (sessionId === -1) a resize would call resize(-1),
+    // which the backend rejects as "session not found" and the early layout is
+    // lost. The post-open mount/refit path (refitWhenSized + the sessionId
+    // watcher) syncs the real size once the PTY is ready.
+    if (tab.sessionId >= 0) sessions.resize(tab.sessionId, term.cols, term.rows);
   });
   ro.observe(el);
 
@@ -296,9 +307,7 @@ function writeChunk(tabId: number, chunk: string) {
       if (tab) kickResize(tab);
     }
   } else {
-    let buf = pendingChunks.get(tabId);
-    if (!buf) { buf = []; pendingChunks.set(tabId, buf); }
-    buf.push(chunk);
+    getOrCreateBuf(pendingChunks, tabId).push(chunk);
   }
 }
 defineExpose({ writeChunk });
@@ -312,13 +321,19 @@ watch(
       const entry = xterms.get(tab.id);
       if (entry && entry.sessionId !== tab.sessionId && tab.sessionId >= 0) {
         entry.sessionId = tab.sessionId;
-        // Fix 6 — PTY is now ready: flush any keystrokes buffered while
-        // sessionId was -1 (typed before terminalOpen resolved).
+        // Flush any keystrokes buffered while sessionId was -1.
         const queued = pendingInput.get(tab.id);
         if (queued?.length) {
           queued.forEach(d => sessions.write(tab.sessionId, d));
           pendingInput.delete(tab.id);
         }
+        // Re-run refitWhenSized now that the PTY is ready. refitWhenSized guards
+        // on tab.sessionId >= 0, so it skips the resize call while the PTY is
+        // pending; its 20-retry window (640ms) can exhaust on a slow spawn before
+        // this transition fires. Calling it here ensures the PTY always gets the
+        // real terminal size, regardless of spawn latency.
+        const el = hostRefs.value[tab.id];
+        if (el) refitWhenSized(tab.id, el);
       }
     }
     // Dispose xterms for closed tabs.
@@ -664,7 +679,8 @@ onBeforeUnmount(() => {
     entry.term.dispose();
   }
   xterms.clear();
-  document.removeEventListener("click", onDocumentClickClose);
+  // No manual removeEventListener for the dropdown — watchEffect cleans it up
+  // automatically when the component unmounts.
 });
 </script>
 

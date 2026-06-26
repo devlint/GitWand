@@ -242,23 +242,39 @@ pub(crate) fn sanitize_appimage_search_paths(cmd: &mut std::process::Command) {
 /// (/usr/bin:/bin:/usr/sbin:/sbin) that does not include Homebrew.
 /// We extend PATH with the common Homebrew prefixes so that tools like
 /// `gh`, `git` (custom path), `claude`, `codex`, etc. are resolvable.
+/// Canonical macOS PATH enrichment, shared by every subprocess spawner so they
+/// resolve tools from the same set of prefixes. The app launched from
+/// Finder/Dock inherits a minimal PATH (/usr/bin:/bin:/usr/sbin:/sbin) that
+/// excludes Homebrew/MacPorts, so we append the common package-manager prefixes
+/// not already present. Returns `None` when nothing needs adding.
+///
+/// Single source of truth for `hidden_cmd` (above) and the integrated terminal
+/// (`commands::terminal`) — keep both on this helper so the prefix list can
+/// never drift between them.
+#[cfg(target_os = "macos")]
+pub(crate) fn macos_enriched_path() -> Option<String> {
+    let current_path = std::env::var("PATH").unwrap_or_default();
+    let extras = ["/opt/homebrew/bin", "/opt/homebrew/sbin",
+                  "/usr/local/bin", "/usr/local/sbin",
+                  "/opt/local/bin"];
+    let mut enriched = current_path.clone();
+    let mut added = false;
+    for extra in extras {
+        if !current_path.split(':').any(|p| p == extra) {
+            enriched.push(':');
+            enriched.push_str(extra);
+            added = true;
+        }
+    }
+    if added { Some(enriched) } else { None }
+}
+
 pub(crate) fn hidden_cmd(bin: &str) -> std::process::Command {
     let mut cmd = std::process::Command::new(bin);
     #[cfg(target_os = "windows")]
     cmd.creation_flags(crate::types::CREATE_NO_WINDOW);
     #[cfg(target_os = "macos")]
-    {
-        let current_path = std::env::var("PATH").unwrap_or_default();
-        let extras = ["/opt/homebrew/bin", "/opt/homebrew/sbin",
-                      "/usr/local/bin", "/usr/local/sbin",
-                      "/opt/local/bin"];
-        let mut enriched = current_path.clone();
-        for extra in extras {
-            if !current_path.split(':').any(|p| p == extra) {
-                enriched.push(':');
-                enriched.push_str(extra);
-            }
-        }
+    if let Some(enriched) = macos_enriched_path() {
         cmd.env("PATH", enriched);
     }
     // Undo AppImage library-path pollution so the spawned binary loads system

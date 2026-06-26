@@ -74,8 +74,10 @@ async function launch(session: AgentSession) {
       // GUI editors: open externally via the existing command.
       await agentSessionLaunch(session.path, session.tool);
     } else {
-      // claude / other: integrated PTY tab.
-      emit("launch-agent", { path: session.path, tool: "claude" });
+      // Integrated PTY tab. Forward the session's real tool so the launched tab
+      // matches the badge: App.vue maps "claude"/"codex" to the matching agent
+      // CLI and anything else to a plain shell in that directory.
+      emit("launch-agent", { path: session.path, tool: session.tool });
     }
     // Re-poll to reflect real state instead of a fake optimistic active flag.
     await loadSessions();

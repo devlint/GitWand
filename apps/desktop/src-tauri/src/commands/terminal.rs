@@ -9,9 +9,16 @@ use std::sync::{Arc, Mutex, OnceLock};
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use tauri::ipc::Channel;
 
+use crate::git::safe_repo_path;
+use crate::types::CLAUDE_AUTH_OVERRIDE_ENV;
+
 /// Une session PTY vivante. Le thread lecteur est détaché ; il sort sur EOF.
 struct PtyHandle {
-    master: Box<dyn portable_pty::MasterPty + Send>,
+    /// Master PTY wrapped in Arc<Mutex> so terminal_resize can clone the Arc,
+    /// release the global sessions lock, then call .resize() outside the lock —
+    /// preventing the resize ioctl from blocking concurrent terminal_write calls
+    /// for all other sessions (fix for the mutex-held-across-ioctl bug).
+    master: Arc<Mutex<Box<dyn portable_pty::MasterPty + Send>>>,
     /// Writer wrappé dans son propre Arc<Mutex> pour découpler les I/O du verrou du registre.
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
@@ -86,35 +93,18 @@ fn login_flag(shell_path: &str) -> Option<&'static str> {
 pub(crate) fn terminal_open(
     cwd: String,
     shell: Option<String>,
+    agent: Option<String>,
     cols: u16,
     rows: u16,
     on_output: Channel<String>,
 ) -> Result<u64, String> {
-    if cwd.trim().is_empty() {
-        return Err("cwd must not be empty".to_string());
-    }
-    // Fix 1 — CWD validation (safe_repo_path applicability note).
-    //
-    // `safe_repo_path(cwd, rel_path)` validates that `rel_path` resolves
-    // inside `cwd`; it requires a second argument and is designed for
-    // file-within-repo access, not for validating the working directory
-    // itself. It cannot be called here with just `cwd`.
-    //
-    // Instead we apply the same defence-in-depth steps manually:
-    //   (a) reject relative paths — only absolute cwd accepted
-    //   (b) canonicalize to resolve symlinks and eliminate `..` components
-    //   (c) check is_dir() — must be an existing directory
-    //
-    // This mirrors AGENTS.md's intent: every user-supplied filesystem path
-    // must be resolved canonically before use, with no hand-crafted join
-    // that could be escaped via `..` traversal.
-    let cwd_path = std::path::Path::new(cwd.trim());
-    if !cwd_path.is_absolute() {
-        return Err(format!("cwd must be absolute (got: {})", cwd));
-    }
-    let canon = cwd_path
-        .canonicalize()
-        .map_err(|e| format!("invalid cwd: {e}"))?;
+    // Validate and canonicalize cwd through the single audited guard (AGENTS.md:
+    // "every file-system operation on user-supplied paths must go through
+    // safe_repo_path()"). Using "." as the relative component mirrors the
+    // pattern in scratch.rs:canonical_cwd — safe_repo_path(cwd, ".") resolves
+    // and traversal-guards the directory itself, keeping this in sync with any
+    // future improvements to the shared guard.
+    let canon = safe_repo_path(cwd.trim(), ".").map_err(|e| format!("invalid cwd: {e}"))?;
     if !canon.is_dir() {
         return Err("cwd is not a directory".to_string());
     }
@@ -124,42 +114,66 @@ pub(crate) fn terminal_open(
         .openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
         .map_err(|e| format!("openpty failed: {e}"))?;
 
-    let shell_path = resolve_shell(&shell);
-    let mut cmd = CommandBuilder::new(&shell_path);
+    // First-class agent vs shell resolution. An agent ("claude" / "codex") is
+    // launched as its own CLI binary rather than being smuggled through the
+    // `shell` parameter; anything else resolves to an interactive login shell.
+    let agent_kind = agent.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let program = match agent_kind {
+        Some(a @ ("claude" | "codex")) => a.to_string(),
+        _ => resolve_shell(&shell),
+    };
+    let mut cmd = CommandBuilder::new(&program);
     // Login shell sur Unix pour charger le profil utilisateur (PATH, aliases…).
     // Seulement pour les shells qui acceptent `-l` (cf. login_flag) — sinon
-    // le PTY meurt avec `unknown option '-l'`.
+    // le PTY meurt avec `unknown option '-l'`. Un agent n'est jamais un login shell.
     #[cfg(not(windows))]
-    if let Some(flag) = login_flag(&shell_path) {
-        cmd.arg(flag);
+    if agent_kind.is_none() {
+        if let Some(flag) = login_flag(&program) {
+            cmd.arg(flag);
+        }
     }
     cmd.cwd(&canon);
-    // On NE propage PAS de tokens GitWand : le shell charge ses propres creds.
-    // Enrichissement PATH (Homebrew / npm global) repris de hidden_cmd.
-    if let Some(extra) = enriched_path() {
+    // Strip GitWand's sensitive auth env vars before handing over an interactive
+    // PTY. Mirrors strip_claude_auth_env (ai.rs) / claudeSpawnEnv (dev-server):
+    // keeps API keys held by the GitWand process from leaking into the terminal,
+    // and lets the `claude` agent fall back to its OAuth session instead of being
+    // hijacked by a stale ANTHROPIC_API_KEY.
+    for var in CLAUDE_AUTH_OVERRIDE_ENV {
+        cmd.env_remove(var);
+    }
+    // PATH enrichment (Homebrew / MacPorts) — shares hidden_cmd's single source
+    // of truth so the PTY resolves tools from the same prefixes as every other
+    // GitWand subprocess (no divergent copy that drops /usr/local/sbin etc.).
+    #[cfg(target_os = "macos")]
+    if let Some(extra) = crate::git::macos_enriched_path() {
         cmd.env("PATH", extra);
     }
 
-    let child = pair
+    let mut child = pair
         .slave
         .spawn_command(cmd)
         .map_err(|e| format!("spawn shell failed: {e}"))?;
 
-    let mut reader = pair
-        .master
-        .try_clone_reader()
-        .map_err(|e| format!("clone reader failed: {e}"))?;
-    let writer = pair
-        .master
-        .take_writer()
-        .map_err(|e| format!("take writer failed: {e}"))?;
+    // Obtain the reader and writer BEFORE inserting into the registry. If either
+    // step fails after spawn_command() succeeded we must kill the child — otherwise
+    // it becomes an orphaned process holding a PTY slave indefinitely.
+    let mut reader = match pair.master.try_clone_reader() {
+        Ok(r) => r,
+        Err(e) => { let _ = child.kill(); return Err(format!("clone reader failed: {e}")); }
+    };
+    let writer = match pair.master.take_writer() {
+        Ok(w) => w,
+        Err(e) => { let _ = child.kill(); return Err(format!("take writer failed: {e}")); }
+    };
 
     let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
+    let master_arc: Arc<Mutex<Box<dyn portable_pty::MasterPty + Send>>> =
+        Arc::new(Mutex::new(pair.master));
     let writer_arc: Arc<Mutex<Box<dyn Write + Send>>> = Arc::new(Mutex::new(writer));
 
     lock_sessions().insert(
         id,
-        PtyHandle { master: pair.master, writer: writer_arc, child },
+        PtyHandle { master: master_arc, writer: writer_arc, child },
     );
 
     // Thread lecteur : pousse les chunks vers le frontend.
@@ -230,9 +244,17 @@ pub(crate) fn terminal_write(id: u64, data: String) -> Result<(), String> {
 
 #[tauri::command]
 pub(crate) fn terminal_resize(id: u64, cols: u16, rows: u16) -> Result<(), String> {
-    let map = lock_sessions();
-    let h = map.get(&id).ok_or("session not found")?;
-    h.master
+    // Clone the Arc under the sessions lock, then release the lock before the
+    // resize ioctl. This mirrors terminal_write's pattern: holding the global
+    // sessions lock across a blocking kernel call would stall terminal_write
+    // (and any other command) for ALL sessions during every resize event.
+    let master_arc = {
+        let map = lock_sessions();
+        map.get(&id).map(|h| Arc::clone(&h.master)).ok_or("session not found")?
+    };
+    master_arc
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
         .resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
         .map_err(|e| format!("resize failed: {e}"))
 }
@@ -253,29 +275,3 @@ pub(crate) fn terminal_close_all() {
     }
 }
 
-/// PATH enrichi (Homebrew / chemins usuels) — mirror minimal de hidden_cmd.
-/// Retourne None si rien à ajouter.
-fn enriched_path() -> Option<String> {
-    let current = std::env::var("PATH").unwrap_or_default();
-    #[cfg(target_os = "macos")]
-    {
-        let extras = ["/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin"];
-        let mut added = false;
-        let mut path = current.clone();
-        for e in extras {
-            if !current.split(':').any(|p| p == e) {
-                path = format!("{e}:{path}");
-                added = true;
-            }
-        }
-        if added {
-            return Some(path);
-        }
-        return None;
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = current;
-        None
-    }
-}

@@ -109,7 +109,7 @@ export const IPC_TIMEOUT = {
  */
 export async function devTerminalOpen(
   cwd: string,
-  opts: { shell?: string; cols: number; rows: number },
+  opts: { shell?: string; agent?: string; cols: number; rows: number },
   onOutput: (chunk: string) => void,
 ): Promise<number> {
   const params = new URLSearchParams({
@@ -118,6 +118,7 @@ export async function devTerminalOpen(
     rows: String(opts.rows),
   });
   if (opts.shell) params.set("shell", opts.shell);
+  if (opts.agent) params.set("agent", opts.agent);
   return new Promise((resolve, reject) => {
     const es = new EventSource(`${DEV_SERVER}/api/terminal-open?${params}`);
     let resolved = false;
@@ -137,10 +138,21 @@ export async function devTerminalOpen(
     };
     es.onerror = () => {
       if (resolved) {
-        // Shell exited — close to prevent browser auto-reconnect spawning a new shell
+        // The dev server ties PTY lifetime to this SSE connection: req.on("close")
+        // kills the PTY the moment the connection drops (see dev-server.mjs). So
+        // once the shell is up, ANY onerror means the server-side PTY is already
+        // gone — close here rather than let EventSource auto-reconnect, which
+        // would re-hit /api/terminal-open and spawn an untracked orphan shell
+        // with a new id the frontend can't address. (Surviving a transient blip
+        // would require server-side reconnect-by-id; this is dev-mode only.)
         es.close();
+      } else {
+        // Initial connection failure before the id arrived (dev server down,
+        // not yet started, etc.). Reject the Promise so the caller surfaces the
+        // error instead of hanging forever with a ghost tab at sessionId=-1.
+        es.close();
+        reject(new Error("dev server unreachable: terminal-open SSE connection failed"));
       }
-      // !resolved: transient connection error — let EventSource retry naturally
     };
   });
 }

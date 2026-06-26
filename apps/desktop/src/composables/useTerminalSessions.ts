@@ -38,8 +38,18 @@ let nextLocalId = 1;
 
 // Debounce refresh par repo.
 const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+// Timestamp of the first un-fired notifyOutput in the current burst, per repo.
+// Used to cap how long a continuous output stream can keep resetting the
+// debounce (see MAX_WAIT_MS).
+const firstPendingAt = new Map<string, number>();
 let mutationHandler: ((repoPath: string) => void) | null = null;
 const DEBOUNCE_MS = 800;
+// A process that emits output continuously (tail -f, a dev server, an agent
+// streaming) would reset the 800ms debounce on every chunk, so a `git commit`
+// run in that same tab would never refresh the UI while output keeps flowing.
+// Cap the wait: once output has been pending this long, fire the refresh even
+// if more output is still arriving.
+const MAX_WAIT_MS = 4000;
 
 const terminalFocused = ref(false);
 
@@ -55,6 +65,7 @@ export function __resetForTests(): void {
   nextLocalId = 1;
   for (const timer of debounceTimers.values()) clearTimeout(timer);
   debounceTimers.clear();
+  firstPendingAt.clear();
   mutationHandler = null;
   terminalFocused.value = false;
 }
@@ -93,7 +104,14 @@ export function useTerminalSessions() {
     try {
       const sessionId = await terminalOpen(
         cwd,
-        { cols: 80, rows: 24, shell: opts?.shell || undefined },
+        {
+          cols: 80,
+          rows: 24,
+          shell: opts?.shell || undefined,
+          // Agent tabs ("claude"/"codex") launch as a first-class agent CLI,
+          // never smuggled through the `shell` parameter.
+          agent: tabType !== "shell" ? tabType : undefined,
+        },
         (chunk) => {
           if (activeByRepo.get(repoPath) !== tab.id) {
             tab.hasUnread = true;
@@ -135,7 +153,13 @@ export function useTerminalSessions() {
     if (idx === -1) return;
     const [tab] = list.splice(idx, 1);
     tab.alive = false;
-    if (tab.sessionId >= 0) await terminalClose(tab.sessionId);
+    if (tab.sessionId >= 0) {
+      await terminalClose(tab.sessionId);
+    }
+    // sessionId === -1 means openTab is still awaiting terminalOpen. The "Fix 3"
+    // guard inside openTab detects that the tab is gone from the list and calls
+    // terminalClose once the sessionId arrives. No extra bookkeeping needed here —
+    // `tab` is still referenced by openTab's closure even after being spliced.
     if (activeByRepo.get(repoPath) === tabId) {
       activeByRepo.set(repoPath, list.length ? list[list.length - 1].id : null);
     }
@@ -161,6 +185,7 @@ export function useTerminalSessions() {
   async function disposeRepo(repoPath: string): Promise<void> {
     const t = debounceTimers.get(repoPath);
     if (t) { clearTimeout(t); debounceTimers.delete(repoPath); }
+    firstPendingAt.delete(repoPath);
     const list = listFor(repoPath);
     for (const tab of list) {
       if (tab.sessionId >= 0) await terminalClose(tab.sessionId);
@@ -170,12 +195,27 @@ export function useTerminalSessions() {
   }
 
   function notifyOutput(repoPath: string): void {
+    const now = Date.now();
+    const pendingSince = firstPendingAt.get(repoPath);
+    if (pendingSince === undefined) {
+      firstPendingAt.set(repoPath, now);
+    } else if (now - pendingSince >= MAX_WAIT_MS) {
+      // Output has been flowing past the max wait — fire now instead of
+      // rescheduling, so a continuous stream can't starve the refresh forever.
+      const prev = debounceTimers.get(repoPath);
+      if (prev) clearTimeout(prev);
+      debounceTimers.delete(repoPath);
+      firstPendingAt.delete(repoPath);
+      mutationHandler?.(repoPath);
+      return;
+    }
     const prev = debounceTimers.get(repoPath);
     if (prev) clearTimeout(prev);
     debounceTimers.set(
       repoPath,
       setTimeout(() => {
         debounceTimers.delete(repoPath);
+        firstPendingAt.delete(repoPath);
         mutationHandler?.(repoPath);
       }, DEBOUNCE_MS),
     );

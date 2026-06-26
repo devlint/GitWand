@@ -5799,6 +5799,10 @@ async function handleRequest(req, res) {
     if (url.pathname === "/api/terminal-open" && req.method === "GET") {
       const cwd = url.searchParams.get("cwd") || process.cwd();
       const shell = url.searchParams.get("shell") || process.env.SHELL || "/bin/zsh";
+      // First-class agent: launch the named CLI directly rather than smuggling
+      // it through `shell`. Mirrors the Rust backend's `agent` parameter.
+      const agent = url.searchParams.get("agent") || "";
+      const program = agent === "claude" || agent === "codex" ? agent : shell;
       const cols = Math.max(1, parseInt(url.searchParams.get("cols") || "80", 10));
       const rows = Math.max(1, parseInt(url.searchParams.get("rows") || "24", 10));
       const id = devPtyNextId++;
@@ -5815,7 +5819,10 @@ async function handleRequest(req, res) {
       // unbuffered output, resize, and control sequences natively.
       let proc;
       try {
-        proc = nodePty.spawn(shell, [], { name: "xterm-256color", cols, rows, cwd, env: process.env });
+        // `claudeSpawnEnv` strips the API-key auth vars so secrets held by the
+        // dev server don't leak into the terminal and `claude` uses its OAuth
+        // session — same hygiene as the Rust backend's terminal_open.
+        proc = nodePty.spawn(program, [], { name: "xterm-256color", cols, rows, cwd, env: claudeSpawnEnv });
       } catch (spawnErr) {
         res.write(`data: ${JSON.stringify({ error: String(spawnErr) })}\n\n`);
         res.end();
@@ -5834,7 +5841,16 @@ async function handleRequest(req, res) {
     }
     if (url.pathname === "/api/terminal-write" && req.method === "POST") {
       const { id, data } = await readBody(req);
-      devPtys.get(id)?.proc.write(data);
+      const entry = devPtys.get(id);
+      // Validate the PTY still exists and the payload is a string. Without this,
+      // a write to an already-exited PTY (or a non-string body) silently no-ops
+      // via optional chaining yet returns {ok:true}, so the frontend believes a
+      // keystroke was delivered when it was dropped. Mirrors the Rust backend's
+      // "session not found" error from terminal_write.
+      if (!entry || typeof data !== "string") {
+        return jsonResponse(req, res, { ok: false, error: "session not found" }, 404);
+      }
+      entry.proc.write(data);
       return jsonResponse(req, res, { ok: true });
     }
     if (url.pathname === "/api/terminal-resize" && req.method === "POST") {
