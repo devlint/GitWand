@@ -164,7 +164,7 @@ function gitSpawn(args, cwd) {
 let _mockGithubPolls = 0;
 
 // ── Terminal PTY state (dev:web only) ────────────────────────────────────────
-const devPtys = new Map(); // id -> { proc, res }
+const devPtys = new Map(); // id -> { proc }
 let devPtyNextId = 1;
 
 /**

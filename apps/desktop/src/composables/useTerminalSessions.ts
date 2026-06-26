@@ -1,4 +1,10 @@
 import { ref, reactive, type Ref } from "vue";
+import {
+  terminalOpen,
+  terminalWrite,
+  terminalResize,
+  terminalClose,
+} from "../utils/backend";
 
 export type TerminalShortcut = "new" | "close" | { switch: number } | null;
 
@@ -12,12 +18,6 @@ export function resolveTerminalShortcut(e: KeyboardEvent, focused: boolean): Ter
   if (/^[1-9]$/.test(e.key)) return { switch: Number(e.key) - 1 };
   return null;
 }
-import {
-  terminalOpen,
-  terminalWrite,
-  terminalResize,
-  terminalClose,
-} from "../utils/backend";
 
 export type TerminalTabType = "shell" | "claude" | "codex";
 
@@ -187,9 +187,10 @@ export function useTerminalSessions() {
     if (t) { clearTimeout(t); debounceTimers.delete(repoPath); }
     firstPendingAt.delete(repoPath);
     const list = listFor(repoPath);
-    for (const tab of list) {
-      if (tab.sessionId >= 0) await terminalClose(tab.sessionId);
-    }
+    // Independent IPC calls — close all sessions concurrently.
+    await Promise.all(
+      list.filter((tab) => tab.sessionId >= 0).map((tab) => terminalClose(tab.sessionId)),
+    );
     tabsByRepo.set(repoPath, []);
     activeByRepo.set(repoPath, null);
   }

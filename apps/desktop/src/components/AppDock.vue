@@ -295,7 +295,7 @@ onBeforeUnmount(() => {
     :style="[dockStyle, { '--dock-idle-opacity': idleOpacity }]"
     :aria-label="t('sidebar.tabChanges')"
   >
-    <div class="app-dock__pill" :class="{ 'app-dock__pill--icons-only': iconsOnly, 'app-dock__pill--vertical': vertical }" :style="{ '--dock-idle-opacity': idleOpacity }">
+    <div class="app-dock__pill" :class="{ 'app-dock__pill--icons-only': iconsOnly, 'app-dock__pill--vertical': vertical }">
       <!-- Drag handle — only when the dock is unlocked. -->
       <button
         v-if="unlocked"

@@ -467,6 +467,10 @@ let moveStartX    = 0;
 let moveStartY    = 0;
 let moveStartLeft = 0;
 let moveStartTop  = 0;
+let moveBoundW    = 0;
+let moveBoundH    = 0;
+let movePanelW    = 0;
+let movePanelH    = 0;
 let isMoving      = false;
 function onMoveStart(e: MouseEvent) {
   // Bottom mode is docked full-width — the panel can't be moved.
@@ -477,6 +481,12 @@ function onMoveStart(e: MouseEvent) {
   moveStartY    = e.clientY;
   moveStartLeft = left.value;
   moveStartTop  = top.value;
+  // Snapshot container/panel dimensions once — they don't change during the
+  // drag, so re-reading offset* per mousemove would force a layout reflow.
+  moveBoundW = tpRef.value?.parentElement?.offsetWidth ?? window.innerWidth;
+  moveBoundH = tpRef.value?.parentElement?.offsetHeight ?? window.innerHeight;
+  movePanelW = tpRef.value?.offsetWidth  ?? width.value;
+  movePanelH = tpRef.value?.offsetHeight ?? height.value;
   isMoving      = true;
   document.body.style.userSelect = "none";
   document.body.style.cursor     = "grabbing";
@@ -486,12 +496,8 @@ function onMoveStart(e: MouseEvent) {
 function onMoveMove(e: MouseEvent) {
   if (!isMoving) return;
   e.preventDefault();
-  const containerW = tpRef.value?.parentElement?.offsetWidth ?? window.innerWidth;
-  const containerH = tpRef.value?.parentElement?.offsetHeight ?? window.innerHeight;
-  const panelW     = tpRef.value?.offsetWidth  ?? width.value;
-  const panelH     = tpRef.value?.offsetHeight ?? height.value;
-  left.value = Math.max(0, Math.min(containerW - panelW, moveStartLeft + (e.clientX - moveStartX)));
-  top.value  = Math.max(0, Math.min(containerH - panelH, moveStartTop  + (e.clientY - moveStartY)));
+  left.value = Math.max(0, Math.min(moveBoundW - movePanelW, moveStartLeft + (e.clientX - moveStartX)));
+  top.value  = Math.max(0, Math.min(moveBoundH - movePanelH, moveStartTop  + (e.clientY - moveStartY)));
 }
 function onMoveEnd() {
   localStorage.setItem(LEFT_KEY, String(left.value));
@@ -506,12 +512,14 @@ function onMoveEnd() {
 // Drag-to-resize-width (right edge handle).
 let resizeXStartX = 0;
 let resizeXStartW = 0;
+let resizeXBoundW = 0;
 const isResizingX = ref(false);
 function onResizeXStart(e: MouseEvent) {
   e.preventDefault();
   e.stopPropagation();
   resizeXStartX = e.clientX;
   resizeXStartW = tpRef.value?.offsetWidth ?? width.value;
+  resizeXBoundW = tpRef.value?.parentElement?.offsetWidth ?? window.innerWidth;
   isResizingX.value = true;
   document.body.style.userSelect = "none";
   document.body.style.cursor     = "ew-resize";
@@ -521,9 +529,8 @@ function onResizeXStart(e: MouseEvent) {
 function onResizeXMove(e: MouseEvent) {
   if (!isResizingX.value) return;
   e.preventDefault();
-  const containerW = tpRef.value?.parentElement?.offsetWidth ?? window.innerWidth;
   const newW = resizeXStartW + (e.clientX - resizeXStartX);
-  width.value = Math.max(300, Math.min(containerW - left.value, newW));
+  width.value = Math.max(300, Math.min(resizeXBoundW - left.value, newW));
 }
 function onResizeXEnd() {
   localStorage.setItem(WIDTH_KEY, String(width.value));
@@ -577,7 +584,7 @@ function onResizeLeftEnd() {
 // horizontal edge (left / right). Floating panel, so all four corners resize.
 type Corner = "tl" | "tr" | "bl" | "br";
 const resizingCorner = ref<Corner | null>(null);
-let cornerStartX = 0, cornerStartY = 0, cornerStartW = 0, cornerStartH = 0, cornerStartLeft = 0, cornerStartTop = 0;
+let cornerStartX = 0, cornerStartY = 0, cornerStartW = 0, cornerStartH = 0, cornerStartLeft = 0, cornerStartTop = 0, cornerBoundW = 0;
 function onResizeCornerStart(corner: Corner, e: MouseEvent) {
   e.preventDefault();
   e.stopPropagation();
@@ -587,6 +594,7 @@ function onResizeCornerStart(corner: Corner, e: MouseEvent) {
   cornerStartH    = height.value;
   cornerStartLeft = left.value;
   cornerStartTop  = top.value;
+  cornerBoundW    = tpRef.value?.parentElement?.offsetWidth ?? window.innerWidth;
   resizingCorner.value = corner;
   document.body.style.userSelect = "none";
   // tl/br share the ↘↖ axis, tr/bl share the ↗↙ axis.
@@ -610,9 +618,8 @@ function onResizeCornerMove(e: MouseEvent) {
     height.value = Math.max(120, cornerStartH + dy);
   }
   // Horizontal edge.
-  const containerW = tpRef.value?.parentElement?.offsetWidth ?? window.innerWidth;
   if (corner === "tr" || corner === "br") {
-    width.value = Math.max(300, Math.min(containerW - left.value, cornerStartW + dx));
+    width.value = Math.max(300, Math.min(cornerBoundW - left.value, cornerStartW + dx));
   } else {
     const rightEdge = cornerStartLeft + cornerStartW; // fixed
     const newLeft = Math.max(0, Math.min(rightEdge - 300, cornerStartLeft + dx));
