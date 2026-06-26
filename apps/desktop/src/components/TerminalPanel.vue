@@ -920,6 +920,20 @@ onBeforeUnmount(() => {
         <div v-if="!tabs.length" class="tp__empty">
           {{ t('terminal.emptyHint') }}
         </div>
+
+        <!-- Floating search affordance — bottom-right, semi-transparent until
+             hovered. Hidden while the search bar is already open. -->
+        <button
+          v-if="tabs.length && !searchVisible"
+          class="tp__search-fab"
+          :title="t('terminal.ctxSearch')"
+          :aria-label="t('terminal.ctxSearch')"
+          @click="openSearch"
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/>
+          </svg>
+        </button>
       </div>
     </div>
 
@@ -1217,6 +1231,35 @@ onBeforeUnmount(() => {
   padding: 0px 7px;
   background-color: black;
   border-radius: 0px var(--radius-sm) var(--radius-sm) var(--radius-sm);
+}
+
+/* Floating search affordance — bottom-right of the terminal surface. Semi-
+   transparent at rest, fully opaque on hover. */
+.tp__search-fab {
+  position: absolute;
+  right: 16px;
+  top: 10px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-bg-tertiary) 80%, transparent);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  color: var(--color-text);
+  cursor: pointer;
+  opacity: 0.45;
+  transition: opacity 0.15s, background 0.15s;
+}
+
+.tp__search-fab:hover {
+  opacity: 1;
+  background: var(--color-bg-tertiary);
 }
 
 .tp__empty {
