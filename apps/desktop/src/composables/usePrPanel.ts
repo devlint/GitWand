@@ -54,7 +54,18 @@ export function isMergeConflict(mergeable: string | null | undefined): boolean {
   return ["CONFLICTING", "CONFLICTS", "DIRTY"].includes((mergeable || "").toUpperCase());
 }
 
-export function usePrPanel(cwd: Ref<string>) {
+/** Optional host hooks so the panel can notify the app of side effects. */
+export interface PrPanelOptions {
+  /**
+   * Called after an action mutates the local working copy (e.g. `checkoutPr`
+   * switches the checked-out branch). The host wires this to its repo-state
+   * refresh so the branch indicator / status / log stay in sync — otherwise the
+   * checkout happens on disk but the UI keeps showing the previous branch.
+   */
+  onRepoMutated?: () => void | Promise<void>;
+}
+
+export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
 
   // Disk-persisted SWR cache — paints the list/detail instantly on repo-switch
   // or cold app start, then revalidates in the background. See usePrCache.ts.
@@ -736,6 +747,9 @@ export function usePrPanel(cwd: Ref<string>) {
     try {
       await forge.value.checkoutPR(cwd.value, pr.number);
       success.value = t("pr.success.checkoutDone", pr.number);
+      // The branch changed on disk — let the host refresh repo state so the
+      // current-branch indicator / status / log reflect the checkout.
+      await opts.onRepoMutated?.();
     } catch (err: any) { error.value = err.message; }
   }
 
