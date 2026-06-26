@@ -405,9 +405,9 @@ export const defaultAppSettings: AppSettings = {
   // v3.x terminal
   terminalFontSize:                  13,
   terminalShell:                     "",
-  terminalMode:                      "floating",
-  terminalPrevMode:                  "floating",
-  terminalHideOnNav:                 true,
+  terminalMode:                      "bottom",
+  terminalPrevMode:                  "bottom",
+  terminalHideOnNav:                 false,
   terminalContextMenu:               true,
   terminalCopyOnSelect:              false,
   terminalPasteOnRightClick:         false,

@@ -257,9 +257,9 @@ const defaultSettings: Settings = {
   // v3.x terminal
   terminalFontSize: 13,
   terminalShell: "",
-  terminalMode: "floating",
-  terminalPrevMode: "floating",
-  terminalHideOnNav: true,
+  terminalMode: "bottom",
+  terminalPrevMode: "bottom",
+  terminalHideOnNav: false,
   terminalContextMenu: true,
   terminalCopyOnSelect: false,
   terminalPasteOnRightClick: false,
@@ -287,6 +287,21 @@ function updateSetting<K extends keyof Settings>(key: K, value: Settings[K]) {
   // Keep the shared reactive settings (read by AppDock and friends) in sync so
   // changes like dock order / position apply live, not only on panel close.
   refreshSharedSettings();
+}
+
+// Terminal layout — mirrors the dock context menu. Fullscreen is an overlay on
+// top of a base layout (floating/bottom), so entering it preserves the base in
+// terminalPrevMode; floating/bottom set both so fullscreen returns to it.
+function setTerminalLayout(mode: "floating" | "bottom" | "fullscreen") {
+  if (mode === "fullscreen") {
+    if (settings.value.terminalMode !== "fullscreen") {
+      updateSetting("terminalPrevMode", settings.value.terminalMode as "floating" | "bottom");
+    }
+    updateSetting("terminalMode", "fullscreen");
+  } else {
+    updateSetting("terminalMode", mode);
+    updateSetting("terminalPrevMode", mode);
+  }
 }
 
 // ─── Dock order ───────────────────────────────────────────
@@ -1858,6 +1873,27 @@ function deleteReleaseNoteTemplate(id: string) {
 
         <!-- ═══ TERMINAL ═══ -->
         <template v-if="activeSettingsTab === 'terminal'">
+          <!-- Layout mode -->
+          <div class="sp-row">
+            <label class="sp-label" for="setting-terminal-mode">{{ t('terminal.menuLayout') }}</label>
+            <select id="setting-terminal-mode" class="sp-select" :value="settings.terminalMode"
+              @change="setTerminalLayout(($event.target as HTMLSelectElement).value as 'floating' | 'bottom' | 'fullscreen')">
+              <option value="floating">{{ t('terminal.modeFloating') }}</option>
+              <option value="bottom">{{ t('terminal.modeBottom') }}</option>
+              <option value="fullscreen">{{ t('terminal.modeFullscreen') }}</option>
+            </select>
+          </div>
+
+          <!-- Hide on menu switch -->
+          <div class="sp-row sp-row--checkbox">
+            <label class="sp-checkbox-label" for="setting-terminal-hide-on-nav">
+              <input id="setting-terminal-hide-on-nav" type="checkbox" class="sp-checkbox"
+                :checked="settings.terminalHideOnNav"
+                @change="updateSetting('terminalHideOnNav', ($event.target as HTMLInputElement).checked)" />
+              <span>{{ t('terminal.menuHideOnNav') }}</span>
+            </label>
+          </div>
+
           <!-- Terminal font size -->
           <div class="sp-row">
             <label class="sp-label" for="setting-terminal-font-size">{{ t('settings.terminalFontSize') }}</label>
