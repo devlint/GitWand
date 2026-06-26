@@ -3,6 +3,7 @@ import { ref, onBeforeUnmount, watch, nextTick, computed, onMounted, onActivated
 import { useTerminalSessions, type TerminalTab } from "../composables/useTerminalSessions";
 import { useI18n } from "../composables/useI18n";
 import { useSettings } from "../composables/useSettings";
+import { clipboardReadText, clipboardWriteText } from "../utils/backend";
 
 const props = defineProps<{ repoPath: string }>();
 const emit = defineEmits<{
@@ -41,6 +42,65 @@ function selectDropdownItem(action: () => void) {
   showDropdown.value = false;
   action();
 }
+
+// ─── Right-click context menu ────────────────────────────
+// Position is viewport-relative (clientX/clientY) — the menu is position:fixed.
+const ctxMenu = ref<{ visible: boolean; x: number; y: number; tabId: number | null }>({
+  visible: false, x: 0, y: 0, tabId: null,
+});
+
+// Close the context menu on any outside click (same single-listener pattern as
+// the "+" dropdown). watchEffect adds the listener while open, removes when shut.
+watchEffect((onCleanup) => {
+  if (!ctxMenu.value.visible) return;
+  function close() { ctxMenu.value.visible = false; }
+  document.addEventListener("click", close);
+  onCleanup(() => document.removeEventListener("click", close));
+});
+
+// Write the clipboard contents to a tab's PTY (the running shell), mirroring how
+// typed input flows through term.onData → sessions.write.
+async function pasteInto(tabId: number) {
+  const tab = tabs.value.find((t) => t.id === tabId);
+  if (!tab || tab.sessionId < 0) return;
+  const text = await clipboardReadText();
+  if (text) sessions.write(tab.sessionId, text);
+}
+
+function onContextMenu(e: MouseEvent, tab: TerminalTab) {
+  // Paste-on-right-click wins: paste straight into the PTY, no menu.
+  if (settings.value.terminalPasteOnRightClick) {
+    e.preventDefault();
+    pasteInto(tab.id);
+    return;
+  }
+  // Otherwise show the context menu (when enabled). If both are off, fall
+  // through to the browser default.
+  if (!settings.value.terminalContextMenu) return;
+  e.preventDefault();
+  ctxMenu.value = { visible: true, x: e.clientX, y: e.clientY, tabId: tab.id };
+}
+
+function closeCtxMenu() { ctxMenu.value.visible = false; }
+
+function ctxEntry() {
+  const id = ctxMenu.value.tabId;
+  return id == null ? undefined : xterms.get(id);
+}
+
+function ctxCopy() {
+  const sel = ctxEntry()?.term.getSelection();
+  if (sel) clipboardWriteText(sel);
+  closeCtxMenu();
+}
+function ctxPaste() {
+  const id = ctxMenu.value.tabId;
+  if (id != null) pasteInto(id);
+  closeCtxMenu();
+}
+function ctxClear() { ctxEntry()?.term.clear(); closeCtxMenu(); }
+function ctxSelectAll() { ctxEntry()?.term.selectAll(); closeCtxMenu(); }
+function ctxSearch() { openSearch(); closeCtxMenu(); }
 
 // xterm instances kept OUTSIDE Vue reactivity — plain Map only.
 type XtermEntry = {
@@ -256,6 +316,15 @@ async function mountTab(tab: TerminalTab) {
   term.onTitleChange((title: string) =>
     sessions.setTitleFromShell(props.repoPath, tab.id, title),
   );
+
+  // Copy-on-select — mirror the selection to the clipboard as soon as it is
+  // made (opt-in via settings). Empty selections (a plain click clears it) are
+  // ignored so the clipboard isn't wiped.
+  term.onSelectionChange(() => {
+    if (!settings.value.terminalCopyOnSelect) return;
+    const sel = term.getSelection();
+    if (sel) clipboardWriteText(sel);
+  });
 
   const ro = new ResizeObserver(() => {
     fit.fit();
@@ -845,6 +914,7 @@ onBeforeUnmount(() => {
           class="tp__host"
           :ref="(el) => { if (el) hostRefs[tab.id] = el as HTMLElement; }"
           v-show="tab.id === activeId"
+          @contextmenu="onContextMenu($event, tab)"
         />
         <!-- No open tabs → keep the dark terminal surface with a hint. -->
         <div v-if="!tabs.length" class="tp__empty">
@@ -852,6 +922,25 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </div>
+
+    <!-- Right-click context menu — teleported to <body> because .tp uses
+         backdrop-filter, which establishes a containing block that would trap
+         position:fixed (clientX/clientY are viewport-relative). -->
+    <Teleport to="body">
+      <div
+        v-if="ctxMenu.visible"
+        class="tp__ctx"
+        :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
+        @click.stop
+        @contextmenu.prevent
+      >
+        <button class="tp__ctx-item" @click="ctxCopy">{{ t('terminal.ctxCopy') }}</button>
+        <button class="tp__ctx-item" @click="ctxPaste">{{ t('terminal.ctxPaste') }}</button>
+        <button class="tp__ctx-item" @click="ctxClear">{{ t('terminal.ctxClear') }}</button>
+        <button class="tp__ctx-item" @click="ctxSelectAll">{{ t('terminal.ctxSelectAll') }}</button>
+        <button class="tp__ctx-item" @click="ctxSearch">{{ t('terminal.ctxSearch') }}</button>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -1197,6 +1286,35 @@ onBeforeUnmount(() => {
   border-top: 1px solid var(--color-border);
   margin-top: 2px;
   padding-top: 8px;
+}
+
+/* Right-click context menu — teleported to <body>, positioned at the cursor. */
+.tp__ctx {
+  position: fixed;
+  background: var(--bg-elevated, var(--color-bg-secondary));
+  border: 1px solid var(--border, var(--color-border));
+  border-radius: var(--radius-sm);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  min-width: 140px;
+  padding: 2px 0;
+}
+
+.tp__ctx-item {
+  display: block;
+  width: 100%;
+  padding: 6px 12px;
+  text-align: left;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--text, var(--color-text));
+  white-space: nowrap;
+}
+
+.tp__ctx-item:hover {
+  background: var(--hover, var(--color-hover));
 }
 
 .tp__search {

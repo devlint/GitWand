@@ -328,6 +328,12 @@ export interface AppSettings {
   terminalPrevMode: Exclude<TerminalMode, "fullscreen">;
   /** Hide the terminal when switching views from the dock. Default: true. */
   terminalHideOnNav: boolean;
+  /** Show the right-click context menu in the terminal. Default: true. */
+  terminalContextMenu: boolean;
+  /** Copy the current selection to the clipboard as soon as it is made. Default: false. */
+  terminalCopyOnSelect: boolean;
+  /** Paste the clipboard on right-click instead of opening the context menu. Default: false. */
+  terminalPasteOnRightClick: boolean;
 }
 
 export type TerminalMode = "floating" | "fullscreen" | "bottom";
@@ -402,6 +408,9 @@ export const defaultAppSettings: AppSettings = {
   terminalMode:                      "floating",
   terminalPrevMode:                  "floating",
   terminalHideOnNav:                 true,
+  terminalContextMenu:               true,
+  terminalCopyOnSelect:              false,
+  terminalPasteOnRightClick:         false,
 };
 
 const SETTINGS_KEY = "gitwand-settings";

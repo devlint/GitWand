@@ -3390,6 +3390,45 @@ export async function installUpdate(
   }
 }
 
+// ─── Clipboard ───────────────────────────────────────────────────────────
+// In the packaged app we go through the clipboard-manager plugin: WebKitGTK
+// (Linux Tauri) does not implement navigator.clipboard.readText(), so a plain
+// browser read silently fails there. In web-dev mode (no Tauri) we fall back to
+// navigator.clipboard, which Chromium supports on http://localhost.
+
+/** Read the system clipboard as text. Returns "" if unavailable/denied. */
+export async function clipboardReadText(): Promise<string> {
+  if (isTauri()) {
+    try {
+      const { readText } = await import("@tauri-apps/plugin-clipboard-manager");
+      return (await readText()) ?? "";
+    } catch {
+      return "";
+    }
+  }
+  try {
+    return await navigator.clipboard.readText();
+  } catch {
+    return "";
+  }
+}
+
+/** Write text to the system clipboard. Best-effort — never throws. */
+export async function clipboardWriteText(text: string): Promise<void> {
+  if (isTauri()) {
+    try {
+      const { writeText } = await import("@tauri-apps/plugin-clipboard-manager");
+      await writeText(text);
+      return;
+    } catch {
+      return;
+    }
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch { /* clipboard perms may be denied */ }
+}
+
 // ─── MCP catalog (§6.x) ──────────────────────────────────────────────────
 
 export interface McpConfigFile {

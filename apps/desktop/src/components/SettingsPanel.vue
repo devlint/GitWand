@@ -187,6 +187,9 @@ interface Settings {
   terminalMode: "floating" | "fullscreen" | "bottom";
   terminalPrevMode: "floating" | "bottom";
   terminalHideOnNav: boolean;
+  terminalContextMenu: boolean;
+  terminalCopyOnSelect: boolean;
+  terminalPasteOnRightClick: boolean;
 }
 
 const defaultSettings: Settings = {
@@ -257,6 +260,9 @@ const defaultSettings: Settings = {
   terminalMode: "floating",
   terminalPrevMode: "floating",
   terminalHideOnNav: true,
+  terminalContextMenu: true,
+  terminalCopyOnSelect: false,
+  terminalPasteOnRightClick: false,
 };
 
 function loadSettings(): Settings {
@@ -1869,6 +1875,39 @@ function deleteReleaseNoteTemplate(id: string) {
             <input id="setting-terminal-shell" class="sp-input mono" type="text" :value="settings.terminalShell"
               @input="updateSetting('terminalShell', ($event.target as HTMLInputElement).value)"
               :placeholder="t('settings.terminalShellHint')" />
+          </div>
+
+          <!-- Right-click context menu -->
+          <div class="sp-row sp-row--checkbox">
+            <label class="sp-checkbox-label" for="setting-terminal-context-menu">
+              <input id="setting-terminal-context-menu" type="checkbox" class="sp-checkbox"
+                :checked="settings.terminalContextMenu"
+                @change="updateSetting('terminalContextMenu', ($event.target as HTMLInputElement).checked)" />
+              <span>{{ t('settings.terminalContextMenu') }}</span>
+            </label>
+            <span class="sp-hint">{{ t('settings.terminalContextMenuHint') }}</span>
+          </div>
+
+          <!-- Copy on select -->
+          <div class="sp-row sp-row--checkbox">
+            <label class="sp-checkbox-label" for="setting-terminal-copy-on-select">
+              <input id="setting-terminal-copy-on-select" type="checkbox" class="sp-checkbox"
+                :checked="settings.terminalCopyOnSelect"
+                @change="updateSetting('terminalCopyOnSelect', ($event.target as HTMLInputElement).checked)" />
+              <span>{{ t('settings.terminalCopyOnSelect') }}</span>
+            </label>
+            <span class="sp-hint">{{ t('settings.terminalCopyOnSelectHint') }}</span>
+          </div>
+
+          <!-- Paste on right-click -->
+          <div class="sp-row sp-row--checkbox">
+            <label class="sp-checkbox-label" for="setting-terminal-paste-right-click">
+              <input id="setting-terminal-paste-right-click" type="checkbox" class="sp-checkbox"
+                :checked="settings.terminalPasteOnRightClick"
+                @change="updateSetting('terminalPasteOnRightClick', ($event.target as HTMLInputElement).checked)" />
+              <span>{{ t('settings.terminalPasteOnRightClick') }}</span>
+            </label>
+            <span class="sp-hint">{{ t('settings.terminalPasteOnRightClickHint') }}</span>
           </div>
         </template>
 
