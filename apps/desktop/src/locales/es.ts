@@ -2169,6 +2169,7 @@ const es: Locale = {
     headerTooltip: "Abrir terminal",
     fullscreen: "Pantalla completa",
     exitFullscreen: "Salir de pantalla completa",
+    emptyHint: "Haz clic en + para abrir un terminal",
     menuShell: "Shell",
     menuClaude: "Claude Code",
     menuCodex: "Codex",

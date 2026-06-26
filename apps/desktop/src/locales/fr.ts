@@ -2180,6 +2180,7 @@ const fr: Locale = {
     headerTooltip: "Ouvrir le terminal",
     fullscreen: "Plein écran",
     exitFullscreen: "Quitter le plein écran",
+    emptyHint: "Cliquez sur + pour ouvrir un terminal",
     menuShell: "Shell",
     menuClaude: "Claude Code",
     menuCodex: "Codex",

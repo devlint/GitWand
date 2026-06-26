@@ -2208,6 +2208,7 @@ const en = {
     headerTooltip: "Open terminal",
     fullscreen: "Fullscreen",
     exitFullscreen: "Exit fullscreen",
+    emptyHint: "Click + to open a terminal",
     menuShell: "Shell",
     menuClaude: "Claude Code",
     menuCodex: "Codex",

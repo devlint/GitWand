@@ -2169,6 +2169,7 @@ const ptBR: Locale = {
     headerTooltip: "Abrir terminal",
     fullscreen: "Tela cheia",
     exitFullscreen: "Sair da tela cheia",
+    emptyHint: "Clique em + para abrir um terminal",
     menuShell: "Shell",
     menuClaude: "Claude Code",
     menuCodex: "Codex",

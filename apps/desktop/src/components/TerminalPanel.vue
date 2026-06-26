@@ -154,7 +154,7 @@ function kickResize(tab: TerminalTab) {
   sessions.resize(tab.sessionId, cols, Math.max(1, rows - 1));
   setTimeout(() => {
     if (tab.sessionId >= 0) sessions.resize(tab.sessionId, cols, rows);
-  }, 50);
+  }, 200);
 }
 
 // Retry a fit until the host element actually has a size, then sync the PTY and
@@ -165,7 +165,7 @@ function refitWhenSized(tabId: number, el: HTMLElement, attempt = 0) {
   const entry = xterms.get(tabId);
   if (!entry) return; // tab closed mid-retry
   if (el.offsetWidth === 0 || el.offsetHeight === 0) {
-    if (attempt < 20) setTimeout(() => refitWhenSized(tabId, el, attempt + 1), 32);
+    if (attempt < 20) setTimeout(() => refitWhenSized(tabId, el, attempt + 1), 100);
     return;
   }
   entry.fit.fit();
@@ -719,6 +719,10 @@ onBeforeUnmount(() => {
           :ref="(el) => { if (el) hostRefs[tab.id] = el as HTMLElement; }"
           v-show="tab.id === activeId"
         />
+        <!-- No open tabs → keep the dark terminal surface with a hint. -->
+        <div v-if="!tabs.length" class="tp__empty">
+          {{ t('terminal.emptyHint') }}
+        </div>
       </div>
     </div>
   </div>
@@ -925,6 +929,19 @@ onBeforeUnmount(() => {
   padding: 0px 7px;
   background-color: black;
   border-radius: 0px var(--radius-sm) var(--radius-sm) var(--radius-sm);
+}
+
+.tp__empty {
+  position: absolute;
+  inset: 0px 6px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: black;
+  border-radius: 0px var(--radius-sm) var(--radius-sm) var(--radius-sm);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xl);
+  user-select: none;
 }
 
 .terminal {
