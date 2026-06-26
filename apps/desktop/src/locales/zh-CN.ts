@@ -2155,6 +2155,7 @@ const zhCN: Locale = {
     fullscreen: "全屏",
     exitFullscreen: "退出全屏",
     emptyHint: "点击 + 打开终端",
+    agentOpenFailed: "无法打开 {0}。请确认 {0} CLI 已安装并在 PATH 中。",
     menuShell: "Shell",
     menuClaude: "Claude Code",
     menuCodex: "Codex",

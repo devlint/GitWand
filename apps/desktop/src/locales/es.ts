@@ -2170,6 +2170,7 @@ const es: Locale = {
     fullscreen: "Pantalla completa",
     exitFullscreen: "Salir de pantalla completa",
     emptyHint: "Haz clic en + para abrir un terminal",
+    agentOpenFailed: "No se pudo abrir {0}. Asegúrate de que la CLI de {0} esté instalada y en el PATH.",
     menuShell: "Shell",
     menuClaude: "Claude Code",
     menuCodex: "Codex",

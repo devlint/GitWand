@@ -2170,6 +2170,7 @@ const ptBR: Locale = {
     fullscreen: "Tela cheia",
     exitFullscreen: "Sair da tela cheia",
     emptyHint: "Clique em + para abrir um terminal",
+    agentOpenFailed: "Não foi possível abrir {0}. Verifique se a CLI do {0} está instalada e no PATH.",
     menuShell: "Shell",
     menuClaude: "Claude Code",
     menuCodex: "Codex",

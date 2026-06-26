@@ -2209,6 +2209,7 @@ const en = {
     fullscreen: "Fullscreen",
     exitFullscreen: "Exit fullscreen",
     emptyHint: "Click + to open a terminal",
+    agentOpenFailed: "Couldn't open {0}. Make sure the {0} CLI is installed and on your PATH.",
     menuShell: "Shell",
     menuClaude: "Claude Code",
     menuCodex: "Codex",

@@ -1331,7 +1331,23 @@ async function onLaunchAgent(payload: { path: string; tool: string }) {
     payload.tool === "claude" ? "claude"
     : payload.tool === "codex" ? "codex"
     : "shell";
-  await openTerminalTab(payload.path, tabType);
+  try {
+    await openTerminalTab(payload.path, tabType);
+  } catch (err) {
+    reportAgentLaunchError(tabType, err);
+  }
+}
+
+// The PTY spawn fails (binary not found) when the agent CLI isn't installed or
+// isn't on PATH — surface a clear toast instead of the raw "spawn shell failed".
+function reportAgentLaunchError(tabType: TerminalTabType, err: unknown) {
+  console.error("Launch agent failed:", err);
+  if (tabType === "claude" || tabType === "codex") {
+    const name = tabType === "claude" ? "Claude Code" : "Codex";
+    repoError.value = t("terminal.agentOpenFailed", name);
+  } else {
+    repoError.value = (err as { message?: string })?.message ?? String(err);
+  }
 }
 
 async function onNewAiTask() {
@@ -1342,7 +1358,7 @@ async function onNewAiTask() {
     await openRepo(scratch.path);
     await openTerminalTab(scratch.path, "claude");
   } catch (err) {
-    console.error("New AI task failed:", err);
+    reportAgentLaunchError("claude", err);
   }
 }
 
