@@ -144,7 +144,6 @@ const emit = defineEmits<{
   openHelp: [];
   openStash: [];
   openTags: [];
-  openTerminal: [];
   discardAll: [];
   changeView: [mode: 'dashboard' | 'changes' | 'history' | 'prs' | 'launchpad'];
 }>();
@@ -326,25 +325,6 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
           <span>{{ t('offline.label') }}</span>
         </div>
         <div class="header-separator header-separator--offline" aria-hidden="true"></div>
-      </template>
-
-      <!-- Primary destinations — labeled pills so they stand out from the
-           utility icons (theme / help / settings) that follow the divider. -->
-      <template v-if="hasRepo">
-        <button
-          class="btn btn--secondary header-feature-btn"
-          v-tooltip="t('terminal.headerTooltip')"
-          :aria-label="t('terminal.headerLabel')"
-          @click="emit('openTerminal')"
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <polyline points="4 17 10 11 4 5"/>
-            <line x1="12" y1="19" x2="20" y2="19"/>
-          </svg>
-          <span>{{ t('terminal.headerLabel') }}</span>
-        </button>
-
-        <div class="header-separator" aria-hidden="true"></div>
       </template>
 
       <!-- Theme toggle -->
@@ -762,21 +742,6 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
 
 .btn--secondary { background: var(--color-bg-tertiary); color: var(--color-text); }
 .btn--secondary:hover:not(:disabled) { background: var(--color-border); }
-
-/* Header feature pills (Launchpad / Workspace / Agents) — labeled, slightly
-   tighter than row-2 actions, with an accent active state for the open view. */
-.header-feature-btn {
-  height: 32px;
-  padding: 0 var(--space-4);
-  font-size: var(--font-size-sm);
-}
-.header-feature-btn svg { flex-shrink: 0; opacity: 0.85; }
-.btn--feature-active,
-.btn--feature-active:hover:not(:disabled) {
-  background: var(--color-accent-soft);
-  color: var(--color-accent);
-}
-.btn--feature-active svg { opacity: 1; }
 
 .btn--primary { background: var(--color-accent); color: var(--color-accent-text); }
 .btn--primary:hover:not(:disabled) { background: var(--color-accent-hover); }

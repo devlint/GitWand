@@ -22,10 +22,13 @@ const props = defineProps<{
   changesCount?: number;
   /** Open-PR count — shown as a badge on the PRs entry. */
   prCount?: number;
+  /** Terminal panel currently open — drives the terminal tile's active state. */
+  terminalActive?: boolean;
 }>();
 
 const emit = defineEmits<{
   changeView: [mode: ViewMode];
+  toggleTerminal: [];
 }>();
 
 const { t } = useI18n();
@@ -251,8 +254,8 @@ onBeforeUnmount(() => {
   <nav
     ref="dockEl"
     class="app-dock"
-    :class="{ 'app-dock--unlocked': unlocked, 'app-dock--vert-anchor': vertical && atDefaultAnchor }"
-    :style="dockStyle"
+    :class="{ 'app-dock--unlocked': unlocked, 'app-dock--vertical': vertical, 'app-dock--vert-anchor': vertical && atDefaultAnchor }"
+    :style="[dockStyle, { '--dock-idle-opacity': idleOpacity }]"
     :aria-label="t('sidebar.tabChanges')"
   >
     <div class="app-dock__pill" :class="{ 'app-dock__pill--icons-only': iconsOnly, 'app-dock__pill--vertical': vertical }" :style="{ '--dock-idle-opacity': idleOpacity }">
@@ -318,6 +321,23 @@ onBeforeUnmount(() => {
       </template>
     </div>
 
+    <!-- Terminal tile — a separate rounded square that rides along with the
+         dock (same position/lock), opening the floating terminal panel. -->
+    <button
+      class="dock-terminal"
+      :class="{ 'dock-terminal--active': terminalActive }"
+      :aria-pressed="terminalActive"
+      :title="t('terminal.headerTooltip')"
+      :aria-label="t('terminal.headerLabel')"
+      @click="emit('toggleTerminal')"
+      @contextmenu="openMenu($event, null)"
+    >
+      <svg class="dock-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <polyline points="4 17 10 11 4 5"/>
+        <line x1="12" y1="19" x2="20" y2="19"/>
+      </svg>
+    </button>
+
     <!-- Right-click context menu (entry-targeted + global actions).
          Teleported to <body> so its fixed positioning is relative to the
          viewport — the dock's own translateX(-50%) transform would otherwise
@@ -368,6 +388,15 @@ onBeforeUnmount(() => {
   transform: translateX(-50%);
   z-index: 50;
   pointer-events: none;
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-2, 6px);
+}
+
+/* Vertical dock → stack the terminal tile under the pill. */
+.app-dock--vertical {
+  flex-direction: column;
+  align-items: stretch;
 }
 
 /* Vertical dock with no custom position → anchor to the center-left edge. */
@@ -393,8 +422,48 @@ onBeforeUnmount(() => {
   transition: opacity 0.2s ease;
 }
 
-.app-dock__pill:hover {
+.app-dock__pill:hover,
+.app-dock:hover .app-dock__pill {
   opacity: 1;
+}
+
+/* Terminal tile — mirrors the pill's chrome but as a standalone square that
+   sits flush beside the dock and shares its idle-fade behaviour. */
+.dock-terminal {
+  pointer-events: auto;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-5, 9px);
+  background: color-mix(in srgb, var(--color-bg-secondary) 97%, transparent);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md, 10px);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28), 0 2px 6px rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(8px);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  opacity: var(--dock-idle-opacity, 0.45);
+  transition: opacity 0.2s ease, background 0.15s, color 0.15s;
+}
+
+.app-dock:hover .dock-terminal {
+  opacity: 1;
+}
+
+.dock-terminal:hover {
+  color: var(--color-text);
+  background: var(--color-bg-secondary);
+}
+
+.dock-terminal--active {
+  color: var(--color-accent);
+  border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-border));
+}
+
+.dock-terminal:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
 }
 
 .dock-handle {

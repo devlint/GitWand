@@ -2647,8 +2647,7 @@ onUnmounted(() => {
       @open-rebase="showRebase = true"
       @open-worktrees="(branch) => { pendingWorktreeBranch = branch; showWorktrees = true; }"
       @open-submodules="showSubmodules = true" @open-submodule="handleOpenSubmodule" @open-search="handleOpenSearch" @open-help="showHelp = true"
-      :stash-count="stashCount" @open-stash="showStash = true" @open-tags="showTags = true"
-      @open-terminal="toggleTerminal()" />
+      :stash-count="stashCount" @open-stash="showStash = true" @open-tags="showTags = true" />
 
     <div class="app-body" :style="{ '--sidebar-width': sidebarWidth + 'px' }">
       <main class="main" :class="{ 'main--dashboard': viewMode === 'dashboard' || viewMode === 'launchpad' }">
@@ -2898,7 +2897,8 @@ onUnmounted(() => {
 
       <!-- Floating bottom-center navigation dock -->
       <AppDock v-if="hasRepo" :view-mode="viewMode" :changes-count="repoFiles.length"
-        :pr-count="prPanel.prs.value.length" @change-view="onViewModeChange" />
+        :pr-count="prPanel.prs.value.length" :terminal-active="showTerminal"
+        @change-view="onViewModeChange" @toggle-terminal="toggleTerminal()" />
     </div>
 
     <!-- In-app update modal -->
