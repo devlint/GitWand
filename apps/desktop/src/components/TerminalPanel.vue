@@ -73,9 +73,11 @@ const hostRefs = ref<Record<number, HTMLElement | undefined>>({});
 const HEIGHT_KEY = "gitwand-terminal-height";
 const LEFT_KEY   = "gitwand-terminal-left";
 const WIDTH_KEY  = "gitwand-terminal-width";
+const TOP_KEY    = "gitwand-terminal-top";
 const height = ref(Number(localStorage.getItem(HEIGHT_KEY)) || 260);
 const left   = ref(Number(localStorage.getItem(LEFT_KEY))   || 16);
 const width  = ref(Number(localStorage.getItem(WIDTH_KEY))  || 0); // 0 = not yet set; initialised on mount
+const top    = ref(Number(localStorage.getItem(TOP_KEY))    || 0); // 0 = not yet set; initialised on mount
 
 const tpRef = ref<HTMLElement | null>(null);
 
@@ -99,8 +101,14 @@ function toggleFullscreen() {
 }
 
 onMounted(() => {
+  const parent = tpRef.value?.parentElement;
   if (!width.value) {
-    width.value = Math.round((tpRef.value?.parentElement?.offsetWidth ?? window.innerWidth) * 0.5);
+    width.value = Math.round((parent?.offsetWidth ?? window.innerWidth) * 0.5);
+  }
+  if (!top.value) {
+    // First open: sit near the bottom, like the old bottom-anchored default.
+    const ph = parent?.offsetHeight ?? window.innerHeight;
+    top.value = Math.max(8, ph - height.value - 16);
   }
 });
 
@@ -109,7 +117,11 @@ const panelStyle = computed(() => {
   // Bottom mode: in-flow docked aside (position handled by .tp--bottom) so it
   // reserves layout space and pushes content up. Only the height is dynamic.
   if (bottom.value) return { height: height.value + "px" };
+  // Floating: free-positioned overlay — top + left so it floats anywhere, not
+  // pinned to the bottom edge. `bottom: auto` clears the base anchor.
   return {
+    top:    top.value    + "px",
+    bottom: "auto",
     height: height.value + "px",
     left:   left.value   + "px",
     width:  width.value  ? width.value + "px" : "50%",
@@ -405,14 +417,16 @@ function commitRename(tab: TerminalTab) {
   editingId.value = null;
 }
 
-// Drag-to-resize (vertical).
-let dragStartY = 0;
-let dragStartH = 0;
+// Drag-to-resize (top edge) — grows upward, keeping the bottom edge fixed.
+let dragStartY   = 0;
+let dragStartH   = 0;
+let dragStartTop = 0;
 const isDragging = ref(false);
 function onDragStart(e: MouseEvent) {
   e.preventDefault();
-  dragStartY = e.clientY;
-  dragStartH = height.value;
+  dragStartY   = e.clientY;
+  dragStartH   = height.value;
+  dragStartTop = top.value;
   isDragging.value = true;
   document.body.style.userSelect = "none";
   window.addEventListener("mousemove", onDragMove, { passive: false });
@@ -420,25 +434,34 @@ function onDragStart(e: MouseEvent) {
 }
 function onDragMove(e: MouseEvent) {
   e.preventDefault();
-  height.value = Math.max(120, Math.min(700, dragStartH + (dragStartY - e.clientY)));
+  height.value = Math.max(120, dragStartH + (dragStartY - e.clientY));
+  // Move the top up by the height gained so the bottom edge stays put (floating).
+  top.value = Math.max(0, dragStartTop - (height.value - dragStartH));
 }
 function onDragEnd() {
   localStorage.setItem(HEIGHT_KEY, String(height.value));
+  localStorage.setItem(TOP_KEY,    String(top.value));
   isDragging.value = false;
   document.body.style.userSelect = "";
   window.removeEventListener("mousemove", onDragMove);
   window.removeEventListener("mouseup", onDragEnd);
 }
 
-// Drag-to-move (horizontal — tab bar).
+// Drag-to-move (tab bar) — both axes so the floating panel moves freely.
 let moveStartX    = 0;
+let moveStartY    = 0;
 let moveStartLeft = 0;
+let moveStartTop  = 0;
 let isMoving      = false;
 function onMoveStart(e: MouseEvent) {
+  // Bottom mode is docked full-width — the panel can't be moved.
+  if (bottom.value) return;
   if ((e.target as HTMLElement).closest("button, .tp__tab, .tp__rename, .tp__menu")) return;
   e.preventDefault();
   moveStartX    = e.clientX;
+  moveStartY    = e.clientY;
   moveStartLeft = left.value;
+  moveStartTop  = top.value;
   isMoving      = true;
   document.body.style.userSelect = "none";
   document.body.style.cursor     = "grabbing";
@@ -449,12 +472,15 @@ function onMoveMove(e: MouseEvent) {
   if (!isMoving) return;
   e.preventDefault();
   const containerW = tpRef.value?.parentElement?.offsetWidth ?? window.innerWidth;
-  const panelW     = tpRef.value?.offsetWidth ?? width.value;
-  const maxLeft    = containerW - panelW - 8;
-  left.value = Math.max(0, Math.min(maxLeft, moveStartLeft + (e.clientX - moveStartX)));
+  const containerH = tpRef.value?.parentElement?.offsetHeight ?? window.innerHeight;
+  const panelW     = tpRef.value?.offsetWidth  ?? width.value;
+  const panelH     = tpRef.value?.offsetHeight ?? height.value;
+  left.value = Math.max(0, Math.min(containerW - panelW, moveStartLeft + (e.clientX - moveStartX)));
+  top.value  = Math.max(0, Math.min(containerH - panelH, moveStartTop  + (e.clientY - moveStartY)));
 }
 function onMoveEnd() {
   localStorage.setItem(LEFT_KEY, String(left.value));
+  localStorage.setItem(TOP_KEY,  String(top.value));
   isMoving                    = false;
   document.body.style.userSelect = "";
   document.body.style.cursor     = "";
@@ -482,7 +508,7 @@ function onResizeXMove(e: MouseEvent) {
   e.preventDefault();
   const containerW = tpRef.value?.parentElement?.offsetWidth ?? window.innerWidth;
   const newW = resizeXStartW + (e.clientX - resizeXStartX);
-  width.value = Math.max(300, Math.min(containerW - left.value - 8, newW));
+  width.value = Math.max(300, Math.min(containerW - left.value, newW));
 }
 function onResizeXEnd() {
   localStorage.setItem(WIDTH_KEY, String(width.value));
@@ -531,12 +557,13 @@ function onResizeLeftEnd() {
   window.removeEventListener("mouseup",   onResizeLeftEnd);
 }
 
-// Drag-to-resize from a top corner — combines vertical (height) and horizontal
-// (width, plus left for the left corner). The bottom edge is pinned, so only the
-// two top corners resize.
-const resizingCorner = ref<"left" | "right" | null>(null);
-let cornerStartX = 0, cornerStartY = 0, cornerStartW = 0, cornerStartH = 0, cornerStartLeft = 0;
-function onResizeCornerStart(side: "left" | "right", e: MouseEvent) {
+// Drag-to-resize from any corner — combines a vertical edge (top: grow upward
+// keeping the bottom fixed / bottom: grow downward keeping the top fixed) with a
+// horizontal edge (left / right). Floating panel, so all four corners resize.
+type Corner = "tl" | "tr" | "bl" | "br";
+const resizingCorner = ref<Corner | null>(null);
+let cornerStartX = 0, cornerStartY = 0, cornerStartW = 0, cornerStartH = 0, cornerStartLeft = 0, cornerStartTop = 0;
+function onResizeCornerStart(corner: Corner, e: MouseEvent) {
   e.preventDefault();
   e.stopPropagation();
   cornerStartX    = e.clientX;
@@ -544,23 +571,36 @@ function onResizeCornerStart(side: "left" | "right", e: MouseEvent) {
   cornerStartW    = tpRef.value?.offsetWidth ?? width.value;
   cornerStartH    = height.value;
   cornerStartLeft = left.value;
-  resizingCorner.value = side;
+  cornerStartTop  = top.value;
+  resizingCorner.value = corner;
   document.body.style.userSelect = "none";
-  document.body.style.cursor     = side === "left" ? "nwse-resize" : "nesw-resize";
+  // tl/br share the ↘↖ axis, tr/bl share the ↗↙ axis.
+  document.body.style.cursor = corner === "tl" || corner === "br" ? "nwse-resize" : "nesw-resize";
   window.addEventListener("mousemove", onResizeCornerMove, { passive: false });
   window.addEventListener("mouseup",   onResizeCornerEnd);
 }
 function onResizeCornerMove(e: MouseEvent) {
-  if (!resizingCorner.value) return;
+  const corner = resizingCorner.value;
+  if (!corner) return;
   e.preventDefault();
-  // Vertical — grow upward (same as the top drag handle).
-  height.value = Math.max(120, Math.min(700, cornerStartH + (cornerStartY - e.clientY)));
+  const dx = e.clientX - cornerStartX;
+  const dy = e.clientY - cornerStartY;
+  // Vertical edge.
+  if (corner === "tl" || corner === "tr") {
+    // Top edge — grow upward, keep the bottom fixed.
+    height.value = Math.max(120, cornerStartH - dy);
+    top.value = Math.max(0, cornerStartTop + (cornerStartH - height.value));
+  } else {
+    // Bottom edge — grow downward, keep the top fixed.
+    height.value = Math.max(120, cornerStartH + dy);
+  }
+  // Horizontal edge.
   const containerW = tpRef.value?.parentElement?.offsetWidth ?? window.innerWidth;
-  if (resizingCorner.value === "right") {
-    width.value = Math.max(300, Math.min(containerW - left.value - 8, cornerStartW + (e.clientX - cornerStartX)));
+  if (corner === "tr" || corner === "br") {
+    width.value = Math.max(300, Math.min(containerW - left.value, cornerStartW + dx));
   } else {
     const rightEdge = cornerStartLeft + cornerStartW; // fixed
-    const newLeft = Math.max(0, Math.min(rightEdge - 300, cornerStartLeft + (e.clientX - cornerStartX)));
+    const newLeft = Math.max(0, Math.min(rightEdge - 300, cornerStartLeft + dx));
     left.value  = newLeft;
     width.value = rightEdge - newLeft;
   }
@@ -569,11 +609,39 @@ function onResizeCornerEnd() {
   localStorage.setItem(HEIGHT_KEY, String(height.value));
   localStorage.setItem(WIDTH_KEY,  String(width.value));
   localStorage.setItem(LEFT_KEY,   String(left.value));
+  localStorage.setItem(TOP_KEY,    String(top.value));
   resizingCorner.value = null;
   document.body.style.userSelect = "";
   document.body.style.cursor     = "";
   window.removeEventListener("mousemove", onResizeCornerMove);
   window.removeEventListener("mouseup",   onResizeCornerEnd);
+}
+
+// Drag-to-resize from the bottom edge — grow downward, top fixed.
+let bottomStartY = 0;
+let bottomStartH = 0;
+const isResizingBottom = ref(false);
+function onResizeBottomStart(e: MouseEvent) {
+  e.preventDefault();
+  e.stopPropagation();
+  bottomStartY = e.clientY;
+  bottomStartH = height.value;
+  isResizingBottom.value = true;
+  document.body.style.userSelect = "none";
+  window.addEventListener("mousemove", onResizeBottomMove, { passive: false });
+  window.addEventListener("mouseup",   onResizeBottomEnd);
+}
+function onResizeBottomMove(e: MouseEvent) {
+  if (!isResizingBottom.value) return;
+  e.preventDefault();
+  height.value = Math.max(120, bottomStartH + (e.clientY - bottomStartY));
+}
+function onResizeBottomEnd() {
+  localStorage.setItem(HEIGHT_KEY, String(height.value));
+  isResizingBottom.value = false;
+  document.body.style.userSelect = "";
+  window.removeEventListener("mousemove", onResizeBottomMove);
+  window.removeEventListener("mouseup",   onResizeBottomEnd);
 }
 
 onBeforeUnmount(() => {
@@ -589,6 +657,8 @@ onBeforeUnmount(() => {
   window.removeEventListener("mouseup",   onResizeLeftEnd);
   window.removeEventListener("mousemove", onResizeCornerMove);
   window.removeEventListener("mouseup",   onResizeCornerEnd);
+  window.removeEventListener("mousemove", onResizeBottomMove);
+  window.removeEventListener("mouseup",   onResizeBottomEnd);
   for (const [, entry] of xterms) {
     entry.ro.disconnect();
     entry.term.dispose();
@@ -602,7 +672,7 @@ onBeforeUnmount(() => {
   <div
     ref="tpRef"
     class="tp"
-    :class="{ 'tp--full': fullscreen, 'tp--bottom': bottom }"
+    :class="{ 'tp--full': fullscreen, 'tp--bottom': bottom, 'tp--floating': !fullscreen && !bottom }"
     :style="panelStyle"
     @focusin="onFocusIn"
     @focusout="onFocusOut"
@@ -698,16 +768,33 @@ onBeforeUnmount(() => {
         @mousedown="onResizeXStart"
       />
 
-      <!-- Top-corner resize handles (width + height together) -->
+      <!-- Bottom-edge resize handle -->
       <div
-        class="tp__corner tp__corner--left"
-        :class="{ 'tp__corner--active': resizingCorner === 'left' }"
-        @mousedown="onResizeCornerStart('left', $event)"
+        class="tp__resize-y tp__resize-y--bottom"
+        :class="{ 'tp__resize-y--active': isResizingBottom }"
+        @mousedown="onResizeBottomStart"
+      />
+
+      <!-- Corner resize handles (width + height together) -->
+      <div
+        class="tp__corner tp__corner--tl"
+        :class="{ 'tp__corner--active': resizingCorner === 'tl' }"
+        @mousedown="onResizeCornerStart('tl', $event)"
       />
       <div
-        class="tp__corner tp__corner--right"
-        :class="{ 'tp__corner--active': resizingCorner === 'right' }"
-        @mousedown="onResizeCornerStart('right', $event)"
+        class="tp__corner tp__corner--tr"
+        :class="{ 'tp__corner--active': resizingCorner === 'tr' }"
+        @mousedown="onResizeCornerStart('tr', $event)"
+      />
+      <div
+        class="tp__corner tp__corner--bl"
+        :class="{ 'tp__corner--active': resizingCorner === 'bl' }"
+        @mousedown="onResizeCornerStart('bl', $event)"
+      />
+      <div
+        class="tp__corner tp__corner--br"
+        :class="{ 'tp__corner--active': resizingCorner === 'br' }"
+        @mousedown="onResizeCornerStart('br', $event)"
       />
     </template>
 
@@ -799,23 +886,56 @@ onBeforeUnmount(() => {
   background: transparent;
 }
 
-/* Top-corner resize grips — sit above the edge handles so the corner wins. */
+/* Bottom-edge resize handle — grow the panel downward. */
+.tp__resize-y {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 8px;
+  cursor: ns-resize;
+  z-index: 1;
+  transition: background 0.15s;
+}
+
+.tp__resize-y--bottom {
+  bottom: -4px;
+}
+
+.tp__resize-y:hover,
+.tp__resize-y--active {
+  background: transparent;
+}
+
+/* Corner resize grips — sit above the edge handles so the corner wins. */
 .tp__corner {
   position: absolute;
-  top: -4px;
   width: 14px;
   height: 14px;
   z-index: 2;
 }
 
-.tp__corner--left {
+.tp__corner--tl {
+  top: -4px;
   left: -4px;
   cursor: nwse-resize;
 }
 
-.tp__corner--right {
+.tp__corner--tr {
+  top: -4px;
   right: -4px;
   cursor: nesw-resize;
+}
+
+.tp__corner--bl {
+  bottom: -4px;
+  left: -4px;
+  cursor: nesw-resize;
+}
+
+.tp__corner--br {
+  bottom: -4px;
+  right: -4px;
+  cursor: nwse-resize;
 }
 
 .tp__tabs {
@@ -937,9 +1057,27 @@ onBeforeUnmount(() => {
   border-radius: 0;
 }
 
-/* Fullscreen — fill the app-body; square the top corners. */
+/* Bottom mode is docked — the tab bar isn't a move handle. */
+.tp--bottom .tp__tabs,
+.tp--bottom .tp__tabs:active {
+  cursor: default;
+}
+
+/* Floating — detached overlay, round all four corners + close the bottom border. */
+.tp--floating {
+  border-radius: var(--radius-lg);
+  border-bottom: 1px solid var(--color-border-strong);
+}
+
+/* Fullscreen — fill the app-body; square the top corners. The drag handle is
+   hidden in this mode, so add its headroom back to the tab bar (the tab buttons
+   sit at top:-2px and would otherwise clip at the panel's top edge). */
 .tp--full {
   border-radius: 0;
+}
+
+.tp--full .tp__tabs {
+  padding-top: 6px;
 }
 
 .tp--full .tp__drag {
@@ -963,7 +1101,7 @@ onBeforeUnmount(() => {
 
 .tp__host {
   position: absolute;
-  inset: 0px 6px 10px;
+  inset: 0px 6px 7px;
   padding: 0px 7px;
   background-color: black;
   border-radius: 0px var(--radius-sm) var(--radius-sm) var(--radius-sm);
@@ -971,7 +1109,7 @@ onBeforeUnmount(() => {
 
 .tp__empty {
   position: absolute;
-  inset: 0px 6px 10px;
+  inset: 0px 6px 7px;
   display: flex;
   align-items: center;
   justify-content: center;
