@@ -1306,6 +1306,21 @@ async function openTerminalTab(cwd?: string, type?: TerminalTabType) {
   return tab;
 }
 
+// Header terminal button: toggle the panel only. Hide if open; if showing
+// and no session exists yet, spawn the first tab. Never spawns extra tabs.
+async function toggleTerminal() {
+  if (showTerminal.value) {
+    showTerminal.value = false;
+    return;
+  }
+  if (!repoFolderPath.value) return;
+  if (termSessions.tabsFor(repoFolderPath.value).length === 0) {
+    await openTerminalTab();
+  } else {
+    showTerminal.value = true;
+  }
+}
+
 termSessions.setMutationHandler((repoPath) => {
   if (repoPath === repoFolderPath.value) repoRefresh();
 });
@@ -2457,7 +2472,7 @@ useAppMenu(
     },
     // ── 5 deferred items, now wired ──
     openTerminal: () => {
-      showTerminal.value = true;
+      void toggleTerminal();
     },
     toggleSidebar: () => {
       showSidebar.value = !showSidebar.value;
@@ -2633,7 +2648,7 @@ onUnmounted(() => {
       @open-worktrees="(branch) => { pendingWorktreeBranch = branch; showWorktrees = true; }"
       @open-submodules="showSubmodules = true" @open-submodule="handleOpenSubmodule" @open-search="handleOpenSearch" @open-help="showHelp = true"
       :stash-count="stashCount" @open-stash="showStash = true" @open-tags="showTags = true"
-      @open-terminal="openTerminalTab()" />
+      @open-terminal="toggleTerminal()" />
 
     <div class="app-body" :style="{ '--sidebar-width': sidebarWidth + 'px' }">
       <main class="main" :class="{ 'main--dashboard': viewMode === 'dashboard' || viewMode === 'launchpad' }">

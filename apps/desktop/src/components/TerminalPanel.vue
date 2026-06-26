@@ -552,7 +552,8 @@ onBeforeUnmount(() => {
   display: flex;
   gap: 2px;
   align-items: center;
-  padding: 4px 6px 6px;
+  padding: 1px 6px 0px;
+  margin-bottom: 0px;
   flex-shrink: 0;
   cursor: grab;
 }
@@ -565,9 +566,10 @@ onBeforeUnmount(() => {
   display: flex;
   gap: 6px;
   align-items: center;
-  padding: 4px 10px;
-  border-radius: var(--radius-sm);
-  background: transparent;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  background: var(--bg-base, var(--color-bg));
+  opacity: 0.7;
   border: none;
   cursor: pointer;
   color: inherit;
@@ -576,14 +578,15 @@ onBeforeUnmount(() => {
 
 .tp__tab--active {
   background: var(--bg-base, var(--color-bg));
+  opacity: 1 !important;
 }
 
 .tp__close {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  width: 20px;
+  height: 20px;
   border-radius: var(--radius-sm);
   font-size: 12px;
   opacity: 0.5;
@@ -596,31 +599,35 @@ onBeforeUnmount(() => {
 }
 
 .tp__new {
-  margin-left: 4px;
   border: none;
-  background: transparent;
   cursor: pointer;
-  padding: 4px 8px;
-  border-radius: var(--radius-sm);
+  padding: 8px 16px;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
   color: inherit;
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-md);
+  background: var(--bg-base, var(--color-bg));
+  opacity: 0.7;
 }
 
 .tp__hide {
   margin-left: auto;
   border: none;
-  background: transparent;
+  background: var(--bg-base, var(--color-bg));
+  opacity: 0.7;
   cursor: pointer;
-  padding: 4px 8px;
+  padding: 3px 10px 10px;
   border-radius: var(--radius-sm);
   color: inherit;
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-md);
+  position: relative;
+  top: -2px;
 }
 
 .tp__new:hover,
 .tp__hide:hover,
 .tp__tab:hover {
-  background: var(--color-bg-hover);
+  background: var(--bg-base, var(--color-bg));
+  opacity: 0.8;
 }
 
 .tp__body {
@@ -639,7 +646,7 @@ onBeforeUnmount(() => {
 
 .tp__host {
   position: absolute;
-  inset: 4px 10px;
+  inset: 0px 6px 10px;
 }
 
 .tp__rename {
