@@ -480,6 +480,89 @@ function onResizeXEnd() {
   window.removeEventListener("mouseup",   onResizeXEnd);
 }
 
+// Drag-to-resize-width (left edge handle) — moves the left edge, keeping the
+// right edge fixed: grows width as it drags left, shrinks as it drags right.
+let resizeLStartX = 0;
+let resizeLStartW = 0;
+let resizeLStartLeft = 0;
+const isResizingL = ref(false);
+function onResizeLeftStart(e: MouseEvent) {
+  e.preventDefault();
+  e.stopPropagation();
+  resizeLStartX = e.clientX;
+  resizeLStartW = tpRef.value?.offsetWidth ?? width.value;
+  resizeLStartLeft = left.value;
+  isResizingL.value = true;
+  document.body.style.userSelect = "none";
+  document.body.style.cursor     = "ew-resize";
+  window.addEventListener("mousemove", onResizeLeftMove, { passive: false });
+  window.addEventListener("mouseup",   onResizeLeftEnd);
+}
+function onResizeLeftMove(e: MouseEvent) {
+  if (!isResizingL.value) return;
+  e.preventDefault();
+  const delta = e.clientX - resizeLStartX;
+  const rightEdge = resizeLStartLeft + resizeLStartW; // fixed
+  // Clamp left so width stays >= 300 and the panel never leaves the container.
+  const newLeft = Math.max(0, Math.min(rightEdge - 300, resizeLStartLeft + delta));
+  left.value  = newLeft;
+  width.value = rightEdge - newLeft;
+}
+function onResizeLeftEnd() {
+  localStorage.setItem(WIDTH_KEY, String(width.value));
+  localStorage.setItem(LEFT_KEY,  String(left.value));
+  isResizingL.value = false;
+  document.body.style.userSelect = "";
+  document.body.style.cursor     = "";
+  window.removeEventListener("mousemove", onResizeLeftMove);
+  window.removeEventListener("mouseup",   onResizeLeftEnd);
+}
+
+// Drag-to-resize from a top corner — combines vertical (height) and horizontal
+// (width, plus left for the left corner). The bottom edge is pinned, so only the
+// two top corners resize.
+const resizingCorner = ref<"left" | "right" | null>(null);
+let cornerStartX = 0, cornerStartY = 0, cornerStartW = 0, cornerStartH = 0, cornerStartLeft = 0;
+function onResizeCornerStart(side: "left" | "right", e: MouseEvent) {
+  e.preventDefault();
+  e.stopPropagation();
+  cornerStartX    = e.clientX;
+  cornerStartY    = e.clientY;
+  cornerStartW    = tpRef.value?.offsetWidth ?? width.value;
+  cornerStartH    = height.value;
+  cornerStartLeft = left.value;
+  resizingCorner.value = side;
+  document.body.style.userSelect = "none";
+  document.body.style.cursor     = side === "left" ? "nwse-resize" : "nesw-resize";
+  window.addEventListener("mousemove", onResizeCornerMove, { passive: false });
+  window.addEventListener("mouseup",   onResizeCornerEnd);
+}
+function onResizeCornerMove(e: MouseEvent) {
+  if (!resizingCorner.value) return;
+  e.preventDefault();
+  // Vertical — grow upward (same as the top drag handle).
+  height.value = Math.max(120, Math.min(700, cornerStartH + (cornerStartY - e.clientY)));
+  const containerW = tpRef.value?.parentElement?.offsetWidth ?? window.innerWidth;
+  if (resizingCorner.value === "right") {
+    width.value = Math.max(300, Math.min(containerW - left.value - 8, cornerStartW + (e.clientX - cornerStartX)));
+  } else {
+    const rightEdge = cornerStartLeft + cornerStartW; // fixed
+    const newLeft = Math.max(0, Math.min(rightEdge - 300, cornerStartLeft + (e.clientX - cornerStartX)));
+    left.value  = newLeft;
+    width.value = rightEdge - newLeft;
+  }
+}
+function onResizeCornerEnd() {
+  localStorage.setItem(HEIGHT_KEY, String(height.value));
+  localStorage.setItem(WIDTH_KEY,  String(width.value));
+  localStorage.setItem(LEFT_KEY,   String(left.value));
+  resizingCorner.value = null;
+  document.body.style.userSelect = "";
+  document.body.style.cursor     = "";
+  window.removeEventListener("mousemove", onResizeCornerMove);
+  window.removeEventListener("mouseup",   onResizeCornerEnd);
+}
+
 onBeforeUnmount(() => {
   document.body.style.userSelect = "";
   document.body.style.cursor     = "";
@@ -489,6 +572,10 @@ onBeforeUnmount(() => {
   window.removeEventListener("mouseup",   onMoveEnd);
   window.removeEventListener("mousemove", onResizeXMove);
   window.removeEventListener("mouseup",   onResizeXEnd);
+  window.removeEventListener("mousemove", onResizeLeftMove);
+  window.removeEventListener("mouseup",   onResizeLeftEnd);
+  window.removeEventListener("mousemove", onResizeCornerMove);
+  window.removeEventListener("mouseup",   onResizeCornerEnd);
   for (const [, entry] of xterms) {
     entry.ro.disconnect();
     entry.term.dispose();
@@ -581,11 +668,30 @@ onBeforeUnmount(() => {
       </button>
     </div>
 
+    <!-- Left-edge resize handle -->
+    <div
+      class="tp__resize-x tp__resize-x--left"
+      :class="{ 'tp__resize-x--active': isResizingL }"
+      @mousedown="onResizeLeftStart"
+    />
+
     <!-- Right-edge resize handle -->
     <div
       class="tp__resize-x"
       :class="{ 'tp__resize-x--active': isResizingX }"
       @mousedown="onResizeXStart"
+    />
+
+    <!-- Top-corner resize handles (width + height together) -->
+    <div
+      class="tp__corner tp__corner--left"
+      :class="{ 'tp__corner--active': resizingCorner === 'left' }"
+      @mousedown="onResizeCornerStart('left', $event)"
+    />
+    <div
+      class="tp__corner tp__corner--right"
+      :class="{ 'tp__corner--active': resizingCorner === 'right' }"
+      @mousedown="onResizeCornerStart('right', $event)"
     />
 
     <!-- xterm host elements — one per tab, visibility toggled via v-show -->
@@ -646,7 +752,7 @@ onBeforeUnmount(() => {
 
 .tp__drag:hover,
 .tp__drag--active {
-  background: var(--color-accent);
+  background: transparent;
 }
 
 .tp__resize-x {
@@ -661,10 +767,34 @@ onBeforeUnmount(() => {
   transition: background 0.15s;
 }
 
+.tp__resize-x--left {
+  right: auto;
+  left: -4px;
+  border-radius: var(--radius-xl) 0 0 0;
+}
+
 .tp__resize-x:hover,
 .tp__resize-x--active {
-  background: var(--color-accent);
-  opacity: 0.5;
+  background: transparent;
+}
+
+/* Top-corner resize grips — sit above the edge handles so the corner wins. */
+.tp__corner {
+  position: absolute;
+  top: -4px;
+  width: 14px;
+  height: 14px;
+  z-index: 2;
+}
+
+.tp__corner--left {
+  left: -4px;
+  cursor: nwse-resize;
+}
+
+.tp__corner--right {
+  right: -4px;
+  cursor: nesw-resize;
 }
 
 .tp__tabs {
