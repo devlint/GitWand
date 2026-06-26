@@ -262,8 +262,8 @@ const i18n: Record<Locale, any> = {
     pillar3StatLabel: 'votre LLM, votre clé',
     pillar3Cta: 'Guide du fallback IA →',
     // Onglet Nouveautés (v2.9 → v2.13)
-    featLaunchpad: 'Launchpad — dashboard cross-repo',
-    featLaunchpadDesc: 'Agrège PRs, issues, WIP et activité d\'équipe sur tous les repos d\'un workspace. Pin, snooze, enrichissement Team lazy. ⌘L depuis n\'importe où.',
+    featLaunchpad: 'Today — dashboard cross-repo',
+    featLaunchpadDesc: 'Boîte de réception d\'actions triée sur tous les repos d\'un workspace. Éléments classés par urgence (À traiter / En attente / Plus tard), chaque ligne avec une action contextuelle — Merge, Review, Resolve ou Reply. Pin, snooze, ⌘L depuis n\'importe où.',
     featLlmFallback: 'Fallback LLM pour les hunks complexes',
     featLlmFallbackDesc: 'Résolution opt-in via Claude / OpenAI / Ollama / MCP. Validée par le même pipeline parse-tree que les patterns déterministes. Trace de décision et bouton reject inclus.',
     featForge: 'GitHub, GitLab & Bitbucket',
@@ -408,8 +408,8 @@ const i18n: Record<Locale, any> = {
     pillar3StatLabel: 'your LLM, your key',
     pillar3Cta: 'AI fallback guide →',
     // What's New tab (v2.9 → v2.13)
-    featLaunchpad: 'Launchpad — cross-repo dashboard',
-    featLaunchpadDesc: 'Aggregate PRs, issues, WIP, and team activity across every repo in a workspace. Pin, snooze, lazy team enrichment. ⌘L from anywhere.',
+    featLaunchpad: 'Today — cross-repo dashboard',
+    featLaunchpadDesc: 'A triaged action inbox across every repo in a workspace. Items sorted by urgency (To do / Waiting / Later), each row with one state-aware action — Merge, Review, Resolve or Reply. Pin, snooze, ⌘L from anywhere.',
     featLlmFallback: 'LLM fallback for complex hunks',
     featLlmFallbackDesc: 'Opt-in resolution via Claude / OpenAI / Ollama / MCP. Validated through the same parse-tree pipeline as deterministic patterns. Decision trace and reject button included.',
     featForge: 'GitHub, GitLab & Bitbucket',
@@ -554,8 +554,8 @@ const i18n: Record<Locale, any> = {
     pillar3StatLabel: 'tu LLM, tu clave',
     pillar3Cta: 'Guía del fallback IA →',
     // Pestaña Novedades (v2.9 → v2.13)
-    featLaunchpad: 'Launchpad — dashboard multi-repo',
-    featLaunchpadDesc: 'Agrega PRs, issues, WIP y actividad del equipo en todos los repos de un workspace. Pin, snooze, enriquecimiento Team lazy. ⌘L desde cualquier lugar.',
+    featLaunchpad: 'Today — dashboard multi-repo',
+    featLaunchpadDesc: 'Bandeja de acciones priorizada en todos los repos de un workspace. Elementos ordenados por urgencia (Por hacer / En espera / Más tarde), cada fila con una acción contextual — Merge, Review, Resolve o Reply. Pin, snooze, ⌘L desde cualquier lugar.',
     featLlmFallback: 'Fallback LLM para hunks complejos',
     featLlmFallbackDesc: 'Resolución opt-in vía Claude / OpenAI / Ollama / MCP. Validada por el mismo pipeline parse-tree que los patrones deterministas. Traza de decisión y botón reject incluidos.',
     featForge: 'GitHub, GitLab y Bitbucket',
@@ -700,8 +700,8 @@ const i18n: Record<Locale, any> = {
     pillar3StatLabel: 'seu LLM, sua chave',
     pillar3Cta: 'Guia do fallback IA →',
     // Aba Novidades (v2.9 → v2.13)
-    featLaunchpad: 'Launchpad — dashboard cross-repo',
-    featLaunchpadDesc: 'Agrega PRs, issues, WIP e atividade da equipe em todos os repos de um workspace. Pin, snooze, enriquecimento Team lazy. ⌘L de qualquer lugar.',
+    featLaunchpad: 'Today — dashboard cross-repo',
+    featLaunchpadDesc: 'Caixa de entrada de ações priorizada em todos os repos de um workspace. Itens ordenados por urgência (A fazer / Aguardando / Depois), cada linha com uma ação contextual — Merge, Review, Resolve ou Reply. Pin, snooze, ⌘L de qualquer lugar.',
     featLlmFallback: 'Fallback LLM para hunks complexos',
     featLlmFallbackDesc: 'Resolução opt-in via Claude / OpenAI / Ollama / MCP. Validada pelo mesmo pipeline parse-tree dos padrões deterministas. Trace de decisão e botão reject inclusos.',
     featForge: 'GitHub, GitLab e Bitbucket',
@@ -846,8 +846,8 @@ const i18n: Record<Locale, any> = {
     pillar3StatLabel: '你的 LLM,你的密钥',
     pillar3Cta: 'AI fallback 指南 →',
     // 最新特性标签页 (v2.9 → v2.13)
-    featLaunchpad: 'Launchpad — 跨仓库仪表盘',
-    featLaunchpadDesc: '聚合 workspace 中所有仓库的 PR、issues、WIP 和团队动态。固定、暂缓、Team 懒加载。从任意位置按 ⌘L 唤起。',
+    featLaunchpad: 'Today — 跨仓库仪表盘',
+    featLaunchpadDesc: '跨 workspace 所有仓库的待办行动收件箱。按紧急程度分级（待处理 / 等待中 / 稍后），每行配一个状态感知操作——Merge、Review、Resolve 或 Reply。固定、暂缓，任意位置按 ⌘L 唤起。',
     featLlmFallback: '复杂 hunk 的 LLM fallback',
     featLlmFallbackDesc: '通过 Claude / OpenAI / Ollama / MCP 进行可选解析。与确定性模式走同一条 parse-tree 校验管线。附带决策追踪与拒绝按钮。',
     featForge: 'GitHub、GitLab 与 Bitbucket',
@@ -1341,6 +1341,12 @@ function cellClass(v: CompareValue | undefined): string {
 
           <!-- What's New tab — 7 highlights from v2.5 → v2.19 -->
           <div v-else-if="activeTab === 'new'" key="new" class="features-grid" role="tabpanel">
+            <!-- Today — triaged action inbox (was Launchpad) — v3.0 -->
+            <div class="feat-card feat-card--new">
+              <div class="feat-badge">v3.0</div>
+              <div class="feat-icon feat-icon--ai"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></div>
+              <h3>{{ t.featLaunchpad }}</h3><p>{{ t.featLaunchpadDesc }}</p>
+            </div>
             <!-- Scratch worktree + extended Conflict Predictor — v2.20 -->
             <div class="feat-card feat-card--new">
               <div class="feat-badge">v2.20</div>
@@ -1376,12 +1382,6 @@ function cellClass(v: CompareValue | undefined): string {
               <div class="feat-badge">v2.12</div>
               <div class="feat-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#7C3AED" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9h18M8 13h3M8 16h5M16 13l1.5 1.5L20 12"/></svg></div>
               <h3>{{ t.featIdentities }}</h3><p>{{ t.featIdentitiesDesc }}</p>
-            </div>
-            <!-- Launchpad — v2.9 -->
-            <div class="feat-card feat-card--new">
-              <div class="feat-badge">v2.9</div>
-              <div class="feat-icon feat-icon--ai"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></div>
-              <h3>{{ t.featLaunchpad }}</h3><p>{{ t.featLaunchpadDesc }}</p>
             </div>
             <!-- LLM fallback — v2.5 -->
             <div class="feat-card feat-card--new">
