@@ -2178,6 +2178,8 @@ const fr: Locale = {
     closeTab: "Fermer l'onglet",
     headerLabel: "Terminal",
     headerTooltip: "Ouvrir le terminal",
+    fullscreen: "Plein écran",
+    exitFullscreen: "Quitter le plein écran",
     menuShell: "Shell",
     menuClaude: "Claude Code",
     menuCodex: "Codex",

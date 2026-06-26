@@ -2152,6 +2152,8 @@ const zhCN: Locale = {
     closeTab: "关闭标签页",
     headerLabel: "终端",
     headerTooltip: "打开终端",
+    fullscreen: "全屏",
+    exitFullscreen: "退出全屏",
     menuShell: "Shell",
     menuClaude: "Claude Code",
     menuCodex: "Codex",

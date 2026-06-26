@@ -2206,6 +2206,8 @@ const en = {
     closeTab: "Close tab",
     headerLabel: "Terminal",
     headerTooltip: "Open terminal",
+    fullscreen: "Fullscreen",
+    exitFullscreen: "Exit fullscreen",
     menuShell: "Shell",
     menuClaude: "Claude Code",
     menuCodex: "Codex",

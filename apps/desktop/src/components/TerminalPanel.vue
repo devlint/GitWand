@@ -79,17 +79,29 @@ const width  = ref(Number(localStorage.getItem(WIDTH_KEY))  || 0); // 0 = not ye
 
 const tpRef = ref<HTMLElement | null>(null);
 
+// Fullscreen — fills the app-body area (project list / header stay visible).
+const FULL_KEY = "gitwand-terminal-fullscreen";
+const fullscreen = ref(localStorage.getItem(FULL_KEY) === "1");
+function toggleFullscreen() {
+  fullscreen.value = !fullscreen.value;
+  localStorage.setItem(FULL_KEY, fullscreen.value ? "1" : "0");
+}
+
 onMounted(() => {
   if (!width.value) {
     width.value = Math.round((tpRef.value?.parentElement?.offsetWidth ?? window.innerWidth) * 0.5);
   }
 });
 
-const panelStyle = computed(() => ({
-  height: height.value + "px",
-  left:   left.value   + "px",
-  width:  width.value  ? width.value + "px" : "50%",
-}));
+const panelStyle = computed(() =>
+  fullscreen.value
+    ? { inset: "0", height: "auto", left: "0", width: "100%" }
+    : {
+        height: height.value + "px",
+        left:   left.value   + "px",
+        width:  width.value  ? width.value + "px" : "50%",
+      },
+);
 
 async function ensureXtermLibs() {
   if (XtermCtor) return;
@@ -490,6 +502,7 @@ onBeforeUnmount(() => {
   <div
     ref="tpRef"
     class="tp"
+    :class="{ 'tp--full': fullscreen }"
     :style="panelStyle"
     @focusin="onFocusIn"
     @focusout="onFocusOut"
@@ -550,7 +563,22 @@ onBeforeUnmount(() => {
           </button>
         </div>
       </div>
-      <button class="tp__hide" :title="t('terminal.hide')" @click="emit('close')">⌄</button>
+      <button class="tp__hide" :title="t('terminal.hide')" @click="emit('close')">_</button>
+      <button
+        class="tp__full"
+        :title="fullscreen ? t('terminal.exitFullscreen') : t('terminal.fullscreen')"
+        :aria-label="fullscreen ? t('terminal.exitFullscreen') : t('terminal.fullscreen')"
+        @click="toggleFullscreen"
+      >
+        <svg v-if="!fullscreen" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/>
+          <line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>
+        </svg>
+        <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/>
+          <line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/>
+        </svg>
+      </button>
     </div>
 
     <!-- Right-edge resize handle -->
@@ -700,13 +728,28 @@ onBeforeUnmount(() => {
   opacity: 0.7;
 }
 
+.tp__full {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: var(--bg-base, var(--color-bg));
+  opacity: 0.7;
+  cursor: pointer;
+  padding: 7px 9px;
+  border-radius: var(--radius-sm);
+  color: inherit;
+  position: relative;
+  top: -2px;
+}
+
 .tp__hide {
   margin-left: auto;
   border: none;
   background: var(--bg-base, var(--color-bg));
   opacity: 0.7;
   cursor: pointer;
-  padding: 3px 10px 10px;
+  padding: 0px 13px 12px;
   border-radius: var(--radius-sm);
   color: inherit;
   font-size: var(--font-size-md);
@@ -715,10 +758,20 @@ onBeforeUnmount(() => {
 }
 
 .tp__new:hover,
+.tp__full:hover,
 .tp__hide:hover,
 .tp__tab:hover {
   background: var(--bg-base, var(--color-bg));
   opacity: 0.8;
+}
+
+/* Fullscreen — fill the app-body; square the top corners. */
+.tp--full {
+  border-radius: 0;
+}
+
+.tp--full .tp__drag {
+  border-radius: 0;
 }
 
 .tp__body {

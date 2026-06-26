@@ -2167,6 +2167,8 @@ const es: Locale = {
     closeTab: "Cerrar pestaña",
     headerLabel: "Terminal",
     headerTooltip: "Abrir terminal",
+    fullscreen: "Pantalla completa",
+    exitFullscreen: "Salir de pantalla completa",
     menuShell: "Shell",
     menuClaude: "Claude Code",
     menuCodex: "Codex",
