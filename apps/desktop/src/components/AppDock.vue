@@ -136,8 +136,16 @@ function endDrag() {
 
 // ─── Context menu (right-click on any entry or the handle) ─
 
-/** target = the clicked entry, or null when invoked from the global handle. */
-const menu = ref<{ x: number; y: number; target: DockEntryId | null } | null>(null);
+/** target = the clicked entry, "terminal" for the terminal tile, or null when
+ *  invoked from the global handle. */
+type MenuTarget = DockEntryId | "terminal" | null;
+const menu = ref<{ x: number; y: number; target: MenuTarget } | null>(null);
+
+/** The menu's target as a dock entry (null for the terminal/global menus) —
+ *  keeps the per-entry template block correctly typed as DockEntryId. */
+const entryTarget = computed<DockEntryId | null>(() =>
+  menu.value && menu.value.target !== "terminal" ? menu.value.target : null,
+);
 const menuEl = ref<HTMLElement | null>(null);
 
 let menuListening = false;
@@ -156,7 +164,7 @@ function detachMenuListeners() {
   menuListening = false;
 }
 
-async function openMenu(e: MouseEvent, target: DockEntryId | null) {
+async function openMenu(e: MouseEvent, target: MenuTarget) {
   e.preventDefault();
   menu.value = { x: e.clientX, y: e.clientY, target };
   // The dock sits at the bottom of the screen, so a downward menu overflows.
@@ -240,6 +248,35 @@ function resetPosition() {
 
 function openDockSettings() {
   openSettings?.("dock");
+  closeMenu();
+}
+
+// ── Terminal tile actions ──
+const terminalHideOnNav = computed(() => settings.value.terminalHideOnNav);
+const terminalIsFullscreen = computed(() => settings.value.terminalMode === "fullscreen");
+/** Base layout (floating/bottom) — what fullscreen sits on top of. */
+const terminalLayout = computed<"floating" | "bottom">(() =>
+  terminalIsFullscreen.value ? settings.value.terminalPrevMode : (settings.value.terminalMode as "floating" | "bottom"),
+);
+
+/** Pick the base layout; also the layout fullscreen returns to. Exits fullscreen. */
+function setTerminalLayout(m: "floating" | "bottom") {
+  patch({ terminalMode: m, terminalPrevMode: m });
+  closeMenu();
+}
+
+/** Fullscreen is an overlay on top of the base layout — toggle it on/off. */
+function toggleTerminalFullscreen() {
+  if (terminalIsFullscreen.value) {
+    patch({ terminalMode: settings.value.terminalPrevMode });
+  } else {
+    patch({ terminalPrevMode: settings.value.terminalMode as "floating" | "bottom", terminalMode: "fullscreen" });
+  }
+  closeMenu();
+}
+
+function toggleTerminalHideOnNav() {
+  patch({ terminalHideOnNav: !settings.value.terminalHideOnNav });
   closeMenu();
 }
 
@@ -330,7 +367,7 @@ onBeforeUnmount(() => {
       :title="t('terminal.headerTooltip')"
       :aria-label="t('terminal.headerLabel')"
       @click="emit('toggleTerminal')"
-      @contextmenu="openMenu($event, null)"
+      @contextmenu="openMenu($event, 'terminal')"
     >
       <svg class="dock-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <polyline points="4 17 10 11 4 5"/>
@@ -344,17 +381,45 @@ onBeforeUnmount(() => {
          become the containing block and push the menu off-screen. -->
     <Teleport to="body">
     <div v-if="menu" ref="menuEl" class="dock-menu" :style="{ left: `${menu.x}px`, top: `${menu.y}px` }" role="menu">
+      <!-- Terminal tile section -->
+      <template v-if="menu.target === 'terminal'">
+        <div class="dock-menu-label">{{ t('terminal.headerLabel') }}</div>
+        <button class="dock-menu-item" role="menuitemcheckbox"
+          :aria-checked="terminalHideOnNav" @click="toggleTerminalHideOnNav">
+          {{ t('terminal.menuHideOnNav') }}
+          <span class="dock-menu-check">{{ terminalHideOnNav ? '✓' : '' }}</span>
+        </button>
+        <button class="dock-menu-item" role="menuitemcheckbox"
+          :aria-checked="terminalIsFullscreen" @click="toggleTerminalFullscreen">
+          {{ t('terminal.modeFullscreen') }}
+          <span class="dock-menu-check">{{ terminalIsFullscreen ? '✓' : '' }}</span>
+        </button>
+        <div class="dock-menu-sep" role="separator"></div>
+        <div class="dock-menu-label">{{ t('terminal.menuLayout') }}</div>
+        <button class="dock-menu-item" role="menuitemradio"
+          :aria-checked="terminalLayout === 'floating'" @click="setTerminalLayout('floating')">
+          {{ t('terminal.modeFloating') }}
+          <span class="dock-menu-check">{{ terminalLayout === 'floating' ? '✓' : '' }}</span>
+        </button>
+        <button class="dock-menu-item" role="menuitemradio"
+          :aria-checked="terminalLayout === 'bottom'" @click="setTerminalLayout('bottom')">
+          {{ t('terminal.modeBottom') }}
+          <span class="dock-menu-check">{{ terminalLayout === 'bottom' ? '✓' : '' }}</span>
+        </button>
+      </template>
+
+      <template v-else>
       <!-- Per-target section -->
-      <template v-if="menu.target">
-        <div class="dock-menu-label">{{ entryLabel(menu.target) }}</div>
-        <button v-if="isRemovable(menu.target)" class="dock-menu-item" role="menuitem"
-          @click="removeFromDock(menu.target)">
+      <template v-if="entryTarget">
+        <div class="dock-menu-label">{{ entryLabel(entryTarget) }}</div>
+        <button v-if="isRemovable(entryTarget)" class="dock-menu-item" role="menuitem"
+          @click="removeFromDock(entryTarget)">
           {{ t('settings.dock.menu.remove') }}
         </button>
-        <button v-if="canBeStartup(menu.target)" class="dock-menu-item" role="menuitemcheckbox"
-          :aria-checked="isStartup(menu.target)" @click="setAsStartup(menu.target)">
+        <button v-if="canBeStartup(entryTarget)" class="dock-menu-item" role="menuitemcheckbox"
+          :aria-checked="isStartup(entryTarget)" @click="setAsStartup(entryTarget)">
           {{ t('settings.dock.menu.setStartup') }}
-          <span class="dock-menu-check">{{ isStartup(menu.target) ? '✓' : '' }}</span>
+          <span class="dock-menu-check">{{ isStartup(entryTarget) ? '✓' : '' }}</span>
         </button>
         <div class="dock-menu-sep" role="separator"></div>
       </template>
@@ -375,6 +440,7 @@ onBeforeUnmount(() => {
       <button class="dock-menu-item" role="menuitem" @click="openDockSettings">
         {{ t('settings.dock.menu.openSettings') }}
       </button>
+      </template>
     </div>
     </Teleport>
   </nav>

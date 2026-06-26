@@ -2219,6 +2219,11 @@ const en = {
     searchNoResult: "No results",
     searchPrev: "Previous (Shift+Enter)",
     searchNext: "Next (Enter)",
+    menuHideOnNav: "Hide on menu switch",
+    menuLayout: "Layout",
+    modeFullscreen: "Fullscreen",
+    modeFloating: "Floating",
+    modeBottom: "Full-width bottom",
   },
 } as const;
 

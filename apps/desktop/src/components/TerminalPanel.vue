@@ -13,7 +13,7 @@ const emit = defineEmits<{
   (e: "new-ai-task"): void;
 }>();
 const { t } = useI18n();
-const { settings } = useSettings();
+const { settings, saveSettings } = useSettings();
 
 const sessions = useTerminalSessions();
 const tabs = computed(() => sessions.tabsFor(props.repoPath));
@@ -79,12 +79,23 @@ const width  = ref(Number(localStorage.getItem(WIDTH_KEY))  || 0); // 0 = not ye
 
 const tpRef = ref<HTMLElement | null>(null);
 
-// Fullscreen — fills the app-body area (project list / header stay visible).
-const FULL_KEY = "gitwand-terminal-fullscreen";
-const fullscreen = ref(localStorage.getItem(FULL_KEY) === "1");
+// Layout mode is driven by settings (set from the dock context menu).
+//  - "fullscreen" fills the app-body area (project list / header stay visible).
+//  - "bottom" is a full-width strip that pushes the content up.
+//  - "floating" is the resizable/movable overlay (default).
+const mode = computed(() => settings.value.terminalMode);
+const fullscreen = computed(() => mode.value === "fullscreen");
+const bottom = computed(() => mode.value === "bottom");
+// The inline header button toggles fullscreen on/off, restoring the layout that
+// was active before fullscreen (floating or bottom) on the way out.
 function toggleFullscreen() {
-  fullscreen.value = !fullscreen.value;
-  localStorage.setItem(FULL_KEY, fullscreen.value ? "1" : "0");
+  if (fullscreen.value) {
+    settings.value.terminalMode = settings.value.terminalPrevMode;
+  } else {
+    settings.value.terminalPrevMode = mode.value as "floating" | "bottom";
+    settings.value.terminalMode = "fullscreen";
+  }
+  saveSettings(settings.value);
 }
 
 onMounted(() => {
@@ -93,15 +104,17 @@ onMounted(() => {
   }
 });
 
-const panelStyle = computed(() =>
-  fullscreen.value
-    ? { inset: "0", height: "auto", left: "0", width: "100%" }
-    : {
-        height: height.value + "px",
-        left:   left.value   + "px",
-        width:  width.value  ? width.value + "px" : "50%",
-      },
-);
+const panelStyle = computed(() => {
+  if (fullscreen.value) return { inset: "0", height: "auto", left: "0", width: "100%" };
+  // Bottom mode: in-flow docked aside (position handled by .tp--bottom) so it
+  // reserves layout space and pushes content up. Only the height is dynamic.
+  if (bottom.value) return { height: height.value + "px" };
+  return {
+    height: height.value + "px",
+    left:   left.value   + "px",
+    width:  width.value  ? width.value + "px" : "50%",
+  };
+});
 
 async function ensureXtermLibs() {
   if (XtermCtor) return;
@@ -589,14 +602,14 @@ onBeforeUnmount(() => {
   <div
     ref="tpRef"
     class="tp"
-    :class="{ 'tp--full': fullscreen }"
+    :class="{ 'tp--full': fullscreen, 'tp--bottom': bottom }"
     :style="panelStyle"
     @focusin="onFocusIn"
     @focusout="onFocusOut"
     @keydown="onKeyDown"
   >
-    <!-- Drag handle — drag upward to grow the panel -->
-    <div class="tp__drag" :class="{ 'tp__drag--active': isDragging }" @mousedown="onDragStart" />
+    <!-- Drag handle — drag upward to grow the panel (height-resizable modes) -->
+    <div v-if="!fullscreen" class="tp__drag" :class="{ 'tp__drag--active': isDragging }" @mousedown="onDragStart" />
 
     <!-- Tab bar — drag on empty space to move the panel -->
     <div class="tp__tabs" @mousedown="onMoveStart">
@@ -668,31 +681,35 @@ onBeforeUnmount(() => {
       </button>
     </div>
 
-    <!-- Left-edge resize handle -->
-    <div
-      class="tp__resize-x tp__resize-x--left"
-      :class="{ 'tp__resize-x--active': isResizingL }"
-      @mousedown="onResizeLeftStart"
-    />
+    <!-- Width / corner resize handles — floating mode only (fullscreen and
+         bottom modes are width-locked). -->
+    <template v-if="!fullscreen && !bottom">
+      <!-- Left-edge resize handle -->
+      <div
+        class="tp__resize-x tp__resize-x--left"
+        :class="{ 'tp__resize-x--active': isResizingL }"
+        @mousedown="onResizeLeftStart"
+      />
 
-    <!-- Right-edge resize handle -->
-    <div
-      class="tp__resize-x"
-      :class="{ 'tp__resize-x--active': isResizingX }"
-      @mousedown="onResizeXStart"
-    />
+      <!-- Right-edge resize handle -->
+      <div
+        class="tp__resize-x"
+        :class="{ 'tp__resize-x--active': isResizingX }"
+        @mousedown="onResizeXStart"
+      />
 
-    <!-- Top-corner resize handles (width + height together) -->
-    <div
-      class="tp__corner tp__corner--left"
-      :class="{ 'tp__corner--active': resizingCorner === 'left' }"
-      @mousedown="onResizeCornerStart('left', $event)"
-    />
-    <div
-      class="tp__corner tp__corner--right"
-      :class="{ 'tp__corner--active': resizingCorner === 'right' }"
-      @mousedown="onResizeCornerStart('right', $event)"
-    />
+      <!-- Top-corner resize handles (width + height together) -->
+      <div
+        class="tp__corner tp__corner--left"
+        :class="{ 'tp__corner--active': resizingCorner === 'left' }"
+        @mousedown="onResizeCornerStart('left', $event)"
+      />
+      <div
+        class="tp__corner tp__corner--right"
+        :class="{ 'tp__corner--active': resizingCorner === 'right' }"
+        @mousedown="onResizeCornerStart('right', $event)"
+      />
+    </template>
 
     <!-- xterm host elements — one per tab, visibility toggled via v-show -->
     <div class="tp__body">
@@ -897,6 +914,27 @@ onBeforeUnmount(() => {
 .tp__tab:hover {
   background: var(--bg-base, var(--color-bg));
   opacity: 0.8;
+}
+
+/* Bottom — in-flow full-width docked aside. position:static drops it back into
+   the flex flow (overriding the absolute base), so the sibling <main> shrinks
+   and the content is pushed up — nothing hidden behind it. Flush chrome: solid
+   surface, square corners, a single top border instead of the floating card. */
+.tp--bottom {
+  position: static;
+  width: 100%;
+  flex-shrink: 0;
+  border: none;
+  border-top: 1px solid var(--color-border-strong);
+  border-radius: 0;
+  background: var(--color-bg-tertiary);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: none;
+}
+
+.tp--bottom .tp__drag {
+  border-radius: 0;
 }
 
 /* Fullscreen — fill the app-body; square the top corners. */

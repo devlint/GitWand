@@ -312,7 +312,25 @@ export interface AppSettings {
    * Empty string = auto (OS default shell). E.g. "/bin/zsh", "pwsh".
    */
   terminalShell: string;
+  /**
+   * Terminal layout mode.
+   * - "floating": resizable/movable panel overlaying the content (default).
+   * - "fullscreen": fills the app-body area.
+   * - "bottom": full-width strip docked at the bottom that pushes the content
+   *   up (nothing hidden behind it).
+   */
+  terminalMode: TerminalMode;
+  /**
+   * Layout to restore when leaving fullscreen — captured on entering it so the
+   * fullscreen toggle returns to the prior layout (floating/bottom), not always
+   * floating. Never "fullscreen" itself.
+   */
+  terminalPrevMode: Exclude<TerminalMode, "fullscreen">;
+  /** Hide the terminal when switching views from the dock. Default: true. */
+  terminalHideOnNav: boolean;
 }
+
+export type TerminalMode = "floating" | "fullscreen" | "bottom";
 
 // ─── Defaults ─────────────────────────────────────────────
 
@@ -381,6 +399,9 @@ export const defaultAppSettings: AppSettings = {
   // v3.x terminal
   terminalFontSize:                  13,
   terminalShell:                     "",
+  terminalMode:                      "floating",
+  terminalPrevMode:                  "floating",
+  terminalHideOnNav:                 true,
 };
 
 const SETTINGS_KEY = "gitwand-settings";

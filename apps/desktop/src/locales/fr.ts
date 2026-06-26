@@ -2191,6 +2191,11 @@ const fr: Locale = {
     searchNoResult: "Aucun résultat",
     searchPrev: "Précédent (Maj+Entrée)",
     searchNext: "Suivant (Entrée)",
+    menuHideOnNav: "Masquer au changement de menu",
+    menuLayout: "Disposition",
+    modeFullscreen: "Plein écran",
+    modeFloating: "Flottant",
+    modeBottom: "Bas pleine largeur",
   },
 };
 

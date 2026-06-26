@@ -184,6 +184,9 @@ interface Settings {
   // v3.x terminal
   terminalFontSize: number;
   terminalShell: string;
+  terminalMode: "floating" | "fullscreen" | "bottom";
+  terminalPrevMode: "floating" | "bottom";
+  terminalHideOnNav: boolean;
 }
 
 const defaultSettings: Settings = {
@@ -251,6 +254,9 @@ const defaultSettings: Settings = {
   // v3.x terminal
   terminalFontSize: 13,
   terminalShell: "",
+  terminalMode: "floating",
+  terminalPrevMode: "floating",
+  terminalHideOnNav: true,
 };
 
 function loadSettings(): Settings {

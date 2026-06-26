@@ -2180,6 +2180,11 @@ const ptBR: Locale = {
     searchNoResult: "Nenhum resultado",
     searchPrev: "Anterior (Shift+Enter)",
     searchNext: "Próximo (Enter)",
+    menuHideOnNav: "Ocultar ao trocar de menu",
+    menuLayout: "Layout",
+    modeFullscreen: "Tela cheia",
+    modeFloating: "Flutuante",
+    modeBottom: "Inferior em largura total",
   },
 };
 

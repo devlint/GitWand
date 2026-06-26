@@ -2180,6 +2180,11 @@ const es: Locale = {
     searchNoResult: "Sin resultados",
     searchPrev: "Anterior (Shift+Enter)",
     searchNext: "Siguiente (Enter)",
+    menuHideOnNav: "Ocultar al cambiar de menú",
+    menuLayout: "Disposición",
+    modeFullscreen: "Pantalla completa",
+    modeFloating: "Flotante",
+    modeBottom: "Inferior de ancho completo",
   },
 };
 

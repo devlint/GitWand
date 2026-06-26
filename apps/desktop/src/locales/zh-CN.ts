@@ -2165,6 +2165,11 @@ const zhCN: Locale = {
     searchNoResult: "无结果",
     searchPrev: "上一个 (Shift+Enter)",
     searchNext: "下一个 (Enter)",
+    menuHideOnNav: "切换菜单时隐藏",
+    menuLayout: "布局",
+    modeFullscreen: "全屏",
+    modeFloating: "浮动",
+    modeBottom: "全宽底部",
   },
 };
 
