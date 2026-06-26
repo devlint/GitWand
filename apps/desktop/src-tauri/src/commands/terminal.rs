@@ -252,11 +252,12 @@ pub(crate) fn terminal_resize(id: u64, cols: u16, rows: u16) -> Result<(), Strin
         let map = lock_sessions();
         map.get(&id).map(|h| Arc::clone(&h.master)).ok_or("session not found")?
     };
-    master_arc
+    let result = master_arc
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
-        .map_err(|e| format!("resize failed: {e}"))
+        .map_err(|e| format!("resize failed: {e}"));
+    result
 }
 
 #[tauri::command]
