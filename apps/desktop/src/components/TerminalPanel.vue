@@ -601,10 +601,10 @@ onBeforeUnmount(() => {
 .tp__new {
   border: none;
   cursor: pointer;
-  padding: 8px 16px;
+  padding: 7.5px 16px;
   border-radius: var(--radius-sm) var(--radius-sm) 0 0;
   color: inherit;
-  font-size: var(--font-size-md);
+  font-size: var(--font-size-lg);
   background: var(--bg-base, var(--color-bg));
   opacity: 0.7;
 }
@@ -642,11 +642,19 @@ onBeforeUnmount(() => {
   position: relative;
   overflow: hidden;
   min-height: 0;
+
 }
 
 .tp__host {
   position: absolute;
   inset: 0px 6px 10px;
+  padding: 0px 7px;
+  background-color: black;
+  border-radius: 0px var(--radius-sm) var(--radius-sm) var(--radius-sm);
+}
+
+.terminal {
+  padding: 5px;
 }
 
 .tp__rename {
