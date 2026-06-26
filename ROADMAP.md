@@ -110,6 +110,32 @@ Subtitle shows "N items · M to handle" (inbox-zero signal). Group-by toggle: **
 
 ---
 
+### For reflection — competitive scan (GitUp · Aurees · Snipara)
+
+_Veille du 2026-06-24 sur 6 clients/outils (Snipara, GitDriv, GitUp, GitX-dev, Aurees, GitBlade). Quelques pistes ressortent comme différenciantes pour GitWand ; les autres (GitDriv = web drag-and-drop débutant, GitX-dev = fork quasi-défunt, GitBlade = parité, abandonné depuis 2019) n'apportent rien d'avancé._
+
+**From GitUp ([gitup.co](https://gitup.co/), FOSS macOS)** — le plus aligné techniquement :
+
+- **Snapshots / undo global** — historique « Time-Machine » de *toutes* les opérations sur le repo (pas que les commits), undo au `⌘Z` y compris rebase/reset. Filet de sécurité naturel pour annuler en un geste une résolution auto-appliquée par le moteur — complète l'Undo stack (v1.2.0).
+- **Live Map** — graphe mis à jour en temps réel sur tout changement, y compris hors de l'app, sans refresh. À confronter à la discipline de polling (réagir aux events FS plutôt que poller) pour le Git Tree.
+- **Accès direct à la base du repo** (bypass du binaire `git`, façon libgit2) — vitesse/fiabilité (40k commits <1s). À évaluer côté backend Rust (`gix`/`git2-rs`) vs shell-out, dans la lignée des fast-paths libgit2 déjà en place.
+- **`GitUpKit`** — leur SDK pour bâtir des clients Git, à étudier.
+
+**From Aurees ([aurees.com](https://aurees.com/))** — recoupe le cœur de métier :
+
+- **Diff éditable** dans la vue (vs lecture seule) et **merge avec preview avant application** — patterns UX que le moteur d'auto-résolution + le Conflict Predictor (v2.20.0) pourraient exposer.
+
+**From GitBlade ([gitblade.com](https://gitblade.com/))** — surtout de la parité (merge, blame, graph, stage hunks, tabs), une seule idée :
+
+- **Combined Diffs** — diff agrégé entre plusieurs commits *même non consécutifs* ; primitive de comparaison absente aujourd'hui (on a file history / split commit / fork point), utile pour relire un travail éparpillé sur des commits non contigus.
+
+**From Snipara ([snipara.com](https://www.snipara.com/))** — couche « project intelligence » MCP pour agents, inspiration AI (pas un client Git) :
+
+- **Code Graph / blast radius** — calculer l'impact d'un changement (callers, imports, tests probables) *avant* l'edit ; appliqué à un merge/rebase : « voici ce que cette opération risque de casser ». Prolonge le Conflict Predictor + `@gitwand/core`.
+- **Verification Plans attachés aux handoffs** — chaque PR/changement porte ses checks à passer ; recoupe les CI annotations (v2.18.0).
+
+---
+
 ### Later (unscheduled)
 
 - **In-app folder-browser + right-click "Scope here"** — follow-up to v2.21.0 Monorepo Scope: a recursive working-tree folder panel where right-clicking a folder scopes to it. Ad-hoc scoping already ships via the picker's "Custom folder…"; this in-tree gesture is deferred (the existing `FolderDiffTree` is a *diff* tree — the wrong substrate — and is unmounted).
