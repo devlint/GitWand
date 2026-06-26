@@ -62,6 +62,26 @@ fn resolve_shell(shell: &Option<String>) -> String {
     default_shell()
 }
 
+/// Login-shell flag for the resolved shell, if it supports one.
+///
+/// `-l` is **not** universal: it is correct for the POSIX family
+/// (bash/zsh/sh/dash/ksh/fish/tcsh/csh), but other shells (nushell,
+/// powershell, xonsh, elvish…) reject it with `unknown option '-l'`,
+/// which kills the PTY immediately. For anything we don't recognise we
+/// skip the flag — the shell still launches, just not as a login shell.
+#[cfg(not(windows))]
+fn login_flag(shell_path: &str) -> Option<&'static str> {
+    let name = std::path::Path::new(shell_path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    match name.as_str() {
+        "bash" | "zsh" | "sh" | "dash" | "ksh" | "fish" | "tcsh" | "csh" => Some("-l"),
+        _ => None,
+    }
+}
+
 #[tauri::command]
 pub(crate) fn terminal_open(
     cwd: String,
@@ -107,8 +127,12 @@ pub(crate) fn terminal_open(
     let shell_path = resolve_shell(&shell);
     let mut cmd = CommandBuilder::new(&shell_path);
     // Login shell sur Unix pour charger le profil utilisateur (PATH, aliases…).
+    // Seulement pour les shells qui acceptent `-l` (cf. login_flag) — sinon
+    // le PTY meurt avec `unknown option '-l'`.
     #[cfg(not(windows))]
-    cmd.arg("-l");
+    if let Some(flag) = login_flag(&shell_path) {
+        cmd.arg(flag);
+    }
     cmd.cwd(&canon);
     // On NE propage PAS de tokens GitWand : le shell charge ses propres creds.
     // Enrichissement PATH (Homebrew / npm global) repris de hidden_cmd.

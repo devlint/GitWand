@@ -114,11 +114,43 @@ async function ensureXtermLibs() {
   await import("@xterm/xterm/css/xterm.css");
 }
 
+// Tabs whose PTY has already received the post-boot resize kick (see below).
+const kicked = new Set<number>();
+
+// Force the child to redraw at the real terminal size.
+//
+// On spawn the PTY is 80×24 (terminalOpen placeholder). A plain same-size
+// resize emits no SIGWINCH, and an early fit() can measure 80×24 before the
+// host element is laid out — so syncPtySize alone isn't enough for a TUI like
+// claude that latches its size at boot. We trigger this once the child has
+// produced its first output (it has booted and the host is laid out by then):
+// re-fit, then jiggle the rows by 1 so the kernel always emits a SIGWINCH the
+// child cannot miss, then snap back to the real size.
+function kickResize(tab: TerminalTab) {
+  const entry = xterms.get(tab.id);
+  if (!entry || tab.sessionId < 0) return;
+  entry.fit.fit();
+  const { cols, rows } = entry.term;
+  if (!cols || !rows) return;
+  sessions.resize(tab.sessionId, cols, Math.max(1, rows - 1));
+  requestAnimationFrame(() => {
+    if (tab.sessionId >= 0) sessions.resize(tab.sessionId, cols, rows);
+  });
+}
+
+// Guards against concurrent mountTab() invocations for the same tab. Two watch
+// runs can overlap (the first awaits the dynamic xterm import) and would
+// otherwise both pass the `xterms.has` check and mount two terminals.
+const mounting = new Set<number>();
+
 async function mountTab(tab: TerminalTab) {
-  await ensureXtermLibs();
-  await nextTick();
-  const el = hostRefs.value[tab.id];
-  if (!el || xterms.has(tab.id)) return;
+  if (xterms.has(tab.id) || mounting.has(tab.id)) return;
+  mounting.add(tab.id);
+  try {
+    await ensureXtermLibs();
+    await nextTick();
+    const el = hostRefs.value[tab.id];
+    if (!el || xterms.has(tab.id)) return;
 
   const term = new XtermCtor({ fontSize: settings.value.terminalFontSize ?? 13, cursorBlink: true });
   const fit = new FitCtor();
@@ -170,6 +202,9 @@ async function mountTab(tab: TerminalTab) {
     for (const chunk of buffered) term.write(chunk);
     pendingChunks.delete(tab.id);
   }
+  } finally {
+    mounting.delete(tab.id);
+  }
 }
 
 // Exposed so App.vue can route PTY chunks to the correct xterm instance.
@@ -179,6 +214,13 @@ function writeChunk(tabId: number, chunk: string) {
   const entry = xterms.get(tabId);
   if (entry) {
     entry.term.write(chunk);
+    // First output from the child → it has booted and the host is laid out.
+    // Kick the PTY size now so a TUI that latched 80×24 at boot snaps to full.
+    if (!kicked.has(tabId)) {
+      kicked.add(tabId);
+      const tab = tabs.value.find((t) => t.id === tabId);
+      if (tab) kickResize(tab);
+    }
   } else {
     let buf = pendingChunks.get(tabId);
     if (!buf) { buf = []; pendingChunks.set(tabId, buf); }
@@ -212,6 +254,7 @@ watch(
         entry?.ro.disconnect();
         entry?.term.dispose();
         xterms.delete(id);
+        kicked.delete(id);
         pendingChunks.delete(id);
         pendingInput.delete(id); // Fix 6 — purge input buffer for closed tabs
       }
