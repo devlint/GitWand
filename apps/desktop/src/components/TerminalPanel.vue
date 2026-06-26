@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onBeforeUnmount, watch, nextTick, computed, onMounted } from "vue";
+import { ref, onBeforeUnmount, watch, nextTick, computed, onMounted, onActivated } from "vue";
 import { useTerminalSessions, type TerminalTab } from "../composables/useTerminalSessions";
 import { useI18n } from "../composables/useI18n";
 import { useSettings } from "../composables/useSettings";
@@ -126,6 +126,13 @@ const kicked = new Set<number>();
 // produced its first output (it has booted and the host is laid out by then):
 // re-fit, then jiggle the rows by 1 so the kernel always emits a SIGWINCH the
 // child cannot miss, then snap back to the real size.
+//
+// The off-size must be HELD with a real timeout gap (not a rAF). On re-show the
+// panel size usually equals the pre-hide size, so the two resizes are the only
+// SIGWINCH the child gets. With a rAF the kernel coalesces shrink+restore into a
+// net-zero change within one frame and the child (claude) ignores it — the
+// terminal stays blank until a manual resize. A held delay guarantees two
+// distinct SIGWINCH the child must act on.
 function kickResize(tab: TerminalTab) {
   const entry = xterms.get(tab.id);
   if (!entry || tab.sessionId < 0) return;
@@ -133,9 +140,28 @@ function kickResize(tab: TerminalTab) {
   const { cols, rows } = entry.term;
   if (!cols || !rows) return;
   sessions.resize(tab.sessionId, cols, Math.max(1, rows - 1));
-  requestAnimationFrame(() => {
+  setTimeout(() => {
     if (tab.sessionId >= 0) sessions.resize(tab.sessionId, cols, rows);
-  });
+  }, 50);
+}
+
+// Retry a fit until the host element actually has a size, then sync the PTY and
+// kick a running child to redraw. Bounded retry — layout settles at an
+// unpredictable frame after a remount (v-if toggle, async component, fonts), so
+// a single rAF is unreliable. Stops as soon as one fit lands on a sized host.
+function refitWhenSized(tabId: number, el: HTMLElement, attempt = 0) {
+  const entry = xterms.get(tabId);
+  if (!entry) return; // tab closed mid-retry
+  if (el.offsetWidth === 0 || el.offsetHeight === 0) {
+    if (attempt < 20) setTimeout(() => refitWhenSized(tabId, el, attempt + 1), 32);
+    return;
+  }
+  entry.fit.fit();
+  const tab = tabs.value.find((t) => t.id === tabId);
+  if (tab && tab.sessionId >= 0) {
+    sessions.resize(tab.sessionId, entry.term.cols, entry.term.rows);
+    kickResize(tab);
+  }
 }
 
 // Guards against concurrent mountTab() invocations for the same tab. Two watch
@@ -202,6 +228,17 @@ async function mountTab(tab: TerminalTab) {
     for (const chunk of buffered) term.write(chunk);
     pendingChunks.delete(tab.id);
   }
+
+  // The fit() above can measure 0×0 when the host is not laid out yet — this
+  // happens on every remount (the panel uses v-if, so toggling it off then on
+  // re-runs mountTab). A new tab is rescued by the output-driven kickResize in
+  // writeChunk, but an already-running session emits no new output on re-show,
+  // so without an explicit refit the terminal stays blank until a manual resize
+  // fires the ResizeObserver. Layout settles at an unpredictable moment (async
+  // component, backdrop-filter, font load) so a single rAF is flaky — retry
+  // until the host has a real size, then refit and kick the PTY so a running
+  // child (TUI) redraws.
+  refitWhenSized(tab.id, el);
   } finally {
     mounting.delete(tab.id);
   }
@@ -270,6 +307,17 @@ watch(
   },
   { immediate: true },
 );
+
+// KeepAlive: the panel is deactivated (not unmounted) when hidden, so xterm
+// instances and their buffers survive a hide/show cycle. On re-show the host
+// elements are re-attached at a possibly different size and the WebGL renderer
+// needs a repaint, so refit every mounted tab once its host is sized again.
+onActivated(() => {
+  for (const id of xterms.keys()) {
+    const el = hostRefs.value[id];
+    if (el) refitWhenSized(id, el);
+  }
+});
 
 function onFocusIn() {
   sessions.terminalFocused.value = true;

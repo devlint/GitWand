@@ -2881,16 +2881,20 @@ onUnmounted(() => {
 
       <!-- Integrated git terminal (v3.0) — docked panel anchored at the bottom
            of app-body, below main, above the floating AppDock. -->
-      <TerminalPanel
-        v-if="showTerminal && repoFolderPath"
-        ref="terminalPanelRef"
-        :repo-path="repoFolderPath"
-        @close="showTerminal = false"
-        @new="openTerminalTab()"
-        @new-agent="(tool: string) => repoFolderPath && onLaunchAgent({ path: repoFolderPath, tool })"
-        @open-sessions="showAgents = true"
-        @new-ai-task="onNewAiTask"
-      />
+      <!-- KeepAlive so toggling the panel deactivates (not unmounts) the xterm
+           instances — buffer + PTY view survive a hide/show cycle. -->
+      <KeepAlive>
+        <TerminalPanel
+          v-if="showTerminal && repoFolderPath"
+          ref="terminalPanelRef"
+          :repo-path="repoFolderPath"
+          @close="showTerminal = false"
+          @new="openTerminalTab()"
+          @new-agent="(tool: string) => repoFolderPath && onLaunchAgent({ path: repoFolderPath, tool })"
+          @open-sessions="showAgents = true"
+          @new-ai-task="onNewAiTask"
+        />
+      </KeepAlive>
 
       <!-- Floating bottom-center navigation dock -->
       <AppDock v-if="hasRepo" :view-mode="viewMode" :changes-count="repoFiles.length"
