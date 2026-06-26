@@ -242,7 +242,7 @@ onUnmounted(() => {
   align-items: center;
   gap: var(--space-4);
   padding: var(--space-5) var(--space-8);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-lg);
   font-size: var(--font-size-lg);
   font-weight: var(--font-weight-semibold);
   background: var(--color-accent);
@@ -273,7 +273,7 @@ onUnmounted(() => {
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-3) var(--space-5);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-md);
   border: 1px solid var(--color-border);
   background: var(--color-bg-secondary);
   color: var(--color-text);
@@ -306,8 +306,7 @@ onUnmounted(() => {
   padding: var(--space-4) var(--space-6);
   border-radius: var(--radius-md);
   background: var(--color-accent-soft, rgba(139, 92, 246, 0.08));
-  border: 1px solid var(--color-border);
-  border-left: 3px solid var(--color-accent);
+  border: 1px solid var(--color-accent-soft);
 }
 
 .empty-tip-label {
@@ -373,7 +372,7 @@ onUnmounted(() => {
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-4) var(--space-6);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-md);
   border: 1px solid var(--color-border);
   background: var(--color-bg-secondary);
   color: var(--color-text);
