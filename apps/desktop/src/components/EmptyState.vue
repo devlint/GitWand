@@ -2,7 +2,6 @@
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useFolderHistory } from "../composables/useFolderHistory";
 import { useI18n } from "../composables/useI18n";
-import { locales, type SupportedLocale } from "../locales";
 import AiSparkle from "./AiSparkle.vue";
 
 const emit = defineEmits<{
@@ -13,7 +12,7 @@ const emit = defineEmits<{
 }>();
 
 const { history } = useFolderHistory();
-const { t, locale } = useI18n();
+const { t, messages } = useI18n();
 
 const recentFolders = computed(() => history.value.slice(0, 5));
 
@@ -25,10 +24,7 @@ const appVersion = __APP_VERSION__;
 // ─── Rotating tips (Phase 1.3.5) ──────────────────────
 const TIP_ROTATION_MS = 30_000;
 
-const tips = computed<readonly string[]>(() => {
-  const l = locale.value as SupportedLocale;
-  return locales[l]?.empty?.tips ?? locales.fr.empty.tips;
-});
+const tips = computed<readonly string[]>(() => messages.value.empty.tips);
 
 /**
  * Start at a random index each mount so consecutive app opens don't

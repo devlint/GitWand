@@ -1,7 +1,10 @@
 import { ref, computed, readonly } from "vue";
 import {
-  locales,
   detectLocale,
+  loadLocale,
+  getLoadedLocale,
+  isSupportedLocale,
+  DEFAULT_LOCALE,
   type SupportedLocale,
   type Locale,
   type LocaleKey,
@@ -13,7 +16,7 @@ const STORAGE_KEY = "gitwand-locale";
 function loadSavedLocale(): SupportedLocale | null {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved && saved in locales) return saved as SupportedLocale;
+    if (saved && isSupportedLocale(saved)) return saved;
   } catch {
     // localStorage unavailable
   }
@@ -36,7 +39,32 @@ function saveLocale(locale: SupportedLocale | null) {
 // "auto" means OS detection, otherwise it's a forced override.
 const isAuto = ref(loadSavedLocale() === null);
 const currentLocale = ref<SupportedLocale>(loadSavedLocale() ?? detectLocale());
-const messages = computed<Locale>(() => locales[currentLocale.value]);
+
+// `en` is always in the main chunk; other locales stream in via loadLocale().
+// `activeMessages` holds whatever is currently available for `currentLocale`,
+// falling back to `en` until the requested chunk resolves. Templates re-render
+// reactively when the chunk lands, so a non-en cold start briefly shows English.
+const activeMessages = ref<Locale>(getLoadedLocale(DEFAULT_LOCALE)!);
+const messages = computed<Locale>(() => activeMessages.value);
+
+/**
+ * Make `activeMessages` reflect `locale`. If the locale is already loaded the
+ * swap is synchronous; otherwise we keep the current (en) fallback and swap
+ * once the chunk resolves — guarding against a newer switch in the meantime.
+ */
+function applyLocale(locale: SupportedLocale) {
+  const ready = getLoadedLocale(locale);
+  if (ready) {
+    activeMessages.value = ready;
+    return;
+  }
+  void loadLocale(locale).then((msgs) => {
+    if (currentLocale.value === locale) activeMessages.value = msgs;
+  });
+}
+
+// Kick off the initial (possibly non-en) load.
+applyLocale(currentLocale.value);
 
 /**
  * Resolve a dotted key ("header.open") into the translated string.
@@ -79,6 +107,7 @@ function setLocale(locale: SupportedLocale | null) {
     currentLocale.value = locale;
     saveLocale(locale);
   }
+  applyLocale(currentLocale.value);
 }
 
 /**
@@ -99,6 +128,9 @@ export function useI18n() {
   return {
     /** Translate a key. Supports positional args: t('key', value) */
     t,
+    /** Active locale messages (reactive). For non-string values like arrays
+     *  that `t()` can't return — e.g. EmptyState's rotating tips. */
+    messages,
     /** Current locale code (reactive). */
     locale: readonly(currentLocale),
     /** Whether locale is auto-detected from OS. */
