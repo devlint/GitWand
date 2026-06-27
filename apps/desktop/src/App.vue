@@ -997,6 +997,32 @@ function isDirty(): boolean {
 async function handleSwitchBranch(name: string, isRemote = false) {
   if (!repoFolderPath.value) return;
 
+  // Worktree-aware branch switching. A branch checked out in a worktree can't
+  // be plain-checked-out (git refuses), so:
+  //   - branch owned by a worktree   → switch to that worktree (+ its branch);
+  //   - main / any non-worktree branch while on a worktree → return to the main
+  //     worktree first, then check out there.
+  // Only probe worktrees when relevant (on a worktree, or the target branch has
+  // one) so the common on-main switch stays a single git call.
+  const activeTab = repoTabs.value.find((t) => t.id === activeTabId.value);
+  if (activeTab) {
+    const onWorktree = !!activeRepoPath.value && activeRepoPath.value !== activeTab.path;
+    if (onWorktree || (worktreeBranches.value?.has(name) ?? false)) {
+      const entries = await gitWorktreeList(activeTab.path).catch(() => []);
+      const target = entries.find((w) => w.branch === name || w.branch.endsWith(`/${name}`));
+      if (target && !target.is_main) {
+        // Branch lives in a worktree — use that worktree instead of checking out.
+        if (target.path !== activeRepoPath.value) selectWorktree(activeTab.id, target.path);
+        return;
+      }
+      if (onWorktree) {
+        // Main or a plain branch — go back to the main worktree, then check out.
+        selectWorktree(activeTab.id, activeTab.path);
+        await openRepo(activeTab.path);
+      }
+    }
+  }
+
   // v2.14: Reset to origin shortcut
   // If user double-clicks/checkouts the origin version of their current branch
   // and they have unpushed changes, ask if they want to reset.
