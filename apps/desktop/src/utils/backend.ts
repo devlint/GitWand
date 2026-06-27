@@ -2379,23 +2379,26 @@ export interface ScratchWorktree {
 }
 
 /**
- * Crée `gitwand-scratch-<timestamp>` comme worktree frère, basé sur
- * `sourceBranch` (HEAD courant par défaut). Ne touche pas au checkout actif.
+ * Crée un worktree frère basé sur `sourceBranch` (HEAD courant par défaut). Ne
+ * touche pas au checkout actif. Si `name` est fourni, le worktree/branche est
+ * nommé `gitwand-scratch-<slug>` (sinon `gitwand-scratch-<timestamp>`).
  */
 export async function scratchWorktreeCreate(
   cwd: string,
   sourceBranch?: string,
+  name?: string,
 ): Promise<ScratchWorktree> {
   if (isTauri()) {
     return tauriInvoke<ScratchWorktree>("scratch_worktree_create", {
       cwd,
       sourceBranch: sourceBranch ?? null,
+      name: name ?? null,
     });
   }
   const res = await devFetch(`${DEV_SERVER}/api/scratch-worktree-create`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ cwd, sourceBranch: sourceBranch ?? null }),
+    body: JSON.stringify({ cwd, sourceBranch: sourceBranch ?? null, name: name ?? null }),
   });
   return res.json() as Promise<ScratchWorktree>;
 }

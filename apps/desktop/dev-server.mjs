@@ -5866,12 +5866,23 @@ async function handleRequest(req, res) {
       return jsonResponse(req, res, { ok: true });
     }
 
-    // POST /api/scratch-worktree-create  { cwd, sourceBranch? }
+    // POST /api/scratch-worktree-create  { cwd, sourceBranch?, name? }
     if (url.pathname === "/api/scratch-worktree-create" && req.method === "POST") {
-      const { cwd, sourceBranch } = await readBody(req);
+      const { cwd, sourceBranch, name } = await readBody(req);
       const resolvedCwd = resolve(cwd);
       const ts = Date.now();
-      const branchName = `gitwand-scratch-dev-${ts}`;
+      // Mirror the Rust slug rules: lowercase, non-alphanumeric runs → "-",
+      // trimmed, capped at 48 chars. Falls back to a timestamp when empty.
+      const slug = (name ?? "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 48)
+        .replace(/-+$/g, "");
+      let branchName = slug ? `gitwand-scratch-${slug}` : `gitwand-scratch-dev-${ts}`;
+      if (slug && existsSync(join(resolve(resolvedCwd, ".."), branchName))) {
+        branchName = `gitwand-scratch-${slug}-${Math.floor(ts / 1000)}`;
+      }
       const scratchPath = join(resolve(resolvedCwd, ".."), branchName);
       const ref = sourceBranch ?? "HEAD";
       try {

@@ -50,6 +50,7 @@ const SubmodulePanel = defineAsyncComponent(() => import("./components/Submodule
 const LaunchpadView = defineAsyncComponent(() => import("./components/LaunchpadView.vue"));
 const AgentSessionsPanel = defineAsyncComponent(() => import("./components/AgentSessionsPanel.vue"));
 const AiTaskCloseModal = defineAsyncComponent(() => import("./components/AiTaskCloseModal.vue"));
+const AiTaskNameModal = defineAsyncComponent(() => import("./components/AiTaskNameModal.vue"));
 const CommandLogPanel = defineAsyncComponent(() => import("./components/CommandLogPanel.vue"));
 const SearchPalette = defineAsyncComponent(() => import("./components/header/SearchPalette.vue"));
 const BranchRenameModal = defineAsyncComponent(() => import("./components/header/BranchRenameModal.vue"));
@@ -1454,14 +1455,26 @@ function reportAgentLaunchError(tabType: TerminalTabType, err: unknown) {
   }
 }
 
-async function onNewAiTask() {
+// AI-task name prompt: opening the prompt is decoupled from creation so the
+// worktree/branch can be named after the task instead of an opaque timestamp.
+const aiTaskNamePrompt = ref(false);
+const aiTaskNameBusy = ref(false);
+
+function onNewAiTask() {
   if (!repoFolderPath.value || activeTabId.value === null) return;
+  aiTaskNamePrompt.value = true;
+}
+
+/** Create the AI-task scratch worktree once the user has named it. */
+async function confirmNewAiTask(name: string) {
+  if (!repoFolderPath.value || activeTabId.value === null) return;
+  aiTaskNameBusy.value = true;
   try {
     // Always base the scratch on the active project's root, not whatever
     // worktree is currently selected, so AI tasks branch from the project.
     const projectTab = repoTabs.value.find((t) => t.id === activeTabId.value);
     const origin = projectTab?.path ?? repoFolderPath.value;
-    const scratch = await scratchWorktreeCreate(origin);
+    const scratch = await scratchWorktreeCreate(origin, undefined, name || undefined);
     aiTasks.register({
       path: scratch.path,
       originCwd: origin,
@@ -1469,13 +1482,17 @@ async function onNewAiTask() {
       createdAt: scratch.created_at,
     });
     void refreshWorktreeCount(origin);
+    aiTaskNamePrompt.value = false;
     // Switch the project's checkout to the new scratch worktree in place, then
     // load it and spawn the agent terminal there.
     selectWorktree(activeTabId.value, scratch.path);
     await openRepo(scratch.path);
     await openTerminalTab(scratch.path, "claude");
   } catch (err) {
+    aiTaskNamePrompt.value = false;
     reportAgentLaunchError("claude", err);
+  } finally {
+    aiTaskNameBusy.value = false;
   }
 }
 
@@ -3266,6 +3283,10 @@ onUnmounted(() => {
     <AgentSessionsPanel v-if="showAgents && repoFolderPath" :cwd="repoFolderPath" @close="showAgents = false"
       @open-tab="(path) => { openTab(path); showAgents = false; }"
       @launch-agent="onLaunchAgent" />
+
+    <!-- AI-task name prompt — names the scratch worktree after the task -->
+    <AiTaskNameModal v-if="aiTaskNamePrompt" :busy="aiTaskNameBusy" @cancel="aiTaskNamePrompt = false"
+      @create="confirmNewAiTask" />
 
     <!-- AI-task worktree removal — deletes / merges-back the scratch worktree -->
     <AiTaskCloseModal v-if="aiTaskClose" :branch="aiTaskClose.branch" :mode="aiTaskClose.mode" :busy="aiTaskCloseBusy"

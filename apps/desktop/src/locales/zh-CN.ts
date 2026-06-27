@@ -1851,6 +1851,11 @@ const zhCN: Locale = {
   // ─── AI 任务工作树 ──────────────────────────────────────
   aiTask: {
     badgeTooltip: "AI 任务工作树",
+    nameTitle: "新建 AI 任务",
+    nameBody: "为此任务命名。隔离的工作树将使用该名称，便于以后识别。",
+    namePlaceholder: "例如：修复登录错误",
+    nameHint: "留空则使用自动时间戳。",
+    create: "创建任务",
     closeTitle: "关闭 AI 任务？",
     closeBody: "这将关闭 AI 任务并从磁盘中移除其独立工作树。",
     closeWarn: "删除同时会丢弃 scratch 分支——任何未提交的更改都会丢失。请先合并以将工作保留在原始仓库中。",

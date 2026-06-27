@@ -1866,6 +1866,11 @@ const ptBR: Locale = {
   // ─── Worktrees de tarefas IA ─────────────────────────────
   aiTask: {
     badgeTooltip: "Worktree de tarefa IA",
+    nameTitle: "Nova tarefa IA",
+    nameBody: "Nomeie esta tarefa. O worktree isolado recebe esse nome para você reconhecê-lo depois.",
+    namePlaceholder: "ex. corrigir o bug de login",
+    nameHint: "Deixe em branco para usar um carimbo de data/hora automático.",
+    create: "Criar tarefa",
     closeTitle: "Fechar a tarefa IA?",
     closeBody: "Isso fecha a tarefa IA e remove o worktree isolado do disco.",
     closeWarn: "Excluir também descarta a branch scratch — alterações não confirmadas são perdidas. Faça merge primeiro para manter o trabalho no repositório original.",

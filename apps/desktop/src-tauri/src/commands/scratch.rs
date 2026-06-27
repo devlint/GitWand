@@ -92,15 +92,46 @@ fn validate_scratch_path(cwd: &Path, scratch_path: &str) -> Result<PathBuf, Stri
     Ok(candidate)
 }
 
-/// Create `gitwand-scratch-<timestamp>` as a sibling worktree based on
-/// `source_branch` (defaults to the current HEAD when `None`). Does NOT touch
-/// the active checkout. Returns the created scratch descriptor.
+/// Turn a user-supplied AI-task name into a git-ref-safe slug. Lowercases,
+/// replaces every run of non-alphanumeric characters with a single `-`, and
+/// trims leading/trailing dashes. Returns `None` when nothing usable remains
+/// (e.g. an empty or all-punctuation name) so the caller can fall back to the
+/// timestamp. Capped at 48 chars to keep directory/branch names sane.
+fn slugify_task_name(name: &str) -> Option<String> {
+    let mut slug = String::new();
+    let mut prev_dash = false;
+    for ch in name.chars() {
+        if ch.is_ascii_alphanumeric() {
+            slug.push(ch.to_ascii_lowercase());
+            prev_dash = false;
+        } else if !prev_dash && !slug.is_empty() {
+            slug.push('-');
+            prev_dash = true;
+        }
+    }
+    let slug = slug.trim_end_matches('-');
+    let slug: String = slug.chars().take(48).collect();
+    let slug = slug.trim_end_matches('-').to_string();
+    if slug.is_empty() {
+        None
+    } else {
+        Some(slug)
+    }
+}
+
+/// Create a sibling worktree based on `source_branch` (defaults to the current
+/// HEAD when `None`). The branch/dir is named `gitwand-scratch-<slug>` from the
+/// supplied `name`, falling back to `gitwand-scratch-<timestamp>` when no usable
+/// name is given. The `gitwand-scratch-` prefix is always preserved so the
+/// validation + cleanup paths keep recognising it. Does NOT touch the active
+/// checkout. Returns the created scratch descriptor.
 #[tauri::command]
 pub(crate) async fn scratch_worktree_create(
     cwd: String,
     source_branch: Option<String>,
+    name: Option<String>,
 ) -> Result<ScratchWorktree, String> {
-    scratch_worktree_create_impl(cwd, source_branch)
+    scratch_worktree_create_impl(cwd, source_branch, name)
 }
 
 /// Synchronous core of `scratch_worktree_create` (git work is blocking; the
@@ -108,6 +139,7 @@ pub(crate) async fn scratch_worktree_create(
 fn scratch_worktree_create_impl(
     cwd: String,
     source_branch: Option<String>,
+    name: Option<String>,
 ) -> Result<ScratchWorktree, String> {
     let repo_root = canonical_cwd(&cwd)?;
 
@@ -135,14 +167,36 @@ fn scratch_worktree_create_impl(
         .duration_since(UNIX_EPOCH)
         .map_err(|e| format!("clock error: {}", e))?
         .as_secs();
-    let scratch_branch = format!("gitwand-scratch-{}", created_at);
 
     // Sibling directory of the repo root (same parent dir as the "New task"
     // worktree flow in commands::ops::git_worktree_add).
     let parent = repo_root
         .parent()
         .ok_or("repo root has no parent directory")?;
-    let scratch_dir = parent.join(&scratch_branch);
+
+    // Prefer a slug from the user-supplied name; otherwise fall back to the
+    // timestamp. The `gitwand-scratch-` prefix is mandatory (validation +
+    // cleanup match on it). If the slugged directory already exists, append the
+    // timestamp to keep the worktree path unique without surprising the user.
+    let slug = name.as_deref().and_then(slugify_task_name);
+    let (scratch_branch, scratch_dir) = match slug {
+        Some(s) => {
+            let preferred = format!("gitwand-scratch-{}", s);
+            let preferred_dir = parent.join(&preferred);
+            if preferred_dir.exists() {
+                let unique = format!("gitwand-scratch-{}-{}", s, created_at);
+                let unique_dir = parent.join(&unique);
+                (unique, unique_dir)
+            } else {
+                (preferred, preferred_dir)
+            }
+        }
+        None => {
+            let b = format!("gitwand-scratch-{}", created_at);
+            let d = parent.join(&b);
+            (b, d)
+        }
+    };
     let scratch_path = scratch_dir.to_string_lossy().to_string();
 
     // Reuse the exact git-worktree add invocation pattern from
@@ -391,7 +445,7 @@ mod tests {
         repo.commit_all("base");
 
         // Create the scratch worktree off the current HEAD.
-        let scratch = scratch_worktree_create_impl(repo.cwd(), None)
+        let scratch = scratch_worktree_create_impl(repo.cwd(), None, None)
             .expect("create should succeed");
 
         assert!(scratch.branch.starts_with("gitwand-scratch-"));
@@ -462,7 +516,7 @@ mod tests {
             .output()
             .unwrap();
 
-        let scratch = scratch_worktree_create_impl(repo.cwd(), None)
+        let scratch = scratch_worktree_create_impl(repo.cwd(), None, None)
             .expect("create should succeed");
 
         let err = scratch_worktree_merge_back_impl(repo.cwd(), scratch.path.clone())
@@ -483,7 +537,7 @@ mod tests {
         repo.write("file.txt", "original\n");
         repo.commit_all("base");
 
-        let scratch = scratch_worktree_create_impl(repo.cwd(), None)
+        let scratch = scratch_worktree_create_impl(repo.cwd(), None, None)
             .expect("create should succeed");
         assert!(Path::new(&scratch.path).exists());
 
@@ -503,6 +557,60 @@ mod tests {
         );
         // Main checkout untouched.
         assert_eq!(repo.read("file.txt"), "original\n");
+    }
+
+    #[test]
+    fn slugify_produces_ref_safe_names_or_none() {
+        assert_eq!(slugify_task_name("Fix login bug"), Some("fix-login-bug".to_string()));
+        assert_eq!(slugify_task_name("  Refactor!! API  "), Some("refactor-api".to_string()));
+        assert_eq!(slugify_task_name("feature/foo@bar"), Some("feature-foo-bar".to_string()));
+        // All-punctuation / empty → no usable slug.
+        assert_eq!(slugify_task_name("   "), None);
+        assert_eq!(slugify_task_name("!!!"), None);
+        assert_eq!(slugify_task_name(""), None);
+        // Length cap, with no trailing dash left behind.
+        let long = "a".repeat(80);
+        let slug = slugify_task_name(&long).unwrap();
+        assert_eq!(slug.len(), 48);
+        assert!(!slug.ends_with('-'));
+    }
+
+    #[test]
+    fn create_with_name_uses_slug_in_branch_and_dir() {
+        let repo = TempRepo::new();
+        repo.write("file.txt", "original\n");
+        repo.commit_all("base");
+
+        let scratch =
+            scratch_worktree_create_impl(repo.cwd(), None, Some("Fix Login Bug".to_string()))
+                .expect("create should succeed");
+
+        assert_eq!(scratch.branch, "gitwand-scratch-fix-login-bug");
+        let base = Path::new(&scratch.path).file_name().unwrap().to_str().unwrap();
+        assert_eq!(base, "gitwand-scratch-fix-login-bug");
+
+        // Still recognised + removable by the validated cleanup path.
+        scratch_worktree_discard_impl(repo.cwd(), scratch.path.clone())
+            .expect("discard should succeed");
+    }
+
+    #[test]
+    fn create_with_colliding_name_appends_timestamp() {
+        let repo = TempRepo::new();
+        repo.write("file.txt", "original\n");
+        repo.commit_all("base");
+
+        let first = scratch_worktree_create_impl(repo.cwd(), None, Some("dupe".to_string()))
+            .expect("first create");
+        assert_eq!(first.branch, "gitwand-scratch-dupe");
+
+        let second = scratch_worktree_create_impl(repo.cwd(), None, Some("dupe".to_string()))
+            .expect("second create");
+        assert_ne!(second.branch, first.branch);
+        assert!(second.branch.starts_with("gitwand-scratch-dupe-"));
+
+        let _ = scratch_worktree_discard_impl(repo.cwd(), first.path);
+        let _ = scratch_worktree_discard_impl(repo.cwd(), second.path);
     }
 
     #[test]

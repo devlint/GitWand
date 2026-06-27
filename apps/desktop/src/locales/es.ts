@@ -1866,6 +1866,11 @@ const es: Locale = {
   // ─── Worktrees de tareas IA ──────────────────────────────
   aiTask: {
     badgeTooltip: "Worktree de tarea IA",
+    nameTitle: "Nueva tarea IA",
+    nameBody: "Nombra esta tarea. El worktree aislado tomará ese nombre para reconocerlo después.",
+    namePlaceholder: "p. ej. arreglar el error de inicio de sesión",
+    nameHint: "Déjalo en blanco para usar una marca de tiempo automática.",
+    create: "Crear tarea",
     closeTitle: "¿Cerrar la tarea IA?",
     closeBody: "Esto cierra la tarea IA y elimina su worktree aislado del disco.",
     closeWarn: "Eliminar también descarta la rama scratch: se pierden los cambios sin confirmar. Fusiona primero para conservar el trabajo en el repositorio original.",

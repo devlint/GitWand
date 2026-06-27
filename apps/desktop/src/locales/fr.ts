@@ -1875,6 +1875,11 @@ const fr: Locale = {
   // ─── Worktrees de tâches IA ──────────────────────────────
   aiTask: {
     badgeTooltip: "Worktree de tâche IA",
+    nameTitle: "Nouvelle tâche IA",
+    nameBody: "Nommez cette tâche. Le worktree isolé portera ce nom pour la retrouver plus tard.",
+    namePlaceholder: "ex. corriger le bug de connexion",
+    nameHint: "Laissez vide pour utiliser un horodatage automatique.",
+    create: "Créer la tâche",
     closeTitle: "Fermer la tâche IA ?",
     closeBody: "Cela ferme la tâche IA et supprime son worktree isolé du disque.",
     closeWarn: "La suppression efface aussi la branche scratch — toute modification non validée est perdue. Fusionnez d’abord pour conserver le travail dans le dépôt d’origine.",

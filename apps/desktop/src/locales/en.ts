@@ -1906,6 +1906,11 @@ const en = {
   // ─── AI task worktrees ──────────────────────────────────
   aiTask: {
     badgeTooltip: "AI task worktree",
+    nameTitle: "New AI task",
+    nameBody: "Name this task. It names the isolated worktree so you can recognise it later.",
+    namePlaceholder: "e.g. fix login bug",
+    nameHint: "Leave blank to use an automatic timestamp.",
+    create: "Create task",
     closeTitle: "Close AI task?",
     closeBody: "This closes the AI task and removes its isolated worktree from disk.",
     closeWarn: "Deleting also drops the scratch branch — any uncommitted changes are lost. Merge back to keep the work in the original repository first.",
