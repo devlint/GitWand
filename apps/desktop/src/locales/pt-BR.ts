@@ -1781,6 +1781,19 @@ const ptBR: Locale = {
     localBranches: "Branches locais",
     remoteBranches: "Branches de rastreamento remoto",
     onlyMainHint: "Nenhum worktree adicional ainda. Use ⚡ Nova tarefa para trabalhar em outro branch em paralelo sem trocar de contexto.",
+    menuLabel: "Worktrees",
+    menuTitle: "Worktrees",
+    menuMain: "main",
+    menuRemove: "Excluir worktree",
+    menuEmpty: "Nenhum worktree",
+  },
+
+  // ─── Projeto (aba) ───────────────────────────────────────
+  project: {
+    closeTitle: "Fechar o projeto?",
+    closeBody: "Fechar “{0}”? Os worktrees permanecem no disco — isso fecha apenas a aba.",
+    close: "Fechar",
+    cancel: "Cancelar",
   },
 
 
@@ -1845,6 +1858,20 @@ const ptBR: Locale = {
     modified: "{0} modificado(s)",
     errorList: "Falha ao listar sessões de agente: {0}",
     errorLaunch: "Falha ao iniciar o agente: {0}",
+  },
+
+  // ─── Worktrees de tarefas IA ─────────────────────────────
+  aiTask: {
+    badgeTooltip: "Worktree de tarefa IA",
+    closeTitle: "Fechar a tarefa IA?",
+    closeBody: "Isso fecha a tarefa IA e remove o worktree isolado do disco.",
+    closeWarn: "Excluir também descarta a branch scratch — alterações não confirmadas são perdidas. Faça merge primeiro para manter o trabalho no repositório original.",
+    delete: "Excluir",
+    mergeBack: "Fazer merge e excluir",
+    cancel: "Cancelar",
+    working: "Processando…",
+    errorDelete: "Falha ao excluir o worktree: {0}",
+    errorMergeBack: "Falha ao fazer merge: {0}",
   },
 
   // ─── Submodules ─────────────────────────────────────────

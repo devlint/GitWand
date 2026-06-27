@@ -1822,6 +1822,20 @@ const en = {
     localBranches: "Local branches",
     remoteBranches: "Remote tracking branches",
     onlyMainHint: "No additional worktrees yet. Use ⚡ New task to work on another branch in parallel without switching.",
+    // Per-project worktree submenu (tab caret)
+    menuLabel: "Worktrees",
+    menuTitle: "Worktrees",
+    menuMain: "main",
+    menuRemove: "Delete worktree",
+    menuEmpty: "No worktrees",
+  },
+
+  // ─── Project (tab) ──────────────────────────────────────
+  project: {
+    closeTitle: "Close project?",
+    closeBody: "Close “{0}”? Its worktrees stay on disk — this only closes the tab.",
+    close: "Close",
+    cancel: "Cancel",
   },
 
   // ─── Automations (v2.8) ──────────────────────────────────
@@ -1884,6 +1898,20 @@ const en = {
     modified: "{0} modified",
     errorList: "Failed to list agent sessions: {0}",
     errorLaunch: "Failed to launch agent: {0}",
+  },
+
+  // ─── AI task worktrees ──────────────────────────────────
+  aiTask: {
+    badgeTooltip: "AI task worktree",
+    closeTitle: "Close AI task?",
+    closeBody: "This closes the AI task and removes its isolated worktree from disk.",
+    closeWarn: "Deleting also drops the scratch branch — any uncommitted changes are lost. Merge back to keep the work in the original repository first.",
+    delete: "Delete",
+    mergeBack: "Merge back & Delete",
+    cancel: "Cancel",
+    working: "Working…",
+    errorDelete: "Failed to delete worktree: {0}",
+    errorMergeBack: "Failed to merge back: {0}",
   },
 
   // ─── Submodules ─────────────────────────────────────────

@@ -31,7 +31,7 @@
  */
 import { ref, computed, inject, watch, onMounted, onUnmounted, type Ref } from "vue";
 import type { Theme } from "../composables/useTheme";
-import type { GitBranch } from "../utils/backend";
+import type { GitBranch, WorktreeEntry } from "../utils/backend";
 import { branchSort } from "../utils/branchSort";
 import { useI18n } from "../composables/useI18n";
 import { useUndoStack, type UndoEntry, type UndoOpType } from "../composables/useUndoStack";
@@ -89,6 +89,12 @@ const props = defineProps<{
   // Tabs (repo strip)
   tabs: RepoTab[];
   activeTabId: number | null;
+  /** Path of the active checkout (project root or a selected worktree). */
+  activeRepoPath?: string | null;
+  /** Loads a project's worktrees for the per-project submenu. */
+  loadWorktrees?: (projectPath: string) => Promise<WorktreeEntry[]>;
+  /** Project paths that have ≥1 extra worktree — only these show the caret. */
+  worktreeProjectPaths?: Set<string>;
   /** Number of accumulated errors; drives the badge on the settings button. */
   errorCount?: number;
   /** Stash entry count — drives the badge on the Stash button. */
@@ -101,6 +107,8 @@ const emit = defineEmits<{
   openRepo: [path: string];
   switchTab: [tabId: number];
   closeTab: [tabId: number];
+  selectWorktree: [payload: { tabId: number; path: string }];
+  deleteWorktree: [payload: { path: string; projectPath: string; branch: string }];
   newTab: [];
   openClone: [];
   openFork: [];
@@ -303,7 +311,12 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
         v-if="tabs.length >= 1"
         :tabs="tabs"
         :active-tab-id="activeTabId"
+        :active-repo-path="activeRepoPath"
+        :load-worktrees="loadWorktrees"
+        :worktree-project-paths="worktreeProjectPaths"
         @switch-tab="(id) => emit('switchTab', id)"
+        @select-worktree="(p) => emit('selectWorktree', p)"
+        @delete-worktree="(p) => emit('deleteWorktree', p)"
         @close-tab="(id) => emit('closeTab', id)"
         @new-tab="emit('newTab')"
         @open-clone="emit('openClone')"

@@ -1791,6 +1791,19 @@ const fr: Locale = {
     localBranches: "Branches locales",
     remoteBranches: "Branches remote de suivi",
     onlyMainHint: "Aucun worktree supplémentaire pour l'instant. Utilisez ⚡ Nouvelle tâche pour travailler sur une autre branche en parallèle sans changer de contexte.",
+    menuLabel: "Worktrees",
+    menuTitle: "Worktrees",
+    menuMain: "main",
+    menuRemove: "Supprimer le worktree",
+    menuEmpty: "Aucun worktree",
+  },
+
+  // ─── Projet (onglet) ─────────────────────────────────────
+  project: {
+    closeTitle: "Fermer le projet ?",
+    closeBody: "Fermer « {0} » ? Ses worktrees restent sur le disque — cela ferme seulement l’onglet.",
+    close: "Fermer",
+    cancel: "Annuler",
   },
 
 
@@ -1855,6 +1868,19 @@ const fr: Locale = {
     modified: "{0} modifié(s)",
     errorList: "Échec de la liste des sessions agents : {0}",
     errorLaunch: "Échec du lancement de l’agent : {0}",
+  },
+  // ─── Worktrees de tâches IA ──────────────────────────────
+  aiTask: {
+    badgeTooltip: "Worktree de tâche IA",
+    closeTitle: "Fermer la tâche IA ?",
+    closeBody: "Cela ferme la tâche IA et supprime son worktree isolé du disque.",
+    closeWarn: "La suppression efface aussi la branche scratch — toute modification non validée est perdue. Fusionnez d’abord pour conserver le travail dans le dépôt d’origine.",
+    delete: "Supprimer",
+    mergeBack: "Fusionner et supprimer",
+    cancel: "Annuler",
+    working: "En cours…",
+    errorDelete: "Échec de la suppression du worktree : {0}",
+    errorMergeBack: "Échec de la fusion : {0}",
   },
 
   // ─── Submodules ─────────────────────────────────────────

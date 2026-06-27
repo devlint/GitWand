@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Per-project worktree submenu** — each project tab now has a caret (▼) between its name and close button that opens a submenu listing `main` plus every worktree of the project. Selecting one switches that project's checkout in place (no extra tab); the active checkout is checkmarked.
+- **AI tasks manage their worktree** — `gitwand-scratch-*` worktrees appear in the submenu with a sparkle icon and a delete action that prompts to either merge the work back into the project or delete the isolated worktree (with branch cleanup), instead of leaving it orphaned on disk.
+
+### Changed
+
+- **Closing a project asks for confirmation** — a confirmation prompt guards the tab close button (now next to the worktree caret) against misclicks. Closing a project only closes the tab; its worktrees stay on disk.
+
 ## [3.1.0] - 2026-06-25
 
 ### Added

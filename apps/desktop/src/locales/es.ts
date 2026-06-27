@@ -1781,6 +1781,19 @@ const es: Locale = {
     localBranches: "Ramas locales",
     remoteBranches: "Ramas de seguimiento remoto",
     onlyMainHint: "Aún no hay worktrees adicionales. Usa ⚡ Nueva tarea para trabajar en otra rama en paralelo sin cambiar de contexto.",
+    menuLabel: "Worktrees",
+    menuTitle: "Worktrees",
+    menuMain: "main",
+    menuRemove: "Eliminar worktree",
+    menuEmpty: "Sin worktrees",
+  },
+
+  // ─── Proyecto (pestaña) ──────────────────────────────────
+  project: {
+    closeTitle: "¿Cerrar el proyecto?",
+    closeBody: "¿Cerrar «{0}»? Sus worktrees permanecen en el disco: esto solo cierra la pestaña.",
+    close: "Cerrar",
+    cancel: "Cancelar",
   },
 
 
@@ -1845,6 +1858,20 @@ const es: Locale = {
     modified: "{0} modificado(s)",
     errorList: "Error al listar sesiones de agente: {0}",
     errorLaunch: "Error al iniciar el agente: {0}",
+  },
+
+  // ─── Worktrees de tareas IA ──────────────────────────────
+  aiTask: {
+    badgeTooltip: "Worktree de tarea IA",
+    closeTitle: "¿Cerrar la tarea IA?",
+    closeBody: "Esto cierra la tarea IA y elimina su worktree aislado del disco.",
+    closeWarn: "Eliminar también descarta la rama scratch: se pierden los cambios sin confirmar. Fusiona primero para conservar el trabajo en el repositorio original.",
+    delete: "Eliminar",
+    mergeBack: "Fusionar y eliminar",
+    cancel: "Cancelar",
+    working: "Procesando…",
+    errorDelete: "Error al eliminar el worktree: {0}",
+    errorMergeBack: "Error al fusionar: {0}",
   },
 
   // ─── Submodules ─────────────────────────────────────────

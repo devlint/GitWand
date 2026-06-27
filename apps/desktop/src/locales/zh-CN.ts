@@ -1766,6 +1766,19 @@ const zhCN: Locale = {
     localBranches: "本地分支",
     remoteBranches: "远程跟踪分支",
     onlyMainHint: "暂无其他工作树。使用 ⚡ 新建任务在不切换上下文的情况下并行处理其他分支。",
+    menuLabel: "工作树",
+    menuTitle: "工作树",
+    menuMain: "main",
+    menuRemove: "删除工作树",
+    menuEmpty: "无工作树",
+  },
+
+  // ─── 项目（标签页）─────────────────────────────────────
+  project: {
+    closeTitle: "关闭项目？",
+    closeBody: "关闭“{0}”？其工作树会保留在磁盘上——这只会关闭标签页。",
+    close: "关闭",
+    cancel: "取消",
   },
 
 
@@ -1830,6 +1843,20 @@ const zhCN: Locale = {
     modified: "{0} 个修改",
     errorList: "列出代理会话失败：{0}",
     errorLaunch: "启动代理失败：{0}",
+  },
+
+  // ─── AI 任务工作树 ──────────────────────────────────────
+  aiTask: {
+    badgeTooltip: "AI 任务工作树",
+    closeTitle: "关闭 AI 任务？",
+    closeBody: "这将关闭 AI 任务并从磁盘中移除其独立工作树。",
+    closeWarn: "删除同时会丢弃 scratch 分支——任何未提交的更改都会丢失。请先合并以将工作保留在原始仓库中。",
+    delete: "删除",
+    mergeBack: "合并并删除",
+    cancel: "取消",
+    working: "处理中…",
+    errorDelete: "删除工作树失败：{0}",
+    errorMergeBack: "合并失败：{0}",
   },
 
   // ─── Submodules ─────────────────────────────────────────

@@ -49,6 +49,7 @@ const WorktreeManager = defineAsyncComponent(() => import("./components/Worktree
 const SubmodulePanel = defineAsyncComponent(() => import("./components/SubmodulePanel.vue"));
 const LaunchpadView = defineAsyncComponent(() => import("./components/LaunchpadView.vue"));
 const AgentSessionsPanel = defineAsyncComponent(() => import("./components/AgentSessionsPanel.vue"));
+const AiTaskCloseModal = defineAsyncComponent(() => import("./components/AiTaskCloseModal.vue"));
 const CommandLogPanel = defineAsyncComponent(() => import("./components/CommandLogPanel.vue"));
 const SearchPalette = defineAsyncComponent(() => import("./components/header/SearchPalette.vue"));
 const BranchRenameModal = defineAsyncComponent(() => import("./components/header/BranchRenameModal.vue"));
@@ -77,6 +78,7 @@ import { isImagePath } from "./utils/imagePath";
 import { useGitWand } from "./composables/useGitWand";
 import { useResolutionMemory, type ResolutionMemoryEntry, type ResolutionStrategy } from "./composables/useResolutionMemory";
 import { useRepoTabs } from "./composables/useRepoTabs";
+import { useAiTasks } from "./composables/useAiTasks";
 import { usePinnedBranches } from "./composables/usePinnedBranches";
 import { useGitRepo, type ViewMode } from "./composables/useGitRepo";
 import { useWorkspaceScope } from "./composables/useWorkspaceScope";
@@ -105,7 +107,7 @@ import {
   TOGGLE_GIT_TREE_KEY,
   OPEN_SETTINGS_KEY,
 } from "./composables/branchPickerBridge";
-import { gitStash, gitStashPop, gitStashList, openInEditor, setGitConfig, gitDiscard, gitAddToGitignore, gitDeleteBranch, gitDeleteTag, gitDeleteRemoteTag, gitRemoteInfo, gitUnpushedTags, gitPushTags, gitMergeBase, gitResetToCommit, gitCommitSubmoduleChanges, scratchWorktreeCreate, type CommitSubmoduleChange } from "./utils/backend";
+import { gitStash, gitStashPop, gitStashList, openInEditor, setGitConfig, gitDiscard, gitAddToGitignore, gitDeleteBranch, gitDeleteTag, gitDeleteRemoteTag, gitRemoteInfo, gitUnpushedTags, gitPushTags, gitMergeBase, gitResetToCommit, gitCommitSubmoduleChanges, scratchWorktreeCreate, scratchWorktreeDiscard, scratchWorktreeMergeBack, gitWorktreeList, type CommitSubmoduleChange } from "./utils/backend";
 import { useCommitActions } from "./composables/useCommitActions";
 
 const { t } = useI18n();
@@ -346,9 +348,53 @@ const {
   activeTabId,
   openTab,
   closeTab,
+  selectWorktree,
+  activeRepoPath,
   switchTab,
   reorderTabs,
 } = useRepoTabs();
+
+// ─── AI-task scratch worktrees (registry + worktree submenu) ──
+const aiTasks = useAiTasks();
+
+// Non-main worktree count per project path — drives whether the chip shows its
+// submenu caret (no caret when a project has only its main worktree). Keyed by
+// the project's own tab path so the strip can look it up directly.
+const worktreeCounts = ref<Record<string, number>>({});
+
+/** Project paths that have at least one extra worktree (caret-visible). */
+const worktreeProjectPaths = computed(
+  () => new Set(Object.entries(worktreeCounts.value).filter(([, n]) => n > 0).map(([p]) => p)),
+);
+
+/** Refresh the cached worktree count for a project (best-effort). */
+async function refreshWorktreeCount(projectPath: string) {
+  try {
+    const entries = await gitWorktreeList(projectPath);
+    const count = entries.filter((w) => !w.is_main && !w.is_prunable).length;
+    worktreeCounts.value = { ...worktreeCounts.value, [projectPath]: count };
+  } catch {
+    /* leave the previous count in place */
+  }
+}
+
+/**
+ * Loader handed to the per-project worktree submenu (RepoTabStrip). Lists the
+ * worktrees of a project so the menu can show `main` + each worktree. Backend
+ * access stays here in App.vue (the component only calls the injected fn).
+ * Best-effort — returns an empty list on failure so the menu degrades cleanly.
+ * Also refreshes the cached count so the caret stays in sync.
+ */
+async function loadProjectWorktrees(projectPath: string) {
+  try {
+    const entries = await gitWorktreeList(projectPath);
+    const count = entries.filter((w) => !w.is_main && !w.is_prunable).length;
+    worktreeCounts.value = { ...worktreeCounts.value, [projectPath]: count };
+    return entries;
+  } catch {
+    return [];
+  }
+}
 
 // When tab changes, load that repo into the single useGitRepo instance.
 // If the user is currently on the history/graph view, also reload the log —
@@ -369,26 +415,37 @@ const {
 // idempotent (checks `tab.path !== repoFolderPath.value` before calling
 // `openRepo`, and only calls `closeRepo` when something is open), so
 // running on boot is safe.
+// We watch `activeRepoPath` (not `activeTabId`) so that switching a project's
+// active worktree in place — via the submenu — reloads the right checkout
+// without opening a new tab.
 watch(
-  activeTabId,
-  async (id) => {
-    if (id === null) {
+  activeRepoPath,
+  async (path) => {
+    if (path === null) {
       if (repoFolderPath.value) closeRepo();
       return;
     }
-    const tab = repoTabs.value.find((t) => t.id === id);
-    if (tab && tab.path !== repoFolderPath.value) {
+    if (path !== repoFolderPath.value) {
       // Restore the persisted monorepo scope before loading, so the first
       // status/log fetch is already scoped (avoids a flash of the full repo).
-      await loadScope(tab.path);
-      await openRepo(tab.path);
+      await loadScope(path);
+      await openRepo(path);
       if (viewMode.value === "history" || showGitTree.value) {
         await loadLog();
       }
     }
+    // Keep the active project's caret in sync with its worktrees on disk.
+    const projectTab = repoTabs.value.find((t) => t.id === activeTabId.value);
+    if (projectTab) void refreshWorktreeCount(projectTab.path);
   },
   { immediate: true },
 );
+
+// Count worktrees for every open project on boot so each chip's caret is
+// correct without the user having to focus that tab first.
+onMounted(() => {
+  for (const tab of repoTabs.value) void refreshWorktreeCount(tab.path);
+});
 
 // Apply the user's configured starting view (Settings → Dock). "default"
 // lands on the first dock entry the user has left visible (dock order: Today →
@@ -1372,10 +1429,23 @@ function reportAgentLaunchError(tabType: TerminalTabType, err: unknown) {
 }
 
 async function onNewAiTask() {
-  if (!repoFolderPath.value) return;
+  if (!repoFolderPath.value || activeTabId.value === null) return;
   try {
-    const scratch = await scratchWorktreeCreate(repoFolderPath.value);
-    openTab(scratch.path);
+    // Always base the scratch on the active project's root, not whatever
+    // worktree is currently selected, so AI tasks branch from the project.
+    const projectTab = repoTabs.value.find((t) => t.id === activeTabId.value);
+    const origin = projectTab?.path ?? repoFolderPath.value;
+    const scratch = await scratchWorktreeCreate(origin);
+    aiTasks.register({
+      path: scratch.path,
+      originCwd: origin,
+      branch: scratch.branch,
+      createdAt: scratch.created_at,
+    });
+    void refreshWorktreeCount(origin);
+    // Switch the project's checkout to the new scratch worktree in place, then
+    // load it and spawn the agent terminal there.
+    selectWorktree(activeTabId.value, scratch.path);
     await openRepo(scratch.path);
     await openTerminalTab(scratch.path, "claude");
   } catch (err) {
@@ -1384,17 +1454,130 @@ async function onNewAiTask() {
 }
 
 /**
- * Definitively close a repo tab: dispose its PTY sessions first, then remove
- * the tab from the strip. Must be used instead of bare `closeTab` everywhere
- * a repo tab is REMOVED (not just switched away from).
+ * Definitively close a repo (project) tab. Closing a project never deletes its
+ * worktrees — it only drops the tab — so we just confirm (the new submenu
+ * caret sits next to the close button and is easy to misclick) and then tear
+ * down the PTY sessions.
  */
 function closeRepoTab(tabId: number) {
   const found = repoTabs.value.find((t) => t.id === tabId);
+  if (!found) return;
+  closeProjectConfirm.value = { tabId, name: found.name };
+}
+
+// ─── Close-project confirmation ──────────────────────────
+const closeProjectConfirm = ref<{ tabId: number; name: string } | null>(null);
+
+function confirmCloseProject() {
+  const target = closeProjectConfirm.value;
+  if (!target) return;
+  const found = repoTabs.value.find((t) => t.id === target.tabId);
   if (found) {
     // Fire-and-forget: PTY cleanup is best-effort; don't block UI on it.
     termSessions.disposeRepo(found.path).catch(() => {});
   }
-  closeTab(tabId);
+  closeTab(target.tabId);
+  closeProjectConfirm.value = null;
+}
+
+// ─── Per-project worktree submenu actions ────────────────
+
+/** Switch a project tab's active checkout to one of its worktrees, in place. */
+function onSelectWorktree(payload: { tabId: number; path: string }) {
+  // Set the selection first, then activate — so `activeRepoPath` lands on the
+  // chosen worktree in one step (avoids a transient load of the project root).
+  selectWorktree(payload.tabId, payload.path);
+  if (activeTabId.value !== payload.tabId) switchTab(payload.tabId);
+}
+
+// ─── AI-task worktree removal (delete / merge-back) ──────
+// Triggered from the worktree submenu's per-scratch action. Removes the
+// scratch worktree; if it was the active checkout, the project falls back to
+// its main worktree.
+const aiTaskClose = ref<{ path: string; projectPath: string; branch: string } | null>(null);
+const aiTaskCloseBusy = ref(false);
+const aiTaskCloseError = ref<string | null>(null);
+
+/** Open the delete / merge-back confirmation for a scratch worktree. */
+function onDeleteWorktree(payload: { path: string; projectPath: string; branch: string }) {
+  aiTaskClose.value = { ...payload };
+  aiTaskCloseError.value = null;
+}
+
+/**
+ * Resolve the origin checkout for a scratch worktree — the `cwd` discard /
+ * merge-back must run from. Prefer the menu's project path, then the registry,
+ * then the repo's main worktree.
+ */
+async function resolveAiTaskOrigin(path: string, projectPath?: string): Promise<string> {
+  if (projectPath) return projectPath;
+  const recorded = aiTasks.get(path)?.originCwd;
+  if (recorded) return recorded;
+  const entries = await gitWorktreeList(path);
+  const main = entries.find((w) => w.is_main);
+  if (!main) throw new Error("could not resolve the origin repository for this worktree");
+  return main.path;
+}
+
+/** Tear down a scratch worktree once it has been removed from disk. */
+async function finalizeWorktreeRemoval(path: string, projectPath: string) {
+  aiTasks.unregister(path);
+  void refreshWorktreeCount(projectPath);
+  aiTaskClose.value = null;
+  // Reload the project's main checkout so the removed worktree AND its now-
+  // deleted `gitwand-scratch-*` branch disappear from every view. We load the
+  // project explicitly (not via the worktree-switch watcher, which refreshes
+  // status/log but not the branch list) and then drop the owning tab's
+  // selection back to main — ordering openRepo first keeps the watcher a no-op.
+  await openRepo(projectPath);
+  const owner = repoTabs.value.find((t) => t.path === projectPath);
+  if (owner) selectWorktree(owner.id, projectPath);
+  await loadBranches();
+  if (viewMode.value === "history" || showGitTree.value) await loadLog();
+}
+
+function onAiTaskCancel() {
+  if (aiTaskCloseBusy.value) return;
+  aiTaskClose.value = null;
+  aiTaskCloseError.value = null;
+}
+
+async function onAiTaskDelete() {
+  const target = aiTaskClose.value;
+  if (!target || aiTaskCloseBusy.value) return;
+  aiTaskCloseBusy.value = true;
+  aiTaskCloseError.value = null;
+  try {
+    const origin = await resolveAiTaskOrigin(target.path, target.projectPath);
+    // Kill the scratch's agent terminal first so no running process holds an
+    // index.lock or open handle that would block the worktree removal.
+    await termSessions.disposeRepo(target.path).catch(() => {});
+    await scratchWorktreeDiscard(origin, target.path);
+    await finalizeWorktreeRemoval(target.path, target.projectPath);
+  } catch (err) {
+    aiTaskCloseError.value = t("aiTask.errorDelete", String((err as { message?: string })?.message ?? err));
+  } finally {
+    aiTaskCloseBusy.value = false;
+  }
+}
+
+async function onAiTaskMergeBack() {
+  const target = aiTaskClose.value;
+  if (!target || aiTaskCloseBusy.value) return;
+  aiTaskCloseBusy.value = true;
+  aiTaskCloseError.value = null;
+  try {
+    const origin = await resolveAiTaskOrigin(target.path, target.projectPath);
+    // Kill the scratch's agent terminal first so no running process holds an
+    // index.lock or open handle that would block the worktree removal.
+    await termSessions.disposeRepo(target.path).catch(() => {});
+    await scratchWorktreeMergeBack(origin, target.path);
+    await finalizeWorktreeRemoval(target.path, target.projectPath);
+  } catch (err) {
+    aiTaskCloseError.value = t("aiTask.errorMergeBack", String((err as { message?: string })?.message ?? err));
+  } finally {
+    aiTaskCloseBusy.value = false;
+  }
 }
 
 // ─── Sidebar visibility (v2.0) ───────────────────────────
@@ -2674,6 +2857,9 @@ onUnmounted(() => {
       :force-push-preferred="forcePushPreferred" :is-fetching="isFetching"
       :cwd="repoFolderPath ?? ''" :branches="branches" :worktree-branches="worktreeBranches" :branches-loading="branchesLoading"
       :is-switching-branch="isSwitchingBranch" :is-merging="isMerging" :tabs="repoTabs" :active-tab-id="activeTabId"
+      :active-repo-path="activeRepoPath" :load-worktrees="loadProjectWorktrees"
+      :worktree-project-paths="worktreeProjectPaths"
+      @select-worktree="onSelectWorktree" @delete-worktree="onDeleteWorktree"
       @open-folder="handleOpenFolder" @open-repo="handleOpenPath" @switch-tab="switchTab" @close-tab="closeRepoTab"
       @reorder-tabs="reorderTabs"
       @new-tab="handleOpenFolder" @open-clone="showCloneModal = true" @open-fork="showForkModal = true"
@@ -2991,6 +3177,20 @@ onUnmounted(() => {
     <AgentSessionsPanel v-if="showAgents && repoFolderPath" :cwd="repoFolderPath" @close="showAgents = false"
       @open-tab="(path) => { openTab(path); showAgents = false; }"
       @launch-agent="onLaunchAgent" />
+
+    <!-- AI-task worktree removal — deletes / merges-back the scratch worktree -->
+    <AiTaskCloseModal v-if="aiTaskClose" :branch="aiTaskClose.branch" :busy="aiTaskCloseBusy"
+      :error="aiTaskCloseError" @cancel="onAiTaskCancel" @delete="onAiTaskDelete" @merge-back="onAiTaskMergeBack" />
+
+    <!-- Close-project confirmation — guards against misclicks near the submenu caret -->
+    <BaseModal v-if="closeProjectConfirm" :title="t('project.closeTitle')" size="sm" role="alertdialog"
+      @close="closeProjectConfirm = null">
+      <p class="ptc-desc">{{ t('project.closeBody', closeProjectConfirm.name) }}</p>
+      <template #footer>
+        <button class="bm-btn bm-btn--ghost" @click="closeProjectConfirm = null">{{ t('project.cancel') }}</button>
+        <button class="bm-btn bm-btn--danger" @click="confirmCloseProject">{{ t('project.close') }}</button>
+      </template>
+    </BaseModal>
 
     <!-- Command Log panel (⌘⇧L) — transparent git command audit trail (v2.11) -->
     <CommandLogPanel :visible="showCommandLog" @close="showCommandLog = false" />
