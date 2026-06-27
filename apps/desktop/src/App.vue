@@ -107,7 +107,7 @@ import {
   TOGGLE_GIT_TREE_KEY,
   OPEN_SETTINGS_KEY,
 } from "./composables/branchPickerBridge";
-import { gitStash, gitStashPop, gitStashList, openInEditor, setGitConfig, gitDiscard, gitAddToGitignore, gitDeleteBranch, gitDeleteTag, gitDeleteRemoteTag, gitRemoteInfo, gitUnpushedTags, gitPushTags, gitMergeBase, gitResetToCommit, gitCommitSubmoduleChanges, scratchWorktreeCreate, scratchWorktreeDiscard, scratchWorktreeMergeBack, gitWorktreeList, type CommitSubmoduleChange } from "./utils/backend";
+import { gitStash, gitStashPop, gitStashList, openInEditor, setGitConfig, gitDiscard, gitAddToGitignore, gitDeleteBranch, gitDeleteTag, gitDeleteRemoteTag, gitRemoteInfo, gitUnpushedTags, gitPushTags, gitMergeBase, gitResetToCommit, gitCommitSubmoduleChanges, scratchWorktreeCreate, scratchWorktreeDiscard, scratchWorktreeMergeBack, gitWorktreeList, gitWorktreeRemove, type CommitSubmoduleChange } from "./utils/backend";
 import { useCommitActions } from "./composables/useCommitActions";
 
 const { t } = useI18n();
@@ -1490,17 +1490,72 @@ function onSelectWorktree(payload: { tabId: number; path: string }) {
   if (activeTabId.value !== payload.tabId) switchTab(payload.tabId);
 }
 
-// ─── AI-task worktree removal (delete / merge-back) ──────
-// Triggered from the worktree submenu's per-scratch action. Removes the
-// scratch worktree; if it was the active checkout, the project falls back to
-// its main worktree.
-const aiTaskClose = ref<{ path: string; projectPath: string; branch: string } | null>(null);
+// ─── Worktree removal (delete / merge-back) ──────────────
+// Triggered from the worktree submenu (per-scratch) and the Git Tree
+// context menu (any worktree branch). `scratch` worktrees can merge back;
+// plain worktrees can only be deleted (remove worktree + branch).
+type WorktreeRemoval = {
+  path: string;
+  projectPath: string;
+  branch: string;
+  scratch: boolean;
+  mode: "both" | "delete" | "merge";
+};
+const aiTaskClose = ref<WorktreeRemoval | null>(null);
 const aiTaskCloseBusy = ref(false);
 const aiTaskCloseError = ref<string | null>(null);
 
-/** Open the delete / merge-back confirmation for a scratch worktree. */
+/** Open the delete / merge-back confirmation for a scratch worktree (submenu ×). */
 function onDeleteWorktree(payload: { path: string; projectPath: string; branch: string }) {
-  aiTaskClose.value = { ...payload };
+  aiTaskClose.value = { ...payload, scratch: true, mode: "both" };
+  aiTaskCloseError.value = null;
+}
+
+/** Resolve a worktree (path + project) from one of its branch names. */
+async function resolveWorktreeByBranch(branch: string) {
+  if (!repoFolderPath.value) return null;
+  const entries = await gitWorktreeList(repoFolderPath.value);
+  const main = entries.find((w) => w.is_main);
+  const entry = entries.find((w) => w.branch === branch || w.branch.endsWith(`/${branch}`));
+  if (!entry) return null;
+  return {
+    path: entry.path,
+    projectPath: main?.path ?? repoFolderPath.value,
+    isMain: entry.is_main,
+  };
+}
+
+/** Git Tree → "Delete worktree" on a worktree branch. */
+async function handleTreeDeleteWorktree(branch: string) {
+  const wt = await resolveWorktreeByBranch(branch);
+  if (!wt || wt.isMain) {
+    repoError.value = t("worktree.cannotRemoveMain");
+    return;
+  }
+  aiTaskClose.value = {
+    path: wt.path,
+    projectPath: wt.projectPath,
+    branch,
+    scratch: aiTasks.isAiTask(wt.path),
+    mode: "delete",
+  };
+  aiTaskCloseError.value = null;
+}
+
+/** Git Tree → "Merge & delete worktree" on a scratch worktree branch. */
+async function handleTreeMergeDeleteWorktree(branch: string) {
+  const wt = await resolveWorktreeByBranch(branch);
+  if (!wt || wt.isMain) {
+    repoError.value = t("worktree.cannotRemoveMain");
+    return;
+  }
+  aiTaskClose.value = {
+    path: wt.path,
+    projectPath: wt.projectPath,
+    branch,
+    scratch: true,
+    mode: "merge",
+  };
   aiTaskCloseError.value = null;
 }
 
@@ -1549,10 +1604,16 @@ async function onAiTaskDelete() {
   aiTaskCloseError.value = null;
   try {
     const origin = await resolveAiTaskOrigin(target.path, target.projectPath);
-    // Kill the scratch's agent terminal first so no running process holds an
+    // Kill the worktree's agent terminal first so no running process holds an
     // index.lock or open handle that would block the worktree removal.
     await termSessions.disposeRepo(target.path).catch(() => {});
-    await scratchWorktreeDiscard(origin, target.path);
+    if (target.scratch) {
+      await scratchWorktreeDiscard(origin, target.path);
+    } else {
+      // Plain worktree: remove it, then delete its now-unreferenced branch.
+      await gitWorktreeRemove(origin, target.path, true);
+      if (target.branch) await gitDeleteBranch(origin, target.branch, true);
+    }
     await finalizeWorktreeRemoval(target.path, target.projectPath);
   } catch (err) {
     aiTaskCloseError.value = t("aiTask.errorDelete", String((err as { message?: string })?.message ?? err));
@@ -3065,6 +3126,8 @@ onUnmounted(() => {
                   @cherry-pick-commit="handleCherryPickCommit"
                   @view-on-forge="handleViewOnForge"
                   @delete-branch="handleDeleteBranchRequest"
+                  @delete-worktree="handleTreeDeleteWorktree"
+                  @merge-delete-worktree="handleTreeMergeDeleteWorktree"
                   @delete-tag="handleDeleteTagRequest"
                   @merge-into-current="doMerge"
                   @rebase-onto-current="handleRebaseOntoCurrent"
@@ -3179,7 +3242,7 @@ onUnmounted(() => {
       @launch-agent="onLaunchAgent" />
 
     <!-- AI-task worktree removal — deletes / merges-back the scratch worktree -->
-    <AiTaskCloseModal v-if="aiTaskClose" :branch="aiTaskClose.branch" :busy="aiTaskCloseBusy"
+    <AiTaskCloseModal v-if="aiTaskClose" :branch="aiTaskClose.branch" :mode="aiTaskClose.mode" :busy="aiTaskCloseBusy"
       :error="aiTaskCloseError" @cancel="onAiTaskCancel" @delete="onAiTaskDelete" @merge-back="onAiTaskMergeBack" />
 
     <!-- Close-project confirmation — guards against misclicks near the submenu caret -->

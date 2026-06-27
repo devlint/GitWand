@@ -1796,6 +1796,9 @@ const fr: Locale = {
     menuMain: "main",
     menuRemove: "Supprimer le worktree",
     menuEmpty: "Aucun worktree",
+    menuDelete: "Supprimer le worktree",
+    menuMergeDelete: "Fusionner et supprimer le worktree",
+    cannotRemoveMain: "Impossible de supprimer le worktree principal.",
   },
 
   // ─── Projet (onglet) ─────────────────────────────────────
@@ -1875,6 +1878,9 @@ const fr: Locale = {
     closeTitle: "Fermer la tâche IA ?",
     closeBody: "Cela ferme la tâche IA et supprime son worktree isolé du disque.",
     closeWarn: "La suppression efface aussi la branche scratch — toute modification non validée est perdue. Fusionnez d’abord pour conserver le travail dans le dépôt d’origine.",
+    deleteTitle: "Supprimer le worktree ?",
+    mergeTitle: "Fusionner et supprimer le worktree ?",
+    deleteWarn: "Les modifications non validées de ce worktree seront perdues.",
     delete: "Supprimer",
     mergeBack: "Fusionner et supprimer",
     cancel: "Annuler",

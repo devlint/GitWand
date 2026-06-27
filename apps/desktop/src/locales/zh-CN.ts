@@ -1771,6 +1771,9 @@ const zhCN: Locale = {
     menuMain: "main",
     menuRemove: "删除工作树",
     menuEmpty: "无工作树",
+    menuDelete: "删除工作树",
+    menuMergeDelete: "合并并删除工作树",
+    cannotRemoveMain: "无法删除主工作树。",
   },
 
   // ─── 项目（标签页）─────────────────────────────────────
@@ -1851,6 +1854,9 @@ const zhCN: Locale = {
     closeTitle: "关闭 AI 任务？",
     closeBody: "这将关闭 AI 任务并从磁盘中移除其独立工作树。",
     closeWarn: "删除同时会丢弃 scratch 分支——任何未提交的更改都会丢失。请先合并以将工作保留在原始仓库中。",
+    deleteTitle: "删除工作树？",
+    mergeTitle: "合并并删除工作树？",
+    deleteWarn: "此工作树中未提交的更改将丢失。",
     delete: "删除",
     mergeBack: "合并并删除",
     cancel: "取消",

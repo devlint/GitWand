@@ -11,17 +11,28 @@
  *
  * Pure presentational: state + git work live in App.vue.
  */
+import { computed } from "vue";
 import { useI18n } from "../composables/useI18n";
 import BaseModal from "./BaseModal.vue";
 
-defineProps<{
-  /** Scratch branch name shown in the body for context. */
-  branch: string;
-  /** True while a delete/merge-back is in flight — disables the buttons. */
-  busy?: boolean;
-  /** Error message from a failed delete/merge-back, if any. */
-  error?: string | null;
-}>();
+const props = withDefaults(
+  defineProps<{
+    /** Scratch branch name shown in the body for context. */
+    branch: string;
+    /** True while a delete/merge-back is in flight — disables the buttons. */
+    busy?: boolean;
+    /** Error message from a failed delete/merge-back, if any. */
+    error?: string | null;
+    /**
+     * Which actions to offer:
+     *   - "both"   → Delete + Merge back & Delete (scratch worktrees)
+     *   - "delete" → Delete only (plain worktrees can't merge back)
+     *   - "merge"  → Merge back & Delete only
+     */
+    mode?: "both" | "delete" | "merge";
+  }>(),
+  { mode: "both" },
+);
 
 const emit = defineEmits<{
   (e: "cancel"): void;
@@ -30,10 +41,16 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useI18n();
+
+const title = computed(() =>
+  props.mode === "delete" ? t("aiTask.deleteTitle")
+  : props.mode === "merge" ? t("aiTask.mergeTitle")
+  : t("aiTask.closeTitle"),
+);
 </script>
 
 <template>
-  <BaseModal :title="t('aiTask.closeTitle')" size="sm" role="alertdialog" @close="emit('cancel')">
+  <BaseModal :title="title" size="sm" role="alertdialog" @close="emit('cancel')">
     <template #title-icon>
       <div class="atc-icon">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
@@ -58,7 +75,9 @@ const { t } = useI18n();
       </svg>
       <span class="atc-branch-name">{{ branch }}</span>
     </p>
-    <p class="atc-warn">{{ t('aiTask.closeWarn') }}</p>
+    <p v-if="mode !== 'merge'" class="atc-warn">
+      {{ mode === 'both' ? t('aiTask.closeWarn') : t('aiTask.deleteWarn') }}
+    </p>
 
     <p v-if="error" class="atc-error">{{ error }}</p>
 
@@ -66,10 +85,10 @@ const { t } = useI18n();
       <button class="bm-btn bm-btn--ghost" :disabled="busy" @click="emit('cancel')">
         {{ t('aiTask.cancel') }}
       </button>
-      <button class="bm-btn bm-btn--danger" :disabled="busy" @click="emit('delete')">
-        {{ t('aiTask.delete') }}
+      <button v-if="mode !== 'merge'" class="bm-btn bm-btn--danger" :disabled="busy" @click="emit('delete')">
+        {{ busy && mode === 'delete' ? t('aiTask.working') : t('aiTask.delete') }}
       </button>
-      <button class="bm-btn bm-btn--primary" :disabled="busy" @click="emit('merge-back')">
+      <button v-if="mode !== 'delete'" class="bm-btn bm-btn--primary" :disabled="busy" @click="emit('merge-back')">
         {{ busy ? t('aiTask.working') : t('aiTask.mergeBack') }}
       </button>
     </template>

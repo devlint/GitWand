@@ -1828,6 +1828,9 @@ const en = {
     menuMain: "main",
     menuRemove: "Delete worktree",
     menuEmpty: "No worktrees",
+    menuDelete: "Delete worktree",
+    menuMergeDelete: "Merge & delete worktree",
+    cannotRemoveMain: "Can’t remove the main worktree.",
   },
 
   // ─── Project (tab) ──────────────────────────────────────
@@ -1906,6 +1909,9 @@ const en = {
     closeTitle: "Close AI task?",
     closeBody: "This closes the AI task and removes its isolated worktree from disk.",
     closeWarn: "Deleting also drops the scratch branch — any uncommitted changes are lost. Merge back to keep the work in the original repository first.",
+    deleteTitle: "Delete worktree?",
+    mergeTitle: "Merge & delete worktree?",
+    deleteWarn: "Uncommitted changes in this worktree will be lost.",
     delete: "Delete",
     mergeBack: "Merge back & Delete",
     cancel: "Cancel",

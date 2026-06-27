@@ -1786,6 +1786,9 @@ const ptBR: Locale = {
     menuMain: "main",
     menuRemove: "Excluir worktree",
     menuEmpty: "Nenhum worktree",
+    menuDelete: "Excluir worktree",
+    menuMergeDelete: "Fazer merge e excluir worktree",
+    cannotRemoveMain: "Não é possível remover o worktree principal.",
   },
 
   // ─── Projeto (aba) ───────────────────────────────────────
@@ -1866,6 +1869,9 @@ const ptBR: Locale = {
     closeTitle: "Fechar a tarefa IA?",
     closeBody: "Isso fecha a tarefa IA e remove o worktree isolado do disco.",
     closeWarn: "Excluir também descarta a branch scratch — alterações não confirmadas são perdidas. Faça merge primeiro para manter o trabalho no repositório original.",
+    deleteTitle: "Excluir worktree?",
+    mergeTitle: "Fazer merge e excluir worktree?",
+    deleteWarn: "Alterações não confirmadas neste worktree serão perdidas.",
     delete: "Excluir",
     mergeBack: "Fazer merge e excluir",
     cancel: "Cancelar",

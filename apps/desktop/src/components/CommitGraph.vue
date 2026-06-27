@@ -74,6 +74,8 @@ const emit = defineEmits<{
   "cherry-pick-commit": [entry: GitLogEntry];
   "view-on-forge": [entry: GitLogEntry];
   "delete-branch": [name: string, hasLocal: boolean, hasRemote: boolean, remoteName?: string];
+  "delete-worktree": [branch: string];
+  "merge-delete-worktree": [branch: string];
   "delete-tag": [name: string, hasLocal: boolean, hasRemote: boolean];
   "merge-into-current": [name: string];
   "rebase-onto-current": [name: string];
@@ -342,6 +344,34 @@ function onCtxDeleteBranch() {
   const b = branchToDelete.value;
   if (!b) return;
   emit("delete-branch", b.name, b.hasLocal, b.hasRemote, b.remoteName);
+  closeCommitContextMenu();
+}
+
+/**
+ * A right-clicked local branch that is checked out in a worktree. Plain
+ * `git branch -d` fails for these (the ref is checked out elsewhere), so we
+ * offer worktree-aware actions instead of the standard delete. Excludes the
+ * current branch — that's the active checkout, removed via the project tab.
+ */
+const clickedBranchIsWorktree = computed(() => {
+  const b = ctxMenu.value.clickedBranch;
+  if (!b || ctxMenu.value.clickedBranchType === "remote") return false;
+  if (b === props.currentBranch) return false;
+  return props.worktreeBranches?.has(b) ?? false;
+});
+
+/** A `gitwand-scratch-*` worktree branch can also merge its work back. */
+const clickedBranchIsScratch = computed(
+  () => ctxMenu.value.clickedBranch?.startsWith("gitwand-scratch-") ?? false,
+);
+
+function onCtxDeleteWorktree() {
+  if (ctxMenu.value.clickedBranch) emit("delete-worktree", ctxMenu.value.clickedBranch);
+  closeCommitContextMenu();
+}
+
+function onCtxMergeDeleteWorktree() {
+  if (ctxMenu.value.clickedBranch) emit("merge-delete-worktree", ctxMenu.value.clickedBranch);
   closeCommitContextMenu();
 }
 
@@ -1448,6 +1478,35 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
             </svg>
             <span>{{ t('branchMenu.rebaseCurrentOntoBranch', ctxMenu.clickedBranch!) }}</span>
           </li>
+
+          <!-- Worktree branch actions (v3.1) — `git branch -d` can't delete a
+               branch checked out in a worktree, so offer worktree-aware actions.
+               Kept in this same list; the delete sits at the end. -->
+          <li
+            v-if="clickedBranchIsWorktree && clickedBranchIsScratch"
+            class="commit-ctx-menu-item"
+            role="menuitem"
+            @click="onCtxMergeDeleteWorktree"
+          >
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <circle cx="5" cy="4" r="2" stroke="currentColor" stroke-width="1.3" />
+              <circle cx="5" cy="12" r="2" stroke="currentColor" stroke-width="1.3" />
+              <circle cx="12" cy="8" r="2" stroke="currentColor" stroke-width="1.3" />
+              <path d="M5 6v4M10 8H7c-1.1 0-2-.9-2-2" stroke="currentColor" stroke-width="1.3" />
+            </svg>
+            <span>{{ t('worktree.menuMergeDelete') }}</span>
+          </li>
+          <li
+            v-if="clickedBranchIsWorktree"
+            class="commit-ctx-menu-item commit-ctx-menu-item--danger"
+            role="menuitem"
+            @click="onCtxDeleteWorktree"
+          >
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M2 4h12M5 4V3a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1M3 4v9a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span>{{ t('worktree.menuDelete') }}</span>
+          </li>
         </template>
 
         <!-- Force push (v2.15.1) — current branch with upstream & local commits ahead -->
@@ -1546,8 +1605,8 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
         <span>{{ t('commitCtx.cherryPick') }}</span>
       </li>
 
-      <!-- Branch Deletion (v2.12) -->
-      <template v-if="branchToDelete">
+      <!-- Branch Deletion (v2.12) — standard branches only -->
+      <template v-if="branchToDelete && !clickedBranchIsWorktree">
         <li class="commit-ctx-menu-sep" role="separator"></li>
         <li
           class="commit-ctx-menu-item commit-ctx-menu-item--danger"

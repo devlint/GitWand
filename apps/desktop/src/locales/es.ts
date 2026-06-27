@@ -1786,6 +1786,9 @@ const es: Locale = {
     menuMain: "main",
     menuRemove: "Eliminar worktree",
     menuEmpty: "Sin worktrees",
+    menuDelete: "Eliminar worktree",
+    menuMergeDelete: "Fusionar y eliminar worktree",
+    cannotRemoveMain: "No se puede eliminar el worktree principal.",
   },
 
   // ─── Proyecto (pestaña) ──────────────────────────────────
@@ -1866,6 +1869,9 @@ const es: Locale = {
     closeTitle: "¿Cerrar la tarea IA?",
     closeBody: "Esto cierra la tarea IA y elimina su worktree aislado del disco.",
     closeWarn: "Eliminar también descarta la rama scratch: se pierden los cambios sin confirmar. Fusiona primero para conservar el trabajo en el repositorio original.",
+    deleteTitle: "¿Eliminar worktree?",
+    mergeTitle: "¿Fusionar y eliminar worktree?",
+    deleteWarn: "Se perderán los cambios sin confirmar de este worktree.",
     delete: "Eliminar",
     mergeBack: "Fusionar y eliminar",
     cancel: "Cancelar",
