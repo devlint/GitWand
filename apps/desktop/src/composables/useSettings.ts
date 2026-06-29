@@ -194,10 +194,10 @@ export interface AppSettings {
 
   /**
    * View shown when the app opens. "default" keeps the built-in dashboard
-   * landing; other values force Today (launchpad), Dashboard, PRs, or the
-   * Git Tree (graph) as the starting page.
+   * landing; other values force Today (launchpad), Dashboard, PRs, the
+   * Git Tree (graph), or Changes as the starting page.
    */
-  startupView: "default" | "launchpad" | "dashboard" | "prs" | "graph";
+  startupView: "default" | "launchpad" | "dashboard" | "prs" | "graph" | "changes";
   /** Hide the Today (launchpad) entry from the bottom dock. */
   dockHideLaunchpad: boolean;
   /** Hide the Dashboard entry from the bottom dock. */

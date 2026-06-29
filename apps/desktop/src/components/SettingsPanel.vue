@@ -150,7 +150,7 @@ interface Settings {
   dashboardHideActivity: boolean;
   dashboardHideReadme: boolean;
   // Dock & startup view (v3)
-  startupView: "default" | "launchpad" | "dashboard" | "prs" | "graph";
+  startupView: "default" | "launchpad" | "dashboard" | "prs" | "graph" | "changes";
   dockHideLaunchpad: boolean;
   dockHideDashboard: boolean;
   dockHidePrs: boolean;
@@ -1420,6 +1420,7 @@ function deleteReleaseNoteTemplate(id: string) {
               <option value="dashboard">{{ t('settings.dock.itemDashboard') }}</option>
               <option value="prs">{{ t('settings.dock.itemPrs') }}</option>
               <option value="graph">{{ t('settings.dock.itemGitTree') }}</option>
+              <option value="changes">{{ t('settings.dock.itemChanges') }}</option>
             </select>
             <span class="sp-hint">{{ t('settings.dock.startupView.help') }}</span>
           </div>
