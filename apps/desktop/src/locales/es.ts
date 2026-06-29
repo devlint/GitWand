@@ -2223,6 +2223,8 @@ const es: Locale = {
     menuShell: "Shell",
     menuClaude: "Claude Code",
     menuCodex: "Codex",
+    menuOpenCode: "OpenCode",
+    menuAntigravity: "Antigravity",
     menuSessions: "Ver sesiones",
     menuNewAiTask: "Nueva tarea IA",
     searchPlaceholder: "Buscar…",

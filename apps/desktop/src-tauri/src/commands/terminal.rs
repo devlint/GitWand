@@ -114,12 +114,20 @@ pub(crate) fn terminal_open(
         .openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
         .map_err(|e| format!("openpty failed: {e}"))?;
 
-    // First-class agent vs shell resolution. An agent ("claude" / "codex") is
-    // launched as its own CLI binary rather than being smuggled through the
-    // `shell` parameter; anything else resolves to an interactive login shell.
+    // First-class agent vs shell resolution. Each agent is resolved via its
+    // dedicated binary resolver (same logic as detect_*_cli) rather than
+    // relying on the PTY's PATH, which may not include user-local install
+    // paths (e.g. ~/.opencode/bin, ~/.claude/local, ~/.local/bin).
     let agent_kind = agent.as_deref().map(str::trim).filter(|s| !s.is_empty());
     let program = match agent_kind {
-        Some(a @ ("claude" | "codex")) => a.to_string(),
+        Some("claude") => super::ai::resolve_claude_binary()
+            .ok_or_else(|| "Binaire `claude` introuvable. Installez-le avec `npm install -g @anthropic-ai/claude-code`.".to_string())?,
+        Some("codex") => super::ai::resolve_codex_binary()
+            .ok_or_else(|| "Binaire `codex` introuvable. Installez-le avec `npm install -g @openai/codex`.".to_string())?,
+        Some("opencode") => super::ai::resolve_opencode_binary()
+            .ok_or_else(|| "Binaire `opencode` introuvable. Installez-le avec `npm install -g opencode-ai` ou via `curl -fsSL https://opencode.ai/install | bash`.".to_string())?,
+        Some("antigravity") => super::ai::resolve_antigravity_binary()
+            .ok_or_else(|| "Binaire `agy` introuvable. Installez-le avec `curl -fsSL https://antigravity.google/cli/install.sh | bash`.".to_string())?,
         _ => resolve_shell(&shell),
     };
     let mut cmd = CommandBuilder::new(&program);

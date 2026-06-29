@@ -2223,6 +2223,8 @@ const ptBR: Locale = {
     menuShell: "Shell",
     menuClaude: "Claude Code",
     menuCodex: "Codex",
+    menuOpenCode: "OpenCode",
+    menuAntigravity: "Antigravity",
     menuSessions: "Ver sessões",
     menuNewAiTask: "Nova tarefa IA",
     searchPlaceholder: "Pesquisar…",

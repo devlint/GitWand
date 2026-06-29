@@ -1435,6 +1435,8 @@ async function onLaunchAgent(payload: { path: string; tool: string }) {
   const tabType: TerminalTabType =
     payload.tool === "claude" ? "claude"
     : payload.tool === "codex" ? "codex"
+    : payload.tool === "opencode" ? "opencode"
+    : payload.tool === "antigravity" ? "antigravity"
     : "shell";
   try {
     await openTerminalTab(payload.path, tabType);
@@ -1447,8 +1449,8 @@ async function onLaunchAgent(payload: { path: string; tool: string }) {
 // isn't on PATH — surface a clear toast instead of the raw "spawn shell failed".
 function reportAgentLaunchError(tabType: TerminalTabType, err: unknown) {
   console.error("Launch agent failed:", err);
-  if (tabType === "claude" || tabType === "codex") {
-    const name = tabType === "claude" ? "Claude Code" : "Codex";
+  if (tabType === "claude" || tabType === "codex" || tabType === "opencode" || tabType === "antigravity") {
+    const name = tabType === "claude" ? "Claude Code" : tabType === "codex" ? "Codex" : tabType === "opencode" ? "OpenCode" : "Antigravity";
     repoError.value = t("terminal.agentOpenFailed", name);
   } else {
     repoError.value = (err as { message?: string })?.message ?? String(err);

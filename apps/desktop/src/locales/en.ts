@@ -2263,6 +2263,8 @@ const en = {
     menuShell: "Shell",
     menuClaude: "Claude Code",
     menuCodex: "Codex",
+    menuOpenCode: "OpenCode",
+    menuAntigravity: "Antigravity",
     menuSessions: "View sessions",
     menuNewAiTask: "New AI task",
     searchPlaceholder: "Search…",

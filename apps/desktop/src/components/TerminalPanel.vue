@@ -792,7 +792,7 @@ onBeforeUnmount(() => {
         />
         <span v-else class="tp__tab-label">
           <span class="tp__tab-icon" :class="`tp__tab-icon--${tab.type}`">
-            {{ tab.type === 'claude' ? 'C' : tab.type === 'codex' ? '⚡' : '$' }}
+            {{ tab.type === 'claude' ? 'C' : tab.type === 'codex' ? '⚡' : tab.type === 'opencode' ? 'O' : tab.type === 'antigravity' ? '↑' : '$' }}
           </span>
           {{ tab.title }}
           <span v-if="tab.hasUnread && tab.id !== activeId" class="tp__unread" />
@@ -816,6 +816,12 @@ onBeforeUnmount(() => {
           </button>
           <button class="tp__menu-item" @click="selectDropdownItem(() => emit('new-agent', 'codex'))">
             {{ t('terminal.menuCodex') }}
+          </button>
+          <button class="tp__menu-item" @click="selectDropdownItem(() => emit('new-agent', 'opencode'))">
+            {{ t('terminal.menuOpenCode') }}
+          </button>
+          <button class="tp__menu-item" @click="selectDropdownItem(() => emit('new-agent', 'antigravity'))">
+            {{ t('terminal.menuAntigravity') }}
           </button>
           <button class="tp__menu-item" @click="selectDropdownItem(() => emit('open-sessions'))">
             {{ t('terminal.menuSessions') }}
@@ -1438,6 +1444,18 @@ onBeforeUnmount(() => {
 .tp__tab-icon--codex {
   color: #a370f7;
   opacity: 1;
+}
+
+.tp__tab-icon--opencode {
+  color: #3b82f6;
+  opacity: 1;
+  font-weight: bold;
+}
+
+.tp__tab-icon--antigravity {
+  color: #10b981;
+  opacity: 1;
+  font-weight: bold;
 }
 
 .tp__unread {

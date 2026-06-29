@@ -34,7 +34,7 @@ fn strip_claude_auth_env(cmd: &mut std::process::Command) {
 
 /// Resolve the path to the `claude` binary, checking the usual install
 /// locations on macOS / Linux / Windows in addition to PATH.
-fn resolve_claude_binary() -> Option<String> {
+pub(crate) fn resolve_claude_binary() -> Option<String> {
     // 1) Try PATH first via `which` / `where`.
     let which_cmd = if cfg!(windows) { "where" } else { "which" };
     if let Ok(out) = hidden_cmd(which_cmd).arg("claude").output() {
@@ -72,7 +72,7 @@ fn resolve_claude_binary() -> Option<String> {
 
 // ─── Codex binary resolution ─────────────────────────────────────────────
 
-fn resolve_codex_binary() -> Option<String> {
+pub(crate) fn resolve_codex_binary() -> Option<String> {
     // 1) PATH first
     let which_cmd = if cfg!(windows) { "where" } else { "which" };
     if let Ok(out) = hidden_cmd(which_cmd).arg("codex").output() {
@@ -347,12 +347,52 @@ pub(crate) async fn codex_cli_prompt(
 //   - `opencode models [provider]`                        — enumerate models
 //   - `opencode auth login`                               — provider auth
 //
+// ─── Antigravity binary resolution ──────────────────────────────────────────
+// Antigravity CLI (google-antigravity/antigravity-cli). The binary is named
+// `agy` and defaults to ~/.local/bin/agy (curl installer).
+
+pub(crate) fn resolve_antigravity_binary() -> Option<String> {
+    // 1) PATH first
+    let which_cmd = if cfg!(windows) { "where" } else { "which" };
+    if let Ok(out) = hidden_cmd(which_cmd).arg("agy").output() {
+        if out.status.success() {
+            let raw = String::from_utf8_lossy(&out.stdout);
+            let first = raw.lines().next().unwrap_or("").trim();
+            if !first.is_empty() && std::path::Path::new(first).exists() {
+                return Some(first.to_string());
+            }
+        }
+    }
+
+    // 2) Common install locations (curl installer → ~/.local/bin)
+    let home = dirs::home_dir();
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Some(h) = home.as_ref() {
+        candidates.push(h.join(".local/bin/agy"));
+        candidates.push(h.join(".npm-global/bin/agy"));
+        candidates.push(h.join("AppData/Roaming/npm/agy.cmd"));
+        candidates.push(h.join("AppData/Roaming/npm/agy"));
+    }
+    candidates.push(PathBuf::from("/opt/homebrew/bin/agy"));
+    candidates.push(PathBuf::from("/usr/local/bin/agy"));
+    candidates.push(PathBuf::from("/usr/bin/agy"));
+
+    for c in candidates {
+        if c.exists() {
+            return Some(c.to_string_lossy().to_string());
+        }
+    }
+    None
+}
+
+// ─── opencode CLI provider (v2.17) ───────────────────────────────────────
+
 // Models are advertised in `provider/model` form (e.g. `anthropic/claude-…`),
 // which is exactly the string `--model` expects. Auth is provider-scoped and
 // stored by opencode itself, so GitWand just shells out — same trick as the
 // other two CLIs.
 
-fn resolve_opencode_binary() -> Option<String> {
+pub(crate) fn resolve_opencode_binary() -> Option<String> {
     // 1) PATH first
     let which_cmd = if cfg!(windows) { "where" } else { "which" };
     if let Ok(out) = hidden_cmd(which_cmd).arg("opencode").output() {

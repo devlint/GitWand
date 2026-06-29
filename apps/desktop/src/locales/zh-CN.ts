@@ -2208,6 +2208,8 @@ const zhCN: Locale = {
     menuShell: "Shell",
     menuClaude: "Claude Code",
     menuCodex: "Codex",
+    menuOpenCode: "OpenCode",
+    menuAntigravity: "Antigravity",
     menuSessions: "查看会话",
     menuNewAiTask: "新 AI 任务",
     searchPlaceholder: "搜索…",

@@ -19,7 +19,7 @@ export function resolveTerminalShortcut(e: KeyboardEvent, focused: boolean): Ter
   return null;
 }
 
-export type TerminalTabType = "shell" | "claude" | "codex";
+export type TerminalTabType = "shell" | "claude" | "codex" | "opencode" | "antigravity";
 
 export interface TerminalTab {
   id: number; // id local (mémoire)
@@ -89,7 +89,7 @@ export function useTerminalSessions() {
     const tab: TerminalTab = {
       id: nextLocalId++,
       sessionId: -1,
-      title: tabType === "claude" ? "Claude Code" : tabType === "codex" ? "Codex" : "shell",
+      title: tabType === "claude" ? "Claude Code" : tabType === "codex" ? "Codex" : tabType === "opencode" ? "OpenCode" : tabType === "antigravity" ? "Antigravity" : "shell",
       titleManual: false,
       alive: true,
       type: tabType,
