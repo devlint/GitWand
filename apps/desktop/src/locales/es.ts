@@ -406,6 +406,13 @@ const es: Locale = {
     graphSearchClear: "Borrar búsqueda",
     graphSearchFilter: "Filtrar",
     graphSearchFilterTitle: "Mostrar solo los commits coincidentes",
+    filterCurrentBranch: "Solo rama actual",
+    filterMineCommits: "Solo mis commits",
+    dateSepToday: "Hoy",
+    dateSepYesterday: "Ayer",
+    dateSepThisWeek: "Esta semana",
+    dateSepThisMonth: "Este mes",
+    dateSepOlder: "Más antiguo",
   },
   commit: {
     summary: "Resumen",
