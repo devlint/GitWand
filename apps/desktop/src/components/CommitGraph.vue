@@ -9,6 +9,8 @@ import { avatarStyle, avatarInitials as initials } from "../composables/useAvata
 import { filterCommitsLocal } from "../composables/useCommitSearch";
 import { useWorkspaceScope } from "../composables/useWorkspaceScope";
 
+defineOptions({ inheritAttrs: false });
+
 const { t } = useI18n();
 const { activeScope, clearScope } = useWorkspaceScope();
 
@@ -993,7 +995,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
 </script>
 
 <template>
-  <div class="cg" v-if="displayCommits.length > 0">
+  <div class="cg" v-if="displayCommits.length > 0" v-bind="$attrs">
     <div class="cg-search-bar" ref="searchBarEl">
       <!-- Branch filter toggle -->
       <button
