@@ -34,6 +34,10 @@ const props = defineProps<{
   hiddenCommitCount?: number;
   /** User-pinned local branch names for the active repo. Pinned branches get a star in the tree. */
   pinnedBranches?: string[];
+  /** Filter commits to current branch only when set to "current". */
+  logBranchFilter?: "all" | "current";
+  /** Filter commits to the current user's commits when set to "mine". */
+  logAuthorFilter?: "all" | "mine";
 }>();
 
 type CommitEvent =
@@ -92,6 +96,8 @@ const emit = defineEmits<{
   /** Asks the parent to lazy-load branches — fired on search focus so the
    * branch autocomplete has data even when the graph is the first view. */
   "load-branches": [];
+  "set-log-branch-filter": [filter: "all" | "current"];
+  "set-log-author-filter": [filter: "all" | "mine"];
 }>();
 
 // ─── Context menu (v1.9) ─────────────────────────────
@@ -964,6 +970,36 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
 <template>
   <div class="cg" v-if="displayCommits.length > 0">
     <div class="cg-search-bar" ref="searchBarEl">
+      <!-- Branch filter toggle -->
+      <button
+        class="cg-filter-icon-btn"
+        :class="{ 'cg-filter-icon-btn--active': props.logBranchFilter === 'current' }"
+        :title="t('log.filterCurrentBranch')"
+        :aria-label="t('log.filterCurrentBranch')"
+        :aria-pressed="props.logBranchFilter === 'current'"
+        @click="emit('set-log-branch-filter', props.logBranchFilter === 'current' ? 'all' : 'current')"
+      >
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <line x1="6" y1="3" x2="6" y2="15"/>
+          <circle cx="18" cy="6" r="3"/>
+          <circle cx="6" cy="18" r="3"/>
+          <path d="M18 9a9 9 0 0 1-9 9"/>
+        </svg>
+      </button>
+      <!-- Author filter toggle -->
+      <button
+        class="cg-filter-icon-btn"
+        :class="{ 'cg-filter-icon-btn--active': props.logAuthorFilter === 'mine' }"
+        :title="t('log.filterMineCommits')"
+        :aria-label="t('log.filterMineCommits')"
+        :aria-pressed="props.logAuthorFilter === 'mine'"
+        @click="emit('set-log-author-filter', props.logAuthorFilter === 'mine' ? 'all' : 'mine')"
+      >
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="8" r="4"/>
+          <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>
+        </svg>
+      </button>
       <!-- Active-scope chip (v2.21.0) — click ✕ to clear -->
       <button
         v-if="activeScope"
@@ -1961,6 +1997,37 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
 .cg-search-nav:disabled {
   opacity: 0.35;
   cursor: not-allowed;
+}
+
+.cg-filter-icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-muted);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+
+.cg-filter-icon-btn:hover {
+  color: var(--color-fg);
+  background: var(--color-surface-hover);
+}
+
+.cg-filter-icon-btn--active {
+  color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+
+.cg-filter-icon-btn--active:hover {
+  color: var(--color-accent);
+  background: var(--color-accent-soft);
 }
 
 .cg-branch-dropdown {
