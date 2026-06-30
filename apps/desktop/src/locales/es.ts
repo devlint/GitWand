@@ -185,6 +185,7 @@ const es: Locale = {
     sectionStaged: "Preparados",
     sectionModified: "Modificados",
     sectionUntracked: "Sin seguimiento",
+    sectionChanges: "Cambios",
     stageAll: "Preparar todo",
     unstageAll: "Quitar todo de preparados",
     discardAll: "Descartar todo",

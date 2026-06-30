@@ -189,6 +189,7 @@ const en = {
     sectionStaged: "Staged",
     sectionModified: "Modified",
     sectionUntracked: "Untracked",
+    sectionChanges: "Changes",
     // Actions
     stageAll: "Stage all",
     unstageAll: "Unstage all",

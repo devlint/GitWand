@@ -189,6 +189,7 @@ const zhCN: Locale = {
     sectionStaged: "已暂存",
     sectionModified: "已修改",
     sectionUntracked: "未跟踪",
+    sectionChanges: "更改",
     stageAll: "全部暂存",
     unstageAll: "全部取消暂存",
     discardAll: "全部丢弃",
