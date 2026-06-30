@@ -81,6 +81,8 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
   const log = ref<GitLogEntry[]>([]);
   // Author filter: "all" → no filter, "mine" → only commits by the current git user
   const logAuthorFilter = ref<"all" | "mine">("all");
+  // Branch filter: "all" → --all refs, "current" → HEAD branch only
+  const logBranchFilter = ref<"all" | "current">("all");
   const currentGitUser = ref<GitUser | null>(null);
   /** True when the last page returned a full page of results — more may exist. */
   const logHasMore = ref(false);
@@ -529,14 +531,15 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       // When refreshing, reload at least as many commits as are currently visible
       // so polling doesn't silently collapse a paginated log back to page 1.
       const pageSize = count ?? Math.max(LOG_PAGE, log.value.length);
+      const isCurrentBranchOnly = logBranchFilter.value === "current";
       const entries = await getGitLog(
         folderPath.value,
         pageSize,
-        true, // all refs
+        !isCurrentBranchOnly,                            // all refs (false when branch-only)
         authorEmail,
         0,
-        undefined, // branch
-        activeScope.value ?? undefined, // pathspec (monorepo scope)
+        isCurrentBranchOnly ? (status.value?.branch ?? undefined) : undefined,
+        activeScope.value ?? undefined,                   // pathspec (monorepo scope)
       );
       log.value = entries;
       // When the result is exactly one full page, assume more exist.
@@ -563,14 +566,15 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       const authorEmail =
         logAuthorFilter.value === "mine" ? (currentGitUser.value?.email ?? "") : undefined;
       const offset = log.value.length;
+      const isCurrentBranchOnly = logBranchFilter.value === "current";
       const next = await getGitLog(
         folderPath.value,
         LOG_PAGE,
-        true, // all refs
+        !isCurrentBranchOnly,
         authorEmail,
         offset,
-        undefined, // branch
-        activeScope.value ?? undefined, // pathspec (monorepo scope)
+        isCurrentBranchOnly ? (status.value?.branch ?? undefined) : undefined,
+        activeScope.value ?? undefined,
       );
       if (next.length > 0) {
         log.value = [...log.value, ...next];
@@ -581,6 +585,12 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     } finally {
       logLoadingMore.value = false;
     }
+  }
+
+  async function setLogBranchFilter(filter: "all" | "current") {
+    if (logBranchFilter.value === filter) return;
+    logBranchFilter.value = filter;
+    await loadLog();
   }
 
   /**
@@ -1200,6 +1210,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     diff,
     log,
     logAuthorFilter,
+    logBranchFilter,
     logHasMore,
     logLoadingMore,
     currentGitUser,
@@ -1253,6 +1264,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     loadLog,
     loadMoreLog,
     setLogAuthorFilter,
+    setLogBranchFilter,
     stageFiles,
     stageAll,
     unstageFiles,
