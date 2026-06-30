@@ -72,7 +72,7 @@ describe("useAiPromptPresets (module-level functions)", () => {
     removePreset(builtinId);
     const stillExists = BUILTIN_PRESETS.find((p) => p.id === builtinId);
     expect(stillExists).toBeDefined();
-    expect(BUILTIN_PRESETS.length).toBe(4);
+    expect(BUILTIN_PRESETS.length).toBe(3);
   });
 
   // 6. setActivePreset(cwd, id) + getActivePresetId(cwd) returns the id
@@ -106,8 +106,8 @@ describe("useAiPromptPresets (module-level functions)", () => {
     expect(getActivePresetId(CWD_B)).toBeNull();
   });
 
-  // 9. allPresetsWithBuiltins() includes all 4 builtins + user presets
-  it("allPresetsWithBuiltins() includes all 4 builtins + user presets", async () => {
+  // 9. allPresetsWithBuiltins() includes all 3 builtins + user presets
+  it("allPresetsWithBuiltins() includes all 3 builtins + user presets", async () => {
     const { addPreset, allPresetsWithBuiltins, BUILTIN_PRESETS } = await import("../useAiPromptPresets");
     addPreset({ name: "Custom A", systemPrompt: "prompt A" });
     addPreset({ name: "Custom B", systemPrompt: "prompt B" });
