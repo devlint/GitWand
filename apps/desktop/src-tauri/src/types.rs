@@ -662,6 +662,18 @@ pub struct CopilotCliInfo {
     pub detail: String,
 }
 
+// ─── Antigravity CLI ───────────────────────────────────────────────
+
+#[derive(Serialize)]
+pub struct AntigravityCliInfo {
+    pub found: bool,
+    pub path: String,
+    pub version: String,
+    pub logged_in: bool,
+    pub status: String,
+    pub detail: String,
+}
+
 // ─── Git hooks ─────────────────────────────────────────────────────
 
 #[derive(Serialize)]

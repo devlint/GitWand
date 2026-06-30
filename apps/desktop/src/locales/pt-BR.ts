@@ -1082,6 +1082,10 @@ const ptBR: Locale = {
     aiProviderCopilotCliNotFound: " — não detectado",
     aiCopilotCliDetectedHint: "A autenticação é gerenciada pelo GitHub Copilot CLI. Verificada no primeiro uso.",
     aiCopilotCliInfoBox: "O GitWand executa `copilot -p` localmente. Nenhuma chave de API necessária: usa a autenticação do GitHub Copilot armazenada na sua máquina. Escolha um modelo abaixo ou mantenha o padrão.",
+    aiProviderAntigravityCli: "Antigravity CLI (assinatura Antigravity)",
+    aiProviderAntigravityCliNotFound: " — não detectado",
+    aiAntigravityCliDetectedHint: "A autenticação é gerenciada pelo Antigravity CLI. Verificada no primeiro uso.",
+    aiAntigravityCliInfoBox: "O GitWand executa `agy -p` localmente. Nenhuma chave de API necessária: usa a autenticação do Antigravity armazenada na sua máquina. Escolha um modelo abaixo ou mantenha o padrão.",
     // Seletor de modelo por provedor para agentes CLI (v2.17)
     aiModelCliDefault: "Padrão (configuração do CLI)",
     aiModelCliPlaceholder: "ex. gpt-5-codex",

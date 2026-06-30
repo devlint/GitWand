@@ -4154,6 +4154,82 @@ async function handleRequest(req, res) {
       }
     }
 
+    // GET /api/antigravity-cli-detect
+    if (url.pathname === "/api/antigravity-cli-detect" && req.method === "GET") {
+      try {
+        const AGY = resolveBin("agy");
+        const exists = (() => {
+          try { return existsSync(AGY); } catch { return false; }
+        })();
+        let resolved = exists ? AGY : "";
+        if (!resolved) {
+          try {
+            const r = spawnSync(process.platform === "win32" ? "where" : "which", ["agy"], { encoding: "utf-8" });
+            if (r.status === 0 && r.stdout.trim()) {
+              resolved = r.stdout.split(/\r?\n/)[0].trim();
+            }
+          } catch { /* ignore */ }
+        }
+
+        if (!resolved) {
+          return jsonResponse(req, res, {
+            found: false,
+            path: "",
+            version: "",
+            logged_in: false,
+            status: "not_found",
+            detail: "Binaire `agy` introuvable. Installez-le avec `curl -fsSL https://antigravity.google/cli/install.sh | bash`.",
+          });
+        }
+
+        let version = "";
+        try {
+          const r = spawnSync(resolved, ["--version"], { encoding: "utf-8" });
+          if (r.status === 0) version = r.stdout.trim();
+        } catch { /* ignore */ }
+
+        return jsonResponse(req, res, {
+          found: true,
+          path: resolved,
+          version,
+          logged_in: false,
+          status: "detected",
+          detail: "",
+        });
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
+      }
+    }
+
+    // POST /api/antigravity-cli-prompt  { prompt, systemPrompt?, cwd?, model? }
+    if (url.pathname === "/api/antigravity-cli-prompt" && req.method === "POST") {
+      try {
+        const body = await readBody(req);
+        const AGY = resolveBin("agy");
+        const fullPrompt = body.systemPrompt && body.systemPrompt.trim()
+          ? `# System\n${body.systemPrompt.trim()}\n\n# User\n${(body.prompt || "").trim()}`
+          : (body.prompt || "");
+        const agyArgs = [];
+        if (body.model && String(body.model).trim()) {
+          agyArgs.push("--model", String(body.model).trim());
+        }
+        agyArgs.push("-p", fullPrompt);
+        const r = spawnSync(AGY, agyArgs, {
+          cwd: body.cwd || undefined,
+          encoding: "utf-8",
+          timeout: 5 * 60 * 1000,
+          maxBuffer: 20 * 1024 * 1024,
+        });
+        if (r.status !== 0) {
+          const detail = (r.stderr || r.stdout || "").trim() || "Antigravity CLI a échoué sans message";
+          return jsonResponse(req, res, { error: detail }, 500);
+        }
+        return res.writeHead(200, { ...corsHeaders(req), "Content-Type": "text/plain" }).end(r.stdout);
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
+      }
+    }
+
     // POST /api/claude-cli-login  (opens a terminal with `claude login`)
     if (url.pathname === "/api/claude-cli-login" && req.method === "POST") {
       try {

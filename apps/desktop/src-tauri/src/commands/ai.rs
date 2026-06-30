@@ -385,6 +385,100 @@ pub(crate) fn resolve_antigravity_binary() -> Option<String> {
     None
 }
 
+/// Detect Antigravity CLI presence and version. Same privacy stance as the
+/// Claude / Codex / opencode / Copilot detectors: no prompt is sent to verify
+/// auth — that is confirmed implicitly on the first real `antigravity_cli_prompt`.
+#[tauri::command]
+pub(crate) fn detect_antigravity_cli() -> Result<AntigravityCliInfo, String> {
+    let binary = match resolve_antigravity_binary() {
+        Some(b) => b,
+        None => {
+            return Ok(AntigravityCliInfo {
+                found: false,
+                path: String::new(),
+                version: String::new(),
+                logged_in: false,
+                status: "not_found".to_string(),
+                detail: "Binaire `agy` introuvable. Installez-le avec `curl -fsSL https://antigravity.google/cli/install.sh | bash`."
+                    .to_string(),
+            });
+        }
+    };
+
+    let version = hidden_cmd(&binary)
+        .arg("--version")
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default();
+
+    Ok(AntigravityCliInfo {
+        found: true,
+        path: binary,
+        version,
+        logged_in: false,
+        status: "detected".to_string(),
+        detail: String::new(),
+    })
+}
+
+/// Run a one-shot prompt through the local Antigravity CLI (`agy -p`).
+///
+/// Antigravity exposes no separate system channel, so the system prompt is
+/// prepended as a Markdown section — same portable shape as the Claude /
+/// Codex / opencode / Copilot flows. Auth is managed by Antigravity itself.
+#[tauri::command]
+pub(crate) fn antigravity_cli_prompt(
+    prompt: String,
+    system_prompt: Option<String>,
+    cwd: Option<String>,
+    model: Option<String>,
+) -> Result<String, String> {
+    let binary = resolve_antigravity_binary()
+        .ok_or_else(|| "Binaire `agy` introuvable".to_string())?;
+
+    let full_prompt = match system_prompt {
+        Some(sys) if !sys.trim().is_empty() => {
+            format!("# System\n{}\n\n# User\n{}", sys.trim(), prompt.trim())
+        }
+        _ => prompt,
+    };
+
+    // Strip NUL bytes — the prompt is passed as a CLI argument and an interior
+    // `\0` makes the spawn fail with "nul byte found in provided data".
+    let full_prompt = full_prompt.replace('\0', "");
+
+    let mut cmd = hidden_cmd(&binary);
+    // Flags precede the positional prompt passed via `-p`.
+    if let Some(m) = model.as_ref() {
+        if !m.trim().is_empty() {
+            cmd.args(["--model", m.trim()]);
+        }
+    }
+    cmd.args(["-p", full_prompt.as_str()]);
+    if let Some(dir) = cwd {
+        if !dir.trim().is_empty() {
+            cmd.current_dir(dir);
+        }
+    }
+
+    let output = cmd
+        .output()
+        .map_err(|e| format!("Failed to run antigravity CLI: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let detail = if stderr.is_empty() { stdout } else { stderr };
+        return Err(if detail.is_empty() {
+            "Antigravity CLI a échoué sans message".to_string()
+        } else {
+            detail
+        });
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
 // ─── opencode CLI provider (v2.17) ───────────────────────────────────────
 
 // Models are advertised in `provider/model` form (e.g. `anthropic/claude-…`),

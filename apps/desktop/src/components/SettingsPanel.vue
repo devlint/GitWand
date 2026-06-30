@@ -22,6 +22,8 @@ import {
   type OpencodeCliInfo,
   detectCopilotCli,
   type CopilotCliInfo,
+  detectAntigravityCli,
+  type AntigravityCliInfo,
   readGitwandrc,
   writeGitwandrc,
   checkForUpdates,
@@ -531,6 +533,8 @@ function onAIProviderChange(val: AIProvider) {
     loadCliModels(val);
   } else if (val === "copilot-cli") {
     runCopilotCliDetect();
+  } else if (val === "antigravity-cli") {
+    runAntigravityCliDetect();
     loadCliModels(val);
   } else if (val === "claude") {
     if (!settings.value.aiApiEndpoint || settings.value.aiApiEndpoint === "https://api.openai.com/v1") {
@@ -720,6 +724,28 @@ async function runCopilotCliDetect() {
   }
 }
 
+// ─── Antigravity CLI detection ──────────────────────────
+const antigravityCliInfo = ref<AntigravityCliInfo | null>(null);
+const antigravityCliDetecting = ref(false);
+
+async function runAntigravityCliDetect() {
+  antigravityCliDetecting.value = true;
+  try {
+    antigravityCliInfo.value = await detectAntigravityCli();
+  } catch (e) {
+    antigravityCliInfo.value = {
+      found: false,
+      path: "",
+      version: "",
+      logged_in: false,
+      status: "error",
+      detail: (e as Error).message,
+    };
+  } finally {
+    antigravityCliDetecting.value = false;
+  }
+}
+
 // ─── Per-provider model picker for CLI agents (v2.17) ───
 const cliModelOptions = ref<string[]>([]);
 const cliModelsLoading = ref(false);
@@ -795,6 +821,7 @@ type LlmFallbackProvider =
   | "codex-cli"
   | "opencode-cli"
   | "copilot-cli"
+  | "antigravity-cli"
   | "openai-compat"
   | "ollama"
   | "mcp";
@@ -962,6 +989,7 @@ onMounted(() => {
   runCodexCliDetect();
   runOpencodeCliDetect();
   runCopilotCliDetect();
+  runAntigravityCliDetect();
   // Preload the model list when a CLI agent is already the active provider.
   loadCliModels();
 });
@@ -1983,6 +2011,10 @@ function deleteReleaseNoteTemplate(id: string) {
                   {{ t('settings.aiProviderCopilotCli') }}{{ copilotCliInfo && !copilotCliInfo.found ?
                     t('settings.aiProviderCopilotCliNotFound') : '' }}
                 </option>
+                <option value="antigravity-cli">
+                  {{ t('settings.aiProviderAntigravityCli') }}{{ antigravityCliInfo && !antigravityCliInfo.found ?
+                    t('settings.aiProviderAntigravityCliNotFound') : '' }}
+                </option>
                 <option value="openai-compat">{{ t('settings.aiProviderOpenAiCompat') }}</option>
                 <option value="ollama" :disabled="!ollamaAvailable">
                   {{ t('settings.aiProviderOllama') }}{{ ollamaAvailable ? '' : t('settings.aiProviderOllamaNotFound')
@@ -2352,6 +2384,51 @@ function deleteReleaseNoteTemplate(id: string) {
               </div>
             </template>
 
+            <!-- Antigravity CLI provider — same shape as the Copilot block -->
+            <template v-if="settings.aiProvider === 'antigravity-cli'">
+              <div class="sp-row">
+                <div class="sp-label">{{ t('settings.aiCliStatus') }}</div>
+                <div class="sp-cli-status">
+                  <template v-if="antigravityCliDetecting">
+                    <span class="sp-hint">{{ t('settings.aiCliDetecting') }}</span>
+                  </template>
+                  <template v-else-if="!antigravityCliInfo || !antigravityCliInfo.found">
+                    <div class="sp-connect-error-block">
+                      <div class="sp-connect-error">
+                        {{ t('settings.aiCliNotFound') }} <code>agy</code> {{ t('settings.aiCliNotFoundSuffix') }}
+                      </div>
+                      <span class="sp-hint">
+                        {{ t('settings.aiCliInstallHint') }}
+                        <code>curl -fsSL https://antigravity.google/cli/install.sh | bash</code>
+                        {{ t('settings.aiCliInstallHintSuffix') }}
+                      </span>
+                      <button class="sp-text-btn" @click="runAntigravityCliDetect">{{ t('settings.aiCliRedetect') }}</button>
+                    </div>
+                  </template>
+                  <template v-else>
+                    <!-- Detected. Auth is managed by Antigravity itself and
+                         verified implicitly on first use; we don't ping. -->
+                    <div class="sp-connected-badge">
+                      <span class="sp-connected-dot sp-connected-dot--neutral"></span>
+                      <span>{{ t('settings.aiCliDetected', antigravityCliInfo.version || 'antigravity') }}</span>
+                      <button class="sp-disconnect-btn sp-disconnect-btn--neutral" @click="runAntigravityCliDetect">{{ t('settings.aiCliRedetect')
+                      }}</button>
+                    </div>
+                    <span class="sp-hint">{{ t('settings.aiAntigravityCliDetectedHint') }}</span>
+                  </template>
+                </div>
+              </div>
+
+              <div v-if="antigravityCliInfo?.found" class="sp-info-box">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
+                  <circle cx="8" cy="8" r="7" />
+                  <path d="M8 7v4" stroke-linecap="round" />
+                  <circle cx="8" cy="5" r="0.7" fill="currentColor" stroke="none" />
+                </svg>
+                <p>{{ t('settings.aiAntigravityCliInfoBox') }}</p>
+              </div>
+            </template>
+
             <!-- OpenAI-compatible provider -->
             <template v-if="settings.aiProvider === 'openai-compat'">
               <div class="sp-row">
@@ -2591,6 +2668,7 @@ function deleteReleaseNoteTemplate(id: string) {
                   <option value="codex-cli">{{ t('settings.aiProviderCodexCli') }}</option>
                   <option value="opencode-cli">{{ t('settings.aiProviderOpencodeCli') }}</option>
                   <option value="copilot-cli">{{ t('settings.aiProviderCopilotCli') }}</option>
+                  <option value="antigravity-cli">{{ t('settings.aiProviderAntigravityCli') }}</option>
                   <option value="openai-compat">{{ t('settings.aiProviderOpenAiCompat') }}</option>
                   <option value="ollama">{{ t('settings.aiProviderOllama') }}</option>
                   <option value="mcp">MCP (Claude Code / Cursor)</option>
