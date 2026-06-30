@@ -2450,7 +2450,8 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
 
 .cg-date-sep-label {
   position: absolute;
-  right: 8px;
+  left: 50%;
+  transform: translateX(-50%);
   top: -9px;
   font-size: 10px;
   line-height: 1;
