@@ -163,9 +163,11 @@ const {
   diff: repoDiff,
   log: repoLog,
   logAuthorFilter,
+  logBranchFilter,
   logHasMore,
   logLoadingMore,
   setLogAuthorFilter,
+  setLogBranchFilter,
   loading: repoLoading,
   error: repoError,
   successMessage: repoSuccess,
@@ -2721,6 +2723,10 @@ onUnmounted(() => {
                   :has-more="logHasMore" :loading-more="logLoadingMore"
                   :hidden-commit-count="hiddenCommitCount"
                   :pinned-branches="graphPinnedBranches"
+                  :log-branch-filter="logBranchFilter"
+                  :log-author-filter="logAuthorFilter"
+                  @set-log-branch-filter="setLogBranchFilter"
+                  @set-log-author-filter="setLogAuthorFilter"
                   @select-commit="onGraphSelectCommit"
                   @change-view="onViewModeChange"
                   @edit-commit="handleEditCommit"
