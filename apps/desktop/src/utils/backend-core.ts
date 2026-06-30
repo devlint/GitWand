@@ -101,3 +101,58 @@ export const IPC_TIMEOUT = {
   /** AI prompts — no timeout, can run arbitrarily long. */
   NONE: 0,
 } as const;
+
+/**
+ * Dev-mode PTY open over Server-Sent Events. First SSE message is
+ * `{"id": <number>}`; subsequent messages are raw output chunks (JSON-encoded
+ * strings to preserve control bytes).
+ */
+export async function devTerminalOpen(
+  cwd: string,
+  opts: { shell?: string; agent?: string; cols: number; rows: number },
+  onOutput: (chunk: string) => void,
+): Promise<number> {
+  const params = new URLSearchParams({
+    cwd,
+    cols: String(opts.cols),
+    rows: String(opts.rows),
+  });
+  if (opts.shell) params.set("shell", opts.shell);
+  if (opts.agent) params.set("agent", opts.agent);
+  return new Promise((resolve, reject) => {
+    const es = new EventSource(`${DEV_SERVER}/api/terminal-open?${params}`);
+    let resolved = false;
+    es.onmessage = (ev) => {
+      const payload = JSON.parse(ev.data);
+      if (!resolved && typeof payload?.id === "number") {
+        resolved = true;
+        resolve(payload.id);
+      } else if (typeof payload?.chunk === "string") {
+        onOutput(payload.chunk);
+      } else if (payload?.eof) {
+        // Fix 5 — Explicitly close the EventSource when the shell exits so that
+        // the browser's built-in auto-reconnect logic does not fire and spawn an
+        // untracked shell process by hitting /api/terminal-open again.
+        es.close();
+      }
+    };
+    es.onerror = () => {
+      if (resolved) {
+        // The dev server ties PTY lifetime to this SSE connection: req.on("close")
+        // kills the PTY the moment the connection drops (see dev-server.mjs). So
+        // once the shell is up, ANY onerror means the server-side PTY is already
+        // gone — close here rather than let EventSource auto-reconnect, which
+        // would re-hit /api/terminal-open and spawn an untracked orphan shell
+        // with a new id the frontend can't address. (Surviving a transient blip
+        // would require server-side reconnect-by-id; this is dev-mode only.)
+        es.close();
+      } else {
+        // Initial connection failure before the id arrived (dev server down,
+        // not yet started, etc.). Reject the Promise so the caller surfaces the
+        // error instead of hanging forever with a ghost tab at sessionId=-1.
+        es.close();
+        reject(new Error("dev server unreachable: terminal-open SSE connection failed"));
+      }
+    };
+  });
+}

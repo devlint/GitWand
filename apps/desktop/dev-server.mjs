@@ -14,6 +14,11 @@ import { readFileSync, writeFileSync, readdirSync, statSync, existsSync, unlinkS
 import { resolve, join, dirname, basename, sep, isAbsolute } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { Socket } from "node:net";
+import { createRequire } from "node:module";
+const _require = createRequire(import.meta.url);
+// node-pty provides a real PTY in dev mode — proper echo, backspace, unbuffered
+// output, resize, and control sequences without any manual workarounds.
+const nodePty = _require("node-pty");
 
 // ── Crash guards ────────────────────────────────────────────────────────────
 // Without these, any unhandled exception or rejected promise kills the process
@@ -157,6 +162,10 @@ function gitSpawn(args, cwd) {
 // so the Settings > Accounts UI can be exercised without Tauri. It does NOT log
 // you in — it just returns a static code then "succeeds" after a couple polls.
 let _mockGithubPolls = 0;
+
+// ── Terminal PTY state (dev:web only) ────────────────────────────────────────
+const devPtys = new Map(); // id -> { proc }
+let devPtyNextId = 1;
 
 /**
  * Get a GitHub OAuth token — tries in order:
@@ -5783,6 +5792,109 @@ async function handleRequest(req, res) {
         return jsonResponse(req, res, merged);
       } catch (err) {
         return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
+      }
+    }
+
+    // ── Terminal PTY (dev echo) ───────────────────────────────────────────────
+    if (url.pathname === "/api/terminal-open" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd") || process.cwd();
+      const shell = url.searchParams.get("shell") || process.env.SHELL || "/bin/zsh";
+      // First-class agent: launch the named CLI directly rather than smuggling
+      // it through `shell`. Mirrors the Rust backend's `agent` parameter.
+      const agent = url.searchParams.get("agent") || "";
+      const program = agent === "claude" || agent === "codex" ? agent : shell;
+      const cols = Math.max(1, parseInt(url.searchParams.get("cols") || "80", 10));
+      const rows = Math.max(1, parseInt(url.searchParams.get("rows") || "24", 10));
+      const id = devPtyNextId++;
+      const sseOrigin = req.headers.origin;
+      const sseAllowOrigin = sseOrigin && ALLOWED_ORIGINS.has(sseOrigin) ? sseOrigin : "";
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+        ...(sseAllowOrigin ? { "Access-Control-Allow-Origin": sseAllowOrigin, Vary: "Origin" } : {}),
+      });
+      res.write(`data: ${JSON.stringify({ id })}\n\n`);
+      // Real PTY via node-pty — handles echo, backspace, CRLF conversion,
+      // unbuffered output, resize, and control sequences natively.
+      let proc;
+      try {
+        // `claudeSpawnEnv` strips the API-key auth vars so secrets held by the
+        // dev server don't leak into the terminal and `claude` uses its OAuth
+        // session — same hygiene as the Rust backend's terminal_open.
+        proc = nodePty.spawn(program, [], { name: "xterm-256color", cols, rows, cwd, env: claudeSpawnEnv });
+      } catch (spawnErr) {
+        res.write(`data: ${JSON.stringify({ error: String(spawnErr) })}\n\n`);
+        res.end();
+        return;
+      }
+      proc.onData((chunk) => {
+        if (!res.writableEnded) res.write(`data: ${JSON.stringify({ chunk })}\n\n`);
+      });
+      proc.onExit(() => {
+        if (!res.writableEnded) res.write(`data: ${JSON.stringify({ eof: true })}\n\n`);
+        devPtys.delete(id);
+      });
+      devPtys.set(id, { proc });
+      req.on("close", () => { try { proc.kill(); } catch (_) {} devPtys.delete(id); });
+      return;
+    }
+    if (url.pathname === "/api/terminal-write" && req.method === "POST") {
+      const { id, data } = await readBody(req);
+      const entry = devPtys.get(id);
+      // Validate the PTY still exists and the payload is a string. Without this,
+      // a write to an already-exited PTY (or a non-string body) silently no-ops
+      // via optional chaining yet returns {ok:true}, so the frontend believes a
+      // keystroke was delivered when it was dropped. Mirrors the Rust backend's
+      // "session not found" error from terminal_write.
+      if (!entry || typeof data !== "string") {
+        return jsonResponse(req, res, { ok: false, error: "session not found" }, 404);
+      }
+      entry.proc.write(data);
+      return jsonResponse(req, res, { ok: true });
+    }
+    if (url.pathname === "/api/terminal-resize" && req.method === "POST") {
+      const { id, cols, rows } = await readBody(req);
+      const entry = devPtys.get(id);
+      if (entry && cols > 0 && rows > 0) entry.proc.resize(cols, rows);
+      return jsonResponse(req, res, { ok: true });
+    }
+    if (url.pathname === "/api/terminal-close" && req.method === "POST") {
+      const { id } = await readBody(req);
+      const entry = devPtys.get(id);
+      if (entry) { try { entry.proc.kill(); } catch (_) {} devPtys.delete(id); }
+      return jsonResponse(req, res, { ok: true });
+    }
+
+    // POST /api/scratch-worktree-create  { cwd, sourceBranch?, name? }
+    if (url.pathname === "/api/scratch-worktree-create" && req.method === "POST") {
+      const { cwd, sourceBranch, name } = await readBody(req);
+      const resolvedCwd = resolve(cwd);
+      const ts = Date.now();
+      // Mirror the Rust slug rules: lowercase, non-alphanumeric runs → "-",
+      // trimmed, capped at 48 chars. Falls back to a timestamp when empty.
+      const slug = (name ?? "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 48)
+        .replace(/-+$/g, "");
+      let branchName = slug ? `gitwand-scratch-${slug}` : `gitwand-scratch-dev-${ts}`;
+      if (slug && existsSync(join(resolve(resolvedCwd, ".."), branchName))) {
+        branchName = `gitwand-scratch-${slug}-${Math.floor(ts / 1000)}`;
+      }
+      const scratchPath = join(resolve(resolvedCwd, ".."), branchName);
+      const ref = sourceBranch ?? "HEAD";
+      try {
+        execFileSync("git", ["worktree", "add", "-b", branchName, scratchPath, ref], { cwd: resolvedCwd, encoding: "utf-8" });
+        return jsonResponse(req, res, {
+          path: scratchPath,
+          branch: branchName,
+          source_branch: sourceBranch ?? "HEAD",
+          created_at: Math.floor(ts / 1000),
+        });
+      } catch (e) {
+        return jsonResponse(req, res, { error: e.message }, 500);
       }
     }
 

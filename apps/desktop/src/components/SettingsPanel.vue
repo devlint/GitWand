@@ -89,7 +89,7 @@ const props = defineProps<{
   /** Accumulated error log passed down from App.vue */
   errorLog?: LogEntry[];
   /** Open directly on this tab (e.g. "logs" when clicking the error badge) */
-  initialTab?: "general" | "dock" | "dashboard" | "git" | "editor" | "ai" | "automations" | "logs" | "hooks" | "accounts" | "mcp" | "releaseNotes";
+  initialTab?: "general" | "dock" | "dashboard" | "git" | "editor" | "terminal" | "ai" | "automations" | "logs" | "hooks" | "accounts" | "mcp" | "releaseNotes";
   /** Current repo path (for Hooks tab) */
   cwd?: string;
 }>();
@@ -181,6 +181,15 @@ interface Settings {
   // v3 Release Note Templates
   releaseNoteTemplates: ReleaseNoteTemplate[];
   activeReleaseNoteTemplateIdByRepo: Record<string, string | null>;
+  // v3.x terminal
+  terminalFontSize: number;
+  terminalShell: string;
+  terminalMode: "floating" | "fullscreen" | "bottom";
+  terminalPrevMode: "floating" | "bottom";
+  terminalHideOnNav: boolean;
+  terminalContextMenu: boolean;
+  terminalCopyOnSelect: boolean;
+  terminalPasteOnRightClick: boolean;
 }
 
 const defaultSettings: Settings = {
@@ -245,6 +254,15 @@ const defaultSettings: Settings = {
   // v3 Release Note Templates
   releaseNoteTemplates: [],
   activeReleaseNoteTemplateIdByRepo: {},
+  // v3.x terminal
+  terminalFontSize: 13,
+  terminalShell: "",
+  terminalMode: "bottom",
+  terminalPrevMode: "bottom",
+  terminalHideOnNav: false,
+  terminalContextMenu: true,
+  terminalCopyOnSelect: false,
+  terminalPasteOnRightClick: false,
 };
 
 function loadSettings(): Settings {
@@ -269,6 +287,21 @@ function updateSetting<K extends keyof Settings>(key: K, value: Settings[K]) {
   // Keep the shared reactive settings (read by AppDock and friends) in sync so
   // changes like dock order / position apply live, not only on panel close.
   refreshSharedSettings();
+}
+
+// Terminal layout — mirrors the dock context menu. Fullscreen is an overlay on
+// top of a base layout (floating/bottom), so entering it preserves the base in
+// terminalPrevMode; floating/bottom set both so fullscreen returns to it.
+function setTerminalLayout(mode: "floating" | "bottom" | "fullscreen") {
+  if (mode === "fullscreen") {
+    if (settings.value.terminalMode !== "fullscreen") {
+      updateSetting("terminalPrevMode", settings.value.terminalMode as "floating" | "bottom");
+    }
+    updateSetting("terminalMode", "fullscreen");
+  } else {
+    updateSetting("terminalMode", mode);
+    updateSetting("terminalPrevMode", mode);
+  }
 }
 
 // ─── Dock order ───────────────────────────────────────────
@@ -299,7 +332,7 @@ function resetDockPosition() {
 }
 
 // ─── Tab navigation ──────────────────────────────────────
-type SettingsTab = "general" | "dock" | "dashboard" | "git" | "editor" | "ai" | "automations" | "logs" | "hooks" | "accounts" | "mcp" | "releaseNotes";
+type SettingsTab = "general" | "dock" | "dashboard" | "git" | "editor" | "terminal" | "ai" | "automations" | "logs" | "hooks" | "accounts" | "mcp" | "releaseNotes";
 const activeSettingsTab = ref<SettingsTab>(props.initialTab ?? "general");
 
 // ─── Logs tab — formatting + clipboard ──────────────────
@@ -356,6 +389,7 @@ const settingsTabs: { id: SettingsTab; icon: string }[] = [
   { id: "dashboard", icon: "dashboard" },
   { id: "git", icon: "git" },
   { id: "editor", icon: "editor" },
+  { id: "terminal", icon: "terminal" },
   { id: "ai", icon: "ai" },
   { id: "releaseNotes", icon: "releaseNotes" },
   { id: "accounts", icon: "accounts" },
@@ -367,7 +401,7 @@ const settingsTabs: { id: SettingsTab; icon: string }[] = [
 
 // ─── Nav sidebar groups (OpenCode-style left nav) ────────
 const settingsNavGroups: Array<{ label: string | null; tabs: SettingsTab[] }> = [
-  { label: "Application", tabs: ["general", "dock", "dashboard", "editor"] },
+  { label: "Application", tabs: ["general", "dock", "dashboard", "editor", "terminal"] },
   { label: "Dépôt", tabs: ["git", "hooks", "accounts"] },
   { label: "IA & Agents", tabs: ["ai", "releaseNotes", "mcp", "automations"] },
   { label: "Système", tabs: ["logs"] },
@@ -380,6 +414,7 @@ function tabLabel(id: SettingsTab): string {
     case "dashboard": return t("settings.tabDashboard");
     case "git": return t("settings.tabGit");
     case "editor": return t("settings.tabEditor");
+    case "terminal": return t("settings.tabTerminal");
     case "ai": return t("settings.tabAi");
     case "releaseNotes": return t("settings.tabReleaseNotes");
     case "accounts": return t("settings.tabAccounts");
@@ -1171,6 +1206,11 @@ function deleteReleaseNoteTemplate(id: string) {
                 <rect x="2" y="2" width="12" height="12" rx="2" />
                 <path d="M5 6h6M5 8.5h4M5 11h5" />
               </svg>
+              <svg v-else-if="tab.icon === 'terminal'" width="15" height="15" viewBox="0 0 16 16" fill="none"
+                stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="2" y="2" width="12" height="12" rx="2" />
+                <path d="M5 6l2.5 2L5 10M9 10h3" />
+              </svg>
               <svg v-else-if="tab.icon === 'ai'" width="15" height="15" viewBox="0 0 16 16" fill="none"
                 stroke="currentColor" stroke-width="1.4">
                 <path d="M8 1v2m0 10v2M1 8h2m10 0h2" />
@@ -1828,6 +1868,83 @@ function deleteReleaseNoteTemplate(id: string) {
               <option :value="4">4 {{ t('settings.spaces') }}</option>
               <option :value="8">8 {{ t('settings.spaces') }}</option>
             </select>
+          </div>
+
+        </template>
+
+        <!-- ═══ TERMINAL ═══ -->
+        <template v-if="activeSettingsTab === 'terminal'">
+          <!-- Layout mode -->
+          <div class="sp-row">
+            <label class="sp-label" for="setting-terminal-mode">{{ t('terminal.menuLayout') }}</label>
+            <select id="setting-terminal-mode" class="sp-select" :value="settings.terminalMode"
+              @change="setTerminalLayout(($event.target as HTMLSelectElement).value as 'floating' | 'bottom' | 'fullscreen')">
+              <option value="floating">{{ t('terminal.modeFloating') }}</option>
+              <option value="bottom">{{ t('terminal.modeBottom') }}</option>
+              <option value="fullscreen">{{ t('terminal.modeFullscreen') }}</option>
+            </select>
+          </div>
+
+          <!-- Hide on menu switch -->
+          <div class="sp-row sp-row--checkbox">
+            <label class="sp-checkbox-label" for="setting-terminal-hide-on-nav">
+              <input id="setting-terminal-hide-on-nav" type="checkbox" class="sp-checkbox"
+                :checked="settings.terminalHideOnNav"
+                @change="updateSetting('terminalHideOnNav', ($event.target as HTMLInputElement).checked)" />
+              <span>{{ t('terminal.menuHideOnNav') }}</span>
+            </label>
+          </div>
+
+          <!-- Terminal font size -->
+          <div class="sp-row">
+            <label class="sp-label" for="setting-terminal-font-size">{{ t('settings.terminalFontSize') }}</label>
+            <div class="sp-range-row">
+              <input id="setting-terminal-font-size" class="sp-range" type="range" min="10" max="24" step="1"
+                :value="settings.terminalFontSize"
+                @input="updateSetting('terminalFontSize', Math.max(10, Math.min(24, Number(($event.target as HTMLInputElement).value))))" />
+              <span class="sp-range-value mono">{{ settings.terminalFontSize }}px</span>
+            </div>
+          </div>
+
+          <!-- Terminal shell override -->
+          <div class="sp-row">
+            <label class="sp-label" for="setting-terminal-shell">{{ t('settings.terminalShell') }}</label>
+            <input id="setting-terminal-shell" class="sp-input mono" type="text" :value="settings.terminalShell"
+              @input="updateSetting('terminalShell', ($event.target as HTMLInputElement).value)"
+              :placeholder="t('settings.terminalShellHint')" />
+          </div>
+
+          <!-- Right-click context menu -->
+          <div class="sp-row sp-row--checkbox">
+            <label class="sp-checkbox-label" for="setting-terminal-context-menu">
+              <input id="setting-terminal-context-menu" type="checkbox" class="sp-checkbox"
+                :checked="settings.terminalContextMenu"
+                @change="updateSetting('terminalContextMenu', ($event.target as HTMLInputElement).checked)" />
+              <span>{{ t('settings.terminalContextMenu') }}</span>
+            </label>
+            <span class="sp-hint">{{ t('settings.terminalContextMenuHint') }}</span>
+          </div>
+
+          <!-- Copy on select -->
+          <div class="sp-row sp-row--checkbox">
+            <label class="sp-checkbox-label" for="setting-terminal-copy-on-select">
+              <input id="setting-terminal-copy-on-select" type="checkbox" class="sp-checkbox"
+                :checked="settings.terminalCopyOnSelect"
+                @change="updateSetting('terminalCopyOnSelect', ($event.target as HTMLInputElement).checked)" />
+              <span>{{ t('settings.terminalCopyOnSelect') }}</span>
+            </label>
+            <span class="sp-hint">{{ t('settings.terminalCopyOnSelectHint') }}</span>
+          </div>
+
+          <!-- Paste on right-click -->
+          <div class="sp-row sp-row--checkbox">
+            <label class="sp-checkbox-label" for="setting-terminal-paste-right-click">
+              <input id="setting-terminal-paste-right-click" type="checkbox" class="sp-checkbox"
+                :checked="settings.terminalPasteOnRightClick"
+                @change="updateSetting('terminalPasteOnRightClick', ($event.target as HTMLInputElement).checked)" />
+              <span>{{ t('settings.terminalPasteOnRightClick') }}</span>
+            </label>
+            <span class="sp-hint">{{ t('settings.terminalPasteOnRightClickHint') }}</span>
           </div>
         </template>
 

@@ -21,9 +21,8 @@
  */
 
 // ─── Infrastructure (shared with sub-modules via backend-core.ts) ────────────
-import { isTauri, tauriInvoke, devFetch, DEV_SERVER, IPC_TIMEOUT } from './backend-core';
+import { isTauri, tauriInvoke, devFetch, DEV_SERVER, IPC_TIMEOUT, devTerminalOpen } from './backend-core';
 export { isTauri };
-
 // ─── Cross-module type imports for workspace helpers ─────────────────────────
 // PullRequest is defined in backend-pr.ts but used by workspacePrsAll here.
 import type { PullRequest } from './backend-pr';
@@ -2380,17 +2379,28 @@ export interface ScratchWorktree {
 }
 
 /**
- * Crée `gitwand-scratch-<timestamp>` comme worktree frère, basé sur
- * `sourceBranch` (HEAD courant par défaut). Ne touche pas au checkout actif.
+ * Crée un worktree frère basé sur `sourceBranch` (HEAD courant par défaut). Ne
+ * touche pas au checkout actif. Si `name` est fourni, le worktree/branche est
+ * nommé `gitwand-scratch-<slug>` (sinon `gitwand-scratch-<timestamp>`).
  */
 export async function scratchWorktreeCreate(
   cwd: string,
   sourceBranch?: string,
+  name?: string,
 ): Promise<ScratchWorktree> {
-  return tauriInvoke<ScratchWorktree>("scratch_worktree_create", {
-    cwd,
-    sourceBranch: sourceBranch ?? null,
+  if (isTauri()) {
+    return tauriInvoke<ScratchWorktree>("scratch_worktree_create", {
+      cwd,
+      sourceBranch: sourceBranch ?? null,
+      name: name ?? null,
+    });
+  }
+  const res = await devFetch(`${DEV_SERVER}/api/scratch-worktree-create`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, sourceBranch: sourceBranch ?? null, name: name ?? null }),
   });
+  return res.json() as Promise<ScratchWorktree>;
 }
 
 /**
@@ -3031,6 +3041,71 @@ export async function agentSessionLaunch(cwd: string, tool: string): Promise<voi
   if (!res.ok) throw new Error(`Failed to launch agent session: ${res.status}`);
 }
 
+// ─── Terminal (PTY) ───────────────────────────────────────
+
+/**
+ * Open a PTY shell session. `onOutput` is called with each raw output chunk.
+ * Returns the backend session id (used by write/resize/close).
+ */
+export async function terminalOpen(
+  cwd: string,
+  opts: { shell?: string; agent?: string; cols: number; rows: number },
+  onOutput: (chunk: string) => void,
+): Promise<number> {
+  if (isTauri()) {
+    const { Channel } = await import("@tauri-apps/api/core");
+    const channel = new Channel<string>();
+    channel.onmessage = onOutput;
+    return tauriInvoke<number>("terminal_open", {
+      cwd,
+      shell: opts.shell ?? null,
+      agent: opts.agent ?? null,
+      cols: opts.cols,
+      rows: opts.rows,
+      onOutput: channel,
+    });
+  }
+  // Dev mode : SSE. Le serveur renvoie l'id en premier message JSON, puis
+  // les chunks bruts.
+  return devTerminalOpen(cwd, opts, onOutput);
+}
+
+export async function terminalWrite(id: number, data: string): Promise<void> {
+  if (isTauri()) {
+    await tauriInvoke("terminal_write", { id, data });
+    return;
+  }
+  await devFetch(`${DEV_SERVER}/api/terminal-write`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id, data }),
+  });
+}
+
+export async function terminalResize(id: number, cols: number, rows: number): Promise<void> {
+  if (isTauri()) {
+    await tauriInvoke("terminal_resize", { id, cols, rows });
+    return;
+  }
+  await devFetch(`${DEV_SERVER}/api/terminal-resize`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id, cols, rows }),
+  });
+}
+
+export async function terminalClose(id: number): Promise<void> {
+  if (isTauri()) {
+    await tauriInvoke("terminal_close", { id });
+    return;
+  }
+  await devFetch(`${DEV_SERVER}/api/terminal-close`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id }),
+  });
+}
+
 // ─── Submodules ──────────────────────────────────────────
 
 export interface SubmoduleEntry {
@@ -3316,6 +3391,45 @@ export async function installUpdate(
       `Please quit and reopen GitWand to apply the update.`
     );
   }
+}
+
+// ─── Clipboard ───────────────────────────────────────────────────────────
+// In the packaged app we go through the clipboard-manager plugin: WebKitGTK
+// (Linux Tauri) does not implement navigator.clipboard.readText(), so a plain
+// browser read silently fails there. In web-dev mode (no Tauri) we fall back to
+// navigator.clipboard, which Chromium supports on http://localhost.
+
+/** Read the system clipboard as text. Returns "" if unavailable/denied. */
+export async function clipboardReadText(): Promise<string> {
+  if (isTauri()) {
+    try {
+      const { readText } = await import("@tauri-apps/plugin-clipboard-manager");
+      return (await readText()) ?? "";
+    } catch {
+      return "";
+    }
+  }
+  try {
+    return await navigator.clipboard.readText();
+  } catch {
+    return "";
+  }
+}
+
+/** Write text to the system clipboard. Best-effort — never throws. */
+export async function clipboardWriteText(text: string): Promise<void> {
+  if (isTauri()) {
+    try {
+      const { writeText } = await import("@tauri-apps/plugin-clipboard-manager");
+      await writeText(text);
+      return;
+    } catch {
+      return;
+    }
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch { /* clipboard perms may be denied */ }
 }
 
 // ─── MCP catalog (§6.x) ──────────────────────────────────────────────────

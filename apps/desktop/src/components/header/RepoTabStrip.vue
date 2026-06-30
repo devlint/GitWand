@@ -27,6 +27,7 @@
  */
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import type { RepoTab } from "../../composables/useRepoTabs";
+import type { WorktreeEntry } from "../../utils/backend";
 import { useI18n } from "../../composables/useI18n";
 import { useFolderHistory } from "../../composables/useFolderHistory";
 
@@ -36,11 +37,24 @@ const { history: repoHistory } = useFolderHistory();
 const props = defineProps<{
   tabs: RepoTab[];
   activeTabId: number | null;
+  /** Path of the active checkout (project root, or a selected worktree). */
+  activeRepoPath?: string | null;
+  /** Loads a project's worktrees for the per-project submenu. */
+  loadWorktrees?: (projectPath: string) => Promise<WorktreeEntry[]>;
+  /** Project paths that have ≥1 extra worktree — only these show the caret. */
+  worktreeProjectPaths?: Set<string>;
 }>();
+
+/** Whether a project has worktrees worth showing the submenu caret for. */
+function hasWorktrees(path: string): boolean {
+  return props.worktreeProjectPaths?.has(path) ?? false;
+}
 
 const emit = defineEmits<{
   switchTab: [tabId: number];
   closeTab: [tabId: number];
+  selectWorktree: [payload: { tabId: number; path: string }];
+  deleteWorktree: [payload: { path: string; projectPath: string; branch: string }];
   newTab: [];
   openClone: [];
   openFork: [];
@@ -48,6 +62,12 @@ const emit = defineEmits<{
   closeOtherTabs: [tabId: number];
   reorderTabs: [oldIndex: number, newIndex: number];
 }>();
+
+/** A `gitwand-scratch-*` worktree gets the AI badge + a delete affordance. */
+function isScratch(path: string): boolean {
+  const base = path.replace(/\/+$/, "").split("/").pop() ?? "";
+  return base.startsWith("gitwand-scratch-");
+}
 
 // ─── Drag and Drop (v2.15) ──────────────────────────────
 const draggedIndex = ref<number | null>(null);
@@ -143,21 +163,31 @@ function pickAction(action: "newTab" | "openClone" | "openFork") {
 }
 
 function onDocumentClick(e: MouseEvent) {
-  if (!showMenu.value) return;
-  const target = e.target as Node | null;
+  const target = e.target as (Node & Element) | null;
   if (!target) return;
-  // Click is "inside" if it's on the trigger wrapper or anywhere in the
-  // teleported menu — treat both as in-bounds so the menu doesn't close
-  // before the item's @click handler fires.
-  if (wrapperEl.value?.contains(target)) return;
-  if (menuEl.value?.contains(target)) return;
-  closeMenu();
+  if (showMenu.value) {
+    // Click is "inside" if it's on the trigger wrapper or anywhere in the
+    // teleported menu — treat both as in-bounds so the menu doesn't close
+    // before the item's @click handler fires.
+    if (!wrapperEl.value?.contains(target) && !menuEl.value?.contains(target)) {
+      closeMenu();
+    }
+  }
+  if (wtMenuTabId.value !== null) {
+    // The caret — and the active chip itself — toggle the menu on click, so
+    // don't pre-close here or the toggle would immediately reopen it.
+    const onCaret = !!(target as Element).closest?.(".repo-tab__caret");
+    const onActiveChip = !!(target as Element).closest?.(".repo-tab--active");
+    if (!onCaret && !onActiveChip && !wtMenuEl.value?.contains(target)) {
+      closeWorktreeMenu();
+    }
+  }
 }
 
 function onDocumentKey(e: KeyboardEvent) {
-  if (e.key === "Escape" && showMenu.value) {
-    closeMenu();
-  }
+  if (e.key !== "Escape") return;
+  if (showMenu.value) closeMenu();
+  if (wtMenuTabId.value !== null) closeWorktreeMenu();
 }
 
 // Reposition when the menu opens — and close on resize / strip scroll
@@ -168,6 +198,7 @@ watch(showMenu, (open) => {
 
 function onWindowChange() {
   if (showMenu.value) closeMenu();
+  if (wtMenuTabId.value !== null) closeWorktreeMenu();
 }
 
 onMounted(() => {
@@ -192,6 +223,89 @@ onUnmounted(() => {
  */
 const showStrip = computed(() => props.tabs.length >= 1);
 const showTabs = computed(() => props.tabs.length >= 1);
+
+// ─── Per-project worktree submenu ────────────────────────
+// The caret on each project chip opens a dropdown listing `main` + the
+// project's worktrees. Selecting one switches that project's checkout in
+// place; scratch worktrees additionally get a delete affordance. Like the
+// "+" menu, the dropdown is teleported to <body> to escape the strip's
+// overflow clipping and positioned from the caret's bounding rect.
+const wtMenuTabId = ref<number | null>(null);
+const wtMenuProjectPath = ref<string>("");
+const wtMenuEl = ref<HTMLElement | null>(null);
+const wtMenuStyle = ref<Record<string, string>>({});
+const wtItems = ref<WorktreeEntry[]>([]);
+const wtLoading = ref(false);
+
+/** Worktree rows (everything that isn't the main worktree or a stale entry). */
+const wtWorktrees = computed(() =>
+  wtItems.value.filter((w) => !w.is_main && !w.is_prunable),
+);
+
+/** The main worktree's on-disk path (falls back to the project path). */
+const wtMainPath = computed(
+  () => wtItems.value.find((w) => w.is_main)?.path ?? wtMenuProjectPath.value,
+);
+
+function isRowActive(path: string): boolean {
+  return wtMenuTabId.value === props.activeTabId && props.activeRepoPath === path;
+}
+
+function worktreeLabel(w: WorktreeEntry): string {
+  return w.branch || (w.path.replace(/\/+$/, "").split("/").pop() ?? w.path);
+}
+
+async function toggleWorktreeMenu(e: MouseEvent, tab: RepoTab) {
+  if (wtMenuTabId.value === tab.id) {
+    closeWorktreeMenu();
+    return;
+  }
+  closeMenu(); // close the "+" menu if open
+  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+  wtMenuStyle.value = { top: `${rect.bottom + 4}px`, left: `${rect.left}px` };
+  wtMenuTabId.value = tab.id;
+  wtMenuProjectPath.value = tab.path;
+  wtItems.value = [];
+  if (!props.loadWorktrees) return;
+  wtLoading.value = true;
+  try {
+    wtItems.value = await props.loadWorktrees(tab.path);
+  } catch {
+    wtItems.value = [];
+  } finally {
+    wtLoading.value = false;
+  }
+}
+
+function closeWorktreeMenu() {
+  wtMenuTabId.value = null;
+}
+
+function pickWorktree(path: string) {
+  const tabId = wtMenuTabId.value;
+  closeWorktreeMenu();
+  if (tabId === null) return;
+  emit("selectWorktree", { tabId, path });
+}
+
+function removeWorktree(w: WorktreeEntry) {
+  const projectPath = wtMenuProjectPath.value;
+  closeWorktreeMenu();
+  emit("deleteWorktree", { path: w.path, projectPath, branch: worktreeLabel(w) });
+}
+
+/**
+ * Clicking a tab switches to it. Clicking the tab that's already active opens
+ * (toggles) its worktree submenu — a second, larger hit target than the small
+ * caret for the same action.
+ */
+function onTabClick(e: MouseEvent, tab: RepoTab) {
+  if (tab.id === props.activeTabId) {
+    if (hasWorktrees(tab.path)) toggleWorktreeMenu(e, tab);
+    return;
+  }
+  emit("switchTab", tab.id);
+}
 
 function onMiddleClick(e: MouseEvent, tabId: number) {
   if (e.button === 1) {
@@ -218,6 +332,7 @@ function onCloseClick(e: MouseEvent, tabId: number) {
         class="repo-tab"
         :class="{
           'repo-tab--active': tab.id === activeTabId,
+          'repo-tab--menu-open': wtMenuTabId === tab.id,
           'repo-tab--dragging': draggedIndex === index,
           'repo-tab--drag-over-left': hoveredIndex === index && draggedIndex !== null && draggedIndex > index,
           'repo-tab--drag-over-right': hoveredIndex === index && draggedIndex !== null && draggedIndex < index
@@ -225,7 +340,7 @@ function onCloseClick(e: MouseEvent, tabId: number) {
         :aria-selected="tab.id === activeTabId ? 'true' : 'false'"
         :title="tab.path"
         draggable="true"
-        @click="emit('switchTab', tab.id)"
+        @click="(e) => onTabClick(e, tab)"
         @mousedown="(e) => onMiddleClick(e, tab.id)"
         @dragstart="(e) => onDragStart(e, index)"
         @dragover="(e) => onDragOver(e, index)"
@@ -237,6 +352,25 @@ function onCloseClick(e: MouseEvent, tabId: number) {
           <path d="M2 3.5A1.5 1.5 0 013.5 2h3.586a1.5 1.5 0 011.06.44l.915.914a1 1 0 00.707.293H12.5A1.5 1.5 0 0114 5.147V12.5A1.5 1.5 0 0112.5 14h-9A1.5 1.5 0 012 12.5v-9z" stroke="currentColor" stroke-width="1.2" />
         </svg>
         <span class="repo-tab__name">{{ tab.name }}</span>
+        <!-- Worktree submenu caret — span (not button) to stay valid inside the
+             chip's own <button>. Sits between the name and the close affordance.
+             Hidden when the project has no extra worktrees. -->
+        <span
+          v-if="hasWorktrees(tab.path) || wtMenuTabId === tab.id"
+          class="repo-tab__caret"
+          role="button"
+          tabindex="-1"
+          :aria-label="t('worktree.menuLabel')"
+          :aria-expanded="wtMenuTabId === tab.id ? 'true' : 'false'"
+          aria-haspopup="menu"
+          @click.stop="(e) => toggleWorktreeMenu(e, tab)"
+          @mousedown.stop
+        >
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.4"
+            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M2 3.5L5 6.5L8 3.5" />
+          </svg>
+        </span>
         <span
           class="repo-tab__close"
           role="button"
@@ -381,6 +515,85 @@ function onCloseClick(e: MouseEvent, tabId: number) {
         </template>
       </div>
     </Teleport>
+
+    <!-- Per-project worktree submenu — teleported to <body> like the "+" menu. -->
+    <Teleport to="body">
+      <div
+        v-if="wtMenuTabId !== null"
+        ref="wtMenuEl"
+        class="repo-tab-new-menu repo-wt-menu"
+        role="menu"
+        :style="wtMenuStyle"
+      >
+        <div class="repo-tab-new-section-label">{{ t('worktree.menuTitle') }}</div>
+
+        <!-- main -->
+        <button
+          type="button"
+          role="menuitem"
+          class="repo-tab-new-item repo-wt-item"
+          :class="{ 'repo-wt-item--active': isRowActive(wtMainPath) }"
+          @click="pickWorktree(wtMainPath)"
+        >
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M2 3.5A1.5 1.5 0 013.5 2h3.586a1.5 1.5 0 011.06.44l.915.914a1 1 0 00.707.293H12.5A1.5 1.5 0 0114 5.147V12.5A1.5 1.5 0 0112.5 14h-9A1.5 1.5 0 012 12.5v-9z" stroke="currentColor" stroke-width="1.2" />
+          </svg>
+          <span class="repo-tab-new-item__text">
+            <span class="repo-tab-new-item__name">{{ t('worktree.menuMain') }}</span>
+          </span>
+          <span v-if="isRowActive(wtMainPath)" class="repo-wt-check" aria-hidden="true">✓</span>
+        </button>
+
+        <!-- worktrees -->
+        <div v-if="wtLoading" class="repo-wt-state">{{ t('common.loading') }}</div>
+        <template v-else>
+          <div
+            v-for="w in wtWorktrees"
+            :key="w.path"
+            class="repo-wt-row"
+            :class="{ 'repo-wt-item--active': isRowActive(w.path) }"
+          >
+            <button
+              type="button"
+              role="menuitem"
+              class="repo-tab-new-item repo-wt-item repo-wt-item--grow"
+              :title="w.path"
+              @click="pickWorktree(w.path)"
+            >
+              <svg v-if="isScratch(w.path)" class="repo-wt-icon--ai" width="14" height="14" viewBox="0 0 24 24"
+                fill="currentColor" aria-hidden="true">
+                <path d="M12 2l1.6 4.8a4 4 0 0 0 2.6 2.6L21 11l-4.8 1.6a4 4 0 0 0-2.6 2.6L12 20l-1.6-4.8a4 4 0 0 0-2.6-2.6L3 11l4.8-1.6a4 4 0 0 0 2.6-2.6L12 2z" />
+              </svg>
+              <svg v-else width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="5" cy="3" r="1.5" />
+                <circle cx="5" cy="13" r="1.5" />
+                <circle cx="11" cy="6" r="1.5" />
+                <path d="M5 4.5v7M5 4.5C5 7 11 7.5 11 6" />
+              </svg>
+              <span class="repo-tab-new-item__text">
+                <span class="repo-tab-new-item__name">{{ worktreeLabel(w) }}</span>
+              </span>
+              <span v-if="isRowActive(w.path)" class="repo-wt-check" aria-hidden="true">✓</span>
+            </button>
+            <button
+              v-if="isScratch(w.path)"
+              type="button"
+              class="repo-wt-delete"
+              :title="t('worktree.menuRemove')"
+              :aria-label="t('worktree.menuRemove')"
+              @click.stop="removeWorktree(w)"
+            >
+              <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"
+                stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M2 4h12M5 4V3a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1M3 4v9a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V4M6 7v4M10 7v4" />
+              </svg>
+            </button>
+          </div>
+          <div v-if="wtWorktrees.length === 0" class="repo-wt-state">{{ t('worktree.menuEmpty') }}</div>
+        </template>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -412,7 +625,7 @@ function onCloseClick(e: MouseEvent, tabId: number) {
   display: inline-flex;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-3) var(--space-5);
+  padding: var(--space-3) var(--space-4);
   border-radius: var(--radius-md);
   font-size: var(--font-size-base);
   font-weight: var(--font-weight-medium);
@@ -478,6 +691,109 @@ function onCloseClick(e: MouseEvent, tabId: number) {
 .repo-tab--active .repo-tab__icon {
   opacity: 1;
   color: var(--color-accent);
+}
+
+/* Worktree submenu caret — sits between the name and the close button. Like
+   the close affordance, it reveals on hover / active and is a span (not a
+   button) to stay valid inside the chip's own <button>. */
+.repo-tab__caret {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-sm);
+  /* Follow the chip's own color logic, exactly like .repo-tab__name:
+     muted by default, text on chip hover, accent when active. */
+  color: inherit;
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity var(--transition-fast), background var(--transition-fast), color var(--transition-fast);
+  margin: 0px -5px;
+}
+
+.repo-tab:hover .repo-tab__caret,
+.repo-tab--active .repo-tab__caret,
+.repo-tab--menu-open .repo-tab__caret {
+  opacity: 0.7;
+}
+
+.repo-tab__caret:hover {
+  /* Font color stays driven by chip state (like the name); only the
+     background reacts to hovering the caret itself. */
+  opacity: 1 !important;
+  background: var(--color-bg-tertiary);
+}
+
+.repo-tab--menu-open {
+  background: var(--color-bg-tertiary);
+}
+
+/* ── Worktree submenu ─────────────────────────────────── */
+.repo-wt-menu {
+  min-width: 220px;
+}
+
+.repo-wt-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.repo-wt-item {
+  width: 100%;
+}
+
+.repo-wt-item--grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.repo-wt-item--active,
+.repo-wt-row.repo-wt-item--active {
+  background: var(--color-accent-soft);
+}
+
+.repo-wt-item--active .repo-tab-new-item__name {
+  color: var(--color-accent);
+}
+
+.repo-wt-icon--ai {
+  color: var(--color-accent);
+}
+
+.repo-wt-check {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--color-accent);
+}
+
+.repo-wt-delete {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.repo-wt-delete:hover {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
+.repo-wt-state {
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
 }
 
 .repo-tab__name {

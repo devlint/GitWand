@@ -276,6 +276,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
             // Register Cmd+Shift+G (macOS) / Ctrl+Shift+G (Linux/Windows)
             // to bring GitWand to the foreground from anywhere.
@@ -557,7 +558,16 @@ pub fn run() {
             commands::read::git_commit_template_path,
             // ── v2.21.0 Monorepo Scope ──
             commands::read::git_rev_count,
+            commands::terminal::terminal_open,
+            commands::terminal::terminal_write,
+            commands::terminal::terminal_resize,
+            commands::terminal::terminal_close,
         ])
+        .on_window_event(|_window, event| {
+            if let tauri::WindowEvent::Destroyed = event {
+                commands::terminal::terminal_close_all();
+            }
+        })
         .run(tauri::generate_context!())
         .expect("error while running GitWand");
 }

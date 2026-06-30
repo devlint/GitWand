@@ -43,6 +43,7 @@ tauri-plugin-shell = "2"
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+tauri-plugin-clipboard-manager = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 dirs = "5"
@@ -50,6 +51,7 @@ base64 = "0.22"
 # Used for data-parallel iteration in workspace_*_all (P3.2). Each repo's
 # git/gh subprocess runs on its own rayon thread instead of in series.
 rayon = "1"
+portable-pty = "0.9"
 
 # libgit2 bindings for in-process git operations (P3.3). Used in the
 # workspace_*_all hot paths to read branch + ahead/behind + file statuses

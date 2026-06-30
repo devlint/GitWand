@@ -1,0 +1,9 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [
+      "src/App.vue"
+    ],
+    "ignoreValues": []
+  }
+}

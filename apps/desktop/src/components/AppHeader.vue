@@ -31,7 +31,7 @@
  */
 import { ref, computed, inject, watch, onMounted, onUnmounted, type Ref } from "vue";
 import type { Theme } from "../composables/useTheme";
-import type { GitBranch } from "../utils/backend";
+import type { GitBranch, WorktreeEntry } from "../utils/backend";
 import { branchSort } from "../utils/branchSort";
 import { useI18n } from "../composables/useI18n";
 import { useUndoStack, type UndoEntry, type UndoOpType } from "../composables/useUndoStack";
@@ -89,6 +89,12 @@ const props = defineProps<{
   // Tabs (repo strip)
   tabs: RepoTab[];
   activeTabId: number | null;
+  /** Path of the active checkout (project root or a selected worktree). */
+  activeRepoPath?: string | null;
+  /** Loads a project's worktrees for the per-project submenu. */
+  loadWorktrees?: (projectPath: string) => Promise<WorktreeEntry[]>;
+  /** Project paths that have ≥1 extra worktree — only these show the caret. */
+  worktreeProjectPaths?: Set<string>;
   /** Number of accumulated errors; drives the badge on the settings button. */
   errorCount?: number;
   /** Stash entry count — drives the badge on the Stash button. */
@@ -101,6 +107,8 @@ const emit = defineEmits<{
   openRepo: [path: string];
   switchTab: [tabId: number];
   closeTab: [tabId: number];
+  selectWorktree: [payload: { tabId: number; path: string }];
+  deleteWorktree: [payload: { path: string; projectPath: string; branch: string }];
   newTab: [];
   openClone: [];
   openFork: [];
@@ -144,7 +152,6 @@ const emit = defineEmits<{
   openHelp: [];
   openStash: [];
   openTags: [];
-  openAgents: [];
   discardAll: [];
   changeView: [mode: 'dashboard' | 'changes' | 'history' | 'prs' | 'launchpad'];
 }>();
@@ -304,7 +311,12 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
         v-if="tabs.length >= 1"
         :tabs="tabs"
         :active-tab-id="activeTabId"
+        :active-repo-path="activeRepoPath"
+        :load-worktrees="loadWorktrees"
+        :worktree-project-paths="worktreeProjectPaths"
         @switch-tab="(id) => emit('switchTab', id)"
+        @select-worktree="(p) => emit('selectWorktree', p)"
+        @delete-worktree="(p) => emit('deleteWorktree', p)"
         @close-tab="(id) => emit('closeTab', id)"
         @new-tab="emit('newTab')"
         @open-clone="emit('openClone')"
@@ -326,28 +338,6 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
           <span>{{ t('offline.label') }}</span>
         </div>
         <div class="header-separator header-separator--offline" aria-hidden="true"></div>
-      </template>
-
-      <!-- Primary destinations — labeled pills so they stand out from the
-           utility icons (theme / help / settings) that follow the divider. -->
-      <template v-if="hasRepo">
-        <button
-          class="btn btn--secondary header-feature-btn"
-          v-tooltip="t('agents.sidebarTooltip')"
-          :aria-label="t('agents.title')"
-          @click="emit('openAgents')"
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <rect x="3" y="11" width="18" height="11" rx="2"/>
-            <path d="M12 2v4M8 11V9a4 4 0 0 1 8 0v2"/>
-            <circle cx="9" cy="16" r="1" fill="currentColor" stroke="none"/>
-            <circle cx="15" cy="16" r="1" fill="currentColor" stroke="none"/>
-            <path d="M9 20h6"/>
-          </svg>
-          <span>{{ t('agents.headerLabel') }}</span>
-        </button>
-
-        <div class="header-separator" aria-hidden="true"></div>
       </template>
 
       <!-- Theme toggle -->
@@ -765,21 +755,6 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
 
 .btn--secondary { background: var(--color-bg-tertiary); color: var(--color-text); }
 .btn--secondary:hover:not(:disabled) { background: var(--color-border); }
-
-/* Header feature pills (Launchpad / Workspace / Agents) — labeled, slightly
-   tighter than row-2 actions, with an accent active state for the open view. */
-.header-feature-btn {
-  height: 32px;
-  padding: 0 var(--space-4);
-  font-size: var(--font-size-sm);
-}
-.header-feature-btn svg { flex-shrink: 0; opacity: 0.85; }
-.btn--feature-active,
-.btn--feature-active:hover:not(:disabled) {
-  background: var(--color-accent-soft);
-  color: var(--color-accent);
-}
-.btn--feature-active svg { opacity: 1; }
 
 .btn--primary { background: var(--color-accent); color: var(--color-accent-text); }
 .btn--primary:hover:not(:disabled) { background: var(--color-accent-hover); }

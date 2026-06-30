@@ -22,10 +22,13 @@ const props = defineProps<{
   changesCount?: number;
   /** Open-PR count — shown as a badge on the PRs entry. */
   prCount?: number;
+  /** Terminal panel currently open — drives the terminal tile's active state. */
+  terminalActive?: boolean;
 }>();
 
 const emit = defineEmits<{
   changeView: [mode: ViewMode];
+  toggleTerminal: [];
 }>();
 
 const { t } = useI18n();
@@ -133,8 +136,16 @@ function endDrag() {
 
 // ─── Context menu (right-click on any entry or the handle) ─
 
-/** target = the clicked entry, or null when invoked from the global handle. */
-const menu = ref<{ x: number; y: number; target: DockEntryId | null } | null>(null);
+/** target = the clicked entry, "terminal" for the terminal tile, or null when
+ *  invoked from the global handle. */
+type MenuTarget = DockEntryId | "terminal" | null;
+const menu = ref<{ x: number; y: number; target: MenuTarget } | null>(null);
+
+/** The menu's target as a dock entry (null for the terminal/global menus) —
+ *  keeps the per-entry template block correctly typed as DockEntryId. */
+const entryTarget = computed<DockEntryId | null>(() =>
+  menu.value && menu.value.target !== "terminal" ? menu.value.target : null,
+);
 const menuEl = ref<HTMLElement | null>(null);
 
 let menuListening = false;
@@ -153,7 +164,7 @@ function detachMenuListeners() {
   menuListening = false;
 }
 
-async function openMenu(e: MouseEvent, target: DockEntryId | null) {
+async function openMenu(e: MouseEvent, target: MenuTarget) {
   e.preventDefault();
   menu.value = { x: e.clientX, y: e.clientY, target };
   // The dock sits at the bottom of the screen, so a downward menu overflows.
@@ -240,6 +251,35 @@ function openDockSettings() {
   closeMenu();
 }
 
+// ── Terminal tile actions ──
+const terminalHideOnNav = computed(() => settings.value.terminalHideOnNav);
+const terminalIsFullscreen = computed(() => settings.value.terminalMode === "fullscreen");
+/** Base layout (floating/bottom) — what fullscreen sits on top of. */
+const terminalLayout = computed<"floating" | "bottom">(() =>
+  terminalIsFullscreen.value ? settings.value.terminalPrevMode : (settings.value.terminalMode as "floating" | "bottom"),
+);
+
+/** Pick the base layout; also the layout fullscreen returns to. Exits fullscreen. */
+function setTerminalLayout(m: "floating" | "bottom") {
+  patch({ terminalMode: m, terminalPrevMode: m });
+  closeMenu();
+}
+
+/** Fullscreen is an overlay on top of the base layout — toggle it on/off. */
+function toggleTerminalFullscreen() {
+  if (terminalIsFullscreen.value) {
+    patch({ terminalMode: settings.value.terminalPrevMode });
+  } else {
+    patch({ terminalPrevMode: settings.value.terminalMode as "floating" | "bottom", terminalMode: "fullscreen" });
+  }
+  closeMenu();
+}
+
+function toggleTerminalHideOnNav() {
+  patch({ terminalHideOnNav: !settings.value.terminalHideOnNav });
+  closeMenu();
+}
+
 onBeforeUnmount(() => {
   window.removeEventListener("pointermove", onDrag);
   window.removeEventListener("pointerup", endDrag);
@@ -251,11 +291,11 @@ onBeforeUnmount(() => {
   <nav
     ref="dockEl"
     class="app-dock"
-    :class="{ 'app-dock--unlocked': unlocked, 'app-dock--vert-anchor': vertical && atDefaultAnchor }"
-    :style="dockStyle"
+    :class="{ 'app-dock--unlocked': unlocked, 'app-dock--vertical': vertical, 'app-dock--vert-anchor': vertical && atDefaultAnchor }"
+    :style="[dockStyle, { '--dock-idle-opacity': idleOpacity }]"
     :aria-label="t('sidebar.tabChanges')"
   >
-    <div class="app-dock__pill" :class="{ 'app-dock__pill--icons-only': iconsOnly, 'app-dock__pill--vertical': vertical }" :style="{ '--dock-idle-opacity': idleOpacity }">
+    <div class="app-dock__pill" :class="{ 'app-dock__pill--icons-only': iconsOnly, 'app-dock__pill--vertical': vertical }">
       <!-- Drag handle — only when the dock is unlocked. -->
       <button
         v-if="unlocked"
@@ -318,23 +358,68 @@ onBeforeUnmount(() => {
       </template>
     </div>
 
+    <!-- Terminal tile — a separate rounded square that rides along with the
+         dock (same position/lock), opening the floating terminal panel. -->
+    <button
+      class="dock-terminal"
+      :class="{ 'dock-terminal--active': terminalActive }"
+      :aria-pressed="terminalActive"
+      :title="t('terminal.headerTooltip')"
+      :aria-label="t('terminal.headerLabel')"
+      @click="emit('toggleTerminal')"
+      @contextmenu="openMenu($event, 'terminal')"
+    >
+      <svg class="dock-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <polyline points="4 17 10 11 4 5"/>
+        <line x1="12" y1="19" x2="20" y2="19"/>
+      </svg>
+    </button>
+
     <!-- Right-click context menu (entry-targeted + global actions).
          Teleported to <body> so its fixed positioning is relative to the
          viewport — the dock's own translateX(-50%) transform would otherwise
          become the containing block and push the menu off-screen. -->
     <Teleport to="body">
     <div v-if="menu" ref="menuEl" class="dock-menu" :style="{ left: `${menu.x}px`, top: `${menu.y}px` }" role="menu">
+      <!-- Terminal tile section -->
+      <template v-if="menu.target === 'terminal'">
+        <div class="dock-menu-label">{{ t('terminal.headerLabel') }}</div>
+        <button class="dock-menu-item" role="menuitemcheckbox"
+          :aria-checked="terminalHideOnNav" @click="toggleTerminalHideOnNav">
+          {{ t('terminal.menuHideOnNav') }}
+          <span class="dock-menu-check">{{ terminalHideOnNav ? '✓' : '' }}</span>
+        </button>
+        <button class="dock-menu-item" role="menuitemcheckbox"
+          :aria-checked="terminalIsFullscreen" @click="toggleTerminalFullscreen">
+          {{ t('terminal.modeFullscreen') }}
+          <span class="dock-menu-check">{{ terminalIsFullscreen ? '✓' : '' }}</span>
+        </button>
+        <div class="dock-menu-sep" role="separator"></div>
+        <div class="dock-menu-label">{{ t('terminal.menuLayout') }}</div>
+        <button class="dock-menu-item" role="menuitemradio"
+          :aria-checked="terminalLayout === 'floating'" @click="setTerminalLayout('floating')">
+          {{ t('terminal.modeFloating') }}
+          <span class="dock-menu-check">{{ terminalLayout === 'floating' ? '✓' : '' }}</span>
+        </button>
+        <button class="dock-menu-item" role="menuitemradio"
+          :aria-checked="terminalLayout === 'bottom'" @click="setTerminalLayout('bottom')">
+          {{ t('terminal.modeBottom') }}
+          <span class="dock-menu-check">{{ terminalLayout === 'bottom' ? '✓' : '' }}</span>
+        </button>
+      </template>
+
+      <template v-else>
       <!-- Per-target section -->
-      <template v-if="menu.target">
-        <div class="dock-menu-label">{{ entryLabel(menu.target) }}</div>
-        <button v-if="isRemovable(menu.target)" class="dock-menu-item" role="menuitem"
-          @click="removeFromDock(menu.target)">
+      <template v-if="entryTarget">
+        <div class="dock-menu-label">{{ entryLabel(entryTarget) }}</div>
+        <button v-if="isRemovable(entryTarget)" class="dock-menu-item" role="menuitem"
+          @click="removeFromDock(entryTarget)">
           {{ t('settings.dock.menu.remove') }}
         </button>
-        <button v-if="canBeStartup(menu.target)" class="dock-menu-item" role="menuitemcheckbox"
-          :aria-checked="isStartup(menu.target)" @click="setAsStartup(menu.target)">
+        <button v-if="canBeStartup(entryTarget)" class="dock-menu-item" role="menuitemcheckbox"
+          :aria-checked="isStartup(entryTarget)" @click="setAsStartup(entryTarget)">
           {{ t('settings.dock.menu.setStartup') }}
-          <span class="dock-menu-check">{{ isStartup(menu.target) ? '✓' : '' }}</span>
+          <span class="dock-menu-check">{{ isStartup(entryTarget) ? '✓' : '' }}</span>
         </button>
         <div class="dock-menu-sep" role="separator"></div>
       </template>
@@ -355,6 +440,7 @@ onBeforeUnmount(() => {
       <button class="dock-menu-item" role="menuitem" @click="openDockSettings">
         {{ t('settings.dock.menu.openSettings') }}
       </button>
+      </template>
     </div>
     </Teleport>
   </nav>
@@ -368,6 +454,15 @@ onBeforeUnmount(() => {
   transform: translateX(-50%);
   z-index: 50;
   pointer-events: none;
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-2, 6px);
+}
+
+/* Vertical dock → stack the terminal tile under the pill. */
+.app-dock--vertical {
+  flex-direction: column;
+  align-items: stretch;
 }
 
 /* Vertical dock with no custom position → anchor to the center-left edge. */
@@ -393,8 +488,48 @@ onBeforeUnmount(() => {
   transition: opacity 0.2s ease;
 }
 
-.app-dock__pill:hover {
+.app-dock__pill:hover,
+.app-dock:hover .app-dock__pill {
   opacity: 1;
+}
+
+/* Terminal tile — mirrors the pill's chrome but as a standalone square that
+   sits flush beside the dock and shares its idle-fade behaviour. */
+.dock-terminal {
+  pointer-events: auto;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-5, 9px);
+  background: color-mix(in srgb, var(--color-bg-secondary) 97%, transparent);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md, 10px);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28), 0 2px 6px rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(8px);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  opacity: var(--dock-idle-opacity, 0.45);
+  transition: opacity 0.2s ease, background 0.15s, color 0.15s;
+}
+
+.app-dock:hover .dock-terminal {
+  opacity: 1;
+}
+
+.dock-terminal:hover {
+  color: var(--color-text);
+  background: var(--color-bg-secondary);
+}
+
+.dock-terminal--active {
+  color: var(--color-accent);
+  border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-border));
+}
+
+.dock-terminal:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
 }
 
 .dock-handle {

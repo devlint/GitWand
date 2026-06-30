@@ -293,7 +293,6 @@ export interface AppSettings {
    * "use the default prompt". Special value "__builtin_*" for built-in presets.
    */
   activePresetIdByRepo: Record<string, string | null>;
-
   // ── v3 Release Note Templates ─────────────────────────────
   /** Saved release note templates (v3). */
   releaseNoteTemplates: ReleaseNoteTemplate[];
@@ -303,7 +302,41 @@ export interface AppSettings {
    * Null / absent / "__builtin_default" means "use the default prompt".
    */
   activeReleaseNoteTemplateIdByRepo: Record<string, string | null>;
+
+  // ── v3.x Terminal ─────────────────────────────────────────
+
+  /** Font size for the integrated PTY terminal (px). Default: 13. */
+  terminalFontSize: number;
+  /**
+   * Shell override for the integrated PTY terminal.
+   * Empty string = auto (OS default shell). E.g. "/bin/zsh", "pwsh".
+   */
+  terminalShell: string;
+  /**
+   * Terminal layout mode.
+   * - "floating": resizable/movable panel overlaying the content (default).
+   * - "fullscreen": fills the app-body area.
+   * - "bottom": full-width strip docked at the bottom that pushes the content
+   *   up (nothing hidden behind it).
+   */
+  terminalMode: TerminalMode;
+  /**
+   * Layout to restore when leaving fullscreen — captured on entering it so the
+   * fullscreen toggle returns to the prior layout (floating/bottom), not always
+   * floating. Never "fullscreen" itself.
+   */
+  terminalPrevMode: Exclude<TerminalMode, "fullscreen">;
+  /** Hide the terminal when switching views from the dock. Default: true. */
+  terminalHideOnNav: boolean;
+  /** Show the right-click context menu in the terminal. Default: true. */
+  terminalContextMenu: boolean;
+  /** Copy the current selection to the clipboard as soon as it is made. Default: false. */
+  terminalCopyOnSelect: boolean;
+  /** Paste the clipboard on right-click instead of opening the context menu. Default: false. */
+  terminalPasteOnRightClick: boolean;
 }
+
+export type TerminalMode = "floating" | "fullscreen" | "bottom";
 
 // ─── Defaults ─────────────────────────────────────────────
 
@@ -369,6 +402,15 @@ export const defaultAppSettings: AppSettings = {
   // v3
   releaseNoteTemplates:              [],
   activeReleaseNoteTemplateIdByRepo: {},
+  // v3.x terminal
+  terminalFontSize:                  13,
+  terminalShell:                     "",
+  terminalMode:                      "bottom",
+  terminalPrevMode:                  "bottom",
+  terminalHideOnNav:                 false,
+  terminalContextMenu:               true,
+  terminalCopyOnSelect:              false,
+  terminalPasteOnRightClick:         false,
 };
 
 const SETTINGS_KEY = "gitwand-settings";

@@ -93,7 +93,7 @@ jobs:
       # users actually run, not a debug build.
       - name: Build parity probe
         working-directory: apps/desktop/src-tauri
-        run: cargo build --example parity-probe --release
+        run: cargo build --locked --example parity-probe --release
 
       - name: Run benches
         working-directory: apps/desktop

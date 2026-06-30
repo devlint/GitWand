@@ -1,4 +1,4 @@
-import { ref, watch } from "vue";
+import { ref, computed, watch } from "vue";
 import { useFolderHistory } from "./useFolderHistory";
 
 /**
@@ -37,6 +37,17 @@ function nameFromPath(path: string): string {
   return trimmed.split("/").pop() ?? path;
 }
 
+/**
+ * Top-level tabs represent *projects* (main worktrees). AI-task scratch
+ * worktrees are reached from the per-project worktree submenu, not as their
+ * own top-level chips — so drop any `gitwand-scratch-*` path that an older
+ * build persisted as a flat tab.
+ */
+function isScratchPath(path: string): boolean {
+  const base = path.replace(/\/+$/, "").split("/").pop() ?? "";
+  return base.startsWith("gitwand-scratch-");
+}
+
 /** Persist open tab paths + which one is active to localStorage. */
 function save(entries: RepoTab[], activeId: number | null) {
   try {
@@ -65,14 +76,14 @@ function load(): PersistedTabs {
     if (Array.isArray(parsed)) {
       // Legacy format — array of paths only.
       return {
-        paths: parsed.filter((p): p is string => typeof p === "string"),
+        paths: parsed.filter((p): p is string => typeof p === "string" && !isScratchPath(p)),
         activePath: null,
       };
     }
     if (parsed && typeof parsed === "object" && Array.isArray((parsed as PersistedTabs).paths)) {
       const obj = parsed as PersistedTabs;
       return {
-        paths: obj.paths.filter((p): p is string => typeof p === "string"),
+        paths: obj.paths.filter((p): p is string => typeof p === "string" && !isScratchPath(p)),
         activePath: typeof obj.activePath === "string" ? obj.activePath : null,
       };
     }
@@ -113,6 +124,27 @@ const activeTabId = ref<number | null>(
 // between tabs. Add/close paths already call save() explicitly, so we
 // skip the change-detection dance there.
 watch(activeTabId, (id) => save(tabs.value, id));
+
+// ─── Per-project worktree selection ─────────────────────────
+// Each project tab can have one of its worktrees active "in place" (the
+// submenu lets the user switch the checkout without opening a new tab).
+// Keyed by tab id (in-memory only — ids regenerate per load, so on restart
+// every project starts back on its main worktree). Absence of an entry, or
+// a value equal to the tab's own path, both mean "main".
+const worktreeSelections = ref<Record<number, string>>({});
+
+/**
+ * The path of the checkout that should actually be loaded for the active
+ * tab — its selected worktree, or the project root when none is selected.
+ * App.vue watches this (not `activeTabId`) to drive `openRepo`.
+ */
+const activeRepoPath = computed<string | null>(() => {
+  if (activeTabId.value === null) return null;
+  const sel = worktreeSelections.value[activeTabId.value];
+  if (sel) return sel;
+  const tab = tabs.value.find((t) => t.id === activeTabId.value);
+  return tab?.path ?? null;
+});
 
 /**
  * Lightweight tab tracker — stores only paths and display names.
@@ -162,6 +194,13 @@ export function useRepoTabs() {
 
     tabs.value.splice(index, 1);
 
+    // Drop any worktree selection bound to this tab.
+    if (tabId in worktreeSelections.value) {
+      const next = { ...worktreeSelections.value };
+      delete next[tabId];
+      worktreeSelections.value = next;
+    }
+
     if (activeTabId.value === tabId) {
       if (tabs.value.length > 0) {
         const newIndex = Math.min(index, tabs.value.length - 1);
@@ -172,6 +211,26 @@ export function useRepoTabs() {
     }
 
     save(tabs.value, activeTabId.value);
+  }
+
+  /**
+   * Switch a project tab's active checkout to one of its worktrees, in place.
+   * Passing the tab's own project path (the main worktree) clears the
+   * selection. Does not open a new tab; `activeRepoPath` recomputes so the
+   * watcher in App.vue reloads the chosen checkout.
+   */
+  function selectWorktree(tabId: number, path: string) {
+    const tab = tabs.value.find((t) => t.id === tabId);
+    if (!tab) return;
+    const normalized = path.replace(/\/+$/, "") || path;
+    if (normalized === tab.path) {
+      if (!(tabId in worktreeSelections.value)) return;
+      const next = { ...worktreeSelections.value };
+      delete next[tabId];
+      worktreeSelections.value = next;
+    } else {
+      worktreeSelections.value = { ...worktreeSelections.value, [tabId]: normalized };
+    }
   }
 
   /**
@@ -203,6 +262,8 @@ export function useRepoTabs() {
     activeTabId,
     openTab,
     closeTab,
+    selectWorktree,
+    activeRepoPath,
     switchTab,
     reorderTabs,
   };

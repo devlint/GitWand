@@ -44,8 +44,11 @@
       "Bash(cargo clippy*)",
       "Bash(cargo fmt*)"
     ]
-  }, 
-  "env":{
+  },
+  "env": {
     "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
-  } 
+  },
+  "worktree": {
+    "bgIsolation": "none"
+  }
 }
