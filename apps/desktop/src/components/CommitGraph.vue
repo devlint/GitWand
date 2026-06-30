@@ -575,7 +575,7 @@ const dateSeparators = computed(() => {
   const now = Date.now();
   const seps: { index: number; label: string }[] = [];
   let lastBucket: DateBucket | "" = "";
-  displayCommits.value.forEach((commit, i) => {
+  renderedCommits.value.forEach((commit, i) => {
     const bucket = dateBucket(new Date(commit.date).getTime(), now);
     if (bucket !== lastBucket) {
       seps.push({ index: i, label: t(BUCKET_KEY[bucket]) });
