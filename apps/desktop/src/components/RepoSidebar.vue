@@ -153,7 +153,7 @@ function toggleSection(sectionKey: string) {
 }
 
 function expandSectionForFile(path: string) {
-  for (const sectionKey of ['conflicted', 'staged', 'unstaged', 'untracked']) {
+  for (const sectionKey of SECTION_KEYS) {
     if (sections.value[sectionKey].some(f => f.path === path)) {
       if (collapsedSections.value[sectionKey]) {
         collapsedSections.value[sectionKey] = false;
@@ -270,7 +270,7 @@ function unstagePaths(paths: string[]) {
 /** Un-collapse every ancestor folder of `path` so the file becomes visible. */
 function expandFoldersForFile(path: string) {
   let sectionKey: string | null = null;
-  for (const sk of ["conflicted", "staged", "unstaged", "untracked"]) {
+  for (const sk of SECTION_KEYS) {
     if (sections.value[sk].some((f) => f.path === path)) {
       sectionKey = sk;
       break;
@@ -295,7 +295,7 @@ function expandFoldersForFile(path: string) {
 /** Flattened tree rows per section, recomputed when files or collapse state change. */
 const treeRowsBySection = computed<Record<string, TreeRow[]>>(() => {
   const result: Record<string, TreeRow[]> = {};
-  for (const sectionKey of ["conflicted", "staged", "unstaged", "untracked"]) {
+  for (const sectionKey of SECTION_KEYS) {
     const root = buildFileTree(sections.value[sectionKey]);
     result[sectionKey] = flattenTree(
       root,
@@ -663,24 +663,29 @@ async function onAiAction(action: "regenerate" | "shorten" | "detail" | "changeL
   }
 }
 
+// Working-tree changes (modified/deleted/added-untracked) share one section
+// header. Files keep their real `section` ('unstaged' | 'untracked') for the
+// per-file stage/discard semantics — only the display grouping is merged here.
 const sections = computed(() => {
   const map: Record<string, RepoFileEntry[]> = {
     conflicted: [],
     staged: [],
-    unstaged: [],
-    untracked: [],
+    changes: [],
   };
   for (const f of props.files) {
-    map[f.section].push(f);
+    const key = f.section === "unstaged" || f.section === "untracked" ? "changes" : f.section;
+    map[key].push(f);
   }
   return map;
 });
 
+/** Display section keys, in render order. */
+const SECTION_KEYS = ["conflicted", "staged", "changes"] as const;
+
 const sectionMeta = computed((): Record<string, { label: string; color: string; icon: string }> => ({
   conflicted: { label: t('sidebar.sectionConflicts'), color: "var(--color-danger)", icon: "!" },
   staged: { label: t('sidebar.sectionStaged'), color: "var(--color-success)", icon: "+" },
-  unstaged: { label: t('sidebar.sectionModified'), color: "var(--color-warning)", icon: "~" },
-  untracked: { label: t('sidebar.sectionUntracked'), color: "var(--color-text-muted)", icon: "?" },
+  changes: { label: t('sidebar.sectionChanges'), color: "var(--color-warning)", icon: "~" },
 }));
 
 function statusBadge(status: string): string {
@@ -1126,7 +1131,7 @@ function formatActivityDate(dateStr: string): string {
 
     <!-- File sections -->
     <div class="sections" v-if="showPane('files', 'changes')">
-      <template v-for="sectionKey in ['conflicted', 'staged', 'unstaged', 'untracked']" :key="sectionKey">
+      <template v-for="sectionKey in SECTION_KEYS" :key="sectionKey">
         <div
           v-if="sections[sectionKey].length > 0"
           class="section"
@@ -1149,7 +1154,7 @@ function formatActivityDate(dateStr: string): string {
             <!-- Stage all / Unstage all + Discard all -->
             <div v-if="sectionKey !== 'conflicted'" class="action-group" @click.stop>
               <button
-                v-if="sectionKey === 'unstaged' || sectionKey === 'untracked'"
+                v-if="sectionKey === 'changes'"
                 class="action-group-btn"
                 @click.stop="emit('stagePaths', sections[sectionKey].map(f => f.path))"
                 :title="t('sidebar.stageAll')"
@@ -1299,7 +1304,7 @@ function formatActivityDate(dateStr: string): string {
                       :title="t('sidebar.unstageAll')"
                     >-</button>
                     <button
-                      v-if="sectionKey === 'unstaged' || sectionKey === 'untracked'"
+                      v-if="sectionKey === 'changes'"
                       class="action-group-btn"
                       @click.stop="emit('stagePaths', filesUnderFolder(sectionKey, row.path))"
                       :title="t('sidebar.stageAll')"

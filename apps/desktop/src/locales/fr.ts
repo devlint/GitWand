@@ -181,6 +181,7 @@ const fr: Locale = {
     sectionStaged: "Indexés",
     sectionModified: "Modifi\u00e9s",
     sectionUntracked: "Non suivis",
+    sectionChanges: "Modifications",
     // Actions
     stageAll: "Tout indexer",
     unstageAll: "Tout désindexer",

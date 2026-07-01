@@ -186,6 +186,7 @@ const ptBR: Locale = {
     sectionStaged: "Em stage",
     sectionModified: "Modificados",
     sectionUntracked: "Não rastreados",
+    sectionChanges: "Alterações",
     stageAll: "Stage em tudo",
     unstageAll: "Tirar tudo do stage",
     discardAll: "Descartar tudo",
