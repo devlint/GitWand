@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { nextTick, ref } from "vue";
+import { effectScope, nextTick, ref } from "vue";
 import { useBranchPrSearch } from "../useBranchPrSearch";
 import type { PullRequest } from "../../utils/backend";
 
@@ -94,6 +94,31 @@ describe("useBranchPrSearch", () => {
     expect(getPR).toHaveBeenCalledWith("/repo", 9335);
     expect(search.lookupLoading.value).toBe(false);
     expect(search.matchesResolvedBranch("fix/old-pr", false)).toBe(true);
+  });
+
+  it("clears the pending debounce timer when the effect scope is disposed", async () => {
+    const getPR = vi.fn(async () => ({ branch: "fix/old-pr" }));
+    const filterText = ref("");
+    const scope = effectScope();
+
+    scope.run(() => {
+      useBranchPrSearch({
+        cwd: ref("/repo"),
+        filterText,
+        prs: ref([]),
+        forge: ref({ getPR } as any),
+        debounceMs: 300,
+      });
+    });
+
+    filterText.value = "#9335";
+    await nextTick();
+
+    scope.stop();
+
+    await vi.advanceTimersByTimeAsync(300);
+
+    expect(getPR).not.toHaveBeenCalled();
   });
 
   it("debounces rapid keystrokes into a single fetch for the final value", async () => {

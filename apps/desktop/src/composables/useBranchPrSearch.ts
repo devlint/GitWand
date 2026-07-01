@@ -1,4 +1,4 @@
-import { computed, ref, watch, type ComputedRef, type Ref } from "vue";
+import { computed, onScopeDispose, ref, watch, type ComputedRef, type Ref } from "vue";
 import type { PullRequest } from "../utils/backend";
 import type { ForgeProvider } from "./forge/types";
 
@@ -50,6 +50,10 @@ export function useBranchPrSearch(opts: UseBranchPrSearchOptions): UseBranchPrSe
   const resolvedBranchName = ref<string | null>(null);
   const lookupLoading = ref(false);
   let timer: ReturnType<typeof setTimeout> | null = null;
+
+  onScopeDispose(() => {
+    if (timer) clearTimeout(timer);
+  });
 
   watch(prNumberQuery, (n) => {
     if (timer) clearTimeout(timer);
