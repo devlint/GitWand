@@ -158,6 +158,29 @@ pub struct RawFileChange {
     pub binary: bool,
 }
 
+// ─── Repo tree types (File Explorer panel) ─────────────────────────
+
+/// One node in the full repo file tree (File Explorer panel). Unlike
+/// `FolderDiffNode` this carries no diff-specific fields — it's a plain
+/// tracked + untracked (`.gitignore`-aware) directory listing.
+#[derive(Serialize, Default, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoTreeNode {
+    pub path: String,
+    pub name: String,
+    pub kind: String, // "folder" | "file"
+    pub children: Vec<RepoTreeNode>,
+}
+
+/// Result of `list_repo_tree`. `truncated` is set when the repo has more
+/// than `MAX_REPO_TREE_ENTRIES` trackable paths and the list was capped.
+#[derive(Serialize, Default, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoTreeResult {
+    pub root: RepoTreeNode,
+    pub truncated: bool,
+}
+
 // ─── Directory listing types ──────────────────────────────────────
 
 #[derive(Serialize)]
