@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { computed, ref, watch, onMounted } from "vue";
-import { useFileExplorer } from "../composables/useFileExplorer";
+import { computed, ref, watch, onMounted, onBeforeUnmount, nextTick } from "vue";
+import { useFileExplorer, resolveFileExplorerShortcut, type FileTab } from "../composables/useFileExplorer";
 import { useRepoFileTree } from "../composables/useRepoFileTree";
 import { useSettings } from "../composables/useSettings";
 import { useI18n } from "../composables/useI18n";
 import type { RepoFileEntry } from "../composables/useGitRepo";
+import type { EditorView as EditorViewType } from "@codemirror/view";
+import type { EditorState as EditorStateType } from "@codemirror/state";
 
 const props = defineProps<{
   repoPath: string;
@@ -75,6 +77,114 @@ function onTabClose(tabId: number) {
     explorer.closeTab(props.repoPath, tabId);
   }
 }
+
+// ── CodeMirror 6 (lazy-loaded, one EditorView with per-tab cached EditorState) ──
+const editorHost = ref<HTMLElement | null>(null);
+let view: EditorViewType | null = null;
+let EditorViewCtor: typeof import("@codemirror/view").EditorView | null = null;
+let EditorStateCtor: typeof import("@codemirror/state").EditorState | null = null;
+let basicSetup: any = null;
+let oneDark: any = null;
+const docStates = new Map<number, EditorStateType>();
+
+async function ensureCodeMirrorLibs() {
+  if (EditorViewCtor) return;
+  const [{ EditorView }, { EditorState }, cmMeta, { oneDark: theme }] = await Promise.all([
+    import("@codemirror/view"),
+    import("@codemirror/state"),
+    import("codemirror"),
+    import("@codemirror/theme-one-dark"),
+  ]);
+  EditorViewCtor = EditorView;
+  EditorStateCtor = EditorState;
+  basicSetup = (cmMeta as any).basicSetup;
+  oneDark = theme;
+}
+
+async function detectLanguageExtension(path: string) {
+  const [{ languages }, { LanguageDescription }] = await Promise.all([
+    import("@codemirror/language-data"),
+    import("@codemirror/language"),
+  ]);
+  const desc = LanguageDescription.matchFilename(languages, path);
+  if (!desc) return [];
+  try {
+    return [await desc.load()];
+  } catch {
+    return [];
+  }
+}
+
+function updateListenerFor(tabId: number) {
+  return EditorViewCtor!.updateListener.of((update) => {
+    if (!update.docChanged) return;
+    docStates.set(tabId, update.state);
+    explorer.updateContent(props.repoPath, tabId, update.state.doc.toString());
+  });
+}
+
+async function mountTab(tab: FileTab) {
+  if (tab.binary) {
+    // Binary files get a placeholder (see FileTab.binary) — tear down any
+    // mounted editor so a previously-open text tab's view doesn't linger.
+    view?.destroy();
+    view = null;
+    return;
+  }
+
+  await ensureCodeMirrorLibs();
+  await nextTick();
+  if (!editorHost.value) return;
+
+  let state = docStates.get(tab.id);
+  if (!state) {
+    const langExt = await detectLanguageExtension(tab.path);
+    state = EditorStateCtor!.create({
+      doc: tab.content,
+      extensions: [basicSetup, oneDark, langExt, updateListenerFor(tab.id)],
+    });
+    docStates.set(tab.id, state);
+  }
+
+  if (!view) {
+    view = new EditorViewCtor!({ state, parent: editorHost.value });
+  } else {
+    view.setState(state);
+  }
+}
+
+watch(activeTab, (tab) => {
+  if (tab) mountTab(tab);
+});
+
+watch(
+  () => tabs.value.map((t) => t.id),
+  (ids, oldIds) => {
+    for (const id of oldIds ?? []) {
+      if (!ids.includes(id)) docStates.delete(id);
+    }
+  },
+);
+
+onBeforeUnmount(() => {
+  view?.destroy();
+  view = null;
+});
+
+function onKeyDown(e: KeyboardEvent) {
+  const shortcut = resolveFileExplorerShortcut(e, true);
+  if (!shortcut || !activeTab.value) return;
+  if (shortcut === "save") {
+    e.preventDefault();
+    if (!activeTab.value.binary) explorer.saveTab(props.repoPath, props.repoPath, activeTab.value.id);
+  } else if (shortcut === "close") {
+    e.preventDefault();
+    onTabClose(activeTab.value.id);
+  } else if (typeof shortcut === "object") {
+    const target = tabs.value[shortcut.switch];
+    if (target) onTabClick(target.id);
+  }
+}
 </script>
 
 <template>
@@ -82,6 +192,8 @@ function onTabClose(tabId: number) {
     class="fe"
     :class="{ 'fe--full': fullscreen, 'fe--bottom': bottom, 'fe--floating': !fullscreen && !bottom }"
     :style="panelStyle"
+    tabindex="0"
+    @keydown="onKeyDown"
   >
     <div class="fe__header">
       <span class="fe__title">{{ t("files.headerLabel") }}</span>
@@ -146,10 +258,9 @@ function onTabClose(tabId: number) {
             <span class="fe__tab-close" @click.stop="onTabClose(tab.id)">✕</span>
           </button>
         </div>
-        <div v-if="activeTab" class="fe__content">
-          <pre class="fe__pre">{{ activeTab.content }}</pre>
-        </div>
-        <div v-else class="fe__empty">{{ t("files.emptyHint") }}</div>
+        <div v-show="activeTab && !activeTab.binary" class="fe__content" ref="editorHost"></div>
+        <div v-if="activeTab && activeTab.binary" class="fe__empty">{{ t("files.binaryPlaceholder") }}</div>
+        <div v-if="!activeTab" class="fe__empty">{{ t("files.emptyHint") }}</div>
       </div>
     </div>
   </div>
@@ -262,12 +373,8 @@ function onTabClose(tabId: number) {
   overflow: auto;
 }
 
-.fe__pre {
-  margin: 0;
-  padding: var(--space-3);
-  font-family: var(--font-mono);
-  font-size: var(--font-size-base);
-  white-space: pre-wrap;
+.fe__content :deep(.cm-editor) {
+  height: 100%;
 }
 
 .fe__empty {
