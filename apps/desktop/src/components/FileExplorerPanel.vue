@@ -67,13 +67,16 @@ const {
   keyPrefix: "gitwand-explorer",
   initialHeight: Number(localStorage.getItem("gitwand-explorer-height")) || 0,
   initialLeft: Number(localStorage.getItem("gitwand-explorer-left")) || 0,
-  initialWidth: Number(localStorage.getItem("gitwand-explorer-width")) || 380,
+  initialWidth: Number(localStorage.getItem("gitwand-explorer-width")) || 0,
   initialTop: Number(localStorage.getItem("gitwand-explorer-top")) || 0,
   canMove: () => !bottom.value,
 });
 
 onMounted(() => {
   const parent = feRef.value?.parentElement;
+  if (!width.value) {
+    width.value = Math.round((parent?.offsetWidth ?? window.innerWidth) * 0.5);
+  }
   if (!height.value) {
     height.value = parent?.offsetHeight ?? window.innerHeight;
   }
@@ -538,7 +541,7 @@ function onKeyDown(e: KeyboardEvent) {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-2) var(--space-5) var(--space-5);
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
   cursor: grab;
