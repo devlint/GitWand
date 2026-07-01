@@ -907,6 +907,7 @@ function onRepoFileSelect(path: string, staged: boolean) {
 function onViewModeChange(mode: ViewMode) {
   // Switching views from the dock dismisses the terminal (opt-out via setting).
   if (showTerminal.value && settings.value.terminalHideOnNav) showTerminal.value = false;
+  if (showFiles.value && settings.value.filesHideOnNav) showFiles.value = false;
   viewMode.value = mode;
   if (mode === "changes" && !repoSelectedFile.value && repoFiles.value.length > 0) {
     const first = repoFiles.value[0];
