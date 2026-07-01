@@ -28,7 +28,7 @@ import { listRepoTree } from "@/utils/backend";
 import { useRepoFileTree } from "../useRepoFileTree";
 
 describe("useRepoFileTree", () => {
-  it("flattens the fetched tree into rows and rolls up folder counts", async () => {
+  it("all folders are collapsed by default and rolls up folder counts", async () => {
     const repoPath = ref("/repo");
     const changedFiles = ref([]);
     const tree = useRepoFileTree(repoPath, changedFiles);
@@ -36,22 +36,40 @@ describe("useRepoFileTree", () => {
     await tree.refresh();
 
     expect(listRepoTree).toHaveBeenCalledWith("/repo");
+    expect(tree.isCollapsed("src")).toBe(true);
     expect(tree.rows.value.map((r) => [r.kind, r.path, r.depth])).toEqual([
       ["folder", "src", 0],
-      ["file", "src/main.ts", 1],
-      ["file", "src/util.ts", 1],
       ["file", "README.md", 0],
     ]);
     expect(tree.rows.value[0].count).toBe(2);
   });
 
-  it("collapsing a folder hides its descendants", async () => {
+  it("toggling a collapsed folder reveals its descendants", async () => {
     const repoPath = ref("/repo");
     const changedFiles = ref([]);
     const tree = useRepoFileTree(repoPath, changedFiles);
     await tree.refresh();
 
     tree.toggleFolder("src");
+
+    expect(tree.isCollapsed("src")).toBe(false);
+    expect(tree.rows.value.map((r) => [r.kind, r.path, r.depth])).toEqual([
+      ["folder", "src", 0],
+      ["file", "src/main.ts", 1],
+      ["file", "src/util.ts", 1],
+      ["file", "README.md", 0],
+    ]);
+  });
+
+  it("toggling an expanded folder collapses it again", async () => {
+    const repoPath = ref("/repo");
+    const changedFiles = ref([]);
+    const tree = useRepoFileTree(repoPath, changedFiles);
+    await tree.refresh();
+
+    tree.toggleFolder("src"); // expand
+    tree.toggleFolder("src"); // collapse again
+
     expect(tree.isCollapsed("src")).toBe(true);
     expect(tree.rows.value.map((r) => r.path)).toEqual(["src", "README.md"]);
   });

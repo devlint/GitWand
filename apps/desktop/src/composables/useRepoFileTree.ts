@@ -30,11 +30,17 @@ export function useRepoFileTree(repoPath: Ref<string>, changedFiles: Ref<RepoFil
   }
 
   function toggleFolder(path: string) {
-    collapsedFolders.value[path] = !collapsedFolders.value[path];
+    // Negate the *effective* state (via isCollapsed), not the raw stored
+    // flag — collapsedFolders only ever holds explicit overrides, so an
+    // untouched path is `undefined`. Negating `undefined` directly would
+    // always produce `true`, making the very first toggle on any
+    // never-touched folder a no-op once isCollapsed defaults missing
+    // entries to collapsed (`true`).
+    collapsedFolders.value[path] = !isCollapsed(path);
   }
 
   function isCollapsed(path: string): boolean {
-    return !!collapsedFolders.value[path];
+    return collapsedFolders.value[path] ?? true;
   }
 
   const statusByPath = computed(() => {
