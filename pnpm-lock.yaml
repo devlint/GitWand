@@ -27,6 +27,9 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@codemirror/commands':
+        specifier: ^6.10.4
+        version: 6.10.4
       '@codemirror/language':
         specifier: ^6.12.4
         version: 6.12.4

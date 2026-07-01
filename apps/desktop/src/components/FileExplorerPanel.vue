@@ -115,22 +115,34 @@ const editorHost = ref<HTMLElement | null>(null);
 let view: EditorViewType | null = null;
 let EditorViewCtor: typeof import("@codemirror/view").EditorView | null = null;
 let EditorStateCtor: typeof import("@codemirror/state").EditorState | null = null;
+let CompartmentCtor: typeof import("@codemirror/state").Compartment | null = null;
 let basicSetup: Extension | null = null;
 let oneDark: Extension | null = null;
+let undoCommand: typeof import("@codemirror/commands").undo | null = null;
 const docStates = new Map<number, EditorStateType>();
+// Global (not per-tab) editable toggle — a single Compartment shared by every
+// tab's EditorState, reconfigured whenever a tab is mounted/switched to so
+// editability always reflects the current `editLocked` value even for a tab
+// whose cached state predates the last lock toggle.
+let editableCompartment: InstanceType<typeof import("@codemirror/state").Compartment> | null = null;
+const editLocked = ref(true);
 
 async function ensureCodeMirrorLibs() {
   if (EditorViewCtor) return;
-  const [{ EditorView }, { EditorState }, cmMeta, { oneDark: theme }] = await Promise.all([
+  const [{ EditorView }, { EditorState, Compartment }, cmMeta, { oneDark: theme }, { undo }] = await Promise.all([
     import("@codemirror/view"),
     import("@codemirror/state"),
     import("codemirror"),
     import("@codemirror/theme-one-dark"),
+    import("@codemirror/commands"),
   ]);
   EditorViewCtor = EditorView;
   EditorStateCtor = EditorState;
+  CompartmentCtor = Compartment;
   basicSetup = cmMeta.basicSetup;
   oneDark = theme;
+  undoCommand = undo;
+  editableCompartment = new Compartment();
 }
 
 async function detectLanguageExtension(path: string) {
@@ -177,7 +189,13 @@ async function mountTab(tab: FileTab) {
     if (activeTab.value?.id !== tab.id) return; // a newer tab switch happened while the grammar was loading — don't touch the shared view/docStates with a stale tab's state
     state = EditorStateCtor!.create({
       doc: tab.content,
-      extensions: [basicSetup!, oneDark!, langExt, updateListenerFor(tab.id)],
+      extensions: [
+        basicSetup!,
+        oneDark!,
+        langExt,
+        updateListenerFor(tab.id),
+        editableCompartment!.of(EditorViewCtor!.editable.of(!editLocked.value)),
+      ],
     });
     docStates.set(tab.id, state);
   }
@@ -187,6 +205,31 @@ async function mountTab(tab: FileTab) {
   } else {
     view.setState(state);
   }
+  // The global lock may have changed since this tab's cached state was last
+  // built or visited — always re-assert it so editability is consistent
+  // panel-wide, not just at the moment this tab's EditorState was created.
+  view.dispatch({ effects: editableCompartment!.reconfigure(EditorViewCtor!.editable.of(!editLocked.value)) });
+  docStates.set(tab.id, view.state);
+}
+
+function toggleLock() {
+  editLocked.value = !editLocked.value;
+  if (view && activeTab.value && editableCompartment && EditorViewCtor) {
+    view.dispatch({ effects: editableCompartment.reconfigure(EditorViewCtor.editable.of(!editLocked.value)) });
+    docStates.set(activeTab.value.id, view.state);
+  }
+}
+
+function onUndo() {
+  if (editLocked.value || !view || !undoCommand) return;
+  undoCommand(view); // dispatches internally; the existing updateListener
+  // (see updateListenerFor) picks up the resulting docChanged transaction
+  // and syncs it into useFileExplorer's tab.content, same as any keystroke.
+}
+
+function onToolbarSave() {
+  if (!activeTab.value || activeTab.value.binary) return;
+  explorer.saveTab(props.repoPath, props.repoPath, activeTab.value.id);
 }
 
 watch(activeTab, (tab) => {
@@ -326,6 +369,46 @@ function onKeyDown(e: KeyboardEvent) {
       <div class="fe__corner fe__corner--bl" :class="{ 'fe__corner--active': resizingCorner === 'bl' }" @mousedown="onResizeCornerStart('bl', $event)" />
       <div class="fe__corner fe__corner--br" :class="{ 'fe__corner--active': resizingCorner === 'br' }" @mousedown="onResizeCornerStart('br', $event)" />
     </template>
+
+    <div class="fe__toolbar">
+      <button
+        class="fe__toolbar-btn"
+        :class="{ 'fe__toolbar-btn--active': !editLocked }"
+        :title="editLocked ? t('files.toolbarEdit') : t('files.toolbarLock')"
+        @click="toggleLock"
+      >
+        <svg v-if="editLocked" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="5" y="11" width="14" height="10" rx="2"/>
+          <path d="M8 11V7a4 4 0 0 1 8 0v4"/>
+        </svg>
+        <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="5" y="11" width="14" height="10" rx="2"/>
+          <path d="M8 11V7a4 4 0 0 1 7.75-1.5"/>
+        </svg>
+        <span>{{ editLocked ? t("files.toolbarEdit") : t("files.toolbarLock") }}</span>
+      </button>
+      <button class="fe__toolbar-btn" :disabled="editLocked" :title="t('files.toolbarUndo')" @click="onUndo">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M3 7v6h6"/>
+          <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/>
+        </svg>
+        <span>{{ t("files.toolbarUndo") }}</span>
+      </button>
+      <div class="fe__toolbar-spacer" />
+      <button
+        class="fe__toolbar-btn"
+        :disabled="!activeTab || activeTab.binary || !explorer.isDirty(activeTab)"
+        :title="t('files.toolbarSave')"
+        @click="onToolbarSave"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+          <polyline points="17 21 17 13 7 13 7 21"/>
+          <polyline points="7 3 7 8 15 8"/>
+        </svg>
+        <span>{{ t("files.toolbarSave") }}</span>
+      </button>
+    </div>
   </div>
 </template>
 
@@ -545,4 +628,41 @@ function onKeyDown(e: KeyboardEvent) {
    intentionally NOT defined here — they come from the shared global rules
    added to apps/desktop/src/assets/main.css in Step 1, also used by
    RepoSidebar.vue's tree layout. Do not re-add them locally. */
+
+.fe__toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.fe__toolbar-spacer {
+  flex: 1;
+}
+
+.fe__toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  background: var(--color-bg-tertiary);
+}
+
+.fe__toolbar-btn:hover:not(:disabled) {
+  color: var(--color-text);
+}
+
+.fe__toolbar-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.fe__toolbar-btn--active {
+  color: var(--color-accent);
+}
 </style>
