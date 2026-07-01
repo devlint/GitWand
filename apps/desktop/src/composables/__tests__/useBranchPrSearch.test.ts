@@ -151,8 +151,8 @@ describe("useBranchPrSearch", () => {
       forge: ref({ getPR: vi.fn() } as any),
     });
 
-    expect(search.prFor("feat/y", false)).toBe(pr);
-    expect(search.prFor("origin/feat/y", true)).toBe(pr);
+    expect(search.prFor("feat/y", false)).toEqual(pr);
+    expect(search.prFor("origin/feat/y", true)).toEqual(pr);
     expect(search.prFor("origin/feat/y", false)).toBeNull();
     expect(search.prFor("feat/y", true)).toBeNull();
   });

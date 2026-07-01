@@ -29,7 +29,7 @@ export interface UseBranchPrSearchResult {
 function stripRemotePrefix(name: string, isRemote: boolean): string | null {
   if (isRemote) {
     if (!name.startsWith("origin/")) return null;
-    return name.slice(7); // "origin/".length === 7
+    return name.slice(7);
   }
   return name;
 }
@@ -50,7 +50,6 @@ export function useBranchPrSearch(opts: UseBranchPrSearchOptions): UseBranchPrSe
   const resolvedBranchName = ref<string | null>(null);
   const lookupLoading = ref(false);
   let timer: ReturnType<typeof setTimeout> | null = null;
-  const prCache = new Map<string, PullRequest>();
 
   watch(prNumberQuery, (n) => {
     if (timer) clearTimeout(timer);
@@ -79,27 +78,22 @@ export function useBranchPrSearch(opts: UseBranchPrSearchOptions): UseBranchPrSe
     }, debounceMs);
   });
 
+  const byBranch = computed(() => {
+    const map = new Map<string, PullRequest>();
+    for (const pr of prs.value) map.set(pr.branch, pr);
+    return map;
+  });
+
   function prFor(branchName: string, isRemote: boolean): PullRequest | null {
     const stripped = stripRemotePrefix(branchName, isRemote);
     if (stripped === null) return null;
-
-    // Check cache first (preserves object identity)
-    if (prCache.has(stripped)) {
-      return prCache.get(stripped)!;
-    }
-
-    // Find in current list and cache
-    const found = prs.value.find((pr) => pr.branch === stripped);
-    if (found) {
-      prCache.set(stripped, found);
-    }
-    return found ?? null;
+    return byBranch.value.get(stripped) ?? null;
   }
 
   function matchesResolvedBranch(branchName: string, isRemote: boolean): boolean {
     if (!resolvedBranchName.value) return false;
     const stripped = stripRemotePrefix(branchName, isRemote);
-    return stripped === resolvedBranchName.value;
+    return stripped !== null && stripped === resolvedBranchName.value;
   }
 
   return { prNumberQuery, lookupLoading, prFor, matchesResolvedBranch };
