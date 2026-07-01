@@ -84,6 +84,28 @@ describe("useFileExplorer", () => {
     expect(explorer.isDirty(tab)).toBe(false);
   });
 
+  it("marks a tab as loading until readFile resolves", async () => {
+    let resolveRead!: (value: string) => void;
+    (readFile as any).mockImplementationOnce(
+      () => new Promise((resolve) => { resolveRead = resolve; }),
+    );
+
+    const explorer = useFileExplorer();
+    const openPromise = explorer.openTab(REPO_A, REPO_A, "slow.ts", true);
+
+    // Synchronously after calling openTab (before the read resolves), the
+    // placeholder tab should already be in the array and marked loading.
+    const tab = explorer.tabsFor(REPO_A).find((t) => t.path === "slow.ts")!;
+    expect(tab).toBeDefined();
+    expect(tab.loading).toBe(true);
+
+    resolveRead("file contents");
+    await openPromise;
+
+    expect(tab.loading).toBe(false);
+    expect(tab.content).toBe("file contents");
+  });
+
   it("marks a tab binary when readFile rejects (non-UTF8 content)", async () => {
     (readFile as any).mockRejectedValueOnce(new Error("stream did not contain valid UTF-8"));
     const explorer = useFileExplorer();

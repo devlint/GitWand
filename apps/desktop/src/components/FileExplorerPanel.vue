@@ -167,6 +167,21 @@ function updateListenerFor(tabId: number) {
   });
 }
 
+function waitForTabLoaded(tab: FileTab): Promise<void> {
+  if (!tab.loading) return Promise.resolve();
+  return new Promise((resolve) => {
+    const stop = watch(
+      () => tab.loading,
+      (loading) => {
+        if (!loading) {
+          stop();
+          resolve();
+        }
+      },
+    );
+  });
+}
+
 async function mountTab(tab: FileTab) {
   if (tab.binary) {
     // Binary files get a placeholder (see FileTab.binary) — tear down any
@@ -178,6 +193,18 @@ async function mountTab(tab: FileTab) {
 
   await ensureCodeMirrorLibs();
   if (activeTab.value?.id !== tab.id) return; // a newer tab switch happened while libs were loading
+
+  if (tab.loading) {
+    await waitForTabLoaded(tab);
+    if (activeTab.value?.id !== tab.id) return; // a newer tab switch happened while we waited for content
+    if (tab.binary) {
+      // The read resolved to a binary file while we were waiting — re-check
+      // and bail the same way the top-of-function binary guard does.
+      view?.destroy();
+      view = null;
+      return;
+    }
+  }
 
   await nextTick();
   if (!editorHost.value) return;

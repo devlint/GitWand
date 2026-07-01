@@ -15,6 +15,13 @@ export interface FileTab {
    * editor — see spec non-goal "no binary preview in v1".
    */
   binary: boolean;
+  /**
+   * True from tab creation until `readFile` resolves (successfully or not).
+   * Lets consumers building on `content` (the CodeMirror mount logic) wait
+   * for the real value instead of racing the synchronous placeholder this
+   * composable inserts before the async read completes.
+   */
+  loading: boolean;
 }
 
 export type FileExplorerShortcut = "save" | "close" | { switch: number } | null;
@@ -79,6 +86,7 @@ export function useFileExplorer() {
       originalContent: "",
       pinned: pin,
       binary: false,
+      loading: true,
     };
 
     if (!pin) {
@@ -92,6 +100,16 @@ export function useFileExplorer() {
       tabs.push(tab);
     }
 
+    // Vue wraps plain objects inserted into a `reactive()` collection in a
+    // new proxy on read-back — `tabs.push(tab)` does NOT make `tab` itself
+    // reactive. Any later mutation via this raw `tab` reference (e.g.
+    // `tab.loading = false` below) would silently fail to notify watchers
+    // set up on the proxy that consumers (FileExplorerPanel's `activeTab`
+    // computed) actually observe, since the two are different object
+    // identities per Vue's reactivity model. Re-fetch the proxied instance
+    // from the array and mutate through that instead.
+    const proxiedTab = tabs.find((t) => t.id === tab.id)!;
+
     setActive(repoPath, tab.id);
 
     let content = "";
@@ -103,11 +121,12 @@ export function useFileExplorer() {
       // file) — show a placeholder instead of surfacing the raw error.
       binary = true;
     }
-    tab.content = content;
-    tab.originalContent = content;
-    tab.binary = binary;
+    proxiedTab.content = content;
+    proxiedTab.originalContent = content;
+    proxiedTab.binary = binary;
+    proxiedTab.loading = false;
 
-    return tab;
+    return proxiedTab;
   }
 
   async function saveTab(repoPath: string, cwd: string, tabId: number): Promise<void> {
