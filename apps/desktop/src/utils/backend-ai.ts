@@ -331,6 +331,76 @@ export async function copilotCliPrompt(
   return await res.text();
 }
 
+// ─── Antigravity CLI provider ──────────────────────────────
+// Mirrors the Claude / Codex / opencode / Copilot CLI shape. Antigravity runs
+// one-shot prompts via `agy -p "<prompt>" [--model <m>]`. Auth is managed by
+// Antigravity itself — GitWand just shells out.
+
+export interface AntigravityCliInfo {
+  found: boolean;
+  path: string;
+  version: string;
+  logged_in: boolean;
+  status: "ok" | "not_found" | "not_logged_in" | "error" | "detected" | string;
+  detail: string;
+}
+
+/**
+ * Detect whether the Antigravity CLI is installed. Safe to call on app boot.
+ */
+export async function detectAntigravityCli(): Promise<AntigravityCliInfo> {
+  if (isTauri()) {
+    return tauriInvoke<AntigravityCliInfo>("detect_antigravity_cli");
+  }
+  try {
+    const res = await devFetch(`${DEV_SERVER}/api/antigravity-cli-detect`);
+    if (res.ok) return (await res.json()) as AntigravityCliInfo;
+  } catch {
+    // Dev server unavailable
+  }
+  return {
+    found: false,
+    path: "",
+    version: "",
+    logged_in: false,
+    status: "not_found",
+    detail: "",
+  };
+}
+
+/**
+ * Run a prompt through the local Antigravity CLI (`agy -p`).
+ */
+export async function antigravityCliPrompt(
+  prompt: string,
+  systemPrompt?: string,
+  cwd?: string,
+  model?: string,
+): Promise<string> {
+  if (isTauri()) {
+    return tauriInvoke<string>("antigravity_cli_prompt", {
+      prompt,
+      systemPrompt,
+      cwd,
+      model,
+    }, IPC_TIMEOUT.NONE);
+  }
+  const res = await devFetch(`${DEV_SERVER}/api/antigravity-cli-prompt`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt, systemPrompt, cwd, model }),
+  });
+  if (!res.ok) {
+    let msg = `antigravity CLI error ${res.status}`;
+    try {
+      const body = await res.json();
+      if (body?.error) msg = body.error;
+    } catch { /* ignore */ }
+    throw new Error(msg);
+  }
+  return await res.text();
+}
+
 /**
  * Open the native terminal with `claude login` so the user can complete
  * the OAuth-style setup. Not a PTY integration — just a one-shot bootstrap.

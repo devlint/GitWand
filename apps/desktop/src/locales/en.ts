@@ -1105,6 +1105,10 @@ const en = {
     aiProviderCopilotCliNotFound: " — not detected",
     aiCopilotCliDetectedHint: "Auth is managed by GitHub Copilot CLI. Verified on first use.",
     aiCopilotCliInfoBox: "GitWand runs `copilot -p` locally. No API key required: it uses the GitHub Copilot authentication stored on your machine. Pick a model below or keep the default.",
+    aiProviderAntigravityCli: "Antigravity CLI (Antigravity subscription)",
+    aiProviderAntigravityCliNotFound: " — not detected",
+    aiAntigravityCliDetectedHint: "Auth is managed by Antigravity CLI. Verified on first use.",
+    aiAntigravityCliInfoBox: "GitWand runs `agy -p` locally. No API key required: it uses the Antigravity authentication stored on your machine. Pick a model below or keep the default.",
     // Per-provider model picker for CLI agents (v2.17)
     aiModelCliDefault: "Default (CLI's own setting)",
     aiModelCliPlaceholder: "e.g. gpt-5-codex",

@@ -5,6 +5,7 @@ import {
   codexCliPrompt,
   opencodeCliPrompt,
   copilotCliPrompt,
+  antigravityCliPrompt,
   listOpencodeModels,
   detectClaudeCli,
 } from "../utils/backend";
@@ -25,6 +26,9 @@ import { t } from "./useI18n";
  * - `copilot-cli`    : piggyback on the user's locally-installed GitHub
  *                     Copilot CLI (`copilot -p`) — uses their Copilot
  *                     subscription stored on the machine, no API key needed
+ * - `antigravity-cli`: piggyback on the user's locally-installed Antigravity
+ *                     CLI (`agy -p`) — uses the auth stored on the machine,
+ *                     no API key needed
  * - `openai-compat`  : any OpenAI-compatible endpoint
  * - `ollama`         : local Ollama instance
  * - `mcp`            : route the LLM call through a connected MCP agent
@@ -40,6 +44,7 @@ export type AIProvider =
   | "codex-cli"
   | "opencode-cli"
   | "copilot-cli"
+  | "antigravity-cli"
   | "openai-compat"
   | "ollama"
   | "mcp";
@@ -49,13 +54,15 @@ export type CliAgentProvider =
   | "claude-code-cli"
   | "codex-cli"
   | "opencode-cli"
-  | "copilot-cli";
+  | "copilot-cli"
+  | "antigravity-cli";
 
 export const CLI_AGENT_PROVIDERS: CliAgentProvider[] = [
   "claude-code-cli",
   "codex-cli",
   "opencode-cli",
   "copilot-cli",
+  "antigravity-cli",
 ];
 
 export interface AISettings {
@@ -298,6 +305,19 @@ async function callCopilotCli(
   return result ?? "";
 }
 
+/**
+ * Call the local Antigravity CLI (`agy -p`). Uses the auth stored on the
+ * machine — no API key required.
+ */
+async function callAntigravityCli(
+  systemPrompt: string,
+  userPrompt: string,
+  model?: string,
+): Promise<string> {
+  const result = await antigravityCliPrompt(userPrompt, systemPrompt, undefined, model);
+  return result ?? "";
+}
+
 // ─── Per-provider model selection (v2.17) ───────────────
 //
 // The three CLI agents each expose a second model picker. opencode can
@@ -322,7 +342,8 @@ export function modelForProvider(
     provider === "claude-code-cli" ||
     provider === "codex-cli" ||
     provider === "opencode-cli" ||
-    provider === "copilot-cli"
+    provider === "copilot-cli" ||
+    provider === "antigravity-cli"
   ) {
     const m = s.aiModelByProvider?.[provider];
     return m && m.trim() ? m.trim() : undefined;
@@ -435,6 +456,7 @@ export function useAIProvider() {
       if (s.aiProvider === "codex-cli") return true;
       if (s.aiProvider === "opencode-cli") return true;
       if (s.aiProvider === "copilot-cli") return true;
+      if (s.aiProvider === "antigravity-cli") return true;
       // misconfigured explicit provider — fall through to CLI auto-detect
     }
     // Auto-fallback: use Claude Code CLI if installed and logged in,
@@ -482,6 +504,9 @@ export function useAIProvider() {
           break;
         case "copilot-cli":
           rawResponse = await callCopilotCli(systemPrompt, userPrompt, model);
+          break;
+        case "antigravity-cli":
+          rawResponse = await callAntigravityCli(systemPrompt, userPrompt, model);
           break;
         case "openai-compat":
           rawResponse = await callOpenAICompat(s, systemPrompt, userPrompt);
@@ -534,6 +559,8 @@ export function useAIProvider() {
         return callOpencodeCli(systemPrompt, userPrompt, model);
       case "copilot-cli":
         return callCopilotCli(systemPrompt, userPrompt, model);
+      case "antigravity-cli":
+        return callAntigravityCli(systemPrompt, userPrompt, model);
       case "openai-compat":
         return callOpenAICompat(s, systemPrompt, userPrompt);
       case "ollama":

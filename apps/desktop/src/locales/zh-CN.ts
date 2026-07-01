@@ -1134,6 +1134,10 @@ const zhCN: Locale = {
     aiProviderCopilotCliNotFound: " — 未检测到",
     aiCopilotCliDetectedHint: "身份验证由 GitHub Copilot CLI 管理，首次使用时验证。",
     aiCopilotCliInfoBox: "GitWand 在本地执行 `copilot -p`。无需 API 密钥：它使用存储在你机器上的 GitHub Copilot 身份验证。在下方选择模型或保留默认。",
+    aiProviderAntigravityCli: "Antigravity CLI（Antigravity 订阅）",
+    aiProviderAntigravityCliNotFound: " — 未检测到",
+    aiAntigravityCliDetectedHint: "身份验证由 Antigravity CLI 管理。首次使用时验证。",
+    aiAntigravityCliInfoBox: "GitWand 在本地执行 `agy -p`。无需 API 密钥：它使用存储在你机器上的 Antigravity 身份验证。在下方选择模型或保留默认。",
     // CLI 代理的按提供商模型选择器 (v2.17)
     aiModelCliDefault: "默认（CLI 自身设置）",
     aiModelCliPlaceholder: "例如 gpt-5-codex",
