@@ -12,28 +12,14 @@
  */
 
 import { computed } from "vue";
-import { loadSettings, saveSettings, type AiPromptPreset } from "./useSettings";
+import { loadSettings, saveSettings, settingsRevision, type AiPromptPreset } from "./useSettings";
 
 // ─── Built-in presets ─────────────────────────────────────────────────────────
 
+// Note: there is intentionally no "__builtin_default" preset. The default
+// Conventional Commits prompt is already reachable via the "Default" menu entry
+// (activate(null) → buildSystemPrompt), so adding it here would duplicate it.
 export const BUILTIN_PRESETS: ReadonlyArray<AiPromptPreset> = [
-  {
-    id: "__builtin_default",
-    name: "Default",
-    description: "Conventional Commits, imperative mood, ${lang}.",
-    systemPrompt: `You are a senior software engineer writing a Git commit message.
-
-Rules:
-1. Follow the Conventional Commits spec: "<type>(<optional scope>): <subject>".
-   Valid types: feat, fix, refactor, perf, docs, test, chore, build, ci, style.
-2. Subject line MUST be 72 characters or less, imperative mood, no trailing period.
-3. After the subject, leave a blank line, then optionally add a short body (1-3 lines)
-   explaining *why* the change was made. Skip the body for trivial changes.
-4. Write in \${lang}.
-5. Do not include trailers (Co-Authored-By, Signed-off-by, Reviewed-by…) — the user controls those via the GitWand trailer checkboxes.
-6. Never wrap your answer in code fences or add explanations — output ONLY the
-   raw commit message, ready to be passed to \`git commit -m\`.`,
-  },
   {
     id: "__builtin_concise",
     name: "Concise",
@@ -161,16 +147,28 @@ export function setActivePreset(cwd: string, presetId: string | null): void {
 // ─── composable ──────────────────────────────────────────────────────────────
 
 export function useAiPromptPresets(getCwd?: () => string) {
-  const userPresets = computed(() => allPresets());
-  const allWithBuiltins = computed(() => allPresetsWithBuiltins());
+  // `void settingsRevision.value` registers a reactive dependency on the
+  // settings-changed counter. The reads below pull straight from localStorage
+  // (via loadSettings), so without this they would never recompute after a
+  // saveSettings() — the active-preset checkmark would stay stale until reload.
+  const userPresets = computed(() => {
+    void settingsRevision.value;
+    return allPresets();
+  });
+  const allWithBuiltins = computed(() => {
+    void settingsRevision.value;
+    return allPresetsWithBuiltins();
+  });
 
-  const activePresetId = computed<string | null>(() =>
-    getCwd ? getActivePresetId(getCwd()) : null,
-  );
+  const activePresetId = computed<string | null>(() => {
+    void settingsRevision.value;
+    return getCwd ? getActivePresetId(getCwd()) : null;
+  });
 
-  const activePreset = computed<AiPromptPreset | null>(() =>
-    getCwd ? getActivePreset(getCwd()) : null,
-  );
+  const activePreset = computed<AiPromptPreset | null>(() => {
+    void settingsRevision.value;
+    return getCwd ? getActivePreset(getCwd()) : null;
+  });
 
   function activate(presetId: string | null) {
     if (!getCwd) return;

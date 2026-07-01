@@ -2523,22 +2523,23 @@ function formatActivityDate(dateStr: string): string {
   right: 100%;
   bottom: 0;
   margin-right: var(--space-1);
-  min-width: 130px;
-  max-height: 300px;
+  min-width: 120px;
+  max-height: 280px;
   overflow-y: auto;
   background: var(--color-bg);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-popover);
   list-style: none;
-  padding: var(--space-2) 0;
+  padding: var(--space-1) 0;
   z-index: 101;
 }
 
 .commit-ai-submenu li {
+  position: relative;
   display: flex;
   align-items: center;
-  padding: 6px 12px 6px 30px;
+  padding: 4px 10px 4px 26px;
   font-size: var(--font-size-sm);
   color: var(--color-text);
   cursor: pointer;
@@ -2551,11 +2552,14 @@ function formatActivityDate(dateStr: string): string {
 
 .commit-ai-submenu li.is-active {
   font-weight: 600;
-  padding-left: 12px;
 }
 
+/* Check sits in the fixed 30px gutter so toggling it never reflows the label. */
 .commit-ai-check {
-  margin-right: 6px;
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  transform: translateY(-50%);
   flex-shrink: 0;
 }
 
@@ -2581,7 +2585,6 @@ function formatActivityDate(dateStr: string): string {
 
 /* Preset submenu — slightly wider to show preset names */
 .commit-ai-preset-submenu {
-  min-width: 180px;
 }
 
 /* Preset label inline in the menu entry */
