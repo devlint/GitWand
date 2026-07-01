@@ -192,6 +192,9 @@ interface Settings {
   terminalContextMenu: boolean;
   terminalCopyOnSelect: boolean;
   terminalPasteOnRightClick: boolean;
+  filesMode: "floating" | "fullscreen" | "bottom";
+  filesPrevMode: "floating" | "bottom";
+  filesHideOnNav: boolean;
 }
 
 const defaultSettings: Settings = {
@@ -265,6 +268,9 @@ const defaultSettings: Settings = {
   terminalContextMenu: true,
   terminalCopyOnSelect: false,
   terminalPasteOnRightClick: false,
+  filesMode: "floating",
+  filesPrevMode: "floating",
+  filesHideOnNav: false,
 };
 
 function loadSettings(): Settings {

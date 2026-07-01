@@ -334,9 +334,21 @@ export interface AppSettings {
   terminalCopyOnSelect: boolean;
   /** Paste the clipboard on right-click instead of opening the context menu. Default: false. */
   terminalPasteOnRightClick: boolean;
+
+  // ── v3.x File Explorer ───────────────────────────────────
+  /**
+   * File Explorer panel layout mode — same semantics as `terminalMode`:
+   * "floating" (default), "fullscreen", or "bottom".
+   */
+  filesMode: FilesMode;
+  /** Layout to restore when leaving fullscreen. Never "fullscreen" itself. */
+  filesPrevMode: Exclude<FilesMode, "fullscreen">;
+  /** Hide the File Explorer when switching views from the dock. Default: false. */
+  filesHideOnNav: boolean;
 }
 
 export type TerminalMode = "floating" | "fullscreen" | "bottom";
+export type FilesMode = "floating" | "fullscreen" | "bottom";
 
 // ─── Defaults ─────────────────────────────────────────────
 
@@ -411,6 +423,9 @@ export const defaultAppSettings: AppSettings = {
   terminalContextMenu:               true,
   terminalCopyOnSelect:              false,
   terminalPasteOnRightClick:         false,
+  filesMode:                         "floating",
+  filesPrevMode:                     "floating",
+  filesHideOnNav:                    false,
 };
 
 const SETTINGS_KEY = "gitwand-settings";
