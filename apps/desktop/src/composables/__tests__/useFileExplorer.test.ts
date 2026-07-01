@@ -47,6 +47,23 @@ describe("useFileExplorer", () => {
     expect(explorer.tabsFor(REPO_A).map((t) => t.path)).toEqual(["a.ts", "b.ts"]);
   });
 
+  it("does not create duplicate tabs when openTab is called concurrently for the same path (simulates a real double-click's click+click+dblclick sequence)", async () => {
+    const explorer = useFileExplorer();
+
+    // Fire all three calls without awaiting between them, exactly like a
+    // real double-click's overlapping click/click/dblclick events.
+    const p1 = explorer.openTab(REPO_A, REPO_A, "a.ts", false);
+    const p2 = explorer.openTab(REPO_A, REPO_A, "a.ts", false);
+    const p3 = explorer.openTab(REPO_A, REPO_A, "a.ts", true);
+
+    const [tab1, tab2, tab3] = await Promise.all([p1, p2, p3]);
+
+    expect(explorer.tabsFor(REPO_A).filter((t) => t.path === "a.ts")).toHaveLength(1);
+    expect(tab1.id).toBe(tab2.id);
+    expect(tab2.id).toBe(tab3.id);
+    expect(explorer.tabsFor(REPO_A).find((t) => t.path === "a.ts")?.pinned).toBe(true);
+  });
+
   it("derives dirty state from content vs originalContent", async () => {
     const explorer = useFileExplorer();
     const tab = await explorer.openTab(REPO_A, REPO_A, "a.ts", true);

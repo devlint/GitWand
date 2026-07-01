@@ -65,22 +65,20 @@ export function useFileExplorer() {
       return existing;
     }
 
-    let content = "";
-    let binary = false;
-    try {
-      content = await readFile(cwd, path);
-    } catch {
-      // `read_file` fails when the file isn't valid UTF-8 text (binary
-      // file) — show a placeholder instead of surfacing the raw error.
-      binary = true;
-    }
+    // Reserve the tab slot synchronously, before the async readFile below.
+    // This makes "does a tab exist for this path" + "create one" atomic
+    // within a single synchronous turn, so a concurrent openTab() call for
+    // the same path (e.g. the click+click+dblclick sequence a real
+    // double-click fires, none of them awaited by Vue's template bindings)
+    // finds this placeholder via the `existing` check above instead of
+    // racing to insert a second tab for the same file.
     const tab: FileTab = {
       id: nextLocalId++,
       path,
-      content,
-      originalContent: content,
+      content: "",
+      originalContent: "",
       pinned: pin,
-      binary,
+      binary: false,
     };
 
     if (!pin) {
@@ -95,6 +93,20 @@ export function useFileExplorer() {
     }
 
     setActive(repoPath, tab.id);
+
+    let content = "";
+    let binary = false;
+    try {
+      content = await readFile(cwd, path);
+    } catch {
+      // `read_file` fails when the file isn't valid UTF-8 text (binary
+      // file) — show a placeholder instead of surfacing the raw error.
+      binary = true;
+    }
+    tab.content = content;
+    tab.originalContent = content;
+    tab.binary = binary;
+
     return tab;
   }
 
