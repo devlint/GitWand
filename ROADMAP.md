@@ -139,6 +139,7 @@ _Veille du 2026-06-24 sur 6 clients/outils (Snipara, GitDriv, GitUp, GitX-dev, A
 ### Later (unscheduled)
 
 - **In-app folder-browser + right-click "Scope here"** — follow-up to v2.21.0 Monorepo Scope: a recursive working-tree folder panel where right-clicking a folder scopes to it. Ad-hoc scoping already ships via the picker's "Custom folder…"; this in-tree gesture is deferred (the existing `FolderDiffTree` is a *diff* tree — the wrong substrate — and is unmounted).
+- **File Explorer/Editor panel** — a Terminal-style panel (floating/docked-bottom/fullscreen, per-repo state, own tab strip) that browses the full repo tree via `git ls-files` (`.gitignore`-aware, no new Rust crate) and opens files in a lightweight CodeMirror 6 editor with save (`⌘S`) and read-only Git status badges (staged/unstaged/untracked dots sourced from the existing status, no new fetch). Distinct from the folder-browser above: a general-purpose viewer/editor, not a monorepo-scope picker — no stage/discard/scope actions in v1. Design: `docs/superpowers/specs/2026-07-01-file-explorer-editor-design.md`.
 
 ---
 
