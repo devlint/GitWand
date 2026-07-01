@@ -2088,20 +2088,6 @@ function formatActivityDate(dateStr: string): string {
   list-style: none;
 }
 
-.file-item {
-  display: flex;
-  align-items: center;
-  gap: var(--space-4);
-  padding: var(--space-3) var(--space-2) var(--space-3);
-  cursor: pointer;
-  transition: background var(--transition-hover);
-  border-left: 3px solid transparent;
-}
-
-.file-item:hover {
-  background: var(--color-bg-tertiary);
-}
-
 .file-item--selected {
   background: var(--color-accent-soft);
   border-left-color: var(--color-accent);
@@ -2160,14 +2146,6 @@ function formatActivityDate(dateStr: string): string {
   display: flex;
   flex-direction: column;
   gap: 1px;
-}
-
-.file-name {
-  font-size: var(--font-size-base);
-  font-weight: var(--font-weight-medium);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .file-dir {
@@ -2297,43 +2275,6 @@ function formatActivityDate(dateStr: string): string {
 
 .layout-toggle:only-child .layout-toggle-label {
   display: inline;
-}
-
-/* ── Tree folder rows ────────────────────────────────────────── */
-.tree-folder {
-  border-left: 3px solid transparent;
-}
-
-.tree-chevron {
-  color: var(--color-text-subtle);
-  flex-shrink: 0;
-  transition: transform 0.15s ease;
-}
-
-.tree-chevron--collapsed {
-  transform: rotate(-90deg);
-}
-
-.tree-folder-icon {
-  color: var(--color-text-muted);
-  flex-shrink: 0;
-}
-
-.tree-folder-name {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--color-text);
-}
-
-/* Count sits snug to the right of the folder name (not pushed to the edge). */
-.tree-folder-count {
-  flex-shrink: 0;
-  font-size: var(--font-size-xs);
-  font-variant-numeric: tabular-nums;
-  color: var(--color-text-subtle);
 }
 
 .empty-section {

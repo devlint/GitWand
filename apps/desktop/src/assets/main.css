@@ -715,3 +715,70 @@ button:focus-visible,
 
 [data-theme="light"] .hljs-meta,
 [data-theme="light"] .hljs-meta .hljs-keyword { color: #0891b2; }
+
+/* ── Shared tree-row styles ───────────────────────────────────
+   Used by RepoSidebar.vue's Changes/History tree layout and by
+   FileExplorerPanel.vue's repo tree. Lives here (global) instead of in
+   either component's <style scoped> because Vue scoped CSS never leaks
+   between components — duplicating ~40 lines in both was the alternative.
+
+   Note: FileList.vue's own `.file-item`/`.file-name` rules are unaffected
+   — Vue compiles its scoped selectors to `.file-item[data-v-xxxxxxxx]`,
+   which is more specific than these global bare-class rules and always
+   wins regardless of stylesheet order. */
+.file-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-2) var(--space-3);
+  cursor: pointer;
+  transition: background var(--transition-hover);
+  border-left: 3px solid transparent;
+}
+
+.file-item:hover {
+  background: var(--color-bg-tertiary);
+}
+
+.file-name {
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree-folder {
+  border-left: 3px solid transparent;
+}
+
+.tree-chevron {
+  color: var(--color-text-subtle);
+  flex-shrink: 0;
+  transition: transform 0.15s ease;
+}
+
+.tree-chevron--collapsed {
+  transform: rotate(-90deg);
+}
+
+.tree-folder-icon {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.tree-folder-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text);
+}
+
+.tree-folder-count {
+  flex-shrink: 0;
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-subtle);
+}
