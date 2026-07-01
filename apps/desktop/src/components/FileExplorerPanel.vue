@@ -6,7 +6,7 @@ import { useSettings } from "../composables/useSettings";
 import { useI18n } from "../composables/useI18n";
 import type { RepoFileEntry } from "../composables/useGitRepo";
 import type { EditorView as EditorViewType } from "@codemirror/view";
-import type { EditorState as EditorStateType } from "@codemirror/state";
+import type { EditorState as EditorStateType, Extension } from "@codemirror/state";
 
 const props = defineProps<{
   repoPath: string;
@@ -83,8 +83,8 @@ const editorHost = ref<HTMLElement | null>(null);
 let view: EditorViewType | null = null;
 let EditorViewCtor: typeof import("@codemirror/view").EditorView | null = null;
 let EditorStateCtor: typeof import("@codemirror/state").EditorState | null = null;
-let basicSetup: any = null;
-let oneDark: any = null;
+let basicSetup: Extension | null = null;
+let oneDark: Extension | null = null;
 const docStates = new Map<number, EditorStateType>();
 
 async function ensureCodeMirrorLibs() {
@@ -97,7 +97,7 @@ async function ensureCodeMirrorLibs() {
   ]);
   EditorViewCtor = EditorView;
   EditorStateCtor = EditorState;
-  basicSetup = (cmMeta as any).basicSetup;
+  basicSetup = cmMeta.basicSetup;
   oneDark = theme;
 }
 
@@ -133,15 +133,19 @@ async function mountTab(tab: FileTab) {
   }
 
   await ensureCodeMirrorLibs();
+  if (activeTab.value?.id !== tab.id) return; // a newer tab switch happened while libs were loading
+
   await nextTick();
   if (!editorHost.value) return;
+  if (activeTab.value?.id !== tab.id) return; // re-check after nextTick too
 
   let state = docStates.get(tab.id);
   if (!state) {
     const langExt = await detectLanguageExtension(tab.path);
+    if (activeTab.value?.id !== tab.id) return; // a newer tab switch happened while the grammar was loading — don't touch the shared view/docStates with a stale tab's state
     state = EditorStateCtor!.create({
       doc: tab.content,
-      extensions: [basicSetup, oneDark, langExt, updateListenerFor(tab.id)],
+      extensions: [basicSetup!, oneDark!, langExt, updateListenerFor(tab.id)],
     });
     docStates.set(tab.id, state);
   }
