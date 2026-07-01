@@ -20,7 +20,7 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useI18n();
-const { settings } = useSettings();
+const { settings, saveSettings } = useSettings();
 const explorer = useFileExplorer();
 
 const repoPathRef = computed(() => props.repoPath);
@@ -37,6 +37,19 @@ const activeTab = computed(() => tabs.value.find((t) => t.id === activeId.value)
 const mode = computed(() => settings.value.filesMode);
 const fullscreen = computed(() => mode.value === "fullscreen");
 const bottom = computed(() => mode.value === "bottom");
+
+// The inline header button toggles fullscreen on/off, restoring the layout
+// that was active before fullscreen (floating or bottom) on the way out —
+// mirrors TerminalPanel.vue's toggleFullscreen exactly.
+function toggleFullscreen() {
+  if (fullscreen.value) {
+    settings.value.filesMode = settings.value.filesPrevMode;
+  } else {
+    settings.value.filesPrevMode = mode.value as "floating" | "bottom";
+    settings.value.filesMode = "fullscreen";
+  }
+  saveSettings(settings.value);
+}
 
 // ── Floating position/size, persisted — via the shared useDraggableResizable
 // composable (also used by TerminalPanel.vue). Defaults: docked to the left
@@ -220,10 +233,25 @@ function onKeyDown(e: KeyboardEvent) {
     @keydown="onKeyDown"
   >
     <div v-if="!fullscreen" class="fe__drag" :class="{ 'fe__drag--active': isDragging }" @mousedown="onDragStart" />
-    <div class="fe__header">
+    <div class="fe__header" @mousedown="onMoveStart">
       <span class="fe__title">{{ t("files.headerLabel") }}</span>
       <button v-if="tree.truncated.value" class="fe__truncated" :title="t('files.truncatedTooltip')">
         {{ t("files.truncatedBadge") }}
+      </button>
+      <button
+        class="fe__full"
+        :title="fullscreen ? t('files.exitFullscreen') : t('files.fullscreen')"
+        :aria-label="fullscreen ? t('files.exitFullscreen') : t('files.fullscreen')"
+        @click="toggleFullscreen"
+      >
+        <svg v-if="!fullscreen" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/>
+          <line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>
+        </svg>
+        <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/>
+          <line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/>
+        </svg>
       </button>
       <button class="fe__close" :title="t('common.close')" @click="emit('close')">✕</button>
     </div>
@@ -405,6 +433,7 @@ function onKeyDown(e: KeyboardEvent) {
   padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
+  cursor: grab;
 }
 
 .fe__title {
@@ -414,6 +443,18 @@ function onKeyDown(e: KeyboardEvent) {
 
 .fe__close {
   color: var(--color-text-muted);
+}
+
+.fe__full {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-muted);
+}
+
+.fe__full:hover,
+.fe__close:hover {
+  color: var(--color-text);
 }
 
 .fe__body {
