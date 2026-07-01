@@ -58,6 +58,7 @@ const BranchDeleteModal = defineAsyncComponent(() => import("./components/header
 const CloneModal = defineAsyncComponent(() => import("./components/CloneModal.vue"));
 const ForkModal = defineAsyncComponent(() => import("./components/ForkModal.vue"));
 const TerminalPanel = defineAsyncComponent(() => import("./components/TerminalPanel.vue"));
+const FileExplorerPanel = defineAsyncComponent(() => import("./components/FileExplorerPanel.vue"));
 const UpdateModal = defineAsyncComponent(() => import("./components/UpdateModal.vue"));
 // Shared create-branch field — only mounted inside the v-if'd create-branch
 // modal, so keep it lazy (also lazy in BranchSelector) to stay out of main.
@@ -99,6 +100,7 @@ import { useFolderHistory } from "./composables/useFolderHistory";
 import { useAppMenu } from "./composables/useAppMenu";
 import { useLogs } from "./composables/useLogs";
 import { useTerminalSessions, resolveTerminalShortcut, type TerminalTabType } from "./composables/useTerminalSessions";
+import { useFileExplorer } from "./composables/useFileExplorer";
 import {
   BRANCH_CREATE_REQUEST_KEY,
   MERGE_POPOVER_REQUEST_KEY,
@@ -1425,6 +1427,30 @@ async function toggleTerminal() {
     await openTerminalTab();
   } else {
     showTerminal.value = true;
+  }
+}
+
+// ─── File explorer / editor panel (v3.1) ─────────────────
+const showFiles = ref(false);
+const fileExplorer = useFileExplorer();
+
+function toggleFiles() {
+  showFiles.value = !showFiles.value;
+}
+
+async function onRequestCloseFileTab(tabId: number) {
+  if (!repoFolderPath.value) return;
+  const tab = fileExplorer.tabsFor(repoFolderPath.value).find((t) => t.id === tabId);
+  if (!tab) return;
+  if (
+    await askConfirm({
+      title: t("files.unsavedTitle"),
+      message: t("files.unsavedMessage", tab.path),
+      confirmLabel: t("files.discardChanges"),
+      danger: true,
+    })
+  ) {
+    fileExplorer.closeTab(repoFolderPath.value, tabId);
   }
 }
 
@@ -3237,10 +3263,23 @@ onUnmounted(() => {
         />
       </KeepAlive>
 
+      <!-- KeepAlive so toggling the panel deactivates (not unmounts) the
+           CodeMirror instance — open tabs and undo history survive a hide/show
+           cycle, same rationale as TerminalPanel. -->
+      <KeepAlive>
+        <FileExplorerPanel
+          v-if="showFiles && repoFolderPath"
+          :repo-path="repoFolderPath"
+          :changed-files="repoFiles"
+          @close="showFiles = false"
+          @request-close-tab="onRequestCloseFileTab"
+        />
+      </KeepAlive>
+
       <!-- Floating bottom-center navigation dock -->
       <AppDock v-if="hasRepo" :view-mode="viewMode" :changes-count="repoFiles.length"
-        :pr-count="prPanel.prs.value.length" :terminal-active="showTerminal"
-        @change-view="onViewModeChange" @toggle-terminal="toggleTerminal()" />
+        :pr-count="prPanel.prs.value.length" :terminal-active="showTerminal" :files-active="showFiles"
+        @change-view="onViewModeChange" @toggle-terminal="toggleTerminal()" @toggle-files="toggleFiles()" />
     </div>
 
     <!-- In-app update modal -->
