@@ -115,7 +115,6 @@ const editorHost = ref<HTMLElement | null>(null);
 let view: EditorViewType | null = null;
 let EditorViewCtor: typeof import("@codemirror/view").EditorView | null = null;
 let EditorStateCtor: typeof import("@codemirror/state").EditorState | null = null;
-let CompartmentCtor: typeof import("@codemirror/state").Compartment | null = null;
 let basicSetup: Extension | null = null;
 let oneDark: Extension | null = null;
 let undoCommand: typeof import("@codemirror/commands").undo | null = null;
@@ -138,7 +137,6 @@ async function ensureCodeMirrorLibs() {
   ]);
   EditorViewCtor = EditorView;
   EditorStateCtor = EditorState;
-  CompartmentCtor = Compartment;
   basicSetup = cmMeta.basicSetup;
   oneDark = theme;
   undoCommand = undo;
