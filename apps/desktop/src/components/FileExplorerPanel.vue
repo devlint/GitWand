@@ -4,6 +4,7 @@ import { useFileExplorer, resolveFileExplorerShortcut, type FileTab } from "../c
 import { useRepoFileTree } from "../composables/useRepoFileTree";
 import { useSettings } from "../composables/useSettings";
 import { useI18n } from "../composables/useI18n";
+import { useDraggableResizable } from "../composables/useDraggableResizable";
 import type { RepoFileEntry } from "../composables/useGitRepo";
 import type { EditorView as EditorViewType } from "@codemirror/view";
 import type { EditorState as EditorStateType, Extension } from "@codemirror/state";
@@ -37,15 +38,33 @@ const mode = computed(() => settings.value.filesMode);
 const fullscreen = computed(() => mode.value === "fullscreen");
 const bottom = computed(() => mode.value === "bottom");
 
-// ── Floating position/size, persisted — mirrors TerminalPanel.vue ──
-const HEIGHT_KEY = "gitwand-explorer-height";
-const LEFT_KEY = "gitwand-explorer-left";
-const WIDTH_KEY = "gitwand-explorer-width";
-const TOP_KEY = "gitwand-explorer-top";
-const height = ref(Number(localStorage.getItem(HEIGHT_KEY)) || 360);
-const left = ref(Number(localStorage.getItem(LEFT_KEY)) || 16);
-const width = ref(Number(localStorage.getItem(WIDTH_KEY)) || 640);
-const top = ref(Number(localStorage.getItem(TOP_KEY)) || 80);
+// ── Floating position/size, persisted — via the shared useDraggableResizable
+// composable (also used by TerminalPanel.vue). Defaults: docked to the left
+// edge, directly under the header (app-body already excludes the header, so
+// top:0 lands there for free), full height of the container measured on
+// mount (0 is a "not yet set" sentinel — see the onMounted block below).
+const feRef = ref<HTMLElement | null>(null);
+
+const {
+  height, left, width, top,
+  isDragging, isResizingX, isResizingL, isResizingBottom, resizingCorner,
+  onDragStart, onMoveStart, onResizeXStart, onResizeLeftStart, onResizeBottomStart, onResizeCornerStart,
+} = useDraggableResizable({
+  panelRef: feRef,
+  keyPrefix: "gitwand-explorer",
+  initialHeight: Number(localStorage.getItem("gitwand-explorer-height")) || 0,
+  initialLeft: Number(localStorage.getItem("gitwand-explorer-left")) || 0,
+  initialWidth: Number(localStorage.getItem("gitwand-explorer-width")) || 380,
+  initialTop: Number(localStorage.getItem("gitwand-explorer-top")) || 0,
+  canMove: () => !bottom.value,
+});
+
+onMounted(() => {
+  const parent = feRef.value?.parentElement;
+  if (!height.value) {
+    height.value = parent?.offsetHeight ?? window.innerHeight;
+  }
+});
 
 const panelStyle = computed(() => {
   if (fullscreen.value || bottom.value) return {};
@@ -193,12 +212,14 @@ function onKeyDown(e: KeyboardEvent) {
 
 <template>
   <div
+    ref="feRef"
     class="fe"
     :class="{ 'fe--full': fullscreen, 'fe--bottom': bottom, 'fe--floating': !fullscreen && !bottom }"
     :style="panelStyle"
     tabindex="0"
     @keydown="onKeyDown"
   >
+    <div v-if="!fullscreen" class="fe__drag" :class="{ 'fe__drag--active': isDragging }" @mousedown="onDragStart" />
     <div class="fe__header">
       <span class="fe__title">{{ t("files.headerLabel") }}</span>
       <button v-if="tree.truncated.value" class="fe__truncated" :title="t('files.truncatedTooltip')">
@@ -267,6 +288,16 @@ function onKeyDown(e: KeyboardEvent) {
         <div v-if="!activeTab" class="fe__empty">{{ t("files.emptyHint") }}</div>
       </div>
     </div>
+
+    <template v-if="!fullscreen && !bottom">
+      <div class="fe__resize-x fe__resize-x--left" :class="{ 'fe__resize-x--active': isResizingL }" @mousedown="onResizeLeftStart" />
+      <div class="fe__resize-x" :class="{ 'fe__resize-x--active': isResizingX }" @mousedown="onResizeXStart" />
+      <div class="fe__resize-y fe__resize-y--bottom" :class="{ 'fe__resize-y--active': isResizingBottom }" @mousedown="onResizeBottomStart" />
+      <div class="fe__corner fe__corner--tl" :class="{ 'fe__corner--active': resizingCorner === 'tl' }" @mousedown="onResizeCornerStart('tl', $event)" />
+      <div class="fe__corner fe__corner--tr" :class="{ 'fe__corner--active': resizingCorner === 'tr' }" @mousedown="onResizeCornerStart('tr', $event)" />
+      <div class="fe__corner fe__corner--bl" :class="{ 'fe__corner--active': resizingCorner === 'bl' }" @mousedown="onResizeCornerStart('bl', $event)" />
+      <div class="fe__corner fe__corner--br" :class="{ 'fe__corner--active': resizingCorner === 'br' }" @mousedown="onResizeCornerStart('br', $event)" />
+    </template>
   </div>
 </template>
 
@@ -299,6 +330,72 @@ function onKeyDown(e: KeyboardEvent) {
   border-left: none;
   border-right: none;
   border-bottom: none;
+}
+
+.fe__drag {
+  height: 5px;
+  cursor: ns-resize;
+  flex-shrink: 0;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+
+.fe__resize-x {
+  position: absolute;
+  top: 0;
+  right: -4px;
+  width: 8px;
+  height: 100%;
+  cursor: ew-resize;
+  z-index: 1;
+}
+
+.fe__resize-x--left {
+  right: auto;
+  left: -4px;
+}
+
+.fe__resize-y {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 8px;
+  cursor: ns-resize;
+  z-index: 1;
+}
+
+.fe__resize-y--bottom {
+  bottom: -4px;
+}
+
+.fe__corner {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  z-index: 2;
+}
+
+.fe__corner--tl {
+  top: -4px;
+  left: -4px;
+  cursor: nwse-resize;
+}
+
+.fe__corner--tr {
+  top: -4px;
+  right: -4px;
+  cursor: nesw-resize;
+}
+
+.fe__corner--bl {
+  bottom: -4px;
+  left: -4px;
+  cursor: nesw-resize;
+}
+
+.fe__corner--br {
+  bottom: -4px;
+  right: -4px;
+  cursor: nwse-resize;
 }
 
 .fe__header {
