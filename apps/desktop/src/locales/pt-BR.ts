@@ -2264,6 +2264,12 @@ const ptBR: Locale = {
     unsavedTitle: "Alterações não salvas",
     unsavedMessage: "\"{0}\" tem alterações não salvas. Descartá-las?",
     discardChanges: "Descartar alterações",
+    toolbarEdit: "Editar",
+    toolbarLock: "Bloquear",
+    toolbarUndo: "Desfazer",
+    toolbarSave: "Salvar",
+    fullscreen: "Tela cheia",
+    exitFullscreen: "Sair da tela cheia",
   },
 };
 

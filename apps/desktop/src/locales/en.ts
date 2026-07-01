@@ -2304,6 +2304,12 @@ const en = {
     unsavedTitle: "Unsaved changes",
     unsavedMessage: "\"{0}\" has unsaved changes. Discard them?",
     discardChanges: "Discard changes",
+    toolbarEdit: "Edit",
+    toolbarLock: "Lock",
+    toolbarUndo: "Undo",
+    toolbarSave: "Save",
+    fullscreen: "Fullscreen",
+    exitFullscreen: "Exit fullscreen",
   },
 } as const;
 

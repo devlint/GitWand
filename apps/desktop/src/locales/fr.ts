@@ -2274,6 +2274,12 @@ const fr: Locale = {
     unsavedTitle: "Modifications non enregistrées",
     unsavedMessage: "« {0} » a des modifications non enregistrées. Les abandonner ?",
     discardChanges: "Abandonner les modifications",
+    toolbarEdit: "Modifier",
+    toolbarLock: "Verrouiller",
+    toolbarUndo: "Annuler",
+    toolbarSave: "Enregistrer",
+    fullscreen: "Plein écran",
+    exitFullscreen: "Quitter le plein écran",
   },
 };
 

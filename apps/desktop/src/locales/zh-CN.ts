@@ -2249,6 +2249,12 @@ const zhCN: Locale = {
     unsavedTitle: "未保存的更改",
     unsavedMessage: "「{0}」有未保存的更改。要放弃吗？",
     discardChanges: "放弃更改",
+    toolbarEdit: "编辑",
+    toolbarLock: "锁定",
+    toolbarUndo: "撤销",
+    toolbarSave: "保存",
+    fullscreen: "全屏",
+    exitFullscreen: "退出全屏",
   },
 };
 

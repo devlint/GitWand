@@ -2264,6 +2264,12 @@ const es: Locale = {
     unsavedTitle: "Cambios sin guardar",
     unsavedMessage: "\"{0}\" tiene cambios sin guardar. ¿Descartarlos?",
     discardChanges: "Descartar cambios",
+    toolbarEdit: "Editar",
+    toolbarLock: "Bloquear",
+    toolbarUndo: "Deshacer",
+    toolbarSave: "Guardar",
+    fullscreen: "Pantalla completa",
+    exitFullscreen: "Salir de pantalla completa",
   },
 };
 
