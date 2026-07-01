@@ -2249,6 +2249,22 @@ const es: Locale = {
     modeFloating: "Flotante",
     modeBottom: "Inferior de ancho completo",
   },
+  files: {
+    headerLabel: "Archivos",
+    headerTooltip: "Abrir explorador de archivos",
+    emptyHint: "Haz clic en un archivo del árbol para abrirlo",
+    binaryPlaceholder: "Este archivo no es texto — la vista previa binaria aún no es compatible",
+    truncatedBadge: "Truncado",
+    truncatedTooltip: "Este repo tiene más archivos de los que se pueden mostrar — la lista se limitó",
+    menuHideOnNav: "Ocultar al cambiar de menú",
+    menuLayout: "Diseño",
+    modeFullscreen: "Pantalla completa",
+    modeFloating: "Flotante",
+    modeBottom: "Ancho completo abajo",
+    unsavedTitle: "Cambios sin guardar",
+    unsavedMessage: "\"{0}\" tiene cambios sin guardar. ¿Descartarlos?",
+    discardChanges: "Descartar cambios",
+  },
 };
 
 export default es;

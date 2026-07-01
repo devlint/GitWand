@@ -2259,6 +2259,22 @@ const fr: Locale = {
     modeFloating: "Flottant",
     modeBottom: "Bas pleine largeur",
   },
+  files: {
+    headerLabel: "Fichiers",
+    headerTooltip: "Ouvrir l'explorateur de fichiers",
+    emptyHint: "Cliquez sur un fichier dans l'arbre pour l'ouvrir",
+    binaryPlaceholder: "Ce fichier n'est pas du texte — l'aperçu binaire n'est pas encore pris en charge",
+    truncatedBadge: "Tronqué",
+    truncatedTooltip: "Ce repo a plus de fichiers qu'il n'est possible d'afficher — la liste a été plafonnée",
+    menuHideOnNav: "Masquer au changement de menu",
+    menuLayout: "Disposition",
+    modeFullscreen: "Plein écran",
+    modeFloating: "Flottant",
+    modeBottom: "Pleine largeur en bas",
+    unsavedTitle: "Modifications non enregistrées",
+    unsavedMessage: "« {0} » a des modifications non enregistrées. Les abandonner ?",
+    discardChanges: "Abandonner les modifications",
+  },
 };
 
 export default fr;

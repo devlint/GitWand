@@ -2234,6 +2234,22 @@ const zhCN: Locale = {
     modeFloating: "浮动",
     modeBottom: "全宽底部",
   },
+  files: {
+    headerLabel: "文件",
+    headerTooltip: "打开文件浏览器",
+    emptyHint: "点击树中的文件以打开它",
+    binaryPlaceholder: "该文件不是文本文件 — 暂不支持二进制预览",
+    truncatedBadge: "已截断",
+    truncatedTooltip: "此仓库的文件数量超出可显示范围 — 列表已被截断",
+    menuHideOnNav: "切换菜单时隐藏",
+    menuLayout: "布局",
+    modeFullscreen: "全屏",
+    modeFloating: "浮动",
+    modeBottom: "底部通栏",
+    unsavedTitle: "未保存的更改",
+    unsavedMessage: "「{0}」有未保存的更改。要放弃吗？",
+    discardChanges: "放弃更改",
+  },
 };
 
 export default zhCN;

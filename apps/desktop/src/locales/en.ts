@@ -2289,6 +2289,22 @@ const en = {
     modeFloating: "Floating",
     modeBottom: "Full-width bottom",
   },
+  files: {
+    headerLabel: "Files",
+    headerTooltip: "Open file explorer",
+    emptyHint: "Click a file in the tree to open it",
+    binaryPlaceholder: "This file isn't text — binary preview isn't supported yet",
+    truncatedBadge: "Truncated",
+    truncatedTooltip: "This repo has more files than can be shown — the list was capped",
+    menuHideOnNav: "Hide on menu switch",
+    menuLayout: "Layout",
+    modeFullscreen: "Fullscreen",
+    modeFloating: "Floating",
+    modeBottom: "Full-width bottom",
+    unsavedTitle: "Unsaved changes",
+    unsavedMessage: "\"{0}\" has unsaved changes. Discard them?",
+    discardChanges: "Discard changes",
+  },
 } as const;
 
 // Widen literal string types to plain `string` for locale compatibility

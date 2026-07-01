@@ -2249,6 +2249,22 @@ const ptBR: Locale = {
     modeFloating: "Flutuante",
     modeBottom: "Inferior em largura total",
   },
+  files: {
+    headerLabel: "Arquivos",
+    headerTooltip: "Abrir explorador de arquivos",
+    emptyHint: "Clique em um arquivo na árvore para abri-lo",
+    binaryPlaceholder: "Este arquivo não é texto — a pré-visualização binária ainda não é compatível",
+    truncatedBadge: "Truncado",
+    truncatedTooltip: "Este repositório tem mais arquivos do que é possível exibir — a lista foi limitada",
+    menuHideOnNav: "Ocultar ao trocar de menu",
+    menuLayout: "Layout",
+    modeFullscreen: "Tela cheia",
+    modeFloating: "Flutuante",
+    modeBottom: "Largura total embaixo",
+    unsavedTitle: "Alterações não salvas",
+    unsavedMessage: "\"{0}\" tem alterações não salvas. Descartá-las?",
+    discardChanges: "Descartar alterações",
+  },
 };
 
 export default ptBR;
