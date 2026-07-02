@@ -68,25 +68,65 @@ const forkTargets = computed(() => {
 const bareRemoteName = (ref: string) => ref.replace(/^[^/]+\//, "");
 
 // ─── Base branch candidates ─────────────────────────────
+// Order: main/master first, then release/* branches, then the rest —
+// each group sorted by most-recently-updated first.
 const baseCandidates = computed<string[]>(() => {
+  // Bare branch name → most recent commit date across its local + remote refs.
+  const lastUpdated = new Map<string, number>();
+  const noteDate = (bare: string, date: string) => {
+    const ts = Date.parse(date) || 0;
+    const prev = lastUpdated.get(bare);
+    if (prev === undefined || ts > prev) lastUpdated.set(bare, ts);
+  };
+
   const locals = new Set<string>();
-  const remoteOnly: string[] = [];
+  const remoteOnly = new Set<string>();
   for (const b of props.branches) {
-    if (!b.isRemote && b.name !== props.currentBranch) locals.add(b.name);
+    if (!b.isRemote && b.name !== props.currentBranch) {
+      locals.add(b.name);
+      noteDate(b.name, b.lastCommitDate);
+    }
   }
   for (const b of props.branches) {
     if (b.isRemote) {
       const bare = bareRemoteName(b.name);
-      if (!locals.has(bare) && bare !== props.currentBranch) remoteOnly.push(bare);
+      if (bare !== props.currentBranch) {
+        if (!locals.has(bare)) remoteOnly.add(bare);
+        noteDate(bare, b.lastCommitDate);
+      }
     }
   }
-  return [...Array.from(locals).sort(), ...Array.from(new Set(remoteOnly)).sort()];
+
+  const names = [...locals, ...remoteOnly];
+  const byRecent = (a: string, b: string) =>
+    (lastUpdated.get(b) ?? 0) - (lastUpdated.get(a) ?? 0) || a.localeCompare(b);
+
+  const primary = names.filter((n) => n === "main" || n === "master").sort(byRecent);
+  const release = names.filter((n) => n.startsWith("release/")).sort(byRecent);
+  const picked = new Set([...primary, ...release]);
+  const rest = names.filter((n) => !picked.has(n)).sort(byRecent);
+
+  return [...primary, ...release, ...rest];
 });
 
 const defaultBase = computed<string>(() => {
   const c = baseCandidates.value;
   for (const name of ["main", "master", "develop", "dev"]) if (c.includes(name)) return name;
   return c[0] ?? "main";
+});
+
+/**
+ * `baseCandidates` plus the already-bound value, if any. `defaultBase` can
+ * fall back to a synthesized "main" that isn't actually in `baseCandidates`
+ * (empty-repo case), and `baseCandidates` can change shape while the panel
+ * is open (branches reload) and drop the currently-selected name. Without
+ * this, the `<select>` would silently show a different/blank option than
+ * what `p.newPrBase.value` actually holds.
+ */
+const baseSelectOptions = computed<string[]>(() => {
+  const list = baseCandidates.value;
+  const current = p.newPrBase.value.trim();
+  return current && !list.includes(current) ? [current, ...list] : list;
 });
 
 watch(defaultBase, (v) => {
@@ -259,7 +299,7 @@ function onKeydown(e: KeyboardEvent) {
 const titleLen = computed(() => p.newPrTitle.value.length);
 
 function onBaseInput(e: Event) {
-  p.newPrBase.value = (e.target as HTMLInputElement).value;
+  p.newPrBase.value = (e.target as HTMLSelectElement).value;
 }
 
 // ─── Reviewers ──────────────────────────────────────────
@@ -454,18 +494,14 @@ function removeReviewer(name: string) {
           </svg>
           <div class="pcv-branch pcv-branch--to" :class="{ 'pcv-branch--invalid': baseIsSameAsHead }">
             <span class="pcv-branch-role">{{ t("pr.create.intoLabel") }}</span>
-            <input
+            <select
               id="pcv-base-input"
-              list="pcv-base-list"
               class="pcv-branch-select"
               :value="p.newPrBase.value"
-              @input="onBaseInput"
-              :placeholder="defaultBase || 'main'"
-              spellcheck="false"
-            />
-            <datalist id="pcv-base-list">
-              <option v-for="name in baseCandidates" :key="name" :value="name" />
-            </datalist>
+              @change="onBaseInput"
+            >
+              <option v-for="name in baseSelectOptions" :key="name" :value="name">{{ name }}</option>
+            </select>
           </div>
         </div>
         <p v-if="baseIsSameAsHead" class="pcv-hint pcv-hint--warn">{{ t("pr.create.sameBranchWarn") }}</p>
@@ -908,14 +944,21 @@ function removeReviewer(name: string) {
   padding: var(--space-2) 0;
 }
 .pcv-branch-select {
-  background: var(--color-bg-secondary);
+  background-color: var(--color-bg);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   color: var(--color-text);
   font-size: var(--font-size-md);
   font-family: var(--font-mono, monospace);
   padding: var(--space-3) var(--space-4);
+  padding-right: var(--space-8);
   outline: none;
+  cursor: pointer;
+  width: 100%;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5l3 3 3-3' stroke='%23888' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right var(--space-3) center;
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 .pcv-branch-select:focus {
