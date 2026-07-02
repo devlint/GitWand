@@ -381,29 +381,26 @@ pub(crate) fn rest_list_prs(
     }
     prs.truncate(page as usize);
 
-    // The list endpoint omits additions/deletions (only the per-PR detail has
-    // them). Fetch +/- from the REST detail endpoint per PR, in parallel. GitHub
-    // computes the diff server-side, so this is correct for cross-fork PRs whose
-    // head branch lives in the contributor's fork — a local `git diff` against
-    // `origin/<branch>` would read 0/0 because that ref isn't present locally.
+    // The list endpoint omits additions/deletions and returns a null/unknown
+    // mergeable_state (GitHub computes both lazily and only exposes them on the
+    // per-PR detail endpoint). Both live in the SAME `GET /pulls/{n}` payload, so
+    // fetch that endpoint ONCE per PR and pull +/- and mergeable_state out of the
+    // one response — issuing two separate requests to the identical URL doubled
+    // the per-list request count and was a primary rate-limit contributor.
+    //
+    // GitHub computes the diff server-side, so +/- is correct for cross-fork PRs
+    // whose head branch lives in the contributor's fork — a local `git diff`
+    // against `origin/<branch>` would read 0/0 because that ref isn't present
+    // locally.
+    //
+    // The REST list also carries no CI status. Resolve each PR's head SHA from
+    // the raw list payload (free — already in hand), then aggregate its
+    // check-runs so the sidebar can colour the dot (red = failing, yellow =
+    // pending, green = passing). We use the REST check-runs endpoint — not
+    // GraphQL `statusCheckRollup` — because fine-grained / GitHub-App tokens can
+    // read check-runs but often can't read the GraphQL rollup field, which would
+    // silently leave every dot green.
     if !prs.is_empty() {
-        let stats: std::collections::HashMap<i64, (i64, i64)> = prs
-            .par_iter()
-            .filter_map(|pr| rest_pr_line_stats(&base, pr.number, token).map(|s| (pr.number, s)))
-            .collect();
-        for pr in &mut prs {
-            if let Some(&(adds, dels)) = stats.get(&pr.number) {
-                pr.additions = adds;
-                pr.deletions = dels;
-            }
-        }
-        // The REST list carries no CI status. Resolve each PR's head SHA from
-        // the raw list payload, then aggregate its check-runs so the sidebar can
-        // colour the dot (red = failing, yellow = pending, green = passing).
-        // We use the REST check-runs endpoint — not GraphQL `statusCheckRollup`
-        // — because fine-grained / GitHub-App tokens can read check-runs but
-        // often can't read the GraphQL rollup field, which would silently leave
-        // every dot green.
         let sha_by_num: std::collections::HashMap<i64, String> = raw
             .iter()
             .filter_map(|pr| {
@@ -411,22 +408,23 @@ pub(crate) fn rest_list_prs(
                 Some((n, jnested(pr, "head", "sha")))
             })
             .collect();
-        // Combine CI rollup + mergeable-state into one parallel pass so we only
-        // spin up one rayon task per PR instead of two separate par_iter rounds.
-        // `rest_mergeable_state` fetches the single-PR endpoint — the list
-        // endpoint returns null/unknown for mergeable_state (GitHub computes it
-        // lazily and only exposes the result on the per-PR detail endpoint).
-        let enrich: std::collections::HashMap<i64, (String, String)> = prs
+        // One rayon task per PR issues at most two requests: the per-PR detail
+        // (adds/dels + mergeable_state) and, if a head SHA is known, the
+        // check-runs rollup.
+        let enrich: std::collections::HashMap<i64, (i64, i64, String, String)> = prs
             .par_iter()
             .map(|pr| {
+                let (adds, dels, merge_state) = rest_pr_detail_enrich(&base, pr.number, token)
+                    .unwrap_or((pr.additions, pr.deletions, String::new()));
                 let sha = sha_by_num.get(&pr.number).map(|s| s.as_str()).unwrap_or("");
                 let rollup = if sha.is_empty() { String::new() } else { rest_rollup_for_sha(&base, sha, token) };
-                let merge_state = rest_mergeable_state(&base, pr.number, token);
-                (pr.number, (rollup, merge_state))
+                (pr.number, (adds, dels, rollup, merge_state))
             })
             .collect();
         for pr in &mut prs {
-            if let Some((rollup, merge_state)) = enrich.get(&pr.number) {
+            if let Some((adds, dels, rollup, merge_state)) = enrich.get(&pr.number) {
+                pr.additions = *adds;
+                pr.deletions = *dels;
                 if !rollup.is_empty() { pr.checks_rollup = rollup.clone(); }
                 if !merge_state.is_empty() { pr.merge_state_status = merge_state.clone(); }
             }
@@ -455,19 +453,21 @@ fn rest_rollup_for_sha(repo: &str, sha: &str, token: &str) -> String {
     rollup_from_check_runs(&runs)
 }
 
-/// Fetch the mergeable state of a single PR from the REST detail endpoint.
-/// Returns `"DIRTY"` (conflicts), `"BLOCKED"`, `"CLEAN"`, etc., or `""` on
-/// error / when GitHub hasn't computed it yet (`"unknown"`).
-/// The list endpoint returns `mergeable_state: null` or `"unknown"` — callers
-/// must hit the per-PR endpoint to get a reliable value.
-fn rest_mergeable_state(repo: &str, number: i64, token: &str) -> String {
+/// Fetch a single PR's detail once and extract the three fields the list view
+/// enriches lazily: `(additions, deletions, mergeable_state)`. All three live in
+/// the same `GET /pulls/{n}` payload — fetching it once instead of once per field
+/// halves the per-list request count.
+///
+/// `mergeable_state` is uppercased and normalised: an empty or `"unknown"` value
+/// (GitHub hasn't computed it yet) collapses to `""`. Additions/deletions are
+/// correct even for cross-fork PRs since GitHub computes the diff server-side.
+/// Best effort — returns `None` on any error so the row keeps its current values.
+fn rest_pr_detail_enrich(repo: &str, number: i64, token: &str) -> Option<(i64, i64, String)> {
     let url = format!("{}/repos/{}/pulls/{}", API_BASE, repo, number);
-    let v = match api_json("GET", &url, token, None) {
-        Ok(v) => v,
-        Err(_) => return String::new(),
-    };
+    let v = api_json("GET", &url, token, None).ok()?;
     let state = js(&v, "mergeable_state").to_uppercase();
-    if state.is_empty() || state == "UNKNOWN" { String::new() } else { state }
+    let merge_state = if state.is_empty() || state == "UNKNOWN" { String::new() } else { state };
+    Some((ji(&v, "additions"), ji(&v, "deletions"), merge_state))
 }
 
 /// Reduce a set of check-run objects to one rollup state.
@@ -518,16 +518,6 @@ pub(crate) fn diff_numstat(cwd: &str, head: &str, base: &str) -> (i64, i64) {
         dels += cols.next().unwrap_or("").parse::<i64>().unwrap_or(0);
     }
     (adds, dels)
-}
-
-/// Fetch a PR's `(additions, deletions)` from the REST detail endpoint in
-/// `repo` ("owner/name"). GitHub computes these server-side, so this is correct
-/// for cross-fork PRs (unlike a local numstat, which can't see a fork's head
-/// branch). Best effort — returns `None` on any error so the row keeps 0/0.
-fn rest_pr_line_stats(repo: &str, number: i64, token: &str) -> Option<(i64, i64)> {
-    let url = format!("{}/repos/{}/pulls/{}", API_BASE, repo, number);
-    let v = api_json("GET", &url, token, None).ok()?;
-    Some((ji(&v, "additions"), ji(&v, "deletions")))
 }
 
 /// Fetch a PR object, trying `origin` first and falling back to the upstream
