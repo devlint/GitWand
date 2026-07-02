@@ -911,6 +911,17 @@ pub struct ShortlogEntry {
     pub count: u32,
 }
 
+/// Per-author line churn across all branches — insertions + deletions summed
+/// over every non-merge commit. Keyed by raw author email so the frontend can
+/// fold it into the same merged-identity clusters the contributor cards use.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthorLineStat {
+    pub email: String,
+    pub added: u64,
+    pub deleted: u64,
+}
+
 /// Top contributor (most commits) for a single branch. Powers the
 /// per-branch contributor avatar in the branch picker.
 #[derive(Serialize)]

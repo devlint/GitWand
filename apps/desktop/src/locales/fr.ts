@@ -280,6 +280,8 @@ const fr: Locale = {
     chartCommits: "commits",
     activityNoCommits: "Aucune activité",
     contribCommits: "Commits",
+    contribLinesAdded: "Ajoutées",
+    contribLinesDeleted: "Supprimées",
     contribPrs: "PR",
     contribNoCommits: "Aucun commit dans l'historique chargé",
     contribNoPrs: "Aucune PR trouvée pour ce contributeur",

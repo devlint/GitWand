@@ -278,6 +278,8 @@ const ptBR: Locale = {
     chartCommits: "commits",
     activityNoCommits: "Sem atividade",
     contribCommits: "Commits",
+    contribLinesAdded: "Adicionadas",
+    contribLinesDeleted: "Removidas",
     contribPrs: "PRs",
     contribNoCommits: "Nenhum commit no histórico carregado",
     contribNoPrs: "Nenhuma PR encontrada para este contribuidor",

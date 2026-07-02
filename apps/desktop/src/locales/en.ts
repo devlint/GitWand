@@ -287,6 +287,8 @@ const en = {
     chartCommits: "commits",
     activityNoCommits: "No activity",
     contribCommits: "Commits",
+    contribLinesAdded: "Added",
+    contribLinesDeleted: "Deleted",
     contribPrs: "PRs",
     contribNoCommits: "No commits in the loaded history",
     contribNoPrs: "No PRs found for this contributor",

@@ -2454,6 +2454,63 @@ pub(crate) async fn git_shortlog(cwd: String) -> Result<Vec<ShortlogEntry>, Stri
     Ok(entries)
 }
 
+/// Per-author line churn across all branches: sum of insertions and deletions
+/// over every non-merge commit. Uses `--numstat` with a NUL-prefixed author
+/// email marker line per commit (`%x00%ae`) so the two output shapes never
+/// collide — an author email can otherwise look like a numstat path.
+///
+/// Binary files render as `-\t-` in numstat and parse to 0/0, so they're
+/// ignored. Keyed by raw email; the frontend folds these into the same merged
+/// identities the contributor cards use.
+#[tauri::command]
+pub(crate) async fn git_author_line_stats(cwd: String) -> Result<Vec<AuthorLineStat>, String> {
+    let output = git_cmd()
+        .args([
+            "log",
+            "--all",
+            "--no-merges",
+            "--numstat",
+            "--pretty=format:%x00%ae",
+        ])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("Failed to run git log --numstat: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(stderr.trim().to_string());
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut totals: HashMap<String, (u64, u64)> = HashMap::new();
+    let mut current = String::new();
+    for line in stdout.lines() {
+        if let Some(email) = line.strip_prefix('\0') {
+            current = email.to_string();
+            continue;
+        }
+        if line.trim().is_empty() {
+            continue;
+        }
+        let mut parts = line.split('\t');
+        let added = parts.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+        let deleted = parts.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+        if added == 0 && deleted == 0 {
+            continue;
+        }
+        let e = totals.entry(current.clone()).or_insert((0, 0));
+        e.0 += added;
+        e.1 += deleted;
+    }
+
+    let mut stats: Vec<AuthorLineStat> = totals
+        .into_iter()
+        .map(|(email, (added, deleted))| AuthorLineStat { email, added, deleted })
+        .collect();
+    stats.sort_by(|a, b| (b.added + b.deleted).cmp(&(a.added + a.deleted)));
+    Ok(stats)
+}
+
 /// Top author (most commits) on each branch — counting only the commits that
 /// are unique to the branch, i.e. the `<base>..<branch>` range where `<base>`
 /// is the repo's main branch. This is the person who did most of the work *on
