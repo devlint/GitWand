@@ -68,19 +68,45 @@ const forkTargets = computed(() => {
 const bareRemoteName = (ref: string) => ref.replace(/^[^/]+\//, "");
 
 // ─── Base branch candidates ─────────────────────────────
+// Order: main/master first, then release/* branches, then the rest —
+// each group sorted by most-recently-updated first.
 const baseCandidates = computed<string[]>(() => {
+  // Bare branch name → most recent commit date across its local + remote refs.
+  const lastUpdated = new Map<string, number>();
+  const noteDate = (bare: string, date: string) => {
+    const ts = Date.parse(date) || 0;
+    const prev = lastUpdated.get(bare);
+    if (prev === undefined || ts > prev) lastUpdated.set(bare, ts);
+  };
+
   const locals = new Set<string>();
-  const remoteOnly: string[] = [];
+  const remoteOnly = new Set<string>();
   for (const b of props.branches) {
-    if (!b.isRemote && b.name !== props.currentBranch) locals.add(b.name);
+    if (!b.isRemote && b.name !== props.currentBranch) {
+      locals.add(b.name);
+      noteDate(b.name, b.lastCommitDate);
+    }
   }
   for (const b of props.branches) {
     if (b.isRemote) {
       const bare = bareRemoteName(b.name);
-      if (!locals.has(bare) && bare !== props.currentBranch) remoteOnly.push(bare);
+      if (bare !== props.currentBranch) {
+        if (!locals.has(bare)) remoteOnly.add(bare);
+        noteDate(bare, b.lastCommitDate);
+      }
     }
   }
-  return [...Array.from(locals).sort(), ...Array.from(new Set(remoteOnly)).sort()];
+
+  const names = [...locals, ...remoteOnly];
+  const byRecent = (a: string, b: string) =>
+    (lastUpdated.get(b) ?? 0) - (lastUpdated.get(a) ?? 0) || a.localeCompare(b);
+
+  const primary = names.filter((n) => n === "main" || n === "master").sort(byRecent);
+  const release = names.filter((n) => n.startsWith("release/")).sort(byRecent);
+  const picked = new Set([...primary, ...release]);
+  const rest = names.filter((n) => !picked.has(n)).sort(byRecent);
+
+  return [...primary, ...release, ...rest];
 });
 
 const defaultBase = computed<string>(() => {
