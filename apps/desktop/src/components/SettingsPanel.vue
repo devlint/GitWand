@@ -373,9 +373,30 @@ function logLevelLabel(level: LogEntry["level"]): string {
 
 // Reset the unread counter when the Logs tab actually becomes visible — both
 // when the panel opens directly on it and when the user later switches to it.
+// Probing the AI CLI agents (`claude --version`, `codex --version`, …) spawns
+// external processes that can each take ~0.5–1 s to boot. Running all five at
+// mount froze the Settings panel for seconds even though the default tab is
+// "general". Detect lazily, once, the first time the AI tab is opened.
+let aiDetectDone = false;
+function ensureAiDetect() {
+  if (aiDetectDone) return;
+  aiDetectDone = true;
+  detectOllama();
+  runClaudeCliDetect();
+  runCodexCliDetect();
+  runOpencodeCliDetect();
+  runCopilotCliDetect();
+  runAntigravityCliDetect();
+  loadCliModels();
+}
+
+// Not `immediate` — the initial tab is handled in `onMounted`, which runs
+// after all refs below are initialised (this watcher sits above them, so an
+// immediate run would hit a TDZ on the detection refs).
 watch(activeSettingsTab, (tab) => {
   if (tab === "logs") markLogsRead();
-}, { immediate: true });
+  if (tab === "ai") ensureAiDetect();
+});
 
 async function copyAllLogs() {
   const all = (props.errorLog ?? []).map(formatLogEntry).join("\n");
@@ -991,17 +1012,13 @@ function onLlmFallbackMinModeChange(val: MinMode) {
 }
 
 onMounted(() => {
-  detectOllama();
-  // Lazy-detect both CLI providers at mount so the dropdown can grey out
-  // missing ones without waiting for the user to pick the option first.
-  // Both are fast — just `which` + `--version`.
-  runClaudeCliDetect();
-  runCodexCliDetect();
-  runOpencodeCliDetect();
-  runCopilotCliDetect();
-  runAntigravityCliDetect();
-  // Preload the model list when a CLI agent is already the active provider.
-  loadCliModels();
+  // The non-immediate `activeSettingsTab` watcher above does not fire for the
+  // tab we open on, so replay its side effects for the initial tab here. The
+  // AI CLI detection only runs when the AI tab is actually shown — probing the
+  // five agents spawns external processes and used to freeze the panel at mount
+  // even though the default tab is "general".
+  if (activeSettingsTab.value === "logs") markLogsRead();
+  if (activeSettingsTab.value === "ai") ensureAiDetect();
 });
 
 // Reload `.gitwandrc` when the active repo changes (or on first mount
