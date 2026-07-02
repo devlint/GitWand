@@ -648,12 +648,11 @@ onUnmounted(() => {
                 :style="avatarStyle(authorFor(branch.name)!.email || authorFor(branch.name)!.name)"
                 :title="t('branches.topContributor', authorFor(branch.name)!.name, authorFor(branch.name)!.count)"
               >{{ avatarInitials(authorFor(branch.name)!.name) }}</span>
-              <span class="bp-item-name mono" :title="branch.name"><span class="bp-item-name__text">{{ branch.name }}</span></span>
-              <span
+              <span class="bp-item-name mono" :title="branch.name"><span class="bp-item-name__text">{{ branch.name }}</span><span
                 v-if="prSearch.prFor(branch.name, false)"
                 class="bp-pr-badge"
                 :title="t('branches.prBadgeTitle', prSearch.prFor(branch.name, false)!.number, prSearch.prFor(branch.name, false)!.title)"
-              >#{{ prSearch.prFor(branch.name, false)!.number }}</span>
+              >#{{ prSearch.prFor(branch.name, false)!.number }}</span></span>
               <span v-if="branch.ahead > 0 || branch.behind > 0" class="bp-item-meta muted">
                 <span v-if="branch.ahead > 0">&uarr;{{ branch.ahead }}</span>
                 <span v-if="branch.behind > 0">&darr;{{ branch.behind }}</span>
@@ -701,12 +700,11 @@ onUnmounted(() => {
                   <circle cx="11.5" cy="8.5" r="2.5" />
                   <rect x="7.5" y="8" width="1" height="6" />
                 </svg>
-                <span class="bp-item-name mono" :title="branch.name"><span class="bp-item-name__text">{{ branch.name }}</span></span>
-                <span
+                <span class="bp-item-name mono" :title="branch.name"><span class="bp-item-name__text">{{ branch.name }}</span><span
                   v-if="prSearch.prFor(branch.name, false)"
                   class="bp-pr-badge"
                   :title="t('branches.prBadgeTitle', prSearch.prFor(branch.name, false)!.number, prSearch.prFor(branch.name, false)!.title)"
-                >#{{ prSearch.prFor(branch.name, false)!.number }}</span>
+                >#{{ prSearch.prFor(branch.name, false)!.number }}</span></span>
                 <span v-if="branch.ahead > 0 || branch.behind > 0" class="bp-item-meta muted">
                   <span v-if="branch.ahead > 0">&uarr;{{ branch.ahead }}</span>
                   <span v-if="branch.behind > 0">&darr;{{ branch.behind }}</span>
@@ -825,12 +823,11 @@ onUnmounted(() => {
                 :style="avatarStyle(authorFor(branch.name)!.email || authorFor(branch.name)!.name)"
                 :title="t('branches.topContributor', authorFor(branch.name)!.name, authorFor(branch.name)!.count)"
               >{{ avatarInitials(authorFor(branch.name)!.name) }}</span>
-              <span class="bp-item-name mono" :title="branch.name"><span class="bp-item-name__text">{{ branch.name }}</span></span>
-              <span
+              <span class="bp-item-name mono" :title="branch.name"><span class="bp-item-name__text">{{ branch.name }}</span><span
                 v-if="prSearch.prFor(branch.name, true)"
                 class="bp-pr-badge"
                 :title="t('branches.prBadgeTitle', prSearch.prFor(branch.name, true)!.number, prSearch.prFor(branch.name, true)!.title)"
-              >#{{ prSearch.prFor(branch.name, true)!.number }}</span>
+              >#{{ prSearch.prFor(branch.name, true)!.number }}</span></span>
             </li>
           </ul>
         </div>
@@ -1240,12 +1237,14 @@ onUnmounted(() => {
 
 .bp-pr-badge {
   flex-shrink: 0;
+  margin-left: var(--space-2);
   padding: 1px 6px;
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-semibold);
   font-variant-numeric: tabular-nums;
   color: var(--color-text-muted);
   background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-sm);
 }
 
