@@ -12,7 +12,7 @@ GitWand is available as a desktop app, a CLI tool, and a VS Code extension. Inst
 Download the latest release for your platform:
 
 - **macOS** — `.dmg` (Universal: Apple Silicon + Intel)
-- **Linux** — `.AppImage` or `.deb`
+- **Linux** — `.AppImage` or `.deb` (also available in the AUR as `gitwand-bin`)
 - **Windows** — `.msi` or `.exe`
 
 👉 [Download from GitHub Releases](https://github.com/devlint/GitWand/releases)
