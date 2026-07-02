@@ -10,6 +10,7 @@ use rayon::prelude::*;
 
 #[tauri::command]
 pub(crate) async fn git_stage(cwd: String, paths: Vec<String>) -> Result<(), String> {
+    let _repo = repo_lock::write(&cwd);
     let mut cmd = git_cmd();
     cmd.arg("add").arg("--").current_dir(&cwd);
     for p in &paths {
@@ -25,6 +26,7 @@ pub(crate) async fn git_stage(cwd: String, paths: Vec<String>) -> Result<(), Str
 
 #[tauri::command]
 pub(crate) async fn git_unstage(cwd: String, paths: Vec<String>) -> Result<(), String> {
+    let _repo = repo_lock::write(&cwd);
     let mut cmd = git_cmd();
     cmd.arg("reset").arg("HEAD").arg("--").current_dir(&cwd);
     for p in &paths {
@@ -40,6 +42,7 @@ pub(crate) async fn git_unstage(cwd: String, paths: Vec<String>) -> Result<(), S
 
 #[tauri::command]
 pub(crate) async fn git_stage_patch(cwd: String, patch: String) -> Result<(), String> {
+    let _repo = repo_lock::write(&cwd);
     let mut cmd = git_cmd();
     cmd.args(["apply", "--cached", "--unidiff-zero", "-"])
         .current_dir(&cwd)
@@ -59,6 +62,7 @@ pub(crate) async fn git_stage_patch(cwd: String, patch: String) -> Result<(), St
 
 #[tauri::command]
 pub(crate) async fn git_unstage_patch(cwd: String, patch: String) -> Result<(), String> {
+    let _repo = repo_lock::write(&cwd);
     let mut cmd = git_cmd();
     cmd.args(["apply", "--cached", "--reverse", "--unidiff-zero", "-"])
         .current_dir(&cwd)
@@ -85,6 +89,7 @@ pub(crate) async fn git_commit(
     identity_name: Option<String>,
     identity_email: Option<String>,
 ) -> Result<String, String> {
+    let _repo = repo_lock::write(&cwd);
     let _t0 = Instant::now();
     let mut cmd = git_cmd();
     // Inject identity overrides before the `commit` sub-command so git sees them.
@@ -119,6 +124,7 @@ pub(crate) async fn git_commit(
 
 #[tauri::command]
 pub(crate) async fn git_amend_commit(cwd: String, message: String) -> Result<String, String> {
+    let _repo = repo_lock::write(&cwd);
     let _t0 = Instant::now();
     let output = git_cmd()
         .args(["commit", "--amend", "-m", &message])
@@ -347,6 +353,10 @@ pub(crate) async fn git_split_commit(
 
 #[tauri::command]
 pub(crate) async fn git_push(cwd: String, set_upstream: Option<bool>, force: Option<bool>) -> Result<GitPushPullResult, String> {
+    // Shared guard: push is network-bound and touches only refs, not the
+    // index/worktree, so it need not exclude reads — but it must not overlap a
+    // writer (checkout/pull/rebase) mutating the refs it is about to publish.
+    let _repo = repo_lock::read(&cwd);
     let mut args: Vec<&str> = vec!["push"];
     if set_upstream.unwrap_or(false) {
         args.extend(["--set-upstream", "origin", "HEAD"]);
@@ -383,6 +393,7 @@ pub(crate) async fn git_push(cwd: String, set_upstream: Option<bool>, force: Opt
 
 #[tauri::command]
 pub(crate) async fn git_fetch(cwd: String) -> Result<GitPushPullResult, String> {
+    let _repo = repo_lock::write(&cwd);
     let _t0 = Instant::now();
     let output = git_cmd()
         .args(["fetch", "--prune"])
@@ -407,6 +418,7 @@ pub(crate) async fn git_fetch(cwd: String) -> Result<GitPushPullResult, String> 
 
 #[tauri::command]
 pub(crate) async fn git_merge(cwd: String, branch: String) -> Result<GitPushPullResult, String> {
+    let _repo = repo_lock::write(&cwd);
     let _t0 = Instant::now();
     let output = git_cmd()
         .args(["merge", &branch])
@@ -435,6 +447,7 @@ pub(crate) async fn git_merge(cwd: String, branch: String) -> Result<GitPushPull
 
 #[tauri::command]
 pub(crate) async fn git_merge_abort(cwd: String) -> Result<GitPushPullResult, String> {
+    let _repo = repo_lock::write(&cwd);
     let _t0 = Instant::now();
     let output = git_cmd()
         .args(["merge", "--abort"])
@@ -458,6 +471,7 @@ pub(crate) async fn git_merge_abort(cwd: String) -> Result<GitPushPullResult, St
 
 #[tauri::command]
 pub(crate) async fn git_merge_continue(cwd: String) -> Result<GitPushPullResult, String> {
+    let _repo = repo_lock::write(&cwd);
     let _t0 = Instant::now();
     let output = git_cmd()
         .args(["-c", "core.editor=true", "merge", "--continue"])
@@ -490,6 +504,7 @@ pub(crate) async fn git_pull(cwd: String, rebase: bool) -> Result<GitPushPullRes
     // git config, which means a user with `pull.rebase=true` would silently
     // get a rebase even when they picked "merge" in GitWand (and vice-versa).
     let strategy = if rebase { "--rebase" } else { "--no-rebase" };
+    let _repo = repo_lock::write(&cwd);
     let output = git_cmd()
         .args(["pull", strategy])
         .current_dir(&cwd)
@@ -519,6 +534,7 @@ pub(crate) async fn git_rebase_action(cwd: String, action: String) -> Result<(),
         "continue" | "abort" | "skip" => action.as_str(),
         _ => return Err(format!("Unknown rebase action '{}'", action)),
     };
+    let _repo = repo_lock::write(&cwd);
     let _t0 = Instant::now();
     let output = git_cmd()
         .args(["rebase", &format!("--{}", arg)])
@@ -564,6 +580,7 @@ pub(crate) async fn git_interactive_rebase(
 ) -> Result<InteractiveRebaseResult, String> {
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    let _repo = repo_lock::write(&cwd);
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos())
@@ -628,6 +645,7 @@ pub(crate) async fn git_interactive_rebase(
 
 #[tauri::command]
 pub(crate) async fn git_discard(cwd: String, paths: Vec<String>, untracked: bool) -> Result<(), String> {
+    let _repo = repo_lock::write(&cwd);
     if untracked {
         let mut cmd = git_cmd();
         cmd.arg("clean").arg("-f").arg("--").current_dir(&cwd);
@@ -704,6 +722,7 @@ fn declared_submodule_paths(cwd: &str) -> std::collections::HashSet<String> {
 
 #[tauri::command]
 pub(crate) async fn git_branches(cwd: String) -> Result<Vec<GitBranch>, String> {
+    let _repo = repo_lock::read(&cwd);
     let main_name = get_main_branch_name(&cwd);
     let output = git_cmd()
         .args([
@@ -820,6 +839,7 @@ fn get_main_branch_name(cwd: &str) -> String {
 
 #[tauri::command]
 pub(crate) async fn git_create_branch(cwd: String, name: String, checkout: bool, start_point: Option<String>) -> Result<(), String> {
+    let _repo = repo_lock::write(&cwd);
     if checkout {
         let mut args = vec!["checkout", "-b", &name];
         if let Some(ref sp) = start_point { args.push(sp); }
@@ -854,6 +874,7 @@ pub(crate) async fn git_create_branch(cwd: String, name: String, checkout: bool,
 
 #[tauri::command]
 pub(crate) async fn git_switch_branch(cwd: String, name: String) -> Result<(), String> {
+    let _repo = repo_lock::write(&cwd);
     let _t0 = Instant::now();
     let output = git_cmd()
         .args(["checkout", &name])
@@ -870,6 +891,7 @@ pub(crate) async fn git_switch_branch(cwd: String, name: String) -> Result<(), S
 
 #[tauri::command]
 pub(crate) async fn git_delete_branch(cwd: String, name: String, force: bool) -> Result<(), String> {
+    let _repo = repo_lock::write(&cwd);
     let flag = if force { "-D" } else { "-d" };
     let _t0 = Instant::now();
     let output = git_cmd()
@@ -919,6 +941,7 @@ pub(crate) async fn git_rename_branch(cwd: String, old_name: String, new_name: S
 
 #[tauri::command]
 pub(crate) async fn git_stash(cwd: String, message: Option<String>) -> Result<(), String> {
+    let _repo = repo_lock::write(&cwd);
     let mut args: Vec<&str> = vec!["stash", "push", "--include-untracked"];
     let trimmed = message.as_deref().map(str::trim).filter(|s| !s.is_empty());
     if let Some(m) = trimmed {
@@ -941,6 +964,7 @@ pub(crate) async fn git_stash(cwd: String, message: Option<String>) -> Result<()
 
 #[tauri::command]
 pub(crate) async fn git_stash_pop(cwd: String) -> Result<(), String> {
+    let _repo = repo_lock::write(&cwd);
     let _t0 = Instant::now();
     let output = git_cmd()
         .args(["stash", "pop"])
@@ -957,6 +981,7 @@ pub(crate) async fn git_stash_pop(cwd: String) -> Result<(), String> {
 
 #[tauri::command]
 pub(crate) async fn git_stash_list(cwd: String) -> Result<Vec<StashEntry>, String> {
+    let _repo = repo_lock::read(&cwd);
     let output = git_cmd()
         .args(["stash", "list", "--format=%H%x00%gd%x00%gs%x00%ai"])
         .current_dir(&cwd)
@@ -1011,6 +1036,7 @@ pub(crate) async fn git_stash_list(cwd: String) -> Result<Vec<StashEntry>, Strin
 
 #[tauri::command]
 pub(crate) async fn git_stash_apply(cwd: String, index: usize) -> Result<(), String> {
+    let _repo = repo_lock::write(&cwd);
     let stash_ref = format!("stash@{{{}}}", index);
     let _t0 = Instant::now();
     let output = git_cmd()
@@ -1030,6 +1056,7 @@ pub(crate) async fn git_stash_apply(cwd: String, index: usize) -> Result<(), Str
 
 #[tauri::command]
 pub(crate) async fn git_stash_drop(cwd: String, index: usize) -> Result<(), String> {
+    let _repo = repo_lock::write(&cwd);
     let stash_ref = format!("stash@{{{}}}", index);
     let output = git_cmd()
         .args(["stash", "drop", &stash_ref])
@@ -1047,6 +1074,7 @@ pub(crate) async fn git_stash_drop(cwd: String, index: usize) -> Result<(), Stri
 
 #[tauri::command]
 pub(crate) async fn git_stash_clear(cwd: String) -> Result<(), String> {
+    let _repo = repo_lock::write(&cwd);
     let output = git_cmd()
         .args(["stash", "clear"])
         .current_dir(&cwd)
@@ -1063,6 +1091,7 @@ pub(crate) async fn git_stash_clear(cwd: String) -> Result<(), String> {
 
 #[tauri::command]
 pub(crate) async fn git_stash_show(cwd: String, index: usize) -> Result<String, String> {
+    let _repo = repo_lock::read(&cwd);
     let stash_ref = format!("stash@{{{}}}", index);
     let output = git_cmd()
         .args(["stash", "show", "-p", &stash_ref])
@@ -1082,6 +1111,7 @@ pub(crate) async fn git_stash_show(cwd: String, index: usize) -> Result<String, 
 
 #[tauri::command]
 pub(crate) async fn git_cherry_pick(cwd: String, hashes: Vec<String>) -> Result<GitPushPullResult, String> {
+    let _repo = repo_lock::write(&cwd);
     let git = git_binary();
     let mut args = vec!["cherry-pick".to_string()];
     args.extend(hashes);
@@ -1125,6 +1155,7 @@ pub(crate) async fn git_cherry_pick_abort(cwd: String) -> Result<(), String> {
 
 #[tauri::command]
 pub(crate) async fn git_cherry_pick_continue(cwd: String) -> Result<GitPushPullResult, String> {
+    let _repo = repo_lock::write(&cwd);
     let _t0 = Instant::now();
     let output = git_cmd()
         .args(["cherry-pick", "--continue"])
@@ -1148,6 +1179,7 @@ pub(crate) async fn git_cherry_pick_continue(cwd: String) -> Result<GitPushPullR
 
 #[tauri::command]
 pub(crate) async fn git_checkout_commit(cwd: String, sha: String) -> Result<(), String> {
+    let _repo = repo_lock::write(&cwd);
     let _t0 = Instant::now();
     let output = git_cmd()
         .args(["checkout", &sha])
@@ -1166,6 +1198,7 @@ pub(crate) async fn git_checkout_commit(cwd: String, sha: String) -> Result<(), 
 
 #[tauri::command]
 pub(crate) async fn git_reset_to_commit(cwd: String, sha: String, mode: String) -> Result<(), String> {
+    let _repo = repo_lock::write(&cwd);
     let flag = match mode.as_str() {
         "soft" => "--soft",
         "hard" => "--hard",
@@ -1190,6 +1223,7 @@ pub(crate) async fn git_reset_to_commit(cwd: String, sha: String, mode: String) 
 
 #[tauri::command]
 pub(crate) async fn git_revert_commit(cwd: String, sha: String, mainline: Option<u32>) -> Result<GitPushPullResult, String> {
+    let _repo = repo_lock::write(&cwd);
     let mut args = vec!["revert".to_string(), "--no-edit".to_string()];
     if let Some(m) = mainline {
         args.push("-m".to_string());
@@ -1433,6 +1467,7 @@ pub(crate) async fn git_conflict_check(cwd: String, target_branch: String) -> Re
 
 #[tauri::command]
 pub(crate) async fn git_submodule_list(cwd: String) -> Result<Vec<SubmoduleEntry>, String> {
+    let _repo = repo_lock::read(&cwd);
     let gitmodules = std::path::Path::new(&cwd).join(".gitmodules");
     if !gitmodules.exists() {
         return Ok(Vec::new());
@@ -1534,6 +1569,7 @@ pub(crate) async fn git_submodule_list(cwd: String) -> Result<Vec<SubmoduleEntry
 /// Submodules that are offline / unreachable are skipped silently.
 #[tauri::command]
 pub(crate) async fn git_submodule_check_updates(cwd: String) -> Result<Vec<SubmoduleUpdate>, String> {
+    let _repo = repo_lock::read(&cwd);
     let gitmodules = std::path::Path::new(&cwd).join(".gitmodules");
     if !gitmodules.exists() {
         return Ok(Vec::new());
@@ -1662,6 +1698,7 @@ fn submodule_behind(sub_dir: &std::path::Path, configured_branch: Option<&str>) 
 
 #[tauri::command]
 pub(crate) async fn git_submodule_init(cwd: String) -> Result<(), String> {
+    let _repo = repo_lock::write(&cwd);
     let output = git_cmd()
         .args(["submodule", "init"])
         .current_dir(&cwd)
@@ -1678,6 +1715,7 @@ pub(crate) async fn git_submodule_init(cwd: String) -> Result<(), String> {
 
 #[tauri::command]
 pub(crate) async fn git_submodule_update(cwd: String, init: bool, recursive: bool) -> Result<(), String> {
+    let _repo = repo_lock::write(&cwd);
     let mut cmd = git_cmd();
     cmd.arg("submodule").arg("update");
     if init {
@@ -1708,6 +1746,7 @@ pub(crate) async fn git_submodule_update(cwd: String, init: bool, recursive: boo
 pub(crate) async fn git_submodule_update_one(cwd: String, path: String) -> Result<(), String> {
     // Validate the submodule path stays inside the repo before passing it on.
     safe_repo_path(&cwd, &path)?;
+    let _repo = repo_lock::write(&cwd);
 
     let output = git_cmd()
         .args(["submodule", "update", "--remote", "--rebase", "--init", "--", &path])
@@ -1725,6 +1764,7 @@ pub(crate) async fn git_submodule_update_one(cwd: String, path: String) -> Resul
 
 #[tauri::command]
 pub(crate) async fn git_submodule_add(cwd: String, url: String, path: String) -> Result<(), String> {
+    let _repo = repo_lock::write(&cwd);
     let output = git_cmd()
         .args(["submodule", "add", &url, &path])
         .current_dir(&cwd)
@@ -1746,6 +1786,9 @@ pub(crate) async fn git_submodule_branches(
     cwd: String,
     submodule_path: String,
 ) -> Result<Vec<SubmoduleBranch>, String> {
+    // Lock on the superproject cwd (same key submodule mutations use) so this
+    // read can't race a concurrent `submodule update` rebuilding sub_dir.
+    let _repo = repo_lock::read(&cwd);
     let sub_dir = std::path::Path::new(&cwd).join(&submodule_path);
     if !sub_dir.exists() {
         return Ok(Vec::new());
@@ -1790,6 +1833,7 @@ pub(crate) async fn git_submodule_branches(
 pub(crate) async fn git_commit_submodule_changes(
     cwd: String,
 ) -> Result<HashMap<String, Vec<CommitSubmoduleChange>>, String> {
+    let _repo = repo_lock::read(&cwd);
     let gitmodules = std::path::Path::new(&cwd).join(".gitmodules");
     if !gitmodules.exists() {
         return Ok(HashMap::new());
@@ -2864,6 +2908,7 @@ pub(crate) async fn set_git_config(git_path: String) -> Result<(), String> {
 
 #[tauri::command]
 pub(crate) async fn get_conflicted_files(cwd: String) -> Result<Vec<String>, String> {
+    let _repo = repo_lock::read(&cwd);
     let output = git_cmd()
         .args(["diff", "--name-only", "--diff-filter=U"])
         .current_dir(&cwd)

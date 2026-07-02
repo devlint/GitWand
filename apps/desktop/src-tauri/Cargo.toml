@@ -51,6 +51,11 @@ base64 = "0.22"
 # Used for data-parallel iteration in workspace_*_all (P3.2). Each repo's
 # git/gh subprocess runs on its own rayon thread instead of in series.
 rayon = "1"
+# Per-repo read/write serialization of git subprocesses (git/repo_lock.rs).
+# `arc_lock` gives owned `Arc`-based guards so a command can hold the lock
+# across its blocking `.output()` with a single-line RAII guard. Already in
+# the tree transitively via tauri, so the direct dep adds ~zero binary cost.
+parking_lot = { version = "0.12", features = ["arc_lock"] }
 portable-pty = "0.9"
 
 # libgit2 bindings for in-process git operations (P3.3). Used in the
