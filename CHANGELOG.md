@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **PR base-branch picker only showed `main` on Azure DevOps** — the "into" branch dropdown was built solely from local git refs, which on an Azure clone often hold just `origin/main`, so server-side branches never appeared. The forge is now queried for its branches (`ForgeProvider.listBranches`) and those heads are merged into the picker, falling back to local refs when unavailable. Implemented across all forges for parity: Azure (`az_branches`, refs API), GitHub (`gh_branches`, REST/`gh` CLI), GitLab (`gl_branches`, `glab` CLI), and Bitbucket (`bb_branches`, refs API).
+
 ## [3.2.0] - 2026-07-02
 
 ### Added

@@ -26,6 +26,7 @@ import {
   azPrDiff,
   azPrFiles,
   azReviewerCandidates,
+  azBranches,
   azCreatePr,
   azMergePr,
   azPrReady,
@@ -83,6 +84,12 @@ export class AzureProvider implements ForgeProvider {
   async listReviewerCandidates(cwd: string): Promise<ReviewerCandidate[]> {
     // Union of the project's team members. Degrades to free-text on failure.
     return azReviewerCandidates(cwd);
+  }
+
+  async listBranches(cwd: string): Promise<string[]> {
+    // Server-side heads from the Azure DevOps refs API — the local clone often
+    // holds only main, so the base-branch picker would otherwise be empty.
+    return azBranches(cwd);
   }
 
   // ── PR listing ─────────────────────────────────────────────────────────────

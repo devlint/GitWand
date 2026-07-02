@@ -43,6 +43,7 @@ import {
   bbPrFiles,
   bbCurrentUser,
   bbReviewerCandidates,
+  bbBranches,
   bbListIssues,
 } from "../../utils/backend";
 import { ghPrConflictPreview, ghPrHotspots } from "../../utils/backend";
@@ -96,6 +97,10 @@ export class BitbucketProvider implements ForgeProvider {
 
   listReviewerCandidates(cwd: string): Promise<ReviewerCandidate[]> {
     return bbReviewerCandidates(cwd);
+  }
+
+  listBranches(cwd: string): Promise<string[]> {
+    return bbBranches(cwd);
   }
 
   // ── PR listing ─────────────────────────────────────────────────────────────

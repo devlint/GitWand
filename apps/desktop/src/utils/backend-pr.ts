@@ -1189,6 +1189,18 @@ export async function azReviewerCandidates(cwd: string): Promise<ReviewerCandida
   throw new Error(AZURE_WEB_ONLY);
 }
 
+export async function azBranches(cwd: string): Promise<string[]> {
+  if (isTauri()) {
+    return tauriInvoke<string[]>("az_branches", { cwd });
+  }
+  throw new Error(AZURE_WEB_ONLY);
+}
+
+export async function ghBranches(cwd: string): Promise<string[]> {
+  if (!isTauri()) return [];
+  return tauriInvoke<string[]>("gh_branches", { cwd });
+}
+
 export async function azCreatePr(
   cwd: string,
   title: string,

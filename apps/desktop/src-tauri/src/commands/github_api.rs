@@ -759,6 +759,38 @@ pub(crate) fn rest_reviewer_candidates(cwd: &str, token: &str) -> Result<Vec<Rev
     Ok(all)
 }
 
+/// List branch names (heads) for the repo via the REST API (tokenless path).
+/// Paginated at 100/page, deduped, case-insensitively sorted.
+pub(crate) fn rest_branches(cwd: &str, token: &str) -> Result<Vec<String>, String> {
+    let (owner, repo) = owner_repo(cwd)?;
+    let mut names: Vec<String> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for page in 1..=10 {
+        let url = format!(
+            "{}/repos/{}/{}/branches?per_page=100&page={}",
+            API_BASE, owner, repo, page
+        );
+        let v = api_json("GET", &url, token, None)?;
+        let arr = match v.as_array() {
+            Some(a) if !a.is_empty() => a,
+            _ => break,
+        };
+        let count = arr.len();
+        for b in arr {
+            let name = js(b, "name");
+            if name.is_empty() || !seen.insert(name.clone()) {
+                continue;
+            }
+            names.push(name);
+        }
+        if count < 100 {
+            break;
+        }
+    }
+    names.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+    Ok(names)
+}
+
 /// Map a GitHub comment object to the snake_case shape the frontend
 /// `PrReviewComment` interface expects. `issue_level` flags conversation
 /// comments (not anchored to a diff line) so their path/line fields are nulled.

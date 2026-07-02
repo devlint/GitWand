@@ -236,6 +236,11 @@ export async function glReviewerCandidates(cwd: string): Promise<ReviewerCandida
   return tauriInvoke<ReviewerCandidate[]>("gl_reviewer_candidates", { cwd });
 }
 
+export async function glBranches(cwd: string): Promise<string[]> {
+  if (!isTauri()) return [];
+  return tauriInvoke<string[]>("gl_branches", { cwd });
+}
+
 /**
  * Create a diff-line anchored discussion on a MR via the GitLab Discussions API.
  *

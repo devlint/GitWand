@@ -878,6 +878,31 @@ fn azure_team_members(cwd: &str) -> Result<Vec<AzureMember>, String> {
     Ok(all)
 }
 
+/// List the branch names (heads) of the repo from the Azure DevOps refs API.
+/// Used to populate the PR base-branch picker with server-side branches that
+/// may not be fetched into the local clone. Names are returned bare (no
+/// `refs/heads/` prefix), deduped, case-insensitively sorted.
+fn rest_branches(cwd: &str) -> Result<Vec<String>, String> {
+    let r = azure_repo(cwd)?;
+    let url = with_api_version(&format!("{}/refs?filter=heads/", r.api_base()));
+    let v = az_json("GET", &url, None)?;
+    let refs = v
+        .get("value")
+        .and_then(|x| x.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let mut names: Vec<String> = refs
+        .iter()
+        .filter_map(|item| {
+            let full = js(item, "name");
+            if full.is_empty() { None } else { Some(short_ref(&full)) }
+        })
+        .collect();
+    names.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+    names.dedup();
+    Ok(names)
+}
+
 /// Candidate reviewers for the combobox (drops the identity id).
 fn rest_reviewer_candidates(cwd: &str) -> Result<Vec<ReviewerCandidate>, String> {
     let mut all: Vec<ReviewerCandidate> = azure_team_members(cwd)?
@@ -1522,6 +1547,13 @@ pub(crate) async fn az_pr_files(cwd: String, number: i64) -> Result<Vec<String>,
 #[tauri::command]
 pub(crate) async fn az_reviewer_candidates(cwd: String) -> Result<Vec<ReviewerCandidate>, String> {
     tauri::async_runtime::spawn_blocking(move || rest_reviewer_candidates(&cwd))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub(crate) async fn az_branches(cwd: String) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || rest_branches(&cwd))
         .await
         .map_err(|e| e.to_string())?
 }

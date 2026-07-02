@@ -1002,6 +1002,49 @@ pub(crate) async fn gl_reviewer_candidates(cwd: String) -> Result<Vec<ReviewerCa
     Ok(candidates)
 }
 
+/// List branch names for the project via `glab api`. Paginated at 100/page,
+/// deduped, case-insensitively sorted. Non-fatal on failure (returns partial).
+#[tauri::command]
+pub(crate) async fn gl_branches(cwd: String) -> Result<Vec<String>, String> {
+    let mut names: Vec<String> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for page in 1..=10 {
+        let endpoint = format!(
+            "projects/:fullpath/repository/branches?per_page=100&page={}",
+            page
+        );
+        let output = hidden_cmd("glab")
+            .args(["api", &endpoint])
+            .current_dir(&cwd)
+            .output()
+            .map_err(|e| format!("glab api branches: {}", e))?;
+        if !output.status.success() {
+            break;
+        }
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let v: serde_json::Value =
+            serde_json::from_str(stdout.trim()).unwrap_or(serde_json::Value::Array(vec![]));
+        let arr = match v.as_array() {
+            Some(a) if !a.is_empty() => a.clone(),
+            _ => break,
+        };
+        let count = arr.len();
+        for b in &arr {
+            if let Some(name) = b.get("name").and_then(|v| v.as_str()) {
+                if name.is_empty() || !seen.insert(name.to_string()) {
+                    continue;
+                }
+                names.push(name.to_string());
+            }
+        }
+        if count < 100 {
+            break;
+        }
+    }
+    names.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+    Ok(names)
+}
+
 /// List file paths changed in a MR via `glab api` (diffs endpoint).
 #[tauri::command]
 pub(crate) async fn gl_mr_files(cwd: String, iid: i64) -> Result<Vec<String>, String> {

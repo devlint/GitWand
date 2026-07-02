@@ -467,6 +467,81 @@ pub(crate) async fn gh_list_reviewer_candidates(cwd: String) -> Result<Vec<Revie
         .map_err(|e| e.to_string())?
 }
 
+fn gh_branches_inner(cwd: String) -> Result<Vec<String>, String> {
+    // Settings-managed OAuth token present → tokenless REST path (no `gh` needed).
+    if let Some(tok) = github_api::settings_github_token() {
+        return github_api::rest_branches(&cwd, &tok);
+    }
+    // Discover owner/repo from the current repo.
+    let view = hidden_cmd("gh")
+        .args(["repo", "view", "--json", "owner,name"])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("Failed to inspect repo: {}", e))?;
+    if !view.status.success() {
+        return Err(format!(
+            "gh repo view failed: {}",
+            String::from_utf8_lossy(&view.stderr)
+        ));
+    }
+    #[derive(serde::Deserialize)]
+    struct OwnerLogin { login: String }
+    #[derive(serde::Deserialize)]
+    struct RepoView { owner: OwnerLogin, name: String }
+    let repo: RepoView = serde_json::from_slice(&view.stdout)
+        .map_err(|e| format!("Failed to parse repo view: {}", e))?;
+    let endpoint = format!("/repos/{}/{}/branches", repo.owner.login, repo.name);
+
+    let output = hidden_cmd("gh")
+        .args([
+            "api",
+            "--paginate",
+            "-H", "Accept: application/vnd.github+json",
+            &endpoint,
+            "--jq", "[.[] | .name]",
+        ])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("Failed to list branches: {}", e))?;
+    if !output.status.success() {
+        return Err(format!(
+            "gh api branches failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    // --paginate concatenates one JSON array per page (NDJSON of arrays).
+    let raw = String::from_utf8_lossy(&output.stdout);
+    let mut names: Vec<String> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for chunk in raw.split('\n') {
+        let trimmed = chunk.trim();
+        if trimmed.is_empty() { continue; }
+        let value: serde_json::Value = match serde_json::from_str(trimmed) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        if let Some(arr) = value.as_array() {
+            for item in arr {
+                if let Some(name) = item.as_str() {
+                    if name.is_empty() || !seen.insert(name.to_string()) { continue; }
+                    names.push(name.to_string());
+                }
+            }
+        }
+    }
+    names.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+    Ok(names)
+}
+
+/// List branch names (heads) for the current repo. Token → REST, else `gh` CLI.
+#[tauri::command]
+pub(crate) async fn gh_branches(cwd: String) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || gh_branches_inner(cwd))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 fn gh_checkout_pr_inner(cwd: String, number: i64) -> Result<(), String> {
     if github_api::settings_github_token().is_some() {
         return github_api::rest_checkout_pr(&cwd, number);
