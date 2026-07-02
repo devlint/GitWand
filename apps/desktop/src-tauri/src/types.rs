@@ -499,7 +499,7 @@ pub struct PullRequestDetail {
 
 /// Describes the current repo's GitHub fork relationship, used by the PR
 /// create view to offer "open against upstream" for forks.
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ForkInfo {
     /// True when `origin` is a fork of another GitHub repo.

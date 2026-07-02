@@ -38,8 +38,10 @@
 
 use crate::git::{git_cmd, hidden_cmd};
 use crate::types::*;
-use super::curl_util::{bearer_config, curl_with_status};
+use super::curl_util::{bearer_config, curl_with_headers, curl_with_status};
 use rayon::prelude::*;
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -167,6 +169,26 @@ fn curl_raw(
     )
 }
 
+/// Map an HTTP ≥ 400 response to a user-facing error, preferring GitHub's
+/// `message` field over the bare status code.
+fn map_api_error(status: i32, body: &str) -> String {
+    let msg = serde_json::from_str::<serde_json::Value>(body.trim())
+        .ok()
+        .and_then(|v| v.get("message").and_then(|m| m.as_str()).map(String::from))
+        .unwrap_or_else(|| format!("HTTP {}", status));
+    format!("GitHub API error ({}): {}", status, msg)
+}
+
+/// Parse a (possibly empty) JSON response body. An empty body maps to `Null` so
+/// no-content responses (e.g. 204) don't fail the JSON parser.
+fn parse_json_body(body: &str) -> Result<serde_json::Value, String> {
+    let t = body.trim();
+    if t.is_empty() {
+        return Ok(serde_json::Value::Null);
+    }
+    serde_json::from_str(t).map_err(|e| format!("Failed to parse GitHub response: {}", e))
+}
+
 /// Perform a GitHub JSON API call. Maps HTTP ≥ 400 to a user-facing error,
 /// preferring GitHub's `message` field.
 fn api_json(
@@ -177,17 +199,65 @@ fn api_json(
 ) -> Result<serde_json::Value, String> {
     let (status, body) = curl_raw(method, url, Some(token), body_json, "application/vnd.github+json")?;
     if status >= 400 {
-        let msg = serde_json::from_str::<serde_json::Value>(body.trim())
-            .ok()
-            .and_then(|v| v.get("message").and_then(|m| m.as_str()).map(String::from))
-            .unwrap_or_else(|| format!("HTTP {}", status));
-        return Err(format!("GitHub API error ({}): {}", status, msg));
+        return Err(map_api_error(status, &body));
     }
-    if body.trim().is_empty() {
-        return Ok(serde_json::Value::Null);
+    parse_json_body(&body)
+}
+
+/// ETag cache for conditional GETs: `url → (etag, response_body)`.
+///
+/// GitHub does **not** count `304 Not Modified` responses against the REST rate
+/// limit, so re-fetching an unchanged resource via `If-None-Match` is free. The
+/// PR list poller hits the same per-PR detail / check-run URLs every few minutes;
+/// once cached, unchanged PRs cost zero quota. Unbounded but bounded in practice
+/// by the set of PR/commit URLs visited in a session (same lifetime model as
+/// `GIT_DIR_CACHE`).
+static ETAG_CACHE: OnceLock<Mutex<HashMap<String, (String, String)>>> = OnceLock::new();
+
+/// GET a GitHub JSON endpoint with ETag-based conditional requests.
+///
+/// Sends `If-None-Match` when a cached ETag exists; a `304` serves the cached
+/// body without spending rate-limit quota. A `200` refreshes the cache from the
+/// response `ETag`. Falls back to a plain fetch when no ETag is returned.
+fn api_json_cached(url: &str, token: &str) -> Result<serde_json::Value, String> {
+    let cache = ETAG_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let cached = cache.lock().unwrap().get(url).cloned();
+
+    let auth = bearer_config(token);
+    let inm = cached.as_ref().map(|(etag, _)| format!("If-None-Match: {}", etag));
+    let mut headers: Vec<&str> = vec!["User-Agent: GitWand", "X-GitHub-Api-Version: 2022-11-28"];
+    if let Some(h) = &inm {
+        headers.push(h);
     }
-    serde_json::from_str(body.trim())
-        .map_err(|e| format!("Failed to parse GitHub response: {}", e))
+
+    let (status, resp_headers, body) = curl_with_headers(
+        "GET",
+        url,
+        Some(auth.as_str()),
+        None,
+        &headers,
+        "application/vnd.github+json",
+    )?;
+
+    if status == 304 {
+        // Unchanged — serve the cached body. We only send If-None-Match when a
+        // cache entry exists, so `cached` is Some here.
+        if let Some((_, cached_body)) = cached {
+            return parse_json_body(&cached_body);
+        }
+    }
+    if status >= 400 {
+        return Err(map_api_error(status, &body));
+    }
+    if let Some(etag) = resp_headers.get("etag") {
+        if !etag.is_empty() {
+            cache
+                .lock()
+                .unwrap()
+                .insert(url.to_string(), (etag.clone(), body.clone()));
+        }
+    }
+    parse_json_body(&body)
 }
 
 // ─── JSON field helpers ─────────────────────────────────────────────────────
@@ -351,14 +421,12 @@ pub(crate) fn rest_list_prs(
     };
 
     // Fetch PRs from the base repository (matches `gh pr list` behavior).
-    let raw: Vec<serde_json::Value> = api_json(
-        "GET",
+    let raw: Vec<serde_json::Value> = api_json_cached(
         &format!(
             "{}/repos/{}/pulls?state={}&per_page={}&page=1&sort=updated&direction=desc",
             API_BASE, base, api_state, per_page
         ),
         token,
-        None,
     )?
     .as_array()
     .cloned()
@@ -445,7 +513,7 @@ fn rest_rollup_for_sha(repo: &str, sha: &str, token: &str) -> String {
         return String::new();
     }
     let url = format!("{}/repos/{}/commits/{}/check-runs", API_BASE, repo, sha);
-    let v = match api_json("GET", &url, token, None) {
+    let v = match api_json_cached(&url, token) {
         Ok(v) => v,
         Err(_) => return String::new(),
     };
@@ -464,7 +532,7 @@ fn rest_rollup_for_sha(repo: &str, sha: &str, token: &str) -> String {
 /// Best effort — returns `None` on any error so the row keeps its current values.
 fn rest_pr_detail_enrich(repo: &str, number: i64, token: &str) -> Option<(i64, i64, String)> {
     let url = format!("{}/repos/{}/pulls/{}", API_BASE, repo, number);
-    let v = api_json("GET", &url, token, None).ok()?;
+    let v = api_json_cached(&url, token).ok()?;
     let state = js(&v, "mergeable_state").to_uppercase();
     let merge_state = if state.is_empty() || state == "UNKNOWN" { String::new() } else { state };
     Some((ji(&v, "additions"), ji(&v, "deletions"), merge_state))
@@ -872,10 +940,23 @@ pub(crate) fn rest_pr_reviews(cwd: &str, number: i64, token: &str) -> Result<Vec
     Ok(map_reviews(&v))
 }
 
-/// Resolve the current repo's fork relationship (REST).
+/// Process-lifetime cache of a repo's fork relationship, keyed by origin
+/// `owner/repo`. The fork status of a repo doesn't change during a session, yet
+/// `base_owner_repo` / `upstream_parent` resolve it on every PR-list refresh — so
+/// without this the poller spent one `GET /repos/{o}/{r}` per tick for a value
+/// that never moves (same lifetime model as `GIT_DIR_CACHE`).
+static FORK_INFO_CACHE: OnceLock<Mutex<HashMap<String, ForkInfo>>> = OnceLock::new();
+
+/// Resolve the current repo's fork relationship (REST), cached per session.
 pub(crate) fn rest_fork_info(cwd: &str, token: &str) -> Result<ForkInfo, String> {
     let (owner, repo) = owner_repo(cwd)?;
     let origin = format!("{}/{}", owner, repo);
+
+    let cache = FORK_INFO_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some(cached) = cache.lock().unwrap().get(&origin) {
+        return Ok(cached.clone());
+    }
+
     let info = api_json("GET", &format!("{}/repos/{}/{}", API_BASE, owner, repo), token, None)?;
     let is_fork = info.get("fork").and_then(|f| f.as_bool()).unwrap_or(false);
     let parent = info
@@ -884,7 +965,9 @@ pub(crate) fn rest_fork_info(cwd: &str, token: &str) -> Result<ForkInfo, String>
         .and_then(|n| n.as_str())
         .unwrap_or("")
         .to_string();
-    Ok(ForkInfo { is_fork, origin, parent })
+    let fi = ForkInfo { is_fork, origin: origin.clone(), parent };
+    cache.lock().unwrap().insert(origin, fi.clone());
+    Ok(fi)
 }
 
 /// The upstream parent `owner/repo` when the current repo is a fork, else None.
