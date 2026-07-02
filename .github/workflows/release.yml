@@ -251,3 +251,60 @@ jobs:
           path: website/.vitepress/dist
       - name: Deploy to GitHub Pages
         uses: actions/deploy-pages@v4
+
+  # After Linux and Windows releases succeed, publish the package to the AUR (Arch User Repository)
+  publish-aur:
+    name: Publish to AUR
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download Linux deb package from release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"
+          # Retry download as assets might take a minute to finalize
+          for attempt in 1 2 3; do
+            if gh release download "${{ github.ref_name }}" \
+                --pattern "GitWand_${VERSION}_amd64.deb" \
+                --dir . \
+                --repo "${{ github.repository }}" 2>&1; then
+              break
+            fi
+            echo "::warning::Deb package not yet available on release ${{ github.ref_name }} (attempt $attempt/3) — sleeping 15s"
+            sleep 15
+          done
+          [ -f "GitWand_${VERSION}_amd64.deb" ] || { echo "::error::Deb package missing or empty after retries"; exit 1; }
+
+      - name: Generate PKGBUILD from template
+        run: |
+          set -euo pipefail
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"
+          
+          # Calculate checksums
+          SHA256_DEB=$(sha256sum "GitWand_${VERSION}_amd64.deb" | awk '{print $1}')
+          SHA256_LICENSE=$(sha256sum LICENSE | awk '{print $1}')
+          
+          # Replace placeholders in template
+          sed -e "s/#VERSION#/${VERSION}/g" \
+              -e "s/#SHA256_DEB#/${SHA256_DEB}/g" \
+              -e "s/#SHA256_LICENSE#/${SHA256_LICENSE}/g" \
+              scripts/PKGBUILD.template > PKGBUILD
+
+          echo "=== Generated PKGBUILD ==="
+          cat PKGBUILD
+
+      - name: Publish AUR package
+        uses: KSXGitHub/github-actions-deploy-aur@v3
+        with:
+          pkgname: gitwand-bin
+          pkgbuild: ./PKGBUILD
+          commit_username: ${{ secrets.AUR_USERNAME }}
+          commit_email: ${{ secrets.AUR_EMAIL }}
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+
