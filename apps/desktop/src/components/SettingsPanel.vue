@@ -268,13 +268,13 @@ const defaultSettings: Settings = {
   terminalShell: "",
   terminalMode: "bottom",
   terminalPrevMode: "bottom",
-  terminalHideOnNav: false,
+  terminalHideOnNav: true,
   terminalContextMenu: true,
   terminalCopyOnSelect: false,
   terminalPasteOnRightClick: false,
   filesMode: "floating",
   filesPrevMode: "floating",
-  filesHideOnNav: false,
+  filesHideOnNav: true,
 };
 
 function loadSettings(): Settings {
