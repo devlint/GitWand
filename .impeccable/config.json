@@ -1,9 +1,0 @@
-{
-  "detector": {
-    "ignoreRules": [],
-    "ignoreFiles": [
-      "apps/desktop/src/components/DashboardView.vue"
-    ],
-    "ignoreValues": []
-  }
-}
