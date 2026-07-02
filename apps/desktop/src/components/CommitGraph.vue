@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, inject, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import type { GitLogEntry, GitBranch } from "../utils/backend";
 import { computeDagLayout, parseRefs, type DagLayout, type DagNode } from "../utils/dagLayout";
 import { dateBucket, type DateBucket } from "../utils/dateBucket";
@@ -8,6 +8,8 @@ import type { LocaleKey } from "../locales";
 import { avatarStyle, avatarInitials as initials } from "../composables/useAvatar";
 import { filterCommitsLocal } from "../composables/useCommitSearch";
 import { useWorkspaceScope } from "../composables/useWorkspaceScope";
+import { PR_PANEL_KEY, type PrPanelState } from "../composables/usePrPanel";
+import { useBranchPrSearch } from "../composables/useBranchPrSearch";
 
 defineOptions({ inheritAttrs: false });
 
@@ -32,6 +34,10 @@ const props = defineProps<{
   stashes?: any[];
   /** Map of commit SHA → submodule pointer changes, for the Git Tree badge (v2.15.1). */
   submoduleChanges?: Record<string, Array<{ path: string; pointedSha: string }>>;
+  /** Map of head-branch name → its open PR, for the "#<number>" ref badge. */
+  branchPrs?: Record<string, { number: number; title: string }>;
+  /** Repo path — lets the `#<number>` graph search fall back to a forge lookup. */
+  cwd?: string;
   hasMore?: boolean;
   loadingMore?: boolean;
   /** Number of commits hidden by the active monorepo scope (v2.21.0). */
@@ -423,6 +429,22 @@ function submoduleChangesFor(sha: string): Array<{ path: string; pointedSha: str
   return props.submoduleChanges?.[sha] ?? [];
 }
 
+/**
+ * The open PR for a branch/remote ref, or null. Remote refs (`origin/foo`) are
+ * matched against the head-branch name by stripping the remote prefix — the
+ * same rule the branch-selector popover uses.
+ */
+function prForRef(r: { type: string; name: string }): { number: number; title: string } | null {
+  if (!props.branchPrs) return null;
+  if (r.type === "branch") return props.branchPrs[r.name] ?? null;
+  if (r.type === "remote") {
+    const slash = r.name.indexOf("/");
+    const base = slash !== -1 ? r.name.slice(slash + 1) : r.name;
+    return props.branchPrs[base] ?? null;
+  }
+  return null;
+}
+
 function onCtxDeleteTag() {
   const t = tagToDelete.value;
   if (!t) return;
@@ -622,6 +644,32 @@ const searchQuery = ref("");
 const currentMatchIdx = ref(-1);
 const filterMode = ref(false);
 
+// ─── `#<number>` PR search ───────────────────────────
+// Typing "#97" in the graph search box resolves the PR's head branch (cache
+// first via the loaded PR list, then a debounced forge lookup) and highlights
+// the commits carrying that branch's ref — same resolver the branch popover uses.
+const prPanel = inject<PrPanelState | null>(PR_PANEL_KEY, null);
+const prSearch = prPanel
+  ? useBranchPrSearch({
+      cwd: computed(() => props.cwd ?? ""),
+      filterText: searchQuery,
+      prs: prPanel.prs,
+      forge: prPanel.forge,
+    })
+  : null;
+const prNumberQuery = computed(() => prSearch?.prNumberQuery.value ?? null);
+const prLookupLoading = computed(() => prSearch?.lookupLoading.value ?? false);
+
+/** True when a commit carries the branch resolved from the `#<number>` query. */
+function commitMatchesPrQuery(entry: GitLogEntry): boolean {
+  if (!prSearch || prNumberQuery.value === null) return false;
+  return commitRefs(entry).some(
+    (r) =>
+      (r.type === "branch" || r.type === "remote") &&
+      prSearch.matchesResolvedBranch(r.name, r.type === "remote"),
+  );
+}
+
 const searchBarEl = ref<HTMLElement | null>(null);
 const showSuggestions = ref(false);
 const activeSuggestionIdx = ref(-1);
@@ -689,12 +737,19 @@ function onSearchKeydown(e: KeyboardEvent) {
 
 const renderedCommits = computed(() => {
   if (!filterMode.value || !searchQuery.value.trim()) return displayCommits.value;
+  if (prNumberQuery.value !== null) return displayCommits.value.filter(commitMatchesPrQuery);
   return filterCommitsLocal(displayCommits.value, searchQuery.value);
 });
 
 const matchedIndices = computed<number[]>(() => {
   const q = searchQuery.value.trim();
   if (!q) return [];
+  // `#<number>` PR query: match by the resolved head branch's ref, not text.
+  if (prNumberQuery.value !== null) {
+    const indices: number[] = [];
+    renderedCommits.value.forEach((e, i) => { if (commitMatchesPrQuery(e)) indices.push(i); });
+    return indices;
+  }
   const matched = filterCommitsLocal(renderedCommits.value, q);
   const matchSet = new Set(matched.map((e) => e.hashFull));
   const indices: number[] = [];
@@ -1121,6 +1176,15 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
       <span v-if="matchedIndices.length > 0" class="cg-search-count">
         {{ t('log.graphSearchCount', currentMatchIdx + 1, matchedIndices.length) }}
       </span>
+      <!-- `#<number>` PR-lookup status (only while resolving or when nothing matched) -->
+      <span
+        v-else-if="prNumberQuery !== null && prLookupLoading"
+        class="cg-search-count cg-search-count--pr"
+      >{{ t('branches.prLookupLoading', prNumberQuery) }}</span>
+      <span
+        v-else-if="prNumberQuery !== null && !prLookupLoading"
+        class="cg-search-count cg-search-count--pr"
+      >{{ t('branches.prLookupNotFound', prNumberQuery) }}</span>
       <button
         class="cg-search-nav"
         :disabled="matchedIndices.length === 0"
@@ -1386,7 +1450,11 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
                   <circle cx="11.5" cy="8.5" r="2.5" />
                   <rect x="7.5" y="8" width="1" height="6" />
                 </svg>
-                {{ branchList.length > 1 ? truncate(r.name) : r.name }}
+                {{ branchList.length > 1 ? truncate(r.name) : r.name }}<span
+                  v-if="prForRef(r)"
+                  class="cg-ref-pr"
+                  :title="t('branches.prBadgeTitle', prForRef(r)!.number, prForRef(r)!.title)"
+                >#{{ prForRef(r)!.number }}</span>
               </span>
             </template>
             <!-- Submodule pointer badges (v2.15.1) — click navigates into the submodule's Git Tree -->
@@ -2068,6 +2136,10 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
   flex-shrink: 0;
   white-space: nowrap;
 }
+.cg-search-count--pr {
+  font-style: italic;
+  opacity: 0.85;
+}
 
 .cg-search-nav {
   display: flex;
@@ -2369,6 +2441,16 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
 }
 .cg-ref--branch-current .cg-ref-pin {
   color: #fff;
+}
+
+/* "#<number>" PR chip appended after the branch/remote name. */
+.cg-ref-pr {
+  margin-left: 5px;
+  padding-left: 5px;
+  font-size: 9px;
+  font-weight: 700;
+  opacity: 0.85;
+  border-left: 1px solid currentColor;
 }
 
 .cg-submodule-badge {

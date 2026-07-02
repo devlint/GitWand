@@ -163,6 +163,11 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   // the user only wanted to see the dashboard.
   const panelMounted = ref(false);
 
+  // Set once `ensurePrsLoaded()` has fetched the list for the current repo, so
+  // the light branch-badge path doesn't refetch on every popover/tree render.
+  // Reset on repo switch by the cwd watcher below.
+  let _prsEnsured = false;
+
   // ─── Lazy pagination (v2.8.5 — §E partial) ──────────────
   // First page = 10 PRs (cf. `gh_list_prs` Rust limit default). Each
   // `loadMorePrs()` bumps the offset by PAGE_SIZE and appends.
@@ -704,6 +709,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     selectedPr.value = null;
     prs.value = [];
     remote.value = null;
+    _prsEnsured = false;
     resetDetail();
     if (newCwd && panelMounted.value) init();
   });
@@ -1051,6 +1057,25 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     if (typeof document === "undefined" || !document.hidden) startPoll();
   }
 
+  /**
+   * Populate `prs` for the branch-badge / `#<number>`-search consumers (Git
+   * Tree, branch popover) WITHOUT opening the PR view. Unlike `init()` this
+   * doesn't flip `panelMounted` and starts no polling — it's a one-shot,
+   * SWR-cached list fetch. No-op once done for the current repo (until switch).
+   */
+  async function ensurePrsLoaded() {
+    if (!cwd.value || _prsEnsured || prs.value.length > 0) return;
+    _prsEnsured = true;
+    const cachedRemote = cache.getRemote(cwd.value);
+    if (cachedRemote) {
+      remote.value = cachedRemote.remote;
+      loadRemote();
+    } else {
+      await loadRemote();
+    }
+    await loadPrs();
+  }
+
   return {
     // State
     cwd,
@@ -1073,7 +1098,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     forge, forgeLabel,
     commentsForFile, commentCount, mergeReadiness, mergeBlocked, mergeBlockedReason, selectedDiff, displayedPrs,
     // Actions
-    init, loadRemote, loadPrs, loadMorePrs, loadCurrentUser, selectPr, loadDiff,
+    init, ensurePrsLoaded, loadRemote, loadPrs, loadMorePrs, loadCurrentUser, selectPr, loadDiff,
     createPr, checkoutPr, mergePr, convertDraftToReady,
     handleCreateComment, handleReplyComment, handleEditComment,
     handleDeleteComment, handleApplySuggestion, handleAddToReview, handleSubmitReview,

@@ -2148,6 +2148,33 @@ async function handleRequest(req, res) {
             encoding: "utf-8",
             shell: true,
           });
+          // A submodule pointer change is not reset by `git restore`; reset the
+          // submodule's working HEAD to the index SHA for any declared submodule.
+          let subPaths = new Set();
+          if (existsSync(join(resolvedCwd, ".gitmodules"))) {
+            try {
+              const r = spawnSync(GIT, ["config", "--file", ".gitmodules", "--get-regexp", "\\.path$"], {
+                cwd: resolvedCwd,
+                encoding: "utf-8",
+              });
+              if (r.status === 0) {
+                for (const line of r.stdout.split("\n")) {
+                  const sp = line.indexOf(" ");
+                  if (sp !== -1) subPaths.add(line.slice(sp + 1).trim());
+                }
+              }
+            } catch { /* no submodules */ }
+          }
+          const toReset = paths.filter((p) => subPaths.has(p));
+          if (toReset.length) {
+            const r = spawnSync(GIT, ["submodule", "update", "--force", "--", ...toReset], {
+              cwd: resolvedCwd,
+              encoding: "utf-8",
+            });
+            if (r.status !== 0) {
+              throw new Error(`git submodule update failed: ${r.stderr || r.error?.message || "unknown error"}`);
+            }
+          }
         }
         return jsonResponse(req, res, { ok: true });
       } catch (err) {
@@ -5141,6 +5168,70 @@ async function handleRequest(req, res) {
       }
     }
 
+    // GET /api/git-submodule-check-updates?cwd=<path>
+    // Fetches each initialized submodule and reports those whose tracked
+    // branch is ahead of the checked-out commit. Mirrors the Tauri
+    // `git_submodule_check_updates` command.
+    if (url.pathname === "/api/git-submodule-check-updates" && req.method === "GET") {
+      try {
+        const cwd = resolve(url.searchParams.get("cwd") || "");
+        const gitmodulesPath = join(cwd, ".gitmodules");
+        if (!existsSync(gitmodulesPath)) return jsonResponse(req, res, []);
+
+        const cfgRaw = execSync("git config --file .gitmodules --list", { cwd, encoding: "utf-8" });
+        const pathToBranch = {};
+        const nameBranch = {};
+        const namePath = {};
+        for (const line of cfgRaw.split("\n")) {
+          const eq = line.indexOf("=");
+          if (eq === -1) continue;
+          const key = line.slice(0, eq);
+          const val = line.slice(eq + 1);
+          const m = key.match(/^submodule\.(.+)\.(\w+)$/);
+          if (!m) continue;
+          const [, name, prop] = m;
+          if (prop === "branch") nameBranch[name] = val;
+          else if (prop === "path") namePath[name] = val;
+        }
+        for (const [name, p] of Object.entries(namePath)) {
+          if (nameBranch[name]) pathToBranch[p] = nameBranch[name];
+        }
+
+        let statusRaw = "";
+        try { statusRaw = execSync("git submodule status", { cwd, encoding: "utf-8" }); } catch { /* none inited */ }
+        const updates = [];
+        for (const line of statusRaw.split("\n")) {
+          if (line.length < 42 || line[0] === "-") continue;
+          const rest = line.slice(1);
+          const p = rest.slice(rest.indexOf(" ") + 1).split(" ")[0];
+          if (!p) continue;
+          const subDir = join(cwd, p);
+          if (!existsSync(join(subDir, ".git"))) continue;
+          const branch = pathToBranch[p] || null;
+          try {
+            let upstream;
+            if (branch) {
+              spawnSync(GIT, ["fetch", "--quiet", "origin", branch], { cwd: subDir, encoding: "utf-8" });
+              upstream = `origin/${branch}`;
+            } else {
+              spawnSync(GIT, ["fetch", "--quiet", "origin"], { cwd: subDir, encoding: "utf-8" });
+              const head = spawnSync(GIT, ["rev-parse", "--abbrev-ref", "origin/HEAD"], { cwd: subDir, encoding: "utf-8" });
+              if (head.status !== 0) continue;
+              upstream = head.stdout.trim();
+            }
+            if (!upstream) continue;
+            const cnt = spawnSync(GIT, ["rev-list", "--count", `HEAD..${upstream}`], { cwd: subDir, encoding: "utf-8" });
+            if (cnt.status !== 0) continue;
+            const behind = parseInt(cnt.stdout.trim(), 10);
+            if (behind > 0) updates.push({ path: p, behind, branch });
+          } catch { /* offline / unreachable — skip */ }
+        }
+        return jsonResponse(req, res, updates);
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
+      }
+    }
+
     // POST /api/git-submodule-init  { cwd }
     if (url.pathname === "/api/git-submodule-init" && req.method === "POST") {
       try {
@@ -5160,6 +5251,20 @@ async function handleRequest(req, res) {
         if (init) cmd += " --init";
         if (recursive) cmd += " --recursive";
         execSync(cmd, { cwd: resolve(cwd), encoding: "utf-8", shell: true });
+        return jsonResponse(req, res, {});
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
+      }
+    }
+
+    // POST /api/git-submodule-update-one  { cwd, path }
+    if (url.pathname === "/api/git-submodule-update-one" && req.method === "POST") {
+      try {
+        const { cwd, path: smPath } = await readBody(req);
+        spawnSync(GIT, ["submodule", "update", "--remote", "--rebase", "--init", "--", smPath], {
+          cwd: resolve(cwd),
+          encoding: "utf-8",
+        });
         return jsonResponse(req, res, {});
       } catch (err) {
         return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
@@ -5541,6 +5646,42 @@ async function handleRequest(req, res) {
       }
       entries.sort((a, b) => b.count - a.count);
       return jsonResponse(req, res, entries);
+    }
+
+    // GET /api/git-author-line-stats?cwd=...
+    // Mirror of Rust git_author_line_stats — per-author insertions/deletions.
+    if (url.pathname === "/api/git-author-line-stats" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd");
+      if (!cwd) return jsonResponse(req, res, { error: "Missing cwd" }, 400);
+      const r = spawnSync(
+        GIT,
+        ["log", "--all", "--no-merges", "--numstat", "--pretty=format:%x00%ae"],
+        { cwd: resolve(cwd), encoding: "utf-8", maxBuffer: 256 * 1024 * 1024 },
+      );
+      if (r.status !== 0) {
+        const detail = (r.stderr || r.stdout || "").trim() || "git log --numstat failed";
+        return jsonResponse(req, res, { error: detail }, 500);
+      }
+      const totals = new Map(); // email -> { added, deleted }
+      let current = "";
+      for (const line of r.stdout.split("\n")) {
+        if (line.startsWith("\0")) {
+          current = line.slice(1);
+          continue;
+        }
+        if (!line.trim()) continue;
+        const parts = line.split("\t");
+        const added = parseInt(parts[0], 10) || 0;
+        const deleted = parseInt(parts[1], 10) || 0;
+        if (added === 0 && deleted === 0) continue;
+        const e = totals.get(current) || { added: 0, deleted: 0 };
+        e.added += added;
+        e.deleted += deleted;
+        totals.set(current, e);
+      }
+      const stats = [...totals.entries()].map(([email, v]) => ({ email, ...v }));
+      stats.sort((a, b) => b.added + b.deleted - (a.added + a.deleted));
+      return jsonResponse(req, res, stats);
     }
 
     // GET /api/git-branch-top-authors?cwd=...&branches=a,b,c
