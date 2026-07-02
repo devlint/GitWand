@@ -1424,6 +1424,9 @@ async function toggleTerminal() {
     return;
   }
   if (!repoFolderPath.value) return;
+  // Opening the terminal is a dock switch too: dismiss the File Explorer
+  // (opt-out via its own filesHideOnNav setting), same as changing views.
+  if (showFiles.value && settings.value.filesHideOnNav) showFiles.value = false;
   if (termSessions.tabsFor(repoFolderPath.value).length === 0) {
     await openTerminalTab();
   } else {
@@ -1436,7 +1439,11 @@ const showFiles = ref(false);
 const fileExplorer = useFileExplorer();
 
 function toggleFiles() {
-  showFiles.value = !showFiles.value;
+  const opening = !showFiles.value;
+  showFiles.value = opening;
+  // Opening the File Explorer is a dock switch too: dismiss the terminal
+  // (opt-out via its own terminalHideOnNav setting), same as changing views.
+  if (opening && showTerminal.value && settings.value.terminalHideOnNav) showTerminal.value = false;
 }
 
 async function onRequestCloseFileTab(tabId: number) {
