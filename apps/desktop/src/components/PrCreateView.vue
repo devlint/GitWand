@@ -259,7 +259,7 @@ function onKeydown(e: KeyboardEvent) {
 const titleLen = computed(() => p.newPrTitle.value.length);
 
 function onBaseInput(e: Event) {
-  p.newPrBase.value = (e.target as HTMLInputElement).value;
+  p.newPrBase.value = (e.target as HTMLSelectElement).value;
 }
 
 // ─── Reviewers ──────────────────────────────────────────
@@ -454,18 +454,14 @@ function removeReviewer(name: string) {
           </svg>
           <div class="pcv-branch pcv-branch--to" :class="{ 'pcv-branch--invalid': baseIsSameAsHead }">
             <span class="pcv-branch-role">{{ t("pr.create.intoLabel") }}</span>
-            <input
+            <select
               id="pcv-base-input"
-              list="pcv-base-list"
               class="pcv-branch-select"
               :value="p.newPrBase.value"
-              @input="onBaseInput"
-              :placeholder="defaultBase || 'main'"
-              spellcheck="false"
-            />
-            <datalist id="pcv-base-list">
-              <option v-for="name in baseCandidates" :key="name" :value="name" />
-            </datalist>
+              @change="onBaseInput"
+            >
+              <option v-for="name in baseCandidates" :key="name" :value="name">{{ name }}</option>
+            </select>
           </div>
         </div>
         <p v-if="baseIsSameAsHead" class="pcv-hint pcv-hint--warn">{{ t("pr.create.sameBranchWarn") }}</p>
@@ -908,14 +904,21 @@ function removeReviewer(name: string) {
   padding: var(--space-2) 0;
 }
 .pcv-branch-select {
-  background: var(--color-bg-secondary);
+  background-color: var(--color-bg);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   color: var(--color-text);
   font-size: var(--font-size-md);
   font-family: var(--font-mono, monospace);
   padding: var(--space-3) var(--space-4);
+  padding-right: var(--space-8);
   outline: none;
+  cursor: pointer;
+  width: 100%;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5l3 3 3-3' stroke='%23888' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right var(--space-3) center;
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 .pcv-branch-select:focus {
