@@ -1022,15 +1022,31 @@ watch(() => props.commits.length, () => {
 });
 
 let _ro: ResizeObserver | null = null;
-onMounted(() => {
-  if (scrollContainer.value) {
-    clientHeight.value = scrollContainer.value.clientHeight;
-    _ro = new ResizeObserver(() => {
-      if (scrollContainer.value) clientHeight.value = scrollContainer.value.clientHeight;
-    });
-    _ro.observe(scrollContainer.value);
-  }
-});
+
+function measureViewport() {
+  if (scrollContainer.value) clientHeight.value = scrollContainer.value.clientHeight;
+}
+
+// The whole component (including `.cg-scroll`) is behind `v-if="displayCommits.length > 0"`,
+// so the scroll container only enters the DOM once commits are loaded. If the graph view
+// mounts before commits arrive, `scrollContainer` is null and a mount-only observer would
+// never attach — clientHeight would stay 0, fall back to 600, and the rows below that never
+// render nor recalculate on resize. Watch the ref instead so the observer (re)attaches every
+// time the element appears (initial load, repo switch, filter-mode toggle).
+watch(
+  scrollContainer,
+  (el) => {
+    _ro?.disconnect();
+    _ro = null;
+    if (el) {
+      measureViewport();
+      _ro = new ResizeObserver(() => measureViewport());
+      _ro.observe(el);
+    }
+  },
+  { immediate: true, flush: "post" },
+);
+
 onUnmounted(() => {
   _ro?.disconnect();
   _ro = null;
