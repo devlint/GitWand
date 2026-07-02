@@ -1480,6 +1480,140 @@ pub(crate) async fn git_submodule_list(cwd: String) -> Result<Vec<SubmoduleEntry
     Ok(entries)
 }
 
+/// Fetch each initialized submodule's remote and report those whose tracked
+/// branch tip is ahead of the currently checked-out commit ("New update").
+///
+/// This performs network I/O (one `git fetch` per submodule) and is intended
+/// to be called on demand (when the Submodules hub opens), never on a poll.
+/// Submodules that are offline / unreachable are skipped silently.
+#[tauri::command]
+pub(crate) async fn git_submodule_check_updates(cwd: String) -> Result<Vec<SubmoduleUpdate>, String> {
+    let gitmodules = std::path::Path::new(&cwd).join(".gitmodules");
+    if !gitmodules.exists() {
+        return Ok(Vec::new());
+    }
+
+    // Map submodule path → configured branch (if any) from .gitmodules.
+    let cfg_out = git_cmd()
+        .args(["config", "--file", ".gitmodules", "--list"])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("Failed to read .gitmodules: {}", e))?;
+
+    let mut name_branch: HashMap<String, String> = HashMap::new();
+    let mut name_path: HashMap<String, String> = HashMap::new();
+    if cfg_out.status.success() {
+        for line in String::from_utf8_lossy(&cfg_out.stdout).lines() {
+            if let Some(eq) = line.find('=') {
+                let key = &line[..eq];
+                let val = &line[eq + 1..];
+                if let Some(name) = key.strip_prefix("submodule.").and_then(|s| s.strip_suffix(".branch")) {
+                    name_branch.insert(name.to_string(), val.to_string());
+                } else if let Some(name) = key.strip_prefix("submodule.").and_then(|s| s.strip_suffix(".path")) {
+                    name_path.insert(name.to_string(), val.to_string());
+                }
+            }
+        }
+    }
+    let path_branch: HashMap<String, String> = name_path
+        .iter()
+        .filter_map(|(name, path)| name_branch.get(name).map(|b| (path.clone(), b.clone())))
+        .collect();
+
+    // Collect initialized submodule paths (lines not prefixed with '-').
+    let status_out = git_cmd()
+        .args(["submodule", "status"])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("Failed to get submodule status: {}", e))?;
+
+    let mut paths: Vec<String> = Vec::new();
+    for line in String::from_utf8_lossy(&status_out.stdout).lines() {
+        if line.len() < 42 || line.starts_with('-') {
+            continue; // too short or uninitialized
+        }
+        let rest = &line[1..];
+        let mut parts = rest.splitn(2, ' ');
+        let _sha = parts.next().unwrap_or("");
+        let path_and_rest = parts.next().unwrap_or("");
+        let path = path_and_rest
+            .split_once(' ')
+            .map(|(p, _)| p)
+            .unwrap_or(path_and_rest)
+            .to_string();
+        if !path.is_empty() {
+            paths.push(path);
+        }
+    }
+
+    let updates: Vec<SubmoduleUpdate> = paths
+        .into_par_iter()
+        .filter_map(|path| {
+            // Resolve + validate the submodule working directory.
+            let sub_dir = safe_repo_path(&cwd, &path).ok()?;
+            if !sub_dir.join(".git").exists() {
+                return None;
+            }
+            let configured = path_branch.get(&path).cloned();
+            submodule_behind(&sub_dir, configured.as_deref())
+                .filter(|&behind| behind > 0)
+                .map(|behind| SubmoduleUpdate { path, behind, branch: configured })
+        })
+        .collect();
+
+    Ok(updates)
+}
+
+/// Fetch a submodule's remote and return how many commits `HEAD` is behind the
+/// tracked branch tip. Returns `None` when the comparison can't be made
+/// (offline, no remote, detached with no tracking branch, etc.).
+fn submodule_behind(sub_dir: &std::path::Path, configured_branch: Option<&str>) -> Option<u32> {
+    // Resolve the upstream ref to compare against.
+    let upstream: String = match configured_branch {
+        Some(b) => {
+            // Fetch just the configured branch, then compare to origin/<branch>.
+            let _ = git_cmd()
+                .args(["fetch", "--quiet", "origin", b])
+                .current_dir(sub_dir)
+                .output()
+                .ok()?;
+            format!("origin/{}", b)
+        }
+        None => {
+            // No configured branch: fetch the default remote and use its HEAD.
+            let _ = git_cmd()
+                .args(["fetch", "--quiet", "origin"])
+                .current_dir(sub_dir)
+                .output()
+                .ok()?;
+            let head = git_cmd()
+                .args(["rev-parse", "--abbrev-ref", "origin/HEAD"])
+                .current_dir(sub_dir)
+                .output()
+                .ok()?;
+            if !head.status.success() {
+                return None;
+            }
+            String::from_utf8_lossy(&head.stdout).trim().to_string()
+        }
+    };
+
+    if upstream.is_empty() {
+        return None;
+    }
+
+    // Count commits reachable from the upstream tip but not from HEAD.
+    let count = git_cmd()
+        .args(["rev-list", "--count", &format!("HEAD..{}", upstream)])
+        .current_dir(sub_dir)
+        .output()
+        .ok()?;
+    if !count.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&count.stdout).trim().parse::<u32>().ok()
+}
+
 #[tauri::command]
 pub(crate) async fn git_submodule_init(cwd: String) -> Result<(), String> {
     let output = git_cmd()
@@ -1511,6 +1645,29 @@ pub(crate) async fn git_submodule_update(cwd: String, init: bool, recursive: boo
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to update submodules: {}", e))?;
+    if !output.status.success() {
+        return Err(format!(
+            "git submodule update failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    Ok(())
+}
+
+/// Pull the latest commits on a single submodule's tracked branch via rebase.
+/// Runs `git submodule update --remote --rebase --init -- <path>`, which fetches
+/// the branch tip and rebases the submodule's checked-out branch onto it (rather
+/// than a detached checkout), for just that submodule.
+#[tauri::command]
+pub(crate) async fn git_submodule_update_one(cwd: String, path: String) -> Result<(), String> {
+    // Validate the submodule path stays inside the repo before passing it on.
+    safe_repo_path(&cwd, &path)?;
+
+    let output = git_cmd()
+        .args(["submodule", "update", "--remote", "--rebase", "--init", "--", &path])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("Failed to update submodule: {}", e))?;
     if !output.status.success() {
         return Err(format!(
             "git submodule update failed: {}",

@@ -891,6 +891,16 @@ pub struct SubmoduleEntry {
 }
 
 #[derive(Serialize, Clone)]
+pub struct SubmoduleUpdate {
+    pub path: String,
+    /// Number of commits the checked-out submodule commit is behind its
+    /// tracked branch tip after fetching. Only entries with `behind > 0` are
+    /// returned.
+    pub behind: u32,
+    pub branch: Option<String>,
+}
+
+#[derive(Serialize, Clone)]
 pub struct SubmoduleBranch {
     pub name: String,
     pub is_current: bool,
