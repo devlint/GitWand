@@ -99,6 +99,8 @@ const props = defineProps<{
   errorCount?: number;
   /** Stash entry count — drives the badge on the Stash button. */
   stashCount?: number;
+  /** Submodules with new upstream commits — drives the badge on the Submodules button. */
+  submoduleUpdateCount?: number;
 }>();
 
 const emit = defineEmits<{
@@ -531,6 +533,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
               <rect x="6" y="6" width="4" height="4" rx="0.5" stroke="currentColor" stroke-width="1.3" fill="none" />
             </svg>
             <span>{{ t('submodule.title') }}</span>
+            <span v-if="(submoduleUpdateCount ?? 0) > 0" class="header-action-btn__count">{{ submoduleUpdateCount }}</span>
           </button>
 
           <!-- Merge-into picker (triggered by BranchMenu → onBranchMenuMerge) -->
