@@ -589,7 +589,6 @@ onBeforeUnmount(() => {
           </button>
         </div>
       </div>
-      <button class="tp__hide" :title="t('terminal.hide')" @click="emit('close')">_</button>
       <button
         class="tp__full"
         :title="fullscreen ? t('terminal.exitFullscreen') : t('terminal.fullscreen')"
@@ -605,6 +604,7 @@ onBeforeUnmount(() => {
           <line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/>
         </svg>
       </button>
+      <button class="tp__hide" :title="t('terminal.hide')" @click="emit('close')">✕</button>
     </div>
 
     <!-- Width / corner resize handles — floating mode only (fullscreen and
@@ -881,10 +881,11 @@ onBeforeUnmount(() => {
 .tp__new {
   border: none;
   cursor: pointer;
-  padding: 7.5px 16px;
+  padding: 3.5px 20px;
   border-radius: var(--radius-sm) var(--radius-sm) 0 0;
   color: inherit;
-  font-size: var(--font-size-lg);
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-bold);
   background: var(--bg-base, var(--color-bg));
   opacity: 0.7;
 }
@@ -893,6 +894,7 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  margin-left: auto;
   border: none;
   background: var(--bg-base, var(--color-bg));
   opacity: 0.7;
@@ -905,15 +907,17 @@ onBeforeUnmount(() => {
 }
 
 .tp__hide {
-  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: none;
   background: var(--bg-base, var(--color-bg));
   opacity: 0.7;
   cursor: pointer;
-  padding: 0px 13px 12px;
+  padding: 4px 9px;
   border-radius: var(--radius-sm);
   color: inherit;
-  font-size: var(--font-size-md);
+  font-size: var(--font-size-xl);
   position: relative;
   top: -2px;
 }

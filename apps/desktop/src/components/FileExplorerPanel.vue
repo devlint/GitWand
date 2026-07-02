@@ -558,7 +558,7 @@ function onKeyDown(e: KeyboardEvent) {
 }
 
 .fe__close {
-  font-size: var(--font-size-2xl);
+  font-size: var(--font-size-xl);
   color: var(--color-text-muted);
 }
 
