@@ -315,11 +315,11 @@ function onKeyDown(e: KeyboardEvent) {
         :aria-label="fullscreen ? t('files.exitFullscreen') : t('files.fullscreen')"
         @click="toggleFullscreen"
       >
-        <svg v-if="!fullscreen" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <svg v-if="!fullscreen" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/>
           <line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>
         </svg>
-        <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/>
           <line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/>
         </svg>
@@ -472,9 +472,13 @@ function onKeyDown(e: KeyboardEvent) {
 }
 
 .fe__drag {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
   height: 5px;
   cursor: ns-resize;
-  flex-shrink: 0;
+  z-index: 3;
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
 }
 
@@ -541,18 +545,20 @@ function onKeyDown(e: KeyboardEvent) {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-2) var(--space-5) var(--space-5);
+  padding: var(--space-3) var(--space-5);
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
   cursor: grab;
 }
 
 .fe__title {
-  font-weight: var(--font-weight-medium);
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
   flex: 1;
 }
 
 .fe__close {
+  font-size: var(--font-size-2xl);
   color: var(--color-text-muted);
 }
 
@@ -560,6 +566,7 @@ function onKeyDown(e: KeyboardEvent) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  margin-right: var(--space-2);
   color: var(--color-text-muted);
 }
 
