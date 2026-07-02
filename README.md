@@ -26,13 +26,13 @@
 
 ---
 
-GitWand is a lightweight, native Git client built with Tauri 2 and Vue 3. It covers the full daily workflow — changes, history, branches, push/pull — and goes further with **automatic resolution of trivial merge conflicts**, **integrated PR code review** with inline comments, and a **Git Tree** as the primary history view. Since v1.3, AI assists every step of the workflow — branch naming, PR writing, hunk-level review, semantic squash, and natural-language commit search. v2.7+ adds multi-repo Workspaces and Worktrees; v2.8 adds Agent Sessions (MCP); v2.9 adds a cross-repo Launchpad; v2.10 brings multi-forge pull requests across **GitHub, GitLab, Bitbucket and Azure DevOps**; v2.13 adds inline AI code review; v2.18 overlays CI check annotations directly on the diff; and v2.19 adds **OAuth device-flow sign-in for GitHub and Azure DevOps** (no `gh` CLI required) plus **cross-fork pull requests**.
+GitWand is a lightweight, native Git client built with Tauri 2 and Vue 3. It covers the full daily workflow — changes, history, branches, push/pull — and goes further with **automatic resolution of trivial merge conflicts**, **integrated PR code review** with inline comments, and a **Git Tree** as the primary history view. Since v1.3, AI assists every step of the workflow — branch naming, PR writing, hunk-level review, semantic squash, and natural-language commit search. v2.7+ adds multi-repo Workspaces and Worktrees; v2.8 adds Agent Sessions (MCP); v2.9 adds a cross-repo Launchpad; v2.10 brings multi-forge pull requests across **GitHub, GitLab, Bitbucket and Azure DevOps**; v2.13 adds inline AI code review; v2.18 overlays CI check annotations directly on the diff; v2.19 adds **OAuth device-flow sign-in for GitHub and Azure DevOps** (no `gh` CLI required) plus **cross-fork pull requests**. The 3.x line makes GitWand a daily driver for AI-assisted work: v3.0 turns the cross-repo dashboard into **Today**, a triaged action inbox, and publishes the **VS Code extension on the Marketplace**; v3.2 adds an **integrated terminal with AI agent tabs** — including one-click AI tasks in isolated worktrees — and a dockable **File Explorer / Editor panel**.
 
 ## Desktop app
 
 ### Git Tree
 
-The **Git Tree** is the primary history view — a full-resolution DAG that renders the branch topology as an SVG with trunk-pinning, lane cooldowns, WIP node, and ref badges. Click any commit to see its diff; right-click to checkout, reset, branch, tag, or cherry-pick. Branches, stashes, and tags are all managed from here without a separate panel.
+The **Git Tree** is the primary history view — a full-resolution DAG that renders the branch topology as an SVG with trunk-pinning, lane cooldowns, WIP node, and ref badges. Click any commit to see its diff; right-click to checkout, reset, branch, tag, or cherry-pick. Branches, stashes, and tags are all managed from here without a separate panel. A **filter mode** (v3.2) recalculates the DAG to show only matching commits, with quick branch/author toggles, date-bucket separators, branch-name autocomplete, and `#<PR number>` lookup that resolves straight to the PR's branch.
 
 ### Repository view
 
@@ -71,11 +71,11 @@ Full file history with `git log --follow`, blame view grouped by commit, time-tr
 
 ### Repo switcher & Workspaces
 
-The current repo name in the header opens a dropdown showing recently opened repositories. Pin favourites, switch instantly — no file picker needed. **Workspaces** (v2.7) group multiple repos into a single dashboard with cross-repo status, coordinated push/pull, and quick-create worktrees (`⌘⇧N`).
+The current repo name in the header opens a dropdown showing recently opened repositories. Pin favourites, switch instantly — no file picker needed. **Workspaces** (v2.7) group multiple repos into a single dashboard with cross-repo status, coordinated push/pull, and quick-create worktrees (`⌘⇧N`). Each project tab carries a **worktree submenu** (v3.2) listing `main` plus every worktree — select one to switch that project's checkout in place, no extra tab.
 
-### Launchpad
+### Today
 
-**Launchpad** (`⌘L`, v2.9) is a cross-repo dashboard with four tabs — WIP, PRs, Issues, Team — for a bird's-eye view of everything in flight. Pin or snooze any item; the Team tab loads lazily for performance on large workspaces.
+**Today** (`⌘L`; introduced as Launchpad in v2.9, reworked in v3.0) is a cross-repo **triaged action inbox**: everything in flight — WIP, PRs, Issues, Team — sorted into urgency tiers, each row carrying a state-aware primary action (Merge · Review · Resolve · Reply · See failure). Pin or snooze any item; the Team tab loads lazily for performance on large workspaces.
 
 ### Pull Requests & Code Review
 
@@ -91,6 +91,14 @@ Browse, create, checkout, and merge pull/merge requests across **GitHub, GitLab,
 ### Agent Sessions
 
 The **Agents panel** (v2.8) shows active MCP sessions and lets you launch Claude Code directly from GitWand — the agent's changes appear live in the diff viewer. The MCP catalog (`Settings > MCP`) lets you install any MCP server in one click.
+
+### Integrated terminal & AI tasks
+
+The **terminal panel** (v3.2) renders through WebGL with inline search (`Ctrl+F`), clickable links, and typed tabs — `shell`, `claude`, `codex` — each with its own icon and an unread-output dot. "Launch Claude Code" / "Launch Codex" open a real PTY tab, and **"New AI task"** creates a scratch git worktree and opens a Claude Code tab in it in one click — the agent works in isolation, and when it's done you either **merge the work back or delete the worktree** from the project tab's submenu. Hardened with a shell-executable whitelist, `safe_repo_path()` on all filesystem operations, and PTY orphan prevention.
+
+### File Explorer / Editor
+
+A dockable **Files panel** (v3.2, drag/resize/fullscreen) lists the full repo tree — gitignore-aware, via `git ls-files` — and opens files in a lazy-loaded CodeMirror 6 editor with syntax highlighting, per-tab undo history, and a lock/undo/save toolbar. Reachable from the Files tile in the AppDock, with per-repo layout settings.
 
 ### Settings
 

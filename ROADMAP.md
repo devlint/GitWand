@@ -107,6 +107,8 @@ _Veille du 2026-06-24 sur 6 clients/outils (Snipara, GitDriv, GitUp, GitX-dev, A
 - **Code Graph / blast radius** — calculer l'impact d'un changement (callers, imports, tests probables) *avant* l'edit ; appliqué à un merge/rebase : « voici ce que cette opération risque de casser ». Prolonge le Conflict Predictor + `@gitwand/core`.
 - **Verification Plans attachés aux handoffs** — chaque PR/changement porte ses checks à passer ; recoupe les CI annotations (v2.18.0).
 
+**À garder à l'œil : Greptile ([greptile.com](https://www.greptile.com/))** — AI code review avec index complet du codebase (contexte cross-repo au moment de la review). Pas un client Git, mais recoupe nos angles : review PR in-app (Launchpad/PrDetailView) et résolution contextuelle — un moteur qui « connaît » le repo entier pourrait enrichir le LLM fallback et le Conflict Predictor.
+
 ---
 
 ### Later (unscheduled)
