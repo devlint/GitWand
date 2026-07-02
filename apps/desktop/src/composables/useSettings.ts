@@ -204,6 +204,10 @@ export interface AppSettings {
   dockHideDashboard: boolean;
   /** Hide the PRs entry from the bottom dock. */
   dockHidePrs: boolean;
+  /** Hide the Terminal tile from the bottom dock. */
+  dockHideTerminal: boolean;
+  /** Hide the Files (File Explorer) tile from the bottom dock. */
+  dockHideFiles: boolean;
   /** Show only icons in the bottom dock (hide text labels). */
   dockIconsOnly: boolean;
   /** Lay the dock out vertically (column) with vertically-oriented labels. */
@@ -388,6 +392,8 @@ export const defaultAppSettings: AppSettings = {
   dockHideLaunchpad: false,
   dockHideDashboard: false,
   dockHidePrs: false,
+  dockHideTerminal: false,
+  dockHideFiles: false,
   dockIconsOnly: false,
   dockVertical: false,
   dockIdleOpacity: 0.45,

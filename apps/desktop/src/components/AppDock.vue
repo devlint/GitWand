@@ -283,6 +283,13 @@ function toggleTerminalHideOnNav() {
   closeMenu();
 }
 
+/** Terminal tile hidden from the dock — re-add via dock settings. */
+const terminalHidden = computed(() => settings.value.dockHideTerminal);
+function removeTerminalFromDock() {
+  patch({ dockHideTerminal: true });
+  closeMenu();
+}
+
 // ── Files tile actions ──
 const filesHideOnNav = computed(() => settings.value.filesHideOnNav);
 const filesIsFullscreen = computed(() => settings.value.filesMode === "fullscreen");
@@ -309,6 +316,13 @@ function toggleFilesFullscreen() {
 
 function toggleFilesHideOnNav() {
   patch({ filesHideOnNav: !settings.value.filesHideOnNav });
+  closeMenu();
+}
+
+/** Files tile hidden from the dock — re-add via dock settings. */
+const filesHidden = computed(() => settings.value.dockHideFiles);
+function removeFilesFromDock() {
+  patch({ dockHideFiles: true });
   closeMenu();
 }
 
@@ -393,6 +407,7 @@ onBeforeUnmount(() => {
     <!-- Terminal tile — a separate rounded square that rides along with the
          dock (same position/lock), opening the floating terminal panel. -->
     <button
+      v-if="!terminalHidden"
       class="dock-terminal"
       :class="{ 'dock-terminal--active': terminalActive }"
       :aria-pressed="terminalActive"
@@ -410,6 +425,7 @@ onBeforeUnmount(() => {
     <!-- Files tile — same mechanics as the Terminal tile, opens the File
          Explorer panel. -->
     <button
+      v-if="!filesHidden"
       class="dock-files"
       :class="{ 'dock-files--active': filesActive }"
       :aria-pressed="filesActive"
@@ -432,6 +448,10 @@ onBeforeUnmount(() => {
       <!-- Terminal tile section -->
       <template v-if="menu.target === 'terminal'">
         <div class="dock-menu-label">{{ t('terminal.headerLabel') }}</div>
+        <button class="dock-menu-item" role="menuitem" @click="removeTerminalFromDock">
+          {{ t('settings.dock.menu.remove') }}
+        </button>
+        <div class="dock-menu-sep" role="separator"></div>
         <button class="dock-menu-item" role="menuitemcheckbox"
           :aria-checked="terminalHideOnNav" @click="toggleTerminalHideOnNav">
           {{ t('terminal.menuHideOnNav') }}
@@ -459,6 +479,10 @@ onBeforeUnmount(() => {
       <!-- Files tile section -->
       <template v-else-if="menu.target === 'files'">
         <div class="dock-menu-label">{{ t('files.headerLabel') }}</div>
+        <button class="dock-menu-item" role="menuitem" @click="removeFilesFromDock">
+          {{ t('settings.dock.menu.remove') }}
+        </button>
+        <div class="dock-menu-sep" role="separator"></div>
         <button class="dock-menu-item" role="menuitemcheckbox"
           :aria-checked="filesHideOnNav" @click="toggleFilesHideOnNav">
           {{ t('files.menuHideOnNav') }}

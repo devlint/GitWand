@@ -1272,6 +1272,8 @@ const fr: Locale = {
       showToday: "Afficher Aujourd'hui",
       showDashboard: "Afficher le tableau de bord",
       showPrs: "Afficher les PRs",
+      showTerminal: "Afficher le terminal",
+      showFiles: "Afficher les fichiers",
       gitTreeLocked: "Arbre Git & Modifications",
       lockedHint: "Toujours affichés — non supprimables.",
       iconsOnly: {

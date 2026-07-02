@@ -1288,6 +1288,8 @@ const en = {
       showToday: "Show Today",
       showDashboard: "Show Dashboard",
       showPrs: "Show PRs",
+      showTerminal: "Show Terminal",
+      showFiles: "Show Files",
       gitTreeLocked: "Git Tree & Changes",
       lockedHint: "Always shown — cannot be removed.",
       iconsOnly: {

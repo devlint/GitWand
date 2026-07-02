@@ -1008,6 +1008,8 @@ const zhCN: Locale = {
       showToday: "显示今天",
       showDashboard: "显示仪表板",
       showPrs: "显示 PRs",
+      showTerminal: "显示终端",
+      showFiles: "显示文件",
       gitTreeLocked: "Git 树和更改",
       lockedHint: "始终显示 — 无法移除。",
       iconsOnly: {

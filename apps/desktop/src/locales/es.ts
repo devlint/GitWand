@@ -1263,6 +1263,8 @@ const es: Locale = {
       showToday: "Mostrar Hoy",
       showDashboard: "Mostrar Panel",
       showPrs: "Mostrar PRs",
+      showTerminal: "Mostrar terminal",
+      showFiles: "Mostrar archivos",
       gitTreeLocked: "Árbol Git y Cambios",
       lockedHint: "Siempre visibles — no se pueden quitar.",
       iconsOnly: {

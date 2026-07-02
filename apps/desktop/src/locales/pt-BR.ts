@@ -1263,6 +1263,8 @@ const ptBR: Locale = {
       showToday: "Mostrar Hoje",
       showDashboard: "Mostrar Painel",
       showPrs: "Mostrar PRs",
+      showTerminal: "Mostrar terminal",
+      showFiles: "Mostrar arquivos",
       gitTreeLocked: "\u00c1rvore Git e Altera\u00e7\u00f5es",
       lockedHint: "Sempre vis\u00edveis \u2014 n\u00e3o podem ser removidos.",
       iconsOnly: {
