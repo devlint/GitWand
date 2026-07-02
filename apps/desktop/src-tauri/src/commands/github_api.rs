@@ -241,10 +241,12 @@ fn api_json_cached(url: &str, token: &str) -> Result<serde_json::Value, String> 
 
     if status == 304 {
         // Unchanged — serve the cached body. We only send If-None-Match when a
-        // cache entry exists, so `cached` is Some here.
-        if let Some((_, cached_body)) = cached {
-            return parse_json_body(&cached_body);
-        }
+        // cache entry exists, so `cached` is Some here; if it's somehow not,
+        // fail loudly rather than silently parsing an empty body as data.
+        return match cached {
+            Some((_, cached_body)) => parse_json_body(&cached_body),
+            None => Err(format!("304 Not Modified received for {url} with no cached body")),
+        };
     }
     if status >= 400 {
         return Err(map_api_error(status, &body));

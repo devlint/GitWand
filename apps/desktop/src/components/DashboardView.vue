@@ -1087,8 +1087,16 @@ watch(
                       </div>
                     </div>
                     <div class="contrib-lines">
-                      <span class="contrib-line-stat contrib-stat-val--added">+{{ contribLines(c).added.toLocaleString() }}</span>
-                      <span class="contrib-line-stat contrib-stat-val--deleted">−{{ contribLines(c).deleted.toLocaleString() }}</span>
+                      <span
+                        class="contrib-line-stat contrib-stat-val--added"
+                        :aria-label="t('dashboard.contribLinesAdded')"
+                        >+{{ contribLines(c).added.toLocaleString() }}</span
+                      >
+                      <span
+                        class="contrib-line-stat contrib-stat-val--deleted"
+                        :aria-label="t('dashboard.contribLinesDeleted')"
+                        >−{{ contribLines(c).deleted.toLocaleString() }}</span
+                      >
                       <span class="contrib-line-stat">({{ contribLines(c).changed.toLocaleString() }})</span>
                     </div>
                   </div>
