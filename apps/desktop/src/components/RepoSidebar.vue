@@ -6,7 +6,7 @@ import { gitRemoteInfo, getGitUser, type GitLogEntry, type GitBranch, type Remot
 import PrListSidebar from "./PrListSidebar.vue";
 import ScopePicker from "./ScopePicker.vue";
 import { useI18n } from "../composables/useI18n";
-import { avatarStyle, avatarInitials } from "../composables/useAvatar";
+import Avatar from "./Avatar.vue";
 import { useCommitMessage } from "../composables/useCommitMessage";
 import { useAIProvider } from "../composables/useAIProvider";
 import { supportedLocales, localeLabels } from "../locales";
@@ -1829,9 +1829,7 @@ function formatActivityDate(dateStr: string): string {
           @click="emit('changeView', 'history')"
           :title="c.message"
         >
-          <span class="activity-dot" :style="avatarStyle(c.email || c.author)">
-            {{ avatarInitials(c.author) }}
-          </span>
+          <Avatar class="activity-dot" :name="c.author" :email="c.email" />
           <div class="activity-body">
             <div class="activity-msg">{{ c.message }}</div>
             <div class="activity-time">{{ formatActivityDate(c.date) }}</div>

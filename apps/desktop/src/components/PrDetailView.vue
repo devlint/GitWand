@@ -14,7 +14,7 @@
 import { computed, inject, nextTick, ref, onMounted, onUnmounted, watch } from "vue";
 import { PR_PANEL_KEY, isMergeConflict, type PrPanelState } from "../composables/usePrPanel";
 import { renderMarkdown, onMarkdownLinkClick } from "../composables/useSafeHtml";
-import { useAvatar } from "../composables/useAvatar";
+import Avatar from "./Avatar.vue";
 import { openExternalUrl } from "../utils/backend";
 import { useI18n } from "../composables/useI18n";
 import PrInlineDiff from "./PrInlineDiff.vue";
@@ -33,9 +33,6 @@ const p = inject<PrPanelState>(PR_PANEL_KEY)!;
 
 // window.open is a no-op in the Tauri webview — hand the URL to the OS opener.
 function openInBrowser(url: string) { void openExternalUrl(url); }
-
-// Avatar disks share the app-wide outline style — see composables/useAvatar.
-const { avatarStyle, avatarInitials: authorInitials } = useAvatar();
 
 const isOpenPr = computed(() => {
   const s = p.selectedPr.value?.state;
@@ -399,7 +396,7 @@ function commentTimeAgo(dateStr: string): string {
 
         <div class="pdv-hero-meta">
           <span class="pdv-author">
-            <span class="pdv-avatar" :style="avatarStyle(p.prDetail.value.author)" aria-hidden="true">{{ authorInitials(p.prDetail.value.author) }}</span>
+            <Avatar class="pdv-avatar" :name="p.prDetail.value.author" />
             <span class="pdv-author-name">{{ p.prDetail.value.author }}</span>
           </span>
           <span class="pdv-meta-sep" aria-hidden="true">·</span>
@@ -622,9 +619,7 @@ function commentTimeAgo(dateStr: string): string {
             <h2 class="pdv-section-label">{{ t('pr.detail.reviewers') }}</h2>
             <div class="pdv-chips">
               <span v-for="r in p.prDetail.value.reviewers" :key="r" class="pdv-chip pdv-chip--reviewer">
-                <span class="pdv-chip-avatar" :style="avatarStyle(r)" aria-hidden="true">
-                  {{ authorInitials(r) }}
-                </span>
+                <Avatar class="pdv-chip-avatar" :name="r" />
                 {{ r }}
               </span>
             </div>
@@ -703,9 +698,7 @@ function commentTimeAgo(dateStr: string): string {
                   :class="item.verdictCls"
                 >
                   <div class="pdv-comment-head">
-                    <span class="pdv-comment-avatar" :style="avatarStyle(item.author)" aria-hidden="true">
-                      {{ authorInitials(item.author) }}
-                    </span>
+                    <Avatar class="pdv-comment-avatar" :name="item.author" />
                     <span class="pdv-comment-author">{{ item.author }}</span>
                     <span class="pdv-review-verdict">{{ item.verdictLabel }}</span>
                     <button
@@ -739,9 +732,7 @@ function commentTimeAgo(dateStr: string): string {
                 <!-- Inline / issue comment -->
                 <li v-else :key="`comment-${item.path}#${item.id}`" class="pdv-comment">
                   <div class="pdv-comment-head">
-                    <span class="pdv-comment-avatar" :style="avatarStyle(item.author)" aria-hidden="true">
-                      {{ authorInitials(item.author) }}
-                    </span>
+                    <Avatar class="pdv-comment-avatar" :name="item.author" />
                     <span class="pdv-comment-author">{{ item.author }}</span>
                     <button
                       v-if="commentHref(item)"

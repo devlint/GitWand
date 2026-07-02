@@ -10,12 +10,12 @@
  * - Confirmation modal (not native confirm()) when switching templates
  *   on a non-empty body
  */
-import { computed, inject, nextTick, onMounted, reactive, ref, useTemplateRef, watch } from "vue";
+import { computed, inject, nextTick, onMounted, ref, useTemplateRef, watch } from "vue";
 import { PR_PANEL_KEY, type PrPanelState } from "../composables/usePrPanel";
 import { renderMarkdown, safeHtml } from "../composables/useSafeHtml";
 import { getGitShortlog, type GitBranch, type ReviewerCandidate } from "../utils/backend";
 import { forgeForRepo } from "../composables/forge/useForge";
-import { useAvatar } from "../composables/useAvatar";
+import Avatar from "./Avatar.vue";
 import { useI18n } from "../composables/useI18n";
 import { useAIProvider } from "../composables/useAIProvider";
 import { usePrDescription } from "../composables/usePrDescription";
@@ -310,11 +310,8 @@ function onBaseInput(e: Event) {
 // workspace members, Azure team members), then filtered locally as the user
 // types. Enter/Tab on the active suggestion adds it. Candidates are ranked by
 // repo commit activity (most active first) so likely reviewers surface at top.
-const { avatarStyle, avatarInitials } = useAvatar();
 const reviewerInput = ref("");
 const reviewerCandidates = ref<ReviewerCandidate[]>([]);
-// Logins whose avatar photo failed to load → fall back to the initials disk.
-const brokenAvatars = reactive(new Set<string>());
 const reviewerCandidatesLoading = ref(false);
 const reviewerSuggestOpen = ref(false);
 const reviewerActiveIdx = ref(0);
@@ -711,22 +708,12 @@ function removeReviewer(name: string) {
               @click="pickCandidate(c)"
               @mouseenter="reviewerActiveIdx = idx"
             >
-              <img
-                v-if="c.avatarUrl && !brokenAvatars.has(c.login)"
-                :src="c.avatarUrl"
-                :alt="c.login"
-                class="pcv-suggest-avatar pcv-suggest-avatar--img"
-                loading="lazy"
-                decoding="async"
-                referrerpolicy="no-referrer"
-                @error="brokenAvatars.add(c.login)"
-              />
-              <span
-                v-else
+              <Avatar
                 class="pcv-suggest-avatar"
-                :style="avatarStyle(c.name || c.login)"
-                aria-hidden="true"
-              >{{ avatarInitials(c.name || c.login) }}</span>
+                :name="c.name || c.login"
+                :email="c.login"
+                :url="c.avatarUrl"
+              />
               <span class="pcv-suggest-text">
                 <span class="pcv-suggest-login">{{ c.login }}</span>
                 <span v-if="c.name" class="pcv-suggest-name">{{ c.name }}</span>
@@ -1471,12 +1458,6 @@ function removeReviewer(name: string) {
   font-size: 9px;
   font-weight: var(--font-weight-bold);
   flex-shrink: 0;
-}
-/* Photo variant (GitHub/Bitbucket): solid image, no initials outline. */
-.pcv-suggest-avatar--img {
-  border: none;
-  background: var(--color-bg-tertiary);
-  object-fit: cover;
 }
 .pcv-suggest-text {
   display: flex;

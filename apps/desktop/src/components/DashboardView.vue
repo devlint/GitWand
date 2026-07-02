@@ -14,7 +14,7 @@ import {
 import type { ViewMode } from "../composables/useGitRepo";
 import { useI18n } from "../composables/useI18n";
 import { useSettings } from "../composables/useSettings";
-import { avatarStyle, avatarInitials as initials } from "../composables/useAvatar";
+import Avatar from "./Avatar.vue";
 import { useAIProvider } from "../composables/useAIProvider";
 import { renderMarkdown, safeHtml } from "../composables/useSafeHtml";
 import AiSparkle from "./AiSparkle.vue";
@@ -1008,7 +1008,7 @@ watch(
           :key="a.email || a.name"
           class="atip-author"
         >
-          <span class="avatar avatar--sm" :style="avatarStyle(a.email || a.name)">{{ initials(a.firstName) }}</span>
+          <Avatar class="avatar avatar--sm" :name="a.firstName" :email="a.email" />
           <div class="atip-author-body">
             <div class="atip-name">
               {{ a.name }}<span class="atip-count">{{ a.count }}</span>
@@ -1074,7 +1074,7 @@ watch(
                   @click="openContribModal(c)"
                   @keydown.enter="openContribModal(c)"
                 >
-                  <span class="avatar" :style="avatarStyle(c.email || c.name)">{{ initials(c.names?.[0] || c.name) }}</span>
+                  <Avatar class="avatar" :name="c.names?.[0] || c.name" :email="c.email" />
                   <div class="contrib-body">
                     <div class="contrib-name">{{ c.name }}</div>
                     <div
@@ -1266,7 +1266,7 @@ watch(
               class="commit"
               @click="emit('selectCommit', c.hashFull)"
             >
-              <span class="avatar avatar--sm" :style="avatarStyle(c.email || c.author)">{{ initials(c.author) }}</span>
+              <Avatar class="avatar avatar--sm" :name="c.author" :email="c.email" />
               <div class="commit-body">
                 <div class="commit-title">
                   <span v-if="commitType(c.message)" class="tag" :class="`tag--${commitType(c.message)}`">
@@ -1359,7 +1359,7 @@ watch(
           class="commit"
           @click="selectFromModal(c.hashFull)"
         >
-          <span class="avatar avatar--sm" :style="avatarStyle(c.email || c.author)">{{ initials(c.author) }}</span>
+          <Avatar class="avatar avatar--sm" :name="c.author" :email="c.email" />
           <div class="commit-body">
             <div class="commit-title">
               <span v-if="commitType(c.message)" class="tag" :class="`tag--${commitType(c.message)}`">
@@ -1383,7 +1383,7 @@ watch(
       @close="closeContribModal"
     >
       <template #title-icon>
-        <span class="avatar" :style="avatarStyle(contribModal.email || contribModal.name)">{{ initials(contribModal.firstName) }}</span>
+        <Avatar class="avatar" :name="contribModal.firstName" :email="contribModal.email" />
       </template>
 
       <template #toolbar>

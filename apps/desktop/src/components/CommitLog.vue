@@ -3,7 +3,7 @@ import { computed, ref, watch, inject, nextTick, onMounted, onUnmounted, type Re
 import type { GitLogEntry, GitBranch } from "../utils/backend";
 import { useVirtualizer } from "@tanstack/vue-virtual";
 import { useI18n } from "../composables/useI18n";
-import { avatarStyle, avatarInitials as initials } from "../composables/useAvatar";
+import Avatar from "./Avatar.vue";
 import { useAIProvider } from "../composables/useAIProvider";
 import { useCommitSearch, filterCommitsLocal, type CommitMatch } from "../composables/useCommitSearch";
 import { LOG_FOCUS_SEARCH_KEY } from "../composables/branchPickerBridge";
@@ -708,9 +708,7 @@ function abbrevAuthor(author: string): string {
               tabindex="0"
               @keydown.enter="emit('selectCommit', c(vr.index).hashFull)"
             >
-              <div class="commit-avatar" :style="avatarStyle(c(vr.index).email || c(vr.index).author)">
-                {{ initials(c(vr.index).author) }}
-              </div>
+              <Avatar class="commit-avatar" :name="c(vr.index).author" :email="c(vr.index).email" />
               <div class="commit-info">
                 <div class="commit-message">
                   {{ c(vr.index).message }}

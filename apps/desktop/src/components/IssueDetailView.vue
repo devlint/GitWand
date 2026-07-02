@@ -10,7 +10,7 @@
 import { inject } from "vue";
 import { ISSUE_PANEL_KEY, type IssuePanelState } from "../composables/useIssuePanel";
 import { useI18n } from "../composables/useI18n";
-import { avatarStyle, avatarInitials } from "../composables/useAvatar";
+import Avatar from "./Avatar.vue";
 import { openExternalUrl } from "../utils/backend-pr";
 
 const { t } = useI18n();
@@ -77,9 +77,7 @@ function fmtDate(s: string): string {
       <!-- Meta -->
       <div class="issue-view__meta">
         <span class="issue-view__author">
-          <span class="issue-view__avatar" :style="avatarStyle(panel.detail.value.author)" aria-hidden="true">
-            {{ avatarInitials(panel.detail.value.author) }}
-          </span>
+          <Avatar class="issue-view__avatar" :name="panel.detail.value.author" />
           {{ panel.detail.value.author }}
         </span>
         <span class="issue-view__date">{{ fmtDate(panel.detail.value.createdAt) }}</span>
@@ -116,9 +114,7 @@ function fmtDate(s: string): string {
         <ul v-else class="issue-view__comment-list">
           <li v-for="c in panel.comments.value" :key="c.id" class="issue-view__comment">
             <div class="issue-view__comment-head">
-              <span class="issue-view__avatar issue-view__avatar--sm" :style="avatarStyle(c.author)" aria-hidden="true">
-                {{ avatarInitials(c.author) }}
-              </span>
+              <Avatar class="issue-view__avatar issue-view__avatar--sm" :name="c.author" />
               <span class="issue-view__comment-author">{{ c.author }}</span>
               <span class="issue-view__date">{{ fmtDate(c.created_at) }}</span>
             </div>

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch, toRef, inject } from "vue";
 import { saveSettings as persistAppSettings } from "../composables/useSettings";
-import { avatarStyle, avatarInitials } from "../composables/useAvatar";
+import { avatarStyle } from "../composables/useAvatar";
+import Avatar from "./Avatar.vue";
 import { useLaunchpadWip } from "../composables/useLaunchpadWip";
 import { useLaunchpadPrs } from "../composables/useLaunchpadPrs";
 import { useLaunchpadInbox, type InboxAction, type InboxCase } from "../composables/useLaunchpadInbox";
@@ -540,9 +541,7 @@ watch(scopedRepos, () => {
                     <path d="M4 5.6v4.8M12 9.6V11a1.5 1.5 0 0 1-1.5 1.5H8M12 6.4 12 5" />
                   </svg>
                 </span>
-                <span class="launchpad-view__inbox-avatar" :style="avatarStyle(item.pr.author)">
-                  {{ avatarInitials(item.pr.author) }}
-                </span>
+                <Avatar class="launchpad-view__inbox-avatar" :name="item.pr.author" />
                 <div class="launchpad-view__inbox-body">
                   <div class="launchpad-view__inbox-line1">
                     <button
@@ -611,9 +610,7 @@ watch(scopedRepos, () => {
                     <circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none" />
                   </svg>
                 </span>
-                <span class="launchpad-view__inbox-avatar" :style="avatarStyle(item.issue.author)">
-                  {{ avatarInitials(item.issue.author) }}
-                </span>
+                <Avatar class="launchpad-view__inbox-avatar" :name="item.issue.author" />
                 <div class="launchpad-view__inbox-body">
                   <div class="launchpad-view__inbox-line1">
                     <button
@@ -729,11 +726,10 @@ watch(scopedRepos, () => {
               @keydown.enter="toggleTeamMember(member.login)"
               @keydown.space.prevent="toggleTeamMember(member.login)"
             >
-              <span
+              <Avatar
                 class="launchpad-view__team-avatar"
-                :style="avatarStyle(member.login)"
-                aria-hidden="true"
-              >{{ avatarInitials(member.login) }}</span>
+                :name="member.login"
+              />
               <span
                 class="launchpad-view__team-login"
                 :style="{ color: avatarStyle(member.login).color }"
@@ -800,11 +796,10 @@ watch(scopedRepos, () => {
               @keydown.enter="toggleTeamMember(member.login)"
               @keydown.space.prevent="toggleTeamMember(member.login)"
             >
-              <span
+              <Avatar
                 class="launchpad-view__team-avatar"
-                :style="avatarStyle(member.login)"
-                aria-hidden="true"
-              >{{ avatarInitials(member.login) }}</span>
+                :name="member.login"
+              />
               <span
                 class="launchpad-view__team-login"
                 :style="{ color: avatarStyle(member.login).color }"

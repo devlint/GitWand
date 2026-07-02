@@ -11,7 +11,7 @@ import { ref, computed } from "vue";
 import type { PrReviewComment } from "../utils/backend";
 import { renderMarkdown, onMarkdownLinkClick } from "../composables/useSafeHtml";
 import { useI18n } from "../composables/useI18n";
-import { useAvatar } from "../composables/useAvatar";
+import Avatar from "./Avatar.vue";
 import PrReactions from "./PrReactions.vue";
 
 const { t } = useI18n();
@@ -100,8 +100,6 @@ const bodyHtmlById = computed(() => {
   return m;
 });
 
-// Avatar disks share the app-wide outline style — see composables/useAvatar.
-const { avatarStyle, avatarInitials } = useAvatar();
 
 function timeAgo(dateStr: string): string {
   try {
@@ -125,7 +123,7 @@ function timeAgo(dateStr: string): string {
     >
       <!-- Header -->
       <div class="pct-comment-header">
-        <div class="pct-avatar" :style="avatarStyle(comment.author)">{{ avatarInitials(comment.author) }}</div>
+        <Avatar class="pct-avatar" :name="comment.author" />
         <span class="pct-author">{{ comment.author }}</span>
         <span class="pct-time" :title="comment.created_at">{{ timeAgo(comment.created_at) }}</span>
         <div class="pct-actions" v-if="comment.author === currentUser || !currentUser">
