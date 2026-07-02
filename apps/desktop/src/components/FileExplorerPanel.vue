@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch, onMounted, onBeforeUnmount, nextTick } from "vue";
+import { computed, ref, toRef, watch, onMounted, onBeforeUnmount, nextTick } from "vue";
 import { useFileExplorer, resolveFileExplorerShortcut, type FileTab } from "../composables/useFileExplorer";
 import { useRepoFileTree } from "../composables/useRepoFileTree";
 import { useSettings } from "../composables/useSettings";
@@ -23,12 +23,11 @@ const { t } = useI18n();
 const { settings, saveSettings } = useSettings();
 const explorer = useFileExplorer();
 
-const repoPathRef = computed(() => props.repoPath);
-const changedFilesRef = computed(() => props.changedFiles);
+const repoPathRef = toRef(props, "repoPath");
+const changedFilesRef = toRef(props, "changedFiles");
 const tree = useRepoFileTree(repoPathRef, changedFilesRef);
 
-onMounted(() => tree.refresh());
-watch(repoPathRef, () => tree.refresh());
+watch(repoPathRef, () => tree.refresh(), { immediate: true });
 
 const tabs = computed(() => explorer.tabsFor(props.repoPath));
 const activeId = computed(() => explorer.activeTabId(props.repoPath));
@@ -236,16 +235,20 @@ async function mountTab(tab: FileTab) {
   // The global lock may have changed since this tab's cached state was last
   // built or visited — always re-assert it so editability is consistent
   // panel-wide, not just at the moment this tab's EditorState was created.
-  view.dispatch({ effects: editableCompartment!.reconfigure(EditorViewCtor!.editable.of(!editLocked.value)) });
-  docStates.set(tab.id, view.state);
+  applyEditable(tab.id);
+}
+
+// Re-assert the current lock state onto the live view and cache the result
+// under `tabId`. No-op until the CodeMirror libs and a view are ready.
+function applyEditable(tabId: number) {
+  if (!view || !editableCompartment || !EditorViewCtor) return;
+  view.dispatch({ effects: editableCompartment.reconfigure(EditorViewCtor.editable.of(!editLocked.value)) });
+  docStates.set(tabId, view.state);
 }
 
 function toggleLock() {
   editLocked.value = !editLocked.value;
-  if (view && activeTab.value && editableCompartment && EditorViewCtor) {
-    view.dispatch({ effects: editableCompartment.reconfigure(EditorViewCtor.editable.of(!editLocked.value)) });
-    docStates.set(activeTab.value.id, view.state);
-  }
+  if (activeTab.value) applyEditable(activeTab.value.id);
 }
 
 function onUndo() {

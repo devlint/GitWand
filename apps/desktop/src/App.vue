@@ -1556,6 +1556,7 @@ function confirmCloseProject() {
   if (found) {
     // Fire-and-forget: PTY cleanup is best-effort; don't block UI on it.
     termSessions.disposeRepo(found.path).catch(() => {});
+    fileExplorer.disposeRepo(found.path);
   }
   closeTab(target.tabId);
   closeProjectConfirm.value = null;
@@ -1688,6 +1689,7 @@ async function onAiTaskDelete() {
     // Kill the worktree's agent terminal first so no running process holds an
     // index.lock or open handle that would block the worktree removal.
     await termSessions.disposeRepo(target.path).catch(() => {});
+    fileExplorer.disposeRepo(target.path);
     if (target.scratch) {
       await scratchWorktreeDiscard(origin, target.path);
     } else {
@@ -1713,6 +1715,7 @@ async function onAiTaskMergeBack() {
     // Kill the scratch's agent terminal first so no running process holds an
     // index.lock or open handle that would block the worktree removal.
     await termSessions.disposeRepo(target.path).catch(() => {});
+    fileExplorer.disposeRepo(target.path);
     await scratchWorktreeMergeBack(origin, target.path);
     await finalizeWorktreeRemoval(target.path, target.projectPath);
   } catch (err) {
