@@ -382,6 +382,10 @@ pub(crate) async fn gh_create_pr(
 }
 
 fn gh_list_reviewer_candidates_inner(cwd: String) -> Result<Vec<ReviewerCandidate>, String> {
+    // Settings-managed OAuth token present → tokenless REST path (no `gh` needed).
+    if let Some(tok) = github_api::settings_github_token() {
+        return github_api::rest_reviewer_candidates(&cwd, &tok);
+    }
     // Discover owner/repo from the current repo.
     let view = hidden_cmd("gh")
         .args(["repo", "view", "--json", "owner,name"])

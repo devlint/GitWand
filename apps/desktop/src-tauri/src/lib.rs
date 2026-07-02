@@ -424,6 +424,7 @@ pub fn run() {
             commands::azure::az_pr_detail,
             commands::azure::az_pr_diff,
             commands::azure::az_pr_files,
+            commands::azure::az_reviewer_candidates,
             commands::azure::az_create_pr,
             commands::azure::az_merge_pr,
             commands::azure::az_pr_ready,

@@ -721,6 +721,44 @@ pub(crate) fn rest_pr_files(cwd: &str, number: i64, token: &str) -> Result<Vec<S
     Ok(files)
 }
 
+/// List candidate reviewers for the repo via the REST `/assignees` endpoint,
+/// using a Settings-managed OAuth token (no `gh` CLI required).
+///
+/// Fetches up to 3 pages of 100 (same ceiling as the CLI path). The assignees
+/// list carries `login` and `avatar_url` but not the display `name` (that needs
+/// a per-user lookup), so `name` is left null — matching the CLI path.
+pub(crate) fn rest_reviewer_candidates(cwd: &str, token: &str) -> Result<Vec<ReviewerCandidate>, String> {
+    let (owner, repo) = owner_repo(cwd)?;
+    let mut all: Vec<ReviewerCandidate> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for page in 1..=3 {
+        let url = format!(
+            "{}/repos/{}/{}/assignees?per_page=100&page={}",
+            API_BASE, owner, repo, page
+        );
+        let v = api_json("GET", &url, token, None)?;
+        let arr = match v.as_array() {
+            Some(a) if !a.is_empty() => a,
+            _ => break,
+        };
+        let count = arr.len();
+        for u in arr {
+            let login = js(u, "login");
+            if login.is_empty() || !seen.insert(login.clone()) {
+                continue;
+            }
+            let name = u.get("name").and_then(|n| n.as_str()).map(String::from);
+            let avatar_url = u.get("avatar_url").and_then(|a| a.as_str()).map(String::from);
+            all.push(ReviewerCandidate { login, name, avatar_url });
+        }
+        if count < 100 {
+            break;
+        }
+    }
+    all.sort_by(|a, b| a.login.to_lowercase().cmp(&b.login.to_lowercase()));
+    Ok(all)
+}
+
 /// Map a GitHub comment object to the snake_case shape the frontend
 /// `PrReviewComment` interface expects. `issue_level` flags conversation
 /// comments (not anchored to a diff line) so their path/line fields are nulled.

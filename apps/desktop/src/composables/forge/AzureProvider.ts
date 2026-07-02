@@ -25,6 +25,7 @@ import {
   azPrDetail,
   azPrDiff,
   azPrFiles,
+  azReviewerCandidates,
   azCreatePr,
   azMergePr,
   azPrReady,
@@ -79,9 +80,9 @@ export class AzureProvider implements ForgeProvider {
     return azCurrentUser();
   }
 
-  async listReviewerCandidates(_cwd: string): Promise<ReviewerCandidate[]> {
-    // Azure DevOps identity picker not wired yet — UI degrades to free-text.
-    return [];
+  async listReviewerCandidates(cwd: string): Promise<ReviewerCandidate[]> {
+    // Union of the project's team members. Degrades to free-text on failure.
+    return azReviewerCandidates(cwd);
   }
 
   // ── PR listing ─────────────────────────────────────────────────────────────
@@ -122,8 +123,9 @@ export class AzureProvider implements ForgeProvider {
   // ── PR actions ─────────────────────────────────────────────────────────────
 
   createPR(cwd: string, input: CreatePRInput): Promise<PullRequest> {
-    // baseRepo (cross-fork) and reviewers are GitHub-only here — ignored.
-    return azCreatePr(cwd, input.title, input.body ?? "", input.base, input.draft);
+    // baseRepo (cross-fork) is GitHub-only here — ignored. Reviewers are
+    // resolved to Azure identity ids server-side.
+    return azCreatePr(cwd, input.title, input.body ?? "", input.base, input.draft, input.reviewers);
   }
 
   mergePR(cwd: string, number: number, method: "merge" | "squash" | "rebase" = "merge"): Promise<void> {

@@ -10,10 +10,12 @@
  * - Confirmation modal (not native confirm()) when switching templates
  *   on a non-empty body
  */
-import { computed, inject, nextTick, onMounted, ref, useTemplateRef, watch } from "vue";
+import { computed, inject, nextTick, onMounted, reactive, ref, useTemplateRef, watch } from "vue";
 import { PR_PANEL_KEY, type PrPanelState } from "../composables/usePrPanel";
 import { renderMarkdown, safeHtml } from "../composables/useSafeHtml";
-import { ghListReviewerCandidates, type GitBranch, type ReviewerCandidate } from "../utils/backend";
+import { getGitShortlog, type GitBranch, type ReviewerCandidate } from "../utils/backend";
+import { forgeForRepo } from "../composables/forge/useForge";
+import { useAvatar } from "../composables/useAvatar";
 import { useI18n } from "../composables/useI18n";
 import { useAIProvider } from "../composables/useAIProvider";
 import { usePrDescription } from "../composables/usePrDescription";
@@ -303,20 +305,52 @@ function onBaseInput(e: Event) {
 }
 
 // ─── Reviewers ──────────────────────────────────────────
-// Tag-style input with autocomplete: candidates are fetched from
-// gh api /repos/:owner/:repo/assignees on mount, then filtered locally
-// as the user types. Enter/Tab on the active suggestion adds it.
+// Tag-style input with autocomplete: candidates are fetched on mount from the
+// forge that owns this repo (GitHub assignees, GitLab members, Bitbucket
+// workspace members, Azure team members), then filtered locally as the user
+// types. Enter/Tab on the active suggestion adds it. Candidates are ranked by
+// repo commit activity (most active first) so likely reviewers surface at top.
+const { avatarStyle, avatarInitials } = useAvatar();
 const reviewerInput = ref("");
 const reviewerCandidates = ref<ReviewerCandidate[]>([]);
+// Logins whose avatar photo failed to load → fall back to the initials disk.
+const brokenAvatars = reactive(new Set<string>());
 const reviewerCandidatesLoading = ref(false);
 const reviewerSuggestOpen = ref(false);
 const reviewerActiveIdx = ref(0);
+
+/**
+ * Rank candidates by repo commit activity, most active first, ties broken
+ * alphabetically. Activity is keyed by email/name from `git shortlog`, matched
+ * against each candidate's login (email for Azure/GitLab) and display name.
+ */
+async function rankByActivity(cwd: string, candidates: ReviewerCandidate[]): Promise<ReviewerCandidate[]> {
+  const activity = new Map<string, number>();
+  try {
+    for (const c of await getGitShortlog(cwd)) {
+      const keys = [...c.emails, ...c.names];
+      for (const k of keys) {
+        const key = k.trim().toLowerCase();
+        if (key) activity.set(key, Math.max(activity.get(key) ?? 0, c.count));
+      }
+    }
+  } catch {
+    // No activity data (shallow clone, non-git, etc.) — keep backend order.
+  }
+  const score = (c: ReviewerCandidate) =>
+    Math.max(activity.get(c.login.toLowerCase()) ?? 0, c.name ? activity.get(c.name.toLowerCase()) ?? 0 : 0);
+  return candidates
+    .slice()
+    .sort((a, b) => score(b) - score(a) || a.login.localeCompare(b.login));
+}
 
 onMounted(async () => {
   if (!props.cwd) return;
   reviewerCandidatesLoading.value = true;
   try {
-    reviewerCandidates.value = await ghListReviewerCandidates(props.cwd);
+    const provider = await forgeForRepo(props.cwd);
+    const candidates = await provider.listReviewerCandidates(props.cwd);
+    reviewerCandidates.value = await rankByActivity(props.cwd, candidates);
   } catch {
     // Silently ignore — autocomplete is optional, manual typing still works.
     reviewerCandidates.value = [];
@@ -678,13 +712,21 @@ function removeReviewer(name: string) {
               @mouseenter="reviewerActiveIdx = idx"
             >
               <img
-                v-if="c.avatarUrl"
+                v-if="c.avatarUrl && !brokenAvatars.has(c.login)"
                 :src="c.avatarUrl"
                 :alt="c.login"
-                class="pcv-suggest-avatar"
+                class="pcv-suggest-avatar pcv-suggest-avatar--img"
+                loading="lazy"
+                decoding="async"
                 referrerpolicy="no-referrer"
+                @error="brokenAvatars.add(c.login)"
               />
-              <span v-else class="pcv-suggest-avatar" aria-hidden="true"></span>
+              <span
+                v-else
+                class="pcv-suggest-avatar"
+                :style="avatarStyle(c.name || c.login)"
+                aria-hidden="true"
+              >{{ avatarInitials(c.name || c.login) }}</span>
               <span class="pcv-suggest-text">
                 <span class="pcv-suggest-login">{{ c.login }}</span>
                 <span v-if="c.name" class="pcv-suggest-name">{{ c.name }}</span>
@@ -1418,11 +1460,22 @@ function removeReviewer(name: string) {
   background: var(--color-accent-soft);
 }
 .pcv-suggest-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 24px;
   height: 24px;
   border-radius: 50%;
-  background: var(--color-bg-tertiary);
+  border: 1.5px solid currentColor;
+  background: transparent;
+  font-size: 9px;
+  font-weight: var(--font-weight-bold);
   flex-shrink: 0;
+}
+/* Photo variant (GitHub/Bitbucket): solid image, no initials outline. */
+.pcv-suggest-avatar--img {
+  border: none;
+  background: var(--color-bg-tertiary);
   object-fit: cover;
 }
 .pcv-suggest-text {

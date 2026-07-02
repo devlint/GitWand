@@ -1175,15 +1175,30 @@ export async function azPrFiles(cwd: string, number: number): Promise<string[]> 
   throw new Error(AZURE_WEB_ONLY);
 }
 
+export async function azReviewerCandidates(cwd: string): Promise<ReviewerCandidate[]> {
+  if (isTauri()) {
+    const raw = await tauriInvoke<
+      Array<{ login: string; name?: string | null; avatar_url?: string | null }>
+    >("az_reviewer_candidates", { cwd });
+    return raw.map((u) => ({
+      login: u.login,
+      name: u.name ?? null,
+      avatarUrl: u.avatar_url ?? null,
+    }));
+  }
+  throw new Error(AZURE_WEB_ONLY);
+}
+
 export async function azCreatePr(
   cwd: string,
   title: string,
   body: string,
   base?: string,
   draft?: boolean,
+  reviewers?: string[],
 ): Promise<PullRequest> {
   if (isTauri()) {
-    const raw = await tauriInvoke<any>("az_create_pr", { cwd, title, body, base, draft });
+    const raw = await tauriInvoke<any>("az_create_pr", { cwd, title, body, base, draft, reviewers });
     return mapRawPr(raw);
   }
   throw new Error(AZURE_WEB_ONLY);

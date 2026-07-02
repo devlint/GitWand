@@ -794,23 +794,163 @@ fn rest_pr_files(cwd: &str, number: i64) -> Result<Vec<String>, String> {
         .collect())
 }
 
+/// One project team member: `(login, displayName, avatarUrl, identityId)`.
+///
+/// `login` is the `uniqueName` (email — the value Azure keys reviewers by),
+/// falling back to `displayName`. `identityId` is the GUID the PR-create API
+/// expects under `reviewers[].id`.
+struct AzureMember {
+    login: String,
+    name: Option<String>,
+    avatar_url: Option<String>,
+    id: String,
+}
+
+/// Enumerate the union of members across all of the project's teams.
+///
+/// Azure DevOps has no single "assignable reviewers" endpoint, so we walk the
+/// project teams (`_apis/projects/{project}/teams`) and flatten their members.
+/// Each `TeamMember` wraps an `identity` carrying `displayName`, `uniqueName`
+/// and `id`. Deduped by identity id; teams we can't read are skipped.
+fn azure_team_members(cwd: &str) -> Result<Vec<AzureMember>, String> {
+    let r = azure_repo(cwd)?;
+
+    let teams_url = with_api_version(&format!(
+        "https://dev.azure.com/{}/_apis/projects/{}/teams",
+        urlenc(&r.org),
+        urlenc(&r.project)
+    ));
+    let teams_v = az_json("GET", &teams_url, None)?;
+    let teams = teams_v
+        .get("value")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let mut all: Vec<AzureMember> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for team in &teams {
+        let team_id = js(team, "id");
+        if team_id.is_empty() {
+            continue;
+        }
+        let members_url = with_api_version(&format!(
+            "https://dev.azure.com/{}/_apis/projects/{}/teams/{}/members",
+            urlenc(&r.org),
+            urlenc(&r.project),
+            urlenc(&team_id)
+        ));
+        // Skip teams we can't read rather than failing the whole picker.
+        let members_v = match az_json("GET", &members_url, None) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let members = members_v
+            .get("value")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        for m in &members {
+            // A TeamMember wraps its identity; fall back to the entry itself.
+            let ident = m.get("identity").unwrap_or(m);
+            let unique = js(ident, "uniqueName");
+            let display = js(ident, "displayName");
+            let id = js(ident, "id");
+            let login = if !unique.is_empty() {
+                unique
+            } else if !display.is_empty() {
+                display.clone()
+            } else {
+                continue;
+            };
+            let dedup_key = if id.is_empty() { login.to_lowercase() } else { id.clone() };
+            if !seen.insert(dedup_key) {
+                continue;
+            }
+            let name = if display.is_empty() { None } else { Some(display) };
+            let avatar_url = {
+                let u = js(ident, "imageUrl");
+                if u.is_empty() { None } else { Some(u) }
+            };
+            all.push(AzureMember { login, name, avatar_url, id });
+        }
+    }
+    Ok(all)
+}
+
+/// Candidate reviewers for the combobox (drops the identity id).
+fn rest_reviewer_candidates(cwd: &str) -> Result<Vec<ReviewerCandidate>, String> {
+    let mut all: Vec<ReviewerCandidate> = azure_team_members(cwd)?
+        .into_iter()
+        .map(|m| ReviewerCandidate { login: m.login, name: m.name, avatar_url: m.avatar_url })
+        .collect();
+    all.sort_by(|a, b| a.login.to_lowercase().cmp(&b.login.to_lowercase()));
+    Ok(all)
+}
+
+/// Resolve the reviewer strings picked in the UI (logins/emails/display names,
+/// possibly `@`-prefixed) to Azure identity GUIDs, matched against the project
+/// team members. Values that don't match a known member are dropped (Azure
+/// requires a valid identity id). Returns a deduped id list.
+fn resolve_reviewer_ids(cwd: &str, reviewers: &[String]) -> Vec<String> {
+    if reviewers.is_empty() {
+        return Vec::new();
+    }
+    let members = azure_team_members(cwd).unwrap_or_default();
+    // login/email + displayName → id.
+    let mut by_key: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    for m in &members {
+        if m.id.is_empty() {
+            continue;
+        }
+        by_key.entry(m.login.to_lowercase()).or_insert_with(|| m.id.clone());
+        if let Some(name) = &m.name {
+            by_key.entry(name.to_lowercase()).or_insert_with(|| m.id.clone());
+        }
+    }
+    let mut ids: Vec<String> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for raw in reviewers {
+        let key = raw.trim().trim_start_matches('@').to_lowercase();
+        if key.is_empty() {
+            continue;
+        }
+        if let Some(id) = by_key.get(&key) {
+            if seen.insert(id.clone()) {
+                ids.push(id.clone());
+            }
+        }
+    }
+    ids
+}
+
 fn rest_create_pr(
     cwd: &str,
     title: String,
     body: String,
     base: String,
     draft: bool,
+    reviewers: Vec<String>,
 ) -> Result<PullRequest, String> {
     let r = azure_repo(cwd)?;
     let head_branch = current_branch(cwd)?;
     let base = if base.is_empty() { "main".to_string() } else { base };
-    let payload = serde_json::json!({
+    let mut payload = serde_json::json!({
         "sourceRefName": format!("refs/heads/{}", head_branch),
         "targetRefName": format!("refs/heads/{}", base),
         "title": title,
         "description": body,
         "isDraft": draft,
     });
+    // Attach reviewers as `[{ id: <identityGuid> }]`. Resolve the picked
+    // logins/emails to identity ids; skip silently if none resolve so PR
+    // creation never fails just because a reviewer couldn't be matched.
+    let ids = resolve_reviewer_ids(cwd, &reviewers);
+    if !ids.is_empty() {
+        payload["reviewers"] = serde_json::Value::Array(
+            ids.into_iter().map(|id| serde_json::json!({ "id": id })).collect(),
+        );
+    }
     let url = with_api_version(&format!("{}/pullrequests", r.api_base()));
     let created = az_json("POST", &url, Some(&payload.to_string()))?;
     Ok(json_to_pr(&r, &created))
@@ -1380,15 +1520,30 @@ pub(crate) async fn az_pr_files(cwd: String, number: i64) -> Result<Vec<String>,
 }
 
 #[tauri::command]
+pub(crate) async fn az_reviewer_candidates(cwd: String) -> Result<Vec<ReviewerCandidate>, String> {
+    tauri::async_runtime::spawn_blocking(move || rest_reviewer_candidates(&cwd))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 pub(crate) async fn az_create_pr(
     cwd: String,
     title: String,
     body: String,
     base: Option<String>,
     draft: Option<bool>,
+    reviewers: Option<Vec<String>>,
 ) -> Result<PullRequest, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        rest_create_pr(&cwd, title, body, base.unwrap_or_default(), draft.unwrap_or(false))
+        rest_create_pr(
+            &cwd,
+            title,
+            body,
+            base.unwrap_or_default(),
+            draft.unwrap_or(false),
+            reviewers.unwrap_or_default(),
+        )
     })
     .await
     .map_err(|e| e.to_string())?
