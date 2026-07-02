@@ -322,6 +322,16 @@ provide(PR_PANEL_KEY, prPanel);
 const issuePanel = useIssuePanel(prCwd);
 provide(ISSUE_PANEL_KEY, issuePanel);
 
+// Map of head-branch name → its open PR, for the Git Tree PR badges.
+// Mirrors the branch-selector popover, which shows the same "#<number>" chip.
+const branchPrs = computed<Record<string, { number: number; title: string }>>(() => {
+  const map: Record<string, { number: number; title: string }> = {};
+  for (const pr of prPanel.prs.value) {
+    if (pr.branch) map[pr.branch] = { number: pr.number, title: pr.title };
+  }
+  return map;
+});
+
 // Load branches when the PR create form opens (they're needed to compute baseCandidates).
 watch(() => prPanel.showCreateForm.value, (val) => {
   if (val && branches.value.length === 0) loadBranches();
@@ -3157,6 +3167,8 @@ onUnmounted(() => {
                   :commits="repoLog" :selected-hash="selectedCommitHash" :current-branch="repoStatus?.branch"
                   :fork-point-sha="graphForkPointSha" :repo-stats="repoStats" :branches="branches" :worktree-branches="worktreeBranches" :stashes="stashes"
                   :submodule-changes="submoduleChanges"
+                  :branch-prs="branchPrs"
+                  :cwd="repoFolderPath ?? ''"
                   :has-more="logHasMore" :loading-more="logLoadingMore"
                   :hidden-commit-count="hiddenCommitCount"
                   :pinned-branches="graphPinnedBranches"

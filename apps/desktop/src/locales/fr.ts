@@ -405,7 +405,7 @@ const fr: Locale = {
     searchPlaceholder: "Filtrer (sujet, auteur, hash\u2026) \u2014 Entr\u00e9e pour une recherche IA",
     searchAiHint: "Recherche IA : tape une question en langage naturel puis Entr\u00e9e ou ✨",
     aiSearchResults: "Recherche IA : {0} commit(s) correspondent.",
-    graphSearchPlaceholder: "Rechercher par id de commit, auteur, branche, résumé ou description…",
+    graphSearchPlaceholder: "Rechercher par id de commit, #pr, auteur, branche, résumé ou description…",
     graphSearchPrev: "Correspondance précédente",
     graphSearchNext: "Correspondance suivante",
     graphSearchCount: "{0} / {1}",
