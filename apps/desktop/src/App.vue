@@ -332,6 +332,7 @@ const branchPrs = computed<Record<string, { number: number; title: string }>>(()
   return map;
 });
 
+
 // Load branches when the PR create form opens (they're needed to compute baseCandidates).
 watch(() => prPanel.showCreateForm.value, (val) => {
   if (val && branches.value.length === 0) loadBranches();
@@ -891,6 +892,9 @@ watch(viewMode, async (mode) => {
   if ((mode === "history" || mode === "graph") && hasRepo.value) {
     await loadLog();
   }
+  // Entering the Git Tree: load PRs (once, SWR, no polling) so branch names get
+  // their "#<number>" badge without the user first opening the PR view.
+  if (mode === "graph" && hasRepo.value) void prPanel.ensurePrsLoaded();
   // Dashboard sidebar needs branches + recent log entries to show
   // pinned branches & activity feed.
   if (mode === "dashboard" && hasRepo.value) {

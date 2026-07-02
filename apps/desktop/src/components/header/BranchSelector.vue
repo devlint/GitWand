@@ -190,6 +190,9 @@ function togglePopover() {
     emit("loadBranches");
     void loadSubmodules();
     void loadTopAuthors();
+    // Load PRs (once, SWR, no polling) so branch rows show their "#<number>"
+    // badge without the user first opening the PR view.
+    void prPanel.ensurePrsLoaded();
     void nextTick(recomputeMaxHeight);
   }
 }
