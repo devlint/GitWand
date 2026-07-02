@@ -115,6 +115,20 @@ const defaultBase = computed<string>(() => {
   return c[0] ?? "main";
 });
 
+/**
+ * `baseCandidates` plus the already-bound value, if any. `defaultBase` can
+ * fall back to a synthesized "main" that isn't actually in `baseCandidates`
+ * (empty-repo case), and `baseCandidates` can change shape while the panel
+ * is open (branches reload) and drop the currently-selected name. Without
+ * this, the `<select>` would silently show a different/blank option than
+ * what `p.newPrBase.value` actually holds.
+ */
+const baseSelectOptions = computed<string[]>(() => {
+  const list = baseCandidates.value;
+  const current = p.newPrBase.value.trim();
+  return current && !list.includes(current) ? [current, ...list] : list;
+});
+
 watch(defaultBase, (v) => {
   if (!p.newPrBase.value.trim() && v) p.newPrBase.value = v;
 }, { immediate: true });
@@ -486,7 +500,7 @@ function removeReviewer(name: string) {
               :value="p.newPrBase.value"
               @change="onBaseInput"
             >
-              <option v-for="name in baseCandidates" :key="name" :value="name">{{ name }}</option>
+              <option v-for="name in baseSelectOptions" :key="name" :value="name">{{ name }}</option>
             </select>
           </div>
         </div>
