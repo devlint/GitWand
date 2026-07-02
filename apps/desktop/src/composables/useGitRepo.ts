@@ -1185,9 +1185,13 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     if (!folderPath.value) return;
     try {
       await gitDiscard(folderPath.value, paths, untracked);
-      await refresh();
     } catch (err: any) {
       error.value = `discard: ${err?.message ?? err}`;
+    } finally {
+      // `gitDiscard` can partially succeed (e.g. the checkout lands but a
+      // submodule reset fails afterward) — refresh regardless so the file
+      // list never goes stale relative to what's actually on disk.
+      await refresh();
     }
   }
 

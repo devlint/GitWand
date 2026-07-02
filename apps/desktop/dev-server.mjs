@@ -2167,10 +2167,13 @@ async function handleRequest(req, res) {
           }
           const toReset = paths.filter((p) => subPaths.has(p));
           if (toReset.length) {
-            spawnSync(GIT, ["submodule", "update", "--force", "--", ...toReset], {
+            const r = spawnSync(GIT, ["submodule", "update", "--force", "--", ...toReset], {
               cwd: resolvedCwd,
               encoding: "utf-8",
             });
+            if (r.status !== 0) {
+              throw new Error(`git submodule update failed: ${r.stderr || r.error?.message || "unknown error"}`);
+            }
           }
         }
         return jsonResponse(req, res, { ok: true });
