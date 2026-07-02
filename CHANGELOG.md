@@ -7,18 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.2.0] - 2026-07-02
+
 ### Added
 
+- **Integrated terminal — WebGL rendering, agent tabs, New AI task** — the terminal panel now renders via WebGL for smoother output, gains inline search (`Ctrl+F`, prev/next) and clickable links, and its tabs carry a type (`shell` / `claude` / `codex`) with a distinct icon and an unread-output dot. "Launch Claude Code" / "Launch Codex" now open a real PTY shell tab instead of a non-functional stub, and a new "New AI task" button creates a scratch git worktree and opens a Claude Code terminal tab in one click. Hardening: `safe_repo_path()` on all terminal filesystem operations, a shell-executable whitelist, PTY orphan/zombie prevention on tab close, bounded keystroke input, and a UTF-8 boundary carry-buffer fix for multibyte characters straddling PTY read chunks.
+- **File Explorer / Editor panel** — a new dockable panel (drag/resize/fullscreen, mirroring the Terminal panel) lists the full repo file tree (gitignore-aware, via `git ls-files`) and opens files in a lazy-loaded CodeMirror 6 editor with per-tab undo history, syntax highlighting, and a lock/undo/save toolbar. Reachable from a new Files tile in the AppDock, with per-repo layout settings and folder file-counts pre-computed in a single tree walk.
 - **Per-project worktree submenu** — each project tab now has a caret (▼) between its name and close button that opens a submenu listing `main` plus every worktree of the project. Selecting one switches that project's checkout in place (no extra tab); the active checkout is checkmarked.
 - **AI tasks manage their worktree** — `gitwand-scratch-*` worktrees appear in the submenu with a sparkle icon and a delete action that prompts to either merge the work back into the project or delete the isolated worktree (with branch cleanup), instead of leaving it orphaned on disk.
+- **GitTree filter mode + branch/date-bucket navigation** — the Git Tree toolbar gains a filter mode that recalculates the DAG to show only matching commits, quick-toggle buttons for branch/author filters, and date-bucket separators in the commit timeline. The branch search box now offers a branch-name autocomplete dropdown (teleported to `<body>` to escape `overflow:hidden` clipping) and can resolve `#<PR number>` directly to the branch that PR is on — cache-first against the already-loaded PR list, with a debounced fallback fetch and a `#1234` badge on branches with a known PR.
+- **Submodule updates** — the Submodules panel now shows update-available indicators and lets you pull remote submodule changes (rebase) or discard them (`git submodule update --force`), backed by new Rust `ops.rs` commands.
+- **Per-author line churn stats** — the contributor dashboard now aggregates insertions/deletions per author (via `git log --numstat`) alongside the existing commit counts. Also brings GitHub API request caching via ETags and consolidated PR detail queries to cut API usage.
+- **Antigravity CLI provider** — the Antigravity CLI (`agy`) is now a selectable local AI provider in Settings, with backend detection and execution support.
+- **Rebase onto any ref, with branch reset** — the rebase editor now accepts remote branches, tags, and raw SHAs (not just local branches) as the base, with free-form ref input; when there are no commits to replay, it offers a branch reset routed through the app's standard confirmation flow instead of an inline prompt.
+
+### Changed
+
+- **Sidebar: unified Changes section** — the working-tree "Unstaged" and "Untracked" sections are merged into a single "Changes" section for a simpler, more conventional view.
+- **PR create: base branch is now a `<select>`** — replaces the free-form text input + datalist, restricting the target to valid base branches (main/master first, then `release/*`, then the rest by recency).
+- **AI presets: duplicate default entry removed** — the built-in `__builtin_default` preset (which duplicated the Default menu entry already routed via `activate(null)`) is gone; the active-preset checkmark now refreshes immediately after save instead of staying stale until reload.
+- **Closing a project asks for confirmation** — a confirmation prompt guards the tab close button (now next to the worktree caret) against misclicks. Closing a project only closes the tab; its worktrees stay on disk.
+- **Tauri bumped to 2.11** — `@tauri-apps/api`, CLI and plugins aligned with the Rust-side bump; the fragile inline find/chmod postinstall step was replaced with a cross-platform `scripts/fix-spawn-helper.mjs`.
+- **Website: "Today" card refresh** — the What's New card moved to first position with its badge bumped to v3.0 and a rewritten triaged-inbox description across all 5 locales; the social-share `og-image` was refreshed to match.
 
 ### Fixed
 
 - **Git Tree: deleting a worktree branch** — right-clicking a branch that's checked out in a worktree now offers "Delete worktree" (and "Merge & delete worktree" for AI-task scratch worktrees) instead of a plain "Delete branch" that git rejects. Removing/merging a worktree also reloads the branch list so the deleted branch no longer lingers in the view.
-
-### Changed
-
-- **Closing a project asks for confirmation** — a confirmation prompt guards the tab close button (now next to the worktree caret) against misclicks. Closing a project only closes the tab; its worktrees stay on disk.
+- **Fork PR checkout** — checking out a PR now resolves its real source repository and fetches `pull/N/head` from upstream when the PR originates from a fork; the branch, status, and log resync immediately after checkout instead of showing stale state.
+- **Real Tauri error messages surfaced** — `invoke()` rejects with a plain string, not an `Error` object, so `err.message` was always `undefined` across ~20 catch blocks in `useGitRepo.ts`, showing e.g. "git log: undefined" instead of the actual git error.
+- **"Changes" missing from selectable startup views** — Settings > Dock's startup-view picker now includes Changes alongside the other panes.
+- **PR create: close button legibility** — improved contrast on the close button in the PR creation view.
 
 ## [3.1.0] - 2026-06-25
 
@@ -1148,7 +1166,8 @@ Design-system foundations — the app header and every overlay now ride on a sha
 - CI pipeline via GitHub Actions (Node 18, 20, 22)
 - 28 tests covering all patterns + real-world scenarios (package.json, Laravel routes, Vue SFC, CSS, .env files)
 
-[Unreleased]: https://github.com/devlint/GitWand/compare/v3.1.0...HEAD
+[Unreleased]: https://github.com/devlint/GitWand/compare/v3.2.0...HEAD
+[3.2.0]: https://github.com/devlint/GitWand/compare/v3.1.0...v3.2.0
 [3.1.0]: https://github.com/devlint/GitWand/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/devlint/GitWand/compare/v2.24.0...v3.0.0
 [2.24.0]: https://github.com/devlint/GitWand/compare/v2.23.0...v2.24.0

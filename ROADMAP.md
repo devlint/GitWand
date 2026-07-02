@@ -6,33 +6,6 @@
 
 ## What's Next
 
-### v3.2.0 — Terminal tabs & AI workspace
-
-_Inspired by t1gu1's feedback: "How can I code with AI in GitWand?" — GitWand as a native AI workspace._
-
-**Prerequisite fix — "Launch Claude Code" opens no usable session** _(follow-up to v2.8.0 Agent Sessions)_
-
-The Agent Sessions launch action is wired end-to-end but doesn't produce a working session — a blocker for the AI-workspace vision below.
-
-- **Root cause**: `agent_session_launch` spawns the `claude` CLI via `hidden_cmd` with `stdin`/`stdout`/`stderr` redirected to `null` and no terminal window (`hidden_cmd` is the *headless* helper — it sets `CREATE_NO_WINDOW` on Windows). But Claude Code is an interactive TUI requiring a TTY, so the process exits immediately / runs invisibly — the user clicks and nothing happens.
-- **Fix**: open a real terminal in the worktree's cwd and run `claude` there, reusing the cross-platform pattern already implemented in `claude_cli_login` (`osascript` → Terminal.app on macOS, `cmd /k start` on Windows, `gnome-terminal`/`konsole`/`kitty`/… on Linux). Factor that terminal-launch logic into a shared helper.
-- **Drop the fake "active" state**: the frontend sets `active = true` optimistically after a 1.5 s `setTimeout` with no confirmation the agent actually started — re-poll `agent_session_list` after launch instead.
-- **Make Cursor/Windsurf launchable too**: today the Launch button only shows for `claude`/`other`; those GUI editors have no launch path from the panel.
-
-**Terminal with tabs**
-
-- The integrated terminal extended with tabs: multiple simultaneous shell sessions (`⌘T` new, `⌘W` close, `⌘1..9` switch)
-- Automatic title from the first command, or editable with a double-click
-- Terminal panel anchored at the bottom, resizable height
-
-**AI workspace (exploratory phase)**
-
-- "New AI task" button: opens a blank worktree + launches a Claude Code (or Codex CLI) session in a dedicated terminal tab — the worktree diff displays live in GitWand
-- Vision: GitWand as the command center for coding with AI — see what the agent changes, stage what you want, commit — without leaving the app
-- User feedback expected to shape v2.25.0+
-
----
-
 ### v3.3.0 — Safety Bundle: pre-commit secrets scanner
 
 _Inspired by GitSquid. A "safety" feature with zero network dependency — everything local._
@@ -174,6 +147,8 @@ Positioning: neither "yet another Git GUI" nor an IDE. A first-class Git navigat
 
 | Version | Highlights |
 |---------|-----------|
+| **v3.2.0** | **Integrated terminal** (WebGL rendering, inline search, clickable links, typed tabs with unread dot, real PTY agent launch, "New AI task" scratch-worktree button) · **File Explorer / Editor panel** (gitignore-aware tree, CodeMirror 6 editor, lock/undo/save toolbar) · **Git Tree** (filter mode, branch/author quick-toggles, date-bucket separators, branch autocomplete + `#PR` search) · Per-project worktree submenu + AI-task worktree management · Submodule update checking/applying · Per-author line churn stats · Antigravity CLI provider · Rebase onto any ref + branch reset · Sidebar unified Changes section · Tauri 2.11 |
+| **v3.1.0** | Customizable dock & startup view, PR create unpublished-branch warning, customizable release-note templates, anonymous GDPR-compliant launch ping, website screenshot slideshow & lightbox, pnpm 11.9.0 |
 | **v3.0.0** | **Today** (triaged action inbox, urgency tiers, state-aware primary actions, Launchpad → Today rename) · **VS Code extension on the Marketplace** (esbuild bundle, `publish-vscode.yml` CI, 4 extension bug fixes, CLI validation surfacing) · **Dashboard** (contributor modal, activity tooltips, fortnight stats, Git-Tree commit navigation) · **Branches** (top-contributor avatars, pinned section, move uncommitted changes on switch, force-delete prompt) · Fullscreen markdown image viewer · Website hero toggle + clickable platform cards |
 | **v2.24.0** | Full-screen views & in-app Launchpad — the permanent sidebar/Git-Tree strips give way to a floating bottom-center `AppDock`; Dashboard, Changes, History, PRs and a first-class full-screen Git Tree each render full-bleed (`RepoSidebar` gains a `pane` prop; collapsible, persisted commit composer rail). Launchpad gains in-app issue review (`IssueDetailView` + `useIssuePanel`), an action inbox (`useLaunchpadInbox` / `useRepoActionCards`), extracted scope (`useLaunchpadScope`) and internal navigation. The list/tree file-tree toggle extends to the history (commit) sidebar (`useFileTree` generalised over any `{ path }` entry). Plus a Linux AppImage follow-up: URL openers de-pollute `PATH`/`XDG_*` so a spawned `xdg-open` resolves the system browser instead of silently no-opening (#52), with opener stderr/exit captured. `EditCommitOverlay`/`SplitCommitModal` lazy-loaded. Full dev:web parity + 5-locale i18n |
 | **v2.23.0** | Changes sidebar & rebase polish — list/tree layout toggle for the changes view (collapsible folders, persisted layout + per-section collapse state, auto-expand to the selected file) via a new `useFileTree` composable; per-file and per-folder stage/unstage/discard fused into an always-visible segmented "action group". Interactive rebase now works in the packaged desktop app (dedicated `git_interactive_rebase` Tauri command replacing a dev-only HTTP endpoint) and branch pickers list branches by most-recent commit (shared `branchSort`). Plus a Linux AppImage fix: external links/OAuth buttons route through a robust multi-opener chain. Full dev:web parity + 5-locale i18n |

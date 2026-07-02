@@ -5,6 +5,34 @@ description: Release history for GitWand — the native Git client with AI confl
 
 # Changelog
 
+## v3.2.0 — July 2026
+
+### An integrated terminal you can actually work in
+
+The terminal panel got a serious upgrade. Rendering moved to WebGL, so scrollback and fast output feel noticeably smoother. You can now search inline with `Ctrl+F`, and links printed to the terminal are clickable. Tabs carry a type — shell, Claude, or Codex — each with its own icon, and a small dot appears on any tab that received output while you weren't looking at it.
+
+The bigger fix: launching an AI agent from the terminal used to open a tab that did nothing — the process needs an interactive terminal to run in, and it wasn't getting one. "Launch Claude Code" and "Launch Codex" now open a real, working shell tab running the agent. And a new "New AI task" button takes this one step further: it creates a fresh, isolated git worktree and opens a Claude Code session in it in a single click, so you can hand an agent a task without touching your main checkout.
+
+### A File Explorer and editor, right inside GitWand
+
+A new panel — reachable from the dock, next to the Terminal — shows your full repo file tree (respecting `.gitignore`) and opens any file in a real code editor (CodeMirror 6, with syntax highlighting and per-tab undo history). It docks, resizes, and goes fullscreen the same way the Terminal panel does, and a small toolbar lets you lock editing, undo, and save without leaving the panel. Small edits and quick lookups no longer require switching to another app.
+
+### Git Tree gets sharper navigation
+
+The Git Tree toolbar now has a filter mode: narrow the whole graph down to just the commits matching your search instead of scrolling past everything else. Quick-toggle buttons let you filter by branch or author in one click, and the timeline now shows date separators so you can tell where "today" ends and "last week" begins. The branch search box got smarter too — it now offers an autocomplete dropdown as you type, and it can jump straight to a branch by its pull request number (`#1234`), with a small badge showing which branches already have an open PR.
+
+### Managing worktrees and submodules got easier
+
+Every project tab now has a small caret that opens a submenu listing that project's worktrees — switch between them without opening a new tab. Worktrees created for AI tasks show up there too, with a one-click option to merge the work back in or discard it cleanly. Deleting a branch that's checked out in a worktree now offers the right action ("Delete worktree") instead of an error git would have rejected anyway.
+
+Submodules also caught up: GitWand now tells you when a submodule has upstream updates, and lets you pull them in or discard your local pointer changes without dropping to the terminal.
+
+### Everything else
+
+The contributor dashboard now shows per-author line churn (insertions and deletions), not just commit counts. Rebasing no longer requires a local branch as the base — remote branches, tags, and raw SHAs all work now, and if there's nothing to replay, GitWand offers a clean branch reset instead of a dead end. Checking out a pull request from a fork now correctly refreshes your branch and status. The Antigravity CLI (`agy`) joins Claude Code, Codex, and opencode as a selectable local AI provider. And the sidebar's "Unstaged" and "Untracked" sections are now a single, simpler "Changes" section.
+
+---
+
 ## v3.1.0 — June 2026
 
 ### Dock, startup, and a few quality-of-life wins

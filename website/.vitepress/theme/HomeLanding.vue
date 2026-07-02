@@ -84,7 +84,7 @@ function setLocale(code: Locale) {
 }
 
 // ── Smart download URL (OS detection) ─────────────────────────────────────
-const LATEST = '3.1.0'
+const LATEST = '3.2.0'
 const RELEASES = 'https://github.com/devlint/GitWand/releases'
 
 // SSR-safe: start with the generic releases page, then switch to the
@@ -150,13 +150,13 @@ const dlWin = `${RELEASES}/download/v${LATEST}/GitWand_${LATEST}_x64-setup.exe`
 
 const i18n: Record<Locale, any> = {
   fr: {
-    badge: 'v3.1.0 · Open Source · MIT',
+    badge: 'v3.2.0 · Open Source · MIT',
     heroH1a: 'Le client Git qui',
     heroH1b: 'résout les conflits pour vous.',
     heroSub: 'GitWand classifie chaque conflit de merge avec 10 patterns déterministes et un score de confiance par hunk. Les 95 % triviaux — résolus automatiquement. Les cas complexes — pour vous, avec traces complètes. Natif, gratuit, open source.',
     download: 'Télécharger',
     github: 'GitHub',
-    whatsNew: 'Nouveautés v3.1',
+    whatsNew: 'Nouveautés v3.2',
     docs: 'Documentation →',
     platforms: 'macOS · Linux · Windows',
     heroTabCli: 'CLI',
@@ -296,13 +296,13 @@ const i18n: Record<Locale, any> = {
     compareSub: 'Comparaison fonctionnalité par fonctionnalité avec les clients Git les plus populaires.',
   },
   en: {
-    badge: 'v3.1.0 · Open Source · MIT',
+    badge: 'v3.2.0 · Open Source · MIT',
     heroH1a: 'The Git client that',
     heroH1b: 'resolves conflicts for you.',
     heroSub: 'GitWand classifies every merge conflict using 10 deterministic patterns and per-hunk confidence scoring. The trivial 95% — auto-resolved. The complex — left for you with full traces. Native, free, open-source.',
     download: 'Download',
     github: 'GitHub',
-    whatsNew: "What's new in v3.1",
+    whatsNew: "What's new in v3.2",
     docs: 'Documentation →',
     platforms: 'macOS · Linux · Windows',
     heroTabCli: 'CLI',
@@ -442,13 +442,13 @@ const i18n: Record<Locale, any> = {
     compareSub: 'Feature-by-feature breakdown against the most popular Git clients on the market.',
   },
   es: {
-    badge: 'v3.1.0 · Open Source · MIT',
+    badge: 'v3.2.0 · Open Source · MIT',
     heroH1a: 'El cliente Git que',
     heroH1b: 'resuelve conflictos por ti.',
     heroSub: 'GitWand clasifica cada conflicto de merge con 10 patrones deterministas y puntuación de confianza por hunk. El 95 % trivial — resuelto automáticamente. Lo complejo — para ti, con trazas completas. Nativo, gratuito, open source.',
     download: 'Descargar',
     github: 'GitHub',
-    whatsNew: 'Novedades v3.1',
+    whatsNew: 'Novedades v3.2',
     docs: 'Documentación →',
     platforms: 'macOS · Linux · Windows',
     heroTabCli: 'CLI',
@@ -588,13 +588,13 @@ const i18n: Record<Locale, any> = {
     compareSub: 'Comparativa función a función con los clientes Git más populares del mercado.',
   },
   'pt-BR': {
-    badge: 'v3.1.0 · Open Source · MIT',
+    badge: 'v3.2.0 · Open Source · MIT',
     heroH1a: 'O cliente Git que',
     heroH1b: 'resolve conflitos por você.',
     heroSub: 'GitWand classifica cada conflito de merge com 10 padrões deterministas e pontuação de confiança por hunk. Os 95 % triviais — resolvidos automaticamente. Os complexos — para você, com traces completos. Nativo, gratuito, open source.',
     download: 'Baixar',
     github: 'GitHub',
-    whatsNew: 'Novidades v3.1',
+    whatsNew: 'Novidades v3.2',
     docs: 'Documentação →',
     platforms: 'macOS · Linux · Windows',
     heroTabCli: 'CLI',
@@ -734,13 +734,13 @@ const i18n: Record<Locale, any> = {
     compareSub: 'Comparação recurso a recurso com os clientes Git mais populares do mercado.',
   },
   'zh-CN': {
-    badge: 'v3.1.0 · 开源 · MIT',
+    badge: 'v3.2.0 · 开源 · MIT',
     heroH1a: '自动解决冲突的',
     heroH1b: 'Git 客户端',
     heroSub: 'GitWand 通过 10 种确定性模式与逐 hunk 置信度评分，对每个合并冲突进行分类。95% 的简单冲突自动解决。复杂的留给你，附带完整追踪。原生、免费、开源。',
     download: '下载',
     github: 'GitHub',
-    whatsNew: 'v3.1 新特性',
+    whatsNew: 'v3.2 新特性',
     docs: '文档 →',
     platforms: 'macOS · Linux · Windows',
     heroTabCli: '命令行',
