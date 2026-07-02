@@ -2056,6 +2056,10 @@ function notifyBody(ev: LaunchpadEvent): string {
 
 const launchpadPoller = useLaunchpadPoller({
   isEnabled: () =>
+    // Skip work when the Launchpad has been removed from the dock — the user
+    // opted out of that surface, so there's no reason to spend a cross-repo PR
+    // poll (and GitHub quota) on its notifications.
+    !settings.value.dockHideLaunchpad &&
     settings.value.notifications &&
     settings.value.notificationLevel !== "none" &&
     !isOffline.value,

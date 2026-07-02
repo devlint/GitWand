@@ -5543,6 +5543,42 @@ async function handleRequest(req, res) {
       return jsonResponse(req, res, entries);
     }
 
+    // GET /api/git-author-line-stats?cwd=...
+    // Mirror of Rust git_author_line_stats — per-author insertions/deletions.
+    if (url.pathname === "/api/git-author-line-stats" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd");
+      if (!cwd) return jsonResponse(req, res, { error: "Missing cwd" }, 400);
+      const r = spawnSync(
+        GIT,
+        ["log", "--all", "--no-merges", "--numstat", "--pretty=format:%x00%ae"],
+        { cwd: resolve(cwd), encoding: "utf-8", maxBuffer: 256 * 1024 * 1024 },
+      );
+      if (r.status !== 0) {
+        const detail = (r.stderr || r.stdout || "").trim() || "git log --numstat failed";
+        return jsonResponse(req, res, { error: detail }, 500);
+      }
+      const totals = new Map(); // email -> { added, deleted }
+      let current = "";
+      for (const line of r.stdout.split("\n")) {
+        if (line.startsWith("\0")) {
+          current = line.slice(1);
+          continue;
+        }
+        if (!line.trim()) continue;
+        const parts = line.split("\t");
+        const added = parseInt(parts[0], 10) || 0;
+        const deleted = parseInt(parts[1], 10) || 0;
+        if (added === 0 && deleted === 0) continue;
+        const e = totals.get(current) || { added: 0, deleted: 0 };
+        e.added += added;
+        e.deleted += deleted;
+        totals.set(current, e);
+      }
+      const stats = [...totals.entries()].map(([email, v]) => ({ email, ...v }));
+      stats.sort((a, b) => b.added + b.deleted - (a.added + a.deleted));
+      return jsonResponse(req, res, stats);
+    }
+
     // GET /api/git-branch-top-authors?cwd=...&branches=a,b,c
     // Mirror of Rust git_branch_top_authors — top contributor per branch.
     if (url.pathname === "/api/git-branch-top-authors" && req.method === "GET") {

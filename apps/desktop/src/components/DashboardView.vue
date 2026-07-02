@@ -3,10 +3,12 @@ import { ref, computed, onMounted, watch, nextTick, defineAsyncComponent, type R
 import {
   getGitLog,
   getGitShortlog,
+  getGitAuthorLineStats,
   readFile,
   openExternalUrl,
   type GitLogEntry,
   type ShortlogEntry,
+  type AuthorLineStat,
   type PullRequest,
 } from "../utils/backend";
 import type { ViewMode } from "../composables/useGitRepo";
@@ -66,6 +68,8 @@ const readmeDoc = ref("README.md");
  * Sorted desc by count (already done by `-n` flag, defended in Rust as well).
  */
 const allContributors = ref<ShortlogEntry[]>([]);
+/** Raw per-email line churn (insertions/deletions) over all history. */
+const authorLineStats = ref<AuthorLineStat[]>([]);
 const fortnightCommits = ref(0);
 const previousFortnightCommits = ref(0);
 
@@ -447,6 +451,49 @@ function contribPrCount(c: ShortlogEntry): number | null {
   return contribPrCounts.value.get(contribId(c)) ?? null;
 }
 
+/**
+ * Per-contributor line churn, folded from the raw per-email `authorLineStats`
+ * into the SAME merged-identity clusters the cards use (a contributor with
+ * several emails sums across all of them). Keyed by `contribId`.
+ */
+const contribLineStats = computed(() => {
+  const byEmail = new Map<string, AuthorLineStat>();
+  for (const s of authorLineStats.value) byEmail.set(s.email.toLowerCase(), s);
+  const map = new Map<string, { added: number; deleted: number; changed: number }>();
+  for (const c of allContributors.value) {
+    let added = 0;
+    let deleted = 0;
+    for (const e of c.emails ?? [c.email]) {
+      const s = byEmail.get(e.toLowerCase());
+      if (s) {
+        added += s.added;
+        deleted += s.deleted;
+      }
+    }
+    map.set(contribId(c), { added, deleted, changed: added + deleted });
+  }
+  return map;
+});
+function contribLines(c: ShortlogEntry) {
+  return contribLineStats.value.get(contribId(c)) ?? { added: 0, deleted: 0, changed: 0 };
+}
+
+/** Largest total churn across contributors — scales the breakdown bar width. */
+const maxContribChanged = computed(() => {
+  let m = 0;
+  for (const v of contribLineStats.value.values()) if (v.changed > m) m = v.changed;
+  return m || 1;
+});
+/** Bar fill width (%) — this contributor's churn relative to the busiest one. */
+function contribChangedPct(c: ShortlogEntry): number {
+  return Math.round((contribLines(c).changed / maxContribChanged.value) * 100);
+}
+/** Added share (%) within the filled portion; deletions fill the remainder. */
+function contribAddedRatio(c: ShortlogEntry): number {
+  const l = contribLines(c);
+  return l.changed ? Math.round((l.added / l.changed) * 100) : 0;
+}
+
 /** Compute + cache a card's commit + union-PR counts from the fetched data. Idempotent. */
 async function ensureContribCounts(c: ShortlogEntry): Promise<void> {
   const id = contribId(c);
@@ -671,6 +718,7 @@ async function loadDashboard() {
     getGitLog(props.cwd, 5000, true, undefined, undefined, undefined, undefined, since),
     loadReadme(),
     getGitShortlog(props.cwd).catch(() => [] as ShortlogEntry[]),
+    getGitAuthorLineStats(props.cwd).catch(() => [] as AuthorLineStat[]),
   ]);
 
   // Commits
@@ -692,6 +740,10 @@ async function loadDashboard() {
   // capture); results[2] is the shortlog.
   if (results[2].status === "fulfilled") {
     allContributors.value = results[2].value;
+  }
+  // Per-author line churn (results[3]) — folded into the card stats.
+  if (results[3].status === "fulfilled") {
+    authorLineStats.value = results[3].value;
   }
 
   loading.value = false;
@@ -1025,7 +1077,20 @@ watch(
                   <span class="avatar" :style="avatarStyle(c.email || c.name)">{{ initials(c.names?.[0] || c.name) }}</span>
                   <div class="contrib-body">
                     <div class="contrib-name">{{ c.name }}</div>
-                    <div class="contrib-bar"><span :style="{ width: c.pct + '%' }"></span></div>
+                    <div
+                      class="contrib-bar"
+                      :title="`+${contribLines(c).added.toLocaleString()} / −${contribLines(c).deleted.toLocaleString()}`"
+                    >
+                      <div class="contrib-bar-fill" :style="{ width: contribChangedPct(c) + '%' }">
+                        <span class="contrib-bar-add" :style="{ width: contribAddedRatio(c) + '%' }"></span>
+                        <span class="contrib-bar-del"></span>
+                      </div>
+                    </div>
+                    <div class="contrib-lines">
+                      <span class="contrib-line-stat contrib-stat-val--added">+{{ contribLines(c).added.toLocaleString() }}</span>
+                      <span class="contrib-line-stat contrib-stat-val--deleted">−{{ contribLines(c).deleted.toLocaleString() }}</span>
+                      <span class="contrib-line-stat">({{ contribLines(c).changed.toLocaleString() }})</span>
+                    </div>
                   </div>
                   <div class="contrib-stats">
                     <div class="contrib-stat-row">
@@ -1735,18 +1800,44 @@ watch(
 }
 
 .contrib-bar {
-  height: 4px;
-  border-radius: 2px;
+  height: 6px;
+  border-radius: 3px;
   background: var(--color-bg-tertiary);
   overflow: hidden;
-  margin-top: 3px;
+  margin-top: 4px;
 }
-.contrib-bar > span {
-  display: block;
+/* Filled portion = churn relative to the busiest contributor; split into an
+   added (green) and a deleted (red) segment. */
+.contrib-bar-fill {
+  display: flex;
   height: 100%;
-  background: var(--color-accent);
-  border-radius: 2px;
+  border-radius: 3px;
+  overflow: hidden;
   transition: width var(--transition-base);
+}
+.contrib-bar-add {
+  height: 100%;
+  background: var(--color-status-added);
+}
+.contrib-bar-del {
+  flex: 1;
+  height: 100%;
+  background: var(--color-status-removed);
+}
+
+/* Added / deleted / changed line counts, laid out horizontally under the bar. */
+.contrib-lines {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-top: 4px;
+}
+.contrib-line-stat {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .contrib-stats {
@@ -1773,6 +1864,12 @@ watch(
   font-variant-numeric: tabular-nums;
   min-width: 1.5em;
   text-align: right;
+}
+.contrib-stat-val--added {
+  color: var(--color-status-added);
+}
+.contrib-stat-val--deleted {
+  color: var(--color-status-removed);
 }
 
 .contrib-divider {
@@ -1807,8 +1904,8 @@ watch(
 }
 
 .type-bar > span { display: block; height: 100%; }
-.type-bar--feat { background: var(--color-success); }
-.type-bar--fix { background: var(--color-danger); }
+.type-bar--feat { background: #a78bfa; }
+.type-bar--fix { background: #f87171; }
 .type-bar--docs { background: var(--color-info); }
 .type-bar--chore { background: var(--color-warning); }
 .type-bar--other { background: var(--color-text-subtle); }
@@ -1823,8 +1920,8 @@ watch(
 .type-legend span { display: inline-flex; align-items: center; gap: var(--space-1); }
 
 .dot { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
-.dot--feat { background: var(--color-success); }
-.dot--fix { background: var(--color-danger); }
+.dot--feat { background: #a78bfa; }
+.dot--fix { background: #f87171; }
 .dot--docs { background: var(--color-info); }
 .dot--chore { background: var(--color-warning); }
 .dot--other { background: var(--color-text-subtle); }

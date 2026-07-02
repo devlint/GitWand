@@ -1889,6 +1889,33 @@ export async function getGitShortlog(cwd: string): Promise<ShortlogEntry[]> {
     .sort((a, b) => b.count - a.count);
 }
 
+/** Per-author line churn (insertions + deletions) across all branches. */
+export interface AuthorLineStat {
+  /** Raw author email — folded into merged identities on the frontend. */
+  email: string;
+  added: number;
+  deleted: number;
+}
+
+/**
+ * `git log --all --no-merges --numstat` — per-author insertions/deletions
+ * summed over the whole history. Keyed by raw email so the caller can fold the
+ * rows into the same merged-identity clusters the contributor cards use.
+ */
+export async function getGitAuthorLineStats(cwd: string): Promise<AuthorLineStat[]> {
+  if (isTauri()) {
+    return await tauriInvoke<AuthorLineStat[]>("git_author_line_stats", { cwd });
+  }
+  const res = await fetch(
+    `${DEV_SERVER}/api/git-author-line-stats?cwd=${encodeURIComponent(cwd)}`,
+  );
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? `git author line stats failed: ${res.status}`);
+  }
+  return (await res.json()) as AuthorLineStat[];
+}
+
 export interface BranchTopAuthor {
   branch: string;
   name: string;

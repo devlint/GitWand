@@ -280,6 +280,8 @@ const zhCN: Locale = {
     chartCommits: "次提交",
     activityNoCommits: "无活动",
     contribCommits: "提交",
+    contribLinesAdded: "新增",
+    contribLinesDeleted: "删除",
     contribPrs: "PR",
     contribNoCommits: "已加载的历史中没有提交",
     contribNoPrs: "未找到该贡献者的 PR",
