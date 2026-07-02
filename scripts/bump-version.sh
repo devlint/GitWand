@@ -81,6 +81,18 @@ bump_cargo_toml() {
 }
 bump_cargo_toml
 
+# ── Cargo.lock (keep the gitwand-desktop entry in sync with Cargo.toml) ─────
+# `cargo build --locked` (used in CI) fails if Cargo.lock disagrees with
+# Cargo.toml, so the lock file must be refreshed in the same commit as the
+# version bump. `--offline` avoids a network round-trip since only the local
+# package's own version changed, not any dependency.
+if command -v cargo >/dev/null 2>&1; then
+  ( cd apps/desktop/src-tauri && cargo update --offline -p gitwand-desktop --precise "${NEW}" ) \
+    && echo "  ✓ apps/desktop/src-tauri/Cargo.lock"
+else
+  echo "  ⚠ cargo not found — apps/desktop/src-tauri/Cargo.lock NOT updated, fix manually before tagging"
+fi
+
 # ── tauri.conf.json ──────────────────────────────────────────────────────────
 bump apps/desktop/src-tauri/tauri.conf.json \
   "s/\"version\": \"${OLD}\"/\"version\": \"${NEW}\"/"
