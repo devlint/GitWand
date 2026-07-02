@@ -1921,6 +1921,33 @@ export async function getGitShortlog(cwd: string): Promise<ShortlogEntry[]> {
     .sort((a, b) => b.count - a.count);
 }
 
+/** Per-author line churn (insertions + deletions) across all branches. */
+export interface AuthorLineStat {
+  /** Raw author email — folded into merged identities on the frontend. */
+  email: string;
+  added: number;
+  deleted: number;
+}
+
+/**
+ * `git log --all --no-merges --numstat` — per-author insertions/deletions
+ * summed over the whole history. Keyed by raw email so the caller can fold the
+ * rows into the same merged-identity clusters the contributor cards use.
+ */
+export async function getGitAuthorLineStats(cwd: string): Promise<AuthorLineStat[]> {
+  if (isTauri()) {
+    return await tauriInvoke<AuthorLineStat[]>("git_author_line_stats", { cwd });
+  }
+  const res = await fetch(
+    `${DEV_SERVER}/api/git-author-line-stats?cwd=${encodeURIComponent(cwd)}`,
+  );
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? `git author line stats failed: ${res.status}`);
+  }
+  return (await res.json()) as AuthorLineStat[];
+}
+
 export interface BranchTopAuthor {
   branch: string;
   name: string;
@@ -3159,6 +3186,29 @@ export async function gitSubmoduleList(cwd: string): Promise<SubmoduleEntry[]> {
   return res.json();
 }
 
+export interface SubmoduleUpdate {
+  path: string;
+  /** Commits the checked-out submodule commit is behind its branch tip. */
+  behind: number;
+  branch: string | null;
+}
+
+/**
+ * Fetch each initialized submodule and report those whose tracked branch has
+ * new commits ahead of the checked-out one. Network-bound — call on demand
+ * (panel open), never on a poll.
+ */
+export async function gitSubmoduleCheckUpdates(cwd: string): Promise<SubmoduleUpdate[]> {
+  if (isTauri()) {
+    return tauriInvoke<SubmoduleUpdate[]>("git_submodule_check_updates", { cwd });
+  }
+  const res = await devFetch(
+    `${DEV_SERVER}/api/git-submodule-check-updates?cwd=${encodeURIComponent(cwd)}`,
+  );
+  if (!res.ok) throw new Error(`Failed to check submodule updates: ${res.status}`);
+  return res.json();
+}
+
 /** Run `git submodule init`. */
 export async function gitSubmoduleInit(cwd: string): Promise<void> {
   if (isTauri()) {
@@ -3189,6 +3239,23 @@ export async function gitSubmoduleUpdate(
     body: JSON.stringify({ cwd, init, recursive }),
   });
   if (!res.ok) throw new Error(`Failed to update submodules: ${res.status}`);
+}
+
+/**
+ * Pull the latest commits on a single submodule's tracked branch via rebase
+ * (`git submodule update --remote --rebase --init -- <path>`). `path` is relative to `cwd`.
+ */
+export async function gitSubmoduleUpdateOne(cwd: string, path: string): Promise<void> {
+  if (isTauri()) {
+    await tauriInvoke("git_submodule_update_one", { cwd, path });
+    return;
+  }
+  const res = await devFetch(`${DEV_SERVER}/api/git-submodule-update-one`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, path }),
+  });
+  if (!res.ok) throw new Error(`Failed to update submodule: ${res.status}`);
 }
 
 /** Add a new submodule. */

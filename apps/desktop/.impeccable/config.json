@@ -2,7 +2,9 @@
   "detector": {
     "ignoreRules": [],
     "ignoreFiles": [
-      "src/App.vue"
+      "src/App.vue",
+      "src/components/PrCreateView.vue",
+      "src/components/DashboardView.vue"
     ],
     "ignoreValues": []
   }

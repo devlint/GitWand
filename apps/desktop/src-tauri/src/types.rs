@@ -522,7 +522,7 @@ pub struct PullRequestDetail {
 
 /// Describes the current repo's GitHub fork relationship, used by the PR
 /// create view to offer "open against upstream" for forks.
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ForkInfo {
     /// True when `origin` is a fork of another GitHub repo.
@@ -914,6 +914,16 @@ pub struct SubmoduleEntry {
 }
 
 #[derive(Serialize, Clone)]
+pub struct SubmoduleUpdate {
+    pub path: String,
+    /// Number of commits the checked-out submodule commit is behind its
+    /// tracked branch tip after fetching. Only entries with `behind > 0` are
+    /// returned.
+    pub behind: u32,
+    pub branch: Option<String>,
+}
+
+#[derive(Serialize, Clone)]
 pub struct SubmoduleBranch {
     pub name: String,
     pub is_current: bool,
@@ -932,6 +942,17 @@ pub struct ShortlogEntry {
     pub name: String,
     pub email: String,
     pub count: u32,
+}
+
+/// Per-author line churn across all branches — insertions + deletions summed
+/// over every non-merge commit. Keyed by raw author email so the frontend can
+/// fold it into the same merged-identity clusters the contributor cards use.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthorLineStat {
+    pub email: String,
+    pub added: u64,
+    pub deleted: u64,
 }
 
 /// Top contributor (most commits) for a single branch. Powers the

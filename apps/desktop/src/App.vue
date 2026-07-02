@@ -110,7 +110,7 @@ import {
   TOGGLE_GIT_TREE_KEY,
   OPEN_SETTINGS_KEY,
 } from "./composables/branchPickerBridge";
-import { gitStash, gitStashPop, gitStashList, openInEditor, setGitConfig, gitDiscard, gitAddToGitignore, gitDeleteBranch, gitDeleteTag, gitDeleteRemoteTag, gitRemoteInfo, gitUnpushedTags, gitPushTags, gitMergeBase, gitResetToCommit, gitCommitSubmoduleChanges, scratchWorktreeCreate, scratchWorktreeDiscard, scratchWorktreeMergeBack, gitWorktreeList, gitWorktreeRemove, type CommitSubmoduleChange } from "./utils/backend";
+import { gitStash, gitStashPop, gitStashList, openInEditor, setGitConfig, gitDiscard, gitAddToGitignore, gitDeleteBranch, gitDeleteTag, gitDeleteRemoteTag, gitRemoteInfo, gitUnpushedTags, gitPushTags, gitMergeBase, gitResetToCommit, gitCommitSubmoduleChanges, gitSubmoduleCheckUpdates, scratchWorktreeCreate, scratchWorktreeDiscard, scratchWorktreeMergeBack, gitWorktreeList, gitWorktreeRemove, type CommitSubmoduleChange } from "./utils/backend";
 import { useCommitActions } from "./composables/useCommitActions";
 
 const { t } = useI18n();
@@ -323,6 +323,17 @@ const prPanel = usePrPanel(prCwd, {
 provide(PR_PANEL_KEY, prPanel);
 const issuePanel = useIssuePanel(prCwd);
 provide(ISSUE_PANEL_KEY, issuePanel);
+
+// Map of head-branch name → its open PR, for the Git Tree PR badges.
+// Mirrors the branch-selector popover, which shows the same "#<number>" chip.
+const branchPrs = computed<Record<string, { number: number; title: string }>>(() => {
+  const map: Record<string, { number: number; title: string }> = {};
+  for (const pr of prPanel.prs.value) {
+    if (pr.branch) map[pr.branch] = { number: pr.number, title: pr.title };
+  }
+  return map;
+});
+
 
 // Load branches when the PR create form opens (they're needed to compute baseCandidates).
 watch(() => prPanel.showCreateForm.value, (val) => {
@@ -845,6 +856,33 @@ async function loadSubmoduleChanges() {
 
 watch(repoFolderPath, () => { void loadSubmoduleChanges(); }, { immediate: true });
 
+// ─── Submodule update check ──────────────────────────────
+// `submoduleUpdates` maps a submodule path → number of new commits on its
+// tracked branch. Feeds both the Submodules header-button badge and the
+// Submodule panel. Network-bound (one fetch per submodule): run one-shot on
+// repo open and on explicit refresh, never on a poll.
+const submoduleUpdates = ref<Record<string, number>>({});
+
+async function loadSubmoduleUpdates() {
+  const cwd = repoFolderPath.value;
+  if (!cwd) {
+    submoduleUpdates.value = {};
+    return;
+  }
+  try {
+    const found = await gitSubmoduleCheckUpdates(cwd);
+    const map: Record<string, number> = {};
+    for (const u of found) map[u.path] = u.behind;
+    submoduleUpdates.value = map;
+  } catch {
+    submoduleUpdates.value = {};
+  }
+}
+
+watch(repoFolderPath, () => { void loadSubmoduleUpdates(); }, { immediate: true });
+
+const submoduleUpdateCount = computed(() => Object.keys(submoduleUpdates.value).length);
+
 /**
  * Navigate the Git Tree into a submodule. Opens the submodule's working
  * directory as its own repo tab — the tab strip provides the natural
@@ -883,6 +921,9 @@ watch(viewMode, async (mode) => {
   if ((mode === "history" || mode === "graph") && hasRepo.value) {
     await loadLog();
   }
+  // Entering the Git Tree: load PRs (once, SWR, no polling) so branch names get
+  // their "#<number>" badge without the user first opening the PR view.
+  if (mode === "graph" && hasRepo.value) void prPanel.ensurePrsLoaded();
   // Dashboard sidebar needs branches + recent log entries to show
   // pinned branches & activity feed.
   if (mode === "dashboard" && hasRepo.value) {
@@ -2093,6 +2134,10 @@ function notifyBody(ev: LaunchpadEvent): string {
 
 const launchpadPoller = useLaunchpadPoller({
   isEnabled: () =>
+    // Skip work when the Launchpad has been removed from the dock — the user
+    // opted out of that surface, so there's no reason to spend a cross-repo PR
+    // poll (and GitHub quota) on its notifications.
+    !settings.value.dockHideLaunchpad &&
     settings.value.notifications &&
     settings.value.notificationLevel !== "none" &&
     !isOffline.value,
@@ -3020,6 +3065,7 @@ onUnmounted(() => {
       @open-rebase="showRebase = true"
       @open-worktrees="(branch) => { pendingWorktreeBranch = branch; showWorktrees = true; }"
       @open-submodules="showSubmodules = true" @open-submodule="handleOpenSubmodule" @open-search="handleOpenSearch" @open-help="showHelp = true"
+      :submodule-update-count="submoduleUpdateCount"
       :stash-count="stashCount" @open-stash="showStash = true" @open-tags="showTags = true" />
 
     <div class="app-body" :style="{ '--sidebar-width': sidebarWidth + 'px' }">
@@ -3194,6 +3240,8 @@ onUnmounted(() => {
                   :commits="repoLog" :selected-hash="selectedCommitHash" :current-branch="repoStatus?.branch"
                   :fork-point-sha="graphForkPointSha" :repo-stats="repoStats" :branches="branches" :worktree-branches="worktreeBranches" :stashes="stashes"
                   :submodule-changes="submoduleChanges"
+                  :branch-prs="branchPrs"
+                  :cwd="repoFolderPath ?? ''"
                   :has-more="logHasMore" :loading-more="logLoadingMore"
                   :hidden-commit-count="hiddenCommitCount"
                   :pinned-branches="graphPinnedBranches"
@@ -3375,7 +3423,8 @@ onUnmounted(() => {
       @open-tab="(path) => { openTab(path); showWorktrees = false; pendingWorktreeBranch = undefined; pendingQuickCreate = false; }" />
 
     <!-- Submodule panel (uses BaseModal internally → own Teleport + backdrop) -->
-    <SubmodulePanel v-if="showSubmodules && repoFolderPath" :cwd="repoFolderPath" @close="showSubmodules = false"
+    <SubmodulePanel v-if="showSubmodules && repoFolderPath" :cwd="repoFolderPath" :updates="submoduleUpdates"
+      @refresh-updates="loadSubmoduleUpdates" @close="showSubmodules = false"
       @open-tab="(path) => { openTab(path); showSubmodules = false; }" />
 
     <!-- Push + unpushed tags confirmation modal -->

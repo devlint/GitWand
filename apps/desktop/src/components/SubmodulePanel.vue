@@ -3,6 +3,7 @@ import { ref, onMounted } from "vue";
 import {
   gitSubmoduleList,
   gitSubmoduleUpdate,
+  gitSubmoduleUpdateOne,
   gitSubmoduleAdd,
   type SubmoduleEntry,
 } from "../utils/backend";
@@ -11,11 +12,15 @@ import BaseModal from "./BaseModal.vue";
 
 const props = defineProps<{
   cwd: string;
+  /** path → number of new commits on the tracked branch. Owned by the parent. */
+  updates: Record<string, number>;
 }>();
 
 const emit = defineEmits<{
   (e: "close"): void;
   (e: "open-tab", path: string): void;
+  /** Ask the parent to re-run the (network-bound) submodule update check. */
+  (e: "refresh-updates"): void;
 }>();
 
 const { t } = useI18n();
@@ -24,6 +29,8 @@ const submodules = ref<SubmoduleEntry[]>([]);
 const loading = ref(false);
 const updating = ref(false);
 const error = ref<string | null>(null);
+/** path of the submodule currently being updated on its own, if any. */
+const updatingPath = ref<string | null>(null);
 
 // Add form
 const showForm = ref(false);
@@ -47,12 +54,34 @@ async function initUpdateAll() {
   updating.value = true;
   error.value = null;
   try {
+    // First init + check out the pinned SHA for every submodule (handles the
+    // uninitialized ones).
     await gitSubmoduleUpdate(props.cwd, true, true);
+    // Then rebase-pull the latest branch commits for the submodules that have
+    // updates available, so "Update all" actually advances them.
+    for (const path of Object.keys(props.updates)) {
+      await gitSubmoduleUpdateOne(props.cwd, path);
+    }
     await loadSubmodules();
+    emit("refresh-updates");
   } catch (err: any) {
     error.value = t("submodule.errorUpdate").replace("{0}", String(err?.message ?? err));
   } finally {
     updating.value = false;
+  }
+}
+
+async function updateOne(sub: SubmoduleEntry) {
+  updatingPath.value = sub.path;
+  error.value = null;
+  try {
+    await gitSubmoduleUpdateOne(props.cwd, sub.path);
+    await loadSubmodules();
+    emit("refresh-updates");
+  } catch (err: any) {
+    error.value = t("submodule.errorUpdate").replace("{0}", String(err?.message ?? err));
+  } finally {
+    updatingPath.value = null;
   }
 }
 
@@ -86,7 +115,11 @@ function statusLabel(status: SubmoduleEntry["status"]): string {
 
 const uninitCount = () => submodules.value.filter(s => s.status === "uninitialized").length;
 
-onMounted(loadSubmodules);
+onMounted(() => {
+  void loadSubmodules();
+  // Refresh the update check on open so badges reflect the current remote state.
+  emit("refresh-updates");
+});
 </script>
 
 <template>
@@ -197,9 +230,15 @@ onMounted(loadSubmodules);
             <div class="sm-item-top">
               <span class="sm-item-path">{{ sub.path }}</span>
               <span
+                v-if="!(sub.status === 'clean' && updates[sub.path])"
                 class="sm-status-badge"
                 :class="`status-${sub.status}`"
               >{{ statusLabel(sub.status) }}</span>
+              <span
+                v-if="updates[sub.path]"
+                class="sm-status-badge status-outdated"
+                :title="t('submodule.updateAvailableTooltip').replace('{0}', String(updates[sub.path]))"
+              >{{ t("submodule.updateAvailable") }}</span>
             </div>
             <div class="sm-item-url" :title="sub.url">{{ sub.url }}</div>
             <div class="sm-item-meta">
@@ -214,6 +253,15 @@ onMounted(loadSubmodules);
             </div>
           </div>
           <div class="sm-item-actions">
+            <button
+              v-if="updates[sub.path]"
+              class="bm-btn bm-btn--primary"
+              :disabled="updatingPath === sub.path"
+              :title="t('submodule.updateOneTooltip')"
+              @click="updateOne(sub)"
+            >
+              {{ updatingPath === sub.path ? t("submodule.updating") : t("submodule.update") }}
+            </button>
             <button
               class="bm-btn bm-btn--ghost"
               :disabled="sub.status === 'uninitialized'"
@@ -404,6 +452,7 @@ onMounted(loadSubmodules);
 .status-clean        { background: var(--color-success-soft, rgba(34,197,94,0.12)); color: var(--color-success, #16a34a); }
 .status-modified     { background: var(--color-warning-soft, rgba(234,179,8,0.12)); color: var(--color-warning, #ca8a04); }
 .status-uninitialized { background: var(--color-danger-soft); color: var(--color-danger); }
+.status-outdated     { background: var(--color-accent-soft); color: var(--color-accent); }
 
 .sm-item-url {
   font-size: var(--font-size-xs);

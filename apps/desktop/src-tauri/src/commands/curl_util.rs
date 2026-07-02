@@ -137,9 +137,97 @@ pub(crate) fn curl_with_status(
     Ok((status, body))
 }
 
+/// Like [`curl_with_status`], but also dumps the response headers (`-D -`) so the
+/// caller can read values such as `ETag`. Returns `(status, headers, body)` where
+/// `headers` maps lowercased header names to their values (case-insensitive
+/// lookup). Works across curl versions — no dependency on newer `%header{}` /
+/// `%{header_json}` write-out variables.
+///
+/// We don't follow redirects (no `-L`), so exactly one header block precedes the
+/// body; the trailing status marker is stripped before splitting the two.
+pub(crate) fn curl_with_headers(
+    method: &str,
+    url: &str,
+    auth_config: Option<&str>,
+    body_json: Option<&str>,
+    extra_headers: &[&str],
+    accept: &str,
+) -> Result<(i32, std::collections::HashMap<String, String>, String), String> {
+    const MARKER: &str = "\n__GW_HTTP_STATUS__";
+    let mut args: Vec<String> = vec![
+        "-s".to_string(),
+        "-S".to_string(),
+        "-D".to_string(), "-".to_string(), // dump response headers to stdout
+        "-X".to_string(), method.to_string(),
+        "-H".to_string(), format!("Accept: {}", accept),
+    ];
+    for h in extra_headers {
+        args.push("-H".to_string());
+        args.push(h.to_string());
+    }
+    if auth_config.is_some() {
+        args.push("--config".to_string());
+        args.push("-".to_string());
+    }
+    if let Some(b) = body_json {
+        args.push("-H".to_string());
+        args.push("Content-Type: application/json".to_string());
+        args.push("-d".to_string());
+        args.push(b.to_string());
+    }
+    args.push("-w".to_string());
+    args.push(format!("{}%{{http_code}}", MARKER));
+    args.push(url.to_string());
+
+    let output = run_curl(&args, auth_config)?;
+    curl_transport_check(
+        output.status.success(),
+        output.status.code(),
+        &String::from_utf8_lossy(&output.stderr),
+    )?;
+    let combined = String::from_utf8(output.stdout)
+        .map_err(|e| format!("curl returned invalid UTF-8: {}", e))?;
+    let (head_and_body, status) = match combined.rsplit_once(MARKER) {
+        Some((hb, s)) => (hb, s.trim().parse::<i32>().unwrap_or(0)),
+        None => (combined.as_str(), 0),
+    };
+    // Header block is terminated by a blank line; the body is everything after.
+    let (headers_raw, body) = head_and_body
+        .split_once("\r\n\r\n")
+        .or_else(|| head_and_body.split_once("\n\n"))
+        .unwrap_or(("", head_and_body));
+    let headers = parse_response_headers(headers_raw);
+    Ok((status, headers, body.to_string()))
+}
+
+/// Parse a raw HTTP header block into a lowercased-key map. The `HTTP/…` status
+/// line and any malformed (colon-less) lines are skipped.
+fn parse_response_headers(raw: &str) -> std::collections::HashMap<String, String> {
+    let mut map = std::collections::HashMap::new();
+    for line in raw.lines() {
+        let line = line.trim_end();
+        if line.is_empty() || line.starts_with("HTTP/") {
+            continue;
+        }
+        if let Some((k, v)) = line.split_once(':') {
+            map.insert(k.trim().to_ascii_lowercase(), v.trim().to_string());
+        }
+    }
+    map
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_headers_lowercases_and_skips_status_line() {
+        let raw = "HTTP/2 200\r\nETag: \"abc123\"\r\nContent-Type: application/json";
+        let h = parse_response_headers(raw);
+        assert_eq!(h.get("etag").map(String::as_str), Some("\"abc123\""));
+        assert_eq!(h.get("content-type").map(String::as_str), Some("application/json"));
+        assert!(!h.contains_key("http/2 200"));
+    }
 
     #[test]
     fn transport_ok_when_curl_succeeds() {

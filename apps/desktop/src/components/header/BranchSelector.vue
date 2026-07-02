@@ -24,7 +24,7 @@
  * against the wrapper class on this component's root, so clicks on
  * either the trigger OR the popover count as "inside".
  */
-import { ref, computed, inject, nextTick, onMounted, onUnmounted, watch, defineAsyncComponent, type Ref } from "vue";
+import { ref, computed, inject, nextTick, onMounted, onUnmounted, watch, toRef, defineAsyncComponent, type Ref } from "vue";
 import { gitSubmoduleList, gitSubmoduleBranches, getGitLog, getGitBranchTopAuthors, type GitBranch, type SubmoduleEntry, type SubmoduleBranch, type BranchTopAuthor } from "../../utils/backend";
 import { branchSort } from "../../utils/branchSort";
 import { avatarStyle, avatarInitials } from "../../composables/useAvatar";
@@ -38,6 +38,8 @@ import { useBranchName } from "../../composables/useBranchName";
 import { usePinnedBranches } from "../../composables/usePinnedBranches";
 import { useArchivedBranches } from "../../composables/useArchivedBranches";
 import { BRANCH_CREATE_REQUEST_KEY } from "../../composables/branchPickerBridge";
+import { PR_PANEL_KEY, type PrPanelState } from "../../composables/usePrPanel";
+import { useBranchPrSearch } from "../../composables/useBranchPrSearch";
 // Lazy: the merge-preview panel only mounts when the user expands a branch's
 // preview row inside the (already v-if'd) popover. BranchSelector is eager via
 // AppHeader, so importing this 600-line panel statically would pin it in main.
@@ -109,6 +111,15 @@ function statLabel(kind: StatKind, n: number): string {
 // ─── Popover state ───────────────────────────────────────────────
 const showPopover = ref(false);
 const branchFilter = ref("");
+
+const prPanel = inject<PrPanelState>(PR_PANEL_KEY)!;
+const prSearch = useBranchPrSearch({
+  cwd: toRef(props, "cwd"),
+  filterText: branchFilter,
+  prs: prPanel.prs,
+  forge: prPanel.forge,
+});
+
 const showCreate = ref(false);
 const newBranchName = ref("");
 
@@ -179,6 +190,9 @@ function togglePopover() {
     emit("loadBranches");
     void loadSubmodules();
     void loadTopAuthors();
+    // Load PRs (once, SWR, no polling) so branch rows show their "#<number>"
+    // badge without the user first opening the PR view.
+    void prPanel.ensurePrsLoaded();
     void nextTick(recomputeMaxHeight);
   }
 }
@@ -298,14 +312,22 @@ const localBranches = computed(() => {
     .filter((b) => b.isCurrent || !archivedSet.has(b.name))
     // Pinned branches live only in the Pinned section — drop them here.
     .filter((b) => !pinnedSet.has(b.name))
-    .filter((b) => !branchFilter.value || b.name.toLowerCase().includes(branchFilter.value.toLowerCase()))
+    .filter((b) =>
+      prSearch.prNumberQuery.value !== null
+        ? prSearch.matchesResolvedBranch(b.name, false)
+        : !branchFilter.value || b.name.toLowerCase().includes(branchFilter.value.toLowerCase()),
+    )
     .sort(branchSort);
 });
 
 const remoteBranches = computed(() =>
   props.branches
     .filter((b) => b.isRemote)
-    .filter((b) => !branchFilter.value || b.name.toLowerCase().includes(branchFilter.value.toLowerCase()))
+    .filter((b) =>
+      prSearch.prNumberQuery.value !== null
+        ? prSearch.matchesResolvedBranch(b.name, true)
+        : !branchFilter.value || b.name.toLowerCase().includes(branchFilter.value.toLowerCase()),
+    )
     .sort(branchSort),
 );
 
@@ -317,7 +339,11 @@ const pinnedBranches = computed(() => {
   return pins.pinned.value
     .map((name) => byName.get(name))
     .filter((b): b is GitBranch => !!b)
-    .filter((b) => !branchFilter.value || b.name.toLowerCase().includes(branchFilter.value.toLowerCase()));
+    .filter((b) =>
+      prSearch.prNumberQuery.value !== null
+        ? prSearch.matchesResolvedBranch(b.name, false)
+        : !branchFilter.value || b.name.toLowerCase().includes(branchFilter.value.toLowerCase()),
+    );
 });
 function togglePin(name: string) {
   if (pins.isPinned(name)) pins.unpin(name);
@@ -625,7 +651,11 @@ onUnmounted(() => {
                 :style="avatarStyle(authorFor(branch.name)!.email || authorFor(branch.name)!.name)"
                 :title="t('branches.topContributor', authorFor(branch.name)!.name, authorFor(branch.name)!.count)"
               >{{ avatarInitials(authorFor(branch.name)!.name) }}</span>
-              <span class="bp-item-name mono" :title="branch.name"><span class="bp-item-name__text">{{ branch.name }}</span></span>
+              <span class="bp-item-name mono" :title="branch.name"><span class="bp-item-name__text">{{ branch.name }}</span><span
+                v-if="prSearch.prFor(branch.name, false)"
+                class="bp-pr-badge"
+                :title="t('branches.prBadgeTitle', prSearch.prFor(branch.name, false)!.number, prSearch.prFor(branch.name, false)!.title)"
+              >#{{ prSearch.prFor(branch.name, false)!.number }}</span></span>
               <span v-if="branch.ahead > 0 || branch.behind > 0" class="bp-item-meta muted">
                 <span v-if="branch.ahead > 0">&uarr;{{ branch.ahead }}</span>
                 <span v-if="branch.behind > 0">&darr;{{ branch.behind }}</span>
@@ -673,7 +703,11 @@ onUnmounted(() => {
                   <circle cx="11.5" cy="8.5" r="2.5" />
                   <rect x="7.5" y="8" width="1" height="6" />
                 </svg>
-                <span class="bp-item-name mono" :title="branch.name"><span class="bp-item-name__text">{{ branch.name }}</span></span>
+                <span class="bp-item-name mono" :title="branch.name"><span class="bp-item-name__text">{{ branch.name }}</span><span
+                  v-if="prSearch.prFor(branch.name, false)"
+                  class="bp-pr-badge"
+                  :title="t('branches.prBadgeTitle', prSearch.prFor(branch.name, false)!.number, prSearch.prFor(branch.name, false)!.title)"
+                >#{{ prSearch.prFor(branch.name, false)!.number }}</span></span>
                 <span v-if="branch.ahead > 0 || branch.behind > 0" class="bp-item-meta muted">
                   <span v-if="branch.ahead > 0">&uarr;{{ branch.ahead }}</span>
                   <span v-if="branch.behind > 0">&darr;{{ branch.behind }}</span>
@@ -792,11 +826,28 @@ onUnmounted(() => {
                 :style="avatarStyle(authorFor(branch.name)!.email || authorFor(branch.name)!.name)"
                 :title="t('branches.topContributor', authorFor(branch.name)!.name, authorFor(branch.name)!.count)"
               >{{ avatarInitials(authorFor(branch.name)!.name) }}</span>
-              <span class="bp-item-name mono" :title="branch.name"><span class="bp-item-name__text">{{ branch.name }}</span></span>
+              <span class="bp-item-name mono" :title="branch.name"><span class="bp-item-name__text">{{ branch.name }}</span><span
+                v-if="prSearch.prFor(branch.name, true)"
+                class="bp-pr-badge"
+                :title="t('branches.prBadgeTitle', prSearch.prFor(branch.name, true)!.number, prSearch.prFor(branch.name, true)!.title)"
+              >#{{ prSearch.prFor(branch.name, true)!.number }}</span></span>
             </li>
           </ul>
         </div>
-        <div v-if="localBranches.length === 0 && remoteBranches.length === 0" class="bp-empty">
+        <div v-if="prSearch.prNumberQuery.value !== null && prSearch.lookupLoading.value" class="bp-empty">
+          <div class="bp-spinner"></div>
+          <span class="muted">{{ t('branches.prLookupLoading', prSearch.prNumberQuery.value) }}</span>
+        </div>
+        <div
+          v-else-if="prSearch.prNumberQuery.value !== null && pinnedBranches.length === 0 && localBranches.length === 0 && remoteBranches.length === 0"
+          class="bp-empty"
+        >
+          <span class="muted">{{ t('branches.prLookupNotFound', prSearch.prNumberQuery.value) }}</span>
+        </div>
+        <div
+          v-else-if="prSearch.prNumberQuery.value === null && localBranches.length === 0 && remoteBranches.length === 0"
+          class="bp-empty"
+        >
           <span class="muted">{{ t('branches.noBranch') }}</span>
         </div>
 
@@ -1187,6 +1238,19 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 
+.bp-pr-badge {
+  flex-shrink: 0;
+  margin-left: var(--space-2);
+  padding: 1px 6px;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+}
+
 /* Fused action group — reads as one segmented control, like the
    branch-trigger + "new branch" pair. Always visible (no hover reveal). */
 .bp-item-actions {
@@ -1312,6 +1376,10 @@ onUnmounted(() => {
   justify-content: center;
   padding: var(--space-7);
   font-size: var(--font-size-base);
+}
+.bp-empty:has(.bp-spinner) {
+  flex-direction: column;
+  gap: var(--space-3);
 }
 
 /* ─── Cherry-pick commit picker ─────────────────────────── */
