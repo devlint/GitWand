@@ -488,6 +488,7 @@ pub fn run() {
             commands::ops::git_clone,
             commands::ops::gh_fork,
             commands::ops::git_shortlog,
+            commands::ops::git_author_line_stats,
             commands::ops::git_branch_top_authors,
             commands::ops::gh_current_user,
             commands::ops::pr_files,

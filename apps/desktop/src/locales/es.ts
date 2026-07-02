@@ -277,6 +277,8 @@ const es: Locale = {
     chartCommits: "commits",
     activityNoCommits: "Sin actividad",
     contribCommits: "Commits",
+    contribLinesAdded: "Añadidas",
+    contribLinesDeleted: "Eliminadas",
     contribPrs: "PR",
     contribNoCommits: "Sin commits en el historial cargado",
     contribNoPrs: "No se encontraron PR para este contribuidor",
