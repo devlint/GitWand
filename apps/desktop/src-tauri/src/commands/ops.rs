@@ -650,8 +650,54 @@ pub(crate) async fn git_discard(cwd: String, paths: Vec<String>, untracked: bool
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(format!("git checkout failed: {}", stderr));
         }
+
+        // `git checkout -- <submodule>` restores the gitlink in the index tree
+        // but does NOT move the submodule's checked-out HEAD, so a submodule
+        // pointer change would survive the discard. For any discarded path that
+        // is a declared submodule, run `git submodule update --force` so its
+        // working HEAD is reset to the SHA recorded in the superproject index.
+        let sub_paths = declared_submodule_paths(&cwd);
+        let to_reset: Vec<&String> = paths.iter().filter(|p| sub_paths.contains(*p)).collect();
+        if !to_reset.is_empty() {
+            let mut cmd = git_cmd();
+            cmd.args(["submodule", "update", "--force", "--"]).current_dir(&cwd);
+            for p in &to_reset {
+                cmd.arg(p);
+            }
+            let output = cmd
+                .output()
+                .map_err(|e| format!("Failed to run git submodule update: {}", e))?;
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(format!("git submodule update failed: {}", stderr));
+            }
+        }
     }
     Ok(())
+}
+
+/// Paths of submodules declared in `.gitmodules`, relative to the repo root.
+/// Returns an empty set when there are no submodules.
+fn declared_submodule_paths(cwd: &str) -> std::collections::HashSet<String> {
+    let mut out = std::collections::HashSet::new();
+    if !std::path::Path::new(cwd).join(".gitmodules").exists() {
+        return out;
+    }
+    if let Ok(cfg) = git_cmd()
+        .args(["config", "--file", ".gitmodules", "--get-regexp", r"\.path$"])
+        .current_dir(cwd)
+        .output()
+    {
+        if cfg.status.success() {
+            for line in String::from_utf8_lossy(&cfg.stdout).lines() {
+                // Each line: "submodule.<name>.path <value>"
+                if let Some((_, value)) = line.split_once(' ') {
+                    out.insert(value.trim().to_string());
+                }
+            }
+        }
+    }
+    out
 }
 
 // ─── Git branches ──────────────────────────────────────────────

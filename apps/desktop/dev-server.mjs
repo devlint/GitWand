@@ -2148,6 +2148,30 @@ async function handleRequest(req, res) {
             encoding: "utf-8",
             shell: true,
           });
+          // A submodule pointer change is not reset by `git restore`; reset the
+          // submodule's working HEAD to the index SHA for any declared submodule.
+          let subPaths = new Set();
+          if (existsSync(join(resolvedCwd, ".gitmodules"))) {
+            try {
+              const r = spawnSync(GIT, ["config", "--file", ".gitmodules", "--get-regexp", "\\.path$"], {
+                cwd: resolvedCwd,
+                encoding: "utf-8",
+              });
+              if (r.status === 0) {
+                for (const line of r.stdout.split("\n")) {
+                  const sp = line.indexOf(" ");
+                  if (sp !== -1) subPaths.add(line.slice(sp + 1).trim());
+                }
+              }
+            } catch { /* no submodules */ }
+          }
+          const toReset = paths.filter((p) => subPaths.has(p));
+          if (toReset.length) {
+            spawnSync(GIT, ["submodule", "update", "--force", "--", ...toReset], {
+              cwd: resolvedCwd,
+              encoding: "utf-8",
+            });
+          }
         }
         return jsonResponse(req, res, { ok: true });
       } catch (err) {

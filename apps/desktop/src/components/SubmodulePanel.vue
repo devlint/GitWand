@@ -54,7 +54,14 @@ async function initUpdateAll() {
   updating.value = true;
   error.value = null;
   try {
+    // First init + check out the pinned SHA for every submodule (handles the
+    // uninitialized ones).
     await gitSubmoduleUpdate(props.cwd, true, true);
+    // Then rebase-pull the latest branch commits for the submodules that have
+    // updates available, so "Update all" actually advances them.
+    for (const path of Object.keys(props.updates)) {
+      await gitSubmoduleUpdateOne(props.cwd, path);
+    }
     await loadSubmodules();
     emit("refresh-updates");
   } catch (err: any) {
