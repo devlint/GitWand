@@ -58,6 +58,49 @@ export async function gravatarUrl(email: string | null | undefined, size = 48): 
   return `https://www.gravatar.com/avatar/${hash}?d=404&s=${size}`;
 }
 
+/**
+ * Best-effort forge avatar URL for a user **login** (not a display name).
+ *
+ * Forges that expose a stable public login→avatar endpoint get a direct URL;
+ * the rest return `null` so the caller's cascade falls through to Gravatar /
+ * colored initials. Only GitHub is wired for now (`github.com/{login}.png`,
+ * public, no auth, redirects to the current avatar). A value containing spaces
+ * is treated as a display name — not a login — and yields `null`.
+ */
+export function forgeAvatarUrl(
+  forge: string | null | undefined,
+  login: string | null | undefined,
+  size = 48,
+): string | null {
+  const l = (login ?? "").trim();
+  if (!l || /\s/.test(l)) return null;
+  switch (forge) {
+    case "github":
+      return `https://github.com/${encodeURIComponent(l)}.png?size=${size * 2}`;
+    default:
+      return null;
+  }
+}
+
+/**
+ * GitHub avatar derived from a commit **email**, or `null`.
+ *
+ * GitHub-authored commits typically carry a `users.noreply.github.com` email
+ * that embeds the login — either `{id}+{login}@…` (modern, privacy-on) or the
+ * legacy `{login}@…`. The `{id}+` form is the most reliable: `avatars.githubusercontent.com/u/{id}`
+ * addresses the user by numeric id directly. Otherwise we fall back to the
+ * login endpoint. Non-GitHub emails yield `null` so the caller cascades to
+ * Gravatar / initials. No network/API — pure string parse.
+ */
+export function githubAvatarFromEmail(email: string | null | undefined, size = 48): string | null {
+  const e = (email ?? "").trim().toLowerCase();
+  const m = /^(?:(\d+)\+)?([a-z0-9-]+)@users\.noreply\.github\.com$/.exec(e);
+  if (!m) return null;
+  const [, id, login] = m;
+  if (id) return `https://avatars.githubusercontent.com/u/${id}?size=${size * 2}`;
+  return `https://github.com/${encodeURIComponent(login)}.png?size=${size * 2}`;
+}
+
 export function useAvatar() {
-  return { avatarHue, avatarInitials, avatarStyle, gravatarUrl };
+  return { avatarHue, avatarInitials, avatarStyle, gravatarUrl, forgeAvatarUrl, githubAvatarFromEmail };
 }

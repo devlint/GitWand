@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch, toRef, inject } from "vue";
 import { saveSettings as persistAppSettings } from "../composables/useSettings";
-import { avatarStyle } from "../composables/useAvatar";
+import { avatarStyle, forgeAvatarUrl } from "../composables/useAvatar";
 import Avatar from "./Avatar.vue";
 import { useLaunchpadWip } from "../composables/useLaunchpadWip";
 import { useLaunchpadPrs } from "../composables/useLaunchpadPrs";
@@ -541,7 +541,7 @@ watch(scopedRepos, () => {
                     <path d="M4 5.6v4.8M12 9.6V11a1.5 1.5 0 0 1-1.5 1.5H8M12 6.4 12 5" />
                   </svg>
                 </span>
-                <Avatar class="launchpad-view__inbox-avatar" :name="item.pr.author" />
+                <Avatar class="launchpad-view__inbox-avatar" :name="item.pr.author" :url="forgeAvatarUrl(item.pr.forge, item.pr.author)" />
                 <div class="launchpad-view__inbox-body">
                   <div class="launchpad-view__inbox-line1">
                     <button
@@ -610,7 +610,7 @@ watch(scopedRepos, () => {
                     <circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none" />
                   </svg>
                 </span>
-                <Avatar class="launchpad-view__inbox-avatar" :name="item.issue.author" />
+                <Avatar class="launchpad-view__inbox-avatar" :name="item.issue.author" :url="forgeAvatarUrl(item.issue.forge, item.issue.author)" />
                 <div class="launchpad-view__inbox-body">
                   <div class="launchpad-view__inbox-line1">
                     <button
@@ -729,6 +729,7 @@ watch(scopedRepos, () => {
               <Avatar
                 class="launchpad-view__team-avatar"
                 :name="member.login"
+                :url="forgeAvatarUrl('github', member.login)"
               />
               <span
                 class="launchpad-view__team-login"
@@ -799,6 +800,7 @@ watch(scopedRepos, () => {
               <Avatar
                 class="launchpad-view__team-avatar"
                 :name="member.login"
+                :url="forgeAvatarUrl('github', member.login)"
               />
               <span
                 class="launchpad-view__team-login"

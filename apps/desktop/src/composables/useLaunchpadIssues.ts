@@ -13,10 +13,17 @@ export type IssueFilter = "" | "assigned" | "mentioned" | "created";
 const FILTERS = ["assigned", "mentioned", "created"] as const;
 type ConcreteFilter = (typeof FILTERS)[number];
 
+/** WorkspaceRepoIssues plus the forge that produced it (for avatar resolution). */
+interface WorkspaceRepoIssuesWithForge extends WorkspaceRepoIssues {
+  forge?: ForgeName;
+}
+
 /** An issue enriched with its repo context (for flat list rendering). */
 export interface IssueWithRepo extends Issue {
   repoName: string;
   repoPath: string;
+  /** Forge that owns this issue — drives the forge avatar lookup. */
+  forge?: ForgeName;
 }
 
 /**
@@ -35,7 +42,7 @@ export interface IssueWithRepo extends Issue {
  *     a stable number that doesn't jump around when you change sub-filter.
  */
 export function useLaunchpadIssues() {
-  const reposByFilter = ref<Record<ConcreteFilter, WorkspaceRepoIssues[]>>({
+  const reposByFilter = ref<Record<ConcreteFilter, WorkspaceRepoIssuesWithForge[]>>({
     assigned: [],
     mentioned: [],
     created: [],
@@ -50,13 +57,13 @@ export function useLaunchpadIssues() {
   const { isPinned, isSnoozed } = useLaunchpadPins();
 
   /** Repos for the active filter — used for per-repo error display. */
-  const repos = computed<WorkspaceRepoIssues[]>(
+  const repos = computed<WorkspaceRepoIssuesWithForge[]>(
     () => reposByFilter.value[(activeFilter.value || "assigned") as ConcreteFilter] ?? []
   );
 
-  function flatten(list: WorkspaceRepoIssues[]): IssueWithRepo[] {
+  function flatten(list: WorkspaceRepoIssuesWithForge[]): IssueWithRepo[] {
     return list.flatMap((r) =>
-      r.issues.map((issue) => ({ ...issue, repoName: r.repoName, repoPath: r.repoPath }))
+      r.issues.map((issue) => ({ ...issue, repoName: r.repoName, repoPath: r.repoPath, forge: r.forge }))
     );
   }
 
@@ -103,9 +110,9 @@ export function useLaunchpadIssues() {
         workspaceRepos.map(async (repo) => ({ repo, provider: await forgeForRepo(repo.path) }))
       );
 
-      async function listFor(filter: ConcreteFilter): Promise<WorkspaceRepoIssues[]> {
+      async function listFor(filter: ConcreteFilter): Promise<WorkspaceRepoIssuesWithForge[]> {
         const out = await Promise.all(
-          resolved.map(async ({ repo, provider }): Promise<WorkspaceRepoIssues | null> => {
+          resolved.map(async ({ repo, provider }): Promise<WorkspaceRepoIssuesWithForge | null> => {
             const forge = provider.name as ForgeName;
             if (!isForgeConnected(forge)) {
               unconnected.add(forge);
@@ -114,16 +121,16 @@ export function useLaunchpadIssues() {
             if (typeof provider.listIssues !== "function") return null; // Azure: unsupported
             try {
               const issues = await provider.listIssues(repo.path, { filter, limit: 100 });
-              return { repoPath: repo.path, repoName: repo.name, issues, filter, error: null };
+              return { repoPath: repo.path, repoName: repo.name, issues, filter, error: null, forge };
             } catch (e) {
               return {
                 repoPath: repo.path, repoName: repo.name, issues: [], filter,
-                error: (e as Error).message ?? String(e),
+                error: (e as Error).message ?? String(e), forge,
               };
             }
           })
         );
-        return out.filter((r): r is WorkspaceRepoIssues => r !== null);
+        return out.filter((r): r is WorkspaceRepoIssuesWithForge => r !== null);
       }
 
       const [assigned, mentioned, created] = await Promise.all([

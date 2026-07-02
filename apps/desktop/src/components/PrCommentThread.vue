@@ -12,6 +12,7 @@ import type { PrReviewComment } from "../utils/backend";
 import { renderMarkdown, onMarkdownLinkClick } from "../composables/useSafeHtml";
 import { useI18n } from "../composables/useI18n";
 import Avatar from "./Avatar.vue";
+import { forgeAvatarUrl } from "../composables/useAvatar";
 import PrReactions from "./PrReactions.vue";
 
 const { t } = useI18n();
@@ -123,7 +124,7 @@ function timeAgo(dateStr: string): string {
     >
       <!-- Header -->
       <div class="pct-comment-header">
-        <Avatar class="pct-avatar" :name="comment.author" />
+        <Avatar class="pct-avatar" :name="comment.author" :url="forgeAvatarUrl(forgeName, comment.author)" />
         <span class="pct-author">{{ comment.author }}</span>
         <span class="pct-time" :title="comment.created_at">{{ timeAgo(comment.created_at) }}</span>
         <div class="pct-actions" v-if="comment.author === currentUser || !currentUser">

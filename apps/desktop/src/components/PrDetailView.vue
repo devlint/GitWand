@@ -15,6 +15,7 @@ import { computed, inject, nextTick, ref, onMounted, onUnmounted, watch } from "
 import { PR_PANEL_KEY, isMergeConflict, type PrPanelState } from "../composables/usePrPanel";
 import { renderMarkdown, onMarkdownLinkClick } from "../composables/useSafeHtml";
 import Avatar from "./Avatar.vue";
+import { forgeAvatarUrl } from "../composables/useAvatar";
 import { openExternalUrl } from "../utils/backend";
 import { useI18n } from "../composables/useI18n";
 import PrInlineDiff from "./PrInlineDiff.vue";
@@ -396,7 +397,7 @@ function commentTimeAgo(dateStr: string): string {
 
         <div class="pdv-hero-meta">
           <span class="pdv-author">
-            <Avatar class="pdv-avatar" :name="p.prDetail.value.author" />
+            <Avatar class="pdv-avatar" :name="p.prDetail.value.author" :url="forgeAvatarUrl(p.forge.value.name, p.prDetail.value.author)" />
             <span class="pdv-author-name">{{ p.prDetail.value.author }}</span>
           </span>
           <span class="pdv-meta-sep" aria-hidden="true">·</span>
@@ -619,7 +620,7 @@ function commentTimeAgo(dateStr: string): string {
             <h2 class="pdv-section-label">{{ t('pr.detail.reviewers') }}</h2>
             <div class="pdv-chips">
               <span v-for="r in p.prDetail.value.reviewers" :key="r" class="pdv-chip pdv-chip--reviewer">
-                <Avatar class="pdv-chip-avatar" :name="r" />
+                <Avatar class="pdv-chip-avatar" :name="r" :url="forgeAvatarUrl(p.forge.value.name, r)" />
                 {{ r }}
               </span>
             </div>
@@ -698,7 +699,7 @@ function commentTimeAgo(dateStr: string): string {
                   :class="item.verdictCls"
                 >
                   <div class="pdv-comment-head">
-                    <Avatar class="pdv-comment-avatar" :name="item.author" />
+                    <Avatar class="pdv-comment-avatar" :name="item.author" :url="forgeAvatarUrl(p.forge.value.name, item.author)" />
                     <span class="pdv-comment-author">{{ item.author }}</span>
                     <span class="pdv-review-verdict">{{ item.verdictLabel }}</span>
                     <button
@@ -732,7 +733,7 @@ function commentTimeAgo(dateStr: string): string {
                 <!-- Inline / issue comment -->
                 <li v-else :key="`comment-${item.path}#${item.id}`" class="pdv-comment">
                   <div class="pdv-comment-head">
-                    <Avatar class="pdv-comment-avatar" :name="item.author" />
+                    <Avatar class="pdv-comment-avatar" :name="item.author" :url="forgeAvatarUrl(p.forge.value.name, item.author)" />
                     <span class="pdv-comment-author">{{ item.author }}</span>
                     <button
                       v-if="commentHref(item)"

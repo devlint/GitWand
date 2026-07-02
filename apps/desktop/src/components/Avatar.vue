@@ -1,23 +1,26 @@
 <script setup lang="ts">
 /**
- * Avatar — app-wide avatar disk with photo + colored-initials fallback.
+ * Avatar — app-wide avatar disk with a cascading photo + colored-initials
+ * fallback chain.
  *
- * Renders a profile photo when one is available (an explicit forge `url`, else
- * a Gravatar derived from `email`) and falls back to the deterministic
- * colored-initials disk (see composables/useAvatar) when there is no photo or
- * it fails to load. Single root <span>, so the caller's sizing class (width /
- * height / border-radius / font-size) falls through and styles it — drop-in for
- * the previous `<span :style="avatarStyle(k)">{{ initials(k) }}</span>` markup.
+ * Tries, in order: the explicit forge `url`, then a Gravatar derived from
+ * `email`, then the deterministic colored-initials disk (see
+ * composables/useAvatar). Each photo source that fails to load (or is
+ * unavailable) advances to the next stage — so a broken forge avatar still
+ * gets a chance at Gravatar before falling back to initials. Single root
+ * <span>, so the caller's sizing class (width / height / border-radius /
+ * font-size) falls through and styles it — drop-in for the previous
+ * `<span :style="avatarStyle(k)">{{ initials(k) }}</span>` markup.
  */
 import { computed, ref, watch } from "vue";
-import { avatarInitials, avatarStyle, gravatarUrl } from "../composables/useAvatar";
+import { avatarInitials, avatarStyle, gravatarUrl, githubAvatarFromEmail } from "../composables/useAvatar";
 
 const props = defineProps<{
   /** Display name — source for the initials and (with email) the color key. */
   name?: string | null;
   /** Email — used for the Gravatar lookup and preferred as the color key. */
   email?: string | null;
-  /** Explicit photo URL (e.g. a forge avatar); takes precedence over Gravatar. */
+  /** Explicit photo URL (e.g. a forge avatar); tried before Gravatar. */
   url?: string | null;
   /** Rendered size hint passed to Gravatar (CSS still controls display size). */
   size?: number;
@@ -27,23 +30,34 @@ const props = defineProps<{
 const colorKey = computed(() => props.email || props.name || "");
 const initialsKey = computed(() => props.name || props.email || "");
 
-const broken = ref(false);
-const resolvedUrl = ref<string | null>(null);
+// Fallback chain: "forge" → "gravatar" → "initials".
+type Stage = "forge" | "gravatar" | "initials";
+const stage = ref<Stage>("initials");
+const forgeUrl = ref<string | null>(null);
+const gravatar = ref<string | null>(null);
 
 watch(
   () => [props.url, props.email, props.size] as const,
   async ([url, email, size]) => {
-    broken.value = false;
-    if (url) {
-      resolvedUrl.value = url;
-      return;
-    }
-    resolvedUrl.value = await gravatarUrl(email, size ?? 48);
+    // Explicit forge URL wins; otherwise try to derive a GitHub avatar straight
+    // from a `users.noreply.github.com` commit email (git-log views have no
+    // forge login, only name+email — this recovers the forge photo for free).
+    forgeUrl.value = url ?? githubAvatarFromEmail(email, size ?? 48);
+    gravatar.value = await gravatarUrl(email, size ?? 48);
+    // Start at the first stage that has a candidate photo.
+    stage.value = forgeUrl.value ? "forge" : gravatar.value ? "gravatar" : "initials";
   },
   { immediate: true },
 );
 
-const showPhoto = computed(() => !!resolvedUrl.value && !broken.value);
+// Advance to the next available stage when the current photo fails to load.
+function onError() {
+  if (stage.value === "forge") stage.value = gravatar.value ? "gravatar" : "initials";
+  else if (stage.value === "gravatar") stage.value = "initials";
+}
+
+const resolvedUrl = computed(() => (stage.value === "forge" ? forgeUrl.value : stage.value === "gravatar" ? gravatar.value : null));
+const showPhoto = computed(() => !!resolvedUrl.value);
 </script>
 
 <template>
@@ -61,7 +75,7 @@ const showPhoto = computed(() => !!resolvedUrl.value && !broken.value);
       loading="lazy"
       decoding="async"
       referrerpolicy="no-referrer"
-      @error="broken = true"
+      @error="onError"
     />
     <template v-else>{{ avatarInitials(initialsKey) }}</template>
   </span>
