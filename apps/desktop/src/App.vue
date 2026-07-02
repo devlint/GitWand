@@ -2527,10 +2527,10 @@ function getPersistedPullMode(): "merge" | "rebase" {
     const raw = localStorage.getItem("gitwand-settings");
     if (raw) {
       const s = JSON.parse(raw);
-      if (s.pullMode === "rebase") return "rebase";
+      if (s.pullMode === "merge") return "merge";
     }
   } catch { /* ignore */ }
-  return "merge";
+  return "rebase";
 }
 const pullMode = ref<"merge" | "rebase">(getPersistedPullMode());
 
