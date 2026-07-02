@@ -204,6 +204,10 @@ export interface AppSettings {
   dockHideDashboard: boolean;
   /** Hide the PRs entry from the bottom dock. */
   dockHidePrs: boolean;
+  /** Hide the Terminal tile from the bottom dock. */
+  dockHideTerminal: boolean;
+  /** Hide the Files (File Explorer) tile from the bottom dock. */
+  dockHideFiles: boolean;
   /** Show only icons in the bottom dock (hide text labels). */
   dockIconsOnly: boolean;
   /** Lay the dock out vertically (column) with vertically-oriented labels. */
@@ -334,9 +338,21 @@ export interface AppSettings {
   terminalCopyOnSelect: boolean;
   /** Paste the clipboard on right-click instead of opening the context menu. Default: false. */
   terminalPasteOnRightClick: boolean;
+
+  // ── v3.x File Explorer ───────────────────────────────────
+  /**
+   * File Explorer panel layout mode — same semantics as `terminalMode`:
+   * "floating" (default), "fullscreen", or "bottom".
+   */
+  filesMode: FilesMode;
+  /** Layout to restore when leaving fullscreen. Never "fullscreen" itself. */
+  filesPrevMode: Exclude<FilesMode, "fullscreen">;
+  /** Hide the File Explorer when switching views from the dock. Default: false. */
+  filesHideOnNav: boolean;
 }
 
 export type TerminalMode = "floating" | "fullscreen" | "bottom";
+export type FilesMode = "floating" | "fullscreen" | "bottom";
 
 // ─── Defaults ─────────────────────────────────────────────
 
@@ -376,6 +392,8 @@ export const defaultAppSettings: AppSettings = {
   dockHideLaunchpad: false,
   dockHideDashboard: false,
   dockHidePrs: false,
+  dockHideTerminal: false,
+  dockHideFiles: false,
   dockIconsOnly: false,
   dockVertical: false,
   dockIdleOpacity: 0.45,
@@ -411,6 +429,9 @@ export const defaultAppSettings: AppSettings = {
   terminalContextMenu:               true,
   terminalCopyOnSelect:              false,
   terminalPasteOnRightClick:         false,
+  filesMode:                         "floating",
+  filesPrevMode:                     "floating",
+  filesHideOnNav:                    false,
 };
 
 const SETTINGS_KEY = "gitwand-settings";

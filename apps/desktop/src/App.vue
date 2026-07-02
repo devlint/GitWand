@@ -58,6 +58,7 @@ const BranchDeleteModal = defineAsyncComponent(() => import("./components/header
 const CloneModal = defineAsyncComponent(() => import("./components/CloneModal.vue"));
 const ForkModal = defineAsyncComponent(() => import("./components/ForkModal.vue"));
 const TerminalPanel = defineAsyncComponent(() => import("./components/TerminalPanel.vue"));
+const FileExplorerPanel = defineAsyncComponent(() => import("./components/FileExplorerPanel.vue"));
 const UpdateModal = defineAsyncComponent(() => import("./components/UpdateModal.vue"));
 // Shared create-branch field — only mounted inside the v-if'd create-branch
 // modal, so keep it lazy (also lazy in BranchSelector) to stay out of main.
@@ -99,6 +100,7 @@ import { useFolderHistory } from "./composables/useFolderHistory";
 import { useAppMenu } from "./composables/useAppMenu";
 import { useLogs } from "./composables/useLogs";
 import { useTerminalSessions, resolveTerminalShortcut, type TerminalTabType } from "./composables/useTerminalSessions";
+import { useFileExplorer } from "./composables/useFileExplorer";
 import {
   BRANCH_CREATE_REQUEST_KEY,
   MERGE_POPOVER_REQUEST_KEY,
@@ -905,6 +907,7 @@ function onRepoFileSelect(path: string, staged: boolean) {
 function onViewModeChange(mode: ViewMode) {
   // Switching views from the dock dismisses the terminal (opt-out via setting).
   if (showTerminal.value && settings.value.terminalHideOnNav) showTerminal.value = false;
+  if (showFiles.value && settings.value.filesHideOnNav) showFiles.value = false;
   viewMode.value = mode;
   if (mode === "changes" && !repoSelectedFile.value && repoFiles.value.length > 0) {
     const first = repoFiles.value[0];
@@ -1421,10 +1424,41 @@ async function toggleTerminal() {
     return;
   }
   if (!repoFolderPath.value) return;
+  // Opening the terminal is a dock switch too: dismiss the File Explorer
+  // (opt-out via its own filesHideOnNav setting), same as changing views.
+  if (showFiles.value && settings.value.filesHideOnNav) showFiles.value = false;
   if (termSessions.tabsFor(repoFolderPath.value).length === 0) {
     await openTerminalTab();
   } else {
     showTerminal.value = true;
+  }
+}
+
+// ─── File explorer / editor panel (v3.1) ─────────────────
+const showFiles = ref(false);
+const fileExplorer = useFileExplorer();
+
+function toggleFiles() {
+  const opening = !showFiles.value;
+  showFiles.value = opening;
+  // Opening the File Explorer is a dock switch too: dismiss the terminal
+  // (opt-out via its own terminalHideOnNav setting), same as changing views.
+  if (opening && showTerminal.value && settings.value.terminalHideOnNav) showTerminal.value = false;
+}
+
+async function onRequestCloseFileTab(tabId: number) {
+  if (!repoFolderPath.value) return;
+  const tab = fileExplorer.tabsFor(repoFolderPath.value).find((t) => t.id === tabId);
+  if (!tab) return;
+  if (
+    await askConfirm({
+      title: t("files.unsavedTitle"),
+      message: t("files.unsavedMessage", tab.path),
+      confirmLabel: t("files.discardChanges"),
+      danger: true,
+    })
+  ) {
+    fileExplorer.closeTab(repoFolderPath.value, tabId);
   }
 }
 
@@ -1522,6 +1556,7 @@ function confirmCloseProject() {
   if (found) {
     // Fire-and-forget: PTY cleanup is best-effort; don't block UI on it.
     termSessions.disposeRepo(found.path).catch(() => {});
+    fileExplorer.disposeRepo(found.path);
   }
   closeTab(target.tabId);
   closeProjectConfirm.value = null;
@@ -1654,6 +1689,7 @@ async function onAiTaskDelete() {
     // Kill the worktree's agent terminal first so no running process holds an
     // index.lock or open handle that would block the worktree removal.
     await termSessions.disposeRepo(target.path).catch(() => {});
+    fileExplorer.disposeRepo(target.path);
     if (target.scratch) {
       await scratchWorktreeDiscard(origin, target.path);
     } else {
@@ -1679,6 +1715,7 @@ async function onAiTaskMergeBack() {
     // Kill the scratch's agent terminal first so no running process holds an
     // index.lock or open handle that would block the worktree removal.
     await termSessions.disposeRepo(target.path).catch(() => {});
+    fileExplorer.disposeRepo(target.path);
     await scratchWorktreeMergeBack(origin, target.path);
     await finalizeWorktreeRemoval(target.path, target.projectPath);
   } catch (err) {
@@ -3237,10 +3274,23 @@ onUnmounted(() => {
         />
       </KeepAlive>
 
+      <!-- KeepAlive so toggling the panel deactivates (not unmounts) the
+           CodeMirror instance — open tabs and undo history survive a hide/show
+           cycle, same rationale as TerminalPanel. -->
+      <KeepAlive>
+        <FileExplorerPanel
+          v-if="showFiles && repoFolderPath"
+          :repo-path="repoFolderPath"
+          :changed-files="repoFiles"
+          @close="showFiles = false"
+          @request-close-tab="onRequestCloseFileTab"
+        />
+      </KeepAlive>
+
       <!-- Floating bottom-center navigation dock -->
       <AppDock v-if="hasRepo" :view-mode="viewMode" :changes-count="repoFiles.length"
-        :pr-count="prPanel.prs.value.length" :terminal-active="showTerminal"
-        @change-view="onViewModeChange" @toggle-terminal="toggleTerminal()" />
+        :pr-count="prPanel.prs.value.length" :terminal-active="showTerminal" :files-active="showFiles"
+        @change-view="onViewModeChange" @toggle-terminal="toggleTerminal()" @toggle-files="toggleFiles()" />
     </div>
 
     <!-- In-app update modal -->

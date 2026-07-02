@@ -19,6 +19,10 @@ export default defineConfig({
   plugins: [vue()],
   resolve: {
     alias: {
+      // Mirrors the "@/*" -> "./src/*" mapping in tsconfig.json so runtime
+      // imports (Vite/Vitest) resolve the same "@/..." paths that
+      // TypeScript already type-checks.
+      "@": resolve(__dirname, "src"),
       // Point directly at the TypeScript source so Vite never needs a
       // pre-built dist/ for @gitwand/core during development or CI.
       // Production builds go through the same alias, so no separate

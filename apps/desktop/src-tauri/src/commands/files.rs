@@ -308,3 +308,149 @@ pub(crate) async fn list_dir(path: Option<String>) -> Result<ListDirResult, Stri
         dirs,
     })
 }
+
+// ─── Full repo file tree (File Explorer panel) ─────────────
+
+/// Cap on total tree entries returned by `list_repo_tree` — see the
+/// apps/desktop/CLAUDE.md P6.4 "IPC payloads > 1MB need truncation" rule.
+/// 20k entries covers all but pathological monorepos while keeping the
+/// payload small.
+const MAX_REPO_TREE_ENTRIES: usize = 20_000;
+
+/// Pure, synchronously-testable core of `list_repo_tree` (kept separate
+/// from the `async fn` Tauri command so it can be unit-tested directly
+/// without an async runtime).
+fn build_repo_tree(cwd: &str) -> Result<RepoTreeResult, String> {
+    if cwd.trim().is_empty() {
+        return Err("cwd must not be empty".to_string());
+    }
+
+    let output = git_cmd()
+        .args(["ls-files", "-z", "--cached", "--others", "--exclude-standard"])
+        .current_dir(cwd)
+        .output()
+        .map_err(|e| format!("Failed to run git ls-files: {}", e))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("git ls-files failed: {}", stderr.trim()));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut paths: Vec<&str> = stdout.split('\0').filter(|p| !p.is_empty()).collect();
+    paths.sort_unstable();
+
+    let truncated = paths.len() > MAX_REPO_TREE_ENTRIES;
+    if truncated {
+        paths.truncate(MAX_REPO_TREE_ENTRIES);
+    }
+
+    let mut root = RepoTreeNode {
+        path: String::new(),
+        name: String::new(),
+        kind: "folder".to_string(),
+        children: Vec::new(),
+    };
+    for path in &paths {
+        insert_repo_path(&mut root, path);
+    }
+    sort_repo_tree(&mut root);
+
+    Ok(RepoTreeResult { root, truncated })
+}
+
+#[tauri::command]
+pub(crate) async fn list_repo_tree(cwd: String) -> Result<RepoTreeResult, String> {
+    build_repo_tree(&cwd)
+}
+
+#[cfg(test)]
+mod list_repo_tree_tests {
+    use super::*;
+    use std::path::PathBuf;
+    use std::process::Command as StdCommand;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    struct TempRepo {
+        path: PathBuf,
+    }
+
+    impl Drop for TempRepo {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+
+    impl TempRepo {
+        fn new(label: &str) -> Self {
+            let n = COUNTER.fetch_add(1, Ordering::SeqCst);
+            let pid = std::process::id();
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let dir = std::env::temp_dir()
+                .join(format!("gitwand-tree-test-{}-{}-{}-{}", label, pid, n, nanos));
+            std::fs::create_dir_all(&dir).unwrap();
+            let repo = TempRepo { path: dir };
+            repo.git(&["init", "-q"]);
+            repo.git(&["config", "user.email", "test@gitwand.dev"]);
+            repo.git(&["config", "user.name", "GitWand Test"]);
+            repo
+        }
+
+        fn cwd(&self) -> String {
+            self.path.to_string_lossy().to_string()
+        }
+
+        fn write(&self, rel: &str, content: &str) {
+            let p = self.path.join(rel);
+            if let Some(parent) = p.parent() {
+                std::fs::create_dir_all(parent).unwrap();
+            }
+            std::fs::write(p, content).unwrap();
+        }
+
+        fn git(&self, args: &[&str]) {
+            let status = StdCommand::new("git")
+                .args(args)
+                .current_dir(&self.path)
+                .status()
+                .unwrap();
+            assert!(status.success(), "git {:?} failed", args);
+        }
+    }
+
+    #[test]
+    fn respects_gitignore_and_includes_untracked() {
+        let repo = TempRepo::new("basic");
+        repo.write(".gitignore", "ignored_dir/\n");
+        repo.write("src/main.rs", "fn main() {}");
+        repo.write("ignored_dir/secret.txt", "nope");
+        repo.write("untracked.md", "# hi");
+        repo.git(&["add", "src/main.rs", ".gitignore"]);
+        repo.git(&["commit", "-q", "-m", "init"]);
+
+        let result = build_repo_tree(&repo.cwd()).unwrap();
+
+        assert!(!result.truncated);
+        let names: Vec<&str> = result.root.children.iter().map(|c| c.name.as_str()).collect();
+        assert!(names.contains(&"src"));
+        assert!(names.contains(&"untracked.md"));
+        assert!(names.contains(&".gitignore"));
+        assert!(!names.contains(&"ignored_dir"));
+
+        let src_folder = result.root.children.iter().find(|c| c.name == "src").unwrap();
+        assert_eq!(src_folder.kind, "folder");
+        assert_eq!(src_folder.children.len(), 1);
+        assert_eq!(src_folder.children[0].name, "main.rs");
+        assert_eq!(src_folder.children[0].path, "src/main.rs");
+    }
+
+    #[test]
+    fn rejects_empty_cwd() {
+        let err = build_repo_tree("").unwrap_err();
+        assert!(err.contains("cwd must not be empty"));
+    }
+}
