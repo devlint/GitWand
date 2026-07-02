@@ -22,12 +22,15 @@
   width: auto;
 }
 
-/* ── Home page: full width, no container constraints ── */
-.VPPage:has(.gw-landing) {
+/* ── Home + marketing pillar pages: full width, no container constraints ── */
+.VPPage:has(.gw-landing),
+.VPPage:has(.gw-page) {
   padding-top: 0;
 }
 .VPPage:has(.gw-landing) > .container,
-.VPPage:has(.gw-landing) .vp-doc {
+.VPPage:has(.gw-landing) .vp-doc,
+.VPPage:has(.gw-page) > .container,
+.VPPage:has(.gw-page) .vp-doc {
   max-width: none !important;
   padding: 0 !important;
   margin: 0 !important;

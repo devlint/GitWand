@@ -6,6 +6,12 @@ description: Technical articles on Git workflows, AI-powered conflict resolution
 # Blog
 
 <div class="blog-list">
+  <a href="/blog/v3-2-integrated-terminal-ai-tasks" class="blog-card">
+    <div class="blog-meta">July 2, 2026 · 9 min read</div>
+    <h2 class="blog-title">An integrated terminal built for AI agents, and a file editor in your Git client: GitWand v3.2</h2>
+    <p class="blog-excerpt">v3.2 rebuilds the terminal panel on WebGL with typed agent tabs (<code>shell</code> / <code>claude</code> / <code>codex</code>, unread-output dots), and adds <strong>one-click AI tasks</strong>: a scratch worktree + a Claude Code tab, isolated from your working tree, with a managed merge-back-or-discard lifecycle. Plus a dockable File Explorer / Editor panel backed by CodeMirror 6, a Git Tree filter mode with <code>#PR</code> lookup, submodule update actions, and a rebase editor that accepts any ref.</p>
+    <span class="blog-read">Read article →</span>
+  </a>
   <a href="/blog/v2-23-changes-tree-view" class="blog-card">
     <div class="blog-meta">June 18, 2026 · 6 min read</div>
     <h2 class="blog-title">A folder tree for your changes, and rebases that work in the real app: GitWand v2.23</h2>

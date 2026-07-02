@@ -150,10 +150,42 @@ const dlWin = `${RELEASES}/download/v${LATEST}/GitWand_${LATEST}_x64-setup.exe`
 
 const i18n: Record<Locale, any> = {
   fr: {
+    conflictCta: "Voir comment fonctionne le moteur →",
+    trustStar: "Star sur GitHub",
+    trustFree: "gratuit · open source",
+    trustNative: "natif · sans Electron",
+    trustDeterministic: "hallucination",
+    whyTitle: "Déterministe là où les autres devinent",
+    whySub: "Quatre raisons pour lesquelles GitWand n’est pas un client Git de plus.",
+    why1t: "0 hallucination",
+    why1d: "Un score de confiance et une trace de décision pour chaque hunk — jamais au hasard.",
+    why2t: "Gratuit · MIT",
+    why2d: "Entièrement open source. Pas de prix par siège, pas de mur d’essai, pas de compte.",
+    why3t: "~8 Mo, natif",
+    why3d: "Tauri 2 + Rust. Démarrage en moins d’une seconde, pas 150 Mo d’Electron.",
+    why4t: "MCP pour les agents",
+    why4d: "Votre moteur de résolution, à disposition de Claude Code, Cursor et tout client MCP.",
+    miniCompareTitle: "GitWand face aux autres",
+    miniCompareSub: "Là où il fait vraiment la différence par rapport aux clients populaires.",
+    miniCompareCta: "Voir le comparatif complet →",
+    mcRow1: "Résolution auto déterministe",
+    mcRow2: "Gratuit / open source",
+    mcRow3: "Natif (sans Electron)",
+    mcRow4: "Serveur MCP pour agents",
+    agentsCta: "Découvrir IA & agents →",
+    heroAnnounce: "Nouveau dans la v3.2 — terminal intégré pensé pour les agents IA & éditeur de fichiers dans ton client Git",
+    heroPoint1: "10 patterns déterministes — zéro pari sur ton code",
+    heroPoint2: "100 % local — ton code ne quitte jamais ta machine",
+    heroPoint3: "Un seul moteur — Desktop, CLI, VS Code & agents IA",
+    heroMeta: "Gratuit · sans compte · sans télémétrie",
+    heroToastTitle: "57 hunks résolus automatiquement",
+    heroToastSub: "1 à relire · 0 hallucination",
+    contribYouName: "+ toi ?",
+    contribYouRole: "Ouvre ta première PR",
     badge: 'v3.2.0 · Open Source · MIT',
-    heroH1a: 'Le client Git qui',
-    heroH1b: 'résout les conflits pour vous.',
-    heroSub: 'GitWand classifie chaque conflit de merge avec 10 patterns déterministes et un score de confiance par hunk. Les 95 % triviaux — résolus automatiquement. Les cas complexes — pour vous, avec traces complètes. Natif, gratuit, open source.',
+    heroH1a: "Les conflits de merge s'arrêtent ici.",
+    heroH1b: "Retrouve ton flow.",
+    heroSub: "Ce petit coup au moral quand 12 fichiers passent au rouge ? Terminé. GitWand classe chaque hunk avec 10 patterns déterministes — sans deviner, sans halluciner — résout les 95 % triviaux tout seul, et ne te rend que ce qui mérite ton cerveau. Natif, gratuit, MIT.",
     download: 'Télécharger',
     github: 'GitHub',
     whatsNew: 'Nouveautés v3.2',
@@ -208,13 +240,13 @@ const i18n: Record<Locale, any> = {
     featForkWorkflowDesc: 'Badge "↑N fork" dans le bouton de sync pour les workflows fork : push remote ≠ upstream. Fini les push accidentels sur l\'origine.',
     featMcp: 'Serveur MCP',
     featMcpDesc: 'Exposez GitWand à Claude, Cursor, Windsurf et tout client MCP. Une commande : npx -y @gitwand/mcp. Publié avec provenance.',
-    conflictTitle: 'Les conflits de merge, résolus automatiquement',
+    conflictTitle: "Regardez-le résoudre un conflit en une seconde",
     conflictSub: 'GitWand analyse la sémantique du code, pas seulement les lignes. Il choisit la bonne résolution à votre place.',
     conflictBefore: 'Avant — conflit brut',
     conflictAfter: 'Après — résolu automatiquement',
     conflictBadge: 'Confiance 97% · prefer-theirs · sémantique',
-    previewTitle: 'Un client Git que vous allez aimer',
-    previewSub: 'Interface épurée, thème sombre, toutes les fonctionnalités Git au même endroit.',
+    previewTitle: "Un client Git que vous aurez envie d'ouvrir",
+    previewSub: "Toutes les actions Git dans une seule fenêtre native et rapide — le graphe de commits, les diffs, les pull requests, les worktrees et ton inbox Today.",
     platformsTitle: 'Disponible partout',
     plMacSub: 'Intel + Apple Silicon',
     plLinuxSub: '.deb · .AppImage · .rpm',
@@ -223,11 +255,11 @@ const i18n: Record<Locale, any> = {
     plCliSub: 'npm i -g @gitwand/cli',
     plVscode: 'VS Code',
     plVscodeSub: 'Extension Marketplace',
-    ctaTitle: 'Prêt à simplifier votre workflow Git ?',
-    ctaSub: 'Gratuit, open source, et conçu pour les développeurs qui veulent aller vite.',
+    ctaTitle: "Arrête d'arbitrer les conflits de merge.",
+    ctaSub: "Gratuit, open source, natif. Télécharge GitWand et laisse le moteur prendre les 95 % ennuyeux.",
     ctaDownload: 'Télécharger GitWand',
-    llmTitle: 'Vos agents IA dans la boucle',
-    llmSub: 'Le serveur MCP de GitWand expose son moteur de conflits aux agents IA. GitWand résout le trivial — votre agent prend le relais pour les cas complexes.',
+    llmTitle: "Tes agents IA, avec un vrai moteur Git à portée de main",
+    llmSub: "Les agents sont excellents pour le code et catastrophiques sur les merges. Le serveur MCP de GitWand résout les 95 % triviaux de façon déterministe et confie à ton agent les hunks difficiles avec tout le contexte — ours, theirs, base et la trace.",
     llmBadge: 'MCP Server · Registre officiel · stdio · Sans clé API',
     llmStep1: 'Analyse',
     llmStep1Desc: 'L\'agent appelle gitwand_preview_merge pour évaluer le nombre de conflits, leur complexité, et le pourcentage que GitWand peut résoudre seul.',
@@ -245,7 +277,7 @@ const i18n: Record<Locale, any> = {
     featuresAria: 'Catégories de fonctionnalités',
     // 3 Pillars
     pillarsTitle: 'Trois piliers, une promesse',
-    pillarsSub: 'Conflits auto-résolus, performance native, IA opt-in et auditable.',
+    pillarsSub: "Des conflits résolus de façon déterministe, une performance vraiment native, et une IA qui n'intervient que si tu le demandes.",
     pillar1Title: 'Résolution auto de 95 % des conflits triviaux',
     pillar1Sub: '10 patterns déterministes. Score de confiance composite. Trace de décision pour chaque hunk.',
     pillar1Stat: '95 %',
@@ -296,10 +328,42 @@ const i18n: Record<Locale, any> = {
     compareSub: 'Comparaison fonctionnalité par fonctionnalité avec les clients Git les plus populaires.',
   },
   en: {
+    conflictCta: "See how the engine works →",
+    trustStar: "Star on GitHub",
+    trustFree: "free · open source",
+    trustNative: "native · no Electron",
+    trustDeterministic: "hallucinations",
+    whyTitle: "Deterministic where others guess",
+    whySub: "Four reasons GitWand isn’t just another Git GUI.",
+    why1t: "0 hallucinations",
+    why1d: "A confidence score and a decision trace for every hunk — never a guess.",
+    why2t: "Free · MIT",
+    why2d: "Fully open source. No seat pricing, no trial wall, no account.",
+    why3t: "~8 MB, native",
+    why3d: "Tauri 2 + Rust. Sub-second start, not 150 MB of Electron.",
+    why4t: "MCP for agents",
+    why4d: "Your resolution engine, on tap for Claude Code, Cursor and any MCP client.",
+    miniCompareTitle: "How GitWand compares",
+    miniCompareSub: "Where it is genuinely different from the popular clients.",
+    miniCompareCta: "See the full comparison →",
+    mcRow1: "Deterministic auto-resolve",
+    mcRow2: "Free / open source",
+    mcRow3: "Native (no Electron)",
+    mcRow4: "MCP server for agents",
+    agentsCta: "Explore AI & agents →",
+    heroAnnounce: "New in v3.2 — integrated terminal built for AI agents & file editor in your Git client",
+    heroPoint1: "10 deterministic patterns — zero gambling with your code",
+    heroPoint2: "100% local — your code never leaves your machine",
+    heroPoint3: "One engine — Desktop, CLI, VS Code & AI agents",
+    heroMeta: "Free · no account · no telemetry",
+    heroToastTitle: "57 hunks auto-resolved",
+    heroToastSub: "1 left for review · 0 hallucinations",
+    contribYouName: "+ you?",
+    contribYouRole: "Open your first PR",
     badge: 'v3.2.0 · Open Source · MIT',
-    heroH1a: 'The Git client that',
-    heroH1b: 'resolves conflicts for you.',
-    heroSub: 'GitWand classifies every merge conflict using 10 deterministic patterns and per-hunk confidence scoring. The trivial 95% — auto-resolved. The complex — left for you with full traces. Native, free, open-source.',
+    heroH1a: "Merge conflicts end here.",
+    heroH1b: "Get your flow back.",
+    heroSub: "That sinking feeling when 12 files turn red? Gone. GitWand classifies every hunk with 10 deterministic patterns — no guessing, no hallucinations — auto-resolves the trivial 95%, and hands you only what's worth your brain. Native, free, MIT.",
     download: 'Download',
     github: 'GitHub',
     whatsNew: "What's new in v3.2",
@@ -354,13 +418,13 @@ const i18n: Record<Locale, any> = {
     featForkWorkflowDesc: '"↑N fork" badge in the sync button for fork workflows where push remote ≠ upstream. No more accidental pushes to origin.',
     featMcp: 'MCP server',
     featMcpDesc: 'Expose GitWand to Claude, Cursor, Windsurf, and any MCP client. One command: npx -y @gitwand/mcp. Published with provenance.',
-    conflictTitle: 'Merge conflicts, resolved automatically',
+    conflictTitle: "See it resolve a conflict in one second",
     conflictSub: 'GitWand analyzes code semantics, not just lines. It picks the right resolution for you.',
     conflictBefore: 'Before — raw conflict',
     conflictAfter: 'After — auto-resolved',
     conflictBadge: 'Confidence 97% · prefer-theirs · semantic',
-    previewTitle: 'A Git client you\'ll love',
-    previewSub: 'Clean interface, dark theme, every Git feature in one place.',
+    previewTitle: "A Git client you'll actually want to open",
+    previewSub: "Every Git action in one fast, native window — the commit graph, diffs, pull requests, worktrees, and your Today inbox.",
     platformsTitle: 'Available everywhere',
     plMacSub: 'Intel + Apple Silicon',
     plLinuxSub: '.deb · .AppImage · .rpm',
@@ -369,11 +433,11 @@ const i18n: Record<Locale, any> = {
     plCliSub: 'npm i -g @gitwand/cli',
     plVscode: 'VS Code',
     plVscodeSub: 'Extension Marketplace',
-    ctaTitle: 'Ready to simplify your Git workflow?',
-    ctaSub: 'Free, open source, and built for developers who want to move fast.',
+    ctaTitle: "Stop refereeing merge conflicts.",
+    ctaSub: "Free, open source, native. Download GitWand and let the engine take the boring 95%.",
     ctaDownload: 'Download GitWand',
-    llmTitle: 'Your AI agents in the loop',
-    llmSub: 'GitWand\'s MCP server exposes its conflict engine to AI agents. GitWand resolves the trivial — your agent takes over for the complex cases.',
+    llmTitle: "Your AI agents, with a real Git engine on tap",
+    llmSub: "Agents are great at code and terrible at merges. GitWand's MCP server resolves the trivial 95% deterministically and hands your agent the hard hunks with full context — ours, theirs, base and the trace.",
     llmBadge: 'MCP Server · Official Registry · stdio · No API key',
     llmStep1: 'Preview',
     llmStep1Desc: 'The agent calls gitwand_preview_merge to assess the number of conflicts, their complexity, and the percentage GitWand can resolve on its own.',
@@ -391,7 +455,7 @@ const i18n: Record<Locale, any> = {
     featuresAria: 'Feature categories',
     // 3 Pillars
     pillarsTitle: 'Three pillars, one promise',
-    pillarsSub: 'Auto-resolved conflicts, native performance, opt-in and auditable AI.',
+    pillarsSub: "Conflicts resolved deterministically, performance that's actually native, and AI that only steps in when you ask.",
     pillar1Title: 'Auto-resolve 95% of trivial conflicts',
     pillar1Sub: '10 deterministic patterns. Composite confidence scoring. Decision traces for every hunk.',
     pillar1Stat: '95%',
@@ -442,10 +506,42 @@ const i18n: Record<Locale, any> = {
     compareSub: 'Feature-by-feature breakdown against the most popular Git clients on the market.',
   },
   es: {
+    conflictCta: "Ver cómo funciona el motor →",
+    trustStar: "Dale una estrella en GitHub",
+    trustFree: "gratis · open source",
+    trustNative: "nativo · sin Electron",
+    trustDeterministic: "alucinaciones",
+    whyTitle: "Determinista donde otros adivinan",
+    whySub: "Cuatro razones por las que GitWand no es un cliente Git más.",
+    why1t: "0 alucinaciones",
+    why1d: "Una puntuación de confianza y una traza de decisión para cada hunk — nunca a ciegas.",
+    why2t: "Gratis · MIT",
+    why2d: "Totalmente open source. Sin precio por asiento, sin muro de prueba, sin cuenta.",
+    why3t: "~8 MB, nativo",
+    why3d: "Tauri 2 + Rust. Arranque en menos de un segundo, no 150 MB de Electron.",
+    why4t: "MCP para agentes",
+    why4d: "Tu motor de resolución, disponible para Claude Code, Cursor y cualquier cliente MCP.",
+    miniCompareTitle: "GitWand frente a los demás",
+    miniCompareSub: "Donde realmente marca la diferencia frente a los clientes populares.",
+    miniCompareCta: "Ver la comparativa completa →",
+    mcRow1: "Auto-resolución determinista",
+    mcRow2: "Gratis / open source",
+    mcRow3: "Nativo (sin Electron)",
+    mcRow4: "Servidor MCP para agentes",
+    agentsCta: "Explorar IA y agentes →",
+    heroAnnounce: "Nuevo en la v3.2 — terminal integrado pensado para agentes de IA y editor de archivos en tu cliente Git",
+    heroPoint1: "10 patrones deterministas — cero apuestas con tu código",
+    heroPoint2: "100 % local — tu código nunca sale de tu máquina",
+    heroPoint3: "Un solo motor — Desktop, CLI, VS Code y agentes de IA",
+    heroMeta: "Gratis · sin cuenta · sin telemetría",
+    heroToastTitle: "57 hunks resueltos automáticamente",
+    heroToastSub: "1 por revisar · 0 alucinaciones",
+    contribYouName: "+ ¿tú?",
+    contribYouRole: "Abre tu primera PR",
     badge: 'v3.2.0 · Open Source · MIT',
-    heroH1a: 'El cliente Git que',
-    heroH1b: 'resuelve conflictos por ti.',
-    heroSub: 'GitWand clasifica cada conflicto de merge con 10 patrones deterministas y puntuación de confianza por hunk. El 95 % trivial — resuelto automáticamente. Lo complejo — para ti, con trazas completas. Nativo, gratuito, open source.',
+    heroH1a: "Los conflictos de merge terminan aquí.",
+    heroH1b: "Recupera tu flow.",
+    heroSub: "¿Esa sensación de vacío cuando 12 archivos se ponen en rojo? Se acabó. GitWand clasifica cada hunk con 10 patrones deterministas — sin adivinar, sin alucinar — resuelve solo el 95 % trivial y te entrega únicamente lo que merece tu cerebro. Nativo, gratis, MIT.",
     download: 'Descargar',
     github: 'GitHub',
     whatsNew: 'Novedades v3.2',
@@ -500,13 +596,13 @@ const i18n: Record<Locale, any> = {
     featForkWorkflowDesc: 'Badge "↑N fork" en el botón de sync para workflows donde push remote ≠ upstream.',
     featMcp: 'Servidor MCP',
     featMcpDesc: 'Expón GitWand a Claude, Cursor, Windsurf y cualquier cliente MCP. Un comando: npx -y @gitwand/mcp. Publicado con attestations de procedencia.',
-    conflictTitle: 'Conflictos de merge, resueltos automáticamente',
+    conflictTitle: "Míralo resolver un conflicto en un segundo",
     conflictSub: 'GitWand analiza la semántica del código, no solo las líneas. Elige la resolución correcta por ti.',
     conflictBefore: 'Antes — conflicto en bruto',
     conflictAfter: 'Después — resuelto automáticamente',
     conflictBadge: 'Confianza 97 % · prefer-theirs · semántico',
-    previewTitle: 'Un cliente Git que te va a encantar',
-    previewSub: 'Interfaz limpia, tema oscuro, todas las funciones de Git en un mismo lugar.',
+    previewTitle: "Un cliente Git que querrás abrir",
+    previewSub: "Todas las acciones de Git en una única ventana nativa y rápida — el grafo de commits, los diffs, las pull requests, los worktrees y tu inbox Today.",
     platformsTitle: 'Disponible en todas partes',
     plMacSub: 'Intel + Apple Silicon',
     plLinuxSub: '.deb · .AppImage · .rpm',
@@ -515,11 +611,11 @@ const i18n: Record<Locale, any> = {
     plCliSub: 'npm i -g @gitwand/cli',
     plVscode: 'VS Code',
     plVscodeSub: 'Marketplace de extensiones',
-    ctaTitle: '¿Listo para simplificar tu flujo Git?',
-    ctaSub: 'Gratis, open source y hecho para desarrolladores que quieren ir rápido.',
+    ctaTitle: "Deja de arbitrar los conflictos de merge.",
+    ctaSub: "Gratis, open source, nativo. Descarga GitWand y deja que el motor se encargue del 95 % aburrido.",
     ctaDownload: 'Descargar GitWand',
-    llmTitle: 'Tus agentes IA en el bucle',
-    llmSub: 'El servidor MCP de GitWand expone su motor de conflictos a los agentes IA. GitWand resuelve lo trivial — tu agente toma el relevo en los casos complejos.',
+    llmTitle: "Tus agentes IA, con un motor Git de verdad a mano",
+    llmSub: "Los agentes son geniales con el código y pésimos con los merges. El servidor MCP de GitWand resuelve el 95 % trivial de forma determinista y le pasa a tu agente los hunks difíciles con todo el contexto — ours, theirs, base y la traza.",
     llmBadge: 'Servidor MCP · Registro oficial · stdio · Sin clave API',
     llmStep1: 'Análisis',
     llmStep1Desc: 'El agente llama a gitwand_preview_merge para evaluar el número de conflictos, su complejidad y el porcentaje que GitWand puede resolver por sí solo.',
@@ -537,7 +633,7 @@ const i18n: Record<Locale, any> = {
     featuresAria: 'Categorías de funcionalidades',
     // 3 Pillars
     pillarsTitle: 'Tres pilares, una promesa',
-    pillarsSub: 'Conflictos auto-resueltos, rendimiento nativo, IA opt-in y auditable.',
+    pillarsSub: "Conflictos resueltos de forma determinista, rendimiento realmente nativo, e IA que solo interviene cuando se lo pides.",
     pillar1Title: 'Resuelve automáticamente el 95 % de los conflictos triviales',
     pillar1Sub: '10 patrones deterministas. Puntuación de confianza compuesta. Traza de decisión para cada hunk.',
     pillar1Stat: '95 %',
@@ -588,10 +684,42 @@ const i18n: Record<Locale, any> = {
     compareSub: 'Comparativa función a función con los clientes Git más populares del mercado.',
   },
   'pt-BR': {
+    conflictCta: "Ver como o motor funciona →",
+    trustStar: "Dê uma estrela no GitHub",
+    trustFree: "gratuito · open source",
+    trustNative: "nativo · sem Electron",
+    trustDeterministic: "alucinações",
+    whyTitle: "Determinista onde os outros chutam",
+    whySub: "Quatro motivos pelos quais o GitWand não é só mais um cliente Git.",
+    why1t: "0 alucinações",
+    why1d: "Um score de confiança e um trace de decisão para cada hunk — nunca no chute.",
+    why2t: "Gratuito · MIT",
+    why2d: "Totalmente open source. Sem preço por assento, sem muro de teste, sem conta.",
+    why3t: "~8 MB, nativo",
+    why3d: "Tauri 2 + Rust. Inicialização em menos de um segundo, não 150 MB de Electron.",
+    why4t: "MCP para agentes",
+    why4d: "Seu motor de resolução, à disposição do Claude Code, Cursor e qualquer cliente MCP.",
+    miniCompareTitle: "GitWand frente aos demais",
+    miniCompareSub: "Onde ele realmente se diferencia dos clientes populares.",
+    miniCompareCta: "Ver a comparação completa →",
+    mcRow1: "Auto-resolução determinista",
+    mcRow2: "Gratuito / open source",
+    mcRow3: "Nativo (sem Electron)",
+    mcRow4: "Servidor MCP para agentes",
+    agentsCta: "Explorar IA e agentes →",
+    heroAnnounce: "Novo na v3.2 — terminal integrado feito para agentes de IA e editor de arquivos no seu cliente Git",
+    heroPoint1: "10 padrões deterministas — zero aposta com seu código",
+    heroPoint2: "100 % local — seu código nunca sai da sua máquina",
+    heroPoint3: "Um único motor — Desktop, CLI, VS Code e agentes de IA",
+    heroMeta: "Gratuito · sem conta · sem telemetria",
+    heroToastTitle: "57 hunks resolvidos automaticamente",
+    heroToastSub: "1 para revisar · 0 alucinações",
+    contribYouName: "+ você?",
+    contribYouRole: "Abra sua primeira PR",
     badge: 'v3.2.0 · Open Source · MIT',
-    heroH1a: 'O cliente Git que',
-    heroH1b: 'resolve conflitos por você.',
-    heroSub: 'GitWand classifica cada conflito de merge com 10 padrões deterministas e pontuação de confiança por hunk. Os 95 % triviais — resolvidos automaticamente. Os complexos — para você, com traces completos. Nativo, gratuito, open source.',
+    heroH1a: "Conflitos de merge terminam aqui.",
+    heroH1b: "Recupere seu flow.",
+    heroSub: "Aquele frio na barriga quando 12 arquivos ficam vermelhos? Acabou. O GitWand classifica cada hunk com 10 padrões deterministas — sem chutar, sem alucinar — resolve os 95 % triviais sozinho e devolve só o que merece seu cérebro. Nativo, gratuito, MIT.",
     download: 'Baixar',
     github: 'GitHub',
     whatsNew: 'Novidades v3.2',
@@ -646,13 +774,13 @@ const i18n: Record<Locale, any> = {
     featForkWorkflowDesc: 'Badge "↑N fork" no botão de sync para workflows onde push remote ≠ upstream.',
     featMcp: 'Servidor MCP',
     featMcpDesc: 'Exponha o GitWand ao Claude, Cursor, Windsurf e qualquer cliente MCP. Um comando: npx -y @gitwand/mcp. Publicado com atestados de proveniência.',
-    conflictTitle: 'Conflitos de merge, resolvidos automaticamente',
+    conflictTitle: "Veja-o resolver um conflito em um segundo",
     conflictSub: 'GitWand analisa a semântica do código, não apenas as linhas. Ele escolhe a resolução certa por você.',
     conflictBefore: 'Antes — conflito bruto',
     conflictAfter: 'Depois — resolvido automaticamente',
     conflictBadge: 'Confiança 97 % · prefer-theirs · semântico',
-    previewTitle: 'Um cliente Git que você vai amar',
-    previewSub: 'Interface limpa, tema escuro, todos os recursos do Git no mesmo lugar.',
+    previewTitle: "Um cliente Git que você vai querer abrir",
+    previewSub: "Todas as ações do Git em uma única janela nativa e rápida — o grafo de commits, diffs, pull requests, worktrees e sua inbox Today.",
     platformsTitle: 'Disponível em todo lugar',
     plMacSub: 'Intel + Apple Silicon',
     plLinuxSub: '.deb · .AppImage · .rpm',
@@ -661,11 +789,11 @@ const i18n: Record<Locale, any> = {
     plCliSub: 'npm i -g @gitwand/cli',
     plVscode: 'VS Code',
     plVscodeSub: 'Extension Marketplace',
-    ctaTitle: 'Pronto para simplificar seu fluxo Git?',
-    ctaSub: 'Gratuito, open source, feito para devs que querem ir rápido.',
+    ctaTitle: "Pare de arbitrar conflitos de merge.",
+    ctaSub: "Gratuito, open source, nativo. Baixe o GitWand e deixe o motor cuidar dos 95 % chatos.",
     ctaDownload: 'Baixar o GitWand',
-    llmTitle: 'Seus agentes de IA no loop',
-    llmSub: 'O servidor MCP do GitWand expõe o motor de conflitos aos agentes de IA. O GitWand resolve o trivial — seu agente assume os casos complexos.',
+    llmTitle: "Seus agentes de IA, com um motor Git de verdade à mão",
+    llmSub: "Agentes são ótimos com código e péssimos com merges. O servidor MCP do GitWand resolve os 95 % triviais de forma determinista e entrega ao seu agente os hunks difíceis com todo o contexto — ours, theirs, base e o trace.",
     llmBadge: 'Servidor MCP · Registro oficial · stdio · Sem chave de API',
     llmStep1: 'Análise',
     llmStep1Desc: 'O agente chama gitwand_preview_merge para avaliar o número de conflitos, a complexidade e o percentual que o GitWand consegue resolver sozinho.',
@@ -683,7 +811,7 @@ const i18n: Record<Locale, any> = {
     featuresAria: 'Categorias de funcionalidades',
     // 3 Pillars
     pillarsTitle: 'Três pilares, uma promessa',
-    pillarsSub: 'Conflitos auto-resolvidos, desempenho nativo, IA opt-in e auditável.',
+    pillarsSub: "Conflitos resolvidos de forma determinista, desempenho realmente nativo e IA que só entra quando você pede.",
     pillar1Title: 'Resolva 95% dos conflitos triviais automaticamente',
     pillar1Sub: '10 padrões deterministas. Score de confiança composto. Trace de decisão em cada hunk.',
     pillar1Stat: '95%',
@@ -734,10 +862,42 @@ const i18n: Record<Locale, any> = {
     compareSub: 'Comparação recurso a recurso com os clientes Git mais populares do mercado.',
   },
   'zh-CN': {
+    conflictCta: "了解引擎如何工作 →",
+    trustStar: "在 GitHub 上加星",
+    trustFree: "免费 · 开源",
+    trustNative: "原生 · 无 Electron",
+    trustDeterministic: "幻觉",
+    whyTitle: "别人靠猜，它靠确定性",
+    whySub: "GitWand 不只是又一个 Git 客户端的四个理由。",
+    why1t: "0 幻觉",
+    why1d: "每个 hunk 都有置信度评分和决策追踪 — 从不靠猜。",
+    why2t: "免费 · MIT",
+    why2d: "完全开源。没有按席位收费，没有试用墙，无需账号。",
+    why3t: "~8 MB，原生",
+    why3d: "Tauri 2 + Rust。亚秒级启动，而非 150 MB 的 Electron。",
+    why4t: "面向代理的 MCP",
+    why4d: "你的解决引擎，随时供 Claude Code、Cursor 及任意 MCP 客户端调用。",
+    miniCompareTitle: "GitWand 与其他客户端对比",
+    miniCompareSub: "与热门客户端相比，它真正不同之处。",
+    miniCompareCta: "查看完整对比 →",
+    mcRow1: "确定性自动解决",
+    mcRow2: "免费 / 开源",
+    mcRow3: "原生（无 Electron）",
+    mcRow4: "面向代理的 MCP 服务器",
+    agentsCta: "探索 AI 与代理 →",
+    heroAnnounce: "v3.2 新功能 — 为 AI 代理打造的集成终端与文件编辑器",
+    heroPoint1: "10 种确定性模式 — 绝不拿你的代码赌运气",
+    heroPoint2: "100% 本地运行 — 代码永不离开你的机器",
+    heroPoint3: "一个引擎 — 桌面端、CLI、VS Code 与 AI 代理",
+    heroMeta: "免费 · 无需账号 · 无遥测",
+    heroToastTitle: "57 个 hunk 已自动解决",
+    heroToastSub: "1 个待复查 · 0 幻觉",
+    contribYouName: "+ 你？",
+    contribYouRole: "提交你的第一个 PR",
     badge: 'v3.2.0 · 开源 · MIT',
-    heroH1a: '自动解决冲突的',
-    heroH1b: 'Git 客户端',
-    heroSub: 'GitWand 通过 10 种确定性模式与逐 hunk 置信度评分，对每个合并冲突进行分类。95% 的简单冲突自动解决。复杂的留给你，附带完整追踪。原生、免费、开源。',
+    heroH1a: "合并冲突，到此为止。",
+    heroH1b: "找回你的心流。",
+    heroSub: "12 个文件同时变红的那种心凉？不会再有。GitWand 用 10 种确定性模式分类每个 hunk——不猜测、无幻觉——自动解决 95% 的简单冲突，只把真正值得你思考的部分交还给你。原生、免费、MIT。",
     download: '下载',
     github: 'GitHub',
     whatsNew: 'v3.2 新特性',
@@ -792,13 +952,13 @@ const i18n: Record<Locale, any> = {
     featForkWorkflowDesc: '同步按钮上的"↑N fork"标记,适用于 push remote ≠ upstream 的 fork 场景。',
     featMcp: 'MCP 服务器',
     featMcpDesc: '将 GitWand 暴露给 Claude、Cursor、Windsurf 等 MCP 客户端。一条命令:npx -y @gitwand/mcp。附带 provenance 签名发布。',
-    conflictTitle: '合并冲突,自动解决',
+    conflictTitle: "看它一秒解决一个冲突",
     conflictSub: 'GitWand 分析代码语义,而不仅仅是文本行。它为你挑选正确的解决方案。',
     conflictBefore: '之前 — 原始冲突',
     conflictAfter: '之后 — 自动解决',
     conflictBadge: '置信度 97% · prefer-theirs · 语义化',
-    previewTitle: '你会爱上的 Git 客户端',
-    previewSub: '简洁的界面、深色主题,所有 Git 功能集于一处。',
+    previewTitle: "一个你真正想打开的 Git 客户端",
+    previewSub: "所有 Git 操作集于一个快速的原生窗口——提交图谱、diff、pull request、worktree,以及你的 Today 收件箱。",
     platformsTitle: '处处可用',
     plMacSub: 'Intel + Apple Silicon',
     plLinuxSub: '.deb · .AppImage · .rpm',
@@ -807,11 +967,11 @@ const i18n: Record<Locale, any> = {
     plCliSub: 'npm i -g @gitwand/cli',
     plVscode: 'VS Code',
     plVscodeSub: '扩展市场',
-    ctaTitle: '准备好简化你的 Git 工作流了吗?',
-    ctaSub: '免费、开源,为追求效率的开发者而生。',
+    ctaTitle: "别再当合并冲突的裁判了。",
+    ctaSub: "免费、开源、原生。下载 GitWand,把无聊的 95% 交给引擎。",
     ctaDownload: '下载 GitWand',
-    llmTitle: '让你的 AI 代理参与其中',
-    llmSub: 'GitWand 的 MCP 服务器将其冲突引擎开放给 AI 代理。GitWand 处理简单情况 — 你的代理接管复杂情况。',
+    llmTitle: "让你的 AI 代理,随时用上真正的 Git 引擎",
+    llmSub: "代理擅长写代码,却搞不定合并。GitWand 的 MCP 服务器以确定性方式解决 95% 的简单冲突,并把困难的 hunk 连同完整上下文——ours、theirs、base 和追踪——交给你的代理。",
     llmBadge: 'MCP 服务器 · 官方注册表 · stdio · 无需 API 密钥',
     llmStep1: '分析',
     llmStep1Desc: '代理调用 gitwand_preview_merge 来评估冲突数量、复杂度,以及 GitWand 能独立解决的比例。',
@@ -829,7 +989,7 @@ const i18n: Record<Locale, any> = {
     featuresAria: '功能类别',
     // 3 Pillars
     pillarsTitle: '三大支柱,一个承诺',
-    pillarsSub: '冲突自动解决、原生性能、可选可审计的 AI。',
+    pillarsSub: "以确定性方式解决冲突、真正原生的性能，以及只有你需要时才介入的 AI。",
     pillar1Title: '自动解决 95% 的简单冲突',
     pillar1Sub: '10 种确定性模式。组合式置信度评分。每个 hunk 都有决策追踪。',
     pillar1Stat: '95%',
@@ -985,14 +1145,24 @@ function cellClass(v: CompareValue | undefined): string {
     </div>
 
     <!-- ══════════════════════════════════════
-         HERO
+         1 · HERO
     ══════════════════════════════════════ -->
     <section class="hero">
+      <!-- Ambient depth layers: dot grid + aurora glows (pure CSS, decorative) -->
+      <div class="hero-bg" aria-hidden="true">
+        <div class="hero-bg__grid"></div>
+        <div class="hero-bg__orb hero-bg__orb--purple"></div>
+        <div class="hero-bg__orb hero-bg__orb--green"></div>
+      </div>
       <div class="hero-inner">
 
         <!-- Left: text -->
         <div class="hero-text">
-          <span class="badge">{{ t.badge }}</span>
+          <a class="hero-announce" href="/changelog">
+            <span class="hero-announce__dot"></span>
+            <span class="hero-announce__txt">{{ t.heroAnnounce }}</span>
+            <span class="hero-announce__arrow">→</span>
+          </a>
           <h1 class="hero-h1">
             {{ t.heroH1a }}<br>
             <span class="gradient">{{ t.heroH1b }}</span>
@@ -1000,6 +1170,12 @@ function cellClass(v: CompareValue | undefined): string {
           <p class="hero-sub">
             {{ t.heroSub }}
           </p>
+          <ul class="hero-points">
+            <li v-for="p in [t.heroPoint1, t.heroPoint2, t.heroPoint3]" :key="p" class="hero-point">
+              <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.4" opacity="0.35"/><path d="M5 8.2l2 2 4-4.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <span>{{ p }}</span>
+            </li>
+          </ul>
           <div class="hero-ctas">
             <div class="btn-split">
               <a :href="downloadUrl" class="btn-primary btn-split__main">
@@ -1014,10 +1190,10 @@ function cellClass(v: CompareValue | undefined): string {
               {{ t.docs }}
             </a>
           </div>
-          <p class="hero-platforms">{{ t.platforms }}</p>
+          <p class="hero-platforms">{{ t.platforms }}<span class="hero-meta"> · {{ t.heroMeta }}</span></p>
         </div>
 
-        <!-- Right: CLI ⇄ GUI toggle (#71) — GitWand is both a desktop app and a CLI -->
+        <!-- Right: CLI ⇄ GUI toggle — GitWand is both a desktop app and a CLI -->
         <div class="hero-visual">
           <div class="hero-tabs" role="tablist" :aria-label="t.heroVisualAria">
             <button
@@ -1030,8 +1206,6 @@ function cellClass(v: CompareValue | undefined): string {
             >{{ t.heroTabCli }}</button>
           </div>
 
-          <!-- Both panels share one grid cell so the stage keeps the height of the
-               taller panel — toggling visibility (not display) avoids any reflow. -->
           <div class="hero-stage">
           <!-- GUI: desktop dashboard screenshot -->
           <div class="hero-gui" :class="{ 'hero-pane--hidden': heroTab !== 'gui' }" role="tabpanel" :aria-hidden="heroTab !== 'gui'">
@@ -1040,6 +1214,16 @@ function cellClass(v: CompareValue | undefined): string {
               class="hero-gui__img" width="1842" height="931"
               loading="lazy" decoding="async"
             />
+            <!-- Floating proof card: the engine's outcome, in one glance -->
+            <div class="hero-toast" aria-hidden="true">
+              <span class="hero-toast__icon">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3 3 7-7.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </span>
+              <span class="hero-toast__body">
+                <span class="hero-toast__title">{{ t.heroToastTitle }}</span>
+                <span class="hero-toast__sub">{{ t.heroToastSub }}</span>
+              </span>
+            </div>
           </div>
 
           <!-- CLI: terminal animation -->
@@ -1064,7 +1248,7 @@ function cellClass(v: CompareValue | undefined): string {
     </section>
 
     <!-- ══════════════════════════════════════
-         STATS BAR
+         2 · STATS BAR
     ══════════════════════════════════════ -->
     <section class="stats-bar">
       <div class="stat">
@@ -1084,70 +1268,20 @@ function cellClass(v: CompareValue | undefined): string {
     </section>
 
     <!-- ══════════════════════════════════════
-         3 PILLARS — strategic positioning under the Hero/Stats
+         3 · TRUST BAR
     ══════════════════════════════════════ -->
-    <section class="hl-pillars">
-      <div class="section-inner">
-        <h2 class="section-title">{{ t.pillarsTitle }}</h2>
-        <p class="section-sub">{{ t.pillarsSub }}</p>
-        <div class="hl-pillars__grid">
-          <!-- Pillar 1 — Conflict resolution -->
-          <article class="hl-pillar">
-            <div class="hl-pillar__icon hl-pillar__icon--purple">
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M6 3v6a3 3 0 0 0 3 3h6a3 3 0 0 1 3 3v6"/>
-                <circle cx="6" cy="3" r="1.5"/>
-                <circle cx="18" cy="21" r="1.5"/>
-                <path d="M9 12l2 2 4-4"/>
-              </svg>
-            </div>
-            <h3 class="hl-pillar__title">{{ t.pillar1Title }}</h3>
-            <p class="hl-pillar__sub">{{ t.pillar1Sub }}</p>
-            <div class="hl-pillar__stat">
-              <span class="hl-pillar__stat-n">{{ t.pillar1Stat }}</span>
-              <span class="hl-pillar__stat-l">{{ t.pillar1StatLabel }}</span>
-            </div>
-            <a href="/guide/conflict-resolution" class="hl-pillar__cta">{{ t.pillar1Cta }}</a>
-          </article>
-
-          <!-- Pillar 2 — Native performance -->
-          <article class="hl-pillar">
-            <div class="hl-pillar__icon hl-pillar__icon--green">
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
-              </svg>
-            </div>
-            <h3 class="hl-pillar__title">{{ t.pillar2Title }}</h3>
-            <p class="hl-pillar__sub">{{ t.pillar2Sub }}</p>
-            <div class="hl-pillar__stat">
-              <span class="hl-pillar__stat-n">{{ t.pillar2Stat }}</span>
-              <span class="hl-pillar__stat-l">{{ t.pillar2StatLabel }}</span>
-            </div>
-            <a href="/guide/desktop" class="hl-pillar__cta">{{ t.pillar2Cta }}</a>
-          </article>
-
-          <!-- Pillar 3 — AI assists -->
-          <article class="hl-pillar">
-            <div class="hl-pillar__icon hl-pillar__icon--gradient">
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M12 3v3M12 18v3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M3 12h3M18 12h3M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/>
-                <circle cx="12" cy="12" r="3.2"/>
-              </svg>
-            </div>
-            <h3 class="hl-pillar__title">{{ t.pillar3Title }}</h3>
-            <p class="hl-pillar__sub">{{ t.pillar3Sub }}</p>
-            <div class="hl-pillar__stat">
-              <span class="hl-pillar__stat-n hl-pillar__stat-n--small">{{ t.pillar3Stat }}</span>
-              <span class="hl-pillar__stat-l">{{ t.pillar3StatLabel }}</span>
-            </div>
-            <a href="/guide/llm-fallback" class="hl-pillar__cta">{{ t.pillar3Cta }}</a>
-          </article>
-        </div>
-      </div>
+    <section class="trust-bar">
+      <a class="trust-item trust-item--link" href="https://github.com/devlint/GitWand" target="_blank" rel="noopener">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 2l2.9 6.3 6.6.6-5 4.4 1.5 6.6L12 17.8 5.5 20.5 7 13.9l-5-4.4 6.6-.6L12 2z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+        <span class="trust-txt">{{ t.trustStar }}</span>
+      </a>
+      <div class="trust-item"><span class="trust-strong">MIT</span><span class="trust-txt">{{ t.trustFree }}</span></div>
+      <div class="trust-item"><span class="trust-strong">~8&nbsp;MB</span><span class="trust-txt">{{ t.trustNative }}</span></div>
+      <div class="trust-item"><span class="trust-strong">0</span><span class="trust-txt">{{ t.trustDeterministic }}</span></div>
     </section>
 
     <!-- ══════════════════════════════════════
-         CONFLICT RESOLUTION DEMO (moved before features)
+         4 · CONFLICT DEMO — the "aha" moment
     ══════════════════════════════════════ -->
     <section class="conflict-section">
       <div class="section-inner">
@@ -1191,321 +1325,77 @@ function cellClass(v: CompareValue | undefined): string {
             </div>
           </div>
         </div>
+        <div class="section-cta-row">
+          <a href="/conflict-engine" class="btn-ghost">{{ t.conflictCta }}</a>
+        </div>
       </div>
     </section>
 
     <!-- ══════════════════════════════════════
-         10 PATTERNS GRID
+         5 · 3 DOORS (pillars → pillar pages)
     ══════════════════════════════════════ -->
-    <section class="patterns-section">
+    <section class="hl-pillars">
       <div class="section-inner">
-        <h2 class="section-title">{{ t.patternsTitle }}</h2>
-        <p class="section-sub">{{ t.patternsSub }}</p>
-        <div class="patterns-grid">
-          <div
-            v-for="p in PATTERNS" :key="p.name"
-            class="pat-card"
-            :class="{ 'pat-card--dim': !p.auto }"
-          >
-            <div class="pat-head">
-              <code class="pat-name">{{ p.name }}</code>
-              <span class="pat-conf" :class="`pat-conf--${p.conf}`">{{ p.conf }}</span>
+        <h2 class="section-title">{{ t.pillarsTitle }}</h2>
+        <p class="section-sub">{{ t.pillarsSub }}</p>
+        <div class="hl-pillars__grid">
+          <!-- Pillar 1 — Conflict resolution -->
+          <a class="hl-pillar hl-pillar--link" href="/conflict-engine">
+            <div class="hl-pillar__icon hl-pillar__icon--purple">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M6 3v6a3 3 0 0 0 3 3h6a3 3 0 0 1 3 3v6"/>
+                <circle cx="6" cy="3" r="1.5"/>
+                <circle cx="18" cy="21" r="1.5"/>
+                <path d="M9 12l2 2 4-4"/>
+              </svg>
             </div>
-            <p class="pat-desc">{{ p.desc }}</p>
-            <div class="pat-auto" :class="p.auto ? 'pat-auto--yes' : 'pat-auto--no'">
-              {{ p.auto ? '⚡ Auto-resolved' : '○ Review needed' }}
+            <h3 class="hl-pillar__title">{{ t.pillar1Title }}</h3>
+            <p class="hl-pillar__sub">{{ t.pillar1Sub }}</p>
+            <div class="hl-pillar__stat">
+              <span class="hl-pillar__stat-n">{{ t.pillar1Stat }}</span>
+              <span class="hl-pillar__stat-l">{{ t.pillar1StatLabel }}</span>
             </div>
-          </div>
-        </div>
-      </div>
-    </section>
+            <span class="hl-pillar__cta">{{ t.pillar1Cta }}</span>
+          </a>
 
-    <!-- ══════════════════════════════════════
-         WHAT'S NEW HIGHLIGHT BANNER — drives traffic to the "new" tab
-    ══════════════════════════════════════ -->
-    <section class="hl-new-release">
-      <div class="hl-new-release__inner">
-        <div class="hl-new-release__copy">
-          <span class="hl-new-release__badge">{{ t.newReleaseBadge }}</span>
-          <h2 class="hl-new-release__title">{{ t.newReleaseTitle }}</h2>
-          <p class="hl-new-release__sub">{{ t.newReleaseSub }}</p>
-        </div>
-        <div class="hl-new-release__cta">
-          <a class="hl-new-release__link" href="/changelog" @click.prevent="jumpToNewTab">
-            {{ t.newReleaseCta }} →
+          <!-- Pillar 2 — Native performance -->
+          <a class="hl-pillar hl-pillar--link" href="/features">
+            <div class="hl-pillar__icon hl-pillar__icon--green">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+              </svg>
+            </div>
+            <h3 class="hl-pillar__title">{{ t.pillar2Title }}</h3>
+            <p class="hl-pillar__sub">{{ t.pillar2Sub }}</p>
+            <div class="hl-pillar__stat">
+              <span class="hl-pillar__stat-n">{{ t.pillar2Stat }}</span>
+              <span class="hl-pillar__stat-l">{{ t.pillar2StatLabel }}</span>
+            </div>
+            <span class="hl-pillar__cta">{{ t.pillar2Cta }}</span>
+          </a>
+
+          <!-- Pillar 3 — AI assists -->
+          <a class="hl-pillar hl-pillar--link" href="/ai-agents">
+            <div class="hl-pillar__icon hl-pillar__icon--gradient">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 3v3M12 18v3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M3 12h3M18 12h3M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/>
+                <circle cx="12" cy="12" r="3.2"/>
+              </svg>
+            </div>
+            <h3 class="hl-pillar__title">{{ t.pillar3Title }}</h3>
+            <p class="hl-pillar__sub">{{ t.pillar3Sub }}</p>
+            <div class="hl-pillar__stat">
+              <span class="hl-pillar__stat-n hl-pillar__stat-n--small">{{ t.pillar3Stat }}</span>
+              <span class="hl-pillar__stat-l">{{ t.pillar3StatLabel }}</span>
+            </div>
+            <span class="hl-pillar__cta">{{ t.pillar3Cta }}</span>
           </a>
         </div>
       </div>
     </section>
 
     <!-- ══════════════════════════════════════
-         FEATURES (tabbed — replaces flat grid)
-    ══════════════════════════════════════ -->
-    <section class="features">
-      <div class="section-inner">
-        <h2 class="section-title">{{ t.featTitle }}</h2>
-        <p class="section-sub">{{ t.featSub }}</p>
-
-        <!-- Tab navigation -->
-        <div class="feat-tabs" role="tablist" :aria-label="t.featuresAria">
-          <button role="tab" class="feat-tab" :aria-selected="activeTab === 'core'" :class="{ 'feat-tab--active': activeTab === 'core' }" @click="activeTab = 'core'">{{ t.tabCore }}</button>
-          <button role="tab" class="feat-tab" :aria-selected="activeTab === 'power'" :class="{ 'feat-tab--active': activeTab === 'power' }" @click="activeTab = 'power'">{{ t.tabPower }}</button>
-          <button role="tab" class="feat-tab" :aria-selected="activeTab === 'ai'" :class="{ 'feat-tab--active': activeTab === 'ai' }" @click="activeTab = 'ai'">{{ t.tabAI }}</button>
-          <button role="tab" class="feat-tab feat-tab--highlight" :aria-selected="activeTab === 'new'" :class="{ 'feat-tab--active': activeTab === 'new' }" @click="activeTab = 'new'">{{ t.tabNew }}</button>
-        </div>
-
-        <!-- Core Git tab — daily workflow essentials -->
-        <Transition name="hl-tab-fade" mode="out-in">
-          <div v-if="activeTab === 'core'" key="core" class="features-grid" role="tabpanel">
-            <div class="feat-card">
-              <div class="feat-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 2a7 7 0 100 14A7 7 0 0012 2z" stroke="#7C3AED" stroke-width="1.8"/><path d="M9 12l2 2 4-4" stroke="#7C3AED" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-              <h3>{{ t.featResolve }}</h3><p>{{ t.featResolveDesc }}</p>
-            </div>
-            <div class="feat-card">
-              <div class="feat-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 00-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0020 4.77 5.07 5.07 0 0019.91 1S18.73.65 16 2.48a13.38 13.38 0 00-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 005 4.77a5.44 5.44 0 00-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 009 18.13V22" stroke="#7C3AED" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-              <h3>{{ t.featPR }}</h3><p>{{ t.featPRDesc }}</p>
-            </div>
-            <div class="feat-card">
-              <div class="feat-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="14" rx="2" stroke="#7C3AED" stroke-width="1.8"/><path d="M8 21h8M12 17v4" stroke="#7C3AED" stroke-width="1.8" stroke-linecap="round"/></svg></div>
-              <h3>{{ t.featDiff }}</h3><p>{{ t.featDiffDesc }}</p>
-            </div>
-            <div class="feat-card">
-              <div class="feat-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M3 5a1 1 0 011-1h4l2 2h10a1 1 0 011 1v2H3V5z" stroke="#7C3AED" stroke-width="1.8" stroke-linejoin="round"/><path d="M3 9h18v11a1 1 0 01-1 1H4a1 1 0 01-1-1V9z" stroke="#7C3AED" stroke-width="1.8"/><path d="M7 13h4M7 17h7" stroke="#7C3AED" stroke-width="1.8" stroke-linecap="round"/></svg></div>
-              <h3>{{ t.featFolderTree }}</h3><p>{{ t.featFolderTreeDesc }}</p>
-            </div>
-            <div class="feat-card">
-              <div class="feat-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="6" cy="6" r="2.5" stroke="#7C3AED" stroke-width="1.8"/><circle cx="18" cy="6" r="2.5" stroke="#7C3AED" stroke-width="1.8"/><circle cx="12" cy="18" r="2.5" stroke="#7C3AED" stroke-width="1.8" fill="rgba(124,58,237,0.07)"/><path d="M6 8.5v3a2 2 0 002 2h8a2 2 0 002-2v-3M12 13.5V16" stroke="#7C3AED" stroke-width="1.8" stroke-linecap="round"/></svg></div>
-              <h3>{{ t.featSplitCommit }}</h3><p>{{ t.featSplitCommitDesc }}</p>
-            </div>
-            <div class="feat-card">
-              <div class="feat-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M7 7h10M7 12h6" stroke="#7C3AED" stroke-width="1.8" stroke-linecap="round"/><circle cx="17" cy="17" r="4" stroke="#7C3AED" stroke-width="1.8"/><path d="M17 15v2l1 1" stroke="#7C3AED" stroke-width="1.5" stroke-linecap="round"/></svg></div>
-              <h3>{{ t.featTags }}</h3><p>{{ t.featTagsDesc }}</p>
-            </div>
-          </div>
-
-          <!-- Power user tab (was "Integrations") -->
-          <div v-else-if="activeTab === 'power'" key="power" class="features-grid" role="tabpanel">
-            <div class="feat-card">
-              <div class="feat-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><rect x="2" y="3" width="9" height="18" rx="1.5" stroke="#7C3AED" stroke-width="1.8"/><rect x="13" y="3" width="9" height="18" rx="1.5" stroke="#7C3AED" stroke-width="1.8" fill="rgba(124,58,237,0.07)"/><path d="M6 8h2M6 12h2M6 16h2M17 8h1M17 12h1M17 16h1" stroke="#7C3AED" stroke-width="1.5" stroke-linecap="round"/></svg></div>
-              <h3>{{ t.featWorktrees }}</h3><p>{{ t.featWorktreesDesc }}</p>
-            </div>
-            <div class="feat-card">
-              <div class="feat-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><rect x="2" y="2" width="9" height="7" rx="1.5" stroke="#7C3AED" stroke-width="1.8"/><rect x="13" y="2" width="9" height="7" rx="1.5" stroke="#7C3AED" stroke-width="1.8" fill="rgba(124,58,237,0.07)"/><path d="M6.5 9v3.5a1 1 0 001 1h9a1 1 0 001-1V9" stroke="#7C3AED" stroke-width="1.8" stroke-linecap="round"/><rect x="8" y="14" width="8" height="8" rx="1.5" stroke="#7C3AED" stroke-width="1.8"/></svg></div>
-              <h3>{{ t.featSubmodules }}</h3><p>{{ t.featSubmodulesDesc }}</p>
-            </div>
-            <div class="feat-card">
-              <div class="feat-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M4 6h16M4 12h10M4 18h7" stroke="#7C3AED" stroke-width="1.8" stroke-linecap="round"/><circle cx="19" cy="17" r="3" stroke="#7C3AED" stroke-width="1.6"/><path d="M21.5 19.5l1.5 1.5" stroke="#7C3AED" stroke-width="1.6" stroke-linecap="round"/></svg></div>
-              <h3>{{ t.featFileHistory }}</h3><p>{{ t.featFileHistoryDesc }}</p>
-            </div>
-            <div class="feat-card">
-              <div class="feat-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="6" cy="6" r="2" stroke="#7C3AED" stroke-width="1.8"/><circle cx="18" cy="6" r="2" stroke="#7C3AED" stroke-width="1.8"/><circle cx="12" cy="18" r="2" stroke="#7C3AED" stroke-width="1.8"/><path d="M8 6h8M7 8l-2 8M17 8l2 8" stroke="#7C3AED" stroke-width="1.8" stroke-linecap="round"/></svg></div>
-              <h3>{{ t.featHistory }}</h3><p>{{ t.featHistoryDesc }}</p>
-            </div>
-            <div class="feat-card">
-              <div class="feat-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="6" cy="6" r="2" stroke="#7C3AED" stroke-width="1.8"/><circle cx="18" cy="6" r="2" stroke="#7C3AED" stroke-width="1.8"/><circle cx="12" cy="20" r="2" stroke="#7C3AED" stroke-width="1.8"/><path d="M6 8v4a2 2 0 002 2h4M18 8v4a2 2 0 01-2 2h-4M12 14v4" stroke="#7C3AED" stroke-width="1.8" stroke-linecap="round"/></svg></div>
-              <h3>{{ t.featCommitCtx }}</h3><p>{{ t.featCommitCtxDesc }}</p>
-            </div>
-            <div class="feat-card">
-              <div class="feat-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="5" cy="12" r="2.5" stroke="#7C3AED" stroke-width="1.8"/><circle cx="19" cy="6" r="2.5" stroke="#7C3AED" stroke-width="1.8"/><circle cx="19" cy="18" r="2.5" stroke="#7C3AED" stroke-width="1.8"/><path d="M7.5 12h9M16.5 6l-4 4.5M16.5 18l-4-4.5" stroke="#7C3AED" stroke-width="1.5" stroke-linecap="round"/></svg></div>
-              <h3>{{ t.featForkWorkflow }}</h3><p>{{ t.featForkWorkflowDesc }}</p>
-            </div>
-          </div>
-
-          <!-- AI tab -->
-          <div v-else-if="activeTab === 'ai'" key="ai" class="features-grid" role="tabpanel">
-            <div class="feat-card feat-card--ai">
-              <div class="feat-icon feat-icon--ai"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M6 3v12M6 21a3 3 0 100-6 3 3 0 000 6zM18 9a3 3 0 100-6 3 3 0 000 6zM18 9v4a2 2 0 01-2 2H8" stroke="#10B981" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-              <h3>{{ t.featAIMerge }}</h3><p>{{ t.featAIMergeDesc }}</p>
-            </div>
-            <div class="feat-card feat-card--ai">
-              <div class="feat-icon feat-icon--ai"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" stroke="#10B981" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="12" r="3" stroke="#10B981" stroke-width="1.8"/></svg></div>
-              <h3>{{ t.featAIPR }}</h3><p>{{ t.featAIPRDesc }}</p>
-            </div>
-            <div class="feat-card feat-card--ai">
-              <div class="feat-icon feat-icon--ai"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="#10B981" stroke-width="1.8"/><path d="M12 7v5l3 2" stroke="#10B981" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-              <h3>{{ t.featAIFlow }}</h3><p>{{ t.featAIFlowDesc }}</p>
-            </div>
-            <div class="feat-card feat-card--ai">
-              <div class="feat-icon feat-icon--ai"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="14" rx="2" stroke="#10B981" stroke-width="1.8"/><path d="M3 9h18M8 13h3M8 16h5" stroke="#10B981" stroke-width="1.5" stroke-linecap="round"/></svg></div>
-              <h3>{{ t.featTrailers }}</h3><p>{{ t.featTrailersDesc }}</p>
-            </div>
-            <div class="feat-card feat-card--ai">
-              <div class="feat-icon feat-icon--ai"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 22v-5M9 7V3M15 7V3M5 11V9a2 2 0 012-2h10a2 2 0 012 2v2a5 5 0 01-5 5h-4a5 5 0 01-5-5z" stroke="#10B981" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-              <h3>{{ t.featMcp }}</h3><p>{{ t.featMcpDesc }}</p>
-            </div>
-            <div class="feat-card feat-card--ai">
-              <div class="feat-icon feat-icon--ai"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="6" cy="6" r="2" stroke="#10B981" stroke-width="1.8"/><circle cx="18" cy="6" r="2" stroke="#10B981" stroke-width="1.8"/><circle cx="12" cy="20" r="2" stroke="#10B981" stroke-width="1.8"/><path d="M6 8v4a2 2 0 002 2h4M18 8v4a2 2 0 01-2 2h-4M12 14v4" stroke="#10B981" stroke-width="1.8" stroke-linecap="round"/></svg></div>
-              <h3>{{ t.featCommitCtx }}</h3><p>{{ t.featCommitCtxDesc }}</p>
-            </div>
-          </div>
-
-          <!-- What's New tab — 7 highlights from v2.5 → v2.19 -->
-          <div v-else-if="activeTab === 'new'" key="new" class="features-grid" role="tabpanel">
-            <!-- Today — triaged action inbox (was Launchpad) — v3.0 -->
-            <div class="feat-card feat-card--new">
-              <div class="feat-badge">v3.0</div>
-              <div class="feat-icon feat-icon--ai"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></div>
-              <h3>{{ t.featLaunchpad }}</h3><p>{{ t.featLaunchpadDesc }}</p>
-            </div>
-            <!-- Scratch worktree + extended Conflict Predictor — v2.20 -->
-            <div class="feat-card feat-card--new">
-              <div class="feat-badge">v2.20</div>
-              <div class="feat-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#7C3AED" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="9" r="2.5"/><path d="M6 8.5v7M8.4 7.2C12 6 14 8 15.6 8.8M9 18h4a4 4 0 004-4v-2.5"/></svg></div>
-              <h3>{{ t.featScratch }}</h3><p>{{ t.featScratchDesc }}</p>
-            </div>
-            <!-- GitHub OAuth, Azure DevOps & cross-fork PRs — v2.19 -->
-            <div class="feat-card feat-card--new">
-              <div class="feat-badge">v2.19</div>
-              <div class="feat-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#7C3AED" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 00-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.34-3.37-1.34-.46-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.89 1.53 2.34 1.09 2.91.83.09-.65.35-1.09.63-1.34-2.22-.25-4.55-1.11-4.55-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.02a9.5 9.5 0 015 0c1.91-1.29 2.75-1.02 2.75-1.02.55 1.38.2 2.4.1 2.65.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.69-4.57 4.94.36.31.68.92.68 1.85v2.74c0 .27.18.58.69.48A10 10 0 0012 2z"/></svg></div>
-              <h3>{{ t.featOAuth }}</h3><p>{{ t.featOAuthDesc }}</p>
-            </div>
-            <!-- AI inline code suggestions — v2.13 -->
-            <div class="feat-card feat-card--new">
-              <div class="feat-badge">v2.13</div>
-              <div class="feat-icon feat-icon--ai"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M7 9h4M7 12h6M15 12l2 2-2 2"/><path d="M8 21h8M12 17v4"/></svg></div>
-              <h3>{{ t.featAISuggest }}</h3><p>{{ t.featAISuggestDesc }}</p>
-            </div>
-            <!-- Forge integrations — v2.10 -->
-            <div class="feat-card feat-card--new">
-              <div class="feat-badge">v2.10</div>
-              <div class="feat-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#7C3AED" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="M12 7v4M10.3 14.5L6.8 17M13.7 14.5l3.5 2.5M10 11h4"/></svg></div>
-              <h3>{{ t.featForge }}</h3><p>{{ t.featForgeDesc }}</p>
-            </div>
-            <!-- Branch management — v2.12 -->
-            <div class="feat-card feat-card--new">
-              <div class="feat-badge">v2.12</div>
-              <div class="feat-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#7C3AED" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><path d="M6 8v8M18 6a4 4 0 00-4 4v4a4 4 0 008 0v-1"/><path d="M15 3l3 3-3 3"/></svg></div>
-              <h3>{{ t.featBranchMgmt }}</h3><p>{{ t.featBranchMgmtDesc }}</p>
-            </div>
-            <!-- Commit templates & identities — v2.12 -->
-            <div class="feat-card feat-card--new">
-              <div class="feat-badge">v2.12</div>
-              <div class="feat-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#7C3AED" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9h18M8 13h3M8 16h5M16 13l1.5 1.5L20 12"/></svg></div>
-              <h3>{{ t.featIdentities }}</h3><p>{{ t.featIdentitiesDesc }}</p>
-            </div>
-            <!-- LLM fallback — v2.5 -->
-            <div class="feat-card feat-card--new">
-              <div class="feat-badge">v2.5</div>
-              <div class="feat-icon feat-icon--ai"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l1.5 4.5L18 8l-4.5 1.5L12 14l-1.5-4.5L6 8l4.5-1.5L12 2z"/><path d="M19 14l.8 2.2L22 17l-2.2.8L19 20l-.8-2.2L16 17l2.2-.8L19 14z"/></svg></div>
-              <h3>{{ t.featLlmFallback }}</h3><p>{{ t.featLlmFallbackDesc }}</p>
-            </div>
-          </div>
-        </Transition>
-
-      </div>
-    </section>
-
-    <!-- ══════════════════════════════════════
-         BENCHMARKS
-    ══════════════════════════════════════ -->
-    <section class="bench-section">
-      <div class="section-inner">
-        <h2 class="section-title">{{ t.benchTitle }}</h2>
-        <p class="section-sub">{{ t.benchSub }}</p>
-        <div class="bench-grid">
-          <div class="bench-card">
-            <div class="bench-val">249k<span class="bench-unit">ops/sec</span></div>
-            <div class="bench-label">1 conflict · ~30 lines · M-series</div>
-          </div>
-          <div class="bench-card">
-            <div class="bench-val">40k<span class="bench-unit">ops/sec</span></div>
-            <div class="bench-label">5 conflicts · ~140 lines</div>
-          </div>
-          <div class="bench-card">
-            <div class="bench-val">4.5k<span class="bench-unit">ops/sec</span></div>
-            <div class="bench-label">50 conflicts · ~1350 lines</div>
-          </div>
-          <div class="bench-card bench-card--purple">
-            <div class="bench-val">~8<span class="bench-unit">MB</span></div>
-            <div class="bench-label">Binary size — vs ~150MB Electron</div>
-          </div>
-          <div class="bench-card bench-card--purple">
-            <div class="bench-val">322<span class="bench-unit">tests</span></div>
-            <div class="bench-label">Engine · CLI · App · all passing</div>
-          </div>
-          <div class="bench-card bench-card--green">
-            <div class="bench-val">0</div>
-            <div class="bench-label">Hallucinations — fully deterministic</div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ══════════════════════════════════════
-         LLM / MCP SECTION
-    ══════════════════════════════════════ -->
-    <section class="llm-section">
-      <div class="section-inner">
-        <span class="badge">{{ t.llmBadge }}</span>
-        <h2 class="section-title" style="margin-top:16px">{{ t.llmTitle }}</h2>
-        <p class="section-sub">{{ t.llmSub }}</p>
-
-        <div class="llm-layout">
-          <!-- Steps -->
-          <div class="llm-steps">
-            <div class="llm-step">
-              <div class="llm-step-num">1</div>
-              <div class="llm-step-body">
-                <h3 class="llm-step-title">{{ t.llmStep1 }}</h3>
-                <p class="llm-step-desc">{{ t.llmStep1Desc }}</p>
-              </div>
-            </div>
-            <div class="llm-connector"></div>
-            <div class="llm-step">
-              <div class="llm-step-num">2</div>
-              <div class="llm-step-body">
-                <h3 class="llm-step-title">{{ t.llmStep2 }}</h3>
-                <p class="llm-step-desc">{{ t.llmStep2Desc }}</p>
-              </div>
-            </div>
-            <div class="llm-connector"></div>
-            <div class="llm-step">
-              <div class="llm-step-num llm-step-num--ai">AI</div>
-              <div class="llm-step-body">
-                <h3 class="llm-step-title">{{ t.llmStep3 }}</h3>
-                <p class="llm-step-desc">{{ t.llmStep3Desc }}</p>
-              </div>
-            </div>
-          </div>
-
-          <!-- Code card -->
-          <div class="llm-code-card">
-            <div class="llm-code-bar">
-              <span class="tl tl-r"></span>
-              <span class="tl tl-y"></span>
-              <span class="tl tl-g"></span>
-              <span class="llm-code-title">claude_desktop_config.json</span>
-            </div>
-            <pre class="llm-code-block"><span class="lc-p">{</span>
-  <span class="lc-k">"mcpServers"</span><span class="lc-p">:</span> <span class="lc-p">{</span>
-    <span class="lc-k">"gitwand"</span><span class="lc-p">:</span> <span class="lc-p">{</span>
-      <span class="lc-k">"command"</span><span class="lc-p">:</span> <span class="lc-s">"npx"</span><span class="lc-p">,</span>
-      <span class="lc-k">"args"</span><span class="lc-p">:</span> <span class="lc-p">[</span>
-        <span class="lc-s">"@gitwand/mcp"</span><span class="lc-p">,</span>
-        <span class="lc-s">"--cwd"</span><span class="lc-p">,</span>
-        <span class="lc-s">"/path/to/repo"</span>
-      <span class="lc-p">]</span>
-    <span class="lc-p">}</span>
-  <span class="lc-p">}</span>
-<span class="lc-p">}</span></pre>
-            <div class="llm-compat">
-              <span class="llm-compat-label">{{ t.llmCompat }}</span>
-              <div class="llm-compat-chips">
-                <span class="llm-chip">Claude Code</span>
-                <span class="llm-chip">Claude Desktop</span>
-                <span class="llm-chip">Cursor</span>
-                <span class="llm-chip">Windsurf</span>
-                <span class="llm-chip">Continue</span>
-              </div>
-            </div>
-            <a href="/guide/mcp" class="llm-docs-link">{{ t.llmDocs }}</a>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ══════════════════════════════════════
-         APP PREVIEW (larger mockup)
+         6 · SHOW THE INTERFACE (slideshow, moved up)
     ══════════════════════════════════════ -->
     <section class="preview-section">
       <div class="section-inner">
@@ -1567,7 +1457,139 @@ function cellClass(v: CompareValue | undefined): string {
     </section>
 
     <!-- ══════════════════════════════════════
-         PLATFORMS
+         7 · WHY GITWAND — the 4 differentiators
+    ══════════════════════════════════════ -->
+    <section class="why-section">
+      <div class="section-inner">
+        <h2 class="section-title">{{ t.whyTitle }}</h2>
+        <p class="section-sub">{{ t.whySub }}</p>
+        <div class="why-grid">
+          <article class="why-card">
+            <div class="why-card__badge why-card__badge--purple">0</div>
+            <h3 class="why-card__title">{{ t.why1t }}</h3>
+            <p class="why-card__desc">{{ t.why1d }}</p>
+          </article>
+          <article class="why-card">
+            <div class="why-card__badge why-card__badge--green">MIT</div>
+            <h3 class="why-card__title">{{ t.why2t }}</h3>
+            <p class="why-card__desc">{{ t.why2d }}</p>
+          </article>
+          <article class="why-card">
+            <div class="why-card__badge why-card__badge--purple">~8&nbsp;MB</div>
+            <h3 class="why-card__title">{{ t.why3t }}</h3>
+            <p class="why-card__desc">{{ t.why3d }}</p>
+          </article>
+          <article class="why-card">
+            <div class="why-card__badge why-card__badge--green">MCP</div>
+            <h3 class="why-card__title">{{ t.why4t }}</h3>
+            <p class="why-card__desc">{{ t.why4d }}</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════
+         8 · MINI COMPARE
+    ══════════════════════════════════════ -->
+    <section class="mini-compare-section">
+      <div class="section-inner">
+        <h2 class="section-title">{{ t.miniCompareTitle }}</h2>
+        <p class="section-sub">{{ t.miniCompareSub }}</p>
+        <div class="mini-compare-wrap">
+          <table class="mini-compare">
+            <thead>
+              <tr>
+                <th></th>
+                <th class="mc-gw">GitWand</th>
+                <th>GitHub Desktop</th>
+                <th>GitKraken</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="mc-feat">{{ t.mcRow1 }}</td>
+                <td class="mc-gw"><span class="mc-yes">✓</span></td>
+                <td><span class="mc-no">✗</span></td>
+                <td><span class="mc-partial">AI only</span></td>
+              </tr>
+              <tr>
+                <td class="mc-feat">{{ t.mcRow2 }}</td>
+                <td class="mc-gw"><span class="mc-yes">✓</span></td>
+                <td><span class="mc-yes">✓</span></td>
+                <td><span class="mc-no">✗</span></td>
+              </tr>
+              <tr>
+                <td class="mc-feat">{{ t.mcRow3 }}</td>
+                <td class="mc-gw"><span class="mc-yes">✓</span></td>
+                <td><span class="mc-no">✗</span></td>
+                <td><span class="mc-no">✗</span></td>
+              </tr>
+              <tr>
+                <td class="mc-feat">{{ t.mcRow4 }}</td>
+                <td class="mc-gw"><span class="mc-yes">✓</span></td>
+                <td><span class="mc-no">✗</span></td>
+                <td><span class="mc-yes">✓</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="section-cta-row">
+          <a href="/features" class="btn-ghost">{{ t.miniCompareCta }}</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════
+         9 · AI AGENTS TEASER
+    ══════════════════════════════════════ -->
+    <section class="agents-teaser">
+      <div class="section-inner">
+        <span class="badge">{{ t.llmBadge }}</span>
+        <h2 class="section-title" style="margin-top:16px">{{ t.llmTitle }}</h2>
+        <p class="section-sub">{{ t.llmSub }}</p>
+        <div class="agents-chips">
+          <span class="llm-chip">Claude Code</span>
+          <span class="llm-chip">Cursor</span>
+          <span class="llm-chip">opencode</span>
+          <span class="llm-chip">Windsurf</span>
+          <span class="llm-chip">Continue</span>
+        </div>
+        <div class="section-cta-row">
+          <a href="/ai-agents" class="btn-primary">{{ t.agentsCta }}</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════
+         10 · FAQ
+    ══════════════════════════════════════ -->
+    <section class="faq-section">
+      <div class="section-inner">
+        <h2 class="section-title">{{ t.faqTitle }}</h2>
+        <div class="faq-list">
+          <div
+            v-for="(item, i) in t.faqItems"
+            :key="i"
+            class="faq-item"
+            :class="{ 'faq-item--open': faqOpen === i }"
+            @click="toggleFaq(i)"
+          >
+            <div class="faq-q">
+              <span>{{ item.q }}</span>
+              <svg class="faq-chevron" width="18" height="18" viewBox="0 0 24 24" fill="none">
+                <path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </div>
+            <div class="faq-a" v-show="faqOpen === i">
+              <p>{{ item.a }}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════
+         11 · PLATFORMS (download)
     ══════════════════════════════════════ -->
     <section class="platforms-section">
       <div class="section-inner">
@@ -1603,118 +1625,24 @@ function cellClass(v: CompareValue | undefined): string {
     </section>
 
     <!-- ══════════════════════════════════════
-         FAQ
-    ══════════════════════════════════════ -->
-    <section class="faq-section">
-      <div class="section-inner">
-        <h2 class="section-title">{{ t.faqTitle }}</h2>
-        <div class="faq-list">
-          <div
-            v-for="(item, i) in t.faqItems"
-            :key="i"
-            class="faq-item"
-            :class="{ 'faq-item--open': faqOpen === i }"
-            @click="toggleFaq(i)"
-          >
-            <div class="faq-q">
-              <span>{{ item.q }}</span>
-              <svg class="faq-chevron" width="18" height="18" viewBox="0 0 24 24" fill="none">
-                <path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-            </div>
-            <div class="faq-a" v-show="faqOpen === i">
-              <p>{{ item.a }}</p>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ══════════════════════════════════════
-         COMPARISON TABLE
-    ══════════════════════════════════════ -->
-    <section class="compare-section">
-      <div class="section-inner">
-        <h2 id="compare" class="section-title">{{ t.compareTitle }}</h2>
-        <p class="section-sub">{{ t.compareSub }}</p>
-        <div class="compare-wrap">
-          <table class="compare-table">
-            <thead>
-              <tr>
-                <th class="compare-feat-col"></th>
-                <th class="compare-app-col compare-app--gw">
-                  <span class="compare-app-name">GitWand</span>
-                  <span class="compare-app-meta">Free · MIT</span>
-                </th>
-                <th class="compare-app-col">
-                  <span class="compare-app-name">GitHub Desktop</span>
-                  <span class="compare-app-meta">Free · Electron</span>
-                </th>
-                <th class="compare-app-col">
-                  <span class="compare-app-name">GitKraken</span>
-                  <span class="compare-app-meta">$8/mo · Electron</span>
-                </th>
-                <th class="compare-app-col">
-                  <span class="compare-app-name">Fork</span>
-                  <span class="compare-app-meta">$50 · Native</span>
-                </th>
-                <th class="compare-app-col">
-                  <span class="compare-app-name">Tower</span>
-                  <span class="compare-app-meta">$69/yr · Native</span>
-                </th>
-                <th class="compare-app-col">
-                  <span class="compare-app-name">Sublime Merge</span>
-                  <span class="compare-app-meta">$99 · Native</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              <template v-for="row in COMPARE_ROWS" :key="row.label">
-                <tr v-if="row.category" class="compare-category-row">
-                  <td colspan="7">
-                    {{ row.label }}
-                    <span v-if="row.note" class="compare-category-note">{{ row.note }}</span>
-                  </td>
-                </tr>
-                <tr v-else class="compare-feat-row" :class="{ 'compare-feat-row--highlight': row.highlight }">
-                  <td class="compare-feat-name">
-                    <span>{{ row.label }}</span>
-                    <span v-if="row.highlight" class="compare-exclusive">unique</span>
-                  </td>
-                  <td class="compare-cell compare-app--gw"><span :class="cellClass(row.gw)">{{ cellIcon(row.gw) }}</span></td>
-                  <td class="compare-cell"><span :class="cellClass(row.ghd)">{{ cellIcon(row.ghd) }}</span></td>
-                  <td class="compare-cell"><span :class="cellClass(row.gk)">{{ cellIcon(row.gk) }}</span></td>
-                  <td class="compare-cell"><span :class="cellClass(row.fork)">{{ cellIcon(row.fork) }}</span></td>
-                  <td class="compare-cell"><span :class="cellClass(row.tower)">{{ cellIcon(row.tower) }}</span></td>
-                  <td class="compare-cell"><span :class="cellClass(row.sm)">{{ cellIcon(row.sm) }}</span></td>
-                </tr>
-              </template>
-            </tbody>
-          </table>
-        </div>
-        <p class="compare-note">~ partial &nbsp;·&nbsp; SOON on the roadmap &nbsp;·&nbsp; data accurate as of May 2026</p>
-      </div>
-    </section>
-
-    <!-- ══════════════════════════════════════
-         BLOG TEASER
+         12 · BLOG TEASER
     ══════════════════════════════════════ -->
     <section class="blog-teaser-section">
       <div class="section-inner">
         <div class="blog-teaser-header">
           <span class="blog-teaser-label">From the blog</span>
         </div>
-        <a href="/blog/v2-23-changes-tree-view" class="blog-teaser-card">
-          <div class="blog-teaser-meta">June 18, 2026 · 6 min read</div>
-          <h3 class="blog-teaser-title">A folder tree for your changes, and rebases that work in the real app</h3>
-          <p class="blog-teaser-excerpt">v2.23 gives the Changes sidebar a list/tree layout toggle with collapsible folders, puts stage, unstage and discard on every file and folder row, and fixes interactive rebase in the packaged desktop app with a dedicated git_interactive_rebase command.</p>
+        <a href="/blog/v3-2-integrated-terminal-ai-tasks" class="blog-teaser-card">
+          <div class="blog-teaser-meta">July 2, 2026 · 9 min read</div>
+          <h3 class="blog-teaser-title">An integrated terminal built for AI agents, and a file editor in your Git client</h3>
+          <p class="blog-teaser-excerpt">v3.2 rebuilds the terminal on WebGL with typed agent tabs, adds one-click AI tasks running Claude Code in isolated scratch worktrees with a managed merge-back-or-discard lifecycle, and ships a dockable File Explorer / Editor panel backed by CodeMirror 6.</p>
           <span class="blog-teaser-cta">Read article →</span>
         </a>
       </div>
     </section>
 
     <!-- ══════════════════════════════════════
-         CONTRIBUTORS
+         13 · CONTRIBUTORS
     ══════════════════════════════════════ -->
     <section class="contributors-section">
       <div class="section-inner">
@@ -1736,16 +1664,22 @@ function cellClass(v: CompareValue | undefined): string {
               <span class="contributor-role">Contributor</span>
             </span>
           </a>
+          <a href="https://github.com/devlint/GitWand/blob/main/CONTRIBUTING.md" class="contributor-card contributor-card--you" target="_blank" rel="noopener">
+            <span class="contributor-avatar contributor-avatar--you" aria-hidden="true">+</span>
+            <span class="contributor-meta">
+              <span class="contributor-name">{{ t.contribYouName }}</span>
+              <span class="contributor-role">{{ t.contribYouRole }}</span>
+            </span>
+          </a>
         </div>
       </div>
     </section>
 
     <!-- ══════════════════════════════════════
-         FINAL CTA
+         14 · FINAL CTA
     ══════════════════════════════════════ -->
     <section class="cta-section">
       <div class="cta-inner">
-        <!-- Logo cube -->
         <svg width="56" height="49" viewBox="0 0 80 70" fill="none" class="cta-logo" aria-hidden="true">
           <path d="M 55,35 L 47.5,22 L 32.5,22 L 25,35 L 32.5,48 L 47.5,48 Z" fill="none"/>
           <path d="M 10,35 L 25,9 L 55,9 L 70,35 L 55,35 L 47.5,22 L 32.5,22 L 25,35 Z" fill="#8B5CF6"/>
@@ -1956,11 +1890,120 @@ function cellClass(v: CompareValue | undefined): string {
    HERO
 ─────────────────────────────────────────── */
 .hero {
-  padding: 80px 0 60px;
-  background: radial-gradient(ellipse 80% 60% at 60% -10%, rgba(124,58,237,0.18) 0%, transparent 70%),
-              var(--gw-bg);
+  position: relative;
+  overflow: hidden;
+  padding: 88px 0 68px;
+  background: var(--gw-bg);
   border-bottom: 1px solid var(--gw-border-soft);
 }
+
+/* ── Ambient depth layers ── */
+.hero-bg {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.hero-bg__grid {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(rgba(148,163,184,0.13) 1px, transparent 1px);
+  background-size: 28px 28px;
+  /* Fade the dots out toward the bottom so the grid doesn't fight the content */
+  -webkit-mask-image: radial-gradient(ellipse 90% 75% at 50% 0%, #000 30%, transparent 75%);
+  mask-image: radial-gradient(ellipse 90% 75% at 50% 0%, #000 30%, transparent 75%);
+}
+.hero-bg__orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(90px);
+  opacity: 0.55;
+  animation: orbFloat 14s ease-in-out infinite alternate;
+}
+.hero-bg__orb--purple {
+  width: 560px;
+  height: 420px;
+  top: -160px;
+  right: -80px;
+  background: radial-gradient(circle, rgba(124,58,237,0.38) 0%, transparent 70%);
+}
+.hero-bg__orb--green {
+  width: 420px;
+  height: 340px;
+  bottom: -180px;
+  left: -120px;
+  background: radial-gradient(circle, rgba(16,185,129,0.20) 0%, transparent 70%);
+  animation-delay: -7s;
+}
+@keyframes orbFloat {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to   { transform: translate3d(-30px, 24px, 0) scale(1.08); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero-bg__orb { animation: none; }
+}
+.hero-inner { position: relative; z-index: 1; }
+
+/* ── Announcement pill (replaces the static version badge) ── */
+.hero-announce {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px 6px 11px;
+  margin-bottom: 22px;
+  border-radius: 999px;
+  border: 1px solid var(--gw-border);
+  background: linear-gradient(120deg, rgba(124,58,237,0.14), rgba(16,185,129,0.07));
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--gw-purple-light);
+  letter-spacing: 0.01em;
+  text-decoration: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.hero-announce:hover {
+  border-color: rgba(124,58,237,0.55);
+  box-shadow: 0 0 20px rgba(124,58,237,0.25);
+}
+.hero-announce__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--gw-green);
+  box-shadow: 0 0 0 0 rgba(16,185,129,0.5);
+  animation: announcePulse 2.4s ease-out infinite;
+}
+@keyframes announcePulse {
+  0%   { box-shadow: 0 0 0 0 rgba(16,185,129,0.45); }
+  70%  { box-shadow: 0 0 0 7px rgba(16,185,129,0); }
+  100% { box-shadow: 0 0 0 0 rgba(16,185,129,0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero-announce__dot { animation: none; }
+}
+.hero-announce__arrow {
+  transition: transform 0.15s;
+}
+.hero-announce:hover .hero-announce__arrow { transform: translateX(3px); }
+
+/* ── Benefit checklist ── */
+.hero-points {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin: 0 0 30px;
+  padding: 0;
+}
+.hero-point {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  color: var(--gw-text);
+}
+.hero-point svg { color: var(--gw-green); flex-shrink: 0; }
+.hero-point span { color: var(--gw-text-muted); }
+.hero-meta { color: var(--gw-text-muted); opacity: 0.85; }
 .hero-inner {
   max-width: 1100px;
   margin: 0 auto;
@@ -1982,7 +2025,7 @@ function cellClass(v: CompareValue | undefined): string {
   font-size: 17px;
   color: var(--gw-text-muted);
   line-height: 1.65;
-  margin: 0 0 32px;
+  margin: 0 0 22px;
   max-width: 460px;
 }
 .hero-ctas {
@@ -2237,22 +2280,46 @@ function cellClass(v: CompareValue | undefined): string {
 ─────────────────────────────────────────── */
 .stats-bar {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   justify-content: center;
-  gap: 0;
-  padding: 32px 28px;
+  gap: 18px;
+  padding: 36px 28px;
   border-bottom: 1px solid var(--gw-border-soft);
   background: var(--gw-bg-2);
 }
 .stat {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  padding: 0 48px;
+  gap: 6px;
+  padding: 22px 44px 20px;
+  background: var(--gw-bg-card);
+  border: 1px solid var(--gw-border);
+  border-radius: var(--gw-radius);
+  overflow: hidden;
+  transition: border-color 0.2s, transform 0.15s, box-shadow 0.2s;
 }
+/* Gradient hairline across the top of each stat card */
+.stat::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--gw-purple-light), var(--gw-green));
+  opacity: 0.55;
+  transition: opacity 0.2s;
+}
+.stat:hover {
+  border-color: rgba(124,58,237,0.45);
+  transform: translateY(-3px);
+  box-shadow: 0 14px 34px rgba(0,0,0,0.35);
+}
+.stat:hover::before { opacity: 1; }
 .stat-n {
-  font-size: 36px;
+  font-size: 38px;
   font-weight: 800;
   background: linear-gradient(135deg, var(--gw-purple-light), var(--gw-green));
   -webkit-background-clip: text;
@@ -2265,11 +2332,7 @@ function cellClass(v: CompareValue | undefined): string {
   color: var(--gw-text-muted);
   text-align: center;
 }
-.stat-sep {
-  width: 1px;
-  height: 40px;
-  background: var(--gw-border-soft);
-}
+.stat-sep { display: none; }
 
 /* ───────────────────────────────────────────
    FEATURES
@@ -3006,6 +3069,28 @@ function cellClass(v: CompareValue | undefined): string {
   color: var(--gw-text-muted);
 }
 
+/* "+ you?" recruitment card — dashed placeholder slot in the grid */
+.contributor-card--you {
+  border-style: dashed;
+  border-color: rgba(124,58,237,0.4);
+  background: rgba(124,58,237,0.04);
+}
+.contributor-card--you:hover {
+  border-style: solid;
+  background: rgba(124,58,237,0.10);
+}
+.contributor-card--you .contributor-name { color: var(--gw-purple-light); }
+.contributor-avatar--you {
+  display: grid;
+  place-items: center;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--gw-purple-light);
+  background: rgba(124,58,237,0.10);
+  border-style: dashed;
+  border-color: rgba(124,58,237,0.4);
+}
+
 /* ───────────────────────────────────────────
    COMPARISON TABLE
 ─────────────────────────────────────────── */
@@ -3195,7 +3280,21 @@ function cellClass(v: CompareValue | undefined): string {
   display: grid;
   width: 100%;
   justify-items: center;
+  position: relative;
 }
+/* Soft dual-tone glow anchoring the visual to the page */
+.hero-stage::before {
+  content: '';
+  position: absolute;
+  inset: -8% -6%;
+  background:
+    radial-gradient(ellipse 60% 55% at 30% 40%, rgba(124,58,237,0.28) 0%, transparent 70%),
+    radial-gradient(ellipse 50% 45% at 75% 70%, rgba(16,185,129,0.14) 0%, transparent 70%);
+  filter: blur(28px);
+  z-index: 0;
+  pointer-events: none;
+}
+.hero-stage > * { position: relative; z-index: 1; }
 .hero-stage > * {
   grid-area: 1 / 1;
 }
@@ -3206,14 +3305,67 @@ function cellClass(v: CompareValue | undefined): string {
 .hero-gui {
   width: 100%;
   max-width: 560px;
+  position: relative;
 }
 .hero-gui__img {
   width: 100%;
   height: auto;
   display: block;
   border-radius: 10px;
-  border: 1px solid rgba(255,255,255,0.08);
-  box-shadow: 0 24px 60px rgba(0,0,0,0.45), 0 0 0 1px rgba(124,58,237,0.12);
+  border: 1px solid rgba(255,255,255,0.10);
+  box-shadow:
+    0 32px 80px rgba(0,0,0,0.55),
+    0 12px 28px rgba(124,58,237,0.14),
+    0 0 0 1px rgba(124,58,237,0.14);
+}
+
+/* Floating proof card over the screenshot */
+.hero-toast {
+  position: absolute;
+  left: -14px;
+  bottom: 18px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px 10px 12px;
+  border-radius: 10px;
+  background: rgba(22, 22, 42, 0.92);
+  border: 1px solid rgba(16,185,129,0.35);
+  box-shadow: 0 16px 40px rgba(0,0,0,0.5), 0 0 24px rgba(16,185,129,0.10);
+  backdrop-filter: blur(10px);
+  animation: toastFloat 6s ease-in-out infinite alternate;
+}
+@keyframes toastFloat {
+  from { transform: translateY(0); }
+  to   { transform: translateY(-7px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero-toast { animation: none; }
+}
+.hero-toast__icon {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: rgba(16,185,129,0.16);
+  color: var(--gw-green);
+  flex-shrink: 0;
+}
+.hero-toast__body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.hero-toast__title {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--gw-text);
+  letter-spacing: 0.01em;
+}
+.hero-toast__sub {
+  font-size: 11px;
+  color: var(--gw-text-muted);
 }
 .hero-term {
   width: 100%;
@@ -3678,8 +3830,9 @@ function cellClass(v: CompareValue | undefined): string {
   }
   .hero-visual { order: -1; }
   .features-grid { grid-template-columns: repeat(2, 1fr); }
-  .stats-bar { flex-direction: column; gap: 24px; }
-  .stat-sep { width: 60px; height: 1px; }
+  .stats-bar { flex-wrap: wrap; gap: 14px; }
+  .stat { flex: 1 1 200px; padding: 20px 24px 18px; }
+  .hero-toast { left: 8px; bottom: 10px; padding: 8px 12px 8px 10px; }
   .conflict-demo { flex-direction: column; }
   .conflict-arrow { flex-direction: row; }
   .llm-layout { grid-template-columns: 1fr; gap: 40px; }
@@ -3691,6 +3844,10 @@ function cellClass(v: CompareValue | undefined): string {
 @media (max-width: 600px) {
   .features-grid { grid-template-columns: 1fr; }
   .hero { padding: 60px 0 40px; }
+  .hero-announce { font-size: 11.5px; }
+  .hero-point { font-size: 13px; }
+  .hero-toast__sub { display: none; }
+  .hero-bg__orb { filter: blur(70px); }
   .platforms-grid { flex-direction: column; align-items: center; }
   .bench-grid { grid-template-columns: 1fr; }
   .patterns-grid { grid-template-columns: 1fr; }
@@ -3703,4 +3860,190 @@ function cellClass(v: CompareValue | undefined): string {
   .hl-new-release__title { font-size: 19px; }
   .hl-new-release__sub { font-size: 13px; }
 }
+
+/* ───────────────────────────────────────────
+   REDESIGN 2026 — new sections
+─────────────────────────────────────────── */
+
+/* Trust bar (below stats) */
+.trust-bar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 14px;
+  padding: 22px 24px;
+  background: var(--gw-bg-2);
+  border-bottom: 1px solid var(--gw-border-soft);
+}
+.trust-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border: 1px solid var(--gw-border);
+  border-radius: 999px;
+  font-size: 13px;
+  color: var(--gw-text-muted);
+  background: rgba(255, 255, 255, 0.02);
+}
+.trust-item--link {
+  text-decoration: none;
+  color: var(--gw-text);
+  transition: border-color 0.15s, color 0.15s;
+}
+.trust-item--link:hover {
+  border-color: var(--gw-purple);
+  color: var(--gw-purple-light);
+}
+.trust-item--link svg { color: var(--gw-purple-light); }
+.trust-strong {
+  font-weight: 800;
+  color: var(--gw-text);
+  letter-spacing: -0.01em;
+}
+.trust-txt { color: var(--gw-text-muted); }
+
+/* Section CTA row */
+.section-cta-row {
+  display: flex;
+  justify-content: center;
+  margin-top: 32px;
+}
+
+/* Pillars as clickable doors */
+.hl-pillar--link {
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+/* Why GitWand — 4 differentiators */
+.why-section {
+  padding: 72px 0 64px;
+  background: var(--gw-bg-2);
+  border-bottom: 1px solid var(--gw-border-soft);
+}
+.why-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 20px;
+  margin-top: 8px;
+}
+.why-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 26px 22px;
+  background: var(--gw-bg-card);
+  border: 1px solid var(--gw-border);
+  border-radius: var(--gw-radius);
+  transition: border-color 0.2s, transform 0.15s;
+}
+.why-card:hover {
+  border-color: var(--gw-purple);
+  transform: translateY(-2px);
+}
+.why-card__badge {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 54px;
+  height: 40px;
+  padding: 0 12px;
+  border-radius: 10px;
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+.why-card__badge--purple {
+  color: var(--gw-purple-light);
+  background: rgba(124, 58, 237, 0.12);
+}
+.why-card__badge--green {
+  color: var(--gw-green);
+  background: rgba(16, 185, 129, 0.12);
+}
+.why-card__title {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 0;
+  color: var(--gw-text);
+}
+.why-card__desc {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--gw-text-muted);
+  margin: 0;
+}
+
+/* Mini comparison */
+.mini-compare-section {
+  padding: 72px 0 64px;
+  background: var(--gw-bg);
+  border-bottom: 1px solid var(--gw-border-soft);
+}
+.mini-compare-wrap {
+  margin-top: 8px;
+  overflow-x: auto;
+  border: 1px solid var(--gw-border);
+  border-radius: var(--gw-radius);
+}
+.mini-compare {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.mini-compare th,
+.mini-compare td {
+  padding: 14px 18px;
+  text-align: center;
+  border-bottom: 1px solid var(--gw-border-soft);
+}
+.mini-compare thead th {
+  font-weight: 700;
+  color: var(--gw-text-muted);
+  background: var(--gw-bg-2);
+}
+.mini-compare tbody tr:last-child td { border-bottom: none; }
+.mini-compare .mc-feat {
+  text-align: left;
+  color: var(--gw-text);
+  font-weight: 500;
+}
+.mini-compare th.mc-gw,
+.mini-compare td.mc-gw {
+  background: rgba(124, 58, 237, 0.08);
+  color: var(--gw-purple-light);
+  font-weight: 700;
+}
+.mc-yes { color: var(--gw-green); font-weight: 700; }
+.mc-no { color: var(--gw-text-muted); opacity: 0.5; }
+.mc-partial { font-size: 12px; color: var(--gw-text-muted); }
+
+/* AI agents teaser */
+.agents-teaser {
+  padding: 72px 0 64px;
+  background: var(--gw-bg-2);
+  border-bottom: 1px solid var(--gw-border-soft);
+  text-align: center;
+}
+.agents-chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin: 28px 0 8px;
+}
+
+/* Responsive */
+@media (max-width: 860px) {
+  .why-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 560px) {
+  .why-grid { grid-template-columns: 1fr; }
+  .trust-bar { gap: 10px; padding: 18px 16px; }
+}
+
 </style>
