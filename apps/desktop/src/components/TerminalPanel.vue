@@ -3,6 +3,7 @@ import { ref, onBeforeUnmount, watch, nextTick, computed, onMounted, onActivated
 import { useTerminalSessions, type TerminalTab } from "../composables/useTerminalSessions";
 import { useI18n } from "../composables/useI18n";
 import { useSettings } from "../composables/useSettings";
+import { useDraggableResizable } from "../composables/useDraggableResizable";
 import { clipboardReadText, clipboardWriteText } from "../utils/backend";
 
 const props = defineProps<{ repoPath: string }>();
@@ -137,16 +138,6 @@ function getOrCreateBuf(map: Map<number, string[]>, id: number): string[] {
 
 const hostRefs = ref<Record<number, HTMLElement | undefined>>({});
 
-// Panel size + position — persisted.
-const HEIGHT_KEY = "gitwand-terminal-height";
-const LEFT_KEY   = "gitwand-terminal-left";
-const WIDTH_KEY  = "gitwand-terminal-width";
-const TOP_KEY    = "gitwand-terminal-top";
-const height = ref(Number(localStorage.getItem(HEIGHT_KEY)) || 260);
-const left   = ref(Number(localStorage.getItem(LEFT_KEY))   || 16);
-const width  = ref(Number(localStorage.getItem(WIDTH_KEY))  || 0); // 0 = not yet set; initialised on mount
-const top    = ref(Number(localStorage.getItem(TOP_KEY))    || 0); // 0 = not yet set; initialised on mount
-
 const tpRef = ref<HTMLElement | null>(null);
 
 // Layout mode is driven by settings (set from the dock context menu).
@@ -167,6 +158,21 @@ function toggleFullscreen() {
   }
   saveSettings(settings.value);
 }
+
+const {
+  height, left, width, top,
+  isDragging, isResizingX, isResizingL, isResizingBottom, resizingCorner,
+  onDragStart, onMoveStart, onResizeXStart, onResizeLeftStart, onResizeBottomStart, onResizeCornerStart,
+} = useDraggableResizable({
+  panelRef: tpRef,
+  keyPrefix: "gitwand-terminal",
+  initialHeight: Number(localStorage.getItem("gitwand-terminal-height")) || 260,
+  initialLeft: Number(localStorage.getItem("gitwand-terminal-left")) || 16,
+  initialWidth: Number(localStorage.getItem("gitwand-terminal-width")) || 0, // 0 = not yet set; initialised on mount
+  initialTop: Number(localStorage.getItem("gitwand-terminal-top")) || 0, // 0 = not yet set; initialised on mount
+  canMove: () => !bottom.value,
+  moveIgnoreSelector: "button, .tp__tab, .tp__rename, .tp__menu",
+});
 
 onMounted(() => {
   const parent = tpRef.value?.parentElement;
@@ -501,255 +507,7 @@ function commitRename(tab: TerminalTab) {
   editingId.value = null;
 }
 
-// Drag-to-resize (top edge) — grows upward, keeping the bottom edge fixed.
-let dragStartY   = 0;
-let dragStartH   = 0;
-let dragStartTop = 0;
-const isDragging = ref(false);
-function onDragStart(e: MouseEvent) {
-  e.preventDefault();
-  dragStartY   = e.clientY;
-  dragStartH   = height.value;
-  dragStartTop = top.value;
-  isDragging.value = true;
-  document.body.style.userSelect = "none";
-  window.addEventListener("mousemove", onDragMove, { passive: false });
-  window.addEventListener("mouseup", onDragEnd);
-}
-function onDragMove(e: MouseEvent) {
-  e.preventDefault();
-  height.value = Math.max(120, dragStartH + (dragStartY - e.clientY));
-  // Move the top up by the height gained so the bottom edge stays put (floating).
-  top.value = Math.max(0, dragStartTop - (height.value - dragStartH));
-}
-function onDragEnd() {
-  localStorage.setItem(HEIGHT_KEY, String(height.value));
-  localStorage.setItem(TOP_KEY,    String(top.value));
-  isDragging.value = false;
-  document.body.style.userSelect = "";
-  window.removeEventListener("mousemove", onDragMove);
-  window.removeEventListener("mouseup", onDragEnd);
-}
-
-// Drag-to-move (tab bar) — both axes so the floating panel moves freely.
-let moveStartX    = 0;
-let moveStartY    = 0;
-let moveStartLeft = 0;
-let moveStartTop  = 0;
-let moveBoundW    = 0;
-let moveBoundH    = 0;
-let movePanelW    = 0;
-let movePanelH    = 0;
-let isMoving      = false;
-function onMoveStart(e: MouseEvent) {
-  // Bottom mode is docked full-width — the panel can't be moved.
-  if (bottom.value) return;
-  if ((e.target as HTMLElement).closest("button, .tp__tab, .tp__rename, .tp__menu")) return;
-  e.preventDefault();
-  moveStartX    = e.clientX;
-  moveStartY    = e.clientY;
-  moveStartLeft = left.value;
-  moveStartTop  = top.value;
-  // Snapshot container/panel dimensions once — they don't change during the
-  // drag, so re-reading offset* per mousemove would force a layout reflow.
-  moveBoundW = tpRef.value?.parentElement?.offsetWidth ?? window.innerWidth;
-  moveBoundH = tpRef.value?.parentElement?.offsetHeight ?? window.innerHeight;
-  movePanelW = tpRef.value?.offsetWidth  ?? width.value;
-  movePanelH = tpRef.value?.offsetHeight ?? height.value;
-  isMoving      = true;
-  document.body.style.userSelect = "none";
-  document.body.style.cursor     = "grabbing";
-  window.addEventListener("mousemove", onMoveMove, { passive: false });
-  window.addEventListener("mouseup",   onMoveEnd);
-}
-function onMoveMove(e: MouseEvent) {
-  if (!isMoving) return;
-  e.preventDefault();
-  left.value = Math.max(0, Math.min(moveBoundW - movePanelW, moveStartLeft + (e.clientX - moveStartX)));
-  top.value  = Math.max(0, Math.min(moveBoundH - movePanelH, moveStartTop  + (e.clientY - moveStartY)));
-}
-function onMoveEnd() {
-  localStorage.setItem(LEFT_KEY, String(left.value));
-  localStorage.setItem(TOP_KEY,  String(top.value));
-  isMoving                    = false;
-  document.body.style.userSelect = "";
-  document.body.style.cursor     = "";
-  window.removeEventListener("mousemove", onMoveMove);
-  window.removeEventListener("mouseup",   onMoveEnd);
-}
-
-// Drag-to-resize-width (right edge handle).
-let resizeXStartX = 0;
-let resizeXStartW = 0;
-let resizeXBoundW = 0;
-const isResizingX = ref(false);
-function onResizeXStart(e: MouseEvent) {
-  e.preventDefault();
-  e.stopPropagation();
-  resizeXStartX = e.clientX;
-  resizeXStartW = tpRef.value?.offsetWidth ?? width.value;
-  resizeXBoundW = tpRef.value?.parentElement?.offsetWidth ?? window.innerWidth;
-  isResizingX.value = true;
-  document.body.style.userSelect = "none";
-  document.body.style.cursor     = "ew-resize";
-  window.addEventListener("mousemove", onResizeXMove, { passive: false });
-  window.addEventListener("mouseup",   onResizeXEnd);
-}
-function onResizeXMove(e: MouseEvent) {
-  if (!isResizingX.value) return;
-  e.preventDefault();
-  const newW = resizeXStartW + (e.clientX - resizeXStartX);
-  width.value = Math.max(300, Math.min(resizeXBoundW - left.value, newW));
-}
-function onResizeXEnd() {
-  localStorage.setItem(WIDTH_KEY, String(width.value));
-  isResizingX.value = false;
-  document.body.style.userSelect = "";
-  document.body.style.cursor     = "";
-  window.removeEventListener("mousemove", onResizeXMove);
-  window.removeEventListener("mouseup",   onResizeXEnd);
-}
-
-// Drag-to-resize-width (left edge handle) — moves the left edge, keeping the
-// right edge fixed: grows width as it drags left, shrinks as it drags right.
-let resizeLStartX = 0;
-let resizeLStartW = 0;
-let resizeLStartLeft = 0;
-const isResizingL = ref(false);
-function onResizeLeftStart(e: MouseEvent) {
-  e.preventDefault();
-  e.stopPropagation();
-  resizeLStartX = e.clientX;
-  resizeLStartW = tpRef.value?.offsetWidth ?? width.value;
-  resizeLStartLeft = left.value;
-  isResizingL.value = true;
-  document.body.style.userSelect = "none";
-  document.body.style.cursor     = "ew-resize";
-  window.addEventListener("mousemove", onResizeLeftMove, { passive: false });
-  window.addEventListener("mouseup",   onResizeLeftEnd);
-}
-function onResizeLeftMove(e: MouseEvent) {
-  if (!isResizingL.value) return;
-  e.preventDefault();
-  const delta = e.clientX - resizeLStartX;
-  const rightEdge = resizeLStartLeft + resizeLStartW; // fixed
-  // Clamp left so width stays >= 300 and the panel never leaves the container.
-  const newLeft = Math.max(0, Math.min(rightEdge - 300, resizeLStartLeft + delta));
-  left.value  = newLeft;
-  width.value = rightEdge - newLeft;
-}
-function onResizeLeftEnd() {
-  localStorage.setItem(WIDTH_KEY, String(width.value));
-  localStorage.setItem(LEFT_KEY,  String(left.value));
-  isResizingL.value = false;
-  document.body.style.userSelect = "";
-  document.body.style.cursor     = "";
-  window.removeEventListener("mousemove", onResizeLeftMove);
-  window.removeEventListener("mouseup",   onResizeLeftEnd);
-}
-
-// Drag-to-resize from any corner — combines a vertical edge (top: grow upward
-// keeping the bottom fixed / bottom: grow downward keeping the top fixed) with a
-// horizontal edge (left / right). Floating panel, so all four corners resize.
-type Corner = "tl" | "tr" | "bl" | "br";
-const resizingCorner = ref<Corner | null>(null);
-let cornerStartX = 0, cornerStartY = 0, cornerStartW = 0, cornerStartH = 0, cornerStartLeft = 0, cornerStartTop = 0, cornerBoundW = 0;
-function onResizeCornerStart(corner: Corner, e: MouseEvent) {
-  e.preventDefault();
-  e.stopPropagation();
-  cornerStartX    = e.clientX;
-  cornerStartY    = e.clientY;
-  cornerStartW    = tpRef.value?.offsetWidth ?? width.value;
-  cornerStartH    = height.value;
-  cornerStartLeft = left.value;
-  cornerStartTop  = top.value;
-  cornerBoundW    = tpRef.value?.parentElement?.offsetWidth ?? window.innerWidth;
-  resizingCorner.value = corner;
-  document.body.style.userSelect = "none";
-  // tl/br share the ↘↖ axis, tr/bl share the ↗↙ axis.
-  document.body.style.cursor = corner === "tl" || corner === "br" ? "nwse-resize" : "nesw-resize";
-  window.addEventListener("mousemove", onResizeCornerMove, { passive: false });
-  window.addEventListener("mouseup",   onResizeCornerEnd);
-}
-function onResizeCornerMove(e: MouseEvent) {
-  const corner = resizingCorner.value;
-  if (!corner) return;
-  e.preventDefault();
-  const dx = e.clientX - cornerStartX;
-  const dy = e.clientY - cornerStartY;
-  // Vertical edge.
-  if (corner === "tl" || corner === "tr") {
-    // Top edge — grow upward, keep the bottom fixed.
-    height.value = Math.max(120, cornerStartH - dy);
-    top.value = Math.max(0, cornerStartTop + (cornerStartH - height.value));
-  } else {
-    // Bottom edge — grow downward, keep the top fixed.
-    height.value = Math.max(120, cornerStartH + dy);
-  }
-  // Horizontal edge.
-  if (corner === "tr" || corner === "br") {
-    width.value = Math.max(300, Math.min(cornerBoundW - left.value, cornerStartW + dx));
-  } else {
-    const rightEdge = cornerStartLeft + cornerStartW; // fixed
-    const newLeft = Math.max(0, Math.min(rightEdge - 300, cornerStartLeft + dx));
-    left.value  = newLeft;
-    width.value = rightEdge - newLeft;
-  }
-}
-function onResizeCornerEnd() {
-  localStorage.setItem(HEIGHT_KEY, String(height.value));
-  localStorage.setItem(WIDTH_KEY,  String(width.value));
-  localStorage.setItem(LEFT_KEY,   String(left.value));
-  localStorage.setItem(TOP_KEY,    String(top.value));
-  resizingCorner.value = null;
-  document.body.style.userSelect = "";
-  document.body.style.cursor     = "";
-  window.removeEventListener("mousemove", onResizeCornerMove);
-  window.removeEventListener("mouseup",   onResizeCornerEnd);
-}
-
-// Drag-to-resize from the bottom edge — grow downward, top fixed.
-let bottomStartY = 0;
-let bottomStartH = 0;
-const isResizingBottom = ref(false);
-function onResizeBottomStart(e: MouseEvent) {
-  e.preventDefault();
-  e.stopPropagation();
-  bottomStartY = e.clientY;
-  bottomStartH = height.value;
-  isResizingBottom.value = true;
-  document.body.style.userSelect = "none";
-  window.addEventListener("mousemove", onResizeBottomMove, { passive: false });
-  window.addEventListener("mouseup",   onResizeBottomEnd);
-}
-function onResizeBottomMove(e: MouseEvent) {
-  if (!isResizingBottom.value) return;
-  e.preventDefault();
-  height.value = Math.max(120, bottomStartH + (e.clientY - bottomStartY));
-}
-function onResizeBottomEnd() {
-  localStorage.setItem(HEIGHT_KEY, String(height.value));
-  isResizingBottom.value = false;
-  document.body.style.userSelect = "";
-  window.removeEventListener("mousemove", onResizeBottomMove);
-  window.removeEventListener("mouseup",   onResizeBottomEnd);
-}
-
 onBeforeUnmount(() => {
-  document.body.style.userSelect = "";
-  document.body.style.cursor     = "";
-  window.removeEventListener("mousemove", onDragMove);
-  window.removeEventListener("mouseup",   onDragEnd);
-  window.removeEventListener("mousemove", onMoveMove);
-  window.removeEventListener("mouseup",   onMoveEnd);
-  window.removeEventListener("mousemove", onResizeXMove);
-  window.removeEventListener("mouseup",   onResizeXEnd);
-  window.removeEventListener("mousemove", onResizeLeftMove);
-  window.removeEventListener("mouseup",   onResizeLeftEnd);
-  window.removeEventListener("mousemove", onResizeCornerMove);
-  window.removeEventListener("mouseup",   onResizeCornerEnd);
-  window.removeEventListener("mousemove", onResizeBottomMove);
-  window.removeEventListener("mouseup",   onResizeBottomEnd);
   for (const [, entry] of xterms) {
     entry.ro.disconnect();
     entry.term.dispose();
@@ -831,7 +589,6 @@ onBeforeUnmount(() => {
           </button>
         </div>
       </div>
-      <button class="tp__hide" :title="t('terminal.hide')" @click="emit('close')">_</button>
       <button
         class="tp__full"
         :title="fullscreen ? t('terminal.exitFullscreen') : t('terminal.fullscreen')"
@@ -847,6 +604,7 @@ onBeforeUnmount(() => {
           <line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/>
         </svg>
       </button>
+      <button class="tp__hide" :title="t('terminal.hide')" @click="emit('close')">✕</button>
     </div>
 
     <!-- Width / corner resize handles — floating mode only (fullscreen and
@@ -1123,10 +881,11 @@ onBeforeUnmount(() => {
 .tp__new {
   border: none;
   cursor: pointer;
-  padding: 7.5px 16px;
+  padding: 3.5px 20px;
   border-radius: var(--radius-sm) var(--radius-sm) 0 0;
   color: inherit;
-  font-size: var(--font-size-lg);
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-bold);
   background: var(--bg-base, var(--color-bg));
   opacity: 0.7;
 }
@@ -1135,6 +894,7 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  margin-left: auto;
   border: none;
   background: var(--bg-base, var(--color-bg));
   opacity: 0.7;
@@ -1147,15 +907,17 @@ onBeforeUnmount(() => {
 }
 
 .tp__hide {
-  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: none;
   background: var(--bg-base, var(--color-bg));
   opacity: 0.7;
   cursor: pointer;
-  padding: 0px 13px 12px;
+  padding: 4px 9px;
   border-radius: var(--radius-sm);
   color: inherit;
-  font-size: var(--font-size-md);
+  font-size: var(--font-size-xl);
   position: relative;
   top: -2px;
 }

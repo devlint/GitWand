@@ -357,6 +357,38 @@ export async function listDir(dirPath?: string): Promise<ListDirResult> {
   return res.json();
 }
 
+export interface RepoTreeNode {
+  path: string;
+  name: string;
+  kind: "folder" | "file";
+  children: RepoTreeNode[];
+}
+
+export interface RepoTreeResult {
+  root: RepoTreeNode;
+  truncated: boolean;
+}
+
+/**
+ * List the full repo file tree (tracked + untracked, `.gitignore`-aware)
+ * for the File Explorer panel.
+ */
+export async function listRepoTree(cwd: string): Promise<RepoTreeResult> {
+  if (isTauri()) {
+    return tauriInvoke<RepoTreeResult>("list_repo_tree", { cwd });
+  }
+  const res = await devFetch(`${DEV_SERVER}/api/list-repo-tree`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`list_repo_tree failed: ${body || res.statusText}`);
+  }
+  return res.json();
+}
+
 // ─── Git status ────────────────────────────────────────────
 
 export interface FileChange {

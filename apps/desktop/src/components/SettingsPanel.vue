@@ -156,6 +156,8 @@ interface Settings {
   dockHideLaunchpad: boolean;
   dockHideDashboard: boolean;
   dockHidePrs: boolean;
+  dockHideTerminal: boolean;
+  dockHideFiles: boolean;
   dockIconsOnly: boolean;
   dockVertical: boolean;
   dockIdleOpacity: number;
@@ -192,6 +194,9 @@ interface Settings {
   terminalContextMenu: boolean;
   terminalCopyOnSelect: boolean;
   terminalPasteOnRightClick: boolean;
+  filesMode: "floating" | "fullscreen" | "bottom";
+  filesPrevMode: "floating" | "bottom";
+  filesHideOnNav: boolean;
 }
 
 const defaultSettings: Settings = {
@@ -230,6 +235,8 @@ const defaultSettings: Settings = {
   dockHideLaunchpad: false,
   dockHideDashboard: false,
   dockHidePrs: false,
+  dockHideTerminal: false,
+  dockHideFiles: false,
   dockIconsOnly: false,
   dockVertical: false,
   dockIdleOpacity: 0.45,
@@ -265,6 +272,9 @@ const defaultSettings: Settings = {
   terminalContextMenu: true,
   terminalCopyOnSelect: false,
   terminalPasteOnRightClick: false,
+  filesMode: "floating",
+  filesPrevMode: "floating",
+  filesHideOnNav: false,
 };
 
 function loadSettings(): Settings {
@@ -1485,6 +1495,26 @@ function deleteReleaseNoteTemplate(id: string) {
                 :checked="!settings.dockHidePrs"
                 @change="updateSetting('dockHidePrs', !($event.target as HTMLInputElement).checked)" />
               <span>{{ t('settings.dock.showPrs') }}</span>
+            </label>
+          </div>
+
+          <!-- Show Terminal -->
+          <div class="sp-row sp-row--checkbox">
+            <label class="sp-checkbox-label" for="setting-dock-terminal">
+              <input id="setting-dock-terminal" type="checkbox" class="sp-checkbox"
+                :checked="!settings.dockHideTerminal"
+                @change="updateSetting('dockHideTerminal', !($event.target as HTMLInputElement).checked)" />
+              <span>{{ t('settings.dock.showTerminal') }}</span>
+            </label>
+          </div>
+
+          <!-- Show Files -->
+          <div class="sp-row sp-row--checkbox">
+            <label class="sp-checkbox-label" for="setting-dock-files">
+              <input id="setting-dock-files" type="checkbox" class="sp-checkbox"
+                :checked="!settings.dockHideFiles"
+                @change="updateSetting('dockHideFiles', !($event.target as HTMLInputElement).checked)" />
+              <span>{{ t('settings.dock.showFiles') }}</span>
             </label>
           </div>
 

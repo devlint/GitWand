@@ -24,11 +24,14 @@ const props = defineProps<{
   prCount?: number;
   /** Terminal panel currently open — drives the terminal tile's active state. */
   terminalActive?: boolean;
+  /** Files (File Explorer) panel currently open — drives the tile's active state. */
+  filesActive?: boolean;
 }>();
 
 const emit = defineEmits<{
   changeView: [mode: ViewMode];
   toggleTerminal: [];
+  toggleFiles: [];
 }>();
 
 const { t } = useI18n();
@@ -138,13 +141,13 @@ function endDrag() {
 
 /** target = the clicked entry, "terminal" for the terminal tile, or null when
  *  invoked from the global handle. */
-type MenuTarget = DockEntryId | "terminal" | null;
+type MenuTarget = DockEntryId | "terminal" | "files" | null;
 const menu = ref<{ x: number; y: number; target: MenuTarget } | null>(null);
 
-/** The menu's target as a dock entry (null for the terminal/global menus) —
+/** The menu's target as a dock entry (null for the terminal/files/global menus) —
  *  keeps the per-entry template block correctly typed as DockEntryId. */
 const entryTarget = computed<DockEntryId | null>(() =>
-  menu.value && menu.value.target !== "terminal" ? menu.value.target : null,
+  menu.value && menu.value.target !== "terminal" && menu.value.target !== "files" ? menu.value.target : null,
 );
 const menuEl = ref<HTMLElement | null>(null);
 
@@ -280,6 +283,49 @@ function toggleTerminalHideOnNav() {
   closeMenu();
 }
 
+/** Terminal tile hidden from the dock — re-add via dock settings. */
+const terminalHidden = computed(() => settings.value.dockHideTerminal);
+function removeTerminalFromDock() {
+  patch({ dockHideTerminal: true });
+  closeMenu();
+}
+
+// ── Files tile actions ──
+const filesHideOnNav = computed(() => settings.value.filesHideOnNav);
+const filesIsFullscreen = computed(() => settings.value.filesMode === "fullscreen");
+/** Base layout (floating/bottom) — what fullscreen sits on top of. */
+const filesLayout = computed<"floating" | "bottom">(() =>
+  filesIsFullscreen.value ? settings.value.filesPrevMode : (settings.value.filesMode as "floating" | "bottom"),
+);
+
+/** Pick the base layout; also the layout fullscreen returns to. Exits fullscreen. */
+function setFilesLayout(m: "floating" | "bottom") {
+  patch({ filesMode: m, filesPrevMode: m });
+  closeMenu();
+}
+
+/** Fullscreen is an overlay on top of the base layout — toggle it on/off. */
+function toggleFilesFullscreen() {
+  if (filesIsFullscreen.value) {
+    patch({ filesMode: settings.value.filesPrevMode });
+  } else {
+    patch({ filesPrevMode: settings.value.filesMode as "floating" | "bottom", filesMode: "fullscreen" });
+  }
+  closeMenu();
+}
+
+function toggleFilesHideOnNav() {
+  patch({ filesHideOnNav: !settings.value.filesHideOnNav });
+  closeMenu();
+}
+
+/** Files tile hidden from the dock — re-add via dock settings. */
+const filesHidden = computed(() => settings.value.dockHideFiles);
+function removeFilesFromDock() {
+  patch({ dockHideFiles: true });
+  closeMenu();
+}
+
 onBeforeUnmount(() => {
   window.removeEventListener("pointermove", onDrag);
   window.removeEventListener("pointerup", endDrag);
@@ -361,6 +407,7 @@ onBeforeUnmount(() => {
     <!-- Terminal tile — a separate rounded square that rides along with the
          dock (same position/lock), opening the floating terminal panel. -->
     <button
+      v-if="!terminalHidden"
       class="dock-terminal"
       :class="{ 'dock-terminal--active': terminalActive }"
       :aria-pressed="terminalActive"
@@ -375,6 +422,23 @@ onBeforeUnmount(() => {
       </svg>
     </button>
 
+    <!-- Files tile — same mechanics as the Terminal tile, opens the File
+         Explorer panel. -->
+    <button
+      v-if="!filesHidden"
+      class="dock-files"
+      :class="{ 'dock-files--active': filesActive }"
+      :aria-pressed="filesActive"
+      :title="t('files.headerTooltip')"
+      :aria-label="t('files.headerLabel')"
+      @click="emit('toggleFiles')"
+      @contextmenu="openMenu($event, 'files')"
+    >
+      <svg class="dock-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M3 5h6l2 2h10v12H3z" />
+      </svg>
+    </button>
+
     <!-- Right-click context menu (entry-targeted + global actions).
          Teleported to <body> so its fixed positioning is relative to the
          viewport — the dock's own translateX(-50%) transform would otherwise
@@ -384,6 +448,10 @@ onBeforeUnmount(() => {
       <!-- Terminal tile section -->
       <template v-if="menu.target === 'terminal'">
         <div class="dock-menu-label">{{ t('terminal.headerLabel') }}</div>
+        <button class="dock-menu-item" role="menuitem" @click="removeTerminalFromDock">
+          {{ t('settings.dock.menu.remove') }}
+        </button>
+        <div class="dock-menu-sep" role="separator"></div>
         <button class="dock-menu-item" role="menuitemcheckbox"
           :aria-checked="terminalHideOnNav" @click="toggleTerminalHideOnNav">
           {{ t('terminal.menuHideOnNav') }}
@@ -405,6 +473,37 @@ onBeforeUnmount(() => {
           :aria-checked="terminalLayout === 'bottom'" @click="setTerminalLayout('bottom')">
           {{ t('terminal.modeBottom') }}
           <span class="dock-menu-check">{{ terminalLayout === 'bottom' ? '✓' : '' }}</span>
+        </button>
+      </template>
+
+      <!-- Files tile section -->
+      <template v-else-if="menu.target === 'files'">
+        <div class="dock-menu-label">{{ t('files.headerLabel') }}</div>
+        <button class="dock-menu-item" role="menuitem" @click="removeFilesFromDock">
+          {{ t('settings.dock.menu.remove') }}
+        </button>
+        <div class="dock-menu-sep" role="separator"></div>
+        <button class="dock-menu-item" role="menuitemcheckbox"
+          :aria-checked="filesHideOnNav" @click="toggleFilesHideOnNav">
+          {{ t('files.menuHideOnNav') }}
+          <span class="dock-menu-check">{{ filesHideOnNav ? '✓' : '' }}</span>
+        </button>
+        <button class="dock-menu-item" role="menuitemcheckbox"
+          :aria-checked="filesIsFullscreen" @click="toggleFilesFullscreen">
+          {{ t('files.modeFullscreen') }}
+          <span class="dock-menu-check">{{ filesIsFullscreen ? '✓' : '' }}</span>
+        </button>
+        <div class="dock-menu-sep" role="separator"></div>
+        <div class="dock-menu-label">{{ t('files.menuLayout') }}</div>
+        <button class="dock-menu-item" role="menuitemradio"
+          :aria-checked="filesLayout === 'floating'" @click="setFilesLayout('floating')">
+          {{ t('files.modeFloating') }}
+          <span class="dock-menu-check">{{ filesLayout === 'floating' ? '✓' : '' }}</span>
+        </button>
+        <button class="dock-menu-item" role="menuitemradio"
+          :aria-checked="filesLayout === 'bottom'" @click="setFilesLayout('bottom')">
+          {{ t('files.modeBottom') }}
+          <span class="dock-menu-check">{{ filesLayout === 'bottom' ? '✓' : '' }}</span>
         </button>
       </template>
 
@@ -528,6 +627,45 @@ onBeforeUnmount(() => {
 }
 
 .dock-terminal:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Files tile — mirrors the pill's chrome but as a standalone square that
+   sits flush beside the dock and shares its idle-fade behaviour. */
+.dock-files {
+  pointer-events: auto;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-5, 9px);
+  background: color-mix(in srgb, var(--color-bg-secondary) 97%, transparent);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md, 10px);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28), 0 2px 6px rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(8px);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  opacity: var(--dock-idle-opacity, 0.45);
+  transition: opacity 0.2s ease, background 0.15s, color 0.15s;
+}
+
+.app-dock:hover .dock-files {
+  opacity: 1;
+}
+
+.dock-files:hover {
+  color: var(--color-text);
+  background: var(--color-bg-secondary);
+}
+
+.dock-files--active {
+  color: var(--color-accent);
+  border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-border));
+}
+
+.dock-files:focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }

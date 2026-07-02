@@ -1028,6 +1028,8 @@ git commit -m "feat(desktop): add File Explorer layout settings (filesMode/files
 
 **Files:**
 - Create: `apps/desktop/src/components/FileExplorerPanel.vue`
+- Modify: `apps/desktop/src/assets/main.css` (extract shared tree-row rules)
+- Modify: `apps/desktop/src/components/RepoSidebar.vue` (remove the rules now living in `main.css`)
 
 **Interfaces:**
 - Consumes: `useFileExplorer()` (Task 3), `useRepoFileTree()` (Task 4), `useSettings()`, `RepoFileEntry` from `./useGitRepo`.
@@ -1037,7 +1039,88 @@ git commit -m "feat(desktop): add File Explorer layout settings (filesMode/files
 
 This task builds the shell with a plain `<pre>` for file content — no editor yet (Task 7 replaces it with CodeMirror). This keeps this task's diff reviewable and independently testable end-to-end (tree → open tab → see raw content → close tab) before adding editor complexity.
 
-- [ ] **Step 1: Create the component**
+Both this panel and `RepoSidebar.vue`'s Changes/History tree render the same tree-row visuals (folder chevron, file row, status dot). Rather than duplicate that CSS (Vue `<style scoped>` never leaks between components), extract the shared rules once into the app's existing global stylesheet, `apps/desktop/src/assets/main.css` (already loaded once in `main.ts` — no new import needed in either component).
+
+- [ ] **Step 1: Extract shared tree-row CSS into `main.css`**
+
+In `apps/desktop/src/components/RepoSidebar.vue`'s `<style scoped>` block, remove these rules (they move to the global stylesheet): `.file-item` and `.file-item:hover` (currently around line 2091-2103 — keep `.file-item--selected`, `.file-item--sub*`, and `.file-item:focus-visible`, which are RepoSidebar-specific modifiers), `.file-name` (currently around line 2165-2171 — keep `.file-dir`, which stays local), and the entire "Tree folder rows" block: `.tree-folder`, `.tree-chevron`, `.tree-chevron--collapsed`, `.tree-folder-icon`, `.tree-folder-name`, `.tree-folder-count` (currently lines 2302-2337 — remove the whole block, nothing there is RepoSidebar-specific).
+
+Append this section to the end of `apps/desktop/src/assets/main.css`:
+
+```css
+/* ── Shared tree-row styles ───────────────────────────────────
+   Used by RepoSidebar.vue's Changes/History tree layout and by
+   FileExplorerPanel.vue's repo tree. Lives here (global) instead of in
+   either component's <style scoped> because Vue scoped CSS never leaks
+   between components — duplicating ~40 lines in both was the alternative.
+
+   Note: FileList.vue's own `.file-item`/`.file-name` rules are unaffected
+   — Vue compiles its scoped selectors to `.file-item[data-v-xxxxxxxx]`,
+   which is more specific than these global bare-class rules and always
+   wins regardless of stylesheet order. */
+.file-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-2) var(--space-3);
+  cursor: pointer;
+  transition: background var(--transition-hover);
+  border-left: 3px solid transparent;
+}
+
+.file-item:hover {
+  background: var(--color-bg-tertiary);
+}
+
+.file-name {
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree-folder {
+  border-left: 3px solid transparent;
+}
+
+.tree-chevron {
+  color: var(--color-text-subtle);
+  flex-shrink: 0;
+  transition: transform 0.15s ease;
+}
+
+.tree-chevron--collapsed {
+  transform: rotate(-90deg);
+}
+
+.tree-folder-icon {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.tree-folder-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text);
+}
+
+.tree-folder-count {
+  flex-shrink: 0;
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-subtle);
+}
+```
+
+- [ ] **Step 2: Verify RepoSidebar's Changes/History tree still renders correctly**
+
+Run: `cd apps/desktop && pnpm dev:web`, open a repo with changed files, switch the Changes view to tree layout, confirm folder chevrons, folder/file rows, and counts still look identical to before the extraction (global CSS now supplies what scoped CSS supplied before — same class names, same rules, just relocated).
+
+- [ ] **Step 3: Create the component**
 
 Create `apps/desktop/src/components/FileExplorerPanel.vue`:
 
@@ -1335,84 +1418,28 @@ function onTabClose(tabId: number) {
 .file-status-dot--deleted { background: var(--color-danger); }
 .file-status-dot--renamed { background: var(--color-status-added); }
 
-/* ── Tree rows — copied from RepoSidebar.vue's scoped .file-item/.tree-*
-   rules (lines 2091-2337) so this panel's tree matches the Changes tree
-   visually without depending on cross-component scoped styles (Vue scoped
-   CSS never leaks between components). Keep these two blocks in sync if
-   RepoSidebar's tree styling changes. */
-.file-item {
-  display: flex;
-  align-items: center;
-  gap: var(--space-4);
-  padding: var(--space-3) var(--space-2) var(--space-3);
-  cursor: pointer;
-  transition: background var(--transition-hover);
-  border-left: 3px solid transparent;
-}
-
-.file-item:hover {
-  background: var(--color-bg-tertiary);
-}
-
-.file-name {
-  font-size: var(--font-size-base);
-  font-weight: var(--font-weight-medium);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.tree-folder {
-  border-left: 3px solid transparent;
-}
-
-.tree-chevron {
-  color: var(--color-text-subtle);
-  flex-shrink: 0;
-  transition: transform 0.15s ease;
-}
-
-.tree-chevron--collapsed {
-  transform: rotate(-90deg);
-}
-
-.tree-folder-icon {
-  color: var(--color-text-muted);
-  flex-shrink: 0;
-}
-
-.tree-folder-name {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--color-text);
-}
-
-.tree-folder-count {
-  flex-shrink: 0;
-  font-size: var(--font-size-xs);
-  font-variant-numeric: tabular-nums;
-  color: var(--color-text-subtle);
-}
+/* Tree row classes (.file-item, .tree-folder, .tree-chevron,
+   .tree-folder-icon, .tree-folder-name, .tree-folder-count, .file-name) are
+   intentionally NOT defined here — they come from the shared global rules
+   added to apps/desktop/src/assets/main.css in Step 1, also used by
+   RepoSidebar.vue's tree layout. Do not re-add them locally. */
 </style>
 ```
 
-- [ ] **Step 2: Type-check**
+- [ ] **Step 4: Type-check**
 
 Run: `cd apps/desktop && pnpm vue-tsc --noEmit`
 Expected: no new errors from `FileExplorerPanel.vue`.
 
-- [ ] **Step 3: Manual smoke test**
+- [ ] **Step 5: Manual smoke test**
 
-Run: `cd apps/desktop && pnpm dev:web`, open the app in the browser, open a repo. This component isn't mounted anywhere yet (that's Task 9) — for now, temporarily add `<FileExplorerPanel :repo-path="repoFolderPath!" :changed-files="repoFiles" @close="() => {}" />` right after the `TerminalPanel` `KeepAlive` block in `App.vue` to eyeball it, then **revert that temporary edit** before committing (Task 9 wires it properly with layout modes, AppDock toggle, and the unsaved-changes guard — mounting it unconditionally here would skip all of that).
+Run: `cd apps/desktop && pnpm dev:web`, open the app in the browser, open a repo. This component isn't mounted anywhere yet (that's Task 9) — for now, temporarily add `<FileExplorerPanel :repo-path="repoFolderPath!" :changed-files="repoFiles" @close="() => {}" />` right after the `TerminalPanel` `KeepAlive` block in `App.vue` to eyeball it. Confirm the tree rows (chevrons, folder icons, counts) look identical to RepoSidebar's Changes tree — proof the shared `main.css` rules apply correctly to both. Then **revert that temporary edit** before committing (Task 9 wires it properly with layout modes, AppDock toggle, and the unsaved-changes guard — mounting it unconditionally here would skip all of that).
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add apps/desktop/src/components/FileExplorerPanel.vue
-git commit -m "feat(desktop): add FileExplorerPanel shell (tree + tabs, no editor yet)"
+git add apps/desktop/src/components/FileExplorerPanel.vue apps/desktop/src/assets/main.css apps/desktop/src/components/RepoSidebar.vue
+git commit -m "feat(desktop): add FileExplorerPanel shell, extract shared tree-row CSS"
 ```
 
 ---

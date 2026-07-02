@@ -4,7 +4,7 @@ use crate::git::cmd::git_cmd;
 use crate::types::{
     DiffHunk, DiffLine, FileLogEntry, FolderDiffNode, GhIssueRaw, GhPrDetailRaw, GhPrRaw,
     GhPrStatusCheck, Issue, MonorepoPackage, PullRequest, PullRequestDetail, RawFileChange,
-    ShortlogEntry,
+    RepoTreeNode, ShortlogEntry,
 };
 
 /// Aggregate a PR's individual status checks into a single rollup state.
@@ -315,6 +315,61 @@ pub(crate) fn insert_change(root: &mut FolderDiffNode, change: &RawFileChange) {
     }
     let total = segments.len();
     insert_segments(root, &segments, 0, total, "", change);
+}
+
+/// Insert a single repo-relative path into the tree, creating intermediate
+/// folder nodes as needed. Mirrors `insert_change` but for a plain path
+/// list (no diff status/stat fields).
+pub(crate) fn insert_repo_path(root: &mut RepoTreeNode, path: &str) {
+    let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+    if segments.is_empty() {
+        return;
+    }
+    insert_repo_segments(root, &segments, 0, "");
+}
+
+fn insert_repo_segments(node: &mut RepoTreeNode, segments: &[&str], idx: usize, parent_path: &str) {
+    let seg = segments[idx];
+    let full_path = if parent_path.is_empty() {
+        seg.to_string()
+    } else {
+        format!("{}/{}", parent_path, seg)
+    };
+    let is_last = idx + 1 == segments.len();
+
+    let child_idx = match node.children.iter().position(|c| c.name == seg) {
+        Some(p) => p,
+        None => {
+            node.children.push(RepoTreeNode {
+                path: full_path.clone(),
+                name: seg.to_string(),
+                kind: if is_last { "file" } else { "folder" }.to_string(),
+                children: Vec::new(),
+            });
+            node.children.len() - 1
+        }
+    };
+
+    if !is_last {
+        insert_repo_segments(&mut node.children[child_idx], segments, idx + 1, &full_path);
+    }
+}
+
+/// Sort a repo tree node's children folders-first, then alphabetically —
+/// same ordering as `sort_node`, on `RepoTreeNode`.
+pub(crate) fn sort_repo_tree(node: &mut RepoTreeNode) {
+    node.children.sort_by(|a, b| {
+        let a_is_folder = a.kind == "folder";
+        let b_is_folder = b.kind == "folder";
+        match (a_is_folder, b_is_folder) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+        }
+    });
+    for c in node.children.iter_mut() {
+        sort_repo_tree(c);
+    }
 }
 
 pub(crate) fn parse_file_log_output(raw: &str) -> Vec<FileLogEntry> {
@@ -1408,5 +1463,36 @@ members = [
         let toml = "[package]\nname = \"my-crate\"\nversion = \"0.3.1\"\n";
         assert_eq!(parse_toml_scalar(toml, "name"), Some("my-crate".to_string()));
         assert_eq!(parse_toml_scalar(toml, "version"), Some("0.3.1".to_string()));
+    }
+}
+
+#[cfg(test)]
+mod repo_tree_tests {
+    use super::*;
+
+    #[test]
+    fn builds_nested_folders_and_sorts_folders_first() {
+        let mut root = RepoTreeNode {
+            path: String::new(),
+            name: String::new(),
+            kind: "folder".to_string(),
+            children: Vec::new(),
+        };
+        insert_repo_path(&mut root, "src/main.rs");
+        insert_repo_path(&mut root, "README.md");
+        insert_repo_path(&mut root, "src/lib.rs");
+        sort_repo_tree(&mut root);
+
+        assert_eq!(root.children.len(), 2);
+        assert_eq!(root.children[0].name, "src");
+        assert_eq!(root.children[0].kind, "folder");
+        assert_eq!(root.children[1].name, "README.md");
+        assert_eq!(root.children[1].kind, "file");
+
+        let src = &root.children[0];
+        assert_eq!(src.children.len(), 2);
+        assert_eq!(src.children[0].name, "lib.rs");
+        assert_eq!(src.children[0].path, "src/lib.rs");
+        assert_eq!(src.children[1].name, "main.rs");
     }
 }

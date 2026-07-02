@@ -1054,6 +1054,62 @@ async function handleRequest(req, res) {
       return jsonResponse(req, res, root);
     }
 
+    // POST /api/list-repo-tree  { cwd }
+    //
+    // Mirrors the Tauri `list_repo_tree` command (File Explorer panel). Lists
+    // tracked + untracked non-ignored paths via `git ls-files -z --cached
+    // --others --exclude-standard`, then folds them into a nested folder tree.
+    //
+    // Response: { root: RepoTreeNode, truncated: boolean } — camelCase to match
+    // the Rust struct's `rename_all = "camelCase"` serialization.
+    if (url.pathname === "/api/list-repo-tree" && req.method === "POST") {
+      const { cwd } = await readBody(req);
+      if (!cwd || !cwd.trim()) return jsonResponse(req, res, { error: "cwd must not be empty" }, 400);
+
+      const MAX_REPO_TREE_ENTRIES = 20000;
+      let stdout;
+      try {
+        stdout = execFileSync(GIT, ["ls-files", "-z", "--cached", "--others", "--exclude-standard"], {
+          cwd,
+          stdio: ["ignore", "pipe", "pipe"],
+        }).toString("utf8");
+      } catch (e) {
+        const stderr = e.stderr ? e.stderr.toString() : e.message;
+        return jsonResponse(req, res, { error: `git ls-files failed: ${stderr.trim()}` }, 500);
+      }
+
+      let paths = stdout.split("\0").filter((p) => p.length > 0).sort();
+      const truncated = paths.length > MAX_REPO_TREE_ENTRIES;
+      if (truncated) paths = paths.slice(0, MAX_REPO_TREE_ENTRIES);
+
+      const root = { path: "", name: "", kind: "folder", children: [] };
+      const insert = (node, segments, idx, parentPath) => {
+        const seg = segments[idx];
+        const fullPath = parentPath ? `${parentPath}/${seg}` : seg;
+        const isLast = idx === segments.length - 1;
+        let child = node.children.find((c) => c.name === seg);
+        if (!child) {
+          child = { path: fullPath, name: seg, kind: isLast ? "file" : "folder", children: [] };
+          node.children.push(child);
+        }
+        if (!isLast) insert(child, segments, idx + 1, fullPath);
+      };
+      for (const p of paths) {
+        const segments = p.split("/").filter((s) => s.length > 0);
+        if (segments.length) insert(root, segments, 0, "");
+      }
+      const sortNode = (node) => {
+        node.children.sort((a, b) => {
+          if (a.kind !== b.kind) return a.kind === "folder" ? -1 : 1;
+          return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+        });
+        node.children.forEach(sortNode);
+      };
+      sortNode(root);
+
+      return jsonResponse(req, res, { root, truncated });
+    }
+
     // GET /api/list-dir?path=/some/dir  — list directories for folder picker
     if (url.pathname === "/api/list-dir" && req.method === "GET") {
       const dirPath = resolve(url.searchParams.get("path") || homedir());

@@ -336,6 +336,7 @@ pub fn run() {
             commands::files::read_file_at_revision,
             commands::files::folder_diff,
             commands::files::list_dir,
+            commands::files::list_repo_tree,
             commands::read::git_status,
             commands::read::git_diff,
             commands::read::git_log,
