@@ -115,6 +115,7 @@ export default defineConfig({
           { text: 'Features', link: '/features' },
           { text: 'Conflict engine', link: '/conflict-engine' },
           { text: 'AI & agents', link: '/ai-agents' },
+          { text: 'Compare', link: '/compare/' },
         ],
       },
       { text: 'Guide', link: '/guide/getting-started' },
@@ -146,6 +147,19 @@ export default defineConfig({
             { text: 'Core API', link: '/reference/core-api' },
             { text: 'Configuration', link: '/reference/config' },
             { text: 'CLI Commands', link: '/reference/cli-commands' },
+          ],
+        },
+      ],
+      '/compare/': [
+        {
+          text: 'Compare',
+          items: [
+            { text: 'All comparisons', link: '/compare/' },
+            { text: 'vs GitKraken', link: '/compare/gitwand-vs-gitkraken' },
+            { text: 'vs Fork', link: '/compare/gitwand-vs-fork' },
+            { text: 'vs Sublime Merge', link: '/compare/gitwand-vs-sublime-merge' },
+            { text: 'vs GitHub Desktop', link: '/compare/gitwand-vs-github-desktop' },
+            { text: 'vs GitButler', link: '/compare/gitwand-vs-gitbutler' },
           ],
         },
       ],
