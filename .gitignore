@@ -65,3 +65,4 @@ website/.vitepress/.temp
 .claude/worktrees/
 
 .gitwandrc
+visibility-pack/
