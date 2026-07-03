@@ -1,6 +1,6 @@
 ---
 title: GitWand vs Fork (2026) — free alternative with PR review and conflict auto-resolution
-description: GitWand vs Fork compared — $0 vs $50, Linux support, in-app PR review, merge conflict auto-resolution and AI integration. An honest verdict, updated July 2026.
+description: GitWand vs Fork compared — $0 vs $59.99, Linux support, in-app PR review, merge conflict auto-resolution and AI integration. An honest verdict, updated July 2026.
 head:
   - - meta
     - property: og:title
@@ -12,7 +12,7 @@ head:
 
 # GitWand vs Fork
 
-**The verdict in three sentences.** Fork is one of the best-crafted Git clients ever made — if you're on macOS/Windows, don't need PR reviews in-app, and $50 once is fine, it will not disappoint you. GitWand matches the "fast, clean, native" philosophy but is **free, open source, runs on Linux, reviews PRs from four forges in-app, and auto-resolves the trivial ~95% of merge conflicts** with a deterministic engine. If conflicts and code review are part of your daily Git life, that's the gap that matters.
+**The verdict in three sentences.** Fork is one of the best-crafted Git clients ever made — if you're on macOS/Windows, don't need full PR review in-app, and $59.99 once is fine, it will not disappoint you. GitWand matches the "fast, clean, native" philosophy but is **free, open source, runs on Linux, reviews PRs from four forges in-app, and auto-resolves the trivial ~95% of merge conflicts** with a deterministic engine. If conflicts and code review are part of your daily Git life, that's the gap that matters.
 
 *Facts checked July 2026.*
 
@@ -20,14 +20,14 @@ head:
 
 | | GitWand | Fork |
 |---|---|---|
-| Price | **Free, MIT open source** | $50 one-time (free evaluation) |
+| Price | **Free, MIT open source** | $59.99 one-time (free evaluation) |
 | Platforms | macOS · **Linux** · Windows | macOS · Windows |
 | Stack | Tauri 2 + Rust, ~8 MB | Native (per-platform) |
 | Merge conflicts | **Auto-resolves ~95% of trivial hunks**, confidence scores, decision trace | Good 3-way merge editor (manual) |
-| PR / MR review | In-app: GitHub, GitLab, Bitbucket, Azure DevOps — inline comments, suggestions, CI annotations | Opens PRs in the browser |
+| PR / MR review | In-app: GitHub, GitLab, Bitbucket, Azure DevOps — inline comments, suggestions, CI annotations | Create & view PRs + CI status; no inline review |
 | Interactive rebase | ✅ including split-commit-by-hunks | ✅ excellent |
 | Worktrees | First-class (tab = worktree, scratch worktrees) | Supported |
-| AI | Agent sessions (Claude Code, Codex, opencode…), per-hunk critique, MCP server — all local, all opt-in | None |
+| AI | Agent sessions (Claude Code, Codex, opencode…), per-hunk critique, MCP server — all local, all opt-in | AI commit messages |
 | History view | Git Tree (multi-branch DAG, filters, `#PR` search) | Commit graph (excellent) |
 
 ## Where Fork wins
@@ -42,11 +42,11 @@ This is the category difference. Fork gives you a merge editor; GitWand gives yo
 
 ### 2. Code review without leaving the app
 
-Fork sends you to the browser for PRs. GitWand renders the diff, inline discussions, pending-review batches, GitHub-native suggestions and CI check annotations in-app, for GitHub, GitLab, Bitbucket **and** Azure DevOps — plus **Today**, a cross-repo inbox of PRs awaiting you.
+Fork can create and view PRs and show CI status, but the actual review — reading the diff, leaving inline comments, batching a review — still happens in the browser. GitWand renders the diff, inline discussions, pending-review batches, GitHub-native suggestions and CI check annotations in-app, for GitHub, GitLab, Bitbucket **and** Azure DevOps — plus **Today**, a cross-repo inbox of PRs awaiting you.
 
 ### 3. Free, open, everywhere
 
-MIT license, Linux builds (.deb/.AppImage/.rpm), a [CLI](/guide/cli), a [VS Code extension](/guide/vscode), and an [MCP server](/guide/mcp) so your AI agents use the same engine you do. Fork is $50/seat, two platforms, closed source.
+MIT license, Linux builds (.deb/.AppImage/.rpm), a [CLI](/guide/cli), a [VS Code extension](/guide/vscode), and an [MCP server](/guide/mcp) so your AI agents use the same engine you do. Fork is $59.99/seat, two platforms, closed source.
 
 ## FAQ
 

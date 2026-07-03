@@ -20,13 +20,13 @@ These comparisons are written by the GitWand team, so read them with that in min
 
 | | GitWand | [GitKraken](/compare/gitwand-vs-gitkraken) | [Fork](/compare/gitwand-vs-fork) | [Sublime Merge](/compare/gitwand-vs-sublime-merge) | [GitHub Desktop](/compare/gitwand-vs-github-desktop) | [GitButler](/compare/gitwand-vs-gitbutler) |
 |---|---|---|---|---|---|---|
-| Price | **Free (MIT)** | $8/mo (Pro) | $50 | $99 | Free | Free |
+| Price | **Free (MIT)** | Free tier; Pro ~$5/mo | $59.99 | $99 | Free | Free |
 | Open source | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ |
 | Stack | Tauri 2 + Rust (~8 MB) | Electron | Native | Native | Electron | Tauri + Rust |
 | Platforms | macOS · Linux · Windows | macOS · Linux · Windows | macOS · Windows | macOS · Linux · Windows | macOS · Windows | macOS · Linux · Windows |
-| Auto-resolves conflicts | ✅ deterministic engine | ❌ (AI suggestions) | ❌ | ❌ | ❌ | ❌ |
-| In-app PR review | ✅ 4 forges | ✅ | ❌ | ❌ | GitHub only | Stacked PRs |
-| AI / agent integration | Agent sessions + MCP server | Agent Mode (cloud) | ❌ | ❌ | Copilot commits | Agents Tab + MCP |
+| Auto-resolves conflicts | ✅ deterministic engine | ❌ (AI assist) | ❌ | ❌ | ❌ (Copilot assist) | ❌ |
+| In-app PR review | ✅ 4 forges | ✅ | Create & view only | ❌ | GitHub only | Stacked PRs |
+| AI / agent integration | Agent sessions + MCP server | Agent sessions + cloud AI | ❌ | ❌ | Copilot commits + conflicts | Agents Tab + MCP |
 | Account required | Never | For advanced features | No | No | GitHub | No |
 
 ## The deep dives
