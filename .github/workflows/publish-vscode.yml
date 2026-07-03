@@ -12,6 +12,12 @@ name: Publish VS Code extension
 #
 # Required secret: VSCE_PAT — a VS Code Marketplace Personal Access Token for
 # the `gitwand` publisher. vsce reads it from the environment automatically.
+#
+# Optional secret: OVSX_PAT — an Open VSX access token (open-vsx.org → User
+# Settings → Access Tokens) for the `gitwand` namespace. When present, the
+# same .vsix is also published to Open VSX (Cursor, VSCodium, Gitpod, Theia
+# pull from there). When absent, the Open VSX step is skipped with a warning
+# so Marketplace releases are never blocked.
 
 on:
   push:
@@ -86,3 +92,16 @@ jobs:
           # Publish the exact .vsix built in the Package step (core is already
           # bundled in, so the package is self-contained).
           pnpm exec vsce publish --packagePath gitwand-vscode-*.vsix
+
+      - name: Publish to Open VSX
+        if: github.event_name == 'push' || github.event.inputs.dry_run != 'true'
+        working-directory: packages/vscode
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          if [ -z "$OVSX_PAT" ]; then
+            echo "::warning::OVSX_PAT secret is not set — skipping Open VSX publish."
+            exit 0
+          fi
+          # Same self-contained .vsix as the Marketplace publish above.
+          pnpm exec ovsx publish --packagePath gitwand-vscode-*.vsix --pat "$OVSX_PAT"
