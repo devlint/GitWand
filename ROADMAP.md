@@ -6,6 +6,8 @@
 
 ## What's Next
 
+_Ordered by priority (2026-07-03). The thread: secure the commit path (v3.3), rebuild the two review surfaces on one shared AI pipeline (v3.4–v3.5), lay the safety net before shipping more auto-apply (v3.6), make the app reactive and fast (v3.7), close the resolution loop (v3.8), then workflow & comparison primitives (v3.9–v3.10), experimental voice input (v3.11), and the v4.0 code-intelligence headline._
+
 ### v3.3.0 — Safety Bundle: pre-commit secrets scanner
 
 _Inspired by GitSquid. A "safety" feature with zero network dependency — everything local._
@@ -18,35 +20,7 @@ _Inspired by GitSquid. A "safety" feature with zero network dependency — every
 
 ---
 
-### v3.4.0 — Stacked Branches (native)
-
-_A differentiating feature: stacked PRs workflow without an external CLI (Graphite, ghstack…)._
-
-The paradigm: short stacked branches (`feat/step-1` → `feat/step-2` → `feat/step-3`), each with its own PR targeting the previous one.
-
-**Visualization** — The DAG automatically identifies stacks; a "Stack" banner in the sidebar; a "Stacks" tab in the Launchpad
-
-**Creation** — "Stack a branch" button in the context menu; `⌘⇧S` shortcut from the commit area
-
-**Restack** — Automatic detection when the base has moved; one-click "Restack" button (cascading `git rebase --onto`); conflict preview before execution
-
-**PRs** — "Submit stack": creates or updates GitHub PRs for each layer; automatic retarget when a layer is merged
-
-**Implementation** — Metadata in `.gitwand-workspace.json`; no external CLI dependency
-
----
-
-### v3.5.0 — Voice Input (experimental)
-
-- **Local dictation**: microphone button in the commit panel — transcription via embedded Whisper (`whisper-rs` Rust) — zero cloud
-- **Optional AI enrichment**: pass dictated text through `useAIProvider` for conventional commit formatting
-- **Models**: `tiny` or `base` downloaded on demand, stored locally
-- **Multilingual**: Whisper auto-detects the language
-- **Graceful fallback**: clear message if microphone access is denied by macOS TCC
-
----
-
-### v3.6.0 — PR Review 2.0: faster, keyboard-first, AI-assisted
+### v3.4.0 — PR Review 2.0: faster, keyboard-first, AI-assisted
 
 _Rebuild of the in-app PR review (v2.24.0) around performance, review flow and a Greptile-style AI layer — benchmark-driven._
 
@@ -62,7 +36,22 @@ _Rebuild of the in-app PR review (v2.24.0) around performance, review flow and a
 
 ---
 
-### v3.7.0 — Time Machine: repo snapshots & global undo
+### v3.5.0 — Commit Review: micro AI reviews in the Changes panel
+
+_Inspired by [git-lrc](https://github.com/HexmosTech/git-lrc) (HexmosTech). Commit-time is the review sweet spot: early enough to catch AI-generated regressions before they enter history, dependable because everyone commits. git-lrc does it with a cloud service + a browser detour — we do it in-panel, fully local._
+
+**Today's baseline** — the Changes section (`RepoSidebar.vue`) + `DiffViewer.vue` render the staged diff read-only; per-hunk AI critique exists but is PR-only (`usePrHunkCritique.ts`); commit trailers ship since v1.9.0 (`useCommitMessage.ts`); CLI agents are launchable in-app (Agent Sessions v2.8.0, terminal + AI-task scratch worktrees v3.2.0).
+
+- **Review staged changes** — one button in the commit area: AI pass over the staged diff, inline findings with severity badges anchored in the diff + a short summary. Generalize `usePrHunkCritique` from PR hunks to any `GitDiff` — the same engine as the v3.4.0 pre-review pass, pointed at the index
+- **Issue navigation** — cycle finding-to-finding (reuses the v3.4.0 keyboard model), per-file finding counts in the staged list
+- **Fix with agent** — git-lrc makes you copy-paste issues back to your agent; we pipe them: "Fix with agent" sends the findings to Claude Code / opencode / Codex (Agent Sessions), optionally in an AI-task scratch worktree; re-review triggers on the next staging change
+- **Iterations & coverage** — track review→fix→review cycles and the share of the final staged diff already reviewed (`iter:N`, `coverage:X%`)
+- **Review / Vouch / Skip** — explicit three-state decision at commit time, non-blocking (same UX contract as the v3.3.0 secrets scanner): reviewed by AI, vouched personally, or skipped — recorded as a commit trailer `GitWand-Review: ran|vouched|skipped (iter:N, coverage:X%)` via the existing trailers support (v1.9.0), so the team sees review status right in `git log`
+- **Opt-in & scoped** — per-repo enable in `.gitwandrc` + Settings; optional pre-commit hook wiring via Settings > Hooks alongside the v3.3.0 scanner
+
+---
+
+### v3.6.0 — Time Machine: repo snapshots & global undo
 
 _Inspired by GitUp's snapshot history. Extends the Undo stack (v1.2.0) from "undo the last ref move" into a true safety net covering the working tree and the resolution engine._
 
@@ -77,7 +66,7 @@ _Inspired by GitUp's snapshot history. Extends the Undo stack (v1.2.0) from "und
 
 ---
 
-### v3.8.0 — Live Repo: filesystem events + libgit2 phase 1
+### v3.7.0 — Live Repo: filesystem events + libgit2 phase 1
 
 _Inspired by GitUp's Live Map. Replace the 2s status poll with real FS events, and start the shell-out → libgit2 migration on the cheap-refresh path._
 
@@ -91,7 +80,7 @@ _Inspired by GitUp's Live Map. Replace the 2s status poll with real FS events, a
 
 ---
 
-### v3.9.0 — Merge preview-to-apply + editable diff
+### v3.8.0 — Merge preview-to-apply + editable diff
 
 _Inspired by Aurees. Close the loop between the Conflict Predictor (v2.20.0) and execution, and make the diff a place you can fix things._
 
@@ -106,6 +95,24 @@ _Inspired by Aurees. Close the loop between the Conflict Predictor (v2.20.0) and
 
 ---
 
+### v3.9.0 — Stacked Branches (native)
+
+_A differentiating feature: stacked PRs workflow without an external CLI (Graphite, ghstack…). Sequenced after v3.8.0 on purpose: Restack leans on the conflict preview → apply flow._
+
+The paradigm: short stacked branches (`feat/step-1` → `feat/step-2` → `feat/step-3`), each with its own PR targeting the previous one.
+
+**Visualization** — The DAG automatically identifies stacks; a "Stack" banner in the sidebar; a "Stacks" tab in Today
+
+**Creation** — "Stack a branch" button in the context menu; `⌘⇧S` shortcut from the commit area
+
+**Restack** — Automatic detection when the base has moved; one-click "Restack" button (cascading `git rebase --onto`); conflict preview before execution (v3.8.0 preview-to-apply)
+
+**PRs** — "Submit stack": creates or updates GitHub PRs for each layer; automatic retarget when a layer is merged
+
+**Implementation** — Metadata in `.gitwand-workspace.json`; no external CLI dependency
+
+---
+
 ### v3.10.0 — Combined Diffs (multi-commit, non-contiguous)
 
 _Inspired by GitBlade. A comparison primitive we lack: one aggregated diff across several commits, even non-consecutive — review scattered work as a single change._
@@ -116,7 +123,17 @@ _Inspired by GitBlade. A comparison primitive we lack: one aggregated diff acros
 - **`combined_diff` Tauri command** — Rust-side aggregation of the selected commits' patches into one virtual diff (per-file hunk merge, conflict-free since same-history)
 - **Combined viewer** — standard DiffViewer rendering + per-hunk commit attribution (gutter badge → jump to commit)
 - **Entry points** — Git Tree context menu, file history ("combine these versions"), PR review (subset of commits)
-- **Optional AI summary** — "what these N commits do together" (what/why/affected areas) via `useAIProvider`, reusing the v3.6.0 PR-summary prompt
+- **Optional AI summary** — "what these N commits do together" (what/why/affected areas) via `useAIProvider`, reusing the v3.4.0 PR-summary prompt
+
+---
+
+### v3.11.0 — Voice Input (experimental)
+
+- **Local dictation**: microphone button in the commit panel — transcription via embedded Whisper (`whisper-rs` Rust) — zero cloud
+- **Optional AI enrichment**: pass dictated text through `useAIProvider` for conventional commit formatting
+- **Models**: `tiny` or `base` downloaded on demand, stored locally
+- **Multilingual**: Whisper auto-detects the language
+- **Graceful fallback**: clear message if microphone access is denied by macOS TCC
 
 ---
 
@@ -131,67 +148,31 @@ _Inspired by Snipara's project-intelligence layer. Before a merge/rebase, answer
 - **Probable-test detection** — heuristic mapping (`*.test.*` / `*.spec.*` naming + import edges) → "these 12 tests likely cover the changed code"
 - **Co-change analysis** — "these files historically change together" mined from local `git log` (zero cloud, cheap); a second impact signal complementing the static import graph, exactly the history hop Greptile does server-side
 - **Blast Radius panel** — new tab in `MergePreviewPanel`: impacted files ranked, affected symbols, suggested test scope; feeds a `blastRadius` dimension alongside `postMergeRisk`
-- **Review ordering** — blast radius reused in the PR review (v3.6.0): files ranked by impact, "start with these 2 files"
+- **Review ordering** — blast radius reused in the PR review (v3.4.0): files ranked by impact, "start with these 2 files"
 - **Feedback loop** — rejected impact predictions / auto-resolutions lower the pattern's confidence (extends `useResolutionMemory`), the local analog of Greptile v4's false-positive reduction
 - **Agents too** — exposed via `@gitwand/mcp` (`gitwand_blast_radius`) and CLI, so AI agents can check impact before committing a resolution. Positioning: Greptile sells this as a paid API ("Genius API", $0.45/req) — ours is local, free, open source
 - **Opt-in & lazy** — computed post-preview, never blocking the merge flow; enabled in Settings
 
 ---
 
-### ~~v2.29.0~~ — Today: triaged action inbox (renamed from Launchpad) — _shipped in v3.0.0_
-
-_Evolves the Launchpad (v2.9.0, + in-app review & action inbox in v2.24.0) from a PR/issue table with a generic "Open in GitHub" action into a prioritized, state-aware action inbox — the daily "what do I do next" surface. **Renamed "Launchpad" → "Today"** ("Launchpad" was GitKraken's term; "Today" frames it as the daily-driver). Mockup-driven. The differentiator vs GitKraken/Tower: each item routes to a **native GitWand surface**, not back to the forge._
-
-**Status** — _Phase 1 shipped_: 3 urgency tiers, state-aware primary action per row, local working-state band, reworked card UI (left accent · state pills · avatars · CI/review chips · diff stat · action hierarchy), pill-chip tab bar, centered max-width layout. _Phase 2 (in progress)_: rename Launchpad → Today; counted filter chips + group-by toggle (Priority/Repo/Type) over a unified list; issues / `@`-mentions / dependency PRs as first-class items. _Deferred (Phase 3)_: active mutations — real nudge / auto-merge, and a direct jump from "Resolve" into the conflict resolver (today routes to in-app PR review).
-
-**Urgency tiers** — three collapsible buckets above the current review/changes/ci/merge granularity:
-- **À traiter** — needs me now (review requested, changes requested, CI failed, ready to merge, merge conflicts, mention)
-- **En attente** — waiting on others / CI running / approved-but-not-mergeable
-- **Plus tard** — dependency bumps, auto-mergeable, low-priority
-
-Subtitle shows "N items · M to handle" (inbox-zero signal). Group-by toggle: **Priority** (default) · **Repo** · **Type**.
-
-**State-aware primary action** — the single most relevant next action replaces the generic "Open in GitHub", each routing to an existing GitWand surface:
-
-| Item state | Action | Routes to |
-|---|---|---|
-| Ready to merge | **Merge** | native merge |
-| Review requested | **Review** | in-app PR review (v2.24) |
-| CI failed | **See failure** | CI annotations (v2.18) |
-| Changes requested / mention | **Reply** | in-app PR/issue thread |
-| Merge conflicts | **Resolve** | GitWand conflict resolver — the key differentiator |
-| Waiting / CI running | **Follow / Nudge** | — |
-| Dependency bump | **Auto-merge** | — |
-
-**Local working state as inbox items** — surface uncommitted changes ("1 uncommitted change on `main` → Commit") and local conflicts at the top, so the inbox spans local + remote. Wires the existing `useRepoActionCards` (commit/publish/push/sync) into the Launchpad header.
-
-**Issues, mentions & dependencies first-class** — extend the inbox beyond *my PRs*: `@`-mentions on issues/PRs, assigned/authored issues, and dependency-update PRs each get their own type, count and action.
-
-**Richer per-row state** — explicit pills (Ready to merge · Review requested · CI failed · Changes requested · Merge conflicts · Mention), CI chip (✓ / ✗ / running), review chip (Approved / Changes requested), read/unread dot, diff stat, labels.
-
-**Counted filter chips** — All · My PRs · To review · Issues · Dependencies · Mentions, each with a live count.
-
-**Implementation** — generalize `useLaunchpadInbox` (today PR-only, 4 buckets) into a tiered classifier over a union item type (PR · issue · mention · dep · local-action card); reuse `useRepoActionCards`, `useLaunchpadScope`, the v2.24 review/issue panels. No new forge round-trips on the hot path — drive off the existing `workspace_prs_all` enriched payload + the Launchpad poller.
-
----
-
 ### For reflection — competitive scan (GitUp · Aurees · Snipara)
 
-_Veille du 2026-06-24 sur 6 clients/outils (Snipara, GitDriv, GitUp, GitX-dev, Aurees, GitBlade). **Mise à jour 2026-07-02** : les pistes à fort signal ont été promues en sections versionnées ci-dessus après audit du code — PR Review 2.0 (inspiration Greptile) → **v3.6.0**, Snapshots/undo global → **v3.7.0**, Live Map + libgit2 phase 1 → **v3.8.0**, diff éditable + merge preview-to-apply → **v3.9.0**, Combined Diffs → **v3.10.0**, Code Graph/blast radius → **v4.0.0 (candidate)**. Les pistes écartées (GitDriv = web drag-and-drop débutant, GitX-dev = fork quasi-défunt, GitBlade = parité, abandonné depuis 2019) n'apportent rien d'avancé._
+_Veille du 2026-06-24 sur 6 clients/outils (Snipara, GitDriv, GitUp, GitX-dev, Aurees, GitBlade). **Mise à jour 2026-07-03** : les pistes à fort signal ont été promues en sections versionnées ci-dessus après audit du code — PR Review 2.0 (inspiration Greptile) → **v3.4.0**, Commit Review (inspiration git-lrc) → **v3.5.0**, Snapshots/undo global → **v3.6.0**, Live Map + libgit2 phase 1 → **v3.7.0**, diff éditable + merge preview-to-apply → **v3.8.0**, Combined Diffs → **v3.10.0**, Code Graph/blast radius → **v4.0.0 (candidate)**. Les pistes écartées (GitDriv = web drag-and-drop débutant, GitX-dev = fork quasi-défunt, GitBlade = parité, abandonné depuis 2019) n'apportent rien d'avancé._
 
 **Reste en veille :**
 
 - **`GitUpKit`** ([gitup.co](https://gitup.co/)) — leur SDK pour bâtir des clients Git, à étudier.
-- **libgit2 phases 3-4** — migration `git_log`/`git_show` (revwalk, le vrai gros gain sur 40k commits — mais boucle de fetch d'objets à optimiser) puis `git_file_log` (`--follow`/rename tracking à réimplémenter). À planifier après validation des phases 1-2 (v3.8/v3.9). Alternative `gix` réévaluée à ce moment-là.
+- **libgit2 phases 3-4** — migration `git_log`/`git_show` (revwalk, le vrai gros gain sur 40k commits — mais boucle de fetch d'objets à optimiser) puis `git_file_log` (`--follow`/rename tracking à réimplémenter). À planifier après validation des phases 1-2 (v3.7/v3.8). Alternative `gix` réévaluée à ce moment-là.
 - **Verification Plans attachés aux handoffs** (Snipara) — chaque PR/changement porte ses checks à passer ; recoupe les CI annotations (v2.18.0).
-- **Greptile ([greptile.com](https://www.greptile.com/))** — largement absorbé dans le plan (2026-07-02) : pre-review multi-hop + scores de confiance → **v3.6.0**, index à chaud → **v3.8.0**, contexte historique du LLM fallback → **v3.9.0**, code graph local + co-change + feedback loop → **v4.0.0**. Reste en veille : leur benchmark public de reviewers AI (à réutiliser pour le volet benchmark v3.6.0) et l'évolution de la Genius API.
+- **Greptile ([greptile.com](https://www.greptile.com/))** — largement absorbé dans le plan (2026-07-02) : pre-review multi-hop + scores de confiance → **v3.4.0**, index à chaud → **v3.7.0**, contexte historique du LLM fallback → **v3.8.0**, code graph local + co-change + feedback loop → **v4.0.0**. Reste en veille : leur benchmark public de reviewers AI (à réutiliser pour le volet benchmark v3.4.0) et l'évolution de la Genius API.
+- **git-lrc / LiveReview ([HexmosTech](https://github.com/HexmosTech/git-lrc))** — concept absorbé en **v3.5.0** (Commit Review). Reste en veille : leur offre équipe LiveReview (dashboards, politiques org, analytics de review) — si le trailer `GitWand-Review` prend, une agrégation cross-repo dans Today/Dashboard en serait l'équivalent local.
 
 ---
 
 ### Later (unscheduled)
 
 - **In-app folder-browser + right-click "Scope here"** — follow-up to v2.21.0 Monorepo Scope: a recursive working-tree folder panel where right-clicking a folder scopes to it. Ad-hoc scoping already ships via the picker's "Custom folder…"; this in-tree gesture is deferred (the existing `FolderDiffTree` is a *diff* tree — the wrong substrate — and is unmounted).
-- **File Explorer/Editor panel** — a Terminal-style panel (floating/docked-bottom/fullscreen, per-repo state, own tab strip) that browses the full repo tree via `git ls-files` (`.gitignore`-aware, no new Rust crate) and opens files in a lightweight CodeMirror 6 editor with save (`⌘S`) and read-only Git status badges (staged/unstaged/untracked dots sourced from the existing status, no new fetch). Distinct from the folder-browser above: a general-purpose viewer/editor, not a monorepo-scope picker — no stage/discard/scope actions in v1. Design: `docs/superpowers/specs/2026-07-01-file-explorer-editor-design.md`.
+- **Today Phase 3 — active mutations** — deferred remainder of the Today inbox (shipped v3.0.0): real nudge / auto-merge actions from the inbox, and a direct jump from "Resolve" into the conflict resolver (today routes to in-app PR review). Note: Phase 2's filter-chips + group-by model was superseded by the fixed-section inbox (see `useLaunchpadInbox.ts`).
 
 ---
 
