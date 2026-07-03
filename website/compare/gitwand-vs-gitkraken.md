@@ -1,6 +1,6 @@
 ---
 title: GitWand vs GitKraken (2026) — free alternative with conflict auto-resolution
-description: GitWand vs GitKraken compared — price ($0 vs ~$5/mo Pro), Electron vs native Rust, AI approaches, PR workflow, and merge conflict resolution. An honest verdict, updated July 2026.
+description: GitWand vs GitKraken compared — price ($0 vs $8/mo Pro), Electron vs native Rust, AI approaches, PR workflow, and merge conflict resolution. An honest verdict, updated July 2026.
 head:
   - - meta
     - property: og:title
@@ -20,7 +20,7 @@ head:
 
 | | GitWand | GitKraken |
 |---|---|---|
-| Price | **Free, MIT open source** | Free Community tier; Pro ~$5/mo (billed annually) |
+| Price | **Free, MIT open source** | Free Community tier; Pro $8/seat/mo, Advanced $14 (billed annually) |
 | Stack | Tauri 2 + Rust, ~8 MB | Electron (v41), ~150 MB class |
 | Merge conflicts | **Auto-resolves ~95% of trivial hunks** — 10 deterministic patterns, confidence score, decision trace | 3-way merge editor; AI suggestions |
 | PR / MR review | In-app, 4 forges: GitHub, GitLab, Bitbucket, Azure DevOps — inline comments, suggestions, CI annotations | In-app, multi-forge (Launchpad) |

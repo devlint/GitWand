@@ -20,7 +20,7 @@ These comparisons are written by the GitWand team, so read them with that in min
 
 | | GitWand | [GitKraken](/compare/gitwand-vs-gitkraken) | [Fork](/compare/gitwand-vs-fork) | [Sublime Merge](/compare/gitwand-vs-sublime-merge) | [GitHub Desktop](/compare/gitwand-vs-github-desktop) | [GitButler](/compare/gitwand-vs-gitbutler) |
 |---|---|---|---|---|---|---|
-| Price | **Free (MIT)** | Free tier; Pro ~$5/mo | $59.99 | $99 | Free | Free |
+| Price | **Free (MIT)** | Free tier; Pro $8/mo | $59.99 | $99 | Free | Free |
 | Open source | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ |
 | Stack | Tauri 2 + Rust (~8 MB) | Electron | Native | Native | Electron | Tauri + Rust |
 | Platforms | macOS · Linux · Windows | macOS · Linux · Windows | macOS · Windows | macOS · Linux · Windows | macOS · Windows | macOS · Linux · Windows |

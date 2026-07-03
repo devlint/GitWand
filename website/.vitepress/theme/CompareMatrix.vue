@@ -9,7 +9,7 @@ interface Row {
 // with Tower appended (it has no deep dive but is in the landscape).
 const COLS = [
   { key: 'gw',    name: 'GitWand',        sub: 'Free · MIT',        gw: true },
-  { key: 'gk',    name: 'GitKraken',      sub: 'Free / ~$5/mo Pro' },
+  { key: 'gk',    name: 'GitKraken',      sub: 'Free / $8/mo Pro' },
   { key: 'fork',  name: 'Fork',           sub: '$59.99 · Native' },
   { key: 'sm',    name: 'Sublime Merge',  sub: '$99 · Native' },
   { key: 'ghd',   name: 'GitHub Desktop', sub: 'Free · Electron' },
