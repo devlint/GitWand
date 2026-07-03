@@ -615,10 +615,30 @@ watch(
 
 onMounted(() => {
   nextTick(drawMinimap);
-  if (typeof ResizeObserver !== "undefined" && contentEl.value) {
-    const ro = new ResizeObserver(() => drawMinimap());
-    ro.observe(contentEl.value);
-  }
+});
+
+let minimapRo: ResizeObserver | null = null;
+
+// `contentEl` lives behind `v-if="!file.tree && !file.markerless"`, so it's
+// absent from the DOM at mount time for tree/markerless conflicts. Watching
+// the ref (rather than a mount-only attach) re-observes every time the
+// editor body appears.
+watch(
+  contentEl,
+  (el) => {
+    minimapRo?.disconnect();
+    minimapRo = null;
+    if (typeof ResizeObserver !== "undefined" && el) {
+      minimapRo = new ResizeObserver(() => drawMinimap());
+      minimapRo.observe(el);
+    }
+  },
+  { immediate: true, flush: "post" },
+);
+
+onUnmounted(() => {
+  minimapRo?.disconnect();
+  minimapRo = null;
 });
 </script>
 
