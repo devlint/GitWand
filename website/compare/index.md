@@ -29,6 +29,12 @@ These comparisons are written by the GitWand team, so read them with that in min
 | AI / agent integration | Agent sessions + MCP server | Agent sessions + cloud AI | ❌ | ❌ | Copilot commits + conflicts | Agents Tab + MCP |
 | Account required | Never | For advanced features | No | No | GitHub | No |
 
+## Every feature, side by side
+
+The table above is the at-a-glance version. Here's the full matrix — workflow, conflict resolution, power-Git, code review and AI — across all seven clients. Rows tagged **GitWand** are where the deterministic conflict engine has no equivalent elsewhere; the honest inverse is there too (virtual/stacked branches, where GitButler leads).
+
+<CompareMatrix />
+
 ## The deep dives
 
 - **[GitWand vs GitKraken](/compare/gitwand-vs-gitkraken)** — free & local-first vs the commercial suite

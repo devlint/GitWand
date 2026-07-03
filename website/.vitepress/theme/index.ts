@@ -4,6 +4,7 @@ import HomeLanding from './HomeLanding.vue'
 import FeaturesPage from './FeaturesPage.vue'
 import ConflictEnginePage from './ConflictEnginePage.vue'
 import AiAgentsPage from './AiAgentsPage.vue'
+import CompareMatrix from './CompareMatrix.vue'
 import './custom.css'
 
 export default {
@@ -13,5 +14,6 @@ export default {
     app.component('FeaturesPage', FeaturesPage)
     app.component('ConflictEnginePage', ConflictEnginePage)
     app.component('AiAgentsPage', AiAgentsPage)
+    app.component('CompareMatrix', CompareMatrix)
   },
 } satisfies Theme

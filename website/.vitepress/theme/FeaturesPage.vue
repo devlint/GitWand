@@ -78,7 +78,7 @@ function cc(v?: CV){ return v===true?'y':v==='partial'?'p':v==='soon'?'s':'n' }
     <section class="ph-hero">
       <div class="ph-inner">
         <span class="ph-badge">Features</span>
-        <h1 class="ph-h1">Everything you need for Git — <span class="grad">native and free.</span></h1>
+        <h1 class="ph-h1">Everything you need for Git <br> <span class="grad">native and free.</span></h1>
         <p class="ph-sub">A complete daily workflow with no performance compromise, across three consistent interfaces: desktop app, CLI and VS Code. Below: the full feature set, and an honest feature-by-feature comparison with the popular clients.</p>
         <div class="ph-ctas">
           <a href="/" class="ph-btn ph-btn--primary">Download GitWand</a>
@@ -104,37 +104,10 @@ function cc(v?: CV){ return v===true?'y':v==='partial'?'p':v==='soon'?'s':'n' }
     <section class="ph-section ph-section--alt">
       <div class="ph-inner">
         <h2 class="ph-h2">How GitWand compares</h2>
-        <p class="ph-secsub">Feature-by-feature against the most popular Git clients. Data accurate as of May 2026.</p>
-        <div class="cmp-wrap">
-          <table class="cmp">
-            <thead>
-              <tr>
-                <th></th>
-                <th class="cmp-gw">GitWand<span>Free · MIT</span></th>
-                <th>GitHub Desktop<span>Free · Electron</span></th>
-                <th>GitKraken<span>$8/mo · Electron</span></th>
-                <th>Fork<span>$50 · Native</span></th>
-                <th>Tower<span>$69/yr</span></th>
-                <th>Sublime Merge<span>$99</span></th>
-              </tr>
-            </thead>
-            <tbody>
-              <template v-for="r in ROWS" :key="r.label">
-                <tr v-if="r.category" class="cmp-cat"><td colspan="7">{{ r.label }}<span v-if="r.note" class="cmp-note">{{ r.note }}</span></td></tr>
-                <tr v-else :class="{ 'cmp-hl': r.highlight }">
-                  <td class="cmp-feat">{{ r.label }}<span v-if="r.highlight" class="cmp-uniq">unique</span></td>
-                  <td class="cmp-gw"><span :class="'c-'+cc(r.gw)">{{ ic(r.gw) }}</span></td>
-                  <td><span :class="'c-'+cc(r.ghd)">{{ ic(r.ghd) }}</span></td>
-                  <td><span :class="'c-'+cc(r.gk)">{{ ic(r.gk) }}</span></td>
-                  <td><span :class="'c-'+cc(r.fork)">{{ ic(r.fork) }}</span></td>
-                  <td><span :class="'c-'+cc(r.tower)">{{ ic(r.tower) }}</span></td>
-                  <td><span :class="'c-'+cc(r.sm)">{{ ic(r.sm) }}</span></td>
-                </tr>
-              </template>
-            </tbody>
-          </table>
-        </div>
+        <p class="ph-secsub">Feature-by-feature against the most popular Git clients. Fact-checked July 2026.</p>
+        <CompareMatrix />
         <div class="ph-ctas ph-ctas--center">
+          <a href="/compare/" class="ph-btn">Full comparisons →</a>
           <a href="/conflict-engine" class="ph-btn">See the conflict engine →</a>
           <a href="/ai-agents" class="ph-btn">AI &amp; agents →</a>
         </div>
