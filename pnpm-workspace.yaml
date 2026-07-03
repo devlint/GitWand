@@ -32,3 +32,6 @@ overrides:
   "form-data@4": ">=4.0.6" # GHSA-hmw2-7cc7-3qxx, high — CRLF injection (#31)
   "js-yaml@4": ">=4.2.0" # GHSA-h67p-54hq-rp68, medium — quadratic DoS (#28)
   "esbuild@>=0.27.3 <0.28.1": ">=0.28.1" # GHSA-g7r4-m6w7-qqqr, low — dev-server file read; via vite 7 (vitepress 2) (#40)
+  # Dependabot #44/#45/#47/#48/#49/#50/#51 — all via @vscode/vsce → cheerio,
+  # dev-only tooling for packaging/publishing the VS Code extension.
+  "undici@7": ">=7.28.0"
