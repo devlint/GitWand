@@ -2289,6 +2289,7 @@ const fr: Locale = {
     toolbarLock: "Verrouiller",
     toolbarUndo: "Annuler",
     toolbarSave: "Enregistrer",
+    toolbarBlame: "Blâme",
     fullscreen: "Plein écran",
     exitFullscreen: "Quitter le plein écran",
   },

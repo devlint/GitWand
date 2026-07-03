@@ -6,6 +6,8 @@ import { useSettings } from "../composables/useSettings";
 import { useI18n } from "../composables/useI18n";
 import { useDraggableResizable } from "../composables/useDraggableResizable";
 import type { RepoFileEntry } from "../composables/useGitRepo";
+import { getGitBlame } from "../utils/backend";
+import { buildBlameModel, type BlameGutterEntry } from "../composables/useBlameGutter";
 import type { EditorView as EditorViewType } from "@codemirror/view";
 import type { EditorState as EditorStateType, Extension } from "@codemirror/state";
 
@@ -128,9 +130,21 @@ const docStates = new Map<number, EditorStateType>();
 let editableCompartment: InstanceType<typeof import("@codemirror/state").Compartment> | null = null;
 const editLocked = ref(true);
 
+// ── Blame gutter (opt-in, per tab) ──
+// A shared Compartment (like editableCompartment) holds either an empty
+// extension (blame off) or a gutter built from the active tab's blame model.
+// Blame data is fetched once per tab via getGitBlame and cached in blameModels;
+// it reflects the *committed* file, so editing a tab clears its blame (see
+// updateListenerFor) — the button is also disabled while a tab is dirty.
+let blameCompartment: InstanceType<typeof import("@codemirror/state").Compartment> | null = null;
+let gutterFn: typeof import("@codemirror/view").gutter | null = null;
+let GutterMarkerCtor: typeof import("@codemirror/view").GutterMarker | null = null;
+const blameEnabled = ref(false);
+const blameModels = new Map<number, Map<number, BlameGutterEntry>>();
+
 async function ensureCodeMirrorLibs() {
   if (EditorViewCtor) return;
-  const [{ EditorView }, { EditorState, Compartment }, cmMeta, { oneDark: theme }, { undo }] = await Promise.all([
+  const [{ EditorView, gutter, GutterMarker }, { EditorState, Compartment }, cmMeta, { oneDark: theme }, { undo }] = await Promise.all([
     import("@codemirror/view"),
     import("@codemirror/state"),
     import("codemirror"),
@@ -143,6 +157,76 @@ async function ensureCodeMirrorLibs() {
   oneDark = theme;
   undoCommand = undo;
   editableCompartment = new Compartment();
+  blameCompartment = new Compartment();
+  gutterFn = gutter;
+  GutterMarkerCtor = GutterMarker;
+}
+
+// Build a CodeMirror gutter extension from a `finalLine → entry` blame model.
+// One marker per source line; continuation lines of a same-commit run render
+// blank (entry.showLabel === false) so the author shows once per block.
+function blameGutterExtension(model: Map<number, BlameGutterEntry>): Extension {
+  const GM = GutterMarkerCtor!;
+  class BlameMarker extends GM {
+    constructor(public entry: BlameGutterEntry) {
+      super();
+    }
+    eq(other: BlameMarker) {
+      return other.entry.hashFull === this.entry.hashFull && other.entry.showLabel === this.entry.showLabel;
+    }
+    toDOM() {
+      const span = document.createElement("span");
+      span.className = "cm-blame-marker";
+      span.textContent = this.entry.showLabel ? this.entry.label : "";
+      span.title = this.entry.title;
+      return span;
+    }
+  }
+  return gutterFn!({
+    class: "cm-blame-gutter",
+    lineMarker(view, blockLine) {
+      const ln = view.state.doc.lineAt(blockLine.from).number;
+      const entry = model.get(ln);
+      return entry ? new BlameMarker(entry) : null;
+    },
+    lineMarkerChange: () => false,
+  });
+}
+
+// Fetch + cache the blame model for a tab. Returns false on failure or if the
+// user switched tabs while the (async) blame was in flight.
+async function ensureBlameForTab(tab: FileTab): Promise<boolean> {
+  if (blameModels.has(tab.id)) return true;
+  try {
+    const lines = await getGitBlame(props.repoPath, tab.path);
+    if (activeTab.value?.id !== tab.id) return false;
+    blameModels.set(tab.id, buildBlameModel(lines));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Reconfigure the shared blame compartment on the live view for `tabId`:
+// the tab's gutter when blame is on and a model is cached, empty otherwise.
+function applyBlame(tabId: number) {
+  if (!view || !blameCompartment) return;
+  const model = blameEnabled.value ? blameModels.get(tabId) : undefined;
+  view.dispatch({ effects: blameCompartment.reconfigure(model ? blameGutterExtension(model) : []) });
+  docStates.set(tabId, view.state);
+}
+
+async function toggleBlame() {
+  if (!activeTab.value || activeTab.value.binary) return;
+  blameEnabled.value = !blameEnabled.value;
+  if (blameEnabled.value) {
+    const ok = await ensureBlameForTab(activeTab.value);
+    if (!ok) {
+      blameEnabled.value = false;
+      return;
+    }
+  }
+  if (activeTab.value) applyBlame(activeTab.value.id);
 }
 
 async function detectLanguageExtension(path: string) {
@@ -164,6 +248,17 @@ function updateListenerFor(tabId: number) {
     if (!update.docChanged) return;
     docStates.set(tabId, update.state);
     explorer.updateContent(props.repoPath, tabId, update.state.doc.toString());
+    // Editing shifts line numbers, so the committed blame no longer aligns:
+    // drop this tab's cached model and turn blame off. Deferred to a
+    // microtask to avoid dispatching a reconfigure from inside an update.
+    if (blameEnabled.value) {
+      blameModels.delete(tabId);
+      queueMicrotask(() => {
+        if (!blameEnabled.value) return;
+        blameEnabled.value = false;
+        applyBlame(tabId);
+      });
+    }
   });
 }
 
@@ -222,6 +317,7 @@ async function mountTab(tab: FileTab) {
         langExt,
         updateListenerFor(tab.id),
         editableCompartment!.of(EditorViewCtor!.editable.of(!editLocked.value)),
+        blameCompartment!.of([]),
       ],
     });
     docStates.set(tab.id, state);
@@ -236,6 +332,15 @@ async function mountTab(tab: FileTab) {
   // built or visited — always re-assert it so editability is consistent
   // panel-wide, not just at the moment this tab's EditorState was created.
   applyEditable(tab.id);
+
+  // Re-assert blame for this tab: if blame is on, load its model (once) and
+  // show the gutter; otherwise applyBlame clears any gutter carried over from
+  // a previously-shown state.
+  if (blameEnabled.value && !tab.binary) {
+    await ensureBlameForTab(tab);
+    if (activeTab.value?.id !== tab.id) return;
+  }
+  applyBlame(tab.id);
 }
 
 // Re-assert the current lock state onto the live view and cache the result
@@ -271,7 +376,10 @@ watch(
   () => tabs.value.map((t) => t.id),
   (ids, oldIds) => {
     for (const id of oldIds ?? []) {
-      if (!ids.includes(id)) docStates.delete(id);
+      if (!ids.includes(id)) {
+        docStates.delete(id);
+        blameModels.delete(id);
+      }
     }
   },
 );
@@ -424,6 +532,20 @@ function onKeyDown(e: KeyboardEvent) {
           <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/>
         </svg>
         <span>{{ t("files.toolbarUndo") }}</span>
+      </button>
+      <button
+        class="fe__toolbar-btn"
+        :class="{ 'fe__toolbar-btn--active': blameEnabled }"
+        :disabled="!activeTab || activeTab.binary || explorer.isDirty(activeTab)"
+        :title="t('files.toolbarBlame')"
+        @click="toggleBlame"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="4"/>
+          <line x1="1.5" y1="12" x2="8" y2="12"/>
+          <line x1="16" y1="12" x2="22.5" y2="12"/>
+        </svg>
+        <span>{{ t("files.toolbarBlame") }}</span>
       </button>
       <div class="fe__toolbar-spacer" />
       <button
@@ -638,6 +760,24 @@ function onKeyDown(e: KeyboardEvent) {
 
 .fe__content :deep(.cm-editor) {
   height: 100%;
+}
+
+/* Blame gutter (opt-in) — sits alongside the line-number gutter, showing
+   `author · date` once per same-commit run. Full details on hover (title). */
+.fe__content :deep(.cm-blame-gutter) {
+  background: var(--color-bg-tertiary);
+  border-right: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs, 11px);
+}
+.fe__content :deep(.cm-blame-marker) {
+  display: inline-block;
+  overflow: hidden;
+  max-width: 190px;
+  padding: 0 var(--space-2);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  cursor: default;
 }
 
 .fe__empty {

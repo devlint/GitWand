@@ -2264,6 +2264,7 @@ const zhCN: Locale = {
     toolbarLock: "锁定",
     toolbarUndo: "撤销",
     toolbarSave: "保存",
+    toolbarBlame: "追溯",
     fullscreen: "全屏",
     exitFullscreen: "退出全屏",
   },
