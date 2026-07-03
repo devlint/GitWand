@@ -46,6 +46,98 @@ The paradigm: short stacked branches (`feat/step-1` → `feat/step-2` → `feat/
 
 ---
 
+### v3.6.0 — PR Review 2.0: faster, keyboard-first, AI-assisted
+
+_Rebuild of the in-app PR review (v2.24.0) around performance, review flow and a Greptile-style AI layer — benchmark-driven._
+
+**Today's baseline** — `PrDetailView.vue` (2.3k lines) + `PrInlineDiff.vue` + `PrIntelligencePanel.vue` + `usePrPanel.ts` already cover pending-review batches, multi-line comments, GitHub-native suggestions, CI annotations (v2.18.0), SWR cache (v2.19.0) and on-demand AI hunk critique (`usePrHunkCritique.ts`). Gaps: the whole diff loads at once (no per-file lazy load, no hunk virtualization — scroll lag on 50+ file PRs), no viewed-file tracking, no keyboard navigation, AI is on-demand only and scattered, no PR summary, GitLab/Bitbucket review methods are stubs.
+
+- **Benchmark first** — score the current review against GitKraken, Tower, Graphite, GitButler and the AI reviewers (Greptile, CodeRabbit, Copilot code review) on a task grid: time-to-first-comment, big-PR navigation, AI signal/noise. Deliverable: a target-UX spec that drives the rest
+- **Performance rebuild** — per-file lazy diff loading + hunk virtualization; slim down the 6-call detail revalidation
+- **Review flow** — viewed-file state (with `SubmitReviewOptions` extension), `J`/`K` hunk navigation + keyboard-first actions, pending-review state surfaced (badge + resume), dismiss review, request-reviewers workflow
+- **AI pre-review pass** — Greptile-style multi-hop, computed in background on PR open: diff → touched dependencies (import parser from `@gitwand/core`) → blame/history of changed lines → line-level findings **with confidence scores** and a user threshold. Local-first via `useAIProvider` (CLI agents), opt-in, cached SWR-style
+- **PR summary** — what changed / why / affected areas at the top of the Info tab; reused as review handoff
+- **Unified Intelligence pipeline** — merge the scattered AI pieces (hunk critique, Intelligence-tab static flags, pre-review findings) into one pipeline with shared cache and one settings surface
+- **Multi-forge reviews** — complete the GitLab review methods (largest stub gap); Bitbucket/Azure follow
+
+---
+
+### v3.7.0 — Time Machine: repo snapshots & global undo
+
+_Inspired by GitUp's snapshot history. Extends the Undo stack (v1.2.0) from "undo the last ref move" into a true safety net covering the working tree and the resolution engine._
+
+**Today's baseline** — `useUndoStack.ts` is reflog-based (50 entries), covers commit / amend / merge / cherry-pick / rebase / pull. Gaps: the working tree is never snapshotted, reset / checkout / discard are not undoable, and an auto-applied resolution has no rollback.
+
+- **Working-tree snapshots** — before every destructive op (reset, checkout with changes, discard, bulk resolution apply), capture an unreferenced snapshot commit (`git stash create`-style, no stash-list pollution); referenced from a local snapshot journal
+- **Undo auto-resolutions** — every resolution applied by the engine (incl. "Accept all" bulk from v2.22.0) becomes an undoable snapshot — one-gesture rollback of a bad auto-merge
+- **Global `⌘Z`** — extend the existing undo stack to reset / checkout / discard; redo via `⇧⌘Z`
+- **Time Machine panel** — chronological timeline of all repo operations (not just commits), one-click restore to any point
+- **Retention policy** — snapshot GC (age + count caps), zero impact on `git log` / push
+- **Optional AI labels** — one-line snapshot summaries in the timeline via `useAIProvider` (same pattern as Quick Stash labels, v2.15.1)
+
+---
+
+### v3.8.0 — Live Repo: filesystem events + libgit2 phase 1
+
+_Inspired by GitUp's Live Map. Replace the 2s status poll with real FS events, and start the shell-out → libgit2 migration on the cheap-refresh path._
+
+**Today's baseline** — `useRepoPoller.ts` polls every 2s (visibility-gated); no file watcher (`notify` crate absent). Backend: ~150 `git_cmd()` shell-outs vs 4 libgit2 fast-paths (`git/libgit2.rs`); `git_status` already has a libgit2 fast-path with CLI fallback.
+
+- **FS watcher** — `notify` crate on `.git/` + working tree, debounced/coalesced Tauri events; Git Tree, status and sidebar refresh in real time, including changes made outside the app
+- **Polling demotion** — the 2s poll becomes a low-frequency fallback (watcher failure, network mounts); consistent with the polling-discipline rule (no unconditional intervals)
+- **libgit2 phase 1: `git_diff` + `git_blame`** — migrate the two read paths with the best effort/risk ratio (per backend audit); CLI fallback kept, covered by the parity harness (`tests/parity/`)
+- **Event-driven invalidation** — post-command manual refreshes replaced by watcher events (single code path)
+- **Indexing hook** — the watcher API is designed with a second consumer in mind: incremental update of the v4.0 code graph (re-index only the changed files, Greptile-style hot index, fully local)
+
+---
+
+### v3.9.0 — Merge preview-to-apply + editable diff
+
+_Inspired by Aurees. Close the loop between the Conflict Predictor (v2.20.0) and execution, and make the diff a place you can fix things._
+
+**Today's baseline** — `preview_merge` / `preview_rebase` / `preview_cherry_pick` + `useMergePreview.ts` already compute per-hunk auto-resolvability side-effect-free, but the preview is display-only: the user then merges blind or detours via scratch worktree. `DiffViewer.vue` is read-only; `MergeEditor.vue` edits via a bare textarea. CodeMirror 6 ships in-app since v3.2.0 (File Explorer/Editor).
+
+- **Apply from preview** — "Apply N auto-resolutions & merge" straight from `MergePreviewPanel`: run the operation, apply the engine's resolutions, stop only on the residual manual hunks
+- **Hunk-level opt-out + confidence threshold** — untick individual auto-resolutions, or set a global bar ("apply only ≥ 90% confidence") surfacing the engine's per-hunk confidence (audit-trail preserved, cf. v2.5.0)
+- **History-aware LLM fallback** — enrich `llm_proposed` prompts with the blame/history of the conflicting lines (Greptile-style multi-hop context, computed locally)
+- **Editable diff** — inline editing in the diff view (CodeMirror 6, reusing the v3.2 editor setup): fix a typo or resolve a trivial conflict where you see it, without switching to the merge editor
+- **MergeEditor upgrade** — replace the textarea with the same CodeMirror 6 component (syntax highlighting, line numbers already themed)
+- **libgit2 phase 2: stage/unstage** — index-level `git2` staging (hot UI path), parity-tested, CLI fallback
+
+---
+
+### v3.10.0 — Combined Diffs (multi-commit, non-contiguous)
+
+_Inspired by GitBlade. A comparison primitive we lack: one aggregated diff across several commits, even non-consecutive — review scattered work as a single change._
+
+**Today's baseline** — `getGitFileDiff(from, to)` and `folderDiff(refA, refB)` compare exactly two points; `CommitGraph.vue` is single-select; file history / split commit / fork point don't cover "these 3 commits together".
+
+- **Multi-select in the Git Tree** — `⌘`-click / `⇧`-click commit selection, selection chip ("3 commits selected → Combined diff")
+- **`combined_diff` Tauri command** — Rust-side aggregation of the selected commits' patches into one virtual diff (per-file hunk merge, conflict-free since same-history)
+- **Combined viewer** — standard DiffViewer rendering + per-hunk commit attribution (gutter badge → jump to commit)
+- **Entry points** — Git Tree context menu, file history ("combine these versions"), PR review (subset of commits)
+- **Optional AI summary** — "what these N commits do together" (what/why/affected areas) via `useAIProvider`, reusing the v3.6.0 PR-summary prompt
+
+---
+
+### v4.0.0 (candidate) — Blast Radius: code-graph impact before merge
+
+_Inspired by Snipara's project-intelligence layer. Before a merge/rebase, answer: "what does this operation risk breaking?" — the natural extension of Conflict Predictor + `postMergeRisk` (v2.4.1), and a headline differentiator._
+
+**Today's baseline** — `packages/core` already embeds tree-sitter (TS/JS/Python/Go/Rust WASM grammars), an ES/CJS import parser (`resolvers/imports.ts`) and parse-tree validation (`validate-parse-tree.ts`), but no dependency graph, caller discovery, or test mapping.
+
+- **Import graph** — `packages/core/src/codeanalysis/`: tree-sitter queries build the module adjacency graph (browser-safe, incremental, cached per repo)
+- **Reverse dependencies** — for each file touched by the operation: who imports it, which exported symbols changed
+- **Probable-test detection** — heuristic mapping (`*.test.*` / `*.spec.*` naming + import edges) → "these 12 tests likely cover the changed code"
+- **Co-change analysis** — "these files historically change together" mined from local `git log` (zero cloud, cheap); a second impact signal complementing the static import graph, exactly the history hop Greptile does server-side
+- **Blast Radius panel** — new tab in `MergePreviewPanel`: impacted files ranked, affected symbols, suggested test scope; feeds a `blastRadius` dimension alongside `postMergeRisk`
+- **Review ordering** — blast radius reused in the PR review (v3.6.0): files ranked by impact, "start with these 2 files"
+- **Feedback loop** — rejected impact predictions / auto-resolutions lower the pattern's confidence (extends `useResolutionMemory`), the local analog of Greptile v4's false-positive reduction
+- **Agents too** — exposed via `@gitwand/mcp` (`gitwand_blast_radius`) and CLI, so AI agents can check impact before committing a resolution. Positioning: Greptile sells this as a paid API ("Genius API", $0.45/req) — ours is local, free, open source
+- **Opt-in & lazy** — computed post-preview, never blocking the merge flow; enabled in Settings
+
+---
+
 ### ~~v2.29.0~~ — Today: triaged action inbox (renamed from Launchpad) — _shipped in v3.0.0_
 
 _Evolves the Launchpad (v2.9.0, + in-app review & action inbox in v2.24.0) from a PR/issue table with a generic "Open in GitHub" action into a prioritized, state-aware action inbox — the daily "what do I do next" surface. **Renamed "Launchpad" → "Today"** ("Launchpad" was GitKraken's term; "Today" frames it as the daily-driver). Mockup-driven. The differentiator vs GitKraken/Tower: each item routes to a **native GitWand surface**, not back to the forge._
@@ -85,29 +177,14 @@ Subtitle shows "N items · M to handle" (inbox-zero signal). Group-by toggle: **
 
 ### For reflection — competitive scan (GitUp · Aurees · Snipara)
 
-_Veille du 2026-06-24 sur 6 clients/outils (Snipara, GitDriv, GitUp, GitX-dev, Aurees, GitBlade). Quelques pistes ressortent comme différenciantes pour GitWand ; les autres (GitDriv = web drag-and-drop débutant, GitX-dev = fork quasi-défunt, GitBlade = parité, abandonné depuis 2019) n'apportent rien d'avancé._
+_Veille du 2026-06-24 sur 6 clients/outils (Snipara, GitDriv, GitUp, GitX-dev, Aurees, GitBlade). **Mise à jour 2026-07-02** : les pistes à fort signal ont été promues en sections versionnées ci-dessus après audit du code — PR Review 2.0 (inspiration Greptile) → **v3.6.0**, Snapshots/undo global → **v3.7.0**, Live Map + libgit2 phase 1 → **v3.8.0**, diff éditable + merge preview-to-apply → **v3.9.0**, Combined Diffs → **v3.10.0**, Code Graph/blast radius → **v4.0.0 (candidate)**. Les pistes écartées (GitDriv = web drag-and-drop débutant, GitX-dev = fork quasi-défunt, GitBlade = parité, abandonné depuis 2019) n'apportent rien d'avancé._
 
-**From GitUp ([gitup.co](https://gitup.co/), FOSS macOS)** — le plus aligné techniquement :
+**Reste en veille :**
 
-- **Snapshots / undo global** — historique « Time-Machine » de *toutes* les opérations sur le repo (pas que les commits), undo au `⌘Z` y compris rebase/reset. Filet de sécurité naturel pour annuler en un geste une résolution auto-appliquée par le moteur — complète l'Undo stack (v1.2.0).
-- **Live Map** — graphe mis à jour en temps réel sur tout changement, y compris hors de l'app, sans refresh. À confronter à la discipline de polling (réagir aux events FS plutôt que poller) pour le Git Tree.
-- **Accès direct à la base du repo** (bypass du binaire `git`, façon libgit2) — vitesse/fiabilité (40k commits <1s). À évaluer côté backend Rust (`gix`/`git2-rs`) vs shell-out, dans la lignée des fast-paths libgit2 déjà en place.
-- **`GitUpKit`** — leur SDK pour bâtir des clients Git, à étudier.
-
-**From Aurees ([aurees.com](https://aurees.com/))** — recoupe le cœur de métier :
-
-- **Diff éditable** dans la vue (vs lecture seule) et **merge avec preview avant application** — patterns UX que le moteur d'auto-résolution + le Conflict Predictor (v2.20.0) pourraient exposer.
-
-**From GitBlade ([gitblade.com](https://gitblade.com/))** — surtout de la parité (merge, blame, graph, stage hunks, tabs), une seule idée :
-
-- **Combined Diffs** — diff agrégé entre plusieurs commits *même non consécutifs* ; primitive de comparaison absente aujourd'hui (on a file history / split commit / fork point), utile pour relire un travail éparpillé sur des commits non contigus.
-
-**From Snipara ([snipara.com](https://www.snipara.com/))** — couche « project intelligence » MCP pour agents, inspiration AI (pas un client Git) :
-
-- **Code Graph / blast radius** — calculer l'impact d'un changement (callers, imports, tests probables) *avant* l'edit ; appliqué à un merge/rebase : « voici ce que cette opération risque de casser ». Prolonge le Conflict Predictor + `@gitwand/core`.
-- **Verification Plans attachés aux handoffs** — chaque PR/changement porte ses checks à passer ; recoupe les CI annotations (v2.18.0).
-
-**À garder à l'œil : Greptile ([greptile.com](https://www.greptile.com/))** — AI code review avec index complet du codebase (contexte cross-repo au moment de la review). Pas un client Git, mais recoupe nos angles : review PR in-app (Launchpad/PrDetailView) et résolution contextuelle — un moteur qui « connaît » le repo entier pourrait enrichir le LLM fallback et le Conflict Predictor.
+- **`GitUpKit`** ([gitup.co](https://gitup.co/)) — leur SDK pour bâtir des clients Git, à étudier.
+- **libgit2 phases 3-4** — migration `git_log`/`git_show` (revwalk, le vrai gros gain sur 40k commits — mais boucle de fetch d'objets à optimiser) puis `git_file_log` (`--follow`/rename tracking à réimplémenter). À planifier après validation des phases 1-2 (v3.8/v3.9). Alternative `gix` réévaluée à ce moment-là.
+- **Verification Plans attachés aux handoffs** (Snipara) — chaque PR/changement porte ses checks à passer ; recoupe les CI annotations (v2.18.0).
+- **Greptile ([greptile.com](https://www.greptile.com/))** — largement absorbé dans le plan (2026-07-02) : pre-review multi-hop + scores de confiance → **v3.6.0**, index à chaud → **v3.8.0**, contexte historique du LLM fallback → **v3.9.0**, code graph local + co-change + feedback loop → **v4.0.0**. Reste en veille : leur benchmark public de reviewers AI (à réutiliser pour le volet benchmark v3.6.0) et l'évolution de la Genius API.
 
 ---
 
