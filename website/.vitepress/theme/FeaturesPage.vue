@@ -20,6 +20,8 @@ const GROUPS = [
       ['History & graph', 'Full history, interactive DAG graph, file blame and natural-language commit search.'],
       ['Commit context menu', '12 right-click actions: checkout, reset, revert, new branch, tag, cherry-pick, view on forge, copy SHA.'],
       ['Fork & triangular workflow', '“↑N fork” badge in the sync button so push remote ≠ upstream — no accidental pushes to origin.'],
+      ['Integrated terminal & AI agents', 'A real PTY terminal in-app — WebGL rendering, inline search, clickable links, typed tabs. Beyond a plain shell, first-class agent tabs launch Claude Code, Codex, opencode or Antigravity, and “New AI task” runs an agent in an isolated scratch worktree.'],
+      ['File explorer & editor', 'A gitignore-aware working-tree file tree with a built-in CodeMirror 6 editor: syntax highlighting, a lock/edit toggle, undo and save — read and tweak files without leaving GitWand.'],
     ],
   },
   {
