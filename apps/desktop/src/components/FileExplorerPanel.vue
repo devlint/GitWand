@@ -763,12 +763,17 @@ function onKeyDown(e: KeyboardEvent) {
 }
 
 /* Blame gutter (opt-in) — sits alongside the line-number gutter, showing
-   `author · date` once per same-commit run. Full details on hover (title). */
+   `author · date` once per same-commit run. Full details on hover (title).
+   The editor is always the oneDark theme regardless of the app light/dark
+   theme, so these colours are hard-coded to oneDark's own gutter palette
+   (background #282c34, stone #7d8799, darkBackground #21252b) rather than the
+   app `--color-*` tokens — those rendered a light gutter on the dark editor in
+   light mode. */
 .fe__content :deep(.cm-blame-gutter) {
-  background: var(--color-bg-tertiary);
-  border-right: 1px solid var(--color-border);
-  color: var(--color-text-muted);
-  font-size: var(--font-size-xs, 11px);
+  background-color: #282c34;
+  border-right: 1px solid #21252b;
+  color: #7d8799;
+  font-size: 11px;
 }
 .fe__content :deep(.cm-blame-marker) {
   display: inline-block;
