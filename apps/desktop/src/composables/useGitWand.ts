@@ -32,6 +32,12 @@ export interface ConflictFile {
   reconstructed?: boolean;
   /** Set when an unmerged file has no markers AND the working tree matches no side (possible manual edit). */
   markerless?: { reconstructed: string };
+  /**
+   * True when the file had 2-way markers (no `|||||||` base — git's default
+   * merge.conflictstyle) and the base was silently recovered from the git index.
+   * The ours/theirs content shown to the user is unchanged; only the base was added.
+   */
+  baseEnriched?: boolean;
 }
 
 export interface GlobalStats {
@@ -466,6 +472,25 @@ export function useGitWand() {
               return { path: filePath, content, result, markerless: { reconstructed: rec.content } };
             }
           } catch { /* not reconstructable → fall through to plain result */ }
+        }
+        // Markers present but at least one hunk has no base (merge.conflictstyle isn't
+        // diff3/zdiff3) → try recovering the base from the index so diff3-only patterns
+        // (non_overlapping, one_side_change, token_level_merge, …) can apply.
+        if (result.stats.totalConflicts > 0 && result.hunks.some((h) => h.baseLines.length === 0)) {
+          try {
+            const rec = await reconstructConflict(cwd, filePath);
+            const enrichedResult = await resolveAsync(rec.content, filePath, resolveOptionsWithLlm, structuralOpts);
+            const sameOursTheirs =
+              enrichedResult.hunks.length === result.hunks.length &&
+              enrichedResult.hunks.every((h, i) =>
+                h.oursLines.join("\n") === result.hunks[i].oursLines.join("\n") &&
+                h.theirsLines.join("\n") === result.hunks[i].theirsLines.join("\n"),
+              );
+            if (sameOursTheirs) {
+              return { path: filePath, content: rec.content, result: enrichedResult, baseEnriched: true };
+            }
+            // ours/theirs diverge from the index (manual edit since the conflict) → abandon silently.
+          } catch { /* no recoverable stage (e.g. add/add) → fall through to plain result */ }
         }
         return { path: filePath, content, result };
       }),
