@@ -1,0 +1,128 @@
+import { describe, it, expect } from "vitest";
+import tokenLevelMerge from "../../patterns/token-level-merge.js";
+import type { ClassifyInput } from "../../types.js";
+
+function input(base: string[], ours: string[], theirs: string[]): ClassifyInput {
+  return { baseLines: base, oursLines: ours, theirsLines: theirs, startLine: 1, endLine: base.length };
+}
+
+describe("token_level_merge : passe 1 — un seul côté change par ligne", () => {
+  it("2 lignes adjacentes, chacune changée par un côté différent → résout", () => {
+    const h = input(
+      ['<div class="flex items-baseline gap-x-2 mr-2">', '<label class="font-weight-bold">'],
+      ['<div class="flex items-baseline gap-x-2 mr-2">', '<label class="font-bold">'],
+      ['<div class="flex items-baseline space-x-2 mr-2">', '<label class="font-weight-bold">'],
+    );
+    expect(tokenLevelMerge.detect(h)).toBe(true);
+  });
+
+  it("3 lignes, ours change la 1ère, theirs change la 3ème, la 2ème est inchangée → résout", () => {
+    const h = input(
+      ["a 1", "b", "c 1"],
+      ["a 2", "b", "c 1"],
+      ["a 1", "b", "c 2"],
+    );
+    expect(tokenLevelMerge.detect(h)).toBe(true);
+  });
+
+  it("1 seule ligne changée par theirs, reste identique → résout (équivalent one_side_change local)", () => {
+    const h = input(["x", "y"], ["x", "y"], ["x", "z"]);
+    expect(tokenLevelMerge.detect(h)).toBe(true);
+  });
+
+  it("toutes les lignes changées, mais jamais les deux côtés sur la même ligne → résout", () => {
+    const h = input(["a", "b", "c"], ["a2", "b", "c"], ["a", "b", "c2"]);
+    expect(tokenLevelMerge.detect(h)).toBe(true);
+  });
+
+  it("aucune ligne changée (contexte pur) → résout trivialement (toutes les lignes = base)", () => {
+    const h = input(["a", "b"], ["a", "b"], ["a", "b"]);
+    expect(tokenLevelMerge.detect(h)).toBe(false); // rien à proposer — voir Step 3 (pass1Count===0 && pass2Count===0)
+  });
+});
+
+describe("token_level_merge : passe 2 — tokens disjoints sur une même ligne", () => {
+  it('class="a b" → ours change \'a\', theirs change \'b\' (tokens disjoints) → résout', () => {
+    const h = input(
+      ['<div class="a b">'],
+      ['<div class="a2 b">'],
+      ['<div class="a b2">'],
+    );
+    expect(tokenLevelMerge.detect(h)).toBe(true);
+  });
+
+  it("attribut différent en début et fin de balise, tokens disjoints → résout", () => {
+    const h = input(
+      ['<input type="text" name="foo" required>'],
+      ['<input type="email" name="foo" required>'],
+      ['<input type="text" name="foo" disabled>'],
+    );
+    expect(tokenLevelMerge.detect(h)).toBe(true);
+  });
+
+  it("deux lignes, chacune avec un conflit token-level résoluble → résout globalement", () => {
+    const h = input(
+      ['<div class="a b">', '<span id="x" data-foo="1">'],
+      ['<div class="a2 b">', '<span id="x2" data-foo="1">'],
+      ['<div class="a b2">', '<span id="x" data-foo="2">'],
+    );
+    expect(tokenLevelMerge.detect(h)).toBe(true);
+  });
+
+  it("mélange passe 1 (ligne 1) + passe 2 (ligne 2) → résout", () => {
+    const h = input(
+      ["ctx", '<div class="a b">'],
+      ["ctx-ours", '<div class="a2 b">'],
+      ["ctx", '<div class="a b2">'],
+    );
+    expect(tokenLevelMerge.detect(h)).toBe(true);
+  });
+
+  it("changement de valeur numérique isolée, tokens disjoints par construction → résout", () => {
+    const h = input(
+      ["width: 10px; height: 20px;"],
+      ["width: 15px; height: 20px;"],
+      ["width: 10px; height: 25px;"],
+    );
+    expect(tokenLevelMerge.detect(h)).toBe(true);
+  });
+});
+
+describe("token_level_merge : cas négatifs — doit échouer et retomber sur complex", () => {
+  it("les deux côtés changent le MÊME token vers des valeurs différentes → échec", () => {
+    const h = input(
+      ['<div class="a b">'],
+      ['<div class="a2 b">'],
+      ['<div class="a3 b">'],
+    );
+    expect(tokenLevelMerge.detect(h)).toBe(false);
+  });
+
+  it("nombre de tokens différent entre ours et base sur une ligne en conflit → échec (pas de réalignement)", () => {
+    const h = input(
+      ['<div class="a b">'],
+      ['<div class="a b c">'],
+      ['<div class="a2 b">'],
+    );
+    expect(tokenLevelMerge.detect(h)).toBe(false);
+  });
+
+  it("une ligne a un vrai conflit alors que les autres sont résolubles → échec global (pas de résolution partielle)", () => {
+    const h = input(
+      ["ok", '<div class="a b">'],
+      ["ok-ours", '<div class="a2 b">'],
+      ["ok", '<div class="a3 b">'],
+    );
+    expect(tokenLevelMerge.detect(h)).toBe(false);
+  });
+
+  it("pas de base (diff2) → échec (requires: diff3)", () => {
+    const h = input([], ['<div class="a2 b">'], ['<div class="a b2">']);
+    expect(tokenLevelMerge.detect(h)).toBe(false);
+  });
+
+  it("nombre de lignes différent entre base/ours/theirs → échec (pas d'alignement 1:1 possible)", () => {
+    const h = input(["a", "b"], ["a", "b", "c"], ["a", "b"]);
+    expect(tokenLevelMerge.detect(h)).toBe(false);
+  });
+});
