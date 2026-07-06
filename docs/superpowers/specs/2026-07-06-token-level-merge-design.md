@@ -3,9 +3,21 @@
 - **Date** : 2026-07-06
 - **Auteur** : Laurent Guitton (design assisté)
 - **Statut** : Design validé — prêt pour le plan d'implémentation
-- **Périmètre** : `packages/core` (nouveau pattern + registre + types) et `apps/desktop`
-  (UI de proposition/confirmation). Parité Rust obligatoire (`apps/desktop/src-tauri/`).
+- **Périmètre** : `packages/core` (nouveau pattern + registre + types) et `apps/desktop/src`
+  (UI de proposition/confirmation, Vue only). **Aucun changement Rust** — voir correction
+  ci-dessous.
 - **Branche** : à créer (`feat/token-level-merge`).
+
+> **Correction post-review (2026-07-06)** : la version initiale de ce spec supposait, sur la
+> base d'AGENTS.md ("Parity tests — Rust vs TypeScript"), qu'un portage Rust du tokenizer était
+> obligatoire. Vérification du code réel : `apps/desktop/src-tauri` n'a **aucun** équivalent du
+> classifier/registre de patterns — il détecte seulement la présence de `<<<<<<<` (voir
+> `commands/read.rs:1732`, `commands/ops.rs:2959`). Le `test:parity` réel
+> (`apps/desktop/vitest.config.parity.ts`) teste des commandes git (status/log/branches), pas la
+> résolution de conflits. `packages/core/src/__tests__/diff/parity.test.ts` compare deux
+> algorithmes **TypeScript** entre eux (Histogram vs LCS legacy), pas Rust vs TS. Le moteur de
+> résolution est 100% TypeScript, consommé directement par le frontend Vue via l'import
+> `@gitwand/core`. **Aucun travail Rust n'est donc nécessaire pour ce pattern.**
 
 ## Problème
 
@@ -72,14 +84,6 @@ explicitement accepter ou rejeter la proposition, réutilisant le mécanisme dé
   routé vers l'auto-application (même garde que pour `llm_proposed` avant acceptation
   utilisateur — vérifier le point d'entrée exact lors du plan d'implémentation).
 
-### Parité Rust (`apps/desktop/src-tauri/`)
-
-Porter les deux passes (décomposition ligne-par-ligne + tokenizer + merge LCS) côté Rust.
-Le tokenizer et le merge LCS doivent produire des résultats identiques bit-à-bit dans les deux
-langages — le `parity-probe` doit passer. **Poste de coût principal du projet** ; à détailler
-comme étape dédiée dans le plan d'implémentation (le tokenizer générique est le point le plus
-sensible à la divergence Rust/TS : ordre d'itération, gestion des guillemets, etc.).
-
 ### Frontend (`apps/desktop`)
 
 - **Généralisation de `LlmTracePanel.vue`** → `ProposedResolutionPanel.vue` (extraction de la
@@ -120,14 +124,12 @@ car deux sous-mécaniques) :
   change `a`, theirs change `b`).
 - **5 cas négatifs** — tokens qui se chevauchent réellement (les deux côtés touchent le même
   token) → doit échouer et retomber sur `complex`.
-- **Parity probe** : chaque cas ci-dessus rejoué côté Rust, résultat identique bit-à-bit.
 - **Frontend** : le panneau `ProposedResolutionPanel` s'affiche pour `token_level_merge`, le
   rejet downgradé bascule bien vers le 3-way manuel, l'acceptation applique les bonnes lignes.
 
 ## Contraintes & règles projet
 
 - `packages/core` : zéro dépendance Node.js (tokenizer en JS/TS pur).
-- Parité Rust/TS obligatoire avant merge (`pnpm test:parity`).
 - IPC : aucun changement Tauri nécessaire (le pattern vit entièrement dans `packages/core`,
   consommé tel quel par `useMergePreview.ts`).
 - i18n : toute string visible du nouveau panneau dans les 5 locales.
@@ -137,9 +139,6 @@ car deux sous-mécaniques) :
 
 ## Risques
 
-- **Divergence Rust/TS du tokenizer** : le risque principal. Mitigation : spécifier l'algorithme
-  de tokenisation de façon exhaustive avant d'écrire le code Rust (table de règles, pas
-  d'implémentation "au feeling" séparée).
 - **Confidence toujours "medium" mais jamais auto-appliqué** : rupture avec la convention
   actuelle où confidence pilote l'auto-application. À documenter clairement dans
   `packages/core/CLAUDE.md` (tableau des patterns) pour éviter qu'un futur pattern copie ce
