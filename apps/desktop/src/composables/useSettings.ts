@@ -396,7 +396,7 @@ export const defaultAppSettings: AppSettings = {
   dockHidePrs: false,
   dockHideTerminal: false,
   dockHideFiles: false,
-  dockHideChangesWhenEmpty: false,
+  dockHideChangesWhenEmpty: true,
   dockIconsOnly: false,
   dockVertical: false,
   dockIdleOpacity: 0.45,
