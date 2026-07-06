@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.3.0] - 2026-07-06
+
+### Added
+
+- **Blame gutter in the File Explorer editor** — an opt-in "Blame" toolbar button in the CodeMirror editor adds an author/date gutter, deduped per consecutive same-commit run with a hover tooltip for full details. Reuses the existing `git_blame` command (no new Tauri command). Blame clears automatically on edit, the toggle is disabled while the file is dirty, and the cache is evicted when the tab closes.
+
 ### Changed
 
 - **Anonymous launch telemetry moved from Umami to Aptabase** — Umami Cloud silently dropped every launch ping (it filters non-browser User-Agents, replying HTTP 200 with a `{"beep":"boop"}` decoy and recording nothing). GitWand now sends the same anonymous, release-only "launch" event through Aptabase (App-Key authenticated, no UA/bot filtering). The GDPR-safe random `install_id` is unchanged; app version and locale are captured automatically by the Aptabase plugin. Dropped the direct `ureq` and `sys-locale` Rust dependencies.
@@ -1175,6 +1181,7 @@ Design-system foundations — the app header and every overlay now ride on a sha
 - 28 tests covering all patterns + real-world scenarios (package.json, Laravel routes, Vue SFC, CSS, .env files)
 
 [Unreleased]: https://github.com/devlint/GitWand/compare/v3.2.0...HEAD
+[3.3.0]: https://github.com/devlint/GitWand/compare/v3.2.0...v3.3.0
 [3.2.0]: https://github.com/devlint/GitWand/compare/v3.1.0...v3.2.0
 [3.1.0]: https://github.com/devlint/GitWand/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/devlint/GitWand/compare/v2.24.0...v3.0.0

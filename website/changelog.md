@@ -5,6 +5,22 @@ description: Release history for GitWand — the native Git client with AI confl
 
 # Changelog
 
+## v3.3.0 — July 2026
+
+### Blame, right in the editor
+
+The File Explorer's built-in editor gets a "Blame" toggle. Turn it on and a gutter appears alongside your code showing who last touched each line and when, with consecutive lines from the same commit grouped together instead of repeating themselves. Hover any line for the full commit details. It clears the moment you start editing — blame on unsaved changes isn't blame on anything real.
+
+### The launch ping actually works now
+
+The anonymous launch ping introduced in v3.1.0 had a quiet bug: the analytics provider it used was filtering out the app's requests as non-browser traffic and silently discarding every single one — the ping was firing, but nothing was ever being counted. GitWand now sends that same anonymous ping through a different, app-friendly analytics service instead. Nothing about what's collected changed: still one fire-and-forget event per launch, still no personal data or user identifiers, still off in every debug build. (For the record, this ping isn't currently toggleable in Settings — a correction to what an earlier version of this changelog said.)
+
+### A smaller fix
+
+Opening a pull request from an Azure DevOps repo, the "into" branch dropdown used to only ever show `main` — it was built from local git refs, which an Azure clone often doesn't have many of. It now asks the forge directly for the real branch list, the same way GitHub, GitLab, and Bitbucket already did.
+
+---
+
 ## v3.2.0 — July 2026
 
 ### An integrated terminal you can actually work in
@@ -45,7 +61,7 @@ Release notes for your PRs can now be customized per-repo, and the default templ
 
 ### GDPR-compliant anonymous telemetry
 
-GitWand now sends a single anonymous ping when it launches. That's it — one request, no user identifiers, no device fingerprinting, no analytics events. The only thing it counts is "someone launched GitWand today." This is used purely to understand how many people are actively using the app. You can opt out in Settings.
+GitWand now sends a single anonymous ping when it launches. That's it — one request, no user identifiers, no device fingerprinting, no analytics events. The only thing it counts is "someone launched GitWand today." This is used purely to understand how many people are actively using the app, and it's skipped entirely in debug builds.
 
 ### AI CLI fix: NUL bytes stripped before spawn
 
