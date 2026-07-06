@@ -1246,9 +1246,9 @@ const en = {
 
     // Launchpad \u2014 Team tab toggle (v2.9)
     launchpad: {
-      disableTeamTab: {
-        label: "Disable Today Team tab",
-        help: "The Team tab fires one API call per colleague PR (~10s on large workspaces). Turn this off if you don't need the overlap view.",
+      showTeamTab: {
+        label: "Show Today Team tab",
+        help: "Shown at the top-left of the Today screen. The Team tab fires one API call per colleague PR (~10s on large workspaces). Turn this off if you don't need the overlap view.",
       },
     },
 
