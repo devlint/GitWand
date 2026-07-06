@@ -139,7 +139,7 @@ Build manuel : `cargo build --example parity-probe` → `target/debug/examples/p
 ## Dépendances Rust notables
 
 - `tauri 2.x` avec plugins séparés : `dialog`, `shell`, `global-shortcut`, `updater`, `process`
-- Pas de dépendances HTTP/async — Tauri gère la fenêtre, git est synchrone
+- Une seule dépendance HTTP/async : `reqwest` + `tokio`, tirés transitivement par `tauri-plugin-aptabase` (télémétrie de lancement anonyme, release-only). Le reste du backend reste synchrone.
 - `serde` / `serde_json` pour la sérialisation des types vers le frontend
 - `dirs 5` pour la résolution des chemins système
 - `base64 0.22` pour l'encodage des contenus binaires

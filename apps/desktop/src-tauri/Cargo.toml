@@ -76,16 +76,17 @@ git2 = { version = "0.20.4", default-features = false, features = ["vendored-lib
 # Windows Credential Manager on Windows.
 keyring = "2"
 
-# Lightweight blocking HTTP client for the anonymous launch-count ping.
-# No async/tokio dependency — runs in a detached thread. Only used in
-# release builds (cfg(not(debug_assertions))).
-ureq = { version = "2", default-features = false, features = ["tls", "json"] }
+# Anonymous launch telemetry via Aptabase (privacy-first analytics for
+# desktop/Tauri apps). Replaced the previous Umami ping: Umami Cloud
+# filters non-browser User-Agents and silently dropped every event
+# (HTTP 200 + `{"beep":"boop"}` decoy, nothing recorded). Aptabase
+# authenticates by App Key, so there is no UA/bot filtering. Only used in
+# release builds (cfg(not(debug_assertions))). Pulls in reqwest + tokio
+# transitively — see Task 5 measurement note in the migration plan.
+tauri-plugin-aptabase = "1.0.0"
 
 # Anonymous install ID generation (v4 random UUID, stored on first launch).
 uuid = { version = "1", features = ["v4"] }
-
-# Cross-platform system locale detection (macOS / Linux / Windows).
-sys-locale = "0.3"
 
 # ─── Release profile (P2.4) ──────────────────────────────────
 #
@@ -114,3 +115,17 @@ opt-level = 3
 inherits = "release"
 debug = true
 strip = false
+
+# ─── Patch: tauri-plugin-aptabase tokio runtime panic ────────
+#
+# Upstream 1.0.0 spawns via raw `tokio::spawn` in `src/client.rs` instead of
+# `tauri::async_runtime::spawn`, which panics at startup in release builds
+# ("there is no reactor running, must be called from the context of a
+# Tokio 1.x runtime") — see aptabase/tauri-plugin-aptabase#16 and #22. The
+# fix is queued upstream in PR #30 (unmerged as of this writing). Rather than
+# depend on a random third-party fork carrying that unreviewed PR, we
+# cherry-picked the exact one-line fix onto a fork under our own GitHub
+# account (`devlint/tauri-plugin-aptabase`, branch `fix/tokio-runtime-panic`)
+# with no other changes and no dependency bumps.
+[patch.crates-io]
+tauri-plugin-aptabase = { git = "https://github.com/devlint/tauri-plugin-aptabase", rev = "a868ab1db74b6ae6616389022680881a2c352e1c" }
