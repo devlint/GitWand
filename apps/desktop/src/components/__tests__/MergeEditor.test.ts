@@ -17,7 +17,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createApp, defineComponent, h, reactive, nextTick, type App } from "vue";
 import MergeEditor from "../MergeEditor.vue";
 import type { ConflictFile } from "../../composables/useGitWand";
-import type { ConflictHunk } from "@gitwand/core";
+import type { ConflictHunk, HunkResolution } from "@gitwand/core";
 
 class FakeResizeObserver {
   static instances: FakeResizeObserver[] = [];
@@ -242,5 +242,95 @@ describe("MergeEditor : bandeau baseEnriched", () => {
     mountWithFile(resolvedFile());
     await nextTick();
     expect(container.querySelector(".me-base-enriched-banner")).toBeNull();
+  });
+});
+
+// ─── ResolutionPreviewPanel (non_overlapping et autres types déjà auto-résolus) ──
+
+function nonOverlappingHunk(): ConflictHunk {
+  return {
+    baseLines: ["line1", "line2"],
+    oursLines: ["line1-changed", "line2"],
+    theirsLines: ["line1", "line2-changed"],
+    startLine: 2,
+    type: "non_overlapping",
+    confidence: {
+      score: 90,
+      label: "high",
+      dimensions: { typeClassification: 90, dataRisk: 20, scopeImpact: 0, fileFrequency: 0, baseAvailability: 100 },
+      boosters: [],
+      penalties: [],
+    },
+    explanation: "Les deux branches ont modifié des zones différentes du même bloc. Fusion automatique possible.",
+    trace: { steps: [], selected: "non_overlapping", summary: "test", hasBase: true },
+  };
+}
+
+function nonOverlappingResolution(): HunkResolution {
+  return {
+    hunk: nonOverlappingHunk(),
+    resolvedLines: ["line1-changed", "line2-changed"], // le vrai merge LCS — PAS ours+theirs concaténés
+    autoResolved: true,
+    resolutionReason: "Merge LCS 3-way réussi.",
+  };
+}
+
+function nonOverlappingFile(): ConflictFile {
+  const content = [
+    "<<<<<<< ours",
+    "line1-changed",
+    "line2",
+    "|||||||",
+    "line1",
+    "line2",
+    "=======",
+    "line1",
+    "line2-changed",
+    ">>>>>>> theirs",
+  ].join("\n");
+  return {
+    path: "src/config.ts",
+    content,
+    result: {
+      filePath: "src/config.ts",
+      mergedContent: null,
+      hunks: [nonOverlappingHunk()],
+      resolutions: [nonOverlappingResolution()],
+      stats: { totalConflicts: 1, autoResolved: 1 },
+      validation: { valid: true, errors: [] },
+    } as unknown as ConflictFile["result"],
+  };
+}
+
+describe("MergeEditor : panneau de résolution générique (non_overlapping)", () => {
+  it("affiche ResolutionPreviewPanel pour un hunk auto-résolu (non_overlapping)", () => {
+    mountDirect(nonOverlappingFile());
+    expect(container.querySelector(".resolution-preview-panel")).not.toBeNull();
+  });
+
+  it("masque la barre d'actions classique quand le panneau est affiché", () => {
+    mountDirect(nonOverlappingFile());
+    expect(container.querySelector(".inline-actions")).toBeNull();
+  });
+
+  it("émet resolveHunkCustom avec le VRAI resolvedLines (pas une concaténation ours+theirs)", async () => {
+    let emitted: unknown[] | null = null;
+    mountDirect(nonOverlappingFile(), {
+      onResolveHunkCustom: (...args: unknown[]) => { emitted = args; },
+    });
+    container
+      .querySelector<HTMLButtonElement>(".resolution-preview-panel__btn--accept")!
+      .click();
+    await nextTick();
+    // resolvedLines réel : ["line1-changed", "line2-changed"] — PAS
+    // ["line1-changed", "line2", "line1", "line2-changed"] (ce que ferait l'ancienne
+    // concaténation ours+theirs de resolveHunkManual("both")).
+    expect(emitted).toEqual(["src/config.ts", 0, "line1-changed\nline2-changed"]);
+  });
+
+  it("un hunk token_level_merge n'obtient pas ce panneau (a déjà le sien, TokenMergePanel)", () => {
+    const file = tokenMergeFile(); // type token_level_merge — exclu explicitement dans showResolutionPreviewFor
+    mountDirect(file);
+    expect(container.querySelector(".resolution-preview-panel")).toBeNull();
   });
 });

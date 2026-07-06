@@ -20,6 +20,7 @@ import {
 } from "../composables/useResolutionMemory";
 import LlmTracePanel from "./LlmTracePanel.vue";
 import TokenMergePanel from "./TokenMergePanel.vue";
+import ResolutionPreviewPanel from "./ResolutionPreviewPanel.vue";
 
 const { t, locale } = useI18n();
 const { isAvailable: aiAvailable, isLoading: aiLoading, lastError: aiError, suggest: aiSuggest } = useAIProvider();
@@ -271,6 +272,7 @@ const canResolve = computed(
 );
 
 const hunks = computed(() => props.file.result.hunks);
+const resolutions = computed(() => props.file.result.resolutions);
 
 const treeExplanation = computed(() => {
   const tr = props.file.tree;
@@ -387,6 +389,33 @@ function showTokenMergePanelFor(hunkIndex: number, hunk: ConflictHunk): boolean 
   if (hunk.type !== "token_level_merge") return false;
   if (!hunk.trace.tokenMergeTrace) return false;
   return !rejectedTokenMergeHunks.value.has(hunkIndex);
+}
+
+// ─── Generic resolution preview (non_overlapping, one_side_change, …) ───
+// Unlike llm_proposed/token_level_merge, these types are already pre-resolved
+// by the core (autoResolved: true) — accepting applies the SAME resolvedLines
+// the "Résoudre auto" button would, via resolveHunkCustom. This replaces the
+// classic action bar's "Accepter les deux" for these hunks, which previously
+// did a raw ours+theirs concatenation instead of the engine's real merge.
+const rejectedPreviewHunks = ref<Set<number>>(new Set());
+
+function onPreviewAccept(hunkIndex: number) {
+  const resolution = resolutions.value[hunkIndex];
+  if (!resolution?.resolvedLines) return;
+  emit("resolveHunkCustom", props.file.path, hunkIndex, resolution.resolvedLines.join("\n"));
+}
+
+function onPreviewReject(hunkIndex: number) {
+  const next = new Set(rejectedPreviewHunks.value);
+  next.add(hunkIndex);
+  rejectedPreviewHunks.value = next;
+}
+
+function showResolutionPreviewFor(hunkIndex: number, hunk: ConflictHunk): boolean {
+  if (hunk.type === "llm_proposed" || hunk.type === "token_level_merge") return false;
+  if (!resolutions.value[hunkIndex]?.autoResolved) return false;
+  if (!resolutions.value[hunkIndex]?.resolvedLines) return false;
+  return !rejectedPreviewHunks.value.has(hunkIndex);
 }
 
 /** Parse file content into displayable segments (code + conflict hunks). */
@@ -846,8 +875,21 @@ useResizeObserver(contentEl, drawMinimap);
               @reject="onTokenMergeReject"
             />
 
+            <!-- ── Résolution générique pré-calculée (non_overlapping, one_side_change, …) ── -->
+            <ResolutionPreviewPanel
+              v-if="hunkForSegment(seg) && seg.hunkIndex != null && showResolutionPreviewFor(seg.hunkIndex, hunkForSegment(seg)!)"
+              :resolved-lines="resolutions[seg.hunkIndex]!.resolvedLines!"
+              :hunk-id="seg.hunkIndex"
+              :explanation="hunkForSegment(seg)!.explanation"
+              @accept="onPreviewAccept"
+              @reject="onPreviewReject"
+            />
+
             <!-- ── VS Code-style inline action bar ─────────── -->
-            <div class="inline-actions" v-if="hunkForSegment(seg) && editingHunkIndex !== seg.hunkIndex">
+            <div
+              class="inline-actions"
+              v-if="hunkForSegment(seg) && editingHunkIndex !== seg.hunkIndex && !showResolutionPreviewFor(seg.hunkIndex!, hunkForSegment(seg)!)"
+            >
               <a
                 class="inline-action inline-action--current"
                 :class="{ 'inline-action--recommended': isRecommended(hunkForSegment(seg)!, 'ours') }"
