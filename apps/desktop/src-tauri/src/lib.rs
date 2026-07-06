@@ -13,6 +13,8 @@ pub(crate) use crate::git::*;
 
 use tauri::{Emitter, Manager};
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
+#[cfg(not(debug_assertions))]
+use tauri_plugin_aptabase::EventTracker;
 
 /// GitWand Desktop — Tauri backend
 ///
@@ -234,7 +236,12 @@ pub fn git_commit_submodule_changes_parity(
 
 // ─── Tauri entry point ─────────────────────────────────────
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// Aptabase App Key for anonymous launch telemetry. This is a public client
+/// identifier (format `A-EU-*` / `A-US-*`), not a secret — same trust model
+/// as the previous public Umami website ID. Only used in release builds.
+#[cfg(not(debug_assertions))]
+const APTABASE_APP_KEY: &str = "A-EU-3954664786";
+
 #[cfg(not(debug_assertions))]
 /// Returns the anonymous install ID, creating it on first launch.
 ///
@@ -261,6 +268,7 @@ fn get_or_create_install_id() -> String {
     id
 }
 
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // macOS GUI apps launched from Finder/Dock get a minimal launchd env
     // (no SSH_AUTH_SOCK, GH_TOKEN, XDG_*, or anything from ~/.zshrc).
@@ -271,14 +279,21 @@ pub fn run() {
     // No-op on Linux/Windows. See shell_env.rs for the full rationale.
     shell_env::init_login_shell_env();
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_clipboard_manager::init());
+
+    // Anonymous launch telemetry (release builds only). Registered
+    // conditionally because APTABASE_APP_KEY is compiled out in debug.
+    #[cfg(not(debug_assertions))]
+    let builder = builder.plugin(tauri_plugin_aptabase::Builder::new(APTABASE_APP_KEY).build());
+
+    builder
         .setup(|app| {
             // Register Cmd+Shift+G (macOS) / Ctrl+Shift+G (Linux/Windows)
             // to bring GitWand to the foreground from anywhere.
@@ -297,31 +312,24 @@ pub fn run() {
                 }
             })?;
 
-            // Anonymous launch telemetry via Umami — fire-and-forget POST.
-            // No personal data: UUID is random (not hardware-derived), IP is
-            // anonymised server-side by Umami. Skipped in debug builds.
+            // Anonymous launch telemetry via Aptabase — fire-and-forget.
+            // Replaced Umami: Umami Cloud filters non-browser User-Agents and
+            // silently dropped every event (HTTP 200 + `{"beep":"boop"}` decoy,
+            // nothing recorded), and spoofing a browser UA to bypass it was
+            // rejected as fragile / against Umami's ToS. Aptabase authenticates
+            // by App Key, so there is no UA/bot filtering. No personal data:
+            // install_id is a random UUID (not hardware-derived). The plugin
+            // auto-captures OS, app version and locale, so only install_id is
+            // sent as a custom property. track_event runs in the background.
+            // Skipped in debug builds.
             #[cfg(not(debug_assertions))]
-            std::thread::spawn(|| {
+            {
                 let install_id = get_or_create_install_id();
-                let language = sys_locale::get_locale().unwrap_or_else(|| "en".to_string());
-                let version = env!("CARGO_PKG_VERSION");
-                let _ = ureq::post("https://cloud.umami.is/api/send")
-                    .set("Content-Type", "application/json")
-                    .send_json(serde_json::json!({
-                        "payload": {
-                            "website": "171a9307-29ca-4524-8772-6187daacd9ca",
-                            "hostname": "app.gitwand.devlint.fr",
-                            "url": "/launch",
-                            "language": language,
-                            "name": "launch",
-                            "data": {
-                                "version": version,
-                                "install_id": install_id
-                            }
-                        },
-                        "type": "event"
-                    }));
-            });
+                let _ = app.track_event(
+                    "launch",
+                    Some(serde_json::json!({ "install_id": install_id })),
+                );
+            }
 
             Ok(())
         })
