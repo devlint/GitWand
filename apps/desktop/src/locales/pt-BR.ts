@@ -737,6 +737,7 @@ const ptBR: Locale = {
     treeBothDeleted: "Excluído em ambos os lados",
     treePreviewLabel: "Visualização do conteúdo mantido",
     reconstructedBanner: "Conflito reconstruído a partir do índice — o arquivo não tinha marcadores",
+    baseEnrichedBanner: "Base ancestral comum recuperada a partir do índice do git",
     markerlessBadge: "sem marcadores",
     markerlessTitle: "Conflito no índice, sem marcadores no arquivo",
     markerlessExplanation: "O Git registra um conflito para este arquivo, mas a cópia de trabalho não tem marcadores e não corresponde a nenhum dos lados.",
@@ -1689,6 +1690,14 @@ const ptBR: Locale = {
       accept: "Aceitar",
       accepted: "Aceito",
       details: "Detalhes do rastro",
+    },
+    tokenLevelMerge: {
+      title: "Fusão fina proposta (linha + token)",
+      pass1Lines: "{0} linha(s) resolvida(s) linha a linha.",
+      pass2Lines: "{0} linha(s) mesclada(s) token a token.",
+      accept: "Aceitar",
+      reject: "Rejeitar → resolver manualmente",
+      accepted: "Aceito",
     },
   },
 

@@ -787,6 +787,12 @@ useResizeObserver(contentEl, drawMinimap);
         </svg>
         <span>{{ t('merge.reconstructedBanner') }}</span>
       </div>
+      <div v-if="file.baseEnriched" class="me-base-enriched-banner">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+          <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm.75 10.5h-1.5v-1.5h1.5v1.5zm0-3h-1.5V4.5h1.5V8.5z"/>
+        </svg>
+        <span>{{ t('merge.baseEnrichedBanner') }}</span>
+      </div>
     <div
       class="editor-content"
       ref="contentEl"
@@ -1762,6 +1768,17 @@ useResizeObserver(contentEl, drawMinimap);
 
 /* ─── Reconstructed-from-index info banner ─────────────── */
 .me-reconstructed-banner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--color-text-secondary, #888);
+  background: var(--color-bg-secondary, rgba(0,0,0,0.03));
+  border-bottom: 1px solid var(--color-border, #e0e0e0);
+}
+
+.me-base-enriched-banner {
   display: flex;
   align-items: center;
   gap: 6px;

@@ -741,6 +741,7 @@ const fr: Locale = {
     treeBothDeleted: "Supprimé des deux côtés",
     treePreviewLabel: "Aperçu du contenu conservé",
     reconstructedBanner: "Conflit reconstruit depuis l'index — le fichier n'avait pas de marqueurs",
+    baseEnrichedBanner: "Base ancêtre récupérée depuis l'index git",
     markerlessBadge: "sans marqueurs",
     markerlessTitle: "Conflit dans l'index, pas de marqueurs dans le fichier",
     markerlessExplanation: "Git enregistre un conflit pour ce fichier, mais la copie de travail n'a pas de marqueurs et ne correspond à aucun des deux côtés.",

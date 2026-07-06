@@ -748,6 +748,7 @@ const en = {
     treeBothDeleted: "Deleted on both sides",
     treePreviewLabel: "Preview of the kept content",
     reconstructedBanner: "Conflict reconstructed from the index — the file had no markers",
+    baseEnrichedBanner: "Common-ancestor base recovered from the git index",
     markerlessBadge: "no markers",
     markerlessTitle: "Conflict in the index, no markers in the file",
     markerlessExplanation: "Git records a conflict for this file, but the working copy has no conflict markers and matches neither side.",

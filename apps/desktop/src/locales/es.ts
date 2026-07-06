@@ -736,6 +736,7 @@ const es: Locale = {
     treeBothDeleted: "Eliminado en ambos lados",
     treePreviewLabel: "Vista previa del contenido conservado",
     reconstructedBanner: "Conflicto reconstruido desde el índice — el archivo no tenía marcadores",
+    baseEnrichedBanner: "Base ancestro común recuperada desde el índice de git",
     markerlessBadge: "sin marcadores",
     markerlessTitle: "Conflicto en el índice, sin marcadores en el archivo",
     markerlessExplanation: "Git registra un conflicto para este archivo, pero la copia de trabajo no tiene marcadores y no coincide con ningún lado.",

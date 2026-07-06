@@ -212,3 +212,35 @@ describe("MergeEditor : panneau token_level_merge", () => {
     expect(container.querySelector(".token-merge-panel")).toBeNull();
   });
 });
+
+// ─── baseEnriched banner ──────────────────────────────────────────────
+
+function baseEnrichedFile(): ConflictFile {
+  return {
+    path: "src/foo.ts",
+    content: "line one\nline two\n",
+    result: {
+      filePath: "src/foo.ts",
+      mergedContent: "line one\nline two\n",
+      hunks: [],
+      resolutions: [],
+      stats: { totalConflicts: 0, autoResolved: 0 },
+      validation: { valid: true, errors: [] },
+    } as unknown as ConflictFile["result"],
+    baseEnriched: true,
+  };
+}
+
+describe("MergeEditor : bandeau baseEnriched", () => {
+  it("affiche le bandeau quand baseEnriched est true", async () => {
+    mountWithFile(baseEnrichedFile());
+    await nextTick();
+    expect(container.querySelector(".me-base-enriched-banner")).not.toBeNull();
+  });
+
+  it("n'affiche pas le bandeau quand baseEnriched est absent", async () => {
+    mountWithFile(resolvedFile());
+    await nextTick();
+    expect(container.querySelector(".me-base-enriched-banner")).toBeNull();
+  });
+});
