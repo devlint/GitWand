@@ -347,7 +347,7 @@ export interface AppSettings {
   filesMode: FilesMode;
   /** Layout to restore when leaving fullscreen. Never "fullscreen" itself. */
   filesPrevMode: Exclude<FilesMode, "fullscreen">;
-  /** Hide the File Explorer when switching views from the dock. Default: false. */
+  /** Hide the File Explorer when switching views from the dock. Default: true. */
   filesHideOnNav: boolean;
 }
 
@@ -425,13 +425,13 @@ export const defaultAppSettings: AppSettings = {
   terminalShell:                     "",
   terminalMode:                      "bottom",
   terminalPrevMode:                  "bottom",
-  terminalHideOnNav:                 false,
+  terminalHideOnNav:                 true,
   terminalContextMenu:               true,
   terminalCopyOnSelect:              false,
   terminalPasteOnRightClick:         false,
   filesMode:                         "floating",
   filesPrevMode:                     "floating",
-  filesHideOnNav:                    false,
+  filesHideOnNav:                    true,
 };
 
 const SETTINGS_KEY = "gitwand-settings";
