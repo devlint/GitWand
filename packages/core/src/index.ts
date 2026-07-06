@@ -120,6 +120,9 @@ export type {
   // v2.6 — Refactoring-aware merge
   RefactoringKind,
   Refactoring,
+  // v2.7 — Token-level merge
+  TokenMergeTrace,
+  TokenMergeLineDetail,
 } from "./types.js";
 
 // v2.6 — Refactoring-aware merge pipeline
