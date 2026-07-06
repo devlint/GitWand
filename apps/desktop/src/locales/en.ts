@@ -423,11 +423,6 @@ const en = {
     graphSearchFilterTitle: "Show only matching commits",
     filterCurrentBranch: "Current branch only",
     filterMineCommits: "My commits only",
-    dateSepToday: "Today",
-    dateSepYesterday: "Yesterday",
-    dateSepThisWeek: "This week",
-    dateSepThisMonth: "This month",
-    dateSepOlder: "Older",
   },
   commit: {
     summary: "Summary",
