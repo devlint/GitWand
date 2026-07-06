@@ -2,9 +2,7 @@
 import { computed, inject, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import type { GitLogEntry, GitBranch } from "../utils/backend";
 import { computeDagLayout, parseRefs, type DagLayout, type DagNode } from "../utils/dagLayout";
-import { dateBucket, type DateBucket } from "../utils/dateBucket";
 import { useI18n } from "../composables/useI18n";
-import type { LocaleKey } from "../locales";
 import Avatar from "./Avatar.vue";
 import { filterCommitsLocal } from "../composables/useCommitSearch";
 import { useWorkspaceScope } from "../composables/useWorkspaceScope";
@@ -615,29 +613,6 @@ const layout = computed<DagLayout>(() => {
     _pinSecondaryHashes.length > 0 ? _pinSecondaryHashes : undefined,
   );
   return _cachedLayout;
-});
-
-// ─── Date separators ─────────────────────────────────
-const BUCKET_KEY: Record<DateBucket, LocaleKey> = {
-  today: "log.dateSepToday",
-  yesterday: "log.dateSepYesterday",
-  thisWeek: "log.dateSepThisWeek",
-  thisMonth: "log.dateSepThisMonth",
-  older: "log.dateSepOlder",
-};
-
-const dateSeparators = computed(() => {
-  const now = Date.now();
-  const seps: { index: number; label: string }[] = [];
-  let lastBucket: DateBucket | "" = "";
-  renderedCommits.value.forEach((commit, i) => {
-    const bucket = dateBucket(new Date(commit.date).getTime(), now);
-    if (bucket !== lastBucket) {
-      seps.push({ index: i, label: t(BUCKET_KEY[bucket]) });
-      lastBucket = bucket;
-    }
-  });
-  return seps;
 });
 
 // ─── Commit search / highlight ───────────────────────
@@ -1478,16 +1453,6 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
               <span>{{ formatDate(vc.entry.date) }}</span>
             </span>
           </template>
-        </div>
-        <!-- Date separators — overlaid, pointer-events: none, zero layout impact -->
-        <div
-          v-for="sep in dateSeparators"
-          :key="'datesep-' + sep.index"
-          class="cg-date-sep"
-          :style="{ top: sep.index * ROW_H - 1 + 'px' }"
-          aria-hidden="true"
-        >
-          <span class="cg-date-sep-label">{{ sep.label }}</span>
         </div>
       </div>
       <div v-if="hasMore" class="cg-load-more">
@@ -2578,29 +2543,5 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
 
 @keyframes cg-spin { to { transform: rotate(360deg); } }
 
-.cg-date-sep {
-  position: absolute;
-  left: 0;
-  right: 0;
-  height: 1px;
-  pointer-events: none;
-  z-index: 2;
-  border-top: 1px solid var(--color-border);
-  opacity: 0.35;
-}
-
-.cg-date-sep-label {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  top: -9px;
-  font-size: 10px;
-  line-height: 1;
-  color: var(--color-muted);
-  background: var(--color-bg);
-  padding: 0 4px;
-  white-space: nowrap;
-  pointer-events: none;
-}
 </style>
 

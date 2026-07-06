@@ -416,11 +416,6 @@ const fr: Locale = {
     graphSearchFilterTitle: "Afficher uniquement les commits correspondants",
     filterCurrentBranch: "Branche courante uniquement",
     filterMineCommits: "Mes commits uniquement",
-    dateSepToday: "Aujourd'hui",
-    dateSepYesterday: "Hier",
-    dateSepThisWeek: "Cette semaine",
-    dateSepThisMonth: "Ce mois-ci",
-    dateSepOlder: "Plus ancien",
   },
   commit: {
     summary: "R\u00e9sum\u00e9",

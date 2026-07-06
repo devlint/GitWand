@@ -412,11 +412,6 @@ const ptBR: Locale = {
     graphSearchFilterTitle: "Mostrar apenas os commits correspondentes",
     filterCurrentBranch: "Apenas branch atual",
     filterMineCommits: "Apenas meus commits",
-    dateSepToday: "Hoje",
-    dateSepYesterday: "Ontem",
-    dateSepThisWeek: "Esta semana",
-    dateSepThisMonth: "Este mês",
-    dateSepOlder: "Mais antigo",
   },
   commit: {
     summary: "Resumo",

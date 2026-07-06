@@ -411,11 +411,6 @@ const zhCN: Locale = {
     graphSearchFilterTitle: "仅显示匹配的提交",
     filterCurrentBranch: "仅当前分支",
     filterMineCommits: "仅我的提交",
-    dateSepToday: "今天",
-    dateSepYesterday: "昨天",
-    dateSepThisWeek: "本周",
-    dateSepThisMonth: "本月",
-    dateSepOlder: "更早",
   },
   commit: {
     summary: "概要",
