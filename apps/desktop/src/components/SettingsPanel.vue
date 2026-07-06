@@ -207,7 +207,7 @@ const defaultSettings: Settings = {
   commitMessageLang: "",
   prAiLanguage: "english",
   diffMode: "inline",
-  pullMode: "merge",
+  pullMode: "rebase",
   switchBehavior: "ask",
   fontSize: 12,
   tabSize: 4,

@@ -362,7 +362,7 @@ export const defaultAppSettings: AppSettings = {
   defaultBranch: "main",
   commitSignature: true,
   diffMode: "inline",
-  pullMode: "merge",
+  pullMode: "rebase",
   switchBehavior: "ask",
   fontSize: 12,
   tabSize: 4,
