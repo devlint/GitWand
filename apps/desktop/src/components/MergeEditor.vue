@@ -21,6 +21,10 @@ import {
 import LlmTracePanel from "./LlmTracePanel.vue";
 import TokenMergePanel from "./TokenMergePanel.vue";
 import ResolutionPreviewPanel from "./ResolutionPreviewPanel.vue";
+// Not lazy-loaded: this is a thin wrapper around BaseModal (already always-eager
+// per the P1.2 perf exception list) with no heavy additional deps — same static-import
+// treatment as its sibling hunk panels (LlmTracePanel, TokenMergePanel, ResolutionPreviewPanel).
+import ResolveAutoSummaryModal from "./ResolveAutoSummaryModal.vue";
 
 const { t, locale } = useI18n();
 const { isAvailable: aiAvailable, isLoading: aiLoading, lastError: aiError, suggest: aiSuggest } = useAIProvider();
@@ -418,6 +422,20 @@ function showResolutionPreviewFor(hunkIndex: number, hunk: ConflictHunk): boolea
   return !rejectedPreviewHunks.value.has(hunkIndex);
 }
 
+// ─── "Résoudre auto" summary confirmation ───────────────
+const showResolveAutoSummary = ref(false);
+
+const autoResolutionsSummary = computed(() =>
+  resolutions.value
+    .map((r, hunkIndex) => ({ hunkIndex, resolvedLines: r.resolvedLines, autoResolved: r.autoResolved }))
+    .filter((r) => r.autoResolved && r.resolvedLines !== null) as Array<{ hunkIndex: number; resolvedLines: string[] }>,
+);
+
+function confirmResolveAuto() {
+  showResolveAutoSummary.value = false;
+  emit("resolve", props.file.path);
+}
+
 /** Parse file content into displayable segments (code + conflict hunks). */
 interface Segment {
   type: "code" | "conflict";
@@ -706,7 +724,7 @@ useResizeObserver(contentEl, drawMinimap);
       <button
         v-if="canResolve"
         class="btn btn--resolve"
-        @click="emit('resolve', file.path)"
+        @click="showResolveAutoSummary = true"
         :aria-label="t('merge.resolveAutoLabel')"
       >
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -1104,6 +1122,13 @@ useResizeObserver(contentEl, drawMinimap);
     </div>
       </div><!-- /merge-body-row -->
     </div><!-- /merge-body -->
+
+    <ResolveAutoSummaryModal
+      v-if="showResolveAutoSummary"
+      :resolutions="autoResolutionsSummary"
+      @confirm="confirmResolveAuto"
+      @cancel="showResolveAutoSummary = false"
+    />
   </div>
 </template>
 

@@ -334,3 +334,29 @@ describe("MergeEditor : panneau de résolution générique (non_overlapping)", (
     expect(container.querySelector(".resolution-preview-panel")).toBeNull();
   });
 });
+
+// ─── ResolveAutoSummaryModal (bouton global "Résoudre auto") ─────────────
+// BaseModal rend via <Teleport to="body"> — les assertions interrogent
+// document.body, pas `container` (qui reste vide pour le contenu de la modale).
+
+describe("MergeEditor : modale récapitulative Résoudre auto", () => {
+  it("ouvre la modale au clic sur Résoudre auto, n'émet pas resolve immédiatement", async () => {
+    let resolved = false;
+    mountDirect(nonOverlappingFile(), { onResolve: () => { resolved = true; } });
+    container.querySelector<HTMLButtonElement>(".btn--resolve")!.click();
+    await nextTick();
+    expect(resolved).toBe(false);
+    expect(document.body.querySelector(".bm-btn--primary")).not.toBeNull();
+    expect(document.body.textContent).toContain("line1-changed");
+  });
+
+  it("émet resolve après confirmation dans la modale", async () => {
+    let resolvedPath: string | null = null;
+    mountDirect(nonOverlappingFile(), { onResolve: (p: string) => { resolvedPath = p; } });
+    container.querySelector<HTMLButtonElement>(".btn--resolve")!.click();
+    await nextTick();
+    document.body.querySelector<HTMLButtonElement>(".bm-btn--primary")!.click();
+    await nextTick();
+    expect(resolvedPath).toBe("src/config.ts");
+  });
+});
