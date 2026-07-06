@@ -76,16 +76,17 @@ git2 = { version = "0.20.4", default-features = false, features = ["vendored-lib
 # Windows Credential Manager on Windows.
 keyring = "2"
 
-# Lightweight blocking HTTP client for the anonymous launch-count ping.
-# No async/tokio dependency — runs in a detached thread. Only used in
-# release builds (cfg(not(debug_assertions))).
-ureq = { version = "2", default-features = false, features = ["tls", "json"] }
+# Anonymous launch telemetry via Aptabase (privacy-first analytics for
+# desktop/Tauri apps). Replaced the previous Umami ping: Umami Cloud
+# filters non-browser User-Agents and silently dropped every event
+# (HTTP 200 + `{"beep":"boop"}` decoy, nothing recorded). Aptabase
+# authenticates by App Key, so there is no UA/bot filtering. Only used in
+# release builds (cfg(not(debug_assertions))). Pulls in reqwest + tokio
+# transitively — see Task 5 measurement note in the migration plan.
+tauri-plugin-aptabase = "1.0.0"
 
 # Anonymous install ID generation (v4 random UUID, stored on first launch).
 uuid = { version = "1", features = ["v4"] }
-
-# Cross-platform system locale detection (macOS / Linux / Windows).
-sys-locale = "0.3"
 
 # ─── Release profile (P2.4) ──────────────────────────────────
 #
