@@ -19,6 +19,7 @@ import {
   type ResolutionMemoryEntry,
 } from "../composables/useResolutionMemory";
 import LlmTracePanel from "./LlmTracePanel.vue";
+import TokenMergePanel from "./TokenMergePanel.vue";
 
 const { t, locale } = useI18n();
 const { isAvailable: aiAvailable, isLoading: aiLoading, lastError: aiError, suggest: aiSuggest } = useAIProvider();
@@ -361,6 +362,33 @@ function onLlmReject(hunkId: string | number) {
   }
 }
 
+// ─── v2.7 — token_level_merge proposal panel ────────────
+// Unlike llm_proposed, the core NEVER pre-computes resolvedLines for this
+// type (see resolver/assemble.ts) — accepting emits resolveHunkCustom with
+// the proposed mergedLines, going through the exact same pathway as a
+// manual edit or an AI suggestion. Rejecting just hides the panel — the
+// hunk falls back to the normal 3-way manual view already rendered below.
+const rejectedTokenMergeHunks = ref<Set<number>>(new Set());
+
+function onTokenMergeAccept(hunkIndex: number) {
+  const hunk = hunks.value[hunkIndex];
+  const proposal = hunk?.trace.tokenMergeTrace;
+  if (!proposal) return;
+  emit("resolveHunkCustom", props.file.path, hunkIndex, proposal.mergedLines.join("\n"));
+}
+
+function onTokenMergeReject(hunkIndex: number) {
+  const next = new Set(rejectedTokenMergeHunks.value);
+  next.add(hunkIndex);
+  rejectedTokenMergeHunks.value = next;
+}
+
+function showTokenMergePanelFor(hunkIndex: number, hunk: ConflictHunk): boolean {
+  if (hunk.type !== "token_level_merge") return false;
+  if (!hunk.trace.tokenMergeTrace) return false;
+  return !rejectedTokenMergeHunks.value.has(hunkIndex);
+}
+
 /** Parse file content into displayable segments (code + conflict hunks). */
 interface Segment {
   type: "code" | "conflict";
@@ -451,7 +479,7 @@ function hunkForSegment(seg: Segment): ConflictHunk | undefined {
 }
 
 function isAutoResolvable(hunk: ConflictHunk): boolean {
-  return hunk.type !== "complex" && hunk.confidence.label !== "low";
+  return hunk.type !== "complex" && hunk.type !== "token_level_merge" && hunk.confidence.label !== "low";
 }
 
 /**
@@ -509,7 +537,7 @@ const contentEl = ref<HTMLElement | null>(null);
 const minimapCanvas = ref<HTMLCanvasElement | null>(null);
 const MINIMAP_WIDTH = 48;
 
-type MinimapLineKind = "code" | "conflict-auto" | "conflict-manual";
+type MinimapLineKind = "code" | "conflict-auto" | "conflict-manual" | "conflict-proposed";
 
 /** Flattened list of line kinds for minimap rendering, one entry per raw line. */
 const allLineKinds = computed<MinimapLineKind[]>(() => {
@@ -520,7 +548,9 @@ const allLineKinds = computed<MinimapLineKind[]>(() => {
     } else {
       const hunk = seg.hunkIndex != null ? hunks.value[seg.hunkIndex] : undefined;
       const kind: MinimapLineKind =
-        hunk && isAutoResolvable(hunk) ? "conflict-auto" : "conflict-manual";
+        hunk && hunk.type === "token_level_merge" ? "conflict-proposed"
+        : hunk && isAutoResolvable(hunk) ? "conflict-auto"
+        : "conflict-manual";
       for (let i = 0; i < seg.lines.length; i++) kinds.push(kind);
     }
   }
@@ -551,9 +581,9 @@ function drawMinimap() {
     const k = kinds[i];
     if (k === "code") continue; // skip for a cleaner look
     ctx.fillStyle =
-      k === "conflict-auto"
-        ? "rgba(34, 197, 94, 0.6)" // green — auto-resolvable
-        : "rgba(239, 68, 68, 0.6)"; // red — needs manual attention
+      k === "conflict-auto" ? "rgba(34, 197, 94, 0.6)" // green — auto-resolvable
+      : k === "conflict-proposed" ? "rgba(217, 119, 6, 0.6)" // amber — proposed, awaiting confirmation
+      : "rgba(239, 68, 68, 0.6)"; // red — needs manual attention
     ctx.fillRect(0, i * lineH, MINIMAP_WIDTH, Math.max(lineH, 2));
   }
 
@@ -757,6 +787,12 @@ useResizeObserver(contentEl, drawMinimap);
         </svg>
         <span>{{ t('merge.reconstructedBanner') }}</span>
       </div>
+      <div v-if="file.baseEnriched" class="me-base-enriched-banner">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+          <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm.75 10.5h-1.5v-1.5h1.5v1.5zm0-3h-1.5V4.5h1.5V8.5z"/>
+        </svg>
+        <span>{{ t('merge.baseEnrichedBanner') }}</span>
+      </div>
     <div
       class="editor-content"
       ref="contentEl"
@@ -798,6 +834,15 @@ useResizeObserver(contentEl, drawMinimap);
               :accepted="acceptedLlmHunks.has(seg.hunkIndex)"
               @accept="onLlmAccept"
               @reject="onLlmReject"
+            />
+
+            <!-- ── v2.7 token_level_merge proposal (when not rejected) ────── -->
+            <TokenMergePanel
+              v-if="hunkForSegment(seg) && seg.hunkIndex != null && showTokenMergePanelFor(seg.hunkIndex, hunkForSegment(seg)!)"
+              :trace="hunkForSegment(seg)!.trace.tokenMergeTrace!"
+              :hunk-id="seg.hunkIndex"
+              @accept="onTokenMergeAccept"
+              @reject="onTokenMergeReject"
             />
 
             <!-- ── VS Code-style inline action bar ─────────── -->
@@ -1723,6 +1768,17 @@ useResizeObserver(contentEl, drawMinimap);
 
 /* ─── Reconstructed-from-index info banner ─────────────── */
 .me-reconstructed-banner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--color-text-secondary, #888);
+  background: var(--color-bg-secondary, rgba(0,0,0,0.03));
+  border-bottom: 1px solid var(--color-border, #e0e0e0);
+}
+
+.me-base-enriched-banner {
   display: flex;
   align-items: center;
   gap: 6px;

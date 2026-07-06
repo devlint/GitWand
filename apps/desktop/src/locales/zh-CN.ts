@@ -726,6 +726,7 @@ const zhCN: Locale = {
     treeBothDeleted: "两侧均已删除",
     treePreviewLabel: "保留内容的预览",
     reconstructedBanner: "冲突从索引重建 — 文件中没有冲突标记",
+    baseEnrichedBanner: "已从 git 索引恢复共同祖先基线",
     markerlessBadge: "无标记",
     markerlessTitle: "索引中有冲突，文件中没有标记",
     markerlessExplanation: "Git 为此文件记录了冲突，但工作副本没有冲突标记，且与任何一方都不匹配。",
@@ -1674,6 +1675,14 @@ const zhCN: Locale = {
       accept: "接受",
       accepted: "已接受",
       details: "追踪详情",
+    },
+    tokenLevelMerge: {
+      title: "提议的精细合并（行 + 词法单元）",
+      pass1Lines: "{0} 行已逐行解决。",
+      pass2Lines: "{0} 行已逐词法单元合并。",
+      accept: "接受",
+      reject: "拒绝 → 手动解决",
+      accepted: "已接受",
     },
   },
 

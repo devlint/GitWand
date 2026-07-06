@@ -17,6 +17,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createApp, defineComponent, h, reactive, nextTick, type App } from "vue";
 import MergeEditor from "../MergeEditor.vue";
 import type { ConflictFile } from "../../composables/useGitWand";
+import type { ConflictHunk } from "@gitwand/core";
 
 class FakeResizeObserver {
   static instances: FakeResizeObserver[] = [];
@@ -115,5 +116,131 @@ describe("MergeEditor minimap ResizeObserver", () => {
     expect(contentEl).not.toBeNull();
     expect(FakeResizeObserver.instances).toHaveLength(1);
     expect(FakeResizeObserver.instances[0].observedElements).toContain(contentEl);
+  });
+});
+
+// ─── token_level_merge panel ──────────────────────────────────────────
+
+function tokenMergeHunk(): ConflictHunk {
+  return {
+    baseLines: ['<div class="a b">'],
+    oursLines: ['<div class="a2 b">'],
+    theirsLines: ['<div class="a b2">'],
+    startLine: 2,
+    type: "token_level_merge",
+    confidence: {
+      score: 62,
+      label: "medium",
+      dimensions: { typeClassification: 70, dataRisk: 38, scopeImpact: 0, fileFrequency: 0, baseAvailability: 0 },
+      boosters: [],
+      penalties: [],
+    },
+    explanation: "Fusion proposée : 0 ligne résolue ligne par ligne, 1 ligne fusionnée token par token.",
+    trace: {
+      steps: [],
+      selected: "token_level_merge",
+      summary: "test",
+      hasBase: true,
+      tokenMergeTrace: {
+        mergedLines: ['<div class="a2 b2">'],
+        pass1Count: 0,
+        pass2Count: 1,
+        lineDetails: [{ lineIndex: 0, resolvedBy: "pass2", resolvedLine: '<div class="a2 b2">' }],
+      },
+    },
+  };
+}
+
+function tokenMergeFile(): ConflictFile {
+  const content = [
+    "line before",
+    "<<<<<<< ours",
+    '<div class="a2 b">',
+    "|||||||",
+    '<div class="a b">',
+    "=======",
+    '<div class="a b2">',
+    ">>>>>>> theirs",
+    "line after",
+  ].join("\n");
+  return {
+    path: "src/foo.html",
+    content,
+    result: {
+      filePath: "src/foo.html",
+      mergedContent: null,
+      hunks: [tokenMergeHunk()],
+      resolutions: [{ hunk: tokenMergeHunk(), resolvedLines: null, autoResolved: false, resolutionReason: "test" }],
+      stats: { totalConflicts: 1, autoResolved: 0 },
+      validation: { valid: true, errors: [] },
+    } as unknown as ConflictFile["result"],
+  };
+}
+
+/** Direct mount (bypasses mountWithFile's reactive wrapper) so `onXxx` emit listeners can be passed. */
+function mountDirect(file: ConflictFile, extraProps: Record<string, unknown> = {}) {
+  container = document.createElement("div");
+  document.body.appendChild(container);
+  app = createApp(MergeEditor, { file, ...extraProps });
+  app.mount(container);
+}
+
+describe("MergeEditor : panneau token_level_merge", () => {
+  it("affiche TokenMergePanel pour un hunk token_level_merge", () => {
+    mountDirect(tokenMergeFile());
+    expect(container.querySelector(".token-merge-panel")).not.toBeNull();
+  });
+
+  it("émet resolveHunkCustom avec les mergedLines au clic sur Accepter", async () => {
+    let emitted: unknown[] | null = null;
+    mountDirect(tokenMergeFile(), {
+      onResolveHunkCustom: (...args: unknown[]) => { emitted = args; },
+    });
+    container
+      .querySelector<HTMLButtonElement>(".token-merge-panel__btn--accept")!
+      .click();
+    await nextTick();
+    expect(emitted).toEqual(["src/foo.html", 0, '<div class="a2 b2">']);
+  });
+
+  it("rejeter masque le panneau et bascule vers l'affichage manuel", async () => {
+    mountDirect(tokenMergeFile());
+    container
+      .querySelector<HTMLButtonElement>(".token-merge-panel__btn--reject")!
+      .click();
+    await nextTick();
+    expect(container.querySelector(".token-merge-panel")).toBeNull();
+  });
+});
+
+// ─── baseEnriched banner ──────────────────────────────────────────────
+
+function baseEnrichedFile(): ConflictFile {
+  return {
+    path: "src/foo.ts",
+    content: "line one\nline two\n",
+    result: {
+      filePath: "src/foo.ts",
+      mergedContent: "line one\nline two\n",
+      hunks: [],
+      resolutions: [],
+      stats: { totalConflicts: 0, autoResolved: 0 },
+      validation: { valid: true, errors: [] },
+    } as unknown as ConflictFile["result"],
+    baseEnriched: true,
+  };
+}
+
+describe("MergeEditor : bandeau baseEnriched", () => {
+  it("affiche le bandeau quand baseEnriched est true", async () => {
+    mountWithFile(baseEnrichedFile());
+    await nextTick();
+    expect(container.querySelector(".me-base-enriched-banner")).not.toBeNull();
+  });
+
+  it("n'affiche pas le bandeau quand baseEnriched est absent", async () => {
+    mountWithFile(resolvedFile());
+    await nextTick();
+    expect(container.querySelector(".me-base-enriched-banner")).toBeNull();
   });
 });
