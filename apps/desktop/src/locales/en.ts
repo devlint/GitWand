@@ -1723,6 +1723,14 @@ const en = {
       accepted: "Accepted",
       details: "Trace details",
     },
+    tokenLevelMerge: {
+      title: "Fine-grained merge proposed (line + token)",
+      pass1Lines: "{0} line(s) resolved line-by-line.",
+      pass2Lines: "{0} line(s) merged token-by-token.",
+      accept: "Accept",
+      reject: "Reject \u2192 resolve manually",
+      accepted: "Accepted",
+    },
   },
 
   // ─── PR inline diff — AI review ─────────────────────────

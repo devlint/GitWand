@@ -1690,6 +1690,14 @@ const es: Locale = {
       accepted: "Aceptado",
       details: "Detalles de la traza",
     },
+    tokenLevelMerge: {
+      title: "Fusión fina propuesta (línea + token)",
+      pass1Lines: "{0} línea(s) resuelta(s) línea por línea.",
+      pass2Lines: "{0} línea(s) fusionada(s) token por token.",
+      accept: "Aceptar",
+      reject: "Rechazar → resolver manualmente",
+      accepted: "Aceptado",
+    },
   },
 
   // ─── PR inline diff — AI review ─────────────────────────
