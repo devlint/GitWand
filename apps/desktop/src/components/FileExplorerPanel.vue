@@ -6,6 +6,8 @@ import { useSettings } from "../composables/useSettings";
 import { useI18n } from "../composables/useI18n";
 import { useDraggableResizable } from "../composables/useDraggableResizable";
 import type { RepoFileEntry } from "../composables/useGitRepo";
+import { getGitBlame } from "../utils/backend";
+import { buildBlameModel, type BlameGutterEntry } from "../composables/useBlameGutter";
 import type { EditorView as EditorViewType } from "@codemirror/view";
 import type { EditorState as EditorStateType, Extension } from "@codemirror/state";
 
@@ -128,9 +130,21 @@ const docStates = new Map<number, EditorStateType>();
 let editableCompartment: InstanceType<typeof import("@codemirror/state").Compartment> | null = null;
 const editLocked = ref(true);
 
+// ── Blame gutter (opt-in, per tab) ──
+// A shared Compartment (like editableCompartment) holds either an empty
+// extension (blame off) or a gutter built from the active tab's blame model.
+// Blame data is fetched once per tab via getGitBlame and cached in blameModels;
+// it reflects the *committed* file, so editing a tab clears its blame (see
+// updateListenerFor) — the button is also disabled while a tab is dirty.
+let blameCompartment: InstanceType<typeof import("@codemirror/state").Compartment> | null = null;
+let gutterFn: typeof import("@codemirror/view").gutter | null = null;
+let GutterMarkerCtor: typeof import("@codemirror/view").GutterMarker | null = null;
+const blameEnabled = ref(false);
+const blameModels = new Map<number, Map<number, BlameGutterEntry>>();
+
 async function ensureCodeMirrorLibs() {
   if (EditorViewCtor) return;
-  const [{ EditorView }, { EditorState, Compartment }, cmMeta, { oneDark: theme }, { undo }] = await Promise.all([
+  const [{ EditorView, gutter, GutterMarker }, { EditorState, Compartment }, cmMeta, { oneDark: theme }, { undo }] = await Promise.all([
     import("@codemirror/view"),
     import("@codemirror/state"),
     import("codemirror"),
@@ -143,6 +157,81 @@ async function ensureCodeMirrorLibs() {
   oneDark = theme;
   undoCommand = undo;
   editableCompartment = new Compartment();
+  blameCompartment = new Compartment();
+  gutterFn = gutter;
+  GutterMarkerCtor = GutterMarker;
+}
+
+// Build a CodeMirror gutter extension from a `finalLine → entry` blame model.
+// One marker per source line; continuation lines of a same-commit run render
+// blank (entry.showLabel === false) so the author shows once per block.
+function blameGutterExtension(model: Map<number, BlameGutterEntry>): Extension {
+  const GM = GutterMarkerCtor!;
+  class BlameMarker extends GM {
+    constructor(public entry: BlameGutterEntry) {
+      super();
+    }
+    eq(other: BlameMarker) {
+      return other.entry.hashFull === this.entry.hashFull && other.entry.showLabel === this.entry.showLabel;
+    }
+    toDOM() {
+      const span = document.createElement("span");
+      span.className = "cm-blame-marker";
+      span.textContent = this.entry.showLabel ? this.entry.label : "";
+      span.title = this.entry.title;
+      return span;
+    }
+  }
+  return gutterFn!({
+    class: "cm-blame-gutter",
+    // Rendered in CodeMirror's separate `.cm-gutters-after` container, to the
+    // right of .cm-content, instead of alongside the line-number gutter on
+    // the left — appearing/resizing the blame column then never shifts the
+    // code's horizontal position (see review discussion on PR #108).
+    side: "after",
+    lineMarker(view, blockLine) {
+      const ln = view.state.doc.lineAt(blockLine.from).number;
+      const entry = model.get(ln);
+      return entry ? new BlameMarker(entry) : null;
+    },
+    lineMarkerChange: () => false,
+  });
+}
+
+// Fetch + cache the blame model for a tab. Returns false on failure or if the
+// user switched tabs while the (async) blame was in flight.
+async function ensureBlameForTab(tab: FileTab): Promise<boolean> {
+  if (blameModels.has(tab.id)) return true;
+  try {
+    const lines = await getGitBlame(props.repoPath, tab.path);
+    if (activeTab.value?.id !== tab.id) return false;
+    blameModels.set(tab.id, buildBlameModel(lines));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Reconfigure the shared blame compartment on the live view for `tabId`:
+// the tab's gutter when blame is on and a model is cached, empty otherwise.
+function applyBlame(tabId: number) {
+  if (!view || !blameCompartment) return;
+  const model = blameEnabled.value ? blameModels.get(tabId) : undefined;
+  view.dispatch({ effects: blameCompartment.reconfigure(model ? blameGutterExtension(model) : []) });
+  docStates.set(tabId, view.state);
+}
+
+async function toggleBlame() {
+  if (!activeTab.value || activeTab.value.binary) return;
+  blameEnabled.value = !blameEnabled.value;
+  if (blameEnabled.value) {
+    const ok = await ensureBlameForTab(activeTab.value);
+    if (!ok) {
+      blameEnabled.value = false;
+      return;
+    }
+  }
+  if (activeTab.value) applyBlame(activeTab.value.id);
 }
 
 async function detectLanguageExtension(path: string) {
@@ -164,6 +253,17 @@ function updateListenerFor(tabId: number) {
     if (!update.docChanged) return;
     docStates.set(tabId, update.state);
     explorer.updateContent(props.repoPath, tabId, update.state.doc.toString());
+    // Editing shifts line numbers, so the committed blame no longer aligns:
+    // drop this tab's cached model and turn blame off. Deferred to a
+    // microtask to avoid dispatching a reconfigure from inside an update.
+    if (blameEnabled.value) {
+      blameModels.delete(tabId);
+      queueMicrotask(() => {
+        if (!blameEnabled.value) return;
+        blameEnabled.value = false;
+        applyBlame(tabId);
+      });
+    }
   });
 }
 
@@ -222,6 +322,7 @@ async function mountTab(tab: FileTab) {
         langExt,
         updateListenerFor(tab.id),
         editableCompartment!.of(EditorViewCtor!.editable.of(!editLocked.value)),
+        blameCompartment!.of([]),
       ],
     });
     docStates.set(tab.id, state);
@@ -236,6 +337,15 @@ async function mountTab(tab: FileTab) {
   // built or visited — always re-assert it so editability is consistent
   // panel-wide, not just at the moment this tab's EditorState was created.
   applyEditable(tab.id);
+
+  // Re-assert blame for this tab: if blame is on, load its model (once) and
+  // show the gutter; otherwise applyBlame clears any gutter carried over from
+  // a previously-shown state.
+  if (blameEnabled.value && !tab.binary) {
+    await ensureBlameForTab(tab);
+    if (activeTab.value?.id !== tab.id) return;
+  }
+  applyBlame(tab.id);
 }
 
 // Re-assert the current lock state onto the live view and cache the result
@@ -271,7 +381,10 @@ watch(
   () => tabs.value.map((t) => t.id),
   (ids, oldIds) => {
     for (const id of oldIds ?? []) {
-      if (!ids.includes(id)) docStates.delete(id);
+      if (!ids.includes(id)) {
+        docStates.delete(id);
+        blameModels.delete(id);
+      }
     }
   },
 );
@@ -309,6 +422,60 @@ function onKeyDown(e: KeyboardEvent) {
     <div v-if="!fullscreen" class="fe__drag" :class="{ 'fe__drag--active': isDragging }" @mousedown="onDragStart" />
     <div class="fe__header" @mousedown="onMoveStart">
       <span class="fe__title">{{ t("files.headerLabel") }}</span>
+      <span class="fe__header-divider" aria-hidden="true" />
+      <div class="fe__header-actions">
+        <button
+          class="fe__action-btn"
+          :class="{ 'fe__action-btn--active': !editLocked }"
+          :title="editLocked ? t('files.toolbarEdit') : t('files.toolbarLock')"
+          @click="toggleLock"
+        >
+          <svg v-if="editLocked" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="5" y="11" width="14" height="10" rx="2"/>
+            <path d="M8 11V7a4 4 0 0 1 8 0v4"/>
+          </svg>
+          <svg v-else width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="5" y="11" width="14" height="10" rx="2"/>
+            <path d="M8 11V7a4 4 0 0 1 7.75-1.5"/>
+          </svg>
+          <span>{{ editLocked ? t("files.toolbarEdit") : t("files.toolbarLock") }}</span>
+        </button>
+        <button class="fe__action-btn" :disabled="editLocked" :title="t('files.toolbarUndo')" @click="onUndo">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M3 7v6h6"/>
+            <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/>
+          </svg>
+          <span>{{ t("files.toolbarUndo") }}</span>
+        </button>
+        <button
+          class="fe__action-btn"
+          :class="{ 'fe__action-btn--active': blameEnabled }"
+          :disabled="!activeTab || activeTab.binary || explorer.isDirty(activeTab)"
+          :title="t('files.toolbarBlame')"
+          @click="toggleBlame"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="4"/>
+            <line x1="1.5" y1="12" x2="8" y2="12"/>
+            <line x1="16" y1="12" x2="22.5" y2="12"/>
+          </svg>
+          <span>{{ t("files.toolbarBlame") }}</span>
+        </button>
+        <button
+          class="fe__action-btn"
+          :disabled="!activeTab || activeTab.binary || !explorer.isDirty(activeTab)"
+          :title="t('files.toolbarSave')"
+          @click="onToolbarSave"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+            <polyline points="17 21 17 13 7 13 7 21"/>
+            <polyline points="7 3 7 8 15 8"/>
+          </svg>
+          <span>{{ t("files.toolbarSave") }}</span>
+        </button>
+      </div>
+      <div class="fe__header-spacer" />
       <button v-if="tree.truncated.value" class="fe__truncated" :title="t('files.truncatedTooltip')">
         {{ t("files.truncatedBadge") }}
       </button>
@@ -400,46 +567,6 @@ function onKeyDown(e: KeyboardEvent) {
       <div class="fe__corner fe__corner--bl" :class="{ 'fe__corner--active': resizingCorner === 'bl' }" @mousedown="onResizeCornerStart('bl', $event)" />
       <div class="fe__corner fe__corner--br" :class="{ 'fe__corner--active': resizingCorner === 'br' }" @mousedown="onResizeCornerStart('br', $event)" />
     </template>
-
-    <div class="fe__toolbar">
-      <button
-        class="fe__toolbar-btn"
-        :class="{ 'fe__toolbar-btn--active': !editLocked }"
-        :title="editLocked ? t('files.toolbarEdit') : t('files.toolbarLock')"
-        @click="toggleLock"
-      >
-        <svg v-if="editLocked" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <rect x="5" y="11" width="14" height="10" rx="2"/>
-          <path d="M8 11V7a4 4 0 0 1 8 0v4"/>
-        </svg>
-        <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <rect x="5" y="11" width="14" height="10" rx="2"/>
-          <path d="M8 11V7a4 4 0 0 1 7.75-1.5"/>
-        </svg>
-        <span>{{ editLocked ? t("files.toolbarEdit") : t("files.toolbarLock") }}</span>
-      </button>
-      <button class="fe__toolbar-btn" :disabled="editLocked" :title="t('files.toolbarUndo')" @click="onUndo">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M3 7v6h6"/>
-          <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/>
-        </svg>
-        <span>{{ t("files.toolbarUndo") }}</span>
-      </button>
-      <div class="fe__toolbar-spacer" />
-      <button
-        class="fe__toolbar-btn"
-        :disabled="!activeTab || activeTab.binary || !explorer.isDirty(activeTab)"
-        :title="t('files.toolbarSave')"
-        @click="onToolbarSave"
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
-          <polyline points="17 21 17 13 7 13 7 21"/>
-          <polyline points="7 3 7 8 15 8"/>
-        </svg>
-        <span>{{ t("files.toolbarSave") }}</span>
-      </button>
-    </div>
   </div>
 </template>
 
@@ -557,7 +684,49 @@ function onKeyDown(e: KeyboardEvent) {
 .fe__title {
   font-size: var(--font-size-lg);
   font-weight: var(--font-weight-bold);
+}
+
+.fe__header-divider {
+  width: 1px;
+  height: 16px;
+  flex-shrink: 0;
+  background: var(--color-border);
+  margin: 0 var(--space-1);
+}
+
+.fe__header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.fe__header-spacer {
   flex: 1;
+}
+
+.fe__action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  background: var(--color-bg-tertiary);
+  white-space: nowrap;
+}
+
+.fe__action-btn:hover:not(:disabled) {
+  color: var(--color-text);
+}
+
+.fe__action-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.fe__action-btn--active {
+  color: var(--color-accent);
 }
 
 .fe__close {
@@ -640,6 +809,32 @@ function onKeyDown(e: KeyboardEvent) {
   height: 100%;
 }
 
+/* Blame gutter (opt-in) — rendered via CodeMirror's `side: "after"` gutter
+   slot (.cm-gutters-after), to the right of .cm-content rather than beside
+   the line-number gutter on the left, so showing/resizing it never shifts
+   the code's horizontal position (PR #108 review). Shows `author · date`
+   once per same-commit run; full details on hover (title). The editor is
+   always the oneDark theme regardless of the app light/dark theme, so these
+   colours are hard-coded to oneDark's own gutter palette (background
+   #282c34, stone #7d8799, darkBackground #21252b) rather than the app
+   `--color-*` tokens — those rendered a light gutter on the dark editor in
+   light mode. */
+.fe__content :deep(.cm-blame-gutter) {
+  background-color: #282c34;
+  border-left: 1px solid #21252b;
+  color: #7d8799;
+  font-size: 11px;
+}
+.fe__content :deep(.cm-blame-marker) {
+  display: inline-block;
+  overflow: hidden;
+  max-width: 190px;
+  padding: 0 var(--space-2);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  cursor: default;
+}
+
 .fe__empty {
   flex: 1;
   display: flex;
@@ -667,40 +862,4 @@ function onKeyDown(e: KeyboardEvent) {
    added to apps/desktop/src/assets/main.css in Step 1, also used by
    RepoSidebar.vue's tree layout. Do not re-add them locally. */
 
-.fe__toolbar {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  border-top: 1px solid var(--color-border);
-  flex-shrink: 0;
-}
-
-.fe__toolbar-spacer {
-  flex: 1;
-}
-
-.fe__toolbar-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-sm);
-  color: var(--color-text-muted);
-  font-size: var(--font-size-sm);
-  background: var(--color-bg-tertiary);
-}
-
-.fe__toolbar-btn:hover:not(:disabled) {
-  color: var(--color-text);
-}
-
-.fe__toolbar-btn:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
-.fe__toolbar-btn--active {
-  color: var(--color-accent);
-}
 </style>

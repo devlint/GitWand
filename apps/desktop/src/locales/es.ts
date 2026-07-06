@@ -2279,6 +2279,7 @@ const es: Locale = {
     toolbarLock: "Bloquear",
     toolbarUndo: "Deshacer",
     toolbarSave: "Guardar",
+    toolbarBlame: "Autoría",
     fullscreen: "Pantalla completa",
     exitFullscreen: "Salir de pantalla completa",
   },

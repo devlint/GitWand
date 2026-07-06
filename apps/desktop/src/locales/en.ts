@@ -2319,6 +2319,7 @@ const en = {
     toolbarLock: "Lock",
     toolbarUndo: "Undo",
     toolbarSave: "Save",
+    toolbarBlame: "Blame",
     fullscreen: "Fullscreen",
     exitFullscreen: "Exit fullscreen",
   },

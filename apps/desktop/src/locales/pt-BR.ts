@@ -2279,6 +2279,7 @@ const ptBR: Locale = {
     toolbarLock: "Bloquear",
     toolbarUndo: "Desfazer",
     toolbarSave: "Salvar",
+    toolbarBlame: "Autoria",
     fullscreen: "Tela cheia",
     exitFullscreen: "Sair da tela cheia",
   },
