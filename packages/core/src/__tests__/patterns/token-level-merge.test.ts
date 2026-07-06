@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import tokenLevelMerge from "../../patterns/token-level-merge.js";
+import { classifyConflict } from "../../classifier.js";
 import type { ClassifyInput } from "../../types.js";
 
 function input(base: string[], ours: string[], theirs: string[]): ClassifyInput {
@@ -124,5 +125,35 @@ describe("token_level_merge : cas négatifs — doit échouer et retomber sur co
   it("nombre de lignes différent entre base/ours/theirs → échec (pas d'alignement 1:1 possible)", () => {
     const h = input(["a", "b"], ["a", "b", "c"], ["a", "b"]);
     expect(tokenLevelMerge.detect(h)).toBe(false);
+  });
+});
+
+describe("token_level_merge : intégration classifier", () => {
+  it("classifie en token_level_merge et attache tokenMergeTrace", () => {
+    const h = input(
+      ['<div class="a b">'],
+      ['<div class="a2 b">'],
+      ['<div class="a b2">'],
+    );
+    const result = classifyConflict(h);
+    expect(result.type).toBe("token_level_merge");
+    expect(result.trace.tokenMergeTrace).not.toBeUndefined();
+    expect(result.trace.tokenMergeTrace?.mergedLines).toEqual(['<div class="a2 b2">']);
+    expect(result.trace.tokenMergeTrace?.pass2Count).toBe(1);
+  });
+
+  it("deux lignes, un vrai conflit token-level par ligne (both-sides-changed) → token_level_merge, pas non_overlapping", () => {
+    // Contrairement au cas "un seul côté par ligne" (déjà couvert par non_overlapping —
+    // vérifié empiriquement : LCS 3-way le résout sans notre pattern), ce cas a les DEUX
+    // côtés qui modifient chacune des deux lignes → non_overlapping échoue (chevauchement
+    // réel), seul token_level_merge peut le résoudre via la passe 2 (tokens disjoints).
+    const h = input(
+      ['<div class="a b">', '<label class="c d">'],
+      ['<div class="a2 b">', '<label class="c d2">'],
+      ['<div class="a b2">', '<label class="c2 d">'],
+    );
+    const result = classifyConflict(h);
+    expect(result.type).toBe("token_level_merge");
+    expect(result.trace.tokenMergeTrace?.pass2Count).toBe(2);
   });
 });
