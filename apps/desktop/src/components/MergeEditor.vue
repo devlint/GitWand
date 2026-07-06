@@ -8,6 +8,7 @@ import { safeHtml } from "../composables/useSafeHtml";
 import { useAIProvider, type ConflictContext } from "../composables/useAIProvider";
 
 import { useHunkExplanation } from "../composables/useHunkExplanation";
+import { useResizeObserver } from "../composables/useResizeObserver";
 import { useCustomAutomations } from "../composables/useCustomAutomations";
 import {
   useResolutionMemory,
@@ -617,29 +618,10 @@ onMounted(() => {
   nextTick(drawMinimap);
 });
 
-let minimapRo: ResizeObserver | null = null;
-
 // `contentEl` lives behind `v-if="!file.tree && !file.markerless"`, so it's
-// absent from the DOM at mount time for tree/markerless conflicts. Watching
-// the ref (rather than a mount-only attach) re-observes every time the
-// editor body appears.
-watch(
-  contentEl,
-  (el) => {
-    minimapRo?.disconnect();
-    minimapRo = null;
-    if (typeof ResizeObserver !== "undefined" && el) {
-      minimapRo = new ResizeObserver(() => drawMinimap());
-      minimapRo.observe(el);
-    }
-  },
-  { immediate: true, flush: "post" },
-);
-
-onUnmounted(() => {
-  minimapRo?.disconnect();
-  minimapRo = null;
-});
+// absent from the DOM at mount time for tree/markerless conflicts. The helper
+// re-observes every time the editor body (re)appears and redraws on resize.
+useResizeObserver(contentEl, drawMinimap);
 </script>
 
 <template>

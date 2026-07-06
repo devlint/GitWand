@@ -10,6 +10,7 @@ import { filterCommitsLocal } from "../composables/useCommitSearch";
 import { useWorkspaceScope } from "../composables/useWorkspaceScope";
 import { PR_PANEL_KEY, type PrPanelState } from "../composables/usePrPanel";
 import { useBranchPrSearch } from "../composables/useBranchPrSearch";
+import { useResizeObserver } from "../composables/useResizeObserver";
 
 defineOptions({ inheritAttrs: false });
 
@@ -1021,8 +1022,6 @@ watch(() => props.commits.length, () => {
   _loadMorePending = false;
 });
 
-let _ro: ResizeObserver | null = null;
-
 function measureViewport() {
   if (scrollContainer.value) clientHeight.value = scrollContainer.value.clientHeight;
 }
@@ -1031,26 +1030,9 @@ function measureViewport() {
 // so the scroll container only enters the DOM once commits are loaded. If the graph view
 // mounts before commits arrive, `scrollContainer` is null and a mount-only observer would
 // never attach — clientHeight would stay 0, fall back to 600, and the rows below that never
-// render nor recalculate on resize. Watch the ref instead so the observer (re)attaches every
-// time the element appears (initial load, repo switch, filter-mode toggle).
-watch(
-  scrollContainer,
-  (el) => {
-    _ro?.disconnect();
-    _ro = null;
-    if (el) {
-      measureViewport();
-      _ro = new ResizeObserver(() => measureViewport());
-      _ro.observe(el);
-    }
-  },
-  { immediate: true, flush: "post" },
-);
-
-onUnmounted(() => {
-  _ro?.disconnect();
-  _ro = null;
-});
+// render nor recalculate on resize. The helper (re)attaches every time the element appears
+// (initial load, repo switch, filter-mode toggle) and measures once on each attach.
+useResizeObserver(scrollContainer, measureViewport);
 
 const visibleRange = computed(() => {
   const total = renderedCommits.value.length;
