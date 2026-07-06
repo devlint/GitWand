@@ -208,6 +208,8 @@ export interface AppSettings {
   dockHideTerminal: boolean;
   /** Hide the Files (File Explorer) tile from the bottom dock. */
   dockHideFiles: boolean;
+  /** Hide the Changes entry from the dock while the working tree is clean. */
+  dockHideChangesWhenEmpty: boolean;
   /** Show only icons in the bottom dock (hide text labels). */
   dockIconsOnly: boolean;
   /** Lay the dock out vertically (column) with vertically-oriented labels. */
@@ -394,6 +396,7 @@ export const defaultAppSettings: AppSettings = {
   dockHidePrs: false,
   dockHideTerminal: false,
   dockHideFiles: false,
+  dockHideChangesWhenEmpty: false,
   dockIconsOnly: false,
   dockVertical: false,
   dockIdleOpacity: 0.45,

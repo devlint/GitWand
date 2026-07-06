@@ -51,6 +51,8 @@ const vertical = computed(() => settings.value.dockVertical);
 const idleOpacity = computed(() => settings.value.dockIdleOpacity ?? 0.45);
 
 function isHidden(id: DockEntryId): boolean {
+  // Changes hides itself while the working tree is clean, when the user opted in.
+  if (id === "changes" && settings.value.dockHideChangesWhenEmpty && !props.changesCount) return true;
   return isDockEntryHidden(id, settings.value);
 }
 
@@ -225,6 +227,12 @@ function removeFromDock(id: DockEntryId) {
 function setAsStartup(id: DockEntryId) {
   if (id === "changes") return; // not a valid startup view
   patch({ startupView: id });
+  closeMenu();
+}
+
+const hideChangesWhenEmpty = computed(() => settings.value.dockHideChangesWhenEmpty);
+function toggleHideChangesWhenEmpty() {
+  patch({ dockHideChangesWhenEmpty: !settings.value.dockHideChangesWhenEmpty });
   closeMenu();
 }
 
@@ -519,6 +527,11 @@ onBeforeUnmount(() => {
           :aria-checked="isStartup(entryTarget)" @click="setAsStartup(entryTarget)">
           {{ t('settings.dock.menu.setStartup') }}
           <span class="dock-menu-check">{{ isStartup(entryTarget) ? '✓' : '' }}</span>
+        </button>
+        <button v-if="entryTarget === 'changes'" class="dock-menu-item" role="menuitemcheckbox"
+          :aria-checked="hideChangesWhenEmpty" @click="toggleHideChangesWhenEmpty">
+          {{ t('settings.dock.menu.hideChangesWhenEmpty') }}
+          <span class="dock-menu-check">{{ hideChangesWhenEmpty ? '✓' : '' }}</span>
         </button>
         <div class="dock-menu-sep" role="separator"></div>
       </template>
