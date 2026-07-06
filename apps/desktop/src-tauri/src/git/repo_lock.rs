@@ -66,10 +66,19 @@ static LOCKS: OnceLock<Mutex<HashMap<String, Arc<RwLock<()>>>>> = OnceLock::new(
 /// number of distinct repo paths the session has touched, so the map is left
 /// to grow rather than reference-counted for eviction.
 fn lock_for(cwd: &str) -> Arc<RwLock<()>> {
+    // Canonicalize so two path representations of the same physical repo (a symlink,
+    // a trailing slash, `..` components) resolve to the same lock — otherwise the
+    // serialization this module exists for silently doesn't apply between them.
+    // Falls back to the raw string if canonicalization fails (path removed between
+    // the frontend call and this command running, unavailable network mount, …) —
+    // same behavior as before this fallback existed, never a regression.
+    let key = std::fs::canonicalize(cwd)
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| cwd.to_string());
     let map = LOCKS.get_or_init(|| Mutex::new(HashMap::new()));
     let mut guard = map.lock().unwrap();
     guard
-        .entry(cwd.to_string())
+        .entry(key)
         .or_insert_with(|| Arc::new(RwLock::new(())))
         .clone()
 }
@@ -127,5 +136,37 @@ mod tests {
             lock_for("/tmp/repo-y").try_write_arc().is_some(),
             "a writer on one repo must not block another repo"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlink_and_real_path_share_one_lock() {
+        let pid = std::process::id();
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let real = std::env::temp_dir().join(format!("gitwand-repolock-real-{}-{}", pid, nanos));
+        let link = std::env::temp_dir().join(format!("gitwand-repolock-link-{}-{}", pid, nanos));
+        std::fs::create_dir_all(&real).expect("create real dir");
+        std::os::unix::fs::symlink(&real, &link).expect("create symlink");
+
+        let a = lock_for(real.to_str().unwrap());
+        let b = lock_for(link.to_str().unwrap());
+
+        std::fs::remove_dir_all(&real).ok();
+        std::fs::remove_file(&link).ok();
+
+        assert!(
+            Arc::ptr_eq(&a, &b),
+            "a symlink and its real path must resolve to the same lock"
+        );
+    }
+
+    #[test]
+    fn nonexistent_path_falls_back_to_raw_string_without_panic() {
+        let a = lock_for("/gitwand-repolock-does-not-exist-1");
+        let b = lock_for("/gitwand-repolock-does-not-exist-1");
+        assert!(Arc::ptr_eq(&a, &b), "same nonexistent path must still share one lock");
     }
 }
