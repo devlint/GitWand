@@ -158,6 +158,14 @@ export function assembleResolution(
       };
     }
 
+    case "token_level_merge":
+      // v2.7 — Résolution toujours différée à la confirmation utilisateur (frontend).
+      // La proposition calculée est disponible dans hunk.trace.tokenMergeTrace.
+      return {
+        lines: null,
+        reason: "token_level_merge : fusion proposée, confirmation utilisateur requise avant application.",
+      };
+
     case "generated_file": {
       // Smart resolution : si les deux côtés sont identiques après suppression
       // des valeurs volatiles (hashes, timestamps), le conflit est cosmétique

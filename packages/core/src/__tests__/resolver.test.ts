@@ -1047,3 +1047,22 @@ return "hello";
     });
   });
 });
+
+describe("assembleResolution : token_level_merge n'est jamais auto-appliqué", () => {
+  it("un hunk token_level_merge reste non-résolu (autoResolved: false)", () => {
+    const conflict = [
+      "<<<<<<< ours",
+      '<div class="a2 b">',
+      "||||||| base",
+      '<div class="a b">',
+      "=======",
+      '<div class="a b2">',
+      ">>>>>>> theirs",
+    ].join("\n");
+    const result = resolve(conflict, "src/test.html");
+    expect(result.hunks[0].type).toBe("token_level_merge");
+    expect(result.resolutions[0].autoResolved).toBe(false);
+    expect(result.resolutions[0].resolvedLines).toBeNull();
+    expect(result.stats.remaining).toBe(1);
+  });
+});
