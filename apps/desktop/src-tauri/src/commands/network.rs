@@ -22,6 +22,9 @@
 //! The probe runs synchronously in the Tauri command thread; `TcpStream::
 //! connect_timeout` bounds the wait so a dropped wifi connection cannot
 //! freeze the UI.
+//!
+//! (This module still adds no direct HTTP dependency; an HTTP client only
+//! exists transitively via the Aptabase telemetry plugin.)
 
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::time::Duration;
