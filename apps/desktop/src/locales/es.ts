@@ -1226,9 +1226,9 @@ const es: Locale = {
 
     // Launchpad — Pestaña Equipo (v2.9)
     launchpad: {
-      disableTeamTab: {
-        label: "Desactivar la pestaña Equipo de Today",
-        help: "La pestaña Equipo hace una llamada API por cada PR de un compañero (~10s en workspaces grandes). Desactívala si no necesitas la vista de solapamientos.",
+      showTeamTab: {
+        label: "Mostrar la pestaña Equipo de Today",
+        help: "Se muestra en la parte superior izquierda de la pantalla Today. La pestaña Equipo hace una llamada API por cada PR de un compañero (~10s en workspaces grandes). Desactívala si no necesitas la vista de solapamientos.",
       },
     },
 

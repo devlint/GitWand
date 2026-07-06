@@ -1235,9 +1235,9 @@ const fr: Locale = {
 
     // Launchpad — Onglet Équipe (v2.9)
     launchpad: {
-      disableTeamTab: {
-        label: "Désactiver l'onglet Équipe de Today",
-        help: "L'onglet Équipe fait un appel API par PR de collègue (~10s sur un gros workspace). Désactive-le si tu n'as pas besoin de la vue chevauchement.",
+      showTeamTab: {
+        label: "Afficher l'onglet Équipe de Today",
+        help: "Affiché en haut à gauche de l'écran Today. L'onglet Équipe fait un appel API par PR de collègue (~10s sur un gros workspace). Désactive-le si tu n'as pas besoin de la vue chevauchement.",
       },
     },
 

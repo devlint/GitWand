@@ -1448,18 +1448,6 @@ function deleteReleaseNoteTemplate(id: string) {
                 t('settings.updateChannelStableHint') }}
             </span>
           </div>
-
-          <!-- Launchpad Team tab toggle (v2.9) — inverted boolean: a "Disable"
-               checkbox is friendlier when the default is "enabled". -->
-          <div class="sp-row sp-row--checkbox">
-            <label class="sp-checkbox-label" for="setting-launchpad-team">
-              <input id="setting-launchpad-team" type="checkbox" class="sp-checkbox"
-                :checked="!settings.launchpadTeamTabEnabled"
-                @change="updateSetting('launchpadTeamTabEnabled', !($event.target as HTMLInputElement).checked)" />
-              <span>{{ t('settings.launchpad.disableTeamTab.label') }}</span>
-            </label>
-            <span class="sp-hint">{{ t('settings.launchpad.disableTeamTab.help') }}</span>
-          </div>
         </template>
 
         <!-- ═══ DASHBOARD ═══ -->
@@ -1493,6 +1481,21 @@ function deleteReleaseNoteTemplate(id: string) {
                 @change="updateSetting('dockHideLaunchpad', !($event.target as HTMLInputElement).checked)" />
               <span>{{ t('settings.dock.showToday') }}</span>
             </label>
+          </div>
+
+          <!-- Launchpad Team tab toggle (v2.9) — child of "Show Today":
+               disabled/greyed out when Today is hidden entirely. -->
+          <div class="sp-row sp-row--checkbox sp-row--child">
+            <label class="sp-checkbox-label"
+              :class="{ 'sp-checkbox-label--locked': settings.dockHideLaunchpad }"
+              for="setting-launchpad-team">
+              <input id="setting-launchpad-team" type="checkbox" class="sp-checkbox"
+                :checked="settings.launchpadTeamTabEnabled"
+                :disabled="settings.dockHideLaunchpad"
+                @change="updateSetting('launchpadTeamTabEnabled', ($event.target as HTMLInputElement).checked)" />
+              <span>{{ t('settings.launchpad.showTeamTab.label') }}</span>
+            </label>
+            <span class="sp-hint">{{ t('settings.launchpad.showTeamTab.help') }}</span>
           </div>
 
           <!-- Show Dashboard -->
@@ -3185,6 +3188,22 @@ function deleteReleaseNoteTemplate(id: string) {
   gap: var(--space-4);
   font-size: var(--font-size-md);
   cursor: pointer;
+}
+
+.sp-checkbox-label--locked {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Nested sub-setting: indented with a subtle left rule tying it to its parent. */
+.sp-row--child {
+  padding-left: var(--space-6);
+  margin-left: var(--space-3);
+  border-left: 1px solid var(--color-border);
+}
+
+.sp-row--child.sp-row--checkbox .sp-hint {
+  padding-left: var(--space-6);
 }
 
 .sp-checkbox {

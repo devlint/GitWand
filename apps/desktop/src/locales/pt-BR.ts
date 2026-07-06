@@ -1226,9 +1226,9 @@ const ptBR: Locale = {
     updateChannelBetaHint: "Notifica sobre builds pré-release. A instalação automática está desativada — clicar em \"Instalar\" abre a página do GitHub Releases.",
     // Launchpad \u2014 Aba Equipe (v2.9)
     launchpad: {
-      disableTeamTab: {
-        label: "Desativar a aba Equipe de Today",
-        help: "A aba Equipe faz uma chamada de API por PR de colega (~10s em workspaces grandes). Desative se voc\u00ea n\u00e3o precisa da vis\u00e3o de sobreposi\u00e7\u00e3o.",
+      showTeamTab: {
+        label: "Mostrar a aba Equipe de Today",
+        help: "Exibida no canto superior esquerdo da tela Today. A aba Equipe faz uma chamada de API por PR de colega (~10s em workspaces grandes). Desative se voc\u00ea n\u00e3o precisa da vis\u00e3o de sobreposi\u00e7\u00e3o.",
       },
     },
 
