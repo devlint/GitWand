@@ -8,6 +8,7 @@ import { safeHtml } from "../composables/useSafeHtml";
 import { useAIProvider, type ConflictContext } from "../composables/useAIProvider";
 
 import { useHunkExplanation } from "../composables/useHunkExplanation";
+import { useResizeObserver } from "../composables/useResizeObserver";
 import { useCustomAutomations } from "../composables/useCustomAutomations";
 import {
   useResolutionMemory,
@@ -615,11 +616,12 @@ watch(
 
 onMounted(() => {
   nextTick(drawMinimap);
-  if (typeof ResizeObserver !== "undefined" && contentEl.value) {
-    const ro = new ResizeObserver(() => drawMinimap());
-    ro.observe(contentEl.value);
-  }
 });
+
+// `contentEl` lives behind `v-if="!file.tree && !file.markerless"`, so it's
+// absent from the DOM at mount time for tree/markerless conflicts. The helper
+// re-observes every time the editor body (re)appears and redraws on resize.
+useResizeObserver(contentEl, drawMinimap);
 </script>
 
 <template>
