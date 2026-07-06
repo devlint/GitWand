@@ -1699,6 +1699,12 @@ const ptBR: Locale = {
       reject: "Rejeitar → resolver manualmente",
       accepted: "Aceito",
     },
+    resolutionPreview: {
+      title: "Resolução proposta",
+      accept: "Aceitar",
+      reject: "Rejeitar → resolver manualmente",
+      accepted: "Aceito",
+    },
   },
 
   // ─── PR inline diff — AI review ─────────────────────────

@@ -1709,6 +1709,12 @@ const fr: Locale = {
       reject: "Rejeter → résolution manuelle",
       accepted: "Accepté",
     },
+    resolutionPreview: {
+      title: "Résolution proposée",
+      accept: "Accepter",
+      reject: "Rejeter → résolution manuelle",
+      accepted: "Accepté",
+    },
   },
 
   // ─── PR inline diff — AI review ─────────────────────────

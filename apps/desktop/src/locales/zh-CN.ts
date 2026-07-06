@@ -1684,6 +1684,12 @@ const zhCN: Locale = {
       reject: "拒绝 → 手动解决",
       accepted: "已接受",
     },
+    resolutionPreview: {
+      title: "提议的解决方案",
+      accept: "接受",
+      reject: "拒绝 → 手动解决",
+      accepted: "已接受",
+    },
   },
 
   // ─── PR inline diff — AI review ─────────────────────────

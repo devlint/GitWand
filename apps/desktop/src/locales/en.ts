@@ -1732,6 +1732,12 @@ const en = {
       reject: "Reject \u2192 resolve manually",
       accepted: "Accepted",
     },
+    resolutionPreview: {
+      title: "Proposed resolution",
+      accept: "Accept",
+      reject: "Reject \u2192 resolve manually",
+      accepted: "Accepted",
+    },
   },
 
   // ─── PR inline diff — AI review ─────────────────────────

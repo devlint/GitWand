@@ -1699,6 +1699,12 @@ const es: Locale = {
       reject: "Rechazar → resolver manualmente",
       accepted: "Aceptado",
     },
+    resolutionPreview: {
+      title: "Resolución propuesta",
+      accept: "Aceptar",
+      reject: "Rechazar → resolver manualmente",
+      accepted: "Aceptado",
+    },
   },
 
   // ─── PR inline diff — AI review ─────────────────────────
