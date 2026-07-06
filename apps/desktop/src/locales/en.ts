@@ -1292,6 +1292,10 @@ const en = {
       showFiles: "Show Files",
       gitTreeLocked: "Git Tree & Changes",
       lockedHint: "Always shown — cannot be removed.",
+      hideChangesWhenEmpty: {
+        label: "Hide Changes when clean",
+        help: "Hide the Changes entry while the working tree has no changes.",
+      },
       iconsOnly: {
         label: "Icons only",
         help: "Hide the text labels in the dock and show only icons.",
@@ -1328,6 +1332,7 @@ const en = {
       menu: {
         remove: "Remove from dock",
         setStartup: "Set as startup view",
+        hideChangesWhenEmpty: "Hide when clean",
         lock: "Lock dock",
         unlock: "Unlock dock",
         hideText: "Hide text",

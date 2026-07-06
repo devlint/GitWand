@@ -1267,6 +1267,10 @@ const es: Locale = {
       showFiles: "Mostrar archivos",
       gitTreeLocked: "Árbol Git y Cambios",
       lockedHint: "Siempre visibles — no se pueden quitar.",
+      hideChangesWhenEmpty: {
+        label: "Ocultar Cambios si está limpio",
+        help: "Oculta la entrada Cambios cuando el árbol de trabajo no tiene cambios.",
+      },
       iconsOnly: {
         label: "Solo iconos",
         help: "Oculta las etiquetas del dock y muestra solo los iconos.",
@@ -1303,6 +1307,7 @@ const es: Locale = {
       menu: {
         remove: "Quitar del dock",
         setStartup: "Establecer como vista de inicio",
+        hideChangesWhenEmpty: "Ocultar si está limpio",
         lock: "Bloquear el dock",
         unlock: "Desbloquear el dock",
         hideText: "Ocultar texto",

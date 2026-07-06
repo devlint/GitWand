@@ -1267,6 +1267,10 @@ const ptBR: Locale = {
       showFiles: "Mostrar arquivos",
       gitTreeLocked: "\u00c1rvore Git e Altera\u00e7\u00f5es",
       lockedHint: "Sempre vis\u00edveis \u2014 n\u00e3o podem ser removidos.",
+      hideChangesWhenEmpty: {
+        label: "Ocultar Altera\u00e7\u00f5es quando limpo",
+        help: "Oculta a entrada Altera\u00e7\u00f5es quando a \u00e1rvore de trabalho n\u00e3o tem altera\u00e7\u00f5es.",
+      },
       iconsOnly: {
         label: "Apenas \u00edcones",
         help: "Oculta os r\u00f3tulos do dock e mostra apenas os \u00edcones.",
@@ -1303,6 +1307,7 @@ const ptBR: Locale = {
       menu: {
         remove: "Remover do dock",
         setStartup: "Definir como vista inicial",
+        hideChangesWhenEmpty: "Ocultar quando limpo",
         lock: "Bloquear o dock",
         unlock: "Desbloquear o dock",
         hideText: "Ocultar texto",

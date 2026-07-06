@@ -158,6 +158,7 @@ interface Settings {
   dockHidePrs: boolean;
   dockHideTerminal: boolean;
   dockHideFiles: boolean;
+  dockHideChangesWhenEmpty: boolean;
   dockIconsOnly: boolean;
   dockVertical: boolean;
   dockIdleOpacity: number;
@@ -237,6 +238,7 @@ const defaultSettings: Settings = {
   dockHidePrs: false,
   dockHideTerminal: false,
   dockHideFiles: false,
+  dockHideChangesWhenEmpty: true,
   dockIconsOnly: false,
   dockVertical: false,
   dockIdleOpacity: 0.45,
@@ -1544,6 +1546,17 @@ function deleteReleaseNoteTemplate(id: string) {
               <span>{{ t('settings.dock.gitTreeLocked') }}</span>
             </label>
             <span class="sp-hint">{{ t('settings.dock.lockedHint') }}</span>
+          </div>
+
+          <!-- Hide Changes when the working tree is clean -->
+          <div class="sp-row sp-row--checkbox">
+            <label class="sp-checkbox-label" for="setting-dock-hide-changes-empty">
+              <input id="setting-dock-hide-changes-empty" type="checkbox" class="sp-checkbox"
+                :checked="settings.dockHideChangesWhenEmpty"
+                @change="updateSetting('dockHideChangesWhenEmpty', ($event.target as HTMLInputElement).checked)" />
+              <span>{{ t('settings.dock.hideChangesWhenEmpty.label') }}</span>
+            </label>
+            <span class="sp-hint">{{ t('settings.dock.hideChangesWhenEmpty.help') }}</span>
           </div>
 
           <!-- ── Appearance ── -->

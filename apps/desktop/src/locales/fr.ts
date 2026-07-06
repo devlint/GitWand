@@ -1276,6 +1276,10 @@ const fr: Locale = {
       showFiles: "Afficher les fichiers",
       gitTreeLocked: "Arbre Git & Modifications",
       lockedHint: "Toujours affichés — non supprimables.",
+      hideChangesWhenEmpty: {
+        label: "Masquer Modifications si propre",
+        help: "Masque l'entrée Modifications quand l'arbre de travail n'a aucune modification.",
+      },
       iconsOnly: {
         label: "Icônes uniquement",
         help: "Masque les libellés du dock et n'affiche que les icônes.",
@@ -1312,6 +1316,7 @@ const fr: Locale = {
       menu: {
         remove: "Retirer du dock",
         setStartup: "Définir comme vue de démarrage",
+        hideChangesWhenEmpty: "Masquer si propre",
         lock: "Verrouiller le dock",
         unlock: "Déverrouiller le dock",
         hideText: "Masquer le texte",

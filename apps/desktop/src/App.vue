@@ -932,6 +932,13 @@ watch(viewMode, async (mode) => {
   }
 });
 
+// When the Changes entry hides itself on a clean tree (opt-in), a user sitting
+// on the Changes view would be left staring at an empty pane — fall back to the
+// Git Tree instead.
+watch([() => repoFiles.value.length, () => settings.value.dockHideChangesWhenEmpty], ([count, hideWhenEmpty]) => {
+  if (hideWhenEmpty && count === 0 && viewMode.value === "changes") viewMode.value = "graph";
+});
+
 // Also refresh the dashboard sidebar data when the repo itself changes.
 watch(hasRepo, (has) => {
   if (has && viewMode.value === "dashboard") {
