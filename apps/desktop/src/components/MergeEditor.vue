@@ -793,6 +793,7 @@ useResizeObserver(contentEl, drawMinimap);
         </svg>
         <span>{{ t('merge.baseEnrichedBanner') }}</span>
       </div>
+      <div class="merge-body-row">
     <div
       class="editor-content"
       ref="contentEl"
@@ -1059,6 +1060,7 @@ useResizeObserver(contentEl, drawMinimap);
     <div class="merge-minimap" @mousedown="onMinimapMouseDown">
       <canvas ref="minimapCanvas"></canvas>
     </div>
+      </div><!-- /merge-body-row -->
     </div><!-- /merge-body -->
   </div>
 </template>
@@ -1118,6 +1120,14 @@ useResizeObserver(contentEl, drawMinimap);
 
 /* ─── Body layout (content + minimap) ──────────────────── */
 .merge-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.merge-body-row {
   flex: 1;
   display: flex;
   overflow: hidden;
