@@ -15,6 +15,16 @@ import { useFolderHistory } from "./useFolderHistory";
 import { useAIProvider } from "./useAIProvider";
 import { t } from "./useI18n";
 import { applyMemory, isGeneralizableStrategy, type ResolutionMemoryEntry } from "./useResolutionMemory";
+import { createSemaphore } from "../utils/concurrentMap";
+
+/**
+ * Reads the index via `git show` ×3 + runs `git merge-file` per call — up to 4
+ * git subprocesses per file. `loadRealFiles()` runs fully in parallel across all
+ * conflicted files, so without a cap a repo with many base-less conflicts could
+ * spawn dozens of concurrent git subprocesses at once. Defensive, not a proven
+ * fix for any specific incident — reduces subprocess load regardless.
+ */
+const reconstructLimiter = createSemaphore(4);
 
 export interface TreeConflictInfo {
   code: string;
@@ -457,7 +467,7 @@ export function useGitWand() {
         // Unmerged file with no parseable markers → reconstruct the 3-way from the index.
         if (result.stats.totalConflicts === 0) {
           try {
-            const rec = await reconstructConflict(cwd, filePath);
+            const rec = await reconstructLimiter.run(() => reconstructConflict(cwd, filePath));
             if (rec.content.includes("<<<<<<<")) {
               if (rec.wtMatchesSide) {
                 // Working tree is just one side → swap in reconstructed markers and resolve normally.
@@ -478,7 +488,7 @@ export function useGitWand() {
         // (non_overlapping, one_side_change, token_level_merge, …) can apply.
         if (result.stats.totalConflicts > 0 && result.hunks.some((h) => h.baseLines.length === 0)) {
           try {
-            const rec = await reconstructConflict(cwd, filePath);
+            const rec = await reconstructLimiter.run(() => reconstructConflict(cwd, filePath));
             const enrichedResult = await resolveAsync(rec.content, filePath, resolveOptionsWithLlm, structuralOpts);
             const sameOursTheirs =
               enrichedResult.hunks.length === result.hunks.length &&

@@ -6,6 +6,7 @@ const {
   CONTENT_2WAY,
   RECONSTRUCTED_DIFF3,
   mockReconstructConflict,
+  mockGetConflictedFiles,
 } = vi.hoisted(() => {
   const OURS_LINE = '<div class="flex items-baseline gap-x-3 mr-2">'; // changed from base
   const THEIRS_LINE = '<div class="flex items-baseline gap-x-2 mr-2">'; // == base, unchanged
@@ -35,6 +36,7 @@ const {
     CONTENT_2WAY,
     RECONSTRUCTED_DIFF3,
     mockReconstructConflict: vi.fn(),
+    mockGetConflictedFiles: vi.fn(async () => ["src/foo.html"]),
   };
 });
 
@@ -43,7 +45,7 @@ vi.mock("@/utils/backend", async (importOriginal) => {
   return {
     ...actual,
     pickFolder: vi.fn(),
-    getConflictedFiles: vi.fn(async () => ["src/foo.html"]),
+    getConflictedFiles: mockGetConflictedFiles,
     readFile: vi.fn(async () => CONTENT_2WAY),
     writeFile: vi.fn(),
     readGitwandrc: vi.fn(async () => ""),
@@ -62,6 +64,8 @@ beforeEach(() => {
     content: RECONSTRUCTED_DIFF3,
     wtMatchesSide: false,
   }));
+  mockGetConflictedFiles.mockClear();
+  mockGetConflictedFiles.mockImplementation(async () => ["src/foo.html"]);
 });
 
 describe("useGitWand : récupération de base pour conflits 2-way", () => {
@@ -113,5 +117,29 @@ describe("useGitWand : reconstructConflict échoue (add/add) → fallback propre
     expect(file.baseEnriched).toBeUndefined();
     expect(file.content).toBe(CONTENT_2WAY);
     expect(gw.error.value).toBeNull();
+  });
+});
+
+describe("useGitWand : concurrence de reconstructConflict limitée", () => {
+  it("ne lance jamais plus de 4 reconstructConflict en vol simultanément", async () => {
+    // 10 fichiers, chacun sans base → chacun déclenche un appel reconstructConflict.
+    const manyPaths = Array.from({ length: 10 }, (_, i) => `src/file${i}.html`);
+    mockGetConflictedFiles.mockResolvedValueOnce(manyPaths);
+
+    let active = 0;
+    let maxActive = 0;
+    mockReconstructConflict.mockImplementation(async () => {
+      active++;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((r) => setTimeout(r, 5));
+      active--;
+      return { content: RECONSTRUCTED_DIFF3, wtMatchesSide: false };
+    });
+
+    const gw = useGitWand();
+    await gw.openPath("/repo");
+
+    expect(maxActive).toBeLessThanOrEqual(4);
+    expect(mockReconstructConflict).toHaveBeenCalledTimes(10);
   });
 });
