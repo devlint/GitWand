@@ -184,6 +184,11 @@ function blameGutterExtension(model: Map<number, BlameGutterEntry>): Extension {
   }
   return gutterFn!({
     class: "cm-blame-gutter",
+    // Rendered in CodeMirror's separate `.cm-gutters-after` container, to the
+    // right of .cm-content, instead of alongside the line-number gutter on
+    // the left — appearing/resizing the blame column then never shifts the
+    // code's horizontal position (see review discussion on PR #108).
+    side: "after",
     lineMarker(view, blockLine) {
       const ln = view.state.doc.lineAt(blockLine.from).number;
       const entry = model.get(ln);
@@ -417,6 +422,60 @@ function onKeyDown(e: KeyboardEvent) {
     <div v-if="!fullscreen" class="fe__drag" :class="{ 'fe__drag--active': isDragging }" @mousedown="onDragStart" />
     <div class="fe__header" @mousedown="onMoveStart">
       <span class="fe__title">{{ t("files.headerLabel") }}</span>
+      <span class="fe__header-divider" aria-hidden="true" />
+      <div class="fe__header-actions">
+        <button
+          class="fe__action-btn"
+          :class="{ 'fe__action-btn--active': !editLocked }"
+          :title="editLocked ? t('files.toolbarEdit') : t('files.toolbarLock')"
+          @click="toggleLock"
+        >
+          <svg v-if="editLocked" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="5" y="11" width="14" height="10" rx="2"/>
+            <path d="M8 11V7a4 4 0 0 1 8 0v4"/>
+          </svg>
+          <svg v-else width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="5" y="11" width="14" height="10" rx="2"/>
+            <path d="M8 11V7a4 4 0 0 1 7.75-1.5"/>
+          </svg>
+          <span>{{ editLocked ? t("files.toolbarEdit") : t("files.toolbarLock") }}</span>
+        </button>
+        <button class="fe__action-btn" :disabled="editLocked" :title="t('files.toolbarUndo')" @click="onUndo">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M3 7v6h6"/>
+            <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/>
+          </svg>
+          <span>{{ t("files.toolbarUndo") }}</span>
+        </button>
+        <button
+          class="fe__action-btn"
+          :class="{ 'fe__action-btn--active': blameEnabled }"
+          :disabled="!activeTab || activeTab.binary || explorer.isDirty(activeTab)"
+          :title="t('files.toolbarBlame')"
+          @click="toggleBlame"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="4"/>
+            <line x1="1.5" y1="12" x2="8" y2="12"/>
+            <line x1="16" y1="12" x2="22.5" y2="12"/>
+          </svg>
+          <span>{{ t("files.toolbarBlame") }}</span>
+        </button>
+        <button
+          class="fe__action-btn"
+          :disabled="!activeTab || activeTab.binary || !explorer.isDirty(activeTab)"
+          :title="t('files.toolbarSave')"
+          @click="onToolbarSave"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+            <polyline points="17 21 17 13 7 13 7 21"/>
+            <polyline points="7 3 7 8 15 8"/>
+          </svg>
+          <span>{{ t("files.toolbarSave") }}</span>
+        </button>
+      </div>
+      <div class="fe__header-spacer" />
       <button v-if="tree.truncated.value" class="fe__truncated" :title="t('files.truncatedTooltip')">
         {{ t("files.truncatedBadge") }}
       </button>
@@ -508,60 +567,6 @@ function onKeyDown(e: KeyboardEvent) {
       <div class="fe__corner fe__corner--bl" :class="{ 'fe__corner--active': resizingCorner === 'bl' }" @mousedown="onResizeCornerStart('bl', $event)" />
       <div class="fe__corner fe__corner--br" :class="{ 'fe__corner--active': resizingCorner === 'br' }" @mousedown="onResizeCornerStart('br', $event)" />
     </template>
-
-    <div class="fe__toolbar">
-      <button
-        class="fe__toolbar-btn"
-        :class="{ 'fe__toolbar-btn--active': !editLocked }"
-        :title="editLocked ? t('files.toolbarEdit') : t('files.toolbarLock')"
-        @click="toggleLock"
-      >
-        <svg v-if="editLocked" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <rect x="5" y="11" width="14" height="10" rx="2"/>
-          <path d="M8 11V7a4 4 0 0 1 8 0v4"/>
-        </svg>
-        <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <rect x="5" y="11" width="14" height="10" rx="2"/>
-          <path d="M8 11V7a4 4 0 0 1 7.75-1.5"/>
-        </svg>
-        <span>{{ editLocked ? t("files.toolbarEdit") : t("files.toolbarLock") }}</span>
-      </button>
-      <button class="fe__toolbar-btn" :disabled="editLocked" :title="t('files.toolbarUndo')" @click="onUndo">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M3 7v6h6"/>
-          <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/>
-        </svg>
-        <span>{{ t("files.toolbarUndo") }}</span>
-      </button>
-      <button
-        class="fe__toolbar-btn"
-        :class="{ 'fe__toolbar-btn--active': blameEnabled }"
-        :disabled="!activeTab || activeTab.binary || explorer.isDirty(activeTab)"
-        :title="t('files.toolbarBlame')"
-        @click="toggleBlame"
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <circle cx="12" cy="12" r="4"/>
-          <line x1="1.5" y1="12" x2="8" y2="12"/>
-          <line x1="16" y1="12" x2="22.5" y2="12"/>
-        </svg>
-        <span>{{ t("files.toolbarBlame") }}</span>
-      </button>
-      <div class="fe__toolbar-spacer" />
-      <button
-        class="fe__toolbar-btn"
-        :disabled="!activeTab || activeTab.binary || !explorer.isDirty(activeTab)"
-        :title="t('files.toolbarSave')"
-        @click="onToolbarSave"
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
-          <polyline points="17 21 17 13 7 13 7 21"/>
-          <polyline points="7 3 7 8 15 8"/>
-        </svg>
-        <span>{{ t("files.toolbarSave") }}</span>
-      </button>
-    </div>
   </div>
 </template>
 
@@ -679,7 +684,49 @@ function onKeyDown(e: KeyboardEvent) {
 .fe__title {
   font-size: var(--font-size-lg);
   font-weight: var(--font-weight-bold);
+}
+
+.fe__header-divider {
+  width: 1px;
+  height: 16px;
+  flex-shrink: 0;
+  background: var(--color-border);
+  margin: 0 var(--space-1);
+}
+
+.fe__header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.fe__header-spacer {
   flex: 1;
+}
+
+.fe__action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  background: var(--color-bg-tertiary);
+  white-space: nowrap;
+}
+
+.fe__action-btn:hover:not(:disabled) {
+  color: var(--color-text);
+}
+
+.fe__action-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.fe__action-btn--active {
+  color: var(--color-accent);
 }
 
 .fe__close {
@@ -762,16 +809,19 @@ function onKeyDown(e: KeyboardEvent) {
   height: 100%;
 }
 
-/* Blame gutter (opt-in) — sits alongside the line-number gutter, showing
-   `author · date` once per same-commit run. Full details on hover (title).
-   The editor is always the oneDark theme regardless of the app light/dark
-   theme, so these colours are hard-coded to oneDark's own gutter palette
-   (background #282c34, stone #7d8799, darkBackground #21252b) rather than the
-   app `--color-*` tokens — those rendered a light gutter on the dark editor in
+/* Blame gutter (opt-in) — rendered via CodeMirror's `side: "after"` gutter
+   slot (.cm-gutters-after), to the right of .cm-content rather than beside
+   the line-number gutter on the left, so showing/resizing it never shifts
+   the code's horizontal position (PR #108 review). Shows `author · date`
+   once per same-commit run; full details on hover (title). The editor is
+   always the oneDark theme regardless of the app light/dark theme, so these
+   colours are hard-coded to oneDark's own gutter palette (background
+   #282c34, stone #7d8799, darkBackground #21252b) rather than the app
+   `--color-*` tokens — those rendered a light gutter on the dark editor in
    light mode. */
 .fe__content :deep(.cm-blame-gutter) {
   background-color: #282c34;
-  border-right: 1px solid #21252b;
+  border-left: 1px solid #21252b;
   color: #7d8799;
   font-size: 11px;
 }
@@ -812,40 +862,4 @@ function onKeyDown(e: KeyboardEvent) {
    added to apps/desktop/src/assets/main.css in Step 1, also used by
    RepoSidebar.vue's tree layout. Do not re-add them locally. */
 
-.fe__toolbar {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  border-top: 1px solid var(--color-border);
-  flex-shrink: 0;
-}
-
-.fe__toolbar-spacer {
-  flex: 1;
-}
-
-.fe__toolbar-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-sm);
-  color: var(--color-text-muted);
-  font-size: var(--font-size-sm);
-  background: var(--color-bg-tertiary);
-}
-
-.fe__toolbar-btn:hover:not(:disabled) {
-  color: var(--color-text);
-}
-
-.fe__toolbar-btn:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
-.fe__toolbar-btn--active {
-  color: var(--color-accent);
-}
 </style>
