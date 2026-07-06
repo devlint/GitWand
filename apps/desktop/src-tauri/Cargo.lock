@@ -1654,6 +1654,7 @@ dependencies = [
  "dirs 5.0.1",
  "git2",
  "keyring",
+ "parking_lot",
  "portable-pty",
  "rayon",
  "serde",

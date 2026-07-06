@@ -627,6 +627,11 @@ pub(crate) async fn bb_checkout_pr(cwd: String, pr_id: i64) -> Result<(), String
         return Err(format!("Could not determine source branch for PR #{}", pr_id));
     }
 
+    // Write guard: fetch + switch mutate refs and the worktree, colliding on
+    // `.git/index.lock` with a single-repo view of the same repo. Held across
+    // both git ops (the RwLock is non-reentrant — acquire exactly once).
+    let _repo = crate::git::repo_lock::write(&cwd);
+
     // Fetch the branch.
     let fetch = hidden_cmd("git")
         .args(["fetch", "origin", &branch])

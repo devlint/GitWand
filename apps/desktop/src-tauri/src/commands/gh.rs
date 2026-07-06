@@ -87,6 +87,10 @@ fn gh_list_prs_inner(
     // Enrich +/- stats via local git diff — mirrors rest_list_prs behaviour.
     // Fetch remote branches once so numstat can resolve origin/branch refs.
     if !prs.is_empty() && off == 0 {
+        // Write guard: refreshing remote-tracking refs mutates `.git` and can
+        // race the single-repo view of the same repo on `index.lock`. Held only
+        // around the fetch — the numstat diffs below are read-only.
+        let _repo = repo_lock::write(&cwd);
         let _ = hidden_cmd("git").args(["fetch", "origin"]).current_dir(&cwd).output();
     }
     for pr in &mut prs {
@@ -543,6 +547,12 @@ pub(crate) async fn gh_branches(cwd: String) -> Result<Vec<String>, String> {
 }
 
 fn gh_checkout_pr_inner(cwd: String, number: i64) -> Result<(), String> {
+    // Write guard: both paths below fetch a PR ref and check it out — index +
+    // refs + worktree mutations that would collide on `.git/index.lock` with a
+    // single-repo view of the same repo. Held for the whole op; the inner
+    // `github_api::rest_checkout_pr` must NOT re-lock (the RwLock is
+    // non-reentrant), so the guard lives only here.
+    let _repo = repo_lock::write(&cwd);
     if github_api::settings_github_token().is_some() {
         return github_api::rest_checkout_pr(&cwd, number);
     }

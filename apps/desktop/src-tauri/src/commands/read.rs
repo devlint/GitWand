@@ -48,6 +48,13 @@ pub(crate) async fn git_status(
     cwd: String,
     pathspec: Option<String>,
 ) -> Result<GitStatus, String> {
+    // Shared guard: block only while a writer mutates this repo (checkout /
+    // fetch / submodule update), so a background status refresh can't observe a
+    // half-rebuilt working tree — the source of the `os error 2` on git status
+    // seen during a submodule-heavy sync. See git::repo_lock. Covers both the
+    // libgit2 fast path and the `git_status_cli` fallback below (a plain
+    // helper, not a command — it does not re-lock).
+    let _repo = repo_lock::read(&cwd);
     // When a pathspec is provided, skip the libgit2 fast path and use the CLI
     // directly — libgit2's status API does not accept a pathspec filter the
     // same way `git status -- <path>` does.
@@ -701,6 +708,7 @@ fn compute_main_commit_count(cwd: &str, branch: &str) -> i32 {
 
 #[tauri::command]
 pub(crate) async fn git_diff(cwd: String, path: String, staged: bool) -> Result<GitDiff, String> {
+    let _repo = repo_lock::read(&cwd);
     let mut cmd = git_cmd();
     if staged {
         cmd.arg("diff").arg("--cached");
@@ -791,6 +799,7 @@ pub(crate) async fn git_log(
     pathspec: Option<String>,
     since: Option<String>,
 ) -> Result<Vec<GitLogEntry>, String> {
+    let _repo = repo_lock::read(&cwd);
     let limit = count.unwrap_or(100);
     let skip  = offset.unwrap_or(0).max(0);
     // Default: current branch only (like `git log`). Pass `all: true` to include all refs.
@@ -1063,6 +1072,7 @@ pub(crate) async fn git_repo_state(cwd: String) -> Result<RepoOperationState, St
 
 #[tauri::command]
 pub(crate) async fn git_show(cwd: String, hash: String) -> Result<Vec<GitDiff>, String> {
+    let _repo = repo_lock::read(&cwd);
     let output = git_cmd()
         .args(["show", "-m", "--first-parent", "--format=", &hash])
         .current_dir(&cwd)
@@ -1219,6 +1229,7 @@ pub(crate) async fn git_show(cwd: String, hash: String) -> Result<Vec<GitDiff>, 
 
 #[tauri::command]
 pub(crate) async fn git_file_log(cwd: String, path: String, count: Option<u32>) -> Result<Vec<FileLogEntry>, String> {
+    let _repo = repo_lock::read(&cwd);
     let n = count.unwrap_or(50).to_string();
     let fmt = "%H\n%h\n%an\n%aI\n%s\n%b\n---END---";
     let output = git_cmd()
@@ -1236,6 +1247,7 @@ pub(crate) async fn git_file_log(cwd: String, path: String, count: Option<u32>) 
 /// mode: "S" (literal string) | "G" (regex)
 #[tauri::command]
 pub(crate) async fn git_file_log_pickaxe(cwd: String, path: String, search: String, mode: String) -> Result<Vec<FileLogEntry>, String> {
+    let _repo = repo_lock::read(&cwd);
     let flag = if mode == "G" { "-G" } else { "-S" };
     let fmt = "%H\n%h\n%an\n%aI\n%s\n%b\n---END---";
     let output = git_cmd()
@@ -1253,6 +1265,7 @@ pub(crate) async fn git_file_log_pickaxe(cwd: String, path: String, search: Stri
 /// Uses git log -L <start>,<end>:<path> (no --follow; incompatible with -L).
 #[tauri::command]
 pub(crate) async fn git_file_log_range(cwd: String, path: String, start_line: u32, end_line: u32) -> Result<Vec<FileLogEntry>, String> {
+    let _repo = repo_lock::read(&cwd);
     let range = format!("{},{}:{}", start_line, end_line, path);
     let fmt = "%H\n%h\n%an\n%aI\n%s\n%b\n---END---";
     let output = git_cmd()
@@ -1270,6 +1283,7 @@ pub(crate) async fn git_file_log_range(cwd: String, path: String, start_line: u3
 /// algorithm: "histogram" | "patience" | "minimal" | "myers" (default "histogram").
 #[tauri::command]
 pub(crate) async fn git_blame(cwd: String, path: String, algorithm: Option<String>) -> Result<Vec<BlameLine>, String> {
+    let _repo = repo_lock::read(&cwd);
     let algo = algorithm.as_deref().unwrap_or("histogram");
     let diff_algo_flag = format!("--diff-algorithm={}", algo);
     let output = git_cmd()
@@ -1741,6 +1755,7 @@ fn merge_file_preview(
 pub(crate) async fn git_branch_merged(cwd: String) -> Result<Vec<String>, String> {
     use crate::git::cmd::git_cmd;
 
+    let _repo = repo_lock::read(&cwd);
     // Resolve default branch (main / master / trunk / …)
     let default_out = git_cmd()
         .args(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"])

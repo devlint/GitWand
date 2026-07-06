@@ -648,6 +648,11 @@ fn rest_list_prs(cwd: &str, state: &str, limit: i64, offset: i64) -> Result<Vec<
     // (merged/closed) leave the stats at 0.
     if !prs.is_empty() {
         if offset == 0 && should_fetch_origin(cwd) {
+            // Write guard: this background PR-list fetch mutates remote-tracking
+            // refs and can collide on `.git/index.lock` with the single-repo
+            // view of the same repo. Held only for the fetch; the read-only
+            // `diff_numstat` calls below don't touch the index.
+            let _repo = crate::git::repo_lock::write(cwd);
             let _ = git_cmd().args(["fetch", "origin"]).current_dir(cwd).output();
         }
         prs.par_iter_mut().for_each(|pr| {
@@ -742,6 +747,12 @@ fn diff_numstat(cwd: &str, source: &str, target: &str) -> (i64, i64, i64) {
 /// Diff is produced locally: fetch both PR branches from origin and diff the
 /// merge base. Azure DevOps has no single unified-patch endpoint.
 fn fetch_pr_branches(cwd: &str, source: &str, target: &str) -> Result<(), String> {
+    // Write guard: fetching the PR branches updates remote-tracking refs and can
+    // race the single-repo view of the same repo on `index.lock`. None of the
+    // three callers (`rest_pr_detail`/`rest_pr_diff`/`rest_pr_files`) hold a repo
+    // lock, so acquiring here can't re-lock (the RwLock is non-reentrant). Held
+    // only for the fetch; the diffs the callers run afterwards are read-only.
+    let _repo = crate::git::repo_lock::write(cwd);
     let out = git_cmd()
         .args(["fetch", "origin", source, target])
         .current_dir(cwd)
@@ -1018,6 +1029,11 @@ fn rest_pr_ready(cwd: &str, number: i64) -> Result<(), String> {
 fn rest_checkout_pr(cwd: &str, number: i64) -> Result<(), String> {
     let (_r, pr) = get_pr_json(cwd, number)?;
     let source = short_ref(&js(&pr, "sourceRefName"));
+    // Write guard: fetch + checkout mutate refs and the worktree, colliding on
+    // `.git/index.lock` with a single-repo view of the same repo. Acquired after
+    // the network `get_pr_json` above so the lock isn't held during the REST
+    // round-trip; held across both git ops (non-reentrant — acquire once).
+    let _repo = crate::git::repo_lock::write(cwd);
     let fetch = git_cmd()
         .args(["fetch", "origin", &source])
         .current_dir(cwd)
