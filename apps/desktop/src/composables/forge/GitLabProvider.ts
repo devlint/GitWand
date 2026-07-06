@@ -42,6 +42,7 @@ import {
   glListReviews,
   glCurrentUser,
   glReviewerCandidates,
+  glBranches,
   glMrFiles,
   glListIssues,
 } from "../../utils/backend";
@@ -91,6 +92,10 @@ export class GitLabProvider implements ForgeProvider {
 
   listReviewerCandidates(cwd: string): Promise<ReviewerCandidate[]> {
     return glReviewerCandidates(cwd);
+  }
+
+  listBranches(cwd: string): Promise<string[]> {
+    return glBranches(cwd);
   }
 
   // ── MR listing ─────────────────────────────────────────────────────────────

@@ -2,7 +2,8 @@
 import { ref, computed, watch, onUnmounted, nextTick } from "vue";
 import type { GitDiff, GitLogEntry, DiffLine, FolderDiffNode } from "../utils/backend";
 import { useI18n } from "../composables/useI18n";
-import { avatarStyle, avatarInitials as initials } from "../composables/useAvatar";
+import { avatarStyle } from "../composables/useAvatar";
+import Avatar from "./Avatar.vue";
 import type { DiffMode } from "../utils/diffMode";
 import { detectLanguage, highlightLine } from "../utils/highlight";
 import { safeHtml } from "../composables/useSafeHtml";
@@ -339,9 +340,7 @@ function onContentScroll(e: Event) {
     <div class="cdv-commit-card" v-if="commitInfo">
       <!-- Row 1: avatar + subject + hash -->
       <div class="cdv-commit-top">
-        <span class="cdv-avatar" :style="avatarStyle(commitInfo.email || commitInfo.author)">
-          {{ initials(commitInfo.author) }}
-        </span>
+        <Avatar class="cdv-avatar" :name="commitInfo.author" :email="commitInfo.email" />
         <div class="cdv-commit-top-text">
           <div class="cdv-commit-subject">{{ commitInfo.message }}</div>
           <div class="cdv-commit-meta">

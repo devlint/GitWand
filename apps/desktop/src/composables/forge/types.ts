@@ -120,6 +120,14 @@ export interface ForgeProvider {
   /** Utilisateurs pouvant être reviewers sur ce repo. */
   listReviewerCandidates(cwd: string): Promise<ReviewerCandidate[]>;
 
+  /**
+   * Server-side branch names (heads) of the repo. Optional: forges implement
+   * it when the local clone may not hold every branch (Azure DevOps), so the
+   * PR base-branch picker can offer branches that were never fetched. Callers
+   * treat absence as "unsupported" and fall back to local git refs only.
+   */
+  listBranches?(cwd: string): Promise<string[]>;
+
   // ── PR / MR listing ───────────────────────────────────────────────────────
 
   listPRs(cwd: string, opts?: ListPRsOptions): Promise<PullRequest[]>;

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from "vue";
 import type { BlameLine, FileLogEntry, GitDiff } from "../utils/backend";
-import { avatarStyle, avatarInitials } from "../composables/useAvatar";
+import Avatar from "./Avatar.vue";
 import { getGitBlame, getGitFileLog, getGitFileLogPickaxe, getGitFileLogRange, getGitFileDiff, type BlameAlgorithm, type PickaxeMode } from "../utils/backend";
 import { loadSettings } from "../composables/useSettings";
 import { useI18n } from "../composables/useI18n";
@@ -507,9 +507,7 @@ function shortHash(hash: string): string {
         }"
       >
         <div class="fhv-log-top">
-          <span class="fhv-log-avatar" :style="avatarStyle(entry.author)">
-            {{ avatarInitials(entry.author) }}
-          </span>
+          <Avatar class="fhv-log-avatar" :name="entry.author" />
           <div class="fhv-log-info" @click="emit('select-commit', entry.hashFull)">
             <div class="fhv-log-message">{{ entry.message }}</div>
             <div class="fhv-log-meta muted">

@@ -17,6 +17,7 @@ import {
   ghPrFiles,
   ghCurrentUser,
   ghListReviewerCandidates,
+  ghBranches,
   ghPrDetail,
   ghPrDiff,
   ghPrChecks,
@@ -82,6 +83,10 @@ export class GitHubProvider implements ForgeProvider {
 
   listReviewerCandidates(cwd: string): Promise<ReviewerCandidate[]> {
     return ghListReviewerCandidates(cwd);
+  }
+
+  listBranches(cwd: string): Promise<string[]> {
+    return ghBranches(cwd);
   }
 
   // ── PR listing ────────────────────────────────────────────────────────────

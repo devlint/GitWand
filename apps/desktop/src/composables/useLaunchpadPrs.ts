@@ -6,10 +6,17 @@ import { useLaunchpadPins } from "./useLaunchpadPins";
 
 export type { WorkspaceRepoPrs };
 
+/** WorkspaceRepoPrs plus the forge that produced it (for avatar resolution). */
+interface WorkspaceRepoPrsWithForge extends WorkspaceRepoPrs {
+  forge?: ForgeName;
+}
+
 /** A PR enriched with its repo context (for flat list rendering). */
 export interface PrWithRepo extends PullRequest {
   repoName: string;
   repoPath: string;
+  /** Forge that owns this PR — drives the forge avatar lookup. */
+  forge?: ForgeName;
 }
 
 /**
@@ -18,7 +25,7 @@ export interface PrWithRepo extends PullRequest {
  * Each call returns a fresh reactive scope — no shared singleton.
  */
 export function useLaunchpadPrs() {
-  const repos = ref<WorkspaceRepoPrs[]>([]);
+  const repos = ref<WorkspaceRepoPrsWithForge[]>([]);
   const needsConnection = ref<ForgeName[]>([]);
   const loading = ref(false);
   const error = ref<string | null>(null);
@@ -28,7 +35,7 @@ export function useLaunchpadPrs() {
   /** Flat list of all non-snoozed PRs: pinned items first, then by createdAt descending. */
   const allPrs = computed<PrWithRepo[]>(() =>
     repos.value
-      .flatMap((r) => r.prs.map((pr) => ({ ...pr, repoName: r.repoName, repoPath: r.repoPath })))
+      .flatMap((r) => r.prs.map((pr) => ({ ...pr, repoName: r.repoName, repoPath: r.repoPath, forge: r.forge })))
       .filter((pr) => !isSnoozed(pr.url))
       .sort((a, b) => {
         const aPinned = isPinned(a.url) ? 0 : 1;
@@ -41,7 +48,7 @@ export function useLaunchpadPrs() {
   /** Flat list of currently-snoozed PRs (hidden from allPrs). */
   const snoozedPrs = computed<PrWithRepo[]>(() =>
     repos.value
-      .flatMap((r) => r.prs.map((pr) => ({ ...pr, repoName: r.repoName, repoPath: r.repoPath })))
+      .flatMap((r) => r.prs.map((pr) => ({ ...pr, repoName: r.repoName, repoPath: r.repoPath, forge: r.forge })))
       .filter((pr) => isSnoozed(pr.url))
   );
 
@@ -51,7 +58,7 @@ export function useLaunchpadPrs() {
     const unconnected = new Set<ForgeName>();
     try {
       const results = await Promise.all(
-        workspaceRepos.map(async (repo): Promise<WorkspaceRepoPrs | null> => {
+        workspaceRepos.map(async (repo): Promise<WorkspaceRepoPrsWithForge | null> => {
           const provider = await forgeForRepo(repo.path);
           const forge = provider.name as ForgeName;
           if (!isForgeConnected(forge)) {
@@ -60,16 +67,16 @@ export function useLaunchpadPrs() {
           }
           try {
             const prs = await provider.listPRs(repo.path, { state: "open", limit: 10 });
-            return { repoPath: repo.path, repoName: repo.name, prs, error: null };
+            return { repoPath: repo.path, repoName: repo.name, prs, error: null, forge };
           } catch (e) {
             return {
               repoPath: repo.path, repoName: repo.name, prs: [],
-              error: (e as Error).message ?? String(e),
+              error: (e as Error).message ?? String(e), forge,
             };
           }
         })
       );
-      repos.value = results.filter((r): r is WorkspaceRepoPrs => r !== null);
+      repos.value = results.filter((r): r is WorkspaceRepoPrsWithForge => r !== null);
       needsConnection.value = [...unconnected];
     } catch (e) {
       error.value = (e as Error).message ?? String(e);

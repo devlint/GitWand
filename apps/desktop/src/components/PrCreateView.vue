@@ -13,7 +13,9 @@
 import { computed, inject, nextTick, onMounted, ref, useTemplateRef, watch } from "vue";
 import { PR_PANEL_KEY, type PrPanelState } from "../composables/usePrPanel";
 import { renderMarkdown, safeHtml } from "../composables/useSafeHtml";
-import { ghListReviewerCandidates, type GitBranch, type ReviewerCandidate } from "../utils/backend";
+import { getGitShortlog, type GitBranch, type ReviewerCandidate } from "../utils/backend";
+import { forgeForRepo } from "../composables/forge/useForge";
+import Avatar from "./Avatar.vue";
 import { useI18n } from "../composables/useI18n";
 import { useAIProvider } from "../composables/useAIProvider";
 import { usePrDescription } from "../composables/usePrDescription";
@@ -67,6 +69,20 @@ const forkTargets = computed(() => {
 // Strip the remote prefix from a remote-tracking ref ("origin/feat/x" → "feat/x").
 const bareRemoteName = (ref: string) => ref.replace(/^[^/]+\//, "");
 
+// Forge-provided branches (e.g. Azure DevOps refs API). The local clone often
+// holds only `main`, so we augment the local git refs with server-side heads so
+// the base-branch picker offers every branch that exists on the remote.
+const forgeBranches = ref<string[]>([]);
+onMounted(async () => {
+  if (!props.cwd) return;
+  try {
+    const forge = await forgeForRepo(props.cwd);
+    if (forge.listBranches) forgeBranches.value = await forge.listBranches(props.cwd);
+  } catch {
+    // Non-fatal: fall back to local git refs only.
+  }
+});
+
 // ─── Base branch candidates ─────────────────────────────
 // Order: main/master first, then release/* branches, then the rest —
 // each group sorted by most-recently-updated first.
@@ -97,7 +113,14 @@ const baseCandidates = computed<string[]>(() => {
     }
   }
 
-  const names = [...locals, ...remoteOnly];
+  // Server-side branches not present in local refs (Azure clone holds only main).
+  const known = new Set([...locals, ...remoteOnly]);
+  const forgeOnly = new Set<string>();
+  for (const name of forgeBranches.value) {
+    if (name && name !== props.currentBranch && !known.has(name)) forgeOnly.add(name);
+  }
+
+  const names = [...locals, ...remoteOnly, ...forgeOnly];
   const byRecent = (a: string, b: string) =>
     (lastUpdated.get(b) ?? 0) - (lastUpdated.get(a) ?? 0) || a.localeCompare(b);
 
@@ -303,20 +326,49 @@ function onBaseInput(e: Event) {
 }
 
 // ─── Reviewers ──────────────────────────────────────────
-// Tag-style input with autocomplete: candidates are fetched from
-// gh api /repos/:owner/:repo/assignees on mount, then filtered locally
-// as the user types. Enter/Tab on the active suggestion adds it.
+// Tag-style input with autocomplete: candidates are fetched on mount from the
+// forge that owns this repo (GitHub assignees, GitLab members, Bitbucket
+// workspace members, Azure team members), then filtered locally as the user
+// types. Enter/Tab on the active suggestion adds it. Candidates are ranked by
+// repo commit activity (most active first) so likely reviewers surface at top.
 const reviewerInput = ref("");
 const reviewerCandidates = ref<ReviewerCandidate[]>([]);
 const reviewerCandidatesLoading = ref(false);
 const reviewerSuggestOpen = ref(false);
 const reviewerActiveIdx = ref(0);
 
+/**
+ * Rank candidates by repo commit activity, most active first, ties broken
+ * alphabetically. Activity is keyed by email/name from `git shortlog`, matched
+ * against each candidate's login (email for Azure/GitLab) and display name.
+ */
+async function rankByActivity(cwd: string, candidates: ReviewerCandidate[]): Promise<ReviewerCandidate[]> {
+  const activity = new Map<string, number>();
+  try {
+    for (const c of await getGitShortlog(cwd)) {
+      const keys = [...c.emails, ...c.names];
+      for (const k of keys) {
+        const key = k.trim().toLowerCase();
+        if (key) activity.set(key, Math.max(activity.get(key) ?? 0, c.count));
+      }
+    }
+  } catch {
+    // No activity data (shallow clone, non-git, etc.) — keep backend order.
+  }
+  const score = (c: ReviewerCandidate) =>
+    Math.max(activity.get(c.login.toLowerCase()) ?? 0, c.name ? activity.get(c.name.toLowerCase()) ?? 0 : 0);
+  return candidates
+    .slice()
+    .sort((a, b) => score(b) - score(a) || a.login.localeCompare(b.login));
+}
+
 onMounted(async () => {
   if (!props.cwd) return;
   reviewerCandidatesLoading.value = true;
   try {
-    reviewerCandidates.value = await ghListReviewerCandidates(props.cwd);
+    const provider = await forgeForRepo(props.cwd);
+    const candidates = await provider.listReviewerCandidates(props.cwd);
+    reviewerCandidates.value = await rankByActivity(props.cwd, candidates);
   } catch {
     // Silently ignore — autocomplete is optional, manual typing still works.
     reviewerCandidates.value = [];
@@ -677,14 +729,12 @@ function removeReviewer(name: string) {
               @click="pickCandidate(c)"
               @mouseenter="reviewerActiveIdx = idx"
             >
-              <img
-                v-if="c.avatarUrl"
-                :src="c.avatarUrl"
-                :alt="c.login"
+              <Avatar
                 class="pcv-suggest-avatar"
-                referrerpolicy="no-referrer"
+                :name="c.name || c.login"
+                :email="c.login"
+                :url="c.avatarUrl"
               />
-              <span v-else class="pcv-suggest-avatar" aria-hidden="true"></span>
               <span class="pcv-suggest-text">
                 <span class="pcv-suggest-login">{{ c.login }}</span>
                 <span v-if="c.name" class="pcv-suggest-name">{{ c.name }}</span>
@@ -1418,12 +1468,17 @@ function removeReviewer(name: string) {
   background: var(--color-accent-soft);
 }
 .pcv-suggest-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 24px;
   height: 24px;
   border-radius: 50%;
-  background: var(--color-bg-tertiary);
+  border: 1.5px solid currentColor;
+  background: transparent;
+  font-size: 9px;
+  font-weight: var(--font-weight-bold);
   flex-shrink: 0;
-  object-fit: cover;
 }
 .pcv-suggest-text {
   display: flex;

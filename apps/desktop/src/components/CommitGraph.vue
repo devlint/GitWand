@@ -5,7 +5,7 @@ import { computeDagLayout, parseRefs, type DagLayout, type DagNode } from "../ut
 import { dateBucket, type DateBucket } from "../utils/dateBucket";
 import { useI18n } from "../composables/useI18n";
 import type { LocaleKey } from "../locales";
-import { avatarStyle, avatarInitials as initials } from "../composables/useAvatar";
+import Avatar from "./Avatar.vue";
 import { filterCommitsLocal } from "../composables/useCommitSearch";
 import { useWorkspaceScope } from "../composables/useWorkspaceScope";
 import { PR_PANEL_KEY, type PrPanelState } from "../composables/usePrPanel";
@@ -1491,7 +1491,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
             <span class="cg-msg">{{ vc.entry.message }}</span>
             <!-- Author + date -->
             <span class="cg-meta muted">
-              <span class="avatar avatar--sm" :style="avatarStyle(vc.entry.email || vc.entry.author)" :title="vc.entry.author">{{ initials(vc.entry.author) }}</span>
+              <Avatar class="avatar avatar--sm" :name="vc.entry.author" :email="vc.entry.email" :title="vc.entry.author" />
               <span class="cg-sep">&middot;</span>
               <span>{{ formatDate(vc.entry.date) }}</span>
             </span>

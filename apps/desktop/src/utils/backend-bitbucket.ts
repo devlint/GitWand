@@ -191,3 +191,8 @@ export async function bbReviewerCandidates(cwd: string): Promise<ReviewerCandida
   if (!isTauri()) return [];
   return tauriInvoke<ReviewerCandidate[]>("bb_reviewer_candidates", { cwd });
 }
+
+export async function bbBranches(cwd: string): Promise<string[]> {
+  if (!isTauri()) return [];
+  return tauriInvoke<string[]>("bb_branches", { cwd });
+}

@@ -27,7 +27,7 @@
 import { ref, computed, inject, nextTick, onMounted, onUnmounted, watch, toRef, defineAsyncComponent, type Ref } from "vue";
 import { gitSubmoduleList, gitSubmoduleBranches, getGitLog, getGitBranchTopAuthors, type GitBranch, type SubmoduleEntry, type SubmoduleBranch, type BranchTopAuthor } from "../../utils/backend";
 import { branchSort } from "../../utils/branchSort";
-import { avatarStyle, avatarInitials } from "../../composables/useAvatar";
+import Avatar from "../Avatar.vue";
 import { useI18n } from "../../composables/useI18n";
 import type { LocaleKey } from "../../locales";
 import { useMergePreview, type PreviewOperation } from "../../composables/useMergePreview";
@@ -645,12 +645,13 @@ onUnmounted(() => {
               @click="!branch.isCurrent && handleBranchSwitch(branch.name)"
             >
               <span v-if="branch.isCurrent" class="bp-current-trait"></span>
-              <span
+              <Avatar
                 v-if="authorFor(branch.name)"
                 class="bp-author-avatar"
-                :style="avatarStyle(authorFor(branch.name)!.email || authorFor(branch.name)!.name)"
+                :name="authorFor(branch.name)!.name"
+                :email="authorFor(branch.name)!.email"
                 :title="t('branches.topContributor', authorFor(branch.name)!.name, authorFor(branch.name)!.count)"
-              >{{ avatarInitials(authorFor(branch.name)!.name) }}</span>
+              />
               <span class="bp-item-name mono" :title="branch.name"><span class="bp-item-name__text">{{ branch.name }}</span><span
                 v-if="prSearch.prFor(branch.name, false)"
                 class="bp-pr-badge"
@@ -691,12 +692,13 @@ onUnmounted(() => {
                 @click="!branch.isCurrent && handleBranchSwitch(branch.name)"
               >
                 <span v-if="branch.isCurrent" class="bp-current-trait"></span>
-                <span
+                <Avatar
                   v-if="authorFor(branch.name)"
                   class="bp-author-avatar"
-                  :style="avatarStyle(authorFor(branch.name)!.email || authorFor(branch.name)!.name)"
+                  :name="authorFor(branch.name)!.name"
+                  :email="authorFor(branch.name)!.email"
                   :title="t('branches.topContributor', authorFor(branch.name)!.name, authorFor(branch.name)!.count)"
-                >{{ avatarInitials(authorFor(branch.name)!.name) }}</span>
+                />
                 <svg v-if="props.worktreeBranches?.has(branch.name)" class="branch-wt-icon" width="12" height="12" viewBox="0 0 16 16" fill="currentColor" style="margin-right: 6px; color: var(--color-success); flex-shrink: 0;">
                   <circle cx="8" cy="4.5" r="2.5" />
                   <circle cx="4.5" cy="8.5" r="2.5" />
@@ -786,12 +788,13 @@ onUnmounted(() => {
               @click="!branch.isCurrent && handleBranchSwitch(branch.name)"
             >
               <span v-if="branch.isCurrent" class="bp-current-trait"></span>
-              <span
+              <Avatar
                 v-if="authorFor(branch.name)"
                 class="bp-author-avatar"
-                :style="avatarStyle(authorFor(branch.name)!.email || authorFor(branch.name)!.name)"
+                :name="authorFor(branch.name)!.name"
+                :email="authorFor(branch.name)!.email"
                 :title="t('branches.topContributor', authorFor(branch.name)!.name, authorFor(branch.name)!.count)"
-              >{{ avatarInitials(authorFor(branch.name)!.name) }}</span>
+              />
               <span class="bp-item-name mono" :title="branch.name"><span class="bp-item-name__text">{{ branch.name }}</span></span>
               <span class="bp-item-actions" @click.stop>
                 <button class="bp-item-action" :title="t('branch.unarchive')" @click.stop="archives.unarchive(branch.name)">
@@ -820,12 +823,13 @@ onUnmounted(() => {
               class="bp-item bp-item--remote"
               @click="handleBranchSwitch(branch.name.replace(/^origin\//, ''))"
             >
-              <span
+              <Avatar
                 v-if="authorFor(branch.name)"
                 class="bp-author-avatar"
-                :style="avatarStyle(authorFor(branch.name)!.email || authorFor(branch.name)!.name)"
+                :name="authorFor(branch.name)!.name"
+                :email="authorFor(branch.name)!.email"
                 :title="t('branches.topContributor', authorFor(branch.name)!.name, authorFor(branch.name)!.count)"
-              >{{ avatarInitials(authorFor(branch.name)!.name) }}</span>
+              />
               <span class="bp-item-name mono" :title="branch.name"><span class="bp-item-name__text">{{ branch.name }}</span><span
                 v-if="prSearch.prFor(branch.name, true)"
                 class="bp-pr-badge"

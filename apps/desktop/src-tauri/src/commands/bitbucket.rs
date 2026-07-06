@@ -933,6 +933,48 @@ pub(crate) async fn bb_reviewer_candidates(cwd: String) -> Result<Vec<ReviewerCa
     Ok(candidates)
 }
 
+/// List branch names for the repo via the Bitbucket refs API. Follows `next`
+/// page links (capped), deduped, case-insensitively sorted.
+#[tauri::command]
+pub(crate) async fn bb_branches(cwd: String) -> Result<Vec<String>, String> {
+    let (workspace, slug) = parse_workspace_slug(&cwd)?;
+    let (username, app_password) = get_bb_creds(&cwd)?;
+    let auth_config = basic_auth_config(&username, &app_password);
+
+    let mut names: Vec<String> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut url = format!(
+        "https://api.bitbucket.org/2.0/repositories/{}/{}/refs/branches?pagelen=100",
+        workspace, slug
+    );
+    // Follow `next` links, capped to avoid unbounded loops.
+    for _ in 0..20 {
+        let resp = match bb_curl("GET", &url, None, &auth_config) {
+            Ok(v) => v,
+            Err(_) => break,
+        };
+        let values = resp
+            .get("values")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        for b in &values {
+            if let Some(name) = b.get("name").and_then(|v| v.as_str()) {
+                if name.is_empty() || !seen.insert(name.to_string()) {
+                    continue;
+                }
+                names.push(name.to_string());
+            }
+        }
+        match resp.get("next").and_then(|v| v.as_str()) {
+            Some(next) if !next.is_empty() => url = next.to_string(),
+            _ => break,
+        }
+    }
+    names.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+    Ok(names)
+}
+
 /// Reduce a commit's Bitbucket build statuses to one rollup state:
 /// `FAILURE` (red) / `PENDING` (yellow) / `SUCCESS` (green), or `""` (no CI).
 /// Precedence: any failed/stopped build ⇒ red, else any in-progress ⇒ yellow.
