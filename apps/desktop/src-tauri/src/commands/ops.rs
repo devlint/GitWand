@@ -1936,9 +1936,21 @@ pub(crate) async fn git_commit_submodule_changes(
 
 #[tauri::command]
 pub(crate) async fn git_worktree_list(cwd: String) -> Result<Vec<WorktreeEntry>, String> {
+    let _repo = repo_lock::read(&cwd);
+    list_worktrees(&cwd)
+}
+
+/// Plain (non-command) worktree enumeration shared by `git_worktree_list` and
+/// its in-process callers (`git_worktree_status_all`, `agent_session_list`).
+///
+/// Deliberately takes no repo lock: the caller owns whatever guard it needs.
+/// Factoring this out keeps the "command bodies never call one another"
+/// invariant true (see `git/repo_lock.rs`) so the non-reentrant `RwLock` can
+/// never be re-acquired on the same repo from a single command.
+fn list_worktrees(cwd: &str) -> Result<Vec<WorktreeEntry>, String> {
     let output = git_cmd()
         .args(["worktree", "list", "--porcelain"])
-        .current_dir(&cwd)
+        .current_dir(cwd)
         .output()
         .map_err(|e| format!("Failed to list worktrees: {}", e))?;
 
@@ -2117,7 +2129,7 @@ pub(crate) async fn git_worktree_prune(cwd: String) -> Result<(), String> {
 
 #[tauri::command]
 pub(crate) async fn git_worktree_status_all(cwd: String) -> Result<Vec<WorkspaceRepoStatus>, String> {
-    let worktrees = git_worktree_list(cwd).await?;
+    let worktrees = list_worktrees(&cwd)?;
 
     let statuses = worktrees.into_par_iter().map(|wt| {
         let path = wt.path.clone();
@@ -2595,7 +2607,7 @@ fn detect_agent_tool(worktree_path: &str) -> Option<String> {
 pub(crate) async fn agent_session_list(cwd: String) -> Result<Vec<AgentSession>, String> {
     if cwd.trim().is_empty() { return Err("cwd must not be empty".to_string()); }
     let path = PathBuf::from(&cwd);
-    let worktrees = git_worktree_list(path.to_string_lossy().to_string()).await?;
+    let worktrees = list_worktrees(&path.to_string_lossy())?;
 
     let mut cwds_cache: HashMap<String, HashSet<String>> = HashMap::new();
 

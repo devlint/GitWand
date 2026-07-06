@@ -39,8 +39,12 @@
 //! Acquire the guard at the top of a `#[tauri::command]` body and hold it for
 //! the whole command. Never acquire a second repo guard while holding one
 //! (the `RwLock` is non-reentrant — re-locking the same repo would deadlock).
-//! GitWand's command bodies each spawn their git subprocess directly and do
-//! not call one another, so this holds by construction.
+//! To keep that safe by construction, command bodies must never call another
+//! `#[tauri::command]`: when one command needs another's logic, that logic is
+//! factored into a plain (non-command, unlocked) helper both share, and the
+//! caller owns the single guard. See `list_worktrees` in `commands/ops.rs`
+//! (shared by `git_worktree_list`, `git_worktree_status_all`, and
+//! `agent_session_list`) for the pattern.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};

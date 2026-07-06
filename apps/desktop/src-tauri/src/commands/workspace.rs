@@ -92,6 +92,10 @@ pub(crate) async fn workspace_status_all(repos: Vec<WorkspaceRepo>) -> Vec<Works
 #[tauri::command]
 pub(crate) async fn workspace_fetch_all(repos: Vec<WorkspaceRepo>) -> Vec<WorkspaceRepoStatus> {
     repos.par_iter().for_each(|repo| {
+        // Per-repo write guard: fetch mutates refs and can collide on
+        // `.git/index.lock` with a single-repo view of the same repo. Distinct
+        // repos map to distinct locks, so cross-repo rayon parallelism is kept.
+        let _repo = repo_lock::write(&repo.path);
         let _ = git_cmd()
             .args(["fetch", "--all", "--prune"])
             .current_dir(&repo.path)
@@ -107,6 +111,10 @@ pub(crate) async fn workspace_fetch_all(repos: Vec<WorkspaceRepo>) -> Vec<Worksp
 #[tauri::command]
 pub(crate) async fn workspace_pull_all(repos: Vec<WorkspaceRepo>) -> Vec<WorkspaceRepoStatus> {
     repos.par_iter().for_each(|repo| {
+        // Per-repo write guard: pull updates the index/worktree and would race a
+        // single-repo view of the same repo on `.git/index.lock`. Different
+        // repos hold different locks, so the rayon parallelism is preserved.
+        let _repo = repo_lock::write(&repo.path);
         let _ = git_cmd()
             .args(["pull", "--ff-only"])
             .current_dir(&repo.path)

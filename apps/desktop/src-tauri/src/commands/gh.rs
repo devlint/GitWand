@@ -87,6 +87,10 @@ fn gh_list_prs_inner(
     // Enrich +/- stats via local git diff — mirrors rest_list_prs behaviour.
     // Fetch remote branches once so numstat can resolve origin/branch refs.
     if !prs.is_empty() && off == 0 {
+        // Write guard: refreshing remote-tracking refs mutates `.git` and can
+        // race the single-repo view of the same repo on `index.lock`. Held only
+        // around the fetch — the numstat diffs below are read-only.
+        let _repo = repo_lock::write(&cwd);
         let _ = hidden_cmd("git").args(["fetch", "origin"]).current_dir(&cwd).output();
     }
     for pr in &mut prs {

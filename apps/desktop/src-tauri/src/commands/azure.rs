@@ -648,6 +648,11 @@ fn rest_list_prs(cwd: &str, state: &str, limit: i64, offset: i64) -> Result<Vec<
     // (merged/closed) leave the stats at 0.
     if !prs.is_empty() {
         if offset == 0 && should_fetch_origin(cwd) {
+            // Write guard: this background PR-list fetch mutates remote-tracking
+            // refs and can collide on `.git/index.lock` with the single-repo
+            // view of the same repo. Held only for the fetch; the read-only
+            // `diff_numstat` calls below don't touch the index.
+            let _repo = crate::git::repo_lock::write(cwd);
             let _ = git_cmd().args(["fetch", "origin"]).current_dir(cwd).output();
         }
         prs.par_iter_mut().for_each(|pr| {
