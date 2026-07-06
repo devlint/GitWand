@@ -1650,6 +1650,11 @@ pub(crate) async fn git_submodule_check_updates(cwd: String) -> Result<Vec<Submo
 /// tracked branch tip. Returns `None` when the comparison can't be made
 /// (offline, no remote, detached with no tracking branch, etc.).
 fn submodule_behind(sub_dir: &std::path::Path, configured_branch: Option<&str>) -> Option<u32> {
+    // Per-submodule write guard: a submodule is a separate working tree with its
+    // own `.git/index.lock`. Two concurrent `git_submodule_updates` polls would
+    // otherwise race the same submodule's fetch. Keyed on the submodule path, so
+    // distinct submodules still fetch in parallel under the caller's rayon loop.
+    let _repo = repo_lock::write(&sub_dir.to_string_lossy());
     // Resolve the upstream ref to compare against.
     let upstream: String = match configured_branch {
         Some(b) => {

@@ -547,6 +547,12 @@ pub(crate) async fn gh_branches(cwd: String) -> Result<Vec<String>, String> {
 }
 
 fn gh_checkout_pr_inner(cwd: String, number: i64) -> Result<(), String> {
+    // Write guard: both paths below fetch a PR ref and check it out — index +
+    // refs + worktree mutations that would collide on `.git/index.lock` with a
+    // single-repo view of the same repo. Held for the whole op; the inner
+    // `github_api::rest_checkout_pr` must NOT re-lock (the RwLock is
+    // non-reentrant), so the guard lives only here.
+    let _repo = repo_lock::write(&cwd);
     if github_api::settings_github_token().is_some() {
         return github_api::rest_checkout_pr(&cwd, number);
     }
