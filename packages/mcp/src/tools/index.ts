@@ -14,7 +14,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { execSync, execFileSync } from "node:child_process";
 import { resolve as resolvePath } from "node:path";
-import { resolve, type MergeResult } from "@gitwand/core";
+import { resolve, summarizeTiers, type MergeResult, type ConflictType } from "@gitwand/core";
 import { resolveHunkToolDefinition, handleResolveHunk } from "./resolve_hunk.js";
 
 // ─── Tool definitions ──────────────────────────────────────
@@ -334,6 +334,14 @@ function simulate3way(cwd: string, ancestor: string, ours: string, theirs: strin
   return out;
 }
 
+/** Accumulate a file's `stats.byType` into a running aggregate (mutates `into`). */
+function addByType(into: Partial<Record<ConflictType, number>>, byType: Record<ConflictType, number>): void {
+  for (const [type, count] of Object.entries(byType)) {
+    const t = type as ConflictType;
+    into[t] = (into[t] ?? 0) + count;
+  }
+}
+
 function serializeResult(file: string, result: MergeResult) {
   return {
     path: file,
@@ -455,11 +463,13 @@ async function toolStatus(cwd: string) {
     };
   }
 
+  const aggregateByType: Partial<Record<ConflictType, number>> = {};
   const conflicts = files.map((file) => {
     const filePath = resolvePath(cwd, file);
     try {
       const content = readFileSync(filePath, "utf-8");
       const result = resolve(content, file, { explainOnly: true });
+      addByType(aggregateByType, result.stats.byType);
       return {
         path: file,
         totalConflicts: result.stats.totalConflicts,
@@ -479,6 +489,9 @@ async function toolStatus(cwd: string) {
 
   const totalConflicts = conflicts.reduce((s: number, c: Record<string, unknown>) => s + ((c.totalConflicts as number) ?? 0), 0);
   const totalResolvable = conflicts.reduce((s: number, c: Record<string, unknown>) => s + ((c.autoResolvable as number) ?? 0), 0);
+  // v2.7 — "recoverable-before-model" : of the residual past the trivial passes,
+  // how much is still recoverable deterministically before the model is invoked.
+  const tierSummary = summarizeTiers(aggregateByType as Record<ConflictType, number>);
 
   return {
     content: [{
@@ -488,6 +501,7 @@ async function toolStatus(cwd: string) {
         totalConflicts,
         autoResolvable: totalResolvable,
         remaining: totalConflicts - totalResolvable,
+        tierSummary,
         conflicts,
       }, null, 2),
     }],
@@ -509,6 +523,7 @@ async function toolResolve(cwd: string, args: Record<string, unknown>) {
     };
   }
 
+  const aggregateByType: Partial<Record<ConflictType, number>> = {};
   const results = files.map((file) => {
     const filePath = resolvePath(cwd, file);
     try {
@@ -516,6 +531,7 @@ async function toolResolve(cwd: string, args: Record<string, unknown>) {
       const result = resolve(content, file, {
         ...(policy ? { policy: policy as any } : {}),
       });
+      addByType(aggregateByType, result.stats.byType);
 
       // Write resolved content unless dry-run
       if (!dryRun && result.stats.autoResolved > 0) {
@@ -531,6 +547,8 @@ async function toolResolve(cwd: string, args: Record<string, unknown>) {
 
   const totalConflicts = results.reduce((s: number, r: Record<string, unknown>) => s + ((r.totalConflicts as number) ?? 0), 0);
   const totalResolved = results.reduce((s: number, r: Record<string, unknown>) => s + ((r.autoResolved as number) ?? 0), 0);
+  // v2.7 — "recoverable-before-model" tier summary, see summarizeTiers() in @gitwand/core.
+  const tierSummary = summarizeTiers(aggregateByType as Record<ConflictType, number>);
 
   return {
     content: [{
@@ -543,6 +561,7 @@ async function toolResolve(cwd: string, args: Record<string, unknown>) {
           autoResolved: totalResolved,
           remaining: totalConflicts - totalResolved,
           allResolved: totalConflicts - totalResolved === 0,
+          tierSummary,
         },
         files: results,
       }, null, 2),
