@@ -1,5 +1,5 @@
 import { ref, computed } from "vue";
-import { resolve, resolveAsync, parseGitwandrc, type MergeResult, type ConflictHunk, type GitWandOptions, type MergePolicy, type LlmFallbackConfig } from "@gitwand/core";
+import { resolve, resolveAsync, parseGitwandrc, parseConflictMarkers, type MergeResult, type ConflictHunk, type GitWandOptions, type MergePolicy, type LlmFallbackConfig } from "@gitwand/core";
 import {
   pickFolder,
   getConflictedFiles,
@@ -25,6 +25,12 @@ import { createSemaphore } from "../utils/concurrentMap";
  * fix for any specific incident — reduces subprocess load regardless.
  */
 const reconstructLimiter = createSemaphore(4);
+
+/** A single conflict segment from `parseConflictMarkers()`, before classification. */
+type RawConflictSegment = Extract<
+  ReturnType<typeof parseConflictMarkers>["segments"][number],
+  { type: "conflict" }
+>;
 
 /**
  * Strip diff3 `|||||||...=======` base sections from reconstructed content,
@@ -490,6 +496,46 @@ export function useGitWand() {
           };
         }
         const content = await readFile(cwd, filePath);
+
+        // Cheap upfront parse (marker splitting only — no pattern classification)
+        // to tell whether every hunk in this file is missing a diff3 base. When
+        // it is, a resolveAsync() pass on the raw content would be entirely
+        // superseded by the base-recovery pass below (diff3-only patterns can't
+        // fire without a base) — running the full pattern registry against it
+        // first would just classify every hunk twice for nothing.
+        const { segments: rawSegments } = parseConflictMarkers(content);
+        const rawConflicts = rawSegments
+          .filter((s): s is RawConflictSegment => s.type === "conflict")
+          .map((s) => s.conflict);
+        const needsBaseRecovery = rawConflicts.length > 0 && rawConflicts.some((c) => c.baseLines.length === 0);
+
+        // Markers present but at least one hunk has no base (merge.conflictstyle isn't
+        // diff3/zdiff3) → try recovering the base from the index so diff3-only patterns
+        // (non_overlapping, one_side_change, token_level_merge, …) can apply.
+        if (needsBaseRecovery) {
+          try {
+            const rec = await reconstructLimiter.run(() => reconstructConflict(cwd, filePath));
+            const enrichedResult = await resolveAsync(rec.content, filePath, resolveOptionsWithLlm, structuralOpts);
+            const sameOursTheirs =
+              enrichedResult.hunks.length === rawConflicts.length &&
+              enrichedResult.hunks.every((h, i) =>
+                h.oursLines.join("\n") === rawConflicts[i].oursLines.join("\n") &&
+                h.theirsLines.join("\n") === rawConflicts[i].theirsLines.join("\n"),
+              );
+            // Guard against silently discarding a manual edit made outside the
+            // conflict markers: reconstructConflict() rebuilds purely from git's
+            // index, so any non-conflict line the user touched in the working
+            // tree since won't be reflected in `rec.content`.
+            const contextUnchanged = stripBaseSections(rec.content) === content;
+            if (sameOursTheirs && contextUnchanged) {
+              return { path: filePath, content: rec.content, result: enrichedResult, baseEnriched: true };
+            }
+            // ours/theirs or non-conflict context diverge from the working tree
+            // (manual edit since the conflict) → fall through to a plain
+            // classification of the original content below.
+          } catch { /* no recoverable stage (e.g. add/add) → fall through to plain result */ }
+        }
+
         const result = await resolveAsync(content, filePath, resolveOptionsWithLlm, structuralOpts);
         // Unmerged file with no parseable markers → reconstruct the 3-way from the index.
         if (result.stats.totalConflicts === 0) {
@@ -509,31 +555,6 @@ export function useGitWand() {
               return { path: filePath, content, result, markerless: { reconstructed: rec.content } };
             }
           } catch { /* not reconstructable → fall through to plain result */ }
-        }
-        // Markers present but at least one hunk has no base (merge.conflictstyle isn't
-        // diff3/zdiff3) → try recovering the base from the index so diff3-only patterns
-        // (non_overlapping, one_side_change, token_level_merge, …) can apply.
-        if (result.stats.totalConflicts > 0 && result.hunks.some((h) => h.baseLines.length === 0)) {
-          try {
-            const rec = await reconstructLimiter.run(() => reconstructConflict(cwd, filePath));
-            const enrichedResult = await resolveAsync(rec.content, filePath, resolveOptionsWithLlm, structuralOpts);
-            const sameOursTheirs =
-              enrichedResult.hunks.length === result.hunks.length &&
-              enrichedResult.hunks.every((h, i) =>
-                h.oursLines.join("\n") === result.hunks[i].oursLines.join("\n") &&
-                h.theirsLines.join("\n") === result.hunks[i].theirsLines.join("\n"),
-              );
-            // Guard against silently discarding a manual edit made outside the
-            // conflict markers: reconstructConflict() rebuilds purely from git's
-            // index, so any non-conflict line the user touched in the working
-            // tree since won't be reflected in `rec.content`.
-            const contextUnchanged = stripBaseSections(rec.content) === content;
-            if (sameOursTheirs && contextUnchanged) {
-              return { path: filePath, content: rec.content, result: enrichedResult, baseEnriched: true };
-            }
-            // ours/theirs or non-conflict context diverge from the working tree
-            // (manual edit since the conflict) → abandon silently.
-          } catch { /* no recoverable stage (e.g. add/add) → fall through to plain result */ }
         }
         return { path: filePath, content, result };
       }),

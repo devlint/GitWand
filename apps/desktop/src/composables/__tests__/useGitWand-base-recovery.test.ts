@@ -56,7 +56,18 @@ vi.mock("@/utils/backend", async (importOriginal) => {
   };
 });
 
+// Spy that delegates to the real implementation — lets tests assert call
+// COUNT (the perf property being guarded) without faking resolution logic.
+vi.mock("@gitwand/core", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@gitwand/core")>();
+  return {
+    ...actual,
+    resolveAsync: vi.fn((...args: Parameters<typeof actual.resolveAsync>) => actual.resolveAsync(...args)),
+  };
+});
+
 import { useGitWand } from "../useGitWand";
+import { resolveAsync } from "@gitwand/core";
 
 beforeEach(() => {
   mockReconstructConflict.mockClear();
@@ -66,6 +77,7 @@ beforeEach(() => {
   }));
   mockGetConflictedFiles.mockClear();
   mockGetConflictedFiles.mockImplementation(async () => ["src/foo.html"]);
+  vi.mocked(resolveAsync).mockClear();
 });
 
 describe("useGitWand : récupération de base pour conflits 2-way", () => {
@@ -79,6 +91,18 @@ describe("useGitWand : récupération de base pour conflits 2-way", () => {
     expect(file.content).toBe(RECONSTRUCTED_DIFF3);
     expect(file.result.hunks[0].type).not.toBe("complex");
     expect(file.result.hunks[0].baseLines.length).toBeGreaterThan(0);
+  });
+
+  it("n'appelle resolveAsync qu'une seule fois quand l'enrichissement réussit (pas de double classification)", async () => {
+    const gw = useGitWand();
+    await gw.openPath("/repo");
+
+    // Avant l'optimisation : un premier resolveAsync sur le contenu brut
+    // (aucun hunk n'a de base → complex/llm_proposed), puis un second sur le
+    // contenu reconstruit — le premier était entièrement superflu puisque le
+    // pré-parse sait déjà qu'aucun pattern diff3-only ne peut matcher sans base.
+    expect(vi.mocked(resolveAsync)).toHaveBeenCalledTimes(1);
+    expect(gw.files.value[0].baseEnriched).toBe(true);
   });
 });
 
@@ -104,6 +128,10 @@ describe("useGitWand : garde-fou — abandon si ours/theirs divergent", () => {
     const file = gw.files.value[0];
     expect(file.baseEnriched).toBeUndefined();
     expect(file.content).toBe(CONTENT_2WAY);
+    // Fallback path: one attempt on the reconstructed content (rejected by the
+    // guard) + one plain classification of the original content — unchanged
+    // from before the optimization, since this path was never the wasteful one.
+    expect(vi.mocked(resolveAsync)).toHaveBeenCalledTimes(2);
   });
 });
 
