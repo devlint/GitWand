@@ -7,7 +7,7 @@
 <p align="center">
   <strong>A fast, native Git client with built-in smart conflict resolution</strong>
 </p>
-aasd
+
 <p align="center">
   <a href="#desktop-app">Desktop</a> &bull;
   <a href="#conflict-resolution-engine">Conflict engine</a> &bull;
