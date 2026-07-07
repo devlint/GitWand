@@ -251,3 +251,67 @@ jobs:
           path: website/.vitepress/dist
       - name: Deploy to GitHub Pages
         uses: actions/deploy-pages@v4
+
+  # Bump the Homebrew cask in devlint/homebrew-tap to this release's version +
+  # universal-DMG sha256, so `brew install --cask devlint/tap/gitwand` always
+  # tracks the latest release. Only version + sha256 lines are rewritten, so
+  # any manual edits elsewhere in the cask (zap paths, etc.) are preserved.
+  #
+  # Requires secret HOMEBREW_TAP_TOKEN: a PAT (classic `public_repo`, or
+  # fine-grained with Contents: read+write on devlint/homebrew-tap). The default
+  # GITHUB_TOKEN can't write to another repo. When the secret is absent the job
+  # skips with a warning instead of failing the release.
+  bump-homebrew-tap:
+    name: Bump Homebrew tap cask
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update devlint/homebrew-tap Casks/gitwand.rb
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          RELEASE_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAP: devlint/homebrew-tap
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::warning::HOMEBREW_TAP_TOKEN not set — skipping Homebrew tap bump."
+            exit 0
+          fi
+          VERSION="${TAG#v}"
+          ASSET="GitWand_${VERSION}_universal.dmg"
+
+          # Fetch the universal DMG's sha256 from the release (retry: the asset
+          # digest may not be finalized the instant the matrix job signals done).
+          digest=""
+          for attempt in 1 2 3 4 5 6; do
+            digest=$(GH_TOKEN="$RELEASE_TOKEN" gh api "repos/${REPO}/releases/tags/${TAG}" \
+              --jq ".assets[] | select(.name == \"${ASSET}\") | .digest" 2>/dev/null || true)
+            [ -n "$digest" ] && break
+            echo "::notice::${ASSET} digest not ready (attempt ${attempt}/6) — sleeping 15s"
+            sleep 15
+          done
+          if [ -z "$digest" ]; then
+            echo "::error::Could not read ${ASSET} sha256 from release ${TAG}"
+            exit 1
+          fi
+          SHA="${digest#sha256:}"
+          echo "::notice::${ASSET} sha256=${SHA}"
+
+          # Pull the current cask, rewrite only version + sha256, commit back.
+          blob=$(gh api "repos/${TAP}/contents/Casks/gitwand.rb" --jq .sha)
+          gh api "repos/${TAP}/contents/Casks/gitwand.rb" --jq .content | base64 -d > cask.orig
+          sed -E "s/^  version \".*\"/  version \"${VERSION}\"/; s/^  sha256 \".*\"/  sha256 \"${SHA}\"/" cask.orig > cask.rb
+
+          if cmp -s cask.orig cask.rb; then
+            echo "::notice::Cask already at ${VERSION} with matching sha256 — nothing to bump."
+            exit 0
+          fi
+
+          gh api -X PUT "repos/${TAP}/contents/Casks/gitwand.rb" \
+            -f message="gitwand ${VERSION}" \
+            -f sha="$blob" \
+            -f content="$(base64 -w0 cask.rb)" \
+            --jq '.commit.sha'
+          echo "::notice::Bumped ${TAP} cask to ${VERSION}"
