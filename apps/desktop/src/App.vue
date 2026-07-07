@@ -1349,7 +1349,7 @@ function onPaletteAction(id: string) {
     case "push": handlePush(); break;
     case "pull": doPull(pullMode.value === "rebase"); break;
     case "sync": doSync(); break;
-    case "fetch": doFetch(); break;
+    case "fetch": doFetch(true); break;
     case "new-tab": handleOpenFolder(); break;
     case "view-dashboard": viewMode.value = "dashboard"; break;
     case "view-changes": viewMode.value = "changes"; break;
@@ -3060,7 +3060,7 @@ onUnmounted(() => {
       @open-folder="handleOpenFolder" @open-repo="handleOpenPath" @switch-tab="switchTab" @close-tab="closeRepoTab"
       @reorder-tabs="reorderTabs"
       @new-tab="handleOpenFolder" @open-clone="showCloneModal = true" @open-fork="showForkModal = true"
-      @toggle-theme="toggleTheme" @push="handlePush" @pull="() => doPull(pullMode === 'rebase')" @fetch="doFetch"
+      @toggle-theme="toggleTheme" @push="handlePush" @pull="() => doPull(pullMode === 'rebase')" @fetch="() => doFetch(true)"
       @sync="doSync" @publish="doPublish" @rebase-onto-remote="doRebaseOntoRemote" @merge-remote="doMergeRemote"
       @force-push="doForcePush" @discard-all="handleWipDiscardAll"
       @merge-branch="doMerge" @open-settings="settingsInitialTab = undefined; showSettings = true"

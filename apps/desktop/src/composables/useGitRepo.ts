@@ -458,7 +458,14 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
    * Updates tracking refs so ahead/behind counts become accurate.
    * Used by both manual user action and the consolidated useRepoPoller.
    */
-  async function fetchRemote() {
+  /**
+   * @param full When true, also reload every cached collection (branches,
+   *   stashes, worktrees) on top of status + log. Used by the manual "up to
+   *   date" / sync click so one gesture refreshes the whole view. The 30s
+   *   background poll leaves it false to stay off the hot path (per the perf
+   *   invariants — no extra process spawns on the polling tick).
+   */
+  async function fetchRemote(full = false) {
     // Skip fetch during merge operations to avoid git lock conflicts
     if (
       !folderPath.value ||
@@ -480,6 +487,11 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       // Force: a fetch moves remote-tracking refs without moving local HEAD,
       // so the canonical fast path would otherwise keep stale origin/* labels.
       await loadLog(undefined, true);
+      // Manual sync: refresh the rest of the cached view so a deleted/renamed
+      // remote branch, a pruned ref, or a new tag surfaces without a reopen.
+      if (full) {
+        await Promise.all([loadBranches(), loadStashes(), loadWorktrees()]);
+      }
     } catch (err) {
       console.warn("[GitWand] fetch failed:", err);
     } finally {
