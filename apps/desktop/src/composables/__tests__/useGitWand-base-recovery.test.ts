@@ -107,6 +107,33 @@ describe("useGitWand : garde-fou — abandon si ours/theirs divergent", () => {
   });
 });
 
+describe("useGitWand : garde-fou — contexte hors conflit modifié manuellement", () => {
+  it("n'enrichit pas si une ligne hors marqueurs diffère entre le working tree et la reconstruction, même si ours/theirs matchent", async () => {
+    // Le hunk ours/theirs est identique à RECONSTRUCTED_DIFF3 (même si1 sameOursTheirs
+    // passerait), mais l'utilisateur a édité la ligne "before" hors conflit dans le
+    // working tree après coup — reconstructConflict() la reconstruit depuis git,
+    // donc sans cette édition. Il ne faut PAS écraser le working tree.
+    const editedContent = [
+      "before — édité manuellement",
+      "<<<<<<< ours",
+      OURS_LINE,
+      "=======",
+      THEIRS_LINE,
+      ">>>>>>> theirs",
+      "after",
+    ].join("\n");
+    const { readFile } = await import("@/utils/backend");
+    vi.mocked(readFile).mockResolvedValueOnce(editedContent);
+
+    const gw = useGitWand();
+    await gw.openPath("/repo");
+
+    const file = gw.files.value[0];
+    expect(file.baseEnriched).toBeUndefined();
+    expect(file.content).toBe(editedContent);
+  });
+});
+
 describe("useGitWand : reconstructConflict échoue (add/add) → fallback propre", () => {
   it("garde le résultat non enrichi sans planter si reconstructConflict rejette", async () => {
     mockReconstructConflict.mockRejectedValueOnce(new Error("no index stages for src/foo.html"));

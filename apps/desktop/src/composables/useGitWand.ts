@@ -26,6 +26,33 @@ import { createSemaphore } from "../utils/concurrentMap";
  */
 const reconstructLimiter = createSemaphore(4);
 
+/**
+ * Strip diff3 `|||||||...=======` base sections from reconstructed content,
+ * leaving plain conflict markers — so it can be compared against working-tree
+ * content read via `readFile()`, which never has a base section for hunks
+ * `reconstructConflict()` had to enrich.
+ */
+function stripBaseSections(diff3Content: string): string {
+  const lines = diff3Content.split("\n");
+  const result: string[] = [];
+  let inBaseSection = false;
+  for (const line of lines) {
+    if (!inBaseSection && line.startsWith("|||||||")) {
+      inBaseSection = true;
+      continue;
+    }
+    if (inBaseSection) {
+      if (line.startsWith("=======")) {
+        inBaseSection = false;
+        result.push(line);
+      }
+      continue;
+    }
+    result.push(line);
+  }
+  return result.join("\n");
+}
+
 export interface TreeConflictInfo {
   code: string;
   hasOurs: boolean;
@@ -496,10 +523,16 @@ export function useGitWand() {
                 h.oursLines.join("\n") === result.hunks[i].oursLines.join("\n") &&
                 h.theirsLines.join("\n") === result.hunks[i].theirsLines.join("\n"),
               );
-            if (sameOursTheirs) {
+            // Guard against silently discarding a manual edit made outside the
+            // conflict markers: reconstructConflict() rebuilds purely from git's
+            // index, so any non-conflict line the user touched in the working
+            // tree since won't be reflected in `rec.content`.
+            const contextUnchanged = stripBaseSections(rec.content) === content;
+            if (sameOursTheirs && contextUnchanged) {
               return { path: filePath, content: rec.content, result: enrichedResult, baseEnriched: true };
             }
-            // ours/theirs diverge from the index (manual edit since the conflict) → abandon silently.
+            // ours/theirs or non-conflict context diverge from the working tree
+            // (manual edit since the conflict) → abandon silently.
           } catch { /* no recoverable stage (e.g. add/add) → fall through to plain result */ }
         }
         return { path: filePath, content, result };
