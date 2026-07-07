@@ -282,7 +282,7 @@ At `lib.rs:300-324`, replace the entire Umami comment + `std::thread::spawn` blo
                     .send_json(serde_json::json!({
                         "payload": {
                             "website": "171a9307-29ca-4524-8772-6187daacd9ca",
-                            "hostname": "app.gitwand.devlint.fr",
+                            "hostname": "app.gitwand.app",
                             "url": "/launch",
                             "language": language,
                             "name": "launch",

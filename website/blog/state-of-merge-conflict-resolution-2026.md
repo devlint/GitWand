@@ -8,7 +8,7 @@ date: 2026-04-26
 
 Most articles on this blog are about something I just shipped. This one is different. It's grounded in the papers, blog posts, and open-source merge tools I've worked through to figure out what GitWand should learn from. The output is a clearer picture of where the field actually is — and a concrete roadmap for the next six releases of `@gitwand/core`. This post is the public version of both.
 
-If you've used [GitWand](https://gitwand.devlint.fr/), you know that the headline feature is automatic conflict resolution: a pattern-based engine that auto-resolves trivial Git conflicts and explains its reasoning step by step. I [wrote about how the engine works](/blog/automatic-merge-conflict-resolution) when I first shipped it, and [cataloged its failure modes](/blog/auto-merge-failure-modes) a few weeks later. The engine has been in production for several months and the published metric is real: it resolves a meaningful fraction of conflicts in monorepos and config files, and it tells you exactly why every time.
+If you've used [GitWand](https://gitwand.app/), you know that the headline feature is automatic conflict resolution: a pattern-based engine that auto-resolves trivial Git conflicts and explains its reasoning step by step. I [wrote about how the engine works](/blog/automatic-merge-conflict-resolution) when I first shipped it, and [cataloged its failure modes](/blog/auto-merge-failure-modes) a few weeks later. The engine has been in production for several months and the published metric is real: it resolves a meaningful fraction of conflicts in monorepos and config files, and it tells you exactly why every time.
 
 But it's also a textual engine. It compares lines. It doesn't parse code. Once you've shipped that, the natural question is: *what would it take to make it parse?*
 
@@ -176,6 +176,6 @@ If you've thought hard about any of this and want to push back, [open an issue o
 
 ---
 
-*Curious about GitWand? [Download it here](https://gitwand.devlint.fr/) — it's free, open-source, and shipping monthly.*
+*Curious about GitWand? [Download it here](https://gitwand.app/) — it's free, open-source, and shipping monthly.*
 
 *Sources are at the end of the [companion roadmap document](https://github.com/devlint/GitWand/blob/main/CORE-V2-ROADMAP.md), with the full bibliography (ConGra, Mergiraf, Weave, RefMerge, Da Silva 2024, Project Harmony, MergeBERT, Nugroho EMSE 2019, web-tree-sitter, Pijul, SemanticMerge).*

@@ -368,7 +368,7 @@ The hunk critique may also get a **"fix it" shortcut**: if the verdict is `sugge
 
 ## Try it
 
-Update to v2.13 from the [releases page](https://gitwand.devlint.fr) or from the in-app update check. If you have an AI provider configured, the "Review" button appears immediately on every hunk header in the PR diff. The pencil icon appears on hover over any non-delete line.
+Update to v2.13 from the [releases page](https://gitwand.app) or from the in-app update check. If you have an AI provider configured, the "Review" button appears immediately on every hunk header in the PR diff. The pencil icon appears on hover over any non-delete line.
 
 The AI prompt presets are in **Settings → AI → Presets** — four built-ins are ready to use out of the box. The picker lives in the commit zone AI dropdown, next to the existing "Generate commit message" option.
 
@@ -378,4 +378,4 @@ Source on [GitHub](https://github.com/devlint/GitWand). Full v2.13.0 entry in th
 
 *Related reading: [Why we made LLM resolution opt-in](/blog/v2-5-llm-fallback) (the v2.5 architecture that brought AI into the conflict-resolution engine) and [Pairing Claude Code with GitWand](/blog/claude-code-gitwand-ai-agents) (using GitWand's MCP server with an AI coding agent).*
 
-*Curious about GitWand? [Download it here](https://gitwand.devlint.fr/) — free, open-source, shipping monthly.*
+*Curious about GitWand? [Download it here](https://gitwand.app/) — free, open-source, shipping monthly.*

@@ -67,7 +67,7 @@ const ctaLabel = computed(() => {
 /** Anchor the changelog link to the version's heading on the website
  *  (VitePress slugifies "v2.0.1" → "v2-0-1"). Falls back to the page top
  *  when the anchor doesn't match (older releases without a heading). */
-const CHANGELOG_BASE = "https://gitwand.devlint.fr/changelog";
+const CHANGELOG_BASE = "https://gitwand.app/changelog";
 const changelogUrl = computed(() => {
   const slug = `v${props.update.version.replace(/\./g, "-")}`;
   return `${CHANGELOG_BASE}#${slug}`;

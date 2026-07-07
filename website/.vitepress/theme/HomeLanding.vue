@@ -1708,7 +1708,7 @@ function cellClass(v: CompareValue | undefined): string {
 
     <!-- Featured badges -->
     <section class="badge-section">
-      <a href="https://nicklaunches.com/products/gitwand/?utm_source=gitwand.devlint.fr&utm_medium=badge&utm_campaign=featured" target="_blank" rel="noopener">
+      <a href="https://nicklaunches.com/products/gitwand/?utm_source=gitwand.app&utm_medium=badge&utm_campaign=featured" target="_blank" rel="noopener">
         <img src="https://nicklaunches.com/badges/featured-dark.png" alt="GitWand on Nick Launches" width="244" height="56" />
       </a>
       <a href="https://www.foundrlist.com/product/gitwand?utm_source=badge&utm_medium=embed" target="_blank" rel="noopener">

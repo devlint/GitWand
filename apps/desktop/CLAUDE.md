@@ -56,7 +56,7 @@ pnpm test:parity
 ## Configuration Tauri
 
 - `tauri.conf.json` — Fenêtre, plugins, updater endpoints, bundle icons
-- Updater : `https://gitwand.devlint.fr/update/latest.json` (primary) + GitHub releases (fallback)
+- Updater : `https://gitwand.app/update/latest.json` (primary) + GitHub releases (fallback)
 - `capabilities/` — Permissions Tauri. Ne pas ajouter `shell:allow-execute` sans raison précise.
 
 ## Plugins Tauri actifs

@@ -66,7 +66,7 @@
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDczRTI4ODgxNDVFMzY0REEKUldUYVpPTkZnWWppYzBoOEFsSEN4elhHcENJRkxDZjV1VHM4M1hsbk4raFNOUVdCckowRFgwcS8K",
       "endpoints": [
         "https://github.com/devlint/GitWand/releases/latest/download/latest.json",
-        "https://gitwand.devlint.fr/update/latest.json"
+        "https://gitwand.app/update/latest.json"
       ],
       "dialog": false
     }
