@@ -1,10 +1,29 @@
 import type { ClassifyInput, ConfidenceScore, PatternPlugin, TokenMergeTrace, TokenMergeLineDetail } from "../types.js";
 import { makeScore, scopeImpact, tokenizeLine } from "./utils.js";
 
-/** Cache module-level du dernier résultat calculé par detect(). */
+/**
+ * Cache module-level, keyed par référence sur le dernier hunk calculé.
+ *
+ * `detect()`, `confidence()` et `explanation()` reçoivent tous le même hunk
+ * dans le flux normal (classifier.ts appelle les trois coup sur coup sur la
+ * même référence `ClassifyInput`), donc le cache est un hit à chaque fois en
+ * pratique. Mais contrairement à un simple "dernier résultat calculé" (qui
+ * suppose implicitement qu'aucun autre appel à detect() ne s'intercale entre
+ * temps sur un hunk différent), la clé sur la référence rend le cache
+ * auto-correcteur : un hunk différent en entrée déclenche un recalcul au lieu
+ * de retourner silencieusement le résultat d'un autre hunk.
+ */
+let _lastInput: ClassifyInput | null = null;
 let _lastResult: TokenMergeTrace | null = null;
 
-/** Retourne le dernier résultat mis en cache par detect() (lu par classifier.ts et assemble.ts). */
+function computeTokenMergeCached(h: ClassifyInput): TokenMergeTrace | null {
+  if (_lastInput === h) return _lastResult;
+  _lastInput = h;
+  _lastResult = computeTokenMerge(h);
+  return _lastResult;
+}
+
+/** Retourne le dernier résultat mis en cache (lu par classifier.ts pour peupler `trace.tokenMergeTrace`). */
 export function getLastTokenMergeResult(): TokenMergeTrace | null {
   return _lastResult;
 }
@@ -116,12 +135,12 @@ const tokenLevelMerge: PatternPlugin = {
   requires: "diff3",
 
   detect(h: ClassifyInput): boolean {
-    _lastResult = computeTokenMerge(h);
-    return _lastResult !== null;
+    return computeTokenMergeCached(h) !== null;
   },
 
-  confidence(_h: ClassifyInput): ConfidenceScore {
-    const totalLines = _lastResult ? _lastResult.mergedLines.length : 0;
+  confidence(h: ClassifyInput): ConfidenceScore {
+    const result = computeTokenMergeCached(h);
+    const totalLines = result ? result.mergedLines.length : 0;
     // dataRisk volontairement non-nul : ce pattern ne doit JAMAIS s'auto-appliquer,
     // quel que soit le score obtenu (cf. resolver/assemble.ts — case dédié).
     return makeScore(70, 38, scopeImpact(totalLines), [
@@ -131,9 +150,10 @@ const tokenLevelMerge: PatternPlugin = {
     ]);
   },
 
-  explanation(_h: ClassifyInput): string {
-    if (!_lastResult) return "Fusion token-level proposée.";
-    const { pass1Count, pass2Count } = _lastResult;
+  explanation(h: ClassifyInput): string {
+    const result = computeTokenMergeCached(h);
+    if (!result) return "Fusion token-level proposée.";
+    const { pass1Count, pass2Count } = result;
     return `Fusion proposée : ${pass1Count} ligne${pass1Count === 1 ? "" : "s"} résolue${pass1Count === 1 ? "" : "s"} ligne-par-ligne, ${pass2Count} ligne${pass2Count === 1 ? "" : "s"} fusionnée${pass2Count === 1 ? "" : "s"} token-par-token. Confirmation requise avant application.`;
   },
 

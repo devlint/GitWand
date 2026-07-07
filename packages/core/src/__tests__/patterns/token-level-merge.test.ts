@@ -128,6 +128,45 @@ describe("token_level_merge : cas négatifs — doit échouer et retomber sur co
   });
 });
 
+describe("token_level_merge : cache keyed par référence (robustesse à l'entrelacement)", () => {
+  // Régression pour un finding de review : confidence()/explanation() lisaient
+  // un `_lastResult` "dernier calculé", correct uniquement si aucun detect()
+  // sur un AUTRE hunk ne s'intercale entre temps. Le cache est maintenant keyed
+  // par référence sur l'input — un hunk différent en entrée force un recalcul
+  // au lieu de retourner silencieusement le résultat d'un autre hunk.
+  it("explanation() sur le hunk B après detect() sur le hunk A ne retourne pas le résultat de A", () => {
+    const hunkA = input(
+      ['<div class="a b">'],
+      ['<div class="a2 b">'],
+      ['<div class="a b2">'],
+    ); // pass1: 0, pass2: 1
+    const hunkB = input(
+      ["ctx", '<div class="a b">'],
+      ["ctx-ours", '<div class="a2 b">'],
+      ["ctx", '<div class="a b2">'],
+    ); // pass1: 1, pass2: 1
+
+    expect(tokenLevelMerge.detect(hunkA)).toBe(true);
+    // Ni detect(hunkB) ni classifyConflict(hunkB) n'ont été appelés ici — on
+    // interroge directement explanation() sur hunkB. Avec un cache "dernier
+    // calculé" non keyed, ceci retournerait à tort le pass1Count de hunkA (0).
+    expect(tokenLevelMerge.explanation(hunkB)).toContain("1 ligne résolue");
+    // Et repasser sur hunkA doit toujours donner le résultat de hunkA, pas
+    // celui de hunkB qu'on vient d'interroger.
+    expect(tokenLevelMerge.explanation(hunkA)).toContain("0 lignes résolues");
+  });
+
+  it("explanation() sur un hunk jamais passé par detect() calcule quand même le bon résultat", () => {
+    const neverDetected = input(
+      ["ctx", '<div class="a b">'],
+      ["ctx-ours", '<div class="a2 b">'],
+      ["ctx", '<div class="a b2">'],
+    ); // pass1: 1, pass2: 1
+    expect(tokenLevelMerge.explanation(neverDetected)).toContain("1 ligne résolue");
+    expect(tokenLevelMerge.explanation(neverDetected)).toContain("1 ligne fusionnée");
+  });
+});
+
 describe("token_level_merge : intégration classifier", () => {
   it("classifie en token_level_merge et attache tokenMergeTrace", () => {
     const h = input(
