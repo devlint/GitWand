@@ -145,6 +145,18 @@ describe("detectRefactorings", () => {
     // pipeline ne crashe pas et retourne un tableau
     expect(Array.isArray(refs)).toBe(true);
   });
+
+  // F-R06b : pas de refactoring — valeurs de string literal changées, pas des identifiants
+  it("F-R06b : ignore les identifiants apparaissant à l'intérieur de string literals (bug tokenizer v2.6)", () => {
+    // "info"→"warn" et "text"→"json" ressemblent à des renames bijectifs si on
+    // tokenize sans respecter les guillemets — ce sont des VALEURS, pas du code
+    // renommé. IDENT_RE ne doit matcher que du code réel, jamais l'intérieur
+    // d'un string/template literal.
+    const base = [`  level: "info",`, `  format: "text",`];
+    const branch = [`  level: "warn",`, `  format: "json",`];
+    const refs = detectRefactorings(base, branch);
+    expect(refs).toHaveLength(0);
+  });
 });
 
 // ─── Section B : invertRefactorings + replayRefactorings ─────────────────────

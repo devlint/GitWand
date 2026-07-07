@@ -60,12 +60,56 @@ const KEYWORDS = new Set([
 // ─── Utilitaires de tokenisation ─────────────────────────────────────────────
 
 /**
+ * Remplace le contenu des string/template literals par des espaces, pour que
+ * `IDENT_RE` ne matche jamais une valeur entre guillemets comme un identifiant
+ * renommable. Sans ça, un simple changement de valeur (`"info"` → `"warn"`)
+ * ressemble à un renommage bijectif et `refactoring_aware_merge` le "résout"
+ * silencieusement à tort (confiance 82) au lieu de le laisser à `complex`/LLM.
+ *
+ * Scan naïf caractère par caractère (pas un vrai lexer) — gère l'échappement
+ * `\"` de base. Limitation connue : les interpolations `${expr}` d'un template
+ * literal sont masquées avec le reste (un identifiant réellement renommable
+ * dans une interpolation ne sera pas détecté) — acceptable pour un pattern
+ * expérimental/best-effort qui dégrade déjà silencieusement en cas d'échec.
+ */
+function maskStringLiterals(text: string): string {
+  let result = "";
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i]!;
+    if (ch === '"' || ch === "'" || ch === "`") {
+      const quote = ch;
+      result += quote;
+      i++;
+      while (i < text.length && text[i] !== quote) {
+        if (text[i] === "\\" && i + 1 < text.length) {
+          // Escaped char (e.g. `\"`) — mask both, never a quote boundary.
+          result += "  ";
+          i += 2;
+          continue;
+        }
+        result += text[i] === "\n" ? "\n" : " "; // preserve newlines (line count/positions)
+        i++;
+      }
+      if (i < text.length) {
+        result += quote; // closing quote
+        i++;
+      }
+      continue;
+    }
+    result += ch;
+    i++;
+  }
+  return result;
+}
+
+/**
  * Extrait la liste ordonnée des identifiants non-mot-clé d'un bloc de code.
  * L'ordre est préservé — c'est la "séquence de tokens" utilisée pour la
  * vérification de substitution bijective.
  */
 function tokenize(lines: string[]): string[] {
-  const text = lines.join("\n");
+  const text = maskStringLiterals(lines.join("\n"));
   const tokens: string[] = [];
   IDENT_RE.lastIndex = 0;
   let m: RegExpExecArray | null;
