@@ -593,6 +593,12 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
   // prefetched/cached — filtered views stay on-demand.
   const LOG_CACHE = new Map<string, GitLogEntry[]>();
   const BG_PAGE = 500; // larger background page → fewer layout recomputes
+  // Ceiling on the automatic background prefetch. Beyond this the graph stays
+  // usable and scroll-loading still reaches older history on demand — we just
+  // stop eagerly pulling the whole DAG into memory / re-laying it out. A log
+  // capped here is NOT cached as complete, so `logHasMore` stays true and
+  // scroll pagination continues past the ceiling.
+  const PREFETCH_CEILING = 5000;
   let _prefetchToken = 0;
 
   function isCanonicalLogView(): boolean {
@@ -626,11 +632,14 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       folderPath.value === repo &&
       token === _prefetchToken &&
       isCanonicalLogView();
-    while (live() && logHasMore.value) {
+    while (live() && logHasMore.value && log.value.length < PREFETCH_CEILING) {
       await whenIdle();
       if (!live()) return;
       await loadMoreLog(BG_PAGE);
     }
+    // Cache only a fully-paged log (reached the end before the ceiling). A
+    // ceiling-capped log keeps `logHasMore` true and is left uncached so
+    // scroll-loading can still fetch the rest.
     if (live() && !logHasMore.value) {
       LOG_CACHE.set(repo, log.value.slice());
     }
