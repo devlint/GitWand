@@ -110,6 +110,16 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     activeScope.value ? Math.max(0, totalUnscopedCount.value - scopedTotalCount.value) : 0,
   );
 
+  /**
+   * Authoritative total commit count for the current log scope — the paging
+   * ceiling. Scoped total when a monorepo scope is active, otherwise the
+   * unscoped all-refs total. Drives `logHasMore` in all-refs mode where the
+   * page length is unreliable (see loadLog).
+   */
+  function effectiveTotalCount(): number {
+    return activeScope.value ? scopedTotalCount.value : totalUnscopedCount.value;
+  }
+
   /** Refresh the unscoped + scoped rev counts for the hidden-commit badge. */
   async function loadRevCounts() {
     if (!folderPath.value) return;
@@ -542,10 +552,16 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
         activeScope.value ?? undefined,                   // pathspec (monorepo scope)
       );
       log.value = entries;
-      // When the result is exactly one full page, assume more exist.
-      logHasMore.value = entries.length >= pageSize;
       // Refresh the hidden-commit badge counts alongside the scoped log.
       await loadRevCounts();
+      // hasMore: in branch-only mode a full page is exactly `pageSize`. In
+      // all-refs mode the backend appends stash start-points and filters the
+      // `index on`/`untracked files on` pseudo-commits, so a full page returns
+      // FEWER than `pageSize` — `entries.length >= pageSize` would wrongly read
+      // false and kill infinite scroll. Use the authoritative rev-count there.
+      logHasMore.value = isCurrentBranchOnly
+        ? entries.length >= pageSize
+        : log.value.length < effectiveTotalCount();
       // If a commit was selected but its diffs were lost, reload them
       if (selectedCommitHash.value && commitDiffs.value.length === 0) {
         commitDiffs.value = await getGitShow(folderPath.value, selectedCommitHash.value);
@@ -576,10 +592,20 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
         isCurrentBranchOnly ? (status.value?.branch ?? undefined) : undefined,
         activeScope.value ?? undefined,
       );
-      if (next.length > 0) {
-        log.value = [...log.value, ...next];
+      // Dedupe: in all-refs mode the `--skip` offset counts filtered-out stash
+      // pseudo-commits, so consecutive pages can overlap by a few commits.
+      // Drop any hash we already have before appending.
+      const seen = new Set(log.value.map((e) => e.hashFull));
+      const added = next.filter((e) => !seen.has(e.hashFull));
+      if (added.length > 0) {
+        log.value = [...log.value, ...added];
       }
-      logHasMore.value = next.length >= LOG_PAGE;
+      // Stop when a page adds nothing new (end of history, guards against an
+      // offset-drift infinite loop) or once we've reached the total. Branch-only
+      // mode has no stash pollution, so a short page also means the end.
+      logHasMore.value =
+        added.length > 0 &&
+        (isCurrentBranchOnly ? next.length >= LOG_PAGE : log.value.length < effectiveTotalCount());
     } catch (err: any) {
       error.value = `git log (page): ${err?.message ?? err}`;
     } finally {
