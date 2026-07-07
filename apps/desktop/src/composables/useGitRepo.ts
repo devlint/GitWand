@@ -477,7 +477,9 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       await loadStatus(folderPath.value);
       // v2.14 — Refresh log so clicking "Up to date" or periodic fetch
       // updates the Git Tree / History view with new remote commits.
-      await loadLog();
+      // Force: a fetch moves remote-tracking refs without moving local HEAD,
+      // so the canonical fast path would otherwise keep stale origin/* labels.
+      await loadLog(undefined, true);
     } catch (err) {
       console.warn("[GitWand] fetch failed:", err);
     } finally {
@@ -545,9 +547,9 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
    * v2.14 — Now also refreshes the commit log so the Git Tree and History
    * views stay in sync with the repository state.
    */
-  async function refresh() {
+  async function refresh(forceLog = false) {
     if (!folderPath.value) return;
-    await Promise.all([loadStatus(folderPath.value), loadLog()]);
+    await Promise.all([loadStatus(folderPath.value), loadLog(undefined, forceLog)]);
     // Also refresh diff if a file is selected
     if (selectedFilePath.value) {
       await loadDiff(selectedFilePath.value, selectedFileStaged.value);
@@ -645,7 +647,15 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     }
   }
 
-  async function loadLog(count?: number) {
+  /**
+   * @param force When true, bypass the canonical fast-paths that trust an
+   *   unchanged top-commit hash (the in-memory `haveSameHead` keep and the
+   *   `LOG_CACHE` restore) and refetch fresh. Ref/decoration-only mutations
+   *   (push moving origin/HEAD, branch/tag/stash deletion, fetch) leave the top
+   *   commit untouched, so without this they'd serve a stale log. Refetches at
+   *   the current depth so a paginated view doesn't collapse back to page 1.
+   */
+  async function loadLog(count?: number, force = false) {
     if (!folderPath.value) return;
     try {
       const authorEmail =
@@ -659,7 +669,9 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       // views reload at least what's visible so polling doesn't collapse a
       // paginated log back to page 1.
       const pageSize = isCanon
-        ? LOG_PAGE
+        ? force
+          ? Math.max(LOG_PAGE, log.value.length)
+          : LOG_PAGE
         : (count ?? Math.max(LOG_PAGE, log.value.length));
       const entries = await getGitLog(
         folderPath.value,
@@ -677,18 +689,28 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       if (isCanon) {
         const cached = LOG_CACHE.get(folderPath.value);
         const haveSameHead =
-          log.value.length >= entries.length && log.value[0]?.hashFull === head;
+          !force &&
+          log.value.length >= entries.length &&
+          log.value[0]?.hashFull === head;
         if (haveSameHead) {
           // Poll while we already hold this page (or the full log / an in-flight
           // prefetch) and HEAD hasn't moved — keep it, don't collapse. Resume
           // the prefetch if it was interrupted.
           if (logHasMore.value) void prefetchAllPages();
-        } else if (cached && cached.length > 0 && cached[0]?.hashFull === head) {
+        } else if (
+          !force &&
+          cached &&
+          cached.length > 0 &&
+          cached[0]?.hashFull === head
+        ) {
           // HEAD unchanged since we cached the full history — restore instantly.
           log.value = cached;
           logHasMore.value = false;
         } else {
-          // Fresh repo, or HEAD moved: show page 1 and prefetch the rest.
+          // Fresh repo, HEAD moved, or a forced reload after a ref/decoration
+          // change: drop the stale cache and show fresh entries. The background
+          // prefetch below re-caches the full history with current decorations.
+          if (force) LOG_CACHE.delete(folderPath.value);
           log.value = entries;
           logHasMore.value = log.value.length < effectiveTotalCount();
           void prefetchAllPages();
@@ -945,7 +967,9 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
         successMessage.value = "push-done";
         forcePushPreferred.value = false;
       }
-      await refresh();
+      // Force: push advances origin/<branch> but not local HEAD, so the log's
+      // remote label must be re-pulled to move off the pre-push commit.
+      await refresh(true);
       // Publishing sets the branch upstream — reload branches so consumers
       // (e.g. the PR-create publish guard) see the new tracking state.
       await loadBranches();
@@ -979,7 +1003,9 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
         }
         forcePushPreferred.value = false;
       }
-      await refresh();
+      // Force: a pull updates remote-tracking refs and may fast-forward without
+      // the fast path noticing the decoration change.
+      await refresh(true);
     } catch (err: any) {
       error.value = `pull: ${err?.message ?? err}`;
     } finally {
@@ -994,7 +1020,8 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     isMerging.value = true;
     try {
       const result = await gitMerge(folderPath.value, branchName);
-      await refresh();
+      // Force: a fast-forward merge moves refs without a new merge commit.
+      await refresh(true);
 
       // Detect conflicts from both the server response and the git status
       const hasConflictedFiles =
@@ -1179,7 +1206,8 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       await gitStashDrop(folderPath.value, index);
       await refresh();
       await loadStashes();
-      await loadLog();
+      // Force: popping drops the stash ref, which the all-refs log renders.
+      await loadLog(undefined, true);
     } catch (err: any) {
       error.value = `stash pop: ${err?.message ?? err}`;
     }
@@ -1190,7 +1218,9 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     try {
       await gitStashDrop(folderPath.value, index);
       await loadStashes();
-      await loadLog();
+      // Force: the dropped stash ref is gone but HEAD is untouched, so the
+      // canonical fast path would keep showing it in the all-refs log.
+      await loadLog(undefined, true);
     } catch (err: any) {
       error.value = `stash drop: ${err?.message ?? err}`;
     }
@@ -1225,7 +1255,9 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     if (!folderPath.value) return false;
     try {
       await gitCreateBranch(folderPath.value, name, true);
-      await refresh();
+      // Force: the new branch ref sits on the current HEAD, so the log's
+      // decorations change without the top commit moving.
+      await refresh(true);
       await loadBranches();
       return true;
     } catch (err: any) {
@@ -1240,7 +1272,9 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     try {
       await gitSwitchBranch(folderPath.value, name);
       forcePushPreferred.value = false;
-      await refresh();
+      // Force: switching to a branch pointing at the same commit moves the
+      // HEAD marker without moving the top commit hash.
+      await refresh(true);
       await loadBranches();
       await loadWorktrees();
       return true;
@@ -1298,7 +1332,9 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     try {
       await gitDeleteBranch(folderPath.value, name, force);
       await loadBranches();
-      await loadLog();
+      // Force: the branch ref is gone but HEAD hasn't moved, so its label must
+      // be dropped from the log.
+      await loadLog(undefined, true);
     } catch (err: any) {
       const msg = err?.message ?? String(err);
       // `git branch -d` refuses to drop a branch that isn't fully merged
@@ -1323,7 +1359,8 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     try {
       await gitDeleteRemoteBranch(folderPath.value, remote, name);
       await loadBranches();
-      await loadLog();
+      // Force: refs change without HEAD moving.
+      await loadLog(undefined, true);
     } catch (err: any) {
       error.value = `delete remote branch: ${err?.message ?? err}`;
     }
@@ -1333,7 +1370,8 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     if (!folderPath.value) return;
     try {
       await gitDeleteTag(folderPath.value, name);
-      await loadLog();
+      // Force: the tag ref is gone but HEAD hasn't moved.
+      await loadLog(undefined, true);
     } catch (err: any) {
       error.value = `delete tag: ${err?.message ?? err}`;
     }
@@ -1343,7 +1381,8 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     if (!folderPath.value) return;
     try {
       await gitDeleteRemoteTag(folderPath.value, remote, name);
-      await loadLog();
+      // Force: refs change without HEAD moving.
+      await loadLog(undefined, true);
     } catch (err: any) {
       error.value = `delete remote tag: ${err?.message ?? err}`;
     }
@@ -1360,7 +1399,8 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       if (status.value?.branch === oldName) {
         await loadStatus(folderPath.value);
       }
-      await loadLog();
+      // Force: renaming swaps the branch label in place without moving HEAD.
+      await loadLog(undefined, true);
     } catch (err: any) {
       error.value = `rename branch: ${err?.message ?? err}`;
     }
