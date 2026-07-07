@@ -208,7 +208,7 @@ The framing that matters: Linear Diffs is an issue tracker growing toward a Git 
 
 ## Try it
 
-Update to v2.14 from the [releases page](https://gitwand.devlint.fr) or via the in-app update check (**Help → Check for Updates**). Open any GitLab or Bitbucket repo — the inline comment anchoring, CI checks, and conflict preview are automatic. If you have multi-account set up in **Settings → Accounts**, switching the active account now takes effect immediately on the next API call.
+Update to v2.14 from the [releases page](https://gitwand.app) or via the in-app update check (**Help → Check for Updates**). Open any GitLab or Bitbucket repo — the inline comment anchoring, CI checks, and conflict preview are automatic. If you have multi-account set up in **Settings → Accounts**, switching the active account now takes effect immediately on the next API call.
 
 Source on [GitHub](https://github.com/devlint/GitWand). Full v2.14.0 entry in the [changelog](/changelog#v2-14-0-may-2026).
 
@@ -216,4 +216,4 @@ Source on [GitHub](https://github.com/devlint/GitWand). Full v2.14.0 entry in th
 
 *Related: [v2.10 — the ForgeProvider architecture](/blog/v2-10-forge-integrations) that this release completes, and the [changelog](/changelog) for every commit.*
 
-*Curious about GitWand? [Download it here](https://gitwand.devlint.fr/) — free, open-source, native, no Electron.*
+*Curious about GitWand? [Download it here](https://gitwand.app/) — free, open-source, native, no Electron.*

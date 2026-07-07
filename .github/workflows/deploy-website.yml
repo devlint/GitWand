@@ -42,7 +42,7 @@ jobs:
       #      windows-x86_64 present), use it.
       #   2. If the release manifest is missing or partial (matrix race
       #      condition, mid-release moment, etc.), fall back to the manifest
-      #      currently served by https://gitwand.devlint.fr/update/latest.json.
+      #      currently served by https://gitwand.app/update/latest.json.
       #      That guarantees the auto-update keeps pointing at the last known
       #      good version, even when the website is redeployed for an unrelated
       #      reason (changelog update, doc tweak…).
@@ -85,7 +85,7 @@ jobs:
           fi
 
           # ── Step 2 — fall back to the live site's existing manifest ────────
-          if curl -fsSL -o "$out" https://gitwand.devlint.fr/update/latest.json \
+          if curl -fsSL -o "$out" https://gitwand.app/update/latest.json \
              && manifest_is_valid "$out"; then
             echo "::notice::Reusing existing auto-update manifest from live site ($(jq -r .version "$out"))"
             exit 0

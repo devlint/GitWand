@@ -2,4 +2,4 @@ User-agent: *
 Allow: /
 Content-Signal: ai-train=no, search=yes, ai-input=yes
 
-Sitemap: https://gitwand.devlint.fr/sitemap.xml
+Sitemap: https://gitwand.app/sitemap.xml

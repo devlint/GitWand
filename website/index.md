@@ -19,7 +19,7 @@ head:
         "applicationCategory": "DeveloperApplication",
         "operatingSystem": "macOS, Linux, Windows",
         "description": "A free, open-source, native Git client that auto-resolves 95% of merge conflicts deterministically, with a per-hunk confidence score and full decision trace. Includes a CLI, a VS Code extension and an MCP server for AI agents.",
-        "url": "https://gitwand.devlint.fr",
+        "url": "https://gitwand.app",
         "downloadUrl": "https://github.com/devlint/GitWand/releases",
         "license": "https://opensource.org/licenses/MIT",
         "softwareVersion": "3.2.0",

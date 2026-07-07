@@ -59,6 +59,6 @@ Pass `policy` to `gitwand_resolve_conflicts`:
 
 ## Documentation
 
-- Guide: https://gitwand.devlint.fr/guide/mcp
+- Guide: https://gitwand.app/guide/mcp
 - npm: https://www.npmjs.com/package/@gitwand/mcp
 - GitHub: https://github.com/devlint/GitWand

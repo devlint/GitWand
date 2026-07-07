@@ -6,7 +6,7 @@ export default defineConfig({
   base: '/',
 
   sitemap: {
-    hostname: 'https://gitwand.devlint.fr',
+    hostname: 'https://gitwand.app',
   },
 
   head: [
@@ -14,12 +14,12 @@ export default defineConfig({
     // Open Graph
     ['meta', { property: 'og:type', content: 'website' }],
     ['meta', { property: 'og:site_name', content: 'GitWand' }],
-    ['meta', { property: 'og:image', content: 'https://gitwand.devlint.fr/og-image.png' }],
+    ['meta', { property: 'og:image', content: 'https://gitwand.app/og-image.png' }],
     ['meta', { property: 'og:image:width', content: '1200' }],
     ['meta', { property: 'og:image:height', content: '630' }],
     // Twitter / X
     ['meta', { name: 'twitter:card', content: 'summary_large_image' }],
-    ['meta', { name: 'twitter:image', content: 'https://gitwand.devlint.fr/og-image.png' }],
+    ['meta', { name: 'twitter:image', content: 'https://gitwand.app/og-image.png' }],
     // Misc
     ['meta', { name: 'theme-color', content: '#7c3aed' }],
     // Google Search Console verification
@@ -46,7 +46,7 @@ export default defineConfig({
       required: ['query']
     },
     execute: function (args) {
-      var url = 'https://gitwand.devlint.fr/?q=' + encodeURIComponent(args.query);
+      var url = 'https://gitwand.app/?q=' + encodeURIComponent(args.query);
       return Promise.resolve({ url: url, hint: 'Navigate to this URL to view search results.' });
     },
     signal: signal
@@ -60,8 +60,8 @@ export default defineConfig({
       return Promise.resolve({
         npm: 'npx @gitwand/mcp',
         mcpConfig: { command: 'npx', args: ['@gitwand/mcp'] },
-        serverCard: 'https://gitwand.devlint.fr/.well-known/mcp/server-card.json',
-        guide: 'https://gitwand.devlint.fr/guide/mcp'
+        serverCard: 'https://gitwand.app/.well-known/mcp/server-card.json',
+        guide: 'https://gitwand.app/guide/mcp'
       });
     },
     signal: signal
@@ -97,7 +97,7 @@ export default defineConfig({
         'blog': '/blog/'
       };
       var path = routes[args.section] || '/';
-      return Promise.resolve({ url: 'https://gitwand.devlint.fr' + path });
+      return Promise.resolve({ url: 'https://gitwand.app' + path });
     },
     signal: signal
   });

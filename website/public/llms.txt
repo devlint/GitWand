@@ -10,40 +10,40 @@ Key facts:
 
 ## Docs
 
-- [Getting started](https://gitwand.devlint.fr/guide/getting-started): install and first conflict resolution
-- [Desktop app](https://gitwand.devlint.fr/guide/desktop): the full Git client
-- [CLI](https://gitwand.devlint.fr/guide/cli): `@gitwand/cli` usage
-- [MCP server](https://gitwand.devlint.fr/guide/mcp): expose the engine to Claude Code, Cursor, Windsurf and any MCP client
-- [VS Code extension](https://gitwand.devlint.fr/guide/vscode): resolve conflicts inside VS Code
-- [Conflict resolution](https://gitwand.devlint.fr/guide/conflict-resolution): how the 10 patterns work
-- [AI integrations](https://gitwand.devlint.fr/guide/ai): agent sessions and providers
-- [LLM fallback](https://gitwand.devlint.fr/guide/llm-fallback): the opt-in LLM path and its audit trail
+- [Getting started](https://gitwand.app/guide/getting-started): install and first conflict resolution
+- [Desktop app](https://gitwand.app/guide/desktop): the full Git client
+- [CLI](https://gitwand.app/guide/cli): `@gitwand/cli` usage
+- [MCP server](https://gitwand.app/guide/mcp): expose the engine to Claude Code, Cursor, Windsurf and any MCP client
+- [VS Code extension](https://gitwand.app/guide/vscode): resolve conflicts inside VS Code
+- [Conflict resolution](https://gitwand.app/guide/conflict-resolution): how the 10 patterns work
+- [AI integrations](https://gitwand.app/guide/ai): agent sessions and providers
+- [LLM fallback](https://gitwand.app/guide/llm-fallback): the opt-in LLM path and its audit trail
 
 ## Reference
 
-- [Core API](https://gitwand.devlint.fr/reference/core-api): `@gitwand/core` TypeScript API
-- [Configuration](https://gitwand.devlint.fr/reference/config): `.gitwandrc` options
-- [CLI commands](https://gitwand.devlint.fr/reference/cli-commands): full command reference
+- [Core API](https://gitwand.app/reference/core-api): `@gitwand/core` TypeScript API
+- [Configuration](https://gitwand.app/reference/config): `.gitwandrc` options
+- [CLI commands](https://gitwand.app/reference/cli-commands): full command reference
 
 ## Product
 
-- [Features](https://gitwand.devlint.fr/features): feature overview
-- [Conflict engine](https://gitwand.devlint.fr/conflict-engine): the resolution engine in depth
-- [AI & agents](https://gitwand.devlint.fr/ai-agents): MCP, agent sessions, AI features
-- [Changelog](https://gitwand.devlint.fr/changelog): full release history
-- [Blog](https://gitwand.devlint.fr/blog/): engineering and product articles
+- [Features](https://gitwand.app/features): feature overview
+- [Conflict engine](https://gitwand.app/conflict-engine): the resolution engine in depth
+- [AI & agents](https://gitwand.app/ai-agents): MCP, agent sessions, AI features
+- [Changelog](https://gitwand.app/changelog): full release history
+- [Blog](https://gitwand.app/blog/): engineering and product articles
 
 ## Install
 
 - Desktop: https://github.com/devlint/GitWand/releases (macOS .dmg, Linux .deb/.AppImage/.rpm, Windows .exe/.msi)
 - CLI: `npm install -g @gitwand/cli`
-- MCP server: `npx @gitwand/mcp` — server card at https://gitwand.devlint.fr/.well-known/mcp/server-card.json
+- MCP server: `npx @gitwand/mcp` — server card at https://gitwand.app/.well-known/mcp/server-card.json
 - VS Code: search "GitWand" on the Marketplace
 - Source: https://github.com/devlint/GitWand (MIT)
 
 ## Optional
 
-- [Why I built another Git client](https://gitwand.devlint.fr/blog/why-i-built-another-git-client): origin story
-- [The state of merge conflict resolution in 2026](https://gitwand.devlint.fr/blog/state-of-merge-conflict-resolution-2026): market overview
-- [Automatic merge conflict resolution](https://gitwand.devlint.fr/blog/automatic-merge-conflict-resolution): the engine's approach
-- [Why we made LLM resolution opt-in](https://gitwand.devlint.fr/blog/v2-5-llm-fallback): design philosophy
+- [Why I built another Git client](https://gitwand.app/blog/why-i-built-another-git-client): origin story
+- [The state of merge conflict resolution in 2026](https://gitwand.app/blog/state-of-merge-conflict-resolution-2026): market overview
+- [Automatic merge conflict resolution](https://gitwand.app/blog/automatic-merge-conflict-resolution): the engine's approach
+- [Why we made LLM resolution opt-in](https://gitwand.app/blog/v2-5-llm-fallback): design philosophy
