@@ -212,12 +212,12 @@ A larger restructure is also in scoping: today the Launchpad is reached in two c
 
 `⌘L` from any workspace and the Launchpad opens. If you're new, the [Desktop guide](/guide/desktop) walks through the basics, and the v2.7 [Workspaces section](/changelog#v2-7-0-may-2026) covers how to define your repo set in the first place.
 
-Download links and platform builds on the [GitWand homepage](https://gitwand.devlint.fr). Source on [GitHub](https://github.com/devlint/GitWand). The full v2.9.0 entry sits in the [changelog](/changelog#v2-9-0-may-2026).
+Download links and platform builds on the [GitWand homepage](https://gitwand.app). Source on [GitHub](https://github.com/devlint/GitWand). The full v2.9.0 entry sits in the [changelog](/changelog#v2-9-0-may-2026).
 
 If your workspace is small enough that the Team tab is overkill, the **Disable Launchpad Team tab** toggle in Settings drops it entirely — three tabs, zero per-PR `gh pr view` cost.
 
 ---
 
-*Curious about GitWand? [Download it here](https://gitwand.devlint.fr/) — it is free, open-source, and shipping monthly.*
+*Curious about GitWand? [Download it here](https://gitwand.app/) — it is free, open-source, and shipping monthly.*
 
 *Related reading: [Hooks, workspaces, agent sessions, and automations](/blog/agent-sessions-automations-v2-8) (the v2.7–v2.8 release that built the workspace foundation), and the [changelog](/changelog) for everything else.*

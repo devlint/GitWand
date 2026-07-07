@@ -5,7 +5,7 @@
       "name": "gitwand-mcp",
       "type": "skill-md",
       "description": "Install and use GitWand's MCP server for AI-powered Git merge conflict resolution — auto-resolves trivial conflicts, guides AI through complex ones.",
-      "url": "https://gitwand.devlint.fr/.well-known/agent-skills/gitwand-mcp/SKILL.md",
+      "url": "https://gitwand.app/.well-known/agent-skills/gitwand-mcp/SKILL.md",
       "digest": "sha256:5c77c8fb034ae4788186366f11847f29868031e0440d83d3594c7d76cbefc5e8"
     }
   ]

@@ -626,7 +626,7 @@ A new Help button in the header — mirrored in the macOS menu bar — opens a m
 
 ### Agent discovery surfaces on the website
 
-`gitwand.devlint.fr` now publishes the surfaces AI tooling looks for: an MCP server card, Agent Skills entries, an RFC 8288 `api-catalog` link, WebMCP browser-tool declarations, and explicit AI usage signals in `robots.txt`. The result is that an agent visiting the site can find `@gitwand/mcp` and its install path on its own — no human in the loop. The `server-card.json` is wired into `bump-version.sh`, so the version stays aligned with every release.
+`gitwand.app` now publishes the surfaces AI tooling looks for: an MCP server card, Agent Skills entries, an RFC 8288 `api-catalog` link, WebMCP browser-tool declarations, and explicit AI usage signals in `robots.txt`. The result is that an agent visiting the site can find `@gitwand/mcp` and its install path on its own — no human in the loop. The `server-card.json` is wired into `bump-version.sh`, so the version stays aligned with every release.
 
 ### Fixes
 

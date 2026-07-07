@@ -255,6 +255,6 @@ If you have used it on a real merge and the rejection rate surprised you in eith
 
 ---
 
-*Curious about GitWand? [Download it here](https://gitwand.devlint.fr/) — it is free, open-source, and shipping monthly.*
+*Curious about GitWand? [Download it here](https://gitwand.app/) — it is free, open-source, and shipping monthly.*
 
 *Background reading: [The state of automatic merge conflict resolution in 2026](/blog/state-of-merge-conflict-resolution-2026), [ConGra benchmark (arXiv:2409.14121)](https://arxiv.org/abs/2409.14121), [Project Harmony preview](https://www.source.dev/journal/harmony-preview).*

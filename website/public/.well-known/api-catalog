@@ -3,28 +3,28 @@
     {
       "anchor": "https://www.npmjs.com/package/@gitwand/mcp",
       "service-doc": [
-        { "href": "https://gitwand.devlint.fr/guide/mcp", "type": "text/html" }
+        { "href": "https://gitwand.app/guide/mcp", "type": "text/html" }
       ],
       "service-desc": [
-        { "href": "https://gitwand.devlint.fr/.well-known/mcp/server-card.json", "type": "application/json" }
+        { "href": "https://gitwand.app/.well-known/mcp/server-card.json", "type": "application/json" }
       ]
     },
     {
       "anchor": "https://www.npmjs.com/package/@gitwand/core",
       "service-doc": [
-        { "href": "https://gitwand.devlint.fr/reference/core-api", "type": "text/html" }
+        { "href": "https://gitwand.app/reference/core-api", "type": "text/html" }
       ],
       "service-desc": [
-        { "href": "https://gitwand.devlint.fr/reference/core-api", "type": "text/html" }
+        { "href": "https://gitwand.app/reference/core-api", "type": "text/html" }
       ]
     },
     {
       "anchor": "https://www.npmjs.com/package/@gitwand/cli",
       "service-doc": [
-        { "href": "https://gitwand.devlint.fr/reference/cli-commands", "type": "text/html" }
+        { "href": "https://gitwand.app/reference/cli-commands", "type": "text/html" }
       ],
       "service-desc": [
-        { "href": "https://gitwand.devlint.fr/reference/cli-commands", "type": "text/html" }
+        { "href": "https://gitwand.app/reference/cli-commands", "type": "text/html" }
       ]
     }
   ]

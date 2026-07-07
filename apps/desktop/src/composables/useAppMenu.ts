@@ -69,7 +69,7 @@ export interface AppMenuState {
 
 // ─── External URLs ──────────────────────────────────────
 
-const URL_DOCUMENTATION = "https://gitwand.devlint.fr/";
+const URL_DOCUMENTATION = "https://gitwand.app/";
 const URL_WHATS_NEW = "https://github.com/devlint/GitWand/releases";
 const URL_REPORT_ISSUE = "https://github.com/devlint/GitWand/issues/new";
 

@@ -270,7 +270,7 @@ The v2.14 scope is:
 
 ## Try it
 
-Update to v2.10 from the [releases page](https://gitwand.devlint.fr) or via the in-app update check. Open any repo with a GitLab or Bitbucket remote — GitWand detects the forge from the remote URL and routes the PR panel automatically. If `glab` isn't installed for GitLab, the panel prompts you; for Bitbucket, the **Settings → Accounts** tab has the App Password form.
+Update to v2.10 from the [releases page](https://gitwand.app) or via the in-app update check. Open any repo with a GitLab or Bitbucket remote — GitWand detects the forge from the remote URL and routes the PR panel automatically. If `glab` isn't installed for GitLab, the panel prompts you; for Bitbucket, the **Settings → Accounts** tab has the App Password form.
 
 Source on [GitHub](https://github.com/devlint/GitWand). Full v2.10.0 entry in the [changelog](/changelog#v2-10-0-may-2026).
 
@@ -278,4 +278,4 @@ Source on [GitHub](https://github.com/devlint/GitWand). Full v2.10.0 entry in th
 
 *Related reading: [Launchpad — GitWand's cross-repo dashboard](/blog/v2-9-launchpad) (the v2.9 release that built the multi-repo PR aggregation the forge abstraction now feeds) and the [changelog](/changelog) for everything else.*
 
-*Curious about GitWand? [Download it here](https://gitwand.devlint.fr/) — free, open-source, shipping monthly.*
+*Curious about GitWand? [Download it here](https://gitwand.app/) — free, open-source, shipping monthly.*
