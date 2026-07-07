@@ -712,6 +712,7 @@ const zhCN: Locale = {
     recommended: "推荐",
     autoResolved: "自动",
     resolvedManually: "已手动解决",
+    recoverableBeforeModel: "AI 介入前 {0}% 可确定性恢复",
     analysing: "正在分析冲突…",
     loadingRepo: "加载仓库中…",
     successTitle: "合并成功完成",

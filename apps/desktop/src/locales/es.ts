@@ -722,6 +722,7 @@ const es: Locale = {
     recommended: "recomendado",
     autoResolved: "auto",
     resolvedManually: "Resuelto manualmente",
+    recoverableBeforeModel: "{0}% recuperable antes de la IA",
     analysing: "Analizando conflictos…",
     loadingRepo: "Cargando repositorio…",
     successTitle: "Merge completado con éxito",

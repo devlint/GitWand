@@ -723,6 +723,7 @@ const ptBR: Locale = {
     recommended: "recomendado",
     autoResolved: "auto",
     resolvedManually: "Resolvido manualmente",
+    recoverableBeforeModel: "{0}% recuperável antes da IA",
     analysing: "Analisando conflitos…",
     loadingRepo: "Carregando repositório…",
     successTitle: "Merge concluído com sucesso",

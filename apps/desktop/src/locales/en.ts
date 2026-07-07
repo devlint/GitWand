@@ -734,6 +734,7 @@ const en = {
     recommended: "recommended",
     autoResolved: "auto",
     resolvedManually: "Manually resolved",
+    recoverableBeforeModel: "{0}% recoverable before AI",
     analysing: "Analysing conflicts\u2026",
     loadingRepo: "Loading repository\u2026",
     successTitle: "Merge completed successfully",

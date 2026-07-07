@@ -727,6 +727,7 @@ const fr: Locale = {
     recommended: "recommand\u00e9",
     autoResolved: "auto",
     resolvedManually: "R\u00e9solu manuellement",
+    recoverableBeforeModel: "{0}% r\u00e9cup\u00e9rable avant l'IA",
     analysing: "Analyse des conflits\u2026",
     loadingRepo: "Chargement du repo\u2026",
     successTitle: "Merge terminé avec succès",

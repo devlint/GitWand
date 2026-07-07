@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import type { ConflictFile } from "../composables/useGitWand";
-import type { ConflictHunk } from "@gitwand/core";
+import { summarizeTiers, type ConflictHunk } from "@gitwand/core";
 import { highlightConflict } from "../utils/diffHighlight";
 import { useI18n } from "../composables/useI18n";
 import { safeHtml } from "../composables/useSafeHtml";
@@ -278,6 +278,10 @@ const canResolve = computed(
 const hunks = computed(() => props.file.result.hunks);
 const resolutions = computed(() => props.file.result.resolutions);
 
+// v2.7 — "recoverable-before-model" tier summary for this file. Hidden when
+// residual is 0 (every hunk was trivially resolved — nothing to measure).
+const tierSummary = computed(() => summarizeTiers(props.file.result.stats.byType));
+
 const treeExplanation = computed(() => {
   const tr = props.file.tree;
   if (!tr) return "";
@@ -344,6 +348,8 @@ watch(
   () => props.file.path,
   () => {
     acceptedLlmHunks.value = new Set();
+    rejectedTokenMergeHunks.value = new Set();
+    rejectedPreviewHunks.value = new Set();
   },
 );
 
@@ -711,6 +717,9 @@ useResizeObserver(contentEl, drawMinimap);
           {{ file.result.stats.totalConflicts }} {{ t('merge.conflictType') }}{{ file.result.stats.totalConflicts > 1 ? 's' : '' }}
           <template v-if="file.result.stats.autoResolved > 0">
             — {{ file.result.stats.autoResolved }} {{ t('merge.autoResolved') }}
+          </template>
+          <template v-if="tierSummary.residual > 0">
+            — {{ t('merge.recoverableBeforeModel', Math.round(tierSummary.recoverableBeforeModel * 100)) }}
           </template>
         </span>
       </div>

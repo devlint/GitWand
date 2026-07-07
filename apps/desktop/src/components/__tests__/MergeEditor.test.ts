@@ -44,7 +44,7 @@ function markerlessFile(): ConflictFile {
       mergedContent: null,
       hunks: [],
       resolutions: [],
-      stats: { totalConflicts: 0, autoResolved: 0 },
+      stats: { totalConflicts: 0, autoResolved: 0, byType: {} },
       validation: { valid: true, errors: [] },
     } as unknown as ConflictFile["result"],
     markerless: { reconstructed: "reconstructed content" },
@@ -60,7 +60,7 @@ function resolvedFile(): ConflictFile {
       mergedContent: "line one\nline two\n",
       hunks: [],
       resolutions: [],
-      stats: { totalConflicts: 0, autoResolved: 0 },
+      stats: { totalConflicts: 0, autoResolved: 0, byType: {} },
       validation: { valid: true, errors: [] },
     } as unknown as ConflictFile["result"],
   };
@@ -171,7 +171,7 @@ function tokenMergeFile(): ConflictFile {
       mergedContent: null,
       hunks: [tokenMergeHunk()],
       resolutions: [{ hunk: tokenMergeHunk(), resolvedLines: null, autoResolved: false, resolutionReason: "test" }],
-      stats: { totalConflicts: 1, autoResolved: 0 },
+      stats: { totalConflicts: 1, autoResolved: 0, byType: { token_level_merge: 1 } },
       validation: { valid: true, errors: [] },
     } as unknown as ConflictFile["result"],
   };
@@ -185,9 +185,40 @@ function mountDirect(file: ConflictFile, extraProps: Record<string, unknown> = {
   app.mount(container);
 }
 
+function tokenMergeFile2(): ConflictFile {
+  const file = tokenMergeFile();
+  return { ...file, path: "src/bar.html" };
+}
+
 describe("MergeEditor : panneau token_level_merge", () => {
   it("affiche TokenMergePanel pour un hunk token_level_merge", () => {
     mountDirect(tokenMergeFile());
+    expect(container.querySelector(".token-merge-panel")).not.toBeNull();
+  });
+
+  it("affiche le taux recoverable-before-model quand le résidu est non nul", () => {
+    // token_level_merge est classé advancedDeterministic — résidu = 1, tout dedans → 100%.
+    mountDirect(tokenMergeFile());
+    expect(container.querySelector(".editor-stats")!.textContent).toContain("100");
+  });
+
+  it("n'affiche pas le taux recoverable-before-model quand tout est trivial (résidu nul)", () => {
+    mountDirect(resolvedFile());
+    expect(container.querySelector(".editor-stats")!.textContent).not.toContain("recoverable");
+  });
+
+  it("un rejet sur un fichier ne masque pas le panneau du hunk au même index sur un autre fichier", async () => {
+    const state = mountWithFile(tokenMergeFile());
+    container
+      .querySelector<HTMLButtonElement>(".token-merge-panel__btn--reject")!
+      .click();
+    await nextTick();
+    expect(container.querySelector(".token-merge-panel")).toBeNull();
+
+    // Changement de fichier : le hunk 0 du fichier B est aussi token_level_merge —
+    // il ne doit pas hériter du rejet du fichier A (fuite d'état inter-fichiers).
+    state.file = tokenMergeFile2();
+    await nextTick();
     expect(container.querySelector(".token-merge-panel")).not.toBeNull();
   });
 
@@ -224,7 +255,7 @@ function baseEnrichedFile(): ConflictFile {
       mergedContent: "line one\nline two\n",
       hunks: [],
       resolutions: [],
-      stats: { totalConflicts: 0, autoResolved: 0 },
+      stats: { totalConflicts: 0, autoResolved: 0, byType: {} },
       validation: { valid: true, errors: [] },
     } as unknown as ConflictFile["result"],
     baseEnriched: true,
@@ -296,7 +327,7 @@ function nonOverlappingFile(): ConflictFile {
       mergedContent: null,
       hunks: [nonOverlappingHunk()],
       resolutions: [nonOverlappingResolution()],
-      stats: { totalConflicts: 1, autoResolved: 1 },
+      stats: { totalConflicts: 1, autoResolved: 1, byType: { non_overlapping: 1 } },
       validation: { valid: true, errors: [] },
     } as unknown as ConflictFile["result"],
   };
@@ -332,6 +363,23 @@ describe("MergeEditor : panneau de résolution générique (non_overlapping)", (
     const file = tokenMergeFile(); // type token_level_merge — exclu explicitement dans showResolutionPreviewFor
     mountDirect(file);
     expect(container.querySelector(".resolution-preview-panel")).toBeNull();
+  });
+
+  it("un rejet sur un fichier ne masque pas le panneau du hunk au même index sur un autre fichier", async () => {
+    const state = mountWithFile(nonOverlappingFile());
+    container
+      .querySelector<HTMLButtonElement>(".resolution-preview-panel__btn--reject")!
+      .click();
+    await nextTick();
+    expect(container.querySelector(".resolution-preview-panel")).toBeNull();
+
+    // Changement de fichier : le hunk 0 du fichier B est aussi auto-résolu —
+    // il ne doit pas hériter du rejet du fichier A (fuite d'état inter-fichiers).
+    const file2 = nonOverlappingFile();
+    file2.path = "src/config2.ts";
+    state.file = file2;
+    await nextTick();
+    expect(container.querySelector(".resolution-preview-panel")).not.toBeNull();
   });
 });
 
