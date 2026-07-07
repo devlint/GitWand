@@ -60,19 +60,25 @@ const KEYWORDS = new Set([
 // ─── Utilitaires de tokenisation ─────────────────────────────────────────────
 
 /**
- * Remplace le contenu des string/template literals par des espaces, pour que
- * `IDENT_RE` ne matche jamais une valeur entre guillemets comme un identifiant
- * renommable. Sans ça, un simple changement de valeur (`"info"` → `"warn"`)
- * ressemble à un renommage bijectif et `refactoring_aware_merge` le "résout"
- * silencieusement à tort (confiance 82) au lieu de le laisser à `complex`/LLM.
+ * Remplace le contenu des string/template literals ET des commentaires par des
+ * espaces, pour que `IDENT_RE` ne matche jamais une valeur entre guillemets ou
+ * un mot de commentaire comme un identifiant renommable. Sans ça, un simple
+ * changement de valeur (`"info"` → `"warn"`) ou de wording de commentaire
+ * (`// use info level` → `// use warn level`) ressemble à un renommage
+ * bijectif et `refactoring_aware_merge` le "résout" silencieusement à tort
+ * (confiance 82) au lieu de le laisser à `complex`/LLM.
  *
- * Scan naïf caractère par caractère (pas un vrai lexer) — gère l'échappement
- * `\"` de base. Limitation connue : les interpolations `${expr}` d'un template
- * literal sont masquées avec le reste (un identifiant réellement renommable
- * dans une interpolation ne sera pas détecté) — acceptable pour un pattern
- * expérimental/best-effort qui dégrade déjà silencieusement en cas d'échec.
+ * Le scan gère strings et commentaires dans la même passe — indispensable pour
+ * qu'un `//` à l'intérieur d'une string (URL) ne soit pas pris pour un début
+ * de commentaire, et qu'un guillemet dans un commentaire n'ouvre pas une
+ * string. Scan naïf caractère par caractère (pas un vrai lexer) — gère
+ * l'échappement `\"` de base. Limitations connues : les interpolations
+ * `${expr}` d'un template literal sont masquées avec le reste, et un `/` de
+ * division suivi d'un autre `/` (regex vs commentaire) n'est pas désambiguïsé
+ * — acceptable pour un pattern expérimental/best-effort qui dégrade déjà
+ * silencieusement en cas d'échec.
  */
-function maskStringLiterals(text: string): string {
+function maskStringsAndComments(text: string): string {
   let result = "";
   let i = 0;
   while (i < text.length) {
@@ -97,6 +103,28 @@ function maskStringLiterals(text: string): string {
       }
       continue;
     }
+    if (ch === "/" && text[i + 1] === "/") {
+      // Line comment — mask through end of line (newline preserved).
+      while (i < text.length && text[i] !== "\n") {
+        result += " ";
+        i++;
+      }
+      continue;
+    }
+    if (ch === "/" && text[i + 1] === "*") {
+      // Block comment — mask through `*/`, preserving newlines.
+      result += "  ";
+      i += 2;
+      while (i < text.length && !(text[i] === "*" && text[i + 1] === "/")) {
+        result += text[i] === "\n" ? "\n" : " ";
+        i++;
+      }
+      if (i < text.length) {
+        result += "  "; // closing */
+        i += 2;
+      }
+      continue;
+    }
     result += ch;
     i++;
   }
@@ -109,7 +137,7 @@ function maskStringLiterals(text: string): string {
  * vérification de substitution bijective.
  */
 function tokenize(lines: string[]): string[] {
-  const text = maskStringLiterals(lines.join("\n"));
+  const text = maskStringsAndComments(lines.join("\n"));
   const tokens: string[] = [];
   IDENT_RE.lastIndex = 0;
   let m: RegExpExecArray | null;

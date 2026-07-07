@@ -157,6 +157,34 @@ describe("detectRefactorings", () => {
     const refs = detectRefactorings(base, branch);
     expect(refs).toHaveLength(0);
   });
+
+  // F-R06c : pas de refactoring — mot changé dans un commentaire ligne
+  it("F-R06c : ignore les identifiants apparaissant dans un commentaire // (même classe de bug que F-R06b)", () => {
+    const base = ["const x = 1; // use info level"];
+    const branch = ["const x = 1; // use warn level"];
+    const refs = detectRefactorings(base, branch);
+    expect(refs).toHaveLength(0);
+  });
+
+  // F-R06d : pas de refactoring — mot changé dans un commentaire bloc multi-lignes
+  it("F-R06d : ignore les identifiants dans un commentaire /* */ multi-lignes", () => {
+    const base = ["/* logger set to", "   info by default */", "const x = 1;"];
+    const branch = ["/* logger set to", "   warn by default */", "const x = 1;"];
+    const refs = detectRefactorings(base, branch);
+    expect(refs).toHaveLength(0);
+  });
+
+  // F-R06e : un // à l'intérieur d'une string ne démarre PAS un commentaire
+  it("F-R06e : un rename réel après une string contenant // est toujours détecté", () => {
+    // Si le `//` de l'URL était pris pour un début de commentaire, `foo(alpha)`
+    // serait masqué et le rename alpha→beta passerait inaperçu.
+    const base = [`const u = "http://x"; foo(alpha);`];
+    const branch = [`const u = "http://x"; foo(beta);`];
+    const refs = detectRefactorings(base, branch);
+    expect(refs).toHaveLength(1);
+    expect(refs[0]!.oldName).toBe("alpha");
+    expect(refs[0]!.newName).toBe("beta");
+  });
 });
 
 // ─── Section B : invertRefactorings + replayRefactorings ─────────────────────
