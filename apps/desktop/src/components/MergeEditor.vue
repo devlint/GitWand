@@ -57,14 +57,6 @@ const emit = defineEmits<{
 const editingHunkIndex = ref<number | null>(null);
 const editContent = ref("");
 
-watch(
-  () => props.file.path,
-  () => {
-    editingHunkIndex.value = null;
-    editContent.value = "";
-  },
-);
-
 function startEditing(hunkIndex: number, hunk: ConflictHunk) {
   editContent.value = [...hunk.oursLines, ...hunk.theirsLines].join("\n");
   editingHunkIndex.value = hunkIndex;
@@ -254,13 +246,6 @@ function resolveHunkCustomWithMemory(path: string, hunkIndex: number, content: s
 // is reset when the active file changes.
 const rejectedLlmHunks = ref<Set<number>>(new Set());
 
-watch(
-  () => props.file.path,
-  () => {
-    rejectedLlmHunks.value = new Set();
-  },
-);
-
 /** Number of `llm_proposed` hunks the user explicitly rejected (this file). */
 const rejectedLlmCount = computed(() => rejectedLlmHunks.value.size);
 
@@ -344,15 +329,6 @@ function showLlmPanelFor(hunkIndex: number, hunk: ConflictHunk): boolean {
 /** Visual badge — `true` once the user clicked Accept. UX-only, no state mutation. */
 const acceptedLlmHunks = ref<Set<number>>(new Set());
 
-watch(
-  () => props.file.path,
-  () => {
-    acceptedLlmHunks.value = new Set();
-    rejectedTokenMergeHunks.value = new Set();
-    rejectedPreviewHunks.value = new Set();
-  },
-);
-
 function onLlmAccept(hunkId: string | number) {
   const idx = Number(hunkId);
   if (!Number.isFinite(idx)) return;
@@ -427,6 +403,25 @@ function showResolutionPreviewFor(hunkIndex: number, hunk: ConflictHunk): boolea
   if (!resolutions.value[hunkIndex]?.resolvedLines) return false;
   return !rejectedPreviewHunks.value.has(hunkIndex);
 }
+
+// ─── Reset per-file UI-only state on file change ────────
+// Consolidated from 3 separate watch(() => props.file.path, ...) blocks that
+// each reset one slice of this UI-only state (inline edit, LLM panel,
+// token-merge/preview panels). Splitting them made it easy to add a new ref
+// and forget to wire it into a reset — that's exactly what happened when
+// rejectedTokenMergeHunks/rejectedPreviewHunks landed. One watcher, one place
+// to extend.
+watch(
+  () => props.file.path,
+  () => {
+    editingHunkIndex.value = null;
+    editContent.value = "";
+    rejectedLlmHunks.value = new Set();
+    acceptedLlmHunks.value = new Set();
+    rejectedTokenMergeHunks.value = new Set();
+    rejectedPreviewHunks.value = new Set();
+  },
+);
 
 // ─── "Résoudre auto" summary confirmation ───────────────
 const showResolveAutoSummary = ref(false);
