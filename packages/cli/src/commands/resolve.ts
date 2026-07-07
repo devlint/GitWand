@@ -19,7 +19,7 @@
 
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve as resolvePath } from "node:path";
-import { resolve, resolveAsync, type MergeResult } from "@gitwand/core";
+import { resolve, resolveAsync, summarizeTiers, type MergeResult, type ConflictType } from "@gitwand/core";
 
 import { c, printBanner, WAND } from "../ui.js";
 import { getConflictedFiles } from "../git.js";
@@ -201,12 +201,17 @@ export async function cmdResolve(
   let totalResolved = 0;
   let totalRemaining = 0;
   let totalConflicts = 0;
+  const aggregateByType: Partial<Record<ConflictType, number>> = {};
   for (const outcome of outcomes) {
     if (outcome.result === null) continue;
     results.push({ file: outcome.file, result: outcome.result });
     totalConflicts += outcome.result.stats.totalConflicts;
     totalResolved += outcome.result.stats.autoResolved;
     totalRemaining += outcome.result.stats.remaining;
+    for (const [type, count] of Object.entries(outcome.result.stats.byType)) {
+      const t = type as ConflictType;
+      aggregateByType[t] = (aggregateByType[t] ?? 0) + count;
+    }
   }
 
   // CI mode: JSON output
@@ -233,6 +238,17 @@ export async function cmdResolve(
   } else if (totalConflicts > 0) {
     console.log(
       `${c.green}${c.bold}All conflicts resolved! ${WAND}${c.reset}`,
+    );
+  }
+
+  // v2.7 — "recoverable-before-model" : de ce qui dépasse les passes triviales,
+  // combien reste récupérable de façon déterministe avant d'atteindre le LLM.
+  // N'affiche rien si tout était trivial (résidu vide — rien à mesurer).
+  const tiers = summarizeTiers(aggregateByType as Record<ConflictType, number>);
+  if (tiers.residual > 0) {
+    const pct = Math.round(tiers.recoverableBeforeModel * 100);
+    console.log(
+      `${c.dim}residual ${tiers.residual} → ${tiers.byTier.advancedDeterministic} deterministic · ${tiers.aiReachable} to model · recoverable-before-model ${pct}%${c.reset}`,
     );
   }
 
