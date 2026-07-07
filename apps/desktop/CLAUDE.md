@@ -46,11 +46,16 @@ name = "parity-probe"
 
 ## Parity Probe
 
-`src-tauri/examples/parity-probe.rs` reproduit en Rust la logique de résolution de conflits de `packages/core`. Permet de vérifier que les deux implémentations donnent des résultats identiques.
+`src-tauri/examples/parity_probe.rs` expose les commandes git critiques du
+backend Rust comme un petit binaire CLI, pour que le harness Node
+(`tests/parity/`) compare leurs sorties à celles des routes équivalentes de
+`dev-server.mjs` (git-status, git-log, git-branches, …). Il ne couvre PAS le
+moteur de résolution de conflits — celui-ci est TypeScript-only
+(`packages/core`), sans implémentation Rust.
 
 ```bash
 pnpm test:parity
-# Exécute vitest.config.parity.ts — lance le binaire Rust + le JS, compare les sorties
+# Exécute vitest.config.parity.ts — lance le binaire Rust + le dev-server Node, compare les sorties
 ```
 
 ## Configuration Tauri

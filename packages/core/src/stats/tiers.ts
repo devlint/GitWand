@@ -8,9 +8,12 @@
  * how much is still recoverable deterministically before the model is ever
  * invoked?
  *
- * Parity note (critical): these fields must NOT be added to `MergeStats` —
- * that struct is compared by the Rust↔TS parity-probe. `summarizeTiers` stays
- * a TS-side derived helper consumed separately by CLI/desktop/MCP.
+ * Design note: these fields are deliberately NOT added to `MergeStats` —
+ * that struct is a serialized public contract (CLI --json reports, MCP
+ * output), and derived metrics stay derived. `summarizeTiers` is a TS-side
+ * helper consumed separately by CLI/desktop/MCP. (An earlier revision cited
+ * the Rust↔TS parity probe as the reason; that probe covers git commands,
+ * not resolution structs — the contract argument is the real one.)
  */
 
 import type { ConflictType } from "../types.js";

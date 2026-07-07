@@ -100,7 +100,7 @@ Single source of truth for the ConflictType→tier mapping lives beside this hel
 
 ## 7. Constraints
 
-- **Parity (critical):** do **not** add these fields to the `MergeStats` object the Rust↔TS parity-probe compares — that would force a Rust mirror. Keep `summarizeTiers` a TS-side derived helper consumed by CLI/desktop/MCP. The probe stays untouched, parity stays green, zero Rust work.
+- **Stable contract:** do **not** add these fields to `MergeStats` — it's a serialized public contract (CLI `--json` reports, MCP output); derived metrics stay derived. Keep `summarizeTiers` a TS-side helper consumed by CLI/desktop/MCP. *(Correction post-implémentation : la version initiale de cette contrainte invoquait le parity-probe Rust↔TS ; vérification faite, ce probe compare des commandes git Rust↔dev-server Node, pas les structs de résolution — il n'existe aucune implémentation Rust du moteur. La contrainte de contrat sérialisé reste valable, le motif parité était fantôme.)*
 - **Browser-safe:** `packages/core` stays Node-free; the helper is pure (no fs/path).
 - **No resolution-logic change from 4.B/4.C** — they read existing output. Only 4.A and 4.D touch behavior.
 
