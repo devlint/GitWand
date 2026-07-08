@@ -285,8 +285,15 @@ export async function resolveAsync(
   //   Le flag est réinitialisé immédiatement après `resolve()` — il ne doit pas
   //   persister entre appels (module-level state, potentiellement partagé).
   const llmEnabled = !!(options.llmFallback?.enabled && options.llmFallback?.endpoint);
+  // Coupling fix (v2.7) — the LLM path must only be reachable for hunks no
+  // enabled deterministic pattern can resolve. Force refactoringAware on
+  // whenever llmFallback is on, so a rename-on-both-sides hunk never skips
+  // the deterministic recoverer just because the user only opted into the LLM.
+  const effectiveOptions = llmEnabled
+    ? { ...userOptions, refactoringAware: { ...options.refactoringAware, enabled: true } }
+    : userOptions;
   if (llmEnabled) setLlmFallbackEnabled(true);
-  const result = resolve(conflictedContent, filePath, userOptions);
+  const result = resolve(conflictedContent, filePath, effectiveOptions);
   if (llmEnabled) setLlmFallbackEnabled(false);
 
   if (options.verbose && llmEnabled && result.resolutions.some((r) => !r.autoResolved && r.hunk.type === "llm_proposed")) {

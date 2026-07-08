@@ -7,25 +7,7 @@ import {
 } from "../utils/backend";
 import type { WorkspaceRepo } from "../utils/backend";
 import type { PrWithRepo } from "./useLaunchpadPrs";
-
-/** Run async `fn` on each item with at most `limit` concurrent in-flight promises. */
-async function concurrentMap<T, R>(
-  items: T[],
-  fn: (item: T) => Promise<R>,
-  limit: number,
-): Promise<R[]> {
-  const results: R[] = [];
-  const executing = new Set<Promise<void>>();
-  for (let i = 0; i < items.length; i++) {
-    const p = fn(items[i]).then((r) => { results[i] = r; });
-    executing.add(p.finally(() => executing.delete(p)));
-    if (executing.size >= limit) {
-      await Promise.race(executing);
-    }
-  }
-  await Promise.allSettled(executing);
-  return results;
-}
+import { concurrentMap } from "../utils/concurrentMap";
 
 export interface OverlappingPr extends PrWithRepo {
   overlappingFiles: string[];

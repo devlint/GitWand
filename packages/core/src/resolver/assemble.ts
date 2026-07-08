@@ -17,6 +17,7 @@ import type { MergePolicy, PolicyConfig } from "../config.js";
 import { mergeNonOverlapping } from "../diff.js";
 import { stripVolatileValues } from "./generated-detection.js";
 import { getLastRefMergeResult } from "../patterns/refactoring-aware-merge.js";
+import { pickNewerSemverSide } from "../patterns/utils.js";
 
 /**
  * Applique la stratégie textuelle correspondant au type de hunk.
@@ -84,10 +85,24 @@ export function assembleResolution(
       const hasBase = hunk.baseLines.length > 0;
       let merged: string[];
       if (hasBase) {
-        // Trouver les lignes ajoutées par chaque côté via inclusion dans l'ensemble de base
-        const baseSet = new Set(hunk.baseLines);
-        const oursInsertions = hunk.oursLines.filter((l) => !baseSet.has(l));
-        const theirsInsertions = hunk.theirsLines.filter((l) => !baseSet.has(l));
+        // Trouver les lignes ajoutées par chaque côté. Comptage MULTISET, pas
+        // Set : une insertion textuellement identique à une ligne de base (un
+        // `}` dupliqué, une ligne répétée) est une vraie insertion — un simple
+        // Set(baseLines) la filtrait et la PERDAIT silencieusement du résultat.
+        const baseCount = new Map<string, number>();
+        for (const l of hunk.baseLines) baseCount.set(l, (baseCount.get(l) ?? 0) + 1);
+        const insertionsOf = (lines: string[]): string[] => {
+          const remaining = new Map(baseCount);
+          const out: string[] = [];
+          for (const l of lines) {
+            const n = remaining.get(l) ?? 0;
+            if (n > 0) remaining.set(l, n - 1);
+            else out.push(l);
+          }
+          return out;
+        };
+        const oursInsertions = insertionsOf(hunk.oursLines);
+        const theirsInsertions = insertionsOf(hunk.theirsLines);
         merged = [...hunk.baseLines, ...oursInsertions, ...theirsInsertions];
       } else {
         // Heuristique diff2 : union (ours ordre préservé, on ajoute ce qui manque de theirs)
@@ -150,6 +165,17 @@ export function assembleResolution(
           reason: `Résolution value_only_change désactivée par la politique "${effectivePolicy}".`,
         };
       }
+      // Quand toutes les paires de tokens différents sont des semver
+      // comparables, le côté le plus élevé gagne — déterministe et conforme à
+      // l'intention « garder la version la plus récente », quel que soit le
+      // côté qui la porte. Sinon (hashes, timestamps) : côté-politique.
+      const semverSide = pickNewerSemverSide(hunk.oursLines, hunk.theirsLines);
+      if (semverSide !== null) {
+        return {
+          lines: semverSide === "ours" ? [...hunk.oursLines] : [...hunk.theirsLines],
+          reason: `Même structure, version(s) semver différente(s). Résolution : accepter ${semverSide} (version la plus élevée).`,
+        };
+      }
       const preferred = policyCfg.preferOurs ? hunk.oursLines : hunk.theirsLines;
       const side = policyCfg.preferOurs ? "ours" : "theirs";
       return {
@@ -157,6 +183,14 @@ export function assembleResolution(
         reason: `Même structure, valeur(s) volatile(s) différente(s). Résolution : accepter ${side} (politique : ${effectivePolicy}).`,
       };
     }
+
+    case "token_level_merge":
+      // v2.7 — Résolution toujours différée à la confirmation utilisateur (frontend).
+      // La proposition calculée est disponible dans hunk.trace.tokenMergeTrace.
+      return {
+        lines: null,
+        reason: "token_level_merge : fusion proposée, confirmation utilisateur requise avant application.",
+      };
 
     case "generated_file": {
       // Smart resolution : si les deux côtés sont identiques après suppression

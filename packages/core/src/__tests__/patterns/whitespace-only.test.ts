@@ -197,3 +197,65 @@ describe("whitespace_only : cas qui ne doivent pas matcher", () => {
     expect(result.hunks[0].type).toBe("same_change");
   });
 });
+
+// ─── Garde string-literal : le whitespace DANS une string est sémantique ─────
+
+describe("whitespace_only : différences de whitespace à l'intérieur de string literals", () => {
+  // Régression : `"hello  world"` vs `"hello world"` était classé
+  // whitespace_only et auto-résolu en écrasant l'un des deux contenus — or le
+  // whitespace dans une string literal est de la DONNÉE, pas de la mise en
+  // forme. Le pattern ne doit matcher que si les segments quotés sont
+  // strictement identiques des deux côtés.
+  it("ne classifie PAS whitespace_only quand seule une string literal diffère (diff2)", () => {
+    const input = [
+      `<<<<<<< ours`,
+      `msg = "hello  world"`,
+      `=======`,
+      `msg = "hello world"`,
+      `>>>>>>> theirs`,
+    ].join("\n");
+    const result = resolve(input, "src/utils.ts");
+    expect(result.hunks[0].type).not.toBe("whitespace_only");
+    expect(result.resolutions[0].autoResolved).toBe(false);
+  });
+
+  it("ne classifie PAS whitespace_only quand une template literal diffère (diff3)", () => {
+    const input = [
+      `<<<<<<< ours`,
+      "const s = `a  b`;",
+      `||||||| base`,
+      "const s = `a b`;",
+      `=======`,
+      "const s = `a b`;".replace("a b", "a b"), // theirs == base, mais ours a changé LA STRING
+      `>>>>>>> theirs`,
+    ].join("\n");
+    const result = resolve(input, "src/utils.ts");
+    // one_side_change (prio 30) peut légitimement le prendre — l'important est
+    // que whitespace_only ne l'écrase pas en préférant un côté au hasard.
+    expect(["one_side_change", "complex"]).toContain(result.hunks[0].type);
+  });
+
+  it("classifie toujours whitespace_only quand les strings sont identiques et seule l'indentation diffère", () => {
+    const input = [
+      `<<<<<<< ours`,
+      `    log("hello world");`,
+      `=======`,
+      `  log("hello world");`,
+      `>>>>>>> theirs`,
+    ].join("\n");
+    const result = resolve(input, "src/utils.ts");
+    expect(result.hunks[0].type).toBe("whitespace_only");
+  });
+
+  it("classifie toujours whitespace_only avec apostrophe dans un commentaire (pas une vraie string)", () => {
+    const input = [
+      `<<<<<<< ours`,
+      `    doIt(); // c'est bon`,
+      `=======`,
+      `  doIt(); // c'est bon`,
+      `>>>>>>> theirs`,
+    ].join("\n");
+    const result = resolve(input, "src/utils.ts");
+    expect(result.hunks[0].type).toBe("whitespace_only");
+  });
+});

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from "vue";
 import { useI18n } from "../composables/useI18n";
+import { useTierStats } from "../composables/useTierStats";
 import { useTheme } from "../composables/useTheme";
 import BaseModal from "./BaseModal.vue";
 import HooksPanel from "./HooksPanel.vue";
@@ -32,6 +33,18 @@ import {
 } from "../utils/backend";
 
 const { t, locale, isAuto, setLocale } = useI18n();
+
+// ─── Statistiques tier locales (onglet Git) ──────────────────────
+const { tierStats, reset: resetTierStats } = useTierStats();
+const tierRecoverablePct = computed(() =>
+  Math.round(tierStats.value.tiers.recoverableBeforeModel * 100),
+);
+const tierSinceLabel = computed(() => {
+  const iso = tierStats.value.since;
+  if (!iso) return "";
+  try { return new Date(iso).toLocaleDateString(); } catch { return iso; }
+});
+
 const { theme, setTheme } = useTheme();
 
 const appVersion = __APP_VERSION__;
@@ -1753,6 +1766,50 @@ function deleteReleaseNoteTemplate(id: string) {
             <span class="sp-hint">{{ t('settings.blameAlgorithmHint') }}</span>
           </div>
 
+          <!-- Statistiques tier locales (recoverable-before-model) -->
+          <div class="sp-section-divider"></div>
+          <h3 class="sp-section-title">{{ t('settings.tierStats.title') }}</h3>
+          <span class="sp-hint">{{ t('settings.tierStats.hint') }}</span>
+          <div v-if="tierStats.totalHunks === 0" class="sp-row">
+            <span class="sp-hint">{{ t('settings.tierStats.empty') }}</span>
+          </div>
+          <template v-else>
+            <div class="sp-row sp-tier-grid">
+              <div class="sp-tier-cell">
+                <span class="sp-tier-value mono">{{ tierStats.filesRecorded }}</span>
+                <span class="sp-hint">{{ t('settings.tierStats.files') }}</span>
+              </div>
+              <div class="sp-tier-cell">
+                <span class="sp-tier-value mono">{{ tierStats.totalHunks }}</span>
+                <span class="sp-hint">{{ t('settings.tierStats.hunks') }}</span>
+              </div>
+              <div class="sp-tier-cell">
+                <span class="sp-tier-value mono">{{ tierStats.tiers.byTier.trivial }}</span>
+                <span class="sp-hint">{{ t('settings.tierStats.trivial') }}</span>
+              </div>
+              <div class="sp-tier-cell">
+                <span class="sp-tier-value mono">{{ tierStats.tiers.byTier.advancedDeterministic }}</span>
+                <span class="sp-hint">{{ t('settings.tierStats.advanced') }}</span>
+              </div>
+              <div class="sp-tier-cell">
+                <span class="sp-tier-value mono">{{ tierStats.tiers.byTier.model }}</span>
+                <span class="sp-hint">{{ t('settings.tierStats.model') }}</span>
+              </div>
+              <div class="sp-tier-cell">
+                <span class="sp-tier-value mono">{{ tierStats.tiers.byTier.unresolved }}</span>
+                <span class="sp-hint">{{ t('settings.tierStats.unresolved') }}</span>
+              </div>
+            </div>
+            <div class="sp-row" v-if="tierStats.tiers.residual > 0">
+              <span class="sp-label">{{ t('settings.tierStats.recoverable') }}</span>
+              <span class="sp-tier-value mono">{{ tierRecoverablePct }}%</span>
+            </div>
+            <div class="sp-row sp-tier-footer">
+              <span class="sp-hint" v-if="tierSinceLabel">{{ t('settings.tierStats.since', tierSinceLabel) }}</span>
+              <button class="btn btn--ghost sp-btn--sm" type="button" @click="resetTierStats">{{ t('settings.tierStats.reset') }}</button>
+            </div>
+          </template>
+
           <!-- Inactive branch threshold -->
           <div class="sp-row">
             <label class="sp-label" for="setting-inactive-days">{{ t('settings.git.inactiveDays') }}</label>
@@ -3086,6 +3143,39 @@ function deleteReleaseNoteTemplate(id: string) {
   flex-direction: column;
   gap: var(--space-3);
 }
+
+.sp-tier-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px 16px;
+}
+
+.sp-tier-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sp-tier-value {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.sp-tier-footer {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.sp-tier-footer .btn {
+  margin-left: auto;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 
 .sp-label {
   font-size: var(--font-size-base);

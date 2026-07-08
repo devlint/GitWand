@@ -20,9 +20,11 @@ import whitespaceOnly      from "./patterns/whitespace-only.js";
 import reorderOnly              from "./patterns/reorder-only.js";
 import insertionAtBoundary      from "./patterns/insertion-at-boundary.js";
 import valueOnlyChange          from "./patterns/value-only-change.js";
+import tokenLevelMerge          from "./patterns/token-level-merge.js";     // v2.7 — priority 65
 import llmProposed         from "./patterns/llm-proposed.js";    // v2.5 — priority 998
 import refactoringAwareMerge from "./patterns/refactoring-aware-merge.js"; // v2.6 — priority 970
 import complex             from "./patterns/complex.js";
+import { getLastTokenMergeResult } from "./patterns/token-level-merge.js";
 
 // ─── Registre ────────────────────────────────────────────────
 
@@ -40,6 +42,7 @@ const PATTERNS: PatternPlugin[] = [
   reorderOnly,          // priority 55  ← v1.4
   insertionAtBoundary,  // priority 57  ← v1.4
   valueOnlyChange,        // priority 60
+  tokenLevelMerge,        // priority 65 ← v2.7 (jamais auto-appliqué, cf. assemble.ts)
   refactoringAwareMerge, // priority 970 ← v2.6 (OFF par défaut, activé par resolve())
   llmProposed,            // priority 998 ← v2.5 (OFF par défaut, activé par resolveAsync)
   complex,               // priority 999 (fallback — detect() always true)
@@ -109,6 +112,7 @@ function buildSummary(type: ConflictType, h: ClassifyInput): string {
     case "reorder_only":         return "Mêmes lignes, ordre différent — résolution : accepter l'ordre theirs.";
     case "insertion_at_boundary": return "Insertions pures des deux côtés — résolution par union.";
     case "value_only_change":    return "Même structure, valeur(s) volatile(s) différente(s) — résolution : accepter theirs.";
+    case "token_level_merge":    return "Fusion ligne/token proposée — confirmation utilisateur requise avant application.";
     case "llm_proposed":         return "LLM fallback activé — résolution déléguée à l'endpoint LLM configuré.";
     case "complex":              return "Conflit complexe — toutes les heuristiques automatiques ont échoué.";
     default:                     return `Type détecté : ${type}.`;
@@ -144,6 +148,9 @@ export function classifyConflict(hunk: ClassifyInput): ClassifyResult {
   for (const pattern of eligible) {
     if (pattern.detect(hunk)) {
       const trace = buildTrace(hunk, eligible, allSorted, pattern);
+      if (pattern.type === "token_level_merge") {
+        trace.tokenMergeTrace = getLastTokenMergeResult() ?? undefined;
+      }
       return {
         type: pattern.type,
         confidence: pattern.confidence(hunk),

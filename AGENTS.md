@@ -197,12 +197,20 @@ composable — always go through `backend.ts`.
 Do not mock the git layer. Spin up a real temporary git repository in each test
 that needs one, and clean it up on teardown.
 
-### Parity tests — Rust vs TypeScript
+### Parity tests — Rust backend vs Node dev-server
 
-`packages/core` contains a parity probe (`parity-probe`) that verifies the Rust
-and TypeScript conflict-resolution implementations produce identical output. Any
-change to the resolution algorithm must be mirrored in both implementations, and
-the parity probe must pass before merging.
+The parity probe (`apps/desktop/src-tauri/examples/parity_probe.rs` + the
+harness in `apps/desktop/tests/parity/`) verifies that **git commands** exposed
+by the Rust Tauri backend and their `dev-server.mjs` Node equivalents produce
+identical output (git-status, git-log, git-branches, …). Rule: every
+`#[tauri::command]` consumed by the frontend needs an equivalent dev-server
+route, and deterministic commands should get parity coverage.
+
+The conflict-resolution engine itself is **TypeScript-only** (`@gitwand/core`)
+— there is no Rust resolution implementation to mirror. (Older revisions of
+this file claimed a Rust↔TS resolution parity probe; that was never what the
+probe covered — do not derive a "mirror resolution changes in Rust" obligation
+from it.)
 
 ### Performance benchmarks
 

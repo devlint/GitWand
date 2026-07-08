@@ -1332,6 +1332,34 @@ const F45: CorpusFixture = {
   expectedOutput: null,
 };
 
+// ─── Régression — deux lignes adjacentes, conflit token-level par ligne ──
+// Motivé par un cas réel signalé sur resources/views/gestion/upsells/suggestions/index.blade.php
+// (deux lignes HTML adjacentes, classes utilitaires Tailwind modifiées des deux côtés).
+// Remarque : la variante "un seul côté change par ligne" est déjà couverte par
+// non_overlapping (vérifié pendant l'implémentation — LCS 3-way la résout sans ce
+// pattern). Ce cas-ci a les DEUX côtés qui modifient chaque ligne avec des tokens
+// disjoints — non_overlapping échoue (chevauchement réel), seul token_level_merge résout.
+const F46: CorpusFixture = {
+  id: "F46",
+  description: "v2.7 — token_level_merge : classes Tailwind, tokens disjoints sur 2 lignes adjacentes",
+  filePath: "resources/views/gestion/upsells/suggestions/index.blade.php",
+  category: "semantic",
+  input: [
+    `<<<<<<< ours`,
+    `            <div class="flex items-baseline a b mr-2">`,
+    `                <label class="font-weight-bold c d">`,
+    `||||||| base`,
+    `            <div class="flex items-baseline a2 b mr-2">`,
+    `                <label class="font-weight-bold c2 d">`,
+    `=======`,
+    `            <div class="flex items-baseline a2 b2 mr-2">`,
+    `                <label class="font-weight-bold c d2">`,
+    `>>>>>>> theirs`,
+  ].join("\n"),
+  expectedType: "token_level_merge",
+  expectedResolved: false,
+};
+
 // ─── Export ─────────────────────────────────────────────────
 
 export const CORPUS: CorpusFixture[] = [
@@ -1348,6 +1376,8 @@ export const CORPUS: CorpusFixture[] = [
   // v2.5 — LLM fallback candidates (complex sans LLM, résolus avec LLM mocké)
   F36, F37, F38, F39, F40,
   F41, F42, F43, F44, F45,
+  // v2.7 — token_level_merge
+  F46,
 ];
 
 /** Résumé par catégorie */

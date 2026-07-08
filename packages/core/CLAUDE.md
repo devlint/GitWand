@@ -77,9 +77,20 @@ Chaque pattern est un objet `PatternPlugin` (default export) enregistré dans `s
 | 6 | `reorder_only` | 0.85 | Mêmes lignes, ordre différent |
 | 7 | `insertion_at_boundary` | 0.85 | Insertions pures sans modifier les lignes existantes |
 | 8 | `value_only_change` | 0.7 | Changement de valeur scalaire (ex: numéro de version) |
+| 65 | `token_level_merge` | 0.5-0.6 (jamais auto-appliqué) | Décomposition ligne/token réussie — proposition soumise à confirmation utilisateur |
 | 9 | `complex` | 0 | Chevauchement complexe — **jamais auto-résolu** |
 
 Le pattern `complex` (priority 999) est le filet de sécurité : `detect()` retourne toujours `true`, `confidence` score 0 — force une revue manuelle.
+
+**Exception à la règle confidence → auto-application** : `token_level_merge` (v2.7, priority 65)
+est le seul pattern textuel dont la confiance ne pilote jamais l'auto-application, quel que soit
+le score obtenu. Il décompose le hunk ligne par ligne, puis — pour les lignes où les deux côtés
+diffèrent encore de la base — fusionne les tokens disjoints (`patterns/token-level-merge.ts`).
+`resolver/assemble.ts` retourne systématiquement `lines: null` pour ce type ; la proposition
+calculée (`hunk.trace.tokenMergeTrace`) est affichée à l'utilisateur via `TokenMergePanel.vue`
+(apps/desktop) qui applique le résultat par `resolveHunkCustom` uniquement après confirmation
+explicite. Ne pas copier ce comportement dans un futur pattern sans raison équivalente — c'est
+une dérogation délibérée, pas un nouveau standard.
 
 ### Interface PatternPlugin
 

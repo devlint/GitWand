@@ -179,3 +179,150 @@ describe("value_only_change : cas qui ne doivent pas matcher", () => {
     expect(result.hunks[0].type).not.toBe("value_only_change");
   });
 });
+
+// ─── Extension diff3 + résolution semver-max ─────────────────────────────────
+
+describe("value_only_change : extension diff3 (les deux côtés ont changé la valeur)", () => {
+  // Avant : requires "diff2" → le pattern était inatteignable dès que la base
+  // était présente (donc quasi mort dans le flux desktop où la base recovery
+  // enrichit tout en diff3) et le hunk tombait en complex.
+  it("classifie value_only_change en diff3 quand les deux côtés ont bumpé une version différemment", () => {
+    const input = [
+      `<<<<<<< ours`,
+      `"version": "1.4.0",`,
+      `||||||| base`,
+      `"version": "1.2.0",`,
+      `=======`,
+      `"version": "1.3.0",`,
+      `>>>>>>> theirs`,
+    ].join("\n");
+    const result = resolve(input, "manifest.txt");
+    expect(result.hunks[0].type).toBe("value_only_change");
+  });
+
+  it("en diff3, un changement unilatéral reste pris par one_side_change (prio 30 < 60)", () => {
+    const input = [
+      `<<<<<<< ours`,
+      `"version": "1.2.0",`,
+      `||||||| base`,
+      `"version": "1.2.0",`,
+      `=======`,
+      `"version": "1.3.0",`,
+      `>>>>>>> theirs`,
+    ].join("\n");
+    const result = resolve(input, "manifest.txt");
+    expect(result.hunks[0].type).toBe("one_side_change");
+  });
+});
+
+describe("value_only_change : résolution semver-max au lieu du côté-politique aveugle", () => {
+  // Régression : l'explication promettait « accepter la version la plus
+  // récente » mais la résolution prenait theirs par politique — probe P4 :
+  // ours=1.4.0, theirs=1.3.0 → 1.3.0 gagnait. Quand toutes les paires de
+  // tokens différents sont des semver comparables, le côté le plus élevé
+  // doit gagner, quel que soit le côté.
+  it("ours=1.4.0 vs theirs=1.3.0 → prend ours (le plus élevé)", () => {
+    const input = [
+      `<<<<<<< ours`,
+      `"version": "1.4.0",`,
+      `=======`,
+      `"version": "1.3.0",`,
+      `>>>>>>> theirs`,
+    ].join("\n");
+    const result = resolve(input, "manifest.txt");
+    expect(result.hunks[0].type).toBe("value_only_change");
+    expect(result.resolutions[0].resolvedLines).toEqual([`"version": "1.4.0",`]);
+  });
+
+  it("ours=1.3.0 vs theirs=2.0.0 → prend theirs (le plus élevé)", () => {
+    const input = [
+      `<<<<<<< ours`,
+      `"version": "1.3.0",`,
+      `=======`,
+      `"version": "2.0.0",`,
+      `>>>>>>> theirs`,
+    ].join("\n");
+    const result = resolve(input, "manifest.txt");
+    expect(result.resolutions[0].resolvedLines).toEqual([`"version": "2.0.0",`]);
+  });
+
+  it("valeurs non-semver (hashes) → côté politique comme avant", () => {
+    const input = [
+      `<<<<<<< ours`,
+      `integrity: "a1b2c3d4e5f6789",`,
+      `=======`,
+      `integrity: "f6e5d4c3b2a1987",`,
+      `>>>>>>> theirs`,
+    ].join("\n");
+    const result = resolve(input, "manifest.txt");
+    expect(result.hunks[0].type).toBe("value_only_change");
+    // Politique par défaut : theirs
+    expect(result.resolutions[0].resolvedLines).toEqual([`integrity: "f6e5d4c3b2a1987",`]);
+  });
+
+  it("l'explication ne prétend plus que theirs est « la plus récente »", () => {
+    const input = [
+      `<<<<<<< ours`,
+      `"version": "1.4.0",`,
+      `=======`,
+      `"version": "1.3.0",`,
+      `>>>>>>> theirs`,
+    ].join("\n");
+    const result = resolve(input, "manifest.txt");
+    expect(result.hunks[0].explanation).not.toContain("la plus récente (theirs)");
+  });
+});
+
+// ─── Tokens quotés multi-mots (timestamp) + résolution timestamp-max ─────────
+
+describe("value_only_change : valeurs volatiles multi-mots à l'intérieur de quotes", () => {
+  // Cas réel n°1 du corpus dendreo (config/dendreo.php 'last_update', récurrent
+  // sur 16+ merges) : un timestamp quoté contient un espace — la tokenization
+  // par défaut le splitte en "2026-07-06" + "11:42:00" et aucun fragment ne
+  // matche la regex datetime → le hunk tombait en complex. La tokenization
+  // quote-aware garde le contenu quoté atomique.
+  const input = [
+    `<<<<<<< ours`,
+    `    'last_update' => '2026-07-07 17:29:00',`,
+    `||||||| base`,
+    `    'last_update' => '2026-07-06 11:42:00',`,
+    `=======`,
+    `    'last_update' => '2026-07-06 09:36:00',`,
+    `>>>>>>> theirs`,
+  ].join("\n");
+
+  it("classifie value_only_change (timestamp quoté modifié des deux côtés, diff3)", () => {
+    const result = resolve(input, "config/app.php");
+    expect(result.hunks[0].type).toBe("value_only_change");
+  });
+
+  it("résout en gardant le timestamp le plus tardif (ours ici)", () => {
+    const result = resolve(input, "config/app.php");
+    expect(result.resolutions[0].autoResolved).toBe(true);
+    expect(result.resolutions[0].resolvedLines).toEqual([`    'last_update' => '2026-07-07 17:29:00',`]);
+  });
+
+  it("theirs plus tardif → theirs gagne", () => {
+    const flipped = [
+      `<<<<<<< ours`,
+      `    'last_update' => '2026-07-06 09:36:00',`,
+      `=======`,
+      `    'last_update' => '2026-07-07 17:29:00',`,
+      `>>>>>>> theirs`,
+    ].join("\n");
+    const result = resolve(flipped, "config/app.php");
+    expect(result.resolutions[0].resolvedLines).toEqual([`    'last_update' => '2026-07-07 17:29:00',`]);
+  });
+
+  it("contenus quotés non volatils (phrases) → ne matche pas", () => {
+    const prose = [
+      `<<<<<<< ours`,
+      `    'title' => 'Bonjour tout le monde',`,
+      `=======`,
+      `    'title' => 'Salut la compagnie',`,
+      `>>>>>>> theirs`,
+    ].join("\n");
+    const result = resolve(prose, "config/app.php");
+    expect(result.hunks[0].type).not.toBe("value_only_change");
+  });
+});

@@ -28,6 +28,7 @@ export type ConflictType =
   | "value_only_change"         // Même structure, seule une valeur change (hash, version, timestamp…)
   | "reorder_only"              // v1.4 — mêmes lignes, ordre différent (permutation pure)
   | "insertion_at_boundary"     // v1.4 — insertions pures des deux côtés, base intacte
+  | "token_level_merge"        // v2.7 — fusion fine ligne/token, toujours proposée (jamais auto-appliquée)
   | "llm_proposed"              // v2.5 — résolution proposée par LLM fallback (opt-in, priority 998)
   | "refactoring_aware_merge"  // v2.6 — RefMerge : détection/inversion/rejeu de refactorings (expérimental, opt-in)
   | "complex";                  // Conflit réel nécessitant intervention humaine
@@ -297,6 +298,39 @@ export interface DecisionTrace {
    * `undefined` pour tous les autres types de conflit.
    */
   llmTrace?: LlmTrace;
+  /**
+   * v2.7 — Proposition de fusion token-level (uniquement si
+   * `selected === "token_level_merge"`). `undefined` pour tous les autres types.
+   */
+  tokenMergeTrace?: TokenMergeTrace;
+}
+
+// ─── v2.7 — Token-level merge (proposition, jamais auto-appliquée) ──────
+
+/** Détail de résolution pour une ligne du hunk. */
+export interface TokenMergeLineDetail {
+  /** Index de la ligne dans le hunk (0-based, aligné sur base/ours/theirs). */
+  lineIndex: number;
+  /** Quelle passe a résolu cette ligne. */
+  resolvedBy: "pass1" | "pass2";
+  /** Contenu final proposé pour cette ligne. */
+  resolvedLine: string;
+  /** Indices de tokens modifiés par ours (uniquement renseigné pour pass2). */
+  oursTokenIndices?: number[];
+  /** Indices de tokens modifiés par theirs (uniquement renseigné pour pass2). */
+  theirsTokenIndices?: number[];
+}
+
+/** Proposition complète de fusion token-level pour un hunk. */
+export interface TokenMergeTrace {
+  /** Lignes fusionnées proposées — appliquées telles quelles si l'utilisateur accepte. */
+  mergedLines: string[];
+  /** Nombre de lignes résolues par la passe 1 (décomposition ligne-par-ligne). */
+  pass1Count: number;
+  /** Nombre de lignes résolues par la passe 2 (diff token-level). */
+  pass2Count: number;
+  /** Détail par ligne, pour l'annotation visuelle dans le panneau de proposition. */
+  lineDetails: TokenMergeLineDetail[];
 }
 
 // ─── Phase v1.4 — Pattern Registry ──────────────────────────

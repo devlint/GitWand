@@ -122,6 +122,47 @@ export function normalizeLine(line: string): string {
   return line.replace(/\t/g, "  ").trim().replace(/  +/g, " ");
 }
 
+/**
+ * Extrait la séquence des contenus de string literals (`"…"`, `'…'`, `` `…` ``)
+ * d'un bloc de lignes, dans l'ordre. Scan naïf caractère par caractère avec
+ * gestion de l'échappement `\"` — pas un vrai lexer (un apostrophe de prose
+ * dans un commentaire ouvre une "string"), mais les deux côtés d'un conflit
+ * subissent la même approximation : la comparaison des séquences reste
+ * équitable, et l'erreur pousse vers le refus de résoudre (direction sûre).
+ *
+ * Utilisé par whitespace_only : le whitespace À L'INTÉRIEUR d'une string est
+ * de la donnée, pas de la mise en forme — deux blocs "identiques modulo
+ * whitespace" mais dont les strings diffèrent ne doivent pas être résolus
+ * en préférant silencieusement un côté.
+ */
+export function extractQuotedSegments(lines: string[]): string[] {
+  const text = lines.join("\n");
+  const segments: string[] = [];
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === '"' || ch === "'" || ch === "`") {
+      const quote = ch;
+      let content = "";
+      i++;
+      while (i < text.length && text[i] !== quote) {
+        if (text[i] === "\\" && i + 1 < text.length) {
+          content += text[i] + text[i + 1];
+          i += 2;
+          continue;
+        }
+        content += text[i];
+        i++;
+      }
+      segments.push(content);
+      i++; // closing quote (or end of text)
+      continue;
+    }
+    i++;
+  }
+  return segments;
+}
+
 // ─── Détection de valeurs volatiles ──────────────────────────
 
 /** Regex qui matche les tokens "volatiles" : hashes, UUIDs, semver, timestamps, URLs */
@@ -185,12 +226,62 @@ export function tokenizeLine(line: string): string[] {
 }
 
 /**
+ * Variante quote-aware de tokenizeLine : le contenu d'une string literal est
+ * gardé ATOMIQUE (un seul token), quotes émises comme délimiteurs séparés.
+ *
+ * Indispensable pour les valeurs volatiles multi-mots : `'2026-07-06 11:42:00'`
+ * splitté sur l'espace donne deux fragments dont aucun ne matche la regex
+ * datetime — le cas résiduel le plus récurrent du corpus réel (config PHP
+ * `last_update`). Utilisé par detectValueOnlyChange/pickNewerVersionSide ;
+ * token_level_merge garde volontairement tokenizeLine (fusion INTRA-string
+ * voulue là-bas, cf. ses fixtures Tailwind).
+ */
+export function tokenizeLineQuoteAware(line: string): string[] {
+  const tokens: string[] = [];
+  let i = 0;
+  let plain = "";
+  const flushPlain = () => {
+    if (plain !== "") {
+      tokens.push(...plain.split(/(\s+|[{}[\](),:;=<>])/).filter((t) => t !== ""));
+      plain = "";
+    }
+  };
+  while (i < line.length) {
+    const ch = line[i];
+    if (ch === '"' || ch === "'" || ch === "`") {
+      flushPlain();
+      const quote = ch;
+      let content = "";
+      i++;
+      while (i < line.length && line[i] !== quote) {
+        if (line[i] === "\\" && i + 1 < line.length) {
+          content += line[i] + line[i + 1];
+          i += 2;
+          continue;
+        }
+        content += line[i];
+        i++;
+      }
+      tokens.push(quote);
+      if (content !== "") tokens.push(content);
+      if (i < line.length) { tokens.push(quote); i++; }
+      continue;
+    }
+    plain += ch;
+    i++;
+  }
+  flushPlain();
+  return tokens;
+}
+
+/**
  * Détecte si deux ensembles de lignes ne diffèrent que par des valeurs atomiques.
  * Retourne un résultat de classification ou null si non applicable.
  */
 export function detectValueOnlyChange(
   oursLines: string[],
   theirsLines: string[],
+  hasBase = false,
 ): { confidenceScore: ConfidenceScore; explanation: string; traceReason: string } | null {
   if (oursLines.length !== theirsLines.length) return null;
   if (oursLines.length === 0) return null;
@@ -200,15 +291,19 @@ export function detectValueOnlyChange(
   let allDiffsAreVolatile = true;
 
   for (let i = 0; i < oursLines.length; i++) {
-    const oursTokens = tokenizeLine(oursLines[i]);
-    const theirsTokens = tokenizeLine(theirsLines[i]);
+    const oursTokens = tokenizeLineQuoteAware(oursLines[i]);
+    const theirsTokens = tokenizeLineQuoteAware(theirsLines[i]);
 
     if (oursTokens.length !== theirsTokens.length) {
       allDiffsAreVolatile = false;
       break;
     }
 
-    totalTokens += oursTokens.length;
+    // Dénominateur du ratio : granularité de l'ancien tokenizeLine (dont les
+    // chaînes vides d'artefact de split) — les seuils de typeClassification
+    // (10/20/30 %) ont été calibrés sur cette granularité-là. La boucle de
+    // comparaison, elle, travaille sur les tokens quote-aware.
+    totalTokens += tokenizeLine(oursLines[i]).length;
 
     for (let j = 0; j < oursTokens.length; j++) {
       if (oursTokens[j] !== theirsTokens[j]) {
@@ -239,21 +334,86 @@ export function detectValueOnlyChange(
   if (typeClassification < 55) return null;
 
   const si = scopeImpact(oursLines.length);
+  const penalties = [`Ratio de différences : ${(diffRatio * 100).toFixed(1)}%`];
+  if (!hasBase) penalties.push("Sans base (diff2) — heuristique basée sur les patterns volatils");
   const confidenceScore = makeScore(typeClassification, 25, si, [
     `${diffCount} token${diffCount > 1 ? "s" : ""} identifié${diffCount > 1 ? "s" : ""} comme volatile${diffCount > 1 ? "s" : ""} (hash, version, timestamp…)`,
     "Même structure de lignes",
-  ], [
-    `Ratio de différences : ${(diffRatio * 100).toFixed(1)}%`,
-    "Sans base (diff2) — heuristique basée sur les patterns volatils",
-  ]);
+    ...(hasBase ? ["Base disponible — les deux côtés ont changé la valeur"] : []),
+  ], penalties, 0, hasBase ? 100 : 0);
 
   if (confidenceScore.label === "low") return null;
 
   const explanation =
-    `Même structure avec ${diffCount} valeur${diffCount > 1 ? "s" : ""} volatile${diffCount > 1 ? "s" : ""} différente${diffCount > 1 ? "s" : ""} (hash, version, timestamp…). Résolution proposée : accepter la version la plus récente (theirs).`;
+    `Même structure avec ${diffCount} valeur${diffCount > 1 ? "s" : ""} volatile${diffCount > 1 ? "s" : ""} différente${diffCount > 1 ? "s" : ""} (hash, version, timestamp…). Résolution : semver le plus élevé si comparable, sinon selon la politique de merge.`;
 
   const traceReason =
     `${diffCount} token${diffCount > 1 ? "s" : ""} différent${diffCount > 1 ? "s" : ""} sur ${totalTokens} — tous identifiés comme volatiles (hash, version, timestamp…). Ratio : ${(diffRatio * 100).toFixed(1)}% → score ${confidenceScore.score} (${confidenceScore.label}).`;
 
   return { confidenceScore, explanation, traceReason };
+}
+
+
+// ─── Comparaison semver pour value_only_change ────────────────
+
+const RE_SEMVER_TOKEN = /^[~^>=<]*(\d+)\.(\d+)\.(\d+)(-[\w.]+)?(\+[\w.]+)?$/;
+
+/** Datetime ISO-ish `YYYY-MM-DD[ T]HH:MM[:SS]` — l'ordre lexicographique EST l'ordre chronologique. */
+const RE_DATETIME_TOKEN = /^\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}(:\d{2})?([Z+\-]\S*)?$/;
+
+function parseSemver(tok: string): [number, number, number, boolean] | null {
+  const m = tok.match(RE_SEMVER_TOKEN);
+  if (!m) return null;
+  return [Number(m[1]), Number(m[2]), Number(m[3]), m[4] !== undefined];
+}
+
+/** -1 si a < b, 0 si égal, 1 si a > b. Une pre-release est inférieure à la release du même triple. */
+function compareSemver(a: [number, number, number, boolean], b: [number, number, number, boolean]): number {
+  for (let i = 0; i < 3; i++) {
+    if (a[i] !== b[i]) return (a[i] as number) < (b[i] as number) ? -1 : 1;
+  }
+  if (a[3] !== b[3]) return a[3] ? -1 : 1; // pre-release < release
+  return 0;
+}
+
+/**
+ * Si TOUTES les paires de tokens qui diffèrent entre ours et theirs sont des
+ * semver comparables ET que le même côté est ≥ sur chaque paire (avec au
+ * moins un >), retourne ce côté. Sinon null (résolution par politique).
+ *
+ * Consommé par assembleResolution (value_only_change) : « accepter la version
+ * la plus récente » n'est déterministe que quand les valeurs sont ORDONNABLES
+ * (semver, ou datetime ISO où l'ordre lexicographique est chronologique) —
+ * pour les hashes et autres valeurs ambiguës on retombe sur la politique.
+ */
+export function pickNewerSemverSide(
+  oursLines: string[],
+  theirsLines: string[],
+): "ours" | "theirs" | null {
+  if (oursLines.length !== theirsLines.length) return null;
+  let winner: "ours" | "theirs" | null = null;
+  for (let i = 0; i < oursLines.length; i++) {
+    const oursTokens = tokenizeLineQuoteAware(oursLines[i]);
+    const theirsTokens = tokenizeLineQuoteAware(theirsLines[i]);
+    if (oursTokens.length !== theirsTokens.length) return null;
+    for (let j = 0; j < oursTokens.length; j++) {
+      if (oursTokens[j] === theirsTokens[j]) continue;
+      let cmp: number;
+      const a = parseSemver(oursTokens[j]);
+      const b = parseSemver(theirsTokens[j]);
+      if (a && b) {
+        cmp = compareSemver(a, b);
+      } else if (RE_DATETIME_TOKEN.test(oursTokens[j]) && RE_DATETIME_TOKEN.test(theirsTokens[j])) {
+        // Format ISO : comparaison lexicographique = chronologique.
+        cmp = oursTokens[j] < theirsTokens[j] ? -1 : oursTokens[j] > theirsTokens[j] ? 1 : 0;
+      } else {
+        return null; // paire ni semver ni datetime → politique
+      }
+      if (cmp === 0) continue;
+      const side = cmp > 0 ? "ours" : "theirs";
+      if (winner !== null && winner !== side) return null; // désaccord entre paires
+      winner = side;
+    }
+  }
+  return winner;
 }

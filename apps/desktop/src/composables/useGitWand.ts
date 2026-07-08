@@ -1,5 +1,5 @@
 import { ref, computed } from "vue";
-import { resolve, resolveAsync, parseGitwandrc, type MergeResult, type ConflictHunk, type GitWandOptions, type MergePolicy, type LlmFallbackConfig } from "@gitwand/core";
+import { resolve, resolveAsync, parseGitwandrc, parseConflictMarkers, type MergeResult, type ConflictHunk, type GitWandOptions, type MergePolicy, type LlmFallbackConfig } from "@gitwand/core";
 import {
   pickFolder,
   getConflictedFiles,
@@ -15,6 +15,50 @@ import { useFolderHistory } from "./useFolderHistory";
 import { useAIProvider } from "./useAIProvider";
 import { t } from "./useI18n";
 import { applyMemory, isGeneralizableStrategy, type ResolutionMemoryEntry } from "./useResolutionMemory";
+import { useTierStats } from "./useTierStats";
+import { createSemaphore } from "../utils/concurrentMap";
+
+/**
+ * Reads the index via `git show` ×3 + runs `git merge-file` per call — up to 4
+ * git subprocesses per file. `loadRealFiles()` runs fully in parallel across all
+ * conflicted files, so without a cap a repo with many base-less conflicts could
+ * spawn dozens of concurrent git subprocesses at once. Defensive, not a proven
+ * fix for any specific incident — reduces subprocess load regardless.
+ */
+const reconstructLimiter = createSemaphore(4);
+
+/** A single conflict segment from `parseConflictMarkers()`, before classification. */
+type RawConflictSegment = Extract<
+  ReturnType<typeof parseConflictMarkers>["segments"][number],
+  { type: "conflict" }
+>;
+
+/**
+ * Strip diff3 `|||||||...=======` base sections from reconstructed content,
+ * leaving plain conflict markers — so it can be compared against working-tree
+ * content read via `readFile()`, which never has a base section for hunks
+ * `reconstructConflict()` had to enrich.
+ */
+function stripBaseSections(diff3Content: string): string {
+  const lines = diff3Content.split("\n");
+  const result: string[] = [];
+  let inBaseSection = false;
+  for (const line of lines) {
+    if (!inBaseSection && line.startsWith("|||||||")) {
+      inBaseSection = true;
+      continue;
+    }
+    if (inBaseSection) {
+      if (line.startsWith("=======")) {
+        inBaseSection = false;
+        result.push(line);
+      }
+      continue;
+    }
+    result.push(line);
+  }
+  return result.join("\n");
+}
 
 export interface TreeConflictInfo {
   code: string;
@@ -32,6 +76,12 @@ export interface ConflictFile {
   reconstructed?: boolean;
   /** Set when an unmerged file has no markers AND the working tree matches no side (possible manual edit). */
   markerless?: { reconstructed: string };
+  /**
+   * True when the file had 2-way markers (no `|||||||` base — git's default
+   * merge.conflictstyle) and the base was silently recovered from the git index.
+   * The ours/theirs content shown to the user is unchanged; only the base was added.
+   */
+  baseEnriched?: boolean;
 }
 
 export interface GlobalStats {
@@ -447,11 +497,51 @@ export function useGitWand() {
           };
         }
         const content = await readFile(cwd, filePath);
+
+        // Cheap upfront parse (marker splitting only — no pattern classification)
+        // to tell whether every hunk in this file is missing a diff3 base. When
+        // it is, a resolveAsync() pass on the raw content would be entirely
+        // superseded by the base-recovery pass below (diff3-only patterns can't
+        // fire without a base) — running the full pattern registry against it
+        // first would just classify every hunk twice for nothing.
+        const { segments: rawSegments } = parseConflictMarkers(content);
+        const rawConflicts = rawSegments
+          .filter((s): s is RawConflictSegment => s.type === "conflict")
+          .map((s) => s.conflict);
+        const needsBaseRecovery = rawConflicts.length > 0 && rawConflicts.some((c) => c.baseLines.length === 0);
+
+        // Markers present but at least one hunk has no base (merge.conflictstyle isn't
+        // diff3/zdiff3) → try recovering the base from the index so diff3-only patterns
+        // (non_overlapping, one_side_change, token_level_merge, …) can apply.
+        if (needsBaseRecovery) {
+          try {
+            const rec = await reconstructLimiter.run(() => reconstructConflict(cwd, filePath));
+            const enrichedResult = await resolveAsync(rec.content, filePath, resolveOptionsWithLlm, structuralOpts);
+            const sameOursTheirs =
+              enrichedResult.hunks.length === rawConflicts.length &&
+              enrichedResult.hunks.every((h, i) =>
+                h.oursLines.join("\n") === rawConflicts[i].oursLines.join("\n") &&
+                h.theirsLines.join("\n") === rawConflicts[i].theirsLines.join("\n"),
+              );
+            // Guard against silently discarding a manual edit made outside the
+            // conflict markers: reconstructConflict() rebuilds purely from git's
+            // index, so any non-conflict line the user touched in the working
+            // tree since won't be reflected in `rec.content`.
+            const contextUnchanged = stripBaseSections(rec.content) === content;
+            if (sameOursTheirs && contextUnchanged) {
+              return { path: filePath, content: rec.content, result: enrichedResult, baseEnriched: true };
+            }
+            // ours/theirs or non-conflict context diverge from the working tree
+            // (manual edit since the conflict) → fall through to a plain
+            // classification of the original content below.
+          } catch { /* no recoverable stage (e.g. add/add) → fall through to plain result */ }
+        }
+
         const result = await resolveAsync(content, filePath, resolveOptionsWithLlm, structuralOpts);
         // Unmerged file with no parseable markers → reconstruct the 3-way from the index.
         if (result.stats.totalConflicts === 0) {
           try {
-            const rec = await reconstructConflict(cwd, filePath);
+            const rec = await reconstructLimiter.run(() => reconstructConflict(cwd, filePath));
             if (rec.content.includes("<<<<<<<")) {
               if (rec.wtMatchesSide) {
                 // Working tree is just one side → swap in reconstructed markers and resolve normally.
@@ -474,6 +564,13 @@ export function useGitWand() {
     files.value = loaded;
     if (loaded.length > 0) {
       selectedPath.value = loaded[0].path;
+    }
+
+    // v2.7 — agrégat local de la métrique tier (dédupliqué par empreinte,
+    // les refreshs du même jeu de conflits ne recomptent pas).
+    const { recordFile } = useTierStats();
+    for (const f of loaded) {
+      recordFile(cwd, f.path, f.result.stats);
     }
   }
 

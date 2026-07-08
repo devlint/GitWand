@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import type { ConflictFile } from "../composables/useGitWand";
-import type { ConflictHunk } from "@gitwand/core";
+import { summarizeTiers, type ConflictHunk } from "@gitwand/core";
 import { highlightConflict } from "../utils/diffHighlight";
 import { useI18n } from "../composables/useI18n";
 import { safeHtml } from "../composables/useSafeHtml";
@@ -19,6 +19,12 @@ import {
   type ResolutionMemoryEntry,
 } from "../composables/useResolutionMemory";
 import LlmTracePanel from "./LlmTracePanel.vue";
+import TokenMergePanel from "./TokenMergePanel.vue";
+import ResolutionPreviewPanel from "./ResolutionPreviewPanel.vue";
+// Not lazy-loaded: this is a thin wrapper around BaseModal (already always-eager
+// per the P1.2 perf exception list) with no heavy additional deps — same static-import
+// treatment as its sibling hunk panels (LlmTracePanel, TokenMergePanel, ResolutionPreviewPanel).
+import ResolveAutoSummaryModal from "./ResolveAutoSummaryModal.vue";
 
 const { t, locale } = useI18n();
 const { isAvailable: aiAvailable, isLoading: aiLoading, lastError: aiError, suggest: aiSuggest } = useAIProvider();
@@ -50,14 +56,6 @@ const emit = defineEmits<{
 // ─── Inline Edit State ──────────────────────────────────
 const editingHunkIndex = ref<number | null>(null);
 const editContent = ref("");
-
-watch(
-  () => props.file.path,
-  () => {
-    editingHunkIndex.value = null;
-    editContent.value = "";
-  },
-);
 
 function startEditing(hunkIndex: number, hunk: ConflictHunk) {
   editContent.value = [...hunk.oursLines, ...hunk.theirsLines].join("\n");
@@ -248,13 +246,6 @@ function resolveHunkCustomWithMemory(path: string, hunkIndex: number, content: s
 // is reset when the active file changes.
 const rejectedLlmHunks = ref<Set<number>>(new Set());
 
-watch(
-  () => props.file.path,
-  () => {
-    rejectedLlmHunks.value = new Set();
-  },
-);
-
 /** Number of `llm_proposed` hunks the user explicitly rejected (this file). */
 const rejectedLlmCount = computed(() => rejectedLlmHunks.value.size);
 
@@ -270,6 +261,11 @@ const canResolve = computed(
 );
 
 const hunks = computed(() => props.file.result.hunks);
+const resolutions = computed(() => props.file.result.resolutions);
+
+// v2.7 — "recoverable-before-model" tier summary for this file. Hidden when
+// residual is 0 (every hunk was trivially resolved — nothing to measure).
+const tierSummary = computed(() => summarizeTiers(props.file.result.stats.byType));
 
 const treeExplanation = computed(() => {
   const tr = props.file.tree;
@@ -333,13 +329,6 @@ function showLlmPanelFor(hunkIndex: number, hunk: ConflictHunk): boolean {
 /** Visual badge — `true` once the user clicked Accept. UX-only, no state mutation. */
 const acceptedLlmHunks = ref<Set<number>>(new Set());
 
-watch(
-  () => props.file.path,
-  () => {
-    acceptedLlmHunks.value = new Set();
-  },
-);
-
 function onLlmAccept(hunkId: string | number) {
   const idx = Number(hunkId);
   if (!Number.isFinite(idx)) return;
@@ -359,6 +348,93 @@ function onLlmReject(hunkId: string | number) {
     a.delete(idx);
     acceptedLlmHunks.value = a;
   }
+}
+
+// ─── v2.7 — token_level_merge proposal panel ────────────
+// Unlike llm_proposed, the core NEVER pre-computes resolvedLines for this
+// type (see resolver/assemble.ts) — accepting emits resolveHunkCustom with
+// the proposed mergedLines, going through the exact same pathway as a
+// manual edit or an AI suggestion. Rejecting just hides the panel — the
+// hunk falls back to the normal 3-way manual view already rendered below.
+const rejectedTokenMergeHunks = ref<Set<number>>(new Set());
+
+function onTokenMergeAccept(hunkIndex: number) {
+  const hunk = hunks.value[hunkIndex];
+  const proposal = hunk?.trace.tokenMergeTrace;
+  if (!proposal) return;
+  emit("resolveHunkCustom", props.file.path, hunkIndex, proposal.mergedLines.join("\n"));
+}
+
+function onTokenMergeReject(hunkIndex: number) {
+  const next = new Set(rejectedTokenMergeHunks.value);
+  next.add(hunkIndex);
+  rejectedTokenMergeHunks.value = next;
+}
+
+function showTokenMergePanelFor(hunkIndex: number, hunk: ConflictHunk): boolean {
+  if (hunk.type !== "token_level_merge") return false;
+  if (!hunk.trace.tokenMergeTrace) return false;
+  return !rejectedTokenMergeHunks.value.has(hunkIndex);
+}
+
+// ─── Generic resolution preview (non_overlapping, one_side_change, …) ───
+// Unlike llm_proposed/token_level_merge, these types are already pre-resolved
+// by the core (autoResolved: true) — accepting applies the SAME resolvedLines
+// the "Résoudre auto" button would, via resolveHunkCustom. This replaces the
+// classic action bar's "Accepter les deux" for these hunks, which previously
+// did a raw ours+theirs concatenation instead of the engine's real merge.
+const rejectedPreviewHunks = ref<Set<number>>(new Set());
+
+function onPreviewAccept(hunkIndex: number) {
+  const resolution = resolutions.value[hunkIndex];
+  if (!resolution?.resolvedLines) return;
+  emit("resolveHunkCustom", props.file.path, hunkIndex, resolution.resolvedLines.join("\n"));
+}
+
+function onPreviewReject(hunkIndex: number) {
+  const next = new Set(rejectedPreviewHunks.value);
+  next.add(hunkIndex);
+  rejectedPreviewHunks.value = next;
+}
+
+function showResolutionPreviewFor(hunkIndex: number, hunk: ConflictHunk): boolean {
+  if (hunk.type === "llm_proposed" || hunk.type === "token_level_merge") return false;
+  if (!resolutions.value[hunkIndex]?.autoResolved) return false;
+  if (!resolutions.value[hunkIndex]?.resolvedLines) return false;
+  return !rejectedPreviewHunks.value.has(hunkIndex);
+}
+
+// ─── Reset per-file UI-only state on file change ────────
+// Consolidated from 3 separate watch(() => props.file.path, ...) blocks that
+// each reset one slice of this UI-only state (inline edit, LLM panel,
+// token-merge/preview panels). Splitting them made it easy to add a new ref
+// and forget to wire it into a reset — that's exactly what happened when
+// rejectedTokenMergeHunks/rejectedPreviewHunks landed. One watcher, one place
+// to extend.
+watch(
+  () => props.file.path,
+  () => {
+    editingHunkIndex.value = null;
+    editContent.value = "";
+    rejectedLlmHunks.value = new Set();
+    acceptedLlmHunks.value = new Set();
+    rejectedTokenMergeHunks.value = new Set();
+    rejectedPreviewHunks.value = new Set();
+  },
+);
+
+// ─── "Résoudre auto" summary confirmation ───────────────
+const showResolveAutoSummary = ref(false);
+
+const autoResolutionsSummary = computed(() =>
+  resolutions.value
+    .map((r, hunkIndex) => ({ hunkIndex, resolvedLines: r.resolvedLines, autoResolved: r.autoResolved }))
+    .filter((r) => r.autoResolved && r.resolvedLines !== null) as Array<{ hunkIndex: number; resolvedLines: string[] }>,
+);
+
+function confirmResolveAuto() {
+  showResolveAutoSummary.value = false;
+  emit("resolve", props.file.path);
 }
 
 /** Parse file content into displayable segments (code + conflict hunks). */
@@ -451,7 +527,7 @@ function hunkForSegment(seg: Segment): ConflictHunk | undefined {
 }
 
 function isAutoResolvable(hunk: ConflictHunk): boolean {
-  return hunk.type !== "complex" && hunk.confidence.label !== "low";
+  return hunk.type !== "complex" && hunk.type !== "token_level_merge" && hunk.confidence.label !== "low";
 }
 
 /**
@@ -509,7 +585,7 @@ const contentEl = ref<HTMLElement | null>(null);
 const minimapCanvas = ref<HTMLCanvasElement | null>(null);
 const MINIMAP_WIDTH = 48;
 
-type MinimapLineKind = "code" | "conflict-auto" | "conflict-manual";
+type MinimapLineKind = "code" | "conflict-auto" | "conflict-manual" | "conflict-proposed";
 
 /** Flattened list of line kinds for minimap rendering, one entry per raw line. */
 const allLineKinds = computed<MinimapLineKind[]>(() => {
@@ -520,7 +596,9 @@ const allLineKinds = computed<MinimapLineKind[]>(() => {
     } else {
       const hunk = seg.hunkIndex != null ? hunks.value[seg.hunkIndex] : undefined;
       const kind: MinimapLineKind =
-        hunk && isAutoResolvable(hunk) ? "conflict-auto" : "conflict-manual";
+        hunk && hunk.type === "token_level_merge" ? "conflict-proposed"
+        : hunk && isAutoResolvable(hunk) ? "conflict-auto"
+        : "conflict-manual";
       for (let i = 0; i < seg.lines.length; i++) kinds.push(kind);
     }
   }
@@ -551,9 +629,9 @@ function drawMinimap() {
     const k = kinds[i];
     if (k === "code") continue; // skip for a cleaner look
     ctx.fillStyle =
-      k === "conflict-auto"
-        ? "rgba(34, 197, 94, 0.6)" // green — auto-resolvable
-        : "rgba(239, 68, 68, 0.6)"; // red — needs manual attention
+      k === "conflict-auto" ? "rgba(34, 197, 94, 0.6)" // green — auto-resolvable
+      : k === "conflict-proposed" ? "rgba(217, 119, 6, 0.6)" // amber — proposed, awaiting confirmation
+      : "rgba(239, 68, 68, 0.6)"; // red — needs manual attention
     ctx.fillRect(0, i * lineH, MINIMAP_WIDTH, Math.max(lineH, 2));
   }
 
@@ -635,6 +713,9 @@ useResizeObserver(contentEl, drawMinimap);
           <template v-if="file.result.stats.autoResolved > 0">
             — {{ file.result.stats.autoResolved }} {{ t('merge.autoResolved') }}
           </template>
+          <template v-if="tierSummary.residual > 0">
+            — {{ t('merge.recoverableBeforeModel', Math.round(tierSummary.recoverableBeforeModel * 100)) }}
+          </template>
         </span>
       </div>
       <div class="me-bulk-actions" v-if="file.result.stats.totalConflicts > 0">
@@ -647,7 +728,7 @@ useResizeObserver(contentEl, drawMinimap);
       <button
         v-if="canResolve"
         class="btn btn--resolve"
-        @click="emit('resolve', file.path)"
+        @click="showResolveAutoSummary = true"
         :aria-label="t('merge.resolveAutoLabel')"
       >
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -757,6 +838,13 @@ useResizeObserver(contentEl, drawMinimap);
         </svg>
         <span>{{ t('merge.reconstructedBanner') }}</span>
       </div>
+      <div v-if="file.baseEnriched" class="me-base-enriched-banner">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+          <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm.75 10.5h-1.5v-1.5h1.5v1.5zm0-3h-1.5V4.5h1.5V8.5z"/>
+        </svg>
+        <span>{{ t('merge.baseEnrichedBanner') }}</span>
+      </div>
+      <div class="merge-body-row">
     <div
       class="editor-content"
       ref="contentEl"
@@ -800,8 +888,30 @@ useResizeObserver(contentEl, drawMinimap);
               @reject="onLlmReject"
             />
 
+            <!-- ── v2.7 token_level_merge proposal (when not rejected) ────── -->
+            <TokenMergePanel
+              v-if="hunkForSegment(seg) && seg.hunkIndex != null && showTokenMergePanelFor(seg.hunkIndex, hunkForSegment(seg)!)"
+              :trace="hunkForSegment(seg)!.trace.tokenMergeTrace!"
+              :hunk-id="seg.hunkIndex"
+              @accept="onTokenMergeAccept"
+              @reject="onTokenMergeReject"
+            />
+
+            <!-- ── Résolution générique pré-calculée (non_overlapping, one_side_change, …) ── -->
+            <ResolutionPreviewPanel
+              v-if="hunkForSegment(seg) && seg.hunkIndex != null && showResolutionPreviewFor(seg.hunkIndex, hunkForSegment(seg)!)"
+              :resolved-lines="resolutions[seg.hunkIndex]!.resolvedLines!"
+              :hunk-id="seg.hunkIndex"
+              :explanation="hunkForSegment(seg)!.explanation"
+              @accept="onPreviewAccept"
+              @reject="onPreviewReject"
+            />
+
             <!-- ── VS Code-style inline action bar ─────────── -->
-            <div class="inline-actions" v-if="hunkForSegment(seg) && editingHunkIndex !== seg.hunkIndex">
+            <div
+              class="inline-actions"
+              v-if="hunkForSegment(seg) && editingHunkIndex !== seg.hunkIndex && !showResolutionPreviewFor(seg.hunkIndex!, hunkForSegment(seg)!)"
+            >
               <a
                 class="inline-action inline-action--current"
                 :class="{ 'inline-action--recommended': isRecommended(hunkForSegment(seg)!, 'ours') }"
@@ -1014,7 +1124,15 @@ useResizeObserver(contentEl, drawMinimap);
     <div class="merge-minimap" @mousedown="onMinimapMouseDown">
       <canvas ref="minimapCanvas"></canvas>
     </div>
+      </div><!-- /merge-body-row -->
     </div><!-- /merge-body -->
+
+    <ResolveAutoSummaryModal
+      v-if="showResolveAutoSummary"
+      :resolutions="autoResolutionsSummary"
+      @confirm="confirmResolveAuto"
+      @cancel="showResolveAutoSummary = false"
+    />
   </div>
 </template>
 
@@ -1073,6 +1191,14 @@ useResizeObserver(contentEl, drawMinimap);
 
 /* ─── Body layout (content + minimap) ──────────────────── */
 .merge-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.merge-body-row {
   flex: 1;
   display: flex;
   overflow: hidden;
@@ -1723,6 +1849,17 @@ useResizeObserver(contentEl, drawMinimap);
 
 /* ─── Reconstructed-from-index info banner ─────────────── */
 .me-reconstructed-banner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--color-text-secondary, #888);
+  background: var(--color-bg-secondary, rgba(0,0,0,0.03));
+  border-bottom: 1px solid var(--color-border, #e0e0e0);
+}
+
+.me-base-enriched-banner {
   display: flex;
   align-items: center;
   gap: 6px;

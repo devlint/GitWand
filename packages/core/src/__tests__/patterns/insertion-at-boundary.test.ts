@@ -206,3 +206,39 @@ describe("insertion_at_boundary vs non_overlapping", () => {
     expect(result.hunks[0].type).toBe("non_overlapping");
   });
 });
+
+// ─── Régression : insertions dupliquant une ligne de la base ────────────────
+
+describe("insertion_at_boundary : insertion identique à une ligne de la base", () => {
+  // Régression : l'assemblage filtrait les insertions via Set(baseLines) — une
+  // insertion textuellement égale à une ligne de base (un `}` dupliqué, une
+  // ligne répétée) était silencieusement PERDUE du résultat, auto-appliqué à 90.
+  it("ne perd pas une insertion qui duplique une ligne de base", () => {
+    const input = [
+      `<<<<<<< ours`,
+      `A`,
+      `B`,
+      `A`,
+      `||||||| base`,
+      `A`,
+      `B`,
+      `=======`,
+      `A`,
+      `B`,
+      `NEW`,
+      `>>>>>>> theirs`,
+    ].join("\n");
+    const result = resolve(input, "probe.txt");
+    const resolution = result.resolutions[0];
+    if (resolution.autoResolved) {
+      // Si une résolution auto est proposée, elle DOIT contenir les deux
+      // insertions : le doublon "A" de ours ET le "NEW" de theirs.
+      const lines = resolution.resolvedLines!;
+      expect(lines.filter((l) => l === "A")).toHaveLength(2);
+      expect(lines).toContain("NEW");
+    } else {
+      // Refuser de résoudre est aussi acceptable — mais jamais perdre de ligne.
+      expect(resolution.resolvedLines).toBeNull();
+    }
+  });
+});
