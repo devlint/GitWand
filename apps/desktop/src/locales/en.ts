@@ -2384,10 +2384,12 @@ const en = {
     severityMedium: "Medium",
     severityLow: "Low",
     dismiss: "Dismiss",
-    ignorePattern: "Ignore",
+    ignorePattern: "Ignore file",
     commitAnyway: "Commit anyway",
     confirmTitle: "Potential secrets in this commit",
     confirmMessage: "{0} potential secret(s) were found in your staged changes. Commit anyway?",
+    ignoreConfirmTitle: "Stop scanning this file for secrets?",
+    ignoreConfirmMessage: "This will stop flagging ANY secret pattern in {0} — permanently, written to .gitwandrc. Continue?",
   },
 } as const;
 

@@ -2327,10 +2327,12 @@ const zhCN: Locale = {
     severityMedium: "中",
     severityLow: "低",
     dismiss: "忽略",
-    ignorePattern: "忽略此规则",
+    ignorePattern: "忽略此文件",
     commitAnyway: "仍然提交",
     confirmTitle: "此提交中存在潜在密钥",
     confirmMessage: "在您暂存的更改中发现 {0} 个潜在密钥。是否仍然提交？",
+    ignoreConfirmTitle: "停止扫描此文件中的密钥？",
+    ignoreConfirmMessage: "这将永久停止标记 {0} 中的任何密钥规则——并写入 .gitwandrc。是否继续？",
   },
 };
 

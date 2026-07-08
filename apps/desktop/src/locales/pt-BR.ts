@@ -2342,10 +2342,12 @@ const ptBR: Locale = {
     severityMedium: "Média",
     severityLow: "Baixa",
     dismiss: "Dispensar",
-    ignorePattern: "Ignorar",
+    ignorePattern: "Ignorar arquivo",
     commitAnyway: "Commitar mesmo assim",
     confirmTitle: "Possíveis segredos neste commit",
     confirmMessage: "{0} possível(is) segredo(s) foram encontrados nas suas alterações em stage. Commitar mesmo assim?",
+    ignoreConfirmTitle: "Parar de verificar segredos neste arquivo?",
+    ignoreConfirmMessage: "Isso vai parar de sinalizar QUALQUER padrão de segredo em {0} — permanentemente, gravado em .gitwandrc. Continuar?",
   },
 };
 

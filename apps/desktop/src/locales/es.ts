@@ -2342,10 +2342,12 @@ const es: Locale = {
     severityMedium: "Media",
     severityLow: "Baja",
     dismiss: "Descartar",
-    ignorePattern: "Ignorar",
+    ignorePattern: "Ignorar archivo",
     commitAnyway: "Hacer commit de todos modos",
     confirmTitle: "Posibles secretos en este commit",
     confirmMessage: "Se encontraron {0} posible(s) secreto(s) en tus cambios en stage. ¿Hacer commit de todos modos?",
+    ignoreConfirmTitle: "¿Dejar de escanear este archivo en busca de secretos?",
+    ignoreConfirmMessage: "Esto dejará de marcar CUALQUIER patrón de secreto en {0} — de forma permanente, escrito en .gitwandrc. ¿Continuar?",
   },
 };
 

@@ -1019,11 +1019,27 @@ async function handleCommitRequest(trailers: string) {
   await doCommit(trailers);
 }
 
-function onSecretsIgnore(patternId: string) {
+/**
+ * Ignoring a pattern writes every file it currently appears in to `.gitwandrc`
+ * `secrets.ignore[]` (see useSecretsScanner.ts) — that suppresses ALL patterns in those files,
+ * permanently, not just the one the user clicked. Always confirm with the true scope spelled
+ * out before writing; never a native `confirm()`.
+ */
+async function onSecretsIgnore(patternId: string) {
   if (!repoFolderPath.value) return;
-  void secretsScanner.ignorePattern(repoFolderPath.value, patternId).then(() => {
-    if (repoFolderPath.value) secretsScanner.scan(repoFolderPath.value, settings.value);
+  const files = secretsScanner.filesForPattern(patternId);
+  if (files.length === 0) return;
+
+  const confirmed = await askConfirm({
+    danger: true,
+    title: t("secrets.ignoreConfirmTitle"),
+    message: t("secrets.ignoreConfirmMessage", files.join(", ")),
+    confirmLabel: t("secrets.ignorePattern"),
   });
+  if (!confirmed) return;
+
+  await secretsScanner.ignorePattern(repoFolderPath.value, patternId);
+  if (repoFolderPath.value) secretsScanner.scan(repoFolderPath.value, settings.value);
 }
 
 function onSecretsCommitAnyway() {

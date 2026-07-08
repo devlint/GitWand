@@ -2352,10 +2352,12 @@ const fr: Locale = {
     severityMedium: "Moyenne",
     severityLow: "Faible",
     dismiss: "Ignorer",
-    ignorePattern: "Ignorer ce motif",
+    ignorePattern: "Ignorer le fichier",
     commitAnyway: "Commit quand même",
     confirmTitle: "Secrets potentiels dans ce commit",
     confirmMessage: "{0} secret(s) potentiel(s) ont été trouvés dans vos changements indexés. Commit quand même ?",
+    ignoreConfirmTitle: "Arrêter d'analyser ce fichier pour des secrets ?",
+    ignoreConfirmMessage: "Ceci arrêtera de signaler N'IMPORTE QUEL motif de secret dans {0} — de façon permanente, écrit dans .gitwandrc. Continuer ?",
   },
 };
 

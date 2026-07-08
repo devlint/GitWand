@@ -38,6 +38,12 @@ export interface UseSecretsScannerResult {
    * file is the safe, structurally-supported option for both cases.
    */
   ignorePattern: (cwd: string, patternId: string) => Promise<void>;
+  /**
+   * Every unique file that currently carries `patternId`, in scan order. Lets a caller (e.g.
+   * App.vue's confirm gate before calling `ignorePattern`) state the true scope — "this
+   * suppresses the pattern in these files" — since `ignorePattern` acts on ALL of them at once.
+   */
+  filesForPattern: (patternId: string) => string[];
   /** Session-only hide — does not touch `.gitwandrc` or `findings`. */
   dismiss: (key: string) => void;
   /** Stable per-finding identity used by `dismiss`. */
@@ -135,10 +141,12 @@ export function useSecretsScanner(opts: UseSecretsScannerOptions = {}): UseSecre
     }, debounceMs);
   }
 
+  function filesForPattern(patternId: string): string[] {
+    return Array.from(new Set(findings.value.filter((f) => f.patternId === patternId).map((f) => f.file)));
+  }
+
   async function ignorePattern(cwd: string, patternId: string): Promise<void> {
-    const affectedFiles = Array.from(
-      new Set(findings.value.filter((f) => f.patternId === patternId).map((f) => f.file)),
-    );
+    const affectedFiles = filesForPattern(patternId);
     if (affectedFiles.length === 0) return;
 
     let existingRc: Record<string, unknown> = {};
@@ -176,5 +184,5 @@ export function useSecretsScanner(opts: UseSecretsScannerOptions = {}): UseSecre
     dismissedKeys.value = next;
   }
 
-  return { findings, scanning, activeFindings, scan, ignorePattern, dismiss, findingKey };
+  return { findings, scanning, activeFindings, scan, ignorePattern, filesForPattern, dismiss, findingKey };
 }

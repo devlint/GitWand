@@ -138,4 +138,20 @@ describe("useSecretsScanner", () => {
 
     expect(writeGitwandrc).not.toHaveBeenCalled();
   });
+
+  it("filesForPattern(patternId) lists every unique file currently carrying that pattern, so callers can build an honest confirm message", async () => {
+    const f1 = finding({ file: "a.ts", line: 1, patternId: "aws_access_key_id" });
+    const f2 = finding({ file: "b.ts", line: 2, patternId: "aws_access_key_id" });
+    const f2b = finding({ file: "b.ts", line: 5, patternId: "aws_access_key_id" });
+    const f3 = finding({ file: "c.ts", line: 3, patternId: "github_pat_classic" });
+    vi.mocked(scanSecrets).mockResolvedValue([f1, f2, f2b, f3]);
+    const scanner = useSecretsScanner({ debounceMs: 100 });
+
+    scanner.scan("/repo", SETTINGS);
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(scanner.filesForPattern("aws_access_key_id")).toEqual(["a.ts", "b.ts"]);
+    expect(scanner.filesForPattern("github_pat_classic")).toEqual(["c.ts"]);
+    expect(scanner.filesForPattern("no_such_pattern")).toEqual([]);
+  });
 });
