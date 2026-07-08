@@ -15,6 +15,7 @@ import { useFolderHistory } from "./useFolderHistory";
 import { useAIProvider } from "./useAIProvider";
 import { t } from "./useI18n";
 import { applyMemory, isGeneralizableStrategy, type ResolutionMemoryEntry } from "./useResolutionMemory";
+import { useTierStats } from "./useTierStats";
 import { createSemaphore } from "../utils/concurrentMap";
 
 /**
@@ -563,6 +564,13 @@ export function useGitWand() {
     files.value = loaded;
     if (loaded.length > 0) {
       selectedPath.value = loaded[0].path;
+    }
+
+    // v2.7 — agrégat local de la métrique tier (dédupliqué par empreinte,
+    // les refreshs du même jeu de conflits ne recomptent pas).
+    const { recordFile } = useTierStats();
+    for (const f of loaded) {
+      recordFile(cwd, f.path, f.result.stats);
     }
   }
 

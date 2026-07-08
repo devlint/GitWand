@@ -198,3 +198,19 @@ describe("useGitWand : concurrence de reconstructConflict limitée", () => {
     expect(mockReconstructConflict).toHaveBeenCalledTimes(10);
   });
 });
+
+describe("useGitWand : agrégat tier stats câblé sur loadRealFiles", () => {
+  it("enregistre les stats du fichier chargé, sans double comptage au refresh", async () => {
+    const { useTierStats, __resetTierStatsForTests } = await import("../useTierStats");
+    localStorage.clear();
+    __resetTierStatsForTests();
+
+    const gw = useGitWand();
+    await gw.openPath("/repo");
+    const after1 = useTierStats().tierStats.value.totalHunks;
+    expect(after1).toBeGreaterThan(0);
+
+    await gw.openPath("/repo"); // même repo, mêmes conflits → dédupliqué
+    expect(useTierStats().tierStats.value.totalHunks).toBe(after1);
+  });
+});
