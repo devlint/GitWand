@@ -290,6 +290,37 @@ export interface GitWandrcConfig {
      */
     maxRefactoringsPerSide?: number;
   };
+  /**
+   * v3.5.0 — Scanner de secrets sur les lignes ajoutées en staging.
+   *
+   * ```jsonc
+   * {
+   *   "secrets": {
+   *     "enabled": true,
+   *     "patterns": [
+   *       { "id": "internal_token", "regex": "itok_[0-9a-f]{32}", "severity": "high" }
+   *     ],
+   *     "ignore": ["fixtures/**", "/AKIAFAKEFAKEFAKEFAKE/"],
+   *     "entropyThreshold": 4.0
+   *   }
+   * }
+   * ```
+   */
+  secrets?: {
+    /** Master switch, combiné au setting applicatif `secretsScannerEnabled` (défaut: true). */
+    enabled?: boolean;
+    /** Patterns supplémentaires, en plus du catalogue built-in. */
+    patterns?: Array<{
+      id: string;
+      regex: string;
+      severity: "high" | "medium" | "low";
+      description: string;
+    }>;
+    /** Glob de chemin OU littéral `/regex/` sur la valeur matchée. */
+    ignore?: string[];
+    /** Seuil d'entropie Shannon (bits/char) pour la détection de secrets à haute entropie, [0, 8]. 0 désactive. */
+    entropyThreshold?: number;
+  };
 }
 
 /**
@@ -397,6 +428,55 @@ export function parseGitwandrc(json: string): GitWandrcConfig | null {
 
       if (Object.keys(refactoringAware).length > 0) {
         result.refactoringAware = refactoringAware;
+      }
+    }
+
+    // v3.5.0 — Secrets scanner config.
+    if (parsed.secrets && typeof parsed.secrets === "object") {
+      const sec = parsed.secrets;
+      const secrets: NonNullable<GitWandrcConfig["secrets"]> = {};
+
+      if (typeof sec.enabled === "boolean") secrets.enabled = sec.enabled;
+
+      if (Array.isArray(sec.patterns)) {
+        const validSeverities = ["high", "medium", "low"] as const;
+        const patterns = sec.patterns
+          .filter(
+            (p: unknown): p is { id: string; regex: string; severity?: string; description?: string } =>
+              typeof p === "object" &&
+              p !== null &&
+              typeof (p as Record<string, unknown>).id === "string" &&
+              (p as Record<string, unknown>).id !== "" &&
+              typeof (p as Record<string, unknown>).regex === "string",
+          )
+          .map((p) => ({
+            id: p.id,
+            regex: p.regex,
+            severity: (validSeverities as readonly string[]).includes(p.severity ?? "")
+              ? (p.severity as "high" | "medium" | "low")
+              : ("medium" as const),
+            description: typeof p.description === "string" ? p.description : "",
+          }));
+        if (patterns.length > 0) secrets.patterns = patterns;
+      }
+
+      if (Array.isArray(sec.ignore)) {
+        const ignore = sec.ignore.filter(
+          (i: unknown): i is string => typeof i === "string" && i.length > 0,
+        );
+        if (ignore.length > 0) secrets.ignore = ignore;
+      }
+
+      if (
+        typeof sec.entropyThreshold === "number" &&
+        sec.entropyThreshold >= 0 &&
+        sec.entropyThreshold <= 8
+      ) {
+        secrets.entropyThreshold = sec.entropyThreshold;
+      }
+
+      if (Object.keys(secrets).length > 0) {
+        result.secrets = secrets;
       }
     }
 
