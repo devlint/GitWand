@@ -84,10 +84,24 @@ export function assembleResolution(
       const hasBase = hunk.baseLines.length > 0;
       let merged: string[];
       if (hasBase) {
-        // Trouver les lignes ajoutées par chaque côté via inclusion dans l'ensemble de base
-        const baseSet = new Set(hunk.baseLines);
-        const oursInsertions = hunk.oursLines.filter((l) => !baseSet.has(l));
-        const theirsInsertions = hunk.theirsLines.filter((l) => !baseSet.has(l));
+        // Trouver les lignes ajoutées par chaque côté. Comptage MULTISET, pas
+        // Set : une insertion textuellement identique à une ligne de base (un
+        // `}` dupliqué, une ligne répétée) est une vraie insertion — un simple
+        // Set(baseLines) la filtrait et la PERDAIT silencieusement du résultat.
+        const baseCount = new Map<string, number>();
+        for (const l of hunk.baseLines) baseCount.set(l, (baseCount.get(l) ?? 0) + 1);
+        const insertionsOf = (lines: string[]): string[] => {
+          const remaining = new Map(baseCount);
+          const out: string[] = [];
+          for (const l of lines) {
+            const n = remaining.get(l) ?? 0;
+            if (n > 0) remaining.set(l, n - 1);
+            else out.push(l);
+          }
+          return out;
+        };
+        const oursInsertions = insertionsOf(hunk.oursLines);
+        const theirsInsertions = insertionsOf(hunk.theirsLines);
         merged = [...hunk.baseLines, ...oursInsertions, ...theirsInsertions];
       } else {
         // Heuristique diff2 : union (ours ordre préservé, on ajoute ce qui manque de theirs)
