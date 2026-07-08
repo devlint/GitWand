@@ -1453,6 +1453,18 @@ const zhCN: Locale = {
     descPostCheckout: "切换分支后运行",
     descPostMerge: "合并后运行",
     descOther: "自定义 Git 钩子",
+    secretsTitle: "密钥 pre-commit 钩子",
+    secretsDescription: "当从终端提交的更改中暂存了疑似密钥时阻止提交。通过 npx 运行“gitwand scan”——始终可以用 git commit --no-verify 绕过。",
+    secretsInstalled: "已安装",
+    secretsNotInstalled: "未安装",
+    secretsInstall: "安装",
+    secretsRemove: "移除",
+    secretsInstallConfirmTitle: "安装密钥 pre-commit 钩子？",
+    secretsInstallConfirmMessage: "这将写入 .git/hooks/pre-commit，并在每次从终端提交时运行“npx @gitwand/cli scan”。始终可以用“git commit --no-verify”绕过。如果已存在 pre-commit 钩子，它将被覆盖。",
+    secretsRemoveConfirmTitle: "移除密钥 pre-commit 钩子？",
+    secretsRemoveConfirmMessage: "这将删除 .git/hooks/pre-commit。从终端提交的更改将不再进行密钥扫描。",
+    errorSecretsInstall: "安装密钥钩子失败：{0}",
+    errorSecretsRemove: "移除密钥钩子失败：{0}",
   },
 
   workspace: {

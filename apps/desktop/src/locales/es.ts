@@ -1466,6 +1466,18 @@ const es: Locale = {
     descPostCheckout: "Se ejecuta tras checkout / switch",
     descPostMerge: "Se ejecuta tras un merge",
     descOther: "Hook de Git personalizado",
+    secretsTitle: "Hook pre-commit de secretos",
+    secretsDescription: "Bloquea un commit desde la terminal cuando indexa un secreto probable. Ejecuta «gitwand scan» vía npx — siempre se puede omitir con git commit --no-verify.",
+    secretsInstalled: "Instalado",
+    secretsNotInstalled: "No instalado",
+    secretsInstall: "Instalar",
+    secretsRemove: "Quitar",
+    secretsInstallConfirmTitle: "¿Instalar el hook pre-commit de secretos?",
+    secretsInstallConfirmMessage: "Esto escribe .git/hooks/pre-commit y ejecuta «npx @gitwand/cli scan» en cada commit hecho desde la terminal. Siempre se puede omitir con «git commit --no-verify». Si ya existe un hook pre-commit, será sobrescrito.",
+    secretsRemoveConfirmTitle: "¿Quitar el hook pre-commit de secretos?",
+    secretsRemoveConfirmMessage: "Esto elimina .git/hooks/pre-commit. Los commits hechos desde la terminal ya no se escanearán en busca de secretos.",
+    errorSecretsInstall: "Error al instalar el hook de secretos: {0}",
+    errorSecretsRemove: "Error al quitar el hook de secretos: {0}",
   },
 
   workspace: {

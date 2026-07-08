@@ -1497,6 +1497,19 @@ const en = {
     descPostCheckout: "Runs after checkout / switch",
     descPostMerge: "Runs after a merge",
     descOther: "Custom Git hook",
+    // v3.5.0 \u2014 Secrets pre-commit hook installer
+    secretsTitle: "Secrets pre-commit hook",
+    secretsDescription: "Blocks a commit from the terminal when it stages a likely secret. Runs \u201cgitwand scan\u201d via npx \u2014 always bypassable with git commit --no-verify.",
+    secretsInstalled: "Installed",
+    secretsNotInstalled: "Not installed",
+    secretsInstall: "Install",
+    secretsRemove: "Remove",
+    secretsInstallConfirmTitle: "Install the secrets pre-commit hook?",
+    secretsInstallConfirmMessage: "This writes .git/hooks/pre-commit and shells out to \u201cnpx @gitwand/cli scan\u201d on every commit made from the terminal. It can always be bypassed with \u201cgit commit --no-verify\u201d. If a pre-commit hook already exists, it will be overwritten.",
+    secretsRemoveConfirmTitle: "Remove the secrets pre-commit hook?",
+    secretsRemoveConfirmMessage: "This deletes .git/hooks/pre-commit. Terminal commits will no longer be scanned for secrets.",
+    errorSecretsInstall: "Failed to install the secrets hook: {0}",
+    errorSecretsRemove: "Failed to remove the secrets hook: {0}",
   },
 
   // \u2500\u2500\u2500 Workspaces \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
