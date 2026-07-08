@@ -351,6 +351,20 @@ export interface AppSettings {
   filesPrevMode: Exclude<FilesMode, "fullscreen">;
   /** Hide the File Explorer when switching views from the dock. Default: true. */
   filesHideOnNav: boolean;
+
+  // ── v3.5.0 Secrets scanner ────────────────────────────────
+  /**
+   * Master switch for the local secrets scanner (staged-diff detection of
+   * cloud/token/private-key/JWT/high-entropy secrets). Non-blocking — only
+   * surfaces a badge + confirm-to-commit, never hard-stops a commit.
+   * Default: true.
+   */
+  secretsScannerEnabled: boolean;
+  /**
+   * Shannon entropy threshold (bits/char) over tokens ≥ 20 chars for the
+   * high-entropy detection pass. 0 disables it. Default: 4.0.
+   */
+  secretsEntropyThreshold: number;
 }
 
 export type TerminalMode = "floating" | "fullscreen" | "bottom";
@@ -435,6 +449,8 @@ export const defaultAppSettings: AppSettings = {
   filesMode:                         "floating",
   filesPrevMode:                     "floating",
   filesHideOnNav:                    true,
+  secretsScannerEnabled:             true,
+  secretsEntropyThreshold:           4.0,
 };
 
 const SETTINGS_KEY = "gitwand-settings";

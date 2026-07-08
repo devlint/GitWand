@@ -1210,6 +1210,10 @@ const en = {
     commitSignatureHint: "A small signature added automatically \u2014 removable anytime",
     blameAlgorithm: "Blame diff algorithm",
     blameAlgorithmHint: "Controls how git blame detects moved or copied lines. histogram gives the best results for most repos.",
+    secretsScannerEnabled: "Scan staged changes for secrets",
+    secretsScannerEnabledHint: "Local, zero-network detection of cloud/token/private-key/JWT secrets in staged added lines. Never blocks a commit — only warns.",
+    secretsEntropyThreshold: "High-entropy detection threshold",
+    secretsEntropyThresholdHint: "Shannon entropy (bits/char) above which a long random-looking token is flagged. 0 disables this check.",
     tierStats: {
       title: "Resolution statistics (local)",
       hint: "Cumulative breakdown of the conflicts encountered on this machine. Stored locally only — never leaves your device.",

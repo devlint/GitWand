@@ -1186,6 +1186,10 @@ const ptBR: Locale = {
     commitSignatureHint: "Uma pequena assinatura adicionada automaticamente — removível a qualquer momento",
     blameAlgorithm: "Algoritmo de diff para blame",
     blameAlgorithmHint: "Controla como git blame detecta linhas movidas. histogram dá os melhores resultados.",
+    secretsScannerEnabled: "Verificar alterações no stage em busca de segredos",
+    secretsScannerEnabledHint: "Detecção local, sem rede, de segredos de nuvem/tokens/chaves privadas/JWT nas linhas adicionadas em stage. Nunca bloqueia um commit — apenas avisa.",
+    secretsEntropyThreshold: "Limite de detecção de alta entropia",
+    secretsEntropyThresholdHint: "Entropia de Shannon (bits/caractere) acima da qual um token longo de aparência aleatória é sinalizado. 0 desativa essa verificação.",
     tierStats: {
       title: "Estatísticas de resolução (local)",
       hint: "Distribuição acumulada dos conflitos encontrados nesta máquina. Armazenado apenas localmente — nunca sai do seu dispositivo.",

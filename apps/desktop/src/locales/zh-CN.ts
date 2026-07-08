@@ -1244,6 +1244,10 @@ const zhCN: Locale = {
     commitSignatureHint: "自动添加的小签名 — 可随时移除",
     blameAlgorithm: "Blame 差异算法",
     blameAlgorithmHint: "控制 git blame 如何检测移动的行。histogram 在大多数仓库中效果最佳。",
+    secretsScannerEnabled: "扫描暂存的更改中的密钥",
+    secretsScannerEnabledHint: "本地、零网络地检测暂存的新增行中的云凭证/令牌/私钥/JWT 等密钥。绝不会阻止提交 — 仅发出警告。",
+    secretsEntropyThreshold: "高熵检测阈值",
+    secretsEntropyThresholdHint: "香农熵（比特/字符）超过该阈值的长随机字符串将被标记。设为 0 可禁用此检测。",
     tierStats: {
       title: "解决统计（本地）",
       hint: "本机遇到的冲突的累计分布。仅存储在本地——绝不离开您的设备。",

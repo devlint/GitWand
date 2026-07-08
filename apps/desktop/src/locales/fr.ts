@@ -1194,6 +1194,10 @@ const fr: Locale = {
     commitSignatureHint: "Un petit clin d\u2019\u0153il ajout\u00e9 automatiquement \u2014 supprimable \u00e0 tout moment",
     blameAlgorithm: "Algorithme de diff pour le blame",
     blameAlgorithmHint: "Contrôle comment git blame détecte les lignes déplacées. histogram donne les meilleurs résultats.",
+    secretsScannerEnabled: "Analyser les changements indexés à la recherche de secrets",
+    secretsScannerEnabledHint: "Détection locale, sans réseau, de secrets cloud/tokens/clés privées/JWT dans les lignes ajoutées indexées. Ne bloque jamais un commit — avertit seulement.",
+    secretsEntropyThreshold: "Seuil de détection haute entropie",
+    secretsEntropyThresholdHint: "Entropie de Shannon (bits/caractère) au-delà de laquelle un token long à l'aspect aléatoire est signalé. 0 désactive cette vérification.",
     tierStats: {
       title: "Statistiques de résolution (local)",
       hint: "Répartition cumulée des conflits rencontrés sur cette machine. Stocké localement uniquement — ne quitte jamais votre appareil.",

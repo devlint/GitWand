@@ -211,6 +211,9 @@ interface Settings {
   filesMode: "floating" | "fullscreen" | "bottom";
   filesPrevMode: "floating" | "bottom";
   filesHideOnNav: boolean;
+  // v3.5.0 Secrets scanner
+  secretsScannerEnabled: boolean;
+  secretsEntropyThreshold: number;
 }
 
 const defaultSettings: Settings = {
@@ -290,6 +293,8 @@ const defaultSettings: Settings = {
   filesMode: "floating",
   filesPrevMode: "floating",
   filesHideOnNav: true,
+  secretsScannerEnabled: true,
+  secretsEntropyThreshold: 4.0,
 };
 
 function loadSettings(): Settings {
@@ -1764,6 +1769,24 @@ function deleteReleaseNoteTemplate(id: string) {
               <option value="myers">myers</option>
             </select>
             <span class="sp-hint">{{ t('settings.blameAlgorithmHint') }}</span>
+          </div>
+
+          <!-- Secrets scanner (v3.5.0) -->
+          <div class="sp-row sp-row--checkbox">
+            <label class="sp-checkbox-label" for="setting-secrets-scanner">
+              <input id="setting-secrets-scanner" type="checkbox" class="sp-checkbox"
+                :checked="settings.secretsScannerEnabled"
+                @change="updateSetting('secretsScannerEnabled', ($event.target as HTMLInputElement).checked)" />
+              <span>{{ t('settings.secretsScannerEnabled') }}</span>
+            </label>
+            <span class="sp-hint">{{ t('settings.secretsScannerEnabledHint') }}</span>
+          </div>
+          <div class="sp-row" v-if="settings.secretsScannerEnabled">
+            <label class="sp-label" for="setting-secrets-entropy">{{ t('settings.secretsEntropyThreshold') }}</label>
+            <input id="setting-secrets-entropy" class="sp-input mono" type="number" min="0" max="8" step="0.1"
+              :value="settings.secretsEntropyThreshold"
+              @input="updateSetting('secretsEntropyThreshold', Number(($event.target as HTMLInputElement).value))" />
+            <span class="sp-hint">{{ t('settings.secretsEntropyThresholdHint') }}</span>
           </div>
 
           <!-- Statistiques tier locales (recoverable-before-model) -->

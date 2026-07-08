@@ -1185,6 +1185,10 @@ const es: Locale = {
     commitSignatureHint: "Una pequeña firma añadida automáticamente — se puede quitar en cualquier momento",
     blameAlgorithm: "Algoritmo de diff para blame",
     blameAlgorithmHint: "Controla cómo git blame detecta líneas movidas. histogram da los mejores resultados.",
+    secretsScannerEnabled: "Escanear cambios en stage en busca de secretos",
+    secretsScannerEnabledHint: "Detección local y sin red de secretos de nube/tokens/claves privadas/JWT en las líneas añadidas en stage. Nunca bloquea un commit — solo avisa.",
+    secretsEntropyThreshold: "Umbral de detección de alta entropía",
+    secretsEntropyThresholdHint: "Entropía de Shannon (bits/carácter) por encima de la cual se marca un token largo de aspecto aleatorio. 0 desactiva esta comprobación.",
     tierStats: {
       title: "Estadísticas de resolución (local)",
       hint: "Desglose acumulado de los conflictos encontrados en esta máquina. Solo se almacena localmente — nunca sale de tu dispositivo.",
