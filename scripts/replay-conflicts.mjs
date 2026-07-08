@@ -34,6 +34,7 @@ if (!repo) {
 const maxMergesIdx = args.indexOf("--max-merges");
 const MAX_MERGES = maxMergesIdx !== -1 ? Number(args[maxMergesIdx + 1]) : 500;
 const WITH_REFACTORING = args.includes("--refactoring");
+const WITH_ECHO = args.includes("--echo");
 const AS_JSON = args.includes("--json");
 
 const MAX_FILE_BYTES = 1_000_000; // skip huge files
@@ -74,6 +75,65 @@ function mergeTree(p1, p2) {
   }
 }
 
+// ─── cherry-pick-echo opportunity signals (--echo) ───────────────────────────
+//
+// Sizing pass for a future deterministic `cherry_pick_echo` recoverer: how much
+// of the `complex` residual involves a change that ALREADY EXISTS on the other
+// side's history?
+//
+// Signal 1 (merge-level): `git cherry` patch-id equivalence between the two
+// parents' exclusive commits — commits cherry-picked (or rebased) across both
+// sides. We record which conflicted files those echo commits touched.
+//
+// Signal 2 (hunk-level): a complex hunk whose ours-block appears VERBATIM
+// somewhere in the other parent's version of the file (or theirs-block in
+// ours' version) — the "conflicting" content is already present on the other
+// side (moved, duplicated, or cherry-picked then shifted).
+
+const ECHO_MAX_EXCLUSIVE = 500; // skip echo analysis on merges with huge exclusive sets
+const ECHO_MIN_BLOCK_CHARS = 20;
+
+/** Shas of commits on `tip`'s exclusive side that are patch-id-equivalent to one on `other`. */
+function echoShas(tip, other) {
+  const count = Number(git(["rev-list", "--count", "--no-merges", tip, `^${other}`]).trim());
+  if (count === 0 || count > ECHO_MAX_EXCLUSIVE) return { shas: [], skipped: count > ECHO_MAX_EXCLUSIVE };
+  const out = git(["cherry", other, tip]);
+  const shas = out.split("\n").filter((l) => l.startsWith("- ")).map((l) => l.slice(2).trim());
+  return { shas, skipped: false };
+}
+
+/** Files touched by a commit. */
+function commitFiles(sha) {
+  try {
+    return git(["diff-tree", "--no-commit-id", "--name-only", "-r", sha]).split("\n").filter(Boolean);
+  } catch { return []; }
+}
+
+/** Set of conflicted files touched by at least one patch-id-echoed commit on either side. */
+function echoTouchedFiles(p1, p2, conflictedFiles) {
+  const a = echoShas(p1, p2);
+  const b = echoShas(p2, p1);
+  const result = { files: new Set(), echoPairs: a.shas.length + b.shas.length, skipped: a.skipped || b.skipped };
+  if (result.echoPairs === 0) return result;
+  const conflictSet = new Set(conflictedFiles);
+  for (const sha of [...a.shas, ...b.shas].slice(0, 50)) {
+    for (const f of commitFiles(sha)) {
+      if (conflictSet.has(f)) result.files.add(f);
+    }
+  }
+  return result;
+}
+
+/** Does `block` (joined lines) appear verbatim in parent's version of the file? */
+function blockPresentIn(parent, path, blockLines) {
+  const block = blockLines.join("\n").trim();
+  if (block.length < ECHO_MIN_BLOCK_CHARS || blockLines.filter((l) => l.trim()).length < 2) return false;
+  try {
+    const content = git(["show", `${parent}:${path}`], { stdio: ["ignore", "pipe", "ignore"] });
+    return content.includes(block);
+  } catch { return false; }
+}
+
 // ─── replay ──────────────────────────────────────────────────────────────────
 
 const merges = git(["rev-list", "--merges", `--max-count=${MAX_MERGES}`, "HEAD"])
@@ -90,6 +150,15 @@ let totalHunks = 0;
 
 const resolveOptions = WITH_REFACTORING ? { refactoringAware: { enabled: true } } : {};
 
+// --echo accumulators
+let complexHunks = 0;
+let complexInEchoFiles = 0;
+let complexContentOnOtherSide = 0;
+let complexEitherSignal = 0;
+let mergesWithEchoPairs = 0;
+let echoSkippedMerges = 0;
+const echoExamples = [];
+
 for (const m of merges) {
   const parents = git(["rev-list", "--parents", "-n", "1", m]).trim().split(" ").slice(1);
   if (parents.length !== 2) continue; // skip octopus
@@ -97,6 +166,13 @@ for (const m of merges) {
   const conflict = mergeTree(parents[0], parents[1]);
   if (!conflict) continue;
   mergesWithConflicts++;
+
+  let echoInfo = null;
+  if (WITH_ECHO) {
+    echoInfo = echoTouchedFiles(parents[0], parents[1], conflict.files);
+    if (echoInfo.echoPairs > 0) mergesWithEchoPairs++;
+    if (echoInfo.skipped) echoSkippedMerges++;
+  }
 
   for (const path of new Set(conflict.files)) {
     const ext = path.split(".").pop()?.toLowerCase() ?? "";
@@ -127,6 +203,22 @@ for (const m of merges) {
       if (hunk.type === "refactoring_aware_merge" && refactoringExamples.length < 25) {
         refactoringExamples.push({ merge: m.slice(0, 10), path, line: hunk.startLine });
       }
+      if (WITH_ECHO && hunk.type === "complex") {
+        complexHunks++;
+        const inEchoFile = echoInfo !== null && echoInfo.files.has(path);
+        // ours block present in theirs' parent version, or theirs block in ours'
+        const contentEcho =
+          blockPresentIn(parents[1], path, hunk.oursLines) ||
+          blockPresentIn(parents[0], path, hunk.theirsLines);
+        if (inEchoFile) complexInEchoFiles++;
+        if (contentEcho) complexContentOnOtherSide++;
+        if (inEchoFile || contentEcho) {
+          complexEitherSignal++;
+          if (echoExamples.length < 20) {
+            echoExamples.push({ merge: m.slice(0, 10), path, line: hunk.startLine, signals: `${inEchoFile ? "patch-id " : ""}${contentEcho ? "content" : ""}`.trim() });
+          }
+        }
+      }
     }
   }
 }
@@ -148,6 +240,17 @@ const report = {
   refactoringAwareEnabled: WITH_REFACTORING,
   tokenLevelExamples,
   ...(WITH_REFACTORING ? { refactoringExamples } : {}),
+  ...(WITH_ECHO ? {
+    echo: {
+      complexHunks,
+      complexInEchoFiles,
+      complexContentOnOtherSide,
+      complexEitherSignal,
+      mergesWithEchoPairs,
+      echoSkippedMerges,
+      examples: echoExamples,
+    },
+  } : {}),
 };
 
 if (AS_JSON) {
@@ -170,5 +273,17 @@ if (AS_JSON) {
     for (const ex of tokenLevelExamples) console.log(`  ${ex.merge}  ${ex.path}:${ex.line}`);
   } else {
     console.log(`\ntoken_level_merge: ZERO hits on this corpus.`);
+  }
+  if (WITH_ECHO) {
+    const pct = (n) => complexHunks ? ((n / complexHunks) * 100).toFixed(1) : "0.0";
+    console.log(`\n─── cherry-pick-echo opportunity (complex hunks: ${complexHunks}) ───`);
+    console.log(`merges w/ patch-id echo pairs:   ${mergesWithEchoPairs}/${report.mergesWithConflicts}${echoSkippedMerges ? ` (${echoSkippedMerges} skipped, exclusive set > ${ECHO_MAX_EXCLUSIVE})` : ""}`);
+    console.log(`complex in echo-touched files:   ${complexInEchoFiles}  (${pct(complexInEchoFiles)}%)`);
+    console.log(`complex content on other side:   ${complexContentOnOtherSide}  (${pct(complexContentOnOtherSide)}%)`);
+    console.log(`complex w/ either signal:        ${complexEitherSignal}  (${pct(complexEitherSignal)}%)`);
+    if (echoExamples.length) {
+      console.log(`examples:`);
+      for (const ex of echoExamples) console.log(`  ${ex.merge}  ${ex.path}:${ex.line}  [${ex.signals}]`);
+    }
   }
 }
