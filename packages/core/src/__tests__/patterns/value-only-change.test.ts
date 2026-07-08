@@ -272,3 +272,57 @@ describe("value_only_change : résolution semver-max au lieu du côté-politique
     expect(result.hunks[0].explanation).not.toContain("la plus récente (theirs)");
   });
 });
+
+// ─── Tokens quotés multi-mots (timestamp) + résolution timestamp-max ─────────
+
+describe("value_only_change : valeurs volatiles multi-mots à l'intérieur de quotes", () => {
+  // Cas réel n°1 du corpus dendreo (config/dendreo.php 'last_update', récurrent
+  // sur 16+ merges) : un timestamp quoté contient un espace — la tokenization
+  // par défaut le splitte en "2026-07-06" + "11:42:00" et aucun fragment ne
+  // matche la regex datetime → le hunk tombait en complex. La tokenization
+  // quote-aware garde le contenu quoté atomique.
+  const input = [
+    `<<<<<<< ours`,
+    `    'last_update' => '2026-07-07 17:29:00',`,
+    `||||||| base`,
+    `    'last_update' => '2026-07-06 11:42:00',`,
+    `=======`,
+    `    'last_update' => '2026-07-06 09:36:00',`,
+    `>>>>>>> theirs`,
+  ].join("\n");
+
+  it("classifie value_only_change (timestamp quoté modifié des deux côtés, diff3)", () => {
+    const result = resolve(input, "config/app.php");
+    expect(result.hunks[0].type).toBe("value_only_change");
+  });
+
+  it("résout en gardant le timestamp le plus tardif (ours ici)", () => {
+    const result = resolve(input, "config/app.php");
+    expect(result.resolutions[0].autoResolved).toBe(true);
+    expect(result.resolutions[0].resolvedLines).toEqual([`    'last_update' => '2026-07-07 17:29:00',`]);
+  });
+
+  it("theirs plus tardif → theirs gagne", () => {
+    const flipped = [
+      `<<<<<<< ours`,
+      `    'last_update' => '2026-07-06 09:36:00',`,
+      `=======`,
+      `    'last_update' => '2026-07-07 17:29:00',`,
+      `>>>>>>> theirs`,
+    ].join("\n");
+    const result = resolve(flipped, "config/app.php");
+    expect(result.resolutions[0].resolvedLines).toEqual([`    'last_update' => '2026-07-07 17:29:00',`]);
+  });
+
+  it("contenus quotés non volatils (phrases) → ne matche pas", () => {
+    const prose = [
+      `<<<<<<< ours`,
+      `    'title' => 'Bonjour tout le monde',`,
+      `=======`,
+      `    'title' => 'Salut la compagnie',`,
+      `>>>>>>> theirs`,
+    ].join("\n");
+    const result = resolve(prose, "config/app.php");
+    expect(result.hunks[0].type).not.toBe("value_only_change");
+  });
+});

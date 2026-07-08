@@ -226,6 +226,55 @@ export function tokenizeLine(line: string): string[] {
 }
 
 /**
+ * Variante quote-aware de tokenizeLine : le contenu d'une string literal est
+ * gardé ATOMIQUE (un seul token), quotes émises comme délimiteurs séparés.
+ *
+ * Indispensable pour les valeurs volatiles multi-mots : `'2026-07-06 11:42:00'`
+ * splitté sur l'espace donne deux fragments dont aucun ne matche la regex
+ * datetime — le cas résiduel le plus récurrent du corpus réel (config PHP
+ * `last_update`). Utilisé par detectValueOnlyChange/pickNewerVersionSide ;
+ * token_level_merge garde volontairement tokenizeLine (fusion INTRA-string
+ * voulue là-bas, cf. ses fixtures Tailwind).
+ */
+export function tokenizeLineQuoteAware(line: string): string[] {
+  const tokens: string[] = [];
+  let i = 0;
+  let plain = "";
+  const flushPlain = () => {
+    if (plain !== "") {
+      tokens.push(...plain.split(/(\s+|[{}[\](),:;=<>])/).filter((t) => t !== ""));
+      plain = "";
+    }
+  };
+  while (i < line.length) {
+    const ch = line[i];
+    if (ch === '"' || ch === "'" || ch === "`") {
+      flushPlain();
+      const quote = ch;
+      let content = "";
+      i++;
+      while (i < line.length && line[i] !== quote) {
+        if (line[i] === "\\" && i + 1 < line.length) {
+          content += line[i] + line[i + 1];
+          i += 2;
+          continue;
+        }
+        content += line[i];
+        i++;
+      }
+      tokens.push(quote);
+      if (content !== "") tokens.push(content);
+      if (i < line.length) { tokens.push(quote); i++; }
+      continue;
+    }
+    plain += ch;
+    i++;
+  }
+  flushPlain();
+  return tokens;
+}
+
+/**
  * Détecte si deux ensembles de lignes ne diffèrent que par des valeurs atomiques.
  * Retourne un résultat de classification ou null si non applicable.
  */
@@ -242,15 +291,19 @@ export function detectValueOnlyChange(
   let allDiffsAreVolatile = true;
 
   for (let i = 0; i < oursLines.length; i++) {
-    const oursTokens = tokenizeLine(oursLines[i]);
-    const theirsTokens = tokenizeLine(theirsLines[i]);
+    const oursTokens = tokenizeLineQuoteAware(oursLines[i]);
+    const theirsTokens = tokenizeLineQuoteAware(theirsLines[i]);
 
     if (oursTokens.length !== theirsTokens.length) {
       allDiffsAreVolatile = false;
       break;
     }
 
-    totalTokens += oursTokens.length;
+    // Dénominateur du ratio : granularité de l'ancien tokenizeLine (dont les
+    // chaînes vides d'artefact de split) — les seuils de typeClassification
+    // (10/20/30 %) ont été calibrés sur cette granularité-là. La boucle de
+    // comparaison, elle, travaille sur les tokens quote-aware.
+    totalTokens += tokenizeLine(oursLines[i]).length;
 
     for (let j = 0; j < oursTokens.length; j++) {
       if (oursTokens[j] !== theirsTokens[j]) {
@@ -305,6 +358,9 @@ export function detectValueOnlyChange(
 
 const RE_SEMVER_TOKEN = /^[~^>=<]*(\d+)\.(\d+)\.(\d+)(-[\w.]+)?(\+[\w.]+)?$/;
 
+/** Datetime ISO-ish `YYYY-MM-DD[ T]HH:MM[:SS]` — l'ordre lexicographique EST l'ordre chronologique. */
+const RE_DATETIME_TOKEN = /^\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}(:\d{2})?([Z+\-]\S*)?$/;
+
 function parseSemver(tok: string): [number, number, number, boolean] | null {
   const m = tok.match(RE_SEMVER_TOKEN);
   if (!m) return null;
@@ -326,8 +382,9 @@ function compareSemver(a: [number, number, number, boolean], b: [number, number,
  * moins un >), retourne ce côté. Sinon null (résolution par politique).
  *
  * Consommé par assembleResolution (value_only_change) : « accepter la version
- * la plus élevée » n'est déterministe que quand les valeurs SONT des versions
- * ordonnables — pour les hashes/timestamps ambigus on retombe sur la politique.
+ * la plus récente » n'est déterministe que quand les valeurs sont ORDONNABLES
+ * (semver, ou datetime ISO où l'ordre lexicographique est chronologique) —
+ * pour les hashes et autres valeurs ambiguës on retombe sur la politique.
  */
 export function pickNewerSemverSide(
   oursLines: string[],
@@ -336,15 +393,22 @@ export function pickNewerSemverSide(
   if (oursLines.length !== theirsLines.length) return null;
   let winner: "ours" | "theirs" | null = null;
   for (let i = 0; i < oursLines.length; i++) {
-    const oursTokens = tokenizeLine(oursLines[i]);
-    const theirsTokens = tokenizeLine(theirsLines[i]);
+    const oursTokens = tokenizeLineQuoteAware(oursLines[i]);
+    const theirsTokens = tokenizeLineQuoteAware(theirsLines[i]);
     if (oursTokens.length !== theirsTokens.length) return null;
     for (let j = 0; j < oursTokens.length; j++) {
       if (oursTokens[j] === theirsTokens[j]) continue;
+      let cmp: number;
       const a = parseSemver(oursTokens[j]);
       const b = parseSemver(theirsTokens[j]);
-      if (!a || !b) return null; // paire non-semver → politique
-      const cmp = compareSemver(a, b);
+      if (a && b) {
+        cmp = compareSemver(a, b);
+      } else if (RE_DATETIME_TOKEN.test(oursTokens[j]) && RE_DATETIME_TOKEN.test(theirsTokens[j])) {
+        // Format ISO : comparaison lexicographique = chronologique.
+        cmp = oursTokens[j] < theirsTokens[j] ? -1 : oursTokens[j] > theirsTokens[j] ? 1 : 0;
+      } else {
+        return null; // paire ni semver ni datetime → politique
+      }
       if (cmp === 0) continue;
       const side = cmp > 0 ? "ours" : "theirs";
       if (winner !== null && winner !== side) return null; // désaccord entre paires
