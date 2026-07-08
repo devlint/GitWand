@@ -234,6 +234,19 @@ pub fn git_commit_submodule_changes_parity(
     tauri::async_runtime::block_on(commands::ops::git_commit_submodule_changes(cwd))
 }
 
+/// v3.5.0 — secrets scanner parity entry point. `config` is accepted as a raw
+/// `serde_json::Value` (deserialized internally) rather than the `pub(crate)`
+/// `types::SecretsScanConfig` type directly, so `parity_probe.rs` never needs to name a
+/// crate-private type across the crate boundary.
+pub fn scan_secrets_parity(
+    cwd: String,
+    config: serde_json::Value,
+) -> Result<Vec<types::SecretFinding>, String> {
+    let config: types::SecretsScanConfig =
+        serde_json::from_value(config).map_err(|e| format!("invalid secrets scan config: {}", e))?;
+    commands::secrets::scan_staged(&cwd, &config)
+}
+
 // ─── Tauri entry point ─────────────────────────────────────
 
 /// Aptabase App Key for anonymous launch telemetry. This is a public client
