@@ -1,0 +1,26 @@
+{
+  "fixtures": 46,
+  "totalHunks": 46,
+  "autoResolved": 31,
+  "byType": {
+    "complex": 20,
+    "delete_no_change": 2,
+    "generated_file": 1,
+    "insertion_at_boundary": 4,
+    "non_overlapping": 4,
+    "one_side_change": 5,
+    "reorder_only": 1,
+    "same_change": 3,
+    "token_level_merge": 1,
+    "value_only_change": 4,
+    "whitespace_only": 1
+  },
+  "tiers": {
+    "trivial": 25,
+    "advancedDeterministic": 1,
+    "model": 0,
+    "unresolved": 20,
+    "residual": 21,
+    "aiReachable": 20
+  }
+}
