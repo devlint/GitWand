@@ -138,10 +138,12 @@ Single source of truth for the ConflictType→tier mapping lives beside this hel
 3. **Residual denominator includes `complex` → yes, shipped as proposed.**
    `summarizeTiers()` (`packages/core/src/stats/tiers.ts`) computes
    `residual = advancedDeterministic + model + unresolved`.
-4. **Telemetry aggregation → out of scope for this pass.** Only per-resolution
-   surfacing shipped (CLI summary line, desktop `MergeEditor` header stat, MCP
-   `tierSummary` field on `gitwand_status`/`gitwand_resolve_conflicts`). No
-   cross-resolution aggregation/telemetry was added — still open if wanted later.
+4. **Telemetry aggregation → shipped 2026-07-08, local-only.** `useTierStats`
+   (apps/desktop) accumulates each conflicted file's `stats.byType` (wired in
+   `useGitWand.loadRealFiles`, deduplicated by per-file fingerprint) and
+   surfaces the cumulative breakdown in Settings > Git with a reset button.
+   Strictly localStorage — no network; remote telemetry stays blocked on the
+   upstream Aptabase/tokio crash.
 
 ## 10. Non-goals
 
