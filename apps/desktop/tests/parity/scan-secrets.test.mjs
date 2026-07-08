@@ -12,6 +12,9 @@
  *  - ignore-glob case    → a `fixtures/**` path is entirely suppressed
  *  - entropy case        → a high-entropy blob is flagged once the threshold is enabled
  *  - no staged changes   → both engines return an empty array
+ *  - default ignore (D5) → a lockfile's high-entropy integrity hash is suppressed on both
+ *    engines by default, while the SAME content in a non-excluded file still flags on both —
+ *    if either engine's built-in default-ignore list drifts from the other, this fails.
  */
 
 import { describe, it, beforeAll, afterAll } from "vitest";
@@ -86,6 +89,26 @@ describe("parity: scan-secrets", () => {
   it("entropy case: a high-entropy blob is flagged once the threshold is enabled", async () => {
     const cwd = mkTempRepo("gw-secrets-entropy-");
     stageFile(cwd, "src/blob.ts", 'const token = "aZ3xQ9mK2pL7vN5wR8tY1cB4fH6jD0sE2gU9iO3k";\n');
+    const config = { ...BASE_CONFIG, entropyThreshold: 4.0 };
+
+    await assertParity(dev, {
+      command: "scan-secrets",
+      args: { cwd, config },
+      httpPath: "/api/scan-secrets",
+      method: "POST",
+      body: { cwd, config },
+    });
+  });
+
+  it("default ignore (D5): a pnpm-lock.yaml integrity hash is suppressed on both engines, while the same content elsewhere still flags on both", async () => {
+    const cwd = mkTempRepo("gw-secrets-default-ignore-");
+    const highEntropyLine =
+      "  integrity: sha512-aB3dE5fG7hI9jK1lM3nO5pQ7rS9tU1vW3xY5zA7bC9dE1fG3hI5jK7lM9nO1pQ3rS5tU7vW9xY1zA3bC5dE7fG9==\n";
+    // Same content in an excluded lockfile AND a plain source file, in the same repo — if
+    // either engine's built-in default-ignore list (or its entropy detection) drifts from the
+    // other, the two finding sets stop matching.
+    stageFile(cwd, "pnpm-lock.yaml", highEntropyLine);
+    stageFile(cwd, "src/blob.ts", highEntropyLine);
     const config = { ...BASE_CONFIG, entropyThreshold: 4.0 };
 
     await assertParity(dev, {

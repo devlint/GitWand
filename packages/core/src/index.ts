@@ -157,7 +157,7 @@ export { summarizeTiers } from "./stats/tiers.js";
 export type { ResolutionTier, TierSummary } from "./stats/tiers.js";
 
 // v3.5.0 — Secrets scanner (pure, mirrored in Rust — see secrets/scanner.ts)
-export { scanSecrets, shannonEntropy, redact, isIgnored } from "./secrets/scanner.js";
+export { scanSecrets, shannonEntropy, redact, isIgnored, DEFAULT_IGNORE_GLOBS } from "./secrets/scanner.js";
 export { BUILT_IN_PATTERNS } from "./secrets/patterns.js";
 export type {
   SecretSeverity,

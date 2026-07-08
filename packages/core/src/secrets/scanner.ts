@@ -13,6 +13,29 @@ import type { ScanFileInput, SecretFinding, SecretPattern, SecretsScanConfig } f
 /** Nombre maximal de findings retournés (défensif — voir apps/desktop/CLAUDE.md P6.4). */
 const MAX_FINDINGS = 500;
 
+/**
+ * v3.5.0 (D5) — Globs de fichiers générés ignorés PAR DÉFAUT, quel que soit `config.ignore`.
+ * Sans ça, un simple `pnpm install` qui bump une intégrité de lockfile (`integrity: sha512-…`)
+ * déclenche un finding `high_entropy` sur la quasi-totalité des commits réels. Toujours
+ * appliqués en plus des entrées `.gitwandrc` `secrets.ignore[]` de l'utilisateur (additif, jamais
+ * remplacé). MIRROIR EXACT côté Rust : `apps/desktop/src-tauri/src/commands/secrets.rs`
+ * `DEFAULT_IGNORE_GLOBS` — verrouillé par le test de parité (scan-secrets.test.mjs). Toute
+ * modification de cette liste doit être répercutée des deux côtés.
+ */
+export const DEFAULT_IGNORE_GLOBS: string[] = [
+  "*.lock",
+  "package-lock.json",
+  "pnpm-lock.yaml",
+  "yarn.lock",
+  "Cargo.lock",
+  "*.min.js",
+  "*.min.css",
+  "dist/**",
+  "build/**",
+  "node_modules/**",
+  "*.map",
+];
+
 /** Longueur minimale d'un token pour être soumis à la détection par entropie. */
 const MIN_ENTROPY_TOKEN_LENGTH = 20;
 
@@ -21,6 +44,9 @@ const ENTROPY_TOKEN_RE = /[A-Za-z0-9+/=_-]+/g;
 
 export function scanSecrets(files: ScanFileInput[], config: SecretsScanConfig): SecretFinding[] {
   if (!config.enabled) return [];
+
+  // Built-ins always apply; user `.gitwandrc` entries are additive on top, never a replacement.
+  const effectiveIgnore = [...DEFAULT_IGNORE_GLOBS, ...config.ignore];
 
   const allPatterns: SecretPattern[] = [...BUILT_IN_PATTERNS, ...config.extraPatterns];
   const compiled = allPatterns.flatMap((pattern) => {
@@ -48,7 +74,7 @@ export function scanSecrets(files: ScanFileInput[], config: SecretsScanConfig): 
             continue;
           }
           matchedRanges.push([m.index, m.index + matchValue.length]);
-          if (!isIgnored(file.path, matchValue, config.ignore)) {
+          if (!isIgnored(file.path, matchValue, effectiveIgnore)) {
             findings.push({
               file: file.path,
               line,
@@ -75,7 +101,7 @@ export function scanSecrets(files: ScanFileInput[], config: SecretsScanConfig): 
           if (overlapsRegexHit) continue;
 
           if (shannonEntropy(token) >= config.entropyThreshold) {
-            if (!isIgnored(file.path, token, config.ignore)) {
+            if (!isIgnored(file.path, token, effectiveIgnore)) {
               findings.push({
                 file: file.path,
                 line,

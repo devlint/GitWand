@@ -17,6 +17,26 @@ use crate::types::{SecretFinding, SecretsScanConfig};
 /// Cap on returned findings — see apps/desktop/CLAUDE.md P6.4 "IPC payloads" rule.
 const MAX_FINDINGS: usize = 500;
 
+/// v3.5.0 (D5) — Generated-file globs ignored by DEFAULT, regardless of `config.ignore`. Without
+/// this, a routine `pnpm install` lockfile bump (`integrity: sha512-…`) trips a `high_entropy`
+/// finding on nearly every real commit. Always applied on top of the user's `.gitwandrc`
+/// `secrets.ignore[]` entries (additive, never replaced). EXACT MIRROR of the TS
+/// `DEFAULT_IGNORE_GLOBS` in `packages/core/src/secrets/scanner.ts` — locked by the parity test
+/// (`scan-secrets.test.mjs`). Any change to this list must be reflected on both sides.
+const DEFAULT_IGNORE_GLOBS: &[&str] = &[
+    "*.lock",
+    "package-lock.json",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+    "Cargo.lock",
+    "*.min.js",
+    "*.min.css",
+    "dist/**",
+    "build/**",
+    "node_modules/**",
+    "*.map",
+];
+
 /// Minimum token length submitted to the entropy pass.
 const MIN_ENTROPY_TOKEN_LENGTH: usize = 20;
 
@@ -136,6 +156,13 @@ pub(crate) fn scan_lines(files: &[ScanFileInput], config: &SecretsScanConfig) ->
         return Vec::new();
     }
 
+    // Built-ins always apply; user `.gitwandrc` entries are additive on top, never a replacement.
+    let effective_ignore: Vec<String> = DEFAULT_IGNORE_GLOBS
+        .iter()
+        .map(|s| s.to_string())
+        .chain(config.ignore.iter().cloned())
+        .collect();
+
     // Compile built-in + user patterns once. A malformed user regex is skipped, never fatal —
     // `regex` is linear-time so it can't hang the app, but we still don't trust arbitrary
     // user-supplied syntax to compile cleanly.
@@ -166,7 +193,7 @@ pub(crate) fn scan_lines(files: &[ScanFileInput], config: &SecretsScanConfig) ->
                         continue;
                     }
                     matched_ranges.push((m.start(), m.end()));
-                    if !is_ignored(&file.path, value, &config.ignore) {
+                    if !is_ignored(&file.path, value, &effective_ignore) {
                         findings.push(SecretFinding {
                             file: file.path.clone(),
                             line: line.line,
@@ -191,7 +218,7 @@ pub(crate) fn scan_lines(files: &[ScanFileInput], config: &SecretsScanConfig) ->
                         continue;
                     }
                     if shannon_entropy(token) >= config.entropy_threshold
-                        && !is_ignored(&file.path, token, &config.ignore)
+                        && !is_ignored(&file.path, token, &effective_ignore)
                     {
                         findings.push(SecretFinding {
                             file: file.path.clone(),
@@ -537,6 +564,66 @@ mod tests {
         config.ignore.push("/NOTTHEKEY/".to_string());
         let findings = scan_lines(&files, &config);
         assert_eq!(findings.len(), 1);
+    }
+
+    // ─── Default generated-file ignore globs (D5) ────────────────────
+
+    const HIGH_ENTROPY_LINE: &str = "  integrity: sha512-aB3dE5fG7hI9jK1lM3nO5pQ7rS9tU1vW3xY5zA7bC9dE1fG3hI5jK7lM9nO1pQ3rS5tU7vW9xY1zA3bC5dE7fG9==";
+
+    #[test]
+    fn does_not_flag_a_pnpm_lock_integrity_hash_at_the_default_entropy_threshold() {
+        let files = [file_with("pnpm-lock.yaml", &[HIGH_ENTROPY_LINE])];
+        let mut config = base_config();
+        config.entropy_threshold = 4.0;
+        let findings = scan_lines(&files, &config);
+        assert!(findings.is_empty());
+    }
+
+    #[test]
+    fn still_flags_the_same_high_entropy_content_in_a_non_excluded_file() {
+        let files = [file_with("src/config.ts", &[HIGH_ENTROPY_LINE])];
+        let mut config = base_config();
+        config.entropy_threshold = 4.0;
+        let findings = scan_lines(&files, &config);
+        assert!(findings.iter().any(|f| f.pattern_id == "high_entropy"));
+    }
+
+    #[test]
+    fn suppresses_common_lockfiles_and_build_output_by_default() {
+        let paths = [
+            "package-lock.json",
+            "pnpm-lock.yaml",
+            "yarn.lock",
+            "Cargo.lock",
+            "vendor/foo.lock",
+            "assets/app.min.js",
+            "assets/app.min.css",
+            "dist/bundle.js",
+            "build/output.js",
+            "node_modules/pkg/index.js",
+            "coverage/lcov.info.map",
+        ];
+        for path in paths {
+            let files = [file_with(path, &[HIGH_ENTROPY_LINE])];
+            let mut config = base_config();
+            config.entropy_threshold = 4.0;
+            let findings = scan_lines(&files, &config);
+            assert!(findings.is_empty(), "expected {} to be ignored by default", path);
+        }
+    }
+
+    #[test]
+    fn user_supplied_ignore_entries_are_additive_on_top_of_the_built_in_defaults() {
+        let mut config = base_config();
+        config.entropy_threshold = 4.0;
+        config.ignore.push("custom/**".to_string());
+
+        let custom_files = [file_with("custom/ignored.ts", &[HIGH_ENTROPY_LINE])];
+        assert!(scan_lines(&custom_files, &config).is_empty());
+
+        // The built-in lockfile default still applies even with a non-empty user ignore list.
+        let lock_files = [file_with("pnpm-lock.yaml", &[HIGH_ENTROPY_LINE])];
+        assert!(scan_lines(&lock_files, &config).is_empty());
     }
 
     #[test]

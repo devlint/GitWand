@@ -161,6 +161,52 @@ describe("v3.5.0 — scanSecrets", () => {
   });
 });
 
+describe("v3.5.0 — default generated-file ignore globs (D5)", () => {
+  const HIGH_ENTROPY_LINE =
+    "  integrity: sha512-aB3dE5fG7hI9jK1lM3nO5pQ7rS9tU1vW3xY5zA7bC9dE1fG3hI5jK7lM9nO1pQ3rS5tU7vW9xY1zA3bC5dE7fG9==";
+
+  it("does not flag a pnpm-lock.yaml integrity hash at the default entropy threshold", () => {
+    const files = [fileWith("pnpm-lock.yaml", [HIGH_ENTROPY_LINE])];
+    const findings = scanSecrets(files, baseConfig({ entropyThreshold: 4.0 }));
+    expect(findings).toEqual([]);
+  });
+
+  it("still flags the same high-entropy content in a non-excluded file", () => {
+    const files = [fileWith("src/config.ts", [HIGH_ENTROPY_LINE])];
+    const findings = scanSecrets(files, baseConfig({ entropyThreshold: 4.0 }));
+    expect(findings.some((f) => f.patternId === "high_entropy")).toBe(true);
+  });
+
+  it.each([
+    "package-lock.json",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+    "Cargo.lock",
+    "vendor/foo.lock",
+    "assets/app.min.js",
+    "assets/app.min.css",
+    "dist/bundle.js",
+    "build/output.js",
+    "node_modules/pkg/index.js",
+    "coverage/lcov.info.map",
+  ])("suppresses %s by default", (path) => {
+    const files = [fileWith(path, [HIGH_ENTROPY_LINE])];
+    const findings = scanSecrets(files, baseConfig({ entropyThreshold: 4.0 }));
+    expect(findings).toEqual([]);
+  });
+
+  it("user-supplied ignore entries are additive on top of the built-in defaults", () => {
+    const config = baseConfig({ entropyThreshold: 4.0, ignore: ["custom/**"] });
+
+    const customFiles = [fileWith("custom/ignored.ts", [HIGH_ENTROPY_LINE])];
+    expect(scanSecrets(customFiles, config)).toEqual([]);
+
+    // The built-in lockfile default still applies even with a non-empty user ignore list.
+    const lockFiles = [fileWith("pnpm-lock.yaml", [HIGH_ENTROPY_LINE])];
+    expect(scanSecrets(lockFiles, config)).toEqual([]);
+  });
+});
+
 describe("v3.5.0 — shannonEntropy", () => {
   it("returns 0 for an empty string", () => {
     expect(shannonEntropy("")).toBe(0);

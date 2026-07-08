@@ -105,4 +105,18 @@ describe("gitwand scan", () => {
     const parsed = JSON.parse(output);
     expect(parsed.findings).toEqual([]);
   });
+
+  it("does not flag a pnpm-lock.yaml integrity hash by default (D5)", async () => {
+    stageFile(
+      repoDir,
+      "pnpm-lock.yaml",
+      "  integrity: sha512-aB3dE5fG7hI9jK1lM3nO5pQ7rS9tU1vW3xY5zA7bC9dE1fG3hI5jK7lM9nO1pQ3rS5tU7vW9xY1zA3bC5dE7fG9==\n",
+    );
+
+    await cmdScan({ json: true });
+
+    const output = logSpy.mock.calls.map((c) => c.join(" ")).join("\n");
+    const parsed = JSON.parse(output);
+    expect(parsed.findings).toEqual([]);
+  });
 });
