@@ -26,6 +26,10 @@ export { isTauri };
 // ─── Cross-module type imports for workspace helpers ─────────────────────────
 // PullRequest is defined in backend-pr.ts but used by workspacePrsAll here.
 import type { PullRequest } from './backend-pr';
+// v3.5.0 — Secrets scanner IPC shapes, imported from @gitwand/core to avoid drift
+// between the frontend, the Rust command, and the dev-server route.
+import type { SecretFinding, SecretsScanConfig } from '@gitwand/core';
+export type { SecretFinding, SecretsScanConfig };
 
 /** Open a native folder picker (Tauri only). */
 async function tauriOpenFolder(): Promise<string | null> {
@@ -1497,6 +1501,31 @@ export async function writeGitwandrc(cwd: string, config: object): Promise<void>
     const body = await res.text().catch(() => "");
     throw new Error(`Failed to write .gitwandrc: ${res.status} ${body}`);
   }
+}
+
+/**
+ * v3.5.0 — Scan the currently staged diff for secrets (AWS/GCP/Azure/GitHub/GitLab/Slack/
+ * Stripe/OpenAI/Anthropic tokens, private key headers, JWTs, plus high-entropy literals).
+ *
+ * Non-blocking by design: findings surface as a badge/confirm in the commit flow, never a hard
+ * stop. Zero-network, matched locally (Rust in Tauri mode, the same `@gitwand/core` engine the
+ * dev-server route runs in browser dev mode). Never returns raw secret values — only redacted
+ * excerpts (`SecretFinding.redactedExcerpt`).
+ */
+export async function scanSecrets(cwd: string, config: SecretsScanConfig): Promise<SecretFinding[]> {
+  if (isTauri()) {
+    return (await tauriInvoke("scan_secrets", { cwd, config })) as SecretFinding[];
+  }
+  const res = await devFetch(`${DEV_SERVER}/api/scan-secrets`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, config }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `Failed to scan secrets: ${res.status}`);
+  }
+  return (await res.json()) as SecretFinding[];
 }
 
 /**
