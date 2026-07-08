@@ -69,38 +69,102 @@ function isScratch(path: string): boolean {
   return base.startsWith("gitwand-scratch-");
 }
 
-// ─── Drag and Drop (v2.15) ──────────────────────────────
+// ─── Drag to reorder — pointer-based ─────────────────────
+// Native HTML5 drag-and-drop is unreliable in WebKit (WKWebView on macOS,
+// WebKitGTK on Linux — both power the packaged Tauri app): `dragstart`
+// frequently never fires, so the tabs couldn't be reordered and no drop
+// indicator showed. We drive it with plain mouse events instead, which
+// behave identically across every webview. draggedIndex / hoveredIndex keep
+// the same meaning the CSS classes expect (source index / hovered target).
 const draggedIndex = ref<number | null>(null);
 const hoveredIndex = ref<number | null>(null);
+const stripEl = ref<HTMLElement | null>(null);
+// Live horizontal offset of the tab being dragged, so it tracks the cursor.
+const dragOffsetX = ref(0);
 
-function onDragStart(e: DragEvent, index: number) {
-  draggedIndex.value = index;
-  if (e.dataTransfer) {
-    e.dataTransfer.effectAllowed = "move";
-    // Required for some browsers to initiate drag
-    e.dataTransfer.setData("text/plain", index.toString());
-  }
+// A press only becomes a drag past this threshold, so a plain click still
+// switches tabs instead of being swallowed as a (zero-distance) drag.
+const DRAG_THRESHOLD_PX = 4;
+let pressIndex: number | null = null;
+let pressStartX = 0;
+let didDrag = false;
+// Center-x of each tab captured when the drag begins. The dragged tab gets a
+// translateX to follow the cursor, which would move its own bounding rect — so
+// we hit-test against this snapshot (the other tabs don't move until drop).
+let tabCenters: number[] = [];
+
+function snapshotCenters() {
+  const root = stripEl.value;
+  tabCenters = root
+    ? Array.from(root.querySelectorAll<HTMLElement>(".repo-tab")).map((el) => {
+        const r = el.getBoundingClientRect();
+        return r.left + r.width / 2;
+      })
+    : [];
 }
 
-function onDragOver(e: DragEvent, index: number) {
-  e.preventDefault(); // Required to allow drop
-  if (draggedIndex.value !== null && draggedIndex.value !== index) {
-    hoveredIndex.value = index;
+/** Index of the tab slot under `clientX`, from the drag-start snapshot. */
+function tabIndexAtX(clientX: number): number | null {
+  if (tabCenters.length === 0) return null;
+  for (let i = 0; i < tabCenters.length; i++) {
+    if (clientX < tabCenters[i]) return i;
   }
+  return tabCenters.length - 1;
 }
 
-function onDrop(e: DragEvent, index: number) {
+function onTabMouseDown(e: MouseEvent, index: number, tabId: number) {
+  if (e.button === 1) {
+    // Middle-click closes, same as before.
+    e.preventDefault();
+    emit("closeTab", tabId);
+    return;
+  }
+  if (e.button !== 0) return;
+  // Don't start a drag from the caret or close affordances.
+  if ((e.target as Element).closest?.(".repo-tab__caret, .repo-tab__close")) return;
+  // Stop the browser from starting a text selection on the press — the click
+  // still fires, so tab switching is unaffected.
   e.preventDefault();
-  if (draggedIndex.value !== null && draggedIndex.value !== index) {
-    emit("reorderTabs", draggedIndex.value, index);
+  pressIndex = index;
+  pressStartX = e.clientX;
+  didDrag = false;
+  window.addEventListener("mousemove", onDragMove);
+  window.addEventListener("mouseup", onDragEnd);
+}
+
+function onDragMove(e: MouseEvent) {
+  if (pressIndex === null) return;
+  if (!didDrag) {
+    if (Math.abs(e.clientX - pressStartX) < DRAG_THRESHOLD_PX) return;
+    didDrag = true;
+    draggedIndex.value = pressIndex;
+    snapshotCenters();
   }
-  draggedIndex.value = null;
-  hoveredIndex.value = null;
+  // Suppress the text selection that a mouse-drag would otherwise paint over
+  // the tab labels and neighbouring header content.
+  e.preventDefault();
+  dragOffsetX.value = e.clientX - pressStartX;
+  hoveredIndex.value = tabIndexAtX(e.clientX);
 }
 
 function onDragEnd() {
+  window.removeEventListener("mousemove", onDragMove);
+  window.removeEventListener("mouseup", onDragEnd);
+  if (
+    didDrag &&
+    draggedIndex.value !== null &&
+    hoveredIndex.value !== null &&
+    hoveredIndex.value !== draggedIndex.value
+  ) {
+    emit("reorderTabs", draggedIndex.value, hoveredIndex.value);
+  }
+  pressIndex = null;
   draggedIndex.value = null;
   hoveredIndex.value = null;
+  dragOffsetX.value = 0;
+  tabCenters = [];
+  // Leave `didDrag` set so the click that follows a drag is suppressed;
+  // onTabClick resets it.
 }
 
 // Pinned and recent repos shown in the + dropdown (excludes repos already
@@ -212,6 +276,9 @@ onUnmounted(() => {
   document.removeEventListener("keydown", onDocumentKey);
   window.removeEventListener("resize", onWindowChange);
   window.removeEventListener("scroll", onWindowChange, true);
+  // Guard against unmounting mid-drag leaking the window listeners.
+  window.removeEventListener("mousemove", onDragMove);
+  window.removeEventListener("mouseup", onDragEnd);
 });
 
 /**
@@ -300,18 +367,16 @@ function removeWorktree(w: WorktreeEntry) {
  * caret for the same action.
  */
 function onTabClick(e: MouseEvent, tab: RepoTab) {
+  // A drag just ended — swallow the trailing click so it doesn't switch tabs.
+  if (didDrag) {
+    didDrag = false;
+    return;
+  }
   if (tab.id === props.activeTabId) {
     if (hasWorktrees(tab.path)) toggleWorktreeMenu(e, tab);
     return;
   }
   emit("switchTab", tab.id);
-}
-
-function onMiddleClick(e: MouseEvent, tabId: number) {
-  if (e.button === 1) {
-    e.preventDefault();
-    emit("closeTab", tabId);
-  }
 }
 
 function onCloseClick(e: MouseEvent, tabId: number) {
@@ -321,9 +386,11 @@ function onCloseClick(e: MouseEvent, tabId: number) {
 </script>
 
 <template>
-  <div v-if="showStrip" class="repo-tab-strip" role="tablist">
+  <div v-if="showStrip" ref="stripEl" class="repo-tab-strip" role="tablist">
     <!-- Tabs — rendered only when there are multiple repos -->
     <template v-if="showTabs">
+      <!-- Reordered via pointer events (see onTabMouseDown), not native HTML5
+           drag, which is unreliable in the WebKit webviews powering the app. -->
       <button
         v-for="(tab, index) in tabs"
         :key="tab.id"
@@ -339,14 +406,9 @@ function onCloseClick(e: MouseEvent, tabId: number) {
         }"
         :aria-selected="tab.id === activeTabId ? 'true' : 'false'"
         :title="tab.path"
-        draggable="true"
+        :style="draggedIndex === index ? { transform: `translateX(${dragOffsetX}px)` } : null"
         @click="(e) => onTabClick(e, tab)"
-        @mousedown="(e) => onMiddleClick(e, tab.id)"
-        @dragstart="(e) => onDragStart(e, index)"
-        @dragover="(e) => onDragOver(e, index)"
-        @dragleave="hoveredIndex = null"
-        @drop="(e) => onDrop(e, index)"
-        @dragend="onDragEnd"
+        @mousedown="(e) => onTabMouseDown(e, index, tab.id)"
       >
         <svg class="repo-tab__icon" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
           <path d="M2 3.5A1.5 1.5 0 013.5 2h3.586a1.5 1.5 0 011.06.44l.915.914a1 1 0 00.707.293H12.5A1.5 1.5 0 0114 5.147V12.5A1.5 1.5 0 0112.5 14h-9A1.5 1.5 0 012 12.5v-9z" stroke="currentColor" stroke-width="1.2" />
@@ -652,8 +714,15 @@ function onCloseClick(e: MouseEvent, tabId: number) {
 }
 
 .repo-tab--dragging {
-  opacity: 0.4;
   cursor: grabbing;
+  /* Lifted above its neighbours and following the cursor via an inline
+     translateX. No transform transition here so it tracks the pointer 1:1. */
+  position: relative;
+  z-index: 3;
+  opacity: 0.3;
+  background: var(--color-bg-tertiary);
+  box-shadow: var(--shadow-md);
+  transition: none;
 }
 
 .repo-tab--drag-over-left,
