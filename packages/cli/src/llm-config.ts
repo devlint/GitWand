@@ -70,8 +70,11 @@ export function loadGitwandrcLlmConfig(): GitWandrcConfig["llmFallback"] | null 
  * Localise la racine du repo git courant via `git rev-parse --show-toplevel`.
  * Retourne `null` si on n'est pas dans un repo ou si git est introuvable —
  * dans ce cas le CLI utilisera uniquement les flags + l'environnement.
+ *
+ * Exporté (v3.5.0) pour être réutilisé par `commands/scan.ts`, qui a besoin
+ * de la même résolution de racine pour lire `.gitwandrc` `secrets`.
  */
-function findGitRoot(): string | null {
+export function findGitRoot(): string | null {
   try {
     const out = execSync("git rev-parse --show-toplevel", {
       encoding: "utf-8",

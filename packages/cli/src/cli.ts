@@ -22,6 +22,7 @@ import { DEFAULT_CONCURRENCY } from "./concurrency.js";
 import { cmdResolve } from "./commands/resolve.js";
 import { cmdStatus } from "./commands/status.js";
 import { cmdPreview } from "./commands/preview.js";
+import { cmdScan } from "./commands/scan.js";
 
 function printHelp(): void {
   printBanner();
@@ -29,6 +30,7 @@ function printHelp(): void {
   console.log(`  gitwand resolve [files...]      Auto-resolve trivial conflicts`);
   console.log(`  gitwand status                  Show conflict status`);
   console.log(`  gitwand preview                 Predict conflicts before merge/rebase/cherry-pick`);
+  console.log(`  gitwand scan                    Scan staged changes for secrets`);
   console.log(`  gitwand --help                  Show this help`);
   console.log();
   console.log(`${c.bold}Options:${c.reset}`);
@@ -51,6 +53,11 @@ function printHelp(): void {
   console.log(`  ANTHROPIC_API_KEY     Required for --llm-provider=claude`);
   console.log(`  OPENAI_API_KEY        Required for --llm-provider=openai`);
   console.log(`  OLLAMA_URL            Optional override (default http://localhost:11434)`);
+  console.log();
+  console.log(`${c.bold}Scan options:${c.reset}`);
+  console.log(`  --staged              Scan the staged diff (default, only mode today)`);
+  console.log(`  --json                Machine-readable { findings: [...] } output`);
+  console.log(`  --strict              Exit code 1 when findings exist (used by the pre-commit hook)`);
   console.log();
 }
 
@@ -101,6 +108,8 @@ export async function main(): Promise<void> {
     await cmdStatus(flags);
   } else if (command === "preview") {
     await cmdPreview(flags);
+  } else if (command === "scan") {
+    await cmdScan(flags);
   } else {
     console.error(`${c.red}Unknown command: ${command}${c.reset}`);
     printHelp();
