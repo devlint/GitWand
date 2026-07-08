@@ -39,22 +39,6 @@ function runTerminalDemo() {
   })
 }
 
-// ── Feature tabs ──────────────────────────────────────────────────────────────
-// "core" by default — first-time visitors land on workflow-essentials,
-// the highlight banner above the tabs drives traffic to "new" for repeat visits.
-type TabId = 'core' | 'power' | 'ai' | 'new'
-const activeTab = ref<TabId>('core')
-
-// Jump to "new" tab and smooth-scroll the features section into view —
-// used by the "What's New" highlight banner CTA.
-function jumpToNewTab(): void {
-  activeTab.value = 'new'
-  // Defer to next tick so the panel content has rendered before scrolling
-  setTimeout(() => {
-    if (typeof document === 'undefined') return
-    document.querySelector('.features')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }, 0)
-}
 
 // ── Resolution patterns (technical — not localised) ───────────────────────────
 // 8 deterministic patterns auto-apply (auto: true). token_level_merge proposes
@@ -187,7 +171,6 @@ const i18n: Record<Locale, any> = {
     heroToastSub: "1 à relire · 0 hallucination",
     contribYouName: "+ toi ?",
     contribYouRole: "Ouvre ta première PR",
-    badge: 'v3.4.0 · Open Source · MIT',
     heroH1a: "Les conflits de merge s'arrêtent ici.",
     heroH1b: "Retrouve ton flow.",
     heroSub: "Ce petit coup au moral quand 12 fichiers passent au rouge ? Terminé. GitWand classe chaque hunk avec 8 patterns déterministes — sans deviner, sans halluciner — résout les 95 % triviaux tout seul, et ne te rend que ce qui mérite ton cerveau. Natif, gratuit, MIT.",
@@ -203,48 +186,6 @@ const i18n: Record<Locale, any> = {
     statPatterns: 'patterns de résolution',
     statResolved: 'conflits résolus automatiquement',
     statInterfaces: 'interfaces (Desktop, CLI, VS Code)',
-    featTitle: 'Tout ce qu\'il faut pour Git',
-    featSub: 'Un workflow complet, sans compromis sur les performances.',
-    featPerf: 'Performances natives',
-    featPerfDesc: 'Construit avec Tauri 2 et Vue 3. Démarrage en moins d\'une seconde. Aucun overhead Electron.',
-    featResolve: 'Résolution intelligente',
-    featResolveDesc: '8 patterns déterministes avec pattern registry (v1.4) et scoring de confiance. 95%+ des conflits triviaux résolus sans intervention.',
-    featDiff: 'Diff visuel',
-    featDiffDesc: 'Viewer de diff unifié avec coloration syntaxique, staging au niveau du hunk, et preview de merge.',
-    featHistory: 'Historique & Graph',
-    featHistoryDesc: 'Historique complet, graphe DAG interactif, blame de fichier, et recherche en langage naturel dans les commits.',
-    featPR: 'Pull Requests intégrées',
-    featPRDesc: 'Revue de PR GitHub directement dans l\'app. Commentaires, reviews, statuts CI et aperçu des conflits.',
-    featUI: '3 interfaces',
-    featUIDesc: 'App desktop (macOS/Linux/Windows), outil CLI gitwand resolve pour CI/CD, et extension VS Code.',
-    featAIPR: 'AI code review & PR',
-    featAIPRDesc: 'Titre et description de PR auto-générés, critique IA par hunk dans le panneau Review, suggestion de nom de branche depuis le diff.',
-    featAIMerge: 'AI merge insight',
-    featAIMergeDesc: 'Explication de conflit en langage naturel, résumé IA du risque avant rebase/merge, squash sémantique en rebase interactif.',
-    featAIFlow: 'AI commit & history',
-    featAIFlowDesc: 'Messages de commit et de stash générés, Absorb classé sémantiquement, blame contextuel et release notes depuis git log.',
-    featImgDiff: 'Diff d\'images visuel',
-    featImgDiffDesc: 'Comparez les PNG, JPG, WebP, GIF et SVG côte à côte, en overlay, en blink ou avec un slider. Fini « Binary file changed ».',
-    featFolderTree: 'Diff en arbre de dossiers',
-    featFolderTreeDesc: 'Bascule plat ↔ arbre dans la liste des fichiers avec totaux par dossier, filtrage au clic et sidebar redimensionnable persistée.',
-    featWorktrees: 'Git Worktrees',
-    featWorktreesDesc: 'Travaillez sur plusieurs branches simultanément sans stasher. Chaque worktree s\'ouvre comme un onglet. Créez-en depuis la liste des branches en un clic.',
-    featSubmodules: 'Gestion des sous-modules',
-    featSubmodulesDesc: 'Listez, initialisez et mettez à jour les sous-modules Git avec badges de statut. Ajoutez-en et ouvrez-les en onglet depuis le panneau.',
-    featSplitCommit: 'Split de commit par hunks',
-    featSplitCommitDesc: 'Découpez un commit en deux via sélection fichier-par-fichier et ligne-par-ligne. Protège contre les merge commits, préserve votre sélection au collapse/expand, supporte ajouts/suppressions/renommages.',
-    featCommitCtx: 'Menu contextuel de commit',
-    featCommitCtxDesc: '12 actions en un clic droit : checkout, reset (soft/mixed/hard), revert, nouvelle branche, tag, cherry-pick, vue sur le forge et copie SHA.',
-    featTags: 'Gestionnaire de tags',
-    featTagsDesc: 'Listez, créez, pushez et supprimez vos tags locaux et distants. Suggestion IA du prochain tag sémantique depuis l\'historique.',
-    featTrailers: 'Trailers & Conventional Commits',
-    featTrailersDesc: 'Ajoutez Signed-off-by et Reviewed-by en un clic. Choisissez le préfixe de commit (feat, fix, docs…) depuis un picker intégré.',
-    featFileHistory: 'Historique de fichier avancé',
-    featFileHistoryDesc: 'Recherche pickaxe (-S/-G) dans l\'historique d\'un fichier, blame par plage de lignes, et sélecteur d\'algorithme diff (histogram, patience, myers).',
-    featForkWorkflow: 'Workflow fork & triangulaire',
-    featForkWorkflowDesc: 'Badge "↑N fork" dans le bouton de sync pour les workflows fork : push remote ≠ upstream. Fini les push accidentels sur l\'origine.',
-    featMcp: 'Serveur MCP',
-    featMcpDesc: 'Exposez GitWand à Claude, Cursor, Windsurf et tout client MCP. Une commande : npx -y @gitwand/mcp. Publié avec provenance.',
     conflictTitle: "Regardez-le résoudre un conflit en une seconde",
     conflictSub: 'GitWand analyse la sémantique du code, pas seulement les lignes. Il choisit la bonne résolution à votre place.',
     conflictBefore: 'Avant — conflit brut',
@@ -266,20 +207,6 @@ const i18n: Record<Locale, any> = {
     llmTitle: "Tes agents IA, avec un vrai moteur Git à portée de main",
     llmSub: "Les agents sont excellents pour le code et catastrophiques sur les merges. Le serveur MCP de GitWand résout les 95 % triviaux de façon déterministe et confie à ton agent les hunks difficiles avec tout le contexte — ours, theirs, base et la trace.",
     llmBadge: 'MCP Server · Registre officiel · stdio · Sans clé API',
-    llmStep1: 'Analyse',
-    llmStep1Desc: 'L\'agent appelle gitwand_preview_merge pour évaluer le nombre de conflits, leur complexité, et le pourcentage que GitWand peut résoudre seul.',
-    llmStep2: 'Auto-résolution',
-    llmStep2Desc: 'GitWand résout instantanément les patterns triviaux (whitespace, one-side-change, same-change…) et retourne les hunks ambigus avec leur trace de classification.',
-    llmStep3: 'Résolution IA',
-    llmStep3Desc: 'Pour chaque conflit complexe, l\'agent dispose du contexte complet : contenu ours/theirs/base, trace de classification et scores de confiance.',
-    llmCompat: 'Compatible avec',
-    llmDocs: 'Voir la documentation MCP →',
-    patternsTitle: '8 patterns auto-appliqués. Déterministes. Auditables.',
-    patternsSub: 'Chaque hunk passe par le classifieur. Chaque pattern a son profil de confiance et son résolveur automatique.',
-    benchTitle: 'Des chiffres, pas des adjectifs.',
-    benchSub: 'Performances mesurées sur puce M, dépôts types.',
-    tabCore: 'Git de base', tabAI: 'IA', tabPower: 'Power user', tabNew: 'Nouveautés',
-    featuresAria: 'Catégories de fonctionnalités',
     // 3 Pillars
     pillarsTitle: 'Trois piliers, une promesse',
     pillarsSub: "Des conflits résolus de façon déterministe, une performance vraiment native, et une IA qui n'intervient que si tu le demandes.",
@@ -298,28 +225,6 @@ const i18n: Record<Locale, any> = {
     pillar3Stat: 'Claude · OpenAI · Ollama',
     pillar3StatLabel: 'votre LLM, votre clé',
     pillar3Cta: 'Guide du fallback IA →',
-    // Onglet Nouveautés (v2.9 → v2.13)
-    featLaunchpad: 'Today — dashboard cross-repo',
-    featLaunchpadDesc: 'Boîte de réception d\'actions triée sur tous les repos d\'un workspace. Éléments classés par urgence (À traiter / En attente / Plus tard), chaque ligne avec une action contextuelle — Merge, Review, Resolve ou Reply. Pin, snooze, ⌘L depuis n\'importe où.',
-    featLlmFallback: 'Fallback LLM pour les hunks complexes',
-    featLlmFallbackDesc: 'Résolution opt-in via Claude / OpenAI / Ollama / MCP. Validée par le même pipeline parse-tree que les patterns déterministes. Trace de décision et bouton reject inclus.',
-    featForge: 'GitHub, GitLab & Bitbucket',
-    featForgeDesc: 'Support PR natif sur les trois forges. Détection automatique du remote, choix du bon provider. Comptes gérés une seule fois dans les Réglages — sans re-authentification par repo.',
-    featBranchMgmt: 'Branches : épinglage, archivage, identité',
-    featBranchMgmtDesc: 'Épinglez vos branches les plus utilisées en haut de liste. Archivez les branchées mergées ou inactives. Identité par repo — email différent pour le perso et le pro.',
-    featIdentities: 'Templates de commit & Conventional Commits',
-    featIdentitiesDesc: 'Configurez des templates de commit par repo, chargés automatiquement à l\'ouverture. Choisissez un préfixe Conventional Commits (feat, fix, docs…) depuis un picker intégré.',
-    featAISuggest: 'Suggestions de code IA inline',
-    featAISuggestDesc: 'Sélectionnez un hunk dans le panneau Review, demandez une réécriture ciblée et acceptez la suggestion IA en un clic. Les presets de prompts ajoutent un contexte instantané.',
-    featScratch: 'Worktree scratch + Conflict Predictor étendu',
-    featScratchDesc: 'Résolvez les conflits dans un worktree isolé jetable, ramenés en un clic (cleanup auto). Le Conflict Predictor prédit désormais rebase et cherry-pick — sans effet de bord, avec badge de risque et vue hunk par hunk.',
-    featOAuth: 'GitHub OAuth, Azure DevOps & PRs cross-fork',
-    featOAuthDesc: 'Connectez-vous à GitHub et Azure DevOps via OAuth device flow — tokens dans le trousseau de l\'OS, sans CLI gh. Azure DevOps devient une forge à part entière, et les PRs cross-fork ciblent le dépôt upstream.',
-    // Encart Nouveautés
-    newReleaseBadge: 'Nouveau dans la v3.4',
-    newReleaseTitle: 'Dashboard Today, VS Code sur le Marketplace, moteur de validation',
-    newReleaseSub: 'Le panneau Today agrège PRs, issues et WIP de tous vos repos en une vue focalisée — ⌘L depuis n\'importe où. GitWand fait ses débuts sur le VS Code Marketplace avec le moteur de conflits complet intégré. CLI et extension VS Code remontent désormais les avertissements de validation : marqueurs résiduels, erreurs de syntaxe, résultats parse-tree.',
-    newReleaseCta: 'Voir les nouveautés',
     faqTitle: 'Questions fréquentes',
     faqItems: [
       { q: 'GitWand est-il vraiment gratuit ?', a: 'Oui, GitWand est entièrement open source sous licence MIT. Vous pouvez l\'utiliser, le modifier et le redistribuer librement.' },
@@ -329,8 +234,6 @@ const i18n: Record<Locale, any> = {
       { q: 'Quelle est la différence avec les autres clients Git ?', a: 'GitWand se distingue par son moteur de résolution intégré, son architecture native Tauri (pas d\'Electron), ses 3 interfaces cohérentes (desktop, CLI, VS Code), et son serveur MCP pour l\'intégration avec les agents IA.' },
       { q: 'Comment installer le serveur MCP ?', a: 'Avec Claude Code, une seule commande suffit : claude mcp add gitwand -- npx -y @gitwand/mcp. Pour Claude Desktop, Cursor ou Windsurf, ajoutez le bloc mcpServers à la config de votre client (voir la documentation). Le serveur est aussi listé sur le registre officiel MCP, donc les clients qui parcourent le registre le trouvent automatiquement.' },
     ],
-    compareTitle: 'GitWand face à la concurrence',
-    compareSub: 'Comparaison fonctionnalité par fonctionnalité avec les clients Git les plus populaires.',
   },
   en: {
     conflictCta: "See how the engine works →",
@@ -365,7 +268,6 @@ const i18n: Record<Locale, any> = {
     heroToastSub: "1 left for review · 0 hallucinations",
     contribYouName: "+ you?",
     contribYouRole: "Open your first PR",
-    badge: 'v3.4.0 · Open Source · MIT',
     heroH1a: "Merge conflicts end here.",
     heroH1b: "Get your flow back.",
     heroSub: "That sinking feeling when 12 files turn red? Gone. GitWand classifies every hunk with 8 deterministic patterns — no guessing, no hallucinations — auto-resolves the trivial 95%, and hands you only what's worth your brain. Native, free, MIT.",
@@ -381,48 +283,6 @@ const i18n: Record<Locale, any> = {
     statPatterns: 'resolution patterns',
     statResolved: 'conflicts auto-resolved',
     statInterfaces: 'interfaces (Desktop, CLI, VS Code)',
-    featTitle: 'Everything you need for Git',
-    featSub: 'A complete workflow with no performance compromise.',
-    featPerf: 'Native performance',
-    featPerfDesc: 'Built with Tauri 2 and Vue 3. Sub-second startup. Zero Electron overhead.',
-    featResolve: 'Smart resolution',
-    featResolveDesc: '8 deterministic patterns with pattern registry (v1.4) and confidence scoring. 95%+ of trivial conflicts resolved without intervention.',
-    featDiff: 'Visual diff',
-    featDiffDesc: 'Unified diff viewer with syntax highlighting, hunk-level staging, and merge preview.',
-    featHistory: 'History & Graph',
-    featHistoryDesc: 'Full history, interactive DAG graph, file blame, and natural-language commit search.',
-    featPR: 'Integrated Pull Requests',
-    featPRDesc: 'Review GitHub PRs directly in the app. Comments, reviews, CI status, and conflict preview.',
-    featUI: '3 interfaces',
-    featUIDesc: 'Desktop app (macOS/Linux/Windows), gitwand resolve CLI for CI/CD, and VS Code extension.',
-    featAIPR: 'AI code review & PR',
-    featAIPRDesc: 'Auto-generated PR title and description, per-hunk AI critique in the Review panel, branch-name suggestions from the diff.',
-    featAIMerge: 'AI merge insight',
-    featAIMergeDesc: 'Plain-English conflict explanation, AI risk summary before rebase/merge, semantic squash in interactive rebase.',
-    featAIFlow: 'AI commit & history',
-    featAIFlowDesc: 'Generated commit and stash messages, semantically-ranked Absorb, blame context and release notes from git log.',
-    featImgDiff: 'Visual image diffs',
-    featImgDiffDesc: 'Compare PNG, JPG, WebP, GIF, and SVG changes side-by-side, overlayed, blinked, or with a reveal slider. No more "Binary file changed".',
-    featFolderTree: 'Folder tree diff',
-    featFolderTreeDesc: 'Flat ↔ tree toggle in the commit file list with per-folder aggregates, click-to-filter, and a resizable sidebar that remembers its width.',
-    featWorktrees: 'Git Worktrees',
-    featWorktreesDesc: 'Work on multiple branches simultaneously without stashing. Each worktree opens as a tab. Create one from the branch list with one click.',
-    featSubmodules: 'Submodule management',
-    featSubmodulesDesc: 'List, initialize, and update Git submodules with status badges. Add submodules and open them as tabs directly from the panel.',
-    featSplitCommit: 'Split a commit by hunks',
-    featSplitCommitDesc: 'Break a commit in two by picking files and lines. Blocks merge commits, preserves your selection across collapse/expand, and handles added/deleted/renamed files.',
-    featCommitCtx: 'Commit context menu',
-    featCommitCtxDesc: '12 actions on right-click: checkout, reset (soft/mixed/hard), revert, new branch, tag, cherry-pick, view on forge, and copy SHA.',
-    featTags: 'Tags manager',
-    featTagsDesc: 'List, create, push, and delete local and remote tags. AI-powered suggestion for the next semantic version from your commit history.',
-    featTrailers: 'Trailers & Conventional Commits',
-    featTrailersDesc: 'Add Signed-off-by and Reviewed-by in one click. Pick a commit prefix (feat, fix, docs…) from a built-in chip picker.',
-    featFileHistory: 'Advanced file history',
-    featFileHistoryDesc: 'Pickaxe search (-S/-G) in file history, blame by line range, and diff algorithm selector (histogram, patience, myers).',
-    featForkWorkflow: 'Fork & triangular workflow',
-    featForkWorkflowDesc: '"↑N fork" badge in the sync button for fork workflows where push remote ≠ upstream. No more accidental pushes to origin.',
-    featMcp: 'MCP server',
-    featMcpDesc: 'Expose GitWand to Claude, Cursor, Windsurf, and any MCP client. One command: npx -y @gitwand/mcp. Published with provenance.',
     conflictTitle: "See it resolve a conflict in one second",
     conflictSub: 'GitWand analyzes code semantics, not just lines. It picks the right resolution for you.',
     conflictBefore: 'Before — raw conflict',
@@ -444,20 +304,6 @@ const i18n: Record<Locale, any> = {
     llmTitle: "Your AI agents, with a real Git engine on tap",
     llmSub: "Agents are great at code and terrible at merges. GitWand's MCP server resolves the trivial 95% deterministically and hands your agent the hard hunks with full context — ours, theirs, base and the trace.",
     llmBadge: 'MCP Server · Official Registry · stdio · No API key',
-    llmStep1: 'Preview',
-    llmStep1Desc: 'The agent calls gitwand_preview_merge to assess the number of conflicts, their complexity, and the percentage GitWand can resolve on its own.',
-    llmStep2: 'Auto-resolve',
-    llmStep2Desc: 'GitWand instantly resolves trivial patterns (whitespace, one-side-change, same-change…) and returns ambiguous hunks with their classification trace.',
-    llmStep3: 'AI resolution',
-    llmStep3Desc: 'For each complex conflict, the agent has full context: ours/theirs/base content, classification trace, and confidence scores.',
-    llmCompat: 'Compatible with',
-    llmDocs: 'View MCP documentation →',
-    patternsTitle: '8 auto-applied patterns. Deterministic. Auditable.',
-    patternsSub: 'Every hunk runs through the classifier. Each pattern has its own confidence profile and automatic resolver.',
-    benchTitle: 'Numbers, not adjectives.',
-    benchSub: 'Performance measured on an M-series chip with typical repositories.',
-    tabCore: 'Core Git', tabAI: 'AI', tabPower: 'Power user', tabNew: "What's New",
-    featuresAria: 'Feature categories',
     // 3 Pillars
     pillarsTitle: 'Three pillars, one promise',
     pillarsSub: "Conflicts resolved deterministically, performance that's actually native, and AI that only steps in when you ask.",
@@ -476,28 +322,6 @@ const i18n: Record<Locale, any> = {
     pillar3Stat: 'Claude · OpenAI · Ollama',
     pillar3StatLabel: 'your LLM, your key',
     pillar3Cta: 'AI fallback guide →',
-    // What's New tab (v2.9 → v2.13)
-    featLaunchpad: 'Today — cross-repo dashboard',
-    featLaunchpadDesc: 'A triaged action inbox across every repo in a workspace. Items sorted by urgency (To do / Waiting / Later), each row with one state-aware action — Merge, Review, Resolve or Reply. Pin, snooze, ⌘L from anywhere.',
-    featLlmFallback: 'LLM fallback for complex hunks',
-    featLlmFallbackDesc: 'Opt-in resolution via Claude / OpenAI / Ollama / MCP. Validated through the same parse-tree pipeline as deterministic patterns. Decision trace and reject button included.',
-    featForge: 'GitHub, GitLab & Bitbucket',
-    featForgeDesc: 'Native PR support across all three forges. Auto-detects your remote and picks the right provider. Accounts managed once in Settings — no re-authentication per repo.',
-    featBranchMgmt: 'Branch management: pin, archive, identity',
-    featBranchMgmtDesc: 'Pin your most-used branches to the top. Archive merged or inactive ones with a configurable threshold. Per-repo committer identity — different email for work and personal repos.',
-    featIdentities: 'Commit templates & Conventional Commits',
-    featIdentitiesDesc: 'Configure per-repo commit templates loaded automatically on open. Pick a Conventional Commits prefix (feat, fix, docs…) from an inline chip picker.',
-    featAISuggest: 'AI inline code suggestions',
-    featAISuggestDesc: 'Select any hunk in the PR Review panel, request a targeted rewrite, and accept the AI suggestion in one click. Prompt presets add instant context across every AI feature.',
-    featScratch: 'Scratch worktree + extended Conflict Predictor',
-    featScratchDesc: 'Resolve conflicts in a throwaway isolated worktree, brought back in one click (auto-cleanup). The Conflict Predictor now covers rebase and cherry-pick — side-effect-free, with a risk badge and a hunk-by-hunk view.',
-    featOAuth: 'GitHub OAuth, Azure DevOps & cross-fork PRs',
-    featOAuthDesc: 'Sign in to GitHub and Azure DevOps with the OAuth device flow — tokens in your OS keychain, no gh CLI. Azure DevOps is a first-class forge, and cross-fork PRs target the upstream parent.',
-    // Highlight banner
-    newReleaseBadge: 'New in v3.4',
-    newReleaseTitle: 'Today dashboard, VS Code on the Marketplace, validation engine',
-    newReleaseSub: 'The Today panel aggregates PRs, issues, and WIP across every repo into one focused view — ⌘L from anywhere. GitWand debuts on the VS Code Marketplace with the full conflict engine bundled in. CLI and VS Code now surface validation warnings: residual markers, syntax errors, and parse-tree results.',
-    newReleaseCta: 'See what\'s new',
     faqTitle: 'Frequently asked questions',
     faqItems: [
       { q: 'Is GitWand really free?', a: 'Yes, GitWand is fully open source under the MIT license. You can use, modify, and redistribute it freely.' },
@@ -507,8 +331,6 @@ const i18n: Record<Locale, any> = {
       { q: 'What sets GitWand apart from other Git clients?', a: 'GitWand stands out with its built-in resolution engine, native Tauri architecture (no Electron), three consistent interfaces (desktop, CLI, VS Code), and an MCP server for AI agent integration.' },
       { q: 'How do I install the MCP server?', a: 'With Claude Code, a single command is enough: claude mcp add gitwand -- npx -y @gitwand/mcp. For Claude Desktop, Cursor, or Windsurf, add the mcpServers block to your client config (see the docs). The server is also listed on the official MCP Registry, so clients that browse the registry discover it automatically.' },
     ],
-    compareTitle: 'How does GitWand compare?',
-    compareSub: 'Feature-by-feature breakdown against the most popular Git clients on the market.',
   },
   es: {
     conflictCta: "Ver cómo funciona el motor →",
@@ -543,7 +365,6 @@ const i18n: Record<Locale, any> = {
     heroToastSub: "1 por revisar · 0 alucinaciones",
     contribYouName: "+ ¿tú?",
     contribYouRole: "Abre tu primera PR",
-    badge: 'v3.4.0 · Open Source · MIT',
     heroH1a: "Los conflictos de merge terminan aquí.",
     heroH1b: "Recupera tu flow.",
     heroSub: "¿Esa sensación de vacío cuando 12 archivos se ponen en rojo? Se acabó. GitWand clasifica cada hunk con 8 patrones deterministas — sin adivinar, sin alucinar — resuelve solo el 95 % trivial y te entrega únicamente lo que merece tu cerebro. Nativo, gratis, MIT.",
@@ -559,48 +380,6 @@ const i18n: Record<Locale, any> = {
     statPatterns: 'patrones de resolución',
     statResolved: 'conflictos resueltos automáticamente',
     statInterfaces: 'interfaces (Escritorio, CLI, VS Code)',
-    featTitle: 'Todo lo que necesitas para Git',
-    featSub: 'Un flujo de trabajo completo, sin compromisos de rendimiento.',
-    featPerf: 'Rendimiento nativo',
-    featPerfDesc: 'Construido con Tauri 2 y Vue 3. Arranque en menos de un segundo. Cero sobrecarga de Electron.',
-    featResolve: 'Resolución inteligente',
-    featResolveDesc: '8 patrones deterministas con registro de patrones (v1.4) y puntuación de confianza. Más del 95 % de los conflictos triviales resueltos sin intervención.',
-    featDiff: 'Diff visual',
-    featDiffDesc: 'Visor de diff unificado con resaltado de sintaxis, staging por hunk y vista previa de merge.',
-    featHistory: 'Historial y grafo',
-    featHistoryDesc: 'Historial completo, grafo DAG interactivo, blame de archivos y búsqueda en lenguaje natural en los commits.',
-    featPR: 'Pull Requests integradas',
-    featPRDesc: 'Revisa los PR de GitHub directamente en la app. Comentarios, revisiones, estado de CI y vista previa de conflictos.',
-    featUI: '3 interfaces',
-    featUIDesc: 'App de escritorio (macOS/Linux/Windows), CLI gitwand resolve para CI/CD y extensión de VS Code.',
-    featAIPR: 'Revisión de código y PR con IA',
-    featAIPRDesc: 'Título y descripción de PR generados automáticamente, crítica IA por hunk en el panel Review y sugerencias de nombre de rama a partir del diff.',
-    featAIMerge: 'Insight de merge con IA',
-    featAIMergeDesc: 'Explicación de conflictos en lenguaje natural, resumen de riesgo por IA antes de rebase/merge y squash semántico en rebase interactivo.',
-    featAIFlow: 'Commits e historial con IA',
-    featAIFlowDesc: 'Mensajes de commit y stash generados, Absorb ordenado semánticamente, contexto de blame y release notes a partir de git log.',
-    featImgDiff: 'Diff visual de imágenes',
-    featImgDiffDesc: 'Compara cambios en PNG, JPG, WebP, GIF y SVG lado a lado, superpuestos, parpadeando o con un slider. Se acabó el «Binary file changed».',
-    featFolderTree: 'Diff en árbol de carpetas',
-    featFolderTreeDesc: 'Alterna plano ↔ árbol en la lista de archivos del commit, con totales por carpeta, filtrado al clic y barra lateral redimensionable persistida.',
-    featWorktrees: 'Git Worktrees',
-    featWorktreesDesc: 'Trabaja en varias ramas simultáneamente sin hacer stash. Cada worktree se abre como pestaña. Créalo desde la lista de ramas con un clic.',
-    featSubmodules: 'Gestión de submódulos',
-    featSubmodulesDesc: 'Lista, inicializa y actualiza submódulos Git con insignias de estado. Añade submódulos y ábrelos como pestañas desde el panel.',
-    featSplitCommit: 'Dividir un commit por hunks',
-    featSplitCommitDesc: 'Divide un commit en dos seleccionando archivos y líneas. Bloquea commits de merge, conserva tu selección al contraer/expandir y soporta archivos añadidos, eliminados o renombrados.',
-    featCommitCtx: 'Menú contextual de commit',
-    featCommitCtxDesc: '12 acciones con clic derecho: checkout, reset, revert, nueva rama, tag, cherry-pick, ver en forge y copiar SHA.',
-    featTags: 'Gestión de tags',
-    featTagsDesc: 'Lista, crea, envía y elimina tags locales y remotos. Sugerencia IA del próximo tag semántico.',
-    featTrailers: 'Trailers & Conventional Commits',
-    featTrailersDesc: 'Añade Signed-off-by y Reviewed-by con un clic. Selector de prefijo de commit (feat, fix, docs…).',
-    featFileHistory: 'Historial de archivo avanzado',
-    featFileHistoryDesc: 'Búsqueda pickaxe (-S/-G), blame por rango de líneas y selector de algoritmo diff.',
-    featForkWorkflow: 'Workflow fork & triangular',
-    featForkWorkflowDesc: 'Badge "↑N fork" en el botón de sync para workflows donde push remote ≠ upstream.',
-    featMcp: 'Servidor MCP',
-    featMcpDesc: 'Expón GitWand a Claude, Cursor, Windsurf y cualquier cliente MCP. Un comando: npx -y @gitwand/mcp. Publicado con attestations de procedencia.',
     conflictTitle: "Míralo resolver un conflicto en un segundo",
     conflictSub: 'GitWand analiza la semántica del código, no solo las líneas. Elige la resolución correcta por ti.',
     conflictBefore: 'Antes — conflicto en bruto',
@@ -622,20 +401,6 @@ const i18n: Record<Locale, any> = {
     llmTitle: "Tus agentes IA, con un motor Git de verdad a mano",
     llmSub: "Los agentes son geniales con el código y pésimos con los merges. El servidor MCP de GitWand resuelve el 95 % trivial de forma determinista y le pasa a tu agente los hunks difíciles con todo el contexto — ours, theirs, base y la traza.",
     llmBadge: 'Servidor MCP · Registro oficial · stdio · Sin clave API',
-    llmStep1: 'Análisis',
-    llmStep1Desc: 'El agente llama a gitwand_preview_merge para evaluar el número de conflictos, su complejidad y el porcentaje que GitWand puede resolver por sí solo.',
-    llmStep2: 'Auto-resolución',
-    llmStep2Desc: 'GitWand resuelve al instante los patrones triviales (whitespace, one-side-change, same-change…) y devuelve los hunks ambiguos con su traza de clasificación.',
-    llmStep3: 'Resolución con IA',
-    llmStep3Desc: 'Para cada conflicto complejo, el agente dispone del contexto completo: contenido ours/theirs/base, traza de clasificación y puntuaciones de confianza.',
-    llmCompat: 'Compatible con',
-    llmDocs: 'Ver la documentación de MCP →',
-    patternsTitle: '8 patrones auto-aplicados. Deterministas. Auditables.',
-    patternsSub: 'Cada hunk pasa por el clasificador. Cada patrón tiene su perfil de confianza y resolución automática.',
-    benchTitle: 'Números, no adjetivos.',
-    benchSub: 'Rendimiento medido en chip M con repositorios típicos.',
-    tabCore: 'Git básico', tabAI: 'IA', tabPower: 'Power user', tabNew: 'Novedades',
-    featuresAria: 'Categorías de funcionalidades',
     // 3 Pillars
     pillarsTitle: 'Tres pilares, una promesa',
     pillarsSub: "Conflictos resueltos de forma determinista, rendimiento realmente nativo, e IA que solo interviene cuando se lo pides.",
@@ -654,28 +419,6 @@ const i18n: Record<Locale, any> = {
     pillar3Stat: 'Claude · OpenAI · Ollama',
     pillar3StatLabel: 'tu LLM, tu clave',
     pillar3Cta: 'Guía del fallback IA →',
-    // Pestaña Novedades (v2.9 → v2.13)
-    featLaunchpad: 'Today — dashboard multi-repo',
-    featLaunchpadDesc: 'Bandeja de acciones priorizada en todos los repos de un workspace. Elementos ordenados por urgencia (Por hacer / En espera / Más tarde), cada fila con una acción contextual — Merge, Review, Resolve o Reply. Pin, snooze, ⌘L desde cualquier lugar.',
-    featLlmFallback: 'Fallback LLM para hunks complejos',
-    featLlmFallbackDesc: 'Resolución opt-in vía Claude / OpenAI / Ollama / MCP. Validada por el mismo pipeline parse-tree que los patrones deterministas. Traza de decisión y botón reject incluidos.',
-    featForge: 'GitHub, GitLab y Bitbucket',
-    featForgeDesc: 'Soporte PR nativo en los tres forges. Detección automática del remote y elección del proveedor correcto. Cuentas gestionadas una sola vez en Ajustes — sin reautenticación por repo.',
-    featBranchMgmt: 'Ramas: ancladas, archivadas, identidad',
-    featBranchMgmtDesc: 'Fija tus ramas más usadas en la parte superior. Archiva las mergeadas o inactivas con un umbral configurable. Identidad por repo — email distinto para personal y trabajo.',
-    featIdentities: 'Templates de commit & Conventional Commits',
-    featIdentitiesDesc: 'Configura templates de commit por repo, cargados automáticamente al abrir. Elige un prefijo de Conventional Commits (feat, fix, docs…) desde un selector integrado.',
-    featAISuggest: 'Sugerencias de código IA inline',
-    featAISuggestDesc: 'Selecciona cualquier hunk en el panel Review, pide una reescritura enfocada y acepta la sugerencia IA con un clic. Los presets de prompts añaden contexto instantáneo.',
-    featScratch: 'Worktree temporal + Conflict Predictor ampliado',
-    featScratchDesc: 'Resuelve conflictos en un worktree aislado y desechable, traído de vuelta en un clic (limpieza automática). El Conflict Predictor ahora cubre rebase y cherry-pick — sin efectos secundarios, con badge de riesgo y vista hunk por hunk.',
-    featOAuth: 'GitHub OAuth, Azure DevOps y PRs cross-fork',
-    featOAuthDesc: 'Inicia sesión en GitHub y Azure DevOps con OAuth device flow — tokens en el llavero del SO, sin CLI gh. Azure DevOps es una forge de primera clase y las PRs cross-fork apuntan al repo upstream.',
-    // Encabezado Novedades
-    newReleaseBadge: 'Nuevo en v3.4',
-    newReleaseTitle: 'Dashboard Today, VS Code en el Marketplace, motor de validación',
-    newReleaseSub: 'El panel Today agrega PRs, issues y WIP de todos tus repos en una vista enfocada — ⌘L desde cualquier lugar. GitWand debuta en el VS Code Marketplace con el motor de conflictos completo integrado. CLI y VS Code ahora muestran advertencias de validación: marcadores residuales, errores de sintaxis y resultados del árbol de análisis.',
-    newReleaseCta: 'Ver las novedades',
     faqTitle: 'Preguntas frecuentes',
     faqItems: [
       { q: '¿GitWand es realmente gratis?', a: 'Sí, GitWand es totalmente open source bajo licencia MIT. Puedes usarlo, modificarlo y redistribuirlo libremente.' },
@@ -685,8 +428,6 @@ const i18n: Record<Locale, any> = {
       { q: '¿Qué lo diferencia de otros clientes Git?', a: 'GitWand destaca por su motor de resolución integrado, su arquitectura nativa Tauri (sin Electron), sus 3 interfaces coherentes (escritorio, CLI, VS Code) y su servidor MCP para la integración con agentes IA.' },
       { q: '¿Cómo se instala el servidor MCP?', a: 'Con Claude Code basta un solo comando: claude mcp add gitwand -- npx -y @gitwand/mcp. Para Claude Desktop, Cursor o Windsurf, añade el bloque mcpServers a la configuración de tu cliente (ver la documentación). El servidor también está listado en el registro oficial MCP, así que los clientes que exploran el registro lo encuentran automáticamente.' },
     ],
-    compareTitle: 'GitWand frente a la competencia',
-    compareSub: 'Comparativa función a función con los clientes Git más populares del mercado.',
   },
   'pt-BR': {
     conflictCta: "Ver como o motor funciona →",
@@ -721,7 +462,6 @@ const i18n: Record<Locale, any> = {
     heroToastSub: "1 para revisar · 0 alucinações",
     contribYouName: "+ você?",
     contribYouRole: "Abra sua primeira PR",
-    badge: 'v3.4.0 · Open Source · MIT',
     heroH1a: "Conflitos de merge terminam aqui.",
     heroH1b: "Recupere seu flow.",
     heroSub: "Aquele frio na barriga quando 12 arquivos ficam vermelhos? Acabou. O GitWand classifica cada hunk com 8 padrões deterministas — sem chutar, sem alucinar — resolve os 95 % triviais sozinho e devolve só o que merece seu cérebro. Nativo, gratuito, MIT.",
@@ -737,48 +477,6 @@ const i18n: Record<Locale, any> = {
     statPatterns: 'padrões de resolução',
     statResolved: 'conflitos resolvidos automaticamente',
     statInterfaces: 'interfaces (Desktop, CLI, VS Code)',
-    featTitle: 'Tudo que você precisa para Git',
-    featSub: 'Um fluxo completo, sem abrir mão do desempenho.',
-    featPerf: 'Desempenho nativo',
-    featPerfDesc: 'Construído com Tauri 2 e Vue 3. Inicialização em menos de um segundo. Zero overhead do Electron.',
-    featResolve: 'Resolução inteligente',
-    featResolveDesc: '8 padrões deterministas com pattern registry (v1.4) e pontuação de confiança. 95 %+ dos conflitos triviais resolvidos sem intervenção.',
-    featDiff: 'Diff visual',
-    featDiffDesc: 'Visualizador de diff unificado com syntax highlighting, staging por hunk e preview de merge.',
-    featHistory: 'Histórico e grafo',
-    featHistoryDesc: 'Histórico completo, grafo DAG interativo, blame de arquivo e busca em linguagem natural nos commits.',
-    featPR: 'Pull Requests integradas',
-    featPRDesc: 'Revise PRs do GitHub direto no app. Comentários, reviews, status de CI e preview de conflitos.',
-    featUI: '3 interfaces',
-    featUIDesc: 'App desktop (macOS/Linux/Windows), CLI gitwand resolve para CI/CD e extensão VS Code.',
-    featAIPR: 'Code review e PR com IA',
-    featAIPRDesc: 'Título e descrição de PR gerados automaticamente, crítica IA por hunk no painel Review e sugestão de nome de branch a partir do diff.',
-    featAIMerge: 'Insight de merge com IA',
-    featAIMergeDesc: 'Explicação de conflito em linguagem natural, resumo de risco por IA antes de rebase/merge e squash semântico no rebase interativo.',
-    featAIFlow: 'Commits e histórico com IA',
-    featAIFlowDesc: 'Mensagens de commit e stash geradas, Absorb ordenado semanticamente, contexto de blame e release notes a partir do git log.',
-    featImgDiff: 'Diff visual de imagens',
-    featImgDiffDesc: 'Compare mudanças em PNG, JPG, WebP, GIF e SVG lado a lado, sobrepostas, piscando ou com um slider. Chega de «Binary file changed».',
-    featFolderTree: 'Diff em árvore de pastas',
-    featFolderTreeDesc: 'Alterne plano ↔ árvore na lista de arquivos do commit, com totais por pasta, filtro ao clicar e sidebar redimensionável persistida.',
-    featWorktrees: 'Git Worktrees',
-    featWorktreesDesc: 'Trabalhe em várias branches simultaneamente sem fazer stash. Cada worktree abre como aba. Crie a partir da lista de branches com um clique.',
-    featSubmodules: 'Gerenciamento de submódulos',
-    featSubmodulesDesc: 'Liste, inicialize e atualize submódulos Git com badges de status. Adicione submódulos e abra-os como abas diretamente do painel.',
-    featSplitCommit: 'Dividir commit por hunks',
-    featSplitCommitDesc: 'Divida um commit em dois selecionando arquivos e linhas. Bloqueia merge commits, preserva sua seleção ao colapsar/expandir e suporta arquivos adicionados, excluídos ou renomeados.',
-    featCommitCtx: 'Menu contextual de commit',
-    featCommitCtxDesc: '12 ações com clique direito: checkout, reset, revert, nova branch, tag, cherry-pick, ver no forge e copiar SHA.',
-    featTags: 'Gerenciador de tags',
-    featTagsDesc: 'Liste, crie, envie e exclua tags locais e remotas. Sugestão de IA para o próximo tag semântico.',
-    featTrailers: 'Trailers & Conventional Commits',
-    featTrailersDesc: 'Adicione Signed-off-by e Reviewed-by com um clique. Seletor de prefixo (feat, fix, docs…).',
-    featFileHistory: 'Histórico de arquivo avançado',
-    featFileHistoryDesc: 'Busca pickaxe (-S/-G), blame por intervalo de linhas e seletor de algoritmo diff.',
-    featForkWorkflow: 'Workflow fork & triangular',
-    featForkWorkflowDesc: 'Badge "↑N fork" no botão de sync para workflows onde push remote ≠ upstream.',
-    featMcp: 'Servidor MCP',
-    featMcpDesc: 'Exponha o GitWand ao Claude, Cursor, Windsurf e qualquer cliente MCP. Um comando: npx -y @gitwand/mcp. Publicado com atestados de proveniência.',
     conflictTitle: "Veja-o resolver um conflito em um segundo",
     conflictSub: 'GitWand analisa a semântica do código, não apenas as linhas. Ele escolhe a resolução certa por você.',
     conflictBefore: 'Antes — conflito bruto',
@@ -800,20 +498,6 @@ const i18n: Record<Locale, any> = {
     llmTitle: "Seus agentes de IA, com um motor Git de verdade à mão",
     llmSub: "Agentes são ótimos com código e péssimos com merges. O servidor MCP do GitWand resolve os 95 % triviais de forma determinista e entrega ao seu agente os hunks difíceis com todo o contexto — ours, theirs, base e o trace.",
     llmBadge: 'Servidor MCP · Registro oficial · stdio · Sem chave de API',
-    llmStep1: 'Análise',
-    llmStep1Desc: 'O agente chama gitwand_preview_merge para avaliar o número de conflitos, a complexidade e o percentual que o GitWand consegue resolver sozinho.',
-    llmStep2: 'Auto-resolução',
-    llmStep2Desc: 'O GitWand resolve instantaneamente os padrões triviais (whitespace, one-side-change, same-change…) e devolve os hunks ambíguos com o trace de classificação.',
-    llmStep3: 'Resolução com IA',
-    llmStep3Desc: 'Para cada conflito complexo, o agente tem o contexto completo: conteúdo ours/theirs/base, trace de classificação e scores de confiança.',
-    llmCompat: 'Compatível com',
-    llmDocs: 'Ver a documentação do MCP →',
-    patternsTitle: '8 padrões auto-aplicados. Deterministas. Auditáveis.',
-    patternsSub: 'Cada hunk passa pelo classificador. Cada padrão tem seu perfil de confiança e resolução automática.',
-    benchTitle: 'Números, não adjetivos.',
-    benchSub: 'Performance medida em chip M com repositórios típicos.',
-    tabCore: 'Git básico', tabAI: 'IA', tabPower: 'Power user', tabNew: 'Novidades',
-    featuresAria: 'Categorias de funcionalidades',
     // 3 Pillars
     pillarsTitle: 'Três pilares, uma promessa',
     pillarsSub: "Conflitos resolvidos de forma determinista, desempenho realmente nativo e IA que só entra quando você pede.",
@@ -832,28 +516,6 @@ const i18n: Record<Locale, any> = {
     pillar3Stat: 'Claude · OpenAI · Ollama',
     pillar3StatLabel: 'seu LLM, sua chave',
     pillar3Cta: 'Guia do fallback IA →',
-    // Aba Novidades (v2.9 → v2.13)
-    featLaunchpad: 'Today — dashboard cross-repo',
-    featLaunchpadDesc: 'Caixa de entrada de ações priorizada em todos os repos de um workspace. Itens ordenados por urgência (A fazer / Aguardando / Depois), cada linha com uma ação contextual — Merge, Review, Resolve ou Reply. Pin, snooze, ⌘L de qualquer lugar.',
-    featLlmFallback: 'Fallback LLM para hunks complexos',
-    featLlmFallbackDesc: 'Resolução opt-in via Claude / OpenAI / Ollama / MCP. Validada pelo mesmo pipeline parse-tree dos padrões deterministas. Trace de decisão e botão reject inclusos.',
-    featForge: 'GitHub, GitLab e Bitbucket',
-    featForgeDesc: 'Suporte a PR nativo nos três forges. Detecta automaticamente o remote e escolhe o provedor certo. Contas gerenciadas uma única vez em Configurações — sem reautenticação por repo.',
-    featBranchMgmt: 'Branches: fixadas, arquivadas, identidade',
-    featBranchMgmtDesc: 'Fixe suas branches mais usadas no topo. Arquive as mergeadas ou inativas com um limite configurável. Identidade por repo — e-mail diferente para pessoal e trabalho.',
-    featIdentities: 'Templates de commit & Conventional Commits',
-    featIdentitiesDesc: 'Configure templates de commit por repo, carregados automaticamente ao abrir. Escolha um prefixo de Conventional Commits (feat, fix, docs…) a partir de um seletor integrado.',
-    featAISuggest: 'Sugestões de código IA inline',
-    featAISuggestDesc: 'Selecione qualquer hunk no painel Review, peça uma reescrita focada e aceite a sugestão de IA com um clique. Presets de prompts adicionam contexto instantâneo.',
-    featScratch: 'Worktree temporário + Conflict Predictor ampliado',
-    featScratchDesc: 'Resolva conflitos em um worktree isolado e descartável, trazido de volta em um clique (limpeza automática). O Conflict Predictor agora cobre rebase e cherry-pick — sem efeitos colaterais, com badge de risco e visão hunk a hunk.',
-    featOAuth: 'GitHub OAuth, Azure DevOps e PRs cross-fork',
-    featOAuthDesc: 'Entre no GitHub e no Azure DevOps com OAuth device flow — tokens no keychain do SO, sem CLI gh. Azure DevOps é uma forge de primeira classe, e as PRs cross-fork miram o repositório upstream.',
-    // Banner de Novidades
-    newReleaseBadge: 'Novo na v3.4',
-    newReleaseTitle: 'Dashboard Today, VS Code no Marketplace, motor de validação',
-    newReleaseSub: 'O painel Today agrega PRs, issues e WIP de todos os seus repos em uma visão focada — ⌘L de qualquer lugar. GitWand estreia no VS Code Marketplace com o motor de conflitos completo embutido. CLI e VS Code agora exibem avisos de validação: marcadores residuais, erros de sintaxe e resultados da árvore de análise.',
-    newReleaseCta: 'Ver as novidades',
     faqTitle: 'Perguntas frequentes',
     faqItems: [
       { q: 'O GitWand é realmente gratuito?', a: 'Sim, o GitWand é totalmente open source sob licença MIT. Você pode usar, modificar e redistribuir livremente.' },
@@ -863,8 +525,6 @@ const i18n: Record<Locale, any> = {
       { q: 'Qual é a diferença para outros clientes Git?', a: 'O GitWand se destaca pelo motor de resolução integrado, arquitetura nativa Tauri (sem Electron), 3 interfaces coerentes (desktop, CLI, VS Code) e servidor MCP para integração com agentes de IA.' },
       { q: 'Como instalar o servidor MCP?', a: 'Com Claude Code basta um único comando: claude mcp add gitwand -- npx -y @gitwand/mcp. Para Claude Desktop, Cursor ou Windsurf, adicione o bloco mcpServers à configuração do seu cliente (veja a documentação). O servidor também está listado no registro oficial MCP, então clientes que navegam o registro o encontram automaticamente.' },
     ],
-    compareTitle: 'GitWand comparado à concorrência',
-    compareSub: 'Comparação recurso a recurso com os clientes Git mais populares do mercado.',
   },
   'zh-CN': {
     conflictCta: "了解引擎如何工作 →",
@@ -899,7 +559,6 @@ const i18n: Record<Locale, any> = {
     heroToastSub: "1 个待复查 · 0 幻觉",
     contribYouName: "+ 你？",
     contribYouRole: "提交你的第一个 PR",
-    badge: 'v3.4.0 · 开源 · MIT',
     heroH1a: "合并冲突，到此为止。",
     heroH1b: "找回你的心流。",
     heroSub: "12 个文件同时变红的那种心凉？不会再有。GitWand 用 8 种确定性模式分类每个 hunk——不猜测、无幻觉——自动解决 95% 的简单冲突，只把真正值得你思考的部分交还给你。原生、免费、MIT。",
@@ -915,48 +574,6 @@ const i18n: Record<Locale, any> = {
     statPatterns: '种解决模式',
     statResolved: '冲突自动解决',
     statInterfaces: '种界面(桌面端、CLI、VS Code)',
-    featTitle: 'Git 所需的一切',
-    featSub: '完整的工作流,无需牺牲性能。',
-    featPerf: '原生性能',
-    featPerfDesc: '基于 Tauri 2 与 Vue 3 构建。亚秒级启动。零 Electron 开销。',
-    featResolve: '智能解决',
-    featResolveDesc: '8 种确定性模式,配合模式注册表(v1.4)和置信度评分。95% 以上的简单冲突无需干预即可解决。',
-    featDiff: '可视化 Diff',
-    featDiffDesc: '统一的 diff 查看器,支持语法高亮、按 hunk 暂存和合并预览。',
-    featHistory: '历史与图谱',
-    featHistoryDesc: '完整历史、交互式 DAG 图谱、文件 blame,以及对提交的自然语言搜索。',
-    featPR: '集成的 Pull Requests',
-    featPRDesc: '直接在应用中审阅 GitHub PR。评论、评审、CI 状态与冲突预览。',
-    featUI: '3 种界面',
-    featUIDesc: '桌面应用(macOS/Linux/Windows)、用于 CI/CD 的 gitwand resolve CLI,以及 VS Code 扩展。',
-    featAIPR: 'AI 代码评审与 PR',
-    featAIPRDesc: '自动生成 PR 标题和描述,在 Review 面板中按 hunk 进行 AI 评审,并基于 diff 提供分支命名建议。',
-    featAIMerge: 'AI 合并洞察',
-    featAIMergeDesc: '用自然语言解释冲突,在 rebase/merge 前给出 AI 风险摘要,并在交互式 rebase 中进行语义 squash。',
-    featAIFlow: 'AI 提交与历史',
-    featAIFlowDesc: '生成 commit 与 stash 信息、按语义排序的 Absorb、blame 上下文,以及基于 git log 的发布说明。',
-    featImgDiff: '图像 diff 查看器',
-    featImgDiffDesc: '以并排、叠加、闪烁或滑动方式比较 PNG、JPG、WebP、GIF、SVG 的变化。告别「Binary file changed」。',
-    featFolderTree: '文件夹树状 diff',
-    featFolderTreeDesc: '提交文件列表中平铺 ↔ 树状切换,按文件夹聚合统计、点击过滤,侧边栏宽度可调且持久保存。',
-    featWorktrees: 'Git 工作树',
-    featWorktreesDesc: '无需 stash 即可同时处理多个分支。每个工作树可直接作为标签页打开。在分支列表中一键创建。',
-    featSubmodules: '子模块管理',
-    featSubmodulesDesc: '列出、初始化并更新 Git 子模块,带状态标记。从面板中添加子模块并直接以标签页形式打开。',
-    featSplitCommit: '按 hunk 拆分提交',
-    featSplitCommitDesc: '通过选择文件和行将一次提交拆分为两次。阻止合并提交,在折叠/展开时保留选择,支持新增、删除、重命名文件。',
-    featCommitCtx: '提交右键菜单',
-    featCommitCtxDesc: '右键 12 个操作:checkout、reset、revert、新建分支、tag、cherry-pick、在 forge 查看及复制 SHA。',
-    featTags: 'Tag 管理器',
-    featTagsDesc: '列出、创建、推送和删除本地及远程 tag。AI 自动建议下一个语义版本号。',
-    featTrailers: 'Trailers & 约定式提交',
-    featTrailersDesc: '一键添加 Signed-off-by 和 Reviewed-by。内置提交前缀选择器(feat、fix、docs…)。',
-    featFileHistory: '高级文件历史',
-    featFileHistoryDesc: '文件历史 pickaxe 搜索(-S/-G)、按行范围 blame,以及 diff 算法选择器。',
-    featForkWorkflow: 'Fork & 三角工作流',
-    featForkWorkflowDesc: '同步按钮上的"↑N fork"标记,适用于 push remote ≠ upstream 的 fork 场景。',
-    featMcp: 'MCP 服务器',
-    featMcpDesc: '将 GitWand 暴露给 Claude、Cursor、Windsurf 等 MCP 客户端。一条命令:npx -y @gitwand/mcp。附带 provenance 签名发布。',
     conflictTitle: "看它一秒解决一个冲突",
     conflictSub: 'GitWand 分析代码语义,而不仅仅是文本行。它为你挑选正确的解决方案。',
     conflictBefore: '之前 — 原始冲突',
@@ -978,20 +595,6 @@ const i18n: Record<Locale, any> = {
     llmTitle: "让你的 AI 代理,随时用上真正的 Git 引擎",
     llmSub: "代理擅长写代码,却搞不定合并。GitWand 的 MCP 服务器以确定性方式解决 95% 的简单冲突,并把困难的 hunk 连同完整上下文——ours、theirs、base 和追踪——交给你的代理。",
     llmBadge: 'MCP 服务器 · 官方注册表 · stdio · 无需 API 密钥',
-    llmStep1: '分析',
-    llmStep1Desc: '代理调用 gitwand_preview_merge 来评估冲突数量、复杂度,以及 GitWand 能独立解决的比例。',
-    llmStep2: '自动解决',
-    llmStep2Desc: 'GitWand 立即解决简单模式(whitespace、one-side-change、same-change…),并返回带有分类追踪的模糊 hunk。',
-    llmStep3: 'AI 解决',
-    llmStep3Desc: '对于每个复杂冲突,代理都能获得完整上下文:ours/theirs/base 内容、分类追踪以及置信度评分。',
-    llmCompat: '兼容',
-    llmDocs: '查看 MCP 文档 →',
-    patternsTitle: '8 种自动应用模式。确定性的。可审计的。',
-    patternsSub: '每个 hunk 都经过分类器处理。每种模式都有自己的置信度配置和自动解析器。',
-    benchTitle: '数字，而非形容词。',
-    benchSub: '在 M 系列芯片上使用典型仓库测量的性能。',
-    tabCore: 'Git 核心', tabAI: 'AI', tabPower: '高级玩法', tabNew: '最新特性',
-    featuresAria: '功能类别',
     // 3 Pillars
     pillarsTitle: '三大支柱,一个承诺',
     pillarsSub: "以确定性方式解决冲突、真正原生的性能，以及只有你需要时才介入的 AI。",
@@ -1010,28 +613,7 @@ const i18n: Record<Locale, any> = {
     pillar3Stat: 'Claude · OpenAI · Ollama',
     pillar3StatLabel: '你的 LLM,你的密钥',
     pillar3Cta: 'AI fallback 指南 →',
-    // 最新特性标签页 (v2.9 → v2.13)
-    featLaunchpad: 'Today — 跨仓库仪表盘',
-    featLaunchpadDesc: '跨 workspace 所有仓库的待办行动收件箱。按紧急程度分级（待处理 / 等待中 / 稍后），每行配一个状态感知操作——Merge、Review、Resolve 或 Reply。固定、暂缓，任意位置按 ⌘L 唤起。',
-    featLlmFallback: '复杂 hunk 的 LLM fallback',
-    featLlmFallbackDesc: '通过 Claude / OpenAI / Ollama / MCP 进行可选解析。与确定性模式走同一条 parse-tree 校验管线。附带决策追踪与拒绝按钮。',
-    featForge: 'GitHub、GitLab 与 Bitbucket',
-    featForgeDesc: '三大 forge 的原生 PR 支持，自动检测远端并选择正确的提供商。账号在设置中统一管理，无需按仓库重复验证。',
-    featBranchMgmt: '分支管理：置顶、归档、身份',
-    featBranchMgmtDesc: '将最常用的分支置顶显示。按可配置阈值归档已合并或不活跃的分支。按仓库设置提交者身份 — 个人与工作仓库使用不同邮箱。',
-    featIdentities: '提交模板与约定式提交',
-    featIdentitiesDesc: '为每个仓库配置提交模板，打开时自动加载。通过内置选择器选择约定式提交前缀（feat、fix、docs…）。',
-    featAISuggest: '内联 AI 代码建议',
-    featAISuggestDesc: '在 Review 面板中选择任意 hunk，请求针对性重写，一键接受 AI 建议。提示词预设为所有 AI 功能即时注入上下文。',
-    featScratch: '临时工作树 + 增强的 Conflict Predictor',
-    featScratchDesc: '在可丢弃的隔离工作树中解决冲突，一键合并回来（自动清理）。Conflict Predictor 现已覆盖变基与拣选 — 无副作用，带风险标记和逐块视图。',
-    featOAuth: 'GitHub OAuth、Azure DevOps 与跨 fork PR',
-    featOAuthDesc: '通过 OAuth 设备流登录 GitHub 和 Azure DevOps — 令牌保存在系统钥匙串中，无需 gh CLI。Azure DevOps 成为一等 forge，跨 fork PR 直接面向上游仓库。',
     // 最新特性横幅
-    newReleaseBadge: 'v3.4 新特性',
-    newReleaseTitle: 'Today 仪表盘、VS Code 上架应用市场、校验引擎',
-    newReleaseSub: 'Today 面板将所有仓库的 PR、issues 和 WIP 汇聚为一个专注视图 — ⌘L 随时唤起。GitWand 正式登陆 VS Code 应用市场，内置完整冲突引擎。CLI 和 VS Code 现在会提示校验警告：残留标记、语法错误与解析树结果。',
-    newReleaseCta: '查看新特性',
     faqTitle: '常见问题',
     faqItems: [
       { q: 'GitWand 真的免费吗?', a: '是的,GitWand 在 MIT 许可下完全开源。你可以自由使用、修改和分发。' },
@@ -1041,8 +623,6 @@ const i18n: Record<Locale, any> = {
       { q: '与其他 Git 客户端有什么区别?', a: 'GitWand 的亮点在于内置的解决引擎、原生的 Tauri 架构(非 Electron)、3 种一致的界面(桌面端、CLI、VS Code),以及用于 AI 代理集成的 MCP 服务器。' },
       { q: '如何安装 MCP 服务器?', a: '使用 Claude Code 一条命令即可:claude mcp add gitwand -- npx -y @gitwand/mcp。对于 Claude Desktop、Cursor 或 Windsurf,将 mcpServers 块添加到你的客户端配置(见文档)。该服务器也已列入官方 MCP 注册表,浏览注册表的客户端会自动发现它。' },
     ],
-    compareTitle: 'GitWand 与同类对比',
-    compareSub: '与市场上最流行的 Git 客户端逐功能对比。',
   },
 }
 
@@ -2079,17 +1659,6 @@ function cellClass(v: CompareValue | undefined): string {
   display: flex;
   gap: 2px;
 }
-.win-tab {
-  font-size: 11px;
-  padding: 3px 10px;
-  border-radius: 4px;
-  color: #6c7086;
-  cursor: default;
-}
-.win-tab--active {
-  color: var(--gw-text);
-  background: rgba(124,58,237,0.15);
-}
 .tl {
   width: 11px;
   height: 11px;
@@ -2222,20 +1791,6 @@ function cellClass(v: CompareValue | undefined): string {
   background: #12121f;
   border-bottom: 1px solid rgba(255,255,255,0.05);
 }
-.diff-tabs {
-  display: flex;
-}
-.diff-tab {
-  font-size: 11px;
-  padding: 8px 12px;
-  color: #6c7086;
-  border-bottom: 2px solid transparent;
-  cursor: default;
-}
-.diff-tab--active {
-  color: var(--gw-text);
-  border-bottom-color: var(--gw-purple);
-}
 .diff-actions {
   display: flex;
   gap: 4px;
@@ -2338,85 +1893,6 @@ function cellClass(v: CompareValue | undefined): string {
   text-align: center;
 }
 .stat-sep { display: none; }
-
-/* ───────────────────────────────────────────
-   FEATURES
-─────────────────────────────────────────── */
-.features {
-  padding: 80px 0;
-  background: var(--gw-bg);
-}
-.features-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 20px;
-}
-.feat-card {
-  background: var(--gw-bg-card);
-  border: 1px solid var(--gw-border);
-  border-radius: var(--gw-radius);
-  padding: 28px;
-  transition: border-color 0.2s, transform 0.15s;
-}
-.feat-card:hover {
-  border-color: var(--gw-purple);
-  transform: translateY(-2px);
-}
-.feat-icon {
-  width: 44px;
-  height: 44px;
-  border-radius: 10px;
-  background: rgba(124,58,237,0.1);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 16px;
-}
-.feat-icon--ai {
-  background: linear-gradient(135deg, rgba(124,58,237,0.12), rgba(16,185,129,0.14));
-}
-.feat-card--ai {
-  border-color: rgba(16,185,129,0.28);
-}
-.feat-card--ai:hover {
-  border-color: var(--gw-green);
-}
-.feat-card--new {
-  position: relative;
-  border-color: rgba(124,58,237,0.35);
-}
-.feat-badge {
-  position: absolute;
-  top: 12px;
-  right: 14px;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  color: var(--gw-purple-light);
-  background: rgba(124,58,237,0.12);
-  border-radius: 4px;
-  padding: 2px 6px;
-}
-.feat-card h3 {
-  font-size: 16px;
-  font-weight: 600;
-  margin: 0 0 10px;
-  color: var(--gw-text);
-}
-.feat-card p {
-  font-size: 13.5px;
-  color: var(--gw-text-muted);
-  line-height: 1.6;
-  margin: 0;
-}
-.feat-card code {
-  font-family: 'Courier New', monospace;
-  background: rgba(124,58,237,0.12);
-  color: var(--gw-purple-light);
-  padding: 1px 5px;
-  border-radius: 3px;
-  font-size: 12px;
-}
 
 /* ───────────────────────────────────────────
    CONFLICT RESOLUTION DEMO
@@ -3448,188 +2924,14 @@ function cellClass(v: CompareValue | undefined): string {
   50%       { opacity: 0; }
 }
 
-/* ───────────────────────────────────────────
-   10 PATTERNS GRID
-─────────────────────────────────────────── */
-.patterns-section {
-  padding: 96px 0;
-  background: var(--gw-bg-2);
-  border-top: 1px solid var(--gw-border-soft);
-}
-.patterns-section .section-title { margin-bottom: 12px; }
-.patterns-section .section-sub   { margin-bottom: 48px; }
 
-.patterns-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 16px;
-}
 
-.pat-card {
-  background: var(--gw-surface);
-  border: 1px solid var(--gw-border);
-  border-radius: var(--gw-radius);
-  padding: 18px 20px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  transition: border-color 0.2s, transform 0.15s;
-}
-.pat-card:hover {
-  border-color: var(--gw-purple);
-  transform: translateY(-2px);
-}
-.pat-card--dim {
-  opacity: 0.7;
-  background: var(--gw-bg);
-}
-.pat-card--dim:hover { opacity: 1; }
 
-.pat-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-.pat-name {
-  font-family: var(--vp-font-family-mono, monospace);
-  font-size: 11.5px;
-  color: var(--gw-purple-light);
-  background: rgba(139, 92, 246, 0.1);
-  border-radius: 4px;
-  padding: 2px 6px;
-  white-space: nowrap;
-}
-.pat-conf {
-  font-size: 9.5px;
-  font-weight: 700;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  border-radius: 3px;
-  padding: 2px 6px;
-  font-family: var(--vp-font-family-mono, monospace);
-  flex-shrink: 0;
-}
-.pat-conf--certain { background: rgba(16,185,129,0.15); color: #10b981; }
-.pat-conf--high    { background: rgba(59,130,246,0.15); color: #60a5fa; }
-.pat-conf--medium  { background: rgba(245,158,11,0.15); color: #f59e0b; }
-.pat-conf--low     { background: rgba(239,68,68,0.12);  color: #f87171; }
 
-.pat-desc {
-  font-size: 12.5px;
-  color: var(--gw-text-muted);
-  line-height: 1.6;
-  margin: 0;
-  flex: 1;
-}
-.pat-auto {
-  font-size: 11px;
-  font-weight: 600;
-  font-family: var(--vp-font-family-mono, monospace);
-}
-.pat-auto--yes { color: #3fb950; }
-.pat-auto--no  { color: rgba(255,255,255,0.3); }
 
-/* ───────────────────────────────────────────
-   TABBED FEATURES
-─────────────────────────────────────────── */
-.feat-tabs {
-  display: flex;
-  gap: 4px;
-  margin-bottom: 28px;
-  border-bottom: 1px solid var(--gw-border-soft);
-  padding-bottom: 0;
-  flex-wrap: wrap;
-}
-.feat-tab {
-  background: none;
-  border: none;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
-  padding: 10px 18px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--gw-text-muted);
-  cursor: pointer;
-  transition: color 0.15s, border-color 0.15s;
-  white-space: nowrap;
-  border-radius: 6px 6px 0 0;
-}
-.feat-tab:hover { color: var(--gw-text); }
-.feat-tab--active {
-  color: var(--gw-text);
-  border-bottom-color: var(--gw-purple);
-  background: rgba(139, 92, 246, 0.05);
-}
-.feat-tab--highlight {
-  color: var(--gw-purple-light);
-}
-.feat-tab--highlight.feat-tab--active {
-  border-bottom-color: var(--gw-purple-light);
-}
 
-/* ───────────────────────────────────────────
-   BENCHMARKS
-─────────────────────────────────────────── */
-.bench-section {
-  padding: 96px 0;
-  background: var(--gw-bg);
-  border-top: 1px solid var(--gw-border-soft);
-}
-.bench-section .section-title { margin-bottom: 12px; }
-.bench-section .section-sub   { margin-bottom: 48px; }
 
-.bench-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 16px;
-}
 
-.bench-card {
-  background: var(--gw-surface);
-  border: 1px solid var(--gw-border);
-  border-radius: var(--gw-radius);
-  padding: 28px 24px 24px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  transition: border-color 0.2s;
-}
-.bench-card:hover { border-color: var(--gw-purple); }
-
-.bench-card--purple {
-  border-color: rgba(139, 92, 246, 0.3);
-  background: rgba(139, 92, 246, 0.04);
-}
-.bench-card--green {
-  border-color: rgba(16, 185, 129, 0.3);
-  background: rgba(16, 185, 129, 0.04);
-}
-
-.bench-val {
-  font-size: 2.6rem;
-  font-weight: 800;
-  letter-spacing: -0.03em;
-  color: var(--gw-text);
-  line-height: 1;
-  display: flex;
-  align-items: baseline;
-  gap: 4px;
-}
-.bench-card--purple .bench-val { color: var(--gw-purple-light); }
-.bench-card--green  .bench-val { color: #10b981; }
-
-.bench-unit {
-  font-size: 0.85rem;
-  font-weight: 500;
-  color: var(--gw-text-muted);
-  letter-spacing: 0;
-}
-.bench-label {
-  font-size: 12px;
-  color: var(--gw-text-muted);
-  line-height: 1.5;
-}
 
 /* ───────────────────────────────────────────
    3 PILLARS (Wave 1)
@@ -3740,90 +3042,6 @@ function cellClass(v: CompareValue | undefined): string {
 /* ───────────────────────────────────────────
    "NEW IN v2.9" HIGHLIGHT BANNER (Wave 3)
 ─────────────────────────────────────────── */
-.hl-new-release {
-  padding: 56px 0 8px;
-  background: var(--gw-bg);
-}
-.hl-new-release__inner {
-  max-width: 1100px;
-  margin: 0 auto;
-  padding: 28px 36px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 28px;
-  flex-wrap: wrap;
-  background: linear-gradient(135deg, rgba(124, 58, 237, 0.18) 0%, rgba(16, 185, 129, 0.08) 60%, transparent 100%);
-  border: 1px solid rgba(124, 58, 237, 0.35);
-  border-radius: var(--gw-radius);
-  box-shadow: 0 8px 28px -16px rgba(124, 58, 237, 0.4);
-}
-.hl-new-release__copy {
-  flex: 1 1 460px;
-  min-width: 0;
-}
-.hl-new-release__badge {
-  display: inline-block;
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: rgba(124, 58, 237, 0.22);
-  color: #c4b5fd;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  margin-bottom: 10px;
-}
-.hl-new-release__title {
-  font-size: clamp(20px, 2.6vw, 26px);
-  font-weight: 700;
-  margin: 0 0 8px;
-  color: var(--gw-text);
-  letter-spacing: -0.01em;
-}
-.hl-new-release__sub {
-  font-size: 14px;
-  line-height: 1.55;
-  color: var(--gw-text-muted);
-  margin: 0;
-  max-width: 64ch;
-}
-.hl-new-release__cta {
-  flex-shrink: 0;
-}
-.hl-new-release__link {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 11px 20px;
-  background: var(--gw-purple);
-  color: #fff;
-  border-radius: 8px;
-  font-weight: 600;
-  font-size: 14px;
-  text-decoration: none;
-  transition: background 0.15s, transform 0.1s;
-}
-.hl-new-release__link:hover {
-  background: var(--gw-purple-light);
-  transform: translateY(-1px);
-}
-
-/* ───────────────────────────────────────────
-   FEATURE TAB FADE TRANSITION (Wave 2)
-─────────────────────────────────────────── */
-.hl-tab-fade-enter-active,
-.hl-tab-fade-leave-active {
-  transition: opacity 180ms ease-out, transform 180ms ease-out;
-}
-.hl-tab-fade-enter-from {
-  opacity: 0;
-  transform: translateY(6px);
-}
-.hl-tab-fade-leave-to {
-  opacity: 0;
-  transform: translateY(-6px);
-}
 
 /* ───────────────────────────────────────────
    RESPONSIVE
@@ -3834,36 +3052,25 @@ function cellClass(v: CompareValue | undefined): string {
     gap: 40px;
   }
   .hero-visual { order: -1; }
-  .features-grid { grid-template-columns: repeat(2, 1fr); }
   .stats-bar { flex-wrap: wrap; gap: 14px; }
   .stat { flex: 1 1 200px; padding: 20px 24px 18px; }
   .hero-toast { left: 8px; bottom: 10px; padding: 8px 12px 8px 10px; }
   .conflict-demo { flex-direction: column; }
   .conflict-arrow { flex-direction: row; }
   .llm-layout { grid-template-columns: 1fr; gap: 40px; }
-  .bench-grid { grid-template-columns: repeat(2, 1fr); }
-  .patterns-grid { grid-template-columns: repeat(2, 1fr); }
   .hl-pillars__grid { grid-template-columns: 1fr; gap: 16px; }
-  .hl-new-release__inner { flex-direction: column; align-items: flex-start; padding: 24px 26px; }
 }
 @media (max-width: 600px) {
-  .features-grid { grid-template-columns: 1fr; }
   .hero { padding: 60px 0 40px; }
   .hero-announce { font-size: 11.5px; }
   .hero-point { font-size: 13px; }
   .hero-toast__sub { display: none; }
   .hero-bg__orb { filter: blur(70px); }
   .platforms-grid { flex-direction: column; align-items: center; }
-  .bench-grid { grid-template-columns: 1fr; }
-  .patterns-grid { grid-template-columns: 1fr; }
-  .feat-tabs { gap: 2px; }
-  .feat-tab { padding: 8px 12px; font-size: 12px; }
   .hero-term { max-width: 100%; }
   .hero-term__line { white-space: pre-wrap; word-break: break-all; }
   .hl-pillars { padding: 56px 0 48px; }
   .hl-pillar { padding: 22px 20px; }
-  .hl-new-release__title { font-size: 19px; }
-  .hl-new-release__sub { font-size: 13px; }
 }
 
 /* ───────────────────────────────────────────
