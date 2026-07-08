@@ -955,6 +955,16 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
 
   // ─── Push / Pull ────────────────────────────────────────
 
+  /**
+   * True when a push failed because the remote rejected a *create* for a ref
+   * that already exists there — the "cannot lock ref …: reference already
+   * exists" case that happens on a --set-upstream push with no local tracking
+   * ref. Matches git's English rejection text, which is stable across versions.
+   */
+  function isRefAlreadyExistsError(message: string): boolean {
+    return /reference already exists/i.test(message);
+  }
+
   async function push(force: boolean = false) {
     if (!folderPath.value) return;
     if (!(await requireOnline("push"))) return;
@@ -964,7 +974,19 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       // this covers both a genuine first publish and a branch that exists on
       // the remote but lost its tracking config.
       const publish = needsUpstream.value;
-      const result = await gitPush(folderPath.value, publish, force);
+      let result = await gitPush(folderPath.value, publish, force);
+      // A --set-upstream push with no local remote-tracking ref sends a *create*
+      // command (old-oid 0000…). If the branch actually exists on the remote
+      // (pushed from another machine, tracking ref pruned, `gh pr checkout`…),
+      // the remote rejects it: "cannot lock ref …: reference already exists".
+      // `remoteBranchExists` only sees local refs, so we can't predict this.
+      // Recover: fetch to populate the tracking ref, then retry once — git now
+      // computes the real old-oid and sends an *update* (still fast-forward-
+      // guarded, so a diverged branch is safely rejected, never clobbered).
+      if (!result.success && publish && isRefAlreadyExistsError(result.message)) {
+        await gitFetch(folderPath.value);
+        result = await gitPush(folderPath.value, true, force);
+      }
       if (!result.success) {
         error.value = `push: ${result.message}`;
       } else {

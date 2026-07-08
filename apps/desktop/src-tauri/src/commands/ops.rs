@@ -353,10 +353,12 @@ pub(crate) async fn git_split_commit(
 
 #[tauri::command]
 pub(crate) async fn git_push(cwd: String, set_upstream: Option<bool>, force: Option<bool>) -> Result<GitPushPullResult, String> {
-    // Shared guard: push is network-bound and touches only refs, not the
-    // index/worktree, so it need not exclude reads — but it must not overlap a
-    // writer (checkout/pull/rebase) mutating the refs it is about to publish.
-    let _repo = repo_lock::read(&cwd);
+    // Push guard: network-bound, touches only refs (not the index/worktree),
+    // so it stays concurrent with reads — but it must not overlap a writer
+    // (checkout/pull/rebase) mutating the refs it publishes, nor another push
+    // to the same repo (concurrent first-publish create → "reference already
+    // exists"). See `repo_lock::push`.
+    let _repo = repo_lock::push(&cwd);
     let mut args: Vec<&str> = vec!["push"];
     if set_upstream.unwrap_or(false) {
         args.extend(["--set-upstream", "origin", "HEAD"]);
@@ -909,6 +911,9 @@ pub(crate) async fn git_delete_branch(cwd: String, name: String, force: bool) ->
 
 #[tauri::command]
 pub(crate) async fn git_delete_remote_branch(cwd: String, remote: String, name: String) -> Result<(), String> {
+    // Outbound push (deletes a remote ref): serialize against other pushes to
+    // this repo, stay concurrent with reads. See `repo_lock::push`.
+    let _repo = repo_lock::push(&cwd);
     let _t0 = Instant::now();
     let output = git_cmd()
         .args(["push", &remote, "--delete", &name])
@@ -1351,6 +1356,9 @@ pub(crate) async fn git_delete_tag(cwd: String, name: String) -> Result<(), Stri
 
 #[tauri::command]
 pub(crate) async fn git_push_tags(cwd: String, remote: String, mode: String, tag_name: Option<String>) -> Result<(), String> {
+    // Outbound push (tags): serialize against other pushes to this repo, stay
+    // concurrent with reads. See `repo_lock::push`.
+    let _repo = repo_lock::push(&cwd);
     let mut args = vec!["push".to_string(), remote.clone()];
     match mode.as_str() {
         "single" => {
@@ -3963,6 +3971,225 @@ mod tree_conflict_tests {
         );
 
         let _ = std::fs::remove_dir_all(&bare);
+    }
+
+    // ── Publish-push recovery: "reference already exists" ───────────────
+    //
+    // The raw error the user hit:
+    //   ! [remote rejected] HEAD -> feat
+    //     (cannot lock ref 'refs/heads/feat': reference already exists)
+    //
+    // Root cause is a concurrent-push race: two --set-upstream pushes of the
+    // same brand-new branch both read the remote advertisement *before* either
+    // commits its ref, so both send a *create* (old-oid 0000…). One wins; the
+    // other's create hits an already-existing ref and is rejected. GitWand's
+    // frontend recovers by fetching (which populates the remote-tracking ref)
+    // then retrying — git then sends an *update* instead of a create.
+    //
+    // These tests drive the real `git_push` / `git_fetch` commands the
+    // recovery orchestrates, against real repos + a bare remote.
+
+    fn remote_sha(bare: &PathBuf, rev: &str) -> String {
+        let out = Command::new(git_binary())
+            .args(["rev-parse", rev])
+            .current_dir(bare)
+            .output()
+            .expect("git rev-parse spawn");
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+
+    /// A bare remote whose pre-receive hook sleeps, widening the race window so
+    /// two concurrent pushes both read the advertisement before either commits.
+    #[cfg(unix)]
+    fn make_slow_bare_remote() -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let bare = make_bare_remote();
+        let hook = bare.join("hooks/pre-receive");
+        std::fs::write(&hook, "#!/bin/sh\nsleep 2\nexit 0\n").expect("write hook");
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).expect("chmod hook");
+        bare
+    }
+
+    /// Clone `bare`, configure identity, and create an identical `feat` commit
+    /// (fixed author/committer dates → deterministic, identical SHA across
+    /// clones, mirroring the same branch double-pushed). Returns the clone path.
+    #[cfg(unix)]
+    fn clone_with_identical_feat(bare: &PathBuf, name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "gitwand-race-{}-{}-{}",
+            std::process::id(),
+            name,
+            COUNTER.fetch_add(1, Ordering::SeqCst)
+        ));
+        let run_in = |cwd: &PathBuf, args: &[&str]| {
+            let out = Command::new(git_binary())
+                .args(args)
+                .env("GIT_AUTHOR_DATE", "2020-01-01T00:00:00")
+                .env("GIT_COMMITTER_DATE", "2020-01-01T00:00:00")
+                .current_dir(cwd)
+                .output()
+                .unwrap_or_else(|e| panic!("git {:?} spawn: {}", args, e));
+            assert!(out.status.success(), "git {:?}: {}", args, String::from_utf8_lossy(&out.stderr));
+        };
+        let out = Command::new(git_binary())
+            .args(["clone", "-q", bare.to_str().unwrap(), dir.to_str().unwrap()])
+            .output()
+            .expect("clone spawn");
+        assert!(out.status.success(), "clone: {}", String::from_utf8_lossy(&out.stderr));
+        run_in(&dir, &["config", "user.name", "Test"]);
+        run_in(&dir, &["config", "user.email", "test@example.com"]);
+        run_in(&dir, &["config", "commit.gpgsign", "false"]);
+        run_in(&dir, &["checkout", "-q", "-b", "feat"]);
+        std::fs::write(dir.join("feat.txt"), "feature\n").unwrap();
+        run_in(&dir, &["add", "-A"]);
+        run_in(&dir, &["commit", "-q", "-m", "feat commit"]);
+        dir
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn publish_push_recovers_from_concurrent_ref_already_exists() {
+        let bare = make_slow_bare_remote();
+        // Seed main so the remote is non-empty and both clones share a base.
+        let seed = TempRepo::new();
+        seed.write("a.txt", "1");
+        seed.commit_all("c1 base");
+        seed.git_ok(&["remote", "add", "origin", bare.to_str().unwrap()]);
+        seed.git_ok(&["push", "-q", "origin", "main"]);
+
+        let a = clone_with_identical_feat(&bare, "A");
+        let b = clone_with_identical_feat(&bare, "B");
+        let feat_sha = remote_sha(&a, "HEAD"); // identical in both clones
+
+        // Fire both --set-upstream pushes concurrently. The sleeping hook keeps
+        // both in-flight until after they've read the (feat-less) advertisement,
+        // so both attempt a create. Exactly one wins.
+        let (ca, cb) = (a.to_str().unwrap().to_string(), b.to_str().unwrap().to_string());
+        let (ra, rb) = std::thread::scope(|s| {
+            let ta = s.spawn(|| tauri::async_runtime::block_on(git_push(ca.clone(), Some(true), None)));
+            let tb = s.spawn(|| tauri::async_runtime::block_on(git_push(cb.clone(), Some(true), None)));
+            (ta.join().unwrap().unwrap(), tb.join().unwrap().unwrap())
+        });
+
+        // One push won, one lost with the ref-exists rejection.
+        let winners = [&ra, &rb].iter().filter(|r| r.success).count();
+        let loser = [(&ra, &a), (&rb, &b)].into_iter().find(|(r, _)| !r.success);
+        assert_eq!(
+            winners, 1,
+            "exactly one concurrent push must win (a: success={} '{}', b: success={} '{}')",
+            ra.success, ra.message, rb.success, rb.message
+        );
+        let (loser_res, loser_dir) = loser.expect("one push must lose the race");
+        assert!(
+            loser_res.message.to_lowercase().contains("reference already exists"),
+            "loser must fail with the ref-exists rejection, got: {}",
+            loser_res.message
+        );
+        assert_eq!(remote_sha(&bare, "feat"), feat_sha, "the winner published feat");
+
+        // Recovery: fetch populates the tracking ref, retry becomes a no-op
+        // update (identical SHA) and succeeds.
+        let loser_cwd = loser_dir.to_str().unwrap().to_string();
+        tauri::async_runtime::block_on(git_fetch(loser_cwd.clone())).expect("git_fetch failed");
+        let retry = tauri::async_runtime::block_on(git_push(loser_cwd, Some(true), None))
+            .expect("retry git_push command failed");
+        assert!(retry.success, "retry after fetch must succeed, got: {}", retry.message);
+        assert_eq!(remote_sha(&bare, "feat"), feat_sha, "feat still published, unchanged");
+
+        let _ = std::fs::remove_dir_all(&bare);
+        let _ = std::fs::remove_dir_all(&a);
+        let _ = std::fs::remove_dir_all(&b);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn concurrent_same_repo_pushes_are_serialized_and_both_succeed() {
+        // The in-process fix: `git_push` holds a per-repo push mutex, so two
+        // pushes to the *same* repo can't race into a create collision. Fire
+        // two --set-upstream pushes of the same branch concurrently against a
+        // slow remote — with the mutex they serialize (the second sees the ref
+        // the first published and no-ops), so BOTH succeed. Without it, one
+        // would fail with "reference already exists".
+        let bare = make_slow_bare_remote();
+        let seed = TempRepo::new();
+        seed.write("a.txt", "1");
+        seed.commit_all("c1 base");
+        seed.git_ok(&["remote", "add", "origin", bare.to_str().unwrap()]);
+        seed.git_ok(&["push", "-q", "origin", "main"]);
+
+        let repo = clone_with_identical_feat(&bare, "same");
+        let feat_sha = remote_sha(&repo, "HEAD");
+        let cwd = repo.to_str().unwrap().to_string();
+
+        let (r1, r2) = std::thread::scope(|s| {
+            let c1 = cwd.clone();
+            let c2 = cwd.clone();
+            let t1 = s.spawn(move || tauri::async_runtime::block_on(git_push(c1, Some(true), None)));
+            let t2 = s.spawn(move || tauri::async_runtime::block_on(git_push(c2, Some(true), None)));
+            (t1.join().unwrap().unwrap(), t2.join().unwrap().unwrap())
+        });
+
+        assert!(
+            r1.success && r2.success,
+            "both same-repo pushes must succeed (serialized): r1 success={} '{}', r2 success={} '{}'",
+            r1.success, r1.message, r2.success, r2.message
+        );
+        assert_eq!(remote_sha(&bare, "feat"), feat_sha, "feat published");
+
+        let _ = std::fs::remove_dir_all(&bare);
+        let _ = std::fs::remove_dir_all(&repo);
+    }
+
+    #[test]
+    fn publish_push_retry_after_fetch_never_clobbers_a_diverged_remote() {
+        // Safety guard on the recovery: the retry reuses the caller's `force`
+        // flag (here false), so a remote branch that diverged is still rejected
+        // as non-fast-forward after the fetch — nothing is silently overwritten.
+        let repo = TempRepo::new();
+        repo.write("a.txt", "1");
+        repo.commit_all("c1 base");
+        let bare = make_bare_remote();
+        repo.git_ok(&["remote", "add", "origin", bare.to_str().unwrap()]);
+        repo.git_ok(&["checkout", "-q", "-b", "feat"]);
+        repo.write("b.txt", "2");
+        repo.commit_all("c2 feat");
+        repo.git_ok(&["push", "-q", "-u", "origin", "feat"]);
+
+        // Advance origin/feat from a second clone so it diverges from local.
+        let other = make_bare_remote(); // reuse unique-dir helper for a temp path
+        let _ = std::fs::remove_dir_all(&other);
+        Command::new(git_binary())
+            .args(["clone", "-q", bare.to_str().unwrap(), other.to_str().unwrap()])
+            .output()
+            .expect("clone spawn");
+        let run = |args: &[&str]| {
+            let out = Command::new(git_binary()).args(args).current_dir(&other).output().unwrap();
+            assert!(out.status.success(), "git {:?}: {}", args, String::from_utf8_lossy(&out.stderr));
+        };
+        run(&["config", "user.name", "Other"]);
+        run(&["config", "user.email", "other@example.com"]);
+        run(&["config", "commit.gpgsign", "false"]);
+        run(&["checkout", "-q", "feat"]);
+        std::fs::write(other.join("remote-only.txt"), "x").unwrap();
+        run(&["add", "-A"]);
+        run(&["commit", "-q", "-m", "remote diverges"]);
+        run(&["push", "-q", "origin", "feat"]);
+        let diverged = remote_sha(&bare, "feat");
+
+        // Local: lose tracking, add a conflicting local commit → non-ff.
+        repo.git_ok(&["branch", "--unset-upstream", "feat"]);
+        repo.git_ok(&["update-ref", "-d", "refs/remotes/origin/feat"]);
+        repo.write("c.txt", "3");
+        repo.commit_all("c3 local-only");
+
+        // fetch → retry (non-force) must stay rejected, remote preserved.
+        tauri::async_runtime::block_on(git_fetch(repo.cwd())).unwrap();
+        let retry = tauri::async_runtime::block_on(git_push(repo.cwd(), Some(true), None)).unwrap();
+        assert!(!retry.success, "non-fast-forward retry must stay rejected, not clobber");
+        assert_eq!(remote_sha(&bare, "feat"), diverged, "remote branch preserved — nothing lost");
+
+        let _ = std::fs::remove_dir_all(&bare);
+        let _ = std::fs::remove_dir_all(&other);
     }
 }
 
