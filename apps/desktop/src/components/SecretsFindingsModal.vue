@@ -50,10 +50,10 @@ function severityLabel(s: SecretSeverity): string {
         </div>
         <div class="sfm-item__excerpt mono">{{ f.redactedExcerpt }}</div>
         <div class="sfm-item__actions">
-          <button type="button" class="bm-btn bm-btn--ghost sfm-item__dismiss" @click="emit('dismiss', findingKey(f))">
+          <button type="button" class="bm-btn bm-btn--ghost sfm-btn-compact sfm-item__dismiss" @click="emit('dismiss', findingKey(f))">
             {{ t('secrets.dismiss') }}
           </button>
-          <button type="button" class="bm-btn bm-btn--ghost sfm-item__ignore" @click="emit('ignore', f.patternId)">
+          <button type="button" class="bm-btn bm-btn--ghost sfm-btn-compact sfm-item__ignore" @click="emit('ignore', f.patternId)">
             {{ t('secrets.ignorePattern') }}
           </button>
         </div>
@@ -143,7 +143,10 @@ function severityLabel(s: SecretSeverity): string {
   gap: var(--space-2);
 }
 
-.sfm-item__actions .bm-btn {
+/* Flat, single-class modifier — never prefix `.bm-btn` with an ancestor selector like
+   `.sfm-item__actions .bm-btn` (AGENTS.md modal-CSS rule): that raises specificity above
+   `.bm-btn--ghost` / `.bm-btn--danger` and can make those modifiers silently lose. */
+.sfm-btn-compact {
   padding: var(--space-2) var(--space-4);
   font-size: var(--font-size-sm);
 }
