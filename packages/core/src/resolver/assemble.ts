@@ -17,6 +17,7 @@ import type { MergePolicy, PolicyConfig } from "../config.js";
 import { mergeNonOverlapping } from "../diff.js";
 import { stripVolatileValues } from "./generated-detection.js";
 import { getLastRefMergeResult } from "../patterns/refactoring-aware-merge.js";
+import { pickNewerSemverSide } from "../patterns/utils.js";
 
 /**
  * Applique la stratégie textuelle correspondant au type de hunk.
@@ -162,6 +163,17 @@ export function assembleResolution(
         return {
           lines: null,
           reason: `Résolution value_only_change désactivée par la politique "${effectivePolicy}".`,
+        };
+      }
+      // Quand toutes les paires de tokens différents sont des semver
+      // comparables, le côté le plus élevé gagne — déterministe et conforme à
+      // l'intention « garder la version la plus récente », quel que soit le
+      // côté qui la porte. Sinon (hashes, timestamps) : côté-politique.
+      const semverSide = pickNewerSemverSide(hunk.oursLines, hunk.theirsLines);
+      if (semverSide !== null) {
+        return {
+          lines: semverSide === "ours" ? [...hunk.oursLines] : [...hunk.theirsLines],
+          reason: `Même structure, version(s) semver différente(s). Résolution : accepter ${semverSide} (version la plus élevée).`,
         };
       }
       const preferred = policyCfg.preferOurs ? hunk.oursLines : hunk.theirsLines;
