@@ -57,6 +57,8 @@ const props = defineProps<{
   commitDiffs?: GitDiff[];
   /** Currently visible file index in CommitDiffViewer */
   visibleFileIdx?: number;
+  /** v3.5.0 — count of active (non-dismissed) secrets-scanner findings on the staged diff. */
+  secretFindingsCount?: number;
 }>();
 
 const emit = defineEmits<{
@@ -89,6 +91,8 @@ const emit = defineEmits<{
   /** Scroll to a specific file in the history view */
   scrollToFile: [index: number];
   deleteBranch: [name: string, hasLocal: boolean, hasRemote: boolean, remoteName?: string];
+  /** v3.5.0 — open the secrets findings modal (commit-area badge clicked). */
+  openSecrets: [];
 }>();
 
 const { t, locale } = useI18n();
@@ -1653,6 +1657,19 @@ function formatActivityDate(dateStr: string): string {
 
       <div class="commit-actions">
         <button
+          v-if="(secretFindingsCount ?? 0) > 0"
+          type="button"
+          class="commit-secrets-badge"
+          :title="t('secrets.badgeTooltip', secretFindingsCount ?? 0)"
+          @click="emit('openSecrets')"
+        >
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+            <path d="M8 1.5l6.5 12h-13L8 1.5z" stroke-linejoin="round" />
+            <path d="M8 6.2v3.2M8 11.6h.01" stroke-linecap="round" />
+          </svg>
+          <span>{{ secretFindingsCount }}</span>
+        </button>
+        <button
           class="commit-stage-all"
           v-if="unstagedCount > 0"
           @click="emit('stageAll')"
@@ -2798,6 +2815,27 @@ function formatActivityDate(dateStr: string): string {
 .commit-actions {
   display: flex;
   gap: var(--space-3);
+}
+
+.commit-secrets-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  background: var(--color-warning-soft, rgba(217, 119, 6, 0.14));
+  color: var(--color-warning, #d97706);
+  border: 1px solid var(--color-warning, #d97706);
+  border-radius: var(--radius-md);
+  flex-shrink: 0;
+  transition: background var(--transition-hover), opacity var(--transition-hover);
+}
+
+.commit-secrets-badge:hover {
+  background: var(--color-warning, #d97706);
+  color: #fff;
 }
 
 .commit-stage-all {

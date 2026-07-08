@@ -2321,6 +2321,20 @@ const es: Locale = {
     fullscreen: "Pantalla completa",
     exitFullscreen: "Salir de pantalla completa",
   },
+  secrets: {
+    badgeTooltip: "{0} posible(s) secreto(s) encontrado(s) en los cambios en stage",
+    findingsTitle: "Posibles secretos detectados",
+    findingsSubtitle: "{0} resultado(s) en tus cambios en stage",
+    findingsEmpty: "Sin resultados",
+    severityHigh: "Alta",
+    severityMedium: "Media",
+    severityLow: "Baja",
+    dismiss: "Descartar",
+    ignorePattern: "Ignorar",
+    commitAnyway: "Hacer commit de todos modos",
+    confirmTitle: "Posibles secretos en este commit",
+    confirmMessage: "Se encontraron {0} posible(s) secreto(s) en tus cambios en stage. ¿Hacer commit de todos modos?",
+  },
 };
 
 export default es;

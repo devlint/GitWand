@@ -2331,6 +2331,20 @@ const fr: Locale = {
     fullscreen: "Plein écran",
     exitFullscreen: "Quitter le plein écran",
   },
+  secrets: {
+    badgeTooltip: "{0} secret(s) potentiel(s) détecté(s) dans les changements indexés",
+    findingsTitle: "Secrets potentiels détectés",
+    findingsSubtitle: "{0} résultat(s) dans vos changements indexés",
+    findingsEmpty: "Aucun résultat",
+    severityHigh: "Élevée",
+    severityMedium: "Moyenne",
+    severityLow: "Faible",
+    dismiss: "Ignorer",
+    ignorePattern: "Ignorer ce motif",
+    commitAnyway: "Commit quand même",
+    confirmTitle: "Secrets potentiels dans ce commit",
+    confirmMessage: "{0} secret(s) potentiel(s) ont été trouvés dans vos changements indexés. Commit quand même ?",
+  },
 };
 
 export default fr;

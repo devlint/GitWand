@@ -2361,6 +2361,21 @@ const en = {
     fullscreen: "Fullscreen",
     exitFullscreen: "Exit fullscreen",
   },
+  // ─── v3.5.0 Secrets scanner ─────────────────────────────
+  secrets: {
+    badgeTooltip: "{0} potential secret(s) found in staged changes",
+    findingsTitle: "Potential secrets detected",
+    findingsSubtitle: "{0} finding(s) in your staged changes",
+    findingsEmpty: "No findings",
+    severityHigh: "High",
+    severityMedium: "Medium",
+    severityLow: "Low",
+    dismiss: "Dismiss",
+    ignorePattern: "Ignore",
+    commitAnyway: "Commit anyway",
+    confirmTitle: "Potential secrets in this commit",
+    confirmMessage: "{0} potential secret(s) were found in your staged changes. Commit anyway?",
+  },
 } as const;
 
 // Widen literal string types to plain `string` for locale compatibility

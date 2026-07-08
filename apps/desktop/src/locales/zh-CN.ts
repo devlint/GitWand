@@ -2306,6 +2306,20 @@ const zhCN: Locale = {
     fullscreen: "全屏",
     exitFullscreen: "退出全屏",
   },
+  secrets: {
+    badgeTooltip: "在暂存的更改中发现 {0} 个潜在密钥",
+    findingsTitle: "检测到潜在密钥",
+    findingsSubtitle: "在您暂存的更改中有 {0} 项结果",
+    findingsEmpty: "没有结果",
+    severityHigh: "高",
+    severityMedium: "中",
+    severityLow: "低",
+    dismiss: "忽略",
+    ignorePattern: "忽略此规则",
+    commitAnyway: "仍然提交",
+    confirmTitle: "此提交中存在潜在密钥",
+    confirmMessage: "在您暂存的更改中发现 {0} 个潜在密钥。是否仍然提交？",
+  },
 };
 
 export default zhCN;

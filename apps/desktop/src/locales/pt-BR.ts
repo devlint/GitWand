@@ -2321,6 +2321,20 @@ const ptBR: Locale = {
     fullscreen: "Tela cheia",
     exitFullscreen: "Sair da tela cheia",
   },
+  secrets: {
+    badgeTooltip: "{0} possível(is) segredo(s) encontrado(s) nas alterações em stage",
+    findingsTitle: "Possíveis segredos detectados",
+    findingsSubtitle: "{0} resultado(s) nas suas alterações em stage",
+    findingsEmpty: "Nenhum resultado",
+    severityHigh: "Alta",
+    severityMedium: "Média",
+    severityLow: "Baixa",
+    dismiss: "Dispensar",
+    ignorePattern: "Ignorar",
+    commitAnyway: "Commitar mesmo assim",
+    confirmTitle: "Possíveis segredos neste commit",
+    confirmMessage: "{0} possível(is) segredo(s) foram encontrados nas suas alterações em stage. Commitar mesmo assim?",
+  },
 };
 
 export default ptBR;
