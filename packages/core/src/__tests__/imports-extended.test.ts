@@ -106,3 +106,36 @@ describe("tryResolveImportConflict — extended", () => {
     expect(result.unresolvedImports).toBeGreaterThan(0);
   });
 });
+
+describe("tryResolveImportConflict — lignes import-like non parsables (garde anti-perte)", () => {
+  // Régression : un bloc accepté par isImportBlock() mais dont les lignes
+  // parsent en `unknown` (ex: `import a` sans from) retournait
+  // "Fusion réussie : 0 import(s)" avec mergedLines: [] — le contenu du hunk
+  // était SUPPRIMÉ silencieusement. Le resolver doit se déclarer non
+  // applicable (mergedLines: null) dès qu'un côté contient du contenu
+  // import-like qu'il ne sait pas représenter.
+
+  it("bloc entièrement non parsable → mergedLines null, pas un succès vide", () => {
+    const result = tryResolveImportConflict([], ["import a", "", "import b"], ["import b", "import a"]);
+    expect(result.mergedLines).toBeNull();
+  });
+
+  it("mélange parsable + non parsable → bail out (sinon la ligne inconnue serait droppée)", () => {
+    const result = tryResolveImportConflict(
+      [],
+      ['import { a } from "./a";', "import weird"],
+      ['import { b } from "./b";'],
+    );
+    expect(result.mergedLines).toBeNull();
+  });
+
+  it("les commentaires et lignes vides restent tolérés (comportement existant inchangé)", () => {
+    const result = tryResolveImportConflict(
+      ['import { a } from "./a";'],
+      ["// utils", 'import { a } from "./a";', ""],
+      ['import { a } from "./a";', 'import { b } from "./b";'],
+    );
+    expect(result.mergedLines).not.toBeNull();
+    expect(result.mergedLines!.join("\n")).toContain('"./b"');
+  });
+});

@@ -287,6 +287,28 @@ export function tryResolveImportConflict(
     };
   }
 
+  // Garde anti-perte : les lignes `unknown` sont exclues du résultat fusionné.
+  // C'est voulu pour les commentaires et lignes vides (le bloc est re-trié de
+  // toute façon), mais tout AUTRE contenu import-like non parsable (ex:
+  // `import a` sans from, syntaxe exotique) serait silencieusement supprimé —
+  // dans le pire cas le resolver retournait "fusion réussie : 0 import(s)"
+  // avec un bloc vide. Si un côté contient du contenu qu'on ne sait pas
+  // représenter, on se déclare non applicable et on laisse le moteur textuel.
+  const isBenignUnknown = (line: string): boolean => {
+    const t = line.trim();
+    return t === "" || t.startsWith("//") || t.startsWith("/*") || t.startsWith("*");
+  };
+  const hasUnparsableContent = (lines: string[]): boolean =>
+    lines.some((l) => !isBenignUnknown(l) && parseImport(l).kind === "unknown");
+  if (hasUnparsableContent(oursLines) || hasUnparsableContent(theirsLines)) {
+    return {
+      mergedLines: null,
+      reason: "Le bloc contient des lignes import-like non parsables — fallback textuel (aucune ligne ne doit être perdue).",
+      resolvedImports: 0,
+      unresolvedImports: 1,
+    };
+  }
+
   // Parser les imports de chaque version
   // aggregateNamedImports combine les imports named multiples du même module en un seul,
   // ce qui évite les collisions de Map keys (ex: deux `import { X } from 'react'` séparés).
