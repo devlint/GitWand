@@ -693,14 +693,22 @@ function onCloseClick(e: MouseEvent, tabId: number) {
   font-weight: var(--font-weight-medium);
   color: var(--color-text-muted);
   background: transparent;
-  border: 0;
+  /* Transparent by default so the active chip (below) and inactive chips share
+     the same box size — inactive tabs colour this border in. */
+  border: 1px solid transparent;
   cursor: pointer;
-  transition: color var(--transition-base), background var(--transition-base);
+  transition: color var(--transition-base), background var(--transition-base), border-color var(--transition-base);
   max-width: 200px;
   min-width: 0;
   flex-shrink: 1;
   user-select: none;
   white-space: nowrap;
+}
+
+/* Inactive tabs get a faint outline so they read as distinct chips and their
+   caret / close affordances feel reachable even without hovering. */
+.repo-tab:not(.repo-tab--active) {
+  border-color: color-mix(in srgb, var(--color-border) 45%, transparent);
 }
 
 .repo-tab:hover {
@@ -776,7 +784,7 @@ function onCloseClick(e: MouseEvent, tabId: number) {
   /* Follow the chip's own color logic, exactly like .repo-tab__name:
      muted by default, text on chip hover, accent when active. */
   color: inherit;
-  opacity: 0;
+  opacity: 0.4;
   cursor: pointer;
   transition: opacity var(--transition-fast), background var(--transition-fast), color var(--transition-fast);
   margin: 0px -5px;
@@ -882,7 +890,7 @@ function onCloseClick(e: MouseEvent, tabId: number) {
   height: 18px;
   border-radius: var(--radius-pill);
   color: var(--color-text-muted);
-  opacity: 0;
+  opacity: 0.4;
   transition: opacity var(--transition-fast), background var(--transition-fast), color var(--transition-fast);
   padding: 0;
 }
