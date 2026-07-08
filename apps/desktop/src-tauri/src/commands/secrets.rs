@@ -11,6 +11,7 @@
 
 use regex::Regex;
 
+use crate::git::cmd::git_cmd;
 use crate::types::{SecretFinding, SecretsScanConfig};
 
 /// Cap on returned findings — see apps/desktop/CLAUDE.md P6.4 "IPC payloads" rule.
@@ -303,6 +304,108 @@ fn glob_regex(pattern: &str) -> Regex {
     Regex::new(&format!("^{}$", replaced)).unwrap_or_else(|_| Regex::new("$^").expect("literal never-match regex must compile"))
 }
 
+// ─── Git extraction + Tauri command wiring ──────────────────────────
+
+/// Extracts `ScanFileInput`s from the currently staged diff. Only `+`-prefixed content lines are
+/// kept (never the `+++` header, never context/removed lines) — see AGENTS.md's diff-parsing
+/// gotcha. Git is confined to `cwd` via `.current_dir()`; no path is joined on the filesystem, so
+/// `safe_repo_path()` does not apply here (same reasoning as the existing `git_diff` command).
+fn extract_staged_added_lines(cwd: &str) -> Result<Vec<ScanFileInput>, String> {
+    fn flush(
+        files: &mut Vec<ScanFileInput>,
+        current_path: &mut Option<String>,
+        current_lines: &mut Vec<ScanLine>,
+    ) {
+        if let Some(path) = current_path.take() {
+            if !current_lines.is_empty() {
+                files.push(ScanFileInput {
+                    path,
+                    added_lines: std::mem::take(current_lines),
+                });
+                return;
+            }
+        }
+        current_lines.clear();
+    }
+
+    let output = git_cmd()
+        .args(["diff", "--cached", "--unified=0", "--no-color", "--", "."])
+        .current_dir(cwd)
+        .output()
+        .map_err(|e| format!("Failed to run git diff --cached: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("git diff --cached failed: {}", stderr.trim()));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    let mut files: Vec<ScanFileInput> = Vec::new();
+    let mut current_path: Option<String> = None;
+    let mut current_lines: Vec<ScanLine> = Vec::new();
+    let mut new_line_no: u32 = 0;
+
+    for line in stdout.lines() {
+        if line.starts_with("diff --git ") {
+            flush(&mut files, &mut current_path, &mut current_lines);
+        } else if let Some(rest) = line.strip_prefix("+++ ") {
+            // "+++ b/<path>" for a file with new-side content, "+++ /dev/null" for a deletion.
+            current_path = if rest == "/dev/null" {
+                None
+            } else {
+                Some(rest.strip_prefix("b/").unwrap_or(rest).to_string())
+            };
+        } else if line.starts_with("@@") {
+            // "@@ -oldStart,oldCount +newStart,newCount @@" — only the new-side start matters,
+            // since we only ever record `+` lines.
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 3 {
+                let new_range = parts[2].strip_prefix('+').unwrap_or("0");
+                new_line_no = if let Some(comma_idx) = new_range.find(',') {
+                    new_range[..comma_idx].parse().unwrap_or(0)
+                } else {
+                    new_range.parse().unwrap_or(0)
+                };
+            }
+        } else if line.starts_with('+') && !line.starts_with("+++") {
+            // A content added line starts with a single `+`; the file header is `+++ ` —
+            // distinguished above by parsing state, not by this check alone (AGENTS.md gotcha).
+            if current_path.is_some() {
+                current_lines.push(ScanLine {
+                    line: new_line_no,
+                    text: line[1..].to_string(),
+                });
+            }
+            new_line_no += 1;
+        }
+        // `-`-prefixed removed lines and (irrelevant here, since --unified=0) context lines are
+        // not part of the added-lines-only scan surface.
+    }
+
+    flush(&mut files, &mut current_path, &mut current_lines);
+
+    Ok(files)
+}
+
+/// Pure(-ish) core of `scan_secrets`, kept sync + separate from the `async` command so it is
+/// unit-testable without a Tokio runtime.
+pub(crate) fn scan_staged(cwd: &str, config: &SecretsScanConfig) -> Result<Vec<SecretFinding>, String> {
+    if cwd.trim().is_empty() {
+        return Err("cwd must not be empty".to_string());
+    }
+    if !config.enabled {
+        return Ok(Vec::new());
+    }
+    let files = extract_staged_added_lines(cwd)?;
+    Ok(scan_lines(&files, config))
+}
+
+#[tauri::command]
+pub(crate) async fn scan_secrets(cwd: String, config: SecretsScanConfig) -> Result<Vec<SecretFinding>, String> {
+    scan_staged(&cwd, &config)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -499,5 +602,122 @@ mod tests {
         let files = [file_with("src/x.ts", &line_refs)];
         let findings = scan_lines(&files, &base_config());
         assert_eq!(findings.len(), 500);
+    }
+
+    // ─── scan_staged: real temp-repo integration tests (Task 5) ─────
+
+    mod scan_staged_tests {
+        use super::super::*;
+        use super::base_config;
+        use std::path::PathBuf;
+        use std::process::Command as StdCommand;
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+        struct TempRepo {
+            path: PathBuf,
+        }
+
+        impl Drop for TempRepo {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.path);
+            }
+        }
+
+        impl TempRepo {
+            fn new(label: &str) -> Self {
+                let n = COUNTER.fetch_add(1, Ordering::SeqCst);
+                let pid = std::process::id();
+                let nanos = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos();
+                let dir = std::env::temp_dir()
+                    .join(format!("gitwand-secrets-test-{}-{}-{}-{}", label, pid, n, nanos));
+                std::fs::create_dir_all(&dir).unwrap();
+                let repo = TempRepo { path: dir };
+                repo.git(&["init", "-q"]);
+                repo.git(&["config", "user.email", "test@gitwand.dev"]);
+                repo.git(&["config", "user.name", "GitWand Test"]);
+                repo
+            }
+
+            fn cwd(&self) -> String {
+                self.path.to_string_lossy().to_string()
+            }
+
+            fn write(&self, rel: &str, content: &str) {
+                let p = self.path.join(rel);
+                if let Some(parent) = p.parent() {
+                    std::fs::create_dir_all(parent).unwrap();
+                }
+                std::fs::write(p, content).unwrap();
+            }
+
+            fn git(&self, args: &[&str]) {
+                let status = StdCommand::new("git")
+                    .args(args)
+                    .current_dir(&self.path)
+                    .status()
+                    .unwrap();
+                assert!(status.success(), "git {:?} failed", args);
+            }
+        }
+
+        #[test]
+        fn finds_a_secret_on_a_newly_staged_added_line() {
+            let repo = TempRepo::new("basic");
+            repo.write("src/config.ts", "const key = \"AKIAABCDEFGHIJKLMNOP\";\n");
+            repo.write("src/benign.ts", "export const x = 1;\n");
+            repo.git(&["add", "src/config.ts", "src/benign.ts"]);
+
+            let findings = scan_staged(&repo.cwd(), &base_config()).unwrap();
+
+            assert_eq!(findings.len(), 1);
+            assert_eq!(findings[0].pattern_id, "aws_access_key_id");
+            assert_eq!(findings[0].file, "src/config.ts");
+            assert_eq!(findings[0].line, 1);
+            assert_ne!(findings[0].redacted_excerpt, "AKIAABCDEFGHIJKLMNOP");
+        }
+
+        #[test]
+        fn nothing_staged_returns_empty() {
+            let repo = TempRepo::new("empty");
+            repo.write("README.md", "# hello\n");
+            // Not staged.
+            let findings = scan_staged(&repo.cwd(), &base_config()).unwrap();
+            assert!(findings.is_empty());
+        }
+
+        #[test]
+        fn a_preexisting_committed_secret_is_not_reported() {
+            let repo = TempRepo::new("preexisting");
+            repo.write("src/old.ts", "const key = \"AKIAABCDEFGHIJKLMNOP\";\n");
+            repo.git(&["add", "src/old.ts"]);
+            repo.git(&["commit", "-q", "-m", "init with a committed secret"]);
+
+            // No new staged changes — the committed secret must not surface.
+            let findings = scan_staged(&repo.cwd(), &base_config()).unwrap();
+            assert!(findings.is_empty());
+        }
+
+        #[test]
+        fn rejects_empty_cwd() {
+            let err = scan_staged("", &base_config()).unwrap_err();
+            assert!(err.contains("cwd must not be empty"));
+        }
+
+        #[test]
+        fn disabled_config_returns_empty_without_running_git() {
+            let repo = TempRepo::new("disabled");
+            repo.write("src/config.ts", "const key = \"AKIAABCDEFGHIJKLMNOP\";\n");
+            repo.git(&["add", "src/config.ts"]);
+
+            let mut config = base_config();
+            config.enabled = false;
+            let findings = scan_staged(&repo.cwd(), &config).unwrap();
+            assert!(findings.is_empty());
+        }
     }
 }
