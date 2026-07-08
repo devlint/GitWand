@@ -22,7 +22,7 @@ head:
 |---|---|---|
 | Price | **Free, MIT open source** | Free Community tier; Pro $8/seat/mo, Advanced $14 (billed annually) |
 | Stack | Tauri 2 + Rust, ~8 MB | Electron (v41), ~150 MB class |
-| Merge conflicts | **Auto-resolves ~95% of trivial hunks** — 10 deterministic patterns, confidence score, decision trace | 3-way merge editor; AI suggestions |
+| Merge conflicts | **Auto-resolves ~95% of trivial hunks** — 8 deterministic patterns, confidence score, decision trace | 3-way merge editor; AI suggestions |
 | PR / MR review | In-app, 4 forges: GitHub, GitLab, Bitbucket, Azure DevOps — inline comments, suggestions, CI annotations | In-app, multi-forge (Launchpad) |
 | AI | Agent sessions (Claude Code, Codex, opencode…) in-app, per-hunk critique, MCP server exposing the engine — all local, opt-in | Agent sessions in worktrees (Claude Code, Codex, Copilot, Gemini, opencode) + cloud GitKraken AI (commit/PR/merge) |
 | Worktrees | First-class (tab = worktree, scratch worktrees) | First-class (agent session per worktree) |
@@ -38,7 +38,7 @@ Being honest: **team features**. Cloud Workspaces shared across an organization,
 
 ### 1. Conflicts actually get resolved
 
-GitKraken gives you a good 3-way editor and, lately, AI suggestions — which means either manual work or trusting a model's guess. GitWand's [engine](/conflict-engine) classifies every hunk against 10 deterministic patterns (reorder-only, boundary insertions, structural entity merges via tree-sitter, lockfile-aware resolvers…) and auto-resolves the trivial ~95% with a per-hunk confidence score and a replayable decision trace. No guess enters your history. The [LLM fallback](/guide/llm-fallback) is opt-in, labeled, and audited.
+GitKraken gives you a good 3-way editor and, lately, AI suggestions — which means either manual work or trusting a model's guess. GitWand's [engine](/conflict-engine) classifies every hunk against 8 deterministic patterns (reorder-only, boundary insertions, structural entity merges via tree-sitter, lockfile-aware resolvers…) and auto-resolves the trivial ~95% with a per-hunk confidence score and a replayable decision trace. No guess enters your history. The [LLM fallback](/guide/llm-fallback) is opt-in, labeled, and audited.
 
 ### 2. Native performance, no account
 

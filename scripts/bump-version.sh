@@ -109,6 +109,13 @@ bump website/public/.well-known/mcp/server-card.json \
 bump packages/mcp/src/server.ts \
   "s/version: \"${OLD}\"/version: \"${NEW}\"/"
 
+# ── website/index.md (JSON-LD softwareVersion) ───────────────────────────────
+# Generic semver pattern: this field historically drifted (was pinned to an
+# older release than the rest) because it wasn't in the bump set — the generic
+# match fixes it regardless of what it currently holds.
+bump website/index.md \
+  "s/\"softwareVersion\": \"[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\"/\"softwareVersion\": \"${NEW}\"/"
+
 # ── README.md (badge URL) ────────────────────────────────────────────────────
 bump README.md \
   "s/version-${OLD}-/version-${NEW}-/"

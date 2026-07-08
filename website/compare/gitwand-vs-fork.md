@@ -38,7 +38,7 @@ Honesty first: **maturity and micro-polish**. Fork has a decade of refinement in
 
 ### 1. The conflict engine
 
-This is the category difference. Fork gives you a merge editor; GitWand gives you [an engine](/conflict-engine) that classifies every conflicted hunk against 10 deterministic patterns and resolves the trivial ones itself — reorders, boundary insertions, structural entity merges (tree-sitter), lockfiles — each with a confidence score and a decision trace you can audit. You only ever open the editor for hunks that genuinely need judgment.
+This is the category difference. Fork gives you a merge editor; GitWand gives you [an engine](/conflict-engine) that classifies every conflicted hunk against 8 deterministic patterns and resolves the trivial ones itself — reorders, boundary insertions, structural entity merges (tree-sitter), lockfiles — each with a confidence score and a decision trace you can audit. You only ever open the editor for hunks that genuinely need judgment.
 
 ### 2. Code review without leaving the app
 

@@ -86,7 +86,7 @@ The agent sees upfront: 10 of 12 conflicts will be handled automatically, 2 need
 
 ### Phase 2: auto-resolve, then handle the residual
 
-The agent calls `gitwand_resolve_conflicts`. GitWand runs its full classification pipeline — 10 patterns, composite confidence scoring, format-aware resolvers for JSON/YAML/TypeScript imports — and writes the resolved content back to disk. It returns a `pendingHunks` array for everything it couldn't safely handle.
+The agent calls `gitwand_resolve_conflicts`. GitWand runs its full classification pipeline — 8 deterministic patterns, composite confidence scoring, format-aware resolvers for JSON/YAML/TypeScript imports — and writes the resolved content back to disk. It returns a `pendingHunks` array for everything it couldn't safely handle.
 
 For the 95%+ of conflicts that are trivial (whitespace changes, one-side additions, same change on both sides, import reorders, lockfile updates), the agent doesn't see them at all. GitWand writes the correct resolution and moves on.
 

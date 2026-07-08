@@ -1,14 +1,19 @@
 <script setup lang="ts">
+// 8 deterministic patterns auto-apply (auto: true). token_level_merge proposes
+// a merge you confirm; refactoring_aware_merge and llm_proposed are opt-in;
+// complex is the fallback that always hands the hunk back with its trace.
 const PATTERNS = [
   { name: 'same_change',           conf: 'certain', auto: true,  desc: 'Both branches made the exact same edit.' },
   { name: 'one_side_change',       conf: 'certain', auto: true,  desc: 'Only one branch touched this block.' },
+  { name: 'delete_no_change',      conf: 'certain', auto: true,  desc: 'One side deleted the block, the other left it untouched.' },
   { name: 'non_overlapping',       conf: 'high',    auto: true,  desc: 'Additions at different positions in the block.' },
   { name: 'whitespace_only',       conf: 'high',    auto: true,  desc: 'Same logic, different indentation or spacing.' },
   { name: 'reorder_only',          conf: 'high',    auto: true,  desc: 'Same lines, different order.' },
   { name: 'insertion_at_boundary', conf: 'high',    auto: true,  desc: 'New lines added at the edge of a hunk.' },
-  { name: 'value_only_change',     conf: 'high',    auto: true,  desc: 'A scalar value (JSON, config) updated on one side.' },
-  { name: 'section_only_change',   conf: 'high',    auto: true,  desc: 'A document section edited on one side only.' },
-  { name: 'llm_proposed',          conf: 'medium',  auto: true,  desc: 'LLM-proposed resolution above the confidence threshold.' },
+  { name: 'value_only_change',     conf: 'high',    auto: true,  desc: 'A scalar value (version, timestamp, hash) updated on both sides — keeps the higher semver / later timestamp.' },
+  { name: 'token_level_merge',     conf: 'medium',  auto: false, desc: 'Both sides changed disjoint tokens on the same line — proposes a merge you confirm, never auto-applied.' },
+  { name: 'refactoring_aware_merge', conf: 'high',  auto: false, desc: 'Rename/move detected and replayed across the conflict (opt-in).' },
+  { name: 'llm_proposed',          conf: 'medium',  auto: false, desc: 'AI-proposed resolution, validated post-merge (opt-in).' },
   { name: 'complex',               conf: 'low',     auto: false, desc: 'Overlapping edits — surfaced with full classification trace.' },
 ] as const
 </script>
@@ -19,7 +24,7 @@ const PATTERNS = [
       <div class="ph-inner">
         <span class="ph-badge">Conflict engine</span>
         <h1 class="ph-h1">Deterministic conflict resolution. <span class="grad">No guessing.</span></h1>
-        <p class="ph-sub">Every hunk runs through a classifier of 10 deterministic patterns, each with its own confidence profile and automatic resolver. The trivial 95% is resolved without you. The rest is surfaced with a full decision trace — never a black box.</p>
+        <p class="ph-sub">Every hunk runs through a classifier of pattern recognizers — 8 of them resolve deterministically on their own, each with its own confidence profile. The trivial 95% of conflicts is resolved without you. The rest is surfaced with a full decision trace — never a black box.</p>
         <div class="ph-ctas">
           <a href="/guide/conflict-resolution" class="ph-btn ph-btn--primary">Read the deep dive</a>
           <a href="/" class="ph-btn">← Back to home</a>
@@ -56,8 +61,8 @@ const PATTERNS = [
 
     <section class="ph-section ph-section--alt">
       <div class="ph-inner">
-        <h2 class="ph-h2">10 patterns. Deterministic. Auditable.</h2>
-        <p class="ph-secsub">Each pattern has its own confidence profile and automatic resolver. The classifier never guesses — when it can't be certain, it hands the hunk back to you with the trace.</p>
+        <h2 class="ph-h2">8 auto-applied patterns. Deterministic. Auditable.</h2>
+        <p class="ph-secsub">Eight deterministic patterns resolve on their own; the rest below either propose a merge you confirm, are opt-in, or hand the hunk back with its trace. The classifier never guesses — when it can't be certain, it stops.</p>
         <div class="pat-grid">
           <div v-for="p in PATTERNS" :key="p.name" class="pat" :class="{ 'pat--dim': !p.auto }">
             <div class="pat-head">

@@ -1,6 +1,6 @@
 # Conflict Resolution Engine
 
-GitWand's core engine classifies merge conflicts into 10 patterns, scores each with a composite confidence metric, and auto-resolves the ones it's confident about — leaving the complex ones for human judgment.
+GitWand's core engine classifies each merge-conflict hunk against a prioritised pattern registry, scores each with a composite confidence metric, and auto-resolves the ones it's confident about — leaving the complex ones for human judgment. Eight deterministic patterns auto-apply; the rest either propose a merge you confirm, are opt-in, or hand the hunk back with its trace.
 
 ## Pipeline
 
@@ -9,10 +9,11 @@ Conflicted text → parseConflictMarkers → classifyConflict → resolveHunk �
 ```
 
 1. **Parse** — Extract conflict markers from the file, producing `ConflictHunk` objects with `base`, `ours`, and `theirs` lines
-2. **Classify** — Evaluate patterns in the **pattern registry** (v1.4) in priority order; each pattern declares whether it requires `diff3` (base available), `diff2`, or works on `both`
-3. **Score** — Compute a composite confidence score for the classification
-4. **Resolve** — Apply the appropriate resolution strategy (or mark as manual)
-5. **Validate** — Check the merged output for residual markers and syntax errors
+2. **Recover base if needed** *(v3.4)* — When git wrote the conflict in its default style (no `|||||||` base section), the diff3 base is reconstructed from the git index so the base-dependent patterns below can still fire. Without this, roughly half the patterns were inert on default-configured repos. Skipped when the working tree was hand-edited outside the markers, to avoid clobbering manual work.
+3. **Classify** — Evaluate patterns in the **pattern registry** in priority order; each pattern declares whether it requires `diff3` (base available), `diff2`, or works on `both`
+4. **Score** — Compute a composite confidence score for the classification
+5. **Resolve** — Apply the appropriate resolution strategy (or mark as manual)
+6. **Validate** — Check the merged output for residual markers and syntax errors
 
 ## Pattern Registry (v1.4)
 
@@ -33,7 +34,7 @@ interface ConflictPattern {
 
 Patterns are evaluated in priority order until one matches. The full evaluation trace (passed/failed + reason for each step) lives in the `DecisionTrace` and is available via the `--verbose` CLI flag or the `gitwand_explain_hunk` MCP tool.
 
-## The 10 Conflict Types
+## The Conflict Types
 
 ### `same_change`
 
@@ -65,7 +66,19 @@ Both sides only insert new lines around an intact base — no modifications to e
 
 ### `value_only_change`
 
-Same structure, but volatile values differ — hashes, version numbers, timestamps, integrity fields. Common in lockfiles and build outputs. Resolution: prefer theirs (incoming values are newer).
+Same structure, but volatile values differ — hashes, version numbers, timestamps, integrity fields. Common in lockfiles and build outputs. When both sides changed the value and the tokens are comparable (semver or ISO timestamps), GitWand keeps the higher semver / later timestamp deterministically; otherwise it falls back to the merge policy. *(v3.4: extended to work with a base, and quote-aware so multi-word quoted values like `'2026-07-06 11:42:00'` aren't split on inner whitespace.)*
+
+### `token_level_merge` *(v3.4)*
+
+Both sides changed the same line but touched **disjoint tokens** of it — e.g. two branches editing different utility classes on one HTML/JSX tag, or different attributes of the same element. GitWand decomposes the line token by token and computes the merge. **Never auto-applied**, regardless of confidence: it surfaces the proposed result in a panel you confirm explicitly, applied through the same path as a manual edit.
+
+### `refactoring_aware_merge` *(opt-in)*
+
+A rename or method move detected on one or both sides and replayed across the conflict (invert → merge → replay). Off by default; enable via `refactoringAware`. Forced on automatically whenever the LLM fallback is enabled, so a deterministically recoverable rename never reaches the model.
+
+### `llm_proposed` *(opt-in)*
+
+When enabled, a hunk no deterministic pattern could resolve is sent to the configured LLM endpoint; the proposal is validated post-merge (parse-tree, optionally tsc/eslint) before it can be accepted. Strictly opt-in, always audited.
 
 ### `generated_file`
 

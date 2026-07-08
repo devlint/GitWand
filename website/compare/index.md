@@ -45,6 +45,6 @@ The table above is the at-a-glance version. Here's the full matrix — workflow,
 
 ## What makes GitWand different, in one paragraph
 
-Every client on this page shows you the conflict markers. GitWand is the only one that **classifies each conflicted hunk against 10 deterministic patterns and auto-resolves the trivial ~95%** — with a confidence score and a [full decision trace](/conflict-engine) per hunk, never an LLM guess (the [LLM fallback](/guide/llm-fallback) exists but is strictly opt-in and audited). The same engine ships as a [CLI](/guide/cli), a [VS Code extension](/guide/vscode) and an [MCP server](/guide/mcp) for AI agents. Free, MIT, local-first.
+Every client on this page shows you the conflict markers. GitWand is the only one that **classifies each conflicted hunk against 8 deterministic patterns and auto-resolves the trivial ~95%** — with a confidence score and a [full decision trace](/conflict-engine) per hunk, never an LLM guess (the [LLM fallback](/guide/llm-fallback) exists but is strictly opt-in and audited). The same engine ships as a [CLI](/guide/cli), a [VS Code extension](/guide/vscode) and an [MCP server](/guide/mcp) for AI agents. Free, MIT, local-first.
 
 [Download GitWand →](https://github.com/devlint/GitWand/releases/latest) · [How the engine works →](/conflict-engine)
