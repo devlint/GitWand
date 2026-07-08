@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.4.0] - 2026-07-08
+
+### Added
+
+- **`token_level_merge` conflict pattern** — decomposes a conflicted hunk line by line, then token by token, and proposes a merge when both sides changed disjoint tokens on the same line (e.g. two branches editing different utility classes on one HTML/JSX line). Never auto-applied regardless of confidence: it surfaces a proposal in a new `TokenMergePanel` that the user confirms explicitly, applied through the same `resolveHunkCustom` path as a manual edit. Priority 65 — evaluated before every opt-in deterministic recoverer.
+- **2-way conflict base recovery** — most repos use git's default `merge.conflictstyle` (no `|||||||` base section), which left every diff3-only pattern (`one_side_change`, `non_overlapping`, `token_level_merge`, …) inert. The desktop now reconstructs the base from the git index (`reconstructConflict`) and re-resolves, upgrading real-world 2-way conflicts to diff3. Guarded against overwriting manual edits made outside the conflict markers, with a discreet banner when recovery fired. Concurrency-capped at 4 subprocesses.
+- **`ResolutionPreviewPanel` + "Resolve auto" confirmation** — pre-computed hunk resolutions are shown for review before applying; the global "Resolve auto" button now opens a per-hunk summary modal instead of applying blind, and applies the engine's real merged lines (not a raw ours+theirs concatenation).
+- **"Recoverable-before-model" metric** — `summarizeTiers()` derives a funnel over the existing per-type counts (trivial / advanced-deterministic / model / unresolved) and reports how much of the residual is still recoverable deterministically before the LLM is invoked. Surfaced in the CLI resolve summary, the MergeEditor header, the MCP `tierSummary` field, and as a cumulative local aggregate in Settings → Git (localStorage only, no network). Backed by a corpus regression guard and a committed golden-funnel snapshot that fails CI on any silent drift.
+
+### Changed
+
+- **`value_only_change` extended to diff3 with ordered-value resolution** — the pattern now runs with a base (both-sides value bumps), and when the differing tokens are comparable semver or ISO timestamps the higher/later value wins deterministically instead of blindly taking the policy side. Value tokens are tokenized quote-aware so multi-word quoted values (e.g. `'2026-07-06 11:42:00'`) aren't split on their inner whitespace.
+- **Deterministic recoverers run before the LLM** — enabling `llmFallback` now forces `refactoringAware` on, so a rename-on-both-sides hunk is never sent to the model when a deterministic answer exists.
+
+### Fixed
+
+- **Data-loss: imports resolver deleted unparsable import-like blocks** — a block accepted as "imports" but containing an unparsable line (e.g. `import a` with no `from`) could return an empty merged block reported as success, silently deleting the hunk. It now falls back to the textual engine.
+- **Data-loss: `insertion_at_boundary` dropped insertions duplicating a base line** — insertions were filtered with a `Set`, so an inserted line equal to any base line was lost. Now uses multiset counting.
+- **`whitespace_only` false positive inside string literals** — whitespace inside a quoted string is data, not formatting; the pattern no longer auto-resolves when only a string literal differs.
+- **Rename detection matched inside strings and comments** — `detectRefactorings` masked neither string literals nor `//`·`/* */` comments, so a value or comment-wording change could pass as a "bijective rename". Both are now masked in a single scan.
+- **git log pagination, caching, and prefetching** — per-file lazy loading and cache correctness fixes in the desktop commit graph (#113).
+
 ## [3.3.0] - 2026-07-06
 
 ### Added
@@ -1181,6 +1203,7 @@ Design-system foundations — the app header and every overlay now ride on a sha
 - 28 tests covering all patterns + real-world scenarios (package.json, Laravel routes, Vue SFC, CSS, .env files)
 
 [Unreleased]: https://github.com/devlint/GitWand/compare/v3.2.0...HEAD
+[3.4.0]: https://github.com/devlint/GitWand/compare/v3.3.0...v3.4.0
 [3.3.0]: https://github.com/devlint/GitWand/compare/v3.2.0...v3.3.0
 [3.2.0]: https://github.com/devlint/GitWand/compare/v3.1.0...v3.2.0
 [3.1.0]: https://github.com/devlint/GitWand/compare/v3.0.0...v3.1.0

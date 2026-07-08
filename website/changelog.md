@@ -5,6 +5,32 @@ description: Release history for GitWand — the native Git client with AI confl
 
 # Changelog
 
+## v3.4.0 — July 2026
+
+### The conflict engine learns a new trick — and stops guessing
+
+The headline is a new resolution pattern, `token_level_merge`. When two branches touch the *same line* but change *different pieces of it* — think two people editing different utility classes on one HTML tag, or different attributes of the same element — GitWand now decomposes that line token by token and works out the merge. Crucially it never applies this on its own, no matter how confident it is: it shows you the proposed result in a dedicated panel and waits for your nod. The engine proposes; you decide.
+
+### Conflicts without a base, recovered
+
+Most repositories are set up so Git shows you only "their version" and "your version" of a conflict, with no common ancestor in between. That missing ancestor is exactly what half of GitWand's smartest patterns need to work — without it, they simply couldn't fire. GitWand now reconstructs that common base from Git's own index and re-runs the analysis, quietly upgrading everyday conflicts into ones the engine can actually reason about. It's careful about it: if you've hand-edited anything around the conflict, it backs off rather than risk overwriting your work, and a small banner tells you when recovery kicked in.
+
+### See the resolution before you commit to it
+
+Auto-resolvable hunks now show their proposed result up front, and the "Resolve auto" button opens a per-hunk summary so you see exactly what's about to happen before it happens — no more resolving blind.
+
+### A number that keeps the engine honest
+
+GitWand now reports how much of what's left after the easy wins is *still* recoverable automatically before any AI is involved — a "recoverable-before-model" breakdown, visible in the CLI, the merge editor, and a running local tally in Settings (stored only on your machine). It's not just a vanity stat: it's wired into the test suite as a regression guard and a committed snapshot, so a change that quietly makes the engine dumber fails the build. On a 2,000-merge real-world corpus, this release roughly halved the share of conflicts that still need a human.
+
+### Version bumps now pick the newer value
+
+When both sides bump the same version number or timestamp, GitWand now keeps the higher one instead of blindly following a side — 1.4.0 wins over 1.3.0 regardless of which branch it came from. And quoted values with spaces inside them (like a `'2026-07-06 11:42:00'` timestamp) are no longer mis-read.
+
+### Fixes that were quietly losing lines
+
+Three auto-resolution paths could, in narrow cases, drop content on the floor: an import block that didn't parse cleanly could be emptied out and reported as a success; an inserted line that happened to be identical to an existing one could vanish; and whitespace differences *inside* a string ("hello  world" vs "hello world") were treated as cosmetic when they're actually data. All three are fixed. Rename detection also no longer mistakes a changed value or a reworded comment for a renamed variable. Plus a round of git-log pagination and caching fixes in the desktop app.
+
 ## v3.3.0 — July 2026
 
 ### Blame, right in the editor
