@@ -449,7 +449,7 @@ export function parseGitwandrc(json: string): GitWandrcConfig | null {
               (p as Record<string, unknown>).id !== "" &&
               typeof (p as Record<string, unknown>).regex === "string",
           )
-          .map((p) => ({
+          .map((p: { id: string; regex: string; severity?: string; description?: string }) => ({
             id: p.id,
             regex: p.regex,
             severity: (validSeverities as readonly string[]).includes(p.severity ?? "")
