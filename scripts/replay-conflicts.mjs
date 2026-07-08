@@ -35,6 +35,7 @@ const maxMergesIdx = args.indexOf("--max-merges");
 const MAX_MERGES = maxMergesIdx !== -1 ? Number(args[maxMergesIdx + 1]) : 500;
 const WITH_REFACTORING = args.includes("--refactoring");
 const WITH_ECHO = args.includes("--echo");
+const WITH_LISTS = args.includes("--lists");
 const AS_JSON = args.includes("--json");
 
 const MAX_FILE_BYTES = 1_000_000; // skip huge files
@@ -134,6 +135,57 @@ function blockPresentIn(parent, path, blockLines) {
   } catch { return false; }
 }
 
+// ─── commutative-list opportunity heuristic (--lists) ────────────────────────
+//
+// Sizing pass for a grammar-driven commutative-list merge (Mergiraf-style):
+// among `complex` hunks, how many are "list-shaped" — every non-blank line on
+// both sides looks like an element of an order-insensitive collection (array
+// items, object/map entries, import/use statements, enum variants)? Those are
+// the hunks a commutative set-merge could take deterministically where line-
+// based LCS fails (same insertion point, trailing-comma drift, reorder+add).
+
+const RE_LIST_LINE = [
+  /,\s*$/,                                    // trailing comma (array/object item)
+  /^\s*(?:import|use|from|export)\b/,         // import-like statement
+  /^\s*['"@\w$-]+\s*:\s*.+[,;]?\s*$/,         // key: value entry
+  /^\s*['"][^'"]*['"],?\s*$/,                 // bare string item
+  /^\s*[\w$.]+\s*(?:::\w+)?,?\s*$/,           // bare identifier / enum variant
+];
+
+function isListShaped(lines) {
+  const content = lines.filter((l) => l.trim() !== "");
+  if (content.length === 0) return false;
+  return content.every((l) => RE_LIST_LINE.some((re) => re.test(l)));
+}
+
+/** Multiset difference a ∖ b on trimmed lines. */
+function multisetDiff(a, b) {
+  const count = new Map();
+  for (const l of b) { const t = l.trim(); count.set(t, (count.get(t) ?? 0) + 1); }
+  const out = [];
+  for (const l of a) {
+    const t = l.trim();
+    const n = count.get(t) ?? 0;
+    if (n > 0) count.set(t, n - 1);
+    else out.push(t);
+  }
+  return out;
+}
+
+/**
+ * List-shaped hunk provably mergeable at LINE granularity: no base line was
+ * removed/modified by BOTH sides (a modified item = removed base line + added
+ * variant, so a shared removal means both sides touched the same item — that
+ * needs key-aware logic or stays a conflict).
+ */
+function isLineMergeable(base, ours, theirs) {
+  if (base.length === 0) return false;
+  const oursRemoved = multisetDiff(base, ours);
+  const theirsRemoved = multisetDiff(base, theirs);
+  const theirsRemovedSet = new Set(theirsRemoved);
+  return !oursRemoved.some((l) => theirsRemovedSet.has(l));
+}
+
 // ─── replay ──────────────────────────────────────────────────────────────────
 
 const merges = git(["rev-list", "--merges", `--max-count=${MAX_MERGES}`, "HEAD"])
@@ -149,6 +201,12 @@ let resolveErrors = 0;
 let totalHunks = 0;
 
 const resolveOptions = WITH_REFACTORING ? { refactoringAware: { enabled: true } } : {};
+
+// --lists accumulators
+let listComplexHunks = 0;
+let listLineMergeable = 0;
+let listTotalComplex = 0;
+const listExamples = [];
 
 // --echo accumulators
 let complexHunks = 0;
@@ -202,6 +260,15 @@ for (const m of merges) {
       }
       if (hunk.type === "refactoring_aware_merge" && refactoringExamples.length < 25) {
         refactoringExamples.push({ merge: m.slice(0, 10), path, line: hunk.startLine });
+      }
+      if (WITH_LISTS && hunk.type === "complex") {
+        listTotalComplex++;
+        if (isListShaped(hunk.oursLines) && isListShaped(hunk.theirsLines)) {
+          listComplexHunks++;
+          const mergeable = isLineMergeable(hunk.baseLines, hunk.oursLines, hunk.theirsLines);
+          if (mergeable) listLineMergeable++;
+          if (listExamples.length < 20) listExamples.push({ merge: m.slice(0, 10), path, line: hunk.startLine, mergeable });
+        }
       }
       if (WITH_ECHO && hunk.type === "complex") {
         complexHunks++;
@@ -273,6 +340,16 @@ if (AS_JSON) {
     for (const ex of tokenLevelExamples) console.log(`  ${ex.merge}  ${ex.path}:${ex.line}`);
   } else {
     console.log(`\ntoken_level_merge: ZERO hits on this corpus.`);
+  }
+  if (WITH_LISTS) {
+    const lpct = (n) => listTotalComplex ? ((n / listTotalComplex) * 100).toFixed(1) : "0.0";
+    console.log(`\n─── commutative-list opportunity ───`);
+    console.log(`complex hunks list-shaped:       ${listComplexHunks}/${listTotalComplex}  (${lpct(listComplexHunks)}%)`);
+    console.log(`  ├─ line-mergeable (disjoint):  ${listLineMergeable}  (${lpct(listLineMergeable)}%)`);
+    console.log(`  └─ same-item touched (key-aware needed): ${listComplexHunks - listLineMergeable}`);
+    if (listExamples.length) {
+      for (const ex of listExamples) console.log(`  ${ex.merge}  ${ex.path}:${ex.line}  ${ex.mergeable ? "[mergeable]" : "[same-item]"}`);
+    }
   }
   if (WITH_ECHO) {
     const pct = (n) => complexHunks ? ((n / complexHunks) * 100).toFixed(1) : "0.0";
