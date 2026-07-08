@@ -249,7 +249,7 @@ Three framing principles we did not break:
 
 The LLM is not the future of merge resolution. The future is the same as the past: deterministic algorithms where they work, structural parsers where text fails, a last-resort fallback where structure fails too, and a human in front of every change that matters. v2.5 adds only the third item — the first two still do most of the work.
 
-Full feature documented in the [LLM fallback guide](/guide/llm-fallback). Implementation lives in `packages/core/src/patterns/llm-proposed.ts`, `packages/core/src/resolvers/llm-fallback.ts`, and `packages/core/src/resolver/llm-pipeline.ts`. Spec in [`CORE-V2-ROADMAP.md`](https://github.com/devlint/GitWand/blob/main/CORE-V2-ROADMAP.md) section v2.5.0.
+Full feature documented in the [LLM fallback guide](/guide/llm-fallback). Implementation lives in `packages/core/src/patterns/llm-proposed.ts`, `packages/core/src/resolvers/llm-fallback.ts`, and `packages/core/src/resolver/llm-pipeline.ts`. Spec was in `CORE-V2-ROADMAP.md` section v2.5.0 (doc since removed — the v2 sequence it planned is fully shipped).
 
 If you have used it on a real merge and the rejection rate surprised you in either direction, [open a discussion](https://github.com/devlint/GitWand/discussions) — the threshold defaults are what we expect to tune next.
 

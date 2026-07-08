@@ -456,7 +456,7 @@ v2.10 opens GitWand to the broader forge ecosystem and brings the MCP ecosystem 
 
 ## [2.9.0] - 2026-05-12
 
-Launchpad — cross-repo dashboard inspired by GitKraken's Launchpad but local-first (no cloud, no account). Closes the v2.9.0 ROADMAP entry. Audit established the chantier was ~95% implemented across previous unmerged work; this release wraps the closure (keyboard shortcut, tab persistence, lazy Team tab, UI tests) and ships. Detail per task in [PLAN-v2.9-launchpad.md](./PLAN-v2.9-launchpad.md).
+Launchpad — cross-repo dashboard inspired by GitKraken's Launchpad but local-first (no cloud, no account). Closes the v2.9.0 ROADMAP entry. Audit established the chantier was ~95% implemented across previous unmerged work; this release wraps the closure (keyboard shortcut, tab persistence, lazy Team tab, UI tests) and ships. Detail per task was in `PLAN-v2.9-launchpad.md` (since removed — chantier fully closed).
 
 ### Added
 
@@ -554,7 +554,7 @@ Critical lag fixes that surfaced post-2.8.4 release. The v2.8.2 perf hardening h
 
 ## [2.8.4] - 2026-05-12
 
-Quick fixes batch — 2 bugs, 6 UX polish, 1 feature (Mode hors-ligne). Closes the "Quick Fixes" section of the ROADMAP. Detail per chantier in [PLAN-quick-fixes.md](./PLAN-quick-fixes.md).
+Quick fixes batch — 2 bugs, 6 UX polish, 1 feature (Mode hors-ligne). Closes the "Quick Fixes" section of the ROADMAP. Detail per chantier was in `PLAN-quick-fixes.md` (since removed — chantier fully closed).
 
 ### Fixed
 
@@ -602,7 +602,7 @@ Quick fixes batch — 2 bugs, 6 UX polish, 1 feature (Mode hors-ligne). Closes t
 
 ## [2.8.2] - 2026-05-11
 
-Performance hardening release. After a fluidity regression observed between v2.6 → v2.8, ~30 chantiers were delivered across 6 optimization levels (frontend, polling/IPC, backend Rust, bundle, measurements, code structure). Behaviour is unchanged for end users — this is consolidation, no new commands or API surface. Detail per chantier in [PERFORMANCE_PLAN.md](./PERFORMANCE_PLAN.md).
+Performance hardening release. After a fluidity regression observed between v2.6 → v2.8, ~30 chantiers were delivered across 6 optimization levels (frontend, polling/IPC, backend Rust, bundle, measurements, code structure). Behaviour is unchanged for end users — this is consolidation, no new commands or API surface. The working plan (`PERFORMANCE_PLAN.md`) has since been folded into `ROADMAP.md` — its remaining items (FS watchers, libgit2 phase 1, Web Worker diff/parse, Channels for progress streaming) are scoped under v3.9.0.
 
 ### Changed
 
@@ -755,7 +755,7 @@ Desktop product track v2.7: Workspaces multi-repo, Hooks manager, and Worktree f
 
 ## [2.6.0] - 2026-05-01
 
-`@gitwand/core@2.6.0` closes the v2.6 entry of the [CORE-V2-ROADMAP](./CORE-V2-ROADMAP.md): a refactoring-aware merge pipeline that detects concurrent rename / move-method refactorings and resolves the resulting conflicts via an invert → merge → replay strategy (inspired by Ellis et al. TSE 2023). Opt-in via `refactoringAware.enabled: true`. Otherwise fully backward-compatible — the new code path is completely silent by default.
+`@gitwand/core@2.6.0` closes the v2.6 entry of the CORE-V2-ROADMAP (since folded into `ROADMAP.md`): a refactoring-aware merge pipeline that detects concurrent rename / move-method refactorings and resolves the resulting conflicts via an invert → merge → replay strategy (inspired by Ellis et al. TSE 2023). Opt-in via `refactoringAware.enabled: true`. Otherwise fully backward-compatible — the new code path is completely silent by default.
 
 ### Added
 
@@ -797,7 +797,7 @@ Desktop patch — PR filter pipeline fixed end-to-end, offline mode, error log t
 
 ## [2.5.0] - 2026-04-30
 
-`@gitwand/core@2.5.0` closes the v2.5 entry of the [CORE-V2-ROADMAP](./CORE-V2-ROADMAP.md): a LLM fallback that resolves `complex` conflicts through a generative model when the deterministic engine cannot. Plus desktop search reliability, PR list stability, and accumulated UX polish.
+`@gitwand/core@2.5.0` closes the v2.5 entry of the CORE-V2-ROADMAP (since folded into `ROADMAP.md`): a LLM fallback that resolves `complex` conflicts through a generative model when the deterministic engine cannot. Plus desktop search reliability, PR list stability, and accumulated UX polish.
 
 ### Added
 
@@ -822,7 +822,7 @@ Desktop patch — PR filter pipeline fixed end-to-end, offline mode, error log t
 
 ## [2.4.1] - 2026-04-29
 
-Implementation pass on the v2.4 entry of the [CORE-V2-ROADMAP](./CORE-V2-ROADMAP.md) — the resolver gains a parse-tree validation layer, a third validation tier (`off` / `balanced` / `strict`), and a `postMergeRisk` dimension on `ConfidenceScore` that retroactively demotes resolutions whose output doesn't parse. Plus an in-app Help Panel, agent-discovery surfaces on the marketing site, and a fix for the merge-success modal that was offering to delete `master` / `main` / `develop`.
+Implementation pass on the v2.4 entry of the CORE-V2-ROADMAP (since folded into `ROADMAP.md`) — the resolver gains a parse-tree validation layer, a third validation tier (`off` / `balanced` / `strict`), and a `postMergeRisk` dimension on `ConfidenceScore` that retroactively demotes resolutions whose output doesn't parse. Plus an in-app Help Panel, agent-discovery surfaces on the marketing site, and a fix for the merge-success modal that was offering to delete `master` / `main` / `develop`.
 
 ### Added
 

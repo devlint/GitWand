@@ -1,6 +1,6 @@
 # `@gitwand/core` — Changelog
 
-All notable changes to this package will be documented in this file. Format inspired by [Keep a Changelog](https://keepachangelog.com/), with deltas grouped by minor version of the v2 sequence (see [`CORE-V2-ROADMAP.md`](../../CORE-V2-ROADMAP.md) for the full plan).
+All notable changes to this package will be documented in this file. Format inspired by [Keep a Changelog](https://keepachangelog.com/), with deltas grouped by minor version of the v2 sequence (originally planned in `CORE-V2-ROADMAP.md`, since removed — the v2 sequence is fully shipped; see the root [ROADMAP.md](../../ROADMAP.md) for what's next).
 
 ## [2.2.0] — 2026-04-27
 

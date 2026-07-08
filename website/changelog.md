@@ -644,7 +644,7 @@ Validation now ships in three tiers. `off` skips the parse-tree pass entirely â€
 
 The async resolver got the same treatment: `resolveAsync()` now populates `externalValidation` on every return path, regardless of which tier ran. Five new corpus fixtures (F31â€“F35) cover the v2.4 surface, and two new test suites (`v2-core-scenarios.test.ts` and `validation-parse-tree.test.ts`, 1,100 lines together) hold the line at **841/841 passing**.
 
-This closes the v2.4 entry on the [CORE-V2-ROADMAP](https://github.com/devlint/GitWand/blob/main/CORE-V2-ROADMAP.md). The expected impact, per the roadmap target, is a roughly 50 % drop in parse-tree-broken false positives.
+This closes the v2.4 entry on the CORE-V2-ROADMAP (since folded into `ROADMAP.md`). The expected impact, per the roadmap target, is a roughly 50 % drop in parse-tree-broken false positives.
 
 ### In-app Help Panel
 

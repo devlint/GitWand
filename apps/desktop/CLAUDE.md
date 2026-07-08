@@ -89,7 +89,7 @@ Quand on ajoute une commande Rust, le wrapper TS correspondant doit être ajout�
 
 ## Performance invariants — règles à respecter (P6.4)
 
-Liste tirée du chantier perf de mai 2026 (cf. `PERFORMANCE_PLAN.md` à la racine). Toute PR qui touche `apps/desktop/` doit s'y conformer ; un reviewer qui voit une violation a la légitimité de bloquer.
+Liste tirée du chantier perf de mai 2026 (voir `CHANGELOG.md` v2.8.2 et `ROADMAP.md` v3.9.0 pour la suite). Toute PR qui touche `apps/desktop/` doit s'y conformer ; un reviewer qui voit une violation a la légitimité de bloquer.
 
 ### Frontend Vue 3
 

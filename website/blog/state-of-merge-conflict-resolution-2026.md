@@ -144,7 +144,7 @@ The shipped engine works because the patterns it does cover are all *strictly sa
 | **v2.5** | LLM fallback through MCP, opt-in | Family 4 — last-resort |
 | **v2.6** | Refactoring-aware merge, experimental | Family 3 — RefMerge in TS |
 
-Each release is independently shippable. The two big architectural shifts are v2.3 (tree-sitter, with a runtime adapter for Node, browser, and Tauri) and v2.5 (async resolution, opt-in, audit-trailed). The full plan is in [`CORE-V2-ROADMAP.md`](https://github.com/devlint/GitWand/blob/main/CORE-V2-ROADMAP.md) at the root of the repo, with file-level specs and tests for each release.
+Each release is independently shippable. The two big architectural shifts are v2.3 (tree-sitter, with a runtime adapter for Node, browser, and Tauri) and v2.5 (async resolution, opt-in, audit-trailed). The full plan was in `CORE-V2-ROADMAP.md` at the root of the repo, with file-level specs and tests for each release (doc since removed — every release it planned has shipped; see the current [ROADMAP.md](https://github.com/devlint/GitWand/blob/main/ROADMAP.md) for what's next).
 
 ---
 
@@ -178,4 +178,4 @@ If you've thought hard about any of this and want to push back, [open an issue o
 
 *Curious about GitWand? [Download it here](https://gitwand.app/) — it's free, open-source, and shipping monthly.*
 
-*Sources are at the end of the [companion roadmap document](https://github.com/devlint/GitWand/blob/main/CORE-V2-ROADMAP.md), with the full bibliography (ConGra, Mergiraf, Weave, RefMerge, Da Silva 2024, Project Harmony, MergeBERT, Nugroho EMSE 2019, web-tree-sitter, Pijul, SemanticMerge).*
+*Sources were at the end of the companion roadmap document (`CORE-V2-ROADMAP.md`, since removed), with the full bibliography (ConGra, Mergiraf, Weave, RefMerge, Da Silva 2024, Project Harmony, MergeBERT, Nugroho EMSE 2019, web-tree-sitter, Pijul, SemanticMerge).*

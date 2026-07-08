@@ -70,13 +70,15 @@ _Inspired by GitUp's snapshot history. Extends the Undo stack (v1.2.0) from "und
 
 _Inspired by GitUp's Live Map. Replace the 2s status poll with real FS events, and start the shell-out → libgit2 migration on the cheap-refresh path._
 
-**Today's baseline** — `useRepoPoller.ts` polls every 2s (visibility-gated); no file watcher (`notify` crate absent). Backend: ~150 `git_cmd()` shell-outs vs 4 libgit2 fast-paths (`git/libgit2.rs`); `git_status` already has a libgit2 fast-path with CLI fallback.
+**Today's baseline** — `useRepoPoller.ts` polls every 2s (visibility-gated); no file watcher (`notify` crate absent). Backend: ~150 `git_cmd()` shell-outs vs 4 libgit2 fast-paths (`git/libgit2.rs`); `git_status` already has a libgit2 fast-path with CLI fallback. Frontend: `packages/core` diff/parse still runs synchronously on the main thread — no Web Worker, no `comlink` (orphaned §5.2 lever from `PERFORMANCE_PLAN.md`, never picked up by a shipped version).
 
 - **FS watcher** — `notify` crate on `.git/` + working tree, debounced/coalesced Tauri events; Git Tree, status and sidebar refresh in real time, including changes made outside the app
 - **Polling demotion** — the 2s poll becomes a low-frequency fallback (watcher failure, network mounts); consistent with the polling-discipline rule (no unconditional intervals)
 - **libgit2 phase 1: `git_diff` + `git_blame`** — migrate the two read paths with the best effort/risk ratio (per backend audit); CLI fallback kept, covered by the parity harness (`tests/parity/`)
+- **Web Worker for diff/parse** — move `packages/core`'s diff/parse hot path off the main thread via `comlink`, browser-safe like the rest of the package; lands here because it's on the same hot path as the FS-watcher refresh and the libgit2 migration above, and because the CPU load on that path is only going up — `token_level_merge` (already shipped, v3.4.0), Combined Diffs multi-commit aggregation (v3.12.0) and the v4.0 tree-sitter code graph all add main-thread work to it
+- **Channels for progress streaming** — migrate `clone`/`fetch` progress off the global `app_handle.emit("clone-progress", …)` broadcast (v2.11.0) onto a scoped `tauri::ipc::Channel<T>` per invoke, the pattern already proven by the terminal's PTY output (v3.2.0); closes the other orphaned lever from `PERFORMANCE_PLAN.md` (§5.4)
 - **Event-driven invalidation** — post-command manual refreshes replaced by watcher events (single code path)
-- **Indexing hook** — the watcher API is designed with a second consumer in mind: incremental update of the v4.0 code graph (re-index only the changed files, Greptile-style hot index, fully local)
+- **Indexing hook** — the watcher API is designed with a second consumer in mind: incremental update of the v4.0 code graph (re-index only the changed files, Greptile-style hot index, fully local); this is also the first real consumer that will lean on the Worker above once tree-sitter parsing moves off the main thread
 
 ---
 
@@ -109,7 +111,7 @@ The paradigm: short stacked branches (`feat/step-1` → `feat/step-2` → `feat/
 
 **PRs** — "Submit stack": creates or updates GitHub PRs for each layer; automatic retarget when a layer is merged
 
-**Implementation** — Metadata in `.gitwand-workspace.json`; no external CLI dependency
+**Implementation** — Metadata in `.gitwand-workspace.json`; no external CLI dependency. Cascading Restack and per-layer Submit-stack progress stream via `tauri::ipc::Channel` (v3.9.0 pattern) rather than a new global `emit()` broadcast
 
 ---
 
