@@ -3,7 +3,7 @@ const GROUPS = [
   {
     title: 'Core Git',
     items: [
-      ['Smart resolution', '10 resolution patterns with a pattern registry and confidence scoring. 95%+ of trivial conflicts resolved without intervention.'],
+      ['Smart resolution', '8 deterministic patterns with a pattern registry and confidence scoring. 95%+ of trivial conflicts resolved without intervention.'],
       ['Integrated Pull Requests', 'Review GitHub, GitLab, Bitbucket and Azure DevOps PRs directly in the app — comments, reviews, CI status, conflict preview.'],
       ['Visual diff', 'Unified diff viewer with syntax highlighting, hunk-level staging, and merge preview.'],
       ['Folder tree diff', 'Flat ↔ tree toggle in the file list with per-folder aggregates, click-to-filter and a resizable sidebar.'],

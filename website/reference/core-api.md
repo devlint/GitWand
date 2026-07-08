@@ -66,6 +66,28 @@ interface MergeStats {
 }
 ```
 
+### `resolveAsync(content, filePath, options?, structuralOpts?)`
+
+Async variant of `resolve`. Adds tree-sitter structural merge for supported languages, parse-tree validation, and the opt-in LLM fallback phase. Use this when `llmFallback` or structural merge is enabled.
+
+### `summarizeTiers(byType)` *(v3.4)*
+
+Derives the **recoverable-before-model** funnel from `MergeStats.byType` — a pure, TS-side helper (not part of `MergeStats` itself, which is a serialized contract).
+
+```typescript
+import { summarizeTiers } from '@gitwand/core'
+
+const tiers = summarizeTiers(result.stats.byType)
+// {
+//   byTier: { trivial, advancedDeterministic, model, unresolved },
+//   residual,              // advancedDeterministic + model + unresolved
+//   aiReachable,           // model + unresolved
+//   recoverableBeforeModel // advancedDeterministic / residual, 0 when residual is 0
+// }
+```
+
+Consumed by the CLI resolve summary, the desktop MergeEditor, and the MCP `tierSummary` field.
+
 ## Parser Utilities
 
 ### `parseConflictMarkers(content)`
@@ -81,7 +103,7 @@ const hunks = parseConflictMarkers(fileContent)
 
 ### `classifyConflict(hunk)`
 
-Classifies a conflict hunk into one of the 8 types.
+Classifies a conflict hunk into one of the conflict types (12 patterns in the registry, plus `generated_file`).
 
 ```typescript
 import { classifyConflict } from '@gitwand/core'
@@ -200,7 +222,7 @@ import {
 
 ## Types
 
-All types are exported from the package:
+The commonly used types are exported from the package (this list is not exhaustive — see [`packages/core/src/index.ts`](https://github.com/devlint/GitWand/blob/main/packages/core/src/index.ts) for the full surface, including the resolver-, diff- and format-profile result types):
 
 ```typescript
 import type {
@@ -215,9 +237,23 @@ import type {
   DecisionTrace,
   TraceStep,
   ValidationResult,
+  ExternalValidationResult,
   GitWandOptions,
   MergePolicy,
   PolicyConfig,
   GitWandrcConfig,
+  // LLM fallback (v2.5)
+  LlmEndpoint,
+  LlmFallbackConfig,
+  LlmTrace,
+  // Refactoring-aware merge (v2.6)
+  RefactoringKind,
+  Refactoring,
+  // Token-level merge (v3.4)
+  TokenMergeTrace,
+  TokenMergeLineDetail,
+  // Recoverable-before-model tier metric (v3.4)
+  ResolutionTier,
+  TierSummary,
 } from '@gitwand/core'
 ```

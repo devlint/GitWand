@@ -38,7 +38,7 @@ No hedging: **absolute performance ceiling and keyboard-driven minimalism**. The
 
 ### 1. It finishes the merge
 
-Sublime Merge hands you beautiful conflict markers; you still do the work. GitWand's [deterministic engine](/conflict-engine) classifies each hunk (10 patterns — reorders, boundary insertions, tree-sitter structural merges, lockfile resolvers) and auto-resolves the trivial ones with a confidence score and full decision trace. Both tools refuse to guess; only one eliminates the busywork. And GitWand's transparency matches SM's: every resolution is auditable, every git command visible in the command log.
+Sublime Merge hands you beautiful conflict markers; you still do the work. GitWand's [deterministic engine](/conflict-engine) classifies each hunk (8 deterministic patterns — reorders, boundary insertions, tree-sitter structural merges, lockfile resolvers) and auto-resolves the trivial ones with a confidence score and full decision trace. Both tools refuse to guess; only one eliminates the busywork. And GitWand's transparency matches SM's: every resolution is auditable, every git command visible in the command log.
 
 ### 2. The workflow around Git
 

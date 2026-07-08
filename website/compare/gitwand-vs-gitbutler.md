@@ -40,7 +40,7 @@ head:
 
 ### 1. Conflicts, solved rather than reorganized
 
-Virtual branches can *reduce* conflicts; they don't resolve the ones that happen — rebases, long-lived branches, team merges still bite. GitWand's [engine](/conflict-engine) classifies every hunk (10 deterministic patterns, tree-sitter structural merges, lockfile resolvers) and auto-resolves the trivial ones with an auditable trace. There's even a **Conflict Predictor**: simulate a merge, rebase or cherry-pick and see the risk before you act.
+Virtual branches can *reduce* conflicts; they don't resolve the ones that happen — rebases, long-lived branches, team merges still bite. GitWand's [engine](/conflict-engine) classifies every hunk (8 deterministic patterns, tree-sitter structural merges, lockfile resolvers) and auto-resolves the trivial ones with an auditable trace. There's even a **Conflict Predictor**: simulate a merge, rebase or cherry-pick and see the risk before you act.
 
 ### 2. A complete classic client
 

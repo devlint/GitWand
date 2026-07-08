@@ -1,9 +1,9 @@
 # GitWand
 
-> GitWand is a free, open-source (MIT) native Git client that automatically resolves trivial merge conflicts using 10 deterministic patterns — no LLM guessing, no hallucinations. It auto-resolves ~95% of trivial conflicts with a confidence score and a full decision trace for every hunk. Built with Tauri 2 + Rust (~8 MB binary). Available as a desktop app (macOS, Linux, Windows), a CLI, a VS Code extension, and an MCP server for AI agents.
+> GitWand is a free, open-source (MIT) native Git client that automatically resolves trivial merge conflicts using 8 deterministic patterns — no LLM guessing, no hallucinations. It auto-resolves ~95% of trivial conflicts with a confidence score and a full decision trace for every hunk. Built with Tauri 2 + Rust (~8 MB binary). Available as a desktop app (macOS, Linux, Windows), a CLI, a VS Code extension, and an MCP server for AI agents.
 
 Key facts:
-- Deterministic conflict-resolution engine: 10 patterns, confidence scoring (certain/high/medium/low), decision trace per hunk. LLM fallback is strictly opt-in.
+- Deterministic conflict-resolution engine: 8 auto-applied patterns (12-pattern registry), confidence scoring (certain/high/medium/low), decision trace per hunk. LLM fallback is strictly opt-in.
 - Full Git client: changes, history (Git Tree), branches, push/pull, interactive rebase, worktrees, submodules, integrated PR review (GitHub, GitLab, Bitbucket, Azure DevOps).
 - AI-agent friendly: MCP server (`@gitwand/mcp`), agent sessions (Claude Code, Codex, opencode, Gemini), scratch worktrees for AI tasks.
 - Native performance: Tauri 2 + Rust, ~8 MB binary, local-first, zero mandatory cloud.
@@ -15,7 +15,7 @@ Key facts:
 - [CLI](https://gitwand.app/guide/cli): `@gitwand/cli` usage
 - [MCP server](https://gitwand.app/guide/mcp): expose the engine to Claude Code, Cursor, Windsurf and any MCP client
 - [VS Code extension](https://gitwand.app/guide/vscode): resolve conflicts inside VS Code
-- [Conflict resolution](https://gitwand.app/guide/conflict-resolution): how the 10 patterns work
+- [Conflict resolution](https://gitwand.app/guide/conflict-resolution): how the patterns work
 - [AI integrations](https://gitwand.app/guide/ai): agent sessions and providers
 - [LLM fallback](https://gitwand.app/guide/llm-fallback): the opt-in LLM path and its audit trail
 
