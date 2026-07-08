@@ -51,7 +51,14 @@ import { requireOnline } from "../utils/networkGuard";
 import { t } from "./useI18n";
 import { useWorkspaceScope } from "./useWorkspaceScope";
 
-export type ViewMode = "dashboard" | "changes" | "history" | "graph" | "prs" | "launchpad" | "issue";
+export type ViewMode =
+  | "dashboard"
+  | "changes"
+  | "history"
+  | "graph"
+  | "prs"
+  | "launchpad"
+  | "issue";
 
 /** Modal-based confirmation (App.vue's `askConfirm`), injected to avoid native `confirm()`. */
 export type ConfirmFn = (opts: {
@@ -107,16 +114,39 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
    * NOT scoped.length. Zero when no scope is active.
    */
   const hiddenCommitCount = computed(() =>
-    activeScope.value ? Math.max(0, totalUnscopedCount.value - scopedTotalCount.value) : 0,
+    activeScope.value
+      ? Math.max(0, totalUnscopedCount.value - scopedTotalCount.value)
+      : 0,
   );
+
+  /**
+   * Authoritative total commit count for the current log scope — the paging
+   * ceiling. Scoped total when a monorepo scope is active, otherwise the
+   * unscoped all-refs total. Drives `logHasMore` in all-refs mode where the
+   * page length is unreliable (see loadLog).
+   */
+  function effectiveTotalCount(): number {
+    return activeScope.value
+      ? scopedTotalCount.value
+      : totalUnscopedCount.value;
+  }
 
   /** Refresh the unscoped + scoped rev counts for the hidden-commit badge. */
   async function loadRevCounts() {
     if (!folderPath.value) return;
     try {
-      totalUnscopedCount.value = await getGitRevCount(folderPath.value, undefined, true);
+      totalUnscopedCount.value = await getGitRevCount(
+        folderPath.value,
+        undefined,
+        true,
+      );
       scopedTotalCount.value = activeScope.value
-        ? await getGitRevCount(folderPath.value, undefined, true, activeScope.value)
+        ? await getGitRevCount(
+            folderPath.value,
+            undefined,
+            true,
+            activeScope.value,
+          )
         : totalUnscopedCount.value;
     } catch {
       // Non-fatal — the badge just won't update. Don't surface to the user.
@@ -139,11 +169,16 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
   });
 
   // Restore from localStorage when status (and thus branch) becomes known.
-  watch(() => status.value?.branch, (branch) => {
-    if (!branch) return;
-    const key = forcePushKey();
-    forcePushPreferred.value = key ? localStorage.getItem(key) === "1" : false;
-  });
+  watch(
+    () => status.value?.branch,
+    (branch) => {
+      if (!branch) return;
+      const key = forcePushKey();
+      forcePushPreferred.value = key
+        ? localStorage.getItem(key) === "1"
+        : false;
+    },
+  );
 
   // Commit editor state
   const COMMIT_SIGNATURE = "\u{1FA84} Commit via GitWand";
@@ -156,7 +191,9 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
         const s = JSON.parse(raw);
         if (s.commitSignature === false) return "";
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     return COMMIT_SIGNATURE;
   }
 
@@ -282,10 +319,23 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
 
   /** Quick stats for the header and graph. */
   const repoStats = computed(() => {
-    if (!status.value) return { staged: 0, unstaged: 0, untracked: 0, conflicted: 0, added: 0, modified: 0, deleted: 0, renamed: 0 };
+    if (!status.value)
+      return {
+        staged: 0,
+        unstaged: 0,
+        untracked: 0,
+        conflicted: 0,
+        added: 0,
+        modified: 0,
+        deleted: 0,
+        renamed: 0,
+      };
     const s = status.value;
 
-    const fileStates = new Map<string, "added" | "modified" | "deleted" | "renamed">();
+    const fileStates = new Map<
+      string,
+      "added" | "modified" | "deleted" | "renamed"
+    >();
 
     for (const path of s.untracked) {
       fileStates.set(path, "added");
@@ -306,7 +356,10 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       else if (!current) fileStates.set(f.path, "modified");
     }
 
-    let added = 0, modified = 0, deleted = 0, renamed = 0;
+    let added = 0,
+      modified = 0,
+      deleted = 0,
+      renamed = 0;
     for (const state of fileStates.values()) {
       if (state === "added") added++;
       else if (state === "modified") modified++;
@@ -322,7 +375,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       added,
       modified,
       deleted,
-      renamed
+      renamed,
     };
   });
 
@@ -337,7 +390,11 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
 
   /** Can we commit? (staged files + non-empty summary) */
   const canCommit = computed(() => {
-    return repoStats.value.staged > 0 && commitSummary.value.trim().length > 0 && !isCommitting.value;
+    return (
+      repoStats.value.staged > 0 &&
+      commitSummary.value.trim().length > 0 &&
+      !isCommitting.value
+    );
   });
 
   /**
@@ -401,9 +458,22 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
    * Updates tracking refs so ahead/behind counts become accurate.
    * Used by both manual user action and the consolidated useRepoPoller.
    */
-  async function fetchRemote() {
+  /**
+   * @param full When true, also reload every cached collection (branches,
+   *   stashes, worktrees) on top of status + log. Used by the manual "up to
+   *   date" / sync click so one gesture refreshes the whole view. The 30s
+   *   background poll leaves it false to stay off the hot path (per the perf
+   *   invariants — no extra process spawns on the polling tick).
+   */
+  async function fetchRemote(full = false) {
     // Skip fetch during merge operations to avoid git lock conflicts
-    if (!folderPath.value || isFetching.value || isMerging.value || hasConflicts.value) return;
+    if (
+      !folderPath.value ||
+      isFetching.value ||
+      isMerging.value ||
+      hasConflicts.value
+    )
+      return;
     // F1 — Mode hors-ligne: short-circuit before hitting the IPC so we
     // can never hang on the 5-min NETWORK timeout when the link is dead.
     if (!(await requireOnline("fetch"))) return;
@@ -414,7 +484,14 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       await loadStatus(folderPath.value);
       // v2.14 — Refresh log so clicking "Up to date" or periodic fetch
       // updates the Git Tree / History view with new remote commits.
-      await loadLog();
+      // Force: a fetch moves remote-tracking refs without moving local HEAD,
+      // so the canonical fast path would otherwise keep stale origin/* labels.
+      await loadLog(undefined, true);
+      // Manual sync: refresh the rest of the cached view so a deleted/renamed
+      // remote branch, a pruned ref, or a new tag surfaces without a reopen.
+      if (full) {
+        await Promise.all([loadBranches(), loadStashes(), loadWorktrees()]);
+      }
     } catch (err) {
       console.warn("[GitWand] fetch failed:", err);
     } finally {
@@ -434,7 +511,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     selectedCommitHash.value = null;
     commitDiffs.value = [];
     log.value = [];
-    branches.value = [];        // ← reset so the palette doesn't show stale branches from the previous repo
+    branches.value = []; // ← reset so the palette doesn't show stale branches from the previous repo
     selectedFilePath.value = null;
     diff.value = null;
 
@@ -482,12 +559,9 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
    * v2.14 — Now also refreshes the commit log so the Git Tree and History
    * views stay in sync with the repository state.
    */
-  async function refresh() {
+  async function refresh(forceLog = false) {
     if (!folderPath.value) return;
-    await Promise.all([
-      loadStatus(folderPath.value),
-      loadLog(),
-    ]);
+    await Promise.all([loadStatus(folderPath.value), loadLog(undefined, forceLog)]);
     // Also refresh diff if a file is selected
     if (selectedFilePath.value) {
       await loadDiff(selectedFilePath.value, selectedFileStaged.value);
@@ -523,32 +597,153 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
   // Page size used for both initial load and subsequent pages.
   const LOG_PAGE = 100;
 
-  async function loadLog(count?: number) {
+  // ── Full-history background prefetch + per-repo session cache ────────────
+  // The graph anchors every branch on main/master and wants a smooth
+  // scroll-to-root, so instead of a bounded trunk seek we lazily page the whole
+  // history in the background (idle-scheduled, cancellable) and cache it per
+  // repo. Re-opening the repo restores the full log instantly.
+  //
+  // Only the canonical view (all refs, all authors, no monorepo scope) is
+  // prefetched/cached — filtered views stay on-demand.
+  const LOG_CACHE = new Map<string, GitLogEntry[]>();
+  const BG_PAGE = 500; // larger background page → fewer layout recomputes
+  // Ceiling on the automatic background prefetch. Beyond this the graph stays
+  // usable and scroll-loading still reaches older history on demand — we just
+  // stop eagerly pulling the whole DAG into memory / re-laying it out. A log
+  // capped here is NOT cached as complete, so `logHasMore` stays true and
+  // scroll pagination continues past the ceiling.
+  const PREFETCH_CEILING = 5000;
+  let _prefetchToken = 0;
+
+  function isCanonicalLogView(): boolean {
+    return (
+      logBranchFilter.value === "all" &&
+      logAuthorFilter.value === "all" &&
+      !activeScope.value
+    );
+  }
+
+  /** Resolve on the next idle slice so background paging never blocks input. */
+  function whenIdle(): Promise<void> {
+    return new Promise((resolve) => {
+      const ric = (globalThis as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => void }).requestIdleCallback;
+      if (typeof ric === "function") ric(() => resolve(), { timeout: 300 });
+      else setTimeout(resolve, 32);
+    });
+  }
+
+  /**
+   * Lazily page the rest of the history in the background, appending as it
+   * goes, then cache the complete log. Cancels if the repo changes, the view
+   * leaves canonical, or a newer prefetch supersedes this one.
+   */
+  async function prefetchAllPages() {
+    if (!isCanonicalLogView()) return;
+    const token = ++_prefetchToken;
+    const repo = folderPath.value;
+    if (!repo) return;
+    const live = () =>
+      folderPath.value === repo &&
+      token === _prefetchToken &&
+      isCanonicalLogView();
+    while (live() && logHasMore.value && log.value.length < PREFETCH_CEILING) {
+      await whenIdle();
+      if (!live()) return;
+      await loadMoreLog(BG_PAGE);
+    }
+    // Cache only a fully-paged log (reached the end before the ceiling). A
+    // ceiling-capped log keeps `logHasMore` true and is left uncached so
+    // scroll-loading can still fetch the rest.
+    if (live() && !logHasMore.value) {
+      LOG_CACHE.set(repo, log.value.slice());
+    }
+  }
+
+  /**
+   * @param force When true, bypass the canonical fast-paths that trust an
+   *   unchanged top-commit hash (the in-memory `haveSameHead` keep and the
+   *   `LOG_CACHE` restore) and refetch fresh. Ref/decoration-only mutations
+   *   (push moving origin/HEAD, branch/tag/stash deletion, fetch) leave the top
+   *   commit untouched, so without this they'd serve a stale log. Refetches at
+   *   the current depth so a paginated view doesn't collapse back to page 1.
+   */
+  async function loadLog(count?: number, force = false) {
     if (!folderPath.value) return;
     try {
       const authorEmail =
-        logAuthorFilter.value === "mine" ? (currentGitUser.value?.email ?? "") : undefined;
-      // When refreshing, reload at least as many commits as are currently visible
-      // so polling doesn't silently collapse a paginated log back to page 1.
-      const pageSize = count ?? Math.max(LOG_PAGE, log.value.length);
+        logAuthorFilter.value === "mine"
+          ? (currentGitUser.value?.email ?? "")
+          : undefined;
       const isCurrentBranchOnly = logBranchFilter.value === "current";
+      const isCanon = isCanonicalLogView();
+      // Canonical view is backed by the cache + background prefetch, so a poll
+      // only needs a cheap first-page probe to detect HEAD movement. Filtered
+      // views reload at least what's visible so polling doesn't collapse a
+      // paginated log back to page 1.
+      const pageSize = isCanon
+        ? force
+          ? Math.max(LOG_PAGE, log.value.length)
+          : LOG_PAGE
+        : (count ?? Math.max(LOG_PAGE, log.value.length));
       const entries = await getGitLog(
         folderPath.value,
         pageSize,
-        !isCurrentBranchOnly,                            // all refs (false when branch-only)
+        !isCurrentBranchOnly, // all refs (false when branch-only)
         authorEmail,
         0,
         isCurrentBranchOnly ? (status.value?.branch ?? undefined) : undefined,
-        activeScope.value ?? undefined,                   // pathspec (monorepo scope)
+        activeScope.value ?? undefined, // pathspec (monorepo scope)
       );
-      log.value = entries;
-      // When the result is exactly one full page, assume more exist.
-      logHasMore.value = entries.length >= pageSize;
       // Refresh the hidden-commit badge counts alongside the scoped log.
       await loadRevCounts();
+
+      const head = entries[0]?.hashFull;
+      if (isCanon) {
+        const cached = LOG_CACHE.get(folderPath.value);
+        const haveSameHead =
+          !force &&
+          log.value.length >= entries.length &&
+          log.value[0]?.hashFull === head;
+        if (haveSameHead) {
+          // Poll while we already hold this page (or the full log / an in-flight
+          // prefetch) and HEAD hasn't moved — keep it, don't collapse. Resume
+          // the prefetch if it was interrupted.
+          if (logHasMore.value) void prefetchAllPages();
+        } else if (
+          !force &&
+          cached &&
+          cached.length > 0 &&
+          cached[0]?.hashFull === head
+        ) {
+          // HEAD unchanged since we cached the full history — restore instantly.
+          log.value = cached;
+          logHasMore.value = false;
+        } else {
+          // Fresh repo, HEAD moved, or a forced reload after a ref/decoration
+          // change: drop the stale cache and show fresh entries. The background
+          // prefetch below re-caches the full history with current decorations.
+          if (force) LOG_CACHE.delete(folderPath.value);
+          log.value = entries;
+          logHasMore.value = log.value.length < effectiveTotalCount();
+          void prefetchAllPages();
+        }
+      } else {
+        log.value = entries;
+        // hasMore: in branch-only mode a full page is exactly `pageSize`. In
+        // all-refs mode the backend appends stash start-points and filters the
+        // `index on`/`untracked files on` pseudo-commits, so a full page returns
+        // FEWER than `pageSize` — `entries.length >= pageSize` would wrongly read
+        // false and kill infinite scroll. Use the authoritative rev-count there.
+        logHasMore.value = isCurrentBranchOnly
+          ? entries.length >= pageSize
+          : log.value.length < effectiveTotalCount();
+      }
       // If a commit was selected but its diffs were lost, reload them
       if (selectedCommitHash.value && commitDiffs.value.length === 0) {
-        commitDiffs.value = await getGitShow(folderPath.value, selectedCommitHash.value);
+        commitDiffs.value = await getGitShow(
+          folderPath.value,
+          selectedCommitHash.value,
+        );
       }
     } catch (err: any) {
       error.value = `git log: ${err?.message ?? err}`;
@@ -559,27 +754,41 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
    * Append the next page of commits to the log.
    * Called when the CommitLog scroll list emits `load-more`.
    */
-  async function loadMoreLog() {
+  async function loadMoreLog(pageSize: number = LOG_PAGE) {
     if (!folderPath.value || !logHasMore.value || logLoadingMore.value) return;
     logLoadingMore.value = true;
     try {
       const authorEmail =
-        logAuthorFilter.value === "mine" ? (currentGitUser.value?.email ?? "") : undefined;
+        logAuthorFilter.value === "mine"
+          ? (currentGitUser.value?.email ?? "")
+          : undefined;
       const offset = log.value.length;
       const isCurrentBranchOnly = logBranchFilter.value === "current";
       const next = await getGitLog(
         folderPath.value,
-        LOG_PAGE,
+        pageSize,
         !isCurrentBranchOnly,
         authorEmail,
         offset,
         isCurrentBranchOnly ? (status.value?.branch ?? undefined) : undefined,
         activeScope.value ?? undefined,
       );
-      if (next.length > 0) {
-        log.value = [...log.value, ...next];
+      // Dedupe: in all-refs mode the `--skip` offset counts filtered-out stash
+      // pseudo-commits, so consecutive pages can overlap by a few commits.
+      // Drop any hash we already have before appending.
+      const seen = new Set(log.value.map((e) => e.hashFull));
+      const added = next.filter((e) => !seen.has(e.hashFull));
+      if (added.length > 0) {
+        log.value = [...log.value, ...added];
       }
-      logHasMore.value = next.length >= LOG_PAGE;
+      // Stop when a page adds nothing new (end of history, guards against an
+      // offset-drift infinite loop) or once we've reached the total. Branch-only
+      // mode has no stash pollution, so a short page also means the end.
+      logHasMore.value =
+        added.length > 0 &&
+        (isCurrentBranchOnly
+          ? next.length >= pageSize
+          : log.value.length < effectiveTotalCount());
     } catch (err: any) {
       error.value = `git log (page): ${err?.message ?? err}`;
     } finally {
@@ -770,7 +979,9 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
         successMessage.value = "push-done";
         forcePushPreferred.value = false;
       }
-      await refresh();
+      // Force: push advances origin/<branch> but not local HEAD, so the log's
+      // remote label must be re-pulled to move off the pre-push commit.
+      await refresh(true);
       // Publishing sets the branch upstream — reload branches so consumers
       // (e.g. the PR-create publish guard) see the new tracking state.
       await loadBranches();
@@ -794,14 +1005,19 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       } else {
         // Show success feedback
         const msg = (result.message || "").trim();
-        if (msg.includes("Already up to date") || msg.includes("Already up-to-date")) {
+        if (
+          msg.includes("Already up to date") ||
+          msg.includes("Already up-to-date")
+        ) {
           successMessage.value = "already-up-to-date";
         } else {
           successMessage.value = "sync-done";
         }
         forcePushPreferred.value = false;
       }
-      await refresh();
+      // Force: a pull updates remote-tracking refs and may fast-forward without
+      // the fast path noticing the decoration change.
+      await refresh(true);
     } catch (err: any) {
       error.value = `pull: ${err?.message ?? err}`;
     } finally {
@@ -816,10 +1032,12 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     isMerging.value = true;
     try {
       const result = await gitMerge(folderPath.value, branchName);
-      await refresh();
+      // Force: a fast-forward merge moves refs without a new merge commit.
+      await refresh(true);
 
       // Detect conflicts from both the server response and the git status
-      const hasConflictedFiles = status.value && status.value.conflicted.length > 0;
+      const hasConflictedFiles =
+        status.value && status.value.conflicted.length > 0;
       const serverSaysConflicts = result.conflicts === true;
 
       if (hasConflictedFiles) {
@@ -893,7 +1111,8 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       const result = await gitCherryPick(folderPath.value, hashes);
       await refresh();
 
-      const hasConflictedFiles = status.value && status.value.conflicted.length > 0;
+      const hasConflictedFiles =
+        status.value && status.value.conflicted.length > 0;
       const serverSaysConflicts = result.conflicts === true;
 
       if (hasConflictedFiles) {
@@ -999,7 +1218,8 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       await gitStashDrop(folderPath.value, index);
       await refresh();
       await loadStashes();
-      await loadLog();
+      // Force: popping drops the stash ref, which the all-refs log renders.
+      await loadLog(undefined, true);
     } catch (err: any) {
       error.value = `stash pop: ${err?.message ?? err}`;
     }
@@ -1010,7 +1230,9 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     try {
       await gitStashDrop(folderPath.value, index);
       await loadStashes();
-      await loadLog();
+      // Force: the dropped stash ref is gone but HEAD is untouched, so the
+      // canonical fast path would keep showing it in the all-refs log.
+      await loadLog(undefined, true);
     } catch (err: any) {
       error.value = `stash drop: ${err?.message ?? err}`;
     }
@@ -1045,7 +1267,9 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     if (!folderPath.value) return false;
     try {
       await gitCreateBranch(folderPath.value, name, true);
-      await refresh();
+      // Force: the new branch ref sits on the current HEAD, so the log's
+      // decorations change without the top commit moving.
+      await refresh(true);
       await loadBranches();
       return true;
     } catch (err: any) {
@@ -1060,7 +1284,9 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     try {
       await gitSwitchBranch(folderPath.value, name);
       forcePushPreferred.value = false;
-      await refresh();
+      // Force: switching to a branch pointing at the same commit moves the
+      // HEAD marker without moving the top commit hash.
+      await refresh(true);
       await loadBranches();
       await loadWorktrees();
       return true;
@@ -1088,14 +1314,21 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
    * "switch branch: " / "create branch: " / "switch (stash): ") and returns
    * false; callers map that to their own user-facing message.
    */
-  async function carryChangesToBranch(name: string, isCreate: boolean): Promise<boolean> {
+  async function carryChangesToBranch(
+    name: string,
+    isCreate: boolean,
+  ): Promise<boolean> {
     if (!folderPath.value) return false;
-    const direct = isCreate ? await createBranch(name) : await switchBranch(name);
+    const direct = isCreate
+      ? await createBranch(name)
+      : await switchBranch(name);
     if (direct) return true;
     isSwitchingBranch.value = true;
     try {
       await gitStash(folderPath.value);
-      const switched = isCreate ? await createBranch(name) : await switchBranch(name);
+      const switched = isCreate
+        ? await createBranch(name)
+        : await switchBranch(name);
       await gitStashPop(folderPath.value);
       return switched;
     } catch (err: any) {
@@ -1111,7 +1344,9 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     try {
       await gitDeleteBranch(folderPath.value, name, force);
       await loadBranches();
-      await loadLog();
+      // Force: the branch ref is gone but HEAD hasn't moved, so its label must
+      // be dropped from the log.
+      await loadLog(undefined, true);
     } catch (err: any) {
       const msg = err?.message ?? String(err);
       // `git branch -d` refuses to drop a branch that isn't fully merged
@@ -1136,7 +1371,8 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     try {
       await gitDeleteRemoteBranch(folderPath.value, remote, name);
       await loadBranches();
-      await loadLog();
+      // Force: refs change without HEAD moving.
+      await loadLog(undefined, true);
     } catch (err: any) {
       error.value = `delete remote branch: ${err?.message ?? err}`;
     }
@@ -1146,7 +1382,8 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     if (!folderPath.value) return;
     try {
       await gitDeleteTag(folderPath.value, name);
-      await loadLog();
+      // Force: the tag ref is gone but HEAD hasn't moved.
+      await loadLog(undefined, true);
     } catch (err: any) {
       error.value = `delete tag: ${err?.message ?? err}`;
     }
@@ -1156,7 +1393,8 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     if (!folderPath.value) return;
     try {
       await gitDeleteRemoteTag(folderPath.value, remote, name);
-      await loadLog();
+      // Force: refs change without HEAD moving.
+      await loadLog(undefined, true);
     } catch (err: any) {
       error.value = `delete remote tag: ${err?.message ?? err}`;
     }
@@ -1173,7 +1411,8 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       if (status.value?.branch === oldName) {
         await loadStatus(folderPath.value);
       }
-      await loadLog();
+      // Force: renaming swaps the branch label in place without moving HEAD.
+      await loadLog(undefined, true);
     } catch (err: any) {
       error.value = `rename branch: ${err?.message ?? err}`;
     }
