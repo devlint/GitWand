@@ -34,12 +34,12 @@ const GROUPS = [
     ],
   },
   {
-    title: 'Recent',
+    title: 'New in v3.4',
     items: [
-      ['Today — cross-repo dashboard', 'A triaged action inbox across every repo, sorted by urgency, one state-aware action per row. ⌘L from anywhere.'],
-      ['Scratch worktree + Conflict Predictor', 'Resolve conflicts in a throwaway worktree; predict rebase and cherry-pick conflicts with a risk badge.'],
-      ['GitHub OAuth, Azure DevOps & cross-fork PRs', 'OAuth device-flow sign-in, tokens in the OS keychain, cross-fork PRs targeting the upstream parent.'],
-      ['AI inline code suggestions', 'Select a hunk in the Review panel, request a targeted rewrite, accept the AI suggestion in one click.'],
+      ['Token-level merge', 'Both sides changed disjoint tokens on the same line — GitWand decomposes it token by token and proposes the merge. Never auto-applied: you confirm it in a panel.'],
+      ['2-way base recovery', 'Reconstructs the diff3 base from the git index so the base-dependent patterns work even on repos using git’s default conflict style — where they used to sit inert.'],
+      ['Resolution preview + per-hunk confirm', 'Every auto-resolvable hunk shows its result before you apply it, and “Resolve auto” confirms a per-hunk summary instead of applying blind.'],
+      ['Recoverable-before-model metric', 'See how much of the residual is still resolved deterministically before any AI — in the CLI, the merge editor, and a cumulative local tally in Settings.'],
     ],
   },
 ] as const
