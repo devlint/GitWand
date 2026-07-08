@@ -1,7 +1,7 @@
 /**
  * Golden funnel — le gate CI anti-rot de la métrique recoverable-before-model.
  *
- * Origine : un commentaire du thread Show HN — « feels like the kind of number
+ * Origine : un commentaire du thread r/git — « feels like the kind of number
  * that quietly rots the second nobody's watching it ». Réponse : le funnel
  * complet (byType agrégé sur tout le corpus + résumé par tier + compteurs
  * d'auto-résolution) est snapshotté dans `golden-funnel.json`, committé, et

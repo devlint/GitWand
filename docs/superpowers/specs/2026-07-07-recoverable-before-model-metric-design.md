@@ -4,7 +4,7 @@ Status: **Draft / for spec** · Target: **PR #117** (`feat/merge-conflicts-token
 
 ## 1. Origin & motivation
 
-A technical exchange on the Show HN thread surfaced two linked issues in the resolution pipeline:
+A technical exchange on the r/git thread surfaced two linked issues in the resolution pipeline:
 
 1. **Coupling bug** — `refactoringAware` and `llmFallback` are *independent* opt-ins. A user can enable the LLM path without the deterministic rename recoverer, so the model gets invoked on conflicts that were deterministically recoverable.
 2. **Missing metric** — the engine reports `~95% auto-resolved` as a flat number. What's actually decision-useful is: *of the residual left after the cheap deterministic passes, how much is still recoverable deterministically before the model is ever invoked.*
