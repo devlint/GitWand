@@ -901,6 +901,13 @@ const ptBR: Locale = {
       empty: "Nenhum achado.",
       running: "Analisando…",
     },
+    summary: {
+      title: "Resumo",
+      regenerate: "Regenerar",
+      copy: "Copiar",
+      loading: "Gerando resumo…",
+      empty: "Ainda sem resumo.",
+    },
     comment: {
       edit: "Editar",
       delete: "Excluir",

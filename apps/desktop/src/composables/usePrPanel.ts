@@ -39,6 +39,7 @@ import { useSettings } from "./useSettings";
 import { useAIProvider } from "./useAIProvider";
 import { usePrPreReview, type ReviewFinding } from "./usePrPreReview";
 import { usePrReviewQueue } from "./usePrReviewQueue";
+import { usePrSummary } from "./usePrSummary";
 import { filterFindings, normalizeFindingClass } from "./usePrFindingFilter";
 
 export const PR_PANEL_KEY = Symbol("prPanel");
@@ -169,6 +170,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   const ai = useAIProvider();
   const preReview = usePrPreReview();
   const reviewQueue = usePrReviewQueue();
+  const prSummaryEngine = usePrSummary();
 
   // ─── Remote / list ─────────────────────────────────────
   const remote = ref<RemoteInfo | null>(null);
@@ -393,7 +395,53 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   // (new headSha while the detail stays open) re-triggers correctly too.
   watch(() => prDetail.value?.headSha, () => {
     void maybeRunPreReview();
+    // The Info tab is the default on PR open — its own `detailTab` watch
+    // only fires on a *change*, so also trigger here for the common case
+    // where the user never leaves Info.
+    if (detailTab.value === "info") void loadSummary();
   });
+
+  // ─── AI PR summary (D1) ──────────────────────────────────
+  const prSummary = ref<string>("");
+  const prSummaryLoading = ref(false);
+
+  /** Opt-in, cache-first by `detailKey@headSha` — same guard pattern as
+   *  `maybeRunPreReview` (C3). `force` bypasses the cache (Regenerate). */
+  async function loadSummary(force = false) {
+    if (!settings.value.reviewAiSummary || !ai.isAvailable.value) return;
+    const pr = selectedPr.value;
+    const headSha = prDetail.value?.headSha;
+    if (!pr || !headSha) return;
+    const key = `${detailKey(cwd.value, pr.number)}@${headSha}`;
+    if (!force) {
+      const cached = cache.getSummary(key);
+      if (cached) {
+        prSummary.value = cached;
+        return;
+      }
+    }
+    if (!diffIndex.value.length) await loadDiff();
+    if (!diffIndex.value.length) return;
+    prSummaryLoading.value = true;
+    try {
+      const text = await prSummaryEngine.generate({
+        cwd: cwd.value,
+        base: prDetail.value?.base ?? "",
+        head: prDetail.value?.branch ?? "",
+        files: diffIndex.value,
+        locale: locale.value,
+      });
+      if (selectedPr.value?.number !== pr.number) return; // stale — user moved on
+      prSummary.value = text;
+      if (text) cache.setSummary(key, text);
+    } finally {
+      prSummaryLoading.value = false;
+    }
+  }
+
+  function regenerateSummary() {
+    return loadSummary(true);
+  }
 
   // ─── Boot-perf gating (v2.8.5) ─────────────────────────
   // `panelMounted` flips to true the first time the user opens the PR
@@ -745,6 +793,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     viewedPaths.value = new Set();
     stopPreReview();
     rawPreReviewFindings.value = [];
+    prSummary.value = "";
     detailTab.value = "info";
   }
 
@@ -1009,7 +1058,10 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       loadAnnotations();
       loadChecks();
     }
-    if (tab === "info") loadIssueComments();
+    if (tab === "info") {
+      loadIssueComments();
+      void loadSummary();
+    }
     if (tab === "intelligence") {
       if (prDiffFiles.value.length === 0) await loadDiff();
       if (!hotspots.value.length) loadHotspots();
@@ -1475,6 +1527,8 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     hotspots, hotspotsLoading, totalRepoFiles, fileHistory, fileHistoryLoading,
     // AI pre-review (C3)
     preReviewFindings, preReviewProgress, preReviewRunning, dismissFinding,
+    // AI PR summary (D1)
+    prSummary, prSummaryLoading, loadSummary, regenerateSummary,
     // Pagination (v2.8.5)
     hasMore, loadingMore,
     // Computed

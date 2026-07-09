@@ -24,6 +24,7 @@ import PrIntelligencePanel from "./PrIntelligencePanel.vue";
 import PrReactions from "./PrReactions.vue";
 import { resolvePrReviewShortcut, isEditableTarget } from "../composables/usePrReviewKeymap";
 import { usePrReviewNav } from "../composables/usePrReviewNav";
+import { useSettings } from "../composables/useSettings";
 
 const { t } = useI18n();
 
@@ -35,6 +36,7 @@ const emit = defineEmits<{
 }>();
 
 const p = inject<PrPanelState>(PR_PANEL_KEY)!;
+const { settings } = useSettings();
 
 // window.open is a no-op in the Tauri webview — hand the URL to the OS opener.
 function openInBrowser(url: string) { void openExternalUrl(url); }
@@ -270,6 +272,11 @@ async function scrollToLastComment() {
   p.detailTab.value = "info";
   await nextTick();
   commentsEnd.value?.scrollIntoView({ behavior: "smooth", block: "end" });
+}
+
+/** D1 — copy the AI PR summary to the clipboard. */
+function copySummary() {
+  if (p.prSummary.value) navigator.clipboard?.writeText(p.prSummary.value);
 }
 
 /** C4 — click a finding in the Intelligence panel's list: switch to the
@@ -618,6 +625,37 @@ function submitRequestReviewers() {
             <span class="pdv-readiness-icon">{{ p.mergeReadiness.value.ready ? '✅' : '⏳' }}</span>
             <span class="pdv-readiness-text">{{ p.mergeReadiness.value.reason }}</span>
           </div>
+
+          <!-- AI PR summary (D1, v3.6.0) — opt-in, shown only once something
+               has actually loaded/is loading, never an empty shell. -->
+          <section
+            v-if="settings.reviewAiSummary && (p.prSummary.value || p.prSummaryLoading.value)"
+            class="pdv-summary"
+          >
+            <header class="pdv-summary-head">
+              <h2 class="pdv-section-label">{{ t('pr.summary.title') }}</h2>
+              <div class="pdv-summary-actions">
+                <button
+                  type="button"
+                  class="pdv-summary-btn"
+                  :disabled="p.prSummaryLoading.value"
+                  :title="t('pr.summary.regenerate')"
+                  @click="p.regenerateSummary()"
+                >{{ t('pr.summary.regenerate') }}</button>
+                <button
+                  type="button"
+                  class="pdv-summary-btn"
+                  :disabled="!p.prSummary.value"
+                  :title="t('pr.summary.copy')"
+                  @click="copySummary"
+                >{{ t('pr.summary.copy') }}</button>
+              </div>
+            </header>
+            <div v-if="p.prSummaryLoading.value && !p.prSummary.value" class="pdv-summary-loading">
+              {{ t('pr.summary.loading') }}
+            </div>
+            <div v-else class="pdv-summary-body" v-html="renderMarkdown(p.prSummary.value)" />
+          </section>
 
           <!-- Stat cards -->
           <div class="pdv-stats-grid">
@@ -1495,6 +1533,52 @@ function submitRequestReviewers() {
   border: 1px solid var(--color-warning);
   color: var(--color-warning);
   font-weight: var(--font-weight-semibold);
+}
+
+/* AI PR summary (D1, v3.6.0) */
+.pdv-summary {
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+}
+.pdv-summary-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+.pdv-summary-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+.pdv-summary-btn {
+  font-size: var(--font-size-xs);
+  padding: 2px var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+.pdv-summary-btn:hover:not(:disabled) {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+.pdv-summary-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.pdv-summary-loading {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+.pdv-summary-body {
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-relaxed, 1.6);
+  color: var(--color-text);
 }
 
 /* Stats grid */

@@ -916,6 +916,13 @@ const en = {
       empty: "No findings.",
       running: "Analyzing…",
     },
+    summary: {
+      title: "Summary",
+      regenerate: "Regenerate",
+      copy: "Copy",
+      loading: "Generating summary…",
+      empty: "No summary yet.",
+    },
     comment: {
       edit: "Edit",
       delete: "Delete",

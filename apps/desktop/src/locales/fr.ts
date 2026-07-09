@@ -909,6 +909,13 @@ const fr: Locale = {
       empty: "Aucun constat.",
       running: "Analyse en cours…",
     },
+    summary: {
+      title: "Résumé",
+      regenerate: "Régénérer",
+      copy: "Copier",
+      loading: "Génération du résumé…",
+      empty: "Pas encore de résumé.",
+    },
     comment: {
       edit: "Modifier",
       delete: "Supprimer",

@@ -93,6 +93,13 @@ export interface FindingsState {
   ts: number;
 }
 
+/** AI PR summary text, keyed `${detailKey}@${headSha}` (D1) — same
+ *  headSha-miss-recomputes contract as `FindingsState`. */
+export interface SummaryState {
+  text: string;
+  ts: number;
+}
+
 interface PrCacheFile {
   lists: Record<string, CachedList>;
   details: Record<string, CachedDetail>;
@@ -101,12 +108,13 @@ interface PrCacheFile {
   drafts: Record<string, DraftState>;
   dismissedFindings: Record<string, DismissedState>;
   findings: Record<string, FindingsState>;
+  summaries: Record<string, SummaryState>;
 }
 
 function emptyFile(): PrCacheFile {
   return {
     lists: {}, details: {}, remotes: {}, viewed: {}, drafts: {},
-    dismissedFindings: {}, findings: {},
+    dismissedFindings: {}, findings: {}, summaries: {},
   };
 }
 
@@ -150,6 +158,7 @@ function loadFromStorage(): PrCacheFile {
       drafts: parsed.drafts ?? {},
       dismissedFindings: parsed.dismissedFindings ?? {},
       findings: parsed.findings ?? {},
+      summaries: parsed.summaries ?? {},
     };
     const now = Date.now();
     pruneByAge(file.lists, now);
@@ -159,6 +168,7 @@ function loadFromStorage(): PrCacheFile {
     pruneByAge(file.drafts, now);
     pruneByAge(file.dismissedFindings, now);
     pruneByAge(file.findings, now);
+    pruneByAge(file.summaries, now);
     return file;
   } catch {
     return emptyFile();
@@ -173,6 +183,7 @@ function saveToStorage(file: PrCacheFile): void {
   evictLru(file.drafts, MAX_DETAILS);
   evictLru(file.dismissedFindings, MAX_LISTS);
   evictLru(file.findings, MAX_DETAILS);
+  evictLru(file.summaries, MAX_DETAILS);
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(file));
   } catch (e) {
@@ -320,12 +331,24 @@ export function usePrCache() {
     saveToStorage(_file);
   }
 
+  // ── AI PR summary cache, by headSha (D1) ──────────────────────────────────
+
+  function getSummary(key: string): string | null {
+    return _file.summaries[key]?.text ?? null;
+  }
+
+  function setSummary(key: string, text: string): void {
+    _file.summaries[key] = { text, ts: monoNow() };
+    saveToStorage(_file);
+  }
+
   return {
     getList, setList, invalidateLists,
     getDetail, setDetail, invalidateDetail,
     getRemote, setRemote,
     getDismissed, addDismissed,
     getFindings, setFindings,
+    getSummary, setSummary,
     getViewed, setViewed, toggleViewed,
     getDraft, setDraft, clearDraft,
   };

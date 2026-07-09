@@ -889,6 +889,13 @@ const zhCN: Locale = {
       empty: "暂无发现项。",
       running: "分析中…",
     },
+    summary: {
+      title: "摘要",
+      regenerate: "重新生成",
+      copy: "复制",
+      loading: "正在生成摘要…",
+      empty: "暂无摘要。",
+    },
     comment: {
       edit: "编辑",
       delete: "删除",

@@ -900,6 +900,13 @@ const es: Locale = {
       empty: "Sin hallazgos.",
       running: "Analizando…",
     },
+    summary: {
+      title: "Resumen",
+      regenerate: "Regenerar",
+      copy: "Copiar",
+      loading: "Generando resumen…",
+      empty: "Aún no hay resumen.",
+    },
     comment: {
       edit: "Editar",
       delete: "Eliminar",
