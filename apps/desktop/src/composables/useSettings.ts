@@ -159,6 +159,20 @@ export interface AppSettings {
   /** Ollama model name. */
   aiOllamaModel: string;
   /**
+   * Review AI settings (E3, v3.6.0) — provider is inherited from the
+   * existing `aiProvider`/`aiEnabled` fields above; these four control the
+   * opt-in pre-review pass (C) and PR summary (D). All opt-in — false/off
+   * by default so the pipeline never runs unless the user turns it on.
+   */
+  /** Opt-in: run the local multi-hop pre-review pass when a PR is opened. */
+  reviewAiPreReview: boolean;
+  /** Confidence threshold (0-100) below which a finding is dropped. */
+  reviewAiConfidenceThreshold: number;
+  /** Top-N cap on findings shown per PR, by confidence descending. */
+  reviewAiMaxFindings: number;
+  /** Opt-in: generate a PR summary block on the Info tab. */
+  reviewAiSummary: boolean;
+  /**
    * Last active tab in Today view — persisted between openings (v2.9).
    * After Phase 2 only "inbox" and "team" are live surfaces; legacy values
    * ("wip"|"prs"|"issues") are migrated to "inbox" at read time.
@@ -383,6 +397,10 @@ export const defaultAppSettings: AppSettings = {
   aiModelByProvider: {},
   aiOllamaUrl: "http://localhost:11434",
   aiOllamaModel: "codellama",
+  reviewAiPreReview: false,
+  reviewAiConfidenceThreshold: 60,
+  reviewAiMaxFindings: 15,
+  reviewAiSummary: false,
   launchpadActiveTab: "inbox",
   launchpadTeamTabEnabled: true,
   launchpadScopePaths: [],
