@@ -18,6 +18,7 @@
  */
 import { extractImportSources } from "@gitwand/core";
 import type { GitDiff, BlameLine } from "../utils/backend";
+import { localeToAiLanguage } from "./prAiLocale";
 import { getGitBlame } from "../utils/backend";
 import { useAIProvider } from "./useAIProvider";
 
@@ -120,7 +121,7 @@ export function summarizeBlameForFile(blame: BlameLine[], file: GitDiff): string
 // ─── Hop 4: findings (strict JSON, defensive parse) ───────────────────────
 
 function buildSystemPrompt(locale: string): string {
-  const lang = locale === "fr" ? "French" : "English";
+  const lang = localeToAiLanguage(locale);
   return `You are a senior engineer doing a pre-review pass on one file of a pull request.
 
 You will receive:

@@ -50,7 +50,6 @@ import {
 } from "../../utils/backend";
 import { ghPrConflictPreview, ghPrHotspots } from "../../utils/backend";
 
-import { ForgeNotImplementedError } from "./types";
 import type {
   ForgeProvider,
   ForgeName,
@@ -324,13 +323,12 @@ export class GitLabProvider implements ForgeProvider {
     };
   }
 
-  /** GitLab has no direct "dismiss a review" equivalent (approvals/notes
-   *  aren't a dismissible review object like GitHub's) — honest unsupported
-   *  error (B4, v3.6.0); the UI hides the action rather than showing one
-   *  that silently no-ops. */
-  dismissReview(): Promise<void> {
-    throw new ForgeNotImplementedError("gitlab", "dismissReview");
-  }
+  // `dismissReview` is intentionally omitted — GitLab has no direct "dismiss
+  // a review" equivalent (approvals/notes aren't a dismissible review object
+  // like GitHub's). Leaving the method undefined (rather than defined-but-
+  // throwing) is what lets `usePrPanel`'s `forgeSupportsDismissReview`
+  // capability check (`typeof forge.dismissReview === "function"`) hide the
+  // action instead of showing a button that's a silent no-op (B4, v3.6.0).
 
   requestReviewers(cwd: string, prNumber: number, logins: string[]): Promise<void> {
     return glRequestReviewers(cwd, prNumber, logins);

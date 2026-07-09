@@ -36,7 +36,10 @@ vi.mock("../useAIProvider", () => ({
 }));
 
 import { usePrPanel } from "../usePrPanel";
-import { computeStaticFlags } from "../useReviewIntelligence";
+import { computeStaticFlags, useReviewIntelligence } from "../useReviewIntelligence";
+import { usePrCache, detailKey } from "../usePrCache";
+import { normalizeFindingClass } from "../usePrFindingFilter";
+import type { ReviewFinding } from "../usePrPreReview";
 import type { GitDiff } from "../../utils/backend";
 
 const RAW_DIFF = [
@@ -78,6 +81,55 @@ describe("useReviewIntelligence — merged stream (via usePrPanel)", () => {
 
     const merged = p.mergedAnnotationsByFile.value["a.ts"] ?? [];
     expect(merged.map((a) => a.source).sort()).toEqual(["ai", "ci"]);
+  });
+});
+
+describe("useReviewIntelligence — dismissal memory applies on a cache hit too (verifier fix)", () => {
+  beforeEach(() => {
+    settingsRef.value = { reviewAiPreReview: true, reviewAiConfidenceThreshold: 0, reviewAiMaxFindings: 15, reviewAiSummary: false };
+    localStorage.clear();
+  });
+
+  it("a dismissed finding class stays hidden after restart even though its findings are already cached at the current headSha", async () => {
+    const cwd = "/repo";
+    const prNumber = 42;
+    const headSha = "sha-cached";
+    const key = `${detailKey(cwd, prNumber)}@${headSha}`;
+
+    const dismissedFinding: ReviewFinding = {
+      id: "f1", path: "a.ts", line: 1, side: "RIGHT", severity: "nit", confidence: 80,
+      title: "unused variable x", detail: "",
+    };
+    const keptFinding: ReviewFinding = {
+      id: "f2", path: "b.ts", line: 2, side: "RIGHT", severity: "risk", confidence: 90,
+      title: "possible null deref", detail: "",
+    };
+
+    // Simulate a PREVIOUS session: findings were cached at this headSha, and
+    // the user dismissed one of them (persisted to the repo-scoped dismissal
+    // set) — both survive an app restart via localStorage.
+    const cache = usePrCache();
+    cache.setFindings(key, [dismissedFinding, keptFinding]);
+    cache.addDismissed(cwd, normalizeFindingClass(dismissedFinding));
+
+    // Fresh composable instance — as if the app just restarted and the PR
+    // detail is reopened at the same (unchanged) headSha, so `maybeRunPreReview`
+    // takes the cache-HIT path rather than re-running the pipeline.
+    const intel = useReviewIntelligence({
+      cwd: ref(cwd),
+      selectedPr: ref({ number: prNumber } as any),
+      prDetail: ref({ headSha } as any),
+      detailTab: ref("diff"),
+      loadDiff: vi.fn(async () => {}),
+      diffIndex: ref([]),
+      annotationsByFile: ref({}),
+    });
+
+    await intel.maybeRunPreReview();
+
+    const ids = intel.preReviewFindings.value.map((f) => f.id);
+    expect(ids).not.toContain("f1");
+    expect(ids).toContain("f2");
   });
 });
 

@@ -140,6 +140,14 @@ export function useReviewIntelligence(opts: UseReviewIntelligenceOptions) {
     const headSha = opts.prDetail.value?.headSha;
     if (!pr || !headSha) return;
 
+    // Load dismissal memory before the cache lookup — `preReviewFindings`
+    // filters `rawPreReviewFindings` through `dismissedFindingClasses`, so
+    // this must be populated before either the cache-HIT return below or
+    // the cache-MISS pipeline run, or a dismissed finding reappears after
+    // restart whenever the cache already has findings at the current
+    // headSha (verifier fix, v3.6.0).
+    dismissedFindingClasses.value = cache.getDismissed(opts.cwd.value);
+
     const key = `${detailKey(opts.cwd.value, pr.number)}@${headSha}`;
     const cached = cache.getFindings(key);
     if (cached) {
@@ -153,7 +161,6 @@ export function useReviewIntelligence(opts: UseReviewIntelligenceOptions) {
       .filter((f) => f.hunks.length > 0);
     if (!filesForReview.length) return;
 
-    dismissedFindingClasses.value = cache.getDismissed(opts.cwd.value);
     rawPreReviewFindings.value = [];
     stopPreReview();
     const controller = new AbortController();

@@ -8,9 +8,10 @@
  */
 import { gitExec } from "../utils/backend";
 import { useAIProvider } from "./useAIProvider";
+import { localeToAiLanguage } from "./prAiLocale";
 
 function buildSystemPrompt(locale: string): string {
-  const lang = locale === "fr" ? "French" : "English";
+  const lang = localeToAiLanguage(locale);
   return `You write a short handoff summary for a pull request, for a
 reviewer who hasn't looked at the diff yet.
 

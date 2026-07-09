@@ -4,23 +4,30 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ref } from "vue";
 
+const gitRemoteInfo = vi.fn();
 const ghPrDetail = vi.fn();
 const ghPrComments = vi.fn();
 const ghPrListReviews = vi.fn();
 const ghDismissReview = vi.fn();
 const ghRequestReviewers = vi.fn();
+const glGetMr = vi.fn();
+const glMrNotes = vi.fn();
+const glListReviews = vi.fn();
 
 vi.mock("@/utils/backend", async () => {
   const actual = await vi.importActual<typeof import("@/utils/backend")>("@/utils/backend");
   return {
     ...actual,
-    gitRemoteInfo: vi.fn(async () => ({ url: "", host: "github.com", owner: "o", repo: "r" })),
+    gitRemoteInfo: (...a: unknown[]) => gitRemoteInfo(...a),
     ghForkInfo: vi.fn(async () => ({ isFork: false, origin: "", parent: "" })),
     ghPrDetail: (...a: unknown[]) => ghPrDetail(...a),
     ghPrComments: (...a: unknown[]) => ghPrComments(...a),
     ghPrListReviews: (...a: unknown[]) => ghPrListReviews(...a),
     ghDismissReview: (...a: unknown[]) => ghDismissReview(...a),
     ghRequestReviewers: (...a: unknown[]) => ghRequestReviewers(...a),
+    glGetMr: (...a: unknown[]) => glGetMr(...a),
+    glMrNotes: (...a: unknown[]) => glMrNotes(...a),
+    glListReviews: (...a: unknown[]) => glListReviews(...a),
   };
 });
 
@@ -38,11 +45,15 @@ function fakeDetail() {
 
 describe("usePrPanel — dismiss review / request reviewers (B4)", () => {
   beforeEach(() => {
+    gitRemoteInfo.mockReset().mockResolvedValue({ url: "", host: "github.com", provider: "github", owner: "o", repo: "r" });
     ghPrDetail.mockReset().mockResolvedValue(fakeDetail());
     ghPrComments.mockReset().mockResolvedValue([]);
     ghPrListReviews.mockReset().mockResolvedValue([]);
     ghDismissReview.mockReset().mockResolvedValue(undefined);
     ghRequestReviewers.mockReset().mockResolvedValue(undefined);
+    glGetMr.mockReset().mockResolvedValue(fakeDetail());
+    glMrNotes.mockReset().mockResolvedValue([]);
+    glListReviews.mockReset().mockResolvedValue([]);
   });
 
   it("forgeSupportsDismissReview / forgeSupportsRequestReviewers are true on GitHub", async () => {
@@ -83,5 +94,16 @@ describe("usePrPanel — dismiss review / request reviewers (B4)", () => {
     ghDismissReview.mockRejectedValue(new ForgeNotImplementedError("gitlab", "dismissReview"));
     await p.handleDismissReview(7);
     expect(p.error.value).toBeNull();
+  });
+
+  it("forgeSupportsDismissReview is false on GitLab — no `dismissReview` method to hide behind a button that would silently no-op (verifier fix)", async () => {
+    gitRemoteInfo.mockResolvedValue({ url: "https://gitlab.com/o/r", host: "gitlab.com", provider: "gitlab", owner: "o", repo: "r" });
+    const p = usePrPanel(ref("/repo"));
+    await p.loadRemote();
+    await p.selectPr({ number: 1 } as any);
+    expect(p.forge.value.name).toBe("gitlab");
+    expect(p.forgeSupportsDismissReview.value).toBe(false);
+    // requestReviewers is real on GitLab — unaffected by this fix.
+    expect(p.forgeSupportsRequestReviewers.value).toBe(true);
   });
 });

@@ -1,6 +1,11 @@
 /**
- * GitLabProvider — B4 (v3.6.0): `dismissReview` is an honest unsupported
- * error (GitLab has no direct equivalent), `requestReviewers` is real.
+ * GitLabProvider — B4 (v3.6.0): `dismissReview` has no direct GitLab
+ * equivalent, so the method is omitted entirely (left `undefined`) rather
+ * than defined-but-throwing — that's what lets `usePrPanel`'s
+ * `forgeSupportsDismissReview` capability check
+ * (`typeof forge.dismissReview === "function"`) correctly hide the action
+ * instead of showing a button that's a silent no-op (verifier fix, v3.6.0).
+ * `requestReviewers` is real.
  * F1 (v3.6.0): real inline batch review, `listReviews`, type-clean
  * `createComment`, and a real `getFileHistory` heuristic.
  */
@@ -27,7 +32,7 @@ vi.mock("../../../utils/backend", () => ({
 }));
 
 import { GitLabProvider } from "../GitLabProvider";
-import { ForgeNotImplementedError } from "../types";
+import type { ForgeProvider } from "../types";
 
 const REFS = { baseSha: "base1", startSha: "start1", headSha: "head1" };
 
@@ -40,9 +45,9 @@ describe("GitLabProvider — review admin (B4)", () => {
     glRequestReviewers.mockReset().mockResolvedValue(undefined);
   });
 
-  it("dismissReview throws a typed ForgeNotImplementedError", () => {
-    const provider = new GitLabProvider();
-    expect(() => provider.dismissReview()).toThrow(ForgeNotImplementedError);
+  it("does not implement dismissReview — GitLab has no direct equivalent", () => {
+    const provider: ForgeProvider = new GitLabProvider();
+    expect(provider.dismissReview).toBeUndefined();
   });
 
   it("requestReviewers delegates to glRequestReviewers", async () => {
