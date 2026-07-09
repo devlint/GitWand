@@ -881,6 +881,14 @@ const zhCN: Locale = {
       hide: "隐藏已查看",
       toggle: "标记为已查看",
     },
+    preReview: {
+      title: "预审查发现项",
+      confidence: "置信度",
+      dismiss: "驳回",
+      progress: "{0}/{1} 个文件",
+      empty: "暂无发现项。",
+      running: "分析中…",
+    },
     comment: {
       edit: "编辑",
       delete: "删除",

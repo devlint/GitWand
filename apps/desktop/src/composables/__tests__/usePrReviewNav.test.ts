@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ref, computed, nextTick } from "vue";
-import { usePrReviewNav } from "../usePrReviewNav";
+import { usePrReviewNav, type DiffRowLike } from "../usePrReviewNav";
 import type { GitDiff } from "../../utils/backend";
+import type { ReviewFinding } from "../usePrPreReview";
 
 function file(path: string, hunkCount: number): GitDiff {
   return {
@@ -12,8 +13,13 @@ function file(path: string, hunkCount: number): GitDiff {
   };
 }
 
+function finding(overrides: Partial<ReviewFinding> = {}): ReviewFinding {
+  return { id: "1", path: "a.ts", line: 1, side: "RIGHT", severity: "suggestion", confidence: 80, title: "t", detail: "", ...overrides };
+}
+
 describe("usePrReviewNav", () => {
   const scrollToHunk = vi.fn();
+  const scrollToLine = vi.fn();
   const openComposeAtHunk = vi.fn();
   const onHelp = vi.fn();
   const onToggleViewed = vi.fn();
@@ -21,13 +27,14 @@ describe("usePrReviewNav", () => {
 
   beforeEach(() => {
     scrollToHunk.mockReset();
+    scrollToLine.mockReset();
     openComposeAtHunk.mockReset();
     onHelp.mockReset();
     onToggleViewed.mockReset();
     onSubmitReview.mockReset();
   });
 
-  function setup(files: GitDiff[], selectedPath: string | null) {
+  function setup(files: GitDiff[], selectedPath: string | null, findings: ReviewFinding[] = [], rows: DiffRowLike[] = []) {
     const prDiffFiles = ref(files);
     const selectedDiffFile = ref<string | null>(selectedPath);
     // Mirrors `PrDetailView`'s real `selectedDiff` — a computed derived from
@@ -36,14 +43,15 @@ describe("usePrReviewNav", () => {
     const selectedDiff = computed<GitDiff | null>(
       () => prDiffFiles.value.find((f) => f.path === selectedDiffFile.value) ?? null,
     );
-    const diffHandle = ref({ scrollToHunk, openComposeAtHunk });
+    const diffHandle = ref({ scrollToHunk, scrollToLine, openComposeAtHunk, rows });
     const hideViewed = ref(false);
     const submittingReview = ref(false);
+    const findingsRef = ref(findings);
     const nav = usePrReviewNav({
       prDiffFiles, selectedDiffFile, selectedDiff, diffHandle, onHelp, onToggleViewed, hideViewed,
-      onSubmitReview, submittingReview,
+      onSubmitReview, submittingReview, findings: findingsRef,
     });
-    return { nav, prDiffFiles, selectedDiffFile, selectedDiff, hideViewed, submittingReview };
+    return { nav, prDiffFiles, selectedDiffFile, selectedDiff, hideViewed, submittingReview, findingsRef };
   }
 
   it("next-hunk advances the cursor within the file and scrolls to it", () => {
@@ -116,12 +124,46 @@ describe("usePrReviewNav", () => {
     expect(onSubmitReview).not.toHaveBeenCalled();
   });
 
-  it("unwired actions (C4) are safe no-ops", () => {
+  it("next-finding (N) with no findings is a safe no-op", () => {
     const { nav } = setup([file("a.ts", 1)], "a.ts");
-    for (const action of ["next-finding", "prev-finding"] as const) {
-      expect(() => nav.dispatch(action)).not.toThrow();
-    }
+    expect(() => nav.dispatch("next-finding")).not.toThrow();
     expect(scrollToHunk).not.toHaveBeenCalled();
     expect(openComposeAtHunk).not.toHaveBeenCalled();
+  });
+
+  it("next-finding (N) lands on the first finding, switching file and scrolling to its row", async () => {
+    const findings = [finding({ id: "1", path: "b.ts", line: 5 })];
+    const rows = [{ kind: "line", dl: { type: "add", newLineNo: 5 } }];
+    const { nav, selectedDiffFile } = setup([file("a.ts", 1), file("b.ts", 1)], "a.ts", findings, rows);
+    nav.dispatch("next-finding");
+    await nextTick();
+    expect(selectedDiffFile.value).toBe("b.ts");
+    expect(scrollToLine).toHaveBeenCalledWith(0);
+    expect(nav.currentFindingIdx.value).toBe(0);
+  });
+
+  it("next-finding (N) then prev-finding (P) returns to the same finding", async () => {
+    const findings = [finding({ id: "1", line: 1 }), finding({ id: "2", line: 2 })];
+    const { nav } = setup([file("a.ts", 1)], "a.ts", findings, []);
+    nav.dispatch("next-finding");
+    await nextTick();
+    expect(nav.currentFindingIdx.value).toBe(0);
+    nav.dispatch("next-finding");
+    await nextTick();
+    expect(nav.currentFindingIdx.value).toBe(1);
+    nav.dispatch("prev-finding");
+    await nextTick();
+    expect(nav.currentFindingIdx.value).toBe(0);
+  });
+
+  it("next-finding (N) wraps around past the last finding", async () => {
+    const findings = [finding({ id: "1" }), finding({ id: "2" })];
+    const { nav } = setup([file("a.ts", 1)], "a.ts", findings, []);
+    nav.dispatch("next-finding");
+    nav.dispatch("next-finding");
+    await nextTick();
+    nav.dispatch("next-finding");
+    await nextTick();
+    expect(nav.currentFindingIdx.value).toBe(0);
   });
 });

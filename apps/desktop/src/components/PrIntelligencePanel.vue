@@ -25,6 +25,7 @@ import type {
   PullRequestDetail,
   GitDiff,
 } from "../utils/backend";
+import type { ReviewFinding } from "../composables/usePrPreReview";
 import { useI18n } from "../composables/useI18n";
 
 const { t } = useI18n();
@@ -45,13 +46,27 @@ const props = defineProps<{
   /** File review history keyed by path. */
   fileHistory: Record<string, PrFileHistory>;
   fileHistoryLoading: boolean;
+  /** AI pre-review findings (C4, v3.6.0) — confidence-sorted, already
+   *  threshold/cap/dismissal-filtered by `usePrPanel`. */
+  preReviewFindings: ReviewFinding[];
+  preReviewProgress: { done: number; total: number };
+  preReviewRunning: boolean;
 }>();
 
 const emit = defineEmits<{
   (e: "load-conflict-preview"): void;
   (e: "load-hotspots"): void;
   (e: "load-file-history"): void;
+  (e: "dismiss-finding", id: string): void;
+  (e: "jump-to-finding", path: string, line: number): void;
 }>();
+
+/** Map a finding's open severity scale onto the existing error/warn/info
+ *  row modifiers (`.pi-ai-row--*`) so it visually matches the static-flags
+ *  list above it. */
+function findingRowSeverity(sev: ReviewFinding["severity"]): "error" | "warn" | "info" {
+  return sev === "risk" ? "error" : sev === "suggestion" ? "warn" : "info";
+}
 
 // ─── Review scope ────────────────────────────────────────
 const scope = computed(() => {
@@ -511,6 +526,52 @@ watch(() => props.prDiffFiles, (files) => {
             <span class="pi-ai-file mono">{{ flag.file.split('/').pop() }}</span>
             <span class="pi-ai-reason">{{ flag.reason }}</span>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── AI Pre-Review Findings (C4, v3.6.0) ──────────────── -->
+    <section class="pi-section">
+      <header class="pi-section-header">
+        <span class="pi-section-icon pi-section-icon--ai" aria-hidden="true">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M6.5 2l1 2.8 2.8 1-2.8 1-1 2.8-1-2.8-2.8-1 2.8-1z" />
+            <path d="M11.5 9l.6 1.6 1.6.6-1.6.6-.6 1.6-.6-1.6-1.6-.6 1.6-.6z" />
+          </svg>
+        </span>
+        <h3 class="pi-section-title">{{ t('pr.preReview.title') }}</h3>
+        <span v-if="preReviewRunning" class="pi-badge pi-badge--ai">
+          {{ t('pr.preReview.progress', preReviewProgress.done, preReviewProgress.total) }}
+        </span>
+      </header>
+
+      <div v-if="preReviewRunning && preReviewFindings.length === 0" class="pi-empty">
+        {{ t('pr.preReview.running') }}
+      </div>
+      <div v-else-if="preReviewFindings.length === 0" class="pi-empty">
+        {{ t('pr.preReview.empty') }}
+      </div>
+
+      <div v-else class="pi-ai-list">
+        <div
+          v-for="f in preReviewFindings"
+          :key="f.id"
+          class="pi-ai-row pi-finding-row"
+          :class="`pi-ai-row--${findingRowSeverity(f.severity)}`"
+        >
+          <button type="button" class="pi-finding-jump" @click="emit('jump-to-finding', f.path, f.line)">
+            <div class="pi-ai-content">
+              <span class="pi-ai-file mono">{{ f.path.split('/').pop() }}:{{ f.line }}</span>
+              <span class="pi-ai-reason">{{ f.title }}</span>
+            </div>
+          </button>
+          <span class="pi-finding-confidence">{{ f.confidence }}%</span>
+          <button
+            type="button"
+            class="pi-finding-dismiss"
+            :title="t('pr.preReview.dismiss')"
+            @click="emit('dismiss-finding', f.id)"
+          >✕</button>
         </div>
       </div>
     </section>
@@ -1040,6 +1101,42 @@ watch(() => props.prDiffFiles, (files) => {
   color: var(--color-text);
   line-height: var(--line-height-snug);
   font-size: var(--font-size-sm);
+}
+
+/* ─── AI pre-review findings (C4, v3.6.0) ─────────────────── */
+.pi-finding-row {
+  align-items: center;
+}
+.pi-finding-jump {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+.pi-finding-confidence {
+  flex-shrink: 0;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+.pi-finding-dismiss {
+  flex-shrink: 0;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  width: 20px;
+  height: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+.pi-finding-dismiss:hover {
+  color: var(--color-danger);
+  border-color: var(--color-danger);
 }
 
 /* ─── File history ──────────────────────────────────────── */

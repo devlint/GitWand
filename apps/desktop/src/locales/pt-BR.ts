@@ -893,6 +893,14 @@ const ptBR: Locale = {
       hide: "Ocultar vistos",
       toggle: "Marcar como visto",
     },
+    preReview: {
+      title: "Achados de pré-review",
+      confidence: "Confiança",
+      dismiss: "Descartar",
+      progress: "{0}/{1} arquivos",
+      empty: "Nenhum achado.",
+      running: "Analisando…",
+    },
     comment: {
       edit: "Editar",
       delete: "Excluir",

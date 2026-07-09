@@ -13,10 +13,21 @@
 import { ref, nextTick, type Ref } from "vue";
 import type { GitDiff } from "../utils/backend";
 import type { PrReviewAction } from "./usePrReviewKeymap";
+import type { ReviewFinding } from "./usePrPreReview";
+
+/** Minimal duck-typed row shape (mirrors `PrInlineDiff.vue`'s internal
+ *  `DiffRow`) — enough to locate the row for a given finding's line without
+ *  this composable depending on the component's exact row-model type. */
+export interface DiffRowLike {
+  kind: string;
+  dl?: { type: string; oldLineNo?: number; newLineNo?: number };
+}
 
 export interface PrInlineDiffHandle {
   scrollToHunk(hunkIdx: number): void;
+  scrollToLine(rowIdx: number): void;
   openComposeAtHunk(hunkIdx: number): void;
+  rows: DiffRowLike[];
 }
 
 export interface UsePrReviewNavOptions {
@@ -34,6 +45,9 @@ export interface UsePrReviewNavOptions {
    *  event/body choice still lives in `PrReviewModal`). No-op mid-submit. */
   onSubmitReview: () => void;
   submittingReview: Ref<boolean>;
+  /** C4 — confidence-sorted AI pre-review findings, across the whole PR
+   *  (not just the selected file) — `N`/`P` cycle through all of them. */
+  findings: Ref<ReviewFinding[]>;
 }
 
 export function usePrReviewNav(opts: UsePrReviewNavOptions) {
@@ -76,10 +90,33 @@ export function usePrReviewNav(opts: UsePrReviewNavOptions) {
     opts.diffHandle.value?.scrollToHunk(next);
   }
 
+  /** Which finding `N`/`P` currently point at, across the whole PR. -1
+   *  means "none yet" — the first `N` press lands on index 0. */
+  const currentFindingIdx = ref(-1);
+
+  /** `N`/`P` — cycle through the confidence-sorted findings list, wrapping
+   *  around, switching file and scrolling to the finding's line. */
+  function jumpToFinding(delta: 1 | -1) {
+    const list = opts.findings.value;
+    if (!list.length) return;
+    const base = currentFindingIdx.value === -1 ? (delta > 0 ? -1 : 0) : currentFindingIdx.value;
+    const idx = ((base + delta) % list.length + list.length) % list.length;
+    currentFindingIdx.value = idx;
+    const finding = list[idx];
+    opts.selectedDiffFile.value = finding.path;
+    nextTick(() => {
+      const rows = opts.diffHandle.value?.rows ?? [];
+      const rowIdx = rows.findIndex((r) => {
+        if (r.kind !== "line" || !r.dl) return false;
+        const lineNo = r.dl.type === "delete" ? r.dl.oldLineNo : r.dl.newLineNo;
+        return lineNo === finding.line;
+      });
+      if (rowIdx !== -1) opts.diffHandle.value?.scrollToLine(rowIdx);
+    });
+  }
+
   /**
-   * Dispatch a resolved PR-review action. `next-finding` / `prev-finding`
-   * (C4) are wired by that task — until then they are safe no-ops rather
-   * than throwing on an unmapped case.
+   * Dispatch a resolved PR-review action.
    */
   function dispatch(action: PrReviewAction) {
     switch (action) {
@@ -98,11 +135,10 @@ export function usePrReviewNav(opts: UsePrReviewNavOptions) {
       case "submit-review":
         if (!opts.submittingReview.value) opts.onSubmitReview();
         break;
-      case "next-finding":
-      case "prev-finding":
-        break; // wired by C4
+      case "next-finding": jumpToFinding(1); break;
+      case "prev-finding": jumpToFinding(-1); break;
     }
   }
 
-  return { currentHunkIdx, goToFile, goToHunk, dispatch };
+  return { currentHunkIdx, currentFindingIdx, goToFile, goToHunk, jumpToFinding, dispatch };
 }

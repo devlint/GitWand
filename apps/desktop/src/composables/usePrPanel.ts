@@ -30,7 +30,7 @@ import {
 } from "../utils/backend";
 import { forgeFromRemoteInfo, githubProvider } from "./forge/useForge";
 import { ForgeNotImplementedError } from "./forge/types";
-import { fromCIAnnotation, type LineAnnotation } from "./prAnnotations";
+import { fromCIAnnotation, fromFinding, type LineAnnotation } from "./prAnnotations";
 import { usePrCache, listKey, detailKey } from "./usePrCache";
 import { getPersistedDiffMode, type DiffMode } from "../utils/diffMode";
 import { requireOnline } from "../utils/networkGuard";
@@ -982,6 +982,23 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     return map;
   });
 
+  /**
+   * `lineAnnotationsByFile` (CI) merged with the confidence/threshold/cap-
+   * filtered AI pre-review findings (C4) — the single stream `PrInlineDiff`
+   * renders per file. Static flags (E2) merge into this same computed once
+   * `useReviewIntelligence` lands, without another prop-shape change.
+   */
+  const mergedAnnotationsByFile = computed<Record<string, LineAnnotation[]>>(() => {
+    const map: Record<string, LineAnnotation[]> = {};
+    for (const [path, anns] of Object.entries(lineAnnotationsByFile.value)) {
+      map[path] = [...anns];
+    }
+    for (const finding of preReviewFindings.value) {
+      (map[finding.path] ??= []).push(fromFinding(finding));
+    }
+    return map;
+  });
+
   watch(detailTab, async (tab) => {
     if (tab === "diff") {
       loadDiff();
@@ -1452,7 +1469,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     viewedPaths, viewedCount, hideViewed, visibleDiffFiles, toggleViewed,
     // CI annotations (v2.18)
     prAnnotations, annotationsLoading, annotationsLoaded,
-    annotationCountByCheck, annotationsByFile, lineAnnotationsByFile, loadAnnotations,
+    annotationCountByCheck, annotationsByFile, lineAnnotationsByFile, mergedAnnotationsByFile, loadAnnotations,
     draftReviewComments, draftCount, showReviewModal, submittingReview,
     conflictPreview, conflictLoading, conflictError,
     hotspots, hotspotsLoading, totalRepoFiles, fileHistory, fileHistoryLoading,

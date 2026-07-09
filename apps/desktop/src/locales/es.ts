@@ -892,6 +892,14 @@ const es: Locale = {
       hide: "Ocultar vistos",
       toggle: "Marcar como visto",
     },
+    preReview: {
+      title: "Hallazgos de pre-revisión",
+      confidence: "Confianza",
+      dismiss: "Descartar",
+      progress: "{0}/{1} archivos",
+      empty: "Sin hallazgos.",
+      running: "Analizando…",
+    },
     comment: {
       edit: "Editar",
       delete: "Eliminar",

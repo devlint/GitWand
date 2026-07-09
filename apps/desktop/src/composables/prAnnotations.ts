@@ -11,6 +11,7 @@
  * Pure module — no Vue, no composable state — testable in isolation.
  */
 import type { CIAnnotation } from "../utils/backend";
+import type { ReviewFinding } from "./usePrPreReview";
 
 export type AnnotationSource = "ci" | "ai" | "static";
 export type LineSide = "LEFT" | "RIGHT";
@@ -54,6 +55,21 @@ export function fromCIAnnotation(a: CIAnnotation): LineAnnotation {
     title: a.title,
     message: a.message,
     checkName: a.checkName,
+  };
+}
+
+/** Map an AI pre-review finding (C1-C3) onto the shared model (C4). */
+export function fromFinding(f: ReviewFinding): LineAnnotation {
+  return {
+    source: "ai",
+    path: f.path,
+    line: f.line,
+    side: f.side,
+    severity: f.severity,
+    confidence: f.confidence,
+    title: f.title,
+    message: f.detail,
+    id: f.id,
   };
 }
 

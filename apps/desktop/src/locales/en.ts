@@ -908,6 +908,14 @@ const en = {
       hide: "Hide viewed",
       toggle: "Mark as viewed",
     },
+    preReview: {
+      title: "Pre-review findings",
+      confidence: "Confidence",
+      dismiss: "Dismiss",
+      progress: "{0}/{1} files",
+      empty: "No findings.",
+      running: "Analyzing…",
+    },
     comment: {
       edit: "Edit",
       delete: "Delete",

@@ -208,6 +208,7 @@ const prReviewNav = usePrReviewNav({
   hideViewed: p.hideViewed,
   onSubmitReview: () => { p.showReviewModal.value = true; },
   submittingReview: p.submittingReview,
+  findings: p.preReviewFindings,
 });
 
 function handleKeydown(e: KeyboardEvent) {
@@ -269,6 +270,21 @@ async function scrollToLastComment() {
   p.detailTab.value = "info";
   await nextTick();
   commentsEnd.value?.scrollIntoView({ behavior: "smooth", block: "end" });
+}
+
+/** C4 — click a finding in the Intelligence panel's list: switch to the
+ *  Diff tab, select the file, and scroll to the finding's line. */
+async function jumpToFinding(path: string, line: number) {
+  p.detailTab.value = "diff";
+  p.selectedDiffFile.value = path;
+  await nextTick();
+  const rows = prInlineDiffRef.value?.rows ?? [];
+  const rowIdx = rows.findIndex((r: any) => {
+    if (r.kind !== "line") return false;
+    const lineNo = r.dl.type === "delete" ? r.dl.oldLineNo : r.dl.newLineNo;
+    return lineNo === line;
+  });
+  if (rowIdx !== -1) prInlineDiffRef.value?.scrollToLine(rowIdx);
 }
 
 /**
@@ -905,7 +921,7 @@ function submitRequestReviewers() {
                 :cwd="p.cwd.value"
                 :pr-number="p.selectedPr.value?.number"
                 :forge-name="p.forge.value.name"
-                :annotations="p.selectedDiffFile.value ? (p.lineAnnotationsByFile.value[p.selectedDiffFile.value] ?? []) : []"
+                :annotations="p.selectedDiffFile.value ? (p.mergedAnnotationsByFile.value[p.selectedDiffFile.value] ?? []) : []"
                 @create-comment="p.handleCreateComment"
                 @add-to-review="p.handleAddToReview"
                 @reply-comment="p.handleReplyComment"
@@ -954,9 +970,14 @@ function submitRequestReviewers() {
             :hotspots-loading="p.hotspotsLoading.value"
             :file-history="p.fileHistory.value"
             :file-history-loading="p.fileHistoryLoading.value"
+            :pre-review-findings="p.preReviewFindings.value"
+            :pre-review-progress="p.preReviewProgress.value"
+            :pre-review-running="p.preReviewRunning.value"
             @load-conflict-preview="p.loadConflictPreview"
             @load-hotspots="p.loadHotspots"
             @load-file-history="p.loadFileHistory"
+            @dismiss-finding="p.dismissFinding"
+            @jump-to-finding="jumpToFinding"
           />
         </div>
       </div>

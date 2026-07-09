@@ -901,6 +901,14 @@ const fr: Locale = {
       hide: "Masquer les vus",
       toggle: "Marquer comme vu",
     },
+    preReview: {
+      title: "Constats de pré-review",
+      confidence: "Confiance",
+      dismiss: "Ignorer",
+      progress: "{0}/{1} fichiers",
+      empty: "Aucun constat.",
+      running: "Analyse en cours…",
+    },
     comment: {
       edit: "Modifier",
       delete: "Supprimer",

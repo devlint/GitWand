@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { fromCIAnnotation, annotationsByLine, worstSeverity, type LineAnnotation } from "../prAnnotations";
+import { fromCIAnnotation, fromFinding, annotationsByLine, worstSeverity, type LineAnnotation } from "../prAnnotations";
 import type { CIAnnotation } from "../../utils/backend";
+import type { ReviewFinding } from "../usePrPreReview";
 
 function ciAnn(overrides: Partial<CIAnnotation> = {}): CIAnnotation {
   return {
@@ -41,6 +42,37 @@ describe("fromCIAnnotation", () => {
       message: "m",
       checkName: "ci-job",
     });
+  });
+});
+
+describe("fromFinding", () => {
+  it("maps a ReviewFinding onto the shared LineAnnotation model, carrying confidence + id", () => {
+    const f: ReviewFinding = {
+      id: "abc123", path: "a.ts", line: 4, side: "RIGHT",
+      severity: "risk", confidence: 82, title: "possible null deref", detail: "explain",
+    };
+    expect(fromFinding(f)).toEqual({
+      source: "ai",
+      path: "a.ts",
+      line: 4,
+      side: "RIGHT",
+      severity: "risk",
+      confidence: 82,
+      title: "possible null deref",
+      message: "explain",
+      id: "abc123",
+    });
+  });
+});
+
+describe("merged annotation stream (CI + AI)", () => {
+  it("keeps CI and AI annotations distinct by source when grouped together", () => {
+    const ci = fromCIAnnotation({ checkName: "lint", path: "a.ts", startLine: 2, endLine: 2, level: "warning", title: "w", message: "" });
+    const aiFinding: ReviewFinding = { id: "1", path: "a.ts", line: 2, side: "RIGHT", severity: "risk", confidence: 90, title: "r", detail: "" };
+    const ai = fromFinding(aiFinding);
+    const map = annotationsByLine([ci, ai]);
+    const atLine2 = map.get("RIGHT:2") ?? [];
+    expect(atLine2.map((a) => a.source).sort()).toEqual(["ai", "ci"]);
   });
 });
 
