@@ -27,6 +27,8 @@ import {
   type PrFileHistory,
   ghForkInfo,
   type ForkInfo,
+  ghPrFreshnessSignal,
+  type PrFreshnessSignal,
 } from "../utils/backend";
 import { forgeFromRemoteInfo, githubProvider } from "./forge/useForge";
 import { usePrCache, listKey, detailKey } from "./usePrCache";
@@ -194,6 +196,37 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   // future calls rather than falsely treating an incomplete list as done.
   const PREFETCH_CEILING = 300;
   let _prPrefetchToken = 0;
+
+  // ─── In-memory list cache (badge path) ──────────────────────────────────
+  // Mirrors useGitRepo.ts's LOG_CACHE/prefetchAllPages pattern (PR #113).
+  // Declared inside usePrPanel() — a singleton instantiated once in App.vue,
+  // same as LOG_CACHE — so its lifetime matches the app session, and each
+  // fresh usePrPanel() call (e.g. in a test) starts with an empty cache.
+  interface PrListCacheEntry {
+    prs: PullRequest[];
+    hasMore: boolean;
+    topSignal: PrFreshnessSignal | null;
+  }
+  const PR_LIST_CACHE = new Map<string, PrListCacheEntry>();
+  // Throttles the freshness re-probe on repeated ensurePrsLoaded() calls
+  // (branch popover reopened, graph mode re-entered) so rapid toggling
+  // doesn't fire a GitHub request every time.
+  const FRESHNESS_RECHECK_MS = 30_000;
+  let _lastFreshnessCheck = 0;
+
+  /**
+   * GitHub-only cheap freshness probe (see `ghPrFreshnessSignal`'s doc
+   * comment). Other forges have no equivalent yet — `null` here just means
+   * "no signal available", which `ensurePrsLoaded()` treats as a cache miss.
+   */
+  async function fetchPrFreshnessSignal(repo: string): Promise<PrFreshnessSignal | null> {
+    if (forge.value.name !== "github") return null;
+    try {
+      return await ghPrFreshnessSignal(repo);
+    } catch {
+      return null;
+    }
+  }
 
   // ─── Computed ──────────────────────────────────────────
   const commentsForFile = computed<PrReviewComment[]>(() =>
@@ -547,6 +580,17 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       if (!live()) return;
       await loadMorePrs(BG_PAGE);
     }
+    // Only cache a fully-drained list (reached the true end before the
+    // ceiling), and only for GitHub (the only forge with a freshness
+    // signal) — a ceiling-capped or signal-less list stays uncached so
+    // ensurePrsLoaded() keeps retrying instead of trusting an incomplete or
+    // unvalidatable snapshot forever.
+    if (live() && !hasMore.value && forge.value.name === "github") {
+      const topSignal = await fetchPrFreshnessSignal(repo);
+      if (live()) {
+        PR_LIST_CACHE.set(repo, { prs: prs.value.slice(), hasMore: false, topSignal });
+      }
+    }
   }
 
   function resetDetail() {
@@ -744,6 +788,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     prs.value = [];
     remote.value = null;
     _prsEnsured = false;
+    _lastFreshnessCheck = 0;
     ++_prPrefetchToken; // invalidate any in-flight background prefetch for the old repo
     resetDetail();
     if (newCwd && panelMounted.value) init();
@@ -775,6 +820,8 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       newPrTitle.value = ""; newPrBody.value = ""; newPrDraft.value = false;
       newPrReviewers.value = [];
       cache.invalidateLists(cwd.value);
+      PR_LIST_CACHE.delete(cwd.value);
+      _prsEnsured = false;
       await loadPrs();
     } catch (err: any) { error.value = err.message; }
     finally { isCreating.value = false; }
@@ -832,6 +879,8 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       success.value = t("pr.success.prMerged", mergingPr.value.number);
       cache.invalidateDetail(cwd.value, mergingPr.value.number);
       cache.invalidateLists(cwd.value);
+      PR_LIST_CACHE.delete(cwd.value);
+      _prsEnsured = false;
       mergingPr.value = null;
       await loadPrs();
     } catch (err: any) { error.value = err.message; }
@@ -1099,7 +1148,40 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
    * SWR-cached list fetch. No-op once done for the current repo (until switch).
    */
   async function ensurePrsLoaded() {
-    if (!cwd.value || _prsEnsured || prs.value.length > 0) return;
+    if (!cwd.value || filterState.value !== "open") return;
+    const repo = cwd.value;
+    const cached = PR_LIST_CACHE.get(repo);
+    if (cached) {
+      const now = Date.now();
+      if (now - _lastFreshnessCheck < FRESHNESS_RECHECK_MS) return; // recently confirmed fresh
+      _lastFreshnessCheck = now;
+      const signal = await fetchPrFreshnessSignal(repo);
+      if (cwd.value !== repo) return; // repo changed while the probe was in flight
+      const unchanged =
+        (signal === null && cached.topSignal === null) ||
+        (signal !== null &&
+          cached.topSignal !== null &&
+          signal.number === cached.topSignal.number &&
+          signal.updatedAt === cached.topSignal.updatedAt &&
+          signal.openCount === cached.topSignal.openCount);
+      if (unchanged) {
+        prs.value = cached.prs;
+        hasMore.value = false;
+        return;
+      }
+      // Stale (or the probe errored) — drop the cache and fall through to a
+      // full redrain below, UNCONDITIONALLY: this branch must not be gated
+      // by the `_prsEnsured`/`prs.value.length` check below, or a repo whose
+      // cache just went stale would keep showing the stale list forever
+      // (`_prsEnsured` stays true and `prs.value` stays non-empty even
+      // though nothing is being redrained).
+      PR_LIST_CACHE.delete(repo);
+    } else if (_prsEnsured && prs.value.length > 0) {
+      // No cache yet, but this session already loaded (or is loading/
+      // draining) this repo's open PRs — matches the original one-shot
+      // guard for the "mid-drain, not yet cached" window.
+      return;
+    }
     _prsEnsured = true;
     const cachedRemote = cache.getRemote(cwd.value);
     if (cachedRemote) {
