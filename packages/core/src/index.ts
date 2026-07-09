@@ -65,7 +65,7 @@ export { tryResolveMarkdownConflict, parseSections, extractFrontmatter } from ".
 
 // Phase 7.3b — Résolveurs supplémentaires (YAML, imports TS/JS, Vue SFC, CSS)
 export { tryResolveYamlConflict } from "./resolvers/yaml.js";
-export { tryResolveImportConflict, isImportBlock } from "./resolvers/imports.js";
+export { tryResolveImportConflict, isImportBlock, extractImportSources } from "./resolvers/imports.js";
 export { tryResolveVueConflict, parseSfcBlocks } from "./resolvers/vue.js";
 export { tryResolveCssConflict, parseCssRules } from "./resolvers/css.js";
 
