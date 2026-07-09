@@ -905,7 +905,7 @@ function submitRequestReviewers() {
                 :cwd="p.cwd.value"
                 :pr-number="p.selectedPr.value?.number"
                 :forge-name="p.forge.value.name"
-                :annotations="p.selectedDiffFile.value ? (p.annotationsByFile.value[p.selectedDiffFile.value] ?? []) : []"
+                :annotations="p.selectedDiffFile.value ? (p.lineAnnotationsByFile.value[p.selectedDiffFile.value] ?? []) : []"
                 @create-comment="p.handleCreateComment"
                 @add-to-review="p.handleAddToReview"
                 @reply-comment="p.handleReplyComment"

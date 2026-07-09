@@ -30,6 +30,7 @@ import {
 } from "../utils/backend";
 import { forgeFromRemoteInfo, githubProvider } from "./forge/useForge";
 import { ForgeNotImplementedError } from "./forge/types";
+import { fromCIAnnotation, type LineAnnotation } from "./prAnnotations";
 import { usePrCache, listKey, detailKey } from "./usePrCache";
 import { getPersistedDiffMode, type DiffMode } from "../utils/diffMode";
 import { requireOnline } from "../utils/networkGuard";
@@ -857,6 +858,20 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     return map;
   });
 
+  /**
+   * `annotationsByFile` converted onto the shared `LineAnnotation` model
+   * (E1) — CI-only for now (`source: "ci"`); AI findings (C4) and static
+   * flags (E2) merge into this same stream once those tasks land, without
+   * `PrInlineDiff`'s prop shape changing again.
+   */
+  const lineAnnotationsByFile = computed<Record<string, LineAnnotation[]>>(() => {
+    const map: Record<string, LineAnnotation[]> = {};
+    for (const [path, anns] of Object.entries(annotationsByFile.value)) {
+      map[path] = anns.map(fromCIAnnotation);
+    }
+    return map;
+  });
+
   watch(detailTab, async (tab) => {
     if (tab === "diff") {
       loadDiff();
@@ -1324,7 +1339,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     viewedPaths, viewedCount, hideViewed, visibleDiffFiles, toggleViewed,
     // CI annotations (v2.18)
     prAnnotations, annotationsLoading, annotationsLoaded,
-    annotationCountByCheck, annotationsByFile, loadAnnotations,
+    annotationCountByCheck, annotationsByFile, lineAnnotationsByFile, loadAnnotations,
     draftReviewComments, draftCount, showReviewModal, submittingReview,
     conflictPreview, conflictLoading, conflictError,
     hotspots, hotspotsLoading, totalRepoFiles, fileHistory, fileHistoryLoading,

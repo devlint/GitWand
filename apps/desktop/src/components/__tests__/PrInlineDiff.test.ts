@@ -7,7 +7,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { createApp, nextTick, type App } from "vue";
 import PrInlineDiff from "../PrInlineDiff.vue";
-import type { GitDiff, DiffHunk, DiffLine, CIAnnotation } from "../../utils/backend";
+import type { GitDiff, DiffHunk, DiffLine } from "../../utils/backend";
+import type { LineAnnotation } from "../../composables/prAnnotations";
 
 function line(type: DiffLine["type"], content: string, oldLineNo?: number, newLineNo?: number): DiffLine {
   return { type, content, oldLineNo, newLineNo };
@@ -74,8 +75,8 @@ describe("PrInlineDiff — flat row model", () => {
   });
 
   it("renders CI annotation gutter icons", async () => {
-    const annotations: CIAnnotation[] = [
-      { checkName: "lint", level: "warning", startLine: 2, endLine: 2, title: "warn", message: "", path: "src/foo.ts" } as CIAnnotation,
+    const annotations: LineAnnotation[] = [
+      { source: "ci", checkName: "lint", severity: "warning", line: 2, endLine: 2, side: "RIGHT", title: "warn", message: "", path: "src/foo.ts" },
     ];
     mounted = mountDiff({ diff: smallDiff(), filePath: "src/foo.ts", comments: [], annotations });
     await nextTick();

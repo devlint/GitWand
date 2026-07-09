@@ -10,7 +10,8 @@
  *  - Code suggestion apply support
  */
 import { ref, computed } from "vue";
-import type { GitDiff, DiffLine, PrReviewComment, CIAnnotation } from "../utils/backend";
+import type { GitDiff, DiffLine, PrReviewComment } from "../utils/backend";
+import { annotationsByLine as groupAnnotationsByLine, worstSeverity, type LineAnnotation } from "../composables/prAnnotations";
 import PrCommentThread from "./PrCommentThread.vue";
 import AiSparkle from "./AiSparkle.vue";
 import { detectLanguage, highlightLine } from "../utils/highlight";
@@ -32,8 +33,8 @@ const props = defineProps<{
   cwd?: string;
   prNumber?: number;
   forgeName?: string;
-  /** CI check-run annotations for this file (v2.18). */
-  annotations?: CIAnnotation[];
+  /** Merged CI + AI + static-flag annotations for this file (E1, v3.6.0). */
+  annotations?: LineAnnotation[];
 }>();
 
 interface CommentParams {
@@ -159,40 +160,39 @@ function threadsForLine(line: DiffLine): Thread[] {
   });
 }
 
-// ─── CI annotations (v2.18) ──────────────────────────────
-// Annotations are anchored on the head commit → matched on `newLineNo`.
-// Ranges are expanded line-by-line, capped so a report spanning a whole
-// file doesn't flag hundreds of rows.
-const ANN_RANGE_CAP = 20;
-const ANN_ICONS: Record<CIAnnotation["level"], string> = {
+// ─── Line annotations (E1, v3.6.0 — CI + AI + static, unified) ──────────
+// CI annotations were previously matched new-side-only (`newLineNo`), since
+// GitHub/GitLab/Bitbucket check-runs are always anchored on the head commit.
+// The shared model supports both sides (LEFT for AI/static findings on
+// removed lines); CI-only behavior stays byte-identical (still RIGHT-only)
+// since `fromCIAnnotation` always sets `side: "RIGHT"`.
+const ANN_ICONS: Record<string, string> = {
   failure: "❌",
+  risk: "❌",
   warning: "⚠",
+  suggestion: "⚠",
   notice: "ℹ",
+  nit: "ℹ",
 };
 
-const annotationsByLine = computed<Map<number, CIAnnotation[]>>(() => {
-  const map = new Map<number, CIAnnotation[]>();
-  for (const a of props.annotations ?? []) {
-    const end = Math.min(a.endLine, a.startLine + ANN_RANGE_CAP - 1);
-    for (let l = a.startLine; l <= end; l++) {
-      const list = map.get(l);
-      if (list) list.push(a);
-      else map.set(l, [a]);
-    }
-  }
-  return map;
-});
+const mergedAnnotationsByLine = computed(() => groupAnnotationsByLine(props.annotations ?? []));
 
-function annotationsForLine(line: DiffLine): CIAnnotation[] {
-  if (line.newLineNo == null) return [];
-  return annotationsByLine.value.get(line.newLineNo) ?? [];
+function annotationsForLine(line: DiffLine): LineAnnotation[] {
+  const anns: LineAnnotation[] = [];
+  if (line.newLineNo != null) {
+    anns.push(...(mergedAnnotationsByLine.value.get(`RIGHT:${line.newLineNo}`) ?? []));
+  }
+  // Delete lines have no RIGHT side — this is purely additive (previously
+  // always matched nothing here, since CI annotations are RIGHT-only).
+  if (line.oldLineNo != null && line.type === "delete") {
+    anns.push(...(mergedAnnotationsByLine.value.get(`LEFT:${line.oldLineNo}`) ?? []));
+  }
+  return anns;
 }
 
-/** Worst level wins for the gutter icon: failure > warning > notice. */
-function annotationLevel(anns: CIAnnotation[]): CIAnnotation["level"] {
-  if (anns.some((a) => a.level === "failure")) return "failure";
-  if (anns.some((a) => a.level === "warning")) return "warning";
-  return "notice";
+/** Worst severity wins for the gutter icon. */
+function annotationLevel(anns: LineAnnotation[]): string {
+  return worstSeverity(anns);
 }
 
 // ─── Compose new comment ─────────────────────────────────
@@ -557,11 +557,12 @@ defineExpose({ scrollToHunk, scrollToLine, openComposeAtHunk, rows, currentRowId
                 class="pid-ann-tip-item"
               >
                 <div class="pid-ann-tip-head">
-                  <span>{{ ANN_ICONS[a.level] }}</span>
+                  <span>{{ ANN_ICONS[a.severity] }}</span>
                   <span class="pid-ann-tip-title">{{ a.title || a.checkName }}</span>
+                  <span v-if="a.confidence != null" class="pid-ann-tip-confidence">{{ a.confidence }}%</span>
                 </div>
                 <div v-if="a.message" class="pid-ann-tip-msg">{{ a.message }}</div>
-                <div class="pid-ann-tip-src">{{ a.checkName }}</div>
+                <div class="pid-ann-tip-src">{{ a.checkName || a.source }}</div>
               </div>
             </div>
           </div>
@@ -799,11 +800,12 @@ defineExpose({ scrollToHunk, scrollToLine, openComposeAtHunk, rows, currentRowId
                     class="pid-ann-tip-item"
                   >
                     <div class="pid-ann-tip-head">
-                      <span>{{ ANN_ICONS[a.level] }}</span>
+                      <span>{{ ANN_ICONS[a.severity] }}</span>
                       <span class="pid-ann-tip-title">{{ a.title || a.checkName }}</span>
+                      <span v-if="a.confidence != null" class="pid-ann-tip-confidence">{{ a.confidence }}%</span>
                     </div>
                     <div v-if="a.message" class="pid-ann-tip-msg">{{ a.message }}</div>
-                    <div class="pid-ann-tip-src">{{ a.checkName }}</div>
+                    <div class="pid-ann-tip-src">{{ a.checkName || a.source }}</div>
                   </div>
                 </div>
               </div>
@@ -1141,6 +1143,14 @@ defineExpose({ scrollToHunk, scrollToLine, openComposeAtHunk, rows, currentRowId
 }
 .pid-ann-tip-title {
   overflow-wrap: anywhere;
+}
+/* E1 — AI finding confidence (C4 renders real values here) */
+.pid-ann-tip-confidence {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
 }
 .pid-ann-tip-msg {
   margin-top: 2px;
