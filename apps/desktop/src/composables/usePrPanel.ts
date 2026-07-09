@@ -65,6 +65,93 @@ export interface PrPanelOptions {
   onRepoMutated?: () => void | Promise<void>;
 }
 
+// ─── Parse unified diff (lazy per-file, A1) ────────────────────────────────
+// `getPRDiff` still fetches the whole PR as one string, but we stop parsing
+// it all up front: `indexDiffFiles` only splits the raw text by `diff --git`
+// headers (cheap), and `parseFileDiff` — the actual hunk/line parse — runs
+// only for the file currently selected (see `ensureFileParsed` below), cached
+// by path so re-selecting a file never re-parses it. Both are pure (no
+// composable state) so they're testable in isolation.
+
+/** Split a raw unified diff into lightweight per-file slices (no hunk parse). */
+export function indexDiffFiles(rawDiff: string): { path: string; raw: string }[] {
+  const slices: { path: string; raw: string }[] = [];
+  if (!rawDiff.trim()) return slices;
+  const lines = rawDiff.split("\n");
+  let currentPath: string | null = null;
+  let currentLines: string[] = [];
+  const flush = () => {
+    if (currentPath !== null) slices.push({ path: currentPath, raw: currentLines.join("\n") });
+  };
+  for (const line of lines) {
+    if (line.startsWith("diff --git ")) {
+      flush();
+      const match = line.match(/diff --git a\/(.+) b\/(.+)/);
+      currentPath = match ? match[2] : "unknown";
+      currentLines = [line];
+      continue;
+    }
+    if (currentPath !== null) currentLines.push(line);
+  }
+  flush();
+  return slices;
+}
+
+/** Parse one file's raw `diff --git …` slice (as produced by `indexDiffFiles`)
+ *  into hunks/lines. Diff-parsing gotcha (AGENTS.md): context lines are
+ *  detected via `line.startsWith(' ')` — a bare empty string is also treated
+ *  as a (whitespace-stripped) context line, never as a phantom add/delete. */
+export function parseFileDiff(rawFileSlice: string): GitDiff {
+  const file: GitDiff = { path: "unknown", hunks: [] };
+  let currentHunk: DiffHunk | null = null;
+  let oldLine = 0, newLine = 0;
+  for (const line of rawFileSlice.split("\n")) {
+    if (line.startsWith("diff --git ")) {
+      const match = line.match(/diff --git a\/(.+) b\/(.+)/);
+      file.path = match ? match[2] : "unknown";
+      currentHunk = null;
+      continue;
+    }
+    if (line.startsWith("index ") || line.startsWith("--- ") || line.startsWith("+++ ") ||
+        line.startsWith("old mode ") || line.startsWith("new mode ") || line.startsWith("new file ") ||
+        line.startsWith("deleted file ") || line.startsWith("similarity index ") ||
+        line.startsWith("rename from ") || line.startsWith("rename to ") || line.startsWith("Binary files ")) continue;
+    const hunkMatch = line.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)/);
+    if (hunkMatch) {
+      currentHunk = {
+        header: line,
+        oldStart: parseInt(hunkMatch[1], 10),
+        oldCount: parseInt(hunkMatch[2] ?? "1", 10),
+        newStart: parseInt(hunkMatch[3], 10),
+        newCount: parseInt(hunkMatch[4] ?? "1", 10),
+        lines: [],
+      };
+      file.hunks.push(currentHunk);
+      oldLine = parseInt(hunkMatch[1], 10);
+      newLine = parseInt(hunkMatch[3], 10);
+      continue;
+    }
+    if (currentHunk) {
+      if (line.startsWith("+")) {
+        currentHunk.lines.push({ type: "add", content: line.substring(1), newLineNo: newLine++ });
+      } else if (line.startsWith("-")) {
+        currentHunk.lines.push({ type: "delete", content: line.substring(1), oldLineNo: oldLine++ });
+      } else if (line.startsWith(" ") || line === "") {
+        currentHunk.lines.push({ type: "context", content: line.startsWith(" ") ? line.substring(1) : line, oldLineNo: oldLine++, newLineNo: newLine++ });
+      }
+    }
+  }
+  return file;
+}
+
+/** Full eager parse — composed from `indexDiffFiles` + `parseFileDiff`.
+ *  Not used on the hot path anymore (see `ensureFileParsed`); kept for
+ *  regression-parity tests and any caller that genuinely wants everything
+ *  parsed up front. */
+export function parseUnifiedDiff(rawDiff: string): GitDiff[] {
+  return indexDiffFiles(rawDiff).map((f) => parseFileDiff(f.raw));
+}
+
 export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
 
   // Disk-persisted SWR cache — paints the list/detail instantly on repo-switch
@@ -127,6 +214,10 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   const annotationsLoading = ref(false);
   const annotationsLoaded = ref(false);
   const prDiffFiles = ref<GitDiff[]>([]);
+  /** Lightweight per-file index (no hunks) produced by `indexDiffFiles` on
+   *  `loadDiff` — the raw slice each shell in `prDiffFiles` is lazily parsed
+   *  from (A1). */
+  const diffIndex = ref<{ path: string; raw: string }[]>([]);
   const prComments = ref<PrReviewComment[]>([]);
   const prIssueComments = ref<PrReviewComment[]>([]);
   const prReviews = ref<PrReview[]>([]);
@@ -315,53 +406,19 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     );
   });
 
-  // ─── Parse unified diff ─────────────────────────────────
-  function parseUnifiedDiff(rawDiff: string): GitDiff[] {
-    const files: GitDiff[] = [];
-    if (!rawDiff.trim()) return files;
-    const lines = rawDiff.split("\n");
-    let currentFile: GitDiff | null = null;
-    let currentHunk: DiffHunk | null = null;
-    let oldLine = 0, newLine = 0;
-    for (const line of lines) {
-      if (line.startsWith("diff --git ")) {
-        if (currentFile) files.push(currentFile);
-        const match = line.match(/diff --git a\/(.+) b\/(.+)/);
-        currentFile = { path: match ? match[2] : "unknown", hunks: [] };
-        currentHunk = null;
-        continue;
-      }
-      if (line.startsWith("index ") || line.startsWith("--- ") || line.startsWith("+++ ") ||
-          line.startsWith("old mode ") || line.startsWith("new mode ") || line.startsWith("new file ") ||
-          line.startsWith("deleted file ") || line.startsWith("similarity index ") ||
-          line.startsWith("rename from ") || line.startsWith("rename to ") || line.startsWith("Binary files ")) continue;
-      const hunkMatch = line.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)/);
-      if (hunkMatch && currentFile) {
-        currentHunk = {
-          header: line,
-          oldStart: parseInt(hunkMatch[1], 10),
-          oldCount: parseInt(hunkMatch[2] ?? "1", 10),
-          newStart: parseInt(hunkMatch[3], 10),
-          newCount: parseInt(hunkMatch[4] ?? "1", 10),
-          lines: [],
-        };
-        currentFile.hunks.push(currentHunk);
-        oldLine = parseInt(hunkMatch[1], 10);
-        newLine = parseInt(hunkMatch[3], 10);
-        continue;
-      }
-      if (currentHunk) {
-        if (line.startsWith("+")) {
-          currentHunk.lines.push({ type: "add", content: line.substring(1), newLineNo: newLine++ });
-        } else if (line.startsWith("-")) {
-          currentHunk.lines.push({ type: "delete", content: line.substring(1), oldLineNo: oldLine++ });
-        } else if (line.startsWith(" ") || line === "") {
-          currentHunk.lines.push({ type: "context", content: line.startsWith(" ") ? line.substring(1) : line, oldLineNo: oldLine++, newLineNo: newLine++ });
-        }
-      }
-    }
-    if (currentFile) files.push(currentFile);
-    return files;
+  // ─── Parse unified diff (lazy per-file, A1) ──────────────
+  const parsedDiffPaths = new Set<string>();
+
+  /** Parse (and cache) the hunks for `path` if not already done. Shells in
+   *  `prDiffFiles` (empty `hunks`) are replaced in place once parsed. */
+  function ensureFileParsed(path: string) {
+    if (parsedDiffPaths.has(path)) return;
+    const slice = diffIndex.value.find((f) => f.path === path);
+    if (!slice) return;
+    const parsed = parseFileDiff(slice.raw);
+    const idx = prDiffFiles.value.findIndex((f) => f.path === path);
+    if (idx !== -1) prDiffFiles.value.splice(idx, 1, parsed);
+    parsedDiffPaths.add(path);
   }
 
   // ─── Data loading ───────────────────────────────────────
@@ -521,6 +578,8 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     prAnnotations.value = [];
     annotationsLoaded.value = false;
     prDiffFiles.value = [];
+    diffIndex.value = [];
+    parsedDiffPaths.clear();
     prComments.value = [];
     prIssueComments.value = [];
     prReviews.value = [];
@@ -633,14 +692,26 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     detailLoading.value = true;
     try {
       const raw = await forge.value.getPRDiff(cwd.value, selectedPr.value.number);
-      prDiffFiles.value = parseUnifiedDiff(raw);
-      if (prDiffFiles.value.length) selectedDiffFile.value = prDiffFiles.value[0].path;
+      // A1: index only (cheap) — shells render the file sidebar instantly.
+      // Hunks are parsed lazily, per file, by `ensureFileParsed`.
+      diffIndex.value = indexDiffFiles(raw);
+      parsedDiffPaths.clear();
+      prDiffFiles.value = diffIndex.value.map((f) => ({ path: f.path, hunks: [] }));
+      if (prDiffFiles.value.length) {
+        selectedDiffFile.value = prDiffFiles.value[0].path;
+        ensureFileParsed(selectedDiffFile.value);
+      }
     } catch (err: any) {
       detailError.value = err.message;
     } finally {
       detailLoading.value = false;
     }
   }
+
+  // A1: parse a newly-selected file's hunks on demand (once, cached by path).
+  watch(selectedDiffFile, (path) => {
+    if (path) ensureFileParsed(path);
+  });
 
   /**
    * Load check-run annotations (v2.18). Lazy: fired the first time the
