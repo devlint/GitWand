@@ -157,9 +157,19 @@ _Inspired by Snipara's project-intelligence layer. Before a merge/rebase, answer
 
 ---
 
-### For reflection — competitive scan (GitUp · Aurees · Snipara)
+### For reflection — competitive scan (GitUp · Aurees · Snipara · Strand · GitComet · RelaGit)
 
 _Veille du 2026-06-24 sur 6 clients/outils (Snipara, GitDriv, GitUp, GitX-dev, Aurees, GitBlade). **Mise à jour 2026-07-03** (renumbered 2026-07-06) : les pistes à fort signal ont été promues en sections versionnées ci-dessus après audit du code — PR Review 2.0 (inspiration Greptile) → **v3.6.0**, Commit Review (inspiration git-lrc) → **v3.7.0**, Snapshots/undo global → **v3.8.0**, Live Map + libgit2 phase 1 → **v3.9.0**, diff éditable + merge preview-to-apply → **v3.10.0**, Combined Diffs → **v3.12.0**, Code Graph/blast radius → **v4.0.0 (candidate)**. Les pistes écartées (GitDriv = web drag-and-drop débutant, GitX-dev = fork quasi-défunt, GitBlade = parité, abandonné depuis 2019) n'apportent rien d'avancé._
+
+**Veille 2026-07-09** — trois nouveaux concurrents sérieux remarchandisent l'espace (tous postérieurs à v2.15.0) :
+
+- **Strand** ([strand/0.5.0](https://github.com/danielss-dev/strand)) — Tauri 2 + React, entièrement focalisé sur les **worktrees comme sessions d'agent parallèles** (not agent *tools* ; agent *workspaces*). Forces : architecture agent-native, lifecycle worktree complet (merge+archive+recovery), WCAG 2.1 accessibility, performance baselines publiées. Faiblesses : aucun conflit IA (en dehors du scope), mono-repo (pas Launchpad équivalent), SolidJS/Strand n'a pas d'équivalent au moteur d'IA conflict resolution. **Implication GitWand** : Strand *n'* adresse pas les conflits auto — notre moat demeure. Leur obsession a11y + perf baseline est à copier (v3.6–v3.9 benchmark pass).
+  
+- **GitComet** ([gitcomet/0.1.15](https://github.com/Auto-Explore/GitComet)) — Pure Rust + GPUI, positionné sur **performance pure + dual-mode (GUI+headless difftool/mergetool)**. Forces : réactivité type Zed, Linux-first distribution, performance documentée sur gros repos (Chromium scale). Faiblesses : IA nulle, pas worktrees, pas multi-repo, pas conflit resolution (strategy algo seule). **Implication GitWand** : GitComet courtise les très gros dépôts et les workflows CI/scripts (headless). Notre Launchpad + conflit IA n'y touche pas. Leur GPUI stack sera intéressant si on re-visit Tauri vs Rust pur en v4.x.
+  
+- **RelaGit** ([relagit/0.16](https://github.com/relagit/relagit)) — Electron + **SolidJS** (fine-grained reactivity), focus **design/elegance** + **workflows extensibles** (TypeScript hooks). Forces : SolidJS perf (GPUI-level), AI nativement intégré (@ai-sdk/anthropic), ecosystème thème communautaire, popout windows uniques. Faiblesses : Electron (lourd), beta fragile, aucun worktree/launchpad, aucun conflit IA structuré. **Implication GitWand** : RelaGit courtise les développeurs "designerss". Leur SolidJS est plus performante que notre Vue 3 sur les diffs lourds — noter pour v3.9 perf pass. Leur AI SDK integration (commit suggestions) est une brique, pas une moat (conflit IA auto-résout reste unique à GitWand).
+
+**Synthèse moat** : aucun de ces trois n'adresse **conflict resolution IA** structurée (Strand = agent workspaces, GitComet = perf, RelaGit = design). GitWand's positional edge — auto-resolve + Launchpad multi-repo + extensible (CLI+MCP) — demeure unique. À cultiver : v3.6–v3.10 pipeline (conflict preview-to-apply, pre-review multi-hop) + v4.0 code graph (blast radius) pour creuser l'écart. Défenses : v3.9 perf baseline (Strand lesson), v3.6 a11y audit (Strand standard), v3.9 SolidJS benchmark vs Vue 3 sur diffs (RelaGit stimulus).
 
 **Reste en veille :**
 
@@ -168,6 +178,7 @@ _Veille du 2026-06-24 sur 6 clients/outils (Snipara, GitDriv, GitUp, GitX-dev, A
 - **Verification Plans attachés aux handoffs** (Snipara) — chaque PR/changement porte ses checks à passer ; recoupe les CI annotations (v2.18.0).
 - **Greptile ([greptile.com](https://www.greptile.com/))** — largement absorbé dans le plan (2026-07-02) : pre-review multi-hop + scores de confiance → **v3.6.0**, index à chaud → **v3.9.0**, contexte historique du LLM fallback → **v3.10.0**, code graph local + co-change + feedback loop → **v4.0.0**. Reste en veille : leur benchmark public de reviewers AI (à réutiliser pour le volet benchmark v3.6.0) et l'évolution de la Genius API.
 - **git-lrc / LiveReview ([HexmosTech](https://github.com/HexmosTech/git-lrc))** — concept absorbé en **v3.7.0** (Commit Review). Reste en veille : leur offre équipe LiveReview (dashboards, politiques org, analytics de review) — si le trailer `GitWand-Review` prend, une agrégation cross-repo dans Today/Dashboard en serait l'équivalent local.
+- **FinderGit + Finder-like mode** — UX empruntable (file-tree first), macOS-only aujourd'hui. v3.10–v3.12 scope : **ajouter une sidebar "Finder-like"** (tree left + inline diff right, keyboard-operable, status badges per-file) pour démarquer vs RelaGit/Strand UI rigides et séduire les utilisateurs macOS. Cross-platform via Tauri = avantage structurel vs FinderGit solo-dev.
 
 ---
 
