@@ -23,7 +23,11 @@
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-100%25-3178C6">
   <img alt="Version" src="https://img.shields.io/badge/version-3.4.0-22c55e">
 </p>
-
+<p align="center">
+  <a href="https://github.com/sponsors/devlint">
+    <img alt="Github Sponsor" src="https://img.shields.io/static/v1?label=Sponsor&message=%E2%9D%A4&logo=GitHub&color=%23fe8e86">
+  </a>
+</p>
 ---
 
 GitWand is a lightweight, native Git client built with Tauri 2 and Vue 3. It covers the full daily workflow — changes, history, branches, push/pull — and goes further with **automatic resolution of trivial merge conflicts**, **integrated PR code review** with inline comments, and a **Git Tree** as the primary history view. Since v1.3, AI assists every step of the workflow — branch naming, PR writing, hunk-level review, semantic squash, and natural-language commit search. v2.7+ adds multi-repo Workspaces and Worktrees; v2.8 adds Agent Sessions (MCP); v2.9 adds a cross-repo Launchpad; v2.10 brings multi-forge pull requests across **GitHub, GitLab, Bitbucket and Azure DevOps**; v2.13 adds inline AI code review; v2.18 overlays CI check annotations directly on the diff; v2.19 adds **OAuth device-flow sign-in for GitHub and Azure DevOps** (no `gh` CLI required) plus **cross-fork pull requests**. The 3.x line makes GitWand a daily driver for AI-assisted work: v3.0 turns the cross-repo dashboard into **Today**, a triaged action inbox, and publishes the **VS Code extension on the Marketplace**; v3.2 adds an **integrated terminal with AI agent tabs** — including one-click AI tasks in isolated worktrees — and a dockable **File Explorer / Editor panel**.
