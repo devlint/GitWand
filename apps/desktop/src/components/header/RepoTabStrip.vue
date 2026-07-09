@@ -85,6 +85,9 @@ const dragOffsetX = ref(0);
 // A press only becomes a drag past this threshold, so a plain click still
 // switches tabs instead of being swallowed as a (zero-distance) drag.
 const DRAG_THRESHOLD_PX = 4;
+// How far above/below the strip the cursor can stray before a release reads
+// as "dropped outside" (cancelled) rather than a reorder.
+const DRAG_VERTICAL_TOLERANCE_PX = 40;
 let pressIndex: number | null = null;
 let pressStartX = 0;
 let didDrag = false;
@@ -103,13 +106,35 @@ function snapshotCenters() {
     : [];
 }
 
-/** Index of the tab slot under `clientX`, from the drag-start snapshot. */
-function tabIndexAtX(clientX: number): number | null {
-  if (tabCenters.length === 0) return null;
+/**
+ * Index of the slot the dragged tab's own (shifted) center now sits in,
+ * i.e. how many of the *other* tabs' (unmoving) centers it has been dragged
+ * past. Hit-testing against the dragged tab's own current center — its
+ * drag-start center plus the live offset — rather than the raw cursor
+ * position means a press anywhere within the tab (left half or right half)
+ * starts at offset 0, so a few pixels of hand wobble can't immediately swap
+ * it with a neighbour just because the press happened to land past its
+ * midpoint. Excluding the dragged tab's own original center from the count
+ * matters too: comparing against the full list would have that slot count
+ * against itself at offset 0, overshooting straight to `draggedIndex + 1`
+ * before any real movement happened.
+ */
+function indexForDragOffset(offsetX: number): number | null {
+  if (tabCenters.length === 0 || draggedIndex.value === null) return null;
+  const draggedCenter = tabCenters[draggedIndex.value] + offsetX;
+  let index = 0;
   for (let i = 0; i < tabCenters.length; i++) {
-    if (clientX < tabCenters[i]) return i;
+    if (i === draggedIndex.value) continue;
+    if (tabCenters[i] < draggedCenter) index++;
   }
-  return tabCenters.length - 1;
+  return index;
+}
+
+function onStripScroll() {
+  // Centers are snapshotted in viewport coordinates; scrolling the strip
+  // (it's overflow-x: auto) mid-drag shifts every tab, so re-snapshot to
+  // keep the hit-test honest.
+  if (didDrag) snapshotCenters();
 }
 
 function onTabMouseDown(e: MouseEvent, index: number, tabId: number) {
@@ -120,16 +145,15 @@ function onTabMouseDown(e: MouseEvent, index: number, tabId: number) {
     return;
   }
   if (e.button !== 0) return;
-  // Don't start a drag from the caret or close affordances.
-  if ((e.target as Element).closest?.(".repo-tab__caret, .repo-tab__close")) return;
-  // Stop the browser from starting a text selection on the press — the click
-  // still fires, so tab switching is unaffected.
-  e.preventDefault();
+  // Don't start a drag from the close affordance. (The caret already stops
+  // propagation on its own @mousedown, so it never reaches this handler.)
+  if ((e.target as Element).closest?.(".repo-tab__close")) return;
   pressIndex = index;
   pressStartX = e.clientX;
   didDrag = false;
   window.addEventListener("mousemove", onDragMove);
   window.addEventListener("mouseup", onDragEnd);
+  window.addEventListener("blur", onDragCancel);
 }
 
 function onDragMove(e: MouseEvent) {
@@ -144,13 +168,24 @@ function onDragMove(e: MouseEvent) {
   // the tab labels and neighbouring header content.
   e.preventDefault();
   dragOffsetX.value = e.clientX - pressStartX;
-  hoveredIndex.value = tabIndexAtX(e.clientX);
+  const stripRect = stripEl.value?.getBoundingClientRect();
+  const droppedOutside =
+    !!stripRect &&
+    (e.clientY < stripRect.top - DRAG_VERTICAL_TOLERANCE_PX ||
+      e.clientY > stripRect.bottom + DRAG_VERTICAL_TOLERANCE_PX);
+  // Cursor well above/below the strip (over app content, a native title bar,
+  // etc.) reads as "no drop target" — mirrors the old native DnD, where
+  // dragging outside any drop zone left the tab order untouched.
+  hoveredIndex.value = droppedOutside ? null : indexForDragOffset(dragOffsetX.value);
 }
 
-function onDragEnd() {
+/** Detaches the drag's window listeners and resets its transient state. */
+function finishDrag(commit: boolean) {
   window.removeEventListener("mousemove", onDragMove);
   window.removeEventListener("mouseup", onDragEnd);
+  window.removeEventListener("blur", onDragCancel);
   if (
+    commit &&
     didDrag &&
     draggedIndex.value !== null &&
     hoveredIndex.value !== null &&
@@ -163,9 +198,38 @@ function onDragEnd() {
   hoveredIndex.value = null;
   dragOffsetX.value = 0;
   tabCenters = [];
-  // Leave `didDrag` set so the click that follows a drag is suppressed;
-  // onTabClick resets it.
+  // The click that follows a mouseup on the same element fires synchronously
+  // in the same task, before this timeout runs — so it's still suppressed
+  // below. Resetting on a deferred tick, rather than relying on that click
+  // reaching onTabClick, means the flag can't get stuck when the release
+  // lands off the dragged tab, which would otherwise swallow the very next
+  // keyboard tab activation.
+  setTimeout(() => {
+    didDrag = false;
+  }, 0);
 }
+
+function onDragEnd(e: MouseEvent) {
+  // Only the left button can end a drag — a right/middle-click released
+  // mid-drag (e.g. after a middle-click closed a different tab) must not
+  // commit or abort this one.
+  if (e.button !== 0) return;
+  finishDrag(true);
+}
+
+function onDragCancel() {
+  finishDrag(false);
+}
+
+// A tab opening/closing mid-drag (deep link, programmatic close, …) leaves
+// draggedIndex/hoveredIndex and the center snapshot pointing at stale
+// positions — abort rather than risk committing a reorder against them.
+watch(
+  () => props.tabs.length,
+  () => {
+    if (pressIndex !== null) onDragCancel();
+  },
+);
 
 // Pinned and recent repos shown in the + dropdown (excludes repos already
 // open in a tab). Capped at 8 combined entries so the menu stays compact;
@@ -252,6 +316,7 @@ function onDocumentKey(e: KeyboardEvent) {
   if (e.key !== "Escape") return;
   if (showMenu.value) closeMenu();
   if (wtMenuTabId.value !== null) closeWorktreeMenu();
+  if (pressIndex !== null) onDragCancel();
 }
 
 // Reposition when the menu opens — and close on resize / strip scroll
@@ -270,15 +335,18 @@ onMounted(() => {
   document.addEventListener("keydown", onDocumentKey);
   window.addEventListener("resize", onWindowChange);
   window.addEventListener("scroll", onWindowChange, true);
+  stripEl.value?.addEventListener("scroll", onStripScroll, { passive: true });
 });
 onUnmounted(() => {
   document.removeEventListener("mousedown", onDocumentClick);
   document.removeEventListener("keydown", onDocumentKey);
   window.removeEventListener("resize", onWindowChange);
   window.removeEventListener("scroll", onWindowChange, true);
+  stripEl.value?.removeEventListener("scroll", onStripScroll);
   // Guard against unmounting mid-drag leaking the window listeners.
   window.removeEventListener("mousemove", onDragMove);
   window.removeEventListener("mouseup", onDragEnd);
+  window.removeEventListener("blur", onDragCancel);
 });
 
 /**
