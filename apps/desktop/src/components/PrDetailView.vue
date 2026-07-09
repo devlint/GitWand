@@ -22,12 +22,16 @@ import PrInlineDiff from "./PrInlineDiff.vue";
 import PrReviewModal from "./PrReviewModal.vue";
 import PrIntelligencePanel from "./PrIntelligencePanel.vue";
 import PrReactions from "./PrReactions.vue";
+import { resolvePrReviewShortcut, isEditableTarget } from "../composables/usePrReviewKeymap";
+import { usePrReviewNav } from "../composables/usePrReviewNav";
 
 const { t } = useI18n();
 
 const emit = defineEmits<{
   (e: "refresh"): void;
   (e: "navigate-commit", hash: string): void;
+  /** B1 `?` shortcut — the host (App.vue) owns the global HelpView toggle. */
+  (e: "open-help"): void;
 }>();
 
 const p = inject<PrPanelState>(PR_PANEL_KEY)!;
@@ -193,9 +197,26 @@ function trackMouse(e: MouseEvent) {
   lastMousePos.y = e.clientY;
 }
 
+const prInlineDiffRef = ref<InstanceType<typeof PrInlineDiff> | null>(null);
+const prReviewNav = usePrReviewNav({
+  prDiffFiles: p.prDiffFiles,
+  selectedDiffFile: p.selectedDiffFile,
+  selectedDiff: p.selectedDiff,
+  diffHandle: prInlineDiffRef,
+  onHelp: () => emit("open-help"),
+});
+
 function handleKeydown(e: KeyboardEvent) {
   if (e.key === "Escape" && fullscreenImageUrl.value) {
     fullscreenImageUrl.value = null;
+  }
+  if (p.detailTab.value === "diff") {
+    const focused = !isEditableTarget(document.activeElement) && !fullscreenImageUrl.value;
+    const action = resolvePrReviewShortcut(e, { focused });
+    if (action) {
+      e.preventDefault();
+      prReviewNav.dispatch(action);
+    }
   }
 }
 
@@ -803,6 +824,7 @@ function commentTimeAgo(dateStr: string): string {
             <div class="pdv-diff-viewer">
               <PrInlineDiff
                 v-if="p.selectedDiff.value"
+                ref="prInlineDiffRef"
                 :diff="p.selectedDiff.value"
                 :file-path="p.selectedDiffFile.value"
                 :comments="p.commentsForFile.value"

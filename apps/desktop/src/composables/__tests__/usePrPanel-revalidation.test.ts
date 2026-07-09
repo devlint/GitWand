@@ -13,7 +13,7 @@ const ghPrComments = vi.fn();
 const ghPrIssueComments = vi.fn();
 const ghPrListReviews = vi.fn();
 const gitFileCount = vi.fn();
-const ghPrDiff = vi.fn(async () => "");
+const ghPrDiff = vi.fn(async (..._args: unknown[]) => "");
 
 vi.mock("@/utils/backend", async () => {
   const actual = await vi.importActual<typeof import("@/utils/backend")>("@/utils/backend");

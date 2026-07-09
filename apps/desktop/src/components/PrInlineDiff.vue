@@ -455,7 +455,15 @@ function scrollToLine(rowIdx: number) {
   scrollRowIntoView(rowIdx);
 }
 
-defineExpose({ scrollToHunk, scrollToLine, rows, currentRowIdx });
+/** B1 `C` shortcut — open the compose box anchored at the first line of the
+ *  given hunk (the "current hunk" the keyboard cursor is on). */
+function openComposeAtHunk(hunkIdx: number) {
+  const hunk = props.diff?.hunks[hunkIdx];
+  if (!hunk || !hunk.lines.length) return;
+  openCompose(hunkIdx, 0, hunk.lines[0]);
+}
+
+defineExpose({ scrollToHunk, scrollToLine, openComposeAtHunk, rows, currentRowIdx });
 </script>
 
 <template>
