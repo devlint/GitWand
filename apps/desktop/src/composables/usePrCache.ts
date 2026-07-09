@@ -36,9 +36,12 @@ export interface CachedList {
 
 export interface DetailBundle {
   detail: PullRequestDetail;
-  checks: CICheck[];
+  /** Optional (A3) — the hot path no longer fetches checks/issueComments up
+   *  front; they're written back once their tab's lazy loader fires. Read
+   *  with a `?? []` default so an older cached entry still parses. */
+  checks?: CICheck[];
   comments: PrReviewComment[];
-  issueComments: PrReviewComment[];
+  issueComments?: PrReviewComment[];
   reviews: PrReview[];
 }
 

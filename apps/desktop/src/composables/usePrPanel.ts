@@ -577,6 +577,9 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     prChecks.value = [];
     prAnnotations.value = [];
     annotationsLoaded.value = false;
+    checksLoaded.value = false;
+    issueCommentsLoaded.value = false;
+    fileCountLoaded.value = false;
     prDiffFiles.value = [];
     diffIndex.value = [];
     parsedDiffPaths.clear();
@@ -602,10 +605,14 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     const cached = cache.getDetail(detailKey(cwd.value, pr.number));
     if (cached) {
       prDetail.value = cached.detail;
-      prChecks.value = cached.checks;
+      prChecks.value = cached.checks ?? [];
       prComments.value = cached.comments;
-      prIssueComments.value = cached.issueComments;
+      prIssueComments.value = cached.issueComments ?? [];
       prReviews.value = cached.reviews;
+      // A cached checks/issueComments array might just be the [] default
+      // above rather than a real prior fetch — leave the loaded flags false
+      // either way so the tab's lazy loader still fires once to get the
+      // real data (cheap no-op if it turns out to genuinely be empty).
       detailRefreshing.value = true;
     } else {
       detailLoading.value = true;
@@ -614,30 +621,30 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   }
 
   /**
-   * Fetch (or revalidate) the full detail bundle for `pr` and write it back to
-   * the cache. The caller sets `detailLoading` / `detailRefreshing` before
-   * awaiting; both are cleared here. `silentError` keeps the stale bundle on
-   * screen instead of surfacing an error (used for cache-hit + background
-   * revalidation, where there is already content to show).
+   * Fetch (or revalidate) the hot-path detail bundle for `pr` and write it
+   * back to the cache. The caller sets `detailLoading` / `detailRefreshing`
+   * before awaiting; both are cleared here. `silentError` keeps the stale
+   * bundle on screen instead of surfacing an error (used for cache-hit +
+   * background revalidation, where there is already content to show).
+   *
+   * A3 (v3.6.0): only `getPR` + `listComments` + `listReviews` run here —
+   * `getCIChecks`/`listIssueComments`/`gitFileCount` are deferred to their
+   * tab's lazy loader (`loadChecks`/`loadIssueComments`/`loadRepoFileCount`)
+   * below, cutting the hot-path forge calls from 6 to 3.
    */
   async function fetchDetailBundle(pr: PullRequest, { silentError }: { silentError: boolean }) {
     const key = detailKey(cwd.value, pr.number);
     detailError.value = null;
     try {
-      const [detail, checks, comments, issueComments, reviews, fileCount] = await Promise.all([
+      const [detail, comments, reviews] = await Promise.all([
         forge.value.getPR(cwd.value, pr.number),
-        forge.value.getCIChecks(cwd.value, pr.number).catch(() => [] as CICheck[]),
         forge.value.listComments(cwd.value, pr.number).catch(() => [] as PrReviewComment[]),
-        forge.value.listIssueComments?.(cwd.value, pr.number).catch(() => [] as PrReviewComment[]) ?? Promise.resolve([] as PrReviewComment[]),
         forge.value.listReviews(cwd.value, pr.number).catch(() => [] as PrReview[]),
-        gitFileCount(cwd.value).catch(() => 0),
       ]);
       // Ignore a stale response if the user moved on to another PR meanwhile.
       if (selectedPr.value?.number !== pr.number) return;
       prDetail.value = detail;
-      prChecks.value = checks;
       prComments.value = comments;
-      prIssueComments.value = issueComments;
       prReviews.value = reviews;
 
       // Azure DevOps API doesn't include comment counts in the PR object.
@@ -647,14 +654,64 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
         prDetail.value.comments = 0;
       }
 
-      totalRepoFiles.value = fileCount;
-      cache.setDetail(key, { detail, checks, comments, issueComments, reviews });
+      cache.setDetail(key, { detail, comments, reviews, checks: prChecks.value, issueComments: prIssueComments.value });
     } catch (err: any) {
       // Keep the cached bundle on screen if revalidation failed.
       if (!silentError) detailError.value = err.message;
     } finally {
       detailLoading.value = false;
       detailRefreshing.value = false;
+    }
+  }
+
+  // ─── Lazy detail loaders (A3) — one flight per PR, fired by the tab
+  // that actually needs the data (mirrors `loadAnnotations`'s guard pattern).
+  const checksLoaded = ref(false);
+  const checksLoading = ref(false);
+  const issueCommentsLoaded = ref(false);
+  const issueCommentsLoading = ref(false);
+  const fileCountLoaded = ref(false);
+  const fileCountLoading = ref(false);
+
+  async function loadChecks() {
+    if (!selectedPr.value || checksLoaded.value || checksLoading.value) return;
+    checksLoading.value = true;
+    try {
+      prChecks.value = await forge.value.getCIChecks(cwd.value, selectedPr.value.number);
+      checksLoaded.value = true;
+      persistDetailCache();
+    } catch {
+      checksLoaded.value = true; // non-fatal — checks tab simply stays empty
+    } finally {
+      checksLoading.value = false;
+    }
+  }
+
+  async function loadIssueComments() {
+    if (!selectedPr.value || issueCommentsLoaded.value || issueCommentsLoading.value) return;
+    issueCommentsLoading.value = true;
+    try {
+      prIssueComments.value =
+        (await forge.value.listIssueComments?.(cwd.value, selectedPr.value.number)) ?? [];
+      issueCommentsLoaded.value = true;
+      persistDetailCache();
+    } catch {
+      issueCommentsLoaded.value = true;
+    } finally {
+      issueCommentsLoading.value = false;
+    }
+  }
+
+  async function loadRepoFileCount() {
+    if (fileCountLoaded.value || fileCountLoading.value) return;
+    fileCountLoading.value = true;
+    try {
+      totalRepoFiles.value = await gitFileCount(cwd.value);
+      fileCountLoaded.value = true;
+    } catch {
+      fileCountLoaded.value = true;
+    } finally {
+      fileCountLoading.value = false;
     }
   }
 
@@ -759,12 +816,18 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     if (tab === "diff") {
       loadDiff();
       loadAnnotations();
+      loadChecks(); // A3: checks gutter/badges on the Diff tab too, not just Checks
     }
-    if (tab === "checks") loadAnnotations();
+    if (tab === "checks") {
+      loadAnnotations();
+      loadChecks();
+    }
+    if (tab === "info") loadIssueComments();
     if (tab === "intelligence") {
       if (prDiffFiles.value.length === 0) await loadDiff();
       if (!hotspots.value.length) loadHotspots();
       if (!Object.keys(fileHistory.value).length) loadFileHistory();
+      loadRepoFileCount();
     }
   });
 
