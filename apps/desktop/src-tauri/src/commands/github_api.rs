@@ -503,6 +503,48 @@ pub(crate) fn rest_list_prs(
     Ok(prs)
 }
 
+/// Pure extraction of `(number, updated_at)` from a REST `GET .../pulls` JSON
+/// array already sorted `updated desc` — the first element is the signal.
+/// Split out from `rest_pr_freshness_signal` so it's unit-testable without an
+/// HTTP call (mirrors `json_to_pr`'s separation of parsing from I/O).
+fn top_pr_from_rest_json(raw: &[serde_json::Value]) -> Option<(i64, String)> {
+    let top = raw.first()?;
+    let updated_at = js(top, "updated_at");
+    if updated_at.is_empty() {
+        return None;
+    }
+    Some((ji(top, "number"), updated_at))
+}
+
+/// Cheap "has the open-PR list changed?" probe: the single most-recently
+/// updated open PR (`per_page=1&sort=updated&direction=desc`, no per-PR
+/// enrichment — unlike `rest_list_prs` this never calls the detail/check-runs
+/// endpoints) plus the open PR count (`rest_pr_count`, already a single
+/// `/search/issues` call). `Ok(None)` means the repo currently has zero open
+/// PRs.
+pub(crate) fn rest_pr_freshness_signal(cwd: &str, token: &str) -> Result<Option<PrFreshnessSignal>, String> {
+    let base = base_owner_repo(cwd, token).unwrap_or_else(|_| {
+        let (o, r) = owner_repo(cwd).unwrap_or_default();
+        format!("{}/{}", o, r)
+    });
+    let raw: Vec<serde_json::Value> = api_json_cached(
+        &format!(
+            "{}/repos/{}/pulls?state=open&per_page=1&page=1&sort=updated&direction=desc",
+            API_BASE, base
+        ),
+        token,
+    )?
+    .as_array()
+    .cloned()
+    .unwrap_or_default();
+    let (number, updated_at) = match top_pr_from_rest_json(&raw) {
+        Some(pair) => pair,
+        None => return Ok(None),
+    };
+    let open_count = rest_pr_count(cwd, "open", token)?;
+    Ok(Some(PrFreshnessSignal { number, updated_at, open_count }))
+}
+
 /// Aggregate the check-runs of commit `sha` in `repo` ("owner/name") into a
 /// single rollup state: `FAILURE` / `PENDING` / `SUCCESS`, or `""` when the
 /// commit has no checks configured. Best effort — any HTTP error yields `""`.
@@ -1618,5 +1660,22 @@ mod tests {
             bearer_config("ghp_abc123"),
             "header = \"Authorization: Bearer ghp_abc123\"\n"
         );
+    }
+
+    #[test]
+    fn top_pr_from_rest_json_reads_first_sorted_entry() {
+        let raw = vec![
+            json!({"number": 88, "updated_at": "2026-07-09T10:00:00Z"}),
+            json!({"number": 3, "updated_at": "2026-01-01T00:00:00Z"}),
+        ];
+        assert_eq!(
+            top_pr_from_rest_json(&raw),
+            Some((88, "2026-07-09T10:00:00Z".to_string()))
+        );
+    }
+
+    #[test]
+    fn top_pr_from_rest_json_empty_list_is_none() {
+        assert_eq!(top_pr_from_rest_json(&[]), None);
     }
 }

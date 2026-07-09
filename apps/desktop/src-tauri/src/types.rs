@@ -358,6 +358,20 @@ pub struct PullRequest {
     pub comment_count: i64,
 }
 
+/// Cheap signal used to detect whether a repo's open-PR list has changed
+/// since it was last fully drained and cached (`usePrPanel.ts`'s
+/// `PR_LIST_CACHE`), without re-fetching the whole list. Two facts, since
+/// neither alone catches every kind of change: the most-recently-updated
+/// open PR (catches edits/comments/new PRs) and the open PR count (catches
+/// a PR closing, which drops it out of the "state=open" results entirely
+/// without changing who's "most recently updated").
+#[derive(Serialize)]
+pub struct PrFreshnessSignal {
+    pub number: i64,
+    pub updated_at: String,
+    pub open_count: i64,
+}
+
 #[derive(Deserialize)]
 pub struct GhPrAuthor {
     /// `None` when the original author has been deleted on GitHub, or for
