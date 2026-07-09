@@ -398,6 +398,7 @@ pub fn run() {
             commands::ops::git_remote_info,
             commands::gh::gh_list_prs,
             commands::gh::gh_pr_count,
+            commands::gh::gh_pr_freshness_signal,
             commands::gh::gh_create_pr,
             commands::gh::gh_list_reviewer_candidates,
             commands::gh::gh_branches,
