@@ -960,6 +960,8 @@ function submitRequestReviewers() {
                 :pr-number="p.selectedPr.value?.number"
                 :forge-name="p.forge.value.name"
                 :annotations="p.selectedDiffFile.value ? (p.mergedAnnotationsByFile.value[p.selectedDiffFile.value] ?? []) : []"
+                :can-edit-comments="p.forgeSupportsCommentEdit.value"
+                :can-delete-comments="p.forgeSupportsCommentDelete.value"
                 @create-comment="p.handleCreateComment"
                 @add-to-review="p.handleAddToReview"
                 @reply-comment="p.handleReplyComment"

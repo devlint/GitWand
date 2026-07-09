@@ -35,6 +35,10 @@ const props = defineProps<{
   forgeName?: string;
   /** Merged CI + AI + static-flag annotations for this file (E1, v3.6.0). */
   annotations?: LineAnnotation[];
+  /** Whether the active forge supports editing a comment (F2). Defaults to true. */
+  canEditComments?: boolean;
+  /** Whether the active forge supports deleting a comment (F2). Defaults to true. */
+  canDeleteComments?: boolean;
 }>();
 
 interface CommentParams {
@@ -620,6 +624,8 @@ defineExpose({ scrollToHunk, scrollToLine, openComposeAtHunk, rows, currentRowId
               :cwd="cwd"
               :pr-number="prNumber"
               :forge-name="forgeName"
+              :can-edit="props.canEditComments"
+              :can-delete="props.canDeleteComments"
               @reply="(body) => handleReply(row.thread, body)"
               @edit="handleEdit"
               @delete="handleDelete"
@@ -853,6 +859,8 @@ defineExpose({ scrollToHunk, scrollToLine, openComposeAtHunk, rows, currentRowId
                   :cwd="cwd"
                   :pr-number="prNumber"
                   :forge-name="forgeName"
+                  :can-edit="props.canEditComments"
+                  :can-delete="props.canDeleteComments"
                   @reply="(body) => handleReply(row.thread, body)"
                   @edit="handleEdit"
                   @delete="handleDelete"

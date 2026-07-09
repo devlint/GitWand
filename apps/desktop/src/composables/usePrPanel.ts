@@ -1015,13 +1015,28 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     } catch (err: any) { error.value = err.message; }
   }
 
+  /** True when the active forge supports editing a review comment (F2) — the
+   *  thread hides the edit affordance rather than calling into a forge that
+   *  throws `ForgeNotImplementedError`. Azure has no edit endpoint wired yet. */
+  const forgeSupportsCommentEdit = computed(() => forge.value.name !== "azure");
+  /** Same contract as `forgeSupportsCommentEdit`, for delete (F2). */
+  const forgeSupportsCommentDelete = computed(() => forge.value.name !== "azure");
+
+  /** Same unsupported-is-silent contract as `handleDismissReview` — a forge
+   *  that throws `ForgeNotImplementedError` (e.g. Azure) is treated as
+   *  unsupported rather than surfaced as an error banner. `forgeSupports*`
+   *  hides the action before this can even be called, so this guard is
+   *  defense-in-depth, not the primary UX. */
   async function handleEditComment(id: number, body: string) {
     try {
       await forge.value.updateComment(cwd.value, id, body);
       const idx = prComments.value.findIndex((c) => c.id === id);
       if (idx !== -1) prComments.value[idx] = { ...prComments.value[idx], body, updated_at: new Date().toISOString() };
       persistDetailCache();
-    } catch (err: any) { error.value = err.message; }
+    } catch (err: any) {
+      if (err instanceof ForgeNotImplementedError) return;
+      error.value = err.message;
+    }
   }
 
   async function handleDeleteComment(id: number) {
@@ -1030,7 +1045,10 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       prComments.value = prComments.value.filter((c) => c.id !== id && c.in_reply_to_id !== id);
       if (prDetail.value && prDetail.value.reviewComments > 0) prDetail.value.reviewComments--;
       persistDetailCache();
-    } catch (err: any) { error.value = err.message; }
+    } catch (err: any) {
+      if (err instanceof ForgeNotImplementedError) return;
+      error.value = err.message;
+    }
   }
 
   function handleApplySuggestion(suggestion: string, startLine: number | null, endLine: number | null) {
@@ -1370,6 +1388,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     handleCreateComment, handleReplyComment, handleEditComment,
     handleDeleteComment, handleApplySuggestion, handleAddToReview, handleSubmitReview,
     handleDismissReview, handleRequestReviewers, forgeSupportsDismissReview, forgeSupportsRequestReviewers,
+    forgeSupportsCommentEdit, forgeSupportsCommentDelete,
     loadConflictPreview, loadHotspots, loadFileHistory,
     // Helpers
     timeAgo, checkIcon, checksIcon, mergeableIcon, renderBody,
