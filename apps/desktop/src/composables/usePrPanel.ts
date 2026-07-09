@@ -30,6 +30,7 @@ import {
 } from "../utils/backend";
 import { forgeFromRemoteInfo, githubProvider } from "./forge/useForge";
 import { usePrCache, listKey, detailKey } from "./usePrCache";
+import { whenIdle } from "../utils/idleSchedule";
 import { getPersistedDiffMode, type DiffMode } from "../utils/diffMode";
 import { requireOnline } from "../utils/networkGuard";
 import { t } from "./useI18n";
@@ -180,6 +181,19 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   const PAGE_SIZE = 10;
   const hasMore = ref(true);
   const loadingMore = ref(false);
+
+  // ─── Background prefetch (badge path) ───────────────────────────────────
+  // Bigger than PAGE_SIZE so the naive offset+limit Rust pagination
+  // (gh_list_prs_inner / rest_list_prs re-fetch offset+limit items from
+  // scratch on every call) issues only a handful of background round trips
+  // instead of one per 10 PRs.
+  const BG_PAGE = 100;
+  // Ceiling on the automatic background drain — matches the dev-server REST
+  // route's existing 3x100-page cap. Beyond this the badge path just has
+  // partial coverage for that repo; ensurePrsLoaded() keeps retrying on
+  // future calls rather than falsely treating an incomplete list as done.
+  const PREFETCH_CEILING = 300;
+  let _prPrefetchToken = 0;
 
   // ─── Computed ──────────────────────────────────────────
   const commentsForFile = computed<PrReviewComment[]>(() =>
@@ -481,7 +495,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
    * Phase 2 (v2.9) will replace this with a cursor-based GraphQL query,
    * making the dedup + slice cost go away.
    */
-  async function loadMorePrs() {
+  async function loadMorePrs(pageSize: number = PAGE_SIZE) {
     // Guard on `refreshing` too: during SWR revalidation the cached list is on
     // screen with `loading` false, so without this the pagination sentinel
     // fires a second `listPRs` (e.g. offset 4) concurrently with the in-flight
@@ -493,7 +507,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     }
     loadingMore.value = true;
     try {
-      const page = await forge.value.listPRs(cwd.value, { state: filterState.value, limit: PAGE_SIZE, offset: prs.value.length });
+      const page = await forge.value.listPRs(cwd.value, { state: filterState.value, limit: pageSize, offset: prs.value.length });
       if (page.length === 0) {
         hasMore.value = false;
       } else {
@@ -503,7 +517,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
         for (const pr of page) {
           if (!seen.has(pr.number)) prs.value.push(pr);
         }
-        hasMore.value = page.length >= PAGE_SIZE;
+        hasMore.value = page.length >= pageSize;
       }
     } catch (e) {
       // Don't surface scroll-load errors as a banner — silent stop is
@@ -512,6 +526,26 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       hasMore.value = false;
     } finally {
       loadingMore.value = false;
+    }
+  }
+
+  /**
+   * Lazily drain the rest of the open-PR list in the background after the
+   * first page paints, so branch badges cover more than PAGE_SIZE PRs.
+   * Idle-scheduled (never blocks input) and cancellable if the repo changes
+   * or the filter leaves "open" mid-drain.
+   */
+  async function prefetchOpenPrs() {
+    if (filterState.value !== "open") return;
+    const token = ++_prPrefetchToken;
+    const repo = cwd.value;
+    if (!repo) return;
+    const live = () =>
+      cwd.value === repo && token === _prPrefetchToken && filterState.value === "open";
+    while (live() && hasMore.value && prs.value.length < PREFETCH_CEILING) {
+      await whenIdle();
+      if (!live()) return;
+      await loadMorePrs(BG_PAGE);
     }
   }
 
@@ -1074,6 +1108,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       await loadRemote();
     }
     await loadPrs();
+    void prefetchOpenPrs();
   }
 
   return {
