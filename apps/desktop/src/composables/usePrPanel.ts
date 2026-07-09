@@ -269,6 +269,9 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
 
   // ─── Draft review ──────────────────────────────────────
   const draftReviewComments = ref<PendingReviewComment[]>([]);
+  /** Named badge value (B3) — same as `.length`, but a stable public name
+   *  for the persistent "N in review" chip visible across tabs. */
+  const draftCount = computed(() => draftReviewComments.value.length);
   const showReviewModal = ref(false);
   const submittingReview = ref(false);
 
@@ -655,6 +658,9 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     } else {
       detailLoading.value = true;
     }
+    // B3 — restore any draft review comments staged before the detail was
+    // last closed, so switching PRs never silently drops staged feedback.
+    draftReviewComments.value = cache.getDraft(detailKey(cwd.value, pr.number)) ?? [];
     await fetchDetailBundle(pr, { silentError: !!cached });
   }
 
@@ -1016,6 +1022,14 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     success.value = t("pr.success.suggestionCopied", startLine ?? "?", endLine ?? "?");
   }
 
+  /** Write the current draft back to the SWR cache (B3) — survives detail
+   *  close/reopen. No-op when no PR is selected (shouldn't happen in
+   *  practice, since only the open detail's compose box can call this). */
+  function persistDraft() {
+    if (!selectedPr.value) return;
+    cache.setDraft(detailKey(cwd.value, selectedPr.value.number), draftReviewComments.value);
+  }
+
   function handleAddToReview(params: {
     path: string; line: number; side: "LEFT" | "RIGHT";
     start_line?: number; start_side?: "LEFT" | "RIGHT"; body: string;
@@ -1026,6 +1040,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       ...(params.start_side !== undefined ? { start_side: params.start_side } : {}),
       body: params.body,
     });
+    persistDraft();
     success.value = t("pr.success.commentAddedToReview", draftReviewComments.value.length);
   }
 
@@ -1043,6 +1058,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       });
       showReviewModal.value = false;
       draftReviewComments.value = [];
+      cache.clearDraft(detailKey(cwd.value, selectedPr.value.number));
       const [reviews, comments] = await Promise.all([
         forge.value.listReviews(cwd.value, selectedPr.value.number).catch(() => [] as PrReview[]),
         forge.value.listComments(cwd.value, selectedPr.value.number).catch(() => [] as PrReviewComment[]),
@@ -1266,7 +1282,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     // CI annotations (v2.18)
     prAnnotations, annotationsLoading, annotationsLoaded,
     annotationCountByCheck, annotationsByFile, loadAnnotations,
-    draftReviewComments, showReviewModal, submittingReview,
+    draftReviewComments, draftCount, showReviewModal, submittingReview,
     conflictPreview, conflictLoading, conflictError,
     hotspots, hotspotsLoading, totalRepoFiles, fileHistory, fileHistoryLoading,
     // Pagination (v2.8.5)

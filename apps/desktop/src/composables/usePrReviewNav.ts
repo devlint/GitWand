@@ -30,6 +30,10 @@ export interface UsePrReviewNavOptions {
   /** B2 — toggle the current file's viewed state / the hide-viewed filter. */
   onToggleViewed: (path: string) => void;
   hideViewed: Ref<boolean>;
+  /** B3 — `⌘Enter` opens the review modal (never submits directly — the
+   *  event/body choice still lives in `PrReviewModal`). No-op mid-submit. */
+  onSubmitReview: () => void;
+  submittingReview: Ref<boolean>;
 }
 
 export function usePrReviewNav(opts: UsePrReviewNavOptions) {
@@ -73,10 +77,9 @@ export function usePrReviewNav(opts: UsePrReviewNavOptions) {
   }
 
   /**
-   * Dispatch a resolved PR-review action. `submit-review` (B3) and
-   * `next-finding` / `prev-finding` (C4) are wired by their respective
-   * tasks — until then they are safe no-ops rather than throwing on an
-   * unmapped case.
+   * Dispatch a resolved PR-review action. `next-finding` / `prev-finding`
+   * (C4) are wired by that task — until then they are safe no-ops rather
+   * than throwing on an unmapped case.
    */
   function dispatch(action: PrReviewAction) {
     switch (action) {
@@ -93,9 +96,11 @@ export function usePrReviewNav(opts: UsePrReviewNavOptions) {
         opts.hideViewed.value = !opts.hideViewed.value;
         break;
       case "submit-review":
+        if (!opts.submittingReview.value) opts.onSubmitReview();
+        break;
       case "next-finding":
       case "prev-finding":
-        break; // wired by B3 / C4
+        break; // wired by C4
     }
   }
 

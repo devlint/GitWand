@@ -206,6 +206,8 @@ const prReviewNav = usePrReviewNav({
   onHelp: () => emit("open-help"),
   onToggleViewed: (path) => p.toggleViewed(path),
   hideViewed: p.hideViewed,
+  onSubmitReview: () => { p.showReviewModal.value = true; },
+  submittingReview: p.submittingReview,
 });
 
 function handleKeydown(e: KeyboardEvent) {

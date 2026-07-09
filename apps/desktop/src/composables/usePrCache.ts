@@ -17,6 +17,7 @@ import type {
   PrReviewComment,
   PrReview,
   RemoteInfo,
+  PendingReviewComment,
 } from "../utils/backend";
 
 export const PR_CACHE_STORAGE_KEY = "gitwand-pr-cache";
@@ -67,15 +68,22 @@ export interface ViewedState {
   ts: number;
 }
 
+/** A pending (not-yet-submitted) review draft, keyed by `detailKey` (B3). */
+export interface DraftState {
+  comments: PendingReviewComment[];
+  ts: number;
+}
+
 interface PrCacheFile {
   lists: Record<string, CachedList>;
   details: Record<string, CachedDetail>;
   remotes: Record<string, CachedRemote>;
   viewed: Record<string, ViewedState>;
+  drafts: Record<string, DraftState>;
 }
 
 function emptyFile(): PrCacheFile {
-  return { lists: {}, details: {}, remotes: {}, viewed: {} };
+  return { lists: {}, details: {}, remotes: {}, viewed: {}, drafts: {} };
 }
 
 // Strictly-increasing write clock. Wall-clock `Date.now()` can return the same
@@ -115,12 +123,14 @@ function loadFromStorage(): PrCacheFile {
       details: parsed.details ?? {},
       remotes: parsed.remotes ?? {},
       viewed: parsed.viewed ?? {},
+      drafts: parsed.drafts ?? {},
     };
     const now = Date.now();
     pruneByAge(file.lists, now);
     pruneByAge(file.details, now);
     pruneByAge(file.remotes, now);
     pruneByAge(file.viewed, now);
+    pruneByAge(file.drafts, now);
     return file;
   } catch {
     return emptyFile();
@@ -132,6 +142,7 @@ function saveToStorage(file: PrCacheFile): void {
   evictLru(file.details, MAX_DETAILS);
   evictLru(file.remotes, MAX_LISTS);
   evictLru(file.viewed, MAX_DETAILS);
+  evictLru(file.drafts, MAX_DETAILS);
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(file));
   } catch (e) {
@@ -234,10 +245,27 @@ export function usePrCache() {
     saveToStorage(_file);
   }
 
+  // ── Pending review draft (B3) ─────────────────────────────────────────────
+
+  function getDraft(key: string): PendingReviewComment[] | null {
+    return _file.drafts[key]?.comments ?? null;
+  }
+
+  function setDraft(key: string, comments: PendingReviewComment[]): void {
+    _file.drafts[key] = { comments, ts: monoNow() };
+    saveToStorage(_file);
+  }
+
+  function clearDraft(key: string): void {
+    delete _file.drafts[key];
+    saveToStorage(_file);
+  }
+
   return {
     getList, setList, invalidateLists,
     getDetail, setDetail, invalidateDetail,
     getRemote, setRemote,
     getViewed, setViewed, toggleViewed,
+    getDraft, setDraft, clearDraft,
   };
 }

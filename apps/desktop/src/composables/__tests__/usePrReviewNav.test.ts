@@ -17,12 +17,14 @@ describe("usePrReviewNav", () => {
   const openComposeAtHunk = vi.fn();
   const onHelp = vi.fn();
   const onToggleViewed = vi.fn();
+  const onSubmitReview = vi.fn();
 
   beforeEach(() => {
     scrollToHunk.mockReset();
     openComposeAtHunk.mockReset();
     onHelp.mockReset();
     onToggleViewed.mockReset();
+    onSubmitReview.mockReset();
   });
 
   function setup(files: GitDiff[], selectedPath: string | null) {
@@ -36,10 +38,12 @@ describe("usePrReviewNav", () => {
     );
     const diffHandle = ref({ scrollToHunk, openComposeAtHunk });
     const hideViewed = ref(false);
+    const submittingReview = ref(false);
     const nav = usePrReviewNav({
       prDiffFiles, selectedDiffFile, selectedDiff, diffHandle, onHelp, onToggleViewed, hideViewed,
+      onSubmitReview, submittingReview,
     });
-    return { nav, prDiffFiles, selectedDiffFile, selectedDiff, hideViewed };
+    return { nav, prDiffFiles, selectedDiffFile, selectedDiff, hideViewed, submittingReview };
   }
 
   it("next-hunk advances the cursor within the file and scrolls to it", () => {
@@ -99,9 +103,22 @@ describe("usePrReviewNav", () => {
     expect(hideViewed.value).toBe(false);
   });
 
-  it("unwired actions (B3/C4) are safe no-ops", () => {
+  it("submit-review (⌘Enter) opens the review modal", () => {
     const { nav } = setup([file("a.ts", 1)], "a.ts");
-    for (const action of ["submit-review", "next-finding", "prev-finding"] as const) {
+    nav.dispatch("submit-review");
+    expect(onSubmitReview).toHaveBeenCalledTimes(1);
+  });
+
+  it("submit-review is a no-op while a submit is already in flight", () => {
+    const { nav, submittingReview } = setup([file("a.ts", 1)], "a.ts");
+    submittingReview.value = true;
+    nav.dispatch("submit-review");
+    expect(onSubmitReview).not.toHaveBeenCalled();
+  });
+
+  it("unwired actions (C4) are safe no-ops", () => {
+    const { nav } = setup([file("a.ts", 1)], "a.ts");
+    for (const action of ["next-finding", "prev-finding"] as const) {
       expect(() => nav.dispatch(action)).not.toThrow();
     }
     expect(scrollToHunk).not.toHaveBeenCalled();
