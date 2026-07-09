@@ -60,3 +60,47 @@ describe("ghCurrentUser caching", () => {
     await expect(ghCurrentUser()).rejects.toThrow(/500.*rate limit/);
   });
 });
+
+describe("ghPrFreshnessSignal", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    devFetch.mockReset();
+    tauriInvoke.mockReset();
+    tauri = false;
+  });
+
+  it("maps the Tauri command's snake_case response to camelCase", async () => {
+    tauri = true;
+    tauriInvoke.mockResolvedValue({ number: 88, updated_at: "2026-07-09T10:00:00Z", open_count: 12 });
+    const { ghPrFreshnessSignal } = await import("../backend-pr");
+    await expect(ghPrFreshnessSignal("/repo")).resolves.toEqual({
+      number: 88, updatedAt: "2026-07-09T10:00:00Z", openCount: 12,
+    });
+  });
+
+  it("returns null when the Tauri command reports zero open PRs", async () => {
+    tauri = true;
+    tauriInvoke.mockResolvedValue(null);
+    const { ghPrFreshnessSignal } = await import("../backend-pr");
+    await expect(ghPrFreshnessSignal("/repo")).resolves.toBeNull();
+  });
+
+  it("returns null instead of throwing when the probe fails", async () => {
+    tauri = true;
+    tauriInvoke.mockRejectedValue(new Error("network down"));
+    const { ghPrFreshnessSignal } = await import("../backend-pr");
+    await expect(ghPrFreshnessSignal("/repo")).resolves.toBeNull();
+  });
+
+  it("dev-server branch maps the JSON response to camelCase", async () => {
+    tauri = false;
+    devFetch.mockResolvedValue(mockRes({
+      ok: true,
+      json: { number: 5, updated_at: "2026-01-01T00:00:00Z", open_count: 2 },
+    }));
+    const { ghPrFreshnessSignal } = await import("../backend-pr");
+    await expect(ghPrFreshnessSignal("/repo")).resolves.toEqual({
+      number: 5, updatedAt: "2026-01-01T00:00:00Z", openCount: 2,
+    });
+  });
+});

@@ -234,6 +234,42 @@ export async function ghPrCount(cwd: string, state: string = "open"): Promise<nu
   }
 }
 
+/** Signal returned by `gh_pr_freshness_signal` — see the Rust doc comment on `PrFreshnessSignal`. */
+export interface PrFreshnessSignal {
+  number: number;
+  updatedAt: string;
+  openCount: number;
+}
+
+/**
+ * Cheap "has the open-PR list changed?" probe for the branch-badge
+ * background-drain cache (`usePrPanel.ts`'s `PR_LIST_CACHE`). GitHub-only —
+ * other forges have no equivalent yet, so their badge path always falls
+ * through to a normal fetch-and-drain instead of an instant cache restore.
+ *
+ * Returns `null` when the repo currently has zero open PRs, or when the
+ * probe itself fails (the caller treats that the same as "cache stale,
+ * redrain").
+ */
+export async function ghPrFreshnessSignal(cwd: string): Promise<PrFreshnessSignal | null> {
+  try {
+    if (isTauri()) {
+      const raw = await tauriInvoke<{ number: number; updated_at: string; open_count: number } | null>(
+        "gh_pr_freshness_signal",
+        { cwd },
+      );
+      return raw ? { number: raw.number, updatedAt: raw.updated_at, openCount: raw.open_count } : null;
+    }
+    const res = await devFetch(`${DEV_SERVER}/api/gh-pr-freshness?cwd=${encodeURIComponent(cwd)}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data || typeof data.number !== "number") return null;
+    return { number: data.number, updatedAt: data.updated_at, openCount: data.open_count ?? 0 };
+  } catch {
+    return null;
+  }
+}
+
 // Minimal branch shape for the publish guard — only the fields it reads.
 interface BranchPublishInfo {
   name: string;
