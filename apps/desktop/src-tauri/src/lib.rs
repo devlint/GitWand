@@ -521,6 +521,7 @@ pub fn run() {
             commands::gitlab::gl_list_issues,
             commands::gitlab::gl_mr_count,
             commands::gitlab::gl_get_mr,
+            commands::gitlab::gl_mr_diff_refs,
             commands::gitlab::gl_mr_diff,
             commands::gitlab::gl_mr_pipelines,
             commands::gitlab::gl_mr_annotations,

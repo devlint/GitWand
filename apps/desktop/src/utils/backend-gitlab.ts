@@ -72,6 +72,20 @@ export async function glGetMr(cwd: string, iid: number): Promise<PullRequestDeta
   } as unknown as PullRequestDetail;
 }
 
+/** GitLab MR diff refs (F1, v3.6.0) — the three SHAs the Discussions API
+ *  needs to correctly anchor an inline comment. */
+export interface MrDiffRefs {
+  baseSha: string;
+  startSha: string;
+  headSha: string;
+}
+
+/** Get a MR's diff refs. Tauri-only, like all GitLab commands. */
+export async function glMrDiffRefs(cwd: string, iid: number): Promise<MrDiffRefs> {
+  if (!isTauri()) throw new Error("glMrDiffRefs requires Tauri");
+  return tauriInvoke<MrDiffRefs>("gl_mr_diff_refs", { cwd, iid });
+}
+
 /** Get the unified diff of a MR. */
 export async function glMrDiff(cwd: string, iid: number): Promise<string> {
   if (!isTauri()) throw new Error("glMrDiff requires Tauri");

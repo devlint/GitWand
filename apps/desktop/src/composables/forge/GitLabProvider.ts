@@ -46,6 +46,7 @@ import {
   glMrFiles,
   glListIssues,
   glRequestReviewers,
+  glMrDiffRefs,
 } from "../../utils/backend";
 import { ghPrConflictPreview, ghPrHotspots } from "../../utils/backend";
 
@@ -71,12 +72,28 @@ import type {
   Issue,
   Account,
 } from "./types";
+import type { PendingReviewComment } from "../../utils/backend";
+
+/** Note-body markers `submitReview` writes so `listReviews` can later
+ *  derive a verdict from plain MR notes (GitLab has no review resource). */
+const CHANGES_REQUESTED_MARKER = "**Changes requested:**";
+const COMMENT_REVIEW_MARKER = "**Review:**";
 
 export class GitLabProvider implements ForgeProvider {
   readonly name: ForgeName = "gitlab";
 
   /** Active account — auth managed by `glab` CLI; stored for API completeness. */
   private _account: Account | null = null;
+
+  /**
+   * Last MR iid resolved via `getPR` (F1, v3.6.0). `getFileHistory`'s
+   * `ForgeProvider` signature carries no `prNumber` (it's shared across all
+   * forges, and GitHub's implementation is repo-wide), but a real GitLab
+   * heuristic needs *some* MR to fetch notes from — the most recently
+   * opened one is the only sane default. Stays `null` (empty file history,
+   * matching the old placeholder) until a PR detail has actually loaded.
+   */
+  private _lastIid: number | null = null;
 
   setAccount(account: Account | null): void {
     this._account = account;
@@ -124,6 +141,7 @@ export class GitLabProvider implements ForgeProvider {
   // ── MR detail ──────────────────────────────────────────────────────────────
 
   getPR(cwd: string, number: number): Promise<PullRequestDetail> {
+    this._lastIid = number;
     return glGetMr(cwd, number);
   }
 
@@ -183,12 +201,14 @@ export class GitLabProvider implements ForgeProvider {
   ): Promise<PrReviewComment> {
     // Use diff-line Discussions API when position info is available.
     if (params.path && params.line != null) {
+      const refs = await glMrDiffRefs(cwd, prNumber);
+      const side = params.side ?? "RIGHT";
       return glMrCreateDiscussion(cwd, prNumber, params.body, {
-        baseSha: (params as any).base_sha ?? "",
-        startSha: (params as any).start_sha ?? (params as any).base_sha ?? "",
-        headSha: (params as any).head_sha ?? "",
-        oldLine: null,
-        newLine: params.line ?? null,
+        baseSha: refs.baseSha,
+        startSha: refs.startSha,
+        headSha: refs.headSha,
+        oldLine: side === "LEFT" ? params.line : null,
+        newLine: side === "RIGHT" ? params.line : null,
         path: params.path,
       });
     }
@@ -209,21 +229,72 @@ export class GitLabProvider implements ForgeProvider {
     return glMrDeleteNote(cwd, prNumber, commentId);
   }
 
-  // ── Reviews (approvals) ────────────────────────────────────────────────────
+  // ── Reviews (approvals + note-derived verdicts, F1 v3.6.0) ─────────────────
   //
   // GitLab uses an approval model rather than GitHub's review states:
   //   APPROVE          → POST /merge_requests/:iid/approve
-  //   REQUEST_CHANGES  → no equivalent; create a blocking note
-  //   COMMENT          → create a general note
+  //   REQUEST_CHANGES  → no equivalent; create a note prefixed with a marker
+  //   COMMENT          → create a note prefixed with a (different) marker
+  // `listReviews` scans notes for those markers to surface
+  // CHANGES_REQUESTED/COMMENTED verdicts alongside real approvals — GitLab
+  // has no structured "review" resource to query directly.
 
-  listReviews(cwd: string, prNumber: number): Promise<PrReview[]> {
-    return glListReviews(cwd, prNumber);
+  /** Post each pending inline comment as a real Discussions-API discussion,
+   *  fetching diff refs once and reusing them (F1). No-op when empty. */
+  private async postBatchComments(
+    cwd: string,
+    prNumber: number,
+    comments?: PendingReviewComment[],
+  ): Promise<void> {
+    if (!comments?.length) return;
+    const refs = await glMrDiffRefs(cwd, prNumber);
+    for (const c of comments) {
+      await glMrCreateDiscussion(cwd, prNumber, c.body, {
+        baseSha: refs.baseSha,
+        startSha: refs.startSha,
+        headSha: refs.headSha,
+        oldLine: c.side === "LEFT" ? c.line : null,
+        newLine: c.side === "RIGHT" ? c.line : null,
+        path: c.path,
+      });
+    }
+  }
+
+  async listReviews(cwd: string, prNumber: number): Promise<PrReview[]> {
+    const [approvals, notes] = await Promise.all([
+      glListReviews(cwd, prNumber),
+      glMrNotes(cwd, prNumber).catch(() => [] as PrReviewComment[]),
+    ]);
+    const derived: PrReview[] = [];
+    for (const note of notes) {
+      let state: "CHANGES_REQUESTED" | "COMMENTED" | null = null;
+      let marker = "";
+      if (note.body.startsWith(CHANGES_REQUESTED_MARKER)) {
+        state = "CHANGES_REQUESTED";
+        marker = CHANGES_REQUESTED_MARKER;
+      } else if (note.body.startsWith(COMMENT_REVIEW_MARKER)) {
+        state = "COMMENTED";
+        marker = COMMENT_REVIEW_MARKER;
+      }
+      if (!state) continue;
+      derived.push({
+        id: note.id,
+        state,
+        body: note.body.slice(marker.length).trim(),
+        user: { login: note.author, avatar_url: "" },
+        submitted_at: note.created_at,
+        html_url: "",
+      });
+    }
+    return [...approvals, ...derived];
   }
 
   async submitReview(cwd: string, prNumber: number, opts: SubmitReviewOptions): Promise<PrReview> {
     if (opts.event === "APPROVE") {
       await glApproveMr(cwd, prNumber);
-      // glab mr approve doesn't return a review object — synthesize one.
+      await this.postBatchComments(cwd, prNumber, opts.comments);
+      // glab mr approve doesn't return a review object — synthesize a
+      // representative one reflecting what actually happened.
       return {
         id: 0,
         state: "APPROVED",
@@ -234,11 +305,14 @@ export class GitLabProvider implements ForgeProvider {
       };
     }
 
-    // REQUEST_CHANGES or COMMENT: create a note with the body.
+    // REQUEST_CHANGES or COMMENT: create a marked note with the body (so
+    // `listReviews` can later derive the verdict from it), then batch-post
+    // any staged inline comments as real Discussions-API discussions.
+    const marker = opts.event === "REQUEST_CHANGES" ? CHANGES_REQUESTED_MARKER : COMMENT_REVIEW_MARKER;
     if (opts.body) {
-      const prefix = opts.event === "REQUEST_CHANGES" ? "**Changes requested:**\n\n" : "";
-      await glMrCreateNote(cwd, prNumber, prefix + opts.body);
+      await glMrCreateNote(cwd, prNumber, `${marker}\n\n${opts.body}`);
     }
+    await this.postBatchComments(cwd, prNumber, opts.comments);
 
     return {
       id: 0,
@@ -277,17 +351,33 @@ export class GitLabProvider implements ForgeProvider {
   }
 
   async getFileHistory(cwd: string, paths: string[]): Promise<Record<string, PrFileHistory>> {
-    // GitLab implementation: aggregate all MR notes mentioning each file path.
-    // This is a heuristic — a note body containing the path string counts as
-    // a review touch. Not as precise as GitHub's structured review comment API,
-    // but sufficient for the "N reviews on this file" chip in the diff view.
+    // Real heuristic (F1, v3.6.0): fetch the current MR's notes once, count
+    // how many mention each path (anchored discussion note, or a general
+    // note whose body happens to reference the path), collect reviewers,
+    // and keep the most recent as `lastComment`.
     //
-    // We fetch all notes (already available from listComments) without re-fetching
-    // per MR — so we pass prNumber=0 as a placeholder; glMrNotes requires iid.
-    // For file history we scan notes across the current PR only.
+    // `ForgeProvider.getFileHistory` carries no `prNumber` (shared across
+    // forges; GitHub's own implementation is repo-wide) — GitLab has no
+    // cheap repo-wide "notes across all MRs" query, so this uses the most
+    // recently opened MR (`_lastIid`, set by `getPR`) as the scope. Empty
+    // history (matching the old placeholder) until a PR detail has loaded.
     const result: Record<string, PrFileHistory> = {};
     for (const path of paths) {
       result[path] = { reviewCommentCount: 0, reviewers: [], lastComment: null };
+    }
+    if (this._lastIid == null) return result;
+
+    const notes = await glMrNotes(cwd, this._lastIid).catch(() => [] as PrReviewComment[]);
+    for (const path of paths) {
+      const matching = notes.filter((n) => n.path === path || n.body.includes(path));
+      if (!matching.length) continue;
+      const reviewers = [...new Set(matching.map((n) => n.author).filter(Boolean))];
+      const last = matching[matching.length - 1];
+      result[path] = {
+        reviewCommentCount: matching.length,
+        reviewers,
+        lastComment: { author: last.author, body: last.body, pr_number: String(this._lastIid) },
+      };
     }
     return result;
   }

@@ -539,6 +539,16 @@ pub struct ForkInfo {
     pub parent: String,
 }
 
+/// GitLab MR diff refs (F1, v3.6.0) — the three SHAs needed to correctly
+/// position an inline discussion comment via the Discussions API.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct MrDiffRefs {
+    pub base_sha: String,
+    pub start_sha: String,
+    pub head_sha: String,
+}
+
 // ─── GitHub OAuth device flow ──────────────────────────────────────
 
 /// Returned by `github_device_start` — the user-facing code + the

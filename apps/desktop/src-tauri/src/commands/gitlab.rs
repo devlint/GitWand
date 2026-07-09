@@ -356,6 +356,37 @@ pub(crate) async fn gl_get_mr(cwd: String, iid: i64) -> Result<PullRequestDetail
     Ok(detail)
 }
 
+/// Get a MR's diff refs (F1, v3.6.0) — `base_sha`/`start_sha`/`head_sha`,
+/// required to correctly anchor inline discussion comments (old/new-side
+/// positioning) via the Discussions API. Same `glab mr view --output json`
+/// fetch pattern as `gl_mr_to_detail`.
+#[tauri::command]
+pub(crate) async fn gl_mr_diff_refs(cwd: String, iid: i64) -> Result<MrDiffRefs, String> {
+    let output = hidden_cmd("glab")
+        .args(["mr", "view", &iid.to_string(), "--output", "json"])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("glab mr view: {}", e))?;
+    if !output.status.success() {
+        return Err(format!(
+            "glab mr view failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mr: serde_json::Value = serde_json::from_str(stdout.trim())
+        .map_err(|e| format!("Failed to parse glab mr view output: {}", e))?;
+    let refs = mr.get("diff_refs").cloned().unwrap_or(serde_json::Value::Null);
+    let base_sha = js(&refs, "base_sha");
+    let start_sha = js(&refs, "start_sha");
+    let head_sha = js(&refs, "head_sha");
+    Ok(MrDiffRefs {
+        base_sha: base_sha.clone(),
+        start_sha: if start_sha.is_empty() { base_sha } else { start_sha },
+        head_sha: if head_sha.is_empty() { js(&mr, "sha") } else { head_sha },
+    })
+}
+
 /// Get the unified diff of a MR using `glab mr diff`.
 #[tauri::command]
 pub(crate) async fn gl_mr_diff(cwd: String, iid: i64) -> Result<String, String> {
