@@ -447,6 +447,45 @@ export async function ghPrReady(cwd: string, number: number): Promise<void> {
   return tauriInvoke<void>("gh_pr_ready", { cwd, number });
 }
 
+/** Dismiss a submitted review (B4, v3.6.0). */
+export async function ghDismissReview(
+  cwd: string,
+  number: number,
+  reviewId: number,
+  message: string = "",
+): Promise<void> {
+  if (isTauri()) {
+    await tauriInvoke("gh_dismiss_review", { cwd, number, reviewId, message });
+    return;
+  }
+  const resp = await devFetch(`${DEV_SERVER}/api/gh-dismiss-review`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, number, reviewId, message }),
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok || data.error) throw new Error(data.error || `gh dismiss review failed: ${resp.status}`);
+}
+
+/** Request reviewers on an existing PR (B4, v3.6.0). */
+export async function ghRequestReviewers(
+  cwd: string,
+  number: number,
+  logins: string[],
+): Promise<void> {
+  if (isTauri()) {
+    await tauriInvoke("gh_request_reviewers", { cwd, number, logins });
+    return;
+  }
+  const resp = await devFetch(`${DEV_SERVER}/api/gh-request-reviewers`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, number, logins }),
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok || data.error) throw new Error(data.error || `gh request reviewers failed: ${resp.status}`);
+}
+
 // ─── PR Detail, Diff & Checks (Phase 9.1) ──────────────────
 
 export interface PullRequestDetail {

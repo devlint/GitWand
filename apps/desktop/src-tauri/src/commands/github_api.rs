@@ -1151,6 +1151,35 @@ pub(crate) fn rest_merge_pr(cwd: &str, number: i64, method: &str, token: &str) -
     Ok(())
 }
 
+/// Dismiss a submitted review (B4, v3.6.0).
+pub(crate) fn rest_dismiss_review(
+    cwd: &str,
+    number: i64,
+    review_id: i64,
+    message: &str,
+    token: &str,
+) -> Result<(), String> {
+    let (repo, _pr) = get_pr_json(cwd, number, token)?;
+    let url = format!("{}/repos/{}/pulls/{}/reviews/{}/dismissals", API_BASE, repo, number, review_id);
+    let payload = serde_json::json!({ "message": message, "event": "DISMISS" });
+    api_json("PUT", &url, token, Some(&payload.to_string()))?;
+    Ok(())
+}
+
+/// Request reviewers on an existing PR (B4, v3.6.0).
+pub(crate) fn rest_request_reviewers(
+    cwd: &str,
+    number: i64,
+    logins: &[String],
+    token: &str,
+) -> Result<(), String> {
+    let (repo, _pr) = get_pr_json(cwd, number, token)?;
+    let url = format!("{}/repos/{}/pulls/{}/requested_reviewers", API_BASE, repo, number);
+    let payload = serde_json::json!({ "reviewers": logins });
+    api_json("POST", &url, token, Some(&payload.to_string()))?;
+    Ok(())
+}
+
 pub(crate) fn rest_pr_ready(cwd: &str, number: i64, token: &str) -> Result<(), String> {
     // Draft→ready is GraphQL-only; resolve the PR node_id first (origin or upstream).
     let (_repo, pr) = get_pr_json(cwd, number, token)?;

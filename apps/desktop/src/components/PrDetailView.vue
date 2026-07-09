@@ -16,7 +16,7 @@ import { PR_PANEL_KEY, isMergeConflict, type PrPanelState } from "../composables
 import { renderMarkdown, onMarkdownLinkClick } from "../composables/useSafeHtml";
 import Avatar from "./Avatar.vue";
 import { forgeAvatarUrl } from "../composables/useAvatar";
-import { openExternalUrl } from "../utils/backend";
+import { openExternalUrl, type ReviewerCandidate } from "../utils/backend";
 import { useI18n } from "../composables/useI18n";
 import PrInlineDiff from "./PrInlineDiff.vue";
 import PrReviewModal from "./PrReviewModal.vue";
@@ -292,6 +292,27 @@ function commentTimeAgo(dateStr: string): string {
     if (hours < 24) return `${hours}h`;
     return `${Math.floor(hours / 24)}j`;
   } catch { return dateStr; }
+}
+
+// ─── Reviews admin: dismiss + request reviewers (B4) ───────
+const reviewerCandidates = ref<ReviewerCandidate[]>([]);
+const requestReviewersInput = ref("");
+
+async function loadReviewerCandidatesOnce() {
+  if (!p.forgeSupportsRequestReviewers.value || reviewerCandidates.value.length || !p.cwd.value) return;
+  try {
+    reviewerCandidates.value = await p.forge.value.listReviewerCandidates(p.cwd.value);
+  } catch { /* non-fatal — the input still works without suggestions */ }
+}
+
+function submitRequestReviewers() {
+  const logins = requestReviewersInput.value
+    .split(/[,\s]+/)
+    .map((s) => s.replace(/^@/, "").trim())
+    .filter(Boolean);
+  if (!logins.length) return;
+  p.handleRequestReviewers(logins);
+  requestReviewersInput.value = "";
 }
 </script>
 
@@ -641,13 +662,31 @@ function commentTimeAgo(dateStr: string): string {
           </div>
 
           <!-- Reviewers -->
-          <section v-if="p.prDetail.value.reviewers.length" class="pdv-section">
+          <section v-if="p.prDetail.value.reviewers.length || p.forgeSupportsRequestReviewers.value" class="pdv-section">
             <h2 class="pdv-section-label">{{ t('pr.detail.reviewers') }}</h2>
-            <div class="pdv-chips">
+            <div v-if="p.prDetail.value.reviewers.length" class="pdv-chips">
               <span v-for="r in p.prDetail.value.reviewers" :key="r" class="pdv-chip pdv-chip--reviewer">
                 <Avatar class="pdv-chip-avatar" :name="r" :url="forgeAvatarUrl(p.forge.value.name, r)" />
                 {{ r }}
               </span>
+            </div>
+            <!-- B4 — request reviewers (capability-gated: hidden, not erroring, when unsupported) -->
+            <div v-if="p.forgeSupportsRequestReviewers.value" class="pdv-request-reviewers">
+              <input
+                v-model="requestReviewersInput"
+                type="text"
+                list="pdv-reviewer-suggestions"
+                class="pdv-request-reviewers-input"
+                :placeholder="t('pr.reviews.requestReviewersPlaceholder')"
+                @focus="loadReviewerCandidatesOnce"
+                @keydown.enter.prevent="submitRequestReviewers"
+              />
+              <datalist id="pdv-reviewer-suggestions">
+                <option v-for="c in reviewerCandidates" :key="c.login" :value="c.login" />
+              </datalist>
+              <button type="button" class="pdv-request-reviewers-btn" @click="submitRequestReviewers">
+                {{ t('pr.reviews.requestReviewers') }}
+              </button>
             </div>
           </section>
 
@@ -740,6 +779,14 @@ function commentTimeAgo(dateStr: string): string {
                       </svg>
                     </button>
                     <span class="pdv-comment-time" :title="item.ts">{{ commentTimeAgo(item.ts) }}</span>
+                    <!-- B4 — dismiss (capability-gated; hidden rather than erroring on GitLab/Bitbucket/Azure) -->
+                    <button
+                      v-if="p.forgeSupportsDismissReview.value && item.verdictCls !== 'pdv-review--dismissed' && item.id"
+                      type="button"
+                      class="pdv-review-dismiss"
+                      :title="t('pr.reviews.dismiss')"
+                      @click="p.handleDismissReview(item.id)"
+                    >{{ t('pr.reviews.dismiss') }}</button>
                   </div>
                   <div v-if="item.bodyHtml" class="pdv-comment-body" @click="onMarkdownLinkClick" v-html="item.bodyHtml" />
                   <!-- Reactions only on reviews that carry a body — there is no
@@ -1658,6 +1705,52 @@ function commentTimeAgo(dateStr: string): string {
 .pdv-comment-goto:hover {
   color: var(--color-accent);
   border-color: var(--color-accent);
+}
+
+/* B4 — dismiss review */
+.pdv-review-dismiss {
+  padding: 1px var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+.pdv-review-dismiss:hover {
+  color: var(--color-danger, #ef4444);
+  border-color: var(--color-danger, #ef4444);
+}
+
+/* B4 — request reviewers */
+.pdv-request-reviewers {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.pdv-request-reviewers-input {
+  flex: 1;
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+}
+.pdv-request-reviewers-btn {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pdv-request-reviewers-btn:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
 }
 
 .pdv-comment-body {

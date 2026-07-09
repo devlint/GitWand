@@ -45,9 +45,11 @@ import {
   glBranches,
   glMrFiles,
   glListIssues,
+  glRequestReviewers,
 } from "../../utils/backend";
 import { ghPrConflictPreview, ghPrHotspots } from "../../utils/backend";
 
+import { ForgeNotImplementedError } from "./types";
 import type {
   ForgeProvider,
   ForgeName,
@@ -246,6 +248,18 @@ export class GitLabProvider implements ForgeProvider {
       submitted_at: new Date().toISOString(),
       html_url: "",
     };
+  }
+
+  /** GitLab has no direct "dismiss a review" equivalent (approvals/notes
+   *  aren't a dismissible review object like GitHub's) — honest unsupported
+   *  error (B4, v3.6.0); the UI hides the action rather than showing one
+   *  that silently no-ops. */
+  dismissReview(): Promise<void> {
+    throw new ForgeNotImplementedError("gitlab", "dismissReview");
+  }
+
+  requestReviewers(cwd: string, prNumber: number, logins: string[]): Promise<void> {
+    return glRequestReviewers(cwd, prNumber, logins);
   }
 
   // ── Intelligence (forge-agnostique depuis v2.14) ───────────────────────────

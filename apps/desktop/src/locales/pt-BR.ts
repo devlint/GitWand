@@ -926,6 +926,13 @@ const ptBR: Locale = {
       cancel: "Cancelar",
       submitting: "Enviando…",
     },
+    reviews: {
+      dismiss: "Descartar",
+      dismissed: "Review descartada",
+      requestReviewers: "Solicitar",
+      requestReviewersPlaceholder: "usuário, usuário…",
+      reviewersRequested: "Revisores solicitados",
+    },
     intel: {
       conflictTitle: "Conflict Prediction",
       analyze: "Analisar",

@@ -202,6 +202,19 @@ export interface ForgeProvider {
 
   submitReview(cwd: string, prNumber: number, opts: SubmitReviewOptions): Promise<PrReview>;
 
+  /**
+   * Dismiss a submitted review (B4, v3.6.0). Optional — a provider that
+   * can't support it (GitLab has no direct equivalent; Bitbucket/Azure omit
+   * it) either doesn't implement the method or throws
+   * `ForgeNotImplementedError`; callers must treat both as "unsupported"
+   * and hide the action rather than surface an error banner.
+   */
+  dismissReview?(cwd: string, prNumber: number, reviewId: number, message?: string): Promise<void>;
+
+  /** Request reviewers on an existing PR/MR (B4, v3.6.0). Optional — same
+   *  unsupported-hides-the-action contract as `dismissReview`. */
+  requestReviewers?(cwd: string, prNumber: number, logins: string[]): Promise<void>;
+
   // ── Intelligence (forge-agnostique depuis v2.14) ───────────────────────────
   //
   // getConflictPreview et getHotspots s'appuient sur des données git locales

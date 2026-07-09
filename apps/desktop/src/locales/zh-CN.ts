@@ -914,6 +914,13 @@ const zhCN: Locale = {
       cancel: "取消",
       submitting: "提交中…",
     },
+    reviews: {
+      dismiss: "驳回",
+      dismissed: "已驳回该 review",
+      requestReviewers: "请求",
+      requestReviewersPlaceholder: "用户名，用户名…",
+      reviewersRequested: "已请求审阅者",
+    },
     intel: {
       conflictTitle: "Conflict Prediction",
       analyze: "分析",

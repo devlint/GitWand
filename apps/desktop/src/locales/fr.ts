@@ -934,6 +934,13 @@ const fr: Locale = {
       cancel: "Annuler",
       submitting: "Envoi\u2026",
     },
+    reviews: {
+      dismiss: "Ignorer",
+      dismissed: "Review ignor\u00e9e",
+      requestReviewers: "Demander",
+      requestReviewersPlaceholder: "nom d'utilisateur, nom d'utilisateur\u2026",
+      reviewersRequested: "Reviewers demand\u00e9s",
+    },
     intel: {
       conflictTitle: "Conflict Prediction",
       analyze: "Analyser",

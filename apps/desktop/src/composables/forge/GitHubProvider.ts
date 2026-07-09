@@ -32,6 +32,8 @@ import {
   ghPrDeleteComment,
   ghPrListReviews,
   ghPrSubmitReview,
+  ghDismissReview,
+  ghRequestReviewers,
   ghPrConflictPreview,
   ghPrHotspots,
   ghPrFileHistory,
@@ -175,6 +177,14 @@ export class GitHubProvider implements ForgeProvider {
 
   submitReview(cwd: string, prNumber: number, opts: SubmitReviewOptions): Promise<PrReview> {
     return ghPrSubmitReview(cwd, prNumber, opts);
+  }
+
+  dismissReview(cwd: string, prNumber: number, reviewId: number, message?: string): Promise<void> {
+    return ghDismissReview(cwd, prNumber, reviewId, message);
+  }
+
+  requestReviewers(cwd: string, prNumber: number, logins: string[]): Promise<void> {
+    return ghRequestReviewers(cwd, prNumber, logins);
   }
 
   // ── Intelligence ──────────────────────────────────────────────────────────

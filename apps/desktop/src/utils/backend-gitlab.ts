@@ -236,6 +236,13 @@ export async function glReviewerCandidates(cwd: string): Promise<ReviewerCandida
   return tauriInvoke<ReviewerCandidate[]>("gl_reviewer_candidates", { cwd });
 }
 
+/** Request reviewers on an existing MR (B4, v3.6.0) — usernames resolved to
+ *  numeric GitLab member ids on the Rust side. */
+export async function glRequestReviewers(cwd: string, iid: number, usernames: string[]): Promise<void> {
+  if (!isTauri()) throw new Error("glRequestReviewers requires Tauri");
+  await tauriInvoke("gl_request_reviewers", { cwd, iid, usernames });
+}
+
 export async function glBranches(cwd: string): Promise<string[]> {
   if (!isTauri()) return [];
   return tauriInvoke<string[]>("gl_branches", { cwd });

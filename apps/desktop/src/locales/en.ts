@@ -941,6 +941,13 @@ const en = {
       cancel: "Cancel",
       submitting: "Submitting\u2026",
     },
+    reviews: {
+      dismiss: "Dismiss",
+      dismissed: "Review dismissed",
+      requestReviewers: "Request",
+      requestReviewersPlaceholder: "username, username\u2026",
+      reviewersRequested: "Reviewers requested",
+    },
     intel: {
       conflictTitle: "Conflict Prediction",
       analyze: "Analyze",

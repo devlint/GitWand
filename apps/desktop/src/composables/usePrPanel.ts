@@ -29,6 +29,7 @@ import {
   type ForkInfo,
 } from "../utils/backend";
 import { forgeFromRemoteInfo, githubProvider } from "./forge/useForge";
+import { ForgeNotImplementedError } from "./forge/types";
 import { usePrCache, listKey, detailKey } from "./usePrCache";
 import { getPersistedDiffMode, type DiffMode } from "../utils/diffMode";
 import { requireOnline } from "../utils/networkGuard";
@@ -1074,6 +1075,48 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     }
   }
 
+  /** True when the active forge implements `dismissReview` (B4) — the Info
+   *  tab uses this to hide the action rather than show one that throws. */
+  const forgeSupportsDismissReview = computed(() => typeof forge.value.dismissReview === "function");
+  /** True when the active forge implements `requestReviewers` (B4). */
+  const forgeSupportsRequestReviewers = computed(() => typeof forge.value.requestReviewers === "function");
+
+  /** Dismiss a submitted review (B4). Forges that don't support it
+   *  (`ForgeNotImplementedError`, or simply omitting the method) are
+   *  treated as unsupported — the Info tab hides the action via
+   *  `forgeSupportsDismissReview` before this can even be called, so this
+   *  guard is defense-in-depth, not the primary UX. */
+  async function handleDismissReview(reviewId: number, message?: string) {
+    if (!selectedPr.value || !forge.value.dismissReview) return;
+    try {
+      await forge.value.dismissReview(cwd.value, selectedPr.value.number, reviewId, message);
+      prReviews.value = await forge.value.listReviews(cwd.value, selectedPr.value.number).catch(() => prReviews.value);
+      persistDetailCache();
+      success.value = t("pr.reviews.dismissed");
+    } catch (err: any) {
+      if (err instanceof ForgeNotImplementedError) return;
+      error.value = err.message;
+    }
+  }
+
+  /** Request reviewers on the open PR (B4). Same unsupported-is-silent
+   *  contract as `handleDismissReview`. */
+  async function handleRequestReviewers(logins: string[]) {
+    if (!selectedPr.value || !forge.value.requestReviewers || !logins.length) return;
+    try {
+      await forge.value.requestReviewers(cwd.value, selectedPr.value.number, logins);
+      const detail = await forge.value.getPR(cwd.value, selectedPr.value.number).catch(() => null);
+      if (detail) {
+        prDetail.value = detail;
+        persistDetailCache();
+      }
+      success.value = t("pr.reviews.reviewersRequested");
+    } catch (err: any) {
+      if (err instanceof ForgeNotImplementedError) return;
+      error.value = err.message;
+    }
+  }
+
   // ─── Intelligence handlers ──────────────────────────────
   async function loadConflictPreview() {
     if (!selectedPr.value || conflictLoading.value) return;
@@ -1296,6 +1339,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     createPr, checkoutPr, mergePr, convertDraftToReady,
     handleCreateComment, handleReplyComment, handleEditComment,
     handleDeleteComment, handleApplySuggestion, handleAddToReview, handleSubmitReview,
+    handleDismissReview, handleRequestReviewers, forgeSupportsDismissReview, forgeSupportsRequestReviewers,
     loadConflictPreview, loadHotspots, loadFileHistory,
     // Helpers
     timeAgo, checkIcon, checksIcon, mergeableIcon, renderBody,

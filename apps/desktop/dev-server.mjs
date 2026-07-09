@@ -4373,6 +4373,64 @@ async function handleRequest(req, res) {
       }
     }
 
+    // POST /api/gh-dismiss-review  { cwd, number, reviewId, message } (B4, v3.6.0)
+    if (url.pathname === "/api/gh-dismiss-review" && req.method === "POST") {
+      try {
+        const { cwd, number, reviewId, message } = await readBody(req);
+        if (!cwd || !number || !reviewId) return jsonResponse(req, res, { error: "Missing cwd, number, or reviewId" }, 400);
+        const token = getGithubToken();
+        if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
+        const nwo = getRepoNwo(resolve(cwd));
+        if (!nwo) return jsonResponse(req, res, { error: "Could not determine GitHub repo" }, 400);
+        const resp = await fetch(`https://api.github.com/repos/${nwo}/pulls/${number}/reviews/${reviewId}/dismissals`, {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ message: message || "", event: "DISMISS" }),
+        });
+        if (!resp.ok) {
+          const body = await resp.text().catch(() => "");
+          return jsonResponse(req, res, { error: `GitHub API ${resp.status}${body ? `: ${body}` : ""}` }, 500);
+        }
+        return jsonResponse(req, res, { ok: true });
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
+      }
+    }
+
+    // POST /api/gh-request-reviewers  { cwd, number, logins } (B4, v3.6.0)
+    if (url.pathname === "/api/gh-request-reviewers" && req.method === "POST") {
+      try {
+        const { cwd, number, logins } = await readBody(req);
+        if (!cwd || !number || !Array.isArray(logins)) return jsonResponse(req, res, { error: "Missing cwd, number, or logins" }, 400);
+        const token = getGithubToken();
+        if (!token) return jsonResponse(req, res, { error: "No GitHub token" }, 401);
+        const nwo = getRepoNwo(resolve(cwd));
+        if (!nwo) return jsonResponse(req, res, { error: "Could not determine GitHub repo" }, 400);
+        const resp = await fetch(`https://api.github.com/repos/${nwo}/pulls/${number}/requested_reviewers`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ reviewers: logins }),
+        });
+        if (!resp.ok) {
+          const body = await resp.text().catch(() => "");
+          return jsonResponse(req, res, { error: `GitHub API ${resp.status}${body ? `: ${body}` : ""}` }, 500);
+        }
+        return jsonResponse(req, res, { ok: true });
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
+      }
+    }
+
     // POST /api/git-interactive-rebase  { cwd, base, todoLines }
     // Starts an interactive rebase with a custom todo list.
     // Writes a temp file and uses GIT_SEQUENCE_EDITOR to inject it.

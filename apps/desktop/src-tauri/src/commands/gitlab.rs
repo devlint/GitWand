@@ -1008,6 +1008,61 @@ pub(crate) async fn gl_reviewer_candidates(cwd: String) -> Result<Vec<ReviewerCa
     Ok(candidates)
 }
 
+/// Resolve a GitLab username to its numeric member id within the current
+/// project — the merge-request update endpoint takes `reviewer_ids`
+/// (numeric), not usernames.
+fn gl_resolve_member_id(cwd: &str, username: &str) -> Option<i64> {
+    let output = hidden_cmd("glab")
+        .args(["api", &format!("projects/:fullpath/members/all?query={}", username)])
+        .current_dir(cwd)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let arr: serde_json::Value = serde_json::from_str(stdout.trim()).ok()?;
+    arr.as_array()?
+        .iter()
+        .find(|m| m.get("username").and_then(|v| v.as_str()) == Some(username))
+        .and_then(|m| m.get("id"))
+        .and_then(|v| v.as_i64())
+}
+
+/// Request reviewers on an existing MR (B4, v3.6.0) — `PUT
+/// /merge_requests/:iid` with `reviewer_ids[]=<id>` per resolved username.
+#[tauri::command]
+pub(crate) async fn gl_request_reviewers(cwd: String, iid: i64, usernames: Vec<String>) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let ids: Vec<i64> = usernames
+            .iter()
+            .filter_map(|u| gl_resolve_member_id(&cwd, u))
+            .collect();
+        if ids.is_empty() {
+            return Err("Could not resolve any reviewer username to a GitLab project member.".to_string());
+        }
+        let endpoint = format!("projects/:fullpath/merge_requests/{}", iid);
+        let mut cmd = hidden_cmd("glab");
+        cmd.args(["api", "-X", "PUT", &endpoint]);
+        for id in &ids {
+            cmd.args(["-f", &format!("reviewer_ids[]={}", id)]);
+        }
+        let output = cmd
+            .current_dir(&cwd)
+            .output()
+            .map_err(|e| format!("glab api request reviewers: {}", e))?;
+        if !output.status.success() {
+            return Err(format!(
+                "glab api request reviewers failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// List branch names for the project via `glab api`. Paginated at 100/page,
 /// deduped, case-insensitively sorted. Non-fatal on failure (returns partial).
 #[tauri::command]

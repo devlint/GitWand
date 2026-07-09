@@ -925,6 +925,13 @@ const es: Locale = {
       cancel: "Cancelar",
       submitting: "Enviando…",
     },
+    reviews: {
+      dismiss: "Descartar",
+      dismissed: "Review descartada",
+      requestReviewers: "Solicitar",
+      requestReviewersPlaceholder: "usuario, usuario…",
+      reviewersRequested: "Revisores solicitados",
+    },
     intel: {
       conflictTitle: "Conflict Prediction",
       analyze: "Analizar",
