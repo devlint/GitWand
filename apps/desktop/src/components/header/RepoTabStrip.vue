@@ -277,9 +277,20 @@ watch(
 // ─── Keyboard reordering ─────────────────────────────────
 // The pointer/touch drag above has no keyboard equivalent, which would
 // otherwise leave reordering unreachable without a mouse, trackpad or
-// touchscreen. Ctrl/Cmd+ArrowLeft/Right nudges the focused tab one slot at a
-// time; the aria-live region above announces the result since the reorder
-// is a silent DOM move with nothing else for a screen reader to key off of.
+// touchscreen. Ctrl/Cmd+Shift+ArrowLeft/Right nudges the focused tab one slot
+// at a time; the aria-live region above announces the result since the
+// reorder is a silent DOM move with nothing else for a screen reader to key
+// off of.
+//
+// Bare Ctrl/Cmd+ArrowLeft/Right was tried first and rejected: on macOS,
+// Ctrl+Arrow is the *default* Mission Control "switch Space" shortcut,
+// handled by the OS before the keydown ever reaches any app — including a
+// browser, so it's not a Tauri-specific gap. Cmd+Arrow isn't bound by
+// default, but plenty of window-manager utilities (Rectangle, yabai, …) and
+// user remaps claim bare Cmd/Ctrl+Arrow too. Requiring Shift as well avoids
+// every OS-level and third-party shortcut we know of for this combo — the
+// same reasoning VS Code's editor-move commands are bound to Shift-modified
+// combos rather than a bare arrow.
 async function moveFocusedTab(index: number, tab: RepoTab, direction: -1 | 1) {
   const newIndex = index + direction;
   if (newIndex < 0 || newIndex >= props.tabs.length) return;
@@ -293,7 +304,7 @@ async function moveFocusedTab(index: number, tab: RepoTab, direction: -1 | 1) {
 }
 
 function onTabKeydown(e: KeyboardEvent, index: number, tab: RepoTab) {
-  if (!(e.ctrlKey || e.metaKey)) return;
+  if (!(e.ctrlKey || e.metaKey) || !e.shiftKey) return;
   if (e.key === "ArrowLeft") {
     e.preventDefault();
     moveFocusedTab(index, tab, -1);
@@ -532,17 +543,20 @@ function onCloseClick(e: MouseEvent, tabId: number) {
 
 <template>
   <div v-if="showStrip" ref="stripEl" class="repo-tab-strip" role="tablist">
-    <!-- Announces the result of a keyboard reorder (Ctrl/Cmd+Arrow) — the
-         move itself is a silent DOM splice with nothing else for a screen
-         reader to react to. -->
+    <!-- Announces the result of a keyboard reorder (Ctrl/Cmd+Shift+Arrow) —
+         the move itself is a silent DOM splice with nothing else for a
+         screen reader to react to. -->
     <span class="repo-tab-strip__sr-only" role="status" aria-live="polite">{{ announceText }}</span>
     <!-- Tabs — rendered only when there are multiple repos -->
     <template v-if="showTabs">
       <!-- Reordered via pointer events (see onTabPointerDown) — covers mouse,
            touch and pen in one path — rather than native HTML5 drag, which is
-           unreliable in the WebKit webviews powering the app. Ctrl/Cmd+Arrow
-           reorders from the keyboard (see onTabKeydown) since the pointer
-           gesture has no keyboard equivalent otherwise. -->
+           unreliable in the WebKit webviews powering the app.
+           Ctrl/Cmd+Shift+Arrow reorders from the keyboard (see
+           onTabKeydown) since the pointer gesture has no keyboard
+           equivalent otherwise — Shift is required alongside Ctrl/Cmd
+           because a bare Ctrl+Arrow is macOS's default Mission Control
+           "switch Space" shortcut and never reaches the app at all. -->
       <button
         v-for="(tab, index) in tabs"
         :key="tab.id"
@@ -557,7 +571,7 @@ function onCloseClick(e: MouseEvent, tabId: number) {
           'repo-tab--drag-over-right': hoveredIndex === index && draggedIndex !== null && draggedIndex < index
         }"
         :aria-selected="tab.id === activeTabId ? 'true' : 'false'"
-        :aria-keyshortcuts="tabs.length > 1 ? 'Control+ArrowLeft Control+ArrowRight' : undefined"
+        :aria-keyshortcuts="tabs.length > 1 ? 'Control+Shift+ArrowLeft Control+Shift+ArrowRight Meta+Shift+ArrowLeft Meta+Shift+ArrowRight' : undefined"
         :data-tab-id="tab.id"
         :title="tab.path"
         :style="draggedIndex === index ? { transform: `translateX(${dragOffsetX}px)` } : null"

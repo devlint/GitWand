@@ -222,24 +222,26 @@ describe("RepoTabStrip — drag to reorder", () => {
 });
 
 describe("RepoTabStrip — keyboard reordering", () => {
-  function fireCtrlArrow(target: EventTarget, key: "ArrowLeft" | "ArrowRight") {
-    target.dispatchEvent(new KeyboardEvent("keydown", { key, ctrlKey: true, bubbles: true, cancelable: true }));
+  function fireCtrlShiftArrow(target: EventTarget, key: "ArrowLeft" | "ArrowRight") {
+    target.dispatchEvent(
+      new KeyboardEvent("keydown", { key, ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }),
+    );
   }
 
-  it("Ctrl+ArrowRight moves the focused tab one slot right and announces it", async () => {
+  it("Ctrl+Shift+ArrowRight moves the focused tab one slot right and announces it", async () => {
     const { tabEls, reorders } = mount(makeTabs(3));
 
-    fireCtrlArrow(tabEls[0], "ArrowRight");
+    fireCtrlShiftArrow(tabEls[0], "ArrowRight");
     await nextTick();
 
     expect(reorders).toEqual([[0, 1]]);
     expect(container?.querySelector('[role="status"]')?.textContent).toBe("repo-0 moved to position 2 of 3");
   });
 
-  it("Ctrl+ArrowLeft moves the focused tab one slot left", async () => {
+  it("Ctrl+Shift+ArrowLeft moves the focused tab one slot left", async () => {
     const { tabEls, reorders } = mount(makeTabs(3));
 
-    fireCtrlArrow(tabEls[1], "ArrowLeft");
+    fireCtrlShiftArrow(tabEls[1], "ArrowLeft");
     await nextTick();
 
     expect(reorders).toEqual([[1, 0]]);
@@ -248,8 +250,8 @@ describe("RepoTabStrip — keyboard reordering", () => {
   it("does nothing at the boundary (first tab can't move left, last can't move right)", async () => {
     const { tabEls, reorders } = mount(makeTabs(3));
 
-    fireCtrlArrow(tabEls[0], "ArrowLeft");
-    fireCtrlArrow(tabEls[2], "ArrowRight");
+    fireCtrlShiftArrow(tabEls[0], "ArrowLeft");
+    fireCtrlShiftArrow(tabEls[2], "ArrowRight");
     await nextTick();
 
     expect(reorders).toEqual([]);
@@ -259,6 +261,23 @@ describe("RepoTabStrip — keyboard reordering", () => {
     const { tabEls, reorders } = mount(makeTabs(3));
 
     tabEls[0].dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }));
+    await nextTick();
+
+    expect(reorders).toEqual([]);
+  });
+
+  it("bare Ctrl+ArrowRight (no Shift) does not reorder", async () => {
+    // Regression: a bare Ctrl+Arrow is macOS's default Mission Control
+    // "switch Space" shortcut, intercepted by the OS before it would even
+    // reach the app — Shift is required precisely to stay clear of that (and
+    // of third-party window-manager shortcuts using the same bare combo).
+    // This only guards our own handler's condition; it can't simulate the
+    // OS swallowing the event outright.
+    const { tabEls, reorders } = mount(makeTabs(3));
+
+    tabEls[0].dispatchEvent(
+      new KeyboardEvent("keydown", { key: "ArrowRight", ctrlKey: true, bubbles: true, cancelable: true }),
+    );
     await nextTick();
 
     expect(reorders).toEqual([]);
