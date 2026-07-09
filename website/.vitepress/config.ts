@@ -122,6 +122,7 @@ export default defineConfig({
       { text: 'Reference', link: '/reference/core-api' },
       { text: 'Blog', link: '/blog/' },
       { text: "What's new", link: '/changelog' },
+      { text: "Sponsoring", link: 'https://github.com/sponsors/devlint' },
     ],
 
     sidebar: {
