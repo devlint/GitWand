@@ -843,6 +843,7 @@ watch(() => props.cwd, () => {
                   :pre-review-findings="[]"
                   :pre-review-progress="{ done: 0, total: 0 }"
                   :pre-review-running="false"
+                  :static-flags="[]"
                   @load-conflict-preview="loadConflictPreview"
                   @load-hotspots="loadHotspots"
                   @load-file-history="loadFileHistory"

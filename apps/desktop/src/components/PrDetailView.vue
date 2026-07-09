@@ -1011,6 +1011,7 @@ function submitRequestReviewers() {
             :pre-review-findings="p.preReviewFindings.value"
             :pre-review-progress="p.preReviewProgress.value"
             :pre-review-running="p.preReviewRunning.value"
+            :static-flags="p.staticFlags.value"
             @load-conflict-preview="p.loadConflictPreview"
             @load-hotspots="p.loadHotspots"
             @load-file-history="p.loadFileHistory"
