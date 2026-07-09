@@ -74,16 +74,26 @@ export interface DraftState {
   ts: number;
 }
 
+/** Local dismissal memory for AI pre-review findings, keyed by `cwd` (C2).
+ *  `classes` are `normalizeFindingClass` values (see `usePrFindingFilter.ts`) —
+ *  dismissing a finding suppresses future occurrences of the same class,
+ *  below the confidence threshold or not. */
+export interface DismissedState {
+  classes: string[];
+  ts: number;
+}
+
 interface PrCacheFile {
   lists: Record<string, CachedList>;
   details: Record<string, CachedDetail>;
   remotes: Record<string, CachedRemote>;
   viewed: Record<string, ViewedState>;
   drafts: Record<string, DraftState>;
+  dismissedFindings: Record<string, DismissedState>;
 }
 
 function emptyFile(): PrCacheFile {
-  return { lists: {}, details: {}, remotes: {}, viewed: {}, drafts: {} };
+  return { lists: {}, details: {}, remotes: {}, viewed: {}, drafts: {}, dismissedFindings: {} };
 }
 
 // Strictly-increasing write clock. Wall-clock `Date.now()` can return the same
@@ -124,6 +134,7 @@ function loadFromStorage(): PrCacheFile {
       remotes: parsed.remotes ?? {},
       viewed: parsed.viewed ?? {},
       drafts: parsed.drafts ?? {},
+      dismissedFindings: parsed.dismissedFindings ?? {},
     };
     const now = Date.now();
     pruneByAge(file.lists, now);
@@ -131,6 +142,7 @@ function loadFromStorage(): PrCacheFile {
     pruneByAge(file.remotes, now);
     pruneByAge(file.viewed, now);
     pruneByAge(file.drafts, now);
+    pruneByAge(file.dismissedFindings, now);
     return file;
   } catch {
     return emptyFile();
@@ -143,6 +155,7 @@ function saveToStorage(file: PrCacheFile): void {
   evictLru(file.remotes, MAX_LISTS);
   evictLru(file.viewed, MAX_DETAILS);
   evictLru(file.drafts, MAX_DETAILS);
+  evictLru(file.dismissedFindings, MAX_LISTS);
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(file));
   } catch (e) {
@@ -261,10 +274,29 @@ export function usePrCache() {
     saveToStorage(_file);
   }
 
+  // ── AI finding dismissal memory (C2) ──────────────────────────────────────
+
+  function getDismissed(cwd: string): Set<string> {
+    return new Set(_file.dismissedFindings[cwd]?.classes ?? []);
+  }
+
+  function addDismissed(cwd: string, cls: string): void {
+    const existing = _file.dismissedFindings[cwd]?.classes ?? [];
+    if (existing.includes(cls)) {
+      // Still bump `ts` so an active repo's dismissal memory doesn't age out
+      // ahead of genuinely idle ones under LRU eviction.
+      _file.dismissedFindings[cwd] = { classes: existing, ts: monoNow() };
+    } else {
+      _file.dismissedFindings[cwd] = { classes: [...existing, cls], ts: monoNow() };
+    }
+    saveToStorage(_file);
+  }
+
   return {
     getList, setList, invalidateLists,
     getDetail, setDetail, invalidateDetail,
     getRemote, setRemote,
+    getDismissed, addDismissed,
     getViewed, setViewed, toggleViewed,
     getDraft, setDraft, clearDraft,
   };
