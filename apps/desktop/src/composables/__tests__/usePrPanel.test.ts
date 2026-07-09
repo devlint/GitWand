@@ -82,4 +82,27 @@ describe("usePrPanel — background prefetch drain", () => {
     // The stale prefetch for /repo-a must not issue a second call.
     expect(listPRs).toHaveBeenCalledTimes(1);
   });
+
+  it("stops the drain after an A→B→A round-trip during an in-flight prefetch", async () => {
+    listPRs.mockImplementation(pagedListPRs(500));
+    const cwd = ref("/repo-a");
+    const panel = usePrPanel(cwd);
+    await panel.ensurePrsLoaded();
+    expect(panel.prs.value).toHaveLength(10);
+    expect(listPRs).toHaveBeenCalledTimes(1);
+
+    // Round-trip back to /repo-a before the in-flight prefetch's whenIdle()
+    // resolves. The cwd watcher must invalidate the original loop's token on
+    // *both* hops, so cwd.value being back to "/repo-a" alone isn't enough
+    // for the stale loop's `live()` check to pass.
+    cwd.value = "/repo-b";
+    await nextTick();
+    cwd.value = "/repo-a";
+    await nextTick();
+
+    await vi.advanceTimersByTimeAsync(40);
+
+    // The original repo-a prefetch loop must not resume issuing fetches.
+    expect(listPRs).toHaveBeenCalledTimes(1);
+  });
 });

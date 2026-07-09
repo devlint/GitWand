@@ -744,6 +744,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     prs.value = [];
     remote.value = null;
     _prsEnsured = false;
+    ++_prPrefetchToken; // invalidate any in-flight background prefetch for the old repo
     resetDetail();
     if (newCwd && panelMounted.value) init();
   });
