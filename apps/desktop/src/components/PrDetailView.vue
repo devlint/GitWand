@@ -204,6 +204,8 @@ const prReviewNav = usePrReviewNav({
   selectedDiff: p.selectedDiff,
   diffHandle: prInlineDiffRef,
   onHelp: () => emit("open-help"),
+  onToggleViewed: (path) => p.toggleViewed(path),
+  hideViewed: p.hideViewed,
 });
 
 function handleKeydown(e: KeyboardEvent) {
@@ -798,13 +800,34 @@ function commentTimeAgo(dateStr: string): string {
             <!-- File sidebar -->
             <div class="pdv-diff-sidebar">
               <div class="pdv-diff-count">{{ t('pr.detail.filesCount', p.prDiffFiles.value.length) }}</div>
+              <!-- B2 — viewed-file progress + hide-viewed toggle -->
+              <div class="pdv-diff-viewed-bar">
+                <span class="pdv-diff-viewed-progress">
+                  {{ t('pr.viewed.progress', p.viewedCount.value, p.prDiffFiles.value.length) }}
+                </span>
+                <button
+                  type="button"
+                  class="pdv-diff-viewed-hide"
+                  :class="{ 'pdv-diff-viewed-hide--active': p.hideViewed.value }"
+                  :aria-pressed="p.hideViewed.value"
+                  :title="t('pr.viewed.hide')"
+                  @click="p.hideViewed.value = !p.hideViewed.value"
+                >{{ t('pr.viewed.hide') }}</button>
+              </div>
               <button
-                v-for="file in p.prDiffFiles.value"
+                v-for="file in p.visibleDiffFiles.value"
                 :key="file.path"
                 :class="['pdv-diff-file', { 'pdv-diff-file--active': p.selectedDiffFile.value === file.path }]"
                 @click="p.selectedDiffFile.value = file.path"
               >
                 <div class="pdv-diff-file-top">
+                  <input
+                    type="checkbox"
+                    class="pdv-diff-file-viewed"
+                    :checked="p.viewedPaths.value.has(file.path)"
+                    :title="t('pr.viewed.toggle')"
+                    @click.stop="p.toggleViewed(file.path)"
+                  />
                   <span class="pdv-diff-file-name">{{ file.path.split('/').pop() }}</span>
                   <!-- v2.18 — CI annotations on this file -->
                   <span
@@ -2035,6 +2058,37 @@ function commentTimeAgo(dateStr: string): string {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   padding: var(--space-2) var(--space-3) var(--space-4);
+}
+
+/* B2 — viewed-file progress bar + hide-viewed toggle */
+.pdv-diff-viewed-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: 0 var(--space-3) var(--space-3);
+  margin-top: calc(var(--space-4) * -1);
+}
+.pdv-diff-viewed-progress {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+.pdv-diff-viewed-hide {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.pdv-diff-viewed-hide--active {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+.pdv-diff-file-viewed {
+  flex-shrink: 0;
+  cursor: pointer;
 }
 
 .pdv-diff-file {

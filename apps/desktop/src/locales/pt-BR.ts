@@ -888,6 +888,11 @@ const ptBR: Locale = {
       badge: "{0} anotação(ões)",
       badgeTooltip: "Ver as anotações no diff",
     },
+    viewed: {
+      progress: "{0}/{1} vistos",
+      hide: "Ocultar vistos",
+      toggle: "Marcar como visto",
+    },
     comment: {
       edit: "Editar",
       delete: "Excluir",

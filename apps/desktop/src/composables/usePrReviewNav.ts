@@ -27,6 +27,9 @@ export interface UsePrReviewNavOptions {
   /** Ref to the mounted `PrInlineDiff` instance (or null before mount). */
   diffHandle: Ref<PrInlineDiffHandle | null>;
   onHelp: () => void;
+  /** B2 — toggle the current file's viewed state / the hide-viewed filter. */
+  onToggleViewed: (path: string) => void;
+  hideViewed: Ref<boolean>;
 }
 
 export function usePrReviewNav(opts: UsePrReviewNavOptions) {
@@ -70,10 +73,10 @@ export function usePrReviewNav(opts: UsePrReviewNavOptions) {
   }
 
   /**
-   * Dispatch a resolved PR-review action. `toggle-viewed` /
-   * `toggle-hide-viewed` (B2), `submit-review` (B3), and `next-finding` /
-   * `prev-finding` (C4) are wired by their respective tasks — until then
-   * they are safe no-ops rather than throwing on an unmapped case.
+   * Dispatch a resolved PR-review action. `submit-review` (B3) and
+   * `next-finding` / `prev-finding` (C4) are wired by their respective
+   * tasks — until then they are safe no-ops rather than throwing on an
+   * unmapped case.
    */
   function dispatch(action: PrReviewAction) {
     switch (action) {
@@ -84,11 +87,15 @@ export function usePrReviewNav(opts: UsePrReviewNavOptions) {
       case "comment-hunk": opts.diffHandle.value?.openComposeAtHunk(currentHunkIdx.value); break;
       case "help": opts.onHelp(); break;
       case "toggle-viewed":
+        if (opts.selectedDiffFile.value) opts.onToggleViewed(opts.selectedDiffFile.value);
+        break;
       case "toggle-hide-viewed":
+        opts.hideViewed.value = !opts.hideViewed.value;
+        break;
       case "submit-review":
       case "next-finding":
       case "prev-finding":
-        break; // wired by B2 / B3 / C4
+        break; // wired by B3 / C4
     }
   }
 

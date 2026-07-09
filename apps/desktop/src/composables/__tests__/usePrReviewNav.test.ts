@@ -16,11 +16,13 @@ describe("usePrReviewNav", () => {
   const scrollToHunk = vi.fn();
   const openComposeAtHunk = vi.fn();
   const onHelp = vi.fn();
+  const onToggleViewed = vi.fn();
 
   beforeEach(() => {
     scrollToHunk.mockReset();
     openComposeAtHunk.mockReset();
     onHelp.mockReset();
+    onToggleViewed.mockReset();
   });
 
   function setup(files: GitDiff[], selectedPath: string | null) {
@@ -33,8 +35,11 @@ describe("usePrReviewNav", () => {
       () => prDiffFiles.value.find((f) => f.path === selectedDiffFile.value) ?? null,
     );
     const diffHandle = ref({ scrollToHunk, openComposeAtHunk });
-    const nav = usePrReviewNav({ prDiffFiles, selectedDiffFile, selectedDiff, diffHandle, onHelp });
-    return { nav, prDiffFiles, selectedDiffFile, selectedDiff };
+    const hideViewed = ref(false);
+    const nav = usePrReviewNav({
+      prDiffFiles, selectedDiffFile, selectedDiff, diffHandle, onHelp, onToggleViewed, hideViewed,
+    });
+    return { nav, prDiffFiles, selectedDiffFile, selectedDiff, hideViewed };
   }
 
   it("next-hunk advances the cursor within the file and scrolls to it", () => {
@@ -74,9 +79,29 @@ describe("usePrReviewNav", () => {
     expect(onHelp).toHaveBeenCalledTimes(1);
   });
 
-  it("unwired actions (B2/B3/C4) are safe no-ops", () => {
+  it("toggle-viewed (V) calls onToggleViewed with the selected file's path", () => {
     const { nav } = setup([file("a.ts", 1)], "a.ts");
-    for (const action of ["toggle-viewed", "toggle-hide-viewed", "submit-review", "next-finding", "prev-finding"] as const) {
+    nav.dispatch("toggle-viewed");
+    expect(onToggleViewed).toHaveBeenCalledWith("a.ts");
+  });
+
+  it("toggle-viewed (V) is a no-op with no file selected", () => {
+    const { nav } = setup([file("a.ts", 1)], null);
+    nav.dispatch("toggle-viewed");
+    expect(onToggleViewed).not.toHaveBeenCalled();
+  });
+
+  it("toggle-hide-viewed (⇧V) flips the hideViewed ref", () => {
+    const { nav, hideViewed } = setup([file("a.ts", 1)], "a.ts");
+    nav.dispatch("toggle-hide-viewed");
+    expect(hideViewed.value).toBe(true);
+    nav.dispatch("toggle-hide-viewed");
+    expect(hideViewed.value).toBe(false);
+  });
+
+  it("unwired actions (B3/C4) are safe no-ops", () => {
+    const { nav } = setup([file("a.ts", 1)], "a.ts");
+    for (const action of ["submit-review", "next-finding", "prev-finding"] as const) {
       expect(() => nav.dispatch(action)).not.toThrow();
     }
     expect(scrollToHunk).not.toHaveBeenCalled();

@@ -230,6 +230,43 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   const selectedDiffFile = ref<string | null>(null);
   const diffMode = ref<DiffMode>(getPersistedDiffMode());
 
+  // ─── Viewed-file state (B2) ─────────────────────────────
+  const viewedPaths = ref<Set<string>>(new Set());
+  const hideViewed = ref(false);
+
+  const viewedCount = computed(() => viewedPaths.value.size);
+
+  /** File sidebar list filtered by `hideViewed` (B1 `⇧V`). */
+  const visibleDiffFiles = computed<GitDiff[]>(() =>
+    hideViewed.value ? prDiffFiles.value.filter((f) => !viewedPaths.value.has(f.path)) : prDiffFiles.value,
+  );
+
+  /** `V` — toggle the current file's viewed state, persisted by head SHA. */
+  function toggleViewed(path: string) {
+    if (!path || !selectedPr.value) return;
+    const headSha = prDetail.value?.headSha ?? "";
+    const key = detailKey(cwd.value, selectedPr.value.number);
+    cache.toggleViewed(key, headSha, path);
+    seedViewedFromCache();
+  }
+
+  /** Re-read the viewed set for the selected PR at its current head SHA —
+   *  a stale-headSha cache entry reads as empty (re-push invalidation). */
+  function seedViewedFromCache() {
+    if (!selectedPr.value) {
+      viewedPaths.value = new Set();
+      return;
+    }
+    const headSha = prDetail.value?.headSha ?? "";
+    const stored = cache.getViewed(detailKey(cwd.value, selectedPr.value.number));
+    viewedPaths.value = new Set(stored && stored.headSha === headSha ? stored.paths : []);
+  }
+
+  // Seed/reset viewed state whenever the selected PR's head SHA is known or
+  // changes (cache hit in `selectPr`, fresh fetch in `fetchDetailBundle`, or
+  // a re-push while the detail is open).
+  watch(() => prDetail.value?.headSha, seedViewedFromCache);
+
   // ─── Draft review ──────────────────────────────────────
   const draftReviewComments = ref<PendingReviewComment[]>([]);
   const showReviewModal = ref(false);
@@ -592,6 +629,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     hotspots.value = [];
     fileHistory.value = {};
     selectedDiffFile.value = null;
+    viewedPaths.value = new Set();
     detailTab.value = "info";
   }
 
@@ -999,7 +1037,10 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     if (!selectedPr.value) return;
     submittingReview.value = true;
     try {
-      await forge.value.submitReview(cwd.value, selectedPr.value.number, opts);
+      await forge.value.submitReview(cwd.value, selectedPr.value.number, {
+        ...opts,
+        viewedFiles: [...viewedPaths.value],
+      });
       showReviewModal.value = false;
       draftReviewComments.value = [];
       const [reviews, comments] = await Promise.all([
@@ -1220,6 +1261,8 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     mergingPr, mergeMethod,
     selectedPr, prDetail, prChecks, checksWithConflict, prDiffFiles, prComments, prIssueComments, prReviews,
     detailLoading, detailRefreshing, detailError, detailTab, selectedDiffFile, diffMode,
+    // Viewed-file state (B2)
+    viewedPaths, viewedCount, hideViewed, visibleDiffFiles, toggleViewed,
     // CI annotations (v2.18)
     prAnnotations, annotationsLoading, annotationsLoaded,
     annotationCountByCheck, annotationsByFile, loadAnnotations,
@@ -1233,6 +1276,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     commentsForFile, commentCount, mergeReadiness, mergeBlocked, mergeBlockedReason, selectedDiff, displayedPrs,
     // Actions
     init, ensurePrsLoaded, loadRemote, loadPrs, loadMorePrs, loadCurrentUser, selectPr, loadDiff,
+    revalidateOpenDetail,
     createPr, checkoutPr, mergePr, convertDraftToReady,
     handleCreateComment, handleReplyComment, handleEditComment,
     handleDeleteComment, handleApplySuggestion, handleAddToReview, handleSubmitReview,

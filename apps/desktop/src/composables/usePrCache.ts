@@ -54,14 +54,28 @@ export interface CachedRemote {
   ts: number;
 }
 
+/**
+ * Client-side per-PR viewed-file state (B2, v3.6.0), keyed by `detailKey`.
+ * `headSha` pins the state to a specific head commit — GitHub has no native
+ * "viewed" API, so the client is the source of truth, and a re-push (new
+ * `headSha`) invalidates the whole PR's viewed set at once (coarser than
+ * per-file blob-SHA invalidation, which is a noted follow-up).
+ */
+export interface ViewedState {
+  headSha: string;
+  paths: string[];
+  ts: number;
+}
+
 interface PrCacheFile {
   lists: Record<string, CachedList>;
   details: Record<string, CachedDetail>;
   remotes: Record<string, CachedRemote>;
+  viewed: Record<string, ViewedState>;
 }
 
 function emptyFile(): PrCacheFile {
-  return { lists: {}, details: {}, remotes: {} };
+  return { lists: {}, details: {}, remotes: {}, viewed: {} };
 }
 
 // Strictly-increasing write clock. Wall-clock `Date.now()` can return the same
@@ -100,11 +114,13 @@ function loadFromStorage(): PrCacheFile {
       lists: parsed.lists ?? {},
       details: parsed.details ?? {},
       remotes: parsed.remotes ?? {},
+      viewed: parsed.viewed ?? {},
     };
     const now = Date.now();
     pruneByAge(file.lists, now);
     pruneByAge(file.details, now);
     pruneByAge(file.remotes, now);
+    pruneByAge(file.viewed, now);
     return file;
   } catch {
     return emptyFile();
@@ -115,6 +131,7 @@ function saveToStorage(file: PrCacheFile): void {
   evictLru(file.lists, MAX_LISTS);
   evictLru(file.details, MAX_DETAILS);
   evictLru(file.remotes, MAX_LISTS);
+  evictLru(file.viewed, MAX_DETAILS);
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(file));
   } catch (e) {
@@ -189,9 +206,38 @@ export function usePrCache() {
     saveToStorage(_file);
   }
 
+  // ── Viewed-file state (B2) ────────────────────────────────────────────────
+
+  function getViewed(key: string): { headSha: string; paths: string[] } | null {
+    const v = _file.viewed[key];
+    return v ? { headSha: v.headSha, paths: v.paths } : null;
+  }
+
+  function setViewed(key: string, headSha: string, paths: string[]): void {
+    _file.viewed[key] = { headSha, paths, ts: monoNow() };
+    saveToStorage(_file);
+  }
+
+  /**
+   * Toggle `path` in/out of the viewed set for `key`. If the stored state was
+   * recorded against a different `headSha` (a re-push happened), the whole
+   * set is cleared first — "re-push resets viewed" at PR granularity (the
+   * simplest honest behavior; per-file blob-SHA invalidation is a follow-up).
+   */
+  function toggleViewed(key: string, headSha: string, path: string): void {
+    const existing = _file.viewed[key];
+    const paths = existing && existing.headSha === headSha ? [...existing.paths] : [];
+    const idx = paths.indexOf(path);
+    if (idx === -1) paths.push(path);
+    else paths.splice(idx, 1);
+    _file.viewed[key] = { headSha, paths, ts: monoNow() };
+    saveToStorage(_file);
+  }
+
   return {
     getList, setList, invalidateLists,
     getDetail, setDetail, invalidateDetail,
     getRemote, setRemote,
+    getViewed, setViewed, toggleViewed,
   };
 }

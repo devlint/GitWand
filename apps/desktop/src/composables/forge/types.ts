@@ -78,6 +78,13 @@ export interface SubmitReviewOptions {
   event: "APPROVE" | "REQUEST_CHANGES" | "COMMENT";
   body?: string;
   comments?: PendingReviewComment[];
+  /**
+   * Client-tracked viewed-file paths at submit time (B2, v3.6.0). Optional
+   * forge transport — GitHub has no native "viewed" API, so the client
+   * (`usePrCache`'s per-PR viewed set) stays the source of truth regardless;
+   * providers may simply ignore this field.
+   */
+  viewedFiles?: string[];
 }
 
 // ─── Forge name discriminant ────────────────────────────────────────────────

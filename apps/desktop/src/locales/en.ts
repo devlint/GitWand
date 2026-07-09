@@ -903,6 +903,11 @@ const en = {
       badge: "{0} annotation(s)",
       badgeTooltip: "View annotations in the diff",
     },
+    viewed: {
+      progress: "{0}/{1} viewed",
+      hide: "Hide viewed",
+      toggle: "Mark as viewed",
+    },
     comment: {
       edit: "Edit",
       delete: "Delete",

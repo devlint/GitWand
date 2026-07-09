@@ -896,6 +896,11 @@ const fr: Locale = {
       badge: "{0} annotation(s)",
       badgeTooltip: "Voir les annotations dans le diff",
     },
+    viewed: {
+      progress: "{0}/{1} vus",
+      hide: "Masquer les vus",
+      toggle: "Marquer comme vu",
+    },
     comment: {
       edit: "Modifier",
       delete: "Supprimer",

@@ -876,6 +876,11 @@ const zhCN: Locale = {
       badge: "{0} 条注释",
       badgeTooltip: "在 diff 中查看注释",
     },
+    viewed: {
+      progress: "已查看 {0}/{1}",
+      hide: "隐藏已查看",
+      toggle: "标记为已查看",
+    },
     comment: {
       edit: "编辑",
       delete: "删除",
