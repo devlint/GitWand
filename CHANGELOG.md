@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **PR Review 2.0** — a chantier of composable, keyboard-first review upgrades:
+  - **GitHub-standard review keymap** — `J`/`K` next/previous hunk, `⇧J`/`⇧K` next/previous file, `V` toggle viewed, `⇧V` hide viewed files, `T` filter files, `C` comment on the current hunk, `N`/`P` next/previous AI finding, `⌘Enter`/`Ctrl+Enter` submit review. Documented in Help → Keyboard Shortcuts.
+  - **Viewed-file state** — mark files as reviewed; hidden-viewed-files view to focus on what's left. Invalidated at the whole-PR level when the head SHA changes (a re-push resets viewed state honestly, rather than silently keeping stale marks).
+  - **Pending review surfaced** — draft review comments persist across closing/reopening the PR detail (survives navigating away) and are visible as a running count before submission.
+  - **Dismiss review / request reviewers** — GitHub gains both actions from the Info tab; forges that don't support one (e.g. GitLab has no direct review-dismissal equivalent) hide the action instead of throwing.
+  - **Local, opt-in AI pre-review pipeline** — a multi-hop pass (diff → import/dependency graph → file history → LLM findings) surfaces confidence-scored, line-anchored findings with a cap and per-finding dismissal memory. Zero calls when the setting is off; a PR switch aborts any in-flight run. Configurable under Settings → Git → Review AI.
+  - **PR summary block** — a generated one-paragraph summary of the PR's intent and risk, shown above the diff, regeneratable on demand.
+  - **Unified `LineAnnotation` model** — CI check-run annotations, AI findings, and static heuristic flags now render through one merged gutter-overlay stream instead of three separate code paths.
+  - **GitLab real review completion** — inline batch review comments anchor correctly via a dedicated diff-refs lookup, `listReviews` reflects approvals and changes-requested verdicts, and file review history reports real per-path comment counts.
+
+### Changed
+
+- **PR detail open now costs 3 forge calls on the hot path (was 6)** — revalidation on reopening an already-cached PR detail was slimmed to only the calls that can actually have changed.
+- **PR diff parsing is lazy, per-file** — a PR with many changed files no longer parses every file's hunks up front; only the file currently open is parsed, cached by path.
+- **Diff line rendering is virtualized** — large diffs (thousands of lines) keep a bounded DOM instead of rendering every line, fixing scroll/interaction lag on big files.
+
+### Fixed
+
+- **Azure comment edit/delete no longer risks a runtime crash** — `updateComment`/`deleteComment` are unsupported on Azure DevOps for now; the UI hides the edit/delete affordance instead of calling into a forge method that throws.
+
 ## [3.4.0] - 2026-07-08
 
 ### Added
