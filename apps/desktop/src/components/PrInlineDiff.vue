@@ -18,6 +18,7 @@ import { safeHtml } from "../composables/useSafeHtml";
 import { useAIProvider } from "../composables/useAIProvider";
 import { usePrHunkCritique, type HunkCritiqueResult } from "../composables/usePrHunkCritique";
 import { useI18n } from "../composables/useI18n";
+import { useVirtualRows } from "../composables/useVirtualRows";
 
 const props = defineProps<{
   diff: GitDiff | null;
@@ -324,6 +325,137 @@ function handleDelete(id: number) {
 function handleApplySuggestion(suggestion: string, startLine: number | null, endLine: number | null) {
   emit("apply-suggestion", suggestion, startLine, endLine);
 }
+
+// ─── Flat row model (A2) ──────────────────────────────────
+// Threads, the critique panel, and the compose/suggest boxes are normally
+// injected *between* hunk/line rows by the template above. Virtualization
+// needs every one of them to be an addressable row so the virtualizer can
+// measure and position it — so the diff is also expressed as a flat
+// `rows: DiffRow[]` list, in the exact order the full-DOM template renders.
+export type DiffRow =
+  | { kind: "hunk-header"; hunkIdx: number }
+  | { kind: "critique"; hunkIdx: number }
+  | { kind: "line"; hunkIdx: number; lineIdx: number; dl: DiffLine }
+  | { kind: "thread"; hunkIdx: number; lineIdx: number; dl: DiffLine; thread: Thread }
+  | { kind: "compose"; hunkIdx: number; lineIdx: number; dl: DiffLine }
+  | { kind: "suggest"; hunkIdx: number; lineIdx: number; dl: DiffLine };
+
+function critiquePanelVisible(hunkIdx: number): boolean {
+  return (
+    critiqueOpenIdx.value === hunkIdx &&
+    !!(critiqueResults.value[hunkIdx] || critiqueLoadingIdx.value === hunkIdx || critiqueAiError.value)
+  );
+}
+
+const rows = computed<DiffRow[]>(() => {
+  const out: DiffRow[] = [];
+  if (!props.diff) return out;
+  props.diff.hunks.forEach((hunk, hunkIdx) => {
+    out.push({ kind: "hunk-header", hunkIdx });
+    if (critiquePanelVisible(hunkIdx)) out.push({ kind: "critique", hunkIdx });
+    hunk.lines.forEach((dl, lineIdx) => {
+      out.push({ kind: "line", hunkIdx, lineIdx, dl });
+      for (const thread of threadsForLine(dl)) {
+        out.push({ kind: "thread", hunkIdx, lineIdx, dl, thread });
+      }
+      if (isComposeAnchoredAt(dl)) out.push({ kind: "compose", hunkIdx, lineIdx, dl });
+      if (isSuggestAnchoredAt(dl)) out.push({ kind: "suggest", hunkIdx, lineIdx, dl });
+    });
+  });
+  return out;
+});
+
+/** True for the first row belonging to a given hunk (drives the "boxed hunk"
+ *  top border/corner once the per-hunk wrapper div is gone, see A2 CSS). */
+function isHunkStart(idx: number): boolean {
+  const row = rows.value[idx];
+  return idx === 0 || rows.value[idx - 1]?.hunkIdx !== row.hunkIdx;
+}
+
+/** True for the last row belonging to a given hunk. */
+function isHunkEnd(idx: number): boolean {
+  const row = rows.value[idx];
+  return idx === rows.value.length - 1 || rows.value[idx + 1]?.hunkIdx !== row.hunkIdx;
+}
+
+function rowKey(row: DiffRow, idx: number): string {
+  if (row.kind === "hunk-header" || row.kind === "critique") return `${row.kind}:${row.hunkIdx}`;
+  if (row.kind === "thread") return `thread:${row.thread.key}:${idx}`;
+  return `${row.kind}:${row.hunkIdx}:${row.lineIdx}`;
+}
+
+// ─── Virtualization (A2) ───────────────────────────────────
+// Full DOM under the threshold (native find/select stay intact); virtualized
+// above it so a huge single-hunk file doesn't render thousands of live rows.
+const ROW_VIRTUALIZE_THRESHOLD = 300;
+const isVirtual = computed(() => rows.value.length >= ROW_VIRTUALIZE_THRESHOLD);
+const scrollContainerRef = ref<HTMLElement | null>(null);
+
+const ROW_ESTIMATE_SIZE: Record<DiffRow["kind"], number> = {
+  "hunk-header": 24,
+  critique: 60,
+  line: 20,
+  thread: 110,
+  compose: 160,
+  suggest: 180,
+};
+
+const { virtualizer, virtualItems, totalSize, measure } = useVirtualRows({
+  count: computed(() => rows.value.length),
+  getScrollElement: () => scrollContainerRef.value,
+  estimateSize: (index: number) => ROW_ESTIMATE_SIZE[rows.value[index]?.kind ?? "line"],
+  overscan: 20,
+});
+
+/** Pairs each virtual item with its already-discriminated `DiffRow` — lets
+ *  the virtualized template branch on `row.kind` with the same type
+ *  narrowing the non-virtual `v-for="(row, idx) in rows"` branch gets
+ *  (indexing `rows[vr.index]` fresh on every reference does not narrow). */
+const virtualRowsView = computed(() =>
+  virtualItems.value.map((vr) => ({ vr, row: rows.value[vr.index] })),
+);
+
+function vrStyle(vr: { start: number; size: number }) {
+  return {
+    position: "absolute" as const,
+    top: 0,
+    left: 0,
+    width: "100%",
+    height: vr.size + "px",
+    overflow: "visible" as const,
+    transform: "translateY(" + vr.start + "px)",
+  };
+}
+
+/** Keyboard-nav cursor (B1) — index into `rows`. Kept here (not in the host)
+ *  so `scrollToHunk`/`scrollToLine` can highlight/scroll in one call. */
+const currentRowIdx = ref(0);
+
+function scrollRowIntoView(idx: number) {
+  if (isVirtual.value) {
+    virtualizer.value?.scrollToIndex(idx, { align: "auto" });
+    return;
+  }
+  const el = (scrollContainerRef.value ?? document).querySelector?.(`[data-row-index="${idx}"]`);
+  el?.scrollIntoView?.({ block: "nearest" });
+}
+
+/** Scroll to (and select) the first row of hunk `hunkIdx`. */
+function scrollToHunk(hunkIdx: number) {
+  const idx = rows.value.findIndex((r) => r.kind === "hunk-header" && r.hunkIdx === hunkIdx);
+  if (idx === -1) return;
+  currentRowIdx.value = idx;
+  scrollRowIntoView(idx);
+}
+
+/** Scroll to (and select) an arbitrary row by its index in `rows`. */
+function scrollToLine(rowIdx: number) {
+  if (rowIdx < 0 || rowIdx >= rows.value.length) return;
+  currentRowIdx.value = rowIdx;
+  scrollRowIntoView(rowIdx);
+}
+
+defineExpose({ scrollToHunk, scrollToLine, rows, currentRowIdx });
 </script>
 
 <template>
@@ -331,24 +463,27 @@ function handleApplySuggestion(suggestion: string, startLine: number | null, end
     <div v-if="!diff || !diff.hunks.length" class="pid-empty">
       Aucun diff disponible.
     </div>
-    <template v-else>
-      <div
-        v-for="(hunk, hunkIdx) in diff.hunks"
-        :key="hunkIdx"
-        class="pid-hunk"
-      >
+    <!-- A2: full DOM under the virtualization threshold — keeps native
+         Cmd+F / text-select working, identical markup to the virtual path. -->
+    <div v-else-if="!isVirtual" class="pid-rows">
+      <template v-for="(row, idx) in rows" :key="rowKey(row, idx)">
         <!-- Hunk header -->
-        <div class="pid-hunk-header mono">
-          <span class="pid-hunk-header-text">{{ hunk.header }}</span>
+        <div
+          v-if="row.kind === 'hunk-header'"
+          class="pid-hunk-header mono pid-rowbox pid-rowbox--start"
+          :class="{ 'pid-rowbox--end': isHunkEnd(idx) }"
+          :data-row-index="idx"
+        >
+          <span class="pid-hunk-header-text">{{ diff.hunks[row.hunkIdx].header }}</span>
           <button
             v-if="ai.isAvailable.value"
             class="btn btn--ai pid-hunk-ai"
-            :class="{ 'pid-hunk-ai--active': critiqueOpenIdx === hunkIdx }"
-            :disabled="critiqueLoadingIdx === hunkIdx"
+            :class="{ 'pid-hunk-ai--active': critiqueOpenIdx === row.hunkIdx }"
+            :disabled="critiqueLoadingIdx === row.hunkIdx"
             :title="t('prInline.aiCritiqueTooltip')"
-            @click="requestHunkCritique(hunkIdx)"
+            @click="requestHunkCritique(row.hunkIdx)"
           >
-            <span v-if="critiqueLoadingIdx === hunkIdx">…</span>
+            <span v-if="critiqueLoadingIdx === row.hunkIdx">…</span>
             <span v-else class="pid-ai-label">
               <AiSparkle :size="13" />
               {{ t('prInline.aiCritiqueButton') }}
@@ -358,210 +493,441 @@ function handleApplySuggestion(suggestion: string, startLine: number | null, end
 
         <!-- AI critique panel -->
         <div
-          v-if="critiqueOpenIdx === hunkIdx && (critiqueResults[hunkIdx] || critiqueLoadingIdx === hunkIdx || critiqueAiError)"
-          class="pid-critique"
-          :class="critiqueResults[hunkIdx] ? verdictClass(critiqueResults[hunkIdx]!.verdict) : ''"
+          v-else-if="row.kind === 'critique'"
+          class="pid-critique pid-rowbox"
+          :class="[critiqueResults[row.hunkIdx] ? verdictClass(critiqueResults[row.hunkIdx]!.verdict) : '', { 'pid-rowbox--end': isHunkEnd(idx) }]"
           role="status"
           aria-live="polite"
+          :data-row-index="idx"
         >
           <span class="pid-critique-icon">
-            <template v-if="critiqueResults[hunkIdx]">{{ verdictIcon(critiqueResults[hunkIdx]!.verdict) }}</template>
+            <template v-if="critiqueResults[row.hunkIdx]">{{ verdictIcon(critiqueResults[row.hunkIdx]!.verdict) }}</template>
             <AiSparkle v-else :size="14" />
           </span>
           <span class="pid-critique-body">
-            <span v-if="critiqueAiError && !critiqueResults[hunkIdx]" class="pid-critique-error">{{ critiqueAiError }}</span>
-            <span v-else-if="critiqueLoadingIdx === hunkIdx && !critiqueResults[hunkIdx]">
+            <span v-if="critiqueAiError && !critiqueResults[row.hunkIdx]" class="pid-critique-error">{{ critiqueAiError }}</span>
+            <span v-else-if="critiqueLoadingIdx === row.hunkIdx && !critiqueResults[row.hunkIdx]">
               {{ t('prInline.aiCritiqueAnalyzing') }}
             </span>
-            <template v-else-if="critiqueResults[hunkIdx]">
-              <span class="pid-critique-verdict">{{ critiqueResults[hunkIdx]!.verdict }}</span>
-              <span class="pid-critique-summary">{{ critiqueResults[hunkIdx]!.summary }}</span>
+            <template v-else-if="critiqueResults[row.hunkIdx]">
+              <span class="pid-critique-verdict">{{ critiqueResults[row.hunkIdx]!.verdict }}</span>
+              <span class="pid-critique-summary">{{ critiqueResults[row.hunkIdx]!.summary }}</span>
             </template>
           </span>
           <button
-            v-if="critiqueLoadingIdx !== hunkIdx"
+            v-if="critiqueLoadingIdx !== row.hunkIdx"
             class="pid-critique-close"
             @click="dismissCritique"
             aria-label="Close"
           >✕</button>
         </div>
 
-        <!-- Lines -->
-        <template v-for="(dl, lineIdx) in hunk.lines" :key="lineIdx">
-          <!-- Diff row -->
-          <div
-            class="pid-row"
-            :class="{
-              'pid-row--add': dl.type === 'add',
-              'pid-row--del': dl.type === 'delete',
-              'pid-row--ctx': dl.type === 'context',
-              'pid-row--annotated': annotationsForLine(dl).length > 0,
-            }"
-          >
-            <!-- CI annotation gutter icon + hover tooltip (v2.18) -->
-            <div v-if="annotationsForLine(dl).length" class="pid-ann">
-              <span
-                class="pid-ann-icon"
-                :class="`pid-ann-icon--${annotationLevel(annotationsForLine(dl))}`"
-              >{{ ANN_ICONS[annotationLevel(annotationsForLine(dl))] }}</span>
-              <div class="pid-ann-tip">
-                <div
-                  v-for="(a, ai) in annotationsForLine(dl)"
-                  :key="ai"
-                  class="pid-ann-tip-item"
-                >
-                  <div class="pid-ann-tip-head">
-                    <span>{{ ANN_ICONS[a.level] }}</span>
-                    <span class="pid-ann-tip-title">{{ a.title || a.checkName }}</span>
-                  </div>
-                  <div v-if="a.message" class="pid-ann-tip-msg">{{ a.message }}</div>
-                  <div class="pid-ann-tip-src">{{ a.checkName }}</div>
+        <!-- Diff line -->
+        <div
+          v-else-if="row.kind === 'line'"
+          class="pid-row pid-rowbox"
+          :class="{
+            'pid-row--add': row.dl.type === 'add',
+            'pid-row--del': row.dl.type === 'delete',
+            'pid-row--ctx': row.dl.type === 'context',
+            'pid-row--annotated': annotationsForLine(row.dl).length > 0,
+            'pid-rowbox--start': isHunkStart(idx),
+            'pid-rowbox--end': isHunkEnd(idx),
+          }"
+          :data-row-index="idx"
+        >
+          <!-- CI annotation gutter icon + hover tooltip (v2.18) -->
+          <div v-if="annotationsForLine(row.dl).length" class="pid-ann">
+            <span
+              class="pid-ann-icon"
+              :class="`pid-ann-icon--${annotationLevel(annotationsForLine(row.dl))}`"
+            >{{ ANN_ICONS[annotationLevel(annotationsForLine(row.dl))] }}</span>
+            <div class="pid-ann-tip">
+              <div
+                v-for="(a, ai) in annotationsForLine(row.dl)"
+                :key="ai"
+                class="pid-ann-tip-item"
+              >
+                <div class="pid-ann-tip-head">
+                  <span>{{ ANN_ICONS[a.level] }}</span>
+                  <span class="pid-ann-tip-title">{{ a.title || a.checkName }}</span>
                 </div>
+                <div v-if="a.message" class="pid-ann-tip-msg">{{ a.message }}</div>
+                <div class="pid-ann-tip-src">{{ a.checkName }}</div>
               </div>
             </div>
-            <!-- Old line number -->
-            <div
-              class="pid-lno mono"
-              :class="{ 'pid-lno--clickable': dl.type !== 'add' }"
-              @click="dl.type !== 'add' && openCompose(hunkIdx, lineIdx, dl)"
-              :title="dl.type !== 'add' ? 'Ajouter un commentaire' : undefined"
-            >
-              <span class="pid-lno-num">{{ dl.oldLineNo ?? '' }}</span>
-              <span class="pid-lno-icon">+</span>
-            </div>
-            <!-- New line number -->
-            <div
-              class="pid-lno mono"
-              :class="{ 'pid-lno--clickable': dl.type !== 'delete' }"
-              @click="dl.type !== 'delete' && openCompose(hunkIdx, lineIdx, dl)"
-              :title="dl.type !== 'delete' ? 'Ajouter un commentaire' : undefined"
-            >
-              <span class="pid-lno-num">{{ dl.newLineNo ?? '' }}</span>
-              <span class="pid-lno-icon">+</span>
-            </div>
-            <!-- Marker -->
-            <div class="pid-marker mono">
-              {{ dl.type === 'add' ? '+' : dl.type === 'delete' ? '-' : ' ' }}
-            </div>
-            <!-- Content -->
-            <div class="pid-content mono" v-html="safeHtml(hl(dl.content)) || '&nbsp;'" />
-            <!-- Suggest button (v2.13) — visible on hover for add/context lines -->
-            <button
-              v-if="dl.type !== 'delete'"
-              class="pid-suggest-btn"
-              :title="t('pr.inline.suggestTooltip')"
-              @click.stop="openSuggest(hunkIdx, lineIdx, dl)"
-            >
-              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4">
-                <path d="M11 2.5l2.5 2.5L5 13.5H2.5V11L11 2.5z" stroke-linejoin="round"/>
-              </svg>
-            </button>
           </div>
-
-          <!-- Comment threads anchored to this line -->
+          <!-- Old line number -->
           <div
-            v-for="thread in threadsForLine(dl)"
-            :key="thread.key"
-            class="pid-thread-row"
+            class="pid-lno mono"
+            :class="{ 'pid-lno--clickable': row.dl.type !== 'add' }"
+            @click="row.dl.type !== 'add' && openCompose(row.hunkIdx, row.lineIdx, row.dl)"
+            :title="row.dl.type !== 'add' ? 'Ajouter un commentaire' : undefined"
           >
-            <div class="pid-thread-gutter" />
-            <div class="pid-thread-body">
-              <PrCommentThread
-                :comments="thread.comments"
-                :current-user="currentUser"
-                :cwd="cwd"
-                :pr-number="prNumber"
-                :forge-name="forgeName"
-                @reply="(body) => handleReply(thread, body)"
-                @edit="handleEdit"
-                @delete="handleDelete"
-                @apply-suggestion="handleApplySuggestion"
+            <span class="pid-lno-num">{{ row.dl.oldLineNo ?? '' }}</span>
+            <span class="pid-lno-icon">+</span>
+          </div>
+          <!-- New line number -->
+          <div
+            class="pid-lno mono"
+            :class="{ 'pid-lno--clickable': row.dl.type !== 'delete' }"
+            @click="row.dl.type !== 'delete' && openCompose(row.hunkIdx, row.lineIdx, row.dl)"
+            :title="row.dl.type !== 'delete' ? 'Ajouter un commentaire' : undefined"
+          >
+            <span class="pid-lno-num">{{ row.dl.newLineNo ?? '' }}</span>
+            <span class="pid-lno-icon">+</span>
+          </div>
+          <!-- Marker -->
+          <div class="pid-marker mono">
+            {{ row.dl.type === 'add' ? '+' : row.dl.type === 'delete' ? '-' : ' ' }}
+          </div>
+          <!-- Content -->
+          <div class="pid-content mono" v-html="safeHtml(hl(row.dl.content)) || '&nbsp;'" />
+          <!-- Suggest button (v2.13) — visible on hover for add/context lines -->
+          <button
+            v-if="row.dl.type !== 'delete'"
+            class="pid-suggest-btn"
+            :title="t('pr.inline.suggestTooltip')"
+            @click.stop="openSuggest(row.hunkIdx, row.lineIdx, row.dl)"
+          >
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4">
+              <path d="M11 2.5l2.5 2.5L5 13.5H2.5V11L11 2.5z" stroke-linejoin="round"/>
+            </svg>
+          </button>
+        </div>
+
+        <!-- Comment thread anchored to this line -->
+        <div
+          v-else-if="row.kind === 'thread'"
+          class="pid-thread-row pid-rowbox"
+          :class="{ 'pid-rowbox--end': isHunkEnd(idx) }"
+          :data-row-index="idx"
+        >
+          <div class="pid-thread-gutter" />
+          <div class="pid-thread-body">
+            <PrCommentThread
+              :comments="row.thread.comments"
+              :current-user="currentUser"
+              :cwd="cwd"
+              :pr-number="prNumber"
+              :forge-name="forgeName"
+              @reply="(body) => handleReply(row.thread, body)"
+              @edit="handleEdit"
+              @delete="handleDelete"
+              @apply-suggestion="handleApplySuggestion"
+            />
+          </div>
+        </div>
+
+        <!-- Compose box anchored to this line -->
+        <div
+          v-else-if="row.kind === 'compose'"
+          class="pid-thread-row pid-compose-row pid-rowbox"
+          :class="{ 'pid-rowbox--end': isHunkEnd(idx) }"
+          :data-row-index="idx"
+        >
+          <div class="pid-thread-gutter" />
+          <div class="pid-thread-body">
+            <div class="pid-compose">
+              <textarea
+                v-model="composeText"
+                class="pid-textarea"
+                :placeholder="t('pr.inline.composePlaceholder')"
+                rows="3"
+                autofocus
+                @keydown.ctrl.enter.prevent="submitCompose"
+                @keydown.meta.enter.prevent="submitCompose"
+                @keydown.escape="closeCompose"
               />
+              <div class="pid-compose-actions">
+                <button class="pid-cancel-btn" @click="closeCompose">{{ t('pr.inline.cancel') }}</button>
+                <button
+                  class="pid-review-btn"
+                  :disabled="!composeText.trim()"
+                  @click="submitToReview"
+                  :title="reviewDraftCount ? t('pr.inline.addToReviewPending', reviewDraftCount) : t('pr.inline.addToReview')"
+                >
+                  {{ reviewDraftCount ? t('pr.inline.reviewBtnCount', reviewDraftCount) : t('pr.inline.reviewBtn') }}
+                </button>
+                <button
+                  class="pid-submit-btn"
+                  :disabled="!composeText.trim()"
+                  @click="submitCompose"
+                >{{ t('pr.inline.commentBtn') }}</button>
+              </div>
             </div>
           </div>
+        </div>
 
-          <!-- Compose box anchored to this line -->
-          <div
-            v-if="isComposeAnchoredAt(dl)"
-            class="pid-thread-row pid-compose-row"
-          >
-            <div class="pid-thread-gutter" />
-            <div class="pid-thread-body">
-              <div class="pid-compose">
+        <!-- Suggestion editor (v2.13) -->
+        <div
+          v-else-if="row.kind === 'suggest'"
+          class="pid-thread-row pid-suggest-row pid-rowbox"
+          :class="{ 'pid-rowbox--end': isHunkEnd(idx) }"
+          :data-row-index="idx"
+        >
+          <div class="pid-thread-gutter" />
+          <div class="pid-thread-body">
+            <div class="pid-suggest">
+              <div class="pid-suggest-header">
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4">
+                  <path d="M11 2.5l2.5 2.5L5 13.5H2.5V11L11 2.5z" stroke-linejoin="round"/>
+                </svg>
+                {{ t('pr.inline.suggestTitle') }}
+                <span class="pid-suggest-hint">{{ t('pr.inline.suggestHint') }}</span>
+              </div>
+              <div class="pid-suggest-preview">
+                <span class="pid-suggest-fence">```suggestion</span>
                 <textarea
-                  v-model="composeText"
-                  class="pid-textarea"
-                  :placeholder="t('pr.inline.composePlaceholder')"
+                  v-model="suggestText"
+                  class="pid-textarea pid-suggest-textarea mono"
                   rows="3"
                   autofocus
-                  @keydown.ctrl.enter.prevent="submitCompose"
-                  @keydown.meta.enter.prevent="submitCompose"
-                  @keydown.escape="closeCompose"
+                  @keydown.ctrl.enter.prevent="submitSuggest"
+                  @keydown.meta.enter.prevent="submitSuggest"
+                  @keydown.escape="closeSuggest"
                 />
-                <div class="pid-compose-actions">
-                  <button class="pid-cancel-btn" @click="closeCompose">{{ t('pr.inline.cancel') }}</button>
-                  <button
-                    class="pid-review-btn"
-                    :disabled="!composeText.trim()"
-                    @click="submitToReview"
-                    :title="reviewDraftCount ? t('pr.inline.addToReviewPending', reviewDraftCount) : t('pr.inline.addToReview')"
-                  >
-                    {{ reviewDraftCount ? t('pr.inline.reviewBtnCount', reviewDraftCount) : t('pr.inline.reviewBtn') }}
-                  </button>
-                  <button
-                    class="pid-submit-btn"
-                    :disabled="!composeText.trim()"
-                    @click="submitCompose"
-                  >{{ t('pr.inline.commentBtn') }}</button>
-                </div>
+                <span class="pid-suggest-fence">```</span>
+              </div>
+              <div class="pid-compose-actions">
+                <button class="pid-cancel-btn" @click="closeSuggest">{{ t('pr.inline.cancel') }}</button>
+                <button
+                  class="pid-review-btn"
+                  @click="submitSuggest"
+                  :title="reviewDraftCount ? t('pr.inline.addToReviewPending', reviewDraftCount) : t('pr.inline.addToReview')"
+                >
+                  {{ reviewDraftCount ? t('pr.inline.reviewBtnCount', reviewDraftCount) : t('pr.inline.suggestAddToReview') }}
+                </button>
               </div>
             </div>
           </div>
+        </div>
+      </template>
+    </div>
 
-          <!-- Suggestion editor (v2.13) -->
-          <div
-            v-if="isSuggestAnchoredAt(dl)"
-            class="pid-thread-row pid-suggest-row"
-          >
-            <div class="pid-thread-gutter" />
-            <div class="pid-thread-body">
-              <div class="pid-suggest">
-                <div class="pid-suggest-header">
-                  <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4">
-                    <path d="M11 2.5l2.5 2.5L5 13.5H2.5V11L11 2.5z" stroke-linejoin="round"/>
-                  </svg>
-                  {{ t('pr.inline.suggestTitle') }}
-                  <span class="pid-suggest-hint">{{ t('pr.inline.suggestHint') }}</span>
+    <!-- A2: virtualized above the threshold — same row markup, only the
+         positioning differs (absolute + translateY instead of normal flow). -->
+    <div v-else ref="scrollContainerRef" class="pid-rows pid-rows--virtual">
+      <div :style="{ height: totalSize + 'px', position: 'relative', width: '100%' }">
+        <div
+          v-for="{ vr, row } in virtualRowsView"
+          :key="'' + vr.key"
+          :data-row-index="vr.index"
+          :ref="(el) => measure(el as Element)"
+          :style="vrStyle(vr)"
+        >
+          <template v-if="row.kind === 'hunk-header'">
+            <div
+              class="pid-hunk-header mono pid-rowbox pid-rowbox--start"
+              :class="{ 'pid-rowbox--end': isHunkEnd(vr.index) }"
+            >
+              <span class="pid-hunk-header-text">{{ diff.hunks[row.hunkIdx].header }}</span>
+              <button
+                v-if="ai.isAvailable.value"
+                class="btn btn--ai pid-hunk-ai"
+                :class="{ 'pid-hunk-ai--active': critiqueOpenIdx === row.hunkIdx }"
+                :disabled="critiqueLoadingIdx === row.hunkIdx"
+                :title="t('prInline.aiCritiqueTooltip')"
+                @click="requestHunkCritique(row.hunkIdx)"
+              >
+                <span v-if="critiqueLoadingIdx === row.hunkIdx">…</span>
+                <span v-else class="pid-ai-label">
+                  <AiSparkle :size="13" />
+                  {{ t('prInline.aiCritiqueButton') }}
+                </span>
+              </button>
+            </div>
+          </template>
+          <template v-else-if="row.kind === 'critique'">
+            <div
+              class="pid-critique pid-rowbox"
+              :class="[critiqueResults[row.hunkIdx] ? verdictClass(critiqueResults[row.hunkIdx]!.verdict) : '', { 'pid-rowbox--end': isHunkEnd(vr.index) }]"
+              role="status"
+              aria-live="polite"
+            >
+              <span class="pid-critique-icon">
+                <template v-if="critiqueResults[row.hunkIdx]">{{ verdictIcon(critiqueResults[row.hunkIdx]!.verdict) }}</template>
+                <AiSparkle v-else :size="14" />
+              </span>
+              <span class="pid-critique-body">
+                <span v-if="critiqueAiError && !critiqueResults[row.hunkIdx]" class="pid-critique-error">{{ critiqueAiError }}</span>
+                <span v-else-if="critiqueLoadingIdx === row.hunkIdx && !critiqueResults[row.hunkIdx]">
+                  {{ t('prInline.aiCritiqueAnalyzing') }}
+                </span>
+                <template v-else-if="critiqueResults[row.hunkIdx]">
+                  <span class="pid-critique-verdict">{{ critiqueResults[row.hunkIdx]!.verdict }}</span>
+                  <span class="pid-critique-summary">{{ critiqueResults[row.hunkIdx]!.summary }}</span>
+                </template>
+              </span>
+              <button
+                v-if="critiqueLoadingIdx !== row.hunkIdx"
+                class="pid-critique-close"
+                @click="dismissCritique"
+                aria-label="Close"
+              >✕</button>
+            </div>
+          </template>
+          <template v-else-if="row.kind === 'line'">
+            <div
+              class="pid-row pid-rowbox"
+              :class="{
+                'pid-row--add': row.dl.type === 'add',
+                'pid-row--del': row.dl.type === 'delete',
+                'pid-row--ctx': row.dl.type === 'context',
+                'pid-row--annotated': annotationsForLine(row.dl).length > 0,
+                'pid-rowbox--start': isHunkStart(vr.index),
+                'pid-rowbox--end': isHunkEnd(vr.index),
+              }"
+            >
+              <div v-if="annotationsForLine(row.dl).length" class="pid-ann">
+                <span
+                  class="pid-ann-icon"
+                  :class="`pid-ann-icon--${annotationLevel(annotationsForLine(row.dl))}`"
+                >{{ ANN_ICONS[annotationLevel(annotationsForLine(row.dl))] }}</span>
+                <div class="pid-ann-tip">
+                  <div
+                    v-for="(a, ai) in annotationsForLine(row.dl)"
+                    :key="ai"
+                    class="pid-ann-tip-item"
+                  >
+                    <div class="pid-ann-tip-head">
+                      <span>{{ ANN_ICONS[a.level] }}</span>
+                      <span class="pid-ann-tip-title">{{ a.title || a.checkName }}</span>
+                    </div>
+                    <div v-if="a.message" class="pid-ann-tip-msg">{{ a.message }}</div>
+                    <div class="pid-ann-tip-src">{{ a.checkName }}</div>
+                  </div>
                 </div>
-                <div class="pid-suggest-preview">
-                  <span class="pid-suggest-fence">```suggestion</span>
+              </div>
+              <div
+                class="pid-lno mono"
+                :class="{ 'pid-lno--clickable': row.dl.type !== 'add' }"
+                @click="row.dl.type !== 'add' && openCompose(row.hunkIdx, row.lineIdx, row.dl)"
+                :title="row.dl.type !== 'add' ? 'Ajouter un commentaire' : undefined"
+              >
+                <span class="pid-lno-num">{{ row.dl.oldLineNo ?? '' }}</span>
+                <span class="pid-lno-icon">+</span>
+              </div>
+              <div
+                class="pid-lno mono"
+                :class="{ 'pid-lno--clickable': row.dl.type !== 'delete' }"
+                @click="row.dl.type !== 'delete' && openCompose(row.hunkIdx, row.lineIdx, row.dl)"
+                :title="row.dl.type !== 'delete' ? 'Ajouter un commentaire' : undefined"
+              >
+                <span class="pid-lno-num">{{ row.dl.newLineNo ?? '' }}</span>
+                <span class="pid-lno-icon">+</span>
+              </div>
+              <div class="pid-marker mono">
+                {{ row.dl.type === 'add' ? '+' : row.dl.type === 'delete' ? '-' : ' ' }}
+              </div>
+              <div class="pid-content mono" v-html="safeHtml(hl(row.dl.content)) || '&nbsp;'" />
+              <button
+                v-if="row.dl.type !== 'delete'"
+                class="pid-suggest-btn"
+                :title="t('pr.inline.suggestTooltip')"
+                @click.stop="openSuggest(row.hunkIdx, row.lineIdx, row.dl)"
+              >
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4">
+                  <path d="M11 2.5l2.5 2.5L5 13.5H2.5V11L11 2.5z" stroke-linejoin="round"/>
+                </svg>
+              </button>
+            </div>
+          </template>
+          <template v-else-if="row.kind === 'thread'">
+            <div class="pid-thread-row pid-rowbox" :class="{ 'pid-rowbox--end': isHunkEnd(vr.index) }">
+              <div class="pid-thread-gutter" />
+              <div class="pid-thread-body">
+                <PrCommentThread
+                  :comments="row.thread.comments"
+                  :current-user="currentUser"
+                  :cwd="cwd"
+                  :pr-number="prNumber"
+                  :forge-name="forgeName"
+                  @reply="(body) => handleReply(row.thread, body)"
+                  @edit="handleEdit"
+                  @delete="handleDelete"
+                  @apply-suggestion="handleApplySuggestion"
+                />
+              </div>
+            </div>
+          </template>
+          <template v-else-if="row.kind === 'compose'">
+            <div class="pid-thread-row pid-compose-row pid-rowbox" :class="{ 'pid-rowbox--end': isHunkEnd(vr.index) }">
+              <div class="pid-thread-gutter" />
+              <div class="pid-thread-body">
+                <div class="pid-compose">
                   <textarea
-                    v-model="suggestText"
-                    class="pid-textarea pid-suggest-textarea mono"
+                    v-model="composeText"
+                    class="pid-textarea"
+                    :placeholder="t('pr.inline.composePlaceholder')"
                     rows="3"
                     autofocus
-                    @keydown.ctrl.enter.prevent="submitSuggest"
-                    @keydown.meta.enter.prevent="submitSuggest"
-                    @keydown.escape="closeSuggest"
+                    @keydown.ctrl.enter.prevent="submitCompose"
+                    @keydown.meta.enter.prevent="submitCompose"
+                    @keydown.escape="closeCompose"
                   />
-                  <span class="pid-suggest-fence">```</span>
-                </div>
-                <div class="pid-compose-actions">
-                  <button class="pid-cancel-btn" @click="closeSuggest">{{ t('pr.inline.cancel') }}</button>
-                  <button
-                    class="pid-review-btn"
-                    @click="submitSuggest"
-                    :title="reviewDraftCount ? t('pr.inline.addToReviewPending', reviewDraftCount) : t('pr.inline.addToReview')"
-                  >
-                    {{ reviewDraftCount ? t('pr.inline.reviewBtnCount', reviewDraftCount) : t('pr.inline.suggestAddToReview') }}
-                  </button>
+                  <div class="pid-compose-actions">
+                    <button class="pid-cancel-btn" @click="closeCompose">{{ t('pr.inline.cancel') }}</button>
+                    <button
+                      class="pid-review-btn"
+                      :disabled="!composeText.trim()"
+                      @click="submitToReview"
+                      :title="reviewDraftCount ? t('pr.inline.addToReviewPending', reviewDraftCount) : t('pr.inline.addToReview')"
+                    >
+                      {{ reviewDraftCount ? t('pr.inline.reviewBtnCount', reviewDraftCount) : t('pr.inline.reviewBtn') }}
+                    </button>
+                    <button
+                      class="pid-submit-btn"
+                      :disabled="!composeText.trim()"
+                      @click="submitCompose"
+                    >{{ t('pr.inline.commentBtn') }}</button>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-        </template>
+          </template>
+          <template v-else-if="row.kind === 'suggest'">
+            <div class="pid-thread-row pid-suggest-row pid-rowbox" :class="{ 'pid-rowbox--end': isHunkEnd(vr.index) }">
+              <div class="pid-thread-gutter" />
+              <div class="pid-thread-body">
+                <div class="pid-suggest">
+                  <div class="pid-suggest-header">
+                    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4">
+                      <path d="M11 2.5l2.5 2.5L5 13.5H2.5V11L11 2.5z" stroke-linejoin="round"/>
+                    </svg>
+                    {{ t('pr.inline.suggestTitle') }}
+                    <span class="pid-suggest-hint">{{ t('pr.inline.suggestHint') }}</span>
+                  </div>
+                  <div class="pid-suggest-preview">
+                    <span class="pid-suggest-fence">```suggestion</span>
+                    <textarea
+                      v-model="suggestText"
+                      class="pid-textarea pid-suggest-textarea mono"
+                      rows="3"
+                      autofocus
+                      @keydown.ctrl.enter.prevent="submitSuggest"
+                      @keydown.meta.enter.prevent="submitSuggest"
+                      @keydown.escape="closeSuggest"
+                    />
+                    <span class="pid-suggest-fence">```</span>
+                  </div>
+                  <div class="pid-compose-actions">
+                    <button class="pid-cancel-btn" @click="closeSuggest">{{ t('pr.inline.cancel') }}</button>
+                    <button
+                      class="pid-review-btn"
+                      @click="submitSuggest"
+                      :title="reviewDraftCount ? t('pr.inline.addToReviewPending', reviewDraftCount) : t('pr.inline.addToReview')"
+                    >
+                      {{ reviewDraftCount ? t('pr.inline.reviewBtnCount', reviewDraftCount) : t('pr.inline.suggestAddToReview') }}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
       </div>
-    </template>
+    </div>
   </div>
 </template>
 
@@ -578,11 +944,33 @@ function handleApplySuggestion(suggestion: string, startLine: number | null, end
   text-align: center;
 }
 
-.pid-hunk {
+/* A2: each hunk used to be wrapped in a single `.pid-hunk` box (border +
+   radius + overflow:hidden). Flattening to a per-row virtualizable list
+   means there's no wrapper element anymore — every row instead carries
+   `.pid-rowbox` (side borders) plus `--start`/`--end` on the first/last row
+   of its hunk (top/bottom border, rounded corners, and the hunk-to-hunk
+   gap), reproducing the same boxed look without a group wrapper. */
+.pid-rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.pid-rowbox {
+  border-left: 1px solid var(--color-border);
+  border-right: 1px solid var(--color-border);
+}
+
+.pid-rowbox--start {
+  border-top: 1px solid var(--color-border);
+  border-top-left-radius: 6px;
+  border-top-right-radius: 6px;
+}
+
+.pid-rowbox--end {
+  border-bottom: 1px solid var(--color-border);
+  border-bottom-left-radius: 6px;
+  border-bottom-right-radius: 6px;
   margin-bottom: 8px;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  overflow: hidden;
 }
 
 .pid-hunk-header {
