@@ -385,6 +385,7 @@ fn json_to_detail(pr: &serde_json::Value) -> PullRequestDetail {
         // Filled in by rest_pr_detail via an explicit repo lookup — the pulls
         // response does not embed `permissions` on the nested base repo.
         can_merge: None,
+        head_sha: jnested(pr, "head", "sha"),
     }
 }
 

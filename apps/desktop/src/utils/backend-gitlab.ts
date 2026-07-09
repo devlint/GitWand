@@ -58,7 +58,7 @@ export async function glGetMr(cwd: string, iid: number): Promise<PullRequestDeta
     merged_at: string; url: string; additions: number; deletions: number;
     changed_files: number; comments: number; review_comments: number;
     labels: string[]; reviewers: string[]; mergeable: string; checks_status: string;
-    can_merge: boolean | null;
+    can_merge: boolean | null; head_sha?: string;
   }>("gl_get_mr", { cwd, iid });
   return {
     number: raw.number, title: raw.title, body: raw.body, state: raw.state,
@@ -68,7 +68,7 @@ export async function glGetMr(cwd: string, iid: number): Promise<PullRequestDeta
     changedFiles: raw.changed_files, comments: raw.comments,
     reviewComments: raw.review_comments, labels: raw.labels, reviewers: raw.reviewers,
     mergeable: raw.mergeable, checksStatus: raw.checks_status,
-    canMerge: raw.can_merge ?? null,
+    canMerge: raw.can_merge ?? null, headSha: raw.head_sha ?? "",
   } as unknown as PullRequestDetail;
 }
 

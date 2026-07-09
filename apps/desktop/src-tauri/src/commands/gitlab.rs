@@ -188,6 +188,12 @@ fn gl_mr_to_detail(mr: &serde_json::Value) -> PullRequestDetail {
             .get("user")
             .and_then(|u| u.get("can_merge"))
             .and_then(|b| b.as_bool()),
+        head_sha: mr
+            .get("diff_refs")
+            .and_then(|d| d.get("head_sha"))
+            .and_then(|s| s.as_str())
+            .map(String::from)
+            .unwrap_or_else(|| js(mr, "sha")),
     }
 }
 

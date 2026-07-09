@@ -648,7 +648,7 @@ fn gh_pr_detail_inner(cwd: String, number: i64) -> Result<PullRequestDetail, Str
     let mut cmd = hidden_cmd("gh");
     cmd.args([
         "pr", "view", &num,
-        "--json", "number,title,body,state,author,headRefName,baseRefName,isDraft,createdAt,updatedAt,mergedAt,url,additions,deletions,changedFiles,comments,reviewRequests,labels,reviews,mergeable,statusCheckRollup",
+        "--json", "number,title,body,state,author,headRefName,headRefOid,baseRefName,isDraft,createdAt,updatedAt,mergedAt,url,additions,deletions,changedFiles,comments,reviewRequests,labels,reviews,mergeable,statusCheckRollup",
     ]);
     if let Some(ref nwo) = upstream {
         cmd.args(["--repo", nwo]);

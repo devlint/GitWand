@@ -435,6 +435,7 @@ pub(crate) fn gh_pr_detail_raw_to_detail(r: GhPrDetailRaw) -> PullRequestDetail 
         // Filled in by the caller (gh_pr_detail) via a `gh repo view`
         // viewerPermission lookup — `gh pr view` doesn't carry it.
         can_merge: None,
+        head_sha: r.head_ref_oid,
     }
 }
 

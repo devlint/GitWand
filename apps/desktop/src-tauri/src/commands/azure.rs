@@ -586,6 +586,7 @@ fn json_to_detail(r: &AzureRepo, pr: &serde_json::Value) -> PullRequestDetail {
         // Azure merge permission needs the Security/Permissions API — not
         // cheaply available here. Unknown ⇒ UI gates on errors only.
         can_merge: None,
+        head_sha: jnested(pr, "lastMergeSourceCommit", "commitId"),
     }
 }
 

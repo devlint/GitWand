@@ -3156,6 +3156,7 @@ async function handleRequest(req, res) {
           reviewers: (pr.requested_reviewers ?? []).map((r) => r.login ?? ""),
           mergeable: pr.mergeable_state ?? "unknown",
           checks_status: "",
+          head_sha: pr.head?.sha ?? "",
         });
       } catch (err) {
         return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
