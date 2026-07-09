@@ -73,17 +73,21 @@ function isScratch(path: string): boolean {
 // Native HTML5 drag-and-drop is unreliable in WebKit (WKWebView on macOS,
 // WebKitGTK on Linux — both power the packaged Tauri app): `dragstart`
 // frequently never fires, so the tabs couldn't be reordered and no drop
-// indicator showed. We drive it with plain mouse events instead, which
-// behave identically across every webview. draggedIndex / hoveredIndex keep
-// the same meaning the CSS classes expect (source index / hovered target).
+// indicator showed. Pointer events drive it instead — one code path for
+// mouse, touch and pen — and the gesture is claimed via setPointerCapture so
+// a native touch-scroll can't steal it mid-drag. draggedIndex / hoveredIndex
+// keep the same meaning the CSS classes expect (source index / hovered
+// target).
 const draggedIndex = ref<number | null>(null);
 const hoveredIndex = ref<number | null>(null);
 const stripEl = ref<HTMLElement | null>(null);
 // Live horizontal offset of the tab being dragged, so it tracks the cursor.
 const dragOffsetX = ref(0);
+/** Rendered by the aria-live region — feedback for a keyboard reorder. */
+const announceText = ref("");
 
-// A press only becomes a drag past this threshold, so a plain click still
-// switches tabs instead of being swallowed as a (zero-distance) drag.
+// A press only becomes a drag past this threshold, so a plain click/tap
+// still switches tabs instead of being swallowed as a (zero-distance) drag.
 const DRAG_THRESHOLD_PX = 4;
 // How far above/below the strip the cursor can stray before a release reads
 // as "dropped outside" (cancelled) rather than a reorder.
@@ -91,6 +95,11 @@ const DRAG_VERTICAL_TOLERANCE_PX = 40;
 let pressIndex: number | null = null;
 let pressStartX = 0;
 let didDrag = false;
+// The element/pointer a drag claimed via setPointerCapture, so it can be
+// released again in finishDrag. Capture is best-effort: some webviews don't
+// implement it, so every use is feature-detected and wrapped in try/catch.
+let capturedEl: HTMLElement | null = null;
+let capturedPointerId: number | null = null;
 // Center-x of each tab captured when the drag begins. The dragged tab gets a
 // translateX to follow the cursor, which would move its own bounding rect — so
 // we hit-test against this snapshot (the other tabs don't move until drop).
@@ -99,9 +108,17 @@ let tabCenters: number[] = [];
 function snapshotCenters() {
   const root = stripEl.value;
   tabCenters = root
-    ? Array.from(root.querySelectorAll<HTMLElement>(".repo-tab")).map((el) => {
+    ? Array.from(root.querySelectorAll<HTMLElement>(".repo-tab")).map((el, i) => {
         const r = el.getBoundingClientRect();
-        return r.left + r.width / 2;
+        const center = r.left + r.width / 2;
+        // The dragged tab renders with a live translateX so it visually
+        // tracks the pointer; a re-snapshot mid-drag (scroll, resize) would
+        // otherwise measure that offset baked into its rect and then add
+        // dragOffsetX on top of it a second time in indexForDragOffset —
+        // strip it back out so this always holds each tab's *resting*
+        // position, exactly like the very first snapshot (taken at offset 0,
+        // before any transform is rendered).
+        return i === draggedIndex.value ? center - dragOffsetX.value : center;
       })
     : [];
 }
@@ -137,7 +154,7 @@ function onStripScroll() {
   if (didDrag) snapshotCenters();
 }
 
-function onTabMouseDown(e: MouseEvent, index: number, tabId: number) {
+function onTabPointerDown(e: PointerEvent, index: number, tabId: number) {
   if (e.button === 1) {
     // Middle-click closes, same as before.
     e.preventDefault();
@@ -146,26 +163,40 @@ function onTabMouseDown(e: MouseEvent, index: number, tabId: number) {
   }
   if (e.button !== 0) return;
   // Don't start a drag from the close affordance. (The caret already stops
-  // propagation on its own @mousedown, so it never reaches this handler.)
+  // propagation on its own @pointerdown, so it never reaches this handler.)
   if ((e.target as Element).closest?.(".repo-tab__close")) return;
   pressIndex = index;
   pressStartX = e.clientX;
   didDrag = false;
-  window.addEventListener("mousemove", onDragMove);
-  window.addEventListener("mouseup", onDragEnd);
+  capturedEl = e.currentTarget as HTMLElement;
+  capturedPointerId = e.pointerId;
+  window.addEventListener("pointermove", onDragMove);
+  window.addEventListener("pointerup", onDragEnd);
+  window.addEventListener("pointercancel", onDragCancel);
   window.addEventListener("blur", onDragCancel);
 }
 
-function onDragMove(e: MouseEvent) {
+function onDragMove(e: PointerEvent) {
   if (pressIndex === null) return;
   if (!didDrag) {
     if (Math.abs(e.clientX - pressStartX) < DRAG_THRESHOLD_PX) return;
     didDrag = true;
     draggedIndex.value = pressIndex;
     snapshotCenters();
+    // Claim the gesture so pointermove/pointerup keep targeting this tab
+    // even once the pointer leaves it — guards against a native touch-pan
+    // gesture on the strip's own overflow-x scroll winning the race and
+    // hijacking the drag partway through.
+    if (capturedEl && typeof capturedEl.setPointerCapture === "function") {
+      try {
+        capturedEl.setPointerCapture(e.pointerId);
+      } catch {
+        // Best-effort — the window listeners still drive the drag without it.
+      }
+    }
   }
-  // Suppress the text selection that a mouse-drag would otherwise paint over
-  // the tab labels and neighbouring header content.
+  // Suppress the text selection / touch-scroll a drag would otherwise paint
+  // over the tab labels and neighbouring header content.
   e.preventDefault();
   dragOffsetX.value = e.clientX - pressStartX;
   const stripRect = stripEl.value?.getBoundingClientRect();
@@ -181,9 +212,20 @@ function onDragMove(e: MouseEvent) {
 
 /** Detaches the drag's window listeners and resets its transient state. */
 function finishDrag(commit: boolean) {
-  window.removeEventListener("mousemove", onDragMove);
-  window.removeEventListener("mouseup", onDragEnd);
+  window.removeEventListener("pointermove", onDragMove);
+  window.removeEventListener("pointerup", onDragEnd);
+  window.removeEventListener("pointercancel", onDragCancel);
   window.removeEventListener("blur", onDragCancel);
+  if (capturedEl && capturedPointerId !== null && typeof capturedEl.releasePointerCapture === "function") {
+    try {
+      capturedEl.releasePointerCapture(capturedPointerId);
+    } catch {
+      // Already released (e.g. the browser dropped it and fired
+      // pointercancel first) — nothing left to release.
+    }
+  }
+  capturedEl = null;
+  capturedPointerId = null;
   if (
     commit &&
     didDrag &&
@@ -198,21 +240,22 @@ function finishDrag(commit: boolean) {
   hoveredIndex.value = null;
   dragOffsetX.value = 0;
   tabCenters = [];
-  // The click that follows a mouseup on the same element fires synchronously
-  // in the same task, before this timeout runs — so it's still suppressed
-  // below. Resetting on a deferred tick, rather than relying on that click
-  // reaching onTabClick, means the flag can't get stuck when the release
-  // lands off the dragged tab, which would otherwise swallow the very next
-  // keyboard tab activation.
+  // The click that follows a pointerup on the same element fires
+  // synchronously in the same task, before this timeout runs — so it's still
+  // suppressed below. Resetting on a deferred tick, rather than relying on
+  // that click reaching onTabClick, means the flag can't get stuck when the
+  // release lands off the dragged tab, which would otherwise swallow the
+  // very next keyboard tab activation.
   setTimeout(() => {
     didDrag = false;
   }, 0);
 }
 
-function onDragEnd(e: MouseEvent) {
-  // Only the left button can end a drag — a right/middle-click released
-  // mid-drag (e.g. after a middle-click closed a different tab) must not
-  // commit or abort this one.
+function onDragEnd(e: PointerEvent) {
+  // Only the button that can start a drag can end it — a right/middle-click
+  // released mid-drag (e.g. after a middle-click closed a different tab)
+  // must not commit or abort this one. Touch/pen contacts report button 0,
+  // same as a left click, so this doesn't affect them.
   if (e.button !== 0) return;
   finishDrag(true);
 }
@@ -230,6 +273,35 @@ watch(
     if (pressIndex !== null) onDragCancel();
   },
 );
+
+// ─── Keyboard reordering ─────────────────────────────────
+// The pointer/touch drag above has no keyboard equivalent, which would
+// otherwise leave reordering unreachable without a mouse, trackpad or
+// touchscreen. Ctrl/Cmd+ArrowLeft/Right nudges the focused tab one slot at a
+// time; the aria-live region above announces the result since the reorder
+// is a silent DOM move with nothing else for a screen reader to key off of.
+async function moveFocusedTab(index: number, tab: RepoTab, direction: -1 | 1) {
+  const newIndex = index + direction;
+  if (newIndex < 0 || newIndex >= props.tabs.length) return;
+  emit("reorderTabs", index, newIndex);
+  announceText.value = t("header.tabStripReorderAnnounce", tab.name, newIndex + 1, props.tabs.length);
+  // `tabs` is keyed by `tab.id`, so Vue moves the same DOM node rather than
+  // recreating it and focus should already follow — but re-focus explicitly
+  // by id once the reorder lands, in case the parent re-renders the list.
+  await nextTick();
+  stripEl.value?.querySelector<HTMLElement>(`[data-tab-id="${tab.id}"]`)?.focus();
+}
+
+function onTabKeydown(e: KeyboardEvent, index: number, tab: RepoTab) {
+  if (!(e.ctrlKey || e.metaKey)) return;
+  if (e.key === "ArrowLeft") {
+    e.preventDefault();
+    moveFocusedTab(index, tab, -1);
+  } else if (e.key === "ArrowRight") {
+    e.preventDefault();
+    moveFocusedTab(index, tab, 1);
+  }
+}
 
 // Pinned and recent repos shown in the + dropdown (excludes repos already
 // open in a tab). Capped at 8 combined entries so the menu stays compact;
@@ -328,6 +400,10 @@ watch(showMenu, (open) => {
 function onWindowChange() {
   if (showMenu.value) closeMenu();
   if (wtMenuTabId.value !== null) closeWorktreeMenu();
+  // A window resize (or a zoom-level change) shifts every tab's viewport
+  // position exactly like a strip scroll would — re-snapshot so the
+  // hit-test in onDragMove keeps hit-testing against live centers.
+  if (didDrag) snapshotCenters();
 }
 
 onMounted(() => {
@@ -344,8 +420,9 @@ onUnmounted(() => {
   window.removeEventListener("scroll", onWindowChange, true);
   stripEl.value?.removeEventListener("scroll", onStripScroll);
   // Guard against unmounting mid-drag leaking the window listeners.
-  window.removeEventListener("mousemove", onDragMove);
-  window.removeEventListener("mouseup", onDragEnd);
+  window.removeEventListener("pointermove", onDragMove);
+  window.removeEventListener("pointerup", onDragEnd);
+  window.removeEventListener("pointercancel", onDragCancel);
   window.removeEventListener("blur", onDragCancel);
 });
 
@@ -455,10 +532,17 @@ function onCloseClick(e: MouseEvent, tabId: number) {
 
 <template>
   <div v-if="showStrip" ref="stripEl" class="repo-tab-strip" role="tablist">
+    <!-- Announces the result of a keyboard reorder (Ctrl/Cmd+Arrow) — the
+         move itself is a silent DOM splice with nothing else for a screen
+         reader to react to. -->
+    <span class="repo-tab-strip__sr-only" role="status" aria-live="polite">{{ announceText }}</span>
     <!-- Tabs — rendered only when there are multiple repos -->
     <template v-if="showTabs">
-      <!-- Reordered via pointer events (see onTabMouseDown), not native HTML5
-           drag, which is unreliable in the WebKit webviews powering the app. -->
+      <!-- Reordered via pointer events (see onTabPointerDown) — covers mouse,
+           touch and pen in one path — rather than native HTML5 drag, which is
+           unreliable in the WebKit webviews powering the app. Ctrl/Cmd+Arrow
+           reorders from the keyboard (see onTabKeydown) since the pointer
+           gesture has no keyboard equivalent otherwise. -->
       <button
         v-for="(tab, index) in tabs"
         :key="tab.id"
@@ -473,10 +557,13 @@ function onCloseClick(e: MouseEvent, tabId: number) {
           'repo-tab--drag-over-right': hoveredIndex === index && draggedIndex !== null && draggedIndex < index
         }"
         :aria-selected="tab.id === activeTabId ? 'true' : 'false'"
+        :aria-keyshortcuts="tabs.length > 1 ? 'Control+ArrowLeft Control+ArrowRight' : undefined"
+        :data-tab-id="tab.id"
         :title="tab.path"
         :style="draggedIndex === index ? { transform: `translateX(${dragOffsetX}px)` } : null"
         @click="(e) => onTabClick(e, tab)"
-        @mousedown="(e) => onTabMouseDown(e, index, tab.id)"
+        @pointerdown="(e) => onTabPointerDown(e, index, tab.id)"
+        @keydown="(e) => onTabKeydown(e, index, tab)"
       >
         <svg class="repo-tab__icon" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
           <path d="M2 3.5A1.5 1.5 0 013.5 2h3.586a1.5 1.5 0 011.06.44l.915.914a1 1 0 00.707.293H12.5A1.5 1.5 0 0114 5.147V12.5A1.5 1.5 0 0112.5 14h-9A1.5 1.5 0 012 12.5v-9z" stroke="currentColor" stroke-width="1.2" />
@@ -494,7 +581,7 @@ function onCloseClick(e: MouseEvent, tabId: number) {
           :aria-expanded="wtMenuTabId === tab.id ? 'true' : 'false'"
           aria-haspopup="menu"
           @click.stop="(e) => toggleWorktreeMenu(e, tab)"
-          @mousedown.stop
+          @pointerdown.stop
         >
           <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.4"
             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -770,6 +857,24 @@ function onCloseClick(e: MouseEvent, tabId: number) {
   min-width: 0;
   flex-shrink: 1;
   user-select: none;
+  white-space: nowrap;
+  /* Claim horizontal pan gestures ourselves (pointer-based drag-to-reorder)
+     instead of letting a touch/pen device start the strip's native
+     overflow-x scroll first — that native gesture can otherwise win the
+     race and hijack the drag before our own pointermove handler ever sees
+     it move. Horizontal scrolling by touch still works from the strip's own
+     padding or empty space between tabs. */
+  touch-action: none;
+}
+
+/* Visually hidden but still reachable by screen readers — used for the
+   aria-live reorder announcement, which must never be visible. */
+.repo-tab-strip__sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
   white-space: nowrap;
 }
 

@@ -108,6 +108,7 @@ const en = {
     tabStripRecentSection: "Recent repos",
     tabStripPinnedSection: "Pinned repos",
     tabStripNoRecent: "No recent repositories",
+    tabStripReorderAnnounce: "{0} moved to position {1} of {2}",
   },
 
   // ─── Sync split button (header primary action) ─────────

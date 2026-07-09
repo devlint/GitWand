@@ -113,6 +113,7 @@ const zhCN: Locale = {
     tabStripRecentSection: "最近的仓库",
     tabStripPinnedSection: "收藏的仓库",
     tabStripNoRecent: "没有最近的仓库",
+    tabStripReorderAnnounce: "{0} 已移动到第 {1} 个位置(共 {2} 个)",
   },
 
   // ─── Sync split button (header primary action) ─────────

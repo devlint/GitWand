@@ -109,6 +109,7 @@ const ptBR: Locale = {
     tabStripRecentSection: "Repos recentes",
     tabStripPinnedSection: "Repos favoritos",
     tabStripNoRecent: "Nenhum repositório recente",
+    tabStripReorderAnnounce: "{0} movido para a posição {1} de {2}",
   },
 
   // ─── Sync split button (header primary action) ─────────

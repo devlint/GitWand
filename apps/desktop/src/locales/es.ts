@@ -108,6 +108,7 @@ const es: Locale = {
     tabStripRecentSection: "Repos recientes",
     tabStripPinnedSection: "Repos favoritos",
     tabStripNoRecent: "Sin repositorios recientes",
+    tabStripReorderAnnounce: "{0} movido a la posición {1} de {2}",
   },
 
   // ─── Sync split button (header primary action) ─────────
