@@ -19,6 +19,7 @@ import type {
   RemoteInfo,
   PendingReviewComment,
 } from "../utils/backend";
+import type { ReviewFinding } from "./usePrPreReview";
 
 export const PR_CACHE_STORAGE_KEY = "gitwand-pr-cache";
 const STORAGE_KEY = PR_CACHE_STORAGE_KEY;
@@ -83,6 +84,15 @@ export interface DismissedState {
   ts: number;
 }
 
+/** AI pre-review findings for a PR at a specific head SHA (C3), keyed
+ *  `${detailKey}@${headSha}` — a headSha change simply misses the cache
+ *  (no explicit invalidation needed; the stale key is pruned by age/LRU
+ *  like every other entry). */
+export interface FindingsState {
+  findings: ReviewFinding[];
+  ts: number;
+}
+
 interface PrCacheFile {
   lists: Record<string, CachedList>;
   details: Record<string, CachedDetail>;
@@ -90,10 +100,14 @@ interface PrCacheFile {
   viewed: Record<string, ViewedState>;
   drafts: Record<string, DraftState>;
   dismissedFindings: Record<string, DismissedState>;
+  findings: Record<string, FindingsState>;
 }
 
 function emptyFile(): PrCacheFile {
-  return { lists: {}, details: {}, remotes: {}, viewed: {}, drafts: {}, dismissedFindings: {} };
+  return {
+    lists: {}, details: {}, remotes: {}, viewed: {}, drafts: {},
+    dismissedFindings: {}, findings: {},
+  };
 }
 
 // Strictly-increasing write clock. Wall-clock `Date.now()` can return the same
@@ -135,6 +149,7 @@ function loadFromStorage(): PrCacheFile {
       viewed: parsed.viewed ?? {},
       drafts: parsed.drafts ?? {},
       dismissedFindings: parsed.dismissedFindings ?? {},
+      findings: parsed.findings ?? {},
     };
     const now = Date.now();
     pruneByAge(file.lists, now);
@@ -143,6 +158,7 @@ function loadFromStorage(): PrCacheFile {
     pruneByAge(file.viewed, now);
     pruneByAge(file.drafts, now);
     pruneByAge(file.dismissedFindings, now);
+    pruneByAge(file.findings, now);
     return file;
   } catch {
     return emptyFile();
@@ -156,6 +172,7 @@ function saveToStorage(file: PrCacheFile): void {
   evictLru(file.viewed, MAX_DETAILS);
   evictLru(file.drafts, MAX_DETAILS);
   evictLru(file.dismissedFindings, MAX_LISTS);
+  evictLru(file.findings, MAX_DETAILS);
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(file));
   } catch (e) {
@@ -292,11 +309,23 @@ export function usePrCache() {
     saveToStorage(_file);
   }
 
+  // ── AI pre-review findings cache, by headSha (C3) ─────────────────────────
+
+  function getFindings(key: string): ReviewFinding[] | null {
+    return _file.findings[key]?.findings ?? null;
+  }
+
+  function setFindings(key: string, findings: ReviewFinding[]): void {
+    _file.findings[key] = { findings, ts: monoNow() };
+    saveToStorage(_file);
+  }
+
   return {
     getList, setList, invalidateLists,
     getDetail, setDetail, invalidateDetail,
     getRemote, setRemote,
     getDismissed, addDismissed,
+    getFindings, setFindings,
     getViewed, setViewed, toggleViewed,
     getDraft, setDraft, clearDraft,
   };

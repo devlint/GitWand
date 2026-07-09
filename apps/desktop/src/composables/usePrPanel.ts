@@ -34,7 +34,12 @@ import { fromCIAnnotation, type LineAnnotation } from "./prAnnotations";
 import { usePrCache, listKey, detailKey } from "./usePrCache";
 import { getPersistedDiffMode, type DiffMode } from "../utils/diffMode";
 import { requireOnline } from "../utils/networkGuard";
-import { t } from "./useI18n";
+import { t, useI18n } from "./useI18n";
+import { useSettings } from "./useSettings";
+import { useAIProvider } from "./useAIProvider";
+import { usePrPreReview, type ReviewFinding } from "./usePrPreReview";
+import { usePrReviewQueue } from "./usePrReviewQueue";
+import { filterFindings, normalizeFindingClass } from "./usePrFindingFilter";
 
 export const PR_PANEL_KEY = Symbol("prPanel");
 
@@ -159,6 +164,11 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   // Disk-persisted SWR cache — paints the list/detail instantly on repo-switch
   // or cold app start, then revalidates in the background. See usePrCache.ts.
   const cache = usePrCache();
+  const { settings } = useSettings();
+  const { locale } = useI18n();
+  const ai = useAIProvider();
+  const preReview = usePrPreReview();
+  const reviewQueue = usePrReviewQueue();
 
   // ─── Remote / list ─────────────────────────────────────
   const remote = ref<RemoteInfo | null>(null);
@@ -286,6 +296,104 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   const totalRepoFiles = ref(0);
   const fileHistory = ref<Record<string, PrFileHistory>>({});
   const fileHistoryLoading = ref(false);
+
+  // ─── AI pre-review pass (C3) ────────────────────────────
+  // Opt-in, background, headSha-cached, cancellable. `rawPreReviewFindings`
+  // holds everything the engine has produced for the current PR@headSha;
+  // `preReviewFindings` (exposed) is that list filtered by the user's
+  // threshold/cap/dismissal-memory settings (C2).
+  const rawPreReviewFindings = ref<ReviewFinding[]>([]);
+  const dismissedFindingClasses = ref<Set<string>>(new Set());
+  const preReviewFindings = computed<ReviewFinding[]>(() =>
+    filterFindings(rawPreReviewFindings.value, {
+      threshold: settings.value.reviewAiConfidenceThreshold,
+      cap: settings.value.reviewAiMaxFindings,
+      dismissed: dismissedFindingClasses.value,
+    }),
+  );
+  const preReviewProgress = computed(() => ({ done: reviewQueue.done.value, total: reviewQueue.total.value }));
+  const preReviewRunning = reviewQueue.running;
+  let preReviewAbort: AbortController | null = null;
+
+  function stopPreReview() {
+    preReviewAbort?.abort();
+    preReviewAbort = null;
+  }
+
+  /**
+   * Kick off (or skip, on a cache hit) the pre-review pass for the
+   * currently selected PR. Guarded by the opt-in setting, AI availability,
+   * and a known head SHA (B2's headSha, surfaced by Task 0) — never runs
+   * unconditionally.
+   */
+  async function maybeRunPreReview() {
+    if (!settings.value.reviewAiPreReview || !ai.isAvailable.value) return;
+    const pr = selectedPr.value;
+    const headSha = prDetail.value?.headSha;
+    if (!pr || !headSha) return;
+
+    const key = `${detailKey(cwd.value, pr.number)}@${headSha}`;
+    const cached = cache.getFindings(key);
+    if (cached) {
+      rawPreReviewFindings.value = cached;
+      return;
+    }
+
+    // The pre-review engine needs every touched file's hunks, not just the
+    // selected one — parse them all here (bounded, local, cheap) without
+    // touching `prDiffFiles`'s A1 lazy shells (the UI stays lazy).
+    if (!diffIndex.value.length) await loadDiff();
+    const filesForReview = diffIndex.value
+      .map((f) => parseFileDiff(f.raw))
+      .filter((f) => f.hunks.length > 0);
+    if (!filesForReview.length) return;
+
+    dismissedFindingClasses.value = cache.getDismissed(cwd.value);
+    rawPreReviewFindings.value = [];
+    stopPreReview();
+    const controller = new AbortController();
+    preReviewAbort = controller;
+
+    await reviewQueue.run(
+      filesForReview,
+      (file) => preReview.analyzeFile(file, {
+        cwd: cwd.value,
+        locale: locale.value,
+        otherDiffFiles: filesForReview,
+      }),
+      {
+        onFinding: (finding) => {
+          rawPreReviewFindings.value = [...rawPreReviewFindings.value, finding];
+        },
+        signal: controller.signal,
+      },
+    );
+
+    // Only cache a *complete* pass — an aborted run (PR switch, detail
+    // close) must not poison the cache with a partial result that would
+    // otherwise look "done" forever at this headSha.
+    if (!controller.signal.aborted && selectedPr.value?.number === pr.number) {
+      cache.setFindings(key, rawPreReviewFindings.value);
+    }
+  }
+
+  /** `C4`/Intelligence panel — dismiss a finding's class (persists per repo,
+   *  C2) and remove it live from the current list. */
+  function dismissFinding(id: string) {
+    const finding = rawPreReviewFindings.value.find((f) => f.id === id);
+    if (!finding) return;
+    const cls = normalizeFindingClass(finding);
+    cache.addDismissed(cwd.value, cls);
+    dismissedFindingClasses.value = new Set([...dismissedFindingClasses.value, cls]);
+  }
+
+  // Trigger the pass whenever the selected PR's head SHA becomes known —
+  // cache hit paints instantly inside `maybeRunPreReview`, a miss starts
+  // the queue. Firing on `headSha` (not `selectedPr`) means a re-push
+  // (new headSha while the detail stays open) re-triggers correctly too.
+  watch(() => prDetail.value?.headSha, () => {
+    void maybeRunPreReview();
+  });
 
   // ─── Boot-perf gating (v2.8.5) ─────────────────────────
   // `panelMounted` flips to true the first time the user opens the PR
@@ -635,6 +743,8 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     fileHistory.value = {};
     selectedDiffFile.value = null;
     viewedPaths.value = new Set();
+    stopPreReview();
+    rawPreReviewFindings.value = [];
     detailTab.value = "info";
   }
 
@@ -1265,6 +1375,9 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       // Catch up immediately if a full interval elapsed while hidden, but don't
       // refetch on every brief alt-tab.
       if (Date.now() - _lastPoll >= REVALIDATE_INTERVAL_MS) pollTick();
+      // C3 — resume the pre-review queue (reuses this listener rather than
+      // adding a second `visibilitychange` handler).
+      reviewQueue.resume();
     }
   }
 
@@ -1343,6 +1456,8 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     draftReviewComments, draftCount, showReviewModal, submittingReview,
     conflictPreview, conflictLoading, conflictError,
     hotspots, hotspotsLoading, totalRepoFiles, fileHistory, fileHistoryLoading,
+    // AI pre-review (C3)
+    preReviewFindings, preReviewProgress, preReviewRunning, dismissFinding,
     // Pagination (v2.8.5)
     hasMore, loadingMore,
     // Computed
