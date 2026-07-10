@@ -2,7 +2,7 @@
 
 ## Problem
 
-`AppDock.vue` already has a `prCount?: number` prop (line 24) used to badge the "prs" dock item (line 83: `if (id === "prs") return props.prCount || undefined;`), but nothing in `App.vue` ever passes it — the prop is dead. Similarly, every `ForgeProvider` implements `getPRCount(cwd, state)` (backed by `ghPrCount` → Rust `gh_pr_count` → a single cheap REST `/search/issues?...&per_page=1` call or GraphQL `totalCount` query, per forge), but nothing calls it anywhere in the app today.
+`AppDock.vue` already has a `prCount?: number` prop (line 24) used to badge the "prs" dock item (line 83: `if (id === "prs") return props.prCount || undefined;`), and `App.vue` already passes it (`App.vue:3347`, `:pr-count="prPanel.prs.value.length"`) — but bound to `prs.value.length`, i.e. however many PRs currently happen to be loaded into `usePrPanel`'s badge-path list. That list is populated lazily (only once the user opens the branch-selector popover or enters graph mode — see `2026-07-09-pr-badge-prefetch-design.md`), so the dock badge reads `0` until one of those interactions happens, and even afterward it reflects "loaded so far" (10, or up to 300 after the background drain), never the true total. Separately, every `ForgeProvider` implements `getPRCount(cwd, state)` (backed by `ghPrCount` → Rust `gh_pr_count` → a single cheap REST `/search/issues?...&per_page=1` call or GraphQL `totalCount` query, per forge), but nothing calls it anywhere in the app today.
 
 Meanwhile, the PR list view's own header count (`PrListSidebar.vue:102`, `totalCount = computed(() => panel.displayedPrs.value.length)`) only ever reflects however many PRs are *currently loaded* into `prs.value` — 10 by default, more after the background drain (see `2026-07-09-pr-badge-prefetch-design.md`), fewer if a user filter is active — never the true total open-PR count.
 
@@ -62,13 +62,13 @@ watch(cwd, (newCwd) => {
 
 ### Wiring into `AppDock`
 
-`App.vue`'s existing `<AppDock v-if="hasRepo" :view-mode="viewMode" :changes-count="repoFiles.length" ...>` gains one more prop:
+`App.vue:3347` already passes `:pr-count="prPanel.prs.value.length"` to `<AppDock>` — this changes to read from the new cheap-count ref instead of the loaded-list length:
 
 ```vue
-<AppDock ... :pr-count="prPanel.dockPrCount.value ?? undefined" />
+:pr-count="prPanel.dockPrCount.value ?? undefined"
 ```
 
-(`?? undefined` because `AppDock`'s prop type is `number | undefined`, and `null` is our "not yet loaded" sentinel — this mirrors how `changesCount`/other counts are already passed.)
+(`?? undefined` because `AppDock`'s prop type is `number | undefined`, and `null` is our "not yet loaded" sentinel.)
 
 ### PR list view refresh button
 
