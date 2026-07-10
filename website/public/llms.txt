@@ -40,6 +40,7 @@ Key facts:
 - MCP server: `npx @gitwand/mcp` — server card at https://gitwand.app/.well-known/mcp/server-card.json
 - VS Code: search "GitWand" on the Marketplace
 - Source: https://github.com/devlint/GitWand (MIT)
+- Sponsor: https://github.com/sponsors/devlint
 
 ## Optional
 
