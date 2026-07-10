@@ -249,6 +249,65 @@ pub(crate) async fn gh_pr_count(cwd: String, state: String) -> Result<i64, Strin
         .map_err(|e| e.to_string())?
 }
 
+/// Pure extraction of `(number, updated_at)` from `gh pr list --json
+/// number,updatedAt` output (already `--limit 1 -S "sort:updated-desc"`
+/// sorted) — the gh CLI's JSON keys are camelCase, unlike the REST API's
+/// snake_case, so this can't share `top_pr_from_rest_json` in github_api.rs.
+fn top_pr_from_cli_json(raw: &[serde_json::Value]) -> Option<(i64, String)> {
+    let top = raw.first()?;
+    let updated_at = top.get("updatedAt").and_then(|v| v.as_str())?.to_string();
+    let number = top.get("number").and_then(|v| v.as_i64())?;
+    Some((number, updated_at))
+}
+
+fn gh_pr_freshness_signal_inner(cwd: String) -> Result<Option<PrFreshnessSignal>, String> {
+    if let Some(tok) = github_api::settings_github_token() {
+        return github_api::rest_pr_freshness_signal(&cwd, &tok);
+    }
+    // No sort flag is used by the main gh_list_prs_inner list fetch (its
+    // order doesn't matter there) — this probe needs updated-desc
+    // specifically, via a `-S` search-query sort, requested only here.
+    let target_repo = gh_fork_upstream(&cwd);
+    let mut cmd = hidden_cmd("gh");
+    cmd.args([
+        "pr", "list",
+        "--state", "open",
+        "--json", "number,updatedAt",
+        "--limit", "1",
+        "-S", "sort:updated-desc",
+    ]);
+    if let Some(ref nwo) = target_repo {
+        cmd.args(["--repo", nwo]);
+    }
+    let output = cmd
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("Failed to run gh pr list (freshness signal): {}", e))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("gh pr list (freshness signal) failed: {}", stderr));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let raw: Vec<serde_json::Value> = serde_json::from_str(stdout.trim())
+        .map_err(|e| format!("Failed to parse freshness signal output: {}", e))?;
+    let (number, updated_at) = match top_pr_from_cli_json(&raw) {
+        Some(pair) => pair,
+        None => return Ok(None),
+    };
+    let open_count = gh_pr_count_inner(cwd, "open".to_string())?;
+    Ok(Some(PrFreshnessSignal { number, updated_at, open_count }))
+}
+
+/// Cheap "has the open-PR list changed?" probe for the branch-badge
+/// background-drain cache (`usePrPanel.ts`'s `PR_LIST_CACHE`). See
+/// `PrFreshnessSignal`'s doc comment for why two facts are needed.
+#[tauri::command]
+pub(crate) async fn gh_pr_freshness_signal(cwd: String) -> Result<Option<PrFreshnessSignal>, String> {
+    tauri::async_runtime::spawn_blocking(move || gh_pr_freshness_signal_inner(cwd))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 fn gh_create_pr_inner(
     cwd: String,
     title: String,
@@ -1447,5 +1506,31 @@ mod gh_list_issues_tests {
         assert_eq!(issues[0].author, "alice");
         assert_eq!(issues[0].assignees, vec!["bob".to_string()]);
         assert_eq!(issues[0].milestone, "v1");
+    }
+}
+
+#[cfg(test)]
+mod gh_pr_freshness_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn top_pr_from_cli_json_reads_first_entry() {
+        let raw = vec![json!({"number": 12, "updatedAt": "2026-07-09T09:00:00Z"})];
+        assert_eq!(
+            top_pr_from_cli_json(&raw),
+            Some((12, "2026-07-09T09:00:00Z".to_string()))
+        );
+    }
+
+    #[test]
+    fn top_pr_from_cli_json_empty_list_is_none() {
+        assert_eq!(top_pr_from_cli_json(&[]), None);
+    }
+
+    #[test]
+    fn top_pr_from_cli_json_missing_updated_at_is_none() {
+        let raw = vec![json!({"number": 12})];
+        assert_eq!(top_pr_from_cli_json(&raw), None);
     }
 }

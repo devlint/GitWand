@@ -20,6 +20,12 @@ const { t } = useI18n();
 const panel = inject<PrPanelState>(PR_PANEL_KEY)!;
 const openSettings = inject(OPEN_SETTINGS_KEY, undefined);
 
+/** Manual refresh: reload both the PR list and the dock's total-count badge together. */
+function refreshList() {
+  panel.loadPrs();
+  panel.refreshDockPrCount();
+}
+
 // ─── Lazy pagination sentinel (v2.8.5 §E) ─────────────────
 // IntersectionObserver watches a 1px element at the bottom of the list;
 // when it enters the viewport, we ask the panel for the next page.
@@ -145,7 +151,7 @@ function setUserFilter(mode: 'all' | 'assigned' | 'reviews') {
         <button
           v-else
           class="pls-icon-btn"
-          @click="panel.loadPrs"
+          @click="refreshList"
           :title="t('pr.list.refresh')"
           aria-label="Refresh"
         >

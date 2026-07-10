@@ -1,4 +1,5 @@
 import { ref, computed, watch } from "vue";
+import { whenIdle } from "../utils/idleSchedule";
 import {
   getGitStatus,
   getGitDiff,
@@ -621,15 +622,6 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       logAuthorFilter.value === "all" &&
       !activeScope.value
     );
-  }
-
-  /** Resolve on the next idle slice so background paging never blocks input. */
-  function whenIdle(): Promise<void> {
-    return new Promise((resolve) => {
-      const ric = (globalThis as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => void }).requestIdleCallback;
-      if (typeof ric === "function") ric(() => resolve(), { timeout: 300 });
-      else setTimeout(resolve, 32);
-    });
   }
 
   /**

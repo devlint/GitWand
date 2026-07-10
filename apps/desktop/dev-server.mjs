@@ -3044,6 +3044,43 @@ async function handleRequest(req, res) {
       }
     }
 
+    // GET /api/gh-pr-freshness?cwd=<path>
+    // Cheap "has the open-PR list changed?" probe for the branch-badge
+    // background-drain cache (mirrors Rust `gh_pr_freshness_signal`): the
+    // single most-recently-updated open PR plus the open PR count. Returns
+    // null when the repo has zero open PRs or the token/remote can't be
+    // resolved — the frontend treats that the same as "cache stale, redrain".
+    if (url.pathname === "/api/gh-pr-freshness" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd");
+      if (!cwd) return jsonResponse(req, res, { error: "Missing cwd" }, 400);
+      try {
+        const token = getGithubToken();
+        if (!token) return jsonResponse(req, res, null);
+        const nwo = getRepoNwo(resolve(cwd));
+        if (!nwo) return jsonResponse(req, res, null);
+        const topResp = await githubFetch(`/repos/${nwo}/pulls?state=open&per_page=1&page=1&sort=updated&direction=desc`, token);
+        if (!topResp.ok) return jsonResponse(req, res, null);
+        const topData = await topResp.json();
+        if (!Array.isArray(topData) || topData.length === 0) return jsonResponse(req, res, null);
+        // Count via the same Link-header trick as /api/gh-pr-count.
+        const countResp = await githubFetch(`/repos/${nwo}/pulls?state=open&per_page=1`, token);
+        let openCount = topData.length;
+        if (countResp.ok) {
+          const linkHeader = countResp.headers.get("link") || "";
+          const m = linkHeader.match(/<[^>]*[?&]page=(\d+)[^>]*>;\s*rel="last"/);
+          if (m) openCount = parseInt(m[1], 10);
+        }
+        return jsonResponse(req, res, {
+          number: topData[0].number,
+          updated_at: topData[0].updated_at,
+          open_count: openCount,
+        });
+      } catch (err) {
+        console.error("[gh-pr-freshness]", err.message);
+        return jsonResponse(req, res, null);
+      }
+    }
+
     // POST /api/gh-create-pr
     // Body: { cwd, title, body, base?, head?, draft?, reviewers? }
     // Creates the PR via REST, then requests reviewers in a second call
@@ -6336,6 +6373,7 @@ server.listen(PORT, "127.0.0.1", () => {
   console.log(`    GET  /api/git-log?cwd=<path>&count=<n>&all=<bool>`);
   console.log(`    GET  /api/gh-list-prs?cwd=<path>&state=<state>`);
   console.log(`    GET  /api/gh-pr-count?cwd=<path>&state=<state>`);
+  console.log(`    GET  /api/gh-pr-freshness?cwd=<path>`);
   console.log(`    POST /api/gh-create-pr  { cwd, title, body, base?, draft?, reviewers? }`);
   console.log(`    GET  /api/gh-reviewer-candidates?cwd=<path>`);
   console.log(`    GET  /api/gh-pr-detail?cwd=<path>&number=<n>`);

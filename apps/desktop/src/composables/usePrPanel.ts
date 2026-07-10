@@ -27,10 +27,13 @@ import {
   type PrFileHistory,
   ghForkInfo,
   type ForkInfo,
+  ghPrFreshnessSignal,
+  type PrFreshnessSignal,
 } from "../utils/backend";
 import { forgeFromRemoteInfo, githubProvider } from "./forge/useForge";
 import { ForgeNotImplementedError } from "./forge/types";
 import { usePrCache, listKey, detailKey } from "./usePrCache";
+import { whenIdle } from "../utils/idleSchedule";
 import { getPersistedDiffMode, type DiffMode } from "../utils/diffMode";
 import { requireOnline } from "../utils/networkGuard";
 import { t } from "./useI18n";
@@ -172,6 +175,12 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   const forgeLabel = computed(() => FORGE_LABELS[forge.value.name] ?? "Web");
 
   const prs = ref<PullRequest[]>([]);
+  // ─── Dock badge count (cheap, independent of the badge-path list) ──────
+  // Reflects the true total open-PR count via a single cheap forge call,
+  // not `prs.value.length` (which only reflects however much of the
+  // branch-badge list has been loaded — see usePrCache's SWR list and
+  // the background prefetch in this same file). `null` = not yet fetched.
+  const dockPrCount = ref<number | null>(null);
   const loading = ref(false);
   // SWR: true while a background revalidation runs over cached data already on
   // screen. Distinct from `loading` (cold load, full-page spinner).
@@ -313,6 +322,50 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   const PAGE_SIZE = 10;
   const hasMore = ref(true);
   const loadingMore = ref(false);
+
+  // ─── Background prefetch (badge path) ───────────────────────────────────
+  // Bigger than PAGE_SIZE so the naive offset+limit Rust pagination
+  // (gh_list_prs_inner / rest_list_prs re-fetch offset+limit items from
+  // scratch on every call) issues only a handful of background round trips
+  // instead of one per 10 PRs.
+  const BG_PAGE = 100;
+  // Ceiling on the automatic background drain — matches the dev-server REST
+  // route's existing 3x100-page cap. Beyond this the badge path just has
+  // partial coverage for that repo; ensurePrsLoaded() keeps retrying on
+  // future calls rather than falsely treating an incomplete list as done.
+  const PREFETCH_CEILING = 300;
+  let _prPrefetchToken = 0;
+
+  // ─── In-memory list cache (badge path) ──────────────────────────────────
+  // Mirrors useGitRepo.ts's LOG_CACHE/prefetchAllPages pattern (PR #113).
+  // Declared inside usePrPanel() — a singleton instantiated once in App.vue,
+  // same as LOG_CACHE — so its lifetime matches the app session, and each
+  // fresh usePrPanel() call (e.g. in a test) starts with an empty cache.
+  interface PrListCacheEntry {
+    prs: PullRequest[];
+    hasMore: boolean;
+    topSignal: PrFreshnessSignal | null;
+  }
+  const PR_LIST_CACHE = new Map<string, PrListCacheEntry>();
+  // Throttles the freshness re-probe on repeated ensurePrsLoaded() calls
+  // (branch popover reopened, graph mode re-entered) so rapid toggling
+  // doesn't fire a GitHub request every time.
+  const FRESHNESS_RECHECK_MS = 30_000;
+  let _lastFreshnessCheck = 0;
+
+  /**
+   * GitHub-only cheap freshness probe (see `ghPrFreshnessSignal`'s doc
+   * comment). Other forges have no equivalent yet — `null` here just means
+   * "no signal available", which `ensurePrsLoaded()` treats as a cache miss.
+   */
+  async function fetchPrFreshnessSignal(repo: string): Promise<PrFreshnessSignal | null> {
+    if (forge.value.name !== "github") return null;
+    try {
+      return await ghPrFreshnessSignal(repo);
+    } catch {
+      return null;
+    }
+  }
 
   // ─── Computed ──────────────────────────────────────────
   const commentsForFile = computed<PrReviewComment[]>(() =>
@@ -567,6 +620,30 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   }
 
   /**
+   * Refresh the dock's PR badge count via a single cheap forge call
+   * (`getPRCount`, backed by a `/search/issues?...&per_page=1`-style REST
+   * call or GraphQL `totalCount` query per forge — no per-PR enrichment).
+   * Independent of `loadPrs`/`ensurePrsLoaded`: this can run even if the
+   * user has never opened the branch popover, graph mode, or the PR view.
+   */
+  async function refreshDockPrCount() {
+    if (!cwd.value) return;
+    const repo = cwd.value;
+    try {
+      const count = await forge.value.getPRCount(repo, "open");
+      // Discard a stale result if the repo changed while this call was in
+      // flight — otherwise a slow response for a repo the user already
+      // navigated away from can silently overwrite a newer, correct count
+      // with nothing to correct it afterward (no polling on this value).
+      if (cwd.value === repo) dockPrCount.value = count;
+    } catch {
+      // Defense-in-depth: ghPrCount's own implementations already swallow
+      // failures to 0, but don't assume every forge does.
+      if (cwd.value === repo) dockPrCount.value = 0;
+    }
+  }
+
+  /**
    * Append the next page of PRs to the existing list.
    * Idempotent guards:
    *   - `loadingMore` prevents double-fire from rapid IntersectionObserver
@@ -580,7 +657,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
    * Phase 2 (v2.9) will replace this with a cursor-based GraphQL query,
    * making the dedup + slice cost go away.
    */
-  async function loadMorePrs() {
+  async function loadMorePrs(pageSize: number = PAGE_SIZE) {
     // Guard on `refreshing` too: during SWR revalidation the cached list is on
     // screen with `loading` false, so without this the pagination sentinel
     // fires a second `listPRs` (e.g. offset 4) concurrently with the in-flight
@@ -592,7 +669,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     }
     loadingMore.value = true;
     try {
-      const page = await forge.value.listPRs(cwd.value, { state: filterState.value, limit: PAGE_SIZE, offset: prs.value.length });
+      const page = await forge.value.listPRs(cwd.value, { state: filterState.value, limit: pageSize, offset: prs.value.length });
       if (page.length === 0) {
         hasMore.value = false;
       } else {
@@ -602,7 +679,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
         for (const pr of page) {
           if (!seen.has(pr.number)) prs.value.push(pr);
         }
-        hasMore.value = page.length >= PAGE_SIZE;
+        hasMore.value = page.length >= pageSize;
       }
     } catch (e) {
       // Don't surface scroll-load errors as a banner — silent stop is
@@ -611,6 +688,37 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       hasMore.value = false;
     } finally {
       loadingMore.value = false;
+    }
+  }
+
+  /**
+   * Lazily drain the rest of the open-PR list in the background after the
+   * first page paints, so branch badges cover more than PAGE_SIZE PRs.
+   * Idle-scheduled (never blocks input) and cancellable if the repo changes
+   * or the filter leaves "open" mid-drain.
+   */
+  async function prefetchOpenPrs() {
+    if (filterState.value !== "open") return;
+    const token = ++_prPrefetchToken;
+    const repo = cwd.value;
+    if (!repo) return;
+    const live = () =>
+      cwd.value === repo && token === _prPrefetchToken && filterState.value === "open";
+    while (live() && hasMore.value && prs.value.length < PREFETCH_CEILING) {
+      await whenIdle();
+      if (!live()) return;
+      await loadMorePrs(BG_PAGE);
+    }
+    // Only cache a fully-drained list (reached the true end before the
+    // ceiling), and only for GitHub (the only forge with a freshness
+    // signal) — a ceiling-capped or signal-less list stays uncached so
+    // ensurePrsLoaded() keeps retrying instead of trusting an incomplete or
+    // unvalidatable snapshot forever.
+    if (live() && !hasMore.value && forge.value.name === "github") {
+      const topSignal = await fetchPrFreshnessSignal(repo);
+      if (live()) {
+        PR_LIST_CACHE.set(repo, { prs: prs.value.slice(), hasMore: false, topSignal });
+      }
     }
   }
 
@@ -902,9 +1010,13 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   watch(cwd, (newCwd) => {
     selectedPr.value = null;
     prs.value = [];
-    remote.value = null;
+    remote.value = cache.getRemote(newCwd)?.remote ?? null;
     _prsEnsured = false;
+    _lastFreshnessCheck = 0;
+    ++_prPrefetchToken; // invalidate any in-flight background prefetch for the old repo
+    dockPrCount.value = null;
     resetDetail();
+    if (newCwd) void refreshDockPrCount();
     if (newCwd && panelMounted.value) init();
   });
 
@@ -934,6 +1046,8 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       newPrTitle.value = ""; newPrBody.value = ""; newPrDraft.value = false;
       newPrReviewers.value = [];
       cache.invalidateLists(cwd.value);
+      PR_LIST_CACHE.delete(cwd.value);
+      _prsEnsured = false;
       await loadPrs();
     } catch (err: any) { error.value = err.message; }
     finally { isCreating.value = false; }
@@ -991,6 +1105,8 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       success.value = t("pr.success.prMerged", mergingPr.value.number);
       cache.invalidateDetail(cwd.value, mergingPr.value.number);
       cache.invalidateLists(cwd.value);
+      PR_LIST_CACHE.delete(cwd.value);
+      _prsEnsured = false;
       mergingPr.value = null;
       await loadPrs();
     } catch (err: any) { error.value = err.message; }
@@ -1334,7 +1450,40 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
    * SWR-cached list fetch. No-op once done for the current repo (until switch).
    */
   async function ensurePrsLoaded() {
-    if (!cwd.value || _prsEnsured || prs.value.length > 0) return;
+    if (!cwd.value || filterState.value !== "open") return;
+    const repo = cwd.value;
+    const cached = PR_LIST_CACHE.get(repo);
+    if (cached) {
+      const now = Date.now();
+      if (now - _lastFreshnessCheck < FRESHNESS_RECHECK_MS) return; // recently confirmed fresh
+      _lastFreshnessCheck = now;
+      const signal = await fetchPrFreshnessSignal(repo);
+      if (cwd.value !== repo) return; // repo changed while the probe was in flight
+      const unchanged =
+        (signal === null && cached.topSignal === null) ||
+        (signal !== null &&
+          cached.topSignal !== null &&
+          signal.number === cached.topSignal.number &&
+          signal.updatedAt === cached.topSignal.updatedAt &&
+          signal.openCount === cached.topSignal.openCount);
+      if (unchanged) {
+        prs.value = cached.prs;
+        hasMore.value = false;
+        return;
+      }
+      // Stale (or the probe errored) — drop the cache and fall through to a
+      // full redrain below, UNCONDITIONALLY: this branch must not be gated
+      // by the `_prsEnsured`/`prs.value.length` check below, or a repo whose
+      // cache just went stale would keep showing the stale list forever
+      // (`_prsEnsured` stays true and `prs.value` stays non-empty even
+      // though nothing is being redrained).
+      PR_LIST_CACHE.delete(repo);
+    } else if (_prsEnsured && prs.value.length > 0) {
+      // No cache yet, but this session already loaded (or is loading/
+      // draining) this repo's open PRs — matches the original one-shot
+      // guard for the "mid-drain, not yet cached" window.
+      return;
+    }
     _prsEnsured = true;
     const cachedRemote = cache.getRemote(cwd.value);
     if (cachedRemote) {
@@ -1344,6 +1493,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       await loadRemote();
     }
     await loadPrs();
+    void prefetchOpenPrs();
   }
 
   return {
@@ -1378,6 +1528,8 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     regenerateSummary: intel.regenerateSummary,
     // Pagination (v2.8.5)
     hasMore, loadingMore,
+    // Dock badge count
+    dockPrCount, refreshDockPrCount,
     // Computed
     forge, forgeLabel,
     commentsForFile, commentCount, mergeReadiness, mergeBlocked, mergeBlockedReason, selectedDiff, displayedPrs,

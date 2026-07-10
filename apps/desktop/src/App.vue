@@ -3417,7 +3417,7 @@ onUnmounted(() => {
 
       <!-- Floating bottom-center navigation dock -->
       <AppDock v-if="hasRepo" :view-mode="viewMode" :changes-count="repoFiles.length"
-        :pr-count="prPanel.prs.value.length" :terminal-active="showTerminal" :files-active="showFiles"
+        :pr-count="prPanel.dockPrCount.value ?? undefined" :terminal-active="showTerminal" :files-active="showFiles"
         @change-view="onViewModeChange" @toggle-terminal="toggleTerminal()" @toggle-files="toggleFiles()" />
     </div>
 
