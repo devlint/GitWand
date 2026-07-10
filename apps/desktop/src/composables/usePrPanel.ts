@@ -529,12 +529,18 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
    */
   async function refreshDockPrCount() {
     if (!cwd.value) return;
+    const repo = cwd.value;
     try {
-      dockPrCount.value = await forge.value.getPRCount(cwd.value, "open");
+      const count = await forge.value.getPRCount(repo, "open");
+      // Discard a stale result if the repo changed while this call was in
+      // flight — otherwise a slow response for a repo the user already
+      // navigated away from can silently overwrite a newer, correct count
+      // with nothing to correct it afterward (no polling on this value).
+      if (cwd.value === repo) dockPrCount.value = count;
     } catch {
       // Defense-in-depth: ghPrCount's own implementations already swallow
       // failures to 0, but don't assume every forge does.
-      dockPrCount.value = 0;
+      if (cwd.value === repo) dockPrCount.value = 0;
     }
   }
 

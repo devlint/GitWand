@@ -207,4 +207,26 @@ describe("usePrPanel — background prefetch drain", () => {
     expect(getPRCount).toHaveBeenCalledWith("/repo-b", "open");
     expect(panel.dockPrCount.value).toBe(9);
   });
+
+  it("discards a stale getPRCount result if the repo changed before it resolved", async () => {
+    let resolveA!: (n: number) => void;
+    const pendingA = new Promise<number>((resolve) => { resolveA = resolve; });
+    getPRCount.mockImplementationOnce(() => pendingA); // repo-a's call: stays pending
+    const cwd = ref("/repo-a");
+    const panel = usePrPanel(cwd);
+    void panel.refreshDockPrCount(); // fire, in flight, not yet resolved
+
+    getPRCount.mockResolvedValueOnce(9); // repo-b's call: resolves immediately
+    cwd.value = "/repo-b";
+    await nextTick(); // flush the cwd watcher, which resets dockPrCount and fires its own refresh for repo-b
+    await nextTick(); // let repo-b's refresh resolve and apply
+    expect(panel.dockPrCount.value).toBe(9);
+
+    resolveA(3); // repo-a's stale call finally resolves, after repo-b already applied
+    await nextTick();
+    await nextTick();
+
+    // Must NOT have been overwritten by the late, stale repo-a result.
+    expect(panel.dockPrCount.value).toBe(9);
+  });
 });
