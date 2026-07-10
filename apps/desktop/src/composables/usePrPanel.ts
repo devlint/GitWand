@@ -86,6 +86,12 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   const forgeLabel = computed(() => FORGE_LABELS[forge.value.name] ?? "Web");
 
   const prs = ref<PullRequest[]>([]);
+  // ─── Dock badge count (cheap, independent of the badge-path list) ──────
+  // Reflects the true total open-PR count via a single cheap forge call,
+  // not `prs.value.length` (which only reflects however much of the
+  // branch-badge list has been loaded — see usePrCache's SWR list and
+  // the background prefetch in this same file). `null` = not yet fetched.
+  const dockPrCount = ref<number | null>(null);
   const loading = ref(false);
   // SWR: true while a background revalidation runs over cached data already on
   // screen. Distinct from `loading` (cold load, full-page spinner).
@@ -515,6 +521,24 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   }
 
   /**
+   * Refresh the dock's PR badge count via a single cheap forge call
+   * (`getPRCount`, backed by a `/search/issues?...&per_page=1`-style REST
+   * call or GraphQL `totalCount` query per forge — no per-PR enrichment).
+   * Independent of `loadPrs`/`ensurePrsLoaded`: this can run even if the
+   * user has never opened the branch popover, graph mode, or the PR view.
+   */
+  async function refreshDockPrCount() {
+    if (!cwd.value) return;
+    try {
+      dockPrCount.value = await forge.value.getPRCount(cwd.value, "open");
+    } catch {
+      // Defense-in-depth: ghPrCount's own implementations already swallow
+      // failures to 0, but don't assume every forge does.
+      dockPrCount.value = 0;
+    }
+  }
+
+  /**
    * Append the next page of PRs to the existing list.
    * Idempotent guards:
    *   - `loadingMore` prevents double-fire from rapid IntersectionObserver
@@ -790,7 +814,9 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     _prsEnsured = false;
     _lastFreshnessCheck = 0;
     ++_prPrefetchToken; // invalidate any in-flight background prefetch for the old repo
+    dockPrCount.value = null;
     resetDetail();
+    if (newCwd) void refreshDockPrCount();
     if (newCwd && panelMounted.value) init();
   });
 
@@ -1212,6 +1238,8 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     hotspots, hotspotsLoading, totalRepoFiles, fileHistory, fileHistoryLoading,
     // Pagination (v2.8.5)
     hasMore, loadingMore,
+    // Dock badge count
+    dockPrCount, refreshDockPrCount,
     // Computed
     forge, forgeLabel,
     commentsForFile, commentCount, mergeReadiness, mergeBlocked, mergeBlockedReason, selectedDiff, displayedPrs,

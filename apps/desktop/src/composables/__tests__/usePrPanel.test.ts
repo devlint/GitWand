@@ -6,10 +6,11 @@ import { ref, nextTick } from "vue";
 // a plain top-level `const x = vi.fn()` in this file would have run, throwing
 // "Cannot access 'x' before initialization". `vi.hoisted()` guarantees the
 // initializers run first regardless of import graph shape.
-const { listPRs, createPR, mergePR, ghPrFreshnessSignal } = vi.hoisted(() => ({
+const { listPRs, createPR, mergePR, getPRCount, ghPrFreshnessSignal } = vi.hoisted(() => ({
   listPRs: vi.fn(),
   createPR: vi.fn(),
   mergePR: vi.fn(),
+  getPRCount: vi.fn(),
   ghPrFreshnessSignal: vi.fn(),
 }));
 
@@ -21,8 +22,8 @@ vi.mock("../../utils/backend", () => ({
 }));
 
 vi.mock("../forge/useForge", () => ({
-  forgeFromRemoteInfo: vi.fn(() => ({ name: "github", listPRs, createPR, mergePR })),
-  githubProvider: { name: "github", listPRs, createPR, mergePR },
+  forgeFromRemoteInfo: vi.fn(() => ({ name: "github", listPRs, createPR, mergePR, getPRCount })),
+  githubProvider: { name: "github", listPRs, createPR, mergePR, getPRCount },
 }));
 
 import { usePrPanel } from "../usePrPanel";
@@ -55,6 +56,7 @@ describe("usePrPanel — background prefetch drain", () => {
     listPRs.mockReset();
     createPR.mockReset();
     mergePR.mockReset();
+    getPRCount.mockReset();
     ghPrFreshnessSignal.mockReset();
     vi.useFakeTimers();
   });
@@ -172,5 +174,37 @@ describe("usePrPanel — background prefetch drain", () => {
     // A stale pre-createPr cache entry must NOT be trusted — it must redrain.
     expect(listPRs.mock.calls.length).toBeGreaterThan(callsAfterCreate);
     expect(panel.prs.value).toHaveLength(16);
+  });
+
+  it("refreshDockPrCount() populates dockPrCount from the forge's getPRCount", async () => {
+    getPRCount.mockResolvedValue(7);
+    const panel = usePrPanel(ref("/repo"));
+    expect(panel.dockPrCount.value).toBeNull();
+    await panel.refreshDockPrCount();
+    expect(panel.dockPrCount.value).toBe(7);
+    expect(getPRCount).toHaveBeenCalledWith("/repo", "open");
+  });
+
+  it("refreshDockPrCount() resolves to 0 instead of throwing when getPRCount rejects", async () => {
+    getPRCount.mockRejectedValue(new Error("network down"));
+    const panel = usePrPanel(ref("/repo"));
+    await panel.refreshDockPrCount();
+    expect(panel.dockPrCount.value).toBe(0);
+  });
+
+  it("switching repos resets dockPrCount and triggers a fresh refresh for the new repo", async () => {
+    getPRCount.mockResolvedValue(3);
+    const cwd = ref("/repo-a");
+    const panel = usePrPanel(cwd);
+    await panel.refreshDockPrCount();
+    expect(panel.dockPrCount.value).toBe(3);
+
+    getPRCount.mockResolvedValue(9);
+    cwd.value = "/repo-b";
+    await nextTick(); // flush the cwd watcher
+    await nextTick(); // flush the watcher's own fire-and-forget refreshDockPrCount() call
+
+    expect(getPRCount).toHaveBeenCalledWith("/repo-b", "open");
+    expect(panel.dockPrCount.value).toBe(9);
   });
 });
