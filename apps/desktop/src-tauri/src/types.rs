@@ -989,3 +989,44 @@ pub struct ReconstructedConflict {
     /// Whether the current working-tree bytes equal stage 2 (ours) or stage 3 (theirs).
     pub wt_matches_side: bool,
 }
+
+// ─── Secrets scanner (v3.5.0) ───────────────────────────────────────
+//
+// Mirrors `packages/core/src/secrets/types.ts` — kept in sync by the parity
+// test (apps/desktop/tests/parity/scan-secrets.test.mjs). Any shape change
+// here must be reflected there.
+
+/// One user-supplied detector from `.gitwandrc` `secrets.patterns[]`.
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SecretPatternInput {
+    pub id: String,
+    /// Common Rust+JS regex subset — no lookaround / backreferences.
+    pub regex: String,
+    /// "high" | "medium" | "low"
+    pub severity: String,
+    pub description: String,
+}
+
+/// Effective scan config: app setting + `.gitwandrc` `secrets` block, resolved by the caller.
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SecretsScanConfig {
+    pub enabled: bool,
+    pub extra_patterns: Vec<SecretPatternInput>,
+    pub ignore: Vec<String>,
+    pub entropy_threshold: f64,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SecretFinding {
+    pub file: String,
+    pub line: u32,
+    /// Built-in id, user pattern id, or "high_entropy".
+    pub pattern_id: String,
+    /// "high" | "medium" | "low"
+    pub severity: String,
+    /// Middle-masked excerpt — NEVER the raw secret value.
+    pub redacted_excerpt: String,
+}

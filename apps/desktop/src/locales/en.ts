@@ -1211,6 +1211,10 @@ const en = {
     commitSignatureHint: "A small signature added automatically \u2014 removable anytime",
     blameAlgorithm: "Blame diff algorithm",
     blameAlgorithmHint: "Controls how git blame detects moved or copied lines. histogram gives the best results for most repos.",
+    secretsScannerEnabled: "Scan staged changes for secrets",
+    secretsScannerEnabledHint: "Local, zero-network detection of cloud/token/private-key/JWT secrets in staged added lines. Never blocks a commit — only warns.",
+    secretsEntropyThreshold: "High-entropy detection threshold",
+    secretsEntropyThresholdHint: "Shannon entropy (bits/char) above which a long random-looking token is flagged. 0 disables this check.",
     tierStats: {
       title: "Resolution statistics (local)",
       hint: "Cumulative breakdown of the conflicts encountered on this machine. Stored locally only — never leaves your device.",
@@ -1494,6 +1498,19 @@ const en = {
     descPostCheckout: "Runs after checkout / switch",
     descPostMerge: "Runs after a merge",
     descOther: "Custom Git hook",
+    // v3.5.0 \u2014 Secrets pre-commit hook installer
+    secretsTitle: "Secrets pre-commit hook",
+    secretsDescription: "Blocks a commit from the terminal when it stages a likely secret. Runs \u201cgitwand scan\u201d via npx \u2014 always bypassable with git commit --no-verify.",
+    secretsInstalled: "Installed",
+    secretsNotInstalled: "Not installed",
+    secretsInstall: "Install",
+    secretsRemove: "Remove",
+    secretsInstallConfirmTitle: "Install the secrets pre-commit hook?",
+    secretsInstallConfirmMessage: "This writes .git/hooks/pre-commit and shells out to \u201cnpx @gitwand/cli scan\u201d on every commit made from the terminal. It can always be bypassed with \u201cgit commit --no-verify\u201d. If a pre-commit hook already exists, it will be overwritten.",
+    secretsRemoveConfirmTitle: "Remove the secrets pre-commit hook?",
+    secretsRemoveConfirmMessage: "This deletes .git/hooks/pre-commit. Terminal commits will no longer be scanned for secrets.",
+    errorSecretsInstall: "Failed to install the secrets hook: {0}",
+    errorSecretsRemove: "Failed to remove the secrets hook: {0}",
   },
 
   // \u2500\u2500\u2500 Workspaces \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
@@ -2357,6 +2374,23 @@ const en = {
     toolbarBlame: "Blame",
     fullscreen: "Fullscreen",
     exitFullscreen: "Exit fullscreen",
+  },
+  // ─── v3.5.0 Secrets scanner ─────────────────────────────
+  secrets: {
+    badgeTooltip: "{0} potential secret(s) found in staged changes",
+    findingsTitle: "Potential secrets detected",
+    findingsSubtitle: "{0} finding(s) in your staged changes",
+    findingsEmpty: "No findings",
+    severityHigh: "High",
+    severityMedium: "Medium",
+    severityLow: "Low",
+    dismiss: "Dismiss",
+    ignorePattern: "Ignore file",
+    commitAnyway: "Commit anyway",
+    confirmTitle: "Potential secrets in this commit",
+    confirmMessage: "{0} potential secret(s) were found in your staged changes. Commit anyway?",
+    ignoreConfirmTitle: "Stop scanning this file for secrets?",
+    ignoreConfirmMessage: "This will stop flagging ANY secret pattern in {0} — permanently, written to .gitwandrc. Continue?",
   },
 } as const;
 

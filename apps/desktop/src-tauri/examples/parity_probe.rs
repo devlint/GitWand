@@ -35,7 +35,7 @@
 use gitwand_desktop_lib::{
     git_branches_parity, git_commit_submodule_changes_parity, git_log_parity,
     git_stash_list_parity, git_status_libgit2_parity, git_status_parity,
-    git_submodule_branches_parity,
+    git_submodule_branches_parity, scan_secrets_parity,
 };
 use serde_json::{json, Value};
 use std::io::{self, Read};
@@ -45,7 +45,7 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
         eprintln!("usage: parity-probe <command>");
-        eprintln!("commands: git-status, git-status-fast, git-log, git-branches, git-stash-list, git-submodule-branches, git-commit-submodule-changes");
+        eprintln!("commands: git-status, git-status-fast, git-log, git-branches, git-stash-list, git-submodule-branches, git-commit-submodule-changes, scan-secrets");
         return ExitCode::from(2);
     }
 
@@ -144,6 +144,14 @@ fn main() -> ExitCode {
                 Err(code) => return code,
             };
             to_json(git_commit_submodule_changes_parity(cwd))
+        }
+        "scan-secrets" => {
+            let cwd = match must_str("cwd") {
+                Ok(v) => v,
+                Err(code) => return code,
+            };
+            let config = input.get("config").cloned().unwrap_or_else(|| json!({}));
+            to_json(scan_secrets_parity(cwd, config))
         }
         other => {
             eprintln!("unknown command: {}", other);
