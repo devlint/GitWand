@@ -97,7 +97,25 @@ export function normalize(command, value) {
       // `date` peut varier subtilement en format ISO selon les implémentations.
       return blankVolatile(camel, ["date"]);
 
+    case "scan-secrets":
+      // Les deux moteurs (Rust `regex` crate / TS `RegExp`) itèrent fichiers → lignes →
+      // patterns dans le même ordre déclaré, donc l'ordre des findings devrait déjà
+      // coïncider. On trie quand même explicitement par (file, line, patternId) — c'est le
+      // *set* de findings qui fait foi, pas un ordre d'itération accidentel.
+      return sortFindings(camel);
+
     default:
       return camel;
   }
+}
+
+/** Tri stable par (file, line, patternId) — voir le cas "scan-secrets" ci-dessus. */
+function sortFindings(list) {
+  if (!Array.isArray(list)) return list;
+  return [...list].sort((a, b) => {
+    if (a.file !== b.file) return a.file < b.file ? -1 : 1;
+    if (a.line !== b.line) return a.line - b.line;
+    if (a.patternId !== b.patternId) return a.patternId < b.patternId ? -1 : 1;
+    return 0;
+  });
 }

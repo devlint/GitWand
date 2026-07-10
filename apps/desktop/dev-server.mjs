@@ -1463,6 +1463,84 @@ async function handleRequest(req, res) {
       }
     }
 
+    // POST /api/scan-secrets { cwd, config }
+    // v3.5.0 — secrets scanner: extracts the staged diff's added lines with the SAME
+    // header/hunk state machine as the Rust extractor (see
+    // apps/desktop/src-tauri/src/commands/secrets.rs `extract_staged_added_lines`), then
+    // scans them with the pure `@gitwand/core` engine (the same one mirrored in Rust). This
+    // is the real dev-server route required by the project rule ("every #[tauri::command] gets
+    // a real dev-server route, not a stub") and is locked in sync with Rust by the parity test.
+    if (url.pathname === "/api/scan-secrets" && req.method === "POST") {
+      try {
+        const { cwd, config } = await readBody(req);
+        if (!cwd || typeof cwd !== "string") {
+          return jsonResponse(req, res, { error: "cwd must be a non-empty string" }, 400);
+        }
+        if (!config || typeof config !== "object") {
+          return jsonResponse(req, res, { error: "config must be an object" }, 400);
+        }
+
+        if (!config.enabled) {
+          return jsonResponse(req, res, []);
+        }
+
+        const resolvedCwd = resolve(cwd);
+        let stdout;
+        try {
+          stdout = await gitSpawn(["diff", "--cached", "--unified=0", "--no-color", "--", "."], resolvedCwd);
+        } catch {
+          stdout = "";
+        }
+
+        const files = [];
+        let currentPath = null;
+        let currentLines = [];
+        let newLineNo = 0;
+
+        const flush = () => {
+          if (currentPath !== null && currentLines.length > 0) {
+            files.push({ path: currentPath, addedLines: currentLines });
+          }
+          currentPath = null;
+          currentLines = [];
+        };
+
+        for (const line of stdout.split("\n")) {
+          if (line.startsWith("diff --git ")) {
+            flush();
+          } else if (line.startsWith("+++ ")) {
+            const rest = line.slice("+++ ".length);
+            currentPath = rest === "/dev/null" ? null : rest.replace(/^b\//, "");
+          } else if (line.startsWith("@@")) {
+            const match = line.match(/@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+            newLineNo = match ? parseInt(match[1], 10) : 0;
+          } else if (line.startsWith("+") && !line.startsWith("+++")) {
+            // A content added line starts with a single `+`; the `+++` file header is handled
+            // above by parsing state, never by this check alone (AGENTS.md diff-parsing gotcha).
+            if (currentPath !== null) {
+              currentLines.push({ line: newLineNo, text: line.slice(1) });
+            }
+            newLineNo++;
+          }
+          // `-`-prefixed removed lines are irrelevant for the added-lines-only scan surface.
+        }
+        flush();
+
+        const scanConfig = {
+          enabled: !!config.enabled,
+          extraPatterns: Array.isArray(config.extraPatterns) ? config.extraPatterns : [],
+          ignore: Array.isArray(config.ignore) ? config.ignore : [],
+          entropyThreshold: typeof config.entropyThreshold === "number" ? config.entropyThreshold : 0,
+        };
+
+        const { scanSecrets } = await import("@gitwand/core");
+        const findings = scanSecrets(files, scanConfig);
+        return jsonResponse(req, res, findings);
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
+      }
+    }
+
     // GET /api/git-get-user?cwd=<path>
     if (url.pathname === "/api/git-get-user" && req.method === "GET") {
       const cwd = url.searchParams.get("cwd");
@@ -6254,6 +6332,7 @@ server.listen(PORT, "127.0.0.1", () => {
   console.log(`    GET  /api/list-dir?path=<path>`);
   console.log(`    GET  /api/git-status?cwd=<path>`);
   console.log(`    GET  /api/git-diff?cwd=<path>&path=<file>&staged=<bool>`);
+  console.log(`    POST /api/scan-secrets { cwd, config }`);
   console.log(`    GET  /api/git-log?cwd=<path>&count=<n>&all=<bool>`);
   console.log(`    GET  /api/gh-list-prs?cwd=<path>&state=<state>`);
   console.log(`    GET  /api/gh-pr-count?cwd=<path>&state=<state>`);

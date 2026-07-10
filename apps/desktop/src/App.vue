@@ -69,6 +69,7 @@ const BranchNameField = defineAsyncComponent(() => import("./components/BranchNa
 const EditCommitOverlay = defineAsyncComponent(() => import("./components/EditCommitOverlay.vue"));
 const SplitCommitModal = defineAsyncComponent(() => import("./components/SplitCommitModal.vue"));
 const BranchDirtySwitchModal = defineAsyncComponent(() => import("./components/BranchDirtySwitchModal.vue"));
+const SecretsFindingsModal = defineAsyncComponent(() => import("./components/SecretsFindingsModal.vue"));
 import { useStashMessage } from "./composables/useStashMessage";
 import { useAIProvider } from "./composables/useAIProvider";
 import { usePrPanel, PR_PANEL_KEY } from "./composables/usePrPanel";
@@ -92,6 +93,7 @@ import { useConnectivity } from "./composables/useConnectivity";
 import { useScheduler } from "./composables/useScheduler";
 import { useRepoPoller } from "./composables/useRepoPoller";
 import { useLaunchpadPoller } from "./composables/useLaunchpadPoller";
+import { useSecretsScanner } from "./composables/useSecretsScanner";
 import { useLaunchpadPrs } from "./composables/useLaunchpadPrs";
 import { diffLaunchpad, isBotAuthor, type LaunchpadEvent } from "./composables/useLaunchpadNotifications";
 import { osNotify } from "./composables/useOsNotification";
@@ -116,6 +118,13 @@ import { useCommitActions } from "./composables/useCommitActions";
 const { t } = useI18n();
 const { settings, refreshSettings } = useSettings();
 const { saveMemory } = useResolutionMemory();
+
+// v3.5.0 — Secrets scanner (local, non-blocking; see useSecretsScanner.ts).
+const secretsScanner = useSecretsScanner();
+const showSecretsModal = ref(false);
+/** Trailers of the last commit attempt — reused by the findings modal's "Commit anyway" so it
+ * doesn't need its own copy of RepoSidebar's Signed-off-by trailer logic. */
+let lastAttemptedCommitTrailers = "";
 // `useNetworkStatus` covers `navigator.onLine` — kept around because
 // `useScheduler` already consumes it and we don't want to retire that path
 // in this commit. `useConnectivity` (F1) adds a real probe-based signal
@@ -988,7 +997,55 @@ const repoSidebarProps = computed(() => ({
   commitDiffs: commitDiffs.value,
   visibleFileIdx: historyVisibleFileIdx.value,
   gitUser: currentGitUser.value,
+  secretFindingsCount: secretsScanner.activeFindings.value.length,
 }));
+
+/**
+ * Intercepts the commit action when the secrets scanner has active findings: shows a
+ * non-blocking confirm (never a hard stop — the user can always proceed) before delegating to
+ * `doCommit`. Wired to both RepoSidebar's commit button and the findings modal's "Commit anyway".
+ */
+async function handleCommitRequest(trailers: string) {
+  lastAttemptedCommitTrailers = trailers;
+  if (secretsScanner.activeFindings.value.length > 0) {
+    const confirmed = await askConfirm({
+      danger: true,
+      title: t("secrets.confirmTitle"),
+      message: t("secrets.confirmMessage", secretsScanner.activeFindings.value.length),
+      confirmLabel: t("secrets.commitAnyway"),
+    });
+    if (!confirmed) return;
+  }
+  await doCommit(trailers);
+}
+
+/**
+ * Ignoring a pattern writes every file it currently appears in to `.gitwandrc`
+ * `secrets.ignore[]` (see useSecretsScanner.ts) — that suppresses ALL patterns in those files,
+ * permanently, not just the one the user clicked. Always confirm with the true scope spelled
+ * out before writing; never a native `confirm()`.
+ */
+async function onSecretsIgnore(patternId: string) {
+  if (!repoFolderPath.value) return;
+  const files = secretsScanner.filesForPattern(patternId);
+  if (files.length === 0) return;
+
+  const confirmed = await askConfirm({
+    danger: true,
+    title: t("secrets.ignoreConfirmTitle"),
+    message: t("secrets.ignoreConfirmMessage", files.join(", ")),
+    confirmLabel: t("secrets.ignorePattern"),
+  });
+  if (!confirmed) return;
+
+  await secretsScanner.ignorePattern(repoFolderPath.value, patternId);
+  if (repoFolderPath.value) secretsScanner.scan(repoFolderPath.value, settings.value);
+}
+
+function onSecretsCommitAnyway() {
+  showSecretsModal.value = false;
+  void doCommit(lastAttemptedCommitTrailers);
+}
 
 const repoSidebarListeners = {
   select: (path: string, staged: boolean) => onRepoFileSelect(path, staged),
@@ -999,7 +1056,7 @@ const repoSidebarListeners = {
   stageAll: () => stageAll(),
   stagePaths: (paths: string[]) => stageFiles(paths),
   unstageAll: () => unstageAll(),
-  commit: (trailers: string) => doCommit(trailers),
+  commit: (trailers: string) => handleCommitRequest(trailers),
   "update:commitSummary": (val: string) => { commitSummary.value = val; },
   "update:commitDescription": (val: string) => { commitDescription.value = val; },
   discard: (path: string, section: string) => discardFiles([path], section === "untracked"),
@@ -1012,7 +1069,22 @@ const repoSidebarListeners = {
   scrollToFile: (idx: number) => onHistoryScrollToFile(idx),
   deleteBranch: (name: string, hasLocal: boolean, hasRemote: boolean, remoteName?: string) =>
     handleDeleteBranchRequest(name, hasLocal, hasRemote, remoteName),
+  openSecrets: () => { showSecretsModal.value = true; },
 };
+
+// Trigger a (debounced) secrets scan whenever the staged set changes, or when a repo is
+// opened/switched. Never a setInterval — see apps/desktop/CLAUDE.md P6.4.
+watch(
+  () => [repoFolderPath.value, repoStats.value.staged] as const,
+  ([cwd]) => {
+    if (cwd) {
+      secretsScanner.scan(cwd, settings.value);
+    } else {
+      secretsScanner.findings.value = [];
+    }
+  },
+  { immediate: true },
+);
 
 function onDiscardSection(sectionKey: string, paths: string[]) {
   discardSectionConfirm.value = { sectionKey, paths };
@@ -3513,6 +3585,16 @@ onUnmounted(() => {
       @carry="confirmDirtyCarry"
       @commit-first="confirmDirtyCommitFirst"
       @close="pendingDirtySwitch = null"
+    />
+
+    <!-- Secrets findings modal (v3.5.0) — opened from the RepoSidebar commit-area badge -->
+    <SecretsFindingsModal
+      v-if="showSecretsModal"
+      :findings="secretsScanner.activeFindings.value"
+      @dismiss="secretsScanner.dismiss($event)"
+      @ignore="onSecretsIgnore($event)"
+      @commit-anyway="onSecretsCommitAnyway"
+      @close="showSecretsModal = false"
     />
 
     <!-- Stash-and-switch modal (asks for a stash label before switching branches) -->

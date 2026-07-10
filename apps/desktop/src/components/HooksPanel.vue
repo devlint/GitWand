@@ -1,27 +1,35 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from "vue";
+import { ref, onMounted, computed, inject } from "vue";
 import {
   gitHookList,
   gitHookToggle,
   gitHookCreate,
   gitHookDelete,
+  readFile,
   type HookEntry,
 } from "../utils/backend";
 import { useI18n } from "../composables/useI18n";
 import type { LocaleKey } from "../locales/en";
 import BaseModal from "./BaseModal.vue";
+import { buildSecretsHookScript, isSecretsHookScript } from "../utils/secretsHook";
 
 const props = defineProps<{
   cwd: string;
 }>();
 
 const { t } = useI18n();
+const askConfirm = inject<(options: { title: string; message: string; confirmLabel?: string; cancelLabel?: string; danger?: boolean }) => Promise<boolean>>("askConfirm");
 
 // ─── State ───────────────────────────────────────────────
 
 const hooks = ref<HookEntry[]>([]);
 const loading = ref(false);
 const error = ref<string | null>(null);
+
+// v3.5.0 — Secrets pre-commit hook installer. The hook script on disk (detected via its marker
+// comment) IS the install state — no separate persisted flag.
+const secretsHookInstalled = ref(false);
+const secretsHookBusy = ref(false);
 
 // New hook form
 const showForm = ref(false);
@@ -126,7 +134,65 @@ async function deleteHook() {
   }
 }
 
-onMounted(loadHooks);
+async function checkSecretsHook() {
+  try {
+    const content = await readFile(props.cwd, ".git/hooks/pre-commit");
+    secretsHookInstalled.value = isSecretsHookScript(content);
+  } catch {
+    // No pre-commit hook on disk (or unreadable) — treat as "not installed".
+    secretsHookInstalled.value = false;
+  }
+}
+
+async function installSecretsHook() {
+  if (askConfirm) {
+    const confirmed = await askConfirm({
+      title: t("hooks.secretsInstallConfirmTitle"),
+      message: t("hooks.secretsInstallConfirmMessage"),
+      confirmLabel: t("hooks.secretsInstall"),
+    });
+    if (!confirmed) return;
+  }
+  secretsHookBusy.value = true;
+  error.value = null;
+  try {
+    await gitHookCreate(props.cwd, "pre-commit", buildSecretsHookScript());
+    await loadHooks();
+    await checkSecretsHook();
+  } catch (err: any) {
+    error.value = t("hooks.errorSecretsInstall").replace("{0}", String(err?.message ?? err));
+  } finally {
+    secretsHookBusy.value = false;
+  }
+}
+
+async function removeSecretsHook() {
+  if (askConfirm) {
+    const confirmed = await askConfirm({
+      title: t("hooks.secretsRemoveConfirmTitle"),
+      message: t("hooks.secretsRemoveConfirmMessage"),
+      confirmLabel: t("hooks.secretsRemove"),
+      danger: true,
+    });
+    if (!confirmed) return;
+  }
+  secretsHookBusy.value = true;
+  error.value = null;
+  try {
+    await gitHookDelete(props.cwd, "pre-commit");
+    await loadHooks();
+    await checkSecretsHook();
+  } catch (err: any) {
+    error.value = t("hooks.errorSecretsRemove").replace("{0}", String(err?.message ?? err));
+  } finally {
+    secretsHookBusy.value = false;
+  }
+}
+
+onMounted(() => {
+  loadHooks();
+  checkSecretsHook();
+});
 </script>
 
 <template>
@@ -146,6 +212,35 @@ onMounted(loadHooks);
 
     <!-- Error -->
     <div v-if="error" class="hp-error">{{ error }}</div>
+
+    <!-- Secrets pre-commit hook (v3.5.0) — dedicated section, distinct from the generic hook creator -->
+    <div class="hp-secrets">
+      <div class="hp-secrets-info">
+        <span class="hp-secrets-title">{{ t("hooks.secretsTitle") }}</span>
+        <span class="hp-secrets-desc">{{ t("hooks.secretsDescription") }}</span>
+      </div>
+      <div class="hp-secrets-actions">
+        <span class="hp-badge" :class="secretsHookInstalled ? 'hp-badge--on' : 'hp-badge--off'">
+          {{ secretsHookInstalled ? t("hooks.secretsInstalled") : t("hooks.secretsNotInstalled") }}
+        </span>
+        <button
+          v-if="!secretsHookInstalled"
+          class="bm-btn bm-btn--primary hp-btn-sm"
+          :disabled="secretsHookBusy"
+          @click="installSecretsHook"
+        >
+          {{ t("hooks.secretsInstall") }}
+        </button>
+        <button
+          v-else
+          class="bm-btn bm-btn--ghost hp-btn-sm hp-secrets-remove"
+          :disabled="secretsHookBusy"
+          @click="removeSecretsHook"
+        >
+          {{ t("hooks.secretsRemove") }}
+        </button>
+      </div>
+    </div>
 
     <!-- Loading -->
     <div v-if="loading" class="hp-loading">{{ t("common.loading") }}</div>
@@ -286,6 +381,48 @@ onMounted(loadHooks);
   border-radius: 6px;
   font-size: 12px;
   margin-bottom: 12px;
+}
+
+/* Secrets pre-commit hook — dedicated section (v3.5.0) */
+.hp-secrets {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--color-warning-soft, rgba(217, 119, 6, 0.1));
+  border: 1px solid var(--color-warning, #d97706);
+  margin-bottom: 12px;
+}
+
+.hp-secrets-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.hp-secrets-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.hp-secrets-desc {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.hp-secrets-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.hp-secrets-remove {
+  color: var(--color-danger, #e53e3e);
 }
 
 .hp-loading,

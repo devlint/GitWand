@@ -1695,6 +1695,7 @@ dependencies = [
  "parking_lot",
  "portable-pty",
  "rayon",
+ "regex",
  "serde",
  "serde_json",
  "tauri",

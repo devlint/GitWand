@@ -102,6 +102,7 @@ const fr: Locale = {
     tabStripRecentSection: "Repos récents",
     tabStripPinnedSection: "Repos favoris",
     tabStripNoRecent: "Aucun dépôt récent",
+    tabStripReorderAnnounce: "{0} déplacé en position {1} sur {2}",
   },
 
   // ─── Sync split button (header primary action) ─────────
@@ -1233,6 +1234,10 @@ const fr: Locale = {
     commitSignatureHint: "Un petit clin d\u2019\u0153il ajout\u00e9 automatiquement \u2014 supprimable \u00e0 tout moment",
     blameAlgorithm: "Algorithme de diff pour le blame",
     blameAlgorithmHint: "Contrôle comment git blame détecte les lignes déplacées. histogram donne les meilleurs résultats.",
+    secretsScannerEnabled: "Analyser les changements indexés à la recherche de secrets",
+    secretsScannerEnabledHint: "Détection locale, sans réseau, de secrets cloud/tokens/clés privées/JWT dans les lignes ajoutées indexées. Ne bloque jamais un commit — avertit seulement.",
+    secretsEntropyThreshold: "Seuil de détection haute entropie",
+    secretsEntropyThresholdHint: "Entropie de Shannon (bits/caractère) au-delà de laquelle un token long à l'aspect aléatoire est signalé. 0 désactive cette vérification.",
     tierStats: {
       title: "Statistiques de résolution (local)",
       hint: "Répartition cumulée des conflits rencontrés sur cette machine. Stocké localement uniquement — ne quitte jamais votre appareil.",
@@ -1510,6 +1515,18 @@ const fr: Locale = {
     descPostCheckout: "Exécuté après un checkout / switch",
     descPostMerge: "Exécuté après un merge",
     descOther: "Hook Git personnalisé",
+    secretsTitle: "Hook pre-commit de secrets",
+    secretsDescription: "Bloque un commit depuis le terminal quand il indexe un secret probable. Exécute « gitwand scan » via npx — toujours contournable avec git commit --no-verify.",
+    secretsInstalled: "Installé",
+    secretsNotInstalled: "Non installé",
+    secretsInstall: "Installer",
+    secretsRemove: "Retirer",
+    secretsInstallConfirmTitle: "Installer le hook pre-commit de secrets ?",
+    secretsInstallConfirmMessage: "Ceci écrit .git/hooks/pre-commit et exécute « npx @gitwand/cli scan » à chaque commit fait depuis le terminal. Toujours contournable avec « git commit --no-verify ». Si un hook pre-commit existe déjà, il sera écrasé.",
+    secretsRemoveConfirmTitle: "Retirer le hook pre-commit de secrets ?",
+    secretsRemoveConfirmMessage: "Ceci supprime .git/hooks/pre-commit. Les commits faits depuis le terminal ne seront plus analysés pour des secrets.",
+    errorSecretsInstall: "Échec de l'installation du hook de secrets : {0}",
+    errorSecretsRemove: "Échec de la suppression du hook de secrets : {0}",
   },
 
   workspace: {
@@ -2376,6 +2393,22 @@ const fr: Locale = {
     toolbarBlame: "Blâme",
     fullscreen: "Plein écran",
     exitFullscreen: "Quitter le plein écran",
+  },
+  secrets: {
+    badgeTooltip: "{0} secret(s) potentiel(s) détecté(s) dans les changements indexés",
+    findingsTitle: "Secrets potentiels détectés",
+    findingsSubtitle: "{0} résultat(s) dans vos changements indexés",
+    findingsEmpty: "Aucun résultat",
+    severityHigh: "Élevée",
+    severityMedium: "Moyenne",
+    severityLow: "Faible",
+    dismiss: "Ignorer",
+    ignorePattern: "Ignorer le fichier",
+    commitAnyway: "Commit quand même",
+    confirmTitle: "Secrets potentiels dans ce commit",
+    confirmMessage: "{0} secret(s) potentiel(s) ont été trouvés dans vos changements indexés. Commit quand même ?",
+    ignoreConfirmTitle: "Arrêter d'analyser ce fichier pour des secrets ?",
+    ignoreConfirmMessage: "Ceci arrêtera de signaler N'IMPORTE QUEL motif de secret dans {0} — de façon permanente, écrit dans .gitwandrc. Continuer ?",
   },
 };
 

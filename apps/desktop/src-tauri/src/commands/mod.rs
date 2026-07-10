@@ -12,5 +12,6 @@ pub(crate) mod network;
 pub(crate) mod ops;
 pub(crate) mod read;
 pub(crate) mod scratch;
+pub(crate) mod secrets;
 pub(crate) mod terminal;
 pub(crate) mod workspace;

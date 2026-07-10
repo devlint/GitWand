@@ -440,6 +440,20 @@ function onKeyDown(e: KeyboardEvent) {
           </svg>
           <span>{{ editLocked ? t("files.toolbarEdit") : t("files.toolbarLock") }}</span>
         </button>
+        <button
+          class="fe__action-btn"
+          :disabled="!activeTab || activeTab.binary || !explorer.isDirty(activeTab)"
+          :title="t('files.toolbarSave')"
+          @click="onToolbarSave"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+            <polyline points="17 21 17 13 7 13 7 21"/>
+            <polyline points="7 3 7 8 15 8"/>
+          </svg>
+          <span>{{ t("files.toolbarSave") }}</span>
+        </button>
+        <span class="fe__header-divider" aria-hidden="true" />
         <button class="fe__action-btn" :disabled="editLocked" :title="t('files.toolbarUndo')" @click="onUndo">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M3 7v6h6"/>
@@ -460,19 +474,6 @@ function onKeyDown(e: KeyboardEvent) {
             <line x1="16" y1="12" x2="22.5" y2="12"/>
           </svg>
           <span>{{ t("files.toolbarBlame") }}</span>
-        </button>
-        <button
-          class="fe__action-btn"
-          :disabled="!activeTab || activeTab.binary || !explorer.isDirty(activeTab)"
-          :title="t('files.toolbarSave')"
-          @click="onToolbarSave"
-        >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
-            <polyline points="17 21 17 13 7 13 7 21"/>
-            <polyline points="7 3 7 8 15 8"/>
-          </svg>
-          <span>{{ t("files.toolbarSave") }}</span>
         </button>
       </div>
       <div class="fe__header-spacer" />

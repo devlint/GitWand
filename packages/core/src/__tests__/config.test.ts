@@ -209,6 +209,93 @@ describe("Phase 7.4 — parseGitwandrc", () => {
     expect(parseGitwandrc(JSON.stringify({ generatedFiles: [] }))!.generatedFiles).toBeUndefined();
     expect(parseGitwandrc(JSON.stringify({ generatedFiles: [42, null] }))!.generatedFiles).toBeUndefined();
   });
+
+  // ─── v3.5.0 — secrets scanner config ────────────────────────
+
+  it("v3.5.0: parse un bloc secrets valide (round-trip, severity défautée à medium)", () => {
+    const json = JSON.stringify({
+      secrets: {
+        enabled: true,
+        patterns: [
+          { id: "custom_token", regex: "tok_[0-9]{10}", severity: "high", description: "Custom token" },
+          { id: "no_severity", regex: "foo_[0-9]+" },
+        ],
+        ignore: ["**/*.test.ts", "/tok_0000000000/"],
+        entropyThreshold: 4.5,
+      },
+    });
+    const cfg = parseGitwandrc(json);
+    expect(cfg).not.toBeNull();
+    expect(cfg!.secrets?.enabled).toBe(true);
+    expect(cfg!.secrets?.patterns).toEqual([
+      { id: "custom_token", regex: "tok_[0-9]{10}", severity: "high", description: "Custom token" },
+      { id: "no_severity", regex: "foo_[0-9]+", severity: "medium", description: "" },
+    ]);
+    expect(cfg!.secrets?.ignore).toEqual(["**/*.test.ts", "/tok_0000000000/"]);
+    expect(cfg!.secrets?.entropyThreshold).toBe(4.5);
+  });
+
+  it("v3.5.0: un pattern avec regex non-string est retiré", () => {
+    const json = JSON.stringify({
+      secrets: {
+        patterns: [
+          { id: "bad", regex: 42 },
+          { id: "good", regex: "abc" },
+        ],
+      },
+    });
+    const cfg = parseGitwandrc(json);
+    expect(cfg!.secrets?.patterns).toEqual([{ id: "good", regex: "abc", severity: "medium", description: "" }]);
+  });
+
+  it("v3.5.0: un pattern avec id non-string ou vide est retiré", () => {
+    const json = JSON.stringify({
+      secrets: {
+        patterns: [
+          { id: "", regex: "abc" },
+          { regex: "def" },
+          { id: "ok", regex: "ghi" },
+        ],
+      },
+    });
+    const cfg = parseGitwandrc(json);
+    expect(cfg!.secrets?.patterns).toEqual([{ id: "ok", regex: "ghi", severity: "medium", description: "" }]);
+  });
+
+  it("v3.5.0: ignore filtre les entrées non-string", () => {
+    const json = JSON.stringify({
+      secrets: { ignore: ["valid.glob", 42, null, "", "another.glob"] },
+    });
+    const cfg = parseGitwandrc(json);
+    expect(cfg!.secrets?.ignore).toEqual(["valid.glob", "another.glob"]);
+  });
+
+  it("v3.5.0: entropyThreshold en dehors de [0, 8] est retiré", () => {
+    expect(
+      parseGitwandrc(JSON.stringify({ secrets: { entropyThreshold: -1 } }))!.secrets?.entropyThreshold,
+    ).toBeUndefined();
+    expect(
+      parseGitwandrc(JSON.stringify({ secrets: { entropyThreshold: 9 } }))!.secrets?.entropyThreshold,
+    ).toBeUndefined();
+    expect(
+      parseGitwandrc(JSON.stringify({ secrets: { entropyThreshold: 0 } }))!.secrets?.entropyThreshold,
+    ).toBe(0);
+    expect(
+      parseGitwandrc(JSON.stringify({ secrets: { entropyThreshold: 8 } }))!.secrets?.entropyThreshold,
+    ).toBe(8);
+  });
+
+  it("v3.5.0: absence du bloc secrets → result.secrets undefined", () => {
+    const cfg = parseGitwandrc(JSON.stringify({ policy: "strict" }));
+    expect(cfg!.secrets).toBeUndefined();
+  });
+
+  it("v3.5.0: bloc secrets vide ou sans sous-champ valide → undefined", () => {
+    expect(parseGitwandrc(JSON.stringify({ secrets: {} }))!.secrets).toBeUndefined();
+    expect(
+      parseGitwandrc(JSON.stringify({ secrets: { patterns: [], ignore: [] } }))!.secrets,
+    ).toBeUndefined();
+  });
 });
 
 // ─── Fixtures pour les tests d'intégration ───────────────

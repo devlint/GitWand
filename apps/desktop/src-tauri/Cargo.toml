@@ -88,6 +88,12 @@ tauri-plugin-aptabase = "1.0.0"
 # Anonymous install ID generation (v4 random UUID, stored on first launch).
 uuid = { version = "1", features = ["v4"] }
 
+# Secrets scanner (v3.5.0) — linear-time regex engine (no catastrophic
+# backtracking), a security plus since it also compiles user-supplied
+# patterns from `.gitwandrc`. Mirrored by a pure-RegExp TS engine in
+# @gitwand/core; see commands/secrets.rs.
+regex = "1"
+
 # ─── Release profile (P2.4) ──────────────────────────────────
 #
 # Profile tuné pour la build de production (vs defaults Cargo conservateurs).
