@@ -29,10 +29,12 @@ import {
   type ForkInfo,
 } from "../utils/backend";
 import { forgeFromRemoteInfo, githubProvider } from "./forge/useForge";
+import { ForgeNotImplementedError } from "./forge/types";
 import { usePrCache, listKey, detailKey } from "./usePrCache";
 import { getPersistedDiffMode, type DiffMode } from "../utils/diffMode";
 import { requireOnline } from "../utils/networkGuard";
 import { t } from "./useI18n";
+import { useReviewIntelligence } from "./useReviewIntelligence";
 
 export const PR_PANEL_KEY = Symbol("prPanel");
 
@@ -63,6 +65,93 @@ export interface PrPanelOptions {
    * checkout happens on disk but the UI keeps showing the previous branch.
    */
   onRepoMutated?: () => void | Promise<void>;
+}
+
+// ─── Parse unified diff (lazy per-file, A1) ────────────────────────────────
+// `getPRDiff` still fetches the whole PR as one string, but we stop parsing
+// it all up front: `indexDiffFiles` only splits the raw text by `diff --git`
+// headers (cheap), and `parseFileDiff` — the actual hunk/line parse — runs
+// only for the file currently selected (see `ensureFileParsed` below), cached
+// by path so re-selecting a file never re-parses it. Both are pure (no
+// composable state) so they're testable in isolation.
+
+/** Split a raw unified diff into lightweight per-file slices (no hunk parse). */
+export function indexDiffFiles(rawDiff: string): { path: string; raw: string }[] {
+  const slices: { path: string; raw: string }[] = [];
+  if (!rawDiff.trim()) return slices;
+  const lines = rawDiff.split("\n");
+  let currentPath: string | null = null;
+  let currentLines: string[] = [];
+  const flush = () => {
+    if (currentPath !== null) slices.push({ path: currentPath, raw: currentLines.join("\n") });
+  };
+  for (const line of lines) {
+    if (line.startsWith("diff --git ")) {
+      flush();
+      const match = line.match(/diff --git a\/(.+) b\/(.+)/);
+      currentPath = match ? match[2] : "unknown";
+      currentLines = [line];
+      continue;
+    }
+    if (currentPath !== null) currentLines.push(line);
+  }
+  flush();
+  return slices;
+}
+
+/** Parse one file's raw `diff --git …` slice (as produced by `indexDiffFiles`)
+ *  into hunks/lines. Diff-parsing gotcha (AGENTS.md): context lines are
+ *  detected via `line.startsWith(' ')` — a bare empty string is also treated
+ *  as a (whitespace-stripped) context line, never as a phantom add/delete. */
+export function parseFileDiff(rawFileSlice: string): GitDiff {
+  const file: GitDiff = { path: "unknown", hunks: [] };
+  let currentHunk: DiffHunk | null = null;
+  let oldLine = 0, newLine = 0;
+  for (const line of rawFileSlice.split("\n")) {
+    if (line.startsWith("diff --git ")) {
+      const match = line.match(/diff --git a\/(.+) b\/(.+)/);
+      file.path = match ? match[2] : "unknown";
+      currentHunk = null;
+      continue;
+    }
+    if (line.startsWith("index ") || line.startsWith("--- ") || line.startsWith("+++ ") ||
+        line.startsWith("old mode ") || line.startsWith("new mode ") || line.startsWith("new file ") ||
+        line.startsWith("deleted file ") || line.startsWith("similarity index ") ||
+        line.startsWith("rename from ") || line.startsWith("rename to ") || line.startsWith("Binary files ")) continue;
+    const hunkMatch = line.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)/);
+    if (hunkMatch) {
+      currentHunk = {
+        header: line,
+        oldStart: parseInt(hunkMatch[1], 10),
+        oldCount: parseInt(hunkMatch[2] ?? "1", 10),
+        newStart: parseInt(hunkMatch[3], 10),
+        newCount: parseInt(hunkMatch[4] ?? "1", 10),
+        lines: [],
+      };
+      file.hunks.push(currentHunk);
+      oldLine = parseInt(hunkMatch[1], 10);
+      newLine = parseInt(hunkMatch[3], 10);
+      continue;
+    }
+    if (currentHunk) {
+      if (line.startsWith("+")) {
+        currentHunk.lines.push({ type: "add", content: line.substring(1), newLineNo: newLine++ });
+      } else if (line.startsWith("-")) {
+        currentHunk.lines.push({ type: "delete", content: line.substring(1), oldLineNo: oldLine++ });
+      } else if (line.startsWith(" ") || line === "") {
+        currentHunk.lines.push({ type: "context", content: line.startsWith(" ") ? line.substring(1) : line, oldLineNo: oldLine++, newLineNo: newLine++ });
+      }
+    }
+  }
+  return file;
+}
+
+/** Full eager parse — composed from `indexDiffFiles` + `parseFileDiff`.
+ *  Not used on the hot path anymore (see `ensureFileParsed`); kept for
+ *  regression-parity tests and any caller that genuinely wants everything
+ *  parsed up front. */
+export function parseUnifiedDiff(rawDiff: string): GitDiff[] {
+  return indexDiffFiles(rawDiff).map((f) => parseFileDiff(f.raw));
 }
 
 export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
@@ -127,6 +216,10 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   const annotationsLoading = ref(false);
   const annotationsLoaded = ref(false);
   const prDiffFiles = ref<GitDiff[]>([]);
+  /** Lightweight per-file index (no hunks) produced by `indexDiffFiles` on
+   *  `loadDiff` — the raw slice each shell in `prDiffFiles` is lazily parsed
+   *  from (A1). */
+  const diffIndex = ref<{ path: string; raw: string }[]>([]);
   const prComments = ref<PrReviewComment[]>([]);
   const prIssueComments = ref<PrReviewComment[]>([]);
   const prReviews = ref<PrReview[]>([]);
@@ -139,8 +232,48 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   const selectedDiffFile = ref<string | null>(null);
   const diffMode = ref<DiffMode>(getPersistedDiffMode());
 
+  // ─── Viewed-file state (B2) ─────────────────────────────
+  const viewedPaths = ref<Set<string>>(new Set());
+  const hideViewed = ref(false);
+
+  const viewedCount = computed(() => viewedPaths.value.size);
+
+  /** File sidebar list filtered by `hideViewed` (B1 `⇧V`). */
+  const visibleDiffFiles = computed<GitDiff[]>(() =>
+    hideViewed.value ? prDiffFiles.value.filter((f) => !viewedPaths.value.has(f.path)) : prDiffFiles.value,
+  );
+
+  /** `V` — toggle the current file's viewed state, persisted by head SHA. */
+  function toggleViewed(path: string) {
+    if (!path || !selectedPr.value) return;
+    const headSha = prDetail.value?.headSha ?? "";
+    const key = detailKey(cwd.value, selectedPr.value.number);
+    cache.toggleViewed(key, headSha, path);
+    seedViewedFromCache();
+  }
+
+  /** Re-read the viewed set for the selected PR at its current head SHA —
+   *  a stale-headSha cache entry reads as empty (re-push invalidation). */
+  function seedViewedFromCache() {
+    if (!selectedPr.value) {
+      viewedPaths.value = new Set();
+      return;
+    }
+    const headSha = prDetail.value?.headSha ?? "";
+    const stored = cache.getViewed(detailKey(cwd.value, selectedPr.value.number));
+    viewedPaths.value = new Set(stored && stored.headSha === headSha ? stored.paths : []);
+  }
+
+  // Seed/reset viewed state whenever the selected PR's head SHA is known or
+  // changes (cache hit in `selectPr`, fresh fetch in `fetchDetailBundle`, or
+  // a re-push while the detail is open).
+  watch(() => prDetail.value?.headSha, seedViewedFromCache);
+
   // ─── Draft review ──────────────────────────────────────
   const draftReviewComments = ref<PendingReviewComment[]>([]);
+  /** Named badge value (B3) — same as `.length`, but a stable public name
+   *  for the persistent "N in review" chip visible across tabs. */
+  const draftCount = computed(() => draftReviewComments.value.length);
   const showReviewModal = ref(false);
   const submittingReview = ref(false);
 
@@ -315,53 +448,19 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     );
   });
 
-  // ─── Parse unified diff ─────────────────────────────────
-  function parseUnifiedDiff(rawDiff: string): GitDiff[] {
-    const files: GitDiff[] = [];
-    if (!rawDiff.trim()) return files;
-    const lines = rawDiff.split("\n");
-    let currentFile: GitDiff | null = null;
-    let currentHunk: DiffHunk | null = null;
-    let oldLine = 0, newLine = 0;
-    for (const line of lines) {
-      if (line.startsWith("diff --git ")) {
-        if (currentFile) files.push(currentFile);
-        const match = line.match(/diff --git a\/(.+) b\/(.+)/);
-        currentFile = { path: match ? match[2] : "unknown", hunks: [] };
-        currentHunk = null;
-        continue;
-      }
-      if (line.startsWith("index ") || line.startsWith("--- ") || line.startsWith("+++ ") ||
-          line.startsWith("old mode ") || line.startsWith("new mode ") || line.startsWith("new file ") ||
-          line.startsWith("deleted file ") || line.startsWith("similarity index ") ||
-          line.startsWith("rename from ") || line.startsWith("rename to ") || line.startsWith("Binary files ")) continue;
-      const hunkMatch = line.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)/);
-      if (hunkMatch && currentFile) {
-        currentHunk = {
-          header: line,
-          oldStart: parseInt(hunkMatch[1], 10),
-          oldCount: parseInt(hunkMatch[2] ?? "1", 10),
-          newStart: parseInt(hunkMatch[3], 10),
-          newCount: parseInt(hunkMatch[4] ?? "1", 10),
-          lines: [],
-        };
-        currentFile.hunks.push(currentHunk);
-        oldLine = parseInt(hunkMatch[1], 10);
-        newLine = parseInt(hunkMatch[3], 10);
-        continue;
-      }
-      if (currentHunk) {
-        if (line.startsWith("+")) {
-          currentHunk.lines.push({ type: "add", content: line.substring(1), newLineNo: newLine++ });
-        } else if (line.startsWith("-")) {
-          currentHunk.lines.push({ type: "delete", content: line.substring(1), oldLineNo: oldLine++ });
-        } else if (line.startsWith(" ") || line === "") {
-          currentHunk.lines.push({ type: "context", content: line.startsWith(" ") ? line.substring(1) : line, oldLineNo: oldLine++, newLineNo: newLine++ });
-        }
-      }
-    }
-    if (currentFile) files.push(currentFile);
-    return files;
+  // ─── Parse unified diff (lazy per-file, A1) ──────────────
+  const parsedDiffPaths = new Set<string>();
+
+  /** Parse (and cache) the hunks for `path` if not already done. Shells in
+   *  `prDiffFiles` (empty `hunks`) are replaced in place once parsed. */
+  function ensureFileParsed(path: string) {
+    if (parsedDiffPaths.has(path)) return;
+    const slice = diffIndex.value.find((f) => f.path === path);
+    if (!slice) return;
+    const parsed = parseFileDiff(slice.raw);
+    const idx = prDiffFiles.value.findIndex((f) => f.path === path);
+    if (idx !== -1) prDiffFiles.value.splice(idx, 1, parsed);
+    parsedDiffPaths.add(path);
   }
 
   // ─── Data loading ───────────────────────────────────────
@@ -520,7 +619,12 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     prChecks.value = [];
     prAnnotations.value = [];
     annotationsLoaded.value = false;
+    checksLoaded.value = false;
+    issueCommentsLoaded.value = false;
+    fileCountLoaded.value = false;
     prDiffFiles.value = [];
+    diffIndex.value = [];
+    parsedDiffPaths.clear();
     prComments.value = [];
     prIssueComments.value = [];
     prReviews.value = [];
@@ -530,6 +634,8 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     hotspots.value = [];
     fileHistory.value = {};
     selectedDiffFile.value = null;
+    viewedPaths.value = new Set();
+    intel.reset();
     detailTab.value = "info";
   }
 
@@ -543,42 +649,49 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     const cached = cache.getDetail(detailKey(cwd.value, pr.number));
     if (cached) {
       prDetail.value = cached.detail;
-      prChecks.value = cached.checks;
+      prChecks.value = cached.checks ?? [];
       prComments.value = cached.comments;
-      prIssueComments.value = cached.issueComments;
+      prIssueComments.value = cached.issueComments ?? [];
       prReviews.value = cached.reviews;
+      // A cached checks/issueComments array might just be the [] default
+      // above rather than a real prior fetch — leave the loaded flags false
+      // either way so the tab's lazy loader still fires once to get the
+      // real data (cheap no-op if it turns out to genuinely be empty).
       detailRefreshing.value = true;
     } else {
       detailLoading.value = true;
     }
+    // B3 — restore any draft review comments staged before the detail was
+    // last closed, so switching PRs never silently drops staged feedback.
+    draftReviewComments.value = cache.getDraft(detailKey(cwd.value, pr.number)) ?? [];
     await fetchDetailBundle(pr, { silentError: !!cached });
   }
 
   /**
-   * Fetch (or revalidate) the full detail bundle for `pr` and write it back to
-   * the cache. The caller sets `detailLoading` / `detailRefreshing` before
-   * awaiting; both are cleared here. `silentError` keeps the stale bundle on
-   * screen instead of surfacing an error (used for cache-hit + background
-   * revalidation, where there is already content to show).
+   * Fetch (or revalidate) the hot-path detail bundle for `pr` and write it
+   * back to the cache. The caller sets `detailLoading` / `detailRefreshing`
+   * before awaiting; both are cleared here. `silentError` keeps the stale
+   * bundle on screen instead of surfacing an error (used for cache-hit +
+   * background revalidation, where there is already content to show).
+   *
+   * A3 (v3.6.0): only `getPR` + `listComments` + `listReviews` run here —
+   * `getCIChecks`/`listIssueComments`/`gitFileCount` are deferred to their
+   * tab's lazy loader (`loadChecks`/`loadIssueComments`/`loadRepoFileCount`)
+   * below, cutting the hot-path forge calls from 6 to 3.
    */
   async function fetchDetailBundle(pr: PullRequest, { silentError }: { silentError: boolean }) {
     const key = detailKey(cwd.value, pr.number);
     detailError.value = null;
     try {
-      const [detail, checks, comments, issueComments, reviews, fileCount] = await Promise.all([
+      const [detail, comments, reviews] = await Promise.all([
         forge.value.getPR(cwd.value, pr.number),
-        forge.value.getCIChecks(cwd.value, pr.number).catch(() => [] as CICheck[]),
         forge.value.listComments(cwd.value, pr.number).catch(() => [] as PrReviewComment[]),
-        forge.value.listIssueComments?.(cwd.value, pr.number).catch(() => [] as PrReviewComment[]) ?? Promise.resolve([] as PrReviewComment[]),
         forge.value.listReviews(cwd.value, pr.number).catch(() => [] as PrReview[]),
-        gitFileCount(cwd.value).catch(() => 0),
       ]);
       // Ignore a stale response if the user moved on to another PR meanwhile.
       if (selectedPr.value?.number !== pr.number) return;
       prDetail.value = detail;
-      prChecks.value = checks;
       prComments.value = comments;
-      prIssueComments.value = issueComments;
       prReviews.value = reviews;
 
       // Azure DevOps API doesn't include comment counts in the PR object.
@@ -588,14 +701,64 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
         prDetail.value.comments = 0;
       }
 
-      totalRepoFiles.value = fileCount;
-      cache.setDetail(key, { detail, checks, comments, issueComments, reviews });
+      cache.setDetail(key, { detail, comments, reviews, checks: prChecks.value, issueComments: prIssueComments.value });
     } catch (err: any) {
       // Keep the cached bundle on screen if revalidation failed.
       if (!silentError) detailError.value = err.message;
     } finally {
       detailLoading.value = false;
       detailRefreshing.value = false;
+    }
+  }
+
+  // ─── Lazy detail loaders (A3) — one flight per PR, fired by the tab
+  // that actually needs the data (mirrors `loadAnnotations`'s guard pattern).
+  const checksLoaded = ref(false);
+  const checksLoading = ref(false);
+  const issueCommentsLoaded = ref(false);
+  const issueCommentsLoading = ref(false);
+  const fileCountLoaded = ref(false);
+  const fileCountLoading = ref(false);
+
+  async function loadChecks() {
+    if (!selectedPr.value || checksLoaded.value || checksLoading.value) return;
+    checksLoading.value = true;
+    try {
+      prChecks.value = await forge.value.getCIChecks(cwd.value, selectedPr.value.number);
+      checksLoaded.value = true;
+      persistDetailCache();
+    } catch {
+      checksLoaded.value = true; // non-fatal — checks tab simply stays empty
+    } finally {
+      checksLoading.value = false;
+    }
+  }
+
+  async function loadIssueComments() {
+    if (!selectedPr.value || issueCommentsLoaded.value || issueCommentsLoading.value) return;
+    issueCommentsLoading.value = true;
+    try {
+      prIssueComments.value =
+        (await forge.value.listIssueComments?.(cwd.value, selectedPr.value.number)) ?? [];
+      issueCommentsLoaded.value = true;
+      persistDetailCache();
+    } catch {
+      issueCommentsLoaded.value = true;
+    } finally {
+      issueCommentsLoading.value = false;
+    }
+  }
+
+  async function loadRepoFileCount() {
+    if (fileCountLoaded.value || fileCountLoading.value) return;
+    fileCountLoading.value = true;
+    try {
+      totalRepoFiles.value = await gitFileCount(cwd.value);
+      fileCountLoaded.value = true;
+    } catch {
+      fileCountLoaded.value = true;
+    } finally {
+      fileCountLoading.value = false;
     }
   }
 
@@ -633,14 +796,26 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     detailLoading.value = true;
     try {
       const raw = await forge.value.getPRDiff(cwd.value, selectedPr.value.number);
-      prDiffFiles.value = parseUnifiedDiff(raw);
-      if (prDiffFiles.value.length) selectedDiffFile.value = prDiffFiles.value[0].path;
+      // A1: index only (cheap) — shells render the file sidebar instantly.
+      // Hunks are parsed lazily, per file, by `ensureFileParsed`.
+      diffIndex.value = indexDiffFiles(raw);
+      parsedDiffPaths.clear();
+      prDiffFiles.value = diffIndex.value.map((f) => ({ path: f.path, hunks: [] }));
+      if (prDiffFiles.value.length) {
+        selectedDiffFile.value = prDiffFiles.value[0].path;
+        ensureFileParsed(selectedDiffFile.value);
+      }
     } catch (err: any) {
       detailError.value = err.message;
     } finally {
       detailLoading.value = false;
     }
   }
+
+  // A1: parse a newly-selected file's hunks on demand (once, cached by path).
+  watch(selectedDiffFile, (path) => {
+    if (path) ensureFileParsed(path);
+  });
 
   /**
    * Load check-run annotations (v2.18). Lazy: fired the first time the
@@ -684,16 +859,35 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     return map;
   });
 
+  /**
+   * Unified AI + static Intelligence surface (E2) — pre-review findings
+   * (C1-C4), PR summary (D1), static heuristic flags, and the merged
+   * `LineAnnotation` stream `PrInlineDiff` renders per file. `usePrPanel`
+   * composes this rather than owning the AI/static state itself.
+   */
+  const intel = useReviewIntelligence({
+    cwd, selectedPr, prDetail, detailTab, loadDiff, diffIndex, annotationsByFile,
+  });
+
   watch(detailTab, async (tab) => {
     if (tab === "diff") {
       loadDiff();
       loadAnnotations();
+      loadChecks(); // A3: checks gutter/badges on the Diff tab too, not just Checks
     }
-    if (tab === "checks") loadAnnotations();
+    if (tab === "checks") {
+      loadAnnotations();
+      loadChecks();
+    }
+    if (tab === "info") {
+      loadIssueComments();
+      void intel.loadSummary();
+    }
     if (tab === "intelligence") {
       if (prDiffFiles.value.length === 0) await loadDiff();
       if (!hotspots.value.length) loadHotspots();
       if (!Object.keys(fileHistory.value).length) loadFileHistory();
+      loadRepoFileCount();
     }
   });
 
@@ -821,13 +1015,28 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     } catch (err: any) { error.value = err.message; }
   }
 
+  /** True when the active forge supports editing a review comment (F2) — the
+   *  thread hides the edit affordance rather than calling into a forge that
+   *  throws `ForgeNotImplementedError`. Azure has no edit endpoint wired yet. */
+  const forgeSupportsCommentEdit = computed(() => forge.value.name !== "azure");
+  /** Same contract as `forgeSupportsCommentEdit`, for delete (F2). */
+  const forgeSupportsCommentDelete = computed(() => forge.value.name !== "azure");
+
+  /** Same unsupported-is-silent contract as `handleDismissReview` — a forge
+   *  that throws `ForgeNotImplementedError` (e.g. Azure) is treated as
+   *  unsupported rather than surfaced as an error banner. `forgeSupports*`
+   *  hides the action before this can even be called, so this guard is
+   *  defense-in-depth, not the primary UX. */
   async function handleEditComment(id: number, body: string) {
     try {
       await forge.value.updateComment(cwd.value, id, body);
       const idx = prComments.value.findIndex((c) => c.id === id);
       if (idx !== -1) prComments.value[idx] = { ...prComments.value[idx], body, updated_at: new Date().toISOString() };
       persistDetailCache();
-    } catch (err: any) { error.value = err.message; }
+    } catch (err: any) {
+      if (err instanceof ForgeNotImplementedError) return;
+      error.value = err.message;
+    }
   }
 
   async function handleDeleteComment(id: number) {
@@ -836,12 +1045,23 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       prComments.value = prComments.value.filter((c) => c.id !== id && c.in_reply_to_id !== id);
       if (prDetail.value && prDetail.value.reviewComments > 0) prDetail.value.reviewComments--;
       persistDetailCache();
-    } catch (err: any) { error.value = err.message; }
+    } catch (err: any) {
+      if (err instanceof ForgeNotImplementedError) return;
+      error.value = err.message;
+    }
   }
 
   function handleApplySuggestion(suggestion: string, startLine: number | null, endLine: number | null) {
     navigator.clipboard?.writeText(suggestion).catch(() => {});
     success.value = t("pr.success.suggestionCopied", startLine ?? "?", endLine ?? "?");
+  }
+
+  /** Write the current draft back to the SWR cache (B3) — survives detail
+   *  close/reopen. No-op when no PR is selected (shouldn't happen in
+   *  practice, since only the open detail's compose box can call this). */
+  function persistDraft() {
+    if (!selectedPr.value) return;
+    cache.setDraft(detailKey(cwd.value, selectedPr.value.number), draftReviewComments.value);
   }
 
   function handleAddToReview(params: {
@@ -854,6 +1074,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       ...(params.start_side !== undefined ? { start_side: params.start_side } : {}),
       body: params.body,
     });
+    persistDraft();
     success.value = t("pr.success.commentAddedToReview", draftReviewComments.value.length);
   }
 
@@ -865,9 +1086,13 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     if (!selectedPr.value) return;
     submittingReview.value = true;
     try {
-      await forge.value.submitReview(cwd.value, selectedPr.value.number, opts);
+      await forge.value.submitReview(cwd.value, selectedPr.value.number, {
+        ...opts,
+        viewedFiles: [...viewedPaths.value],
+      });
       showReviewModal.value = false;
       draftReviewComments.value = [];
+      cache.clearDraft(detailKey(cwd.value, selectedPr.value.number));
       const [reviews, comments] = await Promise.all([
         forge.value.listReviews(cwd.value, selectedPr.value.number).catch(() => [] as PrReview[]),
         forge.value.listComments(cwd.value, selectedPr.value.number).catch(() => [] as PrReviewComment[]),
@@ -880,6 +1105,48 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       error.value = err.message;
     } finally {
       submittingReview.value = false;
+    }
+  }
+
+  /** True when the active forge implements `dismissReview` (B4) — the Info
+   *  tab uses this to hide the action rather than show one that throws. */
+  const forgeSupportsDismissReview = computed(() => typeof forge.value.dismissReview === "function");
+  /** True when the active forge implements `requestReviewers` (B4). */
+  const forgeSupportsRequestReviewers = computed(() => typeof forge.value.requestReviewers === "function");
+
+  /** Dismiss a submitted review (B4). Forges that don't support it
+   *  (`ForgeNotImplementedError`, or simply omitting the method) are
+   *  treated as unsupported — the Info tab hides the action via
+   *  `forgeSupportsDismissReview` before this can even be called, so this
+   *  guard is defense-in-depth, not the primary UX. */
+  async function handleDismissReview(reviewId: number, message?: string) {
+    if (!selectedPr.value || !forge.value.dismissReview) return;
+    try {
+      await forge.value.dismissReview(cwd.value, selectedPr.value.number, reviewId, message);
+      prReviews.value = await forge.value.listReviews(cwd.value, selectedPr.value.number).catch(() => prReviews.value);
+      persistDetailCache();
+      success.value = t("pr.reviews.dismissed");
+    } catch (err: any) {
+      if (err instanceof ForgeNotImplementedError) return;
+      error.value = err.message;
+    }
+  }
+
+  /** Request reviewers on the open PR (B4). Same unsupported-is-silent
+   *  contract as `handleDismissReview`. */
+  async function handleRequestReviewers(logins: string[]) {
+    if (!selectedPr.value || !forge.value.requestReviewers || !logins.length) return;
+    try {
+      await forge.value.requestReviewers(cwd.value, selectedPr.value.number, logins);
+      const detail = await forge.value.getPR(cwd.value, selectedPr.value.number).catch(() => null);
+      if (detail) {
+        prDetail.value = detail;
+        persistDetailCache();
+      }
+      success.value = t("pr.reviews.reviewersRequested");
+    } catch (err: any) {
+      if (err instanceof ForgeNotImplementedError) return;
+      error.value = err.message;
     }
   }
 
@@ -1016,6 +1283,9 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       // Catch up immediately if a full interval elapsed while hidden, but don't
       // refetch on every brief alt-tab.
       if (Date.now() - _lastPoll >= REVALIDATE_INTERVAL_MS) pollTick();
+      // C3 — resume the pre-review queue (reuses this listener rather than
+      // adding a second `visibilitychange` handler).
+      intel.resumePreReviewQueue();
     }
   }
 
@@ -1086,12 +1356,26 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     mergingPr, mergeMethod,
     selectedPr, prDetail, prChecks, checksWithConflict, prDiffFiles, prComments, prIssueComments, prReviews,
     detailLoading, detailRefreshing, detailError, detailTab, selectedDiffFile, diffMode,
+    // Viewed-file state (B2)
+    viewedPaths, viewedCount, hideViewed, visibleDiffFiles, toggleViewed,
     // CI annotations (v2.18)
     prAnnotations, annotationsLoading, annotationsLoaded,
     annotationCountByCheck, annotationsByFile, loadAnnotations,
-    draftReviewComments, showReviewModal, submittingReview,
+    draftReviewComments, draftCount, showReviewModal, submittingReview,
     conflictPreview, conflictLoading, conflictError,
     hotspots, hotspotsLoading, totalRepoFiles, fileHistory, fileHistoryLoading,
+    // Unified AI + static Intelligence (E2) — composed, not owned
+    lineAnnotationsByFile: intel.lineAnnotationsByFile,
+    mergedAnnotationsByFile: intel.mergedAnnotationsByFile,
+    staticFlags: intel.staticFlags,
+    preReviewFindings: intel.preReviewFindings,
+    preReviewProgress: intel.preReviewProgress,
+    preReviewRunning: intel.preReviewRunning,
+    dismissFinding: intel.dismissFinding,
+    prSummary: intel.prSummary,
+    prSummaryLoading: intel.prSummaryLoading,
+    loadSummary: intel.loadSummary,
+    regenerateSummary: intel.regenerateSummary,
     // Pagination (v2.8.5)
     hasMore, loadingMore,
     // Computed
@@ -1099,9 +1383,12 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     commentsForFile, commentCount, mergeReadiness, mergeBlocked, mergeBlockedReason, selectedDiff, displayedPrs,
     // Actions
     init, ensurePrsLoaded, loadRemote, loadPrs, loadMorePrs, loadCurrentUser, selectPr, loadDiff,
+    revalidateOpenDetail,
     createPr, checkoutPr, mergePr, convertDraftToReady,
     handleCreateComment, handleReplyComment, handleEditComment,
     handleDeleteComment, handleApplySuggestion, handleAddToReview, handleSubmitReview,
+    handleDismissReview, handleRequestReviewers, forgeSupportsDismissReview, forgeSupportsRequestReviewers,
+    forgeSupportsCommentEdit, forgeSupportsCommentDelete,
     loadConflictPreview, loadHotspots, loadFileHistory,
     // Helpers
     timeAgo, checkIcon, checksIcon, mergeableIcon, renderBody,

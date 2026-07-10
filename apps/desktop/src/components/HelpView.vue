@@ -53,6 +53,18 @@ const shortcuts: { action: LocaleKey; keys: string[] }[] = [
   { action: "help.keyboardShortcuts.redoMerge",   keys: ["⌘⇧Z"] },
   { action: "help.keyboardShortcuts.saveAll",     keys: ["⌘S"] },
   { action: "help.keyboardShortcuts.closeOverlay", keys: ["Esc"] },
+  // PR Review — Diff tab only (B1, v3.6.0)
+  { action: "help.keyboardShortcuts.prNextHunk",   keys: ["J"] },
+  { action: "help.keyboardShortcuts.prPrevHunk",   keys: ["K"] },
+  { action: "help.keyboardShortcuts.prNextFile",   keys: ["⇧J"] },
+  { action: "help.keyboardShortcuts.prPrevFile",   keys: ["⇧K"] },
+  { action: "help.keyboardShortcuts.prToggleViewed", keys: ["V"] },
+  { action: "help.keyboardShortcuts.prHideViewed", keys: ["⇧V"] },
+  { action: "help.keyboardShortcuts.prFilterFiles", keys: ["T"] },
+  { action: "help.keyboardShortcuts.prCommentHunk", keys: ["C"] },
+  { action: "help.keyboardShortcuts.prNextFinding", keys: ["N"] },
+  { action: "help.keyboardShortcuts.prPrevFinding", keys: ["P"] },
+  { action: "help.keyboardShortcuts.prSubmitReview", keys: ["⌘↵"] },
 ];
 </script>
 

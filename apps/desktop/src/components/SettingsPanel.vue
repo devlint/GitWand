@@ -154,6 +154,11 @@ interface Settings {
   aiModelByProvider: Partial<Record<AIProvider, string>>;
   aiOllamaUrl: string;
   aiOllamaModel: string;
+  // Review AI (E3, v3.6.0) — opt-in pre-review pass + PR summary settings.
+  reviewAiPreReview: boolean;
+  reviewAiConfidenceThreshold: number;
+  reviewAiMaxFindings: number;
+  reviewAiSummary: boolean;
   // Today view — last active surface persisted between openings (v2.9 / Phase 2)
   // Only "inbox" and "team" are live surfaces after Phase 2.
   launchpadActiveTab: "inbox" | "wip" | "prs" | "issues" | "team";
@@ -241,6 +246,10 @@ const defaultSettings: Settings = {
   aiModelByProvider: {},
   aiOllamaUrl: "http://localhost:11434",
   aiOllamaModel: "codellama",
+  reviewAiPreReview: false,
+  reviewAiConfidenceThreshold: 60,
+  reviewAiMaxFindings: 15,
+  reviewAiSummary: false,
   blameAlgorithm: "histogram",
   launchpadActiveTab: "inbox",
   launchpadTeamTabEnabled: true,
@@ -2649,6 +2658,58 @@ function deleteReleaseNoteTemplate(id: string) {
                   placeholder="codellama" />
               </div>
             </template>
+
+            <!-- ─── Review AI (E3, v3.6.0) ─────────────────── -->
+            <div class="sp-section-divider sp-section-divider--inner"></div>
+            <div class="sp-group">
+              <div class="sp-group__head">
+                <div class="sp-group__head-text">
+                  <span class="sp-group__label">{{ t('settings.reviewAi.title') }}</span>
+                  <span class="sp-group__sublabel">{{ t('settings.reviewAi.hint') }}</span>
+                </div>
+              </div>
+
+              <div class="sp-row sp-row--checkbox">
+                <label class="sp-checkbox-label" for="setting-review-ai-pre-review">
+                  <input id="setting-review-ai-pre-review" type="checkbox" class="sp-checkbox"
+                    :checked="settings.reviewAiPreReview"
+                    @change="updateSetting('reviewAiPreReview', ($event.target as HTMLInputElement).checked)" />
+                  <span>{{ t('settings.reviewAi.preReview') }}</span>
+                </label>
+                <span class="sp-hint">{{ t('settings.reviewAi.preReviewHint') }}</span>
+              </div>
+
+              <template v-if="settings.reviewAiPreReview">
+                <div class="sp-row">
+                  <label class="sp-label" for="setting-review-ai-threshold">{{ t('settings.reviewAi.threshold') }}</label>
+                  <div class="sp-range-row">
+                    <input id="setting-review-ai-threshold" type="range" class="sp-range" min="0" max="100" step="5"
+                      :value="settings.reviewAiConfidenceThreshold"
+                      @input="updateSetting('reviewAiConfidenceThreshold', Number(($event.target as HTMLInputElement).value))" />
+                    <span class="sp-range-value">{{ settings.reviewAiConfidenceThreshold }}</span>
+                  </div>
+                  <span class="sp-hint">{{ t('settings.reviewAi.thresholdHint') }}</span>
+                </div>
+
+                <div class="sp-row">
+                  <label class="sp-label" for="setting-review-ai-cap">{{ t('settings.reviewAi.cap') }}</label>
+                  <input id="setting-review-ai-cap" type="number" class="sp-input" min="1" max="50" step="1"
+                    :value="settings.reviewAiMaxFindings"
+                    @input="updateSetting('reviewAiMaxFindings', Number(($event.target as HTMLInputElement).value))" />
+                  <span class="sp-hint">{{ t('settings.reviewAi.capHint') }}</span>
+                </div>
+              </template>
+
+              <div class="sp-row sp-row--checkbox">
+                <label class="sp-checkbox-label" for="setting-review-ai-summary">
+                  <input id="setting-review-ai-summary" type="checkbox" class="sp-checkbox"
+                    :checked="settings.reviewAiSummary"
+                    @change="updateSetting('reviewAiSummary', ($event.target as HTMLInputElement).checked)" />
+                  <span>{{ t('settings.reviewAi.summary') }}</span>
+                </label>
+                <span class="sp-hint">{{ t('settings.reviewAi.summaryHint') }}</span>
+              </div>
+            </div>
 
             <!-- ─── Prompt Presets (v2.13) ─────────────────── -->
             <div class="sp-section-divider sp-section-divider--inner"></div>

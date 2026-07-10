@@ -381,6 +381,7 @@ fn bb_pr_to_detail(pr: &serde_json::Value) -> PullRequestDetail {
         // Bitbucket merge permission needs a separate privileges call —
         // unknown ⇒ UI gates on errors only.
         can_merge: None,
+        head_sha: jdeep(pr, "source", "commit", "hash"),
     }
 }
 

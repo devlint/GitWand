@@ -385,6 +385,7 @@ fn json_to_detail(pr: &serde_json::Value) -> PullRequestDetail {
         // Filled in by rest_pr_detail via an explicit repo lookup — the pulls
         // response does not embed `permissions` on the nested base repo.
         can_merge: None,
+        head_sha: jnested(pr, "head", "sha"),
     }
 }
 
@@ -1147,6 +1148,35 @@ pub(crate) fn rest_merge_pr(cwd: &str, number: i64, method: &str, token: &str) -
         let ref_url = format!("{}/repos/{}/git/refs/heads/{}", API_BASE, repo, branch);
         let _ = api_json("DELETE", &ref_url, token, None);
     }
+    Ok(())
+}
+
+/// Dismiss a submitted review (B4, v3.6.0).
+pub(crate) fn rest_dismiss_review(
+    cwd: &str,
+    number: i64,
+    review_id: i64,
+    message: &str,
+    token: &str,
+) -> Result<(), String> {
+    let (repo, _pr) = get_pr_json(cwd, number, token)?;
+    let url = format!("{}/repos/{}/pulls/{}/reviews/{}/dismissals", API_BASE, repo, number, review_id);
+    let payload = serde_json::json!({ "message": message, "event": "DISMISS" });
+    api_json("PUT", &url, token, Some(&payload.to_string()))?;
+    Ok(())
+}
+
+/// Request reviewers on an existing PR (B4, v3.6.0).
+pub(crate) fn rest_request_reviewers(
+    cwd: &str,
+    number: i64,
+    logins: &[String],
+    token: &str,
+) -> Result<(), String> {
+    let (repo, _pr) = get_pr_json(cwd, number, token)?;
+    let url = format!("{}/repos/{}/pulls/{}/requested_reviewers", API_BASE, repo, number);
+    let payload = serde_json::json!({ "reviewers": logins });
+    api_json("POST", &url, token, Some(&payload.to_string()))?;
     Ok(())
 }
 

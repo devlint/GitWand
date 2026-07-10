@@ -447,6 +447,45 @@ export async function ghPrReady(cwd: string, number: number): Promise<void> {
   return tauriInvoke<void>("gh_pr_ready", { cwd, number });
 }
 
+/** Dismiss a submitted review (B4, v3.6.0). */
+export async function ghDismissReview(
+  cwd: string,
+  number: number,
+  reviewId: number,
+  message: string = "",
+): Promise<void> {
+  if (isTauri()) {
+    await tauriInvoke("gh_dismiss_review", { cwd, number, reviewId, message });
+    return;
+  }
+  const resp = await devFetch(`${DEV_SERVER}/api/gh-dismiss-review`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, number, reviewId, message }),
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok || data.error) throw new Error(data.error || `gh dismiss review failed: ${resp.status}`);
+}
+
+/** Request reviewers on an existing PR (B4, v3.6.0). */
+export async function ghRequestReviewers(
+  cwd: string,
+  number: number,
+  logins: string[],
+): Promise<void> {
+  if (isTauri()) {
+    await tauriInvoke("gh_request_reviewers", { cwd, number, logins });
+    return;
+  }
+  const resp = await devFetch(`${DEV_SERVER}/api/gh-request-reviewers`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, number, logins }),
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok || data.error) throw new Error(data.error || `gh request reviewers failed: ${resp.status}`);
+}
+
 // ─── PR Detail, Diff & Checks (Phase 9.1) ──────────────────
 
 export interface PullRequestDetail {
@@ -477,6 +516,12 @@ export interface PullRequestDetail {
    * and gate the merge button on errors only, never on an unknown permission.
    */
   canMerge: boolean | null;
+  /**
+   * The PR's current head commit SHA. Empty string when a forge can't
+   * cheaply provide one — callers must treat `""` as "no head SHA known"
+   * and skip head-keyed invalidation/caching gracefully (v3.6.0).
+   */
+  headSha: string;
 }
 
 export interface CICheck {
@@ -568,6 +613,7 @@ export async function ghPrDetail(cwd: string, number: number): Promise<PullReque
       mergeable: string;
       checks_status: string;
       can_merge: boolean | null;
+      head_sha?: string;
     }>("gh_pr_detail", { cwd, number });
     return {
       number: raw.number,
@@ -592,6 +638,7 @@ export async function ghPrDetail(cwd: string, number: number): Promise<PullReque
       mergeable: raw.mergeable,
       checksStatus: raw.checks_status,
       canMerge: raw.can_merge ?? null,
+      headSha: raw.head_sha ?? "",
     };
   }
   // Browser dev mode
@@ -607,6 +654,7 @@ export async function ghPrDetail(cwd: string, number: number): Promise<PullReque
     changedFiles: raw.changed_files, comments: raw.comments, reviewComments: raw.review_comments,
     labels: raw.labels, reviewers: raw.reviewers, mergeable: raw.mergeable, checksStatus: raw.checks_status,
     canMerge: raw.can_merge ?? null,
+    headSha: raw.head_sha ?? "",
   };
 }
 
@@ -1160,6 +1208,7 @@ export async function azPrDetail(cwd: string, number: number): Promise<PullReque
       mergeable: raw.mergeable,
       checksStatus: raw.checks_status,
       canMerge: raw.can_merge ?? null,
+      headSha: raw.head_sha ?? "",
     };
   }
   throw new Error(AZURE_WEB_ONLY);

@@ -25,6 +25,8 @@ import type {
   PullRequestDetail,
   GitDiff,
 } from "../utils/backend";
+import type { ReviewFinding } from "../composables/usePrPreReview";
+import type { LineAnnotation } from "../composables/prAnnotations";
 import { useI18n } from "../composables/useI18n";
 
 const { t } = useI18n();
@@ -45,13 +47,30 @@ const props = defineProps<{
   /** File review history keyed by path. */
   fileHistory: Record<string, PrFileHistory>;
   fileHistoryLoading: boolean;
+  /** AI pre-review findings (C4, v3.6.0) — confidence-sorted, already
+   *  threshold/cap/dismissal-filtered by `usePrPanel`. */
+  preReviewFindings: ReviewFinding[];
+  preReviewProgress: { done: number; total: number };
+  preReviewRunning: boolean;
+  /** Static heuristic flags (E2, v3.6.0) — computed by
+   *  `useReviewIntelligence`'s `computeStaticFlags`, not locally anymore. */
+  staticFlags: LineAnnotation[];
 }>();
 
 const emit = defineEmits<{
   (e: "load-conflict-preview"): void;
   (e: "load-hotspots"): void;
   (e: "load-file-history"): void;
+  (e: "dismiss-finding", id: string): void;
+  (e: "jump-to-finding", path: string, line: number): void;
 }>();
+
+/** Map a finding's open severity scale onto the existing error/warn/info
+ *  row modifiers (`.pi-ai-row--*`) so it visually matches the static-flags
+ *  list above it. */
+function findingRowSeverity(sev: ReviewFinding["severity"]): "error" | "warn" | "info" {
+  return sev === "risk" ? "error" : sev === "suggestion" ? "warn" : "info";
+}
 
 // ─── Review scope ────────────────────────────────────────
 const scope = computed(() => {
@@ -100,50 +119,13 @@ function hotspotTier(score: number): "high" | "medium" | "low" {
   return "low";
 }
 
-// ─── AI suggestion detection (static analysis) ───────────
-interface AiFlag {
-  file: string;
-  reason: string;
-  severity: "info" | "warn" | "error";
+// ─── AI suggestion detection (static analysis, E2, v3.6.0) ───────────
+// `staticFlags` (prop) is computed by `useReviewIntelligence.computeStaticFlags`
+// — this component only maps its `LineAnnotation` severity scale onto the
+// existing `.pi-ai-row--error/warn/info` visual modifiers.
+function flagRowSeverity(sev: LineAnnotation["severity"]): "error" | "warn" | "info" {
+  return sev === "failure" ? "error" : sev === "warning" ? "warn" : "info";
 }
-
-const aiFlags = computed<AiFlag[]>(() => {
-  const flags: AiFlag[] = [];
-  for (const diff of props.prDiffFiles) {
-    const totalAdded = diff.hunks.reduce((sum, h) => sum + h.lines.filter((l) => l.type === "add").length, 0);
-    const totalDeleted = diff.hunks.reduce((sum, h) => sum + h.lines.filter((l) => l.type === "delete").length, 0);
-
-    if (totalAdded + totalDeleted > 200) {
-      flags.push({ file: diff.path, reason: t("pr.intel.flagBigFile", totalAdded + totalDeleted), severity: "warn" });
-    }
-
-    // Detect potential breaking changes: removed exports, deleted function signatures
-    const deletedLines = diff.hunks.flatMap((h) => h.lines.filter((l) => l.type === "delete").map((l) => l.content));
-    const hasExportRemoval = deletedLines.some((l) => /^\s*(export\s+(default|const|function|class)|module\.exports|def |pub fn |public )/.test(l));
-    if (hasExportRemoval) {
-      flags.push({ file: diff.path, reason: t("pr.intel.flagExportRemoved"), severity: "error" });
-    }
-
-    // Detect config/env file changes
-    if (/\.(env|config|yaml|yml|toml|json|lock)$/.test(diff.path)) {
-      flags.push({ file: diff.path, reason: t("pr.intel.flagConfigChange"), severity: "info" });
-    }
-
-    // Detect migration files
-    if (/migrat|schema\.sql|\.sql$/.test(diff.path.toLowerCase())) {
-      flags.push({ file: diff.path, reason: t("pr.intel.flagDbMigration"), severity: "warn" });
-    }
-
-    // Large single hunk
-    for (const hunk of diff.hunks) {
-      if (hunk.lines.length > 100) {
-        flags.push({ file: diff.path, reason: t("pr.intel.flagBigHunk", hunk.lines.length), severity: "info" });
-        break; // Only once per file
-      }
-    }
-  }
-  return flags;
-});
 
 // Auto-load hotspots and file history when component mounts
 // (conflict preview is on-demand since it requires git fetch)
@@ -451,21 +433,21 @@ watch(() => props.prDiffFiles, (files) => {
         <span class="pi-badge pi-badge--ai">{{ t('pr.intel.staticBadge') }}</span>
       </header>
 
-      <div v-if="aiFlags.length === 0" class="pi-empty">
+      <div v-if="staticFlags.length === 0" class="pi-empty">
         {{ t('pr.intel.noAnomalies') }}
       </div>
 
       <div v-else class="pi-ai-list">
         <div
-          v-for="(flag, i) in aiFlags"
+          v-for="(flag, i) in staticFlags"
           :key="i"
           class="pi-ai-row"
-          :class="`pi-ai-row--${flag.severity}`"
+          :class="`pi-ai-row--${flagRowSeverity(flag.severity)}`"
         >
           <span class="pi-ai-icon" aria-hidden="true">
             <!-- siren for error, triangle-bang for warn, info-circle for info -->
             <svg
-              v-if="flag.severity === 'error'"
+              v-if="flagRowSeverity(flag.severity) === 'error'"
               width="13"
               height="13"
               viewBox="0 0 16 16"
@@ -479,7 +461,7 @@ watch(() => props.prDiffFiles, (files) => {
               <path d="M8 5v4M8 11v.01" />
             </svg>
             <svg
-              v-else-if="flag.severity === 'warn'"
+              v-else-if="flagRowSeverity(flag.severity) === 'warn'"
               width="13"
               height="13"
               viewBox="0 0 16 16"
@@ -508,9 +490,55 @@ watch(() => props.prDiffFiles, (files) => {
             </svg>
           </span>
           <div class="pi-ai-content">
-            <span class="pi-ai-file mono">{{ flag.file.split('/').pop() }}</span>
-            <span class="pi-ai-reason">{{ flag.reason }}</span>
+            <span class="pi-ai-file mono">{{ flag.path.split('/').pop() }}</span>
+            <span class="pi-ai-reason">{{ flag.title }}</span>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── AI Pre-Review Findings (C4, v3.6.0) ──────────────── -->
+    <section class="pi-section">
+      <header class="pi-section-header">
+        <span class="pi-section-icon pi-section-icon--ai" aria-hidden="true">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M6.5 2l1 2.8 2.8 1-2.8 1-1 2.8-1-2.8-2.8-1 2.8-1z" />
+            <path d="M11.5 9l.6 1.6 1.6.6-1.6.6-.6 1.6-.6-1.6-1.6-.6 1.6-.6z" />
+          </svg>
+        </span>
+        <h3 class="pi-section-title">{{ t('pr.preReview.title') }}</h3>
+        <span v-if="preReviewRunning" class="pi-badge pi-badge--ai">
+          {{ t('pr.preReview.progress', preReviewProgress.done, preReviewProgress.total) }}
+        </span>
+      </header>
+
+      <div v-if="preReviewRunning && preReviewFindings.length === 0" class="pi-empty">
+        {{ t('pr.preReview.running') }}
+      </div>
+      <div v-else-if="preReviewFindings.length === 0" class="pi-empty">
+        {{ t('pr.preReview.empty') }}
+      </div>
+
+      <div v-else class="pi-ai-list">
+        <div
+          v-for="f in preReviewFindings"
+          :key="f.id"
+          class="pi-ai-row pi-finding-row"
+          :class="`pi-ai-row--${findingRowSeverity(f.severity)}`"
+        >
+          <button type="button" class="pi-finding-jump" @click="emit('jump-to-finding', f.path, f.line)">
+            <div class="pi-ai-content">
+              <span class="pi-ai-file mono">{{ f.path.split('/').pop() }}:{{ f.line }}</span>
+              <span class="pi-ai-reason">{{ f.title }}</span>
+            </div>
+          </button>
+          <span class="pi-finding-confidence">{{ f.confidence }}%</span>
+          <button
+            type="button"
+            class="pi-finding-dismiss"
+            :title="t('pr.preReview.dismiss')"
+            @click="emit('dismiss-finding', f.id)"
+          >✕</button>
         </div>
       </div>
     </section>
@@ -1040,6 +1068,42 @@ watch(() => props.prDiffFiles, (files) => {
   color: var(--color-text);
   line-height: var(--line-height-snug);
   font-size: var(--font-size-sm);
+}
+
+/* ─── AI pre-review findings (C4, v3.6.0) ─────────────────── */
+.pi-finding-row {
+  align-items: center;
+}
+.pi-finding-jump {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+.pi-finding-confidence {
+  flex-shrink: 0;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+.pi-finding-dismiss {
+  flex-shrink: 0;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  width: 20px;
+  height: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+.pi-finding-dismiss:hover {
+  color: var(--color-danger);
+  border-color: var(--color-danger);
 }
 
 /* ─── File history ──────────────────────────────────────── */

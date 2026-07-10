@@ -30,7 +30,16 @@ const props = defineProps<{
   prNumber?: number;
   /** Forge name — routes reactions to the right backend. */
   forgeName?: string;
+  /** Whether the active forge supports editing a comment (F2) — hides the
+   *  affordance instead of calling into a forge that throws
+   *  `ForgeNotImplementedError` (e.g. Azure). Defaults to true. */
+  canEdit?: boolean;
+  /** Same contract as `canEdit`, for delete (F2). */
+  canDelete?: boolean;
 }>();
+
+const canEdit = computed(() => props.canEdit !== false);
+const canDelete = computed(() => props.canDelete !== false);
 
 const emit = defineEmits<{
   (e: "reply", body: string): void;
@@ -127,14 +136,15 @@ function timeAgo(dateStr: string): string {
         <Avatar class="pct-avatar" :name="comment.author" :url="forgeAvatarUrl(forgeName, comment.author)" />
         <span class="pct-author">{{ comment.author }}</span>
         <span class="pct-time" :title="comment.created_at">{{ timeAgo(comment.created_at) }}</span>
-        <div class="pct-actions" v-if="comment.author === currentUser || !currentUser">
+        <div class="pct-actions" v-if="(canEdit || canDelete) && (comment.author === currentUser || !currentUser)">
           <button
-            v-if="editingId !== comment.id"
+            v-if="canEdit && editingId !== comment.id"
             class="pct-action-btn"
             @click="startEdit(comment)"
             :title="t('pr.comment.edit')"
           >✏️</button>
           <button
+            v-if="canDelete"
             class="pct-action-btn pct-action-btn--del"
             @click="emit('delete', comment.id)"
             :title="t('pr.comment.delete')"

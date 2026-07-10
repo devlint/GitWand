@@ -411,6 +411,8 @@ pub struct GhPrDetailRaw {
     pub author: GhPrAuthor,
     #[serde(rename = "headRefName")]
     pub head_ref_name: String,
+    #[serde(rename = "headRefOid", default)]
+    pub head_ref_oid: String,
     #[serde(rename = "baseRefName")]
     pub base_ref_name: String,
     #[serde(rename = "isDraft")]
@@ -516,6 +518,10 @@ pub struct PullRequestDetail {
     /// disable the merge button on an unknown permission.
     #[serde(default)]
     pub can_merge: Option<bool>,
+    /// The PR/MR's current head commit SHA. Empty when a forge can't
+    /// cheaply provide one (callers must treat "" as "unknown", v3.6.0).
+    #[serde(default)]
+    pub head_sha: String,
 }
 
 // ─── Fork / PR target info ─────────────────────────────────────────
@@ -531,6 +537,16 @@ pub struct ForkInfo {
     pub origin: String,
     /// Parent/upstream as `owner/repo`, or "" when not a fork.
     pub parent: String,
+}
+
+/// GitLab MR diff refs (F1, v3.6.0) — the three SHAs needed to correctly
+/// position an inline discussion comment via the Discussions API.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct MrDiffRefs {
+    pub base_sha: String,
+    pub start_sha: String,
+    pub head_sha: String,
 }
 
 // ─── GitHub OAuth device flow ──────────────────────────────────────

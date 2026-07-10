@@ -58,7 +58,7 @@ export async function glGetMr(cwd: string, iid: number): Promise<PullRequestDeta
     merged_at: string; url: string; additions: number; deletions: number;
     changed_files: number; comments: number; review_comments: number;
     labels: string[]; reviewers: string[]; mergeable: string; checks_status: string;
-    can_merge: boolean | null;
+    can_merge: boolean | null; head_sha?: string;
   }>("gl_get_mr", { cwd, iid });
   return {
     number: raw.number, title: raw.title, body: raw.body, state: raw.state,
@@ -68,8 +68,22 @@ export async function glGetMr(cwd: string, iid: number): Promise<PullRequestDeta
     changedFiles: raw.changed_files, comments: raw.comments,
     reviewComments: raw.review_comments, labels: raw.labels, reviewers: raw.reviewers,
     mergeable: raw.mergeable, checksStatus: raw.checks_status,
-    canMerge: raw.can_merge ?? null,
+    canMerge: raw.can_merge ?? null, headSha: raw.head_sha ?? "",
   } as unknown as PullRequestDetail;
+}
+
+/** GitLab MR diff refs (F1, v3.6.0) — the three SHAs the Discussions API
+ *  needs to correctly anchor an inline comment. */
+export interface MrDiffRefs {
+  baseSha: string;
+  startSha: string;
+  headSha: string;
+}
+
+/** Get a MR's diff refs. Tauri-only, like all GitLab commands. */
+export async function glMrDiffRefs(cwd: string, iid: number): Promise<MrDiffRefs> {
+  if (!isTauri()) throw new Error("glMrDiffRefs requires Tauri");
+  return tauriInvoke<MrDiffRefs>("gl_mr_diff_refs", { cwd, iid });
 }
 
 /** Get the unified diff of a MR. */
@@ -234,6 +248,13 @@ export async function glCurrentUser(cwd: string): Promise<string> {
 export async function glReviewerCandidates(cwd: string): Promise<ReviewerCandidate[]> {
   if (!isTauri()) return [];
   return tauriInvoke<ReviewerCandidate[]>("gl_reviewer_candidates", { cwd });
+}
+
+/** Request reviewers on an existing MR (B4, v3.6.0) — usernames resolved to
+ *  numeric GitLab member ids on the Rust side. */
+export async function glRequestReviewers(cwd: string, iid: number, usernames: string[]): Promise<void> {
+  if (!isTauri()) throw new Error("glRequestReviewers requires Tauri");
+  await tauriInvoke("gl_request_reviewers", { cwd, iid, usernames });
 }
 
 export async function glBranches(cwd: string): Promise<string[]> {

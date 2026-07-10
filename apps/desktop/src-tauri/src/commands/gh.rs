@@ -639,6 +639,56 @@ pub(crate) async fn gh_pr_ready(cwd: String, number: i64) -> Result<(), String> 
         .map_err(|e| e.to_string())?
 }
 
+fn gh_dismiss_review_inner(cwd: String, number: i64, review_id: i64, message: String) -> Result<(), String> {
+    if let Some(tok) = github_api::settings_github_token() {
+        return github_api::rest_dismiss_review(&cwd, number, review_id, &message, &tok);
+    }
+    let nwo = gh_fork_upstream(&cwd).unwrap_or_else(|| "{owner}/{repo}".to_string());
+    let path = format!("repos/{}/pulls/{}/reviews/{}/dismissals", nwo, number, review_id);
+    gh_api_write(&cwd, "PUT", &path, &[("message", message.as_str()), ("event", "DISMISS")])?;
+    Ok(())
+}
+
+/// Dismiss a submitted review (B4, v3.6.0).
+#[tauri::command]
+pub(crate) async fn gh_dismiss_review(cwd: String, number: i64, review_id: i64, message: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || gh_dismiss_review_inner(cwd, number, review_id, message))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn gh_request_reviewers_inner(cwd: String, number: i64, logins: Vec<String>) -> Result<(), String> {
+    if let Some(tok) = github_api::settings_github_token() {
+        return github_api::rest_request_reviewers(&cwd, number, &logins, &tok);
+    }
+    let nwo = gh_fork_upstream(&cwd).unwrap_or_else(|| "{owner}/{repo}".to_string());
+    let path = format!("repos/{}/pulls/{}/requested_reviewers", nwo, number);
+    let mut cmd = hidden_cmd("gh");
+    cmd.args(["api", "-X", "POST", &path]);
+    for login in &logins {
+        cmd.args(["-f", &format!("reviewers[]={}", login)]);
+    }
+    let output = cmd
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("gh api request reviewers: {}", e))?;
+    if !output.status.success() {
+        return Err(format!(
+            "gh api request reviewers failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    Ok(())
+}
+
+/// Request reviewers on an existing PR (B4, v3.6.0).
+#[tauri::command]
+pub(crate) async fn gh_request_reviewers(cwd: String, number: i64, logins: Vec<String>) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || gh_request_reviewers_inner(cwd, number, logins))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 fn gh_pr_detail_inner(cwd: String, number: i64) -> Result<PullRequestDetail, String> {
     if let Some(tok) = github_api::settings_github_token() {
         return github_api::rest_pr_detail(&cwd, number, &tok);
@@ -648,7 +698,7 @@ fn gh_pr_detail_inner(cwd: String, number: i64) -> Result<PullRequestDetail, Str
     let mut cmd = hidden_cmd("gh");
     cmd.args([
         "pr", "view", &num,
-        "--json", "number,title,body,state,author,headRefName,baseRefName,isDraft,createdAt,updatedAt,mergedAt,url,additions,deletions,changedFiles,comments,reviewRequests,labels,reviews,mergeable,statusCheckRollup",
+        "--json", "number,title,body,state,author,headRefName,headRefOid,baseRefName,isDraft,createdAt,updatedAt,mergedAt,url,additions,deletions,changedFiles,comments,reviewRequests,labels,reviews,mergeable,statusCheckRollup",
     ]);
     if let Some(ref nwo) = upstream {
         cmd.args(["--repo", nwo]);

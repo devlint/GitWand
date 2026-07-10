@@ -78,6 +78,13 @@ export interface SubmitReviewOptions {
   event: "APPROVE" | "REQUEST_CHANGES" | "COMMENT";
   body?: string;
   comments?: PendingReviewComment[];
+  /**
+   * Client-tracked viewed-file paths at submit time (B2, v3.6.0). Optional
+   * forge transport — GitHub has no native "viewed" API, so the client
+   * (`usePrCache`'s per-PR viewed set) stays the source of truth regardless;
+   * providers may simply ignore this field.
+   */
+  viewedFiles?: string[];
 }
 
 // ─── Forge name discriminant ────────────────────────────────────────────────
@@ -194,6 +201,19 @@ export interface ForgeProvider {
   listReviews(cwd: string, prNumber: number): Promise<PrReview[]>;
 
   submitReview(cwd: string, prNumber: number, opts: SubmitReviewOptions): Promise<PrReview>;
+
+  /**
+   * Dismiss a submitted review (B4, v3.6.0). Optional — a provider that
+   * can't support it (GitLab has no direct equivalent; Bitbucket/Azure omit
+   * it) either doesn't implement the method or throws
+   * `ForgeNotImplementedError`; callers must treat both as "unsupported"
+   * and hide the action rather than surface an error banner.
+   */
+  dismissReview?(cwd: string, prNumber: number, reviewId: number, message?: string): Promise<void>;
+
+  /** Request reviewers on an existing PR/MR (B4, v3.6.0). Optional — same
+   *  unsupported-hides-the-action contract as `dismissReview`. */
+  requestReviewers?(cwd: string, prNumber: number, logins: string[]): Promise<void>;
 
   // ── Intelligence (forge-agnostique depuis v2.14) ───────────────────────────
   //

@@ -131,6 +131,24 @@ function parseImport(line: string): ImportStatement {
   return { raw: t, source: "", kind: "unknown", names: [], isType: false };
 }
 
+/**
+ * Extract the deduped list of module specifiers imported by `content` (C0,
+ * v3.6.0 — the PR-review dependency hop's extraction step; the resolved
+ * import *graph* is explicitly out of scope until v4.0). Pure string work,
+ * reuses the same regexes/`parseImport` as the conflict resolver above.
+ * Scans every line of arbitrary file content (not just a contiguous import
+ * block) — non-import lines are skipped, never throw.
+ */
+export function extractImportSources(content: string): string[] {
+  const seen = new Set<string>();
+  for (const line of content.split("\n")) {
+    if (!isImportLike(line)) continue;
+    const stmt = parseImport(line);
+    if (stmt.source) seen.add(stmt.source);
+  }
+  return [...seen];
+}
+
 // ─── Merge engine ─────────────────────────────────────────
 
 /** Résultat du merge d'imports */

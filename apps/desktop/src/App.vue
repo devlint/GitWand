@@ -3278,7 +3278,8 @@ onUnmounted(() => {
               <PrCreateView v-if="prPanel.showCreateForm.value" class="view__content"
                 :current-branch="repoStatus?.branch ?? ''" :branches="branches" :cwd="repoFolderPath ?? ''" />
               <PrDetailView v-else class="view__content" @refresh="repoRefresh"
-                @navigate-commit="(hash) => { selectCommit(hash); viewMode = 'history'; }" />
+                @navigate-commit="(hash) => { selectCommit(hash); viewMode = 'history'; }"
+                @open-help="showHelp = true" />
               <div v-if="showPrRail" class="sidebar-handle" :class="{ 'sidebar-handle--active': sidebarResizing }"
                 @mousedown="onSidebarMouseDown"></div>
               <button class="commit-rail-toggle" :class="{ 'commit-rail-toggle--active': showPrRail }"

@@ -16,21 +16,27 @@ import { PR_PANEL_KEY, isMergeConflict, type PrPanelState } from "../composables
 import { renderMarkdown, onMarkdownLinkClick } from "../composables/useSafeHtml";
 import Avatar from "./Avatar.vue";
 import { forgeAvatarUrl } from "../composables/useAvatar";
-import { openExternalUrl } from "../utils/backend";
+import { openExternalUrl, type ReviewerCandidate } from "../utils/backend";
 import { useI18n } from "../composables/useI18n";
 import PrInlineDiff from "./PrInlineDiff.vue";
 import PrReviewModal from "./PrReviewModal.vue";
 import PrIntelligencePanel from "./PrIntelligencePanel.vue";
 import PrReactions from "./PrReactions.vue";
+import { resolvePrReviewShortcut, isEditableTarget } from "../composables/usePrReviewKeymap";
+import { usePrReviewNav } from "../composables/usePrReviewNav";
+import { useSettings } from "../composables/useSettings";
 
 const { t } = useI18n();
 
 const emit = defineEmits<{
   (e: "refresh"): void;
   (e: "navigate-commit", hash: string): void;
+  /** B1 `?` shortcut — the host (App.vue) owns the global HelpView toggle. */
+  (e: "open-help"): void;
 }>();
 
 const p = inject<PrPanelState>(PR_PANEL_KEY)!;
+const { settings } = useSettings();
 
 // window.open is a no-op in the Tauri webview — hand the URL to the OS opener.
 function openInBrowser(url: string) { void openExternalUrl(url); }
@@ -193,9 +199,31 @@ function trackMouse(e: MouseEvent) {
   lastMousePos.y = e.clientY;
 }
 
+const prInlineDiffRef = ref<InstanceType<typeof PrInlineDiff> | null>(null);
+const prReviewNav = usePrReviewNav({
+  prDiffFiles: p.prDiffFiles,
+  selectedDiffFile: p.selectedDiffFile,
+  selectedDiff: p.selectedDiff,
+  diffHandle: prInlineDiffRef,
+  onHelp: () => emit("open-help"),
+  onToggleViewed: (path) => p.toggleViewed(path),
+  hideViewed: p.hideViewed,
+  onSubmitReview: () => { p.showReviewModal.value = true; },
+  submittingReview: p.submittingReview,
+  findings: p.preReviewFindings,
+});
+
 function handleKeydown(e: KeyboardEvent) {
   if (e.key === "Escape" && fullscreenImageUrl.value) {
     fullscreenImageUrl.value = null;
+  }
+  if (p.detailTab.value === "diff") {
+    const focused = !isEditableTarget(document.activeElement) && !fullscreenImageUrl.value;
+    const action = resolvePrReviewShortcut(e, { focused });
+    if (action) {
+      e.preventDefault();
+      prReviewNav.dispatch(action);
+    }
   }
 }
 
@@ -246,6 +274,26 @@ async function scrollToLastComment() {
   commentsEnd.value?.scrollIntoView({ behavior: "smooth", block: "end" });
 }
 
+/** D1 — copy the AI PR summary to the clipboard. */
+function copySummary() {
+  if (p.prSummary.value) navigator.clipboard?.writeText(p.prSummary.value);
+}
+
+/** C4 — click a finding in the Intelligence panel's list: switch to the
+ *  Diff tab, select the file, and scroll to the finding's line. */
+async function jumpToFinding(path: string, line: number) {
+  p.detailTab.value = "diff";
+  p.selectedDiffFile.value = path;
+  await nextTick();
+  const rows = prInlineDiffRef.value?.rows ?? [];
+  const rowIdx = rows.findIndex((r: any) => {
+    if (r.kind !== "line") return false;
+    const lineNo = r.dl.type === "delete" ? r.dl.oldLineNo : r.dl.newLineNo;
+    return lineNo === line;
+  });
+  if (rowIdx !== -1) prInlineDiffRef.value?.scrollToLine(rowIdx);
+}
+
 /**
  * Web URL for a comment's "Go to" button. GitHub/Bitbucket expose a direct
  * per-comment permalink; GitLab/Azure don't, so fall back to the PR/MR page
@@ -267,6 +315,27 @@ function commentTimeAgo(dateStr: string): string {
     if (hours < 24) return `${hours}h`;
     return `${Math.floor(hours / 24)}j`;
   } catch { return dateStr; }
+}
+
+// ─── Reviews admin: dismiss + request reviewers (B4) ───────
+const reviewerCandidates = ref<ReviewerCandidate[]>([]);
+const requestReviewersInput = ref("");
+
+async function loadReviewerCandidatesOnce() {
+  if (!p.forgeSupportsRequestReviewers.value || reviewerCandidates.value.length || !p.cwd.value) return;
+  try {
+    reviewerCandidates.value = await p.forge.value.listReviewerCandidates(p.cwd.value);
+  } catch { /* non-fatal — the input still works without suggestions */ }
+}
+
+function submitRequestReviewers() {
+  const logins = requestReviewersInput.value
+    .split(/[,\s]+/)
+    .map((s) => s.replace(/^@/, "").trim())
+    .filter(Boolean);
+  if (!logins.length) return;
+  p.handleRequestReviewers(logins);
+  requestReviewersInput.value = "";
 }
 </script>
 
@@ -557,6 +626,37 @@ function commentTimeAgo(dateStr: string): string {
             <span class="pdv-readiness-text">{{ p.mergeReadiness.value.reason }}</span>
           </div>
 
+          <!-- AI PR summary (D1, v3.6.0) — opt-in, shown only once something
+               has actually loaded/is loading, never an empty shell. -->
+          <section
+            v-if="settings.reviewAiSummary && (p.prSummary.value || p.prSummaryLoading.value)"
+            class="pdv-summary"
+          >
+            <header class="pdv-summary-head">
+              <h2 class="pdv-section-label">{{ t('pr.summary.title') }}</h2>
+              <div class="pdv-summary-actions">
+                <button
+                  type="button"
+                  class="pdv-summary-btn"
+                  :disabled="p.prSummaryLoading.value"
+                  :title="t('pr.summary.regenerate')"
+                  @click="p.regenerateSummary()"
+                >{{ t('pr.summary.regenerate') }}</button>
+                <button
+                  type="button"
+                  class="pdv-summary-btn"
+                  :disabled="!p.prSummary.value"
+                  :title="t('pr.summary.copy')"
+                  @click="copySummary"
+                >{{ t('pr.summary.copy') }}</button>
+              </div>
+            </header>
+            <div v-if="p.prSummaryLoading.value && !p.prSummary.value" class="pdv-summary-loading">
+              {{ t('pr.summary.loading') }}
+            </div>
+            <div v-else class="pdv-summary-body" v-html="renderMarkdown(p.prSummary.value)" />
+          </section>
+
           <!-- Stat cards -->
           <div class="pdv-stats-grid">
             <div class="pdv-stat">
@@ -616,13 +716,31 @@ function commentTimeAgo(dateStr: string): string {
           </div>
 
           <!-- Reviewers -->
-          <section v-if="p.prDetail.value.reviewers.length" class="pdv-section">
+          <section v-if="p.prDetail.value.reviewers.length || p.forgeSupportsRequestReviewers.value" class="pdv-section">
             <h2 class="pdv-section-label">{{ t('pr.detail.reviewers') }}</h2>
-            <div class="pdv-chips">
+            <div v-if="p.prDetail.value.reviewers.length" class="pdv-chips">
               <span v-for="r in p.prDetail.value.reviewers" :key="r" class="pdv-chip pdv-chip--reviewer">
                 <Avatar class="pdv-chip-avatar" :name="r" :url="forgeAvatarUrl(p.forge.value.name, r)" />
                 {{ r }}
               </span>
+            </div>
+            <!-- B4 — request reviewers (capability-gated: hidden, not erroring, when unsupported) -->
+            <div v-if="p.forgeSupportsRequestReviewers.value" class="pdv-request-reviewers">
+              <input
+                v-model="requestReviewersInput"
+                type="text"
+                list="pdv-reviewer-suggestions"
+                class="pdv-request-reviewers-input"
+                :placeholder="t('pr.reviews.requestReviewersPlaceholder')"
+                @focus="loadReviewerCandidatesOnce"
+                @keydown.enter.prevent="submitRequestReviewers"
+              />
+              <datalist id="pdv-reviewer-suggestions">
+                <option v-for="c in reviewerCandidates" :key="c.login" :value="c.login" />
+              </datalist>
+              <button type="button" class="pdv-request-reviewers-btn" @click="submitRequestReviewers">
+                {{ t('pr.reviews.requestReviewers') }}
+              </button>
             </div>
           </section>
 
@@ -715,6 +833,14 @@ function commentTimeAgo(dateStr: string): string {
                       </svg>
                     </button>
                     <span class="pdv-comment-time" :title="item.ts">{{ commentTimeAgo(item.ts) }}</span>
+                    <!-- B4 — dismiss (capability-gated; hidden rather than erroring on GitLab/Bitbucket/Azure) -->
+                    <button
+                      v-if="p.forgeSupportsDismissReview.value && item.verdictCls !== 'pdv-review--dismissed' && item.id"
+                      type="button"
+                      class="pdv-review-dismiss"
+                      :title="t('pr.reviews.dismiss')"
+                      @click="p.handleDismissReview(item.id)"
+                    >{{ t('pr.reviews.dismiss') }}</button>
                   </div>
                   <div v-if="item.bodyHtml" class="pdv-comment-body" @click="onMarkdownLinkClick" v-html="item.bodyHtml" />
                   <!-- Reactions only on reviews that carry a body — there is no
@@ -777,13 +903,34 @@ function commentTimeAgo(dateStr: string): string {
             <!-- File sidebar -->
             <div class="pdv-diff-sidebar">
               <div class="pdv-diff-count">{{ t('pr.detail.filesCount', p.prDiffFiles.value.length) }}</div>
+              <!-- B2 — viewed-file progress + hide-viewed toggle -->
+              <div class="pdv-diff-viewed-bar">
+                <span class="pdv-diff-viewed-progress">
+                  {{ t('pr.viewed.progress', p.viewedCount.value, p.prDiffFiles.value.length) }}
+                </span>
+                <button
+                  type="button"
+                  class="pdv-diff-viewed-hide"
+                  :class="{ 'pdv-diff-viewed-hide--active': p.hideViewed.value }"
+                  :aria-pressed="p.hideViewed.value"
+                  :title="t('pr.viewed.hide')"
+                  @click="p.hideViewed.value = !p.hideViewed.value"
+                >{{ t('pr.viewed.hide') }}</button>
+              </div>
               <button
-                v-for="file in p.prDiffFiles.value"
+                v-for="file in p.visibleDiffFiles.value"
                 :key="file.path"
                 :class="['pdv-diff-file', { 'pdv-diff-file--active': p.selectedDiffFile.value === file.path }]"
                 @click="p.selectedDiffFile.value = file.path"
               >
                 <div class="pdv-diff-file-top">
+                  <input
+                    type="checkbox"
+                    class="pdv-diff-file-viewed"
+                    :checked="p.viewedPaths.value.has(file.path)"
+                    :title="t('pr.viewed.toggle')"
+                    @click.stop="p.toggleViewed(file.path)"
+                  />
                   <span class="pdv-diff-file-name">{{ file.path.split('/').pop() }}</span>
                   <!-- v2.18 — CI annotations on this file -->
                   <span
@@ -803,6 +950,7 @@ function commentTimeAgo(dateStr: string): string {
             <div class="pdv-diff-viewer">
               <PrInlineDiff
                 v-if="p.selectedDiff.value"
+                ref="prInlineDiffRef"
                 :diff="p.selectedDiff.value"
                 :file-path="p.selectedDiffFile.value"
                 :comments="p.commentsForFile.value"
@@ -811,7 +959,9 @@ function commentTimeAgo(dateStr: string): string {
                 :cwd="p.cwd.value"
                 :pr-number="p.selectedPr.value?.number"
                 :forge-name="p.forge.value.name"
-                :annotations="p.selectedDiffFile.value ? (p.annotationsByFile.value[p.selectedDiffFile.value] ?? []) : []"
+                :annotations="p.selectedDiffFile.value ? (p.mergedAnnotationsByFile.value[p.selectedDiffFile.value] ?? []) : []"
+                :can-edit-comments="p.forgeSupportsCommentEdit.value"
+                :can-delete-comments="p.forgeSupportsCommentDelete.value"
                 @create-comment="p.handleCreateComment"
                 @add-to-review="p.handleAddToReview"
                 @reply-comment="p.handleReplyComment"
@@ -860,9 +1010,15 @@ function commentTimeAgo(dateStr: string): string {
             :hotspots-loading="p.hotspotsLoading.value"
             :file-history="p.fileHistory.value"
             :file-history-loading="p.fileHistoryLoading.value"
+            :pre-review-findings="p.preReviewFindings.value"
+            :pre-review-progress="p.preReviewProgress.value"
+            :pre-review-running="p.preReviewRunning.value"
+            :static-flags="p.staticFlags.value"
             @load-conflict-preview="p.loadConflictPreview"
             @load-hotspots="p.loadHotspots"
             @load-file-history="p.loadFileHistory"
+            @dismiss-finding="p.dismissFinding"
+            @jump-to-finding="jumpToFinding"
           />
         </div>
       </div>
@@ -1382,6 +1538,52 @@ function commentTimeAgo(dateStr: string): string {
   font-weight: var(--font-weight-semibold);
 }
 
+/* AI PR summary (D1, v3.6.0) */
+.pdv-summary {
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+}
+.pdv-summary-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+.pdv-summary-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+.pdv-summary-btn {
+  font-size: var(--font-size-xs);
+  padding: 2px var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+.pdv-summary-btn:hover:not(:disabled) {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+.pdv-summary-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.pdv-summary-loading {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+.pdv-summary-body {
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-relaxed, 1.6);
+  color: var(--color-text);
+}
+
 /* Stats grid */
 .pdv-stats-grid {
   display: grid;
@@ -1611,6 +1813,52 @@ function commentTimeAgo(dateStr: string): string {
 .pdv-comment-goto:hover {
   color: var(--color-accent);
   border-color: var(--color-accent);
+}
+
+/* B4 — dismiss review */
+.pdv-review-dismiss {
+  padding: 1px var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+.pdv-review-dismiss:hover {
+  color: var(--color-danger, #ef4444);
+  border-color: var(--color-danger, #ef4444);
+}
+
+/* B4 — request reviewers */
+.pdv-request-reviewers {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.pdv-request-reviewers-input {
+  flex: 1;
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+}
+.pdv-request-reviewers-btn {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pdv-request-reviewers-btn:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
 }
 
 .pdv-comment-body {
@@ -2013,6 +2261,37 @@ function commentTimeAgo(dateStr: string): string {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   padding: var(--space-2) var(--space-3) var(--space-4);
+}
+
+/* B2 — viewed-file progress bar + hide-viewed toggle */
+.pdv-diff-viewed-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: 0 var(--space-3) var(--space-3);
+  margin-top: calc(var(--space-4) * -1);
+}
+.pdv-diff-viewed-progress {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+.pdv-diff-viewed-hide {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.pdv-diff-viewed-hide--active {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+.pdv-diff-file-viewed {
+  flex-shrink: 0;
+  cursor: pointer;
 }
 
 .pdv-diff-file {
