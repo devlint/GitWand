@@ -5,6 +5,30 @@ description: Release history for GitWand — the native Git client with AI confl
 
 # Changelog
 
+## v3.5.0 — July 2026
+
+### PR review, rebuilt around keyboard and speed
+
+The in-app pull request review gets a ground-up rebuild. A GitHub-standard keymap now drives the whole flow — `J`/`K` to move hunk by hunk, `⇧J`/`⇧K` to jump file to file, `V` to mark something viewed, `C` to comment where your cursor sits, `⌘Enter` to submit — so a review that used to mean constant mouse trips can now happen almost entirely from the keyboard. Files you've already looked at stay marked as viewed (and can be hidden to focus on what's left), a draft review's comments survive you navigating away and back, and dismissing a review or requesting reviewers is now one click from the Info tab instead of a trip to GitHub.
+
+Big pull requests were the pain point this rebuild targeted directly: diffs now load per file instead of all at once, and even a single huge file renders through a virtualized view instead of dumping every line into the DOM. Reopening a PR you already had cached now costs three calls to the forge instead of six.
+
+### An AI reviewer that reads the whole picture, not just the diff
+
+GitWand can now run a local, opt-in AI pass over a pull request the moment you open it — not just on a diff line by line, but by first tracing which files import the changed code and pulling the history of the touched lines, the same multi-hop trick tools like Greptile charge for. Findings come back with a confidence score and a threshold you control, and a generated summary of what the PR does and why sits at the top before you read a single line of diff. Everything — check-run annotations, the AI's findings, existing static flags — now renders through one shared gutter instead of three different code paths bolted together.
+
+### A secrets scanner that never leaves your machine
+
+Before you commit, GitWand can now scan every added line for the shape of a secret — AWS, GCP, Azure and GitHub tokens, Slack and Stripe keys, OpenAI and Anthropic keys, private key headers, JWTs, and anything that just looks too random to be real code. It's entirely local — no network call, ever — and it's deliberately non-blocking by default: find something, and you get an orange badge and a confirmation, not a wall. Turn it into a hard stop with an opt-in pre-commit hook if your team wants one, and extend or quiet specific patterns per-repo through `.gitwandrc`. The same scanner also ships as `gitwand scan` in the CLI.
+
+### Branch badges that see the whole picture
+
+The little `#1234` badge that shows up on a branch with an open PR used to only ever look at the first page of results — a repo with more than ten open PRs could have one and never show a badge for it. GitWand now keeps draining pages quietly in the background after the first paint, and remembers what it found so reopening a repo restores the list instantly instead of starting cold again. The dock's PR counter, previously stuck at whatever happened to already be loaded, now shows a real count.
+
+### Smaller fixes
+
+Dragging a repo tab to reorder it only worked with a mouse; it now works with touch and pen input too, and can be done from the keyboard. The File Explorer's Save button moved next to the lock toggle, closer to the other primary editing actions.
+
 ## v3.4.0 — July 2026
 
 ### The conflict engine learns a new trick — and stops guessing

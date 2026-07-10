@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.5.0] - 2026-07-10
+
 ### Added
 
 - **PR Review 2.0** — a chantier of composable, keyboard-first review upgrades:
@@ -19,16 +21,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Unified `LineAnnotation` model** — CI check-run annotations, AI findings, and static heuristic flags now render through one merged gutter-overlay stream instead of three separate code paths.
   - **GitLab real review completion** — inline batch review comments anchor correctly via a dedicated diff-refs lookup, `listReviews` reflects approvals and changes-requested verdicts, and file review history reports real per-path comment counts.
 - **Pre-commit secrets scanner** — a zero-network, local scanner over the staged diff's added lines, detecting AWS/GCP/Azure/GitHub/GitLab/Slack/Stripe/OpenAI/Anthropic tokens, RSA/OpenSSH/EC/PGP private-key headers, JWTs, and high-entropy literals (Shannon entropy, tunable threshold). Non-blocking in-app: an orange badge in the commit area opens a findings modal (redacted excerpts only, per-finding dismiss, per-pattern ignore), and committing with active findings shows a confirm the user can always bypass. Extensible per-repo via `.gitwandrc` `secrets.patterns[]` / `secrets.ignore[]`. Dual-implemented (Rust `regex` crate for the desktop app, a pure TypeScript mirror in `@gitwand/core` for `pnpm dev:web` and the CLI) and locked in sync by a parity test. Also ships `gitwand scan [--json] [--strict]` in the CLI and an opt-in, blocking pre-commit hook installer (Settings → Hooks) that shells out to it — always bypassable with `git commit --no-verify`.
+- **PR badges: background prefetch & cache (git-log style)** — branch badges (`#<number>` on branches with an open PR) now drain further pages in the background after first paint instead of only ever seeing the first page of 10 open PRs, and an in-memory per-repo cache restores the drained list instantly on a repeat visit (branch popover reopened, tab switch back) instead of re-fetching from a cold state — the same pattern as the git-log cache/prefetch fix (#113). Non-GitHub forges get the breadth fix; the instant-restore fast path stays GitHub-only for now.
+- **PR dock badge shows a real open-PR count** — the "prs" `AppDock` badge now wires the existing forge-abstracted `getPRCount()` and refreshes on repo open/switch and on the PR list's manual refresh, instead of reading `0` until the branch popover or graph mode happened to populate the badge-path list.
 
 ### Changed
 
 - **PR detail open now costs 3 forge calls on the hot path (was 6)** — revalidation on reopening an already-cached PR detail was slimmed to only the calls that can actually have changed.
 - **PR diff parsing is lazy, per-file** — a PR with many changed files no longer parses every file's hunks up front; only the file currently open is parsed, cached by path.
 - **Diff line rendering is virtualized** — large diffs (thousands of lines) keep a bounded DOM instead of rendering every line, fixing scroll/interaction lag on big files.
+- **File Explorer: Save button moved next to the lock toggle** — grouped with the other primary edit action instead of sitting after Undo/Blame.
 
 ### Fixed
 
 - **Azure comment edit/delete no longer risks a runtime crash** — `updateComment`/`deleteComment` are unsupported on Azure DevOps for now; the UI hides the edit/delete affordance instead of calling into a forge method that throws.
+- **Repo tabs: reordering now works with mouse, touch, and pen** — tab drag-to-reorder was mouse-event-only; it now uses pointer events, plus keyboard support (arrow keys) for accessible reordering.
 
 ## [3.4.0] - 2026-07-08
 
@@ -1225,7 +1231,8 @@ Design-system foundations — the app header and every overlay now ride on a sha
 - CI pipeline via GitHub Actions (Node 18, 20, 22)
 - 28 tests covering all patterns + real-world scenarios (package.json, Laravel routes, Vue SFC, CSS, .env files)
 
-[Unreleased]: https://github.com/devlint/GitWand/compare/v3.2.0...HEAD
+[Unreleased]: https://github.com/devlint/GitWand/compare/v3.5.0...HEAD
+[3.5.0]: https://github.com/devlint/GitWand/compare/v3.4.0...v3.5.0
 [3.4.0]: https://github.com/devlint/GitWand/compare/v3.3.0...v3.4.0
 [3.3.0]: https://github.com/devlint/GitWand/compare/v3.2.0...v3.3.0
 [3.2.0]: https://github.com/devlint/GitWand/compare/v3.1.0...v3.2.0

@@ -6,44 +6,16 @@
 
 ## What's Next
 
-_Ordered by priority (2026-07-03, renumbered 2026-07-08 after v3.4.0 shipped the conflict-engine bundle — token_level_merge, base recovery, the recoverable-before-model metric — instead of the planned secrets scanner). The thread: secure the commit path (v3.5), rebuild the two review surfaces on one shared AI pipeline (v3.6–v3.7), lay the safety net before shipping more auto-apply (v3.8), make the app reactive and fast (v3.9), close the resolution loop (v3.10), then workflow & comparison primitives (v3.11–v3.12), experimental voice input (v3.13), and the v4.0 code-intelligence headline._
+_Ordered by priority (2026-07-03, renumbered 2026-07-08 after v3.4.0 shipped the conflict-engine bundle — token_level_merge, base recovery, the recoverable-before-model metric — instead of the planned secrets scanner; renumbered again 2026-07-10 after v3.5.0 shipped the secrets scanner and PR Review 2.0 together as a single combined release, closing the version gap for everything after it). The thread: rebuild commit-time review on the same AI pipeline (v3.6), lay the safety net before shipping more auto-apply (v3.7), make the app reactive and fast (v3.8), close the resolution loop (v3.9), then workflow & comparison primitives (v3.10–v3.11), experimental voice input (v3.12), and the v4.0 code-intelligence headline._
 
-### v3.5.0 — Safety Bundle: pre-commit secrets scanner
-
-_Inspired by GitSquid. A "safety" feature with zero network dependency — everything local._
-
-- **Scanner integrated in the staging area**: AWS, GCP, Azure, GitHub tokens (`ghp_`, `github_pat_`), GitLab (`glpat-`), Slack, Stripe, OpenAI, Anthropic, RSA/OpenSSH/EC keys, JWTs, high-entropy literals
-- **Extensible patterns** via `.gitwandrc`: `secrets.patterns[]` + `secrets.ignore[]`
-- **Non-blocking UX**: orange badge in the commit area — the user can commit with confirmation or ignore the pattern
-- **Zero network**: local matching via Rust (`regex` crate)
-- **Opt-in pre-commit hook** in Settings > Hooks
-
----
-
-### v3.6.0 — PR Review 2.0: faster, keyboard-first, AI-assisted
-
-_Rebuild of the in-app PR review (v2.24.0) around performance, review flow and a Greptile-style AI layer — benchmark-driven._
-
-**Today's baseline** — `PrDetailView.vue` (2.3k lines) + `PrInlineDiff.vue` + `PrIntelligencePanel.vue` + `usePrPanel.ts` already cover pending-review batches, multi-line comments, GitHub-native suggestions, CI annotations (v2.18.0), SWR cache (v2.19.0) and on-demand AI hunk critique (`usePrHunkCritique.ts`). Gaps: the whole diff loads at once (no per-file lazy load, no hunk virtualization — scroll lag on 50+ file PRs), no viewed-file tracking, no keyboard navigation, AI is on-demand only and scattered, no PR summary, GitLab/Bitbucket review methods are stubs.
-
-- **Benchmark first** — score the current review against GitKraken, Tower, Graphite, GitButler and the AI reviewers (Greptile, CodeRabbit, Copilot code review) on a task grid: time-to-first-comment, big-PR navigation, AI signal/noise. Deliverable: a target-UX spec that drives the rest
-- **Performance rebuild** — per-file lazy diff loading + hunk virtualization; slim down the 6-call detail revalidation
-- **Review flow** — viewed-file state (with `SubmitReviewOptions` extension), `J`/`K` hunk navigation + keyboard-first actions, pending-review state surfaced (badge + resume), dismiss review, request-reviewers workflow
-- **AI pre-review pass** — Greptile-style multi-hop, computed in background on PR open: diff → touched dependencies (import parser from `@gitwand/core`) → blame/history of changed lines → line-level findings **with confidence scores** and a user threshold. Local-first via `useAIProvider` (CLI agents), opt-in, cached SWR-style
-- **PR summary** — what changed / why / affected areas at the top of the Info tab; reused as review handoff
-- **Unified Intelligence pipeline** — merge the scattered AI pieces (hunk critique, Intelligence-tab static flags, pre-review findings) into one pipeline with shared cache and one settings surface
-- **Multi-forge reviews** — complete the GitLab review methods (largest stub gap); Bitbucket/Azure follow
-
----
-
-### v3.7.0 — Commit Review: micro AI reviews in the Changes panel
+### v3.6.0 — Commit Review: micro AI reviews in the Changes panel
 
 _Inspired by [git-lrc](https://github.com/HexmosTech/git-lrc) (HexmosTech). Commit-time is the review sweet spot: early enough to catch AI-generated regressions before they enter history, dependable because everyone commits. git-lrc does it with a cloud service + a browser detour — we do it in-panel, fully local._
 
 **Today's baseline** — the Changes section (`RepoSidebar.vue`) + `DiffViewer.vue` render the staged diff read-only; per-hunk AI critique exists but is PR-only (`usePrHunkCritique.ts`); commit trailers ship since v1.9.0 (`useCommitMessage.ts`); CLI agents are launchable in-app (Agent Sessions v2.8.0, terminal + AI-task scratch worktrees v3.2.0).
 
-- **Review staged changes** — one button in the commit area: AI pass over the staged diff, inline findings with severity badges anchored in the diff + a short summary. Generalize `usePrHunkCritique` from PR hunks to any `GitDiff` — the same engine as the v3.6.0 pre-review pass, pointed at the index
-- **Issue navigation** — cycle finding-to-finding (reuses the v3.6.0 keyboard model), per-file finding counts in the staged list
+- **Review staged changes** — one button in the commit area: AI pass over the staged diff, inline findings with severity badges anchored in the diff + a short summary. Generalize `usePrHunkCritique` from PR hunks to any `GitDiff` — the same engine as the v3.5.0 pre-review pass, pointed at the index
+- **Issue navigation** — cycle finding-to-finding (reuses the v3.5.0 keyboard model), per-file finding counts in the staged list
 - **Fix with agent** — git-lrc makes you copy-paste issues back to your agent; we pipe them: "Fix with agent" sends the findings to Claude Code / opencode / Codex (Agent Sessions), optionally in an AI-task scratch worktree; re-review triggers on the next staging change
 - **Iterations & coverage** — track review→fix→review cycles and the share of the final staged diff already reviewed (`iter:N`, `coverage:X%`)
 - **Review / Vouch / Skip** — explicit three-state decision at commit time, non-blocking (same UX contract as the v3.5.0 secrets scanner): reviewed by AI, vouched personally, or skipped — recorded as a commit trailer `GitWand-Review: ran|vouched|skipped (iter:N, coverage:X%)` via the existing trailers support (v1.9.0), so the team sees review status right in `git log`
@@ -51,7 +23,7 @@ _Inspired by [git-lrc](https://github.com/HexmosTech/git-lrc) (HexmosTech). Comm
 
 ---
 
-### v3.8.0 — Time Machine: repo snapshots & global undo
+### v3.7.0 — Time Machine: repo snapshots & global undo
 
 _Inspired by GitUp's snapshot history. Extends the Undo stack (v1.2.0) from "undo the last ref move" into a true safety net covering the working tree and the resolution engine._
 
@@ -66,7 +38,7 @@ _Inspired by GitUp's snapshot history. Extends the Undo stack (v1.2.0) from "und
 
 ---
 
-### v3.9.0 — Live Repo: filesystem events + libgit2 phase 1
+### v3.8.0 — Live Repo: filesystem events + libgit2 phase 1
 
 _Inspired by GitUp's Live Map. Replace the 2s status poll with real FS events, and start the shell-out → libgit2 migration on the cheap-refresh path._
 
@@ -75,14 +47,14 @@ _Inspired by GitUp's Live Map. Replace the 2s status poll with real FS events, a
 - **FS watcher** — `notify` crate on `.git/` + working tree, debounced/coalesced Tauri events; Git Tree, status and sidebar refresh in real time, including changes made outside the app
 - **Polling demotion** — the 2s poll becomes a low-frequency fallback (watcher failure, network mounts); consistent with the polling-discipline rule (no unconditional intervals)
 - **libgit2 phase 1: `git_diff` + `git_blame`** — migrate the two read paths with the best effort/risk ratio (per backend audit); CLI fallback kept, covered by the parity harness (`tests/parity/`)
-- **Web Worker for diff/parse** — move `packages/core`'s diff/parse hot path off the main thread via `comlink`, browser-safe like the rest of the package; lands here because it's on the same hot path as the FS-watcher refresh and the libgit2 migration above, and because the CPU load on that path is only going up — `token_level_merge` (already shipped, v3.4.0), Combined Diffs multi-commit aggregation (v3.12.0) and the v4.0 tree-sitter code graph all add main-thread work to it
+- **Web Worker for diff/parse** — move `packages/core`'s diff/parse hot path off the main thread via `comlink`, browser-safe like the rest of the package; lands here because it's on the same hot path as the FS-watcher refresh and the libgit2 migration above, and because the CPU load on that path is only going up — `token_level_merge` (already shipped, v3.4.0), Combined Diffs multi-commit aggregation (v3.11.0) and the v4.0 tree-sitter code graph all add main-thread work to it
 - **Channels for progress streaming** — migrate `clone`/`fetch` progress off the global `app_handle.emit("clone-progress", …)` broadcast (v2.11.0) onto a scoped `tauri::ipc::Channel<T>` per invoke, the pattern already proven by the terminal's PTY output (v3.2.0); closes the other orphaned lever from `PERFORMANCE_PLAN.md` (§5.4)
 - **Event-driven invalidation** — post-command manual refreshes replaced by watcher events (single code path)
 - **Indexing hook** — the watcher API is designed with a second consumer in mind: incremental update of the v4.0 code graph (re-index only the changed files, Greptile-style hot index, fully local); this is also the first real consumer that will lean on the Worker above once tree-sitter parsing moves off the main thread
 
 ---
 
-### v3.10.0 — Merge preview-to-apply + editable diff
+### v3.9.0 — Merge preview-to-apply + editable diff
 
 _Inspired by Aurees. Close the loop between the Conflict Predictor (v2.20.0) and execution, and make the diff a place you can fix things._
 
@@ -97,9 +69,9 @@ _Inspired by Aurees. Close the loop between the Conflict Predictor (v2.20.0) and
 
 ---
 
-### v3.11.0 — Stacked Branches (native)
+### v3.10.0 — Stacked Branches (native)
 
-_A differentiating feature: stacked PRs workflow without an external CLI (Graphite, ghstack…). Sequenced after v3.10.0 on purpose: Restack leans on the conflict preview → apply flow._
+_A differentiating feature: stacked PRs workflow without an external CLI (Graphite, ghstack…). Sequenced after v3.9.0 on purpose: Restack leans on the conflict preview → apply flow._
 
 The paradigm: short stacked branches (`feat/step-1` → `feat/step-2` → `feat/step-3`), each with its own PR targeting the previous one.
 
@@ -107,15 +79,15 @@ The paradigm: short stacked branches (`feat/step-1` → `feat/step-2` → `feat/
 
 **Creation** — "Stack a branch" button in the context menu; `⌘⇧S` shortcut from the commit area
 
-**Restack** — Automatic detection when the base has moved; one-click "Restack" button (cascading `git rebase --onto`); conflict preview before execution (v3.10.0 preview-to-apply)
+**Restack** — Automatic detection when the base has moved; one-click "Restack" button (cascading `git rebase --onto`); conflict preview before execution (v3.9.0 preview-to-apply)
 
 **PRs** — "Submit stack": creates or updates GitHub PRs for each layer; automatic retarget when a layer is merged
 
-**Implementation** — Metadata in `.gitwand-workspace.json`; no external CLI dependency. Cascading Restack and per-layer Submit-stack progress stream via `tauri::ipc::Channel` (v3.9.0 pattern) rather than a new global `emit()` broadcast
+**Implementation** — Metadata in `.gitwand-workspace.json`; no external CLI dependency. Cascading Restack and per-layer Submit-stack progress stream via `tauri::ipc::Channel` (v3.8.0 pattern) rather than a new global `emit()` broadcast
 
 ---
 
-### v3.12.0 — Combined Diffs (multi-commit, non-contiguous)
+### v3.11.0 — Combined Diffs (multi-commit, non-contiguous)
 
 _Inspired by GitBlade. A comparison primitive we lack: one aggregated diff across several commits, even non-consecutive — review scattered work as a single change._
 
@@ -125,11 +97,11 @@ _Inspired by GitBlade. A comparison primitive we lack: one aggregated diff acros
 - **`combined_diff` Tauri command** — Rust-side aggregation of the selected commits' patches into one virtual diff (per-file hunk merge, conflict-free since same-history)
 - **Combined viewer** — standard DiffViewer rendering + per-hunk commit attribution (gutter badge → jump to commit)
 - **Entry points** — Git Tree context menu, file history ("combine these versions"), PR review (subset of commits)
-- **Optional AI summary** — "what these N commits do together" (what/why/affected areas) via `useAIProvider`, reusing the v3.6.0 PR-summary prompt
+- **Optional AI summary** — "what these N commits do together" (what/why/affected areas) via `useAIProvider`, reusing the v3.5.0 PR-summary prompt
 
 ---
 
-### v3.13.0 — Voice Input (experimental)
+### v3.12.0 — Voice Input (experimental)
 
 - **Local dictation**: microphone button in the commit panel — transcription via embedded Whisper (`whisper-rs` Rust) — zero cloud
 - **Optional AI enrichment**: pass dictated text through `useAIProvider` for conventional commit formatting
@@ -150,7 +122,7 @@ _Inspired by Snipara's project-intelligence layer. Before a merge/rebase, answer
 - **Probable-test detection** — heuristic mapping (`*.test.*` / `*.spec.*` naming + import edges) → "these 12 tests likely cover the changed code"
 - **Co-change analysis** — "these files historically change together" mined from local `git log` (zero cloud, cheap); a second impact signal complementing the static import graph, exactly the history hop Greptile does server-side
 - **Blast Radius panel** — new tab in `MergePreviewPanel`: impacted files ranked, affected symbols, suggested test scope; feeds a `blastRadius` dimension alongside `postMergeRisk`
-- **Review ordering** — blast radius reused in the PR review (v3.6.0): files ranked by impact, "start with these 2 files"
+- **Review ordering** — blast radius reused in the PR review (v3.5.0): files ranked by impact, "start with these 2 files"
 - **Feedback loop** — rejected impact predictions / auto-resolutions lower the pattern's confidence (extends `useResolutionMemory`), the local analog of Greptile v4's false-positive reduction
 - **Agents too** — exposed via `@gitwand/mcp` (`gitwand_blast_radius`) and CLI, so AI agents can check impact before committing a resolution. Positioning: Greptile sells this as a paid API ("Genius API", $0.45/req) — ours is local, free, open source
 - **Opt-in & lazy** — computed post-preview, never blocking the merge flow; enabled in Settings
@@ -159,26 +131,26 @@ _Inspired by Snipara's project-intelligence layer. Before a merge/rebase, answer
 
 ### For reflection — competitive scan (GitUp · Aurees · Snipara · Strand · GitComet · RelaGit)
 
-_Veille du 2026-06-24 sur 6 clients/outils (Snipara, GitDriv, GitUp, GitX-dev, Aurees, GitBlade). **Mise à jour 2026-07-03** (renumbered 2026-07-06) : les pistes à fort signal ont été promues en sections versionnées ci-dessus après audit du code — PR Review 2.0 (inspiration Greptile) → **v3.6.0**, Commit Review (inspiration git-lrc) → **v3.7.0**, Snapshots/undo global → **v3.8.0**, Live Map + libgit2 phase 1 → **v3.9.0**, diff éditable + merge preview-to-apply → **v3.10.0**, Combined Diffs → **v3.12.0**, Code Graph/blast radius → **v4.0.0 (candidate)**. Les pistes écartées (GitDriv = web drag-and-drop débutant, GitX-dev = fork quasi-défunt, GitBlade = parité, abandonné depuis 2019) n'apportent rien d'avancé._
+_Veille du 2026-06-24 sur 6 clients/outils (Snipara, GitDriv, GitUp, GitX-dev, Aurees, GitBlade). **Mise à jour 2026-07-03** (renumbered 2026-07-06, renumbered again 2026-07-10 après que v3.5.0 a expédié PR Review 2.0 et le secrets scanner ensemble en une seule release, fermant l'écart de version pour la suite) : les pistes à fort signal ont été promues en sections versionnées ci-dessus après audit du code — PR Review 2.0 (inspiration Greptile) → **v3.5.0 (shipped)**, Commit Review (inspiration git-lrc) → **v3.6.0**, Snapshots/undo global → **v3.7.0**, Live Map + libgit2 phase 1 → **v3.8.0**, diff éditable + merge preview-to-apply → **v3.9.0**, Combined Diffs → **v3.11.0**, Code Graph/blast radius → **v4.0.0 (candidate)**. Les pistes écartées (GitDriv = web drag-and-drop débutant, GitX-dev = fork quasi-défunt, GitBlade = parité, abandonné depuis 2019) n'apportent rien d'avancé._
 
 **Veille 2026-07-09** — trois nouveaux concurrents sérieux remarchandisent l'espace (tous postérieurs à v2.15.0) :
 
-- **Strand** ([strand/0.5.0](https://github.com/danielss-dev/strand)) — Tauri 2 + React, entièrement focalisé sur les **worktrees comme sessions d'agent parallèles** (not agent *tools* ; agent *workspaces*). Forces : architecture agent-native, lifecycle worktree complet (merge+archive+recovery), WCAG 2.1 accessibility, performance baselines publiées. Faiblesses : aucun conflit IA (en dehors du scope), mono-repo (pas Launchpad équivalent), SolidJS/Strand n'a pas d'équivalent au moteur d'IA conflict resolution. **Implication GitWand** : Strand *n'* adresse pas les conflits auto — notre moat demeure. Leur obsession a11y + perf baseline est à copier (v3.6–v3.9 benchmark pass).
+- **Strand** ([strand/0.5.0](https://github.com/danielss-dev/strand)) — Tauri 2 + React, entièrement focalisé sur les **worktrees comme sessions d'agent parallèles** (not agent *tools* ; agent *workspaces*). Forces : architecture agent-native, lifecycle worktree complet (merge+archive+recovery), WCAG 2.1 accessibility, performance baselines publiées. Faiblesses : aucun conflit IA (en dehors du scope), mono-repo (pas Launchpad équivalent), SolidJS/Strand n'a pas d'équivalent au moteur d'IA conflict resolution. **Implication GitWand** : Strand *n'* adresse pas les conflits auto — notre moat demeure. Leur obsession a11y + perf baseline est à copier (v3.5–v3.8 benchmark pass).
   
 - **GitComet** ([gitcomet/0.1.15](https://github.com/Auto-Explore/GitComet)) — Pure Rust + GPUI, positionné sur **performance pure + dual-mode (GUI+headless difftool/mergetool)**. Forces : réactivité type Zed, Linux-first distribution, performance documentée sur gros repos (Chromium scale). Faiblesses : IA nulle, pas worktrees, pas multi-repo, pas conflit resolution (strategy algo seule). **Implication GitWand** : GitComet courtise les très gros dépôts et les workflows CI/scripts (headless). Notre Launchpad + conflit IA n'y touche pas. Leur GPUI stack sera intéressant si on re-visit Tauri vs Rust pur en v4.x.
   
-- **RelaGit** ([relagit/0.16](https://github.com/relagit/relagit)) — Electron + **SolidJS** (fine-grained reactivity), focus **design/elegance** + **workflows extensibles** (TypeScript hooks). Forces : SolidJS perf (GPUI-level), AI nativement intégré (@ai-sdk/anthropic), ecosystème thème communautaire, popout windows uniques. Faiblesses : Electron (lourd), beta fragile, aucun worktree/launchpad, aucun conflit IA structuré. **Implication GitWand** : RelaGit courtise les développeurs "designerss". Leur SolidJS est plus performante que notre Vue 3 sur les diffs lourds — noter pour v3.9 perf pass. Leur AI SDK integration (commit suggestions) est une brique, pas une moat (conflit IA auto-résout reste unique à GitWand).
+- **RelaGit** ([relagit/0.16](https://github.com/relagit/relagit)) — Electron + **SolidJS** (fine-grained reactivity), focus **design/elegance** + **workflows extensibles** (TypeScript hooks). Forces : SolidJS perf (GPUI-level), AI nativement intégré (@ai-sdk/anthropic), ecosystème thème communautaire, popout windows uniques. Faiblesses : Electron (lourd), beta fragile, aucun worktree/launchpad, aucun conflit IA structuré. **Implication GitWand** : RelaGit courtise les développeurs "designerss". Leur SolidJS est plus performante que notre Vue 3 sur les diffs lourds — noter pour v3.8 perf pass. Leur AI SDK integration (commit suggestions) est une brique, pas une moat (conflit IA auto-résout reste unique à GitWand).
 
-**Synthèse moat** : aucun de ces trois n'adresse **conflict resolution IA** structurée (Strand = agent workspaces, GitComet = perf, RelaGit = design). GitWand's positional edge — auto-resolve + Launchpad multi-repo + extensible (CLI+MCP) — demeure unique. À cultiver : v3.6–v3.10 pipeline (conflict preview-to-apply, pre-review multi-hop) + v4.0 code graph (blast radius) pour creuser l'écart. Défenses : v3.9 perf baseline (Strand lesson), v3.6 a11y audit (Strand standard), v3.9 SolidJS benchmark vs Vue 3 sur diffs (RelaGit stimulus).
+**Synthèse moat** : aucun de ces trois n'adresse **conflict resolution IA** structurée (Strand = agent workspaces, GitComet = perf, RelaGit = design). GitWand's positional edge — auto-resolve + Launchpad multi-repo + extensible (CLI+MCP) — demeure unique. À cultiver : v3.5–v3.9 pipeline (conflict preview-to-apply, pre-review multi-hop) + v4.0 code graph (blast radius) pour creuser l'écart. Défenses : v3.8 perf baseline (Strand lesson), v3.5 a11y audit (Strand standard), v3.8 SolidJS benchmark vs Vue 3 sur diffs (RelaGit stimulus).
 
 **Reste en veille :**
 
 - **`GitUpKit`** ([gitup.co](https://gitup.co/)) — leur SDK pour bâtir des clients Git, à étudier.
-- **libgit2 phases 3-4** — migration `git_log`/`git_show` (revwalk, le vrai gros gain sur 40k commits — mais boucle de fetch d'objets à optimiser) puis `git_file_log` (`--follow`/rename tracking à réimplémenter). À planifier après validation des phases 1-2 (v3.8/v3.9). Alternative `gix` réévaluée à ce moment-là.
+- **libgit2 phases 3-4** — migration `git_log`/`git_show` (revwalk, le vrai gros gain sur 40k commits — mais boucle de fetch d'objets à optimiser) puis `git_file_log` (`--follow`/rename tracking à réimplémenter). À planifier après validation des phases 1-2 (v3.7/v3.8). Alternative `gix` réévaluée à ce moment-là.
 - **Verification Plans attachés aux handoffs** (Snipara) — chaque PR/changement porte ses checks à passer ; recoupe les CI annotations (v2.18.0).
-- **Greptile ([greptile.com](https://www.greptile.com/))** — largement absorbé dans le plan (2026-07-02) : pre-review multi-hop + scores de confiance → **v3.6.0**, index à chaud → **v3.9.0**, contexte historique du LLM fallback → **v3.10.0**, code graph local + co-change + feedback loop → **v4.0.0**. Reste en veille : leur benchmark public de reviewers AI (à réutiliser pour le volet benchmark v3.6.0) et l'évolution de la Genius API.
-- **git-lrc / LiveReview ([HexmosTech](https://github.com/HexmosTech/git-lrc))** — concept absorbé en **v3.7.0** (Commit Review). Reste en veille : leur offre équipe LiveReview (dashboards, politiques org, analytics de review) — si le trailer `GitWand-Review` prend, une agrégation cross-repo dans Today/Dashboard en serait l'équivalent local.
-- **FinderGit + Finder-like mode** — UX empruntable (file-tree first), macOS-only aujourd'hui. v3.10–v3.12 scope : **ajouter une sidebar "Finder-like"** (tree left + inline diff right, keyboard-operable, status badges per-file) pour démarquer vs RelaGit/Strand UI rigides et séduire les utilisateurs macOS. Cross-platform via Tauri = avantage structurel vs FinderGit solo-dev.
+- **Greptile ([greptile.com](https://www.greptile.com/))** — largement absorbé dans le plan (2026-07-02) : pre-review multi-hop + scores de confiance → **v3.5.0 (shipped)**, index à chaud → **v3.8.0**, contexte historique du LLM fallback → **v3.9.0**, code graph local + co-change + feedback loop → **v4.0.0**. Reste en veille : leur benchmark public de reviewers AI (à réutiliser pour le volet benchmark v3.5.0) et l'évolution de la Genius API.
+- **git-lrc / LiveReview ([HexmosTech](https://github.com/HexmosTech/git-lrc))** — concept absorbé en **v3.6.0** (Commit Review). Reste en veille : leur offre équipe LiveReview (dashboards, politiques org, analytics de review) — si le trailer `GitWand-Review` prend, une agrégation cross-repo dans Today/Dashboard en serait l'équivalent local.
+- **FinderGit + Finder-like mode** — UX empruntable (file-tree first), macOS-only aujourd'hui. v3.9–v3.11 scope : **ajouter une sidebar "Finder-like"** (tree left + inline diff right, keyboard-operable, status badges per-file) pour démarquer vs RelaGit/Strand UI rigides et séduire les utilisateurs macOS. Cross-platform via Tauri = avantage structurel vs FinderGit solo-dev.
 
 ---
 
@@ -223,6 +195,7 @@ Positioning: neither "yet another Git GUI" nor an IDE. A first-class Git navigat
 
 | Version | Highlights |
 |---------|-----------|
+| **v3.5.0** | **PR Review 2.0** — GitHub-standard keymap (`J`/`K`/`⇧J`/`⇧K`/`V`/`⇧V`/`T`/`C`/`N`/`P`/`⌘Enter`), viewed-file tracking, pending-review persistence, dismiss review/request reviewers, local opt-in AI pre-review pipeline (multi-hop, confidence-scored findings), PR summary block, unified `LineAnnotation` gutter model, GitLab review completion, lazy per-file diff loading + virtualized rendering (PR detail hot path 6→3 forge calls) · **Pre-commit secrets scanner** — zero-network local scanner (AWS/GCP/Azure/GitHub/GitLab/Slack/Stripe/OpenAI/Anthropic/RSA/JWT/high-entropy), non-blocking commit-area badge, `.gitwandrc` extensible patterns, dual Rust+TS implementation, CLI `gitwand scan`, opt-in pre-commit hook · **PR badges: background prefetch & cache** (git-log style) past the first page, plus a real open-PR count on the dock badge · Repo-tab reordering via pointer events (mouse/touch/pen) + keyboard a11y · File Explorer Save button moved next to the lock toggle |
 | **v3.4.0** | **Conflict-engine bundle** — `token_level_merge` pattern (line/token decomposition, never auto-applied, user-confirmed via `TokenMergePanel`) · **2-way base recovery** from the git index (unlocks diff3-only patterns on default-conflictstyle repos, guarded against clobbering manual edits) · **`ResolutionPreviewPanel`** + per-hunk "Resolve auto" confirmation · **recoverable-before-model metric** (`summarizeTiers`, surfaced in CLI/desktop/MCP + local cumulative stats in Settings, backed by a corpus regression guard + golden-funnel CI gate) · `value_only_change` extended to diff3 with semver/timestamp-max resolution · deterministic recoverers forced before the LLM path · **data-loss fixes** (imports resolver emptying hunks, `insertion_at_boundary` dropping duplicate-line insertions, `whitespace_only` false positive in string literals, rename detection matching inside strings/comments) · git log pagination/caching fixes. Measured: manual residual halved on a 2000-merge production corpus (5.6%→2.7% of hunks) |
 | **v3.3.0** | **Blame gutter** in the File Explorer's CodeMirror editor — opt-in author/date gutter, deduped per commit run, hover tooltip · **Telemetry moved to Aptabase** — Umami Cloud was silently dropping every launch ping (non-browser User-Agent filtering); replaced with App-Key-authenticated Aptabase, including a self-hosted upstream crash fix (`tokio::spawn` → `tauri::async_runtime::spawn`) · Azure DevOps PR base-branch picker now lists server-side branches, not just local refs |
 | **v3.2.0** | **Integrated terminal** (WebGL rendering, inline search, clickable links, typed tabs with unread dot, real PTY agent launch, "New AI task" scratch-worktree button) · **File Explorer / Editor panel** (gitignore-aware tree, CodeMirror 6 editor, lock/undo/save toolbar) · **Git Tree** (filter mode, branch/author quick-toggles, date-bucket separators, branch autocomplete + `#PR` search) · Per-project worktree submenu + AI-task worktree management · Submodule update checking/applying · Per-author line churn stats · Antigravity CLI provider · Rebase onto any ref + branch reset · Sidebar unified Changes section · Tauri 2.11 |

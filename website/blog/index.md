@@ -6,6 +6,12 @@ description: Technical articles on Git workflows, AI-powered conflict resolution
 # Blog
 
 <div class="blog-list">
+  <a href="/blog/v3-5-pr-review-2-secrets-scanner" class="blog-card">
+    <div class="blog-meta">July 10, 2026 · 9 min read</div>
+    <h2 class="blog-title">PR Review 2.0, a local secrets scanner, and smarter PR badges: GitWand v3.5</h2>
+    <p class="blog-excerpt">v3.5 rebuilds in-app PR review around a GitHub-standard keymap (<code>J</code>/<code>K</code> hunk navigation, viewed-file tracking, pending-review persistence) and a local, opt-in <strong>AI pre-review pipeline</strong> — multi-hop dependency + history context, confidence-scored findings, a generated PR summary. Plus a zero-network <strong>pre-commit secrets scanner</strong> (AWS/GCP/Azure/GitHub/Slack/Stripe/OpenAI/Anthropic tokens, JWTs, high-entropy literals), branch badges that finally drain past the first page of open PRs, and a real PR count on the dock.</p>
+    <span class="blog-read">Read article →</span>
+  </a>
   <a href="/blog/v3-2-integrated-terminal-ai-tasks" class="blog-card">
     <div class="blog-meta">July 2, 2026 · 9 min read</div>
     <h2 class="blog-title">An integrated terminal built for AI agents, and a file editor in your Git client: GitWand v3.2</h2>

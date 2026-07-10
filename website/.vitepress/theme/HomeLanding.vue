@@ -73,7 +73,7 @@ function setLocale(code: Locale) {
 }
 
 // ── Smart download URL (OS detection) ─────────────────────────────────────
-const LATEST = '3.4.0'
+const LATEST = '3.5.0'
 const RELEASES = 'https://github.com/devlint/GitWand/releases'
 
 // SSR-safe: start with the generic releases page, then switch to the
@@ -162,7 +162,7 @@ const i18n: Record<Locale, any> = {
     mcRow3: "Natif (sans Electron)",
     mcRow4: "Serveur MCP pour agents",
     agentsCta: "Découvrir IA & agents →",
-    heroAnnounce: "Nouveau dans la v3.4 — fusion token-level, récupération de base et une métrique qui prouve ce que le moteur résout avant l'IA",
+    heroAnnounce: "Nouveau dans la v3.5 — PR Review 2.0 clavier + IA locale, et un scanner de secrets pre-commit zéro réseau",
     heroPoint1: "8 patterns déterministes — zéro pari sur ton code",
     heroPoint2: "100 % local — ton code ne quitte jamais ta machine",
     heroPoint3: "Un seul moteur — Desktop, CLI, VS Code & agents IA",
@@ -171,12 +171,15 @@ const i18n: Record<Locale, any> = {
     heroToastSub: "1 à relire · 0 hallucination",
     contribYouName: "+ toi ?",
     contribYouRole: "Ouvre ta première PR",
+    sponsorTitle: "Soutiens GitWand",
+    sponsorSub: "GitWand est gratuit et open source. Un sponsoring GitHub finance le temps de développement et l'hébergement.",
+    sponsorCta: "Devenir sponsor",
     heroH1a: "Les conflits de merge s'arrêtent ici.",
     heroH1b: "Retrouve ton flow.",
     heroSub: "Ce petit coup au moral quand 12 fichiers passent au rouge ? Terminé. GitWand classe chaque hunk avec 8 patterns déterministes — sans deviner, sans halluciner — résout les 95 % triviaux tout seul, et ne te rend que ce qui mérite ton cerveau. Natif, gratuit, MIT.",
     download: 'Télécharger',
     github: 'GitHub',
-    whatsNew: 'Nouveautés v3.4',
+    whatsNew: 'Nouveautés v3.5',
     docs: 'Documentation →',
     platforms: 'macOS · Linux · Windows',
     heroTabCli: 'CLI',
@@ -259,7 +262,7 @@ const i18n: Record<Locale, any> = {
     mcRow3: "Native (no Electron)",
     mcRow4: "MCP server for agents",
     agentsCta: "Explore AI & agents →",
-    heroAnnounce: "New in v3.4 — token-level merge, base recovery & a metric that proves what the engine resolves before any AI",
+    heroAnnounce: "New in v3.5 — keyboard-first PR Review 2.0 with local AI, and a zero-network pre-commit secrets scanner",
     heroPoint1: "8 deterministic patterns — zero gambling with your code",
     heroPoint2: "100% local — your code never leaves your machine",
     heroPoint3: "One engine — Desktop, CLI, VS Code & AI agents",
@@ -268,12 +271,15 @@ const i18n: Record<Locale, any> = {
     heroToastSub: "1 left for review · 0 hallucinations",
     contribYouName: "+ you?",
     contribYouRole: "Open your first PR",
+    sponsorTitle: "Support GitWand",
+    sponsorSub: "GitWand is free and open source. GitHub Sponsors funds development time and hosting.",
+    sponsorCta: "Become a sponsor",
     heroH1a: "Merge conflicts end here.",
     heroH1b: "Get your flow back.",
     heroSub: "That sinking feeling when 12 files turn red? Gone. GitWand classifies every hunk with 8 deterministic patterns — no guessing, no hallucinations — auto-resolves the trivial 95%, and hands you only what's worth your brain. Native, free, MIT.",
     download: 'Download',
     github: 'GitHub',
-    whatsNew: "What's new in v3.4",
+    whatsNew: "What's new in v3.5",
     docs: 'Documentation →',
     platforms: 'macOS · Linux · Windows',
     heroTabCli: 'CLI',
@@ -356,7 +362,7 @@ const i18n: Record<Locale, any> = {
     mcRow3: "Nativo (sin Electron)",
     mcRow4: "Servidor MCP para agentes",
     agentsCta: "Explorar IA y agentes →",
-    heroAnnounce: "Nuevo en la v3.4 — merge a nivel de token, recuperación de base y una métrica que demuestra lo que el motor resuelve antes de la IA",
+    heroAnnounce: "Nuevo en la v3.5 — PR Review 2.0 con teclado + IA local, y un escáner de secretos pre-commit sin red",
     heroPoint1: "8 patrones deterministas — cero apuestas con tu código",
     heroPoint2: "100 % local — tu código nunca sale de tu máquina",
     heroPoint3: "Un solo motor — Desktop, CLI, VS Code y agentes de IA",
@@ -365,12 +371,15 @@ const i18n: Record<Locale, any> = {
     heroToastSub: "1 por revisar · 0 alucinaciones",
     contribYouName: "+ ¿tú?",
     contribYouRole: "Abre tu primera PR",
+    sponsorTitle: "Apoya a GitWand",
+    sponsorSub: "GitWand es gratis y open source. GitHub Sponsors financia el tiempo de desarrollo y el hosting.",
+    sponsorCta: "Ser sponsor",
     heroH1a: "Los conflictos de merge terminan aquí.",
     heroH1b: "Recupera tu flow.",
     heroSub: "¿Esa sensación de vacío cuando 12 archivos se ponen en rojo? Se acabó. GitWand clasifica cada hunk con 8 patrones deterministas — sin adivinar, sin alucinar — resuelve solo el 95 % trivial y te entrega únicamente lo que merece tu cerebro. Nativo, gratis, MIT.",
     download: 'Descargar',
     github: 'GitHub',
-    whatsNew: 'Novedades v3.4',
+    whatsNew: 'Novedades v3.5',
     docs: 'Documentación →',
     platforms: 'macOS · Linux · Windows',
     heroTabCli: 'CLI',
@@ -453,7 +462,7 @@ const i18n: Record<Locale, any> = {
     mcRow3: "Nativo (sem Electron)",
     mcRow4: "Servidor MCP para agentes",
     agentsCta: "Explorar IA e agentes →",
-    heroAnnounce: "Novo na v3.4 — merge no nível de token, recuperação de base e uma métrica que comprova o que o motor resolve antes da IA",
+    heroAnnounce: "Novidade na v3.5 — PR Review 2.0 com teclado + IA local, e um scanner de segredos pre-commit sem rede",
     heroPoint1: "8 padrões deterministas — zero aposta com seu código",
     heroPoint2: "100 % local — seu código nunca sai da sua máquina",
     heroPoint3: "Um único motor — Desktop, CLI, VS Code e agentes de IA",
@@ -462,12 +471,15 @@ const i18n: Record<Locale, any> = {
     heroToastSub: "1 para revisar · 0 alucinações",
     contribYouName: "+ você?",
     contribYouRole: "Abra sua primeira PR",
+    sponsorTitle: "Apoie o GitWand",
+    sponsorSub: "GitWand é gratuito e open source. O GitHub Sponsors financia o tempo de desenvolvimento e a hospedagem.",
+    sponsorCta: "Ser sponsor",
     heroH1a: "Conflitos de merge terminam aqui.",
     heroH1b: "Recupere seu flow.",
     heroSub: "Aquele frio na barriga quando 12 arquivos ficam vermelhos? Acabou. O GitWand classifica cada hunk com 8 padrões deterministas — sem chutar, sem alucinar — resolve os 95 % triviais sozinho e devolve só o que merece seu cérebro. Nativo, gratuito, MIT.",
     download: 'Baixar',
     github: 'GitHub',
-    whatsNew: 'Novidades v3.4',
+    whatsNew: 'Novidades v3.5',
     docs: 'Documentação →',
     platforms: 'macOS · Linux · Windows',
     heroTabCli: 'CLI',
@@ -550,7 +562,7 @@ const i18n: Record<Locale, any> = {
     mcRow3: "原生（无 Electron）",
     mcRow4: "面向代理的 MCP 服务器",
     agentsCta: "探索 AI 与代理 →",
-    heroAnnounce: "v3.4 新功能 — token 级合并、基线恢复，以及一个量化引擎在 AI 介入前解决多少冲突的指标",
+    heroAnnounce: "v3.5 新功能 — 键盘优先的 PR Review 2.0（本地 AI 加持），以及零网络的提交前密钥扫描器",
     heroPoint1: "8 种确定性模式 — 绝不拿你的代码赌运气",
     heroPoint2: "100% 本地运行 — 代码永不离开你的机器",
     heroPoint3: "一个引擎 — 桌面端、CLI、VS Code 与 AI 代理",
@@ -559,12 +571,15 @@ const i18n: Record<Locale, any> = {
     heroToastSub: "1 个待复查 · 0 幻觉",
     contribYouName: "+ 你？",
     contribYouRole: "提交你的第一个 PR",
+    sponsorTitle: "支持 GitWand",
+    sponsorSub: "GitWand 免费且开源。GitHub Sponsors 资助开发时间与托管费用。",
+    sponsorCta: "成为赞助者",
     heroH1a: "合并冲突，到此为止。",
     heroH1b: "找回你的心流。",
     heroSub: "12 个文件同时变红的那种心凉？不会再有。GitWand 用 8 种确定性模式分类每个 hunk——不猜测、无幻觉——自动解决 95% 的简单冲突，只把真正值得你思考的部分交还给你。原生、免费、MIT。",
     download: '下载',
     github: 'GitHub',
-    whatsNew: 'v3.4 新特性',
+    whatsNew: 'v3.5 新特性',
     docs: '文档 →',
     platforms: 'macOS · Linux · Windows',
     heroTabCli: '命令行',
@@ -1217,10 +1232,10 @@ function cellClass(v: CompareValue | undefined): string {
         <div class="blog-teaser-header">
           <span class="blog-teaser-label">From the blog</span>
         </div>
-        <a href="/blog/v3-2-integrated-terminal-ai-tasks" class="blog-teaser-card">
-          <div class="blog-teaser-meta">July 2, 2026 · 9 min read</div>
-          <h3 class="blog-teaser-title">An integrated terminal built for AI agents, and a file editor in your Git client</h3>
-          <p class="blog-teaser-excerpt">v3.2 rebuilds the terminal on WebGL with typed agent tabs, adds one-click AI tasks running Claude Code in isolated scratch worktrees with a managed merge-back-or-discard lifecycle, and ships a dockable File Explorer / Editor panel backed by CodeMirror 6.</p>
+        <a href="/blog/v3-5-pr-review-2-secrets-scanner" class="blog-teaser-card">
+          <div class="blog-teaser-meta">July 10, 2026 · 9 min read</div>
+          <h3 class="blog-teaser-title">PR Review 2.0, a local secrets scanner, and smarter PR badges</h3>
+          <p class="blog-teaser-excerpt">v3.5 rebuilds in-app PR review around a keyboard-first flow and a local AI pre-review pipeline, adds a zero-network pre-commit secrets scanner, and fixes branch badges that only ever saw the first page of open PRs.</p>
           <span class="blog-teaser-cta">Read article →</span>
         </a>
       </div>
@@ -1255,6 +1270,24 @@ function cellClass(v: CompareValue | undefined): string {
               <span class="contributor-name">{{ t.contribYouName }}</span>
               <span class="contributor-role">{{ t.contribYouRole }}</span>
             </span>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════
+         13b · SPONSOR
+    ══════════════════════════════════════ -->
+    <section class="sponsor-section">
+      <div class="section-inner">
+        <div class="sponsor-card">
+          <span class="sponsor-icon" aria-hidden="true">♥</span>
+          <div class="sponsor-text">
+            <h3 class="sponsor-title">{{ t.sponsorTitle }}</h3>
+            <p class="sponsor-sub">{{ t.sponsorSub }}</p>
+          </div>
+          <a href="https://github.com/sponsors/devlint" class="btn-primary sponsor-btn" target="_blank" rel="noopener">
+            {{ t.sponsorCta }}
           </a>
         </div>
       </div>
@@ -2570,6 +2603,46 @@ function cellClass(v: CompareValue | undefined): string {
   background: rgba(124,58,237,0.10);
   border-style: dashed;
   border-color: rgba(124,58,237,0.4);
+}
+
+/* ───────────────────────────────────────────
+   SPONSOR
+─────────────────────────────────────────── */
+.sponsor-section {
+  padding: 64px 24px;
+  border-top: 1px solid var(--gw-border);
+}
+.sponsor-card {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  padding: 1.5rem 1.75rem;
+  border: 1px solid var(--gw-border);
+  border-radius: var(--gw-radius);
+  flex-wrap: wrap;
+}
+.sponsor-icon {
+  font-size: 22px;
+  color: var(--gw-purple-light);
+  flex-shrink: 0;
+}
+.sponsor-text {
+  flex: 1 1 320px;
+}
+.sponsor-title {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0 0 0.35rem;
+  color: var(--gw-text);
+}
+.sponsor-sub {
+  font-size: 0.875rem;
+  color: var(--gw-text-muted);
+  margin: 0;
+  line-height: 1.6;
+}
+.sponsor-btn {
+  flex-shrink: 0;
 }
 
 /* ───────────────────────────────────────────

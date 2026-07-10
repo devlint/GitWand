@@ -19,6 +19,10 @@ vi.mock("../../utils/backend", () => ({
   gitFileCount: vi.fn(async () => 0),
   ghForkInfo: vi.fn(async () => ({ isFork: false, origin: "", parent: "" })),
   ghPrFreshnessSignal: (...args: unknown[]) => ghPrFreshnessSignal(...args),
+  // useReviewIntelligence -> useAIProvider calls this at module load time.
+  detectClaudeCli: vi.fn(async () => ({
+    found: false, path: "", version: "", logged_in: false, status: "not_found",
+  })),
 }));
 
 vi.mock("../forge/useForge", () => ({
