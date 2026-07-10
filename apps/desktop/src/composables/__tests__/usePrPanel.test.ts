@@ -27,7 +27,8 @@ vi.mock("../forge/useForge", () => ({
 }));
 
 import { usePrPanel } from "../usePrPanel";
-import { _resetPrCacheForTesting } from "../usePrCache";
+import { _resetPrCacheForTesting, usePrCache } from "../usePrCache";
+import { forgeFromRemoteInfo } from "../forge/useForge";
 
 function makePr(n: number) {
   return {
@@ -228,5 +229,27 @@ describe("usePrPanel — background prefetch drain", () => {
 
     // Must NOT have been overwritten by the late, stale repo-a result.
     expect(panel.dockPrCount.value).toBe(9);
+  });
+
+  it("resolves the correct forge (not always GitHub) on repo-open when the repo was previously cached", async () => {
+    const gitlabGetPRCount = vi.fn().mockResolvedValue(4);
+    (forgeFromRemoteInfo as ReturnType<typeof vi.fn>).mockReturnValueOnce({
+      name: "gitlab", listPRs, createPR, mergePR, getPRCount: gitlabGetPRCount,
+    });
+    usePrCache().setRemote("/repo-b", {
+      name: "origin", url: "https://gitlab.com/x/y.git", provider: "gitlab", owner: "x", repo: "y",
+    });
+
+    const cwd = ref("/repo-a");
+    const panel = usePrPanel(cwd);
+    cwd.value = "/repo-b";
+    await nextTick(); // flush the cwd watcher
+    await nextTick(); // flush the watcher's fire-and-forget refreshDockPrCount() call
+
+    // The cached remote must resolve the gitlab provider, not fall through
+    // to the default githubProvider, before refreshDockPrCount() reads `forge`.
+    expect(gitlabGetPRCount).toHaveBeenCalledWith("/repo-b", "open");
+    expect(getPRCount).not.toHaveBeenCalled();
+    expect(panel.dockPrCount.value).toBe(4);
   });
 });

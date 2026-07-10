@@ -816,7 +816,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   watch(cwd, (newCwd) => {
     selectedPr.value = null;
     prs.value = [];
-    remote.value = null;
+    remote.value = cache.getRemote(newCwd)?.remote ?? null;
     _prsEnsured = false;
     _lastFreshnessCheck = 0;
     ++_prPrefetchToken; // invalidate any in-flight background prefetch for the old repo
