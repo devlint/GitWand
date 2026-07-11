@@ -21,6 +21,11 @@ vi.mock("@/utils/backend", async () => {
     ghPrListReviews: (...a: unknown[]) => ghPrListReviews(...a),
     ghPrDiff: (...a: unknown[]) => ghPrDiff(...a),
     ghCheckAnnotations: (...a: unknown[]) => ghCheckAnnotations(...a),
+    // usePrPreReview.analyzeFile() calls this for blame context. Left
+    // unmocked it falls through to the real dev-server fetch, which has no
+    // server to hit in this test and rejects on a timeline that varies by
+    // environment — the flaky root cause behind the fixed-sleep wait below.
+    getGitBlame: vi.fn(async () => []),
   };
 });
 
@@ -77,9 +82,19 @@ describe("useReviewIntelligence — merged stream (via usePrPanel)", () => {
     const p = usePrPanel(ref("/repo"));
     await p.selectPr({ number: 1 } as any);
     await p.loadAnnotations();
-    await new Promise((r) => setTimeout(r, 10));
 
-    const merged = p.mergedAnnotationsByFile.value["a.ts"] ?? [];
+    // The AI pre-review pass is kicked off fire-and-forget by a `watch()`
+    // inside useReviewIntelligence, not awaited by selectPr/loadAnnotations
+    // — poll the actual condition instead of guessing a fixed sleep, which
+    // was flaky whenever the pipeline's promise chain (including a real
+    // dev-server fetch for blame, now mocked above) took longer than the
+    // guessed delay on a given environment/Node version.
+    let merged = p.mergedAnnotationsByFile.value["a.ts"] ?? [];
+    for (let i = 0; i < 100 && merged.length < 2; i++) {
+      await new Promise((r) => setTimeout(r, 5));
+      merged = p.mergedAnnotationsByFile.value["a.ts"] ?? [];
+    }
+
     expect(merged.map((a) => a.source).sort()).toEqual(["ai", "ci"]);
   });
 });
