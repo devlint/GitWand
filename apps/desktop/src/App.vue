@@ -83,6 +83,7 @@ import { useResolutionMemory, type ResolutionMemoryEntry, type ResolutionStrateg
 import { useRepoTabs } from "./composables/useRepoTabs";
 import { useAiTasks } from "./composables/useAiTasks";
 import { usePinnedBranches } from "./composables/usePinnedBranches";
+import { computeCheckoutPrompt, isUpdatePromptSkipped, skipUpdatePrompt } from "./composables/useBranchUpdatePrompt";
 import { useGitRepo, type ViewMode } from "./composables/useGitRepo";
 import { useWorkspaceScope } from "./composables/useWorkspaceScope";
 import { useTheme } from "./composables/useTheme";
@@ -247,6 +248,7 @@ const {
   loadBranches,
   createBranch,
   switchBranch,
+  updateBranchFastForward,
   carryChangesToBranch,
   deleteBranch,
   deleteRemoteBranch,
@@ -1199,7 +1201,20 @@ async function handleSwitchBranch(name: string, isRemote = false) {
 }
 
 async function promptPullIfBehind() {
-  if (behindCount.value > 0 && await askConfirm({
+  const s = repoStatus.value;
+  if (!s || !repoFolderPath.value) return;
+  const kind = computeCheckoutPrompt({
+    ahead: aheadCount.value,
+    behind: behindCount.value,
+    hasUpstream: !!s.remote,
+    skipped: isUpdatePromptSkipped(repoFolderPath.value, s.branch),
+  });
+  if (kind === "update") {
+    // Behind-only, no local divergence: dedicated fast-forward prompt.
+    branchUpdatePrompt.value = { branch: s.branch, behind: behindCount.value, remote: s.remote! };
+    return;
+  }
+  if (kind === "genericPull" && await askConfirm({
     title: t("branches.pullAfterCheckoutTitle"),
     message: t("branches.pullAfterCheckout"),
     confirmLabel: t("header.pull"),
@@ -2277,6 +2292,37 @@ function askConfirm(options: {
       resolve,
     };
   });
+}
+
+// ─── Post-checkout "Update branch" prompt ────────────────
+// Shown when checking out a branch that is behind its upstream with no
+// local divergence (see useBranchUpdatePrompt.computeCheckoutPrompt).
+
+const branchUpdatePrompt = ref<{ branch: string; behind: number; remote: string } | null>(null);
+
+async function onBranchUpdateConfirm() {
+  const ctx = branchUpdatePrompt.value;
+  branchUpdatePrompt.value = null;
+  if (!ctx) return;
+  const res = await updateBranchFastForward();
+  if (res === "pop-conflict") {
+    repoError.value = t("branches.updatePopConflict");
+    viewMode.value = "changes"; // surface the conflicted files
+  } else if (res === "failed") {
+    const detail = (repoError.value ?? "").replace(/^update branch(?: \(stash pop\))?:\s*/, "");
+    repoError.value = t("branches.updateFailed", detail);
+  }
+}
+
+function onBranchUpdateContinueLocal() {
+  const ctx = branchUpdatePrompt.value;
+  branchUpdatePrompt.value = null;
+  if (ctx && repoFolderPath.value) skipUpdatePrompt(repoFolderPath.value, ctx.branch);
+}
+
+// Esc/backdrop/X — dismiss once, may re-prompt on the next checkout.
+function onBranchUpdateDismiss() {
+  branchUpdatePrompt.value = null;
 }
 
 function onGenericConfirmClose() {
@@ -3812,6 +3858,20 @@ onUnmounted(() => {
           @click="onGenericConfirmDone">
           {{ genericConfirm.confirmLabel }}
         </button>
+      </template>
+    </BaseModal>
+
+    <!-- Post-checkout "Update branch" prompt (behind-only, no divergence) -->
+    <BaseModal v-if="branchUpdatePrompt" :title="t('branches.updateAvailableTitle')" size="sm" role="alertdialog"
+      @close="onBranchUpdateDismiss">
+      <p class="ptc-desc">{{ branchUpdatePrompt.behind === 1
+        ? t('branches.updateAvailableOne', branchUpdatePrompt.branch, branchUpdatePrompt.remote)
+        : t('branches.updateAvailableMany', branchUpdatePrompt.branch, branchUpdatePrompt.behind, branchUpdatePrompt.remote) }}</p>
+      <p v-if="isDirty()" class="ptc-desc">{{ t('branches.updateDirtyHint') }}</p>
+      <template #footer>
+        <button class="bm-btn bm-btn--ghost" :title="t('branches.continueLocalHint')"
+          @click="onBranchUpdateContinueLocal">{{ t('branches.continueLocal') }}</button>
+        <button class="bm-btn bm-btn--primary" @click="onBranchUpdateConfirm">{{ t('branches.updateBranch') }}</button>
       </template>
     </BaseModal>
   </div>

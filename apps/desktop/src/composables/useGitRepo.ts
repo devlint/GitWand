@@ -49,6 +49,7 @@ import {
   gitAddToGitignore,
 } from "../utils/backend";
 import { requireOnline } from "../utils/networkGuard";
+import { clearUpdatePromptSkip } from "./useBranchUpdatePrompt";
 import { t } from "./useI18n";
 import { useWorkspaceScope } from "./useWorkspaceScope";
 
@@ -1006,6 +1007,11 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
           successMessage.value = "sync-done";
         }
         forcePushPreferred.value = false;
+        // The user chose to update — an earlier "continue on local branch"
+        // mute for this branch is obsolete, re-enable its prompt.
+        if (status.value?.branch) {
+          clearUpdatePromptSkip(folderPath.value, status.value.branch);
+        }
       }
       // Force: a pull updates remote-tracking refs and may fast-forward without
       // the fast path noticing the decoration change.
@@ -1014,6 +1020,58 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       error.value = `pull: ${err?.message ?? err}`;
     } finally {
       isPulling.value = false;
+    }
+  }
+
+  /**
+   * Post-checkout "Update branch": stash-if-dirty → pull --ff-only → pop.
+   *
+   * Used by the dedicated prompt shown when checking out a behind-only branch
+   * (behind > 0, ahead == 0). `--ff-only` fetches and fast-forwards atomically
+   * and refuses anything non-fast-forward, so a stale ahead/behind status
+   * (race since the last fetch) degrades into a clean error, never a merge.
+   *
+   * Returns:
+   * - "ok"           — branch updated (WIP restored if it was stashed)
+   * - "pop-conflict" — branch updated but the stash pop hit conflicts; git
+   *                    keeps the stash and leaves markers in the tree
+   * - "failed"       — nothing changed (WIP restored if it was stashed)
+   */
+  async function updateBranchFastForward(): Promise<"ok" | "pop-conflict" | "failed"> {
+    if (!folderPath.value) return "failed";
+    if (!(await requireOnline("pull"))) return "failed";
+    isPulling.value = true;
+    const s = status.value;
+    const dirty =
+      !!s && (s.staged.length > 0 || s.unstaged.length > 0 || s.untracked.length > 0);
+    try {
+      if (dirty) await gitStash(folderPath.value, "GitWand: update branch");
+      const result = await gitPull(folderPath.value, false, true); // --ff-only
+      if (!result.success) {
+        // The tree hasn't moved — the pop applies cleanly, restoring the WIP.
+        if (dirty) await gitStashPop(folderPath.value).catch(() => {});
+        error.value = `update branch: ${result.message}`;
+        return "failed";
+      }
+      if (dirty) {
+        try {
+          await gitStashPop(folderPath.value);
+        } catch (err: any) {
+          // Pop conflict: git keeps the stash and leaves conflict markers.
+          error.value = `update branch (stash pop): ${err?.message ?? err}`;
+          return "pop-conflict";
+        }
+      }
+      successMessage.value = "sync-done";
+      if (s?.branch) clearUpdatePromptSkip(folderPath.value, s.branch);
+      return "ok";
+    } catch (err: any) {
+      error.value = `update branch: ${err?.message ?? err}`;
+      return "failed";
+    } finally {
+      isPulling.value = false;
+      // Force: an ff moves refs without the fast path noticing — same as pull().
+      await refresh(true);
     }
   }
 
@@ -1510,6 +1568,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     amendCommit,
     push,
     pull,
+    updateBranchFastForward,
     fetch: fetchRemote,
     mergeBranch,
     mergeContinue,

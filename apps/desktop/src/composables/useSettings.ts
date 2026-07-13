@@ -276,6 +276,13 @@ export interface AppSettings {
   pinnedBranchesByRepo: Record<string, string[]>;
 
   /**
+   * Branches for which the post-checkout "Update branch" prompt is muted
+   * ("Continue on local branch"), keyed by normalised repo path (cwd).
+   * Cleared automatically when the branch is successfully pulled/updated.
+   */
+  branchUpdatePromptSkips: Record<string, string[]>;
+
+  /**
    * Number of days without a commit after which a branch receives an "Inactif"
    * badge in the sidebar. 0 = disabled. Default: 30.
    */
@@ -442,8 +449,9 @@ export const defaultAppSettings: AppSettings = {
     aiCommitBatch:  { enabled: false },
   },
   // v2.12
-  archivedBranches:       {},
-  pinnedBranchesByRepo:   {},
+  archivedBranches:        {},
+  pinnedBranchesByRepo:    {},
+  branchUpdatePromptSkips: {},
   inactiveBranchDays:     30,
   identities:             [],
   activeIdentityId:       null,

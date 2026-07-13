@@ -890,15 +890,17 @@ export async function gitPush(
 
 /**
  * Pull from remote. Supports optional rebase mode.
+ * When `ffOnly` is true, runs `git pull --ff-only` (overrides `rebase`):
+ * fetch + fast-forward atomically, refusing anything non-fast-forward.
  */
-export async function gitPull(cwd: string, rebase: boolean = false): Promise<GitPushPullResult> {
+export async function gitPull(cwd: string, rebase: boolean = false, ffOnly: boolean = false): Promise<GitPushPullResult> {
   if (isTauri()) {
-    return tauriInvoke<GitPushPullResult>("git_pull", { cwd, rebase }, IPC_TIMEOUT.NETWORK);
+    return tauriInvoke<GitPushPullResult>("git_pull", { cwd, rebase, ffOnly }, IPC_TIMEOUT.NETWORK);
   }
   const res = await devFetch(`${DEV_SERVER}/api/git-pull`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ cwd, rebase }),
+    body: JSON.stringify({ cwd, rebase, ffOnly }),
   });
   return res.json();
 }

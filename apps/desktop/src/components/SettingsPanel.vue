@@ -3,6 +3,7 @@ import { ref, computed, onMounted, watch } from "vue";
 import { useI18n } from "../composables/useI18n";
 import { useTierStats } from "../composables/useTierStats";
 import { useTheme } from "../composables/useTheme";
+import { clearAllUpdatePromptSkips } from "../composables/useBranchUpdatePrompt";
 import BaseModal from "./BaseModal.vue";
 import HooksPanel from "./HooksPanel.vue";
 import AutomationsPanel from "./AutomationsPanel.vue";
@@ -193,6 +194,7 @@ interface Settings {
   // v2.12 Branch Management & Identity
   archivedBranches: Record<string, string[]>;
   pinnedBranchesByRepo: Record<string, string[]>;
+  branchUpdatePromptSkips: Record<string, string[]>;
   inactiveBranchDays: number;
   identities: IdentityProfile[];
   activeIdentityId: string | null;
@@ -279,6 +281,7 @@ const defaultSettings: Settings = {
   // v2.12
   archivedBranches: {},
   pinnedBranchesByRepo: {},
+  branchUpdatePromptSkips: {},
   inactiveBranchDays: 30,
   identities: [],
   activeIdentityId: null,
@@ -554,6 +557,11 @@ function onTabSizeChange(val: number) {
 
 function onSwitchBehaviorChange(val: SwitchBehavior) {
   updateSetting("switchBehavior", val);
+}
+
+function onResetBranchUpdatePrompts() {
+  clearAllUpdatePromptSkips();
+  settings.value.branchUpdatePromptSkips = {};
 }
 
 function onNotificationsChange(e: Event) {
@@ -1755,6 +1763,15 @@ function deleteReleaseNoteTemplate(id: string) {
               <option value="ask">{{ t('settings.switchAsk') }}</option>
               <option value="refuse">{{ t('settings.switchRefuse') }}</option>
             </select>
+          </div>
+
+          <!-- Re-enable post-checkout "Update branch" reminders -->
+          <div class="sp-row">
+            <span class="sp-label">{{ t('settings.resetBranchUpdatePrompts') }}</span>
+            <button class="btn btn--ghost sp-btn--sm" type="button" @click="onResetBranchUpdatePrompts">
+              {{ t('settings.resetBranchUpdatePromptsBtn') }}
+            </button>
+            <span class="sp-hint">{{ t('settings.resetBranchUpdatePromptsHint') }}</span>
           </div>
 
           <!-- Commit signature -->
