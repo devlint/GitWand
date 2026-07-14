@@ -11,13 +11,7 @@
  */
 
 import { computed } from "vue";
-import { loadSettings, saveSettings, settingsRevision } from "./useSettings";
-
-// ─── helpers ─────────────────────────────────────────────────────────────────
-
-function normaliseCwd(cwd: string): string {
-  return cwd.replace(/\\/g, "/").replace(/\/+$/, "");
-}
+import { loadSettings, normaliseCwd, saveSettings, settingsRevision } from "./useSettings";
 
 // ─── actions ─────────────────────────────────────────────────────────────────
 

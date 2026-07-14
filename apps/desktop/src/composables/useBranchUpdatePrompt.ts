@@ -11,7 +11,7 @@
  * via localStorage — same shape and lifecycle as useArchivedBranches.
  */
 
-import { loadSettings, saveSettings } from "./useSettings";
+import { loadSettings, normaliseCwd, saveSettings } from "./useSettings";
 
 // ─── decision ────────────────────────────────────────────────────────────────
 
@@ -28,18 +28,15 @@ export function computeCheckoutPrompt(input: {
   ahead: number;
   behind: number;
   hasUpstream: boolean;
-  skipped: boolean;
+  /** Lazy so the settings blob is only parsed when the branch is behind-only. */
+  isSkipped: () => boolean;
 }): CheckoutPromptKind {
   if (!input.hasUpstream || input.behind <= 0) return "none";
   if (input.ahead > 0) return "genericPull";
-  return input.skipped ? "none" : "update";
+  return input.isSkipped() ? "none" : "update";
 }
 
 // ─── persistence ─────────────────────────────────────────────────────────────
-
-function normaliseCwd(cwd: string): string {
-  return cwd.replace(/\\/g, "/").replace(/\/+$/, "");
-}
 
 /** Mute the "Update branch" prompt for a branch. No-op if already muted. */
 export function skipUpdatePrompt(cwd: string, branch: string): void {
@@ -66,11 +63,4 @@ export function clearUpdatePromptSkip(cwd: string, branch: string): void {
     s.branchUpdatePromptSkips[key] = list.filter((b) => b !== branch);
     saveSettings(s);
   }
-}
-
-/** Un-mute everything, all repos (SettingsPanel "re-enable reminders"). */
-export function clearAllUpdatePromptSkips(): void {
-  const s = loadSettings();
-  s.branchUpdatePromptSkips = {};
-  saveSettings(s);
 }

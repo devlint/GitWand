@@ -1207,7 +1207,8 @@ async function promptPullIfBehind() {
     ahead: aheadCount.value,
     behind: behindCount.value,
     hasUpstream: !!s.remote,
-    skipped: isUpdatePromptSkipped(repoFolderPath.value, s.branch),
+    // Lazy: only hits the settings blob when the branch is behind-only.
+    isSkipped: () => isUpdatePromptSkipped(repoFolderPath.value!, s.branch),
   });
   if (kind === "update") {
     // Behind-only, no local divergence: dedicated fast-forward prompt.
@@ -2301,16 +2302,13 @@ function askConfirm(options: {
 const branchUpdatePrompt = ref<{ branch: string; behind: number; remote: string } | null>(null);
 
 async function onBranchUpdateConfirm() {
-  const ctx = branchUpdatePrompt.value;
   branchUpdatePrompt.value = null;
-  if (!ctx) return;
   const res = await updateBranchFastForward();
-  if (res === "pop-conflict") {
+  if (res.status === "pop-conflict") {
     repoError.value = t("branches.updatePopConflict");
     viewMode.value = "changes"; // surface the conflicted files
-  } else if (res === "failed") {
-    const detail = (repoError.value ?? "").replace(/^update branch(?: \(stash pop\))?:\s*/, "");
-    repoError.value = t("branches.updateFailed", detail);
+  } else if (res.status === "failed" && res.message) {
+    repoError.value = t("branches.updateFailed", res.message);
   }
 }
 

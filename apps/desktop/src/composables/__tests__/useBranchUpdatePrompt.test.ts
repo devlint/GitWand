@@ -13,7 +13,6 @@ import {
   skipUpdatePrompt,
   isUpdatePromptSkipped,
   clearUpdatePromptSkip,
-  clearAllUpdatePromptSkips,
 } from "../useBranchUpdatePrompt";
 
 const CWD_A = "/repos/alpha";
@@ -26,41 +25,41 @@ const CWD_B = "/repos/beta";
 describe("computeCheckoutPrompt", () => {
   it("behind-only + upstream + not muted → update", () => {
     expect(
-      computeCheckoutPrompt({ ahead: 0, behind: 3, hasUpstream: true, skipped: false }),
+      computeCheckoutPrompt({ ahead: 0, behind: 3, hasUpstream: true, isSkipped: () => false }),
     ).toBe("update");
   });
 
   it("behind-only + muted → none", () => {
     expect(
-      computeCheckoutPrompt({ ahead: 0, behind: 3, hasUpstream: true, skipped: true }),
+      computeCheckoutPrompt({ ahead: 0, behind: 3, hasUpstream: true, isSkipped: () => true }),
     ).toBe("none");
   });
 
   it("diverged (ahead>0 && behind>0) → genericPull, even when muted", () => {
     expect(
-      computeCheckoutPrompt({ ahead: 2, behind: 3, hasUpstream: true, skipped: false }),
+      computeCheckoutPrompt({ ahead: 2, behind: 3, hasUpstream: true, isSkipped: () => false }),
     ).toBe("genericPull");
     // The mute only silences the dedicated update prompt, not the generic one.
     expect(
-      computeCheckoutPrompt({ ahead: 2, behind: 3, hasUpstream: true, skipped: true }),
+      computeCheckoutPrompt({ ahead: 2, behind: 3, hasUpstream: true, isSkipped: () => true }),
     ).toBe("genericPull");
   });
 
   it("not behind → none (clean, ahead-only)", () => {
     expect(
-      computeCheckoutPrompt({ ahead: 0, behind: 0, hasUpstream: true, skipped: false }),
+      computeCheckoutPrompt({ ahead: 0, behind: 0, hasUpstream: true, isSkipped: () => false }),
     ).toBe("none");
     expect(
-      computeCheckoutPrompt({ ahead: 5, behind: 0, hasUpstream: true, skipped: false }),
+      computeCheckoutPrompt({ ahead: 5, behind: 0, hasUpstream: true, isSkipped: () => false }),
     ).toBe("none");
   });
 
   it("no upstream → none regardless of counters", () => {
     expect(
-      computeCheckoutPrompt({ ahead: 0, behind: 3, hasUpstream: false, skipped: false }),
+      computeCheckoutPrompt({ ahead: 0, behind: 3, hasUpstream: false, isSkipped: () => false }),
     ).toBe("none");
     expect(
-      computeCheckoutPrompt({ ahead: 2, behind: 3, hasUpstream: false, skipped: false }),
+      computeCheckoutPrompt({ ahead: 2, behind: 3, hasUpstream: false, isSkipped: () => false }),
     ).toBe("none");
   });
 });
@@ -106,14 +105,6 @@ describe("update-prompt skip persistence", () => {
   it("clearUpdatePromptSkip() on a non-muted branch is a no-op", () => {
     expect(() => clearUpdatePromptSkip(CWD_A, "feat/none")).not.toThrow();
     expect(isUpdatePromptSkipped(CWD_A, "feat/none")).toBe(false);
-  });
-
-  it("clearAllUpdatePromptSkips() clears every repo", () => {
-    skipUpdatePrompt(CWD_A, "feat/x");
-    skipUpdatePrompt(CWD_B, "feat/y");
-    clearAllUpdatePromptSkips();
-    expect(isUpdatePromptSkipped(CWD_A, "feat/x")).toBe(false);
-    expect(isUpdatePromptSkipped(CWD_B, "feat/y")).toBe(false);
   });
 
   it("cwd is normalised (backslashes, trailing slashes)", () => {

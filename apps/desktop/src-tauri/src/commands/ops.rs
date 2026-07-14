@@ -497,22 +497,19 @@ pub(crate) async fn git_merge_continue(cwd: String) -> Result<GitPushPullResult,
 }
 
 #[tauri::command]
-pub(crate) async fn git_pull(cwd: String, rebase: bool, ff_only: Option<bool>) -> Result<GitPushPullResult, String> {
+pub(crate) async fn git_pull(cwd: String, strategy: String) -> Result<GitPushPullResult, String> {
     let _t0 = Instant::now();
     // Pass the strategy flag EXPLICITLY so the user's pull-mode choice is
     // authoritative. A bare `git pull` defers to the ambient `pull.rebase`
     // git config, which means a user with `pull.rebase=true` would silently
     // get a rebase even when they picked "merge" in GitWand (and vice-versa).
-    //
-    // --ff-only wins over rebase: used by the post-checkout "Update branch"
-    // flow, which must never create a merge/rebase — it only advances a
-    // non-diverged local branch, and refuses cleanly if the state went stale.
-    let strategy = if ff_only.unwrap_or(false) {
-        "--ff-only"
-    } else if rebase {
-        "--rebase"
-    } else {
-        "--no-rebase"
+    // "ff-only" (post-checkout "Update branch" flow) must never create a
+    // merge/rebase — it only advances a non-diverged local branch, and
+    // refuses cleanly if the state went stale.
+    let strategy = match strategy.as_str() {
+        "rebase" => "--rebase",
+        "ff-only" => "--ff-only",
+        _ => "--no-rebase",
     };
     let _repo = repo_lock::write(&cwd);
     let output = git_cmd()

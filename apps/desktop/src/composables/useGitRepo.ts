@@ -992,7 +992,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     try {
       // Fetch all branches first (updates origin/master, etc.)
       await gitFetch(folderPath.value);
-      const result = await gitPull(folderPath.value, rebase);
+      const result = await gitPull(folderPath.value, rebase ? "rebase" : "merge");
       if (!result.success) {
         error.value = `pull: ${result.message}`;
       } else {
@@ -1035,39 +1035,40 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
    * - "ok"           — branch updated (WIP restored if it was stashed)
    * - "pop-conflict" — branch updated but the stash pop hit conflicts; git
    *                    keeps the stash and leaves markers in the tree
-   * - "failed"       — nothing changed (WIP restored if it was stashed)
+   * - "failed"       — nothing changed (WIP restored if it was stashed);
+   *                    `message` carries the raw git error for the caller
+   *                    to surface
    */
-  async function updateBranchFastForward(): Promise<"ok" | "pop-conflict" | "failed"> {
-    if (!folderPath.value) return "failed";
-    if (!(await requireOnline("pull"))) return "failed";
+  async function updateBranchFastForward(): Promise<{
+    status: "ok" | "pop-conflict" | "failed";
+    message?: string;
+  }> {
+    if (!folderPath.value) return { status: "failed" };
+    if (!(await requireOnline("pull"))) return { status: "failed" };
     isPulling.value = true;
     const s = status.value;
-    const dirty =
-      !!s && (s.staged.length > 0 || s.unstaged.length > 0 || s.untracked.length > 0);
+    const dirty = !isClean.value;
     try {
       if (dirty) await gitStash(folderPath.value, "GitWand: update branch");
-      const result = await gitPull(folderPath.value, false, true); // --ff-only
+      const result = await gitPull(folderPath.value, "ff-only");
       if (!result.success) {
         // The tree hasn't moved — the pop applies cleanly, restoring the WIP.
         if (dirty) await gitStashPop(folderPath.value).catch(() => {});
-        error.value = `update branch: ${result.message}`;
-        return "failed";
+        return { status: "failed", message: result.message };
       }
       if (dirty) {
         try {
           await gitStashPop(folderPath.value);
-        } catch (err: any) {
+        } catch {
           // Pop conflict: git keeps the stash and leaves conflict markers.
-          error.value = `update branch (stash pop): ${err?.message ?? err}`;
-          return "pop-conflict";
+          return { status: "pop-conflict" };
         }
       }
       successMessage.value = "sync-done";
       if (s?.branch) clearUpdatePromptSkip(folderPath.value, s.branch);
-      return "ok";
+      return { status: "ok" };
     } catch (err: any) {
-      error.value = `update branch: ${err?.message ?? err}`;
-      return "failed";
+      return { status: "failed", message: `${err?.message ?? err}` };
     } finally {
       isPulling.value = false;
       // Force: an ff moves refs without the fast path noticing — same as pull().

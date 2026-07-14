@@ -481,6 +481,15 @@ export const defaultAppSettings: AppSettings = {
 
 const SETTINGS_KEY = "gitwand-settings";
 
+/**
+ * Normalise a repo path used as a key in per-repo AppSettings records
+ * (archivedBranches, pinnedBranchesByRepo, branchUpdatePromptSkips, …):
+ * backslashes → "/", no trailing slash.
+ */
+export function normaliseCwd(cwd: string): string {
+  return cwd.replace(/\\/g, "/").replace(/\/+$/, "");
+}
+
 // ─── Load / save helpers ──────────────────────────────────
 
 export function loadSettings(): AppSettings {

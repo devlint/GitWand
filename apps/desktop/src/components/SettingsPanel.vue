@@ -3,7 +3,6 @@ import { ref, computed, onMounted, watch } from "vue";
 import { useI18n } from "../composables/useI18n";
 import { useTierStats } from "../composables/useTierStats";
 import { useTheme } from "../composables/useTheme";
-import { clearAllUpdatePromptSkips } from "../composables/useBranchUpdatePrompt";
 import BaseModal from "./BaseModal.vue";
 import HooksPanel from "./HooksPanel.vue";
 import AutomationsPanel from "./AutomationsPanel.vue";
@@ -560,8 +559,7 @@ function onSwitchBehaviorChange(val: SwitchBehavior) {
 }
 
 function onResetBranchUpdatePrompts() {
-  clearAllUpdatePromptSkips();
-  settings.value.branchUpdatePromptSkips = {};
+  updateSetting("branchUpdatePromptSkips", {});
 }
 
 function onNotificationsChange(e: Event) {

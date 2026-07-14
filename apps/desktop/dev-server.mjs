@@ -2099,17 +2099,17 @@ async function handleRequest(req, res) {
       }
     }
 
-    // POST /api/git-pull  { cwd, rebase?, ffOnly? }
+    // POST /api/git-pull  { cwd, strategy? }  strategy: "merge" | "rebase" | "ff-only"
     if (url.pathname === "/api/git-pull" && req.method === "POST") {
-      const { cwd, rebase, ffOnly } = await readBody(req);
+      const { cwd, strategy } = await readBody(req);
       if (!cwd) return jsonResponse(req, res, { error: "Missing cwd" }, 400);
       try {
         const resolvedCwd = resolve(cwd);
         // Explicit strategy flag so the user's pull-mode choice wins over the
         // ambient `pull.rebase` git config (parity with the Rust git_pull cmd).
-        // ffOnly wins: post-checkout "Update branch" must never merge/rebase.
-        const cmd = ffOnly ? "git pull --ff-only 2>&1"
-          : rebase ? "git pull --rebase 2>&1" : "git pull --no-rebase 2>&1";
+        const flag = strategy === "rebase" ? "--rebase"
+          : strategy === "ff-only" ? "--ff-only" : "--no-rebase";
+        const cmd = `git pull ${flag} 2>&1`;
         const stdout = execSync(cmd, {
           cwd: resolvedCwd,
           encoding: "utf-8",
