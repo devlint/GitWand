@@ -796,8 +796,25 @@ const NODE_R = 4; // node circle radius
 const GRAPH_PAD = 12; // left padding before first lane
 const SVG_MIN_W = 60; // minimum graph column width
 
-const graphWidth = computed(() => {
+const graphWidthRaw = computed(() => {
   return Math.max(SVG_MIN_W, GRAPH_PAD + (layout.value.maxLane + 1) * LANE_W + GRAPH_PAD);
+});
+
+// While a pagination burst is running, the DAG is cut mid-history: branches
+// whose merge-base sits on a page not loaded yet hold transient extra lanes,
+// so maxLane (and thus the graph column width) can spike for one page and
+// settle on the next — visible as the left column twitching. Ratchet the
+// width while loading (grow only) and re-adopt the exact computed value once
+// the burst ends, so a repo/filter switch can still shrink it.
+let _burstMaxWidth = 0;
+const graphWidth = computed(() => {
+  const w = graphWidthRaw.value;
+  if (showLoadingMore.value) {
+    if (w > _burstMaxWidth) _burstMaxWidth = w;
+    return _burstMaxWidth;
+  }
+  _burstMaxWidth = w;
+  return w;
 });
 
 const totalHeight = computed(() => renderedCommits.value.length * ROW_H);
