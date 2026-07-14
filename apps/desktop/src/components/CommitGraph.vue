@@ -1257,11 +1257,13 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
     </div>
     <div class="cg-scroll" ref="scrollContainer" @scroll="onScroll">
       <!-- SVG graph column -->
+      <!-- No viewBox: it was identity (0 0 w h) so coordinates are plain px;
+           with a viewBox the CSS width transition would stretch the drawing
+           instead of just revealing/clipping the extra lane space. -->
       <svg
         class="cg-svg"
-        :width="graphWidth"
         :height="totalHeight"
-        :viewBox="`0 0 ${graphWidth} ${totalHeight}`"
+        :style="{ width: graphWidth + 'px' }"
       >
         <defs>
           <!-- Trunk lane multi-color gradient (vibrant for nodes/edges) -->
@@ -2304,6 +2306,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
   left: 0;
   z-index: 1;
   background: var(--color-bg);
+  transition: width 0.25s ease;
 }
 
 .cg-node,
