@@ -796,8 +796,25 @@ const NODE_R = 4; // node circle radius
 const GRAPH_PAD = 12; // left padding before first lane
 const SVG_MIN_W = 60; // minimum graph column width
 
-const graphWidth = computed(() => {
+const graphWidthRaw = computed(() => {
   return Math.max(SVG_MIN_W, GRAPH_PAD + (layout.value.maxLane + 1) * LANE_W + GRAPH_PAD);
+});
+
+// While a pagination burst is running, the DAG is cut mid-history: branches
+// whose merge-base sits on a page not loaded yet hold transient extra lanes,
+// so maxLane (and thus the graph column width) can spike for one page and
+// settle on the next — visible as the left column twitching. Ratchet the
+// width while loading (grow only) and re-adopt the exact computed value once
+// the burst ends, so a repo/filter switch can still shrink it.
+let _burstMaxWidth = 0;
+const graphWidth = computed(() => {
+  const w = graphWidthRaw.value;
+  if (showLoadingMore.value) {
+    if (w > _burstMaxWidth) _burstMaxWidth = w;
+    return _burstMaxWidth;
+  }
+  _burstMaxWidth = w;
+  return w;
 });
 
 const totalHeight = computed(() => renderedCommits.value.length * ROW_H);
@@ -996,6 +1013,38 @@ function onScroll() {
 watch(() => props.commits.length, () => {
   _loadMorePending = false;
 });
+
+// Pagination loads pages in short bursts, so `loadingMore` flickers off between
+// consecutive pages — binding the spinner to it directly makes it remount (and
+// its rotation restart) on every page. Keep it visible across those gaps and
+// hide it only once no new page has started for a beat, or nothing is left.
+const showLoadingMore = ref(false);
+let _loadingHideTimer: ReturnType<typeof setTimeout> | null = null;
+function clearLoadingHideTimer() {
+  if (_loadingHideTimer !== null) {
+    clearTimeout(_loadingHideTimer);
+    _loadingHideTimer = null;
+  }
+}
+watch(() => props.loadingMore, (loading) => {
+  if (loading) {
+    clearLoadingHideTimer();
+    showLoadingMore.value = true;
+  } else if (showLoadingMore.value) {
+    clearLoadingHideTimer();
+    _loadingHideTimer = setTimeout(() => {
+      _loadingHideTimer = null;
+      showLoadingMore.value = false;
+    }, 600);
+  }
+});
+watch(() => props.hasMore, (has) => {
+  if (!has) {
+    clearLoadingHideTimer();
+    showLoadingMore.value = false;
+  }
+});
+onUnmounted(clearLoadingHideTimer);
 
 function measureViewport() {
   if (scrollContainer.value) clientHeight.value = scrollContainer.value.clientHeight;
@@ -1208,11 +1257,13 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
     </div>
     <div class="cg-scroll" ref="scrollContainer" @scroll="onScroll">
       <!-- SVG graph column -->
+      <!-- No viewBox: it was identity (0 0 w h) so coordinates are plain px;
+           with a viewBox the CSS width transition would stretch the drawing
+           instead of just revealing/clipping the extra lane space. -->
       <svg
         class="cg-svg"
-        :width="graphWidth"
         :height="totalHeight"
-        :viewBox="`0 0 ${graphWidth} ${totalHeight}`"
+        :style="{ width: graphWidth + 'px' }"
       >
         <defs>
           <!-- Trunk lane multi-color gradient (vibrant for nodes/edges) -->
@@ -1455,9 +1506,12 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
           </template>
         </div>
       </div>
-      <div v-if="hasMore" class="cg-load-more">
-        <span v-if="loadingMore" class="cg-load-more__spinner" aria-label="Loading more commits"></span>
-      </div>
+    </div>
+    <!-- Load-more indicator: overlaid bottom-right so it never reflows the graph.
+         Must NOT live inside .cg-scroll (flex row) — as a flex child it becomes
+         a phantom right column that shifts the whole tree when it appears. -->
+    <div v-if="showLoadingMore" class="cg-load-more">
+      <span class="cg-load-more__spinner" aria-label="Loading more commits"></span>
     </div>
   </div>
   <div v-else class="cg-empty muted">
@@ -2235,6 +2289,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
   display: flex;
   flex-direction: column;
   height: 100%;
+  position: relative;
 }
 
 .cg-scroll {
@@ -2251,6 +2306,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
   left: 0;
   z-index: 1;
   background: var(--color-bg);
+  transition: width 0.25s ease;
 }
 
 .cg-node,
@@ -2524,10 +2580,17 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
 }
 
 .cg-load-more {
+  position: absolute;
+  bottom: 10px;
+  right: 14px;
+  z-index: 2;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 10px 0 12px;
+  padding: 5px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  pointer-events: none;
 }
 
 .cg-load-more__spinner {
