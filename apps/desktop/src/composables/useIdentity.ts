@@ -12,13 +12,9 @@
  */
 
 import { computed } from "vue";
-import { loadSettings, saveSettings, type IdentityProfile } from "./useSettings";
+import { loadSettings, normaliseCwd, saveSettings, type IdentityProfile } from "./useSettings";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
-
-function normaliseCwd(cwd: string): string {
-  return cwd.replace(/\\/g, "/").replace(/\/+$/, "");
-}
 
 function uuid(): string {
   // Crypto UUID — supported in Tauri's WebView and modern browsers.

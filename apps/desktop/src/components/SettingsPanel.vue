@@ -193,6 +193,7 @@ interface Settings {
   // v2.12 Branch Management & Identity
   archivedBranches: Record<string, string[]>;
   pinnedBranchesByRepo: Record<string, string[]>;
+  branchUpdatePromptSkips: Record<string, string[]>;
   inactiveBranchDays: number;
   identities: IdentityProfile[];
   activeIdentityId: string | null;
@@ -279,6 +280,7 @@ const defaultSettings: Settings = {
   // v2.12
   archivedBranches: {},
   pinnedBranchesByRepo: {},
+  branchUpdatePromptSkips: {},
   inactiveBranchDays: 30,
   identities: [],
   activeIdentityId: null,
@@ -554,6 +556,10 @@ function onTabSizeChange(val: number) {
 
 function onSwitchBehaviorChange(val: SwitchBehavior) {
   updateSetting("switchBehavior", val);
+}
+
+function onResetBranchUpdatePrompts() {
+  updateSetting("branchUpdatePromptSkips", {});
 }
 
 function onNotificationsChange(e: Event) {
@@ -1755,6 +1761,15 @@ function deleteReleaseNoteTemplate(id: string) {
               <option value="ask">{{ t('settings.switchAsk') }}</option>
               <option value="refuse">{{ t('settings.switchRefuse') }}</option>
             </select>
+          </div>
+
+          <!-- Re-enable post-checkout "Update branch" reminders -->
+          <div class="sp-row">
+            <span class="sp-label">{{ t('settings.resetBranchUpdatePrompts') }}</span>
+            <button class="btn btn--ghost sp-btn--sm" type="button" @click="onResetBranchUpdatePrompts">
+              {{ t('settings.resetBranchUpdatePromptsBtn') }}
+            </button>
+            <span class="sp-hint">{{ t('settings.resetBranchUpdatePromptsHint') }}</span>
           </div>
 
           <!-- Commit signature -->

@@ -889,16 +889,23 @@ export async function gitPush(
 }
 
 /**
- * Pull from remote. Supports optional rebase mode.
+ * Pull strategy. "merge" → `--no-rebase`, "rebase" → `--rebase`,
+ * "ff-only" → `--ff-only` (fetch + fast-forward atomically, refusing
+ * anything non-fast-forward).
  */
-export async function gitPull(cwd: string, rebase: boolean = false): Promise<GitPushPullResult> {
+export type PullStrategy = "merge" | "rebase" | "ff-only";
+
+/**
+ * Pull from remote with an explicit strategy.
+ */
+export async function gitPull(cwd: string, strategy: PullStrategy = "merge"): Promise<GitPushPullResult> {
   if (isTauri()) {
-    return tauriInvoke<GitPushPullResult>("git_pull", { cwd, rebase }, IPC_TIMEOUT.NETWORK);
+    return tauriInvoke<GitPushPullResult>("git_pull", { cwd, strategy }, IPC_TIMEOUT.NETWORK);
   }
   const res = await devFetch(`${DEV_SERVER}/api/git-pull`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ cwd, rebase }),
+    body: JSON.stringify({ cwd, strategy }),
   });
   return res.json();
 }

@@ -10,15 +10,9 @@
  */
 
 import { computed } from "vue";
-import { loadSettings, saveSettings, settingsRevision } from "./useSettings";
+import { loadSettings, normaliseCwd, saveSettings, settingsRevision } from "./useSettings";
 
 const MAX_PINS = 20;
-
-// ─── helpers ─────────────────────────────────────────────────────────────────
-
-function normaliseCwd(cwd: string): string {
-  return cwd.replace(/\\/g, "/").replace(/\/+$/, "");
-}
 
 // ─── actions ─────────────────────────────────────────────────────────────────
 
