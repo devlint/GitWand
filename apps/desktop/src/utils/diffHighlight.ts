@@ -11,6 +11,12 @@ function tokenize(line: string): string[] {
   return line.match(/\S+|\s+/g) ?? [line];
 }
 
+// Word-level LCS is O(m·n). Above this token-product a single line is
+// pathological (minified bundle, long JSON/base64) and would freeze the
+// main thread — mirror packages/core/src/diff/lcs.ts's guard and fall back
+// to whole-line highlighting instead of computing per-token diffs.
+const WORD_DIFF_MAX_CELLS = 1_000_000;
+
 /** Classic LCS on token arrays — returns the common subsequence indices. */
 function lcsTokens(a: string[], b: string[]): { aIdx: Set<number>; bIdx: Set<number> } {
   const m = a.length;
@@ -81,6 +87,11 @@ function highlightLine(
 
   const srcTokens = tokenize(source);
   const refTokens = tokenize(reference);
+
+  if (srcTokens.length * refTokens.length > WORD_DIFF_MAX_CELLS) {
+    return `<span class="${cssClass}">${esc(source)}</span>`;
+  }
+
   const { aIdx } = lcsTokens(srcTokens, refTokens);
 
   let html = "";
