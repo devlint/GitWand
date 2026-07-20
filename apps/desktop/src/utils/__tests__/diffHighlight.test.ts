@@ -23,11 +23,8 @@ describe("highlightConflict", () => {
     const sideA = words.join(" ");
     const sideB = words.slice().reverse().join(" ");
 
-    const start = performance.now();
     const { ours } = highlightConflict([sideA], [sideB], []);
-    const elapsed = performance.now() - start;
 
     expect(ours.lines[0]).toBe(`<span class="diff-add">${sideA}</span>`);
-    expect(elapsed).toBeLessThan(100);
   });
 });

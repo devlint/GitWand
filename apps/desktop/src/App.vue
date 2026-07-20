@@ -3106,6 +3106,8 @@ async function onRebaseConflict() {
   viewMode.value = "changes";
   if (repoStatus.value?.conflicted.length) {
     await repoSelectFile(repoStatus.value.conflicted[0], false);
+  } else {
+    console.warn("[rebase] conflict halt reported but no conflicted files found in status");
   }
 }
 

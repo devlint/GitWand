@@ -15,6 +15,9 @@ function tokenize(line: string): string[] {
 // pathological (minified bundle, long JSON/base64) and would freeze the
 // main thread — mirror packages/core/src/diff/lcs.ts's guard and fall back
 // to whole-line highlighting instead of computing per-token diffs.
+// Lower than core's 4,000,000-cell HIRSCHBERG_THRESHOLD (line arrays there)
+// because this runs synchronously on the main thread per conflict line,
+// not once per file, so the acceptable per-call budget is smaller.
 const WORD_DIFF_MAX_CELLS = 1_000_000;
 
 /** Classic LCS on token arrays — returns the common subsequence indices. */
