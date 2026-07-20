@@ -94,6 +94,30 @@ l'historique** depuis v0.0.1.
 
 ---
 
+## Étape 2d — Mettre à jour le hero announcement (HomeLanding.vue)
+
+`website/.vitepress/theme/HomeLanding.vue` contient un pill d'annonce sur la
+hero section (`.hero-announce`, `<a class="hero-announce" href="/changelog">`)
+dont le texte vient de la clé i18n **`heroAnnounce`**, dupliquée dans les 5
+blocs de locale (`fr:`, `en:`, `es:`, `'pt-BR':`, `'zh-CN':`).
+
+> ⚠️ **`./scripts/bump-version.sh` NE met PAS à jour ce texte.** Le script ne
+> touche ce fichier que pour la constante `LATEST` (numéro de version brut) —
+> `heroAnnounce` est un texte éditorial qui décrit la feature phare de la
+> release, donc il ne peut pas être généré automatiquement. C'est l'oubli le
+> plus fréquent de ce skill : si la hero section du site affiche encore
+> "Nouveau dans la vX.Y" d'une release précédente, c'est que cette étape a été
+> sautée.
+
+1. Repérer les 5 occurrences de `heroAnnounce:` (une par bloc de locale).
+2. Réécrire chacune pour refléter la feature la plus marquante de **cette**
+   release (même angle éditorial que le titre choisi pour `website/changelog.md`
+   à l'étape 2c) — traduire dans les 5 langues, pas juste copier l'anglais.
+3. Format observé : `"Nouveau dans la vX.Y — <feature phare, court>"` (fr),
+   `"New in vX.Y — <...>"` (en), etc. — garder ce gabarit `vX.Y` (pas `vX.Y.Z`).
+
+---
+
 ## Étape 3 — Bumper la version
 
 **Ne jamais éditer les fichiers de version directement.**
@@ -107,6 +131,7 @@ Le script met à jour en une seule passe :
 - `packages/mcp/package.json`
 - `packages/mcp/server.json` + `packages/mcp/src/server.ts`
 - `website/package.json`, `README.md`, `website/.vitepress/theme/HomeLanding.vue`
+  (uniquement la constante `LATEST` — **pas** `heroAnnounce`, voir Étape 2d)
 
 ```bash
 # Depuis la racine du repo
@@ -177,5 +202,6 @@ vsce publish
 - **CHANGELOG oublié** — mettre à jour avant le commit de bump, pas après.
 - **roadmap.md oublié** — déplacer les shipped items dans le même commit de bump.
 - **website/changelog.md oublié** — doit être mis à jour dans le même commit.
+- **`heroAnnounce` oublié (HomeLanding.vue)** — `bump-version.sh` ne le touche pas (voir Étape 2d) ; la hero section du site reste bloquée sur l'annonce de la release précédente si on ne l'édite pas à la main dans les 5 locales.
 - **Push sans `--tags`** — `git push origin main` ne pousse pas les tags. Toujours `git push origin main --tags`.
 - **Tests non passés** — vérifier `pnpm test` avant de bumper, pas après.
