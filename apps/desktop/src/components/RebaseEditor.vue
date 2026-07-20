@@ -55,6 +55,11 @@ async function fetchBranches() {
 const emit = defineEmits<{
   close: [];
   done: [];
+  // A halt that is specifically a merge conflict (as opposed to an edit/split
+  // halt). The parent closes this modal and hands off to the non-blocking
+  // rebase banner + inline MergeEditor so resolution isn't trapped behind the
+  // overlay (issue #128).
+  conflict: [];
   // Destructive hard-reset of the current branch onto `base`. App-level owns the
   // confirmation, execution, refresh and error reporting (same path as the
   // "reset to origin" shortcut) — the editor only signals intent.
@@ -284,6 +289,8 @@ async function startRebase() {
   // authoritative "is the rebase still running" signal.
   if (result.success && !result.inProgress) {
     emit("done");
+  } else if (result.inProgress && result.conflict) {
+    emit("conflict");
   }
   // Otherwise, the progress banner stays visible and the UI adapts
   // (conflict UI, or "Split this commit…" button for pending-split halts).
@@ -293,6 +300,8 @@ async function doContinue() {
   const result = await rebase.rebaseContinue(props.cwd);
   if (result.success && !result.inProgress) {
     emit("done");
+  } else if (result.inProgress && result.conflict) {
+    emit("conflict");
   }
 }
 
@@ -305,6 +314,8 @@ async function doSkip() {
   const result = await rebase.rebaseSkip(props.cwd);
   if (result.success && !result.inProgress) {
     emit("done");
+  } else if (result.inProgress && result.conflict) {
+    emit("conflict");
   }
 }
 
@@ -338,6 +349,8 @@ async function handleSplitAtHead() {
       // true and the progress banner remains visible with the right affordances.
       if (result.success && !result.inProgress) {
         emit("done");
+      } else if (result.inProgress && result.conflict) {
+        emit("conflict");
       }
     },
   );

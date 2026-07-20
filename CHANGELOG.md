@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Interactive rebase now hands a conflict off to the non-blocking rebase banner + inline conflict editor instead of trapping it behind a modal (#128).
+- Fixed a UI freeze when highlighting conflicts on very long / minified lines (word-level diff now guards against pathological line lengths) (#128).
+
 ## [3.5.0] - 2026-07-10
 
 ### Added

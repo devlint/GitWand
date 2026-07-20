@@ -651,6 +651,13 @@ async function advanceToNextConflictOrFinalize() {
     await repoSelectFile(repoStatus.value.conflicted[0], false);
   } else if (isCherryPicking.value) {
     await doCherryPickContinue();
+  } else if (
+    repoOperationState.value?.state === "rebase" ||
+    repoOperationState.value?.state === "rebase_interactive"
+  ) {
+    // `git merge --continue` errors during a rebase ("no merge in progress").
+    // The rebase banner's own Continue button (RebaseProgressBanner.vue) is the
+    // correct control surface to finalize — leave it to the user (issue #128).
   } else {
     await doMergeContinue();
     showMergeSuccess.value = true;
@@ -3085,6 +3092,25 @@ async function onRebaseDone() {
   await repoRefresh();
 }
 
+/**
+ * A conflict halt during the interactive rebase (RebaseEditor's `conflict`
+ * event). Closes the modal so the non-blocking rebase banner + inline
+ * MergeEditor take over instead of trapping resolution behind the overlay
+ * (issue #128) — `edit`/`split` halts don't reach here and keep the modal open.
+ */
+async function onRebaseConflict() {
+  showRebase.value = false;
+  rebaseInitialBase.value = undefined;
+  await refreshRepoState();
+  await repoRefresh();
+  viewMode.value = "changes";
+  if (repoStatus.value?.conflicted.length) {
+    await repoSelectFile(repoStatus.value.conflicted[0], false);
+  } else {
+    console.warn("[rebase] conflict halt reported but no conflicted files found in status");
+  }
+}
+
 async function onUndoPerformed() {
   await repoRefresh();
   forcePushPreferred.value = true;
@@ -3496,7 +3522,7 @@ onUnmounted(() => {
     <!-- Interactive rebase panel -->
     <RebaseEditor v-if="showRebase && repoFolderPath" :cwd="repoFolderPath" :current-branch="repoStatus?.branch ?? ''"
       :branches="branches" :initial-base="rebaseInitialBase" @close="showRebase = false" @done="onRebaseDone"
-      @reset-onto="handleRebaseResetOnto" />
+      @conflict="onRebaseConflict" @reset-onto="handleRebaseResetOnto" />
 
 
     <!-- Stash manager (uses BaseModal, owns its own overlay) -->
