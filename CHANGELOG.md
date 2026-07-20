@@ -7,10 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.6.0] - 2026-07-20
+
+### Added
+
+- **Post-checkout "Update branch" prompt** — checking out a local branch that is behind its upstream with no divergent local commits now offers a one-click fast-forward (`git pull --ff-only`, with automatic stash/restore when the working tree is dirty) or "Continue on local branch", which mutes the prompt for that branch. The mute clears automatically after any successful pull of the branch, and can be reset globally in Settings → Git. Diverged branches (ahead and behind) keep the existing generic pull prompt (#126).
+
 ### Fixed
 
 - Interactive rebase now hands a conflict off to the non-blocking rebase banner + inline conflict editor instead of trapping it behind a modal (#128).
 - Fixed a UI freeze when highlighting conflicts on very long / minified lines (word-level diff now guards against pathological line lengths) (#128).
+- **Commit graph animation & loading layout shifts** — the SVG `viewBox` no longer stretches graph content during width transitions, the graph keeps its maximum width while loading to avoid jumping the left column, and the loading spinner is positioned absolutely so it no longer pushes content or flickers on fast page loads (#127).
 
 ## [3.5.0] - 2026-07-10
 
@@ -29,7 +36,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **PR badges: background prefetch & cache (git-log style)** — branch badges (`#<number>` on branches with an open PR) now drain further pages in the background after first paint instead of only ever seeing the first page of 10 open PRs, and an in-memory per-repo cache restores the drained list instantly on a repeat visit (branch popover reopened, tab switch back) instead of re-fetching from a cold state — the same pattern as the git-log cache/prefetch fix (#113). Non-GitHub forges get the breadth fix; the instant-restore fast path stays GitHub-only for now.
 - **PR dock badge shows a real open-PR count** — the "prs" `AppDock` badge now wires the existing forge-abstracted `getPRCount()` and refreshes on repo open/switch and on the PR list's manual refresh, instead of reading `0` until the branch popover or graph mode happened to populate the badge-path list.
 
-- **Post-checkout "Update branch" prompt** — checking out a local branch that is behind its upstream with no divergent local commits now offers a one-click fast-forward (`git pull --ff-only`, with automatic stash/restore when the working tree is dirty) or "Continue on local branch", which mutes the prompt for that branch. The mute clears automatically after any successful pull of the branch, and can be reset globally in Settings → Git. Diverged branches (ahead and behind) keep the existing generic pull prompt.
 ### Changed
 
 - **PR detail open now costs 3 forge calls on the hot path (was 6)** — revalidation on reopening an already-cached PR detail was slimmed to only the calls that can actually have changed.
@@ -1238,6 +1244,7 @@ Design-system foundations — the app header and every overlay now ride on a sha
 - 28 tests covering all patterns + real-world scenarios (package.json, Laravel routes, Vue SFC, CSS, .env files)
 
 [Unreleased]: https://github.com/devlint/GitWand/compare/v3.5.0...HEAD
+[3.6.0]: https://github.com/devlint/GitWand/compare/v3.5.0...v3.6.0
 [3.5.0]: https://github.com/devlint/GitWand/compare/v3.4.0...v3.5.0
 [3.4.0]: https://github.com/devlint/GitWand/compare/v3.3.0...v3.4.0
 [3.3.0]: https://github.com/devlint/GitWand/compare/v3.2.0...v3.3.0

@@ -5,6 +5,20 @@ description: Release history for GitWand — the native Git client with AI confl
 
 # Changelog
 
+## v3.6.0 — July 2026
+
+### Rebase conflicts no longer trap you behind a modal
+
+Hit a conflict during an interactive rebase, and GitWand used to leave you staring at a dialog with nothing to do but close it — the actual resolution tools were on the other side of an overlay you had to dismiss first. That handoff is gone: a conflict now closes the dialog automatically and drops you straight into the familiar resolution view, banner and all, with everything editable right away. While in there, a pathologically long conflicting line — a minified bundle, a giant JSON blob — could make the whole app freeze while it tried to word-diff every character; it now recognizes when a line is too long for that kind of detail and falls back to highlighting it as a whole, staying responsive no matter what's in the file.
+
+### A gentle nudge to catch your branch up
+
+Checking out a local branch that's simply fallen behind its upstream — no local commits of your own diverging from it — now offers a one-click way to catch it up: a fast-forward pull, with your uncommitted changes automatically stashed and restored around it if needed. Prefer to stay put? "Continue on local branch" silences the prompt for that branch until the next successful pull. Branches that have actually diverged in both directions still get the existing, more general pull prompt.
+
+### A steadier commit graph
+
+Paginating through a long commit history no longer jitters the graph — the loading spinner now sits quietly in the corner instead of nudging the whole view around, and resizing the graph no longer stretches its contents out of shape while it animates.
+
 ## v3.5.0 — July 2026
 
 ### PR review, rebuilt around keyboard and speed
