@@ -51,13 +51,15 @@ function detectZdiff3(conflict: RawConflict): boolean {
  * Utilisé quand zdiff3 est détecté après la classification (baseAvailability = 100).
  */
 function withBaseAvailability(cs: ConfidenceScore, baseAvailability: number, booster?: string): ConfidenceScore {
-  const { typeClassification, dataRisk, scopeImpact, fileFrequency = 0 } = cs.dimensions;
+  const { typeClassification, dataRisk, scopeImpact, fileFrequency = 0, algorithmStability = 0, postMergeRisk = 0 } = cs.dimensions;
   const raw =
     typeClassification
-    - dataRisk        * 0.40
-    - scopeImpact     * 0.15
-    - fileFrequency   * 0.10
-    + baseAvailability * 0.05;
+    - dataRisk          * 0.40
+    - scopeImpact       * 0.15
+    - fileFrequency     * 0.10
+    + baseAvailability  * 0.05
+    - algorithmStability * 0.10
+    - postMergeRisk     * 0.20;
   const score = Math.round(Math.max(0, Math.min(100, raw)));
   const boosters = booster ? [...cs.boosters, booster] : cs.boosters;
   return {
