@@ -161,5 +161,5 @@ export function classifyConflict(hunk: ClassifyInput): ClassifyResult {
   }
 
   // Unreachable — complex.detect() always returns true
-  throw new Error("[GitWand] classifyConflict: aucun pattern n'a matché (complex manquant ?)");
+  throw new Error("[GitWand] classifyConflict: no pattern matched (complex missing ?)");
 }

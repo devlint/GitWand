@@ -1821,7 +1821,7 @@ const ptBR: Locale = {
     dropAllButton: "Descartar tudo",
     dropAllTooltip: "Descartar todos os stashes",
     dropAllConfirm: "Descartar todos os stashes? Esta ação não pode ser desfeita.",
-    dropAllTitle: "Descartar todos os stashes?", // TODO: translate
+    dropAllTitle: "Descartar todos os stashes?",
     loading: "Carregando stashes…",
     empty: "Sem stashes. Use",
     emptyAction: "+ Stash",
