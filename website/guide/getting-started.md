@@ -17,6 +17,12 @@ Download the latest release for your platform:
 
 👉 [Download from GitHub Releases](https://github.com/devlint/GitWand/releases)
 
+On Windows, you can also install via winget:
+
+```bash
+winget install Devlint.GitWand
+```
+
 Open the app, select a Git repository, and you're ready to go.
 
 ## CLI

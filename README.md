@@ -116,6 +116,12 @@ Download the latest build for your platform from [GitHub Releases](https://githu
 - **Linux** — `.AppImage` or `.deb`
 - **Windows** — `.msi` or `.exe`
 
+On Windows, you can also install via [winget](https://learn.microsoft.com/windows/package-manager/):
+
+```bash
+winget install Devlint.GitWand
+```
+
 ### Running from source
 
 ```bash
