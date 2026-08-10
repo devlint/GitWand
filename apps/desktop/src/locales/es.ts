@@ -1033,8 +1033,8 @@ const es: Locale = {
     error: {
       noToken: "Autenticación de GitHub requerida — ejecuta `gh auth login` en tu terminal.",
       noRemote: "No se encontró un remote de GitHub — verifica que este repo tenga un origin de GitHub.",
-      ghNotInstalled: "GitHub CLI no instalado — instálalo desde cli.github.com.",
-      ghNotInstalledHint: "O añade tu cuenta de GitHub desde los ajustes.",
+      cliNotInstalled: "{0} no instalado — instálalo desde {1}.",
+      cliNotInstalledHint: "O añade tu cuenta de {0} desde los ajustes.",
       openSettings: "Abrir ajustes",
       unknown: "Error al cargar los pull requests.",
       retry: "Reintentar",

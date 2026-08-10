@@ -50,6 +50,18 @@ const FORGE_LABELS: Record<string, string> = {
 };
 
 /**
+ * CLI name + install URL per forge, used when `loadPrs()` detects the
+ * forge's CLI binary is missing (issue #138). Only forges backed by a CLI
+ * binary need an entry here — Bitbucket/Azure go through `curl`/OAuth, not
+ * a locally-installed CLI, so they fall back to the GitHub entry (which
+ * only ever fires if a future CLI-backed forge is added without a mapping).
+ */
+const CLI_MISSING_INFO: Record<string, { cli: string; url: string }> = {
+  github: { cli: "GitHub CLI", url: "cli.github.com" },
+  gitlab: { cli: "GitLab CLI", url: "gitlab.com/gitlab-org/cli" },
+};
+
+/**
  * Whether a PR's `mergeable` state means the branch has conflicts and cannot
  * merge. Forges spell this differently (GitHub `CONFLICTING`, GitLab
  * `CONFLICTS`, others `DIRTY`), so normalise here and reuse everywhere a
@@ -598,7 +610,8 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
         // Our own error prefix
         (msg.includes("gh") && msg.includes("installed"));
       if (isGhMissing) {
-        error.value = t("pr.error.ghNotInstalled");
+        const info = CLI_MISSING_INFO[forge.value.name] ?? CLI_MISSING_INFO.github;
+        error.value = t("pr.error.cliNotInstalled", info.cli, info.url);
         errorAction.value = "open-settings";
       } else if (msg.includes("gh auth") || msg.includes("authentication") || msg.includes("token") || msg.includes("401")) {
         error.value = t("pr.error.noToken");
