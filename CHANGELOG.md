@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Commit Tree: checking out or deleting a local branch with a `/` in its name (e.g. `test/some_experiment`) no longer truncates it to the text after the first slash once you've switched away from it — the ref-classification logic no longer assumes any slash-containing decoration is a remote branch (#137).
+
 ## [3.6.0] - 2026-07-20
 
 ### Added
