@@ -48,17 +48,11 @@ export function labelFromScore(score: number): Confidence {
  *           − algorithmStability × 0.10
  *           − postMergeRisk      × 0.20`
  *
- * Toutes les dimensions sauf les trois premières sont optionnelles (défaut 0).
+ * Prend la forme exacte de `ConfidenceScore["dimensions"]` (voir types.ts pour
+ * la plage et la sémantique de chaque champ) — `algorithmStability` et
+ * `postMergeRisk` y sont déjà optionnels, défaut 0 ici si absents.
  */
-export function scoreFromDimensions(dimensions: {
-  typeClassification: number;
-  dataRisk: number;
-  scopeImpact: number;
-  fileFrequency?: number;
-  baseAvailability?: number;
-  algorithmStability?: number;
-  postMergeRisk?: number;
-}): { score: number; label: Confidence } {
+export function scoreFromDimensions(dimensions: ConfidenceScore["dimensions"]): { score: number; label: Confidence } {
   const {
     typeClassification,
     dataRisk,
