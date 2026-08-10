@@ -283,6 +283,23 @@ fn get_or_create_install_id() -> String {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // On some Linux setups (VMs, older Mesa drivers, missing GPU passthrough)
+    // WebKitGTK fails to create a hardware-accelerated EGL context and
+    // aborts the whole process with `Could not create default EGL display:
+    // EGL_BAD_PARAMETER. Aborting...` before any window is ever shown —
+    // reported as a terminal-visible abort on Ubuntu 26.04 (#135) and as a
+    // silent "app won't open" when launched from a .deb-installed GUI
+    // launcher on Linux Mint 22 (#139). These env vars must be set before
+    // the webview is created (WebKitGTK reads them at that point), so this
+    // has to run before `tauri::Builder::default()...run(...)` below.
+    // Forcing software rendering here lets the app degrade gracefully
+    // instead of aborting. No-op on macOS/Windows.
+    #[cfg(target_os = "linux")]
+    {
+        std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
+
     // macOS GUI apps launched from Finder/Dock get a minimal launchd env
     // (no SSH_AUTH_SOCK, GH_TOKEN, XDG_*, or anything from ~/.zshrc).
     // Subprocess like `gh`, `claude`, `codex` then hang on auth/network

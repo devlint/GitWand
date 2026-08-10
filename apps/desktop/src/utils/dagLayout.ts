@@ -275,21 +275,37 @@ export function computeDagLayout(
   return { nodes, edges, maxLane };
 }
 
-/** Parse ref decoration string into individual labels, sorted by priority (branch > remote > tag > head) */
-export function parseRefs(refs: string): Array<{ type: "head" | "branch" | "remote" | "tag" | "stash"; name: string }> {
+/**
+ * Parse ref decoration string into individual labels, sorted by priority
+ * (branch > remote > tag > head).
+ *
+ * IMPORTANT (#137): a ref name containing `/` is NOT necessarily a remote
+ * tracking ref of shape `<remote>/<branch>` — a local branch created with a
+ * slash in its name (e.g. `test/some_experiment`) decorates identically once
+ * it's no longer checked out (no `HEAD -> ` prefix). This function has no
+ * way to tell the two apart from the string alone, so it deliberately does
+ * NOT guess "remote" from the presence of `/`. Such refs are tagged
+ * `"ambiguous"` here; CommitGraph.vue's `commitRefs()` is the sole authority
+ * that resolves `"ambiguous"` into a real `"branch"` or `"remote"` using the
+ * ground-truth branch list (and defaults to `"branch"` when it can't tell,
+ * since an unresolved local branch is far more likely than a genuine remote
+ * ref nobody could match).
+ */
+export function parseRefs(refs: string): Array<{ type: "head" | "branch" | "remote" | "tag" | "stash" | "ambiguous"; name: string }> {
   if (!refs) return [];
   const parsed = refs.split(",").map((r) => r.trim()).filter(Boolean).map((r) => {
     if (r === "HEAD") return { type: "head" as const, name: "HEAD" };
     if (r.startsWith("HEAD -> ")) return { type: "branch" as const, name: r.slice(8) };
     if (r.startsWith("tag: ")) return { type: "tag" as const, name: r.slice(5) };
     if (r === "refs/stash" || r === "stash") return { type: "stash" as const, name: "stash" };
-    if (r.includes("/")) return { type: "remote" as const, name: r };
+    if (r.includes("/")) return { type: "ambiguous" as const, name: r };
     return { type: "branch" as const, name: r };
   });
 
-  // Sort: Branch (local) > Remote > Tag > Stash > HEAD (detached)
+  // Sort: Branch (local) > Ambiguous > Remote > Tag > Stash > HEAD (detached)
   const weights: Record<string, number> = {
     branch: 1,
+    ambiguous: 1.5,
     remote: 2,
     tag: 3,
     stash: 4,

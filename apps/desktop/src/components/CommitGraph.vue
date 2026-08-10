@@ -332,7 +332,13 @@ const branchToDelete = computed(() => {
     );
     return { name, localName: name, remoteName: remote?.name, hasLocal: true, hasRemote: !!remote };
   } else if (type === "remote") {
-    // Remote tracking branch (e.g. origin/main)
+    // Remote tracking branch (e.g. origin/main). `type === "remote"` is only
+    // ever set by commitRefs() after confirming a match against
+    // props.branches with isRemote: true (#137) — it is never a guess from
+    // the presence of `/` in the display name, so slicing off the first `/`
+    // here is safe: git *remote names* (the "origin" in "origin/main") never
+    // contain `/`, even when the branch itself does (`origin/feature/foo` ->
+    // base name `feature/foo`, only the first segment is stripped).
     const remote = props.branches.find((b) => b.name === name && b.isRemote);
     // Extract base name from remote name (e.g. origin/main -> main)
     const slashIdx = name.indexOf("/");
@@ -361,6 +367,24 @@ function onCtxDeleteBranch() {
   emit("delete-branch", b.name, b.hasLocal, b.hasRemote, b.remoteName);
   closeCommitContextMenu();
 }
+
+/**
+ * The git-facing name to pass to `checkout-branch` for the right-clicked
+ * ref. Only a CONFIRMED remote-tracking ref (`clickedBranchType === "remote"`,
+ * set by commitRefs() after matching props.branches — never a guess from the
+ * presence of `/` in the display name) has its remote prefix stripped here.
+ * For every other type — including a local branch whose name itself
+ * contains `/`, e.g. `test/some_experiment` — the display name IS the
+ * git-facing name; blindly slicing off the first `/` regardless of a
+ * confirmed match used to truncate such local branches (#137).
+ */
+const clickedBranchCheckoutName = computed(() => {
+  const name = ctxMenu.value.clickedBranch;
+  if (!name) return undefined;
+  if (ctxMenu.value.clickedBranchType !== "remote") return name;
+  const slashIdx = name.indexOf("/");
+  return slashIdx !== -1 ? name.slice(slashIdx + 1) : name;
+});
 
 /**
  * A right-clicked local branch that is checked out in a worktree. Plain
@@ -525,8 +549,13 @@ const displayCommits = computed(() => {
   let headCommit: GitLogEntry | undefined;
 
   if (props.currentBranch) {
+    // Include "ambiguous" (a slash-containing name parseRefs() couldn't
+    // classify on its own, see #137) — the name equality check below is
+    // the actual discriminator here, not the type.
     headCommit = props.commits.find((e) =>
-      parseRefs(e.refs).some((r) => (r.type === "branch" || r.type === "remote") && r.name === props.currentBranch)
+      parseRefs(e.refs).some(
+        (r) => (r.type === "branch" || r.type === "remote" || r.type === "ambiguous") && r.name === props.currentBranch,
+      )
     );
   }
 
@@ -592,8 +621,11 @@ const layout = computed<DagLayout>(() => {
     let trunkHash: string | undefined;
     for (const commit of commits) {
       const refs = parseRefs(commit.refs);
+      // Include "ambiguous" so `origin/main` (a slash-containing name
+      // parseRefs() can't classify on its own, see #137) still matches here
+      // — TRUNK_NAMES.has(...) already strips any remote prefix below.
       if (refs.some((r) =>
-        (r.type === "branch" || r.type === "remote") &&
+        (r.type === "branch" || r.type === "remote" || r.type === "ambiguous") &&
         TRUNK_NAMES.has(r.name.includes("/") ? r.name.split("/").pop()! : r.name)
       )) {
         trunkHash = commit.hashFull;
@@ -906,17 +938,33 @@ function commitRefs(entry: GitLogEntry) {
     refs.push({ type: 'stash' as const, name: 'stash' });
   }
 
-  // Re-classify refs using props.branches (v2.14)
-  // parseRefs is generic and thinks anything with a '/' is remote.
-  // We use our ground-truth branches list to fix this.
+  // Re-classify refs using props.branches (v2.14).
+  // parseRefs() cannot tell a genuine remote ref (`origin/main`) apart from a
+  // local branch whose name happens to contain a `/` (`test/some_experiment`)
+  // — both decorate identically once not checked out — so it tags any
+  // slash-containing name "ambiguous" rather than guessing. This function is
+  // the SOLE authority that resolves "ambiguous" (and double-checks
+  // "branch"/"remote") against the ground-truth branch list.
+  //
+  // #137: when no match is found (e.g. props.branches is empty/stale right
+  // after a repo/tab switch), an unresolved "ambiguous" ref now defaults to
+  // "branch" (a local branch), NOT "remote" — an unmatched slash-containing
+  // name is far more likely to be a local branch GitWand hasn't loaded yet
+  // than a genuine remote ref. Getting this wrong used to make downstream
+  // context-menu actions strip everything up to the first `/`, truncating
+  // local branch names like `test/some_experiment` to `some_experiment` for
+  // both checkout and delete.
   const reclassified = refs.map(r => {
-    if (r.type === 'branch' || r.type === 'remote') {
+    if (r.type === 'branch' || r.type === 'remote' || r.type === 'ambiguous') {
       const match = props.branches?.find(b => b.name === r.name);
       if (match) {
         return { ...r, type: (match.isRemote ? 'remote' : 'branch') as 'remote' | 'branch' };
       }
+      if (r.type === 'ambiguous') {
+        return { ...r, type: 'branch' as const };
+      }
     }
-    return r;
+    return r as { type: 'head' | 'branch' | 'remote' | 'tag' | 'stash'; name: string };
   });
 
   // Filter out redundant remote tracking branches and noise (v2.14)
@@ -1572,7 +1620,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
           :class="{ 'commit-ctx-menu-item--disabled': isCheckoutDisabled }"
           role="menuitem"
           :title="isCheckoutDisabled ? t('commitCtx.checkoutHeadDisabled') : t('commitCtx.checkoutHint')"
-          @click="!isCheckoutDisabled && (ctxMenu.clickedBranch ? (emit('checkout-branch', ctxMenu.clickedBranchType === 'remote' ? ctxMenu.clickedBranch.slice(ctxMenu.clickedBranch.indexOf('/') + 1) : ctxMenu.clickedBranch, ctxMenu.clickedBranchType === 'remote'), closeCommitContextMenu()) : onCtxEmit('checkout-commit'))"
+          @click="!isCheckoutDisabled && (ctxMenu.clickedBranch ? (emit('checkout-branch', clickedBranchCheckoutName!, ctxMenu.clickedBranchType === 'remote'), closeCommitContextMenu()) : onCtxEmit('checkout-commit'))"
         >
           <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <circle cx="8" cy="8" r="3" stroke="currentColor" stroke-width="1.4"/>

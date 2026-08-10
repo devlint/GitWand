@@ -86,6 +86,23 @@ fn gl_state(state: &str) -> String {
     }
 }
 
+/// Map our canonical MR state ("opened"/"closed"/"merged"/"all") to the
+/// corresponding `glab mr list` boolean flag.
+///
+/// Unlike `gh`, `glab mr list` has no generic `--state <value>` flag — it
+/// exposes one boolean flag per state (`--opened` is the CLI's own default,
+/// plus `--closed` / `--merged` / `--all`). Passing `--state <value>` (the
+/// `gh` convention) is rejected by `glab` with "Unknown flag: --state"
+/// (issue #138).
+fn gl_state_flag(state: &str) -> &'static str {
+    match state {
+        "closed" => "--closed",
+        "merged" => "--merged",
+        "all" => "--all",
+        _ => "--opened",
+    }
+}
+
 // ─── MR → PullRequest mapping ─────────────────────────────────────────────────
 
 /// Map a GitLab MR JSON object to a PullRequest.
@@ -221,12 +238,7 @@ pub(crate) async fn gl_list_mrs(
     limit: Option<i64>,
     offset: Option<i64>,
 ) -> Result<Vec<PullRequest>, String> {
-    let st = match state.as_str() {
-        "closed" => "closed",
-        "merged" => "merged",
-        "all" => "all",
-        _ => "opened",
-    };
+    let flag = gl_state_flag(&state);
     let page = limit.unwrap_or(10).max(1);
     let off = offset.unwrap_or(0).max(0);
     let total = (page + off).to_string();
@@ -234,7 +246,7 @@ pub(crate) async fn gl_list_mrs(
     let output = hidden_cmd("glab")
         .args([
             "mr", "list",
-            "--state", st,
+            flag,
             "--per-page", &total,
             "--output", "json",
         ])
@@ -298,14 +310,9 @@ pub(crate) async fn gl_list_mrs(
 /// Returns 0 on non-fatal errors so the Launchpad badge can still render.
 #[tauri::command]
 pub(crate) async fn gl_mr_count(cwd: String, state: String) -> Result<i64, String> {
-    let st = match state.as_str() {
-        "closed" => "closed",
-        "merged" => "merged",
-        "all" => "all",
-        _ => "opened",
-    };
+    let flag = gl_state_flag(&state);
     let output = hidden_cmd("glab")
-        .args(["mr", "list", "--state", st, "--per-page", "100", "--output", "json"])
+        .args(["mr", "list", flag, "--per-page", "100", "--output", "json"])
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("glab mr count: {}", e))?;
@@ -1372,5 +1379,36 @@ mod gl_list_issues_tests {
         assert_eq!(i.labels, vec!["bug".to_string(), "p1".to_string()]);
         assert_eq!(i.milestone, "M1");
         assert_eq!(i.url, "https://gitlab.com/o/r/-/issues/12");
+    }
+}
+
+/// Issue #138 — `glab mr list` has no generic `--state <value>` flag like
+/// `gh`; it takes one boolean flag per state. Regression coverage for
+/// `gl_state_flag`, consumed by both `gl_list_mrs` and `gl_mr_count`'s
+/// `hidden_cmd("glab").args([...])` argument construction.
+#[cfg(test)]
+mod gl_state_flag_tests {
+    use super::gl_state_flag;
+
+    #[test]
+    fn maps_closed_to_the_closed_flag() {
+        assert_eq!(gl_state_flag("closed"), "--closed");
+    }
+
+    #[test]
+    fn maps_merged_to_the_merged_flag() {
+        assert_eq!(gl_state_flag("merged"), "--merged");
+    }
+
+    #[test]
+    fn maps_all_to_the_all_flag() {
+        assert_eq!(gl_state_flag("all"), "--all");
+    }
+
+    #[test]
+    fn maps_opened_and_any_other_value_to_the_opened_flag() {
+        assert_eq!(gl_state_flag("opened"), "--opened");
+        assert_eq!(gl_state_flag("open"), "--opened");
+        assert_eq!(gl_state_flag(""), "--opened");
     }
 }
