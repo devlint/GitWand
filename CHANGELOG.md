@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Linux: force WebKitGTK software-rendering fallback (`WEBKIT_DISABLE_COMPOSITING_MODE`, `WEBKIT_DISABLE_DMABUF_RENDERER`) before the webview is created, so the app degrades gracefully instead of aborting on systems without a working EGL/GPU context (`Could not create default EGL display: EGL_BAD_PARAMETER. Aborting...`) (#135, #139).
 - Settings → Git → Committer Identities now update immediately after adding, editing, or deleting an identity, instead of requiring the settings popover to be closed and reopened (#140).
 
 ## [3.6.0] - 2026-07-20
