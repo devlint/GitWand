@@ -297,7 +297,7 @@ export async function resolveAsync(
   if (llmEnabled) setLlmFallbackEnabled(false);
 
   if (options.verbose && llmEnabled && result.resolutions.some((r) => !r.autoResolved && r.hunk.type === "llm_proposed")) {
-    console.error("[GitWand] LLM fallback activé — phase 5 en attente des hunks llm_proposed non résolus.");
+    console.error("[GitWand] LLM fallback triggered — phase 5 waiting for unresolved llm_proposed hunks.");
   }
 
   // Rien à valider si la résolution n'est pas complète et pas de LLM fallback
