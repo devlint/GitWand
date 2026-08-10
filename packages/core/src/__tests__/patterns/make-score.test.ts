@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { makeScore } from "../../patterns/utils.js";
+import { makeScore, scoreFromDimensions } from "../../patterns/utils.js";
 
 describe("makeScore — rétro-compat v1.4", () => {
   it("sans algorithmStability, score identique à la formule v1.4", () => {
@@ -49,5 +49,34 @@ describe("makeScore — algorithmStability (v2.1)", () => {
     const s = makeScore(0, 100, 100, [], [], 100, 0, 100);
     expect(s.score).toBe(0);
     expect(s.label).toBe("low");
+  });
+});
+
+describe("scoreFromDimensions — clamp aux bornes 0–100", () => {
+  it("clamp à 100 quand les bonus dépassent le plafond", () => {
+    // raw = 100 (typeClassification) + 100×0.05 (baseAvailability) = 105 → clamp 100.
+    const { score, label } = scoreFromDimensions({
+      typeClassification: 100,
+      dataRisk: 0,
+      scopeImpact: 0,
+      fileFrequency: 0,
+      baseAvailability: 100,
+    });
+    expect(score).toBe(100);
+    expect(label).toBe("certain");
+  });
+
+  it("clamp à 0 quand les pénalités cumulées dépassent le score de base", () => {
+    const { score, label } = scoreFromDimensions({
+      typeClassification: 10,
+      dataRisk: 100,
+      scopeImpact: 100,
+      fileFrequency: 100,
+      baseAvailability: 0,
+      algorithmStability: 100,
+      postMergeRisk: 100,
+    });
+    expect(score).toBe(0);
+    expect(label).toBe("low");
   });
 });

@@ -35,9 +35,11 @@ export function labelFromScore(score: number): Confidence {
 }
 
 /**
- * Construit un ConfidenceScore à partir des dimensions et des justifications.
+ * Calcule `{ score, label }` à partir des dimensions d'un ConfidenceScore.
  *
- * Formule v2.4 :
+ * Formule v2.4 — seule copie de cette formule dans le codebase. `makeScore`
+ * et `withBaseAvailability` (parser.ts) délèguent tous les deux ici pour
+ * qu'un futur changement de formule n'ait qu'un seul endroit à modifier :
  *   `score = typeClassification
  *           − dataRisk           × 0.40
  *           − scopeImpact        × 0.15
@@ -45,6 +47,35 @@ export function labelFromScore(score: number): Confidence {
  *           + baseAvailability   × 0.05
  *           − algorithmStability × 0.10
  *           − postMergeRisk      × 0.20`
+ *
+ * Prend la forme exacte de `ConfidenceScore["dimensions"]` (voir types.ts pour
+ * la plage et la sémantique de chaque champ) — `algorithmStability` et
+ * `postMergeRisk` y sont déjà optionnels, défaut 0 ici si absents.
+ */
+export function scoreFromDimensions(dimensions: ConfidenceScore["dimensions"]): { score: number; label: Confidence } {
+  const {
+    typeClassification,
+    dataRisk,
+    scopeImpact,
+    fileFrequency = 0,
+    baseAvailability = 0,
+    algorithmStability = 0,
+    postMergeRisk = 0,
+  } = dimensions;
+  const raw =
+    typeClassification
+    - dataRisk            * 0.40
+    - scopeImpact         * 0.15
+    - fileFrequency       * 0.10
+    + baseAvailability    * 0.05
+    - algorithmStability  * 0.10
+    - postMergeRisk       * 0.20;
+  const score = Math.round(Math.max(0, Math.min(100, raw)));
+  return { score, label: labelFromScore(score) };
+}
+
+/**
+ * Construit un ConfidenceScore à partir des dimensions et des justifications.
  *
  * Tous les paramètres après `penalties` sont optionnels (défaut 0). Les
  * dimensions optionnelles (`algorithmStability`, `postMergeRisk`) ne sont
@@ -62,15 +93,15 @@ export function makeScore(
   algorithmStability = 0,
   postMergeRisk = 0,
 ): ConfidenceScore {
-  const raw =
-    typeClassification
-    - dataRisk            * 0.40
-    - si                  * 0.15
-    - fileFrequency       * 0.10
-    + baseAvailability    * 0.05
-    - algorithmStability  * 0.10
-    - postMergeRisk       * 0.20;
-  const score = Math.round(Math.max(0, Math.min(100, raw)));
+  const { score, label } = scoreFromDimensions({
+    typeClassification,
+    dataRisk,
+    scopeImpact: si,
+    fileFrequency,
+    baseAvailability,
+    algorithmStability,
+    postMergeRisk,
+  });
   const dimensions: ConfidenceScore["dimensions"] = {
     typeClassification,
     dataRisk,
@@ -86,7 +117,7 @@ export function makeScore(
   }
   return {
     score,
-    label: labelFromScore(score),
+    label,
     dimensions,
     boosters,
     penalties,
