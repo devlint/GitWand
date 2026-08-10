@@ -310,6 +310,77 @@ pub(crate) fn git_cmd() -> std::process::Command {
     hidden_cmd(&git_binary())
 }
 
+/// Resolve the repo's mainline branch name for commands that need a "main"
+/// reference point (ahead/behind counts, "merged into main" checks, top-author
+/// stats per branch). Shared by `commands::ops` and `commands::read` so the
+/// fallback chain lives in exactly one place (#136).
+///
+/// Tried in order, each verified with `git rev-parse --verify <name>` before
+/// being accepted:
+/// 1. `configured` — the user's Settings > Git > Default Branch, if non-empty.
+/// 2. The remote's default branch, via `origin/HEAD`'s symref (handles a
+///    mainline like `develop`/`trunk` that isn't named `main`/`master` but
+///    that the remote already points at).
+/// 3. `main`, `master`, `origin/main`, `origin/master`.
+/// 4. The current branch (`rev-parse --abbrev-ref HEAD`) — this always
+///    resolves in a non-empty repo, so it replaces the old hardcoded `"main"`
+///    literal that caused `fatal: failed to find 'main'` (#136) whenever none
+///    of the above candidates existed.
+pub(crate) fn resolve_default_branch(cwd: &str, configured: Option<&str>) -> String {
+    let verify = |name: &str| -> bool {
+        git_cmd()
+            .args(["rev-parse", "--verify", name])
+            .current_dir(cwd)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    };
+
+    if let Some(name) = configured {
+        let name = name.trim();
+        if !name.is_empty() && verify(name) {
+            return name.to_string();
+        }
+    }
+
+    if let Ok(output) = git_cmd()
+        .args(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"])
+        .current_dir(cwd)
+        .output()
+    {
+        if output.status.success() {
+            // e.g. "origin/main" -> "main"
+            let short = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if let Some((_, name)) = short.split_once('/') {
+                if !name.is_empty() && verify(name) {
+                    return name.to_string();
+                }
+            }
+        }
+    }
+
+    for name in ["main", "master", "origin/main", "origin/master"] {
+        if verify(name) {
+            return name.to_string();
+        }
+    }
+
+    if let Ok(output) = git_cmd()
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .current_dir(cwd)
+        .output()
+    {
+        if output.status.success() {
+            let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !name.is_empty() && name != "HEAD" {
+                return name;
+            }
+        }
+    }
+
+    "main".to_string()
+}
+
 /// Returns the list of files that differ between two revs (names only).
 /// Shared between `commands::read::preview_merge` and the rebase preview in
 /// `commands::ops::*`.
@@ -369,6 +440,123 @@ mod tests {
     /// Build an env-lookup closure backed by a fixed map (no global state).
     fn lookup<'a>(map: &'a HashMap<&'a str, &'a str>) -> impl Fn(&str) -> Option<String> + 'a {
         move |k: &str| map.get(k).map(|s| s.to_string())
+    }
+
+    // ── resolve_default_branch (#136) ──────────────────────────────────────
+
+    mod resolve_default_branch_tests {
+        use super::super::resolve_default_branch;
+        use std::path::PathBuf;
+        use std::process::Command;
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+        struct TempRepo {
+            path: PathBuf,
+        }
+        impl Drop for TempRepo {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.path);
+            }
+        }
+        impl TempRepo {
+            /// A fresh repo whose only branch is `trunk` — neither `main` nor
+            /// `master` exist, and there is no remote.
+            fn new_trunk() -> Self {
+                let n = COUNTER.fetch_add(1, Ordering::SeqCst);
+                let pid = std::process::id();
+                let nanos = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos();
+                let dir = std::env::temp_dir().join(format!(
+                    "gitwand-resolve-default-branch-test-{}-{}-{}",
+                    pid, n, nanos
+                ));
+                std::fs::create_dir_all(&dir).unwrap();
+                let repo = TempRepo { path: dir };
+                repo.git_ok(&["init", "-q", "-b", "trunk"]);
+                repo.git_ok(&["config", "user.name", "Test"]);
+                repo.git_ok(&["config", "user.email", "test@example.com"]);
+                repo.git_ok(&["config", "commit.gpgsign", "false"]);
+                repo.write("README.md", "hello\n");
+                repo.git_ok(&["add", "-A"]);
+                repo.git_ok(&["commit", "-q", "-m", "init"]);
+                repo
+            }
+            fn cwd(&self) -> String {
+                self.path.to_str().unwrap().to_string()
+            }
+            fn write(&self, rel: &str, content: &str) {
+                std::fs::write(self.path.join(rel), content).unwrap();
+            }
+            fn git(&self, args: &[&str]) -> std::process::Output {
+                Command::new(crate::git::cmd::git_binary())
+                    .args(args)
+                    .current_dir(&self.path)
+                    .output()
+                    .unwrap_or_else(|e| panic!("git {:?} spawn: {}", args, e))
+            }
+            fn git_ok(&self, args: &[&str]) {
+                let out = self.git(args);
+                assert!(
+                    out.status.success(),
+                    "git {:?} failed: {}",
+                    args,
+                    String::from_utf8_lossy(&out.stderr)
+                );
+            }
+        }
+
+        #[test]
+        fn falls_back_to_current_branch_when_nothing_matches() {
+            // No "main"/"master", no remote, no configured setting — must
+            // resolve to the actual current branch ("trunk"), never the
+            // hardcoded literal "main" (#136: this used to make the
+            // subsequent `git branch --format=...%(ahead-behind:main)`
+            // fail with "fatal: failed to find 'main'").
+            let repo = TempRepo::new_trunk();
+            assert_eq!(resolve_default_branch(&repo.cwd(), None), "trunk");
+        }
+
+        #[test]
+        fn prefers_configured_branch_when_it_resolves() {
+            // Even with "main" also present, an explicitly configured
+            // default branch (Settings > Git > Default Branch) wins.
+            let repo = TempRepo::new_trunk();
+            repo.git_ok(&["branch", "main"]);
+            assert_eq!(
+                resolve_default_branch(&repo.cwd(), Some("trunk")),
+                "trunk"
+            );
+        }
+
+        #[test]
+        fn ignores_configured_branch_that_does_not_exist() {
+            // A stale/mistyped setting must not be trusted blindly — fall
+            // through to the rest of the chain (here: current branch).
+            let repo = TempRepo::new_trunk();
+            assert_eq!(
+                resolve_default_branch(&repo.cwd(), Some("does-not-exist")),
+                "trunk"
+            );
+        }
+
+        #[test]
+        fn prefers_main_over_current_branch_when_main_exists() {
+            // Baseline: unchanged behavior when "main" is a real branch and
+            // nothing is explicitly configured.
+            let repo = TempRepo::new_trunk();
+            repo.git_ok(&["branch", "main"]);
+            assert_eq!(resolve_default_branch(&repo.cwd(), None), "main");
+        }
+
+        #[test]
+        fn empty_configured_string_is_treated_as_unset() {
+            let repo = TempRepo::new_trunk();
+            assert_eq!(resolve_default_branch(&repo.cwd(), Some("  ")), "trunk");
+        }
     }
 
     #[test]

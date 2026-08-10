@@ -13,6 +13,7 @@ import { getGitBranches, type GitBranch } from "../utils/backend";
 import { branchSort } from "../utils/branchSort";
 import { useAIProvider } from "../composables/useAIProvider";
 import { useSquashSuggestion, type SquashSuggestion } from "../composables/useSquashSuggestion";
+import { useSettings } from "../composables/useSettings";
 import BaseModal from "./BaseModal.vue";
 import AiSparkle from "./AiSparkle.vue";
 
@@ -30,13 +31,15 @@ const branchesLoading = ref(false);
 // which left the modal blank with no explanation.
 const branchError = ref<string | null>(null);
 
+const { settings } = useSettings();
+
 async function fetchBranches() {
   branchesLoading.value = true;
   branchError.value = null;
   try {
     // Sort once here (order is invariant across filter keystrokes) using the
     // app-wide canonical branch ordering.
-    localBranches.value = (await getGitBranches(props.cwd)).sort(branchSort);
+    localBranches.value = (await getGitBranches(props.cwd, settings.value.defaultBranch)).sort(branchSort);
   } catch (e: any) {
     branchError.value = e?.message ?? String(e);
   } finally {

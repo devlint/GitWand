@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, inject } from "vue";
 import { gitListTags, getGitBranches, gitExec, type GitBranch } from "../utils/backend";
 import { useI18n } from "../composables/useI18n";
+import { useSettings } from "../composables/useSettings";
 import { useReleaseNotes, FROM_PROJECT_START } from "../composables/useReleaseNotes";
 import BaseModal from "./BaseModal.vue";
 import { OPEN_SETTINGS_KEY } from "../composables/branchPickerBridge";
@@ -80,10 +81,12 @@ async function previousBranch(localNames: string[]): Promise<string> {
   return valid[0]?.name ?? "";
 }
 
+const { settings } = useSettings();
+
 onMounted(async () => {
   selectedTemplateId.value = getActiveTemplateId(props.cwd);
   const [, tags, headSha] = await Promise.all([
-    getGitBranches(props.cwd)
+    getGitBranches(props.cwd, settings.value.defaultBranch)
       .then((b) => { branches.value = b; })
       .catch(() => { branches.value = []; }),
     gitListTags(props.cwd).catch(() => []),

@@ -37,6 +37,7 @@ import { useAIProvider } from "../../composables/useAIProvider";
 import { useBranchName } from "../../composables/useBranchName";
 import { usePinnedBranches } from "../../composables/usePinnedBranches";
 import { useArchivedBranches } from "../../composables/useArchivedBranches";
+import { useSettings } from "../../composables/useSettings";
 import { BRANCH_CREATE_REQUEST_KEY } from "../../composables/branchPickerBridge";
 import { PR_PANEL_KEY, type PrPanelState } from "../../composables/usePrPanel";
 import { useBranchPrSearch } from "../../composables/useBranchPrSearch";
@@ -223,6 +224,8 @@ function cancelCreate() {
 // backend, fanned out with rayon), so it never runs on a hot path.
 const topAuthors = ref<Map<string, BranchTopAuthor>>(new Map());
 
+const { settings } = useSettings();
+
 async function loadTopAuthors() {
   const names = props.branches.map((b) => b.name);
   if (names.length === 0) {
@@ -230,7 +233,7 @@ async function loadTopAuthors() {
     return;
   }
   try {
-    const entries = await getGitBranchTopAuthors(props.cwd, names);
+    const entries = await getGitBranchTopAuthors(props.cwd, names, settings.value.defaultBranch);
     topAuthors.value = new Map(entries.map((e) => [e.branch, e]));
   } catch {
     topAuthors.value = new Map();

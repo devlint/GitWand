@@ -728,9 +728,9 @@ fn declared_submodule_paths(cwd: &str) -> std::collections::HashSet<String> {
 // ─── Git branches ──────────────────────────────────────────────
 
 #[tauri::command]
-pub(crate) async fn git_branches(cwd: String) -> Result<Vec<GitBranch>, String> {
+pub(crate) async fn git_branches(cwd: String, default_branch: Option<String>) -> Result<Vec<GitBranch>, String> {
     let _repo = repo_lock::read(&cwd);
-    let main_name = get_main_branch_name(&cwd);
+    let main_name = resolve_default_branch(&cwd, default_branch.as_deref());
     let output = git_cmd()
         .args([
             "branch", "-a",
@@ -827,21 +827,6 @@ pub(crate) async fn git_branches(cwd: String) -> Result<Vec<GitBranch>, String> 
     }
 
     Ok(branches)
-}
-
-fn get_main_branch_name(cwd: &str) -> String {
-    for name in ["main", "master", "origin/main", "origin/master"] {
-        if let Ok(output) = git_cmd()
-            .args(["rev-parse", "--verify", name])
-            .current_dir(cwd)
-            .output()
-        {
-            if output.status.success() {
-                return name.to_string();
-            }
-        }
-    }
-    "main".to_string()
 }
 
 #[tauri::command]
@@ -2798,9 +2783,10 @@ pub(crate) async fn git_author_line_stats(cwd: String) -> Result<Vec<AuthorLineS
 pub(crate) async fn git_branch_top_authors(
     cwd: String,
     branches: Vec<String>,
+    default_branch: Option<String>,
 ) -> Result<Vec<BranchTopAuthor>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let base = get_main_branch_name(&cwd);
+        let base = resolve_default_branch(&cwd, default_branch.as_deref());
         let results: Vec<BranchTopAuthor> = branches
             .into_par_iter()
             .filter_map(|branch| {
@@ -4107,5 +4093,155 @@ mod interactive_rebase_tests {
         assert!(res.conflict, "a clashing reorder must report a conflict");
         // The repo is left mid-rebase; TempRepo's Drop cleans it up.
         let _ = repo.git(&["rebase", "--abort"]);
+    }
+}
+
+/// Regression coverage for #136: repos whose mainline is neither `main` nor
+/// `master` used to make `git_branches`/`git_branch_top_authors` fail with
+/// `fatal: failed to find 'main'`. These exercise the full Tauri commands
+/// end-to-end (not just the `resolve_default_branch` helper) against a
+/// "trunk"-only repo.
+#[cfg(test)]
+mod default_branch_setting_tests {
+    use super::*;
+    use crate::git::cmd::git_binary;
+    use std::path::PathBuf;
+    use std::process::Command;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    struct TempRepo {
+        path: PathBuf,
+    }
+    impl Drop for TempRepo {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+    impl TempRepo {
+        /// A repo whose only branch is `trunk` — no `main`/`master`, no remote.
+        fn new_trunk() -> Self {
+            let n = COUNTER.fetch_add(1, Ordering::SeqCst);
+            let pid = std::process::id();
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let dir = std::env::temp_dir()
+                .join(format!("gitwand-default-branch-test-{}-{}-{}", pid, n, nanos));
+            std::fs::create_dir_all(&dir).unwrap();
+            let repo = TempRepo { path: dir };
+            repo.git_ok(&["init", "-q", "-b", "trunk"]);
+            repo.git_ok(&["config", "user.name", "Test"]);
+            repo.git_ok(&["config", "user.email", "test@example.com"]);
+            repo.git_ok(&["config", "commit.gpgsign", "false"]);
+            repo.write("a.txt", "1\n");
+            repo.commit_all("base");
+            repo
+        }
+        fn cwd(&self) -> String {
+            self.path.to_str().unwrap().to_string()
+        }
+        fn write(&self, rel: &str, content: &str) {
+            std::fs::write(self.path.join(rel), content).unwrap();
+        }
+        fn git(&self, args: &[&str]) -> std::process::Output {
+            Command::new(git_binary())
+                .args(args)
+                .current_dir(&self.path)
+                .output()
+                .unwrap_or_else(|e| panic!("git {:?} spawn: {}", args, e))
+        }
+        fn git_ok(&self, args: &[&str]) {
+            let out = self.git(args);
+            assert!(
+                out.status.success(),
+                "git {:?} failed: {}",
+                args,
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+        fn commit_all(&self, msg: &str) {
+            self.git_ok(&["add", "-A"]);
+            self.git_ok(&["commit", "-q", "-m", msg]);
+        }
+    }
+
+    #[test]
+    fn git_branches_no_longer_fails_when_mainline_is_not_main_or_master() {
+        let repo = TempRepo::new_trunk();
+        // Previously: hardcoded "main" fallback -> `%(ahead-behind:main)` ->
+        // `fatal: failed to find 'main'` -> Err(...) surfaced to the UI as a
+        // notification (#136). Must now succeed.
+        let branches = tauri::async_runtime::block_on(git_branches(repo.cwd(), None))
+            .expect("git_branches must not fail when the mainline isn't main/master");
+        assert!(branches.iter().any(|b| b.name == "trunk"));
+    }
+
+    fn make_bare_remote(dir_name_prefix: &str) -> PathBuf {
+        let n = COUNTER.fetch_add(1, Ordering::SeqCst);
+        let pid = std::process::id();
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("{}-{}-{}-{}", dir_name_prefix, pid, n, nanos));
+        let out = Command::new(git_binary())
+            .args(["init", "--bare", "-q", "-b", "trunk"])
+            .arg(&dir)
+            .output()
+            .expect("git init --bare spawn");
+        assert!(
+            out.status.success(),
+            "git init --bare failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        dir
+    }
+
+    #[test]
+    fn git_branches_uses_the_configured_default_branch() {
+        let repo = TempRepo::new_trunk();
+        let bare = make_bare_remote("gitwand-default-branch-bare");
+        repo.git_ok(&["remote", "add", "origin", bare.to_str().unwrap()]);
+        repo.git_ok(&["push", "-q", "-u", "origin", "trunk"]);
+        repo.git_ok(&["checkout", "-q", "-b", "feature"]);
+        repo.write("a.txt", "2\n");
+        repo.commit_all("feature work");
+        repo.git_ok(&["push", "-q", "-u", "origin", "feature"]);
+
+        // With "trunk" configured explicitly (Settings > Git > Default Branch),
+        // feature's ahead-count relative to trunk must be 1.
+        let branches = tauri::async_runtime::block_on(git_branches(
+            repo.cwd(),
+            Some("trunk".to_string()),
+        ))
+        .expect("git_branches with a configured default branch must succeed");
+        let feature = branches
+            .iter()
+            .find(|b| b.name == "feature")
+            .expect("feature branch present");
+        assert_eq!(feature.main_commit_count, 1);
+
+        let _ = std::fs::remove_dir_all(&bare);
+    }
+
+    #[test]
+    fn git_branch_top_authors_no_longer_fails_when_mainline_is_not_main_or_master() {
+        let repo = TempRepo::new_trunk();
+        repo.git_ok(&["checkout", "-q", "-b", "feature"]);
+        repo.write("a.txt", "2\n");
+        repo.commit_all("feature work");
+
+        let authors = tauri::async_runtime::block_on(git_branch_top_authors(
+            repo.cwd(),
+            vec!["feature".to_string()],
+            None,
+        ))
+        .expect("git_branch_top_authors must not fail when the mainline isn't main/master");
+        assert_eq!(authors.len(), 1);
+        assert_eq!(authors[0].branch, "feature");
+        assert_eq!(authors[0].name, "Test");
     }
 }
