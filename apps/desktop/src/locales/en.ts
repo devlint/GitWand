@@ -1049,8 +1049,8 @@ const en = {
     error: {
       noToken: "GitHub authentication required \u2014 run `gh auth login` in your terminal.",
       noRemote: "No GitHub remote found \u2014 make sure this repo has a GitHub origin.",
-      ghNotInstalled: "GitHub CLI not installed \u2014 install it from cli.github.com.",
-      ghNotInstalledHint: "Or add your GitHub account from the settings.",
+      cliNotInstalled: "{0} not installed \u2014 install it from {1}.",
+      cliNotInstalledHint: "Or add your {0} account from the settings.",
       openSettings: "Open settings",
       unknown: "Failed to load pull requests.",
       retry: "Retry",

@@ -1022,8 +1022,8 @@ const zhCN: Locale = {
     error: {
       noToken: "需要 GitHub 认证 — 在终端运行 `gh auth login`。",
       noRemote: "未找到 GitHub 远程仓库 — 请确认此仓库有 GitHub origin。",
-      ghNotInstalled: "未安装 GitHub CLI — 请从 cli.github.com 安装。",
-      ghNotInstalledHint: "或在设置中添加你的 GitHub 账户。",
+      cliNotInstalled: "未安装 {0} — 请从 {1} 安装。",
+      cliNotInstalledHint: "或在设置中添加你的 {0} 账户。",
       openSettings: "打开设置",
       unknown: "加载 pull request 失败。",
       retry: "重试",

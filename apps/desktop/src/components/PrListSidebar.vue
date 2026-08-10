@@ -229,7 +229,7 @@ function setUserFilter(mode: 'all' | 'assigned' | 'reviews') {
     <div v-if="panel.error.value" class="pls-msg pls-msg--error">
       <span>{{ panel.error.value }}</span>
       <template v-if="panel.errorAction.value === 'open-settings' && openSettings">
-        <span class="pls-msg-hint">{{ t('pr.error.ghNotInstalledHint') }}</span>
+        <span class="pls-msg-hint">{{ t('pr.error.cliNotInstalledHint', panel.forgeLabel.value) }}</span>
         <button class="pls-msg-action" @click="openSettings('accounts')">{{ t('pr.error.openSettings') }}</button>
       </template>
       <button class="pls-msg-action" @click="panel.loadPrs">{{ t('pr.error.retry') }}</button>

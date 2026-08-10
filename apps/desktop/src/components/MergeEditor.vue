@@ -21,6 +21,7 @@ import {
 import LlmTracePanel from "./LlmTracePanel.vue";
 import TokenMergePanel from "./TokenMergePanel.vue";
 import ResolutionPreviewPanel from "./ResolutionPreviewPanel.vue";
+import AiSparkle from "./AiSparkle.vue";
 // Not lazy-loaded: this is a thin wrapper around BaseModal (already always-eager
 // per the P1.2 perf exception list) with no heavy additional deps — same static-import
 // treatment as its sibling hunk panels (LlmTracePanel, TokenMergePanel, ResolutionPreviewPanel).
@@ -946,10 +947,7 @@ useResizeObserver(contentEl, drawMinimap);
                   href="#"
                   @click.prevent="requestAISuggestion(seg.hunkIndex!, hunkForSegment(seg)!)"
                 >
-                  <svg class="ai-icon" width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-                    <path d="M8 1v2m0 10v2M1 8h2m10 0h2m-2.05-4.95-1.41 1.41m-7.08 7.08-1.41 1.41m0-9.9 1.41 1.41m7.08 7.08 1.41 1.41"/>
-                    <circle cx="8" cy="8" r="3"/>
-                  </svg>
+                  <AiSparkle :size="12" :animated="aiLoading && aiSuggestionHunkIndex === seg.hunkIndex" />
                   {{ aiLoading && aiSuggestionHunkIndex === seg.hunkIndex ? t('mergeEditor.aiLoading') : t('mergeEditor.aiButton') }}
                 </a>
                 <span class="inline-sep">|</span>
