@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Settings → Git → Default Branch is now actually used** — repos whose mainline is neither `main` nor `master` (nor tracked as `origin/main`/`origin/master`) no longer hit a recurring `git branch failed: fatal: failed to find 'main'` notification. The configured default branch is now threaded through to `git_branches`, `git_branch_merged`, and `git_branch_top_authors` and tried before the existing fallback chain; if nothing resolves, the current branch is used instead of a hardcoded `"main"` literal (#136).
+
 ## [3.6.0] - 2026-07-20
 
 ### Added

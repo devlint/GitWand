@@ -9,6 +9,7 @@ import {
   type GitLogEntry,
   type GitBranch,
 } from "../utils/backend";
+import { useSettings } from "../composables/useSettings";
 
 const props = defineProps<{
   cwd: string;
@@ -31,10 +32,12 @@ const hasConflicts = ref(false);
 
 const canPick = computed(() => selectedHashes.value.size > 0 && !isCherryPicking.value);
 
+const { settings } = useSettings();
+
 async function loadBranches() {
   if (!props.cwd) return;
   try {
-    branches.value = await getGitBranches(props.cwd);
+    branches.value = await getGitBranches(props.cwd, settings.value.defaultBranch);
   } catch (err: any) {
     error.value = err.message;
   }

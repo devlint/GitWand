@@ -157,6 +157,58 @@ function gitSpawn(args, cwd) {
   });
 }
 
+/**
+ * Resolve the repo's mainline branch name — mirrors `resolve_default_branch`
+ * in `src-tauri/src/git/cmd.rs`. Shared by the git-branches, git-branch-top-
+ * authors, and git-branch-merged routes below (#136).
+ *
+ * Tried in order, each verified with `git rev-parse --verify <name>`:
+ * 1. `configured` — the user's Settings > Git > Default Branch, if non-empty.
+ * 2. The remote's default branch via `origin/HEAD`'s symref.
+ * 3. `main`, `master`, `origin/main`, `origin/master`.
+ * 4. The current branch (`rev-parse --abbrev-ref HEAD`) — always resolves in
+ *    a non-empty repo, replacing the old hardcoded `"main"` literal that
+ *    caused `fatal: failed to find 'main'` (#136).
+ *
+ * `resolvedCwd` must already be an absolute, resolved path — callers spawn
+ * git via `spawnSync` with an args array (never shell string interpolation),
+ * so a configured branch name can't be used for command injection.
+ */
+function resolveDefaultBranchName(resolvedCwd, configured) {
+  const verify = (name) => {
+    if (!name) return false;
+    const r = spawnSync(GIT, ["rev-parse", "--verify", name], { cwd: resolvedCwd, encoding: "utf-8" });
+    return r.status === 0;
+  };
+
+  const trimmedConfigured = (configured || "").trim();
+  if (trimmedConfigured && verify(trimmedConfigured)) return trimmedConfigured;
+
+  const headRef = spawnSync(GIT, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], {
+    cwd: resolvedCwd,
+    encoding: "utf-8",
+  });
+  if (headRef.status === 0) {
+    // e.g. "origin/main" -> "main"
+    const short = headRef.stdout.trim();
+    const slash = short.indexOf("/");
+    const name = slash >= 0 ? short.slice(slash + 1) : "";
+    if (name && verify(name)) return name;
+  }
+
+  for (const name of ["main", "master", "origin/main", "origin/master"]) {
+    if (verify(name)) return name;
+  }
+
+  const currentRef = spawnSync(GIT, ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: resolvedCwd, encoding: "utf-8" });
+  if (currentRef.status === 0) {
+    const current = currentRef.stdout.trim();
+    if (current && current !== "HEAD") return current;
+  }
+
+  return "main";
+}
+
 // ── Mock state: GitHub OAuth device flow (dev:web only) ──────────────────────
 // The real flow lives in Rust (`github_api.rs`). In the browser mock we fake it
 // so the Settings > Accounts UI can be exercised without Tauri. It does NOT log
@@ -2450,30 +2502,29 @@ async function handleRequest(req, res) {
       }
     }
 
-    // GET /api/git-branches?cwd=<path>
+    // GET /api/git-branches?cwd=<path>&defaultBranch=<name>
     if (url.pathname === "/api/git-branches" && req.method === "GET") {
       const cwd = url.searchParams.get("cwd");
       if (!cwd) return jsonResponse(req, res, { error: "Missing cwd param" }, 400);
       try {
         const resolvedCwd = resolve(cwd);
-        const mainName = (() => {
-          for (const name of ["main", "master", "origin/main", "origin/master"]) {
-            try {
-              execSync(`git rev-parse --verify ${name}`, { cwd: resolvedCwd, stdio: "ignore" });
-              return name;
-            } catch { /* next */ }
-          }
-          return "main";
-        })();
+        // Settings > Git > Default Branch is tried first (#136).
+        const mainName = resolveDefaultBranchName(resolvedCwd, url.searchParams.get("defaultBranch"));
 
         // KEEP IN SYNC with git_branches in src-tauri/src/commands/ops.rs —
         // same positional field order and date format must be used in both.
+        // Passed as a single argv element (no shell) — `mainName` can come
+        // from a user-configured setting, so it must never be interpolated
+        // into a shell string.
         const format = `%(HEAD)%(refname:short)\x1f%(upstream:short)\x1f%(upstream:track,nobracket)\x1f%(objectname:short) %(subject)\x1f%(committerdate:iso-strict)\x1f%(ahead-behind:${mainName})`;
-        const stdout = execSync(`git branch -a --format="${format}"`, {
+        const branchResult = spawnSync(GIT, ["branch", "-a", `--format=${format}`], {
           cwd: resolvedCwd,
           encoding: "utf-8",
-          shell: true,
         });
+        if (branchResult.status !== 0) {
+          throw new Error(branchResult.stderr || `git branch exited with ${branchResult.status}`);
+        }
+        const stdout = branchResult.stdout;
 
         const mainCounts = new Map();
         const rawBranches = [];
@@ -5916,7 +5967,7 @@ async function handleRequest(req, res) {
       return jsonResponse(req, res, stats);
     }
 
-    // GET /api/git-branch-top-authors?cwd=...&branches=a,b,c
+    // GET /api/git-branch-top-authors?cwd=...&branches=a,b,c&defaultBranch=<name>
     // Mirror of Rust git_branch_top_authors — top contributor per branch.
     if (url.pathname === "/api/git-branch-top-authors" && req.method === "GET") {
       const cwd = url.searchParams.get("cwd");
@@ -5926,16 +5977,9 @@ async function handleRequest(req, res) {
         .split(",")
         .map((b) => b.trim())
         .filter(Boolean);
-      // Mirror get_main_branch_name in Rust.
-      const base = (() => {
-        for (const name of ["main", "master", "origin/main", "origin/master"]) {
-          try {
-            execSync(`git rev-parse --verify ${name}`, { cwd: resolvedCwd, stdio: "ignore" });
-            return name;
-          } catch { /* next */ }
-        }
-        return "main";
-      })();
+      // Settings > Git > Default Branch is tried first (#136); mirrors
+      // resolve_default_branch in Rust.
+      const base = resolveDefaultBranchName(resolvedCwd, url.searchParams.get("defaultBranch"));
       // Top author for a revspec, or null.
       const shortlogTop = (branch, revspec) => {
         const r = spawnSync(GIT, ["shortlog", "-sne", revspec], {
@@ -6216,7 +6260,7 @@ async function handleRequest(req, res) {
       }
     }
 
-    // POST /api/git-branch-merged  { cwd }
+    // POST /api/git-branch-merged  { cwd, defaultBranch? }
     // Mirrors the Tauri `git_branch_merged` command: returns the list of
     // local branches fully merged into the default branch, excluding the
     // current branch and the default branch itself.
@@ -6225,14 +6269,14 @@ async function handleRequest(req, res) {
       const cwd = String(body?.cwd ?? "").trim();
       if (!cwd) return jsonResponse(req, res, { error: "Missing cwd" }, 400);
       try {
-        // Determine default branch (main or master or first remote HEAD).
-        const headRef = spawnSync(GIT, ["symbolic-ref", "refs/remotes/origin/HEAD"], { cwd: resolve(cwd), encoding: "utf-8" });
-        const defaultBranch = headRef.status === 0
-          ? headRef.stdout.trim().replace("refs/remotes/origin/", "")
-          : "main";
-        const currentRef = spawnSync(GIT, ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: resolve(cwd), encoding: "utf-8" });
+        const resolvedCwd = resolve(cwd);
+        // Settings > Git > Default Branch is tried first, then the remote's
+        // HEAD / main / master / the current branch (#136); mirrors
+        // resolve_default_branch in Rust.
+        const defaultBranch = resolveDefaultBranchName(resolvedCwd, body?.defaultBranch);
+        const currentRef = spawnSync(GIT, ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: resolvedCwd, encoding: "utf-8" });
         const current = currentRef.stdout.trim();
-        const result = spawnSync(GIT, ["branch", "--merged", defaultBranch], { cwd: resolve(cwd), encoding: "utf-8" });
+        const result = spawnSync(GIT, ["branch", "--merged", defaultBranch], { cwd: resolvedCwd, encoding: "utf-8" });
         if (result.status !== 0) return jsonResponse(req, res, []);
         const merged = result.stdout
           .split("\n")

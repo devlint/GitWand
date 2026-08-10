@@ -214,7 +214,7 @@ pub fn git_log_parity(
 }
 
 pub fn git_branches_parity(cwd: String) -> Result<Vec<types::GitBranch>, String> {
-    tauri::async_runtime::block_on(commands::ops::git_branches(cwd))
+    tauri::async_runtime::block_on(commands::ops::git_branches(cwd, None))
 }
 
 pub fn git_stash_list_parity(cwd: String) -> Result<Vec<types::StashEntry>, String> {

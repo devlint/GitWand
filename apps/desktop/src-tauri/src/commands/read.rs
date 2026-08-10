@@ -1752,23 +1752,13 @@ fn merge_file_preview(
 /// Excludes the current branch and the default branch itself.
 /// Equivalent to `git branch --merged <default_branch> --format="%(refname:short)"`.
 #[tauri::command]
-pub(crate) async fn git_branch_merged(cwd: String) -> Result<Vec<String>, String> {
-    use crate::git::cmd::git_cmd;
+pub(crate) async fn git_branch_merged(cwd: String, default_branch: Option<String>) -> Result<Vec<String>, String> {
+    use crate::git::cmd::{git_cmd, resolve_default_branch};
 
     let _repo = repo_lock::read(&cwd);
-    // Resolve default branch (main / master / trunk / …)
-    let default_out = git_cmd()
-        .args(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"])
-        .current_dir(&cwd)
-        .output();
-    let default_branch = match default_out {
-        Ok(out) if out.status.success() => {
-            // e.g. "origin/main" → "main"
-            let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            s.splitn(2, '/').nth(1).unwrap_or("main").to_string()
-        }
-        _ => "main".to_string(),
-    };
+    // Resolve default branch (configured setting / main / master / trunk / …
+    // via the remote's HEAD / current branch — see #136).
+    let default_branch = resolve_default_branch(&cwd, default_branch.as_deref());
 
     // Current branch name (to exclude)
     let cur_out = git_cmd()
@@ -2565,5 +2555,108 @@ mod pathspec_tests {
         assert!(s.remote_branch_exists, "configured upstream implies it exists");
 
         let _ = std::fs::remove_dir_all(&bare);
+    }
+}
+
+/// Regression coverage for #136: `git_branch_merged` used to hardcode a
+/// `"main"` fallback (via a local symbolic-ref lookup) whenever the repo had
+/// no `origin/HEAD`, which broke `git branch --merged main` on repos whose
+/// mainline is neither `main` nor `master`.
+#[cfg(test)]
+mod branch_merged_tests {
+    use super::*;
+    use crate::git::cmd::git_binary;
+    use std::path::PathBuf;
+    use std::process::Command;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    struct TempRepo {
+        path: PathBuf,
+    }
+    impl Drop for TempRepo {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+    impl TempRepo {
+        /// A repo whose only branch is `trunk` — no `main`/`master`, no remote.
+        fn new_trunk() -> Self {
+            let n = COUNTER.fetch_add(1, Ordering::SeqCst);
+            let pid = std::process::id();
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let dir = std::env::temp_dir()
+                .join(format!("gitwand-branch-merged-test-{}-{}-{}", pid, n, nanos));
+            std::fs::create_dir_all(&dir).unwrap();
+            let repo = TempRepo { path: dir };
+            repo.git_ok(&["init", "-q", "-b", "trunk"]);
+            repo.git_ok(&["config", "user.name", "Test"]);
+            repo.git_ok(&["config", "user.email", "test@example.com"]);
+            repo.git_ok(&["config", "commit.gpgsign", "false"]);
+            repo.write("a.txt", "1\n");
+            repo.commit_all("base");
+            repo
+        }
+        fn cwd(&self) -> String {
+            self.path.to_str().unwrap().to_string()
+        }
+        fn write(&self, rel: &str, content: &str) {
+            std::fs::write(self.path.join(rel), content).unwrap();
+        }
+        fn git(&self, args: &[&str]) -> std::process::Output {
+            Command::new(git_binary())
+                .args(args)
+                .current_dir(&self.path)
+                .output()
+                .unwrap_or_else(|e| panic!("git {:?} spawn: {}", args, e))
+        }
+        fn git_ok(&self, args: &[&str]) {
+            let out = self.git(args);
+            assert!(
+                out.status.success(),
+                "git {:?} failed: {}",
+                args,
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+        fn commit_all(&self, msg: &str) {
+            self.git_ok(&["add", "-A"]);
+            self.git_ok(&["commit", "-q", "-m", msg]);
+        }
+    }
+
+    #[test]
+    fn no_longer_fails_when_mainline_is_not_main_or_master() {
+        let repo = TempRepo::new_trunk();
+        repo.git_ok(&["checkout", "-q", "-b", "merged-feature"]);
+        // No new commits: merged-feature is fully merged into trunk.
+        repo.git_ok(&["checkout", "-q", "trunk"]);
+
+        let merged = tauri::async_runtime::block_on(git_branch_merged(repo.cwd(), None))
+            .expect("git_branch_merged must not fail when the mainline isn't main/master");
+        assert!(merged.contains(&"merged-feature".to_string()));
+    }
+
+    #[test]
+    fn uses_the_configured_default_branch() {
+        let repo = TempRepo::new_trunk();
+        repo.git_ok(&["checkout", "-q", "-b", "unmerged-feature"]);
+        repo.write("a.txt", "2\n");
+        repo.commit_all("feature work");
+        repo.git_ok(&["checkout", "-q", "trunk"]);
+
+        let merged = tauri::async_runtime::block_on(git_branch_merged(
+            repo.cwd(),
+            Some("trunk".to_string()),
+        ))
+        .expect("git_branch_merged with a configured default branch must succeed");
+        assert!(
+            !merged.contains(&"unmerged-feature".to_string()),
+            "a branch with unmerged commits must not be reported as merged"
+        );
     }
 }

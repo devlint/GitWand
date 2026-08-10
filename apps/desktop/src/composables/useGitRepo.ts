@@ -52,6 +52,7 @@ import { requireOnline } from "../utils/networkGuard";
 import { clearUpdatePromptSkip } from "./useBranchUpdatePrompt";
 import { t } from "./useI18n";
 import { useWorkspaceScope } from "./useWorkspaceScope";
+import { useSettings } from "./useSettings";
 
 export type ViewMode =
   | "dashboard"
@@ -105,6 +106,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
 
   // ── Monorepo scope (v2.21.0) ────────────────────────────────────────────
   const { activeScope } = useWorkspaceScope();
+  const { settings } = useSettings();
   /** Total commits across all refs, ignoring scope. Drives the hidden badge. */
   const totalUnscopedCount = ref(0);
   /** Total commits across all refs touching the active scope sub-tree. */
@@ -1297,7 +1299,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     if (!folderPath.value) return;
     branchesLoading.value = true;
     try {
-      branches.value = await getGitBranches(folderPath.value);
+      branches.value = await getGitBranches(folderPath.value, settings.value.defaultBranch);
     } catch (err: any) {
       error.value = `branches: ${err?.message ?? err}`;
     } finally {

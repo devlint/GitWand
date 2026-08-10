@@ -839,7 +839,7 @@ const mergedBranchNames = ref<Set<string>>(new Set());
 async function loadMergedBranches() {
   if (!props.cwd) return;
   try {
-    const names = await gitBranchMerged(props.cwd);
+    const names = await gitBranchMerged(props.cwd, loadSettings().defaultBranch);
     mergedBranchNames.value = new Set(names);
   } catch {
     mergedBranchNames.value = new Set();
