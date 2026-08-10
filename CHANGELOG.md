@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Settings → Git → Committer Identities now update immediately after adding, editing, or deleting an identity, instead of requiring the settings popover to be closed and reopened (#140).
+
 ## [3.6.0] - 2026-07-20
 
 ### Added
