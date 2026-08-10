@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Rebase auto-resolve UX** — "Auto-resolve" on a paused rebase conflict now correctly re-polls the rebase banner state (the Continue button and conflict hint were staying stuck even though the conflict had actually been resolved and staged); the per-hunk AI-resolve button now uses the app-wide animated `AiSparkle` icon instead of a barely-visible opacity pulse, for both clearer feedback and visual consistency with the rest of the app; and the per-hunk AI explanation prompt now repeats its language directive at the end of the prompt as a best-effort mitigation for occasional wrong-language responses from some providers (#133).
 - Linux: force WebKitGTK software-rendering fallback (`WEBKIT_DISABLE_COMPOSITING_MODE`, `WEBKIT_DISABLE_DMABUF_RENDERER`) before the webview is created, so the app degrades gracefully instead of aborting on systems without a working EGL/GPU context (`Could not create default EGL display: EGL_BAD_PARAMETER. Aborting...`) (#135, #139).
 - Settings → Git → Committer Identities now update immediately after adding, editing, or deleting an identity, instead of requiring the settings popover to be closed and reopened (#140).
 

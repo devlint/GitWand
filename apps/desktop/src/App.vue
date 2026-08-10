@@ -647,6 +647,13 @@ watch(
  */
 async function advanceToNextConflictOrFinalize() {
   await repoRefresh();
+  // Re-poll the rebase/merge operation state alongside the repo status —
+  // `repoOperationState` (read by RebaseProgressBanner's hasConflict/Continue
+  // button) is only updated here, never by `repoRefresh()` itself. Without
+  // this, resolving a hunk/file during a rebase leaves the banner showing a
+  // stale "conflict" state even though the conflict was actually resolved
+  // and staged (issue #133).
+  await refreshRepoState();
   if (repoStatus.value && repoStatus.value.conflicted.length > 0) {
     await repoSelectFile(repoStatus.value.conflicted[0], false);
   } else if (isCherryPicking.value) {
