@@ -11,6 +11,7 @@
 
 import type { ConflictHunk, ClassifyInput, ConfidenceScore } from "./types.js";
 import { classifyConflict } from "./classifier.js";
+import { scoreFromDimensions } from "./patterns/utils.js";
 
 export { classifyConflict };
 
@@ -47,26 +48,20 @@ function detectZdiff3(conflict: RawConflict): boolean {
 /**
  * Applique la dimension `baseAvailability` à un ConfidenceScore existant.
  *
- * Recompute le score avec la formule v1.4 complète.
+ * Recompute le score via `scoreFromDimensions` (formule v2.4, partagée avec
+ * `makeScore` — voir patterns/utils.ts) pour rester en phase avec toute
+ * dimension future.
  * Utilisé quand zdiff3 est détecté après la classification (baseAvailability = 100).
  */
-function withBaseAvailability(cs: ConfidenceScore, baseAvailability: number, booster?: string): ConfidenceScore {
-  const { typeClassification, dataRisk, scopeImpact, fileFrequency = 0, algorithmStability = 0, postMergeRisk = 0 } = cs.dimensions;
-  const raw =
-    typeClassification
-    - dataRisk          * 0.40
-    - scopeImpact       * 0.15
-    - fileFrequency     * 0.10
-    + baseAvailability  * 0.05
-    - algorithmStability * 0.10
-    - postMergeRisk     * 0.20;
-  const score = Math.round(Math.max(0, Math.min(100, raw)));
+export function withBaseAvailability(cs: ConfidenceScore, baseAvailability: number, booster?: string): ConfidenceScore {
+  const dimensions = { ...cs.dimensions, baseAvailability };
+  const { score, label } = scoreFromDimensions(dimensions);
   const boosters = booster ? [...cs.boosters, booster] : cs.boosters;
   return {
     ...cs,
     score,
-    label: score >= 92 ? "certain" : score >= 68 ? "high" : score >= 44 ? "medium" : "low",
-    dimensions: { ...cs.dimensions, baseAvailability },
+    label,
+    dimensions,
     boosters,
   };
 }
