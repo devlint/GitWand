@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.6.1] - 2026-08-10
+
 ### Fixed
 
 - **Settings → Git → Default Branch is now actually used** — repos whose mainline is neither `main` nor `master` (nor tracked as `origin/main`/`origin/master`) no longer hit a recurring `git branch failed: fatal: failed to find 'main'` notification. The configured default branch is now threaded through to `git_branches`, `git_branch_merged`, and `git_branch_top_authors` and tried before the existing fallback chain; if nothing resolves, the current branch is used instead of a hardcoded `"main"` literal (#136).
@@ -1253,6 +1255,7 @@ Design-system foundations — the app header and every overlay now ride on a sha
 - 28 tests covering all patterns + real-world scenarios (package.json, Laravel routes, Vue SFC, CSS, .env files)
 
 [Unreleased]: https://github.com/devlint/GitWand/compare/v3.5.0...HEAD
+[3.6.1]: https://github.com/devlint/GitWand/compare/v3.6.0...v3.6.1
 [3.6.0]: https://github.com/devlint/GitWand/compare/v3.5.0...v3.6.0
 [3.5.0]: https://github.com/devlint/GitWand/compare/v3.4.0...v3.5.0
 [3.4.0]: https://github.com/devlint/GitWand/compare/v3.3.0...v3.4.0

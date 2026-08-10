@@ -5,6 +5,22 @@ description: Release history for GitWand — the native Git client with AI confl
 
 # Changelog
 
+## v3.6.1 — August 2026
+
+A bugfix-only release — six issues reported by the community, fixed and shipped together.
+
+Settings → Git → Default Branch now actually does something: repos whose mainline isn't `main` or `master` used to trip a recurring "failed to find 'main'" error every time GitWand needed a base for ahead/behind counts, merged-branch detection, or top-contributor stats. The configured branch is now tried first everywhere that matters, and if nothing resolves, GitWand falls back to your current branch instead of a hardcoded literal.
+
+Local branches with a slash in their name — `feature/onboarding`, `fix/123-thing` — could get checked out and created just fine, but switching away and back, or deleting them, would silently truncate the name to whatever came after the first `/`. The commit graph was guessing a ref's type from the presence of a slash alone; it no longer guesses.
+
+On GitLab repos, the PR overview panel was showing a GitHub-specific "install the GitHub CLI" error regardless of which forge you were actually using, and once `glab` was installed, listing merge requests failed outright on a flag `glab` doesn't support. Both are fixed — the error now names the right CLI, and merge request state filtering uses `glab`'s actual flags.
+
+Auto-resolving a conflict during a paused rebase looked like it did nothing — the conflict was genuinely resolved and staged, but the banner's Continue button and conflict hint didn't know that yet. They're back in sync now. While in there, the AI-assisted resolve button gained the same animated icon used everywhere else in the app instead of a barely-visible fade, and its explanation text got a nudge to stay in your chosen language more reliably.
+
+Settings → Git → Committer Identities used to require closing and reopening the panel before an add, edit, or delete actually showed up in the list. It now updates immediately.
+
+And on Linux, a WebKitGTK rendering failure on systems without a working hardware EGL context — VMs, older Mesa, missing GPU passthrough — could abort the app before a window ever appeared. GitWand now forces software rendering as a fallback on Linux, so it degrades gracefully instead of refusing to launch.
+
 ## v3.6.0 — July 2026
 
 ### Rebase conflicts no longer trap you behind a modal
