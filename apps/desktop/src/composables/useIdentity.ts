@@ -12,7 +12,7 @@
  */
 
 import { computed } from "vue";
-import { loadSettings, normaliseCwd, saveSettings, type IdentityProfile } from "./useSettings";
+import { loadSettings, normaliseCwd, saveSettings, settingsRevision, type IdentityProfile } from "./useSettings";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -107,8 +107,17 @@ export function setRepoIdentity(cwd: string, id: string | null): void {
 // ─── composable ──────────────────────────────────────────────────────────────
 
 export function useIdentity(cwd?: () => string) {
-  const identities = computed(() => allIdentities());
-  const activeIdentity = computed(() => resolveIdentity(cwd?.()));
+  const identities = computed(() => {
+    // Depend on the settings revision so add/update/remove reflect immediately.
+    void settingsRevision.value;
+    return allIdentities();
+  });
+  const activeIdentity = computed(() => {
+    // Same as above — resolveIdentity() reads localStorage directly and has
+    // no reactive dependency of its own.
+    void settingsRevision.value;
+    return resolveIdentity(cwd?.());
+  });
 
   return {
     identities,
