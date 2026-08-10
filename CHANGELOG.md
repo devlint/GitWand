@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **GitLab PR overview** — the PR panel no longer shows the GitHub-specific "GitHub CLI not installed" message for GitLab repos; the CLI-missing error and its install hint are now forge-specific (GitHub/`gh` vs GitLab/`glab`). Also fixed `glab mr list` failing with "Unknown flag: --state" — GitLab's CLI uses per-state boolean flags (`--opened`/`--closed`/`--merged`/`--all`), not `gh`'s generic `--state <value>` (#138).
+
 ## [3.6.0] - 2026-07-20
 
 ### Added
