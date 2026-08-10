@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Rebase auto-resolve UX** — "Auto-resolve" on a paused rebase conflict now correctly re-polls the rebase banner state (the Continue button and conflict hint were staying stuck even though the conflict had actually been resolved and staged); the per-hunk AI-resolve button now uses the app-wide animated `AiSparkle` icon instead of a barely-visible opacity pulse, for both clearer feedback and visual consistency with the rest of the app; and the per-hunk AI explanation prompt now repeats its language directive at the end of the prompt as a best-effort mitigation for occasional wrong-language responses from some providers (#133).
+
 ## [3.6.0] - 2026-07-20
 
 ### Added
