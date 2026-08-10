@@ -73,10 +73,11 @@ function clip(s: string, max: number): string {
   return s.slice(0, max) + "\n... (truncated)";
 }
 
-function buildUserPrompt(
+export function buildUserPrompt(
   hunk: ConflictHunk,
   filePath: string | undefined,
   maxSideChars: number,
+  lang: string,
 ): string {
   const ours = clip(hunk.oursLines.join("\n"), maxSideChars);
   const theirs = clip(hunk.theirsLines.join("\n"), maxSideChars);
@@ -101,6 +102,13 @@ function buildUserPrompt(
   parts.push(theirs || "(empty)");
   parts.push("");
   parts.push("Explain this conflict.");
+  // Repeat the language instruction at the very end of the user-facing
+  // prompt, in addition to the system-prompt instruction above. Some
+  // providers drift from a language directive buried only in the system
+  // prompt — especially here, where the rest of the prompt is English
+  // decision-trace jargon. End-of-prompt instructions tend to be followed
+  // more reliably (issue #133).
+  parts.push(`(Respond only in ${lang}.)`);
   return parts.join("\n");
 }
 
@@ -132,8 +140,9 @@ export function useHunkExplanation() {
         throw new Error(t("errors.noAiProvider"));
       }
 
+      const lang = localeToEnglishName(locale);
       const systemPrompt = buildSystemPrompt(locale);
-      const userPrompt = buildUserPrompt(hunk, filePath, maxSideChars);
+      const userPrompt = buildUserPrompt(hunk, filePath, maxSideChars, lang);
 
       const raw = await ai.rawPrompt(systemPrompt, userPrompt);
       if (!raw) {

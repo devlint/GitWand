@@ -204,6 +204,55 @@ describe("useIdentity (module-level functions)", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// useIdentity — reactivity of the `identities` / `activeIdentity` computeds
+// (regression test for #140: SettingsPanel.vue renders `identities` straight
+// from useIdentity() in a v-for and never re-mounts the composable, so the
+// computed must invalidate on every add/update/remove without a reload).
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe("useIdentity (composable reactivity — #140)", () => {
+  beforeEach(clearSettings);
+
+  it("identities computed reflects addIdentity() without recreating the composable", async () => {
+    const { useIdentity } = await import("../useIdentity");
+    const api = useIdentity();
+    expect(api.identities.value).toHaveLength(0);
+    api.add({ label: "Work", gitName: "Alice", gitEmail: "alice@corp.com" });
+    expect(api.identities.value).toHaveLength(1);
+    expect(api.identities.value[0].label).toBe("Work");
+  });
+
+  it("identities computed reflects updateIdentity() without recreating the composable", async () => {
+    const { useIdentity } = await import("../useIdentity");
+    const api = useIdentity();
+    const id = api.add({ label: "Work", gitName: "Alice", gitEmail: "alice@corp.com" });
+    // Force an initial read so the computed caches a value before the mutation —
+    // otherwise a lazy first-read-after-mutation would pass even with a stale cache.
+    expect(api.identities.value[0].label).toBe("Work");
+    api.update(id, { label: "Work (renamed)" });
+    expect(api.identities.value[0].label).toBe("Work (renamed)");
+  });
+
+  it("identities computed reflects removeIdentity() without recreating the composable", async () => {
+    const { useIdentity } = await import("../useIdentity");
+    const api = useIdentity();
+    const id = api.add({ label: "Work", gitName: "Alice", gitEmail: "alice@corp.com" });
+    expect(api.identities.value).toHaveLength(1);
+    api.remove(id);
+    expect(api.identities.value).toHaveLength(0);
+  });
+
+  it("activeIdentity computed reflects setActive() without recreating the composable", async () => {
+    const { useIdentity } = await import("../useIdentity");
+    const api = useIdentity();
+    const id = api.add({ label: "Personal", gitName: "Bob", gitEmail: "bob@home.com" });
+    expect(api.activeIdentity.value).toBeNull();
+    api.setActive(id);
+    expect(api.activeIdentity.value?.label).toBe("Personal");
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // useCommitTemplates (module-level functions — composable wraps them)
 // ═══════════════════════════════════════════════════════════════════════════════
 
