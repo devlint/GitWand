@@ -315,3 +315,59 @@ jobs:
             -f content="$(base64 -w0 cask.rb)" \
             --jq '.commit.sha'
           echo "::notice::Bumped ${TAP} cask to ${VERSION}"
+
+  # Submit the new version to microsoft/winget-pkgs so
+  # `winget install Devlint.GitWand` always tracks the latest release.
+  # wingetcreate fetches the existing manifests, updates version/url/sha256/
+  # ProductCode from the actual MSI, and opens the PR from the fork tied to
+  # the token.
+  #
+  # Requires secret WINGET_TOKEN: a PAT (classic `public_repo`, or fine-grained
+  # with Contents: read+write on the devlint/winget-pkgs fork) used by
+  # wingetcreate to push the manifest branch and open the PR. When the secret
+  # is absent the job skips with a warning instead of failing the release.
+  publish-winget:
+    name: Publish to winget
+    needs: release
+    runs-on: windows-latest
+    steps:
+      - name: Submit Devlint.GitWand to microsoft/winget-pkgs
+        shell: pwsh
+        env:
+          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          if (-not $env:WINGET_TOKEN) {
+            Write-Host "::warning::WINGET_TOKEN not set — skipping winget submission."
+            exit 0
+          }
+          $version = $env:TAG.TrimStart("v")
+          $asset = "GitWand_${version}_x64_en-US.msi"
+          $msiUrl = "https://github.com/$env:REPO/releases/download/$env:TAG/$asset"
+
+          # Wait until the MSI asset is actually on the release (the matrix job
+          # may signal success before all uploads are finalized).
+          $found = $false
+          foreach ($attempt in 1..6) {
+            $assets = gh api "repos/$env:REPO/releases/tags/$env:TAG" --jq '[.assets[].name]' | ConvertFrom-Json
+            if ($assets -contains $asset) { $found = $true; break }
+            Write-Host "::notice::$asset not on release yet (attempt $attempt/6) — sleeping 15s"
+            Start-Sleep -Seconds 15
+          }
+          if (-not $found) {
+            Write-Host "::error::$asset missing from release $env:TAG — cannot submit to winget"
+            exit 1
+          }
+
+          # Self-contained wingetcreate (no winget needed on the runner)
+          Invoke-WebRequest -Uri "https://aka.ms/wingetcreate/latest" -OutFile wingetcreate.exe
+
+          .\wingetcreate.exe update Devlint.GitWand `
+            --version $version `
+            --urls $msiUrl `
+            --submit `
+            --token $env:WINGET_TOKEN
+          Write-Host "::notice::Submitted Devlint.GitWand $version to microsoft/winget-pkgs"
