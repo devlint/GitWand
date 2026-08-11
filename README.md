@@ -1,3 +1,5 @@
+[![MCP Toplist](https://mcptoplist.com/badge/io.github.devlint%2Fgitwand.svg)](https://mcptoplist.com/server/io.github.devlint%2Fgitwand)
+
 <p align="center">
   <img src="assets/logo.svg" alt="GitWand" width="300" height="120">
 </p>
