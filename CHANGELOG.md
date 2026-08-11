@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **GitLab MR list no longer times out / freezes the app** — every `glab`-backed command ran its blocking subprocess directly on the async runtime, parking a worker thread for the call's duration; the frontend's 30s IPC timeout only gave up on the JS promise, leaving the `glab` process running and the worker parked on every retry. All `gl_*` commands now offload to `spawn_blocking`, and the `glab` subprocess itself carries a 20s timeout that kills and reaps the child instead of orphaning it, so the app stays responsive and a hang now surfaces as a clear "took too long to respond" message instead of a silent freeze (#149).
+- **Stash Manager: dates are no longer "Invalid Date"** — the backend asked git for its lenient date format (`%ai`, e.g. `2026-08-11 09:16:44 +0200`), which the macOS/Linux webview refuses to parse, so every stash rendered "Invalid Date". Stash dates now use git's strict ISO 8601 output (`%aI`), the Node dev-server route was aligned onto the same placeholder (it was using the committer timestamp), the parity suite now compares the field instead of blanking it, and the UI falls back to the raw string rather than "Invalid Date" if a date is ever unparseable. The same lenient format in the Tags panel (which rendered "NaN years ago") was fixed alongside it (#151).
 
 ## [3.6.1] - 2026-08-10
 

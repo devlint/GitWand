@@ -93,10 +93,6 @@ export function normalize(command, value) {
       // ahead/behind/isRemote) est le cœur de ce qu'on valide.
       return blankVolatile(camel, ["lastCommit", "lastCommitDate"]);
 
-    case "git-stash-list":
-      // `date` peut varier subtilement en format ISO selon les implémentations.
-      return blankVolatile(camel, ["date"]);
-
     case "scan-secrets":
       // Les deux moteurs (Rust `regex` crate / TS `RegExp`) itèrent fichiers → lignes →
       // patterns dans le même ordre déclaré, donc l'ordre des findings devrait déjà

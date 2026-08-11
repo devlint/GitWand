@@ -2698,7 +2698,7 @@ async function handleRequest(req, res) {
         const resolvedCwd = resolve(cwd);
         const out = execFileSync(
           "git",
-          ["stash", "list", "--format=%H%x09%gd%x09%gs%x09%ct"],
+          ["stash", "list", "--format=%H%x09%gd%x09%gs%x09%aI"],
           { cwd: resolvedCwd, encoding: "utf-8" },
         );
         // Mirror git_stash_list (Rust) parsing exactly so the parity test holds:
@@ -2711,10 +2711,14 @@ async function handleRequest(req, res) {
           .map((line) => line.trim())
           .filter(Boolean)
           .forEach((line, i) => {
-            const [hash, , subjectRaw, ts] = line.split("\t");
+            const [hash, , subjectRaw, dateRaw] = line.split("\t");
             const subject = subjectRaw ?? "";
             if (subject.startsWith("untracked files on ")) return;
-            const date = ts ? new Date(parseInt(ts, 10) * 1000).toISOString() : "";
+            // Strict ISO 8601 straight from git (%aI), same placeholder as the
+            // Rust `git_stash_list` — see #151. Previously %ct + toISOString(),
+            // which produced a valid but *different* ISO string (and used the
+            // committer date where Rust used the author date).
+            const date = dateRaw ?? "";
             let branch = "";
             let message = subject;
             if (subject.startsWith("On ")) {
@@ -5813,7 +5817,7 @@ async function handleRequest(req, res) {
       try {
         // Use \x1f (unit separator) — same as git_log, safe in Node child_process args
         const SEP = "\x1f";
-        const fmt = `%(refname:short)${SEP}%(objecttype)${SEP}%(objectname:short)${SEP}%(*objectname:short)${SEP}%(taggerdate:iso)${SEP}%(creatordate:iso)${SEP}%(contents:subject)`;
+        const fmt = `%(refname:short)${SEP}%(objecttype)${SEP}%(objectname:short)${SEP}%(*objectname:short)${SEP}%(taggerdate:iso-strict)${SEP}%(creatordate:iso-strict)${SEP}%(contents:subject)`;
         const out = spawnSync(GIT, ["tag", "-l", "--sort=-version:refname", "--sort=-creatordate", `--format=${fmt}`], { cwd: resolve(cwd), encoding: "utf-8" });
         const tags = (out.stdout || "").split("\n").map(line => {
           const parts = line.split(SEP);

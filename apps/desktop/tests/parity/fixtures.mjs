@@ -157,11 +157,16 @@ export function fixtureStash() {
     env: { ...process.env, ...commitEnv(2) },
   });
 
-  // Second stash : nouveau fichier
+  // Second stash : nouveau fichier (untracked → --include-untracked requis,
+  // sinon `git stash push` l'ignore silencieusement et ne crée aucun stash).
   writeFileSync(join(cwd, "b.txt"), "beta STASH 2\n", "utf-8");
-  execFileSync("git", ["-C", cwd, "stash", "push", "-m", "second stash", "--quiet"], {
-    env: { ...process.env, ...commitEnv(3) },
-  });
+  execFileSync(
+    "git",
+    ["-C", cwd, "stash", "push", "--include-untracked", "-m", "second stash", "--quiet"],
+    {
+      env: { ...process.env, ...commitEnv(3) },
+    },
+  );
 
   return cwd;
 }
