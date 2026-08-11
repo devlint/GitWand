@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.6.2] - 2026-08-11
+
 ### Added
 
 - **Auto-stash on pull (#150)** — pulling with uncommitted changes no longer dead-ends on `cannot pull with rebase: You have unstaged changes`. A new Settings → Git → "Pull with uncommitted changes" option (Ask — default · Auto stash & restore · Refuse) parks the working tree via `git pull --autostash` and lets git restore it, including across a conflicted rebase/merge (`rebase --continue`, `merge --continue`, and both `--abort` paths). When re-applying the parked changes conflicts, GitWand now says so explicitly instead of reporting a successful sync over a conflicted tree.
@@ -1265,7 +1267,8 @@ Design-system foundations — the app header and every overlay now ride on a sha
 - CI pipeline via GitHub Actions (Node 18, 20, 22)
 - 28 tests covering all patterns + real-world scenarios (package.json, Laravel routes, Vue SFC, CSS, .env files)
 
-[Unreleased]: https://github.com/devlint/GitWand/compare/v3.5.0...HEAD
+[Unreleased]: https://github.com/devlint/GitWand/compare/v3.6.2...HEAD
+[3.6.2]: https://github.com/devlint/GitWand/compare/v3.6.1...v3.6.2
 [3.6.1]: https://github.com/devlint/GitWand/compare/v3.6.0...v3.6.1
 [3.6.0]: https://github.com/devlint/GitWand/compare/v3.5.0...v3.6.0
 [3.5.0]: https://github.com/devlint/GitWand/compare/v3.4.0...v3.5.0

@@ -73,7 +73,7 @@ function setLocale(code: Locale) {
 }
 
 // ── Smart download URL (OS detection) ─────────────────────────────────────
-const LATEST = '3.6.1'
+const LATEST = '3.6.2'
 const RELEASES = 'https://github.com/devlint/GitWand/releases'
 
 // SSR-safe: start with the generic releases page, then switch to the
@@ -162,7 +162,7 @@ const i18n: Record<Locale, any> = {
     mcRow3: "Natif (sans Electron)",
     mcRow4: "Serveur MCP pour agents",
     agentsCta: "Découvrir IA & agents →",
-    heroAnnounce: "Nouveau dans la v3.6 — les conflits de rebase ne vous piègent plus derrière une fenêtre modale, et une invite de mise à jour de branche en un clic",
+    heroAnnounce: "Nouveau dans la v3.6 — pull avec des changements non commités sans blocage : stash et restauration automatiques intégrés",
     heroPoint1: "8 patterns déterministes — zéro pari sur ton code",
     heroPoint2: "100 % local — ton code ne quitte jamais ta machine",
     heroPoint3: "Un seul moteur — Desktop, CLI, VS Code & agents IA",
@@ -262,7 +262,7 @@ const i18n: Record<Locale, any> = {
     mcRow3: "Native (no Electron)",
     mcRow4: "MCP server for agents",
     agentsCta: "Explore AI & agents →",
-    heroAnnounce: "New in v3.6 — rebase conflicts no longer trap you behind a modal, plus a one-click branch update prompt",
+    heroAnnounce: "New in v3.6 — pull with uncommitted changes, no more dead-ends: auto-stash and restore built in",
     heroPoint1: "8 deterministic patterns — zero gambling with your code",
     heroPoint2: "100% local — your code never leaves your machine",
     heroPoint3: "One engine — Desktop, CLI, VS Code & AI agents",
@@ -362,7 +362,7 @@ const i18n: Record<Locale, any> = {
     mcRow3: "Nativo (sin Electron)",
     mcRow4: "Servidor MCP para agentes",
     agentsCta: "Explorar IA y agentes →",
-    heroAnnounce: "Nuevo en la v3.6 — los conflictos de rebase ya no te atrapan detrás de un modal, más un aviso de actualización de rama con un clic",
+    heroAnnounce: "Nuevo en la v3.6 — pull con cambios sin confirmar sin bloqueos: stash y restauración automáticos integrados",
     heroPoint1: "8 patrones deterministas — cero apuestas con tu código",
     heroPoint2: "100 % local — tu código nunca sale de tu máquina",
     heroPoint3: "Un solo motor — Desktop, CLI, VS Code y agentes de IA",
@@ -462,7 +462,7 @@ const i18n: Record<Locale, any> = {
     mcRow3: "Nativo (sem Electron)",
     mcRow4: "Servidor MCP para agentes",
     agentsCta: "Explorar IA e agentes →",
-    heroAnnounce: "Novidade na v3.6 — conflitos de rebase não prendem mais você atrás de um modal, além de um aviso de atualização de branch com um clique",
+    heroAnnounce: "Novidade na v3.6 — pull com alterações não commitadas sem travar: stash e restauração automáticos",
     heroPoint1: "8 padrões deterministas — zero aposta com seu código",
     heroPoint2: "100 % local — seu código nunca sai da sua máquina",
     heroPoint3: "Um único motor — Desktop, CLI, VS Code e agentes de IA",
@@ -562,7 +562,7 @@ const i18n: Record<Locale, any> = {
     mcRow3: "原生（无 Electron）",
     mcRow4: "面向代理的 MCP 服务器",
     agentsCta: "探索 AI 与代理 →",
-    heroAnnounce: "v3.6 新功能 — rebase 冲突不再把你困在弹窗后面，还带来一键分支更新提示",
+    heroAnnounce: "v3.6 新功能 — 有未提交更改也能顺畅拉取：内置自动储藏与恢复",
     heroPoint1: "8 种确定性模式 — 绝不拿你的代码赌运气",
     heroPoint2: "100% 本地运行 — 代码永不离开你的机器",
     heroPoint3: "一个引擎 — 桌面端、CLI、VS Code 与 AI 代理",

@@ -5,6 +5,18 @@ description: Release history for GitWand — the native Git client with AI confl
 
 # Changelog
 
+## v3.6.2 — August 2026
+
+Four issues fixed and one long-requested workflow improvement, shipped together.
+
+Pulling with local uncommitted changes used to either work by luck or dead-end with a raw `cannot pull with rebase: you have unstaged changes` error. There's now a real answer: a new Settings → Git → "Pull with uncommitted changes" option lets GitWand park your changes for the duration of the pull and restore them automatically afterward — asking first by default, or auto-stashing silently if you'd rather it just handled it. If restoring them ever runs into a conflict, GitWand says so plainly instead of reporting a successful sync over a tree full of conflict markers.
+
+GitLab's merge request list — and the sidebar badge count — could hang the whole PR panel indefinitely: every `glab`-backed command was running its network call directly on the app's async runtime instead of a background thread, so a slow or stuck `glab` process parked a worker and blocked everything behind it. Every GitLab command now runs off the main runtime with its own timeout, so a hang now shows up as a clear "took too long to respond" message instead of freezing the app.
+
+The Stash Manager showed "Invalid Date" for every single stash — the date format GitWand asked git for is one the shipped macOS/Linux app's webview refuses to parse (it happened to work fine in a browser, which is presumably how this slipped through). Stash — and tag — dates now use a format every engine agrees on.
+
+And on Linux, a rendering failure could still abort the app on startup even after last release's software-rendering fallback, on setups where the failure originates earlier, at EGL display creation rather than compositing. A broader fallback now covers that path too. A second, unrelated bug hiding behind the same crash report — a telemetry panic that could in principle hit any platform on a very fast app exit — is fixed alongside it.
+
 ## v3.6.1 — August 2026
 
 A bugfix-only release — six issues reported by the community, fixed and shipped together.
