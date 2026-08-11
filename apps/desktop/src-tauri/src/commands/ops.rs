@@ -975,7 +975,7 @@ pub(crate) async fn git_stash_pop(cwd: String) -> Result<(), String> {
 pub(crate) async fn git_stash_list(cwd: String) -> Result<Vec<StashEntry>, String> {
     let _repo = repo_lock::read(&cwd);
     let output = git_cmd()
-        .args(["stash", "list", "--format=%H%x00%gd%x00%gs%x00%ai"])
+        .args(["stash", "list", "--format=%H%x00%gd%x00%gs%x00%aI"])
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to list stashes: {}", e))?;
@@ -4243,5 +4243,140 @@ mod default_branch_setting_tests {
         assert_eq!(authors.len(), 1);
         assert_eq!(authors[0].branch, "feature");
         assert_eq!(authors[0].name, "Test");
+    }
+}
+
+/// Regression coverage for #151: `git_stash_list` used git's lenient `%ai`
+/// ("2026-08-11 09:16:44 +0200"), which JavaScriptCore — the webview on the
+/// macOS/Linux builds — refuses to parse, so the Stash Manager rendered
+/// "Invalid Date" for every entry. The date must be strict ISO 8601 (`%aI`).
+#[cfg(test)]
+mod stash_and_tag_date_tests {
+    use super::*;
+    use crate::git::cmd::git_binary;
+    use regex::Regex;
+    use std::path::PathBuf;
+    use std::process::Command;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    /// `%aI` / `:iso-strict` emit a bare `Z` for UTC commits and `±HH:MM`
+    /// otherwise — both are accepted by `new Date()` in every JS engine.
+    const STRICT_ISO: &str = r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(Z|[+-]\d{2}:\d{2})$";
+
+    struct TempRepo {
+        path: PathBuf,
+    }
+    impl Drop for TempRepo {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+    impl TempRepo {
+        fn new() -> Self {
+            let n = COUNTER.fetch_add(1, Ordering::SeqCst);
+            let pid = std::process::id();
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let dir =
+                std::env::temp_dir().join(format!("gitwand-date-test-{}-{}-{}", pid, n, nanos));
+            std::fs::create_dir_all(&dir).unwrap();
+            let repo = TempRepo { path: dir };
+            repo.git_ok(&["init", "-q", "-b", "main"]);
+            repo.git_ok(&["config", "user.name", "Test"]);
+            repo.git_ok(&["config", "user.email", "test@example.com"]);
+            repo.git_ok(&["config", "commit.gpgsign", "false"]);
+            repo.git_ok(&["config", "tag.gpgsign", "false"]);
+            repo
+        }
+        fn cwd(&self) -> String {
+            self.path.to_str().unwrap().to_string()
+        }
+        fn git(&self, args: &[&str]) -> std::process::Output {
+            Command::new(git_binary())
+                .args(args)
+                .current_dir(&self.path)
+                .output()
+                .unwrap_or_else(|e| panic!("git {:?} spawn: {}", args, e))
+        }
+        fn git_ok(&self, args: &[&str]) {
+            let out = self.git(args);
+            assert!(
+                out.status.success(),
+                "git {:?} failed: {}",
+                args,
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+        fn write(&self, rel: &str, content: &str) {
+            std::fs::write(self.path.join(rel), content).unwrap();
+        }
+        fn commit_all(&self, msg: &str) {
+            self.git_ok(&["add", "-A"]);
+            self.git_ok(&["commit", "-q", "-m", msg]);
+        }
+    }
+
+    #[test]
+    fn stash_list_dates_are_strict_iso_8601() {
+        let repo = TempRepo::new();
+        repo.write("a.txt", "v1\n");
+        repo.commit_all("base");
+
+        repo.write("a.txt", "v2\n");
+        repo.git_ok(&["stash", "push", "-q", "-m", "first stash"]);
+        repo.write("a.txt", "v3\n");
+        repo.git_ok(&["stash", "push", "-q", "-m", "second stash"]);
+
+        let entries = tauri::async_runtime::block_on(git_stash_list(repo.cwd()))
+            .expect("git_stash_list must succeed on a repo with stashes");
+
+        assert_eq!(entries.len(), 2, "both stashes must be listed");
+        let re = Regex::new(STRICT_ISO).unwrap();
+        for e in &entries {
+            assert!(
+                re.is_match(&e.date),
+                "stash date {:?} is not strict ISO 8601 — the webview will render \
+                 \"Invalid Date\" (#151)",
+                e.date
+            );
+            // A space separator or a colon-less offset is exactly the %ai shape
+            // this test exists to keep out.
+            assert!(!e.date.contains(' '), "date must not contain a space: {:?}", e.date);
+        }
+        // Sanity: the rest of the entry is still parsed correctly.
+        assert_eq!(entries[0].message, "second stash");
+        assert_eq!(entries[0].branch, "main");
+        assert_eq!(entries[1].message, "first stash");
+    }
+
+    #[test]
+    fn stash_list_date_round_trips_to_the_commit_timestamp() {
+        let repo = TempRepo::new();
+        repo.write("a.txt", "v1\n");
+        repo.commit_all("base");
+        repo.write("a.txt", "v2\n");
+        repo.git_ok(&["stash", "push", "-q", "-m", "anchored"]);
+
+        let entries = tauri::async_runtime::block_on(git_stash_list(repo.cwd())).unwrap();
+        assert_eq!(entries.len(), 1);
+
+        // The reported date must equal git's own iso-strict rendering of the
+        // stash commit — guards against a future "reformat it ourselves" change
+        // silently shifting the timezone.
+        let iso_strict_from_git = String::from_utf8_lossy(
+            &repo
+                .git(&["log", "-1", "--date=iso-strict", "--format=%ad", &entries[0].hash])
+                .stdout,
+        )
+        .trim()
+        .to_string();
+        assert_eq!(
+            entries[0].date, iso_strict_from_git,
+            "date must equal git's own iso-strict rendering of the stash commit"
+        );
     }
 }
