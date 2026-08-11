@@ -1027,6 +1027,7 @@ const zhCN: Locale = {
       openSettings: "打开设置",
       unknown: "加载 pull request 失败。",
       retry: "重试",
+      timedOut: "{0} 响应超时 — 请检查网络或 VPN 后重试。",
     },
   },
 

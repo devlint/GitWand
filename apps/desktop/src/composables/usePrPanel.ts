@@ -613,6 +613,11 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
         const info = CLI_MISSING_INFO[forge.value.name] ?? CLI_MISSING_INFO.github;
         error.value = t("pr.error.cliNotInstalled", info.cli, info.url);
         errorAction.value = "open-settings";
+      } else if (msg.includes("timed out")) {
+        // #149 — a killed-on-timeout subprocess (Rust `output_with_timeout`).
+        // Must come after the CLI-missing check (a genuine ENOENT still wins)
+        // and before the token/auth check below.
+        error.value = t("pr.error.timedOut", forgeLabel.value);
       } else if (msg.includes("gh auth") || msg.includes("authentication") || msg.includes("token") || msg.includes("401")) {
         error.value = t("pr.error.noToken");
       } else if (msg.includes("404") || msg.includes("Could not resolve to a Repository")) {
