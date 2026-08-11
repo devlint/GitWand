@@ -310,6 +310,68 @@ pub(crate) fn git_cmd() -> std::process::Command {
     hidden_cmd(&git_binary())
 }
 
+/// Run `cmd` with a deadline, killing it if it doesn't finish in time.
+///
+/// Unlike `Command::output()`, this never blocks the caller for longer than
+/// `timeout`: on expiry the child is killed and reaped, and `Err` is returned
+/// with `ErrorKind::TimedOut`. Generalizes the deadline-poll pattern already
+/// used by `try_open_linux` (`commands/ops.rs`).
+///
+/// stdin is forced to `Stdio::null()` so a child that unexpectedly reads
+/// stdin (interactive auth re-prompt, pager, TTY probe) never hangs waiting
+/// on input the caller has no way to supply.
+pub(crate) fn output_with_timeout(
+    mut cmd: std::process::Command,
+    timeout: std::time::Duration,
+) -> std::io::Result<std::process::Output> {
+    use std::io::Read;
+    use std::process::Stdio;
+    use std::time::{Duration, Instant};
+
+    cmd.stdin(Stdio::null());
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+
+    let mut child = cmd.spawn()?;
+    let mut stdout_pipe = child.stdout.take().expect("stdout was piped");
+    let mut stderr_pipe = child.stderr.take().expect("stderr was piped");
+
+    let stdout_thread = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = stdout_pipe.read_to_end(&mut buf);
+        buf
+    });
+    let stderr_thread = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = stderr_pipe.read_to_end(&mut buf);
+        buf
+    });
+
+    let deadline = Instant::now() + timeout;
+    loop {
+        match child.try_wait()? {
+            Some(status) => {
+                let stdout = stdout_thread.join().unwrap_or_default();
+                let stderr = stderr_thread.join().unwrap_or_default();
+                return Ok(std::process::Output { status, stdout, stderr });
+            }
+            None if Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait(); // reap — avoid a zombie
+                // Do NOT join the reader threads here: a child that spawned a
+                // grandchild holding the pipe open would never hit EOF, and
+                // joining would defeat the entire point of the timeout. They
+                // exit on their own at EOF; just drop the handles.
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    format!("timed out after {}s", timeout.as_secs()),
+                ));
+            }
+            None => std::thread::sleep(Duration::from_millis(25)),
+        }
+    }
+}
+
 /// Resolve the repo's mainline branch name for commands that need a "main"
 /// reference point (ahead/behind counts, "merged into main" checks, top-author
 /// stats per branch). Shared by `commands::ops` and `commands::read` so the
@@ -636,6 +698,74 @@ mod tests {
                 .into_iter()
                 .collect();
         assert!(appimage_path_fixes(&lookup(&env)).is_empty());
+    }
+
+    // ── output_with_timeout (#149) ─────────────────────────────────────────
+    //
+    // Real subprocesses per AGENTS.md § Testing — gated #[cfg(unix)] since
+    // they rely on `sleep`, `false`, `head`, `/dev/zero` (CI's Rust matrix is
+    // Linux/macOS, per .github/workflows/ci.yml).
+
+    #[cfg(unix)]
+    mod output_with_timeout_tests {
+        use super::super::output_with_timeout;
+        use std::io::ErrorKind;
+        use std::process::Command;
+        use std::time::{Duration, Instant};
+
+        #[test]
+        fn returns_output_for_a_fast_command() {
+            let mut cmd = Command::new("echo");
+            cmd.arg("hi");
+            let out = output_with_timeout(cmd, Duration::from_secs(5)).unwrap();
+            assert!(out.status.success());
+            assert_eq!(out.stdout, b"hi\n");
+        }
+
+        #[test]
+        fn kills_and_errors_when_the_command_exceeds_the_timeout() {
+            let mut cmd = Command::new("sleep");
+            cmd.arg("30");
+            let start = Instant::now();
+            let err = output_with_timeout(cmd, Duration::from_millis(300)).unwrap_err();
+            // This is the actual regression assertion for #149: the call
+            // returns promptly instead of blocking for the child's full
+            // lifetime.
+            assert!(start.elapsed() < Duration::from_secs(5));
+            assert_eq!(err.kind(), ErrorKind::TimedOut);
+            assert!(err.to_string().contains("timed out"));
+        }
+
+        #[test]
+        fn captures_large_stdout_without_deadlocking() {
+            // Guards the pipe-buffer deadlock: without dedicated drain
+            // threads, a child writing more than the OS pipe buffer (~64 KB)
+            // blocks on write() forever and this test hangs until the
+            // timeout, then fails.
+            let mut cmd = Command::new("head");
+            cmd.args(["-c", "2000000", "/dev/zero"]);
+            let out = output_with_timeout(cmd, Duration::from_secs(10)).unwrap();
+            assert_eq!(out.stdout.len(), 2_000_000);
+        }
+
+        #[test]
+        fn propagates_nonzero_exit_status() {
+            let cmd = Command::new("false");
+            let out = output_with_timeout(cmd, Duration::from_secs(5)).unwrap();
+            assert!(!out.status.success());
+        }
+
+        #[test]
+        fn spawn_failure_error_text_is_preserved() {
+            let cmd = Command::new("gitwand-no-such-binary-149");
+            let err = output_with_timeout(cmd, Duration::from_secs(5)).unwrap_err();
+            assert!(
+                err.kind() == ErrorKind::NotFound
+                    || err.to_string().contains("No such file or directory"),
+                "unexpected error: {}",
+                err
+            );
+        }
     }
 
     #[test]

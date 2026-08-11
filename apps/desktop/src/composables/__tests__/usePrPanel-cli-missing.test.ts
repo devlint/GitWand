@@ -76,4 +76,22 @@ describe("usePrPanel — forge-specific CLI-missing error (issue #138)", () => {
     expect(panel.error.value).not.toContain("cli.github.com");
     expect(panel.errorAction.value).toBe("open-settings");
   });
+
+  // Issue #149 — a killed-on-timeout `glab`/`gh` subprocess must not be
+  // misreported as "CLI not installed". `loadPrs()`'s error classification is
+  // a chain of substring matches (usePrPanel.ts:605-621); a carelessly worded
+  // timeout message would be silently swallowed by the CLI-missing branch.
+  it("classifies a timed-out glab subprocess as a timeout, not a missing CLI", async () => {
+    gitRemoteInfo.mockResolvedValue({ name: "origin", url: "https://gitlab.com/o/r", provider: "gitlab", owner: "o", repo: "r" });
+    forgeStub.current = { name: "gitlab", listPRs: vi.fn(async () => { throw new Error("glab mr list failed: timed out after 20s"); }) };
+
+    const panel = usePrPanel(ref("/repo"));
+    await panel.loadRemote();
+    await panel.loadPrs();
+
+    expect(panel.error.value).not.toContain("not installed");
+    expect(panel.error.value).not.toContain("cli.github.com");
+    expect(panel.error.value).toContain("GitLab");
+    expect(panel.error.value).toContain("took too long to respond");
+  });
 });

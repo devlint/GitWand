@@ -1060,6 +1060,7 @@ const en = {
       openSettings: "Open settings",
       unknown: "Failed to load pull requests.",
       retry: "Retry",
+      timedOut: "{0} took too long to respond — check your network or VPN, then retry.",
     },
   },
 

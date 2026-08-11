@@ -1053,6 +1053,7 @@ const fr: Locale = {
       openSettings: "Ouvrir les réglages",
       unknown: "Impossible de charger les pull requests.",
       retry: "Réessayer",
+      timedOut: "{0} a mis trop de temps à répondre — vérifiez votre connexion ou VPN, puis réessayez.",
     },
   },
 

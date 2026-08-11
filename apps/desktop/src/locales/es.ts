@@ -1044,6 +1044,7 @@ const es: Locale = {
       openSettings: "Abrir ajustes",
       unknown: "Error al cargar los pull requests.",
       retry: "Reintentar",
+      timedOut: "{0} tardó demasiado en responder — revisa tu red o VPN y vuelve a intentarlo.",
     },
   },
 

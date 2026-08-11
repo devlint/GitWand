@@ -1045,6 +1045,7 @@ const ptBR: Locale = {
       openSettings: "Abrir configurações",
       unknown: "Falha ao carregar os pull requests.",
       retry: "Tentar novamente",
+      timedOut: "{0} demorou demais para responder — verifique sua rede ou VPN e tente novamente.",
     },
   },
 
