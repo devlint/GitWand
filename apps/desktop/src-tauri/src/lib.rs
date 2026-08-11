@@ -298,6 +298,14 @@ pub fn run() {
     {
         std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
         std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+        // #135 follow-up: the two vars above only steer WebKitGTK's compositing
+        // path, not EGL *display acquisition* itself — force Mesa's software
+        // rasterizer as a broader fallback for systems where EGL_BAD_PARAMETER
+        // originates earlier (e.g. native Wayland/Gnome). Never override a value
+        // the user or environment already set deliberately.
+        if std::env::var("LIBGL_ALWAYS_SOFTWARE").is_err() {
+            std::env::set_var("LIBGL_ALWAYS_SOFTWARE", "1");
+        }
     }
 
     // macOS GUI apps launched from Finder/Dock get a minimal launchd env
