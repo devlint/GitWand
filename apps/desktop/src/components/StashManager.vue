@@ -162,17 +162,16 @@ async function toggleDiff(index: number) {
 }
 
 function formatDate(dateStr: string): string {
-  try {
-    const d = new Date(dateStr);
-    return d.toLocaleDateString(undefined, {
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
-    return dateStr;
-  }
+  const d = new Date(dateStr);
+  // `new Date()` never throws on a bad string — it yields an Invalid Date whose
+  // toLocaleDateString() is the literal "Invalid Date" (#151).
+  if (Number.isNaN(d.getTime())) return dateStr;
+  return d.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 onMounted(loadStashes);
