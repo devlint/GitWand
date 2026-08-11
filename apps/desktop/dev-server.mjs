@@ -5817,7 +5817,7 @@ async function handleRequest(req, res) {
       try {
         // Use \x1f (unit separator) — same as git_log, safe in Node child_process args
         const SEP = "\x1f";
-        const fmt = `%(refname:short)${SEP}%(objecttype)${SEP}%(objectname:short)${SEP}%(*objectname:short)${SEP}%(taggerdate:iso)${SEP}%(creatordate:iso)${SEP}%(contents:subject)`;
+        const fmt = `%(refname:short)${SEP}%(objecttype)${SEP}%(objectname:short)${SEP}%(*objectname:short)${SEP}%(taggerdate:iso-strict)${SEP}%(creatordate:iso-strict)${SEP}%(contents:subject)`;
         const out = spawnSync(GIT, ["tag", "-l", "--sort=-version:refname", "--sort=-creatordate", `--format=${fmt}`], { cwd: resolve(cwd), encoding: "utf-8" });
         const tags = (out.stdout || "").split("\n").map(line => {
           const parts = line.split(SEP);

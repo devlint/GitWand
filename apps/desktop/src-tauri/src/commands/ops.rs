@@ -1292,7 +1292,7 @@ pub(crate) async fn git_create_tag(cwd: String, name: String, sha: String, messa
 pub(crate) async fn git_list_tags(cwd: String) -> Result<Vec<TagEntry>, String> {
     let sep = "\x1f";
     let fmt = format!(
-        "%(refname:short){s}%(objecttype){s}%(objectname:short){s}%(*objectname:short){s}%(taggerdate:iso){s}%(creatordate:iso){s}%(contents:subject)",
+        "%(refname:short){s}%(objecttype){s}%(objectname:short){s}%(*objectname:short){s}%(taggerdate:iso-strict){s}%(creatordate:iso-strict){s}%(contents:subject)",
         s = sep
     );
     let output = git_cmd()
@@ -4377,6 +4377,36 @@ mod stash_and_tag_date_tests {
         assert_eq!(
             entries[0].date, iso_strict_from_git,
             "date must equal git's own iso-strict rendering of the stash commit"
+        );
+    }
+
+    #[test]
+    fn tag_list_dates_are_strict_iso_8601() {
+        let repo = TempRepo::new();
+        repo.write("a.txt", "v1\n");
+        repo.commit_all("base");
+        // Annotated tag → taggerdate; lightweight tag → creatordate. git_list_tags
+        // picks one or the other (ops.rs), so both paths need coverage.
+        repo.git_ok(&["tag", "-a", "v1.0.0", "-m", "release 1.0.0"]);
+        repo.git_ok(&["tag", "lightweight"]);
+
+        let tags = tauri::async_runtime::block_on(git_list_tags(repo.cwd()))
+            .expect("git_list_tags must succeed");
+        assert_eq!(tags.len(), 2, "both tags must be listed");
+
+        let re = Regex::new(STRICT_ISO).unwrap();
+        for t in &tags {
+            assert!(
+                re.is_match(&t.date),
+                "tag {:?} date {:?} is not strict ISO 8601 — TagsPanel.relativeDate \
+                 renders \"NaN years ago\" (#151, sibling of the stash bug)",
+                t.name,
+                t.date
+            );
+        }
+        assert!(
+            tags.iter().any(|t| t.name == "v1.0.0" && t.is_annotated),
+            "the annotated tag must be flagged is_annotated"
         );
     }
 }
