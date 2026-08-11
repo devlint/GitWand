@@ -77,6 +77,7 @@ async function runUpdateCheck() {
 
 export type PullMode = "merge" | "rebase";
 export type SwitchBehavior = "stash" | "ask" | "refuse";
+export type PullDirtyBehavior = "ask" | "refuse" | "autostash";
 export type NotificationLevel = "all" | "reviews" | "ci" | "none";
 // Single source of truth for the provider union — re-export so other files
 // importing from SettingsPanel don't break, but the canonical declaration
@@ -136,6 +137,7 @@ interface Settings {
   diffMode: DiffMode;
   pullMode: PullMode;
   switchBehavior: SwitchBehavior;
+  pullDirtyBehavior: PullDirtyBehavior;
   fontSize: number;
   tabSize: number;
   notifications: boolean;
@@ -232,6 +234,7 @@ const defaultSettings: Settings = {
   diffMode: "inline",
   pullMode: "rebase",
   switchBehavior: "ask",
+  pullDirtyBehavior: "ask",
   fontSize: 12,
   tabSize: 4,
   notifications: true,
@@ -552,6 +555,10 @@ function onFontSizeChange(val: number) {
 function onTabSizeChange(val: number) {
   updateSetting("tabSize", val);
   emit("update:tabSize", val);
+}
+
+function onPullDirtyBehaviorChange(val: PullDirtyBehavior) {
+  updateSetting("pullDirtyBehavior", val);
 }
 
 function onSwitchBehaviorChange(val: SwitchBehavior) {
@@ -1750,6 +1757,18 @@ function deleteReleaseNoteTemplate(id: string) {
               <option value="merge">{{ t('settings.pullMerge') }}</option>
               <option value="rebase">{{ t('settings.pullRebase') }}</option>
             </select>
+          </div>
+
+          <!-- Dirty-tree behavior on pull -->
+          <div class="sp-row">
+            <label class="sp-label" for="setting-pull-dirty">{{ t('settings.pullDirtyBehavior') }}</label>
+            <select id="setting-pull-dirty" class="sp-select" :value="settings.pullDirtyBehavior"
+              @change="onPullDirtyBehaviorChange(($event.target as HTMLSelectElement).value as PullDirtyBehavior)">
+              <option value="autostash">{{ t('settings.pullDirtyAutostash') }}</option>
+              <option value="ask">{{ t('settings.pullDirtyAsk') }}</option>
+              <option value="refuse">{{ t('settings.pullDirtyRefuse') }}</option>
+            </select>
+            <span class="sp-hint">{{ t('settings.pullDirtyHint') }}</span>
           </div>
 
           <!-- Switch behavior -->
