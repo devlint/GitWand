@@ -2151,9 +2151,9 @@ async function handleRequest(req, res) {
       }
     }
 
-    // POST /api/git-pull  { cwd, strategy? }  strategy: "merge" | "rebase" | "ff-only"
+    // POST /api/git-pull  { cwd, strategy?, autostash? }  strategy: "merge" | "rebase" | "ff-only"
     if (url.pathname === "/api/git-pull" && req.method === "POST") {
-      const { cwd, strategy } = await readBody(req);
+      const { cwd, strategy, autostash } = await readBody(req);
       if (!cwd) return jsonResponse(req, res, { error: "Missing cwd" }, 400);
       try {
         const resolvedCwd = resolve(cwd);
@@ -2161,7 +2161,7 @@ async function handleRequest(req, res) {
         // ambient `pull.rebase` git config (parity with the Rust git_pull cmd).
         const flag = strategy === "rebase" ? "--rebase"
           : strategy === "ff-only" ? "--ff-only" : "--no-rebase";
-        const cmd = `git pull ${flag} 2>&1`;
+        const cmd = `git pull ${flag}${autostash ? " --autostash" : ""} 2>&1`;
         const stdout = execSync(cmd, {
           cwd: resolvedCwd,
           encoding: "utf-8",

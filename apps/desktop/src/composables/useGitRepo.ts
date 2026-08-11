@@ -37,6 +37,7 @@ import {
   gitStashApply,
   gitStashDrop,
   gitWorktreeList,
+  gitRepoState,
   type GitStatus,
   type GitDiff,
   type GitLogEntry,
@@ -987,14 +988,15 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     }
   }
 
-  async function pull(rebase: boolean = false) {
+  async function pull(rebase: boolean = false, autostash: boolean = false) {
     if (!folderPath.value) return;
     if (!(await requireOnline("pull"))) return;
     isPulling.value = true;
+    let probeAutostash = false;
     try {
       // Fetch all branches first (updates origin/master, etc.)
       await gitFetch(folderPath.value);
-      const result = await gitPull(folderPath.value, rebase ? "rebase" : "merge");
+      const result = await gitPull(folderPath.value, rebase ? "rebase" : "merge", autostash);
       if (!result.success) {
         error.value = `pull: ${result.message}`;
       } else {
@@ -1009,19 +1011,47 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
           successMessage.value = "sync-done";
         }
         forcePushPreferred.value = false;
+        probeAutostash = autostash;
         // The user chose to update — an earlier "continue on local branch"
         // mute for this branch is obsolete, re-enable its prompt.
         if (status.value?.branch) {
           clearUpdatePromptSkip(folderPath.value, status.value.branch);
         }
       }
-      // Force: a pull updates remote-tracking refs and may fast-forward without
-      // the fast path noticing the decoration change.
-      await refresh(true);
     } catch (err: any) {
       error.value = `pull: ${err?.message ?? err}`;
     } finally {
       isPulling.value = false;
+      // Force: a pull updates remote-tracking refs and may fast-forward without
+      // the fast path noticing the decoration change.
+      await refresh(true);
+      if (probeAutostash) await settleAutostash();
+    }
+  }
+
+  /**
+   * `git pull --autostash` exits 0 even when re-applying the parked WIP hit
+   * conflicts, so a plain success check reports "Sync completed" over a tree
+   * full of markers. A conflicted file with NO merge/rebase in progress can
+   * only come from an autostash apply, which is how we tell the two apart
+   * without grepping git's (localized) output.
+   *
+   * A rebase still in progress is NOT an error: git holds the autostash in
+   * .git/rebase-merge/autostash and applies it itself on `rebase --continue`
+   * or `--abort`. We only tell the user their WIP is parked.
+   */
+  async function settleAutostash() {
+    if (!folderPath.value) return;
+    const st = await gitRepoState(folderPath.value).catch(() => null);
+    if (!st) return;
+    if (st.state === "rebase" || st.state === "rebase_interactive" || st.state === "merge") {
+      successMessage.value = "autostash-parked";
+      return;
+    }
+    if ((status.value?.conflicted.length ?? 0) > 0) {
+      successMessage.value = null;
+      error.value = t("header.pullAutostashConflict");
+      viewMode.value = "changes";
     }
   }
 
