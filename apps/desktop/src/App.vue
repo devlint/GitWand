@@ -138,6 +138,7 @@ import { isTauri, registerBrowserFolderPicker, pickFolder, checkForUpdates, fetc
 import type { UpdateInfo, RepoOperationState, WorkspaceRepo, PullRequest } from "./utils/backend";
 import { onMarkdownLinkClick } from "./composables/useSafeHtml";
 import { resolveDirtySwitchAction, type DirtyFile } from "./utils/branchSwitchDecision";
+import { resolveDirtyPullAction } from "./utils/pullDirtyDecision";
 // UpdateModal moved above (lazy-loaded) — type imported as UpdateModalType for the template ref
 
 const { theme, toggle: toggleTheme } = useTheme();
@@ -612,6 +613,7 @@ watch(repoSuccess, (val) => {
     "stash-done": { key: "header.stashDone" },
     "merge-done": { key: "header.mergeDone" },
     "merge-aborted": { key: "header.mergeAborted" },
+    "autostash-parked": { key: "header.pullAutostashParked" },
   };
   const info = meta[val];
   successToast.value = info ? t(info.key as any) : val;
@@ -1234,7 +1236,7 @@ async function promptPullIfBehind() {
     message: t("branches.pullAfterCheckout"),
     confirmLabel: t("header.pull"),
   })) {
-    await doPull();
+    await handlePull(false);
   }
 }
 
@@ -1263,8 +1265,8 @@ async function handleCreateBranch(name: string) {
 //
 // NOTE: We don't have a dedicated `rebaseOntoRemote` / `mergeRemote`
 // backend. Those are pull variants:
-//   - rebaseOntoRemote → doPull(true)  (git pull --rebase)
-//   - mergeRemote      → doPull(false) (git pull --no-rebase)
+//   - rebaseOntoRemote → handlePull(true)  (git pull --rebase)
+//   - mergeRemote      → handlePull(false) (git pull --no-rebase)
 // This sidesteps the need for a new backend surface and Just Works™.
 
 /**
@@ -1272,10 +1274,38 @@ async function handleCreateBranch(name: string) {
  * push. Kept in App.vue so the toast / error plumbing stays one layer up.
  */
 async function doSync() {
-  await doPull(pullMode.value === "rebase");
+  await handlePull();
   // Only push if pull succeeded and there are local commits to push.
   if (!repoError.value && canPush.value) {
     await doPush();
+  }
+}
+
+/**
+ * Single entry point for every user-triggered pull. Applies the
+ * pullDirtyBehavior setting to a dirty working tree before delegating.
+ * The scheduler deliberately bypasses this (it can't answer a modal).
+ */
+async function handlePull(rebase: boolean = pullMode.value === "rebase") {
+  switch (resolveDirtyPullAction(isDirty(), settings.value.pullDirtyBehavior)) {
+    case "refuse":
+      repoError.value = t("header.pullRefusedDirty");
+      return;
+    case "autostash":
+      await doPull(rebase, true);
+      return;
+    case "modal": {
+      const ok = await askConfirm({
+        title: t("header.pullDirtyTitle"),
+        message: t("header.pullDirtyMessage"),
+        confirmLabel: t("header.pullDirtyConfirm"),
+      });
+      if (!ok) return;
+      await doPull(rebase, true);
+      return;
+    }
+    default:
+      await doPull(rebase);
   }
 }
 
@@ -1317,12 +1347,12 @@ function cancelForcePush() {
 
 /** Dropdown "Rebase onto origin" — explicit rebase pull. */
 async function doRebaseOntoRemote() {
-  await doPull(true);
+  await handlePull(true);
 }
 
 /** Dropdown "Merge origin into current" — explicit merge pull. */
 async function doMergeRemote() {
-  await doPull(false);
+  await handlePull(false);
 }
 
 // ─── Current-branch rename / delete modals ───────────────
@@ -1449,7 +1479,7 @@ const paletteActions = computed<PaletteAction[]>(() => {
 function onPaletteAction(id: string) {
   switch (id) {
     case "push": handlePush(); break;
-    case "pull": doPull(pullMode.value === "rebase"); break;
+    case "pull": void handlePull(); break;
     case "sync": doSync(); break;
     case "fetch": doFetch(true); break;
     case "new-tab": handleOpenFolder(); break;
@@ -2860,7 +2890,8 @@ const scheduler = useScheduler({
     await repoRefresh();
   },
   pullAndRebase: async () => {
-    await doPull(true);
+    // Headless: can't prompt, so always park the WIP (git restores it itself).
+    await doPull(true, true);
   },
   generateReleaseNotes: async () => {
     if (!repoFolderPath.value) return;
@@ -2995,7 +3026,7 @@ useAppMenu(
       if (activeTabId.value !== null) closeRepoTab(activeTabId.value);
     },
     fetch: doFetch,
-    pull: () => doPull(pullMode.value === "rebase"),
+    pull: () => handlePull(),
     push: doPush,
     newBranch: () => {
       // Bump the bridge counter; BranchSelector opens its inline create
@@ -3209,7 +3240,7 @@ onUnmounted(() => {
       @open-folder="handleOpenFolder" @open-repo="handleOpenPath" @switch-tab="switchTab" @close-tab="closeRepoTab"
       @reorder-tabs="reorderTabs"
       @new-tab="handleOpenFolder" @open-clone="showCloneModal = true" @open-fork="showForkModal = true"
-      @toggle-theme="toggleTheme" @push="handlePush" @pull="() => doPull(pullMode === 'rebase')" @fetch="() => doFetch(true)"
+      @toggle-theme="toggleTheme" @push="handlePush" @pull="() => handlePull()" @fetch="() => doFetch(true)"
       @sync="doSync" @publish="doPublish" @rebase-onto-remote="doRebaseOntoRemote" @merge-remote="doMergeRemote"
       @force-push="doForcePush" @discard-all="handleWipDiscardAll"
       @merge-branch="doMerge" @open-settings="settingsInitialTab = undefined; showSettings = true"
@@ -3289,7 +3320,7 @@ onUnmounted(() => {
             <DashboardView v-if="viewMode === 'dashboard'" class="view__content"
               :cwd="repoFolderPath ?? ''" :branch="branchDisplay"
               :status="repoStats" :ahead="aheadCount" :behind="behindCount" :needs-publish="needsPublish"
-              @change-view="onViewModeChange" @select-commit="onDashboardSelectCommit" @push="handlePush" @sync="() => doPull(pullMode === 'rebase')" />
+              @change-view="onViewModeChange" @select-commit="onDashboardSelectCommit" @push="handlePush" @sync="() => handlePull()" />
 
             <!-- ── Changes view: diff │ collapsible right rail (files + commit) ── -->
             <div v-else-if="viewMode === 'changes'" class="view view--changes">

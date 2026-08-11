@@ -497,7 +497,7 @@ pub(crate) async fn git_merge_continue(cwd: String) -> Result<GitPushPullResult,
 }
 
 #[tauri::command]
-pub(crate) async fn git_pull(cwd: String, strategy: String) -> Result<GitPushPullResult, String> {
+pub(crate) async fn git_pull(cwd: String, strategy: String, autostash: Option<bool>) -> Result<GitPushPullResult, String> {
     let _t0 = Instant::now();
     // Pass the strategy flag EXPLICITLY so the user's pull-mode choice is
     // authoritative. A bare `git pull` defers to the ambient `pull.rebase`
@@ -511,13 +511,17 @@ pub(crate) async fn git_pull(cwd: String, strategy: String) -> Result<GitPushPul
         "ff-only" => "--ff-only",
         _ => "--no-rebase",
     };
+    let mut args: Vec<&str> = vec!["pull", strategy];
+    if autostash.unwrap_or(false) {
+        args.push("--autostash");
+    }
     let _repo = repo_lock::write(&cwd);
     let output = git_cmd()
-        .args(["pull", strategy])
+        .args(&args)
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to run git pull: {}", e))?;
-    record_cmd(&format!("git pull {}", strategy), &cwd, _t0.elapsed().as_millis() as u64, output.status.code().unwrap_or(-1));
+    record_cmd(&format!("git {}", args.join(" ")), &cwd, _t0.elapsed().as_millis() as u64, output.status.code().unwrap_or(-1));
 
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
