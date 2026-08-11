@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Linux: broadened the startup render fallback with `LIBGL_ALWAYS_SOFTWARE=1` (never overriding a value already set in the environment) alongside the existing `WEBKIT_DISABLE_COMPOSITING_MODE`/`WEBKIT_DISABLE_DMABUF_RENDERER`. The two WebKitGTK vars only steer compositing; they don't affect EGL *display acquisition*, which is where `Could not create default EGL display: EGL_BAD_PARAMETER` originates on some native-Wayland/Gnome setups (#135).
+- Telemetry no longer panics on exit (`there is no reactor running, must be called from the context of a Tokio 1.x runtime`). The vendored `tauri-plugin-aptabase` fork still flushed its queue through `futures::executor::block_on`, which provides no Tokio reactor, so quitting within 60s of launch — before the background flush had drained the queued `launch` event — panicked on any platform. This was the second half of the crash reported on Linux, where EGL failures make the app exit almost immediately (#135).
 
 ## [3.6.1] - 2026-08-10
 
