@@ -15,10 +15,22 @@
 //! synchronous `hidden_cmd("glab")` wrapper with JSON parsing. No new HTTP
 //! or async dependencies required.
 
-use crate::git::hidden_cmd;
+use crate::git::{hidden_cmd, output_with_timeout};
 use crate::types::*;
 use rayon::prelude::*;
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
+
+/// Timeout for the primary `glab` invocation of a command (#149). Chosen to
+/// leave headroom under the frontend's 30s IPC race (`backend-core.ts`
+/// `IPC_TIMEOUT.DEFAULT`) so the Rust "timed out" error surfaces instead of
+/// the frontend's generic "IPC timeout after 30000ms" message.
+const GLAB_TIMEOUT: Duration = Duration::from_secs(20);
+/// Timeout for best-effort `glab api` helpers (`gl_pipeline_rollup`,
+/// `glab_api_json`) — these already degrade gracefully on any error.
+const GLAB_API_TIMEOUT: Duration = Duration::from_secs(5);
+/// Overall wall-clock budget for the per-MR pipeline fan-out in `gl_list_mrs`.
+const ROLLUP_BUDGET: Duration = Duration::from_secs(5);
 
 // ─── JSON field helpers ────────────────────────────────────────────────────────
 
@@ -231,8 +243,7 @@ pub(crate) async fn detect_glab(cwd: String) -> bool {
 ///
 /// `state` accepts "opened" (default), "closed", "merged", "all".
 /// Pagination: naïve slice — glab doesn't support cursor pagination via CLI.
-#[tauri::command]
-pub(crate) async fn gl_list_mrs(
+fn gl_list_mrs_inner(
     cwd: String,
     state: String,
     limit: Option<i64>,
@@ -243,15 +254,15 @@ pub(crate) async fn gl_list_mrs(
     let off = offset.unwrap_or(0).max(0);
     let total = (page + off).to_string();
 
-    let output = hidden_cmd("glab")
-        .args([
-            "mr", "list",
-            flag,
-            "--per-page", &total,
-            "--output", "json",
-        ])
-        .current_dir(&cwd)
-        .output()
+    let mut cmd = hidden_cmd("glab");
+    cmd.args([
+        "mr", "list",
+        flag,
+        "--per-page", &total,
+        "--output", "json",
+    ])
+    .current_dir(&cwd);
+    let output = output_with_timeout(cmd, GLAB_TIMEOUT)
         .map_err(|e| format!("Failed to run glab mr list (is glab installed?): {}", e))?;
 
     if !output.status.success() {
@@ -286,12 +297,17 @@ pub(crate) async fn gl_list_mrs(
             Some((iid, status))
         })
         .collect();
+    // Overall wall-clock budget for the fan-out, not just a per-call cap:
+    // rollups are already best-effort (empty on any error), so degrading to
+    // "no CI dot" past the deadline is a behavior the code already supports.
+    let rollup_deadline = Instant::now() + ROLLUP_BUDGET;
     let rollups: HashMap<i64, String> = mrs
         .par_iter()
         .filter_map(|mr| {
             let rollup = match embedded.get(&mr.number) {
                 Some(s) => gl_status_to_rollup(s),
-                None => gl_pipeline_rollup(&cwd, mr.number),
+                None if Instant::now() < rollup_deadline => gl_pipeline_rollup(&cwd, mr.number),
+                None => String::new(),
             };
             if rollup.is_empty() { None } else { Some((mr.number, rollup)) }
         })
@@ -305,17 +321,30 @@ pub(crate) async fn gl_list_mrs(
     Ok(mrs)
 }
 
+#[tauri::command]
+pub(crate) async fn gl_list_mrs(
+    cwd: String,
+    state: String,
+    limit: Option<i64>,
+    offset: Option<i64>,
+) -> Result<Vec<PullRequest>, String> {
+    tauri::async_runtime::spawn_blocking(move || gl_list_mrs_inner(cwd, state, limit, offset))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 /// Count MRs. Fetches up to 100 via list endpoint (GitLab REST has no free totalCount).
 ///
 /// Returns 0 on non-fatal errors so the Launchpad badge can still render.
-#[tauri::command]
-pub(crate) async fn gl_mr_count(cwd: String, state: String) -> Result<i64, String> {
+fn gl_mr_count_inner(cwd: String, state: String) -> Result<i64, String> {
     let flag = gl_state_flag(&state);
-    let output = hidden_cmd("glab")
-        .args(["mr", "list", flag, "--per-page", "100", "--output", "json"])
-        .current_dir(&cwd)
-        .output()
-        .map_err(|e| format!("glab mr count: {}", e))?;
+    let mut cmd = hidden_cmd("glab");
+    cmd.args(["mr", "list", flag, "--per-page", "100", "--output", "json"])
+        .current_dir(&cwd);
+    let output = match output_with_timeout(cmd, GLAB_TIMEOUT) {
+        Ok(o) => o,
+        Err(_) => return Ok(0),
+    };
 
     if !output.status.success() {
         return Ok(0);
@@ -325,6 +354,13 @@ pub(crate) async fn gl_mr_count(cwd: String, state: String) -> Result<i64, Strin
     let arr: serde_json::Value =
         serde_json::from_str(stdout.trim()).unwrap_or(serde_json::Value::Array(vec![]));
     Ok(arr.as_array().map(|a| a.len() as i64).unwrap_or(0))
+}
+
+#[tauri::command]
+pub(crate) async fn gl_mr_count(cwd: String, state: String) -> Result<i64, String> {
+    tauri::async_runtime::spawn_blocking(move || gl_mr_count_inner(cwd, state))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// Get detailed MR info using `glab mr view`.
@@ -486,7 +522,9 @@ fn gl_status_to_rollup(status: &str) -> String {
 /// best-effort (empty on any error) so it's safe to fan out under rayon.
 fn gl_pipeline_rollup(cwd: &str, iid: i64) -> String {
     let endpoint = format!("projects/:fullpath/merge_requests/{}/pipelines", iid);
-    let out = match hidden_cmd("glab").args(["api", &endpoint]).current_dir(cwd).output() {
+    let mut cmd = hidden_cmd("glab");
+    cmd.args(["api", &endpoint]).current_dir(cwd);
+    let out = match output_with_timeout(cmd, GLAB_API_TIMEOUT) {
         Ok(o) if o.status.success() => o,
         _ => return String::new(),
     };
@@ -505,11 +543,9 @@ fn gl_pipeline_rollup(cwd: &str, iid: i64) -> String {
 /// Helper — run `glab api <endpoint>` and parse the JSON response.
 /// Returns `None` on any failure (non-fatal pattern, like gl_mr_pipelines).
 fn glab_api_json(cwd: &str, endpoint: &str) -> Option<serde_json::Value> {
-    let output = hidden_cmd("glab")
-        .args(["api", endpoint])
-        .current_dir(cwd)
-        .output()
-        .ok()?;
+    let mut cmd = hidden_cmd("glab");
+    cmd.args(["api", endpoint]).current_dir(cwd);
+    let output = output_with_timeout(cmd, GLAB_API_TIMEOUT).ok()?;
     if !output.status.success() {
         return None;
     }
