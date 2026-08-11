@@ -2698,7 +2698,7 @@ async function handleRequest(req, res) {
         const resolvedCwd = resolve(cwd);
         const out = execFileSync(
           "git",
-          ["stash", "list", "--format=%H%x09%gd%x09%gs%x09%ct"],
+          ["stash", "list", "--format=%H%x09%gd%x09%gs%x09%aI"],
           { cwd: resolvedCwd, encoding: "utf-8" },
         );
         // Mirror git_stash_list (Rust) parsing exactly so the parity test holds:
@@ -2711,10 +2711,14 @@ async function handleRequest(req, res) {
           .map((line) => line.trim())
           .filter(Boolean)
           .forEach((line, i) => {
-            const [hash, , subjectRaw, ts] = line.split("\t");
+            const [hash, , subjectRaw, dateRaw] = line.split("\t");
             const subject = subjectRaw ?? "";
             if (subject.startsWith("untracked files on ")) return;
-            const date = ts ? new Date(parseInt(ts, 10) * 1000).toISOString() : "";
+            // Strict ISO 8601 straight from git (%aI), same placeholder as the
+            // Rust `git_stash_list` — see #151. Previously %ct + toISOString(),
+            // which produced a valid but *different* ISO string (and used the
+            // committer date where Rust used the author date).
+            const date = dateRaw ?? "";
             let branch = "";
             let message = subject;
             if (subject.startsWith("On ")) {
