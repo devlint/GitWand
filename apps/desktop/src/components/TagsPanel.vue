@@ -74,6 +74,9 @@ const hasUnpushed = computed(() => unpushedTagNames.value.length > 0);
 function relativeDate(iso: string): string {
   if (!iso) return "";
   const d = new Date(iso);
+  // An unparseable date makes every comparison below false and falls through to
+  // "NaN years ago" (#151) — treat it like a missing date instead.
+  if (Number.isNaN(d.getTime())) return "";
   const now = new Date();
   const diffDays = Math.floor((now.getTime() - d.getTime()) / 86400000);
   if (diffDays < 1) return t("date.now");

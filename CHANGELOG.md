@@ -7,8 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Auto-stash on pull (#150)** — pulling with uncommitted changes no longer dead-ends on `cannot pull with rebase: You have unstaged changes`. A new Settings → Git → "Pull with uncommitted changes" option (Ask — default · Auto stash & restore · Refuse) parks the working tree via `git pull --autostash` and lets git restore it, including across a conflicted rebase/merge (`rebase --continue`, `merge --continue`, and both `--abort` paths). When re-applying the parked changes conflicts, GitWand now says so explicitly instead of reporting a successful sync over a conflicted tree.
+
 ### Fixed
 
+- **GitLab MR list no longer times out / freezes the app** — every `glab`-backed command ran its blocking subprocess directly on the async runtime, parking a worker thread for the call's duration; the frontend's 30s IPC timeout only gave up on the JS promise, leaving the `glab` process running and the worker parked on every retry. All `gl_*` commands now offload to `spawn_blocking`, and the `glab` subprocess itself carries a 20s timeout that kills and reaps the child instead of orphaning it, so the app stays responsive and a hang now surfaces as a clear "took too long to respond" message instead of a silent freeze (#149).
+- **Stash Manager: dates are no longer "Invalid Date"** — the backend asked git for its lenient date format (`%ai`, e.g. `2026-08-11 09:16:44 +0200`), which the macOS/Linux webview refuses to parse, so every stash rendered "Invalid Date". Stash dates now use git's strict ISO 8601 output (`%aI`), the Node dev-server route was aligned onto the same placeholder (it was using the committer timestamp), the parity suite now compares the field instead of blanking it, and the UI falls back to the raw string rather than "Invalid Date" if a date is ever unparseable. The same lenient format in the Tags panel (which rendered "NaN years ago") was fixed alongside it (#151).
 - Linux: broadened the startup render fallback with `LIBGL_ALWAYS_SOFTWARE=1` (never overriding a value already set in the environment) alongside the existing `WEBKIT_DISABLE_COMPOSITING_MODE`/`WEBKIT_DISABLE_DMABUF_RENDERER`. The two WebKitGTK vars only steer compositing; they don't affect EGL *display acquisition*, which is where `Could not create default EGL display: EGL_BAD_PARAMETER` originates on some native-Wayland/Gnome setups (#135).
 - Telemetry no longer panics on exit (`there is no reactor running, must be called from the context of a Tokio 1.x runtime`). The vendored `tauri-plugin-aptabase` fork still flushed its queue through `futures::executor::block_on`, which provides no Tokio reactor, so quitting within 60s of launch — before the background flush had drained the queued `launch` event — panicked on any platform. This was the second half of the crash reported on Linux, where EGL failures make the app exit almost immediately (#135).
 

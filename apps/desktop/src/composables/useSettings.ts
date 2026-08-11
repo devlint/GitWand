@@ -14,6 +14,7 @@ import type { DiffMode } from "../utils/diffMode";
 import type { BlameAlgorithm } from "../utils/backend";
 import type { AIProvider } from "./useAIProvider";
 import type { SwitchBehavior } from "../utils/branchSwitchDecision";
+import type { PullDirtyBehavior } from "../utils/pullDirtyDecision";
 
 // ─── Types ────────────────────────────────────────────────
 
@@ -21,6 +22,7 @@ export type PullMode = "merge" | "rebase";
 // SwitchBehavior is owned by the pure branch-switch decision helper (lowest
 // layer) and re-exported here so settings consumers keep a single source of truth.
 export type { SwitchBehavior };
+export type { PullDirtyBehavior };
 /** Active tab in the Today view — only "inbox" (unified list) and "team" survive Phase 2. */
 export type LaunchpadTab = "inbox" | "wip" | "prs" | "issues" | "team";
 /** Granularity of PR-activity OS notifications (v2.16). */
@@ -120,6 +122,7 @@ export interface AppSettings {
   diffMode: DiffMode;
   pullMode: PullMode;
   switchBehavior: SwitchBehavior;
+  pullDirtyBehavior: PullDirtyBehavior;
   fontSize: number;
   tabSize: number;
   notifications: boolean;
@@ -401,6 +404,7 @@ export const defaultAppSettings: AppSettings = {
   diffMode: "inline",
   pullMode: "rebase",
   switchBehavior: "ask",
+  pullDirtyBehavior: "ask",
   fontSize: 12,
   tabSize: 4,
   notifications: true,

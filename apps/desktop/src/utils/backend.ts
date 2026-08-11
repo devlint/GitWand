@@ -896,16 +896,24 @@ export async function gitPush(
 export type PullStrategy = "merge" | "rebase" | "ff-only";
 
 /**
- * Pull from remote with an explicit strategy.
+ * Pull from remote with an explicit strategy. `autostash` parks any dirty
+ * working-tree changes for the duration of the pull via `git --autostash` —
+ * git itself (not GitWand) re-applies them afterward, including after a
+ * `rebase --continue` / `merge --continue` / `--abort` if the pull stopped
+ * mid-operation.
  */
-export async function gitPull(cwd: string, strategy: PullStrategy = "merge"): Promise<GitPushPullResult> {
+export async function gitPull(
+  cwd: string,
+  strategy: PullStrategy = "merge",
+  autostash: boolean = false,
+): Promise<GitPushPullResult> {
   if (isTauri()) {
-    return tauriInvoke<GitPushPullResult>("git_pull", { cwd, strategy }, IPC_TIMEOUT.NETWORK);
+    return tauriInvoke<GitPushPullResult>("git_pull", { cwd, strategy, autostash }, IPC_TIMEOUT.NETWORK);
   }
   const res = await devFetch(`${DEV_SERVER}/api/git-pull`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ cwd, strategy }),
+    body: JSON.stringify({ cwd, strategy, autostash }),
   });
   return res.json();
 }
