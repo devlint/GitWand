@@ -20,22 +20,29 @@ export type CommitReviewAction = "next-finding" | "prev-finding" | "dismiss-find
 
 /**
  * Resolve a keydown into a Commit Review action, or `null` when: the
- * Changes view/findings aren't active (`ctx.active`), any modifier key is
+ * Changes view/findings aren't active (`ctx.active`), meta/ctrl/alt is
  * held, or the event target is an editable element. Never maps `Escape` or
  * `⌘⇧L` — those stay owned by `App.vue`'s global handlers.
+ *
+ * Note on Shift: only meta/ctrl/alt are rejected up front. Shift is checked
+ * per-key below instead, because "?" requires Shift on every standard
+ * keyboard layout (it is Shift+/) — a resolver that bails on ANY held
+ * modifier including shiftKey would make the "?" case unreachable in
+ * practice. `usePrReviewKeymap.ts` has the same shape for the same reason
+ * (it maps J/K/V, whose Shift variants are distinct actions).
  */
 export function resolveCommitReviewShortcut(
   e: KeyboardEvent,
   ctx: { active: boolean },
 ): CommitReviewAction | null {
   if (!ctx.active) return null;
-  if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return null;
+  if (e.metaKey || e.ctrlKey || e.altKey) return null;
   if (isEditableTarget(e.target)) return null;
 
   switch (e.key) {
-    case "n": return "next-finding";
-    case "p": return "prev-finding";
-    case "x": return "dismiss-finding";
+    case "n": return e.shiftKey ? null : "next-finding";
+    case "p": return e.shiftKey ? null : "prev-finding";
+    case "x": return e.shiftKey ? null : "dismiss-finding";
     case "?": return "help";
     default: return null;
   }

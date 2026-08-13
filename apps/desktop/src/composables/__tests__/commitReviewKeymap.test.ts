@@ -14,11 +14,17 @@ function kd(key: string, opts: Partial<KeyboardEventInit> = {}, target?: EventTa
 describe("resolveCommitReviewShortcut", () => {
   const active = { active: true };
 
-  it("maps n/p/x/? to their actions", () => {
+  it("maps n/p/x to their actions", () => {
     expect(resolveCommitReviewShortcut(kd("n"), active)).toBe("next-finding");
     expect(resolveCommitReviewShortcut(kd("p"), active)).toBe("prev-finding");
     expect(resolveCommitReviewShortcut(kd("x"), active)).toBe("dismiss-finding");
-    expect(resolveCommitReviewShortcut(kd("?"), active)).toBe("help");
+  });
+
+  it("maps ? (Shift+/ on every standard keyboard layout) to help", () => {
+    // Regression guard: a resolver that bails on ANY held modifier (including
+    // shiftKey) before reaching the "?" case makes this branch unreachable on
+    // a real keyboard, since "?" cannot be typed without Shift.
+    expect(resolveCommitReviewShortcut(kd("?", { shiftKey: true }), active)).toBe("help");
   });
 
   it("returns null for every mapped key when inactive", () => {
@@ -29,7 +35,7 @@ describe("resolveCommitReviewShortcut", () => {
     expect(resolveCommitReviewShortcut(kd("?"), inactive)).toBeNull();
   });
 
-  it("returns null for INPUT/TEXTAREA/contenteditable targets — bare letters must be inert while typing", () => {
+  it("returns null for INPUT/TEXTAREA/contenteditable targets: bare letters must be inert while typing", () => {
     const input = document.createElement("input");
     const textarea = document.createElement("textarea");
     const div = document.createElement("div");
@@ -39,11 +45,19 @@ describe("resolveCommitReviewShortcut", () => {
     expect(resolveCommitReviewShortcut(kd("x", {}, div), active)).toBeNull();
   });
 
-  it("returns null when any modifier is held", () => {
+  it("returns null when meta/ctrl/alt is held, for any mapped key including ?", () => {
     expect(resolveCommitReviewShortcut(kd("n", { metaKey: true }), active)).toBeNull();
     expect(resolveCommitReviewShortcut(kd("n", { ctrlKey: true }), active)).toBeNull();
     expect(resolveCommitReviewShortcut(kd("n", { altKey: true }), active)).toBeNull();
+    expect(resolveCommitReviewShortcut(kd("?", { shiftKey: true, metaKey: true }), active)).toBeNull();
+    expect(resolveCommitReviewShortcut(kd("?", { shiftKey: true, ctrlKey: true }), active)).toBeNull();
+    expect(resolveCommitReviewShortcut(kd("?", { shiftKey: true, altKey: true }), active)).toBeNull();
+  });
+
+  it("returns null when shift is held for the bare-letter keys (n/p/x), unlike ?", () => {
     expect(resolveCommitReviewShortcut(kd("n", { shiftKey: true }), active)).toBeNull();
+    expect(resolveCommitReviewShortcut(kd("p", { shiftKey: true }), active)).toBeNull();
+    expect(resolveCommitReviewShortcut(kd("x", { shiftKey: true }), active)).toBeNull();
   });
 
   it("never maps Escape or ⌘⇧L — those stay owned by App.vue's global handlers", () => {
