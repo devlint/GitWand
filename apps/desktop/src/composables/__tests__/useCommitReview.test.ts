@@ -3,7 +3,7 @@
  * engine, opt-in and off by default. Mocks `../../utils/backend` and
  * `../useAIProvider` per the established convention (`usePrPreReview.test.ts`).
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const rawPromptMock = vi.fn();
 const isAvailableRef = { value: true };
@@ -22,7 +22,7 @@ vi.mock("../../utils/backend", () => ({
   gitExec: (...a: unknown[]) => gitExecMock(...a),
 }));
 
-import { useCommitReview, COMMIT_REVIEW_MAX_FILES } from "../useCommitReview";
+import { useCommitReview, COMMIT_REVIEW_MAX_FILES, COMMIT_REVIEW_MAX_BYTES } from "../useCommitReview";
 import { useSettings, defaultAppSettings } from "../useSettings";
 
 function diffFor(path: string): string {
@@ -46,6 +46,10 @@ function enableCommitReview(overrides: Partial<typeof defaultAppSettings> = {}) 
   settings.value = { ...defaultAppSettings, commitReviewEnabled: true, ...overrides };
 }
 
+function setHidden(hidden: boolean) {
+  Object.defineProperty(document, "hidden", { value: hidden, configurable: true });
+}
+
 describe("useCommitReview", () => {
   beforeEach(() => {
     rawPromptMock.mockReset();
@@ -56,24 +60,30 @@ describe("useCommitReview", () => {
     settings.value = { ...defaultAppSettings };
   });
 
-  it("performs zero IPC and zero LLM calls when the setting is disabled", async () => {
+  afterEach(() => {
+    setHidden(false);
+  });
+
+  it("performs zero IPC and zero LLM calls when the setting is disabled, and reports it did not run", async () => {
     const { settings } = useSettings();
     settings.value = { ...defaultAppSettings, commitReviewEnabled: false };
     const review = useCommitReview();
-    await review.run("/repo", "en");
+    const ran = await review.run("/repo", "en");
     expect(gitExecMock).not.toHaveBeenCalled();
     expect(rawPromptMock).not.toHaveBeenCalled();
     expect(review.findings.value).toEqual([]);
+    expect(ran).toBe(false);
   });
 
-  it("performs zero IPC and zero LLM calls when the AI provider is unavailable", async () => {
+  it("performs zero IPC and zero LLM calls when the AI provider is unavailable, and reports it did not run", async () => {
     enableCommitReview();
     isAvailableRef.value = false;
     const review = useCommitReview();
-    await review.run("/repo", "en");
+    const ran = await review.run("/repo", "en");
     expect(gitExecMock).not.toHaveBeenCalled();
     expect(rawPromptMock).not.toHaveBeenCalled();
     expect(review.findings.value).toEqual([]);
+    expect(ran).toBe(false);
   });
 
   it("reviews two staged files and aggregates findings + progress + per-file counts", async () => {
@@ -84,11 +94,12 @@ describe("useCommitReview", () => {
       .mockResolvedValueOnce('[{"line": 1, "title": "finding b", "confidence": 80}]');
 
     const review = useCommitReview();
-    await review.run("/repo", "en");
+    const ran = await review.run("/repo", "en");
 
     expect(review.findings.value).toHaveLength(2);
     expect(review.progress.value).toEqual({ done: 2, total: 2 });
     expect(review.findingsByFile.value).toEqual({ "a.ts": 1, "b.ts": 1 });
+    expect(ran).toBe(true);
   });
 
   it("sets lastError (never throws) and leaves findings empty when gitExec exits non-zero", async () => {
@@ -96,22 +107,27 @@ describe("useCommitReview", () => {
     gitExecMock.mockResolvedValue({ stdout: "", stderr: "fatal: not a git repository", exitCode: 128 });
 
     const review = useCommitReview();
-    await expect(review.run("/repo", "en")).resolves.toBeUndefined();
+    let ran: boolean | undefined;
+    await expect((async () => { ran = await review.run("/repo", "en"); })()).resolves.toBeUndefined();
     expect(review.findings.value).toEqual([]);
     expect(review.lastError.value).toBeTruthy();
     expect(rawPromptMock).not.toHaveBeenCalled();
+    // A full attempt did occur (it just failed) — distinct from the
+    // disabled/unavailable "never even tried" case above.
+    expect(ran).toBe(true);
   });
 
-  it("makes no LLM call on an empty staged diff (clean index is not an error)", async () => {
+  it("makes no LLM call on an empty staged diff (clean index is not an error), and reports it ran", async () => {
     enableCommitReview();
     gitExecMock.mockResolvedValue(gitExecOk(""));
 
     const review = useCommitReview();
-    await review.run("/repo", "en");
+    const ran = await review.run("/repo", "en");
 
     expect(rawPromptMock).not.toHaveBeenCalled();
     expect(review.findings.value).toEqual([]);
     expect(review.lastError.value).toBeNull();
+    expect(ran).toBe(true);
   });
 
   it("aborts a run in flight when a second run() starts, painting no stale findings", async () => {
@@ -170,7 +186,7 @@ describe("useCommitReview", () => {
     expect(review.rawFindings.value).toHaveLength(1);
   });
 
-  it("caps the staged file count at COMMIT_REVIEW_MAX_FILES and marks truncated", async () => {
+  it("caps the staged file count at exactly COMMIT_REVIEW_MAX_FILES and marks truncated", async () => {
     enableCommitReview();
     const manyFiles = Array.from({ length: 45 }, (_, i) => diffFor(`f${i}.ts`)).join("\n");
     gitExecMock.mockResolvedValue(gitExecOk(manyFiles));
@@ -179,7 +195,95 @@ describe("useCommitReview", () => {
     const review = useCommitReview();
     await review.run("/repo", "en");
 
-    expect(rawPromptMock.mock.calls.length).toBeLessThanOrEqual(COMMIT_REVIEW_MAX_FILES);
+    // Tightened from toBeLessThanOrEqual: that assertion passed even with 0
+    // calls, so it never actually proved the cap triggered. 45 small files
+    // fit well within the byte budget, so the file-count cap is the only
+    // thing that can be limiting here — exactly 40 calls.
+    expect(rawPromptMock.mock.calls.length).toBe(COMMIT_REVIEW_MAX_FILES);
     expect(review.truncated.value).toBe(true);
+  });
+
+  it("truncates by the byte budget when a single file's diff exceeds it, excluding files after it", async () => {
+    enableCommitReview();
+    const hugeAddedLine = "+" + "x".repeat(COMMIT_REVIEW_MAX_BYTES + 1000);
+    const hugeDiff = [
+      "diff --git a/huge.ts b/huge.ts",
+      "index 111..222 100644",
+      "--- a/huge.ts",
+      "+++ b/huge.ts",
+      "@@ -1,1 +1,1 @@",
+      "-old",
+      hugeAddedLine,
+    ].join("\n");
+    gitExecMock.mockResolvedValue(gitExecOk(`${hugeDiff}\n${diffFor("small.ts")}`));
+    rawPromptMock.mockResolvedValue("[]");
+
+    const review = useCommitReview();
+    await review.run("/repo", "en");
+
+    // huge.ts alone exhausts the byte budget, so small.ts (after it in the
+    // diff) is never sent through the review pass.
+    expect(rawPromptMock).toHaveBeenCalledTimes(1);
+    expect(review.truncated.value).toBe(true);
+  });
+
+  it("resume() unblocks a run paused on document.hidden and lets it complete (never stays wedged)", async () => {
+    enableCommitReview();
+    gitExecMock.mockResolvedValue(gitExecOk(diffFor("a.ts")));
+    rawPromptMock.mockResolvedValue('[{"line": 1, "title": "finding a", "confidence": 80}]');
+
+    setHidden(true);
+    const review = useCommitReview();
+    const runPromise = review.run("/repo", "en");
+
+    // Give the run a beat to reach the queue's document.hidden pause — it
+    // must not have called rawPrompt yet, and `running` must still be true
+    // (this is the exact hang the fix guards against: without resume() ever
+    // being called, this promise would never settle).
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(rawPromptMock).not.toHaveBeenCalled();
+    expect(review.running.value).toBe(true);
+
+    setHidden(false);
+    review.resume();
+    await runPromise;
+
+    expect(rawPromptMock).toHaveBeenCalledTimes(1);
+    expect(review.findings.value).toHaveLength(1);
+    expect(review.running.value).toBe(false);
+  });
+
+  it("does not let a stale aborted run's cleanup clobber a newer run's running/progress state", async () => {
+    enableCommitReview();
+    let resolveFirst!: (v: string) => void;
+    const pending = new Promise<string>((resolve) => { resolveFirst = resolve; });
+
+    gitExecMock
+      .mockResolvedValueOnce(gitExecOk(diffFor("a.ts")))
+      .mockResolvedValueOnce(gitExecOk(diffFor("c.ts")));
+    rawPromptMock
+      .mockImplementationOnce(() => pending)
+      .mockResolvedValueOnce("[]");
+
+    const review = useCommitReview();
+    const firstRun = review.run("/repo", "en"); // blocks on rawPrompt for a.ts
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const secondRun = review.run("/repo", "en"); // aborts the first, reviews c.ts
+    await secondRun;
+
+    // Second run completed fully — running/progress must reflect it.
+    expect(review.running.value).toBe(false);
+    expect(review.progress.value).toEqual({ done: 1, total: 1 });
+
+    // Now let the FIRST run's stale in-flight analyzeOne resolve. Its own
+    // (now-orphaned) queue instance settles independently — it must not
+    // touch the second run's running/progress state.
+    resolveFirst("[]");
+    await firstRun;
+    await Promise.resolve();
+
+    expect(review.running.value).toBe(false);
+    expect(review.progress.value).toEqual({ done: 1, total: 1 });
   });
 });
