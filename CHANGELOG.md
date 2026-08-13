@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **GitLab MR list can still time out when `glab` is authenticated via `--use-keyring`** — the v3.6.2 fix (#149) made a hang surface as a clean 20s timeout instead of freezing the app, but on keyring auth the underlying `glab` subprocess itself was still slow: retrieving the PAT from the macOS keychain hangs when `glab` is spawned from a signed Tauri app, the same per-binary ACL mismatch already fixed for `gh`. `shell_env.rs` now also preloads a `GITLAB_TOKEN` from a login shell at startup (parsed from `glab auth status --show-token`) so `glab` subprocesses bypass the keychain lookup entirely, mirroring the existing `GH_TOKEN` preload (#149).
+
 ## [3.6.3] - 2026-08-13
 
 ### Fixed

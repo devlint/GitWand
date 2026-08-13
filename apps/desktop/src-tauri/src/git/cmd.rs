@@ -289,18 +289,25 @@ pub(crate) fn hidden_cmd(bin: &str) -> std::process::Command {
         }
     }
     // Defensive: propagate auth tokens explicitly to every subprocess so
-    // `gh` (and any other CLI that respects these env vars) bypasses the
-    // macOS keychain helper, which hangs ≥30s when called from a signed
+    // `gh`/`glab` (and any other CLI that respects these env vars) bypasses
+    // the macOS keychain helper, which hangs ≥30s when called from a signed
     // Tauri app due to per-binary ACL trust differences vs the user's
-    // terminal. Shell-env preload in `shell_env.rs` populates `GH_TOKEN`
-    // at app startup. `Command::new` already inherits the parent env
-    // by default, but explicit propagation makes it survive any future
-    // `env_clear()` or tokio-runtime peculiarity.
+    // terminal. Shell-env preload in `shell_env.rs` populates `GH_TOKEN` and
+    // `GITLAB_TOKEN` at app startup (#149 for the glab case — `glab auth
+    // login --use-keyring` hits the same ACL mismatch as `gh`). `Command::new`
+    // already inherits the parent env by default, but explicit propagation
+    // makes it survive any future `env_clear()` or tokio-runtime peculiarity.
     if let Ok(tok) = std::env::var("GH_TOKEN") {
         cmd.env("GH_TOKEN", tok);
     }
     if let Ok(tok) = std::env::var("GITHUB_TOKEN") {
         cmd.env("GITHUB_TOKEN", tok);
+    }
+    if let Ok(tok) = std::env::var("GITLAB_TOKEN") {
+        cmd.env("GITLAB_TOKEN", tok);
+    }
+    if let Ok(tok) = std::env::var("GITLAB_ACCESS_TOKEN") {
+        cmd.env("GITLAB_ACCESS_TOKEN", tok);
     }
     cmd
 }

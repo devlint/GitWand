@@ -3,9 +3,13 @@
 //! Wraps the official `glab` CLI (gitlab.com/gitlab-org/cli) for MR workflows:
 //! list, create, checkout, merge, diff, pipelines, notes, approvals.
 //!
-//! **Auth**: managed by `glab auth login` — the PAT is stored in glab's own
-//! config (`~/.config/glab-cli/config.yml`). GitWand never touches the token
-//! directly; `glab` handles all credential lookup.
+//! **Auth**: managed by `glab auth login` — the PAT is normally stored in
+//! glab's own config (`~/.config/glab-cli/config.yml`) and `glab` handles
+//! credential lookup itself. Exception: `--use-keyring` mode stores the PAT
+//! in the macOS keychain instead, which hangs when `glab` is spawned from a
+//! signed Tauri app (same ACL mismatch as the `gh` keychain issue, #149) —
+//! `shell_env.rs` preloads a `GITLAB_TOKEN` env var at startup to make
+//! `hidden_cmd` bypass that path, same as it already does for `gh`.
 //!
 //! **Project resolution**: `glab api` substitutes `:fullpath` with the
 //! URL-encoded `namespace%2Frepo` of the repo in `cwd`, so we never need to
