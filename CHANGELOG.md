@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.6.3] - 2026-08-13
+
 ### Fixed
 
 - Linux: added a further startup fallback, `GDK_BACKEND=x11` (never overriding a value already set in the environment), for systems where `Could not create default EGL display: EGL_BAD_PARAMETER` still occurs after the v3.6.2 fallbacks. Confirmed via a report with `ldd` output that this is a genuine native-Wayland EGL negotiation failure on the host system, not an AppImage-bundled-library mismatch. Forcing GTK onto XWayland sidesteps that negotiation, at the cost of native Wayland's fractional scaling and lower input latency (#135).
@@ -1272,7 +1274,8 @@ Design-system foundations — the app header and every overlay now ride on a sha
 - CI pipeline via GitHub Actions (Node 18, 20, 22)
 - 28 tests covering all patterns + real-world scenarios (package.json, Laravel routes, Vue SFC, CSS, .env files)
 
-[Unreleased]: https://github.com/devlint/GitWand/compare/v3.6.2...HEAD
+[Unreleased]: https://github.com/devlint/GitWand/compare/v3.6.3...HEAD
+[3.6.3]: https://github.com/devlint/GitWand/compare/v3.6.2...v3.6.3
 [3.6.2]: https://github.com/devlint/GitWand/compare/v3.6.1...v3.6.2
 [3.6.1]: https://github.com/devlint/GitWand/compare/v3.6.0...v3.6.1
 [3.6.0]: https://github.com/devlint/GitWand/compare/v3.5.0...v3.6.0

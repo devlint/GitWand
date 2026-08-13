@@ -5,6 +5,14 @@ description: Release history for GitWand — the native Git client with AI confl
 
 # Changelog
 
+## v3.6.3 — August 2026
+
+Two follow-ups from the previous release, both closing loops that community reports opened.
+
+On Linux, the software-rendering fallback shipped in v3.6.2 didn't cover every case: some Wayland desktop setups still hit the same startup crash, because the failure was happening one step earlier than that fallback could reach, at EGL's own platform negotiation rather than compositing. A report with detailed diagnostic output pinned down exactly where, and confirmed it wasn't a packaging problem, just a genuine native-Wayland limitation. GitWand now also forces GTK onto XWayland on Linux, sidestepping that negotiation entirely.
+
+Amending the last commit, and splitting a commit into smaller ones, quietly stopped being reachable a few releases back when the Git Tree replaced the old flat commit log. Both actions kept working under the hood the whole time. They just lost their menu entries in the move. Right-click a commit in the Git Tree again, and Amend and Split are back where Revert used to end the list.
+
 ## v3.6.2 — August 2026
 
 Four issues fixed and one long-requested workflow improvement, shipped together.
