@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Amend and Split commit are reachable again from the commit graph** — both actions shipped in April with a full backend/dialog implementation, but the v2.15.0 "Git Tree" rewrite replaced the old flat commit-log view with the graph view and never carried the corresponding context-menu items over, leaving the two actions fully wired end to end with no button left to trigger them. Restored "Amend commit..." and "Split commit..." to the graph's right-click menu (#156).
+
 ## [3.6.2] - 2026-08-11
 
 ### Added
