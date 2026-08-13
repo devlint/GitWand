@@ -1855,6 +1855,30 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
         </svg>
         <span>{{ t('commitCtx.revert') }}</span>
       </li>
+      <li
+        class="commit-ctx-menu-item"
+        :class="{ 'commit-ctx-menu-item--disabled': !isCtxEntryHead }"
+        role="menuitem"
+        :title="!isCtxEntryHead ? t('commitCtx.amendHeadOnly') : undefined"
+        @click="isCtxEntryHead && onCtxEmit('edit-commit')"
+      >
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M11 2l3 3-8 8H3v-3l8-8z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+        </svg>
+        <span>{{ t('commitCtx.amend') }}</span>
+      </li>
+      <li
+        class="commit-ctx-menu-item"
+        :class="{ 'commit-ctx-menu-item--disabled': isCtxEntryMerge || !isCtxEntryHead }"
+        role="menuitem"
+        :title="isCtxEntryMerge ? t('splitCommit.errorMergeCommit') : !isCtxEntryHead ? t('commitCtx.splitHeadOnly') : undefined"
+        @click="!isCtxEntryMerge && isCtxEntryHead && onCtxEmit('split-commit')"
+      >
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M8 2v5m0 0l-3-3m3 3l3-3M3 10h10M5 14h6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span>{{ t('splitCommit.contextMenuAction') }}</span>
+      </li>
 
       <li class="commit-ctx-menu-sep" role="separator"></li>
 

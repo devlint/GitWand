@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Linux: added a further startup fallback, `GDK_BACKEND=x11` (never overriding a value already set in the environment), for systems where `Could not create default EGL display: EGL_BAD_PARAMETER` still occurs after the v3.6.2 fallbacks. Confirmed via a report with `ldd` output that this is a genuine native-Wayland EGL negotiation failure on the host system, not an AppImage-bundled-library mismatch. Forcing GTK onto XWayland sidesteps that negotiation, at the cost of native Wayland's fractional scaling and lower input latency (#135).
+- **Amend and Split commit are reachable again from the commit graph.** Both actions shipped in April with a full backend/dialog implementation, but the v2.15.0 "Git Tree" rewrite replaced the old flat commit-log view with the graph view and never carried the corresponding context-menu items over, leaving the two actions fully wired end to end with no button left to trigger them. Restored "Amend commit..." and "Split commit..." to the graph's right-click menu (#156).
 
 ## [3.6.2] - 2026-08-11
 
