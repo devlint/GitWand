@@ -8,6 +8,13 @@
  * owns the listener and dispatches.
  */
 
+import { isEditableTarget } from "../utils/editableTarget";
+
+// Task 0 (v3.7.0) — `isEditableTarget` now lives in `utils/editableTarget.ts`
+// (no Vue, no PR-review coupling). Re-exported here verbatim — existing
+// tests (`usePrReviewKeymap.test.ts`) import it from this module unmodified.
+export { isEditableTarget };
+
 export type PrReviewAction =
   | "next-hunk"
   | "prev-hunk"
@@ -21,21 +28,6 @@ export type PrReviewAction =
   | "next-finding"
   | "prev-finding"
   | "submit-review";
-
-/** True when `el` is a text input, textarea, select, or contenteditable —
- *  the keymap must stay completely inert while the user is typing there. */
-export function isEditableTarget(el: EventTarget | null): boolean {
-  if (!(el instanceof HTMLElement)) return false;
-  const tag = el.tagName;
-  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
-  // `isContentEditable` computes inherited editability but jsdom doesn't
-  // fully implement it — check the attribute directly too so this guard is
-  // reliable in both the browser and the test environment.
-  if (el.isContentEditable) return true;
-  const attr = el.getAttribute("contenteditable");
-  if (attr === "" || attr === "true") return true;
-  return false;
-}
 
 /**
  * Resolve a keydown into a PR-review action, or `null` when the key is
