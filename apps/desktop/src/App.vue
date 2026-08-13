@@ -97,6 +97,8 @@ import { useRepoPoller } from "./composables/useRepoPoller";
 import { useLaunchpadPoller } from "./composables/useLaunchpadPoller";
 import { useSecretsScanner } from "./composables/useSecretsScanner";
 import { useCommitReview } from "./composables/useCommitReview";
+import { useCommitReviewNav } from "./composables/useCommitReviewNav";
+import { resolveCommitReviewShortcut } from "./composables/commitReviewKeymap";
 import { useLaunchpadPrs } from "./composables/useLaunchpadPrs";
 import { diffLaunchpad, isBotAuthor, type LaunchpadEvent } from "./composables/useLaunchpadNotifications";
 import { osNotify } from "./composables/useOsNotification";
@@ -282,6 +284,33 @@ const findingsForSelectedFile = computed(() =>
   repoSelectedFileStaged.value && repoSelectedFile.value
     ? commitReview.findings.value.filter((f) => f.path === repoSelectedFile.value)
     : [],
+);
+
+/** Task 2 (v3.7.0) — `n`/`p` cycle every finding across staged files,
+ *  switching the selected file and scrolling the diff to each. */
+const commitReviewNav = useCommitReviewNav({
+  findings: commitReview.findings,
+  selectFile: (path, staged) => repoSelectFile(path, staged),
+  diffHandle: diffViewerRef,
+  onDismiss: (id) => commitReview.dismiss(id),
+  onHelp: () => showCommitReviewNavHelp(),
+});
+
+/** `?` — a one-line toast (per the plan: reuse the existing toast
+ *  affordance, no new help modal). */
+function showCommitReviewNavHelp() {
+  if (successTimer != null) { window.clearTimeout(successTimer); successTimer = null; }
+  successToastLeaving.value = false;
+  successToast.value = t("commitReview.navHelp");
+  successToastDetail.value = `${t("commitReview.navNext")} (N) · ${t("commitReview.navPrev")} (P) · ${t("commitReview.dismiss")} (X)`;
+  successTimer = window.setTimeout(dismissToast, 3000);
+}
+
+/** Task 2 (v3.7.0) — the commit-review keymap is only "active" (bare-letter
+ *  n/p/x reserved) in the Changes view, with the feature on and at least
+ *  one finding to navigate. */
+const commitReviewShortcutActive = computed(
+  () => viewMode.value === "changes" && settings.value.commitReviewEnabled && commitReview.findings.value.length > 0,
 );
 
 // Monorepo scope (v2.21.0) — restore persisted scope on repo open.
@@ -2852,6 +2881,16 @@ function onKeyDown(e: KeyboardEvent) {
         }
       }
     }
+    return;
+  }
+  // Task 2 (v3.7.0) — n/p/x cycle/dismiss commit-review findings in the
+  // Changes view. Checked early, before the mod-key ladder, and the
+  // resolver itself guards editable targets (the commit summary/description
+  // fields live in this same view) and inactivity — see commitReviewKeymap.ts.
+  const commitReviewAction = resolveCommitReviewShortcut(e, { active: commitReviewShortcutActive.value });
+  if (commitReviewAction) {
+    e.preventDefault();
+    commitReviewNav.dispatch(commitReviewAction);
     return;
   }
   if (mod && e.key === "t") {

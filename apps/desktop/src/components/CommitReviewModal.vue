@@ -11,6 +11,7 @@ import { computed } from "vue";
 import BaseModal from "./BaseModal.vue";
 import { useI18n } from "../composables/useI18n";
 import type { ReviewFinding } from "../composables/usePrPreReview";
+import { sortFindingsForReview } from "../composables/useCommitReviewNav";
 
 const props = withDefaults(
   defineProps<{
@@ -31,8 +32,6 @@ const emit = defineEmits<{
 
 const { t } = useI18n();
 
-const SEVERITY_RANK: Record<ReviewFinding["severity"], number> = { risk: 0, suggestion: 1, nit: 2 };
-
 const SEVERITY_LABEL_KEY: Record<ReviewFinding["severity"], "commitReview.severityRisk" | "commitReview.severitySuggestion" | "commitReview.severityNit"> = {
   risk: "commitReview.severityRisk",
   suggestion: "commitReview.severitySuggestion",
@@ -43,13 +42,10 @@ function severityLabel(s: ReviewFinding["severity"]): string {
   return t(SEVERITY_LABEL_KEY[s]);
 }
 
-/** Severity-sorted (risk > suggestion > nit), then confidence descending. */
-const sortedFindings = computed(() =>
-  [...props.findings].sort((a, b) => {
-    const rankDiff = SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity];
-    return rankDiff !== 0 ? rankDiff : b.confidence - a.confidence;
-  }),
-);
+/** Severity-sorted (risk > suggestion > nit), then confidence descending —
+ *  shared with `useCommitReviewNav`'s `N`/`P` cycling order (Task 2) so the
+ *  modal's list and the keyboard cursor always agree. */
+const sortedFindings = computed(() => sortFindingsForReview(props.findings));
 </script>
 
 <template>
