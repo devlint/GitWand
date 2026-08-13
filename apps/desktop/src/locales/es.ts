@@ -2449,7 +2449,7 @@ const es: Locale = {
     jumpTo: "Ir a",
     dismiss: "Descartar",
     close: "Cerrar",
-    truncatedNotice: "Se revisaron los primeros {0} archivo(s) de tus cambios en stage.",
+    truncatedNotice: "Tus cambios en stage eran extensos — solo se revisó una parte.",
     summaryClean: "No se encontraron problemas en tus cambios en stage.",
     summaryCounts: "{0} riesgo(s), {1} sugerencia(s), {2} detalle(s) en {3} archivo(s).",
     fileCountTooltip: "{0} hallazgo(s) de revisión en este archivo",

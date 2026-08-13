@@ -2491,7 +2491,7 @@ const en = {
     jumpTo: "Jump to",
     dismiss: "Dismiss",
     close: "Close",
-    truncatedNotice: "Reviewed the first {0} file(s) of your staged changes.",
+    truncatedNotice: "Your staged changes were large — only part of them was reviewed.",
     summaryClean: "No issues found in your staged changes.",
     summaryCounts: "{0} risk(s), {1} suggestion(s), {2} nit(s) across {3} file(s).",
     fileCountTooltip: "{0} review finding(s) in this file",

@@ -2449,7 +2449,7 @@ const ptBR: Locale = {
     jumpTo: "Ir para",
     dismiss: "Dispensar",
     close: "Fechar",
-    truncatedNotice: "Revisados os primeiros {0} arquivo(s) das suas mudanças em stage.",
+    truncatedNotice: "Suas mudanças em stage eram grandes — apenas parte delas foi revisada.",
     summaryClean: "Nenhum problema encontrado nas suas mudanças em stage.",
     summaryCounts: "{0} risco(s), {1} sugestão(ões), {2} detalhe(s) em {3} arquivo(s).",
     fileCountTooltip: "{0} achado(s) de revisão neste arquivo",

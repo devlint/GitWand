@@ -2459,7 +2459,7 @@ const fr: Locale = {
     jumpTo: "Aller à",
     dismiss: "Ignorer",
     close: "Fermer",
-    truncatedNotice: "Revue effectuée sur les {0} premier(s) fichier(s) de vos changements indexés.",
+    truncatedNotice: "Vos changements indexés étaient volumineux — seule une partie a été passée en revue.",
     summaryClean: "Aucun problème trouvé dans vos changements indexés.",
     summaryCounts: "{0} risque(s), {1} suggestion(s), {2} détail(s) sur {3} fichier(s).",
     fileCountTooltip: "{0} constat(s) de revue dans ce fichier",

@@ -2434,7 +2434,7 @@ const zhCN: Locale = {
     jumpTo: "跳转到",
     dismiss: "忽略",
     close: "关闭",
-    truncatedNotice: "已审查您暂存更改中的前 {0} 个文件。",
+    truncatedNotice: "您暂存的更改较大，仅审查了其中一部分。",
     summaryClean: "您暂存的更改中未发现问题。",
     summaryCounts: "{3} 个文件中共有 {0} 个风险、{1} 个建议、{2} 个细节问题。",
     fileCountTooltip: "此文件中有 {0} 项审查发现",

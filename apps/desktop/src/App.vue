@@ -70,6 +70,7 @@ const EditCommitOverlay = defineAsyncComponent(() => import("./components/EditCo
 const SplitCommitModal = defineAsyncComponent(() => import("./components/SplitCommitModal.vue"));
 const BranchDirtySwitchModal = defineAsyncComponent(() => import("./components/BranchDirtySwitchModal.vue"));
 const SecretsFindingsModal = defineAsyncComponent(() => import("./components/SecretsFindingsModal.vue"));
+const CommitReviewModal = defineAsyncComponent(() => import("./components/CommitReviewModal.vue"));
 import { useStashMessage } from "./composables/useStashMessage";
 import { useAIProvider } from "./composables/useAIProvider";
 import { usePrPanel, PR_PANEL_KEY } from "./composables/usePrPanel";
@@ -95,6 +96,7 @@ import { useScheduler } from "./composables/useScheduler";
 import { useRepoPoller } from "./composables/useRepoPoller";
 import { useLaunchpadPoller } from "./composables/useLaunchpadPoller";
 import { useSecretsScanner } from "./composables/useSecretsScanner";
+import { useCommitReview } from "./composables/useCommitReview";
 import { useLaunchpadPrs } from "./composables/useLaunchpadPrs";
 import { diffLaunchpad, isBotAuthor, type LaunchpadEvent } from "./composables/useLaunchpadNotifications";
 import { osNotify } from "./composables/useOsNotification";
@@ -116,7 +118,7 @@ import {
 import { gitStash, gitStashPop, gitStashList, openInEditor, setGitConfig, gitDiscard, gitAddToGitignore, gitDeleteBranch, gitDeleteTag, gitDeleteRemoteTag, gitRemoteInfo, gitUnpushedTags, gitPushTags, gitMergeBase, gitResetToCommit, gitCommitSubmoduleChanges, gitSubmoduleCheckUpdates, scratchWorktreeCreate, scratchWorktreeDiscard, scratchWorktreeMergeBack, gitWorktreeList, gitWorktreeRemove, type CommitSubmoduleChange } from "./utils/backend";
 import { useCommitActions } from "./composables/useCommitActions";
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
 const { settings, refreshSettings } = useSettings();
 const { saveMemory } = useResolutionMemory();
 
@@ -126,6 +128,10 @@ const showSecretsModal = ref(false);
 /** Trailers of the last commit attempt — reused by the findings modal's "Commit anyway" so it
  * doesn't need its own copy of RepoSidebar's Signed-off-by trailer logic. */
 let lastAttemptedCommitTrailers = "";
+
+// v3.7.0 — Commit Review (local, opt-in, off by default; see useCommitReview.ts).
+const commitReview = useCommitReview();
+const showCommitReviewModal = ref(false);
 // `useNetworkStatus` covers `navigator.onLine` — kept around because
 // `useScheduler` already consumes it and we don't want to retire that path
 // in this commit. `useConnectivity` (F1) adds a real probe-based signal
@@ -266,6 +272,17 @@ const {
   dropStash,
   worktreeBranches,
 } = useGitRepo({ confirm: askConfirm });
+
+// v3.7.0 — Commit Review: template ref to the mounted DiffViewer (its
+// `scrollToFinding` is called by Task 2's nav composable), and the findings
+// for the file currently displayed. Findings are index-scoped (reviewed the
+// staged diff, not the working tree), so never paint them on an unstaged diff.
+const diffViewerRef = ref<any>(null);
+const findingsForSelectedFile = computed(() =>
+  repoSelectedFileStaged.value && repoSelectedFile.value
+    ? commitReview.findings.value.filter((f) => f.path === repoSelectedFile.value)
+    : [],
+);
 
 // Monorepo scope (v2.21.0) — restore persisted scope on repo open.
 const { loadScope } = useWorkspaceScope();
@@ -1016,6 +1033,11 @@ const repoSidebarProps = computed(() => ({
   visibleFileIdx: historyVisibleFileIdx.value,
   gitUser: currentGitUser.value,
   secretFindingsCount: secretsScanner.activeFindings.value.length,
+  commitReviewEnabled: settings.value.commitReviewEnabled,
+  commitReviewRunning: commitReview.running.value,
+  commitReviewFindingsCount: commitReview.findings.value.length,
+  commitReviewProgress: commitReview.progress.value,
+  reviewFindingsByFile: commitReview.findingsByFile.value,
 }));
 
 /**
@@ -1065,6 +1087,20 @@ function onSecretsCommitAnyway() {
   void doCommit(lastAttemptedCommitTrailers);
 }
 
+/** v3.7.0 — "Jump to" in the findings modal: select the finding's file
+ *  (always staged — findings are index-scoped) and scroll the diff to it. */
+function onJumpToCommitReviewFinding(id: string) {
+  const finding = commitReview.findings.value.find((f) => f.id === id);
+  if (!finding) return;
+  if (repoSelectedFile.value !== finding.path || !repoSelectedFileStaged.value) {
+    repoSelectFile(finding.path, true);
+  }
+  showCommitReviewModal.value = false;
+  void nextTick(() => {
+    diffViewerRef.value?.scrollToFinding?.(finding.line, finding.side);
+  });
+}
+
 const repoSidebarListeners = {
   select: (path: string, staged: boolean) => onRepoFileSelect(path, staged),
   changeView: (mode: ViewMode) => onViewModeChange(mode),
@@ -1088,6 +1124,8 @@ const repoSidebarListeners = {
   deleteBranch: (name: string, hasLocal: boolean, hasRemote: boolean, remoteName?: string) =>
     handleDeleteBranchRequest(name, hasLocal, hasRemote, remoteName),
   openSecrets: () => { showSecretsModal.value = true; },
+  reviewStaged: () => { void commitReview.run(repoFolderPath.value ?? "", locale.value); },
+  openCommitReview: () => { showCommitReviewModal.value = true; },
 };
 
 // Trigger a (debounced) secrets scan whenever the staged set changes, or when a repo is
@@ -1100,6 +1138,12 @@ watch(
     } else {
       secretsScanner.findings.value = [];
     }
+    // v3.7.0 — Commit Review: a staged-set/repo change invalidates whatever
+    // findings are on screen (the diff they reviewed no longer exists).
+    // Never auto-run here — the pass only runs on the explicit "Review
+    // staged changes" click (decision D5; the one-shot re-review after a
+    // "Fix with agent" handoff is Task 3, out of scope for this PR).
+    commitReview.reset();
   },
   { immediate: true },
 );
@@ -3349,10 +3393,12 @@ onUnmounted(() => {
                 <ImageDiffViewer v-else-if="isImagePath(repoSelectedFile) && repoFolderPath && repoSelectedFile"
                   :cwd="repoFolderPath" :file-path="repoSelectedFile" old-rev="HEAD"
                   :new-rev="repoSelectedFileStaged ? ':0' : ''" status="modified" />
-                <DiffViewer v-else :diff="repoDiff" :file-path="repoSelectedFile" :diff-mode="diffMode" :selectable="true"
+                <DiffViewer v-else ref="diffViewerRef" :diff="repoDiff" :file-path="repoSelectedFile" :diff-mode="diffMode" :selectable="true"
+                  :findings="findingsForSelectedFile"
                   @update:diff-mode="onDiffModeChange" @open-file-history="openFileHistory"
                   @open-in-editor="handleOpenInEditor" @stage-patch="stagePatch"
-                  @select-dir-file="(path) => repoSelectFile(path, false)" />
+                  @select-dir-file="(path) => repoSelectFile(path, false)"
+                  @dismiss-finding="(id) => commitReview.dismiss(id)" />
               </div>
 
               <div v-if="showCommitRail" class="sidebar-handle" :class="{ 'sidebar-handle--active': sidebarResizing }"
@@ -3703,6 +3749,17 @@ onUnmounted(() => {
       @ignore="onSecretsIgnore($event)"
       @commit-anyway="onSecretsCommitAnyway"
       @close="showSecretsModal = false"
+    />
+
+    <!-- Commit review findings modal (v3.7.0) — opened from the RepoSidebar commit-area badge -->
+    <CommitReviewModal
+      v-if="showCommitReviewModal"
+      :findings="commitReview.findings.value"
+      :summary="commitReview.summary.value"
+      :truncated="commitReview.truncated.value"
+      @jump="onJumpToCommitReviewFinding($event)"
+      @dismiss="commitReview.dismiss($event)"
+      @close="showCommitReviewModal = false"
     />
 
     <!-- Stash-and-switch modal (asks for a stash label before switching branches) -->

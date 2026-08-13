@@ -59,6 +59,16 @@ const props = defineProps<{
   visibleFileIdx?: number;
   /** v3.5.0 — count of active (non-dismissed) secrets-scanner findings on the staged diff. */
   secretFindingsCount?: number;
+  /** v3.7.0 — Commit Review: whether the opt-in feature is on (gates the button). */
+  commitReviewEnabled?: boolean;
+  /** v3.7.0 — Commit Review: true while a review pass is in flight. */
+  commitReviewRunning?: boolean;
+  /** v3.7.0 — Commit Review: count of active (filtered) findings on the staged diff. */
+  commitReviewFindingsCount?: number;
+  /** v3.7.0 — Commit Review: files reviewed / total, while running. */
+  commitReviewProgress?: { done: number; total: number };
+  /** v3.7.0 — Commit Review (Task 2): per-file finding count, keyed by path. */
+  reviewFindingsByFile?: Record<string, number>;
 }>();
 
 const emit = defineEmits<{
@@ -93,6 +103,10 @@ const emit = defineEmits<{
   deleteBranch: [name: string, hasLocal: boolean, hasRemote: boolean, remoteName?: string];
   /** v3.5.0 — open the secrets findings modal (commit-area badge clicked). */
   openSecrets: [];
+  /** v3.7.0 — Commit Review: run the review pass over the staged diff. */
+  reviewStaged: [];
+  /** v3.7.0 — Commit Review: open the findings modal (badge clicked). */
+  openCommitReview: [];
 }>();
 
 const { t, locale } = useI18n();
@@ -1216,6 +1230,12 @@ function formatActivityDate(dateStr: string): string {
                   <span class="file-name mono">{{ fileName(file.path) }}</span>
                   <span class="file-dir muted" v-if="fileDir(file.path)">{{ fileDir(file.path) }}</span>
                 </div>
+                <!-- Commit Review (Task 2, v3.7.0) — per-file finding count chip. -->
+                <span
+                  v-if="(reviewFindingsByFile?.[file.path] ?? 0) > 0"
+                  class="file-review-count"
+                  :title="t('commitReview.fileCountTooltip', reviewFindingsByFile![file.path])"
+                >{{ reviewFindingsByFile![file.path] }}</span>
                 <!-- Stage / Unstage + Discard per file -->
                 <div v-if="file.section !== 'conflicted'" class="action-group" @click.stop>
                   <button
@@ -1355,6 +1375,14 @@ function formatActivityDate(dateStr: string): string {
                     <div class="file-info">
                       <span class="file-name mono">{{ row.name }}</span>
                     </div>
+                    <!-- Commit Review (Task 2, v3.7.0) — per-file finding count chip.
+                         The sidebar has two independent renderers (flat list + tree) —
+                         this branch is easy to miss, hence the explicit callout. -->
+                    <span
+                      v-if="(reviewFindingsByFile?.[row.path] ?? 0) > 0"
+                      class="file-review-count"
+                      :title="t('commitReview.fileCountTooltip', reviewFindingsByFile![row.path])"
+                    >{{ reviewFindingsByFile![row.path] }}</span>
                     <div v-if="row.file!.section !== 'conflicted'" class="action-group" @click.stop>
                       <button
                         v-if="row.file!.section === 'unstaged' || row.file!.section === 'untracked'"
@@ -1668,6 +1696,40 @@ function formatActivityDate(dateStr: string): string {
             <path d="M8 6.2v3.2M8 11.6h.01" stroke-linecap="round" />
           </svg>
           <span>{{ secretFindingsCount }}</span>
+        </button>
+        <!-- Commit Review (v3.7.0) — opt-in, shown only when enabled and something is staged. -->
+        <button
+          v-if="commitReviewEnabled && repoStats.staged > 0"
+          type="button"
+          class="commit-review-btn"
+          :class="{ 'commit-review-btn--loading': commitReviewRunning }"
+          :disabled="commitReviewRunning"
+          :title="commitReviewRunning ? t('commitReview.reviewButtonRunning', commitReviewProgress?.done ?? 0, commitReviewProgress?.total ?? 0) : t('commitReview.reviewButton')"
+          @click="emit('reviewStaged')"
+        >
+          <svg v-if="commitReviewRunning" class="commit-spinner" width="12" height="12" viewBox="0 0 14 14" aria-hidden="true">
+            <circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.5" fill="none" opacity="0.3"/>
+            <path d="M7 1.5A5.5 5.5 0 0112.5 7" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+          </svg>
+          <svg v-else width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+            <path d="M8 1.5a6.5 6.5 0 100 13 6.5 6.5 0 000-13z" />
+            <path d="M8 5v3.2l2.2 1.3" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+          <span v-if="commitReviewRunning">{{ commitReviewProgress?.done ?? 0 }}/{{ commitReviewProgress?.total ?? 0 }}</span>
+          <span v-else>{{ t('commitReview.reviewButton') }}</span>
+        </button>
+        <button
+          v-if="(commitReviewFindingsCount ?? 0) > 0"
+          type="button"
+          class="commit-review-badge"
+          :title="t('commitReview.badgeTooltip', commitReviewFindingsCount ?? 0)"
+          @click="emit('openCommitReview')"
+        >
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+            <circle cx="8" cy="8" r="6.5" />
+            <path d="M8 5v3.2M8 10.6h.01" stroke-linecap="round" />
+          </svg>
+          <span>{{ commitReviewFindingsCount }}</span>
         </button>
         <button
           class="commit-stage-all"
@@ -2168,6 +2230,20 @@ function formatActivityDate(dateStr: string): string {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Commit Review (Task 2, v3.7.0) — per-file finding count chip, both layouts. */
+.file-review-count {
+  flex-shrink: 0;
+  min-width: 16px;
+  padding: 0 var(--space-2);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  line-height: 16px;
+  text-align: center;
+  background: var(--color-ai-soft);
+  color: var(--color-ai);
+  border-radius: var(--radius-sm);
 }
 
 /* ── Segmented action group (stage / unstage / discard) ──────── */
@@ -2836,6 +2912,53 @@ function formatActivityDate(dateStr: string): string {
 .commit-secrets-badge:hover {
   background: var(--color-warning, #d97706);
   color: #fff;
+}
+
+/* Commit Review (v3.7.0) — opt-in "Review staged changes" button + findings badge. */
+.commit-review-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  background: var(--color-ai-soft);
+  color: var(--color-ai);
+  border: 1px solid var(--color-ai);
+  border-radius: var(--radius-md);
+  flex-shrink: 0;
+  transition: background var(--transition-hover), color var(--transition-hover);
+}
+
+.commit-review-btn:hover:not(:disabled) {
+  background: var(--color-ai);
+  color: var(--color-ai-text);
+}
+
+.commit-review-btn:disabled {
+  cursor: not-allowed;
+}
+
+.commit-review-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  background: var(--color-ai-soft);
+  color: var(--color-ai);
+  border: 1px solid var(--color-ai);
+  border-radius: var(--radius-md);
+  flex-shrink: 0;
+  transition: background var(--transition-hover), opacity var(--transition-hover);
+}
+
+.commit-review-badge:hover {
+  background: var(--color-ai);
+  color: var(--color-ai-text);
 }
 
 .commit-stage-all {
