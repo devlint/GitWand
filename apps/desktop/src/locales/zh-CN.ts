@@ -1278,6 +1278,14 @@ const zhCN: Locale = {
       summary: "PR 摘要",
       summaryHint: "在信息标签页生成内容/原因/受影响范围摘要。",
     },
+    commitReview: {
+      title: "提交审查",
+      hint: "本地、可选启用的 AI 分析，针对暂存的更改，从提交区域运行。",
+      enabled: "审查暂存的更改",
+      enabledHint: "在提交区域显示“审查暂存的更改”按钮。默认关闭，复用上方 Review AI 的置信度阈值和上限。",
+      autoReReview: "使用代理修复后自动重新审查",
+      autoReReviewHint: "将发现项交给代理后，下次暂存更改时自动再运行一次审查。",
+    },
     language: "界面语言",
     languageAuto: "自动（跟随系统）",
     commitMessageLang: "提交信息语言",
@@ -2064,6 +2072,7 @@ const zhCN: Locale = {
     aiResponseInvalidJson: "无法解析 AI 服务商的响应（JSON 无效）。",
     sameBranches: "源分支与目标分支相同 — 无法创建 PR。",
     noChangesToStash: "没有可存储的本地更改 — 请先修改文件再生成消息。",
+    commitReviewFailed: "提交审查未能读取暂存的更改。",
   },
   // ─── Tags panel (v1.9)
   tags: {
@@ -2408,6 +2417,31 @@ const zhCN: Locale = {
     confirmMessage: "在您暂存的更改中发现 {0} 个潜在密钥。是否仍然提交？",
     ignoreConfirmTitle: "停止扫描此文件中的密钥？",
     ignoreConfirmMessage: "这将永久停止标记 {0} 中的任何密钥规则——并写入 .gitwandrc。是否继续？",
+  },
+
+  // ─── 提交审查 (v3.7.0) ─────────────────────────────
+  commitReview: {
+    reviewButton: "审查暂存的更改",
+    reviewButtonRunning: "正在审查... {0}/{1}",
+    badgeTooltip: "暂存的更改中有 {0} 项发现",
+    modalTitle: "提交审查",
+    modalSubtitle: "您暂存的更改中有 {0} 项发现",
+    empty: "没有发现项",
+    severityRisk: "风险",
+    severitySuggestion: "建议",
+    severityNit: "细节",
+    confidence: "置信度 {0}%",
+    jumpTo: "跳转到",
+    dismiss: "忽略",
+    close: "关闭",
+    truncatedNotice: "已审查您暂存更改中的前 {0} 个文件。",
+    summaryClean: "您暂存的更改中未发现问题。",
+    summaryCounts: "{3} 个文件中共有 {0} 个风险、{1} 个建议、{2} 个细节问题。",
+    fileCountTooltip: "此文件中有 {0} 项审查发现",
+    navNext: "下一个发现项",
+    navPrev: "上一个发现项",
+    navHelp: "提交审查快捷键",
+    navEmpty: "没有可导航的发现项",
   },
 };
 

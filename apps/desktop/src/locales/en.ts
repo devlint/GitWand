@@ -1244,6 +1244,14 @@ const en = {
       summary: "PR summary",
       summaryHint: "Generate a what/why/affected-areas summary on the Info tab.",
     },
+    commitReview: {
+      title: "Commit Review",
+      hint: "Local, opt-in AI pass over your staged changes, run from the commit area.",
+      enabled: "Review staged changes",
+      enabledHint: "Show a \"Review staged changes\" button in the commit area. Off by default, uses the confidence threshold and cap from Review AI above.",
+      autoReReview: "Auto re-review after fixing with an agent",
+      autoReReviewHint: "Automatically run one more review the next time you stage changes after handing findings to an agent.",
+    },
     language: "Interface language",
     languageAuto: "Automatic (system)",
     commitMessageLang: "Commit message language",
@@ -2120,6 +2128,7 @@ const en = {
     aiResponseInvalidJson: "The AI provider's response could not be interpreted (invalid JSON).",
     sameBranches: "Head and base branches are identical \u2014 no PR possible.",
     noChangesToStash: "No local changes to stash \u2014 modify files before generating a message.",
+    commitReviewFailed: "Commit review failed to read the staged diff.",
   },
 
   // ─── Tags panel (v1.9) ──────────────────────────────────
@@ -2465,6 +2474,31 @@ const en = {
     confirmMessage: "{0} potential secret(s) were found in your staged changes. Commit anyway?",
     ignoreConfirmTitle: "Stop scanning this file for secrets?",
     ignoreConfirmMessage: "This will stop flagging ANY secret pattern in {0} — permanently, written to .gitwandrc. Continue?",
+  },
+
+  // ─── Commit Review (v3.7.0) ─────────────────────────────
+  commitReview: {
+    reviewButton: "Review staged changes",
+    reviewButtonRunning: "Reviewing... {0}/{1}",
+    badgeTooltip: "{0} finding(s) in the staged changes",
+    modalTitle: "Commit review",
+    modalSubtitle: "{0} finding(s) in your staged changes",
+    empty: "No findings",
+    severityRisk: "Risk",
+    severitySuggestion: "Suggestion",
+    severityNit: "Nit",
+    confidence: "{0}% confidence",
+    jumpTo: "Jump to",
+    dismiss: "Dismiss",
+    close: "Close",
+    truncatedNotice: "Reviewed the first {0} file(s) of your staged changes.",
+    summaryClean: "No issues found in your staged changes.",
+    summaryCounts: "{0} risk(s), {1} suggestion(s), {2} nit(s) across {3} file(s).",
+    fileCountTooltip: "{0} review finding(s) in this file",
+    navNext: "Next finding",
+    navPrev: "Previous finding",
+    navHelp: "Commit review shortcuts",
+    navEmpty: "No findings to navigate",
   },
 } as const;
 

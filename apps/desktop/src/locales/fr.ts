@@ -1228,6 +1228,14 @@ const fr: Locale = {
       summary: "Résumé de PR",
       summaryHint: "Générer un résumé quoi/pourquoi/zones affectées dans l'onglet Info.",
     },
+    commitReview: {
+      title: "Revue de commit",
+      hint: "Passe IA locale et opt-in sur vos changements indexés, lancée depuis la zone de commit.",
+      enabled: "Passer en revue les changements indexés",
+      enabledHint: "Afficher un bouton « Passer en revue les changements indexés » dans la zone de commit. Désactivé par défaut, réutilise le seuil de confiance et le plafond de Review AI ci-dessus.",
+      autoReReview: "Nouvelle revue automatique après une correction par un agent",
+      autoReReviewHint: "Lancer automatiquement une revue supplémentaire la prochaine fois que vous indexez des changements après avoir transmis les constats à un agent.",
+    },
     language: "Langue de l\u2019interface",
     languageAuto: "Automatique (syst\u00e8me)",
     commitMessageLang: "Langue des messages de commit",
@@ -2088,6 +2096,7 @@ const fr: Locale = {
     aiResponseInvalidJson: "La r\u00e9ponse du provider IA n'a pas pu \u00eatre interpr\u00e9t\u00e9e (JSON invalide).",
     sameBranches: "La branche source et la branche cible sont identiques \u2014 aucune PR possible.",
     noChangesToStash: "Aucun changement local \u00e0 stasher \u2014 modifie des fichiers avant de g\u00e9n\u00e9rer un message.",
+    commitReviewFailed: "La revue de commit n'a pas pu lire les changements index\u00e9s.",
   },
   // ─── Tags panel (v1.9)
   tags: {
@@ -2433,6 +2442,31 @@ const fr: Locale = {
     confirmMessage: "{0} secret(s) potentiel(s) ont été trouvés dans vos changements indexés. Commit quand même ?",
     ignoreConfirmTitle: "Arrêter d'analyser ce fichier pour des secrets ?",
     ignoreConfirmMessage: "Ceci arrêtera de signaler N'IMPORTE QUEL motif de secret dans {0} — de façon permanente, écrit dans .gitwandrc. Continuer ?",
+  },
+
+  // ─── Commit Review (v3.7.0) ─────────────────────────────
+  commitReview: {
+    reviewButton: "Passer en revue les changements indexés",
+    reviewButtonRunning: "Revue en cours... {0}/{1}",
+    badgeTooltip: "{0} constat(s) dans les changements indexés",
+    modalTitle: "Revue de commit",
+    modalSubtitle: "{0} constat(s) dans vos changements indexés",
+    empty: "Aucun constat",
+    severityRisk: "Risque",
+    severitySuggestion: "Suggestion",
+    severityNit: "Détail",
+    confidence: "{0}% de confiance",
+    jumpTo: "Aller à",
+    dismiss: "Ignorer",
+    close: "Fermer",
+    truncatedNotice: "Revue effectuée sur les {0} premier(s) fichier(s) de vos changements indexés.",
+    summaryClean: "Aucun problème trouvé dans vos changements indexés.",
+    summaryCounts: "{0} risque(s), {1} suggestion(s), {2} détail(s) sur {3} fichier(s).",
+    fileCountTooltip: "{0} constat(s) de revue dans ce fichier",
+    navNext: "Constat suivant",
+    navPrev: "Constat précédent",
+    navHelp: "Raccourcis de la revue de commit",
+    navEmpty: "Aucun constat à parcourir",
   },
 };
 

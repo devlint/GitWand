@@ -1219,6 +1219,14 @@ const es: Locale = {
       summary: "Resumen de PR",
       summaryHint: "Generar un resumen qué/por qué/áreas afectadas en la pestaña Info.",
     },
+    commitReview: {
+      title: "Revisión de commit",
+      hint: "Pase de IA local y opt-in sobre tus cambios en stage, ejecutado desde el área de commit.",
+      enabled: "Revisar cambios en stage",
+      enabledHint: "Muestra un botón «Revisar cambios en stage» en el área de commit. Desactivado por defecto, reutiliza el umbral de confianza y el máximo de Review AI de arriba.",
+      autoReReview: "Nueva revisión automática tras corregir con un agente",
+      autoReReviewHint: "Ejecutar automáticamente una revisión más la próxima vez que hagas stage de cambios después de enviar los hallazgos a un agente.",
+    },
     language: "Idioma de la interfaz",
     languageAuto: "Automático (sistema)",
     commitMessageLang: "Idioma de los mensajes de commit",
@@ -2079,6 +2087,7 @@ const es: Locale = {
     aiResponseInvalidJson: "La respuesta del proveedor IA no pudo interpretarse (JSON inválido).",
     sameBranches: "La rama fuente y la rama destino son idénticas — ninguna PR posible.",
     noChangesToStash: "Sin cambios locales para el stash — modifica archivos antes de generar un mensaje.",
+    commitReviewFailed: "La revisión de commit no pudo leer los cambios en stage.",
   },
   // ─── Tags panel (v1.9)
   tags: {
@@ -2423,6 +2432,31 @@ const es: Locale = {
     confirmMessage: "Se encontraron {0} posible(s) secreto(s) en tus cambios en stage. ¿Hacer commit de todos modos?",
     ignoreConfirmTitle: "¿Dejar de escanear este archivo en busca de secretos?",
     ignoreConfirmMessage: "Esto dejará de marcar CUALQUIER patrón de secreto en {0} — de forma permanente, escrito en .gitwandrc. ¿Continuar?",
+  },
+
+  // ─── Commit Review (v3.7.0) ─────────────────────────────
+  commitReview: {
+    reviewButton: "Revisar cambios en stage",
+    reviewButtonRunning: "Revisando... {0}/{1}",
+    badgeTooltip: "{0} hallazgo(s) en los cambios en stage",
+    modalTitle: "Revisión de commit",
+    modalSubtitle: "{0} hallazgo(s) en tus cambios en stage",
+    empty: "Sin hallazgos",
+    severityRisk: "Riesgo",
+    severitySuggestion: "Sugerencia",
+    severityNit: "Detalle",
+    confidence: "{0}% de confianza",
+    jumpTo: "Ir a",
+    dismiss: "Descartar",
+    close: "Cerrar",
+    truncatedNotice: "Se revisaron los primeros {0} archivo(s) de tus cambios en stage.",
+    summaryClean: "No se encontraron problemas en tus cambios en stage.",
+    summaryCounts: "{0} riesgo(s), {1} sugerencia(s), {2} detalle(s) en {3} archivo(s).",
+    fileCountTooltip: "{0} hallazgo(s) de revisión en este archivo",
+    navNext: "Siguiente hallazgo",
+    navPrev: "Hallazgo anterior",
+    navHelp: "Atajos de la revisión de commit",
+    navEmpty: "Sin hallazgos para recorrer",
   },
 };
 

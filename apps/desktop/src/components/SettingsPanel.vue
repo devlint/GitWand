@@ -222,6 +222,9 @@ interface Settings {
   // v3.5.0 Secrets scanner
   secretsScannerEnabled: boolean;
   secretsEntropyThreshold: number;
+  // v3.7.0 Commit Review
+  commitReviewEnabled: boolean;
+  commitReviewAutoReReview: boolean;
 }
 
 const defaultSettings: Settings = {
@@ -309,6 +312,8 @@ const defaultSettings: Settings = {
   filesHideOnNav: true,
   secretsScannerEnabled: true,
   secretsEntropyThreshold: 4.0,
+  commitReviewEnabled: false,
+  commitReviewAutoReReview: true,
 };
 
 function loadSettings(): Settings {
@@ -2742,6 +2747,37 @@ function deleteReleaseNoteTemplate(id: string) {
                   <span>{{ t('settings.reviewAi.summary') }}</span>
                 </label>
                 <span class="sp-hint">{{ t('settings.reviewAi.summaryHint') }}</span>
+              </div>
+            </div>
+
+            <!-- ─── Commit Review (v3.7.0) ─────────────────── -->
+            <div class="sp-section-divider sp-section-divider--inner"></div>
+            <div class="sp-group">
+              <div class="sp-group__head">
+                <div class="sp-group__head-text">
+                  <span class="sp-group__label">{{ t('settings.commitReview.title') }}</span>
+                  <span class="sp-group__sublabel">{{ t('settings.commitReview.hint') }}</span>
+                </div>
+              </div>
+
+              <div class="sp-row sp-row--checkbox">
+                <label class="sp-checkbox-label" for="setting-commit-review-enabled">
+                  <input id="setting-commit-review-enabled" type="checkbox" class="sp-checkbox"
+                    :checked="settings.commitReviewEnabled"
+                    @change="updateSetting('commitReviewEnabled', ($event.target as HTMLInputElement).checked)" />
+                  <span>{{ t('settings.commitReview.enabled') }}</span>
+                </label>
+                <span class="sp-hint">{{ t('settings.commitReview.enabledHint') }}</span>
+              </div>
+
+              <div class="sp-row sp-row--checkbox" v-if="settings.commitReviewEnabled">
+                <label class="sp-checkbox-label" for="setting-commit-review-auto-rereview">
+                  <input id="setting-commit-review-auto-rereview" type="checkbox" class="sp-checkbox"
+                    :checked="settings.commitReviewAutoReReview"
+                    @change="updateSetting('commitReviewAutoReReview', ($event.target as HTMLInputElement).checked)" />
+                  <span>{{ t('settings.commitReview.autoReReview') }}</span>
+                </label>
+                <span class="sp-hint">{{ t('settings.commitReview.autoReReviewHint') }}</span>
               </div>
             </div>
 

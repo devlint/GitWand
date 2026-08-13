@@ -1220,6 +1220,14 @@ const ptBR: Locale = {
       summary: "Resumo de PR",
       summaryHint: "Gerar um resumo o quê/por quê/áreas afetadas na aba Info.",
     },
+    commitReview: {
+      title: "Revisão de commit",
+      hint: "Passagem de IA local e opt-in sobre suas mudanças em stage, executada na área de commit.",
+      enabled: "Revisar mudanças em stage",
+      enabledHint: "Mostra um botão \"Revisar mudanças em stage\" na área de commit. Desativado por padrão, reutiliza o limite de confiança e o máximo do Review AI acima.",
+      autoReReview: "Nova revisão automática após corrigir com um agente",
+      autoReReviewHint: "Executar automaticamente mais uma revisão na próxima vez que você colocar mudanças em stage após enviar os achados a um agente.",
+    },
     language: "Idioma da interface",
     languageAuto: "Automático (sistema)",
     commitMessageLang: "Idioma das mensagens de commit",
@@ -2079,6 +2087,7 @@ const ptBR: Locale = {
     aiResponseInvalidJson: "A resposta do provedor de IA não pôde ser interpretada (JSON inválido).",
     sameBranches: "A branch de origem e destino são idênticas — nenhuma PR possível.",
     noChangesToStash: "Sem alterações locais para stash — modifique arquivos antes de gerar uma mensagem.",
+    commitReviewFailed: "A revisão de commit não conseguiu ler as mudanças em stage.",
   },
   // ─── Tags panel (v1.9)
   tags: {
@@ -2423,6 +2432,31 @@ const ptBR: Locale = {
     confirmMessage: "{0} possível(is) segredo(s) foram encontrados nas suas alterações em stage. Commitar mesmo assim?",
     ignoreConfirmTitle: "Parar de verificar segredos neste arquivo?",
     ignoreConfirmMessage: "Isso vai parar de sinalizar QUALQUER padrão de segredo em {0} — permanentemente, gravado em .gitwandrc. Continuar?",
+  },
+
+  // ─── Commit Review (v3.7.0) ─────────────────────────────
+  commitReview: {
+    reviewButton: "Revisar mudanças em stage",
+    reviewButtonRunning: "Revisando... {0}/{1}",
+    badgeTooltip: "{0} achado(s) nas mudanças em stage",
+    modalTitle: "Revisão de commit",
+    modalSubtitle: "{0} achado(s) nas suas mudanças em stage",
+    empty: "Nenhum achado",
+    severityRisk: "Risco",
+    severitySuggestion: "Sugestão",
+    severityNit: "Detalhe",
+    confidence: "{0}% de confiança",
+    jumpTo: "Ir para",
+    dismiss: "Dispensar",
+    close: "Fechar",
+    truncatedNotice: "Revisados os primeiros {0} arquivo(s) das suas mudanças em stage.",
+    summaryClean: "Nenhum problema encontrado nas suas mudanças em stage.",
+    summaryCounts: "{0} risco(s), {1} sugestão(ões), {2} detalhe(s) em {3} arquivo(s).",
+    fileCountTooltip: "{0} achado(s) de revisão neste arquivo",
+    navNext: "Próximo achado",
+    navPrev: "Achado anterior",
+    navHelp: "Atalhos da revisão de commit",
+    navEmpty: "Nenhum achado para navegar",
   },
 };
 
