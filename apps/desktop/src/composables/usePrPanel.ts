@@ -86,6 +86,17 @@ export interface PrPanelOptions {
    * checkout happens on disk but the UI keeps showing the previous branch.
    */
   onRepoMutated?: () => void | Promise<void>;
+  /**
+   * Called on the same `visibilitychange` → visible edge that already
+   * resumes the PR pre-review queue (`intel.resumePreReviewQueue()` below).
+   * `usePrPanel` is instantiated once, at app root, regardless of whether
+   * the PR view is open — reusing its single listener here is how Commit
+   * Review's `useCommitReview.resume()` (v3.7.0) gets called without
+   * standing up a second `visibilitychange` listener. Without this, a
+   * commit review started while the tab is hidden would stay paused on
+   * `document.hidden` forever: nothing else ever calls its `resume()`.
+   */
+  onVisibilityResume?: () => void;
 }
 
 // ─── Parse unified diff (lazy per-file, A1) ────────────────────────────────
@@ -1348,6 +1359,9 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       // C3 — resume the pre-review queue (reuses this listener rather than
       // adding a second `visibilitychange` handler).
       intel.resumePreReviewQueue();
+      // v3.7.0 — same reuse for Commit Review's queue (a different queue
+      // instance entirely — see `PrPanelOptions.onVisibilityResume`).
+      opts.onVisibilityResume?.();
     }
   }
 

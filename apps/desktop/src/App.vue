@@ -296,14 +296,33 @@ const commitReviewNav = useCommitReviewNav({
   onHelp: () => showCommitReviewNavHelp(),
 });
 
+/** Shared transient toast for Commit Review's own non-error feedback (the
+ *  `?` help reminder, a clean-pass confirmation) — reuses the existing toast
+ *  affordance rather than inventing a second one (verifier issue #5). */
+function showCommitReviewToast(title: string, detail: string) {
+  if (successTimer != null) { window.clearTimeout(successTimer); successTimer = null; }
+  successToastLeaving.value = false;
+  successToast.value = title;
+  successToastDetail.value = detail;
+  successTimer = window.setTimeout(dismissToast, 3000);
+}
+
 /** `?` — a one-line toast (per the plan: reuse the existing toast
  *  affordance, no new help modal). */
 function showCommitReviewNavHelp() {
-  if (successTimer != null) { window.clearTimeout(successTimer); successTimer = null; }
-  successToastLeaving.value = false;
-  successToast.value = t("commitReview.navHelp");
-  successToastDetail.value = `${t("commitReview.navNext")} (N) · ${t("commitReview.navPrev")} (P) · ${t("commitReview.dismiss")} (X)`;
-  successTimer = window.setTimeout(dismissToast, 3000);
+  showCommitReviewToast(
+    t("commitReview.navHelp"),
+    `${t("commitReview.navNext")} (N) · ${t("commitReview.navPrev")} (P) · ${t("commitReview.dismiss")} (X)`,
+  );
+}
+
+/** A completed review with zero findings otherwise produces no feedback at
+ *  all, indistinguishable from "didn't run" or "failed" (verifier issue
+ *  #5) — `commitReview.summaryClean` already exists but was unreachable.
+ *  Called from `reviewStaged` below only when the run actually completed
+ *  (not skipped, not superseded) and produced no error. */
+function showCommitReviewCleanToast() {
+  showCommitReviewToast(t("commitReview.summaryClean"), "");
 }
 
 /** Task 2 (v3.7.0) — the commit-review keymap is only "active" (bare-letter
@@ -312,6 +331,14 @@ function showCommitReviewNavHelp() {
 const commitReviewShortcutActive = computed(
   () => viewMode.value === "changes" && settings.value.commitReviewEnabled && commitReview.findings.value.length > 0,
 );
+
+/** Verifier issue #4 — a failed review must never fail silently. Reuse the
+ *  existing error-toast banner (`repoError`) rather than inventing a second
+ *  one; this mirrors every other place in this file that funnels a failure
+ *  into `repoError.value`. */
+watch(commitReview.lastError, (val) => {
+  if (val) repoError.value = val;
+});
 
 // Monorepo scope (v2.21.0) — restore persisted scope on repo open.
 const { loadScope } = useWorkspaceScope();
@@ -377,6 +404,12 @@ const prPanel = usePrPanel(prCwd, {
     await repoRefresh();
     await loadBranches();
   },
+  // v3.7.0 — Commit Review: resume its queue on the same visibilitychange
+  // → visible edge usePrPanel already reuses for the PR pre-review queue,
+  // instead of standing up a second listener. Without this, starting a
+  // review then hiding the tab would leave the queue paused on
+  // document.hidden forever.
+  onVisibilityResume: () => commitReview.resume(),
 });
 provide(PR_PANEL_KEY, prPanel);
 const issuePanel = useIssuePanel(prCwd);
@@ -1116,6 +1149,19 @@ function onSecretsCommitAnyway() {
   void doCommit(lastAttemptedCommitTrailers);
 }
 
+/** v3.7.0 — "Review staged changes" button handler. Shows a brief clean-pass
+ *  confirmation when the run actually completed (not skipped, not
+ *  superseded by a newer run) with no error and zero findings — otherwise a
+ *  clean review is indistinguishable from "didn't run" or "failed"
+ *  (verifier issue #5). A failed run is separately surfaced via the
+ *  `commitReview.lastError` watcher above (issue #4). */
+async function onReviewStagedClicked() {
+  const ran = await commitReview.run(repoFolderPath.value ?? "", locale.value);
+  if (ran && !commitReview.lastError.value && commitReview.findings.value.length === 0) {
+    showCommitReviewCleanToast();
+  }
+}
+
 /** v3.7.0 — "Jump to" in the findings modal: select the finding's file
  *  (always staged — findings are index-scoped) and scroll the diff to it. */
 function onJumpToCommitReviewFinding(id: string) {
@@ -1153,7 +1199,7 @@ const repoSidebarListeners = {
   deleteBranch: (name: string, hasLocal: boolean, hasRemote: boolean, remoteName?: string) =>
     handleDeleteBranchRequest(name, hasLocal, hasRemote, remoteName),
   openSecrets: () => { showSecretsModal.value = true; },
-  reviewStaged: () => { void commitReview.run(repoFolderPath.value ?? "", locale.value); },
+  reviewStaged: () => { void onReviewStagedClicked(); },
   openCommitReview: () => { showCommitReviewModal.value = true; },
 };
 
