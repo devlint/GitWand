@@ -306,6 +306,18 @@ pub fn run() {
         if std::env::var("LIBGL_ALWAYS_SOFTWARE").is_err() {
             std::env::set_var("LIBGL_ALWAYS_SOFTWARE", "1");
         }
+        // #135 follow-up 2: LIBGL_ALWAYS_SOFTWARE forces the GL renderer once an
+        // EGL context exists, but doesn't help when the failure happens earlier,
+        // at EGL *platform display* acquisition under native Wayland. Confirmed
+        // via `ldd` from an affected user that this isn't an AppImage-bundled-library
+        // issue (EGL/GL/Mesa all resolved to the host system, not the bundle) but a
+        // genuine native-Wayland EGL negotiation failure. Forcing GTK onto XWayland
+        // sidesteps that negotiation entirely, at the cost of native Wayland's
+        // fractional scaling and lower input latency. Never override a value the
+        // user or environment already set deliberately.
+        if std::env::var("GDK_BACKEND").is_err() {
+            std::env::set_var("GDK_BACKEND", "x11");
+        }
     }
 
     // macOS GUI apps launched from Finder/Dock get a minimal launchd env
