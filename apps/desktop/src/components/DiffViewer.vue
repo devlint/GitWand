@@ -709,23 +709,31 @@ function onDiffScroll() {
                     <span v-html="safeHtml(hlWord(hunkIdx, il.origIdx, il.line.content)) || '\u00a0'"></span>
                   </td>
                 </tr>
-                <!-- Commit Review (Task 1b, v3.7.0) \u2014 inline finding rows, plain-text
-                     interpolation only (findings come from an LLM, never v-html). -->
+                <!-- Commit Review (Task 1b, v3.7.0): inline finding rows, plain-text
+                     interpolation only (findings come from an LLM, never v-html).
+                     The <td> itself stays a plain table-cell box (no display
+                     override) so `colspan` actually spans the full diff width;
+                     `display: flex` lives on the inner wrapper div instead
+                     (a `td` with `display: flex` stops being a table-cell in the
+                     CSS box model, which makes the browser silently ignore
+                     `colspan` and squeeze the row into column 1). -->
                 <tr
                   v-for="f in findingsForLine(il.line)"
                   :key="f.id"
                   class="diff-finding-row"
                 >
                   <td class="diff-finding-cell" :colspan="selectable ? 5 : 4">
-                    <span class="diff-finding-severity" :class="`diff-finding-severity--${f.severity}`">{{ findingSeverityLabel(f.severity) }}</span>
-                    <span class="diff-finding-confidence mono">{{ f.confidence }}%</span>
-                    <span class="diff-finding-title">{{ f.title }}</span>
-                    <span class="diff-finding-detail">{{ f.message }}</span>
-                    <button
-                      type="button"
-                      class="diff-finding-dismiss"
-                      @click="emit('dismiss-finding', f.id!)"
-                    >{{ t('commitReview.dismiss') }}</button>
+                    <div class="diff-finding-body">
+                      <span class="diff-finding-severity" :class="`diff-finding-severity--${f.severity}`">{{ findingSeverityLabel(f.severity) }}</span>
+                      <span class="diff-finding-confidence mono">{{ f.confidence }}%</span>
+                      <span class="diff-finding-title">{{ f.title }}</span>
+                      <span class="diff-finding-detail">{{ f.message }}</span>
+                      <button
+                        type="button"
+                        class="diff-finding-dismiss"
+                        @click="emit('dismiss-finding', f.id!)"
+                      >{{ t('commitReview.dismiss') }}</button>
+                    </div>
                   </td>
                 </tr>
               </template>
@@ -1046,14 +1054,24 @@ function onDiffScroll() {
   background: var(--color-bg-secondary);
 }
 
+/* Plain table-cell box on purpose (no display override) — this is what
+   makes `colspan` on the <td> actually span the full diff width. Flex
+   layout lives on `.diff-finding-body` (the inner div) instead: a `td`
+   with `display: flex` stops being a table-cell in the CSS box model, so
+   the browser silently ignores `colspan` and the row collapses into
+   column 1 (the 48px `.line-no` column). */
 .diff-finding-cell {
+  padding: 0;
+  border-top: 1px dashed var(--color-border);
+  border-bottom: 1px dashed var(--color-border);
+}
+
+.diff-finding-body {
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
   gap: var(--space-3);
   padding: var(--space-2) 12px;
-  border-top: 1px dashed var(--color-border);
-  border-bottom: 1px dashed var(--color-border);
 }
 
 .diff-finding-severity {

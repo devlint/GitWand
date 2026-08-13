@@ -82,6 +82,16 @@ describe("DiffViewer — inline commit-review finding rows", () => {
     expect(rows[0].textContent).toContain("Risk title");
     expect(rows[0].textContent).toContain("Risk detail");
     expect(rows[0].textContent).toContain("80");
+
+    // Regression guard: the <td> must stay a plain table-cell (no display
+    // override) so its colspan actually spans the row — the flex layout
+    // lives on the inner `.diff-finding-body` wrapper instead. A `td` with
+    // `display: flex` silently loses `colspan` in the CSS box model.
+    const cell = rows[0].querySelector("td.diff-finding-cell") as HTMLTableCellElement;
+    expect(cell).not.toBeNull();
+    expect(cell.colSpan).toBeGreaterThan(1);
+    expect(cell.classList.contains("diff-finding-body")).toBe(false);
+    expect(cell.querySelector(":scope > .diff-finding-body")).not.toBeNull();
   });
 
   it("renders no row (and does not throw) for a finding whose line isn't in the diff", async () => {
