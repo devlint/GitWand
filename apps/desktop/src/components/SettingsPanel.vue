@@ -2770,15 +2770,12 @@ function deleteReleaseNoteTemplate(id: string) {
                 <span class="sp-hint">{{ t('settings.commitReview.enabledHint') }}</span>
               </div>
 
-              <div class="sp-row sp-row--checkbox" v-if="settings.commitReviewEnabled">
-                <label class="sp-checkbox-label" for="setting-commit-review-auto-rereview">
-                  <input id="setting-commit-review-auto-rereview" type="checkbox" class="sp-checkbox"
-                    :checked="settings.commitReviewAutoReReview"
-                    @change="updateSetting('commitReviewAutoReReview', ($event.target as HTMLInputElement).checked)" />
-                  <span>{{ t('settings.commitReview.autoReReview') }}</span>
-                </label>
-                <span class="sp-hint">{{ t('settings.commitReview.autoReReviewHint') }}</span>
-              </div>
+              <!-- commitReviewAutoReReview (verifier issue #7): the setting field
+                   exists (useSettings.ts / this file's local Settings interface)
+                   but its only consumer is the "Fix with agent" one-shot
+                   re-review trigger, which is Task 3 and out of scope for this
+                   PR. Hidden here on purpose until PR2 ships that consumer,
+                   rather than showing a toggle that visibly does nothing yet. -->
             </div>
 
             <!-- ─── Prompt Presets (v2.13) ─────────────────── -->

@@ -1230,9 +1230,12 @@ function formatActivityDate(dateStr: string): string {
                   <span class="file-name mono">{{ fileName(file.path) }}</span>
                   <span class="file-dir muted" v-if="fileDir(file.path)">{{ fileDir(file.path) }}</span>
                 </div>
-                <!-- Commit Review (Task 2, v3.7.0) — per-file finding count chip. -->
+                <!-- Commit Review (Task 2, v3.7.0) — per-file finding count chip.
+                     Gated on section === 'staged': findings are index-scoped, so
+                     the unstaged/untracked row of the same path must not carry
+                     the staged diff's count too. -->
                 <span
-                  v-if="(reviewFindingsByFile?.[file.path] ?? 0) > 0"
+                  v-if="file.section === 'staged' && (reviewFindingsByFile?.[file.path] ?? 0) > 0"
                   class="file-review-count"
                   :title="t('commitReview.fileCountTooltip', reviewFindingsByFile![file.path])"
                 >{{ reviewFindingsByFile![file.path] }}</span>
@@ -1377,9 +1380,11 @@ function formatActivityDate(dateStr: string): string {
                     </div>
                     <!-- Commit Review (Task 2, v3.7.0) — per-file finding count chip.
                          The sidebar has two independent renderers (flat list + tree) —
-                         this branch is easy to miss, hence the explicit callout. -->
+                         this branch is easy to miss, hence the explicit callout.
+                         Gated on section === 'staged' — see the flat-list branch
+                         above for why. -->
                     <span
-                      v-if="(reviewFindingsByFile?.[row.path] ?? 0) > 0"
+                      v-if="row.file!.section === 'staged' && (reviewFindingsByFile?.[row.path] ?? 0) > 0"
                       class="file-review-count"
                       :title="t('commitReview.fileCountTooltip', reviewFindingsByFile![row.path])"
                     >{{ reviewFindingsByFile![row.path] }}</span>
