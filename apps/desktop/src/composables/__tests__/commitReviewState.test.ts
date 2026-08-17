@@ -5,6 +5,9 @@
  * no mocks; the store itself is exercised against real (jsdom) localStorage.
  */
 import { describe, it, expect, beforeEach } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import type { GitDiff } from "../../utils/backend";
 
 let mod: typeof import("../commitReviewState");
@@ -13,6 +16,26 @@ beforeEach(async () => {
   localStorage.clear();
   mod = await import("../commitReviewState");
   mod._resetCommitReviewStateForTesting();
+});
+
+/**
+ * Regression guard: this module's source once had a raw, literal NUL byte
+ * embedded in a template literal (instead of the `\0` escape sequence),
+ * which made the whole file register as binary to git — GitHub rendered it
+ * as "Binary file not shown", and git blame/diff broke on it going forward.
+ * A NUL byte is never valid in this source file; this test fails loudly if
+ * one silently reappears, in this file or any sibling `.ts` source that
+ * might copy the same pattern.
+ */
+describe("source file encoding", () => {
+  it("commitReviewState.ts contains no raw NUL byte", () => {
+    // `node:path` join (not `new URL(relative, import.meta.url)`) — jsdom's
+    // shimmed global `URL` isn't accepted by `fileURLToPath`'s scheme check.
+    const testDir = dirname(fileURLToPath(import.meta.url));
+    const path = join(testDir, "..", "commitReviewState.ts");
+    const raw = readFileSync(path);
+    expect(raw.includes(0)).toBe(false);
+  });
 });
 
 function diffWithAddedLines(path: string, added: string[]): GitDiff {
