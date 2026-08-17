@@ -26,6 +26,12 @@ import { filterFindings, normalizeFindingClass } from "./usePrFindingFilter";
 import { useSettings } from "./useSettings";
 import { useAIProvider } from "./useAIProvider";
 import { useI18n } from "./useI18n";
+import {
+  recordReview,
+  coverageFor,
+  getState as getCommitReviewState,
+  clear as clearCommitReviewState,
+} from "./commitReviewState";
 
 /**
  * Hard cap on the number of staged files sent through the review pass — a
@@ -78,9 +84,13 @@ export interface CommitReviewResult {
    * "ran with zero findings" from "did not run" (verifier issue #5).
    */
   run: (cwd: string, locale: string) => Promise<boolean>;
-  /** Abort any in-flight run and clear all state (repo switch, post-commit,
-   *  or a staged-set change invalidating a stale review). */
-  reset: () => void;
+  /**
+   * Abort any in-flight run and clear all state (repo switch, post-commit,
+   * or a staged-set change invalidating a stale review). Passing `cwd`
+   * (Task 4) also refreshes `iterations` from that repo's persisted state
+   * instead of leaving a stale count from whatever repo was active before.
+   */
+  reset: (cwd?: string) => void;
   /** Session-only, class-normalized dismissal — mirrors the PR pre-review
    *  dismissal contract. */
   dismiss: (id: string) => void;
@@ -105,6 +115,27 @@ export interface CommitReviewResult {
    * here, and is unit-testable without mounting the host component.
    */
   onStagedSetChanged: (cwd: string, locale: string, stagedCount: number) => void;
+  /**
+   * Task 4 — review passes completed against the current repo's cycle
+   * (persisted; survives repo switches and app restarts, reset to 0 by a
+   * successful commit via `clearReviewState`).
+   */
+  iterations: Ref<number>;
+  /**
+   * Task 4 — share (0-100) of the CURRENT staged diff's added lines already
+   * covered by a past review snapshot. Recomputed every time `run()` parses
+   * a staged diff (both right after parsing — reflecting whatever was
+   * reviewed BEFORE this run — and again after a non-aborted completion),
+   * so staging a brand-new unreviewed line visibly drops this number even
+   * before the next review pass finishes.
+   */
+  coverage: Ref<number>;
+  /**
+   * Task 4/5 — drops the persisted iteration/coverage history for `cwd` and
+   * resets the in-memory refs. Call after a successful commit: a new commit
+   * starts a new review cycle.
+   */
+  clearReviewState: (cwd: string) => void;
 }
 
 export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReviewResult {
@@ -136,6 +167,13 @@ export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReview
   const lastError = ref<string | null>(null);
   const dismissedClasses = ref<Set<string>>(new Set());
   const truncated = ref(false);
+
+  // Task 4 — iteration/coverage tracking. Plain refs (not computed off the
+  // persisted store) updated imperatively at the points `run()`/`reset()`
+  // actually know the current repo/diff — see the doc comments on the
+  // exposed `iterations`/`coverage` refs above for exactly when each updates.
+  const iterations = ref(0);
+  const coverage = ref(100);
 
   // Task 3 — one-shot auto re-review arm + its debounce timer. `reReviewArmed`
   // is intentionally NOT reset by `stop()`/`reset()` below — it must survive
@@ -178,11 +216,28 @@ export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReview
     abortController = null;
   }
 
-  function reset() {
+  /**
+   * `cwd` is optional so every existing call site (repo close, generic
+   * invalidation) keeps working unchanged; passing it (Task 4) refreshes
+   * `iterations` from whatever is persisted for THAT repo, so switching
+   * repos never keeps showing a stale count from the previous one.
+   * `coverage` always resets to the neutral "nothing outstanding known yet"
+   * value here — it's only truly known once `run()` parses that repo's
+   * actual current staged diff.
+   */
+  function reset(cwd?: string) {
     stop();
     rawFindings.value = [];
     lastError.value = null;
     truncated.value = false;
+    iterations.value = cwd ? getCommitReviewState(cwd).iterations : 0;
+    coverage.value = 100;
+  }
+
+  function clearReviewState(cwd: string): void {
+    if (cwd) clearCommitReviewState(cwd);
+    iterations.value = 0;
+    coverage.value = 100;
   }
 
   async function run(cwd: string, locale: string): Promise<boolean> {
@@ -235,6 +290,12 @@ export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReview
       const files = bounded.map((s) => parseFileDiff(s.raw)).filter((f) => f.hunks.length > 0);
       if (!files.length) return true;
 
+      // Task 4 — recompute coverage against THIS parse of the current staged
+      // diff, using whatever was reviewed by past completed runs. This runs
+      // before the LLM calls even start, so a newly staged, not-yet-reviewed
+      // line is reflected immediately — even if this very run later aborts.
+      coverage.value = coverageFor(cwd, files);
+
       await queue.run(
         files,
         (file) => analyzeFile(file, { cwd, locale, otherDiffFiles: files, scope: "commit" }),
@@ -246,7 +307,16 @@ export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReview
           signal: controller.signal,
         },
       );
-      return !controller.signal.aborted;
+      if (controller.signal.aborted) return false;
+
+      // A full, non-aborted run just reviewed `files` — record it as a new
+      // iteration. Guarded by the abort check above so a stale run's
+      // eventual completion (verifier issue #6's race) never double-counts
+      // an iteration that a newer run has already superseded.
+      recordReview(cwd, files);
+      iterations.value = getCommitReviewState(cwd).iterations;
+      coverage.value = coverageFor(cwd, files);
+      return true;
     } catch (err) {
       if (controller.signal.aborted) return false;
       lastError.value = err instanceof Error ? err.message : String(err);
@@ -275,7 +345,9 @@ export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReview
     // Immediate, synchronous invalidation — a staged-set change means
     // whatever findings are on screen no longer match the index (D5). This
     // must never be debounced: the UI should clear stale findings right away.
-    reset();
+    // Passing `cwd` (Task 4) also refreshes `iterations` from persisted
+    // state for whatever repo is now active.
+    reset(cwd);
 
     if (!reReviewArmed.value) return;
 
@@ -311,5 +383,8 @@ export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReview
     resume: () => activeQueue.value.resume(),
     armReReview,
     onStagedSetChanged,
+    iterations,
+    coverage,
+    clearReviewState,
   };
 }

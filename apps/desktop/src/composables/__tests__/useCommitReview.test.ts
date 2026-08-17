@@ -24,6 +24,7 @@ vi.mock("../../utils/backend", () => ({
 
 import { useCommitReview, COMMIT_REVIEW_MAX_FILES, COMMIT_REVIEW_MAX_BYTES } from "../useCommitReview";
 import { useSettings, defaultAppSettings } from "../useSettings";
+import { _resetCommitReviewStateForTesting } from "../commitReviewState";
 
 function diffFor(path: string): string {
   return [
@@ -58,6 +59,8 @@ describe("useCommitReview", () => {
     isAvailableRef.value = true;
     const { settings } = useSettings();
     settings.value = { ...defaultAppSettings };
+    localStorage.clear();
+    _resetCommitReviewStateForTesting();
   });
 
   afterEach(() => {
@@ -385,6 +388,109 @@ describe("useCommitReview", () => {
       await new Promise((resolve) => setTimeout(resolve, 40));
 
       expect(gitExecMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // ── Task 4 (v3.7.0) — iterations & coverage ───────────────────────────
+  describe("iterations / coverage", () => {
+    it("a completed run bumps iterations to 1 and coverage to 100", async () => {
+      enableCommitReview();
+      gitExecMock.mockResolvedValue(gitExecOk(diffFor("a.ts")));
+      rawPromptMock.mockResolvedValue("[]");
+
+      const review = useCommitReview();
+      await review.run("/repo", "en");
+
+      expect(review.iterations.value).toBe(1);
+      expect(review.coverage.value).toBe(100);
+    });
+
+    it("staging a new unreviewed line drops coverage below 100 while the next run is in flight, then back to 100 once it completes", async () => {
+      enableCommitReview();
+      gitExecMock.mockResolvedValueOnce(gitExecOk(diffFor("a.ts")));
+      rawPromptMock.mockResolvedValueOnce("[]");
+
+      const review = useCommitReview();
+      await review.run("/repo", "en");
+      expect(review.coverage.value).toBe(100);
+
+      let resolveSecond!: (v: string) => void;
+      const pending = new Promise<string>((resolve) => { resolveSecond = resolve; });
+      // A bigger staged diff now includes an extra file with a brand-new,
+      // never-reviewed line.
+      gitExecMock.mockResolvedValueOnce(gitExecOk(`${diffFor("a.ts")}\n${diffFor("b.ts")}`));
+      rawPromptMock.mockImplementationOnce(() => pending).mockResolvedValueOnce("[]");
+
+      const secondRun = review.run("/repo", "en");
+      await new Promise((resolve) => setTimeout(resolve, 0)); // let the parse land before the LLM call resolves
+      expect(review.coverage.value).toBeLessThan(100);
+
+      resolveSecond("[]");
+      await secondRun;
+      expect(review.coverage.value).toBe(100);
+      expect(review.iterations.value).toBe(2);
+    });
+
+    it("an aborted run does not bump iterations (a stale run's cleanup must not double-count)", async () => {
+      enableCommitReview();
+      let resolveFirst!: (v: string) => void;
+      const pending = new Promise<string>((resolve) => { resolveFirst = resolve; });
+
+      gitExecMock
+        .mockResolvedValueOnce(gitExecOk(diffFor("a.ts")))
+        .mockResolvedValueOnce(gitExecOk(diffFor("c.ts")));
+      rawPromptMock
+        .mockImplementationOnce(() => pending)
+        .mockResolvedValueOnce("[]");
+
+      const review = useCommitReview();
+      const firstRun = review.run("/repo", "en"); // blocks on rawPrompt for a.ts
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      const secondRun = review.run("/repo", "en"); // aborts the first, reviews c.ts
+      await secondRun;
+      expect(review.iterations.value).toBe(1);
+
+      resolveFirst("[]");
+      await firstRun;
+      await Promise.resolve();
+
+      // The stale first run's completion must never bump iterations again.
+      expect(review.iterations.value).toBe(1);
+    });
+
+    it("clearReviewState resets iterations/coverage and the persisted store for that repo", async () => {
+      enableCommitReview();
+      gitExecMock.mockResolvedValue(gitExecOk(diffFor("a.ts")));
+      rawPromptMock.mockResolvedValue("[]");
+
+      const review = useCommitReview();
+      await review.run("/repo", "en");
+      expect(review.iterations.value).toBe(1);
+
+      review.clearReviewState("/repo");
+      expect(review.iterations.value).toBe(0);
+      expect(review.coverage.value).toBe(100);
+
+      // A brand-new composable instance for the same repo must also see the
+      // cleared persisted state (not just this instance's in-memory refs).
+      const another = useCommitReview();
+      another.onStagedSetChanged("/repo", "en", 0);
+      expect(another.iterations.value).toBe(0);
+    });
+
+    it("onStagedSetChanged refreshes iterations from persisted state when switching repos", async () => {
+      enableCommitReview();
+      gitExecMock.mockResolvedValue(gitExecOk(diffFor("a.ts")));
+      rawPromptMock.mockResolvedValue("[]");
+
+      const review = useCommitReview();
+      await review.run("/repo-a", "en");
+      expect(review.iterations.value).toBe(1);
+
+      // Switching to a never-reviewed repo must not keep showing repo-a's count.
+      review.onStagedSetChanged("/repo-b", "en", 0);
+      expect(review.iterations.value).toBe(0);
     });
   });
 });

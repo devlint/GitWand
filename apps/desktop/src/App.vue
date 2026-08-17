@@ -235,6 +235,7 @@ const {
   stagePatch,
   unstagePatch,
   commit: doCommit,
+  lastCommitHash,
   amendCommit: doAmendCommit,
   push: doPush,
   pull: doPull,
@@ -1101,6 +1102,8 @@ const repoSidebarProps = computed(() => ({
   commitReviewFindingsCount: commitReview.findings.value.length,
   commitReviewProgress: commitReview.progress.value,
   reviewFindingsByFile: commitReview.findingsByFile.value,
+  commitReviewIterations: commitReview.iterations.value,
+  commitReviewCoverage: commitReview.coverage.value,
 }));
 
 /**
@@ -1119,7 +1122,16 @@ async function handleCommitRequest(trailers: string) {
     });
     if (!confirmed) return;
   }
+  // v3.7.0 (Task 4) — `lastCommitHash` only changes on a SUCCESSFUL commit
+  // (`useGitRepo.commit()` catches its own errors internally, never
+  // throws) — comparing before/after is the cleanest local success signal,
+  // without adding a global watcher that would also have to special-case
+  // amend/other commit paths. A new commit starts a new review cycle.
+  const beforeHash = lastCommitHash.value;
   await doCommit(trailers);
+  if (lastCommitHash.value !== beforeHash) {
+    commitReview.clearReviewState(repoFolderPath.value ?? "");
+  }
 }
 
 /**
@@ -3892,6 +3904,8 @@ onUnmounted(() => {
       :findings="commitReview.findings.value"
       :summary="commitReview.summary.value"
       :truncated="commitReview.truncated.value"
+      :iterations="commitReview.iterations.value"
+      :coverage="commitReview.coverage.value"
       @jump="onJumpToCommitReviewFinding($event)"
       @dismiss="commitReview.dismiss($event)"
       @fix-with-agent="onCommitReviewFixWithAgent($event)"

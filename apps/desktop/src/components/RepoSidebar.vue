@@ -69,6 +69,10 @@ const props = defineProps<{
   commitReviewProgress?: { done: number; total: number };
   /** v3.7.0 — Commit Review (Task 2): per-file finding count, keyed by path. */
   reviewFindingsByFile?: Record<string, number>;
+  /** v3.7.0 (Task 4) — review passes completed this cycle; 0 = none yet. */
+  commitReviewIterations?: number;
+  /** v3.7.0 (Task 4) — share (0-100) of the current staged diff already reviewed. */
+  commitReviewCoverage?: number;
 }>();
 
 const emit = defineEmits<{
@@ -110,6 +114,16 @@ const emit = defineEmits<{
 }>();
 
 const { t, locale } = useI18n();
+
+/** v3.7.0 (Task 4) — the findings badge's tooltip gains an iter/coverage
+ *  suffix once at least one review pass has completed this cycle. */
+const commitReviewBadgeTooltip = computed(() => {
+  const base = t('commitReview.badgeTooltip', props.commitReviewFindingsCount ?? 0);
+  if (!props.commitReviewIterations) return base;
+  const iter = t('commitReview.iterations', props.commitReviewIterations);
+  const cov = t('commitReview.coverage', props.commitReviewCoverage ?? 0);
+  return `${base} · ${iter} · ${cov}`;
+});
 
 /** Resolved pane (legacy callers omit the prop → render everything). */
 const pane = computed(() => props.pane ?? "all");
@@ -1727,7 +1741,7 @@ function formatActivityDate(dateStr: string): string {
           v-if="(commitReviewFindingsCount ?? 0) > 0"
           type="button"
           class="commit-review-badge"
-          :title="t('commitReview.badgeTooltip', commitReviewFindingsCount ?? 0)"
+          :title="commitReviewBadgeTooltip"
           @click="emit('openCommitReview')"
         >
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
