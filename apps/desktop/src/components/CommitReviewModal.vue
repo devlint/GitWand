@@ -4,8 +4,19 @@
  *
  * Task 1b (v3.7.0) — summary + severity-sorted finding list for the
  * staged-diff Commit Review pass. Modelled on `SecretsFindingsModal.vue`.
- * Task 3 adds "Fix with agent" (tool + scratch-worktree picker); Task 4 adds
- * the iteration/coverage line.
+ * Task 3 adds "Fix with agent" (tool picker); Task 4 adds the
+ * iteration/coverage line.
+ *
+ * Scope-narrowed for PR2 (deliberate, not a bug fix): "Fix with agent" no
+ * longer offers a scratch-worktree option. Manual QA against real
+ * claude/codex CLIs found that a brand-new scratch worktree always hits a
+ * first-run "trust this directory?" onboarding screen that misinterprets
+ * the piped prompt as menu navigation (it drove a real `brew upgrade
+ * --cask codex` in testing, from the CLI's default "Update now" option).
+ * "Fix with agent" only ever targets the CURRENT repo now (already
+ * trusted, no onboarding screen). Revisit scratch-worktree support once
+ * there's a real fix — e.g. pre-trusting the directory before launching
+ * the agent, or detecting the onboarding screen before writing.
  */
 import { computed, ref } from "vue";
 import BaseModal from "./BaseModal.vue";
@@ -33,7 +44,7 @@ const emit = defineEmits<{
   jump: [id: string];
   dismiss: [id: string];
   close: [];
-  "fix-with-agent": [{ tool: TerminalTabType; scratch: boolean }];
+  "fix-with-agent": [{ tool: TerminalTabType }];
 }>();
 
 const { t } = useI18n();
@@ -45,7 +56,6 @@ const FIX_AGENT_TOOLS: Extract<TerminalTabType, "claude" | "codex" | "opencode">
   "opencode",
 ];
 const selectedTool = ref<TerminalTabType>("claude");
-const fixInScratch = ref(false);
 
 const TOOL_LABEL_KEY: Record<(typeof FIX_AGENT_TOOLS)[number], "commitReview.toolClaude" | "commitReview.toolCodex" | "commitReview.toolOpencode"> = {
   claude: "commitReview.toolClaude",
@@ -59,7 +69,7 @@ function toolLabel(tool: (typeof FIX_AGENT_TOOLS)[number]): string {
 
 function onFixWithAgentClick() {
   if (!props.findings.length) return;
-  emit("fix-with-agent", { tool: selectedTool.value, scratch: fixInScratch.value });
+  emit("fix-with-agent", { tool: selectedTool.value });
 }
 
 const SEVERITY_LABEL_KEY: Record<ReviewFinding["severity"], "commitReview.severityRisk" | "commitReview.severitySuggestion" | "commitReview.severityNit"> = {
@@ -126,10 +136,6 @@ const sortedFindings = computed(() => sortFindingsForReview(props.findings));
             {{ toolLabel(tool) }}
           </option>
         </select>
-        <label class="crm-fix-scratch-label">
-          <input v-model="fixInScratch" type="checkbox" class="crm-fix-scratch" />
-          <span>{{ t('commitReview.fixInScratch') }}</span>
-        </label>
         <button
           type="button"
           class="bm-btn bm-btn--primary crm-btn-compact crm-fix-btn"
@@ -184,15 +190,6 @@ const sortedFindings = computed(() => sortFindingsForReview(props.findings));
   background: var(--color-bg);
   color: var(--color-text);
   font-size: var(--font-size-sm);
-}
-
-.crm-fix-scratch-label {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-size: var(--font-size-sm);
-  color: var(--color-text-muted);
-  cursor: pointer;
 }
 
 .crm-empty {

@@ -2444,7 +2444,6 @@ const zhCN: Locale = {
     navEmpty: "没有可导航的发现项",
     fixWithAgent: "用代理修复",
     fixWithAgentTooltip: "将这些发现输入到代理的终端中（由你按回车执行）",
-    fixInScratch: "在临时工作树中",
     toolClaude: "Claude Code",
     toolCodex: "Codex",
     toolOpencode: "OpenCode",

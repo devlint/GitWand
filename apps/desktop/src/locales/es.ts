@@ -2459,7 +2459,6 @@ const es: Locale = {
     navEmpty: "Sin hallazgos para recorrer",
     fixWithAgent: "Corregir con un agente",
     fixWithAgentTooltip: "Escribe estos hallazgos en la terminal de un agente (tú pulsas Intro para ejecutarlo)",
-    fixInScratch: "En un worktree temporal",
     toolClaude: "Claude Code",
     toolCodex: "Codex",
     toolOpencode: "OpenCode",

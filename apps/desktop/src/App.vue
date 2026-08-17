@@ -1995,54 +1995,40 @@ async function confirmNewAiTask(name: string) {
  * findings prompt into a fresh agent PTY WITHOUT pressing Enter (plan
  * decision D7 — no `terminal_open` "initial prompt" param exists, and typing
  * without submitting avoids racing the agent TUI's boot while keeping "let
- * an agent edit my files" a deliberate human gesture). Optionally opens the
- * agent in a scratch worktree first (reuses `createAiTaskScratchWorktree`).
+ * an agent edit my files" a deliberate human gesture).
  *
- * Verifier item #5 — manual QA performed against real `claude` and `codex`
- * CLIs (via the dev-server's real `node-pty` backend, the same one
- * `pnpm dev:web` uses) confirmed: once an agent has reached its normal
- * ready-to-chat input state, writing this whole multi-line, trailing-\n
- * prompt as one burst lands as UNSENT multi-line input text (verified for
- * `claude` — its bracketed-paste-mode input box shows every line, with no
- * submission and no response activity for several seconds after). That
- * part of decision D7's assumption holds.
+ * Always targets the CURRENT repo — deliberately scope-narrowed for PR2
+ * (not a bug fix): this used to optionally open the agent in a fresh
+ * scratch worktree via `createAiTaskScratchWorktree`, but manual QA against
+ * real `claude`/`codex` CLIs found that a brand-new working directory
+ * (exactly what a scratch worktree always is) hits a first-run "trust this
+ * directory?" onboarding screen before the agent's normal input box exists.
+ * Writing newline-bearing input into THAT screen doesn't "type unsent
+ * text" — it drives Enter-confirms-the-highlighted-option menu navigation,
+ * and in testing this went as far as `codex` starting a real `brew upgrade
+ * --cask codex` from its default "Update now" option. The current repo is
+ * already trusted (no onboarding screen), so this path is safe; the
+ * scratch-worktree option is removed until there's a real fix — e.g.
+ * pre-trusting the directory before launching the agent, or detecting the
+ * onboarding screen before writing — tracked as a roadmap follow-up.
+ * `createAiTaskScratchWorktree` itself is untouched and still used by the
+ * existing "New AI task" button (`confirmNewAiTask`).
  *
- * BUT: a brand-new working directory (exactly what "in a scratch worktree"
- * always is) makes both `claude` and `codex` show a first-run "trust this
- * directory?" onboarding prompt before their normal input box exists, and
- * for `codex` a subsequent "update available" prompt can follow. Writing
- * newline-bearing input into THOSE screens does not "type unsent text" —
- * it drives their Enter-confirms-the-highlighted-option menu navigation.
- * In manual testing this went as far as `codex` starting a real `brew
- * upgrade --cask codex` from its default "Update now" option. This fixed,
- * short delay is a best-effort mitigation for the narrower "racing the
- * literal process spawn" case D7 originally worried about — it does NOT
- * detect or wait out a first-run onboarding screen (that would need
- * ANSI-aware screen-state parsing, out of scope here). The onboarding-menu
- * risk is real and unresolved; flagged for explicit human sign-off before
- * merge, especially for the scratch-worktree path (see PR report).
+ * Verifier item #5 — manual QA performed via the dev-server's real
+ * `node-pty` backend (the same one `pnpm dev:web` uses) confirmed: once an
+ * agent has reached its normal ready-to-chat input state, writing this
+ * whole multi-line, trailing-\n prompt as one burst lands as UNSENT
+ * multi-line input text (verified for `claude` — its bracketed-paste-mode
+ * input box shows every line, with no submission and no response activity
+ * for several seconds after). That part of decision D7's assumption holds
+ * for the current-repo path this function now exclusively uses.
  */
-async function onCommitReviewFixWithAgent(payload: { tool: TerminalTabType; scratch: boolean }) {
+async function onCommitReviewFixWithAgent(payload: { tool: TerminalTabType }) {
   const prompt = buildReviewFixPrompt(commitReview.findings.value);
   if (!prompt) return;
   showCommitReviewModal.value = false;
   try {
-    let cwd: string | undefined;
-    if (payload.scratch) {
-      const scratch = await createAiTaskScratchWorktree();
-      if (!scratch) {
-        // No repo/tab context to base the scratch on — surface it instead
-        // of silently doing nothing after the modal already closed.
-        // `reportAgentLaunchError` shows a generic "agent failed to open"
-        // message for agent tool types regardless of `err`'s content — the
-        // Error here is only for the console.error log.
-        reportAgentLaunchError(payload.tool, new Error("no active repo tab to base a scratch worktree on"));
-        return;
-      }
-      cwd = scratch.path;
-    } else {
-      cwd = repoFolderPath.value ?? undefined;
-    }
+    const cwd = repoFolderPath.value ?? undefined;
     const tab = await openTerminalTab(cwd, payload.tool);
     // `sessionId` is -1 until `terminalOpen` resolves inside `openTab` —
     // `openTerminalTab` only returns after that await settles, but guard

@@ -2502,7 +2502,6 @@ const en = {
     // ── Task 3 (v3.7.0) — Fix with agent ──────────────────────
     fixWithAgent: "Fix with agent",
     fixWithAgentTooltip: "Type these findings into an agent's terminal (you press Enter to run it)",
-    fixInScratch: "In a scratch worktree",
     toolClaude: "Claude Code",
     toolCodex: "Codex",
     toolOpencode: "OpenCode",

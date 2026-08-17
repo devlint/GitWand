@@ -2459,7 +2459,6 @@ const ptBR: Locale = {
     navEmpty: "Nenhum achado para navegar",
     fixWithAgent: "Corrigir com um agente",
     fixWithAgentTooltip: "Digita esses achados no terminal de um agente (você pressiona Enter para executar)",
-    fixInScratch: "Em um worktree temporário",
     toolClaude: "Claude Code",
     toolCodex: "Codex",
     toolOpencode: "OpenCode",
