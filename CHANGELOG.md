@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **GitLab MR list can still time out when `glab` is authenticated via `--use-keyring`** — the v3.6.2 fix (#149) made a hang surface as a clean 20s timeout instead of freezing the app, but on keyring auth the underlying `glab` subprocess itself was still slow: retrieving the PAT from the macOS keychain hangs when `glab` is spawned from a signed Tauri app, the same per-binary ACL mismatch already fixed for `gh`. `shell_env.rs` now also preloads a `GITLAB_TOKEN` from a login shell at startup (parsed from `glab auth status --show-token`) so `glab` subprocesses bypass the keychain lookup entirely, mirroring the existing `GH_TOKEN` preload (#149).
+- **Dock PR badge briefly queries GitHub on a non-GitHub repo's first open** — opening a repo whose remote had never been resolved yet in this session (no cached remote, e.g. right after install, or a repo opened for the first time) fired the dock badge's `getPRCount` refresh immediately, before the async remote lookup completed. `forge` falls back to the GitHub provider by default while the remote is unresolved, so a GitLab (or other non-GitHub) repo would briefly hit a doomed `gh`-backed call and could surface a spurious error, before quietly correcting itself once the remote resolved. `refreshDockPrCount` now waits for the remote lookup on that cold path, same as the PR panel's own `init()`/`ensurePrsLoaded()` already did (#149).
 
 ## [3.6.3] - 2026-08-13
 

@@ -647,6 +647,14 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   async function refreshDockPrCount() {
     if (!cwd.value) return;
     const repo = cwd.value;
+    // Cold badge refresh on a repo with no cached remote yet: `forge`
+    // defaults to `githubProvider` until `remote` resolves, so firing here
+    // without waiting would misdetect any non-GitHub repo as GitHub on its
+    // first open and surface a doomed `gh` call (#149 follow-up).
+    if (!remote.value) {
+      await loadRemote();
+      if (cwd.value !== repo) return; // repo changed while the remote resolved
+    }
     try {
       const count = await forge.value.getPRCount(repo, "open");
       // Discard a stale result if the repo changed while this call was in
