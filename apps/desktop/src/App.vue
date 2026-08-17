@@ -1156,8 +1156,17 @@ async function handleCommitRequest(trailers: string) {
  * function ever sees the staged-changes trailers, so recomputing the review
  * trailer for the CURRENT decision on every call (including the second pass
  * after a decision is made) is the only correct ordering.
+ *
+ * Verifier item #3 — `reconcileIterationsForHead` is awaited FIRST, before
+ * the gate ever reads `commitReview.iterations`: a commit made outside the
+ * app since the last recorded review (an amend, a terminal commit, any
+ * external tool) must reset that count to 0, not silently let the gate skip
+ * the decision modal and write a `GitWand-Review: ran` trailer for a review
+ * that never happened against what's actually about to be committed.
  */
 async function proceedToCommit(trailers: string) {
+  await commitReview.reconcileIterationsForHead(repoFolderPath.value ?? "");
+
   const gate = resolveCommitReviewGate({
     enabled: settings.value.commitReviewEnabled,
     staged: repoStats.value.staged,
@@ -1189,15 +1198,35 @@ async function proceedToCommit(trailers: string) {
   }
 }
 
-/** "Review now" in the decision modal: runs the pass and leaves the commit
- *  un-issued (decision stays whatever it was — null unless a review already
- *  happened) so the user can look at findings, then commits again when
- *  satisfied; `resolveCommitReviewGate` then sees `iterations > 0` and
- *  proceeds without re-prompting. */
+/**
+ * "Review now" in the decision modal: runs the pass and leaves the commit
+ * un-issued (decision stays whatever it was — null unless a review already
+ * happened) so the user can look at findings, then commits again when
+ * satisfied; `resolveCommitReviewGate` then sees `iterations > 0` and
+ * proceeds without re-prompting.
+ *
+ * Verifier item #4 — reuses `onReviewStagedClicked`'s exact success/
+ * failure/clean-pass branching (calling it directly, not duplicating a
+ * weaker version) rather than always popping the findings modal regardless
+ * of outcome. Without this, clicking "Review now" with no AI provider
+ * configured popped an empty "No findings" modal instead of surfacing the
+ * real reason nothing happened. A genuine failure is already surfaced
+ * globally via the `commitReview.lastError` watcher above (`repoError`) —
+ * the one case that watcher can't cover is "never even attempted"
+ * (`ran === false`), which this modal only reaches via AI being
+ * unavailable (the feature and a staged repo are already guaranteed by
+ * `resolveCommitReviewGate` before this modal ever opens).
+ */
 async function onCommitReviewDecisionReviewNow() {
   showCommitReviewDecisionModal.value = false;
-  await commitReview.run(repoFolderPath.value ?? "", locale.value);
-  showCommitReviewModal.value = true;
+  const ran = await onReviewStagedClicked();
+  if (!ran) {
+    repoError.value = t("errors.noAiProviderShort");
+    return;
+  }
+  if (!commitReview.lastError.value) {
+    showCommitReviewModal.value = true;
+  }
 }
 
 async function onCommitReviewDecisionVouch() {
@@ -1253,12 +1282,17 @@ function onSecretsCommitAnyway() {
  *  superseded by a newer run) with no error and zero findings — otherwise a
  *  clean review is indistinguishable from "didn't run" or "failed"
  *  (verifier issue #5). A failed run is separately surfaced via the
- *  `commitReview.lastError` watcher above (issue #4). */
-async function onReviewStagedClicked() {
+ *  `commitReview.lastError` watcher above (issue #4). Returns whether the
+ *  run actually attempted — `onCommitReviewDecisionReviewNow` ("Review now"
+ *  in the decision modal) reuses this exact branching directly (verifier
+ *  item #4) instead of duplicating a weaker version that ignored the
+ *  outcome and always popped the findings modal. */
+async function onReviewStagedClicked(): Promise<boolean> {
   const ran = await commitReview.run(repoFolderPath.value ?? "", locale.value);
   if (ran && !commitReview.lastError.value && commitReview.findings.value.length === 0) {
     showCommitReviewCleanToast();
   }
+  return ran;
 }
 
 /** v3.7.0 — "Jump to" in the findings modal: select the finding's file
@@ -1963,6 +1997,30 @@ async function confirmNewAiTask(name: string) {
  * without submitting avoids racing the agent TUI's boot while keeping "let
  * an agent edit my files" a deliberate human gesture). Optionally opens the
  * agent in a scratch worktree first (reuses `createAiTaskScratchWorktree`).
+ *
+ * Verifier item #5 — manual QA performed against real `claude` and `codex`
+ * CLIs (via the dev-server's real `node-pty` backend, the same one
+ * `pnpm dev:web` uses) confirmed: once an agent has reached its normal
+ * ready-to-chat input state, writing this whole multi-line, trailing-\n
+ * prompt as one burst lands as UNSENT multi-line input text (verified for
+ * `claude` — its bracketed-paste-mode input box shows every line, with no
+ * submission and no response activity for several seconds after). That
+ * part of decision D7's assumption holds.
+ *
+ * BUT: a brand-new working directory (exactly what "in a scratch worktree"
+ * always is) makes both `claude` and `codex` show a first-run "trust this
+ * directory?" onboarding prompt before their normal input box exists, and
+ * for `codex` a subsequent "update available" prompt can follow. Writing
+ * newline-bearing input into THOSE screens does not "type unsent text" —
+ * it drives their Enter-confirms-the-highlighted-option menu navigation.
+ * In manual testing this went as far as `codex` starting a real `brew
+ * upgrade --cask codex` from its default "Update now" option. This fixed,
+ * short delay is a best-effort mitigation for the narrower "racing the
+ * literal process spawn" case D7 originally worried about — it does NOT
+ * detect or wait out a first-run onboarding screen (that would need
+ * ANSI-aware screen-state parsing, out of scope here). The onboarding-menu
+ * risk is real and unresolved; flagged for explicit human sign-off before
+ * merge, especially for the scratch-worktree path (see PR report).
  */
 async function onCommitReviewFixWithAgent(payload: { tool: TerminalTabType; scratch: boolean }) {
   const prompt = buildReviewFixPrompt(commitReview.findings.value);
@@ -1972,7 +2030,15 @@ async function onCommitReviewFixWithAgent(payload: { tool: TerminalTabType; scra
     let cwd: string | undefined;
     if (payload.scratch) {
       const scratch = await createAiTaskScratchWorktree();
-      if (!scratch) return;
+      if (!scratch) {
+        // No repo/tab context to base the scratch on — surface it instead
+        // of silently doing nothing after the modal already closed.
+        // `reportAgentLaunchError` shows a generic "agent failed to open"
+        // message for agent tool types regardless of `err`'s content — the
+        // Error here is only for the console.error log.
+        reportAgentLaunchError(payload.tool, new Error("no active repo tab to base a scratch worktree on"));
+        return;
+      }
       cwd = scratch.path;
     } else {
       cwd = repoFolderPath.value ?? undefined;
@@ -1981,7 +2047,13 @@ async function onCommitReviewFixWithAgent(payload: { tool: TerminalTabType; scra
     // `sessionId` is -1 until `terminalOpen` resolves inside `openTab` —
     // `openTerminalTab` only returns after that await settles, but guard
     // explicitly anyway (per plan) rather than relying on that implicitly.
-    if (!tab || tab.sessionId < 0) return;
+    if (!tab || tab.sessionId < 0) {
+      reportAgentLaunchError(payload.tool, new Error("terminal session unavailable"));
+      return;
+    }
+    // Best-effort readiness wait (verifier item #5) — gives the spawned
+    // process a moment past the raw PTY spawn before the prompt lands.
+    await new Promise((resolve) => setTimeout(resolve, 1000));
     await termSessions.write(tab.sessionId, prompt);
     commitReview.armReReview();
   } catch (err) {
