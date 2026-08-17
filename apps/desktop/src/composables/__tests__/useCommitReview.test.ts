@@ -2,6 +2,18 @@
  * Task 1a (v3.7.0) — `useCommitReview` orchestrator: staged-diff AI review
  * engine, opt-in and off by default. Mocks `../../utils/backend` and
  * `../useAIProvider` per the established convention (`usePrPreReview.test.ts`).
+ *
+ * Verifier item #3 (v3.7.0 PR2 fixes) — `run()` now also resolves the
+ * repo's HEAD commit (`git rev-parse HEAD`) so a completed review is stamped
+ * against the commit it actually reviewed, letting the commit-time gate
+ * detect a commit that happened outside the app since the last review.
+ * `gitExecMock` therefore routes by git subcommand (`args[0]`) instead of a
+ * single blind response queue: `rev-parse` calls are answered from
+ * `headHashResponse` (a fixed stub unless a test explicitly changes HEAD to
+ * simulate an out-of-band commit), and `diff` calls are answered from the
+ * `diff*` helpers below — completely decoupling the two so existing
+ * `mockResolvedValueOnce` diff sequencing never has to account for the
+ * extra call.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
@@ -42,6 +54,27 @@ function gitExecOk(stdout: string) {
   return { stdout, stderr: "", exitCode: 0 };
 }
 
+type ExecResult = { stdout: string; stderr: string; exitCode: number };
+
+// ── gitExec routing: rev-parse (HEAD) vs diff (staged diff fetch) ────────
+let headHashResponse = "head-hash-stub";
+let diffOnceQueue: ExecResult[] = [];
+let diffDefaultResponse: ExecResult | null = null;
+
+/** Simulates an out-of-band commit (amend, terminal commit, external tool)
+ *  changing HEAD between two `run()` calls. */
+function setHeadHash(hash: string): void {
+  headHashResponse = hash;
+}
+
+function queueDiffResponseOnce(res: ExecResult): void {
+  diffOnceQueue.push(res);
+}
+
+function setDiffDefaultResponse(res: ExecResult): void {
+  diffDefaultResponse = res;
+}
+
 function enableCommitReview(overrides: Partial<typeof defaultAppSettings> = {}) {
   const { settings } = useSettings();
   settings.value = { ...defaultAppSettings, commitReviewEnabled: true, ...overrides };
@@ -56,6 +89,15 @@ describe("useCommitReview", () => {
     rawPromptMock.mockReset();
     getGitBlameMock.mockReset().mockResolvedValue([]);
     gitExecMock.mockReset();
+    headHashResponse = "head-hash-stub";
+    diffOnceQueue = [];
+    diffDefaultResponse = null;
+    gitExecMock.mockImplementation(async (_cwd: string, args: string[]): Promise<ExecResult> => {
+      if (args[0] === "rev-parse") return { stdout: headHashResponse, stderr: "", exitCode: 0 };
+      if (diffOnceQueue.length) return diffOnceQueue.shift()!;
+      if (diffDefaultResponse) return diffDefaultResponse;
+      return { stdout: "", stderr: "", exitCode: 0 };
+    });
     isAvailableRef.value = true;
     const { settings } = useSettings();
     settings.value = { ...defaultAppSettings };
@@ -91,7 +133,7 @@ describe("useCommitReview", () => {
 
   it("reviews two staged files and aggregates findings + progress + per-file counts", async () => {
     enableCommitReview();
-    gitExecMock.mockResolvedValue(gitExecOk(`${diffFor("a.ts")}\n${diffFor("b.ts")}`));
+    setDiffDefaultResponse(gitExecOk(`${diffFor("a.ts")}\n${diffFor("b.ts")}`));
     rawPromptMock
       .mockResolvedValueOnce('[{"line": 1, "title": "finding a", "confidence": 80}]')
       .mockResolvedValueOnce('[{"line": 1, "title": "finding b", "confidence": 80}]');
@@ -107,7 +149,7 @@ describe("useCommitReview", () => {
 
   it("sets lastError (never throws) and leaves findings empty when gitExec exits non-zero", async () => {
     enableCommitReview();
-    gitExecMock.mockResolvedValue({ stdout: "", stderr: "fatal: not a git repository", exitCode: 128 });
+    setDiffDefaultResponse({ stdout: "", stderr: "fatal: not a git repository", exitCode: 128 });
 
     const review = useCommitReview();
     let ran: boolean | undefined;
@@ -122,7 +164,7 @@ describe("useCommitReview", () => {
 
   it("makes no LLM call on an empty staged diff (clean index is not an error), and reports it ran", async () => {
     enableCommitReview();
-    gitExecMock.mockResolvedValue(gitExecOk(""));
+    setDiffDefaultResponse(gitExecOk(""));
 
     const review = useCommitReview();
     const ran = await review.run("/repo", "en");
@@ -138,9 +180,8 @@ describe("useCommitReview", () => {
     let resolveFirst!: (v: string) => void;
     const pending = new Promise<string>((resolve) => { resolveFirst = resolve; });
 
-    gitExecMock
-      .mockResolvedValueOnce(gitExecOk(diffFor("a.ts")))
-      .mockResolvedValueOnce(gitExecOk(diffFor("c.ts")));
+    queueDiffResponseOnce(gitExecOk(diffFor("a.ts")));
+    queueDiffResponseOnce(gitExecOk(diffFor("c.ts")));
     rawPromptMock
       .mockImplementationOnce(() => pending)
       .mockResolvedValueOnce('[{"line": 1, "title": "finding c", "confidence": 80}]');
@@ -164,7 +205,7 @@ describe("useCommitReview", () => {
 
   it("reset() clears findings, error, and aborts any run in flight", async () => {
     enableCommitReview();
-    gitExecMock.mockResolvedValue(gitExecOk(diffFor("a.ts")));
+    setDiffDefaultResponse(gitExecOk(diffFor("a.ts")));
     rawPromptMock.mockResolvedValue('[{"line": 1, "title": "finding a", "confidence": 80}]');
 
     const review = useCommitReview();
@@ -179,7 +220,7 @@ describe("useCommitReview", () => {
 
   it("keeps a below-threshold finding in rawFindings but filters it out of findings", async () => {
     enableCommitReview({ reviewAiConfidenceThreshold: 60 });
-    gitExecMock.mockResolvedValue(gitExecOk(diffFor("a.ts")));
+    setDiffDefaultResponse(gitExecOk(diffFor("a.ts")));
     rawPromptMock.mockResolvedValue('[{"line": 1, "title": "low-confidence finding", "confidence": 20}]');
 
     const review = useCommitReview();
@@ -192,7 +233,7 @@ describe("useCommitReview", () => {
   it("caps the staged file count at exactly COMMIT_REVIEW_MAX_FILES and marks truncated", async () => {
     enableCommitReview();
     const manyFiles = Array.from({ length: 45 }, (_, i) => diffFor(`f${i}.ts`)).join("\n");
-    gitExecMock.mockResolvedValue(gitExecOk(manyFiles));
+    setDiffDefaultResponse(gitExecOk(manyFiles));
     rawPromptMock.mockResolvedValue("[]");
 
     const review = useCommitReview();
@@ -218,7 +259,7 @@ describe("useCommitReview", () => {
       "-old",
       hugeAddedLine,
     ].join("\n");
-    gitExecMock.mockResolvedValue(gitExecOk(`${hugeDiff}\n${diffFor("small.ts")}`));
+    setDiffDefaultResponse(gitExecOk(`${hugeDiff}\n${diffFor("small.ts")}`));
     rawPromptMock.mockResolvedValue("[]");
 
     const review = useCommitReview();
@@ -232,7 +273,7 @@ describe("useCommitReview", () => {
 
   it("resume() unblocks a run paused on document.hidden and lets it complete (never stays wedged)", async () => {
     enableCommitReview();
-    gitExecMock.mockResolvedValue(gitExecOk(diffFor("a.ts")));
+    setDiffDefaultResponse(gitExecOk(diffFor("a.ts")));
     rawPromptMock.mockResolvedValue('[{"line": 1, "title": "finding a", "confidence": 80}]');
 
     setHidden(true);
@@ -261,9 +302,8 @@ describe("useCommitReview", () => {
     let resolveFirst!: (v: string) => void;
     const pending = new Promise<string>((resolve) => { resolveFirst = resolve; });
 
-    gitExecMock
-      .mockResolvedValueOnce(gitExecOk(diffFor("a.ts")))
-      .mockResolvedValueOnce(gitExecOk(diffFor("c.ts")));
+    queueDiffResponseOnce(gitExecOk(diffFor("a.ts")));
+    queueDiffResponseOnce(gitExecOk(diffFor("c.ts")));
     rawPromptMock
       .mockImplementationOnce(() => pending)
       .mockResolvedValueOnce("[]");
@@ -298,9 +338,16 @@ describe("useCommitReview", () => {
   // than merely existing as a callable, unwired function (the exact shape of
   // bug that shipped `resume()` unwired in PR1).
   describe("armReReview() / onStagedSetChanged() — one-shot re-review", () => {
+    // Assertions in this block check `rawPromptMock` (the LLM call — i.e.
+    // "a review pass actually ran") rather than raw `gitExec` counts:
+    // `onStagedSetChanged` also fires an unconditional coverage-refresh
+    // `git diff` call on every invocation (verifier item #2), which is
+    // orthogonal to whether the ARMED re-review itself fires, so a raw
+    // gitExec count is no longer the right signal for "did a review run".
+
     it("arms exactly one auto re-review that fires on the next staged-set change", async () => {
       enableCommitReview({ commitReviewAutoReReview: true });
-      gitExecMock.mockResolvedValue(gitExecOk(diffFor("a.ts")));
+      setDiffDefaultResponse(gitExecOk(diffFor("a.ts")));
       rawPromptMock.mockResolvedValue("[]");
 
       const review = useCommitReview({ debounceMs: 0 });
@@ -308,34 +355,37 @@ describe("useCommitReview", () => {
       review.onStagedSetChanged("/repo", "en", 1);
       await new Promise((resolve) => setTimeout(resolve, 10));
 
-      expect(gitExecMock).toHaveBeenCalledTimes(1);
+      expect(rawPromptMock).toHaveBeenCalledTimes(1);
     });
 
     it("a second staged-set change after the arm has fired runs no further review", async () => {
       enableCommitReview({ commitReviewAutoReReview: true });
-      gitExecMock.mockResolvedValue(gitExecOk(diffFor("a.ts")));
+      setDiffDefaultResponse(gitExecOk(diffFor("a.ts")));
       rawPromptMock.mockResolvedValue("[]");
 
       const review = useCommitReview({ debounceMs: 0 });
       review.armReReview();
       review.onStagedSetChanged("/repo", "en", 1);
       await new Promise((resolve) => setTimeout(resolve, 10));
-      expect(gitExecMock).toHaveBeenCalledTimes(1);
+      expect(rawPromptMock).toHaveBeenCalledTimes(1);
 
-      gitExecMock.mockClear();
+      rawPromptMock.mockClear();
       review.onStagedSetChanged("/repo", "en", 1); // arm already consumed — no re-run
       await new Promise((resolve) => setTimeout(resolve, 10));
-      expect(gitExecMock).not.toHaveBeenCalled();
+      // The coverage refresh still runs (it's unconditional), but no NEW
+      // review pass (no further LLM call) fires.
+      expect(rawPromptMock).not.toHaveBeenCalled();
     });
 
     it("never arms when commitReviewAutoReReview is disabled", async () => {
       enableCommitReview({ commitReviewAutoReReview: false });
+      setDiffDefaultResponse(gitExecOk(diffFor("a.ts")));
       const review = useCommitReview({ debounceMs: 0 });
       review.armReReview();
       review.onStagedSetChanged("/repo", "en", 1);
       await new Promise((resolve) => setTimeout(resolve, 10));
 
-      expect(gitExecMock).not.toHaveBeenCalled();
+      expect(rawPromptMock).not.toHaveBeenCalled();
     });
 
     it("does not fire the armed re-review when the next staged set is empty", async () => {
@@ -345,17 +395,17 @@ describe("useCommitReview", () => {
       review.onStagedSetChanged("/repo", "en", 0); // staged count is 0 — nothing to review
       await new Promise((resolve) => setTimeout(resolve, 10));
 
-      expect(gitExecMock).not.toHaveBeenCalled();
+      expect(rawPromptMock).not.toHaveBeenCalled();
       // The arm was still consumed by this (empty) staged-set change — a
       // LATER non-empty staging event must not unexpectedly trigger a run.
       review.onStagedSetChanged("/repo", "en", 1);
       await new Promise((resolve) => setTimeout(resolve, 10));
-      expect(gitExecMock).not.toHaveBeenCalled();
+      expect(rawPromptMock).not.toHaveBeenCalled();
     });
 
     it("onStagedSetChanged always resets findings/error even when nothing is armed", async () => {
       enableCommitReview();
-      gitExecMock.mockResolvedValue(gitExecOk(diffFor("a.ts")));
+      setDiffDefaultResponse(gitExecOk(diffFor("a.ts")));
       rawPromptMock.mockResolvedValue('[{"line": 1, "title": "finding a", "confidence": 80}]');
 
       const review = useCommitReview({ debounceMs: 0 });
@@ -383,7 +433,7 @@ describe("useCommitReview", () => {
       vi.useFakeTimers();
       try {
         enableCommitReview({ commitReviewAutoReReview: true });
-        gitExecMock.mockResolvedValue(gitExecOk(diffFor("a.ts")));
+        setDiffDefaultResponse(gitExecOk(diffFor("a.ts")));
         rawPromptMock.mockResolvedValue("[]");
 
         const review = useCommitReview({ debounceMs: 20 });
@@ -395,7 +445,7 @@ describe("useCommitReview", () => {
         review.onStagedSetChanged("/repo", "en", 1);
         await vi.advanceTimersByTimeAsync(25);
 
-        expect(gitExecMock).toHaveBeenCalledTimes(1);
+        expect(rawPromptMock).toHaveBeenCalledTimes(1);
       } finally {
         vi.useRealTimers();
       }
@@ -403,10 +453,78 @@ describe("useCommitReview", () => {
   });
 
   // ── Task 4 (v3.7.0) — iterations & coverage ───────────────────────────
+  // ── Verifier item #2 — coverage must never assert 100% when it's actually
+  // unknown/stale. `onStagedSetChanged` used to hardcode `coverage.value =
+  // 100` unconditionally, which meant a brand-new unreviewed file staged
+  // AFTER a completed review kept showing "100% reviewed" (and could get
+  // written into a `GitWand-Review: ran (iter:N, coverage:100%)` trailer)
+  // right up until the user clicked "Review staged changes" again.
+  describe("coverage recompute on staged-set change (no commit involved)", () => {
+    it("recomputes coverage against the current staged diff instead of asserting 100%", async () => {
+      enableCommitReview();
+      setDiffDefaultResponse(gitExecOk(diffFor("a.ts")));
+      rawPromptMock.mockResolvedValue("[]");
+
+      const review = useCommitReview({ debounceMs: 0 });
+      await review.run("/repo", "en");
+      expect(review.coverage.value).toBe(100);
+
+      // A brand-new, never-reviewed file gets staged — no commit happened,
+      // HEAD is unchanged, but the staged diff now includes unreviewed content.
+      setDiffDefaultResponse(gitExecOk(`${diffFor("a.ts")}\n${diffFor("b.ts")}`));
+      review.onStagedSetChanged("/repo", "en", 2);
+      // The refresh is a plain diff fetch (no LLM call) — async, wait for it.
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      expect(review.coverage.value).toBeLessThan(100);
+    });
+
+    it("is zero IPC when the feature is disabled (coverage stays at the neutral default)", async () => {
+      const { settings } = useSettings();
+      settings.value = { ...defaultAppSettings, commitReviewEnabled: false };
+
+      const review = useCommitReview({ debounceMs: 0 });
+      review.onStagedSetChanged("/repo", "en", 1);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      expect(gitExecMock).not.toHaveBeenCalled();
+      expect(review.coverage.value).toBe(100);
+    });
+
+    it("a stale in-flight coverage refresh never clobbers a newer staged-set change's result", async () => {
+      enableCommitReview();
+      let resolveSlow!: (v: ExecResult) => void;
+      const slow = new Promise<ExecResult>((resolve) => { resolveSlow = resolve; });
+
+      let diffCallN = 0;
+      gitExecMock.mockImplementation(async (_cwd: string, args: string[]): Promise<ExecResult> => {
+        if (args[0] === "rev-parse") return { stdout: headHashResponse, stderr: "", exitCode: 0 };
+        diffCallN++;
+        if (diffCallN === 1) return slow; // first staged-set change's refresh — deliberately slow
+        return gitExecOk(`${diffFor("a.ts")}\n${diffFor("b.ts")}`); // second — resolves fast
+      });
+
+      const review = useCommitReview({ debounceMs: 0 });
+      review.onStagedSetChanged("/repo", "en", 1); // fires the SLOW refresh
+      await new Promise((resolve) => setTimeout(resolve, 5)); // let it start, still pending
+      review.onStagedSetChanged("/repo", "en", 2); // fires a second, faster refresh
+      await new Promise((resolve) => setTimeout(resolve, 10)); // let the fast one resolve
+
+      // The newer refresh's result must be in effect: current diff is
+      // a.ts+b.ts against zero reviewed hashes so far, so coverage is 0.
+      expect(review.coverage.value).toBe(0);
+
+      // Now let the STALE slow one resolve — it must not clobber the newer value.
+      resolveSlow(gitExecOk(diffFor("a.ts")));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(review.coverage.value).toBe(0);
+    });
+  });
+
   describe("iterations / coverage", () => {
     it("a completed run bumps iterations to 1 and coverage to 100", async () => {
       enableCommitReview();
-      gitExecMock.mockResolvedValue(gitExecOk(diffFor("a.ts")));
+      setDiffDefaultResponse(gitExecOk(diffFor("a.ts")));
       rawPromptMock.mockResolvedValue("[]");
 
       const review = useCommitReview();
@@ -418,7 +536,7 @@ describe("useCommitReview", () => {
 
     it("staging a new unreviewed line drops coverage below 100 while the next run is in flight, then back to 100 once it completes", async () => {
       enableCommitReview();
-      gitExecMock.mockResolvedValueOnce(gitExecOk(diffFor("a.ts")));
+      queueDiffResponseOnce(gitExecOk(diffFor("a.ts")));
       rawPromptMock.mockResolvedValueOnce("[]");
 
       const review = useCommitReview();
@@ -429,7 +547,7 @@ describe("useCommitReview", () => {
       const pending = new Promise<string>((resolve) => { resolveSecond = resolve; });
       // A bigger staged diff now includes an extra file with a brand-new,
       // never-reviewed line.
-      gitExecMock.mockResolvedValueOnce(gitExecOk(`${diffFor("a.ts")}\n${diffFor("b.ts")}`));
+      queueDiffResponseOnce(gitExecOk(`${diffFor("a.ts")}\n${diffFor("b.ts")}`));
       rawPromptMock.mockImplementationOnce(() => pending).mockResolvedValueOnce("[]");
 
       const secondRun = review.run("/repo", "en");
@@ -447,9 +565,8 @@ describe("useCommitReview", () => {
       let resolveFirst!: (v: string) => void;
       const pending = new Promise<string>((resolve) => { resolveFirst = resolve; });
 
-      gitExecMock
-        .mockResolvedValueOnce(gitExecOk(diffFor("a.ts")))
-        .mockResolvedValueOnce(gitExecOk(diffFor("c.ts")));
+      queueDiffResponseOnce(gitExecOk(diffFor("a.ts")));
+      queueDiffResponseOnce(gitExecOk(diffFor("c.ts")));
       rawPromptMock
         .mockImplementationOnce(() => pending)
         .mockResolvedValueOnce("[]");
@@ -472,7 +589,7 @@ describe("useCommitReview", () => {
 
     it("clearReviewState resets iterations/coverage and the persisted store for that repo", async () => {
       enableCommitReview();
-      gitExecMock.mockResolvedValue(gitExecOk(diffFor("a.ts")));
+      setDiffDefaultResponse(gitExecOk(diffFor("a.ts")));
       rawPromptMock.mockResolvedValue("[]");
 
       const review = useCommitReview();
@@ -492,7 +609,7 @@ describe("useCommitReview", () => {
 
     it("onStagedSetChanged refreshes iterations from persisted state when switching repos", async () => {
       enableCommitReview();
-      gitExecMock.mockResolvedValue(gitExecOk(diffFor("a.ts")));
+      setDiffDefaultResponse(gitExecOk(diffFor("a.ts")));
       rawPromptMock.mockResolvedValue("[]");
 
       const review = useCommitReview();
@@ -502,6 +619,81 @@ describe("useCommitReview", () => {
       // Switching to a never-reviewed repo must not keep showing repo-a's count.
       review.onStagedSetChanged("/repo-b", "en", 0);
       expect(review.iterations.value).toBe(0);
+    });
+
+    // ── Verifier item #3 — bind the review cycle to HEAD ─────────────────
+    // `run()` must stamp each completed review against the repo's HEAD at
+    // review time, and `reconcileIterationsForHead` (the commit-time gate's
+    // real trigger — App.vue's `proceedToCommit` awaits it before deciding
+    // whether to show the decision modal) must catch a commit that happened
+    // OUTSIDE the app (amend, terminal commit, external tool) since the last
+    // recorded review, instead of trusting a stale `iterations` count.
+    describe("HEAD-cycle binding", () => {
+      it("run() stamps the review against the current HEAD", async () => {
+        enableCommitReview();
+        setHeadHash("sha-1");
+        setDiffDefaultResponse(gitExecOk(diffFor("a.ts")));
+        rawPromptMock.mockResolvedValue("[]");
+
+        const review = useCommitReview();
+        await review.run("/repo", "en");
+        expect(review.iterations.value).toBe(1);
+
+        // A second review against the SAME HEAD continues the same cycle.
+        await review.run("/repo", "en");
+        expect(review.iterations.value).toBe(2);
+      });
+
+      it("a review after HEAD changed (an out-of-band commit) starts a fresh cycle", async () => {
+        enableCommitReview();
+        setHeadHash("sha-1");
+        setDiffDefaultResponse(gitExecOk(diffFor("a.ts")));
+        rawPromptMock.mockResolvedValue("[]");
+
+        const review = useCommitReview();
+        await review.run("/repo", "en");
+        expect(review.iterations.value).toBe(1);
+
+        // Simulates a commit made outside the app (amend, terminal, external
+        // tool) moving HEAD between two reviews.
+        setHeadHash("sha-2");
+        await review.run("/repo", "en");
+        expect(review.iterations.value).toBe(1); // fresh cycle, not 2
+      });
+
+      it("reconcileIterationsForHead resets a stale iterations count when HEAD moved since the last review, with no review run in between", async () => {
+        enableCommitReview();
+        setHeadHash("sha-1");
+        setDiffDefaultResponse(gitExecOk(diffFor("a.ts")));
+        rawPromptMock.mockResolvedValue("[]");
+
+        const review = useCommitReview();
+        await review.run("/repo", "en");
+        expect(review.iterations.value).toBe(1);
+
+        // An out-of-band commit happens; the user never reviews again before
+        // hitting commit — this is exactly the scenario the commit-time gate
+        // (App.vue's `proceedToCommit`) must catch by awaiting this call
+        // BEFORE checking `iterations` (verifier item #3).
+        setHeadHash("sha-2");
+        await review.reconcileIterationsForHead("/repo");
+
+        expect(review.iterations.value).toBe(0);
+      });
+
+      it("reconcileIterationsForHead is a no-op when HEAD hasn't changed", async () => {
+        enableCommitReview();
+        setHeadHash("sha-1");
+        setDiffDefaultResponse(gitExecOk(diffFor("a.ts")));
+        rawPromptMock.mockResolvedValue("[]");
+
+        const review = useCommitReview();
+        await review.run("/repo", "en");
+        expect(review.iterations.value).toBe(1);
+
+        await review.reconcileIterationsForHead("/repo");
+        expect(review.iterations.value).toBe(1);
+      });
     });
   });
 });

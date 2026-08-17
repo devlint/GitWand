@@ -31,6 +31,7 @@ import {
   coverageFor,
   getState as getCommitReviewState,
   clear as clearCommitReviewState,
+  reconcileHead,
 } from "./commitReviewState";
 
 /**
@@ -136,6 +137,15 @@ export interface CommitReviewResult {
    * starts a new review cycle.
    */
   clearReviewState: (cwd: string) => void;
+  /**
+   * Verifier item #3 — reconciles `iterations` against the repo's CURRENT
+   * HEAD, without running a new review. The host (App.vue's
+   * `proceedToCommit`) MUST await this before checking `iterations` at
+   * commit time, so a commit made outside the app since the last review
+   * (amend, terminal commit, any external tool) resets the stale count
+   * instead of silently letting the gate skip the decision modal.
+   */
+  reconcileIterationsForHead: (cwd: string) => Promise<void>;
 }
 
 export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReviewResult {
@@ -181,6 +191,14 @@ export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReview
   // to consume.
   const reReviewArmed = ref(false);
   let reReviewTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // Verifier item #2 — generation counter guarding the async, fire-and-
+  // forget coverage refresh (`refreshCoverageForCurrentDiff`) against a
+  // stale response landing AFTER a newer staged-set change (or a real
+  // `run()`) has already superseded it. Bumped by both `onStagedSetChanged`
+  // and `run()` — whichever started MOST RECENTLY wins the right to set
+  // `coverage.value`.
+  let coverageGeneration = 0;
 
   let abortController: AbortController | null = null;
 
@@ -240,6 +258,75 @@ export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReview
     coverage.value = 100;
   }
 
+  /**
+   * Resolves the repo's current HEAD commit hash — a single cheap, read-only
+   * `git rev-parse HEAD` call, no different in kind from the existing
+   * staged-diff fetch. Verifier item #3: this is how a completed review
+   * gets stamped against the exact commit it reviewed, so the commit-time
+   * gate (`reconcileIterationsForHead`, called from App.vue's
+   * `proceedToCommit`) can tell whether a commit happened outside the app
+   * since the last review. Returns `""` (never throws) on any failure —
+   * a HEAD resolution failure must never break the review pass itself.
+   */
+  async function resolveHeadHash(cwd: string): Promise<string> {
+    try {
+      const res = await gitExec(cwd, ["rev-parse", "HEAD"]);
+      return res.exitCode === 0 ? res.stdout.trim() : "";
+    } catch {
+      return "";
+    }
+  }
+
+  /**
+   * Verifier item #2 — recomputes `coverage` against the repo's CURRENT
+   * staged diff (a plain `git diff --cached` fetch, no LLM call) instead of
+   * leaving whatever neutral default `reset()` just set. Fire-and-forget
+   * from `onStagedSetChanged`; `generation` (captured at call time against
+   * the shared `coverageGeneration` counter) guards against this stale
+   * response landing after a NEWER staged-set change or a real `run()` has
+   * already superseded it. Zero IPC when the feature is disabled or `cwd`
+   * is empty — resolves to the neutral 100 default in that case.
+   */
+  async function refreshCoverageForCurrentDiff(cwd: string, generation: number): Promise<void> {
+    let next = 100;
+    if (cwd && settings.value.commitReviewEnabled) {
+      try {
+        const res = await gitExec(cwd, ["diff", "--cached", "--no-color"]);
+        if (res.exitCode === 0 && res.stdout.trim()) {
+          const files = indexDiffFiles(res.stdout)
+            .map((s) => parseFileDiff(s.raw))
+            .filter((f) => f.hunks.length > 0);
+          next = coverageFor(cwd, files);
+        }
+      } catch {
+        // A coverage-refresh failure must never disrupt anything else —
+        // leave `next` at the neutral default.
+      }
+    }
+    if (generation === coverageGeneration) coverage.value = next;
+  }
+
+  /**
+   * Verifier item #3 — reconciles `iterations` against the repo's CURRENT
+   * HEAD without running a new review. Call this before checking
+   * `iterations` at commit time (`App.vue`'s `proceedToCommit`, right
+   * before `resolveCommitReviewGate`): if a commit happened outside the app
+   * (amend, terminal commit, any external tool) since the last recorded
+   * review, this resets the stale count to 0 so the gate re-prompts instead
+   * of silently trusting a review that no longer applies to what's about to
+   * be committed.
+   */
+  async function reconcileIterationsForHead(cwd: string): Promise<void> {
+    if (!cwd) return;
+    const headHash = await resolveHeadHash(cwd);
+    const state = reconcileHead(cwd, headHash);
+    iterations.value = state.iterations;
+    // A reset also invalidates whatever "reviewed" baseline `coverage` was
+    // showing — back to the neutral default until the next `run()` parses
+    // the actual current staged diff.
+    if (state.snapshots.length === 0) coverage.value = 100;
+  }
+
   async function run(cwd: string, locale: string): Promise<boolean> {
     // A new run always supersedes whatever is in flight — abort first so a
     // stale in-flight run can never paint findings after this one starts.
@@ -247,6 +334,10 @@ export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReview
     rawFindings.value = [];
     lastError.value = null;
     truncated.value = false;
+    // Verifier item #2 — a real run supersedes any in-flight coverage-only
+    // refresh (`refreshCoverageForCurrentDiff`); its stale response must not
+    // clobber whatever `coverage.value` this run itself computes below.
+    coverageGeneration++;
 
     // Opt-in feature: zero IPC, zero LLM call when disabled/unavailable.
     // Never even attempted — callers must not treat this as "ran clean".
@@ -260,6 +351,11 @@ export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReview
     activeQueue.value = queue;
 
     try {
+      // Verifier item #3 — resolve HEAD once per run so a completed review
+      // gets stamped against the exact commit it reviewed.
+      const headHash = await resolveHeadHash(cwd);
+      if (controller.signal.aborted) return false;
+
       const res = await gitExec(cwd, ["diff", "--cached", "--no-color"]);
       if (controller.signal.aborted) return false;
 
@@ -313,7 +409,7 @@ export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReview
       // iteration. Guarded by the abort check above so a stale run's
       // eventual completion (verifier issue #6's race) never double-counts
       // an iteration that a newer run has already superseded.
-      recordReview(cwd, files);
+      recordReview(cwd, files, headHash);
       iterations.value = getCommitReviewState(cwd).iterations;
       coverage.value = coverageFor(cwd, files);
       return true;
@@ -348,6 +444,15 @@ export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReview
     // Passing `cwd` (Task 4) also refreshes `iterations` from persisted
     // state for whatever repo is now active.
     reset(cwd);
+
+    // Verifier item #2 — `reset()` just set `coverage` to the neutral 100
+    // default, which is a LIE if the current staged diff actually has
+    // unreviewed content (e.g. a brand-new file staged after the last
+    // completed review). Recompute it for real against the current staged
+    // diff — a plain `git diff` fetch, no LLM call, zero IPC when the
+    // feature is disabled (guarded inside `refreshCoverageForCurrentDiff`).
+    const myCoverageGeneration = ++coverageGeneration;
+    void refreshCoverageForCurrentDiff(cwd, myCoverageGeneration);
 
     if (!reReviewArmed.value) return;
 
@@ -386,5 +491,6 @@ export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReview
     iterations,
     coverage,
     clearReviewState,
+    reconcileIterationsForHead,
   };
 }

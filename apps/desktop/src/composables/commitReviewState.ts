@@ -39,6 +39,19 @@ export interface CommitReviewRepoState {
   iterations: number;
   snapshots: ReviewedSnapshot[];
   updatedAt: number;
+  /**
+   * HEAD commit hash the current `iterations`/`snapshots` are valid for.
+   * Verifier item #3 (v3.7.0 PR2 fixes) — without this, a commit made
+   * OUTSIDE `proceedToCommit` (an amend, a terminal commit, any external
+   * tool) leaves `iterations` pointing at a review cycle for a commit that
+   * no longer exists; the next in-app commit would then silently write
+   * `GitWand-Review: ran (iter:N, ...)` with no review having actually
+   * happened against what's about to be committed. `""` means "not yet
+   * known" (a fresh repo, or state persisted before this field existed) —
+   * an empty stored value never by itself triggers a reset, only an actual
+   * MISMATCH between two known hashes does (see `recordReview`/`reconcileHead`).
+   */
+  headHash: string;
 }
 
 interface CommitReviewStateFile {
@@ -50,7 +63,7 @@ function emptyFile(): CommitReviewStateFile {
 }
 
 function emptyRepoState(): CommitReviewRepoState {
-  return { iterations: 0, snapshots: [], updatedAt: 0 };
+  return { iterations: 0, snapshots: [], updatedAt: 0, headHash: "" };
 }
 
 // Strictly-increasing write clock — same rationale as `usePrCache.ts`'s
@@ -109,11 +122,21 @@ export function computeCoverage(current: string[], reviewed: Set<string>): numbe
   return Math.round((100 * hit) / current.length);
 }
 
+/**
+ * Drops snapshots older than `MAX_AGE_MS`. Verifier item #3 — if pruning
+ * empties the snapshot list entirely, every piece of evidence backing
+ * `iterations` has aged out; the count itself is no longer meaningful and
+ * must reset to 0 rather than silently surviving with no snapshots left to
+ * justify it (otherwise a stale `{iterations: 3, snapshots: []}` would let
+ * the next commit skip the decision modal and write a lying trailer).
+ * Leaves `iterations` alone when pruning only removed SOME snapshots.
+ */
 function pruneStaleSnapshots(state: CommitReviewRepoState, now: number): CommitReviewRepoState {
-  return {
-    ...state,
-    snapshots: state.snapshots.filter((s) => s && now - s.ts <= MAX_AGE_MS),
-  };
+  const snapshots = state.snapshots.filter((s) => s && now - s.ts <= MAX_AGE_MS);
+  if (snapshots.length === 0 && state.snapshots.length > 0) {
+    return { ...state, snapshots, iterations: 0 };
+  }
+  return { ...state, snapshots };
 }
 
 function loadFromStorage(): CommitReviewStateFile {
@@ -129,7 +152,8 @@ function loadFromStorage(): CommitReviewStateFile {
       const iterations = typeof state.iterations === "number" ? state.iterations : 0;
       const snapshots = Array.isArray(state.snapshots) ? state.snapshots : [];
       const updatedAt = typeof state.updatedAt === "number" ? state.updatedAt : now;
-      repos[cwd] = pruneStaleSnapshots({ iterations, snapshots, updatedAt }, now);
+      const headHash = typeof state.headHash === "string" ? state.headHash : "";
+      repos[cwd] = pruneStaleSnapshots({ iterations, snapshots, updatedAt, headHash }, now);
     }
     return { repos };
   } catch {
@@ -189,21 +213,62 @@ export function coverageFor(cwd: string, files: GitDiff[]): number {
  * iteration counter and appends a new snapshot of the added-line hashes it
  * covered. Caps snapshot count (oldest evicted) and per-snapshot hash count
  * (truncated) so a huge staged tree can't blow the localStorage quota.
+ *
+ * `headHash` (verifier item #3, optional — defaults to "" for back-compat)
+ * is the repo's current HEAD commit at review time. When it's provided and
+ * differs from whatever was last recorded for this repo, a commit happened
+ * since the last review — the cycle restarts (iterations back to 1, old
+ * snapshots dropped) instead of counting this review against a diff that no
+ * longer applies to the current HEAD. An empty/omitted `headHash` never
+ * triggers a reset by itself — only an actual mismatch between two KNOWN
+ * hashes does.
  */
-export function recordReview(cwd: string, files: GitDiff[]): void {
+export function recordReview(cwd: string, files: GitDiff[], headHash: string = ""): void {
   const key = normaliseCwd(cwd);
   const existing = getState(cwd);
-  const iterations = existing.iterations + 1;
+  const startingFresh = !!headHash && !!existing.headHash && existing.headHash !== headHash;
+  const base = startingFresh ? emptyRepoState() : existing;
+  const iterations = base.iterations + 1;
 
   let lineHashes = addedLineKeys(files);
   if (lineHashes.length > MAX_HASHES) lineHashes = lineHashes.slice(0, MAX_HASHES);
 
   const snapshot: ReviewedSnapshot = { iter: iterations, ts: monoNow(), lineHashes };
-  let snapshots = [...existing.snapshots, snapshot];
+  let snapshots = [...base.snapshots, snapshot];
   if (snapshots.length > MAX_SNAPSHOTS) snapshots = snapshots.slice(snapshots.length - MAX_SNAPSHOTS);
 
-  _file.repos[key] = { iterations, snapshots, updatedAt: Date.now() };
+  _file.repos[key] = {
+    iterations,
+    snapshots,
+    updatedAt: Date.now(),
+    headHash: headHash || existing.headHash,
+  };
   saveToStorage(_file);
+}
+
+/**
+ * Reconciles the persisted state for `cwd` against the repo's CURRENT HEAD
+ * commit hash, without recording a new review pass. Used right before the
+ * commit-time decision gate checks `iterations` (verifier item #3): if a
+ * HEAD hash was previously recorded and it differs from `currentHeadHash`,
+ * a commit happened since the last recorded review (an amend, a terminal
+ * commit, or anything outside `proceedToCommit`) — the cycle resets to 0
+ * iterations / no snapshots so the gate re-prompts instead of trusting a
+ * stale count. A no-op (just stamps the hash) when there's nothing to
+ * reconcile against yet, or when `currentHeadHash` can't be resolved
+ * (empty string — e.g. a brand-new repo with no commits).
+ */
+export function reconcileHead(cwd: string, currentHeadHash: string): CommitReviewRepoState {
+  const key = normaliseCwd(cwd);
+  const existing = getState(cwd);
+  if (!currentHeadHash || existing.headHash === currentHeadHash) return existing;
+
+  const next: CommitReviewRepoState = existing.headHash
+    ? { ...emptyRepoState(), headHash: currentHeadHash, updatedAt: Date.now() }
+    : { ...existing, headHash: currentHeadHash };
+  _file.repos[key] = next;
+  saveToStorage(_file);
+  return next;
 }
 
 /** Drop all recorded state for `cwd` — a new commit starts a new review cycle. */

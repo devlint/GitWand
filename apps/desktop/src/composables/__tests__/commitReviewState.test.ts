@@ -12,12 +12,6 @@ import type { GitDiff } from "../../utils/backend";
 
 let mod: typeof import("../commitReviewState");
 
-beforeEach(async () => {
-  localStorage.clear();
-  mod = await import("../commitReviewState");
-  mod._resetCommitReviewStateForTesting();
-});
-
 /**
  * Regression guard: this module's source once had a raw, literal NUL byte
  * embedded in a template literal (instead of the `\0` escape sequence),
@@ -36,6 +30,12 @@ describe("source file encoding", () => {
     const raw = readFileSync(path);
     expect(raw.includes(0)).toBe(false);
   });
+});
+
+beforeEach(async () => {
+  localStorage.clear();
+  mod = await import("../commitReviewState");
+  mod._resetCommitReviewStateForTesting();
 });
 
 function diffWithAddedLines(path: string, added: string[]): GitDiff {
@@ -202,6 +202,50 @@ describe("recordReview / getState / coverageFor / clear", () => {
     expect(mod.reviewedHashesFor("/repo").size).toBe(0);
   });
 
+  // ── Verifier item #3 — a stale iterations count must never survive past
+  // the evidence (snapshots) that justified it aging out. Without this, a
+  // repo can end up with {iterations: 3, snapshots: []} and the next commit
+  // silently records "ran (iter:3, coverage:0%)" with no review having
+  // actually happened and no decision modal shown.
+  it("resets iterations to 0 when pruning empties the snapshot list on load", () => {
+    const stale = {
+      repos: {
+        "/repo": {
+          iterations: 3,
+          updatedAt: Date.now() - 10 * 24 * 60 * 60 * 1000,
+          headHash: "abc123",
+          snapshots: [
+            { iter: 1, ts: Date.now() - 10 * 24 * 60 * 60 * 1000, lineHashes: ["stale-hash"] },
+          ],
+        },
+      },
+    };
+    localStorage.setItem(mod.COMMIT_REVIEW_STATE_STORAGE_KEY, JSON.stringify(stale));
+    mod._resetCommitReviewStateForTesting();
+    expect(mod.getState("/repo").iterations).toBe(0);
+  });
+
+  it("does NOT reset iterations when pruning only removes SOME snapshots, leaving others", () => {
+    const now = Date.now();
+    const state = {
+      repos: {
+        "/repo": {
+          iterations: 2,
+          updatedAt: now,
+          headHash: "abc123",
+          snapshots: [
+            { iter: 1, ts: now - 10 * 24 * 60 * 60 * 1000, lineHashes: ["old-hash"] }, // stale, pruned
+            { iter: 2, ts: now, lineHashes: ["fresh-hash"] }, // still fresh
+          ],
+        },
+      },
+    };
+    localStorage.setItem(mod.COMMIT_REVIEW_STATE_STORAGE_KEY, JSON.stringify(state));
+    mod._resetCommitReviewStateForTesting();
+    expect(mod.getState("/repo").iterations).toBe(2);
+    expect(mod.reviewedHashesFor("/repo").has("fresh-hash")).toBe(true);
+  });
+
   it("clear removes only the target repo's entry", () => {
     mod.recordReview("/repo-a", [diffWithAddedLines("a.ts", ["x"])]);
     mod.recordReview("/repo-b", [diffWithAddedLines("b.ts", ["y"])]);
@@ -214,6 +258,70 @@ describe("recordReview / getState / coverageFor / clear", () => {
     mod.recordReview("/repo", [diffWithAddedLines("a.ts", ["line1"])]);
     mod._resetCommitReviewStateForTesting();
     expect(mod.getState("/repo").iterations).toBe(1);
+  });
+});
+
+// ── Verifier item #3 — bind the review cycle to HEAD ───────────────────────
+// `iterations` must not survive a commit made OUTSIDE `proceedToCommit`
+// (amend, a terminal commit, any external tool): without this, the count
+// leaks across commits and the next in-app commit can silently write a
+// `GitWand-Review: ran (iter:N, ...)` trailer with no review having actually
+// happened against the diff that's about to be committed.
+describe("recordReview HEAD-cycle binding", () => {
+  it("recordReview stamps the given headHash on the state", () => {
+    mod.recordReview("/repo", [diffWithAddedLines("a.ts", ["x"])], "sha-1");
+    expect(mod.getState("/repo").headHash).toBe("sha-1");
+  });
+
+  it("recordReview starts a fresh cycle (iterations back to 1) when headHash differs from what's recorded", () => {
+    mod.recordReview("/repo", [diffWithAddedLines("a.ts", ["x"])], "sha-1");
+    expect(mod.getState("/repo").iterations).toBe(1);
+
+    // Same HEAD — a normal second review pass in the same cycle.
+    mod.recordReview("/repo", [diffWithAddedLines("a.ts", ["y"])], "sha-1");
+    expect(mod.getState("/repo").iterations).toBe(2);
+
+    // HEAD changed (a commit happened) — the next review starts a NEW cycle.
+    mod.recordReview("/repo", [diffWithAddedLines("a.ts", ["z"])], "sha-2");
+    expect(mod.getState("/repo").iterations).toBe(1);
+  });
+
+  it("does not reset the cycle when no headHash is provided (back-compat default)", () => {
+    mod.recordReview("/repo", [diffWithAddedLines("a.ts", ["x"])], "sha-1");
+    mod.recordReview("/repo", [diffWithAddedLines("a.ts", ["y"])]); // no third arg
+    expect(mod.getState("/repo").iterations).toBe(2);
+  });
+});
+
+describe("reconcileHead", () => {
+  it("resets iterations/snapshots to a fresh cycle when the stored headHash differs from the current one", () => {
+    mod.recordReview("/repo", [diffWithAddedLines("a.ts", ["x"])], "sha-1");
+    expect(mod.getState("/repo").iterations).toBe(1);
+
+    const next = mod.reconcileHead("/repo", "sha-2");
+    expect(next.iterations).toBe(0);
+    expect(next.snapshots).toEqual([]);
+    expect(next.headHash).toBe("sha-2");
+    expect(mod.getState("/repo").iterations).toBe(0);
+  });
+
+  it("is a no-op (just stamps headHash) when nothing was recorded yet for this repo", () => {
+    const next = mod.reconcileHead("/never-reviewed", "sha-1");
+    expect(next.iterations).toBe(0);
+    expect(next.headHash).toBe("sha-1");
+  });
+
+  it("leaves iterations/snapshots untouched when the headHash is unchanged", () => {
+    mod.recordReview("/repo", [diffWithAddedLines("a.ts", ["x"])], "sha-1");
+    const next = mod.reconcileHead("/repo", "sha-1");
+    expect(next.iterations).toBe(1);
+  });
+
+  it("leaves state unchanged when the current headHash can't be resolved (empty string)", () => {
+    mod.recordReview("/repo", [diffWithAddedLines("a.ts", ["x"])], "sha-1");
+    const next = mod.reconcileHead("/repo", "");
+    expect(next.iterations).toBe(1);
+    expect(next.headHash).toBe("sha-1");
   });
 });
 
