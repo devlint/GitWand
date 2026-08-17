@@ -317,17 +317,20 @@ export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReview
    * the shared `coverageGeneration` counter) guards against this stale
    * response landing after a NEWER staged-set change or a real `run()` has
    * already superseded it. Zero IPC when the feature is disabled or `cwd`
-   * is empty — resolves to the neutral 100 default in that case.
+   * is empty — keeps the last known `coverage` value in that case rather
+   * than resetting to an optimistic 100 (third verifier pass, item L1: a
+   * mid-cycle Settings toggle-off must not silently launder a stale 100%
+   * into the trailer).
    */
   async function refreshCoverageForCurrentDiff(cwd: string, generation: number): Promise<void> {
-    let next = 100;
+    let next = coverage.value;
     if (cwd && settings.value.commitReviewEnabled) {
       try {
         const res = await gitExec(cwd, ["diff", "--cached", "--no-color"]);
         if (res.exitCode === 0) next = coverageFromDiffText(cwd, res.stdout);
       } catch {
         // A coverage-refresh failure must never disrupt anything else —
-        // leave `next` at the neutral default.
+        // leave `next` at the last known value.
       }
     }
     if (generation === coverageGeneration) coverage.value = next;
@@ -349,18 +352,22 @@ export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReview
    * Updates the exposed `coverage` ref and bumps `coverageGeneration` (same
    * "most recent wins" contract as `run()`/`onStagedSetChanged`) so a
    * result from here is never clobbered by a stale in-flight refresh, and
-   * vice versa. Zero IPC when `cwd` is empty or the feature is disabled.
+   * vice versa. Zero IPC when `cwd` is empty or the feature is disabled —
+   * keeps the last known `coverage` value in that case rather than
+   * resetting to an optimistic 100 (third verifier pass, item L1: a
+   * mid-cycle Settings toggle-off must not silently launder a stale 100%
+   * into the trailer).
    */
   async function computeCurrentCoverage(cwd: string): Promise<number> {
     const myGeneration = ++coverageGeneration;
-    let next = 100;
+    let next = coverage.value;
     if (cwd && settings.value.commitReviewEnabled) {
       try {
         const res = await gitExec(cwd, ["diff", "--cached", "--no-color"]);
         if (res.exitCode === 0) next = coverageFromDiffText(cwd, res.stdout);
       } catch {
         // A coverage-refresh failure must never disrupt the commit flow —
-        // leave `next` at the neutral default.
+        // leave `next` at the last known value.
       }
     }
     if (myGeneration === coverageGeneration) coverage.value = next;

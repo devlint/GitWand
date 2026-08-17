@@ -592,6 +592,28 @@ describe("useCommitReview", () => {
       expect(result).toBe(100);
       expect(gitExecMock).not.toHaveBeenCalled();
     });
+
+    it("third verifier pass, L1: keeps the last known coverage instead of an optimistic 100 when the feature is disabled mid-cycle", async () => {
+      enableCommitReview();
+      setDiffDefaultResponse(gitExecOk(diffForTwoLines("a.ts")));
+      rawPromptMock.mockResolvedValue("[]");
+
+      const review = useCommitReview();
+      await review.run("/repo", "en");
+      setDiffDefaultResponse(gitExecOk(`${diffForTwoLines("a.ts")}\n${diffFor("b.ts")}`));
+      const partial = await review.computeCurrentCoverage("/repo");
+      expect(partial).toBeLessThan(100);
+
+      // Commit Review gets toggled off in Settings before the commit lands —
+      // the trailer must still report the truthful, previously-computed
+      // coverage, not silently launder it back to an optimistic 100%.
+      const { settings } = useSettings();
+      settings.value = { ...settings.value, commitReviewEnabled: false };
+      const afterDisable = await review.computeCurrentCoverage("/repo");
+
+      expect(afterDisable).toBe(partial);
+      expect(review.coverage.value).toBe(partial);
+    });
   });
 
   describe("iterations / coverage", () => {
