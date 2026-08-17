@@ -193,3 +193,105 @@ describe("recordReview / getState / coverageFor / clear", () => {
     expect(mod.getState("/repo").iterations).toBe(1);
   });
 });
+
+// ── Task 5 (v3.7.0) — GitWand-Review trailer + commit gate ────────────────
+describe("buildReviewTrailer", () => {
+  it("builds the exact ran/iter/coverage shape", () => {
+    expect(mod.buildReviewTrailer("ran", 2, 87)).toBe("GitWand-Review: ran (iter:2, coverage:87%)");
+  });
+
+  it("builds vouched and skipped the same way when iter > 0", () => {
+    expect(mod.buildReviewTrailer("vouched", 1, 50)).toBe("GitWand-Review: vouched (iter:1, coverage:50%)");
+    expect(mod.buildReviewTrailer("skipped", 3, 10)).toBe("GitWand-Review: skipped (iter:3, coverage:10%)");
+  });
+
+  it("omits the parenthetical entirely when iter is 0 (decision D9)", () => {
+    expect(mod.buildReviewTrailer("skipped", 0, 0)).toBe("GitWand-Review: skipped");
+    expect(mod.buildReviewTrailer("vouched", 0, 42)).toBe("GitWand-Review: vouched");
+  });
+
+  it("clamps coverage to 0-100", () => {
+    expect(mod.buildReviewTrailer("ran", 1, 150)).toBe("GitWand-Review: ran (iter:1, coverage:100%)");
+    expect(mod.buildReviewTrailer("ran", 1, -20)).toBe("GitWand-Review: ran (iter:1, coverage:0%)");
+  });
+
+  it("floors a negative iter at 0 (which also drops the parenthetical)", () => {
+    expect(mod.buildReviewTrailer("ran", -5, 80)).toBe("GitWand-Review: ran");
+  });
+
+  it("has no trailing newline", () => {
+    expect(mod.buildReviewTrailer("ran", 1, 100).endsWith("\n")).toBe(false);
+  });
+
+  it("the key is exactly 'GitWand-Review' when parsed by the first colon (git interpret-trailers semantics)", () => {
+    const trailer = mod.buildReviewTrailer("ran", 2, 87);
+    const firstColon = trailer.indexOf(":");
+    const key = trailer.slice(0, firstColon).trim();
+    expect(key).toBe("GitWand-Review");
+  });
+});
+
+describe("resolveCommitReviewGate", () => {
+  it("proceeds straight to commit when the feature is disabled", () => {
+    expect(mod.resolveCommitReviewGate({ enabled: false, staged: 3, decision: null, iterations: 0 })).toBe("proceed");
+  });
+
+  it("proceeds when nothing is staged", () => {
+    expect(mod.resolveCommitReviewGate({ enabled: true, staged: 0, decision: null, iterations: 0 })).toBe("proceed");
+  });
+
+  it("prompts when enabled, staged, no decision yet, and no review has run", () => {
+    expect(mod.resolveCommitReviewGate({ enabled: true, staged: 3, decision: null, iterations: 0 })).toBe("prompt");
+  });
+
+  it("proceeds without re-prompting once a decision is already recorded", () => {
+    expect(mod.resolveCommitReviewGate({ enabled: true, staged: 3, decision: "vouched", iterations: 0 })).toBe("proceed");
+  });
+
+  it("proceeds without prompting when a review already ran this cycle, even with no explicit decision", () => {
+    // "Review staged changes" was clicked before ever hitting commit — don't
+    // re-ask, the review already happened.
+    expect(mod.resolveCommitReviewGate({ enabled: true, staged: 3, decision: null, iterations: 1 })).toBe("proceed");
+  });
+});
+
+describe("appendReviewTrailer", () => {
+  it("appends the GitWand-Review line AFTER the existing trailer block (Signed-off-by, Reviewed-by, ...)", () => {
+    const existing = "Signed-off-by: A <a@x.com>\nReviewed-by: B <b@x.com>";
+    const review = "GitWand-Review: ran (iter:1, coverage:100%)";
+    const result = mod.appendReviewTrailer(existing, review);
+    const lines = result.split("\n");
+    expect(lines).toEqual([
+      "Signed-off-by: A <a@x.com>",
+      "Reviewed-by: B <b@x.com>",
+      "GitWand-Review: ran (iter:1, coverage:100%)",
+    ]);
+  });
+
+  it("returns just the review trailer when there are no other trailers", () => {
+    expect(mod.appendReviewTrailer("", "GitWand-Review: skipped")).toBe("GitWand-Review: skipped");
+  });
+
+  it("returns the existing trailers unchanged when there's no review trailer to append", () => {
+    expect(mod.appendReviewTrailer("Signed-off-by: A <a@x.com>", "")).toBe("Signed-off-by: A <a@x.com>");
+  });
+
+  it("returns an empty string when both sides are empty", () => {
+    expect(mod.appendReviewTrailer("", "")).toBe("");
+  });
+});
+
+describe("effectiveReviewDecision", () => {
+  it("returns the explicit decision when one is set", () => {
+    expect(mod.effectiveReviewDecision("skipped", 0)).toBe("skipped");
+    expect(mod.effectiveReviewDecision("vouched", 2)).toBe("vouched");
+  });
+
+  it("defaults to 'ran' when no explicit decision but a review already happened", () => {
+    expect(mod.effectiveReviewDecision(null, 1)).toBe("ran");
+  });
+
+  it("stays null when no decision and no review happened (the gate should have prompted)", () => {
+    expect(mod.effectiveReviewDecision(null, 0)).toBeNull();
+  });
+});

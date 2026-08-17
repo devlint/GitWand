@@ -71,6 +71,7 @@ const SplitCommitModal = defineAsyncComponent(() => import("./components/SplitCo
 const BranchDirtySwitchModal = defineAsyncComponent(() => import("./components/BranchDirtySwitchModal.vue"));
 const SecretsFindingsModal = defineAsyncComponent(() => import("./components/SecretsFindingsModal.vue"));
 const CommitReviewModal = defineAsyncComponent(() => import("./components/CommitReviewModal.vue"));
+const CommitReviewDecisionModal = defineAsyncComponent(() => import("./components/CommitReviewDecisionModal.vue"));
 import { useStashMessage } from "./composables/useStashMessage";
 import { useAIProvider } from "./composables/useAIProvider";
 import { usePrPanel, PR_PANEL_KEY } from "./composables/usePrPanel";
@@ -99,6 +100,13 @@ import { useSecretsScanner } from "./composables/useSecretsScanner";
 import { useCommitReview } from "./composables/useCommitReview";
 import { useCommitReviewNav } from "./composables/useCommitReviewNav";
 import { buildReviewFixPrompt } from "./utils/reviewFixPrompt";
+import {
+  buildReviewTrailer,
+  resolveCommitReviewGate,
+  effectiveReviewDecision,
+  appendReviewTrailer,
+  type ReviewDecision,
+} from "./composables/commitReviewState";
 import { resolveCommitReviewShortcut } from "./composables/commitReviewKeymap";
 import { useLaunchpadPrs } from "./composables/useLaunchpadPrs";
 import { diffLaunchpad, isBotAuthor, type LaunchpadEvent } from "./composables/useLaunchpadNotifications";
@@ -135,6 +143,14 @@ let lastAttemptedCommitTrailers = "";
 // v3.7.0 — Commit Review (local, opt-in, off by default; see useCommitReview.ts).
 const commitReview = useCommitReview();
 const showCommitReviewModal = ref(false);
+// Task 5 — the Review/Vouch/Skip decision recorded for the CURRENT commit
+// cycle. Reset on repo switch and after a successful commit (a new commit
+// starts a new cycle) — see the watchers/handlers below.
+const showCommitReviewDecisionModal = ref(false);
+const commitReviewDecision = ref<ReviewDecision | null>(null);
+/** Trailers captured when the decision modal needs to open — re-applied once
+ *  the user picks Vouch/Skip (Review now leaves the commit un-issued). */
+let pendingCommitReviewTrailers = "";
 // `useNetworkStatus` covers `navigator.onLine` — kept around because
 // `useScheduler` already consumes it and we don't want to retire that path
 // in this commit. `useConnectivity` (F1) adds a real probe-based signal
@@ -1109,7 +1125,9 @@ const repoSidebarProps = computed(() => ({
 /**
  * Intercepts the commit action when the secrets scanner has active findings: shows a
  * non-blocking confirm (never a hard stop — the user can always proceed) before delegating to
- * `doCommit`. Wired to both RepoSidebar's commit button and the findings modal's "Commit anyway".
+ * `proceedToCommit`. Wired to both RepoSidebar's commit button and the findings modal's
+ * "Commit anyway" (`onSecretsCommitAnyway`) — both funnel into the same post-secrets-gate path
+ * so the Commit Review decision gate (Task 5) applies consistently either way.
  */
 async function handleCommitRequest(trailers: string) {
   lastAttemptedCommitTrailers = trailers;
@@ -1122,16 +1140,84 @@ async function handleCommitRequest(trailers: string) {
     });
     if (!confirmed) return;
   }
+  await proceedToCommit(trailers);
+}
+
+/**
+ * v3.7.0 (Task 5) — the single place that assembles the final trailer block
+ * and calls `doCommit`, after any secrets gate has already been cleared.
+ * `resolveCommitReviewGate`/`effectiveReviewDecision` (pure, unit-tested in
+ * `commitReviewState.test.ts`) decide whether the Review/Vouch/Skip decision
+ * modal needs to open first — never a hard stop; cancelling that modal
+ * cancels the commit (decision D8), it never silently records "skipped".
+ *
+ * The review trailer is appended HERE rather than round-tripped through a
+ * RepoSidebar prop: `RepoSidebar.buildTrailers()` runs and emits BEFORE this
+ * function ever sees the staged-changes trailers, so recomputing the review
+ * trailer for the CURRENT decision on every call (including the second pass
+ * after a decision is made) is the only correct ordering.
+ */
+async function proceedToCommit(trailers: string) {
+  const gate = resolveCommitReviewGate({
+    enabled: settings.value.commitReviewEnabled,
+    staged: repoStats.value.staged,
+    decision: commitReviewDecision.value,
+    iterations: commitReview.iterations.value,
+  });
+  if (gate === "prompt") {
+    pendingCommitReviewTrailers = trailers;
+    showCommitReviewDecisionModal.value = true;
+    return;
+  }
+
+  const decision = effectiveReviewDecision(commitReviewDecision.value, commitReview.iterations.value);
+  const reviewTrailerLine = decision
+    ? buildReviewTrailer(decision, commitReview.iterations.value, commitReview.coverage.value)
+    : "";
+  const fullTrailers = appendReviewTrailer(trailers, reviewTrailerLine);
+
   // v3.7.0 (Task 4) — `lastCommitHash` only changes on a SUCCESSFUL commit
   // (`useGitRepo.commit()` catches its own errors internally, never
   // throws) — comparing before/after is the cleanest local success signal,
   // without adding a global watcher that would also have to special-case
   // amend/other commit paths. A new commit starts a new review cycle.
   const beforeHash = lastCommitHash.value;
-  await doCommit(trailers);
+  await doCommit(fullTrailers);
   if (lastCommitHash.value !== beforeHash) {
     commitReview.clearReviewState(repoFolderPath.value ?? "");
+    commitReviewDecision.value = null;
   }
+}
+
+/** "Review now" in the decision modal: runs the pass and leaves the commit
+ *  un-issued (decision stays whatever it was — null unless a review already
+ *  happened) so the user can look at findings, then commits again when
+ *  satisfied; `resolveCommitReviewGate` then sees `iterations > 0` and
+ *  proceeds without re-prompting. */
+async function onCommitReviewDecisionReviewNow() {
+  showCommitReviewDecisionModal.value = false;
+  await commitReview.run(repoFolderPath.value ?? "", locale.value);
+  showCommitReviewModal.value = true;
+}
+
+async function onCommitReviewDecisionVouch() {
+  commitReviewDecision.value = "vouched";
+  showCommitReviewDecisionModal.value = false;
+  await proceedToCommit(pendingCommitReviewTrailers);
+}
+
+async function onCommitReviewDecisionSkip() {
+  commitReviewDecision.value = "skipped";
+  showCommitReviewDecisionModal.value = false;
+  await proceedToCommit(pendingCommitReviewTrailers);
+}
+
+/** Decision D8 — cancelling (Escape/backdrop/Cancel button) cancels the
+ *  commit outright. It must NEVER silently record "skipped": skipping is
+ *  only ever the result of an explicit click on the Skip button. */
+function onCommitReviewDecisionCancel() {
+  showCommitReviewDecisionModal.value = false;
+  pendingCommitReviewTrailers = "";
 }
 
 /**
@@ -1159,7 +1245,7 @@ async function onSecretsIgnore(patternId: string) {
 
 function onSecretsCommitAnyway() {
   showSecretsModal.value = false;
-  void doCommit(lastAttemptedCommitTrailers);
+  void proceedToCommit(lastAttemptedCommitTrailers);
 }
 
 /** v3.7.0 — "Review staged changes" button handler. Shows a brief clean-pass
@@ -1236,6 +1322,14 @@ watch(
   },
   { immediate: true },
 );
+
+// Task 5 — a repo switch starts a fresh commit-review decision cycle: forget
+// whatever Vouch/Skip/ran decision applied to the PREVIOUS repo. Deliberately
+// separate from the staged-set watcher above — the decision must survive a
+// plain staging change within the SAME repo (e.g. the "Review now" round trip).
+watch(repoFolderPath, () => {
+  commitReviewDecision.value = null;
+});
 
 function onDiscardSection(sectionKey: string, paths: string[]) {
   discardSectionConfirm.value = { sectionKey, paths };
@@ -3910,6 +4004,18 @@ onUnmounted(() => {
       @dismiss="commitReview.dismiss($event)"
       @fix-with-agent="onCommitReviewFixWithAgent($event)"
       @close="showCommitReviewModal = false"
+    />
+
+    <!-- Commit review decision modal (v3.7.0, Task 5) — Review / Vouch / Skip before a commit -->
+    <CommitReviewDecisionModal
+      v-if="showCommitReviewDecisionModal"
+      :findings-count="commitReview.findings.value.length"
+      :iterations="commitReview.iterations.value"
+      :coverage="commitReview.coverage.value"
+      @review-now="onCommitReviewDecisionReviewNow"
+      @vouch="onCommitReviewDecisionVouch"
+      @skip="onCommitReviewDecisionSkip"
+      @close="onCommitReviewDecisionCancel"
     />
 
     <!-- Stash-and-switch modal (asks for a stash label before switching branches) -->
