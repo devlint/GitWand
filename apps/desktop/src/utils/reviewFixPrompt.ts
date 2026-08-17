@@ -9,17 +9,26 @@
  * Newline-safe for PTY injection: `\r` is stripped and any interior newline
  * in a finding's `detail` is collapsed to a space, so the whole block can be
  * typed as a single `terminalWrite` payload without corrupting the agent's
- * line editor.
+ * line editor. Also strips every other C0 control character (title/detail
+ * are parsed from an AI response to an arbitrary diff, so a crafted diff
+ * could in principle smuggle an ANSI escape sequence or similar into the
+ * raw PTY write this prompt ends up in).
  */
 import type { ReviewFinding } from "../composables/usePrPreReview";
 import { sortFindingsForReview } from "./reviewFindingsSort";
 
 const DEFAULT_MAX_FINDINGS = 25;
 
-/** Strip `\r` and collapse any run of newlines to a single space, trimming
- *  the result — keeps a finding's title/detail on one physical line. */
+/** Strip `\r`, collapse any run of newlines to a single space, then strip
+ *  every remaining C0 control character (tab, ESC, NUL, BEL, ...) and DEL —
+ *  keeps a finding's title/detail on one physical, control-byte-free line. */
 function sanitizeLine(s: string): string {
-  return s.replace(/\r/g, "").replace(/\s*\n+\s*/g, " ").trim();
+  return s
+    .replace(/\r/g, "")
+    .replace(/\s*\n+\s*/g, " ")
+    // eslint-disable-next-line no-control-regex -- deliberate: stripping C0 controls + DEL
+    .replace(/[\x00-\x1f\x7f]/g, "")
+    .trim();
 }
 
 export interface BuildReviewFixPromptOptions {

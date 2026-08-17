@@ -86,4 +86,30 @@ describe("buildReviewFixPrompt", () => {
     const prompt = buildReviewFixPrompt([finding({ title: "T", detail: "D" })]);
     expect(prompt).not.toContain("—");
   });
+
+  // Second verifier pass (low priority) — title/detail come from parsing an
+  // AI response to an arbitrary diff. A crafted diff could in principle get
+  // other control bytes (e.g. ANSI escape sequences) into the raw PTY write
+  // this prompt ends up in. Strip the full C0 control range, not just \r/\n.
+  it("strips ESC and other C0 control characters from title and detail", () => {
+    const findings = [
+      finding({
+        title: "T\x1b[31mred\x1b[0m",
+        detail: "D\x07bell\x00null\x1bnormal",
+      }),
+    ];
+    const prompt = buildReviewFixPrompt(findings);
+    // Check the finding's own line only — the prompt's structural `\n`s
+    // between entries are intentional and fall in the same byte range.
+    const findingLine = prompt.split("\n").find((l) => l.startsWith("-"))!;
+    expect(findingLine).not.toMatch(/[\x00-\x1f\x7f]/);
+    expect(prompt).toContain("T[31mred[0m");
+    expect(prompt).toContain("Dbellnullnormal");
+  });
+
+  it("still collapses newlines to a single space after control-character stripping", () => {
+    const findings = [finding({ detail: "Line one\nLine two" })];
+    const prompt = buildReviewFixPrompt(findings);
+    expect(prompt).toContain("Line one Line two");
+  });
 });
