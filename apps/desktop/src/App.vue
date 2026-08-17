@@ -1163,6 +1163,18 @@ async function handleCommitRequest(trailers: string) {
  * external tool) must reset that count to 0, not silently let the gate skip
  * the decision modal and write a `GitWand-Review: ran` trailer for a review
  * that never happened against what's actually about to be committed.
+ *
+ * Second verifier pass (HIGH) — `computeCurrentCoverage` is awaited right
+ * before `buildReviewTrailer`, recomputing coverage against the FULL
+ * current staged diff at the moment of commit. Two scenarios otherwise let
+ * a stale `coverage:100%` slip into the trailer: (B) editing and restaging
+ * a file that was already reviewed doesn't change the staged file COUNT,
+ * so a count-keyed staged-set watcher never re-fires and the earlier
+ * snapshot goes stale; (C) a review truncated by the file/byte cap only
+ * ever recorded the capped subset it actually reviewed, so comparing
+ * coverage against that same subset is a tautology. Recomputing here,
+ * fresh, right before the trailer is written, is correct regardless of
+ * watcher granularity or truncation.
  */
 async function proceedToCommit(trailers: string) {
   await commitReview.reconcileIterationsForHead(repoFolderPath.value ?? "");
@@ -1180,8 +1192,11 @@ async function proceedToCommit(trailers: string) {
   }
 
   const decision = effectiveReviewDecision(commitReviewDecision.value, commitReview.iterations.value);
+  const coverageNow = decision
+    ? await commitReview.computeCurrentCoverage(repoFolderPath.value ?? "")
+    : commitReview.coverage.value;
   const reviewTrailerLine = decision
-    ? buildReviewTrailer(decision, commitReview.iterations.value, commitReview.coverage.value)
+    ? buildReviewTrailer(decision, commitReview.iterations.value, coverageNow)
     : "";
   const fullTrailers = appendReviewTrailer(trailers, reviewTrailerLine);
 
@@ -1945,12 +1960,17 @@ function onNewAiTask() {
 }
 
 /**
- * v3.7.0 (Task 3) — the scratch-worktree creation sequence shared by "New AI
- * task" (`confirmNewAiTask`) and Commit Review's "Fix with agent -> in a
- * scratch worktree": create -> register -> select -> open. Factored into one
- * implementation so both callers stay in lockstep instead of drifting.
- * Returns `null` (without throwing) when there's no active project tab to
- * base the scratch on — callers decide how to surface that.
+ * v3.7.0 (Task 3) — the scratch-worktree creation sequence used by "New AI
+ * task" (`confirmNewAiTask`): create -> register -> select -> open. Returns
+ * `null` (without throwing) when there's no active project tab to base the
+ * scratch on — the caller decides how to surface that.
+ *
+ * Commit Review's "Fix with agent" used to also call this (optionally
+ * opening the agent in a scratch worktree), but that option was removed
+ * (see `onCommitReviewFixWithAgent`'s doc comment) after manual QA found a
+ * brand-new scratch worktree always hits a first-run onboarding screen that
+ * misinterprets the piped prompt. This function is no longer reachable from
+ * Commit Review at all — only `confirmNewAiTask` calls it now.
  */
 async function createAiTaskScratchWorktree(name?: string): Promise<ScratchWorktree | null> {
   if (!repoFolderPath.value || activeTabId.value === null) return null;

@@ -50,6 +50,23 @@ function diffFor(path: string): string {
   ].join("\n");
 }
 
+/** Same file as `diffFor`, but with a SECOND added line — simulates editing
+ *  and restaging a file that was already reviewed (verifier scenario B: the
+ *  staged file COUNT is unchanged, only the content grew). */
+function diffForTwoLines(path: string): string {
+  return [
+    `diff --git a/${path} b/${path}`,
+    "index 111..222 100644",
+    `--- a/${path}`,
+    `+++ b/${path}`,
+    "@@ -1,2 +1,2 @@",
+    "-old",
+    "+new",
+    "-old2",
+    "+new2",
+  ].join("\n");
+}
+
 function gitExecOk(stdout: string) {
   return { stdout, stderr: "", exitCode: 0 };
 }
@@ -518,6 +535,62 @@ describe("useCommitReview", () => {
       resolveSlow(gitExecOk(diffFor("a.ts")));
       await new Promise((resolve) => setTimeout(resolve, 10));
       expect(review.coverage.value).toBe(0);
+    });
+  });
+
+  // ── Second verifier pass — coverage:100% is still reachable, HIGH ────────
+  // The staged-set watcher fix above only helps when the watcher actually
+  // fires. `computeCurrentCoverage` is the shared, on-demand recompute
+  // `App.vue`'s `proceedToCommit` awaits right before building the trailer —
+  // correct regardless of watcher granularity (scenario B) or the review
+  // pass's file/byte cap (scenario C).
+  describe("computeCurrentCoverage — the pre-commit recompute", () => {
+    it("scenario B: reflects new unreviewed content in the SAME file, even though the staged file COUNT never changed", async () => {
+      enableCommitReview();
+      setDiffDefaultResponse(gitExecOk(diffFor("a.ts")));
+      rawPromptMock.mockResolvedValue("[]");
+
+      const review = useCommitReview();
+      await review.run("/repo", "en");
+      expect(review.coverage.value).toBe(100);
+
+      // Edit a.ts further and restage it — still exactly one staged file
+      // (the count a naive watcher keys on never changes), but the diff
+      // itself now has a second, never-reviewed added line.
+      setDiffDefaultResponse(gitExecOk(diffForTwoLines("a.ts")));
+      const fresh = await review.computeCurrentCoverage("/repo");
+
+      // Only "new" (from the first review) is covered; "new2" is not — 1/2.
+      expect(fresh).toBe(50);
+      expect(review.coverage.value).toBe(50);
+    });
+
+    it("scenario C: reflects the FULL staged diff, not just the capped/reviewed subset", async () => {
+      enableCommitReview();
+      const manyFiles = Array.from({ length: 45 }, (_, i) => diffFor(`f${i}.ts`)).join("\n");
+      setDiffDefaultResponse(gitExecOk(manyFiles));
+      rawPromptMock.mockResolvedValue("[]");
+
+      const review = useCommitReview();
+      await review.run("/repo", "en");
+      expect(review.truncated.value).toBe(true);
+
+      // 40 of 45 staged files were actually reviewed (file-count cap) — the
+      // completed run's OWN coverage must already reflect the full 45, not
+      // tautologically equal the 40 it just reviewed.
+      expect(review.coverage.value).toBe(89); // round(100 * 40 / 45)
+
+      // The on-demand recompute (what proceedToCommit awaits) agrees.
+      const fresh = await review.computeCurrentCoverage("/repo");
+      expect(fresh).toBe(89);
+    });
+
+    it("returns 100 and stays IPC-free when cwd is empty", async () => {
+      enableCommitReview();
+      const review = useCommitReview();
+      const result = await review.computeCurrentCoverage("");
+      expect(result).toBe(100);
+      expect(gitExecMock).not.toHaveBeenCalled();
     });
   });
 

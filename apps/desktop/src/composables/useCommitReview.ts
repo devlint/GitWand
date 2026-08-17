@@ -146,6 +146,19 @@ export interface CommitReviewResult {
    * instead of silently letting the gate skip the decision modal.
    */
   reconcileIterationsForHead: (cwd: string) => Promise<void>;
+  /**
+   * Second verifier pass (HIGH) — the shared, on-demand coverage recompute
+   * against the repo's CURRENT staged diff (never the file/byte-capped
+   * subset the AI actually saw). The host (App.vue's `proceedToCommit`)
+   * MUST await this right before `buildReviewTrailer`, so the trailer's
+   * coverage number is correct at the moment of commit regardless of
+   * staged-set-watcher granularity (editing and restaging an
+   * already-reviewed file doesn't change the staged file COUNT) or review
+   * truncation. Also updates the exposed `coverage` ref. Zero IPC when
+   * `cwd` is empty or the feature is disabled (resolves to the neutral 100
+   * default in that case).
+   */
+  computeCurrentCoverage: (cwd: string) => Promise<number>;
 }
 
 export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReviewResult {
@@ -278,6 +291,25 @@ export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReview
   }
 
   /**
+   * Pure: parses `diffText` (a raw `git diff --cached` output, no caps
+   * applied) and computes coverage against it. Shared by `run()` (which
+   * already has the diff text from its own fetch — no extra IPC needed)
+   * and `computeCurrentCoverage`/`refreshCoverageForCurrentDiff` (which
+   * fetch fresh). ALWAYS the full parsed diff, never the file/byte-capped
+   * subset sent through the AI calls — comparing coverage against that
+   * exact capped subset is a tautology that always yields 100% (second
+   * verifier pass, scenario C: a truncated review must show LESS than
+   * 100%, since most of the diff was never seen by the AI at all).
+   */
+  function coverageFromDiffText(cwd: string, diffText: string): number {
+    if (!diffText.trim()) return 100;
+    const files = indexDiffFiles(diffText)
+      .map((s) => parseFileDiff(s.raw))
+      .filter((f) => f.hunks.length > 0);
+    return coverageFor(cwd, files);
+  }
+
+  /**
    * Verifier item #2 — recomputes `coverage` against the repo's CURRENT
    * staged diff (a plain `git diff --cached` fetch, no LLM call) instead of
    * leaving whatever neutral default `reset()` just set. Fire-and-forget
@@ -292,18 +324,47 @@ export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReview
     if (cwd && settings.value.commitReviewEnabled) {
       try {
         const res = await gitExec(cwd, ["diff", "--cached", "--no-color"]);
-        if (res.exitCode === 0 && res.stdout.trim()) {
-          const files = indexDiffFiles(res.stdout)
-            .map((s) => parseFileDiff(s.raw))
-            .filter((f) => f.hunks.length > 0);
-          next = coverageFor(cwd, files);
-        }
+        if (res.exitCode === 0) next = coverageFromDiffText(cwd, res.stdout);
       } catch {
         // A coverage-refresh failure must never disrupt anything else —
         // leave `next` at the neutral default.
       }
     }
     if (generation === coverageGeneration) coverage.value = next;
+  }
+
+  /**
+   * Second verifier pass (HIGH) — the shared, on-demand coverage recompute
+   * against the repo's CURRENT staged diff. `App.vue`'s `proceedToCommit`
+   * MUST await this right before `buildReviewTrailer`, so the trailer's
+   * coverage number is correct AT THE MOMENT OF COMMIT regardless of:
+   *
+   * - scenario B: a staged-set watcher keyed on file COUNT (not content)
+   *   never re-fires when you edit and restage a file that was already
+   *   reviewed — the file count doesn't change, only the content does.
+   * - scenario C: the last review was truncated by the file/byte cap —
+   *   `coverageFromDiffText` here always uses the FULL current diff, never
+   *   the capped subset the AI actually saw.
+   *
+   * Updates the exposed `coverage` ref and bumps `coverageGeneration` (same
+   * "most recent wins" contract as `run()`/`onStagedSetChanged`) so a
+   * result from here is never clobbered by a stale in-flight refresh, and
+   * vice versa. Zero IPC when `cwd` is empty or the feature is disabled.
+   */
+  async function computeCurrentCoverage(cwd: string): Promise<number> {
+    const myGeneration = ++coverageGeneration;
+    let next = 100;
+    if (cwd && settings.value.commitReviewEnabled) {
+      try {
+        const res = await gitExec(cwd, ["diff", "--cached", "--no-color"]);
+        if (res.exitCode === 0) next = coverageFromDiffText(cwd, res.stdout);
+      } catch {
+        // A coverage-refresh failure must never disrupt the commit flow —
+        // leave `next` at the neutral default.
+      }
+    }
+    if (myGeneration === coverageGeneration) coverage.value = next;
+    return next;
   }
 
   /**
@@ -386,11 +447,16 @@ export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReview
       const files = bounded.map((s) => parseFileDiff(s.raw)).filter((f) => f.hunks.length > 0);
       if (!files.length) return true;
 
-      // Task 4 — recompute coverage against THIS parse of the current staged
-      // diff, using whatever was reviewed by past completed runs. This runs
-      // before the LLM calls even start, so a newly staged, not-yet-reviewed
-      // line is reflected immediately — even if this very run later aborts.
-      coverage.value = coverageFor(cwd, files);
+      // Task 4 — recompute coverage against the FULL current staged diff
+      // (res.stdout, not the file/byte-capped `files` sent to the AI —
+      // second verifier pass, scenario C: comparing against the exact
+      // capped subset just reviewed is a tautology that always yields
+      // 100%, even when most of a huge staged tree was dropped by the
+      // cap), using whatever was reviewed by past completed runs. This
+      // runs before the LLM calls even start, so a newly staged,
+      // not-yet-reviewed line is reflected immediately — even if this very
+      // run later aborts.
+      coverage.value = coverageFromDiffText(cwd, res.stdout);
 
       await queue.run(
         files,
@@ -411,7 +477,7 @@ export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReview
       // an iteration that a newer run has already superseded.
       recordReview(cwd, files, headHash);
       iterations.value = getCommitReviewState(cwd).iterations;
-      coverage.value = coverageFor(cwd, files);
+      coverage.value = coverageFromDiffText(cwd, res.stdout);
       return true;
     } catch (err) {
       if (controller.signal.aborted) return false;
@@ -492,5 +558,6 @@ export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReview
     coverage,
     clearReviewState,
     reconcileIterationsForHead,
+    computeCurrentCoverage,
   };
 }
