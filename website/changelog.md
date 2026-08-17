@@ -5,6 +5,14 @@ description: Release history for GitWand — the native Git client with AI confl
 
 # Changelog
 
+## v3.6.4 — August 2026
+
+Two more fixes closing out the GitLab timeout saga from the last couple of releases, both traced back to community reports that kept pointing at the same issue from different angles.
+
+The v3.6.2 fix turned a silent freeze into a clean 20-second timeout, but on macOS, one specific `glab` auth setup — logging in with `--use-keyring` — was still genuinely slow underneath: retrieving the token from the system keychain hangs when `glab` is spawned from a signed app instead of a terminal, the exact same per-app permission mismatch already fixed for GitHub's CLI a few releases back. GitWand now preloads that token the same way it already does for `gh`, so a `glab` subprocess never has to touch the keychain at all.
+
+Separately, and more commonly, opening a repo GitWand had never seen before could very briefly ask GitHub about it instead of GitLab, and show a confusing sign-in error before quietly fixing itself a moment later. The dock's PR-count badge was checking in before GitWand had finished figuring out which forge a fresh repo actually used, defaulting to GitHub in the meantime. It now waits for that answer first, same as the rest of the PR panel already did.
+
 ## v3.6.3 — August 2026
 
 Two follow-ups from the previous release, both closing loops that community reports opened.

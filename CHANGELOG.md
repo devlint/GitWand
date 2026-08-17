@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.6.4] - 2026-08-17
+
 ### Fixed
 
 - **GitLab MR list can still time out when `glab` is authenticated via `--use-keyring`** — the v3.6.2 fix (#149) made a hang surface as a clean 20s timeout instead of freezing the app, but on keyring auth the underlying `glab` subprocess itself was still slow: retrieving the PAT from the macOS keychain hangs when `glab` is spawned from a signed Tauri app, the same per-binary ACL mismatch already fixed for `gh`. `shell_env.rs` now also preloads a `GITLAB_TOKEN` from a login shell at startup (parsed from `glab auth status --show-token`) so `glab` subprocesses bypass the keychain lookup entirely, mirroring the existing `GH_TOKEN` preload (#149).
@@ -1280,6 +1282,7 @@ Design-system foundations — the app header and every overlay now ride on a sha
 - 28 tests covering all patterns + real-world scenarios (package.json, Laravel routes, Vue SFC, CSS, .env files)
 
 [Unreleased]: https://github.com/devlint/GitWand/compare/v3.6.3...HEAD
+[3.6.4]: https://github.com/devlint/GitWand/compare/v3.6.3...v3.6.4
 [3.6.3]: https://github.com/devlint/GitWand/compare/v3.6.2...v3.6.3
 [3.6.2]: https://github.com/devlint/GitWand/compare/v3.6.1...v3.6.2
 [3.6.1]: https://github.com/devlint/GitWand/compare/v3.6.0...v3.6.1
