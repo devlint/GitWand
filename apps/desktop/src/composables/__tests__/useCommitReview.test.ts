@@ -374,20 +374,31 @@ describe("useCommitReview", () => {
     // quick succession must never double-fire the one-shot re-review, even
     // when the debounce window overlaps two staged-set events.
     it("debounces rapid repeated staged-set changes into a single armed re-review", async () => {
-      enableCommitReview({ commitReviewAutoReReview: true });
-      gitExecMock.mockResolvedValue(gitExecOk(diffFor("a.ts")));
-      rawPromptMock.mockResolvedValue("[]");
+      // Fake timers (pattern: useSecretsScanner.test.ts) rather than real
+      // setTimeout waits — a real-timer version of this test was flaky under
+      // load (the debounce window and the waits around it are only a few ms
+      // apart), and fake timers make the sequencing deterministic instead of
+      // load-dependent. Scoped to just this test; every other test in this
+      // file keeps using real timers.
+      vi.useFakeTimers();
+      try {
+        enableCommitReview({ commitReviewAutoReReview: true });
+        gitExecMock.mockResolvedValue(gitExecOk(diffFor("a.ts")));
+        rawPromptMock.mockResolvedValue("[]");
 
-      const review = useCommitReview({ debounceMs: 20 });
-      review.armReReview();
-      review.onStagedSetChanged("/repo", "en", 1);
-      // A second staged-set event arrives before the debounce window elapses
-      // — it must reset the timer, not queue a second run.
-      await new Promise((resolve) => setTimeout(resolve, 5));
-      review.onStagedSetChanged("/repo", "en", 1);
-      await new Promise((resolve) => setTimeout(resolve, 40));
+        const review = useCommitReview({ debounceMs: 20 });
+        review.armReReview();
+        review.onStagedSetChanged("/repo", "en", 1);
+        // A second staged-set event arrives before the debounce window
+        // elapses — it must reset the timer, not queue a second run.
+        await vi.advanceTimersByTimeAsync(5);
+        review.onStagedSetChanged("/repo", "en", 1);
+        await vi.advanceTimersByTimeAsync(25);
 
-      expect(gitExecMock).toHaveBeenCalledTimes(1);
+        expect(gitExecMock).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 
