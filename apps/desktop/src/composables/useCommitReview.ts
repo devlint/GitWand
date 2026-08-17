@@ -44,12 +44,11 @@ export const COMMIT_REVIEW_MAX_BYTES = 400_000;
 
 export interface UseCommitReviewOptions {
   /**
-   * Reserved for parity with `useSecretsScanner`'s `debounceMs` — that
-   * composable's `scan()` is debounced because it's driven by a staged-set
-   * *watcher*. `run()` here is invoked directly by an explicit user click
-   * (Task 1b's "Review staged changes" button); Task 3's one-shot
-   * re-review-after-fix is the only future watcher-driven call site, and
-   * that phase is out of scope for this PR. Not applied within this PR.
+   * Debounce (ms) applied to `onStagedSetChanged`'s one-shot re-review arm
+   * (Task 3) — mirrors `useSecretsScanner`'s `debounceMs`, coalescing rapid
+   * repeated staged-set events (stage → fix → restage in quick succession)
+   * into a single re-review instead of one per event. `run()` itself is
+   * still invoked directly by an explicit user click and is never debounced.
    * Default 400.
    */
   debounceMs?: number;
@@ -89,9 +88,27 @@ export interface CommitReviewResult {
    *  host's existing `visibilitychange` handler — never add a second
    *  listener. Always resumes whichever run is currently active. */
   resume: () => void;
+  /**
+   * Task 3 — arms exactly one automatic re-review, consumed by the NEXT
+   * `onStagedSetChanged` call (whether or not that call ends up running
+   * anything). A no-op when `commitReviewAutoReReview` is off — the arm
+   * itself never gets set, so a later staged-set change can't accidentally
+   * fire a review the user opted out of.
+   */
+  armReReview: () => void;
+  /**
+   * The real trigger behind "re-review triggers on the next staging change"
+   * (roadmap bullet 3) — call this from the host's staged-set watcher on
+   * EVERY staged-set change (mirrors the existing invalidate-only behavior,
+   * D5), not just after a "Fix with agent" handoff. Bundles `reset()` with
+   * the one-shot arm consumption so the exact sequencing is defined once,
+   * here, and is unit-testable without mounting the host component.
+   */
+  onStagedSetChanged: (cwd: string, locale: string, stagedCount: number) => void;
 }
 
-export function useCommitReview(_opts: UseCommitReviewOptions = {}): CommitReviewResult {
+export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReviewResult {
+  const debounceMs = opts.debounceMs ?? 400;
   const { settings } = useSettings();
   const { t } = useI18n();
   const ai = useAIProvider();
@@ -119,6 +136,13 @@ export function useCommitReview(_opts: UseCommitReviewOptions = {}): CommitRevie
   const lastError = ref<string | null>(null);
   const dismissedClasses = ref<Set<string>>(new Set());
   const truncated = ref(false);
+
+  // Task 3 — one-shot auto re-review arm + its debounce timer. `reReviewArmed`
+  // is intentionally NOT reset by `stop()`/`reset()` below — it must survive
+  // a staged-set invalidation so it's still there for `onStagedSetChanged`
+  // to consume.
+  const reReviewArmed = ref(false);
+  let reReviewTimer: ReturnType<typeof setTimeout> | null = null;
 
   let abortController: AbortController | null = null;
 
@@ -239,6 +263,37 @@ export function useCommitReview(_opts: UseCommitReviewOptions = {}): CommitRevie
     dismissedClasses.value = new Set([...dismissedClasses.value, cls]);
   }
 
+  function armReReview() {
+    // A no-op when the setting is off — the arm never gets set, so a later
+    // staged-set change can never fire a review the user opted out of, even
+    // if the setting flips back on before that later change lands.
+    if (!settings.value.commitReviewAutoReReview) return;
+    reReviewArmed.value = true;
+  }
+
+  function onStagedSetChanged(cwd: string, locale: string, stagedCount: number): void {
+    // Immediate, synchronous invalidation — a staged-set change means
+    // whatever findings are on screen no longer match the index (D5). This
+    // must never be debounced: the UI should clear stale findings right away.
+    reset();
+
+    if (!reReviewArmed.value) return;
+
+    // Debounced consumption: rapid repeated staged-set changes (stage → fix
+    // → restage in quick succession) collapse into a single re-review
+    // instead of firing once per event. Each call restarts the timer; only
+    // the LAST staged-set change in a burst actually triggers the run.
+    if (reReviewTimer) clearTimeout(reReviewTimer);
+    reReviewTimer = setTimeout(() => {
+      reReviewTimer = null;
+      if (!reReviewArmed.value) return; // defensive — nothing else clears this flag
+      reReviewArmed.value = false;
+      if (cwd && settings.value.commitReviewEnabled && stagedCount > 0) {
+        void run(cwd, locale);
+      }
+    }, debounceMs);
+  }
+
   return {
     findings,
     rawFindings,
@@ -254,5 +309,7 @@ export function useCommitReview(_opts: UseCommitReviewOptions = {}): CommitRevie
     // Always resumes whichever queue instance is currently active — see
     // `activeQueue` above.
     resume: () => activeQueue.value.resume(),
+    armReReview,
+    onStagedSetChanged,
   };
 }

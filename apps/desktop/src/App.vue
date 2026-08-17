@@ -98,6 +98,7 @@ import { useLaunchpadPoller } from "./composables/useLaunchpadPoller";
 import { useSecretsScanner } from "./composables/useSecretsScanner";
 import { useCommitReview } from "./composables/useCommitReview";
 import { useCommitReviewNav } from "./composables/useCommitReviewNav";
+import { buildReviewFixPrompt } from "./utils/reviewFixPrompt";
 import { resolveCommitReviewShortcut } from "./composables/commitReviewKeymap";
 import { useLaunchpadPrs } from "./composables/useLaunchpadPrs";
 import { diffLaunchpad, isBotAuthor, type LaunchpadEvent } from "./composables/useLaunchpadNotifications";
@@ -117,7 +118,7 @@ import {
   TOGGLE_GIT_TREE_KEY,
   OPEN_SETTINGS_KEY,
 } from "./composables/branchPickerBridge";
-import { gitStash, gitStashPop, gitStashList, openInEditor, setGitConfig, gitDiscard, gitAddToGitignore, gitDeleteBranch, gitDeleteTag, gitDeleteRemoteTag, gitRemoteInfo, gitUnpushedTags, gitPushTags, gitMergeBase, gitResetToCommit, gitCommitSubmoduleChanges, gitSubmoduleCheckUpdates, scratchWorktreeCreate, scratchWorktreeDiscard, scratchWorktreeMergeBack, gitWorktreeList, gitWorktreeRemove, type CommitSubmoduleChange } from "./utils/backend";
+import { gitStash, gitStashPop, gitStashList, openInEditor, setGitConfig, gitDiscard, gitAddToGitignore, gitDeleteBranch, gitDeleteTag, gitDeleteRemoteTag, gitRemoteInfo, gitUnpushedTags, gitPushTags, gitMergeBase, gitResetToCommit, gitCommitSubmoduleChanges, gitSubmoduleCheckUpdates, scratchWorktreeCreate, scratchWorktreeDiscard, scratchWorktreeMergeBack, gitWorktreeList, gitWorktreeRemove, type CommitSubmoduleChange, type ScratchWorktree } from "./utils/backend";
 import { useCommitActions } from "./composables/useCommitActions";
 
 const { t, locale } = useI18n();
@@ -1207,18 +1208,19 @@ const repoSidebarListeners = {
 // opened/switched. Never a setInterval — see apps/desktop/CLAUDE.md P6.4.
 watch(
   () => [repoFolderPath.value, repoStats.value.staged] as const,
-  ([cwd]) => {
+  ([cwd, staged]) => {
     if (cwd) {
       secretsScanner.scan(cwd, settings.value);
     } else {
       secretsScanner.findings.value = [];
     }
     // v3.7.0 — Commit Review: a staged-set/repo change invalidates whatever
-    // findings are on screen (the diff they reviewed no longer exists).
-    // Never auto-run here — the pass only runs on the explicit "Review
-    // staged changes" click (decision D5; the one-shot re-review after a
-    // "Fix with agent" handoff is Task 3, out of scope for this PR).
-    commitReview.reset();
+    // findings are on screen (the diff they reviewed no longer exists — D5,
+    // no auto-run on a plain staging change). `onStagedSetChanged` is also
+    // the real trigger for Task 3's "re-review on the next staging change"
+    // after a "Fix with agent" handoff: it's a no-op unless `armReReview()`
+    // was called, in which case it fires exactly one re-review here.
+    commitReview.onStagedSetChanged(cwd ?? "", locale.value, staged);
   },
   { immediate: true },
 );
@@ -1802,34 +1804,82 @@ function onNewAiTask() {
   aiTaskNamePrompt.value = true;
 }
 
+/**
+ * v3.7.0 (Task 3) — the scratch-worktree creation sequence shared by "New AI
+ * task" (`confirmNewAiTask`) and Commit Review's "Fix with agent -> in a
+ * scratch worktree": create -> register -> select -> open. Factored into one
+ * implementation so both callers stay in lockstep instead of drifting.
+ * Returns `null` (without throwing) when there's no active project tab to
+ * base the scratch on — callers decide how to surface that.
+ */
+async function createAiTaskScratchWorktree(name?: string): Promise<ScratchWorktree | null> {
+  if (!repoFolderPath.value || activeTabId.value === null) return null;
+  // Always base the scratch on the active project's root, not whatever
+  // worktree is currently selected, so AI tasks branch from the project.
+  const projectTab = repoTabs.value.find((t) => t.id === activeTabId.value);
+  const origin = projectTab?.path ?? repoFolderPath.value;
+  const scratch = await scratchWorktreeCreate(origin, undefined, name || undefined);
+  aiTasks.register({
+    path: scratch.path,
+    originCwd: origin,
+    branch: scratch.branch,
+    createdAt: scratch.created_at,
+  });
+  void refreshWorktreeCount(origin);
+  // Switch the project's checkout to the new scratch worktree in place, then
+  // load it so a spawned agent terminal lands in the right cwd.
+  selectWorktree(activeTabId.value, scratch.path);
+  await openRepo(scratch.path);
+  return scratch;
+}
+
 /** Create the AI-task scratch worktree once the user has named it. */
 async function confirmNewAiTask(name: string) {
   if (!repoFolderPath.value || activeTabId.value === null) return;
   aiTaskNameBusy.value = true;
   try {
-    // Always base the scratch on the active project's root, not whatever
-    // worktree is currently selected, so AI tasks branch from the project.
-    const projectTab = repoTabs.value.find((t) => t.id === activeTabId.value);
-    const origin = projectTab?.path ?? repoFolderPath.value;
-    const scratch = await scratchWorktreeCreate(origin, undefined, name || undefined);
-    aiTasks.register({
-      path: scratch.path,
-      originCwd: origin,
-      branch: scratch.branch,
-      createdAt: scratch.created_at,
-    });
-    void refreshWorktreeCount(origin);
+    const scratch = await createAiTaskScratchWorktree(name);
     aiTaskNamePrompt.value = false;
-    // Switch the project's checkout to the new scratch worktree in place, then
-    // load it and spawn the agent terminal there.
-    selectWorktree(activeTabId.value, scratch.path);
-    await openRepo(scratch.path);
+    if (!scratch) return;
     await openTerminalTab(scratch.path, "claude");
   } catch (err) {
     aiTaskNamePrompt.value = false;
     reportAgentLaunchError("claude", err);
   } finally {
     aiTaskNameBusy.value = false;
+  }
+}
+
+/**
+ * v3.7.0 (Task 3) — "Fix with agent" from `CommitReviewModal`: types the
+ * findings prompt into a fresh agent PTY WITHOUT pressing Enter (plan
+ * decision D7 — no `terminal_open` "initial prompt" param exists, and typing
+ * without submitting avoids racing the agent TUI's boot while keeping "let
+ * an agent edit my files" a deliberate human gesture). Optionally opens the
+ * agent in a scratch worktree first (reuses `createAiTaskScratchWorktree`).
+ */
+async function onCommitReviewFixWithAgent(payload: { tool: TerminalTabType; scratch: boolean }) {
+  const prompt = buildReviewFixPrompt(commitReview.findings.value);
+  if (!prompt) return;
+  showCommitReviewModal.value = false;
+  try {
+    let cwd: string | undefined;
+    if (payload.scratch) {
+      const scratch = await createAiTaskScratchWorktree();
+      if (!scratch) return;
+      cwd = scratch.path;
+    } else {
+      cwd = repoFolderPath.value ?? undefined;
+    }
+    const tab = await openTerminalTab(cwd, payload.tool);
+    // `sessionId` is -1 until `terminalOpen` resolves inside `openTab` —
+    // `openTerminalTab` only returns after that await settles, but guard
+    // explicitly anyway (per plan) rather than relying on that implicitly.
+    if (!tab || tab.sessionId < 0) return;
+    await termSessions.write(tab.sessionId, prompt);
+    commitReview.armReReview();
+  } catch (err) {
+    reportAgentLaunchError(payload.tool, err);
   }
 }
 
@@ -3844,6 +3894,7 @@ onUnmounted(() => {
       :truncated="commitReview.truncated.value"
       @jump="onJumpToCommitReviewFinding($event)"
       @dismiss="commitReview.dismiss($event)"
+      @fix-with-agent="onCommitReviewFixWithAgent($event)"
       @close="showCommitReviewModal = false"
     />
 

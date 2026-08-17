@@ -286,4 +286,105 @@ describe("useCommitReview", () => {
     expect(review.running.value).toBe(false);
     expect(review.progress.value).toEqual({ done: 1, total: 1 });
   });
+
+  // ── Task 3 (v3.7.0) — "Fix with agent" one-shot re-review arming ─────────
+  // `armReReview()` / `onStagedSetChanged()` are the tested, real trigger for
+  // the roadmap's "re-review triggers on the next staging change": App.vue's
+  // staged-set watcher calls `onStagedSetChanged` directly (see App.vue), so
+  // exercising it here proves the trigger actually fires end-to-end rather
+  // than merely existing as a callable, unwired function (the exact shape of
+  // bug that shipped `resume()` unwired in PR1).
+  describe("armReReview() / onStagedSetChanged() — one-shot re-review", () => {
+    it("arms exactly one auto re-review that fires on the next staged-set change", async () => {
+      enableCommitReview({ commitReviewAutoReReview: true });
+      gitExecMock.mockResolvedValue(gitExecOk(diffFor("a.ts")));
+      rawPromptMock.mockResolvedValue("[]");
+
+      const review = useCommitReview({ debounceMs: 0 });
+      review.armReReview();
+      review.onStagedSetChanged("/repo", "en", 1);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      expect(gitExecMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("a second staged-set change after the arm has fired runs no further review", async () => {
+      enableCommitReview({ commitReviewAutoReReview: true });
+      gitExecMock.mockResolvedValue(gitExecOk(diffFor("a.ts")));
+      rawPromptMock.mockResolvedValue("[]");
+
+      const review = useCommitReview({ debounceMs: 0 });
+      review.armReReview();
+      review.onStagedSetChanged("/repo", "en", 1);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(gitExecMock).toHaveBeenCalledTimes(1);
+
+      gitExecMock.mockClear();
+      review.onStagedSetChanged("/repo", "en", 1); // arm already consumed — no re-run
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(gitExecMock).not.toHaveBeenCalled();
+    });
+
+    it("never arms when commitReviewAutoReReview is disabled", async () => {
+      enableCommitReview({ commitReviewAutoReReview: false });
+      const review = useCommitReview({ debounceMs: 0 });
+      review.armReReview();
+      review.onStagedSetChanged("/repo", "en", 1);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      expect(gitExecMock).not.toHaveBeenCalled();
+    });
+
+    it("does not fire the armed re-review when the next staged set is empty", async () => {
+      enableCommitReview({ commitReviewAutoReReview: true });
+      const review = useCommitReview({ debounceMs: 0 });
+      review.armReReview();
+      review.onStagedSetChanged("/repo", "en", 0); // staged count is 0 — nothing to review
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      expect(gitExecMock).not.toHaveBeenCalled();
+      // The arm was still consumed by this (empty) staged-set change — a
+      // LATER non-empty staging event must not unexpectedly trigger a run.
+      review.onStagedSetChanged("/repo", "en", 1);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(gitExecMock).not.toHaveBeenCalled();
+    });
+
+    it("onStagedSetChanged always resets findings/error even when nothing is armed", async () => {
+      enableCommitReview();
+      gitExecMock.mockResolvedValue(gitExecOk(diffFor("a.ts")));
+      rawPromptMock.mockResolvedValue('[{"line": 1, "title": "finding a", "confidence": 80}]');
+
+      const review = useCommitReview({ debounceMs: 0 });
+      await review.run("/repo", "en");
+      expect(review.findings.value).toHaveLength(1);
+
+      review.onStagedSetChanged("/repo", "en", 1); // not armed — pure invalidation (D5)
+      expect(review.findings.value).toEqual([]);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      // Only the initial run() call touched rawPrompt — the staged-set
+      // change itself must never auto-run when nothing was armed.
+      expect(rawPromptMock).toHaveBeenCalledTimes(1);
+    });
+
+    // Race condition guard: stage → review → fix → restage → review again in
+    // quick succession must never double-fire the one-shot re-review, even
+    // when the debounce window overlaps two staged-set events.
+    it("debounces rapid repeated staged-set changes into a single armed re-review", async () => {
+      enableCommitReview({ commitReviewAutoReReview: true });
+      gitExecMock.mockResolvedValue(gitExecOk(diffFor("a.ts")));
+      rawPromptMock.mockResolvedValue("[]");
+
+      const review = useCommitReview({ debounceMs: 20 });
+      review.armReReview();
+      review.onStagedSetChanged("/repo", "en", 1);
+      // A second staged-set event arrives before the debounce window elapses
+      // — it must reset the timer, not queue a second run.
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      review.onStagedSetChanged("/repo", "en", 1);
+      await new Promise((resolve) => setTimeout(resolve, 40));
+
+      expect(gitExecMock).toHaveBeenCalledTimes(1);
+    });
+  });
 });

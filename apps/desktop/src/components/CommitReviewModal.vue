@@ -4,14 +4,15 @@
  *
  * Task 1b (v3.7.0) — summary + severity-sorted finding list for the
  * staged-diff Commit Review pass. Modelled on `SecretsFindingsModal.vue`.
- * "Fix with agent" (Task 3) and the iteration/coverage slot (Task 4) are
- * out of scope for this PR and land as plain follow-ups on this component.
+ * Task 3 adds "Fix with agent" (tool + scratch-worktree picker); Task 4 adds
+ * the iteration/coverage line.
  */
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import BaseModal from "./BaseModal.vue";
 import { useI18n } from "../composables/useI18n";
 import type { ReviewFinding } from "../composables/usePrPreReview";
 import { sortFindingsForReview } from "../composables/useCommitReviewNav";
+import type { TerminalTabType } from "../composables/useTerminalSessions";
 
 const props = withDefaults(
   defineProps<{
@@ -20,17 +21,46 @@ const props = withDefaults(
     summary?: string;
     /** True when the staged diff was truncated by the file/byte cap. */
     truncated?: boolean;
+    /** Task 4 — review passes run this cycle. 0 hides the stats line. */
+    iterations?: number;
+    /** Task 4 — share (0-100) of the current staged diff already reviewed. */
+    coverage?: number;
   }>(),
-  { summary: "", truncated: false },
+  { summary: "", truncated: false, iterations: 0, coverage: 0 },
 );
 
 const emit = defineEmits<{
   jump: [id: string];
   dismiss: [id: string];
   close: [];
+  "fix-with-agent": [{ tool: TerminalTabType; scratch: boolean }];
 }>();
 
 const { t } = useI18n();
+
+// ── Task 3 — Fix with agent ──────────────────────────────────────────────
+const FIX_AGENT_TOOLS: Extract<TerminalTabType, "claude" | "codex" | "opencode">[] = [
+  "claude",
+  "codex",
+  "opencode",
+];
+const selectedTool = ref<TerminalTabType>("claude");
+const fixInScratch = ref(false);
+
+const TOOL_LABEL_KEY: Record<(typeof FIX_AGENT_TOOLS)[number], "commitReview.toolClaude" | "commitReview.toolCodex" | "commitReview.toolOpencode"> = {
+  claude: "commitReview.toolClaude",
+  codex: "commitReview.toolCodex",
+  opencode: "commitReview.toolOpencode",
+};
+
+function toolLabel(tool: (typeof FIX_AGENT_TOOLS)[number]): string {
+  return t(TOOL_LABEL_KEY[tool]);
+}
+
+function onFixWithAgentClick() {
+  if (!props.findings.length) return;
+  emit("fix-with-agent", { tool: selectedTool.value, scratch: fixInScratch.value });
+}
 
 const SEVERITY_LABEL_KEY: Record<ReviewFinding["severity"], "commitReview.severityRisk" | "commitReview.severitySuggestion" | "commitReview.severityNit"> = {
   risk: "commitReview.severityRisk",
@@ -58,6 +88,15 @@ const sortedFindings = computed(() => sortFindingsForReview(props.findings));
   >
     <div v-if="props.summary" class="crm-summary">{{ props.summary }}</div>
     <div v-if="props.truncated" class="crm-truncated">{{ t('commitReview.truncatedNotice') }}</div>
+    <div
+      v-if="props.iterations > 0"
+      class="crm-stats"
+      :title="`${t('commitReview.iterationsTooltip')} · ${t('commitReview.coverageTooltip')}`"
+    >
+      <span class="crm-stats__iter">{{ t('commitReview.iterations', props.iterations) }}</span>
+      <span class="crm-stats__sep">·</span>
+      <span class="crm-stats__coverage">{{ t('commitReview.coverage', props.coverage) }}</span>
+    </div>
 
     <div v-if="sortedFindings.length === 0" class="crm-empty">{{ t('commitReview.empty') }}</div>
     <ul v-else class="crm-list">
@@ -81,6 +120,26 @@ const sortedFindings = computed(() => sortFindingsForReview(props.findings));
     </ul>
 
     <template #footer>
+      <div class="crm-fix-agent">
+        <select v-model="selectedTool" class="crm-fix-tool" :aria-label="t('commitReview.fixWithAgent')">
+          <option v-for="tool in FIX_AGENT_TOOLS" :key="tool" :value="tool">
+            {{ toolLabel(tool) }}
+          </option>
+        </select>
+        <label class="crm-fix-scratch-label">
+          <input v-model="fixInScratch" type="checkbox" class="crm-fix-scratch" />
+          <span>{{ t('commitReview.fixInScratch') }}</span>
+        </label>
+        <button
+          type="button"
+          class="bm-btn bm-btn--primary crm-btn-compact crm-fix-btn"
+          :disabled="props.findings.length === 0"
+          :title="t('commitReview.fixWithAgentTooltip')"
+          @click="onFixWithAgentClick"
+        >
+          {{ t('commitReview.fixWithAgent') }}
+        </button>
+      </div>
       <button type="button" class="bm-btn bm-btn--ghost crm-footer-close" @click="emit('close')">
         {{ t('commitReview.close') }}
       </button>
@@ -98,6 +157,42 @@ const sortedFindings = computed(() => sortFindingsForReview(props.findings));
   color: var(--color-text-muted);
   font-size: var(--font-size-sm);
   margin-bottom: var(--space-4);
+}
+
+.crm-stats {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  margin-bottom: var(--space-4);
+}
+
+.crm-fix-agent {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  /* Pushes this group to the left of the footer while `justify-content:
+     flex-end` on `.base-modal__footer` keeps Close pinned to the right. */
+  margin-right: auto;
+}
+
+.crm-fix-tool {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+}
+
+.crm-fix-scratch-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  cursor: pointer;
 }
 
 .crm-empty {

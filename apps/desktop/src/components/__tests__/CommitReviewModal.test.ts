@@ -93,4 +93,56 @@ describe("CommitReviewModal", () => {
     document.querySelector<HTMLButtonElement>(".crm-footer-close")!.click();
     expect(onClose).toHaveBeenCalled();
   });
+
+  // ── Task 3 (v3.7.0) — "Fix with agent" ────────────────────────────────
+  describe("Fix with agent", () => {
+    it("emits fix-with-agent with the selected tool and scratch flag", () => {
+      const onFixWithAgent = vi.fn();
+      mount({ onFixWithAgent });
+
+      const select = document.querySelector<HTMLSelectElement>(".crm-fix-tool")!;
+      select.value = "codex";
+      select.dispatchEvent(new Event("change"));
+
+      const scratchCheckbox = document.querySelector<HTMLInputElement>(".crm-fix-scratch")!;
+      scratchCheckbox.checked = true;
+      scratchCheckbox.dispatchEvent(new Event("change"));
+
+      document.querySelector<HTMLButtonElement>(".crm-fix-btn")!.click();
+
+      expect(onFixWithAgent).toHaveBeenCalledWith({ tool: "codex", scratch: true });
+    });
+
+    it("defaults to claude, no scratch, when the tool/checkbox are left untouched", () => {
+      const onFixWithAgent = vi.fn();
+      mount({ onFixWithAgent });
+      document.querySelector<HTMLButtonElement>(".crm-fix-btn")!.click();
+      expect(onFixWithAgent).toHaveBeenCalledWith({ tool: "claude", scratch: false });
+    });
+
+    it("disables the Fix with agent button when there are no findings", () => {
+      const onFixWithAgent = vi.fn();
+      mount({ findings: [], onFixWithAgent });
+      const btn = document.querySelector<HTMLButtonElement>(".crm-fix-btn")!;
+      expect(btn.disabled).toBe(true);
+      btn.click();
+      expect(onFixWithAgent).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── Task 4 (v3.7.0) — iteration / coverage display ────────────────────
+  describe("iteration / coverage display", () => {
+    it("shows iter:N and coverage:X% when iterations > 0", () => {
+      mount({ iterations: 2, coverage: 87 });
+      const el = document.querySelector(".crm-stats");
+      expect(el).not.toBeNull();
+      expect(el!.textContent).toContain("2");
+      expect(el!.textContent).toContain("87");
+    });
+
+    it("hides the iteration/coverage line before any review has run", () => {
+      mount({ iterations: 0, coverage: 0 });
+      expect(document.querySelector(".crm-stats")).toBeNull();
+    });
+  });
 });

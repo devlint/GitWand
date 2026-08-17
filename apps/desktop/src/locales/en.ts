@@ -2499,6 +2499,30 @@ const en = {
     navPrev: "Previous finding",
     navHelp: "Commit review shortcuts",
     navEmpty: "No findings to navigate",
+    // ── Task 3 (v3.7.0) — Fix with agent ──────────────────────
+    fixWithAgent: "Fix with agent",
+    fixWithAgentTooltip: "Type these findings into an agent's terminal (you press Enter to run it)",
+    fixInScratch: "In a scratch worktree",
+    toolClaude: "Claude Code",
+    toolCodex: "Codex",
+    toolOpencode: "OpenCode",
+    reReviewArmed: "Will re-review automatically once you stage a fix",
+    reReviewRunning: "Re-reviewing your fix...",
+    // ── Task 4 (v3.7.0) — iterations & coverage ───────────────
+    iterations: "Iteration {0}",
+    coverage: "{0}% of staged lines reviewed",
+    iterationsTooltip: "Number of review passes run this cycle",
+    coverageTooltip: "Share of the current staged diff's added lines already covered by a review",
+    // ── Task 5 (v3.7.0) — Review / Vouch / Skip decision ──────
+    decisionTitle: "Before you commit",
+    decisionMessage: "Commit review is on for this repo. Choose how to proceed.",
+    decisionReviewNow: "Review now",
+    decisionVouch: "Vouch personally",
+    decisionSkip: "Skip",
+    decisionCancel: "Cancel",
+    vouchHint: "Commit without an AI pass — you personally vouch for these changes.",
+    skipHint: "Commit without an AI pass or a personal vouch.",
+    trailerHint: "Recorded as a GitWand-Review trailer in the commit message.",
   },
 } as const;
 
