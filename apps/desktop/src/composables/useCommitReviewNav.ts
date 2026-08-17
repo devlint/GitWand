@@ -11,20 +11,14 @@
 import { ref, computed, nextTick, type ComputedRef, type Ref } from "vue";
 import type { ReviewFinding } from "./usePrPreReview";
 import type { CommitReviewAction } from "./commitReviewKeymap";
-
-/** Lower rank = more severe, matching `CommitReviewModal.vue`'s sort. */
-const SEVERITY_RANK: Record<ReviewFinding["severity"], number> = { risk: 0, suggestion: 1, nit: 2 };
-
-/** Severity-sorted (risk > suggestion > nit), then confidence descending —
- *  the single source of truth for "finding order" shared by the modal's
- *  list and this composable's `N`/`P` cycling, so what you see in the
- *  modal is exactly what `N`/`P` steps through. */
-export function sortFindingsForReview(findings: ReviewFinding[]): ReviewFinding[] {
-  return [...findings].sort((a, b) => {
-    const rankDiff = SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity];
-    return rankDiff !== 0 ? rankDiff : b.confidence - a.confidence;
-  });
-}
+// Moved to `utils/reviewFindingsSort.ts` (verifier low-priority item — a
+// `utils/` module, `reviewFixPrompt.ts`, needed this sort order too, and
+// utils importing from composables inverts Task 0's established
+// dependency direction). Imported (for local use below) and re-exported
+// verbatim for back-compat — `CommitReviewModal.vue` still imports it from
+// this path.
+import { sortFindingsForReview } from "../utils/reviewFindingsSort";
+export { sortFindingsForReview };
 
 /** Minimal duck-typed handle for the mounted `DiffViewer` instance — just
  *  enough to scroll to a finding, without this composable depending on the

@@ -12,7 +12,7 @@
  * line editor.
  */
 import type { ReviewFinding } from "../composables/usePrPreReview";
-import { sortFindingsForReview } from "../composables/useCommitReviewNav";
+import { sortFindingsForReview } from "./reviewFindingsSort";
 
 const DEFAULT_MAX_FINDINGS = 25;
 
