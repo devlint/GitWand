@@ -5,6 +5,14 @@ description: Release history for GitWand — the native Git client with AI confl
 
 # Changelog
 
+## v3.6.5 — August 2026
+
+A single detailed community report on GitLab merge request support turned into nine fixes, all traced back to a couple of root causes once we started pulling on the thread.
+
+The biggest one: several of GitLab's response handlers were passing the API's raw field names straight through instead of translating them into what the interface expects, the way every other integration already does. That one gap alone was responsible for merge request ages showing as "NaNj" instead of an actual date, the CI tab's pipeline link going missing, and reviewer avatars not loading. Also fixed alongside it: a merge-conflict warning that showed up on almost every merge request regardless of whether it actually had one (GitLab's own status field sits in a "not checked yet" state far more often than not), a diff view that always claimed there was nothing to show, a dock badge that quietly capped out at 100 merge requests, and a "load more" button that stopped working the moment a repo had more than ten open merge requests, caused by an invisible background refresh failing in a way that disabled it as a side effect. Line-count stats (+12 -3, and so on) now show up correctly too, computed from the actual diff since GitLab doesn't report them the way GitHub does.
+
+Resolved comment threads also get a small "Resolved" badge now, GitLab's own concept of a settled discussion that GitWand had no way to represent before.
+
 ## v3.6.4 — August 2026
 
 Two more fixes closing out the GitLab timeout saga from the last couple of releases, both traced back to community reports that kept pointing at the same issue from different angles.

@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.6.5] - 2026-08-18
+
+### Fixed
+
+- **Nine GitLab MR overview bugs, all from one repeated root cause** (#161) — several GitLab response handlers (`glListMrs`, `glMrPipelines`, `glCreateMr`, `glReviewerCandidates`) returned the raw Tauri payload untouched instead of mapping it to the camelCase shape the UI expects, the way `glGetMr` and every GitHub equivalent already did. That silently dropped `createdAt`/`updatedAt` (rendering "NaNj" instead of an age), the CI tab's pipeline link, and reviewer avatars. Fixed alongside it, each independently root-caused:
+  - `merge_status` is deprecated since GitLab 15.6 and commonly sits at `unchecked` until something triggers a recheck; the old mapping treated every not-yet-computed MR as a real conflict. Now prefers `detailed_merge_status` and only flags an actual `conflict`.
+  - `glab mr diff` needs `--raw` or its output isn't the git-compatible unified diff format the frontend parser expects, so the diff view always read as empty ("no diff available").
+  - The dock's MR count capped at 100 by fetching one page and counting it. Now reads the real total off the REST list endpoint's `X-Total` header.
+  - `gl_list_mrs_inner` requested a growing `--per-page` (limit + offset) on every page without clamping it to GitLab's 100-per-page ceiling. The automatic background prefetch that drains the rest of the open-MR list right after the first page paints requested `--per-page 110` on its very first batch, which GitLab rejects outright — silently disabling the *visible* "load more" scroll trigger as a side effect, so a repo with more than 10 open MRs looked permanently stuck at 10.
+  - GitLab's MR resource has no `diff_stats` field (a GitHub-shaped assumption that never matched a real GitLab payload), so additions/deletions always read `+0 -0` on the detail view. Now computed from the diffs endpoint's per-file unified-diff text (left as a known gap on the list view, where doing this per MR risked reintroducing the #149 slowness).
+  - Three duplicated `timeAgo` implementations (later found: a fourth, in the comment timeline) hardcoded a French-only "j" unit regardless of locale and rendered "NaNj" on any unparseable date instead of degrading gracefully. Consolidated into one `formatRelativeAge()` using the already-translated `date.*` i18n keys.
+- **Resolved GitLab comment threads showed no "Resolved" indicator** — comments were listed via GitLab's flat `/notes` endpoint, which has no concept of a resolved discussion thread at all. Switched to the Discussions API (flattened back to the same shape) so each note's resolved state is available, and added a small "Resolved" badge to the comment timeline (#161).
+
 ## [3.6.4] - 2026-08-17
 
 ### Fixed
@@ -1281,7 +1294,8 @@ Design-system foundations — the app header and every overlay now ride on a sha
 - CI pipeline via GitHub Actions (Node 18, 20, 22)
 - 28 tests covering all patterns + real-world scenarios (package.json, Laravel routes, Vue SFC, CSS, .env files)
 
-[Unreleased]: https://github.com/devlint/GitWand/compare/v3.6.3...HEAD
+[Unreleased]: https://github.com/devlint/GitWand/compare/v3.6.5...HEAD
+[3.6.5]: https://github.com/devlint/GitWand/compare/v3.6.4...v3.6.5
 [3.6.4]: https://github.com/devlint/GitWand/compare/v3.6.3...v3.6.4
 [3.6.3]: https://github.com/devlint/GitWand/compare/v3.6.2...v3.6.3
 [3.6.2]: https://github.com/devlint/GitWand/compare/v3.6.1...v3.6.2
