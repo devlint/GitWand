@@ -20,7 +20,7 @@ vi.mock("../backend-core", () => ({
   tauriInvoke: (...args: unknown[]) => tauriInvoke(...args),
 }));
 
-import { glListMrs, glMrPipelines, glCreateMr, glReviewerCandidates } from "../backend-gitlab";
+import { glListMrs, glMrPipelines, glCreateMr, glReviewerCandidates, glMrNotes } from "../backend-gitlab";
 
 function rawMr(overrides: Partial<Record<string, unknown>> = {}) {
   return {
@@ -112,5 +112,37 @@ describe("glReviewerCandidates", () => {
     expect(candidates).toEqual([
       { login: "alice", name: "Alice", avatarUrl: "https://gitlab.com/avatar/alice.png" },
     ]);
+  });
+});
+
+describe("glMrNotes", () => {
+  beforeEach(() => {
+    tauriInvoke.mockReset();
+  });
+
+  it("surfaces resolved: true for a resolved discussion note (#161)", async () => {
+    tauriInvoke.mockResolvedValue([
+      { id: 1, body: "please fix this", author: { username: "carol" }, resolvable: true, resolved: true, system: false },
+    ]);
+    const comments = await glMrNotes("/repo", 42);
+    expect(comments).toHaveLength(1);
+    expect(comments[0].body).toBe("please fix this");
+    expect(comments[0].resolved).toBe(true);
+  });
+
+  it("leaves resolved undefined for a plain (non-resolvable) note", async () => {
+    tauriInvoke.mockResolvedValue([
+      { id: 2, body: "just a comment", author: { username: "bob" }, resolvable: false, system: false },
+    ]);
+    const comments = await glMrNotes("/repo", 42);
+    expect(comments[0].resolved).toBeUndefined();
+  });
+
+  it("still drops system notes", async () => {
+    tauriInvoke.mockResolvedValue([
+      { id: 3, body: "resolved this thread", author: { username: "carol" }, system: true },
+    ]);
+    const comments = await glMrNotes("/repo", 42);
+    expect(comments).toHaveLength(0);
   });
 });

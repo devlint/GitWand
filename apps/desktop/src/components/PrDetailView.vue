@@ -18,6 +18,7 @@ import Avatar from "./Avatar.vue";
 import { forgeAvatarUrl } from "../composables/useAvatar";
 import { openExternalUrl, type ReviewerCandidate } from "../utils/backend";
 import { useI18n } from "../composables/useI18n";
+import { formatRelativeAge } from "../utils/relativeTime";
 import PrInlineDiff from "./PrInlineDiff.vue";
 import PrReviewModal from "./PrReviewModal.vue";
 import PrIntelligencePanel from "./PrIntelligencePanel.vue";
@@ -308,13 +309,7 @@ function commentHref(c: { url: string; id: number }): string {
 
 /** Short relative time for a comment timestamp. */
 function commentTimeAgo(dateStr: string): string {
-  try {
-    const mins = Math.floor((Date.now() - new Date(dateStr).getTime()) / 60000);
-    if (mins < 60) return `${mins}m`;
-    const hours = Math.floor(mins / 60);
-    if (hours < 24) return `${hours}h`;
-    return `${Math.floor(hours / 24)}j`;
-  } catch { return dateStr; }
+  return formatRelativeAge(dateStr, t);
 }
 
 // ─── Reviews admin: dismiss + request reviewers (B4) ───────
@@ -861,6 +856,7 @@ function submitRequestReviewers() {
                   <div class="pdv-comment-head">
                     <Avatar class="pdv-comment-avatar" :name="item.author" :url="forgeAvatarUrl(p.forge.value.name, item.author)" />
                     <span class="pdv-comment-author">{{ item.author }}</span>
+                    <span v-if="item.resolved" class="pdv-comment-resolved">✓ {{ t('pr.detail.commentResolved') }}</span>
                     <button
                       v-if="commentHref(item)"
                       type="button"
@@ -1795,6 +1791,12 @@ function submitRequestReviewers() {
   margin-left: auto;
   font-size: var(--font-size-xs);
   color: var(--color-text-muted);
+}
+
+.pdv-comment-resolved {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-success);
 }
 
 .pdv-comment-goto {

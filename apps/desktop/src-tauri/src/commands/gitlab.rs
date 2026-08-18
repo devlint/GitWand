@@ -1102,20 +1102,39 @@ pub(crate) async fn gl_convert_draft_to_ready(cwd: String, iid: i64) -> Result<(
         .map_err(|e| e.to_string())?
 }
 
+/// Flatten a `/discussions` response into the flat note-array shape
+/// `/notes` used to return, preserving each note's own fields — notably
+/// `resolvable`/`resolved`, which the flat endpoint never carried (#161).
+fn gl_flatten_discussions(discussions: &[serde_json::Value]) -> Vec<serde_json::Value> {
+    let mut notes = Vec::new();
+    for d in discussions {
+        if let Some(arr) = d.get("notes").and_then(|n| n.as_array()) {
+            notes.extend(arr.iter().cloned());
+        }
+    }
+    notes
+}
+
 /// List notes (comments) for a MR via `glab api`.
 ///
 /// Returns raw JSON array — parsed TypeScript-side into PrReviewComment[].
-/// GitLab notes are simpler than GitHub review comments: no diff-line
-/// anchoring in v2.10 (that requires the Discussions API).
+/// Uses the Discussions API (`/discussions`, flattened back to a flat note
+/// array by `gl_flatten_discussions`) rather than the flat `/notes` endpoint
+/// this used to call: `/notes` has no concept of a resolved thread at all,
+/// so a resolved discussion's notes were indistinguishable from a live one
+/// (#161). Diff-line anchoring for the notes *listing* is still not wired
+/// up (`path`/`line` stay empty TypeScript-side) — only *creating* an
+/// anchored comment already used the Discussions API, via
+/// `gl_mr_create_discussion`.
 #[tauri::command]
 fn gl_mr_notes_inner(cwd: String, iid: i64) -> Result<serde_json::Value, String> {
     let endpoint = format!(
-        "projects/:fullpath/merge_requests/{}/notes?sort=asc&per_page=100",
+        "projects/:fullpath/merge_requests/{}/discussions?per_page=100",
         iid
     );
     let mut cmd = hidden_cmd("glab");
     cmd.args(["api", &endpoint]).current_dir(&cwd);
-    let output = output_with_timeout(cmd, GLAB_TIMEOUT).map_err(|e| format!("glab api notes: {}", e))?;
+    let output = output_with_timeout(cmd, GLAB_TIMEOUT).map_err(|e| format!("glab api discussions: {}", e))?;
 
     if !output.status.success() {
         return Err(format!(
@@ -1125,7 +1144,9 @@ fn gl_mr_notes_inner(cwd: String, iid: i64) -> Result<serde_json::Value, String>
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    serde_json::from_str(stdout.trim()).map_err(|e| format!("Parse notes: {}", e))
+    let discussions: Vec<serde_json::Value> =
+        serde_json::from_str(stdout.trim()).map_err(|e| format!("Parse discussions: {}", e))?;
+    Ok(serde_json::Value::Array(gl_flatten_discussions(&discussions)))
 }
 
 #[tauri::command]
@@ -1885,6 +1906,52 @@ mod gl_mr_list_per_page_tests {
     fn defaults_and_floors_match_the_pre_existing_behavior() {
         assert_eq!(gl_mr_list_per_page(None, None), 10);
         assert_eq!(gl_mr_list_per_page(Some(0), Some(-5)), 1);
+    }
+}
+
+/// Issue #161 — comments were listed via the flat `/notes` endpoint, which
+/// has no concept of a resolved discussion thread at all: a resolved and a
+/// live comment were indistinguishable to the frontend. Regression coverage
+/// for `gl_flatten_discussions`, which switches to the `/discussions`
+/// endpoint and flattens it back to the same flat-array shape `/notes` used
+/// to return, while preserving each note's `resolvable`/`resolved` fields.
+#[cfg(test)]
+mod gl_flatten_discussions_tests {
+    use super::gl_flatten_discussions;
+    use serde_json::json;
+
+    #[test]
+    fn flattens_notes_out_of_every_discussion_preserving_resolved_state() {
+        let discussions = vec![
+            json!({
+                "id": "d1", "individual_note": false,
+                "notes": [
+                    {"id": 1, "body": "first", "resolvable": true, "resolved": true},
+                    {"id": 2, "body": "reply", "resolvable": true, "resolved": true},
+                ]
+            }),
+            json!({
+                "id": "d2", "individual_note": true,
+                "notes": [{"id": 3, "body": "standalone", "resolvable": false}]
+            }),
+        ];
+        let flat = gl_flatten_discussions(&discussions);
+        assert_eq!(flat.len(), 3);
+        assert_eq!(flat[0]["id"], 1);
+        assert_eq!(flat[0]["resolved"], true);
+        assert_eq!(flat[2]["id"], 3);
+        assert_eq!(flat[2]["resolvable"], false);
+    }
+
+    #[test]
+    fn a_discussion_with_no_notes_array_contributes_nothing() {
+        let discussions = vec![json!({"id": "d1", "individual_note": true})];
+        assert_eq!(gl_flatten_discussions(&discussions).len(), 0);
+    }
+
+    #[test]
+    fn empty_discussion_list_is_empty() {
+        assert_eq!(gl_flatten_discussions(&[]).len(), 0);
     }
 }
 

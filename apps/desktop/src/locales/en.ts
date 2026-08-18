@@ -899,6 +899,7 @@ const en = {
       statDiff: "Diff",
       statComments: "Comments",
       commentGoto: "Go to",
+      commentResolved: "Resolved",
       labels: "Labels",
       reviewers: "Reviewers",
       reviewApproved: "approved",

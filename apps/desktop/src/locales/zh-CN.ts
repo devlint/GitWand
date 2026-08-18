@@ -872,6 +872,7 @@ const zhCN: Locale = {
       statDiff: "Diff",
       statComments: "评论",
       commentGoto: "前往",
+      commentResolved: "已解决",
       labels: "标签",
       reviewers: "评审者",
       reviewApproved: "已批准",

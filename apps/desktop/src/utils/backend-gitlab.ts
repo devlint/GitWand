@@ -205,6 +205,9 @@ function glNoteToComment(note: Record<string, unknown>): PrReviewComment {
     in_reply_to_id: null,
     diff_hunk: "",
     url: "",
+    // Only present when the note is `resolvable` (Discussions API) — a
+    // plain, non-resolvable note has no `resolved` field at all (#161).
+    resolved: (note.resolvable as boolean) ? Boolean(note.resolved) : undefined,
   };
 }
 
