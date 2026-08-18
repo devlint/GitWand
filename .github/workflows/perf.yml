@@ -91,6 +91,20 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # @gitwand/core must be built before both the parity tests below
+      # (dev-server.mjs imports it at runtime — "Cannot find module
+      # '.../dist/index.js'" otherwise, this step used to run after the
+      # parity tests and broke them) and apps/desktop's typecheck (the
+      # frontend resolves `@gitwand/core` via pnpm workspace and vue-tsc
+      # reads the package's `dist/index.d.ts`). ci.yml's `test` job gets
+      # this for free from its recursive `pnpm -r --filter
+      # '!gitwand-website' run build`; release.yml and publish.yml have
+      # their own explicit "Build workspace dependencies" step. perf.yml
+      # needs its own explicit step since it only builds apps/desktop
+      # below, not the whole workspace.
+      - name: Build @gitwand/core (needed by dev-server.mjs + downstream typecheck)
+        run: pnpm --filter @gitwand/core run build
+
       # Build the parity probe on the `ci` profile (thin LTO, 16 codegen
       # units — see [profile.ci] in Cargo.toml): the benches only measure
       # `git` subprocess spawn latency (31-46ms medians), so the fat-LTO
@@ -124,18 +138,6 @@ jobs:
             echo "::warning::Once perf is stable, run 'pnpm bench:write-baseline' on a representative machine and commit the file."
             node perf/bench.mjs
           fi
-
-      # @gitwand/core must be built before apps/desktop typechecks because
-      # the desktop frontend resolves `@gitwand/core` via pnpm workspace and
-      # vue-tsc reads the package's `dist/index.d.ts`. Without this step the
-      # typecheck fails with `TS2307: Cannot find module '@gitwand/core'`.
-      # ci.yml's `test` job gets this for free from its recursive
-      # `pnpm -r --filter '!gitwand-website' run build`; release.yml and
-      # publish.yml have their own explicit "Build workspace dependencies"
-      # step. perf.yml needs its own explicit step since it only builds
-      # apps/desktop below, not the whole workspace.
-      - name: Build @gitwand/core (TS declarations for downstream typecheck)
-        run: pnpm --filter @gitwand/core run build
 
       # Frontend bundle size budgets — catches accidental eager imports
       # that would undo §1.2 (lazy panels) or §4.3 (lazy highlight.js).
