@@ -284,6 +284,15 @@ pub(crate) async fn detect_glab(cwd: String) -> bool {
         .unwrap_or(false)
 }
 
+/// `--per-page` value for a `limit`/`offset` window, clamped to GitLab's
+/// 100-per-page ceiling (#161) — see `gl_mr_list_per_page_tests` above for
+/// the background-prefetch failure this fixes.
+fn gl_mr_list_per_page(limit: Option<i64>, offset: Option<i64>) -> i64 {
+    let page = limit.unwrap_or(10).max(1);
+    let off = offset.unwrap_or(0).max(0);
+    (page + off).min(100)
+}
+
 /// List merge requests using `glab mr list`.
 ///
 /// `state` accepts "opened" (default), "closed", "merged", "all".
@@ -295,9 +304,8 @@ fn gl_list_mrs_inner(
     offset: Option<i64>,
 ) -> Result<Vec<PullRequest>, String> {
     let flag = gl_state_flag(&state);
-    let page = limit.unwrap_or(10).max(1);
     let off = offset.unwrap_or(0).max(0);
-    let total = (page + off).to_string();
+    let total = gl_mr_list_per_page(limit, offset).to_string();
 
     let mut cmd = hidden_cmd("glab");
     cmd.args([
@@ -1837,6 +1845,46 @@ mod gl_diff_stats_from_files_tests {
     fn a_file_with_no_diff_field_contributes_nothing() {
         let files = vec![json!({"new_path": "binary.png"})];
         assert_eq!(gl_diff_stats_from_files(&files), (0, 0));
+    }
+}
+
+/// Issue #161 — `gl_list_mrs_inner`'s naive offset+limit pagination requests
+/// a growing `--per-page` value (`limit + offset`) on every page, but never
+/// clamped it to GitLab's 100-per-page ceiling the way `gl_list_issues_inner`
+/// already does. The background prefetch that drains the rest of the open-MR
+/// list right after the first page paints (`prefetchOpenPrs`, `BG_PAGE =
+/// 100` in `usePrPanel.ts`) requests its very first batch at `offset: 10,
+/// limit: 100` — `--per-page 110` — which GitLab's API rejects outright. The
+/// failure is silently swallowed by `loadMorePrs`'s catch block, which sets
+/// `hasMore` to `false`, permanently hiding the *visible* scroll-to-load-more
+/// sentinel too even though the user never asked for the background batch
+/// that actually failed. Regression coverage for `gl_mr_list_per_page`.
+#[cfg(test)]
+mod gl_mr_list_per_page_tests {
+    use super::gl_mr_list_per_page;
+
+    #[test]
+    fn stays_under_the_cap_for_small_pages() {
+        assert_eq!(gl_mr_list_per_page(Some(10), Some(0)), 10);
+        assert_eq!(gl_mr_list_per_page(Some(10), Some(10)), 20);
+    }
+
+    #[test]
+    fn clamps_to_100_instead_of_erroring_on_the_background_prefetch_batch() {
+        // usePrPanel.ts's prefetchOpenPrs: limit=100 (BG_PAGE), offset=10
+        // after the first visible page — would ask for --per-page 110.
+        assert_eq!(gl_mr_list_per_page(Some(100), Some(10)), 100);
+    }
+
+    #[test]
+    fn clamps_even_when_both_limit_and_offset_are_already_over_100() {
+        assert_eq!(gl_mr_list_per_page(Some(100), Some(200)), 100);
+    }
+
+    #[test]
+    fn defaults_and_floors_match_the_pre_existing_behavior() {
+        assert_eq!(gl_mr_list_per_page(None, None), 10);
+        assert_eq!(gl_mr_list_per_page(Some(0), Some(-5)), 1);
     }
 }
 
