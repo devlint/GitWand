@@ -35,18 +35,26 @@ Les cibles sont indicatives — la vérité est "pas de régression > 15 % vs. b
 ## Commandes
 
 ```bash
-# Build le probe (debug est suffisant pour bench, release plus représentatif)
-cd apps/desktop && cargo build --example parity-probe --release
+# Build le probe sur le profil `ci` (thin LTO, 16 codegen-units — voir
+# [profile.ci] dans Cargo.toml). Les médianes mesurées (31-46 ms) sont
+# dominées par le spawn de `git`, donc le LTO fat de `release` n'apportait
+# rien ici, juste du temps de compil en plus.
+cd apps/desktop/src-tauri && cargo build --example parity-probe --profile ci
 
-# Run le bench (génère fixture + boucle + dump JSON)
-node perf/bench.mjs
+# Run le bench (génère fixture + boucle + dump JSON) — depuis apps/desktop
+cd apps/desktop && node perf/bench.mjs
 
 # Comparer contre baseline (sortie non-zéro si régression > 15%)
-node perf/bench.mjs --check-against baseline.json
+node perf/bench.mjs --check-against perf/baseline.json
 
 # Mettre à jour la baseline après une optim validée
-node perf/bench.mjs --write-baseline baseline.json
+node perf/bench.mjs --write-baseline perf/baseline.json
 ```
+
+Ou, via les scripts npm équivalents (`pnpm bench`, `pnpm bench:check`,
+`pnpm bench:write-baseline` dans `apps/desktop/package.json`), qui buildent
+le probe sur `--profile ci` puis lancent `perf/bench.mjs` avec les bons
+chemins.
 
 ## Format des résultats
 

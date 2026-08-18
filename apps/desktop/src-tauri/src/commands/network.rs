@@ -82,10 +82,7 @@ fn parse_remote_host_port(url: &str) -> Option<HostPort> {
         _ => return None,
     };
     // Drop the path / query / fragment.
-    let authority = rest
-        .split(|c: char| c == '/' || c == '?' || c == '#')
-        .next()
-        .unwrap_or("");
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
     // Strip optional `user[:password]@`.
     let host_port = match authority.rfind('@') {
         Some(at) => &authority[at + 1..],
@@ -246,7 +243,8 @@ mod tests {
         // Empty string is a valid input from the caller's point of view but
         // we can't extract a host, so it must short-circuit to false rather
         // than block on DNS or surface an error.
-        let r = tauri::async_runtime::block_on(check_remote_reachable("".to_string(), 250)).unwrap();
+        let r =
+            tauri::async_runtime::block_on(check_remote_reachable("".to_string(), 250)).unwrap();
         assert!(!r);
     }
 

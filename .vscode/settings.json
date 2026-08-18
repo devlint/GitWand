@@ -16,5 +16,8 @@
   "search.exclude": {
     "**/dist": true,
     "**/pnpm-lock.yaml": true
-  }
+  },
+  "rust-analyzer.cargo.targetDir": true,
+  "rust-analyzer.check.command": "clippy",
+  "rust-analyzer.check.extraArgs": ["--target-dir", "target/rust-analyzer"]
 }

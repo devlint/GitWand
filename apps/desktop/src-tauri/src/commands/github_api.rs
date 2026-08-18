@@ -36,9 +36,9 @@
 //! harden via `curl --config -` stdin piping in a follow-up). The token is
 //! never logged or included in error messages.
 
+use super::curl_util::{bearer_config, curl_with_headers, curl_with_status};
 use crate::git::{git_cmd, hidden_cmd};
 use crate::types::*;
-use super::curl_util::{bearer_config, curl_with_headers, curl_with_status};
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -89,7 +89,11 @@ pub(crate) fn settings_github_token() -> Option<String> {
     let entry = keyring::Entry::new(GH_SERVICE, GH_ACCOUNT).ok()?;
     let tok = entry.get_password().ok()?;
     let tok = tok.trim().to_string();
-    if tok.is_empty() { None } else { Some(tok) }
+    if tok.is_empty() {
+        None
+    } else {
+        Some(tok)
+    }
 }
 
 // ─── Owner/repo resolution ──────────────────────────────────────────────────
@@ -110,8 +114,8 @@ fn owner_repo(cwd: &str) -> Result<(String, String), String> {
 
     let path = if url.starts_with("git@") || url.contains("@github.com:") {
         // git@github.com:owner/repo.git → owner/repo
-        url.splitn(2, ':')
-            .nth(1)
+        url.split_once(':')
+            .map(|x| x.1)
             .unwrap_or("")
             .trim_end_matches(".git")
             .to_string()
@@ -119,8 +123,8 @@ fn owner_repo(cwd: &str) -> Result<(String, String), String> {
         // https://github.com/owner/repo.git → owner/repo
         url.trim_end_matches('/')
             .trim_end_matches(".git")
-            .splitn(2, "github.com/")
-            .nth(1)
+            .split_once("github.com/")
+            .map(|x| x.1)
             .unwrap_or("")
             .to_string()
     };
@@ -129,7 +133,10 @@ fn owner_repo(cwd: &str) -> Result<(String, String), String> {
     let owner = parts.next().unwrap_or("").to_string();
     let repo = parts.next().unwrap_or("").to_string();
     if owner.is_empty() || repo.is_empty() {
-        return Err(format!("Could not parse GitHub owner/repo from remote URL: {}", url));
+        return Err(format!(
+            "Could not parse GitHub owner/repo from remote URL: {}",
+            url
+        ));
     }
     Ok((owner, repo))
 }
@@ -161,7 +168,8 @@ fn curl_raw(
     accept: &str,
 ) -> Result<(i32, String), String> {
     curl_with_status(
-        method, url,
+        method,
+        url,
         token.map(bearer_config).as_deref(),
         body_json,
         &["User-Agent: GitWand", "X-GitHub-Api-Version: 2022-11-28"],
@@ -197,7 +205,13 @@ fn api_json(
     token: &str,
     body_json: Option<&str>,
 ) -> Result<serde_json::Value, String> {
-    let (status, body) = curl_raw(method, url, Some(token), body_json, "application/vnd.github+json")?;
+    let (status, body) = curl_raw(
+        method,
+        url,
+        Some(token),
+        body_json,
+        "application/vnd.github+json",
+    )?;
     if status >= 400 {
         return Err(map_api_error(status, &body));
     }
@@ -224,7 +238,9 @@ fn api_json_cached(url: &str, token: &str) -> Result<serde_json::Value, String> 
     let cached = cache.lock().unwrap().get(url).cloned();
 
     let auth = bearer_config(token);
-    let inm = cached.as_ref().map(|(etag, _)| format!("If-None-Match: {}", etag));
+    let inm = cached
+        .as_ref()
+        .map(|(etag, _)| format!("If-None-Match: {}", etag));
     let mut headers: Vec<&str> = vec!["User-Agent: GitWand", "X-GitHub-Api-Version: 2022-11-28"];
     if let Some(h) = &inm {
         headers.push(h);
@@ -245,7 +261,9 @@ fn api_json_cached(url: &str, token: &str) -> Result<serde_json::Value, String> 
         // fail loudly rather than silently parsing an empty body as data.
         return match cached {
             Some((_, cached_body)) => parse_json_body(&cached_body),
-            None => Err(format!("304 Not Modified received for {url} with no cached body")),
+            None => Err(format!(
+                "304 Not Modified received for {url} with no cached body"
+            )),
         };
     }
     if status >= 400 {
@@ -265,7 +283,10 @@ fn api_json_cached(url: &str, token: &str) -> Result<serde_json::Value, String> 
 // ─── JSON field helpers ─────────────────────────────────────────────────────
 
 fn js(v: &serde_json::Value, key: &str) -> String {
-    v.get(key).and_then(|x| x.as_str()).unwrap_or("").to_string()
+    v.get(key)
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string()
 }
 
 /// Percent-encode an `owner/repo` slug for use inside a search query value,
@@ -295,7 +316,11 @@ fn jb(v: &serde_json::Value, key: &str) -> bool {
 
 /// `obj[outer][inner]` as a string.
 fn jnested(v: &serde_json::Value, outer: &str, inner: &str) -> String {
-    v.get(outer).and_then(|o| o.get(inner)).and_then(|s| s.as_str()).unwrap_or("").to_string()
+    v.get(outer)
+        .and_then(|o| o.get(inner))
+        .and_then(|s| s.as_str())
+        .unwrap_or("")
+        .to_string()
 }
 
 /// Collect `[{ key: "..." }]` string fields into a Vec.
@@ -315,7 +340,11 @@ fn jlogins(v: &serde_json::Value, arr_key: &str, field: &str) -> Vec<String> {
 /// Map a GitHub REST pull-request object to `PullRequest`.
 fn json_to_pr(pr: &serde_json::Value) -> PullRequest {
     let merged = pr.get("merged_at").map(|m| !m.is_null()).unwrap_or(false);
-    let state = if merged { "merged".to_string() } else { js(pr, "state") };
+    let state = if merged {
+        "merged".to_string()
+    } else {
+        js(pr, "state")
+    };
     let review_requested = jlogins(pr, "requested_reviewers", "login");
     // REST has no review-decision field (that's GraphQL). Use the requested
     // reviewers as a cheap proxy: GitHub removes a reviewer from this list once
@@ -351,9 +380,17 @@ fn json_to_pr(pr: &serde_json::Value) -> PullRequest {
 
 /// Map a GitHub REST pull-request object to `PullRequestDetail`.
 fn json_to_detail(pr: &serde_json::Value) -> PullRequestDetail {
-    let merged_at = pr.get("merged_at").and_then(|m| m.as_str()).unwrap_or("").to_string();
+    let merged_at = pr
+        .get("merged_at")
+        .and_then(|m| m.as_str())
+        .unwrap_or("")
+        .to_string();
     let merged = !merged_at.is_empty();
-    let state = if merged { "merged".to_string() } else { js(pr, "state") };
+    let state = if merged {
+        "merged".to_string()
+    } else {
+        js(pr, "state")
+    };
     // GitHub `mergeable`: true / false / null (still computing).
     let mergeable = match pr.get("mergeable").and_then(|m| m.as_bool()) {
         Some(true) => "MERGEABLE".to_string(),
@@ -393,7 +430,11 @@ fn json_to_detail(pr: &serde_json::Value) -> PullRequestDetail {
 
 pub(crate) fn rest_current_user(token: &str) -> Result<String, String> {
     let v = api_json("GET", &format!("{}/user", API_BASE), token, None)?;
-    let login = v.get("login").and_then(|l| l.as_str()).unwrap_or("").to_string();
+    let login = v
+        .get("login")
+        .and_then(|l| l.as_str())
+        .unwrap_or("")
+        .to_string();
     if login.is_empty() {
         return Err("GitHub returned an empty login for this token.".to_string());
     }
@@ -488,7 +529,11 @@ pub(crate) fn rest_list_prs(
                 let (adds, dels, merge_state) = rest_pr_detail_enrich(&base, pr.number, token)
                     .unwrap_or((pr.additions, pr.deletions, String::new()));
                 let sha = sha_by_num.get(&pr.number).map(|s| s.as_str()).unwrap_or("");
-                let rollup = if sha.is_empty() { String::new() } else { rest_rollup_for_sha(&base, sha, token) };
+                let rollup = if sha.is_empty() {
+                    String::new()
+                } else {
+                    rest_rollup_for_sha(&base, sha, token)
+                };
                 (pr.number, (adds, dels, rollup, merge_state))
             })
             .collect();
@@ -496,8 +541,12 @@ pub(crate) fn rest_list_prs(
             if let Some((adds, dels, rollup, merge_state)) = enrich.get(&pr.number) {
                 pr.additions = *adds;
                 pr.deletions = *dels;
-                if !rollup.is_empty() { pr.checks_rollup = rollup.clone(); }
-                if !merge_state.is_empty() { pr.merge_state_status = merge_state.clone(); }
+                if !rollup.is_empty() {
+                    pr.checks_rollup = rollup.clone();
+                }
+                if !merge_state.is_empty() {
+                    pr.merge_state_status = merge_state.clone();
+                }
             }
         }
     }
@@ -523,7 +572,10 @@ fn top_pr_from_rest_json(raw: &[serde_json::Value]) -> Option<(i64, String)> {
 /// endpoints) plus the open PR count (`rest_pr_count`, already a single
 /// `/search/issues` call). `Ok(None)` means the repo currently has zero open
 /// PRs.
-pub(crate) fn rest_pr_freshness_signal(cwd: &str, token: &str) -> Result<Option<PrFreshnessSignal>, String> {
+pub(crate) fn rest_pr_freshness_signal(
+    cwd: &str,
+    token: &str,
+) -> Result<Option<PrFreshnessSignal>, String> {
     let base = base_owner_repo(cwd, token).unwrap_or_else(|_| {
         let (o, r) = owner_repo(cwd).unwrap_or_default();
         format!("{}/{}", o, r)
@@ -543,7 +595,11 @@ pub(crate) fn rest_pr_freshness_signal(cwd: &str, token: &str) -> Result<Option<
         None => return Ok(None),
     };
     let open_count = rest_pr_count(cwd, "open", token)?;
-    Ok(Some(PrFreshnessSignal { number, updated_at, open_count }))
+    Ok(Some(PrFreshnessSignal {
+        number,
+        updated_at,
+        open_count,
+    }))
 }
 
 /// Aggregate the check-runs of commit `sha` in `repo` ("owner/name") into a
@@ -562,7 +618,11 @@ fn rest_rollup_for_sha(repo: &str, sha: &str, token: &str) -> String {
         Ok(v) => v,
         Err(_) => return String::new(),
     };
-    let runs = v.get("check_runs").and_then(|r| r.as_array()).cloned().unwrap_or_default();
+    let runs = v
+        .get("check_runs")
+        .and_then(|r| r.as_array())
+        .cloned()
+        .unwrap_or_default();
     rollup_from_check_runs(&runs)
 }
 
@@ -579,7 +639,11 @@ fn rest_pr_detail_enrich(repo: &str, number: i64, token: &str) -> Option<(i64, i
     let url = format!("{}/repos/{}/pulls/{}", API_BASE, repo, number);
     let v = api_json_cached(&url, token).ok()?;
     let state = js(&v, "mergeable_state").to_uppercase();
-    let merge_state = if state.is_empty() || state == "UNKNOWN" { String::new() } else { state };
+    let merge_state = if state.is_empty() || state == "UNKNOWN" {
+        String::new()
+    } else {
+        state
+    };
     Some((ji(&v, "additions"), ji(&v, "deletions"), merge_state))
 }
 
@@ -605,7 +669,11 @@ fn rollup_from_check_runs(runs: &[serde_json::Value]) -> String {
             _ => pending = true,
         }
     }
-    if pending { "PENDING".to_string() } else { "SUCCESS".to_string() }
+    if pending {
+        "PENDING".to_string()
+    } else {
+        "SUCCESS".to_string()
+    }
 }
 
 /// `git diff --numstat origin/base...origin/head` → (additions, deletions).
@@ -661,7 +729,8 @@ fn get_pr_json(cwd: &str, number: i64, token: &str) -> Result<(String, serde_jso
                 "application/vnd.github+json",
             )?;
             if st2 < 400 {
-                let v = serde_json::from_str(body2.trim()).map_err(|e| format!("parse PR: {}", e))?;
+                let v =
+                    serde_json::from_str(body2.trim()).map_err(|e| format!("parse PR: {}", e))?;
                 return Ok((parent, v));
             }
         }
@@ -683,13 +752,19 @@ pub(crate) fn rest_pr_count(cwd: &str, state: &str, token: &str) -> Result<i64, 
     // /search/issues returns total_count without expanding every item.
     let url = format!(
         "{}/search/issues?q=repo:{}+type:pr{}&per_page=1",
-        API_BASE, enc_nwo(&base), qualifier
+        API_BASE,
+        enc_nwo(&base),
+        qualifier
     );
     let v = api_json("GET", &url, token, None)?;
     Ok(v.get("total_count").and_then(|c| c.as_i64()).unwrap_or(0))
 }
 
-pub(crate) fn rest_pr_detail(cwd: &str, number: i64, token: &str) -> Result<PullRequestDetail, String> {
+pub(crate) fn rest_pr_detail(
+    cwd: &str,
+    number: i64,
+    token: &str,
+) -> Result<PullRequestDetail, String> {
     let (repo, v) = get_pr_json(cwd, number, token)?;
     let mut detail = json_to_detail(&v);
     // The REST PR object carries no CI status; aggregate the head commit's
@@ -721,7 +796,13 @@ pub(crate) fn rest_pr_diff(cwd: &str, number: i64, token: &str) -> Result<String
     // its diff from there.
     let (repo, _pr) = get_pr_json(cwd, number, token)?;
     let url = format!("{}/repos/{}/pulls/{}", API_BASE, repo, number);
-    let (status, body) = curl_raw("GET", &url, Some(token), None, "application/vnd.github.v3.diff")?;
+    let (status, body) = curl_raw(
+        "GET",
+        &url,
+        Some(token),
+        None,
+        "application/vnd.github.v3.diff",
+    )?;
     if status >= 400 {
         return Err(format!("GitHub diff failed (HTTP {})", status));
     }
@@ -740,7 +821,11 @@ pub(crate) fn rest_pr_checks(cwd: &str, number: i64, token: &str) -> Result<Vec<
         Ok(v) => v,
         Err(_) => return Ok(Vec::new()), // no checks configured — not fatal
     };
-    let runs = v.get("check_runs").and_then(|r| r.as_array()).cloned().unwrap_or_default();
+    let runs = v
+        .get("check_runs")
+        .and_then(|r| r.as_array())
+        .cloned()
+        .unwrap_or_default();
     let checks = runs
         .iter()
         .map(|run| CICheck {
@@ -755,11 +840,19 @@ pub(crate) fn rest_pr_checks(cwd: &str, number: i64, token: &str) -> Result<Vec<
 
 pub(crate) fn rest_pr_files(cwd: &str, number: i64, token: &str) -> Result<Vec<String>, String> {
     let (repo, _pr) = get_pr_json(cwd, number, token)?;
-    let url = format!("{}/repos/{}/pulls/{}/files?per_page=100", API_BASE, repo, number);
+    let url = format!(
+        "{}/repos/{}/pulls/{}/files?per_page=100",
+        API_BASE, repo, number
+    );
     let v = api_json("GET", &url, token, None)?;
     let files = v
         .as_array()
-        .map(|arr| arr.iter().map(|f| js(f, "filename")).filter(|s| !s.is_empty()).collect())
+        .map(|arr| {
+            arr.iter()
+                .map(|f| js(f, "filename"))
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
         .unwrap_or_default();
     Ok(files)
 }
@@ -770,7 +863,10 @@ pub(crate) fn rest_pr_files(cwd: &str, number: i64, token: &str) -> Result<Vec<S
 /// Fetches up to 3 pages of 100 (same ceiling as the CLI path). The assignees
 /// list carries `login` and `avatar_url` but not the display `name` (that needs
 /// a per-user lookup), so `name` is left null — matching the CLI path.
-pub(crate) fn rest_reviewer_candidates(cwd: &str, token: &str) -> Result<Vec<ReviewerCandidate>, String> {
+pub(crate) fn rest_reviewer_candidates(
+    cwd: &str,
+    token: &str,
+) -> Result<Vec<ReviewerCandidate>, String> {
     let (owner, repo) = owner_repo(cwd)?;
     let mut all: Vec<ReviewerCandidate> = Vec::new();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -791,8 +887,15 @@ pub(crate) fn rest_reviewer_candidates(cwd: &str, token: &str) -> Result<Vec<Rev
                 continue;
             }
             let name = u.get("name").and_then(|n| n.as_str()).map(String::from);
-            let avatar_url = u.get("avatar_url").and_then(|a| a.as_str()).map(String::from);
-            all.push(ReviewerCandidate { login, name, avatar_url });
+            let avatar_url = u
+                .get("avatar_url")
+                .and_then(|a| a.as_str())
+                .map(String::from);
+            all.push(ReviewerCandidate {
+                login,
+                name,
+                avatar_url,
+            });
         }
         if count < 100 {
             break;
@@ -830,7 +933,7 @@ pub(crate) fn rest_branches(cwd: &str, token: &str) -> Result<Vec<String>, Strin
             break;
         }
     }
-    names.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+    names.sort_by_key(|a| a.to_lowercase());
     Ok(names)
 }
 
@@ -841,7 +944,11 @@ pub(crate) fn map_comment(c: &serde_json::Value, issue_level: bool) -> serde_jso
     use serde_json::Value;
     let side = {
         let s = js(c, "side");
-        if s.is_empty() { "RIGHT".to_string() } else { s }
+        if s.is_empty() {
+            "RIGHT".to_string()
+        } else {
+            s
+        }
     };
     serde_json::json!({
         "id": ji(c, "id"),
@@ -869,17 +976,31 @@ pub(crate) fn map_comments(v: &serde_json::Value, issue_level: bool) -> Vec<serd
 }
 
 /// List inline review comments (anchored to diff lines) for a PR (REST).
-pub(crate) fn rest_pr_comments(cwd: &str, number: i64, token: &str) -> Result<Vec<serde_json::Value>, String> {
+pub(crate) fn rest_pr_comments(
+    cwd: &str,
+    number: i64,
+    token: &str,
+) -> Result<Vec<serde_json::Value>, String> {
     let (repo, _pr) = get_pr_json(cwd, number, token)?;
-    let url = format!("{}/repos/{}/pulls/{}/comments?per_page=100", API_BASE, repo, number);
+    let url = format!(
+        "{}/repos/{}/pulls/{}/comments?per_page=100",
+        API_BASE, repo, number
+    );
     let v = api_json("GET", &url, token, None)?;
     Ok(map_comments(&v, false))
 }
 
 /// List issue-level (conversation) comments for a PR (REST).
-pub(crate) fn rest_pr_issue_comments(cwd: &str, number: i64, token: &str) -> Result<Vec<serde_json::Value>, String> {
+pub(crate) fn rest_pr_issue_comments(
+    cwd: &str,
+    number: i64,
+    token: &str,
+) -> Result<Vec<serde_json::Value>, String> {
     let (repo, _pr) = get_pr_json(cwd, number, token)?;
-    let url = format!("{}/repos/{}/issues/{}/comments?per_page=100", API_BASE, repo, number);
+    let url = format!(
+        "{}/repos/{}/issues/{}/comments?per_page=100",
+        API_BASE, repo, number
+    );
     let v = api_json("GET", &url, token, None)?;
     Ok(map_comments(&v, true))
 }
@@ -894,15 +1015,28 @@ fn json_to_issue_detail(v: &serde_json::Value) -> IssueDetail {
     let assignees = v
         .get("assignees")
         .and_then(|a| a.as_array())
-        .map(|arr| arr.iter().map(|u| js(u, "login")).filter(|s| !s.is_empty()).collect())
+        .map(|arr| {
+            arr.iter()
+                .map(|u| js(u, "login"))
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
         .unwrap_or_default();
     let labels = v
         .get("labels")
         .and_then(|a| a.as_array())
-        .map(|arr| arr.iter().map(|l| js(l, "name")).filter(|s| !s.is_empty()).collect())
+        .map(|arr| {
+            arr.iter()
+                .map(|l| js(l, "name"))
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
         .unwrap_or_default();
     // `milestone` is null when unset — js() on a non-object yields "".
-    let milestone = v.get("milestone").map(|m| js(m, "title")).unwrap_or_default();
+    let milestone = v
+        .get("milestone")
+        .map(|m| js(m, "title"))
+        .unwrap_or_default();
     IssueDetail {
         number: ji(v, "number"),
         title: js(v, "title"),
@@ -920,7 +1054,11 @@ fn json_to_issue_detail(v: &serde_json::Value) -> IssueDetail {
 }
 
 /// Fetch a single issue's detail (REST).
-pub(crate) fn rest_issue_detail(cwd: &str, number: i64, token: &str) -> Result<IssueDetail, String> {
+pub(crate) fn rest_issue_detail(
+    cwd: &str,
+    number: i64,
+    token: &str,
+) -> Result<IssueDetail, String> {
     let (owner, repo) = owner_repo(cwd)?;
     let url = format!("{}/repos/{}/{}/issues/{}", API_BASE, owner, repo, number);
     let v = api_json("GET", &url, token, None)?;
@@ -933,14 +1071,27 @@ fn json_to_issue(v: &serde_json::Value) -> Issue {
     let assignees = v
         .get("assignees")
         .and_then(|a| a.as_array())
-        .map(|arr| arr.iter().map(|u| js(u, "login")).filter(|s| !s.is_empty()).collect())
+        .map(|arr| {
+            arr.iter()
+                .map(|u| js(u, "login"))
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
         .unwrap_or_default();
     let labels = v
         .get("labels")
         .and_then(|a| a.as_array())
-        .map(|arr| arr.iter().map(|l| js(l, "name")).filter(|s| !s.is_empty()).collect())
+        .map(|arr| {
+            arr.iter()
+                .map(|l| js(l, "name"))
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
         .unwrap_or_default();
-    let milestone = v.get("milestone").map(|m| js(m, "title")).unwrap_or_default();
+    let milestone = v
+        .get("milestone")
+        .map(|m| js(m, "title"))
+        .unwrap_or_default();
     Issue {
         number: ji(v, "number"),
         title: js(v, "title"),
@@ -999,24 +1150,44 @@ pub(crate) fn rest_list_issues(
 }
 
 /// List conversation comments for an issue (REST).
-pub(crate) fn rest_issue_comments(cwd: &str, number: i64, token: &str) -> Result<Vec<serde_json::Value>, String> {
+pub(crate) fn rest_issue_comments(
+    cwd: &str,
+    number: i64,
+    token: &str,
+) -> Result<Vec<serde_json::Value>, String> {
     let (owner, repo) = owner_repo(cwd)?;
-    let url = format!("{}/repos/{}/{}/issues/{}/comments?per_page=100", API_BASE, owner, repo, number);
+    let url = format!(
+        "{}/repos/{}/{}/issues/{}/comments?per_page=100",
+        API_BASE, owner, repo, number
+    );
     let v = api_json("GET", &url, token, None)?;
     Ok(map_comments(&v, true))
 }
 
 /// Add a comment to an issue (REST). Returns the created comment, mapped.
-pub(crate) fn rest_issue_add_comment(cwd: &str, number: i64, body: &str, token: &str) -> Result<serde_json::Value, String> {
+pub(crate) fn rest_issue_add_comment(
+    cwd: &str,
+    number: i64,
+    body: &str,
+    token: &str,
+) -> Result<serde_json::Value, String> {
     let (owner, repo) = owner_repo(cwd)?;
-    let url = format!("{}/repos/{}/{}/issues/{}/comments", API_BASE, owner, repo, number);
+    let url = format!(
+        "{}/repos/{}/{}/issues/{}/comments",
+        API_BASE, owner, repo, number
+    );
     let payload = serde_json::json!({ "body": body });
     let v = api_json("POST", &url, token, Some(&payload.to_string()))?;
     Ok(map_comment(&v, true))
 }
 
 /// Close or reopen an issue (REST). `state` is "closed" or "open".
-pub(crate) fn rest_issue_set_state(cwd: &str, number: i64, state: &str, token: &str) -> Result<(), String> {
+pub(crate) fn rest_issue_set_state(
+    cwd: &str,
+    number: i64,
+    state: &str,
+    token: &str,
+) -> Result<(), String> {
     let (owner, repo) = owner_repo(cwd)?;
     let url = format!("{}/repos/{}/{}/issues/{}", API_BASE, owner, repo, number);
     let payload = serde_json::json!({ "state": state });
@@ -1048,9 +1219,16 @@ pub(crate) fn map_reviews(v: &serde_json::Value) -> Vec<serde_json::Value> {
 }
 
 /// List submitted reviews for a PR (REST).
-pub(crate) fn rest_pr_reviews(cwd: &str, number: i64, token: &str) -> Result<Vec<serde_json::Value>, String> {
+pub(crate) fn rest_pr_reviews(
+    cwd: &str,
+    number: i64,
+    token: &str,
+) -> Result<Vec<serde_json::Value>, String> {
     let (repo, _pr) = get_pr_json(cwd, number, token)?;
-    let url = format!("{}/repos/{}/pulls/{}/reviews?per_page=100", API_BASE, repo, number);
+    let url = format!(
+        "{}/repos/{}/pulls/{}/reviews?per_page=100",
+        API_BASE, repo, number
+    );
     let v = api_json("GET", &url, token, None)?;
     Ok(map_reviews(&v))
 }
@@ -1072,7 +1250,12 @@ pub(crate) fn rest_fork_info(cwd: &str, token: &str) -> Result<ForkInfo, String>
         return Ok(cached.clone());
     }
 
-    let info = api_json("GET", &format!("{}/repos/{}/{}", API_BASE, owner, repo), token, None)?;
+    let info = api_json(
+        "GET",
+        &format!("{}/repos/{}/{}", API_BASE, owner, repo),
+        token,
+        None,
+    )?;
     let is_fork = info.get("fork").and_then(|f| f.as_bool()).unwrap_or(false);
     let parent = info
         .get("parent")
@@ -1080,7 +1263,11 @@ pub(crate) fn rest_fork_info(cwd: &str, token: &str) -> Result<ForkInfo, String>
         .and_then(|n| n.as_str())
         .unwrap_or("")
         .to_string();
-    let fi = ForkInfo { is_fork, origin: origin.clone(), parent };
+    let fi = ForkInfo {
+        is_fork,
+        origin: origin.clone(),
+        parent,
+    };
     cache.lock().unwrap().insert(origin, fi.clone());
     Ok(fi)
 }
@@ -1104,6 +1291,11 @@ fn base_owner_repo(cwd: &str, token: &str) -> Result<String, String> {
     }
 }
 
+// Bundling these into a params struct is a real API-shape decision (one
+// caller today, but the sibling `azure.rs`/`bitbucket.rs` "create PR"
+// helpers share this exact parameter list) — deferred rather than done as
+// a drive-by in a chore(ci) PR. See PR1 clippy cleanup notes.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn rest_create_pr(
     cwd: &str,
     title: String,
@@ -1133,9 +1325,18 @@ pub(crate) fn rest_create_pr(
 
     // Resolve base from the *target* repo's default branch when left empty.
     let base = if base.is_empty() {
-        let repo_info = api_json("GET", &format!("{}/repos/{}", API_BASE, target), token, None)?;
+        let repo_info = api_json(
+            "GET",
+            &format!("{}/repos/{}", API_BASE, target),
+            token,
+            None,
+        )?;
         let default = js(&repo_info, "default_branch");
-        if default.is_empty() { "main".to_string() } else { default }
+        if default.is_empty() {
+            "main".to_string()
+        } else {
+            default
+        }
     } else {
         base
     };
@@ -1171,7 +1372,12 @@ pub(crate) fn rest_create_pr(
     Ok(json_to_pr(&created))
 }
 
-pub(crate) fn rest_merge_pr(cwd: &str, number: i64, method: &str, token: &str) -> Result<(), String> {
+pub(crate) fn rest_merge_pr(
+    cwd: &str,
+    number: i64,
+    method: &str,
+    token: &str,
+) -> Result<(), String> {
     let merge_method = match method {
         "squash" => "squash",
         "rebase" => "rebase",
@@ -1202,7 +1408,10 @@ pub(crate) fn rest_dismiss_review(
     token: &str,
 ) -> Result<(), String> {
     let (repo, _pr) = get_pr_json(cwd, number, token)?;
-    let url = format!("{}/repos/{}/pulls/{}/reviews/{}/dismissals", API_BASE, repo, number, review_id);
+    let url = format!(
+        "{}/repos/{}/pulls/{}/reviews/{}/dismissals",
+        API_BASE, repo, number, review_id
+    );
     let payload = serde_json::json!({ "message": message, "event": "DISMISS" });
     api_json("PUT", &url, token, Some(&payload.to_string()))?;
     Ok(())
@@ -1216,7 +1425,10 @@ pub(crate) fn rest_request_reviewers(
     token: &str,
 ) -> Result<(), String> {
     let (repo, _pr) = get_pr_json(cwd, number, token)?;
-    let url = format!("{}/repos/{}/pulls/{}/requested_reviewers", API_BASE, repo, number);
+    let url = format!(
+        "{}/repos/{}/pulls/{}/requested_reviewers",
+        API_BASE, repo, number
+    );
     let payload = serde_json::json!({ "reviewers": logins });
     api_json("POST", &url, token, Some(&payload.to_string()))?;
     Ok(())
@@ -1299,13 +1511,23 @@ pub(crate) fn map_reaction(r: &serde_json::Value) -> serde_json::Value {
 fn reactions_url(repo: &str, target_type: &str, target_id: i64) -> String {
     match target_type {
         "pr" => format!("{}/repos/{}/issues/{}/reactions", API_BASE, repo, target_id),
-        "review_comment" => format!("{}/repos/{}/pulls/comments/{}/reactions", API_BASE, repo, target_id),
-        _ => format!("{}/repos/{}/issues/comments/{}/reactions", API_BASE, repo, target_id),
+        "review_comment" => format!(
+            "{}/repos/{}/pulls/comments/{}/reactions",
+            API_BASE, repo, target_id
+        ),
+        _ => format!(
+            "{}/repos/{}/issues/comments/{}/reactions",
+            API_BASE, repo, target_id
+        ),
     }
 }
 
 fn reaction_delete_url(repo: &str, target_type: &str, target_id: i64, reaction_id: i64) -> String {
-    format!("{}/{}", reactions_url(repo, target_type, target_id), reaction_id)
+    format!(
+        "{}/{}",
+        reactions_url(repo, target_type, target_id),
+        reaction_id
+    )
 }
 
 // ── Review-summary reactions (GraphQL) ──────────────────────────────────────
@@ -1357,12 +1579,24 @@ fn map_gql_reaction(r: &serde_json::Value) -> serde_json::Value {
 }
 
 /// Run a GraphQL operation and surface the first `errors[]` entry as an `Err`.
-fn graphql(token: &str, query: &str, variables: serde_json::Value) -> Result<serde_json::Value, String> {
+fn graphql(
+    token: &str,
+    query: &str,
+    variables: serde_json::Value,
+) -> Result<serde_json::Value, String> {
     let payload = serde_json::json!({ "query": query, "variables": variables });
-    let v = api_json("POST", &format!("{}/graphql", API_BASE), token, Some(&payload.to_string()))?;
+    let v = api_json(
+        "POST",
+        &format!("{}/graphql", API_BASE),
+        token,
+        Some(&payload.to_string()),
+    )?;
     if let Some(errors) = v.get("errors").and_then(|e| e.as_array()) {
         if let Some(first) = errors.first() {
-            let msg = first.get("message").and_then(|m| m.as_str()).unwrap_or("GraphQL error");
+            let msg = first
+                .get("message")
+                .and_then(|m| m.as_str())
+                .unwrap_or("GraphQL error");
             return Err(format!("GraphQL error: {}", msg));
         }
     }
@@ -1371,7 +1605,10 @@ fn graphql(token: &str, query: &str, variables: serde_json::Value) -> Result<ser
 
 /// Resolve a review's opaque GraphQL node id from its REST numeric id.
 fn review_node_id(repo: &str, number: i64, review_id: i64, token: &str) -> Result<String, String> {
-    let url = format!("{}/repos/{}/pulls/{}/reviews/{}", API_BASE, repo, number, review_id);
+    let url = format!(
+        "{}/repos/{}/pulls/{}/reviews/{}",
+        API_BASE, repo, number, review_id
+    );
     let v = api_json("GET", &url, token, None)?;
     let id = js(&v, "node_id");
     if id.is_empty() {
@@ -1393,33 +1630,66 @@ fn gql_reactions_for_node(node: &str, token: &str) -> Result<Vec<serde_json::Val
     Ok(nodes.iter().map(map_gql_reaction).collect())
 }
 
-fn gql_list_review_reactions(repo: &str, number: i64, review_id: i64, token: &str) -> Result<Vec<serde_json::Value>, String> {
+fn gql_list_review_reactions(
+    repo: &str,
+    number: i64,
+    review_id: i64,
+    token: &str,
+) -> Result<Vec<serde_json::Value>, String> {
     let node = review_node_id(repo, number, review_id, token)?;
     gql_reactions_for_node(&node, token)
 }
 
-fn gql_add_review_reaction(repo: &str, number: i64, review_id: i64, content: &str, token: &str) -> Result<serde_json::Value, String> {
-    let gql_content = reaction_content_to_gql(content).ok_or_else(|| format!("Unsupported reaction: {}", content))?;
+fn gql_add_review_reaction(
+    repo: &str,
+    number: i64,
+    review_id: i64,
+    content: &str,
+    token: &str,
+) -> Result<serde_json::Value, String> {
+    let gql_content = reaction_content_to_gql(content)
+        .ok_or_else(|| format!("Unsupported reaction: {}", content))?;
     let node = review_node_id(repo, number, review_id, token)?;
     let query = "mutation($id: ID!, $c: ReactionContent!) { addReaction(input: { subjectId: $id, content: $c }) { reaction { databaseId content user { login } } } }";
-    let v = graphql(token, query, serde_json::json!({ "id": node, "c": gql_content }))?;
-    let reaction = v.pointer("/data/addReaction/reaction").cloned().unwrap_or(serde_json::Value::Null);
+    let v = graphql(
+        token,
+        query,
+        serde_json::json!({ "id": node, "c": gql_content }),
+    )?;
+    let reaction = v
+        .pointer("/data/addReaction/reaction")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
     Ok(map_gql_reaction(&reaction))
 }
 
-fn gql_delete_review_reaction(repo: &str, number: i64, review_id: i64, reaction_id: i64, token: &str) -> Result<(), String> {
+fn gql_delete_review_reaction(
+    repo: &str,
+    number: i64,
+    review_id: i64,
+    reaction_id: i64,
+    token: &str,
+) -> Result<(), String> {
     // GraphQL's removeReaction keys off content, not the reaction id, so look up
     // the content of the reaction being removed first. Resolve the node once and
     // reuse it for both the lookup and the mutation.
     let node = review_node_id(repo, number, review_id, token)?;
     let existing = gql_reactions_for_node(&node, token)?;
-    let Some(target) = existing.iter().find(|r| r.get("id").and_then(|x| x.as_i64()) == Some(reaction_id)) else {
+    let Some(target) = existing
+        .iter()
+        .find(|r| r.get("id").and_then(|x| x.as_i64()) == Some(reaction_id))
+    else {
         return Ok(()); // already gone
     };
     let rest_content = target.get("content").and_then(|c| c.as_str()).unwrap_or("");
-    let gql_content = reaction_content_to_gql(rest_content).ok_or_else(|| format!("Unsupported reaction: {}", rest_content))?;
+    let gql_content = reaction_content_to_gql(rest_content)
+        .ok_or_else(|| format!("Unsupported reaction: {}", rest_content))?;
     let query = "mutation($id: ID!, $c: ReactionContent!) { removeReaction(input: { subjectId: $id, content: $c }) { reaction { databaseId } } }";
-    graphql(token, query, serde_json::json!({ "id": node, "c": gql_content }))?;
+    graphql(
+        token,
+        query,
+        serde_json::json!({ "id": node, "c": gql_content }),
+    )?;
     Ok(())
 }
 
@@ -1440,7 +1710,9 @@ pub(crate) fn rest_list_reactions(
     }
     let url = reactions_url(&repo, target_type, target_id);
     let v = api_json("GET", &url, token, None)?;
-    Ok(v.as_array().map(|a| a.iter().map(|r| map_reaction(r)).collect()).unwrap_or_default())
+    Ok(v.as_array()
+        .map(|a| a.iter().map(map_reaction).collect())
+        .unwrap_or_default())
 }
 
 pub(crate) fn rest_add_reaction(
@@ -1493,7 +1765,10 @@ fn github_device_start_inner() -> Result<GithubDeviceCode, String> {
         "application/json",
     )?;
     if status >= 400 {
-        return Err(format!("GitHub device-code request failed (HTTP {})", status));
+        return Err(format!(
+            "GitHub device-code request failed (HTTP {})",
+            status
+        ));
     }
     let v: serde_json::Value = serde_json::from_str(text.trim())
         .map_err(|e| format!("Failed to parse device-code response: {}", e))?;
@@ -1548,7 +1823,11 @@ fn github_device_poll_inner(device_code: String) -> Result<GithubDevicePoll, Str
         return Ok(GithubDevicePoll {
             status: kind.to_string(),
             login: String::new(),
-            error: if kind == "error" { err.to_string() } else { String::new() },
+            error: if kind == "error" {
+                err.to_string()
+            } else {
+                String::new()
+            },
         });
     }
 
@@ -1661,7 +1940,10 @@ mod tests {
             "requested_reviewers": [{"login": "bob"}],
         });
         assert_eq!(json_to_pr(&pending).review_decision, "REVIEW_REQUIRED");
-        assert_eq!(json_to_pr(&pending).review_requested, vec!["bob".to_string()]);
+        assert_eq!(
+            json_to_pr(&pending).review_requested,
+            vec!["bob".to_string()]
+        );
 
         let cleared = json!({"number": 2, "state": "open", "requested_reviewers": []});
         assert_eq!(json_to_pr(&cleared).review_decision, "");

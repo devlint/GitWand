@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * LaunchpadView.vue — UI smoke tests (Phase 2 / v2.29 sections rework).
  *

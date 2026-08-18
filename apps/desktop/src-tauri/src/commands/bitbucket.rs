@@ -19,10 +19,10 @@
 //! **Security note**: credentials are injected via `curl --config -` (stdin),
 //! keeping the `Authorization: Basic` header off the process argv.
 
-use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
+use super::curl_util::{auth_header_config, curl_with_status};
 use crate::git::hidden_cmd;
 use crate::types::*;
-use super::curl_util::{auth_header_config, curl_with_status};
+use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use rayon::prelude::*;
 use std::collections::HashMap;
 
@@ -38,8 +38,8 @@ fn get_bb_creds(cwd: &str) -> Result<(String, String), String> {
     let (workspace, _) = parse_workspace_slug(cwd)?;
     // Try workspace-scoped entry first; fall back to generic workspace key.
     let account_key = workspace.clone();
-    let entry = keyring::Entry::new(BB_SERVICE, &account_key)
-        .map_err(|e| format!("keyring: {}", e))?;
+    let entry =
+        keyring::Entry::new(BB_SERVICE, &account_key).map_err(|e| format!("keyring: {}", e))?;
     let stored = entry.get_password().map_err(|_| {
         format!(
             "No Bitbucket credentials found for workspace '{workspace}'. \
@@ -85,8 +85,8 @@ fn parse_workspace_slug(cwd: &str) -> Result<(String, String), String> {
 
     let path = if url.starts_with("git@") {
         // git@bitbucket.org:workspace/repo.git  →  workspace/repo
-        url.splitn(2, ':')
-            .nth(1)
+        url.split_once(':')
+            .map(|x| x.1)
             .unwrap_or("")
             .trim_end_matches(".git")
             .to_string()
@@ -94,8 +94,8 @@ fn parse_workspace_slug(cwd: &str) -> Result<(String, String), String> {
         // https://bitbucket.org/workspace/repo.git  →  workspace/repo
         url.trim_end_matches('/')
             .trim_end_matches(".git")
-            .splitn(2, "bitbucket.org/")
-            .nth(1)
+            .split_once("bitbucket.org/")
+            .map(|x| x.1)
             .unwrap_or("")
             .to_string()
     };
@@ -162,8 +162,13 @@ fn bb_curl(
     if body.trim().is_empty() {
         return Ok(serde_json::Value::Null);
     }
-    let json: serde_json::Value = serde_json::from_str(body.trim())
-        .map_err(|e| format!("Failed to parse Bitbucket response: {} — raw: {}", e, &body[..body.len().min(300)]))?;
+    let json: serde_json::Value = serde_json::from_str(body.trim()).map_err(|e| {
+        format!(
+            "Failed to parse Bitbucket response: {} — raw: {}",
+            e,
+            &body[..body.len().min(300)]
+        )
+    })?;
     // Secondary check: Bitbucket sometimes returns 2xx with an error envelope.
     if let Some(error) = json.get("error") {
         let msg = error
@@ -178,13 +183,20 @@ fn bb_curl(
 // ─── JSON field helpers ────────────────────────────────────────────────────────
 
 fn js(v: &serde_json::Value, key: &str) -> String {
-    v.get(key).and_then(|x| x.as_str()).unwrap_or("").to_string()
+    v.get(key)
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string()
 }
 
 fn ji(v: &serde_json::Value, key: &str) -> i64 {
     v.get(key)
         .and_then(|x| x.as_i64())
-        .or_else(|| v.get(key).and_then(|x| x.as_str()).and_then(|s| s.parse().ok()))
+        .or_else(|| {
+            v.get(key)
+                .and_then(|x| x.as_str())
+                .and_then(|s| s.parse().ok())
+        })
         .unwrap_or(0)
 }
 
@@ -353,8 +365,7 @@ fn bb_pr_to_detail(pr: &serde_json::Value) -> PullRequestDetail {
         .unwrap_or_default();
 
     // merge_commit is present on merged PRs.
-    let merged_at = jnested(pr, "merge_commit", "date")
-        .or_else_empty(|| js(pr, "updated_on")); // fallback if unavailable
+    let merged_at = jnested(pr, "merge_commit", "date").or_else_empty(|| js(pr, "updated_on")); // fallback if unavailable
 
     PullRequestDetail {
         number: ji(pr, "id"),
@@ -376,7 +387,7 @@ fn bb_pr_to_detail(pr: &serde_json::Value) -> PullRequestDetail {
         review_comments: 0,
         labels: jlabels(pr, "labels"),
         reviewers,
-        mergeable: String::new(), // Not directly available in v2.10
+        mergeable: String::new(),     // Not directly available in v2.10
         checks_status: String::new(), // Bitbucket Pipelines needs a separate call
         // Bitbucket merge permission needs a separate privileges call —
         // unknown ⇒ UI gates on errors only.
@@ -391,7 +402,11 @@ trait OrElseEmpty {
 }
 impl OrElseEmpty for String {
     fn or_else_empty(self, f: impl FnOnce() -> String) -> String {
-        if self.is_empty() { f() } else { self }
+        if self.is_empty() {
+            f()
+        } else {
+            self
+        }
     }
 }
 
@@ -460,7 +475,11 @@ pub(crate) async fn bb_list_prs(
         .iter()
         .filter_map(|pr| {
             let hash = jdeep(pr, "source", "commit", "hash");
-            if hash.is_empty() { None } else { Some((ji(pr, "id"), hash)) }
+            if hash.is_empty() {
+                None
+            } else {
+                Some((ji(pr, "id"), hash))
+            }
         })
         .collect();
     let rollups: HashMap<i64, String> = prs
@@ -468,7 +487,11 @@ pub(crate) async fn bb_list_prs(
         .filter_map(|pr| {
             let sha = sha_by_num.get(&pr.number)?;
             let rollup = bb_rollup_for_sha(&workspace, &slug, sha, &auth_config);
-            if rollup.is_empty() { None } else { Some((pr.number, rollup)) }
+            if rollup.is_empty() {
+                None
+            } else {
+                Some((pr.number, rollup))
+            }
         })
         .collect();
     for pr in &mut prs {
@@ -527,10 +550,18 @@ pub(crate) async fn bb_pr_diff(cwd: String, pr_id: i64) -> Result<String, String
     let auth_config = basic_auth_config(&username, &app_password);
 
     // Bitbucket /diff endpoint returns plain-text unified diff — not JSON.
-    let url = format!("{}/pullrequests/{}/diff", repo_api(&workspace, &slug), pr_id);
+    let url = format!(
+        "{}/pullrequests/{}/diff",
+        repo_api(&workspace, &slug),
+        pr_id
+    );
     let (status, body) = bb_curl_raw("GET", &url, None, &auth_config, "*/*")?;
     if status >= 400 {
-        return Err(format!("Bitbucket diff failed (HTTP {}): {}", status, body.trim()));
+        return Err(format!(
+            "Bitbucket diff failed (HTTP {}): {}",
+            status,
+            body.trim()
+        ));
     }
     Ok(body)
 }
@@ -604,7 +635,11 @@ pub(crate) async fn bb_merge_pr(cwd: String, pr_id: i64, method: String) -> Resu
         "close_source_branch": true
     });
 
-    let url = format!("{}/pullrequests/{}/merge", repo_api(&workspace, &slug), pr_id);
+    let url = format!(
+        "{}/pullrequests/{}/merge",
+        repo_api(&workspace, &slug),
+        pr_id
+    );
     bb_curl("POST", &url, Some(&payload.to_string()), &auth_config)?;
     Ok(())
 }
@@ -625,7 +660,10 @@ pub(crate) async fn bb_checkout_pr(cwd: String, pr_id: i64) -> Result<(), String
     let pr = bb_curl("GET", &url, None, &auth_config)?;
     let branch = jdeep(&pr, "source", "branch", "name");
     if branch.is_empty() {
-        return Err(format!("Could not determine source branch for PR #{}", pr_id));
+        return Err(format!(
+            "Could not determine source branch for PR #{}",
+            pr_id
+        ));
     }
 
     // Write guard: fetch + switch mutate refs and the worktree, colliding on
@@ -684,7 +722,10 @@ pub(crate) async fn bb_pr_comments(cwd: String, pr_id: i64) -> Result<serde_json
         pr_id
     );
     let resp = bb_curl("GET", &url, None, &auth_config)?;
-    Ok(resp.get("values").cloned().unwrap_or(serde_json::Value::Array(vec![])))
+    Ok(resp
+        .get("values")
+        .cloned()
+        .unwrap_or(serde_json::Value::Array(vec![])))
 }
 
 /// Create a comment on a PR.
@@ -882,7 +923,12 @@ pub(crate) async fn bb_current_user(cwd: String) -> Result<String, String> {
     let (username, app_password) = get_bb_creds(&cwd)?;
     let auth_config = basic_auth_config(&username, &app_password);
 
-    let resp = bb_curl("GET", "https://api.bitbucket.org/2.0/user", None, &auth_config)?;
+    let resp = bb_curl(
+        "GET",
+        "https://api.bitbucket.org/2.0/user",
+        None,
+        &auth_config,
+    )?;
     Ok(resp
         .get("nickname")
         .or_else(|| resp.get("display_name"))
@@ -902,8 +948,7 @@ pub(crate) async fn bb_reviewer_candidates(cwd: String) -> Result<Vec<ReviewerCa
         "https://api.bitbucket.org/2.0/repositories/{}/{}/permissions-config/users",
         workspace, slug
     );
-    let resp = bb_curl("GET", &url, None, &auth_config)
-        .unwrap_or(serde_json::Value::Null);
+    let resp = bb_curl("GET", &url, None, &auth_config).unwrap_or(serde_json::Value::Null);
 
     let values = resp
         .get("values")
@@ -924,7 +969,10 @@ pub(crate) async fn bb_reviewer_candidates(cwd: String) -> Result<Vec<ReviewerCa
             }
             Some(ReviewerCandidate {
                 login: login.to_string(),
-                name: user.get("display_name").and_then(|v| v.as_str()).map(String::from),
+                name: user
+                    .get("display_name")
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
                 avatar_url: user
                     .get("links")
                     .and_then(|l| l.get("avatar"))
@@ -977,7 +1025,7 @@ pub(crate) async fn bb_branches(cwd: String) -> Result<Vec<String>, String> {
             _ => break,
         }
     }
-    names.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+    names.sort_by_key(|a| a.to_lowercase());
     Ok(names)
 }
 
@@ -997,7 +1045,11 @@ fn bb_rollup_from_statuses(values: &[serde_json::Value]) -> String {
             _ => pending = true, // INPROGRESS / anything unknown → still running
         }
     }
-    if pending { "PENDING".to_string() } else { "SUCCESS".to_string() }
+    if pending {
+        "PENDING".to_string()
+    } else {
+        "SUCCESS".to_string()
+    }
 }
 
 /// Fetch + aggregate the build statuses of commit `sha`. Sync, best-effort
@@ -1011,7 +1063,11 @@ fn bb_rollup_for_sha(workspace: &str, slug: &str, sha: &str, auth_config: &str) 
         workspace, slug, sha
     );
     let resp = bb_curl("GET", &url, None, auth_config).unwrap_or(serde_json::Value::Null);
-    let values = resp.get("values").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    let values = resp
+        .get("values")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
     bb_rollup_from_statuses(&values)
 }
 
@@ -1052,9 +1108,9 @@ pub(crate) async fn bb_pr_ci_checks(cwd: String, pr_id: i64) -> Result<Vec<CIChe
             let bb_state = js(s, "state");
             let conclusion = match bb_state.as_str() {
                 "SUCCESSFUL" => "success".to_string(),
-                "FAILED"     => "failure".to_string(),
-                "STOPPED"    => "cancelled".to_string(),
-                _            => "pending".to_string(),
+                "FAILED" => "failure".to_string(),
+                "STOPPED" => "cancelled".to_string(),
+                _ => "pending".to_string(),
             };
             let status = if bb_state == "INPROGRESS" {
                 "in_progress".to_string()
@@ -1067,7 +1123,11 @@ pub(crate) async fn bb_pr_ci_checks(cwd: String, pr_id: i64) -> Result<Vec<CIChe
                 conclusion,
                 details_url: {
                     let u = jnested(s, "url", "href");
-                    if u.is_empty() { js(s, "url") } else { u }
+                    if u.is_empty() {
+                        js(s, "url")
+                    } else {
+                        u
+                    }
                 },
             }
         })
@@ -1156,7 +1216,11 @@ pub(crate) fn bb_pr_annotations(cwd: String, pr_id: i64) -> Result<Vec<CIAnnotat
                 title: js(a, "summary"),
                 message: {
                     let d = js(a, "details");
-                    if d.is_empty() { js(a, "summary") } else { d }
+                    if d.is_empty() {
+                        js(a, "summary")
+                    } else {
+                        d
+                    }
                 },
             });
         }
@@ -1183,7 +1247,11 @@ pub(crate) fn bb_pr_annotations(cwd: String, pr_id: i64) -> Result<Vec<CIAnnotat
 /// Bitbucket issues have no labels array or milestone in the same shape as GitHub.
 fn bb_issue_to_issue(v: &serde_json::Value) -> crate::types::Issue {
     let assignee = jnested(v, "assignee", "nickname");
-    let assignees = if assignee.is_empty() { vec![] } else { vec![assignee] };
+    let assignees = if assignee.is_empty() {
+        vec![]
+    } else {
+        vec![assignee]
+    };
     // links.html is {"href": "..."} — extract the nested href string explicitly.
     let url = v
         .get("links")
@@ -1347,14 +1415,17 @@ mod bb_list_issues_tests {
 
     #[test]
     fn maps_bitbucket_issue_json_to_issue() {
-        let v: serde_json::Value = serde_json::from_str(r#"{
+        let v: serde_json::Value = serde_json::from_str(
+            r#"{
             "id": 5, "title": "Broken", "state": "new",
             "reporter": {"nickname": "alice"},
             "assignee": {"nickname": "bob"},
             "created_on": "2026-01-01T00:00:00Z",
             "updated_on": "2026-01-02T00:00:00Z",
             "links": {"html": {"href": "https://bitbucket.org/o/r/issues/5"}}
-        }"#).unwrap();
+        }"#,
+        )
+        .unwrap();
         let i = bb_issue_to_issue(&v);
         assert_eq!(i.number, 5);
         assert_eq!(i.state, "new");

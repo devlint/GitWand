@@ -20,10 +20,9 @@
 //! `spawn_blocking` — matching `azure.rs` — so the Tokio executor thread is
 //! never held by a synchronous wait.
 
+use crate::commands::github_api;
 use crate::git::*;
 use crate::types::*;
-use crate::commands::github_api;
-use serde_json;
 
 // ─── Inner (sync) implementations ───────────────────────────────────────────
 //
@@ -91,7 +90,10 @@ fn gh_list_prs_inner(
         // race the single-repo view of the same repo on `index.lock`. Held only
         // around the fetch — the numstat diffs below are read-only.
         let _repo = repo_lock::write(&cwd);
-        let _ = hidden_cmd("git").args(["fetch", "origin"]).current_dir(&cwd).output();
+        let _ = hidden_cmd("git")
+            .args(["fetch", "origin"])
+            .current_dir(&cwd)
+            .output();
     }
     for pr in &mut prs {
         let (adds, dels) = github_api::diff_numstat(&cwd, &pr.branch, &pr.base);
@@ -144,8 +146,8 @@ fn gh_pr_count_inner(cwd: String, state: String) -> Result<i64, String> {
     let states_expr = match st.as_str() {
         "closed" => "[CLOSED]",
         "merged" => "[MERGED]",
-        "all"    => "[OPEN, CLOSED, MERGED]",
-        _        => "[OPEN]",
+        "all" => "[OPEN, CLOSED, MERGED]",
+        _ => "[OPEN]",
     };
 
     // Resolve owner/name once via `gh repo view`. `nameWithOwner` is the
@@ -169,14 +171,24 @@ fn gh_pr_count_inner(cwd: String, state: String) -> Result<i64, String> {
     let nwo = if is_fork {
         v.get("parent")
             .and_then(|p| {
-                let owner = p.get("owner").and_then(|o| o.get("login")).and_then(|s| s.as_str())?;
+                let owner = p
+                    .get("owner")
+                    .and_then(|o| o.get("login"))
+                    .and_then(|s| s.as_str())?;
                 let name = p.get("name").and_then(|s| s.as_str())?;
                 Some(format!("{}/{}", owner, name))
             })
-            .or_else(|| v.get("nameWithOwner").and_then(|s| s.as_str()).map(|s| s.to_string()))
+            .or_else(|| {
+                v.get("nameWithOwner")
+                    .and_then(|s| s.as_str())
+                    .map(|s| s.to_string())
+            })
             .unwrap_or_default()
     } else {
-        v.get("nameWithOwner").and_then(|s| s.as_str()).unwrap_or("").to_string()
+        v.get("nameWithOwner")
+            .and_then(|s| s.as_str())
+            .unwrap_or("")
+            .to_string()
     };
 
     let (owner, name) = match nwo.split_once('/') {
@@ -191,10 +203,14 @@ fn gh_pr_count_inner(cwd: String, state: String) -> Result<i64, String> {
     );
     let out = hidden_cmd("gh")
         .args([
-            "api", "graphql",
-            "-F", &format!("owner={}", owner),
-            "-F", &format!("name={}", name),
-            "-f", &format!("query={}", query),
+            "api",
+            "graphql",
+            "-F",
+            &format!("owner={}", owner),
+            "-F",
+            &format!("name={}", name),
+            "-f",
+            &format!("query={}", query),
         ])
         .current_dir(&cwd)
         .output()
@@ -211,12 +227,17 @@ fn gh_pr_count_inner(cwd: String, state: String) -> Result<i64, String> {
     // above: no serde_json import just for one integer. The response
     // shape is fixed by GitHub's schema so the substring lookup is safe.
     let key = "\"totalCount\"";
-    let start = stdout.find(key)
+    let start = stdout
+        .find(key)
         .ok_or_else(|| format!("totalCount missing from response: {}", stdout))?;
     let after = &stdout[start + key.len()..];
-    let colon = after.find(':').ok_or_else(|| "malformed totalCount".to_string())?;
+    let colon = after
+        .find(':')
+        .ok_or_else(|| "malformed totalCount".to_string())?;
     let tail = after[colon + 1..].trim_start();
-    let end = tail.find(|c: char| !c.is_ascii_digit()).unwrap_or(tail.len());
+    let end = tail
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(tail.len());
     if end == 0 {
         return Err(format!("totalCount has no digits: {}", tail));
     }
@@ -270,11 +291,16 @@ fn gh_pr_freshness_signal_inner(cwd: String) -> Result<Option<PrFreshnessSignal>
     let target_repo = gh_fork_upstream(&cwd);
     let mut cmd = hidden_cmd("gh");
     cmd.args([
-        "pr", "list",
-        "--state", "open",
-        "--json", "number,updatedAt",
-        "--limit", "1",
-        "-S", "sort:updated-desc",
+        "pr",
+        "list",
+        "--state",
+        "open",
+        "--json",
+        "number,updatedAt",
+        "--limit",
+        "1",
+        "-S",
+        "sort:updated-desc",
     ]);
     if let Some(ref nwo) = target_repo {
         cmd.args(["--repo", nwo]);
@@ -295,14 +321,20 @@ fn gh_pr_freshness_signal_inner(cwd: String) -> Result<Option<PrFreshnessSignal>
         None => return Ok(None),
     };
     let open_count = gh_pr_count_inner(cwd, "open".to_string())?;
-    Ok(Some(PrFreshnessSignal { number, updated_at, open_count }))
+    Ok(Some(PrFreshnessSignal {
+        number,
+        updated_at,
+        open_count,
+    }))
 }
 
 /// Cheap "has the open-PR list changed?" probe for the branch-badge
 /// background-drain cache (`usePrPanel.ts`'s `PR_LIST_CACHE`). See
 /// `PrFreshnessSignal`'s doc comment for why two facts are needed.
 #[tauri::command]
-pub(crate) async fn gh_pr_freshness_signal(cwd: String) -> Result<Option<PrFreshnessSignal>, String> {
+pub(crate) async fn gh_pr_freshness_signal(
+    cwd: String,
+) -> Result<Option<PrFreshnessSignal>, String> {
     tauri::async_runtime::spawn_blocking(move || gh_pr_freshness_signal_inner(cwd))
         .await
         .map_err(|e| e.to_string())?
@@ -318,7 +350,9 @@ fn gh_create_pr_inner(
     reviewers: Option<Vec<String>>,
 ) -> Result<PullRequest, String> {
     if let Some(tok) = github_api::settings_github_token() {
-        return github_api::rest_create_pr(&cwd, title, body, base, base_repo, draft, reviewers, &tok);
+        return github_api::rest_create_pr(
+            &cwd, title, body, base, base_repo, draft, reviewers, &tok,
+        );
     }
     let mut args = vec![
         "pr".to_string(),
@@ -462,9 +496,14 @@ fn gh_list_reviewer_candidates_inner(cwd: String) -> Result<Vec<ReviewerCandidat
         ));
     }
     #[derive(serde::Deserialize)]
-    struct OwnerLogin { login: String }
+    struct OwnerLogin {
+        login: String,
+    }
     #[derive(serde::Deserialize)]
-    struct RepoView { owner: OwnerLogin, name: String }
+    struct RepoView {
+        owner: OwnerLogin,
+        name: String,
+    }
     let repo: RepoView = serde_json::from_slice(&view.stdout)
         .map_err(|e| format!("Failed to parse repo view: {}", e))?;
     let endpoint = format!("/repos/{}/{}/assignees", repo.owner.login, repo.name);
@@ -474,9 +513,11 @@ fn gh_list_reviewer_candidates_inner(cwd: String) -> Result<Vec<ReviewerCandidat
         .args([
             "api",
             "--paginate",
-            "-H", "Accept: application/vnd.github+json",
+            "-H",
+            "Accept: application/vnd.github+json",
             &endpoint,
-            "--jq", "[.[] | {login: .login, name: .name, avatar_url: .avatar_url}]",
+            "--jq",
+            "[.[] | {login: .login, name: .name, avatar_url: .avatar_url}]",
         ])
         .current_dir(&cwd)
         .output()
@@ -495,7 +536,9 @@ fn gh_list_reviewer_candidates_inner(cwd: String) -> Result<Vec<ReviewerCandidat
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     for chunk in raw.split('\n') {
         let trimmed = chunk.trim();
-        if trimmed.is_empty() { continue; }
+        if trimmed.is_empty() {
+            continue;
+        }
         // gh might return either a single array per chunk (--jq with array wrapper)
         // or NDJSON of arrays. Try to parse as Value and walk.
         let value: serde_json::Value = match serde_json::from_str(trimmed) {
@@ -505,11 +548,19 @@ fn gh_list_reviewer_candidates_inner(cwd: String) -> Result<Vec<ReviewerCandidat
         if let Some(arr) = value.as_array() {
             for item in arr {
                 let login = item.get("login").and_then(|v| v.as_str()).unwrap_or("");
-                if login.is_empty() || !seen.insert(login.to_string()) { continue; }
+                if login.is_empty() || !seen.insert(login.to_string()) {
+                    continue;
+                }
                 all.push(ReviewerCandidate {
                     login: login.to_string(),
-                    name: item.get("name").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                    avatar_url: item.get("avatar_url").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    name: item
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
+                    avatar_url: item
+                        .get("avatar_url")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
                 });
             }
         }
@@ -524,7 +575,9 @@ fn gh_list_reviewer_candidates_inner(cwd: String) -> Result<Vec<ReviewerCandidat
 /// Calls `gh api /repos/:owner/:repo/assignees` (paginated) which returns
 /// users with push access — exactly the set GitHub allows as reviewers.
 #[tauri::command]
-pub(crate) async fn gh_list_reviewer_candidates(cwd: String) -> Result<Vec<ReviewerCandidate>, String> {
+pub(crate) async fn gh_list_reviewer_candidates(
+    cwd: String,
+) -> Result<Vec<ReviewerCandidate>, String> {
     tauri::async_runtime::spawn_blocking(move || gh_list_reviewer_candidates_inner(cwd))
         .await
         .map_err(|e| e.to_string())?
@@ -548,9 +601,14 @@ fn gh_branches_inner(cwd: String) -> Result<Vec<String>, String> {
         ));
     }
     #[derive(serde::Deserialize)]
-    struct OwnerLogin { login: String }
+    struct OwnerLogin {
+        login: String,
+    }
     #[derive(serde::Deserialize)]
-    struct RepoView { owner: OwnerLogin, name: String }
+    struct RepoView {
+        owner: OwnerLogin,
+        name: String,
+    }
     let repo: RepoView = serde_json::from_slice(&view.stdout)
         .map_err(|e| format!("Failed to parse repo view: {}", e))?;
     let endpoint = format!("/repos/{}/{}/branches", repo.owner.login, repo.name);
@@ -559,9 +617,11 @@ fn gh_branches_inner(cwd: String) -> Result<Vec<String>, String> {
         .args([
             "api",
             "--paginate",
-            "-H", "Accept: application/vnd.github+json",
+            "-H",
+            "Accept: application/vnd.github+json",
             &endpoint,
-            "--jq", "[.[] | .name]",
+            "--jq",
+            "[.[] | .name]",
         ])
         .current_dir(&cwd)
         .output()
@@ -579,7 +639,9 @@ fn gh_branches_inner(cwd: String) -> Result<Vec<String>, String> {
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     for chunk in raw.split('\n') {
         let trimmed = chunk.trim();
-        if trimmed.is_empty() { continue; }
+        if trimmed.is_empty() {
+            continue;
+        }
         let value: serde_json::Value = match serde_json::from_str(trimmed) {
             Ok(v) => v,
             Err(_) => continue,
@@ -587,13 +649,15 @@ fn gh_branches_inner(cwd: String) -> Result<Vec<String>, String> {
         if let Some(arr) = value.as_array() {
             for item in arr {
                 if let Some(name) = item.as_str() {
-                    if name.is_empty() || !seen.insert(name.to_string()) { continue; }
+                    if name.is_empty() || !seen.insert(name.to_string()) {
+                        continue;
+                    }
                     names.push(name.to_string());
                 }
             }
         }
     }
-    names.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+    names.sort_by_key(|a| a.to_lowercase());
     Ok(names)
 }
 
@@ -648,7 +712,13 @@ fn gh_merge_pr_inner(cwd: String, number: i64, method: String) -> Result<(), Str
     };
 
     let output = hidden_cmd("gh")
-        .args(["pr", "merge", &number.to_string(), merge_flag, "--delete-branch"])
+        .args([
+            "pr",
+            "merge",
+            &number.to_string(),
+            merge_flag,
+            "--delete-branch",
+        ])
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to merge PR: {}", e))?;
@@ -698,22 +768,42 @@ pub(crate) async fn gh_pr_ready(cwd: String, number: i64) -> Result<(), String> 
         .map_err(|e| e.to_string())?
 }
 
-fn gh_dismiss_review_inner(cwd: String, number: i64, review_id: i64, message: String) -> Result<(), String> {
+fn gh_dismiss_review_inner(
+    cwd: String,
+    number: i64,
+    review_id: i64,
+    message: String,
+) -> Result<(), String> {
     if let Some(tok) = github_api::settings_github_token() {
         return github_api::rest_dismiss_review(&cwd, number, review_id, &message, &tok);
     }
     let nwo = gh_fork_upstream(&cwd).unwrap_or_else(|| "{owner}/{repo}".to_string());
-    let path = format!("repos/{}/pulls/{}/reviews/{}/dismissals", nwo, number, review_id);
-    gh_api_write(&cwd, "PUT", &path, &[("message", message.as_str()), ("event", "DISMISS")])?;
+    let path = format!(
+        "repos/{}/pulls/{}/reviews/{}/dismissals",
+        nwo, number, review_id
+    );
+    gh_api_write(
+        &cwd,
+        "PUT",
+        &path,
+        &[("message", message.as_str()), ("event", "DISMISS")],
+    )?;
     Ok(())
 }
 
 /// Dismiss a submitted review (B4, v3.6.0).
 #[tauri::command]
-pub(crate) async fn gh_dismiss_review(cwd: String, number: i64, review_id: i64, message: String) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || gh_dismiss_review_inner(cwd, number, review_id, message))
-        .await
-        .map_err(|e| e.to_string())?
+pub(crate) async fn gh_dismiss_review(
+    cwd: String,
+    number: i64,
+    review_id: i64,
+    message: String,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        gh_dismiss_review_inner(cwd, number, review_id, message)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 fn gh_request_reviewers_inner(cwd: String, number: i64, logins: Vec<String>) -> Result<(), String> {
@@ -742,7 +832,11 @@ fn gh_request_reviewers_inner(cwd: String, number: i64, logins: Vec<String>) -> 
 
 /// Request reviewers on an existing PR (B4, v3.6.0).
 #[tauri::command]
-pub(crate) async fn gh_request_reviewers(cwd: String, number: i64, logins: Vec<String>) -> Result<(), String> {
+pub(crate) async fn gh_request_reviewers(
+    cwd: String,
+    number: i64,
+    logins: Vec<String>,
+) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || gh_request_reviewers_inner(cwd, number, logins))
         .await
         .map_err(|e| e.to_string())?
@@ -768,7 +862,10 @@ fn gh_pr_detail_inner(cwd: String, number: i64) -> Result<PullRequestDetail, Str
         .map_err(|e| format!("gh pr view: {}", e))?;
 
     if !output.status.success() {
-        return Err(format!("gh pr view failed: {}", String::from_utf8_lossy(&output.stderr)));
+        return Err(format!(
+            "gh pr view failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -809,7 +906,10 @@ fn gh_issue_detail_inner(cwd: String, number: i64) -> Result<IssueDetail, String
         .output()
         .map_err(|e| format!("gh issue view: {}", e))?;
     if !output.status.success() {
-        return Err(format!("gh issue view failed: {}", String::from_utf8_lossy(&output.stderr)));
+        return Err(format!(
+            "gh issue view failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
     let raw: GhIssueDetailRaw = serde_json::from_str(stdout.trim())
@@ -850,7 +950,10 @@ fn gh_issue_comments_inner(cwd: String, number: i64) -> Result<Vec<serde_json::V
         .output()
         .map_err(|e| format!("gh api issue comments: {}", e))?;
     if !output.status.success() {
-        return Err(format!("gh api issue comments failed: {}", String::from_utf8_lossy(&output.stderr)));
+        return Err(format!(
+            "gh api issue comments failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
     }
     let v: serde_json::Value = serde_json::from_slice(&output.stdout)
         .map_err(|e| format!("parse issue comments: {}", e))?;
@@ -859,13 +962,20 @@ fn gh_issue_comments_inner(cwd: String, number: i64) -> Result<Vec<serde_json::V
 
 /// List conversation comments on an issue.
 #[tauri::command]
-pub(crate) async fn gh_issue_comments(cwd: String, number: i64) -> Result<Vec<serde_json::Value>, String> {
+pub(crate) async fn gh_issue_comments(
+    cwd: String,
+    number: i64,
+) -> Result<Vec<serde_json::Value>, String> {
     tauri::async_runtime::spawn_blocking(move || gh_issue_comments_inner(cwd, number))
         .await
         .map_err(|e| e.to_string())?
 }
 
-fn gh_issue_add_comment_inner(cwd: String, number: i64, body: String) -> Result<serde_json::Value, String> {
+fn gh_issue_add_comment_inner(
+    cwd: String,
+    number: i64,
+    body: String,
+) -> Result<serde_json::Value, String> {
     if let Some(tok) = github_api::settings_github_token() {
         return github_api::rest_issue_add_comment(&cwd, number, &body, &tok);
     }
@@ -878,7 +988,10 @@ fn gh_issue_add_comment_inner(cwd: String, number: i64, body: String) -> Result<
         .output()
         .map_err(|e| format!("gh api add comment: {}", e))?;
     if !output.status.success() {
-        return Err(format!("gh api add comment failed: {}", String::from_utf8_lossy(&output.stderr)));
+        return Err(format!(
+            "gh api add comment failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
     }
     let v: serde_json::Value = serde_json::from_slice(&output.stdout)
         .map_err(|e| format!("parse created comment: {}", e))?;
@@ -887,7 +1000,11 @@ fn gh_issue_add_comment_inner(cwd: String, number: i64, body: String) -> Result<
 
 /// Add a comment to an issue. Returns the created comment (mapped shape).
 #[tauri::command]
-pub(crate) async fn gh_issue_add_comment(cwd: String, number: i64, body: String) -> Result<serde_json::Value, String> {
+pub(crate) async fn gh_issue_add_comment(
+    cwd: String,
+    number: i64,
+    body: String,
+) -> Result<serde_json::Value, String> {
     tauri::async_runtime::spawn_blocking(move || gh_issue_add_comment_inner(cwd, number, body))
         .await
         .map_err(|e| e.to_string())?
@@ -906,14 +1023,22 @@ fn gh_issue_set_state_inner(cwd: String, number: i64, state: String) -> Result<(
         .output()
         .map_err(|e| format!("gh issue {}: {}", sub, e))?;
     if !output.status.success() {
-        return Err(format!("gh issue {} failed: {}", sub, String::from_utf8_lossy(&output.stderr)));
+        return Err(format!(
+            "gh issue {} failed: {}",
+            sub,
+            String::from_utf8_lossy(&output.stderr)
+        ));
     }
     Ok(())
 }
 
 /// Close (`state="closed"`) or reopen (`state="open"`) an issue.
 #[tauri::command]
-pub(crate) async fn gh_issue_set_state(cwd: String, number: i64, state: String) -> Result<(), String> {
+pub(crate) async fn gh_issue_set_state(
+    cwd: String,
+    number: i64,
+    state: String,
+) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || gh_issue_set_state_inner(cwd, number, state))
         .await
         .map_err(|e| e.to_string())?
@@ -936,7 +1061,10 @@ fn gh_fork_upstream(cwd: &str) -> Option<String> {
         return None;
     }
     v.get("parent").and_then(|p| {
-        let owner = p.get("owner").and_then(|o| o.get("login")).and_then(|s| s.as_str())?;
+        let owner = p
+            .get("owner")
+            .and_then(|o| o.get("login"))
+            .and_then(|s| s.as_str())?;
         let name = p.get("name").and_then(|s| s.as_str())?;
         Some(format!("{}/{}", owner, name))
     })
@@ -949,13 +1077,24 @@ fn gh_fork_upstream(cwd: &str) -> Option<String> {
 /// reads like unfinished code. Returns `None` on any failure.
 fn gh_current_nwo(cwd: &str) -> Option<String> {
     let out = hidden_cmd("gh")
-        .args(["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"])
+        .args([
+            "repo",
+            "view",
+            "--json",
+            "nameWithOwner",
+            "--jq",
+            ".nameWithOwner",
+        ])
         .current_dir(cwd)
         .output()
         .ok()
         .filter(|o| o.status.success())?;
     let nwo = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if nwo.is_empty() { None } else { Some(nwo) }
+    if nwo.is_empty() {
+        None
+    } else {
+        Some(nwo)
+    }
 }
 
 /// Resolve whether the current viewer can merge this PR. A PR merges into its
@@ -969,7 +1108,12 @@ fn gh_current_nwo(cwd: &str) -> Option<String> {
 fn gh_viewer_can_merge(cwd: &str, pr_url: &str) -> Option<bool> {
     let nwo = github_nwo_from_pr_url(pr_url)?;
     let output = hidden_cmd("gh")
-        .args(["api", &format!("repos/{}", nwo), "--jq", ".permissions.push"])
+        .args([
+            "api",
+            &format!("repos/{}", nwo),
+            "--jq",
+            ".permissions.push",
+        ])
         .current_dir(cwd)
         .output()
         .ok()?;
@@ -1010,7 +1154,10 @@ fn gh_pr_diff_inner(cwd: String, number: i64) -> Result<String, String> {
         .map_err(|e| format!("gh pr diff: {}", e))?;
 
     if !output.status.success() {
-        return Err(format!("gh pr diff failed: {}", String::from_utf8_lossy(&output.stderr)));
+        return Err(format!(
+            "gh pr diff failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
@@ -1035,7 +1182,12 @@ fn gh_pr_checks_inner(cwd: String, number: i64) -> Result<Vec<CICheck>, String> 
 
     // Step 1 — head commit SHA for this PR.
     let pr_out = hidden_cmd("gh")
-        .args(["api", &format!("repos/{}/pulls/{}", nwo, number), "--jq", ".head.sha"])
+        .args([
+            "api",
+            &format!("repos/{}/pulls/{}", nwo, number),
+            "--jq",
+            ".head.sha",
+        ])
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("gh api pr head sha: {}", e))?;
@@ -1052,7 +1204,10 @@ fn gh_pr_checks_inner(cwd: String, number: i64) -> Result<Vec<CICheck>, String> 
 
     // Step 2 — check-runs for that commit.
     let runs_out = hidden_cmd("gh")
-        .args(["api", &format!("repos/{}/commits/{}/check-runs?per_page=100", nwo, sha)])
+        .args([
+            "api",
+            &format!("repos/{}/commits/{}/check-runs?per_page=100", nwo, sha),
+        ])
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("gh api check-runs: {}", e))?;
@@ -1063,18 +1218,34 @@ fn gh_pr_checks_inner(cwd: String, number: i64) -> Result<Vec<CICheck>, String> 
         Ok(v) => v,
         Err(_) => return Ok(Vec::new()),
     };
-    let runs = v.get("check_runs").and_then(|r| r.as_array()).cloned().unwrap_or_default();
-    let checks = runs.iter().map(|run| {
-        let js = |k: &str| run.get(k).and_then(|s| s.as_str()).unwrap_or("").to_string();
-        let status = js("status").to_uppercase();
-        let conclusion = js("conclusion");
-        CICheck {
-            name: js("name"),
-            state: if status == "COMPLETED" { conclusion.clone() } else { status },
-            conclusion,
-            details_url: js("html_url"),
-        }
-    }).collect();
+    let runs = v
+        .get("check_runs")
+        .and_then(|r| r.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let checks = runs
+        .iter()
+        .map(|run| {
+            let js = |k: &str| {
+                run.get(k)
+                    .and_then(|s| s.as_str())
+                    .unwrap_or("")
+                    .to_string()
+            };
+            let status = js("status").to_uppercase();
+            let conclusion = js("conclusion");
+            CICheck {
+                name: js("name"),
+                state: if status == "COMPLETED" {
+                    conclusion.clone()
+                } else {
+                    status
+                },
+                conclusion,
+                details_url: js("html_url"),
+            }
+        })
+        .collect();
     Ok(checks)
 }
 
@@ -1108,7 +1279,10 @@ fn gh_pr_comments_inner(cwd: String, number: i64) -> Result<Vec<serde_json::Valu
 /// List inline review comments (anchored to diff lines) for a PR.
 /// Token present → REST; otherwise `gh api`.
 #[tauri::command]
-pub(crate) async fn gh_pr_comments(cwd: String, number: i64) -> Result<Vec<serde_json::Value>, String> {
+pub(crate) async fn gh_pr_comments(
+    cwd: String,
+    number: i64,
+) -> Result<Vec<serde_json::Value>, String> {
     tauri::async_runtime::spawn_blocking(move || gh_pr_comments_inner(cwd, number))
         .await
         .map_err(|e| e.to_string())?
@@ -1131,7 +1305,10 @@ fn gh_pr_issue_comments_inner(cwd: String, number: i64) -> Result<Vec<serde_json
 /// List issue-level (conversation) comments for a PR.
 /// Token present → REST; otherwise `gh api`.
 #[tauri::command]
-pub(crate) async fn gh_pr_issue_comments(cwd: String, number: i64) -> Result<Vec<serde_json::Value>, String> {
+pub(crate) async fn gh_pr_issue_comments(
+    cwd: String,
+    number: i64,
+) -> Result<Vec<serde_json::Value>, String> {
     tauri::async_runtime::spawn_blocking(move || gh_pr_issue_comments_inner(cwd, number))
         .await
         .map_err(|e| e.to_string())?
@@ -1154,7 +1331,10 @@ fn gh_pr_reviews_inner(cwd: String, number: i64) -> Result<Vec<serde_json::Value
 /// List submitted reviews (Approve / Request changes / Comment verdicts) for a PR.
 /// Token present → REST; otherwise `gh api`.
 #[tauri::command]
-pub(crate) async fn gh_pr_reviews(cwd: String, number: i64) -> Result<Vec<serde_json::Value>, String> {
+pub(crate) async fn gh_pr_reviews(
+    cwd: String,
+    number: i64,
+) -> Result<Vec<serde_json::Value>, String> {
     tauri::async_runtime::spawn_blocking(move || gh_pr_reviews_inner(cwd, number))
         .await
         .map_err(|e| e.to_string())?
@@ -1169,7 +1349,10 @@ fn gh_api_json(cwd: &str, path: &str) -> Result<serde_json::Value, String> {
         .output()
         .map_err(|e| format!("gh api: {}", e))?;
     if !output.status.success() {
-        return Err(format!("gh api failed: {}", String::from_utf8_lossy(&output.stderr)));
+        return Err(format!(
+            "gh api failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
     let trimmed = stdout.trim();
@@ -1181,19 +1364,33 @@ fn gh_api_json(cwd: &str, path: &str) -> Result<serde_json::Value, String> {
 
 /// Run a mutating `gh api` call (`POST`/`DELETE`) with optional `-f key=value` fields.
 /// Returns the parsed JSON body, or `Null` for 204 No Content responses.
-fn gh_api_write(cwd: &str, method: &str, path: &str, fields: &[(&str, &str)]) -> Result<serde_json::Value, String> {
+fn gh_api_write(
+    cwd: &str,
+    method: &str,
+    path: &str,
+    fields: &[(&str, &str)],
+) -> Result<serde_json::Value, String> {
     let mut cmd = hidden_cmd("gh");
     cmd.args(["api", "-X", method, path]);
     for (k, v) in fields {
         cmd.args(["-f", &format!("{}={}", k, v)]);
     }
-    let output = cmd.current_dir(cwd).output().map_err(|e| format!("gh api write: {}", e))?;
+    let output = cmd
+        .current_dir(cwd)
+        .output()
+        .map_err(|e| format!("gh api write: {}", e))?;
     if !output.status.success() {
-        return Err(format!("gh api {}: {}", method, String::from_utf8_lossy(&output.stderr)));
+        return Err(format!(
+            "gh api {}: {}",
+            method,
+            String::from_utf8_lossy(&output.stderr)
+        ));
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
     let trimmed = stdout.trim();
-    if trimmed.is_empty() { return Ok(serde_json::Value::Null); }
+    if trimmed.is_empty() {
+        return Ok(serde_json::Value::Null);
+    }
     serde_json::from_str(trimmed).map_err(|e| format!("parse gh api write response: {}", e))
 }
 
@@ -1213,39 +1410,72 @@ fn gh_auth_token() -> Option<String> {
         return None;
     }
     let tok = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if tok.is_empty() { None } else { Some(tok) }
+    if tok.is_empty() {
+        None
+    } else {
+        Some(tok)
+    }
 }
 
 /// Token for reaction calls: the GitWand token if configured, else (only for the
 /// GraphQL-only `"review"` target) the gh CLI's own token. Other targets fall
 /// back to the plain `gh api` path below when this returns `None`.
 fn reaction_token(target_type: &str) -> Option<String> {
-    github_api::settings_github_token().or_else(|| (target_type == "review").then(gh_auth_token).flatten())
+    github_api::settings_github_token()
+        .or_else(|| (target_type == "review").then(gh_auth_token).flatten())
 }
 
-fn gh_list_reactions_inner(cwd: String, number: i64, target_type: String, target_id: i64) -> Result<Vec<serde_json::Value>, String> {
+fn gh_list_reactions_inner(
+    cwd: String,
+    number: i64,
+    target_type: String,
+    target_id: i64,
+) -> Result<Vec<serde_json::Value>, String> {
     if let Some(tok) = reaction_token(&target_type) {
         return github_api::rest_list_reactions(&cwd, number, &target_type, target_id, &tok);
     }
     let nwo = gh_fork_upstream(&cwd).unwrap_or_else(|| "{owner}/{repo}".to_string());
     let path = reactions_api_path(&nwo, &target_type, target_id);
     let json = gh_api_json(&cwd, &path)?;
-    Ok(json.as_array().map(|a| a.iter().map(|r| github_api::map_reaction(r)).collect()).unwrap_or_default())
+    Ok(json
+        .as_array()
+        .map(|a| a.iter().map(github_api::map_reaction).collect())
+        .unwrap_or_default())
 }
 
 /// List reactions on a PR or one of its comments.
 /// `target_type`: `"pr"` | `"review_comment"` | `"issue_comment"`.
 /// `target_id`: PR number for `"pr"`, comment id otherwise.
 #[tauri::command]
-pub(crate) async fn gh_list_reactions(cwd: String, number: i64, target_type: String, target_id: i64) -> Result<Vec<serde_json::Value>, String> {
-    tauri::async_runtime::spawn_blocking(move || gh_list_reactions_inner(cwd, number, target_type, target_id))
-        .await
-        .map_err(|e| e.to_string())?
+pub(crate) async fn gh_list_reactions(
+    cwd: String,
+    number: i64,
+    target_type: String,
+    target_id: i64,
+) -> Result<Vec<serde_json::Value>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        gh_list_reactions_inner(cwd, number, target_type, target_id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
-fn gh_add_reaction_inner(cwd: String, number: i64, target_type: String, target_id: i64, content: String) -> Result<serde_json::Value, String> {
+fn gh_add_reaction_inner(
+    cwd: String,
+    number: i64,
+    target_type: String,
+    target_id: i64,
+    content: String,
+) -> Result<serde_json::Value, String> {
     if let Some(tok) = reaction_token(&target_type) {
-        return github_api::rest_add_reaction(&cwd, number, &target_type, target_id, &content, &tok);
+        return github_api::rest_add_reaction(
+            &cwd,
+            number,
+            &target_type,
+            target_id,
+            &content,
+            &tok,
+        );
     }
     let nwo = gh_fork_upstream(&cwd).unwrap_or_else(|| "{owner}/{repo}".to_string());
     let path = reactions_api_path(&nwo, &target_type, target_id);
@@ -1254,28 +1484,61 @@ fn gh_add_reaction_inner(cwd: String, number: i64, target_type: String, target_i
 
 /// Add a reaction to a PR or comment.
 #[tauri::command]
-pub(crate) async fn gh_add_reaction(cwd: String, number: i64, target_type: String, target_id: i64, content: String) -> Result<serde_json::Value, String> {
-    tauri::async_runtime::spawn_blocking(move || gh_add_reaction_inner(cwd, number, target_type, target_id, content))
-        .await
-        .map_err(|e| e.to_string())?
+pub(crate) async fn gh_add_reaction(
+    cwd: String,
+    number: i64,
+    target_type: String,
+    target_id: i64,
+    content: String,
+) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        gh_add_reaction_inner(cwd, number, target_type, target_id, content)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
-fn gh_delete_reaction_inner(cwd: String, number: i64, target_type: String, target_id: i64, reaction_id: i64) -> Result<(), String> {
+fn gh_delete_reaction_inner(
+    cwd: String,
+    number: i64,
+    target_type: String,
+    target_id: i64,
+    reaction_id: i64,
+) -> Result<(), String> {
     if let Some(tok) = reaction_token(&target_type) {
-        return github_api::rest_delete_reaction(&cwd, number, &target_type, target_id, reaction_id, &tok);
+        return github_api::rest_delete_reaction(
+            &cwd,
+            number,
+            &target_type,
+            target_id,
+            reaction_id,
+            &tok,
+        );
     }
     let nwo = gh_fork_upstream(&cwd).unwrap_or_else(|| "{owner}/{repo}".to_string());
-    let path = format!("{}/{}", reactions_api_path(&nwo, &target_type, target_id), reaction_id);
+    let path = format!(
+        "{}/{}",
+        reactions_api_path(&nwo, &target_type, target_id),
+        reaction_id
+    );
     gh_api_write(&cwd, "DELETE", &path, &[])?;
     Ok(())
 }
 
 /// Delete a reaction from a PR or comment.
 #[tauri::command]
-pub(crate) async fn gh_delete_reaction(cwd: String, number: i64, target_type: String, target_id: i64, reaction_id: i64) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || gh_delete_reaction_inner(cwd, number, target_type, target_id, reaction_id))
-        .await
-        .map_err(|e| e.to_string())?
+pub(crate) async fn gh_delete_reaction(
+    cwd: String,
+    number: i64,
+    target_type: String,
+    target_id: i64,
+    reaction_id: i64,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        gh_delete_reaction_inner(cwd, number, target_type, target_id, reaction_id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 fn gh_fork_info_inner(cwd: String) -> Result<ForkInfo, String> {
@@ -1293,19 +1556,29 @@ fn gh_fork_info_inner(cwd: String) -> Result<ForkInfo, String> {
             String::from_utf8_lossy(&output.stderr)
         ));
     }
-    let v: serde_json::Value =
-        serde_json::from_slice(&output.stdout).map_err(|e| e.to_string())?;
-    let origin = v.get("nameWithOwner").and_then(|s| s.as_str()).unwrap_or("").to_string();
+    let v: serde_json::Value = serde_json::from_slice(&output.stdout).map_err(|e| e.to_string())?;
+    let origin = v
+        .get("nameWithOwner")
+        .and_then(|s| s.as_str())
+        .unwrap_or("")
+        .to_string();
     let is_fork = v.get("isFork").and_then(|b| b.as_bool()).unwrap_or(false);
     let parent = v
         .get("parent")
         .and_then(|p| {
-            let owner = p.get("owner").and_then(|o| o.get("login")).and_then(|s| s.as_str())?;
+            let owner = p
+                .get("owner")
+                .and_then(|o| o.get("login"))
+                .and_then(|s| s.as_str())?;
             let name = p.get("name").and_then(|s| s.as_str())?;
             Some(format!("{}/{}", owner, name))
         })
         .unwrap_or_default();
-    Ok(ForkInfo { is_fork, origin, parent })
+    Ok(ForkInfo {
+        is_fork,
+        origin,
+        parent,
+    })
 }
 
 /// Report the current repo's fork relationship so the PR create view can offer
@@ -1347,7 +1620,10 @@ pub(crate) fn gh_check_annotations(cwd: String, number: i64) -> Result<Vec<CIAnn
     let output = hidden_cmd("gh")
         .args([
             "api",
-            &format!("repos/{{owner}}/{{repo}}/commits/{}/check-runs?per_page=100", sha),
+            &format!(
+                "repos/{{owner}}/{{repo}}/commits/{}/check-runs?per_page=100",
+                sha
+            ),
         ])
         .current_dir(&cwd)
         .output()
@@ -1392,7 +1668,10 @@ pub(crate) fn gh_check_annotations(cwd: String, number: i64) -> Result<Vec<CIAnn
         let output = hidden_cmd("gh")
             .args([
                 "api",
-                &format!("repos/{{owner}}/{{repo}}/check-runs/{}/annotations?per_page=100", run_id),
+                &format!(
+                    "repos/{{owner}}/{{repo}}/check-runs/{}/annotations?per_page=100",
+                    run_id
+                ),
             ])
             .current_dir(&cwd)
             .output();
@@ -1403,7 +1682,9 @@ pub(crate) fn gh_check_annotations(cwd: String, number: i64) -> Result<Vec<CIAnn
         let stdout = String::from_utf8_lossy(&output.stdout);
         let arr: serde_json::Value =
             serde_json::from_str(stdout.trim()).unwrap_or(serde_json::Value::Array(vec![]));
-        let Some(items) = arr.as_array() else { continue };
+        let Some(items) = arr.as_array() else {
+            continue;
+        };
 
         for a in items {
             let s = |k: &str| a.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string();
@@ -1450,15 +1731,25 @@ fn gh_list_issues_inner(
     // Fallback: shell `gh issue list` (mirrors workspace_issues_all gh path).
     let mut cmd = hidden_cmd("gh");
     cmd.args([
-        "issue", "list",
-        "--state", "open",
-        "--json", "number,title,state,author,assignees,labels,url,createdAt,updatedAt,milestone",
-        "--limit", &lim.to_string(),
+        "issue",
+        "list",
+        "--state",
+        "open",
+        "--json",
+        "number,title,state,author,assignees,labels,url,createdAt,updatedAt,milestone",
+        "--limit",
+        &lim.to_string(),
     ]);
     match filter.as_str() {
-        "assigned" => { cmd.args(["--assignee", "@me"]); }
-        "created" => { cmd.args(["--author", "@me"]); }
-        "mentioned" => { cmd.args(["--search", "mentions:@me"]); }
+        "assigned" => {
+            cmd.args(["--assignee", "@me"]);
+        }
+        "created" => {
+            cmd.args(["--author", "@me"]);
+        }
+        "mentioned" => {
+            cmd.args(["--search", "mentions:@me"]);
+        }
         _ => {}
     }
     let output = cmd

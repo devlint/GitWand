@@ -190,7 +190,10 @@ fn extract_gh_token(shell: &str) {
     }
 
     std::env::set_var("GH_TOKEN", &token);
-    eprintln!("[gitwand] GH_TOKEN preloaded from login shell (length={})", token.len());
+    eprintln!(
+        "[gitwand] GH_TOKEN preloaded from login shell (length={})",
+        token.len()
+    );
 }
 
 /// Spawn `$SHELL -l -c "glab auth status --show-token"` and propagate the
@@ -233,7 +236,10 @@ fn extract_glab_token(shell: &str) {
     };
 
     std::env::set_var("GITLAB_TOKEN", &token);
-    eprintln!("[gitwand] GITLAB_TOKEN preloaded from login shell (length={})", token.len());
+    eprintln!(
+        "[gitwand] GITLAB_TOKEN preloaded from login shell (length={})",
+        token.len()
+    );
 }
 
 /// Extract the token value from `glab auth status --show-token` output.
@@ -286,19 +292,28 @@ mod glab_token_tests {
     #[test]
     fn extracts_token_from_a_status_line() {
         let output = "gitlab.com\n  ✓ Logged in to gitlab.com as alice (keyring)\n  ✓ Token: glpat-abcdefghijklmnopqrst\n";
-        assert_eq!(parse_glab_token(output), Some("glpat-abcdefghijklmnopqrst".to_string()));
+        assert_eq!(
+            parse_glab_token(output),
+            Some("glpat-abcdefghijklmnopqrst".to_string())
+        );
     }
 
     #[test]
     fn strips_ansi_color_codes_around_the_token() {
         let output = "\u{1b}[32m✓\u{1b}[0m Token: \u{1b}[33mglpat-zzzzzzzzzzzzzzzzzzzz\u{1b}[0m\n";
-        assert_eq!(parse_glab_token(output), Some("glpat-zzzzzzzzzzzzzzzzzzzz".to_string()));
+        assert_eq!(
+            parse_glab_token(output),
+            Some("glpat-zzzzzzzzzzzzzzzzzzzz".to_string())
+        );
     }
 
     #[test]
     fn takes_the_first_token_line_when_multiple_hosts_are_configured() {
         let output = "gitlab.com\n  ✓ Token: glpat-firsthost0000000000\n\nself-hosted.example.com\n  ✓ Token: glpat-secondhost000000000\n";
-        assert_eq!(parse_glab_token(output), Some("glpat-firsthost0000000000".to_string()));
+        assert_eq!(
+            parse_glab_token(output),
+            Some("glpat-firsthost0000000000".to_string())
+        );
     }
 
     #[test]

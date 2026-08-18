@@ -1,7 +1,7 @@
-pub(crate) mod git;
-pub(crate) mod types;
 pub(crate) mod commands;
+pub(crate) mod git;
 pub(crate) mod shell_env;
+pub(crate) mod types;
 
 pub(crate) use crate::types::*;
 // Used only by the `#[cfg(test)] mod tests` block below (parse_gh_pr_json,
@@ -12,41 +12,52 @@ pub(crate) use crate::types::*;
 pub(crate) use crate::git::*;
 
 use tauri::{Emitter, Manager};
-use tauri_plugin_global_shortcut::GlobalShortcutExt;
-#[cfg(not(debug_assertions))]
+#[cfg(feature = "telemetry")]
 use tauri_plugin_aptabase::EventTracker;
+use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
-/// GitWand Desktop — Tauri backend
-///
-/// Most of the resolution logic runs in the frontend via @gitwand/core (TypeScript).
-/// This Rust backend handles:
-/// - Native file system access (reading conflicted files, browsing directories)
-/// - Git command execution
-/// - Window management
-///
-/// ─── Trust boundaries ──────────────────────────────────────
-///
-/// Tauri commands live on a trust boundary: inputs come from the webview,
-/// where they may originate from untrusted repo content (READMEs, PR bodies,
-/// file names). Categories of commands and their security invariants:
-///
-/// 1. **Filesystem read/write** (`read_file`, `write_file`, `list_dir`):
-///    - Paths are constrained under an explicit `cwd` root via `safe_repo_path`.
-///    - No `..` segments may escape the root.
-///
-/// 2. **Git command execution** (`get_conflicted_files`, diff/log/status, etc.):
-///    - Arguments are passed mechanically via `.arg()` — never interpolated
-///      into a shell string. Safe by construction against command injection.
-///    - `cwd` is used as `.current_dir()` for the process, so the git binary
-///      itself confines filesystem access to the repo.
-///
-/// 3. **External CLI execution** (`gh`, `claude`, editor): same rules as (2).
-///    `claude` runs with API-key env vars stripped to force the OAuth session.
-///
-/// 4. **Window / IPC events**: trusted frontend-only surface.
-///
-/// When adding a new command, classify it against one of these categories and
-/// reuse the helpers below.
+// Release builds MUST be built with `--features telemetry` (see
+// release.yml). Without it, `tauri-plugin-aptabase` is entirely absent
+// (it's an optional dependency, see Cargo.toml's [features] section), so a
+// release shipped without this flag would silently lose all analytics —
+// this turns that mistake into a build failure instead.
+#[cfg(all(not(debug_assertions), not(feature = "telemetry")))]
+compile_error!(
+    "release builds must be built with --features telemetry \
+     (see release.yml). A release without it silently loses all analytics."
+);
+
+// GitWand Desktop — Tauri backend
+//
+// Most of the resolution logic runs in the frontend via @gitwand/core (TypeScript).
+// This Rust backend handles:
+// - Native file system access (reading conflicted files, browsing directories)
+// - Git command execution
+// - Window management
+//
+// ─── Trust boundaries ──────────────────────────────────────
+//
+// Tauri commands live on a trust boundary: inputs come from the webview,
+// where they may originate from untrusted repo content (READMEs, PR bodies,
+// file names). Categories of commands and their security invariants:
+//
+// 1. **Filesystem read/write** (`read_file`, `write_file`, `list_dir`):
+//    - Paths are constrained under an explicit `cwd` root via `safe_repo_path`.
+//    - No `..` segments may escape the root.
+//
+// 2. **Git command execution** (`get_conflicted_files`, diff/log/status, etc.):
+//    - Arguments are passed mechanically via `.arg()` — never interpolated
+//      into a shell string. Safe by construction against command injection.
+//    - `cwd` is used as `.current_dir()` for the process, so the git binary
+//      itself confines filesystem access to the repo.
+//
+// 3. **External CLI execution** (`gh`, `claude`, editor): same rules as (2).
+//    `claude` runs with API-key env vars stripped to force the OAuth session.
+//
+// 4. **Window / IPC events**: trusted frontend-only surface.
+//
+// When adding a new command, classify it against one of these categories and
+// reuse the helpers below.
 
 // ─── Git read commands → commands/read.rs ─────────────────────
 // (git_status, git_diff, git_log, git_repo_state, git_show,
@@ -56,7 +67,6 @@ use tauri_plugin_aptabase::EventTracker;
 // `commands::read::*`. Internal helpers (libgit2_branch_status,
 // libgit2_file_statuses, compute_push_remote_via_cli, git_status_cli,
 // merge_file_preview) live there alongside their only callers.
-
 
 // `gh_*` commands (list_prs, create_pr, list_reviewer_candidates,
 // checkout_pr, merge_pr, pr_detail, pr_diff, pr_checks) migrated to
@@ -82,7 +92,6 @@ use tauri_plugin_aptabase::EventTracker;
 // gh_pr_checks → commands/gh.rs
 
 // ─── Read .gitwandrc ──────────────────────────────────────
-
 
 // ─── Claude Code CLI (piggyback on user's local install) ─────
 //
@@ -210,7 +219,9 @@ pub fn git_log_parity(
     // Command fns are now `async` (run off the UI thread). These `*_parity`
     // wrappers are sync entry points for the parity-probe example, so block on
     // the future here to keep their signatures unchanged.
-    tauri::async_runtime::block_on(commands::read::git_log(cwd, count, all, author, None, None, None, None))
+    tauri::async_runtime::block_on(commands::read::git_log(
+        cwd, count, all, author, None, None, None, None,
+    ))
 }
 
 pub fn git_branches_parity(cwd: String) -> Result<Vec<types::GitBranch>, String> {
@@ -242,8 +253,8 @@ pub fn scan_secrets_parity(
     cwd: String,
     config: serde_json::Value,
 ) -> Result<Vec<types::SecretFinding>, String> {
-    let config: types::SecretsScanConfig =
-        serde_json::from_value(config).map_err(|e| format!("invalid secrets scan config: {}", e))?;
+    let config: types::SecretsScanConfig = serde_json::from_value(config)
+        .map_err(|e| format!("invalid secrets scan config: {}", e))?;
     commands::secrets::scan_staged(&cwd, &config)
 }
 
@@ -251,11 +262,12 @@ pub fn scan_secrets_parity(
 
 /// Aptabase App Key for anonymous launch telemetry. This is a public client
 /// identifier (format `A-EU-*` / `A-US-*`), not a secret — same trust model
-/// as the previous public Umami website ID. Only used in release builds.
-#[cfg(not(debug_assertions))]
+/// as the previous public Umami website ID. Only used in release builds
+/// compiled with `--features telemetry`.
+#[cfg(feature = "telemetry")]
 const APTABASE_APP_KEY: &str = "A-EU-3954664786";
 
-#[cfg(not(debug_assertions))]
+#[cfg(feature = "telemetry")]
 /// Returns the anonymous install ID, creating it on first launch.
 ///
 /// Stored at `{data_local_dir}/gitwand/install_id` as a plain UUID v4.
@@ -338,9 +350,11 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_clipboard_manager::init());
 
-    // Anonymous launch telemetry (release builds only). Registered
-    // conditionally because APTABASE_APP_KEY is compiled out in debug.
-    #[cfg(not(debug_assertions))]
+    // Anonymous launch telemetry (release builds with --features telemetry
+    // only). Registered conditionally because APTABASE_APP_KEY and the
+    // tauri-plugin-aptabase dependency itself are both compiled out unless
+    // the `telemetry` feature is enabled.
+    #[cfg(feature = "telemetry")]
     let builder = builder.plugin(tauri_plugin_aptabase::Builder::new(APTABASE_APP_KEY).build());
 
     builder
@@ -349,18 +363,21 @@ pub fn run() {
             // to bring GitWand to the foreground from anywhere.
             use tauri_plugin_global_shortcut::ShortcutState;
             let handle = app.handle().clone();
-            app.global_shortcut().on_shortcut("CmdOrCtrl+Shift+G", move |_app, _shortcut, event| {
-                if event.state == ShortcutState::Pressed {
-                    // Show + focus the main window
-                    if let Some(window) = handle.get_webview_window("main") {
-                        let _ = window.show();
-                        let _ = window.unminimize();
-                        let _ = window.set_focus();
+            app.global_shortcut().on_shortcut(
+                "CmdOrCtrl+Shift+G",
+                move |_app, _shortcut, event| {
+                    if event.state == ShortcutState::Pressed {
+                        // Show + focus the main window
+                        if let Some(window) = handle.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.unminimize();
+                            let _ = window.set_focus();
+                        }
+                        // Emit event so frontend can react (e.g. open folder picker)
+                        let _ = handle.emit("global-shortcut-activate", ());
                     }
-                    // Emit event so frontend can react (e.g. open folder picker)
-                    let _ = handle.emit("global-shortcut-activate", ());
-                }
-            })?;
+                },
+            )?;
 
             // Anonymous launch telemetry via Aptabase — fire-and-forget.
             // Replaced Umami: Umami Cloud filters non-browser User-Agents and
@@ -371,8 +388,8 @@ pub fn run() {
             // install_id is a random UUID (not hardware-derived). The plugin
             // auto-captures OS, app version and locale, so only install_id is
             // sent as a custom property. track_event runs in the background.
-            // Skipped in debug builds.
-            #[cfg(not(debug_assertions))]
+            // Skipped unless built with --features telemetry.
+            #[cfg(feature = "telemetry")]
             {
                 let install_id = get_or_create_install_id();
                 let _ = app.track_event(
@@ -423,7 +440,6 @@ pub fn run() {
             commands::ops::git_delete_branch,
             commands::ops::git_delete_remote_branch,
             commands::ops::git_rename_branch,
-
             commands::ops::git_stash,
             commands::ops::git_stash_pop,
             commands::ops::open_in_editor,
@@ -960,11 +976,31 @@ mod tests {
         };
         let json = serde_json::to_string(&item).unwrap();
         // #[serde(rename_all = "camelCase")] must produce camelCase keys
-        assert!(json.contains("\"repoPath\""), "repo_path should serialize as repoPath, got: {}", json);
-        assert!(json.contains("\"repoName\""), "repo_name should serialize as repoName, got: {}", json);
-        assert!(!json.contains("\"repo_path\""), "snake_case must not appear: {}", json);
-        assert!(!json.contains("\"repo_name\""), "snake_case must not appear: {}", json);
-        assert!(json.contains("\"prs\""), "prs field must appear in JSON, got: {}", json);
+        assert!(
+            json.contains("\"repoPath\""),
+            "repo_path should serialize as repoPath, got: {}",
+            json
+        );
+        assert!(
+            json.contains("\"repoName\""),
+            "repo_name should serialize as repoName, got: {}",
+            json
+        );
+        assert!(
+            !json.contains("\"repo_path\""),
+            "snake_case must not appear: {}",
+            json
+        );
+        assert!(
+            !json.contains("\"repo_name\""),
+            "snake_case must not appear: {}",
+            json
+        );
+        assert!(
+            json.contains("\"prs\""),
+            "prs field must appear in JSON, got: {}",
+            json
+        );
     }
 
     #[test]
@@ -976,9 +1012,16 @@ mod tests {
             error: Some("gh: command not found".to_string()),
         };
         let json = serde_json::to_string(&item).unwrap();
-        assert!(json.contains("\"gh: command not found\""), "error message must appear in JSON");
+        assert!(
+            json.contains("\"gh: command not found\""),
+            "error message must appear in JSON"
+        );
         // error field itself should be camelCase (it's a single word, stays "error")
-        assert!(json.contains("\"error\":\"gh: command not found\""), "error key+value must appear together: {}", json);
+        assert!(
+            json.contains("\"error\":\"gh: command not found\""),
+            "error key+value must appear together: {}",
+            json
+        );
     }
 
     #[test]
@@ -1035,7 +1078,10 @@ mod tests {
         }]"#;
         let issues = parse_gh_issue_json(json).unwrap();
         assert_eq!(issues.len(), 1);
-        assert_eq!(issues[0].milestone, "", "milestone should be empty string when absent");
+        assert_eq!(
+            issues[0].milestone, "",
+            "milestone should be empty string when absent"
+        );
         assert!(issues[0].assignees.is_empty());
         assert!(issues[0].labels.is_empty());
     }
@@ -1046,8 +1092,12 @@ mod tests {
         fn extract(status_out: &str) -> Vec<String> {
             let mut seen = std::collections::HashSet::new();
             for line in status_out.lines() {
-                if line.len() < 4 { continue; }
-                if &line[0..2] == "??" { continue; }
+                if line.len() < 4 {
+                    continue;
+                }
+                if &line[0..2] == "??" {
+                    continue;
+                }
                 let path_part = &line[3..];
                 let path = if path_part.contains(" -> ") {
                     path_part.split(" -> ").last().unwrap_or(path_part).trim()
@@ -1077,7 +1127,10 @@ mod tests {
         assert_eq!(extract(" M \"new file.ts\"\n"), vec!["new file.ts"]);
 
         // Rename with spaces: new path, quotes stripped
-        assert_eq!(extract("R  \"old file.ts\" -> \"new file.ts\"\n"), vec!["new file.ts"]);
+        assert_eq!(
+            extract("R  \"old file.ts\" -> \"new file.ts\"\n"),
+            vec!["new file.ts"]
+        );
 
         // Deduplication
         assert_eq!(

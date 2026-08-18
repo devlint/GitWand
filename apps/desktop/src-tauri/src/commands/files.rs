@@ -136,7 +136,11 @@ pub(crate) async fn read_file_at_revision(
 }
 
 #[tauri::command]
-pub(crate) async fn folder_diff(cwd: String, ref_a: String, ref_b: String) -> Result<FolderDiffNode, String> {
+pub(crate) async fn folder_diff(
+    cwd: String,
+    ref_a: String,
+    ref_b: String,
+) -> Result<FolderDiffNode, String> {
     if cwd.trim().is_empty() {
         return Err("cwd must not be empty".to_string());
     }
@@ -186,10 +190,8 @@ pub(crate) async fn folder_diff(cwd: String, ref_a: String, ref_b: String) -> Re
     // --- Merge into raw changes (key = new_path) ---
     let mut changes: Vec<RawFileChange> = Vec::with_capacity(name_status.len());
     for (new_path, status, old_path) in name_status.into_iter() {
-        let (additions, deletions, binary) = numstat
-            .get(&new_path)
-            .copied()
-            .unwrap_or((0, 0, false));
+        let (additions, deletions, binary) =
+            numstat.get(&new_path).copied().unwrap_or((0, 0, false));
         changes.push(RawFileChange {
             new_path,
             old_path,
@@ -243,8 +245,8 @@ pub(crate) async fn list_dir(path: Option<String>) -> Result<ListDirResult, Stri
         .canonicalize()
         .map_err(|e| format!("Cannot resolve path: {}", e))?;
 
-    let entries = std::fs::read_dir(&dir_path)
-        .map_err(|e| format!("Cannot read directory: {}", e))?;
+    let entries =
+        std::fs::read_dir(&dir_path).map_err(|e| format!("Cannot read directory: {}", e))?;
 
     // Is this the home directory? If so, we want to avoid probing
     // inside TCC-protected subfolders on macOS (Documents/Desktop/...)
@@ -326,7 +328,13 @@ fn build_repo_tree(cwd: &str) -> Result<RepoTreeResult, String> {
     }
 
     let output = git_cmd()
-        .args(["ls-files", "-z", "--cached", "--others", "--exclude-standard"])
+        .args([
+            "ls-files",
+            "-z",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+        ])
         .current_dir(cwd)
         .output()
         .map_err(|e| format!("Failed to run git ls-files: {}", e))?;
@@ -390,8 +398,10 @@ mod list_repo_tree_tests {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_nanos();
-            let dir = std::env::temp_dir()
-                .join(format!("gitwand-tree-test-{}-{}-{}-{}", label, pid, n, nanos));
+            let dir = std::env::temp_dir().join(format!(
+                "gitwand-tree-test-{}-{}-{}-{}",
+                label, pid, n, nanos
+            ));
             std::fs::create_dir_all(&dir).unwrap();
             let repo = TempRepo { path: dir };
             repo.git(&["init", "-q"]);
@@ -435,13 +445,23 @@ mod list_repo_tree_tests {
         let result = build_repo_tree(&repo.cwd()).unwrap();
 
         assert!(!result.truncated);
-        let names: Vec<&str> = result.root.children.iter().map(|c| c.name.as_str()).collect();
+        let names: Vec<&str> = result
+            .root
+            .children
+            .iter()
+            .map(|c| c.name.as_str())
+            .collect();
         assert!(names.contains(&"src"));
         assert!(names.contains(&"untracked.md"));
         assert!(names.contains(&".gitignore"));
         assert!(!names.contains(&"ignored_dir"));
 
-        let src_folder = result.root.children.iter().find(|c| c.name == "src").unwrap();
+        let src_folder = result
+            .root
+            .children
+            .iter()
+            .find(|c| c.name == "src")
+            .unwrap();
         assert_eq!(src_folder.kind, "folder");
         assert_eq!(src_folder.children.len(), 1);
         assert_eq!(src_folder.children[0].name, "main.rs");

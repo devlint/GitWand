@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * RepoTabStrip.vue — pointer-based drag-to-reorder regression guards.
  *

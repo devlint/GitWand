@@ -11,6 +11,9 @@ on:
       - ".github/workflows/perf.yml"
   push:
     branches: [main]
+    paths:
+      - "apps/desktop/**"
+      - ".github/workflows/perf.yml"
 
 jobs:
   bench:
@@ -32,6 +35,12 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+          cache-on-failure: true
+          shared-key: probe
+
       - name: Install Linux dependencies
         run: |
           set -euxo pipefail
@@ -43,6 +52,13 @@ jobs:
           # dependency tree which transitively pulls these crates in.
           # `libayatana-appindicator3-dev` is the supported replacement for
           # the deprecated `libappindicator3-dev`.
+          #
+          # `libssl-dev` intentionally NOT installed (P4.1) — see the
+          # [patch.crates-io] comment in Cargo.toml. openssl-sys is gone
+          # from the resolved dependency graph after the reqwest 0.13 +
+          # rustls dedup, and the parity-probe example (built here, no
+          # `telemetry` feature) never even compiles tauri-plugin-aptabase
+          # in the first place, since that dependency is now optional.
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev \
             libglib2.0-dev \
@@ -50,7 +66,6 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev \
             libxdo-dev \
-            libssl-dev \
             build-essential \
             file \
             patchelf
@@ -73,27 +88,27 @@ jobs:
           # Export PKG_CONFIG_PATH at runner level so cargo subprocesses see it.
           echo "PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig:/usr/lib/pkgconfig" >> "$GITHUB_ENV"
 
-      # Cache cargo deps to keep CI under the 20 min budget.
-      # First run: ~8 min compile (rayon + git2 vendored). Subsequent: ~30 s.
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            apps/desktop/src-tauri/target
-          key: ${{ runner.os }}-cargo-perf-${{ hashFiles('apps/desktop/src-tauri/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-perf-
-
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # Build the parity probe in release mode — bench should reflect what
-      # users actually run, not a debug build.
+      # Build the parity probe on the `ci` profile (thin LTO, 16 codegen
+      # units — see [profile.ci] in Cargo.toml): the benches only measure
+      # `git` subprocess spawn latency (31-46ms medians), so the fat-LTO
+      # `release` profile bought nothing but compile time here.
       - name: Build parity probe
         working-directory: apps/desktop/src-tauri
-        run: cargo build --locked --example parity-probe --release
+        run: cargo build --locked --example parity-probe --profile ci
+
+      # perf.yml already installs the Rust toolchain, the Linux deps, and
+      # builds the parity-probe binary — the 8 parity tests
+      # (tests/parity/*.test.mjs) that verify the Rust backend and
+      # dev-server.mjs agree never ran in any workflow before this. Point
+      # them at the binary just built above instead of the debug default.
+      - name: Parity tests (Rust backend vs dev-server)
+        working-directory: apps/desktop
+        env:
+          PARITY_PROBE: ${{ github.workspace }}/apps/desktop/src-tauri/target/ci/examples/parity-probe
+        run: pnpm test:parity
 
       - name: Run benches
         working-directory: apps/desktop
@@ -110,8 +125,11 @@ jobs:
       # the desktop frontend resolves `@gitwand/core` via pnpm workspace and
       # vue-tsc reads the package's `dist/index.d.ts`. Without this step the
       # typecheck fails with `TS2307: Cannot find module '@gitwand/core'`.
-      # ci.yml / publish.yml / release.yml already do this; perf.yml was the
-      # outlier. Same pattern as ci.yml L116.
+      # ci.yml's `test` job gets this for free from its recursive
+      # `pnpm -r --filter '!gitwand-website' run build`; release.yml and
+      # publish.yml have their own explicit "Build workspace dependencies"
+      # step. perf.yml needs its own explicit step since it only builds
+      # apps/desktop below, not the whole workspace.
       - name: Build @gitwand/core (TS declarations for downstream typecheck)
         run: pnpm --filter @gitwand/core run build
 

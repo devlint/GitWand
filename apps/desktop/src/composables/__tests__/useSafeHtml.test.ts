@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * XSS regression tests for useSafeHtml.
  *

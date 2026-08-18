@@ -172,19 +172,15 @@ pub(crate) async fn claude_cli_prompt(
     output_format: Option<String>,
     model: Option<String>,
 ) -> Result<String, String> {
-    let binary = resolve_claude_binary()
-        .ok_or_else(|| "Binaire `claude` introuvable".to_string())?;
+    let binary =
+        resolve_claude_binary().ok_or_else(|| "Binaire `claude` introuvable".to_string())?;
 
     // Compose the full prompt: if a system prompt is provided, prepend it
     // as a Markdown-delimited section. `claude -p` doesn't expose a separate
     // system/user channel, so this is the simplest portable shape.
     let full_prompt = match system_prompt {
         Some(sys) if !sys.trim().is_empty() => {
-            format!(
-                "# System\n{}\n\n# User\n{}",
-                sys.trim(),
-                prompt.trim()
-            )
+            format!("# System\n{}\n\n# User\n{}", sys.trim(), prompt.trim())
         }
         _ => prompt,
     };
@@ -260,8 +256,9 @@ pub(crate) async fn detect_codex_cli() -> Result<CodexCliInfo, String> {
                 version: String::new(),
                 logged_in: false,
                 status: "not_found".to_string(),
-                detail: "Binaire `codex` introuvable. Installez-le avec `npm install -g @openai/codex`."
-                    .to_string(),
+                detail:
+                    "Binaire `codex` introuvable. Installez-le avec `npm install -g @openai/codex`."
+                        .to_string(),
             });
         }
     };
@@ -289,8 +286,7 @@ pub(crate) async fn codex_cli_prompt(
     cwd: Option<String>,
     model: Option<String>,
 ) -> Result<String, String> {
-    let binary = resolve_codex_binary()
-        .ok_or_else(|| "Binaire `codex` introuvable".to_string())?;
+    let binary = resolve_codex_binary().ok_or_else(|| "Binaire `codex` introuvable".to_string())?;
 
     // Codex CLI doesn't expose separate system/user channels; prepend the
     // system prompt as a Markdown section, same shape as the Claude flow.
@@ -433,8 +429,8 @@ pub(crate) fn antigravity_cli_prompt(
     cwd: Option<String>,
     model: Option<String>,
 ) -> Result<String, String> {
-    let binary = resolve_antigravity_binary()
-        .ok_or_else(|| "Binaire `agy` introuvable".to_string())?;
+    let binary =
+        resolve_antigravity_binary().ok_or_else(|| "Binaire `agy` introuvable".to_string())?;
 
     let full_prompt = match system_prompt {
         Some(sys) if !sys.trim().is_empty() => {
@@ -564,8 +560,8 @@ pub(crate) async fn opencode_cli_prompt(
     cwd: Option<String>,
     model: Option<String>,
 ) -> Result<String, String> {
-    let binary = resolve_opencode_binary()
-        .ok_or_else(|| "Binaire `opencode` introuvable".to_string())?;
+    let binary =
+        resolve_opencode_binary().ok_or_else(|| "Binaire `opencode` introuvable".to_string())?;
 
     // opencode run takes the message as a positional arg and has no separate
     // system channel — prepend the system prompt as a Markdown section, same
@@ -739,8 +735,8 @@ pub(crate) fn copilot_cli_prompt(
     cwd: Option<String>,
     model: Option<String>,
 ) -> Result<String, String> {
-    let binary = resolve_copilot_binary()
-        .ok_or_else(|| "Binaire `copilot` introuvable".to_string())?;
+    let binary =
+        resolve_copilot_binary().ok_or_else(|| "Binaire `copilot` introuvable".to_string())?;
 
     // Copilot CLI doesn't expose a separate system channel — prepend the
     // system prompt as a Markdown section, same shape as the other flows.

@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * Issue #151 — every stash rendered its date as the literal "Invalid Date".
  *

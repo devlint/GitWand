@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * CommitGraph.vue — ref-classification regression for #137.
  *

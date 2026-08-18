@@ -108,9 +108,15 @@ fn main() -> ExitCode {
                 Ok(v) => v,
                 Err(code) => return code,
             };
-            let count = input.get("count").and_then(|v| v.as_i64()).map(|v| v as i32);
+            let count = input
+                .get("count")
+                .and_then(|v| v.as_i64())
+                .map(|v| v as i32);
             let all = input.get("all").and_then(|v| v.as_bool());
-            let author = input.get("author").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let author = input
+                .get("author")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
             to_json(git_log_parity(cwd, count, all, author))
         }
         "git-branches" => {
@@ -169,7 +175,10 @@ fn to_json<T: serde::Serialize>(r: Result<T, String>) -> (String, ExitCode) {
     match r {
         Ok(v) => match serde_json::to_string(&v) {
             Ok(s) => (s, ExitCode::from(0)),
-            Err(e) => (json!({"error": format!("serialize failure: {}", e)}).to_string(), ExitCode::from(1)),
+            Err(e) => (
+                json!({"error": format!("serialize failure: {}", e)}).to_string(),
+                ExitCode::from(1),
+            ),
         },
         Err(e) => (json!({"error": e}).to_string(), ExitCode::from(1)),
     }

@@ -1,10 +1,10 @@
 use crate::git::*;
 use crate::types::*;
+use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Instant;
-use rayon::prelude::*;
 
 // ─── Git stage / unstage ─────────────────────────────────────
 
@@ -16,7 +16,9 @@ pub(crate) async fn git_stage(cwd: String, paths: Vec<String>) -> Result<(), Str
     for p in &paths {
         cmd.arg(p);
     }
-    let output = cmd.output().map_err(|e| format!("Failed to run git add: {}", e))?;
+    let output = cmd
+        .output()
+        .map_err(|e| format!("Failed to run git add: {}", e))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!("git add failed: {}", stderr));
@@ -32,7 +34,9 @@ pub(crate) async fn git_unstage(cwd: String, paths: Vec<String>) -> Result<(), S
     for p in &paths {
         cmd.arg(p);
     }
-    let output = cmd.output().map_err(|e| format!("Failed to run git reset: {}", e))?;
+    let output = cmd
+        .output()
+        .map_err(|e| format!("Failed to run git reset: {}", e))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!("git reset failed: {}", stderr));
@@ -47,12 +51,18 @@ pub(crate) async fn git_stage_patch(cwd: String, patch: String) -> Result<(), St
     cmd.args(["apply", "--cached", "--unidiff-zero", "-"])
         .current_dir(&cwd)
         .stdin(std::process::Stdio::piped());
-    let mut child = cmd.spawn().map_err(|e| format!("Failed to run git apply: {}", e))?;
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to run git apply: {}", e))?;
     if let Some(ref mut stdin) = child.stdin {
         use std::io::Write;
-        stdin.write_all(patch.as_bytes()).map_err(|e| format!("Failed to write patch: {}", e))?;
+        stdin
+            .write_all(patch.as_bytes())
+            .map_err(|e| format!("Failed to write patch: {}", e))?;
     }
-    let output = child.wait_with_output().map_err(|e| format!("Failed to wait for git apply: {}", e))?;
+    let output = child
+        .wait_with_output()
+        .map_err(|e| format!("Failed to wait for git apply: {}", e))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!("git apply failed: {}", stderr));
@@ -67,12 +77,18 @@ pub(crate) async fn git_unstage_patch(cwd: String, patch: String) -> Result<(), 
     cmd.args(["apply", "--cached", "--reverse", "--unidiff-zero", "-"])
         .current_dir(&cwd)
         .stdin(std::process::Stdio::piped());
-    let mut child = cmd.spawn().map_err(|e| format!("Failed to run git apply: {}", e))?;
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to run git apply: {}", e))?;
     if let Some(ref mut stdin) = child.stdin {
         use std::io::Write;
-        stdin.write_all(patch.as_bytes()).map_err(|e| format!("Failed to write patch: {}", e))?;
+        stdin
+            .write_all(patch.as_bytes())
+            .map_err(|e| format!("Failed to write patch: {}", e))?;
     }
-    let output = child.wait_with_output().map_err(|e| format!("Failed to wait for git apply: {}", e))?;
+    let output = child
+        .wait_with_output()
+        .map_err(|e| format!("Failed to wait for git apply: {}", e))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!("git apply --reverse failed: {}", stderr));
@@ -95,8 +111,10 @@ pub(crate) async fn git_commit(
     // Inject identity overrides before the `commit` sub-command so git sees them.
     if let (Some(ref name), Some(ref email)) = (&identity_name, &identity_email) {
         if !name.is_empty() && !email.is_empty() {
-            cmd.arg("-c").arg(format!("user.name={}", name))
-               .arg("-c").arg(format!("user.email={}", email));
+            cmd.arg("-c")
+                .arg(format!("user.name={}", name))
+                .arg("-c")
+                .arg(format!("user.email={}", email));
         }
     }
     let output = cmd
@@ -104,7 +122,12 @@ pub(crate) async fn git_commit(
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to run git commit: {}", e))?;
-    record_cmd(&format!("git commit -m {:?}", message), &cwd, _t0.elapsed().as_millis() as u64, output.status.code().unwrap_or(-1));
+    record_cmd(
+        &format!("git commit -m {:?}", message),
+        &cwd,
+        _t0.elapsed().as_millis() as u64,
+        output.status.code().unwrap_or(-1),
+    );
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -118,7 +141,9 @@ pub(crate) async fn git_commit(
         .output()
         .map_err(|e| format!("Failed to get commit hash: {}", e))?;
 
-    let hash = String::from_utf8_lossy(&log_output.stdout).trim().to_string();
+    let hash = String::from_utf8_lossy(&log_output.stdout)
+        .trim()
+        .to_string();
     Ok(hash)
 }
 
@@ -131,7 +156,12 @@ pub(crate) async fn git_amend_commit(cwd: String, message: String) -> Result<Str
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to run git commit --amend: {}", e))?;
-    record_cmd(&format!("git commit --amend -m {:?}", message), &cwd, _t0.elapsed().as_millis() as u64, output.status.code().unwrap_or(-1));
+    record_cmd(
+        &format!("git commit --amend -m {:?}", message),
+        &cwd,
+        _t0.elapsed().as_millis() as u64,
+        output.status.code().unwrap_or(-1),
+    );
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -144,7 +174,9 @@ pub(crate) async fn git_amend_commit(cwd: String, message: String) -> Result<Str
         .output()
         .map_err(|e| format!("Failed to get commit hash: {}", e))?;
 
-    let hash = String::from_utf8_lossy(&log_output.stdout).trim().to_string();
+    let hash = String::from_utf8_lossy(&log_output.stdout)
+        .trim()
+        .to_string();
     Ok(hash)
 }
 
@@ -187,11 +219,9 @@ pub(crate) async fn git_split_commit(
             .map_err(|e| format!("Failed to read status: {}", e))?;
         let stdout = String::from_utf8_lossy(&output.stdout);
         if !stdout.trim().is_empty() {
-            return Err(
-                "Working tree must be clean before splitting a commit — \
+            return Err("Working tree must be clean before splitting a commit — \
                  commit, stash, or discard your changes first."
-                    .to_string(),
-            );
+                .to_string());
         }
     }
 
@@ -214,8 +244,7 @@ pub(crate) async fn git_split_commit(
         let parent_count = tokens.len().saturating_sub(1);
         if parent_count == 0 {
             return Err(
-                "Cannot split the root commit — it has no parent to reset onto."
-                    .to_string(),
+                "Cannot split the root commit — it has no parent to reset onto.".to_string(),
             );
         }
         if parent_count > 1 {
@@ -300,7 +329,9 @@ pub(crate) async fn git_split_commit(
             .current_dir(&cwd)
             .output()
             .map_err(|e| format!("Failed to read first hash: {}", e))?;
-        String::from_utf8_lossy(&hash_output.stdout).trim().to_string()
+        String::from_utf8_lossy(&hash_output.stdout)
+            .trim()
+            .to_string()
     };
 
     // Step 5: stage everything remaining (working tree ↔ index = inverse of first_patch)
@@ -340,7 +371,9 @@ pub(crate) async fn git_split_commit(
             .current_dir(&cwd)
             .output()
             .map_err(|e| format!("Failed to read second hash: {}", e))?;
-        String::from_utf8_lossy(&hash_output.stdout).trim().to_string()
+        String::from_utf8_lossy(&hash_output.stdout)
+            .trim()
+            .to_string()
     };
 
     Ok(GitSplitCommitResult {
@@ -352,7 +385,11 @@ pub(crate) async fn git_split_commit(
 // ─── Git push / pull / merge ─────────────────────────────────
 
 #[tauri::command]
-pub(crate) async fn git_push(cwd: String, set_upstream: Option<bool>, force: Option<bool>) -> Result<GitPushPullResult, String> {
+pub(crate) async fn git_push(
+    cwd: String,
+    set_upstream: Option<bool>,
+    force: Option<bool>,
+) -> Result<GitPushPullResult, String> {
     // Shared guard: push is network-bound and touches only refs, not the
     // index/worktree, so it need not exclude reads — but it must not overlap a
     // writer (checkout/pull/rebase) mutating the refs it is about to publish.
@@ -370,7 +407,12 @@ pub(crate) async fn git_push(cwd: String, set_upstream: Option<bool>, force: Opt
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to run git push: {}", e))?;
-    record_cmd(&format!("git {}", args.join(" ")), &cwd, _t0.elapsed().as_millis() as u64, output.status.code().unwrap_or(-1));
+    record_cmd(
+        &format!("git {}", args.join(" ")),
+        &cwd,
+        _t0.elapsed().as_millis() as u64,
+        output.status.code().unwrap_or(-1),
+    );
 
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
@@ -400,7 +442,12 @@ pub(crate) async fn git_fetch(cwd: String) -> Result<GitPushPullResult, String> 
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to run git fetch: {}", e))?;
-    record_cmd("git fetch --prune", &cwd, _t0.elapsed().as_millis() as u64, output.status.code().unwrap_or(-1));
+    record_cmd(
+        "git fetch --prune",
+        &cwd,
+        _t0.elapsed().as_millis() as u64,
+        output.status.code().unwrap_or(-1),
+    );
 
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
@@ -425,7 +472,12 @@ pub(crate) async fn git_merge(cwd: String, branch: String) -> Result<GitPushPull
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to run git merge: {}", e))?;
-    record_cmd(&format!("git merge {}", branch), &cwd, _t0.elapsed().as_millis() as u64, output.status.code().unwrap_or(-1));
+    record_cmd(
+        &format!("git merge {}", branch),
+        &cwd,
+        _t0.elapsed().as_millis() as u64,
+        output.status.code().unwrap_or(-1),
+    );
 
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
@@ -454,7 +506,12 @@ pub(crate) async fn git_merge_abort(cwd: String) -> Result<GitPushPullResult, St
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to run git merge --abort: {}", e))?;
-    record_cmd("git merge --abort", &cwd, _t0.elapsed().as_millis() as u64, output.status.code().unwrap_or(-1));
+    record_cmd(
+        "git merge --abort",
+        &cwd,
+        _t0.elapsed().as_millis() as u64,
+        output.status.code().unwrap_or(-1),
+    );
 
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
@@ -480,7 +537,12 @@ pub(crate) async fn git_merge_continue(cwd: String) -> Result<GitPushPullResult,
         .env("GIT_EDITOR", "true")
         .output()
         .map_err(|e| format!("Failed to run git merge --continue: {}", e))?;
-    record_cmd("git merge --continue", &cwd, _t0.elapsed().as_millis() as u64, output.status.code().unwrap_or(-1));
+    record_cmd(
+        "git merge --continue",
+        &cwd,
+        _t0.elapsed().as_millis() as u64,
+        output.status.code().unwrap_or(-1),
+    );
 
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
@@ -497,7 +559,11 @@ pub(crate) async fn git_merge_continue(cwd: String) -> Result<GitPushPullResult,
 }
 
 #[tauri::command]
-pub(crate) async fn git_pull(cwd: String, strategy: String, autostash: Option<bool>) -> Result<GitPushPullResult, String> {
+pub(crate) async fn git_pull(
+    cwd: String,
+    strategy: String,
+    autostash: Option<bool>,
+) -> Result<GitPushPullResult, String> {
     let _t0 = Instant::now();
     // Pass the strategy flag EXPLICITLY so the user's pull-mode choice is
     // authoritative. A bare `git pull` defers to the ambient `pull.rebase`
@@ -521,7 +587,12 @@ pub(crate) async fn git_pull(cwd: String, strategy: String, autostash: Option<bo
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to run git pull: {}", e))?;
-    record_cmd(&format!("git {}", args.join(" ")), &cwd, _t0.elapsed().as_millis() as u64, output.status.code().unwrap_or(-1));
+    record_cmd(
+        &format!("git {}", args.join(" ")),
+        &cwd,
+        _t0.elapsed().as_millis() as u64,
+        output.status.code().unwrap_or(-1),
+    );
 
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
@@ -554,7 +625,12 @@ pub(crate) async fn git_rebase_action(cwd: String, action: String) -> Result<(),
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to run git rebase --{}: {}", arg, e))?;
-    record_cmd(&format!("git rebase --{}", arg), &cwd, _t0.elapsed().as_millis() as u64, output.status.code().unwrap_or(-1));
+    record_cmd(
+        &format!("git rebase --{}", arg),
+        &cwd,
+        _t0.elapsed().as_millis() as u64,
+        output.status.code().unwrap_or(-1),
+    );
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -643,8 +719,10 @@ pub(crate) async fn git_interactive_rebase(
 
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if stderr.contains("CONFLICT") || stderr.contains("could not apply")
-        || stdout.contains("CONFLICT") || stdout.contains("could not apply")
+    if stderr.contains("CONFLICT")
+        || stderr.contains("could not apply")
+        || stdout.contains("CONFLICT")
+        || stdout.contains("could not apply")
     {
         return Ok(InteractiveRebaseResult { conflict: true });
     }
@@ -655,7 +733,11 @@ pub(crate) async fn git_interactive_rebase(
 // ─── Git discard ───────────────────────────────────────────────
 
 #[tauri::command]
-pub(crate) async fn git_discard(cwd: String, paths: Vec<String>, untracked: bool) -> Result<(), String> {
+pub(crate) async fn git_discard(
+    cwd: String,
+    paths: Vec<String>,
+    untracked: bool,
+) -> Result<(), String> {
     let _repo = repo_lock::write(&cwd);
     if untracked {
         let mut cmd = git_cmd();
@@ -663,7 +745,9 @@ pub(crate) async fn git_discard(cwd: String, paths: Vec<String>, untracked: bool
         for p in &paths {
             cmd.arg(p);
         }
-        let output = cmd.output().map_err(|e| format!("Failed to run git clean: {}", e))?;
+        let output = cmd
+            .output()
+            .map_err(|e| format!("Failed to run git clean: {}", e))?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(format!("git clean failed: {}", stderr));
@@ -674,7 +758,9 @@ pub(crate) async fn git_discard(cwd: String, paths: Vec<String>, untracked: bool
         for p in &paths {
             cmd.arg(p);
         }
-        let output = cmd.output().map_err(|e| format!("Failed to run git checkout: {}", e))?;
+        let output = cmd
+            .output()
+            .map_err(|e| format!("Failed to run git checkout: {}", e))?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(format!("git checkout failed: {}", stderr));
@@ -689,7 +775,8 @@ pub(crate) async fn git_discard(cwd: String, paths: Vec<String>, untracked: bool
         let to_reset: Vec<&String> = paths.iter().filter(|p| sub_paths.contains(*p)).collect();
         if !to_reset.is_empty() {
             let mut cmd = git_cmd();
-            cmd.args(["submodule", "update", "--force", "--"]).current_dir(&cwd);
+            cmd.args(["submodule", "update", "--force", "--"])
+                .current_dir(&cwd);
             for p in &to_reset {
                 cmd.arg(p);
             }
@@ -713,7 +800,13 @@ fn declared_submodule_paths(cwd: &str) -> std::collections::HashSet<String> {
         return out;
     }
     if let Ok(cfg) = git_cmd()
-        .args(["config", "--file", ".gitmodules", "--get-regexp", r"\.path$"])
+        .args([
+            "config",
+            "--file",
+            ".gitmodules",
+            "--get-regexp",
+            r"\.path$",
+        ])
         .current_dir(cwd)
         .output()
     {
@@ -732,7 +825,10 @@ fn declared_submodule_paths(cwd: &str) -> std::collections::HashSet<String> {
 // ─── Git branches ──────────────────────────────────────────────
 
 #[tauri::command]
-pub(crate) async fn git_branches(cwd: String, default_branch: Option<String>) -> Result<Vec<GitBranch>, String> {
+pub(crate) async fn git_branches(
+    cwd: String,
+    default_branch: Option<String>,
+) -> Result<Vec<GitBranch>, String> {
     let _repo = repo_lock::read(&cwd);
     let main_name = resolve_default_branch(&cwd, default_branch.as_deref());
     let output = git_cmd()
@@ -758,16 +854,24 @@ pub(crate) async fn git_branches(cwd: String, default_branch: Option<String>) ->
 
     for line in stdout.lines() {
         let line = line.trim();
-        if line.is_empty() { continue; }
+        if line.is_empty() {
+            continue;
+        }
 
         let is_current = line.starts_with('*');
         let line = if is_current { &line[1..] } else { line };
 
         let parts: Vec<&str> = line.split('\x1f').collect();
-        if parts.len() < 3 { continue; }
+        if parts.len() < 3 {
+            continue;
+        }
 
         let name = parts[0].to_string();
-        let upstream = if parts[1].is_empty() { None } else { Some(parts[1].to_string()) };
+        let upstream = if parts[1].is_empty() {
+            None
+        } else {
+            Some(parts[1].to_string())
+        };
         let track_info = parts[2];
 
         let mut ahead: i32 = 0;
@@ -775,15 +879,31 @@ pub(crate) async fn git_branches(cwd: String, default_branch: Option<String>) ->
         if !track_info.is_empty() {
             for part in track_info.split(", ") {
                 if part.starts_with("ahead ") {
-                    ahead = part.strip_prefix("ahead ").unwrap_or("0").parse().unwrap_or(0);
+                    ahead = part
+                        .strip_prefix("ahead ")
+                        .unwrap_or("0")
+                        .parse()
+                        .unwrap_or(0);
                 } else if part.starts_with("behind ") {
-                    behind = part.strip_prefix("behind ").unwrap_or("0").parse().unwrap_or(0);
+                    behind = part
+                        .strip_prefix("behind ")
+                        .unwrap_or("0")
+                        .parse()
+                        .unwrap_or(0);
                 }
             }
         }
 
-        let last_commit = if parts.len() > 3 { parts[3].to_string() } else { String::new() };
-        let last_commit_date = if parts.len() > 4 { parts[4].trim().to_string() } else { String::new() };
+        let last_commit = if parts.len() > 3 {
+            parts[3].to_string()
+        } else {
+            String::new()
+        };
+        let last_commit_date = if parts.len() > 4 {
+            parts[4].trim().to_string()
+        } else {
+            String::new()
+        };
 
         let main_count = if parts.len() > 5 {
             let ab = parts[5].split_whitespace().next().unwrap_or("0");
@@ -792,7 +912,9 @@ pub(crate) async fn git_branches(cwd: String, default_branch: Option<String>) ->
             0
         };
 
-        if name.contains("HEAD ->") || name == "origin/HEAD" { continue; }
+        if name.contains("HEAD ->") || name == "origin/HEAD" {
+            continue;
+        }
 
         let is_remote = name.starts_with("origin/") || name.starts_with("remotes/");
         let clean_name = if name.starts_with("remotes/") {
@@ -803,17 +925,20 @@ pub(crate) async fn git_branches(cwd: String, default_branch: Option<String>) ->
 
         main_counts.insert(clean_name.clone(), main_count);
 
-        branches_raw.push((GitBranch {
-            name: clean_name,
-            is_current,
-            is_remote,
-            upstream: upstream.clone(),
-            ahead,
-            behind,
-            main_commit_count: 0, // Fill later
-            last_commit,
-            last_commit_date,
-        }, upstream));
+        branches_raw.push((
+            GitBranch {
+                name: clean_name,
+                is_current,
+                is_remote,
+                upstream: upstream.clone(),
+                ahead,
+                behind,
+                main_commit_count: 0, // Fill later
+                last_commit,
+                last_commit_date,
+            },
+            upstream,
+        ));
     }
 
     let mut branches = Vec::new();
@@ -834,32 +959,51 @@ pub(crate) async fn git_branches(cwd: String, default_branch: Option<String>) ->
 }
 
 #[tauri::command]
-pub(crate) async fn git_create_branch(cwd: String, name: String, checkout: bool, start_point: Option<String>) -> Result<(), String> {
+pub(crate) async fn git_create_branch(
+    cwd: String,
+    name: String,
+    checkout: bool,
+    start_point: Option<String>,
+) -> Result<(), String> {
     let _repo = repo_lock::write(&cwd);
     if checkout {
         let mut args = vec!["checkout", "-b", &name];
-        if let Some(ref sp) = start_point { args.push(sp); }
+        if let Some(ref sp) = start_point {
+            args.push(sp);
+        }
         let _t0 = Instant::now();
         let output = git_cmd()
             .args(&args)
             .current_dir(&cwd)
             .output()
             .map_err(|e| format!("Failed to create branch: {}", e))?;
-        record_cmd(&format!("git {}", args.join(" ")), &cwd, _t0.elapsed().as_millis() as u64, output.status.code().unwrap_or(-1));
+        record_cmd(
+            &format!("git {}", args.join(" ")),
+            &cwd,
+            _t0.elapsed().as_millis() as u64,
+            output.status.code().unwrap_or(-1),
+        );
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(format!("git checkout -b failed: {}", stderr));
         }
     } else {
         let mut args = vec!["branch", &name];
-        if let Some(ref sp) = start_point { args.push(sp); }
+        if let Some(ref sp) = start_point {
+            args.push(sp);
+        }
         let _t0 = Instant::now();
         let output = git_cmd()
             .args(&args)
             .current_dir(&cwd)
             .output()
             .map_err(|e| format!("Failed to create branch: {}", e))?;
-        record_cmd(&format!("git {}", args.join(" ")), &cwd, _t0.elapsed().as_millis() as u64, output.status.code().unwrap_or(-1));
+        record_cmd(
+            &format!("git {}", args.join(" ")),
+            &cwd,
+            _t0.elapsed().as_millis() as u64,
+            output.status.code().unwrap_or(-1),
+        );
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(format!("git branch failed: {}", stderr));
@@ -877,7 +1021,12 @@ pub(crate) async fn git_switch_branch(cwd: String, name: String) -> Result<(), S
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to switch branch: {}", e))?;
-    record_cmd(&format!("git checkout {}", name), &cwd, _t0.elapsed().as_millis() as u64, output.status.code().unwrap_or(-1));
+    record_cmd(
+        &format!("git checkout {}", name),
+        &cwd,
+        _t0.elapsed().as_millis() as u64,
+        output.status.code().unwrap_or(-1),
+    );
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!("git checkout failed: {}", stderr));
@@ -886,7 +1035,11 @@ pub(crate) async fn git_switch_branch(cwd: String, name: String) -> Result<(), S
 }
 
 #[tauri::command]
-pub(crate) async fn git_delete_branch(cwd: String, name: String, force: bool) -> Result<(), String> {
+pub(crate) async fn git_delete_branch(
+    cwd: String,
+    name: String,
+    force: bool,
+) -> Result<(), String> {
     let _repo = repo_lock::write(&cwd);
     let flag = if force { "-D" } else { "-d" };
     let _t0 = Instant::now();
@@ -895,7 +1048,12 @@ pub(crate) async fn git_delete_branch(cwd: String, name: String, force: bool) ->
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to delete branch: {}", e))?;
-    record_cmd(&format!("git branch {} {}", flag, name), &cwd, _t0.elapsed().as_millis() as u64, output.status.code().unwrap_or(-1));
+    record_cmd(
+        &format!("git branch {} {}", flag, name),
+        &cwd,
+        _t0.elapsed().as_millis() as u64,
+        output.status.code().unwrap_or(-1),
+    );
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!("git branch {} failed: {}", flag, stderr));
@@ -904,14 +1062,23 @@ pub(crate) async fn git_delete_branch(cwd: String, name: String, force: bool) ->
 }
 
 #[tauri::command]
-pub(crate) async fn git_delete_remote_branch(cwd: String, remote: String, name: String) -> Result<(), String> {
+pub(crate) async fn git_delete_remote_branch(
+    cwd: String,
+    remote: String,
+    name: String,
+) -> Result<(), String> {
     let _t0 = Instant::now();
     let output = git_cmd()
         .args(["push", &remote, "--delete", &name])
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to delete remote branch: {}", e))?;
-    record_cmd(&format!("git push {} --delete {}", remote, name), &cwd, _t0.elapsed().as_millis() as u64, output.status.code().unwrap_or(-1));
+    record_cmd(
+        &format!("git push {} --delete {}", remote, name),
+        &cwd,
+        _t0.elapsed().as_millis() as u64,
+        output.status.code().unwrap_or(-1),
+    );
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!("git push --delete failed: {}", stderr));
@@ -920,7 +1087,11 @@ pub(crate) async fn git_delete_remote_branch(cwd: String, remote: String, name: 
 }
 
 #[tauri::command]
-pub(crate) async fn git_rename_branch(cwd: String, old_name: String, new_name: String) -> Result<(), String> {
+pub(crate) async fn git_rename_branch(
+    cwd: String,
+    old_name: String,
+    new_name: String,
+) -> Result<(), String> {
     let output = git_cmd()
         .args(["branch", "-m", &old_name, &new_name])
         .current_dir(&cwd)
@@ -950,7 +1121,12 @@ pub(crate) async fn git_stash(cwd: String, message: Option<String>) -> Result<()
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to run git stash: {}", e))?;
-    record_cmd(&format!("git {}", args.join(" ")), &cwd, _t0.elapsed().as_millis() as u64, output.status.code().unwrap_or(-1));
+    record_cmd(
+        &format!("git {}", args.join(" ")),
+        &cwd,
+        _t0.elapsed().as_millis() as u64,
+        output.status.code().unwrap_or(-1),
+    );
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!("git stash failed: {}", stderr));
@@ -967,7 +1143,12 @@ pub(crate) async fn git_stash_pop(cwd: String) -> Result<(), String> {
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to run git stash pop: {}", e))?;
-    record_cmd("git stash pop", &cwd, _t0.elapsed().as_millis() as u64, output.status.code().unwrap_or(-1));
+    record_cmd(
+        "git stash pop",
+        &cwd,
+        _t0.elapsed().as_millis() as u64,
+        output.status.code().unwrap_or(-1),
+    );
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!("git stash pop failed: {}", stderr));
@@ -998,7 +1179,10 @@ pub(crate) async fn git_stash_list(cwd: String) -> Result<Vec<StashEntry>, Strin
             let (branch, message) = if subject.starts_with("On ") {
                 // "On <branch>: <custom-message>"
                 if let Some(colon_pos) = subject.find(": ") {
-                    (subject[3..colon_pos].to_string(), subject[colon_pos + 2..].to_string())
+                    (
+                        subject[3..colon_pos].to_string(),
+                        subject[colon_pos + 2..].to_string(),
+                    )
                 } else {
                     (String::new(), subject.to_string())
                 }
@@ -1008,7 +1192,11 @@ pub(crate) async fn git_stash_list(cwd: String) -> Result<Vec<StashEntry>, Strin
                     let branch = subject[7..colon_pos].to_string();
                     // drop the leading "<sha> " from the commit message portion
                     let rest = &subject[colon_pos + 2..];
-                    let msg = rest.splitn(2, ' ').nth(1).unwrap_or(rest).to_string();
+                    let msg = rest
+                        .split_once(' ')
+                        .map(|x| x.1)
+                        .unwrap_or(rest)
+                        .to_string();
                     (branch, msg)
                 } else {
                     (String::new(), subject.to_string())
@@ -1040,7 +1228,12 @@ pub(crate) async fn git_stash_apply(cwd: String, index: usize) -> Result<(), Str
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to apply stash: {}", e))?;
-    record_cmd(&format!("git stash apply {}", stash_ref), &cwd, _t0.elapsed().as_millis() as u64, output.status.code().unwrap_or(-1));
+    record_cmd(
+        &format!("git stash apply {}", stash_ref),
+        &cwd,
+        _t0.elapsed().as_millis() as u64,
+        output.status.code().unwrap_or(-1),
+    );
     if !output.status.success() {
         return Err(format!(
             "git stash apply failed: {}",
@@ -1106,7 +1299,10 @@ pub(crate) async fn git_stash_show(cwd: String, index: usize) -> Result<String, 
 // ─── Cherry-pick ─────────────────────────────────────────────
 
 #[tauri::command]
-pub(crate) async fn git_cherry_pick(cwd: String, hashes: Vec<String>) -> Result<GitPushPullResult, String> {
+pub(crate) async fn git_cherry_pick(
+    cwd: String,
+    hashes: Vec<String>,
+) -> Result<GitPushPullResult, String> {
     let _repo = repo_lock::write(&cwd);
     let git = git_binary();
     let mut args = vec!["cherry-pick".to_string()];
@@ -1118,7 +1314,12 @@ pub(crate) async fn git_cherry_pick(cwd: String, hashes: Vec<String>) -> Result<
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to run git cherry-pick: {}", e))?;
-    record_cmd(&format!("git {}", args.join(" ")), &cwd, _t0.elapsed().as_millis() as u64, output.status.code().unwrap_or(-1));
+    record_cmd(
+        &format!("git {}", args.join(" ")),
+        &cwd,
+        _t0.elapsed().as_millis() as u64,
+        output.status.code().unwrap_or(-1),
+    );
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
@@ -1126,7 +1327,11 @@ pub(crate) async fn git_cherry_pick(cwd: String, hashes: Vec<String>) -> Result<
 
     Ok(GitPushPullResult {
         success: output.status.success(),
-        message: if output.status.success() { stdout } else { stderr },
+        message: if output.status.success() {
+            stdout
+        } else {
+            stderr
+        },
         conflicts: Some(has_conflicts),
     })
 }
@@ -1139,7 +1344,12 @@ pub(crate) async fn git_cherry_pick_abort(cwd: String) -> Result<(), String> {
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to abort cherry-pick: {}", e))?;
-    record_cmd("git cherry-pick --abort", &cwd, _t0.elapsed().as_millis() as u64, output.status.code().unwrap_or(-1));
+    record_cmd(
+        "git cherry-pick --abort",
+        &cwd,
+        _t0.elapsed().as_millis() as u64,
+        output.status.code().unwrap_or(-1),
+    );
     if !output.status.success() {
         return Err(format!(
             "cherry-pick --abort failed: {}",
@@ -1159,14 +1369,23 @@ pub(crate) async fn git_cherry_pick_continue(cwd: String) -> Result<GitPushPullR
         .env("GIT_EDITOR", "true") // skip editor for commit message
         .output()
         .map_err(|e| format!("Failed to continue cherry-pick: {}", e))?;
-    record_cmd("git cherry-pick --continue", &cwd, _t0.elapsed().as_millis() as u64, output.status.code().unwrap_or(-1));
+    record_cmd(
+        "git cherry-pick --continue",
+        &cwd,
+        _t0.elapsed().as_millis() as u64,
+        output.status.code().unwrap_or(-1),
+    );
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
     Ok(GitPushPullResult {
         success: output.status.success(),
-        message: if output.status.success() { stdout } else { stderr },
+        message: if output.status.success() {
+            stdout
+        } else {
+            stderr
+        },
         conflicts: None,
     })
 }
@@ -1182,7 +1401,12 @@ pub(crate) async fn git_checkout_commit(cwd: String, sha: String) -> Result<(), 
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to checkout commit: {}", e))?;
-    record_cmd(&format!("git checkout {}", sha), &cwd, _t0.elapsed().as_millis() as u64, output.status.code().unwrap_or(-1));
+    record_cmd(
+        &format!("git checkout {}", sha),
+        &cwd,
+        _t0.elapsed().as_millis() as u64,
+        output.status.code().unwrap_or(-1),
+    );
     if !output.status.success() {
         return Err(format!(
             "git checkout failed: {}",
@@ -1193,7 +1417,11 @@ pub(crate) async fn git_checkout_commit(cwd: String, sha: String) -> Result<(), 
 }
 
 #[tauri::command]
-pub(crate) async fn git_reset_to_commit(cwd: String, sha: String, mode: String) -> Result<(), String> {
+pub(crate) async fn git_reset_to_commit(
+    cwd: String,
+    sha: String,
+    mode: String,
+) -> Result<(), String> {
     let _repo = repo_lock::write(&cwd);
     let flag = match mode.as_str() {
         "soft" => "--soft",
@@ -1206,7 +1434,12 @@ pub(crate) async fn git_reset_to_commit(cwd: String, sha: String, mode: String) 
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to reset: {}", e))?;
-    record_cmd(&format!("git reset {} {}", flag, sha), &cwd, _t0.elapsed().as_millis() as u64, output.status.code().unwrap_or(-1));
+    record_cmd(
+        &format!("git reset {} {}", flag, sha),
+        &cwd,
+        _t0.elapsed().as_millis() as u64,
+        output.status.code().unwrap_or(-1),
+    );
     if !output.status.success() {
         return Err(format!(
             "git reset {} failed: {}",
@@ -1218,7 +1451,11 @@ pub(crate) async fn git_reset_to_commit(cwd: String, sha: String, mode: String) 
 }
 
 #[tauri::command]
-pub(crate) async fn git_revert_commit(cwd: String, sha: String, mainline: Option<u32>) -> Result<GitPushPullResult, String> {
+pub(crate) async fn git_revert_commit(
+    cwd: String,
+    sha: String,
+    mainline: Option<u32>,
+) -> Result<GitPushPullResult, String> {
     let _repo = repo_lock::write(&cwd);
     let mut args = vec!["revert".to_string(), "--no-edit".to_string()];
     if let Some(m) = mainline {
@@ -1232,13 +1469,22 @@ pub(crate) async fn git_revert_commit(cwd: String, sha: String, mainline: Option
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to revert commit: {}", e))?;
-    record_cmd(&format!("git {}", args.join(" ")), &cwd, _t0.elapsed().as_millis() as u64, output.status.code().unwrap_or(-1));
+    record_cmd(
+        &format!("git {}", args.join(" ")),
+        &cwd,
+        _t0.elapsed().as_millis() as u64,
+        output.status.code().unwrap_or(-1),
+    );
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     let has_conflicts = stderr.contains("CONFLICT") || stdout.contains("CONFLICT");
     Ok(GitPushPullResult {
         success: output.status.success(),
-        message: if output.status.success() { stdout } else { stderr },
+        message: if output.status.success() {
+            stdout
+        } else {
+            stderr
+        },
         conflicts: Some(has_conflicts),
     })
 }
@@ -1246,11 +1492,23 @@ pub(crate) async fn git_revert_commit(cwd: String, sha: String, mainline: Option
 // ─── Git tags ──────────────────────────────────────────────────
 
 #[tauri::command]
-pub(crate) async fn git_create_tag(cwd: String, name: String, sha: String, message: Option<String>) -> Result<(), String> {
+pub(crate) async fn git_create_tag(
+    cwd: String,
+    name: String,
+    sha: String,
+    message: Option<String>,
+) -> Result<(), String> {
     let tag_name = name.clone();
     let trimmed = message.as_deref().map(str::trim).filter(|s| !s.is_empty());
     let args: Vec<String> = if let Some(m) = trimmed {
-        vec!["tag".into(), "-a".into(), name, sha, "-m".into(), m.to_string()]
+        vec![
+            "tag".into(),
+            "-a".into(),
+            name,
+            sha,
+            "-m".into(),
+            m.to_string(),
+        ]
     } else {
         vec!["tag".into(), name, sha]
     };
@@ -1300,20 +1558,33 @@ pub(crate) async fn git_list_tags(cwd: String) -> Result<Vec<TagEntry>, String> 
         s = sep
     );
     let output = git_cmd()
-        .args(["tag", "-l", "--sort=-version:refname", "--sort=-creatordate", &format!("--format={}", fmt)])
+        .args([
+            "tag",
+            "-l",
+            "--sort=-version:refname",
+            "--sort=-creatordate",
+            &format!("--format={}", fmt),
+        ])
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to list tags: {}", e))?;
     if !output.status.success() {
-        return Err(format!("git tag failed: {}", String::from_utf8_lossy(&output.stderr)));
+        return Err(format!(
+            "git tag failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
     let mut tags = Vec::new();
     for line in stdout.lines() {
         let parts: Vec<&str> = line.split('\x1f').collect();
-        if parts.len() < 7 { continue; }
+        if parts.len() < 7 {
+            continue;
+        }
         let name = parts[0].trim().to_string();
-        if name.is_empty() { continue; }
+        if name.is_empty() {
+            continue;
+        }
         let obj_type = parts[1].trim();
         let is_annotated = obj_type == "tag";
         let hash = if is_annotated && !parts[3].trim().is_empty() {
@@ -1327,7 +1598,13 @@ pub(crate) async fn git_list_tags(cwd: String) -> Result<Vec<TagEntry>, String> 
             parts[5].trim().to_string()
         };
         let message = parts[6].trim().to_string();
-        tags.push(TagEntry { name, hash, is_annotated, date, message });
+        tags.push(TagEntry {
+            name,
+            hash,
+            is_annotated,
+            date,
+            message,
+        });
     }
     Ok(tags)
 }
@@ -1340,13 +1617,21 @@ pub(crate) async fn git_delete_tag(cwd: String, name: String) -> Result<(), Stri
         .output()
         .map_err(|e| format!("Failed to delete tag: {}", e))?;
     if !output.status.success() {
-        return Err(format!("git tag -d failed: {}", String::from_utf8_lossy(&output.stderr)));
+        return Err(format!(
+            "git tag -d failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
     }
     Ok(())
 }
 
 #[tauri::command]
-pub(crate) async fn git_push_tags(cwd: String, remote: String, mode: String, tag_name: Option<String>) -> Result<(), String> {
+pub(crate) async fn git_push_tags(
+    cwd: String,
+    remote: String,
+    mode: String,
+    tag_name: Option<String>,
+) -> Result<(), String> {
     let mut args = vec!["push".to_string(), remote.clone()];
     match mode.as_str() {
         "single" => {
@@ -1365,7 +1650,10 @@ pub(crate) async fn git_push_tags(cwd: String, remote: String, mode: String, tag
         .output()
         .map_err(|e| format!("Failed to push tags: {}", e))?;
     if !output.status.success() {
-        return Err(format!("git push tags failed: {}", String::from_utf8_lossy(&output.stderr)));
+        return Err(format!(
+            "git push tags failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
     }
     Ok(())
 }
@@ -1409,14 +1697,21 @@ pub(crate) async fn git_unpushed_tags(cwd: String, remote: String) -> Result<Vec
 }
 
 #[tauri::command]
-pub(crate) async fn git_delete_remote_tag(cwd: String, remote: String, name: String) -> Result<(), String> {
+pub(crate) async fn git_delete_remote_tag(
+    cwd: String,
+    remote: String,
+    name: String,
+) -> Result<(), String> {
     let output = git_cmd()
         .args(["push", &remote, "--delete", &format!("refs/tags/{}", name)])
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to delete remote tag: {}", e))?;
     if !output.status.success() {
-        return Err(format!("git push --delete failed: {}", String::from_utf8_lossy(&output.stderr)));
+        return Err(format!(
+            "git push --delete failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
     }
     Ok(())
 }
@@ -1424,7 +1719,10 @@ pub(crate) async fn git_delete_remote_tag(cwd: String, remote: String, name: Str
 // ─── Git conflict check ─────────────────────────────────────
 
 #[tauri::command]
-pub(crate) async fn git_conflict_check(cwd: String, target_branch: String) -> Result<ConflictRisk, String> {
+pub(crate) async fn git_conflict_check(
+    cwd: String,
+    target_branch: String,
+) -> Result<ConflictRisk, String> {
     let git = git_binary();
 
     let base_out = hidden_cmd(&git)
@@ -1547,11 +1845,20 @@ pub(crate) async fn git_submodule_list(cwd: String) -> Result<Vec<SubmoduleEntry
         }
         .to_string();
 
-        let name = path_to_name.get(&path).cloned().unwrap_or_else(|| path.clone());
+        let name = path_to_name
+            .get(&path)
+            .cloned()
+            .unwrap_or_else(|| path.clone());
         let url = url_map.get(&name).cloned().unwrap_or_default();
         let branch = branch_map.get(&name).cloned();
 
-        entries.push(SubmoduleEntry { path, url, sha, branch, status });
+        entries.push(SubmoduleEntry {
+            path,
+            url,
+            sha,
+            branch,
+            status,
+        });
     }
 
     Ok(entries)
@@ -1564,7 +1871,9 @@ pub(crate) async fn git_submodule_list(cwd: String) -> Result<Vec<SubmoduleEntry
 /// to be called on demand (when the Submodules hub opens), never on a poll.
 /// Submodules that are offline / unreachable are skipped silently.
 #[tauri::command]
-pub(crate) async fn git_submodule_check_updates(cwd: String) -> Result<Vec<SubmoduleUpdate>, String> {
+pub(crate) async fn git_submodule_check_updates(
+    cwd: String,
+) -> Result<Vec<SubmoduleUpdate>, String> {
     let _repo = repo_lock::read(&cwd);
     let gitmodules = std::path::Path::new(&cwd).join(".gitmodules");
     if !gitmodules.exists() {
@@ -1585,9 +1894,15 @@ pub(crate) async fn git_submodule_check_updates(cwd: String) -> Result<Vec<Submo
             if let Some(eq) = line.find('=') {
                 let key = &line[..eq];
                 let val = &line[eq + 1..];
-                if let Some(name) = key.strip_prefix("submodule.").and_then(|s| s.strip_suffix(".branch")) {
+                if let Some(name) = key
+                    .strip_prefix("submodule.")
+                    .and_then(|s| s.strip_suffix(".branch"))
+                {
                     name_branch.insert(name.to_string(), val.to_string());
-                } else if let Some(name) = key.strip_prefix("submodule.").and_then(|s| s.strip_suffix(".path")) {
+                } else if let Some(name) = key
+                    .strip_prefix("submodule.")
+                    .and_then(|s| s.strip_suffix(".path"))
+                {
                     name_path.insert(name.to_string(), val.to_string());
                 }
             }
@@ -1635,7 +1950,11 @@ pub(crate) async fn git_submodule_check_updates(cwd: String) -> Result<Vec<Submo
             let configured = path_branch.get(&path).cloned();
             submodule_behind(&sub_dir, configured.as_deref())
                 .filter(|&behind| behind > 0)
-                .map(|behind| SubmoduleUpdate { path, behind, branch: configured })
+                .map(|behind| SubmoduleUpdate {
+                    path,
+                    behind,
+                    branch: configured,
+                })
         })
         .collect();
 
@@ -1694,7 +2013,10 @@ fn submodule_behind(sub_dir: &std::path::Path, configured_branch: Option<&str>) 
     if !count.status.success() {
         return None;
     }
-    String::from_utf8_lossy(&count.stdout).trim().parse::<u32>().ok()
+    String::from_utf8_lossy(&count.stdout)
+        .trim()
+        .parse::<u32>()
+        .ok()
 }
 
 #[tauri::command]
@@ -1715,7 +2037,11 @@ pub(crate) async fn git_submodule_init(cwd: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub(crate) async fn git_submodule_update(cwd: String, init: bool, recursive: bool) -> Result<(), String> {
+pub(crate) async fn git_submodule_update(
+    cwd: String,
+    init: bool,
+    recursive: bool,
+) -> Result<(), String> {
     let _repo = repo_lock::write(&cwd);
     let mut cmd = git_cmd();
     cmd.arg("submodule").arg("update");
@@ -1750,7 +2076,15 @@ pub(crate) async fn git_submodule_update_one(cwd: String, path: String) -> Resul
     let _repo = repo_lock::write(&cwd);
 
     let output = git_cmd()
-        .args(["submodule", "update", "--remote", "--rebase", "--init", "--", &path])
+        .args([
+            "submodule",
+            "update",
+            "--remote",
+            "--rebase",
+            "--init",
+            "--",
+            &path,
+        ])
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to update submodule: {}", e))?;
@@ -1764,7 +2098,11 @@ pub(crate) async fn git_submodule_update_one(cwd: String, path: String) -> Resul
 }
 
 #[tauri::command]
-pub(crate) async fn git_submodule_add(cwd: String, url: String, path: String) -> Result<(), String> {
+pub(crate) async fn git_submodule_add(
+    cwd: String,
+    url: String,
+    path: String,
+) -> Result<(), String> {
     let _repo = repo_lock::write(&cwd);
     let output = git_cmd()
         .args(["submodule", "add", &url, &path])
@@ -1923,10 +2261,12 @@ pub(crate) async fn git_commit_submodule_changes(
             continue;
         }
         if let Some(ref sha) = current {
-            map.entry(sha.clone()).or_default().push(CommitSubmoduleChange {
-                path,
-                pointed_sha: new_sha.to_string(),
-            });
+            map.entry(sha.clone())
+                .or_default()
+                .push(CommitSubmoduleChange {
+                    path,
+                    pointed_sha: new_sha.to_string(),
+                });
         }
     }
 
@@ -1967,11 +2307,11 @@ fn list_worktrees(cwd: &str) -> Result<Vec<WorktreeEntry>, String> {
     let mut current: Option<WorktreeEntry> = None;
 
     for line in stdout.lines() {
-        if line.starts_with("worktree ") {
+        if let Some(path) = line.strip_prefix("worktree ") {
             if let Some(e) = current.take() {
                 entries.push(e);
             }
-            let path = line["worktree ".len()..].to_string();
+            let path = path.to_string();
             current = Some(WorktreeEntry {
                 path,
                 branch: String::new(),
@@ -1987,23 +2327,22 @@ fn list_worktrees(cwd: &str) -> Result<Vec<WorktreeEntry>, String> {
             if line == "main" {
                 // Attribut explicite depuis git 2.36
                 e.is_main = true;
-            } else if line.starts_with("HEAD ") {
-                e.head = line["HEAD ".len()..].to_string();
-            } else if line.starts_with("branch ") {
-                let full = &line["branch ".len()..];
+            } else if let Some(head) = line.strip_prefix("HEAD ") {
+                e.head = head.to_string();
+            } else if let Some(full) = line.strip_prefix("branch ") {
                 e.branch = full.strip_prefix("refs/heads/").unwrap_or(full).to_string();
             } else if line == "bare" {
                 e.is_bare = true;
-            } else if line.starts_with("locked") {
+            } else if let Some(rest) = line.strip_prefix("locked") {
                 e.is_locked = true;
                 // Format : "locked" seul ou "locked <raison>" avec raison inline
-                let reason = line["locked".len()..].trim();
+                let reason = rest.trim();
                 if !reason.is_empty() {
                     e.lock_reason = Some(reason.to_string());
                 }
-            } else if line.starts_with("prunable") {
+            } else if let Some(rest) = line.strip_prefix("prunable") {
                 e.is_prunable = true;
-                let reason = line["prunable".len()..].trim();
+                let reason = rest.trim();
                 if !reason.is_empty() {
                     e.prunable_reason = Some(reason.to_string());
                 }
@@ -2089,7 +2428,11 @@ pub(crate) async fn git_worktree_add(
 }
 
 #[tauri::command]
-pub(crate) async fn git_worktree_remove(cwd: String, path: String, force: Option<bool>) -> Result<(), String> {
+pub(crate) async fn git_worktree_remove(
+    cwd: String,
+    path: String,
+    force: Option<bool>,
+) -> Result<(), String> {
     let mut cmd = git_cmd();
     cmd.arg("worktree").arg("remove");
     if force.unwrap_or(false) {
@@ -2129,64 +2472,84 @@ pub(crate) async fn git_worktree_prune(cwd: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub(crate) async fn git_worktree_status_all(cwd: String) -> Result<Vec<WorkspaceRepoStatus>, String> {
+pub(crate) async fn git_worktree_status_all(
+    cwd: String,
+) -> Result<Vec<WorkspaceRepoStatus>, String> {
     let worktrees = list_worktrees(&cwd)?;
 
-    let statuses = worktrees.into_par_iter().map(|wt| {
-        let path = wt.path.clone();
-        let name = wt.branch.trim_start_matches("refs/heads/").to_string();
+    let statuses = worktrees
+        .into_par_iter()
+        .map(|wt| {
+            let path = wt.path.clone();
+            let name = wt.branch.trim_start_matches("refs/heads/").to_string();
 
-        let branch = git_cmd()
-            .args(["rev-parse", "--abbrev-ref", "HEAD"])
-            .current_dir(&path)
-            .output()
-            .ok()
-            .filter(|o| o.status.success())
-            .and_then(|o| String::from_utf8(o.stdout).ok())
-            .map(|s| s.trim().to_string())
-            .unwrap_or_default();
+            let branch = git_cmd()
+                .args(["rev-parse", "--abbrev-ref", "HEAD"])
+                .current_dir(&path)
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .and_then(|o| String::from_utf8(o.stdout).ok())
+                .map(|s| s.trim().to_string())
+                .unwrap_or_default();
 
-        // Upstream : détecter si une remote est configurée, et extraire ahead/behind
-        let upstream_out = git_cmd()
-            .args(["rev-list", "--left-right", "--count", "HEAD...@{upstream}"])
-            .current_dir(&path)
-            .output()
-            .ok()
-            .filter(|o| o.status.success());
+            // Upstream : détecter si une remote est configurée, et extraire ahead/behind
+            let upstream_out = git_cmd()
+                .args(["rev-list", "--left-right", "--count", "HEAD...@{upstream}"])
+                .current_dir(&path)
+                .output()
+                .ok()
+                .filter(|o| o.status.success());
 
-        let has_upstream = upstream_out.is_some();
-        let (ahead, behind) = upstream_out
-            .and_then(|o| String::from_utf8(o.stdout).ok())
-            .and_then(|s| {
-                let parts: Vec<&str> = s.trim().split_whitespace().collect();
-                if parts.len() == 2 {
-                    Some((parts[0].parse::<u32>().unwrap_or(0), parts[1].parse::<u32>().unwrap_or(0)))
-                } else { None }
-            })
-            .unwrap_or((0, 0));
+            let has_upstream = upstream_out.is_some();
+            let (ahead, behind) = upstream_out
+                .and_then(|o| String::from_utf8(o.stdout).ok())
+                .and_then(|s| {
+                    let parts: Vec<&str> = s.split_whitespace().collect();
+                    if parts.len() == 2 {
+                        Some((
+                            parts[0].parse::<u32>().unwrap_or(0),
+                            parts[1].parse::<u32>().unwrap_or(0),
+                        ))
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or((0, 0));
 
-        // Status : séparer les fichiers en conflit (UU/AA/DD/AU/UA/DU/UD) des simples modifiés
-        let status_out = git_cmd()
-            .args(["status", "--porcelain", "--untracked-files=no"])
-            .current_dir(&path)
-            .output()
-            .ok()
-            .filter(|o| o.status.success())
-            .and_then(|o| String::from_utf8(o.stdout).ok())
-            .unwrap_or_default();
+            // Status : séparer les fichiers en conflit (UU/AA/DD/AU/UA/DU/UD) des simples modifiés
+            let status_out = git_cmd()
+                .args(["status", "--porcelain", "--untracked-files=no"])
+                .current_dir(&path)
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .and_then(|o| String::from_utf8(o.stdout).ok())
+                .unwrap_or_default();
 
-        const CONFLICT_CODES: &[&str] = &["UU", "AA", "DD", "AU", "UA", "DU", "UD"];
-        let conflicted = status_out
-            .lines()
-            .filter(|l| l.len() >= 2 && CONFLICT_CODES.contains(&&l[..2]))
-            .count() as u32;
-        let modified = status_out
-            .lines()
-            .filter(|l| l.len() >= 2 && !CONFLICT_CODES.contains(&&l[..2]))
-            .count() as u32;
+            const CONFLICT_CODES: &[&str] = &["UU", "AA", "DD", "AU", "UA", "DU", "UD"];
+            let conflicted = status_out
+                .lines()
+                .filter(|l| l.len() >= 2 && CONFLICT_CODES.contains(&&l[..2]))
+                .count() as u32;
+            let modified = status_out
+                .lines()
+                .filter(|l| l.len() >= 2 && !CONFLICT_CODES.contains(&&l[..2]))
+                .count() as u32;
 
-        WorkspaceRepoStatus { path, name, branch, ahead, behind, has_upstream, modified, conflicted, error: None }
-    }).collect();
+            WorkspaceRepoStatus {
+                path,
+                name,
+                branch,
+                ahead,
+                behind,
+                has_upstream,
+                modified,
+                conflicted,
+                error: None,
+            }
+        })
+        .collect();
 
     Ok(statuses)
 }
@@ -2225,9 +2588,9 @@ pub(crate) async fn git_worktree_repair(cwd: String, paths: Vec<String>) -> Resu
 /// One progress update emitted as a Tauri event.
 #[derive(serde::Serialize, Clone)]
 struct CloneProgress {
-    stage:   String,   // "init" | "counting" | "compressing" | "receiving" | "resolving" | "done"
-    percent: f32,      // 0 – 100
-    message: String,   // raw trimmed line
+    stage: String, // "init" | "counting" | "compressing" | "receiving" | "resolving" | "done"
+    percent: f32,  // 0 – 100
+    message: String, // raw trimmed line
 }
 
 fn extract_percent(line: &str) -> f32 {
@@ -2245,38 +2608,76 @@ fn extract_percent(line: &str) -> f32 {
 
 fn parse_clone_progress(line: &str) -> Option<CloneProgress> {
     let l = line.trim();
-    if l.is_empty() { return None; }
+    if l.is_empty() {
+        return None;
+    }
     if l.starts_with("Cloning into") {
-        return Some(CloneProgress { stage: "init".into(),        percent: 0.0,                 message: l.to_string() });
+        return Some(CloneProgress {
+            stage: "init".into(),
+            percent: 0.0,
+            message: l.to_string(),
+        });
     }
     if l.starts_with("remote: Counting") || l.starts_with("remote: Enumerating") {
-        return Some(CloneProgress { stage: "counting".into(),    percent: extract_percent(l),   message: l.to_string() });
+        return Some(CloneProgress {
+            stage: "counting".into(),
+            percent: extract_percent(l),
+            message: l.to_string(),
+        });
     }
     if l.starts_with("remote: Compressing") {
-        return Some(CloneProgress { stage: "compressing".into(), percent: extract_percent(l),   message: l.to_string() });
+        return Some(CloneProgress {
+            stage: "compressing".into(),
+            percent: extract_percent(l),
+            message: l.to_string(),
+        });
     }
     if l.starts_with("Receiving objects:") {
-        return Some(CloneProgress { stage: "receiving".into(),   percent: extract_percent(l),   message: l.to_string() });
+        return Some(CloneProgress {
+            stage: "receiving".into(),
+            percent: extract_percent(l),
+            message: l.to_string(),
+        });
     }
     if l.starts_with("Resolving deltas:") {
-        return Some(CloneProgress { stage: "resolving".into(),   percent: extract_percent(l),   message: l.to_string() });
+        return Some(CloneProgress {
+            stage: "resolving".into(),
+            percent: extract_percent(l),
+            message: l.to_string(),
+        });
     }
     if l.contains("done") || l.contains("complete") {
-        return Some(CloneProgress { stage: "done".into(),        percent: 100.0,                message: l.to_string() });
+        return Some(CloneProgress {
+            stage: "done".into(),
+            percent: 100.0,
+            message: l.to_string(),
+        });
     }
     // Emit unknown lines too so the modal can show them
-    Some(CloneProgress { stage: "info".into(), percent: 0.0, message: l.to_string() })
+    Some(CloneProgress {
+        stage: "info".into(),
+        percent: 0.0,
+        message: l.to_string(),
+    })
 }
 
 #[tauri::command]
-pub(crate) async fn git_clone(url: String, dest: String, app_handle: tauri::AppHandle) -> Result<String, String> {
+pub(crate) async fn git_clone(
+    url: String,
+    dest: String,
+    app_handle: tauri::AppHandle,
+) -> Result<String, String> {
     use std::io::Read;
     use tauri::Emitter;
 
     let url_trim = url.trim().to_string();
     let dest_trim = dest.trim().to_string();
-    if url_trim.is_empty() { return Err("Empty URL".to_string()); }
-    if dest_trim.is_empty() { return Err("Empty destination".to_string()); }
+    if url_trim.is_empty() {
+        return Err("Empty URL".to_string());
+    }
+    if dest_trim.is_empty() {
+        return Err("Empty destination".to_string());
+    }
 
     let _t0 = Instant::now();
 
@@ -2301,7 +2702,7 @@ pub(crate) async fn git_clone(url: String, dest: String, app_handle: tauri::AppH
                     all_stderr.extend_from_slice(&buf[..n]);
                     let chunk = String::from_utf8_lossy(&buf[..n]);
                     let combined = carry.clone() + &chunk;
-                    let parts: Vec<&str> = combined.split(|c| c == '\r' || c == '\n').collect();
+                    let parts: Vec<&str> = combined.split(['\r', '\n']).collect();
                     let carry_idx = parts.len().saturating_sub(1);
                     carry = parts[carry_idx].to_string();
                     for part in &parts[..carry_idx] {
@@ -2318,18 +2719,34 @@ pub(crate) async fn git_clone(url: String, dest: String, app_handle: tauri::AppH
         }
     }
 
-    let status = child.wait().map_err(|e| format!("Failed to wait for git clone: {}", e))?;
-    record_cmd(&format!("git clone {}", url_trim), &dest_trim, _t0.elapsed().as_millis() as u64, status.code().unwrap_or(-1));
+    let status = child
+        .wait()
+        .map_err(|e| format!("Failed to wait for git clone: {}", e))?;
+    record_cmd(
+        &format!("git clone {}", url_trim),
+        &dest_trim,
+        _t0.elapsed().as_millis() as u64,
+        status.code().unwrap_or(-1),
+    );
 
     if !status.success() {
         let stderr_text = String::from_utf8_lossy(&all_stderr).trim().to_string();
-        return Err(if stderr_text.is_empty() { "git clone failed".to_string() } else { stderr_text });
+        return Err(if stderr_text.is_empty() {
+            "git clone failed".to_string()
+        } else {
+            stderr_text
+        });
     }
 
     // Emit final "done" event
-    let _ = app_handle.emit("clone-progress", CloneProgress {
-        stage: "done".into(), percent: 100.0, message: "Clone complete".to_string(),
-    });
+    let _ = app_handle.emit(
+        "clone-progress",
+        CloneProgress {
+            stage: "done".into(),
+            percent: 100.0,
+            message: "Clone complete".to_string(),
+        },
+    );
 
     Ok(dest_trim)
 }
@@ -2373,14 +2790,20 @@ pub(crate) async fn gh_fork(url: String, parent_dir: String) -> Result<String, S
         return Err(detail);
     }
 
-    Ok(format!("{}/{}", parent_trim.trim_end_matches('/'), repo_name))
+    Ok(format!(
+        "{}/{}",
+        parent_trim.trim_end_matches('/'),
+        repo_name
+    ))
 }
 
 // ─── Git hooks ─────────────────────────────────────────────
 
 #[tauri::command]
 pub(crate) async fn git_hook_list(cwd: String) -> Result<Vec<HookEntry>, String> {
-    if cwd.trim().is_empty() { return Err("cwd must not be empty".to_string()); }
+    if cwd.trim().is_empty() {
+        return Err("cwd must not be empty".to_string());
+    }
     let repo = PathBuf::from(&cwd);
     let hooks_dir = repo.join(".git").join("hooks");
 
@@ -2433,7 +2856,12 @@ pub(crate) async fn git_hook_list(cwd: String) -> Result<Vec<HookEntry>, String>
             .take(80)
             .collect();
 
-        entries.push(HookEntry { name, enabled, executable, preview });
+        entries.push(HookEntry {
+            name,
+            enabled,
+            executable,
+            preview,
+        });
     }
 
     entries.sort_by(|a, b| {
@@ -2451,11 +2879,17 @@ pub(crate) async fn git_hook_list(cwd: String) -> Result<Vec<HookEntry>, String>
 }
 
 #[tauri::command]
-pub(crate) async fn git_hook_toggle(cwd: String, name: String, enabled: bool) -> Result<(), String> {
+pub(crate) async fn git_hook_toggle(
+    cwd: String,
+    name: String,
+    enabled: bool,
+) -> Result<(), String> {
     if name.contains('/') || name.contains('\\') || name.contains('.') {
         return Err(format!("Invalid hook name: {}", name));
     }
-    if cwd.trim().is_empty() { return Err("cwd must not be empty".to_string()); }
+    if cwd.trim().is_empty() {
+        return Err("cwd must not be empty".to_string());
+    }
     let repo = PathBuf::from(&cwd);
     let hooks_dir = repo.join(".git").join("hooks");
 
@@ -2477,11 +2911,17 @@ pub(crate) async fn git_hook_toggle(cwd: String, name: String, enabled: bool) ->
 }
 
 #[tauri::command]
-pub(crate) async fn git_hook_create(cwd: String, name: String, content: String) -> Result<(), String> {
+pub(crate) async fn git_hook_create(
+    cwd: String,
+    name: String,
+    content: String,
+) -> Result<(), String> {
     if name.contains('/') || name.contains('\\') || name.contains('.') {
         return Err(format!("Invalid hook name: {}", name));
     }
-    if cwd.trim().is_empty() { return Err("cwd must not be empty".to_string()); }
+    if cwd.trim().is_empty() {
+        return Err("cwd must not be empty".to_string());
+    }
     let repo = PathBuf::from(&cwd);
     let hooks_dir = repo.join(".git").join("hooks");
 
@@ -2496,8 +2936,7 @@ pub(crate) async fn git_hook_create(cwd: String, name: String, content: String) 
         format!("#!/usr/bin/env bash\n{}", content)
     };
 
-    std::fs::write(&hook_path, script)
-        .map_err(|e| format!("Failed to write hook: {}", e))?;
+    std::fs::write(&hook_path, script).map_err(|e| format!("Failed to write hook: {}", e))?;
 
     #[cfg(unix)]
     {
@@ -2518,7 +2957,9 @@ pub(crate) async fn git_hook_delete(cwd: String, name: String) -> Result<(), Str
     if name.contains('/') || name.contains('\\') || name.contains('.') {
         return Err(format!("Invalid hook name: {}", name));
     }
-    if cwd.trim().is_empty() { return Err("cwd must not be empty".to_string()); }
+    if cwd.trim().is_empty() {
+        return Err("cwd must not be empty".to_string());
+    }
     let repo = PathBuf::from(&cwd);
     let hooks_dir = repo.join(".git").join("hooks");
 
@@ -2526,8 +2967,7 @@ pub(crate) async fn git_hook_delete(cwd: String, name: String) -> Result<(), Str
     let disabled_path = hooks_dir.join(format!("{}.disabled", name));
 
     if enabled_path.exists() {
-        std::fs::remove_file(&enabled_path)
-            .map_err(|e| format!("Failed to delete hook: {}", e))?;
+        std::fs::remove_file(&enabled_path).map_err(|e| format!("Failed to delete hook: {}", e))?;
     }
     if disabled_path.exists() {
         let _ = std::fs::remove_file(&disabled_path);
@@ -2562,15 +3002,21 @@ fn active_cwds_for_tool(tool_name: &str) -> HashSet<String> {
     if let Ok(entries) = std::fs::read_dir("/proc") {
         for entry in entries.flatten() {
             let pid_path = entry.path();
-            if !entry.file_name().to_string_lossy().chars().all(|c| c.is_ascii_digit()) {
+            if !entry
+                .file_name()
+                .to_string_lossy()
+                .chars()
+                .all(|c| c.is_ascii_digit())
+            {
                 continue;
             }
             let exe_path = pid_path.join("exe");
             if let Ok(exe) = std::fs::read_link(&exe_path) {
-                let basename = exe.file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("");
-                if !basename.to_lowercase().starts_with(&tool_name.to_lowercase()) {
+                let basename = exe.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                if !basename
+                    .to_lowercase()
+                    .starts_with(&tool_name.to_lowercase())
+                {
                     continue;
                 }
             } else {
@@ -2606,7 +3052,9 @@ fn detect_agent_tool(worktree_path: &str) -> Option<String> {
 
 #[tauri::command]
 pub(crate) async fn agent_session_list(cwd: String) -> Result<Vec<AgentSession>, String> {
-    if cwd.trim().is_empty() { return Err("cwd must not be empty".to_string()); }
+    if cwd.trim().is_empty() {
+        return Err("cwd must not be empty".to_string());
+    }
     let path = PathBuf::from(&cwd);
     let worktrees = list_worktrees(&path.to_string_lossy())?;
 
@@ -2640,9 +3088,12 @@ pub(crate) async fn agent_session_list(cwd: String) -> Result<Vec<AgentSession>,
                 .filter(|o| o.status.success())
                 .and_then(|o| String::from_utf8(o.stdout).ok())
                 .and_then(|s| {
-                    let v: Vec<&str> = s.trim().split_whitespace().collect();
+                    let v: Vec<&str> = s.split_whitespace().collect();
                     if v.len() == 2 {
-                        Some((v[0].parse::<u32>().unwrap_or(0), v[1].parse::<u32>().unwrap_or(0)))
+                        Some((
+                            v[0].parse::<u32>().unwrap_or(0),
+                            v[1].parse::<u32>().unwrap_or(0),
+                        ))
                     } else {
                         None
                     }
@@ -2659,7 +3110,15 @@ pub(crate) async fn agent_session_list(cwd: String) -> Result<Vec<AgentSession>,
                 .map(|s| s.lines().filter(|l| !l.is_empty()).count() as u32)
                 .unwrap_or(0);
 
-            Some(AgentSession { path: wt.path, branch, tool, active, ahead, behind, modified })
+            Some(AgentSession {
+                path: wt.path,
+                branch,
+                tool,
+                active,
+                ahead,
+                behind,
+                modified,
+            })
         })
         .collect();
 
@@ -2668,12 +3127,14 @@ pub(crate) async fn agent_session_list(cwd: String) -> Result<Vec<AgentSession>,
 
 #[tauri::command]
 pub(crate) async fn agent_session_launch(cwd: String, tool: String) -> Result<(), String> {
-    if cwd.trim().is_empty() { return Err("cwd must not be empty".to_string()); }
+    if cwd.trim().is_empty() {
+        return Err("cwd must not be empty".to_string());
+    }
     let path = PathBuf::from(&cwd);
     let binary = match tool.as_str() {
-        "cursor"   => "cursor",
+        "cursor" => "cursor",
         "windsurf" => "windsurf",
-        _          => "claude",
+        _ => "claude",
     };
 
     hidden_cmd(binary)
@@ -2706,10 +3167,7 @@ pub(crate) async fn git_shortlog(cwd: String) -> Result<Vec<ShortlogEntry>, Stri
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let mut entries: Vec<ShortlogEntry> = stdout
-        .lines()
-        .filter_map(parse_shortlog_line)
-        .collect();
+    let mut entries: Vec<ShortlogEntry> = stdout.lines().filter_map(parse_shortlog_line).collect();
     entries.sort_by(|a, b| b.count.cmp(&a.count));
     Ok(entries)
 }
@@ -2753,8 +3211,14 @@ pub(crate) async fn git_author_line_stats(cwd: String) -> Result<Vec<AuthorLineS
             continue;
         }
         let mut parts = line.split('\t');
-        let added = parts.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
-        let deleted = parts.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+        let added = parts
+            .next()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(0);
+        let deleted = parts
+            .next()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(0);
         if added == 0 && deleted == 0 {
             continue;
         }
@@ -2765,7 +3229,11 @@ pub(crate) async fn git_author_line_stats(cwd: String) -> Result<Vec<AuthorLineS
 
     let mut stats: Vec<AuthorLineStat> = totals
         .into_iter()
-        .map(|(email, (added, deleted))| AuthorLineStat { email, added, deleted })
+        .map(|(email, (added, deleted))| AuthorLineStat {
+            email,
+            added,
+            deleted,
+        })
         .collect();
     stats.sort_by(|a, b| (b.added + b.deleted).cmp(&(a.added + a.deleted)));
     Ok(stats)
@@ -2798,8 +3266,7 @@ pub(crate) async fn git_branch_top_authors(
                 // full history when that range is empty (the base branch itself,
                 // or a branch with nothing ahead of base).
                 let range = format!("{}..{}", base, branch);
-                let top = shortlog_top(&cwd, &range)
-                    .or_else(|| shortlog_top(&cwd, &branch))?;
+                let top = shortlog_top(&cwd, &range).or_else(|| shortlog_top(&cwd, &branch))?;
                 Some(BranchTopAuthor {
                     branch,
                     name: top.name,
@@ -2865,11 +3332,35 @@ pub(crate) async fn git_autocomplete(cwd: String, partial: String) -> Result<Vec
 
     if !partial.contains(' ') {
         let subcommands = [
-            "add", "bisect", "blame", "branch", "checkout", "cherry-pick",
-            "clone", "commit", "config", "diff", "fetch", "grep", "init",
-            "log", "merge", "mv", "pull", "push", "rebase", "remote",
-            "reset", "restore", "revert", "rm", "show", "stash", "status",
-            "switch", "tag",
+            "add",
+            "bisect",
+            "blame",
+            "branch",
+            "checkout",
+            "cherry-pick",
+            "clone",
+            "commit",
+            "config",
+            "diff",
+            "fetch",
+            "grep",
+            "init",
+            "log",
+            "merge",
+            "mv",
+            "pull",
+            "push",
+            "rebase",
+            "remote",
+            "reset",
+            "restore",
+            "revert",
+            "rm",
+            "show",
+            "stash",
+            "status",
+            "switch",
+            "tag",
         ];
         for cmd in &subcommands {
             if cmd.starts_with(&partial) {
@@ -2885,7 +3376,12 @@ pub(crate) async fn git_autocomplete(cwd: String, partial: String) -> Result<Vec
         };
 
         let output = git_cmd()
-            .args(["for-each-ref", "--format=%(refname:short)", "refs/heads/", "refs/tags/"])
+            .args([
+                "for-each-ref",
+                "--format=%(refname:short)",
+                "refs/heads/",
+                "refs/tags/",
+            ])
             .current_dir(&cwd)
             .output();
 
@@ -2971,34 +3467,48 @@ fn collect_tree_conflicts(cwd: &str) -> Result<Vec<crate::types::TreeConflict>, 
     let mut result = Vec::new();
     for record in stdout.split('\0') {
         // Unmerged entries start with "u ".
-        let Some(rest) = record.strip_prefix("u ") else { continue };
+        let Some(rest) = record.strip_prefix("u ") else {
+            continue;
+        };
         // Porcelain-v2 unmerged format (10 space-separated tokens):
         //   XY sub m1 m2 m3 mW h1 h2 h3 path
         // splitn(10, ' ') puts path at index 9.
         let mut parts = rest.splitn(10, ' ');
-        let code = parts.next().unwrap_or("").to_string();   // XY
-        let _sub = parts.next();                              // submodule state
-        let m1 = parts.next().unwrap_or("000000");           // stage 1 (base)
-        let m2 = parts.next().unwrap_or("000000");           // stage 2 (ours)
-        let m3 = parts.next().unwrap_or("000000");           // stage 3 (theirs)
-        let _mw = parts.next();                               // worktree mode
+        let code = parts.next().unwrap_or("").to_string(); // XY
+        let _sub = parts.next(); // submodule state
+        let m1 = parts.next().unwrap_or("000000"); // stage 1 (base)
+        let m2 = parts.next().unwrap_or("000000"); // stage 2 (ours)
+        let m3 = parts.next().unwrap_or("000000"); // stage 3 (theirs)
+        let _mw = parts.next(); // worktree mode
         let _h1 = parts.next();
         let _h2 = parts.next();
         let _h3 = parts.next();
-        let path = parts.next().unwrap_or("").to_string();   // remainder = path
-        if path.is_empty() { continue; }
+        let path = parts.next().unwrap_or("").to_string(); // remainder = path
+        if path.is_empty() {
+            continue;
+        }
         let has_base = m1 != "000000";
         let has_ours = m2 != "000000";
         let has_theirs = m3 != "000000";
         // Only markerless tree conflicts: at least one side missing.
-        if has_ours && has_theirs { continue; }
-        result.push(crate::types::TreeConflict { path, code, has_base, has_ours, has_theirs });
+        if has_ours && has_theirs {
+            continue;
+        }
+        result.push(crate::types::TreeConflict {
+            path,
+            code,
+            has_base,
+            has_ours,
+            has_theirs,
+        });
     }
     Ok(result)
 }
 
 #[tauri::command]
-pub(crate) async fn get_tree_conflicts(cwd: String) -> Result<Vec<crate::types::TreeConflict>, String> {
+pub(crate) async fn get_tree_conflicts(
+    cwd: String,
+) -> Result<Vec<crate::types::TreeConflict>, String> {
     collect_tree_conflicts(&cwd)
 }
 
@@ -3028,7 +3538,11 @@ fn apply_tree_resolution(cwd: &str, path: &str, choice: &str) -> Result<(), Stri
             run_git_checked(cwd, &["add", "--", path], "add")?;
         }
         "theirs" => {
-            run_git_checked(cwd, &["checkout", "--theirs", "--", path], "checkout --theirs")?;
+            run_git_checked(
+                cwd,
+                &["checkout", "--theirs", "--", path],
+                "checkout --theirs",
+            )?;
             run_git_checked(cwd, &["add", "--", path], "add")?;
         }
         "delete" => {
@@ -3040,7 +3554,11 @@ fn apply_tree_resolution(cwd: &str, path: &str, choice: &str) -> Result<(), Stri
 }
 
 #[tauri::command]
-pub(crate) async fn resolve_tree_conflict(cwd: String, path: String, choice: String) -> Result<(), String> {
+pub(crate) async fn resolve_tree_conflict(
+    cwd: String,
+    path: String,
+    choice: String,
+) -> Result<(), String> {
     apply_tree_resolution(&cwd, &path, &choice)
 }
 
@@ -3062,7 +3580,7 @@ fn read_stage_blob(cwd: &str, stage: u8, path: &str) -> Vec<u8> {
 fn reconstruct_conflict_impl(cwd: &str, path: &str) -> Result<ReconstructedConflict, String> {
     let _ = safe_repo_path(cwd, path)?; // traversal guard
 
-    let base = read_stage_blob(cwd, 1, path);   // may be empty (add/add)
+    let base = read_stage_blob(cwd, 1, path); // may be empty (add/add)
     let ours = read_stage_blob(cwd, 2, path);
     let theirs = read_stage_blob(cwd, 3, path);
     if ours.is_empty() && theirs.is_empty() {
@@ -3079,7 +3597,10 @@ fn reconstruct_conflict_impl(cwd: &str, path: &str) -> Result<ReconstructedConfl
     let write_tmp = |name: &str, data: &[u8]| -> Result<std::path::PathBuf, String> {
         let p = dir.join(name);
         std::fs::File::create(&p)
-            .and_then(|mut f| { use std::io::Write; f.write_all(data) })
+            .and_then(|mut f| {
+                use std::io::Write;
+                f.write_all(data)
+            })
             .map_err(|e| format!("write {}: {}", name, e))?;
         Ok(p)
     };
@@ -3090,8 +3611,15 @@ fn reconstruct_conflict_impl(cwd: &str, path: &str) -> Result<ReconstructedConfl
         let theirs_p = write_tmp("theirs", &theirs)?;
         let out = git_cmd()
             .args([
-                "merge-file", "-p", "--diff3",
-                "-L", "ours", "-L", "base", "-L", "theirs",
+                "merge-file",
+                "-p",
+                "--diff3",
+                "-L",
+                "ours",
+                "-L",
+                "base",
+                "-L",
+                "theirs",
                 ours_p.to_str().ok_or("bad temp path")?,
                 base_p.to_str().ok_or("bad temp path")?,
                 theirs_p.to_str().ok_or("bad temp path")?,
@@ -3101,7 +3629,10 @@ fn reconstruct_conflict_impl(cwd: &str, path: &str) -> Result<ReconstructedConfl
             .map_err(|e| format!("git merge-file: {}", e))?;
         // exit 255 = real error; 0/N = clean/conflicts (stdout is the merged content either way)
         if out.status.code() == Some(255) {
-            return Err(format!("git merge-file error: {}", String::from_utf8_lossy(&out.stderr)));
+            return Err(format!(
+                "git merge-file error: {}",
+                String::from_utf8_lossy(&out.stderr)
+            ));
         }
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     })();
@@ -3112,11 +3643,17 @@ fn reconstruct_conflict_impl(cwd: &str, path: &str) -> Result<ReconstructedConfl
     let wt = std::fs::read(safe_repo_path(cwd, path)?).unwrap_or_default();
     let wt_matches_side = (!ours.is_empty() && wt == ours) || (!theirs.is_empty() && wt == theirs);
 
-    Ok(ReconstructedConflict { content, wt_matches_side })
+    Ok(ReconstructedConflict {
+        content,
+        wt_matches_side,
+    })
 }
 
 #[tauri::command]
-pub(crate) async fn reconstruct_conflict(cwd: String, path: String) -> Result<ReconstructedConflict, String> {
+pub(crate) async fn reconstruct_conflict(
+    cwd: String,
+    path: String,
+) -> Result<ReconstructedConflict, String> {
     reconstruct_conflict_impl(&cwd, &path)
 }
 
@@ -3203,7 +3740,9 @@ pub(crate) async fn git_get_user(cwd: String) -> Result<serde_json::Value, Strin
         .output()
         .map_err(|e| format!("Failed to run git config: {}", e))?;
     let name = String::from_utf8_lossy(&name_out.stdout).trim().to_string();
-    let email = String::from_utf8_lossy(&email_out.stdout).trim().to_string();
+    let email = String::from_utf8_lossy(&email_out.stdout)
+        .trim()
+        .to_string();
     Ok(serde_json::json!({ "name": name, "email": email }))
 }
 
@@ -3219,8 +3758,7 @@ pub(crate) async fn detect_monorepo(cwd: String) -> Result<MonorepoInfo, String>
     // ── 1. pnpm ──────────────────────────────────────────────────────────
     let pnpm_ws = cwd_path.join("pnpm-workspace.yaml");
     if pnpm_ws.exists() {
-        let content = std::fs::read_to_string(&pnpm_ws)
-            .unwrap_or_default();
+        let content = std::fs::read_to_string(&pnpm_ws).unwrap_or_default();
         let packages = find_workspace_packages(&cwd, &content, "pnpm");
         return Ok(MonorepoInfo {
             is_monorepo: true,
@@ -3432,9 +3970,13 @@ pub(crate) async fn pr_files(cwd: String, number: i64) -> Result<Vec<String>, St
     }
     let output = hidden_cmd("gh")
         .args([
-            "pr", "view", &number.to_string(),
-            "--json", "files",
-            "--jq", "[.files[].path]",
+            "pr",
+            "view",
+            &number.to_string(),
+            "--json",
+            "files",
+            "--jq",
+            "[.files[].path]",
         ])
         .current_dir(&cwd)
         .output()
@@ -3443,8 +3985,7 @@ pub(crate) async fn pr_files(cwd: String, number: i64) -> Result<Vec<String>, St
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
     }
     let json = String::from_utf8_lossy(&output.stdout);
-    serde_json::from_str::<Vec<String>>(json.trim())
-        .map_err(|e| e.to_string())
+    serde_json::from_str::<Vec<String>>(json.trim()).map_err(|e| e.to_string())
 }
 
 // ─── Fork Point (v2.11) ──────────────────────────────────────
@@ -3458,7 +3999,11 @@ pub(crate) async fn pr_files(cwd: String, number: i64) -> Result<Vec<String>, St
 // common ancestor (unrelated histories, empty repo).
 
 #[tauri::command]
-pub(crate) async fn git_merge_base(cwd: String, ref1: String, ref2: String) -> Result<String, String> {
+pub(crate) async fn git_merge_base(
+    cwd: String,
+    ref1: String,
+    ref2: String,
+) -> Result<String, String> {
     let output = git_cmd()
         .args(["merge-base", &ref1, &ref2])
         .current_dir(&cwd)
@@ -3642,7 +4187,11 @@ fn try_open_linux(mut cmd: std::process::Command, label: &str) -> Result<(), Str
 // ─── Open in external editor ─────────────────────────────────
 
 #[tauri::command]
-pub(crate) async fn open_in_editor(cwd: String, path: String, editor: String) -> Result<(), String> {
+pub(crate) async fn open_in_editor(
+    cwd: String,
+    path: String,
+    editor: String,
+) -> Result<(), String> {
     let editor_cmd = if editor.trim().is_empty() {
         "code".to_string()
     } else {
@@ -3677,16 +4226,16 @@ mod open_url_tests {
     fn opener_exiting_nonzero_is_error() {
         let err = try_open_linux(Command::new("false"), "false").unwrap_err();
         assert!(err.contains("false"), "error should name the opener: {err}");
-        assert!(err.contains("status"), "error should report the exit: {err}");
+        assert!(
+            err.contains("status"),
+            "error should report the exit: {err}"
+        );
     }
 
     #[test]
     fn missing_opener_is_error() {
-        let err = try_open_linux(
-            Command::new("gitwand-no-such-opener-binary"),
-            "ghost",
-        )
-        .unwrap_err();
+        let err =
+            try_open_linux(Command::new("gitwand-no-such-opener-binary"), "ghost").unwrap_err();
         assert!(err.contains("ghost"), "error should name the opener: {err}");
     }
 
@@ -3710,14 +4259,24 @@ mod tree_conflict_tests {
 
     static COUNTER: AtomicU64 = AtomicU64::new(0);
 
-    struct TempRepo { path: PathBuf }
-    impl Drop for TempRepo { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.path); } }
+    struct TempRepo {
+        path: PathBuf,
+    }
+    impl Drop for TempRepo {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
     impl TempRepo {
         fn new() -> Self {
             let n = COUNTER.fetch_add(1, Ordering::SeqCst);
             let pid = std::process::id();
-            let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-            let dir = std::env::temp_dir().join(format!("gitwand-tree-test-{}-{}-{}", pid, n, nanos));
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let dir =
+                std::env::temp_dir().join(format!("gitwand-tree-test-{}-{}-{}", pid, n, nanos));
             std::fs::create_dir_all(&dir).unwrap();
             let repo = TempRepo { path: dir };
             repo.git(&["init", "-q", "-b", "main"]);
@@ -3726,22 +4285,37 @@ mod tree_conflict_tests {
             repo.git(&["config", "commit.gpgsign", "false"]);
             repo
         }
-        fn cwd(&self) -> String { self.path.to_str().unwrap().to_string() }
+        fn cwd(&self) -> String {
+            self.path.to_str().unwrap().to_string()
+        }
         fn git(&self, args: &[&str]) -> std::process::Output {
-            let out = Command::new(git_binary()).args(args).current_dir(&self.path).output()
+            let out = Command::new(git_binary())
+                .args(args)
+                .current_dir(&self.path)
+                .output()
                 .unwrap_or_else(|e| panic!("git {:?} spawn: {}", args, e));
             out
         }
         fn git_ok(&self, args: &[&str]) {
             let out = self.git(args);
-            assert!(out.status.success(), "git {:?} failed: {}", args, String::from_utf8_lossy(&out.stderr));
+            assert!(
+                out.status.success(),
+                "git {:?} failed: {}",
+                args,
+                String::from_utf8_lossy(&out.stderr)
+            );
         }
         fn write(&self, rel: &str, content: &str) {
             let p = self.path.join(rel);
-            if let Some(parent) = p.parent() { std::fs::create_dir_all(parent).unwrap(); }
+            if let Some(parent) = p.parent() {
+                std::fs::create_dir_all(parent).unwrap();
+            }
             std::fs::write(p, content).unwrap();
         }
-        fn commit_all(&self, msg: &str) { self.git_ok(&["add", "-A"]); self.git_ok(&["commit", "-q", "-m", msg]); }
+        fn commit_all(&self, msg: &str) {
+            self.git_ok(&["add", "-A"]);
+            self.git_ok(&["commit", "-q", "-m", msg]);
+        }
     }
 
     /// Build a modify/delete conflict: main deletes the file, feature modifies it,
@@ -3765,7 +4339,10 @@ mod tree_conflict_tests {
         let repo = TempRepo::new();
         make_modify_delete(&repo);
         let conflicts = collect_tree_conflicts(&repo.cwd()).expect("collect_tree_conflicts failed");
-        let tc = conflicts.iter().find(|c| c.path == "doomed.txt").expect("doomed.txt is a tree conflict");
+        let tc = conflicts
+            .iter()
+            .find(|c| c.path == "doomed.txt")
+            .expect("doomed.txt is a tree conflict");
         assert!(tc.has_ours, "feature (ours) modified it → stage 2 present");
         assert!(!tc.has_theirs, "main (theirs) deleted it → stage 3 absent");
         assert_eq!(tc.code, "UD");
@@ -3800,9 +4377,15 @@ mod tree_conflict_tests {
         make_modify_delete(&repo); // feature(ours) modified doomed.txt, main(theirs) deleted it
         apply_tree_resolution(&repo.cwd(), "doomed.txt", "ours").unwrap();
         // No longer unmerged:
-        assert!(collect_tree_conflicts(&repo.cwd()).unwrap().iter().all(|c| c.path != "doomed.txt"));
+        assert!(collect_tree_conflicts(&repo.cwd())
+            .unwrap()
+            .iter()
+            .all(|c| c.path != "doomed.txt"));
         // Working tree keeps the modified version:
-        assert_eq!(std::fs::read_to_string(repo.path.join("doomed.txt")).unwrap(), "MODIFIED by feature\n");
+        assert_eq!(
+            std::fs::read_to_string(repo.path.join("doomed.txt")).unwrap(),
+            "MODIFIED by feature\n"
+        );
     }
 
     #[test]
@@ -3810,8 +4393,14 @@ mod tree_conflict_tests {
         let repo = TempRepo::new();
         make_modify_delete(&repo);
         apply_tree_resolution(&repo.cwd(), "doomed.txt", "delete").unwrap();
-        assert!(collect_tree_conflicts(&repo.cwd()).unwrap().iter().all(|c| c.path != "doomed.txt"));
-        assert!(!repo.path.join("doomed.txt").exists(), "file removed from working tree");
+        assert!(collect_tree_conflicts(&repo.cwd())
+            .unwrap()
+            .iter()
+            .all(|c| c.path != "doomed.txt"));
+        assert!(
+            !repo.path.join("doomed.txt").exists(),
+            "file removed from working tree"
+        );
     }
 
     #[test]
@@ -3836,7 +4425,10 @@ mod tree_conflict_tests {
         repo.git_ok(&["checkout", "-q", "feature"]);
         let _ = repo.git(&["merge", "--no-edit", "main"]);
         let conflicts = collect_tree_conflicts(&repo.cwd()).expect("collect_tree_conflicts failed");
-        assert!(conflicts.iter().all(|c| c.path != "shared.txt"), "content conflict (UU) must NOT be reported as a tree conflict");
+        assert!(
+            conflicts.iter().all(|c| c.path != "shared.txt"),
+            "content conflict (UU) must NOT be reported as a tree conflict"
+        );
     }
 
     /// Build a UU content conflict on `shared.txt`, leaving markers in the working tree.
@@ -3860,7 +4452,10 @@ mod tree_conflict_tests {
         // Remove markers, leave working tree == ours (stage 2).
         repo.git_ok(&["checkout", "--ours", "--", "shared.txt"]);
         let rec = reconstruct_conflict_impl(&repo.cwd(), "shared.txt").unwrap();
-        assert!(rec.content.contains("<<<<<<<"), "reconstructed content must carry conflict markers");
+        assert!(
+            rec.content.contains("<<<<<<<"),
+            "reconstructed content must carry conflict markers"
+        );
         assert!(rec.content.contains(">>>>>>>"));
         assert!(rec.wt_matches_side, "working tree == ours → matches a side");
     }
@@ -3873,7 +4468,10 @@ mod tree_conflict_tests {
         repo.write("shared.txt", "line1\nMANUAL RESOLUTION\nline3\n");
         let rec = reconstruct_conflict_impl(&repo.cwd(), "shared.txt").unwrap();
         assert!(rec.content.contains("<<<<<<<"));
-        assert!(!rec.wt_matches_side, "working tree matches neither side → manual edit");
+        assert!(
+            !rec.wt_matches_side,
+            "working tree matches neither side → manual edit"
+        );
     }
 
     // ── Remote selection + unpushed-tag detection ─────────────
@@ -3896,7 +4494,11 @@ mod tree_conflict_tests {
             .arg(&dir)
             .output()
             .expect("git init --bare spawn");
-        assert!(out.status.success(), "git init --bare failed: {}", String::from_utf8_lossy(&out.stderr));
+        assert!(
+            out.status.success(),
+            "git init --bare failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
         dir
     }
 
@@ -3937,10 +4539,9 @@ mod tree_conflict_tests {
         // A tag that lives on origin must NOT be reported as unpushed.
         repo.git_ok(&["tag", "v1.0.0"]);
         repo.git_ok(&["push", "-q", "origin", "v1.0.0"]);
-        let unpushed = tauri::async_runtime::block_on(
-            git_unpushed_tags(repo.cwd(), "origin".to_string()),
-        )
-        .expect("git_unpushed_tags failed");
+        let unpushed =
+            tauri::async_runtime::block_on(git_unpushed_tags(repo.cwd(), "origin".to_string()))
+                .expect("git_unpushed_tags failed");
         assert!(
             unpushed.is_empty(),
             "v1.0.0 is on origin, expected none unpushed, got {:?}",
@@ -3949,10 +4550,9 @@ mod tree_conflict_tests {
 
         // A local-only tag IS unpushed.
         repo.git_ok(&["tag", "v2.0.0"]);
-        let unpushed2 = tauri::async_runtime::block_on(
-            git_unpushed_tags(repo.cwd(), "origin".to_string()),
-        )
-        .expect("git_unpushed_tags failed");
+        let unpushed2 =
+            tauri::async_runtime::block_on(git_unpushed_tags(repo.cwd(), "origin".to_string()))
+                .expect("git_unpushed_tags failed");
         assert_eq!(
             unpushed2,
             vec!["v2.0.0".to_string()],
@@ -4072,7 +4672,10 @@ mod interactive_rebase_tests {
             !repo.path.join("b.txt").exists(),
             "dropped commit's file must be absent"
         );
-        assert!(repo.path.join("c.txt").exists(), "kept commit's file remains");
+        assert!(
+            repo.path.join("c.txt").exists(),
+            "kept commit's file remains"
+        );
     }
 
     #[test]
@@ -4132,8 +4735,10 @@ mod default_branch_setting_tests {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_nanos();
-            let dir = std::env::temp_dir()
-                .join(format!("gitwand-default-branch-test-{}-{}-{}", pid, n, nanos));
+            let dir = std::env::temp_dir().join(format!(
+                "gitwand-default-branch-test-{}-{}-{}",
+                pid, n, nanos
+            ));
             std::fs::create_dir_all(&dir).unwrap();
             let repo = TempRepo { path: dir };
             repo.git_ok(&["init", "-q", "-b", "trunk"]);
@@ -4217,11 +4822,9 @@ mod default_branch_setting_tests {
 
         // With "trunk" configured explicitly (Settings > Git > Default Branch),
         // feature's ahead-count relative to trunk must be 1.
-        let branches = tauri::async_runtime::block_on(git_branches(
-            repo.cwd(),
-            Some("trunk".to_string()),
-        ))
-        .expect("git_branches with a configured default branch must succeed");
+        let branches =
+            tauri::async_runtime::block_on(git_branches(repo.cwd(), Some("trunk".to_string())))
+                .expect("git_branches with a configured default branch must succeed");
         let feature = branches
             .iter()
             .find(|b| b.name == "feature")
@@ -4349,7 +4952,11 @@ mod stash_and_tag_date_tests {
             );
             // A space separator or a colon-less offset is exactly the %ai shape
             // this test exists to keep out.
-            assert!(!e.date.contains(' '), "date must not contain a space: {:?}", e.date);
+            assert!(
+                !e.date.contains(' '),
+                "date must not contain a space: {:?}",
+                e.date
+            );
         }
         // Sanity: the rest of the entry is still parsed correctly.
         assert_eq!(entries[0].message, "second stash");
@@ -4373,7 +4980,13 @@ mod stash_and_tag_date_tests {
         // silently shifting the timezone.
         let iso_strict_from_git = String::from_utf8_lossy(
             &repo
-                .git(&["log", "-1", "--date=iso-strict", "--format=%ad", &entries[0].hash])
+                .git(&[
+                    "log",
+                    "-1",
+                    "--date=iso-strict",
+                    "--format=%ad",
+                    &entries[0].hash,
+                ])
                 .stdout,
         )
         .trim()

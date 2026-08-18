@@ -27,7 +27,10 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - run: pnpm build
+      # Exclude the VitePress site: deploy-website.yml and release.yml
+      # (publish-update-manifest) already build it, and it has nothing to do
+      # with the desktop/core/cli/mcp test matrix this job exists for.
+      - run: pnpm -r --filter '!gitwand-website' run build
 
       - run: pnpm test
 
@@ -44,37 +47,42 @@ jobs:
       - name: Reproduce issue #48 and verify the fix
         run: bash scripts/repro-issue-48-appimage-curl.sh
 
-  desktop:
-    name: Desktop Build (${{ matrix.platform }})
-    needs: test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+  # Replaces the old `desktop` job, which built 3 fully-signed release
+  # bundles via tauri-action on every push to main (~246 billed min/push)
+  # and whose artifacts nobody downloaded (upload-artifact with
+  # if-no-files-found: warn, no consuming job). This job instead runs the
+  # cheap, high-signal Rust checks (fmt/clippy/check/test) that never ran in
+  # CI before, and — critically — on `pull_request` too, so Rust compile
+  # errors are caught before merge instead of only after, on push to main.
+  # A real bundle build is kept as a separate, path-filtered `bundle-smoke`
+  # job below (ubuntu-22.04 only, push-to-main only) so bundler regressions
+  # are still caught without paying the fat-LTO, 3-platform cost on every PR.
+  rust-check:
+    name: Rust check (${{ matrix.platform }})
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - platform: macos-latest
-            args: --target universal-apple-darwin
-          - platform: ubuntu-22.04
-            args: ""
-          - platform: windows-latest
-            args: ""
+        platform: [ubuntu-22.04, windows-latest, macos-latest]
 
     runs-on: ${{ matrix.platform }}
 
     steps:
       - uses: actions/checkout@v5
 
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 22
-          cache: pnpm
-
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          components: clippy, rustfmt
+          # Host target only: `cargo check`/`cargo test` don't need the
+          # universal macOS target that the (removed) release build used —
+          # verified 0 occurrences of `target_arch` under src-tauri/src, so
+          # there's no arch-gated code that a single-target check would miss.
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+          cache-on-failure: true
+          shared-key: check
 
       - name: Install Linux dependencies
         if: matrix.platform == 'ubuntu-22.04'
@@ -86,6 +94,18 @@ jobs:
           # on Ubuntu 22.04 — libwebkit2gtk-4.1-dev no longer pulls them transitively
           # in current GHA runner images. `libayatana-appindicator3-dev` is the
           # supported replacement for the deprecated `libappindicator3-dev`.
+          # These are still needed for `cargo check`/`cargo test`, not just a
+          # full bundle build: glib-sys / soup3-sys are compiled as soon as the
+          # Tauri dependency tree is type-checked.
+          #
+          # `libssl-dev` intentionally NOT installed (P4.1): it only existed
+          # for openssl-sys, pulled in by tauri-plugin-aptabase's old
+          # reqwest 0.12 default-tls -> native-tls chain. Deduped to
+          # reqwest 0.13 + rustls (see Cargo.toml's [patch.crates-io]
+          # comment) — confirmed via `cargo tree -i openssl-sys --target
+          # x86_64-unknown-linux-gnu` (no match, including keyring's Linux
+          # secret-service/zbus backend) that nothing else in the tree
+          # pulls it. Re-add here if a future dependency needs it.
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev \
             libglib2.0-dev \
@@ -93,7 +113,6 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev \
             libxdo-dev \
-            libssl-dev \
             build-essential \
             file \
             patchelf
@@ -114,9 +133,161 @@ jobs:
             echo "::error::One or more Tauri Linux prereqs are missing — fix the apt-get install list above"
             exit 1
           fi
-          # Belt + braces: also export PKG_CONFIG_PATH at the runner level so
-          # every subsequent step (including tauri-action's internal cargo
-          # subprocess) inherits it, not just the step's `env:` block.
+          echo "PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig:/usr/lib/pkgconfig" >> "$GITHUB_ENV"
+
+      - name: cargo fmt --check
+        if: matrix.platform == 'ubuntu-22.04'
+        working-directory: apps/desktop/src-tauri
+        run: cargo fmt --check
+
+      - name: cargo clippy
+        if: matrix.platform == 'ubuntu-22.04'
+        working-directory: apps/desktop/src-tauri
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: cargo check
+        working-directory: apps/desktop/src-tauri
+        # --all-targets also covers the `[[example]] parity-probe`, which
+        # was previously compiled only by perf.yml, never checked here.
+        run: cargo check --locked --all-targets
+
+      - name: cargo test
+        working-directory: apps/desktop/src-tauri
+        # These 217 unit tests + 1 doctest link the lib (and therefore Tauri)
+        # but never ran in any workflow before this job existed.
+        run: cargo test --locked
+
+  # Cheap gate for `bundle-smoke` below: answers "does this push actually
+  # touch anything a bundle build would rebuild?" so the ~8 min job doesn't
+  # run on every push to main (e.g. a docs-only or website-only push).
+  #
+  # Deliberately plain `git diff --name-only` instead of
+  # `dorny/paths-filter@v3`: nothing else in this repo depends on that
+  # action, and a workflow-level `on: push: paths:` (the pattern perf.yml
+  # already uses) isn't an option here — `bundle-smoke` shares this file's
+  # `on:` block with `test`/`rust-check`, which must keep running
+  # unconditionally on every PR and push. A one-line diff + grep is the
+  # smallest thing that gives a job-level filter without a third-party
+  # dependency.
+  changes:
+    name: Detect bundle-relevant changes
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-22.04
+    outputs:
+      bundle: ${{ steps.filter.outputs.bundle }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Full history: `github.event.before` can be arbitrarily far back
+          # for a multi-commit push, and a shallow clone would make the
+          # `git diff` below fail to resolve it.
+          fetch-depth: 0
+
+      - name: Diff against the pre-push SHA
+        id: filter
+        run: |
+          set -euo pipefail
+          BEFORE="${{ github.event.before }}"
+          # All-zero SHA = first push to a brand-new ref (or a history
+          # rewrite GitHub can't give us a real "before" for). We can't diff
+          # against that, so default to "relevant" — build once rather than
+          # silently never running bundle-smoke for that push.
+          if [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            echo "bundle=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git diff --name-only "$BEFORE" "${{ github.sha }}" -- \
+               apps/desktop/src-tauri apps/desktop/src 'apps/desktop/*.json' \
+               .github/workflows/ci.yml | grep -q .; then
+            echo "bundle=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "bundle=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # Real, signed tauri-action bundle build — the one thing `rust-check`
+  # above can't catch (a `tauri-bundler` regression, e.g. the `[[bin]]`
+  # class of bug that broke release v1.5.1, only shows up when actually
+  # bundling). Kept cheap on purpose:
+  #  - ubuntu-22.04 only (×1), not the 3-platform release matrix: the goal is
+  #    "does the bundler still work", not full cross-platform coverage —
+  #    that's release.yml's job, at tag time.
+  #  - gated by `changes` above: push-to-main only, and only when the push
+  #    touches something a bundle build would rebuild.
+  #  - `[profile.ci]` (thin LTO, 16 codegen-units) instead of the shipped
+  #    `[profile.release]` (fat LTO, 1 codegen-unit) — cuts link time
+  #    without changing bundler behavior. NEVER reuse `[profile.ci]` for a
+  #    real release artifact; see apps/desktop/CLAUDE.md §Performance
+  #    invariants.
+  bundle-smoke:
+    name: Bundle smoke build (ubuntu-22.04)
+    needs: changes
+    if: needs.changes.outputs.bundle == 'true'
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      # Separate shared-key from `rust-check`'s `check` cache: that cache is
+      # built by `cargo check`/`cargo test` (dev profile), this job builds
+      # `--profile ci` — mixing the two would evict one target/ for the
+      # other on every run instead of reusing either.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+          cache-on-failure: true
+          shared-key: bundle-ci
+
+      - name: Install Linux dependencies
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          # Full Tauri 2 prereqs (https://v2.tauri.app/start/prerequisites/#linux).
+          # `libglib2.0-dev` + `libsoup-3.0-dev` are required by glib-sys / soup3-sys
+          # on Ubuntu 22.04 — libwebkit2gtk-4.1-dev no longer pulls them transitively
+          # in current GHA runner images. `libayatana-appindicator3-dev` is the
+          # supported replacement for the deprecated `libappindicator3-dev`.
+          #
+          # `libssl-dev` intentionally NOT installed (P4.1) — see the
+          # `rust-check` job above for the full rationale (openssl-sys is
+          # gone from the resolved dependency graph after the reqwest 0.13
+          # + rustls dedup).
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libglib2.0-dev \
+            libsoup-3.0-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libxdo-dev \
+            build-essential \
+            file \
+            patchelf
+          # Diagnostic — fail fast with a clear list of missing prereqs instead
+          # of waiting for a cryptic glib-sys build script panic.
+          echo "=== probe glib stack ==="
+          for pkg in glib-2.0 gobject-2.0 gio-2.0 cairo gdk-pixbuf-2.0 pango \
+                    gtk+-3.0 webkit2gtk-4.1 javascriptcoregtk-4.1 \
+                    libsoup-3.0 ayatana-appindicator3-0.1 librsvg-2.0; do
+            if version=$(pkg-config --modversion "$pkg" 2>/dev/null); then
+              printf '  ✓ %-32s %s\n' "$pkg" "$version"
+            else
+              printf '  ✗ %-32s MISSING\n' "$pkg"
+              missing=1
+            fi
+          done
+          if [ "${missing:-0}" = "1" ]; then
+            echo "::error::One or more Tauri Linux prereqs are missing — fix the apt-get install list above"
+            exit 1
+          fi
           echo "PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig:/usr/lib/pkgconfig" >> "$GITHUB_ENV"
 
       - run: pnpm install --frozen-lockfile
@@ -124,29 +295,44 @@ jobs:
       - name: Build workspace dependencies (core needed by desktop)
         run: pnpm --filter @gitwand/core run build
 
-      - name: Build desktop app
+      - name: Build desktop app (smoke test, [profile.ci])
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # Pin pkg-config search path explicitly — tauri-action sometimes runs
-          # cargo in a context where the default Ubuntu multi-arch path is reset.
-          # Without this, glib-sys / gio-sys / soup3-sys can't find their .pc
-          # files even when libglib2.0-dev is installed. See release.yml comment.
           PKG_CONFIG_PATH: /usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig:/usr/lib/pkgconfig
         with:
           projectPath: apps/desktop
-          args: ${{ matrix.args }}
+          # `@tauri-apps/cli` 2.11.4 does NOT accept `--profile` as a direct
+          # flag of `tauri build` (clap: "unexpected argument '--profile'
+          # found ... tip: to pass '--profile' as a value, use '--
+          # --profile'") — confirmed locally against this exact CLI version.
+          # The leading `--` here is required, not decorative. tauri-action
+          # itself scans these args for the literal token `--profile` (see
+          # its `src/build.ts`) to locate `target/ci/bundle/...` instead of
+          # `target/release/bundle/...` when collecting artifacts, so this
+          # also has to be the exact string it looks for.
+          #
+          # `--features telemetry` (P4.2) comes BEFORE the `--`: unlike
+          # `--profile`, `-f/--features` is a real tauri-cli flag, parsed by
+          # the CLI itself rather than forwarded raw to cargo. This job
+          # builds in `[profile.ci]` (non-debug), so the crate's
+          # compile_error! guard requires this flag — without it, this
+          # smoke build would no longer be representative of the real
+          # release build (which also requires --features telemetry, see
+          # release.yml), and would in fact fail to compile at all.
+          args: --features telemetry -- --profile ci
 
+      # Kept as a downloadable artifact (unlike the removed 3x-per-push
+      # bundles this job replaces) since it's now a single platform and
+      # only runs when something bundle-relevant changed — cheap enough to
+      # keep for manual inspection of a signing/bundler regression.
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: desktop-${{ matrix.platform }}
+          name: bundle-smoke-ubuntu-22.04
           path: |
-            apps/desktop/src-tauri/target/release/bundle/**/*.dmg
-            apps/desktop/src-tauri/target/release/bundle/**/*.deb
-            apps/desktop/src-tauri/target/release/bundle/**/*.AppImage
-            apps/desktop/src-tauri/target/release/bundle/**/*.msi
-            apps/desktop/src-tauri/target/release/bundle/**/*.exe
+            apps/desktop/src-tauri/target/ci/bundle/**/*.deb
+            apps/desktop/src-tauri/target/ci/bundle/**/*.AppImage
           if-no-files-found: warn

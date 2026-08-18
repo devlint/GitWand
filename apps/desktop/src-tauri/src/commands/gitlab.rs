@@ -44,14 +44,21 @@ const ROLLUP_BUDGET: Duration = Duration::from_secs(5);
 
 /// Extract a string field from a serde_json::Value object.
 fn js(v: &serde_json::Value, key: &str) -> String {
-    v.get(key).and_then(|x| x.as_str()).unwrap_or("").to_string()
+    v.get(key)
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string()
 }
 
 /// Extract an i64 field. Also handles string-encoded numbers (GitLab quirk).
 fn ji(v: &serde_json::Value, key: &str) -> i64 {
     v.get(key)
         .and_then(|x| x.as_i64())
-        .or_else(|| v.get(key).and_then(|x| x.as_str()).and_then(|s| s.parse().ok()))
+        .or_else(|| {
+            v.get(key)
+                .and_then(|x| x.as_str())
+                .and_then(|s| s.parse().ok())
+        })
         .unwrap_or(0)
 }
 
@@ -134,9 +141,7 @@ fn gl_mr_to_pr(mr: &serde_json::Value) -> PullRequest {
     let state = js(mr, "state");
     // Draft MRs: `draft` boolean (GitLab 14+) or legacy title prefix "Draft:"/"WIP:".
     let title = js(mr, "title");
-    let is_draft = jb(mr, "draft")
-        || title.starts_with("Draft:")
-        || title.starts_with("WIP:");
+    let is_draft = jb(mr, "draft") || title.starts_with("Draft:") || title.starts_with("WIP:");
 
     // diff_stats is present on `gl_get_mr` (detail) responses.
     let (additions, deletions) = mr
@@ -204,9 +209,7 @@ fn gl_mergeable_state(mr: &serde_json::Value) -> String {
 fn gl_mr_to_detail(mr: &serde_json::Value) -> PullRequestDetail {
     let state = js(mr, "state");
     let title = js(mr, "title");
-    let is_draft = jb(mr, "draft")
-        || title.starts_with("Draft:")
-        || title.starts_with("WIP:");
+    let is_draft = jb(mr, "draft") || title.starts_with("Draft:") || title.starts_with("WIP:");
 
     let (additions, deletions) = mr
         .get("diff_stats")
@@ -308,13 +311,8 @@ fn gl_list_mrs_inner(
     let total = gl_mr_list_per_page(limit, offset).to_string();
 
     let mut cmd = hidden_cmd("glab");
-    cmd.args([
-        "mr", "list",
-        flag,
-        "--per-page", &total,
-        "--output", "json",
-    ])
-    .current_dir(&cwd);
+    cmd.args(["mr", "list", flag, "--per-page", &total, "--output", "json"])
+        .current_dir(&cwd);
     let output = output_with_timeout(cmd, GLAB_TIMEOUT)
         .map_err(|e| format!("Failed to run glab mr list (is glab installed?): {}", e))?;
 
@@ -327,9 +325,12 @@ fn gl_list_mrs_inner(
     let raw: serde_json::Value = serde_json::from_str(stdout.trim())
         .map_err(|e| format!("Failed to parse glab mr list output: {}", e))?;
 
-    let arr = raw
-        .as_array()
-        .ok_or_else(|| format!("Expected JSON array from glab mr list, got: {}", &stdout[..stdout.len().min(200)]))?;
+    let arr = raw.as_array().ok_or_else(|| {
+        format!(
+            "Expected JSON array from glab mr list, got: {}",
+            &stdout[..stdout.len().min(200)]
+        )
+    })?;
 
     let mut mrs: Vec<PullRequest> = arr.iter().map(gl_mr_to_pr).collect();
 
@@ -346,7 +347,10 @@ fn gl_list_mrs_inner(
         .iter()
         .filter_map(|mr| {
             let iid = ji(mr, "iid");
-            let status = mr.get("head_pipeline").or_else(|| mr.get("pipeline")).map(|p| js(p, "status"))?;
+            let status = mr
+                .get("head_pipeline")
+                .or_else(|| mr.get("pipeline"))
+                .map(|p| js(p, "status"))?;
             Some((iid, status))
         })
         .collect();
@@ -362,7 +366,11 @@ fn gl_list_mrs_inner(
                 None if Instant::now() < rollup_deadline => gl_pipeline_rollup(&cwd, mr.number),
                 None => String::new(),
             };
-            if rollup.is_empty() { None } else { Some((mr.number, rollup)) }
+            if rollup.is_empty() {
+                None
+            } else {
+                Some((mr.number, rollup))
+            }
         })
         .collect();
     for mr in &mut mrs {
@@ -481,7 +489,8 @@ fn gl_get_mr_inner(cwd: String, iid: i64) -> Result<PullRequestDetail, String> {
     let mut cmd = hidden_cmd("glab");
     cmd.args(["mr", "view", &iid.to_string(), "--output", "json"])
         .current_dir(&cwd);
-    let output = output_with_timeout(cmd, GLAB_TIMEOUT).map_err(|e| format!("glab mr view: {}", e))?;
+    let output =
+        output_with_timeout(cmd, GLAB_TIMEOUT).map_err(|e| format!("glab mr view: {}", e))?;
 
     if !output.status.success() {
         return Err(format!(
@@ -544,7 +553,10 @@ fn gl_diff_stats_from_files(files: &[serde_json::Value]) -> (i64, i64) {
 /// since a stats miss shouldn't block the rest of the MR detail from
 /// rendering.
 fn gl_mr_diff_stats(cwd: &str, iid: i64) -> (i64, i64) {
-    let endpoint = format!("projects/:fullpath/merge_requests/{}/diffs?per_page=100", iid);
+    let endpoint = format!(
+        "projects/:fullpath/merge_requests/{}/diffs?per_page=100",
+        iid
+    );
     let mut cmd = hidden_cmd("glab");
     cmd.args(["api", &endpoint]).current_dir(cwd);
     let out = match output_with_timeout(cmd, GLAB_API_TIMEOUT) {
@@ -575,7 +587,8 @@ fn gl_mr_diff_refs_inner(cwd: String, iid: i64) -> Result<MrDiffRefs, String> {
     let mut cmd = hidden_cmd("glab");
     cmd.args(["mr", "view", &iid.to_string(), "--output", "json"])
         .current_dir(&cwd);
-    let output = output_with_timeout(cmd, GLAB_TIMEOUT).map_err(|e| format!("glab mr view: {}", e))?;
+    let output =
+        output_with_timeout(cmd, GLAB_TIMEOUT).map_err(|e| format!("glab mr view: {}", e))?;
     if !output.status.success() {
         return Err(format!(
             "glab mr view failed: {}",
@@ -585,14 +598,25 @@ fn gl_mr_diff_refs_inner(cwd: String, iid: i64) -> Result<MrDiffRefs, String> {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let mr: serde_json::Value = serde_json::from_str(stdout.trim())
         .map_err(|e| format!("Failed to parse glab mr view output: {}", e))?;
-    let refs = mr.get("diff_refs").cloned().unwrap_or(serde_json::Value::Null);
+    let refs = mr
+        .get("diff_refs")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
     let base_sha = js(&refs, "base_sha");
     let start_sha = js(&refs, "start_sha");
     let head_sha = js(&refs, "head_sha");
     Ok(MrDiffRefs {
         base_sha: base_sha.clone(),
-        start_sha: if start_sha.is_empty() { base_sha } else { start_sha },
-        head_sha: if head_sha.is_empty() { js(&mr, "sha") } else { head_sha },
+        start_sha: if start_sha.is_empty() {
+            base_sha
+        } else {
+            start_sha
+        },
+        head_sha: if head_sha.is_empty() {
+            js(&mr, "sha")
+        } else {
+            head_sha
+        },
     })
 }
 
@@ -612,14 +636,20 @@ pub(crate) async fn gl_mr_diff_refs(cwd: String, iid: i64) -> Result<MrDiffRefs,
 /// parsers silently see zero files — no error, just an empty result — and
 /// the UI renders "no diff available" regardless of what the MR contains.
 fn gl_mr_diff_args(iid: i64) -> Vec<String> {
-    vec!["mr".to_string(), "diff".to_string(), iid.to_string(), "--raw".to_string()]
+    vec![
+        "mr".to_string(),
+        "diff".to_string(),
+        iid.to_string(),
+        "--raw".to_string(),
+    ]
 }
 
 /// Get the unified diff of a MR using `glab mr diff`.
 fn gl_mr_diff_inner(cwd: String, iid: i64) -> Result<String, String> {
     let mut cmd = hidden_cmd("glab");
     cmd.args(gl_mr_diff_args(iid)).current_dir(&cwd);
-    let output = output_with_timeout(cmd, GLAB_TIMEOUT).map_err(|e| format!("glab mr diff: {}", e))?;
+    let output =
+        output_with_timeout(cmd, GLAB_TIMEOUT).map_err(|e| format!("glab mr diff: {}", e))?;
 
     if !output.status.success() {
         return Err(format!(
@@ -643,14 +673,11 @@ pub(crate) async fn gl_mr_diff(cwd: String, iid: i64) -> Result<String, String> 
 /// Returns the most-recent pipeline as a single-entry list (GitLab only has
 /// one "active" pipeline per MR at a time). Each job maps to a CICheck entry.
 fn gl_mr_pipelines_inner(cwd: String, iid: i64) -> Result<Vec<CICheck>, String> {
-    let endpoint = format!(
-        "projects/:fullpath/merge_requests/{}/pipelines",
-        iid
-    );
+    let endpoint = format!("projects/:fullpath/merge_requests/{}/pipelines", iid);
     let mut cmd = hidden_cmd("glab");
     cmd.args(["api", &endpoint]).current_dir(&cwd);
-    let output = output_with_timeout(cmd, GLAB_TIMEOUT)
-        .map_err(|e| format!("glab api pipelines: {}", e))?;
+    let output =
+        output_with_timeout(cmd, GLAB_TIMEOUT).map_err(|e| format!("glab api pipelines: {}", e))?;
 
     if !output.status.success() {
         return Ok(Vec::new()); // Non-fatal — no CI configured is common
@@ -768,7 +795,11 @@ fn gl_mr_annotations_inner(cwd: String, iid: i64) -> Result<Vec<CIAnnotation>, S
         Some(v) => v,
         None => return Ok(Vec::new()),
     };
-    let pipeline_id = match pipelines.as_array().and_then(|a| a.first()).map(|p| ji(p, "id")) {
+    let pipeline_id = match pipelines
+        .as_array()
+        .and_then(|a| a.first())
+        .map(|p| ji(p, "id"))
+    {
         Some(id) if id > 0 => id,
         _ => return Ok(Vec::new()),
     };
@@ -776,7 +807,10 @@ fn gl_mr_annotations_inner(cwd: String, iid: i64) -> Result<Vec<CIAnnotation>, S
     // 2. Jobs of that pipeline, keep those with a codequality report artifact.
     let jobs = match glab_api_json(
         &cwd,
-        &format!("projects/:fullpath/pipelines/{}/jobs?per_page=100", pipeline_id),
+        &format!(
+            "projects/:fullpath/pipelines/{}/jobs?per_page=100",
+            pipeline_id
+        ),
     ) {
         Some(v) => v,
         None => return Ok(Vec::new()),
@@ -808,7 +842,9 @@ fn gl_mr_annotations_inner(cwd: String, iid: i64) -> Result<Vec<CIAnnotation>, S
             Some(v) => v,
             None => continue, // report expired or custom filename — skip
         };
-        let Some(entries) = report.as_array() else { continue };
+        let Some(entries) = report.as_array() else {
+            continue;
+        };
 
         // 4. Code Climate format:
         //    { description, check_name, severity, location: { path, lines: { begin, end? } } }
@@ -877,9 +913,16 @@ fn gl_issue_to_issue(v: &serde_json::Value) -> crate::types::Issue {
     let labels = v
         .get("labels")
         .and_then(|l| l.as_array())
-        .map(|arr| arr.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|x| x.as_str().map(String::from))
+                .collect()
+        })
         .unwrap_or_default();
-    let milestone = v.get("milestone").map(|m| js(m, "title")).unwrap_or_default();
+    let milestone = v
+        .get("milestone")
+        .map(|m| js(m, "title"))
+        .unwrap_or_default();
     crate::types::Issue {
         number: ji(v, "iid"),
         title: js(v, "title"),
@@ -906,22 +949,32 @@ fn gl_list_issues_inner(
     // GitLab caps --per-page at 100; clamp so an over-large limit doesn't error.
     let lim = limit.unwrap_or(100).clamp(1, 100).to_string();
     let mut args: Vec<String> = vec![
-        "issue".into(), "list".into(),
-        "--state".into(), "opened".into(),
-        "--per-page".into(), lim,
-        "--output".into(), "json".into(),
+        "issue".into(),
+        "list".into(),
+        "--state".into(),
+        "opened".into(),
+        "--per-page".into(),
+        lim,
+        "--output".into(),
+        "json".into(),
     ];
     // glab filter flags: --assignee / --author accept usernames or "@me".
     match filter.as_str() {
-        "assigned" => { args.push("--assignee".into()); args.push("@me".into()); }
-        "created"  => { args.push("--author".into());   args.push("@me".into()); }
+        "assigned" => {
+            args.push("--assignee".into());
+            args.push("@me".into());
+        }
+        "created" => {
+            args.push("--author".into());
+            args.push("@me".into());
+        }
         // "mentioned" has no native glab flag → fall back to all-open.
         _ => {}
     }
     let mut cmd = hidden_cmd("glab");
     cmd.args(&args).current_dir(&cwd);
-    let output = output_with_timeout(cmd, GLAB_TIMEOUT)
-        .map_err(|e| format!("glab not available: {}", e))?;
+    let output =
+        output_with_timeout(cmd, GLAB_TIMEOUT).map_err(|e| format!("glab not available: {}", e))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!("glab issue list failed: {}", stderr.trim()));
@@ -965,7 +1018,7 @@ fn gl_create_mr_inner(
         source_branch,
         "--target-branch".to_string(),
         target_branch,
-        "--yes".to_string(),     // Skip interactive prompts
+        "--yes".to_string(), // Skip interactive prompts
         "--output".to_string(),
         "json".to_string(),
     ];
@@ -1014,7 +1067,15 @@ pub(crate) async fn gl_create_mr(
     reviewers: Option<Vec<String>>,
 ) -> Result<PullRequest, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        gl_create_mr_inner(cwd, title, body, source_branch, target_branch, draft, reviewers)
+        gl_create_mr_inner(
+            cwd,
+            title,
+            body,
+            source_branch,
+            target_branch,
+            draft,
+            reviewers,
+        )
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1038,7 +1099,8 @@ fn gl_merge_mr_inner(cwd: String, iid: i64, method: String) -> Result<(), String
 
     let mut cmd = hidden_cmd("glab");
     cmd.args(&args).current_dir(&cwd);
-    let output = output_with_timeout(cmd, GLAB_TIMEOUT).map_err(|e| format!("glab mr merge: {}", e))?;
+    let output =
+        output_with_timeout(cmd, GLAB_TIMEOUT).map_err(|e| format!("glab mr merge: {}", e))?;
 
     if !output.status.success() {
         return Err(format!(
@@ -1060,8 +1122,10 @@ pub(crate) async fn gl_merge_mr(cwd: String, iid: i64, method: String) -> Result
 #[tauri::command]
 fn gl_checkout_mr_inner(cwd: String, iid: i64) -> Result<(), String> {
     let mut cmd = hidden_cmd("glab");
-    cmd.args(["mr", "checkout", &iid.to_string()]).current_dir(&cwd);
-    let output = output_with_timeout(cmd, GLAB_TIMEOUT).map_err(|e| format!("glab mr checkout: {}", e))?;
+    cmd.args(["mr", "checkout", &iid.to_string()])
+        .current_dir(&cwd);
+    let output =
+        output_with_timeout(cmd, GLAB_TIMEOUT).map_err(|e| format!("glab mr checkout: {}", e))?;
 
     if !output.status.success() {
         return Err(format!(
@@ -1082,7 +1146,8 @@ pub(crate) async fn gl_checkout_mr(cwd: String, iid: i64) -> Result<(), String> 
 /// Convert a draft MR to ready-for-review using `glab mr update --draft=false`.
 fn gl_convert_draft_to_ready_inner(cwd: String, iid: i64) -> Result<(), String> {
     let mut cmd = hidden_cmd("glab");
-    cmd.args(["mr", "update", &iid.to_string(), "--draft=false"]).current_dir(&cwd);
+    cmd.args(["mr", "update", &iid.to_string(), "--draft=false"])
+        .current_dir(&cwd);
     let output = output_with_timeout(cmd, GLAB_TIMEOUT)
         .map_err(|e| format!("glab mr update (draft→ready): {}", e))?;
 
@@ -1134,7 +1199,8 @@ fn gl_mr_notes_inner(cwd: String, iid: i64) -> Result<serde_json::Value, String>
     );
     let mut cmd = hidden_cmd("glab");
     cmd.args(["api", &endpoint]).current_dir(&cwd);
-    let output = output_with_timeout(cmd, GLAB_TIMEOUT).map_err(|e| format!("glab api discussions: {}", e))?;
+    let output = output_with_timeout(cmd, GLAB_TIMEOUT)
+        .map_err(|e| format!("glab api discussions: {}", e))?;
 
     if !output.status.success() {
         return Err(format!(
@@ -1146,7 +1212,9 @@ fn gl_mr_notes_inner(cwd: String, iid: i64) -> Result<serde_json::Value, String>
     let stdout = String::from_utf8_lossy(&output.stdout);
     let discussions: Vec<serde_json::Value> =
         serde_json::from_str(stdout.trim()).map_err(|e| format!("Parse discussions: {}", e))?;
-    Ok(serde_json::Value::Array(gl_flatten_discussions(&discussions)))
+    Ok(serde_json::Value::Array(gl_flatten_discussions(
+        &discussions,
+    )))
 }
 
 #[tauri::command]
@@ -1159,11 +1227,22 @@ pub(crate) async fn gl_mr_notes(cwd: String, iid: i64) -> Result<serde_json::Val
 /// Create a note (comment) on a MR via `glab api`.
 ///
 /// Returns the created note as raw JSON — parsed TypeScript-side.
-fn gl_mr_create_note_inner(cwd: String, iid: i64, body: String) -> Result<serde_json::Value, String> {
+fn gl_mr_create_note_inner(
+    cwd: String,
+    iid: i64,
+    body: String,
+) -> Result<serde_json::Value, String> {
     let endpoint = format!("projects/:fullpath/merge_requests/{}/notes", iid);
     let mut cmd = hidden_cmd("glab");
-    cmd.args(["api", "-X", "POST", &endpoint, "-f", &format!("body={}", body)])
-        .current_dir(&cwd);
+    cmd.args([
+        "api",
+        "-X",
+        "POST",
+        &endpoint,
+        "-f",
+        &format!("body={}", body),
+    ])
+    .current_dir(&cwd);
     let output = output_with_timeout(cmd, GLAB_TIMEOUT)
         .map_err(|e| format!("glab api create note: {}", e))?;
 
@@ -1190,14 +1269,26 @@ pub(crate) async fn gl_mr_create_note(
 }
 
 /// Update a note on a MR via `glab api`.
-fn gl_mr_update_note_inner(cwd: String, iid: i64, note_id: i64, body: String) -> Result<(), String> {
+fn gl_mr_update_note_inner(
+    cwd: String,
+    iid: i64,
+    note_id: i64,
+    body: String,
+) -> Result<(), String> {
     let endpoint = format!(
         "projects/:fullpath/merge_requests/{}/notes/{}",
         iid, note_id
     );
     let mut cmd = hidden_cmd("glab");
-    cmd.args(["api", "-X", "PUT", &endpoint, "-f", &format!("body={}", body)])
-        .current_dir(&cwd);
+    cmd.args([
+        "api",
+        "-X",
+        "PUT",
+        &endpoint,
+        "-f",
+        &format!("body={}", body),
+    ])
+    .current_dir(&cwd);
     let output = output_with_timeout(cmd, GLAB_TIMEOUT)
         .map_err(|e| format!("glab api update note: {}", e))?;
 
@@ -1229,7 +1320,8 @@ fn gl_mr_delete_note_inner(cwd: String, iid: i64, note_id: i64) -> Result<(), St
         iid, note_id
     );
     let mut cmd = hidden_cmd("glab");
-    cmd.args(["api", "-X", "DELETE", &endpoint]).current_dir(&cwd);
+    cmd.args(["api", "-X", "DELETE", &endpoint])
+        .current_dir(&cwd);
     let output = output_with_timeout(cmd, GLAB_TIMEOUT)
         .map_err(|e| format!("glab api delete note: {}", e))?;
 
@@ -1243,11 +1335,7 @@ fn gl_mr_delete_note_inner(cwd: String, iid: i64, note_id: i64) -> Result<(), St
 }
 
 #[tauri::command]
-pub(crate) async fn gl_mr_delete_note(
-    cwd: String,
-    iid: i64,
-    note_id: i64,
-) -> Result<(), String> {
+pub(crate) async fn gl_mr_delete_note(cwd: String, iid: i64, note_id: i64) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || gl_mr_delete_note_inner(cwd, iid, note_id))
         .await
         .map_err(|e| e.to_string())?
@@ -1257,8 +1345,10 @@ pub(crate) async fn gl_mr_delete_note(
 #[tauri::command]
 fn gl_approve_mr_inner(cwd: String, iid: i64) -> Result<(), String> {
     let mut cmd = hidden_cmd("glab");
-    cmd.args(["mr", "approve", &iid.to_string()]).current_dir(&cwd);
-    let output = output_with_timeout(cmd, GLAB_TIMEOUT).map_err(|e| format!("glab mr approve: {}", e))?;
+    cmd.args(["mr", "approve", &iid.to_string()])
+        .current_dir(&cwd);
+    let output =
+        output_with_timeout(cmd, GLAB_TIMEOUT).map_err(|e| format!("glab mr approve: {}", e))?;
 
     if !output.status.success() {
         return Err(format!(
@@ -1280,13 +1370,11 @@ pub(crate) async fn gl_approve_mr(cwd: String, iid: i64) -> Result<(), String> {
 ///
 /// Returns raw JSON — parsed TypeScript-side into PrReview[].
 fn gl_list_reviews_inner(cwd: String, iid: i64) -> Result<serde_json::Value, String> {
-    let endpoint = format!(
-        "projects/:fullpath/merge_requests/{}/approvals",
-        iid
-    );
+    let endpoint = format!("projects/:fullpath/merge_requests/{}/approvals", iid);
     let mut cmd = hidden_cmd("glab");
     cmd.args(["api", &endpoint]).current_dir(&cwd);
-    let output = output_with_timeout(cmd, GLAB_TIMEOUT).map_err(|e| format!("glab api approvals: {}", e))?;
+    let output =
+        output_with_timeout(cmd, GLAB_TIMEOUT).map_err(|e| format!("glab api approvals: {}", e))?;
 
     if !output.status.success() {
         // Not all GitLab tiers have the approvals API — return empty gracefully.
@@ -1308,7 +1396,8 @@ pub(crate) async fn gl_list_reviews(cwd: String, iid: i64) -> Result<serde_json:
 fn gl_current_user_inner(cwd: String) -> Result<String, String> {
     let mut cmd = hidden_cmd("glab");
     cmd.args(["api", "/user"]).current_dir(&cwd);
-    let output = output_with_timeout(cmd, GLAB_TIMEOUT).map_err(|e| format!("glab api /user: {}", e))?;
+    let output =
+        output_with_timeout(cmd, GLAB_TIMEOUT).map_err(|e| format!("glab api /user: {}", e))?;
 
     if !output.status.success() {
         return Err(format!(
@@ -1318,8 +1407,8 @@ fn gl_current_user_inner(cwd: String) -> Result<String, String> {
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let user: serde_json::Value = serde_json::from_str(stdout.trim())
-        .map_err(|e| format!("Parse user: {}", e))?;
+    let user: serde_json::Value =
+        serde_json::from_str(stdout.trim()).map_err(|e| format!("Parse user: {}", e))?;
 
     Ok(user
         .get("username")
@@ -1338,8 +1427,10 @@ pub(crate) async fn gl_current_user(cwd: String) -> Result<String, String> {
 /// List reviewer candidates (project members with push access) via `glab api`.
 fn gl_reviewer_candidates_inner(cwd: String) -> Result<Vec<ReviewerCandidate>, String> {
     let mut cmd = hidden_cmd("glab");
-    cmd.args(["api", "projects/:fullpath/members/all?per_page=100"]).current_dir(&cwd);
-    let output = output_with_timeout(cmd, GLAB_TIMEOUT).map_err(|e| format!("glab api members: {}", e))?;
+    cmd.args(["api", "projects/:fullpath/members/all?per_page=100"])
+        .current_dir(&cwd);
+    let output =
+        output_with_timeout(cmd, GLAB_TIMEOUT).map_err(|e| format!("glab api members: {}", e))?;
 
     if !output.status.success() {
         return Ok(Vec::new()); // Non-fatal
@@ -1363,10 +1454,7 @@ fn gl_reviewer_candidates_inner(cwd: String) -> Result<Vec<ReviewerCandidate>, S
             }
             Some(ReviewerCandidate {
                 login: login.to_string(),
-                name: m
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .map(String::from),
+                name: m.get("name").and_then(|v| v.as_str()).map(String::from),
                 avatar_url: m
                     .get("avatar_url")
                     .and_then(|v| v.as_str())
@@ -1391,8 +1479,11 @@ pub(crate) async fn gl_reviewer_candidates(cwd: String) -> Result<Vec<ReviewerCa
 /// (numeric), not usernames.
 fn gl_resolve_member_id(cwd: &str, username: &str) -> Option<i64> {
     let mut cmd = hidden_cmd("glab");
-    cmd.args(["api", &format!("projects/:fullpath/members/all?query={}", username)])
-        .current_dir(cwd);
+    cmd.args([
+        "api",
+        &format!("projects/:fullpath/members/all?query={}", username),
+    ])
+    .current_dir(cwd);
     let output = output_with_timeout(cmd, GLAB_API_TIMEOUT).ok()?;
     if !output.status.success() {
         return None;
@@ -1409,14 +1500,20 @@ fn gl_resolve_member_id(cwd: &str, username: &str) -> Option<i64> {
 /// Request reviewers on an existing MR (B4, v3.6.0) — `PUT
 /// /merge_requests/:iid` with `reviewer_ids[]=<id>` per resolved username.
 #[tauri::command]
-pub(crate) async fn gl_request_reviewers(cwd: String, iid: i64, usernames: Vec<String>) -> Result<(), String> {
+pub(crate) async fn gl_request_reviewers(
+    cwd: String,
+    iid: i64,
+    usernames: Vec<String>,
+) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         let ids: Vec<i64> = usernames
             .iter()
             .filter_map(|u| gl_resolve_member_id(&cwd, u))
             .collect();
         if ids.is_empty() {
-            return Err("Could not resolve any reviewer username to a GitLab project member.".to_string());
+            return Err(
+                "Could not resolve any reviewer username to a GitLab project member.".to_string(),
+            );
         }
         let endpoint = format!("projects/:fullpath/merge_requests/{}", iid);
         let mut cmd = hidden_cmd("glab");
@@ -1476,7 +1573,7 @@ fn gl_branches_inner(cwd: String) -> Result<Vec<String>, String> {
             break;
         }
     }
-    names.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+    names.sort_by_key(|a| a.to_lowercase());
     Ok(names)
 }
 
@@ -1495,8 +1592,8 @@ fn gl_mr_files_inner(cwd: String, iid: i64) -> Result<Vec<String>, String> {
     );
     let mut cmd = hidden_cmd("glab");
     cmd.args(["api", &endpoint]).current_dir(&cwd);
-    let output = output_with_timeout(cmd, GLAB_TIMEOUT)
-        .map_err(|e| format!("glab api mr diffs: {}", e))?;
+    let output =
+        output_with_timeout(cmd, GLAB_TIMEOUT).map_err(|e| format!("glab api mr diffs: {}", e))?;
 
     if !output.status.success() {
         return Ok(Vec::new());
@@ -1535,6 +1632,11 @@ pub(crate) async fn gl_mr_files(cwd: String, iid: i64) -> Result<Vec<String>, St
 ///   POST /projects/:fullpath/merge_requests/:iid/discussions
 ///   Body: { body, position: { base_sha, start_sha, head_sha, position_type,
 ///            new_path, new_line, old_path, old_line } }
+// Mirrors the `#[tauri::command]` wrapper below 1:1 — its param list is the
+// IPC contract with the frontend (see `backend.ts`). Regrouping fields into
+// a params struct would be a real API-shape change, not a mechanical clippy
+// fix; deferred out of this chore(ci) PR. See PR1 clippy cleanup notes.
+#[allow(clippy::too_many_arguments)]
 fn gl_mr_create_discussion_inner(
     cwd: String,
     iid: i64,
@@ -1551,21 +1653,29 @@ fn gl_mr_create_discussion_inner(
     // Build args for `glab api -X POST`.
     let mut args: Vec<String> = vec![
         "api".to_string(),
-        "-X".to_string(), "POST".to_string(),
+        "-X".to_string(),
+        "POST".to_string(),
         endpoint.clone(),
-        "-f".to_string(), format!("body={}", body),
+        "-f".to_string(),
+        format!("body={}", body),
     ];
 
     // Attach diff-line position when we have enough context.
     let has_position = !base_sha.is_empty() && !head_sha.is_empty() && !path.is_empty();
     if has_position {
         args.extend([
-            "-f".to_string(), format!("position[base_sha]={}", base_sha),
-            "-f".to_string(), format!("position[start_sha]={}", start_sha),
-            "-f".to_string(), format!("position[head_sha]={}", head_sha),
-            "-f".to_string(), "position[position_type]=text".to_string(),
-            "-f".to_string(), format!("position[new_path]={}", path),
-            "-f".to_string(), format!("position[old_path]={}", path),
+            "-f".to_string(),
+            format!("position[base_sha]={}", base_sha),
+            "-f".to_string(),
+            format!("position[start_sha]={}", start_sha),
+            "-f".to_string(),
+            format!("position[head_sha]={}", head_sha),
+            "-f".to_string(),
+            "position[position_type]=text".to_string(),
+            "-f".to_string(),
+            format!("position[new_path]={}", path),
+            "-f".to_string(),
+            format!("position[old_path]={}", path),
         ]);
         if let Some(nl) = new_line {
             args.extend(["-f".to_string(), format!("position[new_line]={}", nl)]);
@@ -1591,6 +1701,11 @@ fn gl_mr_create_discussion_inner(
     serde_json::from_str(stdout.trim()).map_err(|e| format!("Parse discussion: {}", e))
 }
 
+// This signature is the Tauri IPC contract (see `backend.ts`); regrouping
+// its fields into a params struct is a frontend+backend API-shape change,
+// not a mechanical clippy fix. Deferred out of this chore(ci) PR — see PR1
+// clippy cleanup notes.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub(crate) async fn gl_mr_create_discussion(
     cwd: String,
@@ -1604,7 +1719,9 @@ pub(crate) async fn gl_mr_create_discussion(
     path: String,
 ) -> Result<serde_json::Value, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        gl_mr_create_discussion_inner(cwd, iid, body, base_sha, start_sha, head_sha, old_line, new_line, path)
+        gl_mr_create_discussion_inner(
+            cwd, iid, body, base_sha, start_sha, head_sha, old_line, new_line, path,
+        )
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1615,23 +1732,23 @@ pub(crate) async fn gl_mr_create_discussion(
 /// Map a GitLab emoji name to the equivalent GitHub reaction content string.
 fn gl_emoji_to_gh(name: &str) -> &str {
     match name {
-        "thumbsup"   => "+1",
+        "thumbsup" => "+1",
         "thumbsdown" => "-1",
-        "laughing"   => "laugh",
-        "tada"       => "hooray",
+        "laughing" => "laugh",
+        "tada" => "hooray",
         // confused, heart, rocket, eyes share the same name on both platforms
-        other        => other,
+        other => other,
     }
 }
 
 /// Map a GitHub reaction content string to the GitLab emoji name.
 fn gh_content_to_gl(content: &str) -> &str {
     match content {
-        "+1"    => "thumbsup",
-        "-1"    => "thumbsdown",
+        "+1" => "thumbsup",
+        "-1" => "thumbsdown",
         "laugh" => "laughing",
-        "hooray"=> "tada",
-        other   => other,
+        "hooray" => "tada",
+        other => other,
     }
 }
 
@@ -1644,7 +1761,12 @@ fn map_gl_reaction(r: &serde_json::Value) -> serde_json::Value {
 }
 
 /// Run any `glab api` call with optional `-f key=value` fields.
-fn glab_api(cwd: &str, method: &str, endpoint: &str, fields: &[(&str, &str)]) -> Result<serde_json::Value, String> {
+fn glab_api(
+    cwd: &str,
+    method: &str,
+    endpoint: &str,
+    fields: &[(&str, &str)],
+) -> Result<serde_json::Value, String> {
     let mut cmd = hidden_cmd("glab");
     cmd.args(["api", "-X", method, endpoint]);
     for (k, v) in fields {
@@ -1653,18 +1775,28 @@ fn glab_api(cwd: &str, method: &str, endpoint: &str, fields: &[(&str, &str)]) ->
     cmd.current_dir(cwd);
     let output = output_with_timeout(cmd, GLAB_TIMEOUT).map_err(|e| format!("glab api: {}", e))?;
     if !output.status.success() {
-        return Err(format!("glab api {} {}: {}", method, endpoint, String::from_utf8_lossy(&output.stderr)));
+        return Err(format!(
+            "glab api {} {}: {}",
+            method,
+            endpoint,
+            String::from_utf8_lossy(&output.stderr)
+        ));
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
     let trimmed = stdout.trim();
-    if trimmed.is_empty() { return Ok(serde_json::Value::Null); }
+    if trimmed.is_empty() {
+        return Ok(serde_json::Value::Null);
+    }
     serde_json::from_str(trimmed).map_err(|e| format!("parse glab response: {}", e))
 }
 
 fn award_emoji_path(iid: i64, target_type: &str, target_id: i64) -> String {
     match target_type {
         "pr" => format!("projects/:fullpath/merge_requests/{}/award_emoji", iid),
-        _    => format!("projects/:fullpath/merge_requests/{}/notes/{}/award_emoji", iid, target_id),
+        _ => format!(
+            "projects/:fullpath/merge_requests/{}/notes/{}/award_emoji",
+            iid, target_id
+        ),
     }
 }
 
@@ -1682,8 +1814,12 @@ pub(crate) async fn gl_list_reactions(
     tauri::async_runtime::spawn_blocking(move || {
         let path = award_emoji_path(iid, &target_type, target_id);
         let v = glab_api(&cwd, "GET", &path, &[])?;
-        Ok(v.as_array().map(|a| a.iter().map(map_gl_reaction).collect()).unwrap_or_default())
-    }).await.map_err(|e| e.to_string())?
+        Ok(v.as_array()
+            .map(|a| a.iter().map(map_gl_reaction).collect())
+            .unwrap_or_default())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Add an award emoji (reaction) to a MR or note.
@@ -1701,7 +1837,9 @@ pub(crate) async fn gl_add_reaction(
         let path = award_emoji_path(iid, &target_type, target_id);
         let v = glab_api(&cwd, "POST", &path, &[("name", &gl_name)])?;
         Ok(map_gl_reaction(&v))
-    }).await.map_err(|e| e.to_string())?
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Delete an award emoji (reaction) from a MR or note.
@@ -1718,7 +1856,9 @@ pub(crate) async fn gl_delete_reaction(
         let path = format!("{}/{}", base, reaction_id);
         glab_api(&cwd, "DELETE", &path, &[])?;
         Ok(())
-    }).await.map_err(|e| e.to_string())?
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[cfg(test)]
@@ -1727,7 +1867,8 @@ mod gl_list_issues_tests {
 
     #[test]
     fn maps_gitlab_issue_json_to_issue() {
-        let v: serde_json::Value = serde_json::from_str(r#"{
+        let v: serde_json::Value = serde_json::from_str(
+            r#"{
             "iid": 12, "title": "Crash", "state": "opened",
             "author": {"username": "alice"},
             "assignees": [{"username": "bob"}],
@@ -1736,7 +1877,9 @@ mod gl_list_issues_tests {
             "created_at": "2026-01-01T00:00:00Z",
             "updated_at": "2026-01-02T00:00:00Z",
             "milestone": {"title": "M1"}
-        }"#).unwrap();
+        }"#,
+        )
+        .unwrap();
         let i = gl_issue_to_issue(&v);
         assert_eq!(i.number, 12);
         assert_eq!(i.state, "open");
@@ -1815,10 +1958,22 @@ mod gl_mergeable_state_tests {
 
     #[test]
     fn falls_back_to_legacy_merge_status_when_detailed_is_absent() {
-        assert_eq!(gl_mergeable_state(&json!({"merge_status": "can_be_merged"})), "MERGEABLE");
-        assert_eq!(gl_mergeable_state(&json!({"merge_status": "cannot_be_merged"})), "CONFLICTING");
-        assert_eq!(gl_mergeable_state(&json!({"merge_status": "cannot_be_merged_recheck"})), "CONFLICTING");
-        assert_eq!(gl_mergeable_state(&json!({"merge_status": "unchecked"})), "UNKNOWN");
+        assert_eq!(
+            gl_mergeable_state(&json!({"merge_status": "can_be_merged"})),
+            "MERGEABLE"
+        );
+        assert_eq!(
+            gl_mergeable_state(&json!({"merge_status": "cannot_be_merged"})),
+            "CONFLICTING"
+        );
+        assert_eq!(
+            gl_mergeable_state(&json!({"merge_status": "cannot_be_merged_recheck"})),
+            "CONFLICTING"
+        );
+        assert_eq!(
+            gl_mergeable_state(&json!({"merge_status": "unchecked"})),
+            "UNKNOWN"
+        );
     }
 
     #[test]

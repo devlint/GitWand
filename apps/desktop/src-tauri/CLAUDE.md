@@ -2,7 +2,7 @@
 
 # src-tauri — Backend Rust (Tauri)
 
-Ce répertoire est le backend Rust de l'application Tauri. Toute la logique applicative est dans `src/lib.rs` (~800 lignes). `src/main.rs` est un entry point minimal.
+Ce répertoire est le backend Rust de l'application Tauri. `src/lib.rs` (1 133 lignes, mesuré 2026-08-18) est le bootstrap : structs de données partagées, `git_binary()`, `safe_repo_path()` et le `generate_handler!` final. La logique applicative elle-même vit dans `src/commands/` : 252 `#[tauri::command]` répartis sur 16 des 18 fichiers du répertoire (22 102 lignes au total ; `mod.rs` et `curl_util.rs` n'en déclarent aucune) — voir le détail plus bas. `src/git/` (2 840 lignes) porte l'exécution git bas niveau, `src/types.rs` (1 062 lignes) les types partagés. `src/main.rs` est un entry point minimal.
 
 ---
 
@@ -72,23 +72,38 @@ Command::new("sh")
 
 ---
 
-## Structure de `lib.rs`
+## Structure du backend
 
-Le fichier est organisé dans cet ordre :
+`lib.rs` est organisé dans cet ordre :
 
-1. Imports et structs de données (`GitStatus`, `ConflictFile`, `CommitInfo`, etc.)
+1. Imports et structs de données partagées (`GitStatus`, `ConflictFile`, `CommitInfo`, etc.)
 2. `git_binary()` — résolution du chemin git configurable
 3. `safe_repo_path()` — validation des chemins
-4. Commandes `#[tauri::command]` groupées par domaine :
-   - Status & diff : `git_status`, `git_diff`, `git_log`
-   - Opérations fichiers : `read_file`, `write_file`, `list_dir`
-   - Merge & conflits : `get_conflicted_files`, `git_merge`, `git_merge_tree`
-   - Branches : `git_branch`, `git_checkout`, `git_push`, `git_pull`
-   - History avancée : `git_show`, `git_blame`, `file_history`
-   - Rebase : `git_rebase_interactive`, `git_rebase_continue`
-   - Stash, tags, cherry-pick, worktree
-   - Processus externes : `spawn_process`, `open_in_editor`
-5. `run()` — registration de tous les handlers Tauri
+4. `run()` (L~389) — `tauri::generate_handler![...]` qui enregistre les 252 commandes
+
+Les commandes elles-mêmes vivent dans `src/commands/`, un fichier par domaine
+(mesuré 2026-08-18, `#[tauri::command]` par fichier) :
+
+| Fichier | Commandes |
+|---|---|
+| `ops.rs` | 85 |
+| `gitlab.rs` | 32 |
+| `gh.rs` | 27 |
+| `azure.rs` | 24 |
+| `bitbucket.rs` | 21 |
+| `read.rs` | 16 |
+| `ai.rs` | 12 |
+| `workspace.rs` | 9 |
+| `files.rs` | 7 |
+| `terminal.rs`, `mcp_catalog.rs` | 4 chacun |
+| `scratch.rs`, `credentials.rs`, `github_api.rs` | 3 chacun |
+| `secrets.rs`, `network.rs` | 1 chacun |
+| `mod.rs`, `curl_util.rs` | 0 (helpers uniquement) |
+
+`src/git/` (2 840 lignes) porte l'exécution git bas niveau, sans aucune commande
+Tauri directe (`git/repo_lock.rs` documente le pattern `#[tauri::command]` en
+commentaire, mais n'en déclare aucune — le lock est utilisé par les commandes de
+`commands/`). `src/types.rs` (1 062 lignes) porte les types partagés.
 
 ---
 
@@ -139,7 +154,53 @@ Build manuel : `cargo build --example parity-probe` → `target/debug/examples/p
 ## Dépendances Rust notables
 
 - `tauri 2.x` avec plugins séparés : `dialog`, `shell`, `global-shortcut`, `updater`, `process`
-- Une seule dépendance HTTP/async : `reqwest` + `tokio`, tirés transitivement par `tauri-plugin-aptabase` (télémétrie de lancement anonyme, release-only). Le reste du backend reste synchrone.
+- `reqwest` + `tokio` sont tirés transitivement, pas en dépendance directe. Une
+  seule version résolue (`reqwest 0.13`, rustls) : `tauri-plugin-updater` et
+  notre fork `[patch.crates-io]` `devlint/tauri-plugin-aptabase` (branche
+  `chore/reqwest-013-rustls`) partagent désormais le même
+  `default-features = false` + `rustls-no-provider`, avec un provider crypto
+  `ring` (pur Rust, sans compilation native) installé défensivement par les
+  deux plugins. `libssl-dev`/`native-tls`/`openssl-sys` ont disparu du graphe
+  (v3.6.6, P4.1).
+- `tauri-plugin-aptabase` (télémétrie de lancement anonyme) est une dépendance
+  **optionnelle**, gatée par la feature Cargo `telemetry` (défaut : absente) —
+  `cargo check`/`cargo test`/`cargo build` en dev ne la compilent plus du tout.
+  Tout build non-debug **doit** passer `--features telemetry` (voir
+  `release.yml` / `ci.yml`'s `bundle-smoke`) : `lib.rs` a un `compile_error!`
+  qui fait échouer la compilation d'un build non-debug qui l'omettrait, plutôt
+  que de perdre silencieusement l'analytics (v3.6.6, P4.2).
 - `serde` / `serde_json` pour la sérialisation des types vers le frontend
 - `dirs 5` pour la résolution des chemins système
 - `base64 0.22` pour l'encodage des contenus binaires
+
+---
+
+## Nettoyage disque `target/` — `cargo-sweep` (remédiation ponctuelle)
+
+`target/` (11 GB mesurés, `debug` + `release`) grossit avec chaque worktree qui
+lance `cargo` (`.claude/worktrees/…`, `git worktree add`) — un nouveau
+`target/` de plusieurs GB apparaît par worktree, sans nettoyage automatique.
+
+`cargo-sweep` (`cargo install cargo-sweep`) supprime les artefacts de build
+inutilisés depuis N jours. Il s'invoque **depuis `apps/desktop/src-tauri`** (le
+répertoire qui contient le `Cargo.toml`/`Cargo.lock` visé, pas la racine du
+monorepo, qui n'a pas de `Cargo.toml`) :
+
+```bash
+cd apps/desktop/src-tauri
+cargo sweep --time 14 --recursive
+```
+
+`--recursive` couvre aussi les `target/` de sous-répertoires (ex.
+`target/rust-analyzer` créé par la config `.vscode/settings.json`, ou d'autres
+worktrees si on pointe la commande sur leur propre `src-tauri`).
+
+**Ceci est une commande à lancer ponctuellement, à la main, quand le disque est
+sous pression — ce n'est pas un script npm ni un hook automatisé.** Ne pas
+l'exécuter sur une machine où un autre build/agent est potentiellement en cours
+(elle peut supprimer des artefacts qu'un build concurrent est en train
+d'utiliser).
+
+Repère utile : après l'étape `[profile.dev.package."*"] opt-level = 1`
+(`Cargo.toml`), `target/debug` est invalidé d'un coup — c'est le moment idéal
+pour lancer `cargo sweep` et récupérer l'espace de l'ancien `target/debug`.

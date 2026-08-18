@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * SecretsFindingsModal.vue — findings list + per-finding/per-pattern actions.
  *
