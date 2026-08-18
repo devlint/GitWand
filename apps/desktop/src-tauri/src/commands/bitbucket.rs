@@ -983,7 +983,7 @@ pub(crate) async fn bb_reviewer_candidates(cwd: String) -> Result<Vec<ReviewerCa
         })
         .collect();
 
-    candidates.sort_by(|a, b| a.login.to_lowercase().cmp(&b.login.to_lowercase()));
+    candidates.sort_by_key(|a| a.login.to_lowercase());
     Ok(candidates)
 }
 

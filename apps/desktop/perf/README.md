@@ -39,7 +39,10 @@ Les cibles sont indicatives — la vérité est "pas de régression > 15 % vs. b
 # [profile.ci] dans Cargo.toml). Les médianes mesurées (31-46 ms) sont
 # dominées par le spawn de `git`, donc le LTO fat de `release` n'apportait
 # rien ici, juste du temps de compil en plus.
-cd apps/desktop/src-tauri && cargo build --example parity-probe --profile ci
+# `--features telemetry` est requis : [profile.ci] est un profil non-debug,
+# donc le compile_error! de lib.rs se déclenche sans elle (P4.2) — même si
+# ce binaire d'example n'utilise pas la télémétrie lui-même.
+cd apps/desktop/src-tauri && cargo build --example parity-probe --profile ci --features telemetry
 
 # Run le bench (génère fixture + boucle + dump JSON) — depuis apps/desktop
 cd apps/desktop && node perf/bench.mjs

@@ -152,6 +152,13 @@ pub(crate) fn init_login_shell_env() {
     }
 }
 
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn init_login_shell_env() {
+    // Linux/Windows: launchers (Gnome/KDE session manager, explorer.exe,
+    // the systemd user instance, etc.) typically already provide the full
+    // user env. No preload needed.
+}
+
 /// Spawn `$SHELL -l -c "gh auth token"` and propagate the result as `GH_TOKEN`.
 /// Bounded by a 3s timeout. Silent on any failure path.
 #[cfg(target_os = "macos")]
@@ -250,6 +257,12 @@ fn extract_glab_token(shell: &str) {
 /// the first one wins (current-context host is reported first). ANSI color
 /// codes are stripped first since glab colors this output even when it
 /// detects a non-tty stdout in some versions.
+///
+/// Only called from the macOS-only `extract_glab_token` above, so this (and
+/// `strip_ansi_codes` below) would be dead code on other platforms outside
+/// `#[cfg(test)]` — gated accordingly rather than `#[allow(dead_code)]`,
+/// since `glab_token_tests` below still needs it to compile on every OS.
+#[cfg(any(test, target_os = "macos"))]
 fn parse_glab_token(status_output: &str) -> Option<String> {
     for line in status_output.lines() {
         let stripped = strip_ansi_codes(line);
@@ -267,6 +280,7 @@ fn parse_glab_token(status_output: &str) -> Option<String> {
 /// Strip ANSI CSI escape sequences (`\x1b[...<final byte>`) from a line.
 /// Minimal hand-rolled version — avoids pulling in an ansi-stripping crate
 /// for a startup-only, non-hot-path parse of a few lines of CLI output.
+#[cfg(any(test, target_os = "macos"))]
 fn strip_ansi_codes(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut chars = s.chars().peekable();
@@ -332,11 +346,4 @@ mod glab_token_tests {
         let output = "  ✓ Token: \n";
         assert_eq!(parse_glab_token(output), None);
     }
-}
-
-#[cfg(not(target_os = "macos"))]
-pub(crate) fn init_login_shell_env() {
-    // Linux/Windows: launchers (Gnome/KDE session manager, explorer.exe,
-    // the systemd user instance, etc.) typically already provide the full
-    // user env. No preload needed.
 }

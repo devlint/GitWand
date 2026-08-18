@@ -1010,7 +1010,7 @@ fn rest_reviewer_candidates(cwd: &str) -> Result<Vec<ReviewerCandidate>, String>
             avatar_url: m.avatar_url,
         })
         .collect();
-    all.sort_by(|a, b| a.login.to_lowercase().cmp(&b.login.to_lowercase()));
+    all.sort_by_key(|a| a.login.to_lowercase());
     Ok(all)
 }
 

@@ -296,7 +296,7 @@ pub(crate) async fn list_dir(path: Option<String>) -> Result<ListDirResult, Stri
         });
     }
 
-    dirs.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    dirs.sort_by_key(|a| a.name.to_lowercase());
 
     let parent = dir_path
         .parent()

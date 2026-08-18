@@ -901,7 +901,7 @@ pub(crate) fn rest_reviewer_candidates(
             break;
         }
     }
-    all.sort_by(|a, b| a.login.to_lowercase().cmp(&b.login.to_lowercase()));
+    all.sort_by_key(|a| a.login.to_lowercase());
     Ok(all)
 }
 

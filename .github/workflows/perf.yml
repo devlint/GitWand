@@ -97,7 +97,11 @@ jobs:
       # `release` profile bought nothing but compile time here.
       - name: Build parity probe
         working-directory: apps/desktop/src-tauri
-        run: cargo build --locked --example parity-probe --profile ci
+        # `--features telemetry` required (P4.2): [profile.ci] is non-debug,
+        # so the crate's compile_error! guard fires without it — this
+        # example binary doesn't use telemetry itself, but the guard can't
+        # tell the difference between this and a real release build.
+        run: cargo build --locked --example parity-probe --profile ci --features telemetry
 
       # perf.yml already installs the Rust toolchain, the Linux deps, and
       # builds the parity-probe binary — the 8 parity tests

@@ -94,17 +94,15 @@ fn parse_remote_host_port(url: &str) -> Option<HostPort> {
     // IPv6 literals: `[::1]:443` — split on the closing bracket if present,
     // otherwise on the last colon.
     let (host, port) = if let Some(stripped) = host_port.strip_prefix('[') {
-        match stripped.find(']') {
-            Some(end) => {
-                let host = &stripped[..end];
-                let after = &stripped[end + 1..];
-                let port = after
-                    .strip_prefix(':')
-                    .and_then(|s| s.parse::<u16>().ok())
-                    .unwrap_or(default_port);
-                (host.to_string(), port)
-            }
-            None => return None,
+        {
+            let end = stripped.find(']')?;
+            let host = &stripped[..end];
+            let after = &stripped[end + 1..];
+            let port = after
+                .strip_prefix(':')
+                .and_then(|s| s.parse::<u16>().ok())
+                .unwrap_or(default_port);
+            (host.to_string(), port)
         }
     } else {
         match host_port.rsplit_once(':') {

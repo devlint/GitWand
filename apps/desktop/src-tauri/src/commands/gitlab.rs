@@ -1463,7 +1463,7 @@ fn gl_reviewer_candidates_inner(cwd: String) -> Result<Vec<ReviewerCandidate>, S
         })
         .collect();
 
-    candidates.sort_by(|a, b| a.login.to_lowercase().cmp(&b.login.to_lowercase()));
+    candidates.sort_by_key(|a| a.login.to_lowercase());
     Ok(candidates)
 }
 

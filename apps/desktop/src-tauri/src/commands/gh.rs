@@ -566,7 +566,7 @@ fn gh_list_reviewer_candidates_inner(cwd: String) -> Result<Vec<ReviewerCandidat
         }
     }
     // Sort alphabetically by login for stable UX.
-    all.sort_by(|a, b| a.login.to_lowercase().cmp(&b.login.to_lowercase()));
+    all.sort_by_key(|a| a.login.to_lowercase());
     Ok(all)
 }
 

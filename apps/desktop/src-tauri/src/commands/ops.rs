@@ -3168,7 +3168,7 @@ pub(crate) async fn git_shortlog(cwd: String) -> Result<Vec<ShortlogEntry>, Stri
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let mut entries: Vec<ShortlogEntry> = stdout.lines().filter_map(parse_shortlog_line).collect();
-    entries.sort_by(|a, b| b.count.cmp(&a.count));
+    entries.sort_by_key(|b| std::cmp::Reverse(b.count));
     Ok(entries)
 }
 
@@ -3235,7 +3235,7 @@ pub(crate) async fn git_author_line_stats(cwd: String) -> Result<Vec<AuthorLineS
             deleted,
         })
         .collect();
-    stats.sort_by(|a, b| (b.added + b.deleted).cmp(&(a.added + a.deleted)));
+    stats.sort_by_key(|b| std::cmp::Reverse(b.added + b.deleted));
     Ok(stats)
 }
 
