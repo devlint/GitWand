@@ -167,6 +167,39 @@ fn gl_mr_to_pr(mr: &serde_json::Value) -> PullRequest {
     }
 }
 
+/// Map GitLab's merge-status fields to our canonical MERGEABLE / CONFLICTING
+/// / UNKNOWN (#161).
+///
+/// `merge_status` was deprecated in GitLab 15.6 in favor of
+/// `detailed_merge_status`: the old field is binary in practice (only
+/// `can_be_merged` means yes), lumping every other reason a merge might be
+/// blocked — CI still running, approvals pending, unresolved discussions —
+/// together with "not yet computed" (`unchecked`, `checking`). Treating all
+/// of those as `CONFLICTING` (the previous mapping) put a false-positive
+/// merge-conflict warning on almost every MR, since `unchecked` is the
+/// common resting state until something triggers a recheck. Only an actual
+/// `conflict` (or the legacy `cannot_be_merged*` values when
+/// `detailed_merge_status` isn't present) is a real conflict; anything else
+/// maps to `UNKNOWN`, which the frontend already renders as a neutral dash
+/// rather than a warning (see `isMergeConflict` in `usePrPanel.ts`).
+fn gl_mergeable_state(mr: &serde_json::Value) -> String {
+    let detailed = js(mr, "detailed_merge_status");
+    if !detailed.is_empty() {
+        return match detailed.as_str() {
+            "mergeable" => "MERGEABLE",
+            "conflict" => "CONFLICTING",
+            _ => "UNKNOWN",
+        }
+        .to_string();
+    }
+    match js(mr, "merge_status").as_str() {
+        "can_be_merged" => "MERGEABLE",
+        "cannot_be_merged" | "cannot_be_merged_recheck" => "CONFLICTING",
+        _ => "UNKNOWN",
+    }
+    .to_string()
+}
+
 /// Map a GitLab MR JSON object to a PullRequestDetail (richer fields).
 fn gl_mr_to_detail(mr: &serde_json::Value) -> PullRequestDetail {
     let state = js(mr, "state");
@@ -191,12 +224,7 @@ fn gl_mr_to_detail(mr: &serde_json::Value) -> PullRequestDetail {
         })
         .unwrap_or(0);
 
-    let mergeable = if js(mr, "merge_status") == "can_be_merged" {
-        "MERGEABLE"
-    } else {
-        "CONFLICTING"
-    }
-    .to_string();
+    let mergeable = gl_mergeable_state(mr);
 
     PullRequestDetail {
         number: ji(mr, "iid"),
@@ -350,10 +378,70 @@ pub(crate) async fn gl_list_mrs(
         .map_err(|e| e.to_string())?
 }
 
-/// Count MRs. Fetches up to 100 via list endpoint (GitLab REST has no free totalCount).
+/// Map our canonical state to the GitLab REST `state` query value used by
+/// `gl_mr_count_inner`'s `X-Total` lookup (distinct from `gl_state_flag`,
+/// which returns a `glab mr list` CLI flag, not a query string value).
+fn gl_state_query(state: &str) -> &'static str {
+    match state {
+        "closed" => "closed",
+        "merged" => "merged",
+        "all" => "all",
+        _ => "opened",
+    }
+}
+
+/// Parse the `X-Total` value out of `glab api --include`'s curl-style
+/// "headers, blank line, body" output. Header name match is case-insensitive
+/// and tolerant of `\r\n` line endings; stops scanning at the first blank
+/// line (end of headers) so it never accidentally matches something in the
+/// JSON body.
+fn gl_parse_x_total(output: &str) -> Option<i64> {
+    for line in output.lines() {
+        let line = line.trim_end_matches('\r');
+        if line.is_empty() {
+            break;
+        }
+        // The status line ("HTTP/2 200") has no colon — skip it rather than
+        // bailing out of the whole scan via `?`.
+        let Some((name, value)) = line.split_once(':') else {
+            continue;
+        };
+        if name.eq_ignore_ascii_case("x-total") {
+            return value.trim().parse().ok();
+        }
+    }
+    None
+}
+
+/// Count MRs.
+///
+/// Prefers the REST list endpoint's `X-Total` response header (GitLab's
+/// standard offset-pagination total, exposed via `glab api --include`) — a
+/// single cheap `per_page=1` call regardless of how many MRs actually exist.
+/// Falls back to fetching up to 100 via `glab mr list` and counting the
+/// array (the old behavior, silently capped at 100) only if the header is
+/// ever absent, e.g. an old self-hosted GitLab or a project forced onto
+/// keyset-only pagination (#161 — the old approach was the *only* path and
+/// capped every repo with over 100 open MRs at exactly 100).
 ///
 /// Returns 0 on non-fatal errors so the Launchpad badge can still render.
 fn gl_mr_count_inner(cwd: String, state: String) -> Result<i64, String> {
+    let endpoint = format!(
+        "projects/:fullpath/merge_requests?state={}&per_page=1",
+        gl_state_query(&state)
+    );
+    let mut cmd = hidden_cmd("glab");
+    cmd.args(["api", "--include", &endpoint]).current_dir(&cwd);
+    if let Ok(output) = output_with_timeout(cmd, GLAB_TIMEOUT) {
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            if let Some(total) = gl_parse_x_total(&stdout) {
+                return Ok(total);
+            }
+        }
+    }
+
+    // Fallback: no X-Total header available.
     let flag = gl_state_flag(&state);
     let mut cmd = hidden_cmd("glab");
     cmd.args(["mr", "list", flag, "--per-page", "100", "--output", "json"])
@@ -411,7 +499,57 @@ fn gl_get_mr_inner(cwd: String, iid: i64) -> Result<PullRequestDetail, String> {
     } else {
         gl_status_to_rollup(&embedded)
     };
+    // GitLab's MR resource carries no line-level stats (#161 — `diff_stats`
+    // read by `gl_mr_to_detail` never exists on a real GitLab payload, so it
+    // always fell through to 0/0). One extra call, only on the detail path.
+    let (additions, deletions) = gl_mr_diff_stats(&cwd, iid);
+    detail.additions = additions;
+    detail.deletions = deletions;
     Ok(detail)
+}
+
+/// Sum real `+`/`-` line counts out of each file's unified-diff hunk text,
+/// as returned by the `/merge_requests/:iid/diffs` endpoint (#161). File
+/// header lines (`--- a/...`, `+++ b/...`) are skipped so they're never
+/// miscounted as a deletion/addition of their own.
+fn gl_diff_stats_from_files(files: &[serde_json::Value]) -> (i64, i64) {
+    let mut additions = 0i64;
+    let mut deletions = 0i64;
+    for f in files {
+        let diff = f.get("diff").and_then(|d| d.as_str()).unwrap_or("");
+        for line in diff.lines() {
+            if line.starts_with("+++") || line.starts_with("---") {
+                continue;
+            }
+            if line.starts_with('+') {
+                additions += 1;
+            } else if line.starts_with('-') {
+                deletions += 1;
+            }
+        }
+    }
+    (additions, deletions)
+}
+
+/// Fetch a MR's diffs and reduce them to (additions, deletions). Best-effort
+/// — (0, 0) on any error, same non-fatal pattern as `gl_pipeline_rollup`,
+/// since a stats miss shouldn't block the rest of the MR detail from
+/// rendering.
+fn gl_mr_diff_stats(cwd: &str, iid: i64) -> (i64, i64) {
+    let endpoint = format!("projects/:fullpath/merge_requests/{}/diffs?per_page=100", iid);
+    let mut cmd = hidden_cmd("glab");
+    cmd.args(["api", &endpoint]).current_dir(cwd);
+    let out = match output_with_timeout(cmd, GLAB_API_TIMEOUT) {
+        Ok(o) if o.status.success() => o,
+        _ => return (0, 0),
+    };
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let v: serde_json::Value =
+        serde_json::from_str(stdout.trim()).unwrap_or(serde_json::Value::Array(vec![]));
+    match v.as_array() {
+        Some(files) => gl_diff_stats_from_files(files),
+        None => (0, 0),
+    }
 }
 
 #[tauri::command]
@@ -457,10 +595,22 @@ pub(crate) async fn gl_mr_diff_refs(cwd: String, iid: i64) -> Result<MrDiffRefs,
         .map_err(|e| e.to_string())?
 }
 
+/// Build the `glab mr diff` argument list (#161).
+///
+/// `--raw` is required: `glab`'s default (non-raw) diff output is a
+/// decorated/summarized rendering, not the git-compatible unified-diff
+/// format (`diff --git a/... b/...` headers) the frontend's
+/// `indexDiffFiles`/`parseFileDiff` parsers expect. Without it, those
+/// parsers silently see zero files — no error, just an empty result — and
+/// the UI renders "no diff available" regardless of what the MR contains.
+fn gl_mr_diff_args(iid: i64) -> Vec<String> {
+    vec!["mr".to_string(), "diff".to_string(), iid.to_string(), "--raw".to_string()]
+}
+
 /// Get the unified diff of a MR using `glab mr diff`.
 fn gl_mr_diff_inner(cwd: String, iid: i64) -> Result<String, String> {
     let mut cmd = hidden_cmd("glab");
-    cmd.args(["mr", "diff", &iid.to_string()]).current_dir(&cwd);
+    cmd.args(gl_mr_diff_args(iid)).current_dir(&cwd);
     let output = output_with_timeout(cmd, GLAB_TIMEOUT).map_err(|e| format!("glab mr diff: {}", e))?;
 
     if !output.status.success() {
@@ -1597,5 +1747,150 @@ mod gl_state_flag_tests {
         assert_eq!(gl_state_flag("opened"), "--opened");
         assert_eq!(gl_state_flag("open"), "--opened");
         assert_eq!(gl_state_flag(""), "--opened");
+    }
+}
+
+/// Issue #161 — `merge_status` is deprecated since GitLab 15.6 and commonly
+/// sits at "unchecked"/"checking" until something triggers a recompute, so
+/// the old `can_be_merged` else `CONFLICTING` mapping treated every
+/// not-yet-computed MR as a false-positive conflict. Regression coverage for
+/// `gl_mergeable_state`, consumed by `gl_mr_to_detail`.
+#[cfg(test)]
+mod gl_mergeable_state_tests {
+    use super::gl_mergeable_state;
+    use serde_json::json;
+
+    #[test]
+    fn detailed_mergeable_maps_to_mergeable() {
+        let mr = json!({"detailed_merge_status": "mergeable", "merge_status": "can_be_merged"});
+        assert_eq!(gl_mergeable_state(&mr), "MERGEABLE");
+    }
+
+    #[test]
+    fn detailed_conflict_maps_to_conflicting() {
+        let mr = json!({"detailed_merge_status": "conflict", "merge_status": "cannot_be_merged"});
+        assert_eq!(gl_mergeable_state(&mr), "CONFLICTING");
+    }
+
+    #[test]
+    fn detailed_ci_still_running_is_unknown_not_conflicting() {
+        let mr = json!({"detailed_merge_status": "ci_still_running", "merge_status": "unchecked"});
+        assert_eq!(gl_mergeable_state(&mr), "UNKNOWN");
+    }
+
+    #[test]
+    fn detailed_unchecked_is_unknown() {
+        let mr = json!({"detailed_merge_status": "unchecked"});
+        assert_eq!(gl_mergeable_state(&mr), "UNKNOWN");
+    }
+
+    #[test]
+    fn falls_back_to_legacy_merge_status_when_detailed_is_absent() {
+        assert_eq!(gl_mergeable_state(&json!({"merge_status": "can_be_merged"})), "MERGEABLE");
+        assert_eq!(gl_mergeable_state(&json!({"merge_status": "cannot_be_merged"})), "CONFLICTING");
+        assert_eq!(gl_mergeable_state(&json!({"merge_status": "cannot_be_merged_recheck"})), "CONFLICTING");
+        assert_eq!(gl_mergeable_state(&json!({"merge_status": "unchecked"})), "UNKNOWN");
+    }
+
+    #[test]
+    fn neither_field_present_is_unknown() {
+        assert_eq!(gl_mergeable_state(&json!({})), "UNKNOWN");
+    }
+}
+
+/// Issue #161 — GitLab's MR resource has no `diff_stats` field (that was a
+/// GitHub-shaped assumption; GitLab's REST API never returns per-line
+/// addition/deletion counts on the MR itself), so `gl_mr_to_detail` reading
+/// `mr.diff_stats` always fell through to `(0, 0)`. Regression coverage for
+/// `gl_diff_stats_from_files`, which sums real `+`/`-` line counts out of
+/// the diffs endpoint's per-file unified-diff text instead.
+#[cfg(test)]
+mod gl_diff_stats_from_files_tests {
+    use super::gl_diff_stats_from_files;
+    use serde_json::json;
+
+    #[test]
+    fn sums_additions_and_deletions_across_files() {
+        let files = vec![
+            json!({"new_path": "a.rs", "diff": "@@ -1,2 +1,3 @@\n-old\n+new1\n+new2\n context\n"}),
+            json!({"new_path": "b.rs", "diff": "@@ -1,1 +1,1 @@\n-gone\n+kept\n"}),
+        ];
+        assert_eq!(gl_diff_stats_from_files(&files), (3, 2));
+    }
+
+    #[test]
+    fn ignores_the_file_header_lines_not_just_hunk_lines() {
+        // `---`/`+++` file headers must not be miscounted as a deletion/addition.
+        let files = vec![json!({
+            "new_path": "a.rs",
+            "diff": "--- a/a.rs\n+++ b/a.rs\n@@ -1,1 +1,1 @@\n-old\n+new\n"
+        })];
+        assert_eq!(gl_diff_stats_from_files(&files), (1, 1));
+    }
+
+    #[test]
+    fn empty_file_list_is_zero_zero() {
+        assert_eq!(gl_diff_stats_from_files(&[]), (0, 0));
+    }
+
+    #[test]
+    fn a_file_with_no_diff_field_contributes_nothing() {
+        let files = vec![json!({"new_path": "binary.png"})];
+        assert_eq!(gl_diff_stats_from_files(&files), (0, 0));
+    }
+}
+
+/// Issue #161 — the dock/badge MR count used to fetch up to 100 MRs and
+/// count the array, silently capping any repo with more open MRs than that
+/// at exactly 100. Regression coverage for `gl_parse_x_total`, which reads
+/// the real total off the REST list endpoint's `X-Total` header instead.
+#[cfg(test)]
+mod gl_parse_x_total_tests {
+    use super::gl_parse_x_total;
+
+    #[test]
+    fn finds_x_total_after_a_status_line_with_no_colon() {
+        let output = "HTTP/2 200 \r\nContent-Type: application/json\r\nX-Total: 125\r\nX-Per-Page: 1\r\n\r\n[{}]";
+        assert_eq!(gl_parse_x_total(output), Some(125));
+    }
+
+    #[test]
+    fn header_name_match_is_case_insensitive() {
+        let output = "HTTP/2 200\nx-total: 7\n\n[]";
+        assert_eq!(gl_parse_x_total(output), Some(7));
+    }
+
+    #[test]
+    fn returns_none_when_the_header_is_absent() {
+        let output = "HTTP/2 200\nContent-Type: application/json\n\n[{}]";
+        assert_eq!(gl_parse_x_total(output), None);
+    }
+
+    #[test]
+    fn does_not_scan_into_the_body_past_the_blank_line() {
+        // A body containing a line that happens to look like "X-Total: 9"
+        // must not be matched once the header block has ended.
+        let output = "HTTP/2 200\n\n{\"note\": \"X-Total: 9\"}";
+        assert_eq!(gl_parse_x_total(output), None);
+    }
+
+    #[test]
+    fn returns_none_on_empty_output() {
+        assert_eq!(gl_parse_x_total(""), None);
+    }
+}
+
+/// Issue #161 — `glab mr diff`'s default (non-`--raw`) output isn't the
+/// git-compatible unified-diff format (`diff --git a/... b/...` headers) the
+/// frontend's `indexDiffFiles`/`parseFileDiff` parsers require; without
+/// `--raw` they silently see zero files and the UI renders "no diff
+/// available" no matter what the MR actually contains.
+#[cfg(test)]
+mod gl_mr_diff_args_tests {
+    use super::gl_mr_diff_args;
+
+    #[test]
+    fn includes_the_raw_flag() {
+        assert_eq!(gl_mr_diff_args(42), vec!["mr", "diff", "42", "--raw"]);
     }
 }

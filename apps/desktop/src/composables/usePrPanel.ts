@@ -36,6 +36,7 @@ import { usePrCache, listKey, detailKey } from "./usePrCache";
 import { whenIdle } from "../utils/idleSchedule";
 import { getPersistedDiffMode, type DiffMode } from "../utils/diffMode";
 import { requireOnline } from "../utils/networkGuard";
+import { formatRelativeAge } from "../utils/relativeTime";
 import { t } from "./useI18n";
 import { useReviewIntelligence } from "./useReviewIntelligence";
 
@@ -1324,15 +1325,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
 
   // ─── Helpers ────────────────────────────────────────────
   function timeAgo(dateStr: string): string {
-    try {
-      const d = new Date(dateStr), now = new Date();
-      const diff = now.getTime() - d.getTime();
-      const mins = Math.floor(diff / 60000);
-      if (mins < 60) return `${mins}m`;
-      const hours = Math.floor(mins / 60);
-      if (hours < 24) return `${hours}h`;
-      return `${Math.floor(hours / 24)}j`;
-    } catch { return dateStr; }
+    return formatRelativeAge(dateStr, t);
   }
 
   function checkIcon(c: CICheck): string {

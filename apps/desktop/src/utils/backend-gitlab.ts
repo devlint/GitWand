@@ -32,6 +32,34 @@ export async function detectGlab(cwd: string): Promise<boolean> {
   return false;
 }
 
+/** Raw shape of the Rust `PullRequest` struct as it crosses IPC — snake_case,
+ *  since that struct has no `#[serde(rename_all = "camelCase")]`. */
+interface RawGlPullRequest {
+  number: number; title: string; state: string; author: string; branch: string;
+  base: string; draft: boolean; created_at: string; updated_at: string; url: string;
+  additions: number; deletions: number; labels: string[]; assignees: string[];
+  review_requested: string[]; review_decision: string; merge_state_status: string;
+  checks_rollup: string; comment_count: number;
+}
+
+/** Map a raw `gl_list_mrs`/`gl_create_mr` payload to the camelCase
+ *  `PullRequest` shape the rest of the app expects — mirrors what `glGetMr`
+ *  and every GitHub equivalent already do (#161: previously unmapped here,
+ *  so e.g. `createdAt`/`updatedAt` reached the UI as `undefined` and
+ *  `timeAgo()` rendered "NaNj" instead of an age). */
+function mapGlPullRequest(pr: RawGlPullRequest): PullRequest {
+  return {
+    number: pr.number, title: pr.title, state: pr.state, author: pr.author,
+    branch: pr.branch, base: pr.base, draft: pr.draft,
+    createdAt: pr.created_at, updatedAt: pr.updated_at,
+    url: pr.url, additions: pr.additions, deletions: pr.deletions,
+    labels: pr.labels, assignees: pr.assignees,
+    reviewRequested: pr.review_requested, reviewDecision: pr.review_decision,
+    mergeStateStatus: pr.merge_state_status, checksRollup: pr.checks_rollup,
+    commentCount: pr.comment_count,
+  };
+}
+
 /** List merge requests using `glab`. */
 export async function glListMrs(
   cwd: string,
@@ -40,7 +68,8 @@ export async function glListMrs(
   offset: number = 0,
 ): Promise<PullRequest[]> {
   if (!isTauri()) throw new Error("glListMrs requires Tauri");
-  return tauriInvoke<PullRequest[]>("gl_list_mrs", { cwd, state, limit, offset });
+  const raw = await tauriInvoke<RawGlPullRequest[]>("gl_list_mrs", { cwd, state, limit, offset });
+  return raw.map(mapGlPullRequest);
 }
 
 /** Count MRs via `glab`. Returns 0 on non-fatal errors. */
@@ -95,7 +124,15 @@ export async function glMrDiff(cwd: string, iid: number): Promise<string> {
 /** Get CI pipeline status for a MR. */
 export async function glMrPipelines(cwd: string, iid: number): Promise<CICheck[]> {
   if (!isTauri()) return [];
-  return tauriInvoke<CICheck[]>("gl_mr_pipelines", { cwd, iid });
+  const raw = await tauriInvoke<
+    { name: string; state: string; conclusion: string; details_url: string }[]
+  >("gl_mr_pipelines", { cwd, iid });
+  // Rust's `CICheck` has no `#[serde(rename_all = "camelCase")]`, so this is
+  // snake_case off the wire — map `details_url` -> `detailsUrl` or the CI
+  // tab's pipeline-link button (`v-if="c.detailsUrl"`) never renders (#161).
+  return raw.map((c) => ({
+    name: c.name, state: c.state, conclusion: c.conclusion, detailsUrl: c.details_url,
+  }));
 }
 
 /** Get codequality annotations for a MR (v2.18). Returns [] when no report exists. */
@@ -116,11 +153,12 @@ export async function glCreateMr(
   reviewers?: string[],
 ): Promise<PullRequest> {
   if (!isTauri()) throw new Error("glCreateMr requires Tauri");
-  return tauriInvoke<PullRequest>("gl_create_mr", {
+  const raw = await tauriInvoke<RawGlPullRequest>("gl_create_mr", {
     cwd, title, body,
     sourceBranch, targetBranch, draft,
     reviewers: reviewers ?? [],
   });
+  return mapGlPullRequest(raw);
 }
 
 /** Merge a MR. */
@@ -247,7 +285,14 @@ export async function glCurrentUser(cwd: string): Promise<string> {
 /** List reviewer candidates (project members). */
 export async function glReviewerCandidates(cwd: string): Promise<ReviewerCandidate[]> {
   if (!isTauri()) return [];
-  return tauriInvoke<ReviewerCandidate[]>("gl_reviewer_candidates", { cwd });
+  const raw = await tauriInvoke<{ login: string; name: string | null; avatar_url: string | null }[]>(
+    "gl_reviewer_candidates",
+    { cwd },
+  );
+  // Rust's `ReviewerCandidate` has no `#[serde(rename_all = "camelCase")]`,
+  // so `avatar_url` needs mapping to `avatarUrl` or the reviewer picker's
+  // avatar image never renders for GitLab repos (#161).
+  return raw.map((c) => ({ login: c.login, name: c.name, avatarUrl: c.avatar_url }));
 }
 
 /** Request reviewers on an existing MR (B4, v3.6.0) — usernames resolved to
