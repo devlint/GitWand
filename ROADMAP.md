@@ -6,7 +6,26 @@
 
 ## What's Next
 
-_Ordered by priority (2026-07-03, renumbered 2026-07-08 after v3.4.0 shipped the conflict-engine bundle — token_level_merge, base recovery, the recoverable-before-model metric — instead of the planned secrets scanner; renumbered again 2026-07-10 after v3.5.0 shipped the secrets scanner and PR Review 2.0 together as a single combined release, closing the version gap for everything after it; renumbered again 2026-07-20 after v3.6.0 shipped a batch of smaller incremental items (post-checkout "Update branch" prompt, the #128 non-blocking rebase-conflict UX fix, CommitGraph animation polish) instead of the planned Commit Review chantier, pushing the whole thread down one slot). The thread: rebuild commit-time review on the same AI pipeline (v3.7), lay the safety net before shipping more auto-apply (v3.8), make the app reactive and fast (v3.9), close the resolution loop (v3.10), then workflow & comparison primitives (v3.11–v3.12), experimental voice input (v3.13), and the v4.0 code-intelligence headline._
+_Ordered by priority (2026-07-03, renumbered 2026-07-08 after v3.4.0 shipped the conflict-engine bundle — token_level_merge, base recovery, the recoverable-before-model metric — instead of the planned secrets scanner; renumbered again 2026-07-10 after v3.5.0 shipped the secrets scanner and PR Review 2.0 together as a single combined release, closing the version gap for everything after it; renumbered again 2026-07-20 after v3.6.0 shipped a batch of smaller incremental items (post-checkout "Update branch" prompt, the #128 non-blocking rebase-conflict UX fix, CommitGraph animation polish) instead of the planned Commit Review chantier, pushing the whole thread down one slot). The thread: rebuild commit-time review on the same AI pipeline (v3.7), lay the safety net before shipping more auto-apply (v3.8), make the app reactive and fast (v3.9), close the resolution loop (v3.10), then workflow & comparison primitives (v3.11–v3.12), experimental voice input (v3.13), and the v4.0 code-intelligence headline. Ahead of the thread: v3.6.5, a build/CI chore with no product surface, so nothing below it shifts._
+
+### v3.6.5 — Dev loop & CI build times
+
+_Pure tooling chore, no product surface. Sits ahead of the thread so nothing below it renumbers. Every baseline figure below was measured on the tree as of 2026-08-18._
+
+**Today's baseline** — no Rust cache in any workflow (only `perf.yml` has an `actions/cache`), so `ci.yml`'s `desktop` job and `release.yml` recompile all 663 lockfile crates cold, on 3 platforms, with `lto = "fat"` + `codegen-units = 1`. `src-tauri` is a single 25 015-line crate (`commands/ops.rs` alone is 4 416 lines), so any edit recompiles and relinks everything and the 17 Rust test files must link Tauri to run. `target/` is 11 GB and `.worktrees/feat` duplicates it wholesale. `vite.config.ts` sets `environment: "jsdom"` globally for all 157 test files while only ~18 touch the DOM. `vue-tsc --noEmit` over 116 k lines of TS/Vue sits in the critical path of `pnpm build`, so CI pays it twice (job `test`, then job `desktop`).
+
+- **Rust cache in CI** — `Swatinem/rust-cache@v2` (`workspaces: apps/desktop/src-tauri`, `cache-on-failure: true`) right after `dtolnay/rust-toolchain` in `ci.yml`, `release.yml` and `perf.yml`; expect 10–20 min saved per platform. Check that the `[patch.crates-io]` aptabase fork and the vendored libgit2 build script don't defeat the cache key
+- **`[profile.ci]`** — `inherits = "release"` with `lto = "thin"`, `codegen-units = 16`, `strip = false`, for the builds we don't ship: the `desktop` smoke build and `pnpm bench`'s `parity-probe` (built `--release` today, so it pays fat LTO just to measure git subprocesses). Rewrite `perf/baseline.json` once after the switch
+- **Split the crate** — extract `git/` plus the pure parsers (`git/parse.rs`, secrets, structural) into a `gitwand-git` crate with no `tauri` dependency, inside a proper Cargo workspace. The only structural fix for the edit → `cargo check` loop; also lets the Rust tests run without linking Tauri, which opens the door to `cargo-nextest`
+- **Dev profile** — `[profile.dev] debug = "line-tables-only"` and `[profile.dev.package."*"] opt-level = 1`: faster links, dependencies fast at runtime and compiled once
+- **rust-analyzer vs `tauri dev`** — `"rust-analyzer.cargo.targetDir": true` in `.vscode/settings.json`; today the IDE's `cargo check` and the Tauri build contend for the same `target/` lock, so each blocks the other
+- **`sccache` + `cargo-sweep`** — share artifacts across `.worktrees/*` without the serialization a shared `CARGO_TARGET_DIR` imposes, and GC the 11 GB
+- **Vitest** — default `environment: "node"` with a `// @vitest-environment jsdom` docblock on the ~18 DOM files (100–300 ms of setup per file, currently × 157); root Vitest 4 `projects` config to replace the sequential `pnpm -r run test` with a single parallel run across all packages
+- **Typecheck off the critical path** — `vue-tsc --noEmit` as its own parallel CI job with `--incremental` and a cached `.tsbuildinfo`, instead of blocking `pnpm build` twice
+- **Measure, then iterate** — `cargo build --timings` (codegen vs link), `cargo llvm-lines` on `commands/*` (`#[tauri::command]` monomorphization), `vue-tsc --generateTrace`
+- **Doc fix** — `CLAUDE.md` still advertises a Node 18/20/22 CI matrix; `ci.yml` runs `[22]` only, consistent with `engines: node >=22.13.0`
+
+---
 
 ### v3.7.0 — Commit Review: micro AI reviews in the Changes panel
 
