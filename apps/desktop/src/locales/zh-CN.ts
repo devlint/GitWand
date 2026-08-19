@@ -1118,6 +1118,11 @@ const zhCN: Locale = {
     tabTerminal: "终端",
     tabAi: "AI",
     tabLogs: "日志",
+    // v3.7.0 review-round fix (finding #13a) —导航栏分组标题
+    navGroupApplication: "应用程序",
+    navGroupRepo: "仓库",
+    navGroupAi: "AI 与代理",
+    navGroupSystem: "系统",
     checkForUpdates: "检查更新",
     upToDate: "已是最新",
     logsTitle: "活动日志",
@@ -1139,6 +1144,8 @@ const zhCN: Locale = {
     aiProviderOpenAiCompat: "OpenAI 兼容 API",
     aiProviderOllama: "Ollama（本地）",
     aiProviderOllamaNotFound: " — 未检测到",
+    // v3.7.0 review-round fix (finding #13b)
+    aiProviderCliFallbackHint: "该提供方尚未配置，因此 GitWand 改用您本地的 Claude Code CLI。",
     aiAuthLabel: "认证",
     aiAuthConnect: "连接",
     aiAuthApiKey: "API 密钥",

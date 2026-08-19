@@ -1068,6 +1068,11 @@ const fr: Locale = {
     tabTerminal: "Terminal",
     tabAi: "IA",
     tabLogs: "Journaux",
+    // v3.7.0 review-round fix (finding #13a) — en-têtes de groupe de la nav
+    navGroupApplication: "Application",
+    navGroupRepo: "Dépôt",
+    navGroupAi: "IA & Agents",
+    navGroupSystem: "Système",
     checkForUpdates: "Vérifier les mises à jour",
     upToDate: "À jour",
     logsTitle: "Journal d'activité",
@@ -1089,6 +1094,8 @@ const fr: Locale = {
     aiProviderOpenAiCompat: "API compatible OpenAI",
     aiProviderOllama: "Ollama (local)",
     aiProviderOllamaNotFound: " \u2014 non d\u00e9tect\u00e9",
+    // v3.7.0 review-round fix (finding #13b)
+    aiProviderCliFallbackHint: "Ce fournisseur n'est pas configur\u00e9, GitWand utilise donc votre CLI Claude Code locale \u00e0 la place.",
     aiAuthLabel: "Authentification",
     aiAuthConnect: "Connecter",
     aiAuthApiKey: "Cl\u00e9 API",

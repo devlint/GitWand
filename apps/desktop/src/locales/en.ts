@@ -1076,6 +1076,11 @@ const en = {
     tabTerminal: "Terminal",
     tabAi: "AI",
     tabLogs: "Logs",
+    // v3.7.0 review-round fix (finding #13a) — nav sidebar group headers
+    navGroupApplication: "Application",
+    navGroupRepo: "Repository",
+    navGroupAi: "AI & Agents",
+    navGroupSystem: "System",
     checkForUpdates: "Check for updates",
     upToDate: "Up to date",
     logsTitle: "Activity log",
@@ -1099,6 +1104,8 @@ const en = {
     aiProviderOpenAiCompat: "OpenAI-compatible API",
     aiProviderOllama: "Ollama (local)",
     aiProviderOllamaNotFound: " \u2014 not detected",
+    // v3.7.0 review-round fix (finding #13b)
+    aiProviderCliFallbackHint: "This provider is not configured, so GitWand uses your local Claude Code CLI instead.",
     // AI tab — Claude auth
     aiAuthLabel: "Authentication",
     aiAuthConnect: "Connect",

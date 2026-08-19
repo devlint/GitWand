@@ -1060,6 +1060,11 @@ const ptBR: Locale = {
     tabTerminal: "Terminal",
     tabAi: "IA",
     tabLogs: "Registros",
+    // v3.7.0 review-round fix (finding #13a) — cabeçalhos de grupo da nav
+    navGroupApplication: "Aplicativo",
+    navGroupRepo: "Repositório",
+    navGroupAi: "IA e agentes",
+    navGroupSystem: "Sistema",
     checkForUpdates: "Verificar atualizações",
     upToDate: "Atualizado",
     logsTitle: "Registro de atividade",
@@ -1081,6 +1086,8 @@ const ptBR: Locale = {
     aiProviderOpenAiCompat: "API compatível com OpenAI",
     aiProviderOllama: "Ollama (local)",
     aiProviderOllamaNotFound: " — não detectado",
+    // v3.7.0 review-round fix (finding #13b)
+    aiProviderCliFallbackHint: "Este provedor não está configurado, então o GitWand usa sua CLI local do Claude Code em vez disso.",
     aiAuthLabel: "Autenticação",
     aiAuthConnect: "Conectar",
     aiAuthApiKey: "Chave de API",
