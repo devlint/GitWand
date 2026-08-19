@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.6.6] - 2026-08-19
+
+Pure tooling/perf chore — no product-facing surface. Full rationale in `docs/superpowers/specs/2026-08-18-dev-loop-ci-build-times-plan.md`.
+
+### Changed
+
+- **CI build time** — `ci.yml`'s `desktop` job (3 fully-signed release bundles per push, never consumed by anything downstream) replaced by `rust-check` (fmt/clippy -D warnings/check/test, now also on `pull_request`) plus a path-filtered `bundle-smoke` job that only builds a real bundle on push-to-main when bundle-relevant files changed. Rust cache added to `ci.yml`/`release.yml`/`perf.yml`. ~230 billed CI minutes saved per push to `main`; the 217 Rust unit tests and 8 parity tests now actually run in CI for the first time.
+- **Dev-loop speed** — `[profile.ci]` (thin LTO) for the smoke build and bench probe; `[profile.dev]` (lighter debug info, `opt-level=1` on dependencies only) cut a post-edit `cargo build` from ~21s to ~6.5s. Measured `cargo llvm-lines`/`--timings` to confirm the previously-planned `gitwand-git` crate split isn't worth doing (the 663 dependencies dominate build time regardless of profile).
+- **Vitest** — `apps/desktop` now defaults to `environment: "node"` instead of a global `jsdom`, with per-file opt-in via `// @vitest-environment jsdom` on the ~18 files that actually touch the DOM. `environment` setup time dropped from ~96s to ~17s across the suite; test count unchanged (706 tests).
+- **Runtime perf** — the secrets scanner's `.gitwandrc` ignore-list regex are now precompiled once per scan instead of once per candidate value (~24x faster in Rust, ~2.5x in TypeScript). `@gitwand/core`'s conflict-resolution engine is now lazy-loaded instead of statically bundled into the boot chunk, shrinking the desktop app's main JS chunk by ~185 KB raw.
+- **Dependencies** — deduplicated `reqwest` (the `tauri-plugin-aptabase` fork now matches `tauri-plugin-updater`'s `rustls` choice instead of pulling `native-tls`/`openssl-sys` separately), removing `libssl-dev` from CI. Anonymous launch telemetry is now gated behind an explicit `telemetry` Cargo feature, with a build-time guard against a release accidentally shipping without it.
+
 ## [3.6.5] - 2026-08-18
 
 ### Fixed
@@ -1294,7 +1306,8 @@ Design-system foundations — the app header and every overlay now ride on a sha
 - CI pipeline via GitHub Actions (Node 18, 20, 22)
 - 28 tests covering all patterns + real-world scenarios (package.json, Laravel routes, Vue SFC, CSS, .env files)
 
-[Unreleased]: https://github.com/devlint/GitWand/compare/v3.6.5...HEAD
+[Unreleased]: https://github.com/devlint/GitWand/compare/v3.6.6...HEAD
+[3.6.6]: https://github.com/devlint/GitWand/compare/v3.6.5...v3.6.6
 [3.6.5]: https://github.com/devlint/GitWand/compare/v3.6.4...v3.6.5
 [3.6.4]: https://github.com/devlint/GitWand/compare/v3.6.3...v3.6.4
 [3.6.3]: https://github.com/devlint/GitWand/compare/v3.6.2...v3.6.3

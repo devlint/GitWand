@@ -5,6 +5,18 @@ description: Release history for GitWand — the native Git client with AI confl
 
 # Changelog
 
+## v3.6.6 — August 2026
+
+A different kind of release this time: no user-facing feature, just the build pipeline and the app's own performance getting some overdue attention.
+
+CI was building three fully signed release bundles on every single push to the main branch, across all three platforms, and nothing ever downloaded them — that one job alone accounted for the vast majority of GitWand's CI minutes. It's now a fast compile-and-test check instead, which also runs on pull requests for the first time, so a broken Rust build shows up before a merge instead of after. A much lighter real bundle build still happens, just only when a push actually touches something that would change it.
+
+On the local development side, editing a file and rebuilding the backend dropped from about 21 seconds to under 7, and the desktop test suite's per-file setup overhead fell by roughly 80%, with no change to what's actually tested. A long-considered idea — splitting the Rust backend into two separate crates for faster incremental builds — turned out, once actually measured, not to be worth doing: the sheer number of dependencies dominates build time regardless of how the code itself is organized.
+
+Two runtime improvements ride along with the tooling work: the pre-commit secrets scanner is measurably faster on large diffs, and the app's own conflict-resolution engine no longer loads on every single startup — only the first time a conflict is actually opened, trimming weight off the initial load.
+
+One dependency cleanup: the anonymous, privacy-respecting launch analytics now compile only when the release build explicitly asks for them (with a safeguard against forgetting to), and no longer pull in a second, redundant TLS library alongside the one already used elsewhere in the app.
+
 ## v3.6.5 — August 2026
 
 A single detailed community report on GitLab merge request support turned into nine fixes, all traced back to a couple of root causes once we started pulling on the thread.
