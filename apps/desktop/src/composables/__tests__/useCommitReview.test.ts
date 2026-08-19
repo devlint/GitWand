@@ -21,6 +21,7 @@ const rawPromptMock = vi.fn();
 const isAvailableRef = { value: true };
 const getGitBlameMock = vi.fn();
 const gitExecMock = vi.fn();
+const readGitwandrcMock = vi.fn();
 
 vi.mock("../useAIProvider", () => ({
   useAIProvider: () => ({
@@ -32,6 +33,7 @@ vi.mock("../useAIProvider", () => ({
 vi.mock("../../utils/backend", () => ({
   getGitBlame: (...a: unknown[]) => getGitBlameMock(...a),
   gitExec: (...a: unknown[]) => gitExecMock(...a),
+  readGitwandrc: (...a: unknown[]) => readGitwandrcMock(...a),
 }));
 
 import { useCommitReview, COMMIT_REVIEW_MAX_FILES, COMMIT_REVIEW_MAX_BYTES } from "../useCommitReview";
@@ -106,6 +108,10 @@ describe("useCommitReview", () => {
     rawPromptMock.mockReset();
     getGitBlameMock.mockReset().mockResolvedValue([]);
     gitExecMock.mockReset();
+    // Default: no `.gitwandrc` on disk — every existing test (written before
+    // Task 6) must fall back cleanly to the app settings, unaffected by the
+    // new read.
+    readGitwandrcMock.mockReset().mockResolvedValue("");
     headHashResponse = "head-hash-stub";
     diffOnceQueue = [];
     diffDefaultResponse = null;
@@ -789,6 +795,106 @@ describe("useCommitReview", () => {
         await review.reconcileIterationsForHead("/repo");
         expect(review.iterations.value).toBe(1);
       });
+    });
+  });
+
+  // ── Task 6 (v3.7.0) — .gitwandrc commitReview opt-in override ──────────
+  // `.gitwandrc`'s `commitReview` block overrides the app `Settings` in
+  // BOTH directions. These tests prove the GATE itself changes behavior
+  // (an actual `run()` call either does or doesn't call the LLM depending
+  // on the override) rather than merely that `parseGitwandrc` parses the
+  // block correctly in isolation (that's covered in packages/core).
+  describe(".gitwandrc commitReview opt-in override", () => {
+    function setGitwandrc(commitReview: Record<string, unknown>) {
+      readGitwandrcMock.mockResolvedValue(JSON.stringify({ commitReview }));
+    }
+
+    it(".gitwandrc commitReview.enabled: false beats app commitReviewEnabled: true — no LLM call", async () => {
+      enableCommitReview(); // commitReviewEnabled: true
+      setGitwandrc({ enabled: false });
+      setDiffDefaultResponse(gitExecOk(diffFor("a.ts")));
+
+      const review = useCommitReview();
+      const ran = await review.run("/repo", "en");
+
+      expect(rawPromptMock).not.toHaveBeenCalled();
+      expect(review.findings.value).toEqual([]);
+      expect(ran).toBe(false);
+    });
+
+    it(".gitwandrc commitReview.enabled: true beats app commitReviewEnabled: false — the LLM call happens", async () => {
+      const { settings } = useSettings();
+      settings.value = { ...defaultAppSettings, commitReviewEnabled: false };
+      setGitwandrc({ enabled: true });
+      setDiffDefaultResponse(gitExecOk(diffFor("a.ts")));
+      rawPromptMock.mockResolvedValueOnce('[{"line": 1, "title": "finding a", "confidence": 80}]');
+
+      const review = useCommitReview();
+      const ran = await review.run("/repo", "en");
+
+      expect(rawPromptMock).toHaveBeenCalledTimes(1);
+      expect(review.findings.value).toHaveLength(1);
+      expect(ran).toBe(true);
+    });
+
+    it(".gitwandrc minConfidence overrides the app threshold", async () => {
+      enableCommitReview({ reviewAiConfidenceThreshold: 10 }); // app threshold would keep this finding
+      setGitwandrc({ minConfidence: 90 }); // repo demands a much higher bar
+      setDiffDefaultResponse(gitExecOk(diffFor("a.ts")));
+      rawPromptMock.mockResolvedValueOnce('[{"line": 1, "title": "medium-confidence finding", "confidence": 50}]');
+
+      const review = useCommitReview();
+      await review.run("/repo", "en");
+
+      // Would have passed the app's threshold (10) but not the repo's (90).
+      expect(review.findings.value).toEqual([]);
+      expect(review.rawFindings.value).toHaveLength(1);
+    });
+
+    it("missing/unreadable .gitwandrc falls back cleanly to app settings", async () => {
+      enableCommitReview();
+      readGitwandrcMock.mockRejectedValue(new Error("ENOENT"));
+      setDiffDefaultResponse(gitExecOk(diffFor("a.ts")));
+      rawPromptMock.mockResolvedValueOnce('[{"line": 1, "title": "finding a", "confidence": 80}]');
+
+      const review = useCommitReview();
+      const ran = await review.run("/repo", "en");
+
+      expect(ran).toBe(true);
+      expect(review.findings.value).toHaveLength(1);
+    });
+
+    it("caches the .gitwandrc read — exactly one readGitwandrc call across two run() calls for the same repo", async () => {
+      enableCommitReview();
+      setGitwandrc({ enabled: true });
+      setDiffDefaultResponse(gitExecOk(diffFor("a.ts")));
+      rawPromptMock.mockResolvedValue("[]");
+
+      const review = useCommitReview();
+      await review.run("/repo", "en");
+      await review.run("/repo", "en");
+
+      expect(readGitwandrcMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("two different repos resolve independently — no stale cross-repo cache entry", async () => {
+      enableCommitReview(); // app default: enabled true
+      setDiffDefaultResponse(gitExecOk(diffFor("a.ts")));
+      rawPromptMock.mockResolvedValue("[]");
+
+      readGitwandrcMock.mockImplementation(async (cwd: string) => {
+        if (cwd === "/repo-off") return JSON.stringify({ commitReview: { enabled: false } });
+        return "";
+      });
+
+      const review = useCommitReview();
+      const ranOff = await review.run("/repo-off", "en");
+      expect(ranOff).toBe(false);
+      expect(rawPromptMock).not.toHaveBeenCalled();
+
+      const ranOn = await review.run("/repo-on", "en");
+      expect(ranOn).toBe(true);
+      expect(rawPromptMock).toHaveBeenCalledTimes(1);
     });
   });
 });

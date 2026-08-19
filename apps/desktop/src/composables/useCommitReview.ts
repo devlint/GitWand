@@ -18,7 +18,8 @@
  * Tauri command.
  */
 import { ref, shallowRef, computed, type ComputedRef, type Ref } from "vue";
-import { gitExec } from "../utils/backend";
+import { parseGitwandrc } from "@gitwand/core";
+import { gitExec, readGitwandrc } from "../utils/backend";
 import { indexDiffFiles, parseFileDiff } from "../utils/unifiedDiff";
 import { usePrPreReview, type ReviewFinding } from "./usePrPreReview";
 import { usePrReviewQueue } from "./usePrReviewQueue";
@@ -48,6 +49,27 @@ export const COMMIT_REVIEW_MAX_FILES = 40;
  * caveat as `COMMIT_REVIEW_MAX_FILES`.
  */
 export const COMMIT_REVIEW_MAX_BYTES = 400_000;
+
+/**
+ * Task 6 (v3.7.0) — the `.gitwandrc` `commitReview` block, resolved and
+ * merged with the app `Settings`. Mirrors `useSecretsScanner.ts`'s
+ * `ResolvedGitwandrcSecrets`/`resolveConfig` pattern: the repo config wins
+ * over the app setting in BOTH directions (a `.gitwandrc` can force the
+ * feature on or off regardless of `settings.commitReviewEnabled`).
+ */
+interface ResolvedCommitReviewRc {
+  enabled?: boolean;
+  minConfidence?: number;
+  maxFindings?: number;
+  maxFiles?: number;
+}
+
+interface EffectiveCommitReviewConfig {
+  enabled: boolean;
+  threshold: number;
+  cap: number;
+  maxFiles: number;
+}
 
 export interface UseCommitReviewOptions {
   /**
@@ -198,6 +220,51 @@ export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReview
   const iterations = ref(0);
   const coverage = ref(100);
 
+  // Task 6 (v3.7.0) — per-repo cache of the resolved `.gitwandrc`
+  // `commitReview` block, scoped to this composable instance (mirrors
+  // `useSecretsScanner`'s `gitwandrcSecretsCache`) — avoids re-reading +
+  // re-parsing `.gitwandrc` on every `run()`/coverage-refresh call. There is
+  // no write path for this block in this composable (unlike the secrets
+  // scanner's `ignorePattern`), so no invalidation-on-write is wired here;
+  // a brand-new `useCommitReview()` instance (e.g. after a repo switch in
+  // the host) starts with an empty cache regardless.
+  const gitwandrcCommitReviewCache = new Map<string, ResolvedCommitReviewRc>();
+
+  // Effective threshold/cap actually applied by the `findings` computed
+  // below — start at the app-setting defaults, refreshed by `run()` once
+  // it resolves `.gitwandrc` for the current repo.
+  const effectiveThreshold = ref(settings.value.reviewAiConfidenceThreshold);
+  const effectiveCap = ref(settings.value.reviewAiMaxFindings);
+
+  async function resolveGitwandrcCommitReview(cwd: string): Promise<ResolvedCommitReviewRc> {
+    const cached = gitwandrcCommitReviewCache.get(cwd);
+    if (cached) return cached;
+
+    let resolved: ResolvedCommitReviewRc = {};
+    try {
+      const rcRaw = await readGitwandrc(cwd);
+      if (rcRaw.trim()) {
+        const parsed = parseGitwandrc(rcRaw);
+        resolved = parsed?.commitReview ?? {};
+      }
+    } catch {
+      // No .gitwandrc, or unreadable — fall back to app settings only.
+    }
+
+    gitwandrcCommitReviewCache.set(cwd, resolved);
+    return resolved;
+  }
+
+  async function resolveEffectiveConfig(cwd: string): Promise<EffectiveCommitReviewConfig> {
+    const rc = await resolveGitwandrcCommitReview(cwd);
+    return {
+      enabled: rc.enabled ?? settings.value.commitReviewEnabled,
+      threshold: rc.minConfidence ?? settings.value.reviewAiConfidenceThreshold,
+      cap: rc.maxFindings ?? settings.value.reviewAiMaxFindings,
+      maxFiles: rc.maxFiles ?? COMMIT_REVIEW_MAX_FILES,
+    };
+  }
+
   // Task 3 — one-shot auto re-review arm + its debounce timer. `reReviewArmed`
   // is intentionally NOT reset by `stop()`/`reset()` below — it must survive
   // a staged-set invalidation so it's still there for `onStagedSetChanged`
@@ -215,10 +282,14 @@ export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReview
 
   let abortController: AbortController | null = null;
 
+  // Task 6 (v3.7.0) — `effectiveThreshold`/`effectiveCap` reflect whatever
+  // `.gitwandrc`'s `commitReview.minConfidence`/`maxFindings` resolved to on
+  // the last `run()` (falling back to the app settings when absent), so a
+  // repo-level override actually changes what gets rendered here.
   const findings = computed<ReviewFinding[]>(() =>
     filterFindings(rawFindings.value, {
-      threshold: settings.value.reviewAiConfidenceThreshold,
-      cap: settings.value.reviewAiMaxFindings,
+      threshold: effectiveThreshold.value,
+      cap: effectiveCap.value,
       dismissed: dismissedClasses.value,
     }),
   );
@@ -324,13 +395,16 @@ export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReview
    */
   async function refreshCoverageForCurrentDiff(cwd: string, generation: number): Promise<void> {
     let next = coverage.value;
-    if (cwd && settings.value.commitReviewEnabled) {
-      try {
-        const res = await gitExec(cwd, ["diff", "--cached", "--no-color"]);
-        if (res.exitCode === 0) next = coverageFromDiffText(cwd, res.stdout);
-      } catch {
-        // A coverage-refresh failure must never disrupt anything else —
-        // leave `next` at the last known value.
+    if (cwd) {
+      const config = await resolveEffectiveConfig(cwd);
+      if (config.enabled) {
+        try {
+          const res = await gitExec(cwd, ["diff", "--cached", "--no-color"]);
+          if (res.exitCode === 0) next = coverageFromDiffText(cwd, res.stdout);
+        } catch {
+          // A coverage-refresh failure must never disrupt anything else —
+          // leave `next` at the last known value.
+        }
       }
     }
     if (generation === coverageGeneration) coverage.value = next;
@@ -361,13 +435,16 @@ export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReview
   async function computeCurrentCoverage(cwd: string): Promise<number> {
     const myGeneration = ++coverageGeneration;
     let next = coverage.value;
-    if (cwd && settings.value.commitReviewEnabled) {
-      try {
-        const res = await gitExec(cwd, ["diff", "--cached", "--no-color"]);
-        if (res.exitCode === 0) next = coverageFromDiffText(cwd, res.stdout);
-      } catch {
-        // A coverage-refresh failure must never disrupt the commit flow —
-        // leave `next` at the last known value.
+    if (cwd) {
+      const config = await resolveEffectiveConfig(cwd);
+      if (config.enabled) {
+        try {
+          const res = await gitExec(cwd, ["diff", "--cached", "--no-color"]);
+          if (res.exitCode === 0) next = coverageFromDiffText(cwd, res.stdout);
+        } catch {
+          // A coverage-refresh failure must never disrupt the commit flow —
+          // leave `next` at the last known value.
+        }
       }
     }
     if (myGeneration === coverageGeneration) coverage.value = next;
@@ -407,9 +484,24 @@ export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReview
     // clobber whatever `coverage.value` this run itself computes below.
     coverageGeneration++;
 
-    // Opt-in feature: zero IPC, zero LLM call when disabled/unavailable.
-    // Never even attempted — callers must not treat this as "ran clean".
-    if (!settings.value.commitReviewEnabled || !ai.isAvailable.value || !cwd) return false;
+    // `cwd` gates BEFORE any `.gitwandrc` read — an empty cwd never touches
+    // IPC at all, matching the "never even attempted" contract below.
+    if (!cwd) return false;
+
+    // Task 6 (v3.7.0) — `.gitwandrc`'s `commitReview.enabled` overrides the
+    // app setting in both directions, so this must be resolved BEFORE the
+    // enabled gate below (not just read `settings.value.commitReviewEnabled`
+    // directly). `effectiveThreshold`/`effectiveCap` are refreshed here too,
+    // regardless of the enabled outcome, so a repo-forced-off feature still
+    // reports accurate would-be thresholds if re-enabled later in the same
+    // session.
+    const config = await resolveEffectiveConfig(cwd);
+    effectiveThreshold.value = config.threshold;
+    effectiveCap.value = config.cap;
+
+    // Opt-in feature: zero LLM call when disabled/unavailable. Never even
+    // attempted — callers must not treat this as "ran clean".
+    if (!config.enabled || !ai.isAvailable.value) return false;
 
     const controller = new AbortController();
     abortController = controller;
@@ -434,9 +526,12 @@ export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReview
       // A clean index is not an error — no findings, no toast.
       if (!res.stdout.trim()) return true;
 
+      // Task 6 (v3.7.0) — `config.maxFiles` is `.gitwandrc`'s
+      // `commitReview.maxFiles` when set, else the same `COMMIT_REVIEW_MAX_FILES`
+      // default as before.
       let slices = indexDiffFiles(res.stdout);
-      if (slices.length > COMMIT_REVIEW_MAX_FILES) {
-        slices = slices.slice(0, COMMIT_REVIEW_MAX_FILES);
+      if (slices.length > config.maxFiles) {
+        slices = slices.slice(0, config.maxFiles);
         truncated.value = true;
       }
 
@@ -538,7 +633,12 @@ export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReview
       reReviewTimer = null;
       if (!reReviewArmed.value) return; // defensive — nothing else clears this flag
       reReviewArmed.value = false;
-      if (cwd && settings.value.commitReviewEnabled && stagedCount > 0) {
+      // Task 6 (v3.7.0) — `run()` itself resolves the effective (`.gitwandrc`
+      // vs. app setting) enabled state, so it's the single source of truth
+      // here too: a repo that forces the feature ON via `.gitwandrc` still
+      // gets its armed re-review, even with `settings.commitReviewEnabled`
+      // off, instead of being silently skipped by a settings-only check.
+      if (cwd && stagedCount > 0) {
         void run(cwd, locale);
       }
     }, debounceMs);

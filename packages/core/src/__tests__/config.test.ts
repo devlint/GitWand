@@ -296,6 +296,106 @@ describe("Phase 7.4 — parseGitwandrc", () => {
       parseGitwandrc(JSON.stringify({ secrets: { patterns: [], ignore: [] } }))!.secrets,
     ).toBeUndefined();
   });
+
+  // ─── v3.7.0 — commitReview config (.gitwandrc opt-in) ─────
+  it("v3.7.0: parse un bloc commitReview valide (round-trip)", () => {
+    const cfg = parseGitwandrc(
+      JSON.stringify({
+        commitReview: { enabled: true, minConfidence: 70, maxFindings: 15, maxFiles: 30 },
+      }),
+    );
+    expect(cfg).not.toBeNull();
+    expect(cfg!.commitReview).toEqual({
+      enabled: true,
+      minConfidence: 70,
+      maxFindings: 15,
+      maxFiles: 30,
+    });
+  });
+
+  it("v3.7.0: commitReview.enabled peut être false (force l'opt-out par repo)", () => {
+    const cfg = parseGitwandrc(JSON.stringify({ commitReview: { enabled: false } }));
+    expect(cfg!.commitReview?.enabled).toBe(false);
+  });
+
+  it("v3.7.0: rejette enabled non-booléen", () => {
+    const cfg = parseGitwandrc(JSON.stringify({ commitReview: { enabled: "yes" } }));
+    expect(cfg!.commitReview?.enabled).toBeUndefined();
+  });
+
+  it("v3.7.0: rejette minConfidence hors [0, 100]", () => {
+    expect(
+      parseGitwandrc(JSON.stringify({ commitReview: { minConfidence: -1 } }))!.commitReview
+        ?.minConfidence,
+    ).toBeUndefined();
+    expect(
+      parseGitwandrc(JSON.stringify({ commitReview: { minConfidence: 101 } }))!.commitReview
+        ?.minConfidence,
+    ).toBeUndefined();
+    expect(
+      parseGitwandrc(JSON.stringify({ commitReview: { minConfidence: 0 } }))!.commitReview
+        ?.minConfidence,
+    ).toBe(0);
+    expect(
+      parseGitwandrc(JSON.stringify({ commitReview: { minConfidence: 100 } }))!.commitReview
+        ?.minConfidence,
+    ).toBe(100);
+  });
+
+  it("v3.7.0: rejette maxFindings hors [1, 200]", () => {
+    expect(
+      parseGitwandrc(JSON.stringify({ commitReview: { maxFindings: 0 } }))!.commitReview
+        ?.maxFindings,
+    ).toBeUndefined();
+    expect(
+      parseGitwandrc(JSON.stringify({ commitReview: { maxFindings: 201 } }))!.commitReview
+        ?.maxFindings,
+    ).toBeUndefined();
+    expect(
+      parseGitwandrc(JSON.stringify({ commitReview: { maxFindings: 1 } }))!.commitReview
+        ?.maxFindings,
+    ).toBe(1);
+    expect(
+      parseGitwandrc(JSON.stringify({ commitReview: { maxFindings: 200 } }))!.commitReview
+        ?.maxFindings,
+    ).toBe(200);
+  });
+
+  it("v3.7.0: rejette maxFiles hors [1, 500]", () => {
+    expect(
+      parseGitwandrc(JSON.stringify({ commitReview: { maxFiles: 0 } }))!.commitReview?.maxFiles,
+    ).toBeUndefined();
+    expect(
+      parseGitwandrc(JSON.stringify({ commitReview: { maxFiles: 501 } }))!.commitReview?.maxFiles,
+    ).toBeUndefined();
+    expect(
+      parseGitwandrc(JSON.stringify({ commitReview: { maxFiles: 1 } }))!.commitReview?.maxFiles,
+    ).toBe(1);
+    expect(
+      parseGitwandrc(JSON.stringify({ commitReview: { maxFiles: 500 } }))!.commitReview?.maxFiles,
+    ).toBe(500);
+  });
+
+  it("v3.7.0: ignore les clés inconnues du bloc commitReview", () => {
+    const cfg = parseGitwandrc(JSON.stringify({ commitReview: { enabled: true, bogus: "x" } }));
+    expect(cfg!.commitReview).toEqual({ enabled: true });
+  });
+
+  it("v3.7.0: absence du bloc commitReview → result.commitReview undefined", () => {
+    expect(parseGitwandrc(JSON.stringify({ policy: "strict" }))!.commitReview).toBeUndefined();
+  });
+
+  it("v3.7.0: bloc commitReview vide ou sans sous-champ valide → undefined", () => {
+    expect(parseGitwandrc(JSON.stringify({ commitReview: {} }))!.commitReview).toBeUndefined();
+    expect(
+      parseGitwandrc(JSON.stringify({ commitReview: { minConfidence: -5, maxFindings: 999 } }))!
+        .commitReview,
+    ).toBeUndefined();
+  });
+
+  it("v3.7.0: JSON malformé retourne null globalement (contrat existant préservé)", () => {
+    expect(parseGitwandrc("{ commitReview: not valid json")).toBeNull();
+  });
 });
 
 // ─── Fixtures pour les tests d'intégration ───────────────
