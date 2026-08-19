@@ -99,6 +99,21 @@ export interface CommitReviewResult {
   /** True once the staged diff was truncated by the file-count or byte cap. */
   truncated: Ref<boolean>;
   /**
+   * HIGH fix (Task 6 / PR3 verifier pass) — the reactive, per-current-repo
+   * "is Commit Review actually on" value: `.gitwandrc`'s
+   * `commitReview.enabled` overrides `settings.commitReviewEnabled` in both
+   * directions. The host (App.vue) MUST gate the "Review staged changes"
+   * button, the commit-review keyboard-shortcut guard, and the commit-time
+   * decision gate (`resolveCommitReviewGate`'s `enabled` input) on THIS
+   * instead of reading `settings.value.commitReviewEnabled` directly —
+   * otherwise a repo that forces the feature on via `.gitwandrc` has no
+   * reachable path into `run()` at all, and a repo that forces it off still
+   * shows the button, still pops the decision modal, and still writes a
+   * `GitWand-Review:` trailer. Refreshed by `onStagedSetChanged` (fired by
+   * App.vue's existing `repoFolderPath`/staged-count watcher) and by `run()`.
+   */
+  effectiveEnabled: ComputedRef<boolean>;
+  /**
    * Runs the review pass. Resolves to `true` once a full attempt actually
    * happened (even if it errored, or the staged diff was empty) — `false`
    * when the call never really tried: the feature is disabled, the AI
@@ -230,11 +245,18 @@ export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReview
   // the host) starts with an empty cache regardless.
   const gitwandrcCommitReviewCache = new Map<string, ResolvedCommitReviewRc>();
 
-  // Effective threshold/cap actually applied by the `findings` computed
-  // below — start at the app-setting defaults, refreshed by `run()` once
-  // it resolves `.gitwandrc` for the current repo.
-  const effectiveThreshold = ref(settings.value.reviewAiConfidenceThreshold);
-  const effectiveCap = ref(settings.value.reviewAiMaxFindings);
+  // HIGH fix (verifier pass on PR3) — `rcOverride` is the resolved
+  // `.gitwandrc` `commitReview` block for whichever repo was most recently
+  // refreshed (see `refreshRcOverride` below), kept as a plain reactive ref
+  // so `effectiveEnabled`/`effectiveThreshold`/`effectiveCap` below can be
+  // real `computed`s instead of one-shot snapshots written only inside
+  // `run()`. That one-shot-ref shape was the MEDIUM bug: raising/lowering
+  // the Review-AI threshold or cap in Settings while findings were already
+  // on screen never re-filtered them, since nothing re-ran `run()`. Reading
+  // `settings.value.*` reactively inside a `computed` fixes that — the
+  // findings list now re-filters live, the same way it did before this
+  // Task 6 PR touched these fields.
+  const rcOverride = ref<ResolvedCommitReviewRc>({});
 
   async function resolveGitwandrcCommitReview(cwd: string): Promise<ResolvedCommitReviewRc> {
     const cached = gitwandrcCommitReviewCache.get(cwd);
@@ -255,8 +277,25 @@ export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReview
     return resolved;
   }
 
-  async function resolveEffectiveConfig(cwd: string): Promise<EffectiveCommitReviewConfig> {
+  /**
+   * HIGH fix — refreshes `rcOverride` for `cwd` (cached, so this is cheap on
+   * repeat calls for the same repo) and resets it to "no override" when
+   * `cwd` is empty (repo closed), so a previously-open repo's forced-off
+   * override can never linger and keep `effectiveEnabled` stuck at `false`
+   * for a DIFFERENT repo, or for no repo at all.
+   */
+  async function refreshRcOverride(cwd: string): Promise<ResolvedCommitReviewRc> {
+    if (!cwd) {
+      rcOverride.value = {};
+      return {};
+    }
     const rc = await resolveGitwandrcCommitReview(cwd);
+    rcOverride.value = rc;
+    return rc;
+  }
+
+  async function resolveEffectiveConfig(cwd: string): Promise<EffectiveCommitReviewConfig> {
+    const rc = await refreshRcOverride(cwd);
     return {
       enabled: rc.enabled ?? settings.value.commitReviewEnabled,
       threshold: rc.minConfidence ?? settings.value.reviewAiConfidenceThreshold,
@@ -264,6 +303,25 @@ export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReview
       maxFiles: rc.maxFiles ?? COMMIT_REVIEW_MAX_FILES,
     };
   }
+
+  /**
+   * HIGH fix — the reactive, per-current-repo "is Commit Review actually on"
+   * value. `.gitwandrc`'s `commitReview.enabled` overrides
+   * `settings.value.commitReviewEnabled` in both directions, exactly like
+   * `run()`'s own internal gate — this is that same resolution, exposed so
+   * the host (App.vue) can gate the "Review staged changes" button, the
+   * `n`/`p`/`x` shortcut guard, and the commit-time decision gate on it
+   * instead of reading the raw app setting directly (which was blind to a
+   * repo-level override in either direction). Refreshed by
+   * `refreshRcOverride`, which runs on every `onStagedSetChanged` call (the
+   * same per-repo-state refresh already triggered by App.vue's
+   * `repoFolderPath`/staged-count watcher) and on every `run()`.
+   */
+  const effectiveEnabled = computed(() => rcOverride.value.enabled ?? settings.value.commitReviewEnabled);
+  const effectiveThreshold = computed(
+    () => rcOverride.value.minConfidence ?? settings.value.reviewAiConfidenceThreshold,
+  );
+  const effectiveCap = computed(() => rcOverride.value.maxFindings ?? settings.value.reviewAiMaxFindings);
 
   // Task 3 — one-shot auto re-review arm + its debounce timer. `reReviewArmed`
   // is intentionally NOT reset by `stop()`/`reset()` below — it must survive
@@ -282,10 +340,11 @@ export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReview
 
   let abortController: AbortController | null = null;
 
-  // Task 6 (v3.7.0) — `effectiveThreshold`/`effectiveCap` reflect whatever
-  // `.gitwandrc`'s `commitReview.minConfidence`/`maxFindings` resolved to on
-  // the last `run()` (falling back to the app settings when absent), so a
-  // repo-level override actually changes what gets rendered here.
+  // Task 6 (v3.7.0) — `effectiveThreshold`/`effectiveCap` are `computed`s
+  // reading `.gitwandrc`'s `commitReview.minConfidence`/`maxFindings`
+  // (falling back to the app settings reactively when absent), so both a
+  // repo-level override AND a live change to the app Settings actually
+  // change what gets rendered here immediately, with no new `run()` needed.
   const findings = computed<ReviewFinding[]>(() =>
     filterFindings(rawFindings.value, {
       threshold: effectiveThreshold.value,
@@ -406,6 +465,11 @@ export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReview
           // leave `next` at the last known value.
         }
       }
+    } else {
+      // HIGH fix — no repo open: `rcOverride` must not keep reflecting
+      // whatever repo was open before, or `effectiveEnabled` would stay
+      // stuck at that repo's override with nothing open at all.
+      rcOverride.value = {};
     }
     if (generation === coverageGeneration) coverage.value = next;
   }
@@ -446,6 +510,10 @@ export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReview
           // leave `next` at the last known value.
         }
       }
+    } else {
+      // HIGH fix — same reset as `refreshCoverageForCurrentDiff`: no repo,
+      // no lingering override.
+      rcOverride.value = {};
     }
     if (myGeneration === coverageGeneration) coverage.value = next;
     return next;
@@ -491,13 +559,12 @@ export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReview
     // Task 6 (v3.7.0) — `.gitwandrc`'s `commitReview.enabled` overrides the
     // app setting in both directions, so this must be resolved BEFORE the
     // enabled gate below (not just read `settings.value.commitReviewEnabled`
-    // directly). `effectiveThreshold`/`effectiveCap` are refreshed here too,
+    // directly). This also refreshes `rcOverride` (and therefore the exposed
+    // `effectiveEnabled`/`effectiveThreshold`/`effectiveCap` computeds)
     // regardless of the enabled outcome, so a repo-forced-off feature still
     // reports accurate would-be thresholds if re-enabled later in the same
     // session.
     const config = await resolveEffectiveConfig(cwd);
-    effectiveThreshold.value = config.threshold;
-    effectiveCap.value = config.cap;
 
     // Opt-in feature: zero LLM call when disabled/unavailable. Never even
     // attempted — callers must not treat this as "ran clean".
@@ -653,6 +720,7 @@ export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReview
     findingsByFile,
     summary,
     truncated,
+    effectiveEnabled,
     run,
     reset,
     dismiss,

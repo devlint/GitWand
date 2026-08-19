@@ -345,9 +345,13 @@ function showCommitReviewCleanToast() {
 
 /** Task 2 (v3.7.0) — the commit-review keymap is only "active" (bare-letter
  *  n/p/x reserved) in the Changes view, with the feature on and at least
- *  one finding to navigate. */
+ *  one finding to navigate. HIGH fix (PR3 verifier pass): reads
+ *  `commitReview.effectiveEnabled` (the `.gitwandrc`-aware resolution)
+ *  instead of the raw app setting, so a repo that forces the feature off
+ *  via `.gitwandrc` never reserves these shortcuts even if the global
+ *  setting is on. */
 const commitReviewShortcutActive = computed(
-  () => viewMode.value === "changes" && settings.value.commitReviewEnabled && commitReview.findings.value.length > 0,
+  () => viewMode.value === "changes" && commitReview.effectiveEnabled.value && commitReview.findings.value.length > 0,
 );
 
 /** Verifier issue #4 — a failed review must never fail silently. Reuse the
@@ -1113,7 +1117,11 @@ const repoSidebarProps = computed(() => ({
   visibleFileIdx: historyVisibleFileIdx.value,
   gitUser: currentGitUser.value,
   secretFindingsCount: secretsScanner.activeFindings.value.length,
-  commitReviewEnabled: settings.value.commitReviewEnabled,
+  // HIGH fix (PR3 verifier pass) — `commitReview.effectiveEnabled` resolves
+  // .gitwandrc's commitReview.enabled override against the raw app setting.
+  // Passing the raw setting here meant a repo forcing the feature ON via
+  // .gitwandrc could never show the "Review staged changes" button at all.
+  commitReviewEnabled: commitReview.effectiveEnabled.value,
   commitReviewRunning: commitReview.running.value,
   commitReviewFindingsCount: commitReview.findings.value.length,
   commitReviewProgress: commitReview.progress.value,
@@ -1179,8 +1187,13 @@ async function handleCommitRequest(trailers: string) {
 async function proceedToCommit(trailers: string) {
   await commitReview.reconcileIterationsForHead(repoFolderPath.value ?? "");
 
+  // HIGH fix (PR3 verifier pass) — `commitReview.effectiveEnabled` resolves
+  // .gitwandrc's commitReview.enabled override against the raw app setting;
+  // reading settings.value.commitReviewEnabled directly here ignored a
+  // repo-level opt-out, so the decision modal used to pop on every commit
+  // even in a repo that explicitly disabled Commit Review via .gitwandrc.
   const gate = resolveCommitReviewGate({
-    enabled: settings.value.commitReviewEnabled,
+    enabled: commitReview.effectiveEnabled.value,
     staged: repoStats.value.staged,
     decision: commitReviewDecision.value,
     iterations: commitReview.iterations.value,

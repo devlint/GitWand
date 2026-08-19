@@ -99,6 +99,11 @@ function enableCommitReview(overrides: Partial<typeof defaultAppSettings> = {}) 
   settings.value = { ...defaultAppSettings, commitReviewEnabled: true, ...overrides };
 }
 
+/** Stubs `readGitwandrc` to return a `.gitwandrc` with the given `commitReview` block. */
+function setGitwandrc(commitReview: Record<string, unknown>) {
+  readGitwandrcMock.mockResolvedValue(JSON.stringify({ commitReview }));
+}
+
 function setHidden(hidden: boolean) {
   Object.defineProperty(document, "hidden", { value: hidden, configurable: true });
 }
@@ -805,10 +810,6 @@ describe("useCommitReview", () => {
   // on the override) rather than merely that `parseGitwandrc` parses the
   // block correctly in isolation (that's covered in packages/core).
   describe(".gitwandrc commitReview opt-in override", () => {
-    function setGitwandrc(commitReview: Record<string, unknown>) {
-      readGitwandrcMock.mockResolvedValue(JSON.stringify({ commitReview }));
-    }
-
     it(".gitwandrc commitReview.enabled: false beats app commitReviewEnabled: true — no LLM call", async () => {
       enableCommitReview(); // commitReviewEnabled: true
       setGitwandrc({ enabled: false });
@@ -895,6 +896,160 @@ describe("useCommitReview", () => {
       const ranOn = await review.run("/repo-on", "en");
       expect(ranOn).toBe(true);
       expect(rawPromptMock).toHaveBeenCalledTimes(1);
+    });
+
+    // LOW #2 (PR3 verifier pass) — rc.maxFiles/maxFindings were wired but
+    // untested; only minConfidence had a test.
+    it(".gitwandrc maxFiles overrides the file-count truncation cap", async () => {
+      enableCommitReview();
+      setGitwandrc({ maxFiles: 2 });
+      const manyFiles = Array.from({ length: 5 }, (_, i) => diffFor(`f${i}.ts`)).join("\n");
+      setDiffDefaultResponse(gitExecOk(manyFiles));
+      rawPromptMock.mockResolvedValue("[]");
+
+      const review = useCommitReview();
+      await review.run("/repo", "en");
+
+      // The repo's cap (2) applies instead of the much higher
+      // COMMIT_REVIEW_MAX_FILES default — only 2 of the 5 staged files are
+      // actually sent through the review pass.
+      expect(rawPromptMock).toHaveBeenCalledTimes(2);
+      expect(review.truncated.value).toBe(true);
+    });
+
+    it(".gitwandrc maxFindings overrides the app findings cap", async () => {
+      enableCommitReview({ reviewAiMaxFindings: 10 }); // app cap would keep all 3
+      setGitwandrc({ maxFindings: 1 }); // repo caps much lower
+      setDiffDefaultResponse(gitExecOk(diffFor("a.ts")));
+      rawPromptMock.mockResolvedValueOnce(
+        JSON.stringify([
+          { line: 1, title: "finding 1", confidence: 90 },
+          { line: 1, title: "finding 2", confidence: 85 },
+          { line: 1, title: "finding 3", confidence: 80 },
+        ]),
+      );
+
+      const review = useCommitReview();
+      await review.run("/repo", "en");
+
+      expect(review.rawFindings.value).toHaveLength(3);
+      // Only the repo's cap (1) worth of findings survive the filter, not
+      // the app's much higher cap (10).
+      expect(review.findings.value).toHaveLength(1);
+    });
+  });
+
+  // ── HIGH fix (PR3 verifier pass) — reactive, per-current-repo effectiveEnabled ──
+  // Previously nothing exposed a reactive "is Commit Review actually on for
+  // THIS repo" value, so App.vue gated the button/shortcut/commit-time gate
+  // on the raw app setting directly — blind to a .gitwandrc override in
+  // either direction. These tests prove `effectiveEnabled` itself flips,
+  // not just that `run()`'s internal gating changes (already covered above).
+  describe("effectiveEnabled — reactive, per-current-repo resolution", () => {
+    it("direction A: .gitwandrc forces enabled:true while the app setting is false — effectiveEnabled becomes true", async () => {
+      const { settings } = useSettings();
+      settings.value = { ...defaultAppSettings, commitReviewEnabled: false };
+      setGitwandrc({ enabled: true });
+      setDiffDefaultResponse(gitExecOk(diffFor("a.ts")));
+      rawPromptMock.mockResolvedValue("[]");
+
+      const review = useCommitReview();
+      expect(review.effectiveEnabled.value).toBe(false); // nothing resolved yet
+
+      await review.run("/repo", "en");
+
+      expect(review.effectiveEnabled.value).toBe(true);
+    });
+
+    it("direction B: .gitwandrc forces enabled:false while the app setting is true — effectiveEnabled becomes false", async () => {
+      enableCommitReview(); // commitReviewEnabled: true
+      setGitwandrc({ enabled: false });
+      setDiffDefaultResponse(gitExecOk(diffFor("a.ts")));
+
+      const review = useCommitReview();
+      expect(review.effectiveEnabled.value).toBe(true); // starts from the app setting
+
+      await review.run("/repo", "en");
+
+      expect(review.effectiveEnabled.value).toBe(false);
+    });
+
+    it("onStagedSetChanged also refreshes effectiveEnabled, without needing a full run()", async () => {
+      const { settings } = useSettings();
+      settings.value = { ...defaultAppSettings, commitReviewEnabled: false };
+      setGitwandrc({ enabled: true });
+      setDiffDefaultResponse(gitExecOk(""));
+
+      const review = useCommitReview({ debounceMs: 0 });
+      expect(review.effectiveEnabled.value).toBe(false);
+
+      review.onStagedSetChanged("/repo", "en", 0);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      expect(review.effectiveEnabled.value).toBe(true);
+      // This must not have triggered an actual review pass — only a cheap
+      // .gitwandrc + coverage refresh, no LLM call.
+      expect(rawPromptMock).not.toHaveBeenCalled();
+    });
+
+    it("falls back to the app setting when no repo is open (cwd empty)", async () => {
+      enableCommitReview();
+      const review = useCommitReview({ debounceMs: 0 });
+
+      // Force a forced-off override from a previously open repo...
+      setGitwandrc({ enabled: false });
+      review.onStagedSetChanged("/repo", "en", 0);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(review.effectiveEnabled.value).toBe(false);
+
+      // ...then close the repo. The override must not linger.
+      review.onStagedSetChanged("", "en", 0);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(review.effectiveEnabled.value).toBe(true);
+    });
+  });
+
+  // ── MEDIUM fix (PR3 verifier pass) — findings re-filter live on a ──────
+  // Settings change, without needing a new run(). Before this fix,
+  // effectiveThreshold/effectiveCap were one-shot refs written only inside
+  // run(), so raising/lowering the Review-AI threshold or cap after a
+  // completed run had no visible effect until the next full review pass.
+  describe("findings re-filter reactively on a Settings change (no new run needed)", () => {
+    it("lowering reviewAiConfidenceThreshold after a completed run immediately reveals a previously-filtered finding", async () => {
+      enableCommitReview({ reviewAiConfidenceThreshold: 60 });
+      setDiffDefaultResponse(gitExecOk(diffFor("a.ts")));
+      rawPromptMock.mockResolvedValueOnce('[{"line": 1, "title": "mid-confidence finding", "confidence": 50}]');
+
+      const review = useCommitReview();
+      await review.run("/repo", "en");
+      expect(review.findings.value).toEqual([]); // 50 < 60, filtered out
+
+      const { settings } = useSettings();
+      settings.value = { ...settings.value, reviewAiConfidenceThreshold: 40 };
+
+      // No new run() call — the existing rawFindings must simply re-filter
+      // against the new, live threshold.
+      expect(review.findings.value).toHaveLength(1);
+    });
+
+    it("lowering reviewAiMaxFindings after a completed run immediately shrinks the visible findings list", async () => {
+      enableCommitReview({ reviewAiMaxFindings: 10 });
+      setDiffDefaultResponse(gitExecOk(diffFor("a.ts")));
+      rawPromptMock.mockResolvedValueOnce(
+        JSON.stringify([
+          { line: 1, title: "finding 1", confidence: 90 },
+          { line: 1, title: "finding 2", confidence: 85 },
+        ]),
+      );
+
+      const review = useCommitReview();
+      await review.run("/repo", "en");
+      expect(review.findings.value).toHaveLength(2);
+
+      const { settings } = useSettings();
+      settings.value = { ...settings.value, reviewAiMaxFindings: 1 };
+
+      expect(review.findings.value).toHaveLength(1);
     });
   });
 });
