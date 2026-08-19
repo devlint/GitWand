@@ -748,7 +748,7 @@ describe("useCommitReview", () => {
       expect(getState("/repo").iterations).toBe(0);
     });
 
-    // v3.7.0 fix (finding #6) — mirrors "a stale in-flight coverage refresh
+    // v3.7.0 fix (finding #6): mirrors "a stale in-flight coverage refresh
     // never clobbers a newer staged-set change's result" above, roles
     // reversed: here it's run()'s OWN coverage writes that must respect the
     // generation guard against a newer computeCurrentCoverage.
@@ -765,7 +765,7 @@ describe("useCommitReview", () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
 
       // A newer, on-demand recompute (e.g. App.vue's proceedToCommit) fetches
-      // a diff with an extra never-reviewed file — a different, known,
+      // a diff with an extra never-reviewed file, a different, known,
       // lower coverage value.
       queueDiffResponseOnce(gitExecOk(`${diffFor("a.ts")}\n${diffFor("b.ts")}`));
       const fresh = await review.computeCurrentCoverage("/repo");

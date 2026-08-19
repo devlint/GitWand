@@ -109,7 +109,7 @@ export function parseGitwandHookSections(content: string): HookSections | null {
 export { SECRETS_HOOK_MARKER };
 
 /**
- * v3.7.0 review-round fix (finding #7) — classifies WHAT is installed at
+ * v3.7.0 review-round fix (finding #7): classifies WHAT is installed at
  * `.git/hooks/pre-commit`, distinguishing a foreign (non-GitWand) script from
  * no hook at all. Before this, `parseGitwandHookSections` returning `null`
  * for both cases meant a hand-written pre-commit hook looked identical to an

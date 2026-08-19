@@ -1,7 +1,7 @@
 /**
  * repoStats.ts
  *
- * v3.7.0 review-round fix (Task 1, finding #1, CRITICAL) — pure, Vue-free,
+ * v3.7.0 review-round fix (Task 1, finding #1, CRITICAL): pure, Vue-free,
  * backend-free (type-only import) module holding `useGitRepo.ts`'s
  * `repoStats` computed body, lifted out VERBATIM so it can be memoized and
  * unit-tested. `App.vue` has no test harness of its own, so this module is

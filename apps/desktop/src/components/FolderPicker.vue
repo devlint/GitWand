@@ -55,7 +55,7 @@ function onInputEnter() {
 
 async function selectCurrent() {
   const typed = pathInput.value.trim();
-  // v3.7.0 review-round fix (finding #12) — "Select this folder" must honor
+  // v3.7.0 review-round fix (finding #12): "Select this folder" must honor
   // whatever is in the input, not only a path the user already navigated to
   // with Enter. Resolving it through fetchDir first normalizes it (trailing
   // slash, relative segments, home expansion) and surfaces a bad path as

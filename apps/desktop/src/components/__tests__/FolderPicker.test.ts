@@ -1,11 +1,11 @@
 /**
- * v3.7.0 review-round fix (finding #12) — `FolderPicker`'s "Select this
+ * v3.7.0 review-round fix (finding #12): `FolderPicker`'s "Select this
  * folder" button silently ignored whatever was typed into the path input
  * unless Enter had already been pressed first: it emitted `select` with
  * `currentPath`, which is only ever written by `fetchDir` (reached via
  * navigate/goUp/goHome/onInputEnter), never by typing alone.
  *
- * Mocks `../../utils/backend` (`listDir`) — jsdom `localStorage` is patched
+ * Mocks `../../utils/backend` (`listDir`): jsdom `localStorage` is patched
  * by `src/test-setup.ts`, so `useFolderHistory` works as-is, matching the
  * established convention (`CommitReviewModal.test.ts`, `createApp` mount).
  */
@@ -56,7 +56,7 @@ async function flush() {
   await new Promise((r) => setTimeout(r, 0));
 }
 
-describe("FolderPicker — select the typed path without requiring Enter (finding #12)", () => {
+describe("FolderPicker, select the typed path without requiring Enter (finding #12)", () => {
   it("typing a path and clicking Select (no Enter) resolves it via listDir and emits the resolved path", async () => {
     const onSelect = vi.fn();
     mount({ onSelect });

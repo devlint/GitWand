@@ -32,10 +32,10 @@ const loading = ref(false);
 const error = ref<string | null>(null);
 
 // v3.7.0 (Task 6) — GitWand-managed pre-commit hook: secrets + commit review sections, both
-// carried by a SINGLE composable script on disk (detected via `classifyPreCommitHook`) — no
+// carried by a SINGLE composable script on disk (detected via `classifyPreCommitHook`): no
 // separate persisted flag, and installing/removing one section never clobbers the other.
 //
-// v3.7.0 review-round fix (finding #7) — `hookState` also carries WHICH KIND of hook is
+// v3.7.0 review-round fix (finding #7): `hookState` also carries WHICH KIND of hook is
 // installed (none / gitwand / foreign), not just the section flags, so a hand-written script
 // the user already has can be distinguished from an empty hooks directory: both used to collapse
 // to the same "not installed" UI state, silently hiding that Install would OVERWRITE it.
@@ -298,7 +298,7 @@ onMounted(() => {
     <!-- Error -->
     <div v-if="error" class="hp-error">{{ error }}</div>
 
-    <!-- v3.7.0 review-round fix (finding #7) — a foreign (non-GitWand) pre-commit hook is
+    <!-- v3.7.0 review-round fix (finding #7): a foreign (non-GitWand) pre-commit hook is
          already installed: warn distinctly, since Install below would OVERWRITE it. -->
     <div v-if="isForeignHook" class="hp-hookrow hp-hookrow--foreign">
       <div class="hp-hookrow-info">
@@ -684,7 +684,7 @@ onMounted(() => {
   color: var(--color-text-muted);
 }
 
-/* v3.7.0 review-round fix (finding #7) — foreign pre-commit hook warning */
+/* v3.7.0 review-round fix (finding #7): foreign pre-commit hook warning */
 .hp-badge--warn {
   background: rgba(217, 119, 6, 0.15);
   color: var(--color-warning, #d97706);

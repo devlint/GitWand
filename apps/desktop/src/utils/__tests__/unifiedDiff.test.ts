@@ -67,7 +67,7 @@ describe("parseFileDiff", () => {
     expect(blank?.type).toBe("context");
   });
 
-  // v3.7.0 review-round fix (finding #10) — a raw `git diff` always ends
+  // v3.7.0 review-round fix (finding #10): a raw `git diff` always ends
   // with "\n" (indexDiffFiles joins slices with "\n" too), so
   // `split("\n")` used to yield one trailing "" element that landed on the
   // LAST hunk of the LAST file as a phantom zero-length context line,
@@ -92,7 +92,7 @@ describe("parseFileDiff", () => {
       const lastLine = lastHunk.lines[lastHunk.lines.length - 1];
 
       expect(lastLine).not.toEqual(expect.objectContaining({ type: "context", content: "" }));
-      // Hunk header says "+1,2" — 2 new lines declared (context a, new a).
+      // Hunk header says "+1,2": 2 new lines declared (context a, new a).
       // The last real line (the "+new a" add) must land at newLine 2, not 3.
       expect(lastLine.type).toBe("add");
       expect(lastLine.newLineNo).toBe(2);
@@ -142,7 +142,7 @@ describe("parseFileDiff", () => {
     });
 
     it("a diff NOT ending in a newline produces identical output to before (no line lost)", () => {
-      // THREE_FILE_DIFF itself has no trailing "\n" — regression guard that
+      // THREE_FILE_DIFF itself has no trailing "\n": regression guard that
       // the fix does not drop a real line when there is no trailing "\n".
       const parsed = parseUnifiedDiff(THREE_FILE_DIFF);
       const cFile = parsed[parsed.length - 1];

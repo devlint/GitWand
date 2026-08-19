@@ -1,5 +1,5 @@
 /**
- * v3.7.0 review-round fix (Task 1, finding #1, CRITICAL) — `repoStats` body
+ * v3.7.0 review-round fix (Task 1, finding #1, CRITICAL): `repoStats` body
  * lifted verbatim out of `useGitRepo.ts` into a pure, Vue-free module so the
  * regression (a routine status poll wiping commit-review findings) can be
  * pinned with a unit test. `useGitRepo.ts` itself has no test harness of its

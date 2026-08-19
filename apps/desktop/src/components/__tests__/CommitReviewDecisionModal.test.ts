@@ -87,7 +87,7 @@ describe("CommitReviewDecisionModal", () => {
     expect(onSkip).not.toHaveBeenCalled();
   });
 
-  // v3.7.0 review-round fix (finding #5) — distinguish not-reviewed from
+  // v3.7.0 review-round fix (finding #5): distinguish not-reviewed from
   // reviewed-clean from "N findings", instead of always rendering the
   // "{0} finding(s)" string (which read "0 finding(s)" identically whether a
   // review ran and found nothing, or no review ever ran at all).

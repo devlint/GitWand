@@ -1,5 +1,5 @@
 /**
- * v3.7.0 review-round fix (finding #11) — `BaseModal` focus trap, initial
+ * v3.7.0 review-round fix (finding #11): `BaseModal` focus trap, initial
  * focus, and focus restore. Own commit, extra scrutiny: this changes
  * behavior for every modal in the app. Mounted via `h()` so the default
  * slot can carry real focusable content (two buttons), mirroring the
@@ -47,7 +47,7 @@ function defaultSlotButtons() {
   ];
 }
 
-describe("BaseModal — focus trap (finding #11)", () => {
+describe("BaseModal, focus trap (finding #11)", () => {
   it("focuses the panel on mount by default", async () => {
     focusOutsideElement();
     mount({ title: "T" }, defaultSlotButtons);
@@ -126,7 +126,7 @@ describe("BaseModal — focus trap (finding #11)", () => {
     event.preventDefault(); // simulates an inner component (CodeMirror/xterm) already handling Tab
     panel.dispatchEvent(event);
 
-    // The trap must not additionally move focus — `last` stays focused.
+    // The trap must not additionally move focus: `last` stays focused.
     expect(document.activeElement).toBe(last);
     void first;
   });

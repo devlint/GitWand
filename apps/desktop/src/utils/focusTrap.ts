@@ -1,7 +1,7 @@
 /**
  * focusTrap.ts
  *
- * v3.7.0 review-round fix (finding #11) — pure focus-trap arithmetic for
+ * v3.7.0 review-round fix (finding #11): pure focus-trap arithmetic for
  * `BaseModal.vue`. No Vue, no DOM assumptions beyond the standard DOM API,
  * so it is unit-testable without mounting a component. `BaseModal` stays
  * thin: it just calls `focusableWithin`/`nextTrapTarget` from its own `Tab`
@@ -30,7 +30,7 @@ const FOCUSABLE_SELECTOR = [
  * `dev:web` QA pass (see the v3.7.0 review-round fix plan, Task 11) is what
  * actually exercises this in a real layout engine; real CSS-hidden content
  * inside a modal is rare in this codebase (everything conditionally shown
- * uses `v-if`, which removes the element from the DOM entirely — so this
+ * uses `v-if`, which removes the element from the DOM entirely, so this
  * selector never sees it).
  */
 export function focusableWithin(root: HTMLElement): HTMLElement[] {
@@ -46,13 +46,13 @@ export function focusableWithin(root: HTMLElement): HTMLElement[] {
 
 /**
  * Computes the wrap target for a `Tab` press inside a focus trap. Returns
- * `null` when no wrap is needed — the browser's own default Tab behavior
+ * `null` when no wrap is needed: the browser's own default Tab behavior
  * moves focus correctly for anything that is not a wrap boundary, and the
  * caller must not call `preventDefault()` in that case.
  *
  * - Forward (`backwards: false`): wraps to the FIRST focusable when `active`
  *   is the last one, or is not found in `focusables` at all (outside the
- *   trapped set — e.g. focus was on the backdrop).
+ *   trapped set, e.g. focus was on the backdrop).
  * - Backward (`backwards: true`, Shift+Tab): wraps to the LAST focusable
  *   when `active` is the first one, or is outside the set.
  * - Empty focusable set: always `null` (the caller falls back to focusing

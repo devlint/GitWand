@@ -1,5 +1,5 @@
 /**
- * v3.7.0 review-round fix (finding #4) — `/api/read-gitwandrc`'s four
+ * v3.7.0 review-round fix (finding #4): `/api/read-gitwandrc`'s four
  * success-path responses were missing `...corsHeaders(req)`, so the browser
  * blocked the fetch entirely: `.gitwandrc`'s per-repo `commitReview`/`secrets`
  * overrides were untestable via `pnpm dev:web`, this repo's own sanctioned
@@ -7,9 +7,9 @@
  * `/api/write-gitwandrc` already went through `jsonResponse()`, which always
  * applies `corsHeaders`, so only the four success writes were affected).
  *
- * This suite uses ONLY `startDevServer()` + `dev.fetch(...)` — it never calls
+ * This suite uses ONLY `startDevServer()` + `dev.fetch(...)`, it never calls
  * `runProbe`, so it needs no Rust binary (the runner spawns a real HTTP
- * server on an OS-assigned port precisely so CORS is observable — see that
+ * server on an OS-assigned port precisely so CORS is observable: see that
  * file's header comment). It therefore runs under `pnpm test:parity`
  * (`vitest.config.parity.ts`, `tests/parity/**\/*.test.mjs`, node
  * environment), NOT under `pnpm test` (`vite.config.ts` only includes

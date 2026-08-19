@@ -1076,7 +1076,7 @@ const en = {
     tabTerminal: "Terminal",
     tabAi: "AI",
     tabLogs: "Logs",
-    // v3.7.0 review-round fix (finding #13a) — nav sidebar group headers
+    // v3.7.0 review-round fix (finding #13a): nav sidebar group headers
     navGroupApplication: "Application",
     navGroupRepo: "Repository",
     navGroupAi: "AI & Agents",
@@ -1604,7 +1604,7 @@ const en = {
     reviewInstallConfirmMessageForeign: "This OVERWRITES the pre-commit hook already installed at .git/hooks/pre-commit, which is not managed by GitWand. The new hook prints a reminder on every terminal commit that Commit Review didn't run for it. It never blocks the commit.",
     reviewRemoveConfirmTitle: "Remove the commit review reminder hook?",
     reviewRemoveConfirmMessage: "This removes the commit review section from .git/hooks/pre-commit, deleting the file entirely if the secrets hook isn't also installed.",
-    // v3.7.0 review-round fix (finding #7) — a foreign (non-GitWand) pre-commit hook
+    // v3.7.0 review-round fix (finding #7): a foreign (non-GitWand) pre-commit hook
     foreignTitle: "A pre-commit hook not managed by GitWand is installed",
     foreignDescription: "Installing Secrets or Commit Review below will overwrite this existing script.",
     foreignBadge: "Foreign hook",

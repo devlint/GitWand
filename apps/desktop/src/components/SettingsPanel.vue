@@ -473,7 +473,7 @@ const settingsTabs: { id: SettingsTab; icon: string }[] = [
 ];
 
 // ─── Nav sidebar groups (OpenCode-style left nav) ────────
-// v3.7.0 review-round fix (finding #13a) — these four group headers used to
+// v3.7.0 review-round fix (finding #13a): these four group headers used to
 // be hardcoded strings (three of them French), rendered raw with no t()
 // call, shown untranslated in every locale. Every sibling tab label already
 // goes through t() via tabLabel() below.
@@ -2219,7 +2219,7 @@ function deleteReleaseNoteTemplate(id: string) {
               </select>
             </div>
 
-            <!-- v3.7.0 review-round fix (finding #13b) — useAIProvider.ts's isAvailable
+            <!-- v3.7.0 review-round fix (finding #13b): useAIProvider.ts's isAvailable
                  falls through to the local Claude Code CLI when the selected provider
                  is genuinely misconfigured (a confirmed, intentional fallback, not a
                  bug: no behavior change here, just an indicator so this isn't invisible

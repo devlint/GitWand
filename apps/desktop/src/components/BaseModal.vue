@@ -31,18 +31,18 @@ const props = withDefaults(
     /** If true, the body is not scrollable; child content owns its own scrolling. */
     scrollOwn?: boolean;
     /**
-     * v3.7.0 review-round fix (finding #11) — trap Tab/Shift+Tab focus
+     * v3.7.0 review-round fix (finding #11): trap Tab/Shift+Tab focus
      * inside the panel, wrapping at the ends. Escape hatch for a modal that
      * embeds something that must own its own Tab handling in a way the
      * generic trap can't anticipate.
      */
     trapFocus?: boolean;
     /**
-     * v3.7.0 review-round fix (finding #11) — focus the panel itself on
+     * v3.7.0 review-round fix (finding #11): focus the panel itself on
      * mount. Set to `false` for a modal that already self-focuses one of
      * its own inputs from its own `onMounted` (that self-focus runs AFTER
-     * this component's synchronous `onMounted` — Vue fires a child's
-     * `mounted` before its parent's — so leaving `autoFocus` at its
+     * this component's synchronous `onMounted`, Vue fires a child's
+     * `mounted` before its parent's, so leaving `autoFocus` at its
      * default `true` would still be harmless, but the prop exists so a
      * modal can opt out explicitly and document its own focus target).
      */
@@ -90,7 +90,7 @@ function onKeyDown(e: KeyboardEvent) {
   }
 }
 
-// v3.7.0 review-round fix (finding #11) — focus trap, initial focus, focus
+// v3.7.0 review-round fix (finding #11): focus trap, initial focus, focus
 // restore. See docs/superpowers/plans/2026-08-19-v3.7.0-commit-review-review-fixes.md,
 // Task 11, for the full design rationale (nested modals, CodeMirror/xterm).
 const panelRef = ref<HTMLElement | null>(null);
@@ -111,7 +111,7 @@ function onPanelKeyDown(e: KeyboardEvent) {
 
   const focusables = focusableWithin(panel);
   if (focusables.length === 0) {
-    // Nothing to wrap between — keep focus pinned on the panel itself.
+    // Nothing to wrap between. Keep focus pinned on the panel itself.
     e.preventDefault();
     panel.focus();
     return;
@@ -134,7 +134,7 @@ onMounted(() => {
   // OWN `onMounted` + `nextTick` (AiTaskNameModal.vue, CloneModal.vue,
   // ForkModal.vue, FolderPicker.vue's own overlay opened from CloneModal).
   // A `nextTick` here would run in the same microtask flush and could win
-  // the race against — or after — those, clobbering their explicit input
+  // the race against, or after, those, clobbering their explicit input
   // focus. Doing this synchronously means it always happens BEFORE the
   // parent component's own `onMounted` runs, so a parent's `nextTick`-deferred
   // input focus always wins over this panel focus, exactly like before this
@@ -255,10 +255,10 @@ onUnmounted(() => {
   animation: bm-slide-in var(--transition-slow) ease;
 }
 
-/* v3.7.0 review-round fix (finding #11) — the panel is `tabindex="-1"` so it
+/* v3.7.0 review-round fix (finding #11): the panel is `tabindex="-1"` so it
    is programmatically focusable (initial focus, empty-focusable-set fallback);
    suppress the focus ring that would otherwise draw on the whole panel.
-   A single class + pseudo-class — does not touch `.bm-btn` (AGENTS.md). */
+   A single class + pseudo-class, does not touch `.bm-btn` (AGENTS.md). */
 .base-modal:focus { outline: none; }
 
 .base-modal--sm   { width: min(400px, 92vw); }

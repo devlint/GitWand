@@ -51,15 +51,15 @@ import {
 export const COMMIT_REVIEW_MAX_FILES = 40;
 
 /**
- * v3.7.0 review-round fix (finding #9) — this is NOT a hard cap on the total
+ * v3.7.0 review-round fix (finding #9): this is NOT a hard cap on the total
  * bytes reviewed, unlike `COMMIT_REVIEW_MAX_FILES` above (which genuinely is
  * one: `slices.slice(0, config.maxFiles)`). The budget is only checked
  * BEFORE admitting each file slice, in file-slice order (earlier files in
  * the diff win): a single file whose own diff already exceeds the whole
  * budget is still admitted whole, and only files AFTER it are excluded. This
- * is deliberate, not a bug — see the test named "truncates by the byte
+ * is deliberate, not a bug: see the test named "truncates by the byte
  * budget when a single file's diff exceeds it, excluding files after it"
- * (`useCommitReview.test.ts`) — so a huge single-file staged change still
+ * (`useCommitReview.test.ts`): so a huge single-file staged change still
  * gets reviewed rather than silently skipped entirely. `truncated` is set
  * either way, so the UI always knows part of the staged diff went
  * unreviewed. Same D12 caveat (this number is a guess) as
@@ -364,7 +364,7 @@ export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReview
   // and `run()` — whichever started MOST RECENTLY wins the right to set
   // `coverage.value`.
   //
-  // v3.7.0 fix (finding #6) — EVERY write to `coverage.value` outside
+  // v3.7.0 fix (finding #6): EVERY write to `coverage.value` outside
   // `reset`/`clearReviewState` goes through this guard, no exception: it used
   // to be possible for `run()`'s own coverage writes to bypass it (guarded
   // only by `controller.signal.aborted`, a DIFFERENT invalidation channel),
@@ -602,14 +602,14 @@ export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReview
     // refresh (`refreshCoverageForCurrentDiff`); its stale response must not
     // clobber whatever `coverage.value` this run itself computes below.
     //
-    // v3.7.0 fix (finding #6) — capture the bumped value: EVERY write to
+    // v3.7.0 fix (finding #6): capture the bumped value: EVERY write to
     // `coverage.value` below in this function must be guarded by comparing
     // against `coverageGeneration` at the time it actually runs, exactly like
     // `refreshCoverageForCurrentDiff`/`computeCurrentCoverage` already do.
     // Without this, a `computeCurrentCoverage` that starts and resolves AFTER
     // this line (e.g. `App.vue`'s `proceedToCommit`) could win the race and
     // set an accurate `coverage.value`, only for this `run()` to later finish
-    // un-aborted and clobber it with its own now-stale value — a different,
+    // un-aborted and clobber it with its own now-stale value, a different,
     // ungated invalidation channel than the generation counter was supposed
     // to be the single source of truth for.
     const myCoverageGeneration = ++coverageGeneration;
@@ -688,7 +688,7 @@ export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReview
       // not-yet-reviewed line is reflected immediately — even if this very
       // run later aborts.
       //
-      // v3.7.0 fix (finding #6) — guarded by the SAME `coverageGeneration`
+      // v3.7.0 fix (finding #6): guarded by the SAME `coverageGeneration`
       // counter as `refreshCoverageForCurrentDiff`/`computeCurrentCoverage`:
       // a newer coverage recompute that started after this run must win.
       if (myCoverageGeneration === coverageGeneration) {
@@ -714,7 +714,7 @@ export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReview
       // an iteration that a newer run has already superseded.
       recordReview(cwd, files, headHash);
       iterations.value = getCommitReviewState(cwd).iterations;
-      // v3.7.0 fix (finding #6) — same generation guard as above: this write
+      // v3.7.0 fix (finding #6): same generation guard as above: this write
       // must not clobber a newer coverage recompute either.
       if (myCoverageGeneration === coverageGeneration) {
         coverage.value = coverageFromDiffText(cwd, res.stdout);

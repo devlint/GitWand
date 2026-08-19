@@ -95,7 +95,7 @@ describe("neither section — an empty composable script still carries the v2 ma
   });
 });
 
-// v3.7.0 review-round fix (finding #7) — a foreign (non-GitWand) pre-commit
+// v3.7.0 review-round fix (finding #7): a foreign (non-GitWand) pre-commit
 // hook collapsed to the exact same "none" state as no hook at all, so the UI
 // showed no warning that Install would OVERWRITE the user's own script.
 describe("classifyPreCommitHook", () => {
@@ -148,7 +148,7 @@ describe("classifyPreCommitHook", () => {
     });
   });
 
-  it("a script that merely mentions 'gitwand' in a comment (no marker) still classifies as foreign — no fuzzy matching", () => {
+  it("a script that merely mentions 'gitwand' in a comment (no marker) still classifies as foreign: no fuzzy matching", () => {
     expect(classifyPreCommitHook("#!/bin/sh\n# note: unrelated to gitwand\nnpm test\n")).toEqual({
       kind: "foreign",
       sections: { secrets: false, review: false },

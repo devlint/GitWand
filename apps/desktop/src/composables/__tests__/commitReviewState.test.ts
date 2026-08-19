@@ -442,7 +442,7 @@ describe("resolveCommitReviewGate", () => {
     ).toBe("prompt");
   });
 
-  it("only RISK severity re-prompts — a suggestion/nit-only situation still proceeds", () => {
+  it("only RISK severity re-prompts: a suggestion/nit-only situation still proceeds", () => {
     // unresolvedRiskCount counts only risk-severity findings; a caller
     // passing 0 here for a suggestion/nit-only situation must still proceed.
     expect(

@@ -1060,7 +1060,7 @@ const ptBR: Locale = {
     tabTerminal: "Terminal",
     tabAi: "IA",
     tabLogs: "Registros",
-    // v3.7.0 review-round fix (finding #13a) — cabeçalhos de grupo da nav
+    // v3.7.0 review-round fix (finding #13a): cabeçalhos de grupo da nav
     navGroupApplication: "Aplicativo",
     navGroupRepo: "Repositório",
     navGroupAi: "IA e agentes",
@@ -1572,7 +1572,7 @@ const ptBR: Locale = {
     reviewInstallConfirmMessageForeign: "Isso SOBRESCREVE o hook pre-commit já instalado em .git/hooks/pre-commit, que não é gerenciado pelo GitWand. O novo hook imprime um lembrete em cada commit feito pelo terminal informando que a Revisão de commit não foi executada. Nunca bloqueia o commit.",
     reviewRemoveConfirmTitle: "Remover o hook de lembrete de revisão de commit?",
     reviewRemoveConfirmMessage: "Isso remove a seção de revisão de commit de .git/hooks/pre-commit, apagando o arquivo por completo se o hook de segredos também não estiver instalado.",
-    // v3.7.0 review-round fix (finding #7) — hook pre-commit externo (não gerenciado pelo GitWand)
+    // v3.7.0 review-round fix (finding #7): hook pre-commit externo (não gerenciado pelo GitWand)
     foreignTitle: "Um hook pre-commit não gerenciado pelo GitWand está instalado",
     foreignDescription: "Instalar Segredos ou Revisão de commit abaixo sobrescreverá esse script existente.",
     foreignBadge: "Hook externo",

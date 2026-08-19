@@ -1,5 +1,5 @@
 /**
- * v3.7.0 review-round fix (finding #11) — pure focus-trap arithmetic, unit
+ * v3.7.0 review-round fix (finding #11): pure focus-trap arithmetic, unit
  * tested without mounting a component. `BaseModal.vue` stays thin: it just
  * calls `focusableWithin`/`nextTrapTarget` from its `Tab` handler.
  */
@@ -103,7 +103,7 @@ describe("nextTrapTarget", () => {
     expect(nextTrapTarget([], null, true)).toBeNull();
   });
 
-  it("returns null for a middle element (not a wrap boundary) — the browser's default Tab handles it, the trap must not interfere", () => {
+  it("returns null for a middle element (not a wrap boundary). The browser's default Tab handles it, the trap must not interfere", () => {
     const root = makeRoot(`<button id="b1"></button><button id="b2"></button><button id="b3"></button>`);
     const focusables = focusableWithin(root);
     expect(nextTrapTarget(focusables, focusables[1], false)).toBeNull();

@@ -40,11 +40,11 @@ export function indexDiffFiles(rawDiff: string): { path: string; raw: string }[]
 
 /** Parse one file's raw `diff --git …` slice (as produced by `indexDiffFiles`)
  *  into hunks/lines. Diff-parsing gotcha (AGENTS.md): context lines are
- *  detected via `line.startsWith(' ')` — a bare empty string mid-hunk is
+ *  detected via `line.startsWith(' ')`, a bare empty string mid-hunk is
  *  also treated as a (whitespace-stripped) context line, never as a phantom
  *  add/delete. A raw diff always ends with a newline (and `indexDiffFiles`
  *  joins slices with `"\n"` too), so `split("\n")` yields exactly one
- *  trailing `""` element that is not a diff line at all — v3.7.0 review-round
+ *  trailing `""` element that is not a diff line at all, v3.7.0 review-round
  *  fix (finding #10) drops exactly that trailing element (see below) before
  *  any line is classified, so it can never be mistaken for a genuine blank
  *  context line and pushed onto the last hunk as a phantom zero-length row. */

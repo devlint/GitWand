@@ -1068,7 +1068,7 @@ const fr: Locale = {
     tabTerminal: "Terminal",
     tabAi: "IA",
     tabLogs: "Journaux",
-    // v3.7.0 review-round fix (finding #13a) — en-têtes de groupe de la nav
+    // v3.7.0 review-round fix (finding #13a): en-têtes de groupe de la nav
     navGroupApplication: "Application",
     navGroupRepo: "Dépôt",
     navGroupAi: "IA & Agents",
@@ -1581,7 +1581,7 @@ const fr: Locale = {
     reviewInstallConfirmMessageForeign: "Ceci ÉCRASE le hook pre-commit déjà installé à .git/hooks/pre-commit, qui n'est pas géré par GitWand. Le nouveau hook affiche un rappel à chaque commit terminal indiquant que la Revue de commit ne s'est pas exécutée. Le commit n'est jamais bloqué.",
     reviewRemoveConfirmTitle: "Supprimer le hook de rappel de revue de commit ?",
     reviewRemoveConfirmMessage: "Ceci retire la section de revue de commit de .git/hooks/pre-commit, en supprimant le fichier entièrement si le hook de secrets n'est pas non plus installé.",
-    // v3.7.0 review-round fix (finding #7) — hook pre-commit externe (non géré par GitWand)
+    // v3.7.0 review-round fix (finding #7): hook pre-commit externe (non géré par GitWand)
     foreignTitle: "Un hook pre-commit non géré par GitWand est installé",
     foreignDescription: "Installer Secrets ou Revue de commit ci-dessous écrasera ce script existant.",
     foreignBadge: "Hook externe",

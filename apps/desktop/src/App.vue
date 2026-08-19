@@ -1093,7 +1093,7 @@ function onViewModeChange(mode: ViewMode) {
 }
 
 // ─── Shared RepoSidebar binding (full-screen panes) ──────
-// v3.7.0 review-round fix (finding #2) — the count of LIVE, undismissed
+// v3.7.0 review-round fix (finding #2): the count of LIVE, undismissed
 // risk-severity commit-review findings. Shared by `proceedToCommit`'s gate
 // call and the decision modal's `riskCount` prop so both read the exact same
 // number instead of recomputing the filter twice.
@@ -1215,7 +1215,7 @@ async function proceedToCommit(trailers: string) {
     staged: repoStats.value.staged,
     decision: commitReviewDecision.value,
     iterations: commitReview.iterations.value,
-    // v3.7.0 review-round fix (finding #2) — a live, undismissed risk-level
+    // v3.7.0 review-round fix (finding #2): a live, undismissed risk-level
     // finding always earns one explicit decision, even when a review already
     // ran this cycle: otherwise the commit could silently record "ran" for a
     // risk the user never looked at (this is what task 1's watcher bug was

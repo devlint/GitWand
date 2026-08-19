@@ -1118,7 +1118,7 @@ const zhCN: Locale = {
     tabTerminal: "终端",
     tabAi: "AI",
     tabLogs: "日志",
-    // v3.7.0 review-round fix (finding #13a) —导航栏分组标题
+    // v3.7.0 review-round fix (finding #13a): 导航栏分组标题
     navGroupApplication: "应用程序",
     navGroupRepo: "仓库",
     navGroupAi: "AI 与代理",
@@ -1559,7 +1559,7 @@ const zhCN: Locale = {
     reviewInstallConfirmMessageForeign: "这将覆盖已安装在 .git/hooks/pre-commit 的钩子，该钩子并非由 GitWand 管理。新钩子会在每次终端提交时打印一条提醒，说明提交审查未运行。此操作绝不会阻止提交。",
     reviewRemoveConfirmTitle: "移除提交审查提醒钩子？",
     reviewRemoveConfirmMessage: "这会从 .git/hooks/pre-commit 中移除提交审查部分；如果密钥钩子也未安装，则会彻底删除该文件。",
-    // v3.7.0 review-round fix (finding #7) — 非 GitWand 管理的 pre-commit 钩子
+    // v3.7.0 review-round fix (finding #7): 非 GitWand 管理的 pre-commit 钩子
     foreignTitle: "检测到一个非 GitWand 管理的 pre-commit 钩子",
     foreignDescription: "安装下方的密钥或提交审查钩子将覆盖此现有脚本。",
     foreignBadge: "外部钩子",
