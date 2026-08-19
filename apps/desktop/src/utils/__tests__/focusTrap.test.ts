@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * v3.7.0 review-round fix (finding #11): pure focus-trap arithmetic, unit
  * tested without mounting a component. `BaseModal.vue` stays thin: it just

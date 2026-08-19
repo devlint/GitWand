@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * v3.7.0 review-round fix (finding #11): `BaseModal` focus trap, initial
  * focus, and focus restore. Own commit, extra scrutiny: this changes

@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * Task 1a (v3.7.0) — `useCommitReview` orchestrator: staged-diff AI review
  * engine, opt-in and off by default. Mocks `../../utils/backend` and

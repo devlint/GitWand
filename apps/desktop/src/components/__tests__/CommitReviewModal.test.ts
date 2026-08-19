@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * Task 1b (v3.7.0) — `CommitReviewModal`: summary + severity-sorted finding
  * list + jump/dismiss/close. Mounted with native `createApp`, mirroring

@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * Task 5 (v3.7.0) — `CommitReviewDecisionModal`: Review now / Vouch
  * personally / Skip, at commit time. Mounted with native `createApp`,

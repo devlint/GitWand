@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * v3.7.0 review-round fix (finding #12): `FolderPicker`'s "Select this
  * folder" button silently ignored whatever was typed into the path input

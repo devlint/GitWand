@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * Task 2 (v3.7.0) — pure keymap resolver for Commit Review finding
  * navigation. Mirrors `usePrReviewKeymap.test.ts`'s structure.

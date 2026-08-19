@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * Verifier fix (v3.7.0, issue #1) — `usePrPanel`'s `visibilitychange`
  * handler must call the injected `onVisibilityResume` option on the same

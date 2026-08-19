@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * Task 1b (v3.7.0) — inline commit-review finding rows in `DiffViewer`
  * (inline mode). Mounted with the native `createApp` (no @vue/test-utils
