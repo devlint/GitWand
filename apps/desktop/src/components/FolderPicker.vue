@@ -53,7 +53,17 @@ function onInputEnter() {
   if (val) fetchDir(val);
 }
 
-function selectCurrent() {
+async function selectCurrent() {
+  const typed = pathInput.value.trim();
+  // v3.7.0 review-round fix (finding #12) — "Select this folder" must honor
+  // whatever is in the input, not only a path the user already navigated to
+  // with Enter. Resolving it through fetchDir first normalizes it (trailing
+  // slash, relative segments, home expansion) and surfaces a bad path as
+  // this dialog's own error instead of failing downstream in openRepo.
+  if (typed && typed !== currentPath.value) {
+    await fetchDir(typed);
+    if (errorMsg.value) return; // fetchDir sets errorMsg and never throws
+  }
   emit("select", currentPath.value);
 }
 
