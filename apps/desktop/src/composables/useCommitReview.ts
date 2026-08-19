@@ -51,9 +51,19 @@ import {
 export const COMMIT_REVIEW_MAX_FILES = 40;
 
 /**
- * Hard cap on the total staged-diff bytes sent through the review pass,
- * applied in file-slice order (earlier files in the diff win). Same D12
- * caveat as `COMMIT_REVIEW_MAX_FILES`.
+ * v3.7.0 review-round fix (finding #9) — this is NOT a hard cap on the total
+ * bytes reviewed, unlike `COMMIT_REVIEW_MAX_FILES` above (which genuinely is
+ * one: `slices.slice(0, config.maxFiles)`). The budget is only checked
+ * BEFORE admitting each file slice, in file-slice order (earlier files in
+ * the diff win): a single file whose own diff already exceeds the whole
+ * budget is still admitted whole, and only files AFTER it are excluded. This
+ * is deliberate, not a bug — see the test named "truncates by the byte
+ * budget when a single file's diff exceeds it, excluding files after it"
+ * (`useCommitReview.test.ts`) — so a huge single-file staged change still
+ * gets reviewed rather than silently skipped entirely. `truncated` is set
+ * either way, so the UI always knows part of the staged diff went
+ * unreviewed. Same D12 caveat (this number is a guess) as
+ * `COMMIT_REVIEW_MAX_FILES`.
  */
 export const COMMIT_REVIEW_MAX_BYTES = 400_000;
 
