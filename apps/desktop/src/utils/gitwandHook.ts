@@ -51,13 +51,20 @@ function secretsSectionLines(): string[] {
   ];
 }
 
-/** Warn-only — never exits non-zero, so a terminal commit is never blocked by this section. */
+/**
+ * Warn-only, never exits non-zero, so a commit is never blocked by this section. LOW fix
+ * (PR3 verifier pass): the reminder used to claim "this commit was made from the terminal",
+ * but the hook fires for any `git commit` that reaches this script, including a commit made
+ * from GitWand's own GUI without `--no-verify` (harmless there since a successful GUI commit
+ * discards hook stdout, but the wording was still factually wrong). Worded generically instead
+ * of assuming the commit's origin.
+ */
 function reviewSectionLines(): string[] {
   return [
     REVIEW_SECTION_START,
-    "# GitWand Commit Review is warn-only for terminal commits: review state lives in the app's",
-    "# local storage, which a shell hook cannot read. This section never blocks the commit.",
-    'echo "GitWand: this commit was made from the terminal — Commit Review did not run for it."',
+    "# GitWand Commit Review is warn-only: review state lives in the app's local storage,",
+    "# which a shell hook cannot read. This section never blocks the commit.",
+    'echo "GitWand: commit review did not run for this commit."',
     REVIEW_SECTION_END,
   ];
 }

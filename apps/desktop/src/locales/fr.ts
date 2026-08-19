@@ -1555,9 +1555,9 @@ const fr: Locale = {
     secretsInstall: "Installer",
     secretsRemove: "Retirer",
     secretsInstallConfirmTitle: "Installer le hook pre-commit de secrets ?",
-    secretsInstallConfirmMessage: "Ceci écrit .git/hooks/pre-commit et exécute « npx @gitwand/cli scan » à chaque commit fait depuis le terminal. Toujours contournable avec « git commit --no-verify ». Si un hook pre-commit existe déjà, il sera écrasé.",
+    secretsInstallConfirmMessage: "Ceci écrit .git/hooks/pre-commit et exécute « npx @gitwand/cli scan » à chaque commit fait depuis le terminal. Toujours contournable avec « git commit --no-verify ». Si un hook pre-commit existe déjà et est géré par GitWand, ceci ajoute la section secrets sans toucher à la section de revue de commit. S'il n'est pas géré par GitWand, il sera écrasé.",
     secretsRemoveConfirmTitle: "Retirer le hook pre-commit de secrets ?",
-    secretsRemoveConfirmMessage: "Ceci supprime .git/hooks/pre-commit. Les commits faits depuis le terminal ne seront plus analysés pour des secrets.",
+    secretsRemoveConfirmMessage: "Ceci retire la section secrets de .git/hooks/pre-commit. Les commits faits depuis le terminal ne seront plus analysés pour des secrets. Si la section de revue de commit n'est pas installée non plus, le fichier est supprimé entièrement.",
     errorSecretsInstall: "Échec de l'installation du hook de secrets : {0}",
     errorSecretsRemove: "Échec de la suppression du hook de secrets : {0}",
     // v3.7.0 (Task 6) — Hook pre-commit de revue de commit (rappel non-bloquant), partage

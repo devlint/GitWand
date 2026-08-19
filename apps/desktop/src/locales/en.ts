@@ -1578,9 +1578,9 @@ const en = {
     secretsInstall: "Install",
     secretsRemove: "Remove",
     secretsInstallConfirmTitle: "Install the secrets pre-commit hook?",
-    secretsInstallConfirmMessage: "This writes .git/hooks/pre-commit and shells out to \u201cnpx @gitwand/cli scan\u201d on every commit made from the terminal. It can always be bypassed with \u201cgit commit --no-verify\u201d. If a pre-commit hook already exists, it will be overwritten.",
+    secretsInstallConfirmMessage: "This writes .git/hooks/pre-commit and shells out to \u201cnpx @gitwand/cli scan\u201d on every commit made from the terminal. It can always be bypassed with \u201cgit commit --no-verify\u201d. If a pre-commit hook already exists and is managed by GitWand, this adds the secrets section to it without touching the commit review section. If it is not managed by GitWand, it will be overwritten.",
     secretsRemoveConfirmTitle: "Remove the secrets pre-commit hook?",
-    secretsRemoveConfirmMessage: "This deletes .git/hooks/pre-commit. Terminal commits will no longer be scanned for secrets.",
+    secretsRemoveConfirmMessage: "This removes the secrets section from .git/hooks/pre-commit. Terminal commits will no longer be scanned for secrets. If the commit review section is not also installed, the file is deleted entirely.",
     errorSecretsInstall: "Failed to install the secrets hook: {0}",
     errorSecretsRemove: "Failed to remove the secrets hook: {0}",
     // v3.7.0 (Task 6) — Commit review pre-commit hook (warn-only reminder), shares the

@@ -1533,9 +1533,9 @@ const zhCN: Locale = {
     secretsInstall: "安装",
     secretsRemove: "移除",
     secretsInstallConfirmTitle: "安装密钥 pre-commit 钩子？",
-    secretsInstallConfirmMessage: "这将写入 .git/hooks/pre-commit，并在每次从终端提交时运行“npx @gitwand/cli scan”。始终可以用“git commit --no-verify”绕过。如果已存在 pre-commit 钩子，它将被覆盖。",
+    secretsInstallConfirmMessage: "这将写入 .git/hooks/pre-commit，并在每次从终端提交时运行“npx @gitwand/cli scan”。始终可以用“git commit --no-verify”绕过。如果已存在一个由 GitWand 管理的 pre-commit 钩子，这会添加密钥部分而不影响提交审查部分。如果它不是由 GitWand 管理的，它将被覆盖。",
     secretsRemoveConfirmTitle: "移除密钥 pre-commit 钩子？",
-    secretsRemoveConfirmMessage: "这将删除 .git/hooks/pre-commit。从终端提交的更改将不再进行密钥扫描。",
+    secretsRemoveConfirmMessage: "这将从 .git/hooks/pre-commit 中移除密钥部分。从终端提交的更改将不再进行密钥扫描。如果提交审查部分也未安装，该文件将被彻底删除。",
     errorSecretsInstall: "安装密钥钩子失败：{0}",
     errorSecretsRemove: "移除密钥钩子失败：{0}",
     // v3.7.0（任务 6）— 提交审查 pre-commit 钩子（仅提示，不阻止提交），通过 gitwandHook.ts
