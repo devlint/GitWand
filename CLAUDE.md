@@ -6,15 +6,12 @@ GitWand est un client Git desktop natif avec un moteur de résolution automatiqu
 
 **Stack technique :** Tauri 2, Vue 3, Rust, TypeScript, pnpm monorepo
 
-**Versions actuelles :**
-
-| Package | Nom npm | Version |
-|---|---|---|
-| `apps/desktop` | `@gitwand/desktop` | 2.9.0 |
-| `packages/core` | `@gitwand/core` | 2.9.0 |
-| `packages/cli` | `@gitwand/cli` | 2.9.0 |
-| `packages/mcp` | `@gitwand/mcp` | 2.9.0 |
-| `packages/vscode` | `gitwand-vscode` | 1.2.0 |
+**Versions :** `apps/desktop`, `packages/core`, `packages/cli` et `packages/mcp` sont
+versionnés en lock-step par `./scripts/bump-version.sh` — leur numéro de version courant
+est donc toujours identique et se lit dans `packages/core/package.json` (source de
+vérité unique ; ne pas recopier un chiffre ici, il dérive dès le bump suivant).
+`packages/vscode` (`gitwand-vscode`) est versionné indépendamment — voir son propre
+`package.json`.
 
 ## Architecture monorepo
 
@@ -46,7 +43,7 @@ GitWand/
 ## Setup développement
 
 ```bash
-# Prérequis : Node 20+, pnpm 9+, Rust stable
+# Prérequis : Node 22.13+, pnpm 11+, Rust stable
 pnpm install
 
 # Dev frontend uniquement (sans Rust/Tauri)
@@ -73,7 +70,7 @@ pnpm test
 
 ## CI/CD
 
-- `.github/workflows/ci.yml` — tests matrix Node 18/20/22
+- `.github/workflows/ci.yml` — tests Node 22 (matrice `[22]`)
 - `.github/workflows/release.yml` — release desktop (macOS universal, Ubuntu, Windows)
 - `.github/workflows/publish.yml` — publication npm (`@gitwand/core`, `@gitwand/cli`, `@gitwand/mcp`)
 - `.github/workflows/deploy-website.yml` — déploiement docs VitePress

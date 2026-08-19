@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * TokenMergePanel.vue — accept/reject action UI for proposed token-level merges.
  *

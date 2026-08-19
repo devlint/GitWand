@@ -1,11 +1,11 @@
-use std::collections::HashMap;
-use std::path::Path;
 use crate::git::cmd::git_cmd;
 use crate::types::{
     DiffHunk, DiffLine, FileLogEntry, FolderDiffNode, GhIssueRaw, GhPrDetailRaw, GhPrRaw,
     GhPrStatusCheck, Issue, MonorepoPackage, PullRequest, PullRequestDetail, RawFileChange,
     RepoTreeNode, ShortlogEntry,
 };
+use std::collections::HashMap;
+use std::path::Path;
 
 /// Aggregate a PR's individual status checks into a single rollup state.
 ///
@@ -47,7 +47,11 @@ pub(crate) fn rollup_status_checks(checks: &[GhPrStatusCheck]) -> String {
             }
         }
     }
-    if pending { "PENDING".to_string() } else { "SUCCESS".to_string() }
+    if pending {
+        "PENDING".to_string()
+    } else {
+        "SUCCESS".to_string()
+    }
 }
 
 pub(crate) fn parse_diff_hunks(stdout: &str) -> (Vec<DiffHunk>, Option<String>) {
@@ -122,8 +126,8 @@ pub(crate) fn parse_diff_hunks(stdout: &str) -> (Vec<DiffHunk>, Option<String>) 
                     new_line_no: None,
                 });
                 old_line_no += 1;
-            } else if line.starts_with(' ') {
-                let content = line[1..].to_string();
+            } else if let Some(stripped) = line.strip_prefix(' ') {
+                let content = stripped.to_string();
                 hunk.lines.push(DiffLine {
                     r#type: "context".to_string(),
                     content,
@@ -149,7 +153,11 @@ pub(crate) fn parse_name_status_z(s: &str) -> Vec<(String, String, Option<String
     let mut i = 0;
     while i < tokens.len() {
         let status_full = tokens[i];
-        let letter = status_full.chars().next().unwrap_or('M').to_ascii_uppercase();
+        let letter = status_full
+            .chars()
+            .next()
+            .unwrap_or('M')
+            .to_ascii_uppercase();
         if letter == 'R' || letter == 'C' {
             if i + 2 < tokens.len() {
                 let old = tokens[i + 1].to_string();
@@ -190,8 +198,16 @@ pub(crate) fn parse_numstat_z(s: &str) -> HashMap<String, (u32, u32, bool)> {
         let adds_str = parts[0];
         let dels_str = parts[1];
         let binary = adds_str == "-" && dels_str == "-";
-        let additions: u32 = if binary { 0 } else { adds_str.parse().unwrap_or(0) };
-        let deletions: u32 = if binary { 0 } else { dels_str.parse().unwrap_or(0) };
+        let additions: u32 = if binary {
+            0
+        } else {
+            adds_str.parse().unwrap_or(0)
+        };
+        let deletions: u32 = if binary {
+            0
+        } else {
+            dels_str.parse().unwrap_or(0)
+        };
         let path_part = if parts.len() >= 3 { parts[2] } else { "" };
         if path_part.is_empty() {
             let mut j = i + 1;
@@ -284,7 +300,11 @@ pub(crate) fn insert_segments(
             node.children.push(FolderDiffNode {
                 path: full_path.clone(),
                 name: seg.to_string(),
-                kind: if is_last_seg { "file".to_string() } else { "folder".to_string() },
+                kind: if is_last_seg {
+                    "file".to_string()
+                } else {
+                    "folder".to_string()
+                },
                 status: None,
                 old_path: None,
                 files_changed: 0,
@@ -309,7 +329,11 @@ pub(crate) fn insert_segments(
 }
 
 pub(crate) fn insert_change(root: &mut FolderDiffNode, change: &RawFileChange) {
-    let segments: Vec<&str> = change.new_path.split('/').filter(|s| !s.is_empty()).collect();
+    let segments: Vec<&str> = change
+        .new_path
+        .split('/')
+        .filter(|s| !s.is_empty())
+        .collect();
     if segments.is_empty() {
         return;
     }
@@ -377,16 +401,23 @@ pub(crate) fn parse_file_log_output(raw: &str) -> Vec<FileLogEntry> {
     let mut entries = Vec::new();
     for block in raw.split(sep) {
         let trimmed = block.trim();
-        if trimmed.is_empty() { continue; }
+        if trimmed.is_empty() {
+            continue;
+        }
         let parts: Vec<&str> = trimmed.splitn(6, '\n').collect();
-        if parts.len() < 5 { continue; }
+        if parts.len() < 5 {
+            continue;
+        }
         entries.push(FileLogEntry {
             hash_full: parts[0].trim().to_string(),
             hash: parts[1].trim().to_string(),
             author: parts[2].trim().to_string(),
             date: parts[3].trim().to_string(),
             message: parts[4].trim().to_string(),
-            body: parts.get(5).map(|s| s.trim().to_string()).unwrap_or_default(),
+            body: parts
+                .get(5)
+                .map(|s| s.trim().to_string())
+                .unwrap_or_default(),
         });
     }
     entries
@@ -396,7 +427,8 @@ pub(crate) fn gh_pr_detail_raw_to_detail(r: GhPrDetailRaw) -> PullRequestDetail 
     let comments = r.comments.len() as i64;
     let review_comments = r.reviews.len() as i64;
     let labels: Vec<String> = r.labels.into_iter().map(|l| l.name).collect();
-    let reviewers: Vec<String> = r.review_requests
+    let reviewers: Vec<String> = r
+        .review_requests
         .into_iter()
         .filter_map(|rr| rr.login)
         .collect();
@@ -455,10 +487,7 @@ pub(crate) fn parse_gh_pr_json(json: &str) -> Result<Vec<PullRequest>, String> {
             Ok(raw) => out.push(gh_pr_raw_to_pr(raw)),
             Err(e) => {
                 let number = v.get("number").and_then(|n| n.as_i64()).unwrap_or(-1);
-                eprintln!(
-                    "[parse_gh_pr_json] skipping PR #{}: {}",
-                    number, e
-                );
+                eprintln!("[parse_gh_pr_json] skipping PR #{}: {}", number, e);
             }
         }
     }
@@ -466,16 +495,14 @@ pub(crate) fn parse_gh_pr_json(json: &str) -> Result<Vec<PullRequest>, String> {
 }
 
 pub(crate) fn gh_pr_raw_to_pr(r: GhPrRaw) -> PullRequest {
-    let review_requested = r.review_requests
+    let review_requested = r
+        .review_requests
         .into_iter()
         .filter_map(|rr| rr.login)
         .collect();
     let checks_rollup = rollup_status_checks(&r.status_check_rollup);
     let comment_count = r.comments.len() as i64;
-    let author = r
-        .author
-        .and_then(|a| a.login)
-        .unwrap_or_default();
+    let author = r.author.and_then(|a| a.login).unwrap_or_default();
     PullRequest {
         number: r.number,
         title: r.title,
@@ -490,11 +517,7 @@ pub(crate) fn gh_pr_raw_to_pr(r: GhPrRaw) -> PullRequest {
         additions: r.additions,
         deletions: r.deletions,
         labels: r.labels.into_iter().map(|l| l.name).collect(),
-        assignees: r
-            .assignees
-            .into_iter()
-            .filter_map(|a| a.login)
-            .collect(),
+        assignees: r.assignees.into_iter().filter_map(|a| a.login).collect(),
         review_requested,
         review_decision: r.review_decision.unwrap_or_default(),
         merge_state_status: r.merge_state_status.unwrap_or_default(),
@@ -534,18 +557,21 @@ pub(crate) fn parse_gh_issue_json(json: &str) -> Result<Vec<Issue>, String> {
     }
     let raws: Vec<GhIssueRaw> = serde_json::from_str(trimmed)
         .map_err(|e| format!("Failed to parse gh issue list output: {}", e))?;
-    Ok(raws.into_iter().map(|r| Issue {
-        number: r.number,
-        title: r.title,
-        state: r.state,
-        author: r.author.login,
-        assignees: r.assignees.into_iter().map(|a| a.login).collect(),
-        labels: r.labels.into_iter().map(|l| l.name).collect(),
-        url: r.url,
-        created_at: r.created_at,
-        updated_at: r.updated_at,
-        milestone: r.milestone.map(|m| m.title).unwrap_or_default(),
-    }).collect())
+    Ok(raws
+        .into_iter()
+        .map(|r| Issue {
+            number: r.number,
+            title: r.title,
+            state: r.state,
+            author: r.author.login,
+            assignees: r.assignees.into_iter().map(|a| a.login).collect(),
+            labels: r.labels.into_iter().map(|l| l.name).collect(),
+            url: r.url,
+            created_at: r.created_at,
+            updated_at: r.updated_at,
+            milestone: r.milestone.map(|m| m.title).unwrap_or_default(),
+        })
+        .collect())
 }
 
 pub(crate) fn parse_shortlog_line(line: &str) -> Option<ShortlogEntry> {
@@ -676,7 +702,11 @@ pub(crate) fn repo_name_from_url(url: &str) -> Option<String> {
     }
 }
 
-pub(crate) fn find_workspace_packages(cwd: &str, config_content: &str, manager: &str) -> Vec<MonorepoPackage> {
+pub(crate) fn find_workspace_packages(
+    cwd: &str,
+    config_content: &str,
+    manager: &str,
+) -> Vec<MonorepoPackage> {
     match manager {
         "cargo" => find_cargo_packages(cwd, config_content),
         "go" => find_go_packages(cwd, config_content),
@@ -689,14 +719,18 @@ pub(crate) fn find_workspace_packages(cwd: &str, config_content: &str, manager: 
 
 // ─── pnpm / npm / yarn / turbo ────────────────────────────────────────────
 
-fn find_npm_or_pnpm_packages(cwd: &str, config_content: &str, manager: &str) -> Vec<MonorepoPackage> {
+fn find_npm_or_pnpm_packages(
+    cwd: &str,
+    config_content: &str,
+    manager: &str,
+) -> Vec<MonorepoPackage> {
     let mut globs: Vec<String> = Vec::new();
 
     if manager == "pnpm" {
         for line in config_content.lines() {
             let trimmed = line.trim();
-            if trimmed.starts_with("- ") {
-                let pattern = trimmed[2..].trim().trim_matches('\'').trim_matches('"');
+            if let Some(stripped) = trimmed.strip_prefix("- ") {
+                let pattern = stripped.trim().trim_matches('\'').trim_matches('"');
                 globs.push(pattern.to_string());
             }
         }
@@ -719,7 +753,7 @@ fn extract_npm_workspace_globs(content: &str) -> Vec<String> {
     // Try flat array form first: "workspaces": [ ... ]
     if let Some(start) = content.find("\"workspaces\"") {
         let rest = &content[start + 12..]; // skip `"workspaces"`
-        // skip whitespace + colon
+                                           // skip whitespace + colon
         let rest = rest.trim_start_matches(|c: char| c.is_whitespace() || c == ':');
         let rest = rest.trim_start();
         if rest.starts_with('[') {
@@ -736,7 +770,9 @@ fn extract_npm_workspace_globs(content: &str) -> Vec<String> {
             // Object form: "workspaces": { "packages": [...] }
             if let Some(pkg_start) = rest.find("\"packages\"") {
                 let sub = &rest[pkg_start + 10..];
-                let sub = sub.trim_start_matches(|c: char| c.is_whitespace() || c == ':').trim_start();
+                let sub = sub
+                    .trim_start_matches(|c: char| c.is_whitespace() || c == ':')
+                    .trim_start();
                 if sub.starts_with('[') {
                     if let Some(arr_end) = sub.find(']') {
                         let arr = &sub[1..arr_end];
@@ -777,12 +813,17 @@ fn expand_npm_globs(cwd: &str, globs: &[String]) -> Vec<MonorepoPackage> {
                         if let Ok(pkg_content) = std::fs::read_to_string(&pkg_json_path) {
                             let name = extract_json_string(&pkg_content, "name")
                                 .unwrap_or_else(|| entry.file_name().to_string_lossy().to_string());
-                            let version = extract_json_string(&pkg_content, "version")
-                                .unwrap_or_default();
-                            let rel_path = path.strip_prefix(cwd_path)
+                            let version =
+                                extract_json_string(&pkg_content, "version").unwrap_or_default();
+                            let rel_path = path
+                                .strip_prefix(cwd_path)
                                 .map(|p| p.to_string_lossy().to_string())
                                 .unwrap_or_else(|_| path.to_string_lossy().to_string());
-                            packages.push(MonorepoPackage { name, path: rel_path, version });
+                            packages.push(MonorepoPackage {
+                                name,
+                                path: rel_path,
+                                version,
+                            });
                         }
                     }
                 }
@@ -826,7 +867,8 @@ pub(crate) fn find_cargo_packages(cwd: &str, toml_content: &str) -> Vec<Monorepo
             if member_toml.exists() {
                 let (name, version) = if let Ok(content) = std::fs::read_to_string(&member_toml) {
                     let n = parse_toml_scalar(&content, "name").unwrap_or_else(|| {
-                        abs.file_name().map(|f| f.to_string_lossy().to_string())
+                        abs.file_name()
+                            .map(|f| f.to_string_lossy().to_string())
                             .unwrap_or_else(|| dir_rel.clone())
                     });
                     let v = parse_toml_scalar(&content, "version").unwrap_or_default();
@@ -835,10 +877,15 @@ pub(crate) fn find_cargo_packages(cwd: &str, toml_content: &str) -> Vec<Monorepo
                     (dir_rel.clone(), String::new())
                 };
                 // rel_path: use dir_rel (already relative)
-                let rel_path = abs.strip_prefix(cwd_path)
+                let rel_path = abs
+                    .strip_prefix(cwd_path)
                     .map(|p| p.to_string_lossy().to_string())
                     .unwrap_or(dir_rel);
-                packages.push(MonorepoPackage { name, path: rel_path, version });
+                packages.push(MonorepoPackage {
+                    name,
+                    path: rel_path,
+                    version,
+                });
             }
         }
     }
@@ -890,7 +937,11 @@ fn expand_cargo_glob(cwd: &str, pattern: &str) -> Vec<String> {
             Ok(p) => p,
             Err(_) => return Vec::new(),
         };
-        if abs.is_dir() { vec![pattern.to_string()] } else { Vec::new() }
+        if abs.is_dir() {
+            vec![pattern.to_string()]
+        } else {
+            Vec::new()
+        }
     }
 }
 
@@ -928,9 +979,7 @@ pub(crate) fn parse_toml_string_array(content: &str, key: &str) -> Vec<String> {
     let mut start_idx = None;
     for (i, line) in content.lines().enumerate() {
         let trimmed = line.trim();
-        if trimmed.starts_with(&needle) || trimmed.starts_with(&needle2)
-            || trimmed == key
-        {
+        if trimmed.starts_with(&needle) || trimmed.starts_with(&needle2) || trimmed == key {
             // Check it has `=`
             if trimmed.contains('=') {
                 // Find byte offset
@@ -962,11 +1011,16 @@ pub(crate) fn parse_toml_string_array(content: &str, key: &str) -> Vec<String> {
         match ch {
             '[' => {
                 depth += 1;
-                if depth == 1 { continue; } // skip the opening bracket
+                if depth == 1 {
+                    continue;
+                } // skip the opening bracket
             }
             ']' => {
                 depth -= 1;
-                if depth == 0 { found = true; break; }
+                if depth == 0 {
+                    found = true;
+                    break;
+                }
             }
             _ => {}
         }
@@ -979,13 +1033,14 @@ pub(crate) fn parse_toml_string_array(content: &str, key: &str) -> Vec<String> {
     }
     // Strip comment lines and inline comments, then split on commas.
     // Process line by line first so a comment line doesn't eat the next value.
-    let clean: String = buf.lines()
+    let clean: String = buf
+        .lines()
         .map(|line| {
             let l = line.trim();
             if l.starts_with('#') {
-                ""  // whole-line comment → drop
+                "" // whole-line comment → drop
             } else if let Some(ci) = l.find('#') {
-                &l[..ci]  // inline comment → keep left side
+                &l[..ci] // inline comment → keep left side
             } else {
                 l
             }
@@ -1047,7 +1102,11 @@ pub(crate) fn find_go_packages(cwd: &str, go_work_content: &str) -> Vec<Monorepo
     packages
 }
 
-fn go_work_dir_to_package(cwd: &str, cwd_path: &std::path::Path, dir: &str) -> Option<MonorepoPackage> {
+fn go_work_dir_to_package(
+    cwd: &str,
+    cwd_path: &std::path::Path,
+    dir: &str,
+) -> Option<MonorepoPackage> {
     use crate::git::cmd::safe_repo_path;
     // Normalise: `./foo` → `foo`, `./` → `.` → skip
     let rel = dir.trim_start_matches("./");
@@ -1061,13 +1120,19 @@ fn go_work_dir_to_package(cwd: &str, cwd_path: &std::path::Path, dir: &str) -> O
     if !abs.is_dir() {
         return None;
     }
-    let rel_path = abs.strip_prefix(cwd_path)
+    let rel_path = abs
+        .strip_prefix(cwd_path)
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|_| rel.to_string());
-    let name = abs.file_name()
+    let name = abs
+        .file_name()
         .map(|f| f.to_string_lossy().to_string())
         .unwrap_or_else(|| rel_path.clone());
-    Some(MonorepoPackage { name, path: rel_path, version: String::new() })
+    Some(MonorepoPackage {
+        name,
+        path: rel_path,
+        version: String::new(),
+    })
 }
 
 // ─── nx ───────────────────────────────────────────────────────────────────
@@ -1079,10 +1144,10 @@ pub(crate) fn find_nx_packages(cwd: &str, nx_json_content: &str) -> Vec<Monorepo
     let cwd_path = std::path::Path::new(cwd);
 
     // Detect custom layout dirs from nx.json
-    let apps_dir = extract_json_string(nx_json_content, "appsDir")
-        .unwrap_or_else(|| "apps".to_string());
-    let libs_dir = extract_json_string(nx_json_content, "libsDir")
-        .unwrap_or_else(|| "libs".to_string());
+    let apps_dir =
+        extract_json_string(nx_json_content, "appsDir").unwrap_or_else(|| "apps".to_string());
+    let libs_dir =
+        extract_json_string(nx_json_content, "libsDir").unwrap_or_else(|| "libs".to_string());
 
     let scan_dirs: Vec<String> = if apps_dir == libs_dir {
         vec![apps_dir]
@@ -1133,10 +1198,15 @@ pub(crate) fn find_nx_packages(cwd: &str, nx_json_content: &str) -> Vec<Monorepo
                 } else {
                     String::new()
                 };
-                let rel_path = path.strip_prefix(cwd_path)
+                let rel_path = path
+                    .strip_prefix(cwd_path)
                     .map(|p| p.to_string_lossy().to_string())
                     .unwrap_or_else(|_| path.to_string_lossy().to_string());
-                packages.push(MonorepoPackage { name, path: rel_path, version });
+                packages.push(MonorepoPackage {
+                    name,
+                    path: rel_path,
+                    version,
+                });
             }
         }
     }
@@ -1146,11 +1216,15 @@ pub(crate) fn find_nx_packages(cwd: &str, nx_json_content: &str) -> Vec<Monorepo
 }
 
 pub(crate) fn read_git_file(path: &Path) -> Option<String> {
-    std::fs::read_to_string(path).ok().map(|s| s.trim().to_string())
+    std::fs::read_to_string(path)
+        .ok()
+        .map(|s| s.trim().to_string())
 }
 
 pub(crate) fn read_git_u32(path: &Path) -> u32 {
-    read_git_file(path).and_then(|s| s.parse().ok()).unwrap_or(0)
+    read_git_file(path)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0)
 }
 
 pub(crate) fn has_unresolved_conflicts(cwd: &str) -> bool {
@@ -1218,43 +1292,71 @@ mod workspace_detection_tests {
     #[test]
     fn cargo_workspace_members_glob() {
         let dir = TempDir::new("cargo");
-        dir.write("Cargo.toml", r#"
+        dir.write(
+            "Cargo.toml",
+            r#"
 [workspace]
 members = ["crates/*"]
-"#);
-        dir.write("crates/foo/Cargo.toml", r#"
+"#,
+        );
+        dir.write(
+            "crates/foo/Cargo.toml",
+            r#"
 [package]
 name = "foo"
 version = "0.1.0"
-"#);
-        dir.write("crates/bar/Cargo.toml", r#"
+"#,
+        );
+        dir.write(
+            "crates/bar/Cargo.toml",
+            r#"
 [package]
 name = "bar"
 version = "0.2.0"
-"#);
+"#,
+        );
 
         let content = std::fs::read_to_string(dir.path.join("Cargo.toml")).unwrap();
         let pkgs = find_cargo_packages(dir.cwd(), &content);
         let names: Vec<&str> = pkgs.iter().map(|p| p.name.as_str()).collect();
         assert!(names.contains(&"foo"), "expected 'foo' in {:?}", names);
         assert!(names.contains(&"bar"), "expected 'bar' in {:?}", names);
-        assert_eq!(pkgs.iter().find(|p| p.name == "foo").unwrap().version, "0.1.0");
-        assert_eq!(pkgs.iter().find(|p| p.name == "bar").unwrap().version, "0.2.0");
+        assert_eq!(
+            pkgs.iter().find(|p| p.name == "foo").unwrap().version,
+            "0.1.0"
+        );
+        assert_eq!(
+            pkgs.iter().find(|p| p.name == "bar").unwrap().version,
+            "0.2.0"
+        );
         // paths are repo-relative
         for pkg in &pkgs {
-            assert!(!pkg.path.starts_with('/'), "path should be relative: {}", pkg.path);
+            assert!(
+                !pkg.path.starts_with('/'),
+                "path should be relative: {}",
+                pkg.path
+            );
         }
     }
 
     #[test]
     fn cargo_workspace_literal_member() {
         let dir = TempDir::new("cargo-lit");
-        dir.write("Cargo.toml", r#"
+        dir.write(
+            "Cargo.toml",
+            r#"
 [workspace]
 members = ["packages/alpha", "packages/beta"]
-"#);
-        dir.write("packages/alpha/Cargo.toml", "[package]\nname = \"alpha\"\nversion = \"1.0.0\"\n");
-        dir.write("packages/beta/Cargo.toml", "[package]\nname = \"beta\"\nversion = \"2.0.0\"\n");
+"#,
+        );
+        dir.write(
+            "packages/alpha/Cargo.toml",
+            "[package]\nname = \"alpha\"\nversion = \"1.0.0\"\n",
+        );
+        dir.write(
+            "packages/beta/Cargo.toml",
+            "[package]\nname = \"beta\"\nversion = \"2.0.0\"\n",
+        );
 
         let content = std::fs::read_to_string(dir.path.join("Cargo.toml")).unwrap();
         let pkgs = find_cargo_packages(dir.cwd(), &content);
@@ -1266,19 +1368,31 @@ members = ["packages/alpha", "packages/beta"]
     #[test]
     fn cargo_workspace_exclude() {
         let dir = TempDir::new("cargo-excl");
-        dir.write("Cargo.toml", r#"
+        dir.write(
+            "Cargo.toml",
+            r#"
 [workspace]
 members = ["crates/*"]
 exclude = ["crates/skip"]
-"#);
-        dir.write("crates/keep/Cargo.toml", "[package]\nname = \"keep\"\nversion = \"0.1.0\"\n");
-        dir.write("crates/skip/Cargo.toml", "[package]\nname = \"skip\"\nversion = \"0.1.0\"\n");
+"#,
+        );
+        dir.write(
+            "crates/keep/Cargo.toml",
+            "[package]\nname = \"keep\"\nversion = \"0.1.0\"\n",
+        );
+        dir.write(
+            "crates/skip/Cargo.toml",
+            "[package]\nname = \"skip\"\nversion = \"0.1.0\"\n",
+        );
 
         let content = std::fs::read_to_string(dir.path.join("Cargo.toml")).unwrap();
         let pkgs = find_cargo_packages(dir.cwd(), &content);
         let names: Vec<&str> = pkgs.iter().map(|p| p.name.as_str()).collect();
         assert!(names.contains(&"keep"));
-        assert!(!names.contains(&"skip"), "excluded member should not appear");
+        assert!(
+            !names.contains(&"skip"),
+            "excluded member should not appear"
+        );
     }
 
     #[test]
@@ -1287,7 +1401,10 @@ exclude = ["crates/skip"]
         // Cargo.toml that looks like a workspace but is actually malformed JSON-in-TOML
         let content = "[workspace\nmembers = [\n";
         let pkgs = find_cargo_packages(dir.cwd(), content);
-        assert!(pkgs.is_empty(), "malformed manifest should yield empty packages");
+        assert!(
+            pkgs.is_empty(),
+            "malformed manifest should yield empty packages"
+        );
     }
 
     // ── go.work ───────────────────────────────────────────────
@@ -1302,7 +1419,11 @@ exclude = ["crates/skip"]
         let pkgs = find_go_packages(dir.cwd(), go_work);
         let names: Vec<&str> = pkgs.iter().map(|p| p.name.as_str()).collect();
         assert!(names.contains(&"api"), "expected 'api' in {:?}", names);
-        assert!(names.contains(&"shared"), "expected 'shared' in {:?}", names);
+        assert!(
+            names.contains(&"shared"),
+            "expected 'shared' in {:?}",
+            names
+        );
         // version is always empty for go
         for pkg in &pkgs {
             assert_eq!(pkg.version, "");
@@ -1355,13 +1476,20 @@ exclude = ["crates/skip"]
         let pkgs = find_nx_packages(dir.cwd(), &content);
         let names: Vec<&str> = pkgs.iter().map(|p| p.name.as_str()).collect();
         assert!(names.contains(&"web"), "expected 'web' in {:?}", names);
-        assert!(names.contains(&"ui-lib"), "expected 'ui-lib' in {:?}", names);
+        assert!(
+            names.contains(&"ui-lib"),
+            "expected 'ui-lib' in {:?}",
+            names
+        );
     }
 
     #[test]
     fn nx_custom_workspace_layout() {
         let dir = TempDir::new("nx-custom");
-        dir.write("nx.json", r#"{"workspaceLayout":{"appsDir":"services","libsDir":"shared"}}"#);
+        dir.write(
+            "nx.json",
+            r#"{"workspaceLayout":{"appsDir":"services","libsDir":"shared"}}"#,
+        );
         dir.write("services/api/project.json", r#"{"name":"api"}"#);
         dir.write("shared/core/project.json", r#"{"name":"core"}"#);
 
@@ -1376,12 +1504,19 @@ exclude = ["crates/skip"]
     fn nx_package_json_fallback() {
         let dir = TempDir::new("nx-pkg");
         dir.write("nx.json", "{}");
-        dir.write("apps/dashboard/package.json", r#"{"name":"@acme/dashboard","version":"1.0.0"}"#);
+        dir.write(
+            "apps/dashboard/package.json",
+            r#"{"name":"@acme/dashboard","version":"1.0.0"}"#,
+        );
 
         let content = std::fs::read_to_string(dir.path.join("nx.json")).unwrap();
         let pkgs = find_nx_packages(dir.cwd(), &content);
         let names: Vec<&str> = pkgs.iter().map(|p| p.name.as_str()).collect();
-        assert!(names.contains(&"@acme/dashboard"), "expected '@acme/dashboard' in {:?}", names);
+        assert!(
+            names.contains(&"@acme/dashboard"),
+            "expected '@acme/dashboard' in {:?}",
+            names
+        );
     }
 
     // ── turbo ─────────────────────────────────────────────────
@@ -1390,9 +1525,18 @@ exclude = ["crates/skip"]
     fn turbo_reuses_package_json_workspaces() {
         let dir = TempDir::new("turbo");
         dir.write("turbo.json", r#"{"$schema":"...","pipeline":{}}"#);
-        dir.write("package.json", r#"{"name":"root","workspaces":["apps/*","packages/*"]}"#);
-        dir.write("apps/web/package.json", r#"{"name":"web","version":"0.1.0"}"#);
-        dir.write("packages/utils/package.json", r#"{"name":"utils","version":"1.0.0"}"#);
+        dir.write(
+            "package.json",
+            r#"{"name":"root","workspaces":["apps/*","packages/*"]}"#,
+        );
+        dir.write(
+            "apps/web/package.json",
+            r#"{"name":"web","version":"0.1.0"}"#,
+        );
+        dir.write(
+            "packages/utils/package.json",
+            r#"{"name":"utils","version":"1.0.0"}"#,
+        );
 
         let pkg_content = std::fs::read_to_string(dir.path.join("package.json")).unwrap();
         let pkgs = find_workspace_packages(dir.cwd(), &pkg_content, "turbo");
@@ -1415,7 +1559,10 @@ exclude = ["crates/skip"]
         // Here we just verify cargo packages are found correctly when cargo is used.
         let dir = TempDir::new("prec");
         dir.write("Cargo.toml", "[workspace]\nmembers = [\"crates/*\"]\n");
-        dir.write("crates/mylib/Cargo.toml", "[package]\nname = \"mylib\"\nversion = \"0.1.0\"\n");
+        dir.write(
+            "crates/mylib/Cargo.toml",
+            "[package]\nname = \"mylib\"\nversion = \"0.1.0\"\n",
+        );
 
         let content = std::fs::read_to_string(dir.path.join("Cargo.toml")).unwrap();
         let pkgs = find_cargo_packages(dir.cwd(), &content);
@@ -1431,15 +1578,21 @@ exclude = ["crates/skip"]
         let dir = TempDir::new("prec-detect");
         dir.write("pnpm-workspace.yaml", "packages:\n  - 'packages/*'\n");
         dir.write("Cargo.toml", "[workspace]\nmembers = [\"crates/*\"]\n");
-        dir.write("crates/mylib/Cargo.toml", "[package]\nname = \"mylib\"\nversion = \"0.1.0\"\n");
+        dir.write(
+            "crates/mylib/Cargo.toml",
+            "[package]\nname = \"mylib\"\nversion = \"0.1.0\"\n",
+        );
 
-        let info = tauri::async_runtime::block_on(
-            crate::commands::ops::detect_monorepo(dir.cwd().to_string()),
-        )
+        let info = tauri::async_runtime::block_on(crate::commands::ops::detect_monorepo(
+            dir.cwd().to_string(),
+        ))
         .expect("detect_monorepo should not error");
 
         assert!(info.is_monorepo, "should be detected as a monorepo");
-        assert_eq!(info.manager, "pnpm", "pnpm must win over cargo per locked precedence");
+        assert_eq!(
+            info.manager, "pnpm",
+            "pnpm must win over cargo per locked precedence"
+        );
     }
 
     // ── TOML parsing helpers ──────────────────────────────────
@@ -1462,8 +1615,14 @@ members = [
     #[test]
     fn parse_toml_scalar_basic() {
         let toml = "[package]\nname = \"my-crate\"\nversion = \"0.3.1\"\n";
-        assert_eq!(parse_toml_scalar(toml, "name"), Some("my-crate".to_string()));
-        assert_eq!(parse_toml_scalar(toml, "version"), Some("0.3.1".to_string()));
+        assert_eq!(
+            parse_toml_scalar(toml, "name"),
+            Some("my-crate".to_string())
+        );
+        assert_eq!(
+            parse_toml_scalar(toml, "version"),
+            Some("0.3.1".to_string())
+        );
     }
 }
 

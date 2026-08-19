@@ -52,6 +52,14 @@ export default defineConfig({
     target: ["es2021", "chrome100", "safari14"],
     minify: !process.env.TAURI_DEBUG ? "esbuild" : false,
     sourcemap: !!process.env.TAURI_DEBUG,
+    // Emits dist/.vite/manifest.json, which perf/bundle-check.mjs reads to
+    // find the real entry chunk for index.html. Do NOT remove: bundle-check
+    // hard-fails without it. Before this flag, the main chunk was guessed
+    // by a `/^index-[a-z0-9_-]+\.js$/i` name match + size sort, which would
+    // silently measure the wrong file if a vendor chunk ever outgrew it
+    // (see docs/superpowers/specs/2026-08-18-dev-loop-ci-build-times-plan.md
+    // §0.3 item 13).
+    manifest: true,
     rollupOptions: {
       // Mark Node.js built-ins as external so Rollup can analyse
       // packages/core's node adapter (structural/parsers/adapters/node.ts)
@@ -62,11 +70,17 @@ export default defineConfig({
     },
   },
   test: {
-    environment: "jsdom",
-    // Patch globalThis.localStorage to use the jsdom Storage implementation.
-    // Node.js v25 ships a built-in `localStorage` stub that has no methods
-    // (setItem/getItem/clear) unless --localstorage-file is supplied. Vitest's
-    // jsdom environment does not override it, so we do so here.
+    // Default to "node": jsdom setup/teardown costs ~1s/file (measured:
+    // 95.85s cumulative "environment" time across 94 files vs 19.85s of
+    // actual test execution — see docs/superpowers/specs/
+    // 2026-08-18-dev-loop-ci-build-times-plan.md §3.1). Only the handful of
+    // files that actually touch document/window/HTMLElement opt back into
+    // jsdom via a `// @vitest-environment jsdom` docblock at the top of the
+    // file.
+    environment: "node",
+    // src/test-setup.ts installs an in-memory Storage shim (see that file)
+    // so that files relying on localStorage/sessionStorage keep working
+    // under the "node" environment without needing jsdom.
     setupFiles: ["src/test-setup.ts"],
     include: ["src/**/*.test.ts"],
     globals: false,

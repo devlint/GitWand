@@ -29,7 +29,9 @@ pub(crate) fn libgit2_branch_ab(path: &str) -> (String, u32, u32, bool) {
         let head = repo.head().ok()?;
         let local_oid = head.target()?;
         let local_branch = head.shorthand()?;
-        let branch_ref = repo.find_branch(local_branch, git2::BranchType::Local).ok()?;
+        let branch_ref = repo
+            .find_branch(local_branch, git2::BranchType::Local)
+            .ok()?;
         let upstream = match branch_ref.upstream() {
             Ok(u) => u,
             Err(_) => return Some((0, 0, true)), // valid local branch, just no upstream
@@ -72,12 +74,15 @@ pub(crate) fn libgit2_wip_status(path: &str) -> (u32, u32, u32, Vec<String>) {
         Err(_) => return (0, 0, 0, Vec::new()),
     };
 
-    let staged_mask =
-        git2::Status::INDEX_NEW | git2::Status::INDEX_MODIFIED | git2::Status::INDEX_DELETED |
-        git2::Status::INDEX_RENAMED | git2::Status::INDEX_TYPECHANGE;
-    let unstaged_mask =
-        git2::Status::WT_MODIFIED | git2::Status::WT_DELETED |
-        git2::Status::WT_RENAMED | git2::Status::WT_TYPECHANGE;
+    let staged_mask = git2::Status::INDEX_NEW
+        | git2::Status::INDEX_MODIFIED
+        | git2::Status::INDEX_DELETED
+        | git2::Status::INDEX_RENAMED
+        | git2::Status::INDEX_TYPECHANGE;
+    let unstaged_mask = git2::Status::WT_MODIFIED
+        | git2::Status::WT_DELETED
+        | git2::Status::WT_RENAMED
+        | git2::Status::WT_TYPECHANGE;
 
     let mut staged_count = 0u32;
     let mut unstaged_count = 0u32;
@@ -140,7 +145,15 @@ fn format_iso8601(secs: i64, offset_min: i32) -> String {
     let off_abs = offset_min.unsigned_abs();
     format!(
         "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}{}{:02}:{:02}",
-        y, mo, d, h, mi, s, sign, off_abs / 60, off_abs % 60
+        y,
+        mo,
+        d,
+        h,
+        mi,
+        s,
+        sign,
+        off_abs / 60,
+        off_abs % 60
     )
 }
 

@@ -1,3 +1,7 @@
+// @vitest-environment jsdom
+// usePrPanel pulls in usePrReviewQueue transitively, which reads
+// `document.hidden` at call time (visibility-gated queue, see
+// apps/desktop/CLAUDE.md "Polling" perf invariant) — needs a real `document`.
 /**
  * Task C3 (v3.6.0) — `usePrPanel` orchestration of the pre-review pass:
  * opt-in, cache-first, cancellable on PR switch.

@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * ResolveAutoSummaryModal.vue — confirmation before "Résoudre auto" applies
  * every auto-resolved hunk in a file.

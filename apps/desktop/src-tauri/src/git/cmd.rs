@@ -1,7 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 // ─── Transparent command log ──────────────────────────────────
@@ -13,12 +13,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// One entry in the transparent command log.
 #[derive(serde::Serialize, Clone)]
 pub(crate) struct CmdLogEntry {
-    pub id:          u64,
-    pub label:       String,   // human-readable "git push origin HEAD"
-    pub cwd:         String,
+    pub id: u64,
+    pub label: String, // human-readable "git push origin HEAD"
+    pub cwd: String,
     pub duration_ms: u64,
-    pub exit_code:   i32,      // 0 = success, -1 = could not be determined
-    pub timestamp_ms: u64,     // Unix epoch in milliseconds
+    pub exit_code: i32,    // 0 = success, -1 = could not be determined
+    pub timestamp_ms: u64, // Unix epoch in milliseconds
 }
 
 const CMD_LOG_CAP: usize = 200;
@@ -37,8 +37,14 @@ pub(crate) fn record_cmd(label: &str, cwd: &str, duration_ms: u64, exit_code: i3
     if buf.len() >= CMD_LOG_CAP {
         buf.pop_front();
     }
-    buf.push_back(CmdLogEntry { id, label: label.to_string(), cwd: cwd.to_string(),
-                                duration_ms, exit_code, timestamp_ms });
+    buf.push_back(CmdLogEntry {
+        id,
+        label: label.to_string(),
+        cwd: cwd.to_string(),
+        duration_ms,
+        exit_code,
+        timestamp_ms,
+    });
 }
 
 /// Returns a snapshot (newest first) of the ring buffer.
@@ -254,9 +260,13 @@ pub(crate) fn sanitize_appimage_search_paths(cmd: &mut std::process::Command) {
 #[cfg(target_os = "macos")]
 pub(crate) fn macos_enriched_path() -> Option<String> {
     let current_path = std::env::var("PATH").unwrap_or_default();
-    let extras = ["/opt/homebrew/bin", "/opt/homebrew/sbin",
-                  "/usr/local/bin", "/usr/local/sbin",
-                  "/opt/local/bin"];
+    let extras = [
+        "/opt/homebrew/bin",
+        "/opt/homebrew/sbin",
+        "/usr/local/bin",
+        "/usr/local/sbin",
+        "/opt/local/bin",
+    ];
     let mut enriched = current_path.clone();
     let mut added = false;
     for extra in extras {
@@ -266,7 +276,11 @@ pub(crate) fn macos_enriched_path() -> Option<String> {
             added = true;
         }
     }
-    if added { Some(enriched) } else { None }
+    if added {
+        Some(enriched)
+    } else {
+        None
+    }
 }
 
 pub(crate) fn hidden_cmd(bin: &str) -> std::process::Command {
@@ -284,8 +298,12 @@ pub(crate) fn hidden_cmd(bin: &str) -> std::process::Command {
     // GitHub issue #48.
     for (var, fix) in appimage_env_fixes(&env_get) {
         match fix {
-            EnvFix::Restore(value) => { cmd.env(var, value); }
-            EnvFix::Remove         => { cmd.env_remove(var); }
+            EnvFix::Restore(value) => {
+                cmd.env(var, value);
+            }
+            EnvFix::Remove => {
+                cmd.env_remove(var);
+            }
         }
     }
     // Defensive: propagate auth tokens explicitly to every subprocess so
@@ -360,15 +378,19 @@ pub(crate) fn output_with_timeout(
             Some(status) => {
                 let stdout = stdout_thread.join().unwrap_or_default();
                 let stderr = stderr_thread.join().unwrap_or_default();
-                return Ok(std::process::Output { status, stdout, stderr });
+                return Ok(std::process::Output {
+                    status,
+                    stdout,
+                    stderr,
+                });
             }
             None if Instant::now() >= deadline => {
                 let _ = child.kill();
                 let _ = child.wait(); // reap — avoid a zombie
-                // Do NOT join the reader threads here: a child that spawned a
-                // grandchild holding the pipe open would never hit EOF, and
-                // joining would defeat the entire point of the timeout. They
-                // exit on their own at EOF; just drop the handles.
+                                      // Do NOT join the reader threads here: a child that spawned a
+                                      // grandchild holding the pipe open would never hit EOF, and
+                                      // joining would defeat the entire point of the timeout. They
+                                      // exit on their own at EOF; just drop the handles.
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::TimedOut,
                     format!("timed out after {}s", timeout.as_secs()),
@@ -453,7 +475,12 @@ pub(crate) fn resolve_default_branch(cwd: &str, configured: Option<&str>) -> Str
 /// Returns the list of files that differ between two revs (names only).
 /// Shared between `commands::read::preview_merge` and the rebase preview in
 /// `commands::ops::*`.
-pub(crate) fn git_changed_files(git: &str, cwd: &str, base: &str, rev: &str) -> Result<Vec<String>, String> {
+pub(crate) fn git_changed_files(
+    git: &str,
+    cwd: &str,
+    base: &str,
+    rev: &str,
+) -> Result<Vec<String>, String> {
     let out = hidden_cmd(git)
         .args(["diff", "--name-only", base, rev])
         .current_dir(cwd)
@@ -595,10 +622,7 @@ mod tests {
             // default branch (Settings > Git > Default Branch) wins.
             let repo = TempRepo::new_trunk();
             repo.git_ok(&["branch", "main"]);
-            assert_eq!(
-                resolve_default_branch(&repo.cwd(), Some("trunk")),
-                "trunk"
-            );
+            assert_eq!(resolve_default_branch(&repo.cwd(), Some("trunk")), "trunk");
         }
 
         #[test]
@@ -641,10 +665,12 @@ mod tests {
     fn appimage_env_fixes_removes_polluted_var_without_orig() {
         // Inside an AppImage, a bundled LD_LIBRARY_PATH with no saved original
         // is dropped so the child falls back to the system default.
-        let env: HashMap<&str, &str> =
-            [("APPDIR", "/tmp/.mount_app"), ("LD_LIBRARY_PATH", "/tmp/.mount_app/usr/lib")]
-                .into_iter()
-                .collect();
+        let env: HashMap<&str, &str> = [
+            ("APPDIR", "/tmp/.mount_app"),
+            ("LD_LIBRARY_PATH", "/tmp/.mount_app/usr/lib"),
+        ]
+        .into_iter()
+        .collect();
         assert_eq!(
             appimage_env_fixes(&lookup(&env)),
             vec![("LD_LIBRARY_PATH", EnvFix::Remove)]
@@ -700,10 +726,9 @@ mod tests {
     #[test]
     fn appimage_path_fixes_leaves_clean_path_alone() {
         // Inside an AppImage but a host-only PATH → nothing to strip.
-        let env: HashMap<&str, &str> =
-            [("APPDIR", "/tmp/.mount_app"), ("PATH", "/usr/bin:/bin")]
-                .into_iter()
-                .collect();
+        let env: HashMap<&str, &str> = [("APPDIR", "/tmp/.mount_app"), ("PATH", "/usr/bin:/bin")]
+            .into_iter()
+            .collect();
         assert!(appimage_path_fixes(&lookup(&env)).is_empty());
     }
 
@@ -788,5 +813,3 @@ mod tests {
         assert!(appimage_path_fixes(&lookup(&env)).is_empty());
     }
 }
-
-

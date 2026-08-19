@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * ResolutionPreviewPanel.vue — accept/reject action UI for any hunk the core
  * already auto-resolved (non_overlapping, one_side_change, whitespace_only, …).

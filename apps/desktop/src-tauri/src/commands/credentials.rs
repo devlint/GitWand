@@ -33,7 +33,11 @@
 /// `account` — sub-key within the service, e.g. `"workspace:username"`.
 /// `value`   — the secret (PAT, app-password, etc.).
 #[tauri::command]
-pub(crate) async fn set_credential(service: String, account: String, value: String) -> Result<(), String> {
+pub(crate) async fn set_credential(
+    service: String,
+    account: String,
+    value: String,
+) -> Result<(), String> {
     let entry = keyring::Entry::new(&service, &account)
         .map_err(|e| format!("keyring init failed for {}/{}: {}", service, account, e))?;
     entry
@@ -50,12 +54,12 @@ pub(crate) async fn set_credential(service: String, account: String, value: Stri
 pub(crate) async fn get_credential(service: String, account: String) -> Result<String, String> {
     let entry = keyring::Entry::new(&service, &account)
         .map_err(|e| format!("keyring init failed for {}/{}: {}", service, account, e))?;
-    entry
-        .get_password()
-        .map_err(|_| format!(
+    entry.get_password().map_err(|_| {
+        format!(
             "No credential found for {}/{}. Please configure your account in Settings > Accounts.",
             service, account
-        ))
+        )
+    })
 }
 
 /// Delete a credential from the OS keychain.
@@ -70,6 +74,9 @@ pub(crate) async fn delete_credential(service: String, account: String) -> Resul
     match entry.delete_password() {
         Ok(()) => Ok(()),
         Err(keyring::Error::NoEntry) => Ok(()), // Already gone — idempotent
-        Err(e) => Err(format!("Failed to delete credential {}/{}: {}", service, account, e)),
+        Err(e) => Err(format!(
+            "Failed to delete credential {}/{}: {}",
+            service, account, e
+        )),
     }
 }

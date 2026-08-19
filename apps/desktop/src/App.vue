@@ -693,24 +693,24 @@ async function checkAndSaveIfResolved(filePath: string) {
 }
 
 /** Wrapped resolve handlers that auto-save when fully resolved */
-function handleResolveHunk(path: string, hunkIndex: number, choice: "ours" | "theirs" | "both" | "both-theirs-first") {
-  resolveHunkManual(path, hunkIndex, choice);
-  checkAndSaveIfResolved(path);
+async function handleResolveHunk(path: string, hunkIndex: number, choice: "ours" | "theirs" | "both" | "both-theirs-first") {
+  await resolveHunkManual(path, hunkIndex, choice);
+  await checkAndSaveIfResolved(path);
 }
 
-function handleResolveFile(path: string) {
-  resolveFile(path);
-  checkAndSaveIfResolved(path);
+async function handleResolveFile(path: string) {
+  await resolveFile(path);
+  await checkAndSaveIfResolved(path);
 }
 
-function handleResolveHunkCustom(path: string, hunkIndex: number, content: string) {
-  resolveHunkCustom(path, hunkIndex, content);
-  checkAndSaveIfResolved(path);
+async function handleResolveHunkCustom(path: string, hunkIndex: number, content: string) {
+  await resolveHunkCustom(path, hunkIndex, content);
+  await checkAndSaveIfResolved(path);
 }
 
-function handleResolveFileBulk(path: string, choice: "ours" | "theirs" | "both") {
-  resolveFileBulk(path, choice);
-  checkAndSaveIfResolved(path);
+async function handleResolveFileBulk(path: string, choice: "ours" | "theirs" | "both") {
+  await resolveFileBulk(path, choice);
+  await checkAndSaveIfResolved(path);
   memorizeToast.value = { path, strategy: choice };
 }
 
@@ -723,9 +723,9 @@ async function handleResolveTreeConflict(path: string, choice: "ours" | "theirs"
   }
 }
 
-function handleReconstructConflict(path: string) {
+async function handleReconstructConflict(path: string) {
   // Swap to reconstructed markers; the file now flows through the normal hunk UI.
-  reconstructAndResolve(path);
+  await reconstructAndResolve(path);
 }
 
 async function handleKeepWorkingTree(path: string) {
@@ -749,9 +749,9 @@ function dismissMemorizeToast() {
   memorizeToast.value = null;
 }
 
-function handleApplyFileMemory(path: string, entry: ResolutionMemoryEntry) {
-  applyMemoryToFile(path, entry);
-  checkAndSaveIfResolved(path);
+async function handleApplyFileMemory(path: string, entry: ResolutionMemoryEntry) {
+  await applyMemoryToFile(path, entry);
+  await checkAndSaveIfResolved(path);
 }
 
 // ─── Edit commit overlay ────────────────────────────────
@@ -2067,7 +2067,7 @@ async function onRebaseBannerAutoResolve() {
       }
       // Resolve this step.
       await mergeOpenPath(cwd);
-      resolveAll();
+      await resolveAll();
       await saveAllFiles();
       const resolved = mergeFiles.value
         .filter((f) => f.result.stats.totalConflicts === 0)

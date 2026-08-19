@@ -1,13 +1,27 @@
 /**
- * Vitest global setup — replaces the Node.js v25 built-in `localStorage` stub
- * with a proper in-memory Web Storage implementation.
+ * Vitest global setup — installs an in-memory Web Storage shim when
+ * `localStorage`/`sessionStorage` are missing or non-functional.
  *
- * Node.js v25 ships a `localStorage` global that only works when
- * `--localstorage-file` is supplied. Without the flag the object exists but has
- * no Storage methods (setItem/getItem/removeItem/clear/key/length).
- * Vitest's jsdom environment does not override this built-in, so tests that rely
- * on localStorage fail. This setup file installs a spec-compliant in-memory
- * replacement on `globalThis` before every test file runs.
+ * Three distinct gaps this covers, all landing on the same fix:
+ * 1. Node.js v25 ships a `localStorage` global that only works when
+ *    `--localstorage-file` is supplied. Without the flag the object exists
+ *    but has no Storage methods (setItem/getItem/removeItem/clear/key/length).
+ * 2. Under Vitest's plain "node" environment (the default since the
+ *    jsdom -> node switch, see vite.config.ts), there is no jsdom-provided
+ *    Storage implementation to fall back on at all.
+ * 3. Some Node versions (observed: v25 locally) define a global `Storage`
+ *    class alongside their `localStorage` stub, so `Storage.prototype` exists
+ *    for `vi.spyOn` to hook even before this file runs. Node 22 (CI's
+ *    matrix) has neither — `Storage` is undefined as a bare identifier,
+ *    which throws a ReferenceError the moment a test does
+ *    `vi.spyOn(Storage.prototype, "setItem")` (see usePrCache.test.ts). Expose
+ *    `InMemoryStorage` as the global `Storage` so that spy target exists
+ *    consistently across Node versions, and so it's the exact same
+ *    prototype our localStorage/sessionStorage instances are built from.
+ *
+ * This file is intentionally self-contained (pure JS, no jsdom dependency)
+ * so it works identically whether a given test file runs in "node" or
+ * opts into "jsdom" via a `// @vitest-environment jsdom` docblock.
  */
 
 class InMemoryStorage implements Storage {
@@ -38,15 +52,31 @@ class InMemoryStorage implements Storage {
   }
 }
 
-// Replace the Node.js v25 built-in stub with a real in-memory implementation.
-Object.defineProperty(globalThis, "localStorage", {
-  value: new InMemoryStorage(),
-  writable: true,
-  configurable: true,
-});
+// Only install the shim when the existing global is absent or non-functional
+// (no `setItem`) — e.g. jsdom's own Storage implementation, when a test file
+// opts into `// @vitest-environment jsdom`, is left untouched.
+function installStorageShimIfNeeded(key: "localStorage" | "sessionStorage") {
+  const existing = (globalThis as Record<string, unknown>)[key] as
+    | Storage
+    | undefined;
+  if (existing && typeof existing.setItem === "function") {
+    return;
+  }
+  Object.defineProperty(globalThis, key, {
+    value: new InMemoryStorage(),
+    writable: true,
+    configurable: true,
+  });
+}
 
-Object.defineProperty(globalThis, "sessionStorage", {
-  value: new InMemoryStorage(),
-  writable: true,
-  configurable: true,
-});
+// Expose the constructor globally (as `Storage`) whenever it's missing, so
+// `vi.spyOn(Storage.prototype, "setItem")`-style tests work regardless of
+// Node version — see gap 3 above. Our localStorage/sessionStorage instances
+// below are always `InMemoryStorage`, so this is the exact prototype they
+// share; spying on it affects them too.
+if (typeof (globalThis as Record<string, unknown>).Storage !== "function") {
+  (globalThis as Record<string, unknown>).Storage = InMemoryStorage;
+}
+
+installStorageShimIfNeeded("localStorage");
+installStorageShimIfNeeded("sessionStorage");

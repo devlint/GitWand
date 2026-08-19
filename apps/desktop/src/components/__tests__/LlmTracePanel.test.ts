@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * LlmTracePanel.vue — accept/reject action UI.
  *

@@ -151,7 +151,10 @@ const BUILT_IN_PATTERNS: &[BuiltInPattern] = &[
 
 /// Pure, synchronously-testable core scanner. Mirrors `scanSecrets` in
 /// `packages/core/src/secrets/scanner.ts`.
-pub(crate) fn scan_lines(files: &[ScanFileInput], config: &SecretsScanConfig) -> Vec<SecretFinding> {
+pub(crate) fn scan_lines(
+    files: &[ScanFileInput],
+    config: &SecretsScanConfig,
+) -> Vec<SecretFinding> {
     if !config.enabled {
         return Vec::new();
     }
@@ -162,6 +165,12 @@ pub(crate) fn scan_lines(files: &[ScanFileInput], config: &SecretsScanConfig) ->
         .map(|s| s.to_string())
         .chain(config.ignore.iter().cloned())
         .collect();
+
+    // Precompile the ignore set once — `is_ignored()` used to recompile every entry's regex
+    // (up to 12+ for `DEFAULT_IGNORE_GLOBS` alone) on every call, and it's called once per
+    // pattern match AND once per high-entropy token, for every added line of every file. See
+    // apps/desktop/CLAUDE.md / AGENTS.md perf notes on this module.
+    let compiled_ignore = CompiledIgnore::compile(&effective_ignore);
 
     // Compile built-in + user patterns once. A malformed user regex is skipped, never fatal —
     // `regex` is linear-time so it can't hang the app, but we still don't trust arbitrary
@@ -193,7 +202,7 @@ pub(crate) fn scan_lines(files: &[ScanFileInput], config: &SecretsScanConfig) ->
                         continue;
                     }
                     matched_ranges.push((m.start(), m.end()));
-                    if !is_ignored(&file.path, value, &effective_ignore) {
+                    if !is_ignored(&file.path, value, &compiled_ignore) {
                         findings.push(SecretFinding {
                             file: file.path.clone(),
                             line: line.line,
@@ -218,7 +227,7 @@ pub(crate) fn scan_lines(files: &[ScanFileInput], config: &SecretsScanConfig) ->
                         continue;
                     }
                     if shannon_entropy(token) >= config.entropy_threshold
-                        && !is_ignored(&file.path, token, &effective_ignore)
+                        && !is_ignored(&file.path, token, &compiled_ignore)
                     {
                         findings.push(SecretFinding {
                             file: file.path.clone(),
@@ -272,42 +281,85 @@ fn redact(value: &str) -> String {
     format!("{}\u{2026}{}", lead, trail)
 }
 
+/// One precompiled path-glob entry from `.gitwandrc` `secrets.ignore[]`. `basename_only` mirrors
+/// the "pattern has no `/`" branch of the old `match_glob` — decided once per entry at compile
+/// time instead of being recomputed on every candidate value.
+struct CompiledGlob {
+    basename_only: bool,
+    re: Regex,
+}
+
+/// Precompiled form of `effective_ignore`, built once per `scan_lines()` call and reused by
+/// every `is_ignored()` call for that scan (once per pattern match, once per high-entropy
+/// token, for every added line of every file). Mirrors the split of the TS `.gitwandrc`
+/// `secrets.ignore[]` semantics: value-regex literals (`/.../ `) vs. path globs.
+struct CompiledIgnore {
+    /// Path-glob entries (anything not wrapped in `/.../ `).
+    globs: Vec<CompiledGlob>,
+    /// Value-regex-literal entries (`/.../ `), tested against the matched value, never the path.
+    regexes: Vec<Regex>,
+}
+
+impl CompiledIgnore {
+    /// Compiles every `.gitwandrc` `secrets.ignore[]` entry exactly once. A malformed
+    /// value-regex-literal is silently skipped, never fatal (same tolerance as the pattern
+    /// compilation above) — it simply never contributes a match.
+    fn compile(ignore: &[String]) -> Self {
+        let mut globs = Vec::new();
+        let mut regexes = Vec::new();
+        for entry in ignore {
+            if entry.len() >= 2 && entry.starts_with('/') && entry.ends_with('/') {
+                let body = &entry[1..entry.len() - 1];
+                if let Ok(re) = Regex::new(body) {
+                    regexes.push(re);
+                }
+                continue;
+            }
+            let normalized_pattern = entry.replace('\\', "/");
+            let basename_only = !normalized_pattern.contains('/');
+            globs.push(CompiledGlob {
+                basename_only,
+                re: glob_regex(&normalized_pattern),
+            });
+        }
+        CompiledIgnore { globs, regexes }
+    }
+}
+
 /// `true` if the matched value or file should be ignored, per `.gitwandrc` `secrets.ignore[]`.
 /// A `/.../ ` entry is a regex literal tested against the matched value; anything else is a path
-/// glob tested against `path` (mirrors `matchGlob` in `packages/core/src/config.ts`).
-fn is_ignored(path: &str, value: &str, ignore: &[String]) -> bool {
-    for entry in ignore {
-        if entry.len() >= 2 && entry.starts_with('/') && entry.ends_with('/') {
-            let body = &entry[1..entry.len() - 1];
-            if let Ok(re) = Regex::new(body) {
-                if re.is_match(value) {
-                    return true;
-                }
-            }
-            continue;
+/// glob tested against `path` (mirrors `matchGlob` in `packages/core/src/config.ts`). Takes the
+/// set precompiled once by `CompiledIgnore::compile` — never compiles a regex itself.
+fn is_ignored(path: &str, value: &str, ignore: &CompiledIgnore) -> bool {
+    for re in &ignore.regexes {
+        if re.is_match(value) {
+            return true;
         }
-        if match_glob(entry, path) {
+    }
+    if ignore.globs.is_empty() {
+        return false;
+    }
+    let normalized_path = path.replace('\\', "/");
+    for glob in &ignore.globs {
+        let subject: &str = if glob.basename_only {
+            normalized_path
+                .rsplit('/')
+                .next()
+                .unwrap_or(&normalized_path)
+        } else {
+            normalized_path.as_str()
+        };
+        if glob.re.is_match(subject) {
             return true;
         }
     }
     false
 }
 
-/// Minimal glob matcher — mirrors `matchGlob` in `packages/core/src/config.ts`.
-/// Supports `*` (any char but `/`), `**` (any char), `?` (one char but `/`), and basename
-/// matching when the pattern has no `/`.
-fn match_glob(pattern: &str, file_path: &str) -> bool {
-    let normalized_path = file_path.replace('\\', "/");
-    let normalized_pattern = pattern.replace('\\', "/");
-
-    if !normalized_pattern.contains('/') {
-        let basename = normalized_path.rsplit('/').next().unwrap_or(&normalized_path);
-        return glob_regex(&normalized_pattern).is_match(basename);
-    }
-
-    glob_regex(&normalized_pattern).is_match(&normalized_path)
-}
-
+/// Minimal glob-to-regex compiler — mirrors `globRegex` in `packages/core/src/config.ts`.
+/// Supports `*` (any char but `/`), `**` (any char), `?` (one char but `/`). Called only at
+/// `CompiledIgnore::compile()` time now, never in the hot scanning loop. Its internal logic
+/// (placeholder for `**`, escaping, `^...$` anchoring) is unchanged — locked by the parity test.
 fn glob_regex(pattern: &str) -> Regex {
     const DSTAR_PLACEHOLDER: &str = "\u{0}DSTAR\u{0}";
 
@@ -328,7 +380,8 @@ fn glob_regex(pattern: &str) -> Regex {
         .replace('?', "[^/]")
         .replace(DSTAR_PLACEHOLDER, ".*");
 
-    Regex::new(&format!("^{}$", replaced)).unwrap_or_else(|_| Regex::new("$^").expect("literal never-match regex must compile"))
+    Regex::new(&format!("^{}$", replaced))
+        .unwrap_or_else(|_| Regex::new("$^").expect("literal never-match regex must compile"))
 }
 
 // ─── Git extraction + Tauri command wiring ──────────────────────────
@@ -417,7 +470,10 @@ fn extract_staged_added_lines(cwd: &str) -> Result<Vec<ScanFileInput>, String> {
 
 /// Pure(-ish) core of `scan_secrets`, kept sync + separate from the `async` command so it is
 /// unit-testable without a Tokio runtime.
-pub(crate) fn scan_staged(cwd: &str, config: &SecretsScanConfig) -> Result<Vec<SecretFinding>, String> {
+pub(crate) fn scan_staged(
+    cwd: &str,
+    config: &SecretsScanConfig,
+) -> Result<Vec<SecretFinding>, String> {
     if cwd.trim().is_empty() {
         return Err("cwd must not be empty".to_string());
     }
@@ -429,7 +485,10 @@ pub(crate) fn scan_staged(cwd: &str, config: &SecretsScanConfig) -> Result<Vec<S
 }
 
 #[tauri::command]
-pub(crate) async fn scan_secrets(cwd: String, config: SecretsScanConfig) -> Result<Vec<SecretFinding>, String> {
+pub(crate) async fn scan_secrets(
+    cwd: String,
+    config: SecretsScanConfig,
+) -> Result<Vec<SecretFinding>, String> {
     scan_staged(&cwd, &config)
 }
 
@@ -511,7 +570,10 @@ mod tests {
 
     #[test]
     fn detects_a_user_extra_pattern() {
-        let files = [file_with("src/x.ts", &["const t = \"itok_deadbeefdeadbeef\";"])];
+        let files = [file_with(
+            "src/x.ts",
+            &["const t = \"itok_deadbeefdeadbeef\";"],
+        )];
         let mut config = base_config();
         config.extra_patterns.push(SecretPatternInput {
             id: "internal_token".to_string(),
@@ -540,7 +602,10 @@ mod tests {
 
     #[test]
     fn an_ignore_glob_suppresses_findings_on_a_matching_path() {
-        let files = [file_with("fixtures/sample.ts", &["const key = \"AKIAABCDEFGHIJKLMNOP\";"])];
+        let files = [file_with(
+            "fixtures/sample.ts",
+            &["const key = \"AKIAABCDEFGHIJKLMNOP\";"],
+        )];
         let mut config = base_config();
         config.ignore.push("fixtures/**".to_string());
         let findings = scan_lines(&files, &config);
@@ -549,7 +614,10 @@ mod tests {
 
     #[test]
     fn an_ignore_value_regex_suppresses_a_specific_value() {
-        let files = [file_with("src/x.ts", &["const key = \"AKIAABCDEFGHIJKLMNOP\";"])];
+        let files = [file_with(
+            "src/x.ts",
+            &["const key = \"AKIAABCDEFGHIJKLMNOP\";"],
+        )];
         let mut config = base_config();
         config.ignore.push("/AKIAABCDEFGHIJKLMNOP/".to_string());
         let findings = scan_lines(&files, &config);
@@ -558,7 +626,10 @@ mod tests {
 
     #[test]
     fn ignore_does_not_suppress_unrelated_path_or_value() {
-        let files = [file_with("src/x.ts", &["const key = \"AKIAABCDEFGHIJKLMNOP\";"])];
+        let files = [file_with(
+            "src/x.ts",
+            &["const key = \"AKIAABCDEFGHIJKLMNOP\";"],
+        )];
         let mut config = base_config();
         config.ignore.push("other/**".to_string());
         config.ignore.push("/NOTTHEKEY/".to_string());
@@ -608,7 +679,11 @@ mod tests {
             let mut config = base_config();
             config.entropy_threshold = 4.0;
             let findings = scan_lines(&files, &config);
-            assert!(findings.is_empty(), "expected {} to be ignored by default", path);
+            assert!(
+                findings.is_empty(),
+                "expected {} to be ignored by default",
+                path
+            );
         }
     }
 
@@ -635,7 +710,9 @@ mod tests {
         let mut config = base_config();
         config.entropy_threshold = 4.0;
         let findings = scan_lines(&files, &config);
-        assert!(findings.iter().any(|f| f.pattern_id == "high_entropy" && f.severity == "low"));
+        assert!(findings
+            .iter()
+            .any(|f| f.pattern_id == "high_entropy" && f.severity == "low"));
     }
 
     #[test]
@@ -652,7 +729,10 @@ mod tests {
 
     #[test]
     fn entropy_pass_does_not_double_report_a_regex_covered_token() {
-        let files = [file_with("src/x.ts", &["const key = \"AKIAABCDEFGHIJKLMNOP\";"])];
+        let files = [file_with(
+            "src/x.ts",
+            &["const key = \"AKIAABCDEFGHIJKLMNOP\";"],
+        )];
         let mut config = base_config();
         config.entropy_threshold = 3.0;
         let findings = scan_lines(&files, &config);
@@ -663,7 +743,10 @@ mod tests {
     #[test]
     fn redaction_never_equals_the_raw_planted_value() {
         let secret = "AKIAABCDEFGHIJKLMNOP";
-        let files = [file_with("src/x.ts", &[&format!("const key = \"{}\";", secret)])];
+        let files = [file_with(
+            "src/x.ts",
+            &[&format!("const key = \"{}\";", secret)],
+        )];
         let findings = scan_lines(&files, &base_config());
         for f in &findings {
             assert_ne!(f.redacted_excerpt, secret);
@@ -673,7 +756,10 @@ mod tests {
 
     #[test]
     fn enabled_false_returns_empty() {
-        let files = [file_with("src/x.ts", &["const key = \"AKIAABCDEFGHIJKLMNOP\";"])];
+        let files = [file_with(
+            "src/x.ts",
+            &["const key = \"AKIAABCDEFGHIJKLMNOP\";"],
+        )];
         let mut config = base_config();
         config.enabled = false;
         let findings = scan_lines(&files, &config);
@@ -689,6 +775,59 @@ mod tests {
         let files = [file_with("src/x.ts", &line_refs)];
         let findings = scan_lines(&files, &base_config());
         assert_eq!(findings.len(), 500);
+    }
+
+    // ─── Non-regression: is_ignored precompilation refactor (perf) ──
+
+    /// ~500 added lines across two files, a realistic `entropy_threshold`, and 5 custom
+    /// `.gitwandrc` ignore entries — locks `scan_lines`'s FINDINGS (never timing, which is flaky
+    /// in CI) across the `is_ignored`/`glob_regex` precompilation refactor. Must pass identically
+    /// before and after that refactor.
+    #[test]
+    fn scan_lines_on_a_large_diff_with_custom_ignore_globs_finds_only_the_non_ignored_secrets() {
+        let mut config = base_config();
+        config.entropy_threshold = 4.0;
+        config.ignore = vec![
+            "vendor/**".to_string(),
+            "*.snapshot.ts".to_string(),
+            "fixtures/**".to_string(),
+            "/^IGNOREME_.*$/".to_string(),
+            "build-artifacts/**".to_string(),
+        ];
+
+        // src/app.ts (300 lines): every 10th line plants a real AWS key (30 hits expected),
+        // every 10th-plus-5 line plants a high-entropy token matched by the `/^IGNOREME_.*$/`
+        // ignore literal (must be suppressed), the rest are inert comments.
+        let app_lines: Vec<String> = (0..300)
+            .map(|i| match i % 10 {
+                0 => format!("const key{} = \"AKIAABCDEFGHIJKLMNOP\";", i),
+                5 => format!("IGNOREME_aB3xQ9mK2pL7vN5wR8tY1cB4fH6jD0s{:03}", i),
+                _ => format!("// comment line {}", i),
+            })
+            .collect();
+        let app_refs: Vec<&str> = app_lines.iter().map(|s| s.as_str()).collect();
+
+        // vendor/generated.ts (200 lines): all plant real AWS keys, but the whole path is
+        // ignored wholesale by the custom `vendor/**` glob — none of these must surface.
+        let vendor_lines: Vec<String> = (0..200)
+            .map(|i| format!("const secretKey{} = \"AKIAABCDEFGHIJKLMNOP\";", i))
+            .collect();
+        let vendor_refs: Vec<&str> = vendor_lines.iter().map(|s| s.as_str()).collect();
+
+        let files = [
+            file_with("src/app.ts", &app_refs),
+            file_with("vendor/generated.ts", &vendor_refs),
+        ];
+
+        let findings = scan_lines(&files, &config);
+
+        assert_eq!(
+            findings.len(),
+            30,
+            "expected exactly the 30 planted AWS keys in src/app.ts"
+        );
+        assert!(findings.iter().all(|f| f.file == "src/app.ts"));
+        assert!(findings.iter().all(|f| f.pattern_id == "aws_access_key_id"));
     }
 
     // ─── scan_staged: real temp-repo integration tests (Task 5) ─────
@@ -720,8 +859,10 @@ mod tests {
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap()
                     .as_nanos();
-                let dir = std::env::temp_dir()
-                    .join(format!("gitwand-secrets-test-{}-{}-{}-{}", label, pid, n, nanos));
+                let dir = std::env::temp_dir().join(format!(
+                    "gitwand-secrets-test-{}-{}-{}-{}",
+                    label, pid, n, nanos
+                ));
                 std::fs::create_dir_all(&dir).unwrap();
                 let repo = TempRepo { path: dir };
                 repo.git(&["init", "-q"]);

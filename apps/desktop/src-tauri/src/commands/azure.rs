@@ -33,9 +33,9 @@
 //! arguments — same exposure profile as `github_api.rs` / `bitbucket.rs`. The
 //! token is never logged or returned to the frontend.
 
+use super::curl_util::{bearer_config, curl_with_status, run_curl};
 use crate::git::{git_cmd, hidden_cmd};
 use crate::types::*;
-use super::curl_util::{bearer_config, curl_with_status, run_curl};
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -94,7 +94,11 @@ fn read_secret(account: &str) -> Option<String> {
     let entry = keyring::Entry::new(AZ_SERVICE, account).ok()?;
     let v = entry.get_password().ok()?;
     let v = v.trim().to_string();
-    if v.is_empty() { None } else { Some(v) }
+    if v.is_empty() {
+        None
+    } else {
+        Some(v)
+    }
 }
 
 /// Store a value in the keychain under `AZ_SERVICE` / `account`.
@@ -144,8 +148,7 @@ fn store_tokens(access: &str, refresh: &str) -> Result<(), String> {
 /// after sign-in and Azure DevOps starts returning an HTML sign-in page.
 fn refresh_access_token() -> Result<String, String> {
     let refresh = settings_azure_refresh().ok_or_else(|| {
-        "Azure session expired. Open Settings → Accounts and sign in with Azure again."
-            .to_string()
+        "Azure session expired. Open Settings → Accounts and sign in with Azure again.".to_string()
     })?;
     let cid = client_id();
     // `user_impersonation` rather than `.default`: `.default` requests every
@@ -153,7 +156,10 @@ fn refresh_access_token() -> Result<String, String> {
     // consent. A single delegated scope can be self-consented in standard
     // tenants; fully locked-down tenants (user consent disabled) still need a
     // one-time admin grant via Azure Portal → Enterprise Applications.
-    let scope = format!("{}/user_impersonation offline_access", AZURE_DEVOPS_RESOURCE);
+    let scope = format!(
+        "{}/user_impersonation offline_access",
+        AZURE_DEVOPS_RESOURCE
+    );
     let (_status, text) = curl_form(
         TOKEN_URL,
         &[
@@ -232,8 +238,12 @@ fn azure_repo(cwd: &str) -> Result<AzureRepo, String> {
         return Err("No 'origin' remote found in this repo.".to_string());
     }
     let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    parse_azure_remote(&url)
-        .ok_or_else(|| format!("Could not parse an Azure DevOps repo from remote URL: {}", url))
+    parse_azure_remote(&url).ok_or_else(|| {
+        format!(
+            "Could not parse an Azure DevOps repo from remote URL: {}",
+            url
+        )
+    })
 }
 
 fn parse_azure_remote(url: &str) -> Option<AzureRepo> {
@@ -252,7 +262,7 @@ fn parse_azure_remote(url: &str) -> Option<AzureRepo> {
     }
 
     // HTTPS — strip scheme + any `user@` userinfo.
-    let after_scheme = url.splitn(2, "://").nth(1).unwrap_or(url);
+    let after_scheme = url.split_once("://").map(|x| x.1).unwrap_or(url);
     let after_userinfo = after_scheme.splitn(2, '@').last().unwrap_or(after_scheme);
     let (host, path) = after_userinfo.split_once('/')?;
     let path = path.trim_end_matches('/').trim_end_matches(".git");
@@ -347,7 +357,10 @@ fn form_config(fields: &[(&str, &str)]) -> Result<String, String> {
     let mut cfg = String::new();
     for (k, v) in fields {
         if v.contains('"') || v.contains('\n') || v.contains('\r') {
-            return Err(format!("Refusing to build curl config: field '{}' contains a quote or newline", k));
+            return Err(format!(
+                "Refusing to build curl config: field '{}' contains a quote or newline",
+                k
+            ));
         }
         cfg.push_str(&format!("data-urlencode = \"{}={}\"\n", k, v));
     }
@@ -362,7 +375,8 @@ fn curl_raw(
     body_json: Option<&str>,
 ) -> Result<(i32, String), String> {
     curl_with_status(
-        method, url,
+        method,
+        url,
         token.map(bearer_config).as_deref(),
         body_json,
         &["User-Agent: GitWand"],
@@ -376,13 +390,17 @@ fn curl_form(url: &str, fields: &[(&str, &str)]) -> Result<(i32, String), String
     const MARKER: &str = "\n__GW_HTTP_STATUS__";
     let mut args: Vec<String> = vec![
         "-s".to_string(),
-        "-X".to_string(), "POST".to_string(),
-        "-H".to_string(), "Accept: application/json".to_string(),
-        "-H".to_string(), "User-Agent: GitWand".to_string(),
+        "-X".to_string(),
+        "POST".to_string(),
+        "-H".to_string(),
+        "Accept: application/json".to_string(),
+        "-H".to_string(),
+        "User-Agent: GitWand".to_string(),
         // Form fields (which include the refresh_token / device_code secrets)
         // are fed through `--config -` on stdin rather than `--data-urlencode`
         // argv entries, keeping them out of process listings.
-        "--config".to_string(), "-".to_string(),
+        "--config".to_string(),
+        "-".to_string(),
     ];
     args.push("-w".to_string());
     args.push(format!("{}%{{http_code}}", MARKER));
@@ -432,11 +450,7 @@ fn finalize_json(status: i32, body: &str) -> Result<serde_json::Value, String> {
 /// Resolves the access token from the keychain; on an auth failure it refreshes
 /// the token once (via the stored refresh token) and retries. A persistent
 /// failure surfaces a clear "sign in again" error rather than a JSON parse error.
-fn az_json(
-    method: &str,
-    url: &str,
-    body_json: Option<&str>,
-) -> Result<serde_json::Value, String> {
+fn az_json(method: &str, url: &str, body_json: Option<&str>) -> Result<serde_json::Value, String> {
     let token = settings_azure_token().ok_or_else(|| {
         "Not signed in to Azure DevOps. Open Settings → Accounts and sign in with Azure."
             .to_string()
@@ -466,7 +480,10 @@ fn with_api_version(url: &str) -> String {
 // ─── JSON field helpers ─────────────────────────────────────────────────────
 
 fn js(v: &serde_json::Value, key: &str) -> String {
-    v.get(key).and_then(|x| x.as_str()).unwrap_or("").to_string()
+    v.get(key)
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string()
 }
 
 fn ji(v: &serde_json::Value, key: &str) -> i64 {
@@ -478,7 +495,11 @@ fn jb(v: &serde_json::Value, key: &str) -> bool {
 }
 
 fn jnested(v: &serde_json::Value, outer: &str, inner: &str) -> String {
-    v.get(outer).and_then(|o| o.get(inner)).and_then(|s| s.as_str()).unwrap_or("").to_string()
+    v.get(outer)
+        .and_then(|o| o.get(inner))
+        .and_then(|s| s.as_str())
+        .unwrap_or("")
+        .to_string()
 }
 
 /// Strip the `refs/heads/` prefix from an Azure ref name.
@@ -499,7 +520,10 @@ fn map_status(status: &str) -> String {
 fn pr_web_url(r: &AzureRepo, id: i64) -> String {
     format!(
         "https://dev.azure.com/{}/{}/_git/{}/pullrequest/{}",
-        urlenc(&r.org), urlenc(&r.project), urlenc(&r.repo), id
+        urlenc(&r.org),
+        urlenc(&r.project),
+        urlenc(&r.repo),
+        id
     )
 }
 
@@ -550,7 +574,11 @@ fn json_to_pr(r: &AzureRepo, pr: &serde_json::Value) -> PullRequest {
 fn json_to_detail(r: &AzureRepo, pr: &serde_json::Value) -> PullRequestDetail {
     let id = ji(pr, "pullRequestId");
     let status = js(pr, "status");
-    let merged_at = if status == "completed" { js(pr, "closedDate") } else { String::new() };
+    let merged_at = if status == "completed" {
+        js(pr, "closedDate")
+    } else {
+        String::new()
+    };
     // Azure `mergeStatus`: succeeded / conflicts / queued / …
     let mergeable = match js(pr, "mergeStatus").as_str() {
         "succeeded" => "MERGEABLE".to_string(),
@@ -579,7 +607,12 @@ fn json_to_detail(r: &AzureRepo, pr: &serde_json::Value) -> PullRequestDetail {
         reviewers: pr
             .get("reviewers")
             .and_then(|a| a.as_array())
-            .map(|arr| arr.iter().map(|u| js(u, "displayName")).filter(|s| !s.is_empty()).collect())
+            .map(|arr| {
+                arr.iter()
+                    .map(|u| js(u, "displayName"))
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            })
             .unwrap_or_default(),
         mergeable,
         checks_status: String::new(),
@@ -596,7 +629,11 @@ fn rest_current_user() -> Result<String, String> {
     let url = with_api_version("https://app.vssps.visualstudio.com/_apis/profile/profiles/me");
     let v = az_json("GET", &url, None)?;
     let name = js(&v, "displayName");
-    let name = if name.is_empty() { js(&v, "emailAddress") } else { name };
+    let name = if name.is_empty() {
+        js(&v, "emailAddress")
+    } else {
+        name
+    };
     if name.is_empty() {
         return Err("Azure DevOps returned an empty profile for this token.".to_string());
     }
@@ -610,7 +647,11 @@ fn rest_current_user_with(token: &str) -> Result<String, String> {
     let (status, body) = curl_raw("GET", &url, Some(token), None)?;
     let v = finalize_json(status, &body)?;
     let name = js(&v, "displayName");
-    let name = if name.is_empty() { js(&v, "emailAddress") } else { name };
+    let name = if name.is_empty() {
+        js(&v, "emailAddress")
+    } else {
+        name
+    };
     Ok(name)
 }
 
@@ -623,12 +664,19 @@ fn search_status(state: &str) -> &'static str {
     }
 }
 
-fn rest_list_prs(cwd: &str, state: &str, limit: i64, offset: i64) -> Result<Vec<PullRequest>, String> {
+fn rest_list_prs(
+    cwd: &str,
+    state: &str,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<PullRequest>, String> {
     let r = azure_repo(cwd)?;
     let top = (limit + offset).clamp(1, 100);
     let url = with_api_version(&format!(
         "{}/pullrequests?searchCriteria.status={}&$top={}",
-        r.api_base(), search_status(state), top
+        r.api_base(),
+        search_status(state),
+        top
     ));
     let v = az_json("GET", &url, None)?;
     let mut prs: Vec<PullRequest> = v
@@ -654,7 +702,10 @@ fn rest_list_prs(cwd: &str, state: &str, limit: i64, offset: i64) -> Result<Vec<
             // view of the same repo. Held only for the fetch; the read-only
             // `diff_numstat` calls below don't touch the index.
             let _repo = crate::git::repo_lock::write(cwd);
-            let _ = git_cmd().args(["fetch", "origin"]).current_dir(cwd).output();
+            let _ = git_cmd()
+                .args(["fetch", "origin"])
+                .current_dir(cwd)
+                .output();
         }
         prs.par_iter_mut().for_each(|pr| {
             let (_, adds, dels) = diff_numstat(cwd, &pr.branch, &pr.base);
@@ -668,7 +719,11 @@ fn rest_list_prs(cwd: &str, state: &str, limit: i64, offset: i64) -> Result<Vec<
             .par_iter()
             .filter_map(|pr| {
                 let rollup = rollup_from_checks(&rest_pr_checks(cwd, pr.number).ok()?);
-                if rollup.is_empty() { None } else { Some((pr.number, rollup)) }
+                if rollup.is_empty() {
+                    None
+                } else {
+                    Some((pr.number, rollup))
+                }
             })
             .collect();
         for pr in &mut prs {
@@ -684,11 +739,15 @@ fn rest_pr_count(cwd: &str, state: &str) -> Result<i64, String> {
     let r = azure_repo(cwd)?;
     let url = with_api_version(&format!(
         "{}/pullrequests?searchCriteria.status={}&$top=1000",
-        r.api_base(), search_status(state)
+        r.api_base(),
+        search_status(state)
     ));
     let v = az_json("GET", &url, None)?;
     Ok(v.get("count").and_then(|c| c.as_i64()).unwrap_or_else(|| {
-        v.get("value").and_then(|a| a.as_array()).map(|a| a.len() as i64).unwrap_or(0)
+        v.get("value")
+            .and_then(|a| a.as_array())
+            .map(|a| a.len() as i64)
+            .unwrap_or(0)
     }))
 }
 
@@ -762,7 +821,9 @@ fn fetch_pr_branches(cwd: &str, source: &str, target: &str) -> Result<(), String
     if !out.status.success() {
         return Err(format!(
             "git fetch {}/{} failed: {}",
-            source, target, String::from_utf8_lossy(&out.stderr).trim()
+            source,
+            target,
+            String::from_utf8_lossy(&out.stderr).trim()
         ));
     }
     Ok(())
@@ -780,7 +841,10 @@ fn rest_pr_diff(cwd: &str, number: i64) -> Result<String, String> {
         .output()
         .map_err(|e| format!("git diff failed: {}", e))?;
     if !out.status.success() {
-        return Err(format!("git diff failed: {}", String::from_utf8_lossy(&out.stderr).trim()));
+        return Err(format!(
+            "git diff failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
     }
     Ok(String::from_utf8_lossy(&out.stdout).to_string())
 }
@@ -875,16 +939,33 @@ fn azure_team_members(cwd: &str) -> Result<Vec<AzureMember>, String> {
             } else {
                 continue;
             };
-            let dedup_key = if id.is_empty() { login.to_lowercase() } else { id.clone() };
+            let dedup_key = if id.is_empty() {
+                login.to_lowercase()
+            } else {
+                id.clone()
+            };
             if !seen.insert(dedup_key) {
                 continue;
             }
-            let name = if display.is_empty() { None } else { Some(display) };
+            let name = if display.is_empty() {
+                None
+            } else {
+                Some(display)
+            };
             let avatar_url = {
                 let u = js(ident, "imageUrl");
-                if u.is_empty() { None } else { Some(u) }
+                if u.is_empty() {
+                    None
+                } else {
+                    Some(u)
+                }
             };
-            all.push(AzureMember { login, name, avatar_url, id });
+            all.push(AzureMember {
+                login,
+                name,
+                avatar_url,
+                id,
+            });
         }
     }
     Ok(all)
@@ -907,10 +988,14 @@ fn rest_branches(cwd: &str) -> Result<Vec<String>, String> {
         .iter()
         .filter_map(|item| {
             let full = js(item, "name");
-            if full.is_empty() { None } else { Some(short_ref(&full)) }
+            if full.is_empty() {
+                None
+            } else {
+                Some(short_ref(&full))
+            }
         })
         .collect();
-    names.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+    names.sort_by_key(|a| a.to_lowercase());
     names.dedup();
     Ok(names)
 }
@@ -919,9 +1004,13 @@ fn rest_branches(cwd: &str) -> Result<Vec<String>, String> {
 fn rest_reviewer_candidates(cwd: &str) -> Result<Vec<ReviewerCandidate>, String> {
     let mut all: Vec<ReviewerCandidate> = azure_team_members(cwd)?
         .into_iter()
-        .map(|m| ReviewerCandidate { login: m.login, name: m.name, avatar_url: m.avatar_url })
+        .map(|m| ReviewerCandidate {
+            login: m.login,
+            name: m.name,
+            avatar_url: m.avatar_url,
+        })
         .collect();
-    all.sort_by(|a, b| a.login.to_lowercase().cmp(&b.login.to_lowercase()));
+    all.sort_by_key(|a| a.login.to_lowercase());
     Ok(all)
 }
 
@@ -940,9 +1029,13 @@ fn resolve_reviewer_ids(cwd: &str, reviewers: &[String]) -> Vec<String> {
         if m.id.is_empty() {
             continue;
         }
-        by_key.entry(m.login.to_lowercase()).or_insert_with(|| m.id.clone());
+        by_key
+            .entry(m.login.to_lowercase())
+            .or_insert_with(|| m.id.clone());
         if let Some(name) = &m.name {
-            by_key.entry(name.to_lowercase()).or_insert_with(|| m.id.clone());
+            by_key
+                .entry(name.to_lowercase())
+                .or_insert_with(|| m.id.clone());
         }
     }
     let mut ids: Vec<String> = Vec::new();
@@ -971,7 +1064,11 @@ fn rest_create_pr(
 ) -> Result<PullRequest, String> {
     let r = azure_repo(cwd)?;
     let head_branch = current_branch(cwd)?;
-    let base = if base.is_empty() { "main".to_string() } else { base };
+    let base = if base.is_empty() {
+        "main".to_string()
+    } else {
+        base
+    };
     let mut payload = serde_json::json!({
         "sourceRefName": format!("refs/heads/{}", head_branch),
         "targetRefName": format!("refs/heads/{}", base),
@@ -985,7 +1082,9 @@ fn rest_create_pr(
     let ids = resolve_reviewer_ids(cwd, &reviewers);
     if !ids.is_empty() {
         payload["reviewers"] = serde_json::Value::Array(
-            ids.into_iter().map(|id| serde_json::json!({ "id": id })).collect(),
+            ids.into_iter()
+                .map(|id| serde_json::json!({ "id": id }))
+                .collect(),
         );
     }
     let url = with_api_version(&format!("{}/pullrequests", r.api_base()));
@@ -1043,7 +1142,8 @@ fn rest_checkout_pr(cwd: &str, number: i64) -> Result<(), String> {
     if !fetch.status.success() {
         return Err(format!(
             "git fetch {} failed: {}",
-            source, String::from_utf8_lossy(&fetch.stderr).trim()
+            source,
+            String::from_utf8_lossy(&fetch.stderr).trim()
         ));
     }
     let checkout = git_cmd()
@@ -1054,7 +1154,8 @@ fn rest_checkout_pr(cwd: &str, number: i64) -> Result<(), String> {
     if !checkout.status.success() {
         return Err(format!(
             "git checkout {} failed: {}",
-            source, String::from_utf8_lossy(&checkout.stderr).trim()
+            source,
+            String::from_utf8_lossy(&checkout.stderr).trim()
         ));
     }
     Ok(())
@@ -1075,7 +1176,10 @@ const COMMENT_ID_STRIDE: i64 = 1_000_000;
 fn threads_to_comments(threads: &serde_json::Value) -> Vec<serde_json::Value> {
     let mut out = Vec::new();
     let empty: Vec<serde_json::Value> = vec![];
-    let threads_arr = threads.get("value").and_then(|a| a.as_array()).unwrap_or(&empty);
+    let threads_arr = threads
+        .get("value")
+        .and_then(|a| a.as_array())
+        .unwrap_or(&empty);
     for thread in threads_arr {
         let thread_id = ji(thread, "id");
         let ctx = thread.get("threadContext");
@@ -1090,7 +1194,11 @@ fn threads_to_comments(threads: &serde_json::Value) -> Vec<serde_json::Value> {
             .and_then(|p| p.get("line"))
             .and_then(|l| l.as_i64());
 
-        let comments = thread.get("comments").and_then(|a| a.as_array()).cloned().unwrap_or_default();
+        let comments = thread
+            .get("comments")
+            .and_then(|a| a.as_array())
+            .cloned()
+            .unwrap_or_default();
         for c in &comments {
             // Skip system-generated entries (status changes, votes, etc.).
             if js(c, "commentType") == "system" {
@@ -1181,7 +1289,11 @@ fn map_policy_status(status: &str) -> (&'static str, &'static str) {
 /// completed — possibly failed — so the build result is the source of truth.
 /// Best-effort: returns `None` on any error so the caller keeps the policy
 /// status. A still-running build maps to pending (yellow).
-fn azure_build_outcome(org: &str, project: &str, build_id: i64) -> Option<(&'static str, &'static str)> {
+fn azure_build_outcome(
+    org: &str,
+    project: &str,
+    build_id: i64,
+) -> Option<(&'static str, &'static str)> {
     let url = format!(
         "https://dev.azure.com/{}/{}/_apis/build/builds/{}?api-version=7.1",
         urlenc(org),
@@ -1223,7 +1335,8 @@ fn dedupe_checks(checks: Vec<(String, CICheck)>) -> Vec<CICheck> {
     let mut best: HashMap<String, CICheck> = HashMap::new();
     for (key, c) in checks {
         match best.get(&key) {
-            Some(existing) if conclusion_rank(&existing.conclusion) >= conclusion_rank(&c.conclusion) => {}
+            Some(existing)
+                if conclusion_rank(&existing.conclusion) >= conclusion_rank(&c.conclusion) => {}
             _ => {
                 if !best.contains_key(&key) {
                     order.push(key.clone());
@@ -1254,7 +1367,11 @@ fn rollup_from_checks(checks: &[CICheck]) -> String {
             pending = true;
         }
     }
-    if pending { "PENDING".to_string() } else { "SUCCESS".to_string() }
+    if pending {
+        "PENDING".to_string()
+    } else {
+        "SUCCESS".to_string()
+    }
 }
 
 fn rest_pr_checks(cwd: &str, number: i64) -> Result<Vec<CICheck>, String> {
@@ -1283,7 +1400,11 @@ fn rest_pr_checks(cwd: &str, number: i64) -> Result<Vec<CICheck>, String> {
         Ok(v) => v,
         Err(_) => return Ok(Vec::new()),
     };
-    let evals = v.get("value").and_then(|a| a.as_array()).cloned().unwrap_or_default();
+    let evals = v
+        .get("value")
+        .and_then(|a| a.as_array())
+        .cloned()
+        .unwrap_or_default();
     let checks: Vec<(String, CICheck)> = evals
         .iter()
         .filter_map(|e| {
@@ -1311,7 +1432,11 @@ fn rest_pr_checks(cwd: &str, number: i64) -> Result<Vec<CICheck>, String> {
                     .and_then(|c| c.as_i64())
                     .unwrap_or(0);
                 if n > 0 {
-                    format!("At least {} reviewer{} must approve", n, if n > 1 { "s" } else { "" })
+                    format!(
+                        "At least {} reviewer{} must approve",
+                        n,
+                        if n > 1 { "s" } else { "" }
+                    )
                 } else {
                     display
                 }
@@ -1426,7 +1551,7 @@ fn pending_reviewer_check(pr: &serde_json::Value) -> Option<CICheck> {
 fn map_vote(vote: i64) -> Option<&'static str> {
     match vote {
         v if v >= 5 => Some("APPROVED"),
-        -5 => Some("CHANGES_REQUESTED"), // waiting for author
+        -5 => Some("CHANGES_REQUESTED"),  // waiting for author
         -10 => Some("CHANGES_REQUESTED"), // rejected
         _ => None,                        // 0 — no vote yet
     }
@@ -1454,7 +1579,12 @@ fn current_user_id(org: &str) -> Result<String, String> {
 /// `event` maps onto a vote: APPROVE → 10, REQUEST_CHANGES → -10. COMMENT casts
 /// no vote. Any `body` is posted as a general comment first, so a "Comment"
 /// review still leaves a visible note.
-fn rest_submit_review(cwd: &str, number: i64, event: &str, body: &str) -> Result<serde_json::Value, String> {
+fn rest_submit_review(
+    cwd: &str,
+    number: i64,
+    event: &str,
+    body: &str,
+) -> Result<serde_json::Value, String> {
     let r = azure_repo(cwd)?;
     if !body.trim().is_empty() {
         // Best-effort — never fail the vote because the note failed to post.
@@ -1477,7 +1607,9 @@ fn rest_submit_review(cwd: &str, number: i64, event: &str, body: &str) -> Result
         let payload = serde_json::json!({ "vote": vote });
         let url = with_api_version(&format!(
             "{}/pullrequests/{}/reviewers/{}",
-            r.api_base(), number, urlenc(&uid)
+            r.api_base(),
+            number,
+            urlenc(&uid)
         ));
         az_json("PUT", &url, Some(&payload.to_string()))?;
     }
@@ -1493,10 +1625,16 @@ fn rest_submit_review(cwd: &str, number: i64, event: &str, body: &str) -> Result
 
 fn rest_pr_reviews(cwd: &str, number: i64) -> Result<Vec<serde_json::Value>, String> {
     let (_r, pr) = get_pr_json(cwd, number)?;
-    let reviewers = pr.get("reviewers").and_then(|a| a.as_array()).cloned().unwrap_or_default();
+    let reviewers = pr
+        .get("reviewers")
+        .and_then(|a| a.as_array())
+        .cloned()
+        .unwrap_or_default();
     let mut out = Vec::new();
     for (i, rev) in reviewers.iter().enumerate() {
-        let Some(state) = map_vote(ji(rev, "vote")) else { continue };
+        let Some(state) = map_vote(ji(rev, "vote")) else {
+            continue;
+        };
         out.push(serde_json::json!({
             "id": i as i64 + 1,
             "state": state,
@@ -1527,7 +1665,12 @@ pub(crate) async fn az_current_user() -> Result<String, String> {
 }
 
 #[tauri::command]
-pub(crate) async fn az_list_prs(cwd: String, state: String, limit: i64, offset: i64) -> Result<Vec<PullRequest>, String> {
+pub(crate) async fn az_list_prs(
+    cwd: String,
+    state: String,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<PullRequest>, String> {
     tauri::async_runtime::spawn_blocking(move || rest_list_prs(&cwd, &state, limit, offset))
         .await
         .map_err(|e| e.to_string())?
@@ -1599,7 +1742,11 @@ pub(crate) async fn az_create_pr(
 }
 
 #[tauri::command]
-pub(crate) async fn az_merge_pr(cwd: String, number: i64, method: Option<String>) -> Result<(), String> {
+pub(crate) async fn az_merge_pr(
+    cwd: String,
+    number: i64,
+    method: Option<String>,
+) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         rest_merge_pr(&cwd, number, &method.unwrap_or_else(|| "merge".to_string()))
     })
@@ -1622,14 +1769,21 @@ pub(crate) async fn az_checkout_pr(cwd: String, number: i64) -> Result<(), Strin
 }
 
 #[tauri::command]
-pub(crate) async fn az_pr_comments(cwd: String, number: i64) -> Result<Vec<serde_json::Value>, String> {
+pub(crate) async fn az_pr_comments(
+    cwd: String,
+    number: i64,
+) -> Result<Vec<serde_json::Value>, String> {
     tauri::async_runtime::spawn_blocking(move || rest_pr_comments(&cwd, number))
         .await
         .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub(crate) async fn az_pr_create_comment(cwd: String, number: i64, body: String) -> Result<serde_json::Value, String> {
+pub(crate) async fn az_pr_create_comment(
+    cwd: String,
+    number: i64,
+    body: String,
+) -> Result<serde_json::Value, String> {
     tauri::async_runtime::spawn_blocking(move || rest_pr_create_comment(&cwd, number, &body))
         .await
         .map_err(|e| e.to_string())?
@@ -1643,7 +1797,10 @@ pub(crate) async fn az_pr_checks(cwd: String, number: i64) -> Result<Vec<CICheck
 }
 
 #[tauri::command]
-pub(crate) async fn az_pr_reviews(cwd: String, number: i64) -> Result<Vec<serde_json::Value>, String> {
+pub(crate) async fn az_pr_reviews(
+    cwd: String,
+    number: i64,
+) -> Result<Vec<serde_json::Value>, String> {
     tauri::async_runtime::spawn_blocking(move || rest_pr_reviews(&cwd, number))
         .await
         .map_err(|e| e.to_string())?
@@ -1682,26 +1839,41 @@ fn likes_url(cwd: &str, pr_number: i64, composite_id: i64) -> Result<String, Str
     let comment_id = composite_id % COMMENT_ID_STRIDE;
     Ok(with_api_version(&format!(
         "{}/pullrequests/{}/threads/{}/comments/{}/likes",
-        r.api_base(), pr_number, thread_id, comment_id
+        r.api_base(),
+        pr_number,
+        thread_id,
+        comment_id
     )))
 }
 
-fn rest_list_likes(cwd: &str, pr_number: i64, composite_id: i64) -> Result<Vec<serde_json::Value>, String> {
+fn rest_list_likes(
+    cwd: &str,
+    pr_number: i64,
+    composite_id: i64,
+) -> Result<Vec<serde_json::Value>, String> {
     let url = likes_url(cwd, pr_number, composite_id)?;
     let v = az_json("GET", &url, None)?;
     let empty = vec![];
     let arr = v.as_array().unwrap_or(&empty);
-    let result = arr.iter().enumerate().map(|(i, user)| {
-        serde_json::json!({
-            "id": i as i64,
-            "content": "+1",
-            "user": js(user, "displayName"),
+    let result = arr
+        .iter()
+        .enumerate()
+        .map(|(i, user)| {
+            serde_json::json!({
+                "id": i as i64,
+                "content": "+1",
+                "user": js(user, "displayName"),
+            })
         })
-    }).collect();
+        .collect();
     Ok(result)
 }
 
-fn rest_add_like(cwd: &str, pr_number: i64, composite_id: i64) -> Result<serde_json::Value, String> {
+fn rest_add_like(
+    cwd: &str,
+    pr_number: i64,
+    composite_id: i64,
+) -> Result<serde_json::Value, String> {
     let url = likes_url(cwd, pr_number, composite_id)?;
     az_json("POST", &url, Some("{}"))?;
     let current_user = rest_current_user()?;
@@ -1715,21 +1887,33 @@ fn rest_delete_like(cwd: &str, pr_number: i64, composite_id: i64) -> Result<(), 
 }
 
 #[tauri::command]
-pub(crate) async fn az_list_likes(cwd: String, pr_number: i64, composite_id: i64) -> Result<Vec<serde_json::Value>, String> {
+pub(crate) async fn az_list_likes(
+    cwd: String,
+    pr_number: i64,
+    composite_id: i64,
+) -> Result<Vec<serde_json::Value>, String> {
     tauri::async_runtime::spawn_blocking(move || rest_list_likes(&cwd, pr_number, composite_id))
         .await
         .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub(crate) async fn az_add_like(cwd: String, pr_number: i64, composite_id: i64) -> Result<serde_json::Value, String> {
+pub(crate) async fn az_add_like(
+    cwd: String,
+    pr_number: i64,
+    composite_id: i64,
+) -> Result<serde_json::Value, String> {
     tauri::async_runtime::spawn_blocking(move || rest_add_like(&cwd, pr_number, composite_id))
         .await
         .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub(crate) async fn az_delete_like(cwd: String, pr_number: i64, composite_id: i64) -> Result<(), String> {
+pub(crate) async fn az_delete_like(
+    cwd: String,
+    pr_number: i64,
+    composite_id: i64,
+) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || rest_delete_like(&cwd, pr_number, composite_id))
         .await
         .map_err(|e| e.to_string())?
@@ -1746,12 +1930,19 @@ pub(crate) async fn azure_device_start() -> Result<GithubDeviceCode, String> {
     // consent. A single delegated scope can be self-consented in standard
     // tenants; fully locked-down tenants (user consent disabled) still need a
     // one-time admin grant via Azure Portal → Enterprise Applications.
-    let scope = format!("{}/user_impersonation offline_access", AZURE_DEVOPS_RESOURCE);
+    let scope = format!(
+        "{}/user_impersonation offline_access",
+        AZURE_DEVOPS_RESOURCE
+    );
     let (status, text) = curl_form(DEVICECODE_URL, &[("client_id", &cid), ("scope", &scope)])?;
     if status >= 400 {
         let msg = serde_json::from_str::<serde_json::Value>(text.trim())
             .ok()
-            .and_then(|v| v.get("error_description").and_then(|m| m.as_str()).map(String::from))
+            .and_then(|v| {
+                v.get("error_description")
+                    .and_then(|m| m.as_str())
+                    .map(String::from)
+            })
             .unwrap_or_else(|| format!("HTTP {}", status));
         return Err(format!("Azure device-code request failed: {}", msg));
     }
@@ -1795,7 +1986,11 @@ pub(crate) async fn azure_device_poll(device_code: String) -> Result<GithubDevic
             status: kind.to_string(),
             login: String::new(),
             error: if kind == "error" {
-                if detail.is_empty() { err.to_string() } else { detail }
+                if detail.is_empty() {
+                    err.to_string()
+                } else {
+                    detail
+                }
             } else {
                 String::new()
             },
@@ -1912,8 +2107,14 @@ mod tests {
 
     #[test]
     fn with_api_version_picks_right_separator() {
-        assert_eq!(with_api_version("https://x/y"), "https://x/y?api-version=7.1");
-        assert_eq!(with_api_version("https://x/y?a=1"), "https://x/y?a=1&api-version=7.1");
+        assert_eq!(
+            with_api_version("https://x/y"),
+            "https://x/y?api-version=7.1"
+        );
+        assert_eq!(
+            with_api_version("https://x/y?a=1"),
+            "https://x/y?a=1&api-version=7.1"
+        );
     }
 
     #[test]

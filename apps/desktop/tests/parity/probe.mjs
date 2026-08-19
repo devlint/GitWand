@@ -7,7 +7,8 @@
  * Par défaut on cherche le binaire à
  * `src-tauri/target/debug/examples/parity-probe`, relatif à ce fichier.
  * L'env var `PARITY_PROBE` permet de surcharger le chemin (utile pour pointer
- * sur `target/release/examples/...` ou un binaire pré-build en CI).
+ * sur `target/ci/examples/...` — le profil léger utilisé par `perf.yml` — ou
+ * un binaire pré-build en CI).
  *
  * Le probe lit son JSON d'entrée sur stdin et écrit le résultat sur stdout.
  * On parse stdout en JSON — s'il contient une clé `error`, c'est que la

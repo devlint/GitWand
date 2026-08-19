@@ -13,7 +13,12 @@
 
 import { ref, computed } from "vue";
 import { previewMerge, previewRebase, previewCherryPick } from "../utils/backend.js";
-import { resolve } from "@gitwand/core";
+// `resolve` is loaded lazily via `engine()` — this composable sits on an
+// eager path (AppHeader → BranchSelector → useMergePreview, always mounted),
+// so a static import here would put the ~244 KB raw / ~73 KB gzip resolution
+// engine back in the boot chunk even after useGitWand.ts stopped doing so.
+// See ../utils/coreEngine.ts.
+import { engine } from "../utils/coreEngine.js";
 
 // ─── Opérations prédictibles (v2.20.0) ───────────────────
 //
@@ -100,6 +105,7 @@ export function useMergePreview(cwd: () => string) {
             ? await previewCherryPick(cwd(), ref_)
             : await previewMerge(cwd(), ref_);
 
+      const { resolve } = await engine();
       const files: PreviewFileResult[] = [];
 
       for (const raw of rawFiles) {

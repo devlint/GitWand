@@ -152,6 +152,13 @@ pub(crate) fn init_login_shell_env() {
     }
 }
 
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn init_login_shell_env() {
+    // Linux/Windows: launchers (Gnome/KDE session manager, explorer.exe,
+    // the systemd user instance, etc.) typically already provide the full
+    // user env. No preload needed.
+}
+
 /// Spawn `$SHELL -l -c "gh auth token"` and propagate the result as `GH_TOKEN`.
 /// Bounded by a 3s timeout. Silent on any failure path.
 #[cfg(target_os = "macos")]
@@ -190,7 +197,10 @@ fn extract_gh_token(shell: &str) {
     }
 
     std::env::set_var("GH_TOKEN", &token);
-    eprintln!("[gitwand] GH_TOKEN preloaded from login shell (length={})", token.len());
+    eprintln!(
+        "[gitwand] GH_TOKEN preloaded from login shell (length={})",
+        token.len()
+    );
 }
 
 /// Spawn `$SHELL -l -c "glab auth status --show-token"` and propagate the
@@ -233,7 +243,10 @@ fn extract_glab_token(shell: &str) {
     };
 
     std::env::set_var("GITLAB_TOKEN", &token);
-    eprintln!("[gitwand] GITLAB_TOKEN preloaded from login shell (length={})", token.len());
+    eprintln!(
+        "[gitwand] GITLAB_TOKEN preloaded from login shell (length={})",
+        token.len()
+    );
 }
 
 /// Extract the token value from `glab auth status --show-token` output.
@@ -244,6 +257,12 @@ fn extract_glab_token(shell: &str) {
 /// the first one wins (current-context host is reported first). ANSI color
 /// codes are stripped first since glab colors this output even when it
 /// detects a non-tty stdout in some versions.
+///
+/// Only called from the macOS-only `extract_glab_token` above, so this (and
+/// `strip_ansi_codes` below) would be dead code on other platforms outside
+/// `#[cfg(test)]` — gated accordingly rather than `#[allow(dead_code)]`,
+/// since `glab_token_tests` below still needs it to compile on every OS.
+#[cfg(any(test, target_os = "macos"))]
 fn parse_glab_token(status_output: &str) -> Option<String> {
     for line in status_output.lines() {
         let stripped = strip_ansi_codes(line);
@@ -261,6 +280,7 @@ fn parse_glab_token(status_output: &str) -> Option<String> {
 /// Strip ANSI CSI escape sequences (`\x1b[...<final byte>`) from a line.
 /// Minimal hand-rolled version — avoids pulling in an ansi-stripping crate
 /// for a startup-only, non-hot-path parse of a few lines of CLI output.
+#[cfg(any(test, target_os = "macos"))]
 fn strip_ansi_codes(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut chars = s.chars().peekable();
@@ -286,19 +306,28 @@ mod glab_token_tests {
     #[test]
     fn extracts_token_from_a_status_line() {
         let output = "gitlab.com\n  ✓ Logged in to gitlab.com as alice (keyring)\n  ✓ Token: glpat-abcdefghijklmnopqrst\n";
-        assert_eq!(parse_glab_token(output), Some("glpat-abcdefghijklmnopqrst".to_string()));
+        assert_eq!(
+            parse_glab_token(output),
+            Some("glpat-abcdefghijklmnopqrst".to_string())
+        );
     }
 
     #[test]
     fn strips_ansi_color_codes_around_the_token() {
         let output = "\u{1b}[32m✓\u{1b}[0m Token: \u{1b}[33mglpat-zzzzzzzzzzzzzzzzzzzz\u{1b}[0m\n";
-        assert_eq!(parse_glab_token(output), Some("glpat-zzzzzzzzzzzzzzzzzzzz".to_string()));
+        assert_eq!(
+            parse_glab_token(output),
+            Some("glpat-zzzzzzzzzzzzzzzzzzzz".to_string())
+        );
     }
 
     #[test]
     fn takes_the_first_token_line_when_multiple_hosts_are_configured() {
         let output = "gitlab.com\n  ✓ Token: glpat-firsthost0000000000\n\nself-hosted.example.com\n  ✓ Token: glpat-secondhost000000000\n";
-        assert_eq!(parse_glab_token(output), Some("glpat-firsthost0000000000".to_string()));
+        assert_eq!(
+            parse_glab_token(output),
+            Some("glpat-firsthost0000000000".to_string())
+        );
     }
 
     #[test]
@@ -317,11 +346,4 @@ mod glab_token_tests {
         let output = "  ✓ Token: \n";
         assert_eq!(parse_glab_token(output), None);
     }
-}
-
-#[cfg(not(target_os = "macos"))]
-pub(crate) fn init_login_shell_env() {
-    // Linux/Windows: launchers (Gnome/KDE session manager, explorer.exe,
-    // the systemd user instance, etc.) typically already provide the full
-    // user env. No preload needed.
 }

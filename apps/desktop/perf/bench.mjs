@@ -18,7 +18,7 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "../../..");
 const PROBE = process.env.PARITY_PROBE
-  || resolve(REPO_ROOT, "apps/desktop/src-tauri/target/release/examples/parity-probe");
+  || resolve(REPO_ROOT, "apps/desktop/src-tauri/target/ci/examples/parity-probe");
 
 const SAMPLES = 50;
 const WARMUP = 5;
@@ -26,7 +26,7 @@ const REGRESSION_THRESHOLD = 0.15; // 15%
 
 if (!existsSync(PROBE)) {
   console.error(`Probe binary not found: ${PROBE}`);
-  console.error("Build it first: cd apps/desktop && cargo build --example parity-probe --release");
+  console.error("Build it first: cd apps/desktop/src-tauri && cargo build --example parity-probe --profile ci");
   process.exit(2);
 }
 

@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * PrInlineDiff.vue — flat row model + virtualization (Task A2, v3.6.0).
  *

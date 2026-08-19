@@ -106,7 +106,10 @@ mod tests {
     fn same_cwd_shares_one_lock() {
         let a = lock_for("/tmp/repo-a");
         let b = lock_for("/tmp/repo-a");
-        assert!(Arc::ptr_eq(&a, &b), "same cwd must resolve to the same lock");
+        assert!(
+            Arc::ptr_eq(&a, &b),
+            "same cwd must resolve to the same lock"
+        );
     }
 
     #[test]
@@ -167,6 +170,9 @@ mod tests {
     fn nonexistent_path_falls_back_to_raw_string_without_panic() {
         let a = lock_for("/gitwand-repolock-does-not-exist-1");
         let b = lock_for("/gitwand-repolock-does-not-exist-1");
-        assert!(Arc::ptr_eq(&a, &b), "same nonexistent path must still share one lock");
+        assert!(
+            Arc::ptr_eq(&a, &b),
+            "same nonexistent path must still share one lock"
+        );
     }
 }

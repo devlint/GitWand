@@ -1,5 +1,12 @@
 import { ref, computed } from "vue";
-import { resolve, resolveAsync, parseGitwandrc, parseConflictMarkers, type MergeResult, type ConflictHunk, type GitWandOptions, type MergePolicy, type LlmFallbackConfig } from "@gitwand/core";
+import { parseGitwandrc, type MergeResult, type ConflictHunk, type GitWandOptions, type MergePolicy, type LlmFallbackConfig } from "@gitwand/core";
+// `resolve`, `resolveAsync` and `parseConflictMarkers` are loaded lazily via
+// `engine()` (see ../utils/coreEngine.ts) — they pull in the classifier +
+// full pattern registry (~243 KB raw / ~73 KB gzip) and must stay out of the
+// boot chunk. `import type` below is erased at build time; it only gives us
+// `typeof parseConflictMarkers` for `RawConflictSegment` without a runtime import.
+import type { parseConflictMarkers } from "@gitwand/core";
+import { engine } from "../utils/coreEngine";
 import {
   pickFolder,
   getConflictedFiles,
@@ -358,7 +365,7 @@ export function useGitWand() {
       console.error("openFolder error:", err);
       error.value = err.message ?? "Erreur inconnue";
       // Fallback to demo data if dev server is not running
-      loadDemoData();
+      await loadDemoData();
     } finally {
       loading.value = false;
     }
@@ -378,7 +385,7 @@ export function useGitWand() {
     } catch (err: any) {
       console.error("openPath error:", err);
       error.value = err.message ?? "Erreur inconnue";
-      loadDemoData();
+      await loadDemoData();
     } finally {
       loading.value = false;
     }
@@ -479,6 +486,11 @@ export function useGitWand() {
         }
       : resolveOptions.value;
 
+    // Lazily load the engine once for this whole batch — memoized by
+    // `engine()`, so the dynamic import only actually happens on the very
+    // first conflict resolution of the app's lifetime.
+    const { resolveAsync, parseConflictMarkers } = await engine();
+
     const loaded: ConflictFile[] = await Promise.all(
       allPaths.map(async (filePath) => {
         const tc = treeMap.get(filePath);
@@ -577,7 +589,7 @@ export function useGitWand() {
   /**
    * Load demo conflicted files for development/preview.
    */
-  function loadDemoData() {
+  async function loadDemoData() {
     const demoFiles: Array<{ path: string; content: string }> = [
       {
         path: "src/components/Header.tsx",
@@ -667,6 +679,7 @@ export async function fetchUsers() {
       },
     ];
 
+    const { resolve } = await engine();
     files.value = demoFiles.map(({ path, content }) => ({
       path,
       content,
@@ -683,8 +696,9 @@ export async function fetchUsers() {
    * Handles mixed files (some auto-resolved, some not) by applying
    * auto-resolved hunks individually via replaceConflictByIndex.
    */
-  function resolveAll() {
+  async function resolveAll() {
     pushUndo();
+    const { resolve } = await engine();
     files.value = files.value.map((f) => {
       if (f.result.stats.autoResolved === 0) return f;
 
@@ -726,7 +740,7 @@ export async function fetchUsers() {
    * Otherwise, build a partial resolution: apply resolved hunks and keep
    * conflict markers for the remaining ones.
    */
-  function resolveFile(path: string) {
+  async function resolveFile(path: string) {
     const file = files.value.find((f) => f.path === path);
     if (!file) return;
 
@@ -736,6 +750,7 @@ export async function fetchUsers() {
     if (!newContent || newContent === file.content) return;
 
     pushUndo();
+    const { resolve } = await engine();
     const idx = files.value.indexOf(file);
     files.value[idx] = {
       ...file,
@@ -789,7 +804,7 @@ export async function fetchUsers() {
    * @param hunkIndex - Index of the hunk (0-based, in order of appearance)
    * @param choice - "ours" | "theirs" | "both" | "both-theirs-first"
    */
-  function resolveHunkManual(
+  async function resolveHunkManual(
     path: string,
     hunkIndex: number,
     choice: "ours" | "theirs" | "both" | "both-theirs-first",
@@ -866,6 +881,7 @@ export async function fetchUsers() {
     }
 
     const newContent = newLines.join("\n");
+    const { resolve } = await engine();
     const idx = files.value.indexOf(file);
     files.value[idx] = {
       ...file,
@@ -880,7 +896,7 @@ export async function fetchUsers() {
    * @param hunkIndex - Index of the hunk
    * @param customContent - The user-written replacement text
    */
-  function resolveHunkCustom(
+  async function resolveHunkCustom(
     path: string,
     hunkIndex: number,
     customContent: string,
@@ -890,6 +906,7 @@ export async function fetchUsers() {
 
     pushUndo();
     const newContent = replaceConflictByIndex(file.content, hunkIndex, customContent);
+    const { resolve } = await engine();
     const idx = files.value.indexOf(file);
     files.value[idx] = {
       ...file,
@@ -903,10 +920,10 @@ export async function fetchUsers() {
    * including complex/low-confidence hunks. Distinct from `resolveFile`
    * (which only applies the core's safe auto-resolutions). Reversible via undo.
    */
-  function resolveFileBulk(
+  async function resolveFileBulk(
     path: string,
     choice: "ours" | "theirs" | "both",
-  ): { applied: number; total: number } {
+  ): Promise<{ applied: number; total: number }> {
     const file = files.value.find((f) => f.path === path);
     if (!file) return { applied: 0, total: 0 };
 
@@ -921,6 +938,7 @@ export async function fetchUsers() {
 
     if (newContent !== file.content) {
       pushUndo();
+      const { resolve } = await engine();
       const idx = files.value.indexOf(file);
       files.value[idx] = {
         ...file,
@@ -949,11 +967,12 @@ export async function fetchUsers() {
   }
 
   /** Markerless file → swap to the reconstructed conflict content and resolve via the normal pipeline. */
-  function reconstructAndResolve(path: string): void {
+  async function reconstructAndResolve(path: string): Promise<void> {
     const file = files.value.find((f) => f.path === path);
     if (!file?.markerless) return;
     const newContent = file.markerless.reconstructed;
     pushUndo();
+    const { resolve } = await engine();
     const idx = files.value.indexOf(file);
     files.value[idx] = {
       path: file.path,
@@ -978,10 +997,10 @@ export async function fetchUsers() {
    * rule can't apply (e.g. "date-latest" but content is no longer a date) keep
    * their conflict markers and are reported via the returned counts.
    */
-  function applyMemoryToFile(
+  async function applyMemoryToFile(
     path: string,
     entry: ResolutionMemoryEntry,
-  ): { applied: number; total: number } {
+  ): Promise<{ applied: number; total: number }> {
     const file = files.value.find((f) => f.path === path);
     if (!file) return { applied: 0, total: 0 };
     // A "custom" rule is a verbatim blob bound to one hunk — applying it to every
@@ -999,6 +1018,7 @@ export async function fetchUsers() {
 
     if (newContent !== file.content) {
       pushUndo();
+      const { resolve } = await engine();
       const idx = files.value.indexOf(file);
       files.value[idx] = {
         ...file,

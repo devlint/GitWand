@@ -15,9 +15,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:parity": "vitest run --config vitest.config.parity.ts",
-    "bench": "cd src-tauri && cargo build --example parity-probe --release && cd .. && node perf/bench.mjs",
-    "bench:check": "cd src-tauri && cargo build --example parity-probe --release && cd .. && node perf/bench.mjs --check-against perf/baseline.json",
-    "bench:write-baseline": "cd src-tauri && cargo build --example parity-probe --release && cd .. && node perf/bench.mjs --write-baseline perf/baseline.json",
+    "bench": "cd src-tauri && cargo build --example parity-probe --profile ci --features telemetry && cd .. && node perf/bench.mjs",
+    "bench:check": "cd src-tauri && cargo build --example parity-probe --profile ci --features telemetry && cd .. && node perf/bench.mjs --check-against perf/baseline.json",
+    "bench:write-baseline": "cd src-tauri && cargo build --example parity-probe --profile ci --features telemetry && cd .. && node perf/bench.mjs --write-baseline perf/baseline.json",
     "bundle-check": "node perf/bundle-check.mjs",
     "clean": "rm -rf dist"
   },

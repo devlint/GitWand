@@ -159,8 +159,24 @@ export function matchGlob(pattern: string, filePath: string): boolean {
   return globRegex(normalizedPattern).test(normalizedPath);
 }
 
-/** Convertit un pattern glob en RegExp. */
+/**
+ * Cache module-level pattern glob → `RegExp` compilée. `matchGlob` est appelé une fois par
+ * valeur candidate dans le scanner de secrets (une fois par match de pattern, une fois par
+ * token d'entropie) et une fois par override lookup dans `effectivePolicyForFile` — sans ce
+ * cache, `globRegex` recompilait le même petit ensemble de patterns (12+ globs par défaut du
+ * scanner de secrets, overrides `.gitwandrc`) à chaque appel. Miroir du cache `CompiledIgnore`
+ * côté Rust (`apps/desktop/src-tauri/src/commands/secrets.rs`). `Map` pur JS — zéro dépendance
+ * Node.js, compatible browser (AGENTS.md « packages/core = zéro Node.js »). Borné par le nombre
+ * de patterns distincts réellement rencontrés (built-ins + config utilisateur) : pas de fuite
+ * mémoire dans l'usage actuel.
+ */
+const GLOB_REGEX_CACHE = new Map<string, RegExp>();
+
+/** Convertit un pattern glob en RegExp (mémoïsé — voir `GLOB_REGEX_CACHE`). */
 function globRegex(pattern: string): RegExp {
+  const cached = GLOB_REGEX_CACHE.get(pattern);
+  if (cached) return cached;
+
   // Échapper les caractères spéciaux regex, puis replacer les globs
   const escaped = pattern
     .replace(/[.+^${}()|[\]\\]/g, "\\$&") // échapper les caractères regex
@@ -169,7 +185,9 @@ function globRegex(pattern: string): RegExp {
     .replace(/\?/g, "[^/]")                // ? → un char sauf /
     .replace(/§DSTAR§/g, ".*");            // ** → tout (y compris /)
 
-  return new RegExp(`^${escaped}$`);
+  const re = new RegExp(`^${escaped}$`);
+  GLOB_REGEX_CACHE.set(pattern, re);
+  return re;
 }
 
 // ─── Effective policy ─────────────────────────────────────

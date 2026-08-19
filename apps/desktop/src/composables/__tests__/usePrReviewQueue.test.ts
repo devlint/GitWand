@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * Task C3 (v3.6.0) — bounded, cancellable, visibility-gated queue.
  */

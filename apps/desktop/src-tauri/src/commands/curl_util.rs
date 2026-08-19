@@ -31,7 +31,7 @@ pub(crate) fn run_curl(
         .stderr(Stdio::piped())
         .stdin(match stdin_config {
             Some(_) => Stdio::piped(),
-            None    => Stdio::null(),
+            None => Stdio::null(),
         });
     let mut child = cmd
         .spawn()
@@ -66,7 +66,9 @@ fn curl_transport_check(success: bool, code: Option<i32>, stderr: &str) -> Resul
     if success {
         return Ok(());
     }
-    let code_str = code.map(|c| c.to_string()).unwrap_or_else(|| "signal".to_string());
+    let code_str = code
+        .map(|c| c.to_string())
+        .unwrap_or_else(|| "signal".to_string());
     let detail = stderr.trim();
     if detail.is_empty() {
         Err(format!(
@@ -97,8 +99,10 @@ pub(crate) fn curl_with_status(
     let mut args: Vec<String> = vec![
         "-s".to_string(),
         "-S".to_string(), // --show-error: keep stderr diagnostics under -s
-        "-X".to_string(), method.to_string(),
-        "-H".to_string(), format!("Accept: {}", accept),
+        "-X".to_string(),
+        method.to_string(),
+        "-H".to_string(),
+        format!("Accept: {}", accept),
     ];
     for h in extra_headers {
         args.push("-H".to_string());
@@ -157,9 +161,12 @@ pub(crate) fn curl_with_headers(
     let mut args: Vec<String> = vec![
         "-s".to_string(),
         "-S".to_string(),
-        "-D".to_string(), "-".to_string(), // dump response headers to stdout
-        "-X".to_string(), method.to_string(),
-        "-H".to_string(), format!("Accept: {}", accept),
+        "-D".to_string(),
+        "-".to_string(), // dump response headers to stdout
+        "-X".to_string(),
+        method.to_string(),
+        "-H".to_string(),
+        format!("Accept: {}", accept),
     ];
     for h in extra_headers {
         args.push("-H".to_string());
@@ -225,7 +232,10 @@ mod tests {
         let raw = "HTTP/2 200\r\nETag: \"abc123\"\r\nContent-Type: application/json";
         let h = parse_response_headers(raw);
         assert_eq!(h.get("etag").map(String::as_str), Some("\"abc123\""));
-        assert_eq!(h.get("content-type").map(String::as_str), Some("application/json"));
+        assert_eq!(
+            h.get("content-type").map(String::as_str),
+            Some("application/json")
+        );
         assert!(!h.contains_key("http/2 200"));
     }
 

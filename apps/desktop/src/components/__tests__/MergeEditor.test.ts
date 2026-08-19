@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * MergeEditor.vue — minimap ResizeObserver regression guard.
  *

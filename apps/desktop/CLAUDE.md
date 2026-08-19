@@ -25,7 +25,7 @@ pnpm tauri build    # Build app complète, embed frontend dans le binaire Rust
 
 **Tests :**
 ```bash
-pnpm test           # Vitest (jsdom), src/**/*.test.ts
+pnpm test           # Vitest (node by default; jsdom opt-in per-file), src/**/*.test.ts
 pnpm test:parity    # Test parité Rust↔JS via parity-probe (vitest.config.parity.ts)
 ```
 
@@ -37,7 +37,7 @@ pnpm test:parity    # Test parité Rust↔JS via parity-probe (vitest.config.par
 # Correct
 [[example]]
 name = "parity-probe"
-required-features = ["parity"]
+path = "examples/parity_probe.rs"
 
 # Ne jamais faire ca
 [[bin]]
@@ -76,13 +76,13 @@ pnpm test:parity
 
 ## Architecture IPC
 
-Toutes les commandes Rust sont déclarées via `#[tauri::command]` dans `src-tauri/src/lib.rs` (~800 lignes). Leurs wrappers TypeScript typés sont dans `src/utils/backend.ts`.
+Toutes les commandes Rust sont déclarées via `#[tauri::command]` dans `src-tauri/src/commands/` (252 commandes réparties sur 16 des 18 fichiers ; `src-tauri/src/lib.rs`, 1 133 lignes, ne fait que le bootstrap et le `generate_handler!` final — détail dans `src-tauri/CLAUDE.md`). Leurs wrappers TypeScript typés sont dans `src/utils/backend.ts`.
 
 Quand on ajoute une commande Rust, le wrapper TS correspondant doit être ajouté dans la **même PR**.
 
 ## Tests Vitest
 
-- Config principale : `vite.config.ts` (environnement `jsdom`)
+- Config principale : `vite.config.ts` (environnement `node` par défaut — un fichier qui touche réellement le DOM ajoute `// @vitest-environment jsdom` en tête de fichier)
 - Config parité : `vitest.config.parity.ts`
 - Fichiers de test : `src/**/*.test.ts` et `src/**/__tests__/`
 - Ne pas mocker les commandes Tauri dans les tests unitaires — utiliser `pnpm dev:web` avec le mock backend pour le dev interactif
@@ -122,7 +122,7 @@ Liste tirée du chantier perf de mai 2026 (voir `CHANGELOG.md` v2.8.2 et `ROADMA
 - Toute fonction `workspace_*_all` ou `*_all` qui itère sur N repos / N items DOIT utiliser `rayon::par_iter` ou `into_par_iter`, pas `iter` séquentiel. Le coût de fork de thread est négligeable comparé au gain N× sur des opérations I/O-bound. Voir P3.2.
 
 **Profile.release**
-- Ne jamais retirer `lto = "fat"`, `codegen-units = 1`, `strip = "symbols"` dans `Cargo.toml`. Validés en P3.1.
+- Ne jamais retirer `lto = "fat"`, `codegen-units = 1`, `strip = "symbols"` dans **`[profile.release]`**. Validés en P3.1. Cette contrainte ne s'applique qu'au profil qu'on ship : les profils non-shippés (`[profile.ci]`, `[profile.release-debug]`, …) peuvent être plus légers — voir `[profile.ci]` (thin LTO, 16 codegen-units) utilisé par le job `bundle-smoke` de `ci.yml`, jamais par une release réelle.
 - Ne jamais ajouter `panic = "abort"` sans audit complet : Tauri command handlers reposent sur l'unwinding pour récupérer d'un panic.
 
 ### Build & CI
