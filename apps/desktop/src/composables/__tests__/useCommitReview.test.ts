@@ -748,6 +748,49 @@ describe("useCommitReview", () => {
       expect(getState("/repo").iterations).toBe(0);
     });
 
+    // v3.7.0 fix (finding #6) — mirrors "a stale in-flight coverage refresh
+    // never clobbers a newer staged-set change's result" above, roles
+    // reversed: here it's run()'s OWN coverage writes that must respect the
+    // generation guard against a newer computeCurrentCoverage.
+    it("run()'s coverage writes respect the generation guard: a newer computeCurrentCoverage wins over an in-flight run's own write", async () => {
+      enableCommitReview();
+      let resolvePrompt!: (v: string) => void;
+      const pending = new Promise<string>((resolve) => { resolvePrompt = resolve; });
+
+      queueDiffResponseOnce(gitExecOk(diffFor("a.ts"))); // run()'s own diff fetch
+      rawPromptMock.mockImplementationOnce(() => pending);
+
+      const review = useCommitReview();
+      const inFlight = review.run("/repo", "en"); // parks on rawPrompt for a.ts, past run()'s coverage.value write
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      // A newer, on-demand recompute (e.g. App.vue's proceedToCommit) fetches
+      // a diff with an extra never-reviewed file — a different, known,
+      // lower coverage value.
+      queueDiffResponseOnce(gitExecOk(`${diffFor("a.ts")}\n${diffFor("b.ts")}`));
+      const fresh = await review.computeCurrentCoverage("/repo");
+      expect(fresh).toBeLessThan(100);
+      expect(review.coverage.value).toBe(fresh);
+
+      resolvePrompt("[]");
+      await inFlight;
+      await Promise.resolve();
+
+      // run()'s own (now-stale) generation must not clobber the newer value.
+      expect(review.coverage.value).toBe(fresh);
+    });
+
+    it("happy path is untouched: a run() with nothing else in flight still sets coverage.value from its own diff", async () => {
+      enableCommitReview();
+      queueDiffResponseOnce(gitExecOk(diffFor("a.ts")));
+      rawPromptMock.mockResolvedValueOnce("[]");
+
+      const review = useCommitReview();
+      await review.run("/repo", "en");
+
+      expect(review.coverage.value).toBe(100);
+    });
+
     it("onStagedSetChanged refreshes iterations from persisted state when switching repos", async () => {
       enableCommitReview();
       setDiffDefaultResponse(gitExecOk(diffFor("a.ts")));

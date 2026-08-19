@@ -353,6 +353,18 @@ export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReview
   // `run()`) has already superseded it. Bumped by both `onStagedSetChanged`
   // and `run()` — whichever started MOST RECENTLY wins the right to set
   // `coverage.value`.
+  //
+  // v3.7.0 fix (finding #6) — EVERY write to `coverage.value` outside
+  // `reset`/`clearReviewState` goes through this guard, no exception: it used
+  // to be possible for `run()`'s own coverage writes to bypass it (guarded
+  // only by `controller.signal.aborted`, a DIFFERENT invalidation channel),
+  // so a `computeCurrentCoverage` that started and resolved after `run()`
+  // bumped this counter could still be clobbered by `run()`'s own,
+  // now-stale write finishing later. The next reader does not need to
+  // re-derive this: if you are about to write `coverage.value` anywhere in
+  // this file, capture `const myGen = ++coverageGeneration` (or reuse an
+  // already-captured one) at the point of the bump, and gate the write with
+  // `if (myGen === coverageGeneration)`.
   let coverageGeneration = 0;
 
   let abortController: AbortController | null = null;
@@ -579,7 +591,18 @@ export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReview
     // Verifier item #2 — a real run supersedes any in-flight coverage-only
     // refresh (`refreshCoverageForCurrentDiff`); its stale response must not
     // clobber whatever `coverage.value` this run itself computes below.
-    coverageGeneration++;
+    //
+    // v3.7.0 fix (finding #6) — capture the bumped value: EVERY write to
+    // `coverage.value` below in this function must be guarded by comparing
+    // against `coverageGeneration` at the time it actually runs, exactly like
+    // `refreshCoverageForCurrentDiff`/`computeCurrentCoverage` already do.
+    // Without this, a `computeCurrentCoverage` that starts and resolves AFTER
+    // this line (e.g. `App.vue`'s `proceedToCommit`) could win the race and
+    // set an accurate `coverage.value`, only for this `run()` to later finish
+    // un-aborted and clobber it with its own now-stale value — a different,
+    // ungated invalidation channel than the generation counter was supposed
+    // to be the single source of truth for.
+    const myCoverageGeneration = ++coverageGeneration;
 
     // `cwd` gates BEFORE any `.gitwandrc` read — an empty cwd never touches
     // IPC at all, matching the "never even attempted" contract below.
@@ -654,7 +677,13 @@ export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReview
       // runs before the LLM calls even start, so a newly staged,
       // not-yet-reviewed line is reflected immediately — even if this very
       // run later aborts.
-      coverage.value = coverageFromDiffText(cwd, res.stdout);
+      //
+      // v3.7.0 fix (finding #6) — guarded by the SAME `coverageGeneration`
+      // counter as `refreshCoverageForCurrentDiff`/`computeCurrentCoverage`:
+      // a newer coverage recompute that started after this run must win.
+      if (myCoverageGeneration === coverageGeneration) {
+        coverage.value = coverageFromDiffText(cwd, res.stdout);
+      }
 
       await queue.run(
         files,
@@ -675,7 +704,11 @@ export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReview
       // an iteration that a newer run has already superseded.
       recordReview(cwd, files, headHash);
       iterations.value = getCommitReviewState(cwd).iterations;
-      coverage.value = coverageFromDiffText(cwd, res.stdout);
+      // v3.7.0 fix (finding #6) — same generation guard as above: this write
+      // must not clobber a newer coverage recompute either.
+      if (myCoverageGeneration === coverageGeneration) {
+        coverage.value = coverageFromDiffText(cwd, res.stdout);
+      }
       return true;
     } catch (err) {
       if (controller.signal.aborted) return false;
