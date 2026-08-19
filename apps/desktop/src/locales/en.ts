@@ -1086,8 +1086,8 @@ const en = {
     logsLevelWarn: "WARN",
     logsLevelInfo: "INFO",
     // AI tab (header block)
-    aiEnable: "Enable AI suggestions",
-    aiEnableHint: "Proposes smart resolutions for complex conflicts (confidence < 60%)",
+    aiEnable: "Enable AI features",
+    aiEnableHint: "Turns on every AI-powered feature: conflict-resolution suggestions, commit messages, PR pre-review, and Commit Review of your staged changes. Nothing runs until a provider below is configured.",
     aiPrivacyNote: "The AI analyzes the conflict context (base/ours/theirs, commit messages, file name) to propose a resolution. Your code is only sent to the selected provider. No suggestion is applied automatically.",
     // AI tab — provider selector
     aiProviderLabel: "Provider",
