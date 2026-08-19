@@ -319,6 +319,12 @@ export type CommitReviewGateAction = "prompt" | "proceed";
  *
  * - Feature off, or nothing staged → always "proceed" (nothing to decide).
  * - A decision was already recorded this cycle → "proceed" (don't re-ask).
+ * - A live, undismissed risk-severity finding (`unresolvedRiskCount > 0`)
+ *   always earns one explicit decision, even when a review already ran this
+ *   cycle: otherwise the commit records "ran" for a risk the user may never
+ *   have looked at. Still not a hard stop (Vouch and Skip both proceed), and
+ *   dismissing the finding removes it from the count, so it stops
+ *   re-prompting.
  * - A review already ran this cycle (`iterations > 0`) even without an
  *   explicit decision yet — e.g. "Review staged changes" was clicked before
  *   ever hitting commit — → "proceed" without re-prompting; the trailer
@@ -330,9 +336,16 @@ export function resolveCommitReviewGate(input: {
   staged: number;
   decision: ReviewDecision | null;
   iterations: number;
+  unresolvedRiskCount: number;
 }): CommitReviewGateAction {
   if (!input.enabled || input.staged <= 0) return "proceed";
   if (input.decision !== null) return "proceed";
+  // A live, undismissed risk-severity finding always earns one explicit
+  // decision, even when a review already ran this cycle: otherwise the
+  // commit records "ran" for a risk the user may never have looked at.
+  // Still not a hard stop (Vouch and Skip both proceed), and dismissing the
+  // finding removes it from `findings`, so it stops re-prompting.
+  if (input.unresolvedRiskCount > 0) return "prompt";
   if (input.iterations > 0) return "proceed";
   return "prompt";
 }

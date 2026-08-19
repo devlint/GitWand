@@ -364,25 +364,90 @@ describe("buildReviewTrailer", () => {
 
 describe("resolveCommitReviewGate", () => {
   it("proceeds straight to commit when the feature is disabled", () => {
-    expect(mod.resolveCommitReviewGate({ enabled: false, staged: 3, decision: null, iterations: 0 })).toBe("proceed");
+    expect(
+      mod.resolveCommitReviewGate({ enabled: false, staged: 3, decision: null, iterations: 0, unresolvedRiskCount: 0 }),
+    ).toBe("proceed");
   });
 
   it("proceeds when nothing is staged", () => {
-    expect(mod.resolveCommitReviewGate({ enabled: true, staged: 0, decision: null, iterations: 0 })).toBe("proceed");
+    expect(
+      mod.resolveCommitReviewGate({ enabled: true, staged: 0, decision: null, iterations: 0, unresolvedRiskCount: 0 }),
+    ).toBe("proceed");
   });
 
   it("prompts when enabled, staged, no decision yet, and no review has run", () => {
-    expect(mod.resolveCommitReviewGate({ enabled: true, staged: 3, decision: null, iterations: 0 })).toBe("prompt");
+    expect(
+      mod.resolveCommitReviewGate({ enabled: true, staged: 3, decision: null, iterations: 0, unresolvedRiskCount: 0 }),
+    ).toBe("prompt");
   });
 
   it("proceeds without re-prompting once a decision is already recorded", () => {
-    expect(mod.resolveCommitReviewGate({ enabled: true, staged: 3, decision: "vouched", iterations: 0 })).toBe("proceed");
+    expect(
+      mod.resolveCommitReviewGate({
+        enabled: true,
+        staged: 3,
+        decision: "vouched",
+        iterations: 0,
+        unresolvedRiskCount: 0,
+      }),
+    ).toBe("proceed");
   });
 
   it("proceeds without prompting when a review already ran this cycle, even with no explicit decision", () => {
     // "Review staged changes" was clicked before ever hitting commit — don't
     // re-ask, the review already happened.
-    expect(mod.resolveCommitReviewGate({ enabled: true, staged: 3, decision: null, iterations: 1 })).toBe("proceed");
+    expect(
+      mod.resolveCommitReviewGate({ enabled: true, staged: 3, decision: null, iterations: 1, unresolvedRiskCount: 0 }),
+    ).toBe("proceed");
+  });
+
+  // v3.7.0 fix (finding #2): a live, undismissed risk-severity finding always
+  // earns one explicit decision, even when a review already ran this cycle.
+  it("re-prompts when a review already ran but a risk finding is still live and undismissed (the regression case)", () => {
+    expect(
+      mod.resolveCommitReviewGate({ enabled: true, staged: 2, decision: null, iterations: 3, unresolvedRiskCount: 1 }),
+    ).toBe("prompt");
+  });
+
+  it("proceeds when a review ran and there is no unresolved risk (unchanged behavior)", () => {
+    expect(
+      mod.resolveCommitReviewGate({ enabled: true, staged: 2, decision: null, iterations: 3, unresolvedRiskCount: 0 }),
+    ).toBe("proceed");
+  });
+
+  it("an explicit decision wins over an unresolved risk (no infinite loop once Vouch/Skip was clicked)", () => {
+    expect(
+      mod.resolveCommitReviewGate({
+        enabled: true,
+        staged: 2,
+        decision: "vouched",
+        iterations: 3,
+        unresolvedRiskCount: 5,
+      }),
+    ).toBe("proceed");
+  });
+
+  it("proceeds when disabled or nothing staged, even with unresolved risks", () => {
+    expect(
+      mod.resolveCommitReviewGate({ enabled: false, staged: 3, decision: null, iterations: 3, unresolvedRiskCount: 9 }),
+    ).toBe("proceed");
+    expect(
+      mod.resolveCommitReviewGate({ enabled: true, staged: 0, decision: null, iterations: 3, unresolvedRiskCount: 9 }),
+    ).toBe("proceed");
+  });
+
+  it("prompts when no review has run yet and there are no unresolved risks (unchanged)", () => {
+    expect(
+      mod.resolveCommitReviewGate({ enabled: true, staged: 2, decision: null, iterations: 0, unresolvedRiskCount: 0 }),
+    ).toBe("prompt");
+  });
+
+  it("only RISK severity re-prompts — a suggestion/nit-only situation still proceeds", () => {
+    // unresolvedRiskCount counts only risk-severity findings; a caller
+    // passing 0 here for a suggestion/nit-only situation must still proceed.
+    expect(
+      mod.resolveCommitReviewGate({ enabled: true, staged: 2, decision: null, iterations: 1, unresolvedRiskCount: 0 }),
+    ).toBe("proceed");
   });
 });
 
