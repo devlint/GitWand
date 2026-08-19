@@ -182,4 +182,28 @@ describe("usePrPreReview.analyzeFile", () => {
     const [, userPrompt] = rawPromptMock.mock.calls[0];
     expect(userPrompt).toContain("carol: initial impl");
   });
+
+  // Task 0 (v3.7.0) — the engine's prompt is scope-parametrized so
+  // `useCommitReview` (v3.7.0) can reuse it over the staged diff instead of
+  // a PR. Default is unchanged ("pr"); severity scale, confidence rules, and
+  // JSON contract stay byte-identical across scopes — only the framing
+  // sentence and the dependency-signal sentence change.
+  it("defaults to the pull-request framing when scope is omitted", async () => {
+    rawPromptMock.mockResolvedValue("[]");
+    const { analyzeFile } = usePrPreReview();
+    const file = diffFile("a.ts", [{ type: "add", content: "x", newLineNo: 1 }]);
+    await analyzeFile(file, { cwd: "/repo", otherDiffFiles: [] });
+    const [systemPrompt] = rawPromptMock.mock.calls[0];
+    expect(systemPrompt).toContain("pull request");
+  });
+
+  it("uses the staged-commit framing (and never 'pull request') when scope is 'commit'", async () => {
+    rawPromptMock.mockResolvedValue("[]");
+    const { analyzeFile } = usePrPreReview();
+    const file = diffFile("a.ts", [{ type: "add", content: "x", newLineNo: 1 }]);
+    await analyzeFile(file, { cwd: "/repo", otherDiffFiles: [], scope: "commit" });
+    const [systemPrompt] = rawPromptMock.mock.calls[0];
+    expect(systemPrompt).not.toContain("pull request");
+    expect(systemPrompt).toContain("staged changes");
+  });
 });

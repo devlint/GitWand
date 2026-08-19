@@ -8,6 +8,8 @@ import { detectLanguage, highlightLine } from "../utils/highlight";
 import { safeHtml } from "../composables/useSafeHtml";
 import { wordDiff, segmentsToHtml } from "../utils/wordDiff";
 import { buildPatch, selectWholeHunk, type LineSelection } from "../utils/patchBuilder";
+import type { ReviewFinding } from "../composables/usePrPreReview";
+import { fromFinding, annotationsByLine, worstSeverity, type LineAnnotation } from "../composables/prAnnotations";
 
 const { t } = useI18n();
 
@@ -17,20 +19,29 @@ function onFileItemDblClick() {
   window.getSelection()?.removeAllRanges();
 }
 
-const props = defineProps<{
-  diff: GitDiff | null;
-  filePath: string | null;
-  diffMode: DiffMode;
-  /** Enable line/hunk selection for partial staging */
-  selectable?: boolean;
-  /**
-   * Optional seed for the internal selection state. Hosts like SplitCommitModal
-   * that mount/unmount the viewer (e.g. when collapsing/expanding a file row)
-   * pass the previously emitted selection here so it survives the remount.
-   * Plain DiffViewer usage can leave this unset — selection starts empty.
-   */
-  initialSelection?: LineSelection;
-}>();
+const props = withDefaults(
+  defineProps<{
+    diff: GitDiff | null;
+    filePath: string | null;
+    diffMode: DiffMode;
+    /** Enable line/hunk selection for partial staging */
+    selectable?: boolean;
+    /**
+     * Optional seed for the internal selection state. Hosts like SplitCommitModal
+     * that mount/unmount the viewer (e.g. when collapsing/expanding a file row)
+     * pass the previously emitted selection here so it survives the remount.
+     * Plain DiffViewer usage can leave this unset — selection starts empty.
+     */
+    initialSelection?: LineSelection;
+    /**
+     * Commit Review findings (Task 1b, v3.7.0) for the file currently
+     * displayed. Rendered as inline finding rows in inline mode, and as a
+     * severity gutter marker (no card) in side-by-side mode (decision D4).
+     */
+    findings?: ReviewFinding[];
+  }>(),
+  { findings: () => [] },
+);
 
 const emit = defineEmits<{
   "update:diffMode": [mode: DiffMode];
@@ -47,7 +58,76 @@ const emit = defineEmits<{
    * a "stage" action — they compute the partial patch on demand instead.
    */
   "selection-change": [selection: LineSelection];
+  /** Task 1b (v3.7.0) — user dismissed a commit-review finding inline. */
+  "dismiss-finding": [id: string];
 }>();
+
+// ─── Commit Review (Task 1b, v3.7.0) — findings anchored on diff lines ────
+
+/** `${side}:${line}` → the annotations anchored there. Reuses the exact
+ *  same grouping contract as the PR pre-review overlay (`prAnnotations.ts`)
+ *  — LEFT/RIGHT on the same line number never merge. */
+const findingsByLine = computed(() => annotationsByLine(props.findings.map(fromFinding)));
+
+/** Which `${side}:${line}` key a diff line is anchored at. Deleted lines
+ *  only have an old-side line number (LEFT); added/context lines are keyed
+ *  on the new-side line number (RIGHT) — matching the "new-file line
+ *  number" convention `usePrPreReview`'s prompt asks the model for. */
+function lineKeyFor(dl: DiffLine): string {
+  return dl.type === "delete" ? `LEFT:${dl.oldLineNo}` : `RIGHT:${dl.newLineNo}`;
+}
+
+/** Findings anchored on this diff line, or `[]` for a line with none — an
+ *  orphan finding (line not present in this diff) simply never matches any
+ *  key, so it renders nothing rather than throwing. */
+function findingsForLine(dl: DiffLine): LineAnnotation[] {
+  return findingsByLine.value.get(lineKeyFor(dl)) ?? [];
+}
+
+const FINDING_SEVERITY_LABEL_KEY: Record<string, "commitReview.severityRisk" | "commitReview.severitySuggestion" | "commitReview.severityNit"> = {
+  risk: "commitReview.severityRisk",
+  suggestion: "commitReview.severitySuggestion",
+  nit: "commitReview.severityNit",
+};
+
+function findingSeverityLabel(severity: string): string {
+  return t(FINDING_SEVERITY_LABEL_KEY[severity] ?? "commitReview.severitySuggestion");
+}
+
+/** Side-by-side mode (decision D4): a gutter severity marker only, no card.
+ *  `dl` is the SBS pair's line on the given side (may be null when the pair
+ *  has no counterpart on that side). */
+function sbsFindings(dl: DiffLine | null, side: "LEFT" | "RIGHT"): LineAnnotation[] {
+  if (!dl) return [];
+  const lineNo = side === "LEFT" ? dl.oldLineNo : dl.newLineNo;
+  if (lineNo == null) return [];
+  return findingsByLine.value.get(`${side}:${lineNo}`) ?? [];
+}
+
+function sbsMarkerClass(dl: DiffLine | null, side: "LEFT" | "RIGHT"): string {
+  const anns = sbsFindings(dl, side);
+  return anns.length ? `sbs-finding-marker sbs-finding-marker--${worstSeverity(anns)}` : "";
+}
+
+function sbsMarkerTitle(dl: DiffLine | null, side: "LEFT" | "RIGHT"): string | undefined {
+  const anns = sbsFindings(dl, side);
+  return anns.length ? anns.map((a) => a.title).join("; ") : undefined;
+}
+
+/** Scroll the rendered row for `(line, side)` into view — used by
+ *  `useCommitReviewNav` (Task 2) to jump between findings. Looks up the
+ *  `data-line-key` (inline mode) or `data-line-key-left`/`-right` (SBS mode)
+ *  attribute set on each diff-line row below. No-op if the line isn't
+ *  currently rendered (collapsed section, wrong mode, etc.). */
+function scrollToFinding(line: number, side: "LEFT" | "RIGHT") {
+  const key = `${side}:${line}`;
+  const el = contentEl.value?.querySelector(
+    `[data-line-key="${key}"],[data-line-key-left="${key}"],[data-line-key-right="${key}"]`,
+  ) as HTMLElement | null;
+  el?.scrollIntoView({ block: "center" });
+}
+
+defineExpose({ scrollToFinding });
 
 const hasContent = computed(() => {
   return props.diff && props.diff.hunks.length > 0;
@@ -603,32 +683,60 @@ function onDiffScroll() {
           <!-- Visible lines -->
           <table v-else class="diff-table">
             <tbody>
-              <tr
-                v-for="(il, lineIdx) in section.lines"
-                :key="lineIdx"
-                class="diff-line"
-                :class="[
-                  `diff-line--${il.line.type}`,
-                  { 'diff-line--selected': selectable && isLineSelected(hunkIdx, il.origIdx) },
-                ]"
-              >
-                <td v-if="selectable" class="line-check">
-                  <input
-                    v-if="il.line.type !== 'context'"
-                    type="checkbox"
-                    :checked="isLineSelected(hunkIdx, il.origIdx)"
-                    @change="toggleLine(hunkIdx, il.origIdx)"
-                  />
-                </td>
-                <td class="line-no mono">{{ il.line.oldLineNo ?? '' }}</td>
-                <td class="line-no mono">{{ il.line.newLineNo ?? '' }}</td>
-                <td class="line-marker mono">
-                  {{ il.line.type === 'add' ? '+' : il.line.type === 'delete' ? '-' : ' ' }}
-                </td>
-                <td class="line-content mono">
-                  <span v-html="safeHtml(hlWord(hunkIdx, il.origIdx, il.line.content)) || '\u00a0'"></span>
-                </td>
-              </tr>
+              <template v-for="(il, lineIdx) in section.lines" :key="lineIdx">
+                <tr
+                  class="diff-line"
+                  :class="[
+                    `diff-line--${il.line.type}`,
+                    { 'diff-line--selected': selectable && isLineSelected(hunkIdx, il.origIdx) },
+                  ]"
+                  :data-line-key="lineKeyFor(il.line)"
+                >
+                  <td v-if="selectable" class="line-check">
+                    <input
+                      v-if="il.line.type !== 'context'"
+                      type="checkbox"
+                      :checked="isLineSelected(hunkIdx, il.origIdx)"
+                      @change="toggleLine(hunkIdx, il.origIdx)"
+                    />
+                  </td>
+                  <td class="line-no mono">{{ il.line.oldLineNo ?? '' }}</td>
+                  <td class="line-no mono">{{ il.line.newLineNo ?? '' }}</td>
+                  <td class="line-marker mono">
+                    {{ il.line.type === 'add' ? '+' : il.line.type === 'delete' ? '-' : ' ' }}
+                  </td>
+                  <td class="line-content mono">
+                    <span v-html="safeHtml(hlWord(hunkIdx, il.origIdx, il.line.content)) || '\u00a0'"></span>
+                  </td>
+                </tr>
+                <!-- Commit Review (Task 1b, v3.7.0): inline finding rows, plain-text
+                     interpolation only (findings come from an LLM, never v-html).
+                     The <td> itself stays a plain table-cell box (no display
+                     override) so `colspan` actually spans the full diff width;
+                     `display: flex` lives on the inner wrapper div instead
+                     (a `td` with `display: flex` stops being a table-cell in the
+                     CSS box model, which makes the browser silently ignore
+                     `colspan` and squeeze the row into column 1). -->
+                <tr
+                  v-for="f in findingsForLine(il.line)"
+                  :key="f.id"
+                  class="diff-finding-row"
+                >
+                  <td class="diff-finding-cell" :colspan="selectable ? 5 : 4">
+                    <div class="diff-finding-body">
+                      <span class="diff-finding-severity" :class="`diff-finding-severity--${f.severity}`">{{ findingSeverityLabel(f.severity) }}</span>
+                      <span class="diff-finding-confidence mono">{{ f.confidence }}%</span>
+                      <span class="diff-finding-title">{{ f.title }}</span>
+                      <span class="diff-finding-detail">{{ f.message }}</span>
+                      <button
+                        type="button"
+                        class="diff-finding-dismiss"
+                        @click="emit('dismiss-finding', f.id!)"
+                      >{{ t('commitReview.dismiss') }}</button>
+                    </div>
+                  </td>
+                </tr>
+              </template>
             </tbody>
           </table>
         </template>
@@ -670,9 +778,15 @@ function onDiffScroll() {
               v-for="(pair, pairIdx) in pairedHunks[hunkIdx]"
               :key="pairIdx"
               class="diff-line"
+              :data-line-key-left="pair.left?.oldLineNo != null ? `LEFT:${pair.left.oldLineNo}` : undefined"
+              :data-line-key-right="pair.right?.newLineNo != null ? `RIGHT:${pair.right.newLineNo}` : undefined"
             >
               <!-- Left side (old) -->
-              <td class="line-no mono" :class="pair.left ? `sbs-cell--${pair.left.type}` : 'sbs-cell--empty'">
+              <td
+                class="line-no mono"
+                :class="[pair.left ? `sbs-cell--${pair.left.type}` : 'sbs-cell--empty', sbsMarkerClass(pair.left, 'LEFT')]"
+                :title="sbsMarkerTitle(pair.left, 'LEFT')"
+              >
                 {{ pair.left?.oldLineNo ?? '' }}
               </td>
               <td class="line-marker mono" :class="pair.left ? `sbs-cell--${pair.left.type}` : 'sbs-cell--empty'">
@@ -684,7 +798,11 @@ function onDiffScroll() {
               <!-- Separator -->
               <td class="sbs-gutter"></td>
               <!-- Right side (new) -->
-              <td class="line-no mono" :class="pair.right ? `sbs-cell--${pair.right.type}` : 'sbs-cell--empty'">
+              <td
+                class="line-no mono"
+                :class="[pair.right ? `sbs-cell--${pair.right.type}` : 'sbs-cell--empty', sbsMarkerClass(pair.right, 'RIGHT')]"
+                :title="sbsMarkerTitle(pair.right, 'RIGHT')"
+              >
                 {{ pair.right?.newLineNo ?? '' }}
               </td>
               <td class="line-marker mono" :class="pair.right ? `sbs-cell--${pair.right.type}` : 'sbs-cell--empty'">
@@ -930,6 +1048,85 @@ function onDiffScroll() {
 .diff-line--delete {
   background: var(--color-danger-soft);
 }
+
+/* Commit Review (Task 1b, v3.7.0) — inline finding row. */
+.diff-finding-row {
+  background: var(--color-bg-secondary);
+}
+
+/* Plain table-cell box on purpose (no display override) — this is what
+   makes `colspan` on the <td> actually span the full diff width. Flex
+   layout lives on `.diff-finding-body` (the inner div) instead: a `td`
+   with `display: flex` stops being a table-cell in the CSS box model, so
+   the browser silently ignores `colspan` and the row collapses into
+   column 1 (the 48px `.line-no` column). */
+.diff-finding-cell {
+  padding: 0;
+  border-top: 1px dashed var(--color-border);
+  border-bottom: 1px dashed var(--color-border);
+}
+
+.diff-finding-body {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  padding: var(--space-2) 12px;
+}
+
+.diff-finding-severity {
+  flex-shrink: 0;
+  padding: 1px var(--space-2);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  border-radius: var(--radius-sm);
+  color: #fff;
+}
+.diff-finding-severity--risk { background: var(--color-danger, #dc2626); }
+.diff-finding-severity--suggestion { background: var(--color-warning, #d97706); }
+.diff-finding-severity--nit { background: var(--color-text-muted, #6e7681); }
+
+.diff-finding-confidence {
+  flex-shrink: 0;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+.diff-finding-title {
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
+}
+
+.diff-finding-detail {
+  color: var(--color-text-muted);
+  flex: 1 1 100%;
+}
+
+.diff-finding-dismiss {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 1px var(--space-3);
+  font-size: var(--font-size-xs);
+  background: transparent;
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition-hover), color var(--transition-hover);
+}
+
+.diff-finding-dismiss:hover {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text);
+}
+
+/* Side-by-side mode (decision D4): a gutter severity marker only, no card. */
+.sbs-finding-marker {
+  box-shadow: inset 2px 0 0 0 var(--color-text-muted);
+}
+.sbs-finding-marker--risk { box-shadow: inset 2px 0 0 0 var(--color-danger, #dc2626); }
+.sbs-finding-marker--suggestion { box-shadow: inset 2px 0 0 0 var(--color-warning, #d97706); }
+.sbs-finding-marker--nit { box-shadow: inset 2px 0 0 0 var(--color-text-muted, #6e7681); }
 
 .line-no {
   width: 48px;

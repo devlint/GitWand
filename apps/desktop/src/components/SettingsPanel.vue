@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from "vue";
 import { useI18n } from "../composables/useI18n";
+import type { LocaleKey } from "../locales/en";
 import { useTierStats } from "../composables/useTierStats";
 import { useTheme } from "../composables/useTheme";
 import BaseModal from "./BaseModal.vue";
@@ -222,6 +223,9 @@ interface Settings {
   // v3.5.0 Secrets scanner
   secretsScannerEnabled: boolean;
   secretsEntropyThreshold: number;
+  // v3.7.0 Commit Review
+  commitReviewEnabled: boolean;
+  commitReviewAutoReReview: boolean;
 }
 
 const defaultSettings: Settings = {
@@ -309,6 +313,8 @@ const defaultSettings: Settings = {
   filesHideOnNav: true,
   secretsScannerEnabled: true,
   secretsEntropyThreshold: 4.0,
+  commitReviewEnabled: false,
+  commitReviewAutoReReview: true,
 };
 
 function loadSettings(): Settings {
@@ -467,11 +473,15 @@ const settingsTabs: { id: SettingsTab; icon: string }[] = [
 ];
 
 // ─── Nav sidebar groups (OpenCode-style left nav) ────────
-const settingsNavGroups: Array<{ label: string | null; tabs: SettingsTab[] }> = [
-  { label: "Application", tabs: ["general", "dock", "dashboard", "editor", "terminal"] },
-  { label: "Dépôt", tabs: ["git", "hooks", "accounts"] },
-  { label: "IA & Agents", tabs: ["ai", "releaseNotes", "mcp", "automations"] },
-  { label: "Système", tabs: ["logs"] },
+// v3.7.0 review-round fix (finding #13a): these four group headers used to
+// be hardcoded strings (three of them French), rendered raw with no t()
+// call, shown untranslated in every locale. Every sibling tab label already
+// goes through t() via tabLabel() below.
+const settingsNavGroups: Array<{ labelKey: LocaleKey | null; tabs: SettingsTab[] }> = [
+  { labelKey: "settings.navGroupApplication", tabs: ["general", "dock", "dashboard", "editor", "terminal"] },
+  { labelKey: "settings.navGroupRepo", tabs: ["git", "hooks", "accounts"] },
+  { labelKey: "settings.navGroupAi", tabs: ["ai", "releaseNotes", "mcp", "automations"] },
+  { labelKey: "settings.navGroupSystem", tabs: ["logs"] },
 ];
 
 function tabLabel(id: SettingsTab): string {
@@ -1266,9 +1276,9 @@ function deleteReleaseNoteTemplate(id: string) {
 
       <!-- ── Left nav sidebar ── -->
       <nav class="sp-nav">
-        <template v-for="group in settingsNavGroups" :key="group.label ?? group.tabs[0]">
+        <template v-for="group in settingsNavGroups" :key="group.labelKey ?? group.tabs[0]">
           <div class="sp-nav-group">
-            <span v-if="group.label" class="sp-nav-group-label">{{ group.label }}</span>
+            <span v-if="group.labelKey" class="sp-nav-group-label">{{ t(group.labelKey) }}</span>
             <button v-for="tab in settingsTabs.filter(t => (group.tabs as string[]).includes(t.id))" :key="tab.id"
               class="sp-nav-item" :class="{ 'sp-nav-item--active': activeSettingsTab === tab.id }"
               @click="activeSettingsTab = tab.id">
@@ -2209,6 +2219,19 @@ function deleteReleaseNoteTemplate(id: string) {
               </select>
             </div>
 
+            <!-- v3.7.0 review-round fix (finding #13b): useAIProvider.ts's isAvailable
+                 falls through to the local Claude Code CLI when the selected provider
+                 is genuinely misconfigured (a confirmed, intentional fallback, not a
+                 bug: no behavior change here, just an indicator so this isn't invisible
+                 in the provider UI). -->
+            <div
+              v-if="claudeCliInfo?.found && ((settings.aiProvider === 'claude' && !settings.aiApiKey)
+                || (settings.aiProvider === 'openai-compat' && (!settings.aiApiKey || !settings.aiApiEndpoint)))"
+              class="sp-row"
+            >
+              <span class="sp-hint">{{ t('settings.aiProviderCliFallbackHint') }}</span>
+            </div>
+
             <!-- Per-provider model picker for CLI agents (v2.17). Dynamic
                  enumeration for opencode (`opencode models`); curated aliases
                  for Claude Code; free-text fallback for Codex. -->
@@ -2742,6 +2765,43 @@ function deleteReleaseNoteTemplate(id: string) {
                   <span>{{ t('settings.reviewAi.summary') }}</span>
                 </label>
                 <span class="sp-hint">{{ t('settings.reviewAi.summaryHint') }}</span>
+              </div>
+            </div>
+
+            <!-- ─── Commit Review (v3.7.0) ─────────────────── -->
+            <div class="sp-section-divider sp-section-divider--inner"></div>
+            <div class="sp-group">
+              <div class="sp-group__head">
+                <div class="sp-group__head-text">
+                  <span class="sp-group__label">{{ t('settings.commitReview.title') }}</span>
+                  <span class="sp-group__sublabel">{{ t('settings.commitReview.hint') }}</span>
+                </div>
+              </div>
+
+              <div class="sp-row sp-row--checkbox">
+                <label class="sp-checkbox-label" for="setting-commit-review-enabled">
+                  <input id="setting-commit-review-enabled" type="checkbox" class="sp-checkbox"
+                    :checked="settings.commitReviewEnabled"
+                    @change="updateSetting('commitReviewEnabled', ($event.target as HTMLInputElement).checked)" />
+                  <span>{{ t('settings.commitReview.enabled') }}</span>
+                </label>
+                <span class="sp-hint">{{ t('settings.commitReview.enabledHint') }}</span>
+                <span class="sp-hint">{{ t('settings.commitReview.rcOverrideHint') }}</span>
+              </div>
+
+              <!-- commitReviewAutoReReview (Task 3, v3.7.0) — now wired to the
+                   "Fix with agent" one-shot re-review trigger
+                   (useCommitReview.armReReview / onStagedSetChanged). Shown
+                   only when Commit Review itself is on, matching the shape
+                   of the master switch it depends on. -->
+              <div v-if="settings.commitReviewEnabled" class="sp-row sp-row--checkbox">
+                <label class="sp-checkbox-label" for="setting-commit-review-auto-re-review">
+                  <input id="setting-commit-review-auto-re-review" type="checkbox" class="sp-checkbox"
+                    :checked="settings.commitReviewAutoReReview"
+                    @change="updateSetting('commitReviewAutoReReview', ($event.target as HTMLInputElement).checked)" />
+                  <span>{{ t('settings.commitReview.autoReReview') }}</span>
+                </label>
+                <span class="sp-hint">{{ t('settings.commitReview.autoReReviewHint') }}</span>
               </div>
             </div>
 

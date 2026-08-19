@@ -389,6 +389,22 @@ export interface AppSettings {
    * high-entropy detection pass. 0 disables it. Default: 4.0.
    */
   secretsEntropyThreshold: number;
+
+  // ── v3.7.0 Commit Review ──────────────────────────────────
+  /**
+   * Master switch for the local, opt-in AI review pass over the staged diff
+   * (Commit Review). Off by default — it spends tokens on every "Review
+   * staged changes" click. A repo's `.gitwandrc` `commitReview.enabled` can
+   * override this per-repo in either direction (task 6, out of scope here).
+   * Default: false.
+   */
+  commitReviewEnabled: boolean;
+  /**
+   * After a "Fix with agent" handoff (task 3, out of scope here), arm exactly
+   * one automatic re-review on the next staging change. Only consulted once
+   * that phase ships. Default: true.
+   */
+  commitReviewAutoReReview: boolean;
 }
 
 export type TerminalMode = "floating" | "fullscreen" | "bottom";
@@ -481,6 +497,8 @@ export const defaultAppSettings: AppSettings = {
   filesHideOnNav:                    true,
   secretsScannerEnabled:             true,
   secretsEntropyThreshold:           4.0,
+  commitReviewEnabled:               false,
+  commitReviewAutoReReview:          true,
 };
 
 const SETTINGS_KEY = "gitwand-settings";

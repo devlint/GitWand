@@ -339,6 +339,30 @@ export interface GitWandrcConfig {
     /** Seuil d'entropie Shannon (bits/char) pour la détection de secrets à haute entropie, [0, 8]. 0 désactive. */
     entropyThreshold?: number;
   };
+  /**
+   * v3.7.0 — Opt-in per-repo AI review of the staged diff ("Commit Review").
+   *
+   * ```jsonc
+   * {
+   *   "commitReview": {
+   *     "enabled": true,
+   *     "minConfidence": 70,
+   *     "maxFindings": 15,
+   *     "maxFiles": 30
+   *   }
+   * }
+   * ```
+   */
+  commitReview?: {
+    /** Master switch, combined with the app setting `commitReviewEnabled`. Overrides it either way. */
+    enabled?: boolean;
+    /** Minimum confidence (0-100) a finding must reach to be shown. */
+    minConfidence?: number;
+    /** Cap on the number of findings shown (1-200). */
+    maxFindings?: number;
+    /** Cap on the number of staged files sent through the review pass (1-500). */
+    maxFiles?: number;
+  };
 }
 
 /**
@@ -495,6 +519,30 @@ export function parseGitwandrc(json: string): GitWandrcConfig | null {
 
       if (Object.keys(secrets).length > 0) {
         result.secrets = secrets;
+      }
+    }
+
+    // v3.7.0 — Commit Review opt-in config.
+    if (parsed.commitReview && typeof parsed.commitReview === "object") {
+      const cr = parsed.commitReview;
+      const commitReview: NonNullable<GitWandrcConfig["commitReview"]> = {};
+
+      if (typeof cr.enabled === "boolean") commitReview.enabled = cr.enabled;
+
+      if (typeof cr.minConfidence === "number" && cr.minConfidence >= 0 && cr.minConfidence <= 100) {
+        commitReview.minConfidence = cr.minConfidence;
+      }
+
+      if (typeof cr.maxFindings === "number" && cr.maxFindings >= 1 && cr.maxFindings <= 200) {
+        commitReview.maxFindings = cr.maxFindings;
+      }
+
+      if (typeof cr.maxFiles === "number" && cr.maxFiles >= 1 && cr.maxFiles <= 500) {
+        commitReview.maxFiles = cr.maxFiles;
+      }
+
+      if (Object.keys(commitReview).length > 0) {
+        result.commitReview = commitReview;
       }
     }
 

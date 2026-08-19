@@ -4715,13 +4715,13 @@ async function handleRequest(req, res) {
         // 1. .gitwandrc
         const rcPath = join(base, ".gitwandrc");
         if (existsSync(rcPath)) {
-          return res.writeHead(200, { "Content-Type": "text/plain" }).end(readFileSync(rcPath, "utf-8"));
+          return res.writeHead(200, { ...corsHeaders(req), "Content-Type": "text/plain" }).end(readFileSync(rcPath, "utf-8"));
         }
 
         // 2. .gitwandrc.json
         const rcJsonPath = join(base, ".gitwandrc.json");
         if (existsSync(rcJsonPath)) {
-          return res.writeHead(200, { "Content-Type": "text/plain" }).end(readFileSync(rcJsonPath, "utf-8"));
+          return res.writeHead(200, { ...corsHeaders(req), "Content-Type": "text/plain" }).end(readFileSync(rcJsonPath, "utf-8"));
         }
 
         // 3. "gitwand" key in package.json
@@ -4730,13 +4730,13 @@ async function handleRequest(req, res) {
           try {
             const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
             if (pkg.gitwand) {
-              return res.writeHead(200, { "Content-Type": "text/plain" }).end(JSON.stringify(pkg.gitwand));
+              return res.writeHead(200, { ...corsHeaders(req), "Content-Type": "text/plain" }).end(JSON.stringify(pkg.gitwand));
             }
           } catch { /* ignore parse errors */ }
         }
 
         // Not found — return empty string (same as Rust backend)
-        return res.writeHead(200, { "Content-Type": "text/plain" }).end("");
+        return res.writeHead(200, { ...corsHeaders(req), "Content-Type": "text/plain" }).end("");
       } catch (err) {
         return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
       }

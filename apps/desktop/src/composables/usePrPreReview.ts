@@ -35,6 +35,15 @@ export interface ReviewFinding {
   detail: string;
 }
 
+/**
+ * Task 0 (v3.7.0) — which diff source `analyzeFile` is reviewing. Swaps only
+ * the prompt's framing sentence and dependency-signal sentence; severity
+ * scale, confidence rules, and JSON contract stay byte-identical across
+ * scopes — it's the same engine either way. Default `"pr"` — no behavior
+ * change for any existing PR caller.
+ */
+export type ReviewScope = "pr" | "commit";
+
 export interface AnalyzeFileOptions {
   cwd: string;
   /** UI locale — drives the response language. */
@@ -46,6 +55,8 @@ export interface AnalyzeFileOptions {
    *  a bigger budget than the single-hunk critique since findings are
    *  file-scoped, not hunk-scoped). */
   maxFileChars?: number;
+  /** Which diff source is being reviewed (Task 0, v3.7.0). Default `"pr"`. */
+  scope?: ReviewScope;
 }
 
 // ─── Hop 2: dependency (extraction + cross-reference, no graph) ───────────
@@ -120,14 +131,19 @@ export function summarizeBlameForFile(blame: BlameLine[], file: GitDiff): string
 
 // ─── Hop 4: findings (strict JSON, defensive parse) ───────────────────────
 
-function buildSystemPrompt(locale: string): string {
+function buildSystemPrompt(locale: string, scope: ReviewScope = "pr"): string {
   const lang = localeToAiLanguage(locale);
-  return `You are a senior engineer doing a pre-review pass on one file of a pull request.
+  const framing =
+    scope === "commit"
+      ? "one file of a commit that is about to be created (the staged changes)"
+      : "one file of a pull request";
+  const dependencyScope = scope === "commit" ? "other files staged in this same commit" : "other files in this same PR";
+  return `You are a senior engineer doing a pre-review pass on ${framing}.
 
 You will receive:
 - The file path.
 - The file's touched hunks (unified-diff content).
-- A dependency signal: how many other files in this same PR import this file.
+- A dependency signal: how many ${dependencyScope} import this file.
 - A brief history signal: recent commit summaries that touched the lines
   now being changed.
 
@@ -266,7 +282,7 @@ export function usePrPreReview() {
       const blame = await getGitBlame(opts.cwd, file.path).catch(() => [] as BlameLine[]);
       const blameSummaries = summarizeBlameForFile(blame, file);
 
-      const systemPrompt = buildSystemPrompt(opts.locale ?? "en");
+      const systemPrompt = buildSystemPrompt(opts.locale ?? "en", opts.scope ?? "pr");
       const userPrompt = buildUserPrompt(file, importedByCount, blameSummaries, opts.maxFileChars ?? 6000);
       const raw = await ai.rawPrompt(systemPrompt, userPrompt);
       if (!raw) return [];

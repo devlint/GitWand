@@ -1,0 +1,810 @@
+/**
+ * useCommitReview.ts
+ *
+ * Task 1a (v3.7.0) — staged-diff AI review orchestrator ("Commit Review",
+ * roadmap bullet 1). Opt-in, off by default: with `commitReviewEnabled`
+ * false and no `.gitwandrc` override, this composable performs zero LLM
+ * calls. Verifier finding (Task 6, PR3): it is NOT zero IPC in that case —
+ * `resolveEffectiveConfig` must read `.gitwandrc` (cached per repo after the
+ * first read) before it can know whether `commitReview.enabled` forces the
+ * feature ON regardless of the app setting; there is no way to honor that
+ * per-repo override without checking. The one-time-per-repo `.gitwandrc`
+ * read is the accepted cost of that feature, not a bug — see
+ * `resolveEffectiveConfig` below.
+ *
+ * Reuses the exact same engine as the v3.6.0 PR pre-review pass
+ * (`usePrPreReview.analyzeFile`, `scope: "commit"` — Task 0), the same
+ * sequential/abortable/visibility-gated queue (`usePrReviewQueue`), and the
+ * same confidence-threshold + top-N cap + dismissal filter
+ * (`usePrFindingFilter`) — see AGENTS.md/plan decision D3: no new
+ * commit-specific threshold/cap settings, the existing `reviewAi*` knobs
+ * are reused.
+ *
+ * The staged diff is fetched via the existing `gitExec(["diff", "--cached",
+ * "--no-color"])` primitive (precedent: `useCommitMessage.ts`) — no new
+ * Tauri command.
+ */
+import { ref, shallowRef, computed, type ComputedRef, type Ref } from "vue";
+import { parseGitwandrc } from "@gitwand/core";
+import { gitExec, readGitwandrc } from "../utils/backend";
+import { indexDiffFiles, parseFileDiff } from "../utils/unifiedDiff";
+import { usePrPreReview, type ReviewFinding } from "./usePrPreReview";
+import { usePrReviewQueue } from "./usePrReviewQueue";
+import { filterFindings, normalizeFindingClass } from "./usePrFindingFilter";
+import { useSettings } from "./useSettings";
+import { useAIProvider } from "./useAIProvider";
+import { useI18n } from "./useI18n";
+import {
+  recordReview,
+  coverageFor,
+  getState as getCommitReviewState,
+  clear as clearCommitReviewState,
+  reconcileHead,
+} from "./commitReviewState";
+
+/**
+ * Hard cap on the number of staged files sent through the review pass — a
+ * huge staged tree (e.g. a vendored dependency bump) must not fan out
+ * hundreds of LLM calls. Plan decision D12 flags this number as a guess
+ * worth validating against a real large staged change before merge.
+ */
+export const COMMIT_REVIEW_MAX_FILES = 40;
+
+/**
+ * v3.7.0 review-round fix (finding #9): this is NOT a hard cap on the total
+ * bytes reviewed, unlike `COMMIT_REVIEW_MAX_FILES` above (which genuinely is
+ * one: `slices.slice(0, config.maxFiles)`). The budget is only checked
+ * BEFORE admitting each file slice, in file-slice order (earlier files in
+ * the diff win): a single file whose own diff already exceeds the whole
+ * budget is still admitted whole, and only files AFTER it are excluded. This
+ * is deliberate, not a bug: see the test named "truncates by the byte
+ * budget when a single file's diff exceeds it, excluding files after it"
+ * (`useCommitReview.test.ts`): so a huge single-file staged change still
+ * gets reviewed rather than silently skipped entirely. `truncated` is set
+ * either way, so the UI always knows part of the staged diff went
+ * unreviewed. Same D12 caveat (this number is a guess) as
+ * `COMMIT_REVIEW_MAX_FILES`.
+ */
+export const COMMIT_REVIEW_MAX_BYTES = 400_000;
+
+/**
+ * Task 6 (v3.7.0) — the `.gitwandrc` `commitReview` block, resolved and
+ * merged with the app `Settings`. Mirrors `useSecretsScanner.ts`'s
+ * `ResolvedGitwandrcSecrets`/`resolveConfig` pattern: the repo config wins
+ * over the app setting in BOTH directions (a `.gitwandrc` can force the
+ * feature on or off regardless of `settings.commitReviewEnabled`).
+ */
+interface ResolvedCommitReviewRc {
+  enabled?: boolean;
+  minConfidence?: number;
+  maxFindings?: number;
+  maxFiles?: number;
+}
+
+interface EffectiveCommitReviewConfig {
+  enabled: boolean;
+  maxFiles: number;
+}
+
+export interface UseCommitReviewOptions {
+  /**
+   * Debounce (ms) applied to `onStagedSetChanged`'s one-shot re-review arm
+   * (Task 3) — mirrors `useSecretsScanner`'s `debounceMs`, coalescing rapid
+   * repeated staged-set events (stage → fix → restage in quick succession)
+   * into a single re-review instead of one per event. `run()` itself is
+   * still invoked directly by an explicit user click and is never debounced.
+   * Default 400.
+   */
+  debounceMs?: number;
+}
+
+export interface CommitReviewResult {
+  /** Filtered (threshold + cap + session-dismissed) — what the UI renders. */
+  findings: Ref<ReviewFinding[]>;
+  /** Raw findings from the last completed/in-flight run, unfiltered. */
+  rawFindings: Ref<ReviewFinding[]>;
+  running: ComputedRef<boolean>;
+  progress: ComputedRef<{ done: number; total: number }>;
+  lastError: Ref<string | null>;
+  /** Per-file finding count for the staged list (Task 2's sidebar chips). */
+  findingsByFile: ComputedRef<Record<string, number>>;
+  /** Deterministic i18n one-liner composed from the findings (decision D2 —
+   *  no second LLM call for the summary). */
+  summary: ComputedRef<string>;
+  /** True once the staged diff was truncated by the file-count or byte cap. */
+  truncated: Ref<boolean>;
+  /**
+   * HIGH fix (Task 6 / PR3 verifier pass) — the reactive, per-current-repo
+   * "is Commit Review actually on" value: `.gitwandrc`'s
+   * `commitReview.enabled` overrides `settings.commitReviewEnabled` in both
+   * directions. The host (App.vue) MUST gate the "Review staged changes"
+   * button, the commit-review keyboard-shortcut guard, and the commit-time
+   * decision gate (`resolveCommitReviewGate`'s `enabled` input) on THIS
+   * instead of reading `settings.value.commitReviewEnabled` directly —
+   * otherwise a repo that forces the feature on via `.gitwandrc` has no
+   * reachable path into `run()` at all, and a repo that forces it off still
+   * shows the button, still pops the decision modal, and still writes a
+   * `GitWand-Review:` trailer. Refreshed by `onStagedSetChanged` (fired by
+   * App.vue's existing `repoFolderPath`/staged-count watcher) and by `run()`.
+   */
+  effectiveEnabled: ComputedRef<boolean>;
+  /**
+   * Runs the review pass. Resolves to `true` once a full attempt actually
+   * happened (even if it errored, or the staged diff was empty) — `false`
+   * when the call never really tried: the feature is disabled, the AI
+   * provider is unavailable, `cwd` is empty, or this run was superseded by
+   * a newer one before it got anywhere. Callers use this to distinguish
+   * "ran with zero findings" from "did not run" (verifier issue #5).
+   */
+  run: (cwd: string, locale: string) => Promise<boolean>;
+  /**
+   * Abort any in-flight run and clear all state (repo switch, post-commit,
+   * or a staged-set change invalidating a stale review). Passing `cwd`
+   * (Task 4) also refreshes `iterations` from that repo's persisted state
+   * instead of leaving a stale count from whatever repo was active before.
+   */
+  reset: (cwd?: string) => void;
+  /** Session-only, class-normalized dismissal — mirrors the PR pre-review
+   *  dismissal contract. */
+  dismiss: (id: string) => void;
+  /** Wake the queue after `document.hidden` flips back. Call this from the
+   *  host's existing `visibilitychange` handler — never add a second
+   *  listener. Always resumes whichever run is currently active. */
+  resume: () => void;
+  /**
+   * Task 3 — arms exactly one automatic re-review, consumed by the NEXT
+   * `onStagedSetChanged` call (whether or not that call ends up running
+   * anything). A no-op when `commitReviewAutoReReview` is off — the arm
+   * itself never gets set, so a later staged-set change can't accidentally
+   * fire a review the user opted out of.
+   */
+  armReReview: () => void;
+  /**
+   * The real trigger behind "re-review triggers on the next staging change"
+   * (roadmap bullet 3) — call this from the host's staged-set watcher on
+   * EVERY staged-set change (mirrors the existing invalidate-only behavior,
+   * D5), not just after a "Fix with agent" handoff. Bundles `reset()` with
+   * the one-shot arm consumption so the exact sequencing is defined once,
+   * here, and is unit-testable without mounting the host component.
+   */
+  onStagedSetChanged: (cwd: string, locale: string, stagedCount: number) => void;
+  /**
+   * Task 4 — review passes completed against the current repo's cycle
+   * (persisted; survives repo switches and app restarts, reset to 0 by a
+   * successful commit via `clearReviewState`).
+   */
+  iterations: Ref<number>;
+  /**
+   * Task 4 — share (0-100) of the CURRENT staged diff's added lines already
+   * covered by a past review snapshot. Recomputed every time `run()` parses
+   * a staged diff (both right after parsing — reflecting whatever was
+   * reviewed BEFORE this run — and again after a non-aborted completion),
+   * so staging a brand-new unreviewed line visibly drops this number even
+   * before the next review pass finishes.
+   */
+  coverage: Ref<number>;
+  /**
+   * Task 4/5 — drops the persisted iteration/coverage history for `cwd` and
+   * resets the in-memory refs. Call after a successful commit: a new commit
+   * starts a new review cycle.
+   */
+  clearReviewState: (cwd: string) => void;
+  /**
+   * Verifier item #3 — reconciles `iterations` against the repo's CURRENT
+   * HEAD, without running a new review. The host (App.vue's
+   * `proceedToCommit`) MUST await this before checking `iterations` at
+   * commit time, so a commit made outside the app since the last review
+   * (amend, terminal commit, any external tool) resets the stale count
+   * instead of silently letting the gate skip the decision modal.
+   */
+  reconcileIterationsForHead: (cwd: string) => Promise<void>;
+  /**
+   * Second verifier pass (HIGH) — the shared, on-demand coverage recompute
+   * against the repo's CURRENT staged diff (never the file/byte-capped
+   * subset the AI actually saw). The host (App.vue's `proceedToCommit`)
+   * MUST await this right before `buildReviewTrailer`, so the trailer's
+   * coverage number is correct at the moment of commit regardless of
+   * staged-set-watcher granularity (editing and restaging an
+   * already-reviewed file doesn't change the staged file COUNT) or review
+   * truncation. Also updates the exposed `coverage` ref. Zero IPC when
+   * `cwd` is empty or the feature is disabled (resolves to the neutral 100
+   * default in that case).
+   */
+  computeCurrentCoverage: (cwd: string) => Promise<number>;
+}
+
+export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReviewResult {
+  const debounceMs = opts.debounceMs ?? 400;
+  const { settings } = useSettings();
+  const { t } = useI18n();
+  const ai = useAIProvider();
+  const { analyzeFile } = usePrPreReview();
+
+  // Verifier issue #6: each run() gets its own `usePrReviewQueue()` instance
+  // rather than sharing one across every call. `usePrReviewQueue.run()` has
+  // a `try { ... } finally { running.value = false }` — if run A is aborted
+  // while its in-flight `analyzeOne` is still resolving, and run B has
+  // already started, A's stale `finally` can fire *after* B, incorrectly
+  // flipping shared running/done/total state back to A's. Giving every run
+  // its own queue instance means a stale run's cleanup only ever touches
+  // refs nothing else reads anymore — `activeQueue` always points at the
+  // most recent one, so a stale queue's `finally` becomes a no-op as far as
+  // the exposed `running`/`progress` are concerned.
+  //
+  // `shallowRef` (not `ref`): the queue object holds `done`/`total`/`running`
+  // as nested Refs. A plain `ref()` would make this container reactive,
+  // and Vue auto-unwraps nested refs read off a reactive object — turning
+  // `activeQueue.value.done` into an already-unwrapped number instead of
+  // the Ref itself, silently breaking every `.value` access below.
+  const activeQueue = shallowRef(usePrReviewQueue());
+
+  const rawFindings = ref<ReviewFinding[]>([]);
+  const lastError = ref<string | null>(null);
+  const dismissedClasses = ref<Set<string>>(new Set());
+  const truncated = ref(false);
+
+  // Task 4 — iteration/coverage tracking. Plain refs (not computed off the
+  // persisted store) updated imperatively at the points `run()`/`reset()`
+  // actually know the current repo/diff — see the doc comments on the
+  // exposed `iterations`/`coverage` refs above for exactly when each updates.
+  const iterations = ref(0);
+  const coverage = ref(100);
+
+  // Task 6 (v3.7.0) — per-repo cache of the resolved `.gitwandrc`
+  // `commitReview` block, scoped to this composable instance (mirrors
+  // `useSecretsScanner`'s `gitwandrcSecretsCache`) — avoids re-reading +
+  // re-parsing `.gitwandrc` on every `run()`/coverage-refresh call. There is
+  // no write path for this block in this composable (unlike the secrets
+  // scanner's `ignorePattern`), so no invalidation-on-write is wired here;
+  // a brand-new `useCommitReview()` instance (e.g. after a repo switch in
+  // the host) starts with an empty cache regardless.
+  const gitwandrcCommitReviewCache = new Map<string, ResolvedCommitReviewRc>();
+
+  // HIGH fix (verifier pass on PR3) — `rcOverride` is the resolved
+  // `.gitwandrc` `commitReview` block for whichever repo was most recently
+  // refreshed (see `refreshRcOverride` below), kept as a plain reactive ref
+  // so `effectiveEnabled`/`effectiveThreshold`/`effectiveCap` below can be
+  // real `computed`s instead of one-shot snapshots written only inside
+  // `run()`. That one-shot-ref shape was the MEDIUM bug: raising/lowering
+  // the Review-AI threshold or cap in Settings while findings were already
+  // on screen never re-filtered them, since nothing re-ran `run()`. Reading
+  // `settings.value.*` reactively inside a `computed` fixes that — the
+  // findings list now re-filters live, the same way it did before this
+  // Task 6 PR touched these fields.
+  const rcOverride = ref<ResolvedCommitReviewRc>({});
+
+  async function resolveGitwandrcCommitReview(cwd: string): Promise<ResolvedCommitReviewRc> {
+    const cached = gitwandrcCommitReviewCache.get(cwd);
+    if (cached) return cached;
+
+    let resolved: ResolvedCommitReviewRc = {};
+    try {
+      const rcRaw = await readGitwandrc(cwd);
+      if (rcRaw.trim()) {
+        const parsed = parseGitwandrc(rcRaw);
+        resolved = parsed?.commitReview ?? {};
+      }
+    } catch {
+      // No .gitwandrc, or unreadable — fall back to app settings only.
+    }
+
+    gitwandrcCommitReviewCache.set(cwd, resolved);
+    return resolved;
+  }
+
+  /**
+   * HIGH fix — refreshes `rcOverride` for `cwd` (cached, so this is cheap on
+   * repeat calls for the same repo) and resets it to "no override" when
+   * `cwd` is empty (repo closed), so a previously-open repo's forced-off
+   * override can never linger and keep `effectiveEnabled` stuck at `false`
+   * for a DIFFERENT repo, or for no repo at all.
+   *
+   * Fourth verifier pass (HIGH) — the write to `rcOverride.value` is guarded
+   * by the SAME `coverageGeneration` counter already protecting
+   * `coverage.value` in `refreshCoverageForCurrentDiff`/`computeCurrentCoverage`.
+   * Every caller of this function (`run()`, those two, via
+   * `resolveEffectiveConfig`) either bumps or has already had
+   * `coverageGeneration` bumped synchronously before its first `await`, so
+   * capturing it here — still synchronously, before the `readGitwandrc` IPC
+   * call below — snapshots exactly "which call this is." Without this, a
+   * slow first-visit `.gitwandrc` read for a repo the user has already
+   * navigated away from could resolve after a newer call already set the
+   * correct override, and overwrite `rcOverride`/`effectiveEnabled` with the
+   * WRONG repo's config.
+   */
+  async function refreshRcOverride(cwd: string): Promise<ResolvedCommitReviewRc> {
+    const myGeneration = coverageGeneration;
+    if (!cwd) {
+      rcOverride.value = {};
+      return {};
+    }
+    const rc = await resolveGitwandrcCommitReview(cwd);
+    if (myGeneration === coverageGeneration) rcOverride.value = rc;
+    return rc;
+  }
+
+  async function resolveEffectiveConfig(cwd: string): Promise<EffectiveCommitReviewConfig> {
+    const rc = await refreshRcOverride(cwd);
+    return {
+      enabled: rc.enabled ?? settings.value.commitReviewEnabled,
+      maxFiles: rc.maxFiles ?? COMMIT_REVIEW_MAX_FILES,
+    };
+  }
+
+  /**
+   * HIGH fix — the reactive, per-current-repo "is Commit Review actually on"
+   * value. `.gitwandrc`'s `commitReview.enabled` overrides
+   * `settings.value.commitReviewEnabled` in both directions, exactly like
+   * `run()`'s own internal gate — this is that same resolution, exposed so
+   * the host (App.vue) can gate the "Review staged changes" button, the
+   * `n`/`p`/`x` shortcut guard, and the commit-time decision gate on it
+   * instead of reading the raw app setting directly (which was blind to a
+   * repo-level override in either direction). Refreshed by
+   * `refreshRcOverride`, which runs on every `onStagedSetChanged` call (the
+   * same per-repo-state refresh already triggered by App.vue's
+   * `repoFolderPath`/staged-count watcher) and on every `run()`.
+   */
+  const effectiveEnabled = computed(() => rcOverride.value.enabled ?? settings.value.commitReviewEnabled);
+  const effectiveThreshold = computed(
+    () => rcOverride.value.minConfidence ?? settings.value.reviewAiConfidenceThreshold,
+  );
+  const effectiveCap = computed(() => rcOverride.value.maxFindings ?? settings.value.reviewAiMaxFindings);
+
+  // Task 3 — one-shot auto re-review arm + its debounce timer. `reReviewArmed`
+  // is intentionally NOT reset by `stop()`/`reset()` below — it must survive
+  // a staged-set invalidation so it's still there for `onStagedSetChanged`
+  // to consume.
+  const reReviewArmed = ref(false);
+  let reReviewTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // Verifier item #2 — generation counter guarding the async, fire-and-
+  // forget coverage refresh (`refreshCoverageForCurrentDiff`) against a
+  // stale response landing AFTER a newer staged-set change (or a real
+  // `run()`) has already superseded it. Bumped by both `onStagedSetChanged`
+  // and `run()` — whichever started MOST RECENTLY wins the right to set
+  // `coverage.value`.
+  //
+  // v3.7.0 fix (finding #6): EVERY write to `coverage.value` outside
+  // `reset`/`clearReviewState` goes through this guard, no exception: it used
+  // to be possible for `run()`'s own coverage writes to bypass it (guarded
+  // only by `controller.signal.aborted`, a DIFFERENT invalidation channel),
+  // so a `computeCurrentCoverage` that started and resolved after `run()`
+  // bumped this counter could still be clobbered by `run()`'s own,
+  // now-stale write finishing later. The next reader does not need to
+  // re-derive this: if you are about to write `coverage.value` anywhere in
+  // this file, capture `const myGen = ++coverageGeneration` (or reuse an
+  // already-captured one) at the point of the bump, and gate the write with
+  // `if (myGen === coverageGeneration)`.
+  let coverageGeneration = 0;
+
+  let abortController: AbortController | null = null;
+
+  // Task 6 (v3.7.0) — `effectiveThreshold`/`effectiveCap` are `computed`s
+  // reading `.gitwandrc`'s `commitReview.minConfidence`/`maxFindings`
+  // (falling back to the app settings reactively when absent), so both a
+  // repo-level override AND a live change to the app Settings actually
+  // change what gets rendered here immediately, with no new `run()` needed.
+  const findings = computed<ReviewFinding[]>(() =>
+    filterFindings(rawFindings.value, {
+      threshold: effectiveThreshold.value,
+      cap: effectiveCap.value,
+      dismissed: dismissedClasses.value,
+    }),
+  );
+
+  const progress = computed(() => ({ done: activeQueue.value.done.value, total: activeQueue.value.total.value }));
+  const running = computed(() => activeQueue.value.running.value);
+
+  const findingsByFile = computed<Record<string, number>>(() => {
+    const counts: Record<string, number> = {};
+    for (const f of findings.value) counts[f.path] = (counts[f.path] ?? 0) + 1;
+    return counts;
+  });
+
+  const summary = computed<string>(() => {
+    const list = findings.value;
+    if (list.length === 0) return t("commitReview.summaryClean");
+    const risk = list.filter((f) => f.severity === "risk").length;
+    const suggestion = list.filter((f) => f.severity === "suggestion").length;
+    const nit = list.filter((f) => f.severity === "nit").length;
+    const files = new Set(list.map((f) => f.path)).size;
+    return t("commitReview.summaryCounts", risk, suggestion, nit, files);
+  });
+
+  function stop() {
+    abortController?.abort();
+    abortController = null;
+  }
+
+  /**
+   * `cwd` is optional so every existing call site (repo close, generic
+   * invalidation) keeps working unchanged; passing it (Task 4) refreshes
+   * `iterations` from whatever is persisted for THAT repo, so switching
+   * repos never keeps showing a stale count from the previous one.
+   * `coverage` always resets to the neutral "nothing outstanding known yet"
+   * value here — it's only truly known once `run()` parses that repo's
+   * actual current staged diff.
+   */
+  function reset(cwd?: string) {
+    stop();
+    rawFindings.value = [];
+    lastError.value = null;
+    truncated.value = false;
+    iterations.value = cwd ? getCommitReviewState(cwd).iterations : 0;
+    coverage.value = 100;
+  }
+
+  function clearReviewState(cwd: string): void {
+    // v3.7.0 fix (finding #3): abort any in-flight review FIRST, mirroring
+    // reset()'s ordering. Without this, a background re-review armed by
+    // "Fix with agent" (armReReview -> onStagedSetChanged -> run) that is
+    // still in flight when a commit just went through can complete AFTER
+    // this clear, reaching recordReview(cwd, files, headHash) with the
+    // PRE-COMMIT HEAD hash and re-populating the store this call just
+    // wiped -- a bogus iteration badge until the next commit's
+    // reconcileIterationsForHead self-heals it. Once stop() has run,
+    // controller.signal.aborted is true, so run() returns before
+    // recordReview and its finally block is a no-op (abortController
+    // already nulled).
+    stop();
+    if (cwd) clearCommitReviewState(cwd);
+    iterations.value = 0;
+    coverage.value = 100;
+  }
+
+  /**
+   * Resolves the repo's current HEAD commit hash — a single cheap, read-only
+   * `git rev-parse HEAD` call, no different in kind from the existing
+   * staged-diff fetch. Verifier item #3: this is how a completed review
+   * gets stamped against the exact commit it reviewed, so the commit-time
+   * gate (`reconcileIterationsForHead`, called from App.vue's
+   * `proceedToCommit`) can tell whether a commit happened outside the app
+   * since the last review. Returns `""` (never throws) on any failure —
+   * a HEAD resolution failure must never break the review pass itself.
+   */
+  async function resolveHeadHash(cwd: string): Promise<string> {
+    try {
+      const res = await gitExec(cwd, ["rev-parse", "HEAD"]);
+      return res.exitCode === 0 ? res.stdout.trim() : "";
+    } catch {
+      return "";
+    }
+  }
+
+  /**
+   * Pure: parses `diffText` (a raw `git diff --cached` output, no caps
+   * applied) and computes coverage against it. Shared by `run()` (which
+   * already has the diff text from its own fetch — no extra IPC needed)
+   * and `computeCurrentCoverage`/`refreshCoverageForCurrentDiff` (which
+   * fetch fresh). ALWAYS the full parsed diff, never the file/byte-capped
+   * subset sent through the AI calls — comparing coverage against that
+   * exact capped subset is a tautology that always yields 100% (second
+   * verifier pass, scenario C: a truncated review must show LESS than
+   * 100%, since most of the diff was never seen by the AI at all).
+   */
+  function coverageFromDiffText(cwd: string, diffText: string): number {
+    if (!diffText.trim()) return 100;
+    const files = indexDiffFiles(diffText)
+      .map((s) => parseFileDiff(s.raw))
+      .filter((f) => f.hunks.length > 0);
+    return coverageFor(cwd, files);
+  }
+
+  /**
+   * Verifier item #2 — recomputes `coverage` against the repo's CURRENT
+   * staged diff (a plain `git diff --cached` fetch, no LLM call) instead of
+   * leaving whatever neutral default `reset()` just set. Fire-and-forget
+   * from `onStagedSetChanged`; `generation` (captured at call time against
+   * the shared `coverageGeneration` counter) guards against this stale
+   * response landing after a NEWER staged-set change or a real `run()` has
+   * already superseded it. Zero IPC when the feature is disabled or `cwd`
+   * is empty — keeps the last known `coverage` value in that case rather
+   * than resetting to an optimistic 100 (third verifier pass, item L1: a
+   * mid-cycle Settings toggle-off must not silently launder a stale 100%
+   * into the trailer).
+   */
+  async function refreshCoverageForCurrentDiff(cwd: string, generation: number): Promise<void> {
+    let next = coverage.value;
+    if (cwd) {
+      const config = await resolveEffectiveConfig(cwd);
+      if (config.enabled) {
+        try {
+          const res = await gitExec(cwd, ["diff", "--cached", "--no-color"]);
+          if (res.exitCode === 0) next = coverageFromDiffText(cwd, res.stdout);
+        } catch {
+          // A coverage-refresh failure must never disrupt anything else —
+          // leave `next` at the last known value.
+        }
+      }
+    } else {
+      // HIGH fix — no repo open: `rcOverride` must not keep reflecting
+      // whatever repo was open before, or `effectiveEnabled` would stay
+      // stuck at that repo's override with nothing open at all.
+      rcOverride.value = {};
+    }
+    if (generation === coverageGeneration) coverage.value = next;
+  }
+
+  /**
+   * Second verifier pass (HIGH) — the shared, on-demand coverage recompute
+   * against the repo's CURRENT staged diff. `App.vue`'s `proceedToCommit`
+   * MUST await this right before `buildReviewTrailer`, so the trailer's
+   * coverage number is correct AT THE MOMENT OF COMMIT regardless of:
+   *
+   * - scenario B: a staged-set watcher keyed on file COUNT (not content)
+   *   never re-fires when you edit and restage a file that was already
+   *   reviewed — the file count doesn't change, only the content does.
+   * - scenario C: the last review was truncated by the file/byte cap —
+   *   `coverageFromDiffText` here always uses the FULL current diff, never
+   *   the capped subset the AI actually saw.
+   *
+   * Updates the exposed `coverage` ref and bumps `coverageGeneration` (same
+   * "most recent wins" contract as `run()`/`onStagedSetChanged`) so a
+   * result from here is never clobbered by a stale in-flight refresh, and
+   * vice versa. Zero IPC when `cwd` is empty or the feature is disabled —
+   * keeps the last known `coverage` value in that case rather than
+   * resetting to an optimistic 100 (third verifier pass, item L1: a
+   * mid-cycle Settings toggle-off must not silently launder a stale 100%
+   * into the trailer).
+   */
+  async function computeCurrentCoverage(cwd: string): Promise<number> {
+    const myGeneration = ++coverageGeneration;
+    let next = coverage.value;
+    if (cwd) {
+      const config = await resolveEffectiveConfig(cwd);
+      if (config.enabled) {
+        try {
+          const res = await gitExec(cwd, ["diff", "--cached", "--no-color"]);
+          if (res.exitCode === 0) next = coverageFromDiffText(cwd, res.stdout);
+        } catch {
+          // A coverage-refresh failure must never disrupt the commit flow —
+          // leave `next` at the last known value.
+        }
+      }
+    } else {
+      // HIGH fix — same reset as `refreshCoverageForCurrentDiff`: no repo,
+      // no lingering override.
+      rcOverride.value = {};
+    }
+    if (myGeneration === coverageGeneration) coverage.value = next;
+    return next;
+  }
+
+  /**
+   * Verifier item #3 — reconciles `iterations` against the repo's CURRENT
+   * HEAD without running a new review. Call this before checking
+   * `iterations` at commit time (`App.vue`'s `proceedToCommit`, right
+   * before `resolveCommitReviewGate`): if a commit happened outside the app
+   * (amend, terminal commit, any external tool) since the last recorded
+   * review, this resets the stale count to 0 so the gate re-prompts instead
+   * of silently trusting a review that no longer applies to what's about to
+   * be committed.
+   */
+  async function reconcileIterationsForHead(cwd: string): Promise<void> {
+    if (!cwd) return;
+    const headHash = await resolveHeadHash(cwd);
+    const state = reconcileHead(cwd, headHash);
+    iterations.value = state.iterations;
+    // A reset also invalidates whatever "reviewed" baseline `coverage` was
+    // showing — back to the neutral default until the next `run()` parses
+    // the actual current staged diff.
+    if (state.snapshots.length === 0) coverage.value = 100;
+  }
+
+  async function run(cwd: string, locale: string): Promise<boolean> {
+    // A new run always supersedes whatever is in flight — abort first so a
+    // stale in-flight run can never paint findings after this one starts.
+    stop();
+    rawFindings.value = [];
+    lastError.value = null;
+    truncated.value = false;
+    // Verifier item #2 — a real run supersedes any in-flight coverage-only
+    // refresh (`refreshCoverageForCurrentDiff`); its stale response must not
+    // clobber whatever `coverage.value` this run itself computes below.
+    //
+    // v3.7.0 fix (finding #6): capture the bumped value: EVERY write to
+    // `coverage.value` below in this function must be guarded by comparing
+    // against `coverageGeneration` at the time it actually runs, exactly like
+    // `refreshCoverageForCurrentDiff`/`computeCurrentCoverage` already do.
+    // Without this, a `computeCurrentCoverage` that starts and resolves AFTER
+    // this line (e.g. `App.vue`'s `proceedToCommit`) could win the race and
+    // set an accurate `coverage.value`, only for this `run()` to later finish
+    // un-aborted and clobber it with its own now-stale value, a different,
+    // ungated invalidation channel than the generation counter was supposed
+    // to be the single source of truth for.
+    const myCoverageGeneration = ++coverageGeneration;
+
+    // `cwd` gates BEFORE any `.gitwandrc` read — an empty cwd never touches
+    // IPC at all, matching the "never even attempted" contract below.
+    if (!cwd) return false;
+
+    // Task 6 (v3.7.0) — `.gitwandrc`'s `commitReview.enabled` overrides the
+    // app setting in both directions, so this must be resolved BEFORE the
+    // enabled gate below (not just read `settings.value.commitReviewEnabled`
+    // directly). This also refreshes `rcOverride` (and therefore the exposed
+    // `effectiveEnabled`/`effectiveThreshold`/`effectiveCap` computeds)
+    // regardless of the enabled outcome, so a repo-forced-off feature still
+    // reports accurate would-be thresholds if re-enabled later in the same
+    // session.
+    const config = await resolveEffectiveConfig(cwd);
+
+    // Opt-in feature: zero LLM call when disabled/unavailable. Never even
+    // attempted — callers must not treat this as "ran clean".
+    if (!config.enabled || !ai.isAvailable.value) return false;
+
+    const controller = new AbortController();
+    abortController = controller;
+    // Fresh queue instance for this run (verifier issue #6) — see the
+    // `activeQueue` declaration above for why.
+    const queue = usePrReviewQueue();
+    activeQueue.value = queue;
+
+    try {
+      // Verifier item #3 — resolve HEAD once per run so a completed review
+      // gets stamped against the exact commit it reviewed.
+      const headHash = await resolveHeadHash(cwd);
+      if (controller.signal.aborted) return false;
+
+      const res = await gitExec(cwd, ["diff", "--cached", "--no-color"]);
+      if (controller.signal.aborted) return false;
+
+      if (res.exitCode !== 0) {
+        lastError.value = (res.stderr ?? "").trim() || t("errors.commitReviewFailed");
+        return true; // a full attempt happened, it just failed
+      }
+      // A clean index is not an error — no findings, no toast.
+      if (!res.stdout.trim()) return true;
+
+      // Task 6 (v3.7.0) — `config.maxFiles` is `.gitwandrc`'s
+      // `commitReview.maxFiles` when set, else the same `COMMIT_REVIEW_MAX_FILES`
+      // default as before.
+      let slices = indexDiffFiles(res.stdout);
+      if (slices.length > config.maxFiles) {
+        slices = slices.slice(0, config.maxFiles);
+        truncated.value = true;
+      }
+
+      let budget = COMMIT_REVIEW_MAX_BYTES;
+      const bounded: typeof slices = [];
+      for (const slice of slices) {
+        if (budget <= 0) {
+          truncated.value = true;
+          break;
+        }
+        bounded.push(slice);
+        budget -= slice.raw.length;
+      }
+
+      const files = bounded.map((s) => parseFileDiff(s.raw)).filter((f) => f.hunks.length > 0);
+      if (!files.length) return true;
+
+      // Task 4 — recompute coverage against the FULL current staged diff
+      // (res.stdout, not the file/byte-capped `files` sent to the AI —
+      // second verifier pass, scenario C: comparing against the exact
+      // capped subset just reviewed is a tautology that always yields
+      // 100%, even when most of a huge staged tree was dropped by the
+      // cap), using whatever was reviewed by past completed runs. This
+      // runs before the LLM calls even start, so a newly staged,
+      // not-yet-reviewed line is reflected immediately — even if this very
+      // run later aborts.
+      //
+      // v3.7.0 fix (finding #6): guarded by the SAME `coverageGeneration`
+      // counter as `refreshCoverageForCurrentDiff`/`computeCurrentCoverage`:
+      // a newer coverage recompute that started after this run must win.
+      if (myCoverageGeneration === coverageGeneration) {
+        coverage.value = coverageFromDiffText(cwd, res.stdout);
+      }
+
+      await queue.run(
+        files,
+        (file) => analyzeFile(file, { cwd, locale, otherDiffFiles: files, scope: "commit" }),
+        {
+          onFinding: (finding) => {
+            if (controller.signal.aborted) return;
+            rawFindings.value = [...rawFindings.value, finding];
+          },
+          signal: controller.signal,
+        },
+      );
+      if (controller.signal.aborted) return false;
+
+      // A full, non-aborted run just reviewed `files` — record it as a new
+      // iteration. Guarded by the abort check above so a stale run's
+      // eventual completion (verifier issue #6's race) never double-counts
+      // an iteration that a newer run has already superseded.
+      recordReview(cwd, files, headHash);
+      iterations.value = getCommitReviewState(cwd).iterations;
+      // v3.7.0 fix (finding #6): same generation guard as above: this write
+      // must not clobber a newer coverage recompute either.
+      if (myCoverageGeneration === coverageGeneration) {
+        coverage.value = coverageFromDiffText(cwd, res.stdout);
+      }
+      return true;
+    } catch (err) {
+      if (controller.signal.aborted) return false;
+      lastError.value = err instanceof Error ? err.message : String(err);
+      return true;
+    } finally {
+      if (abortController === controller) abortController = null;
+    }
+  }
+
+  function dismiss(id: string) {
+    const finding = rawFindings.value.find((f) => f.id === id);
+    if (!finding) return;
+    const cls = normalizeFindingClass(finding);
+    dismissedClasses.value = new Set([...dismissedClasses.value, cls]);
+  }
+
+  function armReReview() {
+    // A no-op when the setting is off — the arm never gets set, so a later
+    // staged-set change can never fire a review the user opted out of, even
+    // if the setting flips back on before that later change lands.
+    if (!settings.value.commitReviewAutoReReview) return;
+    reReviewArmed.value = true;
+  }
+
+  function onStagedSetChanged(cwd: string, locale: string, stagedCount: number): void {
+    // Immediate, synchronous invalidation — a staged-set change means
+    // whatever findings are on screen no longer match the index (D5). This
+    // must never be debounced: the UI should clear stale findings right away.
+    // Passing `cwd` (Task 4) also refreshes `iterations` from persisted
+    // state for whatever repo is now active.
+    reset(cwd);
+
+    // Verifier item #2 — `reset()` just set `coverage` to the neutral 100
+    // default, which is a LIE if the current staged diff actually has
+    // unreviewed content (e.g. a brand-new file staged after the last
+    // completed review). Recompute it for real against the current staged
+    // diff — a plain `git diff` fetch, no LLM call, zero IPC when the
+    // feature is disabled (guarded inside `refreshCoverageForCurrentDiff`).
+    const myCoverageGeneration = ++coverageGeneration;
+    void refreshCoverageForCurrentDiff(cwd, myCoverageGeneration);
+
+    if (!reReviewArmed.value) return;
+
+    // Debounced consumption: rapid repeated staged-set changes (stage → fix
+    // → restage in quick succession) collapse into a single re-review
+    // instead of firing once per event. Each call restarts the timer; only
+    // the LAST staged-set change in a burst actually triggers the run.
+    if (reReviewTimer) clearTimeout(reReviewTimer);
+    reReviewTimer = setTimeout(() => {
+      reReviewTimer = null;
+      if (!reReviewArmed.value) return; // defensive — nothing else clears this flag
+      reReviewArmed.value = false;
+      // Task 6 (v3.7.0) — `run()` itself resolves the effective (`.gitwandrc`
+      // vs. app setting) enabled state, so it's the single source of truth
+      // here too: a repo that forces the feature ON via `.gitwandrc` still
+      // gets its armed re-review, even with `settings.commitReviewEnabled`
+      // off, instead of being silently skipped by a settings-only check.
+      if (cwd && stagedCount > 0) {
+        void run(cwd, locale);
+      }
+    }, debounceMs);
+  }
+
+  return {
+    findings,
+    rawFindings,
+    running,
+    progress,
+    lastError,
+    findingsByFile,
+    summary,
+    truncated,
+    effectiveEnabled,
+    run,
+    reset,
+    dismiss,
+    // Always resumes whichever queue instance is currently active — see
+    // `activeQueue` above.
+    resume: () => activeQueue.value.resume(),
+    armReReview,
+    onStagedSetChanged,
+    iterations,
+    coverage,
+    clearReviewState,
+    reconcileIterationsForHead,
+    computeCurrentCoverage,
+  };
+}

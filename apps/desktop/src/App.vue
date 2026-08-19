@@ -70,6 +70,8 @@ const EditCommitOverlay = defineAsyncComponent(() => import("./components/EditCo
 const SplitCommitModal = defineAsyncComponent(() => import("./components/SplitCommitModal.vue"));
 const BranchDirtySwitchModal = defineAsyncComponent(() => import("./components/BranchDirtySwitchModal.vue"));
 const SecretsFindingsModal = defineAsyncComponent(() => import("./components/SecretsFindingsModal.vue"));
+const CommitReviewModal = defineAsyncComponent(() => import("./components/CommitReviewModal.vue"));
+const CommitReviewDecisionModal = defineAsyncComponent(() => import("./components/CommitReviewDecisionModal.vue"));
 import { useStashMessage } from "./composables/useStashMessage";
 import { useAIProvider } from "./composables/useAIProvider";
 import { usePrPanel, PR_PANEL_KEY } from "./composables/usePrPanel";
@@ -95,6 +97,17 @@ import { useScheduler } from "./composables/useScheduler";
 import { useRepoPoller } from "./composables/useRepoPoller";
 import { useLaunchpadPoller } from "./composables/useLaunchpadPoller";
 import { useSecretsScanner } from "./composables/useSecretsScanner";
+import { useCommitReview } from "./composables/useCommitReview";
+import { useCommitReviewNav } from "./composables/useCommitReviewNav";
+import { buildReviewFixPrompt } from "./utils/reviewFixPrompt";
+import {
+  buildReviewTrailer,
+  resolveCommitReviewGate,
+  effectiveReviewDecision,
+  appendReviewTrailer,
+  type ReviewDecision,
+} from "./composables/commitReviewState";
+import { resolveCommitReviewShortcut } from "./composables/commitReviewKeymap";
 import { useLaunchpadPrs } from "./composables/useLaunchpadPrs";
 import { diffLaunchpad, isBotAuthor, type LaunchpadEvent } from "./composables/useLaunchpadNotifications";
 import { osNotify } from "./composables/useOsNotification";
@@ -113,10 +126,10 @@ import {
   TOGGLE_GIT_TREE_KEY,
   OPEN_SETTINGS_KEY,
 } from "./composables/branchPickerBridge";
-import { gitStash, gitStashPop, gitStashList, openInEditor, setGitConfig, gitDiscard, gitAddToGitignore, gitDeleteBranch, gitDeleteTag, gitDeleteRemoteTag, gitRemoteInfo, gitUnpushedTags, gitPushTags, gitMergeBase, gitResetToCommit, gitCommitSubmoduleChanges, gitSubmoduleCheckUpdates, scratchWorktreeCreate, scratchWorktreeDiscard, scratchWorktreeMergeBack, gitWorktreeList, gitWorktreeRemove, type CommitSubmoduleChange } from "./utils/backend";
+import { gitStash, gitStashPop, gitStashList, openInEditor, setGitConfig, gitDiscard, gitAddToGitignore, gitDeleteBranch, gitDeleteTag, gitDeleteRemoteTag, gitRemoteInfo, gitUnpushedTags, gitPushTags, gitMergeBase, gitResetToCommit, gitCommitSubmoduleChanges, gitSubmoduleCheckUpdates, scratchWorktreeCreate, scratchWorktreeDiscard, scratchWorktreeMergeBack, gitWorktreeList, gitWorktreeRemove, type CommitSubmoduleChange, type ScratchWorktree } from "./utils/backend";
 import { useCommitActions } from "./composables/useCommitActions";
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
 const { settings, refreshSettings } = useSettings();
 const { saveMemory } = useResolutionMemory();
 
@@ -126,6 +139,18 @@ const showSecretsModal = ref(false);
 /** Trailers of the last commit attempt — reused by the findings modal's "Commit anyway" so it
  * doesn't need its own copy of RepoSidebar's Signed-off-by trailer logic. */
 let lastAttemptedCommitTrailers = "";
+
+// v3.7.0 — Commit Review (local, opt-in, off by default; see useCommitReview.ts).
+const commitReview = useCommitReview();
+const showCommitReviewModal = ref(false);
+// Task 5 — the Review/Vouch/Skip decision recorded for the CURRENT commit
+// cycle. Reset on repo switch and after a successful commit (a new commit
+// starts a new cycle) — see the watchers/handlers below.
+const showCommitReviewDecisionModal = ref(false);
+const commitReviewDecision = ref<ReviewDecision | null>(null);
+/** Trailers captured when the decision modal needs to open — re-applied once
+ *  the user picks Vouch/Skip (Review now leaves the commit un-issued). */
+let pendingCommitReviewTrailers = "";
 // `useNetworkStatus` covers `navigator.onLine` — kept around because
 // `useScheduler` already consumes it and we don't want to retire that path
 // in this commit. `useConnectivity` (F1) adds a real probe-based signal
@@ -197,6 +222,7 @@ const {
   hasConflicts,
   allFiles: repoFiles,
   repoStats,
+  stagedFingerprint,
   commitSummary,
   commitDescription,
   canCommit,
@@ -226,6 +252,7 @@ const {
   stagePatch,
   unstagePatch,
   commit: doCommit,
+  lastCommitHash,
   amendCommit: doAmendCommit,
   push: doPush,
   pull: doPull,
@@ -266,6 +293,75 @@ const {
   dropStash,
   worktreeBranches,
 } = useGitRepo({ confirm: askConfirm });
+
+// v3.7.0 — Commit Review: template ref to the mounted DiffViewer (its
+// `scrollToFinding` is called by Task 2's nav composable), and the findings
+// for the file currently displayed. Findings are index-scoped (reviewed the
+// staged diff, not the working tree), so never paint them on an unstaged diff.
+const diffViewerRef = ref<any>(null);
+const findingsForSelectedFile = computed(() =>
+  repoSelectedFileStaged.value && repoSelectedFile.value
+    ? commitReview.findings.value.filter((f) => f.path === repoSelectedFile.value)
+    : [],
+);
+
+/** Task 2 (v3.7.0) — `n`/`p` cycle every finding across staged files,
+ *  switching the selected file and scrolling the diff to each. */
+const commitReviewNav = useCommitReviewNav({
+  findings: commitReview.findings,
+  selectFile: (path, staged) => repoSelectFile(path, staged),
+  diffHandle: diffViewerRef,
+  onDismiss: (id) => commitReview.dismiss(id),
+  onHelp: () => showCommitReviewNavHelp(),
+});
+
+/** Shared transient toast for Commit Review's own non-error feedback (the
+ *  `?` help reminder, a clean-pass confirmation) — reuses the existing toast
+ *  affordance rather than inventing a second one (verifier issue #5). */
+function showCommitReviewToast(title: string, detail: string) {
+  if (successTimer != null) { window.clearTimeout(successTimer); successTimer = null; }
+  successToastLeaving.value = false;
+  successToast.value = title;
+  successToastDetail.value = detail;
+  successTimer = window.setTimeout(dismissToast, 3000);
+}
+
+/** `?` — a one-line toast (per the plan: reuse the existing toast
+ *  affordance, no new help modal). */
+function showCommitReviewNavHelp() {
+  showCommitReviewToast(
+    t("commitReview.navHelp"),
+    `${t("commitReview.navNext")} (N) · ${t("commitReview.navPrev")} (P) · ${t("commitReview.dismiss")} (X)`,
+  );
+}
+
+/** A completed review with zero findings otherwise produces no feedback at
+ *  all, indistinguishable from "didn't run" or "failed" (verifier issue
+ *  #5) — `commitReview.summaryClean` already exists but was unreachable.
+ *  Called from `reviewStaged` below only when the run actually completed
+ *  (not skipped, not superseded) and produced no error. */
+function showCommitReviewCleanToast() {
+  showCommitReviewToast(t("commitReview.summaryClean"), "");
+}
+
+/** Task 2 (v3.7.0) — the commit-review keymap is only "active" (bare-letter
+ *  n/p/x reserved) in the Changes view, with the feature on and at least
+ *  one finding to navigate. HIGH fix (PR3 verifier pass): reads
+ *  `commitReview.effectiveEnabled` (the `.gitwandrc`-aware resolution)
+ *  instead of the raw app setting, so a repo that forces the feature off
+ *  via `.gitwandrc` never reserves these shortcuts even if the global
+ *  setting is on. */
+const commitReviewShortcutActive = computed(
+  () => viewMode.value === "changes" && commitReview.effectiveEnabled.value && commitReview.findings.value.length > 0,
+);
+
+/** Verifier issue #4 — a failed review must never fail silently. Reuse the
+ *  existing error-toast banner (`repoError`) rather than inventing a second
+ *  one; this mirrors every other place in this file that funnels a failure
+ *  into `repoError.value`. */
+watch(commitReview.lastError, (val) => {
+  if (val) repoError.value = val;
+});
 
 // Monorepo scope (v2.21.0) — restore persisted scope on repo open.
 const { loadScope } = useWorkspaceScope();
@@ -331,6 +427,12 @@ const prPanel = usePrPanel(prCwd, {
     await repoRefresh();
     await loadBranches();
   },
+  // v3.7.0 — Commit Review: resume its queue on the same visibilitychange
+  // → visible edge usePrPanel already reuses for the PR pre-review queue,
+  // instead of standing up a second listener. Without this, starting a
+  // review then hiding the tab would leave the queue paused on
+  // document.hidden forever.
+  onVisibilityResume: () => commitReview.resume(),
 });
 provide(PR_PANEL_KEY, prPanel);
 const issuePanel = useIssuePanel(prCwd);
@@ -991,6 +1093,14 @@ function onViewModeChange(mode: ViewMode) {
 }
 
 // ─── Shared RepoSidebar binding (full-screen panes) ──────
+// v3.7.0 review-round fix (finding #2): the count of LIVE, undismissed
+// risk-severity commit-review findings. Shared by `proceedToCommit`'s gate
+// call and the decision modal's `riskCount` prop so both read the exact same
+// number instead of recomputing the filter twice.
+const commitReviewUnresolvedRisks = computed(
+  () => commitReview.findings.value.filter((f) => f.severity === "risk").length,
+);
+
 // Each full-screen view composes one or more RepoSidebar panes (files / commit
 // / history / prs / dashboard). They all need the same prop bundle and event
 // wiring, so we bind them via a single computed props object + a stable
@@ -1016,15 +1126,37 @@ const repoSidebarProps = computed(() => ({
   visibleFileIdx: historyVisibleFileIdx.value,
   gitUser: currentGitUser.value,
   secretFindingsCount: secretsScanner.activeFindings.value.length,
+  // HIGH fix (PR3 verifier pass) — `commitReview.effectiveEnabled` resolves
+  // .gitwandrc's commitReview.enabled override against the raw app setting.
+  // Passing the raw setting here meant a repo forcing the feature ON via
+  // .gitwandrc could never show the "Review staged changes" button at all.
+  commitReviewEnabled: commitReview.effectiveEnabled.value,
+  commitReviewRunning: commitReview.running.value,
+  commitReviewFindingsCount: commitReview.findings.value.length,
+  commitReviewProgress: commitReview.progress.value,
+  reviewFindingsByFile: commitReview.findingsByFile.value,
+  commitReviewIterations: commitReview.iterations.value,
+  commitReviewCoverage: commitReview.coverage.value,
 }));
 
 /**
  * Intercepts the commit action when the secrets scanner has active findings: shows a
  * non-blocking confirm (never a hard stop — the user can always proceed) before delegating to
- * `doCommit`. Wired to both RepoSidebar's commit button and the findings modal's "Commit anyway".
+ * `proceedToCommit`. Wired to both RepoSidebar's commit button and the findings modal's
+ * "Commit anyway" (`onSecretsCommitAnyway`) — both funnel into the same post-secrets-gate path
+ * so the Commit Review decision gate (Task 5) applies consistently either way.
  */
 async function handleCommitRequest(trailers: string) {
   lastAttemptedCommitTrailers = trailers;
+  // v3.7.0 Task 2 (fallout of Task 1): rescan the staged diff right now
+  // rather than trusting the last poll-driven scan(). After the Task 1
+  // watcher fix, editing and restaging an already-staged file (staged count
+  // and fingerprint both unchanged) no longer re-triggers scan() at all, so
+  // without this rescan a secret introduced that way would never be caught.
+  // One IPC on the commit path, consistent with the two `proceedToCommit`
+  // already awaits (git rev-parse HEAD, git diff --cached). Session
+  // dismissals survive: scanNow never touches dismissedKeys.
+  await secretsScanner.scanNow(repoFolderPath.value ?? "", settings.value);
   if (secretsScanner.activeFindings.value.length > 0) {
     const confirmed = await askConfirm({
       danger: true,
@@ -1034,7 +1166,139 @@ async function handleCommitRequest(trailers: string) {
     });
     if (!confirmed) return;
   }
-  await doCommit(trailers);
+  await proceedToCommit(trailers);
+}
+
+/**
+ * v3.7.0 (Task 5) — the single place that assembles the final trailer block
+ * and calls `doCommit`, after any secrets gate has already been cleared.
+ * `resolveCommitReviewGate`/`effectiveReviewDecision` (pure, unit-tested in
+ * `commitReviewState.test.ts`) decide whether the Review/Vouch/Skip decision
+ * modal needs to open first — never a hard stop; cancelling that modal
+ * cancels the commit (decision D8), it never silently records "skipped".
+ *
+ * The review trailer is appended HERE rather than round-tripped through a
+ * RepoSidebar prop: `RepoSidebar.buildTrailers()` runs and emits BEFORE this
+ * function ever sees the staged-changes trailers, so recomputing the review
+ * trailer for the CURRENT decision on every call (including the second pass
+ * after a decision is made) is the only correct ordering.
+ *
+ * Verifier item #3 — `reconcileIterationsForHead` is awaited FIRST, before
+ * the gate ever reads `commitReview.iterations`: a commit made outside the
+ * app since the last recorded review (an amend, a terminal commit, any
+ * external tool) must reset that count to 0, not silently let the gate skip
+ * the decision modal and write a `GitWand-Review: ran` trailer for a review
+ * that never happened against what's actually about to be committed.
+ *
+ * Second verifier pass (HIGH) — `computeCurrentCoverage` is awaited right
+ * before `buildReviewTrailer`, recomputing coverage against the FULL
+ * current staged diff at the moment of commit. Two scenarios otherwise let
+ * a stale `coverage:100%` slip into the trailer: (B) editing and restaging
+ * a file that was already reviewed doesn't change the staged file COUNT,
+ * so a count-keyed staged-set watcher never re-fires and the earlier
+ * snapshot goes stale; (C) a review truncated by the file/byte cap only
+ * ever recorded the capped subset it actually reviewed, so comparing
+ * coverage against that same subset is a tautology. Recomputing here,
+ * fresh, right before the trailer is written, is correct regardless of
+ * watcher granularity or truncation.
+ */
+async function proceedToCommit(trailers: string) {
+  await commitReview.reconcileIterationsForHead(repoFolderPath.value ?? "");
+
+  // HIGH fix (PR3 verifier pass) — `commitReview.effectiveEnabled` resolves
+  // .gitwandrc's commitReview.enabled override against the raw app setting;
+  // reading settings.value.commitReviewEnabled directly here ignored a
+  // repo-level opt-out, so the decision modal used to pop on every commit
+  // even in a repo that explicitly disabled Commit Review via .gitwandrc.
+  const gate = resolveCommitReviewGate({
+    enabled: commitReview.effectiveEnabled.value,
+    staged: repoStats.value.staged,
+    decision: commitReviewDecision.value,
+    iterations: commitReview.iterations.value,
+    // v3.7.0 review-round fix (finding #2): a live, undismissed risk-level
+    // finding always earns one explicit decision, even when a review already
+    // ran this cycle: otherwise the commit could silently record "ran" for a
+    // risk the user never looked at (this is what task 1's watcher bug was
+    // masking, by wiping findings before a commit could ever see them).
+    unresolvedRiskCount: commitReviewUnresolvedRisks.value,
+  });
+  if (gate === "prompt") {
+    pendingCommitReviewTrailers = trailers;
+    showCommitReviewDecisionModal.value = true;
+    return;
+  }
+
+  const decision = effectiveReviewDecision(commitReviewDecision.value, commitReview.iterations.value);
+  const coverageNow = decision
+    ? await commitReview.computeCurrentCoverage(repoFolderPath.value ?? "")
+    : commitReview.coverage.value;
+  const reviewTrailerLine = decision
+    ? buildReviewTrailer(decision, commitReview.iterations.value, coverageNow)
+    : "";
+  const fullTrailers = appendReviewTrailer(trailers, reviewTrailerLine);
+
+  // v3.7.0 (Task 4) — `lastCommitHash` only changes on a SUCCESSFUL commit
+  // (`useGitRepo.commit()` catches its own errors internally, never
+  // throws) — comparing before/after is the cleanest local success signal,
+  // without adding a global watcher that would also have to special-case
+  // amend/other commit paths. A new commit starts a new review cycle.
+  const beforeHash = lastCommitHash.value;
+  await doCommit(fullTrailers);
+  if (lastCommitHash.value !== beforeHash) {
+    commitReview.clearReviewState(repoFolderPath.value ?? "");
+    commitReviewDecision.value = null;
+  }
+}
+
+/**
+ * "Review now" in the decision modal: runs the pass and leaves the commit
+ * un-issued (decision stays whatever it was — null unless a review already
+ * happened) so the user can look at findings, then commits again when
+ * satisfied; `resolveCommitReviewGate` then sees `iterations > 0` and
+ * proceeds without re-prompting.
+ *
+ * Verifier item #4 — reuses `onReviewStagedClicked`'s exact success/
+ * failure/clean-pass branching (calling it directly, not duplicating a
+ * weaker version) rather than always popping the findings modal regardless
+ * of outcome. Without this, clicking "Review now" with no AI provider
+ * configured popped an empty "No findings" modal instead of surfacing the
+ * real reason nothing happened. A genuine failure is already surfaced
+ * globally via the `commitReview.lastError` watcher above (`repoError`) —
+ * the one case that watcher can't cover is "never even attempted"
+ * (`ran === false`), which this modal only reaches via AI being
+ * unavailable (the feature and a staged repo are already guaranteed by
+ * `resolveCommitReviewGate` before this modal ever opens).
+ */
+async function onCommitReviewDecisionReviewNow() {
+  showCommitReviewDecisionModal.value = false;
+  const ran = await onReviewStagedClicked();
+  if (!ran) {
+    repoError.value = t("errors.noAiProviderShort");
+    return;
+  }
+  if (!commitReview.lastError.value) {
+    showCommitReviewModal.value = true;
+  }
+}
+
+async function onCommitReviewDecisionVouch() {
+  commitReviewDecision.value = "vouched";
+  showCommitReviewDecisionModal.value = false;
+  await proceedToCommit(pendingCommitReviewTrailers);
+}
+
+async function onCommitReviewDecisionSkip() {
+  commitReviewDecision.value = "skipped";
+  showCommitReviewDecisionModal.value = false;
+  await proceedToCommit(pendingCommitReviewTrailers);
+}
+
+/** Decision D8 — cancelling (Escape/backdrop/Cancel button) cancels the
+ *  commit outright. It must NEVER silently record "skipped": skipping is
+ *  only ever the result of an explicit click on the Skip button. */
+function onCommitReviewDecisionCancel() {
+  showCommitReviewDecisionModal.value = false;
+  pendingCommitReviewTrailers = "";
 }
 
 /**
@@ -1062,7 +1326,39 @@ async function onSecretsIgnore(patternId: string) {
 
 function onSecretsCommitAnyway() {
   showSecretsModal.value = false;
-  void doCommit(lastAttemptedCommitTrailers);
+  void proceedToCommit(lastAttemptedCommitTrailers);
+}
+
+/** v3.7.0 — "Review staged changes" button handler. Shows a brief clean-pass
+ *  confirmation when the run actually completed (not skipped, not
+ *  superseded by a newer run) with no error and zero findings — otherwise a
+ *  clean review is indistinguishable from "didn't run" or "failed"
+ *  (verifier issue #5). A failed run is separately surfaced via the
+ *  `commitReview.lastError` watcher above (issue #4). Returns whether the
+ *  run actually attempted — `onCommitReviewDecisionReviewNow` ("Review now"
+ *  in the decision modal) reuses this exact branching directly (verifier
+ *  item #4) instead of duplicating a weaker version that ignored the
+ *  outcome and always popped the findings modal. */
+async function onReviewStagedClicked(): Promise<boolean> {
+  const ran = await commitReview.run(repoFolderPath.value ?? "", locale.value);
+  if (ran && !commitReview.lastError.value && commitReview.findings.value.length === 0) {
+    showCommitReviewCleanToast();
+  }
+  return ran;
+}
+
+/** v3.7.0 — "Jump to" in the findings modal: select the finding's file
+ *  (always staged — findings are index-scoped) and scroll the diff to it. */
+function onJumpToCommitReviewFinding(id: string) {
+  const finding = commitReview.findings.value.find((f) => f.id === id);
+  if (!finding) return;
+  if (repoSelectedFile.value !== finding.path || !repoSelectedFileStaged.value) {
+    repoSelectFile(finding.path, true);
+  }
+  showCommitReviewModal.value = false;
+  void nextTick(() => {
+    diffViewerRef.value?.scrollToFinding?.(finding.line, finding.side);
+  });
 }
 
 const repoSidebarListeners = {
@@ -1088,21 +1384,56 @@ const repoSidebarListeners = {
   deleteBranch: (name: string, hasLocal: boolean, hasRemote: boolean, remoteName?: string) =>
     handleDeleteBranchRequest(name, hasLocal, hasRemote, remoteName),
   openSecrets: () => { showSecretsModal.value = true; },
+  reviewStaged: () => { void onReviewStagedClicked(); },
+  openCommitReview: () => { showCommitReviewModal.value = true; },
 };
 
 // Trigger a (debounced) secrets scan whenever the staged set changes, or when a repo is
 // opened/switched. Never a setInterval — see apps/desktop/CLAUDE.md P6.4.
+//
+// v3.7.0 fix (finding #1, CRITICAL): this MUST stay the multi-source array
+// form `watch([a, b], cb)`, never the single-getter form `watch(() => [a, b],
+// cb)`. A single getter returning a fresh array literal is always "changed"
+// by reference (`hasChanged(newArray, oldArray)` is `!Object.is`, which a
+// fresh array literal always fails), so that shape re-fires this callback on
+// EVERY reactive re-run of the effect, including a routine 2s status poll
+// that changed nothing. The multi-source form compares each source by its
+// own value instead. The second source is `stagedFingerprint` (paths +
+// statuses), not the bare staged COUNT: a count-keyed watcher misses
+// unstage-A + stage-B (count unchanged, set changed). It still cannot see a
+// content-only restage of an already-staged file (git status carries no
+// content hash) -- that gap is covered by a commit-time rescan, see
+// `handleCommitRequest`'s `secretsScanner.scanNow(...)` call and
+// `useCommitReview.ts`'s coverage recompute in `proceedToCommit`.
 watch(
-  () => [repoFolderPath.value, repoStats.value.staged] as const,
+  [() => repoFolderPath.value, () => stagedFingerprint.value],
   ([cwd]) => {
     if (cwd) {
       secretsScanner.scan(cwd, settings.value);
     } else {
       secretsScanner.findings.value = [];
     }
+    // v3.7.0 — Commit Review: a staged-set/repo change invalidates whatever
+    // findings are on screen (the diff they reviewed no longer exists — D5,
+    // no auto-run on a plain staging change). `onStagedSetChanged` is also
+    // the real trigger for Task 3's "re-review on the next staging change"
+    // after a "Fix with agent" handoff: it's a no-op unless `armReReview()`
+    // was called, in which case it fires exactly one re-review here.
+    // `repoStats.value.staged` is read here (inside the callback), not as a
+    // tracked source: `onStagedSetChanged` only needs the current count for
+    // its own bookkeeping, it is not what should decide whether this fires.
+    commitReview.onStagedSetChanged(cwd ?? "", locale.value, repoStats.value.staged);
   },
   { immediate: true },
 );
+
+// Task 5 — a repo switch starts a fresh commit-review decision cycle: forget
+// whatever Vouch/Skip/ran decision applied to the PREVIOUS repo. Deliberately
+// separate from the staged-set watcher above — the decision must survive a
+// plain staging change within the SAME repo (e.g. the "Review now" round trip).
+watch(repoFolderPath, () => {
+  commitReviewDecision.value = null;
+});
 
 function onDiscardSection(sectionKey: string, paths: string[]) {
   discardSectionConfirm.value = { sectionKey, paths };
@@ -1683,34 +2014,111 @@ function onNewAiTask() {
   aiTaskNamePrompt.value = true;
 }
 
+/**
+ * v3.7.0 (Task 3) — the scratch-worktree creation sequence used by "New AI
+ * task" (`confirmNewAiTask`): create -> register -> select -> open. Returns
+ * `null` (without throwing) when there's no active project tab to base the
+ * scratch on — the caller decides how to surface that.
+ *
+ * Commit Review's "Fix with agent" used to also call this (optionally
+ * opening the agent in a scratch worktree), but that option was removed
+ * (see `onCommitReviewFixWithAgent`'s doc comment) after manual QA found a
+ * brand-new scratch worktree always hits a first-run onboarding screen that
+ * misinterprets the piped prompt. This function is no longer reachable from
+ * Commit Review at all — only `confirmNewAiTask` calls it now.
+ */
+async function createAiTaskScratchWorktree(name?: string): Promise<ScratchWorktree | null> {
+  if (!repoFolderPath.value || activeTabId.value === null) return null;
+  // Always base the scratch on the active project's root, not whatever
+  // worktree is currently selected, so AI tasks branch from the project.
+  const projectTab = repoTabs.value.find((t) => t.id === activeTabId.value);
+  const origin = projectTab?.path ?? repoFolderPath.value;
+  const scratch = await scratchWorktreeCreate(origin, undefined, name || undefined);
+  aiTasks.register({
+    path: scratch.path,
+    originCwd: origin,
+    branch: scratch.branch,
+    createdAt: scratch.created_at,
+  });
+  void refreshWorktreeCount(origin);
+  // Switch the project's checkout to the new scratch worktree in place, then
+  // load it so a spawned agent terminal lands in the right cwd.
+  selectWorktree(activeTabId.value, scratch.path);
+  await openRepo(scratch.path);
+  return scratch;
+}
+
 /** Create the AI-task scratch worktree once the user has named it. */
 async function confirmNewAiTask(name: string) {
   if (!repoFolderPath.value || activeTabId.value === null) return;
   aiTaskNameBusy.value = true;
   try {
-    // Always base the scratch on the active project's root, not whatever
-    // worktree is currently selected, so AI tasks branch from the project.
-    const projectTab = repoTabs.value.find((t) => t.id === activeTabId.value);
-    const origin = projectTab?.path ?? repoFolderPath.value;
-    const scratch = await scratchWorktreeCreate(origin, undefined, name || undefined);
-    aiTasks.register({
-      path: scratch.path,
-      originCwd: origin,
-      branch: scratch.branch,
-      createdAt: scratch.created_at,
-    });
-    void refreshWorktreeCount(origin);
+    const scratch = await createAiTaskScratchWorktree(name);
     aiTaskNamePrompt.value = false;
-    // Switch the project's checkout to the new scratch worktree in place, then
-    // load it and spawn the agent terminal there.
-    selectWorktree(activeTabId.value, scratch.path);
-    await openRepo(scratch.path);
+    if (!scratch) return;
     await openTerminalTab(scratch.path, "claude");
   } catch (err) {
     aiTaskNamePrompt.value = false;
     reportAgentLaunchError("claude", err);
   } finally {
     aiTaskNameBusy.value = false;
+  }
+}
+
+/**
+ * v3.7.0 (Task 3) — "Fix with agent" from `CommitReviewModal`: types the
+ * findings prompt into a fresh agent PTY WITHOUT pressing Enter (plan
+ * decision D7 — no `terminal_open` "initial prompt" param exists, and typing
+ * without submitting avoids racing the agent TUI's boot while keeping "let
+ * an agent edit my files" a deliberate human gesture).
+ *
+ * Always targets the CURRENT repo — deliberately scope-narrowed for PR2
+ * (not a bug fix): this used to optionally open the agent in a fresh
+ * scratch worktree via `createAiTaskScratchWorktree`, but manual QA against
+ * real `claude`/`codex` CLIs found that a brand-new working directory
+ * (exactly what a scratch worktree always is) hits a first-run "trust this
+ * directory?" onboarding screen before the agent's normal input box exists.
+ * Writing newline-bearing input into THAT screen doesn't "type unsent
+ * text" — it drives Enter-confirms-the-highlighted-option menu navigation,
+ * and in testing this went as far as `codex` starting a real `brew upgrade
+ * --cask codex` from its default "Update now" option. The current repo is
+ * already trusted (no onboarding screen), so this path is safe; the
+ * scratch-worktree option is removed until there's a real fix — e.g.
+ * pre-trusting the directory before launching the agent, or detecting the
+ * onboarding screen before writing — tracked as a roadmap follow-up.
+ * `createAiTaskScratchWorktree` itself is untouched and still used by the
+ * existing "New AI task" button (`confirmNewAiTask`).
+ *
+ * Verifier item #5 — manual QA performed via the dev-server's real
+ * `node-pty` backend (the same one `pnpm dev:web` uses) confirmed: once an
+ * agent has reached its normal ready-to-chat input state, writing this
+ * whole multi-line, trailing-\n prompt as one burst lands as UNSENT
+ * multi-line input text (verified for `claude` — its bracketed-paste-mode
+ * input box shows every line, with no submission and no response activity
+ * for several seconds after). That part of decision D7's assumption holds
+ * for the current-repo path this function now exclusively uses.
+ */
+async function onCommitReviewFixWithAgent(payload: { tool: TerminalTabType }) {
+  const prompt = buildReviewFixPrompt(commitReview.findings.value);
+  if (!prompt) return;
+  showCommitReviewModal.value = false;
+  try {
+    const cwd = repoFolderPath.value ?? undefined;
+    const tab = await openTerminalTab(cwd, payload.tool);
+    // `sessionId` is -1 until `terminalOpen` resolves inside `openTab` —
+    // `openTerminalTab` only returns after that await settles, but guard
+    // explicitly anyway (per plan) rather than relying on that implicitly.
+    if (!tab || tab.sessionId < 0) {
+      reportAgentLaunchError(payload.tool, new Error("terminal session unavailable"));
+      return;
+    }
+    // Best-effort readiness wait (verifier item #5) — gives the spawned
+    // process a moment past the raw PTY spawn before the prompt lands.
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await termSessions.write(tab.sessionId, prompt);
+    commitReview.armReReview();
+  } catch (err) {
+    reportAgentLaunchError(payload.tool, err);
   }
 }
 
@@ -2810,6 +3218,16 @@ function onKeyDown(e: KeyboardEvent) {
     }
     return;
   }
+  // Task 2 (v3.7.0) — n/p/x cycle/dismiss commit-review findings in the
+  // Changes view. Checked early, before the mod-key ladder, and the
+  // resolver itself guards editable targets (the commit summary/description
+  // fields live in this same view) and inactivity — see commitReviewKeymap.ts.
+  const commitReviewAction = resolveCommitReviewShortcut(e, { active: commitReviewShortcutActive.value });
+  if (commitReviewAction) {
+    e.preventDefault();
+    commitReviewNav.dispatch(commitReviewAction);
+    return;
+  }
   if (mod && e.key === "t") {
     // Cmd+T — new tab (open folder picker)
     e.preventDefault();
@@ -3349,10 +3767,12 @@ onUnmounted(() => {
                 <ImageDiffViewer v-else-if="isImagePath(repoSelectedFile) && repoFolderPath && repoSelectedFile"
                   :cwd="repoFolderPath" :file-path="repoSelectedFile" old-rev="HEAD"
                   :new-rev="repoSelectedFileStaged ? ':0' : ''" status="modified" />
-                <DiffViewer v-else :diff="repoDiff" :file-path="repoSelectedFile" :diff-mode="diffMode" :selectable="true"
+                <DiffViewer v-else ref="diffViewerRef" :diff="repoDiff" :file-path="repoSelectedFile" :diff-mode="diffMode" :selectable="true"
+                  :findings="findingsForSelectedFile"
                   @update:diff-mode="onDiffModeChange" @open-file-history="openFileHistory"
                   @open-in-editor="handleOpenInEditor" @stage-patch="stagePatch"
-                  @select-dir-file="(path) => repoSelectFile(path, false)" />
+                  @select-dir-file="(path) => repoSelectFile(path, false)"
+                  @dismiss-finding="(id) => commitReview.dismiss(id)" />
               </div>
 
               <div v-if="showCommitRail" class="sidebar-handle" :class="{ 'sidebar-handle--active': sidebarResizing }"
@@ -3703,6 +4123,33 @@ onUnmounted(() => {
       @ignore="onSecretsIgnore($event)"
       @commit-anyway="onSecretsCommitAnyway"
       @close="showSecretsModal = false"
+    />
+
+    <!-- Commit review findings modal (v3.7.0) — opened from the RepoSidebar commit-area badge -->
+    <CommitReviewModal
+      v-if="showCommitReviewModal"
+      :findings="commitReview.findings.value"
+      :summary="commitReview.summary.value"
+      :truncated="commitReview.truncated.value"
+      :iterations="commitReview.iterations.value"
+      :coverage="commitReview.coverage.value"
+      @jump="onJumpToCommitReviewFinding($event)"
+      @dismiss="commitReview.dismiss($event)"
+      @fix-with-agent="onCommitReviewFixWithAgent($event)"
+      @close="showCommitReviewModal = false"
+    />
+
+    <!-- Commit review decision modal (v3.7.0, Task 5) — Review / Vouch / Skip before a commit -->
+    <CommitReviewDecisionModal
+      v-if="showCommitReviewDecisionModal"
+      :findings-count="commitReview.findings.value.length"
+      :iterations="commitReview.iterations.value"
+      :coverage="commitReview.coverage.value"
+      :risk-count="commitReviewUnresolvedRisks"
+      @review-now="onCommitReviewDecisionReviewNow"
+      @vouch="onCommitReviewDecisionVouch"
+      @skip="onCommitReviewDecisionSkip"
+      @close="onCommitReviewDecisionCancel"
     />
 
     <!-- Stash-and-switch modal (asks for a stash label before switching branches) -->

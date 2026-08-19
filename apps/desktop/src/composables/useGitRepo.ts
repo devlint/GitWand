@@ -1,6 +1,11 @@
 import { ref, computed, watch } from "vue";
 import { whenIdle } from "../utils/idleSchedule";
 import {
+  type RepoStats,
+  createRepoStatsMemo,
+  stagedFingerprintOf,
+} from "../utils/repoStats";
+import {
   getGitStatus,
   getGitDiff,
   getGitLog,
@@ -322,67 +327,33 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     return result;
   });
 
-  /** Quick stats for the header and graph. */
-  const repoStats = computed(() => {
-    if (!status.value)
-      return {
-        staged: 0,
-        unstaged: 0,
-        untracked: 0,
-        conflicted: 0,
-        added: 0,
-        modified: 0,
-        deleted: 0,
-        renamed: 0,
-      };
-    const s = status.value;
+  /**
+   * Quick stats for the header and graph.
+   *
+   * v3.7.0 fix (finding #1, CRITICAL): the computation itself lives in the
+   * pure `utils/repoStats.ts` module and is wrapped in a memoizing view
+   * (`createRepoStatsMemo`) so a structurally identical recomputation (a
+   * routine status poll that changed nothing) returns the SAME object
+   * reference instead of a fresh literal. That reference stability is what
+   * stops this `computed` from notifying its subscribers on a no-op poll --
+   * previously every poll tick reassigned `status.value` to a brand-new
+   * object, and the old body here always returned a fresh literal, so Vue's
+   * `hasChanged(new, old)` was always true and every downstream `watch`
+   * fired unconditionally every 2s (see `App.vue`'s staged-set watcher and
+   * `docs/superpowers/plans/2026-08-19-v3.7.0-commit-review-review-fixes.md`,
+   * Task 1, for the full trace).
+   */
+  const repoStatsMemo = createRepoStatsMemo();
+  const repoStats = computed<RepoStats>(() => repoStatsMemo(status.value));
 
-    const fileStates = new Map<
-      string,
-      "added" | "modified" | "deleted" | "renamed"
-    >();
-
-    for (const path of s.untracked) {
-      fileStates.set(path, "added");
-    }
-    for (const path of s.conflicted) {
-      fileStates.set(path, "modified");
-    }
-    for (const f of s.staged) {
-      if (f.status === "added") fileStates.set(f.path, "added");
-      else if (f.status === "deleted") fileStates.set(f.path, "deleted");
-      else if (f.status === "renamed") fileStates.set(f.path, "renamed");
-      else fileStates.set(f.path, "modified");
-    }
-    for (const f of s.unstaged) {
-      const current = fileStates.get(f.path);
-      if (f.status === "deleted") fileStates.set(f.path, "deleted");
-      else if (f.status === "added") fileStates.set(f.path, "added");
-      else if (!current) fileStates.set(f.path, "modified");
-    }
-
-    let added = 0,
-      modified = 0,
-      deleted = 0,
-      renamed = 0;
-    for (const state of fileStates.values()) {
-      if (state === "added") added++;
-      else if (state === "modified") modified++;
-      else if (state === "deleted") deleted++;
-      else if (state === "renamed") renamed++;
-    }
-
-    return {
-      staged: s.staged.length,
-      unstaged: s.unstaged.length,
-      untracked: s.untracked.length,
-      conflicted: s.conflicted.length,
-      added,
-      modified,
-      deleted,
-      renamed,
-    };
-  });
+  /**
+   * Primitive identity of the staged SET (paths + statuses), safe to `watch`
+   * directly. Fires on files entering/leaving the index or changing status,
+   * including unstage-A + stage-B which a bare staged COUNT misses. It cannot
+   * see a content-only restage of an already-staged file: `git status` carries
+   * no content hash. Consumers that need that must recompute at commit time.
+   */
+  const stagedFingerprint = computed(() => stagedFingerprintOf(status.value));
 
   /** How many commits ahead / behind the remote tracking branch. */
   const aheadCount = computed(() => status.value?.ahead ?? 0);
@@ -1565,6 +1536,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     isSelectedFileConflicted,
     allFiles,
     repoStats,
+    stagedFingerprint,
     commitSummary,
     commitDescription,
     canCommit,

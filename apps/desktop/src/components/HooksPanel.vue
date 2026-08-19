@@ -11,7 +11,12 @@ import {
 import { useI18n } from "../composables/useI18n";
 import type { LocaleKey } from "../locales/en";
 import BaseModal from "./BaseModal.vue";
-import { buildSecretsHookScript, isSecretsHookScript } from "../utils/secretsHook";
+import {
+  buildGitwandHookScript,
+  classifyPreCommitHook,
+  type HookSections,
+  type PreCommitHookState,
+} from "../utils/gitwandHook";
 
 const props = defineProps<{
   cwd: string;
@@ -26,10 +31,30 @@ const hooks = ref<HookEntry[]>([]);
 const loading = ref(false);
 const error = ref<string | null>(null);
 
-// v3.5.0 — Secrets pre-commit hook installer. The hook script on disk (detected via its marker
-// comment) IS the install state — no separate persisted flag.
-const secretsHookInstalled = ref(false);
+// v3.7.0 (Task 6) — GitWand-managed pre-commit hook: secrets + commit review sections, both
+// carried by a SINGLE composable script on disk (detected via `classifyPreCommitHook`): no
+// separate persisted flag, and installing/removing one section never clobbers the other.
+//
+// v3.7.0 review-round fix (finding #7): `hookState` also carries WHICH KIND of hook is
+// installed (none / gitwand / foreign), not just the section flags, so a hand-written script
+// the user already has can be distinguished from an empty hooks directory: both used to collapse
+// to the same "not installed" UI state, silently hiding that Install would OVERWRITE it.
+const hookState = ref<PreCommitHookState>({ kind: "none", sections: { secrets: false, review: false } });
+const hookSections = computed<HookSections>(() => hookState.value.sections);
+const isForeignHook = computed(() => hookState.value.kind === "foreign");
 const secretsHookBusy = ref(false);
+const reviewHookBusy = ref(false);
+// Verifier finding (PR3) — both sections' install/remove handlers
+// read-modify-write the same `hookSections.value` snapshot via
+// `writeGitwandHook`, which fully rewrites the on-disk script. Two
+// independent busy flags let a secrets operation and a review operation run
+// concurrently, so the second one's snapshot can predate the first one's
+// write — whichever `gitHookCreate` lands last on disk silently wins,
+// dropping the other section. `hookWriteBusy` gates ALL FOUR handlers (both
+// as a template `:disabled` and as a code-level guard, since the `askConfirm`
+// modal happens before either flag is set) so at most one write is ever
+// in flight regardless of which row's button was clicked.
+const hookWriteBusy = computed(() => secretsHookBusy.value || reviewHookBusy.value);
 
 // New hook form
 const showForm = ref(false);
@@ -134,21 +159,39 @@ async function deleteHook() {
   }
 }
 
-async function checkSecretsHook() {
+async function checkGitwandHook() {
   try {
     const content = await readFile(props.cwd, ".git/hooks/pre-commit");
-    secretsHookInstalled.value = isSecretsHookScript(content);
+    hookState.value = classifyPreCommitHook(content);
   } catch {
-    // No pre-commit hook on disk (or unreadable) — treat as "not installed".
-    secretsHookInstalled.value = false;
+    // No pre-commit hook on disk (or unreadable).
+    hookState.value = classifyPreCommitHook(null);
   }
 }
 
+/**
+ * Writes the single composable script with `next`'s section set, or deletes the hook entirely
+ * once neither section remains — so removing the last installed section never leaves an empty
+ * shebang-only script behind.
+ */
+async function writeGitwandHook(next: HookSections): Promise<void> {
+  if (!next.secrets && !next.review) {
+    await gitHookDelete(props.cwd, "pre-commit");
+  } else {
+    await gitHookCreate(props.cwd, "pre-commit", buildGitwandHookScript(next));
+  }
+  await loadHooks();
+  await checkGitwandHook();
+}
+
 async function installSecretsHook() {
+  if (hookWriteBusy.value) return;
   if (askConfirm) {
     const confirmed = await askConfirm({
       title: t("hooks.secretsInstallConfirmTitle"),
-      message: t("hooks.secretsInstallConfirmMessage"),
+      message: isForeignHook.value
+        ? t("hooks.secretsInstallConfirmMessageForeign")
+        : t("hooks.secretsInstallConfirmMessage"),
       confirmLabel: t("hooks.secretsInstall"),
     });
     if (!confirmed) return;
@@ -156,9 +199,7 @@ async function installSecretsHook() {
   secretsHookBusy.value = true;
   error.value = null;
   try {
-    await gitHookCreate(props.cwd, "pre-commit", buildSecretsHookScript());
-    await loadHooks();
-    await checkSecretsHook();
+    await writeGitwandHook({ ...hookSections.value, secrets: true });
   } catch (err: any) {
     error.value = t("hooks.errorSecretsInstall").replace("{0}", String(err?.message ?? err));
   } finally {
@@ -167,6 +208,7 @@ async function installSecretsHook() {
 }
 
 async function removeSecretsHook() {
+  if (hookWriteBusy.value) return;
   if (askConfirm) {
     const confirmed = await askConfirm({
       title: t("hooks.secretsRemoveConfirmTitle"),
@@ -179,9 +221,7 @@ async function removeSecretsHook() {
   secretsHookBusy.value = true;
   error.value = null;
   try {
-    await gitHookDelete(props.cwd, "pre-commit");
-    await loadHooks();
-    await checkSecretsHook();
+    await writeGitwandHook({ ...hookSections.value, secrets: false });
   } catch (err: any) {
     error.value = t("hooks.errorSecretsRemove").replace("{0}", String(err?.message ?? err));
   } finally {
@@ -189,9 +229,54 @@ async function removeSecretsHook() {
   }
 }
 
+async function installReviewHook() {
+  if (hookWriteBusy.value) return;
+  if (askConfirm) {
+    const confirmed = await askConfirm({
+      title: t("hooks.reviewInstallConfirmTitle"),
+      message: isForeignHook.value
+        ? t("hooks.reviewInstallConfirmMessageForeign")
+        : t("hooks.reviewInstallConfirmMessage"),
+      confirmLabel: t("hooks.reviewInstall"),
+    });
+    if (!confirmed) return;
+  }
+  reviewHookBusy.value = true;
+  error.value = null;
+  try {
+    await writeGitwandHook({ ...hookSections.value, review: true });
+  } catch (err: any) {
+    error.value = t("errors.reviewHookInstall").replace("{0}", String(err?.message ?? err));
+  } finally {
+    reviewHookBusy.value = false;
+  }
+}
+
+async function removeReviewHook() {
+  if (hookWriteBusy.value) return;
+  if (askConfirm) {
+    const confirmed = await askConfirm({
+      title: t("hooks.reviewRemoveConfirmTitle"),
+      message: t("hooks.reviewRemoveConfirmMessage"),
+      confirmLabel: t("hooks.reviewRemove"),
+      danger: true,
+    });
+    if (!confirmed) return;
+  }
+  reviewHookBusy.value = true;
+  error.value = null;
+  try {
+    await writeGitwandHook({ ...hookSections.value, review: false });
+  } catch (err: any) {
+    error.value = t("errors.reviewHookRemove").replace("{0}", String(err?.message ?? err));
+  } finally {
+    reviewHookBusy.value = false;
+  }
+}
+
 onMounted(() => {
   loadHooks();
-  checkSecretsHook();
+  checkGitwandHook();
 });
 </script>
 
@@ -213,31 +298,73 @@ onMounted(() => {
     <!-- Error -->
     <div v-if="error" class="hp-error">{{ error }}</div>
 
-    <!-- Secrets pre-commit hook (v3.5.0) — dedicated section, distinct from the generic hook creator -->
-    <div class="hp-secrets">
-      <div class="hp-secrets-info">
-        <span class="hp-secrets-title">{{ t("hooks.secretsTitle") }}</span>
-        <span class="hp-secrets-desc">{{ t("hooks.secretsDescription") }}</span>
+    <!-- v3.7.0 review-round fix (finding #7): a foreign (non-GitWand) pre-commit hook is
+         already installed: warn distinctly, since Install below would OVERWRITE it. -->
+    <div v-if="isForeignHook" class="hp-hookrow hp-hookrow--foreign">
+      <div class="hp-hookrow-info">
+        <span class="hp-hookrow-title">
+          {{ t("hooks.foreignTitle") }}
+          <span class="hp-badge hp-badge--warn">{{ t("hooks.foreignBadge") }}</span>
+        </span>
+        <span class="hp-hookrow-desc">{{ t("hooks.foreignDescription") }}</span>
       </div>
-      <div class="hp-secrets-actions">
-        <span class="hp-badge" :class="secretsHookInstalled ? 'hp-badge--on' : 'hp-badge--off'">
-          {{ secretsHookInstalled ? t("hooks.secretsInstalled") : t("hooks.secretsNotInstalled") }}
+    </div>
+
+    <!-- GitWand-managed pre-commit hook (v3.7.0, Task 6) — secrets + commit review sections,
+         each independently installable, both written through the single composable script
+         builder so neither clobbers the other. -->
+    <div class="hp-hookrow">
+      <div class="hp-hookrow-info">
+        <span class="hp-hookrow-title">{{ t("hooks.secretsTitle") }}</span>
+        <span class="hp-hookrow-desc">{{ t("hooks.secretsDescription") }}</span>
+      </div>
+      <div class="hp-hookrow-actions">
+        <span class="hp-badge" :class="hookSections.secrets ? 'hp-badge--on' : 'hp-badge--off'">
+          {{ hookSections.secrets ? t("hooks.secretsInstalled") : t("hooks.secretsNotInstalled") }}
         </span>
         <button
-          v-if="!secretsHookInstalled"
+          v-if="!hookSections.secrets"
           class="bm-btn bm-btn--primary hp-btn-sm"
-          :disabled="secretsHookBusy"
+          :disabled="hookWriteBusy"
           @click="installSecretsHook"
         >
           {{ t("hooks.secretsInstall") }}
         </button>
         <button
           v-else
-          class="bm-btn bm-btn--ghost hp-btn-sm hp-secrets-remove"
-          :disabled="secretsHookBusy"
+          class="bm-btn bm-btn--ghost hp-btn-sm hp-hookrow-remove"
+          :disabled="hookWriteBusy"
           @click="removeSecretsHook"
         >
           {{ t("hooks.secretsRemove") }}
+        </button>
+      </div>
+    </div>
+
+    <div class="hp-hookrow">
+      <div class="hp-hookrow-info">
+        <span class="hp-hookrow-title">{{ t("hooks.reviewTitle") }}</span>
+        <span class="hp-hookrow-desc">{{ t("hooks.reviewDescription") }}</span>
+      </div>
+      <div class="hp-hookrow-actions">
+        <span class="hp-badge" :class="hookSections.review ? 'hp-badge--on' : 'hp-badge--off'">
+          {{ hookSections.review ? t("hooks.reviewInstalled") : t("hooks.reviewNotInstalled") }}
+        </span>
+        <button
+          v-if="!hookSections.review"
+          class="bm-btn bm-btn--primary hp-btn-sm"
+          :disabled="hookWriteBusy"
+          @click="installReviewHook"
+        >
+          {{ t("hooks.reviewInstall") }}
+        </button>
+        <button
+          v-else
+          class="bm-btn bm-btn--ghost hp-btn-sm hp-hookrow-remove"
+          :disabled="hookWriteBusy"
+          @click="removeReviewHook"
+        >
+          {{ t("hooks.reviewRemove") }}
         </button>
       </div>
     </div>
@@ -383,8 +510,8 @@ onMounted(() => {
   margin-bottom: 12px;
 }
 
-/* Secrets pre-commit hook — dedicated section (v3.5.0) */
-.hp-secrets {
+/* GitWand-managed pre-commit hook rows — secrets + commit review (v3.7.0, Task 6) */
+.hp-hookrow {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -396,32 +523,32 @@ onMounted(() => {
   margin-bottom: 12px;
 }
 
-.hp-secrets-info {
+.hp-hookrow-info {
   display: flex;
   flex-direction: column;
   gap: 2px;
   min-width: 0;
 }
 
-.hp-secrets-title {
+.hp-hookrow-title {
   font-size: 12px;
   font-weight: 600;
   color: var(--color-text-primary);
 }
 
-.hp-secrets-desc {
+.hp-hookrow-desc {
   font-size: 11px;
   color: var(--color-text-muted);
 }
 
-.hp-secrets-actions {
+.hp-hookrow-actions {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
 }
 
-.hp-secrets-remove {
+.hp-hookrow-remove {
   color: var(--color-danger, #e53e3e);
 }
 
@@ -555,6 +682,18 @@ onMounted(() => {
 .hp-badge--off {
   background: var(--color-surface-alt, rgba(255, 255, 255, 0.06));
   color: var(--color-text-muted);
+}
+
+/* v3.7.0 review-round fix (finding #7): foreign pre-commit hook warning */
+.hp-badge--warn {
+  background: rgba(217, 119, 6, 0.15);
+  color: var(--color-warning, #d97706);
+  margin-left: 6px;
+}
+
+.hp-hookrow--foreign {
+  background: rgba(217, 119, 6, 0.08);
+  border-color: var(--color-warning, #d97706);
 }
 
 /* Form */
