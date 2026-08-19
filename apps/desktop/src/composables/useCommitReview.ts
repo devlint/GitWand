@@ -413,6 +413,18 @@ export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReview
   }
 
   function clearReviewState(cwd: string): void {
+    // v3.7.0 fix (finding #3): abort any in-flight review FIRST, mirroring
+    // reset()'s ordering. Without this, a background re-review armed by
+    // "Fix with agent" (armReReview -> onStagedSetChanged -> run) that is
+    // still in flight when a commit just went through can complete AFTER
+    // this clear, reaching recordReview(cwd, files, headHash) with the
+    // PRE-COMMIT HEAD hash and re-populating the store this call just
+    // wiped -- a bogus iteration badge until the next commit's
+    // reconcileIterationsForHead self-heals it. Once stop() has run,
+    // controller.signal.aborted is true, so run() returns before
+    // recordReview and its finally block is a no-op (abortController
+    // already nulled).
+    stop();
     if (cwd) clearCommitReviewState(cwd);
     iterations.value = 0;
     coverage.value = 100;

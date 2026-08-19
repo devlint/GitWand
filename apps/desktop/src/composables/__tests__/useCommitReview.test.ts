@@ -718,6 +718,36 @@ describe("useCommitReview", () => {
       expect(another.iterations.value).toBe(0);
     });
 
+    it("clearReviewState aborts an in-flight review (a stale post-commit background run must not clobber the just-cleared state)", async () => {
+      enableCommitReview();
+      let resolvePrompt!: (v: string) => void;
+      const pending = new Promise<string>((resolve) => { resolvePrompt = resolve; });
+
+      queueDiffResponseOnce(gitExecOk(diffFor("a.ts")));
+      rawPromptMock.mockImplementationOnce(() => pending);
+
+      const review = useCommitReview();
+      const inFlight = review.run("/repo", "en"); // blocks on rawPrompt for a.ts
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      // A commit just went through; App.vue calls clearReviewState right
+      // after doCommit while the background re-review is still in flight.
+      review.clearReviewState("/repo");
+      expect(review.iterations.value).toBe(0);
+      expect(review.coverage.value).toBe(100);
+
+      resolvePrompt("[]");
+      await inFlight;
+      await Promise.resolve();
+
+      // The stale in-flight run's completion must never re-populate the
+      // just-cleared state with its pre-commit HEAD hash.
+      expect(review.iterations.value).toBe(0);
+      expect(review.coverage.value).toBe(100);
+      const { getState } = await import("../commitReviewState");
+      expect(getState("/repo").iterations).toBe(0);
+    });
+
     it("onStagedSetChanged refreshes iterations from persisted state when switching repos", async () => {
       enableCommitReview();
       setDiffDefaultResponse(gitExecOk(diffFor("a.ts")));
