@@ -222,6 +222,7 @@ const {
   hasConflicts,
   allFiles: repoFiles,
   repoStats,
+  stagedFingerprint,
   commitSummary,
   commitDescription,
   canCommit,
@@ -1366,9 +1367,24 @@ const repoSidebarListeners = {
 
 // Trigger a (debounced) secrets scan whenever the staged set changes, or when a repo is
 // opened/switched. Never a setInterval — see apps/desktop/CLAUDE.md P6.4.
+//
+// v3.7.0 fix (finding #1, CRITICAL): this MUST stay the multi-source array
+// form `watch([a, b], cb)`, never the single-getter form `watch(() => [a, b],
+// cb)`. A single getter returning a fresh array literal is always "changed"
+// by reference (`hasChanged(newArray, oldArray)` is `!Object.is`, which a
+// fresh array literal always fails), so that shape re-fires this callback on
+// EVERY reactive re-run of the effect, including a routine 2s status poll
+// that changed nothing. The multi-source form compares each source by its
+// own value instead. The second source is `stagedFingerprint` (paths +
+// statuses), not the bare staged COUNT: a count-keyed watcher misses
+// unstage-A + stage-B (count unchanged, set changed). It still cannot see a
+// content-only restage of an already-staged file (git status carries no
+// content hash) -- that gap is covered by a commit-time rescan, see
+// `handleCommitRequest`'s `secretsScanner.scanNow(...)` call and
+// `useCommitReview.ts`'s coverage recompute in `proceedToCommit`.
 watch(
-  () => [repoFolderPath.value, repoStats.value.staged] as const,
-  ([cwd, staged]) => {
+  [() => repoFolderPath.value, () => stagedFingerprint.value],
+  ([cwd]) => {
     if (cwd) {
       secretsScanner.scan(cwd, settings.value);
     } else {
@@ -1380,7 +1396,10 @@ watch(
     // the real trigger for Task 3's "re-review on the next staging change"
     // after a "Fix with agent" handoff: it's a no-op unless `armReReview()`
     // was called, in which case it fires exactly one re-review here.
-    commitReview.onStagedSetChanged(cwd ?? "", locale.value, staged);
+    // `repoStats.value.staged` is read here (inside the callback), not as a
+    // tracked source: `onStagedSetChanged` only needs the current count for
+    // its own bookkeeping, it is not what should decide whether this fires.
+    commitReview.onStagedSetChanged(cwd ?? "", locale.value, repoStats.value.staged);
   },
   { immediate: true },
 );
