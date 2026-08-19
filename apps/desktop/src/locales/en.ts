@@ -1251,6 +1251,7 @@ const en = {
       enabledHint: "Show a \"Review staged changes\" button in the commit area. Off by default, uses the confidence threshold and cap from Review AI above.",
       autoReReview: "Auto re-review after fixing with an agent",
       autoReReviewHint: "Automatically run one more review the next time you stage changes after handing findings to an agent.",
+      rcOverrideHint: "A repo's .gitwandrc commitReview.enabled forces this on or off for that repo, regardless of this toggle.",
     },
     language: "Interface language",
     languageAuto: "Automatic (system)",
@@ -1582,6 +1583,18 @@ const en = {
     secretsRemoveConfirmMessage: "This deletes .git/hooks/pre-commit. Terminal commits will no longer be scanned for secrets.",
     errorSecretsInstall: "Failed to install the secrets hook: {0}",
     errorSecretsRemove: "Failed to remove the secrets hook: {0}",
+    // v3.7.0 (Task 6) — Commit review pre-commit hook (warn-only reminder), shares the
+    // same single script as the secrets hook above via gitwandHook.ts.
+    reviewTitle: "Commit review pre-commit hook",
+    reviewDescription: "Reminds you from the terminal that GitWand's Commit Review didn't run for a commit. Never blocks, just a heads-up. Review state lives in the app and can't be checked from a shell script.",
+    reviewInstalled: "Installed",
+    reviewNotInstalled: "Not installed",
+    reviewInstall: "Install",
+    reviewRemove: "Remove",
+    reviewInstallConfirmTitle: "Install the commit review reminder hook?",
+    reviewInstallConfirmMessage: "This writes .git/hooks/pre-commit (or adds to the existing GitWand-managed one) to print a reminder on every terminal commit that Commit Review didn't run for it. It never blocks the commit. If a pre-commit hook already exists and isn't GitWand-managed, it will be overwritten.",
+    reviewRemoveConfirmTitle: "Remove the commit review reminder hook?",
+    reviewRemoveConfirmMessage: "This removes the commit review section from .git/hooks/pre-commit, deleting the file entirely if the secrets hook isn't also installed.",
   },
 
   // \u2500\u2500\u2500 Workspaces \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
@@ -2129,6 +2142,8 @@ const en = {
     sameBranches: "Head and base branches are identical \u2014 no PR possible.",
     noChangesToStash: "No local changes to stash \u2014 modify files before generating a message.",
     commitReviewFailed: "Commit review failed to read the staged diff.",
+    reviewHookInstall: "Failed to install the commit review hook: {0}",
+    reviewHookRemove: "Failed to remove the commit review hook: {0}",
   },
 
   // ─── Tags panel (v1.9) ──────────────────────────────────

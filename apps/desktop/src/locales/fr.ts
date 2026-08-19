@@ -1235,6 +1235,7 @@ const fr: Locale = {
       enabledHint: "Afficher un bouton « Passer en revue les changements indexés » dans la zone de commit. Désactivé par défaut, réutilise le seuil de confiance et le plafond de Review AI ci-dessus.",
       autoReReview: "Nouvelle revue automatique après une correction par un agent",
       autoReReviewHint: "Lancer automatiquement une revue supplémentaire la prochaine fois que vous indexez des changements après avoir transmis les constats à un agent.",
+      rcOverrideHint: "Le champ commitReview.enabled du .gitwandrc d'un dépôt force cette option (activée ou désactivée) pour ce dépôt, indépendamment de ce réglage.",
     },
     language: "Langue de l\u2019interface",
     languageAuto: "Automatique (syst\u00e8me)",
@@ -1559,6 +1560,18 @@ const fr: Locale = {
     secretsRemoveConfirmMessage: "Ceci supprime .git/hooks/pre-commit. Les commits faits depuis le terminal ne seront plus analysés pour des secrets.",
     errorSecretsInstall: "Échec de l'installation du hook de secrets : {0}",
     errorSecretsRemove: "Échec de la suppression du hook de secrets : {0}",
+    // v3.7.0 (Task 6) — Hook pre-commit de revue de commit (rappel non-bloquant), partage
+    // le même script unique que le hook de secrets ci-dessus via gitwandHook.ts.
+    reviewTitle: "Hook pre-commit de revue de commit",
+    reviewDescription: "Rappelle depuis le terminal que la Revue de commit GitWand n'a pas été exécutée pour un commit. Ne bloque jamais, c'est juste un avertissement. L'état de la revue vit dans l'application et ne peut pas être vérifié depuis un script shell.",
+    reviewInstalled: "Installé",
+    reviewNotInstalled: "Non installé",
+    reviewInstall: "Installer",
+    reviewRemove: "Supprimer",
+    reviewInstallConfirmTitle: "Installer le hook de rappel de revue de commit ?",
+    reviewInstallConfirmMessage: "Ceci écrit .git/hooks/pre-commit (ou l'ajoute au script GitWand existant) pour afficher un rappel à chaque commit terminal indiquant que la Revue de commit ne s'est pas exécutée. Le commit n'est jamais bloqué. Si un hook pre-commit existe déjà et n'est pas géré par GitWand, il sera écrasé.",
+    reviewRemoveConfirmTitle: "Supprimer le hook de rappel de revue de commit ?",
+    reviewRemoveConfirmMessage: "Ceci retire la section de revue de commit de .git/hooks/pre-commit, en supprimant le fichier entièrement si le hook de secrets n'est pas non plus installé.",
   },
 
   workspace: {
@@ -2097,6 +2110,8 @@ const fr: Locale = {
     sameBranches: "La branche source et la branche cible sont identiques \u2014 aucune PR possible.",
     noChangesToStash: "Aucun changement local \u00e0 stasher \u2014 modifie des fichiers avant de g\u00e9n\u00e9rer un message.",
     commitReviewFailed: "La revue de commit n'a pas pu lire les changements index\u00e9s.",
+    reviewHookInstall: "\u00c9chec de l'installation du hook de revue de commit : {0}",
+    reviewHookRemove: "\u00c9chec de la suppression du hook de revue de commit : {0}",
   },
   // ─── Tags panel (v1.9)
   tags: {

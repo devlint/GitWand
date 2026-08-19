@@ -1227,6 +1227,7 @@ const ptBR: Locale = {
       enabledHint: "Mostra um botão \"Revisar mudanças em stage\" na área de commit. Desativado por padrão, reutiliza o limite de confiança e o máximo do Review AI acima.",
       autoReReview: "Nova revisão automática após corrigir com um agente",
       autoReReviewHint: "Executar automaticamente mais uma revisão na próxima vez que você colocar mudanças em stage após enviar os achados a um agente.",
+      rcOverrideHint: "O campo commitReview.enabled do .gitwandrc de um repositório força essa opção (ativada ou desativada) para aquele repositório, independentemente desta configuração.",
     },
     language: "Idioma da interface",
     languageAuto: "Automático (sistema)",
@@ -1550,6 +1551,18 @@ const ptBR: Locale = {
     secretsRemoveConfirmMessage: "Isso exclui .git/hooks/pre-commit. Commits feitos pelo terminal deixarão de ser verificados em busca de segredos.",
     errorSecretsInstall: "Falha ao instalar o hook de segredos: {0}",
     errorSecretsRemove: "Falha ao remover o hook de segredos: {0}",
+    // v3.7.0 (Task 6) — Hook pre-commit de revisão de commit (lembrete apenas informativo),
+    // compartilha o mesmo script único do hook de segredos acima via gitwandHook.ts.
+    reviewTitle: "Hook pre-commit de revisão de commit",
+    reviewDescription: "Lembra pelo terminal que a Revisão de commit do GitWand não foi executada para um commit. Nunca bloqueia, é só um aviso. O estado da revisão vive no app e não pode ser verificado por um script de shell.",
+    reviewInstalled: "Instalado",
+    reviewNotInstalled: "Não instalado",
+    reviewInstall: "Instalar",
+    reviewRemove: "Remover",
+    reviewInstallConfirmTitle: "Instalar o hook de lembrete de revisão de commit?",
+    reviewInstallConfirmMessage: "Isso grava .git/hooks/pre-commit (ou adiciona ao script GitWand existente) para imprimir um lembrete em cada commit feito pelo terminal informando que a Revisão de commit não foi executada. Nunca bloqueia o commit. Se já existir um hook pre-commit que não é gerenciado pelo GitWand, ele será sobrescrito.",
+    reviewRemoveConfirmTitle: "Remover o hook de lembrete de revisão de commit?",
+    reviewRemoveConfirmMessage: "Isso remove a seção de revisão de commit de .git/hooks/pre-commit, apagando o arquivo por completo se o hook de segredos também não estiver instalado.",
   },
 
   workspace: {
@@ -2088,6 +2101,8 @@ const ptBR: Locale = {
     sameBranches: "A branch de origem e destino são idênticas — nenhuma PR possível.",
     noChangesToStash: "Sem alterações locais para stash — modifique arquivos antes de gerar uma mensagem.",
     commitReviewFailed: "A revisão de commit não conseguiu ler as mudanças em stage.",
+    reviewHookInstall: "Falha ao instalar o hook de revisão de commit: {0}",
+    reviewHookRemove: "Falha ao remover o hook de revisão de commit: {0}",
   },
   // ─── Tags panel (v1.9)
   tags: {

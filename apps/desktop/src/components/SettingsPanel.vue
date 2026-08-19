@@ -2768,6 +2768,7 @@ function deleteReleaseNoteTemplate(id: string) {
                   <span>{{ t('settings.commitReview.enabled') }}</span>
                 </label>
                 <span class="sp-hint">{{ t('settings.commitReview.enabledHint') }}</span>
+                <span class="sp-hint">{{ t('settings.commitReview.rcOverrideHint') }}</span>
               </div>
 
               <!-- commitReviewAutoReReview (Task 3, v3.7.0) — now wired to the

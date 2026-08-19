@@ -1285,6 +1285,7 @@ const zhCN: Locale = {
       enabledHint: "在提交区域显示“审查暂存的更改”按钮。默认关闭，复用上方 Review AI 的置信度阈值和上限。",
       autoReReview: "使用代理修复后自动重新审查",
       autoReReviewHint: "将发现项交给代理后，下次暂存更改时自动再运行一次审查。",
+      rcOverrideHint: "仓库 .gitwandrc 中的 commitReview.enabled 会强制在该仓库中开启或关闭此功能，无论此开关的设置如何。",
     },
     language: "界面语言",
     languageAuto: "自动（跟随系统）",
@@ -1537,6 +1538,18 @@ const zhCN: Locale = {
     secretsRemoveConfirmMessage: "这将删除 .git/hooks/pre-commit。从终端提交的更改将不再进行密钥扫描。",
     errorSecretsInstall: "安装密钥钩子失败：{0}",
     errorSecretsRemove: "移除密钥钩子失败：{0}",
+    // v3.7.0（任务 6）— 提交审查 pre-commit 钩子（仅提示，不阻止提交），通过 gitwandHook.ts
+    // 与上方的密钥钩子共用同一个脚本。
+    reviewTitle: "提交审查 pre-commit 钩子",
+    reviewDescription: "在终端提交时提醒你 GitWand 的提交审查未针对该提交运行，仅作提示，绝不阻止提交。审查状态保存在应用内，shell 脚本无法读取。",
+    reviewInstalled: "已安装",
+    reviewNotInstalled: "未安装",
+    reviewInstall: "安装",
+    reviewRemove: "移除",
+    reviewInstallConfirmTitle: "安装提交审查提醒钩子？",
+    reviewInstallConfirmMessage: "这会写入 .git/hooks/pre-commit（或添加到现有的 GitWand 脚本中），在每次终端提交时打印一条提醒，说明提交审查未运行。此操作绝不会阻止提交。如果已存在一个非 GitWand 管理的 pre-commit 钩子，它将被覆盖。",
+    reviewRemoveConfirmTitle: "移除提交审查提醒钩子？",
+    reviewRemoveConfirmMessage: "这会从 .git/hooks/pre-commit 中移除提交审查部分；如果密钥钩子也未安装，则会彻底删除该文件。",
   },
 
   workspace: {
@@ -2073,6 +2086,8 @@ const zhCN: Locale = {
     sameBranches: "源分支与目标分支相同 — 无法创建 PR。",
     noChangesToStash: "没有可存储的本地更改 — 请先修改文件再生成消息。",
     commitReviewFailed: "提交审查未能读取暂存的更改。",
+    reviewHookInstall: "安装提交审查钩子失败：{0}",
+    reviewHookRemove: "移除提交审查钩子失败：{0}",
   },
   // ─── Tags panel (v1.9)
   tags: {
