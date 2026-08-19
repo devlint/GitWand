@@ -32,6 +32,17 @@ const error = ref<string | null>(null);
 const hookSections = ref<HookSections>({ secrets: false, review: false });
 const secretsHookBusy = ref(false);
 const reviewHookBusy = ref(false);
+// Verifier finding (PR3) — both sections' install/remove handlers
+// read-modify-write the same `hookSections.value` snapshot via
+// `writeGitwandHook`, which fully rewrites the on-disk script. Two
+// independent busy flags let a secrets operation and a review operation run
+// concurrently, so the second one's snapshot can predate the first one's
+// write — whichever `gitHookCreate` lands last on disk silently wins,
+// dropping the other section. `hookWriteBusy` gates ALL FOUR handlers (both
+// as a template `:disabled` and as a code-level guard, since the `askConfirm`
+// modal happens before either flag is set) so at most one write is ever
+// in flight regardless of which row's button was clicked.
+const hookWriteBusy = computed(() => secretsHookBusy.value || reviewHookBusy.value);
 
 // New hook form
 const showForm = ref(false);
@@ -162,6 +173,7 @@ async function writeGitwandHook(next: HookSections): Promise<void> {
 }
 
 async function installSecretsHook() {
+  if (hookWriteBusy.value) return;
   if (askConfirm) {
     const confirmed = await askConfirm({
       title: t("hooks.secretsInstallConfirmTitle"),
@@ -182,6 +194,7 @@ async function installSecretsHook() {
 }
 
 async function removeSecretsHook() {
+  if (hookWriteBusy.value) return;
   if (askConfirm) {
     const confirmed = await askConfirm({
       title: t("hooks.secretsRemoveConfirmTitle"),
@@ -203,6 +216,7 @@ async function removeSecretsHook() {
 }
 
 async function installReviewHook() {
+  if (hookWriteBusy.value) return;
   if (askConfirm) {
     const confirmed = await askConfirm({
       title: t("hooks.reviewInstallConfirmTitle"),
@@ -223,6 +237,7 @@ async function installReviewHook() {
 }
 
 async function removeReviewHook() {
+  if (hookWriteBusy.value) return;
   if (askConfirm) {
     const confirmed = await askConfirm({
       title: t("hooks.reviewRemoveConfirmTitle"),
@@ -282,7 +297,7 @@ onMounted(() => {
         <button
           v-if="!hookSections.secrets"
           class="bm-btn bm-btn--primary hp-btn-sm"
-          :disabled="secretsHookBusy"
+          :disabled="hookWriteBusy"
           @click="installSecretsHook"
         >
           {{ t("hooks.secretsInstall") }}
@@ -290,7 +305,7 @@ onMounted(() => {
         <button
           v-else
           class="bm-btn bm-btn--ghost hp-btn-sm hp-hookrow-remove"
-          :disabled="secretsHookBusy"
+          :disabled="hookWriteBusy"
           @click="removeSecretsHook"
         >
           {{ t("hooks.secretsRemove") }}
@@ -310,7 +325,7 @@ onMounted(() => {
         <button
           v-if="!hookSections.review"
           class="bm-btn bm-btn--primary hp-btn-sm"
-          :disabled="reviewHookBusy"
+          :disabled="hookWriteBusy"
           @click="installReviewHook"
         >
           {{ t("hooks.reviewInstall") }}
@@ -318,7 +333,7 @@ onMounted(() => {
         <button
           v-else
           class="bm-btn bm-btn--ghost hp-btn-sm hp-hookrow-remove"
-          :disabled="reviewHookBusy"
+          :disabled="hookWriteBusy"
           @click="removeReviewHook"
         >
           {{ t("hooks.reviewRemove") }}

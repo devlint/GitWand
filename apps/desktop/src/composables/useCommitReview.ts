@@ -3,7 +3,14 @@
  *
  * Task 1a (v3.7.0) — staged-diff AI review orchestrator ("Commit Review",
  * roadmap bullet 1). Opt-in, off by default: with `commitReviewEnabled`
- * false this composable performs zero IPC and zero LLM calls.
+ * false and no `.gitwandrc` override, this composable performs zero LLM
+ * calls. Verifier finding (Task 6, PR3): it is NOT zero IPC in that case —
+ * `resolveEffectiveConfig` must read `.gitwandrc` (cached per repo after the
+ * first read) before it can know whether `commitReview.enabled` forces the
+ * feature ON regardless of the app setting; there is no way to honor that
+ * per-repo override without checking. The one-time-per-repo `.gitwandrc`
+ * read is the accepted cost of that feature, not a bug — see
+ * `resolveEffectiveConfig` below.
  *
  * Reuses the exact same engine as the v3.6.0 PR pre-review pass
  * (`usePrPreReview.analyzeFile`, `scope: "commit"` — Task 0), the same
@@ -281,14 +288,28 @@ export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReview
    * `cwd` is empty (repo closed), so a previously-open repo's forced-off
    * override can never linger and keep `effectiveEnabled` stuck at `false`
    * for a DIFFERENT repo, or for no repo at all.
+   *
+   * Fourth verifier pass (HIGH) — the write to `rcOverride.value` is guarded
+   * by the SAME `coverageGeneration` counter already protecting
+   * `coverage.value` in `refreshCoverageForCurrentDiff`/`computeCurrentCoverage`.
+   * Every caller of this function (`run()`, those two, via
+   * `resolveEffectiveConfig`) either bumps or has already had
+   * `coverageGeneration` bumped synchronously before its first `await`, so
+   * capturing it here — still synchronously, before the `readGitwandrc` IPC
+   * call below — snapshots exactly "which call this is." Without this, a
+   * slow first-visit `.gitwandrc` read for a repo the user has already
+   * navigated away from could resolve after a newer call already set the
+   * correct override, and overwrite `rcOverride`/`effectiveEnabled` with the
+   * WRONG repo's config.
    */
   async function refreshRcOverride(cwd: string): Promise<ResolvedCommitReviewRc> {
+    const myGeneration = coverageGeneration;
     if (!cwd) {
       rcOverride.value = {};
       return {};
     }
     const rc = await resolveGitwandrcCommitReview(cwd);
-    rcOverride.value = rc;
+    if (myGeneration === coverageGeneration) rcOverride.value = rc;
     return rc;
   }
 

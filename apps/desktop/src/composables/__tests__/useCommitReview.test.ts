@@ -137,18 +137,23 @@ describe("useCommitReview", () => {
     setHidden(false);
   });
 
-  it("performs zero IPC and zero LLM calls when the setting is disabled, and reports it did not run", async () => {
+  it("performs zero staged-diff fetch and zero LLM calls when the setting is disabled, but still reads .gitwandrc once to check for a force-on override, and reports it did not run", async () => {
     const { settings } = useSettings();
     settings.value = { ...defaultAppSettings, commitReviewEnabled: false };
     const review = useCommitReview();
     const ran = await review.run("/repo", "en");
+    // Verifier finding (Task 6, PR3): `.gitwandrc` must be read even when the
+    // app setting is off, since a repo can force the feature ON via
+    // `commitReview.enabled` — there is no way to honor that override without
+    // checking. Only the staged-diff fetch and the LLM call stay skipped.
+    expect(readGitwandrcMock).toHaveBeenCalledTimes(1);
     expect(gitExecMock).not.toHaveBeenCalled();
     expect(rawPromptMock).not.toHaveBeenCalled();
     expect(review.findings.value).toEqual([]);
     expect(ran).toBe(false);
   });
 
-  it("performs zero IPC and zero LLM calls when the AI provider is unavailable, and reports it did not run", async () => {
+  it("performs zero staged-diff fetch and zero LLM calls when the AI provider is unavailable, and reports it did not run", async () => {
     enableCommitReview();
     isAvailableRef.value = false;
     const review = useCommitReview();
@@ -1004,6 +1009,34 @@ describe("useCommitReview", () => {
 
       // ...then close the repo. The override must not linger.
       review.onStagedSetChanged("", "en", 0);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(review.effectiveEnabled.value).toBe(true);
+    });
+
+    it("fourth verifier pass (HIGH): a stale, slow-resolving .gitwandrc read for a repo the user already left never clobbers effectiveEnabled for the repo now open", async () => {
+      enableCommitReview(); // app setting: true
+      setDiffDefaultResponse(gitExecOk(""));
+
+      let resolveSlow!: (v: string) => void;
+      const slow = new Promise<string>((resolve) => { resolveSlow = resolve; });
+      readGitwandrcMock.mockImplementation(async (cwd: string) => {
+        if (cwd === "/repoA") return slow; // repo A's read — deliberately slow
+        return ""; // repo B — no .gitwandrc, resolves immediately, falls back to the app setting
+      });
+
+      const review = useCommitReview({ debounceMs: 0 });
+      review.onStagedSetChanged("/repoA", "en", 0); // fires the SLOW read, still pending
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      review.onStagedSetChanged("/repoB", "en", 0); // fires a second, faster read
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      // Repo B has no override — effectiveEnabled must reflect the (true)
+      // app setting for the repo actually open right now.
+      expect(review.effectiveEnabled.value).toBe(true);
+
+      // Now let repo A's stale read resolve, forcing the feature off. It must
+      // NOT overwrite effectiveEnabled — repo B is still the active repo.
+      resolveSlow(JSON.stringify({ commitReview: { enabled: false } }));
       await new Promise((resolve) => setTimeout(resolve, 10));
       expect(review.effectiveEnabled.value).toBe(true);
     });
