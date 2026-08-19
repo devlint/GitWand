@@ -6,6 +6,14 @@
  * The marker comment (`SECRETS_HOOK_MARKER`) lets HooksPanel.vue detect a previously-installed
  * GitWand-managed pre-commit hook (vs. an unrelated user hook) without needing to store any
  * separate install-state — the hook script on disk IS the source of truth.
+ *
+ * @deprecated v3.7.0 (Task 6) — superseded by `utils/gitwandHook.ts`'s composable
+ * `buildGitwandHookScript`/`parseGitwandHookSections`, which lets the secrets section coexist
+ * with a second, independent "Commit Review" reminder section at the same `pre-commit` path.
+ * `HooksPanel.vue` now installs/removes hooks through that module instead of this one. This file
+ * (and `SECRETS_HOOK_MARKER`/`isSecretsHookScript`) is kept ONLY so `parseGitwandHookSections` can
+ * still recognize a previously-installed v1 script for migration (`{ secrets: true, review: false
+ * }`) — do not delete it.
  */
 
 export const SECRETS_HOOK_MARKER = "# gitwand-secrets-hook v1";
