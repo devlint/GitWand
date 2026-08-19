@@ -5,6 +5,18 @@ description: Release history for GitWand — the native Git client with AI confl
 
 # Changelog
 
+## v3.7.0 — August 2026
+
+Commit Review — the biggest addition to the Changes panel since it shipped. A button now sits right in the commit area: click it, and GitWand runs the same AI review pipeline that already checks your pull requests against whatever's staged, right there, before you commit. Findings show up inline in the diff with severity badges, and you cycle through them with `n` and `p`, dismissing what doesn't matter with `x` — no separate view, no context switch.
+
+Found something worth fixing? "Fix with agent" hands the findings straight to Claude Code, opencode, or Codex in a terminal tab, against your current repo. An earlier plan had this optionally spin up an isolated scratch worktree instead, but testing against the real CLIs turned up a real problem: a brand-new worktree is, by definition, a directory none of them has ever seen, and each one's first-run "do you trust this folder?" prompt happily (and dangerously) interprets a piped-in prompt as menu navigation instead of text — in one test, it actually triggered a real `brew upgrade`. That variant is shelved until there's a proper fix; for now, "Fix with agent" always targets the repo you're already in, which never hits that screen.
+
+GitWand keeps track of how many review-and-fix cycles a change has been through, and how much of what's staged has actually been looked at, tied to the commit you're building on so an amend or an outside commit correctly starts a fresh count instead of carrying over a stale one. And at the moment you commit, there's an honest three-way choice — reviewed by AI, vouched for personally, or explicitly skipped — recorded right in the commit trailer, so your team can see review status in `git log` itself, not in some separate dashboard. None of this ever blocks a commit; it's there to inform, not gatekeep.
+
+The whole feature is opt-in, and a repo can override your personal setting either way through a `.gitwandrc` file — handy for a team that wants it mandatory-by-convention on a shared project regardless of what any one person has toggled locally. And if you want a gentle nudge for anyone committing from the terminal instead of the app, Settings → Hooks can install a pre-commit reminder that lives alongside the existing secrets scanner in the same managed script, so installing one never disturbs the other.
+
+Two changes ride along that go beyond Commit Review itself. Every dialog in the app now properly traps keyboard focus while it's open and hands it back to whatever you were doing when you close it — a foundational accessibility fix that a thorough product review this cycle surfaced as missing everywhere, not just somewhere new. And that same review round caught something sneaky already living in the app: a routine background check of your repo's status was, as an unintended side effect, silently clearing Commit Review's findings behind your back within seconds of them appearing. Fixed at the root, along with a dozen smaller things the review turned up along the way.
+
 ## v3.6.6 — August 2026
 
 A different kind of release this time: no user-facing feature, just the build pipeline and the app's own performance getting some overdue attention.

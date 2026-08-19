@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.7.0] - 2026-08-19
+
+### Added
+
+- **Commit Review** — micro AI reviews in the Changes panel (roadmap v3.7.0, #164). "Review staged changes" runs an AI pass over the staged diff producing inline findings with severity badges (risk/suggestion/nit), navigable with `n`/`p` and dismissible with `x`. "Fix with agent" pipes findings into a terminal AI agent session (Claude Code / opencode / Codex) in the current repo. Tracks review→fix→review iterations and staged-diff coverage, content-hash based so a fix that only shifts line numbers doesn't destroy coverage, bound to HEAD so an amend or an out-of-app commit correctly starts a fresh cycle. At commit time, an explicit non-blocking Review / Vouch / Skip decision is recorded as a `GitWand-Review: ran|vouched|skipped (iter:N, coverage:X%)` commit trailer. A per-repo `.gitwandrc` `commitReview` block can force the feature on or off independently of the app Setting, in either direction. Settings > Hooks can install a composable pre-commit script combining the shipped (v3.5.0) secrets-scanning section with a new warn-only Commit Review reminder section, correctly migrating an already-installed v1 secrets-only hook.
+- **Modal focus trap** — `BaseModal` now traps Tab/Shift-Tab within the open modal, focuses it (or its first focusable element) on open, and restores focus to the trigger on close, closing a foundational accessibility gap inherited by every modal in the app.
+
+### Fixed
+
+- **A routine background status poll was silently wiping Commit Review findings** — `repoStats` (derived from git status) produced a new object reference on every poll regardless of content, and a watcher wrapping it in a throwaway array compared it by reference, firing on every poll tick instead of on genuine staged-set changes. Fixed with a content-memoized `repoStats` and a proper multi-source watch; also restored (and hardened against the same class of bug) the secrets scanner's accidental "catch a secret added by editing an already-staged file" trigger that this fix would otherwise have silently removed.
+- The commit-time decision gate now re-prompts when a live, undismissed Risk-severity finding is on screen, instead of silently proceeding once any review had run that cycle.
+- `clearReviewState()` now aborts an in-flight background review before clearing state, so a stale run can no longer resurrect cleared state right after a commit.
+- The pre-commit decision modal now distinguishes "not reviewed yet" from "reviewed, found nothing" instead of showing the same "0 finding(s)" copy for both.
+- Fixed a phantom trailing context line in the diff parser (a diff string ending in `\n` produced a spurious empty context line with incorrect line numbers in the last hunk of the last file).
+- `dev-server.mjs`'s `/api/read-gitwandrc` route now sends CORS headers on its success paths, fixing `.gitwandrc` testability via `pnpm dev:web`.
+- The Hooks panel now visibly distinguishes a foreign/hand-written pre-commit hook from "nothing installed" instead of showing the same state for both.
+- The folder picker's "Select this folder" button now uses the currently typed path instead of silently ignoring it unless Enter was pressed first.
+
 ## [3.6.6] - 2026-08-19
 
 Pure tooling/perf chore — no product-facing surface. Full rationale in `docs/superpowers/specs/2026-08-18-dev-loop-ci-build-times-plan.md`.
@@ -1306,7 +1324,8 @@ Design-system foundations — the app header and every overlay now ride on a sha
 - CI pipeline via GitHub Actions (Node 18, 20, 22)
 - 28 tests covering all patterns + real-world scenarios (package.json, Laravel routes, Vue SFC, CSS, .env files)
 
-[Unreleased]: https://github.com/devlint/GitWand/compare/v3.6.6...HEAD
+[Unreleased]: https://github.com/devlint/GitWand/compare/v3.7.0...HEAD
+[3.7.0]: https://github.com/devlint/GitWand/compare/v3.6.6...v3.7.0
 [3.6.6]: https://github.com/devlint/GitWand/compare/v3.6.5...v3.6.6
 [3.6.5]: https://github.com/devlint/GitWand/compare/v3.6.4...v3.6.5
 [3.6.4]: https://github.com/devlint/GitWand/compare/v3.6.3...v3.6.4
