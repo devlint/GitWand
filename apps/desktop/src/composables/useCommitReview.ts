@@ -66,8 +66,6 @@ interface ResolvedCommitReviewRc {
 
 interface EffectiveCommitReviewConfig {
   enabled: boolean;
-  threshold: number;
-  cap: number;
   maxFiles: number;
 }
 
@@ -298,8 +296,6 @@ export function useCommitReview(opts: UseCommitReviewOptions = {}): CommitReview
     const rc = await refreshRcOverride(cwd);
     return {
       enabled: rc.enabled ?? settings.value.commitReviewEnabled,
-      threshold: rc.minConfidence ?? settings.value.reviewAiConfidenceThreshold,
-      cap: rc.maxFindings ?? settings.value.reviewAiMaxFindings,
       maxFiles: rc.maxFiles ?? COMMIT_REVIEW_MAX_FILES,
     };
   }
