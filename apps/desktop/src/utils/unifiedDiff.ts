@@ -40,13 +40,29 @@ export function indexDiffFiles(rawDiff: string): { path: string; raw: string }[]
 
 /** Parse one file's raw `diff --git …` slice (as produced by `indexDiffFiles`)
  *  into hunks/lines. Diff-parsing gotcha (AGENTS.md): context lines are
- *  detected via `line.startsWith(' ')` — a bare empty string is also treated
- *  as a (whitespace-stripped) context line, never as a phantom add/delete. */
+ *  detected via `line.startsWith(' ')` — a bare empty string mid-hunk is
+ *  also treated as a (whitespace-stripped) context line, never as a phantom
+ *  add/delete. A raw diff always ends with a newline (and `indexDiffFiles`
+ *  joins slices with `"\n"` too), so `split("\n")` yields exactly one
+ *  trailing `""` element that is not a diff line at all — v3.7.0 review-round
+ *  fix (finding #10) drops exactly that trailing element (see below) before
+ *  any line is classified, so it can never be mistaken for a genuine blank
+ *  context line and pushed onto the last hunk as a phantom zero-length row. */
 export function parseFileDiff(rawFileSlice: string): GitDiff {
   const file: GitDiff = { path: "unknown", hunks: [] };
   let currentHunk: DiffHunk | null = null;
   let oldLine = 0, newLine = 0;
-  for (const line of rawFileSlice.split("\n")) {
+  const lines = rawFileSlice.split("\n");
+  // A raw diff ends with a newline, so `split("\n")` yields one trailing ""
+  // element that is not a diff line at all. Dropping exactly that element
+  // (and only when it is last) keeps a genuine blank context line mid-hunk
+  // intact, while removing the phantom zero-length context row that
+  // otherwise lands on the last hunk of the last file and pushes its line
+  // counters past the hunk header. Same bug class the Rust parser fixed in
+  // src-tauri/src/commands/read.rs (a phantom trailing context line makes
+  // `git apply` reject the patch).
+  if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+  for (const line of lines) {
     if (line.startsWith("diff --git ")) {
       const match = line.match(/diff --git a\/(.+) b\/(.+)/);
       file.path = match ? match[2] : "unknown";
