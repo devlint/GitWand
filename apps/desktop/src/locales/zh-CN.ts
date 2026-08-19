@@ -2477,6 +2477,9 @@ const zhCN: Locale = {
     vouchHint: "不进行 AI 审查即提交 —— 您个人为这些更改担保。",
     skipHint: "不进行 AI 审查也不做个人担保即提交。",
     trailerHint: "将作为 GitWand-Review 尾注记录在提交信息中。",
+    decisionNotReviewed: "您暂存的更改尚未经过审查。",
+    decisionReviewedClean: "已审查，暂存更改中未发现问题。",
+    decisionRiskWarning: "有 {0} 项未解决的风险级发现。仅在您已查看过之后再担保。",
   },
 };
 

@@ -4145,6 +4145,7 @@ onUnmounted(() => {
       :findings-count="commitReview.findings.value.length"
       :iterations="commitReview.iterations.value"
       :coverage="commitReview.coverage.value"
+      :risk-count="commitReviewUnresolvedRisks"
       @review-now="onCommitReviewDecisionReviewNow"
       @vouch="onCommitReviewDecisionVouch"
       @skip="onCommitReviewDecisionSkip"

@@ -86,4 +86,52 @@ describe("CommitReviewDecisionModal", () => {
     expect(onReviewNow).not.toHaveBeenCalled();
     expect(onSkip).not.toHaveBeenCalled();
   });
+
+  // v3.7.0 review-round fix (finding #5) — distinguish not-reviewed from
+  // reviewed-clean from "N findings", instead of always rendering the
+  // "{0} finding(s)" string (which read "0 finding(s)" identically whether a
+  // review ran and found nothing, or no review ever ran at all).
+  describe("context copy (finding #5)", () => {
+    it("iterations: 0, findingsCount: 0 renders the not-reviewed string, not the '0 finding(s)' string", () => {
+      mount({ iterations: 0, findingsCount: 0 });
+      expect(document.body.textContent).toContain("not been reviewed");
+      expect(document.body.textContent).not.toContain("0 finding");
+    });
+
+    it("iterations: 2, findingsCount: 0 renders the reviewed-clean string", () => {
+      mount({ iterations: 2, findingsCount: 0 });
+      expect(document.body.textContent).toContain("Reviewed, no findings");
+    });
+
+    it("iterations: 2, findingsCount: 3 renders the count string plus the iterations/coverage chips", () => {
+      mount({ iterations: 2, findingsCount: 3, coverage: 80 });
+      expect(document.body.textContent).toContain("3");
+      expect(document.body.textContent).toContain("Iteration 2");
+      expect(document.body.textContent).toContain("80");
+    });
+
+    it("riskCount: 2 renders the warning line; riskCount: 0 does not", () => {
+      mount({ riskCount: 2 });
+      expect(document.body.textContent).toContain("2");
+      expect(document.body.textContent).toContain("unresolved risk");
+
+      app?.unmount();
+      container?.remove();
+      mount({ riskCount: 0 });
+      expect(document.body.textContent).not.toContain("unresolved risk");
+    });
+
+    it("the three actions still emit their events and close still carries no decision, with riskCount set", () => {
+      const onReviewNow = vi.fn();
+      const onVouch = vi.fn();
+      const onSkip = vi.fn();
+      const onClose = vi.fn();
+      mount({ riskCount: 3, onReviewNow, onVouch, onSkip, onClose });
+      document.querySelector<HTMLButtonElement>(".crdm-cancel")!.click();
+      expect(onClose).toHaveBeenCalled();
+      expect(onVouch).not.toHaveBeenCalled();
+      expect(onSkip).not.toHaveBeenCalled();
+      expect(onReviewNow).not.toHaveBeenCalled();
+    });
+  });
 });

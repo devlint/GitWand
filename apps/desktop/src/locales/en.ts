@@ -2537,6 +2537,9 @@ const en = {
     vouchHint: "Commit without an AI pass — you personally vouch for these changes.",
     skipHint: "Commit without an AI pass or a personal vouch.",
     trailerHint: "Recorded as a GitWand-Review trailer in the commit message.",
+    decisionNotReviewed: "Your staged changes have not been reviewed yet.",
+    decisionReviewedClean: "Reviewed, no findings in your staged changes.",
+    decisionRiskWarning: "{0} unresolved risk-level finding(s). Vouch only if you have looked at them.",
   },
 } as const;
 

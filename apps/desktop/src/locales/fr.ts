@@ -2502,6 +2502,9 @@ const fr: Locale = {
     vouchHint: "Commit sans passe IA — vous validez personnellement ces changements.",
     skipHint: "Commit sans passe IA ni validation personnelle.",
     trailerHint: "Enregistré comme trailer GitWand-Review dans le message de commit.",
+    decisionNotReviewed: "Vos changements indexés n'ont pas encore été passés en revue.",
+    decisionReviewedClean: "Revue effectuée, aucun constat dans vos changements indexés.",
+    decisionRiskWarning: "{0} constat(s) de niveau risque non résolu(s). Validez uniquement si vous les avez examinés.",
   },
 };
 

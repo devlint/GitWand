@@ -19,10 +19,11 @@
  * this modal wants, so there's nothing else to wire (and nothing else that
  * could get a modifier-key guard wrong).
  */
+import { computed } from "vue";
 import { useI18n } from "../composables/useI18n";
 import BaseModal from "./BaseModal.vue";
 
-withDefaults(
+const props = withDefaults(
   defineProps<{
     /** Active (filtered) findings count on the staged diff, for context. */
     findingsCount?: number;
@@ -30,8 +31,13 @@ withDefaults(
     iterations?: number;
     /** Share (0-100) of the current staged diff already reviewed. */
     coverage?: number;
+    /**
+     * Live, undismissed risk-severity finding count (v3.7.0 review-round fix
+     * #2/#5). When > 0, shown as a distinct warning line above the actions.
+     */
+    riskCount?: number;
   }>(),
-  { findingsCount: 0, iterations: 0, coverage: 0 },
+  { findingsCount: 0, iterations: 0, coverage: 0, riskCount: 0 },
 );
 
 const emit = defineEmits<{
@@ -42,6 +48,18 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useI18n();
+
+/**
+ * Three mutually exclusive context strings, driven by iterations/findingsCount
+ * (v3.7.0 review-round fix #5): the plain "{0} finding(s)" string used to
+ * render identically whether a review ran and found nothing, or no review
+ * ever ran at all.
+ */
+const contextLabel = computed(() => {
+  if (props.iterations === 0) return t("commitReview.decisionNotReviewed");
+  if (props.findingsCount === 0) return t("commitReview.decisionReviewedClean");
+  return t("commitReview.modalSubtitle", props.findingsCount);
+});
 </script>
 
 <template>
@@ -53,7 +71,7 @@ const { t } = useI18n();
   >
     <p class="crdm-message">{{ t('commitReview.decisionMessage') }}</p>
     <div class="crdm-context">
-      <span>{{ t('commitReview.modalSubtitle', findingsCount) }}</span>
+      <span>{{ contextLabel }}</span>
       <template v-if="iterations > 0">
         <span class="crdm-context__sep">·</span>
         <span>{{ t('commitReview.iterations', iterations) }}</span>
@@ -61,6 +79,7 @@ const { t } = useI18n();
         <span>{{ t('commitReview.coverage', coverage) }}</span>
       </template>
     </div>
+    <p v-if="riskCount > 0" class="crdm-risk">{{ t('commitReview.decisionRiskWarning', riskCount) }}</p>
     <p class="crdm-hint">{{ t('commitReview.trailerHint') }}</p>
 
     <template #footer>
@@ -110,6 +129,12 @@ const { t } = useI18n();
   color: var(--color-text-muted);
   font-size: var(--font-size-xs);
   margin: 0;
+}
+
+.crdm-risk {
+  color: var(--color-danger);
+  font-size: var(--font-size-sm);
+  margin: 0 0 var(--space-3);
 }
 
 /* Flat, single-class modifiers — never prefix `.bm-btn` with an ancestor

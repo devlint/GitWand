@@ -2492,6 +2492,9 @@ const es: Locale = {
     vouchHint: "Commit sin una pasada de IA — avalas personalmente estos cambios.",
     skipHint: "Commit sin una pasada de IA ni un aval personal.",
     trailerHint: "Se registra como un trailer GitWand-Review en el mensaje de commit.",
+    decisionNotReviewed: "Tus cambios en stage aún no han sido revisados.",
+    decisionReviewedClean: "Revisado, sin hallazgos en tus cambios en stage.",
+    decisionRiskWarning: "{0} hallazgo(s) de riesgo sin resolver. Avala solo si ya los revisaste.",
   },
 };
 

@@ -2492,6 +2492,9 @@ const ptBR: Locale = {
     vouchHint: "Commit sem uma passada de IA — você atesta pessoalmente essas mudanças.",
     skipHint: "Commit sem uma passada de IA ou atestado pessoal.",
     trailerHint: "Registrado como um trailer GitWand-Review na mensagem de commit.",
+    decisionNotReviewed: "Suas mudanças em stage ainda não foram revisadas.",
+    decisionReviewedClean: "Revisado, sem achados nas suas mudanças em stage.",
+    decisionRiskWarning: "{0} achado(s) de nível de risco não resolvido(s). Ateste somente se já os revisou.",
   },
 };
 
