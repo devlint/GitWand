@@ -1,3 +1,7 @@
+// @vitest-environment jsdom
+// useReviewIntelligence drives usePrReviewQueue transitively, which reads
+// `document.hidden` at call time (visibility-gated queue, see
+// apps/desktop/CLAUDE.md "Polling" perf invariant) — needs a real `document`.
 /**
  * Task E2 (v3.6.0) — unified AI + static Intelligence orchestrator.
  */

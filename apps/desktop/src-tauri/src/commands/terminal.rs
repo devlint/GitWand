@@ -44,14 +44,19 @@ static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 /// We accept:
 ///   - bare names like `"zsh"` or `"bash"` (no path separator)
 ///   - absolute paths like `"/bin/zsh"` or `"C:\\Windows\\System32\\cmd.exe"`
+///
 /// We reject (fall back to default) any path that contains a separator
 /// but is not absolute, to prevent directory-traversal attacks via settings.
 fn resolve_shell(shell: &Option<String>) -> String {
     fn default_shell() -> String {
         #[cfg(windows)]
-        { std::env::var("ComSpec").unwrap_or_else(|_| "powershell.exe".to_string()) }
+        {
+            std::env::var("ComSpec").unwrap_or_else(|_| "powershell.exe".to_string())
+        }
         #[cfg(not(windows))]
-        { std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string()) }
+        {
+            std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string())
+        }
     }
 
     if let Some(s) = shell {
@@ -111,7 +116,12 @@ pub(crate) fn terminal_open(
 
     let pty_system = native_pty_system();
     let pair = pty_system
-        .openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
+        .openpty(PtySize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
         .map_err(|e| format!("openpty failed: {e}"))?;
 
     // First-class agent vs shell resolution. Each agent is resolved via its
@@ -167,11 +177,17 @@ pub(crate) fn terminal_open(
     // it becomes an orphaned process holding a PTY slave indefinitely.
     let mut reader = match pair.master.try_clone_reader() {
         Ok(r) => r,
-        Err(e) => { let _ = child.kill(); return Err(format!("clone reader failed: {e}")); }
+        Err(e) => {
+            let _ = child.kill();
+            return Err(format!("clone reader failed: {e}"));
+        }
     };
     let writer = match pair.master.take_writer() {
         Ok(w) => w,
-        Err(e) => { let _ = child.kill(); return Err(format!("take writer failed: {e}")); }
+        Err(e) => {
+            let _ = child.kill();
+            return Err(format!("take writer failed: {e}"));
+        }
     };
 
     let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
@@ -181,7 +197,11 @@ pub(crate) fn terminal_open(
 
     lock_sessions().insert(
         id,
-        PtyHandle { master: master_arc, writer: writer_arc, child },
+        PtyHandle {
+            master: master_arc,
+            writer: writer_arc,
+            child,
+        },
     );
 
     // Thread lecteur : pousse les chunks vers le frontend.
@@ -258,12 +278,19 @@ pub(crate) fn terminal_resize(id: u64, cols: u16, rows: u16) -> Result<(), Strin
     // (and any other command) for ALL sessions during every resize event.
     let master_arc = {
         let map = lock_sessions();
-        map.get(&id).map(|h| Arc::clone(&h.master)).ok_or("session not found")?
+        map.get(&id)
+            .map(|h| Arc::clone(&h.master))
+            .ok_or("session not found")?
     };
     let result = master_arc
         .lock()
         .unwrap_or_else(|e| e.into_inner())
-        .resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
+        .resize(PtySize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
         .map_err(|e| format!("resize failed: {e}"));
     result
 }
@@ -283,4 +310,3 @@ pub(crate) fn terminal_close_all() {
         let _ = h.child.kill();
     }
 }
-

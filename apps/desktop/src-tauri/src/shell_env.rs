@@ -8,8 +8,8 @@
 //!   - `HOME`, `USER`, `TMPDIR`
 //!   - **Nothing from `~/.zshrc`, `~/.zprofile`, `~/.bashrc`, etc.**
 //!
-//! This breaks subprocess like `gh`, `claude`, `codex`, `pnpm`, `node` for
-//! users whose tooling depends on shell-rc-set variables: `SSH_AUTH_SOCK`,
+//! This breaks subprocess like `gh`, `glab`, `claude`, `codex`, `pnpm`, `node`
+//! for users whose tooling depends on shell-rc-set variables: `SSH_AUTH_SOCK`,
 //! `XDG_CONFIG_HOME`, `LANG`/`LC_ALL`, `GH_TOKEN`/`GITHUB_TOKEN`, custom
 //! `PATH` prefixes (asdf, mise, nvm), and `nix-darwin` exports.
 //!
@@ -19,6 +19,11 @@
 //! auth paths (env-var token, gh-config token) are unavailable, and the
 //! keychain prompt fired from a launchd-spawned subprocess often hangs
 //! silently or retries indefinitely without surfacing a UI dialog.
+//!
+//! Same symptom reappeared for `glab` (#149): `glab auth login --use-keyring`
+//! stores the GitLab PAT in the macOS keychain instead of `config.yml`, so a
+//! user on that auth mode hits the identical ACL mismatch. Fixed the same
+//! way — see `extract_glab_token` below.
 //!
 //! This is the same pattern VS Code, Sublime Text, IntelliJ, and most
 //! macOS-savvy GUI dev tools handle via "shell environment detection".
@@ -139,6 +144,19 @@ pub(crate) fn init_login_shell_env() {
     if std::env::var("GH_TOKEN").is_err() && std::env::var("GITHUB_TOKEN").is_err() {
         extract_gh_token(&shell);
     }
+    if std::env::var("GITLAB_TOKEN").is_err()
+        && std::env::var("GITLAB_ACCESS_TOKEN").is_err()
+        && std::env::var("OAUTH_TOKEN").is_err()
+    {
+        extract_glab_token(&shell);
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn init_login_shell_env() {
+    // Linux/Windows: launchers (Gnome/KDE session manager, explorer.exe,
+    // the systemd user instance, etc.) typically already provide the full
+    // user env. No preload needed.
 }
 
 /// Spawn `$SHELL -l -c "gh auth token"` and propagate the result as `GH_TOKEN`.
@@ -179,12 +197,153 @@ fn extract_gh_token(shell: &str) {
     }
 
     std::env::set_var("GH_TOKEN", &token);
-    eprintln!("[gitwand] GH_TOKEN preloaded from login shell (length={})", token.len());
+    eprintln!(
+        "[gitwand] GH_TOKEN preloaded from login shell (length={})",
+        token.len()
+    );
 }
 
-#[cfg(not(target_os = "macos"))]
-pub(crate) fn init_login_shell_env() {
-    // Linux/Windows: launchers (Gnome/KDE session manager, explorer.exe,
-    // the systemd user instance, etc.) typically already provide the full
-    // user env. No preload needed.
+/// Spawn `$SHELL -l -c "glab auth status --show-token"` and propagate the
+/// parsed token as `GITLAB_TOKEN` (#149). Bounded by a 3s timeout, silent on
+/// any failure path — same shape as `extract_gh_token`.
+///
+/// Unlike `gh auth token`, glab has no subcommand that prints a bare token;
+/// `--show-token` embeds it in the multi-line `auth status` report (a line
+/// containing `Token:`), so the output needs parsing via `parse_glab_token`.
+#[cfg(target_os = "macos")]
+fn extract_glab_token(shell: &str) {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    let (tx, rx) = mpsc::channel();
+    let shell_for_thread = shell.to_string();
+    std::thread::spawn(move || {
+        let output = std::process::Command::new(&shell_for_thread)
+            .args(["-l", "-c", "glab auth status --show-token 2>/dev/null"])
+            .output();
+        let _ = tx.send(output);
+    });
+
+    let output = match rx.recv_timeout(Duration::from_secs(3)) {
+        Ok(Ok(o)) => o,
+        Ok(Err(_)) | Err(_) => {
+            eprintln!("[gitwand] glab auth token preload skipped (timeout or spawn error)");
+            return;
+        }
+    };
+
+    // `glab auth status` exits non-zero when not authenticated, but can also
+    // exit non-zero on some versions while still printing the token line for
+    // an unrelated reason (e.g. an unreachable secondary host) — parse
+    // whatever stdout we got either way, same tolerant approach as the
+    // status parsing already does for other glab commands in this codebase.
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let Some(token) = parse_glab_token(&stdout) else {
+        return;
+    };
+
+    std::env::set_var("GITLAB_TOKEN", &token);
+    eprintln!(
+        "[gitwand] GITLAB_TOKEN preloaded from login shell (length={})",
+        token.len()
+    );
+}
+
+/// Extract the token value from `glab auth status --show-token` output.
+///
+/// The token appears on a line such as `  ✓ Token: glpat-xxxxxxxxxxxxxxxxxxxx`
+/// (exact checkmark/indentation varies by glab version); with `--all` or
+/// multiple configured hosts there can be several such lines, in which case
+/// the first one wins (current-context host is reported first). ANSI color
+/// codes are stripped first since glab colors this output even when it
+/// detects a non-tty stdout in some versions.
+///
+/// Only called from the macOS-only `extract_glab_token` above, so this (and
+/// `strip_ansi_codes` below) would be dead code on other platforms outside
+/// `#[cfg(test)]` — gated accordingly rather than `#[allow(dead_code)]`,
+/// since `glab_token_tests` below still needs it to compile on every OS.
+#[cfg(any(test, target_os = "macos"))]
+fn parse_glab_token(status_output: &str) -> Option<String> {
+    for line in status_output.lines() {
+        let stripped = strip_ansi_codes(line);
+        let Some((_, rest)) = stripped.split_once("Token:") else {
+            continue;
+        };
+        let token = rest.trim();
+        if !token.is_empty() && !token.contains(char::is_whitespace) {
+            return Some(token.to_string());
+        }
+    }
+    None
+}
+
+/// Strip ANSI CSI escape sequences (`\x1b[...<final byte>`) from a line.
+/// Minimal hand-rolled version — avoids pulling in an ansi-stripping crate
+/// for a startup-only, non-hot-path parse of a few lines of CLI output.
+#[cfg(any(test, target_os = "macos"))]
+fn strip_ansi_codes(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\u{1b}' && chars.peek() == Some(&'[') {
+            chars.next(); // consume '['
+            for c in chars.by_ref() {
+                if c.is_ascii_alphabetic() {
+                    break; // final byte of the CSI sequence
+                }
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod glab_token_tests {
+    use super::parse_glab_token;
+
+    #[test]
+    fn extracts_token_from_a_status_line() {
+        let output = "gitlab.com\n  ✓ Logged in to gitlab.com as alice (keyring)\n  ✓ Token: glpat-abcdefghijklmnopqrst\n";
+        assert_eq!(
+            parse_glab_token(output),
+            Some("glpat-abcdefghijklmnopqrst".to_string())
+        );
+    }
+
+    #[test]
+    fn strips_ansi_color_codes_around_the_token() {
+        let output = "\u{1b}[32m✓\u{1b}[0m Token: \u{1b}[33mglpat-zzzzzzzzzzzzzzzzzzzz\u{1b}[0m\n";
+        assert_eq!(
+            parse_glab_token(output),
+            Some("glpat-zzzzzzzzzzzzzzzzzzzz".to_string())
+        );
+    }
+
+    #[test]
+    fn takes_the_first_token_line_when_multiple_hosts_are_configured() {
+        let output = "gitlab.com\n  ✓ Token: glpat-firsthost0000000000\n\nself-hosted.example.com\n  ✓ Token: glpat-secondhost000000000\n";
+        assert_eq!(
+            parse_glab_token(output),
+            Some("glpat-firsthost0000000000".to_string())
+        );
+    }
+
+    #[test]
+    fn returns_none_when_not_authenticated() {
+        let output = "gitlab.com\n  x No token found for gitlab.com\n";
+        assert_eq!(parse_glab_token(output), None);
+    }
+
+    #[test]
+    fn returns_none_on_empty_output() {
+        assert_eq!(parse_glab_token(""), None);
+    }
+
+    #[test]
+    fn ignores_a_token_line_whose_value_is_blank() {
+        let output = "  ✓ Token: \n";
+        assert_eq!(parse_glab_token(output), None);
+    }
 }

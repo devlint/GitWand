@@ -760,6 +760,10 @@ export interface PrReviewComment {
   /** Raw diff hunk context. */
   diff_hunk: string;
   url: string;
+  /** Whether the review thread this comment belongs to has been marked
+   *  resolved. `undefined` on forges/paths with no resolved-thread concept
+   *  (GitHub review comments don't carry this field here). */
+  resolved?: boolean;
 }
 
 /** Params for creating a new review comment. */

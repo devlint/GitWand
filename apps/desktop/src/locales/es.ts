@@ -883,6 +883,7 @@ const es: Locale = {
       statDiff: "Diff",
       statComments: "Comentarios",
       commentGoto: "Ir a",
+      commentResolved: "Resuelto",
       labels: "Etiquetas",
       reviewers: "Revisores",
       reviewApproved: "aprobó",

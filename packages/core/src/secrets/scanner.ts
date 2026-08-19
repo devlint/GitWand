@@ -149,21 +149,42 @@ export function redact(match: string): string {
 }
 
 /**
+ * Cache module-level des littéraux `/.../ ` de `secrets.ignore[]`, clé par le corps de la
+ * regex (contenu entre les délimiteurs `/`). Sans ce cache, `isIgnored` recompilait
+ * `new RegExp(body)` pour CHAQUE valeur candidate — une fois par match de pattern, une fois
+ * par token d'entropie — sur chaque ligne ajoutée de chaque fichier du diff staged. `null`
+ * signifie « regex malformée » (jamais fatal, jamais matchante — même tolérance que le
+ * comportement try/catch d'origine). Miroir de `CompiledIgnore.regexes` côté Rust
+ * (`apps/desktop/src-tauri/src/commands/secrets.rs`). Le cache glob (`matchGlob`) est traité à
+ * part, dans `config.ts` (`GLOB_REGEX_CACHE`), au bénéfice de tous ses appelants.
+ */
+const IGNORE_VALUE_REGEX_CACHE = new Map<string, RegExp | null>();
+
+function compiledIgnoreValueRegex(body: string): RegExp | null {
+  const cached = IGNORE_VALUE_REGEX_CACHE.get(body);
+  if (cached !== undefined) return cached;
+  let re: RegExp | null;
+  try {
+    re = new RegExp(body);
+  } catch {
+    re = null;
+  }
+  IGNORE_VALUE_REGEX_CACHE.set(body, re);
+  return re;
+}
+
+/**
  * `true` si la valeur matchée ou le fichier doit être ignoré, d'après `.gitwandrc` `secrets.ignore[]`.
  * Une entrée `/.../ ` est un littéral regex testé contre la valeur matchée ; toute autre entrée
  * est un glob de chemin testé contre `path` (via `matchGlob`, le même moteur que les overrides de
- * politique de merge).
+ * politique de merge — mémoïsé, voir `config.ts` `GLOB_REGEX_CACHE`).
  */
 export function isIgnored(path: string, value: string, ignore: string[]): boolean {
   for (const entry of ignore) {
     if (entry.length >= 2 && entry.startsWith("/") && entry.endsWith("/")) {
       const body = entry.slice(1, -1);
-      try {
-        if (new RegExp(body).test(value)) return true;
-      } catch {
-        // Regex d'ignore malformée — on l'ignore silencieusement.
-        continue;
-      }
+      const re = compiledIgnoreValueRegex(body);
+      if (re && re.test(value)) return true;
     } else if (matchGlob(entry, path)) {
       return true;
     }

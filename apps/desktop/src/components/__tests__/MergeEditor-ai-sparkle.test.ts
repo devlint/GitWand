@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * Issue #133 (sub-issues 2 & 3) — the per-hunk "AI" resolve button used a
  * bespoke inline SVG + text label ("AI" / "AI…") with only a subtle opacity

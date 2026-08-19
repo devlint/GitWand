@@ -2,15 +2,15 @@
 //!
 //! Four commands:
 //!   - `mcp_detect_configs`   — discover MCP config files on disk (Claude Desktop,
-//!                              Claude Code, Cursor, Windsurf) with full server_keys list.
+//!     Claude Code, Cursor, Windsurf) with full server_keys list.
 //!   - `mcp_read_config`      — parse a config file and return its current `mcpServers`
-//!                              map as a JSON string.
+//!     map as a JSON string.
 //!   - `mcp_install_server`   — merge a server fragment into one or more config files.
 //!   - `mcp_uninstall_server` — remove a server key from one or more config files.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 // ---------------------------------------------------------------------------
 // Types
@@ -59,8 +59,7 @@ fn read_json(path: &PathBuf) -> Result<Value, String> {
     }
     let raw = std::fs::read_to_string(path)
         .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
-    serde_json::from_str(&raw)
-        .map_err(|e| format!("Failed to parse {}: {}", path.display(), e))
+    serde_json::from_str(&raw).map_err(|e| format!("Failed to parse {}: {}", path.display(), e))
 }
 
 /// Return all keys under `mcpServers` in the given JSON value.
@@ -76,7 +75,7 @@ fn mcp_server_keys(value: &Value) -> Vec<String> {
 // Known config locations
 // ---------------------------------------------------------------------------
 
-fn known_configs(home: &PathBuf) -> Vec<(String, PathBuf)> {
+fn known_configs(home: &Path) -> Vec<(String, PathBuf)> {
     let mut list = vec![
         (
             "Claude Desktop".to_string(),
@@ -88,10 +87,7 @@ fn known_configs(home: &PathBuf) -> Vec<(String, PathBuf)> {
             // Claude Code stores global settings (including mcpServers) in ~/.claude.json
             home.join(".claude.json"),
         ),
-        (
-            "Cursor (global)".to_string(),
-            home.join(".cursor/mcp.json"),
-        ),
+        ("Cursor (global)".to_string(), home.join(".cursor/mcp.json")),
         (
             "Windsurf (global)".to_string(),
             home.join(".windsurf/mcp.json"),
@@ -144,11 +140,17 @@ pub(crate) async fn mcp_detect_configs() -> Result<Vec<McpConfigFile>, String> {
         // Skip platform-specific entries that don't apply to the current OS.
         if !exists {
             #[cfg(target_os = "windows")]
-            if label.contains("Linux") { continue; }
+            if label.contains("Linux") {
+                continue;
+            }
             #[cfg(target_os = "linux")]
-            if label.contains("Windows") { continue; }
+            if label.contains("Windows") {
+                continue;
+            }
             #[cfg(target_os = "macos")]
-            if label.contains("Windows") || label.contains("Linux") { continue; }
+            if label.contains("Windows") || label.contains("Linux") {
+                continue;
+            }
         }
 
         let server_keys = if exists {
@@ -179,8 +181,7 @@ pub(crate) async fn mcp_read_config(path: String) -> Result<String, String> {
         .get("mcpServers")
         .cloned()
         .unwrap_or(Value::Object(Map::new()));
-    serde_json::to_string(&servers)
-        .map_err(|e| format!("Failed to serialize mcpServers: {}", e))
+    serde_json::to_string(&servers).map_err(|e| format!("Failed to serialize mcpServers: {}", e))
 }
 
 /// Merge a server entry into each specified config file.
@@ -198,8 +199,8 @@ pub(crate) async fn mcp_install_server(
     server_json: String,
     config_paths: Vec<String>,
 ) -> Result<(), String> {
-    let fragment: Value = serde_json::from_str(&server_json)
-        .map_err(|e| format!("Invalid server JSON: {}", e))?;
+    let fragment: Value =
+        serde_json::from_str(&server_json).map_err(|e| format!("Invalid server JSON: {}", e))?;
 
     for path_str in &config_paths {
         let path = PathBuf::from(path_str);
@@ -240,9 +241,13 @@ pub(crate) async fn mcp_uninstall_server(
 ) -> Result<(), String> {
     for path_str in &config_paths {
         let path = PathBuf::from(path_str);
-        if !path.exists() { continue; }
+        if !path.exists() {
+            continue;
+        }
         let mut root = read_json(&path)?;
-        if root.is_null() { continue; }
+        if root.is_null() {
+            continue;
+        }
         if let Some(servers) = root.get_mut("mcpServers").and_then(|v| v.as_object_mut()) {
             servers.remove(&server_key);
         }

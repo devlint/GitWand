@@ -44,10 +44,7 @@ use crate::types::*;
 // fallback ensures we never regress vs. the v2.8 baseline.
 
 #[tauri::command]
-pub(crate) async fn git_status(
-    cwd: String,
-    pathspec: Option<String>,
-) -> Result<GitStatus, String> {
+pub(crate) async fn git_status(cwd: String, pathspec: Option<String>) -> Result<GitStatus, String> {
     // Shared guard: block only while a writer mutates this repo (checkout /
     // fetch / submodule update), so a background status refresh can't observe a
     // half-rebuilt working tree — the source of the `os error 2` on git status
@@ -70,7 +67,10 @@ pub(crate) async fn git_status(
         Err(e) => {
             // Soft-fail: log but keep going. Don't surface libgit2 errors
             // to the UI when CLI works.
-            eprintln!("[git_status] libgit2 fast path failed ({}); falling back to CLI", e);
+            eprintln!(
+                "[git_status] libgit2 fast path failed ({}); falling back to CLI",
+                e
+            );
             git_status_cli(cwd, None)
         }
     }
@@ -93,8 +93,7 @@ pub(crate) async fn git_status(
 ///     no direct equivalent. Calling git here for the few users with
 ///     triangular setups is acceptable; the common case is unaffected.
 pub(crate) fn git_status_libgit2(cwd: &str) -> Result<GitStatus, String> {
-    let repo = git2::Repository::open(cwd)
-        .map_err(|e| format!("git2 open: {}", e))?;
+    let repo = git2::Repository::open(cwd).map_err(|e| format!("git2 open: {}", e))?;
 
     // ── Branch + upstream + ahead/behind ────────────────────────────────
     let (branch, ahead, behind, remote, remote_branch_exists) = libgit2_branch_status(&repo);
@@ -103,8 +102,7 @@ pub(crate) fn git_status_libgit2(cwd: &str) -> Result<GitStatus, String> {
     let (staged, unstaged, untracked, conflicted) = libgit2_file_statuses(&repo)?;
 
     // ── Push remote (triangular workflow) — CLI fallback ────────────────
-    let (push_remote, ahead_push) =
-        compute_push_remote_via_cli(cwd, remote.as_deref());
+    let (push_remote, ahead_push) = compute_push_remote_via_cli(cwd, remote.as_deref());
 
     let main_commit_count = compute_main_commit_count(cwd, &branch);
 
@@ -159,11 +157,7 @@ fn libgit2_branch_status(repo: &git2::Repository) -> (String, i32, i32, Option<S
     };
     // upstream.name() returns Result<Option<&str>>: None when the ref name
     // is non-UTF-8 (extremely rare). Keep ahead/behind=0 in that case.
-    let upstream_name = upstream
-        .name()
-        .ok()
-        .flatten()
-        .map(|s| s.to_string());
+    let upstream_name = upstream.name().ok().flatten().map(|s| s.to_string());
     let upstream_oid = match upstream.get().target() {
         Some(o) => o,
         None => return (branch, 0, 0, upstream_name, true),
@@ -191,7 +185,9 @@ fn detect_untracked_remote_branch(
     for candidate in remote_tracking_candidates(repo, branch) {
         if let Ok(rb) = repo.find_branch(&candidate, git2::BranchType::Remote) {
             if let Some(remote_oid) = rb.get().target() {
-                let (a, b) = repo.graph_ahead_behind(local_oid, remote_oid).unwrap_or((0, 0));
+                let (a, b) = repo
+                    .graph_ahead_behind(local_oid, remote_oid)
+                    .unwrap_or((0, 0));
                 return (branch.to_string(), a as i32, b as i32, None, true);
             }
         }
@@ -214,12 +210,14 @@ fn remote_tracking_candidates(repo: &git2::Repository, branch: &str) -> Vec<Stri
     candidates
 }
 
+/// (staged, unstaged, untracked, conflicted) file lists.
+type FileStatusesResult =
+    Result<(Vec<FileChange>, Vec<FileChange>, Vec<String>, Vec<String>), String>;
+
 /// Build (staged, unstaged, untracked, conflicted) from `repo.statuses()`.
 /// Mirrors the porcelain v2 logic in `git_status_cli`: a single file with
 /// both index and worktree changes appears in BOTH `staged` and `unstaged`.
-fn libgit2_file_statuses(
-    repo: &git2::Repository,
-) -> Result<(Vec<FileChange>, Vec<FileChange>, Vec<String>, Vec<String>), String> {
+fn libgit2_file_statuses(repo: &git2::Repository) -> FileStatusesResult {
     let mut opts = git2::StatusOptions::new();
     opts.include_untracked(true)
         .include_ignored(false)
@@ -393,17 +391,32 @@ pub(crate) fn git_status_cli(cwd: String, pathspec: Option<String>) -> Result<Gi
 
     for line in stdout.lines() {
         if line.starts_with("# branch.head ") {
-            branch = line.strip_prefix("# branch.head ").unwrap_or("unknown").to_string();
+            branch = line
+                .strip_prefix("# branch.head ")
+                .unwrap_or("unknown")
+                .to_string();
         } else if line.starts_with("# branch.ab ") {
             let parts: Vec<&str> = line.split_whitespace().collect();
             if parts.len() >= 4 {
-                ahead = parts[2].strip_prefix('+').unwrap_or("0").parse().unwrap_or(0);
-                behind = parts[3].strip_prefix('-').unwrap_or("0").parse().unwrap_or(0);
+                ahead = parts[2]
+                    .strip_prefix('+')
+                    .unwrap_or("0")
+                    .parse()
+                    .unwrap_or(0);
+                behind = parts[3]
+                    .strip_prefix('-')
+                    .unwrap_or("0")
+                    .parse()
+                    .unwrap_or(0);
             }
         } else if line.starts_with("# branch.oid ") {
             // track oid if needed
         } else if line.starts_with("# branch.upstream ") {
-            remote = Some(line.strip_prefix("# branch.upstream ").unwrap_or("").to_string());
+            remote = Some(
+                line.strip_prefix("# branch.upstream ")
+                    .unwrap_or("")
+                    .to_string(),
+            );
         } else if line.starts_with("u ") {
             // unmerged (conflicted) — porcelain v2 format:
             // u <xy> <sub> <m1> <m2> <m3> <mW> <h1> <h2> <h3> <path>
@@ -466,7 +479,11 @@ pub(crate) fn git_status_cli(cwd: String, pathspec: Option<String>) -> Result<Gi
             // 2 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <Xscore> <path>\t<origPath>
             // Fields separated by spaces, but path and origPath separated by tab
             let tab_idx = line.find('\t');
-            let meta_part = if let Some(idx) = tab_idx { &line[..idx] } else { line };
+            let meta_part = if let Some(idx) = tab_idx {
+                &line[..idx]
+            } else {
+                line
+            };
             let fields: Vec<&str> = meta_part.split_whitespace().collect();
             if fields.len() < 10 {
                 continue;
@@ -532,7 +549,6 @@ pub(crate) fn git_status_cli(cwd: String, pathspec: Option<String>) -> Result<Gi
             if rev_output.status.success() {
                 let rev_str = String::from_utf8_lossy(&rev_output.stdout);
                 let nums: Vec<i32> = rev_str
-                    .trim()
                     .split_whitespace()
                     .filter_map(|s| s.parse().ok())
                     .collect();
@@ -565,7 +581,6 @@ pub(crate) fn git_status_cli(cwd: String, pathspec: Option<String>) -> Result<Gi
             {
                 if rl.status.success() {
                     let nums: Vec<i32> = String::from_utf8_lossy(&rl.stdout)
-                        .trim()
                         .split_whitespace()
                         .filter_map(|s| s.parse().ok())
                         .collect();
@@ -606,7 +621,9 @@ pub(crate) fn git_status_cli(cwd: String, pathspec: Option<String>) -> Result<Gi
                 if let Ok(o) = rl {
                     if o.status.success() {
                         ahead_push = String::from_utf8_lossy(&o.stdout)
-                            .trim().parse().unwrap_or(0);
+                            .trim()
+                            .parse()
+                            .unwrap_or(0);
                     }
                 }
                 push_remote = Some(push_ref);
@@ -637,11 +654,7 @@ pub(crate) fn git_status_cli(cwd: String, pathspec: Option<String>) -> Result<Gi
 /// "origin/feature") or None. Uses exact `rev-parse --verify` lookups so a
 /// branch named "x" never matches an unrelated "remote/foo/x".
 fn find_untracked_remote_ref_cli(cwd: &str, branch: &str) -> Option<String> {
-    let remotes_out = git_cmd()
-        .args(["remote"])
-        .current_dir(cwd)
-        .output()
-        .ok()?;
+    let remotes_out = git_cmd().args(["remote"]).current_dir(cwd).output().ok()?;
     if !remotes_out.status.success() {
         return None;
     }
@@ -788,6 +801,11 @@ pub(crate) async fn git_diff(cwd: String, path: String, staged: bool) -> Result<
 
 // ─── Git log ─────────────────────────────────────────────────
 
+// This signature is the Tauri IPC contract (see `backend.ts`); regrouping
+// its optional filters into a params struct is a frontend+backend API-shape
+// change, not a mechanical clippy fix. Deferred out of this chore(ci) PR —
+// see PR1 clippy cleanup notes.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub(crate) async fn git_log(
     cwd: String,
@@ -801,7 +819,7 @@ pub(crate) async fn git_log(
 ) -> Result<Vec<GitLogEntry>, String> {
     let _repo = repo_lock::read(&cwd);
     let limit = count.unwrap_or(100);
-    let skip  = offset.unwrap_or(0).max(0);
+    let skip = offset.unwrap_or(0).max(0);
     // Default: current branch only (like `git log`). Pass `all: true` to include all refs.
     let include_all = all.unwrap_or(false);
 
@@ -887,7 +905,6 @@ pub(crate) async fn git_log(
         }
 
         let parents: Vec<String> = fields[7]
-            .trim()
             .split_whitespace()
             .filter(|s| !s.is_empty())
             .map(|s| s.to_string())
@@ -906,7 +923,9 @@ pub(crate) async fn git_log(
         });
     }
 
-    entries.retain(|e| !e.message.starts_with("index on ") && !e.message.starts_with("untracked files on "));
+    entries.retain(|e| {
+        !e.message.starts_with("index on ") && !e.message.starts_with("untracked files on ")
+    });
 
     Ok(entries)
 }
@@ -930,10 +949,7 @@ pub(crate) async fn git_rev_count(
 ) -> Result<usize, String> {
     let include_all = all.unwrap_or(false);
 
-    let mut args: Vec<String> = vec![
-        "rev-list".to_string(),
-        "--count".to_string(),
-    ];
+    let mut args: Vec<String> = vec!["rev-list".to_string(), "--count".to_string()];
 
     if include_all {
         args.push("--all".to_string());
@@ -985,13 +1001,17 @@ pub(crate) async fn git_repo_state(cwd: String) -> Result<RepoOperationState, St
     let rebase_merge = git_dir.join("rebase-merge");
     if rebase_merge.exists() {
         let is_interactive = rebase_merge.join("interactive").exists();
-        let step  = read_git_u32(&rebase_merge.join("msgnum"));
+        let step = read_git_u32(&rebase_merge.join("msgnum"));
         let total = read_git_u32(&rebase_merge.join("end"));
-        let head  = read_git_file(&git_dir.join("REBASE_HEAD"));
+        let head = read_git_file(&git_dir.join("REBASE_HEAD"));
         let branch = read_git_file(&rebase_merge.join("head-name"))
             .map(|s| s.trim_start_matches("refs/heads/").to_string());
         return Ok(RepoOperationState {
-            state: if is_interactive { "rebase_interactive".into() } else { "rebase".into() },
+            state: if is_interactive {
+                "rebase_interactive".into()
+            } else {
+                "rebase".into()
+            },
             has_conflict: has_unresolved_conflicts(&cwd),
             operation_head: head,
             target_branch: branch,
@@ -1003,9 +1023,9 @@ pub(crate) async fn git_repo_state(cwd: String) -> Result<RepoOperationState, St
     // ── Old-style rebase-apply (git am / old --apply) ─────────────────────
     let rebase_apply = git_dir.join("rebase-apply");
     if rebase_apply.exists() {
-        let step  = read_git_u32(&rebase_apply.join("next"));
+        let step = read_git_u32(&rebase_apply.join("next"));
         let total = read_git_u32(&rebase_apply.join("last"));
-        let head  = read_git_file(&git_dir.join("REBASE_HEAD"));
+        let head = read_git_file(&git_dir.join("REBASE_HEAD"));
         let branch = read_git_file(&rebase_apply.join("head-name"))
             .map(|s| s.trim_start_matches("refs/heads/").to_string());
         return Ok(RepoOperationState {
@@ -1189,7 +1209,7 @@ pub(crate) async fn git_show(cwd: String, hash: String) -> Result<Vec<GitDiff>, 
                     new_line_no: None,
                 });
                 old_line_no += 1;
-            } else if line.starts_with(' ') {
+            } else if let Some(stripped) = line.strip_prefix(' ') {
                 // Only accept lines that start with a literal space as context.
                 // Empty strings (from split on blank separator lines or trailing
                 // EOF newline) must NOT be classified as context — doing so adds
@@ -1198,7 +1218,7 @@ pub(crate) async fn git_show(cwd: String, hash: String) -> Result<Vec<GitDiff>, 
                 // for new-file hunks (header becomes `-0,1` instead of `-0,0`).
                 hunk.lines.push(DiffLine {
                     r#type: "context".to_string(),
-                    content: line[1..].to_string(),
+                    content: stripped.to_string(),
                     old_line_no: Some(old_line_no),
                     new_line_no: Some(new_line_no),
                 });
@@ -1228,43 +1248,83 @@ pub(crate) async fn git_show(cwd: String, hash: String) -> Result<Vec<GitDiff>, 
 // ─── File log (v1.9) — pickaxe + line-range ──────────────
 
 #[tauri::command]
-pub(crate) async fn git_file_log(cwd: String, path: String, count: Option<u32>) -> Result<Vec<FileLogEntry>, String> {
+pub(crate) async fn git_file_log(
+    cwd: String,
+    path: String,
+    count: Option<u32>,
+) -> Result<Vec<FileLogEntry>, String> {
     let _repo = repo_lock::read(&cwd);
     let n = count.unwrap_or(50).to_string();
     let fmt = "%H\n%h\n%an\n%aI\n%s\n%b\n---END---";
     let output = git_cmd()
-        .args(["log", "--follow", "-n", &n, &format!("--format={}", fmt), "--", &path])
+        .args([
+            "log",
+            "--follow",
+            "-n",
+            &n,
+            &format!("--format={}", fmt),
+            "--",
+            &path,
+        ])
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("git log failed: {}", e))?;
     if !output.status.success() {
-        return Err(format!("git log failed: {}", String::from_utf8_lossy(&output.stderr)));
+        return Err(format!(
+            "git log failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
     }
-    Ok(parse_file_log_output(&String::from_utf8_lossy(&output.stdout)))
+    Ok(parse_file_log_output(&String::from_utf8_lossy(
+        &output.stdout,
+    )))
 }
 
 /// Pickaxe: find commits that added or removed `search` string.
 /// mode: "S" (literal string) | "G" (regex)
 #[tauri::command]
-pub(crate) async fn git_file_log_pickaxe(cwd: String, path: String, search: String, mode: String) -> Result<Vec<FileLogEntry>, String> {
+pub(crate) async fn git_file_log_pickaxe(
+    cwd: String,
+    path: String,
+    search: String,
+    mode: String,
+) -> Result<Vec<FileLogEntry>, String> {
     let _repo = repo_lock::read(&cwd);
     let flag = if mode == "G" { "-G" } else { "-S" };
     let fmt = "%H\n%h\n%an\n%aI\n%s\n%b\n---END---";
     let output = git_cmd()
-        .args(["log", "--follow", flag, &search, &format!("--format={}", fmt), "--", &path])
+        .args([
+            "log",
+            "--follow",
+            flag,
+            &search,
+            &format!("--format={}", fmt),
+            "--",
+            &path,
+        ])
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("git log pickaxe failed: {}", e))?;
     if !output.status.success() {
-        return Err(format!("git log pickaxe failed: {}", String::from_utf8_lossy(&output.stderr)));
+        return Err(format!(
+            "git log pickaxe failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
     }
-    Ok(parse_file_log_output(&String::from_utf8_lossy(&output.stdout)))
+    Ok(parse_file_log_output(&String::from_utf8_lossy(
+        &output.stdout,
+    )))
 }
 
 /// Line-range history: commits that touched lines [start..end] in path.
 /// Uses git log -L <start>,<end>:<path> (no --follow; incompatible with -L).
 #[tauri::command]
-pub(crate) async fn git_file_log_range(cwd: String, path: String, start_line: u32, end_line: u32) -> Result<Vec<FileLogEntry>, String> {
+pub(crate) async fn git_file_log_range(
+    cwd: String,
+    path: String,
+    start_line: u32,
+    end_line: u32,
+) -> Result<Vec<FileLogEntry>, String> {
     let _repo = repo_lock::read(&cwd);
     let range = format!("{},{}:{}", start_line, end_line, path);
     let fmt = "%H\n%h\n%an\n%aI\n%s\n%b\n---END---";
@@ -1274,15 +1334,24 @@ pub(crate) async fn git_file_log_range(cwd: String, path: String, start_line: u3
         .output()
         .map_err(|e| format!("git log -L failed: {}", e))?;
     if !output.status.success() {
-        return Err(format!("git log -L failed: {}", String::from_utf8_lossy(&output.stderr)));
+        return Err(format!(
+            "git log -L failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
     }
-    Ok(parse_file_log_output(&String::from_utf8_lossy(&output.stdout)))
+    Ok(parse_file_log_output(&String::from_utf8_lossy(
+        &output.stdout,
+    )))
 }
 
 /// Run `git blame --porcelain` on a file.
 /// algorithm: "histogram" | "patience" | "minimal" | "myers" (default "histogram").
 #[tauri::command]
-pub(crate) async fn git_blame(cwd: String, path: String, algorithm: Option<String>) -> Result<Vec<BlameLine>, String> {
+pub(crate) async fn git_blame(
+    cwd: String,
+    path: String,
+    algorithm: Option<String>,
+) -> Result<Vec<BlameLine>, String> {
     let _repo = repo_lock::read(&cwd);
     let algo = algorithm.as_deref().unwrap_or("histogram");
     let diff_algo_flag = format!("--diff-algorithm={}", algo);
@@ -1292,7 +1361,10 @@ pub(crate) async fn git_blame(cwd: String, path: String, algorithm: Option<Strin
         .output()
         .map_err(|e| format!("Failed to run git blame: {}", e))?;
     if !output.status.success() {
-        return Err(format!("git blame failed: {}", String::from_utf8_lossy(&output.stderr)));
+        return Err(format!(
+            "git blame failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
     }
     let raw = String::from_utf8_lossy(&output.stdout);
     let lines: Vec<&str> = raw.lines().collect();
@@ -1330,7 +1402,16 @@ pub(crate) async fn git_blame(cwd: String, path: String, algorithm: Option<Strin
             content = lines[i][1..].to_string();
             i += 1;
         }
-        blame_lines.push(BlameLine { hash, hash_full, final_line, orig_line, author, author_date, summary, content });
+        blame_lines.push(BlameLine {
+            hash,
+            hash_full,
+            final_line,
+            orig_line,
+            author,
+            author_date,
+            summary,
+            content,
+        });
     }
     Ok(blame_lines)
 }
@@ -1350,7 +1431,10 @@ pub(crate) async fn git_blame(cwd: String, path: String, algorithm: Option<Strin
 //   7. Retourner la liste brute — le résolveur tourne côté frontend (TypeScript)
 
 #[tauri::command]
-pub(crate) async fn preview_merge(cwd: String, source_branch: String) -> Result<Vec<FileMergePreview>, String> {
+pub(crate) async fn preview_merge(
+    cwd: String,
+    source_branch: String,
+) -> Result<Vec<FileMergePreview>, String> {
     let git = git_binary();
 
     // 1. Merge-base
@@ -1374,19 +1458,29 @@ pub(crate) async fn preview_merge(cwd: String, source_branch: String) -> Result<
 
     // 4. Intersection : modifiés des deux côtés
     let ours_set: std::collections::HashSet<&String> = ours_files.iter().collect();
-    let both_modified: Vec<&String> = theirs_files.iter().filter(|f| ours_set.contains(f)).collect();
+    let both_modified: Vec<&String> = theirs_files
+        .iter()
+        .filter(|f| ours_set.contains(f))
+        .collect();
 
     // 5. Fichiers supprimés/ajoutés unilatéralement
     let theirs_set: std::collections::HashSet<&String> = theirs_files.iter().collect();
-    let only_ours: Vec<&String> = ours_files.iter().filter(|f| !theirs_set.contains(f)).collect();
-    let only_theirs: Vec<&String> = theirs_files.iter().filter(|f| !ours_set.contains(f)).collect();
+    let only_ours: Vec<&String> = ours_files
+        .iter()
+        .filter(|f| !theirs_set.contains(f))
+        .collect();
+    let only_theirs: Vec<&String> = theirs_files
+        .iter()
+        .filter(|f| !ours_set.contains(f))
+        .collect();
 
     let tmp = std::env::temp_dir();
     let mut results: Vec<FileMergePreview> = Vec::new();
 
     // 6. Pour chaque fichier modifié des deux côtés → tenter git merge-file
     for file_path in both_modified {
-        let preview = merge_file_preview(&git, &cwd, &base, "HEAD", &source_branch, file_path, &tmp);
+        let preview =
+            merge_file_preview(&git, &cwd, &base, "HEAD", &source_branch, file_path, &tmp);
         results.push(preview);
     }
 
@@ -1412,7 +1506,8 @@ pub(crate) async fn preview_merge(cwd: String, source_branch: String) -> Result<
 
     // Trier : conflits en premier, puis par chemin
     results.sort_by(|a, b| {
-        b.has_conflicts.cmp(&a.has_conflicts)
+        b.has_conflicts
+            .cmp(&a.has_conflicts)
             .then(a.file_path.cmp(&b.file_path))
     });
 
@@ -1473,15 +1568,26 @@ fn build_3way_preview(
     let ours_set: std::collections::HashSet<&String> = ours_files.iter().collect();
     let theirs_set: std::collections::HashSet<&String> = theirs_files.iter().collect();
 
-    let both_modified: Vec<&String> = theirs_files.iter().filter(|f| ours_set.contains(f)).collect();
-    let only_ours: Vec<&String> = ours_files.iter().filter(|f| !theirs_set.contains(f)).collect();
-    let only_theirs: Vec<&String> = theirs_files.iter().filter(|f| !ours_set.contains(f)).collect();
+    let both_modified: Vec<&String> = theirs_files
+        .iter()
+        .filter(|f| ours_set.contains(f))
+        .collect();
+    let only_ours: Vec<&String> = ours_files
+        .iter()
+        .filter(|f| !theirs_set.contains(f))
+        .collect();
+    let only_theirs: Vec<&String> = theirs_files
+        .iter()
+        .filter(|f| !ours_set.contains(f))
+        .collect();
 
     let tmp = std::env::temp_dir();
     let mut results: Vec<FileMergePreview> = Vec::new();
 
     for file_path in both_modified {
-        results.push(merge_file_preview(git, cwd, ancestor, ours_ref, theirs_ref, file_path, &tmp));
+        results.push(merge_file_preview(
+            git, cwd, ancestor, ours_ref, theirs_ref, file_path, &tmp,
+        ));
     }
     for file_path in only_ours {
         results.push(FileMergePreview {
@@ -1501,7 +1607,8 @@ fn build_3way_preview(
     }
 
     results.sort_by(|a, b| {
-        b.has_conflicts.cmp(&a.has_conflicts)
+        b.has_conflicts
+            .cmp(&a.has_conflicts)
             .then(a.file_path.cmp(&b.file_path))
     });
 
@@ -1524,7 +1631,10 @@ fn build_3way_preview(
 /// multiple commits, the entry with the most conflicts is kept so that
 /// intermediate conflicts are not silently dropped.
 #[tauri::command]
-pub(crate) async fn preview_rebase(cwd: String, onto: String) -> Result<Vec<FileMergePreview>, String> {
+pub(crate) async fn preview_rebase(
+    cwd: String,
+    onto: String,
+) -> Result<Vec<FileMergePreview>, String> {
     let git = git_binary();
 
     // Fail fast on an unknown / invalid `onto` ref.
@@ -1594,12 +1704,20 @@ pub(crate) async fn preview_rebase(cwd: String, onto: String) -> Result<Vec<File
             Some(existing) => {
                 // Prefer the entry with more conflict signal:
                 // is_add_delete > has_conflicts (with markers) > clean.
-                let new_score = if preview.is_add_delete { 2u8 }
-                    else if preview.has_conflicts { 1 }
-                    else { 0 };
-                let old_score = if existing.is_add_delete { 2u8 }
-                    else if existing.has_conflicts { 1 }
-                    else { 0 };
+                let new_score = if preview.is_add_delete {
+                    2u8
+                } else if preview.has_conflicts {
+                    1
+                } else {
+                    0
+                };
+                let old_score = if existing.is_add_delete {
+                    2u8
+                } else if existing.has_conflicts {
+                    1
+                } else {
+                    0
+                };
                 new_score > old_score
             }
         };
@@ -1610,7 +1728,8 @@ pub(crate) async fn preview_rebase(cwd: String, onto: String) -> Result<Vec<File
 
     let mut results: Vec<FileMergePreview> = by_file.into_values().collect();
     results.sort_by(|a, b| {
-        b.has_conflicts.cmp(&a.has_conflicts)
+        b.has_conflicts
+            .cmp(&a.has_conflicts)
             .then(a.file_path.cmp(&b.file_path))
     });
 
@@ -1625,7 +1744,10 @@ pub(crate) async fn preview_rebase(cwd: String, onto: String) -> Result<Vec<File
 ///   - ours  = HEAD   (where it is being applied)
 ///   - theirs = commit (the change being picked)
 #[tauri::command]
-pub(crate) async fn preview_cherry_pick(cwd: String, commit: String) -> Result<Vec<FileMergePreview>, String> {
+pub(crate) async fn preview_cherry_pick(
+    cwd: String,
+    commit: String,
+) -> Result<Vec<FileMergePreview>, String> {
     let git = git_binary();
 
     // Resolve the commit and ensure HEAD exists (clear error on a fresh repo).
@@ -1665,7 +1787,11 @@ fn merge_file_preview(
             .current_dir(cwd)
             .output()
             .ok()?;
-        if out.status.success() { Some(out.stdout) } else { None }
+        if out.status.success() {
+            Some(out.stdout)
+        } else {
+            None
+        }
     }
 
     let base_bytes = git_show_file(git, cwd, base_ref, file_path);
@@ -1687,8 +1813,8 @@ fn merge_file_preview(
 
     // Écrire les trois versions dans des fichiers temporaires
     let prefix = file_path.replace(['/', '\\', '.'], "_");
-    let tmp_base  = tmp.join(format!("{}_base.tmp", prefix));
-    let tmp_ours  = tmp.join(format!("{}_ours.tmp", prefix));
+    let tmp_base = tmp.join(format!("{}_base.tmp", prefix));
+    let tmp_ours = tmp.join(format!("{}_ours.tmp", prefix));
     let tmp_theirs = tmp.join(format!("{}_theirs.tmp", prefix));
 
     let write_or_empty = |path: &std::path::Path, bytes: &Option<Vec<u8>>| {
@@ -1752,7 +1878,10 @@ fn merge_file_preview(
 /// Excludes the current branch and the default branch itself.
 /// Equivalent to `git branch --merged <default_branch> --format="%(refname:short)"`.
 #[tauri::command]
-pub(crate) async fn git_branch_merged(cwd: String, default_branch: Option<String>) -> Result<Vec<String>, String> {
+pub(crate) async fn git_branch_merged(
+    cwd: String,
+    default_branch: Option<String>,
+) -> Result<Vec<String>, String> {
     use crate::git::cmd::{git_cmd, resolve_default_branch};
 
     let _repo = repo_lock::read(&cwd);
@@ -1809,7 +1938,9 @@ pub(crate) async fn git_config_identity(cwd: String) -> Result<(String, String),
         .map_err(|e| e.to_string())?;
 
     let name = String::from_utf8_lossy(&name_out.stdout).trim().to_string();
-    let email = String::from_utf8_lossy(&email_out.stdout).trim().to_string();
+    let email = String::from_utf8_lossy(&email_out.stdout)
+        .trim()
+        .to_string();
 
     if name.is_empty() || email.is_empty() {
         return Err("git user.name or user.email is not configured".to_string());
@@ -1839,11 +1970,11 @@ pub(crate) async fn git_commit_template_path(cwd: String) -> Result<Option<Strin
     }
 
     // Expand leading ~
-    let expanded = if raw.starts_with('~') {
+    let expanded = if let Some(stripped) = raw.strip_prefix('~') {
         let home = std::env::var("HOME")
             .or_else(|_| std::env::var("USERPROFILE"))
             .unwrap_or_default();
-        format!("{}{}", home, &raw[1..])
+        format!("{}{}", home, stripped)
     } else {
         raw
     };
@@ -1886,7 +2017,8 @@ mod predictor_tests {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_nanos();
-            let dir = std::env::temp_dir().join(format!("gitwand-predictor-test-{}-{}-{}", pid, n, nanos));
+            let dir = std::env::temp_dir()
+                .join(format!("gitwand-predictor-test-{}-{}-{}", pid, n, nanos));
             std::fs::create_dir_all(&dir).unwrap();
             let repo = TempRepo { path: dir };
             repo.git(&["init", "-q", "-b", "main"]);
@@ -2004,7 +2136,11 @@ mod predictor_tests {
 
         // Working tree + HEAD must be untouched.
         assert_eq!(repo.head_sha(), head_before, "HEAD moved during preview");
-        assert_eq!(porcelain(&repo), status_before, "working tree mutated during preview");
+        assert_eq!(
+            porcelain(&repo),
+            status_before,
+            "working tree mutated during preview"
+        );
         assert_eq!(repo.read("shared.txt"), "line1\nFEATURE\nline3\n");
     }
 
@@ -2097,8 +2233,16 @@ mod predictor_tests {
             .output()
             .unwrap();
         let commits_str = String::from_utf8_lossy(&commits_out.stdout);
-        let commits: Vec<&str> = commits_str.lines().map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
-        assert_eq!(commits.len(), 2, "should have exactly 2 commits in the stack");
+        let commits: Vec<&str> = commits_str
+            .lines()
+            .map(|l| l.trim())
+            .filter(|l| !l.is_empty())
+            .collect();
+        assert_eq!(
+            commits.len(),
+            2,
+            "should have exactly 2 commits in the stack"
+        );
 
         let mut all_previews: Vec<FileMergePreview> = Vec::new();
         for commit in &commits {
@@ -2108,7 +2252,8 @@ mod predictor_tests {
             all_previews.append(&mut pp);
         }
         // At least one entry for shared.txt must have has_conflicts = true.
-        let conflict_files: Vec<String> = all_previews.iter()
+        let conflict_files: Vec<String> = all_previews
+            .iter()
             .filter(|p| p.has_conflicts)
             .map(|p| p.file_path.clone())
             .collect();
@@ -2158,7 +2303,11 @@ mod predictor_tests {
         );
 
         assert_eq!(repo.head_sha(), head_before, "HEAD moved during preview");
-        assert_eq!(porcelain(&repo), status_before, "working tree mutated during preview");
+        assert_eq!(
+            porcelain(&repo),
+            status_before,
+            "working tree mutated during preview"
+        );
         assert_eq!(repo.read("shared.txt"), "x\nMAIN\nz\n");
     }
 
@@ -2235,8 +2384,8 @@ mod pathspec_tests {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_nanos();
-            let dir = std::env::temp_dir()
-                .join(format!("gitwand-pathspec-test-{}-{}-{}", pid, n, nanos));
+            let dir =
+                std::env::temp_dir().join(format!("gitwand-pathspec-test-{}-{}-{}", pid, n, nanos));
             std::fs::create_dir_all(&dir).unwrap();
             let repo = TempRepo { path: dir };
             repo.git(&["init", "-q", "-b", "main"]);
@@ -2300,13 +2449,23 @@ mod pathspec_tests {
 
         let all_entries = tauri::async_runtime::block_on(git_log(
             repo.cwd(),
-            None, None, None, None, None, None, None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
         ))
         .expect("git_log(all) failed");
 
         let scoped_a = tauri::async_runtime::block_on(git_log(
             repo.cwd(),
-            None, None, None, None, None,
+            None,
+            None,
+            None,
+            None,
+            None,
             Some("packages/a".to_string()),
             None,
         ))
@@ -2314,7 +2473,11 @@ mod pathspec_tests {
 
         let scoped_b = tauri::async_runtime::block_on(git_log(
             repo.cwd(),
-            None, None, None, None, None,
+            None,
+            None,
+            None,
+            None,
+            None,
             Some("packages/b".to_string()),
             None,
         ))
@@ -2323,11 +2486,19 @@ mod pathspec_tests {
         // All: 3 commits
         assert_eq!(all_entries.len(), 3, "expected 3 unscoped commits");
         // packages/a: commits 1 (add a) + 3 (touch both) = 2
-        assert_eq!(scoped_a.len(), 2, "expected 2 commits for packages/a, got {:?}",
-            scoped_a.iter().map(|e| &e.message).collect::<Vec<_>>());
+        assert_eq!(
+            scoped_a.len(),
+            2,
+            "expected 2 commits for packages/a, got {:?}",
+            scoped_a.iter().map(|e| &e.message).collect::<Vec<_>>()
+        );
         // packages/b: commits 2 (add b) + 3 (touch both) = 2
-        assert_eq!(scoped_b.len(), 2, "expected 2 commits for packages/b, got {:?}",
-            scoped_b.iter().map(|e| &e.message).collect::<Vec<_>>());
+        assert_eq!(
+            scoped_b.len(),
+            2,
+            "expected 2 commits for packages/b, got {:?}",
+            scoped_b.iter().map(|e| &e.message).collect::<Vec<_>>()
+        );
     }
 
     #[test]
@@ -2338,7 +2509,13 @@ mod pathspec_tests {
 
         let entries = tauri::async_runtime::block_on(git_log(
             repo.cwd(),
-            None, None, None, None, None, None, None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
         ))
         .expect("git_log failed");
 
@@ -2357,18 +2534,28 @@ mod pathspec_tests {
         repo.write("a.txt", "3");
         repo.commit_all("c3");
 
-        let count = tauri::async_runtime::block_on(git_rev_count(
-            repo.cwd(), None, None, None,
-        ))
-        .expect("git_rev_count failed");
+        let count = tauri::async_runtime::block_on(git_rev_count(repo.cwd(), None, None, None))
+            .expect("git_rev_count failed");
 
         let log = tauri::async_runtime::block_on(git_log(
             repo.cwd(),
-            Some(1000), None, None, None, None, None, None,
+            Some(1000),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
         ))
         .expect("git_log failed");
 
-        assert_eq!(count, log.len(), "rev_count ({}) should match log len ({})", count, log.len());
+        assert_eq!(
+            count,
+            log.len(),
+            "rev_count ({}) should match log len ({})",
+            count,
+            log.len()
+        );
     }
 
     #[test]
@@ -2384,20 +2571,32 @@ mod pathspec_tests {
         repo.commit_all("b1");
 
         let count_a = tauri::async_runtime::block_on(git_rev_count(
-            repo.cwd(), None, None, Some("packages/a".to_string()),
+            repo.cwd(),
+            None,
+            None,
+            Some("packages/a".to_string()),
         ))
         .expect("git_rev_count(a) failed");
 
         let log_a = tauri::async_runtime::block_on(git_log(
             repo.cwd(),
-            Some(1000), None, None, None, None,
+            Some(1000),
+            None,
+            None,
+            None,
+            None,
             Some("packages/a".to_string()),
             None,
         ))
         .expect("git_log(a) failed");
 
-        assert_eq!(count_a, log_a.len(),
-            "scoped rev_count ({}) should match scoped log len ({})", count_a, log_a.len());
+        assert_eq!(
+            count_a,
+            log_a.len(),
+            "scoped rev_count ({}) should match scoped log len ({})",
+            count_a,
+            log_a.len()
+        );
         assert_eq!(count_a, 2, "packages/a has 2 commits");
     }
 
@@ -2405,10 +2604,8 @@ mod pathspec_tests {
     fn git_rev_count_empty_repo_returns_zero() {
         let repo = TempRepo::new();
         // fresh repo — HEAD doesn't exist yet
-        let count = tauri::async_runtime::block_on(git_rev_count(
-            repo.cwd(), None, None, None,
-        ))
-        .expect("git_rev_count on empty repo failed");
+        let count = tauri::async_runtime::block_on(git_rev_count(repo.cwd(), None, None, None))
+            .expect("git_rev_count on empty repo failed");
         assert_eq!(count, 0);
     }
 
@@ -2432,11 +2629,13 @@ mod pathspec_tests {
         let untracked_a: Vec<&str> = status_a.untracked.iter().map(|s| s.as_str()).collect();
         assert!(
             untracked_a.iter().any(|p| p.contains("packages/a")),
-            "expected packages/a in untracked: {:?}", untracked_a
+            "expected packages/a in untracked: {:?}",
+            untracked_a
         );
         assert!(
             !untracked_a.iter().any(|p| p.contains("packages/b")),
-            "packages/b should NOT appear in packages/a scope: {:?}", untracked_a
+            "packages/b should NOT appear in packages/a scope: {:?}",
+            untracked_a
         );
     }
 
@@ -2448,13 +2647,18 @@ mod pathspec_tests {
         repo.write("packages/a/dirty.txt", "dirty a");
         repo.write("packages/b/dirty.txt", "dirty b");
 
-        let status = git_status_cli(repo.cwd(), None)
-            .expect("git_status_cli(None) failed");
+        let status = git_status_cli(repo.cwd(), None).expect("git_status_cli(None) failed");
 
         let all_paths: Vec<&str> = status.untracked.iter().map(|s| s.as_str()).collect();
         // Both subtrees should appear
-        let has_a = all_paths.iter().any(|p| p.contains("packages/a") || p.contains("packages/"));
-        assert!(has_a, "unscoped status should show all changes: {:?}", all_paths);
+        let has_a = all_paths
+            .iter()
+            .any(|p| p.contains("packages/a") || p.contains("packages/"));
+        assert!(
+            has_a,
+            "unscoped status should show all changes: {:?}",
+            all_paths
+        );
     }
 
     // ── Remote branch existence without configured upstream ───────
@@ -2471,8 +2675,7 @@ mod pathspec_tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let dir = std::env::temp_dir()
-            .join(format!("gitwand-bare-remote-{}-{}-{}", pid, n, nanos));
+        let dir = std::env::temp_dir().join(format!("gitwand-bare-remote-{}-{}-{}", pid, n, nanos));
         let out = Command::new(git_binary())
             .args(["init", "--bare", "-q", "-b", "main"])
             .arg(&dir)
@@ -2501,14 +2704,20 @@ mod pathspec_tests {
         let s = tauri::async_runtime::block_on(git_status(repo.cwd(), None))
             .expect("git_status failed");
         assert_eq!(s.remote, None, "no upstream should be configured");
-        assert!(s.remote_branch_exists, "remote-tracking ref should be detected");
+        assert!(
+            s.remote_branch_exists,
+            "remote-tracking ref should be detected"
+        );
         assert_eq!(s.ahead, 1, "one local commit ahead of origin/main");
         assert_eq!(s.behind, 0);
 
         // CLI fallback path must agree.
         let c = git_status_cli(repo.cwd(), None).expect("git_status_cli failed");
         assert_eq!(c.remote, None);
-        assert!(c.remote_branch_exists, "CLI path should also detect the remote ref");
+        assert!(
+            c.remote_branch_exists,
+            "CLI path should also detect the remote ref"
+        );
         assert_eq!(c.ahead, 1);
         assert_eq!(c.behind, 0);
 
@@ -2531,10 +2740,16 @@ mod pathspec_tests {
         let s = tauri::async_runtime::block_on(git_status(repo.cwd(), None))
             .expect("git_status failed");
         assert_eq!(s.remote, None);
-        assert!(!s.remote_branch_exists, "unpushed branch must not look published");
+        assert!(
+            !s.remote_branch_exists,
+            "unpushed branch must not look published"
+        );
 
         let c = git_status_cli(repo.cwd(), None).expect("git_status_cli failed");
-        assert!(!c.remote_branch_exists, "CLI path agrees: branch is unpublished");
+        assert!(
+            !c.remote_branch_exists,
+            "CLI path agrees: branch is unpublished"
+        );
 
         let _ = std::fs::remove_dir_all(&bare);
     }
@@ -2552,7 +2767,10 @@ mod pathspec_tests {
         let s = tauri::async_runtime::block_on(git_status(repo.cwd(), None))
             .expect("git_status failed");
         assert_eq!(s.remote.as_deref(), Some("origin/main"));
-        assert!(s.remote_branch_exists, "configured upstream implies it exists");
+        assert!(
+            s.remote_branch_exists,
+            "configured upstream implies it exists"
+        );
 
         let _ = std::fs::remove_dir_all(&bare);
     }
@@ -2589,8 +2807,10 @@ mod branch_merged_tests {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_nanos();
-            let dir = std::env::temp_dir()
-                .join(format!("gitwand-branch-merged-test-{}-{}-{}", pid, n, nanos));
+            let dir = std::env::temp_dir().join(format!(
+                "gitwand-branch-merged-test-{}-{}-{}",
+                pid, n, nanos
+            ));
             std::fs::create_dir_all(&dir).unwrap();
             let repo = TempRepo { path: dir };
             repo.git_ok(&["init", "-q", "-b", "trunk"]);

@@ -44,7 +44,6 @@ _tmp_*
 vite.config.ts.timestamp-*
 vitest.config.ts.timestamp-*
 *.timestamp-*.mjs
-ROADMAP.md
 
 # Worktrees
 .worktrees/

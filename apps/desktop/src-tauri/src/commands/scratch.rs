@@ -76,12 +76,15 @@ fn validate_scratch_path(cwd: &Path, scratch_path: &str) -> Result<PathBuf, Stri
     // Must be registered as a worktree of this repo (porcelain output lists the
     // absolute path on each `worktree ` line).
     let list = git_in(cwd, &["worktree", "list", "--porcelain"])?;
-    let registered = list.lines().filter_map(|l| l.strip_prefix("worktree ")).any(|p| {
-        Path::new(p)
-            .canonicalize()
-            .map(|c| c == candidate)
-            .unwrap_or(false)
-    });
+    let registered = list
+        .lines()
+        .filter_map(|l| l.strip_prefix("worktree "))
+        .any(|p| {
+            Path::new(p)
+                .canonicalize()
+                .map(|c| c == candidate)
+                .unwrap_or(false)
+        });
     if !registered {
         return Err(format!(
             "scratch_path is not a registered worktree of this repo: {}",
@@ -158,8 +161,21 @@ fn scratch_worktree_create_impl(
     // commit. This rejects a leading-dash value (e.g. "--no-checkout", "--detach")
     // — which git would otherwise treat as a flag — as `fatal: invalid reference`.
     // The trailing `--` separator below is a second, defence-in-depth guard.
-    if git_in(&repo_root, &["rev-parse", "--verify", "--quiet", &format!("{}^{{commit}}", base_ref)]).is_err() {
-        return Err(format!("source ref does not resolve to a commit: {}", base_ref));
+    if git_in(
+        &repo_root,
+        &[
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("{}^{{commit}}", base_ref),
+        ],
+    )
+    .is_err()
+    {
+        return Err(format!(
+            "source ref does not resolve to a commit: {}",
+            base_ref
+        ));
     }
 
     // Timestamp generated Rust-side so the frontend never has to.
@@ -299,7 +315,13 @@ fn scratch_worktree_merge_back_impl(cwd: String, scratch_path: String) -> Result
     // from the main working tree + index, then overlay the remaining content.
     let deleted = git_in(
         &repo_root,
-        &["diff", "--name-only", "--diff-filter=D", "HEAD", &scratch_branch],
+        &[
+            "diff",
+            "--name-only",
+            "--diff-filter=D",
+            "HEAD",
+            &scratch_branch,
+        ],
     )?;
     for path in deleted.lines().map(str::trim).filter(|p| !p.is_empty()) {
         // `--` separates the pathspec from options; `--ignore-unmatch` keeps the
@@ -445,8 +467,8 @@ mod tests {
         repo.commit_all("base");
 
         // Create the scratch worktree off the current HEAD.
-        let scratch = scratch_worktree_create_impl(repo.cwd(), None, None)
-            .expect("create should succeed");
+        let scratch =
+            scratch_worktree_create_impl(repo.cwd(), None, None).expect("create should succeed");
 
         assert!(scratch.branch.starts_with("gitwand-scratch-"));
         assert_eq!(scratch.source_branch, "main");
@@ -490,7 +512,9 @@ mod tests {
         // test's own temp parent dir is named "gitwand-scratch-test-…".)
         let list = repo.worktree_list();
         assert!(
-            !list.lines().any(|l| l.starts_with("branch refs/heads/gitwand-scratch-")),
+            !list
+                .lines()
+                .any(|l| l.starts_with("branch refs/heads/gitwand-scratch-")),
             "no scratch worktree should remain registered, got: {}",
             list
         );
@@ -516,8 +540,8 @@ mod tests {
             .output()
             .unwrap();
 
-        let scratch = scratch_worktree_create_impl(repo.cwd(), None, None)
-            .expect("create should succeed");
+        let scratch =
+            scratch_worktree_create_impl(repo.cwd(), None, None).expect("create should succeed");
 
         let err = scratch_worktree_merge_back_impl(repo.cwd(), scratch.path.clone())
             .expect_err("merge_back must be refused on a conflicted main checkout");
@@ -537,8 +561,8 @@ mod tests {
         repo.write("file.txt", "original\n");
         repo.commit_all("base");
 
-        let scratch = scratch_worktree_create_impl(repo.cwd(), None, None)
-            .expect("create should succeed");
+        let scratch =
+            scratch_worktree_create_impl(repo.cwd(), None, None).expect("create should succeed");
         assert!(Path::new(&scratch.path).exists());
 
         scratch_worktree_discard_impl(repo.cwd(), scratch.path.clone())
@@ -551,7 +575,9 @@ mod tests {
         // test's own temp parent dir is named "gitwand-scratch-test-…".)
         let list = repo.worktree_list();
         assert!(
-            !list.lines().any(|l| l.starts_with("branch refs/heads/gitwand-scratch-")),
+            !list
+                .lines()
+                .any(|l| l.starts_with("branch refs/heads/gitwand-scratch-")),
             "no scratch worktree should remain registered, got: {}",
             list
         );
@@ -561,9 +587,18 @@ mod tests {
 
     #[test]
     fn slugify_produces_ref_safe_names_or_none() {
-        assert_eq!(slugify_task_name("Fix login bug"), Some("fix-login-bug".to_string()));
-        assert_eq!(slugify_task_name("  Refactor!! API  "), Some("refactor-api".to_string()));
-        assert_eq!(slugify_task_name("feature/foo@bar"), Some("feature-foo-bar".to_string()));
+        assert_eq!(
+            slugify_task_name("Fix login bug"),
+            Some("fix-login-bug".to_string())
+        );
+        assert_eq!(
+            slugify_task_name("  Refactor!! API  "),
+            Some("refactor-api".to_string())
+        );
+        assert_eq!(
+            slugify_task_name("feature/foo@bar"),
+            Some("feature-foo-bar".to_string())
+        );
         // All-punctuation / empty → no usable slug.
         assert_eq!(slugify_task_name("   "), None);
         assert_eq!(slugify_task_name("!!!"), None);
@@ -586,7 +621,11 @@ mod tests {
                 .expect("create should succeed");
 
         assert_eq!(scratch.branch, "gitwand-scratch-fix-login-bug");
-        let base = Path::new(&scratch.path).file_name().unwrap().to_str().unwrap();
+        let base = Path::new(&scratch.path)
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap();
         assert_eq!(base, "gitwand-scratch-fix-login-bug");
 
         // Still recognised + removable by the validated cleanup path.

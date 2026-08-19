@@ -892,6 +892,7 @@ const fr: Locale = {
       statDiff: "Diff",
       statComments: "Commentaires",
       commentGoto: "Aller à",
+      commentResolved: "Résolu",
       labels: "Labels",
       reviewers: "Reviewers",
       reviewApproved: "a approuvé",

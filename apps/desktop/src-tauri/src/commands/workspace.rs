@@ -24,23 +24,23 @@ pub(crate) async fn workspace_read(path: String) -> Result<WorkspaceConfig, Stri
     if !file.exists() {
         return Err(format!("No workspace file found at {}", file.display()));
     }
-    let content = std::fs::read_to_string(&file)
-        .map_err(|e| format!("Failed to read workspace: {}", e))?;
-    serde_json::from_str(&content)
-        .map_err(|e| format!("Failed to parse workspace: {}", e))
+    let content =
+        std::fs::read_to_string(&file).map_err(|e| format!("Failed to read workspace: {}", e))?;
+    serde_json::from_str(&content).map_err(|e| format!("Failed to parse workspace: {}", e))
 }
 
 /// Write a `.gitwand-workspace.json` to the given directory.
 #[tauri::command]
-pub(crate) async fn workspace_write(path: String, workspace: WorkspaceConfig) -> Result<(), String> {
+pub(crate) async fn workspace_write(
+    path: String,
+    workspace: WorkspaceConfig,
+) -> Result<(), String> {
     let dir = std::path::Path::new(&path);
     let file = dir.join(".gitwand-workspace.json");
-    std::fs::create_dir_all(dir)
-        .map_err(|e| format!("Failed to create directory: {}", e))?;
+    std::fs::create_dir_all(dir).map_err(|e| format!("Failed to create directory: {}", e))?;
     let content = serde_json::to_string_pretty(&workspace)
         .map_err(|e| format!("Failed to serialize workspace: {}", e))?;
-    std::fs::write(&file, content)
-        .map_err(|e| format!("Failed to write workspace: {}", e))
+    std::fs::write(&file, content).map_err(|e| format!("Failed to write workspace: {}", e))
 }
 
 /// Check whether `rel`, resolved under `cwd`, exists on disk.
@@ -64,25 +64,28 @@ pub(crate) async fn path_exists(cwd: String, rel: String) -> Result<bool, String
 /// because `Vec<T>::into_par_iter()` is an `IndexedParallelIterator`.
 #[tauri::command]
 pub(crate) async fn workspace_status_all(repos: Vec<WorkspaceRepo>) -> Vec<WorkspaceRepoStatus> {
-    repos.into_par_iter().map(|repo| {
-        let path = repo.path.clone();
-        let name = repo.name.clone();
+    repos
+        .into_par_iter()
+        .map(|repo| {
+            let path = repo.path.clone();
+            let name = repo.name.clone();
 
-        let (branch, ahead, behind, no_upstream) = libgit2_branch_ab(&path);
-        let modified = libgit2_modified_count(&path);
+            let (branch, ahead, behind, no_upstream) = libgit2_branch_ab(&path);
+            let modified = libgit2_modified_count(&path);
 
-        WorkspaceRepoStatus {
-            path,
-            name,
-            branch,
-            ahead,
-            behind,
-            has_upstream: !no_upstream,
-            modified,
-            conflicted: 0, // non calculé dans la vue workspace (libgit2 ne distingue pas les conflits ici)
-            error: None,
-        }
-    }).collect()
+            WorkspaceRepoStatus {
+                path,
+                name,
+                branch,
+                ahead,
+                behind,
+                has_upstream: !no_upstream,
+                modified,
+                conflicted: 0, // non calculé dans la vue workspace (libgit2 ne distingue pas les conflits ici)
+                error: None,
+            }
+        })
+        .collect()
 }
 
 /// Run `git fetch` on all repos in a workspace (best-effort; errors captured per-repo).
@@ -131,31 +134,33 @@ pub(crate) async fn workspace_pull_all(repos: Vec<WorkspaceRepo>) -> Vec<Workspa
 /// went from ~750 ms wall-clock to ~30 ms in the typical case.
 #[tauri::command]
 pub(crate) async fn workspace_wip_all(repos: Vec<WorkspaceRepo>) -> Vec<WorkspaceWipItem> {
-    repos.into_par_iter().map(|repo| {
-        let path = repo.path.clone();
-        let name = repo.name.clone();
+    repos
+        .into_par_iter()
+        .map(|repo| {
+            let path = repo.path.clone();
+            let name = repo.name.clone();
 
-        let (branch, ahead, behind, has_no_upstream) = libgit2_branch_ab(&path);
-        let (staged_count, unstaged_count, untracked_count, changed_files) =
-            libgit2_wip_status(&path);
-        let last_commit_at = libgit2_last_commit_at(&path);
+            let (branch, ahead, behind, has_no_upstream) = libgit2_branch_ab(&path);
+            let (staged_count, unstaged_count, untracked_count, changed_files) =
+                libgit2_wip_status(&path);
+            let last_commit_at = libgit2_last_commit_at(&path);
 
-        WorkspaceWipItem {
-            path,
-            name,
-            branch,
-            ahead,
-            behind,
-            staged_count,
-            unstaged_count,
-            untracked_count,
-            last_commit_at,
-            has_no_upstream,
-            error: None,
-            changed_files,
-        }
-    })
-    .collect()
+            WorkspaceWipItem {
+                path,
+                name,
+                branch,
+                ahead,
+                behind,
+                staged_count,
+                unstaged_count,
+                untracked_count,
+                last_commit_at,
+                has_no_upstream,
+                error: None,
+                changed_files,
+            }
+        })
+        .collect()
 }
 
 /// Aggregate open PRs from all repos in a workspace (via `gh pr list`).
@@ -250,7 +255,10 @@ pub(crate) async fn workspace_prs_all(repos: Vec<WorkspaceRepo>) -> Vec<Workspac
 /// Parallelized via rayon (P3.2). `filter` is captured by-ref and read-only
 /// so it's safe to share across threads.
 #[tauri::command]
-pub(crate) async fn workspace_issues_all(repos: Vec<WorkspaceRepo>, filter: String) -> Vec<WorkspaceRepoIssues> {
+pub(crate) async fn workspace_issues_all(
+    repos: Vec<WorkspaceRepo>,
+    filter: String,
+) -> Vec<WorkspaceRepoIssues> {
     // OAuth/REST path (#73): same routing rule as `workspace_prs_all`. The
     // assigned/created/mentioned filters map `@me` to a concrete login, so we
     // resolve the authenticated user once (a single REST round-trip) and pass it
@@ -263,73 +271,12 @@ pub(crate) async fn workspace_issues_all(repos: Vec<WorkspaceRepo>, filter: Stri
             }
             _ => String::new(),
         };
-        return repos.into_par_iter().map(|repo| {
-            let repo_path = repo.path.clone();
-            let repo_name = repo.name.clone();
-            match github_api::rest_list_issues(&repo_path, &filter, &me, 100, tok) {
-                Ok(issues) => WorkspaceRepoIssues {
-                    repo_path, repo_name, issues, filter: filter.clone(), error: None,
-                },
-                Err(e) => WorkspaceRepoIssues {
-                    repo_path, repo_name, issues: vec![], filter: filter.clone(), error: Some(e),
-                },
-            }
-        }).collect();
-    }
-
-    repos.into_par_iter().map(|repo| {
-        let repo_path = repo.path.clone();
-        let repo_name = repo.name.clone();
-
-        let mut args: Vec<String> = vec![
-            "issue".to_string(), "list".to_string(),
-            "--state".to_string(), "open".to_string(),
-            "--json".to_string(),
-            "number,title,state,author,assignees,labels,url,createdAt,updatedAt,milestone".to_string(),
-            "--limit".to_string(), "100".to_string(),
-        ];
-        match filter.as_str() {
-            "assigned" => {
-                args.push("--assignee".to_string());
-                args.push("@me".to_string());
-            }
-            "created" => {
-                args.push("--author".to_string());
-                args.push("@me".to_string());
-            }
-            "mentioned" => {
-                args.push("--search".to_string());
-                args.push("mentions:@me".to_string());
-            }
-            _ => {} // "" or unknown = no extra filter
-        }
-
-        let output = hidden_cmd("gh")
-            .args(&args)
-            .current_dir(&repo_path)
-            .output();
-
-        match output {
-            Err(e) => WorkspaceRepoIssues {
-                repo_path,
-                repo_name,
-                issues: vec![],
-                filter: filter.clone(),
-                error: Some(format!("gh not available: {}", e)),
-            },
-            Ok(out) if !out.status.success() => {
-                let stderr = String::from_utf8_lossy(&out.stderr);
-                WorkspaceRepoIssues {
-                    repo_path,
-                    repo_name,
-                    issues: vec![],
-                    filter: filter.clone(),
-                    error: Some(format!("gh issue list failed: {}", stderr.trim())),
-                }
-            }
-            Ok(out) => {
-                let stdout = String::from_utf8_lossy(&out.stdout);
-                match parse_gh_issue_json(&stdout) {
+        return repos
+            .into_par_iter()
+            .map(|repo| {
+                let repo_path = repo.path.clone();
+                let repo_name = repo.name.clone();
+                match github_api::rest_list_issues(&repo_path, &filter, &me, 100, tok) {
                     Ok(issues) => WorkspaceRepoIssues {
                         repo_path,
                         repo_name,
@@ -345,8 +292,86 @@ pub(crate) async fn workspace_issues_all(repos: Vec<WorkspaceRepo>, filter: Stri
                         error: Some(e),
                     },
                 }
+            })
+            .collect();
+    }
+
+    repos
+        .into_par_iter()
+        .map(|repo| {
+            let repo_path = repo.path.clone();
+            let repo_name = repo.name.clone();
+
+            let mut args: Vec<String> = vec![
+                "issue".to_string(),
+                "list".to_string(),
+                "--state".to_string(),
+                "open".to_string(),
+                "--json".to_string(),
+                "number,title,state,author,assignees,labels,url,createdAt,updatedAt,milestone"
+                    .to_string(),
+                "--limit".to_string(),
+                "100".to_string(),
+            ];
+            match filter.as_str() {
+                "assigned" => {
+                    args.push("--assignee".to_string());
+                    args.push("@me".to_string());
+                }
+                "created" => {
+                    args.push("--author".to_string());
+                    args.push("@me".to_string());
+                }
+                "mentioned" => {
+                    args.push("--search".to_string());
+                    args.push("mentions:@me".to_string());
+                }
+                _ => {} // "" or unknown = no extra filter
             }
-        }
-    })
-    .collect()
+
+            let output = hidden_cmd("gh")
+                .args(&args)
+                .current_dir(&repo_path)
+                .output();
+
+            match output {
+                Err(e) => WorkspaceRepoIssues {
+                    repo_path,
+                    repo_name,
+                    issues: vec![],
+                    filter: filter.clone(),
+                    error: Some(format!("gh not available: {}", e)),
+                },
+                Ok(out) if !out.status.success() => {
+                    let stderr = String::from_utf8_lossy(&out.stderr);
+                    WorkspaceRepoIssues {
+                        repo_path,
+                        repo_name,
+                        issues: vec![],
+                        filter: filter.clone(),
+                        error: Some(format!("gh issue list failed: {}", stderr.trim())),
+                    }
+                }
+                Ok(out) => {
+                    let stdout = String::from_utf8_lossy(&out.stdout);
+                    match parse_gh_issue_json(&stdout) {
+                        Ok(issues) => WorkspaceRepoIssues {
+                            repo_path,
+                            repo_name,
+                            issues,
+                            filter: filter.clone(),
+                            error: None,
+                        },
+                        Err(e) => WorkspaceRepoIssues {
+                            repo_path,
+                            repo_name,
+                            issues: vec![],
+                            filter: filter.clone(),
+                            error: Some(e),
+                        },
+                    }
+                }
+            }
+        })
+        .collect()
 }

@@ -11,6 +11,7 @@ import { ref, computed } from "vue";
 import type { PrReviewComment } from "../utils/backend";
 import { renderMarkdown, onMarkdownLinkClick } from "../composables/useSafeHtml";
 import { useI18n } from "../composables/useI18n";
+import { formatRelativeAge } from "../utils/relativeTime";
 import Avatar from "./Avatar.vue";
 import { forgeAvatarUrl } from "../composables/useAvatar";
 import PrReactions from "./PrReactions.vue";
@@ -112,14 +113,7 @@ const bodyHtmlById = computed(() => {
 
 
 function timeAgo(dateStr: string): string {
-  try {
-    const diff = Date.now() - new Date(dateStr).getTime();
-    const mins = Math.floor(diff / 60000);
-    if (mins < 60) return `${mins}m`;
-    const hours = Math.floor(mins / 60);
-    if (hours < 24) return `${hours}h`;
-    return `${Math.floor(hours / 24)}j`;
-  } catch { return dateStr; }
+  return formatRelativeAge(dateStr, t);
 }
 </script>
 

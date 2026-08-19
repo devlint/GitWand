@@ -1,3 +1,8 @@
+// @vitest-environment jsdom
+// resolveFileExplorerShortcut tests below construct `new KeyboardEvent(...)`
+// directly — a DOM global not covered by the plan's document./window./
+// HTMLElement/createElement/matchMedia/getComputedStyle grep, but a real DOM
+// dependency nonetheless.
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("@/utils/backend", () => ({

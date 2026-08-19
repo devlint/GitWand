@@ -33,6 +33,7 @@ vi.mock("../forge/useForge", () => ({
 import { usePrPanel } from "../usePrPanel";
 import { _resetPrCacheForTesting, usePrCache } from "../usePrCache";
 import { forgeFromRemoteInfo } from "../forge/useForge";
+import { gitRemoteInfo } from "../../utils/backend";
 
 function makePr(n: number) {
   return {
@@ -207,7 +208,8 @@ describe("usePrPanel — background prefetch drain", () => {
     getPRCount.mockResolvedValue(9);
     cwd.value = "/repo-b";
     await nextTick(); // flush the cwd watcher
-    await nextTick(); // flush the watcher's own fire-and-forget refreshDockPrCount() call
+    await nextTick(); // flush the watcher's fire-and-forget refreshDockPrCount() -> loadRemote() hop
+    await nextTick(); // flush the resulting getPRCount() call
 
     expect(getPRCount).toHaveBeenCalledWith("/repo-b", "open");
     expect(panel.dockPrCount.value).toBe(9);
@@ -219,12 +221,22 @@ describe("usePrPanel — background prefetch drain", () => {
     getPRCount.mockImplementationOnce(() => pendingA); // repo-a's call: stays pending
     const cwd = ref("/repo-a");
     const panel = usePrPanel(cwd);
-    void panel.refreshDockPrCount(); // fire, in flight, not yet resolved
+    void panel.refreshDockPrCount(); // fire repo-a's refresh
+    // Let repo-a's own loadRemote() hop resolve so its getPRCount(pendingA)
+    // call actually fires (genuinely in flight) before we switch away —
+    // otherwise the repo-change guard added for the #149 follow-up would
+    // bail out of repo-a's refresh during loadRemote(), before it ever
+    // reaches getPRCount, and repo-b would wrongly consume repo-a's
+    // mockImplementationOnce(pendingA) instead of its own mock.
+    await nextTick();
+    await nextTick();
 
     getPRCount.mockResolvedValueOnce(9); // repo-b's call: resolves immediately
     cwd.value = "/repo-b";
     await nextTick(); // flush the cwd watcher, which resets dockPrCount and fires its own refresh for repo-b
-    await nextTick(); // let repo-b's refresh resolve and apply
+    await nextTick(); // flush repo-b's refresh -> loadRemote() -> gitRemoteInfo() hop
+    await nextTick(); // flush loadRemote()'s own resolution
+    await nextTick(); // let repo-b's getPRCount() call resolve and apply
     expect(panel.dockPrCount.value).toBe(9);
 
     resolveA(3); // repo-a's stale call finally resolves, after repo-b already applied
@@ -254,6 +266,37 @@ describe("usePrPanel — background prefetch drain", () => {
     // to the default githubProvider, before refreshDockPrCount() reads `forge`.
     expect(gitlabGetPRCount).toHaveBeenCalledWith("/repo-b", "open");
     expect(getPRCount).not.toHaveBeenCalled();
+    expect(panel.dockPrCount.value).toBe(4);
+  });
+
+  it("does not misfire the default GitHub forge when opening an UNcached non-GitHub repo (dock badge race, #149 follow-up)", async () => {
+    // No `usePrCache().setRemote(...)` seed here — this is the cold, never-
+    // opened-before repo case. `gitRemoteInfo` resolves asynchronously, same
+    // as the real IPC roundtrip, so the test can assert nothing fires against
+    // `forge`'s default (github) value before that roundtrip completes.
+    let resolveRemote!: (r: unknown) => void;
+    const pendingRemote = new Promise((resolve) => { resolveRemote = resolve; });
+    (gitRemoteInfo as ReturnType<typeof vi.fn>).mockReturnValueOnce(pendingRemote);
+
+    const gitlabGetPRCount = vi.fn().mockResolvedValue(4);
+    (forgeFromRemoteInfo as ReturnType<typeof vi.fn>).mockReturnValueOnce({
+      name: "gitlab", listPRs, createPR, mergePR, getPRCount: gitlabGetPRCount,
+    });
+
+    const cwd = ref("/repo-a");
+    const panel = usePrPanel(cwd);
+    cwd.value = "/repo-b";
+    await nextTick(); // flush the cwd watcher and its fire-and-forget refreshDockPrCount() call
+
+    resolveRemote({
+      name: "origin", url: "https://gitlab.com/x/y.git", provider: "gitlab", owner: "x", repo: "y",
+    });
+    await nextTick();
+    await nextTick();
+    await nextTick();
+
+    expect(getPRCount).not.toHaveBeenCalled();
+    expect(gitlabGetPRCount).toHaveBeenCalledWith("/repo-b", "open");
     expect(panel.dockPrCount.value).toBe(4);
   });
 });

@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.6.6] - 2026-08-19
+
+Pure tooling/perf chore — no product-facing surface. Full rationale in `docs/superpowers/specs/2026-08-18-dev-loop-ci-build-times-plan.md`.
+
+### Changed
+
+- **CI build time** — `ci.yml`'s `desktop` job (3 fully-signed release bundles per push, never consumed by anything downstream) replaced by `rust-check` (fmt/clippy -D warnings/check/test, now also on `pull_request`) plus a path-filtered `bundle-smoke` job that only builds a real bundle on push-to-main when bundle-relevant files changed. Rust cache added to `ci.yml`/`release.yml`/`perf.yml`. ~230 billed CI minutes saved per push to `main`; the 217 Rust unit tests and 8 parity tests now actually run in CI for the first time.
+- **Dev-loop speed** — `[profile.ci]` (thin LTO) for the smoke build and bench probe; `[profile.dev]` (lighter debug info, `opt-level=1` on dependencies only) cut a post-edit `cargo build` from ~21s to ~6.5s. Measured `cargo llvm-lines`/`--timings` to confirm the previously-planned `gitwand-git` crate split isn't worth doing (the 663 dependencies dominate build time regardless of profile).
+- **Vitest** — `apps/desktop` now defaults to `environment: "node"` instead of a global `jsdom`, with per-file opt-in via `// @vitest-environment jsdom` on the ~18 files that actually touch the DOM. `environment` setup time dropped from ~96s to ~17s across the suite; test count unchanged (706 tests).
+- **Runtime perf** — the secrets scanner's `.gitwandrc` ignore-list regex are now precompiled once per scan instead of once per candidate value (~24x faster in Rust, ~2.5x in TypeScript). `@gitwand/core`'s conflict-resolution engine is now lazy-loaded instead of statically bundled into the boot chunk, shrinking the desktop app's main JS chunk by ~185 KB raw.
+- **Dependencies** — deduplicated `reqwest` (the `tauri-plugin-aptabase` fork now matches `tauri-plugin-updater`'s `rustls` choice instead of pulling `native-tls`/`openssl-sys` separately), removing `libssl-dev` from CI. Anonymous launch telemetry is now gated behind an explicit `telemetry` Cargo feature, with a build-time guard against a release accidentally shipping without it.
+
+## [3.6.5] - 2026-08-18
+
+### Fixed
+
+- **Nine GitLab MR overview bugs, all from one repeated root cause** (#161) — several GitLab response handlers (`glListMrs`, `glMrPipelines`, `glCreateMr`, `glReviewerCandidates`) returned the raw Tauri payload untouched instead of mapping it to the camelCase shape the UI expects, the way `glGetMr` and every GitHub equivalent already did. That silently dropped `createdAt`/`updatedAt` (rendering "NaNj" instead of an age), the CI tab's pipeline link, and reviewer avatars. Fixed alongside it, each independently root-caused:
+  - `merge_status` is deprecated since GitLab 15.6 and commonly sits at `unchecked` until something triggers a recheck; the old mapping treated every not-yet-computed MR as a real conflict. Now prefers `detailed_merge_status` and only flags an actual `conflict`.
+  - `glab mr diff` needs `--raw` or its output isn't the git-compatible unified diff format the frontend parser expects, so the diff view always read as empty ("no diff available").
+  - The dock's MR count capped at 100 by fetching one page and counting it. Now reads the real total off the REST list endpoint's `X-Total` header.
+  - `gl_list_mrs_inner` requested a growing `--per-page` (limit + offset) on every page without clamping it to GitLab's 100-per-page ceiling. The automatic background prefetch that drains the rest of the open-MR list right after the first page paints requested `--per-page 110` on its very first batch, which GitLab rejects outright — silently disabling the *visible* "load more" scroll trigger as a side effect, so a repo with more than 10 open MRs looked permanently stuck at 10.
+  - GitLab's MR resource has no `diff_stats` field (a GitHub-shaped assumption that never matched a real GitLab payload), so additions/deletions always read `+0 -0` on the detail view. Now computed from the diffs endpoint's per-file unified-diff text (left as a known gap on the list view, where doing this per MR risked reintroducing the #149 slowness).
+  - Three duplicated `timeAgo` implementations (later found: a fourth, in the comment timeline) hardcoded a French-only "j" unit regardless of locale and rendered "NaNj" on any unparseable date instead of degrading gracefully. Consolidated into one `formatRelativeAge()` using the already-translated `date.*` i18n keys.
+- **Resolved GitLab comment threads showed no "Resolved" indicator** — comments were listed via GitLab's flat `/notes` endpoint, which has no concept of a resolved discussion thread at all. Switched to the Discussions API (flattened back to the same shape) so each note's resolved state is available, and added a small "Resolved" badge to the comment timeline (#161).
+
+## [3.6.4] - 2026-08-17
+
+### Fixed
+
+- **GitLab MR list can still time out when `glab` is authenticated via `--use-keyring`** — the v3.6.2 fix (#149) made a hang surface as a clean 20s timeout instead of freezing the app, but on keyring auth the underlying `glab` subprocess itself was still slow: retrieving the PAT from the macOS keychain hangs when `glab` is spawned from a signed Tauri app, the same per-binary ACL mismatch already fixed for `gh`. `shell_env.rs` now also preloads a `GITLAB_TOKEN` from a login shell at startup (parsed from `glab auth status --show-token`) so `glab` subprocesses bypass the keychain lookup entirely, mirroring the existing `GH_TOKEN` preload (#149).
+- **Dock PR badge briefly queries GitHub on a non-GitHub repo's first open** — opening a repo whose remote had never been resolved yet in this session (no cached remote, e.g. right after install, or a repo opened for the first time) fired the dock badge's `getPRCount` refresh immediately, before the async remote lookup completed. `forge` falls back to the GitHub provider by default while the remote is unresolved, so a GitLab (or other non-GitHub) repo would briefly hit a doomed `gh`-backed call and could surface a spurious error, before quietly correcting itself once the remote resolved. `refreshDockPrCount` now waits for the remote lookup on that cold path, same as the PR panel's own `init()`/`ensurePrsLoaded()` already did (#149).
+
+## [3.6.3] - 2026-08-13
+
 ### Fixed
 
 - Linux: added a further startup fallback, `GDK_BACKEND=x11` (never overriding a value already set in the environment), for systems where `Could not create default EGL display: EGL_BAD_PARAMETER` still occurs after the v3.6.2 fallbacks. Confirmed via a report with `ldd` output that this is a genuine native-Wayland EGL negotiation failure on the host system, not an AppImage-bundled-library mismatch. Forcing GTK onto XWayland sidesteps that negotiation, at the cost of native Wayland's fractional scaling and lower input latency (#135).
@@ -1272,7 +1306,11 @@ Design-system foundations — the app header and every overlay now ride on a sha
 - CI pipeline via GitHub Actions (Node 18, 20, 22)
 - 28 tests covering all patterns + real-world scenarios (package.json, Laravel routes, Vue SFC, CSS, .env files)
 
-[Unreleased]: https://github.com/devlint/GitWand/compare/v3.6.2...HEAD
+[Unreleased]: https://github.com/devlint/GitWand/compare/v3.6.6...HEAD
+[3.6.6]: https://github.com/devlint/GitWand/compare/v3.6.5...v3.6.6
+[3.6.5]: https://github.com/devlint/GitWand/compare/v3.6.4...v3.6.5
+[3.6.4]: https://github.com/devlint/GitWand/compare/v3.6.3...v3.6.4
+[3.6.3]: https://github.com/devlint/GitWand/compare/v3.6.2...v3.6.3
 [3.6.2]: https://github.com/devlint/GitWand/compare/v3.6.1...v3.6.2
 [3.6.1]: https://github.com/devlint/GitWand/compare/v3.6.0...v3.6.1
 [3.6.0]: https://github.com/devlint/GitWand/compare/v3.5.0...v3.6.0

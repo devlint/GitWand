@@ -159,6 +159,47 @@ describe("v3.5.0 — scanSecrets", () => {
     const findings = scanSecrets(files, baseConfig());
     expect(findings.length).toBe(500);
   });
+
+  // ─── Non-regression: isIgnored/globRegex precompilation caches (perf) ──
+
+  it("finds only the non-ignored secrets across ~500 added lines with 5 custom ignore globs (mirrors the Rust non-regression test)", () => {
+    const config = baseConfig({
+      entropyThreshold: 4.0,
+      ignore: [
+        "vendor/**",
+        "*.snapshot.ts",
+        "fixtures/**",
+        "/^IGNOREME_.*$/",
+        "build-artifacts/**",
+      ],
+    });
+
+    // src/app.ts (300 lines): every 10th line plants a real AWS key (30 hits expected), every
+    // 10th-plus-5 line plants a high-entropy token matched by the `/^IGNOREME_.*$/` ignore
+    // literal (must be suppressed), the rest are inert comments.
+    const appLines = Array.from({ length: 300 }, (_, i) => {
+      if (i % 10 === 0) return `const key${i} = "AKIAABCDEFGHIJKLMNOP";`;
+      if (i % 10 === 5) {
+        return `IGNOREME_aB3xQ9mK2pL7vN5wR8tY1cB4fH6jD0s${String(i).padStart(3, "0")}`;
+      }
+      return `// comment line ${i}`;
+    });
+
+    // vendor/generated.ts (200 lines): all plant real AWS keys, but the whole path is ignored
+    // wholesale by the custom `vendor/**` glob — none of these must surface.
+    const vendorLines = Array.from(
+      { length: 200 },
+      (_, i) => `const secretKey${i} = "AKIAABCDEFGHIJKLMNOP";`,
+    );
+
+    const files = [fileWith("src/app.ts", appLines), fileWith("vendor/generated.ts", vendorLines)];
+
+    const findings = scanSecrets(files, config);
+
+    expect(findings.length).toBe(30);
+    expect(findings.every((f) => f.file === "src/app.ts")).toBe(true);
+    expect(findings.every((f) => f.patternId === "aws_access_key_id")).toBe(true);
+  });
 });
 
 describe("v3.5.0 — default generated-file ignore globs (D5)", () => {

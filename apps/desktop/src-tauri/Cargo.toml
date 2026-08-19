@@ -1,6 +1,6 @@
 [package]
 name = "gitwand-desktop"
-version = "3.6.2"
+version = "3.6.6"
 description = "GitWand Desktop — standalone merge conflict resolution"
 authors = ["Laurent Guitton <lb.guitton@gmail.com>"]
 license = "MIT"
@@ -30,6 +30,18 @@ path = "examples/parity_probe.rs"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+
+# ─── Features (P4.2 — Dev loop & CI build times) ─────────────
+#
+# `telemetry` gates `tauri-plugin-aptabase` (and its reqwest/tokio subtree)
+# as an optional dependency. Default (no feature) = no telemetry compiled
+# at all: faster `cargo check`/`cargo test`/dev `cargo build`. Real release
+# builds MUST pass `--features telemetry` (see release.yml) — lib.rs has a
+# `compile_error!` that fires on any non-debug build missing this feature,
+# so forgetting it is a hard build failure, not a silent analytics loss.
+[features]
+default = []
+telemetry = ["dep:tauri-plugin-aptabase"]
 
 [dependencies]
 # `devtools` feature opens the WebView inspector via Cmd+Option+I (macOS)
@@ -81,9 +93,12 @@ keyring = "2"
 # filters non-browser User-Agents and silently dropped every event
 # (HTTP 200 + `{"beep":"boop"}` decoy, nothing recorded). Aptabase
 # authenticates by App Key, so there is no UA/bot filtering. Only used in
-# release builds (cfg(not(debug_assertions))). Pulls in reqwest + tokio
-# transitively — see Task 5 measurement note in the migration plan.
-tauri-plugin-aptabase = "1.0.0"
+# release builds (cfg(feature = "telemetry"), see [features] below and
+# lib.rs's compile_error! guard). Pulls in reqwest + tokio transitively —
+# see Task 5 measurement note in the migration plan. Optional: gating it
+# behind the `telemetry` feature keeps it (and its reqwest/tokio subtree)
+# out of `cargo check`/`cargo test`/plain `cargo build` in dev.
+tauri-plugin-aptabase = { version = "1.0.0", optional = true }
 
 # Anonymous install ID generation (v4 random UUID, stored on first launch).
 uuid = { version = "1", features = ["v4"] }
@@ -122,6 +137,24 @@ inherits = "release"
 debug = true
 strip = false
 
+# ─── CI profile (P2.1 — Dev loop & CI build times) ───────────
+#
+# Profile for builds we never ship: today, the `bundle-smoke` job in ci.yml
+# (still needs a real, signed tauri-action bundle to catch bundler
+# regressions, but doesn't need the fully-optimized artifact users
+# download). A future phase (P2.3 of the dev-loop plan) may point the
+# parity-probe bench build at this profile too — not done here. Deliberately
+# lighter than `release`: thin LTO + 16 codegen units cut link time without
+# changing observable behavior. NEVER use this profile for a distributed
+# artifact — see apps/desktop/CLAUDE.md §Performance invariants, which only
+# pins `[profile.release]` (lto = "fat", codegen-units = 1, strip =
+# "symbols"); non-shipped profiles are free to be lighter.
+[profile.ci]
+inherits = "release"
+lto = "thin"
+codegen-units = 16
+strip = false
+
 # ─── Patch: tauri-plugin-aptabase tokio runtime panic ────────
 #
 # Upstream 1.0.0 reaches for raw `tokio::spawn` / `futures::executor::block_on`
@@ -139,5 +172,36 @@ strip = false
 #     remaining unpatched call site; it fires from the plugin's `RunEvent::Exit`
 #     handler on the main thread, so the same panic hit *exit* whenever the
 #     process quit before the 60s background flush had drained the queue (#135).
+#   - `reqwest 0.12.12` (default-tls -> native-tls -> openssl-sys) ->
+#     `reqwest 0.13` with `default-features = false` + `rustls-no-provider`
+#     (rev a3ed128, branch `chore/reqwest-013-rustls`) — dev-loop/CI
+#     build-times pass (P4.1). `tauri-plugin-updater` separately pulls
+#     `reqwest 0.13.4` with the exact same `rustls-no-provider` feature +
+#     its own `rustls` dep on the `ring` crypto provider; before this, every
+#     build compiled two full reqwest stacks plus native-tls/openssl-sys
+#     just for this plugin's HTTP client. The fork now depends on `rustls`
+#     directly (features = ["ring"], pure Rust — the full `rustls` feature
+#     was tried first but transitively pulls `aws-lc-rs`/`aws-lc-sys`, a new
+#     C-compiled crypto backend, defeating the point) and defensively
+#     installs the default crypto provider in `src/dispatcher.rs` if no
+#     other plugin has installed one yet, exactly mirroring
+#     tauri-plugin-updater's own defensive install. No other API changes
+#     needed in `src/dispatcher.rs` / `src/config.rs` — verified with
+#     `cargo build`/`cargo test` against the fork in isolation, and against
+#     this monorepo's actual Cargo.lock (reqwest resolves to 0.13.4 here)
+#     via a temporary local-path override, before pulling it in for real.
+[profile.dev]
+# Dev loop: `debug = "line-tables-only"` still gives backtraces/panics with file:line,
+# but cuts the size of the .o files (and therefore link time) vs full debuginfo.
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+# opt-level = 1 on DEPENDENCIES only (workspace members are unaffected — Cargo scopes
+# `[profile.dev.package."*"]` to non-workspace crates). Dependencies are compiled once
+# and then reused across edits; keeping them unoptimized (opt-level = 0, the profile.dev
+# default) makes debug-mode git2/regex/rayon slow at runtime for no compile-time benefit
+# once they're cached. First build after this change is a full cold rebuild (invalidates
+# the existing target/debug) — a one-time, expected cost.
+
 [patch.crates-io]
-tauri-plugin-aptabase = { git = "https://github.com/devlint/tauri-plugin-aptabase", rev = "364eb00650ca957674cf5b450bcf6877913995e2" }
+tauri-plugin-aptabase = { git = "https://github.com/devlint/tauri-plugin-aptabase", rev = "a3ed1282162b2f16a3b160ead7e1627ad7201564" }

@@ -884,6 +884,7 @@ const ptBR: Locale = {
       statDiff: "Diff",
       statComments: "Comentários",
       commentGoto: "Ir para",
+      commentResolved: "Resolvido",
       labels: "Labels",
       reviewers: "Revisores",
       reviewApproved: "aprovou",

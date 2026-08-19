@@ -104,7 +104,7 @@ const { t } = useI18n()
 
 ## Tests Vitest
 
-- Environnement : `jsdom`
+- Environnement : `node` par défaut (voir `vite.config.ts`) ; les fichiers qui touchent réellement le DOM (`document.`/`window.`/`HTMLElement`/`createElement`/`matchMedia`/`getComputedStyle`, ou un import transitif qui le fait) ajoutent `// @vitest-environment jsdom` en tête de fichier
 - Les composables ont leurs tests dans `composables/__tests__/`
 - Préférer les tests de composables aux tests de composants avec mocks lourds
 

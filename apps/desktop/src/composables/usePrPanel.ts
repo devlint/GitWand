@@ -34,6 +34,7 @@ import { usePrCache, listKey, detailKey } from "./usePrCache";
 import { whenIdle } from "../utils/idleSchedule";
 import { getPersistedDiffMode, type DiffMode } from "../utils/diffMode";
 import { requireOnline } from "../utils/networkGuard";
+import { formatRelativeAge } from "../utils/relativeTime";
 import { t } from "./useI18n";
 import { useReviewIntelligence } from "./useReviewIntelligence";
 import { indexDiffFiles, parseFileDiff, parseUnifiedDiff } from "../utils/unifiedDiff";
@@ -586,6 +587,14 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   async function refreshDockPrCount() {
     if (!cwd.value) return;
     const repo = cwd.value;
+    // Cold badge refresh on a repo with no cached remote yet: `forge`
+    // defaults to `githubProvider` until `remote` resolves, so firing here
+    // without waiting would misdetect any non-GitHub repo as GitHub on its
+    // first open and surface a doomed `gh` call (#149 follow-up).
+    if (!remote.value) {
+      await loadRemote();
+      if (cwd.value !== repo) return; // repo changed while the remote resolved
+    }
     try {
       const count = await forge.value.getPRCount(repo, "open");
       // Discard a stale result if the repo changed while this call was in
@@ -1255,15 +1264,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
 
   // ─── Helpers ────────────────────────────────────────────
   function timeAgo(dateStr: string): string {
-    try {
-      const d = new Date(dateStr), now = new Date();
-      const diff = now.getTime() - d.getTime();
-      const mins = Math.floor(diff / 60000);
-      if (mins < 60) return `${mins}m`;
-      const hours = Math.floor(mins / 60);
-      if (hours < 24) return `${hours}h`;
-      return `${Math.floor(hours / 24)}j`;
-    } catch { return dateStr; }
+    return formatRelativeAge(dateStr, t);
   }
 
   function checkIcon(c: CICheck): string {

@@ -17,12 +17,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # `--features telemetry` is required on every platform (P4.2): the
+          # crate's own compile_error! guard fails any non-debug build that
+          # omits it, so a release without this flag fails to compile rather
+          # than silently shipping without analytics. `-f/--features` is a
+          # tauri-cli flag recognized directly (no `--` needed, unlike
+          # `--profile` in ci.yml's bundle-smoke job).
           - platform: macos-latest
-            args: --target universal-apple-darwin
+            args: --target universal-apple-darwin --features telemetry
           - platform: ubuntu-22.04
-            args: ''
+            args: --features telemetry
           - platform: windows-latest
-            args: ''
+            args: --features telemetry
 
     runs-on: ${{ matrix.platform }}
 
@@ -41,6 +47,21 @@ jobs:
         with:
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
+      # Only cache the registry/git downloads, not the built `target/`. A
+      # release build here is fat-LTO (lto = "fat", codegen-units = 1) and
+      # ~1.8 GB per platform locally — on macOS universal (2 targets) it's
+      # bigger still. The GitHub Actions cache quota is 10 GB/repo, shared
+      # across ci.yml/perf.yml/release.yml; caching release `target/` on all
+      # 3 platforms would repeatedly evict the much more valuable ci.yml/
+      # perf.yml caches. cache-targets: false keeps the win (skip re-fetching
+      # ~663 crates) without that risk.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+          cache-on-failure: true
+          cache-targets: false
+          shared-key: release-registry
+
       - name: Install Linux dependencies
         if: matrix.platform == 'ubuntu-22.04'
         run: |
@@ -51,6 +72,14 @@ jobs:
           # on Ubuntu 22.04 — libwebkit2gtk-4.1-dev no longer pulls them transitively
           # in current GHA runner images. `libayatana-appindicator3-dev` is the
           # supported replacement for the deprecated `libappindicator3-dev`.
+          # `libssl-dev` intentionally NOT installed (P4.1): it only existed
+          # for openssl-sys, pulled in by tauri-plugin-aptabase's old
+          # reqwest 0.12 default-tls -> native-tls chain. Deduped to
+          # reqwest 0.13 + rustls (see Cargo.toml's [patch.crates-io]
+          # comment) — confirmed via `cargo tree -i openssl-sys --target
+          # x86_64-unknown-linux-gnu` (no match, including keyring's
+          # Linux secret-service/zbus backend) that nothing else in the
+          # tree pulls it. Re-add here if a future dependency needs it.
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev \
             libglib2.0-dev \
@@ -58,7 +87,6 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev \
             libxdo-dev \
-            libssl-dev \
             build-essential \
             file \
             patchelf
