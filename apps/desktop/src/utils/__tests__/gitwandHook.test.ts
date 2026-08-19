@@ -3,6 +3,7 @@ import {
   GITWAND_HOOK_MARKER,
   buildGitwandHookScript,
   parseGitwandHookSections,
+  classifyPreCommitHook,
   type HookSections,
 } from "../gitwandHook";
 import { buildSecretsHookScript } from "../secretsHook";
@@ -91,5 +92,66 @@ describe("neither section — an empty composable script still carries the v2 ma
   it("is still recognized as a GitWand-managed script with no sections installed", () => {
     const script = buildGitwandHookScript({ secrets: false, review: false });
     expect(parseGitwandHookSections(script)).toEqual({ secrets: false, review: false });
+  });
+});
+
+// v3.7.0 review-round fix (finding #7) — a foreign (non-GitWand) pre-commit
+// hook collapsed to the exact same "none" state as no hook at all, so the UI
+// showed no warning that Install would OVERWRITE the user's own script.
+describe("classifyPreCommitHook", () => {
+  it("null (unreadable or absent) classifies as none, with both sections false", () => {
+    expect(classifyPreCommitHook(null)).toEqual({
+      kind: "none",
+      sections: { secrets: false, review: false },
+    });
+  });
+
+  it("an empty string classifies as none", () => {
+    expect(classifyPreCommitHook("")).toEqual({
+      kind: "none",
+      sections: { secrets: false, review: false },
+    });
+  });
+
+  it("a whitespace-only string classifies as none", () => {
+    expect(classifyPreCommitHook("   \n\t  \n")).toEqual({
+      kind: "none",
+      sections: { secrets: false, review: false },
+    });
+  });
+
+  const combos: HookSections[] = [
+    { secrets: false, review: false },
+    { secrets: true, review: false },
+    { secrets: false, review: true },
+    { secrets: true, review: true },
+  ];
+  for (const sections of combos) {
+    it(`a v2 GitWand script (secrets=${sections.secrets} review=${sections.review}) classifies as gitwand with the right sections`, () => {
+      const script = buildGitwandHookScript(sections);
+      expect(classifyPreCommitHook(script)).toEqual({ kind: "gitwand", sections });
+    });
+  }
+
+  it("a v1 secrets-only script classifies as gitwand with {secrets:true, review:false} (migration regression guard)", () => {
+    const v1Script = buildSecretsHookScript();
+    expect(classifyPreCommitHook(v1Script)).toEqual({
+      kind: "gitwand",
+      sections: { secrets: true, review: false },
+    });
+  });
+
+  it("a hand-written, unrelated script classifies as foreign", () => {
+    expect(classifyPreCommitHook("#!/bin/sh\nnpm test\n")).toEqual({
+      kind: "foreign",
+      sections: { secrets: false, review: false },
+    });
+  });
+
+  it("a script that merely mentions 'gitwand' in a comment (no marker) still classifies as foreign — no fuzzy matching", () => {
+    expect(classifyPreCommitHook("#!/bin/sh\n# note: unrelated to gitwand\nnpm test\n")).toEqual({
+      kind: "foreign",
+      sections: { secrets: false, review: false },
+    });
   });
 });

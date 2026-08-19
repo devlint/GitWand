@@ -1533,7 +1533,8 @@ const zhCN: Locale = {
     secretsInstall: "安装",
     secretsRemove: "移除",
     secretsInstallConfirmTitle: "安装密钥 pre-commit 钩子？",
-    secretsInstallConfirmMessage: "这将写入 .git/hooks/pre-commit，并在每次从终端提交时运行“npx @gitwand/cli scan”。始终可以用“git commit --no-verify”绕过。如果已存在一个由 GitWand 管理的 pre-commit 钩子，这会添加密钥部分而不影响提交审查部分。如果它不是由 GitWand 管理的，它将被覆盖。",
+    secretsInstallConfirmMessage: "这将写入 .git/hooks/pre-commit，并在每次从终端提交时运行“npx @gitwand/cli scan”。始终可以用“git commit --no-verify”绕过。如果已存在一个由 GitWand 管理的 pre-commit 钩子，这会添加密钥部分而不影响提交审查部分。",
+    secretsInstallConfirmMessageForeign: "这将覆盖已安装在 .git/hooks/pre-commit 的钩子，该钩子并非由 GitWand 管理。新钩子会写入 .git/hooks/pre-commit，并在每次从终端提交时运行“npx @gitwand/cli scan”。始终可以用“git commit --no-verify”绕过。",
     secretsRemoveConfirmTitle: "移除密钥 pre-commit 钩子？",
     secretsRemoveConfirmMessage: "这将从 .git/hooks/pre-commit 中移除密钥部分。从终端提交的更改将不再进行密钥扫描。如果提交审查部分也未安装，该文件将被彻底删除。",
     errorSecretsInstall: "安装密钥钩子失败：{0}",
@@ -1547,9 +1548,14 @@ const zhCN: Locale = {
     reviewInstall: "安装",
     reviewRemove: "移除",
     reviewInstallConfirmTitle: "安装提交审查提醒钩子？",
-    reviewInstallConfirmMessage: "这会写入 .git/hooks/pre-commit（或添加到现有的 GitWand 脚本中），在每次终端提交时打印一条提醒，说明提交审查未运行。此操作绝不会阻止提交。如果已存在一个非 GitWand 管理的 pre-commit 钩子，它将被覆盖。",
+    reviewInstallConfirmMessage: "这会写入 .git/hooks/pre-commit（或添加到现有的 GitWand 脚本中），在每次终端提交时打印一条提醒，说明提交审查未运行。此操作绝不会阻止提交。",
+    reviewInstallConfirmMessageForeign: "这将覆盖已安装在 .git/hooks/pre-commit 的钩子，该钩子并非由 GitWand 管理。新钩子会在每次终端提交时打印一条提醒，说明提交审查未运行。此操作绝不会阻止提交。",
     reviewRemoveConfirmTitle: "移除提交审查提醒钩子？",
     reviewRemoveConfirmMessage: "这会从 .git/hooks/pre-commit 中移除提交审查部分；如果密钥钩子也未安装，则会彻底删除该文件。",
+    // v3.7.0 review-round fix (finding #7) — 非 GitWand 管理的 pre-commit 钩子
+    foreignTitle: "检测到一个非 GitWand 管理的 pre-commit 钩子",
+    foreignDescription: "安装下方的密钥或提交审查钩子将覆盖此现有脚本。",
+    foreignBadge: "外部钩子",
   },
 
   workspace: {

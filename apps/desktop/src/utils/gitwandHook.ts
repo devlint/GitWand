@@ -107,3 +107,39 @@ export function parseGitwandHookSections(content: string): HookSections | null {
 // Re-exported so call sites that only need to detect a legacy v1 script don't have to import
 // from both modules.
 export { SECRETS_HOOK_MARKER };
+
+/**
+ * v3.7.0 review-round fix (finding #7) — classifies WHAT is installed at
+ * `.git/hooks/pre-commit`, distinguishing a foreign (non-GitWand) script from
+ * no hook at all. Before this, `parseGitwandHookSections` returning `null`
+ * for both cases meant a hand-written pre-commit hook looked identical to an
+ * empty hooks directory in the UI, and `writeGitwandHook` would silently
+ * OVERWRITE that foreign script on Install with no distinct warning.
+ */
+export type PreCommitHookKind = "none" | "gitwand" | "foreign";
+
+export interface PreCommitHookState {
+  kind: PreCommitHookKind;
+  sections: HookSections;
+}
+
+/**
+ * `content === null` means "unreadable or absent". A non-empty script that
+ * `parseGitwandHookSections` does not recognize is "foreign": GitWand would
+ * OVERWRITE it on install, so the UI must say so specifically rather than
+ * showing the same "nothing installed" state as an empty hooks dir.
+ */
+export function classifyPreCommitHook(content: string | null): PreCommitHookState {
+  const NO_SECTIONS: HookSections = { secrets: false, review: false };
+
+  if (content === null || content.trim() === "") {
+    return { kind: "none", sections: NO_SECTIONS };
+  }
+
+  const parsed = parseGitwandHookSections(content);
+  if (parsed !== null) {
+    return { kind: "gitwand", sections: parsed };
+  }
+
+  return { kind: "foreign", sections: NO_SECTIONS };
+}

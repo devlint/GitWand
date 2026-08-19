@@ -11,7 +11,12 @@ import {
 import { useI18n } from "../composables/useI18n";
 import type { LocaleKey } from "../locales/en";
 import BaseModal from "./BaseModal.vue";
-import { buildGitwandHookScript, parseGitwandHookSections, type HookSections } from "../utils/gitwandHook";
+import {
+  buildGitwandHookScript,
+  classifyPreCommitHook,
+  type HookSections,
+  type PreCommitHookState,
+} from "../utils/gitwandHook";
 
 const props = defineProps<{
   cwd: string;
@@ -27,9 +32,16 @@ const loading = ref(false);
 const error = ref<string | null>(null);
 
 // v3.7.0 (Task 6) — GitWand-managed pre-commit hook: secrets + commit review sections, both
-// carried by a SINGLE composable script on disk (detected via `parseGitwandHookSections`) — no
+// carried by a SINGLE composable script on disk (detected via `classifyPreCommitHook`) — no
 // separate persisted flag, and installing/removing one section never clobbers the other.
-const hookSections = ref<HookSections>({ secrets: false, review: false });
+//
+// v3.7.0 review-round fix (finding #7) — `hookState` also carries WHICH KIND of hook is
+// installed (none / gitwand / foreign), not just the section flags, so a hand-written script
+// the user already has can be distinguished from an empty hooks directory: both used to collapse
+// to the same "not installed" UI state, silently hiding that Install would OVERWRITE it.
+const hookState = ref<PreCommitHookState>({ kind: "none", sections: { secrets: false, review: false } });
+const hookSections = computed<HookSections>(() => hookState.value.sections);
+const isForeignHook = computed(() => hookState.value.kind === "foreign");
 const secretsHookBusy = ref(false);
 const reviewHookBusy = ref(false);
 // Verifier finding (PR3) — both sections' install/remove handlers
@@ -150,10 +162,10 @@ async function deleteHook() {
 async function checkGitwandHook() {
   try {
     const content = await readFile(props.cwd, ".git/hooks/pre-commit");
-    hookSections.value = parseGitwandHookSections(content) ?? { secrets: false, review: false };
+    hookState.value = classifyPreCommitHook(content);
   } catch {
-    // No pre-commit hook on disk (or unreadable) — treat as "neither section installed".
-    hookSections.value = { secrets: false, review: false };
+    // No pre-commit hook on disk (or unreadable).
+    hookState.value = classifyPreCommitHook(null);
   }
 }
 
@@ -177,7 +189,9 @@ async function installSecretsHook() {
   if (askConfirm) {
     const confirmed = await askConfirm({
       title: t("hooks.secretsInstallConfirmTitle"),
-      message: t("hooks.secretsInstallConfirmMessage"),
+      message: isForeignHook.value
+        ? t("hooks.secretsInstallConfirmMessageForeign")
+        : t("hooks.secretsInstallConfirmMessage"),
       confirmLabel: t("hooks.secretsInstall"),
     });
     if (!confirmed) return;
@@ -220,7 +234,9 @@ async function installReviewHook() {
   if (askConfirm) {
     const confirmed = await askConfirm({
       title: t("hooks.reviewInstallConfirmTitle"),
-      message: t("hooks.reviewInstallConfirmMessage"),
+      message: isForeignHook.value
+        ? t("hooks.reviewInstallConfirmMessageForeign")
+        : t("hooks.reviewInstallConfirmMessage"),
       confirmLabel: t("hooks.reviewInstall"),
     });
     if (!confirmed) return;
@@ -281,6 +297,18 @@ onMounted(() => {
 
     <!-- Error -->
     <div v-if="error" class="hp-error">{{ error }}</div>
+
+    <!-- v3.7.0 review-round fix (finding #7) — a foreign (non-GitWand) pre-commit hook is
+         already installed: warn distinctly, since Install below would OVERWRITE it. -->
+    <div v-if="isForeignHook" class="hp-hookrow hp-hookrow--foreign">
+      <div class="hp-hookrow-info">
+        <span class="hp-hookrow-title">
+          {{ t("hooks.foreignTitle") }}
+          <span class="hp-badge hp-badge--warn">{{ t("hooks.foreignBadge") }}</span>
+        </span>
+        <span class="hp-hookrow-desc">{{ t("hooks.foreignDescription") }}</span>
+      </div>
+    </div>
 
     <!-- GitWand-managed pre-commit hook (v3.7.0, Task 6) — secrets + commit review sections,
          each independently installable, both written through the single composable script
@@ -654,6 +682,18 @@ onMounted(() => {
 .hp-badge--off {
   background: var(--color-surface-alt, rgba(255, 255, 255, 0.06));
   color: var(--color-text-muted);
+}
+
+/* v3.7.0 review-round fix (finding #7) — foreign pre-commit hook warning */
+.hp-badge--warn {
+  background: rgba(217, 119, 6, 0.15);
+  color: var(--color-warning, #d97706);
+  margin-left: 6px;
+}
+
+.hp-hookrow--foreign {
+  background: rgba(217, 119, 6, 0.08);
+  border-color: var(--color-warning, #d97706);
 }
 
 /* Form */

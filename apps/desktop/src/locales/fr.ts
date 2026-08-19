@@ -1555,7 +1555,8 @@ const fr: Locale = {
     secretsInstall: "Installer",
     secretsRemove: "Retirer",
     secretsInstallConfirmTitle: "Installer le hook pre-commit de secrets ?",
-    secretsInstallConfirmMessage: "Ceci écrit .git/hooks/pre-commit et exécute « npx @gitwand/cli scan » à chaque commit fait depuis le terminal. Toujours contournable avec « git commit --no-verify ». Si un hook pre-commit existe déjà et est géré par GitWand, ceci ajoute la section secrets sans toucher à la section de revue de commit. S'il n'est pas géré par GitWand, il sera écrasé.",
+    secretsInstallConfirmMessage: "Ceci écrit .git/hooks/pre-commit et exécute « npx @gitwand/cli scan » à chaque commit fait depuis le terminal. Toujours contournable avec « git commit --no-verify ». Si un hook pre-commit existe déjà et est géré par GitWand, ceci ajoute la section secrets sans toucher à la section de revue de commit.",
+    secretsInstallConfirmMessageForeign: "Ceci ÉCRASE le hook pre-commit déjà installé à .git/hooks/pre-commit, qui n'est pas géré par GitWand. Le nouveau hook écrit .git/hooks/pre-commit et exécute « npx @gitwand/cli scan » à chaque commit fait depuis le terminal. Toujours contournable avec « git commit --no-verify ».",
     secretsRemoveConfirmTitle: "Retirer le hook pre-commit de secrets ?",
     secretsRemoveConfirmMessage: "Ceci retire la section secrets de .git/hooks/pre-commit. Les commits faits depuis le terminal ne seront plus analysés pour des secrets. Si la section de revue de commit n'est pas installée non plus, le fichier est supprimé entièrement.",
     errorSecretsInstall: "Échec de l'installation du hook de secrets : {0}",
@@ -1569,9 +1570,14 @@ const fr: Locale = {
     reviewInstall: "Installer",
     reviewRemove: "Supprimer",
     reviewInstallConfirmTitle: "Installer le hook de rappel de revue de commit ?",
-    reviewInstallConfirmMessage: "Ceci écrit .git/hooks/pre-commit (ou l'ajoute au script GitWand existant) pour afficher un rappel à chaque commit terminal indiquant que la Revue de commit ne s'est pas exécutée. Le commit n'est jamais bloqué. Si un hook pre-commit existe déjà et n'est pas géré par GitWand, il sera écrasé.",
+    reviewInstallConfirmMessage: "Ceci écrit .git/hooks/pre-commit (ou l'ajoute au script GitWand existant) pour afficher un rappel à chaque commit terminal indiquant que la Revue de commit ne s'est pas exécutée. Le commit n'est jamais bloqué.",
+    reviewInstallConfirmMessageForeign: "Ceci ÉCRASE le hook pre-commit déjà installé à .git/hooks/pre-commit, qui n'est pas géré par GitWand. Le nouveau hook affiche un rappel à chaque commit terminal indiquant que la Revue de commit ne s'est pas exécutée. Le commit n'est jamais bloqué.",
     reviewRemoveConfirmTitle: "Supprimer le hook de rappel de revue de commit ?",
     reviewRemoveConfirmMessage: "Ceci retire la section de revue de commit de .git/hooks/pre-commit, en supprimant le fichier entièrement si le hook de secrets n'est pas non plus installé.",
+    // v3.7.0 review-round fix (finding #7) — hook pre-commit externe (non géré par GitWand)
+    foreignTitle: "Un hook pre-commit non géré par GitWand est installé",
+    foreignDescription: "Installer Secrets ou Revue de commit ci-dessous écrasera ce script existant.",
+    foreignBadge: "Hook externe",
   },
 
   workspace: {
