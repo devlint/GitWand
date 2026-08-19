@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "../composables/useI18n";
+import { focusableWithin, nextTrapTarget } from "../utils/focusTrap";
 
 type ModalSize = "sm" | "md" | "lg" | "xl" | "full" | "2x";
 type ModalPosition = "center" | "top";
@@ -29,6 +30,23 @@ const props = withDefaults(
     bodyFlush?: boolean;
     /** If true, the body is not scrollable; child content owns its own scrolling. */
     scrollOwn?: boolean;
+    /**
+     * v3.7.0 review-round fix (finding #11) — trap Tab/Shift+Tab focus
+     * inside the panel, wrapping at the ends. Escape hatch for a modal that
+     * embeds something that must own its own Tab handling in a way the
+     * generic trap can't anticipate.
+     */
+    trapFocus?: boolean;
+    /**
+     * v3.7.0 review-round fix (finding #11) — focus the panel itself on
+     * mount. Set to `false` for a modal that already self-focuses one of
+     * its own inputs from its own `onMounted` (that self-focus runs AFTER
+     * this component's synchronous `onMounted` — Vue fires a child's
+     * `mounted` before its parent's — so leaving `autoFocus` at its
+     * default `true` would still be harmless, but the prop exists so a
+     * modal can opt out explicitly and document its own focus target).
+     */
+    autoFocus?: boolean;
   }>(),
   {
     title: "",
@@ -42,6 +60,8 @@ const props = withDefaults(
     hideClose: false,
     bodyFlush: false,
     scrollOwn: false,
+    trapFocus: true,
+    autoFocus: true,
   }
 );
 
@@ -70,12 +90,64 @@ function onKeyDown(e: KeyboardEvent) {
   }
 }
 
+// v3.7.0 review-round fix (finding #11) — focus trap, initial focus, focus
+// restore. See docs/superpowers/plans/2026-08-19-v3.7.0-commit-review-review-fixes.md,
+// Task 11, for the full design rationale (nested modals, CodeMirror/xterm).
+const panelRef = ref<HTMLElement | null>(null);
+let previouslyFocused: HTMLElement | null = null;
+
+/**
+ * Bubble-phase `keydown` listener on the PANEL element (not `window`, unlike
+ * the Escape handler above): nested modals (e.g. `askConfirm` layered over
+ * another modal) each get their own trap, and only the one that actually
+ * contains focus reacts. An inner component that owns Tab itself
+ * (CodeMirror indent, an xterm terminal) runs first in the bubble phase, so
+ * this bails on `e.defaultPrevented`.
+ */
+function onPanelKeyDown(e: KeyboardEvent) {
+  if (e.key !== "Tab" || !props.trapFocus || e.defaultPrevented) return;
+  const panel = panelRef.value;
+  if (!panel) return;
+
+  const focusables = focusableWithin(panel);
+  if (focusables.length === 0) {
+    // Nothing to wrap between — keep focus pinned on the panel itself.
+    e.preventDefault();
+    panel.focus();
+    return;
+  }
+
+  const target = nextTrapTarget(focusables, document.activeElement, e.shiftKey);
+  if (target) {
+    e.preventDefault();
+    target.focus();
+  }
+  // target === null means `active` is a middle element: the browser's own
+  // default Tab behavior already moves focus correctly, so this is a no-op.
+}
+
 onMounted(() => {
   window.addEventListener("keydown", onKeyDown);
+
+  // Synchronous, NOT wrapped in `nextTick`: Vue fires a child's `mounted`
+  // before its parent's, and several modals self-focus an input from their
+  // OWN `onMounted` + `nextTick` (AiTaskNameModal.vue, CloneModal.vue,
+  // ForkModal.vue, FolderPicker.vue's own overlay opened from CloneModal).
+  // A `nextTick` here would run in the same microtask flush and could win
+  // the race against — or after — those, clobbering their explicit input
+  // focus. Doing this synchronously means it always happens BEFORE the
+  // parent component's own `onMounted` runs, so a parent's `nextTick`-deferred
+  // input focus always wins over this panel focus, exactly like before this
+  // fix existed.
+  previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  if (props.autoFocus) panelRef.value?.focus();
 });
 
 onUnmounted(() => {
   window.removeEventListener("keydown", onKeyDown);
+  if (previouslyFocused && document.contains(previouslyFocused)) {
+    previouslyFocused.focus();
+  }
 });
 </script>
 
@@ -87,11 +159,14 @@ onUnmounted(() => {
       @click.self="onBackdropClick"
     >
       <div
+        ref="panelRef"
         class="base-modal"
         :class="sizeClass"
         :role="role"
         aria-modal="true"
         :aria-label="ariaLabel || title || undefined"
+        tabindex="-1"
+        @keydown="onPanelKeyDown"
       >
         <!-- Header -->
         <header v-if="!hideHeader" class="base-modal__header">
@@ -179,6 +254,12 @@ onUnmounted(() => {
   overflow: hidden;
   animation: bm-slide-in var(--transition-slow) ease;
 }
+
+/* v3.7.0 review-round fix (finding #11) — the panel is `tabindex="-1"` so it
+   is programmatically focusable (initial focus, empty-focusable-set fallback);
+   suppress the focus ring that would otherwise draw on the whole panel.
+   A single class + pseudo-class — does not touch `.bm-btn` (AGENTS.md). */
+.base-modal:focus { outline: none; }
 
 .base-modal--sm   { width: min(400px, 92vw); }
 .base-modal--md   { width: min(520px, 92vw); }
