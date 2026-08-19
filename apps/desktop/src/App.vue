@@ -1140,6 +1140,15 @@ const repoSidebarProps = computed(() => ({
  */
 async function handleCommitRequest(trailers: string) {
   lastAttemptedCommitTrailers = trailers;
+  // v3.7.0 Task 2 (fallout of Task 1): rescan the staged diff right now
+  // rather than trusting the last poll-driven scan(). After the Task 1
+  // watcher fix, editing and restaging an already-staged file (staged count
+  // and fingerprint both unchanged) no longer re-triggers scan() at all, so
+  // without this rescan a secret introduced that way would never be caught.
+  // One IPC on the commit path, consistent with the two `proceedToCommit`
+  // already awaits (git rev-parse HEAD, git diff --cached). Session
+  // dismissals survive: scanNow never touches dismissedKeys.
+  await secretsScanner.scanNow(repoFolderPath.value ?? "", settings.value);
   if (secretsScanner.activeFindings.value.length > 0) {
     const confirmed = await askConfirm({
       danger: true,

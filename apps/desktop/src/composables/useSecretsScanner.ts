@@ -30,6 +30,17 @@ export interface UseSecretsScannerResult {
    */
   scan: (cwd: string, settings: SecretsScannerAppSettings) => void;
   /**
+   * Awaitable, un-debounced scan for the pre-commit gate specifically
+   * (v3.7.0 Task 2). `handleCommitRequest` must see the CURRENT staged diff's
+   * findings, not whatever the last 2s-interval-driven `scan()` happened to
+   * catch: after the Task 1 watcher fix, a content-only restage of an
+   * already-staged file (staged count and fingerprint both unchanged) no
+   * longer re-triggers `scan()`, so without this the secrets gate could miss
+   * a secret added that way. Already internally non-throwing (a scan failure
+   * must never disrupt the commit flow), so it is safe to `await` directly.
+   */
+  scanNow: (cwd: string, settings: SecretsScannerAppSettings) => Promise<void>;
+  /**
    * Suppresses `patternId` for every file it currently appears in, by appending each affected
    * file path as a glob entry to `.gitwandrc` `secrets.ignore[]`. The underlying ignore config
    * only supports path-globs and value-regexes (no patternId-based ignore) — and `SecretFinding`
@@ -184,5 +195,23 @@ export function useSecretsScanner(opts: UseSecretsScannerOptions = {}): UseSecre
     dismissedKeys.value = next;
   }
 
-  return { findings, scanning, activeFindings, scan, ignorePattern, filesForPattern, dismiss, findingKey };
+  function scanNow(cwd: string, settings: SecretsScannerAppSettings): Promise<void> {
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
+    return runScan(cwd, settings);
+  }
+
+  return {
+    findings,
+    scanning,
+    activeFindings,
+    scan,
+    scanNow,
+    ignorePattern,
+    filesForPattern,
+    dismiss,
+    findingKey,
+  };
 }

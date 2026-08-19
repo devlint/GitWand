@@ -154,4 +154,51 @@ describe("useSecretsScanner", () => {
     expect(scanner.filesForPattern("github_pat_classic")).toEqual(["c.ts"]);
     expect(scanner.filesForPattern("no_such_pattern")).toEqual([]);
   });
+
+  describe("scanNow (Task 2 — pre-commit gate rescan)", () => {
+    it("resolves after findings is populated, with no timer advance (un-debounced)", async () => {
+      vi.mocked(scanSecrets).mockResolvedValue([finding()]);
+      const scanner = useSecretsScanner({ debounceMs: 100 });
+
+      await scanner.scanNow("/repo", SETTINGS);
+
+      expect(scanSecrets).toHaveBeenCalledTimes(1);
+      expect(scanner.findings.value).toEqual([finding()]);
+    });
+
+    it("a scanSecrets rejection leaves findings empty and does not reject", async () => {
+      vi.mocked(scanSecrets).mockRejectedValue(new Error("boom"));
+      const scanner = useSecretsScanner({ debounceMs: 100 });
+
+      await expect(scanner.scanNow("/repo", SETTINGS)).resolves.toBeUndefined();
+      expect(scanner.findings.value).toEqual([]);
+    });
+
+    it("with the feature disabled, clears findings and performs no scanSecrets call", async () => {
+      const scanner = useSecretsScanner({ debounceMs: 100 });
+
+      await scanner.scanNow("/repo", { ...SETTINGS, secretsScannerEnabled: false });
+
+      expect(scanSecrets).not.toHaveBeenCalled();
+      expect(scanner.findings.value).toEqual([]);
+    });
+
+    it("previously dismissed keys stay dismissed across a scanNow", async () => {
+      const f1 = finding({ file: "a.ts", line: 1, patternId: "aws_access_key_id" });
+      const f2 = finding({ file: "b.ts", line: 2, patternId: "github_pat_classic" });
+      vi.mocked(scanSecrets).mockResolvedValue([f1, f2]);
+      const scanner = useSecretsScanner({ debounceMs: 100 });
+
+      await scanner.scanNow("/repo", SETTINGS);
+      scanner.dismiss(scanner.findingKey(f1));
+      expect(scanner.activeFindings.value).toEqual([f2]);
+
+      // Same findings come back from the next scanNow (e.g. re-run at commit
+      // time with nothing changed) — the dismissal must still apply.
+      vi.mocked(scanSecrets).mockResolvedValue([f1, f2]);
+      await scanner.scanNow("/repo", SETTINGS);
+
+      expect(scanner.activeFindings.value).toEqual([f2]);
+    });
+  });
 });
