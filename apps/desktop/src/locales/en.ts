@@ -1062,6 +1062,8 @@ const en = {
       unknown: "Failed to load pull requests.",
       retry: "Retry",
       timedOut: "{0} took too long to respond — check your network or VPN, then retry.",
+      forgeUnsupported: "{0} pull requests aren't supported yet. Cloning, pushing, pulling and merging all work normally.",
+      openForgeWeb: "Open on the web",
     },
   },
 
@@ -1786,6 +1788,7 @@ const en = {
     gitlab: "GitLab",
     bitbucket: "Bitbucket",
     azure: "Azure DevOps",
+    cursor: "Cursor Origin",
     action: "Open Settings",
   },
 
@@ -2346,7 +2349,7 @@ const en = {
       historyTitle: "History",
       history: "Switch to the History tab in the sidebar to browse commits. Click a commit to inspect its diff. Use the Graph tab for a visual DAG.",
       remoteTitle: "Remotes",
-      remote: "GitWand supports GitHub, GitLab, and Bitbucket. The Sync button auto-detects push/pull state. Use \u201cOpen on Forge\u201d to jump to the web UI.",
+      remote: "GitWand supports GitHub, GitLab, Bitbucket and Azure DevOps for pull requests, and detects Cursor Origin remotes (git operations only, no PR integration yet). The Sync button auto-detects push/pull state. Use \u201cOpen on Forge\u201d to jump to the web UI.",
     },
     aiFeatures: {
       title: "AI features",

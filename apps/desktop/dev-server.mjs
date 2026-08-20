@@ -5691,8 +5691,13 @@ async function handleRequest(req, res) {
         if (!remoteUrl) {
           return jsonResponse(req, res, { error: "No remote found" }, 404);
         }
+        // Mirrors `detect_provider()` in src-tauri/src/git/parse.rs — keep the
+        // branch order identical. Locked by tests/parity/git-remote-info.test.mjs.
+        // Cursor Origin matches on `origin.cursor.com` (its git host) and NOT on
+        // a bare `cursor.com`, which is the web UI.
         let provider = "unknown";
         if (remoteUrl.includes("github.com")) provider = "github";
+        else if (remoteUrl.includes("origin.cursor.com")) provider = "cursor";
         else if (remoteUrl.includes("gitlab")) provider = "gitlab";
         else if (remoteUrl.includes("bitbucket")) provider = "bitbucket";
         else if (remoteUrl.includes("dev.azure.com") || remoteUrl.includes("visualstudio.com")) provider = "azure";

@@ -1055,6 +1055,8 @@ const fr: Locale = {
       unknown: "Impossible de charger les pull requests.",
       retry: "Réessayer",
       timedOut: "{0} a mis trop de temps à répondre — vérifiez votre connexion ou VPN, puis réessayez.",
+      forgeUnsupported: "Les pull requests {0} ne sont pas encore prises en charge. Le clone, le push, le pull et les merges fonctionnent normalement.",
+      openForgeWeb: "Ouvrir sur le web",
     },
   },
 
@@ -1762,6 +1764,7 @@ const fr: Locale = {
     gitlab: "GitLab",
     bitbucket: "Bitbucket",
     azure: "Azure DevOps",
+    cursor: "Cursor Origin",
     action: "Ouvrir les Réglages",
   },
 
@@ -2315,7 +2318,7 @@ const fr: Locale = {
       historyTitle: "Historique",
       history: "Passez sur l'onglet Historique dans la sidebar pour parcourir les commits. Cliquez sur un commit pour inspecter son diff. Utilisez l'onglet Graphe pour une visualisation DAG.",
       remoteTitle: "Remotes",
-      remote: "GitWand supporte GitHub, GitLab et Bitbucket. Le bouton Sync détecte automatiquement l'état push/pull. Utilisez « Ouvrir sur la forge » pour accéder à l'interface web.",
+      remote: "GitWand supporte GitHub, GitLab, Bitbucket et Azure DevOps pour les pull requests, et détecte les remotes Cursor Origin (opérations git seulement, pas encore d'intégration PR). Le bouton Sync détecte automatiquement l'état push/pull. Utilisez « Ouvrir sur la forge » pour accéder à l'interface web.",
     },
     aiFeatures: {
       title: "Fonctionnalités AI",

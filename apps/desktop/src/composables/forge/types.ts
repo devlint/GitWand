@@ -89,7 +89,39 @@ export interface SubmitReviewOptions {
 
 // ─── Forge name discriminant ────────────────────────────────────────────────
 
-export type ForgeName = "github" | "gitlab" | "bitbucket" | "azure" | "unknown";
+export type ForgeName = "github" | "gitlab" | "bitbucket" | "azure" | "cursor" | "unknown";
+
+// ─── Forge web bases ────────────────────────────────────────────────────────
+
+/**
+ * Cursor Origin web UI base. Note the asymmetry with its git host
+ * (`origin.cursor.com`): repos are browsed at `cursor.com/codebase/{owner}/{repo}`.
+ * Lives here rather than in CursorProvider so `usePrPanel` can link out without
+ * pulling the provider into the main bundle.
+ */
+export const CURSOR_WEB_BASE = "https://cursor.com/codebase";
+
+// ─── Forge capabilities ─────────────────────────────────────────────────────
+
+/**
+ * Forges GitWand detects but has no PR/issue integration for.
+ *
+ * A forge lands here when its remote is recognised (so git operations, merges
+ * and conflict resolution all work) but no ForgeProvider can talk to its API
+ * yet. Callers use `forgeSupportsPRs()` to hide PR affordances up front rather
+ * than letting the user reach a dead end.
+ */
+const PR_UNSUPPORTED_FORGES: ReadonlySet<string> = new Set<ForgeName>(["cursor"]);
+
+/**
+ * Whether PR/issue affordances should be offered for `forge`.
+ *
+ * Deliberately independent of whether a call has already failed: the "New PR"
+ * button must be absent on first paint, not only after a failed `listPRs`.
+ */
+export function forgeSupportsPRs(forge: ForgeName | string): boolean {
+  return !PR_UNSUPPORTED_FORGES.has(forge);
+}
 
 // ─── ForgeProvider interface ─────────────────────────────────────────────────
 

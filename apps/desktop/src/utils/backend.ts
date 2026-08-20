@@ -2263,7 +2263,7 @@ export async function gitAutocomplete(cwd: string, partial: string): Promise<str
 export interface RemoteInfo {
   name: string;
   url: string;
-  provider: "github" | "gitlab" | "bitbucket" | "azure" | "unknown";
+  provider: "github" | "gitlab" | "bitbucket" | "azure" | "cursor" | "unknown";
   owner: string;
   repo: string;
 }

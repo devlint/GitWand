@@ -526,6 +526,32 @@ pub(crate) fn gh_pr_raw_to_pr(r: GhPrRaw) -> PullRequest {
     }
 }
 
+/// Maps a git remote URL onto a forge identifier.
+///
+/// Extracted from `git_remote_info` so it is unit-testable and so the
+/// duplicated chain in `dev-server.mjs` has a single canonical shape to
+/// mirror. Returns `"unknown"` when no forge matches — callers treat that as
+/// "no forge integration", never as a silent GitHub fallback.
+///
+/// Cursor Origin (v3.8) is matched on its dedicated git host
+/// `origin.cursor.com`, NOT on a bare `cursor.com`: the latter is the web UI
+/// and would misfire on any URL merely containing it.
+pub(crate) fn detect_provider(url: &str) -> &'static str {
+    if url.contains("github.com") {
+        "github"
+    } else if url.contains("origin.cursor.com") {
+        "cursor"
+    } else if url.contains("gitlab.com") || url.contains("gitlab") {
+        "gitlab"
+    } else if url.contains("bitbucket.org") || url.contains("bitbucket") {
+        "bitbucket"
+    } else if url.contains("dev.azure.com") || url.contains("visualstudio.com") {
+        "azure"
+    } else {
+        "unknown"
+    }
+}
+
 pub(crate) fn parse_remote_owner_repo(url: &str) -> (String, String) {
     if let Some(colon_pos) = url.find(':') {
         if url.starts_with("git@") {
@@ -1654,5 +1680,80 @@ mod repo_tree_tests {
         assert_eq!(src.children[0].name, "lib.rs");
         assert_eq!(src.children[0].path, "src/lib.rs");
         assert_eq!(src.children[1].name, "main.rs");
+    }
+}
+
+#[cfg(test)]
+mod remote_provider_tests {
+    use super::{detect_provider, parse_remote_owner_repo};
+
+    #[test]
+    fn detects_cursor_origin_https_remote() {
+        assert_eq!(
+            detect_provider("https://origin.cursor.com/acme/checkout.git"),
+            "cursor"
+        );
+    }
+
+    #[test]
+    fn detects_cursor_origin_ssh_remote() {
+        assert_eq!(
+            detect_provider("git@origin.cursor.com:acme/checkout.git"),
+            "cursor"
+        );
+    }
+
+    #[test]
+    fn does_not_claim_unrelated_cursor_hosts() {
+        // Only the Origin git host counts. A bare cursor.com URL (the web UI,
+        // docs, or a repo merely *named* cursor.com) must not be misread as a
+        // forge remote.
+        assert_eq!(detect_provider("https://cursor.com/docs/origin"), "unknown");
+    }
+
+    #[test]
+    fn detects_the_four_preexisting_forges() {
+        assert_eq!(
+            detect_provider("https://github.com/acme/checkout.git"),
+            "github"
+        );
+        assert_eq!(
+            detect_provider("git@gitlab.com:acme/checkout.git"),
+            "gitlab"
+        );
+        assert_eq!(
+            detect_provider("https://git.acme.io/gitlab/acme/checkout.git"),
+            "gitlab"
+        );
+        assert_eq!(
+            detect_provider("https://bitbucket.org/acme/checkout.git"),
+            "bitbucket"
+        );
+        assert_eq!(
+            detect_provider("https://dev.azure.com/acme/proj/_git/checkout"),
+            "azure"
+        );
+        assert_eq!(
+            detect_provider("https://acme.visualstudio.com/proj/_git/checkout"),
+            "azure"
+        );
+        assert_eq!(
+            detect_provider("https://git.sr.ht/~acme/checkout"),
+            "unknown"
+        );
+    }
+
+    #[test]
+    fn parses_owner_and_repo_from_a_cursor_origin_remote() {
+        // Origin uses a GitHub-shaped path, so the generic parser already
+        // handles it — locked in here because the detection above depends on it.
+        assert_eq!(
+            parse_remote_owner_repo("https://origin.cursor.com/acme/checkout.git"),
+            ("acme".to_string(), "checkout".to_string())
+        );
+        assert_eq!(
+            parse_remote_owner_repo("git@origin.cursor.com:acme/checkout.git"),
+            ("acme".to_string(), "checkout".to_string())
+        );
     }
 }
