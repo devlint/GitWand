@@ -23,6 +23,49 @@
 use crate::commands::github_api;
 use crate::git::*;
 use crate::types::*;
+use rayon::prelude::*;
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
+
+/// Timeout for the primary `gh` invocation in `gh_list_prs_inner`. Mirrors
+/// `gitlab.rs`'s `GLAB_TIMEOUT` (#149) — chosen to leave headroom under the
+/// frontend's 30s IPC race (`backend-core.ts`'s `IPC_TIMEOUT.DEFAULT`) so a
+/// Rust "timed out" error surfaces instead of the frontend's generic "IPC
+/// timeout after 30000ms" message. Before this, `gh pr list` ran unbounded —
+/// devlint/GitWand#161 reported the 30s timeout reappearing once the per-PR
+/// stats enrichment below was added.
+const GH_TIMEOUT: Duration = Duration::from_secs(20);
+/// Timeout for the best-effort `git fetch origin` that refreshes
+/// remote-tracking refs before the per-PR numstat diffs below.
+const GH_FETCH_TIMEOUT: Duration = Duration::from_secs(5);
+/// Minimum interval between `git fetch origin` calls per repo — mirrors
+/// `azure.rs`'s `FETCH_MIN_INTERVAL`. Without this, every first-page
+/// `gh_list_prs` call (initial load, poll, panel reopen) fired a blocking
+/// network fetch even when the previous one was seconds ago.
+const GH_FETCH_MIN_INTERVAL: Duration = Duration::from_secs(30);
+
+fn gh_last_fetch_map() -> &'static Mutex<HashMap<String, Instant>> {
+    static MAP: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
+    MAP.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Returns `true` (and records `now`) when `cwd` has not been fetched within
+/// `GH_FETCH_MIN_INTERVAL`; otherwise `false` so callers can skip the fetch.
+fn gh_should_fetch_origin(cwd: &str) -> bool {
+    let now = Instant::now();
+    let mut map = match gh_last_fetch_map().lock() {
+        Ok(m) => m,
+        Err(p) => p.into_inner(), // a poisoned lock must not block PR loading
+    };
+    match map.get(cwd) {
+        Some(prev) if now.duration_since(*prev) < GH_FETCH_MIN_INTERVAL => false,
+        _ => {
+            map.insert(cwd.to_string(), now);
+            true
+        }
+    }
+}
 
 // ─── Inner (sync) implementations ───────────────────────────────────────────
 //
@@ -65,9 +108,8 @@ fn gh_list_prs_inner(
     if let Some(ref nwo) = target_repo {
         cmd.args(["--repo", nwo]);
     }
-    let output = cmd
-        .current_dir(&cwd)
-        .output()
+    cmd.current_dir(&cwd);
+    let output = output_with_timeout(cmd, GH_TIMEOUT)
         .map_err(|e| format!("Failed to run gh pr list (is GitHub CLI installed?): {}", e))?;
 
     if !output.status.success() {
@@ -84,22 +126,26 @@ fn gh_list_prs_inner(
     }
 
     // Enrich +/- stats via local git diff — mirrors rest_list_prs behaviour.
-    // Fetch remote branches once so numstat can resolve origin/branch refs.
-    if !prs.is_empty() && off == 0 {
+    // Fetch remote branches once so numstat can resolve origin/branch refs,
+    // throttled per-repo (#161) so a poll or panel reopen within
+    // `GH_FETCH_MIN_INTERVAL` reuses the previous fetch instead of firing a
+    // fresh blocking network call every time.
+    if !prs.is_empty() && off == 0 && gh_should_fetch_origin(&cwd) {
         // Write guard: refreshing remote-tracking refs mutates `.git` and can
         // race the single-repo view of the same repo on `index.lock`. Held only
         // around the fetch — the numstat diffs below are read-only.
         let _repo = repo_lock::write(&cwd);
-        let _ = hidden_cmd("git")
-            .args(["fetch", "origin"])
-            .current_dir(&cwd)
-            .output();
+        let mut fetch_cmd = hidden_cmd("git");
+        fetch_cmd.args(["fetch", "origin"]).current_dir(&cwd);
+        let _ = output_with_timeout(fetch_cmd, GH_FETCH_TIMEOUT);
     }
-    for pr in &mut prs {
+    // Parallel, not sequential (#161) — one `git diff --numstat` subprocess
+    // per PR in series was the other half of the reappeared 30s timeout.
+    prs.par_iter_mut().for_each(|pr| {
         let (adds, dels) = github_api::diff_numstat(&cwd, &pr.branch, &pr.base);
         pr.additions = adds;
         pr.deletions = dels;
-    }
+    });
 
     Ok(prs)
 }
@@ -1823,5 +1869,25 @@ mod gh_pr_freshness_tests {
     fn top_pr_from_cli_json_missing_updated_at_is_none() {
         let raw = vec![json!({"number": 12})];
         assert_eq!(top_pr_from_cli_json(&raw), None);
+    }
+}
+
+#[cfg(test)]
+mod gh_should_fetch_origin_tests {
+    use super::*;
+
+    #[test]
+    fn throttles_repeated_calls_for_the_same_repo() {
+        let cwd = "/tmp/gitwand-test-gh-throttle-unique-abc";
+        assert!(gh_should_fetch_origin(cwd));
+        assert!(!gh_should_fetch_origin(cwd));
+    }
+
+    #[test]
+    fn does_not_throttle_a_different_repo() {
+        let a = "/tmp/gitwand-test-gh-throttle-unique-def";
+        let b = "/tmp/gitwand-test-gh-throttle-unique-ghi";
+        assert!(gh_should_fetch_origin(a));
+        assert!(gh_should_fetch_origin(b));
     }
 }

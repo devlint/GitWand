@@ -354,28 +354,38 @@ fn gl_list_mrs_inner(
             Some((iid, status))
         })
         .collect();
-    // Overall wall-clock budget for the fan-out, not just a per-call cap:
-    // rollups are already best-effort (empty on any error), so degrading to
-    // "no CI dot" past the deadline is a behavior the code already supports.
-    let rollup_deadline = Instant::now() + ROLLUP_BUDGET;
-    let rollups: HashMap<i64, String> = mrs
+    // Overall wall-clock budget for the fan-out below, not just a per-call
+    // cap: both the rollup and the diff-stats fetch are best-effort (empty /
+    // 0-0 on any error or once the deadline passes), so degrading past it is
+    // a behavior the code already supports. Kept as ONE shared budget (not
+    // stacked per fetch) so the worst case for a list load stays at
+    // `ROLLUP_BUDGET`, not double it — the diff-stats fetch was left out of
+    // the list view for exactly this reason (#161) until this shared-deadline
+    // approach made it safe to add.
+    let enrich_deadline = Instant::now() + ROLLUP_BUDGET;
+    let enrich: HashMap<i64, (String, i64, i64)> = mrs
         .par_iter()
-        .filter_map(|mr| {
+        .map(|mr| {
             let rollup = match embedded.get(&mr.number) {
                 Some(s) => gl_status_to_rollup(s),
-                None if Instant::now() < rollup_deadline => gl_pipeline_rollup(&cwd, mr.number),
+                None if Instant::now() < enrich_deadline => gl_pipeline_rollup(&cwd, mr.number),
                 None => String::new(),
             };
-            if rollup.is_empty() {
-                None
+            let (additions, deletions) = if Instant::now() < enrich_deadline {
+                gl_mr_diff_stats(&cwd, mr.number)
             } else {
-                Some((mr.number, rollup))
-            }
+                (0, 0)
+            };
+            (mr.number, (rollup, additions, deletions))
         })
         .collect();
     for mr in &mut mrs {
-        if let Some(state) = rollups.get(&mr.number) {
-            mr.checks_rollup = state.clone();
+        if let Some((rollup, additions, deletions)) = enrich.get(&mr.number) {
+            if !rollup.is_empty() {
+                mr.checks_rollup = rollup.clone();
+            }
+            mr.additions = *additions;
+            mr.deletions = *deletions;
         }
     }
 
