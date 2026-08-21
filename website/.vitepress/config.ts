@@ -105,6 +105,29 @@ export default defineConfig({
 `],
   ],
 
+  // Every page gets a self-referencing canonical URL (and matching og:url), which is what
+  // Search Console's "Duplicate without user-selected canonical" flag is asking for — without
+  // it, Google has to guess between whatever URL variants (with/without trailing slash, with/
+  // without .html) happen to serve the same content. A page that already sets its own
+  // `rel: canonical` in frontmatter (e.g. a post cross-posted from elsewhere, pointing back at
+  // the original) is left alone instead of getting a conflicting second canonical tag.
+  transformPageData(pageData) {
+    const hasOwnCanonical = (pageData.frontmatter.head || []).some(
+      ([tag, attrs]: [string, Record<string, string>]) => tag === 'link' && attrs?.rel === 'canonical'
+    )
+    if (hasOwnCanonical) return
+
+    const canonicalUrl = `https://gitwand.app/${pageData.relativePath}`
+      .replace(/\/?index\.md$/, '/')
+      .replace(/\.md$/, '')
+
+    pageData.frontmatter.head ??= []
+    pageData.frontmatter.head.push(
+      ['link', { rel: 'canonical', href: canonicalUrl }],
+      ['meta', { property: 'og:url', content: canonicalUrl }],
+    )
+  },
+
   themeConfig: {
     logo: '/logo.svg',
 
