@@ -1,6 +1,7 @@
 import { ref, computed } from "vue";
 import type { WorkspaceRepoIssues, WorkspaceRepo, Issue } from "../utils/backend";
 import { forgeForRepo, isForgeConnected } from "./forge/useForge";
+import { forgeSupportsPRs } from "./forge/types";
 import type { ForgeName } from "./forge/types";
 import { useLaunchpadPins } from "./useLaunchpadPins";
 
@@ -114,6 +115,10 @@ export function useLaunchpadIssues() {
         const out = await Promise.all(
           resolved.map(async ({ repo, provider }): Promise<WorkspaceRepoIssuesWithForge | null> => {
             const forge = provider.name as ForgeName;
+            // Dropped BEFORE the connection check: `isForgeConnected` would file it
+            // under `needsConnection` and render a "connect your account" banner for a
+            // forge that has no account to connect.
+            if (!forgeSupportsPRs(forge)) return null;
             if (!isForgeConnected(forge)) {
               unconnected.add(forge);
               return null;

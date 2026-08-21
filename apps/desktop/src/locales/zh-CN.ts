@@ -1036,6 +1036,8 @@ const zhCN: Locale = {
       unknown: "加载 pull request 失败。",
       retry: "重试",
       timedOut: "{0} 响应超时 — 请检查网络或 VPN 后重试。",
+      forgeUnsupported: "尚不支持 {0} 的 pull request。克隆、推送、拉取和合并均可正常使用。",
+      openForgeWeb: "在网页中打开",
     },
   },
 
@@ -1741,6 +1743,7 @@ const zhCN: Locale = {
     gitlab: "GitLab",
     bitbucket: "Bitbucket",
     azure: "Azure DevOps",
+    cursor: "Cursor Origin",
     action: "打开设置",
   },
 
@@ -2291,7 +2294,7 @@ const zhCN: Locale = {
       historyTitle: "历史",
       history: "切换到侧边栏的历史标签浏览提交记录。",
       remoteTitle: "远程",
-      remote: "GitWand 支持 GitHub、GitLab 和 Bitbucket。",
+      remote: "GitWand 的 pull request 功能支持 GitHub、GitLab、Bitbucket 和 Azure DevOps，并可识别 Cursor Origin 远程仓库（仅支持 git 操作，尚无 PR 集成）。",
     },
     aiFeatures: {
       title: "AI 功能",

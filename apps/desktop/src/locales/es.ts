@@ -1047,6 +1047,8 @@ const es: Locale = {
       unknown: "Error al cargar los pull requests.",
       retry: "Reintentar",
       timedOut: "{0} tardó demasiado en responder — revisa tu red o VPN y vuelve a intentarlo.",
+      forgeUnsupported: "Los pull requests de {0} aún no son compatibles. Clonar, hacer push, pull y merge funcionan con normalidad.",
+      openForgeWeb: "Abrir en la web",
     },
   },
 
@@ -1754,6 +1756,7 @@ const es: Locale = {
     gitlab: "GitLab",
     bitbucket: "Bitbucket",
     azure: "Azure DevOps",
+    cursor: "Cursor Origin",
     action: "Abrir Ajustes",
   },
 
@@ -2306,7 +2309,7 @@ const es: Locale = {
       historyTitle: "Historial",
       history: "Cambia a la pestaña Historial para navegar por los commits.",
       remoteTitle: "Remotos",
-      remote: "GitWand soporta GitHub, GitLab y Bitbucket.",
+      remote: "GitWand soporta GitHub, GitLab, Bitbucket y Azure DevOps para pull requests, y detecta los remotes de Cursor Origin (solo operaciones git, aún sin integración de PR).",
     },
     aiFeatures: {
       title: "Funciones de IA",

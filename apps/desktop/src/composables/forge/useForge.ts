@@ -43,6 +43,10 @@ _cache.set("github", githubProvider);
 import("./GitLabProvider").then((m) => _cache.set("gitlab", m.gitlabProvider));
 import("./BitbucketProvider").then((m) => _cache.set("bitbucket", m.bitbucketProvider));
 import("./AzureProvider").then((m) => _cache.set("azure", m.azureProvider));
+// Cursor Origin: detection-only (no PR integration yet). Registering it is what
+// keeps `getProviderByName("cursor")` from falling through to githubProvider and
+// firing `gh` CLI calls at origin.cursor.com.
+import("./CursorProvider").then((m) => _cache.set("cursor", m.cursorProvider));
 
 /**
  * Retourne le ForgeProvider correspondant à un nom de forge déjà connu.

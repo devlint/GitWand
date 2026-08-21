@@ -34,7 +34,7 @@
 // la fn elle-même est `pub`. Voir le bloc "Parity probe re-exports" dans lib.rs.
 use gitwand_desktop_lib::{
     git_branches_parity, git_commit_submodule_changes_parity, git_log_parity,
-    git_stash_list_parity, git_status_libgit2_parity, git_status_parity,
+    git_remote_info_parity, git_stash_list_parity, git_status_libgit2_parity, git_status_parity,
     git_submodule_branches_parity, scan_secrets_parity,
 };
 use serde_json::{json, Value};
@@ -125,6 +125,13 @@ fn main() -> ExitCode {
                 Err(code) => return code,
             };
             to_json(git_branches_parity(cwd))
+        }
+        "git-remote-info" => {
+            let cwd = match must_str("cwd") {
+                Ok(v) => v,
+                Err(code) => return code,
+            };
+            to_json(git_remote_info_parity(cwd))
         }
         "git-stash-list" => {
             let cwd = match must_str("cwd") {

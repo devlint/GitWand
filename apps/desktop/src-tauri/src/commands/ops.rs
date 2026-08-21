@@ -3696,17 +3696,7 @@ pub(crate) async fn git_remote_info(cwd: String) -> Result<RemoteInfo, String> {
         }
 
         if let Some((name, url)) = origin.or(first) {
-            let provider = if url.contains("github.com") {
-                "github"
-            } else if url.contains("gitlab.com") || url.contains("gitlab") {
-                "gitlab"
-            } else if url.contains("bitbucket.org") || url.contains("bitbucket") {
-                "bitbucket"
-            } else if url.contains("dev.azure.com") || url.contains("visualstudio.com") {
-                "azure"
-            } else {
-                "unknown"
-            };
+            let provider = detect_provider(&url);
 
             let (owner, repo) = parse_remote_owner_repo(&url);
 

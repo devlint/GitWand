@@ -14,6 +14,7 @@ import { computed, inject, onMounted, onBeforeUnmount, ref, watch } from "vue";
 import { PR_PANEL_KEY, isMergeConflict, type PrPanelState } from "../composables/usePrPanel";
 import { OPEN_SETTINGS_KEY } from "../composables/branchPickerBridge";
 import { useI18n } from "../composables/useI18n";
+import { openExternalUrl } from "../utils/backend";
 
 const { t } = useI18n();
 
@@ -213,8 +214,10 @@ function setUserFilter(mode: 'all' | 'assigned' | 'reviews') {
       </div>
     </header>
 
-    <!-- New PR CTA -->
+    <!-- New PR CTA — hidden on a forge with no PR integration (Cursor Origin):
+         the create form would open and then never be submittable. -->
     <button
+      v-if="panel.prSupported.value"
       class="pls-new-btn"
       :class="{ 'pls-new-btn--active': panel.showCreateForm.value }"
       @click="panel.showCreateForm.value = true"
@@ -232,7 +235,16 @@ function setUserFilter(mode: 'all' | 'assigned' | 'reviews') {
         <span class="pls-msg-hint">{{ t('pr.error.cliNotInstalledHint', panel.forgeLabel.value) }}</span>
         <button class="pls-msg-action" @click="openSettings('accounts')">{{ t('pr.error.openSettings') }}</button>
       </template>
-      <button class="pls-msg-action" @click="panel.loadPrs">{{ t('pr.error.retry') }}</button>
+      <!-- Forge detected but without a PR integration (Cursor Origin): the web
+           UI is the only way through, and Retry would never succeed. -->
+      <template v-else-if="panel.errorAction.value === 'open-forge-web' && panel.forgeWebUrl.value">
+        <button class="pls-msg-action" @click="openExternalUrl(panel.forgeWebUrl.value)">{{ t('pr.error.openForgeWeb') }}</button>
+      </template>
+      <button
+        v-if="panel.errorAction.value !== 'open-forge-web'"
+        class="pls-msg-action"
+        @click="panel.loadPrs"
+      >{{ t('pr.error.retry') }}</button>
     </div>
     <div
       v-if="panel.success.value"

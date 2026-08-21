@@ -93,6 +93,24 @@ export function fixtureClean() {
 }
 
 /**
+ * Fixture « remote Cursor Origin » : un commit, plus un remote `origin`
+ * pointant sur le host git d'Origin (`origin.cursor.com`).
+ *
+ * Aucun accès réseau : `git remote add` n'effectue aucune connexion, et
+ * `git remote -v` — la seule commande que `git_remote_info` exécute — lit
+ * uniquement `.git/config`.
+ */
+export function fixtureCursorOriginRemote() {
+  const cwd = mkTempRepo("gw-cursor-remote-");
+  commitFile(cwd, "README.md", "# Parity Fixture\n", "initial commit", 0);
+  execFileSync("git", [
+    "-C", cwd, "remote", "add", "origin",
+    "https://origin.cursor.com/acme/checkout.git",
+  ]);
+  return cwd;
+}
+
+/**
  * Fixture « dirty » : 3 commits, un fichier modifié non stagé, un nouveau
  * fichier untracked, un fichier stagé.
  *

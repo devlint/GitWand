@@ -29,7 +29,7 @@ import {
   type PrFreshnessSignal,
 } from "../utils/backend";
 import { forgeFromRemoteInfo, githubProvider } from "./forge/useForge";
-import { ForgeNotImplementedError } from "./forge/types";
+import { ForgeNotImplementedError, CURSOR_WEB_BASE, forgeSupportsPRs } from "./forge/types";
 import { usePrCache, listKey, detailKey } from "./usePrCache";
 import { whenIdle } from "../utils/idleSchedule";
 import { getPersistedDiffMode, type DiffMode } from "../utils/diffMode";
@@ -54,6 +54,7 @@ const FORGE_LABELS: Record<string, string> = {
   gitlab: "GitLab",
   bitbucket: "Bitbucket",
   azure: "Azure DevOps",
+  cursor: "Cursor Origin",
 };
 
 /**
@@ -126,6 +127,24 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   /** Human-facing name of the active forge — used for "Open on …" labels. */
   const forgeLabel = computed(() => FORGE_LABELS[forge.value.name] ?? "Web");
 
+  /**
+   * Whether this repo's forge has a PR integration at all. Gates the "New PR"
+   * affordances, which would otherwise open a form that can never be submitted.
+   */
+  const prSupported = computed(() => forgeSupportsPRs(forge.value.name));
+
+  /**
+   * Repo URL on the forge's web UI, for the `open-forge-web` error action.
+   * `null` for forges with a working PR integration, which never need the
+   * escape hatch.
+   */
+  const forgeWebUrl = computed<string | null>(() => {
+    const info = remote.value;
+    if (!info?.owner || !info?.repo) return null;
+    if (info.provider === "cursor") return `${CURSOR_WEB_BASE}/${info.owner}/${info.repo}`;
+    return null;
+  });
+
   const prs = ref<PullRequest[]>([]);
   // ─── Dock badge count (cheap, independent of the badge-path list) ──────
   // Reflects the true total open-PR count via a single cheap forge call,
@@ -141,7 +160,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   // Optional follow-up action surfaced alongside an error. `"open-settings"`
   // is set when the failure is actionable from Settings (e.g. gh CLI missing
   // but the user can add a GitHub account instead). Reset on every reload.
-  const errorAction = ref<"open-settings" | null>(null);
+  const errorAction = ref<"open-settings" | "open-forge-web" | null>(null);
   const success = ref<string | null>(null);
   const filterState = ref<"open" | "closed" | "all">("open");
   /** 'all' = no user filter | 'assigned' = assignees | 'reviews' = review_requested */
@@ -549,7 +568,14 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
         msg.includes("ENOENT") ||
         // Our own error prefix
         (msg.includes("gh") && msg.includes("installed"));
-      if (isGhMissing) {
+      if (err instanceof ForgeNotImplementedError) {
+        // A forge GitWand detects but has no PR integration for (Cursor Origin).
+        // MUST be classified before the substring chain below: `isGhMissing` is
+        // loose enough to claim a reworded message, and telling the user to
+        // install a CLI would be actively wrong since no install fixes this.
+        error.value = t("pr.error.forgeUnsupported", forgeLabel.value);
+        errorAction.value = "open-forge-web";
+      } else if (isGhMissing) {
         const info = CLI_MISSING_INFO[forge.value.name] ?? CLI_MISSING_INFO.github;
         error.value = t("pr.error.cliNotInstalled", info.cli, info.url);
         errorAction.value = "open-settings";
@@ -1460,7 +1486,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   return {
     // State
     cwd,
-    remote, prs, loading, refreshing, error, errorAction, success, filterState, filterMode,
+    remote, prs, loading, refreshing, error, errorAction, forgeWebUrl, prSupported, success, filterState, filterMode,
     currentUser, currentUserLoading, currentUserError,
     showCreateForm, newPrTitle, newPrBody, newPrBase, newPrDraft, newPrReviewers, isCreating,
     forkInfo, newPrBaseRepo,

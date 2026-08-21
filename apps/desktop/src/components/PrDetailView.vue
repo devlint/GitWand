@@ -378,7 +378,7 @@ function submitRequestReviewers() {
         </svg>
       </div>
       <span class="pdv-empty-label">{{ t('pr.detail.emptySelect') }}</span>
-      <button class="pdv-empty-new-btn" @click="p.showCreateForm.value = true">
+      <button v-if="p.prSupported.value" class="pdv-empty-new-btn" @click="p.showCreateForm.value = true">
         <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
           <path d="M8 3v10M3 8h10" />
         </svg>

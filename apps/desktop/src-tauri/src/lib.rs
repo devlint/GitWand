@@ -228,6 +228,10 @@ pub fn git_branches_parity(cwd: String) -> Result<Vec<types::GitBranch>, String>
     tauri::async_runtime::block_on(commands::ops::git_branches(cwd, None))
 }
 
+pub fn git_remote_info_parity(cwd: String) -> Result<types::RemoteInfo, String> {
+    tauri::async_runtime::block_on(commands::ops::git_remote_info(cwd))
+}
+
 pub fn git_stash_list_parity(cwd: String) -> Result<Vec<types::StashEntry>, String> {
     tauri::async_runtime::block_on(commands::ops::git_stash_list(cwd))
 }

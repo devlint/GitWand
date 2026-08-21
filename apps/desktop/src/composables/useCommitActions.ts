@@ -24,6 +24,7 @@ import {
   gitDeleteRemoteTag,
   openExternalUrl,
 } from "../utils/backend";
+import { forgeCommitUrl } from "../utils/forgeUrls";
 import { useI18n } from "./useI18n";
 import { useTagSuggestion } from "./useTagSuggestion";
 import { useAIProvider } from "./useAIProvider";
@@ -360,16 +361,14 @@ export function useCommitActions(deps: Deps) {
     if (!cwd) return;
     try {
       const info = await gitRemoteInfo(cwd);
-      if (!info.owner || !info.repo) {
+      // No owner/repo check here: Azure DevOps carries its coordinates in the
+      // remote URL, not in owner/repo, so `forgeCommitUrl` is the single judge
+      // of whether a correct URL can be built.
+      const base = forgeCommitUrl(info, entry.hashFull);
+      if (!base) {
         repoError.value = t("commitCtx.noRemote");
         return;
       }
-      const base =
-        info.provider === "gitlab"
-          ? `https://gitlab.com/${info.owner}/${info.repo}/-/commit/${entry.hashFull}`
-          : info.provider === "bitbucket"
-            ? `https://bitbucket.org/${info.owner}/${info.repo}/commits/${entry.hashFull}`
-            : `https://github.com/${info.owner}/${info.repo}/commit/${entry.hashFull}`;
       void openExternalUrl(base);
     } catch {
       repoError.value = t("commitCtx.noRemote");
