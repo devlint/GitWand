@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.7.1] - 2026-08-21
+
+### Added
+
+- **Cursor Origin remote detection** (#165) — [Cursor Origin](https://cursor.com/docs/origin) remotes (`origin.cursor.com`) are now recognized instead of falling through to `unknown`, which previously routed PR-panel calls at the GitHub provider and surfaced a confusing GitHub-auth error on a repo that has nothing to do with GitHub. This is detection only (Phase 1, a real `OriginProvider`, is deferred until Origin's app-auth model and API stabilize out of beta): the PR panel now shows an honest "Open on the web" state, both "New PR" buttons are hidden via a provider-driven `forgeSupportsPRs()` check instead of only after a failed call, and Today no longer offers to "connect" an account type that can't exist for this forge. `detect_provider()` was extracted out of `git_remote_info` into `git/parse.rs` (unit-testable, mirrored in `dev-server.mjs`), with new parity coverage for `git-remote-info`, which previously had none despite the detection chain being duplicated verbatim between the Rust backend and the Node dev-server.
+
+### Fixed
+
+- **Azure DevOps "View on forge" commit URLs pointed at GitHub** (#165) — `forgeCommitUrl()` built a `github.com` URL for Azure DevOps repos because the generic owner/repo parser split `https://dev.azure.com/myorg/myproj/_git/myrepo` incorrectly and hit the GitHub fallback. It now resolves org/project through the same `parseAzureRemote()` logic already used server-side (`parse_azure_remote()` in `commands/azure.rs`), covering all five documented remote shapes (`dev.azure.com`, `user@` userinfo, legacy `visualstudio.com`, the `DefaultCollection` segment, and SSH `v3/`); an unparseable Azure remote now returns `null` instead of silently producing a broken GitHub-shaped link.
+
+### Security
+
+- Bumped `dompurify` (used by `useSafeHtml.ts` to sanitize user-generated HTML) from 3.4.11 to 3.4.13 — fixes for a hook-removal issue during `IN_PLACE` sanitization, a clone-guard bypass via hooks, and DOM clobbering via `ownerDocument` during `IN_PLACE`.
+
 ## [3.7.0] - 2026-08-19
 
 ### Added
@@ -1328,6 +1342,7 @@ Design-system foundations — the app header and every overlay now ride on a sha
 - 28 tests covering all patterns + real-world scenarios (package.json, Laravel routes, Vue SFC, CSS, .env files)
 
 [Unreleased]: https://github.com/devlint/GitWand/compare/v3.7.0...HEAD
+[3.7.1]: https://github.com/devlint/GitWand/compare/v3.7.0...v3.7.1
 [3.7.0]: https://github.com/devlint/GitWand/compare/v3.6.6...v3.7.0
 [3.6.6]: https://github.com/devlint/GitWand/compare/v3.6.5...v3.6.6
 [3.6.5]: https://github.com/devlint/GitWand/compare/v3.6.4...v3.6.5

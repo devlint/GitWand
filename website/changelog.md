@@ -5,6 +5,14 @@ description: Release history for GitWand — the native Git client with AI confl
 
 # Changelog
 
+## v3.7.1 — August 2026
+
+[Cursor Origin](https://cursor.com/docs/origin) is Cursor's git forge, still in early beta, and GitWand had never heard of it: a repo with an `origin.cursor.com` remote showed up as an unrecognized forge, and opening the PR panel fired off GitHub CLI calls that failed with a baffling GitHub auth error, on a repo that has nothing to do with GitHub. GitWand now recognizes Origin remotes for what they are. This is deliberately detection only, not a full integration: Origin's API currently only documents an app-auth model built for server-to-server access rather than a desktop client, and it's still moving underneath its beta tag, so a real `OriginProvider` is on hold until that settles. In the meantime, the PR panel is honest about it instead of pretending: it offers to open the repo on the web, hides both "New PR" buttons instead of leaving them to fail, and Today no longer suggests connecting an account type that doesn't exist for this forge. Everything else, clone, push, pull, merges, and the whole conflict-resolution engine, already worked fine on an Origin repo and needed no changes; none of it goes through a forge integration in the first place.
+
+A pre-existing bug got fixed along the way: "View on forge" for a commit on an Azure DevOps repo was building a `github.com` link instead of an Azure one, because the shared URL parser assumed every remote had the same shape GitHub's does. Azure's shapes are different enough (five different ones, depending on how you're connected) that a proper parser was worth writing rather than special-casing around the edges.
+
+And `dompurify`, the library behind every bit of user-generated HTML GitWand sanitizes before showing it to you, moved up two patch versions upstream to close a few narrow XSS-adjacent edge cases in how hooks interact with in-place sanitization.
+
 ## v3.7.0 — August 2026
 
 Commit Review — the biggest addition to the Changes panel since it shipped. A button now sits right in the commit area: click it, and GitWand runs the same AI review pipeline that already checks your pull requests against whatever's staged, right there, before you commit. Findings show up inline in the diff with severity badges, and you cycle through them with `n` and `p`, dismissing what doesn't matter with `x` — no separate view, no context switch.
