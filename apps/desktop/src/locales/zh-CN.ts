@@ -1003,6 +1003,7 @@ const zhCN: Locale = {
       addToReview: "加入 review",
       addToReviewPending: "加入 review（{0} 待定）",
       reviewBtn: "+ Review",
+      commentTooltip: "添加评论",
       suggestTooltip: "建议修改",
       suggestTitle: "代码建议",
       suggestHint: "编辑代码 — 将作为 GitHub 建议块提交。",

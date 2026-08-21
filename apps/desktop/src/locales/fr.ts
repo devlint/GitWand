@@ -1023,6 +1023,7 @@ const fr: Locale = {
       addToReview: "Ajouter à la review",
       addToReviewPending: "Ajouter à la review ({0} en attente)",
       reviewBtn: "+ Review",
+      commentTooltip: "Ajouter un commentaire",
       suggestTooltip: "Proposer une modification",
       suggestTitle: "Suggestion de code",
       suggestHint: "Éditez le code — il sera soumis comme bloc de suggestion GitHub.",

@@ -575,7 +575,7 @@ defineExpose({ scrollToHunk, scrollToLine, openComposeAtHunk, rows, currentRowId
             class="pid-lno mono"
             :class="{ 'pid-lno--clickable': row.dl.type !== 'add' }"
             @click="row.dl.type !== 'add' && openCompose(row.hunkIdx, row.lineIdx, row.dl)"
-            :title="row.dl.type !== 'add' ? 'Ajouter un commentaire' : undefined"
+            :title="row.dl.type !== 'add' ? t('pr.inline.commentTooltip') : undefined"
           >
             <span class="pid-lno-num">{{ row.dl.oldLineNo ?? '' }}</span>
             <span class="pid-lno-icon">+</span>
@@ -585,7 +585,7 @@ defineExpose({ scrollToHunk, scrollToLine, openComposeAtHunk, rows, currentRowId
             class="pid-lno mono"
             :class="{ 'pid-lno--clickable': row.dl.type !== 'delete' }"
             @click="row.dl.type !== 'delete' && openCompose(row.hunkIdx, row.lineIdx, row.dl)"
-            :title="row.dl.type !== 'delete' ? 'Ajouter un commentaire' : undefined"
+            :title="row.dl.type !== 'delete' ? t('pr.inline.commentTooltip') : undefined"
           >
             <span class="pid-lno-num">{{ row.dl.newLineNo ?? '' }}</span>
             <span class="pid-lno-icon">+</span>
@@ -819,7 +819,7 @@ defineExpose({ scrollToHunk, scrollToLine, openComposeAtHunk, rows, currentRowId
                 class="pid-lno mono"
                 :class="{ 'pid-lno--clickable': row.dl.type !== 'add' }"
                 @click="row.dl.type !== 'add' && openCompose(row.hunkIdx, row.lineIdx, row.dl)"
-                :title="row.dl.type !== 'add' ? 'Ajouter un commentaire' : undefined"
+                :title="row.dl.type !== 'add' ? t('pr.inline.commentTooltip') : undefined"
               >
                 <span class="pid-lno-num">{{ row.dl.oldLineNo ?? '' }}</span>
                 <span class="pid-lno-icon">+</span>
@@ -828,7 +828,7 @@ defineExpose({ scrollToHunk, scrollToLine, openComposeAtHunk, rows, currentRowId
                 class="pid-lno mono"
                 :class="{ 'pid-lno--clickable': row.dl.type !== 'delete' }"
                 @click="row.dl.type !== 'delete' && openCompose(row.hunkIdx, row.lineIdx, row.dl)"
-                :title="row.dl.type !== 'delete' ? 'Ajouter un commentaire' : undefined"
+                :title="row.dl.type !== 'delete' ? t('pr.inline.commentTooltip') : undefined"
               >
                 <span class="pid-lno-num">{{ row.dl.newLineNo ?? '' }}</span>
                 <span class="pid-lno-icon">+</span>

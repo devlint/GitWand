@@ -1031,6 +1031,7 @@ const en = {
       addToReviewPending: "Add to review ({0} pending)",
       reviewBtn: "+ Review",
       reviewBtnCount: "+ Review ({0})",
+      commentTooltip: "Add a comment",
       suggestTooltip: "Suggest a change",
       suggestTitle: "Code suggestion",
       suggestHint: "Edit the code — it will be submitted as a GitHub suggestion block.",

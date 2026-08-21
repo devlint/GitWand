@@ -1015,6 +1015,7 @@ const ptBR: Locale = {
       addToReview: "Adicionar à review",
       addToReviewPending: "Adicionar à review ({0} pendente(s))",
       reviewBtn: "+ Review",
+      commentTooltip: "Adicionar um comentário",
       suggestTooltip: "Sugerir uma alteração",
       suggestTitle: "Sugestão de código",
       suggestHint: "Edite o código — será enviado como bloco de sugestão do GitHub.",
