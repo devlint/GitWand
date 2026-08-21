@@ -6,6 +6,12 @@ description: Technical articles on Git workflows, AI-powered conflict resolution
 # Blog
 
 <div class="blog-list">
+  <a href="/blog/why-gitwand-is-rust-not-electron" class="blog-card">
+    <div class="blog-meta">August 21, 2026 · 10 min read</div>
+    <h2 class="blog-title">Why GitWand is Rust, not Electron: what native performance actually buys a Git client</h2>
+    <p class="blog-excerpt">A tour of what's shipped since v3.5 (Commit Review, dev-loop and CI performance work, small UX fixes) through the architectural bet that makes them possible: Tauri 2 + Rust for everything that touches the OS, a deliberately portable TypeScript core for the deterministic conflict engine, and what that split is worth against Electron incumbents and paid cloud AI, real numbers included (a <strong>750ms to 30ms</strong> multi-repo status fetch via <code>rayon</code>).</p>
+    <span class="blog-read">Read article →</span>
+  </a>
   <a href="/blog/v3-5-pr-review-2-secrets-scanner" class="blog-card">
     <div class="blog-meta">July 10, 2026 · 9 min read</div>
     <h2 class="blog-title">PR Review 2.0, a local secrets scanner, and smarter PR badges: GitWand v3.5</h2>
