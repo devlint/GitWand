@@ -35,6 +35,8 @@ import type { GitBranch, WorktreeEntry } from "../utils/backend";
 import { branchSort } from "../utils/branchSort";
 import { useI18n } from "../composables/useI18n";
 import { useUndoStack, type UndoEntry, type UndoOpType } from "../composables/useUndoStack";
+import { useTimeMachine, type TimelineItem } from "../composables/useTimeMachine";
+import { formatRelativeAge } from "../utils/relativeTime";
 import {
   MERGE_POPOVER_REQUEST_KEY,
   UNDO_POPOVER_REQUEST_KEY,
@@ -154,6 +156,8 @@ const emit = defineEmits<{
   openHelp: [];
   openStash: [];
   openTags: [];
+  /** v3.8: the rewind popover's footer link opens the full Time Machine. */
+  openTimeMachine: [];
   discardAll: [];
   changeView: [mode: 'dashboard' | 'changes' | 'history' | 'prs' | 'launchpad'];
 }>();
@@ -185,13 +189,20 @@ function handleMerge(name: string) {
   closeMergePopover();
 }
 
-// ─── Undo / rewind popover (triggered by BranchMenu.rewind) ───────
+// ─── Undo / rewind popover (triggered by BranchMenu.rewind and ⌘⇧U) ───
+//
+// v3.8: the list is the merged Time Machine timeline (snapshots + reflog),
+// not the reflog alone. Same trigger, same anchor, richer content — adding a
+// second rewind surface next to this one would split one mental action in
+// two. `useUndoStack` is still used for its op labels and as the reflog half
+// of the timeline.
 const undoStack = useUndoStack();
+const timeMachine = useTimeMachine();
 const showUndoPopover = ref(false);
 
 function openUndoPopover() {
   showUndoPopover.value = true;
-  if (props.cwd) undoStack.refresh(props.cwd);
+  if (props.cwd) timeMachine.refresh(props.cwd);
 }
 
 function closeUndoPopover() {
@@ -218,25 +229,47 @@ function isHardUndo(entry: UndoEntry): boolean {
   return entry.type !== "commit" && entry.type !== "amend";
 }
 
-async function handleUndo(entry: UndoEntry) {
-  const msg = isHardUndo(entry)
-    ? t("undoStack.undoHardConfirm")
-    : t("undoStack.undoConfirm");
-  
+/** Localized label for a timeline row's left cell. */
+function rowLabel(item: TimelineItem): string {
+  if (item.source === "reflog") return opLabel(item.kind as UndoOpType);
+  const map: Record<string, string> = {
+    manual: t("timeMachine.kindManual"),
+    discard: t("timeMachine.kindDiscard"),
+    reset: t("timeMachine.kindReset"),
+    checkout: t("timeMachine.kindCheckout"),
+    resolution: t("timeMachine.kindResolution"),
+  };
+  return map[item.kind] ?? item.kind;
+}
+
+/** Relative age. Both sources are merged now, so git's own `%cr` string can
+ *  no longer be used: the shared formatter handles both. */
+function rowAge(item: TimelineItem): string {
+  return formatRelativeAge(new Date(item.timestampMs).toISOString(), t);
+}
+
+async function handleRestore(item: TimelineItem) {
+  // A snapshot restore takes a pre-restore snapshot first, so it is itself
+  // undoable and not a danger action. A reflog hard reset still is.
+  const hard = item.source === "reflog" && !!item.reflog && isHardUndo(item.reflog);
+  const msg =
+    item.source === "snapshot"
+      ? t("timeMachine.restoreConfirm")
+      : hard
+        ? t("undoStack.undoHardConfirm")
+        : t("undoStack.undoConfirm");
+
   if (askConfirm) {
     if (!await askConfirm({
-      title: t("undoStack.undoTitle"),
+      title: t("timeMachine.restoreTitle"),
       message: msg,
-      confirmLabel: t("undoStack.undoButton"),
-      danger: isHardUndo(entry),
+      confirmLabel: t("timeMachine.restoreButton"),
+      danger: hard,
     })) return;
-  } else {
-    // eslint-disable-next-line no-alert
-    if (!confirm(msg)) return;
   }
 
   try {
-    await undoStack.undo(props.cwd, entry);
+    await timeMachine.restore(props.cwd, item);
     closeUndoPopover();
     emit("undoPerformed");
   } catch {
@@ -587,28 +620,32 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
           <div v-if="showUndoPopover" class="undo-popover-anchor">
             <div class="undo-popover">
               <div class="undo-popover-title">{{ t('undoStack.title') }}</div>
-              <div v-if="undoStack.lastError.value" class="undo-error">{{ undoStack.lastError.value }}</div>
-              <div v-if="undoStack.isLoading.value" class="undo-loading">
+              <div v-if="timeMachine.lastError.value" class="undo-error">{{ timeMachine.lastError.value }}</div>
+              <div v-if="timeMachine.isLoading.value" class="undo-loading">
                 <div class="mp-spinner"></div>
               </div>
-              <ul v-else-if="undoStack.entries.value.length > 0" class="undo-list">
+              <ul v-else-if="timeMachine.timeline.value.length > 0" class="undo-list">
                 <li
-                  v-for="entry in undoStack.entries.value.slice(0, 20)"
-                  :key="entry.index"
+                  v-for="item in timeMachine.timeline.value.slice(0, 20)"
+                  :key="item.key"
                   class="undo-entry"
-                  :class="{ 'undo-entry--undoable': undoStack.canUndo(entry) }"
+                  :class="{ 'undo-entry--undoable': item.restorable }"
                 >
                   <div class="undo-entry-info">
-                    <span class="undo-entry-type">{{ opLabel(entry.type) }}</span>
-                    <span class="undo-entry-summary mono">{{ entry.summary }}</span>
-                    <span class="undo-entry-date muted">{{ entry.date }}</span>
+                    <span
+                      class="undo-entry-type"
+                      :class="{ 'undo-entry-type--snapshot': item.source === 'snapshot' }"
+                      :title="item.source === 'snapshot' ? t('timeMachine.sourceSnapshot') : t('timeMachine.sourceReflog')"
+                    >{{ rowLabel(item) }}</span>
+                    <span class="undo-entry-summary mono">{{ item.label }}</span>
+                    <span class="undo-entry-date muted">{{ rowAge(item) }}</span>
                   </div>
                   <button
-                    v-if="undoStack.canUndo(entry)"
+                    v-if="item.restorable"
                     class="undo-entry-btn"
-                    :class="{ 'undo-entry-btn--hard': isHardUndo(entry) }"
-                    :title="t('undoStack.undoButton')"
-                    @click="handleUndo(entry)"
+                    :class="{ 'undo-entry-btn--hard': item.source === 'reflog' && !!item.reflog && isHardUndo(item.reflog) }"
+                    :title="t('timeMachine.restore')"
+                    @click="handleRestore(item)"
                   >
                     <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
                       <circle cx="9" cy="9" r="6" stroke="currentColor" stroke-width="1.4" fill="none" />
@@ -620,6 +657,9 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
                 </li>
               </ul>
               <div v-else class="undo-empty">{{ t('undoStack.noHistory') }}</div>
+              <button class="undo-see-all" @click="emit('openTimeMachine'); closeUndoPopover()">
+                {{ t('timeMachine.seeAll') }}
+              </button>
             </div>
           </div>
         </template>
@@ -977,6 +1017,23 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
   flex-direction: column;
   gap: 1px;
 }
+
+.undo-entry-type--snapshot { color: var(--color-accent); }
+
+.undo-see-all {
+  display: block;
+  width: 100%;
+  padding: 8px;
+  border: none;
+  border-top: 1px solid var(--color-border);
+  border-radius: 0;
+  background: none;
+  color: var(--color-accent);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.undo-see-all:hover { background: var(--color-bg-hover); }
 
 .undo-entry-type {
   font-size: var(--font-size-xs);

@@ -226,6 +226,18 @@ interface Settings {
   // v3.7.0 Commit Review
   commitReviewEnabled: boolean;
   commitReviewAutoReReview: boolean;
+  /**
+   * Time Machine (v3.8). When false, no snapshot is taken before destructive
+   * operations and the timeline shows the reflog only. Default true: the
+   * safety net is the point of the feature.
+   */
+  snapshotsEnabled: boolean;
+  /** Snapshots older than this are pruned on repo open. */
+  snapshotRetentionDays: number;
+  /** Hard cap on snapshots kept per repo, newest first. */
+  snapshotMaxCount: number;
+  /** Opt-in: one-line AI summaries for snapshots in the timeline. */
+  snapshotAiLabels: boolean;
 }
 
 const defaultSettings: Settings = {
@@ -315,6 +327,10 @@ const defaultSettings: Settings = {
   secretsEntropyThreshold: 4.0,
   commitReviewEnabled: false,
   commitReviewAutoReReview: true,
+  snapshotsEnabled: true,
+  snapshotRetentionDays: 14,
+  snapshotMaxCount: 200,
+  snapshotAiLabels: false,
 };
 
 function loadSettings(): Settings {

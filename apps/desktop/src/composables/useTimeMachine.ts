@@ -64,6 +64,10 @@ export function toTimeline(snapshots: SnapshotMeta[], reflog: UndoEntry[]): Time
   }
 
   for (const r of reflog) {
+    // A bare `git update-ref` writes a reflog line with an empty subject, and
+    // a row with nothing in it tells the user nothing. GitWand labels its own
+    // ref moves (see `restore_snapshot_inner`); this guards the rest.
+    if (!r.summary.trim()) continue;
     const covered = items.some(
       (i) =>
         i.source === "snapshot" &&
@@ -82,7 +86,26 @@ export function toTimeline(snapshots: SnapshotMeta[], reflog: UndoEntry[]): Time
     });
   }
 
-  return items.sort((a, b) => b.timestampMs - a.timestampMs || a.key.localeCompare(b.key));
+  return items.sort(compareNewestFirst);
+}
+
+/**
+ * Newest first, with a tie-break that matters more than it looks.
+ *
+ * `git reflog` reports whole seconds, so two commits made in the same second
+ * tie on `timestampMs`. Falling back to the key string sorted them
+ * alphabetically, which put the OLDER commit first (caught in manual QA).
+ * Each source knows its own order, so use it:
+ *
+ * - reflog vs reflog: the reflog index, where 0 is the most recent entry.
+ * - snapshot vs snapshot: the id, which `stamp_ms()` keeps monotonic.
+ * - snapshot vs reflog: the snapshot first, since it restores strictly more.
+ */
+function compareNewestFirst(a: TimelineItem, b: TimelineItem): number {
+  if (a.timestampMs !== b.timestampMs) return b.timestampMs - a.timestampMs;
+  if (a.reflog && b.reflog) return a.reflog.index - b.reflog.index;
+  if (a.snapshot && b.snapshot) return b.snapshot.id.localeCompare(a.snapshot.id);
+  return a.source === "snapshot" ? -1 : 1;
 }
 
 const isLoading = ref(false);

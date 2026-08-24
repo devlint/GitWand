@@ -484,13 +484,15 @@ function restoreSnapshot(cwd, id) {
   const redo = createSnapshot(cwd, "pre-restore", `before restoring ${id}`);
 
   // Plumbing, not `checkout`: a checkout would refuse on a dirty tree, which
-  // is exactly the state an undo has to recover from.
+  // is exactly the state an undo has to recover from. `-m` on every ref move:
+  // without it git writes an empty reflog message (see snapshot.rs).
+  const reason = `gitwand: restore snapshot ${id}`;
   if (target.headRef) {
     const full = `refs/heads/${target.headRef}`;
-    g(["update-ref", full, target.headSha]);
-    g(["symbolic-ref", "HEAD", full]);
+    g(["update-ref", "-m", reason, full, target.headSha]);
+    g(["symbolic-ref", "-m", reason, "HEAD", full]);
   } else {
-    g(["update-ref", "--no-deref", "HEAD", target.headSha]);
+    g(["update-ref", "-m", reason, "--no-deref", "HEAD", target.headSha]);
   }
 
   g(["read-tree", "-u", "--reset", `${target.commit}^{tree}`]);

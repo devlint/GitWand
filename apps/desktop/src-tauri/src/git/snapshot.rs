@@ -313,14 +313,30 @@ pub(crate) fn restore_snapshot_inner(cwd: &str, id: &str) -> Result<SnapshotMeta
 
     // ── 1. HEAD. Move the ref, never `checkout`: the worktree is fixed in
     //    step 2 anyway, and `checkout` would refuse on a dirty tree.
+    //
+    //    Every ref move here is labelled with `-m`. Without it git writes a
+    //    reflog entry with an EMPTY message, which shows up as a blank row in
+    //    the Time Machine timeline and, worse, as an unexplained line in the
+    //    user's own `git reflog`. Caught in manual QA.
+    let reason = format!("gitwand: restore snapshot {}", id);
     match target.head_ref.as_deref() {
         Some(branch) => {
             let full = format!("refs/heads/{}", branch);
-            run(cwd, &["update-ref", &full, &target.head_sha])?;
-            run(cwd, &["symbolic-ref", "HEAD", &full])?;
+            run(cwd, &["update-ref", "-m", &reason, &full, &target.head_sha])?;
+            run(cwd, &["symbolic-ref", "-m", &reason, "HEAD", &full])?;
         }
         None => {
-            run(cwd, &["update-ref", "--no-deref", "HEAD", &target.head_sha])?;
+            run(
+                cwd,
+                &[
+                    "update-ref",
+                    "-m",
+                    &reason,
+                    "--no-deref",
+                    "HEAD",
+                    &target.head_sha,
+                ],
+            )?;
         }
     }
 

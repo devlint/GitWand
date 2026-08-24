@@ -44,6 +44,7 @@ const MergeSuccessModal = defineAsyncComponent(() => import("./components/MergeS
 const RebaseEditor = defineAsyncComponent(() => import("./components/RebaseEditor.vue"));
 const RebaseProgressBanner = defineAsyncComponent(() => import("./components/RebaseProgressBanner.vue"));
 const StashManager = defineAsyncComponent(() => import("./components/StashManager.vue"));
+const TimeMachinePanel = defineAsyncComponent(() => import("./components/TimeMachinePanel.vue"));
 const TagsPanel = defineAsyncComponent(() => import("./components/TagsPanel.vue"));
 const WorktreeManager = defineAsyncComponent(() => import("./components/WorktreeManager.vue"));
 const SubmodulePanel = defineAsyncComponent(() => import("./components/SubmodulePanel.vue"));
@@ -2547,6 +2548,8 @@ watch(repoOperationState, (op) => {
 
 // ─── Stash manager panel ────────────────────────────────
 const showStash = ref(false);
+/** v3.8 Time Machine modal, opened from the rewind popover footer. */
+const showTimeMachine = ref(false);
 const showTags = ref(false);
 const showAgents = ref(false);
 const showCommandLog = ref(false);
@@ -3671,7 +3674,8 @@ onUnmounted(() => {
       @open-worktrees="(branch) => { pendingWorktreeBranch = branch; showWorktrees = true; }"
       @open-submodules="showSubmodules = true" @open-submodule="handleOpenSubmodule" @open-search="handleOpenSearch" @open-help="showHelp = true"
       :submodule-update-count="submoduleUpdateCount"
-      :stash-count="stashCount" @open-stash="showStash = true" @open-tags="showTags = true" />
+      :stash-count="stashCount" @open-stash="showStash = true" @open-tags="showTags = true"
+      @open-time-machine="showTimeMachine = true" />
 
     <div class="app-body" :style="{ '--sidebar-width': sidebarWidth + 'px' }">
       <main class="main" :class="{ 'main--dashboard': viewMode === 'dashboard' || viewMode === 'launchpad' }">
@@ -3986,6 +3990,10 @@ onUnmounted(() => {
     <!-- Stash manager (uses BaseModal, owns its own overlay) -->
     <StashManager v-if="showStash && repoFolderPath" :cwd="repoFolderPath" @close="showStash = false"
       @refresh="repoRefresh()" />
+
+    <!-- Time Machine (v3.8) — full repo history, snapshots + reflog -->
+    <TimeMachinePanel v-if="showTimeMachine && repoFolderPath" :cwd="repoFolderPath"
+      @close="showTimeMachine = false" @restored="onUndoPerformed()" />
 
     <!-- Clone modal (v2.0) -->
     <CloneModal v-if="showCloneModal" @close="showCloneModal = false" @cloned="onCloned" />
