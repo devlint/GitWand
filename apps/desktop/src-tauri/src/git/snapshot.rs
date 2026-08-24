@@ -24,6 +24,8 @@
 
 use super::cmd::git_cmd;
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Ref namespace for snapshots. Excluded from every `--all` traversal
@@ -98,6 +100,30 @@ fn now_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
+}
+
+/// Last timestamp handed out by `stamp_ms`, so ids stay strictly increasing.
+static LAST_STAMP_MS: AtomicU64 = AtomicU64::new(0);
+
+/// A snapshot timestamp that never repeats within this process.
+///
+/// The id (`<ts>-<short sha>`) is what the timeline sorts on. Two snapshots
+/// created inside the same millisecond would sort by sha, i.e. arbitrarily,
+/// and a bulk operation can plausibly do that. Bumping to `last + 1` costs at
+/// most a few milliseconds of drift on the recorded time and buys a stable
+/// creation order.
+fn stamp_ms() -> u64 {
+    let now = now_ms();
+    loop {
+        let last = LAST_STAMP_MS.load(Ordering::SeqCst);
+        let next = if now > last { now } else { last + 1 };
+        if LAST_STAMP_MS
+            .compare_exchange(last, next, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+        {
+            return next;
+        }
+    }
 }
 
 /// Absolute path of the git dir for `cwd`. For a linked worktree this is
@@ -194,7 +220,7 @@ pub(crate) fn create_snapshot_inner(
     )?;
 
     // ── 3. snapshotCommit + ref.
-    let timestamp_ms = now_ms();
+    let timestamp_ms = stamp_ms();
     let mut meta = SnapshotMeta {
         id: String::new(),
         commit: String::new(),
@@ -271,6 +297,129 @@ pub(crate) fn list_snapshots_inner(cwd: &str) -> Result<Vec<SnapshotMeta>, Strin
 
     out.sort_by(|a, b| b.timestamp_ms.cmp(&a.timestamp_ms).then(b.id.cmp(&a.id)));
     Ok(out)
+}
+
+/// Restore the repo to the state captured by snapshot `id`.
+///
+/// A `pre-restore` snapshot is taken first, so the restore is itself
+/// undoable: the returned meta is the redo target.
+///
+/// Uses plumbing (`update-ref` / `read-tree`) rather than `checkout`, so it
+/// cannot refuse on a dirty tree, which is the whole point of an undo.
+///
+/// Lock-free by design, see the module doc.
+pub(crate) fn restore_snapshot_inner(cwd: &str, id: &str) -> Result<SnapshotMeta, String> {
+    let target = list_snapshots_inner(cwd)?
+        .into_iter()
+        .find(|s| s.id == id)
+        .ok_or_else(|| format!("snapshot {} not found", id))?;
+
+    let redo = create_snapshot_inner(cwd, "pre-restore", &format!("before restoring {}", id))?
+        .ok_or_else(|| "cannot snapshot current state before restore".to_string())?;
+
+    // ── 1. HEAD. Move the ref, never `checkout`: the worktree is fixed in
+    //    step 2 anyway, and `checkout` would refuse on a dirty tree.
+    match target.head_ref.as_deref() {
+        Some(branch) => {
+            let full = format!("refs/heads/{}", branch);
+            run(cwd, &["update-ref", &full, &target.head_sha])?;
+            run(cwd, &["symbolic-ref", "HEAD", &full])?;
+        }
+        None => {
+            run(cwd, &["update-ref", "--no-deref", "HEAD", &target.head_sha])?;
+        }
+    }
+
+    // ── 2. Working tree + index from the snapshot's tree.
+    run(
+        cwd,
+        &[
+            "read-tree",
+            "-u",
+            "--reset",
+            &format!("{}^{{tree}}", target.commit),
+        ],
+    )?;
+
+    // ── 3. Exact index, including conflict stages 1/2/3.
+    let dir = git_dir(cwd)?;
+    let info_path = scratch(&dir, "restore");
+    let info = run(
+        cwd,
+        &[
+            "cat-file",
+            "blob",
+            &format!("{}^2:index-info", target.commit),
+        ],
+    )?;
+    std::fs::write(&info_path, format!("{}\n", info))
+        .map_err(|e| format!("failed to write index-info: {}", e))?;
+    let applied = (|| -> Result<(), String> {
+        run(cwd, &["read-tree", "--empty"])?;
+        let file = std::fs::File::open(&info_path)
+            .map_err(|e| format!("failed to open index-info: {}", e))?;
+        let out = git_cmd()
+            .args(["update-index", "--index-info"])
+            .stdin(Stdio::from(file))
+            .current_dir(cwd)
+            .output()
+            .map_err(|e| format!("failed to run git update-index: {}", e))?;
+        if !out.status.success() {
+            return Err(format!(
+                "git update-index --index-info failed: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            ));
+        }
+        Ok(())
+    })();
+    let _ = std::fs::remove_file(&info_path);
+    applied?;
+
+    // ── 4. Merge state. `read-tree` restores stages but not MERGE_HEAD, so a
+    //    snapshot taken mid-merge would otherwise come back as a plain dirty
+    //    tree with no "merge in progress" banner.
+    if let Some(ref mh) = target.merge_head {
+        let merge_head_path = dir.join("MERGE_HEAD");
+        if !merge_head_path.exists() {
+            std::fs::write(&merge_head_path, format!("{}\n", mh))
+                .map_err(|e| format!("failed to restore MERGE_HEAD: {}", e))?;
+        }
+    }
+
+    Ok(redo)
+}
+
+/// Delete snapshot refs older than `max_age_days` or beyond `max_count`,
+/// newest kept. Returns the number of refs deleted.
+///
+/// Only refs are deleted; the objects are reclaimed by git's own `gc`, which
+/// is why a snapshot costs nothing once pruned.
+pub(crate) fn prune_snapshots_inner(
+    cwd: &str,
+    max_age_days: u32,
+    max_count: usize,
+) -> Result<usize, String> {
+    let all = list_snapshots_inner(cwd)?; // newest first
+    let cutoff = now_ms().saturating_sub(u64::from(max_age_days) * 86_400_000);
+
+    let mut deleted = 0usize;
+    for (idx, snap) in all.iter().enumerate() {
+        let too_many = idx >= max_count;
+        let too_old = snap.timestamp_ms < cutoff;
+        if !too_many && !too_old {
+            continue;
+        }
+        run(
+            cwd,
+            &[
+                "update-ref",
+                "-d",
+                &format!("{}/{}", SNAPSHOT_REF_PREFIX, snap.id),
+            ],
+        )?;
+        deleted += 1;
+    }
+    Ok(deleted)
 }
 
 #[cfg(test)]
@@ -453,5 +602,154 @@ mod tests {
         assert_eq!(list[0].label, "two");
         assert_eq!(list[1].id, first.id);
         assert_eq!(list[1].kind, "discard");
+    }
+
+    #[test]
+    fn restore_brings_back_worktree_untracked_and_deleted_files() {
+        let repo = TempRepo::new();
+        repo.write("a.txt", "v1\n");
+        repo.write("k.txt", "keep\n");
+        repo.git(&["add", "."]);
+        repo.git(&["commit", "-qm", "c1"]);
+        repo.write("a.txt", "dirty\n");
+        repo.write("u.txt", "untracked\n");
+
+        let snap = create_snapshot_inner(repo.cwd(), "manual", "before")
+            .unwrap()
+            .unwrap();
+
+        // Destructive op: clobber the tracked file, delete both the untracked
+        // file and a tracked one.
+        repo.write("a.txt", "clobbered\n");
+        std::fs::remove_file(repo.path.join("u.txt")).unwrap();
+        std::fs::remove_file(repo.path.join("k.txt")).unwrap();
+
+        let redo = restore_snapshot_inner(repo.cwd(), &snap.id).unwrap();
+        assert_eq!(redo.kind, "pre-restore");
+
+        assert_eq!(
+            std::fs::read_to_string(repo.path.join("a.txt")).unwrap(),
+            "dirty\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(repo.path.join("u.txt")).unwrap(),
+            "untracked\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(repo.path.join("k.txt")).unwrap(),
+            "keep\n"
+        );
+    }
+
+    #[test]
+    fn restore_rebuilds_conflict_stages() {
+        let repo = TempRepo::new();
+        repo.write("a.txt", "base\n");
+        repo.git(&["add", "."]);
+        repo.git(&["commit", "-qm", "base"]);
+        repo.git(&["checkout", "-qb", "feat"]);
+        repo.write("a.txt", "theirs\n");
+        repo.git(&["commit", "-qam", "theirs"]);
+        repo.git(&["checkout", "-q", "main"]);
+        repo.write("a.txt", "ours\n");
+        repo.git(&["commit", "-qam", "ours"]);
+        repo.git_may_fail(&["merge", "feat"]);
+
+        let snap = create_snapshot_inner(repo.cwd(), "resolution", "pre-resolve")
+            .unwrap()
+            .unwrap();
+
+        // Simulate an auto-resolution: clean content, staged, stages gone.
+        repo.write("a.txt", "resolved\n");
+        repo.git(&["add", "a.txt"]);
+        assert!(
+            String::from_utf8_lossy(&repo.git(&["ls-files", "-u"]).stdout)
+                .trim()
+                .is_empty()
+        );
+
+        restore_snapshot_inner(repo.cwd(), &snap.id).unwrap();
+
+        let staged = String::from_utf8_lossy(&repo.git(&["ls-files", "-u"]).stdout).to_string();
+        assert!(staged.contains(" 1\ta.txt"), "stages: {}", staged);
+        assert!(staged.contains(" 2\ta.txt"), "stages: {}", staged);
+        assert!(staged.contains(" 3\ta.txt"), "stages: {}", staged);
+
+        let content = std::fs::read_to_string(repo.path.join("a.txt")).unwrap();
+        assert!(content.contains("<<<<<<<"), "content: {}", content);
+    }
+
+    #[test]
+    fn restore_moves_head_back_after_a_reset() {
+        let repo = TempRepo::new();
+        repo.write("a.txt", "v1\n");
+        repo.git(&["add", "."]);
+        repo.git(&["commit", "-qm", "c1"]);
+        repo.write("a.txt", "v2\n");
+        repo.git(&["commit", "-qam", "c2"]);
+        let before = String::from_utf8_lossy(&repo.git(&["rev-parse", "HEAD"]).stdout)
+            .trim()
+            .to_string();
+
+        let snap = create_snapshot_inner(repo.cwd(), "reset", "before reset")
+            .unwrap()
+            .unwrap();
+        repo.git(&["reset", "--hard", "HEAD~1"]);
+
+        restore_snapshot_inner(repo.cwd(), &snap.id).unwrap();
+
+        let after = String::from_utf8_lossy(&repo.git(&["rev-parse", "HEAD"]).stdout)
+            .trim()
+            .to_string();
+        assert_eq!(after, before);
+        // Still on the branch, not detached.
+        let head_ref =
+            String::from_utf8_lossy(&repo.git(&["symbolic-ref", "--short", "HEAD"]).stdout)
+                .trim()
+                .to_string();
+        assert_eq!(head_ref, "main");
+    }
+
+    #[test]
+    fn prune_respects_count_cap_and_keeps_newest() {
+        let repo = TempRepo::new();
+        repo.write("a.txt", "v1\n");
+        repo.git(&["add", "."]);
+        repo.git(&["commit", "-qm", "c1"]);
+
+        let mut ids = Vec::new();
+        for i in 0..5 {
+            repo.write("a.txt", &format!("v{}\n", i));
+            ids.push(
+                create_snapshot_inner(repo.cwd(), "manual", "x")
+                    .unwrap()
+                    .unwrap()
+                    .id,
+            );
+        }
+
+        let deleted = prune_snapshots_inner(repo.cwd(), 365, 2).unwrap();
+        assert_eq!(deleted, 3);
+
+        let list = list_snapshots_inner(repo.cwd()).unwrap();
+        assert_eq!(list.len(), 2);
+        assert_eq!(list[0].id, ids[4]);
+        assert_eq!(list[1].id, ids[3]);
+    }
+
+    #[test]
+    fn prune_respects_age_cap() {
+        let repo = TempRepo::new();
+        repo.write("a.txt", "v1\n");
+        repo.git(&["add", "."]);
+        repo.git(&["commit", "-qm", "c1"]);
+        create_snapshot_inner(repo.cwd(), "manual", "x")
+            .unwrap()
+            .unwrap();
+
+        // Age cap of 0 days means "everything is stale".
+        let deleted = prune_snapshots_inner(repo.cwd(), 0, 100).unwrap();
+        assert_eq!(deleted, 1);
+        assert!(list_snapshots_inner(repo.cwd()).unwrap().is_empty());
     }
 }
