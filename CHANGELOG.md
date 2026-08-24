@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.8.0] - 2026-08-24
+
+### Added
+
+- **Time Machine — repo snapshots & global undo.** Every destructive operation (discard, reset, checkout, branch switch, bulk resolution apply) now captures a restorable snapshot first: the working tree including untracked files, the index, and conflict stages 1/2/3. Snapshots are written with git plumbing under `refs/gitwand/snapshots/`, so they cost nothing until git's own `gc` reclaims them and they are never pushed by the default refspec. Restoring uses `read-tree` rather than `checkout`, so it cannot refuse on a dirty tree, which is the state an undo has to recover from.
+- **Undo where the action happened.** A discard used to give no feedback at all. It now surfaces a single-slot toast with an "Undo" button and a `⌘Z` hint, which is what makes the safety net discoverable rather than a panel you have to remember exists.
+- **Global `⌘Z` / `⇧⌘Z`.** Outside the merge editor these rewind and replay repo operations. The keyboard path reports through the same toast the buttons use, so it says either "Restored" or "Nothing to undo" instead of failing silently.
+- **One timeline over two sources.** The existing rewind popover (`⌘⇧U`, and Actions > Rewind) now lists GitWand snapshots merged with git's reflog rather than the reflog alone, deduplicating the operations that produce both. A footer link opens a full-history modal with source filters. Restoring is itself undoable, since a `pre-restore` snapshot is taken first, and the confirmation says so.
+- **Retention settings** — enable/disable snapshots, an age cap (default 14 days) and a count cap (default 200), pruned on repo open rather than on a timer. Plus opt-in one-line AI snapshot labels, following the Quick Stash label pattern.
+- `snapshot_create` / `snapshot_list` / `snapshot_restore` / `snapshot_prune` Tauri commands, each with a real `dev-server.mjs` route and parity coverage.
+
+### Fixed
+
+- Snapshot refs are excluded from every `--all` history traversal GitWand runs, so the Git Tree, the hidden-commit count, the contributor shortlog and per-author line churn are unaffected. (A `git log --all` typed at the terminal still shows them, exactly as it shows `refs/stash`.)
+- Ref moves made by a restore carry an explicit reflog message. Without one git writes an empty reflog entry, which showed as a blank row in the timeline and as an unexplained line in the user's own `git reflog`.
+
 ## [3.7.2] - 2026-08-24
 
 ### Fixed

@@ -5,6 +5,28 @@ description: Release history for GitWand — the native Git client with AI confl
 
 # Changelog
 
+## v3.8.0 — August 2026
+
+Undo, for the parts of git that never had one.
+
+GitWand has had an undo stack since v1.2, but it was built on `git reflog`, and the reflog only knows about things that move a ref. Commit, merge, rebase, pull: recoverable. Everything else, which is most of what actually loses work, was not. Discard a file and it was gone. Reset with uncommitted changes and they were gone. Let the engine auto-apply resolutions across seven files and there was no way back to the conflict markers you started from.
+
+Time Machine closes that gap. Before every destructive operation, GitWand now captures a snapshot of the working tree, the index, and the conflict state, and hands you a way back.
+
+The capture is real git, not a copy of your folder somewhere. It writes the same kind of object graph `git stash create` does, anchored under a ref namespace of its own, which means it costs nothing beyond the objects themselves, it never touches your stash list, and git's own garbage collection reclaims it once the retention window closes. Two things it does that stash cannot: it captures untracked files, and it survives a conflicted index. Both matter, because discarding untracked work and rewinding a half-applied merge resolution are exactly the cases this exists for.
+
+Restoring goes back through plumbing rather than `checkout`, deliberately. A checkout refuses to run on a dirty working tree, which is precisely the state you are in when you need an undo.
+
+The part that took the longest to get right was not the mechanism but where to put it. GitWand already had a rewind popover, so adding a second Time Machine surface beside it would have split one mental action across two places. The popover keeps its trigger and its position; only its contents changed, from git's reflog alone to that reflog merged with the new snapshots, with the operations that produce both collapsed into one row. A link at the bottom opens the full history when you want it.
+
+More importantly, a safety net nobody knows about is not a safety net. Discarding a file gave no feedback whatsoever before this release. Now it says so, with an Undo button and a `⌘Z` hint sitting right where the action happened. `⌘Z` and `⇧⌘Z` work at the repo level too, and they answer back through the same toast, so the shortcut tells you what it did rather than appearing to do nothing.
+
+Restoring is itself undoable. A snapshot of the current state is taken before every restore, and the confirmation dialog says as much, which is the difference between this and `git reset --hard`.
+
+Snapshots are pruned on an age and a count cap, checked when you open a repo rather than on a timer. Everything is optional: turn snapshots off and the timeline falls back to exactly the reflog view of previous versions. There is also an opt-in AI labelling pass if you want one-line summaries in the timeline instead of the mechanical ones.
+
+None of this leaks into your history. GitWand excludes its own snapshot refs from every history traversal it runs, so the Git Tree, commit counts and contributor stats are untouched, and nothing is pushed.
+
 ## v3.7.2 — August 2026
 
 One fix, and an embarrassing one: the conflict predictor was wrong every single time, always in the same direction.
