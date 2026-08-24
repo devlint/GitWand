@@ -145,11 +145,23 @@ export function useTimeMachine() {
     await refresh(cwd);
   }
 
-  /** ⌘Z — restore the most recent restorable point. */
-  async function undoLast(cwd: string): Promise<void> {
+  /**
+   * ⌘Z — restore the most recent restorable point. Returns whether it did
+   * anything, so the caller can tell "restored" from "nothing to undo".
+   *
+   * Refreshes FIRST, and that is the whole point: discard / reset / checkout
+   * create their snapshot in Rust, never through `capture()`, so the cached
+   * list is stale right after the one operation ⌘Z exists to undo. Without
+   * this, the shortcut answered "nothing to undo" unless the user had opened
+   * the rewind popover at some earlier moment (caught in manual QA).
+   */
+  async function undoLast(cwd: string): Promise<boolean> {
+    if (!cwd) return false;
+    await refresh(cwd);
     const target = timeline.value.find((i) => i.restorable);
-    if (!target) return;
+    if (!target) return false;
     await restore(cwd, target);
+    return true;
   }
 
   /** ⇧⌘Z — go back to where the last restore started from. */

@@ -26,6 +26,8 @@ import {
 } from "../utils/backend";
 import { forgeCommitUrl } from "../utils/forgeUrls";
 import { useI18n } from "./useI18n";
+import { useSettings } from "./useSettings";
+import { useUndoToast } from "./useUndoToast";
 import { useTagSuggestion } from "./useTagSuggestion";
 import { useAIProvider } from "./useAIProvider";
 import { useBranchName } from "./useBranchName";
@@ -209,7 +211,11 @@ export function useCommitActions(deps: Deps) {
     if (!entry || !cwd) return;
     modal.value.busy = true;
     try {
-      await gitCheckoutCommit(cwd, entry.hashFull);
+      const snapshots = useSettings().settings.value.snapshotsEnabled;
+      await gitCheckoutCommit(cwd, entry.hashFull, snapshots);
+      if (snapshots) {
+        useUndoToast().show(t("timeMachine.toastCheckout", entry.hash));
+      }
       closeModal();
       await Promise.all([loadLog(), repoRefresh()]);
       loadBranches();
@@ -237,7 +243,11 @@ export function useCommitActions(deps: Deps) {
     if (!entry || !cwd) return;
     modal.value.busy = true;
     try {
-      await gitResetToCommit(cwd, entry.hashFull, modal.value.resetMode);
+      const snapshots = useSettings().settings.value.snapshotsEnabled;
+      await gitResetToCommit(cwd, entry.hashFull, modal.value.resetMode, snapshots);
+      if (snapshots) {
+        useUndoToast().show(t("timeMachine.toastReset", entry.hash));
+      }
       closeModal();
       // repoRefresh reloads staged/unstaged status — critical for --hard.
       await Promise.all([loadLog(), repoRefresh()]);

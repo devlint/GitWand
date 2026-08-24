@@ -2821,6 +2821,50 @@ function deleteReleaseNoteTemplate(id: string) {
               </div>
             </div>
 
+            <!-- ─── Time Machine (v3.8) ────────────────────── -->
+            <div class="sp-section-divider sp-section-divider--inner"></div>
+            <div class="sp-group">
+              <div class="sp-group__head">
+                <div class="sp-group__head-text">
+                  <span class="sp-group__label">{{ t('timeMachine.settingsTitle') }}</span>
+                  <span class="sp-group__sublabel">{{ t('timeMachine.subtitle') }}</span>
+                </div>
+              </div>
+
+              <div class="sp-row sp-row--checkbox">
+                <label class="sp-checkbox-label" for="setting-snapshots-enabled">
+                  <input id="setting-snapshots-enabled" type="checkbox" class="sp-checkbox"
+                    :checked="settings.snapshotsEnabled"
+                    @change="updateSetting('snapshotsEnabled', ($event.target as HTMLInputElement).checked)" />
+                  <span>{{ t('timeMachine.settingsEnabled') }}</span>
+                </label>
+                <span class="sp-hint">{{ t('timeMachine.settingsEnabledHint') }}</span>
+              </div>
+
+              <div class="sp-row" v-if="settings.snapshotsEnabled">
+                <label class="sp-label" for="setting-snapshot-retention">{{ t('timeMachine.settingsRetentionDays') }}</label>
+                <input id="setting-snapshot-retention" type="number" class="sp-input" min="1" max="365" step="1"
+                  :value="settings.snapshotRetentionDays"
+                  @input="updateSetting('snapshotRetentionDays', Number(($event.target as HTMLInputElement).value))" />
+              </div>
+
+              <div class="sp-row" v-if="settings.snapshotsEnabled">
+                <label class="sp-label" for="setting-snapshot-max">{{ t('timeMachine.settingsMaxCount') }}</label>
+                <input id="setting-snapshot-max" type="number" class="sp-input" min="10" max="2000" step="10"
+                  :value="settings.snapshotMaxCount"
+                  @input="updateSetting('snapshotMaxCount', Number(($event.target as HTMLInputElement).value))" />
+              </div>
+
+              <div class="sp-row sp-row--checkbox" v-if="settings.snapshotsEnabled">
+                <label class="sp-checkbox-label" for="setting-snapshot-ai-labels">
+                  <input id="setting-snapshot-ai-labels" type="checkbox" class="sp-checkbox"
+                    :checked="settings.snapshotAiLabels"
+                    @change="updateSetting('snapshotAiLabels', ($event.target as HTMLInputElement).checked)" />
+                  <span>{{ t('timeMachine.settingsAiLabels') }}</span>
+                </label>
+              </div>
+            </div>
+
             <!-- ─── Prompt Presets (v2.13) ─────────────────── -->
             <div class="sp-section-divider sp-section-divider--inner"></div>
             <div class="sp-group">
