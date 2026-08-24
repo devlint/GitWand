@@ -349,6 +349,25 @@ function saveSettings(s: Settings) {
 
 const settings = ref<Settings>(loadSettings());
 
+/**
+ * Numeric settings whose degenerate values are destructive, clamped at the
+ * source. A `<input type="number">` reports `""` while the user is retyping,
+ * and `Number("")` is `0` — which for the snapshot retention fields means
+ * "delete every snapshot on the next repo open". `min`/`max` attributes do
+ * not prevent that: nothing validates on `input`.
+ */
+function updateClampedSetting<K extends keyof Settings>(
+  key: K,
+  raw: string,
+  min: number,
+  max: number,
+) {
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return; // mid-edit empty field: keep the old value
+  const clamped = Math.min(max, Math.max(min, Math.round(parsed)));
+  updateSetting(key, clamped as Settings[K]);
+}
+
 function updateSetting<K extends keyof Settings>(key: K, value: Settings[K]) {
   settings.value[key] = value;
   saveSettings(settings.value);
@@ -2845,14 +2864,14 @@ function deleteReleaseNoteTemplate(id: string) {
                 <label class="sp-label" for="setting-snapshot-retention">{{ t('timeMachine.settingsRetentionDays') }}</label>
                 <input id="setting-snapshot-retention" type="number" class="sp-input" min="1" max="365" step="1"
                   :value="settings.snapshotRetentionDays"
-                  @input="updateSetting('snapshotRetentionDays', Number(($event.target as HTMLInputElement).value))" />
+                  @input="updateClampedSetting('snapshotRetentionDays', ($event.target as HTMLInputElement).value, 1, 365)" />
               </div>
 
               <div class="sp-row" v-if="settings.snapshotsEnabled">
                 <label class="sp-label" for="setting-snapshot-max">{{ t('timeMachine.settingsMaxCount') }}</label>
                 <input id="setting-snapshot-max" type="number" class="sp-input" min="10" max="2000" step="10"
                   :value="settings.snapshotMaxCount"
-                  @input="updateSetting('snapshotMaxCount', Number(($event.target as HTMLInputElement).value))" />
+                  @input="updateClampedSetting('snapshotMaxCount', ($event.target as HTMLInputElement).value, 10, 2000)" />
               </div>
 
               <div class="sp-row sp-row--checkbox" v-if="settings.snapshotsEnabled">

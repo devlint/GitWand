@@ -385,14 +385,35 @@ pub(crate) fn restore_snapshot_inner(cwd: &str, id: &str) -> Result<SnapshotMeta
     let _ = std::fs::remove_file(&info_path);
     applied?;
 
-    // ── 4. Merge state. `read-tree` restores stages but not MERGE_HEAD, so a
-    //    snapshot taken mid-merge would otherwise come back as a plain dirty
-    //    tree with no "merge in progress" banner.
-    if let Some(ref mh) = target.merge_head {
-        let merge_head_path = dir.join("MERGE_HEAD");
-        if !merge_head_path.exists() {
+    // ── 4. Merge state, made to MATCH the snapshot in both directions.
+    //
+    //    `read-tree` restores index stages but knows nothing about MERGE_HEAD,
+    //    so this has to be driven explicitly. Writing it when the snapshot had
+    //    one is the obvious half; clearing it when the snapshot did NOT is the
+    //    half that matters just as much. Rewinding past the start of a merge
+    //    while leaving MERGE_HEAD on disk makes `git status` report "you are
+    //    still merging" over a tree that no longer contains the merge, and
+    //    turns the next commit into a merge commit that silently re-merges the
+    //    branch the user just undid.
+    let merge_head_path = dir.join("MERGE_HEAD");
+    match target.merge_head {
+        Some(ref mh) => {
             std::fs::write(&merge_head_path, format!("{}\n", mh))
                 .map_err(|e| format!("failed to restore MERGE_HEAD: {}", e))?;
+        }
+        None => {
+            if merge_head_path.exists() {
+                std::fs::remove_file(&merge_head_path)
+                    .map_err(|e| format!("failed to clear MERGE_HEAD: {}", e))?;
+            }
+            // MERGE_MSG is git's prefilled merge commit message. Left behind,
+            // it silently becomes the default message for the user's next,
+            // unrelated commit.
+            let merge_msg_path = dir.join("MERGE_MSG");
+            if merge_msg_path.exists() {
+                std::fs::remove_file(&merge_msg_path)
+                    .map_err(|e| format!("failed to clear MERGE_MSG: {}", e))?;
+            }
         }
     }
 
@@ -687,6 +708,83 @@ mod tests {
 
         let content = std::fs::read_to_string(repo.path.join("a.txt")).unwrap();
         assert!(content.contains("<<<<<<<"), "content: {}", content);
+    }
+
+    #[test]
+    fn restore_clears_a_merge_started_after_the_snapshot() {
+        let repo = TempRepo::new();
+        repo.write("a.txt", "base\n");
+        repo.git(&["add", "."]);
+        repo.git(&["commit", "-qm", "base"]);
+        repo.git(&["checkout", "-qb", "feat"]);
+        repo.write("a.txt", "theirs\n");
+        repo.git(&["commit", "-qam", "theirs"]);
+        repo.git(&["checkout", "-q", "main"]);
+        repo.write("a.txt", "ours\n");
+        repo.git(&["commit", "-qam", "ours"]);
+
+        // Snapshot taken with NO merge in progress.
+        let snap = create_snapshot_inner(repo.cwd(), "manual", "before merge")
+            .unwrap()
+            .unwrap();
+        assert!(snap.merge_head.is_none());
+
+        // The user then starts a merge that conflicts.
+        repo.git_may_fail(&["merge", "feat"]);
+        let dir = repo.path.join(".git");
+        assert!(
+            dir.join("MERGE_HEAD").exists(),
+            "setup: merge should be in progress"
+        );
+
+        restore_snapshot_inner(repo.cwd(), &snap.id).unwrap();
+
+        // Rewinding past the merge must also rewind the merge STATE. Leaving
+        // MERGE_HEAD behind makes `git status` say "you are still merging" and
+        // turns the next commit into a merge commit that silently re-merges
+        // the branch the user just undid.
+        assert!(
+            !dir.join("MERGE_HEAD").exists(),
+            "MERGE_HEAD survived a restore to a pre-merge snapshot"
+        );
+        assert!(!dir.join("MERGE_MSG").exists(), "MERGE_MSG survived too");
+        assert_eq!(
+            std::fs::read_to_string(repo.path.join("a.txt")).unwrap(),
+            "ours\n"
+        );
+    }
+
+    #[test]
+    fn restore_brings_back_a_merge_that_was_concluded() {
+        let repo = TempRepo::new();
+        repo.write("a.txt", "base\n");
+        repo.git(&["add", "."]);
+        repo.git(&["commit", "-qm", "base"]);
+        repo.git(&["checkout", "-qb", "feat"]);
+        repo.write("a.txt", "theirs\n");
+        repo.git(&["commit", "-qam", "theirs"]);
+        repo.git(&["checkout", "-q", "main"]);
+        repo.write("a.txt", "ours\n");
+        repo.git(&["commit", "-qam", "ours"]);
+        repo.git_may_fail(&["merge", "feat"]);
+
+        // Snapshot taken mid-merge, then the user concludes the merge.
+        let snap = create_snapshot_inner(repo.cwd(), "resolution", "mid-merge")
+            .unwrap()
+            .unwrap();
+        assert!(snap.merge_head.is_some());
+        repo.write("a.txt", "resolved\n");
+        repo.git(&["add", "a.txt"]);
+        repo.git(&["commit", "-qm", "merged"]);
+        let dir = repo.path.join(".git");
+        assert!(!dir.join("MERGE_HEAD").exists(), "setup: merge concluded");
+
+        restore_snapshot_inner(repo.cwd(), &snap.id).unwrap();
+
+        assert!(
+            dir.join("MERGE_HEAD").exists(),
+            "restoring a mid-merge snapshot must put the merge back in progress"
+        );
     }
 
     #[test]

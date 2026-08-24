@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Snapshot refs are excluded from every `--all` history traversal GitWand runs, so the Git Tree, the hidden-commit count, the contributor shortlog and per-author line churn are unaffected. (A `git log --all` typed at the terminal still shows them, exactly as it shows `refs/stash`.)
 - Ref moves made by a restore carry an explicit reflog message. Without one git writes an empty reflog entry, which showed as a blank row in the timeline and as an unexplained line in the user's own `git reflog`.
+- Restoring a snapshot taken *before* a merge started now clears `MERGE_HEAD` and `MERGE_MSG` as well. Previously the merge state survived the rewind, so `git status` reported "you are still merging" over a tree that no longer contained the merge, and the next commit became a merge commit that silently re-merged the branch the user had just undone.
+- The snapshot retention fields refuse a value that would delete every snapshot. Clearing the input yields `Number("") === 0`, which was persisted verbatim and made the next prune wipe the whole undo history; the value is now clamped at the input and the destructive case is rejected again before the backend is called.
 
 ## [3.7.2] - 2026-08-24
 

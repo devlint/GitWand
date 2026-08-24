@@ -81,6 +81,13 @@ export function useSnapshots() {
   }
 
   async function prune(cwd: string, maxAgeDays: number, maxCount: number): Promise<number> {
+    // Guard the destructive degenerate case. Clearing the Settings number
+    // field yields `Number("") === 0`, which is persisted verbatim, and a
+    // 0-day / 0-count retention tells the backend to delete every snapshot in
+    // the repo — wiping the exact history this feature exists to keep. Nobody
+    // configuring a safety net means that, so refuse rather than obey.
+    if (!Number.isFinite(maxAgeDays) || !Number.isFinite(maxCount)) return 0;
+    if (maxAgeDays < 1 || maxCount < 1) return 0;
     try {
       const deleted = await snapshotPrune(cwd, maxAgeDays, maxCount);
       if (deleted > 0) await refresh(cwd);

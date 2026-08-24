@@ -88,6 +88,20 @@ describe("useSnapshots", () => {
     expect(s.lastError.value).toContain("not found");
   });
 
+  it("refuses to prune with a retention that would delete everything", async () => {
+    // Clearing the Settings number field yields `Number("") === 0`, which is
+    // persisted verbatim. A 0-day / 0-count retention means "delete every
+    // snapshot", which is never what someone configuring a safety net wants,
+    // so the destructive value is rejected here rather than obeyed.
+    const s = useSnapshots();
+
+    expect(await s.prune("/repo", 0, 200)).toBe(0);
+    expect(await s.prune("/repo", 14, 0)).toBe(0);
+    expect(await s.prune("/repo", Number.NaN, 200)).toBe(0);
+    expect(await s.prune("/repo", -1, 200)).toBe(0);
+    expect(backend.snapshotPrune).not.toHaveBeenCalled();
+  });
+
   it("prune only re-lists when something was actually deleted", async () => {
     const s = useSnapshots();
 

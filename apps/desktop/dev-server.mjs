@@ -511,9 +511,17 @@ function restoreSnapshot(cwd, id) {
     try { unlinkSync(infoPath); } catch { /* already gone */ }
   }
 
+  // Merge state, made to match the snapshot in BOTH directions — see the
+  // step 4 comment in snapshot.rs. Clearing it when the snapshot had no merge
+  // is what stops a rewind past a merge from leaving the repo claiming the
+  // merge is still in progress.
+  const mergeHeadPath = join(dir, "MERGE_HEAD");
   if (target.mergeHead) {
-    const p = join(dir, "MERGE_HEAD");
-    if (!existsSync(p)) writeFileSync(p, `${target.mergeHead}\n`);
+    writeFileSync(mergeHeadPath, `${target.mergeHead}\n`);
+  } else {
+    if (existsSync(mergeHeadPath)) unlinkSync(mergeHeadPath);
+    const mergeMsgPath = join(dir, "MERGE_MSG");
+    if (existsSync(mergeMsgPath)) unlinkSync(mergeMsgPath);
   }
   return redo;
 }
