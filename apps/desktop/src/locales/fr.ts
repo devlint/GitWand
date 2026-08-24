@@ -1795,6 +1795,8 @@ const fr: Locale = {
     kindReset: "Reset",
     kindCheckout: "Checkout",
     kindResolution: "Résolution appliquée",
+    aiLabel: "Résumer avec l'IA",
+    aiLabelPending: "Résumé en cours…",
     toastUndo: "Annuler",
     toastDiscard: "{0} fichier(s) abandonné(s)",
     toastReset: "Reset vers {0}",

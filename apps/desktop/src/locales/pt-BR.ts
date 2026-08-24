@@ -1786,6 +1786,8 @@ const ptBR: Locale = {
     kindReset: "Reset",
     kindCheckout: "Checkout",
     kindResolution: "Resolução aplicada",
+    aiLabel: "Resumir com IA",
+    aiLabelPending: "Resumindo…",
     toastUndo: "Desfazer",
     toastDiscard: "{0} arquivo(s) descartado(s)",
     toastReset: "Reset para {0}",

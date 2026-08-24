@@ -1772,6 +1772,8 @@ const zhCN: Locale = {
     kindReset: "重置",
     kindCheckout: "切换",
     kindResolution: "已应用解决方案",
+    aiLabel: "用 AI 总结",
+    aiLabelPending: "正在总结…",
     toastUndo: "撤销",
     toastDiscard: "已丢弃 {0} 个文件",
     toastReset: "已重置到 {0}",

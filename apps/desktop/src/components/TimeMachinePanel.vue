@@ -5,6 +5,7 @@ import { useTimeMachine, type TimelineItem } from "../composables/useTimeMachine
 import { useI18n } from "../composables/useI18n";
 import { useSettings } from "../composables/useSettings";
 import { formatRelativeAge } from "../utils/relativeTime";
+import { useSnapshotLabels } from "../composables/useSnapshotLabels";
 
 /**
  * Time Machine (v3.8) — the full chronological history of the repo, merging
@@ -28,6 +29,7 @@ const { settings } = useSettings();
 const tm = useTimeMachine();
 
 const askConfirm = inject<(options: any) => Promise<boolean>>("askConfirm");
+const aiLabels = useSnapshotLabels();
 
 type Filter = "all" | "snapshot" | "reflog";
 const filter = ref<Filter>("all");
@@ -44,6 +46,10 @@ const items = computed(() =>
  */
 function primary(item: TimelineItem): string {
   if (item.source === "reflog") return item.label;
+  // An AI label, when the user asked for one, replaces the mechanical kind:
+  // it is the more specific description of the same point.
+  const ai = item.snapshot ? aiLabels.labels.value[item.snapshot.id] : undefined;
+  if (ai) return ai;
   const map: Record<string, string> = {
     manual: t("timeMachine.kindManual"),
     discard: t("timeMachine.kindDiscard"),
@@ -93,7 +99,10 @@ async function onRestore(item: TimelineItem) {
   }
 }
 
-onMounted(() => tm.refresh(props.cwd));
+onMounted(() => {
+  void tm.refresh(props.cwd);
+  void aiLabels.load(props.cwd);
+});
 watch(
   () => props.cwd,
   (next) => {
@@ -151,6 +160,16 @@ watch(
           <div class="tm-label">{{ primary(item) }}</div>
           <div class="tm-detail muted">{{ detail(item) }}</div>
         </div>
+        <button
+          v-if="settings.snapshotAiLabels && item.snapshot && !aiLabels.labels.value[item.snapshot.id]"
+          class="tm-ai"
+          :disabled="aiLabels.pending.value.has(item.snapshot.id)"
+          @click="aiLabels.generate(cwd, item.snapshot)"
+        >
+          {{ aiLabels.pending.value.has(item.snapshot.id)
+             ? t('timeMachine.aiLabelPending')
+             : t('timeMachine.aiLabel') }}
+        </button>
         <button
           v-if="item.restorable"
           class="tm-restore"
@@ -218,4 +237,5 @@ watch(
   white-space: nowrap;
 }
 .tm-restore { font-size: 12px; padding: 2px 10px; }
+.tm-ai { font-size: 12px; padding: 2px 10px; color: var(--color-text-muted); }
 </style>

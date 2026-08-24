@@ -1819,6 +1819,8 @@ const en = {
     kindReset: "Reset",
     kindCheckout: "Checkout",
     kindResolution: "Resolution applied",
+    aiLabel: "Summarise with AI",
+    aiLabelPending: "Summarising…",
     toastUndo: "Undo",
     toastDiscard: "Discarded {0} file(s)",
     toastReset: "Reset to {0}",

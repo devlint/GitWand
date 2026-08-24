@@ -1786,6 +1786,8 @@ const es: Locale = {
     kindReset: "Reset",
     kindCheckout: "Checkout",
     kindResolution: "Resolución aplicada",
+    aiLabel: "Resumir con IA",
+    aiLabelPending: "Resumiendo…",
     toastUndo: "Deshacer",
     toastDiscard: "{0} archivo(s) descartado(s)",
     toastReset: "Reset a {0}",
