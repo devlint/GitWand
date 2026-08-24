@@ -6,6 +6,12 @@ description: Technical articles on Git workflows, AI-powered conflict resolution
 # Blog
 
 <div class="blog-list">
+  <a href="/blog/from-four-tools-to-one" class="blog-card">
+    <div class="blog-meta">August 24, 2026 · 12 min read</div>
+    <h2 class="blog-title">From four tools to one: rebuilding the Git workflow you already have</h2>
+    <p class="blog-excerpt">Most people run Git across four applications: a desktop cockpit, a terminal, an IDE merge editor, and a browser tab. A tool-by-tool map of what each one buys you and where that same job lives in GitWand, with one PHP rebase played twice: the four-tool way, then end to end in GitWand (predictor first, <strong>Auto-resolve</strong> through the loop, merge editor for the one conflict that was ever real). Plus the receipts behind "deterministic", measured by replaying <strong>2,000 real merges</strong> (a residual of 104 hunks, and the two patterns that measurement talked us out of building), and the one job that should stay in your IDE.</p>
+    <span class="blog-read">Read article →</span>
+  </a>
   <a href="/blog/why-gitwand-is-rust-not-electron" class="blog-card">
     <div class="blog-meta">August 21, 2026 · 10 min read</div>
     <h2 class="blog-title">Why GitWand is Rust, not Electron: what native performance actually buys a Git client</h2>

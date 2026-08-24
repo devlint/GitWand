@@ -192,6 +192,7 @@ export default defineConfig({
           text: 'Blog',
           items: [
             { text: 'All articles', link: '/blog/' },
+            { text: 'From four tools to one', link: '/blog/from-four-tools-to-one' },
             { text: 'Why GitWand is Rust, not Electron', link: '/blog/why-gitwand-is-rust-not-electron' },
             { text: 'PR Review 2.0 + secrets scanner (v3.5)', link: '/blog/v3-5-pr-review-2-secrets-scanner' },
             { text: 'Integrated terminal + one-click AI tasks (v3.2)', link: '/blog/v3-2-integrated-terminal-ai-tasks' },

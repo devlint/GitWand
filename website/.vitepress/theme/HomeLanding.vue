@@ -891,7 +891,7 @@ function cellClass(v: CompareValue | undefined): string {
         <div class="conflict-demo">
           <!-- Before -->
           <div class="conflict-panel">
-            <div class="conflict-panel-head conflict-panel-head--before">
+            <div class="conflict-panel-head">
               <span class="panel-dot panel-dot--red"></span>
               {{ t.conflictBefore }}
             </div>
@@ -912,7 +912,7 @@ function cellClass(v: CompareValue | undefined): string {
 
           <!-- After -->
           <div class="conflict-panel">
-            <div class="conflict-panel-head conflict-panel-head--after">
+            <div class="conflict-panel-head">
               <span class="panel-dot panel-dot--green"></span>
               {{ t.conflictAfter }}
             </div>
@@ -1232,10 +1232,10 @@ function cellClass(v: CompareValue | undefined): string {
         <div class="blog-teaser-header">
           <span class="blog-teaser-label">From the blog</span>
         </div>
-        <a href="/blog/v3-5-pr-review-2-secrets-scanner" class="blog-teaser-card">
-          <div class="blog-teaser-meta">July 10, 2026 · 9 min read</div>
-          <h3 class="blog-teaser-title">PR Review 2.0, a local secrets scanner, and smarter PR badges</h3>
-          <p class="blog-teaser-excerpt">v3.5 rebuilds in-app PR review around a keyboard-first flow and a local AI pre-review pipeline, adds a zero-network pre-commit secrets scanner, and fixes branch badges that only ever saw the first page of open PRs.</p>
+        <a href="/blog/from-four-tools-to-one" class="blog-teaser-card">
+          <div class="blog-teaser-meta">August 24, 2026 · 12 min read</div>
+          <h3 class="blog-teaser-title">From four tools to one: rebuilding the Git workflow you already have</h3>
+          <p class="blog-teaser-excerpt">A desktop cockpit, a terminal, an IDE merge editor, a browser tab: nobody chose that workflow, it accumulated. The same PHP rebase played twice, the receipts behind "deterministic" (2,000 real merges replayed), and the one job that should stay in your IDE.</p>
           <span class="blog-teaser-cta">Read article →</span>
         </a>
       </div>
@@ -1429,11 +1429,12 @@ function cellClass(v: CompareValue | undefined): string {
   font-size: 16px;
   margin: 0 0 52px;
 }
+/* Brand accent on the second line of the hero H1. Solid, not clipped-gradient
+   text: a transparent text fill paints nothing wherever `background-clip: text`
+   isn't honoured (forced-colors, print), and the sweep bought nothing the brand
+   purple doesn't already carry. */
 .gradient {
-  background: linear-gradient(135deg, var(--gw-purple-light), var(--gw-green));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: var(--gw-purple-light);
 }
 .badge {
   display: inline-block;
@@ -1914,10 +1915,7 @@ function cellClass(v: CompareValue | undefined): string {
 .stat-n {
   font-size: 38px;
   font-weight: 800;
-  background: linear-gradient(135deg, var(--gw-purple-light), var(--gw-green));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: var(--gw-purple-light);
   line-height: 1;
 }
 .stat-l {
@@ -1959,8 +1957,6 @@ function cellClass(v: CompareValue | undefined): string {
   border-bottom: 1px solid rgba(255,255,255,0.05);
   color: var(--gw-text-muted);
 }
-.conflict-panel-head--before { border-left: 3px solid #f38ba8; }
-.conflict-panel-head--after  { border-left: 3px solid #10B981; }
 .panel-dot {
   width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
 }
@@ -3082,10 +3078,7 @@ function cellClass(v: CompareValue | undefined): string {
   font-size: 30px;
   font-weight: 800;
   line-height: 1;
-  background: linear-gradient(135deg, var(--gw-purple-light), var(--gw-green));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: var(--gw-purple-light);
   letter-spacing: -0.02em;
 }
 .hl-pillar__stat-n--small {
