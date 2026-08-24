@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.7.2] - 2026-08-24
+
+### Fixed
+
+- **The conflict predictor reported 0% auto-resolvable on every conflict.** `gitwand preview --onto=<ref>` (and the MCP `gitwand_status` / `gitwand_preview_merge` tools) called `resolve()` with `{ explainOnly: true }` and then read `stats.autoResolved`. That flag short-circuits `resolveHunk()` before the format-aware dispatch and the confidence gate, returning `lines: null` for every hunk, so `autoResolved` was structurally always `0`. Every file showed `0/N auto-resolvable` and every operation came back `Risk: HIGH`, whatever the engine could actually do. On a real 4-file rebase the predictor now reports `6/7` where it previously reported `0/7`. These three call sites predict over in-memory content and never write, so `explainOnly` bought nothing. The desktop merge preview goes through `useMergePreview` and was never affected.
+
 ## [3.7.1] - 2026-08-21
 
 ### Added
@@ -1342,6 +1348,7 @@ Design-system foundations — the app header and every overlay now ride on a sha
 - 28 tests covering all patterns + real-world scenarios (package.json, Laravel routes, Vue SFC, CSS, .env files)
 
 [Unreleased]: https://github.com/devlint/GitWand/compare/v3.7.0...HEAD
+[3.7.2]: https://github.com/devlint/GitWand/compare/v3.7.1...v3.7.2
 [3.7.1]: https://github.com/devlint/GitWand/compare/v3.7.0...v3.7.1
 [3.7.0]: https://github.com/devlint/GitWand/compare/v3.6.6...v3.7.0
 [3.6.6]: https://github.com/devlint/GitWand/compare/v3.6.5...v3.6.6

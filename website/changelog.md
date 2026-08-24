@@ -5,6 +5,18 @@ description: Release history for GitWand — the native Git client with AI confl
 
 # Changelog
 
+## v3.7.2 — August 2026
+
+One fix, and an embarrassing one: the conflict predictor was wrong every single time, always in the same direction.
+
+`gitwand preview --onto=main` exists to answer one question before you start a rebase or a merge: how much of this can GitWand handle on its own? It was answering "none of it". Every file came back as 0 auto-resolvable and every operation came back rated HIGH risk, regardless of what the engine would happily resolve a second later if you ran `gitwand resolve` on the very same conflicts.
+
+The cause was one option passed at the wrong layer. The predictor asked the engine to classify the conflicts without applying anything, which is the right instinct, since a prediction has no business touching your files. But that mode returns early, before the format-aware resolvers and the confidence gate ever run, so the number of resolvable conflicts it reported was structurally zero rather than measured. Prediction and resolution were reading the same engine and disagreeing completely.
+
+On the four-file PHP rebase used to verify the fix, the predictor now reports 6 of 7 conflicts auto-resolvable, with the one file that genuinely needs a human sitting at 0 of 1. The same repo reported 0 of 7 before.
+
+Two MCP tools had the same flaw, `gitwand_status` and `gitwand_preview_merge`, so a coding agent asking GitWand what it could resolve was told "nothing" and presumably went off to do the work itself. The desktop merge preview takes a different path and was never affected.
+
 ## v3.7.1 — August 2026
 
 [Cursor Origin](https://cursor.com/docs/origin) is Cursor's git forge, still in early beta, and GitWand had never heard of it: a repo with an `origin.cursor.com` remote showed up as an unrecognized forge, and opening the PR panel fired off GitHub CLI calls that failed with a baffling GitHub auth error, on a repo that has nothing to do with GitHub. GitWand now recognizes Origin remotes for what they are. This is deliberately detection only, not a full integration: Origin's API currently only documents an app-auth model built for server-to-server access rather than a desktop client, and it's still moving underneath its beta tag, so a real `OriginProvider` is on hold until that settles. In the meantime, the PR panel is honest about it instead of pretending: it offers to open the repo on the web, hides both "New PR" buttons instead of leaving them to fail, and Today no longer suggests connecting an account type that doesn't exist for this forge. Everything else, clone, push, pull, merges, and the whole conflict-resolution engine, already worked fine on an Origin repo and needed no changes; none of it goes through a forge integration in the first place.
