@@ -227,7 +227,11 @@ function buildFilePreview(content: string, file: string): {
   remaining: number;
   percentage: number;
 } {
-  const result = resolve(content, file, { explainOnly: true });
+  // NOT `explainOnly`: that flag short-circuits `resolveHunk` before the format-aware
+  // dispatch and the confidence gate, so every hunk comes back unresolved and
+  // `stats.autoResolved` is always 0 — the predictor would report 0% resolvable and
+  // HIGH risk on every conflict. This runs on a temp-dir merge, nothing is written.
+  const result = resolve(content, file);
   const pct =
     result.stats.totalConflicts > 0
       ? Math.round((result.stats.autoResolved / result.stats.totalConflicts) * 100)
