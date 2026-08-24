@@ -10,7 +10,7 @@
 
 import { createServer } from "node:http";
 import { execSync, execFileSync, spawnSync, spawn } from "node:child_process";
-import { readFileSync, writeFileSync, readdirSync, statSync, existsSync, unlinkSync, realpathSync, renameSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync, statSync, existsSync, unlinkSync, realpathSync, renameSync, mkdirSync, mkdtempSync, rmSync, copyFileSync } from "node:fs";
 import { resolve, join, dirname, basename, sep, isAbsolute } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { Socket } from "node:net";
@@ -371,6 +371,161 @@ function parseFileLog(raw) {
     });
   }
   return entries;
+}
+
+// ─── Snapshot helpers (v3.8 Time Machine) ────────────────────
+//
+// Node port of `src-tauri/src/git/snapshot.rs`. Both implementations read and
+// write the same `refs/gitwand/snapshots/*` object graph, and the parity
+// harness (`tests/parity/snapshot-list.test.mjs`) compares them, so any
+// behaviour change must land in both.
+
+function snapshotGitDir(cwd) {
+  return execFileSync(GIT, ["rev-parse", "--absolute-git-dir"], { cwd, encoding: "utf-8" }).trim();
+}
+
+function createSnapshot(cwd, kind, label) {
+  const g = (args, opts = {}) =>
+    execFileSync(GIT, args, { cwd, encoding: "utf-8", ...opts }).trim();
+
+  let headSha;
+  try {
+    headSha = g(["rev-parse", "HEAD"]);
+  } catch {
+    return null; // no HEAD yet
+  }
+  let headRef = null;
+  try {
+    headRef = g(["symbolic-ref", "--quiet", "--short", "HEAD"]) || null;
+  } catch { /* detached */ }
+  let mergeHead = null;
+  try {
+    mergeHead = g(["rev-parse", "--quiet", "--verify", "MERGE_HEAD"]) || null;
+  } catch { /* not merging */ }
+
+  const dir = snapshotGitDir(cwd);
+  const stamp = `${process.pid}-${snapshotStampMs()}`;
+  // Scratch files live under the git dir: inside the worktree, `add -A .`
+  // would add them to the snapshot tree.
+  const tmpIndex = join(dir, `gitwand-snapshot-index-${stamp}`);
+  const infoPath = join(dir, `gitwand-snapshot-info-${stamp}`);
+  const metaIndex = join(dir, `gitwand-snapshot-meta-${stamp}`);
+
+  try {
+    const realIndex = join(dir, "index");
+    if (existsSync(realIndex)) copyFileSync(realIndex, tmpIndex);
+    const withIndex = { env: { ...process.env, GIT_INDEX_FILE: tmpIndex } };
+    g(["add", "-A", "."], withIndex);
+    const worktreeTree = g(["write-tree"], withIndex);
+
+    // `write-tree` on the real index fails on a conflicted index; `ls-files -s`
+    // round-trips stages 1/2/3 through `update-index --index-info`.
+    writeFileSync(infoPath, g(["ls-files", "-s"]) + "\n");
+    const infoBlob = g(["hash-object", "-w", infoPath]);
+    const withMeta = { env: { ...process.env, GIT_INDEX_FILE: metaIndex } };
+    g(["update-index", "--add", "--cacheinfo", `100644,${infoBlob},index-info`], withMeta);
+    const metaTree = g(["write-tree"], withMeta);
+    const metaCommit = g(["commit-tree", metaTree, "-m", "gitwand-snapshot-meta"]);
+
+    const timestampMs = snapshotStampMs();
+    const meta = { id: "", commit: "", kind, label, timestampMs, headSha, headRef, mergeHead };
+    const commit = g([
+      "commit-tree", worktreeTree, "-p", headSha, "-p", metaCommit, "-m", JSON.stringify(meta),
+    ]);
+    const id = `${timestampMs}-${commit.slice(0, 8)}`;
+    g(["update-ref", `refs/gitwand/snapshots/${id}`, commit]);
+    return { ...meta, id, commit };
+  } finally {
+    for (const p of [tmpIndex, infoPath, metaIndex]) {
+      try { unlinkSync(p); } catch { /* already gone */ }
+    }
+  }
+}
+
+// Mirrors `stamp_ms()` in snapshot.rs: ids must be strictly increasing, or two
+// snapshots created inside the same millisecond sort arbitrarily.
+let _snapshotLastStampMs = 0;
+function snapshotStampMs() {
+  const now = Date.now();
+  _snapshotLastStampMs = now > _snapshotLastStampMs ? now : _snapshotLastStampMs + 1;
+  return _snapshotLastStampMs;
+}
+
+function listSnapshots(cwd) {
+  const raw = execFileSync(
+    GIT,
+    [
+      "for-each-ref",
+      "--format=%(refname:lstrip=3)\x1f%(objectname)\x1f%(contents:subject)\x1e",
+      "refs/gitwand/snapshots",
+    ],
+    { cwd, encoding: "utf-8" },
+  );
+  const out = [];
+  for (const record of raw.split("\x1e")) {
+    const trimmed = record.replace(/^[\r\n]+|[\r\n]+$/g, "");
+    if (!trimmed) continue;
+    const [id, commit, subject] = trimmed.split("\x1f");
+    if (!subject) continue;
+    try {
+      out.push({ ...JSON.parse(subject), id, commit });
+    } catch { /* not one of ours */ }
+  }
+  out.sort((a, b) => b.timestampMs - a.timestampMs || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
+  return out;
+}
+
+function restoreSnapshot(cwd, id) {
+  const g = (args, opts = {}) =>
+    execFileSync(GIT, args, { cwd, encoding: "utf-8", ...opts }).trim();
+  const target = listSnapshots(cwd).find((s) => s.id === id);
+  if (!target) throw new Error(`snapshot ${id} not found`);
+
+  const redo = createSnapshot(cwd, "pre-restore", `before restoring ${id}`);
+
+  // Plumbing, not `checkout`: a checkout would refuse on a dirty tree, which
+  // is exactly the state an undo has to recover from.
+  if (target.headRef) {
+    const full = `refs/heads/${target.headRef}`;
+    g(["update-ref", full, target.headSha]);
+    g(["symbolic-ref", "HEAD", full]);
+  } else {
+    g(["update-ref", "--no-deref", "HEAD", target.headSha]);
+  }
+
+  g(["read-tree", "-u", "--reset", `${target.commit}^{tree}`]);
+
+  const dir = snapshotGitDir(cwd);
+  const infoPath = join(dir, `gitwand-snapshot-restore-${process.pid}-${snapshotStampMs()}`);
+  try {
+    writeFileSync(infoPath, g(["cat-file", "blob", `${target.commit}^2:index-info`]) + "\n");
+    g(["read-tree", "--empty"]);
+    execFileSync(GIT, ["update-index", "--index-info"], {
+      cwd,
+      encoding: "utf-8",
+      input: readFileSync(infoPath, "utf-8"),
+    });
+  } finally {
+    try { unlinkSync(infoPath); } catch { /* already gone */ }
+  }
+
+  if (target.mergeHead) {
+    const p = join(dir, "MERGE_HEAD");
+    if (!existsSync(p)) writeFileSync(p, `${target.mergeHead}\n`);
+  }
+  return redo;
+}
+
+function pruneSnapshots(cwd, maxAgeDays, maxCount) {
+  const all = listSnapshots(cwd);
+  const cutoff = Date.now() - maxAgeDays * 86_400_000;
+  let deleted = 0;
+  all.forEach((snap, idx) => {
+    if (idx < maxCount && snap.timestampMs >= cutoff) return;
+    execFileSync(GIT, ["update-ref", "-d", `refs/gitwand/snapshots/${snap.id}`], { cwd });
+    deleted += 1;
+  });
+  return deleted;
 }
 
 function jsonResponse(req, res, data, status = 200) {
@@ -5760,6 +5915,54 @@ async function handleRequest(req, res) {
       try {
         execFileSync(GIT, ["reset", flag, sha], { cwd: resolve(cwd) });
         return jsonResponse(req, res, { ok: true });
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
+      }
+    }
+
+    // ─── Snapshots (v3.8 Time Machine) ──────────────────────
+
+    // GET /api/snapshot-list?cwd=…
+    if (url.pathname === "/api/snapshot-list" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd");
+      if (!cwd) return jsonResponse(req, res, { error: "Missing cwd" }, 400);
+      try {
+        return jsonResponse(req, res, listSnapshots(resolve(cwd)));
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
+      }
+    }
+
+    // POST /api/snapshot-create  { cwd, kind, label }
+    if (url.pathname === "/api/snapshot-create" && req.method === "POST") {
+      const { cwd, kind, label } = await readBody(req);
+      if (!cwd) return jsonResponse(req, res, { error: "Missing cwd" }, 400);
+      try {
+        return jsonResponse(req, res, createSnapshot(resolve(cwd), kind ?? "manual", label ?? ""));
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
+      }
+    }
+
+    // POST /api/snapshot-restore  { cwd, id }
+    if (url.pathname === "/api/snapshot-restore" && req.method === "POST") {
+      const { cwd, id } = await readBody(req);
+      if (!cwd || !id) return jsonResponse(req, res, { error: "Missing cwd or id" }, 400);
+      try {
+        return jsonResponse(req, res, restoreSnapshot(resolve(cwd), id));
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
+      }
+    }
+
+    // POST /api/snapshot-prune  { cwd, maxAgeDays, maxCount }
+    if (url.pathname === "/api/snapshot-prune" && req.method === "POST") {
+      const { cwd, maxAgeDays, maxCount } = await readBody(req);
+      if (!cwd) return jsonResponse(req, res, { error: "Missing cwd" }, 400);
+      try {
+        return jsonResponse(req, res, {
+          deleted: pruneSnapshots(resolve(cwd), maxAgeDays ?? 14, maxCount ?? 200),
+        });
       } catch (err) {
         return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
       }

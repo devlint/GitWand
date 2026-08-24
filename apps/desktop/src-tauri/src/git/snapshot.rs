@@ -16,12 +16,6 @@
 //! inside a `#[tauri::command]` hold the `repo_lock` write guard; taking a
 //! second guard for the same cwd would deadlock.
 
-// Transitional: the engine lands before the Tauri commands that consume it
-// (`commands/snapshots.rs`) and before the `ops.rs` hooks. Clippy runs with
-// `-D warnings`, so without this the intermediate commits are red on dead
-// code alone. Removed once every function below has a caller.
-#![allow(dead_code)]
-
 use super::cmd::git_cmd;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;

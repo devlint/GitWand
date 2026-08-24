@@ -1710,6 +1710,87 @@ export async function gitCheckoutCommit(cwd: string, sha: string): Promise<void>
  * Reset the current branch to a specific commit.
  * mode: "soft" | "mixed" | "hard"
  */
+/**
+ * One repo snapshot (v3.8 Time Machine). Mirrors `SnapshotMeta` in
+ * `src-tauri/src/git/snapshot.rs`, which serialises `rename_all = "camelCase"`,
+ * so the field names below match the wire format on both backends.
+ */
+export interface SnapshotMeta {
+  /** Sortable id and ref leaf: `<unix ms>-<short sha>`. */
+  id: string;
+  /** Full sha of the snapshot commit. */
+  commit: string;
+  /** What triggered it. */
+  kind: "manual" | "discard" | "reset" | "checkout" | "resolution" | "pre-restore";
+  label: string;
+  timestampMs: number;
+  headSha: string;
+  /** Branch short name, or null when HEAD was detached. */
+  headRef: string | null;
+  /** MERGE_HEAD sha when taken mid-merge. */
+  mergeHead: string | null;
+}
+
+/** Capture a snapshot. Returns null on a repo with no HEAD yet. */
+export async function snapshotCreate(
+  cwd: string,
+  kind: SnapshotMeta["kind"],
+  label: string,
+): Promise<SnapshotMeta | null> {
+  if (isTauri()) {
+    return await tauriInvoke("snapshot_create", { cwd, kind, label });
+  }
+  const res = await devFetch(`${DEV_SERVER}/api/snapshot-create`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, kind, label }),
+  });
+  if (!res.ok) throw new Error(((await res.json()) as any).error ?? `snapshot failed: ${res.status}`);
+  return (await res.json()) as SnapshotMeta | null;
+}
+
+/** All snapshots for the repo, newest first. */
+export async function snapshotList(cwd: string): Promise<SnapshotMeta[]> {
+  if (isTauri()) {
+    return await tauriInvoke("snapshot_list", { cwd });
+  }
+  const res = await devFetch(`${DEV_SERVER}/api/snapshot-list?cwd=${encodeURIComponent(cwd)}`);
+  if (!res.ok) throw new Error(`snapshot list failed: ${res.status}`);
+  return (await res.json()) as SnapshotMeta[];
+}
+
+/** Restore a snapshot. Returns the `pre-restore` snapshot, i.e. the redo target. */
+export async function snapshotRestore(cwd: string, id: string): Promise<SnapshotMeta> {
+  if (isTauri()) {
+    return await tauriInvoke("snapshot_restore", { cwd, id });
+  }
+  const res = await devFetch(`${DEV_SERVER}/api/snapshot-restore`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, id }),
+  });
+  if (!res.ok) throw new Error(((await res.json()) as any).error ?? `restore failed: ${res.status}`);
+  return (await res.json()) as SnapshotMeta;
+}
+
+/** Delete snapshots past the retention caps. Returns how many were deleted. */
+export async function snapshotPrune(
+  cwd: string,
+  maxAgeDays: number,
+  maxCount: number,
+): Promise<number> {
+  if (isTauri()) {
+    return await tauriInvoke("snapshot_prune", { cwd, maxAgeDays, maxCount });
+  }
+  const res = await devFetch(`${DEV_SERVER}/api/snapshot-prune`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, maxAgeDays, maxCount }),
+  });
+  if (!res.ok) throw new Error(`prune failed: ${res.status}`);
+  return ((await res.json()) as { deleted: number }).deleted;
+}
+
 export async function gitResetToCommit(cwd: string, sha: string, mode: "soft" | "mixed" | "hard"): Promise<void> {
   if (isTauri()) {
     await tauriInvoke("git_reset_to_commit", { cwd, sha, mode });

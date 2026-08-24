@@ -35,7 +35,8 @@
 use gitwand_desktop_lib::{
     git_branches_parity, git_commit_submodule_changes_parity, git_log_parity,
     git_remote_info_parity, git_stash_list_parity, git_status_libgit2_parity, git_status_parity,
-    git_submodule_branches_parity, scan_secrets_parity,
+    git_submodule_branches_parity, scan_secrets_parity, snapshot_create_parity,
+    snapshot_list_parity,
 };
 use serde_json::{json, Value};
 use std::io::{self, Read};
@@ -139,6 +140,28 @@ fn main() -> ExitCode {
                 Err(code) => return code,
             };
             to_json(git_stash_list_parity(cwd))
+        }
+        "snapshot-list" => {
+            let cwd = match must_str("cwd") {
+                Ok(v) => v,
+                Err(code) => return code,
+            };
+            to_json(snapshot_list_parity(cwd))
+        }
+        "snapshot-create" => {
+            let cwd = match must_str("cwd") {
+                Ok(v) => v,
+                Err(code) => return code,
+            };
+            let kind = match must_str("kind") {
+                Ok(v) => v,
+                Err(code) => return code,
+            };
+            let label = match must_str("label") {
+                Ok(v) => v,
+                Err(code) => return code,
+            };
+            to_json(snapshot_create_parity(cwd, kind, label))
         }
         "git-submodule-branches" => {
             let cwd = match must_str("cwd") {

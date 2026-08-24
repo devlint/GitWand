@@ -1,5 +1,5 @@
 pub(crate) mod commands;
-pub(crate) mod git;
+pub mod git;
 pub(crate) mod shell_env;
 pub(crate) mod types;
 
@@ -234,6 +234,18 @@ pub fn git_remote_info_parity(cwd: String) -> Result<types::RemoteInfo, String> 
 
 pub fn git_stash_list_parity(cwd: String) -> Result<Vec<types::StashEntry>, String> {
     tauri::async_runtime::block_on(commands::ops::git_stash_list(cwd))
+}
+
+pub fn snapshot_list_parity(cwd: String) -> Result<Vec<git::snapshot::SnapshotMeta>, String> {
+    tauri::async_runtime::block_on(commands::snapshots::snapshot_list(cwd))
+}
+
+pub fn snapshot_create_parity(
+    cwd: String,
+    kind: String,
+    label: String,
+) -> Result<Option<git::snapshot::SnapshotMeta>, String> {
+    tauri::async_runtime::block_on(commands::snapshots::snapshot_create(cwd, kind, label))
 }
 
 pub fn git_submodule_branches_parity(
@@ -563,6 +575,10 @@ pub fn run() {
             commands::read::git_blame,
             commands::ops::git_checkout_commit,
             commands::ops::git_reset_to_commit,
+            commands::snapshots::snapshot_create,
+            commands::snapshots::snapshot_list,
+            commands::snapshots::snapshot_restore,
+            commands::snapshots::snapshot_prune,
             commands::ops::git_revert_commit,
             commands::ops::git_create_tag,
             commands::ops::git_list_tags,
