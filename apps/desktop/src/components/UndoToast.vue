@@ -38,11 +38,11 @@ async function onUndo() {
     if (target) {
       const outcome = await tm.restoreSnapshotById(props.cwd, target);
       if (outcome === "moved") {
-        toast.show(t("timeMachine.toastMoved"));
+        toast.notify(t("timeMachine.toastMoved"));
         return;
       }
       if (outcome === "missing") {
-        toast.show(t("timeMachine.toastNothing"));
+        toast.notify(t("timeMachine.toastNothing"));
         return;
       }
     } else {
@@ -66,10 +66,12 @@ async function onUndo() {
       <path d="M3.5 6.5A6 6 0 019 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
     </svg>
     <span class="undo-toast__msg">{{ toast.offer.value.message }}</span>
-    <button class="undo-toast__btn" :disabled="busy" @click="onUndo">
-      {{ t('timeMachine.toastUndo') }}
-    </button>
-    <span class="undo-toast__kbd mono">⌘Z</span>
+    <template v-if="toast.offer.value.actionable">
+      <button class="undo-toast__btn" :disabled="busy" @click="onUndo">
+        {{ t('timeMachine.toastUndo') }}
+      </button>
+      <span class="undo-toast__kbd mono">⌘Z</span>
+    </template>
     <button class="undo-toast__close" :aria-label="t('common.close')" @click="toast.dismiss()">×</button>
   </div>
 </template>

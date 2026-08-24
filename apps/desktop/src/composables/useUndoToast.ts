@@ -22,6 +22,12 @@ export interface UndoOffer {
   message: string;
   /** The point this offer rewinds to, or null to fall back to ⌘Z. */
   snapshotId: string | null;
+  /**
+   * Whether this is an offer (renders the Undo button) or a plain report
+   * ("Restored", "Nothing to undo", a failure). A report that still rendered
+   * the button would hand the user an action unrelated to the text above it.
+   */
+  actionable: boolean;
 }
 
 /** How long an offer stays on screen. Long enough to read and react to,
@@ -41,15 +47,25 @@ export function useUndoToast() {
     offer.value = null;
   }
 
-  function show(message: string, snapshotId?: string | null): void {
+  function publish(message: string, snapshotId: string | null, actionable: boolean): void {
     if (timer !== null) clearTimeout(timer);
     counter += 1;
-    offer.value = { id: counter, message, snapshotId: snapshotId ?? null };
+    offer.value = { id: counter, message, snapshotId, actionable };
     timer = setTimeout(() => {
       offer.value = null;
       timer = null;
     }, TIMEOUT_MS);
   }
 
-  return { offer, show, dismiss };
+  /** An offer the user can act on. */
+  function show(message: string, snapshotId?: string | null): void {
+    publish(message, snapshotId ?? null, true);
+  }
+
+  /** A report with no action attached. */
+  function notify(message: string): void {
+    publish(message, null, false);
+  }
+
+  return { offer, show, notify, dismiss };
 }

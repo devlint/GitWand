@@ -3623,12 +3623,12 @@ async function repoUndo() {
   // discard is created backend-side and is not in the cache yet.
   try {
     const restored = await timeMachine.undoLast(cwd);
-    undoToast.show(t(restored ? "timeMachine.toastRestored" : "timeMachine.toastNothing"));
+    undoToast.notify(t(restored ? "timeMachine.toastRestored" : "timeMachine.toastNothing"));
   } catch (err: any) {
     // The keyboard path has no popover or modal open, so `lastError` is
     // rendered nowhere. Without this the user presses ⌘Z, nothing happens,
     // and the rejection is swallowed as an unhandled promise.
-    undoToast.show(`${t("timeMachine.toastFailed")}: ${err?.message ?? err}`);
+    undoToast.notify(`${t("timeMachine.toastFailed")}: ${err?.message ?? err}`);
   } finally {
     await onUndoPerformed();
   }
@@ -3643,9 +3643,9 @@ async function repoRedo() {
   if (!cwd || !timeMachine.canRedo.value) return;
   try {
     await timeMachine.redo(cwd);
-    undoToast.show(t("timeMachine.toastRestored"));
+    undoToast.notify(t("timeMachine.toastRestored"));
   } catch (err: any) {
-    undoToast.show(`${t("timeMachine.toastFailed")}: ${err?.message ?? err}`);
+    undoToast.notify(`${t("timeMachine.toastFailed")}: ${err?.message ?? err}`);
   } finally {
     await onUndoPerformed();
   }

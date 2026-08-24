@@ -362,8 +362,12 @@ function updateClampedSetting<K extends keyof Settings>(
   min: number,
   max: number,
 ) {
+  // The empty field has to be tested as a STRING: `Number("")` is `0`, which
+  // is finite, so a `Number.isFinite` guard never fires and the value snaps
+  // to `min` under the user's cursor the moment they backspace to retype.
+  if (raw.trim() === "") return;
   const parsed = Number(raw);
-  if (!Number.isFinite(parsed)) return; // mid-edit empty field: keep the old value
+  if (!Number.isFinite(parsed)) return;
   const clamped = Math.min(max, Math.max(min, Math.round(parsed)));
   updateSetting(key, clamped as Settings[K]);
 }

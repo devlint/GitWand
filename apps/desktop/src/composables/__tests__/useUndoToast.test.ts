@@ -58,6 +58,21 @@ describe("useUndoToast", () => {
     expect(toast.offer.value?.snapshotId).toBe("1700000000000-abcd1234");
   });
 
+  it("marks a report as non-actionable so no button is rendered", () => {
+    // "Restored" / "Nothing to undo" / a failure must not carry an Undo
+    // button: it would rewind something unrelated to the text above it.
+    const toast = useUndoToast();
+    toast.notify("Restored");
+    expect(toast.offer.value?.actionable).toBe(false);
+    expect(toast.offer.value?.snapshotId).toBeNull();
+  });
+
+  it("marks a real offer as actionable", () => {
+    const toast = useUndoToast();
+    toast.show("Discarded 1 file(s)", "1700000000000-abcd1234");
+    expect(toast.offer.value?.actionable).toBe(true);
+  });
+
   it("has no snapshot id when the backend took none", () => {
     const toast = useUndoToast();
     toast.show("Switched to main");

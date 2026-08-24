@@ -38,6 +38,15 @@ const SNAPSHOT_SUPERSEDES: Record<string, string> = {
   discard: "checkout",
 };
 
+/**
+ * Reflog op types that put a NEW commit on the branch. These are the ones a
+ * snapshot restore would throw away, since it rewinds HEAD to where the
+ * snapshot recorded it. Ref moves that create nothing (reset, checkout) are
+ * deliberately absent: those are what the snapshotted operations themselves
+ * do.
+ */
+const COMMIT_CREATING = new Set(["commit", "amend", "merge", "cherry-pick", "rebase", "pull"]);
+
 /** How close in time a snapshot and a reflog line must be to count as one op. */
 const DEDUPE_WINDOW_MS = 2_000;
 
@@ -170,11 +179,16 @@ export function useTimeMachine() {
    * created, and must not drift onto whatever happens to be newest by the
    * time the user clicks.
    *
-   * Refuses once HEAD has moved past the snapshot. Restoring rewinds the
-   * branch to the HEAD the snapshot recorded, so a commit made afterwards
-   * would go with it. The Time Machine can do that: it asks first. A toast
-   * cannot — it is one click, no confirmation, and the label only ever
+   * Refuses once a COMMIT has landed on top of the snapshot. Restoring
+   * rewinds the branch to the HEAD the snapshot recorded, so any commit made
+   * after it goes with it. The Time Machine may do that: it confirms first. A
+   * toast may not — it is one click, no confirmation, and its label only ever
    * promised to undo the small thing it names.
+   *
+   * The test is deliberately "a newer commit-creating entry", NOT "HEAD has
+   * moved". reset / checkout / branch-switch move HEAD as part of the very
+   * operation the snapshot belongs to, so a plain HEAD comparison reports
+   * "moved" every time and leaves three of the toast's four paths dead.
    */
   async function restoreSnapshotById(
     cwd: string,
@@ -182,13 +196,13 @@ export function useTimeMachine() {
   ): Promise<"restored" | "moved" | "missing"> {
     if (!cwd || !id) return "missing";
     await refresh(cwd);
-    const target = snaps.snapshots.value.find((s) => s.id === id);
-    if (!target) return "missing";
 
-    // The reflog's newest entry is where HEAD is now. It carries git's short
-    // hash, hence the prefix test against the snapshot's full sha.
-    const head = undoStack.entries.value[0];
-    if (head && head.hash && !target.headSha.startsWith(head.hash)) return "moved";
+    const idx = timeline.value.findIndex((i) => i.key === `snapshot:${id}`);
+    if (idx === -1) return "missing";
+    const newerCommit = timeline.value
+      .slice(0, idx)
+      .some((i) => i.source === "reflog" && COMMIT_CREATING.has(i.kind));
+    if (newerCommit) return "moved";
 
     await snaps.restore(cwd, id);
     await refresh(cwd);
