@@ -3156,7 +3156,14 @@ pub(crate) async fn git_shortlog(cwd: String) -> Result<Vec<ShortlogEntry>, Stri
         // `--all` (not HEAD): count every author's commits across all branches,
         // independent of the checked-out branch — matches the dashboard's
         // all-branches contributor totals.
-        .args(["shortlog", "-sne", "--all"])
+        // `--exclude` before `--all`: Time Machine snapshot refs (v3.8) are
+        // authored by the app, not by a contributor.
+        .args([
+            "shortlog",
+            "-sne",
+            "--exclude=refs/gitwand/snapshots/*",
+            "--all",
+        ])
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to run git shortlog: {}", e))?;
@@ -3185,6 +3192,9 @@ pub(crate) async fn git_author_line_stats(cwd: String) -> Result<Vec<AuthorLineS
     let output = git_cmd()
         .args([
             "log",
+            // Same exclusion as the shortlog above: a snapshot commit's tree
+            // would otherwise register as churn against its author.
+            "--exclude=refs/gitwand/snapshots/*",
             "--all",
             "--no-merges",
             "--numstat",

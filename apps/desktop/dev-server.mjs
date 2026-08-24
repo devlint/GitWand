@@ -1780,7 +1780,8 @@ async function handleRequest(req, res) {
         const resolvedCwd = resolve(cwd);
         const format = "%h%x1f%H%x1f%an%x1f%ae%x1f%aI%x1f%s%x1f%b%x1f%P%x1f%D%x1e";
         const args = ["log"];
-        if (all) args.push("--all");
+        // `--exclude` before `--all`: keep v3.8 snapshot refs out of history.
+        if (all) args.push("--exclude=refs/gitwand/snapshots/*", "--all");
         if (author) args.push(`--author=${author}`);
         if (since) args.push(`--since=${since}`);
         if (offset > 0) args.push(`--skip=${offset}`);
@@ -1839,7 +1840,8 @@ async function handleRequest(req, res) {
       try {
         const resolvedCwd = resolve(cwd);
         const args = ["rev-list", "--count"];
-        if (all) args.push("--all");
+        // `--exclude` before `--all`: keep v3.8 snapshot refs out of history.
+        if (all) args.push("--exclude=refs/gitwand/snapshots/*", "--all");
         else args.push(branch || "HEAD");
         // Discrete args — `--` then the pathspec, never interpolated.
         if (pathspec) args.push("--", pathspec);
@@ -6116,7 +6118,7 @@ async function handleRequest(req, res) {
     if (url.pathname === "/api/git-shortlog" && req.method === "GET") {
       const cwd = url.searchParams.get("cwd");
       if (!cwd) return jsonResponse(req, res, { error: "Missing cwd" }, 400);
-      const r = spawnSync(GIT, ["shortlog", "-sne", "--all"], {
+      const r = spawnSync(GIT, ["shortlog", "-sne", "--exclude=refs/gitwand/snapshots/*", "--all"], {
         cwd: resolve(cwd),
         encoding: "utf-8",
       });
@@ -6150,7 +6152,7 @@ async function handleRequest(req, res) {
       if (!cwd) return jsonResponse(req, res, { error: "Missing cwd" }, 400);
       const r = spawnSync(
         GIT,
-        ["log", "--all", "--no-merges", "--numstat", "--pretty=format:%x00%ae"],
+        ["log", "--exclude=refs/gitwand/snapshots/*", "--all", "--no-merges", "--numstat", "--pretty=format:%x00%ae"],
         { cwd: resolve(cwd), encoding: "utf-8", maxBuffer: 256 * 1024 * 1024 },
       );
       if (r.status !== 0) {

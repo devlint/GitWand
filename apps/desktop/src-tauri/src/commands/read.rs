@@ -828,6 +828,12 @@ pub(crate) async fn git_log(
 
     let mut args: Vec<String> = vec!["log".to_string()];
     if include_all {
+        // `--exclude` scopes the NEXT `--all`: without it, Time Machine
+        // snapshot refs (v3.8) walk into the Git Tree as real commits.
+        args.push(format!(
+            "--exclude={}/*",
+            crate::git::snapshot::SNAPSHOT_REF_PREFIX
+        ));
         args.push("--all".to_string());
     }
     if let Some(ref author_filter) = author {
@@ -952,6 +958,12 @@ pub(crate) async fn git_rev_count(
     let mut args: Vec<String> = vec!["rev-list".to_string(), "--count".to_string()];
 
     if include_all {
+        // `--exclude` scopes the NEXT `--all`: without it, Time Machine
+        // snapshot refs (v3.8) walk into the Git Tree as real commits.
+        args.push(format!(
+            "--exclude={}/*",
+            crate::git::snapshot::SNAPSHOT_REF_PREFIX
+        ));
         args.push("--all".to_string());
     } else if let Some(ref b) = branch {
         if !b.is_empty() {
@@ -2773,6 +2785,57 @@ mod pathspec_tests {
         );
 
         let _ = std::fs::remove_dir_all(&bare);
+    }
+
+    // ── v3.8: Time Machine snapshot refs must stay out of history ──
+
+    #[test]
+    fn git_log_all_excludes_snapshot_refs() {
+        let repo = TempRepo::new();
+        repo.write("a.txt", "v1");
+        repo.commit_all("c1");
+        repo.write("a.txt", "dirty");
+
+        let snap = crate::git::snapshot::create_snapshot_inner(&repo.cwd(), "manual", "snap")
+            .expect("snapshot failed")
+            .expect("expected a snapshot");
+
+        let entries = tauri::async_runtime::block_on(git_log(
+            repo.cwd(),
+            None,
+            Some(true), // --all
+            None,
+            None,
+            None,
+            None,
+            None,
+        ))
+        .expect("git_log(all) failed");
+
+        assert!(
+            !entries.iter().any(|e| e.hash_full == snap.commit),
+            "snapshot commit leaked into git log --all"
+        );
+        assert_eq!(entries.len(), 1, "only the real commit should be listed");
+    }
+
+    #[test]
+    fn git_rev_count_all_excludes_snapshot_refs() {
+        let repo = TempRepo::new();
+        repo.write("a.txt", "v1");
+        repo.commit_all("c1");
+        repo.write("a.txt", "dirty");
+
+        crate::git::snapshot::create_snapshot_inner(&repo.cwd(), "manual", "snap")
+            .expect("snapshot failed")
+            .expect("expected a snapshot");
+
+        let count =
+            tauri::async_runtime::block_on(git_rev_count(repo.cwd(), None, Some(true), None))
+                .expect("git_rev_count(all) failed");
+
+        // The snapshot commit and its meta commit must not be counted.
+        assert_eq!(count, 1);
     }
 }
 
