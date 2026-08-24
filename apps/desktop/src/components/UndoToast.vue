@@ -27,16 +27,34 @@ const busy = ref(false);
 
 async function onUndo() {
   if (busy.value) return;
+  const target = toast.offer.value?.snapshotId ?? null;
   busy.value = true;
   try {
-    await tm.undoLast(props.cwd);
+    // Rewind the point THIS operation created. An offer reading "1 file
+    // discarded" must never undo a commit the user happened to make inside
+    // the 8s window — neither by drifting onto it (plain `undoLast`) nor by
+    // dragging it along (a snapshot restore rewinds HEAD too). The composable
+    // refuses that second case and says so.
+    if (target) {
+      const outcome = await tm.restoreSnapshotById(props.cwd, target);
+      if (outcome === "moved") {
+        toast.show(t("timeMachine.toastMoved"));
+        return;
+      }
+      if (outcome === "missing") {
+        toast.show(t("timeMachine.toastNothing"));
+        return;
+      }
+    } else {
+      await tm.undoLast(props.cwd);
+    }
     emit("restored");
   } catch {
     // lastError surfaces in the popover and the modal; the toast just closes.
   } finally {
     busy.value = false;
-    toast.dismiss();
   }
+  toast.dismiss();
 }
 </script>
 

@@ -1803,6 +1803,8 @@ const fr: Locale = {
     toastCheckout: "Basculé sur {0}",
     toastResolution: "Résolutions appliquées à {0} fichier(s)",
     toastRestored: "Restauré",
+    toastMoved: "Le dépôt a changé depuis, passe par Time Machine",
+    toastFailed: "Échec de l'annulation",
     toastNothing: "Rien à annuler",
     settingsTitle: "Time Machine",
     settingsEnabled: "Instantané avant les opérations destructrices",

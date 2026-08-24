@@ -1827,6 +1827,8 @@ const en = {
     toastCheckout: "Switched to {0}",
     toastResolution: "Applied resolutions to {0} file(s)",
     toastRestored: "Restored",
+    toastMoved: "The repo moved on — use Time Machine",
+    toastFailed: "Undo failed",
     toastNothing: "Nothing to undo",
     settingsTitle: "Time Machine",
     settingsEnabled: "Snapshot before destructive operations",

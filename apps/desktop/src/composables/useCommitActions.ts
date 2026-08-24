@@ -212,9 +212,9 @@ export function useCommitActions(deps: Deps) {
     modal.value.busy = true;
     try {
       const snapshots = useSettings().settings.value.snapshotsEnabled;
-      await gitCheckoutCommit(cwd, entry.hashFull, snapshots);
+      const snapshot = await gitCheckoutCommit(cwd, entry.hashFull, snapshots);
       if (snapshots) {
-        useUndoToast().show(t("timeMachine.toastCheckout", entry.hash));
+        useUndoToast().show(t("timeMachine.toastCheckout", entry.hash), snapshot?.id);
       }
       closeModal();
       await Promise.all([loadLog(), repoRefresh()]);
@@ -244,9 +244,14 @@ export function useCommitActions(deps: Deps) {
     modal.value.busy = true;
     try {
       const snapshots = useSettings().settings.value.snapshotsEnabled;
-      await gitResetToCommit(cwd, entry.hashFull, modal.value.resetMode, snapshots);
+      const snapshot = await gitResetToCommit(
+        cwd,
+        entry.hashFull,
+        modal.value.resetMode,
+        snapshots,
+      );
       if (snapshots) {
-        useUndoToast().show(t("timeMachine.toastReset", entry.hash));
+        useUndoToast().show(t("timeMachine.toastReset", entry.hash), snapshot?.id);
       }
       closeModal();
       // repoRefresh reloads staged/unstaged status — critical for --hard.

@@ -1,5 +1,5 @@
 import { ref } from "vue";
-import { readFile, writeFile, type SnapshotMeta } from "../utils/backend";
+import type { SnapshotMeta } from "../utils/backend";
 import { useAIProvider } from "./useAIProvider";
 
 /**
@@ -8,18 +8,20 @@ import { useAIProvider } from "./useAIProvider";
  * Opt-in and lazy: nothing runs unless the user asks for a label on a
  * specific snapshot, matching the Quick Stash label pattern (v2.15.1).
  *
- * Labels live in a sidecar file rather than the snapshot commit message,
- * which is immutable. A desync there is harmless: a missing label just falls
- * back to the mechanical one.
+ * Stored in `localStorage`, keyed by repo path, like the other ancillary
+ * per-user state in this app (`useResolutionMemory`, `useLaunchpadPins`,
+ * `useTierStats`). An earlier draft wrote a sidecar file under `.git/`, which
+ * silently never worked in a linked worktree: there `.git` is a FILE, not a
+ * directory, so every read and write failed with ENOTDIR and the error was
+ * swallowed. GitWand treats worktrees as first-class (tab = worktree since
+ * v2.7.0, plus scratch and AI-task worktrees), so that was a normal state,
+ * not an edge case.
+ *
+ * Losing this store costs nothing but a repeat model call: a missing label
+ * falls back to the mechanical one.
  */
 
-/**
- * Flat, not nested: `write_file` is a bare `std::fs::write` with no
- * `create_dir_all` (see `commands/files.rs`). `.git/` is inside the repo
- * root so it passes `safe_repo_path`, and nothing there shows up as an
- * untracked file.
- */
-const LABEL_FILE = ".git/gitwand-snapshot-labels.json";
+const STORAGE_KEY = "gitwand-snapshot-labels";
 
 const SYSTEM_PROMPT = `You are a senior software engineer labelling a repository snapshot.
 
@@ -37,6 +39,32 @@ Mechanical label: ${snapshot.label}
 Branch: ${snapshot.headRef ?? "(detached)"}`;
 }
 
+/** `{ [repoPath]: { [snapshotId]: label } }` */
+type LabelStore = Record<string, Record<string, string>>;
+
+function readStore(): LabelStore {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as unknown;
+    // Guard the shape: a hand-edited or truncated entry must not poison the
+    // panel with non-object values.
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as LabelStore)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeStore(store: LabelStore): void {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+  } catch {
+    // Quota or a locked store: one extra model call, nothing more.
+  }
+}
+
 const labels = ref<Record<string, string>>({});
 const pending = ref<Set<string>>(new Set());
 
@@ -44,28 +72,15 @@ export function useSnapshotLabels() {
   const ai = useAIProvider();
 
   async function load(cwd: string): Promise<void> {
-    try {
-      const raw = await readFile(cwd, LABEL_FILE);
-      const parsed = JSON.parse(raw) as unknown;
-      // Guard the shape: a hand-edited or truncated file must not poison the
-      // panel with non-string values.
-      labels.value =
-        parsed && typeof parsed === "object" && !Array.isArray(parsed)
-          ? (parsed as Record<string, string>)
-          : {};
-    } catch {
-      // No sidecar yet, or unreadable, or not JSON: labels are optional by
-      // construction, so this is never worth surfacing.
-      labels.value = {};
-    }
+    const forRepo = readStore()[cwd];
+    labels.value =
+      forRepo && typeof forRepo === "object" && !Array.isArray(forRepo) ? forRepo : {};
   }
 
-  async function persist(cwd: string): Promise<void> {
-    try {
-      await writeFile(cwd, LABEL_FILE, JSON.stringify(labels.value, null, 2));
-    } catch {
-      // Losing a cached label costs one extra model call, nothing more.
-    }
+  function persist(cwd: string): void {
+    const store = readStore();
+    store[cwd] = labels.value;
+    writeStore(store);
   }
 
   async function generate(cwd: string, snapshot: SnapshotMeta): Promise<string | null> {
@@ -79,7 +94,7 @@ export function useSnapshotLabels() {
       const text = (raw ?? "").trim().split("\n")[0].trim();
       if (!text) return null;
       labels.value = { ...labels.value, [snapshot.id]: text };
-      await persist(cwd);
+      persist(cwd);
       return text;
     } catch {
       return null;

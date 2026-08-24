@@ -1,15 +1,11 @@
+// @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const backend = vi.hoisted(() => ({
-  readFile: vi.fn(),
-  writeFile: vi.fn(),
-}));
 const ai = vi.hoisted(() => ({
   rawPrompt: vi.fn(),
   isAvailable: { value: true },
 }));
 
-vi.mock("../../utils/backend", () => backend);
 vi.mock("../useAIProvider", () => ({ useAIProvider: () => ai }));
 
 import { useSnapshotLabels } from "../useSnapshotLabels";
@@ -29,21 +25,45 @@ describe("useSnapshotLabels", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ai.isAvailable.value = true;
-    backend.readFile.mockResolvedValue("{}");
+    localStorage.clear();
   });
 
-  it("load tolerates a missing sidecar file", async () => {
-    backend.readFile.mockRejectedValue(new Error("ENOENT"));
+  it("load starts empty when nothing was stored", async () => {
     const l = useSnapshotLabels();
     await l.load("/repo");
     expect(l.labels.value).toEqual({});
   });
 
-  it("load tolerates a corrupt sidecar file", async () => {
-    backend.readFile.mockResolvedValue("{not json");
+  it("load tolerates a corrupt store entry", async () => {
+    localStorage.setItem("gitwand-snapshot-labels", "{not json");
     const l = useSnapshotLabels();
     await l.load("/repo");
     expect(l.labels.value).toEqual({});
+  });
+
+  it("keeps each repo's labels separate", async () => {
+    ai.rawPrompt.mockResolvedValue("label for repo A\n");
+    const l = useSnapshotLabels();
+    await l.load("/repo-a");
+    await l.generate("/repo-a", snap);
+    expect(l.labels.value[snap.id]).toBe("label for repo A");
+
+    await l.load("/repo-b");
+    expect(l.labels.value).toEqual({});
+
+    await l.load("/repo-a");
+    expect(l.labels.value[snap.id]).toBe("label for repo A");
+  });
+
+  it("persists across a reload of the composable state", async () => {
+    ai.rawPrompt.mockResolvedValue("persisted\n");
+    const l = useSnapshotLabels();
+    await l.load("/repo");
+    await l.generate("/repo", snap);
+    // Simulate a fresh session reading the same store.
+    l.labels.value = {};
+    await l.load("/repo");
+    expect(l.labels.value[snap.id]).toBe("persisted");
   });
 
   it("generate stores the model's one-liner and persists it", async () => {
@@ -53,7 +73,6 @@ describe("useSnapshotLabels", () => {
     const text = await l.generate("/repo", snap);
     expect(text).toBe("Discarded the half-finished parser rewrite");
     expect(l.labels.value[snap.id]).toBe("Discarded the half-finished parser rewrite");
-    expect(backend.writeFile).toHaveBeenCalledTimes(1);
   });
 
   it("keeps only the first line of a chatty model answer", async () => {
@@ -64,7 +83,10 @@ describe("useSnapshotLabels", () => {
   });
 
   it("returns the cached label without calling the model twice", async () => {
-    backend.readFile.mockResolvedValue(JSON.stringify({ [snap.id]: "cached" }));
+    localStorage.setItem(
+      "gitwand-snapshot-labels",
+      JSON.stringify({ "/repo": { [snap.id]: "cached" } }),
+    );
     const l = useSnapshotLabels();
     await l.load("/repo");
     expect(await l.generate("/repo", snap)).toBe("cached");

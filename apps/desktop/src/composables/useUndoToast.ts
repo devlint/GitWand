@@ -5,13 +5,14 @@ import { ref } from "vue";
  *
  * Single-slot on purpose: two destructive operations in a row must not stack
  * two toasts the user has to dismiss. The newest offer replaces the previous
- * one, and its "Undo" always means "rewind the most recent restorable point",
- * which is exactly what ⌘Z does.
+ * one.
  *
- * It carries no snapshot id for the same reason: the button and the shortcut
- * run one code path (`useTimeMachine().undoLast`), so the toast stays a pure
- * affordance rather than a second restore mechanism with its own state to
- * keep correct.
+ * The offer carries the id of the snapshot its operation actually created,
+ * so the button rewinds THAT point. Falling back to "the most recent
+ * restorable point at click time" makes the label and the action disagree:
+ * a commit made inside the 8s window is newer, so an offer reading
+ * "1 file discarded" would undo the commit instead. Without an id (snapshots
+ * off, or the backend took none) the button falls back to ⌘Z's behaviour.
  */
 
 export interface UndoOffer {
@@ -19,6 +20,8 @@ export interface UndoOffer {
    *  when the same message is shown twice in a row. */
   id: number;
   message: string;
+  /** The point this offer rewinds to, or null to fall back to ⌘Z. */
+  snapshotId: string | null;
 }
 
 /** How long an offer stays on screen. Long enough to read and react to,
@@ -38,10 +41,10 @@ export function useUndoToast() {
     offer.value = null;
   }
 
-  function show(message: string): void {
+  function show(message: string, snapshotId?: string | null): void {
     if (timer !== null) clearTimeout(timer);
     counter += 1;
-    offer.value = { id: counter, message };
+    offer.value = { id: counter, message, snapshotId: snapshotId ?? null };
     timer = setTimeout(() => {
       offer.value = null;
       timer = null;

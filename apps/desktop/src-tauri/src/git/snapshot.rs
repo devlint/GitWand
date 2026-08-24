@@ -352,8 +352,25 @@ pub(crate) fn restore_snapshot_inner(cwd: &str, id: &str) -> Result<SnapshotMeta
     )?;
 
     // ── 3. Exact index, including conflict stages 1/2/3.
+    //
+    //    Built in a SCRATCH index and moved into place only once
+    //    `update-index` has succeeded. Emptying the live index first and
+    //    repopulating it in place is the obvious shape, but it leaves the
+    //    repo with a wiped index whenever the second step fails (truncated
+    //    meta blob, a mode git rejects, an aggressive `gc --prune=now`,
+    //    disk full): every tracked file then reads as deleted-from-index,
+    //    with no rollback and no obvious recovery for the user.
+    //
+    //    A scratch `GIT_INDEX_FILE` that does not exist yet starts out empty,
+    //    so no explicit `read-tree --empty` is needed. The final `rename` is
+    //    within the git dir, hence same-filesystem and atomic. It bypasses
+    //    git's `index.lock` protocol, which is acceptable here because the
+    //    caller holds the repo write guard for the whole restore; the
+    //    alternative (`write-tree` on the scratch index) is not available,
+    //    since `write-tree` refuses an index carrying conflict stages.
     let dir = git_dir(cwd)?;
     let info_path = scratch(&dir, "restore");
+    let staged_index = scratch(&dir, "restore-index");
     let info = run(
         cwd,
         &[
@@ -365,11 +382,11 @@ pub(crate) fn restore_snapshot_inner(cwd: &str, id: &str) -> Result<SnapshotMeta
     std::fs::write(&info_path, format!("{}\n", info))
         .map_err(|e| format!("failed to write index-info: {}", e))?;
     let applied = (|| -> Result<(), String> {
-        run(cwd, &["read-tree", "--empty"])?;
         let file = std::fs::File::open(&info_path)
             .map_err(|e| format!("failed to open index-info: {}", e))?;
         let out = git_cmd()
             .args(["update-index", "--index-info"])
+            .env("GIT_INDEX_FILE", &staged_index)
             .stdin(Stdio::from(file))
             .current_dir(cwd)
             .output()
@@ -380,9 +397,11 @@ pub(crate) fn restore_snapshot_inner(cwd: &str, id: &str) -> Result<SnapshotMeta
                 String::from_utf8_lossy(&out.stderr).trim()
             ));
         }
-        Ok(())
+        std::fs::rename(&staged_index, dir.join("index"))
+            .map_err(|e| format!("failed to install the restored index: {}", e))
     })();
     let _ = std::fs::remove_file(&info_path);
+    let _ = std::fs::remove_file(&staged_index);
     applied?;
 
     // ── 4. Merge state, made to MATCH the snapshot in both directions.
@@ -512,6 +531,23 @@ mod tests {
                 String::from_utf8_lossy(&out.stderr)
             );
             out
+        }
+
+        /// Like `git`, but with `GIT_INDEX_FILE` pointed at a scratch index.
+        fn git_with_index(&self, index: &std::path::Path, args: &[&str]) -> String {
+            let out = Command::new(git_binary())
+                .args(args)
+                .env("GIT_INDEX_FILE", index)
+                .current_dir(&self.path)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "git {:?} failed: {}",
+                args,
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
         }
 
         /// Like `git`, but tolerates a non-zero exit (merge conflicts).
@@ -816,6 +852,88 @@ mod tests {
                 .trim()
                 .to_string();
         assert_eq!(head_ref, "main");
+    }
+
+    #[test]
+    fn a_failing_index_restore_leaves_the_live_index_intact() {
+        let repo = TempRepo::new();
+        repo.write("a.txt", "v1\n");
+        repo.write("b.txt", "v1\n");
+        repo.git(&["add", "."]);
+        repo.git(&["commit", "-qm", "c1"]);
+        repo.write("b.txt", "staged edit\n");
+        repo.git(&["add", "b.txt"]);
+        let before = String::from_utf8_lossy(&repo.git(&["ls-files", "-s"]).stdout).to_string();
+        assert!(!before.trim().is_empty(), "setup: index must not be empty");
+
+        // Hand-build a snapshot whose meta blob is NOT valid index-info, which
+        // is what a truncated blob or an aggressive `gc --prune=now` looks
+        // like from the restore's point of view.
+        let worktree_tree = String::from_utf8_lossy(&repo.git(&["write-tree"]).stdout)
+            .trim()
+            .to_string();
+        repo.write("garbage-info", "this is not index-info\n");
+        let bad_blob =
+            String::from_utf8_lossy(&repo.git(&["hash-object", "-w", "garbage-info"]).stdout)
+                .trim()
+                .to_string();
+        std::fs::remove_file(repo.path.join("garbage-info")).unwrap();
+        let meta_index = repo.path.join(".git").join("test-meta-index");
+        repo.git_with_index(
+            &meta_index,
+            &[
+                "update-index",
+                "--add",
+                "--cacheinfo",
+                &format!("100644,{},index-info", bad_blob),
+            ],
+        );
+        let meta_tree = repo.git_with_index(&meta_index, &["write-tree"]);
+        let _ = std::fs::remove_file(&meta_index);
+        let meta_commit =
+            String::from_utf8_lossy(&repo.git(&["commit-tree", &meta_tree, "-m", "meta"]).stdout)
+                .trim()
+                .to_string();
+        let head = String::from_utf8_lossy(&repo.git(&["rev-parse", "HEAD"]).stdout)
+            .trim()
+            .to_string();
+        let meta_json = format!(
+            r#"{{"id":"","commit":"","kind":"manual","label":"bad","timestampMs":1,"headSha":"{}","headRef":"main","mergeHead":null}}"#,
+            head
+        );
+        let bad_commit = String::from_utf8_lossy(
+            &repo
+                .git(&[
+                    "commit-tree",
+                    &worktree_tree,
+                    "-p",
+                    &head,
+                    "-p",
+                    &meta_commit,
+                    "-m",
+                    &meta_json,
+                ])
+                .stdout,
+        )
+        .trim()
+        .to_string();
+        repo.git(&[
+            "update-ref",
+            "refs/gitwand/snapshots/1-deadbeef",
+            &bad_commit,
+        ]);
+
+        let res = restore_snapshot_inner(repo.cwd(), "1-deadbeef");
+        assert!(
+            res.is_err(),
+            "restore should fail on an unusable index-info"
+        );
+
+        // The live index must be untouched. Emptying it first and repopulating
+        // in place would leave every tracked file looking deleted, with no
+        // rollback and no obvious way for the user to recover.
+        let after = String::from_utf8_lossy(&repo.git(&["ls-files", "-s"]).stdout).to_string();
+        assert_eq!(after, before, "the failed restore wiped the live index");
     }
 
     #[test]

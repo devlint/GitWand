@@ -1271,11 +1271,14 @@ export async function getGitFileDiff(
  * v3.8: `snapshotsEnabled` carries the user's Time Machine setting to the
  * backend, which snapshots the repo before running this. Omitted means "no
  * opinion" and the backend snapshots; only an explicit `false` opts out.
+ *
+ * Returns that snapshot (or null when none was taken), so the undo
+ * affordance can target this exact point rather than "whatever is newest by
+ * the time the user clicks".
  */
-export async function gitDiscard(cwd: string, paths: string[], untracked = false, snapshotsEnabled?: boolean): Promise<void> {
+export async function gitDiscard(cwd: string, paths: string[], untracked = false, snapshotsEnabled?: boolean): Promise<SnapshotMeta | null> {
   if (isTauri()) {
-    await tauriInvoke("git_discard", { cwd, paths, untracked, snapshotsEnabled });
-    return;
+    return await tauriInvoke("git_discard", { cwd, paths, untracked, snapshotsEnabled });
   }
   const res = await devFetch(`${DEV_SERVER}/api/git-discard`, {
     method: "POST",
@@ -1283,6 +1286,7 @@ export async function gitDiscard(cwd: string, paths: string[], untracked = false
     body: JSON.stringify({ cwd, paths, untracked, snapshotsEnabled }),
   });
   if (!res.ok) throw new Error(`Failed to discard changes: ${res.status}`);
+  return ((await res.json()) as { snapshot?: SnapshotMeta | null }).snapshot ?? null;
 }
 
 /**
@@ -1391,11 +1395,14 @@ export async function gitCreateBranch(
  * v3.8: `snapshotsEnabled` carries the user's Time Machine setting to the
  * backend, which snapshots the repo before running this. Omitted means "no
  * opinion" and the backend snapshots; only an explicit `false` opts out.
+ *
+ * Returns that snapshot (or null when none was taken), so the undo
+ * affordance can target this exact point rather than "whatever is newest by
+ * the time the user clicks".
  */
-export async function gitSwitchBranch(cwd: string, name: string, snapshotsEnabled?: boolean): Promise<void> {
+export async function gitSwitchBranch(cwd: string, name: string, snapshotsEnabled?: boolean): Promise<SnapshotMeta | null> {
   if (isTauri()) {
-    await tauriInvoke("git_switch_branch", { cwd, name, snapshotsEnabled });
-    return;
+    return await tauriInvoke("git_switch_branch", { cwd, name, snapshotsEnabled });
   }
   const res = await devFetch(`${DEV_SERVER}/api/git-switch-branch`, {
     method: "POST",
@@ -1406,6 +1413,7 @@ export async function gitSwitchBranch(cwd: string, name: string, snapshotsEnable
     const data = await res.json().catch(() => ({}));
     throw new Error(data.error || `Failed to switch branch: ${res.status}`);
   }
+  return ((await res.json()) as { snapshot?: SnapshotMeta | null }).snapshot ?? null;
 }
 
 /**
@@ -1707,11 +1715,14 @@ export async function gitCherryPickContinue(cwd: string): Promise<GitPushPullRes
  * v3.8: `snapshotsEnabled` carries the user's Time Machine setting to the
  * backend, which snapshots the repo before running this. Omitted means "no
  * opinion" and the backend snapshots; only an explicit `false` opts out.
+ *
+ * Returns that snapshot (or null when none was taken), so the undo
+ * affordance can target this exact point rather than "whatever is newest by
+ * the time the user clicks".
  */
-export async function gitCheckoutCommit(cwd: string, sha: string, snapshotsEnabled?: boolean): Promise<void> {
+export async function gitCheckoutCommit(cwd: string, sha: string, snapshotsEnabled?: boolean): Promise<SnapshotMeta | null> {
   if (isTauri()) {
-    await tauriInvoke("git_checkout_commit", { cwd, sha, snapshotsEnabled });
-    return;
+    return await tauriInvoke("git_checkout_commit", { cwd, sha, snapshotsEnabled });
   }
   const res = await devFetch(`${DEV_SERVER}/api/git-checkout-commit`, {
     method: "POST",
@@ -1719,6 +1730,7 @@ export async function gitCheckoutCommit(cwd: string, sha: string, snapshotsEnabl
     body: JSON.stringify({ cwd, sha, snapshotsEnabled }),
   });
   if (!res.ok) throw new Error(((await res.json()) as any).error ?? `git checkout failed: ${res.status}`);
+  return ((await res.json()) as { snapshot?: SnapshotMeta | null }).snapshot ?? null;
 }
 
 /**
@@ -1810,11 +1822,14 @@ export async function snapshotPrune(
  * v3.8: `snapshotsEnabled` carries the user's Time Machine setting to the
  * backend, which snapshots the repo before running this. Omitted means "no
  * opinion" and the backend snapshots; only an explicit `false` opts out.
+ *
+ * Returns that snapshot (or null when none was taken), so the undo
+ * affordance can target this exact point rather than "whatever is newest by
+ * the time the user clicks".
  */
-export async function gitResetToCommit(cwd: string, sha: string, mode: "soft" | "mixed" | "hard", snapshotsEnabled?: boolean): Promise<void> {
+export async function gitResetToCommit(cwd: string, sha: string, mode: "soft" | "mixed" | "hard", snapshotsEnabled?: boolean): Promise<SnapshotMeta | null> {
   if (isTauri()) {
-    await tauriInvoke("git_reset_to_commit", { cwd, sha, mode, snapshotsEnabled });
-    return;
+    return await tauriInvoke("git_reset_to_commit", { cwd, sha, mode, snapshotsEnabled });
   }
   const res = await devFetch(`${DEV_SERVER}/api/git-reset-to-commit`, {
     method: "POST",
@@ -1822,6 +1837,7 @@ export async function gitResetToCommit(cwd: string, sha: string, mode: "soft" | 
     body: JSON.stringify({ cwd, sha, mode, snapshotsEnabled }),
   });
   if (!res.ok) throw new Error(((await res.json()) as any).error ?? `git reset failed: ${res.status}`);
+  return ((await res.json()) as { snapshot?: SnapshotMeta | null }).snapshot ?? null;
 }
 
 /**

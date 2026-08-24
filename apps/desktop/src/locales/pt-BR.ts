@@ -1794,6 +1794,8 @@ const ptBR: Locale = {
     toastCheckout: "Mudou para {0}",
     toastResolution: "Resoluções aplicadas a {0} arquivo(s)",
     toastRestored: "Restaurado",
+    toastMoved: "O repositório mudou, use o Time Machine",
+    toastFailed: "Falha ao desfazer",
     toastNothing: "Nada para desfazer",
     settingsTitle: "Time Machine",
     settingsEnabled: "Instantâneo antes de operações destrutivas",

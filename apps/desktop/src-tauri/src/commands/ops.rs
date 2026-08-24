@@ -18,12 +18,21 @@ use std::time::Instant;
 /// "no opinion" and snapshots; only an explicit `Some(false)` opts out. App
 /// settings live in exactly one place (the frontend), as everywhere else in
 /// this codebase, so Rust never reads them itself.
-fn snapshot_before(cwd: &str, enabled: Option<bool>, kind: &str, label: &str) {
+fn snapshot_before(
+    cwd: &str,
+    enabled: Option<bool>,
+    kind: &str,
+    label: &str,
+) -> Option<crate::git::snapshot::SnapshotMeta> {
     if enabled == Some(false) {
-        return;
+        return None;
     }
-    if let Err(e) = crate::git::snapshot::create_snapshot_inner(cwd, kind, label) {
-        eprintln!("[snapshots] failed to snapshot before {}: {}", kind, e);
+    match crate::git::snapshot::create_snapshot_inner(cwd, kind, label) {
+        Ok(meta) => meta,
+        Err(e) => {
+            eprintln!("[snapshots] failed to snapshot before {}: {}", kind, e);
+            None
+        }
     }
 }
 
@@ -759,9 +768,9 @@ pub(crate) async fn git_discard(
     paths: Vec<String>,
     untracked: bool,
     snapshots_enabled: Option<bool>,
-) -> Result<(), String> {
+) -> Result<Option<crate::git::snapshot::SnapshotMeta>, String> {
     let _repo = repo_lock::write(&cwd);
-    snapshot_before(
+    let snapshot = snapshot_before(
         &cwd,
         snapshots_enabled,
         "discard",
@@ -817,7 +826,7 @@ pub(crate) async fn git_discard(
             }
         }
     }
-    Ok(())
+    Ok(snapshot)
 }
 
 /// Paths of submodules declared in `.gitmodules`, relative to the repo root.
@@ -1045,9 +1054,9 @@ pub(crate) async fn git_switch_branch(
     cwd: String,
     name: String,
     snapshots_enabled: Option<bool>,
-) -> Result<(), String> {
+) -> Result<Option<crate::git::snapshot::SnapshotMeta>, String> {
     let _repo = repo_lock::write(&cwd);
-    snapshot_before(
+    let snapshot = snapshot_before(
         &cwd,
         snapshots_enabled,
         "checkout",
@@ -1069,7 +1078,7 @@ pub(crate) async fn git_switch_branch(
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!("git checkout failed: {}", stderr));
     }
-    Ok(())
+    Ok(snapshot)
 }
 
 #[tauri::command]
@@ -1435,9 +1444,9 @@ pub(crate) async fn git_checkout_commit(
     cwd: String,
     sha: String,
     snapshots_enabled: Option<bool>,
-) -> Result<(), String> {
+) -> Result<Option<crate::git::snapshot::SnapshotMeta>, String> {
     let _repo = repo_lock::write(&cwd);
-    snapshot_before(
+    let snapshot = snapshot_before(
         &cwd,
         snapshots_enabled,
         "checkout",
@@ -1461,7 +1470,7 @@ pub(crate) async fn git_checkout_commit(
             String::from_utf8_lossy(&output.stderr)
         ));
     }
-    Ok(())
+    Ok(snapshot)
 }
 
 #[tauri::command]
@@ -1470,9 +1479,9 @@ pub(crate) async fn git_reset_to_commit(
     sha: String,
     mode: String,
     snapshots_enabled: Option<bool>,
-) -> Result<(), String> {
+) -> Result<Option<crate::git::snapshot::SnapshotMeta>, String> {
     let _repo = repo_lock::write(&cwd);
-    snapshot_before(
+    let snapshot = snapshot_before(
         &cwd,
         snapshots_enabled,
         "reset",
@@ -1502,7 +1511,7 @@ pub(crate) async fn git_reset_to_commit(
             String::from_utf8_lossy(&output.stderr)
         ));
     }
-    Ok(())
+    Ok(snapshot)
 }
 
 #[tauri::command]

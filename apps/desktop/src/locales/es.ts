@@ -1794,6 +1794,8 @@ const es: Locale = {
     toastCheckout: "Cambiado a {0}",
     toastResolution: "Resoluciones aplicadas a {0} archivo(s)",
     toastRestored: "Restaurado",
+    toastMoved: "El repositorio ha cambiado, usa Time Machine",
+    toastFailed: "Error al deshacer",
     toastNothing: "Nada que deshacer",
     settingsTitle: "Time Machine",
     settingsEnabled: "Instantánea antes de operaciones destructivas",

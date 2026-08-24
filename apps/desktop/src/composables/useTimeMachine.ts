@@ -164,6 +164,37 @@ export function useTimeMachine() {
     return true;
   }
 
+  /**
+   * Restore one specific snapshot by id, for callers that already know which
+   * point they mean — the undo toast knows the snapshot its own operation
+   * created, and must not drift onto whatever happens to be newest by the
+   * time the user clicks.
+   *
+   * Refuses once HEAD has moved past the snapshot. Restoring rewinds the
+   * branch to the HEAD the snapshot recorded, so a commit made afterwards
+   * would go with it. The Time Machine can do that: it asks first. A toast
+   * cannot — it is one click, no confirmation, and the label only ever
+   * promised to undo the small thing it names.
+   */
+  async function restoreSnapshotById(
+    cwd: string,
+    id: string,
+  ): Promise<"restored" | "moved" | "missing"> {
+    if (!cwd || !id) return "missing";
+    await refresh(cwd);
+    const target = snaps.snapshots.value.find((s) => s.id === id);
+    if (!target) return "missing";
+
+    // The reflog's newest entry is where HEAD is now. It carries git's short
+    // hash, hence the prefix test against the snapshot's full sha.
+    const head = undoStack.entries.value[0];
+    if (head && head.hash && !target.headSha.startsWith(head.hash)) return "moved";
+
+    await snaps.restore(cwd, id);
+    await refresh(cwd);
+    return "restored";
+  }
+
   /** ⇧⌘Z — go back to where the last restore started from. */
   async function redo(cwd: string): Promise<void> {
     const target = snaps.redoTarget.value;
@@ -175,5 +206,16 @@ export function useTimeMachine() {
     await refresh(cwd);
   }
 
-  return { timeline, isLoading, lastError, canUndo, canRedo, refresh, restore, undoLast, redo };
+  return {
+    timeline,
+    isLoading,
+    lastError,
+    canUndo,
+    canRedo,
+    refresh,
+    restore,
+    restoreSnapshotById,
+    undoLast,
+    redo,
+  };
 }

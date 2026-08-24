@@ -1780,6 +1780,8 @@ const zhCN: Locale = {
     toastCheckout: "已切换到 {0}",
     toastResolution: "已对 {0} 个文件应用解决方案",
     toastRestored: "已恢复",
+    toastMoved: "仓库已发生变化，请使用时光机",
+    toastFailed: "撤销失败",
     toastNothing: "没有可撤销的操作",
     settingsTitle: "时光机",
     settingsEnabled: "在破坏性操作前创建快照",

@@ -497,18 +497,26 @@ function restoreSnapshot(cwd, id) {
 
   g(["read-tree", "-u", "--reset", `${target.commit}^{tree}`]);
 
+  // Staged into a scratch index and moved into place only on success — see
+  // the step 3 comment in snapshot.rs. Emptying the live index first would
+  // leave it wiped whenever `update-index` fails.
   const dir = snapshotGitDir(cwd);
-  const infoPath = join(dir, `gitwand-snapshot-restore-${process.pid}-${snapshotStampMs()}`);
+  const stamp = `${process.pid}-${snapshotStampMs()}`;
+  const infoPath = join(dir, `gitwand-snapshot-restore-${stamp}`);
+  const stagedIndex = join(dir, `gitwand-snapshot-restore-index-${stamp}`);
   try {
     writeFileSync(infoPath, g(["cat-file", "blob", `${target.commit}^2:index-info`]) + "\n");
-    g(["read-tree", "--empty"]);
     execFileSync(GIT, ["update-index", "--index-info"], {
       cwd,
       encoding: "utf-8",
       input: readFileSync(infoPath, "utf-8"),
+      env: { ...process.env, GIT_INDEX_FILE: stagedIndex },
     });
+    renameSync(stagedIndex, join(dir, "index"));
   } finally {
-    try { unlinkSync(infoPath); } catch { /* already gone */ }
+    for (const p of [infoPath, stagedIndex]) {
+      try { unlinkSync(p); } catch { /* already gone */ }
+    }
   }
 
   // Merge state, made to match the snapshot in BOTH directions — see the
@@ -545,11 +553,12 @@ function pruneSnapshots(cwd, maxAgeDays, maxCount) {
  * explicit `false` opts out; `undefined` means "no opinion" and snapshots.
  */
 function snapshotBefore(cwd, enabled, kind, label) {
-  if (enabled === false) return;
+  if (enabled === false) return null;
   try {
-    createSnapshot(cwd, kind, label);
+    return createSnapshot(cwd, kind, label);
   } catch (err) {
     console.warn(`[snapshots] failed to snapshot before ${kind}:`, err.message);
+    return null;
   }
 }
 
@@ -2504,7 +2513,7 @@ async function handleRequest(req, res) {
       if (!cwd || !paths) return jsonResponse(req, res, { error: "Missing cwd or paths" }, 400);
       try {
         const resolvedCwd = resolve(cwd);
-        snapshotBefore(resolvedCwd, snapshotsEnabled, "discard", `Discard ${paths.length} file(s)`);
+        const snapshot = snapshotBefore(resolvedCwd, snapshotsEnabled, "discard", `Discard ${paths.length} file(s)`);
         if (untracked) {
           // Fichiers non-suivis → git clean -f
           execSync(`git clean -f -- ${paths.map((p) => `"${p}"`).join(" ")}`, {
@@ -2547,7 +2556,7 @@ async function handleRequest(req, res) {
             }
           }
         }
-        return jsonResponse(req, res, { ok: true });
+        return jsonResponse(req, res, { ok: true, snapshot });
       } catch (err) {
         return jsonResponse(req, res, { error: err.message, stderr: err.stderr }, 500);
       }
@@ -2794,9 +2803,9 @@ async function handleRequest(req, res) {
       if (!cwd || !name) return jsonResponse(req, res, { error: "Missing cwd or name" }, 400);
       try {
         const resolvedCwd = resolve(cwd);
-        snapshotBefore(resolvedCwd, snapshotsEnabled, "checkout", `Switch to ${name}`);
+        const snapshot = snapshotBefore(resolvedCwd, snapshotsEnabled, "checkout", `Switch to ${name}`);
         execSync(`git checkout "${name}"`, { cwd: resolvedCwd, encoding: "utf-8", shell: true });
-        return jsonResponse(req, res, { ok: true });
+        return jsonResponse(req, res, { ok: true, snapshot });
       } catch (err) {
         return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
       }
@@ -5929,9 +5938,9 @@ async function handleRequest(req, res) {
       const { cwd, sha, snapshotsEnabled } = await readBody(req);
       if (!cwd || !sha) return jsonResponse(req, res, { error: "Missing cwd or sha" }, 400);
       try {
-        snapshotBefore(resolve(cwd), snapshotsEnabled, "checkout", `Checkout ${sha}`);
+        const snapshot = snapshotBefore(resolve(cwd), snapshotsEnabled, "checkout", `Checkout ${sha}`);
         execFileSync(GIT, ["checkout", sha], { cwd: resolve(cwd) });
-        return jsonResponse(req, res, { ok: true });
+        return jsonResponse(req, res, { ok: true, snapshot });
       } catch (err) {
         return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
       }
@@ -5943,9 +5952,9 @@ async function handleRequest(req, res) {
       if (!cwd || !sha) return jsonResponse(req, res, { error: "Missing cwd or sha" }, 400);
       const flag = mode === "soft" ? "--soft" : mode === "hard" ? "--hard" : "--mixed";
       try {
-        snapshotBefore(resolve(cwd), snapshotsEnabled, "reset", `Reset ${mode} to ${sha}`);
+        const snapshot = snapshotBefore(resolve(cwd), snapshotsEnabled, "reset", `Reset ${mode} to ${sha}`);
         execFileSync(GIT, ["reset", flag, sha], { cwd: resolve(cwd) });
-        return jsonResponse(req, res, { ok: true });
+        return jsonResponse(req, res, { ok: true, snapshot });
       } catch (err) {
         return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
       }

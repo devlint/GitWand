@@ -49,6 +49,21 @@ describe("useUndoToast", () => {
     expect(toast.offer.value).toBeNull();
   });
 
+  it("carries the snapshot the operation actually created", () => {
+    // The button must rewind THAT point, not "whatever is newest when the
+    // user clicks": a commit made inside the 8s window would otherwise be
+    // what an offer labelled "1 file discarded" undoes.
+    const toast = useUndoToast();
+    toast.show("Discarded 1 file(s)", "1700000000000-abcd1234");
+    expect(toast.offer.value?.snapshotId).toBe("1700000000000-abcd1234");
+  });
+
+  it("has no snapshot id when the backend took none", () => {
+    const toast = useUndoToast();
+    toast.show("Switched to main");
+    expect(toast.offer.value?.snapshotId).toBeNull();
+  });
+
   it("dismiss cancels the pending timer, so a later offer survives", () => {
     const toast = useUndoToast();
     toast.show("first");
