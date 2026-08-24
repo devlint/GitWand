@@ -528,6 +528,21 @@ function pruneSnapshots(cwd, maxAgeDays, maxCount) {
   return deleted;
 }
 
+/**
+ * Mirror of `snapshot_before` in `src-tauri/src/commands/ops.rs`: capture a
+ * restorable point before a destructive route runs. Best-effort, so a
+ * snapshot failure never blocks the operation the user asked for. Only an
+ * explicit `false` opts out; `undefined` means "no opinion" and snapshots.
+ */
+function snapshotBefore(cwd, enabled, kind, label) {
+  if (enabled === false) return;
+  try {
+    createSnapshot(cwd, kind, label);
+  } catch (err) {
+    console.warn(`[snapshots] failed to snapshot before ${kind}:`, err.message);
+  }
+}
+
 function jsonResponse(req, res, data, status = 200) {
   res.writeHead(status, corsHeaders(req));
   res.end(JSON.stringify(data));
@@ -2475,10 +2490,11 @@ async function handleRequest(req, res) {
     // Pour les fichiers non-suivis (untracked), utiliser git clean -f
     // Pour les fichiers suivis modifiés, utiliser git restore (ou checkout --)
     if (url.pathname === "/api/git-discard" && req.method === "POST") {
-      const { cwd, paths, untracked } = await readBody(req);
+      const { cwd, paths, untracked, snapshotsEnabled } = await readBody(req);
       if (!cwd || !paths) return jsonResponse(req, res, { error: "Missing cwd or paths" }, 400);
       try {
         const resolvedCwd = resolve(cwd);
+        snapshotBefore(resolvedCwd, snapshotsEnabled, "discard", `Discard ${paths.length} file(s)`);
         if (untracked) {
           // Fichiers non-suivis → git clean -f
           execSync(`git clean -f -- ${paths.map((p) => `"${p}"`).join(" ")}`, {
@@ -2764,10 +2780,11 @@ async function handleRequest(req, res) {
 
     // POST /api/git-switch-branch  { cwd, name }
     if (url.pathname === "/api/git-switch-branch" && req.method === "POST") {
-      const { cwd, name } = await readBody(req);
+      const { cwd, name, snapshotsEnabled } = await readBody(req);
       if (!cwd || !name) return jsonResponse(req, res, { error: "Missing cwd or name" }, 400);
       try {
         const resolvedCwd = resolve(cwd);
+        snapshotBefore(resolvedCwd, snapshotsEnabled, "checkout", `Switch to ${name}`);
         execSync(`git checkout "${name}"`, { cwd: resolvedCwd, encoding: "utf-8", shell: true });
         return jsonResponse(req, res, { ok: true });
       } catch (err) {
@@ -5899,9 +5916,10 @@ async function handleRequest(req, res) {
 
     // POST /api/git-checkout-commit  { cwd, sha }
     if (url.pathname === "/api/git-checkout-commit" && req.method === "POST") {
-      const { cwd, sha } = await readBody(req);
+      const { cwd, sha, snapshotsEnabled } = await readBody(req);
       if (!cwd || !sha) return jsonResponse(req, res, { error: "Missing cwd or sha" }, 400);
       try {
+        snapshotBefore(resolve(cwd), snapshotsEnabled, "checkout", `Checkout ${sha}`);
         execFileSync(GIT, ["checkout", sha], { cwd: resolve(cwd) });
         return jsonResponse(req, res, { ok: true });
       } catch (err) {
@@ -5911,10 +5929,11 @@ async function handleRequest(req, res) {
 
     // POST /api/git-reset-to-commit  { cwd, sha, mode }
     if (url.pathname === "/api/git-reset-to-commit" && req.method === "POST") {
-      const { cwd, sha, mode } = await readBody(req);
+      const { cwd, sha, mode, snapshotsEnabled } = await readBody(req);
       if (!cwd || !sha) return jsonResponse(req, res, { error: "Missing cwd or sha" }, 400);
       const flag = mode === "soft" ? "--soft" : mode === "hard" ? "--hard" : "--mixed";
       try {
+        snapshotBefore(resolve(cwd), snapshotsEnabled, "reset", `Reset ${mode} to ${sha}`);
         execFileSync(GIT, ["reset", flag, sha], { cwd: resolve(cwd) });
         return jsonResponse(req, res, { ok: true });
       } catch (err) {
