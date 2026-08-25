@@ -27,6 +27,14 @@ Snapshots are pruned on an age and a count cap, checked when you open a repo rat
 
 None of this leaks into your history. GitWand excludes its own snapshot refs from every history traversal it runs, so the Git Tree, commit counts and contributor stats are untouched, and nothing is pushed.
 
+## v3.7.3 — August 2026
+
+A community report from someone running a self-hosted GitLab instance: GitWand's PR panel kept showing GitHub, even though their `glab` CLI was correctly logged in and everything else about their setup was fine.
+
+The forge detection GitWand uses to decide which provider to talk to worked by scanning the remote URL's text for a recognizable name — `github.com`, `gitlab.com`, or just the word "gitlab" anywhere in the URL for a self-hosted instance. That covers the common case (`git.company.com/gitlab/...`), but breaks the moment a self-hosted instance sits on a hostname that doesn't happen to contain that word, an internal alias like `forge`, for instance. With nothing left to match, detection gave up and the interface quietly fell back to GitHub instead of admitting it didn't know.
+
+The fix asks the CLI itself instead of trying to guess from the hostname. When the URL doesn't give away the forge, GitWand now checks whether `glab` or `gh` is authenticated for that exact host, the same information those tools already track internally. Whichever one says yes wins, so a self-hosted GitLab instance is now recognized correctly regardless of what its hostname happens to look like, as long as it's a host you've already logged into via CLI.
+
 ## v3.7.2 — August 2026
 
 One fix, and an embarrassing one: the conflict predictor was wrong every single time, always in the same direction.

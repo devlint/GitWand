@@ -3733,6 +3733,50 @@ pub(crate) async fn reconstruct_conflict(
 
 // ─── Git remote info ─────────────────────────────────────────
 
+/// Timeout for the `glab`/`gh` `auth status` probes below — best-effort,
+/// bounded so a missing or hanging CLI degrades to "unknown" instead of
+/// blocking remote-info resolution.
+const FORGE_AUTH_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Fallback provider detection for a remote host `detect_provider` couldn't
+/// classify from the URL text alone (e.g. a self-hosted GitLab instance whose
+/// hostname doesn't contain "gitlab" — GitHub issue #168).
+///
+/// Runs `<bin> auth status --hostname <host>` from `cwd` for each forge CLI in
+/// turn; whichever one reports that exact host as authenticated wins. Reusing
+/// `hidden_cmd` means this picks up the same `GH_TOKEN`/`GITLAB_TOKEN`
+/// ambient-env fallback the rest of the app already relies on (#149), so it
+/// works even when the CLI's own keychain lookup would hang.
+fn detect_provider_via_cli_auth(cwd: &str, host: &str) -> &'static str {
+    let authenticated_for_host = |bin: &str| -> bool {
+        let mut cmd = hidden_cmd(bin);
+        cmd.args(["auth", "status", "--hostname", host])
+            .current_dir(cwd);
+        let Ok(output) = output_with_timeout(cmd, FORGE_AUTH_PROBE_TIMEOUT) else {
+            return false;
+        };
+        if !output.status.success() {
+            return false;
+        }
+        // Guard against a CLI that ignores an unknown --hostname and silently
+        // reports its default host's status instead of erroring.
+        let combined = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        combined.contains(host)
+    };
+
+    if authenticated_for_host("glab") {
+        "gitlab"
+    } else if authenticated_for_host("gh") {
+        "github"
+    } else {
+        "unknown"
+    }
+}
+
 #[tauri::command]
 pub(crate) async fn git_remote_info(cwd: String) -> Result<RemoteInfo, String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -3770,7 +3814,12 @@ pub(crate) async fn git_remote_info(cwd: String) -> Result<RemoteInfo, String> {
         }
 
         if let Some((name, url)) = origin.or(first) {
-            let provider = detect_provider(&url);
+            let mut provider = detect_provider(&url);
+            if provider == "unknown" {
+                if let Some(host) = extract_remote_host(&url) {
+                    provider = detect_provider_via_cli_auth(&cwd, &host);
+                }
+            }
 
             let (owner, repo) = parse_remote_owner_repo(&url);
 
@@ -4589,6 +4638,28 @@ mod tree_conflict_tests {
         let info = tauri::async_runtime::block_on(git_remote_info(repo.cwd()))
             .expect("git_remote_info failed");
         assert_eq!(info.name, "upstream", "the only remote is the answer");
+    }
+
+    #[test]
+    fn git_remote_info_degrades_to_unknown_when_cli_auth_probe_finds_nothing() {
+        // Self-hosted GitLab issue #168: a remote host with no recognizable
+        // substring (unlike "gitlab.example.com") falls through
+        // `detect_provider` and hits the `glab`/`gh auth status --hostname`
+        // fallback. In this sandboxed test env neither CLI is authenticated
+        // for the made-up host below, so the fallback must degrade to
+        // "unknown" rather than erroring, hanging, or silently claiming a
+        // provider it never confirmed.
+        let repo = TempRepo::new();
+        repo.git_ok(&[
+            "remote",
+            "add",
+            "origin",
+            "git@definitely-not-a-real-forge-host.invalid:acme/checkout.git",
+        ]);
+
+        let info = tauri::async_runtime::block_on(git_remote_info(repo.cwd()))
+            .expect("git_remote_info failed");
+        assert_eq!(info.provider, "unknown");
     }
 
     #[test]

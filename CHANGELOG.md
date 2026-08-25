@@ -30,6 +30,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Opt-in AI snapshot labels now persist in a linked worktree. They were written to a sidecar under `.git/`, which is a file rather than a directory in any linked worktree, so every read and write failed with `ENOTDIR` and was silently swallowed; they live in `localStorage` keyed by repo path now, like the other ancillary per-repo state.
 - The snapshot retention fields refuse a value that would delete every snapshot. Clearing the input yields `Number("") === 0`, which was persisted verbatim and made the next prune wipe the whole undo history; the value is now clamped at the input and the destructive case is rejected again before the backend is called.
 
+## [3.7.3] - 2026-08-25
+
+### Fixed
+
+- **Self-hosted GitLab remotes fell through to the GitHub provider in the PR panel** (#168). `detect_provider()` only recognized a GitLab remote by matching the literal substring `"gitlab"` in the URL, so a self-hosted instance on a hostname that doesn't contain it (e.g. an internal alias like `forge`) was classified `"unknown"`, and the frontend's `githubProvider` fallback kicked in — even though `glab` was correctly authenticated for that host. `git_remote_info` now falls back to probing `glab auth status --hostname <host>` (then `gh auth status --hostname <host>`) from the repo directory whenever the URL-based detection is inconclusive, so any self-hosted forge the user has already authenticated via CLI is recognized regardless of hostname. `dev-server.mjs` (the `pnpm dev:web` mock backend) intentionally does not mirror this CLI probe, matching its existing "no glab in dev:web" mock-only design; an unrecognized host there still resolves to `"unknown"`.
+
 ## [3.7.2] - 2026-08-24
 
 ### Fixed
@@ -1371,6 +1377,7 @@ Design-system foundations — the app header and every overlay now ride on a sha
 - 28 tests covering all patterns + real-world scenarios (package.json, Laravel routes, Vue SFC, CSS, .env files)
 
 [Unreleased]: https://github.com/devlint/GitWand/compare/v3.7.0...HEAD
+[3.7.3]: https://github.com/devlint/GitWand/compare/v3.7.2...v3.7.3
 [3.7.2]: https://github.com/devlint/GitWand/compare/v3.7.1...v3.7.2
 [3.7.1]: https://github.com/devlint/GitWand/compare/v3.7.0...v3.7.1
 [3.7.0]: https://github.com/devlint/GitWand/compare/v3.6.6...v3.7.0
