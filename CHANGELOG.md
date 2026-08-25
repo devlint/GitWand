@@ -1376,7 +1376,8 @@ Design-system foundations — the app header and every overlay now ride on a sha
 - CI pipeline via GitHub Actions (Node 18, 20, 22)
 - 28 tests covering all patterns + real-world scenarios (package.json, Laravel routes, Vue SFC, CSS, .env files)
 
-[Unreleased]: https://github.com/devlint/GitWand/compare/v3.7.0...HEAD
+[Unreleased]: https://github.com/devlint/GitWand/compare/v3.8.0...HEAD
+[3.8.0]: https://github.com/devlint/GitWand/compare/v3.7.3...v3.8.0
 [3.7.3]: https://github.com/devlint/GitWand/compare/v3.7.2...v3.7.3
 [3.7.2]: https://github.com/devlint/GitWand/compare/v3.7.1...v3.7.2
 [3.7.1]: https://github.com/devlint/GitWand/compare/v3.7.0...v3.7.1
