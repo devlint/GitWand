@@ -449,6 +449,20 @@ pub(crate) fn prune_snapshots_inner(
     max_age_days: u32,
     max_count: usize,
 ) -> Result<usize, String> {
+    // Refuse the degenerate retention rather than obey it. A 0-day or 0-count
+    // cap means "delete every snapshot", which is never what someone
+    // configuring a safety net intends, and this is the last layer before the
+    // refs actually go. The frontend clamps at the input and guards again in
+    // `useSnapshots.prune`; both of those are one edit away from regressing,
+    // and a hand-edited settings file bypasses them entirely.
+    if max_age_days < 1 || max_count < 1 {
+        return Err(format!(
+            "refusing a retention that would delete every snapshot \
+             (max_age_days={}, max_count={})",
+            max_age_days, max_count
+        ));
+    }
+
     let all = list_snapshots_inner(cwd)?; // newest first
     let cutoff = now_ms().saturating_sub(u64::from(max_age_days) * 86_400_000);
 
@@ -964,6 +978,31 @@ mod tests {
     }
 
     #[test]
+    fn prune_refuses_a_retention_that_would_delete_everything() {
+        let repo = TempRepo::new();
+        repo.write("a.txt", "v1\n");
+        repo.git(&["add", "."]);
+        repo.git(&["commit", "-qm", "c1"]);
+        create_snapshot_inner(repo.cwd(), "manual", "keep me")
+            .unwrap()
+            .unwrap();
+
+        for (days, count) in [(0u32, 200usize), (14, 0), (0, 0)] {
+            assert!(
+                prune_snapshots_inner(repo.cwd(), days, count).is_err(),
+                "days={} count={} should be refused",
+                days,
+                count
+            );
+        }
+        assert_eq!(
+            list_snapshots_inner(repo.cwd()).unwrap().len(),
+            1,
+            "the refused prune must not have deleted anything"
+        );
+    }
+
+    #[test]
     fn prune_respects_age_cap() {
         let repo = TempRepo::new();
         repo.write("a.txt", "v1\n");
@@ -973,8 +1012,36 @@ mod tests {
             .unwrap()
             .unwrap();
 
-        // Age cap of 0 days means "everything is stale".
-        let deleted = prune_snapshots_inner(repo.cwd(), 0, 100).unwrap();
+        // Backdate the snapshot's ref message so it reads as older than the
+        // cap, rather than using a 0-day cap, which is now refused outright.
+        let snaps = list_snapshots_inner(repo.cwd()).unwrap();
+        let old_meta = format!(
+            r#"{{"id":"","commit":"","kind":"manual","label":"old","timestampMs":1,"headSha":"{}","headRef":"main","mergeHead":null}}"#,
+            snaps[0].head_sha
+        );
+        let tree = format!("{}^{{tree}}", snaps[0].commit);
+        let backdated = String::from_utf8_lossy(
+            &repo
+                .git(&[
+                    "commit-tree",
+                    &tree,
+                    "-p",
+                    &snaps[0].head_sha,
+                    "-m",
+                    &old_meta,
+                ])
+                .stdout,
+        )
+        .trim()
+        .to_string();
+        repo.git(&[
+            "update-ref",
+            "-d",
+            &format!("refs/gitwand/snapshots/{}", snaps[0].id),
+        ]);
+        repo.git(&["update-ref", "refs/gitwand/snapshots/1-oldsnap", &backdated]);
+
+        let deleted = prune_snapshots_inner(repo.cwd(), 1, 100).unwrap();
         assert_eq!(deleted, 1);
         assert!(list_snapshots_inner(repo.cwd()).unwrap().is_empty());
     }

@@ -36,7 +36,7 @@ use gitwand_desktop_lib::{
     git_branches_parity, git_commit_submodule_changes_parity, git_log_parity,
     git_remote_info_parity, git_stash_list_parity, git_status_libgit2_parity, git_status_parity,
     git_submodule_branches_parity, scan_secrets_parity, snapshot_create_parity,
-    snapshot_list_parity,
+    snapshot_list_parity, snapshot_prune_parity, snapshot_restore_parity,
 };
 use serde_json::{json, Value};
 use std::io::{self, Read};
@@ -147,6 +147,32 @@ fn main() -> ExitCode {
                 Err(code) => return code,
             };
             to_json(snapshot_list_parity(cwd))
+        }
+        "snapshot-restore" => {
+            let cwd = match must_str("cwd") {
+                Ok(v) => v,
+                Err(code) => return code,
+            };
+            let id = match must_str("id") {
+                Ok(v) => v,
+                Err(code) => return code,
+            };
+            to_json(snapshot_restore_parity(cwd, id))
+        }
+        "snapshot-prune" => {
+            let cwd = match must_str("cwd") {
+                Ok(v) => v,
+                Err(code) => return code,
+            };
+            let days = input
+                .get("maxAgeDays")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(14) as u32;
+            let count = input
+                .get("maxCount")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(200) as usize;
+            to_json(snapshot_prune_parity(cwd, days, count))
         }
         "snapshot-create" => {
             let cwd = match must_str("cwd") {

@@ -157,6 +157,12 @@ export function useUndoStack() {
           summary: summarize(subject, type),
           raw: subject,
           date,
+          // A missing/unparseable `%ct` degrades to 0 on purpose. The format
+          // applies to every line, so either all entries have a timestamp or
+          // none do; an all-zero set ties on time and falls through to the
+          // reflog index in `compareNewestFirst`, which is the correct order
+          // anyway. A `Date.now()` fallback would be worse: it would float a
+          // broken entry to the TOP of the timeline.
           timestampMs: Number(committedAt) * 1000 || 0,
         });
       }

@@ -248,6 +248,25 @@ pub fn snapshot_create_parity(
     tauri::async_runtime::block_on(commands::snapshots::snapshot_create(cwd, kind, label))
 }
 
+pub fn snapshot_restore_parity(
+    cwd: String,
+    id: String,
+) -> Result<git::snapshot::SnapshotMeta, String> {
+    tauri::async_runtime::block_on(commands::snapshots::snapshot_restore(cwd, id))
+}
+
+pub fn snapshot_prune_parity(
+    cwd: String,
+    max_age_days: u32,
+    max_count: usize,
+) -> Result<usize, String> {
+    tauri::async_runtime::block_on(commands::snapshots::snapshot_prune(
+        cwd,
+        max_age_days,
+        max_count,
+    ))
+}
+
 pub fn git_submodule_branches_parity(
     cwd: String,
     submodule_path: String,

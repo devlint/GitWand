@@ -65,6 +65,11 @@
   --sidebar-width: 350px;
   --header-height: 56px;
   --tabbar-height: 40px;
+  /* Height of the floating AppDock pill (v2.24.0). Declared here rather than
+     inside the component so anything that has to sit clear of the dock — the
+     v3.8 undo toast, for one — positions itself from the same number instead
+     of hardcoding a guess that silently drifts. */
+  --app-dock-height: 44px;
 
   /* Code */
   --code-font-size: 12px;

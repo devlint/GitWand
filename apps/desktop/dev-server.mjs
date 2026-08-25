@@ -535,6 +535,13 @@ function restoreSnapshot(cwd, id) {
 }
 
 function pruneSnapshots(cwd, maxAgeDays, maxCount) {
+  // Mirrors the Rust guard: a 0-day / 0-count retention means "delete every
+  // snapshot", which is never intended and is refused at the last layer.
+  if (!(maxAgeDays >= 1) || !(maxCount >= 1)) {
+    throw new Error(
+      `refusing a retention that would delete every snapshot (maxAgeDays=${maxAgeDays}, maxCount=${maxCount})`,
+    );
+  }
   const all = listSnapshots(cwd);
   const cutoff = Date.now() - maxAgeDays * 86_400_000;
   let deleted = 0;

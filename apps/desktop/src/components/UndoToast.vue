@@ -77,12 +77,13 @@ async function onUndo() {
 </template>
 
 <style scoped>
-/* Sits just above the floating AppDock (v2.24.0), which anchors at
-   `bottom: var(--space-4)` with a ~44px pill. */
+/* Sits just above the floating AppDock (v2.24.0). The dock's own offset and
+   height drive the position, so a change to either moves the toast with it
+   instead of leaving it overlapping. */
 .undo-toast {
   position: absolute;
   left: 50%;
-  bottom: calc(var(--space-4, 12px) + 56px);
+  bottom: calc(var(--space-4, 12px) + var(--app-dock-height, 44px) + 12px);
   transform: translateX(-50%);
   z-index: 51;
   display: flex;
