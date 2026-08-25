@@ -567,7 +567,9 @@ pub(crate) fn extract_remote_host(url: &str) -> Option<String> {
     }
     let host_start = url.find("://")? + 3;
     let rest = &url[host_start..];
-    let rest = rest.rsplit_once('@').map_or(rest, |(_, host_part)| host_part);
+    let rest = rest
+        .rsplit_once('@')
+        .map_or(rest, |(_, host_part)| host_part);
     let host = rest.split(['/', ':']).next()?;
     (!host.is_empty()).then(|| host.to_string())
 }
