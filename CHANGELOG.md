@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Self-hosted GitLab remotes fell through to the GitHub provider in the PR panel** (#168). `detect_provider()` only recognized a GitLab remote by matching the literal substring `"gitlab"` in the URL, so a self-hosted instance on a hostname that doesn't contain it (e.g. an internal alias like `forge`) was classified `"unknown"`, and the frontend's `githubProvider` fallback kicked in — even though `glab` was correctly authenticated for that host. `git_remote_info` now falls back to probing `glab auth status --hostname <host>` (then `gh auth status --hostname <host>`) from the repo directory whenever the URL-based detection is inconclusive, so any self-hosted forge the user has already authenticated via CLI is recognized regardless of hostname. `dev-server.mjs` (the `pnpm dev:web` mock backend) intentionally does not mirror this CLI probe, matching its existing "no glab in dev:web" mock-only design; an unrecognized host there still resolves to `"unknown"`.
+
 ## [3.7.2] - 2026-08-24
 
 ### Fixed

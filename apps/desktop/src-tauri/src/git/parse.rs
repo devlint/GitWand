@@ -552,6 +552,26 @@ pub(crate) fn detect_provider(url: &str) -> &'static str {
     }
 }
 
+/// Extracts the hostname from a git remote URL (`git@host:owner/repo.git` or
+/// `scheme://[user@]host[:port]/owner/repo.git`). Returns `None` for a URL
+/// shaped like neither form.
+///
+/// Used as the input to the CLI-auth fallback in `git_remote_info`
+/// (`commands/ops.rs`) when `detect_provider` can't identify the forge from
+/// the URL text alone — e.g. a self-hosted GitLab instance on a hostname that
+/// doesn't contain "gitlab" (GitHub issue #168).
+pub(crate) fn extract_remote_host(url: &str) -> Option<String> {
+    if let Some(rest) = url.strip_prefix("git@") {
+        let host = rest.split(':').next()?;
+        return (!host.is_empty()).then(|| host.to_string());
+    }
+    let host_start = url.find("://")? + 3;
+    let rest = &url[host_start..];
+    let rest = rest.rsplit_once('@').map_or(rest, |(_, host_part)| host_part);
+    let host = rest.split(['/', ':']).next()?;
+    (!host.is_empty()).then(|| host.to_string())
+}
+
 pub(crate) fn parse_remote_owner_repo(url: &str) -> (String, String) {
     if let Some(colon_pos) = url.find(':') {
         if url.starts_with("git@") {
@@ -1685,7 +1705,7 @@ mod repo_tree_tests {
 
 #[cfg(test)]
 mod remote_provider_tests {
-    use super::{detect_provider, parse_remote_owner_repo};
+    use super::{detect_provider, extract_remote_host, parse_remote_owner_repo};
 
     #[test]
     fn detects_cursor_origin_https_remote() {
@@ -1741,6 +1761,39 @@ mod remote_provider_tests {
             detect_provider("https://git.sr.ht/~acme/checkout"),
             "unknown"
         );
+    }
+
+    #[test]
+    fn extracts_host_from_ssh_and_https_remotes() {
+        assert_eq!(
+            extract_remote_host("git@github.com:acme/checkout.git"),
+            Some("github.com".to_string())
+        );
+        assert_eq!(
+            extract_remote_host("https://github.com/acme/checkout.git"),
+            Some("github.com".to_string())
+        );
+        // Self-hosted GitLab on a hostname that doesn't contain "gitlab" —
+        // this is the case `detect_provider` can't classify (issue #168).
+        assert_eq!(
+            extract_remote_host("git@forge:acme/checkout.git"),
+            Some("forge".to_string())
+        );
+        assert_eq!(
+            extract_remote_host("https://forge/acme/checkout.git"),
+            Some("forge".to_string())
+        );
+        // ssh:// form with an embedded user and port.
+        assert_eq!(
+            extract_remote_host("ssh://git@forge.internal:2222/acme/checkout.git"),
+            Some("forge.internal".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_remote_host_returns_none_for_malformed_urls() {
+        assert_eq!(extract_remote_host("not-a-remote-url"), None);
+        assert_eq!(extract_remote_host(""), None);
     }
 
     #[test]

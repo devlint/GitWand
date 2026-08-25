@@ -5701,6 +5701,13 @@ async function handleRequest(req, res) {
         else if (remoteUrl.includes("gitlab")) provider = "gitlab";
         else if (remoteUrl.includes("bitbucket")) provider = "bitbucket";
         else if (remoteUrl.includes("dev.azure.com") || remoteUrl.includes("visualstudio.com")) provider = "azure";
+        // NOTE: the Rust command additionally falls back to a `glab`/`gh auth
+        // status --hostname <host>` CLI probe when the substring chain above
+        // still lands on "unknown" (self-hosted forge on a hostname that
+        // doesn't contain "gitlab" — issue #168). That fallback is
+        // deliberately NOT mirrored here: dev-server.mjs never shells out to
+        // `glab` (see the "no glab in dev:web" mock at /api/gl-list-issues),
+        // so an unrecognized host just stays "unknown" in web-dev mode.
 
         // Extract owner/repo — SSH (git@host:owner/repo.git) or HTTPS.
         let owner = "";
