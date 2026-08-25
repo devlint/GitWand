@@ -39,6 +39,12 @@ export interface UndoEntry {
   raw: string;
   /** Relative date string from git. */
   date: string;
+  /**
+   * Unix epoch in ms. Needed by the v3.8 Time Machine timeline, which merges
+   * these entries with snapshots: `date` is git's relative string ("2 hours
+   * ago") and cannot be sorted against a numeric timestamp.
+   */
+  timestampMs: number;
 }
 
 // ─── Reflog parsing ─────────────────────────────────────
@@ -120,10 +126,10 @@ export function useUndoStack() {
     lastError.value = null;
 
     try {
-      // Format: hash<TAB>prevHash<TAB>subject<TAB>relativeDate
+      // Format: hash<TAB>prevHash<TAB>subject<TAB>relativeDate<TAB>unixSeconds
       const result = await gitExec(cwd, [
         "reflog",
-        "--format=%h\t%gd\t%gs\t%cr",
+        "--format=%h\t%gd\t%gs\t%cr\t%ct",
         `-n${MAX_ENTRIES}`,
       ]);
 
@@ -136,8 +142,8 @@ export function useUndoStack() {
 
       for (let i = 0; i < lines.length; i++) {
         const parts = lines[i].split("\t");
-        if (parts.length < 4) continue;
-        const [hash, , subject, date] = parts;
+        if (parts.length < 5) continue;
+        const [hash, , subject, date, committedAt] = parts;
         const type = classifyReflog(subject);
         // prevHash = the hash of the NEXT line (older state)
         // For the last entry, prevHash stays empty (can't undo further)
@@ -151,6 +157,13 @@ export function useUndoStack() {
           summary: summarize(subject, type),
           raw: subject,
           date,
+          // A missing/unparseable `%ct` degrades to 0 on purpose. The format
+          // applies to every line, so either all entries have a timestamp or
+          // none do; an all-zero set ties on time and falls through to the
+          // reflog index in `compareNewestFirst`, which is the correct order
+          // anyway. A `Date.now()` fallback would be worse: it would float a
+          // broken entry to the TOP of the timeline.
+          timestampMs: Number(committedAt) * 1000 || 0,
         });
       }
 

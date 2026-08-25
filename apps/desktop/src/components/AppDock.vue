@@ -587,6 +587,9 @@ onBeforeUnmount(() => {
 
 .app-dock__pill {
   pointer-events: auto;
+  /* Single source of truth, shared with anything that must clear the dock
+     (see `--app-dock-height` in assets/main.css). */
+  min-height: var(--app-dock-height, 44px);
   display: flex;
   align-items: stretch;
   gap: var(--space-1, 4px);

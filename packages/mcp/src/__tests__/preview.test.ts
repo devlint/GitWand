@@ -46,7 +46,12 @@ function makeRepo(): Repo {
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
-describe('simulate3way via toolPreviewRebase', () => {
+// These cases spin up real git repos and run the predictor against them, so
+// they are I/O-bound and measurably slower than vitest's 5s default whenever
+// the whole monorepo suite runs in parallel (5.8s and 8.4s observed, ~1s in
+// isolation). That made `pnpm -r run test` non-deterministic on a loaded
+// machine, and CI runs the same way.
+describe('simulate3way via toolPreviewRebase', { timeout: 30_000 }, () => {
   it('detects a real conflict on overlapping lines and reports it', async () => {
     // Regression guard: git merge-file exits with code = number of conflicts
     // (non-zero). The predictor must capture the conflict-marked stdout from

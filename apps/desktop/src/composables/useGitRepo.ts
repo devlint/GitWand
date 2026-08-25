@@ -59,6 +59,7 @@ import { clearUpdatePromptSkip } from "./useBranchUpdatePrompt";
 import { t } from "./useI18n";
 import { useWorkspaceScope } from "./useWorkspaceScope";
 import { useSettings } from "./useSettings";
+import { useUndoToast } from "./useUndoToast";
 
 export type ViewMode =
   | "dashboard"
@@ -1336,7 +1337,14 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     if (!folderPath.value) return false;
     isSwitchingBranch.value = true;
     try {
-      await gitSwitchBranch(folderPath.value, name);
+      const snapshot = await gitSwitchBranch(
+        folderPath.value,
+        name,
+        settings.value.snapshotsEnabled,
+      );
+      if (settings.value.snapshotsEnabled) {
+        useUndoToast().show(t("timeMachine.toastCheckout", name), snapshot?.id);
+      }
       forcePushPreferred.value = false;
       // Force: switching to a branch pointing at the same commit moves the
       // HEAD marker without moving the top commit hash.
@@ -1476,8 +1484,16 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
 
   async function discardFiles(paths: string[], untracked = false) {
     if (!folderPath.value) return;
+    const snapshots = settings.value.snapshotsEnabled;
     try {
-      await gitDiscard(folderPath.value, paths, untracked);
+      const snapshot = await gitDiscard(folderPath.value, paths, untracked, snapshots);
+      // v3.8: the backend took the snapshot; this is the affordance that
+      // tells the user it exists, and teaches ⌘Z. Success only — a failed
+      // discard has nothing to undo — and never when snapshots are off,
+      // since the offer would then be a lie.
+      if (snapshots) {
+        useUndoToast().show(t("timeMachine.toastDiscard", paths.length), snapshot?.id);
+      }
     } catch (err: any) {
       error.value = `discard: ${err?.message ?? err}`;
     } finally {

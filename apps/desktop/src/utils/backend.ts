@@ -1267,17 +1267,26 @@ export async function getGitFileDiff(
 /**
  * Discard changes to tracked files (git restore) or delete untracked files (git clean -f).
  */
-export async function gitDiscard(cwd: string, paths: string[], untracked = false): Promise<void> {
+/**
+ * v3.8: `snapshotsEnabled` carries the user's Time Machine setting to the
+ * backend, which snapshots the repo before running this. Omitted means "no
+ * opinion" and the backend snapshots; only an explicit `false` opts out.
+ *
+ * Returns that snapshot (or null when none was taken), so the undo
+ * affordance can target this exact point rather than "whatever is newest by
+ * the time the user clicks".
+ */
+export async function gitDiscard(cwd: string, paths: string[], untracked = false, snapshotsEnabled?: boolean): Promise<SnapshotMeta | null> {
   if (isTauri()) {
-    await tauriInvoke("git_discard", { cwd, paths, untracked });
-    return;
+    return await tauriInvoke("git_discard", { cwd, paths, untracked, snapshotsEnabled });
   }
   const res = await devFetch(`${DEV_SERVER}/api/git-discard`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ cwd, paths, untracked }),
+    body: JSON.stringify({ cwd, paths, untracked, snapshotsEnabled }),
   });
   if (!res.ok) throw new Error(`Failed to discard changes: ${res.status}`);
+  return ((await res.json()) as { snapshot?: SnapshotMeta | null }).snapshot ?? null;
 }
 
 /**
@@ -1382,20 +1391,29 @@ export async function gitCreateBranch(
 /**
  * Switch to an existing branch.
  */
-export async function gitSwitchBranch(cwd: string, name: string): Promise<void> {
+/**
+ * v3.8: `snapshotsEnabled` carries the user's Time Machine setting to the
+ * backend, which snapshots the repo before running this. Omitted means "no
+ * opinion" and the backend snapshots; only an explicit `false` opts out.
+ *
+ * Returns that snapshot (or null when none was taken), so the undo
+ * affordance can target this exact point rather than "whatever is newest by
+ * the time the user clicks".
+ */
+export async function gitSwitchBranch(cwd: string, name: string, snapshotsEnabled?: boolean): Promise<SnapshotMeta | null> {
   if (isTauri()) {
-    await tauriInvoke("git_switch_branch", { cwd, name });
-    return;
+    return await tauriInvoke("git_switch_branch", { cwd, name, snapshotsEnabled });
   }
   const res = await devFetch(`${DEV_SERVER}/api/git-switch-branch`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ cwd, name }),
+    body: JSON.stringify({ cwd, name, snapshotsEnabled }),
   });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
     throw new Error(data.error || `Failed to switch branch: ${res.status}`);
   }
+  return ((await res.json()) as { snapshot?: SnapshotMeta | null }).snapshot ?? null;
 }
 
 /**
@@ -1693,34 +1711,133 @@ export async function gitCherryPickContinue(cwd: string): Promise<GitPushPullRes
 /**
  * Checkout a specific commit SHA — puts the repo in detached HEAD state.
  */
-export async function gitCheckoutCommit(cwd: string, sha: string): Promise<void> {
+/**
+ * v3.8: `snapshotsEnabled` carries the user's Time Machine setting to the
+ * backend, which snapshots the repo before running this. Omitted means "no
+ * opinion" and the backend snapshots; only an explicit `false` opts out.
+ *
+ * Returns that snapshot (or null when none was taken), so the undo
+ * affordance can target this exact point rather than "whatever is newest by
+ * the time the user clicks".
+ */
+export async function gitCheckoutCommit(cwd: string, sha: string, snapshotsEnabled?: boolean): Promise<SnapshotMeta | null> {
   if (isTauri()) {
-    await tauriInvoke("git_checkout_commit", { cwd, sha });
-    return;
+    return await tauriInvoke("git_checkout_commit", { cwd, sha, snapshotsEnabled });
   }
   const res = await devFetch(`${DEV_SERVER}/api/git-checkout-commit`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ cwd, sha }),
+    body: JSON.stringify({ cwd, sha, snapshotsEnabled }),
   });
   if (!res.ok) throw new Error(((await res.json()) as any).error ?? `git checkout failed: ${res.status}`);
+  return ((await res.json()) as { snapshot?: SnapshotMeta | null }).snapshot ?? null;
 }
 
 /**
  * Reset the current branch to a specific commit.
  * mode: "soft" | "mixed" | "hard"
  */
-export async function gitResetToCommit(cwd: string, sha: string, mode: "soft" | "mixed" | "hard"): Promise<void> {
+/**
+ * One repo snapshot (v3.8 Time Machine). Mirrors `SnapshotMeta` in
+ * `src-tauri/src/git/snapshot.rs`, which serialises `rename_all = "camelCase"`,
+ * so the field names below match the wire format on both backends.
+ */
+export interface SnapshotMeta {
+  /** Sortable id and ref leaf: `<unix ms>-<short sha>`. */
+  id: string;
+  /** Full sha of the snapshot commit. */
+  commit: string;
+  /** What triggered it. */
+  kind: "manual" | "discard" | "reset" | "checkout" | "resolution" | "pre-restore";
+  label: string;
+  timestampMs: number;
+  headSha: string;
+  /** Branch short name, or null when HEAD was detached. */
+  headRef: string | null;
+  /** MERGE_HEAD sha when taken mid-merge. */
+  mergeHead: string | null;
+}
+
+/** Capture a snapshot. Returns null on a repo with no HEAD yet. */
+export async function snapshotCreate(
+  cwd: string,
+  kind: SnapshotMeta["kind"],
+  label: string,
+): Promise<SnapshotMeta | null> {
   if (isTauri()) {
-    await tauriInvoke("git_reset_to_commit", { cwd, sha, mode });
-    return;
+    return await tauriInvoke("snapshot_create", { cwd, kind, label });
+  }
+  const res = await devFetch(`${DEV_SERVER}/api/snapshot-create`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, kind, label }),
+  });
+  if (!res.ok) throw new Error(((await res.json()) as any).error ?? `snapshot failed: ${res.status}`);
+  return (await res.json()) as SnapshotMeta | null;
+}
+
+/** All snapshots for the repo, newest first. */
+export async function snapshotList(cwd: string): Promise<SnapshotMeta[]> {
+  if (isTauri()) {
+    return await tauriInvoke("snapshot_list", { cwd });
+  }
+  const res = await devFetch(`${DEV_SERVER}/api/snapshot-list?cwd=${encodeURIComponent(cwd)}`);
+  if (!res.ok) throw new Error(`snapshot list failed: ${res.status}`);
+  return (await res.json()) as SnapshotMeta[];
+}
+
+/** Restore a snapshot. Returns the `pre-restore` snapshot, i.e. the redo target. */
+export async function snapshotRestore(cwd: string, id: string): Promise<SnapshotMeta> {
+  if (isTauri()) {
+    return await tauriInvoke("snapshot_restore", { cwd, id });
+  }
+  const res = await devFetch(`${DEV_SERVER}/api/snapshot-restore`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, id }),
+  });
+  if (!res.ok) throw new Error(((await res.json()) as any).error ?? `restore failed: ${res.status}`);
+  return (await res.json()) as SnapshotMeta;
+}
+
+/** Delete snapshots past the retention caps. Returns how many were deleted. */
+export async function snapshotPrune(
+  cwd: string,
+  maxAgeDays: number,
+  maxCount: number,
+): Promise<number> {
+  if (isTauri()) {
+    return await tauriInvoke("snapshot_prune", { cwd, maxAgeDays, maxCount });
+  }
+  const res = await devFetch(`${DEV_SERVER}/api/snapshot-prune`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, maxAgeDays, maxCount }),
+  });
+  if (!res.ok) throw new Error(`prune failed: ${res.status}`);
+  return ((await res.json()) as { deleted: number }).deleted;
+}
+
+/**
+ * v3.8: `snapshotsEnabled` carries the user's Time Machine setting to the
+ * backend, which snapshots the repo before running this. Omitted means "no
+ * opinion" and the backend snapshots; only an explicit `false` opts out.
+ *
+ * Returns that snapshot (or null when none was taken), so the undo
+ * affordance can target this exact point rather than "whatever is newest by
+ * the time the user clicks".
+ */
+export async function gitResetToCommit(cwd: string, sha: string, mode: "soft" | "mixed" | "hard", snapshotsEnabled?: boolean): Promise<SnapshotMeta | null> {
+  if (isTauri()) {
+    return await tauriInvoke("git_reset_to_commit", { cwd, sha, mode, snapshotsEnabled });
   }
   const res = await devFetch(`${DEV_SERVER}/api/git-reset-to-commit`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ cwd, sha, mode }),
+    body: JSON.stringify({ cwd, sha, mode, snapshotsEnabled }),
   });
   if (!res.ok) throw new Error(((await res.json()) as any).error ?? `git reset failed: ${res.status}`);
+  return ((await res.json()) as { snapshot?: SnapshotMeta | null }).snapshot ?? null;
 }
 
 /**

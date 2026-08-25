@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.8.0] - 2026-08-24
+
+### Added
+
+- **Time Machine — repo snapshots & global undo.** Every destructive operation (discard, reset, checkout, branch switch, bulk resolution apply) now captures a restorable snapshot first: the working tree including untracked files, the index, and conflict stages 1/2/3. Snapshots are written with git plumbing under `refs/gitwand/snapshots/`, so they cost nothing until git's own `gc` reclaims them and they are never pushed by the default refspec. Restoring uses `read-tree` rather than `checkout`, so it cannot refuse on a dirty tree, which is the state an undo has to recover from.
+- **Undo where the action happened.** A discard used to give no feedback at all. It now surfaces a single-slot toast with an "Undo" button and a `⌘Z` hint, which is what makes the safety net discoverable rather than a panel you have to remember exists.
+- **Global `⌘Z` / `⇧⌘Z`.** Outside the merge editor these rewind and replay repo operations. The keyboard path reports through the same toast the buttons use, so it says either "Restored" or "Nothing to undo" instead of failing silently.
+- **One timeline over two sources.** The existing rewind popover (`⌘⇧U`, and Actions > Rewind) now lists GitWand snapshots merged with git's reflog rather than the reflog alone, deduplicating the operations that produce both. A footer link opens a full-history modal with source filters. Restoring is itself undoable, since a `pre-restore` snapshot is taken first, and the confirmation says so.
+- **Retention settings** — enable/disable snapshots, an age cap (default 14 days) and a count cap (default 200), pruned on repo open rather than on a timer. Plus opt-in one-line AI snapshot labels, following the Quick Stash label pattern.
+- `snapshot_create` / `snapshot_list` / `snapshot_restore` / `snapshot_prune` Tauri commands, each with a real `dev-server.mjs` route and parity coverage.
+
+### Fixed
+
+- Snapshot refs are excluded from every `--all` history traversal GitWand runs, so the Git Tree, the hidden-commit count, the contributor shortlog and per-author line churn are unaffected. (A `git log --all` typed at the terminal still shows them, exactly as it shows `refs/stash`.)
+- Ref moves made by a restore carry an explicit reflog message. Without one git writes an empty reflog entry, which showed as a blank row in the timeline and as an unexplained line in the user's own `git reflog`.
+- Restoring a snapshot taken *before* a merge started now clears `MERGE_HEAD` and `MERGE_MSG` as well. Previously the merge state survived the rewind, so `git status` reported "you are still merging" over a tree that no longer contained the merge, and the next commit became a merge commit that silently re-merged the branch the user had just undone.
+- A failed index restore no longer leaves the index wiped. The restored index is now built in a scratch `GIT_INDEX_FILE` and moved into place only once `update-index` has succeeded; previously the live index was emptied first, so any failure in the second step left every tracked file reading as deleted-from-index with no rollback.
+- `⌘Z` and `⇧⌘Z` report a failed restore instead of doing nothing. The keyboard path opens neither the popover nor the modal, which are the only places the error was rendered, so a failure was silent and surfaced only as an unhandled rejection.
+- The undo toast rewinds the snapshot its own operation created, rather than whatever point happens to be newest when the button is clicked, and steps aside once the repo has moved on. An offer reading "1 file discarded" could previously undo a commit made inside its 8-second window; restoring blind would equally have dragged that commit along, since a snapshot restore rewinds HEAD too.
+- `prune_snapshots_inner` refuses a 0-day or 0-count retention outright, in both the Rust engine and the dev-server port. The frontend already clamped at the input and guarded again before the call; this is the last layer before the refs go, and it also covers a hand-edited settings file.
+- Opt-in AI snapshot labels now persist in a linked worktree. They were written to a sidecar under `.git/`, which is a file rather than a directory in any linked worktree, so every read and write failed with `ENOTDIR` and was silently swallowed; they live in `localStorage` keyed by repo path now, like the other ancillary per-repo state.
+- The snapshot retention fields refuse a value that would delete every snapshot. Clearing the input yields `Number("") === 0`, which was persisted verbatim and made the next prune wipe the whole undo history; the value is now clamped at the input and the destructive case is rejected again before the backend is called.
+
 ## [3.7.3] - 2026-08-25
 
 ### Fixed

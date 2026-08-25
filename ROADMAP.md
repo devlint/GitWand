@@ -6,32 +6,16 @@
 
 ## What's Next
 
-_Ordered by priority, last verified 2026-08-21 (current after v3.7.0 shipped Commit Review). The thread: lay the safety net before shipping more auto-apply (v3.8), make the app reactive and fast (v3.9), close the resolution loop (v3.10), then workflow & comparison primitives (v3.11–v3.12), experimental voice input (v3.13), and the v4.0 code-intelligence headline. Full renumbering history: `git log -p -- roadmap.md`._
+_Ordered by priority, last verified 2026-08-24 (current after v3.8.0 shipped Time Machine, which laid the safety net the auto-apply work needed). The thread: make the app reactive and fast (v3.9), close the resolution loop (v3.10), then workflow & comparison primitives (v3.11–v3.12), experimental voice input (v3.13), and the v4.0 code-intelligence headline. Full renumbering history: `git log -p -- roadmap.md`._
 
 | Version | Codename | Why now |
 |---------|----------|---------|
-| **v3.8.0** | Time Machine | Safety net before shipping more auto-apply — repo snapshots & global undo |
 | **v3.9.0** | Live Repo | Reactive & fast — FS events replace polling, libgit2 phase 1 |
 | **v3.10.0** | Merge preview-to-apply | Close the resolution loop — apply straight from preview, editable diff |
 | **v3.11.0** | Stacked Branches | Native stacked PRs, sequenced after v3.10 (leans on preview→apply) |
 | **v3.12.0** | Combined Diffs | Multi-commit, non-contiguous aggregated diff |
 | **v3.13.0** | Voice Input | Experimental — local dictation via embedded Whisper |
 | **v4.0.0** (candidate) | Blast Radius | Code-graph impact before merge — the code-intelligence headline |
-
-### v3.8.0 — Time Machine: repo snapshots & global undo
-
-_Inspired by GitUp's snapshot history. Extends the Undo stack (v1.2.0) from "undo the last ref move" into a true safety net covering the working tree and the resolution engine._
-
-**Today's baseline** — `useUndoStack.ts` is reflog-based (50 entries), covers commit / amend / merge / cherry-pick / rebase / pull. Gaps: the working tree is never snapshotted, reset / checkout / discard are not undoable, and an auto-applied resolution has no rollback.
-
-- **Working-tree snapshots** — before every destructive op (reset, checkout with changes, discard, bulk resolution apply), capture an unreferenced snapshot commit (`git stash create`-style, no stash-list pollution); referenced from a local snapshot journal
-- **Undo auto-resolutions** — every resolution applied by the engine (incl. "Accept all" bulk from v2.22.0) becomes an undoable snapshot — one-gesture rollback of a bad auto-merge
-- **Global `⌘Z`** — extend the existing undo stack to reset / checkout / discard; redo via `⇧⌘Z`
-- **Time Machine panel** — chronological timeline of all repo operations (not just commits), one-click restore to any point
-- **Retention policy** — snapshot GC (age + count caps), zero impact on `git log` / push
-- **Optional AI labels** — one-line snapshot summaries in the timeline via `useAIProvider` (same pattern as Quick Stash labels, v2.15.1)
-
----
 
 ### v3.9.0 — Live Repo: filesystem events + libgit2 phase 1
 
@@ -148,6 +132,10 @@ _Synthesis: none of the three addresses structured conflict-resolution AI (Stran
 
 ### Later (unscheduled)
 
+- **Snapshot rebase/cherry-pick state** — v3.8 restores `MERGE_HEAD` but not `.git/rebase-merge/` or `.git/sequencer/`, so restoring a snapshot taken mid-rebase or mid-cherry-pick brings the files and index stages back without the in-progress sequence. Restoring those is a directory copy rather than a plumbing call, which is why it was left out of the first pass. Revisit if users report rewinding mid-rebase.
+- **Snapshot cost on very large working trees** — each snapshot runs `git add -A` into a scratch index, which is O(worktree) on a cold cache. Fine on normal repos, unmeasured on a 100k-file monorepo. Benchmark alongside the v3.9 FS-watcher work, where the same walk gains a second consumer.
+- **Snapshot refs are visible to a bare `git log --all`** — GitWand excludes them from every traversal it runs, but any ref under `refs/` is by definition part of `--all`, so a user typing it in a terminal sees snapshot commits, exactly as they see `refs/stash`. Nothing to fix short of abandoning refs entirely (which would let `gc` eat the snapshots); documented here so it is a known property rather than a surprise.
+
 - **Multi-forge PR-freshness signal parity** — follow-up to the branch-badge background-prefetch/cache work (PR #125): GitLab/Bitbucket/Azure already get the breadth fix (background drain past the first page), but not the cheap freshness-signal instant-cache-restore fast path — GitHub-only today, since the other three don't yet have an equivalent cheap "most-recently-updated PR" query built. Deferred until there's real non-GitHub usage pressure.
 - **Cursor-based PR-list pagination (Rust)** — already flagged in-code as Phase 2/v2.9 (`gh_list_prs_inner`/`rest_list_prs` comments, predates PR #125): replace the naive offset+limit re-fetch, which re-walks from the start on every page, with a cursor-based `gh api graphql` query. Removes the quadratic re-fetch cost for repos with very large open-PR counts; most repos stay well under the current 300-PR prefetch ceiling, so this is scalability hardening, not an urgent fix.
 - **Commit Review "Fix with agent" in a scratch worktree** — follow-up to v3.7.0: the originally-planned "optionally in an AI-task scratch worktree" variant was cut after manual QA against real `claude`/`codex` CLIs found a brand-new scratch worktree always hits a first-run "trust this directory?" onboarding screen that misinterprets the piped prompt as menu navigation (drove a real `brew upgrade --cask codex` in testing). Revisit once there's a real fix — pre-trusting the directory before launching the agent, or detecting the onboarding screen before writing.
@@ -191,6 +179,7 @@ Positioning: neither "yet another Git GUI" nor an IDE. A first-class Git navigat
 
 | Version | Highlights |
 |---------|-----------|
+| **v3.8.0** | **Time Machine** — repo snapshots & global undo. Every destructive operation (discard, reset, checkout, branch switch, bulk resolution apply) first captures a restorable snapshot of the working tree (untracked included), the index and conflict stages 1/2/3, written with git plumbing under `refs/gitwand/snapshots/` and restored via `read-tree` so it never refuses on a dirty tree · **undo offered where the action happened** — a single-slot toast with an Undo button and a `⌘Z` hint, since a discard previously gave no feedback at all · **global `⌘Z` / `⇧⌘Z`** now rewind and replay repo operations, reporting through that same toast · the existing rewind popover (`⌘⇧U`) **lists snapshots merged with git's reflog** instead of the reflog alone, with a full-history modal behind its footer link; restoring is itself undoable via a `pre-restore` snapshot · retention settings (age + count caps, pruned on repo open) and opt-in AI snapshot labels · snapshot refs excluded from every `--all` traversal, and every ref move a restore makes carries an explicit reflog message |
 | **v3.7.0** | **Commit Review** — micro AI reviews in the Changes panel (inspiration [git-lrc](https://github.com/HexmosTech/git-lrc), fully local instead of a cloud+browser detour). "Review staged changes" runs the pre-review engine against the staged diff (inline findings, severity badges, `n`/`p`/`x` navigation) · **Fix with agent** pipes findings into a terminal AI agent session against the current repo (the scratch-worktree variant was cut after manual QA found it could hit a CLI's first-run "trust this directory?" screen and misfire a real command — tracked as a follow-up) · **Iterations & coverage** tracking bound to HEAD · **Review / Vouch / Skip** commit-time decision recorded as a `GitWand-Review:` trailer · per-repo **`.gitwandrc` opt-in** overriding the app Setting in either direction · a composable **pre-commit hook** merging the shipped v3.5.0 secrets section with a new warn-only review reminder · a real focus trap added to `BaseModal`, fixing a foundational a11y gap inherited by every modal in the app · fixed a core reactivity bug where routine background polling silently wiped findings, plus a dozen smaller findings from a dedicated product/code review round |
 | **v3.6.6** | **Dev loop & CI build times** (pure tooling/perf chore, no product surface) — `ci.yml`'s 3-bundle-per-push `desktop` job replaced by a fast `rust-check` (fmt/clippy/check/test, now on PRs too) + a path-filtered `bundle-smoke` job (~230 billed CI min saved/push); Rust cache across all 3 workflows; `[profile.ci]`/`[profile.dev]` cut a post-edit `cargo build` from ~21s to ~6.5s; measured `cargo llvm-lines`/`--timings` to rule out the previously-planned `gitwand-git` crate split; Vitest defaults to `environment: "node"` instead of global `jsdom` (setup time ~96s→~17s); secrets-scanner ignore-regex precompiled (~24x Rust/~2.5x TS); `@gitwand/core`'s resolution engine lazy-loaded out of the boot chunk (main bundle −185 KB raw); deduped `reqwest` (dropped `native-tls`/`openssl-sys`, removed `libssl-dev` from CI); anonymous telemetry gated behind an explicit `telemetry` Cargo feature with a build-time guard against a telemetry-less release |
 | **v3.6.0** | Post-checkout **"Update branch" prompt** — one-click fast-forward (with stash/restore) or "Continue on local branch" when checking out a branch that's behind its upstream with no divergent commits, per-branch mute · **Non-blocking rebase-conflict handoff** (#128) — an interactive rebase conflict now closes the blocking `RebaseEditor` modal and hands off to the existing rebase banner + inline `MergeEditor` instead of trapping resolution behind an overlay; also fixes a UI freeze on very long/minified conflicting lines (word-diff now guards against pathological line lengths) · **CommitGraph animation polish** (#127) — no more layout shifts/flicker during pagination loading |

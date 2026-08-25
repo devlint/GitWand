@@ -226,6 +226,18 @@ interface Settings {
   // v3.7.0 Commit Review
   commitReviewEnabled: boolean;
   commitReviewAutoReReview: boolean;
+  /**
+   * Time Machine (v3.8). When false, no snapshot is taken before destructive
+   * operations and the timeline shows the reflog only. Default true: the
+   * safety net is the point of the feature.
+   */
+  snapshotsEnabled: boolean;
+  /** Snapshots older than this are pruned on repo open. */
+  snapshotRetentionDays: number;
+  /** Hard cap on snapshots kept per repo, newest first. */
+  snapshotMaxCount: number;
+  /** Opt-in: one-line AI summaries for snapshots in the timeline. */
+  snapshotAiLabels: boolean;
 }
 
 const defaultSettings: Settings = {
@@ -315,6 +327,10 @@ const defaultSettings: Settings = {
   secretsEntropyThreshold: 4.0,
   commitReviewEnabled: false,
   commitReviewAutoReReview: true,
+  snapshotsEnabled: true,
+  snapshotRetentionDays: 14,
+  snapshotMaxCount: 200,
+  snapshotAiLabels: false,
 };
 
 function loadSettings(): Settings {
@@ -332,6 +348,29 @@ function saveSettings(s: Settings) {
 }
 
 const settings = ref<Settings>(loadSettings());
+
+/**
+ * Numeric settings whose degenerate values are destructive, clamped at the
+ * source. A `<input type="number">` reports `""` while the user is retyping,
+ * and `Number("")` is `0` — which for the snapshot retention fields means
+ * "delete every snapshot on the next repo open". `min`/`max` attributes do
+ * not prevent that: nothing validates on `input`.
+ */
+function updateClampedSetting<K extends keyof Settings>(
+  key: K,
+  raw: string,
+  min: number,
+  max: number,
+) {
+  // The empty field has to be tested as a STRING: `Number("")` is `0`, which
+  // is finite, so a `Number.isFinite` guard never fires and the value snaps
+  // to `min` under the user's cursor the moment they backspace to retype.
+  if (raw.trim() === "") return;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return;
+  const clamped = Math.min(max, Math.max(min, Math.round(parsed)));
+  updateSetting(key, clamped as Settings[K]);
+}
 
 function updateSetting<K extends keyof Settings>(key: K, value: Settings[K]) {
   settings.value[key] = value;
@@ -2802,6 +2841,50 @@ function deleteReleaseNoteTemplate(id: string) {
                   <span>{{ t('settings.commitReview.autoReReview') }}</span>
                 </label>
                 <span class="sp-hint">{{ t('settings.commitReview.autoReReviewHint') }}</span>
+              </div>
+            </div>
+
+            <!-- ─── Time Machine (v3.8) ────────────────────── -->
+            <div class="sp-section-divider sp-section-divider--inner"></div>
+            <div class="sp-group">
+              <div class="sp-group__head">
+                <div class="sp-group__head-text">
+                  <span class="sp-group__label">{{ t('timeMachine.settingsTitle') }}</span>
+                  <span class="sp-group__sublabel">{{ t('timeMachine.subtitle') }}</span>
+                </div>
+              </div>
+
+              <div class="sp-row sp-row--checkbox">
+                <label class="sp-checkbox-label" for="setting-snapshots-enabled">
+                  <input id="setting-snapshots-enabled" type="checkbox" class="sp-checkbox"
+                    :checked="settings.snapshotsEnabled"
+                    @change="updateSetting('snapshotsEnabled', ($event.target as HTMLInputElement).checked)" />
+                  <span>{{ t('timeMachine.settingsEnabled') }}</span>
+                </label>
+                <span class="sp-hint">{{ t('timeMachine.settingsEnabledHint') }}</span>
+              </div>
+
+              <div class="sp-row" v-if="settings.snapshotsEnabled">
+                <label class="sp-label" for="setting-snapshot-retention">{{ t('timeMachine.settingsRetentionDays') }}</label>
+                <input id="setting-snapshot-retention" type="number" class="sp-input" min="1" max="365" step="1"
+                  :value="settings.snapshotRetentionDays"
+                  @input="updateClampedSetting('snapshotRetentionDays', ($event.target as HTMLInputElement).value, 1, 365)" />
+              </div>
+
+              <div class="sp-row" v-if="settings.snapshotsEnabled">
+                <label class="sp-label" for="setting-snapshot-max">{{ t('timeMachine.settingsMaxCount') }}</label>
+                <input id="setting-snapshot-max" type="number" class="sp-input" min="10" max="2000" step="10"
+                  :value="settings.snapshotMaxCount"
+                  @input="updateClampedSetting('snapshotMaxCount', ($event.target as HTMLInputElement).value, 10, 2000)" />
+              </div>
+
+              <div class="sp-row sp-row--checkbox" v-if="settings.snapshotsEnabled">
+                <label class="sp-checkbox-label" for="setting-snapshot-ai-labels">
+                  <input id="setting-snapshot-ai-labels" type="checkbox" class="sp-checkbox"
+                    :checked="settings.snapshotAiLabels"
+                    @change="updateSetting('snapshotAiLabels', ($event.target as HTMLInputElement).checked)" />
+                  <span>{{ t('timeMachine.settingsAiLabels') }}</span>
+                </label>
               </div>
             </div>
 

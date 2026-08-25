@@ -7,6 +7,7 @@ import { parseGitwandrc, type MergeResult, type ConflictHunk, type GitWandOption
 // `typeof parseConflictMarkers` for `RawConflictSegment` without a runtime import.
 import type { parseConflictMarkers } from "@gitwand/core";
 import { engine } from "../utils/coreEngine";
+import { useSnapshots } from "./useSnapshots";
 import {
   pickFolder,
   getConflictedFiles,
@@ -1061,6 +1062,21 @@ export async function fetchUsers() {
    */
   async function saveAllFiles() {
     if (!folderPath.value) return;
+
+    // v3.8 Time Machine: writing every resolved file back is exactly the
+    // "more auto-apply" the snapshot safety net exists for, and unlike the
+    // destructive git commands this path is driven from the frontend, so it
+    // has to capture its own. `capture` never throws, so a snapshot failure
+    // cannot cost the user their save.
+    //
+    // The label is stored in the snapshot's commit message, so it stays in
+    // English like the Rust-side labels and like git's own reflog subjects.
+    // The UI localises the `kind`, not this string.
+    await useSnapshots().capture(
+      folderPath.value,
+      "resolution",
+      `Apply resolutions to ${files.value.length} file(s)`,
+    );
 
     const failures: Array<{ index: number; path: string; err: unknown }> = [];
     await Promise.all(

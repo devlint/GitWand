@@ -44,6 +44,11 @@ const MergeSuccessModal = defineAsyncComponent(() => import("./components/MergeS
 const RebaseEditor = defineAsyncComponent(() => import("./components/RebaseEditor.vue"));
 const RebaseProgressBanner = defineAsyncComponent(() => import("./components/RebaseProgressBanner.vue"));
 const StashManager = defineAsyncComponent(() => import("./components/StashManager.vue"));
+const TimeMachinePanel = defineAsyncComponent(() => import("./components/TimeMachinePanel.vue"));
+import UndoToast from "./components/UndoToast.vue";
+import { useTimeMachine } from "./composables/useTimeMachine";
+import { useUndoToast } from "./composables/useUndoToast";
+import { useSnapshots } from "./composables/useSnapshots";
 const TagsPanel = defineAsyncComponent(() => import("./components/TagsPanel.vue"));
 const WorktreeManager = defineAsyncComponent(() => import("./components/WorktreeManager.vue"));
 const SubmodulePanel = defineAsyncComponent(() => import("./components/SubmodulePanel.vue"));
@@ -132,6 +137,11 @@ import { useCommitActions } from "./composables/useCommitActions";
 const { t, locale } = useI18n();
 const { settings, refreshSettings } = useSettings();
 const { saveMemory } = useResolutionMemory();
+
+// v3.8 Time Machine: repo-level ⌘Z / ⇧⌘Z and the undo toast they report through.
+const timeMachine = useTimeMachine();
+const undoToast = useUndoToast();
+const snapshots = useSnapshots();
 
 // v3.5.0 — Secrets scanner (local, non-blocking; see useSecretsScanner.ts).
 const secretsScanner = useSecretsScanner();
@@ -1010,6 +1020,23 @@ async function loadSubmoduleUpdates() {
 
 watch(repoFolderPath, () => { void loadSubmoduleUpdates(); }, { immediate: true });
 
+// ─── Time Machine retention (v3.8) ───────────────────────
+// Prune on repo open, never on a timer. Cheap (`for-each-ref` plus one
+// `update-ref -d` per stale entry) and it keeps the ref namespace bounded
+// without an unconditional interval, per the polling-discipline rule.
+watch(
+  repoFolderPath,
+  (cwd) => {
+    if (!cwd || !settings.value.snapshotsEnabled) return;
+    void snapshots.prune(
+      cwd,
+      settings.value.snapshotRetentionDays,
+      settings.value.snapshotMaxCount,
+    );
+  },
+  { immediate: true },
+);
+
 const submoduleUpdateCount = computed(() => Object.keys(submoduleUpdates.value).length);
 
 /**
@@ -1510,7 +1537,7 @@ async function handleSwitchBranch(name: string, isRemote = false) {
       danger: true,
     })) {
       try {
-        await gitResetToCommit(repoFolderPath.value, remote, "hard");
+        await gitResetToCommit(repoFolderPath.value, remote, "hard", settings.value.snapshotsEnabled);
         await repoRefresh();
         return;
       } catch (err: any) {
@@ -2547,6 +2574,8 @@ watch(repoOperationState, (op) => {
 
 // ─── Stash manager panel ────────────────────────────────
 const showStash = ref(false);
+/** v3.8 Time Machine modal, opened from the rewind popover footer. */
+const showTimeMachine = ref(false);
 const showTags = ref(false);
 const showAgents = ref(false);
 const showCommandLog = ref(false);
@@ -3247,6 +3276,15 @@ function onKeyDown(e: KeyboardEvent) {
   } else if (mod && e.key === "y" && showingMergeEditor.value) {
     e.preventDefault();
     redo();
+  } else if (mod && e.key === "z" && !e.shiftKey && hasRepo.value) {
+    // v3.8: outside the merge editor, ⌘Z rewinds the repo itself. The
+    // merge-editor branches above are the narrower guard and must stay
+    // first, or they would never be reached.
+    e.preventDefault();
+    void repoUndo();
+  } else if (mod && e.key === "z" && e.shiftKey && hasRepo.value) {
+    e.preventDefault();
+    void repoRedo();
   } else if (mod && e.key === "s") {
     e.preventDefault();
     if (showingMergeEditor.value) saveAllFiles();
@@ -3522,7 +3560,7 @@ async function handleRebaseResetOnto(base: string) {
     danger: true,
   }))) return;
   try {
-    await gitResetToCommit(repoFolderPath.value, base, "hard");
+    await gitResetToCommit(repoFolderPath.value, base, "hard", settings.value.snapshotsEnabled);
     showRebase.value = false;
     rebaseInitialBase.value = undefined;
     await repoRefresh();
@@ -3570,6 +3608,47 @@ async function onRebaseConflict() {
 async function onUndoPerformed() {
   await repoRefresh();
   forcePushPreferred.value = true;
+}
+
+/**
+ * ⌘Z outside the merge editor (v3.8). The keyboard path has no button to
+ * grey out, so it reports through the same toast the buttons use: what it
+ * did, or that there was nothing to do.
+ */
+async function repoUndo() {
+  const cwd = repoFolderPath.value;
+  if (!cwd) return;
+  // `undoLast` refreshes the timeline itself and reports what it did, so the
+  // message is never driven by a stale `canUndo` — the snapshot behind a
+  // discard is created backend-side and is not in the cache yet.
+  try {
+    const restored = await timeMachine.undoLast(cwd);
+    undoToast.notify(t(restored ? "timeMachine.toastRestored" : "timeMachine.toastNothing"));
+  } catch (err: any) {
+    // The keyboard path has no popover or modal open, so `lastError` is
+    // rendered nowhere. Without this the user presses ⌘Z, nothing happens,
+    // and the rejection is swallowed as an unhandled promise.
+    undoToast.notify(`${t("timeMachine.toastFailed")}: ${err?.message ?? err}`);
+  } finally {
+    await onUndoPerformed();
+  }
+}
+
+/** ⇧⌘Z. Silent when there is nothing to redo: a redo with no prior undo is
+ *  not a user mistake worth a message. */
+async function repoRedo() {
+  const cwd = repoFolderPath.value;
+  // `canRedo` is set by a restore that happened in this session, so unlike
+  // `canUndo` it is never stale.
+  if (!cwd || !timeMachine.canRedo.value) return;
+  try {
+    await timeMachine.redo(cwd);
+    undoToast.notify(t("timeMachine.toastRestored"));
+  } catch (err: any) {
+    undoToast.notify(`${t("timeMachine.toastFailed")}: ${err?.message ?? err}`);
+  } finally {
+    await onUndoPerformed();
+  }
 }
 
 const historyVisibleFileIdx = ref(0);
@@ -3671,7 +3750,8 @@ onUnmounted(() => {
       @open-worktrees="(branch) => { pendingWorktreeBranch = branch; showWorktrees = true; }"
       @open-submodules="showSubmodules = true" @open-submodule="handleOpenSubmodule" @open-search="handleOpenSearch" @open-help="showHelp = true"
       :submodule-update-count="submoduleUpdateCount"
-      :stash-count="stashCount" @open-stash="showStash = true" @open-tags="showTags = true" />
+      :stash-count="stashCount" @open-stash="showStash = true" @open-tags="showTags = true"
+      @open-time-machine="showTimeMachine = true" />
 
     <div class="app-body" :style="{ '--sidebar-width': sidebarWidth + 'px' }">
       <main class="main" :class="{ 'main--dashboard': viewMode === 'dashboard' || viewMode === 'launchpad' }">
@@ -3947,6 +4027,11 @@ onUnmounted(() => {
       <AppDock v-if="hasRepo" :view-mode="viewMode" :changes-count="repoFiles.length"
         :pr-count="prPanel.dockPrCount.value ?? undefined" :terminal-active="showTerminal" :files-active="showFiles"
         @change-view="onViewModeChange" @toggle-terminal="toggleTerminal()" @toggle-files="toggleFiles()" />
+
+      <!-- v3.8: undo offer, right where the destructive action happened.
+           Eager, not lazy: it must be able to appear the instant an
+           operation finishes. -->
+      <UndoToast v-if="hasRepo && repoFolderPath" :cwd="repoFolderPath" @restored="onUndoPerformed()" />
     </div>
 
     <!-- In-app update modal -->
@@ -3986,6 +4071,10 @@ onUnmounted(() => {
     <!-- Stash manager (uses BaseModal, owns its own overlay) -->
     <StashManager v-if="showStash && repoFolderPath" :cwd="repoFolderPath" @close="showStash = false"
       @refresh="repoRefresh()" />
+
+    <!-- Time Machine (v3.8) — full repo history, snapshots + reflog -->
+    <TimeMachinePanel v-if="showTimeMachine && repoFolderPath" :cwd="repoFolderPath"
+      @close="showTimeMachine = false" @restored="onUndoPerformed()" />
 
     <!-- Clone modal (v2.0) -->
     <CloneModal v-if="showCloneModal" @close="showCloneModal = false" @cloned="onCloned" />
