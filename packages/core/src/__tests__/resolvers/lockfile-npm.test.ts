@@ -11,6 +11,9 @@
 
 import { describe, it, expect } from "vitest";
 import { resolve } from "../../resolver.js";
+// v3.9 — les lockfiles déclinent par défaut (fichiers générés) ; ces suites
+// testent le résolveur sémantique lui-même, donc derrière l'opt-in resolveGeneratedFiles.
+
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -59,18 +62,18 @@ describe("F1 — package-lock.json : package ajouté d'un seul côté (diff3)", 
   ].join("\n");
 
   it("auto-résout via le resolver lockfile-npm", () => {
-    const result = resolve(input, "package-lock.json");
+    const result = resolve(input, "package-lock.json", { resolveGeneratedFiles: true });
     expect(result.stats.autoResolved).toBe(1);
   });
 
   it("le résultat contient le package ajouté", () => {
-    const result = resolve(input, "package-lock.json");
+    const result = resolve(input, "package-lock.json", { resolveGeneratedFiles: true });
     expect(result.mergedContent).toContain("lodash");
     expect(result.mergedContent).toContain("react");
   });
 
   it("la raison mentionne [lockfile-npm]", () => {
-    const result = resolve(input, "package-lock.json");
+    const result = resolve(input, "package-lock.json", { resolveGeneratedFiles: true });
     expect(result.resolutions[0].resolutionReason).toMatch(/\[lockfile-npm\]/i);
   });
 });
@@ -105,11 +108,11 @@ describe("F2 — package-lock.json : même package, version différente (diff3)"
   ].join("\n");
 
   it("ne lève pas d'exception", () => {
-    expect(() => resolve(input, "package-lock.json")).not.toThrow();
+    expect(() => resolve(input, "package-lock.json", { resolveGeneratedFiles: true })).not.toThrow();
   });
 
   it("la raison mentionne [lockfile-npm]", () => {
-    const result = resolve(input, "package-lock.json");
+    const result = resolve(input, "package-lock.json", { resolveGeneratedFiles: true });
     expect(result.resolutions[0].resolutionReason).toMatch(/\[lockfile-npm\]/i);
   });
 });
@@ -134,11 +137,11 @@ describe("F3 — package-lock.json minimal : ne plante pas", () => {
   ].join("\n");
 
   it("ne lève pas d'exception", () => {
-    expect(() => resolve(input, "package-lock.json")).not.toThrow();
+    expect(() => resolve(input, "package-lock.json", { resolveGeneratedFiles: true })).not.toThrow();
   });
 
   it("produit un résultat avec au moins un hunk", () => {
-    const result = resolve(input, "package-lock.json");
+    const result = resolve(input, "package-lock.json", { resolveGeneratedFiles: true });
     expect(result.hunks.length).toBeGreaterThanOrEqual(1);
   });
 });
@@ -173,19 +176,19 @@ describe("F4 — package-lock.json : packages différents ajoutés des deux côt
   ].join("\n");
 
   it("auto-résout via le resolver lockfile-npm", () => {
-    const result = resolve(input, "package-lock.json");
+    const result = resolve(input, "package-lock.json", { resolveGeneratedFiles: true });
     expect(result.stats.autoResolved).toBe(1);
   });
 
   it("le résultat contient les deux packages", () => {
-    const result = resolve(input, "package-lock.json");
+    const result = resolve(input, "package-lock.json", { resolveGeneratedFiles: true });
     expect(result.mergedContent).toContain("axios");
     expect(result.mergedContent).toContain("date-fns");
     expect(result.mergedContent).toContain("react");
   });
 
   it("la raison mentionne [lockfile-npm]", () => {
-    const result = resolve(input, "package-lock.json");
+    const result = resolve(input, "package-lock.json", { resolveGeneratedFiles: true });
     expect(result.resolutions[0].resolutionReason).toMatch(/\[lockfile-npm\]/i);
   });
 });
@@ -213,12 +216,12 @@ describe("F5 — package-lock.json : détection du nom de fichier", () => {
   ].join("\n");
 
   it("le nom package-lock.json active le bon resolver", () => {
-    const result = resolve(input, "package-lock.json");
+    const result = resolve(input, "package-lock.json", { resolveGeneratedFiles: true });
     expect(result.resolutions[0].resolutionReason).toMatch(/\[lockfile-npm\]/i);
   });
 
   it("le nom dans un sous-dossier est aussi détecté", () => {
-    const result = resolve(input, "apps/frontend/package-lock.json");
+    const result = resolve(input, "apps/frontend/package-lock.json", { resolveGeneratedFiles: true });
     expect(result.resolutions[0].resolutionReason).toMatch(/\[lockfile-npm\]/i);
   });
 });

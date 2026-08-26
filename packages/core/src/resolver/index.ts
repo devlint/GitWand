@@ -15,6 +15,7 @@
  */
 
 import type {
+  ConfidenceScore,
   ConflictHunk,
   ConflictType,
   ExternalValidationResult,
@@ -57,31 +58,146 @@ import { runLlmFallbackPhase } from "./llm-pipeline.js";
  * @param options - Options de configuration (complètes, déjà fusionnées avec les défauts)
  * @returns Les lignes résolues + la raison, ou `null` + raison de refus
  */
+/**
+ * v3.9 — Types de hunk qu'un pattern textuel peut résoudre sans risque même
+ * dans un fichier généré : ils ne fabriquent aucun contenu (ils prennent un
+ * côté existant ou constatent l'identité des deux).
+ */
+const SAFE_TEXTUAL_ON_GENERATED: ReadonlySet<ConflictType> = new Set([
+  "same_change",
+  "one_side_change",
+  "delete_no_change",
+  "whitespace_only",
+]);
+
+/**
+ * v3.9 — Contrat du classifieur : un hunk `complex` résolu par un résolveur
+ * format-aware est reclassifié `format_semantic`, avec une confiance et une
+ * trace — plus jamais un hunk affiché « complex » mais appliqué en douce.
+ */
+function reclassifyFormatSemantic(hunk: ConflictHunk, resolverUsed: string): ConflictHunk {
+  // On ne remplace pas le score du classifieur, on l'augmente : les dimensions
+  // (baseAvailability, dataRisk…) et les boosters existants (zdiff3…) restent —
+  // la reclassification ajoute l'information « fusion sémantique validée »,
+  // elle n'efface pas ce que la classification savait déjà.
+  const confidence: ConfidenceScore = {
+    score: Math.max(hunk.confidence.score, 78),
+    label: "high",
+    dimensions: { ...hunk.confidence.dimensions, typeClassification: 85 },
+    boosters: [
+      ...hunk.confidence.boosters,
+      `Résolveur format-aware « ${resolverUsed} » : fusion sémantique validée pour ce format`,
+    ],
+    penalties: hunk.confidence.penalties,
+  };
+  return {
+    ...hunk,
+    type: "format_semantic",
+    confidence,
+    explanation: `Hunk résolu sémantiquement par le résolveur « ${resolverUsed} » (fusion par structure du format, pas par lignes).`,
+    trace: {
+      ...hunk.trace,
+      selected: "format_semantic",
+      summary: `Résolveur format-aware « ${resolverUsed} » — reclassifié depuis complex.`,
+      steps: [
+        ...hunk.trace.steps,
+        {
+          type: "format_semantic" as ConflictType,
+          passed: true,
+          reason: `Le résolveur « ${resolverUsed} » a produit une fusion sémantique ; le hunk n'est plus « complex ».`,
+        },
+      ],
+    },
+  };
+}
+
+/**
+ * v3.9 — Un hunk non-complex résolu par un résolveur format-aware garde son
+ * type (la classification textuelle reste vraie) mais sa confiance intègre la
+ * validation sémantique du résolveur : c'est elle qui justifie l'application,
+ * et elle doit être visible dans la trace au lieu d'un bypass silencieux.
+ */
+function boostFormatValidated(hunk: ConflictHunk, resolverUsed: string): ConflictHunk {
+  if (CONFIDENCE_ORDER[hunk.confidence.label] >= CONFIDENCE_ORDER.high) return hunk;
+  const confidence: ConfidenceScore = {
+    score: Math.max(hunk.confidence.score, 75),
+    label: "high",
+    dimensions: hunk.confidence.dimensions,
+    boosters: [
+      ...hunk.confidence.boosters,
+      `Résolveur format-aware « ${resolverUsed} » : fusion validée sémantiquement pour ce format`,
+    ],
+    penalties: hunk.confidence.penalties,
+  };
+  return { ...hunk, confidence };
+}
+
 function resolveHunk(
   hunk: ConflictHunk,
   filePath: string,
   options: Required<GitWandOptions>,
-): { lines: string[] | null; reason: string } {
+  genInfo: { generated: boolean; label: string },
+): { hunk: ConflictHunk; lines: string[] | null; reason: string } {
   // explainOnly : ne pas appliquer de résolution, juste tracer
   if (options.explainOnly) {
     return {
+      hunk,
       lines: null,
       reason: `Mode explain-only : résolution non appliquée (type: ${hunk.type}, confiance: ${hunk.confidence.label} [score: ${hunk.confidence.score}]).`,
     };
   }
 
-  // Phase 7.3 — Dispatch format-aware (bypasse le seuil de confiance textuel
-  // car les résolveurs spécialisés font une validation sémantique).
-  const dispatch = dispatchFormatAware(hunk, filePath, options);
-  if (dispatch.status === "resolved") {
-    return { lines: dispatch.lines, reason: dispatch.reason };
+  // v3.9 — Fichier généré : par défaut on ne fusionne pas, on régénère.
+  // Les résolveurs format-aware (lockfiles compris) ne sont même pas tentés ;
+  // seuls les patterns textuels qui ne fabriquent rien restent autorisés.
+  const generatedGate = genInfo.generated && !options.resolveGeneratedFiles;
+  if (generatedGate && hunk.type !== "generated_file" && !SAFE_TEXTUAL_ON_GENERATED.has(hunk.type)) {
+    return {
+      hunk,
+      lines: null,
+      reason: `Fichier auto-généré (${genInfo.label}) — ne se fusionne pas, se régénère. Résous le fichier source puis relance l'outil qui produit celui-ci (install/build). Auto-résolution disponible via resolveGeneratedFiles: true.`,
+    };
   }
-  if (dispatch.status === "rejected-policy") {
-    return { lines: null, reason: dispatch.reason };
+
+  // Phase 7.3 — Dispatch format-aware. v3.9 : plus de bypass silencieux —
+  // un hunk complex résolu ici est reclassifié `format_semantic` (confiance +
+  // trace) puis soumis au même seuil de confiance que les patterns.
+  let dispatchNote = "";
+  if (!generatedGate) {
+    const dispatch = dispatchFormatAware(hunk, filePath, options);
+    if (dispatch.status === "resolved") {
+      const effective = hunk.type === "complex"
+        ? reclassifyFormatSemantic(hunk, dispatch.resolverUsed)
+        : boostFormatValidated(hunk, dispatch.resolverUsed);
+      const { policy: fmtPolicy, cfg: fmtCfg } = computeEffectivePolicy(filePath, options);
+      const fmtMinConfidence = computeEffectiveMinConfidence(fmtCfg, options);
+      // Une fusion sémantique combine du contenu des deux côtés — même famille
+      // de risque que non_overlapping. Les politiques qui l'excluent (strict,
+      // prefer-safety) l'excluent donc aussi, comme pour le résolveur imports.
+      if (effective.type === "format_semantic" && !fmtCfg.allowNonOverlapping) {
+        return {
+          hunk: effective,
+          lines: null,
+          reason: `Fusion sémantique (${dispatch.resolverUsed}) désactivée par la politique "${fmtPolicy}" — elle combine du contenu des deux côtés.`,
+        };
+      }
+      if (CONFIDENCE_ORDER[effective.confidence.label] < CONFIDENCE_ORDER[fmtMinConfidence]) {
+        return {
+          hunk: effective,
+          lines: null,
+          reason: `Confiance ${effective.confidence.label} (score: ${effective.confidence.score}) insuffisante pour appliquer la résolution format-aware (minimum requis : ${fmtMinConfidence}, politique : ${fmtPolicy}).`,
+        };
+      }
+      return { hunk: effective, lines: dispatch.lines, reason: dispatch.reason };
+    }
+    if (dispatch.status === "rejected-policy") {
+      return { hunk, lines: null, reason: dispatch.reason };
+    }
+    // dispatch.status === "not-applicable" → on continue vers le moteur textuel.
+    // `dispatch.note` porte la raison d'échec du résolveur spécialisé (pour
+    // annotation du refus final si le seuil de confiance bloque aussi).
+    dispatchNote = dispatch.note;
   }
-  // dispatch.status === "not-applicable" → on continue vers le moteur textuel.
-  // `dispatch.note` porte la raison d'échec du résolveur spécialisé (pour
-  // annotation du refus final si le seuil de confiance bloque aussi).
 
   // Phase 7.4 — Politique de merge effective pour ce fichier
   const { policy: effectivePolicy, cfg: policyCfg } = computeEffectivePolicy(filePath, options);
@@ -90,12 +206,14 @@ function resolveHunk(
   // Vérifier le niveau de confiance minimum
   if (CONFIDENCE_ORDER[hunk.confidence.label] < CONFIDENCE_ORDER[effectiveMinConfidence]) {
     return {
+      hunk,
       lines: null,
-      reason: `Confiance ${hunk.confidence.label} (score: ${hunk.confidence.score}) insuffisante (minimum requis : ${effectiveMinConfidence}, politique : ${effectivePolicy}).${dispatch.note ? ` [${dispatch.note}]` : ""}`,
+      reason: `Confiance ${hunk.confidence.label} (score: ${hunk.confidence.score}) insuffisante (minimum requis : ${effectiveMinConfidence}, politique : ${effectivePolicy}).${dispatchNote ? ` [${dispatchNote}]` : ""}`,
     };
   }
 
-  return assembleResolution(hunk, options, effectivePolicy, policyCfg);
+  const assembled = assembleResolution(hunk, options, effectivePolicy, policyCfg);
+  return { hunk, ...assembled };
 }
 
 /**
@@ -147,9 +265,10 @@ export function resolve(
     // Si fichier auto-généré et hunk classifié "complex", reclassifier en "generated_file"
     hunk = reclassifyIfGenerated(hunk, genInfo);
 
+    const { hunk: effectiveHunk, lines: resolvedLines, reason: resolutionReason } = resolveHunk(hunk, filePath, options, genInfo);
+    hunk = effectiveHunk;
     hunks.push(hunk);
 
-    const { lines: resolvedLines, reason: resolutionReason } = resolveHunk(hunk, filePath, options);
     const autoResolved = resolvedLines !== null;
 
     // v1.4 — Incrémenter le compteur de hunks complexes non résolus pour fileFrequency
@@ -206,6 +325,33 @@ export function resolve(
   const validation: ValidationResult = mergedContent !== null
     ? validateMergedContent(mergedContent, filePath)
     : EMPTY_VALIDATION;
+
+  // v3.9 — Une violation d'invariant de format (deux « Unreleased » dans un
+  // changelog, clé JSON dupliquée…) rétracte les résolutions automatiques du
+  // fichier, comme la validation parse-tree le fait déjà pour la syntaxe.
+  // Une résolution qui casse un invariant n'est pas appliquée, quel que soit
+  // le pattern qui l'a produite.
+  if (mergedContent !== null && validation.invariantErrors && validation.invariantErrors.length > 0) {
+    const why = validation.invariantErrors.join(" ");
+    const retractedResolutions = resolutions.map((r) =>
+      r.autoResolved
+        ? {
+            ...r,
+            autoResolved: false,
+            resolvedLines: null,
+            resolutionReason: `Rétracté : le contenu fusionné viole un invariant du format. ${why}`,
+          }
+        : r,
+    );
+    return {
+      filePath,
+      mergedContent: null,
+      hunks,
+      resolutions: retractedResolutions,
+      stats: { ...stats, autoResolved: 0, remaining: stats.totalConflicts },
+      validation: { ...validation, isValid: false },
+    };
+  }
 
   return {
     filePath,

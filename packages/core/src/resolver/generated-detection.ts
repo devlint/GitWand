@@ -107,14 +107,14 @@ export function reclassifyIfGenerated(
       baseAvailability: 0,
     },
     boosters: [`Chemin correspond au pattern de fichier auto-généré : ${genInfo.label}`],
-    penalties: ["Le contenu sera régénéré — theirs est supposé plus récent"],
+    penalties: ["Le contenu commité est la sortie d'un outil — une fusion textuelle ne le reproduit pas"],
   };
 
   return {
     ...hunk,
     type: "generated_file",
     confidence: generatedScore,
-    explanation: `Fichier auto-généré (${genInfo.label}). Ce fichier sera régénéré après le merge. Résolution proposée : accepter theirs et relancer le build.`,
+    explanation: `Fichier auto-généré (${genInfo.label}). Ce fichier se régénère, il ne se fusionne pas : résous sa source puis relance l'outil qui le produit (install/build).`,
     // Update the trace to reflect the reclassification
     trace: {
       ...hunk.trace,

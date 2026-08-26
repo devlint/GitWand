@@ -33,6 +33,8 @@ export const DEFAULT_OPTIONS: Required<GitWandOptions> = {
   policy: DEFAULT_POLICY,
   patternOverrides: {},
   generatedFiles: [],
+  // v3.9 — les fichiers générés déclinent par défaut (voir GitWandOptions)
+  resolveGeneratedFiles: false,
   // v2.2 — profils de format actifs par défaut
   disableFormatProfiles: false,
   // v2.4 — validation post-merge

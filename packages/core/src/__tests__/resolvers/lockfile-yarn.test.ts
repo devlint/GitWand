@@ -11,6 +11,9 @@
 
 import { describe, it, expect } from "vitest";
 import { resolve } from "../../resolver.js";
+// v3.9 — les lockfiles déclinent par défaut (fichiers générés) ; ces suites
+// testent le résolveur sémantique lui-même, donc derrière l'opt-in resolveGeneratedFiles.
+
 
 // ─── base lockfile ─────────────────────────────────────────────────────────────
 
@@ -49,19 +52,19 @@ axios@^1.0.0:
   ].join("\n");
 
   it("auto-résout via le resolver lockfile-yarn", () => {
-    const result = resolve(input, "yarn.lock");
+    const result = resolve(input, "yarn.lock", { resolveGeneratedFiles: true });
     expect(result.stats.autoResolved).toBe(1);
   });
 
   it("le résultat contient le bloc de package ajouté", () => {
-    const result = resolve(input, "yarn.lock");
+    const result = resolve(input, "yarn.lock", { resolveGeneratedFiles: true });
     expect(result.mergedContent).toContain("axios@^1.0.0:");
     expect(result.mergedContent).toContain("react@^18.0.0:");
     expect(result.mergedContent).toContain("vue@^3.0.0:");
   });
 
   it("la raison mentionne [lockfile-yarn]", () => {
-    const result = resolve(input, "yarn.lock");
+    const result = resolve(input, "yarn.lock", { resolveGeneratedFiles: true });
     expect(result.resolutions[0].resolutionReason).toMatch(/\[lockfile-yarn\]/i);
   });
 });
@@ -83,11 +86,11 @@ describe("F2 — yarn.lock : même bloc, version différente → prefer theirs (
   ].join("\n");
 
   it("ne lève pas d'exception", () => {
-    expect(() => resolve(input, "yarn.lock")).not.toThrow();
+    expect(() => resolve(input, "yarn.lock", { resolveGeneratedFiles: true })).not.toThrow();
   });
 
   it("la raison mentionne [lockfile-yarn]", () => {
-    const result = resolve(input, "yarn.lock");
+    const result = resolve(input, "yarn.lock", { resolveGeneratedFiles: true });
     expect(result.resolutions[0].resolutionReason).toMatch(/\[lockfile-yarn\]/i);
   });
 });
@@ -108,11 +111,11 @@ describe("F3 — yarn.lock minimal : ne plante pas", () => {
   ].join("\n");
 
   it("ne lève pas d'exception", () => {
-    expect(() => resolve(input, "yarn.lock")).not.toThrow();
+    expect(() => resolve(input, "yarn.lock", { resolveGeneratedFiles: true })).not.toThrow();
   });
 
   it("produit un résultat avec au moins un hunk", () => {
-    const result = resolve(input, "yarn.lock");
+    const result = resolve(input, "yarn.lock", { resolveGeneratedFiles: true });
     expect(result.hunks.length).toBeGreaterThanOrEqual(1);
   });
 });
@@ -145,12 +148,12 @@ date-fns@^3.0.0:
   ].join("\n");
 
   it("auto-résout avec les deux packages", () => {
-    const result = resolve(input, "yarn.lock");
+    const result = resolve(input, "yarn.lock", { resolveGeneratedFiles: true });
     expect(result.stats.autoResolved).toBe(1);
   });
 
   it("le résultat contient les deux packages ajoutés", () => {
-    const result = resolve(input, "yarn.lock");
+    const result = resolve(input, "yarn.lock", { resolveGeneratedFiles: true });
     expect(result.mergedContent).toContain("lodash@^4.0.0:");
     expect(result.mergedContent).toContain("date-fns@^3.0.0:");
     expect(result.mergedContent).toContain("react@^18.0.0:");
@@ -158,7 +161,7 @@ date-fns@^3.0.0:
   });
 
   it("la raison mentionne [lockfile-yarn]", () => {
-    const result = resolve(input, "yarn.lock");
+    const result = resolve(input, "yarn.lock", { resolveGeneratedFiles: true });
     expect(result.resolutions[0].resolutionReason).toMatch(/\[lockfile-yarn\]/i);
   });
 });
@@ -184,12 +187,12 @@ zod@^3.0.0:
   ].join("\n");
 
   it("le nom yarn.lock active le bon resolver", () => {
-    const result = resolve(input, "yarn.lock");
+    const result = resolve(input, "yarn.lock", { resolveGeneratedFiles: true });
     expect(result.resolutions[0].resolutionReason).toMatch(/\[lockfile-yarn\]/i);
   });
 
   it("le nom dans un sous-dossier est aussi détecté", () => {
-    const result = resolve(input, "apps/desktop/yarn.lock");
+    const result = resolve(input, "apps/desktop/yarn.lock", { resolveGeneratedFiles: true });
     expect(result.resolutions[0].resolutionReason).toMatch(/\[lockfile-yarn\]/i);
   });
 });

@@ -1,10 +1,11 @@
 {
   "fixtures": 46,
   "totalHunks": 46,
-  "autoResolved": 31,
+  "autoResolved": 28,
   "byType": {
-    "complex": 19,
+    "complex": 14,
     "delete_no_change": 2,
+    "format_semantic": 5,
     "generated_file": 1,
     "insertion_at_boundary": 4,
     "non_overlapping": 4,
@@ -17,11 +18,11 @@
     "whitespace_only": 1
   },
   "tiers": {
-    "trivial": 25,
-    "advancedDeterministic": 2,
+    "trivial": 24,
+    "advancedDeterministic": 7,
     "model": 0,
-    "unresolved": 19,
-    "residual": 21,
-    "aiReachable": 19
+    "unresolved": 15,
+    "residual": 22,
+    "aiReachable": 15
   }
 }

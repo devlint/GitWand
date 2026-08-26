@@ -309,7 +309,7 @@ const F11: CorpusFixture = {
     `>>>>>>> theirs`,
   ].join("\n"),
   expectedType: "value_only_change",
-  expectedResolved: true,
+  expectedResolved: false, // v3.9 — fichier généré : décline par défaut (se régénère, ne se fusionne pas),
 };
 
 const F12: CorpusFixture = {
@@ -361,7 +361,7 @@ const F13: CorpusFixture = {
     `>>>>>>> theirs`,
   ].join("\n"),
   expectedType: "value_only_change",
-  expectedResolved: true,
+  expectedResolved: false, // v3.9 — fichier généré : décline par défaut (se régénère, ne se fusionne pas),
   options: { minConfidence: "medium" },
 };
 
@@ -384,7 +384,7 @@ const F14: CorpusFixture = {
   ].join("\n"),
   // diff3 + les deux côtés changent + tokens non-volatils (clés) → complex → generated_file
   expectedType: "generated_file",
-  expectedResolved: true,
+  expectedResolved: false, // v3.9 — fichier généré : décline par défaut (se régénère, ne se fusionne pas),
 };
 
 // ─── Format-aware — JSON sémantique ────────────────────────

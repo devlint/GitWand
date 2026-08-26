@@ -611,7 +611,8 @@ describe("@gitwand/core resolve", () => {
     "name": "Foo"
   }
 }`;
-      const result = resolve(manifest, "build/manifest.json");
+      // v3.9 — build/manifest.json est un chemin généré : opt-in requis
+      const result = resolve(manifest, "build/manifest.json", { resolveGeneratedFiles: true });
       expect(result.hunks[0].type).toBe("value_only_change");
       expect(result.hunks[0].confidence.label).toBe("high");
       expect(result.stats.autoResolved).toBe(1);
@@ -630,7 +631,8 @@ describe("@gitwand/core resolve", () => {
       "resolved": "https://registry.npmjs.org/foo/-/foo-3.3.0.tgz",
       "integrity": "sha512-xyz789ghi012"
 >>>>>>> master`;
-      const result = resolve(lockEntry, "package-lock.json");
+      // v3.9 — lockfile : opt-in requis pour l'auto-résolution
+      const result = resolve(lockEntry, "package-lock.json", { resolveGeneratedFiles: true });
       expect(result.hunks[0].type).toBe("value_only_change");
       expect(result.stats.autoResolved).toBe(1);
     });
@@ -688,7 +690,13 @@ after`;
 >>>>>>> master`;
       const result = resolve(minJs, "public/dist/app.min.js", { minConfidence: "medium" });
       expect(result.hunks[0].type).toBe("generated_file");
-      expect(result.stats.autoResolved).toBe(1);
+      // v3.9 — classification conservée, application déclinée par défaut :
+      // un fichier généré se régénère, il ne se fusionne pas.
+      expect(result.stats.autoResolved).toBe(0);
+      expect(result.resolutions[0].resolutionReason).toContain("resolveGeneratedFiles");
+      // L'ancien comportement reste disponible derrière l'opt-in.
+      const optIn = resolve(minJs, "public/dist/app.min.js", { minConfidence: "medium", resolveGeneratedFiles: true });
+      expect(optIn.stats.autoResolved).toBe(1);
     });
 
     it("reclassifies complex conflicts in package-lock.json as generated_file", () => {
@@ -705,7 +713,7 @@ after`;
 >>>>>>> master`;
       const result = resolve(lockJson, "package-lock.json", { minConfidence: "medium" });
       expect(result.hunks[0].type).toBe("generated_file");
-      expect(result.stats.autoResolved).toBe(1);
+      expect(result.stats.autoResolved).toBe(0); // v3.9 — décliné par défaut
     });
 
     it("reclassifies complex in build/manifest.json as generated_file", () => {
@@ -723,7 +731,7 @@ after`;
 >>>>>>> master`;
       const result = resolve(manifest, "public/build/manifest.json", { minConfidence: "medium" });
       expect(result.hunks[0].type).toBe("generated_file");
-      expect(result.stats.autoResolved).toBe(1);
+      expect(result.stats.autoResolved).toBe(0); // v3.9 — décliné par défaut
     });
 
     it("does NOT mark normal .ts files as generated", () => {

@@ -193,21 +193,34 @@ export function assembleResolution(
       };
 
     case "generated_file": {
-      // Smart resolution : si les deux côtés sont identiques après suppression
-      // des valeurs volatiles (hashes, timestamps), le conflit est cosmétique
+      // v3.9 — Par défaut, on DÉCLINE : la version commitée d'un fichier
+      // généré est la sortie d'un outil, pas la fusion de deux textes.
+      // Mesuré sur le corpus benchmark/ : « accepter theirs » divergeait de
+      // ce que les équipes livrent dans ~100 % des cas. Décliner avec un
+      // message actionnable vaut mieux qu'une fusion silencieusement fausse.
       const oursStripped = stripVolatileValues(hunk.oursLines);
       const theirsStripped = stripVolatileValues(hunk.theirsLines);
+      const cosmetic = oursStripped === theirsStripped;
 
-      if (oursStripped === theirsStripped) {
+      if (!options.resolveGeneratedFiles) {
+        return {
+          lines: null,
+          reason: cosmetic
+            ? "Fichier auto-généré — différences volatiles uniquement (hashes/timestamps). Résous le fichier source (ex: package.json) puis régénère celui-ci avec son outil (install/build). Auto-résolution disponible via resolveGeneratedFiles: true."
+            : "Fichier auto-généré — ne se fusionne pas, se régénère. Résous le fichier source (ex: package.json) puis relance l'outil qui produit celui-ci (install/build). Auto-résolution (accepter theirs) disponible via resolveGeneratedFiles: true.",
+        };
+      }
+
+      // Opt-in resolveGeneratedFiles: true — comportement historique.
+      if (cosmetic) {
         return {
           lines: [...hunk.theirsLines],
           reason: "Fichier auto-généré — contenu structurel identique (seules les valeurs volatiles diffèrent). Résolution : accepter theirs. Suggestion : relancer le build/install.",
         };
       }
-
       return {
         lines: [...hunk.theirsLines],
-        reason: "Fichier auto-généré — le fichier sera régénéré après merge. Résolution : accepter theirs. Suggestion : relancer le build/install.",
+        reason: "Fichier auto-généré — le fichier sera régénéré après merge. Résolution : accepter theirs (opt-in resolveGeneratedFiles). Suggestion : relancer le build/install.",
       };
     }
 

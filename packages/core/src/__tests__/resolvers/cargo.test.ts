@@ -9,6 +9,9 @@
 
 import { describe, it, expect } from "vitest";
 import { resolve } from "../../resolver.js";
+// v3.9 — les lockfiles déclinent par défaut (fichiers générés) ; ces suites
+// testent le résolveur sémantique lui-même, donc derrière l'opt-in resolveGeneratedFiles.
+
 
 // ─── F25 — conflit [dependencies] ────────────────────────────
 
@@ -122,12 +125,12 @@ describe("F27 — Cargo.lock : merge de packages [[package]] (diff3)", () => {
   ].join("\n");
 
   it("auto-résout via le resolver cargo", () => {
-    const result = resolve(lockConflict, "Cargo.lock");
+    const result = resolve(lockConflict, "Cargo.lock", { resolveGeneratedFiles: true });
     expect(result.stats.autoResolved).toBe(1);
   });
 
   it("le résultat contient les deux nouveaux packages", () => {
-    const result = resolve(lockConflict, "Cargo.lock");
+    const result = resolve(lockConflict, "Cargo.lock", { resolveGeneratedFiles: true });
     const merged = result.mergedContent!;
     expect(merged).toContain("clap");
     expect(merged).toContain("anyhow");
@@ -135,7 +138,7 @@ describe("F27 — Cargo.lock : merge de packages [[package]] (diff3)", () => {
   });
 
   it("la raison mentionne Cargo.lock", () => {
-    const result = resolve(lockConflict, "Cargo.lock");
+    const result = resolve(lockConflict, "Cargo.lock", { resolveGeneratedFiles: true });
     expect(result.resolutions[0].resolutionReason).toMatch(/Cargo\.lock/i);
   });
 });
@@ -169,7 +172,7 @@ describe("Cargo — détection du nom de fichier", () => {
       `version = "2.0.0"`,
       `>>>>>>> theirs`,
     ].join("\n");
-    const result = resolve(input, "Cargo.lock");
+    const result = resolve(input, "Cargo.lock", { resolveGeneratedFiles: true });
     expect(result.resolutions[0].resolutionReason).toMatch(/\[cargo\]/i);
   });
 });

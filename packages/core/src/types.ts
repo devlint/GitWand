@@ -31,6 +31,7 @@ export type ConflictType =
   | "token_level_merge"        // v2.7 — fusion fine ligne/token, toujours proposée (jamais auto-appliquée)
   | "llm_proposed"              // v2.5 — résolution proposée par LLM fallback (opt-in, priority 998)
   | "refactoring_aware_merge"  // v2.6 — RefMerge : détection/inversion/rejeu de refactorings (expérimental, opt-in)
+  | "format_semantic"           // v3.9 — hunk complex résolu par un résolveur format-aware (JSON/MD/YAML/Vue/CSS…), reclassifié pour que stats et trace disent la vérité
   | "complex";                  // Conflit réel nécessitant intervention humaine
 
 /** Niveau de confiance discret (label seuil, utilisé dans les options) */
@@ -443,6 +444,12 @@ export interface ValidationResult {
   /** Le contenu fusionné est-il valide ? */
   isValid: boolean;
   /**
+   * v3.9 — Violations d'invariants de format (au-delà de la syntaxe).
+   * Ex : deux sections `## [Unreleased]` dans un changelog, clé dupliquée
+   * dans un objet JSON. Non vide → les résolutions du fichier sont rétractées.
+   */
+  invariantErrors?: string[];
+  /**
    * v2.4 — Résultat de la validation parse-tree via tree-sitter.
    * - `true`  : l'arbre syntaxique ne contient aucun nœud d'erreur
    * - `false` : des erreurs syntaxiques ont été détectées → rétraction activée
@@ -532,6 +539,15 @@ export interface GitWandOptions {
    * Exemple : `["src/**\/*.generated.ts", "*.pb.go", "api/openapi-client/**"]`.
    */
   generatedFiles?: string[];
+  /**
+   * v3.9 — Autoriser l'auto-résolution des fichiers générés (lockfiles,
+   * bundles, `dist/`…). Défaut : `false` — mesuré sur 1 662 merges réels,
+   * la version commitée de ces fichiers est la sortie d'un outil, pas la
+   * fusion de deux textes : l'auto-résolution divergeait de ce que les
+   * équipes livrent dans ~100 % des cas. Par défaut le moteur décline avec
+   * un message actionnable (« résous la source et régénère »).
+   */
+  resolveGeneratedFiles?: boolean;
   /**
    * v2.4 — Niveau de validation post-merge.
    * - `"balanced"` (défaut) : marqueurs résiduels + syntaxe JSON/YAML/TOML + parse-tree tree-sitter (async)

@@ -10,6 +10,8 @@
 
 import { describe, it, expect } from "vitest";
 import { resolve } from "../../resolver.js";
+// v3.9 — ces cas exercent le pattern value_only_change sur des chemins de lockfile ;
+// sous le nouveau défaut ces fichiers déclinent, donc opt-in resolveGeneratedFiles.
 
 // ─── Cas qui doivent matcher value_only_change ───────────────
 
@@ -43,12 +45,12 @@ describe("value_only_change : checksums différents (diff2)", () => {
   ].join("\n");
 
   it("classifie en value_only_change", () => {
-    const result = resolve(input, "Cargo.lock");
+    const result = resolve(input, "Cargo.lock", { resolveGeneratedFiles: true });
     expect(result.hunks[0].type).toBe("value_only_change");
   });
 
   it("auto-résout", () => {
-    const result = resolve(input, "Cargo.lock");
+    const result = resolve(input, "Cargo.lock", { resolveGeneratedFiles: true });
     expect(result.stats.autoResolved).toBe(1);
   });
 });
@@ -63,12 +65,12 @@ describe("value_only_change : integrity hash npm (diff2)", () => {
   ].join("\n");
 
   it("classifie en value_only_change", () => {
-    const result = resolve(input, "package-lock.json");
+    const result = resolve(input, "package-lock.json", { resolveGeneratedFiles: true });
     expect(result.hunks[0].type).toBe("value_only_change");
   });
 
   it("auto-résout", () => {
-    const result = resolve(input, "package-lock.json");
+    const result = resolve(input, "package-lock.json", { resolveGeneratedFiles: true });
     expect(result.stats.autoResolved).toBe(1);
   });
 });
@@ -85,12 +87,12 @@ describe("value_only_change : multiple lignes avec valeurs scalaires (diff2)", (
   ].join("\n");
 
   it("classifie en value_only_change", () => {
-    const result = resolve(input, "package-lock.json");
+    const result = resolve(input, "package-lock.json", { resolveGeneratedFiles: true });
     expect(result.hunks[0].type).toBe("value_only_change");
   });
 
   it("auto-résout", () => {
-    const result = resolve(input, "package-lock.json");
+    const result = resolve(input, "package-lock.json", { resolveGeneratedFiles: true });
     expect(result.stats.autoResolved).toBe(1);
   });
 });
@@ -105,12 +107,12 @@ describe("value_only_change : hash de commit (diff2)", () => {
   ].join("\n");
 
   it("classifie en value_only_change", () => {
-    const result = resolve(input, "Cargo.lock");
+    const result = resolve(input, "Cargo.lock", { resolveGeneratedFiles: true });
     expect(result.hunks[0].type).toBe("value_only_change");
   });
 
   it("auto-résout", () => {
-    const result = resolve(input, "Cargo.lock");
+    const result = resolve(input, "Cargo.lock", { resolveGeneratedFiles: true });
     expect(result.stats.autoResolved).toBe(1);
   });
 });
