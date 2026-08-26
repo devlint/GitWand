@@ -535,7 +535,7 @@ async function toolResolve(cwd: string, args: Record<string, unknown>) {
       const content = readFileSync(filePath, "utf-8");
       const result = resolve(content, file, {
         ...(policy ? { policy: policy as any } : {}),
-        // v3.10 — l'opération en cours rend déterministes les décisions qui en
+        // accuracy lot C — l'opération en cours rend déterministes les décisions qui en
         // dépendent (versions modifiées des deux côtés → la cible gagne).
         mergeContext: detectMergeContext(cwd),
       });

@@ -10,7 +10,7 @@
 
 import { describe, it, expect } from "vitest";
 import { resolve } from "../../resolver.js";
-// v3.9 — ces cas exercent le pattern value_only_change sur des chemins de lockfile ;
+// accuracy lot 1 — ces cas exercent le pattern value_only_change sur des chemins de lockfile ;
 // sous le nouveau défaut ces fichiers déclinent, donc opt-in resolveGeneratedFiles.
 
 // ─── Cas qui doivent matcher value_only_change ───────────────

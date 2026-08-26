@@ -39,7 +39,7 @@ describe("summarizeTiers — mapping des tiers", () => {
     expect(s.byTier.trivial).toBe(11);
     expect(s.byTier.advancedDeterministic).toBe(0);
     expect(s.byTier.model).toBe(0);
-    // v3.9 — generated_file décline par défaut (se régénère, ne se fusionne pas)
+    // accuracy lot 1 — generated_file décline par défaut (se régénère, ne se fusionne pas)
     expect(s.byTier.unresolved).toBe(1);
   });
 

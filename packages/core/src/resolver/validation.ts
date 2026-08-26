@@ -63,7 +63,7 @@ function tryParse(content: string, format: StructuredFormat): string | null {
   }
 }
 
-// ─── v3.9 — Invariants de format ──────────────────────────────────────────────
+// ─── accuracy lot 1 — Invariants de format ──────────────────────────────────────────────
 //
 // La validation syntaxique ne suffit pas : un changelog avec deux sections
 // « ## [Unreleased] » parse très bien, un package.json avec une clé dupliquée
@@ -188,7 +188,7 @@ export function validateMergedContent(content: string, filePath: string): Valida
   const format = detectFormat(filePath);
   const syntaxError = tryParse(content, format);
 
-  // 3. v3.9 — Invariants de format (au-delà de la syntaxe)
+  // 3. accuracy lot 1 — Invariants de format (au-delà de la syntaxe)
   const invariantErrors = checkFormatInvariants(content, filePath);
 
   const isValid = !hasResidualMarkers && syntaxError === null && invariantErrors.length === 0;

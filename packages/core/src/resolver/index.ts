@@ -59,7 +59,7 @@ import { runLlmFallbackPhase } from "./llm-pipeline.js";
  * @returns Les lignes résolues + la raison, ou `null` + raison de refus
  */
 /**
- * v3.9 — Types de hunk qu'un pattern textuel peut résoudre sans risque même
+ * accuracy lot 1 — Types de hunk qu'un pattern textuel peut résoudre sans risque même
  * dans un fichier généré : ils ne fabriquent aucun contenu (ils prennent un
  * côté existant ou constatent l'identité des deux).
  */
@@ -71,7 +71,7 @@ const SAFE_TEXTUAL_ON_GENERATED: ReadonlySet<ConflictType> = new Set([
 ]);
 
 /**
- * v3.9 — Contrat du classifieur : un hunk `complex` résolu par un résolveur
+ * accuracy lot 1 — Contrat du classifieur : un hunk `complex` résolu par un résolveur
  * format-aware est reclassifié `format_semantic`, avec une confiance et une
  * trace — plus jamais un hunk affiché « complex » mais appliqué en douce.
  */
@@ -112,7 +112,7 @@ function reclassifyFormatSemantic(hunk: ConflictHunk, resolverUsed: string): Con
 }
 
 /**
- * v3.9 — Un hunk non-complex résolu par un résolveur format-aware garde son
+ * accuracy lot 1 — Un hunk non-complex résolu par un résolveur format-aware garde son
  * type (la classification textuelle reste vraie) mais sa confiance intègre la
  * validation sémantique du résolveur : c'est elle qui justifie l'application,
  * et elle doit être visible dans la trace au lieu d'un bypass silencieux.
@@ -147,7 +147,7 @@ function resolveHunk(
     };
   }
 
-  // v3.9 — Fichier généré : par défaut on ne fusionne pas, on régénère.
+  // accuracy lot 1 — Fichier généré : par défaut on ne fusionne pas, on régénère.
   // Les résolveurs format-aware (lockfiles compris) ne sont même pas tentés ;
   // seuls les patterns textuels qui ne fabriquent rien restent autorisés.
   const generatedGate = genInfo.generated && !options.resolveGeneratedFiles;
@@ -159,7 +159,7 @@ function resolveHunk(
     };
   }
 
-  // Phase 7.3 — Dispatch format-aware. v3.9 : plus de bypass silencieux —
+  // Phase 7.3 — Dispatch format-aware. accuracy lot 1 : plus de bypass silencieux —
   // un hunk complex résolu ici est reclassifié `format_semantic` (confiance +
   // trace) puis soumis au même seuil de confiance que les patterns.
   let dispatchNote = "";
@@ -326,7 +326,7 @@ export function resolve(
     ? validateMergedContent(mergedContent, filePath)
     : EMPTY_VALIDATION;
 
-  // v3.9 — Une violation d'invariant de format (deux « Unreleased » dans un
+  // accuracy lot 1 — Une violation d'invariant de format (deux « Unreleased » dans un
   // changelog, clé JSON dupliquée…) rétracte les résolutions automatiques du
   // fichier, comme la validation parse-tree le fait déjà pour la syntaxe.
   // Une résolution qui casse un invariant n'est pas appliquée, quel que soit

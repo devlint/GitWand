@@ -31,7 +31,7 @@ export type ConflictType =
   | "token_level_merge"        // v2.7 — fusion fine ligne/token, toujours proposée (jamais auto-appliquée)
   | "llm_proposed"              // v2.5 — résolution proposée par LLM fallback (opt-in, priority 998)
   | "refactoring_aware_merge"  // v2.6 — RefMerge : détection/inversion/rejeu de refactorings (expérimental, opt-in)
-  | "format_semantic"           // v3.9 — hunk complex résolu par un résolveur format-aware (JSON/MD/YAML/Vue/CSS…), reclassifié pour que stats et trace disent la vérité
+  | "format_semantic"           // accuracy lot 1 — hunk complex résolu par un résolveur format-aware (JSON/MD/YAML/Vue/CSS…), reclassifié pour que stats et trace disent la vérité
   | "complex";                  // Conflit réel nécessitant intervention humaine
 
 /** Niveau de confiance discret (label seuil, utilisé dans les options) */
@@ -444,7 +444,7 @@ export interface ValidationResult {
   /** Le contenu fusionné est-il valide ? */
   isValid: boolean;
   /**
-   * v3.9 — Violations d'invariants de format (au-delà de la syntaxe).
+   * accuracy lot 1 — Violations d'invariants de format (au-delà de la syntaxe).
    * Ex : deux sections `## [Unreleased]` dans un changelog, clé dupliquée
    * dans un objet JSON. Non vide → les résolutions du fichier sont rétractées.
    */
@@ -503,7 +503,7 @@ export interface MergeStats {
 
 /** Options de configuration pour le moteur de résolution */
 /**
- * v3.10 — Contexte du merge en cours : la donnée que le moteur n'a jamais eue.
+ * accuracy lot C — Contexte du merge en cours : la donnée que le moteur n'a jamais eue.
  * Optionnel et purement déclaratif — les appelants le détectent (CLI/MCP lisent
  * l'état `.git`, le desktop connaît son opération) ; le cœur reste une fonction
  * pure qui l'echo dans ses traces.
@@ -562,7 +562,7 @@ export interface GitWandOptions {
    */
   generatedFiles?: string[];
   /**
-   * v3.9 — Autoriser l'auto-résolution des fichiers générés (lockfiles,
+   * accuracy lot 1 — Autoriser l'auto-résolution des fichiers générés (lockfiles,
    * bundles, `dist/`…). Défaut : `false` — mesuré sur 1 662 merges réels,
    * la version commitée de ces fichiers est la sortie d'un outil, pas la
    * fusion de deux textes : l'auto-résolution divergeait de ce que les
@@ -571,7 +571,7 @@ export interface GitWandOptions {
    */
   resolveGeneratedFiles?: boolean;
   /**
-   * v3.10 — Contexte du merge en cours (opération + côté cible). `null`/absent :
+   * accuracy lot C — Contexte du merge en cours (opération + côté cible). `null`/absent :
    * inconnu. Quand il est fourni, les décisions qui en dépendent (scalaires de
    * version modifiés des deux côtés) deviennent déterministes : la branche
    * cible gagne. Sans lui, ces cas sont proposés au lieu d'être appliqués.

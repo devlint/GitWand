@@ -36,10 +36,10 @@ export async function cmdResolve(
   const isCIMode = flags.ci || flags.json;
   const verbose = !isCIMode && (flags.verbose === true || typeof flags.verbose === "string");
   const resolveWhitespace = !(flags["no-whitespace"] === true);
-  // v3.9 — les fichiers générés déclinent par défaut ; ce flag rétablit
+  // accuracy lot 1 — les fichiers générés déclinent par défaut ; ce flag rétablit
   // l'auto-résolution (équivalent CLI de resolveGeneratedFiles: true).
   const resolveGeneratedFiles = flags["resolve-generated"] === true;
-  // v3.10 — contexte de merge : détecté depuis l'état .git ; null hors opération.
+  // accuracy lot C — contexte de merge : détecté depuis l'état .git ; null hors opération.
   // Rend déterministes les décisions qui en dépendent (versions modifiées des
   // deux côtés → la branche cible garde sa valeur).
   const mergeContext = detectMergeContext();

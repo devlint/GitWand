@@ -245,7 +245,7 @@ export interface GitWandrcConfig {
    */
   generatedFiles?: string[];
   /**
-   * v3.9 — Autoriser l'auto-résolution des fichiers générés (défaut: false).
+   * accuracy lot 1 — Autoriser l'auto-résolution des fichiers générés (défaut: false).
    * Par défaut le moteur décline : un fichier généré se régénère, il ne se
    * fusionne pas. Convention de dépôt, donc configurée ici plutôt qu'en
    * réglage d'application.
@@ -420,7 +420,7 @@ export function parseGitwandrc(json: string): GitWandrcConfig | null {
       }
     }
 
-    // v3.9 — Auto-résolution des fichiers générés (opt-in booléen strict).
+    // accuracy lot 1 — Auto-résolution des fichiers générés (opt-in booléen strict).
     if (typeof parsed.resolveGeneratedFiles === "boolean") {
       result.resolveGeneratedFiles = parsed.resolveGeneratedFiles;
     }

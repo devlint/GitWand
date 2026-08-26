@@ -33,9 +33,9 @@ export const DEFAULT_OPTIONS: Required<GitWandOptions> = {
   policy: DEFAULT_POLICY,
   patternOverrides: {},
   generatedFiles: [],
-  // v3.9 — les fichiers générés déclinent par défaut (voir GitWandOptions)
+  // accuracy lot 1 — les fichiers générés déclinent par défaut (voir GitWandOptions)
   resolveGeneratedFiles: false,
-  // v3.10 — contexte de merge inconnu par défaut ; fourni par les appelants
+  // accuracy lot C — contexte de merge inconnu par défaut ; fourni par les appelants
   mergeContext: null,
   // v2.2 — profils de format actifs par défaut
   disableFormatProfiles: false,

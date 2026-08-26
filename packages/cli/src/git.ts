@@ -33,7 +33,7 @@ export function getConflictedFiles(): string[] {
 }
 
 
-// ─── v3.10 — Détection du contexte de merge ──────────────────────────────────
+// ─── accuracy lot C — Détection du contexte de merge ──────────────────────────────────
 
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";

@@ -11,7 +11,7 @@
 
 import { describe, it, expect } from "vitest";
 import { resolve } from "../../resolver.js";
-// v3.9 — les lockfiles déclinent par défaut (fichiers générés) ; ces suites
+// accuracy lot 1 — les lockfiles déclinent par défaut (fichiers générés) ; ces suites
 // testent le résolveur sémantique lui-même, donc derrière l'opt-in resolveGeneratedFiles.
 
 

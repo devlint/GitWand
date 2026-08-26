@@ -1,5 +1,5 @@
 /**
- * v3.10 — Détection du contexte de merge pour les tools MCP.
+ * accuracy lot C — Détection du contexte de merge pour les tools MCP.
  *
  * Volontairement dupliqué depuis `@gitwand/cli` (src/git.ts) plutôt
  * qu'importé : le MCP ne dépend pas du CLI, et `@gitwand/core` reste sans

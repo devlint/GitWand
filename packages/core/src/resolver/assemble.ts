@@ -169,7 +169,7 @@ export function assembleResolution(
       const versionish = hasUnorderableVersionPair(hunk.oursLines, hunk.theirsLines);
       const ctx = options.mergeContext;
 
-      // v3.10 — Un scalaire de version NON ordonnable fixé différemment des
+      // accuracy lot C — Un scalaire de version NON ordonnable fixé différemment des
       // deux côtés ('13.x-dev' vs '12.54.1', '2.9.0-dev'…) est l'identité de
       // version du fichier sur la branche cible : avec le contexte, la cible
       // garde sa valeur. Mesuré sur benchmark/ : laravel 36,6 % → 81,5 %
@@ -221,7 +221,7 @@ export function assembleResolution(
       };
 
     case "generated_file": {
-      // v3.9 — Par défaut, on DÉCLINE : la version commitée d'un fichier
+      // accuracy lot 1 — Par défaut, on DÉCLINE : la version commitée d'un fichier
       // généré est la sortie d'un outil, pas la fusion de deux textes.
       // Mesuré sur le corpus benchmark/ : « accepter theirs » divergeait de
       // ce que les équipes livrent dans ~100 % des cas. Décliner avec un

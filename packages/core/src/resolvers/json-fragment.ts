@@ -1,5 +1,5 @@
 /**
- * GitWand — Résolveur de FRAGMENTS JSON (v3.11, lot E)
+ * GitWand — Résolveur de FRAGMENTS JSON (accuracy lot E, lot E)
  *
  * `tryResolveJsonConflict` exige que chaque côté du hunk parse comme un
  * document JSON complet. Or les conflits réels de `package.json` /

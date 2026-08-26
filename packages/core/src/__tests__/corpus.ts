@@ -309,7 +309,7 @@ const F11: CorpusFixture = {
     `>>>>>>> theirs`,
   ].join("\n"),
   expectedType: "value_only_change",
-  expectedResolved: false, // v3.9 — fichier généré : décline par défaut (se régénère, ne se fusionne pas),
+  expectedResolved: false, // accuracy lot 1 — fichier généré : décline par défaut (se régénère, ne se fusionne pas),
 };
 
 const F12: CorpusFixture = {
@@ -361,7 +361,7 @@ const F13: CorpusFixture = {
     `>>>>>>> theirs`,
   ].join("\n"),
   expectedType: "value_only_change",
-  expectedResolved: false, // v3.9 — fichier généré : décline par défaut (se régénère, ne se fusionne pas),
+  expectedResolved: false, // accuracy lot 1 — fichier généré : décline par défaut (se régénère, ne se fusionne pas),
   options: { minConfidence: "medium" },
 };
 
@@ -384,7 +384,7 @@ const F14: CorpusFixture = {
   ].join("\n"),
   // diff3 + les deux côtés changent + tokens non-volatils (clés) → complex → generated_file
   expectedType: "generated_file",
-  expectedResolved: false, // v3.9 — fichier généré : décline par défaut (se régénère, ne se fusionne pas),
+  expectedResolved: false, // accuracy lot 1 — fichier généré : décline par défaut (se régénère, ne se fusionne pas),
 };
 
 // ─── Format-aware — JSON sémantique ────────────────────────
@@ -1360,11 +1360,11 @@ const F46: CorpusFixture = {
   expectedResolved: false,
 };
 
-// ─── v3.10 — MergeContext (lot C) ───────────────────────────
+// ─── accuracy lot C — MergeContext (lot C) ───────────────────────────
 
 const F47: CorpusFixture = {
   id: "F47",
-  description: "v3.10 — value_only_change : identité de version en back-merge, la cible gagne (contexte fourni)",
+  description: "accuracy lot C — value_only_change : identité de version en back-merge, la cible gagne (contexte fourni)",
   filePath: "src/Application.php",
   category: "semantic",
   input: [
@@ -1384,7 +1384,7 @@ const F47: CorpusFixture = {
 
 const F48: CorpusFixture = {
   id: "F48",
-  description: "v3.10 — value_only_change : même identité de version SANS contexte → proposé, jamais appliqué (l'ancien fallback politique était mesuré faux ~3 fois sur 4)",
+  description: "accuracy lot C — value_only_change : même identité de version SANS contexte → proposé, jamais appliqué (l'ancien fallback politique était mesuré faux ~3 fois sur 4)",
   filePath: "src/Application.php",
   category: "semantic",
   input: [
@@ -1416,7 +1416,7 @@ export const CORPUS: CorpusFixture[] = [
   // v2.5 — LLM fallback candidates (complex sans LLM, résolus avec LLM mocké)
   F36, F37, F38, F39, F40,
   F41, F42, F43, F44, F45,
-  // v3.10 — MergeContext
+  // accuracy lot C — MergeContext
   F47, F48,
   // v2.7 — token_level_merge
   F46,

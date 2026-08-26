@@ -1,5 +1,5 @@
 /**
- * v3.10 — detectMergeContext : détection de l'opération git en cours depuis
+ * accuracy lot C — detectMergeContext : détection de l'opération git en cours depuis
  * l'état du répertoire .git, sur de vrais dépôts temporaires (jamais de mock
  * de la couche git, conformément aux contraintes du repo).
  */

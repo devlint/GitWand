@@ -1,5 +1,5 @@
 /**
- * v3.11 (lot E) — Fragments JSON fusionnés par clé.
+ * accuracy lot E (lot E) — Fragments JSON fusionnés par clé.
  *
  * Les conflits réels de package.json / composer.json sont des fragments
  * « "clé": valeur, » — le doc complet ne parse pas, et l'union ligne à ligne

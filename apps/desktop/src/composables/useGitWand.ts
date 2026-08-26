@@ -427,7 +427,7 @@ export function useGitWand() {
             policy: cfg.policy,
             patternOverrides: cfg.patterns,
             generatedFiles: cfg.generatedFiles,
-            // v3.9 — opt-in repo-level : ré-autorise l'auto-résolution des
+            // accuracy lot 1 — opt-in repo-level : ré-autorise l'auto-résolution des
             // fichiers générés (le défaut du moteur est de décliner).
             resolveGeneratedFiles: cfg.resolveGeneratedFiles,
           };
@@ -484,7 +484,7 @@ export function useGitWand() {
       // Non-fatal : visible dans le toast d'erreur, mais on continue.
       error.value = msg;
     }
-    // v3.10 — Contexte de merge : l'app sait quelle opération est en cours
+    // accuracy lot C — Contexte de merge : l'app sait quelle opération est en cours
     // (git_repo_state lit .git directement). Convention des marqueurs git :
     // « ours » est la branche cible pour merge, rebase ET cherry-pick — déclaré
     // explicitement pour que le moteur n'ait jamais à re-dériver l'inversion

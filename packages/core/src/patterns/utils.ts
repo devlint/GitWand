@@ -418,7 +418,7 @@ function compareSemver(a: [number, number, number, boolean], b: [number, number,
  * pour les hashes et autres valeurs ambiguës on retombe sur la politique.
  */
 /**
- * v3.10 — Y a-t-il, parmi les paires de tokens qui diffèrent, au moins une
+ * accuracy lot C — Y a-t-il, parmi les paires de tokens qui diffèrent, au moins une
  * paire « de type version » qui n'est PAS ordonnable proprement ?
  *
  * C'est exactement le cas mesuré comme faux sur le corpus benchmark/ : deux

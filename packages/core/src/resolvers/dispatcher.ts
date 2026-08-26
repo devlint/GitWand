@@ -297,7 +297,7 @@ export function tryFormatAwareResolve(
       };
     }
 
-    // v3.11 (lot E) — le doc complet n'a pas parsé : les conflits réels de
+    // accuracy lot E (lot E) — le doc complet n'a pas parsé : les conflits réels de
     // package.json / composer.json sont des FRAGMENTS (« "clé": valeur, »).
     // Fusion 3-way par clé, mesurée bien plus juste que l'union ligne à ligne.
     const frag = tryResolveJsonFragment(hunk.baseLines, hunk.oursLines, hunk.theirsLines);

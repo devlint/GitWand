@@ -1,5 +1,5 @@
 /**
- * v3.10 — Lot C : MergeContext.
+ * accuracy lot C — Lot C : MergeContext.
  *
  * Le moteur reçoit (optionnellement) l'opération en cours et le côté cible.
  * Règles testées :

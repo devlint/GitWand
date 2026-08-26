@@ -1,5 +1,5 @@
 /**
- * v3.9 — Lot 1 « accuracy » : tests des trois changements issus du benchmark
+ * accuracy lot 1 — Lot 1 « accuracy » : tests des trois changements issus du benchmark
  * (docs/superpowers/specs/2026-08-26-conflict-engine-accuracy.md).
  *
  * A — contrat du classifieur : un hunk `complex` résolu par un résolveur
