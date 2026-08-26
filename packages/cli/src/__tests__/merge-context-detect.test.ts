@@ -12,8 +12,31 @@ import { join } from "node:path";
 
 import { detectMergeContext } from "../git.js";
 
+// Environnement git HERMÉTIQUE : sans ça, la config globale/système de la
+// machine hôte s'invite dans le dépôt temporaire — un core.hooksPath global
+// (husky…), une signature GPG qui attend une passphrase ou un éditeur
+// configuré suffisent à faire pendre `git rebase` jusqu'au timeout du test.
+const HERMETIC_GIT_ENV = {
+  ...process.env,
+  GIT_CONFIG_GLOBAL: "/dev/null",
+  GIT_CONFIG_SYSTEM: "/dev/null",
+  GIT_CONFIG_NOSYSTEM: "1",
+  GIT_TERMINAL_PROMPT: "0",
+  GIT_EDITOR: "true",
+  GIT_SEQUENCE_EDITOR: "true",
+  GIT_PAGER: "cat",
+};
+
 function git(cwd: string, args: string[]): string {
-  return execFileSync("git", args, { cwd, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] });
+  return execFileSync("git", args, {
+    cwd,
+    encoding: "utf-8",
+    stdio: ["ignore", "pipe", "pipe"],
+    env: HERMETIC_GIT_ENV,
+    // Un git qui attend une entrée doit échouer vite et fort, pas pendre
+    // silencieusement jusqu'au timeout de vitest.
+    timeout: 10_000,
+  });
 }
 
 function initRepo(cwd: string): void {
@@ -21,6 +44,7 @@ function initRepo(cwd: string): void {
   git(cwd, ["config", "user.email", "t@t.t"]);
   git(cwd, ["config", "user.name", "t"]);
   git(cwd, ["config", "commit.gpgsign", "false"]);
+  git(cwd, ["config", "core.hooksPath", "/dev/null"]);
 }
 
 function commitFile(cwd: string, name: string, content: string, msg: string): void {
