@@ -41,29 +41,35 @@ Derivation is a **replay**: for each historical merge with conflicts, re-run the
 ## Tasks
 
 ### 1 — Core: the observation → verdict engine
-- [ ] `packages/core/src/conventions/types.ts` — `RepoConventions`, `ConventionObservation` (one replayed conflicted file: path, hunk classes, what each candidate rule would produce, what the humans committed).
-- [ ] `packages/core/src/conventions/derive.ts` — pure `deriveConventions(observations: ConventionObservation[]): RepoConventions`, with the sample/agreement floors and per-question scoring. No git, no fs.
-- [ ] Unit tests: floors respected (4 samples → no verdict), conflicting evidence → no verdict, agreement math, engineVersion stamped.
+- [x] `packages/core/src/conventions/types.ts` — `RepoConventions`, `ConventionObservation` (one replayed conflicted file: path, hunk classes, what each candidate rule would produce, what the humans committed).
+- [x] `packages/core/src/conventions/derive.ts` — pure `deriveConventions(observations: ConventionObservation[]): RepoConventions`, with the sample/agreement floors and per-question scoring. No git, no fs.
+- [x] Unit tests: floors respected (4 samples → no verdict), conflicting evidence → no verdict, agreement math, engineVersion stamped.
 
 ### 2 — Core: conventions as an input
-- [ ] `GitWandOptions.conventions?: RepoConventions | null` (default null) + precedence: explicit `.gitwandrc` keys win over conventions, conventions win over defaults. Implement for the three questions that already have engine switches: `resolveGeneratedFiles` (generatedFiles verdict "merge" → behave as opt-in true), version-identity side (versionIdentity verdict feeds the lot-C rule when `mergeContext` is absent), changelog handling (verdict "tool-rebuilt" → decline changelog unions outright).
-- [ ] Trace provenance: every influenced resolution's reason names the convention, its sample count and agreement.
-- [ ] Unit tests per question + a precedence test (.gitwandrc beats conventions).
+- [x] `GitWandOptions.conventions?: RepoConventions | null` (default null) + precedence: explicit `.gitwandrc` keys win over conventions, conventions win over defaults. Implement for the three questions that already have engine switches: `resolveGeneratedFiles` (generatedFiles verdict "merge" → behave as opt-in true), version-identity side (versionIdentity verdict feeds the lot-C rule when `mergeContext` is absent), changelog handling (verdict "tool-rebuilt" → decline changelog unions outright).
+- [x] Trace provenance: every influenced resolution's reason names the convention, its sample count and agreement.
+- [x] Unit tests per question + a precedence test (.gitwandrc beats conventions).
 
 ### 3 — The derivation runner (caller side)
-- [ ] `packages/cli/src/conventions-runner.ts` — walk `rev-list --merges` (cap + `--since` window), re-create each conflict via `merge-tree --write-tree` (git ≥ 2.38 guard), build `ConventionObservation`s, call `deriveConventions`, write `.git/gitwand/conventions.json` atomically. Shares the merge-walk shape with `scripts/replay-conflicts.mjs` — extract the common walk into the runner and have the benchmark script consume it, so there is ONE replay implementation.
-- [ ] `gitwand conventions` CLI command: derive (`--max-merges`, `--json`), show current verdicts with evidence, `--clear`. Verbose prints the per-question table.
-- [ ] Tests: temp repo with a fabricated history (team regenerates lockfiles in 6 merges → verdict; 4 merges → no verdict), worktree case, cap respected.
+- [x] `packages/cli/src/conventions-runner.ts` — walk `rev-list --merges` (cap + `--since` window), re-create each conflict via `merge-tree --write-tree` (git ≥ 2.38 guard), build `ConventionObservation`s, call `deriveConventions`, write `.git/gitwand/conventions.json` atomically. Shares the merge-walk shape with `scripts/replay-conflicts.mjs` — extract the common walk into the runner and have the benchmark script consume it, so there is ONE replay implementation.
+- [x] `gitwand conventions` CLI command: derive (`--max-merges`, `--json`), show current verdicts with evidence, `--clear`. Verbose prints the per-question table.
+- [x] Tests: temp repo with a fabricated history (team regenerates lockfiles in 6 merges → verdict; 4 merges → no verdict), worktree case, cap respected.
 
-### 4 — Desktop
+### 4 — Desktop — **DEFERRED by the task-5 gate** (2026-08-26)
+
+_Split-half on the corpus: flat everywhere — every derived verdict confirms the
+engine defaults, because the defaults were calibrated on this very corpus
+(circularity, recorded in benchmark/README). The desktop surface waits for a
+corpus re-pin that includes repos with divergent conventions; core + CLI ship
+now (provenance + `gitwand conventions` have standalone value)._
 - [ ] Tauri command `derive_conventions` (Rust spawns the same runner logic via the existing node sidecar? NO — implement the walk in Rust `git/conventions.rs` OR call the CLI runner as a subprocess; decide by effort at implementation time, parity route in `dev-server.mjs` either way) + typed wrapper in `utils/backend.ts` + `invoke_handler!` registration.
 - [ ] `useGitWand.ts`: load `.git/gitwand/conventions.json` alongside `.gitwandrc` at repo open; merge into `resolveOptions` at the documented precedence.
 - [ ] Settings > repo section: "Measure this repo's merge conventions" action with progress, results table (question / verdict / evidence), re-run and clear. 5 locales.
 - [ ] The conflict UI shows convention provenance when a hunk was influenced (reuses the trace string from task 2).
 
 ### 5 — Prove the loop closes (gate)
-- [ ] Benchmark: derive conventions on each corpus repo from its FIRST half of merges, then measure agreement on the SECOND half with conventions applied vs not. Ship the desktop surface only if agreement improves (or stays flat with better coverage) on at least two repos and regresses on none beyond noise.
-- [ ] Record the split-half results in `benchmark/README.md`.
+- [x] Benchmark: derive conventions on each corpus repo from its FIRST half of merges, then measure agreement on the SECOND half with conventions applied vs not. Ship the desktop surface only if agreement improves (or stays flat with better coverage) on at least two repos and regresses on none beyond noise.
+- [x] Record the split-half results in `benchmark/README.md`.
 
 ### 6 — Close
 - [ ] `website/reference/config.md` + `/conflict-engine`: document the layer and its precedence; `llms.txt` line.

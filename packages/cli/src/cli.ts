@@ -23,6 +23,7 @@ import { cmdResolve } from "./commands/resolve.js";
 import { cmdStatus } from "./commands/status.js";
 import { cmdPreview } from "./commands/preview.js";
 import { cmdScan } from "./commands/scan.js";
+import { cmdConventions } from "./commands/conventions.js";
 
 function printHelp(): void {
   printBanner();
@@ -31,6 +32,7 @@ function printHelp(): void {
   console.log(`  gitwand status                  Show conflict status`);
   console.log(`  gitwand preview                 Predict conflicts before merge/rebase/cherry-pick`);
   console.log(`  gitwand scan                    Scan staged changes for secrets`);
+  console.log(`  gitwand conventions             Measure this repo's merge conventions from its own history (--show, --clear, --max-merges=N)`);
   console.log(`  gitwand --help                  Show this help`);
   console.log();
   console.log(`${c.bold}Options:${c.reset}`);
@@ -111,6 +113,8 @@ export async function main(): Promise<void> {
     await cmdPreview(flags);
   } else if (command === "scan") {
     await cmdScan(flags);
+  } else if (command === "conventions") {
+    await cmdConventions(flags);
   } else {
     console.error(`${c.red}Unknown command: ${command}${c.reset}`);
     printHelp();

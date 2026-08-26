@@ -121,7 +121,7 @@ export function findDuplicateJsonKeys(content: string): string[] {
 }
 
 /** Un fichier est « de type changelog » si son nom de base commence par changelog/history/releases et finit en .md. */
-function isChangelogFile(filePath: string): boolean {
+export function isChangelogFile(filePath: string): boolean {
   const base = filePath.split(/[\\/]/).pop() ?? "";
   return /^(changelog|history|releases|release-notes)\b.*\.(md|markdown)$/i.test(base);
 }

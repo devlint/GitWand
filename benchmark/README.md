@@ -237,6 +237,31 @@ only to unorderable version pairs (the file's version identity: `13.x-dev`,
 `2.9.0-dev`), which is where all of laravel's gain lives. This is exactly the
 kind of decision the benchmark exists to make.
 
+## Split-half validation of derived conventions (lot F gate)
+
+Lot F derives a repo's own merge conventions from its history. Gate protocol:
+derive on the older half of each corpus repo's merges, measure agreement on
+the recent half with and without the derived conventions applied.
+
+Result (engine at lot E): **flat everywhere — zero regressions, zero gains.**
+prettier and vue derive `generatedFiles: regenerate` at 100 % agreement (16
+and 5 samples); laravel and express clear no evidence floor. Nothing changes
+behaviour because every verdict *confirms the engine's defaults*.
+
+That is not a null result — it is a circularity warning worth recording: the
+defaults were calibrated on this corpus, so conventions derived from the same
+corpus can only agree with them. The layer's value is (a) **provenance** — 
+"declined because your repo regenerates lockfiles, measured on 16 merges" is a
+different product than "declined because we say so" — and (b) repos that
+**diverge** from the defaults: a team that genuinely merges its lockfiles gets
+its auto-resolution back (verdict `merge`), a tool-rebuilt changelog gets its
+unions declined. Both behaviours are pinned by unit tests on fabricated
+histories; demonstrating them on real public repos needs corpus candidates
+*selected for divergent conventions*, which the next re-pin should include.
+
+Per the gate, the desktop surface is deferred; core + CLI ship (the
+measurement itself, `gitwand conventions`, has standalone value).
+
 ## Results
 
 `results/` holds one JSON file per measured GitWand version, plus the corpus pin

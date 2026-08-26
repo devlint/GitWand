@@ -578,6 +578,14 @@ export interface GitWandOptions {
    */
   mergeContext?: MergeContext | null;
   /**
+   * accuracy lot F — Conventions du dépôt, MESURÉES sur son propre historique
+   * de merges (voir `deriveConventions`). Précédence stricte : une option
+   * explicite (`.gitwandrc` ou appelant) gagne toujours sur une convention
+   * dérivée, qui gagne sur les défauts du moteur. Toute résolution influencée
+   * porte la provenance dans sa raison.
+   */
+  conventions?: import("./conventions/types.js").RepoConventions | null;
+  /**
    * v2.4 — Niveau de validation post-merge.
    * - `"balanced"` (défaut) : marqueurs résiduels + syntaxe JSON/YAML/TOML + parse-tree tree-sitter (async)
    * - `"strict"` : + tsc --noEmit et/ou eslint (opt-in, Node.js uniquement)

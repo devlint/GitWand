@@ -37,6 +37,7 @@ import { EMPTY_VALIDATION, validateMergedContent } from "./validation.js";
 import { checkParseTreeValid, applyPostMergeRiskPenalty } from "./validate-parse-tree.js";
 import { runStrictValidation } from "./validate-strict.js";
 import { isGeneratedFile, reclassifyIfGenerated } from "./generated-detection.js";
+import { isChangelogFile } from "./validation.js";
 import {
   CONFIDENCE_ORDER,
   DEFAULT_OPTIONS,
@@ -150,6 +151,23 @@ function resolveHunk(
   // accuracy lot 1 — Fichier généré : par défaut on ne fusionne pas, on régénère.
   // Les résolveurs format-aware (lockfiles compris) ne sont même pas tentés ;
   // seuls les patterns textuels qui ne fabriquent rien restent autorisés.
+  // accuracy lot F — convention mesurée : dans ce dépôt, le changelog est
+  // RECONSTRUIT par l'outillage de release, pas fusionné. Aucune fusion
+  // textuelle ne le reproduit (mesuré sur l'historique), donc on décline avec
+  // la provenance au lieu de produire une union plausible mais jamais livrée.
+  const changelogConv = options.conventions?.changelog;
+  if (
+    changelogConv?.verdict === "tool-rebuilt" &&
+    isChangelogFile(filePath) &&
+    !SAFE_TEXTUAL_ON_GENERATED.has(hunk.type)
+  ) {
+    return {
+      hunk,
+      lines: null,
+      reason: `Changelog reconstruit par l'outillage de release dans ce dépôt [convention mesurée sur ${changelogConv.samples} merges, ${Math.round(changelogConv.agreement * 100)} %] — fusion déclinée : résous la source et relance l'outil de release.`,
+    };
+  }
+
   const generatedGate = genInfo.generated && !options.resolveGeneratedFiles;
   if (generatedGate && hunk.type !== "generated_file" && !SAFE_TEXTUAL_ON_GENERATED.has(hunk.type)) {
     return {
@@ -229,7 +247,17 @@ export function resolve(
   filePath: string,
   userOptions: GitWandOptions = {},
 ): MergeResult {
-  const options = { ...DEFAULT_OPTIONS, ...userOptions };
+  let options = { ...DEFAULT_OPTIONS, ...userOptions };
+
+  // accuracy lot F — précédence : option explicite > convention dérivée > défaut.
+  // Seule la convention generatedFiles pilote un interrupteur du moteur en v1 ;
+  // elle ne s'applique que si l'appelant n'a PAS exprimé de choix.
+  const generatedConv = options.conventions?.generatedFiles;
+  const generatedByConvention =
+    userOptions.resolveGeneratedFiles === undefined && generatedConv?.verdict === "merge";
+  if (generatedByConvention) {
+    options = { ...options, resolveGeneratedFiles: true };
+  }
 
   // v2.6 — RefMerge opt-in : activer le pattern avant classification, désactiver après
   const refEnabled = !!(options.refactoringAware?.enabled);
@@ -276,7 +304,17 @@ export function resolve(
       priorComplexHunks++;
     }
 
-    resolutions.push({ hunk, resolvedLines, autoResolved, resolutionReason });
+    // accuracy lot F — provenance : toute résolution (ou déclin) d'un fichier
+    // généré influencée par une convention mesurée le dit dans sa raison.
+    let finalReason = resolutionReason;
+    if (genInfo.generated && generatedConv) {
+      const prov = `[convention mesurée sur ${generatedConv.samples} merges, ${Math.round(generatedConv.agreement * 100)} % : ce dépôt ${generatedConv.verdict === "merge" ? "fusionne" : "régénère"} ses fichiers générés]`;
+      if ((generatedByConvention && autoResolved) || (generatedConv.verdict === "regenerate" && !autoResolved)) {
+        finalReason = `${resolutionReason} ${prov}`;
+      }
+    }
+
+    resolutions.push({ hunk, resolvedLines, autoResolved, resolutionReason: finalReason });
 
     if (autoResolved) {
       outputLines.push(...resolvedLines);
