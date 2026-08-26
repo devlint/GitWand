@@ -95,10 +95,13 @@ But it is not nothing either, and this is the uncomfortable half:
 > team shipped in roughly three cases out of four. A user whose convention is
 > "regenerate the changelog" gets a merged one instead, quietly.
 
-That is a product finding, not a measurement artefact. The honest options are to
-stop auto-applying on regenerate-by-convention paths (changelogs, lockfiles) and
-propose instead, or to keep auto-applying and say so loudly in the UI. Either
-way, **the number should not be published until that is decided** — quoting
+That is a product finding, not a measurement artefact — and digging into it turned
+up four more, including a `generated_file` classification that the engine
+recognises and then merges anyway, at **0 % agreement over 77 attempts**. The
+diagnosis and the directions that follow from it are in
+[`docs/superpowers/specs/2026-08-26-conflict-engine-accuracy.md`](../docs/superpowers/specs/2026-08-26-conflict-engine-accuracy.md).
+
+Either way, **the number should not be published until that is decided** — quoting
 41.7 % without this paragraph is misleading, and quoting only `vuejs/core`'s
 92.5 % is cherry-picking.
 
