@@ -24,7 +24,7 @@ const PATTERNS = [
       <div class="ph-inner">
         <span class="ph-badge">Conflict engine</span>
         <h1 class="ph-h1">Deterministic conflict resolution. <span class="grad">No guessing.</span></h1>
-        <p class="ph-sub">Every hunk runs through a classifier of pattern recognizers — 8 of them resolve deterministically on their own, each with its own confidence profile. The trivial 95% of conflicts is resolved without you. The rest is surfaced with a full decision trace — never a black box.</p>
+        <p class="ph-sub">Every hunk runs through a classifier of pattern recognizers — 8 of them resolve deterministically on their own, each with its own confidence profile. Conflicts that carry no decision are resolved without you. The rest is surfaced with a full decision trace — never a black box.</p>
         <div class="ph-ctas">
           <a href="/guide/conflict-resolution" class="ph-btn ph-btn--primary">Read the deep dive</a>
           <a href="/" class="ph-btn">← Back to home</a>

@@ -220,6 +220,17 @@ const result = {
           mergesScanned: r.mergesScanned, maxMergesRequested: r.maxMergesRequested,
           mergesWithConflicts: r.mergesWithConflicts,
           totalHunks: r.totalHunks, byTier: r.tiers.byTier,
+          agreement: r.agreement
+            ? {
+                filesFullyResolved: r.agreement.filesFullyResolved,
+                comparable: r.agreement.comparable,
+                agreeExact: r.agreement.agreeExact,
+                exactShare: r.agreement.comparable
+                  ? Number(((r.agreement.agreeExact / r.agreement.comparable) * 100).toFixed(2))
+                  : null,
+                disagreeExamples: r.agreement.disagreeExamples,
+              }
+            : undefined,
           autoResolvedShare: r.totalHunks
             ? Number((((r.tiers.byTier.trivial + r.tiers.byTier.advancedDeterministic) / r.totalHunks) * 100).toFixed(2))
             : 0,

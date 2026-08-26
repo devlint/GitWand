@@ -62,24 +62,63 @@ the real merge commit is right there in the history, so when the engine resolves
 a file **end to end** (`mergedContent` non-null — no conflict left), its output
 can be compared byte-for-byte with what the team actually committed.
 
-Measured on GitWand 3.8.0, corpus pinned 2026-08-26:
+Full corpus, GitWand 3.8.0, pinned 2026-08-26 — **1 662 merges replayed, 568 with
+conflicts, 5 631 hunks**:
 
-| Repo | Files resolved end-to-end | Byte-identical to the human merge |
-|---|---:|---:|
-| `vuejs/core` | 226 | **92.5 %** |
-| `expressjs/express` | 47 | **59.6 %** |
+| Repo | Hunks | Auto-resolved | Files resolved end-to-end | Byte-identical |
+|---|---:|---:|---:|---:|
+| `vuejs/core` | 401 | 76.1 % | 226 | **92.5 %** |
+| `expressjs/express` | 586 | 23.4 % | 47 | **59.6 %** |
+| `tauri-apps/tauri` | 2 129 | — | 143 | **26.6 %** |
+| `prettier/prettier` | 1 281 | — | 179 | **25.3 %** |
+| `laravel/framework` | 696 | — | 325 | **24.3 %** |
+| `gohugoio/hugo` | 507 | — | 63 | **15.9 %** |
+| `django/django` | 31 | — | — | — |
+| `rust-lang/cargo` | 0 | — | — | — |
+| **Corpus** | **5 631** | **55.5 %** | **986** | **41.7 %** |
 
-Read the disagreements before reading the percentages. On `vuejs/core` they are
-dominated by `pnpm-lock.yaml`, `CHANGELOG.md` and Jest snapshot files — artefacts
-the humans **regenerated** after merging rather than merged. No merge algorithm
-reproduces a regenerated lockfile, so those are not engine errors, and they are
-also not wins: the honest reading is "not comparable".
+### What the disagreements actually are
 
-The same caution applies in the other direction. A recorded merge may contain
+Look at *which* files disagree before reading any percentage. On
+`laravel/framework` and `tauri-apps/tauri` the list is almost entirely
+`CHANGELOG.md`. On `prettier/prettier` and `gohugoio/hugo` it is `yarn.lock`,
+`go.sum` and docs. On `vuejs/core`, `pnpm-lock.yaml` and Jest snapshots.
+
+These are files whose committed version is **regenerated, not merged** — the team
+ran the release tool, the installer, or `--update-snapshot` after resolving. No
+merge algorithm reproduces a regenerated artefact, so a mismatch there is not
+proof the engine was wrong.
+
+But it is not nothing either, and this is the uncomfortable half:
+
+> GitWand auto-resolves those files today, and its answer differs from what the
+> team shipped in roughly three cases out of four. A user whose convention is
+> "regenerate the changelog" gets a merged one instead, quietly.
+
+That is a product finding, not a measurement artefact. The honest options are to
+stop auto-applying on regenerate-by-convention paths (changelogs, lockfiles) and
+propose instead, or to keep auto-applying and say so loudly in the UI. Either
+way, **the number should not be published until that is decided** — quoting
+41.7 % without this paragraph is misleading, and quoting only `vuejs/core`'s
+92.5 % is cherry-picking.
+
+The same caution applies in the other direction: a recorded merge may contain
 edits the human made while resolving — an "evil merge" — which nothing could
-reproduce either. So this metric is a **lower bound on correctness**, not a
-score, and it is reported as exact and whitespace-normalised counts with retained
-examples rather than as a single grade.
+reproduce. So the metric is a **lower bound on correctness**, not a score, and it
+is reported as exact and whitespace-normalised counts with retained examples
+rather than as a single grade.
+
+### The corpus needs re-pinning
+
+This run also indicts the corpus. `rust-lang/cargo` contributed **zero** merges
+with conflicts, `django/django` ten, `vuejs/core` thirty-five — these projects
+squash-merge or use a merge queue, so there is almost nothing to replay. Four
+repositories carry the entire result.
+
+The next pin should select for *projects that actually merge feature branches*,
+verified by `git rev-list --merges --count HEAD` before adding them, rather than
+for language coverage. Language diversity is worth nothing if the repository has
+no conflicted merges in it.
 
 ## What it does NOT measure
 
@@ -150,10 +189,16 @@ number from this benchmark and a number on the website ever appear side by side,
 the difference in denominator has to be visible, or the benchmark reads as a
 refutation of the marketing rather than the source of it.
 
-The measurements also suggest which claim is worth making. Coverage is largely a
-property of *your codebase* — 23 % on one repo, 76 % on another. Agreement is a
-property of the *engine*. The second is the one a sceptic actually wants
-answered, and it is the one this benchmark can defend.
+The measurements also settled which claim is worth making — by ruling both out
+for now. Coverage is largely a property of *your codebase* (0 % to 76 % across
+this corpus). Agreement is a property of the engine, but at 41.7 % it is not
+publishable until the changelog/lockfile question above is decided.
+
+So the site stopped claiming a percentage at all. It says the thing that is true
+in every repository — some conflicts carry no decision, and those are the ones
+GitWand answers — and points here for the numbers, with their denominators
+attached. When the corpus is re-pinned and the regenerate-by-convention paths are
+settled, there will be a figure worth putting on a landing page.
 
 ## Results
 

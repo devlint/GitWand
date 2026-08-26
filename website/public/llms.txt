@@ -1,6 +1,6 @@
 # GitWand
 
-> GitWand is a free, open-source (MIT) native Git client that automatically resolves trivial merge conflicts using 8 deterministic patterns — no LLM guessing, no hallucinations. It auto-resolves ~95% of trivial conflicts with a confidence score and a full decision trace for every hunk. Built with Tauri 2 + Rust (~8 MB binary). Available as a desktop app (macOS, Linux, Windows), a CLI, a VS Code extension, and an MCP server for AI agents.
+> GitWand is a free, open-source (MIT) native Git client that automatically resolves trivial merge conflicts using 8 deterministic patterns — no LLM guessing, no hallucinations. It auto-resolves the conflicted hunks that carry no decision — identical edits on both sides, one-sided changes, reorderings, boundary insertions, lockfiles — each with a confidence score and a full decision trace. Coverage is measured, not estimated: see https://github.com/devlint/GitWand/tree/main/benchmark (23% to 76% of conflicted hunks depending on the codebase). Built with Tauri 2 + Rust (~8 MB binary). Available as a desktop app (macOS, Linux, Windows), a CLI, a VS Code extension, and an MCP server for AI agents.
 
 Key facts:
 - Deterministic conflict-resolution engine: 8 auto-applied patterns (12-pattern registry), confidence scoring (certain/high/medium/low), decision trace per hunk. LLM fallback is strictly opt-in.
