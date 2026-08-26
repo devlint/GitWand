@@ -124,17 +124,22 @@ export default defineConfig({
     const hasOwnCanonical = (pageData.frontmatter.head || []).some(
       ([tag, attrs]: [string, Record<string, string>]) => tag === 'link' && attrs?.rel === 'canonical'
     )
-    if (hasOwnCanonical) return
 
     const canonicalUrl = `https://gitwand.app/${pageData.relativePath}`
       .replace(/\/?index\.md$/, '/')
       .replace(/\.md$/, '')
 
     pageData.frontmatter.head ??= []
-    pageData.frontmatter.head.push(
-      ['link', { rel: 'canonical', href: canonicalUrl }],
-      ['meta', { property: 'og:url', content: canonicalUrl }],
-    )
+    // A page that already declares its own canonical (a post cross-posted from
+    // elsewhere, pointing back at the original) keeps it — but it still gets the
+    // structured data below. An earlier version of this returned here, which
+    // silently left that one page with no JSON-LD at all.
+    if (!hasOwnCanonical) {
+      pageData.frontmatter.head.push(
+        ['link', { rel: 'canonical', href: canonicalUrl }],
+        ['meta', { property: 'og:url', content: canonicalUrl }],
+      )
+    }
 
     // ── Structured data, generated rather than hand-maintained ────────────────
     // Only the home page carried JSON-LD before this. Two schemas are worth
@@ -177,7 +182,10 @@ export default defineConfig({
     // BlogPosting — every post already has a title, description and date in its
     // frontmatter; without this markup Google has to infer authorship and
     // publication date, and answer engines cite the post without attribution.
-    if (segment === 'blog' && !/(^|\/)index\.md$/.test(pageData.relativePath)) {
+    // Skipped when the page declares an external canonical: claiming a BlogPosting
+    // at this URL would contradict the canonical, which says the original lives
+    // somewhere else. The breadcrumb above is navigational and stays either way.
+    if (segment === 'blog' && !hasOwnCanonical && !/(^|\/)index\.md$/.test(pageData.relativePath)) {
       const date = pageData.frontmatter.date
       pageData.frontmatter.head.push([
         'script',
