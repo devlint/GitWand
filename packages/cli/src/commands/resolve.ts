@@ -36,6 +36,9 @@ export async function cmdResolve(
   const isCIMode = flags.ci || flags.json;
   const verbose = !isCIMode && (flags.verbose === true || typeof flags.verbose === "string");
   const resolveWhitespace = !(flags["no-whitespace"] === true);
+  // v3.9 — les fichiers générés déclinent par défaut ; ce flag rétablit
+  // l'auto-résolution (équivalent CLI de resolveGeneratedFiles: true).
+  const resolveGeneratedFiles = flags["resolve-generated"] === true;
   const concurrency = parseConcurrency(flags.concurrency);
   const llmFallbackEnabled = flags["llm-fallback"] === true;
 
@@ -118,6 +121,7 @@ export async function cmdResolve(
       ? await resolveAsync(content, file, {
           verbose: false,
           resolveWhitespace,
+          resolveGeneratedFiles,
           llmFallback: {
             ...buildResolveLlmOptions(llmCliConfig, llmFileConfig),
             endpoint: buildLlmEndpoint(llmCliConfig),
@@ -126,6 +130,7 @@ export async function cmdResolve(
       : resolve(content, file, {
           verbose: false,
           resolveWhitespace,
+          resolveGeneratedFiles,
         });
 
     // Écriture sur disque (sauf dry-run). Bloquée si des marqueurs résiduels

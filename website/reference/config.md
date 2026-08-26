@@ -94,6 +94,42 @@ When multiple patterns match a file:
 2. Falls back to the global `policy`
 3. Falls back to `DEFAULT_POLICY` (`"prefer-theirs"`)
 
+## Generated Files
+
+Lockfiles (`package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `Cargo.lock`…),
+minified bundles and `dist/` outputs are detected as **generated files**. By
+default GitWand declines to auto-resolve them and tells you why: the committed
+version of a generated file is a tool's output, not a merge of two texts —
+[measured on 1,662 real merges](https://github.com/devlint/GitWand/tree/main/benchmark),
+auto-merging them diverged from what teams actually shipped in almost every
+case. Resolve the source file (`package.json`, `composer.json`…), re-run the
+installer or build, and the conflict disappears.
+
+Only the patterns that fabricate nothing still apply automatically on these
+files: identical edits on both sides, a change on one side only, a deletion
+against an untouched side, whitespace-only differences.
+
+To extend detection to your own generated paths:
+
+```json
+{
+  "generatedFiles": ["src/**/*.generated.ts", "*.pb.go", "api/openapi-client/**"]
+}
+```
+
+To restore full auto-resolution (semantic lockfile merges, accept-theirs) — for
+example if your team genuinely merges lockfiles rather than regenerating them:
+
+```json
+{
+  "resolveGeneratedFiles": true
+}
+```
+
+The CLI equivalent is `gitwand resolve --resolve-generated`. This is a
+repository convention, so it lives in `.gitwandrc` rather than in the app
+settings.
+
 ## Confidence Levels
 
 The `minConfidence` setting (set implicitly by each policy) controls the minimum confidence score required for auto-resolution:

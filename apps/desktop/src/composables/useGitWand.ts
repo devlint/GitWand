@@ -426,6 +426,9 @@ export function useGitWand() {
             policy: cfg.policy,
             patternOverrides: cfg.patterns,
             generatedFiles: cfg.generatedFiles,
+            // v3.9 — opt-in repo-level : ré-autorise l'auto-résolution des
+            // fichiers générés (le défaut du moteur est de décliner).
+            resolveGeneratedFiles: cfg.resolveGeneratedFiles,
           };
         }
         // v2.5 — `llmFallback` n'est pas géré par `parseGitwandrc` (qui
