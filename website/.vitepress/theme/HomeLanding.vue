@@ -166,7 +166,7 @@ const i18n: Record<Locale, any> = {
     heroPoint1: "8 patterns déterministes — zéro pari sur ton code",
     heroPoint2: "100 % local — ton code ne quitte jamais ta machine",
     heroPoint3: "Un seul moteur — Desktop, CLI, VS Code & agents IA",
-    heroMeta: "Gratuit · sans compte · sans télémétrie",
+    heroMeta: "Gratuit · sans compte · sans pistage",
     heroToastTitle: "57 hunks résolus automatiquement",
     heroToastSub: "1 à relire · 0 hallucination",
     contribYouName: "+ toi ?",
@@ -266,7 +266,7 @@ const i18n: Record<Locale, any> = {
     heroPoint1: "8 deterministic patterns — zero gambling with your code",
     heroPoint2: "100% local — your code never leaves your machine",
     heroPoint3: "One engine — Desktop, CLI, VS Code & AI agents",
-    heroMeta: "Free · no account · no telemetry",
+    heroMeta: "Free · no account · no tracking",
     heroToastTitle: "57 hunks auto-resolved",
     heroToastSub: "1 left for review · 0 hallucinations",
     contribYouName: "+ you?",
@@ -366,7 +366,7 @@ const i18n: Record<Locale, any> = {
     heroPoint1: "8 patrones deterministas — cero apuestas con tu código",
     heroPoint2: "100 % local — tu código nunca sale de tu máquina",
     heroPoint3: "Un solo motor — Desktop, CLI, VS Code y agentes de IA",
-    heroMeta: "Gratis · sin cuenta · sin telemetría",
+    heroMeta: "Gratis · sin cuenta · sin rastreo",
     heroToastTitle: "57 hunks resueltos automáticamente",
     heroToastSub: "1 por revisar · 0 alucinaciones",
     contribYouName: "+ ¿tú?",
@@ -466,7 +466,7 @@ const i18n: Record<Locale, any> = {
     heroPoint1: "8 padrões deterministas — zero aposta com seu código",
     heroPoint2: "100 % local — seu código nunca sai da sua máquina",
     heroPoint3: "Um único motor — Desktop, CLI, VS Code e agentes de IA",
-    heroMeta: "Gratuito · sem conta · sem telemetria",
+    heroMeta: "Gratuito · sem conta · sem rastreamento",
     heroToastTitle: "57 hunks resolvidos automaticamente",
     heroToastSub: "1 para revisar · 0 alucinações",
     contribYouName: "+ você?",
@@ -566,7 +566,7 @@ const i18n: Record<Locale, any> = {
     heroPoint1: "8 种确定性模式 — 绝不拿你的代码赌运气",
     heroPoint2: "100% 本地运行 — 代码永不离开你的机器",
     heroPoint3: "一个引擎 — 桌面端、CLI、VS Code 与 AI 代理",
-    heroMeta: "免费 · 无需账号 · 无遥测",
+    heroMeta: "免费 · 无需账号 · 无追踪",
     heroToastTitle: "57 个 hunk 已自动解决",
     heroToastSub: "1 个待复查 · 0 幻觉",
     contribYouName: "+ 你？",
@@ -852,7 +852,7 @@ function cellClass(v: CompareValue | undefined): string {
     ══════════════════════════════════════ -->
     <section class="stats-bar">
       <div class="stat">
-        <span class="stat-n">10</span>
+        <span class="stat-n">8</span>
         <span class="stat-l">{{ t.statPatterns }}</span>
       </div>
       <div class="stat-sep"></div>
@@ -1134,7 +1134,7 @@ function cellClass(v: CompareValue | undefined): string {
           </table>
         </div>
         <div class="section-cta-row">
-          <a href="/features" class="btn-ghost">{{ t.miniCompareCta }}</a>
+          <a href="/compare/" class="btn-ghost">{{ t.miniCompareCta }}</a>
         </div>
       </div>
     </section>

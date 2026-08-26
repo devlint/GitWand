@@ -1,10 +1,25 @@
+---
+title: GitWand for VS Code — resolve conflicts in your editor
+description: The GitWand VS Code extension surfaces conflicted hunks as CodeLens annotations and diagnostics, with one-click deterministic resolution and a full decision trace.
+---
+
 # VS Code Extension
 
 The GitWand VS Code extension brings conflict resolution directly into your editor with CodeLens annotations, diagnostics, and one-click resolution.
 
 ## Installation
 
-The extension is not yet published to the VS Code Marketplace — install it from source by building a `.vsix` from the monorepo:
+The extension is on the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=gitwand.gitwand-vscode):
+
+```bash
+code --install-extension gitwand.gitwand-vscode
+```
+
+Or search for **GitWand** in the Extensions view (`⇧⌘X` / `Ctrl+Shift+X`).
+
+### Building from source
+
+To run an unreleased version, build a `.vsix` from the monorepo:
 
 ```bash
 # From the GitWand monorepo root

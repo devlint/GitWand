@@ -1,4 +1,6 @@
 import { defineConfig } from 'vitepress'
+import { extractFaq } from './seo'
+
 
 export default defineConfig({
   title: 'GitWand',
@@ -126,6 +128,95 @@ export default defineConfig({
       ['link', { rel: 'canonical', href: canonicalUrl }],
       ['meta', { property: 'og:url', content: canonicalUrl }],
     )
+
+    // ── Structured data, generated rather than hand-maintained ────────────────
+    // Only the home page carried JSON-LD before this. Two schemas are worth
+    // emitting site-wide, and both are fully derivable from page data, so they
+    // belong here instead of in 30-odd frontmatter blocks that would drift.
+    const SECTIONS: Record<string, string> = {
+      guide: 'Guide',
+      reference: 'Reference',
+      compare: 'Compare',
+      blog: 'Blog',
+      fix: 'Fix a conflict',
+    }
+    const [segment] = pageData.relativePath.split('/')
+    const section = SECTIONS[segment]
+
+    // BreadcrumbList — tells Google the site's shape and earns the breadcrumb
+    // trail in the SERP instead of a bare URL. Emitted on every page below the
+    // root; the home page is the trail's own first item.
+    if (section) {
+      const isSectionIndex = /(^|\/)index\.md$/.test(pageData.relativePath)
+      const itemListElement: unknown[] = [
+        { '@type': 'ListItem', position: 1, name: 'GitWand', item: 'https://gitwand.app/' },
+        { '@type': 'ListItem', position: 2, name: section, item: `https://gitwand.app/${segment}/` },
+      ]
+      if (!isSectionIndex) {
+        itemListElement.push({
+          '@type': 'ListItem',
+          position: 3,
+          name: pageData.title || pageData.frontmatter.title,
+          item: canonicalUrl,
+        })
+      }
+      pageData.frontmatter.head.push([
+        'script',
+        { type: 'application/ld+json' },
+        JSON.stringify({ '@context': 'https://schema.org', '@type': 'BreadcrumbList', itemListElement }),
+      ])
+    }
+
+    // BlogPosting — every post already has a title, description and date in its
+    // frontmatter; without this markup Google has to infer authorship and
+    // publication date, and answer engines cite the post without attribution.
+    if (segment === 'blog' && !/(^|\/)index\.md$/.test(pageData.relativePath)) {
+      const date = pageData.frontmatter.date
+      pageData.frontmatter.head.push([
+        'script',
+        { type: 'application/ld+json' },
+        JSON.stringify({
+          '@context': 'https://schema.org',
+          '@type': 'BlogPosting',
+          headline: pageData.frontmatter.title || pageData.title,
+          description: pageData.frontmatter.description || pageData.description,
+          url: canonicalUrl,
+          mainEntityOfPage: { '@type': 'WebPage', '@id': canonicalUrl },
+          ...(date ? { datePublished: new Date(date).toISOString().slice(0, 10) } : {}),
+          image: 'https://gitwand.app/og-image.png',
+          author: { '@type': 'Organization', name: 'Devlint', url: 'https://github.com/devlint' },
+          publisher: {
+            '@type': 'Organization',
+            name: 'GitWand',
+            url: 'https://gitwand.app/',
+            logo: { '@type': 'ImageObject', url: 'https://gitwand.app/logo.svg' },
+          },
+          isPartOf: { '@type': 'Blog', name: 'GitWand Blog', url: 'https://gitwand.app/blog/' },
+        }),
+      ])
+    }
+
+    // FAQPage — the /compare/* pages and /guide/llm-fallback each end in an
+    // "## FAQ" section of "### question" + answer. Those are exactly the blocks
+    // that win featured snippets on "gitwand vs X" / "is GitWand free" queries,
+    // and they were shipping as plain prose. Parsed from the source file so the
+    // markup can never drift from the visible copy.
+    const faq = extractFaq(pageData.filePath)
+    if (faq.length) {
+      pageData.frontmatter.head.push([
+        'script',
+        { type: 'application/ld+json' },
+        JSON.stringify({
+          '@context': 'https://schema.org',
+          '@type': 'FAQPage',
+          mainEntity: faq.map((qa) => ({
+            '@type': 'Question',
+            name: qa.q,
+            acceptedAnswer: { '@type': 'Answer', text: qa.a },
+          })),
+        }),
+      ])
+    }
   },
 
   themeConfig: {
@@ -142,6 +233,7 @@ export default defineConfig({
         ],
       },
       { text: 'Guide', link: '/guide/getting-started' },
+      { text: 'Fix a conflict', link: '/fix/' },
       { text: 'Reference', link: '/reference/core-api' },
       { text: 'Blog', link: '/blog/' },
       { text: "What's new", link: '/changelog' },
@@ -171,6 +263,18 @@ export default defineConfig({
             { text: 'Core API', link: '/reference/core-api' },
             { text: 'Configuration', link: '/reference/config' },
             { text: 'CLI Commands', link: '/reference/cli-commands' },
+          ],
+        },
+      ],
+      '/fix/': [
+        {
+          text: 'Fix a Git conflict',
+          items: [
+            { text: 'All guides', link: '/fix/' },
+            { text: 'Merge conflict in a file', link: '/fix/merge-conflict-in-file' },
+            { text: 'Lockfile conflicts', link: '/fix/package-lock-json-merge-conflict' },
+            { text: 'Rebase repeats the same conflict', link: '/fix/rebase-same-conflict-every-commit' },
+            { text: 'git rerere explained', link: '/fix/git-rerere' },
           ],
         },
       ],
