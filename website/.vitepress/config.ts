@@ -7,6 +7,13 @@ export default defineConfig({
   description: "Git's magic wand — smart conflict resolution & native Git client",
   base: '/',
 
+  // The generated sitemap advertised /features.html while every canonical tag
+  // points at /features — two URL forms for one page, which is the mismatch the
+  // canonical block below exists to avoid. cleanUrls makes VitePress emit the
+  // extensionless form everywhere, sitemap included. GitHub Pages already serves
+  // /foo as /foo.html with a 200 and no redirect, which is what this requires.
+  cleanUrls: true,
+
   sitemap: {
     hostname: 'https://gitwand.app',
   },
