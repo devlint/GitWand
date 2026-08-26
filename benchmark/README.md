@@ -111,17 +111,33 @@ reproduce. So the metric is a **lower bound on correctness**, not a score, and i
 is reported as exact and whitespace-normalised counts with retained examples
 rather than as a single grade.
 
-### The corpus needs re-pinning
+### Corpus v2 (pinned 2026-08-26) — selected on measured merge history
 
-This run also indicts the corpus. `rust-lang/cargo` contributed **zero** merges
-with conflicts, `django/django` ten, `vuejs/core` thirty-five — these projects
-squash-merge or use a merge queue, so there is almost nothing to replay. Four
-repositories carry the entire result.
+The v1 corpus indicted itself: cargo contributed zero conflicted merges, django
+ten, vue thirty-five. v2 was re-pinned after **probing** candidates
+(`rev-list --merges` + a merge-tree conflict-rate sample): kubernetes, rails and
+godot were rejected at 0 conflicted merges per 60 (merge queues); symfony
+(back-merge culture, composer.json in half its conflicts), git/git (integration
+branches, maintainer-resolved conflicts — the best human ground truth available)
+and bootstrap (an adversarial `_variables.scss` family no resolver special-cases)
+came in. vue was dropped *despite* being the 92–95 % showcase — keeping it would
+have been flattering rather than informative.
 
-The next pin should select for *projects that actually merge feature branches*,
-verified by `git rev-list --merges --count HEAD` before adding them, rather than
-for language coverage. Language diversity is worth nothing if the repository has
-no conflicted merges in it.
+Current-engine baseline on v2 (`results/v3.8.0-corpus2-baseline.json`):
+**1 927 merges, 634 with conflicts, 5 675 hunks — 59.2 % of end-to-end-resolved
+files byte-identical to the human merge (391/660), per-repo spread 17.5–65.4 %.**
+This file is the reference the CI gate compares against.
+
+### The CI gate (lot G)
+
+`.github/workflows/benchmark-gate.yml` replays the corpus on every PR touching
+the engine and fails via [`compare.mjs`](compare.mjs) when agreement drops
+beyond noise (−1.5 pts corpus-wide, −5 pts on any repo) or coverage collapses
+(>−25 % files resolved end-to-end) — a deliberate decline policy must update
+the baseline in the same PR, with the reasoning in the commit message. Clones
+are cached keyed on the corpus hash, so only the first run after a re-pin pays
+the cloning. This generalizes the `token_level_merge` trial (PR #117): no
+pattern ships if the corpus says it makes the engine less right.
 
 ## What it does NOT measure
 
@@ -261,6 +277,12 @@ histories; demonstrating them on real public repos needs corpus candidates
 
 Per the gate, the desktop surface is deferred; core + CLI ship (the
 measurement itself, `gitwand conventions`, has standalone value).
+
+Re-run on the v2 corpus additions (symfony, git/git, bootstrap): still flat —
+each half of their histories yields too few per-question samples to clear the
+evidence floors. The verdict stands, and sharpens: the layer will prove itself
+either on repos with *dense* lockfile/changelog conflict histories, or once
+pathPolicies graduate from report-only to applied (lot F v2).
 
 ## Results
 

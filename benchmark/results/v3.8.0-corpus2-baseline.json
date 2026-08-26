@@ -1,0 +1,180 @@
+{
+  "gitwandVersion": "3.8.0",
+  "corpusPinnedAt": "2026-08-26",
+  "refactoringAwareEnabled": false,
+  "reposRun": 8,
+  "reposFailed": 0,
+  "totals": {
+    "mergesScanned": 1927,
+    "mergesWithConflicts": 634,
+    "conflictedFiles": 2431,
+    "skippedFiles": 5914,
+    "resolveErrors": 0,
+    "mergeTreeErrors": 4,
+    "totalHunks": 5675,
+    "byType": {
+      "complex": 2248,
+      "generated_file": 1268,
+      "value_only_change": 901,
+      "format_semantic": 531,
+      "non_overlapping": 517,
+      "insertion_at_boundary": 111,
+      "token_level_merge": 74,
+      "whitespace_only": 12,
+      "one_side_change": 8,
+      "same_change": 4,
+      "reorder_only": 1
+    },
+    "byTier": {
+      "trivial": 1554,
+      "advancedDeterministic": 605,
+      "model": 0,
+      "unresolved": 3516
+    },
+    "agreement": {
+      "filesFullyResolved": 660,
+      "comparable": 660,
+      "agreeExact": 391,
+      "agreeNormalized": 395,
+      "unavailable": 0
+    }
+  },
+  "headline": {
+    "autoResolvedHunks": 2159,
+    "autoResolvedShare": 38.04,
+    "residualHunks": 3516,
+    "residualShare": 61.96,
+    "agreementExactShare": 59.24,
+    "agreementComparableFiles": 660
+  },
+  "perRepo": [
+    {
+      "repo": "prettier/prettier",
+      "language": "JavaScript",
+      "pinnedSha": "0bc958e734b00907e2bae2bae45c664ad8a1a2f7",
+      "mergesScanned": 237,
+      "maxMergesRequested": 300,
+      "mergesWithConflicts": 116,
+      "totalHunks": 1281,
+      "byTier": {
+        "trivial": 246,
+        "advancedDeterministic": 102,
+        "model": 0,
+        "unresolved": 933
+      },
+      "autoResolvedShare": 27.17
+    },
+    {
+      "repo": "gohugoio/hugo",
+      "language": "Go",
+      "pinnedSha": "a25af7facfc9de3f17bcd82a9268ded595f0adb4",
+      "mergesScanned": 234,
+      "maxMergesRequested": 300,
+      "mergesWithConflicts": 125,
+      "totalHunks": 507,
+      "byTier": {
+        "trivial": 77,
+        "advancedDeterministic": 104,
+        "model": 0,
+        "unresolved": 326
+      },
+      "autoResolvedShare": 35.7
+    },
+    {
+      "repo": "tauri-apps/tauri",
+      "language": "Rust + TypeScript",
+      "pinnedSha": "5e2856e3209d4ab16d21a1f828ff94b46a35a0b6",
+      "mergesScanned": 56,
+      "maxMergesRequested": 300,
+      "mergesWithConflicts": 22,
+      "totalHunks": 2129,
+      "byTier": {
+        "trivial": 726,
+        "advancedDeterministic": 85,
+        "model": 0,
+        "unresolved": 1318
+      },
+      "autoResolvedShare": 38.09
+    },
+    {
+      "repo": "laravel/framework",
+      "language": "PHP",
+      "pinnedSha": "bdc52237f0b7999916e5f09dd179e3f415762dd0",
+      "mergesScanned": 300,
+      "maxMergesRequested": 300,
+      "mergesWithConflicts": 189,
+      "totalHunks": 696,
+      "byTier": {
+        "trivial": 290,
+        "advancedDeterministic": 165,
+        "model": 0,
+        "unresolved": 241
+      },
+      "autoResolvedShare": 65.37
+    },
+    {
+      "repo": "expressjs/express",
+      "language": "JavaScript",
+      "pinnedSha": "023767fe9872e029271df1418f73401bff20ff40",
+      "mergesScanned": 200,
+      "maxMergesRequested": 200,
+      "mergesWithConflicts": 82,
+      "totalHunks": 586,
+      "byTier": {
+        "trivial": 136,
+        "advancedDeterministic": 111,
+        "model": 0,
+        "unresolved": 339
+      },
+      "autoResolvedShare": 42.15
+    },
+    {
+      "repo": "symfony/symfony",
+      "language": "PHP",
+      "pinnedSha": "f1072d8902e3d397ab5f9190877fb947d259b0c3",
+      "mergesScanned": 300,
+      "maxMergesRequested": 300,
+      "mergesWithConflicts": 30,
+      "totalHunks": 229,
+      "byTier": {
+        "trivial": 37,
+        "advancedDeterministic": 3,
+        "model": 0,
+        "unresolved": 189
+      },
+      "autoResolvedShare": 17.47
+    },
+    {
+      "repo": "git/git",
+      "language": "C",
+      "pinnedSha": "f78ce2f7b6df702f93d40b85d6bda92a3f65da79",
+      "mergesScanned": 300,
+      "maxMergesRequested": 300,
+      "mergesWithConflicts": 34,
+      "totalHunks": 118,
+      "byTier": {
+        "trivial": 25,
+        "advancedDeterministic": 0,
+        "model": 0,
+        "unresolved": 93
+      },
+      "autoResolvedShare": 21.19
+    },
+    {
+      "repo": "twbs/bootstrap",
+      "language": "SCSS/JS",
+      "pinnedSha": "ae7d4c5313121f9da1f63974c7bbc373665a979b",
+      "mergesScanned": 300,
+      "maxMergesRequested": 300,
+      "mergesWithConflicts": 36,
+      "totalHunks": 129,
+      "byTier": {
+        "trivial": 17,
+        "advancedDeterministic": 35,
+        "model": 0,
+        "unresolved": 77
+      },
+      "autoResolvedShare": 40.31
+    }
+  ]
+}
