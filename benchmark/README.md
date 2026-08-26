@@ -208,12 +208,19 @@ settled, there will be a figure worth putting on a landing page.
 The corpus is already earning its keep. Same pins, three engine states
 (files resolved end-to-end that are byte-identical to the human merge):
 
-| Repo | v3.8.0 baseline | + lot 1 (contract/invariants/decline) | + merge context |
-|---|---:|---:|---:|
-| `laravel/framework` | 24.3 % | 36.6 % | **81.9 %** |
-| `prettier/prettier` | 25.3 % | 45.0 % | 45.0 % |
-| `vuejs/core` | 92.5 % | 95.0 % | 90.0 %* |
-| `expressjs/express` | 59.6 % | 59.2 % | 59.2 % |
+| Repo | v3.8.0 baseline | + lot 1 (contract/invariants/decline) | + merge context | + key-wise manifests |
+|---|---:|---:|---:|---:|
+| `laravel/framework` | 24.3 % | 36.6 % | 81.9 % | **83.3 %** (245 files) |
+| `prettier/prettier` | 25.3 % | 45.0 % | 45.0 % | **49.6 %** (117 files) |
+| `vuejs/core` | 92.5 % | 95.0 % | 90.0 %* | **90.1 %** (222 files) |
+| `expressjs/express` | 59.6 % | 59.2 % | 59.2 % | **61.3 %** (62 files) |
+
+The key-wise manifest merge (lot E) is the first change that raises **both**
+metrics at once: more files resolved end-to-end (laravel 216 → 245, express
+49 → 62) *and* a higher share of them byte-identical — because merging
+`"key": value` fragments by key, with a bounded same-operator version
+arbitration, replaces the line-level union that produced plausible-but-wrong
+dependency blocks.
 
 \* vue's apparent drop is a **denominator artefact, not a regression**: a
 per-file flip scan found zero files where the previous engine agreed and the
