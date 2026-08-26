@@ -88,8 +88,14 @@ let repo: string;
 beforeEach(() => { repo = mkdtempSync(join(tmpdir(), "gw-conv-")); });
 afterEach(() => { rmSync(repo, { recursive: true, force: true }); });
 
+// Tests d'intégration git : des dizaines de spawns par test, et macOS taxe
+// chaque exec (XProtect) — 5 s de timeout vitest ne suffisent pas sur un vrai
+// Mac alors que la suite passe en <1 s sur Linux. Budget explicite, distinct du
+// timeout dur de 10 s par appel git qui attrape les vrais blocages.
+const IT_TIMEOUT = { timeout: 30_000 };
+
 describe.skipIf(!MODERN_GIT)("deriveFromHistory", () => {
-  it("measures the simulated team's conventions from six real merges", () => {
+  it("measures the simulated team's conventions from six real merges", IT_TIMEOUT, () => {
     buildHistory(repo, 6);
     const { conventions } = deriveFromHistory(repo, 200);
 
@@ -102,7 +108,7 @@ describe.skipIf(!MODERN_GIT)("deriveFromHistory", () => {
     ]);
   });
 
-  it("emits no verdict below the evidence floor (4 merges)", () => {
+  it("emits no verdict below the evidence floor (4 merges)", IT_TIMEOUT, () => {
     buildHistory(repo, 4);
     const { conventions } = deriveFromHistory(repo, 200);
     expect(conventions.generatedFiles).toBeUndefined();
@@ -110,14 +116,14 @@ describe.skipIf(!MODERN_GIT)("deriveFromHistory", () => {
     expect(conventions.pathPolicies).toBeUndefined();
   });
 
-  it("respects the merge cap", () => {
+  it("respects the merge cap", IT_TIMEOUT, () => {
     buildHistory(repo, 6);
     const { conventions } = deriveFromHistory(repo, 3);
     expect(conventions.evidence.mergesReplayed).toBe(3);
     expect(conventions.generatedFiles).toBeUndefined(); // 3 < plancher
   });
 
-  it("conventionsPath resolves inside .git, worktree-safe", () => {
+  it("conventionsPath resolves inside .git, worktree-safe", IT_TIMEOUT, () => {
     buildHistory(repo, 1);
     const p = conventionsPath(repo);
     expect(p).toContain(".git");

@@ -67,18 +67,24 @@ let repo: string;
 beforeEach(() => { repo = mkdtempSync(join(tmpdir(), "gw-ctx-")); });
 afterEach(() => { rmSync(repo, { recursive: true, force: true }); });
 
+// Tests d'intégration git : des dizaines de spawns par test, et macOS taxe
+// chaque exec (XProtect) — 5 s de timeout vitest ne suffisent pas sur un vrai
+// Mac alors que la suite passe en <1 s sur Linux. Budget explicite, distinct du
+// timeout dur de 10 s par appel git qui attrape les vrais blocages.
+const IT_TIMEOUT = { timeout: 30_000 };
+
 describe("detectMergeContext", () => {
-  it("returns null on a clean repo", () => {
+  it("returns null on a clean repo", IT_TIMEOUT, () => {
     initRepo(repo);
     commitFile(repo, "a.txt", "x\n", "init");
     expect(detectMergeContext(repo)).toBeNull();
   });
 
-  it("returns null outside a git repo", () => {
+  it("returns null outside a git repo", IT_TIMEOUT, () => {
     expect(detectMergeContext(repo)).toBeNull();
   });
 
-  it("detects a merge in progress, ours = the checked-out target", () => {
+  it("detects a merge in progress, ours = the checked-out target", IT_TIMEOUT, () => {
     makeDivergence(repo);
     try { git(repo, ["merge", "feature"]); } catch { /* conflit attendu */ }
     const ctx = detectMergeContext(repo);
@@ -88,7 +94,7 @@ describe("detectMergeContext", () => {
     expect(ctx?.theirsRef).toContain("feature");
   });
 
-  it("detects a rebase in progress, ours = the branch rebased onto", () => {
+  it("detects a rebase in progress, ours = the branch rebased onto", IT_TIMEOUT, () => {
     makeDivergence(repo);
     git(repo, ["checkout", "feature"]);
     try { git(repo, ["rebase", "main"]); } catch { /* conflit attendu */ }
@@ -100,7 +106,7 @@ describe("detectMergeContext", () => {
     expect(ctx?.theirsRef).toContain("feature");
   });
 
-  it("detects a cherry-pick in progress", () => {
+  it("detects a cherry-pick in progress", IT_TIMEOUT, () => {
     makeDivergence(repo);
     const sha = git(repo, ["rev-parse", "feature"]).trim();
     try { git(repo, ["cherry-pick", sha]); } catch { /* conflit attendu */ }
@@ -110,7 +116,7 @@ describe("detectMergeContext", () => {
     expect(ctx?.oursRef).toBe("main");
   });
 
-  it("works from a linked worktree (.git is a file)", () => {
+  it("works from a linked worktree (.git is a file)", IT_TIMEOUT, () => {
     makeDivergence(repo);
     const wt = join(repo, "..", "gw-ctx-wt-" + Date.now());
     git(repo, ["worktree", "add", wt, "feature"]);
