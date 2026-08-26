@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "pinnedAt": "2026-08-26",
+  "note": "Every repository is pinned to a commit SHA rather than a branch, so a run today and a run in two years scan the same merges. Re-pinning is a deliberate act: bump `pinnedAt`, update the SHAs, and keep the old results file — a corpus that silently drifts cannot be used to compare two versions of an engine.",
+  "selection": "Public, permissively licensed projects with a real multi-author merge history, chosen to spread across languages and file formats rather than to flatter any particular pattern. Deliberately excluded: repositories that squash-merge everything (no merge commits to replay) and repositories dominated by generated files.",
+  "repos": [
+    {
+      "name": "vuejs/core",
+      "url": "https://github.com/vuejs/core.git",
+      "sha": "e2bede96134f757aad5c5b33ac9be055022dbfc8",
+      "language": "TypeScript",
+      "maxMerges": 300,
+      "why": "TypeScript monorepo with heavy import-block churn — exercises the import and JSON resolvers."
+    },
+    {
+      "name": "rust-lang/cargo",
+      "url": "https://github.com/rust-lang/cargo.git",
+      "sha": "94ba974179df2adb3c911fadf361f03b84aa8f14",
+      "language": "Rust",
+      "maxMerges": 300,
+      "why": "High merge volume from bors-style integration, plus Cargo.lock churn."
+    },
+    {
+      "name": "django/django",
+      "url": "https://github.com/django/django.git",
+      "sha": "0b40210e4808937a7c0922e8b7502bff4752faa3",
+      "language": "Python",
+      "maxMerges": 300,
+      "why": "Two decades of history and a large contributor base — the long tail of ordinary conflicts."
+    },
+    {
+      "name": "prettier/prettier",
+      "url": "https://github.com/prettier/prettier.git",
+      "sha": "0bc958e734b00907e2bae2bae45c664ad8a1a2f7",
+      "language": "JavaScript",
+      "maxMerges": 300,
+      "why": "A formatter's own repo: an adversarial case for whitespace_only, since the code is already normalised."
+    },
+    {
+      "name": "gohugoio/hugo",
+      "url": "https://github.com/gohugoio/hugo.git",
+      "sha": "a25af7facfc9de3f17bcd82a9268ded595f0adb4",
+      "language": "Go",
+      "maxMerges": 300,
+      "why": "Go, with go.mod/go.sum churn — a lockfile format the engine does NOT special-case, kept in deliberately."
+    },
+    {
+      "name": "tauri-apps/tauri",
+      "url": "https://github.com/tauri-apps/tauri.git",
+      "sha": "5e2856e3209d4ab16d21a1f828ff94b46a35a0b6",
+      "language": "Rust + TypeScript",
+      "maxMerges": 300,
+      "why": "Mixed-language monorepo with changesets — the shape GitWand's own users most often have."
+    },
+    {
+      "name": "laravel/framework",
+      "url": "https://github.com/laravel/framework.git",
+      "sha": "bdc52237f0b7999916e5f09dd179e3f415762dd0",
+      "language": "PHP",
+      "maxMerges": 300,
+      "why": "PHP, very high contributor turnover, many small overlapping edits."
+    },
+    {
+      "name": "expressjs/express",
+      "url": "https://github.com/expressjs/express.git",
+      "sha": "023767fe9872e029271df1418f73401bff20ff40",
+      "language": "JavaScript",
+      "maxMerges": 200,
+      "why": "Small and old. Included as a control: a repo where the engine should have little to do."
+    }
+  ]
+}
