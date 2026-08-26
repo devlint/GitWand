@@ -25,6 +25,23 @@ Key facts:
 - [Configuration](https://gitwand.app/reference/config): `.gitwandrc` options
 - [CLI commands](https://gitwand.app/reference/cli-commands): full command reference
 
+## Fix a conflict (task guides)
+
+- [Fix a Git conflict](https://gitwand.app/fix/): index of guides by symptom
+- [CONFLICT (content): Merge conflict in <file>](https://gitwand.app/fix/merge-conflict-in-file): reading conflict markers, zdiff3, the four ways out
+- [Lockfile conflicts](https://gitwand.app/fix/package-lock-json-merge-conflict): package-lock.json, yarn.lock, pnpm-lock.yaml, Cargo.lock
+- [Rebase repeats the same conflict](https://gitwand.app/fix/rebase-same-conflict-every-commit): why a rebase replays conflicts, and the four fixes
+- [git rerere explained](https://gitwand.app/fix/git-rerere): what it stores, and where it stops helping
+
+## Compare
+
+- [All comparisons](https://gitwand.app/compare/): GitWand vs the mainstream Git clients, with a shared feature matrix
+- [vs GitKraken](https://gitwand.app/compare/gitwand-vs-gitkraken)
+- [vs Fork](https://gitwand.app/compare/gitwand-vs-fork)
+- [vs Sublime Merge](https://gitwand.app/compare/gitwand-vs-sublime-merge)
+- [vs GitHub Desktop](https://gitwand.app/compare/gitwand-vs-github-desktop)
+- [vs GitButler](https://gitwand.app/compare/gitwand-vs-gitbutler)
+
 ## Product
 
 - [Features](https://gitwand.app/features): feature overview
@@ -36,10 +53,11 @@ Key facts:
 ## Install
 
 - Desktop: https://github.com/devlint/GitWand/releases (macOS .dmg, Linux .deb/.AppImage/.rpm, Windows .exe/.msi)
+- macOS via Homebrew: `brew install --cask devlint/tap/gitwand`
 - Windows via winget: `winget install Devlint.GitWand`
 - CLI: `npm install -g @gitwand/cli`
 - MCP server: `npx @gitwand/mcp` — server card at https://gitwand.app/.well-known/mcp/server-card.json
-- VS Code: search "GitWand" on the Marketplace
+- VS Code: `code --install-extension gitwand.gitwand-vscode` (also on Open VSX for VSCodium and Cursor)
 - Source: https://github.com/devlint/GitWand (MIT)
 - Sponsor: https://github.com/sponsors/devlint
 
