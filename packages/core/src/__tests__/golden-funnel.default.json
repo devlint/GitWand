@@ -1,7 +1,7 @@
 {
-  "fixtures": 46,
-  "totalHunks": 46,
-  "autoResolved": 28,
+  "fixtures": 48,
+  "totalHunks": 48,
+  "autoResolved": 29,
   "byType": {
     "complex": 14,
     "delete_no_change": 2,
@@ -13,11 +13,11 @@
     "reorder_only": 1,
     "same_change": 3,
     "token_level_merge": 1,
-    "value_only_change": 4,
+    "value_only_change": 6,
     "whitespace_only": 1
   },
   "tiers": {
-    "trivial": 24,
+    "trivial": 26,
     "advancedDeterministic": 7,
     "model": 0,
     "unresolved": 15,

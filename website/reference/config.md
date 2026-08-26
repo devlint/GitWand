@@ -130,6 +130,29 @@ The CLI equivalent is `gitwand resolve --resolve-generated`. This is a
 repository convention, so it lives in `.gitwandrc` rather than in the app
 settings.
 
+## Merge Context
+
+GitWand's engine accepts an optional **merge context** — which operation is in
+progress (merge, rebase, cherry-pick, revert) and which side of the conflict
+markers is the target branch. You normally never set this: the desktop app, the
+CLI and the MCP server detect it from the repository's `.git` state.
+
+It changes one class of decision. A version scalar set differently on both
+sides (`'13.x-dev'` vs `'12.54.1'`) is a real decision, not a volatile value —
+and with context, the answer is deterministic: **the target branch keeps its
+version identity**. Measured on laravel/framework's real merge history, this
+took agreement with the humans' own resolutions from 36.6 % to 81.9 %. Without
+context, GitWand proposes instead of applying. Ordinary dependency bumps
+(orderable versions on both sides) keep the "newest wins" rule either way.
+
+API consumers can pass it explicitly:
+
+```ts
+resolve(content, filePath, {
+  mergeContext: { operation: "merge", targetSide: "ours", oursRef: "13.x", theirsRef: "12.x" },
+});
+```
+
 ## Confidence Levels
 
 The `minConfidence` setting (set implicitly by each policy) controls the minimum confidence score required for auto-resolution:

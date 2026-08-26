@@ -1360,6 +1360,46 @@ const F46: CorpusFixture = {
   expectedResolved: false,
 };
 
+// ─── v3.10 — MergeContext (lot C) ───────────────────────────
+
+const F47: CorpusFixture = {
+  id: "F47",
+  description: "v3.10 — value_only_change : identité de version en back-merge, la cible gagne (contexte fourni)",
+  filePath: "src/Application.php",
+  category: "semantic",
+  input: [
+    `<<<<<<< ours`,
+    `    const VERSION = '13.x-dev';`,
+    `||||||| base`,
+    `    const VERSION = '12.53.0';`,
+    `=======`,
+    `    const VERSION = '12.54.1';`,
+    `>>>>>>> theirs`,
+  ].join("\n"),
+  expectedType: "value_only_change",
+  expectedResolved: true,
+  expectedOutput: `    const VERSION = '13.x-dev';`,
+  options: { mergeContext: { operation: "merge", targetSide: "ours", oursRef: "13.x", theirsRef: "12.x" } },
+};
+
+const F48: CorpusFixture = {
+  id: "F48",
+  description: "v3.10 — value_only_change : même identité de version SANS contexte → proposé, jamais appliqué (l'ancien fallback politique était mesuré faux ~3 fois sur 4)",
+  filePath: "src/Application.php",
+  category: "semantic",
+  input: [
+    `<<<<<<< ours`,
+    `    const VERSION = '13.x-dev';`,
+    `||||||| base`,
+    `    const VERSION = '12.53.0';`,
+    `=======`,
+    `    const VERSION = '12.54.1';`,
+    `>>>>>>> theirs`,
+  ].join("\n"),
+  expectedType: "value_only_change",
+  expectedResolved: false,
+};
+
 // ─── Export ─────────────────────────────────────────────────
 
 export const CORPUS: CorpusFixture[] = [
@@ -1376,6 +1416,8 @@ export const CORPUS: CorpusFixture[] = [
   // v2.5 — LLM fallback candidates (complex sans LLM, résolus avec LLM mocké)
   F36, F37, F38, F39, F40,
   F41, F42, F43, F44, F45,
+  // v3.10 — MergeContext
+  F47, F48,
   // v2.7 — token_level_merge
   F46,
 ];
