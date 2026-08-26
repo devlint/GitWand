@@ -167,11 +167,19 @@ const totals = ok.reduce(
     acc.totalHunks += r.totalHunks;
     for (const [type, n] of Object.entries(r.byType)) acc.byType[type] = (acc.byType[type] ?? 0) + n;
     for (const [tier, n] of Object.entries(r.tiers.byTier)) acc.byTier[tier] = (acc.byTier[tier] ?? 0) + n;
+    if (r.agreement) {
+      acc.agreement.filesFullyResolved += r.agreement.filesFullyResolved;
+      acc.agreement.comparable += r.agreement.comparable;
+      acc.agreement.agreeExact += r.agreement.agreeExact;
+      acc.agreement.agreeNormalized += r.agreement.agreeNormalized;
+      acc.agreement.unavailable += r.agreement.unavailable;
+    }
     return acc;
   },
   {
     mergesScanned: 0, mergesWithConflicts: 0, conflictedFiles: 0, skippedFiles: 0,
     resolveErrors: 0, mergeTreeErrors: 0, totalHunks: 0, byType: {}, byTier: {},
+    agreement: { filesFullyResolved: 0, comparable: 0, agreeExact: 0, agreeNormalized: 0, unavailable: 0 },
   },
 );
 
@@ -192,10 +200,17 @@ const result = {
     byType: Object.fromEntries(Object.entries(totals.byType).sort((a, b) => b[1] - a[1])),
   },
   headline: {
+    // Coverage — how much the engine takes off your plate. Varies hugely by repo.
     autoResolvedHunks: autoResolved,
     autoResolvedShare: share(autoResolved),
     residualHunks: totals.totalHunks - autoResolved,
     residualShare: share(totals.totalHunks - autoResolved),
+    // Precision — of the files it resolved end to end, how many match what the
+    // team actually merged. This is the number that says whether to trust it.
+    agreementExactShare: totals.agreement.comparable
+      ? Number(((totals.agreement.agreeExact / totals.agreement.comparable) * 100).toFixed(2))
+      : null,
+    agreementComparableFiles: totals.agreement.comparable,
   },
   perRepo: reports.map((r) =>
     r.error
@@ -226,6 +241,9 @@ console.error(`merges w/ conflicts:   ${totals.mergesWithConflicts}`);
 console.error(`hunks:                 ${totals.totalHunks}`);
 console.error(`auto-resolved:         ${autoResolved}  (${result.headline.autoResolvedShare}%)`);
 console.error(`residual:              ${result.headline.residualHunks}  (${result.headline.residualShare}%)`);
+if (result.headline.agreementExactShare !== null) {
+  console.error(`agreement w/ humans:   ${totals.agreement.agreeExact}/${totals.agreement.comparable} files byte-identical  (${result.headline.agreementExactShare}%)`);
+}
 const shares = result.perRepo.filter((r) => !r.error).map((r) => r.autoResolvedShare);
 if (shares.length > 1) {
   console.error(`per-repo spread:       ${Math.min(...shares)}% … ${Math.max(...shares)}%  ← read this before the aggregate`);

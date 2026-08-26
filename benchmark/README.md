@@ -54,18 +54,34 @@ when a repository returns fewer than half the merges asked for — a repo that
 contributes 35 merges looks like a full participant in the list and is a rounding
 error in the total.
 
+## Agreement with the human merge — the number that matters
+
+Coverage says how much work the engine removes. It does not say whether you
+should trust the result. That second question has an answer available for free:
+the real merge commit is right there in the history, so when the engine resolves
+a file **end to end** (`mergedContent` non-null — no conflict left), its output
+can be compared byte-for-byte with what the team actually committed.
+
+Measured on GitWand 3.8.0, corpus pinned 2026-08-26:
+
+| Repo | Files resolved end-to-end | Byte-identical to the human merge |
+|---|---:|---:|
+| `vuejs/core` | 226 | **92.5 %** |
+| `expressjs/express` | 47 | **59.6 %** |
+
+Read the disagreements before reading the percentages. On `vuejs/core` they are
+dominated by `pnpm-lock.yaml`, `CHANGELOG.md` and Jest snapshot files — artefacts
+the humans **regenerated** after merging rather than merged. No merge algorithm
+reproduces a regenerated lockfile, so those are not engine errors, and they are
+also not wins: the honest reading is "not comparable".
+
+The same caution applies in the other direction. A recorded merge may contain
+edits the human made while resolving — an "evil merge" — which nothing could
+reproduce either. So this metric is a **lower bound on correctness**, not a
+score, and it is reported as exact and whitespace-normalised counts with retained
+examples rather than as a single grade.
+
 ## What it does NOT measure
-
-Stated plainly, because this is the limitation that matters:
-
-**It measures decidability, not correctness.** An auto-resolved hunk is one the
-engine claims is provably decidable. This run does not verify that the result
-matches what the humans actually committed in the real merge.
-
-That check is possible — the real merge commit is right there in the history, so
-the engine's output can be diffed against the recorded resolution — and it is the
-next thing to build here. Until it exists, read the headline as *"share of
-conflicted hunks that carry no decision"*, not *"share resolved correctly"*.
 
 Two smaller caveats:
 
@@ -124,14 +140,20 @@ worse is more useful to us than another repo where we do well.
 
 GitWand's marketing says it auto-resolves "~95 % of *trivial* conflicts". Note
 the denominator: that sentence is close to circular, since "trivial" is defined
-by the same classifier doing the resolving. This benchmark uses a denominator
-nobody chooses after the fact — **every conflicted hunk in the corpus** — and on
-that basis the measured figures are the ones in the table above.
+by the same classifier doing the resolving. This benchmark uses denominators
+nobody can choose after the fact — every conflicted hunk in the corpus for
+coverage, every end-to-end resolved file for agreement — and on that basis the
+measured figures are the ones in the tables above.
 
 Both statements can be true at once, but only one of them is falsifiable. If a
 number from this benchmark and a number on the website ever appear side by side,
 the difference in denominator has to be visible, or the benchmark reads as a
 refutation of the marketing rather than the source of it.
+
+The measurements also suggest which claim is worth making. Coverage is largely a
+property of *your codebase* — 23 % on one repo, 76 % on another. Agreement is a
+property of the *engine*. The second is the one a sceptic actually wants
+answered, and it is the one this benchmark can defend.
 
 ## Results
 
