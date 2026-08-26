@@ -40,7 +40,7 @@ _The engine's claims are now measured instead of asserted, and three measured fa
 
 - **Lot F — derive the repo's own conventions** (the moat): point `scripts/replay-conflicts.mjs` at the *user's* repository to measure their policies — regenerate-vs-merge lockfiles, who wins version scalars, changelog discipline — instead of assuming them. Feeds the same `useResolutionMemory` feedback loop v4.0 plans; this is its active, measured form. Nobody else in the market can do this, and the mechanism already exists.
 - **Lot G — agreement as a CI gate**: a new pattern must not lower agreement on the pinned corpus (generalizes the `token_level_merge` trial, PR #117). Needs a corpus cache strategy — a cold clone is several GB.
-- **Lot D (full) — sandboxed regeneration**: for declared-generated files, resolve the source manifest then run the ecosystem's own tool (`npm install --package-lock-only`, …) in a sandbox with explicit consent; today's interim (decline + explain) stays the fallback.
+- **Lot D (full) — sandboxed regeneration** ([plan](docs/superpowers/plans/2026-08-26-regenerate-tier.md)): for declared-generated files, resolve the source manifest then run the ecosystem's own tool (`npm install --package-lock-only`, …) in a sandbox with explicit consent; today's interim (decline + explain) stays the fallback.
 - **Corpus re-pin**: select on `git rev-list --merges --count` — cargo contributes zero conflicted merges, django ten; language diversity is worthless without merge history.
 - Website tie-in: the site stopped claiming "95 %" (circular denominator) and links the benchmark; keep site numbers sourced from `benchmark/results/` only.
 
