@@ -63,6 +63,7 @@ Key facts:
 
 ## Optional
 
+- [Best Git GUI clients in 2026](https://gitwand.app/blog/best-git-gui-clients-2026): honest field guide to nine clients (GitHub Desktop, Fork, Sublime Merge, Tower, GitKraken, GitButler, Lazygit, Sourcetree, GitWand), prices and licences checked August 2026
 - [Why I built another Git client](https://gitwand.app/blog/why-i-built-another-git-client): origin story
 - [The state of merge conflict resolution in 2026](https://gitwand.app/blog/state-of-merge-conflict-resolution-2026): market overview
 - [Automatic merge conflict resolution](https://gitwand.app/blog/automatic-merge-conflict-resolution): the engine's approach
