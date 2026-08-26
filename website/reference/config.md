@@ -1,6 +1,6 @@
 ---
-title: GitWand configuration reference — .gitwandrc options
-description: Every GitWand configuration option: policies, per-glob pattern overrides, confidence thresholds and LLM fallback settings, via .gitwandrc or a "gitwand" key in package.json.
+title: 'GitWand configuration reference — .gitwandrc options'
+description: 'Every GitWand configuration option: policies, per-glob pattern overrides, confidence thresholds and LLM fallback settings, via .gitwandrc or a "gitwand" key in package.json.'
 ---
 
 # Configuration

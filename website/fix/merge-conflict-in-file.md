@@ -1,6 +1,6 @@
 ---
 title: "CONFLICT (content): Merge conflict in <file> — what it means and how to fix it"
-description: Git stopped mid-merge with "CONFLICT (content): Merge conflict in". Here is exactly what git did to your working tree, how to read the markers, the four ways out, and how to make the next one resolve itself.
+description: 'Git stopped mid-merge with "CONFLICT (content): Merge conflict in". Here is exactly what git did to your working tree, how to read the markers, the four ways out, and how to make the next one resolve itself.'
 head:
   - - meta
     - property: og:title

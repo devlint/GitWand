@@ -1,6 +1,6 @@
 ---
-title: How GitWand resolves merge conflicts automatically
-description: The classification pipeline behind GitWand: conflict-marker parsing, diff3 base recovery, a prioritised pattern registry, composite confidence scoring and a per-hunk decision trace.
+title: 'How GitWand resolves merge conflicts automatically'
+description: 'The classification pipeline behind GitWand: conflict-marker parsing, diff3 base recovery, a prioritised pattern registry, composite confidence scoring and a per-hunk decision trace.'
 ---
 
 # Conflict Resolution Engine

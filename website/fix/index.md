@@ -1,6 +1,6 @@
 ---
-title: Fix a Git conflict — practical guides by symptom
-description: Straight answers to the Git conflicts you actually hit: the CONFLICT (content) message, lockfile conflicts, rebases that repeat the same conflict, and git rerere.
+title: 'Fix a Git conflict — practical guides by symptom'
+description: 'Straight answers to the Git conflicts you actually hit: the CONFLICT (content) message, lockfile conflicts, rebases that repeat the same conflict, and git rerere.'
 head:
   - - meta
     - property: og:title

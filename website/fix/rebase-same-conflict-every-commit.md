@@ -1,6 +1,6 @@
 ---
 title: Git rebase keeps asking for the same conflict — why, and how to stop it
-description: A rebase replays every commit, so one conflict can come back a dozen times. Why it happens, how git rerere makes it resolve itself, and the three ways to avoid the replay entirely.
+description: A rebase replays every commit, so one conflict can come back a dozen times. Why it happens, how git rerere makes it resolve itself, and the four ways out.
 head:
   - - meta
     - property: og:title

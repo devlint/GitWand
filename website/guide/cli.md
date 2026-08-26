@@ -1,6 +1,6 @@
 ---
-title: GitWand CLI — resolve merge conflicts from the command line
-description: Auto-resolve merge conflicts from your terminal or CI with @gitwand/cli: gitwand resolve, check and explain, exit codes for pipelines, and Git hook integration.
+title: 'GitWand CLI — resolve merge conflicts from the command line'
+description: 'Auto-resolve merge conflicts from your terminal or CI with @gitwand/cli: gitwand resolve, check and explain, exit codes for pipelines, and Git hook integration.'
 ---
 
 # CLI

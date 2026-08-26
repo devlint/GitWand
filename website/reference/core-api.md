@@ -1,6 +1,6 @@
 ---
-title: @gitwand/core API reference — programmatic conflict resolution
-description: API reference for @gitwand/core: resolveConflicts, classifyConflict, parseConflictMarkers, types, confidence scores and policies. Zero Node.js dependencies, runs in the browser.
+title: '@gitwand/core API reference — programmatic conflict resolution'
+description: 'API reference for @gitwand/core: resolveConflicts, classifyConflict, parseConflictMarkers, types, confidence scores and policies. Zero Node.js dependencies, runs in the browser.'
 ---
 
 # Core API
