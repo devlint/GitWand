@@ -50,30 +50,30 @@ Detection lives with the callers, not the core: the CLI and MCP read `.git` stat
 ## Tasks
 
 ### 1 — Core: the type and the plumbing
-- [ ] `types.ts`: add `MergeContext`, add `mergeContext?: MergeContext` to `GitWandOptions`; `DEFAULT_OPTIONS.mergeContext: undefined` (typed `MergeContext | undefined`; keep `Required<GitWandOptions>` compiling).
-- [ ] Thread `options.mergeContext` into `resolveHunk` / `assembleResolution` (already receive full options — verify, no signature change expected).
-- [ ] Unit: `resolve()` with and without context returns identical results on a corpus fixture that context should NOT influence.
+- [x] `types.ts`: add `MergeContext`, add `mergeContext?: MergeContext` to `GitWandOptions`; `DEFAULT_OPTIONS.mergeContext: undefined` (typed `MergeContext | undefined`; keep `Required<GitWandOptions>` compiling).
+- [x] Thread `options.mergeContext` into `resolveHunk` / `assembleResolution` (already receive full options — verify, no signature change expected).
+- [x] Unit: `resolve()` with and without context returns identical results on a corpus fixture that context should NOT influence.
 
 ### 2 — Core: version-aware `value_only_change`
-- [ ] In `patterns/value-only-change.ts` (or `assemble.ts` case): add `isVersionLikeScalar()` — semver-ish values, or the changed token sits in a `version`-named key (`"version":`, `const VERSION`, `version =`). Deliberately conservative; when unsure, it is not version-like.
-- [ ] Context present + version-like → resolve to `targetSide`, confidence `high`, trace step naming the operation and refs.
-- [ ] Context absent + version-like → `lines: null`, reason explaining both candidate values and how to enable the deterministic path (run from a repo where GitWand can see the operation, or pass `mergeContext`).
-- [ ] Unit tests: the laravel `Application.php` shape (back-merge, target wins), the rebase inversion (targetSide "ours" while user perceives it as theirs), absent-context demotion, non-version scalar untouched.
+- [x] In `patterns/value-only-change.ts` (or `assemble.ts` case): add `isVersionLikeScalar()` — semver-ish values, or the changed token sits in a `version`-named key (`"version":`, `const VERSION`, `version =`). Deliberately conservative; when unsure, it is not version-like.
+- [x] Context present + version-like → resolve to `targetSide`, confidence `high`, trace step naming the operation and refs.
+- [x] Context absent + version-like → `lines: null`, reason explaining both candidate values and how to enable the deterministic path (run from a repo where GitWand can see the operation, or pass `mergeContext`).
+- [x] Unit tests: the laravel `Application.php` shape (back-merge, target wins), the rebase inversion (targetSide "ours" while user perceives it as theirs), absent-context demotion, non-version scalar untouched.
 
 ### 3 — Detection helper (callers' side)
 - [ ] `packages/cli/src/git.ts`: `detectMergeContext(cwd): MergeContext | null` from `.git` state files + `git rev-parse --abbrev-ref HEAD` / `MERGE_HEAD` for the ref names. Cover worktrees (`.git` as file).
-- [ ] Unit tests with `TempRepo`: mid-merge, mid-rebase, mid-cherry-pick, clean repo → null.
-- [ ] CLI `resolve` / `preview`: call it, pass it, print one line in verbose mode ("context: merging feature/x into main").
-- [ ] MCP `gitwand_resolve_conflicts` (+ preview tool): same detection from the tool's cwd; echo the detected context in the tool result so agents can reason about it.
+- [x] Unit tests with `TempRepo`: mid-merge, mid-rebase, mid-cherry-pick, clean repo → null.
+- [x] CLI `resolve` / `preview`: call it, pass it, print one line in verbose mode ("context: merging feature/x into main").
+- [x] MCP `gitwand_resolve_conflicts` (+ preview tool): same detection from the tool's cwd; echo the detected context in the tool result so agents can reason about it.
 
 ### 4 — Desktop
-- [ ] `useGitWand.ts`: build `mergeContext` from the state the app already tracks (merge in progress / rebase in progress / cherry-pick — the same signals the conflict banner uses) and merge it into `resolveOptions`.
+- [x] `useGitWand.ts`: build `mergeContext` from the state the app already tracks (merge in progress / rebase in progress / cherry-pick — the same signals the conflict banner uses) and merge it into `resolveOptions`.
 - [ ] Trace display: show the context line in the hunk explanation panel; 5-locale strings.
 - [ ] Verify the dev-server parity suite still passes; add a parity fixture only if a new backend read is actually needed.
 
 ### 5 — Measure, then decide what ships
-- [ ] `scripts/replay-conflicts.mjs`: pass `mergeContext: { operation: "merge", targetSide: "ours" }` — in a replayed merge commit, the first parent IS the target branch, so the benchmark exercises the real rule.
-- [ ] Re-run `benchmark/run.mjs`; expected: laravel agreement jumps (the ~112 Application.php cases flip), corpus agreement moves accordingly. Record `results/v<next>.json` and update the tables in `benchmark/README.md`.
+- [x] `scripts/replay-conflicts.mjs`: pass `mergeContext: { operation: "merge", targetSide: "ours" }` — in a replayed merge commit, the first parent IS the target branch, so the benchmark exercises the real rule.
+- [x] Re-run `benchmark/run.mjs`; expected: laravel agreement jumps (the ~112 Application.php cases flip), corpus agreement moves accordingly. Record `results/v<next>.json` and update the tables in `benchmark/README.md`.
 - [ ] If agreement does NOT improve on at least two repos, stop and re-open the spec before wiring the desktop — the rule, not the plumbing, would be wrong.
 
 ### 6 — Close

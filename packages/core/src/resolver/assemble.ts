@@ -17,7 +17,7 @@ import type { MergePolicy, PolicyConfig } from "../config.js";
 import { mergeNonOverlapping } from "../diff.js";
 import { stripVolatileValues } from "./generated-detection.js";
 import { getLastRefMergeResult } from "../patterns/refactoring-aware-merge.js";
-import { pickNewerSemverSide } from "../patterns/utils.js";
+import { pickNewerSemverSide, hasUnorderableVersionPair } from "../patterns/utils.js";
 
 /**
  * Applique la stratégie textuelle correspondant au type de hunk.
@@ -165,15 +165,43 @@ export function assembleResolution(
           reason: `Résolution value_only_change désactivée par la politique "${effectivePolicy}".`,
         };
       }
-      // Quand toutes les paires de tokens différents sont des semver
-      // comparables, le côté le plus élevé gagne — déterministe et conforme à
-      // l'intention « garder la version la plus récente », quel que soit le
-      // côté qui la porte. Sinon (hashes, timestamps) : côté-politique.
       const semverSide = pickNewerSemverSide(hunk.oursLines, hunk.theirsLines);
+      const versionish = hasUnorderableVersionPair(hunk.oursLines, hunk.theirsLines);
+      const ctx = options.mergeContext;
+
+      // v3.10 — Un scalaire de version NON ordonnable fixé différemment des
+      // deux côtés ('13.x-dev' vs '12.54.1', '2.9.0-dev'…) est l'identité de
+      // version du fichier sur la branche cible : avec le contexte, la cible
+      // garde sa valeur. Mesuré sur benchmark/ : laravel 36,6 % → 81,5 %
+      // d'accord. Les paires ORDONNABLES (deps bumpées des deux côtés) gardent
+      // en revanche « la plus récente gagne » même avec contexte — la première
+      // version de cette règle les basculait aussi vers la cible, et l'accord
+      // régressait sur prettier/vue/express (les humains prennent bien la dep
+      // la plus récente apportée par la branche source).
+      if (ctx && versionish && semverSide === null) {
+        const side = ctx.targetSide;
+        const refs = ctx.oursRef && ctx.theirsRef ? ` (${ctx.theirsRef} → ${ctx.oursRef})` : "";
+        return {
+          lines: side === "ours" ? [...hunk.oursLines] : [...hunk.theirsLines],
+          reason: `Version modifiée des deux côtés pendant un ${ctx.operation}${refs} — la branche cible garde sa valeur. Résolution : accepter ${side}.`,
+        };
+      }
+
+      // Sans contexte : les paires semver/datetime ordonnables gardent la règle
+      // historique « la plus récente gagne » (déterministe et testée)…
       if (semverSide !== null) {
         return {
           lines: semverSide === "ours" ? [...hunk.oursLines] : [...hunk.theirsLines],
           reason: `Même structure, version(s) semver différente(s). Résolution : accepter ${semverSide} (version la plus élevée).`,
+        };
+      }
+      // …mais une paire version NON ordonnable ('13.x-dev' vs '12.54.1') ne
+      // retombe plus sur la politique : mesurée fausse ~3 fois sur 4, c'est une
+      // proposition, pas une application.
+      if (versionish) {
+        return {
+          lines: null,
+          reason: "Version modifiée des deux côtés avec des valeurs non comparables — c'est une décision de merge, pas une volatilité. La branche cible gagne quand le contexte est connu (détecté automatiquement par le CLI et le desktop) ; ici il ne l'est pas, donc GitWand propose au lieu d'appliquer.",
         };
       }
       const preferred = policyCfg.preferOurs ? hunk.oursLines : hunk.theirsLines;

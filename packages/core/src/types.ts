@@ -502,6 +502,28 @@ export interface MergeStats {
 }
 
 /** Options de configuration pour le moteur de résolution */
+/**
+ * v3.10 — Contexte du merge en cours : la donnée que le moteur n'a jamais eue.
+ * Optionnel et purement déclaratif — les appelants le détectent (CLI/MCP lisent
+ * l'état `.git`, le desktop connaît son opération) ; le cœur reste une fonction
+ * pure qui l'echo dans ses traces.
+ */
+export interface MergeContext {
+  /** L'opération git qui a produit ces marqueurs. */
+  operation: "merge" | "rebase" | "cherry-pick" | "revert";
+  /**
+   * Quel côté des marqueurs est la branche DANS LAQUELLE on fusionne.
+   * Dans la convention git c'est "ours" pour merge, rebase (ours = la branche
+   * sur laquelle on rebase) ET cherry-pick — mais l'appelant le déclare
+   * explicitement pour que le moteur n'ait jamais à re-dériver l'inversion
+   * ours/theirs du rebase.
+   */
+  targetSide: "ours" | "theirs";
+  /** Noms de refs, pour les traces et explications uniquement — jamais parsés pour décider. */
+  oursRef?: string;
+  theirsRef?: string;
+}
+
 export interface GitWandOptions {
   /** Résoudre les conflits whitespace-only (défaut: true) */
   resolveWhitespace?: boolean;
@@ -548,6 +570,13 @@ export interface GitWandOptions {
    * un message actionnable (« résous la source et régénère »).
    */
   resolveGeneratedFiles?: boolean;
+  /**
+   * v3.10 — Contexte du merge en cours (opération + côté cible). `null`/absent :
+   * inconnu. Quand il est fourni, les décisions qui en dépendent (scalaires de
+   * version modifiés des deux côtés) deviennent déterministes : la branche
+   * cible gagne. Sans lui, ces cas sont proposés au lieu d'être appliqués.
+   */
+  mergeContext?: MergeContext | null;
   /**
    * v2.4 — Niveau de validation post-merge.
    * - `"balanced"` (défaut) : marqueurs résiduels + syntaxe JSON/YAML/TOML + parse-tree tree-sitter (async)

@@ -22,7 +22,7 @@ import { resolve as resolvePath } from "node:path";
 import { resolve, resolveAsync, summarizeTiers, type MergeResult, type ConflictType } from "@gitwand/core";
 
 import { c, printBanner, WAND } from "../ui.js";
-import { getConflictedFiles } from "../git.js";
+import { getConflictedFiles, detectMergeContext } from "../git.js";
 import { parseConcurrency, runPool } from "../concurrency.js";
 import { buildPartialContent } from "../partial-content.js";
 import { buildCIReport } from "../reporting.js";
@@ -39,6 +39,10 @@ export async function cmdResolve(
   // v3.9 — les fichiers générés déclinent par défaut ; ce flag rétablit
   // l'auto-résolution (équivalent CLI de resolveGeneratedFiles: true).
   const resolveGeneratedFiles = flags["resolve-generated"] === true;
+  // v3.10 — contexte de merge : détecté depuis l'état .git ; null hors opération.
+  // Rend déterministes les décisions qui en dépendent (versions modifiées des
+  // deux côtés → la branche cible garde sa valeur).
+  const mergeContext = detectMergeContext();
   const concurrency = parseConcurrency(flags.concurrency);
   const llmFallbackEnabled = flags["llm-fallback"] === true;
 
@@ -70,6 +74,12 @@ export async function cmdResolve(
 
   if (!isCIMode) {
     printBanner();
+    if (verbose && mergeContext) {
+      const refs = mergeContext.oursRef && mergeContext.theirsRef
+        ? ` — ${mergeContext.theirsRef} → ${mergeContext.oursRef}`
+        : "";
+      console.log(`${c.dim}  context: ${mergeContext.operation} in progress${refs} (target: ${mergeContext.targetSide})${c.reset}`);
+    }
   }
 
   // If no files specified, discover from git
@@ -122,6 +132,7 @@ export async function cmdResolve(
           verbose: false,
           resolveWhitespace,
           resolveGeneratedFiles,
+          mergeContext,
           llmFallback: {
             ...buildResolveLlmOptions(llmCliConfig, llmFileConfig),
             endpoint: buildLlmEndpoint(llmCliConfig),
@@ -131,6 +142,7 @@ export async function cmdResolve(
           verbose: false,
           resolveWhitespace,
           resolveGeneratedFiles,
+          mergeContext,
         });
 
     // Écriture sur disque (sauf dry-run). Bloquée si des marqueurs résiduels

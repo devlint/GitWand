@@ -107,6 +107,7 @@ export type {
   ConfidenceScore,
   HunkResolution,
   GitWandOptions,
+  MergeContext,
   // Phase 7.1
   DecisionTrace,
   TraceStep,

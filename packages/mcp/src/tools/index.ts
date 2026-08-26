@@ -16,6 +16,7 @@ import { execSync, execFileSync } from "node:child_process";
 import { resolve as resolvePath } from "node:path";
 import { resolve, summarizeTiers, type MergeResult, type ConflictType } from "@gitwand/core";
 import { resolveHunkToolDefinition, handleResolveHunk } from "./resolve_hunk.js";
+import { detectMergeContext } from "../merge-context.js";
 
 // ─── Tool definitions ──────────────────────────────────────
 
@@ -472,7 +473,7 @@ async function toolStatus(cwd: string) {
       // format-aware dispatch and the confidence gate, so every hunk comes back
       // unresolved and `stats.autoResolved` is always 0. This is a prediction on
       // in-memory content, nothing is written, so run the real resolution.
-      const result = resolve(content, file);
+      const result = resolve(content, file, { mergeContext: detectMergeContext(cwd) });
       addByType(aggregateByType, result.stats.byType);
       return {
         path: file,
@@ -534,6 +535,9 @@ async function toolResolve(cwd: string, args: Record<string, unknown>) {
       const content = readFileSync(filePath, "utf-8");
       const result = resolve(content, file, {
         ...(policy ? { policy: policy as any } : {}),
+        // v3.10 — l'opération en cours rend déterministes les décisions qui en
+        // dépendent (versions modifiées des deux côtés → la cible gagne).
+        mergeContext: detectMergeContext(cwd),
       });
       addByType(aggregateByType, result.stats.byType);
 
@@ -600,7 +604,7 @@ async function toolPreview(cwd: string, args: Record<string, unknown>) {
       // format-aware dispatch and the confidence gate, so every hunk comes back
       // unresolved and `stats.autoResolved` is always 0. This is a prediction on
       // in-memory content, nothing is written, so run the real resolution.
-      const result = resolve(content, file);
+      const result = resolve(content, file, { mergeContext: detectMergeContext(cwd) });
       return serializeResult(file, result);
     } catch (err: any) {
       return { path: file, error: err.message };

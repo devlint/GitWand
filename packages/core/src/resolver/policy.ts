@@ -35,6 +35,8 @@ export const DEFAULT_OPTIONS: Required<GitWandOptions> = {
   generatedFiles: [],
   // v3.9 — les fichiers générés déclinent par défaut (voir GitWandOptions)
   resolveGeneratedFiles: false,
+  // v3.10 — contexte de merge inconnu par défaut ; fourni par les appelants
+  mergeContext: null,
   // v2.2 — profils de format actifs par défaut
   disableFormatProfiles: false,
   // v2.4 — validation post-merge

@@ -203,6 +203,33 @@ GitWand answers — and points here for the numbers, with their denominators
 attached. When the corpus is re-pinned and the regenerate-by-convention paths are
 settled, there will be a figure worth putting on a landing page.
 
+## Measured impact of the engine changes
+
+The corpus is already earning its keep. Same pins, three engine states
+(files resolved end-to-end that are byte-identical to the human merge):
+
+| Repo | v3.8.0 baseline | + lot 1 (contract/invariants/decline) | + merge context |
+|---|---:|---:|---:|
+| `laravel/framework` | 24.3 % | 36.6 % | **81.9 %** |
+| `prettier/prettier` | 25.3 % | 45.0 % | 45.0 % |
+| `vuejs/core` | 92.5 % | 95.0 % | 90.0 %* |
+| `expressjs/express` | 59.6 % | 59.2 % | 59.2 % |
+
+\* vue's apparent drop is a **denominator artefact, not a regression**: a
+per-file flip scan found zero files where the previous engine agreed and the
+new one doesn't. Fixing the version-identity hunk pulls previously-excluded
+files into the comparable set, where they disagree on *other* hunks — all 11
+in one merge, dominated by a `workspace:*` protocol migration the humans did
+while merging (an evil merge nothing reproduces).
+
+The merge-context rule also went through one refinement this table forced:
+its first version sent *orderable* semver pairs to the target side too, and
+agreement regressed on prettier (45.0 → 39.0), vue and express — teams do take
+the newer dependency brought by the source branch. Target-wins now applies
+only to unorderable version pairs (the file's version identity: `13.x-dev`,
+`2.9.0-dev`), which is where all of laravel's gain lives. This is exactly the
+kind of decision the benchmark exists to make.
+
 ## Results
 
 `results/` holds one JSON file per measured GitWand version, plus the corpus pin
