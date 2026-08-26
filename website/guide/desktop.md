@@ -1,3 +1,8 @@
+---
+title: 'GitWand desktop app — native Git client for macOS, Linux, Windows'
+description: 'A native ~8 MB Git client (Tauri 2 + Vue 3): staged/unstaged diffs, hunk-level staging, Git Tree history, branch and worktree management, PR review, and conflict auto-resolution.'
+---
+
 # Desktop App
 
 The GitWand desktop app is a lightweight, native Git client built with Tauri 2 and Vue 3. It covers the full daily workflow and adds smart conflict resolution on top.

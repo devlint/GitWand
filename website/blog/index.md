@@ -6,6 +6,12 @@ description: Technical articles on Git workflows, AI-powered conflict resolution
 # Blog
 
 <div class="blog-list">
+  <a href="/blog/best-git-gui-clients-2026" class="blog-card">
+    <div class="blog-meta">August 26, 2026 · 9 min read</div>
+    <h2 class="blog-title">The best Git GUI clients in 2026: an honest field guide</h2>
+    <p class="blog-excerpt">Nine clients — GitHub Desktop, Fork, Sublime Merge, Tower, GitKraken, GitButler, Lazygit, Sourcetree and GitWand — organised by what each one is genuinely best at rather than by score, with prices and licences checked in August 2026 and the two figures we couldn't verify flagged as unverified. Written by the maker of one of them, disclosed in the first line, with a plain statement under every tool of what it does better than ours. Ends on the failure mode almost none of them address: <strong>the conflicted hunk that was never a decision</strong>.</p>
+    <span class="blog-read">Read article →</span>
+  </a>
   <a href="/blog/from-four-tools-to-one" class="blog-card">
     <div class="blog-meta">August 24, 2026 · 12 min read</div>
     <h2 class="blog-title">From four tools to one: rebuilding the Git workflow you already have</h2>

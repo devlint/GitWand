@@ -2,10 +2,6 @@
 title: "How I built automatic merge conflict resolution: pattern classification and composite confidence scoring"
 description: "Pattern-based engine that auto-resolves trivial Git merge conflicts using classification, composite confidence scoring, and format-aware resolvers."
 date: 2026-04-20
-head:
-  - - link
-    - rel: canonical
-      href: https://devlint.hashnode.dev/how-i-built-automatic-merge-conflict-resolution-pattern-classification-and-composite-confidence-scoring
 ---
 
 # How I built automatic merge conflict resolution: pattern classification and composite confidence scoring

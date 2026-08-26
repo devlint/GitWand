@@ -1,3 +1,8 @@
+---
+title: 'GitWand CLI commands reference — resolve, check, explain'
+description: 'Complete reference for every GitWand CLI command: arguments, options, output formats and exit codes for scripting and CI pipelines.'
+---
+
 # CLI Commands
 
 ## `gitwand resolve`

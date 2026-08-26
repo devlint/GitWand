@@ -200,6 +200,29 @@ let skippedFiles = 0;
 let resolveErrors = 0;
 let totalHunks = 0;
 
+// ─── agreement with the human merge ──────────────────────────────────────────
+//
+// Coverage ("how many hunks did it take off your plate") varies enormously by
+// repository, so it says more about the corpus than about the engine. Precision
+// does not: when the engine resolves a file completely on its own, does the
+// result match what the team actually committed in the real merge?
+//
+// `mergedContent` is non-null exactly when no conflict remains, so those files
+// can be compared byte-for-byte against `<merge>:<path>`.
+//
+// A mismatch is NOT automatically an error: the recorded merge may contain edits
+// the human made while resolving (an "evil merge"), which no merge algorithm
+// could reproduce. Hence the whitespace-normalised count alongside the exact one,
+// and the retained examples.
+let filesFullyResolved = 0;
+let agreeExact = 0;
+let agreeNormalized = 0;
+let agreeUnavailable = 0;
+const disagreeExamples = [];
+
+const normalizeForCompare = (text) =>
+  text.replace(/\r\n/g, "\n").split("\n").map((l) => l.replace(/[ \t]+$/, "")).join("\n").replace(/\n+$/, "");
+
 const resolveOptions = WITH_REFACTORING ? { refactoringAware: { enabled: true } } : {};
 
 // --lists accumulators
@@ -238,7 +261,10 @@ for (const m of merges) {
 
     let content;
     try {
-      content = git(["show", `${conflict.treeOid}:${path}`]);
+      // stderr silenced: a path present in the conflict list but absent from the
+      // written tree (rename/delete conflicts) makes git print a fatal line per
+      // file, which drowns the run's own output on doc-heavy repos.
+      content = git(["show", `${conflict.treeOid}:${path}`], { stdio: ["ignore", "pipe", "ignore"] });
     } catch { skippedFiles++; continue; } // deleted/rename conflict → no blob at path
 
     if (content.length > MAX_FILE_BYTES || content.includes("\0")) { skippedFiles++; continue; }
@@ -253,6 +279,28 @@ for (const m of merges) {
     totalHunks += result.stats.totalConflicts;
     for (const [type, count] of Object.entries(result.stats.byType)) {
       byType[type] = (byType[type] ?? 0) + count;
+    }
+
+    if (result.mergedContent !== null) {
+      filesFullyResolved++;
+      let actual = null;
+      try {
+        actual = git(["show", `${m}:${path}`], { stdio: ["ignore", "pipe", "ignore"] });
+      } catch {
+        // The path can be absent from the recorded merge (renamed or dropped
+        // while resolving). Counted separately rather than scored as a miss.
+        agreeUnavailable++;
+      }
+      if (actual !== null) {
+        if (result.mergedContent === actual) {
+          agreeExact++;
+          agreeNormalized++;
+        } else if (normalizeForCompare(result.mergedContent) === normalizeForCompare(actual)) {
+          agreeNormalized++;
+        } else if (disagreeExamples.length < 25) {
+          disagreeExamples.push({ merge: m.slice(0, 10), path, hunks: result.stats.totalConflicts });
+        }
+      }
     }
     for (const hunk of result.hunks) {
       if (hunk.type === "token_level_merge" && tokenLevelExamples.length < 25) {
@@ -302,6 +350,14 @@ const report = {
   skippedFiles,
   resolveErrors,
   totalHunks,
+  agreement: {
+    filesFullyResolved,
+    comparable: filesFullyResolved - agreeUnavailable,
+    agreeExact,
+    agreeNormalized,
+    unavailable: agreeUnavailable,
+    disagreeExamples,
+  },
   byType: Object.fromEntries(Object.entries(byType).sort((a, b) => b[1] - a[1])),
   tiers,
   refactoringAwareEnabled: WITH_REFACTORING,
@@ -333,6 +389,12 @@ if (AS_JSON) {
     const pct = totalHunks ? ((count / totalHunks) * 100).toFixed(1) : "0.0";
     console.log(`  ${type.padEnd(26)} ${String(count).padStart(6)}  (${pct}%)`);
   }
+  const cmp = report.agreement.comparable;
+  const apct = (n) => (cmp ? ((n / cmp) * 100).toFixed(1) : "0.0");
+  console.log(`\nagreement with the human merge (files resolved end-to-end by the engine):`);
+  console.log(`  files fully resolved:  ${filesFullyResolved}  (comparable: ${cmp}, path absent from merge: ${agreeUnavailable})`);
+  console.log(`  byte-identical:        ${agreeExact}  (${apct(agreeExact)}%)`);
+  console.log(`  identical modulo ws:   ${agreeNormalized}  (${apct(agreeNormalized)}%)`);
   console.log(`\ntiers: trivial=${tiers.byTier.trivial} advancedDeterministic=${tiers.byTier.advancedDeterministic} model=${tiers.byTier.model} unresolved=${tiers.byTier.unresolved}`);
   console.log(`residual=${tiers.residual} aiReachable=${tiers.aiReachable} recoverable-before-model=${(tiers.recoverableBeforeModel * 100).toFixed(1)}%`);
   if (tokenLevelExamples.length) {

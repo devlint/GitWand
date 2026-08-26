@@ -6,7 +6,7 @@
       <div class="ph-inner">
         <span class="ph-badge">MCP server · Official registry · stdio · No API key</span>
         <h1 class="ph-h1">Your AI agents, with a <span class="grad">real Git engine on tap.</span></h1>
-        <p class="ph-sub">GitWand's MCP server exposes its deterministic conflict engine to AI agents. GitWand resolves the trivial 95% instantly and deterministically; your agent takes over the complex cases with full context — ours/theirs/base content, classification trace and confidence scores. AI is always opt-in, always auditable.</p>
+        <p class="ph-sub">GitWand's MCP server exposes its deterministic conflict engine to AI agents. GitWand resolves the hunks that carry no decision instantly and deterministically; your agent takes over the complex cases with full context — ours/theirs/base content, classification trace and confidence scores. AI is always opt-in, always auditable.</p>
         <div class="ph-ctas">
           <a href="/guide/mcp" class="ph-btn ph-btn--primary">MCP documentation</a>
           <a href="/" class="ph-btn">← Back to home</a>

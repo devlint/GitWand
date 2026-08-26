@@ -1,3 +1,8 @@
+---
+title: 'How GitWand resolves merge conflicts automatically'
+description: 'The classification pipeline behind GitWand: conflict-marker parsing, diff3 base recovery, a prioritised pattern registry, composite confidence scoring and a per-hunk decision trace.'
+---
+
 # Conflict Resolution Engine
 
 GitWand's core engine classifies each merge-conflict hunk against a prioritised pattern registry, scores each with a composite confidence metric, and auto-resolves the ones it's confident about — leaving the complex ones for human judgment. Eight deterministic patterns auto-apply; the rest either propose a merge you confirm, are opt-in, or hand the hunk back with its trace.
@@ -184,3 +189,13 @@ interface ValidationResult {
   isValid: boolean
 }
 ```
+
+## Common conflicts, by symptom
+
+The engine is the general case. If you landed here from a specific message git
+printed, these guides go straight to it:
+
+- [`CONFLICT (content): Merge conflict in <file>`](/fix/merge-conflict-in-file) — reading the markers, the four ways out
+- [Lockfile conflicts](/fix/package-lock-json-merge-conflict) — `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `Cargo.lock`
+- [A rebase that repeats the same conflict](/fix/rebase-same-conflict-every-commit) — why it happens, and how to stop it
+- [`git rerere`](/fix/git-rerere) — what it stores, and where it stops helping
