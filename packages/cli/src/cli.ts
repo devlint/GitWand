@@ -40,6 +40,7 @@ function printHelp(): void {
   console.log(`  --verbose             Show details for each resolution`);
   console.log(`  --no-whitespace       Don't resolve whitespace-only conflicts`);
   console.log(`  --resolve-generated   Auto-resolve generated files (lockfiles, dist/) — declined by default: regenerate them instead`);
+  console.log(`  --regenerate          Re-run the ecosystem's generator (npm/pnpm/yarn-berry/composer/cargo) for declined lockfiles once their source of truth is clean/resolved (sandboxed git worktree, opt-in — see .gitwandrc "regenerate": true)`);
   console.log(`  --concurrency=N       Parallel file workers (default ${DEFAULT_CONCURRENCY}, min 1)`);
   console.log(`  --ci                  CI mode: JSON output + exit code 1 if unresolved`);
   console.log(`  --json                Output results as JSON (implies --ci behavior)`);

@@ -19,7 +19,16 @@
 
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve as resolvePath } from "node:path";
-import { resolve, resolveAsync, summarizeTiers, type MergeResult, type ConflictType } from "@gitwand/core";
+import {
+  resolve,
+  resolveAsync,
+  summarizeTiers,
+  findEcosystem,
+  buildRegenerationPlan,
+  type MergeResult,
+  type ConflictType,
+  type RegenerationContext,
+} from "@gitwand/core";
 
 import { c, printBanner, WAND } from "../ui.js";
 import { getConflictedFiles, detectMergeContext } from "../git.js";
@@ -27,7 +36,17 @@ import { parseConcurrency, runPool } from "../concurrency.js";
 import { buildPartialContent } from "../partial-content.js";
 import { buildCIReport } from "../reporting.js";
 import { buildLlmEndpoint } from "../llm-endpoint.js";
-import { resolveLlmConfig, buildResolveLlmOptions } from "../llm-config.js";
+import { resolveLlmConfig, buildResolveLlmOptions, findGitRoot } from "../llm-config.js";
+import {
+  runRegeneration,
+  loadGitwandrcRegenerateFlag,
+  type ResolvedSource,
+} from "../regenerate-runner.js";
+
+/** Un marqueur de conflit résiduel dans un contenu régénéré serait un bug de
+ * l'installeur (ou un ré-échantillonnage malheureux) — même garde que celle
+ * appliquée en pass 1 avant toute écriture. */
+const RESIDUAL_MARKER_RE = /^(?:<{7}|={7}|>{7})/m;
 
 export async function cmdResolve(
   files: string[],
@@ -111,6 +130,53 @@ export async function cmdResolve(
     printLines: string[];
   };
 
+  // Extrait pour être réutilisé par la pass 2 (accuracy lot D — regenerate
+  // tier) : après une régénération réussie/échouée, les stats/résolutions du
+  // fichier changent et la ligne affichée doit refléter le nouvel état plutôt
+  // que le résultat figé de la pass 1.
+  function buildFileLines(
+    file: string,
+    result: MergeResult,
+    validationWarning: string | null,
+    skipWrite: boolean,
+  ): string[] {
+    const printLines: string[] = [];
+    if (isCIMode) return printLines;
+    if (result.stats.totalConflicts === 0) {
+      printLines.push(`${c.dim}  ○ ${file} — no conflicts${c.reset}`);
+      return printLines;
+    }
+
+    const icon = result.stats.remaining === 0 ? "✓" : "◐";
+    const color = result.stats.remaining === 0 ? c.green : c.yellow;
+
+    printLines.push(
+      `${color}  ${icon} ${file} — ${result.stats.autoResolved}/${result.stats.totalConflicts} resolved${c.reset}`,
+    );
+
+    if (validationWarning) {
+      const warnColor = skipWrite ? c.red : c.yellow;
+      printLines.push(`${warnColor}    ⚠ validation: ${validationWarning}${c.reset}`);
+    }
+
+    if (verbose) {
+      for (const res of result.resolutions) {
+        const status = res.autoResolved
+          ? `${c.green}auto${c.reset}`
+          : `${c.red}manual${c.reset}`;
+        printLines.push(
+          `${c.dim}    L${res.hunk.startLine} [${res.hunk.type}] ${status} — ${res.hunk.explanation}${c.reset}`,
+        );
+        printLines.push(`${c.dim}      trace: ${res.hunk.trace.summary}${c.reset}`);
+        if (res.regenerationPlan) {
+          printLines.push(`${c.dim}      regenerate: ${res.resolutionReason}${c.reset}`);
+        }
+      }
+    }
+
+    return printLines;
+  }
+
   const outcomes = await runPool<string, FileOutcome>(files, concurrency, async (file) => {
     const filePath = resolvePath(file);
     let content: string;
@@ -171,39 +237,134 @@ export async function cmdResolve(
       }
     }
 
-    const printLines: string[] = [];
-    if (!isCIMode) {
-      if (result.stats.totalConflicts === 0) {
-        printLines.push(`${c.dim}  \u25CB ${file} — no conflicts${c.reset}`);
-      } else {
-        const icon = result.stats.remaining === 0 ? "\u2713" : "\u25D0";
-        const color = result.stats.remaining === 0 ? c.green : c.yellow;
-
-        printLines.push(
-          `${color}  ${icon} ${file} — ${result.stats.autoResolved}/${result.stats.totalConflicts} resolved${c.reset}`,
-        );
-
-        if (validationWarning) {
-          const warnColor = skipWrite ? c.red : c.yellow;
-          printLines.push(`${warnColor}    ⚠ validation: ${validationWarning}${c.reset}`);
-        }
-
-        if (verbose) {
-          for (const res of result.resolutions) {
-            const status = res.autoResolved
-              ? `${c.green}auto${c.reset}`
-              : `${c.red}manual${c.reset}`;
-            printLines.push(
-              `${c.dim}    L${res.hunk.startLine} [${res.hunk.type}] ${status} — ${res.hunk.explanation}${c.reset}`,
-            );
-            printLines.push(`${c.dim}      trace: ${res.hunk.trace.summary}${c.reset}`);
-          }
-        }
-      }
-    }
+    const printLines = buildFileLines(file, result, validationWarning, skipWrite);
 
     return { file, result, printLines };
   });
+
+  // ─── accuracy lot D — Pass 2 : tier de régénération (opt-in) ───
+  //
+  // Ne tourne QUE si `--regenerate` ou `.gitwandrc` `regenerate: true` est
+  // actif, et seulement après que la pass 1 ci-dessus a produit `outcomes`
+  // en entier — c'est ce qui permet de connaître l'état des AUTRES fichiers
+  // du merge (sources de vérité) avant de décider qu'un plan est sûr à
+  // exécuter. Voir `regenerate-runner.ts` pour l'exécution elle-même.
+  const regenerateEnabled =
+    !resolveGeneratedFiles && (flags.regenerate === true || loadGitwandrcRegenerateFlag());
+  if (regenerateEnabled) {
+    const repoRoot = findGitRoot();
+    if (repoRoot !== null) {
+      const siblingFiles: RegenerationContext["siblingFiles"] = {};
+      for (const outcome of outcomes) {
+        if (outcome.result === null) continue;
+        const { stats } = outcome.result;
+        siblingFiles[outcome.file] = {
+          state:
+            stats.totalConflicts === 0
+              ? "clean"
+              : stats.remaining === 0
+                ? "resolved"
+                : "conflicted",
+        };
+      }
+
+      for (const outcome of outcomes) {
+        if (outcome.result === null) continue;
+        const hasRegenCandidate = outcome.result.resolutions.some((res) => res.regenerationPlan !== undefined);
+        if (!hasRegenCandidate) continue;
+
+        const ecosystem = findEcosystem(outcome.file);
+        if (!ecosystem) continue; // ne devrait jamais arriver — le plan pass-1 impliquait déjà un match
+
+        // Ruling P-1b (brief) — on IGNORE le `runnable` attaché en pass 1 (il
+        // vaut toujours `false`, `regenerationContext` n'existait pas encore)
+        // et on re-dérive le plan avec la carte de siblings réelle.
+        const plan = buildRegenerationPlan(outcome.file, ecosystem, { siblingFiles });
+        if (!plan.runnable) continue;
+
+        const resolvedSources: ResolvedSource[] = [];
+        let sourcesReady = true;
+        for (const source of plan.sources) {
+          const siblingOutcome = outcomes.find((o) => o.file === source.path);
+          if (!siblingOutcome?.result || siblingOutcome.result.mergedContent === null) {
+            sourcesReady = false;
+            break;
+          }
+          resolvedSources.push({ path: source.path, content: siblingOutcome.result.mergedContent });
+        }
+        if (!sourcesReady) continue; // défensif : `plan.runnable` aurait dû le garantir
+
+        const regenOutcome = await runRegeneration({
+          repoRoot,
+          file: outcome.file,
+          ecosystem,
+          resolvedSources,
+        });
+
+        const hasResidualMarkers =
+          regenOutcome.kind === "success" &&
+          regenOutcome.content !== null &&
+          RESIDUAL_MARKER_RE.test(regenOutcome.content);
+
+        let validationWarning: string | null = null;
+        let skipWrite = false;
+
+        if (regenOutcome.kind === "success" && regenOutcome.content !== null && !hasResidualMarkers) {
+          if (!flags["dry-run"]) {
+            await writeFile(resolvePath(outcome.file), regenOutcome.content, "utf-8");
+          }
+          const updatedResolutions = outcome.result.resolutions.map((res) =>
+            res.regenerationPlan !== undefined
+              ? {
+                  ...res,
+                  autoResolved: true,
+                  resolutionReason: `${res.resolutionReason} ${regenOutcome.reason}`,
+                }
+              : res,
+          );
+          const newAutoResolved = updatedResolutions.filter((r) => r.autoResolved).length;
+          outcome.result = {
+            ...outcome.result,
+            mergedContent: regenOutcome.content,
+            resolutions: updatedResolutions,
+            stats: {
+              ...outcome.result.stats,
+              autoResolved: newAutoResolved,
+              remaining: outcome.result.stats.totalConflicts - newAutoResolved,
+            },
+          };
+          siblingFiles[outcome.file] = {
+            state: outcome.result.stats.remaining === 0 ? "resolved" : "conflicted",
+          };
+        } else {
+          // Échec (toute nature confondue) OU succès mais contenu régénéré
+          // truffé de marqueurs résiduels : le fichier reste EXACTEMENT tel
+          // que la pass 1 l'a laissé sur disque — seule la raison affichée
+          // gagne le détail de l'échec.
+          if (hasResidualMarkers) {
+            validationWarning = "regenerated content still contains conflict markers — file NOT touched";
+            skipWrite = true;
+          }
+          const detail = hasResidualMarkers
+            ? `${regenOutcome.reason} (marqueurs résiduels détectés — écriture annulée)`
+            : regenOutcome.reason;
+          const updatedResolutions = outcome.result.resolutions.map((res) =>
+            res.regenerationPlan !== undefined
+              ? { ...res, resolutionReason: `${res.resolutionReason} ${detail}` }
+              : res,
+          );
+          outcome.result = { ...outcome.result, resolutions: updatedResolutions };
+        }
+
+        outcome.printLines = buildFileLines(outcome.file, outcome.result, validationWarning, skipWrite);
+        if (verbose && !isCIMode) {
+          outcome.printLines.push(
+            `${c.dim}      regenerate: ${regenOutcome.trace.ecosystem} · ${regenOutcome.trace.command} · ${(regenOutcome.trace.durationMs / 1000).toFixed(1)}s · ${regenOutcome.kind}${c.reset}`,
+          );
+        }
+      }
+    }
+  }
 
   // Flush ordonné (ordre de `files`, pas ordre de complétion).
   if (!isCIMode) {
