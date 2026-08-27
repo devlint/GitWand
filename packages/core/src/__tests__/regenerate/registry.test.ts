@@ -30,19 +30,37 @@ describe("findEcosystem", () => {
     expect(findEcosystem("src/index.ts")).toBeUndefined();
   });
 
-  it("every v1 registry entry bakes in script-suppression or is inherently script-free", () => {
-    // Global constraint: no registry entry may omit script suppression — either
-    // an explicit flag (--ignore-scripts / --no-scripts) or a command that never
-    // executes lifecycle scripts by construction (documented per entry below).
-    for (const eco of REGEN_ECOSYSTEMS) {
-      const args = eco.command.args.join(" ");
-      const scriptSuppressed =
-        args.includes("--ignore-scripts") ||
-        args.includes("--no-scripts") ||
-        eco.id === "yarn-berry" || // update-lockfile mode never runs installs/lifecycle scripts
-        eco.id === "cargo"; // generate-lockfile only resolves, never builds/runs build.rs
-      expect(scriptSuppressed).toBe(true);
-    }
+  describe("every v1 registry entry bakes in script-suppression", () => {
+    // Global constraint: no registry entry may omit script suppression. For
+    // npm/pnpm/composer that's an explicit flag on `command.args`. For
+    // yarn-berry and cargo, suppression is inherent to the command CHOICE
+    // itself (no flag exists to bolt onto a riskier command) — so instead of
+    // a boolean short-circuit, each ecosystem gets its own real assertion
+    // that fails if a future edit swaps in a script-running command.
+    it("npm carries --ignore-scripts", () => {
+      const eco = REGEN_ECOSYSTEMS.find((e) => e.id === "npm")!;
+      expect(eco.command.args).toContain("--ignore-scripts");
+    });
+
+    it("pnpm carries --ignore-scripts", () => {
+      const eco = REGEN_ECOSYSTEMS.find((e) => e.id === "pnpm")!;
+      expect(eco.command.args).toContain("--ignore-scripts");
+    });
+
+    it("composer carries --no-scripts", () => {
+      const eco = REGEN_ECOSYSTEMS.find((e) => e.id === "composer")!;
+      expect(eco.command.args).toContain("--no-scripts");
+    });
+
+    it("yarn-berry carries --mode=update-lockfile (lockfile-only mode never runs install/lifecycle scripts)", () => {
+      const eco = REGEN_ECOSYSTEMS.find((e) => e.id === "yarn-berry")!;
+      expect(eco.command.args).toContain("--mode=update-lockfile");
+    });
+
+    it("cargo is exactly generate-lockfile (resolves only, never invokes build.rs)", () => {
+      const eco = REGEN_ECOSYSTEMS.find((e) => e.id === "cargo")!;
+      expect(eco.command.args).toEqual(["generate-lockfile"]);
+    });
   });
 
   it("v1 registry has exactly the 5 documented ecosystems", () => {

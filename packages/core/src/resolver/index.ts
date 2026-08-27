@@ -140,10 +140,18 @@ function boostFormatValidated(hunk: ConflictHunk, resolverUsed: string): Conflic
  * (lockfiles npm/pnpm/yarn-berry/composer/cargo), calcule le plan de
  * régénération et ajoute l'indice « --regenerate » à la raison de déclin.
  * Sinon, retourne la raison telle quelle sans plan. Centralisé ici : les
- * trois sites de déclin d'un fichier généré (generatedGate, seuil de
- * confiance, `assembleResolution` case "generated_file") appellent ce même
- * helper — `assembleResolution` reste un simple switch lignes-ou-null, il
- * n'a pas connaissance du registre de régénération.
+ * deux sites de déclin d'un fichier généré (`generatedGate`,
+ * `assembleResolution` case "generated_file") appellent ce même helper —
+ * `assembleResolution` reste un simple switch lignes-ou-null, il n'a pas
+ * connaissance du registre de régénération.
+ *
+ * (Un troisième site — le seuil `minConfidence` — a été envisagé puis
+ * retiré : `computeEffectiveMinConfidence` retourne toujours le PLUS
+ * PERMISSIF de la politique et de l'option, et aucun `MergePolicy` ne
+ * dépasse "high" ; comme `reclassifyIfGenerated` fixe la confiance d'un
+ * hunk `generated_file` à exactement "high", ce seuil ne peut jamais
+ * rejeter un tel hunk, quelle que soit l'API publique utilisée. Ce n'était
+ * pas un cas rare à couvrir par prudence : c'était du code mort.)
  */
 function attachRegenerationPlan(
   filePath: string,
@@ -251,15 +259,11 @@ function resolveHunk(
 
   // Vérifier le niveau de confiance minimum
   if (CONFIDENCE_ORDER[hunk.confidence.label] < CONFIDENCE_ORDER[effectiveMinConfidence]) {
-    const baseReason = `Confiance ${hunk.confidence.label} (score: ${hunk.confidence.score}) insuffisante (minimum requis : ${effectiveMinConfidence}, politique : ${effectivePolicy}).${dispatchNote ? ` [${dispatchNote}]` : ""}`;
-    // accuracy lot D — cas rare : un appelant a poussé minConfidence au-dessus
-    // de "high" (le score fixe de generated_file, voir reclassifyIfGenerated),
-    // ce qui fait échouer ce hunk générateur au seuil au lieu du generatedGate.
-    if (genInfo.generated && hunk.type === "generated_file") {
-      const { reason, regenerationPlan } = attachRegenerationPlan(filePath, options, baseReason);
-      return { hunk, lines: null, reason, regenerationPlan };
-    }
-    return { hunk, lines: null, reason: baseReason };
+    return {
+      hunk,
+      lines: null,
+      reason: `Confiance ${hunk.confidence.label} (score: ${hunk.confidence.score}) insuffisante (minimum requis : ${effectiveMinConfidence}, politique : ${effectivePolicy}).${dispatchNote ? ` [${dispatchNote}]` : ""}`,
+    };
   }
 
   const assembled = assembleResolution(hunk, options, effectivePolicy, policyCfg);
