@@ -423,9 +423,19 @@ pilot-scale, single-ecosystem, n = 3 result — it does not prove regeneration i
 unreliable at 66.7 % either; it proves the question isn't answered yet. Before
 revisiting: (a) re-pin the corpus with at least one application-shaped PHP repo
 so the composer leg is measurable, (b) run the plan's full ≤ 20-merges-per-ecosystem
-sweep across npm, pnpm, yarn-berry, composer and cargo, and (c) characterise
+sweep across npm, pnpm, yarn-berry, composer and cargo, (c) characterise
 the one observed mismatch (which package(s) diverged, and why) rather than
-treating a single data point as noise.
+treating a single data point as noise, and (d) rule out a documented, known
+limitation before blaming the registry commands themselves: `regenerate-runner.ts`
+seeds its disposable worktree from `HEAD` (ours-only), not the in-progress merge
+index that the plan's own architecture text describes. Files that exist only on
+`theirs`' side are invisible to the installer, and seeding from `ours`' lockfile
+biases the regeneration toward an incremental update rather than a fresh
+resolution — a plausible contributor to the 66.7 % this pilot measured. The full
+fix (seed from the merge's stage-2/3 state instead) needs its own real
+measurement to confirm it actually moves the number before it's worth building —
+see `regenerate-runner.ts`'s module header for the detailed writeup of this
+limitation.
 
 ## Results
 

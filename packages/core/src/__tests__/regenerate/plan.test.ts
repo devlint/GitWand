@@ -103,4 +103,40 @@ describe("buildRegenerationPlan", () => {
       expect(plan.sources).toContainEqual({ path: ".yarnrc.yml", state: "conflicted" });
     });
   });
+
+  // Final review Finding 1 — a nested lockfile (e.g. `packages/x/package-lock.json`)
+  // matches the registry (intentional — see registry.test.ts) but nothing
+  // downstream is directory-aware: the CLI's regenerate-runner writes
+  // resolved sources at the worktree ROOT and reads the regenerated lockfile
+  // back from its nested path. Without this guard, a nested lockfile whose
+  // (root-relative) sourcesOfTruth all read "clean" comes back runnable, and
+  // executing that plan would silently regenerate the ROOT lockfile while
+  // reading back an untouched (still-"ours") nested one — a false success.
+  describe("nested (non-root) generated files (Finding 1, final review)", () => {
+    it("is not runnable even when every source of truth is clean", () => {
+      const ctx: RegenerationContext = {
+        siblingFiles: { "package.json": { state: "clean" } },
+      };
+      const plan = buildRegenerationPlan("packages/x/package-lock.json", npmEco, ctx);
+      expect(plan.runnable).toBe(false);
+      expect(plan.blockedReason).toBeDefined();
+      expect(plan.blockedReason).toContain("packages/x/package-lock.json");
+    });
+
+    it("carries no blockedReason for a root-level file (unaffected)", () => {
+      const ctx: RegenerationContext = {
+        siblingFiles: { "package.json": { state: "clean" } },
+      };
+      const plan = buildRegenerationPlan("package-lock.json", npmEco, ctx);
+      expect(plan.runnable).toBe(true);
+      expect(plan.blockedReason).toBeUndefined();
+    });
+
+    it("still reports the (root-relative) source states even though it's blocked", () => {
+      const ctx: RegenerationContext = { siblingFiles: {} };
+      const plan = buildRegenerationPlan("packages/x/package-lock.json", npmEco, ctx);
+      expect(plan.runnable).toBe(false);
+      expect(plan.sources).toEqual([{ path: "package.json", state: "conflicted" }]);
+    });
+  });
 });

@@ -17,7 +17,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -293,6 +293,67 @@ describe('MCP regenerate:true — reporting only, never executes (task 3)', () =
         expect(plan.runnable).toBe(false)
         const source = plan.sources.find((s: { path: string }) => s.path === 'package.json')
         expect(source?.state).toBe('conflicted')
+
+        assertNothingExecuted()
+        expect(worktreeCount(cwd)).toBe(worktreesBefore)
+      } finally {
+        cleanup()
+      }
+    },
+  )
+
+  it(
+    // Final review Finding 2 — "not conflicted" must not be conflated with
+    // "clean": a yarn-CLASSIC repo (has yarn.lock, no `.yarnrc.yml` at all —
+    // the berry marker `registry.ts` requires) has `.yarnrc.yml` trivially
+    // "not conflicted" simply because it never existed. Before the fix, that
+    // made the reported yarn-berry plan come back `runnable: true` for a repo
+    // the registry's own documented guard says must never be runnable.
+    'gitwand_status: yarn-classic repo (no .yarnrc.yml) must NOT report runnable:true for the yarn-berry plan',
+    async () => {
+      const repo = makeRepo()
+      const { cwd, cleanup } = repo
+      try {
+        const YARN_LOCK = 'yarn.lock'
+        writeFileSync(join(cwd, 'package.json'), '{"name":"e2e","version":"1.0.0"}\n', 'utf-8')
+        writeFileSync(join(cwd, YARN_LOCK), lockContent('base'), 'utf-8')
+        git(cwd, ['add', '-A'])
+        git(cwd, ['commit', '-m', 'init'])
+
+        git(cwd, ['checkout', '-b', 'feature'])
+        writeFileSync(join(cwd, YARN_LOCK), lockContent('feature'), 'utf-8')
+        git(cwd, ['commit', '-a', '-m', 'feature: bump lock'])
+
+        git(cwd, ['checkout', 'main'])
+        writeFileSync(join(cwd, YARN_LOCK), lockContent('main'), 'utf-8')
+        git(cwd, ['commit', '-a', '-m', 'main: bump lock'])
+
+        try {
+          git(cwd, ['merge', 'feature'])
+        } catch {
+          // conflict expected
+        }
+
+        // Precondition: only yarn.lock is conflicted, and `.yarnrc.yml`
+        // genuinely does not exist anywhere in this repo (classic yarn).
+        const conflicted = git(cwd, ['diff', '--name-only', '--diff-filter=U']).trim().split('\n')
+        expect(conflicted).toEqual([YARN_LOCK])
+        expect(existsSync(join(cwd, '.yarnrc.yml'))).toBe(false)
+
+        const worktreesBefore = worktreeCount(cwd)
+
+        const result: ToolResult = await handleToolCall('gitwand_status', { regenerate: true }, cwd)
+
+        expect(result.isError).toBeFalsy()
+        const parsed = JSON.parse(result.content[0].text)
+        const plan = parsed.regenerationPlans.find((p: { file: string }) => p.file === YARN_LOCK)
+        expect(plan).toBeDefined()
+        expect(plan.ecosystem).toBe('yarn-berry')
+        // Safety-critical: absent berry marker must block runnable, not be
+        // silently defaulted to "clean" just because it was never conflicted.
+        expect(plan.runnable).toBe(false)
+        const marker = plan.sources.find((s: { path: string }) => s.path === '.yarnrc.yml')
+        expect(marker?.state).toBe('conflicted')
 
         assertNothingExecuted()
         expect(worktreeCount(cwd)).toBe(worktreesBefore)

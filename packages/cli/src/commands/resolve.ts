@@ -18,6 +18,7 @@
  */
 
 import { readFile, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 import {
   resolve,
@@ -306,6 +307,18 @@ export async function cmdResolve(
       // Pré-seed chaque source de vérité des écosystèmes candidats qui n'a
       // JAMAIS été signalée en conflit par git : par construction, "jamais
       // vue en conflit" = "clean", exactement le signal attendu par le type.
+      //
+      // Fix (final review, Finding 2) — "jamais vue en conflit" ne veut PAS
+      // dire "clean" : un fichier peut n'avoir jamais été conflicté parce
+      // qu'il n'EXISTE tout simplement pas dans ce dépôt (ex: `.yarnrc.yml`
+      // sur un dépôt yarn CLASSIC, qui n'a jamais eu ce fichier). Confondre
+      // "pas conflicté" et "clean" faisait passer un tel repo pour
+      // `runnable: true` sur l'écosystème yarn-berry, contredisant la propre
+      // garde documentée du registre (`registry.ts` — `.yarnrc.yml` absent ⇒
+      // non-runnable). On ne marque donc "clean" que si le fichier existe
+      // RÉELLEMENT sur disque en plus de n'être pas conflicté — sinon on le
+      // laisse absent de `siblingFiles`, que `buildRegenerationPlan` traite
+      // déjà comme "conflicted" (jamais runnable par défaut).
       for (const outcome of outcomes) {
         if (outcome.result === null) continue;
         const hasRegenCandidate = outcome.result.resolutions.some((res) => res.regenerationPlan !== undefined);
@@ -313,7 +326,11 @@ export async function cmdResolve(
         const ecosystem = findEcosystem(outcome.file);
         if (!ecosystem) continue;
         for (const sourcePath of ecosystem.sourcesOfTruth) {
-          if (!conflictedFileSet.has(sourcePath) && !(sourcePath in siblingFiles)) {
+          if (
+            !conflictedFileSet.has(sourcePath) &&
+            !(sourcePath in siblingFiles) &&
+            existsSync(resolvePath(sourcePath))
+          ) {
             siblingFiles[sourcePath] = { state: "clean" };
           }
         }
@@ -335,6 +352,7 @@ export async function cmdResolve(
 
         const resolvedSources: ResolvedSource[] = [];
         let sourcesReady = true;
+        let unreadableSource: string | null = null;
         for (const source of plan.sources) {
           const siblingOutcome = outcomes.find((o) => o.file === source.path);
           if (siblingOutcome?.result?.mergedContent != null) {
@@ -355,9 +373,22 @@ export async function cmdResolve(
             }
           }
           sourcesReady = false;
+          unreadableSource = source.path;
           break;
         }
-        if (!sourcesReady) continue; // défensif : `plan.runnable` aurait dû le garantir
+        if (!sourcesReady) {
+          // Final review Finding 2 (opportunistic ask) — ce cas était
+          // auparavant totalement silencieux, même sous `--regenerate`
+          // explicite. Un plan jugé runnable mais dont une source ne peut
+          // finalement pas être lue reste défensif (`plan.runnable` aurait dû
+          // le garantir) mais mérite au moins une ligne nommant le fichier.
+          if (!isCIMode) {
+            console.log(
+              `${c.dim}  ⚠ ${outcome.file} — regeneration plan was runnable but source "${unreadableSource ?? "?"}" could not be read; skipped.${c.reset}`,
+            );
+          }
+          continue;
+        }
 
         const regenOutcome = await runRegeneration({
           repoRoot,

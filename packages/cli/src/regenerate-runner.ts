@@ -22,6 +22,26 @@
  * Chaque tentative est tracée intégralement (commande, durée, code de
  * sortie) — cette provenance doit finir dans la raison de résolution
  * affichée à l'utilisateur (voir `commands/resolve.ts`).
+ *
+ * LIMITATION CONNUE (final review, Finding 3 — documentation seulement, pas
+ * de re-architecture dans cette fix wave) : le worktree jetable est semé
+ * depuis `HEAD` (étape 1 ci-dessus) — c'est-à-dire l'état "ours" seul — et
+ * non depuis l'INDEX DE MERGE en cours (stages 1/2/3), pourtant ce que le
+ * texte d'architecture du plan décrit ("populated from the in-progress merge
+ * index"). C'était une décision délibérée prise pendant le dispatch de la
+ * tâche 2 (raisonnement : ce qui comptait était la jetabilité du worktree,
+ * et HEAD est jetable) — mais elle a un coût réel que la revue finale du
+ * plan a identifié à juste titre : les fichiers qui n'existent QUE côté
+ * "theirs" sont invisibles pour l'installeur, et semer depuis le lockfile de
+ * "ours" biaise la régénération vers une mise à jour incrémentale plutôt
+ * qu'une résolution fraîche à partir de zéro. C'est un contributeur
+ * plausible au faible taux d'accord mesuré par le pilote réel de la tâche 4
+ * (66,7 %, n = 3 — voir `benchmark/README.md`, "The gate verdict", hypothèse
+ * (d)). Le correctif complet (semer depuis l'état stage-2/3 du merge)
+ * nécessite sa propre mesure réelle pour valider qu'il change effectivement
+ * ce chiffre — hors scope de cette fix wave (pas de second tour de revue
+ * après celle-ci) ; ledgeré ici comme limitation connue plutôt que laissé
+ * silencieux.
  */
 
 import { execFile, execFileSync } from "node:child_process";
@@ -111,6 +131,39 @@ const ENV_ALLOWLIST_EXACT = new Set([
 
 /** Préfixes de noms de variables entièrement whitelistés (plomberie git). */
 const ENV_ALLOWLIST_PREFIXES = ["GIT_"];
+
+/**
+ * Fix (final review, Finding 4) — `ENV_ALLOWLIST_PREFIXES` (`GIT_*`) était
+ * jusqu'ici utilisé par LA MÊME fonction (`buildSpawnEnv`) pour LES DEUX
+ * familles de spawn : la plomberie git (`git worktree add`/`remove`, où
+ * `GIT_*` est effectivement nécessaire — voir le commentaire ci-dessus) ET
+ * l'installeur de l'écosystème (npm/pnpm/yarn/composer/cargo), qui n'a
+ * besoin d'AUCUNE de ces variables. Des systèmes CI injectent couramment des
+ * identifiants via `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n`
+ * (ex: `http.extraheader=Authorization: Basic <token>`) ou
+ * `GIT_ASKPASS`/`GIT_SSH_COMMAND` — laisser ces variables atteindre le
+ * process spawné pour l'écosystème contredit la propre justification de
+ * l'allowlist ("aucun token ne peut fuiter par un nom de variable qu'une
+ * denylist aurait oublié") et AGENTS.md ("Pass only the specific env vars
+ * the child process needs").
+ *
+ * Les 5 commandes du registre v1 sont toutes lockfile-only (jamais
+ * d'installation complète) : aucune n'a besoin de résoudre une dépendance
+ * `git+https://` via la config git héritée. On retire donc le préfixe
+ * `GIT_*` ENTIÈREMENT pour ce builder plutôt que de tenter une liste
+ * d'exclusions au sein du préfixe (plus simple à auditer, et le blast radius
+ * d'un manque futur — une dépendance git+https qui échouerait proprement —
+ * est bien moins grave qu'une fuite de credentials).
+ */
+function buildEcosystemSpawnEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value === undefined) continue;
+    if (!ENV_ALLOWLIST_EXACT.has(key)) continue;
+    env[key] = value;
+  }
+  return env;
+}
 
 export type RegenerationOutcomeKind =
   | "success"
@@ -236,14 +289,18 @@ export function validateRegeneratedContent(
 }
 
 /**
- * Construit l'environnement des process spawnés (git worktree + installeur)
- * à partir d'une ALLOWLIST explicite (`ENV_ALLOWLIST_EXACT`/`_PREFIXES`), pas
- * d'une denylist de motifs "sensibles" — voir le commentaire de l'allowlist
- * pour le pourquoi. Rien d'autre du `process.env` de l'agent n'est transmis :
- * aucun token/clé/identifiant ne peut fuiter par un nom de variable qu'une
- * denylist aurait simplement oublié de couvrir.
+ * Construit l'environnement des DEUX spawns de plomberie git (`git worktree
+ * add`/`remove`/`prune`) à partir d'une ALLOWLIST explicite
+ * (`ENV_ALLOWLIST_EXACT` + préfixe `GIT_*`), pas d'une denylist de motifs
+ * "sensibles" — voir le commentaire de l'allowlist pour le pourquoi. Rien
+ * d'autre du `process.env` de l'agent n'est transmis.
+ *
+ * Fix (final review, Finding 4) — ce builder (GIT_*-inclusif) ne doit PLUS
+ * servir pour le spawn de l'installeur de l'écosystème (npm/pnpm/yarn/
+ * composer/cargo) : voir `buildEcosystemSpawnEnv` ci-dessus et son
+ * commentaire pour le pourquoi. Réservé à git désormais — d'où le renommage.
  */
-function buildSpawnEnv(): NodeJS.ProcessEnv {
+function buildGitSpawnEnv(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (value === undefined) continue;
@@ -258,7 +315,7 @@ function buildSpawnEnv(): NodeJS.ProcessEnv {
 async function addWorktree(repoRoot: string, worktreeDir: string): Promise<void> {
   await execFileAsync("git", ["worktree", "add", "--detach", worktreeDir, "HEAD"], {
     cwd: repoRoot,
-    env: buildSpawnEnv(),
+    env: buildGitSpawnEnv(),
   });
 }
 
@@ -266,14 +323,14 @@ async function removeWorktree(repoRoot: string, worktreeDir: string): Promise<vo
   try {
     await execFileAsync("git", ["worktree", "remove", "--force", worktreeDir], {
       cwd: repoRoot,
-      env: buildSpawnEnv(),
+      env: buildGitSpawnEnv(),
     });
   } catch {
     // Best-effort fallback : le worktree n'est peut-être jamais devenu un
     // vrai worktree git (échec avant/pendant `git worktree add`) — on
     // s'assure quand même que rien ne reste sur disque.
     await rm(worktreeDir, { recursive: true, force: true }).catch(() => {});
-    await execFileAsync("git", ["worktree", "prune"], { cwd: repoRoot, env: buildSpawnEnv() }).catch(() => {});
+    await execFileAsync("git", ["worktree", "prune"], { cwd: repoRoot, env: buildGitSpawnEnv() }).catch(() => {});
   }
 }
 
@@ -332,7 +389,7 @@ export async function runRegeneration(params: RegenerationRunParams): Promise<Re
     try {
       const res = await execFileAsync(bin, args, {
         cwd: worktreeDir,
-        env: buildSpawnEnv(),
+        env: buildEcosystemSpawnEnv(),
         timeout: timeoutMs,
         encoding: "utf-8",
         maxBuffer: 32 * 1024 * 1024,

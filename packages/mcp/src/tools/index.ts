@@ -538,7 +538,9 @@ async function toolStatus(cwd: string, args: Record<string, unknown> = {}) {
   // `files` IS the repo's full conflicted set here (toolStatus never narrows
   // it), so it doubles as the `conflictedFiles` guard buildRegenerationReport
   // needs against the fix-round-1 "narrowed files ⇒ falsely clean" bug.
-  const regenerationPlans = wantsRegenerationReport ? buildRegenerationReport(resultsForReport, files) : undefined;
+  const regenerationPlans = wantsRegenerationReport
+    ? buildRegenerationReport(resultsForReport, files, cwd)
+    : undefined;
 
   return {
     content: [{
@@ -621,7 +623,7 @@ async function toolResolve(cwd: string, args: Record<string, unknown>) {
   // genuinely conflicted elsewhere in the repo. Always re-fetch the repo's
   // FULL conflicted set for that guard.
   const regenerationPlans = wantsRegenerationReport
-    ? buildRegenerationReport(resultsForReport, getConflictedFiles(cwd))
+    ? buildRegenerationReport(resultsForReport, getConflictedFiles(cwd), cwd)
     : undefined;
 
   return {
@@ -696,7 +698,7 @@ async function toolPreview(cwd: string, args: Record<string, unknown>) {
   // conflicted set here (no `files:` narrowing param on this tool), so it
   // doubles as the `conflictedFiles` guard (fix round 1).
   const regenerationPlans = wantsRegenerationReport
-    ? buildRegenerationReport(resultsForReport, files)
+    ? buildRegenerationReport(resultsForReport, files, cwd)
     : undefined;
 
   return previewResponse("merge", files.length, previews, 0, regenerationPlans);

@@ -28,7 +28,7 @@
 
 import { readFileSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { join } from "node:path";
+import { join, resolve as resolvePath } from "node:path";
 import {
   findEcosystem,
   buildRegenerationPlan,
@@ -120,10 +120,21 @@ export interface RegenerationReportEntry {
  * guarantee — actually applying it always goes through
  * `gitwand resolve --regenerate` (the CLI), which verifies the real working
  * tree before running anything.
+ *
+ * Final review Finding 2 — `cwd` is required so a sourceOfTruth that is
+ * neither conflicted (per `conflictedFiles`) NOR present here in `results`
+ * can be checked against the real filesystem before defaulting it to
+ * "clean". "Never conflicted" does NOT imply "clean" — it can just as well
+ * mean the file does not exist at all (e.g. `.yarnrc.yml` on a yarn-CLASSIC
+ * repo, which never had that file). Reporting such a file as "clean" made
+ * yarn-berry plans come back `runnable: true` for classic-yarn repos,
+ * directly contradicting the registry's own documented berry-marker guard
+ * (`registry.ts`).
  */
 export function buildRegenerationReport(
   results: Array<{ file: string; result: MergeResult }>,
   conflictedFiles: string[],
+  cwd: string,
 ): RegenerationReportEntry[] {
   const conflictedFileSet = new Set(conflictedFiles);
   const siblingFiles: RegenerationContext["siblingFiles"] = {};
@@ -151,12 +162,17 @@ export function buildRegenerationReport(
 
     for (const source of ecosystem.sourcesOfTruth) {
       if (source in siblingFiles) continue;
-      // Never conflicted anywhere in the repo ⇒ safe to treat as "clean".
-      // Conflicted in the repo but absent from THIS call's results (a
-      // narrowed `files:` param) ⇒ unknown to this call — leave it out of
-      // siblingFiles entirely, which `buildRegenerationPlan` itself already
-      // treats as "conflicted" (never silently runnable).
-      if (!conflictedFileSet.has(source)) siblingFiles[source] = { state: "clean" };
+      // Never conflicted anywhere in the repo AND actually present on disk
+      // ⇒ safe to treat as "clean". Conflicted in the repo but absent from
+      // THIS call's results (a narrowed `files:` param) ⇒ unknown to this
+      // call — leave it out of siblingFiles entirely, which
+      // `buildRegenerationPlan` itself already treats as "conflicted" (never
+      // silently runnable). Same for a source that's simply absent from disk
+      // (e.g. `.yarnrc.yml` on a yarn-classic repo) — "never conflicted"
+      // there means "never existed", not "clean".
+      if (!conflictedFileSet.has(source) && existsSync(resolvePath(cwd, source))) {
+        siblingFiles[source] = { state: "clean" };
+      }
     }
 
     const plan = buildRegenerationPlan(file, ecosystem, { siblingFiles });

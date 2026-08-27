@@ -44,9 +44,20 @@
  * historical merge here, this script points `repoRoot`'s HEAD at that merge's
  * first parent (the "ours"/target side — matching the v3.10 merge-context
  * convention used throughout the benchmark, see replay-conflicts.mjs) right
- * before invoking it, and restores the original HEAD when done. `repoRoot`
- * can be bare or non-bare — `git worktree add` and `update-ref` both work
- * against a bare repository.
+ * before invoking it, and restores the original HEAD when done.
+ *
+ * Final review Finding 5 — `<repo-path>` MUST be a bare repository. An
+ * earlier revision of this comment claimed "can be bare or non-bare", which
+ * was wrong: `git update-ref HEAD <sha>` follows the symref — on a non-bare
+ * repo with a branch checked out, it silently rewrites THAT branch's ref,
+ * not just a detached state. This script refuses to run against a non-bare
+ * repo (`git rev-parse --is-bare-repository`) before it ever moves HEAD.
+ * It also restores the operator's original HEAD from a `SIGINT`/`SIGTERM`
+ * handler, not just the happy-path tail of the script — a Ctrl-C mid-sweep
+ * (the natural way an operator aborts a real multi-minute install run)
+ * would otherwise leave HEAD reset to a historical commit while the
+ * index/worktree still hold newer state, an easy silent-loss trap for
+ * whatever the operator commits there next.
  *
  * Usage:
  *   node scripts/replay-regenerate.mjs <repo-path> [--max-merges N] \
@@ -98,6 +109,58 @@ function git(cmd, opts = {}) {
     ...opts,
   });
 }
+
+// ─── Finding 5 (final review) — bare-repo guard, before ANYTHING moves HEAD ─
+//
+// `git update-ref HEAD <sha>` follows the symref: on a non-bare repo with a
+// branch checked out, it silently rewrites that branch's ref, not merely a
+// detached-HEAD state. Refuse outright rather than risk a real branch.
+function isBareRepo() {
+  try {
+    return git(["rev-parse", "--is-bare-repository"]).trim() === "true";
+  } catch {
+    return false;
+  }
+}
+
+if (!isBareRepo()) {
+  console.error(
+    `refusing to run: "${repo}" is not a bare repository.\n` +
+      `This script moves HEAD (git update-ref HEAD <historical-sha>) to replay each\n` +
+      `candidate merge. On a non-bare repo with a branch checked out, that silently\n` +
+      `rewrites the checked-out branch's ref, not just a detached state — this could\n` +
+      `reset a real branch to a historical commit.\n` +
+      `Re-clone as bare (+blobless, pinned to the corpus SHA — see benchmark/run.mjs's\n` +
+      `prepare() for the exact recipe) and re-run against that clone instead.`,
+  );
+  process.exit(2);
+}
+
+// ─── Finding 5 (final review) — restore the operator's HEAD on Ctrl-C too ───
+//
+// Captured immediately (before stage 1/2 do any work) so a SIGINT/SIGTERM at
+// ANY point — including mid-sweep, the natural way an operator aborts a real
+// multi-minute install run — can always restore it, not just the happy-path
+// tail of the script.
+const originalHead = git(["rev-parse", "HEAD"]).trim();
+let exitingViaSignal = false;
+
+function restoreHeadAndExit(signal) {
+  if (exitingViaSignal) return; // a second signal while we're already cleaning up
+  exitingViaSignal = true;
+  try {
+    git(["update-ref", "HEAD", originalHead]);
+    console.error(`\n[replay-regenerate] ${signal} received — restored HEAD to ${originalHead.slice(0, 10)} before exiting.`);
+  } catch (err) {
+    console.error(
+      `\n[replay-regenerate] ${signal} received — FAILED to restore HEAD to ${originalHead.slice(0, 10)}: ` +
+        `${err instanceof Error ? err.message : String(err)}. Fix "${repo}"'s HEAD manually before reusing this clone.`,
+    );
+  }
+  process.exit(130);
+}
+process.on("SIGINT", () => restoreHeadAndExit("SIGINT"));
+process.on("SIGTERM", () => restoreHeadAndExit("SIGTERM"));
 
 let mergeTreeErrors = 0;
 
@@ -196,8 +259,8 @@ for (const m of merges) {
 }
 
 // ─── stage 2: expensive real regeneration, bounded per ecosystem ───────────
-
-const originalHead = git(["rev-parse", "HEAD"]).trim();
+// (`originalHead` was already captured above, before stage 1, so the
+// SIGINT/SIGTERM handler can restore it even if interrupted during stage 1.)
 
 const perEcosystem = {};
 
