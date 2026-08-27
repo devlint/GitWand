@@ -254,6 +254,19 @@ export async function cmdResolve(
   if (regenerateEnabled) {
     const repoRoot = findGitRoot();
     if (repoRoot !== null) {
+      // Fix round 1 (Important #1) — `outcomes` ne couvre QUE les fichiers
+      // que git a signalés en conflit (`getConflictedFiles()` /
+      // `git diff --diff-filter=U`). Une source de vérité qui a fusionné
+      // proprement (ex: `package.json` intact pendant que `package-lock.json`
+      // diverge) n'apparaît JAMAIS dans `outcomes` — et `RegenerationContext.
+      // siblingFiles` documente pourtant la clé comme « chaque AUTRE fichier
+      // de ce merge », pas « chaque autre fichier CONFLICTÉ ». Ne pas la
+      // couvrir revient à la traiter comme "conflicted" par défaut dans
+      // `buildRegenerationPlan` (absente de la map ⇒ conflicted) — ce qui
+      // rend `runnable` inatteignable pour le cas le plus courant (lockfile
+      // seul en conflit) et rend yarn-berry totalement injoignable (son
+      // marqueur `.yarnrc.yml` n'est quasiment jamais lui-même conflicté).
+      const conflictedFileSet = new Set(outcomes.map((o) => o.file));
       const siblingFiles: RegenerationContext["siblingFiles"] = {};
       for (const outcome of outcomes) {
         if (outcome.result === null) continue;
@@ -266,6 +279,21 @@ export async function cmdResolve(
                 ? "resolved"
                 : "conflicted",
         };
+      }
+      // Pré-seed chaque source de vérité des écosystèmes candidats qui n'a
+      // JAMAIS été signalée en conflit par git : par construction, "jamais
+      // vue en conflit" = "clean", exactement le signal attendu par le type.
+      for (const outcome of outcomes) {
+        if (outcome.result === null) continue;
+        const hasRegenCandidate = outcome.result.resolutions.some((res) => res.regenerationPlan !== undefined);
+        if (!hasRegenCandidate) continue;
+        const ecosystem = findEcosystem(outcome.file);
+        if (!ecosystem) continue;
+        for (const sourcePath of ecosystem.sourcesOfTruth) {
+          if (!conflictedFileSet.has(sourcePath) && !(sourcePath in siblingFiles)) {
+            siblingFiles[sourcePath] = { state: "clean" };
+          }
+        }
       }
 
       for (const outcome of outcomes) {
@@ -286,11 +314,25 @@ export async function cmdResolve(
         let sourcesReady = true;
         for (const source of plan.sources) {
           const siblingOutcome = outcomes.find((o) => o.file === source.path);
-          if (!siblingOutcome?.result || siblingOutcome.result.mergedContent === null) {
-            sourcesReady = false;
-            break;
+          if (siblingOutcome?.result?.mergedContent != null) {
+            resolvedSources.push({ path: source.path, content: siblingOutcome.result.mergedContent });
+            continue;
           }
-          resolvedSources.push({ path: source.path, content: siblingOutcome.result.mergedContent });
+          if (!siblingOutcome) {
+            // Jamais vu par la pass 1 ⇒ jamais conflicté ⇒ son contenu actuel
+            // sur disque EST déjà le contenu final (rien à fusionner) : on le
+            // lit directement plutôt que de le rechercher dans `outcomes`.
+            try {
+              const diskContent = await readFile(resolvePath(source.path), "utf-8");
+              resolvedSources.push({ path: source.path, content: diskContent });
+              continue;
+            } catch {
+              // Fichier introuvable — défensif, ne devrait pas arriver si
+              // `state === "clean"` a été dérivé de "jamais en conflit".
+            }
+          }
+          sourcesReady = false;
+          break;
         }
         if (!sourcesReady) continue; // défensif : `plan.runnable` aurait dû le garantir
 

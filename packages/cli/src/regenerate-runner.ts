@@ -52,17 +52,65 @@ const NETWORK_PROBE_HOSTS: Partial<Record<RegenEcosystem["id"], string>> = {
 const OFFLINE_PROBE_TIMEOUT_MS = 2_000;
 
 /**
- * Motifs de noms de variables d'environnement considérées comme sensibles.
- * Volontairement délimité par des frontières `_`/début/fin de nom — une
- * regex `key`/`auth` nue matche aussi des variables de PLOMBERIE git tout à
- * fait légitimes (`GIT_CONFIG_KEY_0`, `GIT_CONFIG_COUNT`…, injectées par
- * certains environnements CI/sandbox pour porter `safe.directory`) et les
- * retirer casse `git worktree add` (`GIT_CONFIG_COUNT` sans son `KEY_N`
- * correspondant → "fatal: unable to parse command-line config"). On ne
- * strippe donc que les segments de nom qui ressemblent vraiment à un secret.
+ * Fix round 1 (Important #2) — AGENTS.md : « Strip environment variables
+ * that carry secrets… Pass only the specific env vars the child process
+ * needs. » C'est la description d'une ALLOWLIST, pas d'une denylist — une
+ * denylist par motif de nom a toujours des trous (`*_PRIVATE_KEY`,
+ * `DATABASE_URL` avec un mot de passe embarqué, tout secret dont le nom ne
+ * matche aucun des motifs prévus…). On liste donc explicitement ce dont
+ * git/npm/pnpm/yarn/composer/cargo ont besoin pour tourner, plutôt que ce
+ * qu'on essaie de deviner comme "sensible".
+ *
+ * `GIT_*` est inclus en bloc (préfixe) : c'est de la plomberie git, jamais
+ * un secret, et le retirer casse `git worktree add` lui-même (régression
+ * découverte en test : un environnement qui injecte `safe.directory` via
+ * `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_N`/`GIT_CONFIG_VALUE_N` échoue si l'un
+ * des trois est retiré sans les deux autres — "fatal: unable to parse
+ * command-line config").
  */
-const SECRET_ENV_PATTERN =
-  /(?:^|_)(?:API_?KEYS?|ACCESS_KEYS?|SECRET_KEYS?|SECRETS?|TOKENS?|PASSWORD|PASSWD|CREDENTIALS?)(?:_|$)/i;
+const ENV_ALLOWLIST_EXACT = new Set([
+  // POSIX — nécessaires pour localiser les binaires, le HOME (~/.npmrc,
+  // ~/.cargo, ~/.composer…) et un shell/locale cohérents.
+  "PATH",
+  "HOME",
+  "TMPDIR",
+  "TMP",
+  "TEMP",
+  "LANG",
+  "LC_ALL",
+  "LC_CTYPE",
+  "USER",
+  "LOGNAME",
+  "SHELL",
+  // Windows — équivalents, seulement transmis s'ils sont effectivement définis.
+  "SystemRoot",
+  "SystemDrive",
+  "windir",
+  "ComSpec",
+  "PATHEXT",
+  "APPDATA",
+  "LOCALAPPDATA",
+  "ProgramData",
+  "ProgramFiles",
+  "ProgramFiles(x86)",
+  "ProgramW6432",
+  "ALLUSERSPROFILE",
+  "USERPROFILE",
+  "HOMEDRIVE",
+  "HOMEPATH",
+  "NUMBER_OF_PROCESSORS",
+  // Emplacements toolchain non-standard — n'ont d'effet que si l'utilisateur
+  // les a lui-même définis (rustup/cargo/pnpm/composer hors XDG par défaut).
+  "CARGO_HOME",
+  "RUSTUP_HOME",
+  "PNPM_HOME",
+  "COMPOSER_HOME",
+  "COMPOSER_CACHE_DIR",
+  "npm_config_cache",
+]);
+
+/** Préfixes de noms de variables entièrement whitelistés (plomberie git). */
+const ENV_ALLOWLIST_PREFIXES = ["GIT_"];
 
 export type RegenerationOutcomeKind =
   | "success"
@@ -188,17 +236,20 @@ export function validateRegeneratedContent(
 }
 
 /**
- * Clone `process.env` en retirant toute variable dont le NOM ressemble à un
- * secret (token/clé/mot de passe/identifiant…) — l'outillage régénéré
- * (npm/pnpm/yarn/composer/cargo) n'a besoin de rien de tel pour un
- * `install --lockfile-only` script-suppressed ; ne jamais transmettre plus
- * que le strict nécessaire à un process spawné (règle AGENTS.md).
+ * Construit l'environnement des process spawnés (git worktree + installeur)
+ * à partir d'une ALLOWLIST explicite (`ENV_ALLOWLIST_EXACT`/`_PREFIXES`), pas
+ * d'une denylist de motifs "sensibles" — voir le commentaire de l'allowlist
+ * pour le pourquoi. Rien d'autre du `process.env` de l'agent n'est transmis :
+ * aucun token/clé/identifiant ne peut fuiter par un nom de variable qu'une
+ * denylist aurait simplement oublié de couvrir.
  */
 function buildSpawnEnv(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (value === undefined) continue;
-    if (SECRET_ENV_PATTERN.test(key)) continue;
+    const allowed =
+      ENV_ALLOWLIST_EXACT.has(key) || ENV_ALLOWLIST_PREFIXES.some((prefix) => key.startsWith(prefix));
+    if (!allowed) continue;
     env[key] = value;
   }
   return env;
