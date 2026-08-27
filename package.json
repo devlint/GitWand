@@ -13,10 +13,13 @@
   "scripts": {
     "build": "pnpm -r run build",
     "test": "pnpm -r run test",
+    "test:regenerate-compare": "node --test scripts/lib/regenerate-compare.test.mjs",
     "clean": "pnpm -r run clean",
     "postinstall": "node scripts/fix-spawn-helper.mjs"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.11.4"
+    "@tauri-apps/cli": "^2.11.4",
+    "smol-toml": "^1.8.0",
+    "yaml": "^2.9.0"
   }
 }

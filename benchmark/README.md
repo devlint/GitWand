@@ -284,6 +284,149 @@ evidence floors. The verdict stands, and sharpens: the layer will prove itself
 either on repos with *dense* lockfile/changelog conflict histories, or once
 pathPolicies graduate from report-only to applied (lot F v2).
 
+## Regenerate-tier replay (accuracy lot D, task 4)
+
+The agreement metric above (`run.mjs`/`replay-conflicts.mjs`) replays merges with
+`git merge-tree --write-tree`, which never touches a working tree — it can score
+whether a *textual* merge would match the human's, but it cannot score
+regeneration, because regeneration is "resolve `package.json`/`composer.json`,
+then re-run the ecosystem's installer and take *its* output as the answer".
+That needs a real checkout and a real `npm install`/`composer update`/`yarn
+install` invocation. `scripts/replay-regenerate.mjs` is that harness:
+
+1. **Cheap stage** — same `merge-tree --write-tree` (diff3) sweep as
+   `replay-conflicts.mjs`, over the already-cloned corpus repo, to find
+   candidate merges: ones whose conflict set includes a lockfile from the v1
+   registry (`packages/core/src/regenerate/registry.ts` — npm, pnpm,
+   yarn-berry, composer, cargo).
+2. **Expensive stage**, bounded to `--max-real` merges per ecosystem (the
+   plan's own ceiling: ≤ 20) — for each candidate: settle the ecosystem's
+   `sourcesOfTruth` from the merge-tree result (clean, or resolved via
+   `@gitwand/core`'s `resolve()`; a still-conflicted source makes the plan
+   non-runnable, exactly as `buildRegenerationPlan` decides for the real
+   CLI), then run the **actual production executor** —
+   `runRegeneration()` from `packages/cli/src/regenerate-runner.ts` — in a
+   disposable `git worktree`, and structurally compare the regenerated
+   lockfile against the one the team actually committed
+   (`scripts/lib/regenerate-compare.mjs`).
+
+Reusing `runRegeneration` (rather than reimplementing the executor for the
+harness) means this measures the exact code path the CLI ships, not a stand-in.
+
+### Structural comparison
+
+Byte-exact comparison almost never holds — dependency resolvers vary resolved
+URLs, integrity hashes and key ordering run-to-run even with unchanged inputs.
+`regenerate-compare.mjs` extracts the `name@version` identity set from each of
+the five registry lockfile formats (`packages`/`dependencies` for npm,
+`packages`/`packages-dev` for composer, the `packages` map keys for pnpm, the
+locator blocks for yarn-berry, `[[package]]` tables for cargo) and compares
+those sets — ignoring hashes, resolved URLs and ordering by construction. If
+format-aware parsing fails (corrupt output, an unexpected variant),
+it falls back to a text compare via `stripVolatileValues`
+(`@gitwand/core`, exported from `packages/core/src/resolver/generated-detection.ts`
+for this purpose) rather than crashing the run. Both paths are covered by
+fixture tests — `node --test scripts/lib/regenerate-compare.test.mjs` (also
+`pnpm run test:regenerate-compare` from the repo root) — fast, no network, no
+real installs: hand-built lockfile pairs that are identical-modulo-volatile-values
+(must match) and pairs with a genuinely different dependency graph (must not).
+
+### Running it
+
+```bash
+pnpm --filter @gitwand/core build   # replay imports the built engine
+pnpm --filter @gitwand/cli build    # replay reuses the real runRegeneration() executor
+node scripts/replay-regenerate.mjs <repo-path> \
+  [--max-merges N] [--max-real N] [--ecosystem npm,composer,...] [--timeout-ms N] [--json]
+```
+
+`<repo-path>` must already be a local clone with the target commit reachable
+(bare + blobless + pinned, exactly like `benchmark/run.mjs`'s `prepare()` — this
+script does not clone for you, same separation of concerns as
+`replay-conflicts.mjs`). Requires the ecosystem's own toolchain in `PATH`
+(`npm`/`pnpm`/`yarn`/`composer`/`cargo`) and network access to the relevant
+package registry; a missing toolchain or offline registry is reported as a
+graceful per-candidate skip, not a crash.
+
+### Why this lives outside the CI gate
+
+Same reasoning as `replay-conflicts.mjs`/`run.mjs` being operator-run tools:
+this script needs the corpus repos already cloned, needs real network access to
+package registries, spawns real installers with real wall-clock timeouts, and a
+dependency resolver's output is not byte-for-byte deterministic run to run —
+none of that belongs in a required CI check. `scripts/replay-regenerate.mjs`
+is run manually/in the container, same as its siblings.
+
+### Pilot run (2026-08-27) — SMALL SAMPLE, read the caveat before the numbers
+
+Per the task-4 plan, a full ≤ 20-merges-per-ecosystem sweep was explicitly
+**not** run — this is a bounded pilot (≤ 5 real attempts per ecosystem) meant
+to decide whether a full run and the desktop surface (task 5) are worth
+building at all. Both named corpus v2 repos (`benchmark/corpus.json`, cloned
+bare+blobless, pinned to their corpus SHA, same recipe as `run.mjs`'s
+`prepare()`) were used, with one correction and one hard blocker discovered
+along the way:
+
+- **`laravel/framework` (composer) — INFEASIBLE, not just slow.** `git log
+  --all -- composer.lock` returns **zero commits, ever**, in the entire
+  history. `laravel/framework` is a Composer *library* package, and library
+  packages deliberately do not commit a lockfile (only applications do) — this
+  is architectural, not an environment or toolchain problem. The same check
+  against `symfony/symfony` (the corpus's other PHP repo) confirms it has no
+  `composer.lock` either. **Corpus v2 currently has no repository that can
+  measure the composer leg of this gate at all** — a future re-pin needs an
+  application-shaped PHP repo (the way `prettier/prettier`/`vuejs/core` are
+  application-shaped for npm-family ecosystems).
+- **`prettier/prettier` — the brief's "npm ecosystem" label was wrong.**
+  `git ls-tree` shows no `package-lock.json` anywhere in the repo, ever; the
+  repo has a root `.yarnrc.yml` with `yarnPath: .yarn/releases/yarn-4.18.0.cjs`
+  and a root `yarn.lock` — it is a **yarn-berry** repo. The pilot used the
+  correctly-identified ecosystem for the same named repo rather than
+  fabricating an npm measurement that has no basis in this repo's history.
+  (Confirmed the delegation works in this environment: only yarn classic
+  1.22.x was installed via `npm install -g yarn`, and running `yarn
+  --version` inside a checkout of the repo correctly reports `4.18.0` —
+  yarn's `yarnPath` respawn works even from a classic binary.)
+
+Result, `prettier/prettier`, yarn-berry, 237 merges scanned, `--max-real 5`:
+
+| Metric | Value |
+|---|---:|
+| Candidate merges found (conflicting `yarn.lock`) | 85 |
+| Attempted (the pilot's own cap) | 5 |
+| Runnable plans (source resolvable) | 3 |
+| Ran successfully (real `yarn install --mode=update-lockfile`, no toolchain/timeout/spawn failure) | 3 |
+| Comparable (regenerated + actual committed content both available) | 3 |
+| Structurally matched | 2 |
+| **Agreement rate** | **66.7 % (2/3)** |
+
+The two non-runnable candidates declined because `@gitwand/core`'s `resolve()`
+could not fully settle `package.json` on its own (genuine overlapping edits,
+correctly not auto-resolved) — exactly the behaviour the real CLI would show
+for those same two merges.
+
+### The gate verdict
+
+**n = 3.** That is not a corpus, it is barely a sample, and it is the honest
+result of following Ruling P-9's bound (≤ 5 real attempts per ecosystem) against
+a repo where two of five candidates were correctly declined before reaching
+comparison. The measured rate, 66.7 %, is **below the ≥ 80 % target**, and one
+of the two named corpus repos (`laravel/framework`) could not be measured on
+the composer leg **at all** — not "below target", but no data.
+
+Per the plan's own instruction for this outcome: **keep CLI opt-in only**
+(already true — `--regenerate`/`.gitwandrc` `regenerate: true` already gate
+every regeneration behind explicit consent, since tasks 1–3), **document
+findings, stop here.** The desktop surface (task 5) and any default-on
+regeneration behaviour are **not** justified by this evidence. This is a
+pilot-scale, single-ecosystem, n = 3 result — it does not prove regeneration is
+unreliable at 66.7 % either; it proves the question isn't answered yet. Before
+revisiting: (a) re-pin the corpus with at least one application-shaped PHP repo
+so the composer leg is measurable, (b) run the plan's full ≤ 20-merges-per-ecosystem
+sweep across npm, pnpm, yarn-berry, composer and cargo, and (c) characterise
+the one observed mismatch (which package(s) diverged, and why) rather than
+treating a single data point as noise.
+
 ## Results
 
 `results/` holds one JSON file per measured GitWand version, plus the corpus pin

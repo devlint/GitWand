@@ -37,7 +37,7 @@ export {
   type ConventionObservation,
   type RepoConventions,
 } from "./conventions/types.js";
-export { isGeneratedFile } from "./resolver/generated-detection.js";
+export { isGeneratedFile, stripVolatileValues } from "./resolver/generated-detection.js";
 export { isChangelogFile } from "./resolver/validation.js";
 
 // accuracy lot D — Regenerate tier: core emits a plan, never executes it
