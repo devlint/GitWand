@@ -135,6 +135,27 @@ function boostFormatValidated(hunk: ConflictHunk, resolverUsed: string): Conflic
   return { ...hunk, confidence };
 }
 
+/**
+ * accuracy lot D — Si `filePath` matche un écosystème connu du registre
+ * (lockfiles npm/pnpm/yarn-berry/composer/cargo), calcule le plan de
+ * régénération et ajoute l'indice « --regenerate » à la raison de déclin.
+ * Sinon, retourne la raison telle quelle sans plan. Centralisé ici : les
+ * trois sites de déclin d'un fichier généré (generatedGate, seuil de
+ * confiance, `assembleResolution` case "generated_file") appellent ce même
+ * helper — `assembleResolution` reste un simple switch lignes-ou-null, il
+ * n'a pas connaissance du registre de régénération.
+ */
+function attachRegenerationPlan(
+  filePath: string,
+  options: Required<GitWandOptions>,
+  reason: string,
+): { reason: string; regenerationPlan?: RegenerationPlan } {
+  const ecosystem = findEcosystem(filePath);
+  if (!ecosystem) return { reason };
+  const regenerationPlan = buildRegenerationPlan(filePath, ecosystem, options.regenerationContext);
+  return { reason: `${reason} Ou relance avec --regenerate.`, regenerationPlan };
+}
+
 function resolveHunk(
   hunk: ConflictHunk,
   filePath: string,
@@ -176,17 +197,12 @@ function resolveHunk(
     // npm/pnpm/yarn-berry/composer/cargo), on émet un plan de régénération en
     // plus du déclin : le moteur ne l'exécute jamais, il indique juste ce qui
     // le rendrait sûr (sources de vérité propres). L'appelant (CLI) décide.
-    const ecosystem = findEcosystem(filePath);
-    const regenerationPlan = ecosystem
-      ? buildRegenerationPlan(filePath, ecosystem, options.regenerationContext)
-      : undefined;
-    const regenerateHint = ecosystem ? " Ou relance avec --regenerate." : "";
-    return {
-      hunk,
-      lines: null,
-      reason: `Fichier auto-généré (${genInfo.label}) — ne se fusionne pas, se régénère. Résous le fichier source puis relance l'outil qui produit celui-ci (install/build). Auto-résolution disponible via resolveGeneratedFiles: true.${regenerateHint}`,
-      regenerationPlan,
-    };
+    const { reason, regenerationPlan } = attachRegenerationPlan(
+      filePath,
+      options,
+      `Fichier auto-généré (${genInfo.label}) — ne se fusionne pas, se régénère. Résous le fichier source puis relance l'outil qui produit celui-ci (install/build). Auto-résolution disponible via resolveGeneratedFiles: true.`,
+    );
+    return { hunk, lines: null, reason, regenerationPlan };
   }
 
   // Phase 7.3 — Dispatch format-aware. accuracy lot 1 : plus de bypass silencieux —
@@ -235,14 +251,32 @@ function resolveHunk(
 
   // Vérifier le niveau de confiance minimum
   if (CONFIDENCE_ORDER[hunk.confidence.label] < CONFIDENCE_ORDER[effectiveMinConfidence]) {
-    return {
-      hunk,
-      lines: null,
-      reason: `Confiance ${hunk.confidence.label} (score: ${hunk.confidence.score}) insuffisante (minimum requis : ${effectiveMinConfidence}, politique : ${effectivePolicy}).${dispatchNote ? ` [${dispatchNote}]` : ""}`,
-    };
+    const baseReason = `Confiance ${hunk.confidence.label} (score: ${hunk.confidence.score}) insuffisante (minimum requis : ${effectiveMinConfidence}, politique : ${effectivePolicy}).${dispatchNote ? ` [${dispatchNote}]` : ""}`;
+    // accuracy lot D — cas rare : un appelant a poussé minConfidence au-dessus
+    // de "high" (le score fixe de generated_file, voir reclassifyIfGenerated),
+    // ce qui fait échouer ce hunk générateur au seuil au lieu du generatedGate.
+    if (genInfo.generated && hunk.type === "generated_file") {
+      const { reason, regenerationPlan } = attachRegenerationPlan(filePath, options, baseReason);
+      return { hunk, lines: null, reason, regenerationPlan };
+    }
+    return { hunk, lines: null, reason: baseReason };
   }
 
   const assembled = assembleResolution(hunk, options, effectivePolicy, policyCfg);
+
+  // accuracy lot D — la majorité des lockfiles réellement en conflit (chevauchement
+  // sémantique, pas un pattern "safe") sont reclassifiés `generated_file` par
+  // `reclassifyIfGenerated` AVANT `resolveHunk` : le generatedGate ci-dessus ne les
+  // voit donc jamais (il exclut explicitement `hunk.type === "generated_file"`). Le
+  // déclin arrive ici, dans `assembleResolution`'s case "generated_file" —
+  // `assembled.lines === null` sauf opt-in `resolveGeneratedFiles: true` (auquel cas
+  // ce chemin prend "accepter theirs" et ne décline jamais). C'est le cas majoritaire
+  // visé par le spec finding #1 (0 % d'accord sur generated_file).
+  if (genInfo.generated && hunk.type === "generated_file" && assembled.lines === null) {
+    const { reason, regenerationPlan } = attachRegenerationPlan(filePath, options, assembled.reason);
+    return { hunk, lines: null, reason, regenerationPlan };
+  }
+
   return { hunk, ...assembled };
 }
 
