@@ -37,6 +37,8 @@ export const DEFAULT_OPTIONS: Required<GitWandOptions> = {
   resolveGeneratedFiles: false,
   // accuracy lot C — contexte de merge inconnu par défaut ; fourni par les appelants
   mergeContext: null,
+  // accuracy lot D — pas de contexte de régénération par défaut ; fourni par les appelants
+  regenerationContext: null,
   // accuracy lot F — pas de conventions dérivées par défaut
   conventions: null,
   // v2.2 — profils de format actifs par défaut

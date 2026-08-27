@@ -414,6 +414,13 @@ export interface HunkResolution {
   autoResolved: boolean;
   /** Raison lisible de la résolution (ou du refus de résolution) */
   resolutionReason: string;
+  /**
+   * accuracy lot D — Présent uniquement quand le fichier a été décliné parce
+   * qu'auto-généré ET que son chemin matche un écosystème du registre
+   * `regenerate/registry.ts`. Absent quand `resolveGeneratedFiles: true`
+   * (l'opt-in textuel gagne, la résolution n'est alors jamais déclinée).
+   */
+  regenerationPlan?: import("./regenerate/plan.js").RegenerationPlan;
 }
 
 // ─── Phase 7.2 — Validation post-merge ───────────────────
@@ -524,6 +531,20 @@ export interface MergeContext {
   theirsRef?: string;
 }
 
+/**
+ * accuracy lot D — État des autres fichiers de ce merge, tel que connu par
+ * l'appelant. Un fichier régénérable (ex: `package-lock.json`) dépend d'une
+ * ou plusieurs "sources de vérité" (ex: `package.json`) ; le moteur ne peut
+ * pas voir ces fichiers-là lui-même (il reçoit le contenu conflictuel d'UN
+ * seul fichier à la fois et doit rester sans accès filesystem), donc
+ * l'appelant (CLI aujourd'hui, ayant déjà traité les autres fichiers du
+ * merge) le lui fournit explicitement.
+ */
+export interface RegenerationContext {
+  /** Clé = chemin repo-relative de CHAQUE AUTRE fichier de ce merge. */
+  siblingFiles: Record<string, { state: "clean" | "resolved" | "conflicted"; confidence?: number }>;
+}
+
 export interface GitWandOptions {
   /** Résoudre les conflits whitespace-only (défaut: true) */
   resolveWhitespace?: boolean;
@@ -577,6 +598,13 @@ export interface GitWandOptions {
    * cible gagne. Sans lui, ces cas sont proposés au lieu d'être appliqués.
    */
   mergeContext?: MergeContext | null;
+  /**
+   * accuracy lot D — État des autres fichiers de ce merge (source de vérité
+   * d'un fichier régénérable, ex: package.json pour package-lock.json).
+   * Fourni par l'appelant (CLI aujourd'hui) qui a déjà résolu les autres
+   * fichiers du merge ; le moteur ne touche jamais au filesystem lui-même.
+   */
+  regenerationContext?: RegenerationContext | null;
   /**
    * accuracy lot F — Conventions du dépôt, MESURÉES sur son propre historique
    * de merges (voir `deriveConventions`). Précédence stricte : une option

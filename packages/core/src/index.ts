@@ -39,6 +39,10 @@ export {
 } from "./conventions/types.js";
 export { isGeneratedFile } from "./resolver/generated-detection.js";
 export { isChangelogFile } from "./resolver/validation.js";
+
+// accuracy lot D — Regenerate tier: core emits a plan, never executes it
+export { findEcosystem, REGEN_ECOSYSTEMS, type RegenEcosystem } from "./regenerate/registry.js";
+export { buildRegenerationPlan, type RegenerationPlan } from "./regenerate/plan.js";
 export { mergeNonOverlapping, computeDiff, lcs } from "./diff.js";
 
 // v2.1 — nouveaux backends diff exposés
@@ -118,6 +122,8 @@ export type {
   HunkResolution,
   GitWandOptions,
   MergeContext,
+  // accuracy lot D — Regenerate tier
+  RegenerationContext,
   // Phase 7.1
   DecisionTrace,
   TraceStep,

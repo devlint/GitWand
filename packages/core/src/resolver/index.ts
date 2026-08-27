@@ -37,6 +37,8 @@ import { EMPTY_VALIDATION, validateMergedContent } from "./validation.js";
 import { checkParseTreeValid, applyPostMergeRiskPenalty } from "./validate-parse-tree.js";
 import { runStrictValidation } from "./validate-strict.js";
 import { isGeneratedFile, reclassifyIfGenerated } from "./generated-detection.js";
+import { findEcosystem } from "../regenerate/registry.js";
+import { buildRegenerationPlan, type RegenerationPlan } from "../regenerate/plan.js";
 import { isChangelogFile } from "./validation.js";
 import {
   CONFIDENCE_ORDER,
@@ -138,7 +140,7 @@ function resolveHunk(
   filePath: string,
   options: Required<GitWandOptions>,
   genInfo: { generated: boolean; label: string },
-): { hunk: ConflictHunk; lines: string[] | null; reason: string } {
+): { hunk: ConflictHunk; lines: string[] | null; reason: string; regenerationPlan?: RegenerationPlan } {
   // explainOnly : ne pas appliquer de résolution, juste tracer
   if (options.explainOnly) {
     return {
@@ -170,10 +172,20 @@ function resolveHunk(
 
   const generatedGate = genInfo.generated && !options.resolveGeneratedFiles;
   if (generatedGate && hunk.type !== "generated_file" && !SAFE_TEXTUAL_ON_GENERATED.has(hunk.type)) {
+    // accuracy lot D — Si le chemin matche un écosystème connu (lockfiles
+    // npm/pnpm/yarn-berry/composer/cargo), on émet un plan de régénération en
+    // plus du déclin : le moteur ne l'exécute jamais, il indique juste ce qui
+    // le rendrait sûr (sources de vérité propres). L'appelant (CLI) décide.
+    const ecosystem = findEcosystem(filePath);
+    const regenerationPlan = ecosystem
+      ? buildRegenerationPlan(filePath, ecosystem, options.regenerationContext)
+      : undefined;
+    const regenerateHint = ecosystem ? " Ou relance avec --regenerate." : "";
     return {
       hunk,
       lines: null,
-      reason: `Fichier auto-généré (${genInfo.label}) — ne se fusionne pas, se régénère. Résous le fichier source puis relance l'outil qui produit celui-ci (install/build). Auto-résolution disponible via resolveGeneratedFiles: true.`,
+      reason: `Fichier auto-généré (${genInfo.label}) — ne se fusionne pas, se régénère. Résous le fichier source puis relance l'outil qui produit celui-ci (install/build). Auto-résolution disponible via resolveGeneratedFiles: true.${regenerateHint}`,
+      regenerationPlan,
     };
   }
 
@@ -293,7 +305,12 @@ export function resolve(
     // Si fichier auto-généré et hunk classifié "complex", reclassifier en "generated_file"
     hunk = reclassifyIfGenerated(hunk, genInfo);
 
-    const { hunk: effectiveHunk, lines: resolvedLines, reason: resolutionReason } = resolveHunk(hunk, filePath, options, genInfo);
+    const {
+      hunk: effectiveHunk,
+      lines: resolvedLines,
+      reason: resolutionReason,
+      regenerationPlan,
+    } = resolveHunk(hunk, filePath, options, genInfo);
     hunk = effectiveHunk;
     hunks.push(hunk);
 
@@ -314,7 +331,7 @@ export function resolve(
       }
     }
 
-    resolutions.push({ hunk, resolvedLines, autoResolved, resolutionReason: finalReason });
+    resolutions.push({ hunk, resolvedLines, autoResolved, resolutionReason: finalReason, regenerationPlan });
 
     if (autoResolved) {
       outputLines.push(...resolvedLines);
