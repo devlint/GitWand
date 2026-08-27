@@ -101,20 +101,31 @@ export interface RegenerationReportEntry {
  * Re-derives an accurate `RegenerationPlan` for every declined
  * `generated_file` resolution across `results` — each `{ file, result }` this
  * SAME tool call already computed. Pure reporting: reads nothing beyond what
- * `results` already carries, spawns nothing.
+ * `results`/`conflictedFiles` already carry, spawns nothing.
  *
- * A source-of-truth path never seen in conflict by THIS call is treated as
- * "clean" — the exact same convention the CLI's pass 2 uses for the common
- * case of a lockfile conflicting alone while its source merged cleanly (see
- * `resolve.ts`'s siblingFiles pre-seed comment). This is a best-effort
- * simplification appropriate for a reporting-only surface: `regenerate: true`
- * documents plan AVAILABILITY, never a guarantee — actually applying it
- * always goes through `gitwand resolve --regenerate` (the CLI), which
- * verifies the real working tree before running anything.
+ * `conflictedFiles` MUST be the repo's FULL conflicted-file set (e.g.
+ * `getConflictedFiles(cwd)` with no narrowing), not just the (possibly
+ * caller-narrowed) file list a tool call happened to process — this is the
+ * exact bug the CLI's Task 2 fix round already closed for `resolve.ts`
+ * (`resolve.ts:292/316`): a source-of-truth path absent from `results` is
+ * ONLY safe to default to "clean" when it is ALSO absent from the repo's
+ * full conflicted set. If it's absent from `results` (because a caller's
+ * `files:` param narrowed it out) but present in `conflictedFiles`, its real
+ * state is unknown to this call — it must NOT be reported as runnable.
+ * (Absent from `siblingFiles` entirely already means "conflicted" by
+ * `buildRegenerationPlan`'s own default — see `regenerate/plan.ts`.)
+ *
+ * This is a best-effort simplification appropriate for a reporting-only
+ * surface: `regenerate: true` documents plan AVAILABILITY, never a
+ * guarantee — actually applying it always goes through
+ * `gitwand resolve --regenerate` (the CLI), which verifies the real working
+ * tree before running anything.
  */
 export function buildRegenerationReport(
   results: Array<{ file: string; result: MergeResult }>,
+  conflictedFiles: string[],
 ): RegenerationReportEntry[] {
+  const conflictedFileSet = new Set(conflictedFiles);
   const siblingFiles: RegenerationContext["siblingFiles"] = {};
   for (const { file, result } of results) {
     siblingFiles[file] = {
@@ -139,7 +150,13 @@ export function buildRegenerationReport(
     if (!ecosystem) continue; // should not happen — pass 1 already implied a match
 
     for (const source of ecosystem.sourcesOfTruth) {
-      if (!(source in siblingFiles)) siblingFiles[source] = { state: "clean" };
+      if (source in siblingFiles) continue;
+      // Never conflicted anywhere in the repo ⇒ safe to treat as "clean".
+      // Conflicted in the repo but absent from THIS call's results (a
+      // narrowed `files:` param) ⇒ unknown to this call — leave it out of
+      // siblingFiles entirely, which `buildRegenerationPlan` itself already
+      // treats as "conflicted" (never silently runnable).
+      if (!conflictedFileSet.has(source)) siblingFiles[source] = { state: "clean" };
     }
 
     const plan = buildRegenerationPlan(file, ecosystem, { siblingFiles });

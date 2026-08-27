@@ -535,7 +535,10 @@ async function toolStatus(cwd: string, args: Record<string, unknown> = {}) {
   // how much is still recoverable deterministically before the model is invoked.
   const tierSummary = summarizeTiers(aggregateByType as Record<ConflictType, number>);
   // accuracy lot D (task 3, § 4) — reporting-only; never executes anything.
-  const regenerationPlans = wantsRegenerationReport ? buildRegenerationReport(resultsForReport) : undefined;
+  // `files` IS the repo's full conflicted set here (toolStatus never narrows
+  // it), so it doubles as the `conflictedFiles` guard buildRegenerationReport
+  // needs against the fix-round-1 "narrowed files ⇒ falsely clean" bug.
+  const regenerationPlans = wantsRegenerationReport ? buildRegenerationReport(resultsForReport, files) : undefined;
 
   return {
     content: [{
@@ -609,9 +612,17 @@ async function toolResolve(cwd: string, args: Record<string, unknown>) {
   const totalResolved = results.reduce((s: number, r: Record<string, unknown>) => s + ((r.autoResolved as number) ?? 0), 0);
   // v2.7 — "recoverable-before-model" tier summary, see summarizeTiers() in @gitwand/core.
   const tierSummary = summarizeTiers(aggregateByType as Record<ConflictType, number>);
-  // accuracy lot D (task 3, § 4) — reporting-only; never executes anything,
-  // regardless of `dryRun`.
-  const regenerationPlans = wantsRegenerationReport ? buildRegenerationReport(resultsForReport) : undefined;
+  // accuracy lot D (task 3, § 4 — fix round 1) — reporting-only; never
+  // executes anything, regardless of `dryRun`. `files` may be a
+  // caller-NARROWED subset (`args.files`), unlike `toolStatus`/the merge
+  // branch of `toolPreview` — so it must NOT be reused as the
+  // `conflictedFiles` guard: a source-of-truth path excluded from a narrowed
+  // `files:` list would otherwise be misreported as "clean" even when it's
+  // genuinely conflicted elsewhere in the repo. Always re-fetch the repo's
+  // FULL conflicted set for that guard.
+  const regenerationPlans = wantsRegenerationReport
+    ? buildRegenerationReport(resultsForReport, getConflictedFiles(cwd))
+    : undefined;
 
   return {
     content: [{
@@ -681,8 +692,12 @@ async function toolPreview(cwd: string, args: Record<string, unknown>) {
   // accuracy lot D (task 3, § 4) — reporting-only; this whole tool is already
   // side-effect-free ("Does NOT modify the working tree, index, or HEAD" per
   // its own tool description), so `regenerate: true` here changes nothing
-  // beyond what's included in the JSON response.
-  const regenerationPlans = wantsRegenerationReport ? buildRegenerationReport(resultsForReport) : undefined;
+  // beyond what's included in the JSON response. `files` IS the repo's full
+  // conflicted set here (no `files:` narrowing param on this tool), so it
+  // doubles as the `conflictedFiles` guard (fix round 1).
+  const regenerationPlans = wantsRegenerationReport
+    ? buildRegenerationReport(resultsForReport, files)
+    : undefined;
 
   return previewResponse("merge", files.length, previews, 0, regenerationPlans);
 }

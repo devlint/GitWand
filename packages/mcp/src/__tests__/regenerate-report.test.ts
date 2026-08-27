@@ -110,6 +110,39 @@ function buildConflictedLockRepo(): Repo {
   return repo
 }
 
+/**
+ * Repo where BOTH `package.json` and `package-lock.json` conflict (unlike
+ * `buildConflictedLockRepo`, whose `package.json` never conflicts) — needed
+ * to prove the fix-round-1 regression: a narrowed `files:` param that omits
+ * an actually-conflicted `package.json` must NOT make the reported plan
+ * look runnable.
+ */
+function buildConflictedLockAndManifestRepo(): Repo {
+  const repo = makeRepo()
+  const { cwd } = repo
+  writeFileSync(join(cwd, 'package.json'), '{"name":"e2e","version":"1.0.0"}\n', 'utf-8')
+  writeFileSync(join(cwd, LOCK), lockContent('base'), 'utf-8')
+  git(cwd, ['add', '-A'])
+  git(cwd, ['commit', '-m', 'init'])
+
+  git(cwd, ['checkout', '-b', 'feature'])
+  writeFileSync(join(cwd, 'package.json'), '{"name":"e2e","version":"1.1.0-feature"}\n', 'utf-8')
+  writeFileSync(join(cwd, LOCK), lockContent('feature'), 'utf-8')
+  git(cwd, ['commit', '-a', '-m', 'feature: bump version + lock'])
+
+  git(cwd, ['checkout', 'main'])
+  writeFileSync(join(cwd, 'package.json'), '{"name":"e2e","version":"1.1.0-main"}\n', 'utf-8')
+  writeFileSync(join(cwd, LOCK), lockContent('main'), 'utf-8')
+  git(cwd, ['commit', '-a', '-m', 'main: bump version + lock'])
+
+  try {
+    git(cwd, ['merge', 'feature'])
+  } catch {
+    // conflict expected on both files
+  }
+  return repo
+}
+
 /** Binaries the regenerate-tier registry would spawn — must NEVER appear in any execFile/execSync call made by these 3 MCP tools. */
 const REGEN_BINARIES = ['npm', 'pnpm', 'yarn', 'composer', 'cargo']
 
@@ -226,6 +259,48 @@ describe('MCP regenerate:true — reporting only, never executes (task 3)', () =
       cleanup()
     }
   })
+
+  it(
+    // Fix round 1 regression — mirrors Task 2's own CLI-side regression test
+    // for the same bug (`resolve.ts:292/316`). A caller-narrowed `files:`
+    // param must never make an actually-conflicted-elsewhere source of truth
+    // look "clean" just because THIS call didn't fetch it.
+    'gitwand_resolve_conflicts: a narrowed files: param excluding a conflicted package.json must NOT report runnable:true',
+    async () => {
+      const { cwd, cleanup } = buildConflictedLockAndManifestRepo()
+      try {
+        // Precondition: package.json really is conflicted repo-wide (not just
+        // package-lock.json) — confirms this test actually exercises the gap.
+        const conflicted = git(cwd, ['diff', '--name-only', '--diff-filter=U']).trim().split('\n').sort()
+        expect(conflicted).toEqual(['package-lock.json', 'package.json'].sort())
+
+        const worktreesBefore = worktreeCount(cwd)
+
+        // Narrowed on purpose: only package-lock.json, excluding the
+        // genuinely-conflicted package.json.
+        const result: ToolResult = await handleToolCall(
+          'gitwand_resolve_conflicts',
+          { files: [LOCK], dry_run: true, regenerate: true },
+          cwd,
+        )
+
+        expect(result.isError).toBeFalsy()
+        const parsed = JSON.parse(result.content[0].text)
+        const plan = parsed.regenerationPlans.find((p: { file: string }) => p.file === LOCK)
+        expect(plan).toBeDefined()
+        // The safety-critical assertion: package.json's real state (conflicted)
+        // is unknown to THIS narrowed call — the plan must NOT claim runnable.
+        expect(plan.runnable).toBe(false)
+        const source = plan.sources.find((s: { path: string }) => s.path === 'package.json')
+        expect(source?.state).toBe('conflicted')
+
+        assertNothingExecuted()
+        expect(worktreeCount(cwd)).toBe(worktreesBefore)
+      } finally {
+        cleanup()
+      }
+    },
+  )
 
   it('gitwand_preview_merge: rebase/cherry-pick operations never populate regenerationPlans (out of this task\'s scope)', async () => {
     const { cwd, cleanup } = buildConflictedLockRepo()
