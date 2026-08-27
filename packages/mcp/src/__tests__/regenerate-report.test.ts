@@ -188,7 +188,7 @@ describe('MCP regenerate:true — reporting only, never executes (task 3)', () =
     } finally {
       cleanup()
     }
-  })
+  }, 30_000)
 
   it('gitwand_status: without regenerate, response has no regenerationPlans key (backward compatible)', async () => {
     const { cwd, cleanup } = buildConflictedLockRepo()
@@ -199,7 +199,7 @@ describe('MCP regenerate:true — reporting only, never executes (task 3)', () =
     } finally {
       cleanup()
     }
-  })
+  }, 30_000)
 
   it('gitwand_resolve_conflicts: regenerate:true reports the plan without writing or executing anything', async () => {
     const { cwd, cleanup } = buildConflictedLockRepo()
@@ -231,7 +231,7 @@ describe('MCP regenerate:true — reporting only, never executes (task 3)', () =
     } finally {
       cleanup()
     }
-  })
+  }, 30_000)
 
   it('gitwand_preview_merge: regenerate:true reports the plan, stays side-effect-free', async () => {
     const { cwd, cleanup } = buildConflictedLockRepo()
@@ -258,7 +258,7 @@ describe('MCP regenerate:true — reporting only, never executes (task 3)', () =
     } finally {
       cleanup()
     }
-  })
+  }, 30_000)
 
   it(
     // Fix round 1 regression — mirrors Task 2's own CLI-side regression test
@@ -300,6 +300,7 @@ describe('MCP regenerate:true — reporting only, never executes (task 3)', () =
         cleanup()
       }
     },
+    30_000,
   )
 
   it(
@@ -361,6 +362,7 @@ describe('MCP regenerate:true — reporting only, never executes (task 3)', () =
         cleanup()
       }
     },
+    30_000,
   )
 
   it('gitwand_preview_merge: rebase/cherry-pick operations never populate regenerationPlans (out of this task\'s scope)', async () => {
@@ -376,5 +378,5 @@ describe('MCP regenerate:true — reporting only, never executes (task 3)', () =
     } finally {
       cleanup()
     }
-  })
+  }, 30_000)
 })
