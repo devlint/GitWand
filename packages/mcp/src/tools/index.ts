@@ -17,6 +17,16 @@ import { resolve as resolvePath } from "node:path";
 import { resolve, summarizeTiers, type MergeResult, type ConflictType } from "@gitwand/core";
 import { resolveHunkToolDefinition, handleResolveHunk } from "./resolve_hunk.js";
 import { detectMergeContext } from "../merge-context.js";
+import {
+  buildRegenerationReport,
+  loadGitwandrcResolveGeneratedFiles,
+  loadPersistedConventions,
+  type RegenerationReportEntry,
+} from "../regenerate-report.js";
+
+/** Shared description suffix for the `regenerate` param on all 3 tools that expose it — see task-3-brief.md § 4 scope ruling. */
+const REGENERATE_PARAM_DESCRIPTION =
+  "If true, report GitWand's regenerate-tier plan (lockfile ecosystem + whether it's currently runnable) for any declined generated file (e.g. package-lock.json), reusing the same file states this call already computed. REPORTING ONLY — this never executes anything (no process spawned, no worktree created, no file written beyond what this tool already writes without the flag). To actually apply a plan, run `gitwand resolve --regenerate` (the CLI). Default: false.";
 
 // ─── Tool definitions ──────────────────────────────────────
 
@@ -32,6 +42,10 @@ export function registerTools() {
           cwd: {
             type: "string",
             description: "Working directory (repo root). Defaults to server cwd.",
+          },
+          regenerate: {
+            type: "boolean",
+            description: REGENERATE_PARAM_DESCRIPTION,
           },
         },
       },
@@ -61,6 +75,10 @@ export function registerTools() {
             enum: ["prefer-ours", "prefer-theirs", "prefer-merge", "prefer-safety", "strict"],
             description: "Merge policy to use. Default: prefer-theirs.",
           },
+          regenerate: {
+            type: "boolean",
+            description: REGENERATE_PARAM_DESCRIPTION,
+          },
         },
       },
     },
@@ -87,6 +105,10 @@ export function registerTools() {
           commit: {
             type: "string",
             description: "Required when operation is 'cherry-pick': the commit to simulate cherry-picking onto HEAD.",
+          },
+          regenerate: {
+            type: "boolean",
+            description: `Only applies when operation is 'merge' (the default). ${REGENERATE_PARAM_DESCRIPTION}`,
           },
         },
       },
@@ -437,7 +459,7 @@ export async function handleToolCall(
 
   switch (name) {
     case "gitwand_status":
-      return toolStatus(cwd);
+      return toolStatus(cwd, args);
     case "gitwand_resolve_conflicts":
       return toolResolve(cwd, args);
     case "gitwand_preview_merge":
@@ -455,8 +477,9 @@ export async function handleToolCall(
   }
 }
 
-async function toolStatus(cwd: string) {
+async function toolStatus(cwd: string, args: Record<string, unknown> = {}) {
   const files = getConflictedFiles(cwd);
+  const wantsRegenerationReport = args.regenerate === true;
 
   if (files.length === 0) {
     return {
@@ -464,7 +487,16 @@ async function toolStatus(cwd: string) {
     };
   }
 
+  // accuracy lot F/D (task 3) — same measured-convention/.gitwandrc precedence
+  // the CLI applies (`resolveGeneratedFiles.ts` Bug A/B fix): explicit
+  // `.gitwandrc` beats a measured convention, which beats core's own default.
+  // MCP has no `--resolve-generated` flag equivalent on this read-only tool,
+  // so there is no higher-precedence "explicit call arg" tier here.
+  const conventions = loadPersistedConventions(cwd);
+  const resolveGeneratedFiles = loadGitwandrcResolveGeneratedFiles(cwd);
+
   const aggregateByType: Partial<Record<ConflictType, number>> = {};
+  const resultsForReport: Array<{ file: string; result: MergeResult }> = [];
   const conflicts = files.map((file) => {
     const filePath = resolvePath(cwd, file);
     try {
@@ -473,8 +505,13 @@ async function toolStatus(cwd: string) {
       // format-aware dispatch and the confidence gate, so every hunk comes back
       // unresolved and `stats.autoResolved` is always 0. This is a prediction on
       // in-memory content, nothing is written, so run the real resolution.
-      const result = resolve(content, file, { mergeContext: detectMergeContext(cwd) });
+      const result = resolve(content, file, {
+        mergeContext: detectMergeContext(cwd),
+        conventions,
+        resolveGeneratedFiles,
+      });
       addByType(aggregateByType, result.stats.byType);
+      resultsForReport.push({ file, result });
       return {
         path: file,
         totalConflicts: result.stats.totalConflicts,
@@ -497,6 +534,8 @@ async function toolStatus(cwd: string) {
   // v2.7 — "recoverable-before-model" : of the residual past the trivial passes,
   // how much is still recoverable deterministically before the model is invoked.
   const tierSummary = summarizeTiers(aggregateByType as Record<ConflictType, number>);
+  // accuracy lot D (task 3, § 4) — reporting-only; never executes anything.
+  const regenerationPlans = wantsRegenerationReport ? buildRegenerationReport(resultsForReport) : undefined;
 
   return {
     content: [{
@@ -508,6 +547,7 @@ async function toolStatus(cwd: string) {
         remaining: totalConflicts - totalResolvable,
         tierSummary,
         conflicts,
+        ...(regenerationPlans !== undefined ? { regenerationPlans } : {}),
       }, null, 2),
     }],
   };
@@ -517,6 +557,7 @@ async function toolResolve(cwd: string, args: Record<string, unknown>) {
   let files = (args.files as string[]) ?? [];
   const dryRun = (args.dry_run as boolean) ?? false;
   const policy = args.policy as string | undefined;
+  const wantsRegenerationReport = args.regenerate === true;
 
   if (files.length === 0) {
     files = getConflictedFiles(cwd);
@@ -528,7 +569,15 @@ async function toolResolve(cwd: string, args: Record<string, unknown>) {
     };
   }
 
+  // accuracy lot F/D (task 3) — same precedence as the CLI's Bug A/B fix:
+  // a measured `generatedFiles` convention only engages the textual "merge"
+  // path when there is no higher-precedence explicit opinion; `.gitwandrc`
+  // always wins over the convention.
+  const conventions = loadPersistedConventions(cwd);
+  const resolveGeneratedFiles = loadGitwandrcResolveGeneratedFiles(cwd);
+
   const aggregateByType: Partial<Record<ConflictType, number>> = {};
+  const resultsForReport: Array<{ file: string; result: MergeResult }> = [];
   const results = files.map((file) => {
     const filePath = resolvePath(cwd, file);
     try {
@@ -538,8 +587,11 @@ async function toolResolve(cwd: string, args: Record<string, unknown>) {
         // accuracy lot C — l'opération en cours rend déterministes les décisions qui en
         // dépendent (versions modifiées des deux côtés → la cible gagne).
         mergeContext: detectMergeContext(cwd),
+        conventions,
+        resolveGeneratedFiles,
       });
       addByType(aggregateByType, result.stats.byType);
+      resultsForReport.push({ file, result });
 
       // Write resolved content unless dry-run
       if (!dryRun && result.stats.autoResolved > 0) {
@@ -557,6 +609,9 @@ async function toolResolve(cwd: string, args: Record<string, unknown>) {
   const totalResolved = results.reduce((s: number, r: Record<string, unknown>) => s + ((r.autoResolved as number) ?? 0), 0);
   // v2.7 — "recoverable-before-model" tier summary, see summarizeTiers() in @gitwand/core.
   const tierSummary = summarizeTiers(aggregateByType as Record<ConflictType, number>);
+  // accuracy lot D (task 3, § 4) — reporting-only; never executes anything,
+  // regardless of `dryRun`.
+  const regenerationPlans = wantsRegenerationReport ? buildRegenerationReport(resultsForReport) : undefined;
 
   return {
     content: [{
@@ -572,6 +627,7 @@ async function toolResolve(cwd: string, args: Record<string, unknown>) {
           tierSummary,
         },
         files: results,
+        ...(regenerationPlans !== undefined ? { regenerationPlans } : {}),
       }, null, 2),
     }],
   };
@@ -589,6 +645,7 @@ async function toolPreview(cwd: string, args: Record<string, unknown>) {
 
   // Default: merge — analyze conflicts already present in the working tree.
   const files = getConflictedFiles(cwd);
+  const wantsRegenerationReport = args.regenerate === true;
 
   if (files.length === 0) {
     return {
@@ -596,6 +653,11 @@ async function toolPreview(cwd: string, args: Record<string, unknown>) {
     };
   }
 
+  // accuracy lot F/D (task 3) — same precedence as the CLI's Bug A/B fix.
+  const conventions = loadPersistedConventions(cwd);
+  const resolveGeneratedFiles = loadGitwandrcResolveGeneratedFiles(cwd);
+
+  const resultsForReport: Array<{ file: string; result: MergeResult }> = [];
   const previews = files.map((file) => {
     const filePath = resolvePath(cwd, file);
     try {
@@ -604,14 +666,25 @@ async function toolPreview(cwd: string, args: Record<string, unknown>) {
       // format-aware dispatch and the confidence gate, so every hunk comes back
       // unresolved and `stats.autoResolved` is always 0. This is a prediction on
       // in-memory content, nothing is written, so run the real resolution.
-      const result = resolve(content, file, { mergeContext: detectMergeContext(cwd) });
+      const result = resolve(content, file, {
+        mergeContext: detectMergeContext(cwd),
+        conventions,
+        resolveGeneratedFiles,
+      });
+      resultsForReport.push({ file, result });
       return serializeResult(file, result);
     } catch (err: any) {
       return { path: file, error: err.message };
     }
   });
 
-  return previewResponse("merge", files.length, previews);
+  // accuracy lot D (task 3, § 4) — reporting-only; this whole tool is already
+  // side-effect-free ("Does NOT modify the working tree, index, or HEAD" per
+  // its own tool description), so `regenerate: true` here changes nothing
+  // beyond what's included in the JSON response.
+  const regenerationPlans = wantsRegenerationReport ? buildRegenerationReport(resultsForReport) : undefined;
+
+  return previewResponse("merge", files.length, previews, 0, regenerationPlans);
 }
 
 /**
@@ -634,6 +707,10 @@ function previewResponse(
   fileCount: number,
   previews: Array<Record<string, unknown>>,
   addDeleteCount = 0,
+  // accuracy lot D (task 3, § 4) — only ever populated by the merge branch of
+  // `toolPreview` (the sole "real resolve() site" among the 3 preview
+  // operations, per the brief's scope ruling); `undefined` for rebase/cherry-pick.
+  regenerationPlans?: RegenerationReportEntry[],
 ) {
   const totalConflicts = previews.reduce((s: number, r) => s + ((r.totalConflicts as number) ?? 0), 0);
   const totalResolvable = previews.reduce((s: number, r) => s + ((r.autoResolved as number) ?? 0), 0);
@@ -676,6 +753,7 @@ function previewResponse(
             : 100,
         },
         files: previews,
+        ...(regenerationPlans !== undefined ? { regenerationPlans } : {}),
       }, null, 2),
     }],
   };

@@ -179,6 +179,33 @@ export function conventionsPath(cwd: string): string {
   return join(gitDir, "gitwand", "conventions.json");
 }
 
+/**
+ * Lit les conventions dérivées persistées (`.git/gitwand/conventions.json`)
+ * pour le dépôt à `cwd`, si elles existent. Tolérant — jamais de throw :
+ * hors d'un repo git, fichier absent, ou JSON invalide retournent `null`,
+ * exactement le "pas de conventions" que le moteur (`@gitwand/core`) attend
+ * par défaut sur `options.conventions`.
+ *
+ * Exporté (task 3 — accuracy lot D) pour être réutilisé par `cmdResolve`
+ * (Bug B fix : les conventions n'étaient jamais chargées dans `resolve()`) —
+ * cette même fonction alimente aussi `cmdConventions --show` ci-dessous, pour
+ * ne pas dupliquer une troisième fois la même lecture inline.
+ */
+export function loadPersistedConventions(cwd: string): RepoConventions | null {
+  let path: string;
+  try {
+    path = conventionsPath(cwd);
+  } catch {
+    return null;
+  }
+  if (!existsSync(path)) return null;
+  try {
+    return JSON.parse(readFileSync(path, "utf-8")) as RepoConventions;
+  } catch {
+    return null;
+  }
+}
+
 function writeAtomic(path: string, data: string): void {
   mkdirSync(dirname(path), { recursive: true });
   const tmp = `${path}.tmp`;
@@ -223,11 +250,11 @@ export async function cmdConventions(flags: Record<string, boolean | string>): P
   }
 
   if (flags.show === true) {
-    if (!existsSync(path)) {
+    const conv = loadPersistedConventions(cwd);
+    if (conv === null) {
       console.log(asJson ? "null" : `${c.dim}no derived conventions — run \`gitwand conventions\` to measure them${c.reset}`);
       return;
     }
-    const conv = JSON.parse(readFileSync(path, "utf-8")) as RepoConventions;
     if (asJson) console.log(JSON.stringify(conv, null, 2));
     else { printBanner(); printVerdicts(conv); }
     return;

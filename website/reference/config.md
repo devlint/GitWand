@@ -130,6 +130,74 @@ The CLI equivalent is `gitwand resolve --resolve-generated`. This is a
 repository convention, so it lives in `.gitwandrc` rather than in the app
 settings.
 
+### Regenerate tier
+
+Merging a lockfile textually is wrong in almost every real case — the
+committed version is a tool's output, not the union of two edits. Rather than
+guess, GitWand can instead resolve the *source* file (`package.json`,
+`composer.json`, `Cargo.toml`…) and re-run the ecosystem's own installer to
+regenerate the lockfile, then take that as the resolution.
+
+This never happens automatically. It requires explicit opt-in, per invocation
+or per repository:
+
+```bash
+gitwand resolve --regenerate
+```
+
+```json
+{
+  "regenerate": true
+}
+```
+
+When declined without the flag, `gitwand resolve` now suggests it by default
+whenever a lockfile ecosystem is recognized:
+
+```
+Some declined file(s) could be auto-resolved by regenerating their lockfile — re-run with --regenerate.
+```
+
+**What runs.** A small, deliberately narrow registry of ecosystems that each
+expose a lockfile-only, script-suppressed mode — never a full install:
+
+| Ecosystem | Command |
+|---|---|
+| npm | `npm install --package-lock-only --ignore-scripts` |
+| pnpm | `pnpm install --lockfile-only --ignore-scripts` |
+| Yarn (Berry only) | `yarn install --mode=update-lockfile` |
+| Composer | `composer update --lock --no-scripts --no-install` |
+| Cargo | `cargo generate-lockfile` |
+
+The command runs inside a disposable `git worktree` — never your real working
+tree — populated only with the already-resolved source files, under a
+wall-clock timeout (120s by default). The command and its duration are folded
+into the resolution reason; the full trace (binary, arguments, duration, exit
+code) is visible with `--verbose`. The script-suppression flags in the table
+above are registry constants; nothing you configure can remove them.
+
+**What never runs.** No full `install` (dependencies aren't actually
+downloaded beyond what resolving the lockfile requires), no lifecycle scripts
+(`postinstall` and friends), and no attempt at all when the ecosystem needs
+network access and the machine is offline — that case declines with the same
+interim message as always, never a partial or guessed lockfile. Any failure
+(missing toolchain, timeout, non-zero exit, invalid output) hands the conflict
+back untouched, with the failure detail appended to the reason.
+
+**Interaction with measured conventions.** The `gitwand conventions` CLI command
+can measure, from a repository's own merge history, whether its team actually
+regenerates or textually merges its generated files. A measured `"regenerate"`
+verdict is only ever a *hint* — the extra provenance text visible via
+`gitwand resolve --verbose` and the default summary offer above — it never
+runs the regenerate tier by itself. A measured `"merge"` verdict, by contrast,
+can flip the textual path on (equivalent to `resolveGeneratedFiles: true`) when
+nothing more specific overrides it. Precedence, most to least specific:
+
+1. `gitwand resolve --resolve-generated` / `--regenerate` (explicit, per invocation)
+2. `.gitwandrc` `resolveGeneratedFiles` / `regenerate` (explicit, per repository)
+3. A measured `generatedFiles` convention (`gitwand conventions`)
+4. The engine's own default — decline, with an actionable message
+
 ## Merge Context
 
 GitWand's engine accepts an optional **merge context** — which operation is in

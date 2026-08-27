@@ -36,12 +36,18 @@ import { parseConcurrency, runPool } from "../concurrency.js";
 import { buildPartialContent } from "../partial-content.js";
 import { buildCIReport } from "../reporting.js";
 import { buildLlmEndpoint } from "../llm-endpoint.js";
-import { resolveLlmConfig, buildResolveLlmOptions, findGitRoot } from "../llm-config.js";
+import {
+  resolveLlmConfig,
+  buildResolveLlmOptions,
+  findGitRoot,
+  loadGitwandrcResolveGeneratedFiles,
+} from "../llm-config.js";
 import {
   runRegeneration,
   loadGitwandrcRegenerateFlag,
   type ResolvedSource,
 } from "../regenerate-runner.js";
+import { loadPersistedConventions } from "./conventions.js";
 
 /** Un marqueur de conflit résiduel dans un contenu régénéré serait un bug de
  * l'installeur (ou un ré-échantillonnage malheureux) — même garde que celle
@@ -57,7 +63,22 @@ export async function cmdResolve(
   const resolveWhitespace = !(flags["no-whitespace"] === true);
   // accuracy lot 1 — les fichiers générés déclinent par défaut ; ce flag rétablit
   // l'auto-résolution (équivalent CLI de resolveGeneratedFiles: true).
-  const resolveGeneratedFiles = flags["resolve-generated"] === true;
+  //
+  // Fix (task 3 brief, Bug A) — précédence, de la plus à la moins spécifique :
+  //   --resolve-generated (true explicite) > .gitwandrc resolveGeneratedFiles
+  //   (true/false explicite) > undefined (laisse la convention mesurée décider)
+  //   > défaut du moteur (false). L'ancien code passait TOUJOURS un booléen
+  //   concret (`=== true`, donc `false` même quand le flag n'était jamais
+  //   fourni) — cela bloquait silencieusement pour toujours la précédence lot F
+  //   de core (`resolver/index.ts` : un verdict "merge" ne s'applique que si
+  //   `userOptions.resolveGeneratedFiles === undefined`).
+  const resolveGeneratedFiles: boolean | undefined =
+    flags["resolve-generated"] === true ? true : loadGitwandrcResolveGeneratedFiles();
+  // accuracy lot F (Bug B fix, task 3) — conventions mesurées sur l'historique du
+  // dépôt (`gitwand conventions`), si elles ont été dérivées. Jusqu'ici jamais
+  // chargées ici : `options.conventions` restait toujours `undefined`, et la
+  // précédence lot F de core ne pouvait donc jamais s'exercer depuis le CLI.
+  const conventions = loadPersistedConventions(process.cwd());
   // accuracy lot C — contexte de merge : détecté depuis l'état .git ; null hors opération.
   // Rend déterministes les décisions qui en dépendent (versions modifiées des
   // deux côtés → la branche cible garde sa valeur).
@@ -199,6 +220,7 @@ export async function cmdResolve(
           resolveWhitespace,
           resolveGeneratedFiles,
           mergeContext,
+          conventions,
           llmFallback: {
             ...buildResolveLlmOptions(llmCliConfig, llmFileConfig),
             endpoint: buildLlmEndpoint(llmCliConfig),
@@ -209,6 +231,7 @@ export async function cmdResolve(
           resolveWhitespace,
           resolveGeneratedFiles,
           mergeContext,
+          conventions,
         });
 
     // Écriture sur disque (sauf dry-run). Bloquée si des marqueurs résiduels
@@ -458,6 +481,28 @@ export async function cmdResolve(
   } else if (totalConflicts > 0) {
     console.log(
       `${c.green}${c.bold}All conflicts resolved! ${WAND}${c.reset}`,
+    );
+  }
+
+  // accuracy lot D (task 3, checklist item 1) — offer the regenerate tier by
+  // default (not just under --verbose) whenever it's a live option: at least
+  // one declined resolution carries a `regenerationPlan` (an ecosystem
+  // matched), regardless of whether a measured convention exists — the
+  // per-file reason text (visible via --verbose) already carries the
+  // convention provenance when there is one. Suppressed when this very run
+  // already used --regenerate/.gitwandrc `regenerate: true`: re-offering a
+  // flag that was already applied (and, on failure, already tried) is not
+  // useful. `regenerationPlan` is still attached after a failed pass-2
+  // attempt, so this check must also account for that by keying off
+  // `regenerateEnabled` from this same invocation.
+  const hasRegenerationOffer =
+    !regenerateEnabled &&
+    outcomes.some((o) =>
+      o.result?.resolutions.some((r) => r.regenerationPlan !== undefined && !r.autoResolved),
+    );
+  if (hasRegenerationOffer) {
+    console.log(
+      `${c.dim}Some declined file(s) could be auto-resolved by regenerating their lockfile — re-run with --regenerate.${c.reset}`,
     );
   }
 
