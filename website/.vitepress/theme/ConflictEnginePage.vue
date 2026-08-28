@@ -1,20 +1,25 @@
 <script setup lang="ts">
-// 8 deterministic patterns auto-apply (auto: true). token_level_merge proposes
+// 8 registry patterns auto-apply (auto: true). token_level_merge proposes
 // a merge you confirm; refactoring_aware_merge and llm_proposed are opt-in;
 // complex is the fallback that always hands the hunk back with its trace.
+// generated_file (registry: false) is NOT a classifier pattern: it is a
+// post-classification pass that rescues complex hunks whose path matches a
+// generated-file glob. Mirrors packages/core/src/classifier.ts and
+// packages/core/src/resolver/generated-detection.ts.
 const PATTERNS = [
-  { name: 'same_change',           conf: 'certain', auto: true,  desc: 'Both branches made the exact same edit.' },
-  { name: 'one_side_change',       conf: 'certain', auto: true,  desc: 'Only one branch touched this block.' },
-  { name: 'delete_no_change',      conf: 'certain', auto: true,  desc: 'One side deleted the block, the other left it untouched.' },
-  { name: 'non_overlapping',       conf: 'high',    auto: true,  desc: 'Additions at different positions in the block.' },
-  { name: 'whitespace_only',       conf: 'high',    auto: true,  desc: 'Same logic, different indentation or spacing.' },
-  { name: 'reorder_only',          conf: 'high',    auto: true,  desc: 'Same lines, different order.' },
-  { name: 'insertion_at_boundary', conf: 'high',    auto: true,  desc: 'New lines added at the edge of a hunk.' },
-  { name: 'value_only_change',     conf: 'high',    auto: true,  desc: 'A scalar value (version, timestamp, hash) updated on both sides — keeps the higher semver / later timestamp.' },
-  { name: 'token_level_merge',     conf: 'medium',  auto: false, desc: 'Both sides changed disjoint tokens on the same line — proposes a merge you confirm, never auto-applied.' },
-  { name: 'refactoring_aware_merge', conf: 'high',  auto: false, desc: 'Rename/move detected and replayed across the conflict (opt-in).' },
-  { name: 'llm_proposed',          conf: 'medium',  auto: false, desc: 'AI-proposed resolution, validated post-merge (opt-in).' },
-  { name: 'complex',               conf: 'low',     auto: false, desc: 'Overlapping edits — surfaced with full classification trace.' },
+  { name: 'same_change',           conf: 'certain', auto: true, registry: true,  desc: 'Both branches made the exact same edit.' },
+  { name: 'one_side_change',       conf: 'certain', auto: true, registry: true,  desc: 'Only one branch touched this block.' },
+  { name: 'delete_no_change',      conf: 'certain', auto: true, registry: true,  desc: 'One side deleted the block, the other left it untouched.' },
+  { name: 'non_overlapping',       conf: 'high',    auto: true, registry: true,  desc: 'Additions at different positions in the block.' },
+  { name: 'whitespace_only',       conf: 'high',    auto: true, registry: true,  desc: 'Same logic, different indentation or spacing.' },
+  { name: 'reorder_only',          conf: 'high',    auto: true, registry: true,  desc: 'Same lines, different order.' },
+  { name: 'insertion_at_boundary', conf: 'high',    auto: true, registry: true,  desc: 'New lines added at the edge of a hunk.' },
+  { name: 'value_only_change',     conf: 'high',    auto: true, registry: true,  desc: 'A scalar value (version, timestamp, hash) updated on both sides — keeps the higher semver / later timestamp.' },
+  { name: 'token_level_merge',     conf: 'medium',  auto: false, registry: true, desc: 'Both sides changed disjoint tokens on the same line — proposes a merge you confirm, never auto-applied.' },
+  { name: 'refactoring_aware_merge', conf: 'high',  auto: false, registry: true, desc: 'Rename/move detected and replayed across the conflict (opt-in).' },
+  { name: 'llm_proposed',          conf: 'medium',  auto: false, registry: true, desc: 'AI-proposed resolution, validated post-merge (opt-in).' },
+  { name: 'complex',               conf: 'low',     auto: false, registry: true, desc: 'Overlapping edits — surfaced with full classification trace.' },
+  { name: 'generated_file',        conf: 'high',    auto: true,  registry: false, desc: 'Path matches a generated-file glob (lockfile, minified bundle, dist/). Reclassified out of complex and resolved to theirs: the file will be regenerated.' },
 ] as const
 </script>
 
@@ -61,8 +66,8 @@ const PATTERNS = [
 
     <section class="ph-section ph-section--alt">
       <div class="ph-inner">
-        <h2 class="ph-h2">8 auto-applied patterns. Deterministic. Auditable.</h2>
-        <p class="ph-secsub">Eight deterministic patterns resolve on their own; the rest below either propose a merge you confirm, are opt-in, or hand the hunk back with its trace. The classifier never guesses — when it can't be certain, it stops.</p>
+        <h2 class="ph-h2">8 auto-applied patterns, plus the generated-file pass.</h2>
+        <p class="ph-secsub">Eight deterministic patterns in the registry resolve on their own; the rest either propose a merge you confirm, are opt-in, or hand the hunk back with its trace. <code>generated_file</code> sits apart: it is not a registry pattern but a post-classification pass that rescues lockfiles and build output already classified as complex. The classifier never guesses; when it can't be certain, it stops.</p>
         <div class="pat-grid">
           <div v-for="p in PATTERNS" :key="p.name" class="pat" :class="{ 'pat--dim': !p.auto }">
             <div class="pat-head">
@@ -71,6 +76,7 @@ const PATTERNS = [
             </div>
             <p class="pat-desc">{{ p.desc }}</p>
             <div class="pat-auto" :class="p.auto ? 'pat-auto--yes' : 'pat-auto--no'">{{ p.auto ? '⚡ Auto-resolved' : '○ Review needed' }}</div>
+            <p v-if="!p.registry" class="pat-note">Post-classification pass, not a classifier pattern.</p>
           </div>
         </div>
       </div>
@@ -142,6 +148,7 @@ const PATTERNS = [
 .pat-conf--low{color:#94a3b8;background:rgba(148,163,184,0.12);}
 .pat-desc{font-size:13px;color:var(--muted);line-height:1.55;margin:0 0 12px;}
 .pat-auto{font-size:12px;font-weight:600;}.pat-auto--yes{color:var(--green);}.pat-auto--no{color:var(--muted);}
+.pat-note{font-size:11px;color:var(--muted);font-style:italic;margin:6px 0 0;line-height:1.4;}
 .bench{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;}
 .bcard{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:24px;text-align:center;}
 .bcard--p{border-color:rgba(124,58,237,0.4);}.bcard--g{border-color:rgba(16,185,129,0.4);}

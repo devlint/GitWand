@@ -153,18 +153,26 @@ GitWand's core engine (`@gitwand/core`) automatically resolves trivial Git merge
 
 GitWand uses a **pattern registry** — the classifier evaluates patterns in priority order, each declaring whether it requires diff3 (base available), diff2, or works on both.
 
-| Pattern | Description | Confidence |
-|---|---|---|
-| **same_change** | Both branches made the exact same edit | Certain |
-| **one_side_change** | Only one branch modified the block | Certain |
-| **delete_no_change** | One branch deleted, the other didn't touch it | Certain |
-| **non_overlapping** | Additions at different locations in the block | High |
-| **whitespace_only** | Same logic, different indentation/spacing | High |
-| **reorder_only** | Same lines, different order — pure permutation | High |
-| **insertion_at_boundary** | Pure insertions on both sides, base intact | High |
-| **value_only_change** | Scalar value update (version number, constant) | Medium |
-| **generated_file** | File matches a known generated-file path pattern | High |
-| **complex** | Overlapping edits — never auto-resolved | — |
+The registry holds **12 patterns**, of which **8 auto-apply**. The other four either propose a resolution you confirm, are opt-in, or hand the hunk back untouched.
+
+| Pattern | Priority | Auto-applies | Description | Typical confidence |
+|---|---|---|---|---|
+| **same_change** | 10 | Yes | Both branches made the exact same edit | Certain |
+| **delete_no_change** | 20 | Yes | One side deleted the block, the other left it untouched | Certain |
+| **one_side_change** | 30 | Yes | Only one branch modified the block | Certain |
+| **non_overlapping** | 40 | Yes | Additions at different locations in the block | High |
+| **whitespace_only** | 50 | Yes | Same logic, different indentation/spacing | High |
+| **reorder_only** | 55 | Yes | Same lines, different order, a pure permutation | High |
+| **insertion_at_boundary** | 57 | Yes | Pure insertions on both sides, base intact | High |
+| **value_only_change** | 60 | Yes | Both sides changed the same scalar (version, hash, timestamp) | High to medium |
+| **token_level_merge** | 65 | No, proposes | Disjoint token edits on the same line, merged into a proposal you confirm | Medium |
+| **refactoring_aware_merge** | 970 | No, opt-in | Rename or move detected and replayed across the conflict | High |
+| **llm_proposed** | 998 | No, opt-in | Model-proposed resolution, validated post-merge | Medium |
+| **complex** | 999 | No | Overlapping edits, always surfaced with a full trace | Low |
+
+The confidence column is indicative: every hunk carries a computed `ConfidenceScore` (see below), not a fixed label. `value_only_change`, for instance, scores on the ratio of volatile tokens to total tokens and rejects the hunk outright below its threshold.
+
+**Not a registry pattern:** `generated_file` is a separate reclassification pass that runs after classification. When a hunk lands in `complex` and its path matches a generated-file glob (lockfiles, bundles, `dist/`, plus anything in `generatedFiles`), the resolver rewrites it to `generated_file` and resolves to *theirs*, on the assumption the file will be regenerated. It appears in `ConflictType` but never in the classifier registry.
 
 ### Composite confidence score
 
