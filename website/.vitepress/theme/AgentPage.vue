@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { TOOLS, parseGitErrorTool, resolveConflictTool } from './tools'
+import MergeRoom from './MergeRoom.vue'
 import { SAMPLE_GIT_ERROR, SAMPLE_CONFLICT } from './tools/samples'
 import { registerTools, type Surface } from './webmcp'
 
@@ -84,10 +85,11 @@ function pick(id: ToolId) {
     <section class="ph-hero">
       <div class="ph-inner">
         <span class="ph-badge">WebMCP</span>
-        <h1 class="ph-h1">Git tools your agent can <span class="grad">just call</span>.</h1>
-        <p class="ph-sub">
-          This page exposes GitWand's conflict engine to any agent browsing it, through the W3C WebMCP
-          standard. No install, no API key, no server: the tools run in the tab you are looking at.
+        <h1 class="ph-h1">Your agent clears the queue. <span class="grad">You make the calls.</span></h1>
+                <p class="ph-sub">
+          A shared Git workspace for you and whatever agent is browsing this page, over the W3C
+          WebMCP standard. The engine settles every hunk that carries no decision. The ones where
+          your two branches genuinely disagree wait for you, and no tool here can take that call.
         </p>
         <div class="ph-ctas">
           <a href="/guide/mcp" class="ph-btn ph-btn--primary">Prefer a real MCP server?</a>
@@ -95,6 +97,8 @@ function pick(id: ToolId) {
         </div>
       </div>
     </section>
+
+    <MergeRoom />
 
     <!-- Live registration state. Deliberately shows failure and absence as
          plainly as success: a demo that always claims to work teaches nobody. -->
@@ -154,10 +158,10 @@ function pick(id: ToolId) {
          agent would get back. -->
     <section class="ph-section ph-section--alt">
       <div class="ph-inner">
-        <h2 class="ph-h2">Try them without an agent</h2>
+        <h2 class="ph-h2">File a case yourself</h2>
         <p class="ph-secsub">
-          This runs the same code an agent calls. Nothing is sent anywhere: the engine executes in
-          this tab.
+          The same code an agent calls, wired to the same room. Whatever you run here shows up above
+          exactly as an agent's call would. Nothing is sent anywhere.
         </p>
 
         <div class="try">
@@ -205,10 +209,11 @@ function pick(id: ToolId) {
          browser has no WebMCP and for crawlers that will never run the script. -->
     <section class="ph-section ph-section--alt">
       <div class="ph-inner">
-        <h2 class="ph-h2">The two tools, written out</h2>
+        <h2 class="ph-h2">The three tools, written out</h2>
         <p class="ph-secsub">
-          Both are read-only. Neither runs git, neither writes to a repository, and neither uploads
-          what you pass it.
+          All read-only with respect to your machine. None runs git, none writes to a repository,
+          none uploads what you pass it. What they do write to is the room above. Deliberately
+          missing: any tool that picks a side on a conflicted hunk.
         </p>
 
         <article class="tool">
@@ -234,6 +239,16 @@ function pick(id: ToolId) {
           <p class="tool-io">
             <span class="tool-k">Input</span> <code>{ content: string, filePath?: string }</code>
           </p>
+        </article>
+
+        <article class="tool">
+          <h3 class="tool-name"><code>list_cases</code></h3>
+          <p class="tool-desc">
+            Reads the room back: what has been filed, which hunks the engine settled, which are still
+            waiting on a person, and which you have already decided. It is what lets an agent pick up
+            where it left off, and check whether you have made the calls it was waiting on.
+          </p>
+          <p class="tool-io"><span class="tool-k">Input</span> <code>{}</code></p>
         </article>
 
         <p class="foot">

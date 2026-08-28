@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The Merge Room on `/agent`.** The page is now a shared workspace rather than a tool listing. Tool handlers no longer just return text to the agent: they file a case into live page state that the person sitting there watches fill up. The engine settles every hunk that carries no decision; every hunk where the two branches genuinely disagree queues for a human, who picks a side and gets the assembled file back, ready to paste. No tool on the page can make that call, which is the boundary the whole thing is built around. A live journal records who did what, agent and human alike.
+- **`list_cases`**, a third WebMCP tool, lets an agent read the room back: what is filed, what the engine settled, what is still waiting on a person, what they have already decided. It is what turns a stateless calculator into a workspace an agent can pick back up.
+
 ### Fixed
 
 - **`parse_git_error` did not recognise a rebase that stopped on a conflict.** The catalogue only knew the phrases git prints when you try to *start* a rebase while one is already unfinished (`rebase-merge directory`), not the ones it prints when a rebase *halts*, which is the far more common paste. Reported by an agent audit of the live page. It now keys on the rebase-specific commands, and a halted cherry-pick gets its own entry rather than being mislabelled a rebase: both print `could not apply`, so matching on that phrase would have handed out `git rebase --continue` to someone mid-cherry-pick.
