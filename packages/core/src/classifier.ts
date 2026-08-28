@@ -20,7 +20,7 @@ import whitespaceOnly      from "./patterns/whitespace-only.js";
 import reorderOnly              from "./patterns/reorder-only.js";
 import insertionAtBoundary      from "./patterns/insertion-at-boundary.js";
 import valueOnlyChange          from "./patterns/value-only-change.js";
-import tokenLevelMerge          from "./patterns/token-level-merge.js";     // v2.7 — priority 65
+import tokenLevelMerge          from "./patterns/token-level-merge.js";     // v3.4 — priority 65
 import llmProposed         from "./patterns/llm-proposed.js";    // v2.5 — priority 998
 import refactoringAwareMerge from "./patterns/refactoring-aware-merge.js"; // v2.6 — priority 970
 import complex             from "./patterns/complex.js";
@@ -42,7 +42,7 @@ const PATTERNS: PatternPlugin[] = [
   reorderOnly,          // priority 55  ← v1.4
   insertionAtBoundary,  // priority 57  ← v1.4
   valueOnlyChange,        // priority 60
-  tokenLevelMerge,        // priority 65 ← v2.7 (jamais auto-appliqué, cf. assemble.ts)
+  tokenLevelMerge,        // priority 65 ← v3.4 (jamais auto-appliqué, cf. assemble.ts)
   refactoringAwareMerge, // priority 970 ← v2.6 (OFF par défaut, activé par resolve())
   llmProposed,            // priority 998 ← v2.5 (OFF par défaut, activé par resolveAsync)
   complex,               // priority 999 (fallback — detect() always true)

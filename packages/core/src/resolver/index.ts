@@ -285,7 +285,7 @@ export async function resolveAsync(
   //   Le flag est réinitialisé immédiatement après `resolve()` — il ne doit pas
   //   persister entre appels (module-level state, potentiellement partagé).
   const llmEnabled = !!(options.llmFallback?.enabled && options.llmFallback?.endpoint);
-  // Coupling fix (v2.7) — the LLM path must only be reachable for hunks no
+  // Coupling fix (v3.4) — the LLM path must only be reachable for hunks no
   // enabled deterministic pattern can resolve. Force refactoringAware on
   // whenever llmFallback is on, so a rename-on-both-sides hunk never skips
   // the deterministic recoverer just because the user only opted into the LLM.

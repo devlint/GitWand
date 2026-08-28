@@ -1,5 +1,5 @@
 /**
- * "Recoverable-before-model" metric (v2.7).
+ * "Recoverable-before-model" metric (v3.4).
  *
  * Design: docs/superpowers/specs/2026-07-07-recoverable-before-model-metric-design.md §4.B
  *

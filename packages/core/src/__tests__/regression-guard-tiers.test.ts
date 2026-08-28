@@ -1,5 +1,5 @@
 /**
- * Garde de régression pour la métrique "recoverable-before-model" (v2.7).
+ * Garde de régression pour la métrique "recoverable-before-model" (v3.4).
  *
  * Design: docs/superpowers/specs/2026-07-07-recoverable-before-model-metric-design.md §4.C
  *
@@ -62,7 +62,7 @@ describe("Garde de régression — token_level_merge doit shrink le bucket AI-re
     }
 
     // Le corpus doit contenir au moins un cas dépendant de token_level_merge —
-    // sinon ce garde ne garde rien (cf. F46, la fixture Tailwind du v2.7).
+    // sinon ce garde ne garde rien (cf. F46, la fixture Tailwind du v3.4).
     expect(tokenLevelMergeCount).toBeGreaterThan(0);
 
     const countReachingModelOn = modelOrUnresolvedCount;

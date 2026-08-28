@@ -4,7 +4,7 @@ import { makeScore, detectValueOnlyChange } from "./utils.js";
 const valueOnlyChange: PatternPlugin = {
   type: "value_only_change",
   priority: 60,
-  // "both" depuis v2.7 : avec base (diff3), un changement unilatéral est déjà
+  // "both" depuis v3.4 : avec base (diff3), un changement unilatéral est déjà
   // pris par one_side_change (prio 30) — ce pattern ne voit donc que les cas
   // où LES DEUX côtés ont changé la valeur. En "diff2" il était inatteignable
   // dès que la base recovery du desktop enrichissait le conflit.

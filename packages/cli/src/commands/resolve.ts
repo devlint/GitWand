@@ -241,7 +241,7 @@ export async function cmdResolve(
     );
   }
 
-  // v2.7 — "recoverable-before-model" : de ce qui dépasse les passes triviales,
+  // v3.4 — "recoverable-before-model" : de ce qui dépasse les passes triviales,
   // combien reste récupérable de façon déterministe avant d'atteindre le LLM.
   // N'affiche rien si tout était trivial (résidu vide — rien à mesurer).
   const tiers = summarizeTiers(aggregateByType as Record<ConflictType, number>);

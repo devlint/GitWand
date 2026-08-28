@@ -264,7 +264,7 @@ const canResolve = computed(
 const hunks = computed(() => props.file.result.hunks);
 const resolutions = computed(() => props.file.result.resolutions);
 
-// v2.7 — "recoverable-before-model" tier summary for this file. Hidden when
+// v3.4 — "recoverable-before-model" tier summary for this file. Hidden when
 // residual is 0 (every hunk was trivially resolved — nothing to measure).
 const tierSummary = computed(() => summarizeTiers(props.file.result.stats.byType));
 
@@ -351,7 +351,7 @@ function onLlmReject(hunkId: string | number) {
   }
 }
 
-// ─── v2.7 — token_level_merge proposal panel ────────────
+// ─── v3.4 — token_level_merge proposal panel ────────────
 // Unlike llm_proposed, the core NEVER pre-computes resolvedLines for this
 // type (see resolver/assemble.ts) — accepting emits resolveHunkCustom with
 // the proposed mergedLines, going through the exact same pathway as a
@@ -889,7 +889,7 @@ useResizeObserver(contentEl, drawMinimap);
               @reject="onLlmReject"
             />
 
-            <!-- ── v2.7 token_level_merge proposal (when not rejected) ────── -->
+            <!-- ── v3.4 token_level_merge proposal (when not rejected) ────── -->
             <TokenMergePanel
               v-if="hunkForSegment(seg) && seg.hunkIndex != null && showTokenMergePanelFor(seg.hunkIndex, hunkForSegment(seg)!)"
               :trace="hunkForSegment(seg)!.trace.tokenMergeTrace!"

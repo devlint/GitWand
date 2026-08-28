@@ -185,7 +185,7 @@ export function assembleResolution(
     }
 
     case "token_level_merge":
-      // v2.7 — Résolution toujours différée à la confirmation utilisateur (frontend).
+      // v3.4 — Résolution toujours différée à la confirmation utilisateur (frontend).
       // La proposition calculée est disponible dans hunk.trace.tokenMergeTrace.
       return {
         lines: null,
