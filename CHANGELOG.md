@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The page states its own registration status live, including when the browser has no WebMCP at all, and writes both tool contracts out in HTML and JSON-LD for the majority of visitors and crawlers that will never run the script.
 - **A try-it panel on `/agent`.** Both tools can be run by hand from the page, against editable sample inputs, so the majority of visitors whose browser has no WebMCP can still see what an agent gets back. It calls the same `execute` an agent calls rather than a mock, and deliberately does not feed the agent call counter.
 
+### Changed
+
+- **The engine speaks English.** Every explanation, resolution reason, decision-trace step, confidence booster and penalty `@gitwand/core` produces was written in French. None of the consumers translate them, so the desktop merge editor, the CLI summary and the `@gitwand/mcp` `explanation` / `resolutionReason` fields have been handing French text to every user and every agent, whatever their locale. 194 strings translated across 38 files. Comments and test names stay French: this is only about what leaves the engine.
+- A regression guard (`__tests__/english-output.test.ts`) runs the engine over the whole corpus and asserts that no string it hands back is French, checking real output rather than scanning source so it cannot be fooled by how a string is assembled. It caught four strings a source scan had missed, including one with no accented characters in it.
+
 ### Fixed
 
 - **Site-wide WebMCP tools went dark on browsers without `navigator.modelContext`.** The registration script bailed out entirely unless the deprecated `navigator` location existed, so the three documentation tools would disappear the day Chrome removes the alias it deprecated in 150. It now prefers `document.modelContext`, where the spec has put the entry point since 27 May 2026, and falls back to `navigator` only when that is all the browser offers. It registers once either way: on the versions exposing both names they alias the same object, so registering on both would have duplicated every tool.

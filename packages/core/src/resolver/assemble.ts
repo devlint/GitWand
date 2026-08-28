@@ -34,7 +34,7 @@ export function assembleResolution(
     case "same_change":
       return {
         lines: [...hunk.oursLines],
-        reason: "Même modification des deux côtés — résolution triviale (ours = theirs).",
+        reason: "Same edit on both sides, so the resolution is trivial (ours = theirs).",
       };
 
     case "one_side_change": {
@@ -43,12 +43,12 @@ export function assembleResolution(
       if (oursText === baseText) {
         return {
           lines: [...hunk.theirsLines],
-          reason: "Ours = base → seul theirs a changé. Résolution : accepter theirs.",
+          reason: "Ours = base, so only theirs changed. Resolution: take theirs.",
         };
       } else {
         return {
           lines: [...hunk.oursLines],
-          reason: "Theirs = base → seul ours a changé. Résolution : accepter ours.",
+          reason: "Theirs = base, so only ours changed. Resolution: take ours.",
         };
       }
     }
@@ -56,7 +56,7 @@ export function assembleResolution(
     case "delete_no_change":
       return {
         lines: [],
-        reason: "Un côté a supprimé le bloc, l'autre n'a pas touché. Résolution : supprimer (0 lignes).",
+        reason: "One side deleted the block and the other left it untouched. Resolution: delete (0 lines).",
       };
 
     case "reorder_only": {
@@ -75,7 +75,7 @@ export function assembleResolution(
       }
       return {
         lines: preferred,
-        reason: `Permutation pure — mêmes lignes, ordre différent. Résolution : accepter ${side}.`,
+        reason: `Pure permutation: same lines, different order. Resolution: take ${side}.`,
       };
     }
 
@@ -112,7 +112,7 @@ export function assembleResolution(
       }
       return {
         lines: merged,
-        reason: `Insertions pures — union des ${hasBase ? "insertions (base + ours + theirs)" : "lignes (heuristique diff2)"}. ${merged.length} lignes dans le résultat.`,
+        reason: `Pure insertions: union of the ${hasBase ? "insertions (base + ours + theirs)" : "lines (diff2 heuristic)"}. ${merged.length} lines in the result.`,
       };
     }
 
@@ -121,14 +121,14 @@ export function assembleResolution(
         return {
           lines: null,
           reason: !policyCfg.allowWhitespace
-            ? `Résolution whitespace désactivée par la politique "${effectivePolicy}".`
-            : "Résolution whitespace désactivée par options (resolveWhitespace: false).",
+            ? `Whitespace resolution disabled by the "${effectivePolicy}" policy.`
+            : "Whitespace resolution disabled by options (resolveWhitespace: false).",
         };
       }
       const wsSide = policyCfg.preferOurs ? "ours" : "theirs";
       return {
         lines: policyCfg.preferOurs ? [...hunk.oursLines] : [...hunk.theirsLines],
-        reason: `Seul le whitespace diffère. Résolution : préférer ${wsSide} (politique : ${effectivePolicy}).`,
+        reason: `Only whitespace differs. Resolution: prefer ${wsSide} (policy: ${effectivePolicy}).`,
       };
     }
 
@@ -137,8 +137,8 @@ export function assembleResolution(
         return {
           lines: null,
           reason: !policyCfg.allowNonOverlapping
-            ? `Résolution non-overlapping désactivée par la politique "${effectivePolicy}".`
-            : "Résolution non-overlapping désactivée par options (resolveNonOverlapping: false).",
+            ? `Non-overlapping resolution disabled by the "${effectivePolicy}" policy.`
+            : "Non-overlapping resolution disabled by options (resolveNonOverlapping: false).",
         };
       }
       const merged = mergeNonOverlapping(
@@ -149,12 +149,12 @@ export function assembleResolution(
       if (merged !== null) {
         return {
           lines: merged,
-          reason: `Merge LCS 3-way réussi — ${merged.length} lignes dans le résultat fusionné.`,
+          reason: `3-way LCS merge succeeded: ${merged.length} lines in the merged result.`,
         };
       }
       return {
         lines: null,
-        reason: "Le merge LCS 3-way a échoué (chevauchement détecté au moment de la résolution).",
+        reason: "The 3-way LCS merge failed (an overlap was detected at resolution time).",
       };
     }
 
@@ -162,7 +162,7 @@ export function assembleResolution(
       if (!policyCfg.allowValueOnly) {
         return {
           lines: null,
-          reason: `Résolution value_only_change désactivée par la politique "${effectivePolicy}".`,
+          reason: `value_only_change resolution disabled by the "${effectivePolicy}" policy.`,
         };
       }
       // Quand toutes les paires de tokens différents sont des semver
@@ -173,14 +173,14 @@ export function assembleResolution(
       if (semverSide !== null) {
         return {
           lines: semverSide === "ours" ? [...hunk.oursLines] : [...hunk.theirsLines],
-          reason: `Même structure, version(s) semver différente(s). Résolution : accepter ${semverSide} (version la plus élevée).`,
+          reason: `Same structure, differing semver version(s). Resolution: take ${semverSide} (the higher version).`,
         };
       }
       const preferred = policyCfg.preferOurs ? hunk.oursLines : hunk.theirsLines;
       const side = policyCfg.preferOurs ? "ours" : "theirs";
       return {
         lines: [...preferred],
-        reason: `Même structure, valeur(s) volatile(s) différente(s). Résolution : accepter ${side} (politique : ${effectivePolicy}).`,
+        reason: `Same structure, differing volatile value(s). Resolution: take ${side} (policy: ${effectivePolicy}).`,
       };
     }
 
@@ -189,7 +189,7 @@ export function assembleResolution(
       // La proposition calculée est disponible dans hunk.trace.tokenMergeTrace.
       return {
         lines: null,
-        reason: "token_level_merge : fusion proposée, confirmation utilisateur requise avant application.",
+        reason: "token_level_merge: merge proposed, user confirmation required before it is applied.",
       };
 
     case "generated_file": {
@@ -201,13 +201,13 @@ export function assembleResolution(
       if (oursStripped === theirsStripped) {
         return {
           lines: [...hunk.theirsLines],
-          reason: "Fichier auto-généré — contenu structurel identique (seules les valeurs volatiles diffèrent). Résolution : accepter theirs. Suggestion : relancer le build/install.",
+          reason: "Generated file with identical structure (only volatile values differ). Resolution: take theirs. Suggestion: re-run the build or install.",
         };
       }
 
       return {
         lines: [...hunk.theirsLines],
-        reason: "Fichier auto-généré — le fichier sera régénéré après merge. Résolution : accepter theirs. Suggestion : relancer le build/install.",
+        reason: "Generated file: it will be rebuilt after the merge. Resolution: take theirs. Suggestion: re-run the build or install.",
       };
     }
 
@@ -221,7 +221,7 @@ export function assembleResolution(
       // Fallback si le cache est invalide (ne devrait pas arriver)
       return {
         lines: null,
-        reason: "RefMerge : résultat non disponible en cache — résolution manuelle requise.",
+        reason: "RefMerge: no cached result available, so manual resolution is required.",
       };
     }
 
@@ -230,19 +230,19 @@ export function assembleResolution(
       // assembleResolution() n'est pas censé être appelé directement pour llm_proposed.
       return {
         lines: null,
-        reason: "llm_proposed : résolution différée au pipeline LLM asynchrone.",
+        reason: "llm_proposed: resolution deferred to the asynchronous LLM pipeline.",
       };
 
     case "complex":
       return {
         lines: null,
-        reason: "Conflit complexe — aucune heuristique automatique applicable. Résolution manuelle requise.",
+        reason: "Complex conflict: no automatic heuristic applies. Manual resolution required.",
       };
 
     default:
       return {
         lines: null,
-        reason: `Type de conflit inconnu : ${hunk.type}.`,
+        reason: `Unknown conflict type: ${hunk.type}.`,
       };
   }
 }

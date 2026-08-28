@@ -52,7 +52,7 @@ describe("F21 — reorder_only : exports triés alphabétiquement (diff3)", () =
 
   it("le booster 'Permutation pure' est présent", () => {
     const result = resolve(input, "src/index.ts");
-    expect(result.hunks[0].confidence.boosters.join(" ")).toMatch(/Permutation pure/);
+    expect(result.hunks[0].confidence.boosters.join(" ")).toMatch(/Pure permutation/);
   });
 });
 
@@ -135,7 +135,7 @@ describe("reorder_only avec lignes dupliquées (F32-like)", () => {
   it("applique la pénalité 'Lignes dupliquées'", () => {
     const result = resolve(input, "src/test.ts");
     const penalties = result.hunks[0].confidence.penalties.join(" ");
-    expect(penalties).toMatch(/dupliqu/i);
+    expect(penalties).toMatch(/duplicate/i);
   });
 
   it("le score est réduit par rapport au cas sans doublons", () => {

@@ -39,11 +39,11 @@ describe("withBaseAvailability — reste en phase avec makeScore", () => {
 
   it("reste rétro-compatible quand les deux dimensions sont à 0", () => {
     const cs = makeScore(90, 20, 15, [], []);
-    const adjusted = withBaseAvailability(cs, 100, "zdiff3 — base tronquée aux sections divergentes");
+    const adjusted = withBaseAvailability(cs, 100, "zdiff3: base truncated to the diverging sections");
 
     const expected = makeScore(90, 20, 15, [], [], 0, 100);
     expect(adjusted.score).toBe(expected.score);
     expect(adjusted.label).toBe(expected.label);
-    expect(adjusted.boosters).toContain("zdiff3 — base tronquée aux sections divergentes");
+    expect(adjusted.boosters).toContain("zdiff3: base truncated to the diverging sections");
   });
 });

@@ -66,7 +66,7 @@ function resolveHunk(
   if (options.explainOnly) {
     return {
       lines: null,
-      reason: `Mode explain-only : résolution non appliquée (type: ${hunk.type}, confiance: ${hunk.confidence.label} [score: ${hunk.confidence.score}]).`,
+      reason: `Explain-only mode: no resolution applied (type: ${hunk.type}, confidence: ${hunk.confidence.label} [score: ${hunk.confidence.score}]).`,
     };
   }
 
@@ -91,7 +91,7 @@ function resolveHunk(
   if (CONFIDENCE_ORDER[hunk.confidence.label] < CONFIDENCE_ORDER[effectiveMinConfidence]) {
     return {
       lines: null,
-      reason: `Confiance ${hunk.confidence.label} (score: ${hunk.confidence.score}) insuffisante (minimum requis : ${effectiveMinConfidence}, politique : ${effectivePolicy}).${dispatch.note ? ` [${dispatch.note}]` : ""}`,
+      reason: `Confidence ${hunk.confidence.label} (score: ${hunk.confidence.score}) is below the ${effectiveMinConfidence} required by the ${effectivePolicy} policy.${dispatch.note ? ` [${dispatch.note}]` : ""}`,
     };
   }
 

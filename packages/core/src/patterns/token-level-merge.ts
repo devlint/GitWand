@@ -144,25 +144,25 @@ const tokenLevelMerge: PatternPlugin = {
     // dataRisk volontairement non-nul : ce pattern ne doit JAMAIS s'auto-appliquer,
     // quel que soit le score obtenu (cf. resolver/assemble.ts — case dédié).
     return makeScore(70, 38, scopeImpact(totalLines), [
-      "Décomposition ligne-par-ligne et token-level réussie",
+      "Line-by-line and token-level decomposition succeeded",
     ], [
-      "Résolution proposée — jamais auto-appliquée, confirmation utilisateur requise",
+      "Resolution proposed: never auto-applied, user confirmation required",
     ]);
   },
 
   explanation(h: ClassifyInput): string {
     const result = computeTokenMergeCached(h);
-    if (!result) return "Fusion token-level proposée.";
+    if (!result) return "Token-level merge proposed.";
     const { pass1Count, pass2Count } = result;
-    return `Fusion proposée : ${pass1Count} ligne${pass1Count === 1 ? "" : "s"} résolue${pass1Count === 1 ? "" : "s"} ligne-par-ligne, ${pass2Count} ligne${pass2Count === 1 ? "" : "s"} fusionnée${pass2Count === 1 ? "" : "s"} token-par-token. Confirmation requise avant application.`;
+    return `Merge proposed: ${pass1Count} line${pass1Count === 1 ? "" : "s"} resolved line-by-line, ${pass2Count} line${pass2Count === 1 ? "" : "s"} merged token-by-token. Confirmation required before it is applied.`;
   },
 
   passReason(_h: ClassifyInput): string {
-    return "Décomposition ligne-par-ligne + diff token-level réussis sur toutes les lignes du hunk.";
+    return "Line-by-line decomposition and token-level diff succeeded on every line of the hunk.";
   },
 
   failReason(_h: ClassifyInput): string {
-    return "Au moins une ligne résiste (vrai conflit token-level ou désalignement de tokens) — pas de résolution partielle.";
+    return "At least one line resists (a real token-level conflict, or misaligned tokens), and partial resolutions are not offered.";
   },
 };
 

@@ -133,7 +133,7 @@ const insertionAtBoundary: PatternPlugin = {
 
     if (hasBase) {
       return makeScore(90, 8, scopeImpact(totalLines), [
-        "Insertions pures — base intacte des deux côtés",
+        "Pure insertions, base intact on both sides",
       ], []);
     }
     return makeScore(68, 20, scopeImpact(totalLines), [], [
@@ -144,22 +144,22 @@ const insertionAtBoundary: PatternPlugin = {
   explanation(h: ClassifyInput): string {
     const hasBase = h.baseLines.length > 0;
     return hasBase
-      ? "Les deux branches ont uniquement ajouté des lignes sans modifier la base. Résolution : union des insertions (ours en premier)."
-      : "Les deux branches semblent avoir uniquement ajouté des lignes (heuristique diff2). Résolution : union (ours en premier).";
+      ? "Both branches only added lines without modifying the base. Resolution: union of the insertions, ours first."
+      : "Both branches appear to have only added lines (diff2 heuristic). Resolution: union, ours first.";
   },
 
   passReason(h: ClassifyInput): string {
     const hasBase = h.baseLines.length > 0;
     return hasBase
-      ? "Aucune suppression des deux côtés, insertions distinctes — insertions pures confirmées par la base."
-      : "Heuristique diff2 : les deux côtés sont des sur-ensembles l'un de l'autre.";
+      ? "No deletions on either side and the insertions are distinct: pure insertions confirmed against the base."
+      : "diff2 heuristic: each side is a superset of the other.";
   },
 
   failReason(h: ClassifyInput): string {
     const hasBase = h.baseLines.length > 0;
     return hasBase
-      ? "Au moins un côté a des suppressions ou des insertions qui se chevauchent."
-      : "La heuristique diff2 d'union échoue — des lignes sont présentes d'un côté mais absentes de l'autre de façon asymétrique.";
+      ? "At least one side has deletions, or insertions that overlap."
+      : "The diff2 union heuristic fails: some lines are present on one side and absent from the other, asymmetrically.";
   },
 };
 

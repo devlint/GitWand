@@ -33,12 +33,12 @@ const deleteNoChange: PatternPlugin = {
       return makeScore(100, 5, 0, [
         "Base disponible",
         oursDeleted
-          ? "Ours a supprimé, theirs identique à la base"
-          : "Theirs a supprimé, ours identique à la base",
+          ? "Ours deleted, theirs identical to the base"
+          : "Theirs deleted, ours identical to the base",
       ], []);
     }
     return makeScore(60, 30, 0, [], [
-      "Sans base (diff2) — suppression non confirmée par rapport à l'ancêtre commun",
+      "No base (diff2): the deletion is not confirmed against the common ancestor",
     ]);
   },
 
@@ -48,14 +48,14 @@ const deleteNoChange: PatternPlugin = {
       const baseText = h.baseLines.join("\n");
       const theirsText = h.theirsLines.join("\n");
       if (h.oursLines.length === 0 && theirsText === baseText) {
-        return "La branche courante (ours) a supprimé ce bloc, l'autre ne l'a pas modifié. Résolution : supprimer.";
+        return "The current branch (ours) deleted this block and the other left it untouched. Resolution: delete.";
       }
-      return "La branche entrante (theirs) a supprimé ce bloc, l'autre ne l'a pas modifié. Résolution : supprimer.";
+      return "The incoming branch (theirs) deleted this block and the other left it untouched. Resolution: delete.";
     }
     if (h.oursLines.length === 0) {
-      return "La branche courante (ours) a supprimé ce bloc. Sans base, confiance moyenne. Résolution proposée : supprimer.";
+      return "The current branch (ours) deleted this block. Without a base, confidence is medium. Proposed resolution: delete.";
     }
-    return "La branche entrante (theirs) a supprimé ce bloc. Sans base, confiance moyenne. Résolution proposée : supprimer.";
+    return "The incoming branch (theirs) deleted this block. Without a base, confidence is medium. Proposed resolution: delete.";
   },
 
   passReason(h: ClassifyInput): string {
@@ -64,22 +64,22 @@ const deleteNoChange: PatternPlugin = {
       const baseText = h.baseLines.join("\n");
       const theirsText = h.theirsLines.join("\n");
       if (h.oursLines.length === 0 && theirsText === baseText) {
-        return "Ours a supprimé le bloc (0 lignes) et theirs n'a pas modifié la base.";
+        return "Ours deleted the block (0 lines) and theirs did not modify the base.";
       }
-      return "Theirs a supprimé le bloc (0 lignes) et ours n'a pas modifié la base.";
+      return "Theirs deleted the block (0 lines) and ours did not modify the base.";
     }
     if (h.oursLines.length === 0) {
-      return "Ours est vide (0 lignes) en diff2. Suppression probable mais incertaine sans base.";
+      return "Ours is empty (0 lines) in diff2. A deletion is likely but uncertain without a base.";
     }
-    return "Theirs est vide (0 lignes) en diff2. Suppression probable mais incertaine sans base.";
+    return "Theirs is empty (0 lines) in diff2. A deletion is likely but uncertain without a base.";
   },
 
   failReason(h: ClassifyInput): string {
     const hasBase = h.baseLines.length > 0;
     if (hasBase) {
-      return "Ni ours ni theirs n'est une suppression unilatérale avec l'autre côté identique à la base.";
+      return "Neither ours nor theirs is a one-sided deletion with the other side identical to the base.";
     }
-    return "Ni ours ni theirs n'est vide en diff2 — pas de suppression unilatérale évidente.";
+    return "Neither ours nor theirs is empty in diff2, so there is no obvious one-sided deletion.";
   },
 };
 

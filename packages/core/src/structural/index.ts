@@ -186,11 +186,11 @@ export function wrapStructuralResult(
         boosters: ["structural-merge"],
         penalties: [],
       },
-      explanation: "Résolu via merge structurel (tree-sitter AST)",
+      explanation: "Resolved by a structural merge (tree-sitter AST)",
       trace: {
         steps: [],
         selected: "complex" as const,
-        summary: "Résolu via analyse structurelle AST — merge par entités TypeScript",
+        summary: "Resolved by structural AST analysis: merged per TypeScript entity",
         hasBase: s.conflict.baseLines.length > 0,
       },
     }));
@@ -199,7 +199,7 @@ export function wrapStructuralResult(
     hunk,
     resolvedLines: null,
     autoResolved: true,
-    resolutionReason: "structural-merge: résolu via analyse AST tree-sitter",
+    resolutionReason: "structural-merge: resolved by tree-sitter AST analysis",
   }));
 
   const byType = hunks.length > 0 ? ({ complex: hunks.length } as MergeStats["byType"]) : ({} as MergeStats["byType"]);

@@ -60,11 +60,11 @@ const reorderOnly: PatternPlugin = {
     const duplicates = hasDuplicates(ours);
     const si = scopeImpact(h.oursLines.length);
 
-    const boosters = ["Permutation pure — mêmes lignes, ordre différent"];
+    const boosters = ["Pure permutation: same lines, different order"];
     const penalties: string[] = [];
 
     if (duplicates) {
-      penalties.push("Lignes dupliquées — ordre ambigu (−10)");
+      penalties.push("Duplicate lines make the ordering ambiguous (−10)");
     }
 
     // typeClassification 92 sauf si doublons (−10 → 82)
@@ -75,16 +75,16 @@ const reorderOnly: PatternPlugin = {
   explanation(h: ClassifyInput): string {
     const hasBase = h.baseLines.length > 0;
     return hasBase
-      ? "Les deux branches contiennent les mêmes lignes dans un ordre différent. Résolution : accepter l'ordre theirs (ou ours si la base correspond à theirs)."
-      : "Les deux branches contiennent les mêmes lignes dans un ordre différent. Résolution : accepter l'ordre theirs.";
+      ? "Both branches contain the same lines in a different order. Resolution: take the theirs ordering, or ours when the base matches theirs."
+      : "Both branches contain the same lines in a different order. Resolution: take the theirs ordering.";
   },
 
   passReason(_h: ClassifyInput): string {
-    return "Les deux côtés sont des permutations l'un de l'autre — mêmes lignes, ordre différent.";
+    return "Each side is a permutation of the other: same lines, different order.";
   },
 
   failReason(_h: ClassifyInput): string {
-    return "Les lignes ne sont pas une simple permutation — des ajouts ou suppressions sont présents.";
+    return "The lines are not a plain permutation: there are additions or deletions.";
   },
 };
 

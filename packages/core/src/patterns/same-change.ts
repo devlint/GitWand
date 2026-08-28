@@ -12,20 +12,20 @@ const sameChange: PatternPlugin = {
 
   confidence(h: ClassifyInput): ConfidenceScore {
     return makeScore(100, 0, scopeImpact(h.oursLines.length), [
-      "Les deux branches ont exactement le même contenu",
+      "Both branches have exactly the same content",
     ], []);
   },
 
   explanation(_h: ClassifyInput): string {
-    return "Les deux branches ont effectué exactement la même modification.";
+    return "Both branches made exactly the same edit.";
   },
 
   passReason(_h: ClassifyInput): string {
-    return "Les deux branches ont exactement le même contenu — modification identique des deux côtés.";
+    return "Both branches have exactly the same content: an identical edit on each side.";
   },
 
   failReason(_h: ClassifyInput): string {
-    return "Les deux branches ont des contenus différents.";
+    return "The branches have different content.";
   },
 };
 

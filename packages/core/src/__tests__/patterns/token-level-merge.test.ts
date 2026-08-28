@@ -150,10 +150,10 @@ describe("token_level_merge : cache keyed par référence (robustesse à l'entre
     // Ni detect(hunkB) ni classifyConflict(hunkB) n'ont été appelés ici — on
     // interroge directement explanation() sur hunkB. Avec un cache "dernier
     // calculé" non keyed, ceci retournerait à tort le pass1Count de hunkA (0).
-    expect(tokenLevelMerge.explanation(hunkB)).toContain("1 ligne résolue");
+    expect(tokenLevelMerge.explanation(hunkB)).toContain("1 line resolved line-by-line");
     // Et repasser sur hunkA doit toujours donner le résultat de hunkA, pas
     // celui de hunkB qu'on vient d'interroger.
-    expect(tokenLevelMerge.explanation(hunkA)).toContain("0 lignes résolues");
+    expect(tokenLevelMerge.explanation(hunkA)).toContain("0 lines resolved line-by-line");
   });
 
   it("explanation() sur un hunk jamais passé par detect() calcule quand même le bon résultat", () => {
@@ -162,8 +162,8 @@ describe("token_level_merge : cache keyed par référence (robustesse à l'entre
       ["ctx-ours", '<div class="a2 b">'],
       ["ctx", '<div class="a b2">'],
     ); // pass1: 1, pass2: 1
-    expect(tokenLevelMerge.explanation(neverDetected)).toContain("1 ligne résolue");
-    expect(tokenLevelMerge.explanation(neverDetected)).toContain("1 ligne fusionnée");
+    expect(tokenLevelMerge.explanation(neverDetected)).toContain("1 line resolved line-by-line");
+    expect(tokenLevelMerge.explanation(neverDetected)).toContain("1 line merged token-by-token");
   });
 });
 

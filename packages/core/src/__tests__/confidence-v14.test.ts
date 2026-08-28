@@ -178,7 +178,7 @@ describe("F32 — reorder_only : lignes dupliquées (pénalité ordre ambigu)", 
   it("la pénalité de doublons est mentionnée", () => {
     const result = resolve(input, "index.ts");
     const penalties = result.hunks[0].confidence.penalties;
-    expect(penalties.some((p) => p.toLowerCase().includes("dupliqu"))).toBe(true);
+    expect(penalties.some((p) => p.toLowerCase().includes("duplicate"))).toBe(true);
   });
 
   it("le score est inférieur à un reorder_only sans doublons", () => {
@@ -297,7 +297,7 @@ describe("fileFrequency — pénalité sur les fichiers avec hunks complexes", (
 
     const result = resolve(input, "hot.ts");
     const secondHunkPenalties = result.hunks[1].confidence.penalties;
-    expect(secondHunkPenalties.some((p) => p.toLowerCase().includes("zone chaude"))).toBe(true);
+    expect(secondHunkPenalties.some((p) => p.toLowerCase().includes("hot spot"))).toBe(true);
   });
 
   it("un seul hunk dans un fichier n'a pas de pénalité fileFrequency", () => {

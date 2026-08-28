@@ -19,24 +19,24 @@ const valueOnlyChange: PatternPlugin = {
     const result = detectValueOnlyChange(h.oursLines, h.theirsLines, h.baseLines.length > 0);
     if (result) return result.confidenceScore;
     // Fallback (ne devrait pas être appelé si detect() retourne false)
-    return makeScore(0, 100, 0, [], ["Erreur interne : confidence() appelé sans match"]);
+    return makeScore(0, 100, 0, [], ["Internal error: confidence() called without a match"]);
   },
 
   explanation(h: ClassifyInput): string {
     const result = detectValueOnlyChange(h.oursLines, h.theirsLines, h.baseLines.length > 0);
-    return result?.explanation ?? "Valeurs volatiles différentes.";
+    return result?.explanation ?? "Differing volatile values.";
   },
 
   passReason(h: ClassifyInput): string {
     const result = detectValueOnlyChange(h.oursLines, h.theirsLines, h.baseLines.length > 0);
-    return result?.traceReason ?? "Valeurs atomiques identifiées comme volatiles.";
+    return result?.traceReason ?? "Atomic values identified as volatile.";
   },
 
   failReason(h: ClassifyInput): string {
     if (h.oursLines.length !== h.theirsLines.length) {
-      return "Ours et theirs n'ont pas le même nombre de lignes — structure différente.";
+      return "Ours and theirs do not have the same number of lines, so the structure differs.";
     }
-    return "Les différences entre ours et theirs ne se limitent pas à des valeurs volatiles (hash, version, timestamp…).";
+    return "The differences between ours and theirs go beyond volatile values (hash, version, timestamp…).";
   },
 };
 

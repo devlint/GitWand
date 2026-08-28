@@ -432,7 +432,7 @@ export function tryResolveYamlConflict(
   ) {
     return {
       mergedLines: null,
-      reason: "YAML contient des anchors, aliases ou block scalars — fusion structurelle non supportée (fallback textuel).",
+      reason: "The YAML contains anchors, aliases or block scalars, which structural merging does not support, so it falls back to the textual engine.",
       resolvedKeys: 0,
       unresolvedKeys: 1,
     };
@@ -446,14 +446,14 @@ export function tryResolveYamlConflict(
     if (merged !== null) {
       return {
         mergedLines: merged,
-        reason: `YAML séquence scalaire — union des éléments (${merged.length} entrées).`,
+        reason: `Scalar YAML sequence: union of the items (${merged.length} entries).`,
         resolvedKeys: 1,
         unresolvedKeys: 0,
       };
     }
     return {
       mergedLines: null,
-      reason: "YAML séquence scalaire — fusion impossible (éléments en conflit).",
+      reason: "Scalar YAML sequence: merging is not possible, the items conflict.",
       resolvedKeys: 0,
       unresolvedKeys: 1,
     };
@@ -468,7 +468,7 @@ export function tryResolveYamlConflict(
   if (lines === null) {
     return {
       mergedLines: null,
-      reason: `Fusion YAML impossible : ${unresolvedKeys} clé(s) en conflit non résolvable.`,
+      reason: `YAML merge not possible: ${unresolvedKeys} key(s) conflict irreducibly.`,
       resolvedKeys,
       unresolvedKeys,
     };
@@ -476,7 +476,7 @@ export function tryResolveYamlConflict(
 
   return {
     mergedLines: lines,
-    reason: `Fusion YAML structurelle réussie : ${resolvedKeys} clé(s) fusionnée(s).`,
+    reason: `Structural YAML merge succeeded: ${resolvedKeys} key(s) merged.`,
     resolvedKeys,
     unresolvedKeys,
   };
@@ -531,7 +531,7 @@ function tryProfileBasedYamlMerge(
   const serialized = YAML.stringify(merged, { indent: 2, lineWidth: 0 }).trimEnd();
   return {
     mergedLines: serialized.split("\n"),
-    reason: `Fusion YAML via profil '${profile.name}'.`,
+    reason: `YAML merged using the '${profile.name}' profile.`,
     resolvedKeys: 1,
     unresolvedKeys: 0,
   };

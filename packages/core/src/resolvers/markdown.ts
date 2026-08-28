@@ -175,7 +175,7 @@ export function tryResolveMarkdownConflict(
       mergedLines: null,
       conflictedSections: ["frontmatter"],
       resolvedSections: 0,
-      reason: "Conflit dans le frontmatter YAML — fusion manuelle requise.",
+      reason: "Conflict in the YAML frontmatter: manual merging required.",
     };
   }
 
@@ -222,7 +222,7 @@ export function tryResolveMarkdownConflict(
       }
       if (theirsSection && !sectionsEqual(oursSection ?? emptySectionFor(key), theirsSection)) {
         // Ajouter la version theirs avec un commentaire d'avertissement
-        mergedLines.push(`<!-- ⚠️ GitWand: section "${key}" modifiée des deux côtés -->`);
+        mergedLines.push(`<!-- ⚠️ GitWand: section "${key}" modified on both sides -->`);
         if (theirsSection.heading) mergedLines.push(theirsSection.heading);
         mergedLines.push(...theirsSection.lines);
       }
@@ -235,7 +235,7 @@ export function tryResolveMarkdownConflict(
       mergedLines: null, // Force resolution manuelle si des sections ont conflicté
       conflictedSections,
       resolvedSections,
-      reason: `Fusion Markdown partielle : ${resolvedSections} section(s) résolue(s), ${conflictedSections.length} en conflit (${conflictedSections.join(", ")}).`,
+      reason: `Partial Markdown merge: ${resolvedSections} section(s) resolved, ${conflictedSections.length} still in conflict (${conflictedSections.join(", ")}).`,
     };
   }
 
@@ -243,7 +243,7 @@ export function tryResolveMarkdownConflict(
     mergedLines,
     conflictedSections: [],
     resolvedSections,
-    reason: `Fusion Markdown réussie : ${resolvedSections} section(s) fusionnée(s) automatiquement.`,
+    reason: `Markdown merge succeeded: ${resolvedSections} section(s) merged automatically.`,
   };
 }
 

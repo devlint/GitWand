@@ -75,8 +75,8 @@ function buildTrace(
     if (!isEligible) {
       // Pattern sauté à cause du filtre `requires`
       const skipReason = pattern.requires === "diff3"
-        ? `Base (diff3) indisponible — ${pattern.type} requiert diff3, sauté.`
-        : `Base présente — ${pattern.type} requiert diff2 (sans base), sauté.`;
+        ? `Base (diff3) unavailable: ${pattern.type} requires diff3, skipped.`
+        : `Base present: ${pattern.type} requires diff2 (no base), skipped.`;
       steps.push({ type: pattern.type, passed: false, reason: skipReason });
       continue;
     }
@@ -100,22 +100,22 @@ function buildTrace(
 function buildSummary(type: ConflictType, h: ClassifyInput): string {
   const hasBase = h.baseLines.length > 0;
   switch (type) {
-    case "same_change":          return "Même modification des deux côtés → résolution triviale.";
+    case "same_change":          return "Same edit on both sides, so the resolution is trivial.";
     case "delete_no_change":     return hasBase
-      ? (h.oursLines.length === 0 ? "Ours a supprimé ce bloc, theirs est resté identique à la base." : "Theirs a supprimé ce bloc, ours est resté identique à la base.")
-      : (h.oursLines.length === 0 ? "Ours a supprimé ce bloc (diff2 — sans base, confiance moyenne)." : "Theirs a supprimé ce bloc (diff2 — sans base, confiance moyenne).");
+      ? (h.oursLines.length === 0 ? "Ours deleted this block; theirs stayed identical to the base." : "Theirs deleted this block; ours stayed identical to the base.")
+      : (h.oursLines.length === 0 ? "Ours deleted this block (diff2, no base, medium confidence)." : "Theirs deleted this block (diff2, no base, medium confidence).");
     case "one_side_change":      return h.oursLines.join("\n") === h.baseLines.join("\n")
-      ? "Seul theirs a modifié ce bloc — résolution : accepter theirs."
-      : "Seul ours a modifié ce bloc — résolution : accepter ours.";
-    case "non_overlapping":      return "Modifications non-overlapping — fusion automatique par LCS 3-way.";
-    case "whitespace_only":      return "Même code, whitespace différent — résolution : préférer ours.";
-    case "reorder_only":         return "Mêmes lignes, ordre différent — résolution : accepter l'ordre theirs.";
-    case "insertion_at_boundary": return "Insertions pures des deux côtés — résolution par union.";
-    case "value_only_change":    return "Même structure, valeur(s) volatile(s) différente(s) — résolution : accepter theirs.";
-    case "token_level_merge":    return "Fusion ligne/token proposée — confirmation utilisateur requise avant application.";
-    case "llm_proposed":         return "LLM fallback activé — résolution déléguée à l'endpoint LLM configuré.";
-    case "complex":              return "Conflit complexe — toutes les heuristiques automatiques ont échoué.";
-    default:                     return `Type détecté : ${type}.`;
+      ? "Only theirs modified this block. Resolution: take theirs."
+      : "Only ours modified this block. Resolution: take ours.";
+    case "non_overlapping":      return "Non-overlapping edits, merged automatically by 3-way LCS.";
+    case "whitespace_only":      return "Same code, different whitespace. Resolution: prefer ours.";
+    case "reorder_only":         return "Same lines in a different order. Resolution: take the theirs ordering.";
+    case "insertion_at_boundary": return "Pure insertions on both sides, resolved by union.";
+    case "value_only_change":    return "Same structure, differing volatile value(s). Resolution: take theirs.";
+    case "token_level_merge":    return "Line/token merge proposed. User confirmation is required before it is applied.";
+    case "llm_proposed":         return "LLM fallback enabled; resolution delegated to the configured LLM endpoint.";
+    case "complex":              return "Complex conflict: every automatic heuristic failed.";
+    default:                     return `Detected type: ${type}.`;
   }
 }
 

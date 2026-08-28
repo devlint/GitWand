@@ -264,7 +264,7 @@ export function tryResolveDockerfileConflict(
     if (!merged) {
       return {
         lines: null,
-        reason: "[dockerfile] Conflit irréductible dans un stage — fallback textuel.",
+        reason: "[dockerfile] Irreducible conflict inside a stage, falling back to the textual engine.",
       };
     }
     resultLines.push(...merged);
@@ -279,6 +279,6 @@ export function tryResolveDockerfileConflict(
 
   return {
     lines: resultLines,
-    reason: "Dockerfile — merge par stage et instruction (FROM prefer-theirs, ENV/ARG par clé, RUN conservatif).",
+    reason: "Dockerfile merged by stage and instruction (FROM prefer-theirs, ENV/ARG by key, RUN conservatively).",
   };
 }
