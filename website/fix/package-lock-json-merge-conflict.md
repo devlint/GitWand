@@ -116,13 +116,20 @@ package-lock.json merge=npm-lock
 
 **Batch dependency updates.** Most lockfile conflicts come from several bot PRs updating dependencies in parallel. Grouping them into one PR per week removes the overlap rather than resolving it.
 
-## A structural resolution
+## Why GitWand declines to merge lockfiles by default
 
-The reason `--theirs` is a coin flip is that the tooling has thrown away the structure. A lockfile is not lines — it is a map of independent entries, which is exactly the shape a three-way merge handles perfectly.
+The reason `--theirs` is a coin flip is that the tooling has thrown away the structure. A lockfile is not lines — it is a map of independent entries, which looks like exactly the shape a three-way merge should handle perfectly.
 
-[GitWand](/) resolves lockfiles that way. It ships dedicated semantic resolvers for `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml` and `Cargo.lock`: each version is parsed into a map of package entries, merged key by key against the common ancestor, and re-serialised with the original formatting. Added on one side only → kept. Removed on one side, untouched on the other → removed. Changed on one side → taken. Changed on both to different versions → surfaced to you as a real conflict, with the package named, instead of buried in a thousand-line diff.
+[GitWand](/) tried that: dedicated semantic resolvers for `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml` and `Cargo.lock`, each version parsed into a map of package entries and merged key by key against the common ancestor. Then it [measured the result against 1,662 real merges](https://github.com/devlint/GitWand/tree/main/benchmark) instead of assuming it was correct — and even a structurally-correct key-wise merge diverged from what the team actually committed in almost every case, because a lockfile also encodes a resolved dependency *graph*, not just a set of independent pins; merging two valid maps key by key can still produce a graph the installer would never have resolved to on its own.
 
-The same [engine](/guide/conflict-resolution) handles the JSON, YAML, TypeScript import blocks and Vue SFCs around it, and runs as a [desktop app](/guide/desktop), a [CLI](/guide/cli) for hooks and CI, and an [MCP server](/guide/mcp) for coding agents. A reinstall is still recommended afterwards — a merged lockfile is consistent, not necessarily freshly resolved.
+So by default, GitWand **declines** lockfile conflicts instead of guessing: it names the file, explains why, and tells you to resolve `package.json` (or `composer.json`, `Cargo.toml`…) first and re-run the installer — the workflow above. Only the changes that fabricate nothing still apply automatically: identical edits on both sides, a change on one side only, a deletion against an untouched side, whitespace-only differences.
+
+Two opt-ins exist for teams that want more automation, each measured rather than assumed safe:
+
+- **`gitwand resolve --regenerate`** (or `.gitwandrc`'s `regenerate: true`) actually re-runs the installer for you — in a disposable, sandboxed `git worktree`, never your real working tree, with no secrets forwarded to the child process. Measured accuracy on this tier so far is below the bar GitWand holds itself to for auto-applying anything (see the [benchmark README](https://github.com/devlint/GitWand/tree/main/benchmark) for the current numbers), so treat it as a fast first attempt to verify, not a silent auto-merge.
+- **`resolveGeneratedFiles: true`** in `.gitwandrc` (or `--resolve-generated` on the CLI) restores the old key-wise semantic merge described above, for teams that have decided — as a repository convention — that they'd rather merge lockfiles than regenerate them.
+
+The same [engine](/guide/conflict-resolution) handles the JSON, YAML, TypeScript import blocks and Vue SFCs around it, and runs as a [desktop app](/guide/desktop), a [CLI](/guide/cli) for hooks and CI, and an [MCP server](/guide/mcp) for coding agents.
 
 ## FAQ
 

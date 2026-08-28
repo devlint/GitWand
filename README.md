@@ -163,8 +163,10 @@ GitWand uses a **pattern registry** — the classifier evaluates patterns in pri
 | **reorder_only** | Same lines, different order — pure permutation | High |
 | **insertion_at_boundary** | Pure insertions on both sides, base intact | High |
 | **value_only_change** | Scalar value update (version number, constant) | Medium |
-| **generated_file** | File matches a known generated-file path pattern | High |
+| **generated_file** | File matches a known generated-file path pattern | Declined by default* |
 | **complex** | Overlapping edits — never auto-resolved | — |
+
+\* Generated files (lockfiles, minified bundles, `dist/` outputs) are declined by default — [measured on 1,662 real merges](https://github.com/devlint/GitWand/tree/main/benchmark), auto-merging them diverged from what teams actually shipped in almost every case. GitWand tells you to resolve the source file and re-run the installer/build instead. Opt back into the old accept-theirs/semantic-merge behavior with `.gitwandrc`'s `resolveGeneratedFiles: true` or `gitwand resolve --resolve-generated`.
 
 ### Composite confidence score
 
@@ -183,6 +185,8 @@ Every resolution carries a `ConfidenceScore` object rather than a simple label:
   penalties: ["Content will be regenerated — theirs assumed more recent"],
 }
 ```
+
+(Shape shown for a `generated_file` hunk with `resolveGeneratedFiles: true` — the default is to decline generated files rather than score and apply them; see the pattern table above.)
 
 Score formula: `score = typeClassification − dataRisk×0.4 − scopeImpact×0.15`
 
