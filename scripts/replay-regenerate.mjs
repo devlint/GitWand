@@ -82,6 +82,7 @@ import {
 import { runRegeneration } from "../packages/cli/dist/regenerate-runner.js";
 import { structuralMatch } from "./lib/regenerate-compare.mjs";
 import { seedScratchIndex } from "./lib/seed-index.mjs";
+import { mergeTree as mergeTreeLib } from "./lib/merge-tree.mjs";
 
 // ─── args ────────────────────────────────────────────────────────────────────
 
@@ -170,19 +171,15 @@ process.on("SIGTERM", () => restoreHeadAndExit("SIGTERM"));
 let mergeTreeErrors = 0;
 
 /** merge-tree exits 1 on conflict — capture that case without throwing. Same
- * pattern as replay-conflicts.mjs's mergeTree(): DO NOT throw on conflict. */
+ * pattern as replay-conflicts.mjs's mergeTree(): DO NOT throw on conflict.
+ * Delegates to scripts/lib/merge-tree.mjs (see its doc comment for the `-z`
+ * fix and the exact output shape it was verified against); any error that
+ * isn't a recognised conflict outcome is counted here rather than crashing
+ * the whole candidate-discovery sweep. */
 function mergeTree(p1, p2) {
   try {
-    git(["-c", "merge.conflictstyle=diff3", "merge-tree", "--write-tree", "--name-only", p1, p2], {
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-    return null; // exit 0 → clean merge, no lockfile conflict possible
-  } catch (err) {
-    if (err.status === 1 && typeof err.stdout === "string") {
-      const [head] = err.stdout.split("\n\n");
-      const lines = head.split("\n").filter(Boolean);
-      return { treeOid: lines[0], files: lines.slice(1) };
-    }
+    return mergeTreeLib(repo, p1, p2);
+  } catch {
     mergeTreeErrors++;
     return null;
   }

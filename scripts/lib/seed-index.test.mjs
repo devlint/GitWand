@@ -301,3 +301,95 @@ test("seedScratchIndex(skipPaths) tolerates sibling filenames with quotes/spaces
     rmSync(repo, { recursive: true, force: true });
   }
 });
+
+// Bug B regression — the blobless-clone `mktree --missing` fix (see the
+// module doc's "Third finding") shipped without a regression test, on a
+// claim that a hermetic fixture "cannot reproduce" a blobless clone since it
+// is "never blobless". That claim is false: a genuinely blobless bare clone
+// is reproducible locally, with no network, using exactly the technique
+// below — confirmed empirically here (see also benchmark/README.md's "Full
+// corpus sweep re-run #2" section, which documents an independent review
+// reproducing this the same way).
+//
+// Build a normal (non-bare) origin repo with real commits, enable
+// `uploadpack.allowFilter` on it (required for `--filter` to work at all
+// against a local transport), then `git clone --bare --filter=blob:none
+// file://<origin>` into a second temp path. That clone's object database
+// genuinely has zero blob objects (confirmed below via `cat-file
+// --batch-all-objects --batch-check`) — the exact shape `git mktree`
+// (without `--missing`) fails against with `fatal: entry '<path>' object
+// <sha> is unavailable`.
+test("seedScratchIndex(skipPaths) works against a genuinely blobless bare clone (mktree --missing)", () => {
+  const originRepo = mkdtempSync(join(tmpdir(), "gw-seed-index-blobless-origin-"));
+  const bareRepo = mkdtempSync(join(tmpdir(), "gw-seed-index-blobless-bare-"));
+  try {
+    git(originRepo, ["init", "-q", "-b", "main"]);
+    git(originRepo, ["config", "user.email", "t@t.com"]);
+    git(originRepo, ["config", "user.name", "t"]);
+    writeFileSync(join(originRepo, "conflicted.txt"), "base\n");
+    writeFileSync(join(originRepo, "clean-only.txt"), "base clean\n");
+    git(originRepo, ["add", "-A"]);
+    git(originRepo, ["commit", "-q", "-m", "base"]);
+    // Required for a blobless clone to work at all against a local
+    // (file://) transport — without this, the clone below fails outright.
+    git(originRepo, ["config", "uploadpack.allowFilter", "true"]);
+
+    git(originRepo, ["checkout", "-q", "-b", "theirs"]);
+    writeFileSync(join(originRepo, "conflicted.txt"), "theirs change\n");
+    git(originRepo, ["add", "-A"]);
+    git(originRepo, ["commit", "-q", "-m", "theirs: conflicting change"]);
+    const theirsSha = git(originRepo, ["rev-parse", "HEAD"]).trim();
+
+    git(originRepo, ["checkout", "-q", "main"]);
+    writeFileSync(join(originRepo, "conflicted.txt"), "main change\n");
+    git(originRepo, ["add", "-A"]);
+    git(originRepo, ["commit", "-q", "-m", "main: conflicting change"]);
+    const mainSha = git(originRepo, ["rev-parse", "HEAD"]).trim();
+
+    // The real 3-way merge-tree result, computed BEFORE cloning (bare
+    // clones have no work tree, but merge-tree needs none either way — this
+    // just mirrors when replay-regenerate.mjs's candidate discovery runs it,
+    // against the full, non-blobless origin).
+    const treeOid = mergeTreeWriteTree(originRepo, mainSha, theirsSha);
+
+    rmSync(bareRepo, { recursive: true, force: true });
+    git(originRepo, ["clone", "-q", "--bare", "--filter=blob:none", `file://${originRepo}`, bareRepo]);
+    assert.equal(
+      git(bareRepo, ["rev-parse", "--is-bare-repository"]).trim(),
+      "true",
+      "fixture must actually be bare, or this test proves nothing",
+    );
+
+    // Confirm the clone is GENUINELY blobless (not just requested as such) —
+    // zero blob objects present locally, only the commits/trees that were
+    // fetched to satisfy the ref advertisement.
+    const batchCheck = git(bareRepo, ["cat-file", "--batch-all-objects", "--batch-check=%(objecttype)"]);
+    const objectTypeCounts = batchCheck
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .reduce((counts, type) => ({ ...counts, [type]: (counts[type] ?? 0) + 1 }), {});
+    assert.equal(
+      objectTypeCounts.blob ?? 0,
+      0,
+      `fixture must be genuinely blobless (0 blob objects locally) — got: ${JSON.stringify(objectTypeCounts)}`,
+    );
+
+    const scratchIndex = join(bareRepo, "scratch-test-index-blobless");
+    // Must NOT throw `fatal: entry '<path>' object <sha> is unavailable`.
+    seedScratchIndex(bareRepo, treeOid, scratchIndex, ["conflicted.txt"]);
+
+    const listing = lsFilesScratch(bareRepo, scratchIndex);
+    assert.ok(
+      !listing.split("\n").some((l) => l.endsWith("\tconflicted.txt")),
+      `conflicted.txt must be ABSENT from the scratch index — got:\n${listing}`,
+    );
+    assert.ok(
+      listing.includes("clean-only.txt"),
+      `clean-only.txt must be present at stage 0 in the scratch index — got:\n${listing}`,
+    );
+  } finally {
+    rmSync(originRepo, { recursive: true, force: true });
+    rmSync(bareRepo, { recursive: true, force: true });
+  }
+});
