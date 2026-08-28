@@ -57,22 +57,22 @@ const llmProposed: PatternPlugin = {
       0,    // scopeImpact : inconnu à ce stade
       [],   // boosters
       [
-        "Résolution non déterministe (LLM)",
-        "Validation post-merge stricte requise avant acceptation",
+        "Non-deterministic resolution (LLM)",
+        "Strict post-merge validation required before acceptance",
       ],
     );
   },
 
   explanation(_h: ClassifyInput): string {
-    return "Résolution proposée par LLM fallback. Le hunk sera envoyé à l'endpoint LLM configuré pour une résolution assistée. La résolution sera validée (parse-tree + tsc/eslint) avant acceptation.";
+    return "Resolution proposed by the LLM fallback. The hunk is sent to the configured LLM endpoint for an assisted resolution, which is validated (parse tree plus tsc/eslint) before it can be accepted.";
   },
 
   passReason(_h: ClassifyInput): string {
-    return "Aucun pattern déterministe applicable — délégation au LLM fallback (opt-in).";
+    return "No deterministic pattern applies; delegating to the LLM fallback (opt-in).";
   },
 
   failReason(_h: ClassifyInput): string {
-    return "LLM fallback désactivé (options.llmFallback.enabled !== true).";
+    return "LLM fallback disabled (options.llmFallback.enabled !== true).";
   },
 };
 

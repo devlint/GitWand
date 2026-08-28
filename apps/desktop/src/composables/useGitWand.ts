@@ -579,7 +579,7 @@ export function useGitWand() {
       selectedPath.value = loaded[0].path;
     }
 
-    // v2.7 — agrégat local de la métrique tier (dédupliqué par empreinte,
+    // v3.4 — agrégat local de la métrique tier (dédupliqué par empreinte,
     // les refreshs du même jeu de conflits ne recomptent pas).
     const { recordFile } = useTierStats();
     for (const f of loaded) {

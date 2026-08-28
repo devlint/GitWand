@@ -53,7 +53,7 @@ describe("F1 — JSON : clé ajoutée d'un seul côté (diff3)", () => {
 
 // ─── F2 — même clé modifiée des deux côtés ────────────────────────────────────
 //
-// v2.7 : value_only_change couvre désormais le diff3 (requires "both"). Ce
+// v3.4 : value_only_change couvre désormais le diff3 (requires "both"). Ce
 // fixture — version bumpée différemment des deux côtés — est exactement son
 // cas nominal : résolution semver-max (3.0.0), déterministe. Avant, le hunk
 // restait complex et le refus portait la note [json] ; ces assertions

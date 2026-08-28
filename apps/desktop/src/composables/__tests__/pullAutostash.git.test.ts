@@ -18,9 +18,16 @@ import { join } from "node:path";
 
 const AUTHOR_NAME = "GitWand Test";
 const AUTHOR_EMAIL = "test@gitwand.test";
-// Real git subprocesses (init/clone/push/pull) are slower than the 5s default
-// under full-suite parallel load — give them real headroom instead of flaking.
-const GIT_TEST_TIMEOUT_MS = 20_000;
+// Real git subprocesses (init/clone/push/pull), per AGENTS.md's rule against
+// mocking the git layer. Measured at 20.2s for the six tests in this file with
+// the machine otherwise idle, so ~3.4s each before any contention, and one of
+// them was observed at 31s once the whole monorepo ran at once.
+//
+// 60s is deliberately generous, and matches the other git-backed suites. A
+// timeout here exists to catch a hang, not to enforce a performance budget,
+// and it costs nothing on a passing run. The previous 20s was tuned just above
+// what had been observed, which is what produced the flake in issue #172.
+const GIT_TEST_TIMEOUT_MS = 60_000;
 
 function gitEnv(): NodeJS.ProcessEnv {
   return {

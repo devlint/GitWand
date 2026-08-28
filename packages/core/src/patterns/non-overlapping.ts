@@ -15,20 +15,20 @@ const nonOverlapping: PatternPlugin = {
     const mergedSize = Math.max(h.oursLines.length, h.theirsLines.length);
     return makeScore(90, 20, scopeImpact(mergedSize), [
       "Base disponible",
-      "Merge LCS 3-way réussi sans chevauchement",
+      "3-way LCS merge succeeded with no overlap",
     ], []);
   },
 
   explanation(_h: ClassifyInput): string {
-    return "Les deux branches ont modifié des zones différentes du même bloc. Fusion automatique possible.";
+    return "The branches modified different regions of the same block, so an automatic merge is possible.";
   },
 
   passReason(_h: ClassifyInput): string {
-    return "Le merge 3-way LCS a réussi sans conflit — les modifications ne se chevauchent pas.";
+    return "The 3-way LCS merge succeeded with no conflict: the edits do not overlap.";
   },
 
   failReason(_h: ClassifyInput): string {
-    return "Le merge 3-way LCS détecte un chevauchement — les deux branches ont modifié les mêmes lignes.";
+    return "The 3-way LCS merge detects an overlap: both branches modified the same lines.";
   },
 };
 

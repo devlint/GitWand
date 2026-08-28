@@ -13,17 +13,17 @@ const complex: PatternPlugin = {
 
   confidence(_h: ClassifyInput): ConfidenceScore {
     return makeScore(100, 100, 0, [], [
-      "Aucune heuristique automatique applicable",
-      "Les deux branches ont modifié le bloc de façon incompatible",
+      "No automatic heuristic applies",
+      "Both branches modified the block in incompatible ways",
     ]);
   },
 
   explanation(_h: ClassifyInput): string {
-    return "Conflit complexe nécessitant une résolution manuelle. Les deux branches ont modifié ce bloc différemment.";
+    return "A genuine conflict that needs a human. Both branches modified this block differently.";
   },
 
   passReason(_h: ClassifyInput): string {
-    return "Aucun pattern automatique ne s'applique — résolution manuelle requise.";
+    return "No automatic pattern applies; manual resolution required.";
   },
 
   failReason(_h: ClassifyInput): string {

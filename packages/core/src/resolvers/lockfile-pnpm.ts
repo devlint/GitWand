@@ -309,8 +309,8 @@ export function tryResolvePnpmLockConflict(
   }
 
   const reason = totalConflicts > 0
-    ? `Fusion sémantique pnpm-lock.yaml : ${totalResolved} entrée(s), ${totalConflicts} conflit(s) résolu(s) (prefer-theirs).`
-    : `Fusion sémantique pnpm-lock.yaml réussie : ${totalResolved} entrée(s) fusionnée(s) sans conflit.`;
+    ? `Semantic pnpm-lock.yaml merge: ${totalResolved} entries merged, ${totalConflicts} conflict(s) resolved (prefer-theirs).`
+    : `Semantic pnpm-lock.yaml merge succeeded: ${totalResolved} entries merged with no conflict.`;
 
   return {
     merged: outputLines.join("\n"),

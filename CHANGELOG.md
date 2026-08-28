@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`/agent`, a WebMCP page.** gitwand.app/agent exposes two read-only git tools to any agent browsing it, over the W3C WebMCP standard: `parse_git_error` explains a failing git command and gives the commands that fix it, `resolve_conflict` runs the deterministic engine over a conflicted file and reports per hunk what was resolved and what still needs a human. Both execute in the visitor's tab, so nothing is uploaded and there is no backend. `@gitwand/core` is imported on demand rather than at module scope, which keeps it out of the shared theme chunk every page downloads.
+- The page states its own registration status live, including when the browser has no WebMCP at all, and writes both tool contracts out in HTML and JSON-LD for the majority of visitors and crawlers that will never run the script.
+- **A try-it panel on `/agent`.** Both tools can be run by hand from the page, against editable sample inputs, so the majority of visitors whose browser has no WebMCP can still see what an agent gets back. It calls the same `execute` an agent calls rather than a mock, and deliberately does not feed the agent call counter.
+
+### Changed
+
+- **The engine speaks English.** Every explanation, resolution reason, decision-trace step, confidence booster and penalty `@gitwand/core` produces was written in French. None of the consumers translate them, so the desktop merge editor, the CLI summary and the `@gitwand/mcp` `explanation` / `resolutionReason` fields have been handing French text to every user and every agent, whatever their locale. 194 strings translated across 38 files. Comments and test names stay French: this is only about what leaves the engine.
+- A regression guard (`__tests__/english-output.test.ts`) runs the engine over the whole corpus and asserts that no string it hands back is French, checking real output rather than scanning source so it cannot be fooled by how a string is assembled. It caught four strings a source scan had missed, including one with no accented characters in it.
+
+### Fixed
+
+- **`pnpm test` was non-deterministic (#172).** Suites that use real git repositories are subprocess-bound, not CPU-bound, and were timing out under the load of the whole monorepo testing at once. Every git-backed suite now shares a 60s timeout, chosen to catch a hang rather than to enforce a performance budget. Running workspaces one at a time turned out to be **faster** as well as deterministic (49s against 119s), because five packages each fanning out to one worker per core oversubscribes the machine several times over, so `pnpm test` now passes `--workspace-concurrency=1`. Eleven consecutive full runs green, against roughly one failure in three before.
+
+- **Site-wide WebMCP tools went dark on browsers without `navigator.modelContext`.** The registration script bailed out entirely unless the deprecated `navigator` location existed, so the three documentation tools would disappear the day Chrome removes the alias it deprecated in 150. It now prefers `document.modelContext`, where the spec has put the entry point since 27 May 2026, and falls back to `navigator` only when that is all the browser offers. It registers once either way: on the versions exposing both names they alias the same object, so registering on both would have duplicated every tool.
+- **WebMCP tools could never be unregistered.** `signal` was passed as a property of the tool dictionary, which declares no such member, so it was silently dropped. It now goes in the options argument where `ModelContextRegisterToolOptions` expects it.
+
 ## [3.8.0] - 2026-08-24
 
 ### Added

@@ -89,7 +89,7 @@ export function applyPostMergeRiskPenalty<
     autoResolved: false,
     resolvedLines: null,
     resolutionReason:
-      "Rétracté : le contenu fusionné contient des erreurs syntaxiques (parse-tree tree-sitter). Intervention manuelle requise.",
+      "Retracted: the merged content contains syntax errors (tree-sitter parse-tree). Manual intervention required.",
     hunk: {
       ...resolution.hunk,
       confidence: {
@@ -102,7 +102,7 @@ export function applyPostMergeRiskPenalty<
         },
         penalties: [
           ...resolution.hunk.confidence.penalties,
-          "v2.4 — Parse-tree invalide après résolution automatique",
+          "Parse-tree invalid after automatic resolution",
         ],
       },
     },

@@ -6,10 +6,15 @@
   "scripts": {
     "dev": "vitepress dev",
     "build": "vitepress build",
-    "preview": "vitepress preview"
+    "preview": "vitepress preview",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@gitwand/core": "workspace:*"
   },
   "devDependencies": {
     "vitepress": "2.0.0-alpha.17",
+    "vitest": "^4.1.0",
     "vue": "^3.5.0"
   }
 }

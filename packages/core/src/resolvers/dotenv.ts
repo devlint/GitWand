@@ -101,7 +101,7 @@ export function tryResolveDotenvConflict(
   if (!oursParsed || !theirsParsed) {
     return {
       lines: null,
-      reason: "[dotenv] Valeurs multilignes détectées — fallback textuel.",
+      reason: "[dotenv] Multi-line values detected, falling back to the textual engine.",
     };
   }
 
@@ -141,6 +141,6 @@ export function tryResolveDotenvConflict(
 
   return {
     lines: result,
-    reason: "Format key=value — merge par clé (.env). Nouvelles clés ajoutées des deux côtés ; conflits de valeur résolus en faveur de theirs.",
+    reason: "key=value format merged by key (.env). New keys from both sides are kept; value conflicts resolve to theirs.",
   };
 }

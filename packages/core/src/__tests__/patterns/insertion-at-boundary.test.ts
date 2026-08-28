@@ -50,7 +50,7 @@ describe("F23 — insertion_at_boundary : liste de dépendances npm (diff3)", ()
 
   it("le booster 'Insertions pures' est présent", () => {
     const result = resolve(input, "package.json");
-    expect(result.hunks[0].confidence.boosters.join(" ")).toMatch(/Insertions pures/);
+    expect(result.hunks[0].confidence.boosters.join(" ")).toMatch(/Pure insertions/);
   });
 });
 

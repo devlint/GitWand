@@ -191,7 +191,7 @@ export function tryResolveCargoTomlConflict(
       // Conflit sur une section non reconnue → fallback
       return {
         lines: null,
-        reason: `[cargo] Section "${header}" modifiée des deux côtés — fallback textuel.`,
+        reason: `[cargo] Section "${header}" modified on both sides, falling back to the textual engine.`,
       };
     }
   }
@@ -203,7 +203,7 @@ export function tryResolveCargoTomlConflict(
 
   return {
     lines: result,
-    reason: "Cargo.toml — merge par nom de crate (union des dépendances, prefer-theirs en cas de conflit de version).",
+    reason: "Cargo.toml merged by crate name (union of dependencies, prefer-theirs on a version conflict).",
   };
 }
 
@@ -302,7 +302,7 @@ export function tryResolveCargoLockConflict(
 
   return {
     lines: result,
-    reason: "Cargo.lock — merge par crate name+version (union, prefer-theirs). Vérification recommandée : `cargo check`.",
+    reason: "Cargo.lock merged by crate name and version (union, prefer-theirs). Recommended check: `cargo check`.",
   };
 }
 

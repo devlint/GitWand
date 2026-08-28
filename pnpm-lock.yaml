@@ -224,10 +224,17 @@ importers:
         version: 5.9.3
 
   website:
+    dependencies:
+      '@gitwand/core':
+        specifier: workspace:*
+        version: link:../packages/core
     devDependencies:
       vitepress:
         specifier: 2.0.0-alpha.17
         version: 2.0.0-alpha.17(@types/node@25.5.0)(postcss@8.5.15)(typescript@5.9.3)(yaml@2.8.3)
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.0(@types/node@25.5.0)(jsdom@25.0.1)(vite@7.3.5(@types/node@25.5.0)(yaml@2.8.3))
       vue:
         specifier: ^3.5.0
         version: 3.5.32(typescript@5.9.3)

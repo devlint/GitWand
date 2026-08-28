@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { AUTO_PATTERN_COUNT } from './patterns'
 
 type Locale = 'en' | 'fr' | 'es' | 'pt-BR' | 'zh-CN'
 
@@ -40,24 +41,6 @@ function runTerminalDemo() {
 }
 
 
-// ── Resolution patterns (technical — not localised) ───────────────────────────
-// 8 deterministic patterns auto-apply (auto: true). token_level_merge proposes
-// a merge you confirm; refactoring_aware_merge and llm_proposed are opt-in;
-// complex is the fallback that always hands the hunk back with its trace.
-const PATTERNS = [
-  { name: 'same_change',           conf: 'certain', auto: true,  desc: 'Both branches made the exact same edit.' },
-  { name: 'one_side_change',       conf: 'certain', auto: true,  desc: 'Only one branch touched this block.' },
-  { name: 'delete_no_change',      conf: 'certain', auto: true,  desc: 'One side deleted the block, the other left it untouched.' },
-  { name: 'non_overlapping',       conf: 'high',    auto: true,  desc: 'Additions at different positions in the block.' },
-  { name: 'whitespace_only',       conf: 'high',    auto: true,  desc: 'Same logic, different indentation or spacing.' },
-  { name: 'reorder_only',          conf: 'high',    auto: true,  desc: 'Same lines, different order.' },
-  { name: 'insertion_at_boundary', conf: 'high',    auto: true,  desc: 'New lines added at the edge of a hunk.' },
-  { name: 'value_only_change',     conf: 'high',    auto: true,  desc: 'A scalar value (version, timestamp, hash) updated on both sides — keeps the higher semver / later timestamp.' },
-  { name: 'token_level_merge',     conf: 'medium',  auto: false, desc: 'Both sides changed disjoint tokens on the same line — proposes a merge you confirm, never auto-applied.' },
-  { name: 'refactoring_aware_merge', conf: 'high',  auto: false, desc: 'Rename/move detected and replayed across the conflict (opt-in).' },
-  { name: 'llm_proposed',          conf: 'medium',  auto: false, desc: 'AI-proposed resolution, validated post-merge (opt-in).' },
-  { name: 'complex',               conf: 'low',     auto: false, desc: 'Overlapping edits — surfaced with full classification trace.' },
-] as const
 
 // Short labels keep the picker compact; `title` surfaces the full native name on hover.
 const LOCALES: { code: Locale; label: string; title: string }[] = [
@@ -852,7 +835,7 @@ function cellClass(v: CompareValue | undefined): string {
     ══════════════════════════════════════ -->
     <section class="stats-bar">
       <div class="stat">
-        <span class="stat-n">8</span>
+        <span class="stat-n">{{ AUTO_PATTERN_COUNT }}</span>
         <span class="stat-l">{{ t.statPatterns }}</span>
       </div>
       <div class="stat-sep"></div>

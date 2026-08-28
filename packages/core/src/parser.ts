@@ -166,7 +166,7 @@ export function toConflictHunk(conflict: RawConflict): ConflictHunk {
 
   const isZdiff3 = detectZdiff3(conflict);
   const adjustedConfidence = isZdiff3
-    ? withBaseAvailability(confidence, 100, "zdiff3 — base tronquée aux sections divergentes")
+    ? withBaseAvailability(confidence, 100, "zdiff3: base truncated to the diverging sections")
     : confidence;
 
   return {

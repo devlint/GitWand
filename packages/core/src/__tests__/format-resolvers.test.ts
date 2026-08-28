@@ -242,7 +242,7 @@ describe("Phase 7.3 — JSON resolver", () => {
       const result = tryResolveJsonConflict(base, ours, theirs);
 
       expect(result.merged).toBeNull();
-      expect(result.reason).toMatch(/parser ours/i);
+      expect(result.reason).toMatch(/parse ours/i);
     });
 
     it("retourne null si theirs n'est pas un JSON valide", () => {
@@ -253,7 +253,7 @@ describe("Phase 7.3 — JSON resolver", () => {
       const result = tryResolveJsonConflict(base, ours, theirs);
 
       expect(result.merged).toBeNull();
-      expect(result.reason).toMatch(/parser theirs/i);
+      expect(result.reason).toMatch(/parse theirs/i);
     });
   });
 
