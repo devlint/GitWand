@@ -1,7 +1,8 @@
 /**
  * Fixture-based tests for regenerate-compare.mjs — fast, no network, no real
  * installs. Run with: node --test scripts/lib/regenerate-compare.test.mjs
- * (see root package.json's "test:regenerate-compare" script).
+ * (see root package.json's "test:scripts-lib" script, which runs every
+ * scripts/lib/*.test.mjs file, this one included).
  */
 
 import { test } from "node:test";

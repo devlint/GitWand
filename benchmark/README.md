@@ -474,37 +474,34 @@ evidence — n = 1 justifies nothing either way. Do not read this section as
 one data point.
 
 On hypothesis (d) specifically (does merge-index seeding move the number):
-**this sweep cannot confirm or refute it.** The fix from tasks 2–3 was
-exercised (`replay-regenerate.mjs` now seeds its scratch index from the real
-merge-tree result, per its module header), but the bottleneck this sweep hit
-is a *different* failure surface than the one hypothesis (d) targeted: 11 of
-13 runnable `prettier/prettier` candidates failed at the `yarn install
---mode=update-lockfile` step itself — before ever reaching the comparison the
-seeding fix was meant to improve. Manually reproducing `yarn install
---mode=update-lockfile` against one of the same merges' unmodified checkout
-(no `resolvedSources` overlay applied) succeeds cleanly in this environment,
-so the toolchain itself is not broken; the failures are specific to the
-regenerated worktree state for those particular candidates and were not
-further root-caused here (out of scope for an operator-run measurement task).
-Whether this `spawn-failed` surface is itself a side effect of seeding from a
-more realistic (and more heterogeneous) merge-index state — as opposed to the
-old `HEAD`-only worktree, which by construction produced closer-to-trivial
-installs — is a plausible hypothesis, not a confirmed finding.
+**this sweep cannot confirm or refute it, for a reason stronger than "different
+failure surface" — see the invalidation notice above this section.** The
+dominant `spawn-failed` bottleneck (11 of 13 runnable `prettier/prettier`
+candidates failing inside `yarn install --mode=update-lockfile` itself) has
+since been root-caused: the harness's scratch-index construction had a real
+bug that materialized diff3 conflict-marker text into the disposable
+worktree for paths a genuine in-progress merge would have left untouched —
+exactly the kind of corrupted input that would make `yarn install` fail. That
+bug is now fixed (see the invalidation notice). The "side effect of a more
+realistic merge-index state" explanation this paragraph previously floated is
+superseded by that finding — it is not a competing hypothesis still worth
+weighing, it was this sweep measuring its own harness bug. **The numbers in
+this section remain invalidated regardless of which explanation is
+correct; a fresh sweep against the fixed harness is required either way.**
 
 Before revisiting: (a) a corpus re-pin adding an application-shaped PHP repo
 so the composer leg becomes measurable at all is still needed and is
-explicitly out of scope for this plan; (b) the new dominant bottleneck,
-`spawn-failed` on 11 of 13 runnable `prettier/prettier` candidates, needs its
-own root-cause pass (capture full `yarn` stdout/stderr per failure, not just
-the truncated 3-line `reason` string) before any further accuracy conclusion
-is possible; (c) `tauri-apps/tauri`'s 100 % `not-runnable` rate across both
+explicitly out of scope for this plan; (b) the harness bug behind the
+`spawn-failed` bottleneck is now fixed (see the invalidation notice above) —
+what's still needed is the fresh full sweep itself, not further root-causing;
+(c) `tauri-apps/tauri`'s 100 % `not-runnable` rate across both
 its ecosystems (32 candidates found, 30 attempted — cargo capped at
 `--max-real 20`, all 10 yarn-berry attempted) suggests `resolve()`'s handling
 of `Cargo.toml`/`package.json` conflicts in a large mixed-language monorepo
 may itself be a bigger practical ceiling on this feature than the
-regeneration step being measured here — worth its own investigation; (d) once
-(b) is understood, a re-run with a materially larger comparable sample (not
-just a larger attempted count) is needed before the ≥ 80 % target can be
+regeneration step being measured here — worth its own investigation; (d) the
+fresh sweep against the fixed harness needs a materially larger comparable
+sample (not just a larger attempted count) before the ≥ 80 % target can be
 honestly called met or missed.
 
 ## Results
