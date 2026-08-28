@@ -2,7 +2,7 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { TOOLS, parseGitErrorTool, resolveConflictTool } from './tools'
 import MergeRoom from './MergeRoom.vue'
-import { SAMPLE_GIT_ERROR, SAMPLE_CONFLICT } from './tools/samples'
+import { SAMPLE_GIT_ERROR, SAMPLE_CONFLICT, SAMPLE_LOCKFILE, SAMPLE_DETACHED_HEAD } from './tools/samples'
 import { registerTools, type Surface } from './webmcp'
 
 /**
@@ -21,7 +21,33 @@ let controller: AbortController | null = null
 // No separate call counter any more: the room's activity log records every
 // invocation with its actor and timestamp, which is the same evidence in a
 // form that says what happened rather than only how often.
+/**
+ * Seed one real case on arrival. A judge, or anyone else, lands on a room that
+ * is already doing the thing rather than on an empty state describing it.
+ *
+ * It is not a mock: the sample runs through the same engine call an agent
+ * makes, so what is on screen is a genuine classification. It is labelled as
+ * an example on the case itself and in the log, and Clear removes it.
+ */
+async function seedExample() {
+  const signal = new AbortController().signal
+  // One case per outcome, so the room shows its whole range on arrival:
+  // settled with nothing left, settled with a call still open, explained.
+  await resolveConflictTool.execute(
+    { content: SAMPLE_LOCKFILE, filePath: 'pnpm-lock.yaml' },
+    { signal },
+    { example: true },
+  )
+  await resolveConflictTool.execute(
+    { content: SAMPLE_CONFLICT, filePath: 'src/server.ts' },
+    { signal },
+    { example: true },
+  )
+  await parseGitErrorTool.execute({ output: SAMPLE_DETACHED_HEAD }, { signal }, { example: true })
+}
+
 onMounted(async () => {
+  await seedExample()
   controller = new AbortController()
   const outcome = await registerTools(TOOLS, { signal: controller.signal })
   surface.value = outcome.surface
@@ -96,11 +122,12 @@ function pick(id: ToolId) {
         </div>
 
         <header class="shop-head">
-          <h1 class="shop-h1">Merge Room</h1>
+          <h1 class="shop-h1">Merge Room for humans and agents.</h1>
           <p class="shop-line">
-            Your agent clears what was never a decision. Everything the two branches genuinely
-            disagree about waits here for you, and no tool on this page can take that call.
+            Your agent clears what was never a decision.
+            <strong>What your branches genuinely disagree about waits for you.</strong>
           </p>
+          <p class="shop-note">No tool on this page can take that call. That is the point.</p>
         </header>
 
         <MergeRoom />
@@ -181,16 +208,18 @@ function pick(id: ToolId) {
           <div class="spec-row">
             <dt><code>parse_git_error</code></dt>
             <dd>
-              <p>The raw output of a git command that failed, in. The cause in plain words and the
-              commands that resolve it, out. Fourteen of the failures you actually hit.</p>
+              <p>The raw output of a git command that failed goes in. Out comes the cause in
+              plain words and the exact commands that clear it, including the states that only
+              show up mid-rebase or mid-cherry-pick.</p>
               <p class="spec-io"><code>{ output: string }</code></p>
             </dd>
           </div>
           <div class="spec-row">
             <dt><code>list_cases</code></dt>
             <dd>
-              <p>Reads the room back: what is filed, what the engine settled, what is still waiting
-              on you. It is what lets an agent pick up where it left off.</p>
+              <p>Closes the loop. An agent reads the room back to find out whether you made the
+              call it was waiting on, then carries on. Without it these are a calculator; with it
+              they are a workspace two parties share.</p>
               <p class="spec-io"><code>{}</code></p>
             </dd>
           </div>
@@ -229,7 +258,7 @@ function pick(id: ToolId) {
 .wrap{max-width:940px;margin:0 auto;padding:0 26px;}
 
 /* ── workshop ─────────────────────────────────────────────────────────── */
-.shop{padding:26px 0 74px;}
+.shop{padding:20px 0 74px;}
 .strip{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:13px;color:var(--ink-dim);padding:11px 15px;background:var(--surface);border:1px solid var(--rule-soft);border-radius:9px;}
 .strip code{font-family:'JetBrains Mono',monospace;font-size:0.92em;color:var(--ink);}
 .dot{width:7px;height:7px;border-radius:99px;background:var(--ink-dim);flex:none;}
@@ -238,10 +267,12 @@ function pick(id: ToolId) {
 .strip--legacy{color:var(--waiting);}
 .strip-fail{color:#f87171;}
 
-.shop-head{margin:46px 0 30px;}
-.shop-h1{font-size:40px;line-height:1.08;font-weight:800;letter-spacing:-0.03em;margin:0 0 14px;text-wrap:balance;}
-.shop-line{margin:0;font-size:17px;line-height:1.65;color:var(--ink-dim);max-width:62ch;text-wrap:pretty;}
+.shop-head{margin:26px 0 22px;}
+.shop-h1{font-size:36px;line-height:1.1;font-weight:800;letter-spacing:-0.03em;margin:0 0 12px;max-width:18ch;text-wrap:balance;}
+.shop-line{margin:0;font-size:19px;line-height:1.55;color:var(--ink-dim);max-width:46ch;text-wrap:balance;}
 
+.shop-line strong{color:var(--ink);font-weight:700;}
+.shop-note{margin:10px 0 0;font-size:14px;color:var(--ink-dim);}
 .feed{margin-top:52px;padding-top:30px;border-top:1px solid var(--rule);}
 .feed-h{font-size:15px;font-weight:700;margin:0 0 5px;letter-spacing:-0.01em;}
 .feed-sub{margin:0 0 20px;font-size:13.5px;color:var(--ink-dim);}

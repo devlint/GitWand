@@ -42,6 +42,8 @@ export interface ConflictCase {
   hunks: HunkView[]
   segments: Segment[]
   at: number
+  /** Seeded on arrival so the room is not empty. Labelled as such on screen. */
+  example?: boolean
 }
 
 export interface ErrorCase {
@@ -51,6 +53,8 @@ export interface ErrorCase {
   titles: string[]
   body: string
   at: number
+  /** Seeded on arrival so the room is not empty. Labelled as such on screen. */
+  example?: boolean
 }
 
 export type RoomCase = ConflictCase | ErrorCase
@@ -76,6 +80,7 @@ export function fileConflict(input: {
   filePath: string
   hunks: HunkView[]
   segments: Segment[]
+  example?: boolean
 }): ConflictCase {
   const c: ConflictCase = { id: nextId('conflict'), kind: 'conflict', at: Date.now(), ...input }
   cases.value = [...cases.value, c]
@@ -83,15 +88,18 @@ export function fileConflict(input: {
   const open = input.hunks.length - settled
   log(
     'agent',
-    `Filed ${c.id} (${input.filePath}): ${settled} settled, ${open} waiting on you.`,
+    input.example
+      ? `Seeded ${c.id} (${input.filePath}) as an example: ${settled} settled, ${open} waiting on you.`
+      : `Filed ${c.id} (${input.filePath}): ${settled} settled, ${open} waiting on you.`,
   )
   return c
 }
 
-export function fileError(input: { titles: string[]; body: string }): ErrorCase {
+export function fileError(input: { titles: string[]; body: string; example?: boolean }): ErrorCase {
   const c: ErrorCase = { id: nextId('error'), kind: 'error', at: Date.now(), ...input }
   cases.value = [...cases.value, c]
-  log('agent', `Filed ${c.id}: ${input.titles.join('; ') || 'no known git error matched'}.`)
+  const what = input.titles.join('; ') || 'no known git error matched'
+  log('agent', input.example ? `Seeded ${c.id} as an example: ${what}.` : `Filed ${c.id}: ${what}.`)
   return c
 }
 

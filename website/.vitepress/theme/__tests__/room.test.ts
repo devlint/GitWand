@@ -91,6 +91,25 @@ describe('the Merge Room', { timeout: 30_000 }, () => {
     expect(actors).toContain('you')
   })
 
+  it('marks a seeded case as an example, so nothing on screen pretends to be yours', async () => {
+    // The page seeds one real case on arrival so a visitor lands on a working
+    // room. It runs through the same engine call an agent makes, so the only
+    // thing separating it from real work is this flag and the label it drives.
+    await resolveConflictTool.execute(
+      { content: MIXED, filePath: 'src/app.ts' },
+      { signal },
+      { example: true },
+    )
+    expect((roomCases.value[0] as ConflictCase).example).toBe(true)
+    expect(roomJournal.value.some((e) => e.text.includes('as an example'))).toBe(true)
+  })
+
+  it('does not mark an ordinary call as an example', async () => {
+    await resolveConflictTool.execute({ content: MIXED, filePath: 'src/app.ts' }, { signal })
+    expect((roomCases.value[0] as ConflictCase).example).toBeUndefined()
+    expect(roomJournal.value.some((e) => e.text.includes('as an example'))).toBe(false)
+  })
+
   it('files git errors as cases too', async () => {
     await parseGitErrorTool.execute({ output: 'fatal: refusing to merge unrelated histories' }, { signal })
     expect(summary.value.errors).toBe(1)

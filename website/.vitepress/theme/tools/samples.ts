@@ -42,3 +42,39 @@ export const SAMPLE_CONFLICT = [
   '  return server',
   '}',
 ].join('\n')
+
+/**
+ * A lockfile conflict the format-aware resolver settles end to end, with
+ * nothing left for a person. Seeded next to the source conflict so the room
+ * shows both outcomes on arrival rather than only the one needing a human.
+ */
+export const SAMPLE_LOCKFILE = [
+  "lockfileVersion: '9.0'",
+  '',
+  'importers:',
+  '',
+  '  .:',
+  '    dependencies:',
+  '<<<<<<<'.concat(' ours'),
+  '      yaml:',
+  '        specifier: ^2.5.0',
+  '        version: 2.8.3',
+  '|||||||'.concat(' base'),
+  '      yaml:',
+  '        specifier: ^2.5.0',
+  '        version: 2.8.1',
+  '=======',
+  '      yaml:',
+  '        specifier: ^2.5.0',
+  '        version: 2.8.3',
+  '>>>>>>>'.concat(' theirs'),
+].join('\n')
+
+/** A git failure with a clear, well-known fix. */
+export const SAMPLE_DETACHED_HEAD = [
+  "Note: switching to 'v3.8.0'.",
+  '',
+  "You are in 'detached HEAD' state. You can look around, make experimental",
+  'changes and commit them, and you can discard any commits you make in this',
+  'state without impacting any branches by switching back to a branch.',
+].join('\n')

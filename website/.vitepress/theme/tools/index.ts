@@ -37,7 +37,7 @@ export const parseGitErrorTool: WebMcpTool = {
     },
     required: ['output'],
   },
-  async execute({ output }: { output: string }) {
+  async execute({ output }: { output: string }, _opts?: unknown, meta?: { example?: boolean }) {
     if (typeof output !== 'string' || output.trim() === '') {
       return text('No output provided. Pass the raw text of the failing git command as `output`.')
     }
@@ -51,7 +51,7 @@ export const parseGitErrorTool: WebMcpTool = {
         '',
         'Useful next command: `git status` prints the repository state that most git errors are really about.',
       ].join('\n')
-      fileError({ titles: [], body })
+      fileError({ titles: [], body, example: meta?.example })
       return text(body)
     }
 
@@ -77,7 +77,7 @@ export const parseGitErrorTool: WebMcpTool = {
         : `${matches.length} known git errors matched this output, listed in the order they should be dealt with.`
 
     const body = truncate([header, ...sections].join('\n\n'))
-    fileError({ titles: matches.map((m) => m.entry.title), body })
+    fileError({ titles: matches.map((m) => m.entry.title), body, example: meta?.example })
     return text(body)
   },
 }
@@ -101,7 +101,7 @@ export const resolveConflictTool: WebMcpTool = {
     },
     required: ['content'],
   },
-  async execute({ content, filePath }: { content: string; filePath?: string }) {
+  async execute({ content, filePath }: { content: string; filePath?: string }, _opts?: unknown, meta?: { example?: boolean }) {
     if (typeof content !== 'string' || content.trim() === '') {
       return text('No content provided. Pass the full conflicted file as `content`.')
     }
@@ -150,7 +150,7 @@ export const resolveConflictTool: WebMcpTool = {
       s.type === 'text' ? { kind: 'text' as const, lines: s.lines } : { kind: 'hunk' as const, index: ++n },
     )
 
-    const filed = fileConflict({ filePath: path, hunks, segments })
+    const filed = fileConflict({ filePath: path, hunks, segments, example: meta?.example })
 
     const hunkLines = hunks.map(
       (h) =>
