@@ -376,7 +376,7 @@ why the number might be low. That pilot's full write-up (including the
 still stands unchanged) is preserved in git history; see the section below for
 the real, full-scale numbers gathered after the fix.
 
-### Full corpus sweep (2026-08-28) — post merge-index-seeding fix
+### Full corpus sweep (2026-08-28) — post merge-index-seeding fix, superseded by the corrected re-run below
 
 > **This section's numbers are INVALIDATED, not corrected — do not treat any
 > figure below as reliable.** The harness that produced this sweep had a real
@@ -451,7 +451,7 @@ Detail per repo, exactly as measured, no rounding or omission:
   `Cargo.toml`/`package.json` for any of them, so zero plans ever reached the
   regeneration step. Zero runnable, zero ran, zero comparable.
 
-### The gate verdict
+### The gate verdict (2026-08-28 sweep — invalidated, see re-run below)
 
 **n = 1, comparable.** The literal number, `1/1 = 100.0 %`, is arithmetically
 above the ≥ 80 % target — but reporting that as "target met" would be exactly
@@ -503,6 +503,118 @@ regeneration step being measured here — worth its own investigation; (d) the
 fresh sweep against the fixed harness needs a materially larger comparable
 sample (not just a larger attempted count) before the ≥ 80 % target can be
 honestly called met or missed.
+
+### Full corpus sweep re-run (2026-08-28) — against the fixed harness
+
+The `skipPaths` fix from the whole-branch review (commit `43be17e`, "fix: harden
+regenerate-tier merge-index seeding after whole-branch review") is merged, so
+this is the fresh, real re-run the invalidation notice above called for: same
+recipe, same four corpus v2 repos, `@gitwand/core`/`@gitwand/cli` rebuilt from
+source immediately before running, the same already-cached bare+blobless clones
+under `benchmark/.cache/` re-verified against `benchmark/corpus.json`'s current
+SHAs (`cat-file -e <sha>^{commit}` and `rev-parse HEAD` both matched the pin for
+all four, no re-clone needed), then
+`node scripts/replay-regenerate.mjs <repo> --max-real 20 --json` run against
+each, for real, with real network access and real installer invocations
+(`npm`/`pnpm`/`yarn`/`cargo` all present in `PATH`).
+
+| Repo | Merges scanned | Ecosystem | Candidates found | Attempted | Runnable plans | Ran | Comparable | Matched | Agreement rate |
+|---|---:|---|---:|---:|---:|---:|---:|---:|---:|
+| `expressjs/express` | 485 | *(none)* | 0 | — | — | — | — | — | no candidates |
+| `twbs/bootstrap` | 500 | *(none)* | 0 | — | — | — | — | — | no candidates |
+| `prettier/prettier` | 237 | yarn-berry | 85 | 20 | 13 | **0** | 0 | 0 | n/a (0 ran) |
+| `tauri-apps/tauri` | 56 | cargo | 22 | 20 | 0 | 0 | 0 | 0 | n/a (0 runnable) |
+| `tauri-apps/tauri` | 56 | yarn-berry | 10 | 10 | 0 | 0 | 0 | 0 | n/a (0 runnable) |
+
+**TOTAL, weighted by comparable attempts across all repos/ecosystems: sum(matched) = 0,
+sum(comparable) = 0. The ratio is undefined — not 0 %, not 100 %. This re-run
+produced no comparable data point at all.**
+
+Every number that isn't `prettier/prettier`'s `yarn-berry` outcome column is
+byte-identical to the invalidated sweep above (485/500/56 merges scanned,
+0/0/22/10 candidates found) — the corpus is genuinely pin-stable and this is
+the same population being re-measured, not a different sample reacting to a
+different corpus state.
+
+#### What actually changed, and what didn't
+
+The fix does exactly what its doc comment says: for a runnable candidate, after
+`git read-tree <treeOid>` it force-removes every path the historical merge left
+genuinely conflicted (`skipPaths`, threaded through as `conflictedPaths` from
+candidate discovery) from the scratch index, via
+`git update-index --force-remove -- <paths>` with `GIT_INDEX_FILE` pointed at
+the scratch index.
+
+But **`git update-index` — including `--force-remove`, which only edits the
+index and never touches the filesystem — is still subject to git's
+`NEED_WORK_TREE` plumbing rule**, and the corpus caches this harness targets are
+bare by design (`git clone --bare --filter=blob:none`, exactly
+`benchmark/run.mjs`'s own `prepare()` recipe, which this file's "Running it"
+section above documents as the required input shape). Verified independently,
+outside the harness entirely, against the real cache directory, reproduced
+identically with the agent sandbox both enabled and disabled (so it is not a
+sandbox artefact), and reproduced again on a from-scratch, freshly-verified
+`pnpm install` + rebuild (so it is not related to an unrelated node_modules
+corruption hit once mid-measurement from a stale concurrent build process):
+
+```
+$ git -C benchmark/.cache/prettier__prettier.git rev-parse --is-bare-repository
+true
+$ GIT_INDEX_FILE=/path/to/scratch-index git -C benchmark/.cache/prettier__prettier.git read-tree HEAD
+(succeeds)
+$ GIT_INDEX_FILE=/path/to/scratch-index git -C benchmark/.cache/prettier__prettier.git update-index --force-remove -- package.json
+fatal: this operation must be run in a work tree
+```
+
+`scripts/lib/seed-index.test.mjs`'s own unit tests pass because they build
+their fixture with `git init` inside a `mkdtemp` directory — an ordinary,
+non-bare repository with a real work tree — so this failure mode never
+triggers there. It only fires against the bare corpus clones the script is
+documented to require. And since a "runnable" candidate is defined as one
+whose lockfile is *still conflicted* (only its `sourcesOfTruth` settled), every
+runnable candidate's `skipPaths` is non-empty by construction — this bug is not
+probabilistic or environment-sensitive, it fires on 100 % of runnable
+candidates, everywhere in the corpus, deterministically.
+
+Net effect on `prettier/prettier`'s 13 runnable candidates: the dominant
+failure mode changed from `spawn-failed` (11/13, `yarn install
+--mode=update-lockfile` itself exiting 1, the invalidated sweep's finding) to
+`error` (13/13, `fatal: this operation must be run in a work tree`) — one bug
+fully replaced the other, and this time not a single candidate got far enough
+to reach `yarn install` at all. **This neither confirms nor refutes the
+marker-corruption hypothesis the merged fix targeted** — no candidate reached
+the point where that hypothesis could be tested. It confirms only that the fix,
+as merged, cannot run to completion against this harness's own documented
+target repos.
+
+#### The gate verdict (2026-08-28 corrected re-run)
+
+**0 comparable, 0 matched.** Not close to met, and not confidently missed
+either — there is no percentage to react to, because zero candidates in this
+fresh, real, honestly-executed run ever reached a state where
+`runRegeneration()`'s output could be compared against the human-committed
+lockfile. This is a *smaller* comparable sample than both predecessors it was
+meant to improve on: the original pilot's n = 3 (66.7 %) and the invalidated
+sweep's n = 1 (100 %). Running the harness fix for real did not make the
+regenerate-tier measurement more conclusive — it made it strictly less
+conclusive, by trading a bug that at least let one candidate run to completion
+for one that blocks every runnable candidate before its worktree is even
+populated.
+
+Per the plan's own instruction for an inconclusive/below-target outcome:
+**keep CLI opt-in only** (unchanged — already true), **document findings, stop
+here.** The desktop surface remains unjustified by this evidence: zero
+comparable data justifies nothing in either direction, more decisively than the
+prior n = 1 did.
+
+Before any further regenerate-tier gate evaluation is possible,
+`scripts/lib/seed-index.mjs`'s `skipPaths` removal step needs its own fix — for
+example, building the filtered scratch index via `git ls-tree` piped into
+`git update-index --index-info` (both operate purely on an index file and carry
+no `NEED_WORK_TREE` requirement), instead of `update-index --force-remove`
+against a bare `-C <repo>`. That fix, and the sweep re-run it would require, is
+out of scope for this task; it is the concrete next action for whoever picks
+this back up.
 
 ## Results
 
