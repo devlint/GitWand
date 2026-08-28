@@ -357,85 +357,124 @@ dependency resolver's output is not byte-for-byte deterministic run to run —
 none of that belongs in a required CI check. `scripts/replay-regenerate.mjs`
 is run manually/in the container, same as its siblings.
 
-### Pilot run (2026-08-27) — SMALL SAMPLE, read the caveat before the numbers
+### Pilot run (2026-08-27) — superseded by the full sweep below
 
-Per the task-4 plan, a full ≤ 20-merges-per-ecosystem sweep was explicitly
-**not** run — this is a bounded pilot (≤ 5 real attempts per ecosystem) meant
-to decide whether a full run and the desktop surface (task 5) are worth
-building at all. Both named corpus v2 repos (`benchmark/corpus.json`, cloned
-bare+blobless, pinned to their corpus SHA, same recipe as `run.mjs`'s
-`prepare()`) were used, with one correction and one hard blocker discovered
-along the way:
+Before the merge-index-seeding fix (a follow-up plan's tasks 2–3:
+`replay-regenerate.mjs` and the CLI's disposable worktree both now seed from
+the real 3-way merge result instead of `HEAD` alone), a bounded pilot
+(`prettier/prettier`, yarn-berry, `--max-real 5`) measured **66.7 % (2/3)**
+agreement, n = 3, and flagged the `HEAD`-only seeding as hypothesis (d) for
+why the number might be low. That pilot's full write-up (including the
+`laravel/framework`/`symfony/symfony` composer infeasibility finding, which
+still stands unchanged) is preserved in git history; see the section below for
+the real, full-scale numbers gathered after the fix.
 
-- **`laravel/framework` (composer) — INFEASIBLE, not just slow.** `git log
-  --all -- composer.lock` returns **zero commits, ever**, in the entire
-  history. `laravel/framework` is a Composer *library* package, and library
-  packages deliberately do not commit a lockfile (only applications do) — this
-  is architectural, not an environment or toolchain problem. The same check
-  against `symfony/symfony` (the corpus's other PHP repo) confirms it has no
-  `composer.lock` either. **Corpus v2 currently has no repository that can
-  measure the composer leg of this gate at all** — a future re-pin needs an
-  application-shaped PHP repo (the way `prettier/prettier`/`vuejs/core` are
-  application-shaped for npm-family ecosystems).
-- **`prettier/prettier` — the brief's "npm ecosystem" label was wrong.**
-  `git ls-tree` shows no `package-lock.json` anywhere in the repo, ever; the
-  repo has a root `.yarnrc.yml` with `yarnPath: .yarn/releases/yarn-4.18.0.cjs`
-  and a root `yarn.lock` — it is a **yarn-berry** repo. The pilot used the
-  correctly-identified ecosystem for the same named repo rather than
-  fabricating an npm measurement that has no basis in this repo's history.
-  (Confirmed the delegation works in this environment: only yarn classic
-  1.22.x was installed via `npm install -g yarn`, and running `yarn
-  --version` inside a checkout of the repo correctly reports `4.18.0` —
-  yarn's `yarnPath` respawn works even from a classic binary.)
+### Full corpus sweep (2026-08-28) — post merge-index-seeding fix
 
-Result, `prettier/prettier`, yarn-berry, 237 merges scanned, `--max-real 5`:
+Per this follow-up plan's task 4: the fix from tasks 2–3 is merged, so this is
+the real ≤ 20-real-attempts-per-ecosystem sweep the pilot deferred, run against
+all four corpus v2 repos whose language makes a v1-registry lockfile plausible
+(`prettier/prettier`, `tauri-apps/tauri`, `expressjs/express`,
+`twbs/bootstrap` — `laravel/framework`/`symfony/symfony` are still excluded,
+confirmed infeasible for composer per the pilot's finding above;
+`gohugoio/hugo`/`git/git` are outside the v1 registry's ecosystems entirely).
+Each repo was cloned bare+blobless and pinned to its exact `benchmark/corpus.json`
+SHA (`prepare()`'s recipe), then run through
+`node scripts/replay-regenerate.mjs <repo> --max-real 20 --json`.
 
-| Metric | Value |
-|---|---:|
-| Candidate merges found (conflicting `yarn.lock`) | 85 |
-| Attempted (the pilot's own cap) | 5 |
-| Runnable plans (source resolvable) | 3 |
-| Ran successfully (real `yarn install --mode=update-lockfile`, no toolchain/timeout/spawn failure) | 3 |
-| Comparable (regenerated + actual committed content both available) | 3 |
-| Structurally matched | 2 |
-| **Agreement rate** | **66.7 % (2/3)** |
+| Repo | Merges scanned | Ecosystem | Candidates found | Attempted | Runnable plans | Ran | Comparable | Matched | Agreement rate |
+|---|---:|---|---:|---:|---:|---:|---:|---:|---:|
+| `expressjs/express` | 485 | *(none)* | 0 | — | — | — | — | — | no candidates |
+| `twbs/bootstrap` | 500 | *(none)* | 0 | — | — | — | — | — | no candidates |
+| `prettier/prettier` | 237 | yarn-berry | 85 | 20 | 13 | 1 | 1 | 1 | 100.0 % (1/1) |
+| `tauri-apps/tauri` | 56 | cargo | 22 | 20 | 0 | 0 | 0 | 0 | n/a (0 runnable) |
+| `tauri-apps/tauri` | 56 | yarn-berry | 10 | 10 | 0 | 0 | 0 | 0 | n/a (0 runnable) |
 
-The two non-runnable candidates declined because `@gitwand/core`'s `resolve()`
-could not fully settle `package.json` on its own (genuine overlapping edits,
-correctly not auto-resolved) — exactly the behaviour the real CLI would show
-for those same two merges.
+**TOTAL, weighted by comparable attempts across all repos/ecosystems: 1/1 matched = 100.0 %.**
+
+Detail per repo, exactly as measured, no rounding or omission:
+
+- **`expressjs/express`** — 485 merges scanned, **zero** candidate merges
+  across all five v1-registry ecosystems. `git ls-tree -r HEAD` confirms this
+  repo carries **no lockfile at all** (no `package-lock.json`,
+  `pnpm-lock.yaml`, `yarn.lock`, `composer.lock` or `Cargo.lock`) at the
+  pinned commit — the regenerate tier has literally nothing to measure here.
+  This matches corpus.json's own framing of `expressjs/express` as a control
+  repo ("a repo where the engine should have little to do").
+- **`twbs/bootstrap`** — 500 merges scanned, **zero** candidate merges, despite
+  a committed `package-lock.json` existing in the tree (confirmed via
+  `git ls-tree`). None of the 500 scanned merges happened to conflict on it.
+- **`prettier/prettier`** — 237 merges scanned (unchanged from the pilot, same
+  pin), 85 yarn-berry candidates found (unchanged from the pilot — candidate
+  discovery is deterministic and pin-stable). Of the 20 attempted (the
+  script's own cap): 7 **not-runnable** (`package.json` didn't fully settle via
+  `resolve()`), 13 runnable, and of those 13: **11 `spawn-failed`** (`yarn
+  install --mode=update-lockfile` exited 1), **1 `error`** (an unrelated
+  partial-clone/promisor-fetch failure on one historical blob, not a
+  regeneration-logic failure), and **1 `success`** — which also
+  structurally matched the human-committed `yarn.lock`. Comparable sample:
+  **n = 1**, agreement **100.0 %**.
+- **`tauri-apps/tauri`** — only **56** merge commits are reachable from the
+  pinned SHA (`rev-list --merges` walked the real, smaller history at this
+  pin; not a truncation bug). 22 cargo candidates and 10 yarn-berry candidates
+  were found; **all 32 attempted candidates across both ecosystems came back
+  `not-runnable`** — `@gitwand/core`'s `resolve()` never fully settled
+  `Cargo.toml`/`package.json` for any of them, so zero plans ever reached the
+  regeneration step. Zero runnable, zero ran, zero comparable.
 
 ### The gate verdict
 
-**n = 3.** That is not a corpus, it is barely a sample, and it is the honest
-result of following Ruling P-9's bound (≤ 5 real attempts per ecosystem) against
-a repo where two of five candidates were correctly declined before reaching
-comparison. The measured rate, 66.7 %, is **below the ≥ 80 % target**, and one
-of the two named corpus repos (`laravel/framework`) could not be measured on
-the composer leg **at all** — not "below target", but no data.
+**n = 1, comparable.** The literal number, `1/1 = 100.0 %`, is arithmetically
+above the ≥ 80 % target — but reporting that as "target met" would be exactly
+the kind of rounding-up this project's discipline forbids. One data point is
+not evidence of reliability in either direction. **Verdict: genuinely
+inconclusive**, not "met." The real, full-scale sweep this task ran produced
+a *smaller* comparable sample (n = 1) than the pilot it was meant to supersede
+(n = 3) — running the harness against real network access and all four
+in-scope corpus repos did not produce more comparable data; it mostly
+produced a different, larger population of **non-comparable** outcomes
+(`not-runnable`, `spawn-failed`, zero candidates).
 
-Per the plan's own instruction for this outcome: **keep CLI opt-in only**
-(already true — `--regenerate`/`.gitwandrc` `regenerate: true` already gate
-every regeneration behind explicit consent, since tasks 1–3), **document
-findings, stop here.** The desktop surface (task 5) and any default-on
-regeneration behaviour are **not** justified by this evidence. This is a
-pilot-scale, single-ecosystem, n = 3 result — it does not prove regeneration is
-unreliable at 66.7 % either; it proves the question isn't answered yet. Before
-revisiting: (a) re-pin the corpus with at least one application-shaped PHP repo
-so the composer leg is measurable, (b) run the plan's full ≤ 20-merges-per-ecosystem
-sweep across npm, pnpm, yarn-berry, composer and cargo, (c) characterise
-the one observed mismatch (which package(s) diverged, and why) rather than
-treating a single data point as noise, and (d) rule out a documented, known
-limitation before blaming the registry commands themselves: `regenerate-runner.ts`
-seeds its disposable worktree from `HEAD` (ours-only), not the in-progress merge
-index that the plan's own architecture text describes. Files that exist only on
-`theirs`' side are invisible to the installer, and seeding from `ours`' lockfile
-biases the regeneration toward an incremental update rather than a fresh
-resolution — a plausible contributor to the 66.7 % this pilot measured. The full
-fix (seed from the merge's stage-2/3 state instead) needs its own real
-measurement to confirm it actually moves the number before it's worth building —
-see `regenerate-runner.ts`'s module header for the detailed writeup of this
-limitation.
+Per the plan's own instruction for an inconclusive/below-target outcome:
+**keep CLI opt-in only** (already true — `--regenerate`/`.gitwandrc`
+`regenerate: true` already gate every regeneration behind explicit consent,
+since tasks 1–3 of the original plan), **document findings, stop here.** The
+desktop surface (task 5 of the original plan) is **not** justified by this
+evidence — n = 1 justifies nothing either way. Do not read this section as
+"the fix worked" or "the fix didn't work"; neither claim is supportable from
+one data point.
+
+On hypothesis (d) specifically (does merge-index seeding move the number):
+**this sweep cannot confirm or refute it.** The fix from tasks 2–3 was
+exercised (`replay-regenerate.mjs` now seeds its scratch index from the real
+merge-tree result, per its module header), but the bottleneck this sweep hit
+is a *different* failure surface than the one hypothesis (d) targeted: 11 of
+13 runnable `prettier/prettier` candidates failed at the `yarn install
+--mode=update-lockfile` step itself — before ever reaching the comparison the
+seeding fix was meant to improve. Manually reproducing `yarn install
+--mode=update-lockfile` against one of the same merges' unmodified checkout
+(no `resolvedSources` overlay applied) succeeds cleanly in this environment,
+so the toolchain itself is not broken; the failures are specific to the
+regenerated worktree state for those particular candidates and were not
+further root-caused here (out of scope for an operator-run measurement task).
+Whether this `spawn-failed` surface is itself a side effect of seeding from a
+more realistic (and more heterogeneous) merge-index state — as opposed to the
+old `HEAD`-only worktree, which by construction produced closer-to-trivial
+installs — is a plausible hypothesis, not a confirmed finding.
+
+Before revisiting: (a) a corpus re-pin adding an application-shaped PHP repo
+so the composer leg becomes measurable at all is still needed and is
+explicitly out of scope for this plan; (b) the new dominant bottleneck,
+`spawn-failed` on 11 of 13 runnable `prettier/prettier` candidates, needs its
+own root-cause pass (capture full `yarn` stdout/stderr per failure, not just
+the truncated 3-line `reason` string) before any further accuracy conclusion
+is possible; (c) `tauri-apps/tauri`'s 100 % `not-runnable` rate across both
+its ecosystems (32/32) suggests `resolve()`'s handling of `Cargo.toml`/
+`package.json` conflicts in a large mixed-language monorepo may itself be a
+bigger practical ceiling on this feature than the regeneration step being
+measured here — worth its own investigation; (d) once (b) is understood, a
+re-run with a materially larger comparable sample (not just a larger attempted
+count) is needed before the ≥ 80 % target can be honestly called met or missed.
 
 ## Results
 
