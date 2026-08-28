@@ -320,6 +320,60 @@ describe("runRegeneration — failure paths", () => {
   });
 });
 
+describe("runRegeneration — worktree reflects the real merge index", () => {
+  it("a theirs-only file is visible inside the disposable worktree", IT_TIMEOUT, async () => {
+    initRepo(repo);
+    writeAndAdd(repo, "package.json", '{"v":1}\n');
+    writeAndAdd(repo, "package-lock.json", '{"base":true}\n');
+    commit(repo, "base");
+
+    git(repo, ["checkout", "-b", "theirs"]);
+    // theirs adds a brand-new file that ours never sees committed.
+    writeAndAdd(repo, "theirs-only.txt", "only on theirs\n");
+    writeAndAdd(repo, "package-lock.json", '{"theirs":true}\n');
+    commit(repo, "theirs: add file + bump lock");
+
+    git(repo, ["checkout", "main"]);
+    writeAndAdd(repo, "package-lock.json", '{"main":true}\n');
+    commit(repo, "main: bump lock");
+
+    try {
+      git(repo, ["merge", "theirs"]);
+    } catch {
+      // conflict on package-lock.json expected; package.json and
+      // theirs-only.txt auto-merge cleanly and land in the live index.
+    }
+
+    const fakeEcosystem: RegenEcosystem = {
+      ...ecosystemFor("npm"),
+      sourcesOfTruth: [],
+      network: "offline-capable", // exerce le worktree, pas la sonde réseau
+      // Prouve que theirs-only.txt a atteint le worktree : `cat … > /dev/null`
+      // échoue (exit non-zéro → spawn-failed, pas success) si le fichier est
+      // absent, court-circuitant le `&&` avant que `package-lock.json` ne soit
+      // écrasé. Écrit du JSON valide (plutôt que le contenu brut du fichier)
+      // pour ne pas se heurter au validateur JSON de l'écosystème "npm" — ce
+      // test vérifie la visibilité du fichier dans le worktree, pas le format
+      // de sortie d'un vrai installeur.
+      command: {
+        bin: "sh",
+        args: ["-c", "cat theirs-only.txt > /dev/null && echo '{\"sawTheirsOnly\":true}' > package-lock.json"],
+      },
+    };
+
+    const outcome = await runRegeneration({
+      repoRoot: repo,
+      file: "package-lock.json",
+      ecosystem: fakeEcosystem,
+      resolvedSources: [],
+    });
+
+    expect(outcome.kind).toBe("success");
+    expect(outcome.content).toBe('{"sawTheirsOnly":true}\n');
+    expect(listWorktrees(repo)).not.toContain("gitwand-regen-");
+  });
+});
+
 describe("validateRegeneratedContent", () => {
   it("accepts valid JSON for npm/composer", () => {
     expect(validateRegeneratedContent("npm", '{"a":1}').valid).toBe(true);

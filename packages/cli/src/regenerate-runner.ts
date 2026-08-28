@@ -10,38 +10,23 @@
  * Sandbox d'exécution (voir le brief de la tâche, § "Worktree sourcing") :
  *  1. `git worktree add --detach <tmp> HEAD` — HEAD est un point jetable,
  *     jamais la branche réelle de l'utilisateur.
- *  2. écraser dans ce worktree chaque source de vérité (`package.json`…)
+ *  2. superposer sur ce worktree chaque chemin déjà résolu (stage 0) de
+ *     l'index de merge réel (`git checkout-index --all --force`, ciblé via
+ *     `--work-tree`) — c'est ce qui rend visibles les fichiers qui n'existent
+ *     QUE côté "theirs" (follow-up plan, résout la limitation identifiée par
+ *     la revue finale du plan original — voir git blame pour l'historique).
+ *  3. écraser dans ce worktree chaque source de vérité (`package.json`…)
  *     par son contenu déjà résolu en pass 1 (fourni par l'appelant — ce
  *     module ne re-résout rien).
- *  3. lancer la commande du registre (flags de suppression de scripts déjà
+ *  4. lancer la commande du registre (flags de suppression de scripts déjà
  *     bakés dans `ecosystem.command.args` — jamais surchargeables ici).
- *  4. sur succès : relire + valider le lockfile régénéré depuis le
+ *  5. sur succès : relire + valider le lockfile régénéré depuis le
  *     filesystem du worktree.
- *  5. `finally` : toujours supprimer le worktree, succès ou échec.
+ *  6. `finally` : toujours supprimer le worktree, succès ou échec.
  *
  * Chaque tentative est tracée intégralement (commande, durée, code de
  * sortie) — cette provenance doit finir dans la raison de résolution
  * affichée à l'utilisateur (voir `commands/resolve.ts`).
- *
- * LIMITATION CONNUE (final review, Finding 3 — documentation seulement, pas
- * de re-architecture dans cette fix wave) : le worktree jetable est semé
- * depuis `HEAD` (étape 1 ci-dessus) — c'est-à-dire l'état "ours" seul — et
- * non depuis l'INDEX DE MERGE en cours (stages 1/2/3), pourtant ce que le
- * texte d'architecture du plan décrit ("populated from the in-progress merge
- * index"). C'était une décision délibérée prise pendant le dispatch de la
- * tâche 2 (raisonnement : ce qui comptait était la jetabilité du worktree,
- * et HEAD est jetable) — mais elle a un coût réel que la revue finale du
- * plan a identifié à juste titre : les fichiers qui n'existent QUE côté
- * "theirs" sont invisibles pour l'installeur, et semer depuis le lockfile de
- * "ours" biaise la régénération vers une mise à jour incrémentale plutôt
- * qu'une résolution fraîche à partir de zéro. C'est un contributeur
- * plausible au faible taux d'accord mesuré par le pilote réel de la tâche 4
- * (66,7 %, n = 3 — voir `benchmark/README.md`, "The gate verdict", hypothèse
- * (d)). Le correctif complet (semer depuis l'état stage-2/3 du merge)
- * nécessite sa propre mesure réelle pour valider qu'il change effectivement
- * ce chiffre — hors scope de cette fix wave (pas de second tour de revue
- * après celle-ci) ; ledgeré ici comme limitation connue plutôt que laissé
- * silencieux.
  */
 
 import { execFile, execFileSync } from "node:child_process";
@@ -209,6 +194,14 @@ export interface RegenerationRunParams {
   resolvedSources: ResolvedSource[];
   /** Surcharge de `ecosystem.defaultTimeoutMs` (tests notamment). */
   timeoutMs?: number;
+  /**
+   * Alternate git index file to seed the disposable worktree from (via
+   * `GIT_INDEX_FILE`), instead of `repoRoot`'s own live index. Omitted in
+   * production (the real CLI always has a genuine in-progress merge whose
+   * live index is exactly what should seed the worktree) — supplied by the
+   * measurement harness, which has no real in-progress merge to read from.
+   */
+  seedIndexFile?: string;
 }
 
 function buildTrace(
@@ -312,11 +305,39 @@ function buildGitSpawnEnv(): NodeJS.ProcessEnv {
   return env;
 }
 
-async function addWorktree(repoRoot: string, worktreeDir: string): Promise<void> {
+/**
+ * Fix (follow-up plan, "merge-index seeding") — step 1 still worktrees at
+ * `HEAD` (a disposable, always-valid scaffold), but step 2 overlays every
+ * already-resolved (stage-0) path from the REAL merge index on top of it —
+ * this is what makes a `theirs`-only file (a new workspace member's
+ * `package.json`, say) visible to the installer, and what stops the seed
+ * lockfile from being biased toward `ours'` incremental state. Paths still
+ * mid-conflict (multi-stage) are silently skipped by `checkout-index`; the
+ * caller overwrites those explicitly via `resolvedSources` right after this
+ * returns, so leaving them at their `HEAD` scaffold content is harmless.
+ *
+ * `seedIndexFile`, when given, points `checkout-index` at an alternate index
+ * instead of `repoRoot`'s own live one — used by the measurement harness
+ * (`scripts/replay-regenerate.mjs`) to replay a *historical* merge, which has
+ * no real in-progress-merge index to read from.
+ */
+async function addWorktree(
+  repoRoot: string,
+  worktreeDir: string,
+  seedIndexFile?: string,
+): Promise<void> {
   await execFileAsync("git", ["worktree", "add", "--detach", worktreeDir, "HEAD"], {
     cwd: repoRoot,
     env: buildGitSpawnEnv(),
   });
+
+  const env = buildGitSpawnEnv();
+  if (seedIndexFile) env.GIT_INDEX_FILE = seedIndexFile;
+  await execFileAsync(
+    "git",
+    ["--work-tree", worktreeDir, "checkout-index", "--all", "--force"],
+    { cwd: repoRoot, env },
+  );
 }
 
 async function removeWorktree(repoRoot: string, worktreeDir: string): Promise<void> {
@@ -369,7 +390,7 @@ export async function runRegeneration(params: RegenerationRunParams): Promise<Re
   let worktreeCreated = false;
 
   try {
-    await addWorktree(repoRoot, worktreeDir);
+    await addWorktree(repoRoot, worktreeDir, params.seedIndexFile);
     worktreeCreated = true;
 
     // 3. Écrase les sources de vérité par leur contenu déjà résolu (pass 1) —
