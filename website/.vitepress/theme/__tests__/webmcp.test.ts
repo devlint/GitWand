@@ -4,6 +4,14 @@ import { matchGitErrors } from '../tools/git-errors'
 import { parseGitErrorTool, resolveConflictTool } from '../tools'
 import { SAMPLE_GIT_ERROR, SAMPLE_CONFLICT } from '../tools/samples'
 
+// resolve_conflict loads @gitwand/core through a dynamic import, and the vitest
+// alias points at the TypeScript source rather than a built dist, so the first
+// call pays for Vite transforming the whole engine. That is comfortably over
+// vitest's 5s default on a cold cache (5028ms observed), and warm on every run
+// after, which is exactly the shape of a test that passes locally and fails in
+// CI. See issue #172 for the same problem in the git-backed suites.
+const ENGINE_LOAD_TIMEOUT_MS = 30_000
+
 function fakeModelContext() {
   const calls: { tool: WebMcpTool; options?: { signal?: AbortSignal } }[] = []
   return {
@@ -178,7 +186,7 @@ describe('parse_git_error tool', () => {
   })
 })
 
-describe('resolve_conflict tool', () => {
+describe('resolve_conflict tool', { timeout: ENGINE_LOAD_TIMEOUT_MS }, () => {
   const signal = new AbortController().signal
 
   it('resolves a hunk that carries no decision', async () => {
@@ -232,7 +240,7 @@ describe('resolve_conflict tool', () => {
   })
 })
 
-describe('try-it panel samples', () => {
+describe('try-it panel samples', { timeout: ENGINE_LOAD_TIMEOUT_MS }, () => {
   const signal = new AbortController().signal
 
   it('the conflict sample shows both halves of the pitch in one run', async () => {

@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`pnpm test` was non-deterministic (#172).** Suites that use real git repositories are subprocess-bound, not CPU-bound, and were timing out under the load of the whole monorepo testing at once. Every git-backed suite now shares a 60s timeout, chosen to catch a hang rather than to enforce a performance budget. Running workspaces one at a time turned out to be **faster** as well as deterministic (49s against 119s), because five packages each fanning out to one worker per core oversubscribes the machine several times over, so `pnpm test` now passes `--workspace-concurrency=1`. Eleven consecutive full runs green, against roughly one failure in three before.
+
 - **Site-wide WebMCP tools went dark on browsers without `navigator.modelContext`.** The registration script bailed out entirely unless the deprecated `navigator` location existed, so the three documentation tools would disappear the day Chrome removes the alias it deprecated in 150. It now prefers `document.modelContext`, where the spec has put the entry point since 27 May 2026, and falls back to `navigator` only when that is all the browser offers. It registers once either way: on the versions exposing both names they alias the same object, so registering on both would have duplicated every tool.
 - **WebMCP tools could never be unregistered.** `signal` was passed as a property of the tool dictionary, which declares no such member, so it was silently dropped. It now goes in the options argument where `ModelContextRegisterToolOptions` expects it.
 
