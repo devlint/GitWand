@@ -110,13 +110,35 @@ export const GIT_ERRORS: GitErrorEntry[] = [
   },
   {
     id: 'rebase_in_progress',
-    match: /rebase-merge directory|rebase-apply|rebase is in progress/i,
-    title: 'A rebase is still in progress',
-    cause: 'A rebase stopped, usually on a conflict, and was neither continued nor aborted.',
+    // Two distinct situations print different things, and only the second was
+    // covered here originally. A rebase that HALTS says "could not apply" and
+    // points at --continue / --skip / --abort; a rebase you try to START while
+    // another is unfinished says "rebase-merge directory". Keying on the
+    // rebase-specific commands rather than on "could not apply" matters:
+    // cherry-pick prints that phrase too, and would be mislabelled as a rebase.
+    match: /git rebase --(continue|skip|abort)|rebase-merge directory|rebase-apply|rebase is in progress/i,
+    title: 'A rebase is in progress and waiting on you',
+    cause:
+      'Either the rebase stopped part-way, usually on a conflict, and was never continued or aborted, or you tried to start a new one while an unfinished rebase was still open. Git will refuse most other operations until it is settled either way. Nothing is lost: the commits being replayed are still in the reflog.',
     fixes: [
-      { command: 'git rebase --continue', when: 'The conflict is resolved and staged.' },
-      { command: 'git rebase --skip', when: 'This particular commit is no longer needed.' },
-      { command: 'git rebase --abort', when: 'Return to where the branch was before the rebase started.' },
+      { command: 'git status', when: 'First. It names which commit is being applied and what is still unresolved.' },
+      { command: 'git rebase --continue', when: 'The conflicts are resolved and staged with `git add`. This replays the remaining commits.' },
+      { command: 'git rebase --skip', when: 'This particular commit is already upstream, or is no longer wanted. It is dropped from the result.' },
+      { command: 'git rebase --abort', when: 'Return the branch to exactly where it was before the rebase started.' },
+    ],
+  },
+  {
+    id: 'cherry_pick_in_progress',
+    // Same shape as the halted rebase above, and the same gap: keyed on the
+    // cherry-pick-specific commands so the two never claim each other's paste.
+    match: /git cherry-pick --(continue|skip|abort)|CHERRY_PICK_HEAD/i,
+    title: 'A cherry-pick is in progress and waiting on you',
+    cause:
+      'The cherry-pick stopped part-way, usually because the picked commit conflicts with the branch you are on. Git keeps the partial state until you finish or abandon it.',
+    fixes: [
+      { command: 'git status', when: 'First. It names the commit being picked and what is still unresolved.' },
+      { command: 'git cherry-pick --continue', when: 'The conflicts are resolved and staged.' },
+      { command: 'git cherry-pick --abort', when: 'Return to where the branch was before the pick.' },
     ],
   },
   {

@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The Merge Room on `/agent`.** The page is now a shared workspace rather than a tool listing. Tool handlers no longer just return text to the agent: they file a case into live page state that the person sitting there watches fill up. The engine settles every hunk that carries no decision; every hunk where the two branches genuinely disagree queues for a human, who picks a side and gets the assembled file back, ready to paste. No tool on the page can make that call, which is the boundary the whole thing is built around. A live journal records who did what, agent and human alike.
+- **`list_cases`**, a third WebMCP tool, lets an agent read the room back: what is filed, what the engine settled, what is still waiting on a person, what they have already decided. It is what turns a stateless calculator into a workspace an agent can pick back up.
+
+### Fixed
+
+- **`parse_git_error` did not recognise a rebase that stopped on a conflict.** The catalogue only knew the phrases git prints when you try to *start* a rebase while one is already unfinished (`rebase-merge directory`), not the ones it prints when a rebase *halts*, which is the far more common paste. Reported by an agent audit of the live page. It now keys on the rebase-specific commands, and a halted cherry-pick gets its own entry rather than being mislabelled a rebase: both print `could not apply`, so matching on that phrase would have handed out `git rebase --continue` to someone mid-cherry-pick.
+
+### Added
+
 - **`/agent`, a WebMCP page.** gitwand.app/agent exposes two read-only git tools to any agent browsing it, over the W3C WebMCP standard: `parse_git_error` explains a failing git command and gives the commands that fix it, `resolve_conflict` runs the deterministic engine over a conflicted file and reports per hunk what was resolved and what still needs a human. Both execute in the visitor's tab, so nothing is uploaded and there is no backend. `@gitwand/core` is imported on demand rather than at module scope, which keeps it out of the shared theme chunk every page downloads.
 - The page states its own registration status live, including when the browser has no WebMCP at all, and writes both tool contracts out in HTML and JSON-LD for the majority of visitors and crawlers that will never run the script.
 - **A try-it panel on `/agent`.** Both tools can be run by hand from the page, against editable sample inputs, so the majority of visitors whose browser has no WebMCP can still see what an agent gets back. It calls the same `execute` an agent calls rather than a mock, and deliberately does not feed the agent call counter.

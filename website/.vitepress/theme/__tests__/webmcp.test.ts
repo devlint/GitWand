@@ -150,6 +150,65 @@ describe('matchGitErrors', () => {
     expect(out.filter((m) => m.entry.id === 'merge_conflict')).toHaveLength(1)
   })
 
+  // Reported by an agent audit of the live page (reports/webmcp-audit-2026-08-28.md):
+  // a rebase that stopped on a conflict fell through to the unmatched response.
+  // The catalogue only knew the phrases git prints when you try to START a
+  // rebase while one is already in progress, not the ones it prints when a
+  // rebase HALTS, which is the far more common paste.
+  it('recognises a rebase that stopped on a conflict', () => {
+    const out = matchGitErrors(
+      [
+        'Auto-merging src/app.ts',
+        'CONFLICT (content): Merge conflict in src/app.ts',
+        'error: could not apply 1f0c3a9... refactor: extract the handler',
+        'hint: Resolve all conflicts manually, mark them as resolved with',
+        'hint: "git add/rm <conflicted_files>", then run "git rebase --continue".',
+        'hint: You can instead skip this commit: run "git rebase --skip".',
+        'hint: To abort and get back to the state before "git rebase", run "git rebase --abort".',
+        'Could not apply 1f0c3a9... refactor: extract the handler',
+      ].join('\n'),
+    )
+    const ids = out.map((m) => m.entry.id)
+    expect(ids).toContain('rebase_in_progress')
+    // The conflict itself is still reported: the paste carries both, and an
+    // agent that only hears "finish your rebase" will not know to resolve.
+    expect(ids).toContain('merge_conflict')
+  })
+
+  it('still recognises a rebase blocked because one is already running', () => {
+    const out = matchGitErrors(
+      'fatal: It seems that there is already a rebase-merge directory, and I wonder if you are in the middle of another rebase.',
+    )
+    expect(out.map((m) => m.entry.id)).toContain('rebase_in_progress')
+  })
+
+  it('recognises a halted cherry-pick without calling it a rebase', () => {
+    // The two print nearly the same thing, "error: could not apply" included.
+    // Keying on that phrase would have made every halted cherry-pick claim to
+    // be a rebase and hand out `git rebase --continue`, which does not apply.
+    const out = matchGitErrors(
+      [
+        'error: could not apply 9de4f21... fix: guard the null case',
+        'hint: After resolving the conflicts, mark them with',
+        'hint: "git add/rm <pathspec>", then run',
+        'hint: "git cherry-pick --continue".',
+        'hint: You can instead skip this commit with "git cherry-pick --skip".',
+      ].join('\n'),
+    )
+    const ids = out.map((m) => m.entry.id)
+    expect(ids).toContain('cherry_pick_in_progress')
+    expect(ids).not.toContain('rebase_in_progress')
+  })
+
+  it('does not call a halted rebase a cherry-pick either', () => {
+    const out = matchGitErrors(
+      'hint: Resolve all conflicts manually, then run "git rebase --continue".',
+    )
+    const ids = out.map((m) => m.entry.id)
+    expect(ids).toContain('rebase_in_progress')
+    expect(ids).not.toContain('cherry_pick_in_progress')
+  })
+
   it('returns nothing for output it does not know', () => {
     expect(matchGitErrors('Everything up-to-date')).toEqual([])
   })
@@ -237,6 +296,36 @@ describe('resolve_conflict tool', { timeout: ENGINE_LOAD_TIMEOUT_MS }, () => {
   it('rejects empty input', async () => {
     const r = await resolveConflictTool.execute({ content: '' }, { signal })
     expect(r.content[0].text).toContain('No content provided')
+  })
+})
+
+// An agent audit of the live page (reports/webmcp-audit-2026-08-28.md) read the
+// engine as "conservative on normal source files", concluding it "will often
+// defer to humans on non-generated code" and suggesting the policy be tuned for
+// symmetric trivial edits. That generalises from a single genuinely divergent
+// edit. Trivial patterns already resolve in a plain .ts file; what defers is the
+// case where the two sides really disagree, which is the entire product claim.
+// Pinned here so the next reader gets the measurement rather than the guess.
+describe('trivial patterns resolve in ordinary source files', { timeout: ENGINE_LOAD_TIMEOUT_MS }, () => {
+  const signal = new AbortController().signal
+  const M = (a: string[]) => a.join('\n')
+
+  const RESOLVES: Record<string, string> = {
+    same_change: M(['export function f() {', '<<<<<<< ours', '  return 42', '||||||| base', '  return 0', '=======', '  return 42', '>>>>>>> theirs', '}']),
+    whitespace_only: M(['export function f() {', '<<<<<<< ours', '    return 1', '||||||| base', '  return 1', '=======', '\treturn 1', '>>>>>>> theirs', '}']),
+    non_overlapping: M(['<<<<<<< ours', 'import { a } from "./a"', 'import { b } from "./b"', '||||||| base', 'import { b } from "./b"', '=======', 'import { b } from "./b"', 'import { c } from "./c"', '>>>>>>> theirs']),
+  }
+
+  it.each(Object.entries(RESOLVES))('resolves %s in src/app.ts', async (_name, body) => {
+    const r = await resolveConflictTool.execute({ content: body, filePath: 'src/app.ts' }, { signal })
+    expect(r.content[0].text).toContain('1 resolved deterministically, 0 left for you')
+  })
+
+  it('defers only when the two sides genuinely disagree', async () => {
+    const body = M(['<<<<<<< ours', 'const x = 1', '||||||| base', 'const x = 0', '=======', 'const x = 2', '>>>>>>> theirs'])
+    const r = await resolveConflictTool.execute({ content: body, filePath: 'src/app.ts' }, { signal })
+    expect(r.content[0].text).toContain('0 resolved deterministically, 1 left for you')
+    expect(r.content[0].text).toContain('NEEDS REVIEW')
   })
 })
 

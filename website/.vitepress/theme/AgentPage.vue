@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { TOOLS, parseGitErrorTool, resolveConflictTool } from './tools'
+import MergeRoom from './MergeRoom.vue'
 import { SAMPLE_GIT_ERROR, SAMPLE_CONFLICT } from './tools/samples'
 import { registerTools, type Surface } from './webmcp'
 
@@ -14,19 +15,15 @@ const surface = ref<Surface>(null)
 const registered = ref<string[]>([])
 const failed = ref<{ name: string; reason: string }[]>([])
 const settled = ref(false)
-const calls = ref<Record<string, number>>({})
-const lastCall = ref<string | null>(null)
 
 let controller: AbortController | null = null
 
-function onCall(name: string) {
-  calls.value = { ...calls.value, [name]: (calls.value[name] ?? 0) + 1 }
-  lastCall.value = name
-}
-
+// No separate call counter any more: the room's activity log records every
+// invocation with its actor and timestamp, which is the same evidence in a
+// form that says what happened rather than only how often.
 onMounted(async () => {
   controller = new AbortController()
-  const outcome = await registerTools(TOOLS, { signal: controller.signal, onCall })
+  const outcome = await registerTools(TOOLS, { signal: controller.signal })
   surface.value = outcome.surface
   registered.value = outcome.registered
   failed.value = outcome.failed
@@ -81,233 +78,215 @@ function pick(id: ToolId) {
 
 <template>
   <div class="gw-page">
-    <section class="ph-hero">
-      <div class="ph-inner">
-        <span class="ph-badge">WebMCP</span>
-        <h1 class="ph-h1">Git tools your agent can <span class="grad">just call</span>.</h1>
-        <p class="ph-sub">
-          This page exposes GitWand's conflict engine to any agent browsing it, through the W3C WebMCP
-          standard. No install, no API key, no server: the tools run in the tab you are looking at.
-        </p>
-        <div class="ph-ctas">
-          <a href="/guide/mcp" class="ph-btn ph-btn--primary">Prefer a real MCP server?</a>
-          <a href="/conflict-engine" class="ph-btn">How the engine works</a>
+    <!-- ══ WORKSHOP ══════════════════════════════════════════════════════
+         A tool, not a pitch. Status is a strip, not a section: it is a
+         connection indicator, and giving it a heading of its own is what
+         made the previous version read as two things fighting. -->
+    <div class="shop">
+      <div class="wrap">
+        <div class="strip" :class="settled ? (surface ? 'strip--on' : 'strip--off') : 'strip--wait'">
+          <span class="dot" aria-hidden="true"></span>
+          <span v-if="!settled">Looking for a WebMCP entry point…</span>
+          <span v-else-if="surface">
+            WebMCP live on <code>{{ surface }}.modelContext</code>, {{ registered.length }} tool{{ registered.length === 1 ? '' : 's' }} registered
+            <span v-if="surface === 'navigator'" class="strip--legacy">· deprecated location, registered there rather than not at all</span>
+          </span>
+          <span v-else>No WebMCP in this browser. The room still works by hand, and everything below is readable without it.</span>
+          <span v-for="f in failed" :key="f.name" class="strip-fail">{{ f.name }} failed: {{ f.reason }}</span>
         </div>
-      </div>
-    </section>
 
-    <!-- Live registration state. Deliberately shows failure and absence as
-         plainly as success: a demo that always claims to work teaches nobody. -->
-    <section class="ph-section">
-      <div class="ph-inner">
-        <h2 class="ph-h2">Status in this browser</h2>
-        <p class="ph-secsub">
-          Read live from the page you have open, not from a screenshot taken on a good day.
-        </p>
+        <header class="shop-head">
+          <h1 class="shop-h1">Merge Room</h1>
+          <p class="shop-line">
+            Your agent clears what was never a decision. Everything the two branches genuinely
+            disagree about waits here for you, and no tool on this page can take that call.
+          </p>
+        </header>
 
-        <div class="st" :class="settled ? (surface ? 'st--on' : 'st--off') : 'st--wait'">
-          <template v-if="!settled">
-            <p class="st-line">Checking for a WebMCP entry point…</p>
-          </template>
+        <MergeRoom />
 
-          <template v-else-if="surface">
-            <p class="st-line">
-              <strong>WebMCP available</strong> on <code>{{ surface }}.modelContext</code>.
-              {{ registered.length }} tool{{ registered.length === 1 ? '' : 's' }} registered.
-            </p>
-            <p v-if="surface === 'navigator'" class="st-note">
-              This browser only exposes the deprecated location. Chrome 150 kept
-              <code>navigator.modelContext</code> as an alias and has announced its removal, so this
-              page registered there rather than not at all.
-            </p>
-            <ul class="st-calls">
-              <li v-for="name in registered" :key="name">
-                <code>{{ name }}</code>
-                <span class="st-count" :class="{ 'st-count--hot': lastCall === name }">
-                  called {{ calls[name] ?? 0 }}×
-                </span>
-              </li>
-            </ul>
-            <p class="st-note">
-              That counter lives in this tab and is never sent anywhere. There is no backend behind
-              this page to send it to.
-            </p>
-          </template>
+        <!-- The input sits with the tool it feeds, not in its own marketing bay. -->
+        <section class="feed">
+          <h2 class="feed-h">File a case</h2>
+          <p class="feed-sub">
+            The same code an agent calls, wired to the same room. Nothing leaves this tab.
+          </p>
 
-          <template v-else>
-            <p class="st-line"><strong>No WebMCP in this browser.</strong> Nothing was registered.</p>
-            <p class="st-note">
-              As of today that means most browsers. The API ships behind an origin trial in Chrome and
-              a flag in Edge, and natively in the ChatGPT desktop app's built-in browser. Everything
-              below is readable without it, which is the point of writing it out.
-            </p>
-          </template>
-
-          <ul v-if="failed.length" class="st-failed">
-            <li v-for="f in failed" :key="f.name"><code>{{ f.name }}</code> failed: {{ f.reason }}</li>
-          </ul>
-        </div>
-      </div>
-    </section>
-
-    <!-- Runs the real tools, so a visitor with no WebMCP can still see what an
-         agent would get back. -->
-    <section class="ph-section ph-section--alt">
-      <div class="ph-inner">
-        <h2 class="ph-h2">Try them without an agent</h2>
-        <p class="ph-secsub">
-          This runs the same code an agent calls. Nothing is sent anywhere: the engine executes in
-          this tab.
-        </p>
-
-        <div class="try">
-          <div class="try-tabs" role="tablist">
+          <div class="feed-tabs" role="tablist">
             <button
               v-for="id in (['resolve_conflict', 'parse_git_error'] as const)"
               :key="id"
-              class="try-tab"
-              :class="{ 'try-tab--on': active === id }"
+              class="feed-tab"
+              :class="{ 'feed-tab--on': active === id }"
               role="tab"
               :aria-selected="active === id"
               @click="pick(id)"
-            >
-              {{ id }}
-            </button>
+            >{{ id }}</button>
           </div>
 
-          <div v-if="active === 'resolve_conflict'" class="try-body">
-            <label class="try-label" for="try-path">File path</label>
-            <input id="try-path" v-model="conflictPath" class="try-input" spellcheck="false" />
-            <p class="try-hint">
-              The extension selects the format-aware resolvers, and the path is what identifies a
-              generated file. Try <code>pnpm-lock.yaml</code> to see that change the answer.
+          <div v-if="active === 'resolve_conflict'" class="feed-body">
+            <label class="feed-label" for="try-path">File path</label>
+            <input id="try-path" v-model="conflictPath" class="feed-input" spellcheck="false" />
+            <p class="feed-hint">
+              The extension picks the format-aware resolvers and the path is what marks a generated
+              file. Try <code>pnpm-lock.yaml</code> to watch the answer change.
             </p>
-
-            <label class="try-label" for="try-conflict">Conflicted file</label>
-            <textarea id="try-conflict" v-model="conflictInput" class="try-area" rows="14" spellcheck="false"></textarea>
+            <label class="feed-label" for="try-conflict">Conflicted file</label>
+            <textarea id="try-conflict" v-model="conflictInput" class="feed-area" rows="13" spellcheck="false"></textarea>
           </div>
 
-          <div v-else class="try-body">
-            <label class="try-label" for="try-error">Output of the failing git command</label>
-            <textarea id="try-error" v-model="errorInput" class="try-area" rows="8" spellcheck="false"></textarea>
+          <div v-else class="feed-body">
+            <label class="feed-label" for="try-error">Output of the failing git command</label>
+            <textarea id="try-error" v-model="errorInput" class="feed-area" rows="8" spellcheck="false"></textarea>
           </div>
 
-          <button class="try-run" :disabled="running" @click="run">
+          <button class="feed-run" :disabled="running" @click="run">
             {{ running ? 'Running…' : `Call ${active}` }}
           </button>
-
-          <pre v-if="output" class="try-out">{{ output }}</pre>
-        </div>
+          <p v-if="output" class="feed-note">Filed. The case is in the room above.</p>
+        </section>
       </div>
-    </section>
+    </div>
 
-    <!-- The same tool contract in HTML, for the majority of visitors whose
-         browser has no WebMCP and for crawlers that will never run the script. -->
-    <section class="ph-section ph-section--alt">
-      <div class="ph-inner">
-        <h2 class="ph-h2">The two tools, written out</h2>
-        <p class="ph-secsub">
-          Both are read-only. Neither runs git, neither writes to a repository, and neither uploads
-          what you pass it.
+    <!-- ══ THE BREAK ═════════════════════════════════════════════════════
+         Deliberate and visible. Above it the page is a tool; below it the
+         page argues. Interleaving the two is what made it muddled. -->
+    <div class="seam" aria-hidden="true"></div>
+
+    <!-- ══ SHOWCASE ══════════════════════════════════════════════════════ -->
+    <div class="tell">
+      <div class="wrap">
+        <p class="tell-lede">
+          Every other tool in this space asks you to trust that a model got it right.
+          <strong>This one refuses to guess.</strong>
+        </p>
+        <p class="tell-body">
+          Twelve patterns in a classifier registry, eight of which apply on their own. Every
+          resolution carries the pattern that produced it, a composite confidence score and a full
+          decision trace. Where the two branches genuinely disagree, the engine stops and says so.
+          That refusal is the product, so it is enforced in the data rather than promised in the
+          copy: nothing exposed on this page can pick a side for you.
         </p>
 
-        <article class="tool">
-          <h3 class="tool-name"><code>parse_git_error</code></h3>
-          <p class="tool-desc">
-            Paste the raw output of a git command that failed. Returns the cause in plain language
-            and the specific commands that resolve it, for the common failures: merge conflicts,
-            rejected pushes, unrelated histories, detached HEAD, an interrupted merge or rebase,
-            authentication.
-          </p>
-          <p class="tool-io"><span class="tool-k">Input</span> <code>{ output: string }</code></p>
-        </article>
+        <h2 class="tell-h">The three tools</h2>
+        <dl class="spec">
+          <div class="spec-row">
+            <dt><code>resolve_conflict</code></dt>
+            <dd>
+              <p>A file with conflict markers goes in. Hunks that carry no decision come back
+              resolved; the rest are filed for you, with the reason each one was refused.</p>
+              <p class="spec-io"><code>{ content: string, filePath?: string }</code></p>
+            </dd>
+          </div>
+          <div class="spec-row">
+            <dt><code>parse_git_error</code></dt>
+            <dd>
+              <p>The raw output of a git command that failed, in. The cause in plain words and the
+              commands that resolve it, out. Fourteen of the failures you actually hit.</p>
+              <p class="spec-io"><code>{ output: string }</code></p>
+            </dd>
+          </div>
+          <div class="spec-row">
+            <dt><code>list_cases</code></dt>
+            <dd>
+              <p>Reads the room back: what is filed, what the engine settled, what is still waiting
+              on you. It is what lets an agent pick up where it left off.</p>
+              <p class="spec-io"><code>{}</code></p>
+            </dd>
+          </div>
+        </dl>
 
-        <article class="tool">
-          <h3 class="tool-name"><code>resolve_conflict</code></h3>
-          <p class="tool-desc">
-            Pass a file that still contains conflict markers. Returns the merged result plus a
-            per-hunk classification: which conflicts carried no decision and were resolved, which
-            need a human, and why in each case. Deterministic patterns only, no model in the loop.
-            Pass the real file path when you have one: the extension selects the format-aware
-            resolvers, and the path is what identifies a generated file.
-          </p>
-          <p class="tool-io">
-            <span class="tool-k">Input</span> <code>{ content: string, filePath?: string }</code>
-          </p>
-        </article>
-
-        <p class="foot">
-          Neither tool is a substitute for
-          <a href="/guide/mcp"><code>@gitwand/mcp</code></a>, which runs against your real repository
-          and can write. WebMCP only carries callable tools, with no resources, prompts or sampling.
-          This page is the zero-install door, not the full one.
+        <p class="tell-foot">
+          None of these runs git or touches a repository, and none uploads what you pass it. For the
+          real thing against your working tree, there is
+          <a href="/guide/mcp"><code>@gitwand/mcp</code></a>. WebMCP carries callable tools only, no
+          resources, prompts or sampling, so this page is the zero-install door rather than the
+          whole house. <a href="/conflict-engine">How the engine decides →</a>
         </p>
       </div>
-    </section>
+    </div>
   </div>
 </template>
 
 <style scoped>
 .gw-page{
-  --purple:#8B5CF6;--purple-d:#7C3AED;--green:#10B981;
-  --bg:#0c0c1a;--bg2:#111120;--card:#16162a;
-  --border:rgba(124,58,237,0.18);--border-soft:rgba(255,255,255,0.06);
-  --text:#e2e8f0;--muted:#94a3b8;
-  background:var(--bg);color:var(--text);
+  --ink:#e8edf5;
+  --ink-dim:#9aa7bd;
+  --ground:#0c0c1a;
+  --ground-tell:#08080f;
+  --surface:#13131f;
+  --rule:rgba(255,255,255,0.09);
+  --rule-soft:rgba(255,255,255,0.05);
+  --brand:#a78bfa;
+  --settled:#34d399;
+  --waiting:#fbbf24;
+  --ease:cubic-bezier(0.22,1,0.36,1);
+  background:var(--ground);
+  color:var(--ink);
   font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  -webkit-font-smoothing:antialiased;
 }
-.ph-inner{max-width:1080px;margin:0 auto;padding:0 24px;}
-.ph-hero{padding:80px 0 56px;text-align:center;background:radial-gradient(ellipse 80% 60% at 50% -10%,rgba(124,58,237,0.18) 0%,transparent 70%),var(--bg);border-bottom:1px solid var(--border-soft);}
-.ph-badge{display:inline-block;font-size:12px;font-weight:600;padding:5px 12px;border-radius:999px;color:var(--purple);background:rgba(124,58,237,0.1);border:1px solid var(--border);margin-bottom:18px;}
-.ph-h1{font-size:44px;line-height:1.15;font-weight:800;letter-spacing:-0.02em;margin:0 auto 18px;max-width:800px;}
-.ph-h1 .grad{background:linear-gradient(135deg,var(--purple),var(--green));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;}
-.ph-sub{font-size:18px;line-height:1.65;color:var(--muted);max-width:680px;margin:0 auto 28px;}
-.ph-ctas{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;}
-.ph-btn{padding:11px 22px;border-radius:10px;font-size:15px;font-weight:600;text-decoration:none;color:var(--text);border:1px solid var(--border-soft);transition:border-color .15s,color .15s;}
-.ph-btn:hover{border-color:var(--purple);color:var(--purple);}
-.ph-btn--primary{background:var(--purple-d);color:#fff;border-color:var(--purple-d);}
-.ph-btn--primary:hover{background:var(--purple);color:#fff;}
-.ph-section{padding:72px 0;}
-.ph-section--alt{background:var(--bg2);border-top:1px solid var(--border-soft);border-bottom:1px solid var(--border-soft);}
-.ph-h2{font-size:30px;font-weight:800;letter-spacing:-0.01em;text-align:center;margin:0 0 10px;}
-.ph-secsub{font-size:16px;color:var(--muted);text-align:center;max-width:640px;margin:0 auto 40px;line-height:1.6;}
+.wrap{max-width:940px;margin:0 auto;padding:0 26px;}
 
-.st{max-width:640px;margin:0 auto;background:var(--card);border:1px solid var(--border);border-left-width:3px;border-radius:12px;padding:20px 22px;}
-.st--on{border-left-color:var(--green);}
-.st--off{border-left-color:var(--muted);}
-.st--wait{border-left-color:var(--purple);}
-.st-line{margin:0;font-size:15px;line-height:1.6;}
-.st-note{margin:10px 0 0;font-size:13px;color:var(--muted);line-height:1.55;}
-.st-calls{list-style:none;padding:0;margin:14px 0 0;display:flex;flex-direction:column;gap:8px;}
-.st-calls li{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:14px;}
-.st-count{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;transition:color .2s;}
-.st-count--hot{color:var(--green);}
-.st-failed{margin:14px 0 0;padding-left:18px;font-size:13px;color:#f87171;}
+/* ── workshop ─────────────────────────────────────────────────────────── */
+.shop{padding:26px 0 74px;}
+.strip{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:13px;color:var(--ink-dim);padding:11px 15px;background:var(--surface);border:1px solid var(--rule-soft);border-radius:9px;}
+.strip code{font-family:'JetBrains Mono',monospace;font-size:0.92em;color:var(--ink);}
+.dot{width:7px;height:7px;border-radius:99px;background:var(--ink-dim);flex:none;}
+.strip--on .dot{background:var(--settled);box-shadow:0 0 0 3px rgba(52,211,153,0.16);}
+.strip--wait .dot{background:var(--brand);}
+.strip--legacy{color:var(--waiting);}
+.strip-fail{color:#f87171;}
 
-.try{max-width:760px;margin:0 auto;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px 22px;}
-.try-tabs{display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap;}
-.try-tab{font-family:'JetBrains Mono',monospace;font-size:13px;padding:7px 14px;border-radius:8px;background:transparent;color:var(--muted);border:1px solid var(--border-soft);cursor:pointer;transition:color .15s,border-color .15s;}
-.try-tab:hover{color:var(--text);}
-.try-tab--on{color:var(--purple);border-color:var(--border);background:rgba(124,58,237,0.1);}
-.try-body{display:flex;flex-direction:column;}
-.try-label{font-size:13px;font-weight:600;margin-bottom:6px;}
-.try-hint{font-size:12px;color:var(--muted);margin:6px 0 0;line-height:1.5;}
-.try-input,.try-area{width:100%;box-sizing:border-box;background:var(--bg);color:var(--text);border:1px solid var(--border-soft);border-radius:8px;padding:10px 12px;font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.6;}
-.try-input:focus,.try-area:focus{outline:none;border-color:var(--purple);}
-.try-area{resize:vertical;margin-bottom:4px;}
-.try-label + .try-area,.try-hint + .try-label{margin-top:0;}
-.try-body > .try-label:not(:first-child){margin-top:16px;}
-.try-run{margin-top:16px;align-self:flex-start;padding:10px 20px;border-radius:10px;font-size:14px;font-weight:600;background:var(--purple-d);color:#fff;border:1px solid var(--purple-d);cursor:pointer;font-family:'JetBrains Mono',monospace;}
-.try-run:hover:not(:disabled){background:var(--purple);}
-.try-run:disabled{opacity:0.6;cursor:default;}
-.try-out{margin:18px 0 0;padding:14px 16px;background:var(--bg);border:1px solid var(--border-soft);border-radius:8px;font-family:'JetBrains Mono',monospace;font-size:12.5px;line-height:1.6;white-space:pre-wrap;word-break:break-word;max-height:460px;overflow:auto;color:var(--text);}
-.tool{max-width:720px;margin:0 auto 20px;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px 22px;}
-.tool-name{margin:0 0 10px;font-size:16px;}
-.tool-name code{font-family:'JetBrains Mono',monospace;color:var(--purple);}
-.tool-desc{margin:0 0 12px;font-size:14px;line-height:1.65;color:var(--muted);}
-.tool-io{margin:0;font-size:13px;color:var(--muted);}
-.tool-k{display:inline-block;min-width:52px;font-weight:600;color:var(--text);}
-.foot{max-width:720px;margin:28px auto 0;font-size:14px;line-height:1.65;color:var(--muted);text-align:center;}
-.foot a{color:var(--purple);}
-code{font-family:'JetBrains Mono',monospace;font-size:0.92em;}
+.shop-head{margin:46px 0 30px;}
+.shop-h1{font-size:40px;line-height:1.08;font-weight:800;letter-spacing:-0.03em;margin:0 0 14px;text-wrap:balance;}
+.shop-line{margin:0;font-size:17px;line-height:1.65;color:var(--ink-dim);max-width:62ch;text-wrap:pretty;}
+
+.feed{margin-top:52px;padding-top:30px;border-top:1px solid var(--rule);}
+.feed-h{font-size:15px;font-weight:700;margin:0 0 5px;letter-spacing:-0.01em;}
+.feed-sub{margin:0 0 20px;font-size:13.5px;color:var(--ink-dim);}
+.feed-tabs{display:flex;gap:7px;margin-bottom:18px;flex-wrap:wrap;}
+.feed-tab{font-family:'JetBrains Mono',monospace;font-size:12.5px;padding:7px 13px;border-radius:7px;background:transparent;color:var(--ink-dim);border:1px solid var(--rule-soft);cursor:pointer;transition:color .16s,border-color .16s,background .16s;}
+.feed-tab:hover,.feed-tab:focus-visible{color:var(--ink);}
+.feed-tab--on{color:var(--ink);border-color:var(--rule);background:var(--surface);}
+.feed-body{display:flex;flex-direction:column;}
+.feed-label{font-size:12.5px;font-weight:600;margin-bottom:6px;}
+.feed-body > .feed-label:not(:first-child){margin-top:17px;}
+.feed-hint{font-size:12.5px;color:var(--ink-dim);margin:7px 0 0;line-height:1.55;}
+.feed-hint code{font-family:'JetBrains Mono',monospace;color:var(--ink);}
+.feed-input,.feed-area{width:100%;box-sizing:border-box;background:var(--surface);color:var(--ink);border:1px solid var(--rule-soft);border-radius:8px;padding:10px 13px;font-family:'JetBrains Mono',monospace;font-size:12.5px;line-height:1.65;}
+.feed-input:focus,.feed-area:focus{outline:none;border-color:var(--brand);}
+.feed-area{resize:vertical;}
+.feed-run{margin-top:17px;align-self:flex-start;padding:10px 19px;border-radius:8px;font:inherit;font-size:13.5px;font-weight:600;background:var(--ink);color:#0c0c14;border:1px solid var(--ink);cursor:pointer;transition:opacity .16s;}
+.feed-run:hover:not(:disabled){opacity:0.86;}
+.feed-run:disabled{opacity:0.5;cursor:default;}
+.feed-note{margin:12px 0 0;font-size:13px;color:var(--settled);}
+
+/* ── the break ────────────────────────────────────────────────────────── */
+.seam{height:0;border-top:1px solid var(--rule);box-shadow:0 -22px 44px -30px rgba(167,139,250,0.55);}
+
+/* ── showcase ─────────────────────────────────────────────────────────── */
+.tell{background:var(--ground-tell);padding:96px 0 100px;}
+.tell-lede{margin:0 0 26px;font-size:29px;line-height:1.3;font-weight:600;letter-spacing:-0.02em;color:var(--ink-dim);max-width:24ch;text-wrap:balance;}
+.tell-lede strong{color:var(--ink);font-weight:800;display:block;}
+.tell-body{margin:0 0 62px;font-size:16px;line-height:1.75;color:var(--ink-dim);max-width:70ch;text-wrap:pretty;}
+.tell-h{font-size:13px;font-weight:700;margin:0 0 4px;color:var(--ink);}
+
+.spec{margin:0 0 44px;}
+.spec-row{display:grid;grid-template-columns:minmax(160px,0.9fr) 2fr;gap:26px;padding:22px 0;border-top:1px solid var(--rule-soft);}
+@media (max-width:680px){.spec-row{grid-template-columns:1fr;gap:9px;}}
+.spec-row dt code{font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--brand);}
+.spec-row dd{margin:0;}
+.spec-row dd p{margin:0;font-size:14.5px;line-height:1.65;color:var(--ink-dim);max-width:62ch;}
+.spec-io{margin-top:9px !important;font-family:'JetBrains Mono',monospace;}
+.spec-io code{font-size:12.5px;color:var(--ink-dim);}
+
+.tell-foot{margin:0;font-size:14px;line-height:1.75;color:var(--ink-dim);max-width:70ch;}
+.tell-foot a{color:var(--brand);text-underline-offset:3px;}
+.tell-foot code{font-family:'JetBrains Mono',monospace;font-size:0.92em;}
+
+@media (max-width:640px){
+  .shop-h1{font-size:32px;}
+  .tell-lede{font-size:24px;}
+}
 </style>
