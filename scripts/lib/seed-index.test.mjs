@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { seedScratchIndex } from "./seed-index.mjs";
@@ -138,6 +138,164 @@ test("seedScratchIndex(skipPaths) removes still-conflicted paths from the scratc
     assert.ok(
       listing.includes("clean-only.txt"),
       `clean-only.txt must be present at stage 0 in the scratch index — got:\n${listing}`,
+    );
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+// Regenerate-sweep re-run #2 — the bug this test exists to catch (and the
+// prior two tests above never could): `git update-index --force-remove`
+// fails with `fatal: this operation must be run in a work tree` against a
+// BARE repo, even though it only edits an index file and never touches the
+// filesystem. The real corpus (`benchmark/run.mjs`'s `prepare()`) clones
+// bare + blobless, so this is the shape that actually matters in production
+// use of this harness. Build commits in an ordinary non-bare repo (bare repos
+// have no work tree to `git add`/`git commit` against), then `git clone
+// --bare` it into a second temp path and exercise `seedScratchIndex` against
+// THAT bare clone.
+//
+// The fixture ALSO puts one skipped and one kept file inside a nested
+// subdirectory (`src/nested/...`) — a real, real-world repo (prettier) turned
+// up a second bug the first version of this test's flat-only fixture missed
+// entirely: `git mktree` (unlike `ls-tree -r`) does not reconstruct nested
+// subtrees on its own and rejects any path containing a slash with `fatal:
+// path ... contains slash`. A fixture with only root-level files can never
+// exercise that failure mode.
+test("seedScratchIndex(skipPaths) works against a BARE repo with nested paths (no work tree) — the real corpus's shape", () => {
+  const srcRepo = mkdtempSync(join(tmpdir(), "gw-seed-index-bare-src-"));
+  const bareRepo = mkdtempSync(join(tmpdir(), "gw-seed-index-bare-"));
+  try {
+    git(srcRepo, ["init", "-q", "-b", "main"]);
+    git(srcRepo, ["config", "user.email", "t@t.com"]);
+    git(srcRepo, ["config", "user.name", "t"]);
+    mkdirSync(join(srcRepo, "src", "nested"), { recursive: true });
+    writeFileSync(join(srcRepo, "conflicted.txt"), "base\n");
+    writeFileSync(join(srcRepo, "src", "nested", "conflicted-nested.txt"), "base nested\n");
+    git(srcRepo, ["add", "-A"]);
+    git(srcRepo, ["commit", "-q", "-m", "base"]);
+
+    git(srcRepo, ["checkout", "-q", "-b", "theirs"]);
+    writeFileSync(join(srcRepo, "conflicted.txt"), "theirs change\n");
+    writeFileSync(join(srcRepo, "src", "nested", "conflicted-nested.txt"), "theirs nested change\n");
+    writeFileSync(join(srcRepo, "clean-only.txt"), "only on theirs, no conflict\n");
+    writeFileSync(join(srcRepo, "src", "nested", "clean-nested.txt"), "only on theirs, nested, no conflict\n");
+    git(srcRepo, ["add", "-A"]);
+    git(srcRepo, ["commit", "-q", "-m", "theirs: conflicting changes (root + nested) + clean adds (root + nested)"]);
+    const theirsSha = git(srcRepo, ["rev-parse", "HEAD"]).trim();
+
+    git(srcRepo, ["checkout", "-q", "main"]);
+    writeFileSync(join(srcRepo, "conflicted.txt"), "main change\n");
+    writeFileSync(join(srcRepo, "src", "nested", "conflicted-nested.txt"), "main nested change\n");
+    git(srcRepo, ["add", "-A"]);
+    git(srcRepo, ["commit", "-q", "-m", "main: conflicting changes (root + nested)"]);
+    const mainSha = git(srcRepo, ["rev-parse", "HEAD"]).trim();
+
+    const treeOid = mergeTreeWriteTree(srcRepo, mainSha, theirsSha);
+
+    // Re-create bareRepo as an actual bare clone of srcRepo (mkdtempSync
+    // already created bareRepo as an empty dir — `clone --bare` needs to
+    // create/populate its target, so remove it first and let clone recreate it).
+    rmSync(bareRepo, { recursive: true, force: true });
+    git(srcRepo, ["clone", "-q", "--bare", srcRepo, bareRepo]);
+    assert.equal(
+      git(bareRepo, ["rev-parse", "--is-bare-repository"]).trim(),
+      "true",
+      "fixture must actually be bare, or this test proves nothing",
+    );
+
+    const scratchIndex = join(bareRepo, "scratch-test-index-bare-skip");
+    // Must NOT throw `fatal: this operation must be run in a work tree` NOR
+    // `fatal: path ... contains slash`.
+    seedScratchIndex(bareRepo, treeOid, scratchIndex, ["conflicted.txt", "src/nested/conflicted-nested.txt"]);
+
+    const listing = lsFilesScratch(bareRepo, scratchIndex);
+    assert.ok(
+      !listing.includes("conflicted.txt") || listing.includes("src/nested/conflicted-nested.txt") === false,
+      `sanity: listing must not be empty/garbage — got:\n${listing}`,
+    );
+    assert.ok(
+      !listing.split("\n").some((l) => l.endsWith("\tconflicted.txt")),
+      `root-level conflicted.txt must be ABSENT from the scratch index built against a bare repo — got:\n${listing}`,
+    );
+    assert.ok(
+      !listing.includes("src/nested/conflicted-nested.txt"),
+      `nested conflicted-nested.txt must be ABSENT from the scratch index built against a bare repo — got:\n${listing}`,
+    );
+    assert.ok(
+      listing.includes("clean-only.txt"),
+      `root-level clean-only.txt must be present at stage 0 — got:\n${listing}`,
+    );
+    assert.ok(
+      listing.includes("src/nested/clean-nested.txt"),
+      `nested clean-nested.txt must be present at stage 0, with its full nested path intact — got:\n${listing}`,
+    );
+  } finally {
+    rmSync(srcRepo, { recursive: true, force: true });
+    rmSync(bareRepo, { recursive: true, force: true });
+  }
+});
+
+// Regenerate-sweep re-run #2, second finding — a real corpus repo
+// (prettier/prettier) turned up a case no hand-built fixture had covered:
+// git C-quotes filenames with special characters (spaces, double quotes,
+// unicode) in the default (non-`-z`) output of both `ls-tree` and `mktree`.
+// Reassembling a hand-parsed quoted name (e.g. splitting on "/" or matching
+// it against a skip path) breaks and surfaces as `fatal: invalid quoting`.
+// This fixture puts a filename containing a double quote and a space
+// ALONGSIDE the skipped file at the very same tree level, so a regression
+// back to non-`-z` parsing would corrupt or drop it.
+test("seedScratchIndex(skipPaths) tolerates sibling filenames with quotes/spaces that git C-quotes by default", () => {
+  const repo = mkdtempSync(join(tmpdir(), "gw-seed-index-quoting-"));
+  try {
+    git(repo, ["init", "-q", "-b", "main"]);
+    git(repo, ["config", "user.email", "t@t.com"]);
+    git(repo, ["config", "user.name", "t"]);
+    const trickyName = 'weird "quoted" file with spaces.txt';
+    writeFileSync(join(repo, "conflicted.txt"), "base\n");
+    writeFileSync(join(repo, trickyName), "base tricky\n");
+    git(repo, ["add", "-A"]);
+    git(repo, ["commit", "-q", "-m", "base"]);
+
+    git(repo, ["checkout", "-q", "-b", "theirs"]);
+    writeFileSync(join(repo, "conflicted.txt"), "theirs change\n");
+    writeFileSync(join(repo, trickyName), "theirs tricky change\n");
+    git(repo, ["add", "-A"]);
+    git(repo, ["commit", "-q", "-m", "theirs: conflicting change + a clean edit of a tricky filename"]);
+    const theirsSha = git(repo, ["rev-parse", "HEAD"]).trim();
+
+    git(repo, ["checkout", "-q", "main"]);
+    writeFileSync(join(repo, "conflicted.txt"), "main change\n");
+    git(repo, ["add", "-A"]);
+    git(repo, ["commit", "-q", "-m", "main: conflicting change"]);
+    const mainSha = git(repo, ["rev-parse", "HEAD"]).trim();
+
+    const treeOid = mergeTreeWriteTree(repo, mainSha, theirsSha);
+
+    const scratchIndex = join(repo, ".git", "scratch-test-index-quoting");
+    // Must NOT throw `fatal: invalid quoting`.
+    seedScratchIndex(repo, treeOid, scratchIndex, ["conflicted.txt"]);
+
+    // `-z` (NUL-terminated) so `trickyName`'s embedded literal quote comes
+    // back as a raw byte instead of git's own C-quoted/escaped
+    // representation (which any name containing a literal `"` always gets,
+    // regardless of `core.quotepath` — that setting only affects non-ASCII,
+    // not embedded quote characters) — otherwise this assertion would need
+    // to hand-construct the escaped form itself.
+    const listingZ = git(repo, ["ls-files", "-s", "-z"], {
+      env: { GIT_INDEX_FILE: scratchIndex },
+    });
+    const names = listingZ
+      .split("\0")
+      .filter((e) => e.length > 0)
+      .map((e) => e.slice(e.indexOf("\t") + 1));
+    assert.ok(
+      !names.includes("conflicted.txt"),
+      `conflicted.txt must be ABSENT from the scratch index — got:\n${JSON.stringify(names)}`,
+    );
+    assert.ok(
+      names.includes(trickyName),
+      `sibling file with quotes/spaces must survive intact (not corrupted, not dropped) — got:\n${JSON.stringify(names)}`,
     );
   } finally {
     rmSync(repo, { recursive: true, force: true });

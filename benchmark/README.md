@@ -616,7 +616,150 @@ against a bare `-C <repo>`. That fix, and the sweep re-run it would require, is
 out of scope for this task; it is the concrete next action for whoever picks
 this back up.
 
-## Results
+### Full corpus sweep re-run #2 (2026-08-28) — first CONCLUSIVE sweep, target NOT met
+
+`scripts/lib/seed-index.mjs`'s `skipPaths` removal step was rebuilt again,
+this time via pure object-database plumbing that never needs a work tree at
+all: `git ls-tree -z` + `git mktree -z --missing` walking only the directory
+chain from the tree root down to each skipped path (every sibling subtree
+keeps its original oid untouched — no full-tree rebuild). Before trusting this
+description, it was tested against the real corpus and, doing so, turned up
+two more real bugs no hand-built fixture had ever exercised, in order:
+
+1. **`git mktree` cannot ingest `ls-tree -r`'s flat recursive listing
+   directly** — it rejects any entry whose name contains a slash with `fatal:
+   path ... contains slash`. A first attempt fed a fully-flattened `ls-tree -r`
+   straight into `mktree`; fixed by walking and rewriting only the actual
+   directory chain of each skip path instead (see above) — which also turned a
+   3288-directory-per-candidate rebuild into effectively zero-to-a-few `mktree`
+   calls per candidate, since `prettier/prettier`'s skip paths are always at
+   the tree root.
+2. **Filenames with embedded quotes/spaces/unicode get C-quoted by git's
+   default (non-`-z`) `ls-tree`/`mktree` output**, and hand-parsing a quoted,
+   escaped name (e.g. splitting on `/`) corrupts it — surfaced as `fatal:
+   invalid quoting` against `prettier/prettier`'s real tree. Fixed by using
+   `-z` (NUL-terminated, unquoted raw bytes) for both commands throughout,
+   which avoids the quoting problem entirely rather than parsing around it.
+3. **`git mktree` verifies every referenced object exists locally by
+   default**, and does not lazily fetch a missing one the way most git
+   commands do under a partial clone's promisor-remote mechanism — a real
+   problem specifically because `benchmark/run.mjs`'s `prepare()` clones the
+   corpus **blobless** (`--filter=blob:none`), so most historical blobs are
+   not present locally yet. Surfaced as `fatal: entry '<path>' object <sha>
+   is unavailable`. Fixed with `mktree --missing`, safe here because every
+   sha passed to `mktree` was read moments earlier from a real `ls-tree` of
+   the same repository's own object database — nothing is invented, so there
+   is nothing to validate.
+
+All three are now covered by `scripts/lib/seed-index.test.mjs`: a bare-repo
+fixture with nested paths (catches #1), a fixture with a sibling filename
+containing a literal quote and spaces (catches #2). #3 is a partial-clone
+promisor-fetch behavior that a from-scratch `mkdtemp` fixture cannot reproduce
+(it is never blobless); it was caught and fixed by direct testing against the
+real cache, which is exactly why this task's protocol required a real-bare-repo
+sanity check before the full sweep — one is documented below.
+`node --test scripts/lib/*.test.mjs` passes, 17/17, including the two new
+regression tests.
+
+**Cheap real-bare-repo sanity check, run before the full sweep**: a real
+candidate merge (`63503cd4142585c9b54629929078a7dbab8ec1f0`, conflicting on
+`package.json` and `yarn.lock`) was pulled directly from
+`benchmark/.cache/prettier__prettier.git` (confirmed bare) via the same
+candidate-discovery logic `replay-regenerate.mjs` uses, and `seedScratchIndex`
+was called directly against it. No error; the resulting scratch index has
+exactly 9337 entries against the tree's 9339 total, i.e. precisely the two
+skipped paths removed and nothing else disturbed; both `package.json` and
+`yarn.lock` confirmed absent via `git ls-files`. Only after this passed did the
+full sweep run.
+
+Before the full sweep could run for real, one thing needed re-verifying and
+one environment issue needed working around, both worth recording plainly:
+
+- `benchmark/.cache/prettier__prettier.git`'s cached `HEAD` had drifted from
+  `corpus.json`'s current pin (`0bc958e734b00907e2bae2bae45c664ad8a1a2f7`) —
+  re-pinned via `git update-ref HEAD <sha>` (the commit was already reachable
+  locally; no re-clone needed). The other three repos were already correctly
+  pinned.
+- The measurement environment's own sandbox routes all network egress through
+  an HTTP CONNECT proxy and denies raw `dns.lookup()` calls outright (even for
+  `github.com`) — this collided with `runRegeneration`'s own pre-flight
+  offline probe (`isOffline()` in `packages/cli/src/regenerate-runner.ts`,
+  a bare `dns.lookup()` against the ecosystem's registry host), which
+  therefore declined every runnable candidate as `offline` on the first
+  attempt at this sweep, before any installer ran. This is an environment
+  property of the sandbox this measurement happened to run in, not a defect
+  in `isOffline()` or in the code touched by this task — confirmed by
+  disabling the sandbox for the sweep, at which point DNS resolution and the
+  real installs both worked normally. Recorded here in case a future
+  measurement run hits the same thing.
+
+Recipe, same as the prior two sweeps: all four corpus v2 repos whose language
+makes a v1-registry lockfile plausible, `@gitwand/core`/`@gitwand/cli`
+rebuilt from source immediately before running, each repo confirmed bare and
+correctly pinned, `node scripts/replay-regenerate.mjs <repo> --max-real 20
+--json` run against each, for real, with real network access and real
+installer invocations.
+
+| Repo | Merges scanned | Ecosystem | Candidates found | Attempted | Runnable plans | Ran | Comparable | Matched | Agreement rate |
+|---|---:|---|---:|---:|---:|---:|---:|---:|---:|
+| `expressjs/express` | 485 | *(none)* | 0 | — | — | — | — | — | no candidates |
+| `twbs/bootstrap` | 500 | *(none)* | 0 | — | — | — | — | — | no candidates |
+| `prettier/prettier` | 237 | yarn-berry | 85 | 20 | 13 | **13** | **13** | **5** | **38.5 % (5/13)** |
+| `tauri-apps/tauri` | 56 | cargo | 22 | 20 | 0 | 0 | 0 | 0 | n/a (0 runnable) |
+| `tauri-apps/tauri` | 56 | yarn-berry | 10 | 10 | 0 | 0 | 0 | 0 | n/a (0 runnable) |
+
+**TOTAL, weighted by comparable attempts across all repos/ecosystems: sum(matched) = 5,
+sum(comparable) = 13 → 5/13 = 38.5 %.**
+
+`expressjs/express`, `twbs/bootstrap` and `tauri-apps/tauri` are byte-identical
+to both prior sweeps on every field that isn't the harness bug itself (same
+merges scanned, same candidates found, same zero/`not-runnable` outcomes) —
+the corpus is genuinely pin-stable and this is the same population, not a
+different sample reacting to a different corpus state. `prettier/prettier`'s
+`yarn-berry` candidates are the only ones that ever reached a real installer
+across all three sweeps of this fix: all 13 runnable candidates ran the real
+`yarn install --mode=update-lockfile` to completion (`ran = 13`), all 13 had
+both a regenerated and an actually-committed lockfile available for structural
+comparison (`comparable = 13`), and 5 of those 13 structurally matched the
+lockfile the `prettier` team actually committed.
+
+#### The gate verdict (2026-08-28 re-run #2) — CONCLUSIVE: target not met
+
+**n = 13 comparable, 5 matched, 38.5 % agreement.** This is not close to the
+≥ 80 % target, and — unlike the two prior sweeps of this fix — this sample is
+large enough that the shortfall is not plausibly sampling noise: it is more
+than 4× the comparable sample size of either predecessor (pilot n = 3,
+invalidated sweep n = 1), it is the first sweep where a materially larger
+*comparable* population was actually produced (not just a larger *attempted*
+count), and every one of the 13 runnable candidates ran to completion, so
+there is no remaining pool of not-yet-measured runnable candidates hiding a
+different answer. **Verdict: target NOT met**, plainly, not "inconclusive."
+
+Per the plan's own instruction for a below-target outcome: **keep CLI opt-in
+only** (unchanged — already true), **document findings, stop here.** The
+desktop surface remains unjustified: 38.5 % agreement on real historical
+merges means the majority of automatic `yarn.lock` regenerations in this
+sample would have silently produced a lockfile different from what the
+`prettier` team actually shipped — not evidence to build a user-facing surface
+on. Whether the 8 mismatches are genuine wrong answers or artifacts of
+replaying an old merge with today's yarn/registry state (dependency resolvers
+are not deterministic run-to-run, and installing against 2020s-era
+`package.json` ranges with today's registry can legitimately resolve
+different transitive versions than what was available at merge time) is an
+open question this sweep does not answer — `structuralMatch()` already
+ignores hashes/resolved-URLs/ordering, so the 8 disagreements are graph-level,
+not cosmetic, but distinguishing "engine got it wrong" from "the ecosystem
+moved on" needs looking at the actual diverging dependency identities
+per-example, which is out of scope for this task.
+
+On hypothesis (d) from the prior section (does merge-index seeding move the
+number): **this sweep finally answers it, and the answer is not the one
+tasks 2–3's fix was hoping for.** The scratch-index seeding bug that blocked
+every candidate in re-run #1 is fixed, candidates now reach `yarn install` and
+run to completion, and the result is 38.5 % agreement — well below both the
+pilot's 66.7 % (n = 3) and the ≥ 80 % target. Seeding the disposable worktree
+from the real 3-way merge result (rather than `HEAD` alone) does not, by
+itself, get this feature to a publishable number.
 
 `results/` holds one JSON file per measured GitWand version, plus the corpus pin
 date that produced it. Keep old files: the whole reason for pinning is to be able
