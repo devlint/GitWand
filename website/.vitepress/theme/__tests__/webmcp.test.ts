@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { detectSurface, registerTools, type WebMcpTool } from '../webmcp'
 import { matchGitErrors } from '../tools/git-errors'
 import { parseGitErrorTool, resolveConflictTool } from '../tools'
+import { SAMPLE_GIT_ERROR, SAMPLE_CONFLICT } from '../tools/samples'
 
 function fakeModelContext() {
   const calls: { tool: WebMcpTool; options?: { signal?: AbortSignal } }[] = []
@@ -228,5 +229,40 @@ describe('resolve_conflict tool', () => {
   it('rejects empty input', async () => {
     const r = await resolveConflictTool.execute({ content: '' }, { signal })
     expect(r.content[0].text).toContain('No content provided')
+  })
+})
+
+describe('try-it panel samples', () => {
+  const signal = new AbortController().signal
+
+  it('the conflict sample shows both halves of the pitch in one run', async () => {
+    // The whole point of this sample is that it resolves one hunk and refuses
+    // the other. If a pattern change ever makes it resolve both, or neither,
+    // the demo stops demonstrating anything and this test should say so.
+    const r = await resolveConflictTool.execute(
+      { content: SAMPLE_CONFLICT, filePath: 'src/server.ts' },
+      { signal },
+    )
+    const text = r.content[0].text
+
+    expect(text).toContain('2 conflicts found')
+    expect(text).toContain('1 resolved deterministically, 1 left for you')
+    // Pin the classifications, not just the counts. A sample where both hunks
+    // land on `complex` still satisfies the counts while showing the reader
+    // nothing about how the engine decides.
+    expect(text).toContain('same_change')
+    expect(text).toContain('complex')
+    expect(text).toContain('NEEDS REVIEW')
+  })
+
+  it('the git error sample matches more than one failure', async () => {
+    // Chosen to show that a real paste usually carries several problems and
+    // that the tool reports all of them rather than the first.
+    const ids = matchGitErrors(SAMPLE_GIT_ERROR).map((m) => m.entry.id)
+    expect(ids).toContain('push_rejected')
+    expect(ids).toContain('merge_head_exists')
+
+    const r = await parseGitErrorTool.execute({ output: SAMPLE_GIT_ERROR }, { signal })
+    expect(r.content[0].text).toContain('2 known git errors matched')
   })
 })

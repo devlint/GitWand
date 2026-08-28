@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
-import { TOOLS } from './tools'
+import { TOOLS, parseGitErrorTool, resolveConflictTool } from './tools'
+import { SAMPLE_GIT_ERROR, SAMPLE_CONFLICT } from './tools/samples'
 import { registerTools, type Surface } from './webmcp'
 
 /**
@@ -33,6 +34,49 @@ onMounted(async () => {
 })
 
 onUnmounted(() => controller?.abort())
+
+/**
+ * Try-it panel. Calls the same `execute` an agent calls, not a mock of it,
+ * which is the only version of this worth shipping: if the panel disagreed
+ * with the tool, the page would be lying.
+ */
+
+type ToolId = 'resolve_conflict' | 'parse_git_error'
+
+const active = ref<ToolId>('resolve_conflict')
+const errorInput = ref(SAMPLE_GIT_ERROR)
+const conflictInput = ref(SAMPLE_CONFLICT)
+const conflictPath = ref('src/server.ts')
+const output = ref<string | null>(null)
+const running = ref(false)
+
+async function run() {
+  running.value = true
+  output.value = null
+  const signal = new AbortController().signal
+  try {
+    // Deliberately the un-instrumented tool: registerTools wraps a copy for
+    // its counter, so clicking here does not inflate the agent call count.
+    const result =
+      active.value === 'parse_git_error'
+        ? await parseGitErrorTool.execute({ output: errorInput.value }, { signal })
+        : await resolveConflictTool.execute(
+            { content: conflictInput.value, filePath: conflictPath.value },
+            { signal },
+          )
+    output.value = result.content.map((c) => c.text).join('\n')
+  } catch (err) {
+    output.value = `The tool threw: ${err instanceof Error ? err.message : String(err)}`
+  } finally {
+    running.value = false
+  }
+}
+
+function pick(id: ToolId) {
+  active.value = id
+  output.value = null
+}
+
 </script>
 
 <template>
@@ -102,6 +146,57 @@ onUnmounted(() => controller?.abort())
           <ul v-if="failed.length" class="st-failed">
             <li v-for="f in failed" :key="f.name"><code>{{ f.name }}</code> failed: {{ f.reason }}</li>
           </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- Runs the real tools, so a visitor with no WebMCP can still see what an
+         agent would get back. -->
+    <section class="ph-section ph-section--alt">
+      <div class="ph-inner">
+        <h2 class="ph-h2">Try them without an agent</h2>
+        <p class="ph-secsub">
+          This runs the same code an agent calls. Nothing is sent anywhere: the engine executes in
+          this tab.
+        </p>
+
+        <div class="try">
+          <div class="try-tabs" role="tablist">
+            <button
+              v-for="id in (['resolve_conflict', 'parse_git_error'] as const)"
+              :key="id"
+              class="try-tab"
+              :class="{ 'try-tab--on': active === id }"
+              role="tab"
+              :aria-selected="active === id"
+              @click="pick(id)"
+            >
+              {{ id }}
+            </button>
+          </div>
+
+          <div v-if="active === 'resolve_conflict'" class="try-body">
+            <label class="try-label" for="try-path">File path</label>
+            <input id="try-path" v-model="conflictPath" class="try-input" spellcheck="false" />
+            <p class="try-hint">
+              The extension selects the format-aware resolvers, and the path is what identifies a
+              generated file. Try <code>pnpm-lock.yaml</code> to see that change the answer.
+            </p>
+
+            <label class="try-label" for="try-conflict">Conflicted file</label>
+            <textarea id="try-conflict" v-model="conflictInput" class="try-area" rows="14" spellcheck="false"></textarea>
+          </div>
+
+          <div v-else class="try-body">
+            <label class="try-label" for="try-error">Output of the failing git command</label>
+            <textarea id="try-error" v-model="errorInput" class="try-area" rows="8" spellcheck="false"></textarea>
+          </div>
+
+          <button class="try-run" :disabled="running" @click="run">
+            {{ running ? 'Running…' : `Call ${active}` }}
+          </button>
+
+          <pre v-if="output" class="try-out">{{ output }}</pre>
         </div>
       </div>
     </section>
@@ -189,6 +284,23 @@ onUnmounted(() => controller?.abort())
 .st-count--hot{color:var(--green);}
 .st-failed{margin:14px 0 0;padding-left:18px;font-size:13px;color:#f87171;}
 
+.try{max-width:760px;margin:0 auto;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px 22px;}
+.try-tabs{display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap;}
+.try-tab{font-family:'JetBrains Mono',monospace;font-size:13px;padding:7px 14px;border-radius:8px;background:transparent;color:var(--muted);border:1px solid var(--border-soft);cursor:pointer;transition:color .15s,border-color .15s;}
+.try-tab:hover{color:var(--text);}
+.try-tab--on{color:var(--purple);border-color:var(--border);background:rgba(124,58,237,0.1);}
+.try-body{display:flex;flex-direction:column;}
+.try-label{font-size:13px;font-weight:600;margin-bottom:6px;}
+.try-hint{font-size:12px;color:var(--muted);margin:6px 0 0;line-height:1.5;}
+.try-input,.try-area{width:100%;box-sizing:border-box;background:var(--bg);color:var(--text);border:1px solid var(--border-soft);border-radius:8px;padding:10px 12px;font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.6;}
+.try-input:focus,.try-area:focus{outline:none;border-color:var(--purple);}
+.try-area{resize:vertical;margin-bottom:4px;}
+.try-label + .try-area,.try-hint + .try-label{margin-top:0;}
+.try-body > .try-label:not(:first-child){margin-top:16px;}
+.try-run{margin-top:16px;align-self:flex-start;padding:10px 20px;border-radius:10px;font-size:14px;font-weight:600;background:var(--purple-d);color:#fff;border:1px solid var(--purple-d);cursor:pointer;font-family:'JetBrains Mono',monospace;}
+.try-run:hover:not(:disabled){background:var(--purple);}
+.try-run:disabled{opacity:0.6;cursor:default;}
+.try-out{margin:18px 0 0;padding:14px 16px;background:var(--bg);border:1px solid var(--border-soft);border-radius:8px;font-family:'JetBrains Mono',monospace;font-size:12.5px;line-height:1.6;white-space:pre-wrap;word-break:break-word;max-height:460px;overflow:auto;color:var(--text);}
 .tool{max-width:720px;margin:0 auto 20px;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px 22px;}
 .tool-name{margin:0 0 10px;font-size:16px;}
 .tool-name code{font-family:'JetBrains Mono',monospace;color:var(--purple);}

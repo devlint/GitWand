@@ -70,7 +70,7 @@ export const parseGitErrorTool: WebMcpTool = {
         ? 'One known git error matched.'
         : `${matches.length} known git errors matched this output, listed in the order they should be dealt with.`
 
-    return text(truncate([header, '', ...sections].join('\n\n')))
+    return text(truncate([header, ...sections].join('\n\n')))
   },
 }
 
