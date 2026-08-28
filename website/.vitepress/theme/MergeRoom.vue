@@ -1,9 +1,28 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { roomCases, roomJournal, summary, decide, clearRoom, finalFile, type ConflictCase } from './room'
+import { listCasesTool } from './tools'
 
 const copied = ref<string | null>(null)
 const journalOpen = ref(false)
+
+/**
+ * `list_cases` is what closes the loop: it is how an agent reads the room back
+ * and finds out whether the human made the call it was waiting on. That is
+ * invisible if it only appears as a row in a spec table, so the room can show
+ * its literal output next to the state it describes. It calls the real tool.
+ */
+const agentView = ref<string | null>(null)
+async function showAgentView() {
+  if (agentView.value) { agentView.value = null; return }
+  const r = await listCasesTool.execute({}, { signal: new AbortController().signal })
+  agentView.value = r.content[0].text
+}
+async function refreshAgentView() {
+  if (!agentView.value) return
+  const r = await listCasesTool.execute({}, { signal: new AbortController().signal })
+  agentView.value = r.content[0].text
+}
 
 /**
  * A decided hunk collapses to the side that was taken. Keeping both columns
@@ -44,6 +63,7 @@ const rail = computed(() => {
 
 function take(caseId: string, index: number, side: 'ours' | 'theirs') {
   decide(caseId, index, side)
+  refreshAgentView()
   const next = new Set(reopened.value)
   next.delete(key(caseId, index))
   reopened.value = next
@@ -83,8 +103,21 @@ const clock = (t: number) =>
         <span v-if="summary.hunksWaitingOnYou" class="tick tick--waiting">{{ summary.hunksWaitingOnYou }} waiting on you</span>
         <span v-else class="tick tick--clear">nothing left for you</span>
       </p>
-      <button class="ghost" @click="clearRoom">Clear</button>
+      <button class="ghost" @click="showAgentView">
+        {{ agentView ? 'Hide agent view' : 'What the agent sees' }}
+      </button>
+      <button class="ghost ghost--last" @click="clearRoom">Clear</button>
     </div>
+
+    <Transition name="unfurl">
+      <figure v-if="agentView" class="agentview">
+        <figcaption>
+          <code>list_cases</code> returns this. It is how an agent checks whether you have made the
+          call it was waiting on.
+        </figcaption>
+        <pre class="block">{{ agentView }}</pre>
+      </figure>
+    </Transition>
 
     <p v-if="empty" class="void">
       Empty. An agent calls <code>resolve_conflict</code> or <code>parse_git_error</code> and the
@@ -100,6 +133,7 @@ const clock = (t: number) =>
         <header class="entry-head">
           <code class="entry-id">{{ c.id }}</code>
           <span class="entry-subject">{{ c.kind === 'conflict' ? c.filePath : 'git failure' }}</span>
+          <span v-if="c.example" class="entry-flag">example</span>
           <time class="entry-time">{{ clock(c.at) }}</time>
         </header>
 
@@ -228,9 +262,14 @@ const clock = (t: number) =>
 .tick--clear{color:var(--settled);}
 .tick--clear::before{background:var(--settled);}
 
-.ghost{margin-left:auto;background:transparent;border:1px solid var(--rule);color:var(--ink-dim);border-radius:7px;padding:6px 13px;font:inherit;font-size:13px;cursor:pointer;transition:color .16s,border-color .16s;}
+.ghost{background:transparent;border:1px solid var(--rule);color:var(--ink-dim);border-radius:7px;padding:6px 13px;font:inherit;font-size:13px;cursor:pointer;transition:color .16s,border-color .16s;}
 .ghost:hover,.ghost:focus-visible{color:var(--ink);border-color:var(--ink-dim);}
 
+.rail-read{flex:1;}
+.agentview{margin:18px 0 0;}
+.agentview figcaption{margin:0 0 8px;font-size:12.5px;color:var(--ink-dim);max-width:66ch;line-height:1.55;}
+.agentview figcaption code{font-family:'JetBrains Mono',monospace;color:var(--decided);}
+.entry-flag{font-size:10.5px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;color:var(--ink-quiet);border:1px solid var(--rule);border-radius:99px;padding:2px 8px;}
 .void{margin:0;font-size:15px;line-height:1.7;color:var(--ink-dim);max-width:58ch;text-wrap:pretty;}
 .void code{font-family:'JetBrains Mono',monospace;font-size:0.9em;color:var(--ink);}
 
