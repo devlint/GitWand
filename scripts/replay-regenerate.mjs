@@ -258,6 +258,12 @@ for (const m of merges) {
       parents,
       lockfilePath: path,
       treeOid: conflict.treeOid,
+      // Final review, Critical #1 — retained so `seedScratchIndex` can strip
+      // these paths back out of the scratch index (see its doc comment):
+      // `merge-tree --write-tree`'s conflicted blobs hold literal diff3
+      // marker text, and production never materializes that content because
+      // a real merge index keeps conflicted paths off stage 0 entirely.
+      conflictedPaths: conflict.files,
       ecosystem,
     });
   }
@@ -319,7 +325,11 @@ for (const [ecosystemId, allCandidates] of candidatesByEcosystem) {
       // A scratch index is a throwaway file; it never touches this corpus
       // repo's own index.
       const seedIndexFile = join(tmpdir(), `gitwand-replay-index-${randomUUID()}`);
-      seedScratchIndex(repo, candidate.treeOid, seedIndexFile);
+      // Final review, Critical #1 — skip the paths that were genuinely
+      // conflicted in this historical merge, so the scratch index matches
+      // production's real multi-stage-skip behavior instead of materializing
+      // diff3 marker content for them.
+      seedScratchIndex(repo, candidate.treeOid, seedIndexFile, candidate.conflictedPaths);
 
       let regenOutcome;
       try {

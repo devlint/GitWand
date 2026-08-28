@@ -374,6 +374,107 @@ describe("runRegeneration — worktree reflects the real merge index", () => {
   });
 });
 
+describe("runRegeneration — explicit seedIndexFile (final review, Important #7)", () => {
+  // The Task 2 ↔ Task 3 interface (`seedIndexFile`) previously had zero
+  // coverage from the CLI test suite — only from the harness's own manual
+  // sweep. This test drives it directly, with a HAND-BUILT scratch index
+  // (no real `git merge`), proving BOTH halves of the Critical #1 fix from
+  // the CLI side:
+  //  1. a theirs-only path (present at stage 0 in the scratch index) is
+  //     visible inside the disposable worktree (positive case — same as the
+  //     "worktree reflects the real merge index" describe block above, but
+  //     via an explicit seedIndexFile instead of a real live merge index).
+  //  2. a still-conflicted path (force-removed from the scratch index,
+  //     simulating a real merge index's multi-stage skip) is left UNTOUCHED
+  //     by the overlay — it must still hold whatever the HEAD-only scaffold
+  //     from step 1 put there, never any diff3-marker content the scratch
+  //     index's source tree carries for that path (negative case — this is
+  //     exactly what `seedScratchIndex`'s `skipPaths` parameter now makes
+  //     the measurement harness do too, see `scripts/lib/seed-index.mjs`).
+  it("theirs-only file becomes visible, still-conflicted file stays at its HEAD scaffold content", IT_TIMEOUT, async () => {
+    initRepo(repo);
+    writeAndAdd(repo, "package.json", '{"v":1}\n');
+    writeAndAdd(repo, "package-lock.json", '{"base":true}\n');
+    commit(repo, "base");
+
+    git(repo, ["checkout", "-b", "theirs"]);
+    writeAndAdd(repo, "theirs-only.txt", "only on theirs\n");
+    writeAndAdd(repo, "package-lock.json", '{"theirs":true}\n');
+    commit(repo, "theirs: add file + bump lock");
+    const theirsSha = git(repo, ["rev-parse", "HEAD"]).trim();
+
+    git(repo, ["checkout", "main"]);
+    writeAndAdd(repo, "package-lock.json", '{"main":true}\n');
+    commit(repo, "main: bump lock");
+    // HEAD now sits on main, at this exact commit — `addWorktree`'s
+    // `git worktree add --detach <dir> HEAD` will scaffold from THIS tree,
+    // i.e. package.json@v1 + package-lock.json@'{"main":true}\n', no
+    // theirs-only.txt (never committed to main).
+
+    // Compute the merge-tree's tree oid by hand — no real `git merge` is run
+    // in this test, only `merge-tree --write-tree`, which exits 1 on
+    // conflict (package-lock.json conflicts; theirs-only.txt merges clean).
+    // Tree oid is still the first stdout line even on exit 1.
+    let mergeTreeStdout: string;
+    try {
+      mergeTreeStdout = execFileSync(
+        "git",
+        ["-C", repo, "-c", "merge.conflictstyle=diff3", "merge-tree", "--write-tree", "main", theirsSha],
+        { encoding: "utf-8", env: HERMETIC_GIT_ENV, timeout: 10_000 },
+      );
+    } catch (err) {
+      const e = err as NodeJS.ErrnoException & { stdout?: string };
+      if (typeof e.stdout !== "string") throw err;
+      mergeTreeStdout = e.stdout;
+    }
+    const treeOid = mergeTreeStdout.trim().split("\n")[0];
+
+    // Hand-build the scratch index: read-tree puts every path (including
+    // the still-conflicted package-lock.json) at stage 0, then
+    // update-index --force-remove simulates "this path is still multi-stage
+    // in a real merge index" — exactly what Critical #1's fix
+    // (`seedScratchIndex`'s `skipPaths`) now does for the harness.
+    const scratchIndexFile = join(repo, ".git", "scratch-explicit-seed-index");
+    const scratchEnv = { ...HERMETIC_GIT_ENV, GIT_INDEX_FILE: scratchIndexFile };
+    execFileSync("git", ["-C", repo, "read-tree", treeOid], { env: scratchEnv, timeout: 10_000 });
+    execFileSync("git", ["-C", repo, "update-index", "--force-remove", "--", "package-lock.json"], {
+      env: scratchEnv,
+      timeout: 10_000,
+    });
+
+    const fakeEcosystem: RegenEcosystem = {
+      ...ecosystemFor("npm"),
+      sourcesOfTruth: [],
+      network: "offline-capable", // exerce le worktree, pas la sonde réseau
+      // Positive case: fails (non-zero exit -> spawn-failed, not success) if
+      // theirs-only.txt is missing from the worktree. Negative case: never
+      // writes to package-lock.json itself, so whatever `runRegeneration`
+      // later reads back from it is exactly whatever `checkout-index --all`
+      // left on disk — the HEAD scaffold content if (and only if) the
+      // still-conflicted path was correctly skipped, never the scratch
+      // index's diff3-marker blob for that path.
+      command: { bin: "sh", args: ["-c", "cat theirs-only.txt > /dev/null"] },
+    };
+
+    const outcome = await runRegeneration({
+      repoRoot: repo,
+      file: "package-lock.json",
+      ecosystem: fakeEcosystem,
+      resolvedSources: [],
+      seedIndexFile: scratchIndexFile,
+    });
+
+    expect(outcome.kind).toBe("success");
+    // Negative case: package-lock.json must still be the HEAD scaffold's
+    // content, not overwritten with diff3-marker garbage from the scratch
+    // index's source tree.
+    expect(outcome.content).toBe('{"main":true}\n');
+    expect(outcome.content).not.toContain("<<<<<<<");
+    expect(outcome.content).not.toContain('"theirs":true');
+    expect(listWorktrees(repo)).not.toContain("gitwand-regen-");
+  });
+});
+
 describe("validateRegeneratedContent", () => {
   it("accepts valid JSON for npm/composer", () => {
     expect(validateRegeneratedContent("npm", '{"a":1}').valid).toBe(true);

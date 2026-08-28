@@ -15,6 +15,11 @@
  *     `--work-tree`) — c'est ce qui rend visibles les fichiers qui n'existent
  *     QUE côté "theirs" (follow-up plan, résout la limitation identifiée par
  *     la revue finale du plan original — voir git blame pour l'historique).
+ *     Note (revue finale, Important #4) : cette superposition ne change RIEN
+ *     à l'état du lockfile candidat lui-même — il reste multi-stage (encore
+ *     en conflit) dans l'index de merge réel, donc `checkout-index --all` le
+ *     saute silencieusement, exactement comme avant ce fix ; seule la
+ *     visibilité des fichiers theirs-only est réellement corrigée ici.
  *  3. écraser dans ce worktree chaque source de vérité (`package.json`…)
  *     par son contenu déjà résolu en pass 1 (fourni par l'appelant — ce
  *     module ne re-résout rien).
@@ -310,16 +315,34 @@ function buildGitSpawnEnv(): NodeJS.ProcessEnv {
  * `HEAD` (a disposable, always-valid scaffold), but step 2 overlays every
  * already-resolved (stage-0) path from the REAL merge index on top of it —
  * this is what makes a `theirs`-only file (a new workspace member's
- * `package.json`, say) visible to the installer, and what stops the seed
- * lockfile from being biased toward `ours'` incremental state. Paths still
- * mid-conflict (multi-stage) are silently skipped by `checkout-index`; the
- * caller overwrites those explicitly via `resolvedSources` right after this
- * returns, so leaving them at their `HEAD` scaffold content is harmless.
+ * `package.json`, say) visible to the installer. Paths still mid-conflict
+ * (multi-stage) are silently skipped by `checkout-index --all` — this
+ * INCLUDES the candidate lockfile itself, which stays at its `HEAD`
+ * (`ours'`) content from step 1, exactly as before this fix: this overlay
+ * does not, and was never claimed to, change the lockfile's own seed state.
+ * (Final review, Important #4 — an earlier revision of this comment claimed
+ * this overlay "stops the seed lockfile from being biased toward `ours'`
+ * incremental state"; that was never true. Only the theirs-only-file
+ * visibility half is real.) The caller overwrites the resolved sources of
+ * truth explicitly via `resolvedSources` right after this returns.
  *
  * `seedIndexFile`, when given, points `checkout-index` at an alternate index
  * instead of `repoRoot`'s own live one — used by the measurement harness
  * (`scripts/replay-regenerate.mjs`) to replay a *historical* merge, which has
  * no real in-progress-merge index to read from.
+ *
+ * Final review, Important #2/#3:
+ *  - never throw: `runRegeneration`'s documented contract is that it always
+ *    resolves to a `RegenerationOutcome`, never an exception. A
+ *    `checkout-index` failure here degrades to the HEAD-only scaffold from
+ *    step 1 (no overlay applied) rather than propagating as an unhandled
+ *    rejection — the pre-fix behavior, not a regression.
+ *  - never leak an ambient `GIT_INDEX_FILE`: `buildGitSpawnEnv()` allowlists
+ *    the whole `GIT_*` prefix, so an ambient `GIT_INDEX_FILE` already present
+ *    in the process environment (git hooks, some mergetool flows) would
+ *    otherwise silently override the "omit `seedIndexFile` → use `repoRoot`'s
+ *    own live index" default this function documents. Explicitly deleted
+ *    when `seedIndexFile` is not supplied.
  */
 async function addWorktree(
   repoRoot: string,
@@ -332,12 +355,22 @@ async function addWorktree(
   });
 
   const env = buildGitSpawnEnv();
-  if (seedIndexFile) env.GIT_INDEX_FILE = seedIndexFile;
-  await execFileAsync(
-    "git",
-    ["--work-tree", worktreeDir, "checkout-index", "--all", "--force"],
-    { cwd: repoRoot, env },
-  );
+  if (seedIndexFile) {
+    env.GIT_INDEX_FILE = seedIndexFile;
+  } else {
+    delete env.GIT_INDEX_FILE;
+  }
+  try {
+    await execFileAsync(
+      "git",
+      ["--work-tree", worktreeDir, "checkout-index", "--all", "--force"],
+      { cwd: repoRoot, env },
+    );
+  } catch {
+    // Never throw — see doc comment above. Degrading to the HEAD-only
+    // scaffold from step 1 (no overlay applied) is the pre-fix behavior,
+    // not a regression, just the failure floor this fix started from.
+  }
 }
 
 async function removeWorktree(repoRoot: string, worktreeDir: string): Promise<void> {

@@ -327,9 +327,11 @@ it falls back to a text compare via `stripVolatileValues`
 (`@gitwand/core`, exported from `packages/core/src/resolver/generated-detection.ts`
 for this purpose) rather than crashing the run. Both paths are covered by
 fixture tests — `node --test scripts/lib/regenerate-compare.test.mjs` (also
-`pnpm run test:regenerate-compare` from the repo root) — fast, no network, no
-real installs: hand-built lockfile pairs that are identical-modulo-volatile-values
-(must match) and pairs with a genuinely different dependency graph (must not).
+`pnpm run test:scripts-lib` from the repo root, which runs every
+`scripts/lib/*.test.mjs` file, including `seed-index.test.mjs`) — fast, no
+network, no real installs: hand-built lockfile pairs that are
+identical-modulo-volatile-values (must match) and pairs with a genuinely
+different dependency graph (must not).
 
 ### Running it
 
@@ -360,8 +362,13 @@ is run manually/in the container, same as its siblings.
 ### Pilot run (2026-08-27) — superseded by the full sweep below
 
 Before the merge-index-seeding fix (a follow-up plan's tasks 2–3:
-`replay-regenerate.mjs` and the CLI's disposable worktree both now seed from
-the real 3-way merge result instead of `HEAD` alone), a bounded pilot
+`replay-regenerate.mjs` and the CLI's disposable worktree both now overlay
+every already-resolved (stage-0) path of the real 3-way merge index onto the
+`HEAD` worktree, in place of the `HEAD`-only scaffold this pilot ran against
+— this makes `theirs`-only files visible to the installer; it does not, and
+never did, change the seed state of the still-conflicted lockfile itself,
+which stays at its `HEAD` content either way — see the fix's own doc comment
+in `packages/cli/src/regenerate-runner.ts` for the precise scope), a bounded pilot
 (`prettier/prettier`, yarn-berry, `--max-real 5`) measured **66.7 % (2/3)**
 agreement, n = 3, and flagged the `HEAD`-only seeding as hypothesis (d) for
 why the number might be low. That pilot's full write-up (including the
@@ -370,6 +377,26 @@ still stands unchanged) is preserved in git history; see the section below for
 the real, full-scale numbers gathered after the fix.
 
 ### Full corpus sweep (2026-08-28) — post merge-index-seeding fix
+
+> **This section's numbers are INVALIDATED, not corrected — do not treat any
+> figure below as reliable.** The harness that produced this sweep had a real
+> bug: `scripts/lib/seed-index.mjs`'s `seedScratchIndex` built its scratch
+> index via `git read-tree <treeOid>` of a single tree, which puts EVERY path
+> in that tree at stage 0 — including paths that were genuinely conflicted in
+> the 3-way merge. `merge-tree --write-tree`'s conflicted blobs hold literal
+> diff3 conflict-marker text as their content, so `checkout-index --all
+> --force` wrote marker-laden content into the disposable worktree for every
+> conflicted path in each candidate merge — a worktree state the real
+> production CLI can never produce (a genuine in-progress merge's index keeps
+> conflicted paths at stages 1/2/3, which `checkout-index --all` always
+> skips). This most likely explains the dominant `spawn-failed` failure mode
+> in the numbers below (11 of 13 runnable `prettier/prettier` candidates
+> failed inside `yarn install` itself). The bug is now fixed (see the final
+> review fix wave that added `skipPaths` to `seedScratchIndex` and
+> `conflictedPaths` to candidate discovery in `scripts/replay-regenerate.mjs`)
+> — but **a fresh full sweep against the fixed harness is required before this
+> gate can be evaluated at all.** No estimate of what the corrected numbers
+> would be is given here; none is implied by anything below.
 
 Per this follow-up plan's task 4: the fix from tasks 2–3 is merged, so this is
 the real ≤ 20-real-attempts-per-ecosystem sweep the pilot deferred, run against
@@ -417,7 +444,9 @@ Detail per repo, exactly as measured, no rounding or omission:
 - **`tauri-apps/tauri`** — only **56** merge commits are reachable from the
   pinned SHA (`rev-list --merges` walked the real, smaller history at this
   pin; not a truncation bug). 22 cargo candidates and 10 yarn-berry candidates
-  were found; **all 32 attempted candidates across both ecosystems came back
+  were found (**32 candidates found**), but cargo's attempts were capped at
+  `--max-real 20`, so only **30 candidates attempted** (20 cargo + all 10
+  yarn-berry) — **all 30 attempted candidates across both ecosystems came back
   `not-runnable`** — `@gitwand/core`'s `resolve()` never fully settled
   `Cargo.toml`/`package.json` for any of them, so zero plans ever reached the
   regeneration step. Zero runnable, zero ran, zero comparable.
@@ -469,12 +498,14 @@ explicitly out of scope for this plan; (b) the new dominant bottleneck,
 own root-cause pass (capture full `yarn` stdout/stderr per failure, not just
 the truncated 3-line `reason` string) before any further accuracy conclusion
 is possible; (c) `tauri-apps/tauri`'s 100 % `not-runnable` rate across both
-its ecosystems (32/32) suggests `resolve()`'s handling of `Cargo.toml`/
-`package.json` conflicts in a large mixed-language monorepo may itself be a
-bigger practical ceiling on this feature than the regeneration step being
-measured here — worth its own investigation; (d) once (b) is understood, a
-re-run with a materially larger comparable sample (not just a larger attempted
-count) is needed before the ≥ 80 % target can be honestly called met or missed.
+its ecosystems (32 candidates found, 30 attempted — cargo capped at
+`--max-real 20`, all 10 yarn-berry attempted) suggests `resolve()`'s handling
+of `Cargo.toml`/`package.json` conflicts in a large mixed-language monorepo
+may itself be a bigger practical ceiling on this feature than the
+regeneration step being measured here — worth its own investigation; (d) once
+(b) is understood, a re-run with a materially larger comparable sample (not
+just a larger attempted count) is needed before the ≥ 80 % target can be
+honestly called met or missed.
 
 ## Results
 

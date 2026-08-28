@@ -13,7 +13,7 @@
   "scripts": {
     "build": "pnpm -r run build",
     "test": "pnpm -r run test",
-    "test:regenerate-compare": "node --test scripts/lib/regenerate-compare.test.mjs",
+    "test:scripts-lib": "node --test scripts/lib/*.test.mjs",
     "clean": "pnpm -r run clean",
     "postinstall": "node scripts/fix-spawn-helper.mjs"
   },
