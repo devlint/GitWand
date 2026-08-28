@@ -70,6 +70,10 @@
  */
 
 import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { rm } from "node:fs/promises";
 import {
   resolve as gwResolve,
   findEcosystem,
@@ -77,6 +81,7 @@ import {
 } from "../packages/core/dist/index.js";
 import { runRegeneration } from "../packages/cli/dist/regenerate-runner.js";
 import { structuralMatch } from "./lib/regenerate-compare.mjs";
+import { seedScratchIndex } from "./lib/seed-index.mjs";
 
 // ─── args ────────────────────────────────────────────────────────────────────
 
@@ -307,13 +312,28 @@ for (const [ecosystemId, allCandidates] of candidatesByEcosystem) {
       // reproduces the right commit — see module doc.
       git(["update-ref", "HEAD", candidate.parents[0]]);
 
-      const regenOutcome = await runRegeneration({
-        repoRoot: repo,
-        file: candidate.lockfilePath,
-        ecosystem: candidate.ecosystem,
-        resolvedSources,
-        timeoutMs: TIMEOUT_MS_OVERRIDE,
-      });
+      // Follow-up plan ("merge-index seeding"): seed the disposable worktree
+      // from the ACTUAL 3-way merge result — the tree `merge-tree
+      // --write-tree` already computed during candidate discovery
+      // (`candidate.treeOid`) — not just `candidate.parents[0]`'s bare HEAD.
+      // A scratch index is a throwaway file; it never touches this corpus
+      // repo's own index.
+      const seedIndexFile = join(tmpdir(), `gitwand-replay-index-${randomUUID()}`);
+      seedScratchIndex(repo, candidate.treeOid, seedIndexFile);
+
+      let regenOutcome;
+      try {
+        regenOutcome = await runRegeneration({
+          repoRoot: repo,
+          file: candidate.lockfilePath,
+          ecosystem: candidate.ecosystem,
+          resolvedSources,
+          timeoutMs: TIMEOUT_MS_OVERRIDE,
+          seedIndexFile,
+        });
+      } finally {
+        await rm(seedIndexFile, { force: true });
+      }
 
       bump(regenOutcome.kind);
 
