@@ -28,6 +28,12 @@ gitwand resolve [files...] [options]
 | `--no-whitespace` | Skip whitespace-only conflicts |
 | `--ci` | CI mode: JSON output, exit code 1 if unresolved |
 | `--json` | Alias for `--ci` |
+| `--resolve-generated` | Auto-resolve generated files (lockfiles, `dist/`) — declined by default: regenerate them instead |
+| `--regenerate` | Re-run the ecosystem's generator (npm/pnpm/yarn-berry/composer/cargo) for declined lockfiles once their source of truth is clean/resolved (sandboxed git worktree, opt-in — see `.gitwandrc` `"regenerate": true`) |
+| `--concurrency=N` | Parallel file workers (default 8, min 1) |
+| `--llm-fallback` | Enable LLM fallback for unresolved conflicts (opt-in, experimental) |
+| `--llm-provider=X` | LLM provider: `claude` (default) \| `openai` \| `ollama` |
+| `--llm-model=X` | Model name (e.g. `claude-sonnet-4-6`, `gpt-4o-mini`, `llama3`) |
 
 ### Examples
 
@@ -171,6 +177,33 @@ gitwand status
 ```
 
 Reports the number of conflicted files, total conflicts, and how many are auto-resolvable.
+
+---
+
+## `gitwand conventions`
+
+Measures this repo's own merge conventions from its historical merges (which side wins version scalars, whether the team regenerates or merges lockfiles, how the changelog is maintained) and writes the verdicts to `.git/gitwand/conventions.json` — per clone, never committed, always beaten by an explicit `.gitwandrc`.
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--show` | Print the currently persisted conventions without re-measuring |
+| `--clear` | Delete the persisted conventions file |
+| `--max-merges=N` | Cap on historical merges replayed (default 200) |
+| `--json` | Machine-readable output |
+
+### Example
+
+```bash
+$ gitwand conventions
+  measured on 187 merges / 412 conflicted files (engine 3.8.0, 2026-08-27)
+
+  generated files  regenerate  (11 samples, 91 %)
+  changelog        tool-rebuilt  (8 samples, 100 %)
+
+✓ written to .git/gitwand/conventions.json (per-clone, never committed; an explicit .gitwandrc always wins)
+```
 
 ---
 
