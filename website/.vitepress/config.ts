@@ -1,5 +1,6 @@
 import { defineConfig } from 'vitepress'
 import { extractFaq } from './seo'
+import { fileURLToPath } from 'node:url'
 
 
 export default defineConfig({
@@ -13,6 +14,29 @@ export default defineConfig({
   // extensionless form everywhere, sitemap included. GitHub Pages already serves
   // /foo as /foo.html with a 200 and no redirect, which is what this requires.
   cleanUrls: true,
+
+  vite: {
+    resolve: {
+      alias: {
+        // Point at the TypeScript source rather than packages/core/dist.
+        // deploy-website.yml runs `pnpm install` and builds the site directly,
+        // with no `pnpm --filter @gitwand/core build` step, so dist/ does not
+        // exist in CI. Same reasoning as apps/desktop/vite.config.ts.
+        '@gitwand/core': fileURLToPath(new URL('../../packages/core/src/index.ts', import.meta.url)),
+      },
+    },
+    build: {
+      rollupOptions: {
+        // Mark Node built-ins external so Rollup can parse packages/core's
+        // node adapter (structural/parsers/adapters/node.ts) without trying to
+        // resolve it. The adapter is behind a dynamic import reached only when
+        // env === "node", which never happens in a browser, so it is dead code
+        // here. Without this, the build fails on `createRequire` from
+        // node:module. Same fix as apps/desktop/vite.config.ts.
+        external: (id: string) => id.startsWith('node:'),
+      },
+    },
+  },
 
   sitemap: {
     hostname: 'https://gitwand.app',
@@ -37,14 +61,21 @@ export default defineConfig({
     ['link', { rel: 'api-catalog', href: '/.well-known/api-catalog', type: 'application/linkset+json' }],
     ['link', { rel: 'service-doc', href: '/guide/mcp', type: 'text/html', title: 'GitWand MCP Server Guide' }],
     ['link', { rel: 'service-doc', href: '/reference/core-api', type: 'text/html', title: 'GitWand Core API Reference' }],
-    // WebMCP — expose site tools to AI agents via the browser (navigator.modelContext)
+    // WebMCP — expose site tools to AI agents via the browser.
+    // The spec puts the entry point on document.modelContext; Chrome 150
+    // deprecated navigator.modelContext but kept it as an ALIAS to the same
+    // object, with removal announced. So: prefer document, fall back to
+    // navigator, and register ONCE. Registering on both would duplicate every
+    // tool on the versions that still expose both names.
     ['script', {}, `
 (function () {
-  if (typeof navigator === 'undefined' || !navigator.modelContext) return;
+  var mc = (typeof document !== 'undefined' && document.modelContext) ||
+           (typeof navigator !== 'undefined' && navigator.modelContext) || null;
+  if (!mc) return;
   var ac = new AbortController();
-  var signal = ac.signal;
+  var opts = { signal: ac.signal };
 
-  navigator.modelContext.registerTool({
+  mc.registerTool({
     name: 'search_gitwand_docs',
     description: 'Search the GitWand documentation for guides, API reference, CLI commands, and blog articles.',
     inputSchema: {
@@ -58,10 +89,9 @@ export default defineConfig({
       var url = 'https://gitwand.app/?q=' + encodeURIComponent(args.query);
       return Promise.resolve({ url: url, hint: 'Navigate to this URL to view search results.' });
     },
-    signal: signal
-  });
+  }, opts);
 
-  navigator.modelContext.registerTool({
+  mc.registerTool({
     name: 'get_gitwand_mcp_install',
     description: 'Get the installation instructions and configuration snippet for GitWand MCP server.',
     inputSchema: { type: 'object', properties: {} },
@@ -73,10 +103,9 @@ export default defineConfig({
         guide: 'https://gitwand.app/guide/mcp'
       });
     },
-    signal: signal
-  });
+  }, opts);
 
-  navigator.modelContext.registerTool({
+  mc.registerTool({
     name: 'navigate_to_gitwand_section',
     description: 'Get the URL for a GitWand documentation section.',
     inputSchema: {
@@ -108,8 +137,7 @@ export default defineConfig({
       var path = routes[args.section] || '/';
       return Promise.resolve({ url: 'https://gitwand.app' + path });
     },
-    signal: signal
-  });
+  }, opts);
 })();
 `],
   ],

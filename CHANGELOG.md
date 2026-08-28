@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`/agent`, a WebMCP page.** gitwand.app/agent exposes two read-only git tools to any agent browsing it, over the W3C WebMCP standard: `parse_git_error` explains a failing git command and gives the commands that fix it, `resolve_conflict` runs the deterministic engine over a conflicted file and reports per hunk what was resolved and what still needs a human. Both execute in the visitor's tab, so nothing is uploaded and there is no backend. `@gitwand/core` is imported on demand rather than at module scope, which keeps it out of the shared theme chunk every page downloads.
+- The page states its own registration status live, including when the browser has no WebMCP at all, and writes both tool contracts out in HTML and JSON-LD for the majority of visitors and crawlers that will never run the script.
+
+### Fixed
+
+- **Site-wide WebMCP tools went dark on browsers without `navigator.modelContext`.** The registration script bailed out entirely unless the deprecated `navigator` location existed, so the three documentation tools would disappear the day Chrome removes the alias it deprecated in 150. It now prefers `document.modelContext`, where the spec has put the entry point since 27 May 2026, and falls back to `navigator` only when that is all the browser offers. It registers once either way: on the versions exposing both names they alias the same object, so registering on both would have duplicated every tool.
+- **WebMCP tools could never be unregistered.** `signal` was passed as a property of the tool dictionary, which declares no such member, so it was silently dropped. It now goes in the options argument where `ModelContextRegisterToolOptions` expects it.
+
 ## [3.8.0] - 2026-08-24
 
 ### Added
