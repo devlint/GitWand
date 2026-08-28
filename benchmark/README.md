@@ -376,7 +376,7 @@ why the number might be low. That pilot's full write-up (including the
 still stands unchanged) is preserved in git history; see the section below for
 the real, full-scale numbers gathered after the fix.
 
-### Full corpus sweep (2026-08-28) — post merge-index-seeding fix, superseded by the corrected re-run below
+### Full corpus sweep (2026-08-28) — post merge-index-seeding fix, superseded by "Full corpus sweep re-run #2" below (the first conclusive result)
 
 > **This section's numbers are INVALIDATED, not corrected — do not treat any
 > figure below as reliable.** The harness that produced this sweep had a real
@@ -504,7 +504,7 @@ fresh sweep against the fixed harness needs a materially larger comparable
 sample (not just a larger attempted count) before the ≥ 80 % target can be
 honestly called met or missed.
 
-### Full corpus sweep re-run (2026-08-28) — against the fixed harness
+### Full corpus sweep re-run (2026-08-28) — against the fixed harness, itself superseded by "Full corpus sweep re-run #2" below (the first conclusive result)
 
 The `skipPaths` fix from the whole-branch review (commit `43be17e`, "fix: harden
 regenerate-tier merge-index seeding after whole-branch review") is merged, so
@@ -631,9 +631,9 @@ two more real bugs no hand-built fixture had ever exercised, in order:
    path ... contains slash`. A first attempt fed a fully-flattened `ls-tree -r`
    straight into `mktree`; fixed by walking and rewriting only the actual
    directory chain of each skip path instead (see above) — which also turned a
-   3288-directory-per-candidate rebuild into effectively zero-to-a-few `mktree`
-   calls per candidate, since `prettier/prettier`'s skip paths are always at
-   the tree root.
+   full-recursive-tree rebuild (thousands of directories for a repo this size)
+   into effectively zero-to-a-few `mktree` calls per candidate, since
+   `prettier/prettier`'s skip paths are always at the tree root.
 2. **Filenames with embedded quotes/spaces/unicode get C-quoted by git's
    default (non-`-z`) `ls-tree`/`mktree` output**, and hand-parsing a quoted,
    escaped name (e.g. splitting on `/`) corrupts it — surfaced as `fatal:
@@ -651,15 +651,35 @@ two more real bugs no hand-built fixture had ever exercised, in order:
    the same repository's own object database — nothing is invented, so there
    is nothing to validate.
 
-All three are now covered by `scripts/lib/seed-index.test.mjs`: a bare-repo
+#1 and #2 are now covered by `scripts/lib/seed-index.test.mjs`: a bare-repo
 fixture with nested paths (catches #1), a fixture with a sibling filename
-containing a literal quote and spaces (catches #2). #3 is a partial-clone
-promisor-fetch behavior that a from-scratch `mkdtemp` fixture cannot reproduce
-(it is never blobless); it was caught and fixed by direct testing against the
-real cache, which is exactly why this task's protocol required a real-bare-repo
-sanity check before the full sweep — one is documented below.
-`node --test scripts/lib/*.test.mjs` passes, 17/17, including the two new
-regression tests.
+containing a literal quote and spaces (catches #2). `node --test
+scripts/lib/*.test.mjs` passes, 17/17, including these two new regression
+tests.
+
+**#3 (the blobless `mktree --missing` fix) shipped without a regression
+test, on a claim later found to be wrong.** This section originally stated a
+from-scratch fixture "cannot reproduce" a blobless clone since it is "never
+blobless" — false: a local, hermetic blobless bare clone is reproducible with
+no network (`git config uploadpack.allowFilter true` on a temp origin, then
+`git clone --bare --filter=blob:none file://<origin>`), and an independent
+review proved it by doing exactly that and reproducing bug #3 on demand. That
+test does not exist yet — a real, if currently blast-radius-zero, gap.
+
+**A fourth, still-open gap, found by the same review, after this section was
+first written:** `conflictedPaths` comes from `git merge-tree --write-tree
+--name-only`'s default (non-`-z`) output, which C-quotes any path containing
+a `"` or non-ASCII byte. `seedScratchIndex`'s skip-matching uses raw `-z`
+bytes, so a C-quoted skip path silently fails to match and is never removed —
+the exact marker-leak failure mode bug #1 (the original Critical finding) was
+supposed to eliminate, now one layer upstream. Confirmed via review: switching
+`merge-tree`'s own `--name-only` call to `-z` fixes it cleanly. **This did
+not affect the sweep numbers below** — all 76 lockfile-conflicting merges
+across the 237 `prettier/prettier` merges scanned were independently checked,
+and none carry a C-quoted conflicted path — but it is a live latent bug for
+any future corpus repo (or a re-pin) whose conflicts touch a quote- or
+non-ASCII-containing filename. Not fixed here; recorded plainly rather than
+left for a fourth round to rediscover.
 
 **Cheap real-bare-repo sanity check, run before the full sweep**: a real
 candidate merge (`63503cd4142585c9b54629929078a7dbab8ec1f0`, conflicting on
@@ -727,13 +747,25 @@ lockfile the `prettier` team actually committed.
 
 **n = 13 comparable, 5 matched, 38.5 % agreement.** This is not close to the
 ≥ 80 % target, and — unlike the two prior sweeps of this fix — this sample is
-large enough that the shortfall is not plausibly sampling noise: it is more
-than 4× the comparable sample size of either predecessor (pilot n = 3,
-invalidated sweep n = 1), it is the first sweep where a materially larger
-*comparable* population was actually produced (not just a larger *attempted*
-count), and every one of the 13 runnable candidates ran to completion, so
-there is no remaining pool of not-yet-measured runnable candidates hiding a
-different answer. **Verdict: target NOT met**, plainly, not "inconclusive."
+large enough that the shortfall is not plausibly sampling noise: a one-sided
+exact binomial test against the 80 % target gives P(X ≤ 5 | n = 13, p = 0.80)
+≈ 1.2×10⁻³, and the 95 % Wilson interval on 5/13 is roughly [17.7 %, 64.5 %] —
+entirely below the target. It is also more than 4× the comparable sample size
+of either predecessor (pilot n = 3, invalidated sweep n = 1), and every one of
+the 13 *runnable* candidates ran to completion, so nothing was left half-measured
+among those 13. **Verdict: target NOT met**, plainly, not "inconclusive."
+
+**Caveat this verdict is scoped to, disclosed plainly rather than left implicit:**
+`prettier/prettier`'s yarn-berry leg had **85 candidates found**, but
+`--max-real 20` means only the 20 most *recent* were attempted (a `rev-list`
+prefix — recency-biased, not a random sample), leaving **65 candidates never
+classified** as runnable or not. The 13 comparable results above are exactly
+what this sweep measured, and the statistical argument above is valid for
+those 13 — but they are not necessarily representative of the full 85 if the
+regeneration tool's behavior (or the ecosystem's own tooling) changed across
+`prettier/prettier`'s history. A full, uncapped sweep of all 85 would close
+this gap; not attempted here (real cost, real time, diminishing returns on a
+verdict the CI already puts at P ≈ 1.2×10⁻³).
 
 Per the plan's own instruction for a below-target outcome: **keep CLI opt-in
 only** (unchanged — already true), **document findings, stop here.** The
@@ -753,13 +785,21 @@ moved on" needs looking at the actual diverging dependency identities
 per-example, which is out of scope for this task.
 
 On hypothesis (d) from the prior section (does merge-index seeding move the
-number): **this sweep finally answers it, and the answer is not the one
-tasks 2–3's fix was hoping for.** The scratch-index seeding bug that blocked
-every candidate in re-run #1 is fixed, candidates now reach `yarn install` and
-run to completion, and the result is 38.5 % agreement — well below both the
-pilot's 66.7 % (n = 3) and the ≥ 80 % target. Seeding the disposable worktree
-from the real 3-way merge result (rather than `HEAD` alone) does not, by
-itself, get this feature to a publishable number.
+number, relative to the pilot's `HEAD`-only seeding): **this sweep cannot
+answer that comparison, and it should not be read as answering it.** The
+pilot's 66.7 % (n = 3) and this sweep's 38.5 % (n = 13) are not a matched-pair
+comparison — the pilot never ran these same 13 candidates under the old
+`HEAD`-only seeding, so there is no controlled before/after to attribute a
+change to. The pilot's own interval at n = 3 is enormous (a single flip would
+swing it by ±33 points) and overlaps this sweep's [17.7 %, 64.5 %] Wilson
+interval entirely; the two numbers are statistically indistinguishable from
+each other, not evidence that seeding made things worse. What this sweep DOES
+support, on its own and without reference to the pilot: **this fix's
+real-world lockfile-regeneration accuracy, measured on 13 real historical
+`prettier/prettier` merges with the seeding bug fixed, is 38.5 % agreement,
+95 % upper bound around 65–68 %, well below the 80 % bar.** That is sufficient
+on its own to keep the desktop surface unjustified — no comparison to the
+pilot is needed to reach that conclusion, and none should be implied.
 
 `results/` holds one JSON file per measured GitWand version, plus the corpus pin
 date that produced it. Keep old files: the whole reason for pinning is to be able
