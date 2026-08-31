@@ -1,5 +1,5 @@
 /**
- * Coupling entre `llmFallback` et `refactoringAware` (v2.7).
+ * Coupling entre `llmFallback` et `refactoringAware` (v3.4).
  *
  * Bug : les deux opt-ins sont indépendants dans `DEFAULT_OPTIONS`. Si un
  * utilisateur active `llmFallback` sans `refactoringAware`, un hunk de

@@ -897,7 +897,7 @@ return "hello";
       const result = resolve(complex, "utils.ts", { minConfidence: "low" });
       const res = result.resolutions[0];
       expect(res.autoResolved).toBe(false);
-      expect(res.resolutionReason).toMatch(/complexe|manuelle/i);
+      expect(res.resolutionReason).toMatch(/complex|manual/i);
     });
 
     it("mode explainOnly : classi fie sans résoudre", () => {

@@ -445,7 +445,7 @@ export function tryFormatAwareResolve(
   // ── Pas de résolveur spécialisé ───────────────────────
   return {
     lines: null,
-    reason: "Aucun résolveur spécialisé pour ce type de fichier.",
+    reason: "No format-aware resolver for this file type.",
     resolverUsed: "none",
   };
 }

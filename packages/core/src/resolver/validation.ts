@@ -137,12 +137,12 @@ export function checkFormatInvariants(content: string, filePath: string): string
     const lines = content.split("\n");
     const unreleased = lines.filter((l) => /^##\s+\[?unreleased/i.test(l.trim()));
     if (unreleased.length > 1) {
-      violations.push(`Changelog : ${unreleased.length} sections « Unreleased » — un changelog n'en a qu'une.`);
+      violations.push(`Changelog: ${unreleased.length} "Unreleased" sections — a changelog has only one.`);
     }
     const headings = lines.map((l) => l.trim()).filter((l) => /^##\s+\[?v?\d/i.test(l));
     const seen = new Set<string>();
     for (const h of headings) {
-      if (seen.has(h)) { violations.push(`Changelog : section de version dupliquée — « ${h.slice(0, 80)} ».`); break; }
+      if (seen.has(h)) { violations.push(`Changelog: duplicated version section — "${h.slice(0, 80)}".`); break; }
       seen.add(h);
     }
   }
@@ -150,7 +150,7 @@ export function checkFormatInvariants(content: string, filePath: string): string
   if (/\.json$/i.test(filePath)) {
     const dup = findDuplicateJsonKeys(content);
     if (dup.length > 0) {
-      violations.push(`JSON : clé(s) dupliquée(s) dans un même objet — ${dup.slice(0, 5).map((k) => `« ${k} »`).join(", ")}. JSON.parse garderait silencieusement la dernière.`);
+      violations.push(`JSON: duplicate key(s) in the same object — ${dup.slice(0, 5).map((k) => `"${k}"`).join(", ")}. JSON.parse would silently keep the last one.`);
     }
   }
 

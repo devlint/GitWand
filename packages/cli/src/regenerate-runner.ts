@@ -404,7 +404,7 @@ export async function runRegeneration(params: RegenerationRunParams): Promise<Re
     return {
       kind: "missing-toolchain",
       content: null,
-      reason: `outil « ${bin} » introuvable dans le PATH — régénération de "${file}" (${ecosystem.id}) impossible.`,
+      reason: `tool "${bin}" not found in PATH — cannot regenerate "${file}" (${ecosystem.id}).`,
       trace: buildTrace(ecosystem.id, bin, args, 0, null),
     };
   }
@@ -414,7 +414,7 @@ export async function runRegeneration(params: RegenerationRunParams): Promise<Re
     return {
       kind: "offline",
       content: null,
-      reason: `pas de connexion réseau détectée — régénération de "${file}" (${ecosystem.id}) nécessite un accès réseau, déclinée.`,
+      reason: `no network connection detected — regenerating "${file}" (${ecosystem.id}) requires network access, declined.`,
       trace: buildTrace(ecosystem.id, bin, args, 0, null),
     };
   }
@@ -474,7 +474,7 @@ export async function runRegeneration(params: RegenerationRunParams): Promise<Re
         return {
           kind: "timeout",
           content: null,
-          reason: `régénération de "${file}" via "${trace.command}" interrompue après ${formatDuration(durationMs)} (timeout ${formatDuration(timeoutMs)}) — conflit non résolu.`,
+          reason: `regenerating "${file}" via "${trace.command}" was interrupted after ${formatDuration(durationMs)} (timeout ${formatDuration(timeoutMs)}) — conflict not resolved.`,
           trace,
         };
       }
@@ -482,7 +482,7 @@ export async function runRegeneration(params: RegenerationRunParams): Promise<Re
       return {
         kind: "spawn-failed",
         content: null,
-        reason: `régénération de "${file}" via "${trace.command}" a échoué (code ${exitCode ?? "?"}) — conflit non résolu.${detail ? ` ${detail}` : ""}`,
+        reason: `regenerating "${file}" via "${trace.command}" failed (code ${exitCode ?? "?"}) — conflict not resolved.${detail ? ` ${detail}` : ""}`,
         trace,
       };
     }
@@ -497,7 +497,7 @@ export async function runRegeneration(params: RegenerationRunParams): Promise<Re
       return {
         kind: "spawn-failed",
         content: null,
-        reason: `régénération de "${file}" via "${trace.command}" (${formatDuration(durationMs)}) n'a produit aucun fichier lisible — conflit non résolu. ${msg}`,
+        reason: `regenerating "${file}" via "${trace.command}" (${formatDuration(durationMs)}) produced no readable file — conflict not resolved. ${msg}`,
         trace,
       };
     }
@@ -507,7 +507,7 @@ export async function runRegeneration(params: RegenerationRunParams): Promise<Re
       return {
         kind: "validation-failed",
         content: null,
-        reason: `régénération de "${file}" via "${trace.command}" (${formatDuration(durationMs)}) a produit un contenu invalide — conflit non résolu. ${validation.error}`,
+        reason: `regenerating "${file}" via "${trace.command}" (${formatDuration(durationMs)}) produced invalid content — conflict not resolved. ${validation.error}`,
         trace,
       };
     }
@@ -515,7 +515,7 @@ export async function runRegeneration(params: RegenerationRunParams): Promise<Re
     return {
       kind: "success",
       content: regenerated,
-      reason: `régénéré via ${trace.command} (${formatDuration(durationMs)}).`,
+      reason: `regenerated via ${trace.command} (${formatDuration(durationMs)}).`,
       trace,
     };
   } finally {

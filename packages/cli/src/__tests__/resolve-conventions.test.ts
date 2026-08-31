@@ -212,7 +212,7 @@ describe("cmdResolve — conventions & .gitwandrc wiring (task 3)", () => {
       expect(out).toContain("--regenerate");
       // Convention provenance text is only surfaced via --verbose (see
       // resolve.ts's `if (verbose)` block) — a default run must not print it.
-      expect(out).not.toContain("convention mesurée");
+      expect(out).not.toContain("convention measured");
     },
   );
 

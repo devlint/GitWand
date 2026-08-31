@@ -89,7 +89,7 @@ function reclassifyFormatSemantic(hunk: ConflictHunk, resolverUsed: string): Con
     dimensions: { ...hunk.confidence.dimensions, typeClassification: 85 },
     boosters: [
       ...hunk.confidence.boosters,
-      `Résolveur format-aware « ${resolverUsed} » : fusion sémantique validée pour ce format`,
+      `Format-aware resolver "${resolverUsed}": semantic merge validated for this format`,
     ],
     penalties: hunk.confidence.penalties,
   };
@@ -97,17 +97,17 @@ function reclassifyFormatSemantic(hunk: ConflictHunk, resolverUsed: string): Con
     ...hunk,
     type: "format_semantic",
     confidence,
-    explanation: `Hunk résolu sémantiquement par le résolveur « ${resolverUsed} » (fusion par structure du format, pas par lignes).`,
+    explanation: `Hunk resolved semantically by the "${resolverUsed}" resolver (merged by the format's structure, not by lines).`,
     trace: {
       ...hunk.trace,
       selected: "format_semantic",
-      summary: `Résolveur format-aware « ${resolverUsed} » — reclassifié depuis complex.`,
+      summary: `Format-aware resolver "${resolverUsed}" — reclassified out of complex.`,
       steps: [
         ...hunk.trace.steps,
         {
           type: "format_semantic" as ConflictType,
           passed: true,
-          reason: `Le résolveur « ${resolverUsed} » a produit une fusion sémantique ; le hunk n'est plus « complex ».`,
+          reason: `The "${resolverUsed}" resolver produced a semantic merge; the hunk is no longer "complex".`,
         },
       ],
     },
@@ -128,7 +128,7 @@ function boostFormatValidated(hunk: ConflictHunk, resolverUsed: string): Conflic
     dimensions: hunk.confidence.dimensions,
     boosters: [
       ...hunk.confidence.boosters,
-      `Résolveur format-aware « ${resolverUsed} » : fusion validée sémantiquement pour ce format`,
+      `Format-aware resolver "${resolverUsed}": semantically validated merge for this format`,
     ],
     penalties: hunk.confidence.penalties,
   };
@@ -161,7 +161,7 @@ function attachRegenerationPlan(
   const ecosystem = findEcosystem(filePath);
   if (!ecosystem) return { reason };
   const regenerationPlan = buildRegenerationPlan(filePath, ecosystem, options.regenerationContext);
-  return { reason: `${reason} Ou relance avec --regenerate.`, regenerationPlan };
+  return { reason: `${reason} Or re-run with --regenerate.`, regenerationPlan };
 }
 
 function resolveHunk(
@@ -175,7 +175,7 @@ function resolveHunk(
     return {
       hunk,
       lines: null,
-      reason: `Mode explain-only : résolution non appliquée (type: ${hunk.type}, confiance: ${hunk.confidence.label} [score: ${hunk.confidence.score}]).`,
+      reason: `Explain-only mode: no resolution applied (type: ${hunk.type}, confidence: ${hunk.confidence.label} [score: ${hunk.confidence.score}]).`,
     };
   }
 
@@ -195,7 +195,7 @@ function resolveHunk(
     return {
       hunk,
       lines: null,
-      reason: `Changelog reconstruit par l'outillage de release dans ce dépôt [convention mesurée sur ${changelogConv.samples} merges, ${Math.round(changelogConv.agreement * 100)} %] — fusion déclinée : résous la source et relance l'outil de release.`,
+      reason: `Changelog rebuilt by this repo's release tooling [convention measured on ${changelogConv.samples} merges, ${Math.round(changelogConv.agreement * 100)}%] — merge declined: resolve the source and re-run the release tool.`,
     };
   }
 
@@ -208,7 +208,7 @@ function resolveHunk(
     const { reason, regenerationPlan } = attachRegenerationPlan(
       filePath,
       options,
-      `Fichier auto-généré (${genInfo.label}) — ne se fusionne pas, se régénère. Résous le fichier source puis relance l'outil qui produit celui-ci (install/build). Auto-résolution disponible via resolveGeneratedFiles: true.`,
+      `Generated file (${genInfo.label}) — not merged, regenerated. Resolve the source file then re-run the tool that produces this one (install/build). Auto-resolution available via resolveGeneratedFiles: true.`,
     );
     return { hunk, lines: null, reason, regenerationPlan };
   }
@@ -232,14 +232,14 @@ function resolveHunk(
         return {
           hunk: effective,
           lines: null,
-          reason: `Fusion sémantique (${dispatch.resolverUsed}) désactivée par la politique "${fmtPolicy}" — elle combine du contenu des deux côtés.`,
+          reason: `Semantic merge (${dispatch.resolverUsed}) disabled by the "${fmtPolicy}" policy — it combines content from both sides.`,
         };
       }
       if (CONFIDENCE_ORDER[effective.confidence.label] < CONFIDENCE_ORDER[fmtMinConfidence]) {
         return {
           hunk: effective,
           lines: null,
-          reason: `Confiance ${effective.confidence.label} (score: ${effective.confidence.score}) insuffisante pour appliquer la résolution format-aware (minimum requis : ${fmtMinConfidence}, politique : ${fmtPolicy}).`,
+          reason: `Confidence ${effective.confidence.label} (score: ${effective.confidence.score}) is insufficient to apply the format-aware resolution (minimum required: ${fmtMinConfidence}, policy: ${fmtPolicy}).`,
         };
       }
       return { hunk: effective, lines: dispatch.lines, reason: dispatch.reason };
@@ -262,7 +262,7 @@ function resolveHunk(
     return {
       hunk,
       lines: null,
-      reason: `Confiance ${hunk.confidence.label} (score: ${hunk.confidence.score}) insuffisante (minimum requis : ${effectiveMinConfidence}, politique : ${effectivePolicy}).${dispatchNote ? ` [${dispatchNote}]` : ""}`,
+      reason: `Confidence ${hunk.confidence.label} (score: ${hunk.confidence.score}) is below the ${effectiveMinConfidence} required by the ${effectivePolicy} policy.${dispatchNote ? ` [${dispatchNote}]` : ""}`,
     };
   }
 
@@ -363,7 +363,7 @@ export function resolve(
     // généré influencée par une convention mesurée le dit dans sa raison.
     let finalReason = resolutionReason;
     if (genInfo.generated && generatedConv) {
-      const prov = `[convention mesurée sur ${generatedConv.samples} merges, ${Math.round(generatedConv.agreement * 100)} % : ce dépôt ${generatedConv.verdict === "merge" ? "fusionne" : "régénère"} ses fichiers générés]`;
+      const prov = `[convention measured on ${generatedConv.samples} merges, ${Math.round(generatedConv.agreement * 100)}%: this repo ${generatedConv.verdict === "merge" ? "merges" : "regenerates"} its generated files]`;
       if ((generatedByConvention && autoResolved) || (generatedConv.verdict === "regenerate" && !autoResolved)) {
         finalReason = `${resolutionReason} ${prov}`;
       }
@@ -432,7 +432,7 @@ export function resolve(
             ...r,
             autoResolved: false,
             resolvedLines: null,
-            resolutionReason: `Rétracté : le contenu fusionné viole un invariant du format. ${why}`,
+            resolutionReason: `Retracted: the merged content violates a format invariant. ${why}`,
           }
         : r,
     );
@@ -524,7 +524,7 @@ export async function resolveAsync(
   //   Le flag est réinitialisé immédiatement après `resolve()` — il ne doit pas
   //   persister entre appels (module-level state, potentiellement partagé).
   const llmEnabled = !!(options.llmFallback?.enabled && options.llmFallback?.endpoint);
-  // Coupling fix (v2.7) — the LLM path must only be reachable for hunks no
+  // Coupling fix (v3.4) — the LLM path must only be reachable for hunks no
   // enabled deterministic pattern can resolve. Force refactoringAware on
   // whenever llmFallback is on, so a rename-on-both-sides hunk never skips
   // the deterministic recoverer just because the user only opted into the LLM.

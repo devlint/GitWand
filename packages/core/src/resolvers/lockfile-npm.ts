@@ -104,7 +104,7 @@ export function tryResolveLockfileNpmConflict(
   if (!baseParsed || !oursParsed || !theirsParsed) {
     return {
       merged: null,
-      reason: "Impossible de parser une des versions du package-lock.json.",
+      reason: "One of the package-lock.json versions could not be parsed.",
       resolvedPackages: 0,
       versionConflicts: 0,
       conflictedPackages: [],
@@ -232,8 +232,8 @@ export function tryResolveLockfileNpmConflict(
   const merged = JSON.stringify(result, null, indent.length) + "\n";
 
   const reason = versionConflicts > 0
-    ? `Fusion sémantique lockfile : ${resolvedPackages} paquet(s) fusionné(s), ${versionConflicts} conflit(s) de version résolu(s) (prefer-theirs).`
-    : `Fusion sémantique lockfile réussie : ${resolvedPackages} paquet(s) fusionné(s) sans conflit.`;
+    ? `Semantic lockfile merge: ${resolvedPackages} package(s) merged, ${versionConflicts} version conflict(s) resolved (prefer-theirs).`
+    : `Semantic lockfile merge succeeded: ${resolvedPackages} package(s) merged with no conflict.`;
 
   return {
     merged,

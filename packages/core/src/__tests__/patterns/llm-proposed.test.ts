@@ -113,7 +113,7 @@ describe("llm_proposed PatternPlugin — confidence", () => {
   it("penalties liste les risques LLM", () => {
     const score = llmProposed.confidence(SIMPLE_HUNK);
     expect(score.penalties.length).toBeGreaterThan(0);
-    expect(score.penalties.some((p) => p.toLowerCase().includes("llm") || p.toLowerCase().includes("déterministe"))).toBe(true);
+    expect(score.penalties.some((p) => p.toLowerCase().includes("llm") || p.toLowerCase().includes("deterministic"))).toBe(true);
   });
 });
 

@@ -18,9 +18,9 @@ export const GENERATED_FILE_PATTERNS: Array<{ pattern: RegExp; label: string }> 
   { pattern: /composer\.lock$/i, label: "composer lockfile" },
   { pattern: /Gemfile\.lock$/i, label: "bundler lockfile" },
   { pattern: /Cargo\.lock$/i, label: "cargo lockfile" },
-  { pattern: /\.min\.(js|css)$/i, label: "fichier minifié" },
-  { pattern: /\bdist\//, label: "fichier build dist/" },
-  { pattern: /\bbuild\/manifest\.json$/i, label: "manifest de build" },
+  { pattern: /\.min\.(js|css)$/i, label: "minified file" },
+  { pattern: /\bdist\//, label: "dist/ build output" },
+  { pattern: /\bbuild\/manifest\.json$/i, label: "build manifest" },
   { pattern: /\.bundle\.(js|css)$/i, label: "bundle" },
   { pattern: /mix-manifest\.json$/i, label: "Laravel Mix manifest" },
 ];
@@ -106,31 +106,31 @@ export function reclassifyIfGenerated(
       fileFrequency: 0,
       baseAvailability: 0,
     },
-    boosters: [`Chemin correspond au pattern de fichier auto-généré : ${genInfo.label}`],
-    penalties: ["Le contenu commité est la sortie d'un outil — une fusion textuelle ne le reproduit pas"],
+    boosters: [`Path matches the generated-file pattern: ${genInfo.label}`],
+    penalties: ["The committed content is a tool's output — a textual merge does not reproduce it"],
   };
 
   return {
     ...hunk,
     type: "generated_file",
     confidence: generatedScore,
-    explanation: `Fichier auto-généré (${genInfo.label}). Ce fichier se régénère, il ne se fusionne pas : résous sa source puis relance l'outil qui le produit (install/build).`,
+    explanation: `Generated file (${genInfo.label}). This file is regenerated, not merged: resolve its source, then re-run the tool that produces it (install/build).`,
     // Update the trace to reflect the reclassification
     trace: {
       ...hunk.trace,
       selected: "generated_file",
-      summary: `Fichier auto-généré (${genInfo.label}) — reclassifié depuis complex.`,
+      summary: `Generated file (${genInfo.label}), reclassified out of complex.`,
       steps: [
         ...hunk.trace.steps.slice(0, -1), // remove the "complex passed: true" step
         {
           type: "complex" as ConflictType,
           passed: false,
-          reason: `Reclassifié : fichier auto-généré (${genInfo.label}) détecté par son chemin.`,
+          reason: `Reclassified: generated file (${genInfo.label}) detected by its path.`,
         },
         {
           type: "generated_file" as ConflictType,
           passed: true,
-          reason: `Chemin correspond au pattern de fichier auto-généré : ${genInfo.label}.`,
+          reason: `Path matches the generated-file pattern: ${genInfo.label}.`,
         },
       ],
     },

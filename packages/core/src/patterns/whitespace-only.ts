@@ -29,24 +29,24 @@ const whitespaceOnly: PatternPlugin = {
       scopeImpact(lines),
       hasBase
         ? [
-            "Base disponible — whitespace confirmé par rapport à l'ancêtre",
-            "Seul le whitespace diffère après normalisation",
+            "Base available: whitespace confirmed against the ancestor",
+            "Only whitespace differs after normalisation",
           ]
-        : ["Seul le whitespace diffère après normalisation (trim)"],
-      hasBase ? [] : ["Sans base (diff2) — hypothèse basée sur la normalisation uniquement"],
+        : ["Only whitespace differs after normalisation (trim)"],
+      hasBase ? [] : ["No base (diff2): the assumption rests on normalisation alone"],
     );
   },
 
   explanation(_h: ClassifyInput): string {
-    return "Les deux branches contiennent le même code avec des différences de whitespace uniquement.";
+    return "Both branches contain the same code, differing only in whitespace.";
   },
 
   passReason(_h: ClassifyInput): string {
-    return "Après normalisation (trim), les deux versions sont identiques — seul le whitespace diffère.";
+    return "After normalisation (trim) the two versions are identical: only whitespace differs.";
   },
 
   failReason(_h: ClassifyInput): string {
-    return "Après normalisation (trim), les deux versions restent différentes — pas seulement du whitespace.";
+    return "After normalisation (trim) the two versions still differ, so this is more than whitespace.";
   },
 };
 

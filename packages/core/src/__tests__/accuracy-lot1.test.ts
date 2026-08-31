@@ -48,7 +48,7 @@ describe("A — classifier contract (format_semantic)", () => {
     expect(hunk.type).toBe("format_semantic");
     expect(hunk.confidence.label).toBe("high");
     expect(hunk.trace.selected).toBe("format_semantic");
-    expect(hunk.trace.steps.at(-1)?.reason).toContain("fusion sémantique");
+    expect(hunk.trace.steps.at(-1)?.reason).toContain("semantic merge");
   });
 
   it("never reports a fully-resolved file whose only hunk is still `complex`", () => {
@@ -73,7 +73,7 @@ describe("A — classifier contract (format_semantic)", () => {
     const result = resolve(content, "config.json", { policy: "strict" });
     expect(result.mergedContent).toBeNull();
     expect(result.resolutions[0].autoResolved).toBe(false);
-    expect(result.resolutions[0].resolutionReason).toMatch(/politique|insuffisante/);
+    expect(result.resolutions[0].resolutionReason).toMatch(/policy|insufficient/);
   });
 });
 
@@ -156,7 +156,7 @@ describe("D — generated files decline by default", () => {
     expect(result.mergedContent).toBeNull();
     expect(result.stats.autoResolved).toBe(0);
     const reason = result.resolutions[0].resolutionReason;
-    expect(reason).toMatch(/régénère|install|build/i);
+    expect(reason).toMatch(/regenerat|install|build/i);
     expect(reason).toContain("resolveGeneratedFiles");
   });
 

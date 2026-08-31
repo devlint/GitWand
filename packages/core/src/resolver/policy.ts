@@ -138,7 +138,7 @@ export function applyFileFrequencyPenalty(
       dimensions: { ...d, fileFrequency: ff },
       penalties: [
         ...hunk.confidence.penalties,
-        `Zone chaude — ${priorComplexHunks} hunk${priorComplexHunks > 1 ? "s" : ""} complexe${priorComplexHunks > 1 ? "s" : ""} déjà vus dans ce fichier (−${(ff * 0.10).toFixed(1)} pts)`,
+        `Hot spot: ${priorComplexHunks} complex hunk${priorComplexHunks > 1 ? "s" : ""} already seen in this file (−${(ff * 0.10).toFixed(1)} pts)`,
       ],
     },
   };

@@ -2,7 +2,7 @@
   "name": "gitwand",
   "version": "3.8.0",
   "private": true,
-  "description": "Git's magic wand — automatic conflict resolution and smart merge tools",
+  "description": "Git's magic wand \u2014 automatic conflict resolution and smart merge tools",
   "author": "Laurent Guitton <lb.guitton@gmail.com>",
   "license": "MIT",
   "packageManager": "pnpm@11.9.0",
@@ -12,7 +12,7 @@
   },
   "scripts": {
     "build": "pnpm -r run build",
-    "test": "pnpm -r run test",
+    "test": "pnpm -r --workspace-concurrency=1 run test",
     "test:scripts-lib": "node --test scripts/lib/*.test.mjs",
     "clean": "pnpm -r run clean",
     "postinstall": "node scripts/fix-spawn-helper.mjs"

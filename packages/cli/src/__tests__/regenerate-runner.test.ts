@@ -139,7 +139,7 @@ describe("runRegeneration — success path (real toolchains)", () => {
       expect(outcome.content).not.toBeNull();
       expect(() => JSON.parse(outcome.content as string)).not.toThrow();
       expect(outcome.trace.exitCode).toBe(0);
-      expect(outcome.reason).toContain("régénéré via");
+      expect(outcome.reason).toContain("regenerated via");
       expect(outcome.reason).toContain("npm install --package-lock-only --ignore-scripts");
       expect(listWorktrees(repo)).not.toContain("gitwand-regen-");
     });
@@ -234,7 +234,7 @@ describe("runRegeneration — failure paths", () => {
 
     expect(outcome.kind).toBe("missing-toolchain");
     expect(outcome.content).toBeNull();
-    expect(outcome.reason).toContain("introuvable dans le PATH");
+    expect(outcome.reason).toContain("not found in PATH");
     // Pas de worktree tenté du tout — la sonde toolchain échoue avant.
     expect(listWorktrees(repo)).not.toContain("gitwand-regen-");
   });
@@ -291,7 +291,7 @@ describe("runRegeneration — failure paths", () => {
 
     expect(outcome.kind).toBe("validation-failed");
     expect(outcome.content).toBeNull();
-    expect(outcome.reason).toContain("contenu invalide");
+    expect(outcome.reason).toContain("invalid content");
     expect(listWorktrees(repo)).not.toContain("gitwand-regen-");
   });
 

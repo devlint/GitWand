@@ -489,7 +489,7 @@ export function tryResolveCssConflict(
             unresolvedRules++;
             return {
               mergedLines: null,
-              reason: `Conflit CSS sur le sélecteur '${selector}' — propriétés incompatibles.`,
+              reason: `CSS conflict on selector '${selector}': incompatible properties.`,
               resolvedRules,
               unresolvedRules,
             };
@@ -498,7 +498,7 @@ export function tryResolveCssConflict(
           unresolvedRules++;
           return {
             mergedLines: null,
-            reason: `Conflit CSS sur '${selector}' — ajouté différemment des deux côtés.`,
+            reason: `CSS conflict on '${selector}': added differently on each side.`,
             resolvedRules,
             unresolvedRules,
           };
@@ -526,7 +526,7 @@ export function tryResolveCssConflict(
         resolvedRules++;
       } else {
         unresolvedRules++;
-        return { mergedLines: null, reason: `Conflit CSS sur '${selector}' — ours supprimé, theirs modifié.`, resolvedRules, unresolvedRules };
+        return { mergedLines: null, reason: `CSS conflict on '${selector}': ours deleted it, theirs modified it.`, resolvedRules, unresolvedRules };
       }
       continue;
     }
@@ -536,7 +536,7 @@ export function tryResolveCssConflict(
         resolvedRules++;
       } else {
         unresolvedRules++;
-        return { mergedLines: null, reason: `Conflit CSS sur '${selector}' — theirs supprimé, ours modifié.`, resolvedRules, unresolvedRules };
+        return { mergedLines: null, reason: `CSS conflict on '${selector}': theirs deleted it, ours modified it.`, resolvedRules, unresolvedRules };
       }
       continue;
     }
@@ -566,7 +566,7 @@ export function tryResolveCssConflict(
         unresolvedRules++;
         return {
           mergedLines: null,
-          reason: `Conflit CSS sur le sélecteur '${selector}' — propriétés modifiées incompatibles.`,
+          reason: `CSS conflict on selector '${selector}': incompatible property changes.`,
           resolvedRules,
           unresolvedRules,
         };
@@ -575,7 +575,7 @@ export function tryResolveCssConflict(
       unresolvedRules++;
       return {
         mergedLines: null,
-        reason: `Conflit CSS sur '${selector}' — at-rules modifiées des deux côtés.`,
+        reason: `CSS conflict on '${selector}': at-rules modified on both sides.`,
         resolvedRules,
         unresolvedRules,
       };
@@ -584,7 +584,7 @@ export function tryResolveCssConflict(
 
   return {
     mergedLines: resultLines,
-    reason: `Fusion CSS réussie : ${resolvedRules} règle(s) fusionnée(s).`,
+    reason: `CSS merge succeeded: ${resolvedRules} rule(s) merged.`,
     resolvedRules,
     unresolvedRules,
   };

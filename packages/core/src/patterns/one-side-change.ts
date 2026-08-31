@@ -22,7 +22,7 @@ const oneSideChange: PatternPlugin = {
     const changedLines = oursMatchesBase ? h.theirsLines.length : h.oursLines.length;
     return makeScore(100, 0, scopeImpact(changedLines), [
       "Base disponible",
-      oursMatchesBase ? "Seul theirs a modifié le bloc" : "Seul ours a modifié le bloc",
+      oursMatchesBase ? "Only theirs modified the block" : "Only ours modified the block",
     ], []);
   },
 
@@ -30,22 +30,22 @@ const oneSideChange: PatternPlugin = {
     const oursText = h.oursLines.join("\n");
     const baseText = h.baseLines.join("\n");
     if (oursText === baseText) {
-      return "Seule la branche entrante (theirs) a modifié ce bloc. Résolution : accepter theirs.";
+      return "Only the incoming branch (theirs) modified this block. Resolution: take theirs.";
     }
-    return "Seule la branche courante (ours) a modifié ce bloc. Résolution : accepter ours.";
+    return "Only the current branch (ours) modified this block. Resolution: take ours.";
   },
 
   passReason(h: ClassifyInput): string {
     const oursText = h.oursLines.join("\n");
     const baseText = h.baseLines.join("\n");
     if (oursText === baseText) {
-      return "Ours est identique à la base, seul theirs a changé.";
+      return "Ours is identical to the base; only theirs changed.";
     }
-    return "Theirs est identique à la base, seul ours a changé.";
+    return "Theirs is identical to the base; only ours changed.";
   },
 
   failReason(_h: ClassifyInput): string {
-    return "Les deux branches ont modifié le bloc par rapport à la base.";
+    return "Both branches modified the block relative to the base.";
   },
 };
 

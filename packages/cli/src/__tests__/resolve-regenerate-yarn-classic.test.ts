@@ -109,7 +109,7 @@ describe("cmdResolve --regenerate — yarn-classic repo regression (Finding 2, f
       await cmdResolve([], { regenerate: true, verbose: true });
 
       const output = logSpy.mock.calls.map((c) => c.join(" ")).join("\n");
-      expect(output).not.toContain("régénéré via");
+      expect(output).not.toContain("regenerated via");
 
       const lockContent = readFileSync(join(repo, YARN_LOCK), "utf-8");
       expect(lockContent).toContain("<<<<<<<");

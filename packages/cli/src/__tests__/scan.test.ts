@@ -21,6 +21,19 @@ function stageFile(cwd: string, relPath: string, content: string): void {
   execFileSync("git", ["-C", cwd, "add", "--", relPath]);
 }
 
+// Every test here goes through `initRepo()`, which runs `git init` plus two
+// `git config` calls, and `stageFile()` adds a `git add` per file. Per
+// AGENTS.md the git layer is deliberately not mocked, so these are
+// subprocess-bound and slow down sharply when the whole monorepo runs at once,
+// which is how `pnpm test` and CI run them. The hooks carry the timeout too:
+// they are outside the `describe`, so its option does not reach them.
+//
+// 60s is deliberately generous, and matches the other git-backed suites. A
+// timeout here exists to catch a hang, not to enforce a performance budget,
+// and it costs nothing on a passing run. Tuning it down to "just above
+// observed" is what produced the flake in issue #172.
+const GIT_IO_TIMEOUT_MS = 60_000
+
 let repoDir: string;
 let originalCwd: string;
 let logSpy: ReturnType<typeof vi.spyOn>;
@@ -31,16 +44,16 @@ beforeEach(() => {
   process.chdir(repoDir);
   logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
   process.exitCode = 0;
-});
+}, GIT_IO_TIMEOUT_MS);
 
 afterEach(() => {
   process.chdir(originalCwd);
   rmSync(repoDir, { recursive: true, force: true });
   logSpy.mockRestore();
   process.exitCode = 0;
-});
+}, GIT_IO_TIMEOUT_MS);
 
-describe("gitwand scan", () => {
+describe("gitwand scan", { timeout: GIT_IO_TIMEOUT_MS }, () => {
   it("reports a finding for a secret on a staged added line", async () => {
     stageFile(repoDir, "src/config.ts", 'const key = "AKIAABCDEFGHIJKLMNOP";\n');
 

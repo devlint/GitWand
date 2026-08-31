@@ -120,7 +120,7 @@ export function tryResolveYarnLockConflict(
   if (!baseParsed || !oursParsed || !theirsParsed) {
     return {
       merged: null,
-      reason: "Impossible de parser une des versions du yarn.lock.",
+      reason: "One of the yarn.lock versions could not be parsed.",
       resolvedBlocks: 0,
       versionConflicts: 0,
     };
@@ -216,8 +216,8 @@ export function tryResolveYarnLockConflict(
   }
 
   const reason = versionConflicts > 0
-    ? `Fusion sémantique yarn.lock : ${resolvedBlocks} bloc(s), ${versionConflicts} conflit(s) résolu(s) (prefer-theirs).`
-    : `Fusion sémantique yarn.lock réussie : ${resolvedBlocks} bloc(s) fusionné(s) sans conflit.`;
+    ? `Semantic yarn.lock merge: ${resolvedBlocks} block(s), ${versionConflicts} conflict(s) resolved (prefer-theirs).`
+    : `Semantic yarn.lock merge succeeded: ${resolvedBlocks} block(s) merged with no conflict.`;
 
   return {
     merged: output,

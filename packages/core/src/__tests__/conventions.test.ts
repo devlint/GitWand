@@ -105,7 +105,7 @@ describe("conventions — consumption precedence and provenance", () => {
   it("generatedFiles 'merge' convention enables auto-resolution, with provenance in the reason", () => {
     const result = resolve(lockConflict, "package-lock.json", { conventions: mergeConv });
     expect(result.stats.autoResolved).toBeGreaterThan(0);
-    expect(result.resolutions[0].resolutionReason).toContain("convention mesurée sur 12 merges");
+    expect(result.resolutions[0].resolutionReason).toContain("convention measured on 12 merges");
   });
 
   it("an explicit caller choice beats the convention (.gitwandrc precedence)", () => {
@@ -114,7 +114,7 @@ describe("conventions — consumption precedence and provenance", () => {
       resolveGeneratedFiles: false,
     });
     expect(result.stats.autoResolved).toBe(0);
-    expect(result.resolutions[0].resolutionReason).not.toContain("convention mesurée");
+    expect(result.resolutions[0].resolutionReason).not.toContain("convention measured");
   });
 
   it("'regenerate' convention keeps the decline and confirms it with provenance", () => {
@@ -124,7 +124,7 @@ describe("conventions — consumption precedence and provenance", () => {
     };
     const result = resolve(lockConflict, "package-lock.json", { conventions: regen });
     expect(result.stats.autoResolved).toBe(0);
-    expect(result.resolutions[0].resolutionReason).toContain("régénère ses fichiers générés");
+    expect(result.resolutions[0].resolutionReason).toContain("regenerates its generated files");
   });
 
   it("'tool-rebuilt' changelog convention declines the union with provenance", () => {
@@ -143,7 +143,7 @@ describe("conventions — consumption precedence and provenance", () => {
     };
     const withConv = resolve(changelog, "CHANGELOG.md", { conventions: conv });
     expect(withConv.stats.autoResolved).toBe(0);
-    expect(withConv.resolutions[0].resolutionReason).toContain("outillage de release");
+    expect(withConv.resolutions[0].resolutionReason).toContain("release tooling");
     // ...et sans convention, l'union markdown fait son travail habituel.
     const without = resolve(changelog, "CHANGELOG.md");
     expect(without.stats.autoResolved).toBe(1);

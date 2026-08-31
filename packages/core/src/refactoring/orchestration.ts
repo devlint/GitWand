@@ -138,7 +138,7 @@ export function tryRefMerge(
     if (oursRefs.length === 0 && theirsRefs.length === 0) {
       return {
         lines: null,
-        reason: "RefMerge : aucun refactoring détecté — fallback au pipeline standard.",
+        reason: "RefMerge: no refactoring detected, falling back to the standard pipeline.",
         oursRefs: [],
         theirsRefs: [],
       };
@@ -164,7 +164,7 @@ export function tryRefMerge(
     if (mergedInverted === null) {
       return {
         lines: null,
-        reason: "RefMerge : chevauchement résiduel après inversion — fallback au pipeline standard.",
+        reason: "RefMerge: residual overlap after inversion, falling back to the standard pipeline.",
         oursRefs,
         theirsRefs,
       };
@@ -177,7 +177,7 @@ export function tryRefMerge(
     const summary = summarizeRefs(oursRefs, theirsRefs);
     return {
       lines: finalLines,
-      reason: `RefMerge : ${summary} — résolution par inversion+merge+rejeu.`,
+      reason: `RefMerge: ${summary}. Resolved by invert, merge and replay.`,
       oursRefs,
       theirsRefs,
     };

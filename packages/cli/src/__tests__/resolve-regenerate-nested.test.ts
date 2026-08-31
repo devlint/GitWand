@@ -130,7 +130,7 @@ describe("cmdResolve --regenerate — nested lockfile regression (Finding 1, fin
       // Not a false success: the printed line for this file must NOT read
       // "success" for a regeneration that never should have run.
       const output = logSpy.mock.calls.map((c) => c.join(" ")).join("\n");
-      expect(output).not.toContain("régénéré via");
+      expect(output).not.toContain("regenerated via");
       expect(output).not.toMatch(/regenerate:.*success/);
 
       // The nested lockfile must be left exactly as the merge left it —

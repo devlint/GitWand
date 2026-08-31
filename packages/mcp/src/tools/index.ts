@@ -531,7 +531,7 @@ async function toolStatus(cwd: string, args: Record<string, unknown> = {}) {
 
   const totalConflicts = conflicts.reduce((s: number, c: Record<string, unknown>) => s + ((c.totalConflicts as number) ?? 0), 0);
   const totalResolvable = conflicts.reduce((s: number, c: Record<string, unknown>) => s + ((c.autoResolvable as number) ?? 0), 0);
-  // v2.7 — "recoverable-before-model" : of the residual past the trivial passes,
+  // v3.4 — "recoverable-before-model" : of the residual past the trivial passes,
   // how much is still recoverable deterministically before the model is invoked.
   const tierSummary = summarizeTiers(aggregateByType as Record<ConflictType, number>);
   // accuracy lot D (task 3, § 4) — reporting-only; never executes anything.
@@ -612,7 +612,7 @@ async function toolResolve(cwd: string, args: Record<string, unknown>) {
 
   const totalConflicts = results.reduce((s: number, r: Record<string, unknown>) => s + ((r.totalConflicts as number) ?? 0), 0);
   const totalResolved = results.reduce((s: number, r: Record<string, unknown>) => s + ((r.autoResolved as number) ?? 0), 0);
-  // v2.7 — "recoverable-before-model" tier summary, see summarizeTiers() in @gitwand/core.
+  // v3.4 — "recoverable-before-model" tier summary, see summarizeTiers() in @gitwand/core.
   const tierSummary = summarizeTiers(aggregateByType as Record<ConflictType, number>);
   // accuracy lot D (task 3, § 4 — fix round 1) — reporting-only; never
   // executes anything, regardless of `dryRun`. `files` may be a

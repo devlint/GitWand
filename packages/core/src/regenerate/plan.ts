@@ -75,7 +75,7 @@ export function buildRegenerationPlan(
       ecosystem: ecosystem.id,
       sources,
       runnable: false,
-      blockedReason: `régénération non supportée pour un fichier généré niché dans un sous-répertoire ("${file}") — résous-le manuellement ou relance ton installeur depuis ce répertoire.`,
+      blockedReason: `regeneration is not supported for a generated file nested in a subdirectory ("${file}") — resolve it manually or re-run your installer from that directory.`,
     };
   }
 

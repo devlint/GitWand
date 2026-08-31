@@ -1341,7 +1341,7 @@ const F45: CorpusFixture = {
 // disjoints — non_overlapping échoue (chevauchement réel), seul token_level_merge résout.
 const F46: CorpusFixture = {
   id: "F46",
-  description: "v2.7 — token_level_merge : classes Tailwind, tokens disjoints sur 2 lignes adjacentes",
+  description: "v3.4 — token_level_merge : classes Tailwind, tokens disjoints sur 2 lignes adjacentes",
   filePath: "resources/views/gestion/upsells/suggestions/index.blade.php",
   category: "semantic",
   input: [
@@ -1418,7 +1418,7 @@ export const CORPUS: CorpusFixture[] = [
   F41, F42, F43, F44, F45,
   // accuracy lot C — MergeContext
   F47, F48,
-  // v2.7 — token_level_merge
+  // v3.4 — token_level_merge
   F46,
 ];
 

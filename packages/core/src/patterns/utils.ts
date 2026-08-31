@@ -365,21 +365,21 @@ export function detectValueOnlyChange(
   if (typeClassification < 55) return null;
 
   const si = scopeImpact(oursLines.length);
-  const penalties = [`Ratio de différences : ${(diffRatio * 100).toFixed(1)}%`];
-  if (!hasBase) penalties.push("Sans base (diff2) — heuristique basée sur les patterns volatils");
+  const penalties = [`Difference ratio: ${(diffRatio * 100).toFixed(1)}%`];
+  if (!hasBase) penalties.push("No base (diff2): heuristic based on volatile-value patterns alone");
   const confidenceScore = makeScore(typeClassification, 25, si, [
-    `${diffCount} token${diffCount > 1 ? "s" : ""} identifié${diffCount > 1 ? "s" : ""} comme volatile${diffCount > 1 ? "s" : ""} (hash, version, timestamp…)`,
-    "Même structure de lignes",
-    ...(hasBase ? ["Base disponible — les deux côtés ont changé la valeur"] : []),
+    `${diffCount} token${diffCount > 1 ? "s" : ""} identified as volatile (hash, version, timestamp…)`,
+    "Same line structure",
+    ...(hasBase ? ["Base available: both sides changed the value"] : []),
   ], penalties, 0, hasBase ? 100 : 0);
 
   if (confidenceScore.label === "low") return null;
 
   const explanation =
-    `Même structure avec ${diffCount} valeur${diffCount > 1 ? "s" : ""} volatile${diffCount > 1 ? "s" : ""} différente${diffCount > 1 ? "s" : ""} (hash, version, timestamp…). Résolution : semver le plus élevé si comparable, sinon selon la politique de merge.`;
+    `Same structure with ${diffCount} differing volatile value${diffCount > 1 ? "s" : ""} (hash, version, timestamp…). Resolution: the higher semver when comparable, otherwise whatever the merge policy says.`;
 
   const traceReason =
-    `${diffCount} token${diffCount > 1 ? "s" : ""} différent${diffCount > 1 ? "s" : ""} sur ${totalTokens} — tous identifiés comme volatiles (hash, version, timestamp…). Ratio : ${(diffRatio * 100).toFixed(1)}% → score ${confidenceScore.score} (${confidenceScore.label}).`;
+    `${diffCount} of ${totalTokens} tokens differ, all identified as volatile (hash, version, timestamp…). Ratio: ${(diffRatio * 100).toFixed(1)}%, score ${confidenceScore.score} (${confidenceScore.label}).`;
 
   return { confidenceScore, explanation, traceReason };
 }

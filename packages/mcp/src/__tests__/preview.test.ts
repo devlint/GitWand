@@ -44,14 +44,20 @@ function makeRepo(): Repo {
   }
 }
 
+// Real git repositories, per AGENTS.md's rule against mocking the git layer.
+// That makes these subprocess-bound rather than CPU-bound: ~1s per test in
+// isolation, 5.8s and 8.4s observed once the whole monorepo runs at once, which
+// is how `pnpm test` and CI run them.
+//
+// 60s is deliberately generous, and matches the other git-backed suites. A
+// timeout here exists to catch a hang, not to enforce a performance budget,
+// and it costs nothing on a passing run. Tuning it down to "just above
+// observed" is what produced the flake in issue #172.
+const GIT_IO_TIMEOUT_MS = 60_000
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
-// These cases spin up real git repos and run the predictor against them, so
-// they are I/O-bound and measurably slower than vitest's 5s default whenever
-// the whole monorepo suite runs in parallel (5.8s and 8.4s observed, ~1s in
-// isolation). That made `pnpm -r run test` non-deterministic on a loaded
-// machine, and CI runs the same way.
-describe('simulate3way via toolPreviewRebase', { timeout: 30_000 }, () => {
+describe('simulate3way via toolPreviewRebase', { timeout: GIT_IO_TIMEOUT_MS }, () => {
   it('detects a real conflict on overlapping lines and reports it', async () => {
     // Regression guard: git merge-file exits with code = number of conflicts
     // (non-zero). The predictor must capture the conflict-marked stdout from
@@ -154,7 +160,7 @@ describe('simulate3way via toolPreviewRebase', { timeout: 30_000 }, () => {
   })
 })
 
-describe('toolPreviewRebase — error handling', () => {
+describe('toolPreviewRebase — error handling', { timeout: GIT_IO_TIMEOUT_MS }, () => {
   it('returns isError=true for an unknown onto ref', async () => {
     const { cwd, cleanup } = makeRepo()
     try {
@@ -191,7 +197,7 @@ describe('toolPreviewRebase — error handling', () => {
   })
 })
 
-describe('toolPreviewCherryPick — error handling', () => {
+describe('toolPreviewCherryPick — error handling', { timeout: GIT_IO_TIMEOUT_MS }, () => {
   it('returns isError=true for a root commit (no parent)', async () => {
     const { cwd, cleanup } = makeRepo()
     try {
@@ -296,7 +302,7 @@ describe('toolPreviewCherryPick — error handling', () => {
   })
 })
 
-describe('toolPreviewCherryPick — conflict detection', () => {
+describe('toolPreviewCherryPick — conflict detection', { timeout: GIT_IO_TIMEOUT_MS }, () => {
   it('detects a real conflict when the picked commit touches the same line', async () => {
     const { cwd, cleanup } = makeRepo()
     try {
@@ -374,7 +380,7 @@ describe('toolPreviewCherryPick — conflict detection', () => {
   })
 })
 
-describe('toolPreview — merge operation (working tree)', () => {
+describe('toolPreview — merge operation (working tree)', { timeout: GIT_IO_TIMEOUT_MS }, () => {
   it('reports no conflicts when the working tree is clean', async () => {
     const { cwd, cleanup } = makeRepo()
     try {

@@ -108,8 +108,8 @@ const refactoringAwareMerge: PatternPlugin = {
       12,           // dataRisk : faible — merge déterministe, pas génératif
       scopeImpact(h.oursLines.length + h.theirsLines.length),
       [
-        "Refactoring bijectivement vérifié (substitution simulée)",
-        "Merge textuel réussi sur les versions inversées",
+        "Refactoring verified bijectively (simulated substitution)",
+        "Textual merge succeeded on the inverted versions",
       ],
       [],
     );
@@ -122,31 +122,31 @@ const refactoringAwareMerge: PatternPlugin = {
       const moves = refs.filter((r) => r.kind === "move-method");
       const parts: string[] = [];
       if (renames.length > 0) {
-        parts.push(`${renames.length} renommage(s) détecté(s) et inversé(s)`);
+        parts.push(`${renames.length} rename(s) detected and inverted`);
       }
       if (moves.length > 0) {
-        parts.push(`${moves.length} déplacement(s) de méthode`);
+        parts.push(`${moves.length} method move(s)`);
       }
-      return `Conflit de refactoring — ${parts.join(", ") || "refactoring détecté"}. Résolu via le pipeline RefMerge (inversion + merge + rejeu).`;
+      return `Refactoring conflict: ${parts.join(", ") || "refactoring detected"}. Resolved through the RefMerge pipeline (invert, merge, replay).`;
     }
-    return "Conflit causé par un refactoring concurrent — résolu via le pipeline RefMerge.";
+    return "Conflict caused by a concurrent refactoring, resolved through the RefMerge pipeline.";
   },
 
   passReason(_h: ClassifyInput): string {
     if (_lastResult?.oursRefs.length || _lastResult?.theirsRefs.length) {
-      return `Refactoring(s) détecté(s) : ours=${_lastResult!.oursRefs.length}, theirs=${_lastResult!.theirsRefs.length}. Merge textuel réussi après inversion.`;
+      return `Refactoring(s) detected: ours=${_lastResult!.oursRefs.length}, theirs=${_lastResult!.theirsRefs.length}. Textual merge succeeded after inversion.`;
     }
-    return "Refactoring bijectivement détecté — merge réussi après inversion.";
+    return "Refactoring detected bijectively; merge succeeded after inversion.";
   },
 
   failReason(_h: ClassifyInput): string {
     if (!_refMergeEnabled) {
-      return "RefMerge désactivé (options.refactoringAware.enabled !== true).";
+      return "RefMerge disabled (options.refactoringAware.enabled !== true).";
     }
     if (_lastResult && _lastResult.lines === null) {
-      return `RefMerge échoué : ${_lastResult.reason}`;
+      return `RefMerge failed: ${_lastResult.reason}`;
     }
-    return "Aucun refactoring bijectivement détectable dans ce hunk.";
+    return "No bijectively detectable refactoring in this hunk.";
   },
 };
 

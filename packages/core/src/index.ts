@@ -137,7 +137,7 @@ export type {
   // v2.6 — Refactoring-aware merge
   RefactoringKind,
   Refactoring,
-  // v2.7 — Token-level merge
+  // v3.4 — Token-level merge
   TokenMergeTrace,
   TokenMergeLineDetail,
 } from "./types.js";
@@ -169,7 +169,7 @@ export type { PnpmLockMergeResult } from "./resolvers/lockfile-pnpm.js";
 export type { ImportSortStrategy } from "./resolvers/imports.js";
 export type { MergePolicy, PolicyConfig, GitWandrcConfig } from "./config.js";
 
-// v2.7 — "Recoverable-before-model" tier metric (derived, TS-only — see stats/tiers.ts)
+// v3.4 — "Recoverable-before-model" tier metric (derived, TS-only — see stats/tiers.ts)
 export { summarizeTiers } from "./stats/tiers.js";
 export type { ResolutionTier, TierSummary } from "./stats/tiers.js";
 

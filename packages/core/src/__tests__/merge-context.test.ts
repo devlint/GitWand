@@ -40,7 +40,7 @@ describe("MergeContext — version scalars", () => {
     expect(result.stats.autoResolved).toBe(1);
     expect(result.mergedContent).toContain("13.x-dev");
     expect(result.mergedContent).not.toContain("12.54.1");
-    expect(result.resolutions[0].resolutionReason).toContain("branche cible");
+    expect(result.resolutions[0].resolutionReason).toContain("target branch");
   });
 
   it("targetSide is honoured literally (rebase declares its own inversion)", () => {
@@ -57,7 +57,7 @@ describe("MergeContext — version scalars", () => {
     const result = resolve(laravelShape, "src/Application.php");
     expect(result.stats.autoResolved).toBe(0);
     expect(result.mergedContent).toBeNull();
-    expect(result.resolutions[0].resolutionReason).toContain("décision");
+    expect(result.resolutions[0].resolutionReason).toContain("decision");
   });
 
   it("orderable semver pairs keep 'newest wins' even WITH context", () => {

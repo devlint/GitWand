@@ -271,7 +271,7 @@ describe("value_only_change : résolution semver-max au lieu du côté-politique
       `>>>>>>> theirs`,
     ].join("\n");
     const result = resolve(input, "manifest.txt");
-    expect(result.hunks[0].explanation).not.toContain("la plus récente (theirs)");
+    expect(result.hunks[0].explanation).not.toContain("the more recent (theirs)");
   });
 });
 

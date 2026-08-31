@@ -224,7 +224,7 @@ export function tryResolveVueConflict(
             mergedLines: null,
             conflictedBlocks,
             resolvedBlocks,
-            reason: `Conflit sur le bloc <${ours.name}> — ajouté différemment des deux côtés.`,
+            reason: `Conflict on the <${ours.name}> block: added differently on each side.`,
           };
         }
       } else if (ours) {
@@ -256,7 +256,7 @@ export function tryResolveVueConflict(
           mergedLines: null,
           conflictedBlocks,
           resolvedBlocks,
-          reason: `Conflit sur le bloc <${base.name}> — ours l'a supprimé, theirs l'a modifié.`,
+          reason: `Conflict on the <${base.name}> block: ours deleted it, theirs modified it.`,
         };
       }
       continue;
@@ -272,7 +272,7 @@ export function tryResolveVueConflict(
           mergedLines: null,
           conflictedBlocks,
           resolvedBlocks,
-          reason: `Conflit sur le bloc <${base.name}> — theirs l'a supprimé, ours l'a modifié.`,
+          reason: `Conflict on the <${base.name}> block: theirs deleted it, ours modified it.`,
         };
       }
       continue;
@@ -298,7 +298,7 @@ export function tryResolveVueConflict(
         mergedLines: null,
         conflictedBlocks,
         resolvedBlocks,
-        reason: `Conflit sur le bloc <${ours.name}> — modifié des deux côtés de façon incompatible.`,
+        reason: `Conflict on the <${ours.name}> block: modified incompatibly on both sides.`,
       };
     }
   }
@@ -307,6 +307,6 @@ export function tryResolveVueConflict(
     mergedLines: resultLines,
     conflictedBlocks: [],
     resolvedBlocks,
-    reason: `Fusion Vue SFC réussie : ${resolvedBlocks} bloc(s) fusionné(s).`,
+    reason: `Vue SFC merge succeeded: ${resolvedBlocks} block(s) merged.`,
   };
 }

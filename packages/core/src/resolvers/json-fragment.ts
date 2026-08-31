@@ -103,12 +103,12 @@ export function tryResolveJsonFragment(
   const ours = parseFragmentEntries(oursLines);
   const theirs = parseFragmentEntries(theirsLines);
   if (!ours || !theirs) {
-    return { lines: null, reason: "Fragment JSON : lignes non reconnues comme entrées « \"clé\": valeur » simples." };
+    return { lines: null, reason: "JSON fragment: lines not recognized as simple \"key\": value entries." };
   }
   // Base absente (diff2) → traitée comme vide : tout est « ajouté ».
   const base = baseLines.length > 0 ? parseFragmentEntries(baseLines) : [];
   if (base === null) {
-    return { lines: null, reason: "Fragment JSON : base non reconnue comme liste d'entrées simples." };
+    return { lines: null, reason: "JSON fragment: base not recognized as a list of simple entries." };
   }
 
   const bMap = new Map(base.map((e) => [e.key, e]));
@@ -160,7 +160,7 @@ export function tryResolveJsonFragment(
   for (const key of allKeys) {
     const d = decide(key);
     if (d === null) {
-      return { lines: null, reason: `Fragment JSON : la clé « ${key} » est modifiée des deux côtés avec des valeurs non arbitrables — décision humaine.` };
+      return { lines: null, reason: `JSON fragment: key "${key}" is changed on both sides with non-arbitrable values — human decision.` };
     }
     if (d !== "drop") decided.set(key, d);
   }
@@ -194,7 +194,7 @@ export function tryResolveJsonFragment(
   const oursLast = ours[ours.length - 1].hadComma;
   const theirsLast = theirs[theirs.length - 1].hadComma;
   if (oursLast !== theirsLast) {
-    return { lines: null, reason: "Fragment JSON : convention de virgule finale incohérente entre les deux côtés." };
+    return { lines: null, reason: "JSON fragment: inconsistent trailing-comma convention between the two sides." };
   }
 
   const lines = outKeys.map((key, idx) => {
@@ -205,6 +205,6 @@ export function tryResolveJsonFragment(
 
   return {
     lines,
-    reason: `Fragment JSON fusionné par clé : ${outKeys.length} entrée(s), ${merged} modification(s) unilatérale(s) prise(s)${arbitrated ? `, ${arbitrated} contrainte(s) de version arbitrée(s) vers la plus récente` : ""}.`,
+    reason: `JSON fragment merged by key: ${outKeys.length} entr${outKeys.length === 1 ? "y" : "ies"}, ${merged} one-sided change(s) taken${arbitrated ? `, ${arbitrated} version constraint(s) arbitrated to the newer` : ""}.`,
   };
 }

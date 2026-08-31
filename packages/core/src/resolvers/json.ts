@@ -384,7 +384,7 @@ export function tryResolveJsonConflict(
   } catch (e) {
     return {
       merged: null,
-      reason: `Impossible de parser ours comme JSON : ${e instanceof Error ? e.message : String(e)}`,
+      reason: `Could not parse ours as JSON: ${e instanceof Error ? e.message : String(e)}`,
       resolvedKeys: 0,
       unresolvedKeys: 1,
     };
@@ -395,7 +395,7 @@ export function tryResolveJsonConflict(
   } catch (e) {
     return {
       merged: null,
-      reason: `Impossible de parser theirs comme JSON : ${e instanceof Error ? e.message : String(e)}`,
+      reason: `Could not parse theirs as JSON: ${e instanceof Error ? e.message : String(e)}`,
       resolvedKeys: 0,
       unresolvedKeys: 1,
     };
@@ -408,7 +408,7 @@ export function tryResolveJsonConflict(
       // Pour l'instant, pas de merge sémantique des tableaux — fallback textuel
       return {
         merged: null,
-        reason: "Fusion sémantique de tableaux JSON non supportée (fallback textuel).",
+        reason: "Semantic merging of JSON arrays is not supported, so this falls back to the textual engine.",
         resolvedKeys: 0,
         unresolvedKeys: 1,
       };
@@ -418,14 +418,14 @@ export function tryResolveJsonConflict(
       const indent = detectIndentation(oursText);
       return {
         merged: JSON.stringify(oursJson, null, indent),
-        reason: "Même valeur JSON des deux côtés — résolution triviale.",
+        reason: "Same JSON value on both sides, so the resolution is trivial.",
         resolvedKeys: 1,
         unresolvedKeys: 0,
       };
     }
     return {
       merged: null,
-      reason: "Valeurs JSON scalaires différentes — fallback textuel.",
+      reason: "Differing scalar JSON values, falling back to the textual engine.",
       resolvedKeys: 0,
       unresolvedKeys: 1,
     };
@@ -448,7 +448,7 @@ export function tryResolveJsonConflict(
   if (merged === null) {
     return {
       merged: null,
-      reason: `Fusion JSON impossible : ${unresolvedKeys} clé(s) en conflit non résolvable.`,
+      reason: `JSON merge not possible: ${unresolvedKeys} key(s) conflict irreducibly.`,
       resolvedKeys,
       unresolvedKeys,
     };
@@ -460,7 +460,7 @@ export function tryResolveJsonConflict(
 
   return {
     merged: mergedText,
-    reason: `Fusion JSON sémantique réussie : ${resolvedKeys} clé(s) fusionnée(s), ${unresolvedKeys} conflit(s).`,
+    reason: `Semantic JSON merge succeeded: ${resolvedKeys} key(s) merged, ${unresolvedKeys} conflict(s).`,
     resolvedKeys,
     unresolvedKeys,
   };

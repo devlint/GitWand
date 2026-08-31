@@ -205,7 +205,7 @@ export async function tryLlmFallbackResolve(
     };
     return {
       lines: null,
-      reason: "LLM fallback ignoré : aucun endpoint injecté (config.endpoint manquant).",
+      reason: "LLM fallback skipped: no endpoint was injected (config.endpoint missing).",
       llmTrace: trace,
     };
   }
@@ -254,7 +254,7 @@ export async function tryLlmFallbackResolve(
     };
     return {
       lines: null,
-      reason: "LLM a refusé de résoudre ce conflit (CANNOT_RESOLVE ou réponse vide).",
+      reason: "The LLM declined to resolve this conflict (CANNOT_RESOLVE, or an empty response).",
       llmTrace: trace,
     };
   }
@@ -278,15 +278,15 @@ export async function tryLlmFallbackResolve(
 
   if (!accepted) {
     const reason = !validation.isValid
-      ? `LLM résolution refusée : validation échouée (marqueurs résiduels: ${validation.hasResidualMarkers}, syntaxe: ${validation.syntaxError ?? "ok"}).`
-      : `LLM résolution refusée : score de validation ${validationScore} < minimum requis ${minPostMergeScore}.`;
+      ? `LLM resolution rejected: validation failed (residual markers: ${validation.hasResidualMarkers}, syntax: ${validation.syntaxError ?? "ok"}).`
+      : `LLM resolution rejected: validation score ${validationScore} is below the required minimum ${minPostMergeScore}.`;
 
     return { lines: null, reason, llmTrace: trace };
   }
 
   return {
     lines: proposedLines,
-    reason: `LLM résolution acceptée (score: ${validationScore}/100, latence: ${latencyMs}ms, modèle: ${model}).`,
+    reason: `LLM resolution accepted (score: ${validationScore}/100, latency: ${latencyMs}ms, model: ${model}).`,
     llmTrace: trace,
   };
 }

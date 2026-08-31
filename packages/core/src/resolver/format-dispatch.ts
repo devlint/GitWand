@@ -54,14 +54,14 @@ export function dispatchFormatAware(
     if (!options.resolveNonOverlapping) {
       return {
         status: "rejected-policy",
-        reason: "Résolution d'imports (non-overlapping) désactivée par options (resolveNonOverlapping: false).",
+        reason: "Import resolution (non-overlapping) disabled by options (resolveNonOverlapping: false).",
       };
     }
     const { policy, cfg } = computeEffectivePolicy(filePath, options);
     if (!cfg.allowNonOverlapping) {
       return {
         status: "rejected-policy",
-        reason: `Résolution d'imports (non-overlapping) désactivée par la politique "${policy}".`,
+        reason: `Import resolution (non-overlapping) disabled by the "${policy}" policy.`,
       };
     }
   }

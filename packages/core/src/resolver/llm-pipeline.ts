@@ -181,7 +181,7 @@ export async function runLlmFallbackPhase(
         ...updatedHunks[idx],
         trace: {
           ...updatedHunks[idx].trace,
-          summary: `${updatedHunks[idx].trace.summary} | LLM refusé: ${llmResult.reason}`,
+          summary: `${updatedHunks[idx].trace.summary} | LLM rejected: ${llmResult.reason}`,
           llmTrace: llmResult.llmTrace,
         },
       };
@@ -189,7 +189,7 @@ export async function runLlmFallbackPhase(
       updatedResolutions[idx] = {
         ...updatedResolutions[idx],
         hunk: updatedHunk,
-        resolutionReason: `${updatedResolutions[idx].resolutionReason} | LLM refusé: ${llmResult.reason}`,
+        resolutionReason: `${updatedResolutions[idx].resolutionReason} | LLM rejected: ${llmResult.reason}`,
       };
     }
   }
