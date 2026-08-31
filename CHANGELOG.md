@@ -34,6 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Site-wide WebMCP tools went dark on browsers without `navigator.modelContext`.** The registration script bailed out entirely unless the deprecated `navigator` location existed, so the three documentation tools would disappear the day Chrome removes the alias it deprecated in 150. It now prefers `document.modelContext`, where the spec has put the entry point since 27 May 2026, and falls back to `navigator` only when that is all the browser offers. It registers once either way: on the versions exposing both names they alias the same object, so registering on both would have duplicated every tool.
 - **WebMCP tools could never be unregistered.** `signal` was passed as a property of the tool dictionary, which declares no such member, so it was silently dropped. It now goes in the options argument where `ModelContextRegisterToolOptions` expects it.
 
+- **Signed commits failed from the GUI with a gpg-agent/ssh-agent socket error (#171)**, even though the identical `git commit` succeeded from Terminal. On macOS, a Finder/Dock-launched GitWand backfills its minimal `launchd` environment by reading `$SHELL -l -c env` once at startup, but `-l` (login) alone does not make zsh source `~/.zshrc` — only an interactive shell does, and setup guides for gpg/ssh agents (`export GPG_TTY=$(tty)`, agent-socket exports for tools like 1Password/YubiKey) conventionally live there. The probe now runs `$SHELL -i -l -c env`, so those exports are captured like any other shell-rc variable.
+
 ## [3.8.0] - 2026-08-24
 
 ### Added
