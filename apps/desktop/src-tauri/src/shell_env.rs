@@ -60,7 +60,7 @@
 /// (interactive) is required alongside `-l` (login) so `~/.zshrc`-only
 /// exports (GPG_TTY, agent-socket vars, …) are captured — see the module
 /// doc comment above and #171.
-#[cfg(any(test, target_os = "macos"))]
+#[cfg(target_os = "macos")]
 const LOGIN_SHELL_ENV_ARGS: [&str; 3] = ["-i", "-l", "-c"];
 
 #[cfg(target_os = "macos")]
