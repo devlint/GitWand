@@ -30,10 +30,22 @@
 //!
 //! ## What this module does
 //!
-//! Spawn `$SHELL -l -c env` once at startup (bounded by a 3s timeout),
+//! Spawn `$SHELL -i -l -c env` once at startup (bounded by a 3s timeout),
 //! parse its output, and propagate everything-not-already-set into the
 //! current process env. Subsequent subprocess (`Command::new`) inherit
 //! the enriched env automatically.
+//!
+//! `-i` (interactive) is required in addition to `-l` (login): zsh only
+//! sources `~/.zshrc` when the shell is interactive, and a `-c` script is
+//! non-interactive by default even with `-l`. Setup guides for gpg/ssh
+//! agents (`export GPG_TTY=$(tty)`, agent-socket exports for tools like
+//! 1Password/YubiKey) conventionally land in `.zshrc`, not `.zprofile` —
+//! without `-i` those never get captured, so a signed `git commit` from
+//! the GUI fails with a gpg-agent/ssh-agent socket error (#171) even
+//! though the same commit succeeds from an interactive Terminal, which
+//! does source `.zshrc`. Non-KV lines that an interactive shell's rc
+//! might print (banners, etc.) are already tolerated below — skipped by
+//! the `split_once('=')` check — so `-i` is safe to add unconditionally.
 //!
 //! - `PATH` is **not** overwritten — `hidden_cmd` in `git/cmd.rs` does its
 //!   own PATH enrichment with the Homebrew prefixes for predictability;
@@ -43,6 +55,13 @@
 //! - On Linux/Windows this is a no-op. Linux distros launch GUI apps with
 //!   the full session env most of the time; Windows installs always have
 //!   the user env (HKCU\Environment).
+
+/// Flags used to probe the user's full login+interactive shell env. `-i`
+/// (interactive) is required alongside `-l` (login) so `~/.zshrc`-only
+/// exports (GPG_TTY, agent-socket vars, …) are captured — see the module
+/// doc comment above and #171.
+#[cfg(any(test, target_os = "macos"))]
+const LOGIN_SHELL_ENV_ARGS: [&str; 3] = ["-i", "-l", "-c"];
 
 #[cfg(target_os = "macos")]
 pub(crate) fn init_login_shell_env() {
@@ -58,7 +77,8 @@ pub(crate) fn init_login_shell_env() {
     let shell_for_thread = shell.clone();
     std::thread::spawn(move || {
         let output = std::process::Command::new(&shell_for_thread)
-            .args(["-l", "-c", "env"])
+            .args(LOGIN_SHELL_ENV_ARGS)
+            .arg("env")
             .output();
         let _ = tx.send(output);
     });
@@ -71,7 +91,7 @@ pub(crate) fn init_login_shell_env() {
         }
         Err(_) => {
             eprintln!(
-                "[gitwand] login shell `{} -l -c env` timed out (3s) — \
+                "[gitwand] login shell `{} -i -l -c env` timed out (3s) — \
                  continuing with minimal launchd env",
                 shell
             );
@@ -81,7 +101,7 @@ pub(crate) fn init_login_shell_env() {
 
     if !output.status.success() {
         eprintln!(
-            "[gitwand] `{} -l -c env` exit non-zero: {}",
+            "[gitwand] `{} -i -l -c env` exit non-zero: {}",
             shell,
             String::from_utf8_lossy(&output.stderr).trim()
         );
@@ -345,5 +365,100 @@ mod glab_token_tests {
     fn ignores_a_token_line_whose_value_is_blank() {
         let output = "  ✓ Token: \n";
         assert_eq!(parse_glab_token(output), None);
+    }
+}
+
+/// Regression test for #171: a signed `git commit` failing with a
+/// gpg-agent/ssh-agent socket error from the GUI app while working fine
+/// from Terminal, because agent env vars set only in `~/.zshrc` (the
+/// conventional place per common gpg/ssh-agent setup guides) never made it
+/// into the process env.
+///
+/// Spawns real `zsh` directly against an isolated `ZDOTDIR` fixture so the
+/// developer's real `~/.zshrc` is untouched, and so we don't mutate this
+/// test binary's process-wide env (which `init_login_shell_env` does, and
+/// which isn't safe to do from a `#[test]` running alongside others).
+#[cfg(all(test, target_os = "macos"))]
+mod login_shell_flags_tests {
+    use super::LOGIN_SHELL_ENV_ARGS;
+    use std::io::Write;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    const MARKER_KEY: &str = "GITWAND_TEST_ZSHRC_ONLY_MARKER";
+    const MARKER_VALUE: &str = "gpg_tty_style_export";
+
+    struct ZdotdirFixture {
+        path: PathBuf,
+    }
+    impl Drop for ZdotdirFixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+    impl ZdotdirFixture {
+        /// A `ZDOTDIR` whose `.zshrc` exports `MARKER_KEY`, deliberately
+        /// absent from `.zprofile`/`.zshenv` — it must come from `.zshrc`,
+        /// which only an *interactive* shell sources.
+        fn new() -> Self {
+            let n = COUNTER.fetch_add(1, Ordering::SeqCst);
+            let path = std::env::temp_dir().join(format!(
+                "gitwand-shell-env-test-{}-{}",
+                std::process::id(),
+                n
+            ));
+            std::fs::create_dir_all(&path).unwrap();
+            let mut f = std::fs::File::create(path.join(".zshrc")).unwrap();
+            writeln!(f, "export {}={}", MARKER_KEY, MARKER_VALUE).unwrap();
+            Self { path }
+        }
+    }
+
+    fn zsh_env_output(fixture: &ZdotdirFixture, args: &[&str]) -> String {
+        let output = std::process::Command::new("zsh")
+            .env("ZDOTDIR", &fixture.path)
+            .args(args)
+            .output()
+            .expect("zsh must be present on macOS");
+        assert!(output.status.success());
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    }
+
+    fn has_marker(env_output: &str) -> bool {
+        env_output
+            .lines()
+            .any(|l| l == format!("{}={}", MARKER_KEY, MARKER_VALUE))
+    }
+
+    #[test]
+    fn login_shell_env_args_capture_a_zshrc_only_export() {
+        let fixture = ZdotdirFixture::new();
+        let mut args: Vec<&str> = LOGIN_SHELL_ENV_ARGS.to_vec();
+        args.push("env");
+        let stdout = zsh_env_output(&fixture, &args);
+        assert!(
+            has_marker(&stdout),
+            "expected `{}` (only exported in .zshrc) to be captured by the \
+             production LOGIN_SHELL_ENV_ARGS (`-i -l -c`), but it was missing \
+             from:\n{}",
+            MARKER_KEY,
+            stdout
+        );
+    }
+
+    #[test]
+    fn login_only_without_interactive_misses_the_zshrc_only_export() {
+        // Documents the bug this test file guards against: dropping `-i`
+        // (the pre-fix behavior) does NOT source `.zshrc`, so a var like
+        // `GPG_TTY` set there is silently missing.
+        let fixture = ZdotdirFixture::new();
+        let stdout = zsh_env_output(&fixture, &["-l", "-c", "env"]);
+        assert!(
+            !has_marker(&stdout),
+            "expected `-l` alone (no `-i`) to NOT source .zshrc, but `{}` was \
+             present anyway — the repro fixture is invalid",
+            MARKER_KEY
+        );
     }
 }
