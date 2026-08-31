@@ -5,6 +5,40 @@ description: Release history for GitWand — the native Git client with AI confl
 
 # Changelog
 
+## v3.9.0 — August 2026
+
+### The engine finally measures itself
+
+Every accuracy claim GitWand has ever made about its conflict engine was, until now, an assertion. This release replaces that with a number. `benchmark/` pins eight public repositories to exact commits, replays roughly 1,700 real historical merges through the engine, and compares the result byte-for-byte with what the team actually committed. Two numbers come out the other end: coverage, how much of a repo's conflicts the engine even attempts, and agreement, how often what it produces matches the human. Coverage is a property of the codebase. Agreement is a property of the engine, and it is the one this release was built to move.
+
+The first fix the benchmark found was structural: a hunk the engine calls "too complex to touch" could still, quietly, be resolved by a format-aware resolver underneath it, reported as unresolved while being applied anyway. That is now impossible. A format resolver's output gets its own classification, its own confidence score, and its own trace entry, so nothing ships without an honest label. A related fix catches resolutions that look fine hunk by hunk but break the file as a whole, two "Unreleased" headings in a changelog, or a duplicate key in a JSON object, and retracts them rather than writing something no parser would accept.
+
+The biggest single change was admitting the engine was wrong about generated files. Lockfiles, minified bundles, anything a build tool produces: GitWand used to auto-merge them, on the theory that the alternative side wins or a semantic merge would be close enough. Measured against 1,662 real merges, that guess diverged from what teams actually shipped almost every time. Generated files now decline by default, with an explanation of what to regenerate and how, and the accept-and-hope behavior is one `.gitwandrc` key away for anyone who still wants it.
+
+### Teaching the engine what merge it's in
+
+A surprising number of wrong resolutions turned out to share one root cause: the engine had no idea whether it was in a merge, a rebase, or a cherry-pick, or which side was which. A version string set differently on both sides of a back-merge, `'13.x-dev'` against `'12.54.1'`, has an obvious right answer to a human: keep the target branch's value. Without context, the engine was guessing, and measured wrong about three times out of four. `MergeContext` now flows in from the CLI, the MCP server, and the desktop's own knowledge of what operation is running, and that one case alone took laravel/framework's agreement from 36.6% to 81.9%.
+
+The correction is as much the story as the fix. An early version of the rule sent every version-like scalar to the target branch, including ordinary dependency bumps that should keep "newest wins." Agreement dropped on three other repositories the moment that shipped in the benchmark, not in production, which is the entire reason the benchmark exists. The rule now only touches version pairs that can't be ordered, and orderable ones still go with the newer.
+
+A smaller but equally overdue fix: `package.json` and `composer.json` conflicts are almost always a handful of `"key": value` lines, and merging them line by line was exactly the wrong granularity. They now merge by key, three-way, with one narrow arbitration: two version ranges on the same operator resolve to the newer. Anything that looks like a real decision, a changed operator, a `workspace:*` migration, still comes back to a human. It's the first change in this release that raised both coverage and agreement at once, on every repository measured.
+
+### A repo's own habits, and an honest no
+
+Every rule above was calibrated on the benchmark's eight public repositories, but no two teams merge the same way. `gitwand conventions` now replays a repository's own merge history and measures its actual habits, whether it regenerates lockfiles or merges them, whether a changelog gets hand-merged or rebuilt by tooling, entirely locally and only above real evidence floors. It always loses to an explicit `.gitwandrc`, and every resolution it influences says so in its reason. Checked against the benchmark corpus itself, the result came back flat: the derived rules just confirmed the defaults, because the defaults were calibrated on the same repos. That's not a wasted feature, it's circularity being reported honestly instead of dressed up, and the payoff shows up on the repositories that actually diverge from the defaults.
+
+The same honesty applies to the feature this release did not fully ship. For a declined lockfile, GitWand can now run the ecosystem's own installer, `npm install --package-lock-only` and friends, inside a disposable, sandboxed worktree, with an explicit allowlist that keeps secrets out of the spawned process. Measured against real historical merges rather than assumed correct, it matched the human outcome 5 times out of 13 on `prettier/prettier`, well short of the 80% bar this release set for shipping a feature to the desktop UI. So it stays exactly what the numbers support: a CLI opt-in (`--regenerate`), not a button. And because every future PR to the engine now runs through the same benchmark, a new `benchmark-gate.yml` CI check fails the build if agreement on the pinned corpus drops without the PR explaining why.
+
+### The Merge Room, a shared workspace for agents
+
+`gitwand.app/agent` used to expose two read-only tools over the WebMCP standard: explain a git error, resolve a conflicted file. Both ran entirely in the visitor's browser tab, no upload, no backend. This release turns that page into a shared workspace instead. Every tool call now files a case into live page state, so the person sitting at the page watches it fill up in real time: hunks the engine can settle get settled, hunks where the two branches genuinely disagree queue up for a human to pick a side, and the assembled result comes back ready to paste. No tool on the page can make that call itself, which is the whole point of the boundary. A third tool, `list_cases`, lets an agent read the room back: what's filed, what's settled, what's still waiting. It's what turns a stateless calculator into something an agent can leave and come back to.
+
+### Smaller fixes
+
+Signed commits could fail from the desktop app with a cryptic gpg-agent or ssh-agent socket error, while the identical `git commit` worked fine from a terminal. The cause was environmental: GitWand backfills the minimal environment a Finder-launched app gets from macOS by reading a login shell's variables at startup, but a login shell alone doesn't source `~/.zshrc`, and that's exactly where GPG and SSH agent setup conventionally lives. The startup probe now asks for an interactive shell too, so those variables come through like any other.
+
+`pnpm test` had been non-deterministic for a while, roughly one failure in three, because git-backed test suites are bound by subprocess spawning rather than CPU and were timing out under full monorepo load. Every such suite now shares a consistent timeout, and running workspaces one at a time turned out to be faster overall as well as reliable. Eleven consecutive clean runs later, the flake is gone. `parse_git_error` also picked up recognition for a rebase that stopped on a conflict, a phrase distinct enough from a cherry-pick's that the two no longer got confused, and the site's WebMCP registration now prefers the current `document.modelContext` entry point over the deprecated `navigator` alias, with a fix for a tool's stop signal that was silently being dropped.
+
 ## v3.8.0 — August 2026
 
 Undo, for the parts of git that never had one.

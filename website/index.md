@@ -22,7 +22,7 @@ head:
         "url": "https://gitwand.app",
         "downloadUrl": "https://github.com/devlint/GitWand/releases",
         "license": "https://opensource.org/licenses/MIT",
-        "softwareVersion": "3.8.0",
+        "softwareVersion": "3.9.0",
         "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
         "author": { "@type": "Organization", "name": "Devlint", "url": "https://github.com/devlint" }
       }
