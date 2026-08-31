@@ -6,47 +6,22 @@
 
 ## What's Next
 
-_Ordered by priority, last verified 2026-08-26 (current after v3.8.0 shipped Time Machine, and after the Engine Accuracy work landed on `feat/conflict-engine-accuracy`, ready to ship as the next release). The thread: ship the measured-accuracy engine first (v3.8.x/v3.9 — it re-founds the trust every later auto-apply feature spends), make the app reactive and fast (Live Repo), close the resolution loop (preview-to-apply, whose confidence threshold is only meaningful **because** of the accuracy work), then workflow & comparison primitives, experimental voice input, and the v4.0 code-intelligence headline. Full renumbering history: `git log -p -- roadmap.md`._
+_Ordered by priority, last verified 2026-08-31 (current after v3.9.0 shipped Engine Accuracy, merged to `main` via PR #170). The thread: the measured-accuracy engine re-founds the trust every later auto-apply feature spends, then make the app reactive and fast (Live Repo), close the resolution loop (preview-to-apply, whose confidence threshold is only meaningful **because** of the accuracy work), then workflow & comparison primitives, experimental voice input, and the v4.0 code-intelligence headline. Full renumbering history: `git log -p -- roadmap.md`._
 
 | Version | Codename | Why now |
 |---------|----------|---------|
-| **next release** | Engine Accuracy | **Implemented** on `feat/conflict-engine-accuracy` — measured agreement with real human merges: laravel 24 → 83 %, prettier 25 → 50 % |
-| **v3.9.0** | Live Repo | Reactive & fast — FS events replace polling, libgit2 phase 1 |
-| **v3.10.0** | Merge preview-to-apply | Close the resolution loop — apply straight from preview, editable diff |
-| **v3.11.0** | Stacked Branches | Native stacked PRs, sequenced after v3.10 (leans on preview→apply) |
-| **v3.12.0** | Combined Diffs | Multi-commit, non-contiguous aggregated diff |
-| **v3.13.0** | Voice Input | Experimental — local dictation via embedded Whisper |
+| **v3.10.0** | Live Repo | Reactive & fast — FS events replace polling, libgit2 phase 1 |
+| **v3.11.0** | Merge preview-to-apply | Close the resolution loop — apply straight from preview, editable diff |
+| **v3.12.0** | Stacked Branches | Native stacked PRs, sequenced after v3.11 (leans on preview→apply) |
+| **v3.13.0** | Combined Diffs | Multi-commit, non-contiguous aggregated diff |
+| **v3.14.0** | Voice Input | Experimental — local dictation via embedded Whisper |
 | **v4.0.0** (candidate) | Blast Radius | Code-graph impact before merge — the code-intelligence headline |
 
-### Next release — Engine Accuracy (implemented, `feat/conflict-engine-accuracy`)
-
-_The engine's claims are now measured instead of asserted, and three measured failure modes were fixed. Spec: [`docs/superpowers/specs/2026-08-26-conflict-engine-accuracy.md`](docs/superpowers/specs/2026-08-26-conflict-engine-accuracy.md) · benchmark: [`benchmark/`](benchmark/). Takes the next free version number at bump time — in-code comments reference these as "accuracy lot 1/C/E" to avoid colliding with the numbers below._
-
-**Shipped on the branch (7 commits, all suites green):**
-
-- **Reproducible benchmark** (`benchmark/`) — 8 public repos pinned to SHAs, ~1,700 real merges replayed, engine output compared byte-for-byte with what the teams actually committed. Two metrics: coverage (varies 0–76 % by repo — a property of the *codebase*) and agreement (a property of the *engine*). Every claim below is a measurement from it.
-- **Lot 1 — classifier contract, format invariants, generated files decline.** No `complex` hunk is ever silently applied (format resolvers now classify as `format_semantic`, scored and traced); a resolution that breaks a format invariant (double `Unreleased`, duplicate JSON key) is retracted; lockfiles/bundles decline with an actionable message instead of an auto-merge measured wrong ~100 % of the time (`resolveGeneratedFiles` opt-in in `.gitwandrc` / `--resolve-generated`).
-- **Lot C — MergeContext.** The engine finally knows what merge it is in (operation + target side, detected by CLI/MCP/desktop from `.git` state). Version-identity conflicts (`'13.x-dev'` vs `'12.54.1'`) resolve to the target branch — laravel agreement 36.6 → 81.9 %. The first version of the rule also flipped orderable dep bumps and regressed three repos; **the benchmark caught it before it shipped** (the whole point).
-- **Lot E — key-wise manifest fragments.** `package.json`/`composer.json` conflict hunks merged by key (3-way), with one bounded arbitration: same-operator ranges (`^7.23.0` vs `^7.23.3`) → newer. First change to raise coverage AND agreement at once, on all four measured repos.
-
-| Agreement with the human merge | v3.8.0 | after |
-|---|---:|---:|
-| laravel/framework | 24.3 % | **83.3 %** |
-| prettier/prettier | 25.3 % | **49.6 %** |
-| expressjs/express | 59.6 % | **61.3 %** |
-| vuejs/core | 92.5 % | **90.1 %** (denominator artefact — zero per-file flips; see benchmark/README) |
-
-**Follow-ups (each wants its own plan):**
-
-- **Lot F — derive the repo's own conventions** (the moat): point `scripts/replay-conflicts.mjs` at the *user's* repository to measure their policies — regenerate-vs-merge lockfiles, who wins version scalars, changelog discipline — instead of assuming them. Feeds the same `useResolutionMemory` feedback loop v4.0 plans; this is its active, measured form. Nobody else in the market can do this, and the mechanism already exists.
-- **Lot G — agreement as a CI gate**: a new pattern must not lower agreement on the pinned corpus (generalizes the `token_level_merge` trial, PR #117). Needs a corpus cache strategy — a cold clone is several GB.
-- **Lot D (full) — sandboxed regeneration** ([plan](docs/superpowers/plans/2026-08-26-regenerate-tier.md)): for declared-generated files, resolve the source manifest then run the ecosystem's own tool (`npm install --package-lock-only`, …) in a sandbox with explicit consent; today's interim (decline + explain) stays the fallback.
-- **Corpus re-pin**: select on `git rev-list --merges --count` — cargo contributes zero conflicted merges, django ten; language diversity is worthless without merge history.
-- Website tie-in: the site stopped claiming "95 %" (circular denominator) and links the benchmark; keep site numbers sourced from `benchmark/results/` only.
+_v3.9.0 — Engine Accuracy — shipped; see [Shipped](#shipped) below and the full lot-by-lot detail in [CHANGELOG.md](./CHANGELOG.md)._
 
 ---
 
-### v3.9.0 — Live Repo: filesystem events + libgit2 phase 1
+### v3.10.0 — Live Repo: filesystem events + libgit2 phase 1
 
 _Inspired by GitUp's Live Map. Replace the 2s status poll with real FS events, and start the shell-out → libgit2 migration on the cheap-refresh path._
 
@@ -55,7 +30,7 @@ _Inspired by GitUp's Live Map. Replace the 2s status poll with real FS events, a
 - **FS watcher** — `notify` crate on `.git/` + working tree, debounced/coalesced Tauri events; Git Tree, status and sidebar refresh in real time, including changes made outside the app
 - **Polling demotion** — the 2s poll becomes a low-frequency fallback (watcher failure, network mounts); consistent with the polling-discipline rule (no unconditional intervals)
 - **libgit2 phase 1: `git_diff` + `git_blame`** — migrate the two read paths with the best effort/risk ratio (per backend audit); CLI fallback kept, covered by the parity harness (`tests/parity/`); phases 3-4 (`git_log`/`git_show` revwalk, `git_file_log` rename tracking — the real 40k-commit win) evaluated once this lands, see the veille note below
-- **Web Worker for diff/parse** — move `packages/core`'s diff/parse hot path off the main thread via `comlink`, browser-safe like the rest of the package; lands here because it's on the same hot path as the FS-watcher refresh and the libgit2 migration above, and because the CPU load on that path is only going up — `token_level_merge` (already shipped, v3.4.0), Combined Diffs multi-commit aggregation (v3.12.0) and the v4.0 tree-sitter code graph all add main-thread work to it
+- **Web Worker for diff/parse** — move `packages/core`'s diff/parse hot path off the main thread via `comlink`, browser-safe like the rest of the package; lands here because it's on the same hot path as the FS-watcher refresh and the libgit2 migration above, and because the CPU load on that path is only going up — `token_level_merge` (already shipped, v3.4.0), Combined Diffs multi-commit aggregation (v3.13.0) and the v4.0 tree-sitter code graph all add main-thread work to it
 - **Channels for progress streaming** — migrate `clone`/`fetch` progress off the global `app_handle.emit("clone-progress", …)` broadcast (v2.11.0) onto a scoped `tauri::ipc::Channel<T>` per invoke, the pattern already proven by the terminal's PTY output (v3.2.0); closes the other orphaned lever from `PERFORMANCE_PLAN.md` (§5.4)
 - **Event-driven invalidation** — post-command manual refreshes replaced by watcher events (single code path)
 - **Today Phase 3 — active mutations** — deferred remainder of the Today inbox (v3.0.0): real nudge / auto-merge actions from the inbox cards, and a direct jump from "Resolve" into the conflict resolver (today routes to in-app PR review); leans on v3.8's undo safety net, since an inbox "auto-merge" nudge is itself the "more auto-apply" that v3.8 exists to make safe, and on this version's event-driven refresh so an action's result is reflected instantly instead of on the next poll
@@ -64,7 +39,7 @@ _Inspired by GitUp's Live Map. Replace the 2s status poll with real FS events, a
 
 ---
 
-### v3.10.0 — Merge preview-to-apply + editable diff
+### v3.11.0 — Merge preview-to-apply + editable diff
 
 _Inspired by Aurees. Close the loop between the Conflict Predictor (v2.20.0) and execution, and make the diff a place you can fix things._
 
@@ -80,9 +55,9 @@ _Inspired by Aurees. Close the loop between the Conflict Predictor (v2.20.0) and
 
 ---
 
-### v3.11.0 — Stacked Branches (native)
+### v3.12.0 — Stacked Branches (native)
 
-_A differentiating feature: stacked PRs workflow without an external CLI (Graphite, ghstack…). Sequenced after v3.10.0 on purpose: Restack leans on the conflict preview → apply flow._
+_A differentiating feature: stacked PRs workflow without an external CLI (Graphite, ghstack…). Sequenced after v3.11.0 on purpose: Restack leans on the conflict preview → apply flow._
 
 The paradigm: short stacked branches (`feat/step-1` → `feat/step-2` → `feat/step-3`), each with its own PR targeting the previous one.
 
@@ -90,15 +65,15 @@ The paradigm: short stacked branches (`feat/step-1` → `feat/step-2` → `feat/
 
 **Creation** — "Stack a branch" button in the context menu; `⌘⇧S` shortcut from the commit area
 
-**Restack** — Automatic detection when the base has moved; one-click "Restack" button (cascading `git rebase --onto`); conflict preview before execution (v3.10.0 preview-to-apply)
+**Restack** — Automatic detection when the base has moved; one-click "Restack" button (cascading `git rebase --onto`); conflict preview before execution (v3.11.0 preview-to-apply)
 
 **PRs** — "Submit stack": creates or updates GitHub PRs for each layer; automatic retarget when a layer is merged
 
-**Implementation** — Metadata in `.gitwand-workspace.json`; no external CLI dependency. Cascading Restack and per-layer Submit-stack progress stream via `tauri::ipc::Channel` (v3.9.0 pattern) rather than a new global `emit()` broadcast
+**Implementation** — Metadata in `.gitwand-workspace.json`; no external CLI dependency. Cascading Restack and per-layer Submit-stack progress stream via `tauri::ipc::Channel` (v3.10.0 pattern) rather than a new global `emit()` broadcast
 
 ---
 
-### v3.12.0 — Combined Diffs (multi-commit, non-contiguous)
+### v3.13.0 — Combined Diffs (multi-commit, non-contiguous)
 
 _Inspired by GitBlade. A comparison primitive we lack: one aggregated diff across several commits, even non-consecutive — review scattered work as a single change._
 
@@ -112,7 +87,7 @@ _Inspired by GitBlade. A comparison primitive we lack: one aggregated diff acros
 
 ---
 
-### v3.13.0 — Voice Input (experimental)
+### v3.14.0 — Voice Input (experimental)
 
 - **Local dictation**: microphone button in the commit panel — transcription via embedded Whisper (`whisper-rs` Rust) — zero cloud
 - **Optional AI enrichment**: pass dictated text through `useAIProvider` for conventional commit formatting
@@ -142,27 +117,27 @@ _Inspired by Snipara's project-intelligence layer. Before a merge/rebase, answer
 
 ### For reflection — competitive scan (GitUp · Aurees · Snipara · Strand · GitComet · RelaGit)
 
-_Competitive scan from 2026-06-24 across 6 clients/tools (Snipara, GitDriv, GitUp, GitX-dev, Aurees, GitBlade), updated 2026-07-20. High-signal leads were promoted into the versioned sections above after a code audit — PR Review 2.0 (inspired by Greptile) → **v3.5.0 (shipped)**, Commit Review (inspired by git-lrc) → **v3.7.0 (shipped)**, global snapshots/undo → **v3.8.0**, Live Map + libgit2 phase 1 → **v3.9.0**, editable diff + merge preview-to-apply → **v3.10.0**, Combined Diffs → **v3.12.0**, code graph/blast radius → **v4.0.0 (candidate)**. Discarded leads (GitDriv = beginner web drag-and-drop, GitX-dev = near-dead fork, GitBlade = parity only, abandoned since 2019) bring nothing advanced._
+_Competitive scan from 2026-06-24 across 6 clients/tools (Snipara, GitDriv, GitUp, GitX-dev, Aurees, GitBlade), updated 2026-07-20. High-signal leads were promoted into the versioned sections above after a code audit — PR Review 2.0 (inspired by Greptile) → **v3.5.0 (shipped)**, Commit Review (inspired by git-lrc) → **v3.7.0 (shipped)**, global snapshots/undo → **v3.8.0**, Live Map + libgit2 phase 1 → **v3.10.0**, editable diff + merge preview-to-apply → **v3.11.0**, Combined Diffs → **v3.13.0**, code graph/blast radius → **v4.0.0 (candidate)**. Discarded leads (GitDriv = beginner web drag-and-drop, GitX-dev = near-dead fork, GitBlade = parity only, abandoned since 2019) bring nothing advanced._
 
 **2026-07-09 scan** — three serious new competitors (all post-dating v2.15.0), now folded into the [Competitive landscape](#competitive-landscape) table above: **Strand** ([strand/0.5.0](https://github.com/danielss-dev/strand), agent workspaces via worktrees), **GitComet** ([gitcomet/0.1.15](https://github.com/Auto-Explore/GitComet), pure Rust+GPUI perf), **RelaGit** ([relagit/0.16](https://github.com/relagit/relagit), design/SolidJS).
 
-_Synthesis: none of the three addresses structured conflict-resolution AI (Strand = agent workspaces, GitComet = perf, RelaGit = design) — GitWand's moat (auto-resolve + multi-repo Launchpad + extensible CLI/MCP) stays intact. Worth cultivating: the v3.8–v3.10 pipeline (preview-to-apply) + v4.0 code graph to widen the gap. Worth borrowing from their respective strengths: published a11y/perf baselines (Strand, → v3.9 benchmark pass), SolidJS vs Vue 3 benchmark on heavy diffs (RelaGit, → v3.9 perf pass)._
+_Synthesis: none of the three addresses structured conflict-resolution AI (Strand = agent workspaces, GitComet = perf, RelaGit = design) — GitWand's moat (auto-resolve + multi-repo Launchpad + extensible CLI/MCP) stays intact. Worth cultivating: the v3.8–v3.11 pipeline (preview-to-apply) + v4.0 code graph to widen the gap. Worth borrowing from their respective strengths: published a11y/perf baselines (Strand, → v3.10 benchmark pass), SolidJS vs Vue 3 benchmark on heavy diffs (RelaGit, → v3.10 perf pass)._
 
 **Still watching:**
 
 - **`GitUpKit`** ([gitup.co](https://gitup.co/)) — their SDK for building Git clients, worth studying.
-- **libgit2 phases 3-4** — migrate `git_log`/`git_show` (revwalk, the real win on 40k commits — but the object-fetch loop needs optimizing first) then `git_file_log` (`--follow`/rename tracking to reimplement). To schedule once phases 1-2 (v3.9/v3.10) are validated. `gix` as an alternative to be re-evaluated at that point.
+- **libgit2 phases 3-4** — migrate `git_log`/`git_show` (revwalk, the real win on 40k commits — but the object-fetch loop needs optimizing first) then `git_file_log` (`--follow`/rename tracking to reimplement). To schedule once phases 1-2 (v3.10/v3.11) are validated. `gix` as an alternative to be re-evaluated at that point.
 - **Verification Plans attached to handoffs** (Snipara) — every PR/change carries the checks it must pass; overlaps with the CI annotations (v2.18.0).
-- **Greptile ([greptile.com](https://www.greptile.com/))** — largely absorbed into the plan (2026-07-02): multi-hop pre-review + confidence scores → **v3.5.0 (shipped)**, hot index → **v3.9.0**, LLM-fallback historical context → **v3.10.0**, local code graph + co-change + feedback loop → **v4.0.0**. Still watching: their public AI-reviewer benchmark (reusable for the v3.5.0 benchmark work) and how the Genius API evolves.
+- **Greptile ([greptile.com](https://www.greptile.com/))** — largely absorbed into the plan (2026-07-02): multi-hop pre-review + confidence scores → **v3.5.0 (shipped)**, hot index → **v3.10.0**, LLM-fallback historical context → **v3.11.0**, local code graph + co-change + feedback loop → **v4.0.0**. Still watching: their public AI-reviewer benchmark (reusable for the v3.5.0 benchmark work) and how the Genius API evolves.
 - **git-lrc / LiveReview ([HexmosTech](https://github.com/HexmosTech/git-lrc))** — concept absorbed in **v3.7.0** (Commit Review). Still watching: their LiveReview team offering (dashboards, org policies, review analytics) — if the `GitWand-Review` trailer catches on, a cross-repo rollup in Today/Dashboard would be the local equivalent.
-- **FinderGit** — UX worth borrowing (file-tree first), macOS-only today; the Finder-like sidebar concept has been promoted to **v3.10.0**. Cross-platform via Tauri is a structural advantage over FinderGit's solo-dev status.
+- **FinderGit** — UX worth borrowing (file-tree first), macOS-only today; the Finder-like sidebar concept has been promoted to **v3.11.0**. Cross-platform via Tauri is a structural advantage over FinderGit's solo-dev status.
 
 ---
 
 ### Later (unscheduled)
 
 - **Snapshot rebase/cherry-pick state** — v3.8 restores `MERGE_HEAD` but not `.git/rebase-merge/` or `.git/sequencer/`, so restoring a snapshot taken mid-rebase or mid-cherry-pick brings the files and index stages back without the in-progress sequence. Restoring those is a directory copy rather than a plumbing call, which is why it was left out of the first pass. Revisit if users report rewinding mid-rebase.
-- **Snapshot cost on very large working trees** — each snapshot runs `git add -A` into a scratch index, which is O(worktree) on a cold cache. Fine on normal repos, unmeasured on a 100k-file monorepo. Benchmark alongside the v3.9 FS-watcher work, where the same walk gains a second consumer.
+- **Snapshot cost on very large working trees** — each snapshot runs `git add -A` into a scratch index, which is O(worktree) on a cold cache. Fine on normal repos, unmeasured on a 100k-file monorepo. Benchmark alongside the v3.10 FS-watcher work, where the same walk gains a second consumer.
 - **Snapshot refs are visible to a bare `git log --all`** — GitWand excludes them from every traversal it runs, but any ref under `refs/` is by definition part of `--all`, so a user typing it in a terminal sees snapshot commits, exactly as they see `refs/stash`. Nothing to fix short of abandoning refs entirely (which would let `gc` eat the snapshots); documented here so it is a known property rather than a surprise.
 
 - **Multi-forge PR-freshness signal parity** — follow-up to the branch-badge background-prefetch/cache work (PR #125): GitLab/Bitbucket/Azure already get the breadth fix (background drain past the first page), but not the cheap freshness-signal instant-cache-restore fast path — GitHub-only today, since the other three don't yet have an equivalent cheap "most-recently-updated PR" query built. Deferred until there's real non-GitHub usage pressure.
@@ -208,6 +183,7 @@ Positioning: neither "yet another Git GUI" nor an IDE. A first-class Git navigat
 
 | Version | Highlights |
 |---------|-----------|
+| **v3.9.0** | **Engine Accuracy** — the engine's claims are now measured against ~1,700 real merges instead of asserted (`benchmark/`, 8 pinned public repos, byte-for-byte comparison with what teams actually committed) · no `complex` hunk is ever silently applied (`format_semantic` reclassification, scored and traced) · a resolution that breaks a format invariant (double `Unreleased`, duplicate JSON key) is retracted · generated files (lockfiles, bundles) decline by default instead of an auto-merge measured wrong ~100% of the time (`resolveGeneratedFiles` opt-in) · the engine knows what merge it's in (`MergeContext`) — version-identity conflicts resolve to the target branch, laravel agreement 24 → 83% · `package.json`/`composer.json` fragments merge by key instead of line-by-line · **`gitwand conventions`** measures a repo's own merge history to derive its policies, always losing to an explicit `.gitwandrc` · a sandboxed `--regenerate` tier runs the ecosystem's own installer in a disposable worktree for declined lockfiles, measured at 38.5% agreement against an 80% bar so it stays CLI-only rather than shipping to desktop · `benchmark-gate.yml` CI check blocks any future PR that regresses agreement on the pinned corpus |
 | **v3.8.0** | **Time Machine** — repo snapshots & global undo. Every destructive operation (discard, reset, checkout, branch switch, bulk resolution apply) first captures a restorable snapshot of the working tree (untracked included), the index and conflict stages 1/2/3, written with git plumbing under `refs/gitwand/snapshots/` and restored via `read-tree` so it never refuses on a dirty tree · **undo offered where the action happened** — a single-slot toast with an Undo button and a `⌘Z` hint, since a discard previously gave no feedback at all · **global `⌘Z` / `⇧⌘Z`** now rewind and replay repo operations, reporting through that same toast · the existing rewind popover (`⌘⇧U`) **lists snapshots merged with git's reflog** instead of the reflog alone, with a full-history modal behind its footer link; restoring is itself undoable via a `pre-restore` snapshot · retention settings (age + count caps, pruned on repo open) and opt-in AI snapshot labels · snapshot refs excluded from every `--all` traversal, and every ref move a restore makes carries an explicit reflog message |
 | **v3.7.0** | **Commit Review** — micro AI reviews in the Changes panel (inspiration [git-lrc](https://github.com/HexmosTech/git-lrc), fully local instead of a cloud+browser detour). "Review staged changes" runs the pre-review engine against the staged diff (inline findings, severity badges, `n`/`p`/`x` navigation) · **Fix with agent** pipes findings into a terminal AI agent session against the current repo (the scratch-worktree variant was cut after manual QA found it could hit a CLI's first-run "trust this directory?" screen and misfire a real command — tracked as a follow-up) · **Iterations & coverage** tracking bound to HEAD · **Review / Vouch / Skip** commit-time decision recorded as a `GitWand-Review:` trailer · per-repo **`.gitwandrc` opt-in** overriding the app Setting in either direction · a composable **pre-commit hook** merging the shipped v3.5.0 secrets section with a new warn-only review reminder · a real focus trap added to `BaseModal`, fixing a foundational a11y gap inherited by every modal in the app · fixed a core reactivity bug where routine background polling silently wiped findings, plus a dozen smaller findings from a dedicated product/code review round |
 | **v3.6.6** | **Dev loop & CI build times** (pure tooling/perf chore, no product surface) — `ci.yml`'s 3-bundle-per-push `desktop` job replaced by a fast `rust-check` (fmt/clippy/check/test, now on PRs too) + a path-filtered `bundle-smoke` job (~230 billed CI min saved/push); Rust cache across all 3 workflows; `[profile.ci]`/`[profile.dev]` cut a post-edit `cargo build` from ~21s to ~6.5s; measured `cargo llvm-lines`/`--timings` to rule out the previously-planned `gitwand-git` crate split; Vitest defaults to `environment: "node"` instead of global `jsdom` (setup time ~96s→~17s); secrets-scanner ignore-regex precompiled (~24x Rust/~2.5x TS); `@gitwand/core`'s resolution engine lazy-loaded out of the boot chunk (main bundle −185 KB raw); deduped `reqwest` (dropped `native-tls`/`openssl-sys`, removed `libssl-dev` from CI); anonymous telemetry gated behind an explicit `telemetry` Cargo feature with a build-time guard against a telemetry-less release |
