@@ -68,3 +68,7 @@ website/.vitepress/.temp
 
 .gitwandrc
 visibility-pack/
+
+# Devpost hackathon submission helper (local plugin state, HyperFrames video project)
+.devpost-hackathon-state.json
+videos/
