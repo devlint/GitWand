@@ -87,7 +87,7 @@ When enabled, a hunk no deterministic pattern could resolve is sent to the confi
 
 ### `generated_file`
 
-The file is auto-generated (lockfiles, minified bundles, build manifests). Detected by filename patterns. Resolution: prefer theirs (the file will be regenerated).
+The file is auto-generated (lockfiles, minified bundles, build manifests). Detected by filename patterns. **Declined by default**: [measured on 1,662 real merges](https://github.com/devlint/GitWand/tree/main/benchmark), auto-merging a generated file diverged from what teams actually shipped in almost every case, so GitWand tells you to resolve the source file and re-run the installer/build instead of guessing. Only the patterns that fabricate nothing (`same_change`, `one_side_change`, `delete_no_change`, `whitespace_only`) still apply automatically on these files. Opt back into the old accept-theirs/semantic-merge behavior with `.gitwandrc`'s `resolveGeneratedFiles: true` or `gitwand resolve --resolve-generated` — see [Generated Files](/reference/config#generated-files) for the full option, including the CLI's opt-in `--regenerate` tier that actually re-runs the installer in a disposable worktree.
 
 **Detected patterns:** `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `composer.lock`, `Gemfile.lock`, `Cargo.lock`, `.min.js`, `.min.css`, `dist/`, `build/manifest.json`, `.bundle.js`, `.bundle.css`
 
@@ -157,8 +157,10 @@ The default resolution strategy can be overridden per-project with a [`.gitwandr
 | `reorder_only` | Either side | Same content, different order |
 | `insertion_at_boundary` | Merge both | Independent additions around intact base |
 | `value_only_change` | Theirs | Incoming values are newer |
-| `generated_file` | Theirs | Will be regenerated |
+| `generated_file` | Declined by default* | Committed version is a tool's output, not a merge |
 | `complex` | No auto-resolution | Too risky |
+
+\* Restore the old behavior with `.gitwandrc`'s `resolveGeneratedFiles: true` or `gitwand resolve --resolve-generated`.
 
 ## Format-Aware Resolvers
 

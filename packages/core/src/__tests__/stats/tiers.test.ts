@@ -36,10 +36,11 @@ describe("summarizeTiers — mapping des tiers", () => {
       whitespace_only: 1, reorder_only: 1, insertion_at_boundary: 1, value_only_change: 1,
       generated_file: 1,
     }));
-    expect(s.byTier.trivial).toBe(12);
+    expect(s.byTier.trivial).toBe(11);
     expect(s.byTier.advancedDeterministic).toBe(0);
     expect(s.byTier.model).toBe(0);
-    expect(s.byTier.unresolved).toBe(0);
+    // accuracy lot 1 — generated_file décline par défaut (se régénère, ne se fusionne pas)
+    expect(s.byTier.unresolved).toBe(1);
   });
 
   it("classe refactoring_aware_merge et token_level_merge dans 'advancedDeterministic'", () => {

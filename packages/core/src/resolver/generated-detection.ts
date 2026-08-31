@@ -19,8 +19,8 @@ export const GENERATED_FILE_PATTERNS: Array<{ pattern: RegExp; label: string }> 
   { pattern: /Gemfile\.lock$/i, label: "bundler lockfile" },
   { pattern: /Cargo\.lock$/i, label: "cargo lockfile" },
   { pattern: /\.min\.(js|css)$/i, label: "minified file" },
-  { pattern: /\bdist\//, label: "fichier build dist/" },
-  { pattern: /\bbuild\/manifest\.json$/i, label: "manifest de build" },
+  { pattern: /\bdist\//, label: "dist/ build output" },
+  { pattern: /\bbuild\/manifest\.json$/i, label: "build manifest" },
   { pattern: /\.bundle\.(js|css)$/i, label: "bundle" },
   { pattern: /mix-manifest\.json$/i, label: "Laravel Mix manifest" },
 ];
@@ -107,14 +107,14 @@ export function reclassifyIfGenerated(
       baseAvailability: 0,
     },
     boosters: [`Path matches the generated-file pattern: ${genInfo.label}`],
-    penalties: ["The content will be regenerated, so theirs is assumed to be the more recent"],
+    penalties: ["The committed content is a tool's output — a textual merge does not reproduce it"],
   };
 
   return {
     ...hunk,
     type: "generated_file",
     confidence: generatedScore,
-    explanation: `Generated file (${genInfo.label}). It will be rebuilt after the merge. Proposed resolution: take theirs and re-run the build.`,
+    explanation: `Generated file (${genInfo.label}). This file is regenerated, not merged: resolve its source, then re-run the tool that produces it (install/build).`,
     // Update the trace to reflect the reclassification
     trace: {
       ...hunk.trace,

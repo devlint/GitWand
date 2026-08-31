@@ -17,7 +17,7 @@ import type { MergePolicy, PolicyConfig } from "../config.js";
 import { mergeNonOverlapping } from "../diff.js";
 import { stripVolatileValues } from "./generated-detection.js";
 import { getLastRefMergeResult } from "../patterns/refactoring-aware-merge.js";
-import { pickNewerSemverSide } from "../patterns/utils.js";
+import { pickNewerSemverSide, hasUnorderableVersionPair } from "../patterns/utils.js";
 
 /**
  * Applique la stratégie textuelle correspondant au type de hunk.
@@ -165,15 +165,43 @@ export function assembleResolution(
           reason: `value_only_change resolution disabled by the "${effectivePolicy}" policy.`,
         };
       }
-      // Quand toutes les paires de tokens différents sont des semver
-      // comparables, le côté le plus élevé gagne — déterministe et conforme à
-      // l'intention « garder la version la plus récente », quel que soit le
-      // côté qui la porte. Sinon (hashes, timestamps) : côté-politique.
       const semverSide = pickNewerSemverSide(hunk.oursLines, hunk.theirsLines);
+      const versionish = hasUnorderableVersionPair(hunk.oursLines, hunk.theirsLines);
+      const ctx = options.mergeContext;
+
+      // accuracy lot C — Un scalaire de version NON ordonnable fixé différemment des
+      // deux côtés ('13.x-dev' vs '12.54.1', '2.9.0-dev'…) est l'identité de
+      // version du fichier sur la branche cible : avec le contexte, la cible
+      // garde sa valeur. Mesuré sur benchmark/ : laravel 36,6 % → 81,5 %
+      // d'accord. Les paires ORDONNABLES (deps bumpées des deux côtés) gardent
+      // en revanche « la plus récente gagne » même avec contexte — la première
+      // version de cette règle les basculait aussi vers la cible, et l'accord
+      // régressait sur prettier/vue/express (les humains prennent bien la dep
+      // la plus récente apportée par la branche source).
+      if (ctx && versionish && semverSide === null) {
+        const side = ctx.targetSide;
+        const refs = ctx.oursRef && ctx.theirsRef ? ` (${ctx.theirsRef} → ${ctx.oursRef})` : "";
+        return {
+          lines: side === "ours" ? [...hunk.oursLines] : [...hunk.theirsLines],
+          reason: `Version changed on both sides during a ${ctx.operation}${refs} — the target branch keeps its value. Resolution: take ${side}.`,
+        };
+      }
+
+      // Sans contexte : les paires semver/datetime ordonnables gardent la règle
+      // historique « la plus récente gagne » (déterministe et testée)…
       if (semverSide !== null) {
         return {
           lines: semverSide === "ours" ? [...hunk.oursLines] : [...hunk.theirsLines],
           reason: `Same structure, differing semver version(s). Resolution: take ${semverSide} (the higher version).`,
+        };
+      }
+      // …mais une paire version NON ordonnable ('13.x-dev' vs '12.54.1') ne
+      // retombe plus sur la politique : mesurée fausse ~3 fois sur 4, c'est une
+      // proposition, pas une application.
+      if (versionish) {
+        return {
+          lines: null,
+          reason: "Version changed on both sides with non-comparable values — this is a merge decision, not volatility. The target branch wins when context is known (auto-detected by the CLI and desktop); here it isn't, so GitWand proposes instead of applying.",
         };
       }
       const preferred = policyCfg.preferOurs ? hunk.oursLines : hunk.theirsLines;
@@ -193,21 +221,34 @@ export function assembleResolution(
       };
 
     case "generated_file": {
-      // Smart resolution : si les deux côtés sont identiques après suppression
-      // des valeurs volatiles (hashes, timestamps), le conflit est cosmétique
+      // accuracy lot 1 — Par défaut, on DÉCLINE : la version commitée d'un fichier
+      // généré est la sortie d'un outil, pas la fusion de deux textes.
+      // Mesuré sur le corpus benchmark/ : « accepter theirs » divergeait de
+      // ce que les équipes livrent dans ~100 % des cas. Décliner avec un
+      // message actionnable vaut mieux qu'une fusion silencieusement fausse.
       const oursStripped = stripVolatileValues(hunk.oursLines);
       const theirsStripped = stripVolatileValues(hunk.theirsLines);
+      const cosmetic = oursStripped === theirsStripped;
 
-      if (oursStripped === theirsStripped) {
+      if (!options.resolveGeneratedFiles) {
+        return {
+          lines: null,
+          reason: cosmetic
+            ? "Generated file — only volatile differences (hashes/timestamps). Resolve the source file (e.g. package.json) then regenerate this one with its tool (install/build). Auto-resolution available via resolveGeneratedFiles: true."
+            : "Generated file — not merged, regenerated. Resolve the source file (e.g. package.json) then re-run the tool that produces this one (install/build). Auto-resolution (take theirs) available via resolveGeneratedFiles: true.",
+        };
+      }
+
+      // Opt-in resolveGeneratedFiles: true — comportement historique.
+      if (cosmetic) {
         return {
           lines: [...hunk.theirsLines],
           reason: "Generated file with identical structure (only volatile values differ). Resolution: take theirs. Suggestion: re-run the build or install.",
         };
       }
-
       return {
         lines: [...hunk.theirsLines],
-        reason: "Generated file: it will be rebuilt after the merge. Resolution: take theirs. Suggestion: re-run the build or install.",
+        reason: "Generated file: it will be rebuilt after the merge. Resolution: take theirs (opt-in resolveGeneratedFiles). Suggestion: re-run the build or install.",
       };
     }
 

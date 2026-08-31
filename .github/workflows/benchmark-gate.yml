@@ -1,0 +1,80 @@
+# Lot G — l'accord avec les merges humains en garde-fou de régression.
+#
+# Rejoue le corpus épinglé (benchmark/corpus.json) contre le moteur du PR et
+# échoue si l'accord baisse au-delà du bruit par rapport à la baseline commitée
+# (benchmark/results/*-baseline.json). Généralise le procès de
+# token_level_merge (PR #117) : aucun pattern n'entre si le corpus dit qu'il
+# rend le moteur moins juste.
+#
+# Coût maîtrisé : les clones (bare + blobless, ~1,5 Go) sont mis en cache avec
+# pour clé le hash de corpus.json — seul le premier run après un re-pin paie le
+# clonage. Le replay lui-même prend quelques minutes.
+
+name: benchmark-gate
+
+on:
+  pull_request:
+    paths:
+      - "packages/core/**"
+      - "benchmark/**"
+      - "scripts/replay-conflicts.mjs"
+      - ".github/workflows/benchmark-gate.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: benchmark-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # merge-tree --write-tree exige git >= 2.38 ; ubuntu-latest est bien au-delà,
+      # mais on échoue explicitement plutôt que de mesurer zéro conflit en silence.
+      - name: Check git version
+        run: |
+          git --version
+          v=$(git --version | grep -oE '[0-9]+\.[0-9]+' | head -1)
+          if [ "$(printf '%s\n2.38\n' "$v" | sort -V | head -1)" != "2.38" ]; then
+            echo "::error::git >= 2.38 required (merge-tree --write-tree)"; exit 1
+          fi
+
+      - name: Install & build the engine
+        run: |
+          pnpm install --frozen-lockfile --filter @gitwand/core
+          pnpm --filter @gitwand/core build
+
+      # La clé de cache est le hash du corpus : un re-pin invalide le cache,
+      # tout le reste le réutilise. restore-keys volontairement absent — un
+      # cache partiel d'un ancien corpus fausserait la mesure.
+      - name: Cache the pinned corpus clones
+        uses: actions/cache@v4
+        with:
+          path: benchmark/.cache
+          key: benchmark-corpus-${{ hashFiles('benchmark/corpus.json') }}
+
+      - name: Replay the corpus
+        run: node benchmark/run.mjs --out results/ci.json
+
+      - name: Gate on agreement vs the committed baseline
+        run: |
+          baseline=$(ls benchmark/results/*-baseline.json | sort | tail -1)
+          echo "baseline: $baseline"
+          node benchmark/compare.mjs "$baseline" results/ci.json
+
+      - name: Upload fresh results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: results/ci.json

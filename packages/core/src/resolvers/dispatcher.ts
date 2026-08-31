@@ -29,6 +29,7 @@
 
 import type { ConflictHunk } from "../types.js";
 import { tryResolveJsonConflict } from "./json.js";
+import { tryResolveJsonFragment } from "./json-fragment.js";
 import { tryResolveMarkdownConflict } from "./markdown.js";
 import { tryResolveYamlConflict } from "./yaml.js";
 import { tryResolveImportConflict, isImportBlock } from "./imports.js";
@@ -292,6 +293,18 @@ export function tryFormatAwareResolve(
       return {
         lines: mergedText.split("\n"),
         reason: `[json] ${result.reason}`,
+        resolverUsed: "json",
+      };
+    }
+
+    // accuracy lot E (lot E) — le doc complet n'a pas parsé : les conflits réels de
+    // package.json / composer.json sont des FRAGMENTS (« "clé": valeur, »).
+    // Fusion 3-way par clé, mesurée bien plus juste que l'union ligne à ligne.
+    const frag = tryResolveJsonFragment(hunk.baseLines, hunk.oursLines, hunk.theirsLines);
+    if (frag.lines !== null) {
+      return {
+        lines: frag.lines,
+        reason: `[json] ${frag.reason}`,
         resolverUsed: "json",
       };
     }

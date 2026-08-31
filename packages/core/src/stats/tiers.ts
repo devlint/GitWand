@@ -48,9 +48,12 @@ const TIER_BY_TYPE: Record<ConflictType, ResolutionTier> = {
   reorder_only: "trivial",
   insertion_at_boundary: "trivial",
   value_only_change: "trivial",
-  generated_file: "trivial",
+  // accuracy lot 1 — generated_file décline par défaut (le fichier se régénère, il ne se
+  // fusionne pas) : le compter « trivial » gonflerait la couverture mesurée.
+  generated_file: "unresolved",
   refactoring_aware_merge: "advancedDeterministic",
   token_level_merge: "advancedDeterministic",
+  format_semantic: "advancedDeterministic",
   llm_proposed: "model",
   complex: "unresolved",
 };

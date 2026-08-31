@@ -6,16 +6,45 @@
 
 ## What's Next
 
-_Ordered by priority, last verified 2026-08-24 (current after v3.8.0 shipped Time Machine, which laid the safety net the auto-apply work needed). The thread: make the app reactive and fast (v3.9), close the resolution loop (v3.10), then workflow & comparison primitives (v3.11–v3.12), experimental voice input (v3.13), and the v4.0 code-intelligence headline. Full renumbering history: `git log -p -- roadmap.md`._
+_Ordered by priority, last verified 2026-08-26 (current after v3.8.0 shipped Time Machine, and after the Engine Accuracy work landed on `feat/conflict-engine-accuracy`, ready to ship as the next release). The thread: ship the measured-accuracy engine first (v3.8.x/v3.9 — it re-founds the trust every later auto-apply feature spends), make the app reactive and fast (Live Repo), close the resolution loop (preview-to-apply, whose confidence threshold is only meaningful **because** of the accuracy work), then workflow & comparison primitives, experimental voice input, and the v4.0 code-intelligence headline. Full renumbering history: `git log -p -- roadmap.md`._
 
 | Version | Codename | Why now |
 |---------|----------|---------|
+| **next release** | Engine Accuracy | **Implemented** on `feat/conflict-engine-accuracy` — measured agreement with real human merges: laravel 24 → 83 %, prettier 25 → 50 % |
 | **v3.9.0** | Live Repo | Reactive & fast — FS events replace polling, libgit2 phase 1 |
 | **v3.10.0** | Merge preview-to-apply | Close the resolution loop — apply straight from preview, editable diff |
 | **v3.11.0** | Stacked Branches | Native stacked PRs, sequenced after v3.10 (leans on preview→apply) |
 | **v3.12.0** | Combined Diffs | Multi-commit, non-contiguous aggregated diff |
 | **v3.13.0** | Voice Input | Experimental — local dictation via embedded Whisper |
 | **v4.0.0** (candidate) | Blast Radius | Code-graph impact before merge — the code-intelligence headline |
+
+### Next release — Engine Accuracy (implemented, `feat/conflict-engine-accuracy`)
+
+_The engine's claims are now measured instead of asserted, and three measured failure modes were fixed. Spec: [`docs/superpowers/specs/2026-08-26-conflict-engine-accuracy.md`](docs/superpowers/specs/2026-08-26-conflict-engine-accuracy.md) · benchmark: [`benchmark/`](benchmark/). Takes the next free version number at bump time — in-code comments reference these as "accuracy lot 1/C/E" to avoid colliding with the numbers below._
+
+**Shipped on the branch (7 commits, all suites green):**
+
+- **Reproducible benchmark** (`benchmark/`) — 8 public repos pinned to SHAs, ~1,700 real merges replayed, engine output compared byte-for-byte with what the teams actually committed. Two metrics: coverage (varies 0–76 % by repo — a property of the *codebase*) and agreement (a property of the *engine*). Every claim below is a measurement from it.
+- **Lot 1 — classifier contract, format invariants, generated files decline.** No `complex` hunk is ever silently applied (format resolvers now classify as `format_semantic`, scored and traced); a resolution that breaks a format invariant (double `Unreleased`, duplicate JSON key) is retracted; lockfiles/bundles decline with an actionable message instead of an auto-merge measured wrong ~100 % of the time (`resolveGeneratedFiles` opt-in in `.gitwandrc` / `--resolve-generated`).
+- **Lot C — MergeContext.** The engine finally knows what merge it is in (operation + target side, detected by CLI/MCP/desktop from `.git` state). Version-identity conflicts (`'13.x-dev'` vs `'12.54.1'`) resolve to the target branch — laravel agreement 36.6 → 81.9 %. The first version of the rule also flipped orderable dep bumps and regressed three repos; **the benchmark caught it before it shipped** (the whole point).
+- **Lot E — key-wise manifest fragments.** `package.json`/`composer.json` conflict hunks merged by key (3-way), with one bounded arbitration: same-operator ranges (`^7.23.0` vs `^7.23.3`) → newer. First change to raise coverage AND agreement at once, on all four measured repos.
+
+| Agreement with the human merge | v3.8.0 | after |
+|---|---:|---:|
+| laravel/framework | 24.3 % | **83.3 %** |
+| prettier/prettier | 25.3 % | **49.6 %** |
+| expressjs/express | 59.6 % | **61.3 %** |
+| vuejs/core | 92.5 % | **90.1 %** (denominator artefact — zero per-file flips; see benchmark/README) |
+
+**Follow-ups (each wants its own plan):**
+
+- **Lot F — derive the repo's own conventions** (the moat): point `scripts/replay-conflicts.mjs` at the *user's* repository to measure their policies — regenerate-vs-merge lockfiles, who wins version scalars, changelog discipline — instead of assuming them. Feeds the same `useResolutionMemory` feedback loop v4.0 plans; this is its active, measured form. Nobody else in the market can do this, and the mechanism already exists.
+- **Lot G — agreement as a CI gate**: a new pattern must not lower agreement on the pinned corpus (generalizes the `token_level_merge` trial, PR #117). Needs a corpus cache strategy — a cold clone is several GB.
+- **Lot D (full) — sandboxed regeneration** ([plan](docs/superpowers/plans/2026-08-26-regenerate-tier.md)): for declared-generated files, resolve the source manifest then run the ecosystem's own tool (`npm install --package-lock-only`, …) in a sandbox with explicit consent; today's interim (decline + explain) stays the fallback.
+- **Corpus re-pin**: select on `git rev-list --merges --count` — cargo contributes zero conflicted merges, django ten; language diversity is worthless without merge history.
+- Website tie-in: the site stopped claiming "95 %" (circular denominator) and links the benchmark; keep site numbers sourced from `benchmark/results/` only.
+
+---
 
 ### v3.9.0 — Live Repo: filesystem events + libgit2 phase 1
 
@@ -42,7 +71,7 @@ _Inspired by Aurees. Close the loop between the Conflict Predictor (v2.20.0) and
 **Today's baseline** — `preview_merge` / `preview_rebase` / `preview_cherry_pick` + `useMergePreview.ts` already compute per-hunk auto-resolvability side-effect-free, but the preview is display-only: the user then merges blind or detours via scratch worktree. `DiffViewer.vue` is read-only; `MergeEditor.vue` edits via a bare textarea. CodeMirror 6 ships in-app since v3.2.0 (File Explorer/Editor).
 
 - **Apply from preview** — "Apply N auto-resolutions & merge" straight from `MergePreviewPanel`: run the operation, apply the engine's resolutions, stop only on the residual manual hunks
-- **Hunk-level opt-out + confidence threshold** — untick individual auto-resolutions, or set a global bar ("apply only ≥ 90% confidence") surfacing the engine's per-hunk confidence (audit-trail preserved, cf. v2.5.0)
+- **Hunk-level opt-out + confidence threshold** — untick individual auto-resolutions, or set a global bar ("apply only ≥ 90% confidence") surfacing the engine's per-hunk confidence (audit-trail preserved, cf. v2.5.0); this threshold is only meaningful since the Engine Accuracy release — format resolvers now carry a real confidence instead of bypassing the gate, and the benchmark measures what the scores are worth
 - **History-aware LLM fallback** — enrich `llm_proposed` prompts with the blame/history of the conflicting lines (Greptile-style multi-hop context, computed locally)
 - **Editable diff** — inline editing in the diff view (CodeMirror 6, reusing the v3.2 editor setup): fix a typo or resolve a trivial conflict where you see it, without switching to the merge editor
 - **MergeEditor upgrade** — replace the textarea with the same CodeMirror 6 component (syntax highlighting, line numbers already themed); while in this code, re-surface the "Split this commit…" / edit affordance after a mid-rebase conflict handoff (#128 follow-up) — today only Continue/Skip/Abort survive once `RebaseEditor` unmounts for the conflict banner
@@ -105,7 +134,7 @@ _Inspired by Snipara's project-intelligence layer. Before a merge/rebase, answer
 - **Co-change analysis** — "these files historically change together" mined from local `git log` (zero cloud, cheap); a second impact signal complementing the static import graph, exactly the history hop Greptile does server-side
 - **Blast Radius panel** — new tab in `MergePreviewPanel`: impacted files ranked, affected symbols, suggested test scope; feeds a `blastRadius` dimension alongside `postMergeRisk`
 - **Review ordering** — blast radius reused in the PR review (v3.5.0): files ranked by impact, "start with these 2 files"
-- **Feedback loop** — rejected impact predictions / auto-resolutions lower the pattern's confidence (extends `useResolutionMemory`), the local analog of Greptile v4's false-positive reduction
+- **Feedback loop** — rejected impact predictions / auto-resolutions lower the pattern's confidence (extends `useResolutionMemory`), the local analog of Greptile v4's false-positive reduction; the Engine Accuracy release's lot F (derive the repo's conventions by replaying its own history) is the active, measured form of the same idea — the two should share one store
 - **Agents too** — exposed via `@gitwand/mcp` (`gitwand_blast_radius`) and CLI, so AI agents can check impact before committing a resolution. Positioning: Greptile sells this as a paid API ("Genius API", $0.45/req) — ours is local, free, open source
 - **Opt-in & lazy** — computed post-preview, never blocking the merge flow; enabled in Settings
 

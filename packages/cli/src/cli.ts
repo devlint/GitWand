@@ -23,6 +23,7 @@ import { cmdResolve } from "./commands/resolve.js";
 import { cmdStatus } from "./commands/status.js";
 import { cmdPreview } from "./commands/preview.js";
 import { cmdScan } from "./commands/scan.js";
+import { cmdConventions } from "./commands/conventions.js";
 
 function printHelp(): void {
   printBanner();
@@ -31,12 +32,15 @@ function printHelp(): void {
   console.log(`  gitwand status                  Show conflict status`);
   console.log(`  gitwand preview                 Predict conflicts before merge/rebase/cherry-pick`);
   console.log(`  gitwand scan                    Scan staged changes for secrets`);
+  console.log(`  gitwand conventions             Measure this repo's merge conventions from its own history (--show, --clear, --max-merges=N)`);
   console.log(`  gitwand --help                  Show this help`);
   console.log();
   console.log(`${c.bold}Options:${c.reset}`);
   console.log(`  --dry-run             Analyze without writing files`);
   console.log(`  --verbose             Show details for each resolution`);
   console.log(`  --no-whitespace       Don't resolve whitespace-only conflicts`);
+  console.log(`  --resolve-generated   Auto-resolve generated files (lockfiles, dist/) — declined by default: regenerate them instead`);
+  console.log(`  --regenerate          Re-run the ecosystem's generator (npm/pnpm/yarn-berry/composer/cargo) for declined lockfiles once their source of truth is clean/resolved (sandboxed git worktree, opt-in — see .gitwandrc "regenerate": true)`);
   console.log(`  --concurrency=N       Parallel file workers (default ${DEFAULT_CONCURRENCY}, min 1)`);
   console.log(`  --ci                  CI mode: JSON output + exit code 1 if unresolved`);
   console.log(`  --json                Output results as JSON (implies --ci behavior)`);
@@ -110,6 +114,8 @@ export async function main(): Promise<void> {
     await cmdPreview(flags);
   } else if (command === "scan") {
     await cmdScan(flags);
+  } else if (command === "conventions") {
+    await cmdConventions(flags);
   } else {
     console.error(`${c.red}Unknown command: ${command}${c.reset}`);
     printHelp();

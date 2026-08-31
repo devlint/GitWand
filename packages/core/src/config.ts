@@ -245,6 +245,13 @@ export interface GitWandrcConfig {
    */
   generatedFiles?: string[];
   /**
+   * accuracy lot 1 — Autoriser l'auto-résolution des fichiers générés (défaut: false).
+   * Par défaut le moteur décline : un fichier généré se régénère, il ne se
+   * fusionne pas. Convention de dépôt, donc configurée ici plutôt qu'en
+   * réglage d'application.
+   */
+  resolveGeneratedFiles?: boolean;
+  /**
    * v2.4 — Validation post-merge.
    * - `level: "balanced"` (défaut) : marqueurs résiduels + syntaxe + parse-tree
    * - `level: "strict"` : + tsc --noEmit et/ou eslint (Node.js uniquement, opt-in)
@@ -411,6 +418,11 @@ export function parseGitwandrc(json: string): GitWandrcConfig | null {
       if (generatedFiles.length > 0) {
         result.generatedFiles = generatedFiles;
       }
+    }
+
+    // accuracy lot 1 — Auto-résolution des fichiers générés (opt-in booléen strict).
+    if (typeof parsed.resolveGeneratedFiles === "boolean") {
+      result.resolveGeneratedFiles = parsed.resolveGeneratedFiles;
     }
 
     // v2.4 — Validation post-merge.

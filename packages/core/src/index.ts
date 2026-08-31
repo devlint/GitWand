@@ -29,6 +29,20 @@ export {
 } from "./structural/index.js";
 export type { StructuralLoaderOptions, SupportedLanguage } from "./structural/index.js";
 export { parseConflictMarkers, classifyConflict } from "./parser.js";
+// accuracy lot F — conventions de dépôt mesurées sur l'historique
+export { deriveConventions } from "./conventions/derive.js";
+export {
+  MIN_AGREEMENT,
+  MIN_SAMPLES,
+  type ConventionObservation,
+  type RepoConventions,
+} from "./conventions/types.js";
+export { isGeneratedFile, stripVolatileValues } from "./resolver/generated-detection.js";
+export { isChangelogFile } from "./resolver/validation.js";
+
+// accuracy lot D — Regenerate tier: core emits a plan, never executes it
+export { findEcosystem, REGEN_ECOSYSTEMS, type RegenEcosystem } from "./regenerate/registry.js";
+export { buildRegenerationPlan, type RegenerationPlan } from "./regenerate/plan.js";
 export { mergeNonOverlapping, computeDiff, lcs } from "./diff.js";
 
 // v2.1 — nouveaux backends diff exposés
@@ -107,6 +121,9 @@ export type {
   ConfidenceScore,
   HunkResolution,
   GitWandOptions,
+  MergeContext,
+  // accuracy lot D — Regenerate tier
+  RegenerationContext,
   // Phase 7.1
   DecisionTrace,
   TraceStep,

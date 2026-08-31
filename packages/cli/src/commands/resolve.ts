@@ -18,16 +18,42 @@
  */
 
 import { readFile, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
-import { resolve, resolveAsync, summarizeTiers, type MergeResult, type ConflictType } from "@gitwand/core";
+import {
+  resolve,
+  resolveAsync,
+  summarizeTiers,
+  findEcosystem,
+  buildRegenerationPlan,
+  type MergeResult,
+  type ConflictType,
+  type RegenerationContext,
+} from "@gitwand/core";
 
 import { c, printBanner, WAND } from "../ui.js";
-import { getConflictedFiles } from "../git.js";
+import { getConflictedFiles, detectMergeContext } from "../git.js";
 import { parseConcurrency, runPool } from "../concurrency.js";
 import { buildPartialContent } from "../partial-content.js";
 import { buildCIReport } from "../reporting.js";
 import { buildLlmEndpoint } from "../llm-endpoint.js";
-import { resolveLlmConfig, buildResolveLlmOptions } from "../llm-config.js";
+import {
+  resolveLlmConfig,
+  buildResolveLlmOptions,
+  findGitRoot,
+  loadGitwandrcResolveGeneratedFiles,
+} from "../llm-config.js";
+import {
+  runRegeneration,
+  loadGitwandrcRegenerateFlag,
+  type ResolvedSource,
+} from "../regenerate-runner.js";
+import { loadPersistedConventions } from "./conventions.js";
+
+/** Un marqueur de conflit résiduel dans un contenu régénéré serait un bug de
+ * l'installeur (ou un ré-échantillonnage malheureux) — même garde que celle
+ * appliquée en pass 1 avant toute écriture. */
+const RESIDUAL_MARKER_RE = /^(?:<{7}|={7}|>{7})/m;
 
 export async function cmdResolve(
   files: string[],
@@ -36,6 +62,28 @@ export async function cmdResolve(
   const isCIMode = flags.ci || flags.json;
   const verbose = !isCIMode && (flags.verbose === true || typeof flags.verbose === "string");
   const resolveWhitespace = !(flags["no-whitespace"] === true);
+  // accuracy lot 1 — les fichiers générés déclinent par défaut ; ce flag rétablit
+  // l'auto-résolution (équivalent CLI de resolveGeneratedFiles: true).
+  //
+  // Fix (task 3 brief, Bug A) — précédence, de la plus à la moins spécifique :
+  //   --resolve-generated (true explicite) > .gitwandrc resolveGeneratedFiles
+  //   (true/false explicite) > undefined (laisse la convention mesurée décider)
+  //   > défaut du moteur (false). L'ancien code passait TOUJOURS un booléen
+  //   concret (`=== true`, donc `false` même quand le flag n'était jamais
+  //   fourni) — cela bloquait silencieusement pour toujours la précédence lot F
+  //   de core (`resolver/index.ts` : un verdict "merge" ne s'applique que si
+  //   `userOptions.resolveGeneratedFiles === undefined`).
+  const resolveGeneratedFiles: boolean | undefined =
+    flags["resolve-generated"] === true ? true : loadGitwandrcResolveGeneratedFiles();
+  // accuracy lot F (Bug B fix, task 3) — conventions mesurées sur l'historique du
+  // dépôt (`gitwand conventions`), si elles ont été dérivées. Jusqu'ici jamais
+  // chargées ici : `options.conventions` restait toujours `undefined`, et la
+  // précédence lot F de core ne pouvait donc jamais s'exercer depuis le CLI.
+  const conventions = loadPersistedConventions(process.cwd());
+  // accuracy lot C — contexte de merge : détecté depuis l'état .git ; null hors opération.
+  // Rend déterministes les décisions qui en dépendent (versions modifiées des
+  // deux côtés → la branche cible garde sa valeur).
+  const mergeContext = detectMergeContext();
   const concurrency = parseConcurrency(flags.concurrency);
   const llmFallbackEnabled = flags["llm-fallback"] === true;
 
@@ -67,6 +115,12 @@ export async function cmdResolve(
 
   if (!isCIMode) {
     printBanner();
+    if (verbose && mergeContext) {
+      const refs = mergeContext.oursRef && mergeContext.theirsRef
+        ? ` — ${mergeContext.theirsRef} → ${mergeContext.oursRef}`
+        : "";
+      console.log(`${c.dim}  context: ${mergeContext.operation} in progress${refs} (target: ${mergeContext.targetSide})${c.reset}`);
+    }
   }
 
   // If no files specified, discover from git
@@ -98,6 +152,53 @@ export async function cmdResolve(
     printLines: string[];
   };
 
+  // Extrait pour être réutilisé par la pass 2 (accuracy lot D — regenerate
+  // tier) : après une régénération réussie/échouée, les stats/résolutions du
+  // fichier changent et la ligne affichée doit refléter le nouvel état plutôt
+  // que le résultat figé de la pass 1.
+  function buildFileLines(
+    file: string,
+    result: MergeResult,
+    validationWarning: string | null,
+    skipWrite: boolean,
+  ): string[] {
+    const printLines: string[] = [];
+    if (isCIMode) return printLines;
+    if (result.stats.totalConflicts === 0) {
+      printLines.push(`${c.dim}  ○ ${file} — no conflicts${c.reset}`);
+      return printLines;
+    }
+
+    const icon = result.stats.remaining === 0 ? "✓" : "◐";
+    const color = result.stats.remaining === 0 ? c.green : c.yellow;
+
+    printLines.push(
+      `${color}  ${icon} ${file} — ${result.stats.autoResolved}/${result.stats.totalConflicts} resolved${c.reset}`,
+    );
+
+    if (validationWarning) {
+      const warnColor = skipWrite ? c.red : c.yellow;
+      printLines.push(`${warnColor}    ⚠ validation: ${validationWarning}${c.reset}`);
+    }
+
+    if (verbose) {
+      for (const res of result.resolutions) {
+        const status = res.autoResolved
+          ? `${c.green}auto${c.reset}`
+          : `${c.red}manual${c.reset}`;
+        printLines.push(
+          `${c.dim}    L${res.hunk.startLine} [${res.hunk.type}] ${status} — ${res.hunk.explanation}${c.reset}`,
+        );
+        printLines.push(`${c.dim}      trace: ${res.hunk.trace.summary}${c.reset}`);
+        if (res.regenerationPlan) {
+          printLines.push(`${c.dim}      regenerate: ${res.resolutionReason}${c.reset}`);
+        }
+      }
+    }
+
+    return printLines;
+  }
+
   const outcomes = await runPool<string, FileOutcome>(files, concurrency, async (file) => {
     const filePath = resolvePath(file);
     let content: string;
@@ -118,6 +219,9 @@ export async function cmdResolve(
       ? await resolveAsync(content, file, {
           verbose: false,
           resolveWhitespace,
+          resolveGeneratedFiles,
+          mergeContext,
+          conventions,
           llmFallback: {
             ...buildResolveLlmOptions(llmCliConfig, llmFileConfig),
             endpoint: buildLlmEndpoint(llmCliConfig),
@@ -126,6 +230,9 @@ export async function cmdResolve(
       : resolve(content, file, {
           verbose: false,
           resolveWhitespace,
+          resolveGeneratedFiles,
+          mergeContext,
+          conventions,
         });
 
     // Écriture sur disque (sauf dry-run). Bloquée si des marqueurs résiduels
@@ -154,39 +261,206 @@ export async function cmdResolve(
       }
     }
 
-    const printLines: string[] = [];
-    if (!isCIMode) {
-      if (result.stats.totalConflicts === 0) {
-        printLines.push(`${c.dim}  \u25CB ${file} — no conflicts${c.reset}`);
-      } else {
-        const icon = result.stats.remaining === 0 ? "\u2713" : "\u25D0";
-        const color = result.stats.remaining === 0 ? c.green : c.yellow;
-
-        printLines.push(
-          `${color}  ${icon} ${file} — ${result.stats.autoResolved}/${result.stats.totalConflicts} resolved${c.reset}`,
-        );
-
-        if (validationWarning) {
-          const warnColor = skipWrite ? c.red : c.yellow;
-          printLines.push(`${warnColor}    ⚠ validation: ${validationWarning}${c.reset}`);
-        }
-
-        if (verbose) {
-          for (const res of result.resolutions) {
-            const status = res.autoResolved
-              ? `${c.green}auto${c.reset}`
-              : `${c.red}manual${c.reset}`;
-            printLines.push(
-              `${c.dim}    L${res.hunk.startLine} [${res.hunk.type}] ${status} — ${res.hunk.explanation}${c.reset}`,
-            );
-            printLines.push(`${c.dim}      trace: ${res.hunk.trace.summary}${c.reset}`);
-          }
-        }
-      }
-    }
+    const printLines = buildFileLines(file, result, validationWarning, skipWrite);
 
     return { file, result, printLines };
   });
+
+  // ─── accuracy lot D — Pass 2 : tier de régénération (opt-in) ───
+  //
+  // Ne tourne QUE si `--regenerate` ou `.gitwandrc` `regenerate: true` est
+  // actif, et seulement après que la pass 1 ci-dessus a produit `outcomes`
+  // en entier — c'est ce qui permet de connaître l'état des AUTRES fichiers
+  // du merge (sources de vérité) avant de décider qu'un plan est sûr à
+  // exécuter. Voir `regenerate-runner.ts` pour l'exécution elle-même.
+  const regenerateEnabled =
+    !resolveGeneratedFiles && (flags.regenerate === true || loadGitwandrcRegenerateFlag());
+  if (regenerateEnabled) {
+    const repoRoot = findGitRoot();
+    if (repoRoot !== null) {
+      // Fix round 1 (Important #1) — `outcomes` ne couvre QUE les fichiers
+      // que git a signalés en conflit (`getConflictedFiles()` /
+      // `git diff --diff-filter=U`). Une source de vérité qui a fusionné
+      // proprement (ex: `package.json` intact pendant que `package-lock.json`
+      // diverge) n'apparaît JAMAIS dans `outcomes` — et `RegenerationContext.
+      // siblingFiles` documente pourtant la clé comme « chaque AUTRE fichier
+      // de ce merge », pas « chaque autre fichier CONFLICTÉ ». Ne pas la
+      // couvrir revient à la traiter comme "conflicted" par défaut dans
+      // `buildRegenerationPlan` (absente de la map ⇒ conflicted) — ce qui
+      // rend `runnable` inatteignable pour le cas le plus courant (lockfile
+      // seul en conflit) et rend yarn-berry totalement injoignable (son
+      // marqueur `.yarnrc.yml` n'est quasiment jamais lui-même conflicté).
+      const conflictedFileSet = new Set(outcomes.map((o) => o.file));
+      const siblingFiles: RegenerationContext["siblingFiles"] = {};
+      for (const outcome of outcomes) {
+        if (outcome.result === null) continue;
+        const { stats } = outcome.result;
+        siblingFiles[outcome.file] = {
+          state:
+            stats.totalConflicts === 0
+              ? "clean"
+              : stats.remaining === 0
+                ? "resolved"
+                : "conflicted",
+        };
+      }
+      // Pré-seed chaque source de vérité des écosystèmes candidats qui n'a
+      // JAMAIS été signalée en conflit par git : par construction, "jamais
+      // vue en conflit" = "clean", exactement le signal attendu par le type.
+      //
+      // Fix (final review, Finding 2) — "jamais vue en conflit" ne veut PAS
+      // dire "clean" : un fichier peut n'avoir jamais été conflicté parce
+      // qu'il n'EXISTE tout simplement pas dans ce dépôt (ex: `.yarnrc.yml`
+      // sur un dépôt yarn CLASSIC, qui n'a jamais eu ce fichier). Confondre
+      // "pas conflicté" et "clean" faisait passer un tel repo pour
+      // `runnable: true` sur l'écosystème yarn-berry, contredisant la propre
+      // garde documentée du registre (`registry.ts` — `.yarnrc.yml` absent ⇒
+      // non-runnable). On ne marque donc "clean" que si le fichier existe
+      // RÉELLEMENT sur disque en plus de n'être pas conflicté — sinon on le
+      // laisse absent de `siblingFiles`, que `buildRegenerationPlan` traite
+      // déjà comme "conflicted" (jamais runnable par défaut).
+      for (const outcome of outcomes) {
+        if (outcome.result === null) continue;
+        const hasRegenCandidate = outcome.result.resolutions.some((res) => res.regenerationPlan !== undefined);
+        if (!hasRegenCandidate) continue;
+        const ecosystem = findEcosystem(outcome.file);
+        if (!ecosystem) continue;
+        for (const sourcePath of ecosystem.sourcesOfTruth) {
+          if (
+            !conflictedFileSet.has(sourcePath) &&
+            !(sourcePath in siblingFiles) &&
+            existsSync(resolvePath(sourcePath))
+          ) {
+            siblingFiles[sourcePath] = { state: "clean" };
+          }
+        }
+      }
+
+      for (const outcome of outcomes) {
+        if (outcome.result === null) continue;
+        const hasRegenCandidate = outcome.result.resolutions.some((res) => res.regenerationPlan !== undefined);
+        if (!hasRegenCandidate) continue;
+
+        const ecosystem = findEcosystem(outcome.file);
+        if (!ecosystem) continue; // ne devrait jamais arriver — le plan pass-1 impliquait déjà un match
+
+        // Ruling P-1b (brief) — on IGNORE le `runnable` attaché en pass 1 (il
+        // vaut toujours `false`, `regenerationContext` n'existait pas encore)
+        // et on re-dérive le plan avec la carte de siblings réelle.
+        const plan = buildRegenerationPlan(outcome.file, ecosystem, { siblingFiles });
+        if (!plan.runnable) continue;
+
+        const resolvedSources: ResolvedSource[] = [];
+        let sourcesReady = true;
+        let unreadableSource: string | null = null;
+        for (const source of plan.sources) {
+          const siblingOutcome = outcomes.find((o) => o.file === source.path);
+          if (siblingOutcome?.result?.mergedContent != null) {
+            resolvedSources.push({ path: source.path, content: siblingOutcome.result.mergedContent });
+            continue;
+          }
+          if (!siblingOutcome) {
+            // Jamais vu par la pass 1 ⇒ jamais conflicté ⇒ son contenu actuel
+            // sur disque EST déjà le contenu final (rien à fusionner) : on le
+            // lit directement plutôt que de le rechercher dans `outcomes`.
+            try {
+              const diskContent = await readFile(resolvePath(source.path), "utf-8");
+              resolvedSources.push({ path: source.path, content: diskContent });
+              continue;
+            } catch {
+              // Fichier introuvable — défensif, ne devrait pas arriver si
+              // `state === "clean"` a été dérivé de "jamais en conflit".
+            }
+          }
+          sourcesReady = false;
+          unreadableSource = source.path;
+          break;
+        }
+        if (!sourcesReady) {
+          // Final review Finding 2 (opportunistic ask) — ce cas était
+          // auparavant totalement silencieux, même sous `--regenerate`
+          // explicite. Un plan jugé runnable mais dont une source ne peut
+          // finalement pas être lue reste défensif (`plan.runnable` aurait dû
+          // le garantir) mais mérite au moins une ligne nommant le fichier.
+          if (!isCIMode) {
+            console.log(
+              `${c.dim}  ⚠ ${outcome.file} — regeneration plan was runnable but source "${unreadableSource ?? "?"}" could not be read; skipped.${c.reset}`,
+            );
+          }
+          continue;
+        }
+
+        const regenOutcome = await runRegeneration({
+          repoRoot,
+          file: outcome.file,
+          ecosystem,
+          resolvedSources,
+        });
+
+        const hasResidualMarkers =
+          regenOutcome.kind === "success" &&
+          regenOutcome.content !== null &&
+          RESIDUAL_MARKER_RE.test(regenOutcome.content);
+
+        let validationWarning: string | null = null;
+        let skipWrite = false;
+
+        if (regenOutcome.kind === "success" && regenOutcome.content !== null && !hasResidualMarkers) {
+          if (!flags["dry-run"]) {
+            await writeFile(resolvePath(outcome.file), regenOutcome.content, "utf-8");
+          }
+          const updatedResolutions = outcome.result.resolutions.map((res) =>
+            res.regenerationPlan !== undefined
+              ? {
+                  ...res,
+                  autoResolved: true,
+                  resolutionReason: `${res.resolutionReason} ${regenOutcome.reason}`,
+                }
+              : res,
+          );
+          const newAutoResolved = updatedResolutions.filter((r) => r.autoResolved).length;
+          outcome.result = {
+            ...outcome.result,
+            mergedContent: regenOutcome.content,
+            resolutions: updatedResolutions,
+            stats: {
+              ...outcome.result.stats,
+              autoResolved: newAutoResolved,
+              remaining: outcome.result.stats.totalConflicts - newAutoResolved,
+            },
+          };
+          siblingFiles[outcome.file] = {
+            state: outcome.result.stats.remaining === 0 ? "resolved" : "conflicted",
+          };
+        } else {
+          // Échec (toute nature confondue) OU succès mais contenu régénéré
+          // truffé de marqueurs résiduels : le fichier reste EXACTEMENT tel
+          // que la pass 1 l'a laissé sur disque — seule la raison affichée
+          // gagne le détail de l'échec.
+          if (hasResidualMarkers) {
+            validationWarning = "regenerated content still contains conflict markers — file NOT touched";
+            skipWrite = true;
+          }
+          const detail = hasResidualMarkers
+            ? `${regenOutcome.reason} (marqueurs résiduels détectés — écriture annulée)`
+            : regenOutcome.reason;
+          const updatedResolutions = outcome.result.resolutions.map((res) =>
+            res.regenerationPlan !== undefined
+              ? { ...res, resolutionReason: `${res.resolutionReason} ${detail}` }
+              : res,
+          );
+          outcome.result = { ...outcome.result, resolutions: updatedResolutions };
+        }
+
+        outcome.printLines = buildFileLines(outcome.file, outcome.result, validationWarning, skipWrite);
+        if (verbose && !isCIMode) {
+          outcome.printLines.push(
+            `${c.dim}      regenerate: ${regenOutcome.trace.ecosystem} · ${regenOutcome.trace.command} · ${(regenOutcome.trace.durationMs / 1000).toFixed(1)}s · ${regenOutcome.kind}${c.reset}`,
+          );
+        }
+      }
+    }
+  }
 
   // Flush ordonné (ordre de `files`, pas ordre de complétion).
   if (!isCIMode) {
@@ -238,6 +512,28 @@ export async function cmdResolve(
   } else if (totalConflicts > 0) {
     console.log(
       `${c.green}${c.bold}All conflicts resolved! ${WAND}${c.reset}`,
+    );
+  }
+
+  // accuracy lot D (task 3, checklist item 1) — offer the regenerate tier by
+  // default (not just under --verbose) whenever it's a live option: at least
+  // one declined resolution carries a `regenerationPlan` (an ecosystem
+  // matched), regardless of whether a measured convention exists — the
+  // per-file reason text (visible via --verbose) already carries the
+  // convention provenance when there is one. Suppressed when this very run
+  // already used --regenerate/.gitwandrc `regenerate: true`: re-offering a
+  // flag that was already applied (and, on failure, already tried) is not
+  // useful. `regenerationPlan` is still attached after a failed pass-2
+  // attempt, so this check must also account for that by keying off
+  // `regenerateEnabled` from this same invocation.
+  const hasRegenerationOffer =
+    !regenerateEnabled &&
+    outcomes.some((o) =>
+      o.result?.resolutions.some((r) => r.regenerationPlan !== undefined && !r.autoResolved),
+    );
+  if (hasRegenerationOffer) {
+    console.log(
+      `${c.dim}Some declined file(s) could be auto-resolved by regenerating their lockfile — re-run with --regenerate.${c.reset}`,
     );
   }
 

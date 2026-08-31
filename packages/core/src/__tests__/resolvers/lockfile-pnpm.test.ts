@@ -11,6 +11,9 @@
 
 import { describe, it, expect } from "vitest";
 import { resolve } from "../../resolver.js";
+// accuracy lot 1 — les lockfiles déclinent par défaut (fichiers générés) ; ces suites
+// testent le résolveur sémantique lui-même, donc derrière l'opt-in resolveGeneratedFiles.
+
 
 // ─── base lockfile ─────────────────────────────────────────────────────────────
 
@@ -54,18 +57,18 @@ describe("F1 — pnpm-lock.yaml : package ajouté dans packages: d'un seul côt�
   ].join("\n");
 
   it("auto-résout via le resolver lockfile-pnpm", () => {
-    const result = resolve(input, "pnpm-lock.yaml");
+    const result = resolve(input, "pnpm-lock.yaml", { resolveGeneratedFiles: true });
     expect(result.stats.autoResolved).toBe(1);
   });
 
   it("le résultat contient le package ajouté", () => {
-    const result = resolve(input, "pnpm-lock.yaml");
+    const result = resolve(input, "pnpm-lock.yaml", { resolveGeneratedFiles: true });
     expect(result.mergedContent).toContain("axios");
     expect(result.mergedContent).toContain("vue");
   });
 
   it("la raison mentionne [lockfile-pnpm]", () => {
-    const result = resolve(input, "pnpm-lock.yaml");
+    const result = resolve(input, "pnpm-lock.yaml", { resolveGeneratedFiles: true });
     expect(result.resolutions[0].resolutionReason).toMatch(/\[lockfile-pnpm\]/i);
   });
 });
@@ -87,11 +90,11 @@ describe("F2 — pnpm-lock.yaml : même package, version différente (diff3)", (
   ].join("\n");
 
   it("ne lève pas d'exception", () => {
-    expect(() => resolve(input, "pnpm-lock.yaml")).not.toThrow();
+    expect(() => resolve(input, "pnpm-lock.yaml", { resolveGeneratedFiles: true })).not.toThrow();
   });
 
   it("la raison mentionne [lockfile-pnpm]", () => {
-    const result = resolve(input, "pnpm-lock.yaml");
+    const result = resolve(input, "pnpm-lock.yaml", { resolveGeneratedFiles: true });
     expect(result.resolutions[0].resolutionReason).toMatch(/\[lockfile-pnpm\]/i);
   });
 });
@@ -112,11 +115,11 @@ describe("F3 — pnpm-lock.yaml minimal : ne plante pas", () => {
   ].join("\n");
 
   it("ne lève pas d'exception", () => {
-    expect(() => resolve(input, "pnpm-lock.yaml")).not.toThrow();
+    expect(() => resolve(input, "pnpm-lock.yaml", { resolveGeneratedFiles: true })).not.toThrow();
   });
 
   it("produit un résultat avec au moins un hunk", () => {
-    const result = resolve(input, "pnpm-lock.yaml");
+    const result = resolve(input, "pnpm-lock.yaml", { resolveGeneratedFiles: true });
     expect(result.hunks.length).toBeGreaterThanOrEqual(1);
   });
 });
@@ -159,17 +162,17 @@ packages:
   ].join("\n");
 
   it("auto-résout via le resolver lockfile-pnpm", () => {
-    const result = resolve(input, "pnpm-lock.yaml");
+    const result = resolve(input, "pnpm-lock.yaml", { resolveGeneratedFiles: true });
     expect(result.stats.autoResolved).toBe(1);
   });
 
   it("le résultat contient la dépendance ajoutée dans importers", () => {
-    const result = resolve(input, "pnpm-lock.yaml");
+    const result = resolve(input, "pnpm-lock.yaml", { resolveGeneratedFiles: true });
     expect(result.mergedContent).toContain("axios");
   });
 
   it("la raison mentionne [lockfile-pnpm]", () => {
-    const result = resolve(input, "pnpm-lock.yaml");
+    const result = resolve(input, "pnpm-lock.yaml", { resolveGeneratedFiles: true });
     expect(result.resolutions[0].resolutionReason).toMatch(/\[lockfile-pnpm\]/i);
   });
 });
@@ -193,12 +196,12 @@ describe("F5 — pnpm-lock.yaml : détection du nom de fichier", () => {
   ].join("\n");
 
   it("le nom pnpm-lock.yaml active le bon resolver", () => {
-    const result = resolve(input, "pnpm-lock.yaml");
+    const result = resolve(input, "pnpm-lock.yaml", { resolveGeneratedFiles: true });
     expect(result.resolutions[0].resolutionReason).toMatch(/\[lockfile-pnpm\]/i);
   });
 
   it("le nom dans un sous-dossier est aussi détecté", () => {
-    const result = resolve(input, "packages/core/pnpm-lock.yaml");
+    const result = resolve(input, "packages/core/pnpm-lock.yaml", { resolveGeneratedFiles: true });
     expect(result.resolutions[0].resolutionReason).toMatch(/\[lockfile-pnpm\]/i);
   });
 });

@@ -223,7 +223,13 @@ const disagreeExamples = [];
 const normalizeForCompare = (text) =>
   text.replace(/\r\n/g, "\n").split("\n").map((l) => l.replace(/[ \t]+$/, "")).join("\n").replace(/\n+$/, "");
 
-const resolveOptions = WITH_REFACTORING ? { refactoringAware: { enabled: true } } : {};
+// v3.10 — dans un commit de merge rejoué, le premier parent EST la branche
+// cible (celle où le merge a été commité). Le replay exerce donc la vraie
+// règle contextuelle : les scalaires de version reviennent au côté cible.
+const MERGE_CONTEXT = { operation: "merge", targetSide: "ours" };
+const resolveOptions = WITH_REFACTORING
+  ? { refactoringAware: { enabled: true }, mergeContext: MERGE_CONTEXT }
+  : { mergeContext: MERGE_CONTEXT };
 
 // --lists accumulators
 let listComplexHunks = 0;

@@ -67,6 +67,37 @@ export function loadGitwandrcLlmConfig(): GitWandrcConfig["llmFallback"] | null 
 }
 
 /**
+ * Lit `.gitwandrc`/`.gitwandrc.json` à la racine du repo git courant et
+ * retourne sa valeur `resolveGeneratedFiles` (task 3 — Bug A fix + précédence
+ * lot D/F).
+ *
+ * Retourne `undefined` — jamais `false` par défaut — quand le champ n'est pas
+ * déclaré, dans un repo introuvable, ou si le fichier est absent/invalide :
+ * `undefined` est le signal "pas d'avis explicite" que core sait distinguer
+ * d'un `false` concret (seul un `false`/`true` explicite doit surclasser une
+ * convention `generatedFiles` mesurée — voir `resolver/index.ts`, précédence
+ * lot F). Même contrat tolérant que `loadGitwandrcLlmConfig` : ne throw jamais.
+ */
+export function loadGitwandrcResolveGeneratedFiles(): boolean | undefined {
+  const repoRoot = findGitRoot();
+  if (repoRoot === null) return undefined;
+
+  for (const filename of [".gitwandrc", ".gitwandrc.json"]) {
+    const path = join(repoRoot, filename);
+    let content: string;
+    try {
+      content = readFileSync(path, "utf-8");
+    } catch {
+      continue;
+    }
+    const parsed = parseGitwandrc(content);
+    if (parsed === null) continue;
+    return parsed.resolveGeneratedFiles;
+  }
+  return undefined;
+}
+
+/**
  * Localise la racine du repo git courant via `git rev-parse --show-toplevel`.
  * Retourne `null` si on n'est pas dans un repo ou si git est introuvable —
  * dans ce cas le CLI utilisera uniquement les flags + l'environnement.

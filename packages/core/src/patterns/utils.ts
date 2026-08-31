@@ -417,6 +417,45 @@ function compareSemver(a: [number, number, number, boolean], b: [number, number,
  * (semver, ou datetime ISO où l'ordre lexicographique est chronologique) —
  * pour les hashes et autres valeurs ambiguës on retombe sur la politique.
  */
+/**
+ * accuracy lot C — Y a-t-il, parmi les paires de tokens qui diffèrent, au moins une
+ * paire « de type version » qui n'est PAS ordonnable proprement ?
+ *
+ * C'est exactement le cas mesuré comme faux sur le corpus benchmark/ : deux
+ * côtés fixent un scalaire de version à des valeurs différentes dont l'une ne
+ * parse pas en semver (`'13.x-dev'`, `'2.0-beta'`, `dev-master`). L'ancien
+ * comportement retombait sur la politique (prefer-theirs) — un pari. Ces
+ * paires sont une décision : la branche cible gagne quand le contexte est
+ * connu, et on propose au lieu d'appliquer quand il ne l'est pas.
+ *
+ * Délibérément conservateur : un token n'est « versionish » que s'il ressemble
+ * réellement à une version (chiffres pointés, wildcard x/*, suffixe -dev/-beta…).
+ * Les hashes et timestamps ne matchent pas et gardent leur traitement existant.
+ */
+const RE_VERSIONISH_TOKEN = /^["']?v?\d+\.(\d+|[x*])(\.(\d+|[x*]))?([._-][0-9A-Za-z.]+)?["']?$/;
+
+export function hasUnorderableVersionPair(
+  oursLines: string[],
+  theirsLines: string[],
+): boolean {
+  if (oursLines.length !== theirsLines.length) return false;
+  for (let i = 0; i < oursLines.length; i++) {
+    const oursTokens = tokenizeLineQuoteAware(oursLines[i]);
+    const theirsTokens = tokenizeLineQuoteAware(theirsLines[i]);
+    if (oursTokens.length !== theirsTokens.length) continue;
+    for (let j = 0; j < oursTokens.length; j++) {
+      const a = oursTokens[j];
+      const b = theirsTokens[j];
+      if (a === b) continue;
+      const bothSemver = parseSemver(a) !== null && parseSemver(b) !== null;
+      const bothDatetime = RE_DATETIME_TOKEN.test(a) && RE_DATETIME_TOKEN.test(b);
+      if (bothSemver || bothDatetime) continue; // ordonnable → pickNewerSemverSide gère
+      if (RE_VERSIONISH_TOKEN.test(a) || RE_VERSIONISH_TOKEN.test(b)) return true;
+    }
+  }
+  return false;
+}
+
 export function pickNewerSemverSide(
   oursLines: string[],
   theirsLines: string[],

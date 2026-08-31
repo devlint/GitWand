@@ -172,7 +172,7 @@ The registry holds **12 patterns**, of which **8 auto-apply**. The other four ei
 
 The confidence column is indicative: every hunk carries a computed `ConfidenceScore` (see below), not a fixed label. `value_only_change`, for instance, scores on the ratio of volatile tokens to total tokens and rejects the hunk outright below its threshold.
 
-**Not a registry pattern:** `generated_file` is a separate reclassification pass that runs after classification. When a hunk lands in `complex` and its path matches a generated-file glob (lockfiles, bundles, `dist/`, plus anything in `generatedFiles`), the resolver rewrites it to `generated_file` and resolves to *theirs*, on the assumption the file will be regenerated. It appears in `ConflictType` but never in the classifier registry.
+**Not a registry pattern:** `generated_file` is a separate reclassification pass that runs after classification. When a hunk's path matches a generated-file glob (lockfiles, bundles, `dist/`, plus anything in `generatedFiles`), the resolver rewrites it to `generated_file` and, by default, declines with an actionable reason rather than guessing — [measured on 1,662 real merges](https://github.com/devlint/GitWand/tree/main/benchmark), auto-merging generated files diverged from what teams actually shipped in almost every case. GitWand tells you to resolve the source file and re-run the installer/build instead. Opt back into the old accept-theirs/semantic-merge behavior with `.gitwandrc`'s `resolveGeneratedFiles: true` or `gitwand resolve --resolve-generated`. `generated_file` appears in `ConflictType` but never in the classifier registry.
 
 ### Composite confidence score
 
@@ -191,6 +191,8 @@ Every resolution carries a `ConfidenceScore` object rather than a simple label:
   penalties: ["Content will be regenerated — theirs assumed more recent"],
 }
 ```
+
+(Shape shown for a `generated_file` hunk with `resolveGeneratedFiles: true` — the default is to decline generated files rather than score and apply them; see the pattern table above.)
 
 Score formula: `score = typeClassification − dataRisk×0.4 − scopeImpact×0.15`
 
