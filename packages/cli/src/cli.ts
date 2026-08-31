@@ -17,6 +17,7 @@
  * Tout token ne commençant pas par `--` est considéré comme positionnel.
  */
 
+import { readFileSync } from "node:fs";
 import { c, printBanner } from "./ui.js";
 import { DEFAULT_CONCURRENCY } from "./concurrency.js";
 import { cmdResolve } from "./commands/resolve.js";
@@ -24,6 +25,13 @@ import { cmdStatus } from "./commands/status.js";
 import { cmdPreview } from "./commands/preview.js";
 import { cmdScan } from "./commands/scan.js";
 import { cmdConventions } from "./commands/conventions.js";
+import { checkForUpdate } from "./update-check.js";
+
+const CLI_VERSION = (
+  JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf-8")) as {
+    version: string;
+  }
+).version;
 
 function printHelp(): void {
   printBanner();
@@ -103,6 +111,13 @@ export function parseArgs(argv: string[]): {
 export async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const { command, positional, flags } = parseArgs(args);
+
+  // Most commands call `process.exit()` themselves once done (see the exit
+  // codes table in the README), so a check placed after dispatch would
+  // never run for them. Awaited here, before dispatch: a no-op file read
+  // on every invocation except roughly once per 24h, when it's a capped
+  // ~1.2s network call. Silently skipped outside a TTY (CI, pipes).
+  await checkForUpdate(CLI_VERSION);
 
   if (!command || command === "--help" || command === "-h") {
     printHelp();

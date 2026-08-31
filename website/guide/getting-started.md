@@ -27,16 +27,17 @@ Open the app, select a Git repository, and you're ready to go.
 
 ## CLI
 
-Install globally via npm:
+Use it directly with npx, no install, always the latest version:
+
+```bash
+npx @gitwand/cli resolve
+```
+
+Or install globally via npm (or pnpm):
 
 ```bash
 npm install -g @gitwand/cli
-```
-
-Or with pnpm:
-
-```bash
-pnpm add -g @gitwand/cli
+# pnpm add -g @gitwand/cli
 ```
 
 Verify the installation:

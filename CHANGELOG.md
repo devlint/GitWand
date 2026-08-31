@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **CLI update notice.** A global `npm install -g @gitwand/cli` never auto-updates, unlike `npx @gitwand/cli` or the desktop app's own updater. `gitwand` now checks the npm registry at most once every 24h (cached locally) and prints a one-line notice when a newer version is published. Only runs in an interactive terminal, never in CI or piped output, and any failure (offline, registry down, unwritable home dir) is silent.
+
+### Changed
+
+- `website/guide/getting-started.md`'s CLI section led with a global install only, inconsistent with every other install doc (root README, `packages/cli/README.md`, `website/reference/cli-commands.md`), which lead with `npx @gitwand/cli` since it always resolves the latest version. Aligned.
+
 ## [3.9.0] - 2026-08-31
 
 - **`/agent`, a WebMCP page.** gitwand.app/agent exposes two read-only git tools to any agent browsing it, over the W3C WebMCP standard: `parse_git_error` explains a failing git command and gives the commands that fix it, `resolve_conflict` runs the deterministic engine over a conflicted file and reports per hunk what was resolved and what still needs a human. Both execute in the visitor's tab, so nothing is uploaded and there is no backend. `@gitwand/core` is imported on demand rather than at module scope, which keeps it out of the shared theme chunk every page downloads.

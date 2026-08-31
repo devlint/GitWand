@@ -20,6 +20,8 @@ gitwand resolve
 
 Requires Node.js ≥ 18.
 
+A global install doesn't auto-update the way `npx @gitwand/cli` does, so `gitwand` checks once every 24h (cached, never more than once a day) whether a newer version is published and prints a one-line notice if so. It only runs in an interactive terminal — never in CI or when output is piped — and never delays or alters command output.
+
 ## Quickstart
 
 ```bash
