@@ -1215,10 +1215,10 @@ function cellClass(v: CompareValue | undefined): string {
         <div class="blog-teaser-header">
           <span class="blog-teaser-label">From the blog</span>
         </div>
-        <a href="/blog/from-four-tools-to-one" class="blog-teaser-card">
-          <div class="blog-teaser-meta">August 24, 2026 · 12 min read</div>
-          <h3 class="blog-teaser-title">From four tools to one: rebuilding the Git workflow you already have</h3>
-          <p class="blog-teaser-excerpt">A desktop cockpit, a terminal, an IDE merge editor, a browser tab: nobody chose that workflow, it accumulated. The same PHP rebase played twice, the receipts behind "deterministic" (2,000 real merges replayed), and the one job that should stay in your IDE.</p>
+        <a href="/blog/webmcp-gitwand-merge-room" class="blog-teaser-card">
+          <div class="blog-teaser-meta">September 1, 2026 · 8 min read</div>
+          <h3 class="blog-teaser-title">What WebMCP is, and how GitWand built (as far as we can tell) the first Git tool on it</h3>
+          <p class="blog-teaser-excerpt">MCP needs a server and a host app; WebMCP puts the tools on the page itself, callable by any agent already browsing it, no install, no API key. How gitwand.app/agent's three tools turn a Git conflict into a shared Merge Room for humans and agents.</p>
           <span class="blog-teaser-cta">Read article →</span>
         </a>
       </div>
