@@ -1070,9 +1070,6 @@ pub struct SecretFinding {
 /// paths that changed, capped at `EVENT_PATH_CAP`; `truncated` is true when the
 /// batch exceeded the cap, in which case a consumer must assume "everything
 /// may have changed" rather than trusting `paths` as exhaustive.
-// TODO(v3.10.0 Task A2): remove #[allow(dead_code)] once watch_repo_start /
-// coalesce construct this for real (only #[cfg(test)] does at this step).
-#[allow(dead_code)]
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RepoChangeEvent {

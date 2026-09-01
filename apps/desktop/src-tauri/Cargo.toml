@@ -70,6 +70,12 @@ rayon = "1"
 parking_lot = { version = "0.12", features = ["arc_lock"] }
 portable-pty = "0.9"
 
+# Live Repo FS watcher (v3.10.0). Backs `commands/watcher.rs`: one recommended
+# (platform-native: FSEvents / inotify / ReadDirectoryChangesW) watcher per open
+# repo, coalesced in-process. Deliberately without `notify-debouncer-full`: we
+# need our own classification pass anyway, and one dependency is enough.
+notify = "8.2.0"
+
 # libgit2 bindings for in-process git operations (P3.3). Used in the
 # workspace_*_all hot paths to read branch + ahead/behind + file statuses
 # without spawning git subprocesses (5-15ms each on macOS). Vendored to

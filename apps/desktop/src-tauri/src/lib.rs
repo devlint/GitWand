@@ -694,6 +694,9 @@ pub fn run() {
             commands::terminal::terminal_write,
             commands::terminal::terminal_resize,
             commands::terminal::terminal_close,
+            // ── v3.10.0 Live Repo FS watcher ──
+            commands::watcher::watch_repo_start,
+            commands::watcher::watch_repo_stop,
         ])
         .on_window_event(|_window, event| {
             if let tauri::WindowEvent::Destroyed = event {
