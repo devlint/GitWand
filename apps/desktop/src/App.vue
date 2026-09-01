@@ -101,6 +101,7 @@ import { useConnectivity } from "./composables/useConnectivity";
 import { useScheduler } from "./composables/useScheduler";
 import { useRepoPoller } from "./composables/useRepoPoller";
 import { useRepoWatcher } from "./composables/useRepoWatcher";
+import { useWatcherRefreshQueue } from "./composables/useWatcherRefreshQueue";
 import { useLaunchpadPoller } from "./composables/useLaunchpadPoller";
 import { useSecretsScanner } from "./composables/useSecretsScanner";
 import { useCommitReview } from "./composables/useCommitReview";
@@ -446,12 +447,14 @@ const prPanel = usePrPanel(prCwd, {
   //
   // v3.10.0 — Live Repo: also fire a catch-up watcher refresh here. Watcher
   // events that arrive while the tab is hidden are dropped by
-  // scheduleWatcherRefresh()'s document.hidden guard, so without this a
+  // watcherRefreshQueue.schedule()'s document.hidden guard, so without this a
   // change made while backgrounded would only surface on the *next* real
-  // event rather than immediately on return.
+  // event rather than immediately on return. Shares the "worktree-index" key
+  // with that handler below (same job — repoRefresh + conditional loadLog) so
+  // the two collapse to a single refresh if they race.
   onVisibilityResume: () => {
     commitReview.resume();
-    scheduleWatcherRefresh(async () => {
+    watcherRefreshQueue.schedule("worktree-index", async () => {
       await repoRefresh();
       if (viewMode.value === "history" || showGitTree.value) await loadLog();
     });
@@ -3428,37 +3431,24 @@ watch(
 );
 
 // Serialize watcher-driven refreshes: an `rm -rf node_modules` or a branch
-// switch produces several coalesced batches back to back, and without this a
-// burst would stack concurrent repoRefresh() calls on the same repo.
-let _wtRefreshInFlight: Promise<void> | null = null;
-let _wtRefreshQueued = false;
-
-function scheduleWatcherRefresh(run: () => Promise<void>) {
-  if (document.hidden) return;
-  if (_wtRefreshInFlight) {
-    _wtRefreshQueued = true;
-    return;
-  }
-  _wtRefreshInFlight = run()
-    .catch(() => {})
-    .finally(() => {
-      _wtRefreshInFlight = null;
-      if (_wtRefreshQueued) {
-        _wtRefreshQueued = false;
-        scheduleWatcherRefresh(run);
-      }
-    });
-}
+// switch produces several coalesced batches back to back, and repoRefresh()
+// routinely takes longer than the watcher's debounce window, so without this
+// a burst would stack concurrent repoRefresh() calls on the same repo. Keyed
+// per handler (not a single shared in-flight boolean): one coalesced event
+// batch can carry several kinds at once, so distinct handlers (worktree/index,
+// mergeState, stash, ...) routinely need to queue during the very same
+// in-flight window, and each must still run — see useWatcherRefreshQueue.ts.
+const watcherRefreshQueue = useWatcherRefreshQueue();
 
 repoWatcher.on(["worktree", "index"], () => {
-  scheduleWatcherRefresh(async () => {
+  watcherRefreshQueue.schedule("worktree-index", async () => {
     await repoRefresh();
     if (viewMode.value === "history" || showGitTree.value) await loadLog();
   });
 });
 
 repoWatcher.on(["head", "refs"], () => {
-  scheduleWatcherRefresh(async () => {
+  watcherRefreshQueue.schedule("head-refs", async () => {
     await repoRefresh();
     await loadLog();
   });
@@ -3473,7 +3463,7 @@ repoWatcher.on(["refs"], () => {
 });
 
 repoWatcher.on(["mergeState"], () => {
-  scheduleWatcherRefresh(async () => {
+  watcherRefreshQueue.schedule("mergeState", async () => {
     await repoRefresh();
     // Gate on an actual conflict, mirroring useRepoPoller's rising-edge check
     // (useRepoPoller.ts:115-121). classify_path reports "mergeState" for any
@@ -3490,7 +3480,7 @@ repoWatcher.on(["mergeState"], () => {
 // a future consumer knows the kind exists rather than silently dropping it.
 
 repoWatcher.on(["stash"], () => {
-  scheduleWatcherRefresh(async () => {
+  watcherRefreshQueue.schedule("stash", async () => {
     if (showStash.value) await loadStashes();
   });
 });
