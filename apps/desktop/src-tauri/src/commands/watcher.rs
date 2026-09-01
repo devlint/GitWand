@@ -135,27 +135,17 @@ fn broadcast(root: &PathBuf, event: &RepoChangeEvent) {
     }
 }
 
-/// Start (or join) a watch on `cwd`. Returns a subscription id to pass to
-/// `watch_repo_stop`. Calling this twice on the same repo creates two
-/// independent subscriptions sharing a single OS watcher: this is the
-/// extension point the v4.0 incremental code-graph indexer will use.
-#[tauri::command]
-pub(crate) fn watch_repo_start(
-    cwd: String,
-    on_change: Channel<RepoChangeEvent>,
-) -> Result<u64, String> {
-    let root = safe_repo_path(cwd.trim(), ".").map_err(|e| format!("invalid cwd: {e}"))?;
-    if !root.is_dir() {
-        return Err("cwd is not a directory".to_string());
-    }
-
-    let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
-    lock_subscribers().insert(id, (root.clone(), on_change));
-
+/// Ensure a live OS watch exists for `root`, joining an existing one or
+/// creating a new watcher and its coalescing thread. Never touches
+/// SUBSCRIBERS: `watch_repo_start` only registers a subscriber after this
+/// returns `Ok(())`, so a failed watcher creation can never orphan a
+/// subscriber entry that nothing can ever `watch_repo_stop` (verifier
+/// Finding 3, 2026-09-01).
+fn ensure_watch(root: &std::path::Path) -> Result<(), String> {
     let mut watches = lock_watches();
-    if let Some(existing) = watches.get_mut(&root) {
+    if let Some(existing) = watches.get_mut(root) {
         existing.subscriber_count += 1;
-        return Ok(id);
+        return Ok(());
     }
 
     let (tx, rx) = mpsc::channel::<notify::Result<notify::Event>>();
@@ -164,11 +154,11 @@ pub(crate) fn watch_repo_start(
     })
     .map_err(|e| format!("failed to create watcher: {e}"))?;
     watcher
-        .watch(&root, RecursiveMode::Recursive)
+        .watch(root, RecursiveMode::Recursive)
         .map_err(|e| format!("failed to watch {}: {e}", root.display()))?;
 
     let stop = Arc::new(AtomicBool::new(false));
-    let thread_root = root.clone();
+    let thread_root = root.to_path_buf();
     let thread_stop = stop.clone();
     std::thread::spawn(move || {
         let mut batch: Vec<String> = Vec::new();
@@ -215,13 +205,34 @@ pub(crate) fn watch_repo_start(
     });
 
     watches.insert(
-        root,
+        root.to_path_buf(),
         RepoWatch {
             _watcher: watcher,
             stop,
             subscriber_count: 1,
         },
     );
+    Ok(())
+}
+
+/// Start (or join) a watch on `cwd`. Returns a subscription id to pass to
+/// `watch_repo_stop`. Calling this twice on the same repo creates two
+/// independent subscriptions sharing a single OS watcher: this is the
+/// extension point the v4.0 incremental code-graph indexer will use.
+#[tauri::command]
+pub(crate) fn watch_repo_start(
+    cwd: String,
+    on_change: Channel<RepoChangeEvent>,
+) -> Result<u64, String> {
+    let root = safe_repo_path(cwd.trim(), ".").map_err(|e| format!("invalid cwd: {e}"))?;
+    if !root.is_dir() {
+        return Err("cwd is not a directory".to_string());
+    }
+
+    ensure_watch(&root)?;
+
+    let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+    lock_subscribers().insert(id, (root, on_change));
     Ok(id)
 }
 
@@ -378,5 +389,35 @@ mod tests {
 
         drop(watcher);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Regression test for Finding 3: `watch_repo_start` inserts into
+    /// SUBSCRIBERS only after `ensure_watch` succeeds, so a failed watch can
+    /// never orphan a subscriber entry nothing can ever `watch_repo_stop`.
+    /// `watch_repo_start` itself takes a `tauri::ipc::Channel`, which cannot
+    /// be constructed outside a Tauri runtime (see the note on the real-repo
+    /// test above) — so this exercises `ensure_watch` directly, the exact
+    /// function `watch_repo_start` gates subscriber registration on.
+    #[test]
+    fn ensure_watch_failure_never_touches_subscribers() {
+        let missing = std::env::temp_dir().join(format!(
+            "gw-watch-missing-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        let _ = std::fs::remove_dir_all(&missing); // guarantee it does not exist
+
+        let subscribers_before = lock_subscribers().len();
+        let result = ensure_watch(&missing);
+        assert!(result.is_err(), "watching a nonexistent path must fail");
+        assert!(
+            !lock_watches().contains_key(&missing),
+            "a failed watch must not linger in the WATCHES registry"
+        );
+        assert_eq!(
+            lock_subscribers().len(),
+            subscribers_before,
+            "ensure_watch must never touch SUBSCRIBERS"
+        );
     }
 }
