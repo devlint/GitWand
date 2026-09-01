@@ -91,8 +91,25 @@ pub(crate) fn coalesce(batch: &[String]) -> Option<RepoChangeEvent> {
 }
 
 /// Quiet window before a batch is flushed. Long enough to swallow the dozens of
-/// events a single `git checkout` produces, short enough to feel instant.
+/// events a single `git checkout` produces, short enough to feel instant. This
+/// window *resets* on every event, so on its own it never fires under
+/// continuous churn (an install, a big checkout, a build writing to `dist/`);
+/// `MAX_WAIT` below is the backstop for that case.
 const DEBOUNCE: Duration = Duration::from_millis(150);
+
+/// Hard ceiling on how long a batch can stay open, measured from its first
+/// event, regardless of whether events keep resetting `DEBOUNCE`. Fixes
+/// Finding 1: a continuous event stream faster than `DEBOUNCE` (package
+/// installs, `cargo build`, a huge `git checkout`) used to reset the quiet
+/// window forever and never flush.
+const MAX_WAIT: Duration = Duration::from_millis(500);
+
+/// Safety valve on the pre-coalesce staging batch. Without this, the same
+/// continuous-churn scenario that motivates `MAX_WAIT` would otherwise grow
+/// `Vec<String>` unbounded for as long as the storm lasts. Deliberately much
+/// larger than `EVENT_PATH_CAP` (512): this bounds raw, non-deduplicated
+/// input, not the final event payload.
+const MAX_RAW_BATCH: usize = 4096;
 
 struct RepoWatch {
     /// Dropping the watcher stops the OS-level subscription.
@@ -135,12 +152,113 @@ fn broadcast(root: &PathBuf, event: &RepoChangeEvent) {
     }
 }
 
+/// Drive the debounce/coalesce state machine for one repo's raw `notify`
+/// event stream, calling `emit` for each flushed batch. Extracted from
+/// `ensure_watch` so it is testable with a plain `mpsc` channel and closure,
+/// without a real OS watcher or a Tauri `Channel` (which cannot be
+/// constructed outside a Tauri runtime).
+///
+/// Flush triggers, first one to fire wins:
+/// - `DEBOUNCE` quiet window elapses (no new event) — the common bursty case.
+/// - `MAX_WAIT` elapses since the batch's first event, even if events are
+///   still arriving fast enough to keep resetting the quiet window (Finding 1).
+/// - the raw staging batch hits `MAX_RAW_BATCH`, in which case the flush is
+///   forced `truncated` regardless of `coalesce`'s own (post-dedup) cap.
+fn spawn_coalescer<F>(
+    root: PathBuf,
+    rx: mpsc::Receiver<notify::Result<notify::Event>>,
+    stop: Arc<AtomicBool>,
+    emit: F,
+) where
+    F: Fn(RepoChangeEvent) + Send + 'static,
+{
+    std::thread::spawn(move || {
+        let mut batch: Vec<String> = Vec::new();
+        let mut first_event_at: Option<std::time::Instant> = None;
+
+        let flush = |batch: &mut Vec<String>, force_truncated: bool| {
+            if batch.is_empty() {
+                return;
+            }
+            if let Some(mut ev) = coalesce(&batch[..]) {
+                if force_truncated {
+                    ev.truncated = true;
+                }
+                emit(ev);
+            }
+            batch.clear();
+        };
+
+        loop {
+            if stop.load(Ordering::Relaxed) {
+                return;
+            }
+
+            if let Some(started) = first_event_at {
+                if started.elapsed() >= MAX_WAIT {
+                    flush(&mut batch, false);
+                    first_event_at = None;
+                }
+            }
+
+            let wait = match first_event_at {
+                Some(started) => DEBOUNCE.min(MAX_WAIT.saturating_sub(started.elapsed())),
+                None => DEBOUNCE,
+            };
+
+            match rx.recv_timeout(wait) {
+                Ok(Ok(event)) => {
+                    for p in event.paths {
+                        let Ok(rel) = p.strip_prefix(&root) else {
+                            continue;
+                        };
+                        let rel = rel.to_string_lossy().replace('\\', "/");
+                        if rel.is_empty() {
+                            continue;
+                        }
+                        // Classify at push time so noise (object churn,
+                        // ignored build dirs) is never stored, not just
+                        // discarded later at flush.
+                        if classify_path(&rel).is_none() {
+                            continue;
+                        }
+                        if batch.is_empty() {
+                            first_event_at = Some(std::time::Instant::now());
+                        }
+                        batch.push(rel);
+                        if batch.len() >= MAX_RAW_BATCH {
+                            flush(&mut batch, true);
+                            first_event_at = None;
+                        }
+                    }
+                }
+                // A watcher error (e.g. inotify queue overflow) must not kill
+                // the loop: force a "everything changed" event so the UI
+                // resyncs, then keep going.
+                Ok(Err(_)) => {
+                    emit(RepoChangeEvent {
+                        kinds: vec!["worktree".to_string()],
+                        paths: Vec::new(),
+                        truncated: true,
+                    });
+                    batch.clear();
+                    first_event_at = None;
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    flush(&mut batch, false);
+                    first_event_at = None;
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => return,
+            }
+        }
+    });
+}
+
 /// Ensure a live OS watch exists for `root`, joining an existing one or
 /// creating a new watcher and its coalescing thread. Never touches
 /// SUBSCRIBERS: `watch_repo_start` only registers a subscriber after this
 /// returns `Ok(())`, so a failed watcher creation can never orphan a
-/// subscriber entry that nothing can ever `watch_repo_stop` (verifier
-/// Finding 3, 2026-09-01).
+/// subscriber entry that nothing can ever `watch_repo_stop` (Finding 3).
 fn ensure_watch(root: &std::path::Path) -> Result<(), String> {
     let mut watches = lock_watches();
     if let Some(existing) = watches.get_mut(root) {
@@ -159,49 +277,9 @@ fn ensure_watch(root: &std::path::Path) -> Result<(), String> {
 
     let stop = Arc::new(AtomicBool::new(false));
     let thread_root = root.to_path_buf();
-    let thread_stop = stop.clone();
-    std::thread::spawn(move || {
-        let mut batch: Vec<String> = Vec::new();
-        loop {
-            if thread_stop.load(Ordering::Relaxed) {
-                return;
-            }
-            match rx.recv_timeout(DEBOUNCE) {
-                Ok(Ok(event)) => {
-                    for p in event.paths {
-                        if let Ok(rel) = p.strip_prefix(&thread_root) {
-                            let rel = rel.to_string_lossy().replace('\\', "/");
-                            if !rel.is_empty() {
-                                batch.push(rel);
-                            }
-                        }
-                    }
-                }
-                // A watcher error (e.g. inotify queue overflow) must not kill
-                // the loop: force a "everything changed" event so the UI
-                // resyncs, then keep going.
-                Ok(Err(_)) => {
-                    broadcast(
-                        &thread_root,
-                        &RepoChangeEvent {
-                            kinds: vec!["worktree".to_string()],
-                            paths: Vec::new(),
-                            truncated: true,
-                        },
-                    );
-                    batch.clear();
-                }
-                Err(mpsc::RecvTimeoutError::Timeout) => {
-                    if !batch.is_empty() {
-                        if let Some(ev) = coalesce(&batch) {
-                            broadcast(&thread_root, &ev);
-                        }
-                        batch.clear();
-                    }
-                }
-                Err(mpsc::RecvTimeoutError::Disconnected) => return,
-            }
-        }
+    let emit_root = thread_root.clone();
+    spawn_coalescer(thread_root, rx, stop.clone(), move |ev| {
+        broadcast(&emit_root, &ev);
     });
 
     watches.insert(
@@ -389,6 +467,80 @@ mod tests {
 
         drop(watcher);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Regression test for Finding 1: a *resetting* quiet window (the old
+    /// `rx.recv_timeout(DEBOUNCE)` with no other flush trigger) never fires
+    /// under continuous churn, because every new event re-arms the window
+    /// before it elapses. `spawn_coalescer` must force a flush within
+    /// `MAX_WAIT` of the first event in a batch regardless of how many more
+    /// events keep arriving.
+    #[test]
+    fn continuous_churn_still_flushes_within_max_wait() {
+        use std::sync::mpsc;
+
+        let root = PathBuf::from("/fake/repo/for/churn/test");
+        let (raw_tx, raw_rx) = mpsc::channel::<notify::Result<notify::Event>>();
+        let (evt_tx, evt_rx) = mpsc::channel::<RepoChangeEvent>();
+        let stop = Arc::new(AtomicBool::new(false));
+
+        spawn_coalescer(root.clone(), raw_rx, stop.clone(), move |ev| {
+            let _ = evt_tx.send(ev);
+        });
+
+        // Faster than DEBOUNCE (150ms), for longer than MAX_WAIT (500ms): a
+        // purely resetting quiet window would never see a gap and would never
+        // flush the whole time this loop runs.
+        let stop_sending_at = std::time::Instant::now() + Duration::from_millis(900);
+        std::thread::spawn(move || {
+            let mut i = 0u32;
+            while std::time::Instant::now() < stop_sending_at {
+                let path = root.join(format!("f{}.txt", i % 5));
+                let _ = raw_tx.send(Ok(notify::Event::new(notify::EventKind::Any).add_path(path)));
+                i += 1;
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        });
+
+        let first = evt_rx
+            .recv_timeout(Duration::from_millis(700))
+            .expect("expected a flush within MAX_WAIT despite continuous churn");
+        assert!(first.kinds.contains(&"worktree".to_string()), "kinds: {:?}", first.kinds);
+
+        stop.store(true, Ordering::Relaxed);
+    }
+
+    /// Regression test for Finding 1's raw-batch cap: an event storm that
+    /// never reaches the max-wait deadline must still flush once the
+    /// pre-coalesce staging batch hits `MAX_RAW_BATCH`, and must report the
+    /// result as truncated.
+    #[test]
+    fn raw_batch_cap_forces_an_early_truncated_flush() {
+        use std::sync::mpsc;
+
+        let root = PathBuf::from("/fake/repo/for/cap/test");
+        let (raw_tx, raw_rx) = mpsc::channel::<notify::Result<notify::Event>>();
+        let (evt_tx, evt_rx) = mpsc::channel::<RepoChangeEvent>();
+        let stop = Arc::new(AtomicBool::new(false));
+
+        spawn_coalescer(root.clone(), raw_rx, stop.clone(), move |ev| {
+            let _ = evt_tx.send(ev);
+        });
+
+        for i in 0..(MAX_RAW_BATCH + 10) {
+            let path = root.join(format!("f{i}.txt"));
+            raw_tx
+                .send(Ok(notify::Event::new(notify::EventKind::Any).add_path(path)))
+                .unwrap();
+        }
+
+        // The cap must trip well before MAX_WAIT (500ms) would have.
+        let ev = evt_rx
+            .recv_timeout(Duration::from_millis(300))
+            .expect("expected an early flush once the raw batch cap was hit");
+        assert!(ev.truncated, "a flush forced by the raw batch cap must be marked truncated");
+
+        stop.store(true, Ordering::Relaxed);
     }
 
     /// Regression test for Finding 3: `watch_repo_start` inserts into

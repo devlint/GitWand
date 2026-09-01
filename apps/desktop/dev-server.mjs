@@ -225,8 +225,13 @@ let devWatchNextId = 1;
 
 /**
  * Mirror of `classify_path` in apps/desktop/src-tauri/src/commands/watcher.rs.
- * Both implementations must stay in sync: the frontend switches on `kinds`
- * identically in Tauri and dev:web mode.
+ * This classifier (which change kind a path maps to) is the canonical part
+ * kept in sync between the two implementations: the frontend switches on
+ * `kinds` identically in Tauri and dev:web mode. The debounce/flush *timing*
+ * below mirrors `spawn_coalescer` in watcher.rs (DEBOUNCE quiet window +
+ * MAX_WAIT ceiling + MAX_RAW_BATCH cap) on a best-effort basis — Rust's
+ * version is canonical for exact timing; this one only needs to produce
+ * "roughly as fresh, never starved" events for dev:web testing.
  */
 function devClassifyPath(rel) {
   const p = rel.replace(/^\.\//, "");
@@ -250,6 +255,15 @@ function devClassifyPath(rel) {
 }
 
 const DEV_EVENT_PATH_CAP = 512;
+
+// Mirrors watcher.rs's DEBOUNCE / MAX_WAIT / MAX_RAW_BATCH (Finding 1): a
+// fixed 150ms-since-first-event timer alone (the old behavior here) is
+// naturally bounded but always waits the full 150ms even for a single
+// isolated change. Matching Rust's two-trigger model gives the same
+// snappy-burst-then-quiet behavior while staying bounded under continuous churn.
+const DEV_WATCH_DEBOUNCE_MS = 150;
+const DEV_WATCH_MAX_WAIT_MS = 500;
+const DEV_WATCH_MAX_RAW_BATCH = 4096;
 
 function devCoalesceRepoPaths(batch) {
   const kinds = new Set();
@@ -6688,19 +6702,37 @@ async function handleRequest(req, res) {
       res.write(`data: ${JSON.stringify({ id })}\n\n`);
 
       let batch = [];
-      let timer = null;
-      const flush = () => {
-        timer = null;
+      let quietTimer = null;
+      let maxWaitTimer = null;
+      const clearWatchTimers = () => {
+        if (quietTimer) { clearTimeout(quietTimer); quietTimer = null; }
+        if (maxWaitTimer) { clearTimeout(maxWaitTimer); maxWaitTimer = null; }
+      };
+      const flush = (forceTruncated) => {
+        clearWatchTimers();
+        if (batch.length === 0) return;
         const ev = devCoalesceRepoPaths(batch);
         batch = [];
-        if (ev && !res.writableEnded) res.write(`data: ${JSON.stringify(ev)}\n\n`);
+        if (ev) {
+          if (forceTruncated) ev.truncated = true;
+          if (!res.writableEnded) res.write(`data: ${JSON.stringify(ev)}\n\n`);
+        }
       };
       let watcher;
       try {
         watcher = watch(cwd, { recursive: true }, (_type, filename) => {
           if (!filename) return;
-          batch.push(String(filename).split(sep).join("/"));
-          if (!timer) timer = setTimeout(flush, 150);
+          const rel = String(filename).split(sep).join("/");
+          // Classify at push time so noise never enters the batch (mirrors
+          // watcher.rs's spawn_coalescer, Finding 1).
+          if (!devClassifyPath(rel)) return;
+          if (batch.length === 0) {
+            maxWaitTimer = setTimeout(() => flush(false), DEV_WATCH_MAX_WAIT_MS);
+          }
+          batch.push(rel);
+          if (quietTimer) clearTimeout(quietTimer);
+          quietTimer = setTimeout(() => flush(false), DEV_WATCH_DEBOUNCE_MS);
+          if (batch.length >= DEV_WATCH_MAX_RAW_BATCH) flush(true);
         });
       } catch (err) {
         res.write(`data: ${JSON.stringify({ error: String(err) })}\n\n`);
@@ -6709,7 +6741,7 @@ async function handleRequest(req, res) {
       }
       const close = () => {
         try { watcher.close(); } catch (_) {}
-        if (timer) clearTimeout(timer);
+        clearWatchTimers();
         devWatchers.delete(id);
         if (!res.writableEnded) res.end();
       };
