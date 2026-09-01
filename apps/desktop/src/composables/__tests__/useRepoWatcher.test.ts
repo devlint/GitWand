@@ -82,4 +82,21 @@ describe("useRepoWatcher", () => {
     await vi.waitFor(() => expect(onHealthChange).toHaveBeenCalledWith(false));
     expect(w.healthy.value).toBe(false);
   });
+
+  it("reports unhealthy when the underlying connection drops mid-session", async () => {
+    let close: (() => void) | undefined;
+    startMock.mockImplementationOnce(async (_cwd: string, onChange: typeof emit, onClose: () => void) => {
+      emit = onChange;
+      close = onClose;
+      return 7;
+    });
+    const onHealthChange = vi.fn();
+    const w = useRepoWatcher({ onHealthChange });
+    w.setFolderPath("/tmp/repo");
+    await vi.waitFor(() => expect(w.healthy.value).toBe(true));
+    onHealthChange.mockClear();
+    close?.();
+    expect(onHealthChange).toHaveBeenCalledWith(false);
+    expect(w.healthy.value).toBe(false);
+  });
 });

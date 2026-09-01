@@ -164,20 +164,27 @@ const _devWatchStreams = new Map<number, EventSource>();
  * Dev-mode (`pnpm dev:web`) equivalent of the Tauri `watch_repo_start` Channel:
  * an SSE stream. The server sends `{ id }` first, then one message per
  * coalesced batch. Resolves with the subscription id.
+ *
+ * `onClose`, if given, fires once if the stream dies *after* the subscription
+ * started (dev server killed/restarted mid-session) — distinct from the
+ * initial-connection failure, which rejects the returned Promise instead.
  */
 export async function devWatchRepoOpen(
   cwd: string,
   onChange: (ev: { kinds: string[]; paths: string[]; truncated: boolean }) => void,
+  onClose?: () => void,
 ): Promise<number> {
   const params = new URLSearchParams({ cwd });
   return new Promise((resolve, reject) => {
     const es = new EventSource(`${DEV_SERVER}/api/watch-repo?${params}`);
     let resolved = false;
+    let subscriptionId = -1;
     _devWatchStreams.set(-1, es); // placeholder replaced once the id arrives
     es.onmessage = (ev) => {
       const payload = JSON.parse(ev.data);
       if (!resolved && typeof payload?.id === "number") {
         resolved = true;
+        subscriptionId = payload.id;
         _devWatchStreams.delete(-1);
         _devWatchStreams.set(payload.id, es);
         resolve(payload.id);
@@ -187,7 +194,14 @@ export async function devWatchRepoOpen(
     };
     es.onerror = () => {
       es.close();
-      if (!resolved) reject(new Error("dev server unreachable: watch-repo SSE failed"));
+      if (!resolved) {
+        reject(new Error("dev server unreachable: watch-repo SSE failed"));
+        return;
+      }
+      // The stream died mid-session: the subscription is dead even though
+      // nothing ever called devWatchRepoClose for it.
+      _devWatchStreams.delete(subscriptionId);
+      onClose?.();
     };
   });
 }

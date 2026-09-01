@@ -3356,10 +3356,20 @@ export interface RepoChangeEvent {
  * Subscribe to filesystem changes in `cwd`. Returns a subscription id for
  * `watchRepoStop`. Multiple subscriptions on the same repo share one OS
  * watcher on the backend.
+ *
+ * `onClose`, if given, fires once if the subscription dies unexpectedly after
+ * starting (as opposed to a rejected Promise, which means it never started).
+ * Dev mode (`pnpm dev:web`) detects this via the underlying SSE connection
+ * dropping. The Tauri backend has no such signal yet: `watch_repo_start`'s
+ * `Channel` never emits a terminal "closed" event when the OS-level watch
+ * dies (e.g. the watched directory is deleted or unmounted mid-session), so
+ * `onClose` is currently a no-op on that path. Tracked as a Phase C
+ * prerequisite in the Live Repo plan.
  */
 export async function watchRepoStart(
   cwd: string,
   onChange: (ev: RepoChangeEvent) => void,
+  onClose?: () => void,
 ): Promise<number> {
   if (isTauri()) {
     const { Channel } = await import("@tauri-apps/api/core");
@@ -3367,7 +3377,7 @@ export async function watchRepoStart(
     channel.onmessage = onChange;
     return tauriInvoke<number>("watch_repo_start", { cwd, onChange: channel });
   }
-  return devWatchRepoOpen(cwd, onChange);
+  return devWatchRepoOpen(cwd, onChange, onClose);
 }
 
 /** Drop a subscription. Idempotent: an unknown id is a no-op. */

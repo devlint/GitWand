@@ -69,7 +69,15 @@ export function useRepoWatcher(opts?: { onHealthChange?: (healthy: boolean) => v
     void stop().then(async () => {
       if (!path || generation !== _generation) return;
       try {
-        const id = await watchRepoStart(path, dispatch);
+        const id: number = await watchRepoStart(path, dispatch, () => {
+          // The subscription died after starting (e.g. dev server restarted
+          // mid-session). A stale close from a since-replaced subscription is
+          // a no-op: `id` will no longer match `_subscriptionId`.
+          if (id === _subscriptionId) {
+            _subscriptionId = null;
+            setHealthy(false);
+          }
+        });
         if (generation !== _generation) {
           // The folder changed while start() was in flight: drop this one.
           void watchRepoStop(id);
