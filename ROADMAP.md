@@ -246,3 +246,4 @@ Positioning: neither "yet another Git GUI" nor an IDE. A first-class Git navigat
 3. **Progressive** — Works immediately for simple cases. Advanced features are discovered naturally.
 4. **Cross-platform** — macOS, Linux, Windows. Same quality everywhere.
 5. **Free and open source** — Core and desktop under MIT.
+6. **Refusal is structured, not silent**: any tool that declines to decide (a pending hunk, a detected silent conflict) hands back `agent_guardrails` built only from facts it actually computed (the diff, the signature, the missing argument), never inferred domain judgment like "this is security-critical." Applies everywhere a `@gitwand/mcp` tool can refuse (`gitwand_resolve_conflicts` today, `detect_silent_conflict` in v4.0.0); the `/agent` WebMCP page has no repository to reason from, so it never carries this.
