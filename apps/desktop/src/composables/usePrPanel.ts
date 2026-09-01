@@ -604,6 +604,15 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
   }
 
   /**
+   * Minimum wall-clock gap between two dock-badge forge calls. The badge is
+   * refreshed from watcher `refs` events (v3.10.0), and a rebase or a fetch
+   * can move dozens of refs in one batch. v2.8.5 ruled out periodic polling
+   * here on boot-perf grounds, so the event path must be at least as cheap.
+   */
+  const DOCK_PR_COUNT_MIN_GAP_MS = 60_000;
+  let _lastDockPrCountAt = 0;
+
+  /**
    * Refresh the dock's PR badge count via a single cheap forge call
    * (`getPRCount`, backed by a `/search/issues?...&per_page=1`-style REST
    * call or GraphQL `totalCount` query per forge — no per-PR enrichment).
@@ -633,6 +642,18 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       // failures to 0, but don't assume every forge does.
       if (cwd.value === repo) dockPrCount.value = 0;
     }
+  }
+
+  /**
+   * Refresh the dock badge, skipping the forge call when the last one was
+   * less than DOCK_PR_COUNT_MIN_GAP_MS ago. `force` bypasses the throttle
+   * (repo open, explicit user refresh).
+   */
+  async function refreshDockPrCountThrottled(force = false) {
+    const now = Date.now();
+    if (!force && now - _lastDockPrCountAt < DOCK_PR_COUNT_MIN_GAP_MS) return;
+    _lastDockPrCountAt = now;
+    await refreshDockPrCount();
   }
 
   /**
@@ -1007,6 +1028,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     _lastFreshnessCheck = 0;
     ++_prPrefetchToken; // invalidate any in-flight background prefetch for the old repo
     dockPrCount.value = null;
+    _lastDockPrCountAt = 0;
     resetDetail();
     if (newCwd) void refreshDockPrCount();
     if (newCwd && panelMounted.value) init();
@@ -1516,7 +1538,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     // Pagination (v2.8.5)
     hasMore, loadingMore,
     // Dock badge count
-    dockPrCount, refreshDockPrCount,
+    dockPrCount, refreshDockPrCount, refreshDockPrCountThrottled,
     // Computed
     forge, forgeLabel,
     commentsForFile, commentCount, mergeReadiness, mergeBlocked, mergeBlockedReason, selectedDiff, displayedPrs,

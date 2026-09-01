@@ -3350,6 +3350,12 @@ export interface RepoChangeEvent {
   paths: string[];
   /** True when the batch exceeded the cap: treat `paths` as non-exhaustive. */
   truncated: boolean;
+  /**
+   * Terminal sentinel: true on the final event a subscription ever receives,
+   * sent when the OS-level watch died unexpectedly. Never surfaced to
+   * `onChange` — `watchRepoStart` intercepts it and calls `onClose` instead.
+   */
+  closed?: boolean;
 }
 
 /**
@@ -3360,11 +3366,10 @@ export interface RepoChangeEvent {
  * `onClose`, if given, fires once if the subscription dies unexpectedly after
  * starting (as opposed to a rejected Promise, which means it never started).
  * Dev mode (`pnpm dev:web`) detects this via the underlying SSE connection
- * dropping. The Tauri backend has no such signal yet: `watch_repo_start`'s
- * `Channel` never emits a terminal "closed" event when the OS-level watch
- * dies (e.g. the watched directory is deleted or unmounted mid-session), so
- * `onClose` is currently a no-op on that path. Tracked as a Phase C
- * prerequisite in the Live Repo plan.
+ * dropping. The Tauri backend (v3.10.0 Phase C) detects it via a terminal
+ * `closed: true` `RepoChangeEvent` sent on the same `Channel` right before the
+ * backend tears down its watcher state for that repo (see
+ * `commands::watcher::spawn_coalescer`'s `Disconnected` arm).
  */
 export async function watchRepoStart(
   cwd: string,
@@ -3374,7 +3379,13 @@ export async function watchRepoStart(
   if (isTauri()) {
     const { Channel } = await import("@tauri-apps/api/core");
     const channel = new Channel<RepoChangeEvent>();
-    channel.onmessage = onChange;
+    channel.onmessage = (ev) => {
+      if (ev.closed) {
+        onClose?.();
+        return;
+      }
+      onChange(ev);
+    };
     return tauriInvoke<number>("watch_repo_start", { cwd, onChange: channel });
   }
   return devWatchRepoOpen(cwd, onChange, onClose);

@@ -1070,10 +1070,18 @@ pub struct SecretFinding {
 /// paths that changed, capped at `EVENT_PATH_CAP`; `truncated` is true when the
 /// batch exceeded the cap, in which case a consumer must assume "everything
 /// may have changed" rather than trusting `paths` as exhaustive.
+///
+/// `closed` is a terminal sentinel (v3.10.0 Phase C): true exactly once, on
+/// the final event a subscriber ever receives on a given `Channel`, when the
+/// underlying OS watch died unexpectedly (not via an explicit
+/// `watch_repo_stop`). `kinds`/`paths` are empty and `truncated` is false on a
+/// `closed` event; a consumer must treat it as "stop trusting this
+/// subscription", not as a change to react to.
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RepoChangeEvent {
     pub kinds: Vec<String>,
     pub paths: Vec<String>,
     pub truncated: bool,
+    pub closed: bool,
 }

@@ -87,6 +87,7 @@ pub(crate) fn coalesce(batch: &[String]) -> Option<RepoChangeEvent> {
         kinds: kinds.into_iter().map(str::to_string).collect(),
         paths: paths.into_iter().take(EVENT_PATH_CAP).collect(),
         truncated,
+        closed: false,
     })
 }
 
@@ -240,6 +241,7 @@ fn spawn_coalescer<F>(
                         kinds: vec!["worktree".to_string()],
                         paths: Vec::new(),
                         truncated: true,
+                        closed: false,
                     });
                     batch.clear();
                     first_event_at = None;
@@ -248,7 +250,29 @@ fn spawn_coalescer<F>(
                     flush(&mut batch, false);
                     first_event_at = None;
                 }
-                Err(mpsc::RecvTimeoutError::Disconnected) => return,
+                // The raw-event channel only disconnects when the `notify`
+                // watcher (and the sender closure it owns) is dropped. An
+                // intentional `watch_repo_stop` teardown sets `stop` first
+                // (see `watch_repo_stop`), so a Disconnected with `stop` still
+                // false means the OS-level watch died on its own (deleted /
+                // unmounted directory, fatal notify backend error). Emit a
+                // terminal `closed` sentinel so subscribers stop trusting
+                // `healthy`, then purge this repo's state so a future
+                // `watch_repo_start` on the same root gets a fresh watcher
+                // instead of silently joining a dead one.
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    if !stop.load(Ordering::Relaxed) {
+                        emit(RepoChangeEvent {
+                            kinds: Vec::new(),
+                            paths: Vec::new(),
+                            truncated: false,
+                            closed: true,
+                        });
+                        lock_watches().remove(&root);
+                        lock_subscribers().retain(|_, (path, _)| path != &root);
+                    }
+                    return;
+                }
             }
         }
     });
@@ -541,6 +565,63 @@ mod tests {
         assert!(ev.truncated, "a flush forced by the raw batch cap must be marked truncated");
 
         stop.store(true, Ordering::Relaxed);
+    }
+
+    /// Phase C prerequisite: an *unexpected* death of the raw `notify` channel
+    /// (the sender dropped without `watch_repo_stop` ever setting `stop`)
+    /// must surface as a terminal `closed: true` sentinel, so
+    /// `useRepoWatcher` on the frontend can flip `healthy` to false instead
+    /// of silently going quiet forever.
+    #[test]
+    fn unexpected_disconnect_emits_a_closed_sentinel() {
+        use std::sync::mpsc;
+
+        let root = PathBuf::from("/fake/repo/for/closed/test");
+        let (raw_tx, raw_rx) = mpsc::channel::<notify::Result<notify::Event>>();
+        let (evt_tx, evt_rx) = mpsc::channel::<RepoChangeEvent>();
+        let stop = Arc::new(AtomicBool::new(false));
+
+        spawn_coalescer(root, raw_rx, stop, move |ev| {
+            let _ = evt_tx.send(ev);
+        });
+
+        // Drop the sender without ever setting `stop`: simulates the OS-level
+        // watch dying on its own rather than an intentional teardown.
+        drop(raw_tx);
+
+        let ev = evt_rx
+            .recv_timeout(Duration::from_millis(300))
+            .expect("expected a closed sentinel after the unexpected disconnect");
+        assert!(ev.closed, "expected closed: true, got {:?}", ev);
+        assert!(ev.kinds.is_empty());
+        assert!(ev.paths.is_empty());
+        assert!(!ev.truncated);
+    }
+
+    /// An *intentional* teardown (`stop` set before the sender drops, exactly
+    /// as `watch_repo_stop` does when the last subscriber leaves) must not
+    /// emit a `closed` sentinel: nothing is listening for it anymore, and a
+    /// stray event here would be pure noise.
+    #[test]
+    fn intentional_stop_emits_no_closed_sentinel() {
+        use std::sync::mpsc;
+
+        let root = PathBuf::from("/fake/repo/for/intentional/stop/test");
+        let (raw_tx, raw_rx) = mpsc::channel::<notify::Result<notify::Event>>();
+        let (evt_tx, evt_rx) = mpsc::channel::<RepoChangeEvent>();
+        let stop = Arc::new(AtomicBool::new(false));
+
+        spawn_coalescer(root, raw_rx, stop.clone(), move |ev| {
+            let _ = evt_tx.send(ev);
+        });
+
+        stop.store(true, Ordering::Relaxed);
+        drop(raw_tx);
+
+        assert!(
+            evt_rx.recv_timeout(Duration::from_millis(300)).is_err(),
+            "an intentional stop must not emit a closed sentinel"
+        );
     }
 
     /// Regression test for Finding 3: `watch_repo_start` inserts into

@@ -443,7 +443,19 @@ const prPanel = usePrPanel(prCwd, {
   // instead of standing up a second listener. Without this, starting a
   // review then hiding the tab would leave the queue paused on
   // document.hidden forever.
-  onVisibilityResume: () => commitReview.resume(),
+  //
+  // v3.10.0 — Live Repo: also fire a catch-up watcher refresh here. Watcher
+  // events that arrive while the tab is hidden are dropped by
+  // scheduleWatcherRefresh()'s document.hidden guard, so without this a
+  // change made while backgrounded would only surface on the *next* real
+  // event rather than immediately on return.
+  onVisibilityResume: () => {
+    commitReview.resume();
+    scheduleWatcherRefresh(async () => {
+      await repoRefresh();
+      if (viewMode.value === "history" || showGitTree.value) await loadLog();
+    });
+  },
 });
 provide(PR_PANEL_KEY, prPanel);
 const issuePanel = useIssuePanel(prCwd);
@@ -3414,6 +3426,74 @@ watch(
   },
   { immediate: true },
 );
+
+// Serialize watcher-driven refreshes: an `rm -rf node_modules` or a branch
+// switch produces several coalesced batches back to back, and without this a
+// burst would stack concurrent repoRefresh() calls on the same repo.
+let _wtRefreshInFlight: Promise<void> | null = null;
+let _wtRefreshQueued = false;
+
+function scheduleWatcherRefresh(run: () => Promise<void>) {
+  if (document.hidden) return;
+  if (_wtRefreshInFlight) {
+    _wtRefreshQueued = true;
+    return;
+  }
+  _wtRefreshInFlight = run()
+    .catch(() => {})
+    .finally(() => {
+      _wtRefreshInFlight = null;
+      if (_wtRefreshQueued) {
+        _wtRefreshQueued = false;
+        scheduleWatcherRefresh(run);
+      }
+    });
+}
+
+repoWatcher.on(["worktree", "index"], () => {
+  scheduleWatcherRefresh(async () => {
+    await repoRefresh();
+    if (viewMode.value === "history" || showGitTree.value) await loadLog();
+  });
+});
+
+repoWatcher.on(["head", "refs"], () => {
+  scheduleWatcherRefresh(async () => {
+    await repoRefresh();
+    await loadLog();
+  });
+});
+
+// The dock "prs" badge only refreshed on repo-open and manual refresh (PR #125).
+// A ref moving is the cheapest local proxy for "a PR's state may have changed";
+// the forge call itself is throttled to once a minute inside usePrPanel.
+repoWatcher.on(["refs"], () => {
+  if (document.hidden) return;
+  void prPanel.refreshDockPrCountThrottled();
+});
+
+repoWatcher.on(["mergeState"], () => {
+  scheduleWatcherRefresh(async () => {
+    await repoRefresh();
+    // Gate on an actual conflict, mirroring useRepoPoller's rising-edge check
+    // (useRepoPoller.ts:115-121). classify_path reports "mergeState" for any
+    // write under .git/MERGE_MSG or .git/rebase-merge/*, which a completely
+    // clean merge or rebase also produces — calling onConflictDetected()
+    // unconditionally would burn its one-shot mergeHeadWasPresent latch on a
+    // clean merge and silently swallow auto-resolve for a real conflict later.
+    if (hasConflicts.value) await scheduler.onConflictDetected();
+  });
+});
+
+// "config" (.git/config writes) has no handler: nothing in the app reacts to
+// remote/branch-tracking config changes today. Left as a deliberate no-op so
+// a future consumer knows the kind exists rather than silently dropping it.
+
+repoWatcher.on(["stash"], () => {
+  scheduleWatcherRefresh(async () => {
+    if (showStash.value) await loadStashes();
+  });
+});
 
 // v2.14 — Ensure the log is loaded when the Git Tree is toggled on.
 watch(showGitTree, (show) => {

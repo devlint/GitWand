@@ -99,4 +99,31 @@ describe("useRepoWatcher", () => {
     expect(onHealthChange).toHaveBeenCalledWith(false);
     expect(w.healthy.value).toBe(false);
   });
+
+  it("ignores a stale close from a subscription already replaced by a folder switch", async () => {
+    const closes: Array<() => void> = [];
+    let nextId = 0;
+    startMock.mockImplementation(async (_cwd: string, onChange: typeof emit, onClose: () => void) => {
+      emit = onChange;
+      closes.push(onClose);
+      return ++nextId;
+    });
+    const onHealthChange = vi.fn();
+    const w = useRepoWatcher({ onHealthChange });
+
+    // Subscribe to path A, then switch to path B before A's close arrives —
+    // the exact race a mid-flight watcher death can hit.
+    w.setFolderPath("/tmp/a");
+    await vi.waitFor(() => expect(startMock).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(w.healthy.value).toBe(true));
+
+    w.setFolderPath("/tmp/b");
+    await vi.waitFor(() => expect(startMock).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(w.healthy.value).toBe(true));
+
+    onHealthChange.mockClear();
+    closes[0]?.(); // stale close for A, arriving after the switch to B
+    expect(onHealthChange).not.toHaveBeenCalled();
+    expect(w.healthy.value).toBe(true);
+  });
 });
