@@ -15,4 +15,5 @@ pub(crate) mod scratch;
 pub(crate) mod secrets;
 pub(crate) mod snapshots;
 pub(crate) mod terminal;
+pub(crate) mod watcher;
 pub(crate) mod workspace;

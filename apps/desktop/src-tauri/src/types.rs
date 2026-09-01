@@ -1060,3 +1060,23 @@ pub struct SecretFinding {
     /// Middle-masked excerpt — NEVER the raw secret value.
     pub redacted_excerpt: String,
 }
+
+// ─── Live Repo watcher types (v3.10.0) ─────────────────────────────
+
+/// One coalesced batch of filesystem changes inside a watched repo.
+///
+/// `kinds` is the deduplicated, sorted set of change categories in the batch
+/// (see `commands::watcher::classify_path`). `paths` carries the repo-relative
+/// paths that changed, capped at `EVENT_PATH_CAP`; `truncated` is true when the
+/// batch exceeded the cap, in which case a consumer must assume "everything
+/// may have changed" rather than trusting `paths` as exhaustive.
+// TODO(v3.10.0 Task A2): remove #[allow(dead_code)] once watch_repo_start /
+// coalesce construct this for real (only #[cfg(test)] does at this step).
+#[allow(dead_code)]
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoChangeEvent {
+    pub kinds: Vec<String>,
+    pub paths: Vec<String>,
+    pub truncated: bool,
+}
