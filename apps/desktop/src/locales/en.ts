@@ -1284,6 +1284,8 @@ const en = {
     defaultBranch: "Default branch",
     commitSignature: "Add \u201c\u{1FA84} Commit via GitWand\u201d to description",
     commitSignatureHint: "A small signature added automatically \u2014 removable anytime",
+    liveRepoWatcher: "Live repo updates",
+    liveRepoWatcherHint: "Refresh instantly from filesystem events instead of polling. Turn off if your repository lives on a network drive.",
     blameAlgorithm: "Blame diff algorithm",
     blameAlgorithmHint: "Controls how git blame detects moved or copied lines. histogram gives the best results for most repos.",
     secretsScannerEnabled: "Scan staged changes for secrets",

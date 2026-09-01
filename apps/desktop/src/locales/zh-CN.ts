@@ -1318,6 +1318,8 @@ const zhCN: Locale = {
     defaultBranch: "默认分支",
     commitSignature: "在描述中添加 \u201c🪄 Commit via GitWand\u201d",
     commitSignatureHint: "自动添加的小签名 — 可随时移除",
+    liveRepoWatcher: "仓库实时更新",
+    liveRepoWatcherHint: "通过文件系统事件即时刷新，而不是定时轮询。如果仓库位于网络驱动器上，请关闭此选项。",
     blameAlgorithm: "Blame 差异算法",
     blameAlgorithmHint: "控制 git blame 如何检测移动的行。histogram 在大多数仓库中效果最佳。",
     secretsScannerEnabled: "扫描暂存的更改中的密钥",

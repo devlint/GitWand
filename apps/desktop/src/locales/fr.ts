@@ -1268,6 +1268,8 @@ const fr: Locale = {
     defaultBranch: "Branche par d\u00e9faut",
     commitSignature: "Ajouter \u00ab \u{1FA84} Commit via GitWand \u00bb dans la description",
     commitSignatureHint: "Un petit clin d\u2019\u0153il ajout\u00e9 automatiquement \u2014 supprimable \u00e0 tout moment",
+    liveRepoWatcher: "Mise \u00e0 jour live du d\u00e9p\u00f4t",
+    liveRepoWatcherHint: "Rafra\u00eechit instantan\u00e9ment \u00e0 partir des \u00e9v\u00e9nements du syst\u00e8me de fichiers au lieu d'interroger p\u00e9riodiquement. \u00c0 d\u00e9sactiver si le d\u00e9p\u00f4t est sur un disque r\u00e9seau.",
     blameAlgorithm: "Algorithme de diff pour le blame",
     blameAlgorithmHint: "Contrôle comment git blame détecte les lignes déplacées. histogram donne les meilleurs résultats.",
     secretsScannerEnabled: "Analyser les changements indexés à la recherche de secrets",

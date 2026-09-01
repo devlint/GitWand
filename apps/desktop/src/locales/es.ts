@@ -1259,6 +1259,8 @@ const es: Locale = {
     defaultBranch: "Rama por defecto",
     commitSignature: "Añadir «🪄 Commit vía GitWand» a la descripción",
     commitSignatureHint: "Una pequeña firma añadida automáticamente — se puede quitar en cualquier momento",
+    liveRepoWatcher: "Actualización en vivo del repositorio",
+    liveRepoWatcherHint: "Actualiza al instante a partir de eventos del sistema de archivos en lugar de sondear. Desactívalo si el repositorio está en una unidad de red.",
     blameAlgorithm: "Algoritmo de diff para blame",
     blameAlgorithmHint: "Controla cómo git blame detecta líneas movidas. histogram da los mejores resultados.",
     secretsScannerEnabled: "Escanear cambios en stage en busca de secretos",

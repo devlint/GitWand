@@ -100,6 +100,7 @@ import { useNetworkStatus } from "./composables/useNetworkStatus";
 import { useConnectivity } from "./composables/useConnectivity";
 import { useScheduler } from "./composables/useScheduler";
 import { useRepoPoller } from "./composables/useRepoPoller";
+import { useRepoWatcher } from "./composables/useRepoWatcher";
 import { useLaunchpadPoller } from "./composables/useLaunchpadPoller";
 import { useSecretsScanner } from "./composables/useSecretsScanner";
 import { useCommitReview } from "./composables/useCommitReview";
@@ -3396,6 +3397,23 @@ const poller = useRepoPoller({
   },
 });
 watch(repoFolderPath, (p) => poller.setFolderPath(p), { immediate: true });
+
+// ─── Live Repo watcher (v3.10.0) ─────────────────────────────────────
+// The watcher is the primary refresh driver; the poller above demotes itself
+// to a 15 s fallback while `healthy` is true. When the user has turned the
+// feature off, or the backend cannot watch (network mount), we never start it
+// and the poller keeps its 2 s cadence.
+const repoWatcher = useRepoWatcher({
+  onHealthChange: (healthy) => poller.setWatcherHealthy(healthy),
+});
+
+watch(
+  [repoFolderPath, () => settings.value.liveRepoWatcher],
+  ([path, enabled]) => {
+    repoWatcher.setFolderPath(enabled ? path : null);
+  },
+  { immediate: true },
+);
 
 // v2.14 — Ensure the log is loaded when the Git Tree is toggled on.
 watch(showGitTree, (show) => {
