@@ -319,4 +319,64 @@ mod tests {
         assert!(ev.truncated);
         assert_eq!(ev.kinds, vec!["worktree".to_string()]);
     }
+
+    /// End-to-end over a real temp git repo: writing a file must produce a
+    /// coalesced "worktree" event, and `git add` must produce an "index" one.
+    #[test]
+    fn watches_a_real_repo_and_reports_worktree_and_index_changes() {
+        use std::process::Command;
+        use std::sync::mpsc;
+
+        let dir = std::env::temp_dir().join(format!("gw-watch-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let run = |args: &[&str]| {
+            Command::new("git").args(args).current_dir(&dir).output().unwrap();
+        };
+        run(&["init", "-q"]);
+        run(&["config", "user.email", "t@example.com"]);
+        run(&["config", "user.name", "T"]);
+        std::fs::write(dir.join("a.txt"), "one\n").unwrap();
+        run(&["add", "."]);
+        run(&["commit", "-qm", "init"]);
+
+        let root = std::fs::canonicalize(&dir).unwrap();
+        let (tx, rx) = mpsc::channel::<notify::Result<notify::Event>>();
+        let mut watcher = notify::recommended_watcher(move |res| { let _ = tx.send(res); }).unwrap();
+        watcher.watch(&root, notify::RecursiveMode::Recursive).unwrap();
+
+        std::fs::write(root.join("a.txt"), "two\n").unwrap();
+        Command::new("git").args(["add", "a.txt"]).current_dir(&root).output().unwrap();
+
+        // Drain for up to 3 s, then coalesce whatever arrived.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        let mut batch: Vec<String> = Vec::new();
+        while std::time::Instant::now() < deadline {
+            match rx.recv_timeout(std::time::Duration::from_millis(200)) {
+                Ok(Ok(ev)) => {
+                    for p in ev.paths {
+                        if let Ok(rel) = p.strip_prefix(&root) {
+                            let rel = rel.to_string_lossy().replace('\\', "/");
+                            if !rel.is_empty() { batch.push(rel); }
+                        }
+                    }
+                }
+                _ => {
+                    if batch.iter().any(|p| classify_path(p) == Some("index"))
+                        && batch.iter().any(|p| classify_path(p) == Some("worktree"))
+                    { break; }
+                }
+            }
+        }
+
+        let ev = coalesce(&batch).expect("expected at least one interesting path");
+        assert!(ev.kinds.contains(&"worktree".to_string()), "kinds: {:?}", ev.kinds);
+        assert!(ev.kinds.contains(&"index".to_string()), "kinds: {:?}", ev.kinds);
+        assert!(ev.paths.iter().any(|p| p == "a.txt"), "paths: {:?}", ev.paths);
+        // Object churn from `git add` must never surface.
+        assert!(!ev.paths.iter().any(|p| p.starts_with(".git/objects/")), "paths: {:?}", ev.paths);
+
+        drop(watcher);
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
