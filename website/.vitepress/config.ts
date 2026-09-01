@@ -272,6 +272,7 @@ export default defineConfig({
           { text: 'Features', link: '/features' },
           { text: 'Conflict engine', link: '/conflict-engine' },
           { text: 'AI & agents', link: '/ai-agents' },
+          { text: 'WebMCP', link: '/agent' },
           { text: 'Compare', link: '/compare/' },
         ],
       },
@@ -339,6 +340,7 @@ export default defineConfig({
           text: 'Blog',
           items: [
             { text: 'All articles', link: '/blog/' },
+            { text: 'What WebMCP is, and the first Git tool on it', link: '/blog/webmcp-gitwand-merge-room' },
             { text: 'Best Git GUI clients in 2026', link: '/blog/best-git-gui-clients-2026' },
             { text: 'From four tools to one', link: '/blog/from-four-tools-to-one' },
             { text: 'Why GitWand is Rust, not Electron', link: '/blog/why-gitwand-is-rust-not-electron' },
