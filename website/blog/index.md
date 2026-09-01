@@ -9,7 +9,7 @@ description: Technical articles on Git workflows, AI-powered conflict resolution
   <a href="/blog/webmcp-gitwand-merge-room" class="blog-card">
     <div class="blog-meta">September 1, 2026 · 8 min read</div>
     <h2 class="blog-title">What WebMCP is, and how GitWand built (as far as we can tell) the first Git tool on it</h2>
-    <p class="blog-excerpt">MCP needs a server and a host app; WebMCP puts the tools on the page itself, callable by any agent already browsing it, no install, no API key. What the spec actually does (and where <code>document.modelContext</code> moved), plus how <a href="/agent">gitwand.app/agent</a>'s three tools (<code>resolve_conflict</code>, <code>parse_git_error</code>, <code>list_cases</code>) turn a Git conflict into a shared <strong>Merge Room</strong> for humans and agents. Built for the <a href="https://webmcp.devpost.com/">WebMCP Challenge</a>.</p>
+    <p class="blog-excerpt">MCP needs a server and a host app; WebMCP puts the tools on the page itself, callable by any agent already browsing it, no install, no API key. What the spec actually does (and where <code>document.modelContext</code> moved), plus how <code>gitwand.app/agent</code>'s three tools (<code>resolve_conflict</code>, <code>parse_git_error</code>, <code>list_cases</code>) turn a Git conflict into a shared <strong>Merge Room</strong> for humans and agents. Built for the <strong>WebMCP Challenge</strong>.</p>
     <span class="blog-read">Read article →</span>
   </a>
   <a href="/blog/best-git-gui-clients-2026" class="blog-card">
