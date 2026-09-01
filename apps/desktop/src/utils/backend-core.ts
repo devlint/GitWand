@@ -156,3 +156,46 @@ export async function devTerminalOpen(
     };
   });
 }
+
+/** Open dev-mode watch streams, keyed by subscription id. */
+const _devWatchStreams = new Map<number, EventSource>();
+
+/**
+ * Dev-mode (`pnpm dev:web`) equivalent of the Tauri `watch_repo_start` Channel:
+ * an SSE stream. The server sends `{ id }` first, then one message per
+ * coalesced batch. Resolves with the subscription id.
+ */
+export async function devWatchRepoOpen(
+  cwd: string,
+  onChange: (ev: { kinds: string[]; paths: string[]; truncated: boolean }) => void,
+): Promise<number> {
+  const params = new URLSearchParams({ cwd });
+  return new Promise((resolve, reject) => {
+    const es = new EventSource(`${DEV_SERVER}/api/watch-repo?${params}`);
+    let resolved = false;
+    _devWatchStreams.set(-1, es); // placeholder replaced once the id arrives
+    es.onmessage = (ev) => {
+      const payload = JSON.parse(ev.data);
+      if (!resolved && typeof payload?.id === "number") {
+        resolved = true;
+        _devWatchStreams.delete(-1);
+        _devWatchStreams.set(payload.id, es);
+        resolve(payload.id);
+      } else if (payload && Array.isArray(payload.kinds)) {
+        onChange(payload);
+      }
+    };
+    es.onerror = () => {
+      es.close();
+      if (!resolved) reject(new Error("dev server unreachable: watch-repo SSE failed"));
+    };
+  });
+}
+
+export function devWatchRepoClose(id: number): void {
+  const es = _devWatchStreams.get(id);
+  if (es) {
+    es.close();
+    _devWatchStreams.delete(id);
+  }
+}

@@ -10,7 +10,7 @@
 
 import { createServer } from "node:http";
 import { execSync, execFileSync, spawnSync, spawn } from "node:child_process";
-import { readFileSync, writeFileSync, readdirSync, statSync, existsSync, unlinkSync, realpathSync, renameSync, mkdirSync, mkdtempSync, rmSync, copyFileSync } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync, statSync, existsSync, unlinkSync, realpathSync, renameSync, mkdirSync, mkdtempSync, rmSync, copyFileSync, watch } from "node:fs";
 import { resolve, join, dirname, basename, sep, isAbsolute } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { Socket } from "node:net";
@@ -218,6 +218,54 @@ let _mockGithubPolls = 0;
 // ── Terminal PTY state (dev:web only) ────────────────────────────────────────
 const devPtys = new Map(); // id -> { proc }
 let devPtyNextId = 1;
+
+// ── Live Repo watcher state (dev:web only, v3.10.0) ──────────────────────────
+const devWatchers = new Map();
+let devWatchNextId = 1;
+
+/**
+ * Mirror of `classify_path` in apps/desktop/src-tauri/src/commands/watcher.rs.
+ * Both implementations must stay in sync: the frontend switches on `kinds`
+ * identically in Tauri and dev:web mode.
+ */
+function devClassifyPath(rel) {
+  const p = rel.replace(/^\.\//, "");
+  if (p.startsWith(".git/")) {
+    const inner = p.slice(5);
+    if (inner.startsWith("objects/") || inner.startsWith("lfs/") || inner.endsWith(".lock")) return null;
+    if (inner === "refs/stash" || inner === "logs/refs/stash") return "stash";
+    if (inner.startsWith("logs/")) return null;
+    if (inner === "HEAD") return "head";
+    if (inner === "index") return "index";
+    if (inner === "config") return "config";
+    if (inner.startsWith("refs/") || inner === "packed-refs") return "refs";
+    if (["MERGE_HEAD", "REBASE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "MERGE_MSG"].includes(inner)
+      || inner.startsWith("rebase-merge/") || inner.startsWith("rebase-apply/")) return "mergeState";
+    return null;
+  }
+  const ignored = new Set(["node_modules", "target", "dist", ".venv", "__pycache__"]);
+  if (p.split("/").some((seg) => ignored.has(seg))) return null;
+  if (!p) return null;
+  return "worktree";
+}
+
+const DEV_EVENT_PATH_CAP = 512;
+
+function devCoalesceRepoPaths(batch) {
+  const kinds = new Set();
+  const paths = new Set();
+  for (const p of batch) {
+    const kind = devClassifyPath(p);
+    if (kind) { kinds.add(kind); paths.add(p); }
+  }
+  if (kinds.size === 0) return null;
+  const all = [...paths].sort();
+  return {
+    kinds: [...kinds].sort(),
+    paths: all.slice(0, DEV_EVENT_PATH_CAP),
+    truncated: all.length > DEV_EVENT_PATH_CAP,
+  };
+}
 
 /**
  * Get a GitHub OAuth token — tries in order:
@@ -6622,6 +6670,57 @@ async function handleRequest(req, res) {
       const { id } = await readBody(req);
       const entry = devPtys.get(id);
       if (entry) { try { entry.proc.kill(); } catch (_) {} devPtys.delete(id); }
+      return jsonResponse(req, res, { ok: true });
+    }
+
+    // ── Live Repo watcher (dev equivalent of the Tauri Channel) ───────────────
+    if (url.pathname === "/api/watch-repo" && req.method === "GET") {
+      const cwd = resolve(url.searchParams.get("cwd") || process.cwd());
+      const id = devWatchNextId++;
+      const sseOrigin = req.headers.origin;
+      const sseAllowOrigin = sseOrigin && ALLOWED_ORIGINS.has(sseOrigin) ? sseOrigin : "";
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+        ...(sseAllowOrigin ? { "Access-Control-Allow-Origin": sseAllowOrigin, Vary: "Origin" } : {}),
+      });
+      res.write(`data: ${JSON.stringify({ id })}\n\n`);
+
+      let batch = [];
+      let timer = null;
+      const flush = () => {
+        timer = null;
+        const ev = devCoalesceRepoPaths(batch);
+        batch = [];
+        if (ev && !res.writableEnded) res.write(`data: ${JSON.stringify(ev)}\n\n`);
+      };
+      let watcher;
+      try {
+        watcher = watch(cwd, { recursive: true }, (_type, filename) => {
+          if (!filename) return;
+          batch.push(String(filename).split(sep).join("/"));
+          if (!timer) timer = setTimeout(flush, 150);
+        });
+      } catch (err) {
+        res.write(`data: ${JSON.stringify({ error: String(err) })}\n\n`);
+        res.end();
+        return;
+      }
+      const close = () => {
+        try { watcher.close(); } catch (_) {}
+        if (timer) clearTimeout(timer);
+        devWatchers.delete(id);
+        if (!res.writableEnded) res.end();
+      };
+      devWatchers.set(id, { close });
+      req.on("close", close);
+      return;
+    }
+    if (url.pathname === "/api/watch-repo-stop" && req.method === "POST") {
+      const { id } = await readBody(req);
+      const entry = devWatchers.get(id);
+      if (entry) entry.close();
       return jsonResponse(req, res, { ok: true });
     }
 

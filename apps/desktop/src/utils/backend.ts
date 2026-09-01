@@ -21,7 +21,7 @@
  */
 
 // ─── Infrastructure (shared with sub-modules via backend-core.ts) ────────────
-import { isTauri, tauriInvoke, devFetch, DEV_SERVER, IPC_TIMEOUT, devTerminalOpen } from './backend-core';
+import { isTauri, tauriInvoke, devFetch, DEV_SERVER, IPC_TIMEOUT, devTerminalOpen, devWatchRepoOpen, devWatchRepoClose } from './backend-core';
 export { isTauri };
 // ─── Cross-module type imports for workspace helpers ─────────────────────────
 // PullRequest is defined in backend-pr.ts but used by workspacePrsAll here.
@@ -3334,6 +3334,50 @@ export async function terminalClose(id: number): Promise<void> {
     return;
   }
   await devFetch(`${DEV_SERVER}/api/terminal-close`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id }),
+  });
+}
+
+// ─── Live Repo watcher (v3.10.0) ──────────────────────────
+
+/** One coalesced batch of filesystem changes inside a watched repo. */
+export interface RepoChangeEvent {
+  /** Deduplicated, sorted change categories: head | index | refs | config | mergeState | stash | worktree. */
+  kinds: string[];
+  /** Repo-relative paths that changed, capped at 512 entries. */
+  paths: string[];
+  /** True when the batch exceeded the cap: treat `paths` as non-exhaustive. */
+  truncated: boolean;
+}
+
+/**
+ * Subscribe to filesystem changes in `cwd`. Returns a subscription id for
+ * `watchRepoStop`. Multiple subscriptions on the same repo share one OS
+ * watcher on the backend.
+ */
+export async function watchRepoStart(
+  cwd: string,
+  onChange: (ev: RepoChangeEvent) => void,
+): Promise<number> {
+  if (isTauri()) {
+    const { Channel } = await import("@tauri-apps/api/core");
+    const channel = new Channel<RepoChangeEvent>();
+    channel.onmessage = onChange;
+    return tauriInvoke<number>("watch_repo_start", { cwd, onChange: channel });
+  }
+  return devWatchRepoOpen(cwd, onChange);
+}
+
+/** Drop a subscription. Idempotent: an unknown id is a no-op. */
+export async function watchRepoStop(id: number): Promise<void> {
+  if (isTauri()) {
+    await tauriInvoke("watch_repo_stop", { id });
+    return;
+  }
+  devWatchRepoClose(id);
+  await devFetch(`${DEV_SERVER}/api/watch-repo-stop`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ id }),
