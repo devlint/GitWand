@@ -5433,7 +5433,7 @@ mod merge_no_ff_tests {
         fn parent_count_of_head(&self) -> usize {
             let out = self.git(&["rev-list", "--parents", "-n", "1", "HEAD"]);
             let line = String::from_utf8_lossy(&out.stdout);
-            line.trim().split_whitespace().count().saturating_sub(1)
+            line.split_whitespace().count().saturating_sub(1)
         }
     }
 
