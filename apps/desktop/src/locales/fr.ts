@@ -1756,6 +1756,23 @@ const fr: Locale = {
     reviewersShort: "Reviewers",
     refreshAll: "Tout rafraîchir",
     refreshAllTooltip: "Rafraîchir les 4 onglets en parallèle",
+    confirm: {
+      merge: {
+        title: "Merger cette pull request ?",
+        body: "{0} sera mergée dans {1}.",
+      },
+      nudge: {
+        title: "Envoyer une relance ?",
+        body: "Un commentaire sera posté sur {0}.",
+      },
+    },
+    nudge: {
+      comment: "Petite relance amicale : cette pull request est prête pour la review.",
+    },
+    toast: {
+      merged: "Pull request mergée.",
+      nudged: "Relance envoyée.",
+    },
     noWorkspace: {
       warning: "Créez d'abord un workspace pour utiliser Today",
     },

@@ -1747,6 +1747,23 @@ const es: Locale = {
     reviewersShort: "Revisores",
     refreshAll: "Actualizar todo",
     refreshAllTooltip: "Actualizar las 4 pestañas en paralelo",
+    confirm: {
+      merge: {
+        title: "¿Fusionar esta pull request?",
+        body: "{0} se fusionará en {1}.",
+      },
+      nudge: {
+        title: "¿Enviar un recordatorio?",
+        body: "Se publicará un comentario en {0}.",
+      },
+    },
+    nudge: {
+      comment: "Recordatorio amistoso: esta pull request está lista para revisión.",
+    },
+    toast: {
+      merged: "Pull request fusionada.",
+      nudged: "Recordatorio publicado.",
+    },
     noWorkspace: {
       warning: "Crea un workspace primero para usar Today",
     },

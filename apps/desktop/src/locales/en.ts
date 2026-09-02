@@ -1780,6 +1780,23 @@ const en = {
     reviewersShort: "Reviewers",
     refreshAll: "Refresh all",
     refreshAllTooltip: "Refresh all tabs in parallel",
+    confirm: {
+      merge: {
+        title: "Merge this pull request?",
+        body: "{0} will be merged into {1}.",
+      },
+      nudge: {
+        title: "Send a reminder?",
+        body: "A comment will be posted on {0}.",
+      },
+    },
+    nudge: {
+      comment: "Friendly ping: this pull request is ready for review.",
+    },
+    toast: {
+      merged: "Pull request merged.",
+      nudged: "Reminder posted.",
+    },
     noWorkspace: {
       warning: "Create a workspace first to use Today",
     },

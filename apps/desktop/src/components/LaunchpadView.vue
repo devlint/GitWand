@@ -5,7 +5,7 @@ import { avatarStyle, forgeAvatarUrl } from "../composables/useAvatar";
 import Avatar from "./Avatar.vue";
 import { useLaunchpadWip } from "../composables/useLaunchpadWip";
 import { useLaunchpadPrs } from "../composables/useLaunchpadPrs";
-import { useLaunchpadInbox, type InboxAction, type InboxCase } from "../composables/useLaunchpadInbox";
+import { useLaunchpadInbox, type InboxAction, type InboxCase, type InboxItem } from "../composables/useLaunchpadInbox";
 import { useLaunchpadIssues } from "../composables/useLaunchpadIssues";
 import { useLaunchpadScope } from "../composables/useLaunchpadScope";
 import { useRepoActionCards, type RepoCardKind } from "../composables/useRepoActionCards";
@@ -30,6 +30,12 @@ const emit = defineEmits<{
   (e: "open-issue", issue: IssueWithRepo): void;
   /** Open a repo's Changes view (local action card CTA) — handled by App.vue. */
   (e: "open-repo-changes", repoPath: string): void;
+  /** Merge a PR straight from its inbox card — handled by App.vue. */
+  (e: "merge-pr", pr: PrWithRepo): void;
+  /** Post a reminder comment on a PR that has been waiting for review — handled by App.vue. */
+  (e: "nudge-pr", pr: PrWithRepo): void;
+  /** Open the conflict resolver on the PR's repo and branch — handled by App.vue. */
+  (e: "resolve-pr", pr: PrWithRepo): void;
 }>();
 
 // close event removed — navigation is now handled by the sidebar viewMode switch
@@ -79,6 +85,30 @@ const inboxCount = computed(() => localTotal.value + inboxTotal.value);
 /** i18n label for an inbox action button. */
 function inboxActionLabel(action: InboxAction): string {
   return t(`launchpad.action.${action}`);
+}
+
+/**
+ * Route an inbox action to the right emit. Mutating actions (merge, nudge)
+ * are confirmed by the parent before anything happens; this component only
+ * declares intent.
+ */
+function runInboxAction(item: InboxItem): void {
+  const pr = item.pr;
+  if (!pr) return;
+  switch (item.classification.action) {
+    case "merge":
+    case "autoMerge":
+      emit("merge-pr", pr);
+      return;
+    case "nudge":
+      emit("nudge-pr", pr);
+      return;
+    case "resolve":
+      emit("resolve-pr", pr);
+      return;
+    default:
+      emit("open-pr", pr);
+  }
 }
 
 // Ephemeral collapsed-section state (keyed by section.key).
@@ -596,7 +626,7 @@ watch(scopedRepos, () => {
                   class="launchpad-view__pr-action"
                   :class="`launchpad-view__pr-action--${item.classification.action}`"
                   :title="inboxActionLabel(item.classification.action)"
-                  @click="emit('open-pr', item.pr)"
+                  @click="runInboxAction(item)"
                 >
                   {{ inboxActionLabel(item.classification.action) }}
                 </button>

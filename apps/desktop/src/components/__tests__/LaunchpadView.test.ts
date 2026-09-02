@@ -119,14 +119,28 @@ vi.mock("../../composables/useLaunchpadInbox", () => ({
 interface MountResult {
   app: App;
   container: HTMLDivElement;
-  emitted: { close: number; openPr: unknown[]; openIssue: unknown[] };
+  emitted: {
+    close: number;
+    openPr: unknown[];
+    openIssue: unknown[];
+    mergePr: unknown[];
+    nudgePr: unknown[];
+    resolvePr: unknown[];
+  };
 }
 
 function mountLaunchpad(repos: { path: string; name: string }[] = []): MountResult {
   const container = document.createElement("div");
   document.body.appendChild(container);
 
-  const emitted = { close: 0, openPr: [] as unknown[], openIssue: [] as unknown[] };
+  const emitted = {
+    close: 0,
+    openPr: [] as unknown[],
+    openIssue: [] as unknown[],
+    mergePr: [] as unknown[],
+    nudgePr: [] as unknown[],
+    resolvePr: [] as unknown[],
+  };
 
   const app = createApp(LaunchpadView, {
     repos,
@@ -138,6 +152,15 @@ function mountLaunchpad(repos: { path: string; name: string }[] = []): MountResu
     },
     onOpenIssue: (issue: unknown) => {
       emitted.openIssue.push(issue);
+    },
+    onMergePr: (pr: unknown) => {
+      emitted.mergePr.push(pr);
+    },
+    onNudgePr: (pr: unknown) => {
+      emitted.nudgePr.push(pr);
+    },
+    onResolvePr: (pr: unknown) => {
+      emitted.resolvePr.push(pr);
     },
   });
   app.mount(container);
@@ -375,7 +398,7 @@ describe("LaunchpadView — sections inbox rendering", () => {
     unmount(mounted);
   });
 
-  it("emits open-pr when a section action button is clicked", async () => {
+  it("emits open-pr when a section action button for a non-mutating action is clicked", async () => {
     settingsRef.value.launchpadActiveTab = "inbox";
     sectionsRef.value = sectionsFixture();
     inboxTotalRef.value = 3;
@@ -384,13 +407,14 @@ describe("LaunchpadView — sections inbox rendering", () => {
     const mounted = mountLaunchpad();
     await nextTick();
 
-    const action = mounted.container.querySelector<HTMLButtonElement>(".launchpad-view__pr-action");
-    expect(action).not.toBeNull();
-    action!.click();
+    // Third fixture item ("review" action) is not one of the mutating
+    // actions (merge/autoMerge/nudge/resolve), so it still emits open-pr.
+    const actions = mounted.container.querySelectorAll<HTMLButtonElement>(".launchpad-view__pr-action");
+    actions[2].click();
     await nextTick();
 
     expect(mounted.emitted.openPr).toHaveLength(1);
-    expect((mounted.emitted.openPr[0] as { number: number }).number).toBe(42);
+    expect((mounted.emitted.openPr[0] as { number: number }).number).toBe(44);
 
     unmount(mounted);
   });
@@ -582,6 +606,116 @@ describe("LaunchpadView — Refresh-all", () => {
     expect(refreshTeamMock).toHaveBeenCalledTimes(1);
 
     unmount(mounted);
+  });
+});
+
+describe("LaunchpadView — mutating action routing (Phase G)", () => {
+  function sectionWithAction(action: string, kind: "pr" = "pr") {
+    return [
+      {
+        key: "mine",
+        titleKey: "launchpad.section.mine",
+        count: 1,
+        items: [
+          {
+            pr: fakePr({ number: 77 }),
+            classification: { tier: "now", case: "merge", action, kind },
+          },
+        ],
+      },
+    ];
+  }
+
+  it("routes 'merge' action to merge-pr", async () => {
+    settingsRef.value.launchpadActiveTab = "inbox";
+    sectionsRef.value = sectionWithAction("merge");
+    inboxTotalRef.value = 1;
+
+    const mounted = mountLaunchpad();
+    await nextTick();
+
+    mounted.container.querySelector<HTMLButtonElement>(".launchpad-view__pr-action")!.click();
+    await nextTick();
+
+    expect(mounted.emitted.mergePr).toHaveLength(1);
+    expect((mounted.emitted.mergePr[0] as { number: number }).number).toBe(77);
+    expect(mounted.emitted.openPr).toHaveLength(0);
+
+    unmount(mounted);
+  });
+
+  it("routes 'autoMerge' action to merge-pr", async () => {
+    settingsRef.value.launchpadActiveTab = "inbox";
+    sectionsRef.value = sectionWithAction("autoMerge");
+    inboxTotalRef.value = 1;
+
+    const mounted = mountLaunchpad();
+    await nextTick();
+
+    mounted.container.querySelector<HTMLButtonElement>(".launchpad-view__pr-action")!.click();
+    await nextTick();
+
+    expect(mounted.emitted.mergePr).toHaveLength(1);
+    expect((mounted.emitted.mergePr[0] as { number: number }).number).toBe(77);
+
+    unmount(mounted);
+  });
+
+  it("routes 'nudge' action to nudge-pr", async () => {
+    settingsRef.value.launchpadActiveTab = "inbox";
+    sectionsRef.value = sectionWithAction("nudge");
+    inboxTotalRef.value = 1;
+
+    const mounted = mountLaunchpad();
+    await nextTick();
+
+    mounted.container.querySelector<HTMLButtonElement>(".launchpad-view__pr-action")!.click();
+    await nextTick();
+
+    expect(mounted.emitted.nudgePr).toHaveLength(1);
+    expect((mounted.emitted.nudgePr[0] as { number: number }).number).toBe(77);
+    expect(mounted.emitted.openPr).toHaveLength(0);
+
+    unmount(mounted);
+  });
+
+  it("routes 'resolve' action to resolve-pr", async () => {
+    settingsRef.value.launchpadActiveTab = "inbox";
+    sectionsRef.value = sectionWithAction("resolve");
+    inboxTotalRef.value = 1;
+
+    const mounted = mountLaunchpad();
+    await nextTick();
+
+    mounted.container.querySelector<HTMLButtonElement>(".launchpad-view__pr-action")!.click();
+    await nextTick();
+
+    expect(mounted.emitted.resolvePr).toHaveLength(1);
+    expect((mounted.emitted.resolvePr[0] as { number: number }).number).toBe(77);
+    expect(mounted.emitted.openPr).toHaveLength(0);
+
+    unmount(mounted);
+  });
+
+  it("routes every other action ('view', 'follow', 'reply', 'seeFailure') to open-pr", async () => {
+    for (const action of ["view", "follow", "reply", "seeFailure"]) {
+      settingsRef.value.launchpadActiveTab = "inbox";
+      sectionsRef.value = sectionWithAction(action);
+      inboxTotalRef.value = 1;
+
+      const mounted = mountLaunchpad();
+      await nextTick();
+
+      mounted.container.querySelector<HTMLButtonElement>(".launchpad-view__pr-action")!.click();
+      await nextTick();
+
+      expect(mounted.emitted.openPr).toHaveLength(1);
+      expect(mounted.emitted.mergePr).toHaveLength(0);
+      expect(mounted.emitted.nudgePr).toHaveLength(0);
+      expect(mounted.emitted.resolvePr).toHaveLength(0);
+
+      unmount(mounted);
+    }
   });
 });
 

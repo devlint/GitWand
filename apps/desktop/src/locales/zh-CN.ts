@@ -1734,6 +1734,23 @@ const zhCN: Locale = {
     reviewersShort: "审阅者",
     refreshAll: "全部刷新",
     refreshAllTooltip: "并行刷新所有 4 个标签页",
+    confirm: {
+      merge: {
+        title: "合并此拉取请求？",
+        body: "{0} 将被合并到 {1}。",
+      },
+      nudge: {
+        title: "发送提醒？",
+        body: "将在 {0} 上发布一条评论。",
+      },
+    },
+    nudge: {
+      comment: "友情提醒：此拉取请求已准备好接受审查。",
+    },
+    toast: {
+      merged: "拉取请求已合并。",
+      nudged: "提醒已发送。",
+    },
     noWorkspace: {
       warning: "请先创建工作区以使用 Today",
     },

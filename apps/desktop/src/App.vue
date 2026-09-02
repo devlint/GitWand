@@ -171,8 +171,9 @@ let pendingCommitReviewTrailers = "";
 const { isOffline: navIsOffline } = useNetworkStatus();
 const { isOnline: probedOnline, probeConnectivity } = useConnectivity();
 const isOffline = computed(() => navIsOffline.value || !probedOnline.value);
-import { isTauri, registerBrowserFolderPicker, pickFolder, checkForUpdates, fetchBetaUpdate, installUpdate, gitRepoState, openExternalUrl } from "./utils/backend";
+import { isTauri, registerBrowserFolderPicker, pickFolder, checkForUpdates, fetchBetaUpdate, installUpdate, gitRepoState, openExternalUrl, ghIssueAddComment } from "./utils/backend";
 import type { UpdateInfo, RepoOperationState, WorkspaceRepo, PullRequest } from "./utils/backend";
+import type { ForgeName } from "./composables/forge/types";
 import { onMarkdownLinkClick } from "./composables/useSafeHtml";
 import { resolveDirtySwitchAction, type DirtyFile } from "./utils/branchSwitchDecision";
 import { resolveDirtyPullAction } from "./utils/pullDirtyDecision";
@@ -721,6 +722,16 @@ function dismissToast() {
     successToastLeaving.value = false;
     successTimer = null;
   }, 200);
+}
+
+/** Transient toast for Launchpad mutating actions (merge/nudge) — reuses the
+ *  existing toast affordance rather than inventing a second one. */
+function showLaunchpadToast(title: string) {
+  if (successTimer != null) { window.clearTimeout(successTimer); successTimer = null; }
+  successToastLeaving.value = false;
+  successToast.value = title;
+  successToastDetail.value = null;
+  successTimer = window.setTimeout(dismissToast, 3000);
 }
 
 watch(repoSuccess, (val) => {
@@ -2670,6 +2681,108 @@ async function openLaunchpadRepoChanges(repoPath: string) {
 }
 
 /**
+ * Merge a PR straight from its Launchpad inbox card (v3.10, Phase G). Confirms
+ * through the app's `askConfirm` modal (never native `confirm()`), then
+ * reuses `usePrPanel`'s own merge path (`mergingPr` + `mergePr()`) rather than
+ * calling `ghMergePr` directly, so error handling / cache invalidation /
+ * dock-badge refresh stay identical to merging from PrDetailView.
+ */
+async function openLaunchpadMergePr(pr: PullRequest & { repoPath?: string }) {
+  const confirmed = await askConfirm({
+    title: t("launchpad.confirm.merge.title"),
+    message: t("launchpad.confirm.merge.body", pr.title, pr.base),
+  });
+  if (!confirmed) return;
+  if (pr.repoPath && pr.repoPath !== repoFolderPath.value) {
+    await handleOpenPath(pr.repoPath);
+    await nextTick();
+  }
+  await prPanel.loadRemote();
+  prPanel.mergingPr.value = pr;
+  await prPanel.mergePr();
+  // `mergePr()` nulls `mergingPr` only on success — that is the real signal,
+  // not `!prPanel.error.value` (sticky from any unrelated prior PR action,
+  // so it can both mask a genuine failure and suppress today's success).
+  if (prPanel.mergingPr.value === null) {
+    showLaunchpadToast(t("launchpad.toast.merged"));
+  } else {
+    // On failure `prPanel.error` is only rendered inside PrDetailView, which
+    // isn't mounted from the Launchpad — funnel it into the app-wide
+    // error-toast banner so it doesn't fail silently, and clear `mergingPr`
+    // ourselves so PrDetailView's merge dialog doesn't pop back open on a
+    // stale value the next time the user opens the PRs view.
+    repoError.value = prPanel.error.value;
+    prPanel.mergingPr.value = null;
+  }
+}
+
+/**
+ * Nudge state for the Launchpad "post a reminder comment" flow (v3.10, Phase
+ * G). GitHub-only for this release (decision #6): `ghIssueAddComment` posts a
+ * plain top-level comment on the PR's issue thread, which is what a reminder
+ * needs — `ghPrCreateComment` posts a diff-anchored review comment and
+ * requires a file `path`/`line`, so it is the wrong primitive here. Non-GitHub
+ * forges fall back to `open-pr`.
+ *
+ * The comment text is editable (decision #7): the modal pre-fills
+ * `launchpad.nudge.comment` into a textarea the user can change before
+ * sending, so this cannot reuse the plain-message `askConfirm` modal — it is
+ * a small dedicated `BaseModal` instead, same pattern as the commit "tag"
+ * modal (editable text field + Cancel/Confirm footer).
+ */
+const nudgeConfirm = ref<{ pr: PullRequest & { repoPath?: string }; comment: string; busy: boolean } | null>(null);
+
+function openLaunchpadNudgePr(pr: PullRequest & { repoPath?: string; forge?: ForgeName }) {
+  if (pr.forge && pr.forge !== "github") {
+    void openLaunchpadPr(pr);
+    return;
+  }
+  nudgeConfirm.value = { pr, comment: t("launchpad.nudge.comment"), busy: false };
+}
+
+function cancelNudgePr() {
+  nudgeConfirm.value = null;
+}
+
+async function confirmNudgePr() {
+  if (!nudgeConfirm.value || !nudgeConfirm.value.pr.repoPath) return;
+  const { pr, comment } = nudgeConfirm.value;
+  nudgeConfirm.value.busy = true;
+  try {
+    await ghIssueAddComment(pr.repoPath!, pr.number, comment);
+    nudgeConfirm.value = null;
+    showLaunchpadToast(t("launchpad.toast.nudged"));
+  } catch (err: any) {
+    repoError.value = err?.message ?? String(err);
+    if (nudgeConfirm.value) nudgeConfirm.value.busy = false;
+  }
+}
+
+/**
+ * Jump into the conflict resolver for a PR flagged DIRTY (mergeStateStatus)
+ * instead of opening the PR review page (v3.10, Phase G — a deliberate change
+ * from the previous open-pr behavior). Switches to the PR's repo, checks out
+ * its branch (same `checkoutPr` PrDetailView uses), then shows the Changes
+ * view where GitWand's own conflict engine surfaces working-tree conflicts.
+ */
+async function openLaunchpadResolvePr(pr: PullRequest & { repoPath?: string }) {
+  if (pr.repoPath && pr.repoPath !== repoFolderPath.value) {
+    await handleOpenPath(pr.repoPath);
+    await nextTick();
+  }
+  await prPanel.loadRemote();
+  // Clear any stale error first so the check below reflects this checkout,
+  // not a leftover from an unrelated prior PR action.
+  prPanel.error.value = null;
+  await prPanel.checkoutPr(pr);
+  if (prPanel.error.value) {
+    repoError.value = prPanel.error.value;
+    return;
+  }
+  viewMode.value = "changes";
+}
+
+/**
  * Handle the ⌘L / Ctrl+L shortcut (and the header Launchpad pill / menu item):
  * just switch to the Launchpad view. Its repos come from the open tabs, so
  * there is nothing to resolve — if no repo is open, the EmptyState shows.
@@ -4077,7 +4190,7 @@ onUnmounted(() => {
             <IssueDetailView v-else-if="viewMode === 'issue'" />
 
             <!-- Launchpad view: cross-repo dashboard (v2.10 nav revamp) -->
-            <LaunchpadView v-else-if="viewMode === 'launchpad'" :repos="launchpadRepos" @open-pr="openLaunchpadPr" @open-issue="openLaunchpadIssue" @open-repo-changes="openLaunchpadRepoChanges" />
+            <LaunchpadView v-else-if="viewMode === 'launchpad'" :repos="launchpadRepos" @open-pr="openLaunchpadPr" @open-issue="openLaunchpadIssue" @open-repo-changes="openLaunchpadRepoChanges" @merge-pr="openLaunchpadMergePr" @nudge-pr="openLaunchpadNudgePr" @resolve-pr="openLaunchpadResolvePr" />
           </template>
         </template>
       </main>
@@ -4544,6 +4657,21 @@ onUnmounted(() => {
         <button class="bm-btn" :class="genericConfirm.danger ? 'bm-btn--danger' : 'bm-btn--primary'"
           @click="onGenericConfirmDone">
           {{ genericConfirm.confirmLabel }}
+        </button>
+      </template>
+    </BaseModal>
+
+    <!-- Launchpad "nudge" — reminder comment, editable before sending (v3.10, Phase G) -->
+    <BaseModal v-if="nudgeConfirm" :title="t('launchpad.confirm.nudge.title')" size="sm" role="alertdialog"
+      @close="cancelNudgePr">
+      <p class="ptc-desc">{{ t('launchpad.confirm.nudge.body', nudgeConfirm.pr.title) }}</p>
+      <textarea v-model="nudgeConfirm.comment" class="cam-input" rows="4"
+        :disabled="nudgeConfirm.busy" style="resize: vertical;"></textarea>
+      <template #footer>
+        <button class="bm-btn bm-btn--ghost" :disabled="nudgeConfirm.busy" @click="cancelNudgePr">{{ t('common.cancel') }}</button>
+        <button class="bm-btn bm-btn--primary" :disabled="nudgeConfirm.busy || !nudgeConfirm.comment.trim()"
+          @click="confirmNudgePr">
+          {{ nudgeConfirm.busy ? t('common.loading') : t('common.confirm') }}
         </button>
       </template>
     </BaseModal>
