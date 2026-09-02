@@ -2771,32 +2771,43 @@ fn parse_clone_progress(line: &str) -> Option<CloneProgress> {
 /// `on_progress`. Splits on both `\r` and `\n` because git rewrites
 /// progress lines in place with `\r`. Returns the raw stderr bytes so the
 /// caller can build an error message if the process fails.
+///
+/// Buffers raw bytes (not decoded strings) across reads: a multi-byte UTF-8
+/// character can land right on a chunk boundary, and decoding each chunk
+/// independently via `from_utf8_lossy` before concatenating would mangle
+/// both halves into replacement characters even though the full byte
+/// sequence is valid once assembled. `\r`/`\n` are single-byte ASCII values
+/// that can never appear inside a multi-byte sequence, so splitting on raw
+/// bytes here never itself corrupts a character — only a complete line's
+/// bytes are ever decoded, as a whole.
 fn stream_progress(
     stderr: &mut impl std::io::Read,
     on_progress: &tauri::ipc::Channel<CloneProgress>,
 ) -> Vec<u8> {
     let mut all_stderr: Vec<u8> = Vec::new();
     let mut buf = [0u8; 512];
-    let mut carry = String::new();
+    let mut carry: Vec<u8> = Vec::new();
     loop {
         match stderr.read(&mut buf) {
             Ok(0) | Err(_) => break,
             Ok(n) => {
                 all_stderr.extend_from_slice(&buf[..n]);
-                let chunk = String::from_utf8_lossy(&buf[..n]);
-                let combined = carry.clone() + &chunk;
-                let parts: Vec<&str> = combined.split(['\r', '\n']).collect();
-                let carry_idx = parts.len().saturating_sub(1);
-                carry = parts[carry_idx].to_string();
-                for part in &parts[..carry_idx] {
-                    if let Some(prog) = parse_clone_progress(part) {
-                        let _ = on_progress.send(prog);
+                carry.extend_from_slice(&buf[..n]);
+                let mut line_start = 0;
+                for i in 0..carry.len() {
+                    if carry[i] == b'\r' || carry[i] == b'\n' {
+                        let line = String::from_utf8_lossy(&carry[line_start..i]);
+                        if let Some(prog) = parse_clone_progress(&line) {
+                            let _ = on_progress.send(prog);
+                        }
+                        line_start = i + 1;
                     }
                 }
+                carry.drain(..line_start);
             }
         }
     }
-    if let Some(prog) = parse_clone_progress(&carry) {
+    if let Some(prog) = parse_clone_progress(&String::from_utf8_lossy(&carry)) {
         let _ = on_progress.send(prog);
     }
     all_stderr
@@ -3029,6 +3040,67 @@ mod clone_fetch_channel_tests {
         );
 
         let _ = std::fs::remove_dir_all(&bare);
+    }
+
+    /// A `Read` impl that yields exactly one caller-supplied chunk per
+    /// `read()` call — used to force `stream_progress` to see a multi-byte
+    /// UTF-8 character split across two separate reads, which a real pipe
+    /// can do at any byte offset regardless of character boundaries.
+    struct ChunkedReader {
+        chunks: std::collections::VecDeque<Vec<u8>>,
+    }
+    impl std::io::Read for ChunkedReader {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            match self.chunks.pop_front() {
+                Some(chunk) => {
+                    let n = chunk.len().min(buf.len());
+                    buf[..n].copy_from_slice(&chunk[..n]);
+                    Ok(n)
+                }
+                None => Ok(0),
+            }
+        }
+    }
+
+    /// Regression for the multi-byte UTF-8 chunk-boundary corruption
+    /// (adversarial review of PR #178, Minor 2): decoding each raw chunk
+    /// independently via `String::from_utf8_lossy` before concatenating with
+    /// the carry buffer mangles a character split across the boundary into
+    /// replacement characters, even though the full byte sequence is valid
+    /// UTF-8 once assembled.
+    #[test]
+    fn stream_progress_handles_multibyte_utf8_split_across_chunks() {
+        let line = "remote: 日本語ブランチ\n";
+        let bytes = line.as_bytes();
+        // "remote: " is 8 ASCII bytes; "日" is E6 97 A5. Split after the
+        // second byte of that 3-byte sequence, mid-character.
+        let split_at = 8 + 2;
+        let (first, second) = bytes.split_at(split_at);
+
+        let mut reader = ChunkedReader {
+            chunks: std::collections::VecDeque::from(vec![first.to_vec(), second.to_vec()]),
+        };
+        let (channel, received) = collecting_channel();
+
+        stream_progress(&mut reader, &channel);
+
+        let msgs = received.lock().unwrap();
+        assert!(
+            msgs.iter().any(|m| {
+                m.get("message").and_then(|s| s.as_str()) == Some(line.trim())
+            }),
+            "expected the multi-byte line to decode intact, got {:?}",
+            *msgs
+        );
+        assert!(
+            !msgs.iter().any(|m| {
+                m.get("message")
+                    .and_then(|s| s.as_str())
+                    .is_some_and(|s| s.contains('\u{FFFD}'))
+            }),
+            "no message should contain a UTF-8 replacement character, got {:?}",
+            *msgs
+        );
     }
 
     #[test]

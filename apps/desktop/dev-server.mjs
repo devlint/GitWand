@@ -15,6 +15,7 @@ import { resolve, join, dirname, basename, sep, isAbsolute } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { Socket } from "node:net";
 import { createRequire } from "node:module";
+import { StringDecoder } from "node:string_decoder";
 const _require = createRequire(import.meta.url);
 // node-pty provides a real PTY in dev mode — proper echo, backspace, unbuffered
 // output, resize, and control sequences without any manual workarounds.
@@ -2365,9 +2366,18 @@ async function handleRequest(req, res) {
       });
       let allStderr = "";
       let carry = "";
+      // Decode via a StringDecoder rather than `chunk.toString()` per chunk:
+      // a multi-byte UTF-8 character (a non-ASCII branch/remote/user name in
+      // git's --progress output) can land on a chunk boundary, and decoding
+      // each raw chunk independently would corrupt both halves into
+      // replacement characters even though the full byte sequence is valid
+      // once assembled. StringDecoder buffers an incomplete trailing
+      // sequence internally and only emits it once complete.
+      const decoder = new StringDecoder("utf8");
       proc.stderr.on("data", (chunk) => {
-        allStderr += chunk;
-        const combined = carry + chunk.toString();
+        const text = decoder.write(chunk);
+        allStderr += text;
+        const combined = carry + text;
         const parts = combined.split(/[\r\n]/);
         carry = parts.pop() ?? "";
         for (const part of parts) {
@@ -2376,6 +2386,7 @@ async function handleRequest(req, res) {
         }
       });
       proc.on("close", (code) => {
+        allStderr += decoder.end();
         if (res.writableEnded) return;
         const prog = devParseCloneProgress(carry);
         if (prog) res.write(`data: ${JSON.stringify(prog)}\n\n`);
@@ -6503,9 +6514,14 @@ async function handleRequest(req, res) {
       const proc = spawn(GIT, ["clone", "--progress", u, d], { stdio: ["ignore", "ignore", "pipe"] });
       let allStderr = "";
       let carry = "";
+      // See the git-fetch-stream route above for why this uses StringDecoder
+      // rather than `chunk.toString()` per chunk (multi-byte UTF-8 chars can
+      // land on a chunk boundary).
+      const decoder = new StringDecoder("utf8");
       proc.stderr.on("data", (chunk) => {
-        allStderr += chunk;
-        const combined = carry + chunk.toString();
+        const text = decoder.write(chunk);
+        allStderr += text;
+        const combined = carry + text;
         const parts = combined.split(/[\r\n]/);
         carry = parts.pop() ?? "";
         for (const part of parts) {
@@ -6514,6 +6530,7 @@ async function handleRequest(req, res) {
         }
       });
       proc.on("close", (code) => {
+        allStderr += decoder.end();
         if (res.writableEnded) return;
         const prog = devParseCloneProgress(carry);
         if (prog) res.write(`data: ${JSON.stringify(prog)}\n\n`);

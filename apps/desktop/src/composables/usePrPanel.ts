@@ -1543,7 +1543,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     forge, forgeLabel,
     commentsForFile, commentCount, mergeReadiness, mergeBlocked, mergeBlockedReason, selectedDiff, displayedPrs,
     // Actions
-    init, ensurePrsLoaded, loadRemote, loadPrs, loadMorePrs, loadCurrentUser, selectPr, loadDiff,
+    init, ensurePrsLoaded, loadRemote, loadPrs, loadMorePrs, loadCurrentUser, selectPr, loadDiff, loadChecks,
     revalidateOpenDetail,
     createPr, checkoutPr, mergePr, convertDraftToReady,
     handleCreateComment, handleReplyComment, handleEditComment,

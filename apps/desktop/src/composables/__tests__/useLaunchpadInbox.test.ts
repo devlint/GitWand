@@ -159,6 +159,36 @@ describe("classifyInboxPr", () => {
     ).toEqual({ tier: "waiting", case: "waiting", action: "follow", kind: "pr" });
   });
 
+  it("classifies my PR awaiting review as nudge once stale with no response from requested reviewers", () => {
+    expect(
+      classifyInboxPr(
+        pr({
+          author: ME,
+          reviewDecision: "REVIEW_REQUIRED",
+          checksRollup: "SUCCESS",
+          reviewRequested: ["bob"],
+          updatedAt: "2020-01-01T00:00:00Z",
+        }),
+        ME
+      )
+    ).toEqual({ tier: "waiting", case: "waiting", action: "nudge", kind: "pr" });
+  });
+
+  it("does not nudge a PR awaiting review with requested reviewers that is still fresh", () => {
+    expect(
+      classifyInboxPr(
+        pr({
+          author: ME,
+          reviewDecision: "REVIEW_REQUIRED",
+          checksRollup: "SUCCESS",
+          reviewRequested: ["bob"],
+          updatedAt: new Date().toISOString(),
+        }),
+        ME
+      )
+    ).toEqual({ tier: "waiting", case: "waiting", action: "follow", kind: "pr" });
+  });
+
   it("prioritises changes-requested over conflicts (DIRTY) on my own PR", () => {
     // CHANGES_REQUESTED wins over mergeStateStatus=DIRTY (same as the old
     // priority: changes > ci > merge ordering is preserved).

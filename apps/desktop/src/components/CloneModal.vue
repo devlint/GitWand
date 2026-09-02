@@ -111,7 +111,11 @@ async function onClone() {
   try {
     const finalPath = await gitClone(url.value.trim(), destination.value, (p: CloneProgress) => {
       cloneStage.value   = p.stage;
-      clonePercent.value = p.percent;
+      // Monotonic clamp (mirrors useGitRepo.ts's fetchRemote progress handler,
+      // Phase E): the catch-all "info" stage (e.g. the `remote: Total N...`
+      // summary line) reports percent: 0, which would otherwise snap the bar
+      // back down right before the clone finishes.
+      clonePercent.value = Math.max(clonePercent.value, p.percent);
       cloneMessage.value = p.message;
     });
     emit("cloned", finalPath);

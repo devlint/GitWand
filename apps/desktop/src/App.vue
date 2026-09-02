@@ -177,6 +177,7 @@ import type { ForgeName } from "./composables/forge/types";
 import { onMarkdownLinkClick } from "./composables/useSafeHtml";
 import { resolveDirtySwitchAction, type DirtyFile } from "./utils/branchSwitchDecision";
 import { resolveDirtyPullAction } from "./utils/pullDirtyDecision";
+import { requireOnline } from "./utils/networkGuard";
 // UpdateModal moved above (lazy-loaded) — type imported as UpdateModalType for the template ref
 
 const { theme, toggle: toggleTheme } = useTheme();
@@ -2686,18 +2687,34 @@ async function openLaunchpadRepoChanges(repoPath: string) {
  * reuses `usePrPanel`'s own merge path (`mergingPr` + `mergePr()`) rather than
  * calling `ghMergePr` directly, so error handling / cache invalidation /
  * dock-badge refresh stay identical to merging from PrDetailView.
+ *
+ * Applies the same readiness gate `PrDetailView` uses to disable its merge
+ * button (`mergeBlocked` — conflicts / failing or pending checks / requested
+ * changes / no permission): `selectPr()` + `loadChecks()` populate the same
+ * `prDetail`/`prChecks`/`prReviews` that computed reads, so it reflects this
+ * PR rather than whatever was previously selected. `mergeMethod` is also
+ * reset to PrDetailView's own default ("merge") first, since it is a single
+ * app-wide ref that otherwise leaks whatever the user last picked for an
+ * unrelated PR.
  */
 async function openLaunchpadMergePr(pr: PullRequest & { repoPath?: string }) {
-  const confirmed = await askConfirm({
-    title: t("launchpad.confirm.merge.title"),
-    message: t("launchpad.confirm.merge.body", pr.title, pr.base),
-  });
-  if (!confirmed) return;
   if (pr.repoPath && pr.repoPath !== repoFolderPath.value) {
     await handleOpenPath(pr.repoPath);
     await nextTick();
   }
   await prPanel.loadRemote();
+  await prPanel.selectPr(pr);
+  await prPanel.loadChecks();
+  if (prPanel.mergeBlocked.value) {
+    repoError.value = prPanel.mergeBlockedReason.value;
+    return;
+  }
+  const confirmed = await askConfirm({
+    title: t("launchpad.confirm.merge.title"),
+    message: t("launchpad.confirm.merge.body", pr.title, pr.base),
+  });
+  if (!confirmed) return;
+  prPanel.mergeMethod.value = "merge";
   prPanel.mergingPr.value = pr;
   await prPanel.mergePr();
   // `mergePr()` nulls `mergingPr` only on success — that is the real signal,
@@ -2746,6 +2763,10 @@ function cancelNudgePr() {
 
 async function confirmNudgePr() {
   if (!nudgeConfirm.value || !nudgeConfirm.value.pr.repoPath) return;
+  if (!(await requireOnline("gh issue comment (nudge)"))) {
+    repoError.value = t("connectivity.offline.disabledOp");
+    return;
+  }
   const { pr, comment } = nudgeConfirm.value;
   nudgeConfirm.value.busy = true;
   try {

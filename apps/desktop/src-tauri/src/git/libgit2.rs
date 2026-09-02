@@ -7,6 +7,8 @@
 //! NOT used by the user-facing `git_status` command — that path keeps
 //! a CLI implementation for parity-test compatibility.
 
+use super::cmd::safe_repo_path;
+
 /// Read branch name + ahead/behind via libgit2. Returns
 /// `(branch, ahead, behind, has_no_upstream)`. All fields default to safe
 /// values on any libgit2 error so a single broken repo can't poison a
@@ -212,9 +214,27 @@ pub(crate) fn libgit2_diff_patch(cwd: &str, path: &str, staged: bool) -> Result<
     Ok(out)
 }
 
-/// In-process `git blame --porcelain`. Uses libgit2's default diff algorithm,
-/// which has no `--diff-algorithm` equivalent: the caller must only use this
-/// for the default (`histogram`) setting and fall back to the CLI otherwise.
+/// In-process `git blame --porcelain`. Uses libgit2's default diff algorithm
+/// (`git2::BlameOptions` exposes no `--diff-algorithm` knob: internally it's
+/// bundled libgit2's `xdiff`, unconfigured, i.e. Myers), which has no
+/// `--diff-algorithm` equivalent: the caller must only use this for the
+/// default (`histogram`) setting and fall back to the CLI otherwise.
+///
+/// Accuracy note (adversarial review of PR #178, Priority 5): a plain diff
+/// between Myers and histogram *can* produce differently-shaped hunks around
+/// a moved block with duplicate separator lines nearby (verified by hand —
+/// see the `blame_attribution_matches_the_cli_on_a_moved_block` fixture
+/// below). Blame attribution held up anyway: unlike a diff, blame doesn't
+/// need to agree on *how* a change is hunked, only on which single commit
+/// last touched each surviving line, and both algorithms still resolve that
+/// the same way once a line's content is otherwise unambiguous. Real
+/// divergence would require genuinely duplicate, indistinguishable line
+/// content with more than one plausible origin commit — a case that is
+/// inherently ambiguous for the CLI's own blame too, algorithm choice aside.
+/// If a future fixture does show a real attribution divergence, follow the
+/// plan's original fallback: gate `git_blame`'s libgit2 fast path off
+/// entirely and go back to CLI-only for blame (independent of `git_diff`'s
+/// libgit2 path, which stays put).
 pub(crate) fn libgit2_blame(
     cwd: &str,
     path: &str,
@@ -225,8 +245,8 @@ pub(crate) fn libgit2_blame(
         .blame_file(std::path::Path::new(path), None)
         .map_err(|e| format!("git2 blame: {e}"))?;
 
-    let workdir = repo.workdir().ok_or_else(|| "bare repository".to_string())?;
-    let content = std::fs::read_to_string(workdir.join(path))
+    let safe_path = safe_repo_path(cwd, path)?;
+    let content = std::fs::read_to_string(&safe_path)
         .map_err(|e| format!("failed to read {path}: {e}"))?;
     let file_lines: Vec<&str> = content.split('\n').collect();
 
@@ -548,5 +568,113 @@ mod tests {
         assert_eq!(lg2[3].content, "four");
         assert_eq!(lg2[0].hash.len(), 7);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Go/no-go gate, moved-block variant (adversarial review of PR #178,
+    /// Priority 5): the sequential-edit fixture above doesn't exercise a
+    /// reordered block. This one reorders a block *and* edits another line in
+    /// the very same commit, with duplicate `X` separator lines around each
+    /// block — confirmed (via `git diff --diff-algorithm=myers` vs
+    /// `=histogram` on this exact content) to actually produce differently
+    /// shaped hunks between the two algorithms, unlike a plain block move
+    /// with no nearby duplicate lines. If libgit2's default diffing (Myers,
+    /// no `histogram`/`patience` flag — `xdiff`'s default) disagreed with the
+    /// CLI's histogram output on *attribution*, this is where it would show,
+    /// even though the two algorithms already disagree on hunk shape here.
+    #[test]
+    fn blame_attribution_matches_the_cli_on_a_moved_block() {
+        use std::process::Command;
+        let dir = temp_repo("blame-moved-block");
+        let run = |args: &[&str]| {
+            Command::new("git").args(args).current_dir(&dir).output().unwrap();
+        };
+
+        std::fs::write(
+            dir.join("a.txt"),
+            "X\nA1\nA2\nX\nB1\nB2\nX\nC1\nC2\nX\n",
+        )
+        .unwrap();
+        run(&["config", "user.name", "Blocks"]);
+        run(&["commit", "-qam", "three blocks: A B C"]);
+
+        // Move block C to the front AND edit A2 in the same commit — this
+        // combination is what makes Myers and histogram pick genuinely
+        // different hunk boundaries (verified by hand against plain `git
+        // diff` on this content), unlike an isolated pure reorder.
+        std::fs::write(
+            dir.join("a.txt"),
+            "X\nC1\nC2\nX\nAA2\nX\nB1\nB2\nX\n",
+        )
+        .unwrap();
+        run(&["config", "user.name", "Mover"]);
+        run(&["commit", "-qam", "move block C to the front, edit A2 -> AA2"]);
+
+        let lg2 = libgit2_blame(dir.to_str().unwrap(), "a.txt", 10_000).unwrap();
+
+        let out = Command::new("git")
+            .args(["blame", "--porcelain", "--diff-algorithm=histogram", "--", "a.txt"])
+            .current_dir(&dir)
+            .output()
+            .unwrap();
+        let raw = String::from_utf8_lossy(&out.stdout);
+        let cli_shas: Vec<String> = raw
+            .lines()
+            .filter_map(|l| {
+                let parts: Vec<&str> = l.split_whitespace().collect();
+                if parts.len() >= 3 && parts[0].len() == 40 { Some(parts[0].to_string()) } else { None }
+            })
+            .collect();
+
+        assert_eq!(lg2.len(), cli_shas.len(), "line count differs");
+        let mismatches: Vec<usize> = (0..lg2.len())
+            .filter(|&i| lg2[i].hash_full != cli_shas[i])
+            .collect();
+        assert!(
+            mismatches.is_empty(),
+            "attribution differs at lines {mismatches:?} (0-indexed); \
+             lg2={:?} cli={:?}",
+            lg2.iter().map(|l| &l.hash).collect::<Vec<_>>(),
+            cli_shas.iter().map(|s| &s[..7]).collect::<Vec<_>>(),
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Security regression: `libgit2_blame` must route its working-tree read
+    /// through `safe_repo_path()` like every other filesystem call site. A
+    /// symlink committed inside the tracked tree that points outside the
+    /// workdir must not be followed to read arbitrary files on disk.
+    #[test]
+    fn blame_on_a_symlink_escaping_the_workdir_is_rejected() {
+        use std::process::Command;
+        let dir = temp_repo("blame-symlink-escape");
+        let run = |args: &[&str]| {
+            Command::new("git").args(args).current_dir(&dir).output().unwrap();
+        };
+
+        let secret_dir = std::env::temp_dir().join(format!(
+            "gw-lg2-blame-secret-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&secret_dir);
+        std::fs::create_dir_all(&secret_dir).unwrap();
+        let secret_file = secret_dir.join("secret.txt");
+        std::fs::write(&secret_file, "top-secret-contents\n").unwrap();
+
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&secret_file, dir.join("link.txt")).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_file(&secret_file, dir.join("link.txt")).unwrap();
+
+        run(&["add", "link.txt"]);
+        run(&["commit", "-qm", "add escaping symlink"]);
+
+        let result = libgit2_blame(dir.to_str().unwrap(), "link.txt", 10_000);
+        assert!(
+            result.is_err(),
+            "expected an Err for a symlink escaping the workdir, got: {result:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&secret_dir);
     }
 }
