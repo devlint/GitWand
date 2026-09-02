@@ -64,6 +64,7 @@ const zhCN: Locale = {
     pull: "拉取",
     sync: "同步",
     syncTooltip: "获取远程分支并拉取",
+    fetchProgress: "正在获取… {0}%",
     merge: "合并",
     mergeTooltip: "将其他分支合并到当前分支",
     mergeFilterPlaceholder: "要合并的分支…",

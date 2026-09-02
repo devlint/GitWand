@@ -57,6 +57,7 @@ const en = {
     pull: "Pull",
     sync: "Sync",
     syncTooltip: "Fetch remote branches and pull",
+    fetchProgress: "Fetching… {0}%",
     merge: "Merge",
     mergeTooltip: "Merge a branch into the current branch",
     mergeFilterPlaceholder: "Branch to merge\u2026",

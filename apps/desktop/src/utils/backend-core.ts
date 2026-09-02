@@ -213,3 +213,75 @@ export function devWatchRepoClose(id: number): void {
     _devWatchStreams.delete(id);
   }
 }
+
+/** One progress update from `git clone --progress` / `git fetch --progress`. */
+interface DevCloneProgress {
+  stage: string;
+  percent: number;
+  message: string;
+}
+
+/**
+ * Dev-mode (`pnpm dev:web`) equivalent of the Tauri `git_clone` Channel: an
+ * SSE stream that forwards `{stage,percent,message}` progress messages,
+ * then resolves on `{done: dest}` or rejects on `{error}`.
+ */
+export async function devGitClone(
+  url: string,
+  dest: string,
+  onProgress?: (p: DevCloneProgress) => void,
+): Promise<string> {
+  const params = new URLSearchParams({ url, dest });
+  return new Promise((resolve, reject) => {
+    const es = new EventSource(`${DEV_SERVER}/api/git-clone-stream?${params}`);
+    es.onmessage = (ev) => {
+      const payload = JSON.parse(ev.data);
+      if (typeof payload?.done === "string") {
+        es.close();
+        resolve(payload.done);
+      } else if (typeof payload?.error === "string") {
+        es.close();
+        reject(new Error(payload.error));
+      } else if (typeof payload?.stage === "string") {
+        onProgress?.(payload as DevCloneProgress);
+      }
+    };
+    es.onerror = () => {
+      es.close();
+      reject(new Error("dev server unreachable: git-clone-stream SSE failed"));
+    };
+  });
+}
+
+/**
+ * Dev-mode (`pnpm dev:web`) equivalent of the Tauri `git_fetch` Channel: an
+ * SSE stream that forwards `{stage,percent,message}` progress messages,
+ * then resolves with the final `{result}` (a `GitPushPullResult`-shaped
+ * object). Mirrors the Rust command: a failed fetch resolves with
+ * `result.success === false` rather than rejecting the promise.
+ */
+export async function devGitFetch(
+  cwd: string,
+  onProgress?: (p: DevCloneProgress) => void,
+): Promise<{ success: boolean; message: string; conflicts?: boolean }> {
+  const params = new URLSearchParams({ cwd });
+  return new Promise((resolve, reject) => {
+    const es = new EventSource(`${DEV_SERVER}/api/git-fetch-stream?${params}`);
+    es.onmessage = (ev) => {
+      const payload = JSON.parse(ev.data);
+      if (payload?.result) {
+        es.close();
+        resolve(payload.result);
+      } else if (typeof payload?.error === "string") {
+        es.close();
+        reject(new Error(payload.error));
+      } else if (typeof payload?.stage === "string") {
+        onProgress?.(payload as DevCloneProgress);
+      }
+    };
+    es.onerror = () => {
+      es.close();
+      reject(new Error("dev server unreachable: git-fetch-stream SSE failed"));
+    };
+  });
+}

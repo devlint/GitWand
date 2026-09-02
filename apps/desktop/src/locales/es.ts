@@ -57,6 +57,7 @@ const es: Locale = {
     pull: "Pull",
     sync: "Sincronizar",
     syncTooltip: "Recuperar ramas remotas y hacer pull",
+    fetchProgress: "Obteniendo… {0} %",
     merge: "Merge",
     mergeTooltip: "Hacer merge de una rama en la rama actual",
     mergeFilterPlaceholder: "Rama a fusionar…",

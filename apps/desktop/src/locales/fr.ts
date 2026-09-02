@@ -51,6 +51,7 @@ const fr: Locale = {
     pull: "Pull",
     sync: "Sync",
     syncTooltip: "Récupérer les branches distantes et pull",
+    fetchProgress: "Récupération… {0} %",
     merge: "Merge",
     mergeTooltip: "Merger une branche dans la branche courante",
     mergeFilterPlaceholder: "Branche à merger\u2026",

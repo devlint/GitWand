@@ -58,6 +58,7 @@ const ptBR: Locale = {
     pull: "Pull",
     sync: "Sincronizar",
     syncTooltip: "Buscar branches remotos e fazer pull",
+    fetchProgress: "Buscando… {0}%",
     merge: "Merge",
     mergeTooltip: "Fazer merge de um branch no branch atual",
     mergeFilterPlaceholder: "Branch para mesclar…",

@@ -11,12 +11,13 @@
  * is derived from the URL (last segment, `.git` stripped). Lets us keep
  * the form short while still being explicit about where files will land.
  *
- * v2.11: real-time progress bar via `clone-progress` Tauri events emitted
- * by the Rust backend as it reads git's stderr line by line.
+ * v2.11: real-time progress bar via a per-invoke IPC channel passed to
+ * `gitClone` (v3.10.0 — replaced the earlier `clone-progress` broadcast
+ * event, which every window/listener shared).
  */
-import { computed, onMounted, onUnmounted, nextTick, ref } from "vue";
+import { computed, onMounted, nextTick, ref } from "vue";
 import { useI18n } from "../composables/useI18n";
-import { gitClone, pickFolder } from "../utils/backend";
+import { gitClone, pickFolder, type CloneProgress } from "../utils/backend";
 import { requireOnline } from "../utils/networkGuard";
 import BaseModal from "./BaseModal.vue";
 
@@ -34,12 +35,6 @@ const error = ref<string | null>(null);
 const urlInputEl = ref<HTMLInputElement | null>(null);
 
 // ─── Clone progress (v2.11) ──────────────────────────────────
-interface CloneProgressEvent {
-  stage:   string;   // "init" | "counting" | "compressing" | "receiving" | "resolving" | "done"
-  percent: number;
-  message: string;
-}
-
 const cloneStage   = ref<string>("");
 const clonePercent = ref<number>(0);
 const cloneMessage = ref<string>("");
@@ -74,29 +69,6 @@ const barPercent = computed<number>(() => {
     default:            return clonePercent.value;
   }
 });
-
-let _unlisten: (() => void) | null = null;
-
-async function startProgressListener() {
-  try {
-    const { listen } = await import("@tauri-apps/api/event");
-    _unlisten = await listen<CloneProgressEvent>("clone-progress", (ev) => {
-      const { stage, percent, message } = ev.payload;
-      cloneStage.value   = stage;
-      clonePercent.value = percent;
-      cloneMessage.value = message;
-    });
-  } catch {
-    // Browser dev mode — no Tauri events available, progress bar hidden
-  }
-}
-
-function stopProgressListener() {
-  _unlisten?.();
-  _unlisten = null;
-}
-
-onUnmounted(() => stopProgressListener());
 
 /**
  * Derive the bare repo name from the URL — last segment, `.git` stripped.
@@ -136,15 +108,17 @@ async function onClone() {
   clonePercent.value = 0;
   cloneMessage.value = "";
 
-  await startProgressListener();
   try {
-    const finalPath = await gitClone(url.value.trim(), destination.value);
+    const finalPath = await gitClone(url.value.trim(), destination.value, (p: CloneProgress) => {
+      cloneStage.value   = p.stage;
+      clonePercent.value = p.percent;
+      cloneMessage.value = p.message;
+    });
     emit("cloned", finalPath);
     emit("close");
   } catch (err: unknown) {
     error.value = err instanceof Error ? err.message : String(err);
   } finally {
-    stopProgressListener();
     isCloning.value = false;
   }
 }

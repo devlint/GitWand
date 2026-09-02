@@ -78,6 +78,8 @@ const props = defineProps<{
   forcePushPreferred: boolean;
   /** Whether a fetch is in flight (drives the sync-split spinner). */
   isFetching?: boolean;
+  /** 0-100 while a user-initiated fetch streams progress; 0 otherwise (v3.10.0). */
+  fetchPercent?: number;
   /** True when the device has no network connectivity. */
   isOffline?: boolean;
   // Branch popover
@@ -494,6 +496,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
             :is-pulling="isPulling"
             :force-push-preferred="forcePushPreferred"
             :is-fetching="isFetching ?? false"
+            :fetch-percent="fetchPercent ?? 0"
             :can-push="canPush"
             :can-pull="canPull"
             :is-offline="isOffline"

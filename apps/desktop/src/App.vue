@@ -250,6 +250,7 @@ const {
   isPushing,
   isPulling,
   isFetching,
+  fetchPercent,
   openRepo,
   closeRepo,
   refresh: repoRefresh,
@@ -3816,7 +3817,7 @@ onUnmounted(() => {
       :needs-publish="needsPublish" :ahead-count="aheadCount" :behind-count="behindCount"
       :main-commit-count="mainCommitCount" :push-remote="pushRemote"
       :ahead-push-count="aheadPushCount" :is-pushing="isPushing" :is-pulling="isPulling"
-      :force-push-preferred="forcePushPreferred" :is-fetching="isFetching"
+      :force-push-preferred="forcePushPreferred" :is-fetching="isFetching" :fetch-percent="fetchPercent"
       :cwd="repoFolderPath ?? ''" :branches="branches" :worktree-branches="worktreeBranches" :branches-loading="branchesLoading"
       :is-switching-branch="isSwitchingBranch" :is-merging="isMerging" :tabs="repoTabs" :active-tab-id="activeTabId"
       :active-repo-path="activeRepoPath" :load-worktrees="loadProjectWorktrees"

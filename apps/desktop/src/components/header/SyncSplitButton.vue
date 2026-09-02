@@ -22,6 +22,8 @@ const props = defineProps<{
   isPulling: boolean;
   forcePushPreferred: boolean;
   isFetching: boolean;
+  /** 0-100 while a user-initiated fetch streams progress; 0 otherwise (v3.10.0). */
+  fetchPercent?: number;
   canPush: boolean;
   canPull: boolean;
   /** Fork / triangular workflow: push remote when it differs from upstream. */
@@ -60,6 +62,12 @@ const action = computed(() =>
 // use {0} for count; the singular variants (pushOne / pullOne) take no params.
 const primaryLabel = computed(() => {
   const a = action.value;
+  // While a user-initiated fetch is in flight, swap in the live percentage
+  // (v3.10.0) — `fetchPercent` stays 0 for the silent background poll tick,
+  // so this only ever fires for the click-driven fetch.
+  if (a.primary.id === "fetch" && props.isFetching && (props.fetchPercent ?? 0) > 0) {
+    return t("header.fetchProgress", props.fetchPercent as number);
+  }
   const n = a.primaryLabelParams?.n;
   // labelKey values are hand-authored in useSyncAction and correspond to real
   // entries in the locale files; cast is safe.

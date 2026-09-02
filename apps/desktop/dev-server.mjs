@@ -93,6 +93,49 @@ const GH = resolveBin("gh");
 const GIT = resolveBin("git");
 
 /**
+ * Extract a percentage from a git progress line, e.g.
+ * "Receiving objects:  56% (456/812), 1.2 MiB | 3.4 MiB/s". Mirrors the Rust
+ * `extract_percent` helper in `commands/ops.rs` — keep the two in sync.
+ */
+function devExtractPercent(line) {
+  const pctPos = line.indexOf("%");
+  if (pctPos === -1) return 0;
+  const before = line.slice(0, pctPos).trimEnd();
+  const m = before.match(/(\d+(?:\.\d+)?)\s*$/);
+  if (!m) return 0;
+  return Math.min(100, Math.max(0, parseFloat(m[1])));
+}
+
+/**
+ * Classify one line of `git clone --progress` / `git fetch --progress`
+ * stderr into a `{stage,percent,message}` update. Mirrors the Rust
+ * `parse_clone_progress` helper in `commands/ops.rs` — keep the two in sync.
+ */
+function devParseCloneProgress(line) {
+  const l = line.trim();
+  if (!l) return null;
+  if (l.startsWith("Cloning into")) {
+    return { stage: "init", percent: 0, message: l };
+  }
+  if (l.startsWith("remote: Counting") || l.startsWith("remote: Enumerating")) {
+    return { stage: "counting", percent: devExtractPercent(l), message: l };
+  }
+  if (l.startsWith("remote: Compressing")) {
+    return { stage: "compressing", percent: devExtractPercent(l), message: l };
+  }
+  if (l.startsWith("Receiving objects:")) {
+    return { stage: "receiving", percent: devExtractPercent(l), message: l };
+  }
+  if (l.startsWith("Resolving deltas:")) {
+    return { stage: "resolving", percent: devExtractPercent(l), message: l };
+  }
+  if (l.includes("done") || l.includes("complete")) {
+    return { stage: "done", percent: 100, message: l };
+  }
+  return { stage: "info", percent: 0, message: l };
+}
+
+/**
  * Guess a MIME type from a file extension. Mirrors the Rust `guess_mime_from_ext`
  * helper. Keep the two lists in sync.
  */
@@ -2297,6 +2340,53 @@ async function handleRequest(req, res) {
       } catch (err) {
         return jsonResponse(req, res, { success: false, message: ((err.stdout || "") + (err.stderr || "")).toString().trim() || err.message });
       }
+    }
+
+    // GET /api/git-fetch-stream?cwd=..
+    // Dev-mode SSE equivalent of the Tauri `git_fetch` Channel (v3.10.0):
+    // streams `{stage,percent,message}` progress, then a final
+    // `{result: GitPushPullResult}`. Reuses the clone parser — `git fetch
+    // --progress` emits the same vocabulary.
+    if (url.pathname === "/api/git-fetch-stream" && req.method === "GET") {
+      const cwd = url.searchParams.get("cwd");
+      if (!cwd) return jsonResponse(req, res, { error: "Missing cwd" }, 400);
+      const resolvedCwd = resolve(cwd);
+      const sseOrigin = req.headers.origin;
+      const sseAllowOrigin = sseOrigin && ALLOWED_ORIGINS.has(sseOrigin) ? sseOrigin : "";
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+        ...(sseAllowOrigin ? { "Access-Control-Allow-Origin": sseAllowOrigin, Vary: "Origin" } : {}),
+      });
+      const proc = spawn(GIT, ["fetch", "--prune", "--progress"], {
+        cwd: resolvedCwd,
+        stdio: ["ignore", "ignore", "pipe"],
+      });
+      let allStderr = "";
+      let carry = "";
+      proc.stderr.on("data", (chunk) => {
+        allStderr += chunk;
+        const combined = carry + chunk.toString();
+        const parts = combined.split(/[\r\n]/);
+        carry = parts.pop() ?? "";
+        for (const part of parts) {
+          const prog = devParseCloneProgress(part);
+          if (prog && !res.writableEnded) res.write(`data: ${JSON.stringify(prog)}\n\n`);
+        }
+      });
+      proc.on("close", (code) => {
+        if (res.writableEnded) return;
+        const prog = devParseCloneProgress(carry);
+        if (prog) res.write(`data: ${JSON.stringify(prog)}\n\n`);
+        const success = code === 0;
+        if (success) res.write(`data: ${JSON.stringify({ stage: "done", percent: 100, message: "Fetch complete" })}\n\n`);
+        const result = { success, message: success ? "" : allStderr.trim() };
+        res.write(`data: ${JSON.stringify({ result })}\n\n`);
+        res.end();
+      });
+      req.on("close", () => { try { proc.kill(); } catch (_) {} });
+      return;
     }
 
     // POST /api/git-merge  { cwd, branch }
@@ -6390,6 +6480,53 @@ async function handleRequest(req, res) {
         return jsonResponse(req, res, { error: detail }, 500);
       }
       return jsonResponse(req, res, { dest: d });
+    }
+
+    // GET /api/git-clone-stream?url=..&dest=..
+    // Dev-mode SSE equivalent of the Tauri `git_clone` Channel (v3.10.0):
+    // streams `{stage,percent,message}` progress, then `{done: dest}` or
+    // `{error}`.
+    if (url.pathname === "/api/git-clone-stream" && req.method === "GET") {
+      const u = (url.searchParams.get("url") || "").trim();
+      const d = (url.searchParams.get("dest") || "").trim();
+      if (!u || !d) {
+        return jsonResponse(req, res, { error: "Empty URL or destination" }, 400);
+      }
+      const sseOrigin = req.headers.origin;
+      const sseAllowOrigin = sseOrigin && ALLOWED_ORIGINS.has(sseOrigin) ? sseOrigin : "";
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+        ...(sseAllowOrigin ? { "Access-Control-Allow-Origin": sseAllowOrigin, Vary: "Origin" } : {}),
+      });
+      const proc = spawn(GIT, ["clone", "--progress", u, d], { stdio: ["ignore", "ignore", "pipe"] });
+      let allStderr = "";
+      let carry = "";
+      proc.stderr.on("data", (chunk) => {
+        allStderr += chunk;
+        const combined = carry + chunk.toString();
+        const parts = combined.split(/[\r\n]/);
+        carry = parts.pop() ?? "";
+        for (const part of parts) {
+          const prog = devParseCloneProgress(part);
+          if (prog && !res.writableEnded) res.write(`data: ${JSON.stringify(prog)}\n\n`);
+        }
+      });
+      proc.on("close", (code) => {
+        if (res.writableEnded) return;
+        const prog = devParseCloneProgress(carry);
+        if (prog) res.write(`data: ${JSON.stringify(prog)}\n\n`);
+        if (code === 0) {
+          res.write(`data: ${JSON.stringify({ done: d })}\n\n`);
+        } else {
+          const detail = allStderr.trim() || "git clone failed";
+          res.write(`data: ${JSON.stringify({ error: detail })}\n\n`);
+        }
+        res.end();
+      });
+      req.on("close", () => { try { proc.kill(); } catch (_) {} });
+      return;
     }
 
     // POST /api/gh-fork  { url, parentDir }
