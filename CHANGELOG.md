@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.9.1] - 2026-09-02
+
 ### Added
 
 - **No-fast-forward merge option** (#177). The "Merge into current…" popover gets an "Always create a merge commit" checkbox — forces `git merge --no-ff` so merging a fast-forwardable branch still records an explicit merge commit, matching teams whose workflow requires one. Off by default; the existing fast-forward behavior is unchanged.
@@ -1417,7 +1419,8 @@ Design-system foundations — the app header and every overlay now ride on a sha
 - CI pipeline via GitHub Actions (Node 18, 20, 22)
 - 28 tests covering all patterns + real-world scenarios (package.json, Laravel routes, Vue SFC, CSS, .env files)
 
-[Unreleased]: https://github.com/devlint/GitWand/compare/v3.8.0...HEAD
+[Unreleased]: https://github.com/devlint/GitWand/compare/v3.9.1...HEAD
+[3.9.1]: https://github.com/devlint/GitWand/compare/v3.9.0...v3.9.1
 [3.9.0]: https://github.com/devlint/GitWand/compare/v3.8.0...v3.9.0
 [3.8.0]: https://github.com/devlint/GitWand/compare/v3.7.3...v3.8.0
 [3.7.3]: https://github.com/devlint/GitWand/compare/v3.7.2...v3.7.3
