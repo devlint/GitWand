@@ -494,16 +494,27 @@ pub(crate) async fn git_fetch(cwd: String) -> Result<GitPushPullResult, String> 
 }
 
 #[tauri::command]
-pub(crate) async fn git_merge(cwd: String, branch: String) -> Result<GitPushPullResult, String> {
+pub(crate) async fn git_merge(
+    cwd: String,
+    branch: String,
+    no_ff: Option<bool>,
+) -> Result<GitPushPullResult, String> {
     let _repo = repo_lock::write(&cwd);
     let _t0 = Instant::now();
+    let mut args: Vec<&str> = vec!["merge", &branch];
+    if no_ff.unwrap_or(false) {
+        // --no-ff always creates a merge commit, which otherwise opens an
+        // editor for the commit message; --no-edit keeps it non-interactive.
+        args.push("--no-ff");
+        args.push("--no-edit");
+    }
     let output = git_cmd()
-        .args(["merge", &branch])
+        .args(&args)
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to run git merge: {}", e))?;
     record_cmd(
-        &format!("git merge {}", branch),
+        &format!("git {}", args.join(" ")),
         &cwd,
         _t0.elapsed().as_millis() as u64,
         output.status.code().unwrap_or(-1),
@@ -5354,5 +5365,123 @@ mod snapshot_hook_tests {
         // of snapshots — what matters is that we reached it at all.
         assert!(list_snapshots_inner(&repo.cwd()).unwrap().is_empty());
         let _ = res;
+    }
+}
+
+#[cfg(test)]
+mod merge_no_ff_tests {
+    use super::*;
+    use crate::git::cmd::git_binary;
+    use std::path::PathBuf;
+    use std::process::Command;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    struct TempRepo {
+        path: PathBuf,
+    }
+    impl Drop for TempRepo {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+    impl TempRepo {
+        fn new() -> Self {
+            let n = COUNTER.fetch_add(1, Ordering::SeqCst);
+            let pid = std::process::id();
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let dir =
+                std::env::temp_dir().join(format!("gitwand-noff-test-{}-{}-{}", pid, n, nanos));
+            std::fs::create_dir_all(&dir).unwrap();
+            let repo = TempRepo { path: dir };
+            repo.git_ok(&["init", "-q", "-b", "main"]);
+            repo.git_ok(&["config", "user.name", "Test"]);
+            repo.git_ok(&["config", "user.email", "test@example.com"]);
+            repo.git_ok(&["config", "commit.gpgsign", "false"]);
+            repo
+        }
+        fn cwd(&self) -> String {
+            self.path.to_str().unwrap().to_string()
+        }
+        fn git(&self, args: &[&str]) -> std::process::Output {
+            Command::new(git_binary())
+                .args(args)
+                .current_dir(&self.path)
+                .output()
+                .unwrap_or_else(|e| panic!("git {:?} spawn: {}", args, e))
+        }
+        fn git_ok(&self, args: &[&str]) {
+            let out = self.git(args);
+            assert!(
+                out.status.success(),
+                "git {:?} failed: {}",
+                args,
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+        fn write(&self, rel: &str, content: &str) {
+            std::fs::write(self.path.join(rel), content).unwrap();
+        }
+        fn commit_all(&self, msg: &str) {
+            self.git_ok(&["add", "-A"]);
+            self.git_ok(&["commit", "-q", "-m", msg]);
+        }
+        fn parent_count_of_head(&self) -> usize {
+            let out = self.git(&["rev-list", "--parents", "-n", "1", "HEAD"]);
+            let line = String::from_utf8_lossy(&out.stdout);
+            line.trim().split_whitespace().count().saturating_sub(1)
+        }
+    }
+
+    /// `feature` branches off `main` and gets one extra commit; `main` gets
+    /// none, so merging `feature` into `main` is fast-forwardable.
+    fn make_fast_forwardable(repo: &TempRepo) {
+        repo.write("a.txt", "base\n");
+        repo.commit_all("base");
+        repo.git_ok(&["checkout", "-q", "-b", "feature"]);
+        repo.write("a.txt", "feature change\n");
+        repo.commit_all("feature commit");
+        repo.git_ok(&["checkout", "-q", "main"]);
+    }
+
+    #[test]
+    fn no_ff_true_creates_merge_commit_even_when_fast_forward_possible() {
+        let repo = TempRepo::new();
+        make_fast_forwardable(&repo);
+
+        let result =
+            tauri::async_runtime::block_on(git_merge(repo.cwd(), "feature".to_string(), Some(true)))
+                .expect("merge must succeed");
+
+        assert!(result.success, "merge failed: {}", result.message);
+        assert_eq!(
+            repo.parent_count_of_head(),
+            2,
+            "--no-ff must produce a merge commit with 2 parents even on a fast-forwardable branch"
+        );
+    }
+
+    #[test]
+    fn no_ff_false_fast_forwards_when_possible() {
+        let repo = TempRepo::new();
+        make_fast_forwardable(&repo);
+
+        let result = tauri::async_runtime::block_on(git_merge(
+            repo.cwd(),
+            "feature".to_string(),
+            Some(false),
+        ))
+        .expect("merge must succeed");
+
+        assert!(result.success, "merge failed: {}", result.message);
+        assert_eq!(
+            repo.parent_count_of_head(),
+            1,
+            "default merge must fast-forward (1 parent) when possible"
+        );
     }
 }

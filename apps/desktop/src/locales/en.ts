@@ -60,6 +60,8 @@ const en = {
     merge: "Merge",
     mergeTooltip: "Merge a branch into the current branch",
     mergeFilterPlaceholder: "Branch to merge\u2026",
+    mergeNoFf: "Always create a merge commit",
+    mergeNoFfTooltip: "Skip fast-forward even when possible (--no-ff)",
     // Stats
     file: "file",
     files: "files",

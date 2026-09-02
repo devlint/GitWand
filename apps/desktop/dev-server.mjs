@@ -2223,16 +2223,18 @@ async function handleRequest(req, res) {
       }
     }
 
-    // POST /api/git-merge  { cwd, branch }
+    // POST /api/git-merge  { cwd, branch, noFf? }
     if (url.pathname === "/api/git-merge" && req.method === "POST") {
-      const { cwd, branch } = await readBody(req);
+      const { cwd, branch, noFf } = await readBody(req);
       if (!cwd || !branch) return jsonResponse(req, res, { success: false, message: "Missing cwd or branch" }, 400);
       try {
         const resolvedCwd = resolve(cwd);
-        const stdout = execSync(`git merge "${branch}" 2>&1`, {
+        // --no-ff always creates a merge commit, which otherwise opens an
+        // editor for the commit message; --no-edit keeps it non-interactive.
+        const args = noFf ? ["merge", branch, "--no-ff", "--no-edit"] : ["merge", branch];
+        const stdout = execFileSync(GIT, args, {
           cwd: resolvedCwd,
           encoding: "utf-8",
-          shell: true,
         });
         return jsonResponse(req, res, { success: true, message: stdout.trim() || "Merge completed" });
       } catch (err) {

@@ -66,6 +66,8 @@ const zhCN: Locale = {
     syncTooltip: "获取远程分支并拉取",
     merge: "合并",
     mergeTooltip: "将其他分支合并到当前分支",
+    mergeNoFf: "始终创建合并提交",
+    mergeNoFfTooltip: "即使可以快进合并也跳过（--no-ff）",
     mergeFilterPlaceholder: "要合并的分支…",
     file: "个文件",
     files: "个文件",

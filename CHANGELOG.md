@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **No-fast-forward merge option** (#177). The "Merge into current…" popover gets an "Always create a merge commit" checkbox — forces `git merge --no-ff` so merging a fast-forwardable branch still records an explicit merge commit, matching teams whose workflow requires one. Off by default; the existing fast-forward behavior is unchanged.
 - **CLI update notice.** A global `npm install -g @gitwand/cli` never auto-updates, unlike `npx @gitwand/cli` or the desktop app's own updater. `gitwand` now checks the npm registry at most once every 24h (cached locally) and prints a one-line notice when a newer version is published. Only runs in an interactive terminal, never in CI or piped output, and any failure (offline, registry down, unwritable home dir) is silent.
 
 ### Changed

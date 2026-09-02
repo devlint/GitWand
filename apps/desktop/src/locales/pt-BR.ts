@@ -60,6 +60,8 @@ const ptBR: Locale = {
     syncTooltip: "Buscar branches remotos e fazer pull",
     merge: "Merge",
     mergeTooltip: "Fazer merge de um branch no branch atual",
+    mergeNoFf: "Sempre criar um commit de merge",
+    mergeNoFfTooltip: "Pular o fast-forward mesmo quando possível (--no-ff)",
     mergeFilterPlaceholder: "Branch para mesclar…",
     // Stats
     file: "arquivo",

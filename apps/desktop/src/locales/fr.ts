@@ -53,6 +53,8 @@ const fr: Locale = {
     syncTooltip: "Récupérer les branches distantes et pull",
     merge: "Merge",
     mergeTooltip: "Merger une branche dans la branche courante",
+    mergeNoFf: "Toujours créer un commit de merge",
+    mergeNoFfTooltip: "Ignorer le fast-forward même si possible (--no-ff)",
     mergeFilterPlaceholder: "Branche à merger\u2026",
     // Stats
     file: "fichier",
