@@ -69,6 +69,16 @@ export default defineConfig({
       external: (id: string) => id.startsWith("node:"),
     },
   },
+  worker: {
+    format: "es",
+    // Vite bundles `new Worker(new URL(...))` targets (coreEngine.worker.ts)
+    // with a separate Rollup pass that doesn't inherit `build.rollupOptions`.
+    // Same rationale as above: @gitwand/core's node adapter is analysed but
+    // never actually reached at runtime.
+    rollupOptions: {
+      external: (id: string) => id.startsWith("node:"),
+    },
+  },
   test: {
     // Default to "node": jsdom setup/teardown costs ~1s/file (measured:
     // 95.85s cumulative "environment" time across 94 files vs 19.85s of

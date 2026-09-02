@@ -105,7 +105,7 @@ export function useMergePreview(cwd: () => string) {
             ? await previewCherryPick(cwd(), ref_)
             : await previewMerge(cwd(), ref_);
 
-      const { resolve } = await engine();
+      const core = await engine();
       const files: PreviewFileResult[] = [];
 
       for (const raw of rawFiles) {
@@ -136,7 +136,7 @@ export function useMergePreview(cwd: () => string) {
 
         // Conflit textuel → lancer le résolveur
         if (raw.conflict_content) {
-          const result = resolve(raw.conflict_content, raw.file_path);
+          const result = await core.resolve(raw.conflict_content, raw.file_path);
           const types = [...new Set(result.hunks.map(h => h.type))];
 
           let status: PreviewFileStatus;

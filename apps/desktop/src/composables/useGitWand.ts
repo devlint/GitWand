@@ -1,4 +1,4 @@
-import { ref, computed } from "vue";
+import { ref, computed, toRaw } from "vue";
 import { parseGitwandrc, type MergeResult, type ConflictHunk, type GitWandOptions, type MergePolicy, type LlmFallbackConfig, type MergeContext } from "@gitwand/core";
 // `resolve`, `resolveAsync` and `parseConflictMarkers` are loaded lazily via
 // `engine()` (see ../utils/coreEngine.ts) — they pull in the classifier +
@@ -7,6 +7,7 @@ import { parseGitwandrc, type MergeResult, type ConflictHunk, type GitWandOption
 // `typeof parseConflictMarkers` for `RawConflictSegment` without a runtime import.
 import type { parseConflictMarkers } from "@gitwand/core";
 import { engine } from "../utils/coreEngine";
+import * as Comlink from "comlink";
 import { useSnapshots } from "./useSnapshots";
 import {
   pickFolder,
@@ -452,21 +453,7 @@ export function useGitWand() {
     // supported languages (TS/TSX/JS/JSX/Python/Go/Rust), falling back
     // transparently to the hunk-based resolver for everything else.
     //
-    // Grammar WASM files are served from /grammars/ (copied to public/ by
-    // `pnpm copy-grammars` before the build, and by Vite dev server from
-    // public/ during development).  A customLoader is used here to bypass
-    // environment auto-detection (avoids the Tauri adapter's convertFileSrc
-    // path, which requires absolute filesystem paths unknown at runtime).
-    const structuralOpts = {
-      wasmPath: "/grammars/web-tree-sitter.wasm",
-      customLoader: async (grammarName: string): Promise<Uint8Array> => {
-        const response = await fetch(`/grammars/${grammarName}.wasm`);
-        if (!response.ok) {
-          throw new Error(`[gitwand] Failed to fetch grammar ${grammarName} (HTTP ${response.status})`);
-        }
-        return new Uint8Array(await response.arrayBuffer());
-      },
-    };
+    // Grammar loading now lives in utils/coreEngine.ts (worker + fallback share one loader).
 
     // v2.5 — Construire les options avec LLM fallback si activé. L'endpoint
     // n'est pas dans `.gitwandrc` (non-sérialisable) : on l'injecte ici via
@@ -513,18 +500,37 @@ export function useGitWand() {
       // état illisible → contexte inconnu, comportement conservateur du moteur
     }
 
+    // NOTE: `llmFallback.endpoint` is deliberately left out of this options
+    // object — it's a live function, and Comlink only recognizes a
+    // `Comlink.proxy()` marker on a top-level RPC argument, not on something
+    // nested inside `options` (a function buried in `options` still trips the
+    // browser's structured-clone algorithm). It travels separately as
+    // `aiEndpointProxy` below, passed as `core.resolveAsync`'s dedicated 4th
+    // argument; see ../utils/coreEngine.ts and ../workers/coreEngine.worker.ts.
+    //
+    // `toRaw(resolveOptions.value)` (not a plain spread of the reactive ref)
+    // matters here: `resolveOptions` is a `ref<GitWandOptions>`, so `.value`
+    // is a Vue reactive Proxy, and V8's structured-clone rejects a JSProxy
+    // outright when this object crosses into the worker. A shallow spread
+    // only unwraps the top level — nested object properties like
+    // `patternOverrides`/`generatedFiles` (set from `.gitwandrc` above) are
+    // still reactive Proxies when read through the parent Proxy's getter, so
+    // the unwrap has to happen on the source (`toRaw(resolveOptions.value)`)
+    // before spreading, not after.
     const resolveOptionsWithLlm: GitWandOptions = (llmCfg?.enabled && aiEndpoint)
-      ? {
-          ...resolveOptions.value,
-          mergeContext,
-          llmFallback: { ...llmCfg, endpoint: aiEndpoint },
-        }
-      : { ...resolveOptions.value, mergeContext };
+      ? { ...toRaw(resolveOptions.value), mergeContext, llmFallback: { ...llmCfg } }
+      : { ...toRaw(resolveOptions.value), mergeContext };
+
+    // The LLM endpoint is a closure over useAIProvider, which reaches the AI
+    // backend through Tauri IPC. That is main-thread-only, so it crosses into
+    // the worker as a Comlink proxy: the worker calls it, the call hops back
+    // here, the answer hops forward. Never send it as plain data.
+    const aiEndpointProxy = (llmCfg?.enabled && aiEndpoint) ? Comlink.proxy(aiEndpoint) : undefined;
 
     // Lazily load the engine once for this whole batch — memoized by
-    // `engine()`, so the dynamic import only actually happens on the very
-    // first conflict resolution of the app's lifetime.
-    const { resolveAsync, parseConflictMarkers } = await engine();
+    // `engine()`, so the worker is only spun up on the very first conflict
+    // resolution of the app's lifetime.
+    const core = await engine();
 
     const loaded: ConflictFile[] = await Promise.all(
       allPaths.map(async (filePath) => {
@@ -539,7 +545,7 @@ export function useGitWand() {
             // Tree conflicts render the dedicated panel, never hunks — produce a
             // trivial empty MergeResult instead of running the full resolver on
             // (possibly large) working-tree content. `content` above is kept for the preview.
-            result: await resolveAsync("", filePath, resolveOptionsWithLlm, structuralOpts),
+            result: await core.resolveAsync("", filePath, resolveOptionsWithLlm, aiEndpointProxy),
             tree: { code: tc.code, hasOurs: tc.hasOurs, hasTheirs: tc.hasTheirs, hasBase: tc.hasBase },
           };
         }
@@ -551,7 +557,7 @@ export function useGitWand() {
         // superseded by the base-recovery pass below (diff3-only patterns can't
         // fire without a base) — running the full pattern registry against it
         // first would just classify every hunk twice for nothing.
-        const { segments: rawSegments } = parseConflictMarkers(content);
+        const { segments: rawSegments } = await core.parseConflictMarkers(content);
         const rawConflicts = rawSegments
           .filter((s): s is RawConflictSegment => s.type === "conflict")
           .map((s) => s.conflict);
@@ -563,7 +569,7 @@ export function useGitWand() {
         if (needsBaseRecovery) {
           try {
             const rec = await reconstructLimiter.run(() => reconstructConflict(cwd, filePath));
-            const enrichedResult = await resolveAsync(rec.content, filePath, resolveOptionsWithLlm, structuralOpts);
+            const enrichedResult = await core.resolveAsync(rec.content, filePath, resolveOptionsWithLlm, aiEndpointProxy);
             const sameOursTheirs =
               enrichedResult.hunks.length === rawConflicts.length &&
               enrichedResult.hunks.every((h, i) =>
@@ -584,7 +590,7 @@ export function useGitWand() {
           } catch { /* no recoverable stage (e.g. add/add) → fall through to plain result */ }
         }
 
-        const result = await resolveAsync(content, filePath, resolveOptionsWithLlm, structuralOpts);
+        const result = await core.resolveAsync(content, filePath, resolveOptionsWithLlm, aiEndpointProxy);
         // Unmerged file with no parseable markers → reconstruct the 3-way from the index.
         if (result.stats.totalConflicts === 0) {
           try {
@@ -595,7 +601,7 @@ export function useGitWand() {
                 return {
                   path: filePath,
                   content: rec.content,
-                  result: await resolveAsync(rec.content, filePath, resolveOptionsWithLlm, structuralOpts),
+                  result: await core.resolveAsync(rec.content, filePath, resolveOptionsWithLlm, aiEndpointProxy),
                   reconstructed: true,
                 };
               }
@@ -714,12 +720,14 @@ export async function fetchUsers() {
       },
     ];
 
-    const { resolve } = await engine();
-    files.value = demoFiles.map(({ path, content }) => ({
-      path,
-      content,
-      result: resolve(content, path, resolveOptions.value),
-    }));
+    const core = await engine();
+    files.value = await Promise.all(
+      demoFiles.map(async ({ path, content }) => ({
+        path,
+        content,
+        result: await core.resolve(content, path, toRaw(resolveOptions.value)),
+      })),
+    );
 
     if (files.value.length > 0) {
       selectedPath.value = files.value[0].path;
@@ -733,40 +741,42 @@ export async function fetchUsers() {
    */
   async function resolveAll() {
     pushUndo();
-    const { resolve } = await engine();
-    files.value = files.value.map((f) => {
-      if (f.result.stats.autoResolved === 0) return f;
+    const core = await engine();
+    files.value = await Promise.all(
+      files.value.map(async (f) => {
+        if (f.result.stats.autoResolved === 0) return f;
 
-      if (f.result.mergedContent) {
-        // All conflicts resolved — use merged content directly
+        if (f.result.mergedContent) {
+          // All conflicts resolved — use merged content directly
+          return {
+            ...f,
+            content: f.result.mergedContent,
+            result: await core.resolve(f.result.mergedContent, f.path, toRaw(resolveOptions.value)),
+          };
+        }
+
+        // Mixed file: apply auto-resolved hunks individually (reverse order
+        // to preserve conflict indices as we replace earlier blocks).
+        let newContent = f.content;
+        const resolutions = f.result.resolutions;
+        for (let i = resolutions.length - 1; i >= 0; i--) {
+          const res = resolutions[i];
+          if (res.autoResolved && res.resolvedLines) {
+            newContent = replaceConflictByIndex(
+              newContent,
+              i,
+              res.resolvedLines.join("\n"),
+            );
+          }
+        }
+
         return {
           ...f,
-          content: f.result.mergedContent,
-          result: resolve(f.result.mergedContent, f.path, resolveOptions.value),
+          content: newContent,
+          result: await core.resolve(newContent, f.path, toRaw(resolveOptions.value)),
         };
-      }
-
-      // Mixed file: apply auto-resolved hunks individually (reverse order
-      // to preserve conflict indices as we replace earlier blocks).
-      let newContent = f.content;
-      const resolutions = f.result.resolutions;
-      for (let i = resolutions.length - 1; i >= 0; i--) {
-        const res = resolutions[i];
-        if (res.autoResolved && res.resolvedLines) {
-          newContent = replaceConflictByIndex(
-            newContent,
-            i,
-            res.resolvedLines.join("\n"),
-          );
-        }
-      }
-
-      return {
-        ...f,
-        content: newContent,
-        result: resolve(newContent, f.path, resolveOptions.value),
-      };
-    });
+      }),
+    );
   }
 
   /**
@@ -785,12 +795,12 @@ export async function fetchUsers() {
     if (!newContent || newContent === file.content) return;
 
     pushUndo();
-    const { resolve } = await engine();
+    const core = await engine();
     const idx = files.value.indexOf(file);
     files.value[idx] = {
       ...file,
       content: newContent,
-      result: resolve(newContent, file.path, resolveOptions.value),
+      result: await core.resolve(newContent, file.path, toRaw(resolveOptions.value)),
     };
   }
 
@@ -916,12 +926,12 @@ export async function fetchUsers() {
     }
 
     const newContent = newLines.join("\n");
-    const { resolve } = await engine();
+    const core = await engine();
     const idx = files.value.indexOf(file);
     files.value[idx] = {
       ...file,
       content: newContent,
-      result: resolve(newContent, file.path, resolveOptions.value),
+      result: await core.resolve(newContent, file.path, toRaw(resolveOptions.value)),
     };
   }
 
@@ -941,12 +951,12 @@ export async function fetchUsers() {
 
     pushUndo();
     const newContent = replaceConflictByIndex(file.content, hunkIndex, customContent);
-    const { resolve } = await engine();
+    const core = await engine();
     const idx = files.value.indexOf(file);
     files.value[idx] = {
       ...file,
       content: newContent,
-      result: resolve(newContent, file.path, resolveOptions.value),
+      result: await core.resolve(newContent, file.path, toRaw(resolveOptions.value)),
     };
   }
 
@@ -973,12 +983,12 @@ export async function fetchUsers() {
 
     if (newContent !== file.content) {
       pushUndo();
-      const { resolve } = await engine();
+      const core = await engine();
       const idx = files.value.indexOf(file);
       files.value[idx] = {
         ...file,
         content: newContent,
-        result: resolve(newContent, file.path, resolveOptions.value),
+        result: await core.resolve(newContent, file.path, toRaw(resolveOptions.value)),
       };
     }
     return { applied, total };
@@ -1007,12 +1017,12 @@ export async function fetchUsers() {
     if (!file?.markerless) return;
     const newContent = file.markerless.reconstructed;
     pushUndo();
-    const { resolve } = await engine();
+    const core = await engine();
     const idx = files.value.indexOf(file);
     files.value[idx] = {
       path: file.path,
       content: newContent,
-      result: resolve(newContent, file.path, resolveOptions.value),
+      result: await core.resolve(newContent, file.path, toRaw(resolveOptions.value)),
       reconstructed: true,
     };
   }
@@ -1053,12 +1063,12 @@ export async function fetchUsers() {
 
     if (newContent !== file.content) {
       pushUndo();
-      const { resolve } = await engine();
+      const core = await engine();
       const idx = files.value.indexOf(file);
       files.value[idx] = {
         ...file,
         content: newContent,
-        result: resolve(newContent, file.path, resolveOptions.value),
+        result: await core.resolve(newContent, file.path, toRaw(resolveOptions.value)),
       };
     }
     return { applied, total };
