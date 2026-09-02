@@ -5453,9 +5453,12 @@ mod merge_no_ff_tests {
         let repo = TempRepo::new();
         make_fast_forwardable(&repo);
 
-        let result =
-            tauri::async_runtime::block_on(git_merge(repo.cwd(), "feature".to_string(), Some(true)))
-                .expect("merge must succeed");
+        let result = tauri::async_runtime::block_on(git_merge(
+            repo.cwd(),
+            "feature".to_string(),
+            Some(true),
+        ))
+        .expect("merge must succeed");
 
         assert!(result.success, "merge failed: {}", result.message);
         assert_eq!(
