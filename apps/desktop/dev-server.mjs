@@ -1703,9 +1703,18 @@ async function handleRequest(req, res) {
         } catch { stdout = ""; }
 
         // ── New untracked file: fall back to --no-index diff (all lines green) ──
+        //
+        // Guard: only for genuinely UNTRACKED files. A tracked file whose only
+        // change is already staged also yields an empty unstaged `git diff`;
+        // without this check the --no-index fallback would render the entire
+        // file as an addition instead of showing no unstaged change (mirrors
+        // the Rust `is_untracked` guard in commands/read.rs).
         if (!stdout.trim() && !staged) {
           const absFile = join(resolvedCwd, path);
-          if (existsSync(absFile) && !statSync(absFile).isDirectory()) {
+          const tracked = spawnSync("git", ["ls-files", "--error-unmatch", "--", path], {
+            cwd: resolvedCwd, encoding: "utf-8",
+          }).status === 0;
+          if (!tracked && existsSync(absFile) && !statSync(absFile).isDirectory()) {
             const r = spawnSync("git", ["diff", "--no-index", "--", "/dev/null", absFile], {
               cwd: resolvedCwd, encoding: "utf-8",
             });
@@ -1717,10 +1726,16 @@ async function handleRequest(req, res) {
         let currentHunk = null;
         let oldLineNo = 0;
         let newLineNo = 0;
+        // Mirrors Rust's parse_diff_hunks: a "new file mode" line marks the
+        // diff as an addition. Matches the Rust GitDiff shape, which omits
+        // `status` entirely when not detected (skip_serializing_if).
+        let status;
 
         const lines = stdout.split("\n");
         for (const line of lines) {
-          if (line.startsWith("@@")) {
+          if (line.startsWith("new file mode")) {
+            status = "added";
+          } else if (line.startsWith("@@")) {
             if (currentHunk) hunks.push(currentHunk);
 
             const header = line;
@@ -1751,11 +1766,10 @@ async function handleRequest(req, res) {
                 newLineNo: null,
               });
               oldLineNo++;
-            } else if (!line.startsWith("\\")) {
-              const content = line.length > 0 ? line.substring(1) : "";
+            } else if (line.startsWith(" ")) {
               currentHunk.lines.push({
                 type: "context",
-                content,
+                content: line.substring(1),
                 oldLineNo,
                 newLineNo,
               });
@@ -1767,7 +1781,7 @@ async function handleRequest(req, res) {
 
         if (currentHunk) hunks.push(currentHunk);
 
-        return jsonResponse(req, res, { path, hunks });
+        return jsonResponse(req, res, { path, hunks, ...(status ? { status } : {}) });
       } catch (err) {
         return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
       }
@@ -3094,6 +3108,13 @@ async function handleRequest(req, res) {
         const raw = out.stdout || "";
         const lines = raw.split("\n");
         const blameLines = [];
+        // Porcelain compaction: the metadata block (author/author-time/summary)
+        // is only emitted the FIRST time a commit is seen in the output; later
+        // hunks for the same commit carry just the header + content line. Carry
+        // the metadata forward from the first sighting so it matches the Rust
+        // backend (both the CLI parser in commands/read.rs and the libgit2 fast
+        // path in git/libgit2.rs, which always resolves full commit metadata).
+        const metaCache = new Map();
         let i = 0;
         while (i < lines.length) {
           const headerMatch = lines[i].match(/^([0-9a-f]{40})\s+(\d+)\s+(\d+)/);
@@ -3113,7 +3134,16 @@ async function handleRequest(req, res) {
           }
           const content = i < lines.length ? lines[i].slice(1) : "";
           i++;
-          blameLines.push({ hash: hash.slice(0, 8), hashFull: hash, finalLine, origLine, author, authorDate, summary, content });
+
+          if (!author && !authorDate && !summary) {
+            const cached = metaCache.get(hash);
+            if (cached) ({ author, authorDate, summary } = cached);
+          } else {
+            metaCache.set(hash, { author, authorDate, summary });
+          }
+          // 7 chars, matching the Rust backend (commands/read.rs: hash_full[..7]),
+          // which is the path the shipped app actually uses.
+          blameLines.push({ hash: hash.slice(0, 7), hashFull: hash, finalLine, origLine, author, authorDate, summary, content });
         }
         return jsonResponse(req, res, blameLines);
       } catch (err) {

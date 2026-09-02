@@ -245,7 +245,7 @@ pub struct GitBranch {
 
 // ─── Blame types ───────────────────────────────────────────────────
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct BlameLine {
     pub hash: String,
     pub hash_full: String,

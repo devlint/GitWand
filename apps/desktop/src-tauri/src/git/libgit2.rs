@@ -157,6 +157,163 @@ fn format_iso8601(secs: i64, offset_min: i32) -> String {
     )
 }
 
+/// Render `git diff [--cached] -- <path>` as unified-diff text, in process.
+///
+/// Deliberately produces *text* rather than `DiffHunk`s: the caller feeds it to
+/// the same `parse_diff_hunks` the CLI output goes through, so the two paths
+/// cannot drift in hunk shaping, line classification, or the leading-space
+/// context-line rule (AGENTS.md "Diff Parsing").
+pub(crate) fn libgit2_diff_patch(cwd: &str, path: &str, staged: bool) -> Result<String, String> {
+    let repo = git2::Repository::open(cwd).map_err(|e| format!("git2 open: {e}"))?;
+
+    // A path with an unmerged (conflicted) index entry has no single "index"
+    // version to diff against: `diff_index_to_workdir`/`diff_tree_to_index`
+    // silently produce a useless patch (or none at all) for it, while the CLI
+    // renders the real combined `diff --cc` conflict-marker diff. Bail out so
+    // the caller (`git_diff`) falls back to the CLI, which is what the
+    // conflict-resolution UI needs to render.
+    let index = repo.index().map_err(|e| format!("git2 index: {e}"))?;
+    let has_conflict = [1, 2, 3]
+        .iter()
+        .any(|stage| index.get_path(std::path::Path::new(path), *stage).is_some());
+    if has_conflict {
+        return Err(format!("{path} has an unmerged conflict"));
+    }
+
+    let mut opts = git2::DiffOptions::new();
+    opts.pathspec(path);
+    // Match the CLI defaults `git diff` uses for the UI: 3 lines of context,
+    // no rename detection on a single-path diff.
+    opts.context_lines(3);
+    opts.include_untracked(false);
+
+    let diff = if staged {
+        // HEAD tree to index. An unborn HEAD has no tree: diff against nothing.
+        let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
+        repo.diff_tree_to_index(head_tree.as_ref(), None, Some(&mut opts))
+            .map_err(|e| format!("git2 diff_tree_to_index: {e}"))?
+    } else {
+        repo.diff_index_to_workdir(None, Some(&mut opts))
+            .map_err(|e| format!("git2 diff_index_to_workdir: {e}"))?
+    };
+
+    let mut out = String::new();
+    diff.print(git2::DiffFormat::Patch, |_delta, _hunk, line| {
+        match line.origin() {
+            // Content lines carry their origin char separately from the text.
+            '+' | '-' | ' ' => out.push(line.origin()),
+            _ => {}
+        }
+        out.push_str(&String::from_utf8_lossy(line.content()));
+        true
+    })
+    .map_err(|e| format!("git2 diff print: {e}"))?;
+
+    Ok(out)
+}
+
+/// In-process `git blame --porcelain`. Uses libgit2's default diff algorithm,
+/// which has no `--diff-algorithm` equivalent: the caller must only use this
+/// for the default (`histogram`) setting and fall back to the CLI otherwise.
+pub(crate) fn libgit2_blame(
+    cwd: &str,
+    path: &str,
+    max_entries: usize,
+) -> Result<Vec<crate::types::BlameLine>, String> {
+    let repo = git2::Repository::open(cwd).map_err(|e| format!("git2 open: {e}"))?;
+    let committed_blame = repo
+        .blame_file(std::path::Path::new(path), None)
+        .map_err(|e| format!("git2 blame: {e}"))?;
+
+    let workdir = repo.workdir().ok_or_else(|| "bare repository".to_string())?;
+    let content = std::fs::read_to_string(workdir.join(path))
+        .map_err(|e| format!("failed to read {path}: {e}"))?;
+    let file_lines: Vec<&str> = content.split('\n').collect();
+
+    // Re-blame against the actual working-tree buffer. `blame_file` alone only
+    // knows about the committed content: on a dirty file its hunks are shaped
+    // for the committed line count, so reading `content` (the on-disk buffer)
+    // by those line numbers either drifts onto the wrong commit or silently
+    // drops uncommitted lines entirely. `blame_buffer` re-diffs against the
+    // buffer and marks changed lines with the zero OID, matching what
+    // `git blame --porcelain` reports as "Not Committed Yet".
+    let blame = committed_blame
+        .blame_buffer(content.as_bytes())
+        .map_err(|e| format!("git2 blame_buffer: {e}"))?;
+
+    // One commit lookup per distinct OID, not per line.
+    let mut meta: std::collections::HashMap<git2::Oid, (String, String, String)> =
+        std::collections::HashMap::new();
+
+    let mut out: Vec<crate::types::BlameLine> = Vec::new();
+    for hunk in blame.iter() {
+        let oid = hunk.final_commit_id();
+        let (author, author_date, summary) = if oid.is_zero() {
+            // Matches the CLI porcelain convention for uncommitted lines:
+            // `author Not Committed Yet`, current time, and a synthesized
+            // summary of `Version of <path> from <path>` (verified against
+            // real `git blame --porcelain` output on a dirty file).
+            (
+                "Not Committed Yet".to_string(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs().to_string())
+                    .unwrap_or_default(),
+                format!("Version of {path} from {path}"),
+            )
+        } else {
+            meta.entry(oid)
+                .or_insert_with(|| match repo.find_commit(oid) {
+                    Ok(c) => (
+                        c.author().name().unwrap_or("").to_string(),
+                        // The CLI path stores git's raw `author-time` epoch
+                        // seconds as a string (commands/read.rs). Match it
+                        // exactly.
+                        c.author().when().seconds().to_string(),
+                        c.summary().unwrap_or("").to_string(),
+                    ),
+                    Err(_) => (String::new(), String::new(), String::new()),
+                })
+                .clone()
+        };
+
+        let hash_full = oid.to_string();
+        let hash = hash_full[..7].to_string();
+        let start = hunk.final_start_line();
+        let orig_start = hunk.orig_start_line();
+        for i in 0..hunk.lines_in_hunk() {
+            if out.len() >= max_entries {
+                return Ok(out);
+            }
+            let final_line = (start + i) as u32;
+            // `orig_start_line()` is 0 for a zero-OID (uncommitted) hunk, so
+            // `orig_start + i` would collide with real line numbers starting
+            // at 0/1/2... The CLI porcelain output sets `orig_line ==
+            // final_line` for uncommitted lines (verified against real
+            // `git blame --porcelain` output); match that.
+            let orig_line = if oid.is_zero() {
+                final_line
+            } else {
+                (orig_start + i) as u32
+            };
+            out.push(crate::types::BlameLine {
+                hash: hash.clone(),
+                hash_full: hash_full.clone(),
+                final_line,
+                orig_line,
+                author: author.clone(),
+                author_date: author_date.clone(),
+                summary: summary.clone(),
+                content: file_lines
+                    .get(final_line as usize - 1)
+                    .map(|s| s.to_string())
+                    .unwrap_or_default(),
+            });
+        }
+    }
+    Ok(out)
+}
+
 /// Decompose Unix timestamp into (Y, M, D, h, m, s). Algorithm from Howard
 /// Hinnant's "date algorithms" — works for any reasonable epoch and handles
 /// leap years correctly. Range: years 1970-9999, ample for git timestamps.
@@ -178,4 +335,218 @@ fn unix_to_ymdhms(t: i64) -> (i32, u32, u32, u32, u32, u32) {
     let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
     let y = if m <= 2 { y + 1 } else { y };
     (y as i32, m, d, h, mi, s)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::process::Command;
+
+    fn temp_repo(label: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("gw-lg2-{}-{}", label, std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let run = |args: &[&str]| {
+            Command::new("git").args(args).current_dir(&dir).output().unwrap();
+        };
+        run(&["init", "-q"]);
+        run(&["config", "user.email", "t@example.com"]);
+        run(&["config", "user.name", "T"]);
+        std::fs::write(dir.join("a.txt"), "one\ntwo\nthree\n").unwrap();
+        run(&["add", "."]);
+        run(&["commit", "-qm", "init"]);
+        dir
+    }
+
+    fn cli_diff(dir: &std::path::Path, path: &str, staged: bool) -> String {
+        let mut args = vec!["diff"];
+        if staged { args.push("--cached"); }
+        args.push("--");
+        args.push(path);
+        let out = Command::new("git").args(&args).current_dir(dir).output().unwrap();
+        String::from_utf8_lossy(&out.stdout).to_string()
+    }
+
+    /// The libgit2 patch must parse into the same hunks the CLI patch does.
+    #[test]
+    fn unstaged_patch_matches_the_cli_hunks() {
+        let dir = temp_repo("unstaged");
+        std::fs::write(dir.join("a.txt"), "one\nTWO\nthree\n").unwrap();
+
+        let lg2 = libgit2_diff_patch(dir.to_str().unwrap(), "a.txt", false).unwrap();
+        let cli = cli_diff(&dir, "a.txt", false);
+
+        let (lg2_hunks, _) = crate::git::parse::parse_diff_hunks(&lg2);
+        let (cli_hunks, _) = crate::git::parse::parse_diff_hunks(&cli);
+        assert_eq!(lg2_hunks.len(), cli_hunks.len());
+        assert_eq!(lg2_hunks[0].old_start, cli_hunks[0].old_start);
+        assert_eq!(lg2_hunks[0].new_start, cli_hunks[0].new_start);
+        assert_eq!(
+            lg2_hunks[0].lines.iter().map(|l| (l.r#type.clone(), l.content.clone())).collect::<Vec<_>>(),
+            cli_hunks[0].lines.iter().map(|l| (l.r#type.clone(), l.content.clone())).collect::<Vec<_>>(),
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn staged_patch_matches_the_cli_hunks() {
+        let dir = temp_repo("staged");
+        std::fs::write(dir.join("a.txt"), "one\nTWO\nthree\n").unwrap();
+        Command::new("git").args(["add", "a.txt"]).current_dir(&dir).output().unwrap();
+
+        let lg2 = libgit2_diff_patch(dir.to_str().unwrap(), "a.txt", true).unwrap();
+        let cli = cli_diff(&dir, "a.txt", true);
+        let (lg2_hunks, _) = crate::git::parse::parse_diff_hunks(&lg2);
+        let (cli_hunks, _) = crate::git::parse::parse_diff_hunks(&cli);
+        assert_eq!(lg2_hunks.len(), cli_hunks.len());
+        assert!(!lg2_hunks.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn clean_file_yields_an_empty_patch() {
+        let dir = temp_repo("clean");
+        let lg2 = libgit2_diff_patch(dir.to_str().unwrap(), "a.txt", false).unwrap();
+        assert!(lg2.trim().is_empty(), "expected empty patch, got: {lg2}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn untracked_file_yields_an_empty_patch_like_the_cli() {
+        let dir = temp_repo("untracked");
+        std::fs::write(dir.join("new.txt"), "hello\n").unwrap();
+        let lg2 = libgit2_diff_patch(dir.to_str().unwrap(), "new.txt", false).unwrap();
+        assert!(lg2.trim().is_empty());
+        assert!(cli_diff(&dir, "new.txt", false).trim().is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Regression test: a path with an unmerged (conflicted) index entry must
+    /// NOT be diffed via libgit2: `diff_index_to_workdir` silently emits no
+    /// patch at all for such a path, while the CLI's `git diff` renders the
+    /// real combined `diff --cc` conflict-marker diff. `git_diff` must fall
+    /// back to the CLI here, so `libgit2_diff_patch` must return an `Err`.
+    #[test]
+    fn conflicted_path_falls_back_to_cli() {
+        let dir = temp_repo("conflict");
+        let run = |args: &[&str]| {
+            Command::new("git").args(args).current_dir(&dir).output().unwrap()
+        };
+        let base_branch_out = Command::new("git")
+            .args(["symbolic-ref", "--short", "HEAD"])
+            .current_dir(&dir)
+            .output()
+            .unwrap();
+        let base_branch = String::from_utf8_lossy(&base_branch_out.stdout).trim().to_string();
+        run(&["checkout", "-qb", "feat"]);
+        std::fs::write(dir.join("a.txt"), "one\ntwo\nFEAT\n").unwrap();
+        run(&["commit", "-qam", "feat change"]);
+        run(&["checkout", "-q", &base_branch]);
+        std::fs::write(dir.join("a.txt"), "one\ntwo\nMAIN\n").unwrap();
+        run(&["commit", "-qam", "main change"]);
+        // Expected to exit non-zero (conflict), that's the point.
+        let _ = run(&["merge", "feat", "-q", "--no-edit"]);
+
+        let cli = cli_diff(&dir, "a.txt", false);
+        assert!(
+            cli.contains("<<<<<<<"),
+            "fixture must actually be conflicted, got: {cli}"
+        );
+
+        let result = libgit2_diff_patch(dir.to_str().unwrap(), "a.txt", false);
+        assert!(
+            result.is_err(),
+            "expected an Err (triggering the CLI fallback) for a conflicted path, got: {result:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Regression test for the dirty-file blame misattribution bug: without
+    /// re-blaming against the actual working-tree buffer, `blame_file` only
+    /// knows about the committed content, so uncommitted lines either get
+    /// mapped to the wrong commit (line-number drift) or are silently
+    /// dropped. The CLI's `git blame --porcelain` marks such lines with the
+    /// zero OID and `author = "Not Committed Yet"`; libgit2_blame must match.
+    #[test]
+    fn dirty_lines_are_attributed_to_not_committed_yet() {
+        let dir = temp_repo("dirty");
+        // Prepend a new line and edit an existing one, without committing.
+        std::fs::write(dir.join("a.txt"), "ZERO\none\ntwo\nTHREE\n").unwrap();
+
+        let lg2 = libgit2_blame(dir.to_str().unwrap(), "a.txt", 10_000).unwrap();
+        assert_eq!(lg2.len(), 4, "expected all 4 working-tree lines, got: {lg2:?}");
+
+        assert_eq!(lg2[0].content, "ZERO");
+        assert!(
+            lg2[0].hash_full.chars().all(|c| c == '0'),
+            "uncommitted line must carry the zero OID, got {}",
+            lg2[0].hash_full
+        );
+        assert_eq!(lg2[0].author, "Not Committed Yet");
+        assert_eq!(lg2[0].summary, "Version of a.txt from a.txt");
+        // orig_start_line() is 0 for a zero-OID hunk; must not collide with
+        // real line numbers, so it must mirror final_line instead.
+        assert_eq!(lg2[0].orig_line, lg2[0].final_line);
+
+        // Untouched lines still resolve to the real commit.
+        assert_eq!(lg2[1].content, "one");
+        assert!(!lg2[1].hash_full.chars().all(|c| c == '0'));
+        assert_ne!(lg2[1].author, "Not Committed Yet");
+
+        assert_eq!(lg2[3].content, "THREE");
+        assert!(
+            lg2[3].hash_full.chars().all(|c| c == '0'),
+            "edited line must carry the zero OID, got {}",
+            lg2[3].hash_full
+        );
+        assert_eq!(lg2[3].author, "Not Committed Yet");
+        assert_eq!(lg2[3].summary, "Version of a.txt from a.txt");
+        assert_eq!(lg2[3].orig_line, lg2[3].final_line);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Go/no-go gate for the blame fast path: libgit2's attribution must match
+    /// `git blame --porcelain --diff-algorithm=histogram` line for line on a
+    /// multi-commit file. If this fails, blame stays on the CLI (see the plan's
+    /// Open Decisions).
+    #[test]
+    fn blame_attribution_matches_the_cli_on_a_multi_commit_file() {
+        use std::process::Command;
+        let dir = temp_repo("blame");
+        let run = |args: &[&str]| {
+            Command::new("git").args(args).current_dir(&dir).output().unwrap();
+        };
+        std::fs::write(dir.join("a.txt"), "one\ntwo\nTHREE\n").unwrap();
+        run(&["config", "user.name", "Second"]);
+        run(&["commit", "-qam", "change three"]);
+        std::fs::write(dir.join("a.txt"), "one\nTWO\nTHREE\nfour\n").unwrap();
+        run(&["config", "user.name", "Third"]);
+        run(&["commit", "-qam", "change two, add four"]);
+
+        let lg2 = libgit2_blame(dir.to_str().unwrap(), "a.txt", 10_000).unwrap();
+
+        let out = Command::new("git")
+            .args(["blame", "--porcelain", "--diff-algorithm=histogram", "--", "a.txt"])
+            .current_dir(&dir)
+            .output()
+            .unwrap();
+        let raw = String::from_utf8_lossy(&out.stdout);
+        let cli_shas: Vec<String> = raw
+            .lines()
+            .filter_map(|l| {
+                let parts: Vec<&str> = l.split_whitespace().collect();
+                if parts.len() >= 3 && parts[0].len() == 40 { Some(parts[0].to_string()) } else { None }
+            })
+            .collect();
+
+        assert_eq!(lg2.len(), cli_shas.len(), "line count differs");
+        for (i, line) in lg2.iter().enumerate() {
+            assert_eq!(line.hash_full, cli_shas[i], "attribution differs at line {}", i + 1);
+        }
+        assert_eq!(lg2[0].content, "one");
+        assert_eq!(lg2[3].content, "four");
+        assert_eq!(lg2[0].hash.len(), 7);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

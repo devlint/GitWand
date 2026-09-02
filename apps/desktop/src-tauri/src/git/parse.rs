@@ -1,8 +1,8 @@
 use crate::git::cmd::git_cmd;
 use crate::types::{
-    DiffHunk, DiffLine, FileLogEntry, FolderDiffNode, GhIssueRaw, GhPrDetailRaw, GhPrRaw,
-    GhPrStatusCheck, Issue, MonorepoPackage, PullRequest, PullRequestDetail, RawFileChange,
-    RepoTreeNode, ShortlogEntry,
+    BlameLine, DiffHunk, DiffLine, FileLogEntry, FolderDiffNode, GhIssueRaw, GhPrDetailRaw,
+    GhPrRaw, GhPrStatusCheck, Issue, MonorepoPackage, PullRequest, PullRequestDetail,
+    RawFileChange, RepoTreeNode, ShortlogEntry,
 };
 use std::collections::HashMap;
 use std::path::Path;
@@ -145,6 +145,81 @@ pub(crate) fn parse_diff_hunks(stdout: &str) -> (Vec<DiffHunk>, Option<String>) 
     }
 
     (hunks, detected_status)
+}
+
+/// Parse `git blame --porcelain` output into `BlameLine`s.
+///
+/// Porcelain compaction: the metadata block (`author `, `author-time `,
+/// `summary `, …) is only emitted the FIRST time a commit is seen in the
+/// output; later hunks attributed to the same commit carry just the header
+/// line and the content line, with the reader expected to remember the
+/// metadata from that first sighting (documented `git-blame` porcelain
+/// behavior). Without the cache below, a repeated commit would render with a
+/// blank author/date/summary in the blame gutter; this must match the
+/// libgit2 fast path (`libgit2_blame`), which always resolves full commit
+/// metadata per hunk.
+pub(crate) fn parse_blame_porcelain(raw: &str, max_entries: usize) -> Vec<BlameLine> {
+    let lines: Vec<&str> = raw.lines().collect();
+    let mut blame_lines: Vec<BlameLine> = Vec::new();
+    let mut meta_cache: HashMap<String, (String, String, String)> = HashMap::new();
+    let mut i = 0;
+    while i < lines.len() && blame_lines.len() < max_entries {
+        // Header: <40-char-sha> <orig-line> <final-line> [<num-lines-in-group>]
+        let parts: Vec<&str> = lines[i].split_whitespace().collect();
+        if parts.len() < 3 || parts[0].len() != 40 {
+            i += 1;
+            continue;
+        }
+        let hash_full = parts[0].to_string();
+        let hash = hash_full[..7].to_string();
+        let orig_line: u32 = parts[1].parse().unwrap_or(0);
+        let final_line: u32 = parts[2].parse().unwrap_or(0);
+        i += 1;
+        let mut author = String::new();
+        let mut author_date = String::new();
+        let mut summary = String::new();
+        let mut content = String::new();
+        while i < lines.len() && !lines[i].starts_with('\t') {
+            if lines[i].starts_with("author ") {
+                author = lines[i][7..].to_string();
+            } else if lines[i].starts_with("author-time ") {
+                author_date = lines[i][12..].to_string();
+            } else if lines[i].starts_with("summary ") {
+                summary = lines[i][8..].to_string();
+            }
+            i += 1;
+        }
+        if i < lines.len() && lines[i].starts_with('\t') {
+            content = lines[i][1..].to_string();
+            i += 1;
+        }
+
+        if author.is_empty() && author_date.is_empty() && summary.is_empty() {
+            if let Some((cached_author, cached_date, cached_summary)) = meta_cache.get(&hash_full)
+            {
+                author = cached_author.clone();
+                author_date = cached_date.clone();
+                summary = cached_summary.clone();
+            }
+        } else {
+            meta_cache.insert(
+                hash_full.clone(),
+                (author.clone(), author_date.clone(), summary.clone()),
+            );
+        }
+
+        blame_lines.push(BlameLine {
+            hash,
+            hash_full,
+            final_line,
+            orig_line,
+            author,
+            author_date,
+            summary,
+            content,
+        });
+    }
+    blame_lines
 }
 
 pub(crate) fn parse_name_status_z(s: &str) -> Vec<(String, String, Option<String>)> {
@@ -1702,6 +1777,60 @@ mod repo_tree_tests {
         assert_eq!(src.children[0].name, "lib.rs");
         assert_eq!(src.children[0].path, "src/lib.rs");
         assert_eq!(src.children[1].name, "main.rs");
+    }
+}
+
+#[cfg(test)]
+mod blame_porcelain_tests {
+    use super::*;
+
+    /// Porcelain omits the metadata block on a commit's second (and later)
+    /// appearance in the same blame output, so the parser must carry the
+    /// author/date/summary forward from the first sighting rather than
+    /// leaving them blank.
+    #[test]
+    fn carries_forward_metadata_for_a_repeated_commit() {
+        let raw = "\
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 1 1 1
+author Alice
+author-time 1704067200
+summary first commit
+filename a.txt
+\tone
+bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb 2 2 2
+author Bob
+author-time 1704067201
+summary second commit
+filename a.txt
+\tTWO
+bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb 3 3
+\tfour
+";
+        let lines = parse_blame_porcelain(raw, 10_000);
+        assert_eq!(lines.len(), 3);
+        // Repeated commit `bbbb...` on the third hunk carries no metadata
+        // block in the raw porcelain text, but must resolve to Bob's info.
+        assert_eq!(lines[2].hash_full, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+        assert_eq!(lines[2].author, "Bob");
+        assert_eq!(lines[2].author_date, "1704067201");
+        assert_eq!(lines[2].summary, "second commit");
+        assert_eq!(lines[2].content, "four");
+    }
+
+    #[test]
+    fn caps_output_at_max_entries() {
+        let raw = "\
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 1 1 1
+author Alice
+author-time 1704067200
+summary only commit
+filename a.txt
+\tone
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 2 2
+\ttwo
+";
+        let lines = parse_blame_porcelain(raw, 1);
+        assert_eq!(lines.len(), 1);
     }
 }
 

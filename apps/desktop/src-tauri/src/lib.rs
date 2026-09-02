@@ -228,6 +228,22 @@ pub fn git_branches_parity(cwd: String) -> Result<Vec<types::GitBranch>, String>
     tauri::async_runtime::block_on(commands::ops::git_branches(cwd, None))
 }
 
+/// Parity entry point for `git_diff`. Exercises the shipped implementation,
+/// libgit2 fast path included: the whole point is that its output is
+/// indistinguishable from the Node dev-server's CLI-based route.
+pub fn git_diff_parity(cwd: String, path: String, staged: bool) -> Result<types::GitDiff, String> {
+    tauri::async_runtime::block_on(commands::read::git_diff(cwd, path, staged))
+}
+
+/// Parity entry point for `git_blame`. Same reasoning as `git_diff_parity`.
+pub fn git_blame_parity(
+    cwd: String,
+    path: String,
+    algorithm: Option<String>,
+) -> Result<Vec<types::BlameLine>, String> {
+    tauri::async_runtime::block_on(commands::read::git_blame(cwd, path, algorithm))
+}
+
 pub fn git_remote_info_parity(cwd: String) -> Result<types::RemoteInfo, String> {
     tauri::async_runtime::block_on(commands::ops::git_remote_info(cwd))
 }

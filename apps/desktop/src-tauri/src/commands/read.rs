@@ -722,21 +722,30 @@ fn compute_main_commit_count(cwd: &str, branch: &str) -> i32 {
 #[tauri::command]
 pub(crate) async fn git_diff(cwd: String, path: String, staged: bool) -> Result<GitDiff, String> {
     let _repo = repo_lock::read(&cwd);
-    let mut cmd = git_cmd();
-    if staged {
-        cmd.arg("diff").arg("--cached");
-    } else {
-        cmd.arg("diff");
-    }
-    cmd.arg("--").arg(&path).current_dir(&cwd);
 
-    let output = cmd
-        .output()
-        .map_err(|e| format!("Failed to run git diff: {}", e))?;
+    // libgit2 fast path (v3.10.0): avoids a git subprocess on the hottest read
+    // path in the app. Any error falls back to the CLI, which stays the
+    // reference implementation for the parity harness.
+    let raw: Vec<u8> = match libgit2_diff_patch(&cwd, &path, staged) {
+        Ok(patch) => patch.into_bytes(),
+        Err(e) => {
+            eprintln!("[git_diff] libgit2 fast path failed ({e}); falling back to CLI");
+            let mut cmd = git_cmd();
+            if staged {
+                cmd.arg("diff").arg("--cached");
+            } else {
+                cmd.arg("diff");
+            }
+            cmd.arg("--").arg(&path).current_dir(&cwd);
+            cmd.output()
+                .map_err(|e| format!("Failed to run git diff: {}", e))?
+                .stdout
+        }
+    };
 
     // Defensive truncation. We slice at the last newline within the cap so
     // we never split a hunk header mid-line.
-    let original_size = output.stdout.len();
+    let original_size = raw.len();
     let truncated_from_bytes: Option<u64> = if original_size > DIFF_TRUNCATE_BYTES {
         Some(original_size as u64)
     } else {
@@ -745,12 +754,12 @@ pub(crate) async fn git_diff(cwd: String, path: String, staged: bool) -> Result<
     let stdout_slice: &[u8] = if truncated_from_bytes.is_some() {
         let mut cut = DIFF_TRUNCATE_BYTES;
         // Walk back to the last \n so the parser sees complete lines.
-        while cut > 0 && output.stdout[cut - 1] != b'\n' {
+        while cut > 0 && raw[cut - 1] != b'\n' {
             cut -= 1;
         }
-        &output.stdout[..cut]
+        &raw[..cut]
     } else {
-        &output.stdout
+        &raw
     };
     let stdout = String::from_utf8_lossy(stdout_slice);
     let (mut hunks, mut status) = parse_diff_hunks(&stdout);
@@ -1366,6 +1375,19 @@ pub(crate) async fn git_blame(
 ) -> Result<Vec<BlameLine>, String> {
     let _repo = repo_lock::read(&cwd);
     let algo = algorithm.as_deref().unwrap_or("histogram");
+    // Limit to 10 000 blame entries to cap memory & runtime on huge files.
+    const BLAME_MAX_ENTRIES: usize = 10_000;
+
+    // libgit2 fast path (v3.10.0). Only for the default algorithm: git2 exposes
+    // no --diff-algorithm equivalent, and blame attribution is user-visible, so
+    // a non-default setting must keep producing what the user asked for.
+    if algo == "histogram" {
+        match libgit2_blame(&cwd, &path, BLAME_MAX_ENTRIES) {
+            Ok(lines) => return Ok(lines),
+            Err(e) => eprintln!("[git_blame] libgit2 fast path failed ({e}); falling back to CLI"),
+        }
+    }
+
     let diff_algo_flag = format!("--diff-algorithm={}", algo);
     let output = git_cmd()
         .args(["blame", "--porcelain", &diff_algo_flag, "--", &path])
@@ -1379,53 +1401,7 @@ pub(crate) async fn git_blame(
         ));
     }
     let raw = String::from_utf8_lossy(&output.stdout);
-    let lines: Vec<&str> = raw.lines().collect();
-    let mut blame_lines: Vec<BlameLine> = Vec::new();
-    // Limit to 10 000 blame entries to cap memory & runtime on huge files.
-    const BLAME_MAX_ENTRIES: usize = 10_000;
-    let mut i = 0;
-    while i < lines.len() && blame_lines.len() < BLAME_MAX_ENTRIES {
-        // Header: <40-char-sha> <orig-line> <final-line> [<num-lines-in-group>]
-        let parts: Vec<&str> = lines[i].split_whitespace().collect();
-        if parts.len() < 3 || parts[0].len() != 40 {
-            i += 1;
-            continue;
-        }
-        let hash_full = parts[0].to_string();
-        let hash = hash_full[..7].to_string();
-        let orig_line: u32 = parts[1].parse().unwrap_or(0);
-        let final_line: u32 = parts[2].parse().unwrap_or(0);
-        i += 1;
-        let mut author = String::new();
-        let mut author_date = String::new();
-        let mut summary = String::new();
-        let mut content = String::new();
-        while i < lines.len() && !lines[i].starts_with('\t') {
-            if lines[i].starts_with("author ") {
-                author = lines[i][7..].to_string();
-            } else if lines[i].starts_with("author-time ") {
-                author_date = lines[i][12..].to_string();
-            } else if lines[i].starts_with("summary ") {
-                summary = lines[i][8..].to_string();
-            }
-            i += 1;
-        }
-        if i < lines.len() && lines[i].starts_with('\t') {
-            content = lines[i][1..].to_string();
-            i += 1;
-        }
-        blame_lines.push(BlameLine {
-            hash,
-            hash_full,
-            final_line,
-            orig_line,
-            author,
-            author_date,
-            summary,
-            content,
-        });
-    }
-    Ok(blame_lines)
+    Ok(parse_blame_porcelain(&raw, BLAME_MAX_ENTRIES))
 }
 
 // ─── Merge Preview (Phase 8.1) ───────────────────────────
@@ -2836,6 +2812,82 @@ mod pathspec_tests {
 
         // The snapshot commit and its meta commit must not be counted.
         assert_eq!(count, 1);
+    }
+
+    // ── Phase D: git_diff libgit2 fast path ───────────────────
+
+    #[test]
+    fn git_diff_reports_an_unstaged_edit_via_the_fast_path() {
+        let repo = TempRepo::new();
+        repo.write("a.txt", "one\ntwo\nthree\n");
+        repo.commit_all("init");
+        repo.write("a.txt", "one\nTWO\nthree\n");
+
+        let d = tauri::async_runtime::block_on(git_diff(
+            repo.cwd().to_string(),
+            "a.txt".to_string(),
+            false,
+        ))
+        .expect("git_diff failed");
+        assert_eq!(d.path, "a.txt");
+        assert_eq!(d.hunks.len(), 1);
+        assert!(d.hunks[0]
+            .lines
+            .iter()
+            .any(|l| l.r#type == "delete" && l.content == "two"));
+        assert!(d.hunks[0]
+            .lines
+            .iter()
+            .any(|l| l.r#type == "add" && l.content == "TWO"));
+        assert!(d.truncated_from_bytes.is_none());
+    }
+
+    #[test]
+    fn git_diff_still_renders_an_untracked_file_as_all_additions() {
+        let repo = TempRepo::new();
+        repo.write("root.txt", "root");
+        repo.commit_all("init");
+        repo.write("new.txt", "hello\nworld\n");
+
+        let d = tauri::async_runtime::block_on(git_diff(
+            repo.cwd().to_string(),
+            "new.txt".to_string(),
+            false,
+        ))
+        .expect("git_diff failed");
+        assert_eq!(d.status.as_deref(), Some("added"));
+        assert!(d.hunks[0].lines.iter().all(|l| l.r#type == "add"));
+    }
+
+    /// Regression test: a TRACKED file whose only change is already staged
+    /// also yields an empty unstaged `git diff`. Without the `is_untracked`
+    /// guard, the `--no-index` fallback would misfire and render the whole
+    /// file as a fresh addition instead of showing no unstaged change (the
+    /// same bug independently found and fixed in dev-server.mjs's mirror
+    /// route during the v3.10.0 libgit2 migration).
+    #[test]
+    fn git_diff_unstaged_is_empty_for_a_tracked_file_with_only_a_staged_change() {
+        let repo = TempRepo::new();
+        repo.write("b.txt", "alpha\nbeta\n");
+        repo.commit_all("init b");
+        repo.write("b.txt", "alpha\nBETA\n");
+        Command::new(git_binary())
+            .args(["add", "--", "b.txt"])
+            .current_dir(repo.cwd())
+            .output()
+            .expect("git add failed");
+
+        let d = tauri::async_runtime::block_on(git_diff(
+            repo.cwd().to_string(),
+            "b.txt".to_string(),
+            false,
+        ))
+        .expect("git_diff failed");
+        assert!(
+            d.hunks.is_empty(),
+            "expected no unstaged hunks for a fully-staged tracked file, got {} hunk(s)",
+            d.hunks.len()
+        );
     }
 }
 

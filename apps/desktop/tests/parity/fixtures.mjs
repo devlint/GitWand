@@ -220,3 +220,26 @@ export function fixtureSubmodule() {
 
   return { cwd, subPath: "libs/inner" };
 }
+
+/**
+ * Repo with one tracked file carrying an unstaged edit AND a staged edit on a
+ * second file, so git-diff parity covers both `staged` values.
+ */
+export function fixtureDiff() {
+  const cwd = mkTempRepo("gw-parity-diff-");
+  commitFile(cwd, "a.txt", "one\ntwo\nthree\n", "init a", 0);
+  commitFile(cwd, "b.txt", "alpha\nbeta\n", "init b", 1);
+  writeFileSync(join(cwd, "a.txt"), "one\nTWO\nthree\n");
+  writeFileSync(join(cwd, "b.txt"), "alpha\nBETA\n");
+  execFileSync("git", ["-C", cwd, "add", "--", "b.txt"]);
+  return cwd;
+}
+
+/** Repo whose single file was authored across three commits, for blame parity. */
+export function fixtureBlame() {
+  const cwd = mkTempRepo("gw-parity-blame-");
+  commitFile(cwd, "a.txt", "one\ntwo\nthree\n", "c1", 0);
+  commitFile(cwd, "a.txt", "one\ntwo\nTHREE\n", "c2", 1);
+  commitFile(cwd, "a.txt", "one\nTWO\nTHREE\nfour\n", "c3", 2);
+  return cwd;
+}
