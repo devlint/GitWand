@@ -41,13 +41,13 @@
   },
   "dependencies": {
     "@gitwand/core": "workspace:*",
-    "smol-toml": "^1.6.1",
-    "yaml": "^2.8.3"
+    "smol-toml": "^1.8.0",
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
-    "@types/node": "^25.5.0",
-    "typescript": "^5.4.0",
-    "vitest": "^4.1.0"
+    "@types/node": "^25.9.5",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.11"
   },
   "author": "Laurent Guitton <lb.guitton@gmail.com>",
   "license": "MIT"
