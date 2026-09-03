@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Cleared 39 open Dependabot alerts (all `high`/`medium`, one `low`) via `pnpm update -r` across the monorepo, all resolved within existing semver ranges — no direct dependency needed a major-version bump. Most of the chain came from `@modelcontextprotocol/sdk` (`packages/mcp`, a published runtime dependency): `hono`, `@hono/node-server`, `express`, `express-rate-limit`, `body-parser`, `qs`, `ip-address`, `ajv`/`ajv-formats`, `undici`, `fast-uri`. The rest came from `@vscode/vsce` (dev-only VSIX packaging, `packages/vscode`): `cheerio`, `@textlint/linter-formatter` → `js-yaml`, `azure-devops-node-api` → `typed-rest-client`. A Linux-only `glib` alert (transitive via `tauri`'s GTK stack) is not yet actionable — no newer version is reachable within the current `tauri`/`tao`/`gtk-rs` dependency graph; tracked for the next `tauri` bump.
+
 ## [3.9.1] - 2026-09-02
 
 ### Added

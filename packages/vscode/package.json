@@ -83,12 +83,12 @@
     "@gitwand/core": "workspace:*"
   },
   "devDependencies": {
-    "@types/node": "^25.5.0",
-    "@types/vscode": "^1.85.0",
-    "@vscode/vsce": "^3.0.0",
-    "esbuild": "^0.28.1",
-    "ovsx": "^1.0.2",
-    "typescript": "^5.4.0"
+    "@types/node": "^25.9.5",
+    "@types/vscode": "^1.134.0",
+    "@vscode/vsce": "^3.9.2",
+    "esbuild": "^0.28.2",
+    "ovsx": "^1.1.1",
+    "typescript": "^5.9.3"
   },
   "license": "MIT"
 }

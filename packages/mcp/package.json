@@ -45,12 +45,12 @@
   },
   "dependencies": {
     "@gitwand/core": "workspace:*",
-    "@modelcontextprotocol/sdk": "^1.12.1"
+    "@modelcontextprotocol/sdk": "^1.30.0"
   },
   "devDependencies": {
-    "@types/node": "^25.5.0",
-    "typescript": "^5.4.0",
-    "vitest": "^4.1.0"
+    "@types/node": "^25.9.5",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.11"
   },
   "author": "Laurent Guitton <lb.guitton@gmail.com>",
   "license": "MIT"
