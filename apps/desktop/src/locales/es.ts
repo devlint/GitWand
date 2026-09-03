@@ -60,6 +60,8 @@ const es: Locale = {
     fetchProgress: "Obteniendo… {0} %",
     merge: "Merge",
     mergeTooltip: "Hacer merge de una rama en la rama actual",
+    mergeNoFf: "Crear siempre un commit de fusión",
+    mergeNoFfTooltip: "Omitir el fast-forward incluso si es posible (--no-ff)",
     mergeFilterPlaceholder: "Rama a fusionar…",
     // Stats
     file: "archivo",

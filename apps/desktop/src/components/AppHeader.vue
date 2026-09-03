@@ -142,7 +142,7 @@ const emit = defineEmits<{
   openRenameModal: [];
   /** User chose "Delete current branch" in BranchMenu — open the modal. */
   openDeleteModal: [];
-  mergeBranch: [name: string];
+  mergeBranch: [name: string, noFf: boolean];
   loadBranches: [];
   // ── Other overlays ───────────────────────────────────────────
   openRebase: [];
@@ -167,10 +167,12 @@ const emit = defineEmits<{
 // ─── Merge-into picker popover (triggered by BranchMenu) ──────────
 const showMergePopover = ref(false);
 const mergeFilter = ref("");
+const mergeNoFf = ref(false);
 
 function openMergePopover() {
   showMergePopover.value = true;
   mergeFilter.value = "";
+  mergeNoFf.value = false;
   emit("loadBranches");
 }
 
@@ -187,7 +189,7 @@ const mergeBranches = computed(() => {
 });
 
 function handleMerge(name: string) {
-  emit("mergeBranch", name);
+  emit("mergeBranch", name, mergeNoFf.value);
   closeMergePopover();
 }
 
@@ -584,6 +586,10 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
                   @keydown.escape="closeMergePopover"
                 />
               </div>
+              <label class="mp-no-ff" :title="t('header.mergeNoFfTooltip')">
+                <input type="checkbox" v-model="mergeNoFf" />
+                <span>{{ t('header.mergeNoFf') }}</span>
+              </label>
               <div v-if="branchesLoading" class="mp-loading">
                 <div class="mp-spinner"></div>
               </div>
@@ -870,6 +876,18 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
 .mp-header {
   padding: var(--space-4) var(--space-5);
   border-bottom: 1px solid var(--color-border);
+}
+
+.mp-no-ff {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-5);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  border-bottom: 1px solid var(--color-border);
+  cursor: pointer;
+  user-select: none;
 }
 
 .mp-filter {

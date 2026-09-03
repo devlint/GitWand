@@ -7,8 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Cleared 39 open Dependabot alerts (all `high`/`medium`, one `low`) via `pnpm update -r` across the monorepo, all resolved within existing semver ranges — no direct dependency needed a major-version bump. Most of the chain came from `@modelcontextprotocol/sdk` (`packages/mcp`, a published runtime dependency): `hono`, `@hono/node-server`, `express`, `express-rate-limit`, `body-parser`, `qs`, `ip-address`, `ajv`/`ajv-formats`, `undici`, `fast-uri`. The rest came from `@vscode/vsce` (dev-only VSIX packaging, `packages/vscode`): `cheerio`, `@textlint/linter-formatter` → `js-yaml`, `azure-devops-node-api` → `typed-rest-client`. A Linux-only `glib` alert (transitive via `tauri`'s GTK stack) is not yet actionable — no newer version is reachable within the current `tauri`/`tao`/`gtk-rs` dependency graph; tracked for the next `tauri` bump.
+
+## [3.9.1] - 2026-09-02
+
 ### Added
 
+- **No-fast-forward merge option** (#177). The "Merge into current…" popover gets an "Always create a merge commit" checkbox — forces `git merge --no-ff` so merging a fast-forwardable branch still records an explicit merge commit, matching teams whose workflow requires one. Off by default; the existing fast-forward behavior is unchanged.
 - **CLI update notice.** A global `npm install -g @gitwand/cli` never auto-updates, unlike `npx @gitwand/cli` or the desktop app's own updater. `gitwand` now checks the npm registry at most once every 24h (cached locally) and prints a one-line notice when a newer version is published. Only runs in an interactive terminal, never in CI or piped output, and any failure (offline, registry down, unwritable home dir) is silent.
 
 ### Changed
@@ -1416,7 +1423,8 @@ Design-system foundations — the app header and every overlay now ride on a sha
 - CI pipeline via GitHub Actions (Node 18, 20, 22)
 - 28 tests covering all patterns + real-world scenarios (package.json, Laravel routes, Vue SFC, CSS, .env files)
 
-[Unreleased]: https://github.com/devlint/GitWand/compare/v3.8.0...HEAD
+[Unreleased]: https://github.com/devlint/GitWand/compare/v3.9.1...HEAD
+[3.9.1]: https://github.com/devlint/GitWand/compare/v3.9.0...v3.9.1
 [3.9.0]: https://github.com/devlint/GitWand/compare/v3.8.0...v3.9.0
 [3.8.0]: https://github.com/devlint/GitWand/compare/v3.7.3...v3.8.0
 [3.7.3]: https://github.com/devlint/GitWand/compare/v3.7.2...v3.7.3

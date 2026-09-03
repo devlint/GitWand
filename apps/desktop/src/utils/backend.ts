@@ -935,16 +935,17 @@ export async function gitFetch(cwd: string, onProgress?: (p: CloneProgress) => v
 }
 
 /**
- * Merge a branch into the current branch.
+ * Merge a branch into the current branch. `noFf` forces `--no-ff` (#177),
+ * always creating a merge commit even when a fast-forward is possible.
  */
-export async function gitMerge(cwd: string, branch: string): Promise<GitPushPullResult> {
+export async function gitMerge(cwd: string, branch: string, noFf: boolean = false): Promise<GitPushPullResult> {
   if (isTauri()) {
-    return tauriInvoke<GitPushPullResult>("git_merge", { cwd, branch });
+    return tauriInvoke<GitPushPullResult>("git_merge", { cwd, branch, noFf });
   }
   const res = await devFetch(`${DEV_SERVER}/api/git-merge`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ cwd, branch }),
+    body: JSON.stringify({ cwd, branch, noFf }),
   });
   return res.json();
 }

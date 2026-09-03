@@ -5,6 +5,12 @@ description: Release history for GitWand — the native Git client with AI confl
 
 # Changelog
 
+## v3.9.1 — September 2026
+
+A community request, filed as a one-line issue: "the branch merge UI doesn't include the ability to merge with no fast forward option. This is the base working process in our company." Some teams want every merge to leave a visible seam, a real merge commit, even for a branch that could otherwise fast-forward silently into the trunk. GitWand's merge popover had no way to ask for that. It does now: an "Always create a merge commit" checkbox sits next to the branch picker, off by default, and checking it before merging runs `git merge --no-ff` instead of letting a fast-forward slide through unannounced. Leave it unchecked and nothing changes.
+
+A CLI installed the traditional way, `npm install -g @gitwand/cli`, never told you a newer version existed, unlike `npx @gitwand/cli`, which always resolves latest, or the desktop app, which updates itself. Only global installs had this blind spot, so `gitwand` now checks npm at most once a day and prints a one-line notice when it's behind, quietly, and only in a real terminal.
+
 ## v3.9.0 — August 2026
 
 ### The engine finally measures itself

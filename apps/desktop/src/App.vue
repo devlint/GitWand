@@ -664,9 +664,9 @@ watch(repoError, (val) => {
 });
 
 /** Wrap the raw merge to capture the merged branch name for the cleanup modal. */
-async function doMerge(branch: string) {
+async function doMerge(branch: string, noFf: boolean = false) {
   lastMergedBranch.value = branch;
-  await doMergeRaw(branch);
+  await doMergeRaw(branch, noFf);
 }
 
 // ─── Merge success modal ──────────────────────────────────

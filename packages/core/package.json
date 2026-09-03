@@ -1,6 +1,6 @@
 {
   "name": "@gitwand/core",
-  "version": "3.9.0",
+  "version": "3.9.1",
   "description": "GitWand core — automatic Git conflict resolution engine (powers @gitwand/cli, @gitwand/mcp, and the GitWand desktop app)",
   "type": "module",
   "main": "dist/index.js",
@@ -58,14 +58,14 @@
     }
   },
   "dependencies": {
-    "smol-toml": "^1.3.0",
-    "yaml": "^2.5.0"
+    "smol-toml": "^1.8.0",
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
-    "@types/node": "^25.5.0",
+    "@types/node": "^25.9.5",
     "tree-sitter-wasms": "^0.1.13",
-    "typescript": "^5.4.0",
-    "vitest": "^4.1.0",
-    "web-tree-sitter": "~0.20.7"
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.11",
+    "web-tree-sitter": "~0.20.8"
   }
 }

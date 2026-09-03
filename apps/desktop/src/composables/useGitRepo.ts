@@ -1096,11 +1096,11 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
 
   // ─── Merge ──────────────────────────────────────────────
 
-  async function mergeBranch(branchName: string) {
+  async function mergeBranch(branchName: string, noFf: boolean = false) {
     if (!folderPath.value || !branchName) return;
     isMerging.value = true;
     try {
-      const result = await gitMerge(folderPath.value, branchName);
+      const result = await gitMerge(folderPath.value, branchName, noFf);
       // Force: a fast-forward merge moves refs without a new merge commit.
       await refresh(true);
 
