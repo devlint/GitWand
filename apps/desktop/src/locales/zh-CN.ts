@@ -1667,7 +1667,6 @@ const zhCN: Locale = {
       resolve: "解决",
       follow: "跟进",
       nudge: "提醒",
-      autoMerge: "自动合并",
       view: "查看",
     },
     case: {

@@ -448,13 +448,13 @@ const prPanel = usePrPanel(prCwd, {
   // review then hiding the tab would leave the queue paused on
   // document.hidden forever.
   //
-  // v3.10.0 — Live Repo: also fire a catch-up watcher refresh here. Watcher
-  // events that arrive while the tab is hidden are dropped by
-  // watcherRefreshQueue.schedule()'s document.hidden guard, so without this a
-  // change made while backgrounded would only surface on the *next* real
-  // event rather than immediately on return. Shares the "worktree-index" key
-  // with that handler below (same job — repoRefresh + conditional loadLog) so
-  // the two collapse to a single refresh if they race.
+  // v3.10.0 Live Repo: also fire a catch-up watcher refresh here, for the
+  // changes no watcher event covers (anything that happened before the watch
+  // existed, or that the OS watcher missed). Events that arrive while the tab
+  // is hidden need no help: watcherRefreshQueue queues them and drains itself
+  // on this same visibility edge, for every kind. Shares the "worktree-index"
+  // key with that handler below (same job, repoRefresh + conditional
+  // loadLog) so the two collapse to a single refresh if they race.
   onVisibilityResume: () => {
     commitReview.resume();
     watcherRefreshQueue.schedule("worktree-index", async () => {

@@ -70,6 +70,14 @@ async function inThreadFacade(): Promise<CoreEngineFacade> {
   };
 }
 
+/**
+ * How long the worker gets to answer its handshake before we give up on it and
+ * run in-thread. Generous: this only has to cover chunk fetch + module eval on
+ * a cold cache, and the common failure modes (404, no module-worker support)
+ * report themselves through the `error` event long before it elapses.
+ */
+const HANDSHAKE_TIMEOUT_MS = 5_000;
+
 async function workerFacade(): Promise<CoreEngineFacade> {
   const worker = new Worker(new URL("../workers/coreEngine.worker.ts", import.meta.url), {
     type: "module",
@@ -77,18 +85,43 @@ async function workerFacade(): Promise<CoreEngineFacade> {
   // Constructing a Worker never throws for a chunk that fails to load (e.g. a
   // 404, or a WebView without module-worker support) — the failure surfaces
   // later as an async `error` event, well after this function has already
-  // returned a Comlink-wrapped facade. Comlink's RPC has no timeout, so any
-  // call already in flight against that worker would hang forever with no
-  // error surfaced. We can't rescue an in-flight call, but we can stop
-  // handing out the broken worker to every *subsequent* `engine()` caller —
-  // demote `_facade` to the in-thread implementation so the conflict UI
+  // returned a Comlink-wrapped facade. This listener keeps a worker that dies
+  // *later* from being handed to every subsequent `engine()` caller: it
+  // demotes `_facade` to the in-thread implementation so the conflict UI
   // degrades instead of freezing.
   worker.addEventListener("error", (event) => {
     console.warn("[gitwand] core engine worker failed to load, falling back to in-thread", event);
     worker.terminate();
     _facade = inThreadFacade();
   });
-  return Comlink.wrap<CoreEngineWorkerApi>(worker) as unknown as CoreEngineFacade;
+
+  const remote = Comlink.wrap<CoreEngineWorkerApi>(worker);
+  // Handshake before handing the facade out. Comlink's RPC has no timeout, so
+  // a worker that loads but never answers (or one whose `error` event the
+  // WebView does not deliver) would leave the *first* caller
+  // (`useGitWand.loadRealFiles`, awaiting `Promise.all` over `resolveAsync`)
+  // hanging forever, with the merge editor stuck on its loading state and no
+  // error anywhere. The listener above cannot rescue that call; proving the
+  // worker answers one cheap RPC first can.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      remote.ping(),
+      new Promise((_resolve, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`core engine worker did not answer in ${HANDSHAKE_TIMEOUT_MS}ms`)),
+          HANDSHAKE_TIMEOUT_MS,
+        );
+      }),
+    ]);
+  } catch (err) {
+    worker.terminate();
+    throw err; // engine() below turns this into the in-thread fallback
+  } finally {
+    clearTimeout(timer);
+  }
+
+  return remote as unknown as CoreEngineFacade;
 }
 
 export function engine(): Promise<CoreEngineFacade> {

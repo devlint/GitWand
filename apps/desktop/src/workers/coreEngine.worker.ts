@@ -24,6 +24,17 @@
 import * as Comlink from "comlink";
 import { resolve, resolveAsync, parseConflictMarkers, type GitWandOptions, type LlmEndpoint } from "@gitwand/core";
 
+/**
+ * Release a Comlink proxy received as an RPC argument, if it is one.
+ *
+ * A no-op for the in-thread fallback in `../utils/coreEngine.ts`, which hands
+ * over the marked function itself rather than a wrapped proxy.
+ */
+function releaseProxy(value: unknown): void {
+  const releasable = value as { [Comlink.releaseProxy]?: () => void } | undefined;
+  releasable?.[Comlink.releaseProxy]?.();
+}
+
 const structuralOpts = {
   wasmPath: "/grammars/web-tree-sitter.wasm",
   customLoader: async (grammarName: string): Promise<Uint8Array> => {
@@ -36,10 +47,18 @@ const structuralOpts = {
 };
 
 const api = {
+  /**
+   * Handshake probe. `../utils/coreEngine.ts` races this against a timeout
+   * before handing the facade out, so a worker that loads but never answers
+   * degrades to the in-thread engine instead of hanging the first caller.
+   */
+  ping(): true {
+    return true;
+  },
   resolve(content: string, filePath: string, options?: GitWandOptions) {
     return resolve(content, filePath, options);
   },
-  resolveAsync(
+  async resolveAsync(
     content: string,
     filePath: string,
     options?: GitWandOptions,
@@ -51,7 +70,20 @@ const api = {
           llmFallback: { ...(options?.llmFallback ?? { enabled: false }), endpoint: endpointProxy },
         }
       : options;
-    return resolveAsync(content, filePath, opts, structuralOpts);
+    try {
+      return await resolveAsync(content, filePath, opts, structuralOpts);
+    } finally {
+      // Comlink's proxy transfer handler builds a *fresh* `MessageChannel`
+      // every time a `Comlink.proxy()`-marked value is serialized, once per
+      // call, not once per marked object. The main thread holds the exposing
+      // end (`expose(obj, port1)`), so it has nothing to release: without
+      // this, one port pair and its message listener leak per conflicted
+      // file, per resolution pass, for the life of the page. Releasing from
+      // this side makes the exposing end detach its listener and close the
+      // port. Safe to do unconditionally after the call: the proxy is
+      // per-call, so nothing else can still be holding it.
+      releaseProxy(endpointProxy);
+    }
   },
   parseConflictMarkers(content: string) {
     return parseConflictMarkers(content);

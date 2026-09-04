@@ -159,6 +159,60 @@ fn format_iso8601(secs: i64, offset_min: i32) -> String {
     )
 }
 
+/// Mirror the effective `git diff` configuration onto libgit2's
+/// `DiffOptions`, or fail when libgit2 cannot express it.
+///
+/// Covered: `diff.context` (git default 3), `diff.interHunkContext` (0),
+/// `diff.algorithm` (`myers`/`default` → libgit2's bundled xdiff default,
+/// `patience`, `minimal`) and `diff.indentHeuristic`, which git enables by
+/// default since 2.14 while libgit2 leaves it off, so it has to be set
+/// explicitly rather than left at the library default.
+///
+/// Not covered: `diff.algorithm = histogram`. libgit2 exposes no histogram
+/// flag, and the difference is not cosmetic, it reshapes hunks around moved
+/// blocks with repeated lines. An unknown value is treated the same way: fail
+/// loudly here rather than render a diff that disagrees with the user's git.
+fn apply_diff_config(repo: &git2::Repository, opts: &mut git2::DiffOptions) -> Result<(), String> {
+    let cfg = repo
+        .config()
+        .map_err(|e| format!("git2 config: {e}"))?
+        .snapshot()
+        .map_err(|e| format!("git2 config snapshot: {e}"))?;
+
+    let context = cfg.get_i32("diff.context").unwrap_or(3);
+    let interhunk = cfg.get_i32("diff.interhunkcontext").unwrap_or(0);
+    if context < 0 || interhunk < 0 {
+        return Err("negative diff.context / diff.interHunkContext".to_string());
+    }
+    opts.context_lines(context as u32);
+    opts.interhunk_lines(interhunk as u32);
+
+    // git: on by default since 2.14. libgit2: off by default.
+    opts.indent_heuristic(cfg.get_bool("diff.indentheuristic").unwrap_or(true));
+
+    match cfg
+        .get_str("diff.algorithm")
+        .unwrap_or("default")
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "" | "default" | "myers" => {}
+        "patience" => {
+            opts.patience(true);
+        }
+        "minimal" => {
+            opts.minimal(true);
+        }
+        other => {
+            return Err(format!(
+                "diff.algorithm = {other} is not expressible with libgit2; use the CLI"
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Render `git diff [--cached] -- <path>` as unified-diff text, in process.
 ///
 /// Deliberately produces *text* rather than `DiffHunk`s: the caller feeds it to
@@ -184,10 +238,15 @@ pub(crate) fn libgit2_diff_patch(cwd: &str, path: &str, staged: bool) -> Result<
 
     let mut opts = git2::DiffOptions::new();
     opts.pathspec(path);
-    // Match the CLI defaults `git diff` uses for the UI: 3 lines of context,
-    // no rename detection on a single-path diff.
-    opts.context_lines(3);
     opts.include_untracked(false);
+    // Honour the user's diff configuration, or bail so `git_diff` falls back
+    // to the CLI. Hardcoding libgit2's defaults here made the displayed diff
+    // silently disagree with `git diff` for anyone who sets `diff.algorithm`
+    // or `diff.context`: `libgit2_diff_patch` returning `Ok` means the CLI
+    // fallback never runs, so the divergence has nothing to correct it. This
+    // is the same class of mismatch that disqualified the libgit2 blame fast
+    // path (see `libgit2_blame` below).
+    apply_diff_config(&repo, &mut opts)?;
 
     let diff = if staged {
         // HEAD tree to index. An unborn HEAD has no tree: diff against nothing.
@@ -446,6 +505,97 @@ mod tests {
         assert_eq!(lg2_hunks.len(), cli_hunks.len());
         assert!(!lg2_hunks.is_empty());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A repo with `diff.algorithm = histogram` must fall back to the CLI:
+    /// libgit2 has no histogram flag, and on a moved block with repeated lines
+    /// histogram and myers produce genuinely different hunks. Because
+    /// `libgit2_diff_patch` returning `Ok` means `git_diff` never runs the
+    /// CLI, silently shipping the myers shaping would leave the UI disagreeing
+    /// with the user's own `git diff` with nothing to correct it.
+    #[test]
+    fn histogram_algorithm_falls_back_to_the_cli() {
+        let dir = temp_repo("histogram");
+        Command::new("git")
+            .args(["config", "diff.algorithm", "histogram"])
+            .current_dir(&dir)
+            .output()
+            .unwrap();
+        std::fs::write(dir.join("a.txt"), "one\nTWO\nthree\n").unwrap();
+
+        let result = libgit2_diff_patch(dir.to_str().unwrap(), "a.txt", false);
+        assert!(
+            result.is_err(),
+            "diff.algorithm = histogram must bail to the CLI, got: {result:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn unknown_algorithm_falls_back_to_the_cli() {
+        let dir = temp_repo("unknown-algo");
+        Command::new("git")
+            .args(["config", "diff.algorithm", "some-future-algorithm"])
+            .current_dir(&dir)
+            .output()
+            .unwrap();
+        std::fs::write(dir.join("a.txt"), "one\nTWO\nthree\n").unwrap();
+        assert!(libgit2_diff_patch(dir.to_str().unwrap(), "a.txt", false).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `diff.context` and `diff.algorithm = patience` are both expressible
+    /// with libgit2, so the fast path must *honour* them rather than bail, and
+    /// match the CLI hunk for hunk while doing so.
+    #[test]
+    fn honours_diff_context_and_patience_like_the_cli() {
+        for (key, value) in [("diff.context", "1"), ("diff.algorithm", "patience")] {
+            let dir = temp_repo(&format!("cfg-{}", key.replace('.', "-")));
+            Command::new("git")
+                .args(["config", key, value])
+                .current_dir(&dir)
+                .output()
+                .unwrap();
+            // A file long enough for the context setting to change the hunk
+            // shape: with 3 lines of content, 1 and 3 lines of context both
+            // cover the whole file and the test would prove nothing.
+            let base: String = (1..=12).map(|i| format!("line {i}\n")).collect();
+            std::fs::write(dir.join("a.txt"), &base).unwrap();
+            for args in [vec!["add", "a.txt"], vec!["commit", "-qm", "long file"]] {
+                let out = Command::new("git")
+                    .args(&args)
+                    .current_dir(&dir)
+                    .output()
+                    .unwrap();
+                assert!(out.status.success(), "git {args:?} failed");
+            }
+            std::fs::write(dir.join("a.txt"), base.replace("line 6\n", "LINE SIX\n")).unwrap();
+
+            let lg2 = libgit2_diff_patch(dir.to_str().unwrap(), "a.txt", false)
+                .unwrap_or_else(|e| panic!("{key}={value} must stay on the fast path: {e}"));
+            let cli = cli_diff(&dir, "a.txt", false);
+            let (lg2_hunks, _) = crate::git::parse::parse_diff_hunks(&lg2);
+            let (cli_hunks, _) = crate::git::parse::parse_diff_hunks(&cli);
+            assert_eq!(
+                lg2_hunks.len(),
+                cli_hunks.len(),
+                "{key}={value}: hunk count diverged"
+            );
+            assert_eq!(
+                lg2_hunks[0]
+                    .lines
+                    .iter()
+                    .map(|l| (l.r#type.clone(), l.content.clone()))
+                    .collect::<Vec<_>>(),
+                cli_hunks[0]
+                    .lines
+                    .iter()
+                    .map(|l| (l.r#type.clone(), l.content.clone()))
+                    .collect::<Vec<_>>(),
+                "{key}={value}: hunk contents diverged"
+            );
+            let _ = std::fs::remove_dir_all(&dir);
+        }
     }
 
     #[test]

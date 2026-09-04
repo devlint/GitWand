@@ -1689,7 +1689,6 @@ const fr: Locale = {
       resolve: "Résoudre",
       follow: "Suivre",
       nudge: "Relancer",
-      autoMerge: "Auto-merge",
       view: "Voir",
     },
     case: {

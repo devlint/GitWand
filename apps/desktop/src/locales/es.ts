@@ -1680,7 +1680,6 @@ const es: Locale = {
       resolve: "Resolver",
       follow: "Seguir",
       nudge: "Recordar",
-      autoMerge: "Auto-merge",
       view: "Ver",
     },
     case: {

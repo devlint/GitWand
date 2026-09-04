@@ -67,6 +67,77 @@ pub(crate) fn classify_path(rel: &str) -> Option<&'static str> {
     Some("worktree")
 }
 
+/// Normalize a path fragment for classification and for the event payload:
+/// lossy UTF-8, forward slashes on every platform.
+fn rel_str(rel: &std::path::Path) -> String {
+    rel.to_string_lossy().replace('\\', "/")
+}
+
+/// Map an absolute filesystem path to the repo-relative form `classify_path`
+/// understands, or `None` when it belongs to neither the worktree nor the
+/// repo's metadata directories.
+///
+/// `git_dirs` carries the metadata directories that are *not* already covered
+/// by the recursive worktree watch: a linked `git worktree` has `.git` as a
+/// **file**, with HEAD/index/MERGE_HEAD living in
+/// `<main>/.git/worktrees/<name>/` and refs/config in `<main>/.git/`, both
+/// outside the worktree entirely. `--separate-git-dir` repos are the same
+/// shape. Paths found there are renamed to `.git/<rest>` so one classifier
+/// covers every repo layout, and so `head`/`index`/`refs`/`mergeState` events
+/// are produced for a worktree instead of the watcher going silently
+/// metadata-blind while still reporting itself healthy.
+///
+/// Metadata directories are tested first: in the ordinary layout `<root>/.git`
+/// is *inside* the worktree, so worktree-first would classify every metadata
+/// path as plain `worktree` content.
+pub(crate) fn classify_abs_path(
+    worktree: &std::path::Path,
+    git_dirs: &[PathBuf],
+    abs: &std::path::Path,
+) -> Option<(String, &'static str)> {
+    for dir in git_dirs {
+        if let Ok(rel) = abs.strip_prefix(dir) {
+            let rel = rel_str(rel);
+            if rel.is_empty() {
+                continue;
+            }
+            let mapped = format!(".git/{rel}");
+            return classify_path(&mapped).map(|kind| (mapped, kind));
+        }
+    }
+    let rel = rel_str(abs.strip_prefix(worktree).ok()?);
+    if rel.is_empty() {
+        return None;
+    }
+    classify_path(&rel).map(|kind| (rel, kind))
+}
+
+/// The metadata directories of `root` that a recursive watch on `root` does
+/// **not** already cover. Empty for the ordinary layout (`<root>/.git` is a
+/// real directory inside the worktree).
+///
+/// Resolved in-process through libgit2 rather than `git rev-parse --git-dir`:
+/// no subprocess on the repo-open path, and `commondir()` gives the shared
+/// directory a linked worktree keeps its refs in, which `--git-dir` alone
+/// does not.
+fn external_git_dirs(root: &std::path::Path) -> Vec<PathBuf> {
+    let Ok(repo) = git2::Repository::open(root) else {
+        return Vec::new();
+    };
+    let mut out: Vec<PathBuf> = Vec::new();
+    // Order matters for `classify_abs_path`: the worktree's own git dir is
+    // nested inside the common dir, and its HEAD/index must win over the
+    // common dir's `worktrees/<name>/...` reading of the same path.
+    for dir in [repo.path().to_path_buf(), repo.commondir().to_path_buf()] {
+        let dir = std::fs::canonicalize(&dir).unwrap_or(dir);
+        if dir.starts_with(root) || out.contains(&dir) {
+            continue;
+        }
+        out.push(dir);
+    }
+    out
+}
+
 /// Turn a raw batch of repo-relative paths into one event, or `None` when
 /// nothing in the batch is interesting. Paths and kinds are deduplicated and
 /// sorted so the payload is deterministic (and so tests are stable).
@@ -124,7 +195,16 @@ fn watches() -> &'static Mutex<HashMap<PathBuf, RepoWatch>> {
     W.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-type Subscribers = HashMap<u64, (PathBuf, Channel<RepoChangeEvent>)>;
+/// One frontend subscription. `webview` is the label of the webview that
+/// opened it, so every subscription a document left behind can be reaped when
+/// that webview navigates or is destroyed, see `stop_all_for_webview`.
+struct Subscription {
+    root: PathBuf,
+    webview: String,
+    chan: Channel<RepoChangeEvent>,
+}
+
+type Subscribers = HashMap<u64, Subscription>;
 
 fn subscribers() -> &'static Mutex<Subscribers> {
     static S: OnceLock<Mutex<Subscribers>> = OnceLock::new();
@@ -141,15 +221,29 @@ fn lock_subscribers() -> std::sync::MutexGuard<'static, Subscribers> {
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
-/// Fan an event out to every live subscriber of `root`.
+/// Fan an event out to every live subscriber of `root`, reaping the ones whose
+/// channel is gone.
+///
+/// A `Channel::send` bottoms out in `webview.eval(...)`, which fails once the
+/// webview is destroyed (window closed without the frontend's `onUnmounted`
+/// getting to run). Ignoring that error used to leave the subscription, and
+/// the `subscriber_count` it holds, in place forever, so the count could
+/// never fall back to 0 and both the `RecommendedWatcher` and its coalescing
+/// thread leaked for the lifetime of the process, with every event still being
+/// cloned into a channel nobody reads.
 fn broadcast(root: &PathBuf, event: &RepoChangeEvent) {
-    let subs = lock_subscribers();
-    for (path, chan) in subs.values() {
-        if path == root {
-            // A dead channel (window closed) just errors; the subscription is
-            // reaped by watch_repo_stop or by the next app_handle teardown.
-            let _ = chan.send(event.clone());
-        }
+    // Collect under the lock, reap after releasing it: `drop_subscription`
+    // takes both this lock and WATCHES.
+    let dead: Vec<u64> = {
+        let subs = lock_subscribers();
+        subs.iter()
+            .filter(|(_, sub)| &sub.root == root)
+            .filter(|(_, sub)| sub.chan.send(event.clone()).is_err())
+            .map(|(id, _)| *id)
+            .collect()
+    };
+    for id in dead {
+        drop_subscription(id);
     }
 }
 
@@ -167,6 +261,7 @@ fn broadcast(root: &PathBuf, event: &RepoChangeEvent) {
 ///   forced `truncated` regardless of `coalesce`'s own (post-dedup) cap.
 fn spawn_coalescer<F>(
     root: PathBuf,
+    git_dirs: Vec<PathBuf>,
     rx: mpsc::Receiver<notify::Result<notify::Event>>,
     stop: Arc<AtomicBool>,
     emit: F,
@@ -210,19 +305,14 @@ fn spawn_coalescer<F>(
             match rx.recv_timeout(wait) {
                 Ok(Ok(event)) => {
                     for p in event.paths {
-                        let Ok(rel) = p.strip_prefix(&root) else {
-                            continue;
-                        };
-                        let rel = rel.to_string_lossy().replace('\\', "/");
-                        if rel.is_empty() {
-                            continue;
-                        }
                         // Classify at push time so noise (object churn,
                         // ignored build dirs) is never stored, not just
-                        // discarded later at flush.
-                        if classify_path(&rel).is_none() {
+                        // discarded later at flush. `classify_abs_path` also
+                        // maps a linked worktree's external metadata paths
+                        // onto the `.git/<...>` names the classifier knows.
+                        let Some((rel, _kind)) = classify_abs_path(&root, &git_dirs, &p) else {
                             continue;
-                        }
+                        };
                         if batch.is_empty() {
                             first_event_at = Some(std::time::Instant::now());
                         }
@@ -269,7 +359,7 @@ fn spawn_coalescer<F>(
                             closed: true,
                         });
                         lock_watches().remove(&root);
-                        lock_subscribers().retain(|_, (path, _)| path != &root);
+                        lock_subscribers().retain(|_, sub| sub.root != root);
                     }
                     return;
                 }
@@ -299,10 +389,32 @@ fn ensure_watch(root: &std::path::Path) -> Result<(), String> {
         .watch(root, RecursiveMode::Recursive)
         .map_err(|e| format!("failed to watch {}: {e}", root.display()))?;
 
+    // A linked `git worktree` (or a `--separate-git-dir` repo) keeps its
+    // metadata outside the worktree, so the recursive watch above sees no
+    // HEAD, index, refs or merge-state writes at all. Watch those directories
+    // too, otherwise the watcher reports itself healthy (demoting the poll to
+    // 15 s) while being blind to every commit, branch switch and conflict
+    // created outside GitWand: strictly worse than the pre-v3.10.0 2 s poll.
+    let git_dirs = external_git_dirs(root);
+    for dir in &git_dirs {
+        watcher
+            .watch(dir, RecursiveMode::Recursive)
+            .map_err(|e| format!("failed to watch {}: {e}", dir.display()))?;
+    }
+    // Nothing to watch for metadata and no `.git` directory inside the
+    // worktree either: we cannot honestly claim a healthy watch, and saying so
+    // is what keeps the poller on its 2 s cadence.
+    if git_dirs.is_empty() && !root.join(".git").is_dir() {
+        return Err(format!(
+            "cannot resolve the git metadata directory for {}",
+            root.display()
+        ));
+    }
+
     let stop = Arc::new(AtomicBool::new(false));
     let thread_root = root.to_path_buf();
     let emit_root = thread_root.clone();
-    spawn_coalescer(thread_root, rx, stop.clone(), move |ev| {
+    spawn_coalescer(thread_root, git_dirs, rx, stop.clone(), move |ev| {
         broadcast(&emit_root, &ev);
     });
 
@@ -323,6 +435,7 @@ fn ensure_watch(root: &std::path::Path) -> Result<(), String> {
 /// extension point the v4.0 incremental code-graph indexer will use.
 #[tauri::command]
 pub(crate) fn watch_repo_start(
+    webview: tauri::Webview,
     cwd: String,
     on_change: Channel<RepoChangeEvent>,
 ) -> Result<u64, String> {
@@ -334,27 +447,65 @@ pub(crate) fn watch_repo_start(
     ensure_watch(&root)?;
 
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
-    lock_subscribers().insert(id, (root, on_change));
+    lock_subscribers().insert(
+        id,
+        Subscription {
+            root,
+            webview: webview.label().to_string(),
+            chan: on_change,
+        },
+    );
     Ok(id)
 }
 
-/// Drop a subscription. When the last subscriber for a repo leaves, the OS
-/// watcher and its coalescing thread are torn down.
-#[tauri::command]
-pub(crate) fn watch_repo_stop(id: u64) -> Result<(), String> {
+/// Drop a subscription and release the watch reference it held. When the last
+/// subscriber for a repo leaves, the OS watcher and its coalescing thread are
+/// torn down. Shared by the `watch_repo_stop` command, the dead-channel
+/// reaping in `broadcast`, and `stop_all_for_webview`.
+fn drop_subscription(id: u64) {
     let removed = lock_subscribers().remove(&id);
-    let Some((root, _)) = removed else {
-        return Ok(()); // idempotent: stopping an unknown id is not an error
+    let Some(sub) = removed else {
+        return; // idempotent: dropping an unknown id is not an error
     };
     let mut watches = lock_watches();
-    if let Some(entry) = watches.get_mut(&root) {
+    if let Some(entry) = watches.get_mut(&sub.root) {
         entry.subscriber_count = entry.subscriber_count.saturating_sub(1);
         if entry.subscriber_count == 0 {
             entry.stop.store(true, Ordering::Relaxed);
-            watches.remove(&root); // drops the watcher, ends the thread
+            watches.remove(&sub.root); // drops the watcher, ends the thread
         }
     }
+}
+
+/// Drop a subscription. Idempotent: an unknown id is a no-op.
+#[tauri::command]
+pub(crate) fn watch_repo_stop(id: u64) -> Result<(), String> {
+    drop_subscription(id);
     Ok(())
+}
+
+/// Reap every subscription opened by a webview. Called from `lib.rs` on
+/// `PageLoadEvent::Started` and on `WindowEvent::Destroyed`.
+///
+/// This is the only reliable signal for a *reload* (a Vite full reload in dev,
+/// a `location.reload()`, a crashed-and-restored webview): the old document's
+/// `onUnmounted` never runs, so nothing calls `watch_repo_stop`, and
+/// `Channel::send` keeps succeeding because the webview itself is still alive:
+/// the `eval` lands in a document whose callback registry was wiped, so the
+/// dead-channel reaping in `broadcast` cannot see it either. Without this the
+/// `subscriber_count` for the repo would climb by one per reload and never
+/// return to 0.
+pub(crate) fn stop_all_for_webview(label: &str) {
+    let stale: Vec<u64> = {
+        let subs = lock_subscribers();
+        subs.iter()
+            .filter(|(_, sub)| sub.webview == label)
+            .map(|(id, _)| *id)
+            .collect()
+    };
+    for id in stale {
+        drop_subscription(id);
+    }
 }
 
 #[cfg(test)]
@@ -405,6 +556,73 @@ mod tests {
         assert_eq!(classify_path("README.md"), Some("worktree"));
         // A file literally named ".gitignore" is worktree content, not metadata.
         assert_eq!(classify_path(".gitignore"), Some("worktree"));
+    }
+
+    #[test]
+    fn classifies_absolute_paths_in_the_ordinary_layout() {
+        let root = PathBuf::from("/repo");
+        let none: Vec<PathBuf> = Vec::new();
+        assert_eq!(
+            classify_abs_path(&root, &none, &PathBuf::from("/repo/.git/HEAD")),
+            Some((".git/HEAD".to_string(), "head"))
+        );
+        assert_eq!(
+            classify_abs_path(&root, &none, &PathBuf::from("/repo/src/main.rs")),
+            Some(("src/main.rs".to_string(), "worktree"))
+        );
+        assert_eq!(
+            classify_abs_path(&root, &none, &PathBuf::from("/elsewhere/x")),
+            None
+        );
+        // The root itself is not a change.
+        assert_eq!(classify_abs_path(&root, &none, &root), None);
+    }
+
+    /// Regression test for the linked-worktree blind spot: HEAD, index and
+    /// merge state live in `<main>/.git/worktrees/<name>/`, refs and config in
+    /// `<main>/.git/`, and neither is under the worktree. Without the mapping
+    /// these paths classify as nothing at all, and the watcher reports itself
+    /// healthy (demoting the poll to 15 s) while missing every commit, branch
+    /// switch and conflict made outside GitWand.
+    #[test]
+    fn classifies_a_linked_worktrees_external_metadata() {
+        let root = PathBuf::from("/wt/feature");
+        let git_dir = PathBuf::from("/main/.git/worktrees/feature");
+        let common = PathBuf::from("/main/.git");
+        let dirs = vec![git_dir.clone(), common.clone()];
+
+        assert_eq!(
+            classify_abs_path(&root, &dirs, &git_dir.join("HEAD")),
+            Some((".git/HEAD".to_string(), "head"))
+        );
+        assert_eq!(
+            classify_abs_path(&root, &dirs, &git_dir.join("index")),
+            Some((".git/index".to_string(), "index"))
+        );
+        assert_eq!(
+            classify_abs_path(&root, &dirs, &git_dir.join("MERGE_HEAD")),
+            Some((".git/MERGE_HEAD".to_string(), "mergeState"))
+        );
+        assert_eq!(
+            classify_abs_path(&root, &dirs, &common.join("refs/heads/main")),
+            Some((".git/refs/heads/main".to_string(), "refs"))
+        );
+        // The worktree's own git dir must win over the common dir's reading of
+        // the same path (`.git/worktrees/feature/HEAD`, which is noise).
+        assert_eq!(
+            classify_abs_path(&root, &dirs, &common.join("worktrees/feature/HEAD")),
+            Some((".git/HEAD".to_string(), "head"))
+        );
+        // Object churn in the shared dir stays noise.
+        assert_eq!(
+            classify_abs_path(&root, &dirs, &common.join("objects/ab/cdef")),
+            None
+        );
+        // Worktree content still classifies normally.
+        assert_eq!(
+            classify_abs_path(&root, &dirs, &root.join("src/main.rs")),
+            Some(("src/main.rs".to_string(), "worktree"))
+        );
     }
 
     #[test]
@@ -541,6 +759,114 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// End-to-end over a real `git worktree`: a commit made inside a linked
+    /// worktree writes HEAD and refs *outside* the worktree directory, so a
+    /// recursive watch on the worktree alone sees none of it. `ensure_watch`
+    /// must pick those directories up and the coalescer must classify them.
+    #[test]
+    fn watches_a_linked_worktrees_external_metadata_end_to_end() {
+        use std::process::Command;
+
+        let base = std::env::temp_dir().join(format!(
+            "gw-watch-wt-{}-{}",
+            std::process::id(),
+            NEXT_ID.load(Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_dir_all(&base);
+        let main = base.join("main");
+        std::fs::create_dir_all(&main).unwrap();
+        let git = |dir: &std::path::Path, args: &[&str]| {
+            let out = Command::new("git")
+                .args(args)
+                .current_dir(dir)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "git {:?}: {}",
+                args,
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        git(&main, &["init", "-q", "-b", "main"]);
+        git(&main, &["config", "user.email", "t@example.com"]);
+        git(&main, &["config", "user.name", "T"]);
+        git(&main, &["config", "commit.gpgsign", "false"]);
+        std::fs::write(main.join("a.txt"), "one\n").unwrap();
+        git(&main, &["add", "."]);
+        git(&main, &["commit", "-qm", "init"]);
+        let wt = base.join("feature");
+        git(
+            &main,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                wt.to_str().unwrap(),
+                "-b",
+                "feature",
+            ],
+        );
+        let wt = std::fs::canonicalize(&wt).unwrap();
+
+        // Sanity: this is the shape the finding is about, `.git` is a file.
+        assert!(wt.join(".git").is_file(), "expected a gitfile worktree");
+        let dirs = external_git_dirs(&wt);
+        assert!(
+            !dirs.is_empty(),
+            "the worktree's metadata dirs live outside it and must be resolved"
+        );
+
+        let (tx, rx) = mpsc::channel::<notify::Result<notify::Event>>();
+        let (evt_tx, evt_rx) = mpsc::channel::<RepoChangeEvent>();
+        let mut watcher = notify::recommended_watcher(move |res| {
+            let _ = tx.send(res);
+        })
+        .unwrap();
+        watcher.watch(&wt, RecursiveMode::Recursive).unwrap();
+        for dir in &dirs {
+            watcher.watch(dir, RecursiveMode::Recursive).unwrap();
+        }
+        let stop = Arc::new(AtomicBool::new(false));
+        spawn_coalescer(wt.clone(), dirs, rx, stop.clone(), move |ev| {
+            let _ = evt_tx.send(ev);
+        });
+
+        // A commit inside the worktree: writes the worktree's HEAD-adjacent
+        // metadata and the shared refs, all outside `wt` itself.
+        std::fs::write(wt.join("a.txt"), "two\n").unwrap();
+        git(&wt, &["add", "a.txt"]);
+        git(&wt, &["commit", "-qm", "in worktree"]);
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let mut kinds = std::collections::BTreeSet::<String>::new();
+        while std::time::Instant::now() < deadline {
+            // A timeout is not a failure here: keep waiting until the
+            // deadline, since the events arrive in several coalesced batches.
+            if let Ok(ev) = evt_rx.recv_timeout(Duration::from_millis(300)) {
+                for k in ev.kinds {
+                    kinds.insert(k);
+                }
+                if kinds.contains("refs") && kinds.contains("index") {
+                    break;
+                }
+            }
+        }
+        stop.store(true, Ordering::Relaxed);
+
+        assert!(
+            kinds.contains("index"),
+            "a staged change in a linked worktree must produce an `index` event; got {kinds:?}"
+        );
+        assert!(
+            kinds.contains("refs"),
+            "a commit in a linked worktree moves a ref in the shared git dir and must produce a `refs` event; got {kinds:?}"
+        );
+
+        drop(watcher);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
     /// Regression test for Finding 1: a *resetting* quiet window (the old
     /// `rx.recv_timeout(DEBOUNCE)` with no other flush trigger) never fires
     /// under continuous churn, because every new event re-arms the window
@@ -556,7 +882,7 @@ mod tests {
         let (evt_tx, evt_rx) = mpsc::channel::<RepoChangeEvent>();
         let stop = Arc::new(AtomicBool::new(false));
 
-        spawn_coalescer(root.clone(), raw_rx, stop.clone(), move |ev| {
+        spawn_coalescer(root.clone(), Vec::new(), raw_rx, stop.clone(), move |ev| {
             let _ = evt_tx.send(ev);
         });
 
@@ -599,7 +925,7 @@ mod tests {
         let (evt_tx, evt_rx) = mpsc::channel::<RepoChangeEvent>();
         let stop = Arc::new(AtomicBool::new(false));
 
-        spawn_coalescer(root.clone(), raw_rx, stop.clone(), move |ev| {
+        spawn_coalescer(root.clone(), Vec::new(), raw_rx, stop.clone(), move |ev| {
             let _ = evt_tx.send(ev);
         });
 
@@ -636,7 +962,7 @@ mod tests {
         let (evt_tx, evt_rx) = mpsc::channel::<RepoChangeEvent>();
         let stop = Arc::new(AtomicBool::new(false));
 
-        spawn_coalescer(root, raw_rx, stop, move |ev| {
+        spawn_coalescer(root, Vec::new(), raw_rx, stop, move |ev| {
             let _ = evt_tx.send(ev);
         });
 
@@ -666,7 +992,7 @@ mod tests {
         let (evt_tx, evt_rx) = mpsc::channel::<RepoChangeEvent>();
         let stop = Arc::new(AtomicBool::new(false));
 
-        spawn_coalescer(root, raw_rx, stop.clone(), move |ev| {
+        spawn_coalescer(root, Vec::new(), raw_rx, stop.clone(), move |ev| {
             let _ = evt_tx.send(ev);
         });
 
@@ -695,17 +1021,158 @@ mod tests {
         ));
         let _ = std::fs::remove_dir_all(&missing); // guarantee it does not exist
 
-        let subscribers_before = lock_subscribers().len();
         let result = ensure_watch(&missing);
         assert!(result.is_err(), "watching a nonexistent path must fail");
         assert!(
             !lock_watches().contains_key(&missing),
             "a failed watch must not linger in the WATCHES registry"
         );
-        assert_eq!(
-            lock_subscribers().len(),
-            subscribers_before,
+        // Scoped to this root rather than comparing the global SUBSCRIBERS
+        // length: the registry is process-wide and the tests around this one
+        // register their own subscribers on other roots in parallel.
+        assert!(
+            !lock_subscribers().values().any(|sub| sub.root == missing),
             "ensure_watch must never touch SUBSCRIBERS"
         );
+    }
+
+    /// Create a real watched directory and register `n` subscriptions on it,
+    /// each with the given webview label and channel behaviour. Returns the
+    /// root and the ids, so a test can assert on the reaping bookkeeping.
+    fn register_subscription(
+        root: &std::path::Path,
+        webview: &str,
+        chan: Channel<RepoChangeEvent>,
+    ) -> u64 {
+        ensure_watch(root).expect("watching a real temp dir must succeed");
+        let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+        lock_subscribers().insert(
+            id,
+            Subscription {
+                root: root.to_path_buf(),
+                webview: webview.to_string(),
+                chan,
+            },
+        );
+        id
+    }
+
+    /// A real (if empty) git repo: `ensure_watch` refuses a directory whose
+    /// git metadata it cannot resolve, since it could not honestly report the
+    /// watch as healthy.
+    fn temp_watch_root(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "gw-watch-{tag}-{}-{}",
+            std::process::id(),
+            NEXT_ID.load(Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let out = std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(&dir)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git init failed in the temp watch root"
+        );
+        std::fs::canonicalize(&dir).unwrap()
+    }
+
+    /// Regression test: a subscription whose channel is gone (window destroyed
+    /// without the frontend's `onUnmounted` running) must be reaped by the
+    /// broadcast that discovers it, releasing the watch reference it held.
+    /// Otherwise `subscriber_count` never returns to 0 and both the OS watcher
+    /// and its coalescing thread leak.
+    #[test]
+    fn broadcast_reaps_a_subscriber_whose_channel_is_gone() {
+        let root = temp_watch_root("reap");
+        // `Channel::send` bottoms out in `webview.eval`, which is exactly what
+        // fails with this error once the webview is destroyed.
+        let dead = Channel::new(|_| Err(tauri::Error::WebviewNotFound));
+        let id = register_subscription(&root, "main", dead);
+
+        broadcast(
+            &root,
+            &RepoChangeEvent {
+                kinds: vec!["worktree".to_string()],
+                paths: vec!["a.txt".to_string()],
+                truncated: false,
+                closed: false,
+            },
+        );
+
+        assert!(
+            !lock_subscribers().contains_key(&id),
+            "a subscription with a dead channel must be reaped"
+        );
+        assert!(
+            !lock_watches().contains_key(&root),
+            "reaping the last subscriber must tear the OS watcher down"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A live channel must survive a broadcast, and the watch it holds must
+    /// stay up, the reaping above must key on the send failure, not fire
+    /// indiscriminately.
+    #[test]
+    fn broadcast_keeps_a_live_subscriber() {
+        let root = temp_watch_root("live");
+        let id = register_subscription(&root, "main", Channel::new(|_| Ok(())));
+
+        broadcast(
+            &root,
+            &RepoChangeEvent {
+                kinds: vec!["worktree".to_string()],
+                paths: Vec::new(),
+                truncated: false,
+                closed: false,
+            },
+        );
+
+        assert!(lock_subscribers().contains_key(&id));
+        assert!(lock_watches().contains_key(&root));
+        drop_subscription(id);
+        assert!(!lock_watches().contains_key(&root));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Regression test for the reload leak: after a webview reloads, the old
+    /// document's subscriptions are unreachable (its `onUnmounted` never ran)
+    /// yet `Channel::send` still succeeds, so `broadcast` cannot detect them.
+    /// `stop_all_for_webview` is what releases them, and it must only touch
+    /// the reloading webview's own subscriptions.
+    #[test]
+    fn stop_all_for_webview_reaps_only_that_webviews_subscriptions() {
+        let root = temp_watch_root("reload");
+        // Two subscriptions from the document that is about to be replaced,
+        // plus one from a second window on the same repo.
+        let stale_a = register_subscription(&root, "main", Channel::new(|_| Ok(())));
+        let stale_b = register_subscription(&root, "main", Channel::new(|_| Ok(())));
+        let other = register_subscription(&root, "second", Channel::new(|_| Ok(())));
+        assert_eq!(lock_watches().get(&root).unwrap().subscriber_count, 3);
+
+        stop_all_for_webview("main");
+
+        assert!(!lock_subscribers().contains_key(&stale_a));
+        assert!(!lock_subscribers().contains_key(&stale_b));
+        assert!(
+            lock_subscribers().contains_key(&other),
+            "another window's subscription must not be reaped"
+        );
+        assert_eq!(
+            lock_watches().get(&root).unwrap().subscriber_count,
+            1,
+            "the watch reference count must follow the reaped subscriptions"
+        );
+
+        drop_subscription(other);
+        assert!(
+            !lock_watches().contains_key(&root),
+            "the count must now be able to reach 0 and tear the watcher down"
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

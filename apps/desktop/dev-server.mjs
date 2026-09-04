@@ -277,6 +277,37 @@ let devWatchNextId = 1;
  * version is canonical for exact timing; this one only needs to produce
  * "roughly as fresh, never starved" events for dev:web testing.
  */
+/**
+ * Metadata directories of `cwd` that a recursive watch on `cwd` does not
+ * already cover. Mirrors `external_git_dirs` in
+ * src-tauri/src/commands/watcher.rs: in a linked `git worktree` (or a
+ * `--separate-git-dir` repo) `.git` is a *file*, HEAD/index/merge state live
+ * in `<main>/.git/worktrees/<name>/` and refs/config in `<main>/.git/`, so
+ * without watching those the dev watcher never emits a single
+ * head/index/refs/mergeState event while still reporting itself healthy.
+ */
+function devExternalGitDirs(cwd) {
+  const base = resolve(cwd);
+  const out = [];
+  const readDir = (args) => {
+    try {
+      const raw = execFileSync(GIT, args, { cwd: base, encoding: "utf-8" }).trim();
+      return raw ? resolve(base, raw) : null;
+    } catch {
+      return null;
+    }
+  };
+  // The worktree's own git dir first: it is nested inside the common dir, and
+  // its HEAD/index must win over the common dir's `worktrees/<name>/…` view of
+  // the same path (see the ordering note in watcher.rs).
+  for (const dir of [readDir(["rev-parse", "--git-dir"]), readDir(["rev-parse", "--git-common-dir"])]) {
+    if (!dir) continue;
+    if (dir === base || dir.startsWith(base + sep)) continue;
+    if (!out.includes(dir)) out.push(dir);
+  }
+  return out;
+}
+
 function devClassifyPath(rel) {
   const p = rel.replace(/^\.\//, "");
   if (p.startsWith(".git/")) {
@@ -457,6 +488,61 @@ function corsHeaders(req) {
     "Access-Control-Allow-Headers": "Content-Type",
     "Content-Type": "application/json",
   };
+}
+
+/**
+ * Reject a side-effecting request that a foreign page triggered. Returns true
+ * when the request was refused (the caller must stop).
+ *
+ * `corsHeaders` above only *echoes* an allow-listed origin, it never refuses
+ * a request, so the browser blocks the attacker's view of the *response*
+ * while this server still executes it. For the JSON `POST` routes that is
+ * enough: `Content-Type: application/json` forces a preflight no foreign page
+ * can satisfy. The SSE routes are plain `GET`s with real side effects (clone,
+ * fetch, PTY spawn, watcher), and a `GET` needs no preflight: any page the
+ * developer visits while `pnpm dev:web` runs could otherwise fire
+ * `<img src="http://localhost:PORT/api/git-clone-stream?url=...&dest=...">`
+ * and have it run, response-blocked but executed.
+ *
+ * The rule:
+ *   - `Origin` present  → must be allow-listed. Covers `EventSource` (which
+ *     always sends one) and any fetch/XHR.
+ *   - `Origin` absent   → only allowed when `Sec-Fetch-Site` is absent too,
+ *     i.e. the caller is not a browser at all (curl, the parity harness).
+ *     Browsers send `Sec-Fetch-Site` on every request, including the
+ *     sub-resource loads that carry no `Origin` (`<img>`, `<script>`,
+ *     `<iframe>`, navigations), which is exactly the attack shape above.
+ */
+function rejectCrossOrigin(req, res) {
+  const origin = req.headers.origin;
+  if (origin ? ALLOWED_ORIGINS.has(origin) : !req.headers["sec-fetch-site"]) {
+    return false;
+  }
+  res.writeHead(403, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ error: "Cross-origin request refused" }));
+  return true;
+}
+
+/**
+ * Validate a clone URL before it reaches `git clone`'s argv.
+ *
+ * Two distinct problems, both closed here:
+ *  - Option injection: a URL starting with `-` lands in an argv slot git
+ *    parses as an option (`--upload-pack=<cmd>` runs a command for the
+ *    local/ssh transports). The callers also pass `--` before the positional
+ *    arguments; this is the second lock on that door.
+ *  - Scheme confusion: anything that is not a recognizable git URL has no
+ *    business being spawned at all.
+ */
+function isValidCloneUrl(u) {
+  if (u.startsWith("-")) return false; // never let git parse the URL as an option
+  return (
+    /^[a-z][a-z0-9+.-]*:\/\//i.test(u) || // https:// ssh:// git:// file://
+    /^[^@\s]+@[^:\s]+:/.test(u) || // scp-like: git@host:owner/repo.git
+    u.startsWith("/") ||
+    u.startsWith("./") ||
+    u.startsWith("~/")
+  );
 }
 
 /** Parse `git log --format="%H\n%h\n%an\n%aI\n%s\n%b\n---END---"` output into FileLogEntry objects. */
@@ -1519,7 +1605,11 @@ async function handleRequest(req, res) {
         const resolvedCwd = resolve(cwd);
         // Discrete args so the optional pathspec can be passed after `--`
         // without string interpolation (v2.21.0 monorepo scope).
-        const statusArgs = ["status", "--porcelain=v2", "--branch"];
+        // `--no-optional-locks` mirrors `git_status_cli` in
+        // src-tauri/src/commands/read.rs (parity reference): a read-only
+        // status must not rewrite `.git/index`, which the v3.10.0 watcher
+        // would classify as an `index` change and refresh on.
+        const statusArgs = ["--no-optional-locks", "status", "--porcelain=v2", "--branch"];
         if (pathspec) statusArgs.push("--", pathspec);
         const stdout = execFileSync(GIT, statusArgs, {
           cwd: resolvedCwd,
@@ -2349,6 +2439,8 @@ async function handleRequest(req, res) {
     // `{result: GitPushPullResult}`. Reuses the clone parser — `git fetch
     // --progress` emits the same vocabulary.
     if (url.pathname === "/api/git-fetch-stream" && req.method === "GET") {
+      // Side-effecting GET: refuse anything a foreign page triggered.
+      if (rejectCrossOrigin(req, res)) return;
       const cwd = url.searchParams.get("cwd");
       if (!cwd) return jsonResponse(req, res, { error: "Missing cwd" }, 400);
       const resolvedCwd = resolve(cwd);
@@ -6487,7 +6579,9 @@ async function handleRequest(req, res) {
       const d = (dest || "").trim();
       if (!u) return jsonResponse(req, res, { error: "Empty URL" }, 400);
       if (!d) return jsonResponse(req, res, { error: "Empty destination" }, 400);
-      const r = spawnSync(GIT, ["clone", u, d], { encoding: "utf-8" });
+      if (!isValidCloneUrl(u)) return jsonResponse(req, res, { error: "Unsupported clone URL" }, 400);
+      // `--`: see the git-clone-stream route below.
+      const r = spawnSync(GIT, ["clone", "--", u, d], { encoding: "utf-8" });
       if (r.status !== 0) {
         const detail = (r.stderr || r.stdout || "").trim() || "git clone failed";
         return jsonResponse(req, res, { error: detail }, 500);
@@ -6500,10 +6594,15 @@ async function handleRequest(req, res) {
     // streams `{stage,percent,message}` progress, then `{done: dest}` or
     // `{error}`.
     if (url.pathname === "/api/git-clone-stream" && req.method === "GET") {
+      // Side-effecting GET: refuse anything a foreign page triggered.
+      if (rejectCrossOrigin(req, res)) return;
       const u = (url.searchParams.get("url") || "").trim();
       const d = (url.searchParams.get("dest") || "").trim();
       if (!u || !d) {
         return jsonResponse(req, res, { error: "Empty URL or destination" }, 400);
+      }
+      if (!isValidCloneUrl(u)) {
+        return jsonResponse(req, res, { error: "Unsupported clone URL" }, 400);
       }
       const sseOrigin = req.headers.origin;
       const sseAllowOrigin = sseOrigin && ALLOWED_ORIGINS.has(sseOrigin) ? sseOrigin : "";
@@ -6513,7 +6612,9 @@ async function handleRequest(req, res) {
         Connection: "keep-alive",
         ...(sseAllowOrigin ? { "Access-Control-Allow-Origin": sseAllowOrigin, Vary: "Origin" } : {}),
       });
-      const proc = spawn(GIT, ["clone", "--progress", u, d], { stdio: ["ignore", "ignore", "pipe"] });
+      // `--` before the positionals: without it a URL like
+      // `--upload-pack=<cmd>` is parsed as an option, not as a repository.
+      const proc = spawn(GIT, ["clone", "--progress", "--", u, d], { stdio: ["ignore", "ignore", "pipe"] });
       let allStderr = "";
       let carry = "";
       // See the git-fetch-stream route above for why this uses StringDecoder
@@ -6804,6 +6905,9 @@ async function handleRequest(req, res) {
 
     // ── Terminal PTY (dev echo) ───────────────────────────────────────────────
     if (url.pathname === "/api/terminal-open" && req.method === "GET") {
+      // Side-effecting GET (spawns a shell): refuse anything a foreign page
+      // triggered. Predates the v3.10.0 stream routes but is the same hole.
+      if (rejectCrossOrigin(req, res)) return;
       const cwd = url.searchParams.get("cwd") || process.cwd();
       const shell = url.searchParams.get("shell") || process.env.SHELL || "/bin/zsh";
       // First-class agent: launch the named CLI directly rather than smuggling
@@ -6875,6 +6979,9 @@ async function handleRequest(req, res) {
 
     // ── Live Repo watcher (dev equivalent of the Tauri Channel) ───────────────
     if (url.pathname === "/api/watch-repo" && req.method === "GET") {
+      // Side-effecting GET (opens a recursive fs watch): refuse anything a
+      // foreign page triggered.
+      if (rejectCrossOrigin(req, res)) return;
       const cwd = resolve(url.searchParams.get("cwd") || process.cwd());
       const id = devWatchNextId++;
       const sseOrigin = req.headers.origin;
@@ -6904,29 +7011,44 @@ async function handleRequest(req, res) {
           if (!res.writableEnded) res.write(`data: ${JSON.stringify(ev)}\n\n`);
         }
       };
-      let watcher;
+      const push = (rel) => {
+        // Classify at push time so noise never enters the batch (mirrors
+        // watcher.rs's spawn_coalescer, Finding 1).
+        if (!devClassifyPath(rel)) return;
+        if (batch.length === 0) {
+          maxWaitTimer = setTimeout(() => flush(false), DEV_WATCH_MAX_WAIT_MS);
+        }
+        batch.push(rel);
+        if (quietTimer) clearTimeout(quietTimer);
+        quietTimer = setTimeout(() => flush(false), DEV_WATCH_DEBOUNCE_MS);
+        if (batch.length >= DEV_WATCH_MAX_RAW_BATCH) flush(true);
+      };
+      const watchers = [];
       try {
-        watcher = watch(cwd, { recursive: true }, (_type, filename) => {
-          if (!filename) return;
-          const rel = String(filename).split(sep).join("/");
-          // Classify at push time so noise never enters the batch (mirrors
-          // watcher.rs's spawn_coalescer, Finding 1).
-          if (!devClassifyPath(rel)) return;
-          if (batch.length === 0) {
-            maxWaitTimer = setTimeout(() => flush(false), DEV_WATCH_MAX_WAIT_MS);
-          }
-          batch.push(rel);
-          if (quietTimer) clearTimeout(quietTimer);
-          quietTimer = setTimeout(() => flush(false), DEV_WATCH_DEBOUNCE_MS);
-          if (batch.length >= DEV_WATCH_MAX_RAW_BATCH) flush(true);
-        });
+        watchers.push(
+          watch(cwd, { recursive: true }, (_type, filename) => {
+            if (!filename) return;
+            push(String(filename).split(sep).join("/"));
+          }),
+        );
+        // Linked worktrees keep their metadata outside the worktree, watch it
+        // too, renamed to the `.git/<…>` form devClassifyPath understands.
+        for (const dir of devExternalGitDirs(cwd)) {
+          watchers.push(
+            watch(dir, { recursive: true }, (_type, filename) => {
+              if (!filename) return;
+              push(`.git/${String(filename).split(sep).join("/")}`);
+            }),
+          );
+        }
       } catch (err) {
+        for (const w of watchers) { try { w.close(); } catch (_) {} }
         res.write(`data: ${JSON.stringify({ error: String(err) })}\n\n`);
         res.end();
         return;
       }
       const close = () => {
-        try { watcher.close(); } catch (_) {}
+        for (const w of watchers) { try { w.close(); } catch (_) {} }
         clearWatchTimers();
         devWatchers.delete(id);
         if (!res.writableEnded) res.end();

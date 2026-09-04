@@ -43,7 +43,6 @@ export type InboxAction =
   | "resolve"
   | "follow"
   | "nudge"
-  | "autoMerge"
   | "view";       // open an issue / dep / assigned PR
 
 /** Discriminated union of items that can appear in the unified inbox. */
@@ -119,7 +118,14 @@ export function classifyInboxPr(pr: PrWithRepo, me: string): InboxClassification
   // classified as kind:"dep" if they surface to me at all — i.e.
   // if I own the PR, my review was requested, or I am an assignee.
   if (isDependencyBump(pr) && (isMine || reviewRequested || isAssigned)) {
-    return { tier: "later", case: "merge", action: "autoMerge", kind: "dep" };
+    // `action: "merge"`, not an "auto-merge": there is no forge auto-merge
+    // call anywhere in the app, and `openLaunchpadMergePr` refuses to merge
+    // while `mergeBlocked` is true, which a fresh dep-bump PR almost always
+    // is, since its CI is still running. Labelling the button "Auto-merge"
+    // promised a queue-it-for-later behaviour that could only ever surface
+    // "waiting: <check>". Enabling real forge-side auto-merge is tracked in
+    // roadmap.md.
+    return { tier: "later", case: "merge", action: "merge", kind: "dep" };
   }
 
   // My own PR — what's the next thing I owe it?

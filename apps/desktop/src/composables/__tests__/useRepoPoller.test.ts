@@ -57,6 +57,26 @@ describe("useRepoPoller cadences", () => {
     expect(gitExecMock.mock.calls.length).toBeLessThanOrEqual(3);
   });
 
+  /**
+   * The status probe must not take `index.lock` and rewrite `.git/index`:
+   * the v3.10.0 watcher classifies a `.git/index` write as an `index` change
+   * and refreshes the repo, which polls again. Without
+   * `--no-optional-locks` the poller feeds its own watcher every time git
+   * finds a stale-but-unchanged stat entry (a `touch`, a save-then-undo, a
+   * checkout, coarse mtime granularity on network mounts).
+   */
+  it("reads status without taking optional locks", async () => {
+    const p = useRepoPoller(actions());
+    p.setFolderPath("/tmp/repo");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(gitExecMock).toHaveBeenCalledWith("/tmp/repo", [
+      "--no-optional-locks",
+      "status",
+      "--porcelain",
+      "--branch",
+    ]);
+  });
+
   it("returns to the fast interval and probes immediately when the watcher dies", async () => {
     const a = actions();
     const p = useRepoPoller(a);

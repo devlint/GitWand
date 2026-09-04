@@ -714,9 +714,21 @@ pub fn run() {
             commands::watcher::watch_repo_start,
             commands::watcher::watch_repo_stop,
         ])
-        .on_window_event(|_window, event| {
+        // A reload (Vite full reload in dev, location.reload(), a restored
+        // crashed webview) leaves the previous document's watcher
+        // subscriptions behind: its `onUnmounted` never runs, so nothing calls
+        // `watch_repo_stop`, and the channel keeps "sending" into a document
+        // whose callback registry is gone. Reap them the moment the new page
+        // starts loading, before it re-subscribes.
+        .on_page_load(|webview, payload| {
+            if payload.event() == tauri::webview::PageLoadEvent::Started {
+                commands::watcher::stop_all_for_webview(webview.label());
+            }
+        })
+        .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event {
                 commands::terminal::terminal_close_all();
+                commands::watcher::stop_all_for_webview(window.label());
             }
         })
         .run(tauri::generate_context!())

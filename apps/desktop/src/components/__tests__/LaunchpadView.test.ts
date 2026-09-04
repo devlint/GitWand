@@ -364,7 +364,7 @@ describe("LaunchpadView — sections inbox rendering", () => {
       { key: "assigned", titleKey: "launchpad.section.assigned", count: 1, items: [{ pr: fakePr({ number: 2 }),  classification: { tier: "now", case: "review", action: "view",   kind: "pr"    } }] },
       { key: "review",   titleKey: "launchpad.section.review",   count: 1, items: [{ pr: fakePr({ number: 3 }),  classification: { tier: "now", case: "review", action: "review", kind: "pr"    } }] },
       { key: "issues",   titleKey: "launchpad.section.issues",   count: 1, items: [{ issue: fakeIssue({ number: 4 }), classification: { tier: "now", case: "issue",  action: "view",   kind: "issue" } }] },
-      { key: "deps",     titleKey: "launchpad.section.deps",     count: 1, items: [{ pr: fakePr({ number: 5 }),  classification: { tier: "later", case: "merge", action: "autoMerge", kind: "dep" } }] },
+      { key: "deps",     titleKey: "launchpad.section.deps",     count: 1, items: [{ pr: fakePr({ number: 5 }),  classification: { tier: "later", case: "merge", action: "merge", kind: "dep" } }] },
     ];
     inboxTotalRef.value = 5;
 
@@ -408,7 +408,7 @@ describe("LaunchpadView — sections inbox rendering", () => {
     await nextTick();
 
     // Third fixture item ("review" action) is not one of the mutating
-    // actions (merge/autoMerge/nudge/resolve), so it still emits open-pr.
+    // actions (merge/nudge/resolve), so it still emits open-pr.
     const actions = mounted.container.querySelectorAll<HTMLButtonElement>(".launchpad-view__pr-action");
     actions[2].click();
     await nextTick();
@@ -644,9 +644,9 @@ describe("LaunchpadView — mutating action routing (Phase G)", () => {
     unmount(mounted);
   });
 
-  it("routes 'autoMerge' action to merge-pr", async () => {
+  it("routes a dep-bump 'merge' action to merge-pr", async () => {
     settingsRef.value.launchpadActiveTab = "inbox";
-    sectionsRef.value = sectionWithAction("autoMerge");
+    sectionsRef.value = sectionWithAction("merge");
     inboxTotalRef.value = 1;
 
     const mounted = mountLaunchpad();

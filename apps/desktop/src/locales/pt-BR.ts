@@ -1680,7 +1680,6 @@ const ptBR: Locale = {
       resolve: "Resolver",
       follow: "Acompanhar",
       nudge: "Lembrar",
-      autoMerge: "Auto-merge",
       view: "Ver",
     },
     case: {

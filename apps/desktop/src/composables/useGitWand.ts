@@ -325,6 +325,56 @@ export function useGitWand() {
     files.value = redoStack.value.pop()!;
   }
 
+  // ─── Serialized resolution mutations (v3.10.0) ─────────
+  /**
+   * `core.resolve` became a Web Worker RPC in v3.10.0, so every resolution
+   * helper below now has an `await` between reading a file's content and
+   * writing the resolved result back, a window of hundreds of milliseconds
+   * on the first call, which pays for the tree-sitter grammar load. Two
+   * helpers overlapping inside that window would each derive their new
+   * content from the same stale snapshot and silently drop the other's
+   * resolution.
+   *
+   * `withFiles` serializes them so each body starts from fresh state. Bodies
+   * must therefore look their file up *inside* the callback (never capture it
+   * before the queue is entered), and must not call each other, which would
+   * deadlock.
+   */
+  let _filesQueue: Promise<unknown> = Promise.resolve();
+  function withFiles<T>(job: () => Promise<T>): Promise<T> {
+    const run = _filesQueue.then(job, job);
+    // Keep the chain alive after a rejection without leaving it unhandled.
+    _filesQueue = run.then(
+      () => {},
+      () => {},
+    );
+    return run;
+  }
+
+  /**
+   * Re-resolve `newContent` for `file` and write the result back into
+   * `files.value`.
+   *
+   * The slot is located *after* the await and a vanished path is a no-op:
+   * `files.value` can still be replaced wholesale while the worker call is in
+   * flight by the paths that don't go through `withFiles` (a fresh
+   * `loadRealFiles`, a tree-conflict resolution, undo/redo). An index
+   * captured before the await would then write to the wrong file, or, at
+   * `-1`, create a dead `"-1"` property, swallowing the user's resolution
+   * with no error anywhere.
+   */
+  async function commitResolved(
+    file: ConflictFile,
+    newContent: string,
+    build?: (result: MergeResult) => ConflictFile,
+  ): Promise<void> {
+    const core = await engine();
+    const result = await core.resolve(newContent, file.path, toRaw(resolveOptions.value));
+    const idx = files.value.findIndex((f) => f.path === file.path);
+    if (idx === -1) return;
+    files.value[idx] = build ? build(result) : { ...file, content: newContent, result };
+  }
+
   const selectedFile = computed(() =>
     files.value.find((f) => f.path === selectedPath.value) ?? null,
   );
@@ -740,43 +790,56 @@ export async function fetchUsers() {
    * auto-resolved hunks individually via replaceConflictByIndex.
    */
   async function resolveAll() {
-    pushUndo();
-    const core = await engine();
-    files.value = await Promise.all(
-      files.value.map(async (f) => {
-        if (f.result.stats.autoResolved === 0) return f;
+    return withFiles(async () => {
+      pushUndo();
+      const core = await engine();
+      const snapshot = files.value;
+      const resolved = await Promise.all(
+        snapshot.map(async (f) => {
+          if (f.result.stats.autoResolved === 0) return f;
 
-        if (f.result.mergedContent) {
-          // All conflicts resolved — use merged content directly
+          if (f.result.mergedContent) {
+            // All conflicts resolved — use merged content directly
+            return {
+              ...f,
+              content: f.result.mergedContent,
+              result: await core.resolve(f.result.mergedContent, f.path, toRaw(resolveOptions.value)),
+            };
+          }
+
+          // Mixed file: apply auto-resolved hunks individually (reverse order
+          // to preserve conflict indices as we replace earlier blocks).
+          let newContent = f.content;
+          const resolutions = f.result.resolutions;
+          for (let i = resolutions.length - 1; i >= 0; i--) {
+            const res = resolutions[i];
+            if (res.autoResolved && res.resolvedLines) {
+              newContent = replaceConflictByIndex(
+                newContent,
+                i,
+                res.resolvedLines.join("\n"),
+              );
+            }
+          }
+
           return {
             ...f,
-            content: f.result.mergedContent,
-            result: await core.resolve(f.result.mergedContent, f.path, toRaw(resolveOptions.value)),
+            content: newContent,
+            result: await core.resolve(newContent, f.path, toRaw(resolveOptions.value)),
           };
-        }
+        }),
+      );
 
-        // Mixed file: apply auto-resolved hunks individually (reverse order
-        // to preserve conflict indices as we replace earlier blocks).
-        let newContent = f.content;
-        const resolutions = f.result.resolutions;
-        for (let i = resolutions.length - 1; i >= 0; i--) {
-          const res = resolutions[i];
-          if (res.autoResolved && res.resolvedLines) {
-            newContent = replaceConflictByIndex(
-              newContent,
-              i,
-              res.resolvedLines.join("\n"),
-            );
-          }
-        }
-
-        return {
-          ...f,
-          content: newContent,
-          result: await core.resolve(newContent, f.path, toRaw(resolveOptions.value)),
-        };
-      }),
-    );
+      // Merge per slot instead of reassigning the whole array. This batch is
+      // N worker round trips long, and the paths that don't go through
+      // `withFiles` (`loadRealFiles`, a tree-conflict resolution, undo/redo)
+      // can replace entries, or the entire list, while it runs. Keying on
+      // object identity applies each result only to the exact entry it was
+      // computed from: anything replaced meanwhile keeps its newer value
+      // instead of being silently overwritten with a stale resolution.
+      const byRef = new Map(snapshot.map((f, i) => [f, resolved[i]] as const));
+      files.value = files.value.map((f) => byRef.get(f) ?? f);
+    });
   }
 
   /**
@@ -786,22 +849,18 @@ export async function fetchUsers() {
    * conflict markers for the remaining ones.
    */
   async function resolveFile(path: string) {
-    const file = files.value.find((f) => f.path === path);
-    if (!file) return;
+    return withFiles(async () => {
+      const file = files.value.find((f) => f.path === path);
+      if (!file) return;
 
-    // If core resolved everything → use mergedContent directly
-    // Otherwise → build partial content from resolutions
-    const newContent = file.result.mergedContent ?? buildPartialContent(file.content, file.result.resolutions);
-    if (!newContent || newContent === file.content) return;
+      // If core resolved everything → use mergedContent directly
+      // Otherwise → build partial content from resolutions
+      const newContent = file.result.mergedContent ?? buildPartialContent(file.content, file.result.resolutions);
+      if (!newContent || newContent === file.content) return;
 
-    pushUndo();
-    const core = await engine();
-    const idx = files.value.indexOf(file);
-    files.value[idx] = {
-      ...file,
-      content: newContent,
-      result: await core.resolve(newContent, file.path, toRaw(resolveOptions.value)),
-    };
+      pushUndo();
+      await commitResolved(file, newContent);
+    });
   }
 
   /**
@@ -854,8 +913,30 @@ export async function fetchUsers() {
     hunkIndex: number,
     choice: "ours" | "theirs" | "both" | "both-theirs-first",
   ) {
+    // Delegates rather than wrapping its body inline (the marker walk below is
+    // long): the queue is what guarantees the file is read fresh, so nothing
+    // may look `path` up before entering it, except `contentAtCall`, which
+    // must be read here, before queueing. See `resolveHunkManualLocked`.
+    const contentAtCall = files.value.find((f) => f.path === path)?.content;
+    return withFiles(() => resolveHunkManualLocked(path, hunkIndex, choice, contentAtCall));
+  }
+
+  async function resolveHunkManualLocked(
+    path: string,
+    hunkIndex: number,
+    choice: "ours" | "theirs" | "both" | "both-theirs-first",
+    contentAtCall?: string,
+  ) {
     const file = files.value.find((f) => f.path === path);
     if (!file) return;
+    // `hunkIndex` was computed by the caller against the content it had on
+    // screen. If the file changed while this job waited its turn in the queue
+    // (another resolution landed, an undo, a reload), that index now points at
+    // a different hunk, or at none, since resolving one conflict renumbers
+    // every later one. Applying it anyway would silently rewrite the wrong
+    // hunk, so drop the stale request: the UI re-renders from the resolution
+    // that did land, and the user can act on the new state.
+    if (contentAtCall !== undefined && file.content !== contentAtCall) return;
 
     pushUndo();
     const lines = file.content.split("\n");
@@ -926,13 +1007,7 @@ export async function fetchUsers() {
     }
 
     const newContent = newLines.join("\n");
-    const core = await engine();
-    const idx = files.value.indexOf(file);
-    files.value[idx] = {
-      ...file,
-      content: newContent,
-      result: await core.resolve(newContent, file.path, toRaw(resolveOptions.value)),
-    };
+    await commitResolved(file, newContent);
   }
 
   /**
@@ -946,18 +1021,19 @@ export async function fetchUsers() {
     hunkIndex: number,
     customContent: string,
   ) {
-    const file = files.value.find((f) => f.path === path);
-    if (!file) return;
+    // Read before queueing: `hunkIndex` belongs to this content, and the
+    // queued body must refuse to apply it to anything else. Same rationale as
+    // `resolveHunkManual` above.
+    const contentAtCall = files.value.find((f) => f.path === path)?.content;
+    return withFiles(async () => {
+      const file = files.value.find((f) => f.path === path);
+      if (!file) return;
+      if (file.content !== contentAtCall) return; // stale hunk index
 
-    pushUndo();
-    const newContent = replaceConflictByIndex(file.content, hunkIndex, customContent);
-    const core = await engine();
-    const idx = files.value.indexOf(file);
-    files.value[idx] = {
-      ...file,
-      content: newContent,
-      result: await core.resolve(newContent, file.path, toRaw(resolveOptions.value)),
-    };
+      pushUndo();
+      const newContent = replaceConflictByIndex(file.content, hunkIndex, customContent);
+      await commitResolved(file, newContent);
+    });
   }
 
   /**
@@ -969,29 +1045,25 @@ export async function fetchUsers() {
     path: string,
     choice: "ours" | "theirs" | "both",
   ): Promise<{ applied: number; total: number }> {
-    const file = files.value.find((f) => f.path === path);
-    if (!file) return { applied: 0, total: 0 };
+    return withFiles(async () => {
+      const file = files.value.find((f) => f.path === path);
+      if (!file) return { applied: 0, total: 0 };
 
-    const { content: newContent, applied, total } = resolveAllConflictBlocks(
-      file.content,
-      (b) => {
-        if (choice === "ours") return b.oursLines.join("\n");
-        if (choice === "theirs") return b.theirsLines.join("\n");
-        return [...b.oursLines, ...b.theirsLines].join("\n");
-      },
-    );
+      const { content: newContent, applied, total } = resolveAllConflictBlocks(
+        file.content,
+        (b) => {
+          if (choice === "ours") return b.oursLines.join("\n");
+          if (choice === "theirs") return b.theirsLines.join("\n");
+          return [...b.oursLines, ...b.theirsLines].join("\n");
+        },
+      );
 
-    if (newContent !== file.content) {
-      pushUndo();
-      const core = await engine();
-      const idx = files.value.indexOf(file);
-      files.value[idx] = {
-        ...file,
-        content: newContent,
-        result: await core.resolve(newContent, file.path, toRaw(resolveOptions.value)),
-      };
-    }
-    return { applied, total };
+      if (newContent !== file.content) {
+        pushUndo();
+        await commitResolved(file, newContent);
+      }
+      return { applied, total };
+    });
   }
 
   /**
@@ -1013,18 +1085,20 @@ export async function fetchUsers() {
 
   /** Markerless file → swap to the reconstructed conflict content and resolve via the normal pipeline. */
   async function reconstructAndResolve(path: string): Promise<void> {
-    const file = files.value.find((f) => f.path === path);
-    if (!file?.markerless) return;
-    const newContent = file.markerless.reconstructed;
-    pushUndo();
-    const core = await engine();
-    const idx = files.value.indexOf(file);
-    files.value[idx] = {
-      path: file.path,
-      content: newContent,
-      result: await core.resolve(newContent, file.path, toRaw(resolveOptions.value)),
-      reconstructed: true,
-    };
+    return withFiles(async () => {
+      const file = files.value.find((f) => f.path === path);
+      if (!file?.markerless) return;
+      const newContent = file.markerless.reconstructed;
+      pushUndo();
+      // Builds a fresh entry rather than spreading `file`: the reconstructed
+      // file is no longer markerless, so `markerless` must not survive.
+      await commitResolved(file, newContent, (result) => ({
+        path: file.path,
+        content: newContent,
+        result,
+        reconstructed: true,
+      }));
+    });
   }
 
   /** Resolve an unmerged file by staging the current working-tree content as the resolution. */
@@ -1046,32 +1120,28 @@ export async function fetchUsers() {
     path: string,
     entry: ResolutionMemoryEntry,
   ): Promise<{ applied: number; total: number }> {
-    const file = files.value.find((f) => f.path === path);
-    if (!file) return { applied: 0, total: 0 };
-    // A "custom" rule is a verbatim blob bound to one hunk — applying it to every
-    // hunk would clobber the file. Bulk apply only generalizable strategies.
-    if (!isGeneralizableStrategy(entry.strategy)) return { applied: 0, total: 0 };
+    return withFiles(async () => {
+      const file = files.value.find((f) => f.path === path);
+      if (!file) return { applied: 0, total: 0 };
+      // A "custom" rule is a verbatim blob bound to one hunk, applying it to every
+      // hunk would clobber the file. Bulk apply only generalizable strategies.
+      if (!isGeneralizableStrategy(entry.strategy)) return { applied: 0, total: 0 };
 
-    const { content: newContent, applied, total } = resolveAllConflictBlocks(
-      file.content,
-      (b) =>
-        applyMemory(entry, {
-          oursLines: b.oursLines,
-          theirsLines: b.theirsLines,
-        } as ConflictHunk),
-    );
+      const { content: newContent, applied, total } = resolveAllConflictBlocks(
+        file.content,
+        (b) =>
+          applyMemory(entry, {
+            oursLines: b.oursLines,
+            theirsLines: b.theirsLines,
+          } as ConflictHunk),
+      );
 
-    if (newContent !== file.content) {
-      pushUndo();
-      const core = await engine();
-      const idx = files.value.indexOf(file);
-      files.value[idx] = {
-        ...file,
-        content: newContent,
-        result: await core.resolve(newContent, file.path, toRaw(resolveOptions.value)),
-      };
-    }
-    return { applied, total };
+      if (newContent !== file.content) {
+        pushUndo();
+        await commitResolved(file, newContent);
+      }
+      return { applied, total };
+    });
   }
 
   /**

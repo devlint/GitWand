@@ -1713,7 +1713,6 @@ const en = {
       resolve: "Resolve",
       follow: "Follow",
       nudge: "Nudge",
-      autoMerge: "Auto-merge",
       view: "View",
     },
     case: {

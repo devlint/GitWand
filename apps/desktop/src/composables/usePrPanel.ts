@@ -618,9 +618,12 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
    * call or GraphQL `totalCount` query per forge — no per-PR enrichment).
    * Independent of `loadPrs`/`ensurePrsLoaded`: this can run even if the
    * user has never opened the branch popover, graph mode, or the PR view.
+   *
+   * Returns whether a forge call actually happened, so the throttle above it
+   * only spends its window on real calls.
    */
-  async function refreshDockPrCount() {
-    if (!cwd.value) return;
+  async function refreshDockPrCount(): Promise<boolean> {
+    if (!cwd.value) return false;
     const repo = cwd.value;
     // Cold badge refresh on a repo with no cached remote yet: `forge`
     // defaults to `githubProvider` until `remote` resolves, so firing here
@@ -628,7 +631,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     // first open and surface a doomed `gh` call (#149 follow-up).
     if (!remote.value) {
       await loadRemote();
-      if (cwd.value !== repo) return; // repo changed while the remote resolved
+      if (cwd.value !== repo) return false; // repo changed while the remote resolved
     }
     try {
       const count = await forge.value.getPRCount(repo, "open");
@@ -637,10 +640,12 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       // navigated away from can silently overwrite a newer, correct count
       // with nothing to correct it afterward (no polling on this value).
       if (cwd.value === repo) dockPrCount.value = count;
+      return true;
     } catch {
       // Defense-in-depth: ghPrCount's own implementations already swallow
       // failures to 0, but don't assume every forge does.
       if (cwd.value === repo) dockPrCount.value = 0;
+      return false;
     }
   }
 
@@ -648,12 +653,24 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
    * Refresh the dock badge, skipping the forge call when the last one was
    * less than DOCK_PR_COUNT_MIN_GAP_MS ago. `force` bypasses the throttle
    * (repo open, explicit user refresh).
+   *
+   * The window is stamped *after* a call that actually reached the forge, not
+   * before one that may never happen: `refreshDockPrCount` returns early with
+   * no request when there is no repo or no resolvable remote (offline, no
+   * token, a fresh folder), and stamping up front would burn the whole 60 s
+   * on that no-op and skip the next real `refs` event. The in-flight guard is
+   * what keeps the late stamp from letting two calls through at once.
    */
+  let _dockPrCountInFlight = false;
   async function refreshDockPrCountThrottled(force = false) {
-    const now = Date.now();
-    if (!force && now - _lastDockPrCountAt < DOCK_PR_COUNT_MIN_GAP_MS) return;
-    _lastDockPrCountAt = now;
-    await refreshDockPrCount();
+    if (_dockPrCountInFlight) return;
+    if (!force && Date.now() - _lastDockPrCountAt < DOCK_PR_COUNT_MIN_GAP_MS) return;
+    _dockPrCountInFlight = true;
+    try {
+      if (await refreshDockPrCount()) _lastDockPrCountAt = Date.now();
+    } finally {
+      _dockPrCountInFlight = false;
+    }
   }
 
   /**
@@ -1030,7 +1047,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     dockPrCount.value = null;
     _lastDockPrCountAt = 0;
     resetDetail();
-    if (newCwd) void refreshDockPrCount();
+    if (newCwd) void refreshDockPrCountThrottled(true);
     if (newCwd && panelMounted.value) init();
   });
 
@@ -1411,6 +1428,11 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
       // v3.7.0 — same reuse for Commit Review's queue (a different queue
       // instance entirely — see `PrPanelOptions.onVisibilityResume`).
       opts.onVisibilityResume?.();
+      // v3.10.0: the watcher-driven badge refresh is skipped while the tab
+      // is hidden (App.vue's `refs` handler), so a ref that moved in the
+      // background left the count stale with nothing to correct it. Throttled,
+      // so a brief alt-tab costs nothing.
+      void refreshDockPrCountThrottled();
     }
   }
 

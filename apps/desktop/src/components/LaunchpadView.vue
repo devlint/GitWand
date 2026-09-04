@@ -97,7 +97,6 @@ function runInboxAction(item: InboxItem): void {
   if (!pr) return;
   switch (item.classification.action) {
     case "merge":
-    case "autoMerge":
       emit("merge-pr", pr);
       return;
     case "nudge":
@@ -1443,7 +1442,6 @@ watch(scopedRepos, () => {
 .launchpad-view__pr-action--review { background: var(--color-accent); color: var(--color-accent-text); }
 .launchpad-view__pr-action--resolve { background: var(--color-danger); color: #fff; }
 /* Soft — opportunistic */
-.launchpad-view__pr-action--autoMerge { background: var(--color-accent-soft); color: var(--color-accent); }
 /* Outlined — medium-priority */
 .launchpad-view__pr-action--reply,
 .launchpad-view__pr-action--seeFailure {

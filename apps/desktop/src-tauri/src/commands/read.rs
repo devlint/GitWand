@@ -357,7 +357,17 @@ fn compute_push_remote_via_cli(cwd: &str, upstream: Option<&str>) -> (Option<Str
 /// implementation `git_status_libgit2` instead, with this CLI version as a
 /// fallback on libgit2 errors.
 pub(crate) fn git_status_cli(cwd: String, pathspec: Option<String>) -> Result<GitStatus, String> {
+    // `--no-optional-locks`: a read-only status must never rewrite
+    // `.git/index`. Git refreshes the index's stat cache (and takes
+    // `index.lock` to write it back) whenever an entry's stat data is stale
+    // but its content is unchanged: a `touch`, a save-then-undo, a checkout,
+    // or just coarse mtime granularity on a network mount. The v3.10.0
+    // filesystem watcher classifies that write as an `index` change and
+    // refreshes the repo, which reads status again: GitWand feeding its own
+    // watcher. Must stay in sync with the dev-server's `/api/git-status`
+    // route, which the parity harness compares this against.
     let mut args: Vec<String> = vec![
+        "--no-optional-locks".to_string(),
         "status".to_string(),
         "--porcelain=v2".to_string(),
         "--branch".to_string(),
@@ -2992,6 +3002,126 @@ mod branch_merged_tests {
         assert!(
             !merged.contains(&"unmerged-feature".to_string()),
             "a branch with unmerged commits must not be reported as merged"
+        );
+    }
+}
+
+/// `git status` must never rewrite `.git/index` (v3.10.0 Live Repo watcher).
+///
+/// Git refreshes the index's stat cache, taking `index.lock` and writing the
+/// index back, whenever an entry's recorded stat data no longer matches the
+/// file but its content does. The watcher classifies that write as an `index`
+/// change and refreshes the repo, which reads status again: a refresh loop
+/// with GitWand as the only writer. `--no-optional-locks` is what suppresses
+/// the write-back.
+#[cfg(test)]
+mod status_no_optional_locks_tests {
+    use super::*;
+    use crate::git::cmd::git_binary;
+    use std::path::PathBuf;
+    use std::process::Command;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    struct TempRepo {
+        path: PathBuf,
+    }
+    impl Drop for TempRepo {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+    impl TempRepo {
+        fn new() -> Self {
+            let n = COUNTER.fetch_add(1, Ordering::SeqCst);
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let dir = std::env::temp_dir().join(format!(
+                "gitwand-status-locks-test-{}-{}-{}",
+                std::process::id(),
+                n,
+                nanos
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            let repo = TempRepo { path: dir };
+            repo.git(&["init", "-q", "-b", "main"]);
+            repo.git(&["config", "user.name", "Test"]);
+            repo.git(&["config", "user.email", "test@example.com"]);
+            repo.git(&["config", "commit.gpgsign", "false"]);
+            std::fs::write(repo.path.join("a.txt"), "one\n").unwrap();
+            repo.git(&["add", "-A"]);
+            repo.git(&["commit", "-q", "-m", "base"]);
+            repo
+        }
+        fn cwd(&self) -> String {
+            self.path.to_str().unwrap().to_string()
+        }
+        fn git(&self, args: &[&str]) -> std::process::Output {
+            let out = Command::new(git_binary())
+                .args(args)
+                .current_dir(&self.path)
+                .output()
+                .unwrap_or_else(|e| panic!("git {:?} spawn: {}", args, e));
+            assert!(
+                out.status.success(),
+                "git {:?} failed: {}",
+                args,
+                String::from_utf8_lossy(&out.stderr)
+            );
+            out
+        }
+        /// Make `a.txt`'s stat data stale while leaving its content identical:
+        /// exactly what a `touch`, a save-then-undo, a checkout or a coarse
+        /// mtime granularity produces, and the only case where git wants to
+        /// write the index back from a read-only status.
+        fn backdate_a_txt(&self) {
+            let out = Command::new("touch")
+                .args(["-t", "202001010000", "a.txt"])
+                .current_dir(&self.path)
+                .output()
+                .expect("touch spawn");
+            assert!(out.status.success(), "touch failed");
+        }
+        fn index_bytes(&self) -> Vec<u8> {
+            std::fs::read(self.path.join(".git").join("index")).expect("read .git/index")
+        }
+    }
+
+    #[test]
+    fn git_status_cli_does_not_rewrite_the_index() {
+        let repo = TempRepo::new();
+        repo.backdate_a_txt();
+        let before = repo.index_bytes();
+
+        git_status_cli(repo.cwd(), None).expect("git status must succeed");
+
+        assert_eq!(
+            before,
+            repo.index_bytes(),
+            "git_status_cli rewrote .git/index; the watcher would classify that \
+             as an `index` change and refresh, which reads status again"
+        );
+    }
+
+    /// Guard on the premise: without `--no-optional-locks` the very same repo
+    /// state *does* get its index rewritten. If git ever stops doing this, the
+    /// test above would pass for the wrong reason.
+    #[test]
+    fn a_plain_status_does_rewrite_the_index() {
+        let repo = TempRepo::new();
+        repo.backdate_a_txt();
+        let before = repo.index_bytes();
+
+        repo.git(&["status", "--porcelain=v2", "--branch"]);
+
+        assert_ne!(
+            before,
+            repo.index_bytes(),
+            "premise broken: a plain `git status` no longer refreshes the index \
+             stat cache, so --no-optional-locks is no longer what prevents it"
         );
     }
 }

@@ -2838,12 +2838,20 @@ pub(crate) async fn git_clone(
     if dest_trim.is_empty() {
         return Err("Empty destination".to_string());
     }
+    // A URL starting with `-` lands in an argv slot git parses as an option
+    // (`--upload-pack=<cmd>` executes a command for the local and ssh
+    // transports). `--` below closes option parsing; this rejects the input
+    // outright so a mistyped or pasted `-`-prefixed URL can never reach it.
+    if url_trim.starts_with('-') {
+        return Err("Invalid URL".to_string());
+    }
 
     let _t0 = Instant::now();
 
     // --progress forces git to emit progress even when stderr is not a tty.
+    // `--` keeps a `-`-prefixed URL or destination positional.
     let mut child = git_cmd()
-        .args(["clone", "--progress", &url_trim, &dest_trim])
+        .args(["clone", "--progress", "--", &url_trim, &dest_trim])
         .stderr(std::process::Stdio::piped())
         .stdout(std::process::Stdio::null())
         .spawn()

@@ -68,19 +68,48 @@ export function useRepoWatcher(opts?: { onHealthChange?: (healthy: boolean) => v
     const generation = ++_generation;
     void stop().then(async () => {
       if (!path || generation !== _generation) return;
+      // `startedId` is deliberately a mutable binding assigned *after* the
+      // await, not a `const id` captured by the close callback: both backends
+      // install the event handler before the call that yields the id resolves
+      // (`watchRepoStart` sets `channel.onmessage` before invoking
+      // `watch_repo_start`; the dev path opens the SSE stream first). A watch
+      // that dies immediately (deleted/unmounted directory, fatal notify
+      // backend error, dev server restart) therefore delivers its
+      // `closed: true` sentinel while the await is still pending. Reading a
+      // `const id` from inside the callback at that point would throw a TDZ
+      // ReferenceError inside the channel handler, leaving `healthy` stuck at
+      // true on a subscription the backend has already purged (and the poller
+      // demoted to its 15 s fallback with no events coming).
+      let startedId: number | null = null;
+      let closedBeforeStart = false;
+      const onClose = () => {
+        if (startedId === null) {
+          // Closed before the id landed: remember it, `start` handles it below.
+          closedBeforeStart = true;
+          return;
+        }
+        // A stale close from a since-replaced subscription is a no-op:
+        // `startedId` no longer matches `_subscriptionId`.
+        if (startedId === _subscriptionId) {
+          _subscriptionId = null;
+          setHealthy(false);
+        }
+      };
       try {
-        const id: number = await watchRepoStart(path, dispatch, () => {
-          // The subscription died after starting (e.g. dev server restarted
-          // mid-session). A stale close from a since-replaced subscription is
-          // a no-op: `id` will no longer match `_subscriptionId`.
-          if (id === _subscriptionId) {
-            _subscriptionId = null;
-            setHealthy(false);
-          }
-        });
+        const id: number = await watchRepoStart(path, dispatch, onClose);
         if (generation !== _generation) {
           // The folder changed while start() was in flight: drop this one.
           void watchRepoStop(id);
+          return;
+        }
+        startedId = id;
+        if (closedBeforeStart) {
+          // The watch died before `watch_repo_start` even returned. Never
+          // report healthy: there is nothing alive behind this id.
+          _subscriptionId = null;
+          healthy.value = false;
+          opts?.onHealthChange?.(false);
+          void watchRepoStop(id); // idempotent on both backends
           return;
         }
         _subscriptionId = id;

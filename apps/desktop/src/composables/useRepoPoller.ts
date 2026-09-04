@@ -101,9 +101,17 @@ export function useRepoPoller(actions: RepoPollerActions) {
     if (!cwd) return;
     if (!eager && isHidden()) return;
 
-    // 1. Lightweight porcelain check every tick
+    // 1. Lightweight porcelain check every tick.
+    //    `--no-optional-locks` is load-bearing, not cosmetic: a plain
+    //    `git status` takes `index.lock` and rewrites `.git/index` whenever an
+    //    entry's stat data is stale but its content is unchanged (a `touch`, a
+    //    save-then-undo in an editor, a checkout, coarse mtime granularity on
+    //    network/virtiofs mounts). The v3.10.0 watcher classifies that write
+    //    as an `index` change and refreshes the repo, which polls again, a
+    //    self-sustaining refresh loop with GitWand as the only writer. See
+    //    `classify_path` in src-tauri/src/commands/watcher.rs.
     try {
-      const result = await gitExec(cwd, ["status", "--porcelain", "--branch"]);
+      const result = await gitExec(cwd, ["--no-optional-locks", "status", "--porcelain", "--branch"]);
       if (result.exitCode !== 0) return;
       const snapshot = result.stdout ?? "";
 

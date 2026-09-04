@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { engine } from "../coreEngine";
 
 const CONFLICT = [
@@ -66,5 +66,76 @@ describe("coreEngine facade", () => {
     expect(callCount).toBe(1);
     expect(result.hunks.map((h) => h.type)).toContain("llm_proposed");
     expect(result.stats.remaining).toBe(0);
+  });
+});
+
+describe("coreEngine worker handshake", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    vi.resetModules();
+  });
+
+  /**
+   * A worker chunk that fails to load (404, a WebView without module-worker
+   * support) does not make `new Worker` throw, and Comlink's RPC has no
+   * timeout, so the first caller, `useGitWand.loadRealFiles` awaiting
+   * `Promise.all` over `resolveAsync`, used to hang forever with the merge
+   * editor stuck on its loading state and no error surfaced anywhere. The
+   * handshake must give up and degrade to the in-thread engine instead.
+   */
+  it("gives up on a worker that never answers and resolves in-thread", async () => {
+    vi.useFakeTimers();
+    let terminated = false;
+    class DeafWorker {
+      addEventListener() {}
+      removeEventListener() {}
+      postMessage() {} // swallows the handshake: no reply, ever
+      terminate() {
+        terminated = true;
+      }
+    }
+    vi.stubGlobal("Worker", DeafWorker);
+    vi.resetModules();
+    const { engine: freshEngine } = await import("../coreEngine");
+
+    const pending = freshEngine();
+    await vi.advanceTimersByTimeAsync(5_001);
+    const e = await pending;
+
+    expect(terminated).toBe(true);
+    // The facade still works, it is the in-thread implementation now.
+    vi.useRealTimers();
+    const result = await e.resolve(CONFLICT, "a.txt");
+    expect(result.stats.totalConflicts).toBe(1);
+  });
+
+  it("hands out the worker facade as soon as it answers the handshake", async () => {
+    // Fake timers that are never advanced: if the handshake needed the
+    // timeout to settle, this test would hang instead of passing.
+    vi.useFakeTimers();
+    let posted = 0;
+    class TalkingWorker {
+      private listeners: Array<(ev: MessageEvent) => void> = [];
+      addEventListener(type: string, fn: (ev: MessageEvent) => void) {
+        if (type === "message") this.listeners.push(fn);
+      }
+      removeEventListener(type: string, fn: (ev: MessageEvent) => void) {
+        this.listeners = this.listeners.filter((l) => l !== fn);
+      }
+      postMessage(msg: { id?: string; type?: string; path?: string[] }) {
+        posted++;
+        // Minimal Comlink reply: echo the message id with a plain value.
+        const reply = { data: { id: msg.id, type: "RAW", value: true } } as MessageEvent;
+        for (const l of [...this.listeners]) l(reply);
+      }
+      terminate() {}
+    }
+    vi.stubGlobal("Worker", TalkingWorker);
+    vi.resetModules();
+    const { engine: freshEngine } = await import("../coreEngine");
+
+    await freshEngine();
+    expect(posted).toBeGreaterThan(0); // the handshake actually went out
   });
 });

@@ -207,18 +207,18 @@ describe("classifyInboxPr", () => {
     expect(result?.case).toBe("changes");
   });
 
-  it("classifies dependabot-labelled PR as { tier:'later', kind:'dep', action:'autoMerge' }", () => {
+  it("classifies dependabot-labelled PR as { tier:'later', kind:'dep', action:'merge' }", () => {
     expect(
       classifyInboxPr(pr({ author: ME, reviewDecision: "APPROVED", mergeStateStatus: "CLEAN", labels: ["dependencies"] }), ME)
-    ).toEqual({ tier: "later", case: "merge", action: "autoMerge", kind: "dep" });
+    ).toEqual({ tier: "later", case: "merge", action: "merge", kind: "dep" });
   });
 
-  it("classifies renovate[bot] author PR (review requested of me) as { tier:'later', kind:'dep', action:'autoMerge' }", () => {
+  it("classifies renovate[bot] author PR (review requested of me) as { tier:'later', kind:'dep', action:'merge' }", () => {
     // Renovate bot PRs where my review is requested are classified as dep bumps
     // regardless of author — the dep check fires before the isMine gate.
     expect(
       classifyInboxPr(pr({ author: "renovate[bot]", reviewRequested: [ME], reviewDecision: "APPROVED", mergeStateStatus: "CLEAN" }), ME)
-    ).toEqual({ tier: "later", case: "merge", action: "autoMerge", kind: "dep" });
+    ).toEqual({ tier: "later", case: "merge", action: "merge", kind: "dep" });
   });
 
   it("returns null for a bot dep-bump PR where neither I'm the author nor my review is requested", () => {

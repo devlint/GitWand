@@ -100,6 +100,35 @@ describe("useRepoWatcher", () => {
     expect(w.healthy.value).toBe(false);
   });
 
+  /**
+   * Both backends install the change/close handler *before* the call that
+   * yields the subscription id resolves, so a watch that dies instantly
+   * (deleted or unmounted directory, fatal notify backend error, dev server
+   * restart) delivers its close while `watchRepoStart` is still pending. The
+   * handler runs isolated from that promise in production (Tauri dispatches
+   * `channel.onmessage`; the dev path dispatches an SSE message), so a throw
+   * inside it does not reject the start, it just silently wedges the watcher
+   * with `healthy` stuck at true. The mock reproduces that isolation.
+   */
+  it("never reports healthy when the watch dies before start resolves", async () => {
+    let closeThrew: unknown = null;
+    startMock.mockImplementationOnce(async (_cwd: string, onChange: typeof emit, onClose: () => void) => {
+      emit = onChange;
+      try { onClose(); } catch (err) { closeThrew = err; }
+      return 7;
+    });
+    const onHealthChange = vi.fn();
+    const w = useRepoWatcher({ onHealthChange });
+    w.setFolderPath("/tmp/repo");
+
+    await vi.waitFor(() => expect(onHealthChange).toHaveBeenCalledWith(false));
+    expect(closeThrew).toBeNull();
+    expect(w.healthy.value).toBe(false);
+    expect(onHealthChange).not.toHaveBeenCalledWith(true);
+    // The dead subscription is released rather than leaked.
+    await vi.waitFor(() => expect(stopMock).toHaveBeenCalledWith(7));
+  });
+
   it("ignores a stale close from a subscription already replaced by a folder switch", async () => {
     const closes: Array<() => void> = [];
     let nextId = 0;
