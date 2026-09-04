@@ -57,6 +57,7 @@ const es: Locale = {
     pull: "Pull",
     sync: "Sincronizar",
     syncTooltip: "Recuperar ramas remotas y hacer pull",
+    fetchProgress: "Obteniendo… {0} %",
     merge: "Merge",
     mergeTooltip: "Hacer merge de una rama en la rama actual",
     mergeNoFf: "Crear siempre un commit de fusión",
@@ -1261,6 +1262,8 @@ const es: Locale = {
     defaultBranch: "Rama por defecto",
     commitSignature: "Añadir «🪄 Commit vía GitWand» a la descripción",
     commitSignatureHint: "Una pequeña firma añadida automáticamente — se puede quitar en cualquier momento",
+    liveRepoWatcher: "Actualización en vivo del repositorio",
+    liveRepoWatcherHint: "Actualiza al instante a partir de eventos del sistema de archivos en lugar de sondear. Desactívalo si el repositorio está en una unidad de red.",
     blameAlgorithm: "Algoritmo de diff para blame",
     blameAlgorithmHint: "Controla cómo git blame detecta líneas movidas. histogram da los mejores resultados.",
     secretsScannerEnabled: "Escanear cambios en stage en busca de secretos",
@@ -1677,7 +1680,6 @@ const es: Locale = {
       resolve: "Resolver",
       follow: "Seguir",
       nudge: "Recordar",
-      autoMerge: "Auto-merge",
       view: "Ver",
     },
     case: {
@@ -1746,6 +1748,23 @@ const es: Locale = {
     reviewersShort: "Revisores",
     refreshAll: "Actualizar todo",
     refreshAllTooltip: "Actualizar las 4 pestañas en paralelo",
+    confirm: {
+      merge: {
+        title: "¿Fusionar esta pull request?",
+        body: "{0} se fusionará en {1}.",
+      },
+      nudge: {
+        title: "¿Enviar un recordatorio?",
+        body: "Se publicará un comentario en {0}.",
+      },
+    },
+    nudge: {
+      comment: "Recordatorio amistoso: esta pull request está lista para revisión.",
+    },
+    toast: {
+      merged: "Pull request fusionada.",
+      nudged: "Recordatorio publicado.",
+    },
     noWorkspace: {
       warning: "Crea un workspace primero para usar Today",
     },

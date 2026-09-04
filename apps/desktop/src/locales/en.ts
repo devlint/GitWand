@@ -57,6 +57,7 @@ const en = {
     pull: "Pull",
     sync: "Sync",
     syncTooltip: "Fetch remote branches and pull",
+    fetchProgress: "Fetching… {0}%",
     merge: "Merge",
     mergeTooltip: "Merge a branch into the current branch",
     mergeFilterPlaceholder: "Branch to merge\u2026",
@@ -1286,6 +1287,8 @@ const en = {
     defaultBranch: "Default branch",
     commitSignature: "Add \u201c\u{1FA84} Commit via GitWand\u201d to description",
     commitSignatureHint: "A small signature added automatically \u2014 removable anytime",
+    liveRepoWatcher: "Live repo updates",
+    liveRepoWatcherHint: "Refresh instantly from filesystem events instead of polling. Turn off if your repository lives on a network drive.",
     blameAlgorithm: "Blame diff algorithm",
     blameAlgorithmHint: "Controls how git blame detects moved or copied lines. histogram gives the best results for most repos.",
     secretsScannerEnabled: "Scan staged changes for secrets",
@@ -1710,7 +1713,6 @@ const en = {
       resolve: "Resolve",
       follow: "Follow",
       nudge: "Nudge",
-      autoMerge: "Auto-merge",
       view: "View",
     },
     case: {
@@ -1779,6 +1781,23 @@ const en = {
     reviewersShort: "Reviewers",
     refreshAll: "Refresh all",
     refreshAllTooltip: "Refresh all tabs in parallel",
+    confirm: {
+      merge: {
+        title: "Merge this pull request?",
+        body: "{0} will be merged into {1}.",
+      },
+      nudge: {
+        title: "Send a reminder?",
+        body: "A comment will be posted on {0}.",
+      },
+    },
+    nudge: {
+      comment: "Friendly ping: this pull request is ready for review.",
+    },
+    toast: {
+      merged: "Pull request merged.",
+      nudged: "Reminder posted.",
+    },
     noWorkspace: {
       warning: "Create a workspace first to use Today",
     },

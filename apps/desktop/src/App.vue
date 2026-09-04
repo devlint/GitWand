@@ -100,6 +100,8 @@ import { useNetworkStatus } from "./composables/useNetworkStatus";
 import { useConnectivity } from "./composables/useConnectivity";
 import { useScheduler } from "./composables/useScheduler";
 import { useRepoPoller } from "./composables/useRepoPoller";
+import { useRepoWatcher } from "./composables/useRepoWatcher";
+import { useWatcherRefreshQueue } from "./composables/useWatcherRefreshQueue";
 import { useLaunchpadPoller } from "./composables/useLaunchpadPoller";
 import { useSecretsScanner } from "./composables/useSecretsScanner";
 import { useCommitReview } from "./composables/useCommitReview";
@@ -169,11 +171,13 @@ let pendingCommitReviewTrailers = "";
 const { isOffline: navIsOffline } = useNetworkStatus();
 const { isOnline: probedOnline, probeConnectivity } = useConnectivity();
 const isOffline = computed(() => navIsOffline.value || !probedOnline.value);
-import { isTauri, registerBrowserFolderPicker, pickFolder, checkForUpdates, fetchBetaUpdate, installUpdate, gitRepoState, openExternalUrl } from "./utils/backend";
+import { isTauri, registerBrowserFolderPicker, pickFolder, checkForUpdates, fetchBetaUpdate, installUpdate, gitRepoState, openExternalUrl, ghIssueAddComment } from "./utils/backend";
 import type { UpdateInfo, RepoOperationState, WorkspaceRepo, PullRequest } from "./utils/backend";
+import type { ForgeName } from "./composables/forge/types";
 import { onMarkdownLinkClick } from "./composables/useSafeHtml";
 import { resolveDirtySwitchAction, type DirtyFile } from "./utils/branchSwitchDecision";
 import { resolveDirtyPullAction } from "./utils/pullDirtyDecision";
+import { requireOnline } from "./utils/networkGuard";
 // UpdateModal moved above (lazy-loaded) — type imported as UpdateModalType for the template ref
 
 const { theme, toggle: toggleTheme } = useTheme();
@@ -248,6 +252,7 @@ const {
   isPushing,
   isPulling,
   isFetching,
+  fetchPercent,
   openRepo,
   closeRepo,
   refresh: repoRefresh,
@@ -442,7 +447,21 @@ const prPanel = usePrPanel(prCwd, {
   // instead of standing up a second listener. Without this, starting a
   // review then hiding the tab would leave the queue paused on
   // document.hidden forever.
-  onVisibilityResume: () => commitReview.resume(),
+  //
+  // v3.10.0 Live Repo: also fire a catch-up watcher refresh here, for the
+  // changes no watcher event covers (anything that happened before the watch
+  // existed, or that the OS watcher missed). Events that arrive while the tab
+  // is hidden need no help: watcherRefreshQueue queues them and drains itself
+  // on this same visibility edge, for every kind. Shares the "worktree-index"
+  // key with that handler below (same job, repoRefresh + conditional
+  // loadLog) so the two collapse to a single refresh if they race.
+  onVisibilityResume: () => {
+    commitReview.resume();
+    watcherRefreshQueue.schedule("worktree-index", async () => {
+      await repoRefresh();
+      if (viewMode.value === "history" || showGitTree.value) await loadLog();
+    });
+  },
 });
 provide(PR_PANEL_KEY, prPanel);
 const issuePanel = useIssuePanel(prCwd);
@@ -704,6 +723,16 @@ function dismissToast() {
     successToastLeaving.value = false;
     successTimer = null;
   }, 200);
+}
+
+/** Transient toast for Launchpad mutating actions (merge/nudge) — reuses the
+ *  existing toast affordance rather than inventing a second one. */
+function showLaunchpadToast(title: string) {
+  if (successTimer != null) { window.clearTimeout(successTimer); successTimer = null; }
+  successToastLeaving.value = false;
+  successToast.value = title;
+  successToastDetail.value = null;
+  successTimer = window.setTimeout(dismissToast, 3000);
 }
 
 watch(repoSuccess, (val) => {
@@ -2653,6 +2682,128 @@ async function openLaunchpadRepoChanges(repoPath: string) {
 }
 
 /**
+ * Merge a PR straight from its Launchpad inbox card (v3.10, Phase G). Confirms
+ * through the app's `askConfirm` modal (never native `confirm()`), then
+ * reuses `usePrPanel`'s own merge path (`mergingPr` + `mergePr()`) rather than
+ * calling `ghMergePr` directly, so error handling / cache invalidation /
+ * dock-badge refresh stay identical to merging from PrDetailView.
+ *
+ * Applies the same readiness gate `PrDetailView` uses to disable its merge
+ * button (`mergeBlocked` — conflicts / failing or pending checks / requested
+ * changes / no permission): `selectPr()` + `loadChecks()` populate the same
+ * `prDetail`/`prChecks`/`prReviews` that computed reads, so it reflects this
+ * PR rather than whatever was previously selected. `mergeMethod` is also
+ * reset to PrDetailView's own default ("merge") first, since it is a single
+ * app-wide ref that otherwise leaks whatever the user last picked for an
+ * unrelated PR.
+ */
+async function openLaunchpadMergePr(pr: PullRequest & { repoPath?: string }) {
+  if (pr.repoPath && pr.repoPath !== repoFolderPath.value) {
+    await handleOpenPath(pr.repoPath);
+    await nextTick();
+  }
+  await prPanel.loadRemote();
+  await prPanel.selectPr(pr);
+  await prPanel.loadChecks();
+  if (prPanel.mergeBlocked.value) {
+    repoError.value = prPanel.mergeBlockedReason.value;
+    return;
+  }
+  const confirmed = await askConfirm({
+    title: t("launchpad.confirm.merge.title"),
+    message: t("launchpad.confirm.merge.body", pr.title, pr.base),
+  });
+  if (!confirmed) return;
+  prPanel.mergeMethod.value = "merge";
+  prPanel.mergingPr.value = pr;
+  await prPanel.mergePr();
+  // `mergePr()` nulls `mergingPr` only on success — that is the real signal,
+  // not `!prPanel.error.value` (sticky from any unrelated prior PR action,
+  // so it can both mask a genuine failure and suppress today's success).
+  if (prPanel.mergingPr.value === null) {
+    showLaunchpadToast(t("launchpad.toast.merged"));
+  } else {
+    // On failure `prPanel.error` is only rendered inside PrDetailView, which
+    // isn't mounted from the Launchpad — funnel it into the app-wide
+    // error-toast banner so it doesn't fail silently, and clear `mergingPr`
+    // ourselves so PrDetailView's merge dialog doesn't pop back open on a
+    // stale value the next time the user opens the PRs view.
+    repoError.value = prPanel.error.value;
+    prPanel.mergingPr.value = null;
+  }
+}
+
+/**
+ * Nudge state for the Launchpad "post a reminder comment" flow (v3.10, Phase
+ * G). GitHub-only for this release (decision #6): `ghIssueAddComment` posts a
+ * plain top-level comment on the PR's issue thread, which is what a reminder
+ * needs — `ghPrCreateComment` posts a diff-anchored review comment and
+ * requires a file `path`/`line`, so it is the wrong primitive here. Non-GitHub
+ * forges fall back to `open-pr`.
+ *
+ * The comment text is editable (decision #7): the modal pre-fills
+ * `launchpad.nudge.comment` into a textarea the user can change before
+ * sending, so this cannot reuse the plain-message `askConfirm` modal — it is
+ * a small dedicated `BaseModal` instead, same pattern as the commit "tag"
+ * modal (editable text field + Cancel/Confirm footer).
+ */
+const nudgeConfirm = ref<{ pr: PullRequest & { repoPath?: string }; comment: string; busy: boolean } | null>(null);
+
+function openLaunchpadNudgePr(pr: PullRequest & { repoPath?: string; forge?: ForgeName }) {
+  if (pr.forge && pr.forge !== "github") {
+    void openLaunchpadPr(pr);
+    return;
+  }
+  nudgeConfirm.value = { pr, comment: t("launchpad.nudge.comment"), busy: false };
+}
+
+function cancelNudgePr() {
+  nudgeConfirm.value = null;
+}
+
+async function confirmNudgePr() {
+  if (!nudgeConfirm.value || !nudgeConfirm.value.pr.repoPath) return;
+  if (!(await requireOnline("gh issue comment (nudge)"))) {
+    repoError.value = t("connectivity.offline.disabledOp");
+    return;
+  }
+  const { pr, comment } = nudgeConfirm.value;
+  nudgeConfirm.value.busy = true;
+  try {
+    await ghIssueAddComment(pr.repoPath!, pr.number, comment);
+    nudgeConfirm.value = null;
+    showLaunchpadToast(t("launchpad.toast.nudged"));
+  } catch (err: any) {
+    repoError.value = err?.message ?? String(err);
+    if (nudgeConfirm.value) nudgeConfirm.value.busy = false;
+  }
+}
+
+/**
+ * Jump into the conflict resolver for a PR flagged DIRTY (mergeStateStatus)
+ * instead of opening the PR review page (v3.10, Phase G — a deliberate change
+ * from the previous open-pr behavior). Switches to the PR's repo, checks out
+ * its branch (same `checkoutPr` PrDetailView uses), then shows the Changes
+ * view where GitWand's own conflict engine surfaces working-tree conflicts.
+ */
+async function openLaunchpadResolvePr(pr: PullRequest & { repoPath?: string }) {
+  if (pr.repoPath && pr.repoPath !== repoFolderPath.value) {
+    await handleOpenPath(pr.repoPath);
+    await nextTick();
+  }
+  await prPanel.loadRemote();
+  // Clear any stale error first so the check below reflects this checkout,
+  // not a leftover from an unrelated prior PR action.
+  prPanel.error.value = null;
+  await prPanel.checkoutPr(pr);
+  if (prPanel.error.value) {
+    repoError.value = prPanel.error.value;
+    return;
+  }
+  viewMode.value = "changes";
+}
+
+/**
  * Handle the ⌘L / Ctrl+L shortcut (and the header Launchpad pill / menu item):
  * just switch to the Launchpad view. Its repos come from the open tabs, so
  * there is nothing to resolve — if no repo is open, the EmptyState shows.
@@ -3397,6 +3548,78 @@ const poller = useRepoPoller({
 });
 watch(repoFolderPath, (p) => poller.setFolderPath(p), { immediate: true });
 
+// ─── Live Repo watcher (v3.10.0) ─────────────────────────────────────
+// The watcher is the primary refresh driver; the poller above demotes itself
+// to a 15 s fallback while `healthy` is true. When the user has turned the
+// feature off, or the backend cannot watch (network mount), we never start it
+// and the poller keeps its 2 s cadence.
+const repoWatcher = useRepoWatcher({
+  onHealthChange: (healthy) => poller.setWatcherHealthy(healthy),
+});
+
+watch(
+  [repoFolderPath, () => settings.value.liveRepoWatcher],
+  ([path, enabled]) => {
+    repoWatcher.setFolderPath(enabled ? path : null);
+  },
+  { immediate: true },
+);
+
+// Serialize watcher-driven refreshes: an `rm -rf node_modules` or a branch
+// switch produces several coalesced batches back to back, and repoRefresh()
+// routinely takes longer than the watcher's debounce window, so without this
+// a burst would stack concurrent repoRefresh() calls on the same repo. Keyed
+// per handler (not a single shared in-flight boolean): one coalesced event
+// batch can carry several kinds at once, so distinct handlers (worktree/index,
+// mergeState, stash, ...) routinely need to queue during the very same
+// in-flight window, and each must still run — see useWatcherRefreshQueue.ts.
+const watcherRefreshQueue = useWatcherRefreshQueue();
+
+repoWatcher.on(["worktree", "index"], () => {
+  watcherRefreshQueue.schedule("worktree-index", async () => {
+    await repoRefresh();
+    if (viewMode.value === "history" || showGitTree.value) await loadLog();
+  });
+});
+
+repoWatcher.on(["head", "refs"], () => {
+  watcherRefreshQueue.schedule("head-refs", async () => {
+    await repoRefresh();
+    await loadLog();
+  });
+});
+
+// The dock "prs" badge only refreshed on repo-open and manual refresh (PR #125).
+// A ref moving is the cheapest local proxy for "a PR's state may have changed";
+// the forge call itself is throttled to once a minute inside usePrPanel.
+repoWatcher.on(["refs"], () => {
+  if (document.hidden) return;
+  void prPanel.refreshDockPrCountThrottled();
+});
+
+repoWatcher.on(["mergeState"], () => {
+  watcherRefreshQueue.schedule("mergeState", async () => {
+    await repoRefresh();
+    // Gate on an actual conflict, mirroring useRepoPoller's rising-edge check
+    // (useRepoPoller.ts:115-121). classify_path reports "mergeState" for any
+    // write under .git/MERGE_MSG or .git/rebase-merge/*, which a completely
+    // clean merge or rebase also produces — calling onConflictDetected()
+    // unconditionally would burn its one-shot mergeHeadWasPresent latch on a
+    // clean merge and silently swallow auto-resolve for a real conflict later.
+    if (hasConflicts.value) await scheduler.onConflictDetected();
+  });
+});
+
+// "config" (.git/config writes) has no handler: nothing in the app reacts to
+// remote/branch-tracking config changes today. Left as a deliberate no-op so
+// a future consumer knows the kind exists rather than silently dropping it.
+
+repoWatcher.on(["stash"], () => {
+  watcherRefreshQueue.schedule("stash", async () => {
+    if (showStash.value) await loadStashes();
+  });
+});
+
 // v2.14 — Ensure the log is loaded when the Git Tree is toggled on.
 watch(showGitTree, (show) => {
   if (show && hasRepo.value) {
@@ -3728,7 +3951,7 @@ onUnmounted(() => {
       :needs-publish="needsPublish" :ahead-count="aheadCount" :behind-count="behindCount"
       :main-commit-count="mainCommitCount" :push-remote="pushRemote"
       :ahead-push-count="aheadPushCount" :is-pushing="isPushing" :is-pulling="isPulling"
-      :force-push-preferred="forcePushPreferred" :is-fetching="isFetching"
+      :force-push-preferred="forcePushPreferred" :is-fetching="isFetching" :fetch-percent="fetchPercent"
       :cwd="repoFolderPath ?? ''" :branches="branches" :worktree-branches="worktreeBranches" :branches-loading="branchesLoading"
       :is-switching-branch="isSwitchingBranch" :is-merging="isMerging" :tabs="repoTabs" :active-tab-id="activeTabId"
       :active-repo-path="activeRepoPath" :load-worktrees="loadProjectWorktrees"
@@ -3988,7 +4211,7 @@ onUnmounted(() => {
             <IssueDetailView v-else-if="viewMode === 'issue'" />
 
             <!-- Launchpad view: cross-repo dashboard (v2.10 nav revamp) -->
-            <LaunchpadView v-else-if="viewMode === 'launchpad'" :repos="launchpadRepos" @open-pr="openLaunchpadPr" @open-issue="openLaunchpadIssue" @open-repo-changes="openLaunchpadRepoChanges" />
+            <LaunchpadView v-else-if="viewMode === 'launchpad'" :repos="launchpadRepos" @open-pr="openLaunchpadPr" @open-issue="openLaunchpadIssue" @open-repo-changes="openLaunchpadRepoChanges" @merge-pr="openLaunchpadMergePr" @nudge-pr="openLaunchpadNudgePr" @resolve-pr="openLaunchpadResolvePr" />
           </template>
         </template>
       </main>
@@ -4455,6 +4678,21 @@ onUnmounted(() => {
         <button class="bm-btn" :class="genericConfirm.danger ? 'bm-btn--danger' : 'bm-btn--primary'"
           @click="onGenericConfirmDone">
           {{ genericConfirm.confirmLabel }}
+        </button>
+      </template>
+    </BaseModal>
+
+    <!-- Launchpad "nudge" — reminder comment, editable before sending (v3.10, Phase G) -->
+    <BaseModal v-if="nudgeConfirm" :title="t('launchpad.confirm.nudge.title')" size="sm" role="alertdialog"
+      @close="cancelNudgePr">
+      <p class="ptc-desc">{{ t('launchpad.confirm.nudge.body', nudgeConfirm.pr.title) }}</p>
+      <textarea v-model="nudgeConfirm.comment" class="cam-input" rows="4"
+        :disabled="nudgeConfirm.busy" style="resize: vertical;"></textarea>
+      <template #footer>
+        <button class="bm-btn bm-btn--ghost" :disabled="nudgeConfirm.busy" @click="cancelNudgePr">{{ t('common.cancel') }}</button>
+        <button class="bm-btn bm-btn--primary" :disabled="nudgeConfirm.busy || !nudgeConfirm.comment.trim()"
+          @click="confirmNudgePr">
+          {{ nudgeConfirm.busy ? t('common.loading') : t('common.confirm') }}
         </button>
       </template>
     </BaseModal>

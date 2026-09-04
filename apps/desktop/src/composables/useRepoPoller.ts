@@ -6,11 +6,13 @@
  * interval that orchestrates all of them.
  *
  * Design:
- *   - One setInterval at POLL_INTERVAL
+ *   - One setInterval at FAST_INTERVAL (2 s), demoted to SLOW_INTERVAL (15 s)
+ *     while a filesystem watcher is healthy (v3.10.0)
  *   - Lightweight git status --porcelain --branch every tick
  *   - Expensive ops (fetch, full status parse) only when porcelain output changes
  *   - Visibility-aware: pauses on document.hidden, resumes + eager check on return
- *   - Tick counters for 30s (fetch) and 60s (nightly pull) intervals
+ *   - Wall-clock deadlines for 30s (fetch) and 60s (nightly pull) cadences,
+ *     independent of the current interval
  *   - Derived conflict detection from porcelain output (replaces autoResolve's
  *     separate getGitStatus call)
  *
@@ -32,14 +34,14 @@ import { gitExec } from "../utils/backend";
 
 // ─── Constants ───────────────────────────────────────────────
 
-/** Base polling interval (2 s). */
-const POLL_INTERVAL = 2_000;
-/** How many ticks between background fetches (~30 s). */
-const FETCH_EVERY_TICKS = 15;
-/** How many ticks between nightly-pull checks (~60 s). */
-const NP_EVERY_TICKS = 30;
-/** How many ticks between connectivity probes (~30 s — F1 Mode hors-ligne). */
-const CONNECTIVITY_EVERY_TICKS = 15;
+/** Poll interval while no filesystem watcher is healthy. */
+const FAST_INTERVAL = 2_000;
+/** Poll interval while a watcher is healthy: a safety net, not the primary driver. */
+const SLOW_INTERVAL = 15_000;
+/** Wall-clock cadences, independent of the current interval. */
+const FETCH_EVERY_MS = 30_000;
+const NIGHTLY_EVERY_MS = 60_000;
+const CONNECTIVITY_EVERY_MS = 30_000;
 
 // ─── Public interface ───────────────────────────────────────
 
@@ -69,7 +71,11 @@ export interface RepoPollerActions {
 export function useRepoPoller(actions: RepoPollerActions) {
   let _folderPath: string | null = null;
   let _interval: ReturnType<typeof setInterval> | null = null;
-  let _tick = 0;
+  let _intervalMs = FAST_INTERVAL;
+  let _watcherHealthy = false;
+  let _lastFetchAt = 0;
+  let _lastNightlyAt = 0;
+  let _lastConnectivityAt = 0;
   let _porcelainSnapshot = "";
   let _conflictWasPresent = false;
   let _visibilityHandler: (() => void) | null = null;
@@ -95,11 +101,17 @@ export function useRepoPoller(actions: RepoPollerActions) {
     if (!cwd) return;
     if (!eager && isHidden()) return;
 
-    _tick++;
-
-    // 1. Lightweight porcelain check every tick
+    // 1. Lightweight porcelain check every tick.
+    //    `--no-optional-locks` is load-bearing, not cosmetic: a plain
+    //    `git status` takes `index.lock` and rewrites `.git/index` whenever an
+    //    entry's stat data is stale but its content is unchanged (a `touch`, a
+    //    save-then-undo in an editor, a checkout, coarse mtime granularity on
+    //    network/virtiofs mounts). The v3.10.0 watcher classifies that write
+    //    as an `index` change and refreshes the repo, which polls again, a
+    //    self-sustaining refresh loop with GitWand as the only writer. See
+    //    `classify_path` in src-tauri/src/commands/watcher.rs.
     try {
-      const result = await gitExec(cwd, ["status", "--porcelain", "--branch"]);
+      const result = await gitExec(cwd, ["--no-optional-locks", "status", "--porcelain", "--branch"]);
       if (result.exitCode !== 0) return;
       const snapshot = result.stdout ?? "";
 
@@ -122,23 +134,25 @@ export function useRepoPoller(actions: RepoPollerActions) {
       // polling errors are non-critical — silent
     }
 
-    // 2. Background fetch every ~30 s
-    if (_tick % FETCH_EVERY_TICKS === 0) {
+    const now = Date.now();
+
+    // 2. Background fetch, at most every 30 s of wall clock.
+    if (now - _lastFetchAt >= FETCH_EVERY_MS) {
+      _lastFetchAt = now;
       await actions.onFetchTick(cwd).catch(() => {});
     }
 
-    // 3. Nightly-pull schedule check every ~60 s
-    if (_tick % NP_EVERY_TICKS === 0) {
+    // 3. Nightly-pull schedule check, at most every 60 s.
+    if (now - _lastNightlyAt >= NIGHTLY_EVERY_MS) {
+      _lastNightlyAt = now;
       await actions.onNightlyTick().catch(() => {});
     }
 
-    // 4. Connectivity probe every ~30 s (F1 — Mode hors-ligne).
-    //    Reuses this poller's clock so we don't add a 3rd setInterval —
-    //    see `feedback_gitwand_polling_discipline` in MEMORY.md.
-    if (
-      actions.onConnectivityTick &&
-      _tick % CONNECTIVITY_EVERY_TICKS === 0
-    ) {
+    // 4. Connectivity probe, at most every 30 s (F1 offline mode). Rides this
+    //    poller's clock so we never add a second interval, per the polling
+    //    discipline rule in apps/desktop/CLAUDE.md.
+    if (actions.onConnectivityTick && now - _lastConnectivityAt >= CONNECTIVITY_EVERY_MS) {
+      _lastConnectivityAt = now;
       await actions.onConnectivityTick(cwd).catch(() => {});
     }
   }
@@ -147,7 +161,31 @@ export function useRepoPoller(actions: RepoPollerActions) {
 
   function startPolling() {
     if (_interval) return;
-    _interval = setInterval(() => void tick(), POLL_INTERVAL);
+    _interval = setInterval(() => void tick(), _intervalMs);
+  }
+
+  /** Restart the interval at the current `_intervalMs`. No-op when stopped. */
+  function reconcileInterval() {
+    if (!_interval) return;
+    clearInterval(_interval);
+    _interval = null;
+    startPolling();
+  }
+
+  /**
+   * Demote (or restore) the poll cadence. A healthy filesystem watcher makes
+   * the poll a fallback for the cases events cannot cover: watcher failure,
+   * network mounts, FUSE filesystems.
+   */
+  function setWatcherHealthy(value: boolean) {
+    if (_watcherHealthy === value) return;
+    _watcherHealthy = value;
+    _intervalMs = value ? SLOW_INTERVAL : FAST_INTERVAL;
+    reconcileInterval();
+    if (!value) {
+      // The watcher just died: whatever it missed, catch it now.
+      void tick(true);
+    }
   }
 
   function stopPolling() {
@@ -168,7 +206,9 @@ export function useRepoPoller(actions: RepoPollerActions) {
     if (path) {
       _porcelainSnapshot = "";
       _conflictWasPresent = false;
-      _tick = 0;
+      _lastFetchAt = Date.now();
+      _lastNightlyAt = Date.now();
+      _lastConnectivityAt = Date.now();
       startPolling();
       void tick(true);
     } else {
@@ -189,16 +229,5 @@ export function useRepoPoller(actions: RepoPollerActions) {
     }
   });
 
-  return { setFolderPath, startPolling, stopPolling };
-}
-
-// ─── Internal ─────────────────────────────────────────────
-
-/**
- * Parse porcelain output to determine if unresolved conflicts exist.
- * In --porcelain mode, unmerged paths show as `UU ` (both sides modified),
- * or `AA ` / `DD `, but `UU ` covers the common case.
- */
-function hasConflictMarkers(porcelain: string): boolean {
-  return porcelain.split("\n").some((l) => l.startsWith("UU "));
+  return { setFolderPath, startPolling, stopPolling, setWatcherHealthy };
 }

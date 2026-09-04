@@ -228,6 +228,22 @@ pub fn git_branches_parity(cwd: String) -> Result<Vec<types::GitBranch>, String>
     tauri::async_runtime::block_on(commands::ops::git_branches(cwd, None))
 }
 
+/// Parity entry point for `git_diff`. Exercises the shipped implementation,
+/// libgit2 fast path included: the whole point is that its output is
+/// indistinguishable from the Node dev-server's CLI-based route.
+pub fn git_diff_parity(cwd: String, path: String, staged: bool) -> Result<types::GitDiff, String> {
+    tauri::async_runtime::block_on(commands::read::git_diff(cwd, path, staged))
+}
+
+/// Parity entry point for `git_blame`. Same reasoning as `git_diff_parity`.
+pub fn git_blame_parity(
+    cwd: String,
+    path: String,
+    algorithm: Option<String>,
+) -> Result<Vec<types::BlameLine>, String> {
+    tauri::async_runtime::block_on(commands::read::git_blame(cwd, path, algorithm))
+}
+
 pub fn git_remote_info_parity(cwd: String) -> Result<types::RemoteInfo, String> {
     tauri::async_runtime::block_on(commands::ops::git_remote_info(cwd))
 }
@@ -694,10 +710,25 @@ pub fn run() {
             commands::terminal::terminal_write,
             commands::terminal::terminal_resize,
             commands::terminal::terminal_close,
+            // ── v3.10.0 Live Repo FS watcher ──
+            commands::watcher::watch_repo_start,
+            commands::watcher::watch_repo_stop,
         ])
-        .on_window_event(|_window, event| {
+        // A reload (Vite full reload in dev, location.reload(), a restored
+        // crashed webview) leaves the previous document's watcher
+        // subscriptions behind: its `onUnmounted` never runs, so nothing calls
+        // `watch_repo_stop`, and the channel keeps "sending" into a document
+        // whose callback registry is gone. Reap them the moment the new page
+        // starts loading, before it re-subscribes.
+        .on_page_load(|webview, payload| {
+            if payload.event() == tauri::webview::PageLoadEvent::Started {
+                commands::watcher::stop_all_for_webview(webview.label());
+            }
+        })
+        .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event {
                 commands::terminal::terminal_close_all();
+                commands::watcher::stop_all_for_webview(window.label());
             }
         })
         .run(tauri::generate_context!())

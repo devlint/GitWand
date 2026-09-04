@@ -417,6 +417,12 @@ export interface AppSettings {
   snapshotMaxCount: number;
   /** Opt-in: one-line AI summaries for snapshots in the timeline. */
   snapshotAiLabels: boolean;
+  /**
+   * Live Repo (v3.10.0): subscribe to filesystem events instead of relying on
+   * the 2 s status poll. Off falls back to the pre-v3.10 polling behavior,
+   * which is what network mounts and FUSE filesystems need.
+   */
+  liveRepoWatcher: boolean;
 }
 
 export type TerminalMode = "floating" | "fullscreen" | "bottom";
@@ -515,6 +521,7 @@ export const defaultAppSettings: AppSettings = {
   snapshotRetentionDays:             14,
   snapshotMaxCount:                  200,
   snapshotAiLabels:                  false,
+  liveRepoWatcher:                   true,
 };
 
 const SETTINGS_KEY = "gitwand-settings";

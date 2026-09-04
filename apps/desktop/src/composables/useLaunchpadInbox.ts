@@ -43,7 +43,6 @@ export type InboxAction =
   | "resolve"
   | "follow"
   | "nudge"
-  | "autoMerge"
   | "view";       // open an issue / dep / assigned PR
 
 /** Discriminated union of items that can appear in the unified inbox. */
@@ -86,6 +85,22 @@ function isDependencyBump(pr: PrWithRepo): boolean {
   return botPattern.test(pr.author) || pr.labels.some((l) => l.toLowerCase() === "dependencies");
 }
 
+/** A PR awaiting review is "stale" past this age with no reviewer activity. */
+const NUDGE_STALE_MS = 3 * 24 * 60 * 60 * 1000;
+
+/**
+ * A PR is nudge-worthy when it still has reviewers explicitly requested (the
+ * requested reviewers clear from this list the moment they submit a review,
+ * so a non-empty list means none of them has acted yet) and `updatedAt` (the
+ * best available proxy for "last activity") hasn't moved in `NUDGE_STALE_MS`.
+ */
+function isStaleAwaitingReview(pr: PrWithRepo): boolean {
+  if (pr.reviewRequested.length === 0) return false;
+  const updated = Date.parse(pr.updatedAt);
+  if (Number.isNaN(updated)) return false;
+  return Date.now() - updated >= NUDGE_STALE_MS;
+}
+
 /**
  * Classify a single PR into a tier + case + action from the viewpoint of `me`.
  * Returns `null` when the PR needs no action from `me` (so it stays out of the inbox).
@@ -103,7 +118,14 @@ export function classifyInboxPr(pr: PrWithRepo, me: string): InboxClassification
   // classified as kind:"dep" if they surface to me at all — i.e.
   // if I own the PR, my review was requested, or I am an assignee.
   if (isDependencyBump(pr) && (isMine || reviewRequested || isAssigned)) {
-    return { tier: "later", case: "merge", action: "autoMerge", kind: "dep" };
+    // `action: "merge"`, not an "auto-merge": there is no forge auto-merge
+    // call anywhere in the app, and `openLaunchpadMergePr` refuses to merge
+    // while `mergeBlocked` is true, which a fresh dep-bump PR almost always
+    // is, since its CI is still running. Labelling the button "Auto-merge"
+    // promised a queue-it-for-later behaviour that could only ever surface
+    // "waiting: <check>". Enabling real forge-side auto-merge is tracked in
+    // roadmap.md.
+    return { tier: "later", case: "merge", action: "merge", kind: "dep" };
   }
 
   // My own PR — what's the next thing I owe it?
@@ -138,8 +160,12 @@ export function classifyInboxPr(pr: PrWithRepo, me: string): InboxClassification
       return { tier: "waiting", case: "ciRunning", action: "follow", kind: "pr" };
     }
 
-    // 6. Awaiting review from others
+    // 6. Awaiting review from others — nudge once it's gone stale with no
+    // response from the requested reviewers, otherwise just keep following.
     if (pr.reviewDecision === "REVIEW_REQUIRED") {
+      if (isStaleAwaitingReview(pr)) {
+        return { tier: "waiting", case: "waiting", action: "nudge", kind: "pr" };
+      }
       return { tier: "waiting", case: "waiting", action: "follow", kind: "pr" };
     }
 

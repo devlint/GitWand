@@ -64,6 +64,7 @@ const zhCN: Locale = {
     pull: "拉取",
     sync: "同步",
     syncTooltip: "获取远程分支并拉取",
+    fetchProgress: "正在获取… {0}%",
     merge: "合并",
     mergeTooltip: "将其他分支合并到当前分支",
     mergeNoFf: "始终创建合并提交",
@@ -1320,6 +1321,8 @@ const zhCN: Locale = {
     defaultBranch: "默认分支",
     commitSignature: "在描述中添加 \u201c🪄 Commit via GitWand\u201d",
     commitSignatureHint: "自动添加的小签名 — 可随时移除",
+    liveRepoWatcher: "仓库实时更新",
+    liveRepoWatcherHint: "通过文件系统事件即时刷新，而不是定时轮询。如果仓库位于网络驱动器上，请关闭此选项。",
     blameAlgorithm: "Blame 差异算法",
     blameAlgorithmHint: "控制 git blame 如何检测移动的行。histogram 在大多数仓库中效果最佳。",
     secretsScannerEnabled: "扫描暂存的更改中的密钥",
@@ -1664,7 +1667,6 @@ const zhCN: Locale = {
       resolve: "解决",
       follow: "跟进",
       nudge: "提醒",
-      autoMerge: "自动合并",
       view: "查看",
     },
     case: {
@@ -1733,6 +1735,23 @@ const zhCN: Locale = {
     reviewersShort: "审阅者",
     refreshAll: "全部刷新",
     refreshAllTooltip: "并行刷新所有 4 个标签页",
+    confirm: {
+      merge: {
+        title: "合并此拉取请求？",
+        body: "{0} 将被合并到 {1}。",
+      },
+      nudge: {
+        title: "发送提醒？",
+        body: "将在 {0} 上发布一条评论。",
+      },
+    },
+    nudge: {
+      comment: "友情提醒：此拉取请求已准备好接受审查。",
+    },
+    toast: {
+      merged: "拉取请求已合并。",
+      nudged: "提醒已发送。",
+    },
     noWorkspace: {
       warning: "请先创建工作区以使用 Today",
     },

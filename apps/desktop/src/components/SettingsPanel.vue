@@ -238,6 +238,8 @@ interface Settings {
   snapshotMaxCount: number;
   /** Opt-in: one-line AI summaries for snapshots in the timeline. */
   snapshotAiLabels: boolean;
+  /** Live Repo (v3.10.0): subscribe to filesystem events instead of polling. */
+  liveRepoWatcher: boolean;
 }
 
 const defaultSettings: Settings = {
@@ -331,6 +333,7 @@ const defaultSettings: Settings = {
   snapshotRetentionDays: 14,
   snapshotMaxCount: 200,
   snapshotAiLabels: false,
+  liveRepoWatcher: true,
 };
 
 function loadSettings(): Settings {
@@ -1848,6 +1851,17 @@ function deleteReleaseNoteTemplate(id: string) {
               <span>{{ t('settings.commitSignature') }}</span>
             </label>
             <span class="sp-hint">{{ t('settings.commitSignatureHint') }}</span>
+          </div>
+
+          <!-- Live repo watcher (v3.10.0) -->
+          <div class="sp-row sp-row--checkbox">
+            <label class="sp-checkbox-label" for="setting-live-repo-watcher">
+              <input id="setting-live-repo-watcher" type="checkbox" class="sp-checkbox"
+                :checked="settings.liveRepoWatcher"
+                @change="updateSetting('liveRepoWatcher', ($event.target as HTMLInputElement).checked)" />
+              <span>{{ t('settings.liveRepoWatcher') }}</span>
+            </label>
+            <span class="sp-hint">{{ t('settings.liveRepoWatcherHint') }}</span>
           </div>
 
           <!-- Blame diff algorithm -->

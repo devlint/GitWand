@@ -58,6 +58,7 @@ const ptBR: Locale = {
     pull: "Pull",
     sync: "Sincronizar",
     syncTooltip: "Buscar branches remotos e fazer pull",
+    fetchProgress: "Buscando… {0}%",
     merge: "Merge",
     mergeTooltip: "Fazer merge de um branch no branch atual",
     mergeNoFf: "Sempre criar um commit de merge",
@@ -1262,6 +1263,8 @@ const ptBR: Locale = {
     defaultBranch: "Branch padrão",
     commitSignature: "Adicionar «🪄 Commit via GitWand» à descrição",
     commitSignatureHint: "Uma pequena assinatura adicionada automaticamente — removível a qualquer momento",
+    liveRepoWatcher: "Atualização ao vivo do repositório",
+    liveRepoWatcherHint: "Atualiza instantaneamente a partir de eventos do sistema de arquivos em vez de consultar periodicamente. Desative se o repositório estiver em uma unidade de rede.",
     blameAlgorithm: "Algoritmo de diff para blame",
     blameAlgorithmHint: "Controla como git blame detecta linhas movidas. histogram dá os melhores resultados.",
     secretsScannerEnabled: "Verificar alterações no stage em busca de segredos",
@@ -1677,7 +1680,6 @@ const ptBR: Locale = {
       resolve: "Resolver",
       follow: "Acompanhar",
       nudge: "Lembrar",
-      autoMerge: "Auto-merge",
       view: "Ver",
     },
     case: {
@@ -1746,6 +1748,23 @@ const ptBR: Locale = {
     reviewersShort: "Revisores",
     refreshAll: "Atualizar tudo",
     refreshAllTooltip: "Atualizar as 4 abas em paralelo",
+    confirm: {
+      merge: {
+        title: "Mesclar esta pull request?",
+        body: "{0} será mesclada em {1}.",
+      },
+      nudge: {
+        title: "Enviar um lembrete?",
+        body: "Um comentário será publicado em {0}.",
+      },
+    },
+    nudge: {
+      comment: "Lembrete amigável: esta pull request está pronta para revisão.",
+    },
+    toast: {
+      merged: "Pull request mesclada.",
+      nudged: "Lembrete enviado.",
+    },
     noWorkspace: {
       warning: "Crie um workspace primeiro para usar Today",
     },

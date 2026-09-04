@@ -21,7 +21,7 @@
  */
 
 // ─── Infrastructure (shared with sub-modules via backend-core.ts) ────────────
-import { isTauri, tauriInvoke, devFetch, DEV_SERVER, IPC_TIMEOUT, devTerminalOpen } from './backend-core';
+import { isTauri, tauriInvoke, devFetch, DEV_SERVER, IPC_TIMEOUT, devTerminalOpen, devWatchRepoOpen, devWatchRepoClose, devGitClone, devGitFetch } from './backend-core';
 export { isTauri };
 // ─── Cross-module type imports for workspace helpers ─────────────────────────
 // PullRequest is defined in backend-pr.ts but used by workspacePrsAll here.
@@ -919,18 +919,19 @@ export async function gitPull(
 }
 
 /**
- * Fetch from remote (updates tracking info without merging).
+ * Fetch from remote (updates tracking info without merging). `onProgress`,
+ * if given, receives live updates over a scoped IPC channel (v3.10.0) —
+ * pass it only for user-initiated fetches; the background poller omits it
+ * so the UI never flickers on an automatic tick.
  */
-export async function gitFetch(cwd: string): Promise<GitPushPullResult> {
+export async function gitFetch(cwd: string, onProgress?: (p: CloneProgress) => void): Promise<GitPushPullResult> {
   if (isTauri()) {
-    return tauriInvoke<GitPushPullResult>("git_fetch", { cwd }, IPC_TIMEOUT.NETWORK);
+    const { Channel } = await import("@tauri-apps/api/core");
+    const channel = new Channel<CloneProgress>();
+    if (onProgress) channel.onmessage = onProgress;
+    return tauriInvoke<GitPushPullResult>("git_fetch", { cwd, onProgress: channel }, IPC_TIMEOUT.NETWORK);
   }
-  const res = await devFetch(`${DEV_SERVER}/api/git-fetch`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ cwd }),
-  });
-  return res.json();
+  return devGitFetch(cwd, onProgress);
 }
 
 /**
@@ -2158,25 +2159,38 @@ export async function getGitBranchTopAuthors(
 }
 
 // ─── Clone & Fork (v2.0) ───────────────────────────────────
-// Synchronous on both backends — no real-time progress events. The caller
-// (CloneModal / ForkModal) shows a spinner while the promise settles.
+// Fork (gh_fork) stays synchronous on both backends — no real-time progress
+// events; the caller shows a spinner while the promise settles. Clone
+// (v2.11) and fetch (v3.10.0) stream live progress over a scoped IPC
+// channel — see CloneProgress below.
+
+/** One progress update from `git clone --progress` / `git fetch --progress`. */
+export interface CloneProgress {
+  /** init | counting | compressing | receiving | resolving | info | done */
+  stage: string;
+  percent: number;
+  message: string;
+}
 
 /**
  * Run `git clone <url> <dest>`. Returns the destination path on success.
  * `dest` must be absolute and not yet exist; git refuses otherwise.
+ * `onProgress` receives live updates over a scoped IPC channel (v3.10.0),
+ * replacing the app-wide `clone-progress` broadcast: two concurrent clones
+ * no longer share one event stream.
  */
-export async function gitClone(url: string, dest: string): Promise<string> {
+export async function gitClone(
+  url: string,
+  dest: string,
+  onProgress?: (p: CloneProgress) => void,
+): Promise<string> {
   if (isTauri()) {
-    return tauriInvoke<string>("git_clone", { url, dest }, IPC_TIMEOUT.NETWORK);
+    const { Channel } = await import("@tauri-apps/api/core");
+    const channel = new Channel<CloneProgress>();
+    if (onProgress) channel.onmessage = onProgress;
+    return tauriInvoke<string>("git_clone", { url, dest, onProgress: channel }, IPC_TIMEOUT.NETWORK);
   }
-  const res = await devFetch(`${DEV_SERVER}/api/git-clone`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ url, dest }),
-  });
-  const body = (await res.json()) as { dest?: string; error?: string };
-  if (!res.ok || body.error) throw new Error(body.error ?? `git clone failed: ${res.status}`);
-  return body.dest ?? dest;
+  return devGitClone(url, dest, onProgress);
 }
 
 /**
@@ -3335,6 +3349,71 @@ export async function terminalClose(id: number): Promise<void> {
     return;
   }
   await devFetch(`${DEV_SERVER}/api/terminal-close`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id }),
+  });
+}
+
+// ─── Live Repo watcher (v3.10.0) ──────────────────────────
+
+/** One coalesced batch of filesystem changes inside a watched repo. */
+export interface RepoChangeEvent {
+  /** Deduplicated, sorted change categories: head | index | refs | config | mergeState | stash | worktree. */
+  kinds: string[];
+  /** Repo-relative paths that changed, capped at 512 entries. */
+  paths: string[];
+  /** True when the batch exceeded the cap: treat `paths` as non-exhaustive. */
+  truncated: boolean;
+  /**
+   * Terminal sentinel: true on the final event a subscription ever receives,
+   * sent when the OS-level watch died unexpectedly. Never surfaced to
+   * `onChange` — `watchRepoStart` intercepts it and calls `onClose` instead.
+   */
+  closed?: boolean;
+}
+
+/**
+ * Subscribe to filesystem changes in `cwd`. Returns a subscription id for
+ * `watchRepoStop`. Multiple subscriptions on the same repo share one OS
+ * watcher on the backend.
+ *
+ * `onClose`, if given, fires once if the subscription dies unexpectedly after
+ * starting (as opposed to a rejected Promise, which means it never started).
+ * Dev mode (`pnpm dev:web`) detects this via the underlying SSE connection
+ * dropping. The Tauri backend (v3.10.0 Phase C) detects it via a terminal
+ * `closed: true` `RepoChangeEvent` sent on the same `Channel` right before the
+ * backend tears down its watcher state for that repo (see
+ * `commands::watcher::spawn_coalescer`'s `Disconnected` arm).
+ */
+export async function watchRepoStart(
+  cwd: string,
+  onChange: (ev: RepoChangeEvent) => void,
+  onClose?: () => void,
+): Promise<number> {
+  if (isTauri()) {
+    const { Channel } = await import("@tauri-apps/api/core");
+    const channel = new Channel<RepoChangeEvent>();
+    channel.onmessage = (ev) => {
+      if (ev.closed) {
+        onClose?.();
+        return;
+      }
+      onChange(ev);
+    };
+    return tauriInvoke<number>("watch_repo_start", { cwd, onChange: channel });
+  }
+  return devWatchRepoOpen(cwd, onChange, onClose);
+}
+
+/** Drop a subscription. Idempotent: an unknown id is a no-op. */
+export async function watchRepoStop(id: number): Promise<void> {
+  if (isTauri()) {
+    await tauriInvoke("watch_repo_stop", { id });
+    return;
+  }
+  devWatchRepoClose(id);
+  await devFetch(`${DEV_SERVER}/api/watch-repo-stop`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ id }),

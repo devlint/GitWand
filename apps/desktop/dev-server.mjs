@@ -10,11 +10,12 @@
 
 import { createServer } from "node:http";
 import { execSync, execFileSync, spawnSync, spawn } from "node:child_process";
-import { readFileSync, writeFileSync, readdirSync, statSync, existsSync, unlinkSync, realpathSync, renameSync, mkdirSync, mkdtempSync, rmSync, copyFileSync } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync, statSync, existsSync, unlinkSync, realpathSync, renameSync, mkdirSync, mkdtempSync, rmSync, copyFileSync, watch } from "node:fs";
 import { resolve, join, dirname, basename, sep, isAbsolute } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { Socket } from "node:net";
 import { createRequire } from "node:module";
+import { StringDecoder } from "node:string_decoder";
 const _require = createRequire(import.meta.url);
 // node-pty provides a real PTY in dev mode — proper echo, backspace, unbuffered
 // output, resize, and control sequences without any manual workarounds.
@@ -91,6 +92,49 @@ function resolveBin(name) {
 
 const GH = resolveBin("gh");
 const GIT = resolveBin("git");
+
+/**
+ * Extract a percentage from a git progress line, e.g.
+ * "Receiving objects:  56% (456/812), 1.2 MiB | 3.4 MiB/s". Mirrors the Rust
+ * `extract_percent` helper in `commands/ops.rs` — keep the two in sync.
+ */
+function devExtractPercent(line) {
+  const pctPos = line.indexOf("%");
+  if (pctPos === -1) return 0;
+  const before = line.slice(0, pctPos).trimEnd();
+  const m = before.match(/(\d+(?:\.\d+)?)\s*$/);
+  if (!m) return 0;
+  return Math.min(100, Math.max(0, parseFloat(m[1])));
+}
+
+/**
+ * Classify one line of `git clone --progress` / `git fetch --progress`
+ * stderr into a `{stage,percent,message}` update. Mirrors the Rust
+ * `parse_clone_progress` helper in `commands/ops.rs` — keep the two in sync.
+ */
+function devParseCloneProgress(line) {
+  const l = line.trim();
+  if (!l) return null;
+  if (l.startsWith("Cloning into")) {
+    return { stage: "init", percent: 0, message: l };
+  }
+  if (l.startsWith("remote: Counting") || l.startsWith("remote: Enumerating")) {
+    return { stage: "counting", percent: devExtractPercent(l), message: l };
+  }
+  if (l.startsWith("remote: Compressing")) {
+    return { stage: "compressing", percent: devExtractPercent(l), message: l };
+  }
+  if (l.startsWith("Receiving objects:")) {
+    return { stage: "receiving", percent: devExtractPercent(l), message: l };
+  }
+  if (l.startsWith("Resolving deltas:")) {
+    return { stage: "resolving", percent: devExtractPercent(l), message: l };
+  }
+  if (l.includes("done") || l.includes("complete")) {
+    return { stage: "done", percent: 100, message: l };
+  }
+  return { stage: "info", percent: 0, message: l };
+}
 
 /**
  * Guess a MIME type from a file extension. Mirrors the Rust `guess_mime_from_ext`
@@ -218,6 +262,99 @@ let _mockGithubPolls = 0;
 // ── Terminal PTY state (dev:web only) ────────────────────────────────────────
 const devPtys = new Map(); // id -> { proc }
 let devPtyNextId = 1;
+
+// ── Live Repo watcher state (dev:web only, v3.10.0) ──────────────────────────
+const devWatchers = new Map();
+let devWatchNextId = 1;
+
+/**
+ * Mirror of `classify_path` in apps/desktop/src-tauri/src/commands/watcher.rs.
+ * This classifier (which change kind a path maps to) is the canonical part
+ * kept in sync between the two implementations: the frontend switches on
+ * `kinds` identically in Tauri and dev:web mode. The debounce/flush *timing*
+ * below mirrors `spawn_coalescer` in watcher.rs (DEBOUNCE quiet window +
+ * MAX_WAIT ceiling + MAX_RAW_BATCH cap) on a best-effort basis — Rust's
+ * version is canonical for exact timing; this one only needs to produce
+ * "roughly as fresh, never starved" events for dev:web testing.
+ */
+/**
+ * Metadata directories of `cwd` that a recursive watch on `cwd` does not
+ * already cover. Mirrors `external_git_dirs` in
+ * src-tauri/src/commands/watcher.rs: in a linked `git worktree` (or a
+ * `--separate-git-dir` repo) `.git` is a *file*, HEAD/index/merge state live
+ * in `<main>/.git/worktrees/<name>/` and refs/config in `<main>/.git/`, so
+ * without watching those the dev watcher never emits a single
+ * head/index/refs/mergeState event while still reporting itself healthy.
+ */
+function devExternalGitDirs(cwd) {
+  const base = resolve(cwd);
+  const out = [];
+  const readDir = (args) => {
+    try {
+      const raw = execFileSync(GIT, args, { cwd: base, encoding: "utf-8" }).trim();
+      return raw ? resolve(base, raw) : null;
+    } catch {
+      return null;
+    }
+  };
+  // The worktree's own git dir first: it is nested inside the common dir, and
+  // its HEAD/index must win over the common dir's `worktrees/<name>/…` view of
+  // the same path (see the ordering note in watcher.rs).
+  for (const dir of [readDir(["rev-parse", "--git-dir"]), readDir(["rev-parse", "--git-common-dir"])]) {
+    if (!dir) continue;
+    if (dir === base || dir.startsWith(base + sep)) continue;
+    if (!out.includes(dir)) out.push(dir);
+  }
+  return out;
+}
+
+function devClassifyPath(rel) {
+  const p = rel.replace(/^\.\//, "");
+  if (p.startsWith(".git/")) {
+    const inner = p.slice(5);
+    if (inner.startsWith("objects/") || inner.startsWith("lfs/") || inner.endsWith(".lock")) return null;
+    if (inner === "refs/stash" || inner === "logs/refs/stash") return "stash";
+    if (inner.startsWith("logs/")) return null;
+    if (inner === "HEAD") return "head";
+    if (inner === "index") return "index";
+    if (inner === "config") return "config";
+    if (inner.startsWith("refs/") || inner === "packed-refs") return "refs";
+    if (["MERGE_HEAD", "REBASE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "MERGE_MSG"].includes(inner)
+      || inner.startsWith("rebase-merge/") || inner.startsWith("rebase-apply/")) return "mergeState";
+    return null;
+  }
+  const ignored = new Set(["node_modules", "target", "dist", ".venv", "__pycache__"]);
+  if (p.split("/").some((seg) => ignored.has(seg))) return null;
+  if (!p) return null;
+  return "worktree";
+}
+
+const DEV_EVENT_PATH_CAP = 512;
+
+// Mirrors watcher.rs's DEBOUNCE / MAX_WAIT / MAX_RAW_BATCH (Finding 1): a
+// fixed 150ms-since-first-event timer alone (the old behavior here) is
+// naturally bounded but always waits the full 150ms even for a single
+// isolated change. Matching Rust's two-trigger model gives the same
+// snappy-burst-then-quiet behavior while staying bounded under continuous churn.
+const DEV_WATCH_DEBOUNCE_MS = 150;
+const DEV_WATCH_MAX_WAIT_MS = 500;
+const DEV_WATCH_MAX_RAW_BATCH = 4096;
+
+function devCoalesceRepoPaths(batch) {
+  const kinds = new Set();
+  const paths = new Set();
+  for (const p of batch) {
+    const kind = devClassifyPath(p);
+    if (kind) { kinds.add(kind); paths.add(p); }
+  }
+  if (kinds.size === 0) return null;
+  const all = [...paths].sort();
+  return {
+    kinds: [...kinds].sort(),
+    paths: all.slice(0, DEV_EVENT_PATH_CAP),
+    truncated: all.length > DEV_EVENT_PATH_CAP,
+  };
+}
 
 /**
  * Get a GitHub OAuth token — tries in order:
@@ -351,6 +488,61 @@ function corsHeaders(req) {
     "Access-Control-Allow-Headers": "Content-Type",
     "Content-Type": "application/json",
   };
+}
+
+/**
+ * Reject a side-effecting request that a foreign page triggered. Returns true
+ * when the request was refused (the caller must stop).
+ *
+ * `corsHeaders` above only *echoes* an allow-listed origin, it never refuses
+ * a request, so the browser blocks the attacker's view of the *response*
+ * while this server still executes it. For the JSON `POST` routes that is
+ * enough: `Content-Type: application/json` forces a preflight no foreign page
+ * can satisfy. The SSE routes are plain `GET`s with real side effects (clone,
+ * fetch, PTY spawn, watcher), and a `GET` needs no preflight: any page the
+ * developer visits while `pnpm dev:web` runs could otherwise fire
+ * `<img src="http://localhost:PORT/api/git-clone-stream?url=...&dest=...">`
+ * and have it run, response-blocked but executed.
+ *
+ * The rule:
+ *   - `Origin` present  → must be allow-listed. Covers `EventSource` (which
+ *     always sends one) and any fetch/XHR.
+ *   - `Origin` absent   → only allowed when `Sec-Fetch-Site` is absent too,
+ *     i.e. the caller is not a browser at all (curl, the parity harness).
+ *     Browsers send `Sec-Fetch-Site` on every request, including the
+ *     sub-resource loads that carry no `Origin` (`<img>`, `<script>`,
+ *     `<iframe>`, navigations), which is exactly the attack shape above.
+ */
+function rejectCrossOrigin(req, res) {
+  const origin = req.headers.origin;
+  if (origin ? ALLOWED_ORIGINS.has(origin) : !req.headers["sec-fetch-site"]) {
+    return false;
+  }
+  res.writeHead(403, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ error: "Cross-origin request refused" }));
+  return true;
+}
+
+/**
+ * Validate a clone URL before it reaches `git clone`'s argv.
+ *
+ * Two distinct problems, both closed here:
+ *  - Option injection: a URL starting with `-` lands in an argv slot git
+ *    parses as an option (`--upload-pack=<cmd>` runs a command for the
+ *    local/ssh transports). The callers also pass `--` before the positional
+ *    arguments; this is the second lock on that door.
+ *  - Scheme confusion: anything that is not a recognizable git URL has no
+ *    business being spawned at all.
+ */
+function isValidCloneUrl(u) {
+  if (u.startsWith("-")) return false; // never let git parse the URL as an option
+  return (
+    /^[a-z][a-z0-9+.-]*:\/\//i.test(u) || // https:// ssh:// git:// file://
+    /^[^@\s]+@[^:\s]+:/.test(u) || // scp-like: git@host:owner/repo.git
+    u.startsWith("/") ||
+    u.startsWith("./") ||
+    u.startsWith("~/")
+  );
 }
 
 /** Parse `git log --format="%H\n%h\n%an\n%aI\n%s\n%b\n---END---"` output into FileLogEntry objects. */
@@ -1413,7 +1605,11 @@ async function handleRequest(req, res) {
         const resolvedCwd = resolve(cwd);
         // Discrete args so the optional pathspec can be passed after `--`
         // without string interpolation (v2.21.0 monorepo scope).
-        const statusArgs = ["status", "--porcelain=v2", "--branch"];
+        // `--no-optional-locks` mirrors `git_status_cli` in
+        // src-tauri/src/commands/read.rs (parity reference): a read-only
+        // status must not rewrite `.git/index`, which the v3.10.0 watcher
+        // would classify as an `index` change and refresh on.
+        const statusArgs = ["--no-optional-locks", "status", "--porcelain=v2", "--branch"];
         if (pathspec) statusArgs.push("--", pathspec);
         const stdout = execFileSync(GIT, statusArgs, {
           cwd: resolvedCwd,
@@ -1641,9 +1837,18 @@ async function handleRequest(req, res) {
         } catch { stdout = ""; }
 
         // ── New untracked file: fall back to --no-index diff (all lines green) ──
+        //
+        // Guard: only for genuinely UNTRACKED files. A tracked file whose only
+        // change is already staged also yields an empty unstaged `git diff`;
+        // without this check the --no-index fallback would render the entire
+        // file as an addition instead of showing no unstaged change (mirrors
+        // the Rust `is_untracked` guard in commands/read.rs).
         if (!stdout.trim() && !staged) {
           const absFile = join(resolvedCwd, path);
-          if (existsSync(absFile) && !statSync(absFile).isDirectory()) {
+          const tracked = spawnSync("git", ["ls-files", "--error-unmatch", "--", path], {
+            cwd: resolvedCwd, encoding: "utf-8",
+          }).status === 0;
+          if (!tracked && existsSync(absFile) && !statSync(absFile).isDirectory()) {
             const r = spawnSync("git", ["diff", "--no-index", "--", "/dev/null", absFile], {
               cwd: resolvedCwd, encoding: "utf-8",
             });
@@ -1655,10 +1860,16 @@ async function handleRequest(req, res) {
         let currentHunk = null;
         let oldLineNo = 0;
         let newLineNo = 0;
+        // Mirrors Rust's parse_diff_hunks: a "new file mode" line marks the
+        // diff as an addition. Matches the Rust GitDiff shape, which omits
+        // `status` entirely when not detected (skip_serializing_if).
+        let status;
 
         const lines = stdout.split("\n");
         for (const line of lines) {
-          if (line.startsWith("@@")) {
+          if (line.startsWith("new file mode")) {
+            status = "added";
+          } else if (line.startsWith("@@")) {
             if (currentHunk) hunks.push(currentHunk);
 
             const header = line;
@@ -1689,11 +1900,10 @@ async function handleRequest(req, res) {
                 newLineNo: null,
               });
               oldLineNo++;
-            } else if (!line.startsWith("\\")) {
-              const content = line.length > 0 ? line.substring(1) : "";
+            } else if (line.startsWith(" ")) {
               currentHunk.lines.push({
                 type: "context",
-                content,
+                content: line.substring(1),
                 oldLineNo,
                 newLineNo,
               });
@@ -1705,7 +1915,7 @@ async function handleRequest(req, res) {
 
         if (currentHunk) hunks.push(currentHunk);
 
-        return jsonResponse(req, res, { path, hunks });
+        return jsonResponse(req, res, { path, hunks, ...(status ? { status } : {}) });
       } catch (err) {
         return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
       }
@@ -2221,6 +2431,65 @@ async function handleRequest(req, res) {
       } catch (err) {
         return jsonResponse(req, res, { success: false, message: ((err.stdout || "") + (err.stderr || "")).toString().trim() || err.message });
       }
+    }
+
+    // GET /api/git-fetch-stream?cwd=..
+    // Dev-mode SSE equivalent of the Tauri `git_fetch` Channel (v3.10.0):
+    // streams `{stage,percent,message}` progress, then a final
+    // `{result: GitPushPullResult}`. Reuses the clone parser — `git fetch
+    // --progress` emits the same vocabulary.
+    if (url.pathname === "/api/git-fetch-stream" && req.method === "GET") {
+      // Side-effecting GET: refuse anything a foreign page triggered.
+      if (rejectCrossOrigin(req, res)) return;
+      const cwd = url.searchParams.get("cwd");
+      if (!cwd) return jsonResponse(req, res, { error: "Missing cwd" }, 400);
+      const resolvedCwd = resolve(cwd);
+      const sseOrigin = req.headers.origin;
+      const sseAllowOrigin = sseOrigin && ALLOWED_ORIGINS.has(sseOrigin) ? sseOrigin : "";
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+        ...(sseAllowOrigin ? { "Access-Control-Allow-Origin": sseAllowOrigin, Vary: "Origin" } : {}),
+      });
+      const proc = spawn(GIT, ["fetch", "--prune", "--progress"], {
+        cwd: resolvedCwd,
+        stdio: ["ignore", "ignore", "pipe"],
+      });
+      let allStderr = "";
+      let carry = "";
+      // Decode via a StringDecoder rather than `chunk.toString()` per chunk:
+      // a multi-byte UTF-8 character (a non-ASCII branch/remote/user name in
+      // git's --progress output) can land on a chunk boundary, and decoding
+      // each raw chunk independently would corrupt both halves into
+      // replacement characters even though the full byte sequence is valid
+      // once assembled. StringDecoder buffers an incomplete trailing
+      // sequence internally and only emits it once complete.
+      const decoder = new StringDecoder("utf8");
+      proc.stderr.on("data", (chunk) => {
+        const text = decoder.write(chunk);
+        allStderr += text;
+        const combined = carry + text;
+        const parts = combined.split(/[\r\n]/);
+        carry = parts.pop() ?? "";
+        for (const part of parts) {
+          const prog = devParseCloneProgress(part);
+          if (prog && !res.writableEnded) res.write(`data: ${JSON.stringify(prog)}\n\n`);
+        }
+      });
+      proc.on("close", (code) => {
+        allStderr += decoder.end();
+        if (res.writableEnded) return;
+        const prog = devParseCloneProgress(carry);
+        if (prog) res.write(`data: ${JSON.stringify(prog)}\n\n`);
+        const success = code === 0;
+        if (success) res.write(`data: ${JSON.stringify({ stage: "done", percent: 100, message: "Fetch complete" })}\n\n`);
+        const result = { success, message: success ? "" : allStderr.trim() };
+        res.write(`data: ${JSON.stringify({ result })}\n\n`);
+        res.end();
+      });
+      req.on("close", () => { try { proc.kill(); } catch (_) {} });
+      return;
     }
 
     // POST /api/git-merge  { cwd, branch, noFf? }
@@ -3034,6 +3303,13 @@ async function handleRequest(req, res) {
         const raw = out.stdout || "";
         const lines = raw.split("\n");
         const blameLines = [];
+        // Porcelain compaction: the metadata block (author/author-time/summary)
+        // is only emitted the FIRST time a commit is seen in the output; later
+        // hunks for the same commit carry just the header + content line. Carry
+        // the metadata forward from the first sighting so it matches the Rust
+        // backend (both the CLI parser in commands/read.rs and the libgit2 fast
+        // path in git/libgit2.rs, which always resolves full commit metadata).
+        const metaCache = new Map();
         let i = 0;
         while (i < lines.length) {
           const headerMatch = lines[i].match(/^([0-9a-f]{40})\s+(\d+)\s+(\d+)/);
@@ -3053,7 +3329,16 @@ async function handleRequest(req, res) {
           }
           const content = i < lines.length ? lines[i].slice(1) : "";
           i++;
-          blameLines.push({ hash: hash.slice(0, 8), hashFull: hash, finalLine, origLine, author, authorDate, summary, content });
+
+          if (!author && !authorDate && !summary) {
+            const cached = metaCache.get(hash);
+            if (cached) ({ author, authorDate, summary } = cached);
+          } else {
+            metaCache.set(hash, { author, authorDate, summary });
+          }
+          // 7 chars, matching the Rust backend (commands/read.rs: hash_full[..7]),
+          // which is the path the shipped app actually uses.
+          blameLines.push({ hash: hash.slice(0, 7), hashFull: hash, finalLine, origLine, author, authorDate, summary, content });
         }
         return jsonResponse(req, res, blameLines);
       } catch (err) {
@@ -6294,12 +6579,74 @@ async function handleRequest(req, res) {
       const d = (dest || "").trim();
       if (!u) return jsonResponse(req, res, { error: "Empty URL" }, 400);
       if (!d) return jsonResponse(req, res, { error: "Empty destination" }, 400);
-      const r = spawnSync(GIT, ["clone", u, d], { encoding: "utf-8" });
+      if (!isValidCloneUrl(u)) return jsonResponse(req, res, { error: "Unsupported clone URL" }, 400);
+      // `--`: see the git-clone-stream route below.
+      const r = spawnSync(GIT, ["clone", "--", u, d], { encoding: "utf-8" });
       if (r.status !== 0) {
         const detail = (r.stderr || r.stdout || "").trim() || "git clone failed";
         return jsonResponse(req, res, { error: detail }, 500);
       }
       return jsonResponse(req, res, { dest: d });
+    }
+
+    // GET /api/git-clone-stream?url=..&dest=..
+    // Dev-mode SSE equivalent of the Tauri `git_clone` Channel (v3.10.0):
+    // streams `{stage,percent,message}` progress, then `{done: dest}` or
+    // `{error}`.
+    if (url.pathname === "/api/git-clone-stream" && req.method === "GET") {
+      // Side-effecting GET: refuse anything a foreign page triggered.
+      if (rejectCrossOrigin(req, res)) return;
+      const u = (url.searchParams.get("url") || "").trim();
+      const d = (url.searchParams.get("dest") || "").trim();
+      if (!u || !d) {
+        return jsonResponse(req, res, { error: "Empty URL or destination" }, 400);
+      }
+      if (!isValidCloneUrl(u)) {
+        return jsonResponse(req, res, { error: "Unsupported clone URL" }, 400);
+      }
+      const sseOrigin = req.headers.origin;
+      const sseAllowOrigin = sseOrigin && ALLOWED_ORIGINS.has(sseOrigin) ? sseOrigin : "";
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+        ...(sseAllowOrigin ? { "Access-Control-Allow-Origin": sseAllowOrigin, Vary: "Origin" } : {}),
+      });
+      // `--` before the positionals: without it a URL like
+      // `--upload-pack=<cmd>` is parsed as an option, not as a repository.
+      const proc = spawn(GIT, ["clone", "--progress", "--", u, d], { stdio: ["ignore", "ignore", "pipe"] });
+      let allStderr = "";
+      let carry = "";
+      // See the git-fetch-stream route above for why this uses StringDecoder
+      // rather than `chunk.toString()` per chunk (multi-byte UTF-8 chars can
+      // land on a chunk boundary).
+      const decoder = new StringDecoder("utf8");
+      proc.stderr.on("data", (chunk) => {
+        const text = decoder.write(chunk);
+        allStderr += text;
+        const combined = carry + text;
+        const parts = combined.split(/[\r\n]/);
+        carry = parts.pop() ?? "";
+        for (const part of parts) {
+          const prog = devParseCloneProgress(part);
+          if (prog && !res.writableEnded) res.write(`data: ${JSON.stringify(prog)}\n\n`);
+        }
+      });
+      proc.on("close", (code) => {
+        allStderr += decoder.end();
+        if (res.writableEnded) return;
+        const prog = devParseCloneProgress(carry);
+        if (prog) res.write(`data: ${JSON.stringify(prog)}\n\n`);
+        if (code === 0) {
+          res.write(`data: ${JSON.stringify({ done: d })}\n\n`);
+        } else {
+          const detail = allStderr.trim() || "git clone failed";
+          res.write(`data: ${JSON.stringify({ error: detail })}\n\n`);
+        }
+        res.end();
+      });
+      req.on("close", () => { try { proc.kill(); } catch (_) {} });
+      return;
     }
 
     // POST /api/gh-fork  { url, parentDir }
@@ -6558,6 +6905,9 @@ async function handleRequest(req, res) {
 
     // ── Terminal PTY (dev echo) ───────────────────────────────────────────────
     if (url.pathname === "/api/terminal-open" && req.method === "GET") {
+      // Side-effecting GET (spawns a shell): refuse anything a foreign page
+      // triggered. Predates the v3.10.0 stream routes but is the same hole.
+      if (rejectCrossOrigin(req, res)) return;
       const cwd = url.searchParams.get("cwd") || process.cwd();
       const shell = url.searchParams.get("shell") || process.env.SHELL || "/bin/zsh";
       // First-class agent: launch the named CLI directly rather than smuggling
@@ -6624,6 +6974,93 @@ async function handleRequest(req, res) {
       const { id } = await readBody(req);
       const entry = devPtys.get(id);
       if (entry) { try { entry.proc.kill(); } catch (_) {} devPtys.delete(id); }
+      return jsonResponse(req, res, { ok: true });
+    }
+
+    // ── Live Repo watcher (dev equivalent of the Tauri Channel) ───────────────
+    if (url.pathname === "/api/watch-repo" && req.method === "GET") {
+      // Side-effecting GET (opens a recursive fs watch): refuse anything a
+      // foreign page triggered.
+      if (rejectCrossOrigin(req, res)) return;
+      const cwd = resolve(url.searchParams.get("cwd") || process.cwd());
+      const id = devWatchNextId++;
+      const sseOrigin = req.headers.origin;
+      const sseAllowOrigin = sseOrigin && ALLOWED_ORIGINS.has(sseOrigin) ? sseOrigin : "";
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+        ...(sseAllowOrigin ? { "Access-Control-Allow-Origin": sseAllowOrigin, Vary: "Origin" } : {}),
+      });
+      res.write(`data: ${JSON.stringify({ id })}\n\n`);
+
+      let batch = [];
+      let quietTimer = null;
+      let maxWaitTimer = null;
+      const clearWatchTimers = () => {
+        if (quietTimer) { clearTimeout(quietTimer); quietTimer = null; }
+        if (maxWaitTimer) { clearTimeout(maxWaitTimer); maxWaitTimer = null; }
+      };
+      const flush = (forceTruncated) => {
+        clearWatchTimers();
+        if (batch.length === 0) return;
+        const ev = devCoalesceRepoPaths(batch);
+        batch = [];
+        if (ev) {
+          if (forceTruncated) ev.truncated = true;
+          if (!res.writableEnded) res.write(`data: ${JSON.stringify(ev)}\n\n`);
+        }
+      };
+      const push = (rel) => {
+        // Classify at push time so noise never enters the batch (mirrors
+        // watcher.rs's spawn_coalescer, Finding 1).
+        if (!devClassifyPath(rel)) return;
+        if (batch.length === 0) {
+          maxWaitTimer = setTimeout(() => flush(false), DEV_WATCH_MAX_WAIT_MS);
+        }
+        batch.push(rel);
+        if (quietTimer) clearTimeout(quietTimer);
+        quietTimer = setTimeout(() => flush(false), DEV_WATCH_DEBOUNCE_MS);
+        if (batch.length >= DEV_WATCH_MAX_RAW_BATCH) flush(true);
+      };
+      const watchers = [];
+      try {
+        watchers.push(
+          watch(cwd, { recursive: true }, (_type, filename) => {
+            if (!filename) return;
+            push(String(filename).split(sep).join("/"));
+          }),
+        );
+        // Linked worktrees keep their metadata outside the worktree, watch it
+        // too, renamed to the `.git/<…>` form devClassifyPath understands.
+        for (const dir of devExternalGitDirs(cwd)) {
+          watchers.push(
+            watch(dir, { recursive: true }, (_type, filename) => {
+              if (!filename) return;
+              push(`.git/${String(filename).split(sep).join("/")}`);
+            }),
+          );
+        }
+      } catch (err) {
+        for (const w of watchers) { try { w.close(); } catch (_) {} }
+        res.write(`data: ${JSON.stringify({ error: String(err) })}\n\n`);
+        res.end();
+        return;
+      }
+      const close = () => {
+        for (const w of watchers) { try { w.close(); } catch (_) {} }
+        clearWatchTimers();
+        devWatchers.delete(id);
+        if (!res.writableEnded) res.end();
+      };
+      devWatchers.set(id, { close });
+      req.on("close", close);
+      return;
+    }
+    if (url.pathname === "/api/watch-repo-stop" && req.method === "POST") {
+      const { id } = await readBody(req);
+      const entry = devWatchers.get(id);
+      if (entry) entry.close();
       return jsonResponse(req, res, { ok: true });
     }
 

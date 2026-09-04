@@ -463,29 +463,63 @@ pub(crate) async fn git_push(
     })
 }
 
+/// Fetch from remote, streaming `git fetch --progress`'s stderr over
+/// `on_progress` (v3.10.0). Reuses `CloneProgress`/`parse_clone_progress`
+/// from the clone path rather than a second shape — see the doc comment on
+/// `CloneProgress`. Callers that don't need live updates (the background
+/// poller) pass a `Channel` whose `onmessage` handler is a no-op; either way
+/// the fetch itself still runs and returns the same `GitPushPullResult`.
+///
+/// stdout is discarded (`Stdio::null()`), mirroring `git_clone`: `git fetch`
+/// writes its summary to stderr, not stdout, and piping both without
+/// draining them concurrently risks a deadlock once stderr's OS pipe buffer
+/// fills with progress lines.
 #[tauri::command]
-pub(crate) async fn git_fetch(cwd: String) -> Result<GitPushPullResult, String> {
+pub(crate) async fn git_fetch(
+    cwd: String,
+    on_progress: tauri::ipc::Channel<CloneProgress>,
+) -> Result<GitPushPullResult, String> {
     let _repo = repo_lock::write(&cwd);
     let _t0 = Instant::now();
-    let output = git_cmd()
-        .args(["fetch", "--prune"])
+
+    let mut child = git_cmd()
+        .args(["fetch", "--prune", "--progress"])
         .current_dir(&cwd)
-        .output()
+        .stderr(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .spawn()
         .map_err(|e| format!("Failed to run git fetch: {}", e))?;
+
+    let all_stderr = if let Some(mut stderr) = child.stderr.take() {
+        stream_progress(&mut stderr, &on_progress)
+    } else {
+        Vec::new()
+    };
+
+    let status = child
+        .wait()
+        .map_err(|e| format!("Failed to wait for git fetch: {}", e))?;
     record_cmd(
-        "git fetch --prune",
+        "git fetch --prune --progress",
         &cwd,
         _t0.elapsed().as_millis() as u64,
-        output.status.code().unwrap_or(-1),
+        status.code().unwrap_or(-1),
     );
 
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&all_stderr).to_string();
+
+    if status.success() {
+        let _ = on_progress.send(CloneProgress {
+            stage: "done".into(),
+            percent: 100.0,
+            message: "Fetch complete".to_string(),
+        });
+    }
 
     Ok(GitPushPullResult {
-        success: output.status.success(),
-        message: if output.status.success() {
-            stdout.trim().to_string()
+        success: status.success(),
+        message: if status.success() {
+            String::new()
         } else {
             stderr.trim().to_string()
         },
@@ -2654,16 +2688,23 @@ pub(crate) async fn git_worktree_repair(cwd: String, paths: Vec<String>) -> Resu
 
 // ─── Clone progress helpers ──────────────────────────────────
 //
-// `git clone --progress` writes progress lines to stderr, mostly
-// terminated by \r (carriage return) for in-place updates, not \n.
-// We read stderr in raw chunks, split on both \r and \n, and emit a
-// `clone-progress` Tauri event for each meaningful line so the
-// CloneModal.vue can render a live progress bar.
+// `git clone --progress` (and, since v3.10.0, `git fetch --progress`) writes
+// progress lines to stderr, mostly terminated by \r (carriage return) for
+// in-place updates, not \n. We read stderr in raw chunks, split on both \r
+// and \n, and forward each meaningful line over a per-invoke
+// `tauri::ipc::Channel<CloneProgress>` (v3.10.0) so CloneModal.vue and the
+// header's fetch indicator can render a live progress bar. This replaced a
+// global `app_handle.emit("clone-progress", ...)` broadcast, which had no
+// way to tell two concurrent operations' streams apart.
 
-/// One progress update emitted as a Tauri event.
+/// One progress update sent over an IPC `Channel`. Shared by `git_clone` and
+/// `git_fetch`: `git fetch --progress` emits the same "Receiving objects /
+/// Resolving deltas" vocabulary as clone, so `parse_clone_progress` handles
+/// both without a second shape.
 #[derive(serde::Serialize, Clone)]
-struct CloneProgress {
-    stage: String, // "init" | "counting" | "compressing" | "receiving" | "resolving" | "done"
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CloneProgress {
+    stage: String, // "init" | "counting" | "compressing" | "receiving" | "resolving" | "done" | "info"
     percent: f32,  // 0 – 100
     message: String, // raw trimmed line
 }
@@ -2736,15 +2777,59 @@ fn parse_clone_progress(line: &str) -> Option<CloneProgress> {
     })
 }
 
+/// Reads a child process's piped stderr to completion, parsing each
+/// progress line via `parse_clone_progress` and forwarding it over
+/// `on_progress`. Splits on both `\r` and `\n` because git rewrites
+/// progress lines in place with `\r`. Returns the raw stderr bytes so the
+/// caller can build an error message if the process fails.
+///
+/// Buffers raw bytes (not decoded strings) across reads: a multi-byte UTF-8
+/// character can land right on a chunk boundary, and decoding each chunk
+/// independently via `from_utf8_lossy` before concatenating would mangle
+/// both halves into replacement characters even though the full byte
+/// sequence is valid once assembled. `\r`/`\n` are single-byte ASCII values
+/// that can never appear inside a multi-byte sequence, so splitting on raw
+/// bytes here never itself corrupts a character — only a complete line's
+/// bytes are ever decoded, as a whole.
+fn stream_progress(
+    stderr: &mut impl std::io::Read,
+    on_progress: &tauri::ipc::Channel<CloneProgress>,
+) -> Vec<u8> {
+    let mut all_stderr: Vec<u8> = Vec::new();
+    let mut buf = [0u8; 512];
+    let mut carry: Vec<u8> = Vec::new();
+    loop {
+        match stderr.read(&mut buf) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => {
+                all_stderr.extend_from_slice(&buf[..n]);
+                carry.extend_from_slice(&buf[..n]);
+                let mut line_start = 0;
+                for i in 0..carry.len() {
+                    if carry[i] == b'\r' || carry[i] == b'\n' {
+                        let line = String::from_utf8_lossy(&carry[line_start..i]);
+                        if let Some(prog) = parse_clone_progress(&line) {
+                            let _ = on_progress.send(prog);
+                        }
+                        line_start = i + 1;
+                    }
+                }
+                carry.drain(..line_start);
+            }
+        }
+    }
+    if let Some(prog) = parse_clone_progress(&String::from_utf8_lossy(&carry)) {
+        let _ = on_progress.send(prog);
+    }
+    all_stderr
+}
+
 #[tauri::command]
 pub(crate) async fn git_clone(
     url: String,
     dest: String,
-    app_handle: tauri::AppHandle,
+    on_progress: tauri::ipc::Channel<CloneProgress>,
 ) -> Result<String, String> {
-    use std::io::Read;
-    use tauri::Emitter;
-
     let url_trim = url.trim().to_string();
     let dest_trim = dest.trim().to_string();
     if url_trim.is_empty() {
@@ -2753,46 +2838,30 @@ pub(crate) async fn git_clone(
     if dest_trim.is_empty() {
         return Err("Empty destination".to_string());
     }
+    // A URL starting with `-` lands in an argv slot git parses as an option
+    // (`--upload-pack=<cmd>` executes a command for the local and ssh
+    // transports). `--` below closes option parsing; this rejects the input
+    // outright so a mistyped or pasted `-`-prefixed URL can never reach it.
+    if url_trim.starts_with('-') {
+        return Err("Invalid URL".to_string());
+    }
 
     let _t0 = Instant::now();
 
     // --progress forces git to emit progress even when stderr is not a tty.
+    // `--` keeps a `-`-prefixed URL or destination positional.
     let mut child = git_cmd()
-        .args(["clone", "--progress", &url_trim, &dest_trim])
+        .args(["clone", "--progress", "--", &url_trim, &dest_trim])
         .stderr(std::process::Stdio::piped())
         .stdout(std::process::Stdio::null())
         .spawn()
         .map_err(|e| format!("Failed to spawn git clone: {}", e))?;
 
-    // Stream stderr → parse progress lines → emit Tauri events.
-    // Split on both \r and \n because git uses \r for in-place rewrites.
-    let mut all_stderr: Vec<u8> = Vec::new();
-    if let Some(mut stderr) = child.stderr.take() {
-        let mut buf = [0u8; 512];
-        let mut carry = String::new();
-        loop {
-            match stderr.read(&mut buf) {
-                Ok(0) | Err(_) => break,
-                Ok(n) => {
-                    all_stderr.extend_from_slice(&buf[..n]);
-                    let chunk = String::from_utf8_lossy(&buf[..n]);
-                    let combined = carry.clone() + &chunk;
-                    let parts: Vec<&str> = combined.split(['\r', '\n']).collect();
-                    let carry_idx = parts.len().saturating_sub(1);
-                    carry = parts[carry_idx].to_string();
-                    for part in &parts[..carry_idx] {
-                        if let Some(prog) = parse_clone_progress(part) {
-                            let _ = app_handle.emit("clone-progress", prog);
-                        }
-                    }
-                }
-            }
-        }
-        // Flush carry
-        if let Some(prog) = parse_clone_progress(&carry) {
-            let _ = app_handle.emit("clone-progress", prog);
-        }
-    }
+    let all_stderr = if let Some(mut stderr) = child.stderr.take() {
+        stream_progress(&mut stderr, &on_progress)
+    } else {
+        Vec::new()
+    };
 
     let status = child
         .wait()
@@ -2813,17 +2882,307 @@ pub(crate) async fn git_clone(
         });
     }
 
-    // Emit final "done" event
-    let _ = app_handle.emit(
-        "clone-progress",
-        CloneProgress {
-            stage: "done".into(),
-            percent: 100.0,
-            message: "Clone complete".to_string(),
-        },
-    );
+    // Send final "done" event
+    let _ = on_progress.send(CloneProgress {
+        stage: "done".into(),
+        percent: 100.0,
+        message: "Clone complete".to_string(),
+    });
 
     Ok(dest_trim)
+}
+
+#[cfg(test)]
+mod clone_fetch_channel_tests {
+    use super::*;
+    use crate::git::cmd::git_binary;
+    use std::path::PathBuf;
+    use std::process::Command;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::{Arc, Mutex};
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    struct TempRepo {
+        path: PathBuf,
+    }
+    impl Drop for TempRepo {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+    impl TempRepo {
+        fn new() -> Self {
+            let n = COUNTER.fetch_add(1, Ordering::SeqCst);
+            let pid = std::process::id();
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let dir = std::env::temp_dir().join(format!(
+                "gitwand-clone-fetch-channel-test-{}-{}-{}",
+                pid, n, nanos
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            let repo = TempRepo { path: dir };
+            repo.git_ok(&["init", "-q", "-b", "main"]);
+            repo.git_ok(&["config", "user.name", "Test"]);
+            repo.git_ok(&["config", "user.email", "test@example.com"]);
+            repo.git_ok(&["config", "commit.gpgsign", "false"]);
+            repo
+        }
+        fn cwd(&self) -> String {
+            self.path.to_str().unwrap().to_string()
+        }
+        fn git(&self, args: &[&str]) -> std::process::Output {
+            Command::new(git_binary())
+                .args(args)
+                .current_dir(&self.path)
+                .output()
+                .unwrap_or_else(|e| panic!("git {:?} spawn: {}", args, e))
+        }
+        fn git_ok(&self, args: &[&str]) {
+            let out = self.git(args);
+            assert!(
+                out.status.success(),
+                "git {:?} failed: {}",
+                args,
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+        fn write(&self, rel: &str, content: &str) {
+            let p = self.path.join(rel);
+            if let Some(parent) = p.parent() {
+                std::fs::create_dir_all(parent).unwrap();
+            }
+            std::fs::write(p, content).unwrap();
+        }
+        fn commit_all(&self, msg: &str) {
+            self.git_ok(&["add", "-A"]);
+            self.git_ok(&["commit", "-q", "-m", msg]);
+        }
+    }
+
+    fn make_bare_remote() -> PathBuf {
+        let n = COUNTER.fetch_add(1, Ordering::SeqCst);
+        let pid = std::process::id();
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "gitwand-clone-fetch-channel-bare-{}-{}-{}",
+            pid, n, nanos
+        ));
+        let out = Command::new(git_binary())
+            .args(["init", "--bare", "-q", "-b", "main"])
+            .arg(&dir)
+            .output()
+            .expect("git init --bare spawn");
+        assert!(
+            out.status.success(),
+            "git init --bare failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        dir
+    }
+
+    /// Collects every `CloneProgress` sent over a Channel into a shared Vec,
+    /// decoding via `serde_json::Value` rather than adding a test-only
+    /// `Deserialize` impl to the production struct.
+    fn collecting_channel() -> (
+        tauri::ipc::Channel<CloneProgress>,
+        Arc<Mutex<Vec<serde_json::Value>>>,
+    ) {
+        let received = Arc::new(Mutex::new(Vec::new()));
+        let received_clone = received.clone();
+        let channel = tauri::ipc::Channel::new(move |body| {
+            if let tauri::ipc::InvokeResponseBody::Json(s) = body {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&s) {
+                    received_clone.lock().unwrap().push(v);
+                }
+            }
+            Ok(())
+        });
+        (channel, received)
+    }
+
+    #[test]
+    fn git_fetch_streams_progress_and_advances_remote_tracking_ref() {
+        let bare = make_bare_remote();
+
+        let repo = TempRepo::new();
+        repo.write("a.txt", "1");
+        repo.commit_all("c1");
+        repo.git_ok(&["remote", "add", "origin", bare.to_str().unwrap()]);
+        repo.git_ok(&["push", "-q", "origin", "main"]);
+
+        // A second working copy pushes a new commit to the shared remote so
+        // `repo`'s upcoming fetch has objects to transfer.
+        let pusher = TempRepo::new();
+        pusher.git_ok(&["remote", "add", "origin", bare.to_str().unwrap()]);
+        pusher.git_ok(&["fetch", "-q", "origin", "main"]);
+        pusher.git_ok(&["reset", "-q", "--hard", "origin/main"]);
+        pusher.write("b.txt", "2");
+        pusher.commit_all("c2");
+        pusher.git_ok(&["push", "-q", "origin", "main"]);
+        let expected_sha = String::from_utf8_lossy(&pusher.git(&["rev-parse", "HEAD"]).stdout)
+            .trim()
+            .to_string();
+
+        let (channel, received) = collecting_channel();
+        let result = tauri::async_runtime::block_on(git_fetch(repo.cwd(), channel))
+            .expect("git_fetch failed");
+        assert!(result.success, "fetch should succeed: {}", result.message);
+
+        let new_sha = String::from_utf8_lossy(&repo.git(&["rev-parse", "origin/main"]).stdout)
+            .trim()
+            .to_string();
+        assert_eq!(
+            new_sha, expected_sha,
+            "origin/main must advance to the pushed commit after fetch"
+        );
+
+        let msgs = received.lock().unwrap();
+        assert!(
+            !msgs.is_empty(),
+            "expected at least the synthetic 'done' progress event"
+        );
+        assert!(
+            msgs.iter()
+                .any(|m| m.get("stage").and_then(|s| s.as_str()) == Some("done")),
+            "expected a 'done' stage event on success, got {:?}",
+            *msgs
+        );
+
+        let _ = std::fs::remove_dir_all(&bare);
+    }
+
+    /// A `Read` impl that yields exactly one caller-supplied chunk per
+    /// `read()` call — used to force `stream_progress` to see a multi-byte
+    /// UTF-8 character split across two separate reads, which a real pipe
+    /// can do at any byte offset regardless of character boundaries.
+    struct ChunkedReader {
+        chunks: std::collections::VecDeque<Vec<u8>>,
+    }
+    impl std::io::Read for ChunkedReader {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            match self.chunks.pop_front() {
+                Some(chunk) => {
+                    let n = chunk.len().min(buf.len());
+                    buf[..n].copy_from_slice(&chunk[..n]);
+                    Ok(n)
+                }
+                None => Ok(0),
+            }
+        }
+    }
+
+    /// Regression for the multi-byte UTF-8 chunk-boundary corruption
+    /// (adversarial review of PR #178, Minor 2): decoding each raw chunk
+    /// independently via `String::from_utf8_lossy` before concatenating with
+    /// the carry buffer mangles a character split across the boundary into
+    /// replacement characters, even though the full byte sequence is valid
+    /// UTF-8 once assembled.
+    #[test]
+    fn stream_progress_handles_multibyte_utf8_split_across_chunks() {
+        let line = "remote: 日本語ブランチ\n";
+        let bytes = line.as_bytes();
+        // "remote: " is 8 ASCII bytes; "日" is E6 97 A5. Split after the
+        // second byte of that 3-byte sequence, mid-character.
+        let split_at = 8 + 2;
+        let (first, second) = bytes.split_at(split_at);
+
+        let mut reader = ChunkedReader {
+            chunks: std::collections::VecDeque::from(vec![first.to_vec(), second.to_vec()]),
+        };
+        let (channel, received) = collecting_channel();
+
+        stream_progress(&mut reader, &channel);
+
+        let msgs = received.lock().unwrap();
+        assert!(
+            msgs.iter()
+                .any(|m| { m.get("message").and_then(|s| s.as_str()) == Some(line.trim()) }),
+            "expected the multi-byte line to decode intact, got {:?}",
+            *msgs
+        );
+        assert!(
+            !msgs.iter().any(|m| {
+                m.get("message")
+                    .and_then(|s| s.as_str())
+                    .is_some_and(|s| s.contains('\u{FFFD}'))
+            }),
+            "no message should contain a UTF-8 replacement character, got {:?}",
+            *msgs
+        );
+    }
+
+    #[test]
+    fn git_fetch_reports_failure_without_a_done_event() {
+        let repo = TempRepo::new();
+        // A remote pointing at a path that isn't a git repository — `git
+        // fetch` must fail cleanly rather than hang, and must not claim
+        // success via a "done" event. (An unconfigured `origin` is not
+        // enough to exercise this: `git fetch` with no remotes at all is a
+        // silent no-op that exits 0.)
+        repo.git_ok(&["remote", "add", "origin", "/no/such/path"]);
+        let (channel, received) = collecting_channel();
+        let result = tauri::async_runtime::block_on(git_fetch(repo.cwd(), channel))
+            .expect("git_fetch command itself should not error");
+        assert!(!result.success, "fetch with no remote must fail");
+        assert!(!result.message.is_empty(), "failure must carry a message");
+
+        let msgs = received.lock().unwrap();
+        assert!(
+            !msgs
+                .iter()
+                .any(|m| m.get("stage").and_then(|s| s.as_str()) == Some("done")),
+            "a failed fetch must not send a 'done' event, got {:?}",
+            *msgs
+        );
+    }
+
+    #[test]
+    fn git_clone_streams_progress_and_returns_dest() {
+        let bare = make_bare_remote();
+        let seed = TempRepo::new();
+        seed.write("a.txt", "1");
+        seed.commit_all("c1");
+        seed.git_ok(&["remote", "add", "origin", bare.to_str().unwrap()]);
+        seed.git_ok(&["push", "-q", "origin", "main"]);
+
+        let n = COUNTER.fetch_add(1, Ordering::SeqCst);
+        let dest = std::env::temp_dir().join(format!(
+            "gitwand-clone-fetch-channel-dest-{}-{}",
+            std::process::id(),
+            n
+        ));
+
+        let (channel, received) = collecting_channel();
+        let result = tauri::async_runtime::block_on(git_clone(
+            bare.to_str().unwrap().to_string(),
+            dest.to_str().unwrap().to_string(),
+            channel,
+        ));
+        assert!(result.is_ok(), "git_clone failed: {:?}", result.err());
+        assert_eq!(result.unwrap(), dest.to_str().unwrap());
+        assert!(
+            dest.join("a.txt").exists(),
+            "cloned repo should contain a.txt"
+        );
+
+        let msgs = received.lock().unwrap();
+        assert!(
+            msgs.iter()
+                .any(|m| m.get("stage").and_then(|s| s.as_str()) == Some("done")),
+            "expected a 'done' stage event, got {:?}",
+            *msgs
+        );
+
+        let _ = std::fs::remove_dir_all(&bare);
+        let _ = std::fs::remove_dir_all(&dest);
+    }
 }
 
 #[tauri::command]

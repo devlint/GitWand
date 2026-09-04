@@ -429,6 +429,10 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
   }
 
   const isFetching = ref(false);
+  // v3.10.0 — 0-100 while a user-initiated fetch streams progress over its
+  // IPC channel; stays 0 for the silent background poll tick (full=false),
+  // which passes no progress callback so the UI never flickers.
+  const fetchPercent = ref(0);
 
   /**
    * Fetch from remote (background, non-blocking).
@@ -440,7 +444,8 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
    *   stashes, worktrees) on top of status + log. Used by the manual "up to
    *   date" / sync click so one gesture refreshes the whole view. The 30s
    *   background poll leaves it false to stay off the hot path (per the perf
-   *   invariants — no extra process spawns on the polling tick).
+   *   invariants — no extra process spawns on the polling tick), and doubles
+   *   as the signal to fetch silently rather than surface progress (v3.10.0).
    */
   async function fetchRemote(full = false) {
     // Skip fetch during merge operations to avoid git lock conflicts
@@ -455,8 +460,16 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     // can never hang on the 5-min NETWORK timeout when the link is dead.
     if (!(await requireOnline("fetch"))) return;
     isFetching.value = true;
+    fetchPercent.value = 0;
     try {
-      await gitFetch(folderPath.value);
+      await gitFetch(
+        folderPath.value,
+        // Clamp monotonically: parse_clone_progress's catch-all "info" branch
+        // (remote summary lines, ref-update lines) reports percent 0, which
+        // would otherwise yank the bar backward mid-fetch between the real
+        // counting/compressing percentages and the final "done" event.
+        full ? (p) => { fetchPercent.value = Math.max(fetchPercent.value, p.percent); } : undefined,
+      );
       // Always refresh status after fetch attempt to get updated ahead/behind
       await loadStatus(folderPath.value);
       // v2.14 — Refresh log so clicking "Up to date" or periodic fetch
@@ -473,6 +486,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       console.warn("[GitWand] fetch failed:", err);
     } finally {
       isFetching.value = false;
+      fetchPercent.value = 0;
     }
   }
 
@@ -1536,6 +1550,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     isPushing,
     isPulling,
     isFetching,
+    fetchPercent,
     lastCommitHash,
     branches,
     branchesLoading,
