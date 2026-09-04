@@ -220,21 +220,24 @@ pub(crate) fn libgit2_diff_patch(cwd: &str, path: &str, staged: bool) -> Result<
 /// `--diff-algorithm` equivalent: the caller must only use this for the
 /// default (`histogram`) setting and fall back to the CLI otherwise.
 ///
-/// Accuracy note (adversarial review of PR #178, Priority 5): a plain diff
-/// between Myers and histogram *can* produce differently-shaped hunks around
-/// a moved block with duplicate separator lines nearby (verified by hand —
-/// see the `blame_attribution_matches_the_cli_on_a_moved_block` fixture
-/// below). Blame attribution held up anyway: unlike a diff, blame doesn't
-/// need to agree on *how* a change is hunked, only on which single commit
-/// last touched each surviving line, and both algorithms still resolve that
-/// the same way once a line's content is otherwise unambiguous. Real
-/// divergence would require genuinely duplicate, indistinguishable line
-/// content with more than one plausible origin commit — a case that is
-/// inherently ambiguous for the CLI's own blame too, algorithm choice aside.
-/// If a future fixture does show a real attribution divergence, follow the
-/// plan's original fallback: gate `git_blame`'s libgit2 fast path off
-/// entirely and go back to CLI-only for blame (independent of `git_diff`'s
-/// libgit2 path, which stays put).
+/// Accuracy note (adversarial review of PR #178, Priority 5, confirmed by a
+/// real CI failure the same PR): a plain diff between Myers and histogram
+/// *can* produce differently-shaped hunks around a moved block with
+/// duplicate separator lines nearby, and — contrary to this function's
+/// original expectation that blame attribution would hold up regardless of
+/// hunk shape — `blame_attribution_can_diverge_from_the_cli_on_a_moved_block`
+/// below did diverge in CI (git 2.55.0, macOS runner) while passing locally
+/// against git 2.50.1: the CLI's histogram blame and libgit2's bundled
+/// xdiff (Myers) attributed several lines of the moved block to different
+/// commits. This is real and git-version-dependent, not flaky. Per the
+/// plan's original fallback, `git_blame` (`commands/read.rs`) no longer
+/// calls this function — it is CLI-only for blame (independent of
+/// `git_diff`'s libgit2 path, which stays put and is unaffected: diffing
+/// doesn't need attribution agreement). This function and its tests remain
+/// as a regression guard against re-enabling the fast path without
+/// re-verifying the divergence is gone; with no production caller left,
+/// it's dead code outside `#[cfg(test)]` — hence the `allow` below.
+#[allow(dead_code)]
 pub(crate) fn libgit2_blame(
     cwd: &str,
     path: &str,
@@ -246,8 +249,8 @@ pub(crate) fn libgit2_blame(
         .map_err(|e| format!("git2 blame: {e}"))?;
 
     let safe_path = safe_repo_path(cwd, path)?;
-    let content = std::fs::read_to_string(&safe_path)
-        .map_err(|e| format!("failed to read {path}: {e}"))?;
+    let content =
+        std::fs::read_to_string(&safe_path).map_err(|e| format!("failed to read {path}: {e}"))?;
     let file_lines: Vec<&str> = content.split('\n').collect();
 
     // Re-blame against the actual working-tree buffer. `blame_file` alone only
@@ -367,7 +370,11 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let run = |args: &[&str]| {
-            Command::new("git").args(args).current_dir(&dir).output().unwrap();
+            Command::new("git")
+                .args(args)
+                .current_dir(&dir)
+                .output()
+                .unwrap();
         };
         run(&["init", "-q"]);
         run(&["config", "user.email", "t@example.com"]);
@@ -380,10 +387,16 @@ mod tests {
 
     fn cli_diff(dir: &std::path::Path, path: &str, staged: bool) -> String {
         let mut args = vec!["diff"];
-        if staged { args.push("--cached"); }
+        if staged {
+            args.push("--cached");
+        }
         args.push("--");
         args.push(path);
-        let out = Command::new("git").args(&args).current_dir(dir).output().unwrap();
+        let out = Command::new("git")
+            .args(&args)
+            .current_dir(dir)
+            .output()
+            .unwrap();
         String::from_utf8_lossy(&out.stdout).to_string()
     }
 
@@ -402,8 +415,16 @@ mod tests {
         assert_eq!(lg2_hunks[0].old_start, cli_hunks[0].old_start);
         assert_eq!(lg2_hunks[0].new_start, cli_hunks[0].new_start);
         assert_eq!(
-            lg2_hunks[0].lines.iter().map(|l| (l.r#type.clone(), l.content.clone())).collect::<Vec<_>>(),
-            cli_hunks[0].lines.iter().map(|l| (l.r#type.clone(), l.content.clone())).collect::<Vec<_>>(),
+            lg2_hunks[0]
+                .lines
+                .iter()
+                .map(|l| (l.r#type.clone(), l.content.clone()))
+                .collect::<Vec<_>>(),
+            cli_hunks[0]
+                .lines
+                .iter()
+                .map(|l| (l.r#type.clone(), l.content.clone()))
+                .collect::<Vec<_>>(),
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -412,7 +433,11 @@ mod tests {
     fn staged_patch_matches_the_cli_hunks() {
         let dir = temp_repo("staged");
         std::fs::write(dir.join("a.txt"), "one\nTWO\nthree\n").unwrap();
-        Command::new("git").args(["add", "a.txt"]).current_dir(&dir).output().unwrap();
+        Command::new("git")
+            .args(["add", "a.txt"])
+            .current_dir(&dir)
+            .output()
+            .unwrap();
 
         let lg2 = libgit2_diff_patch(dir.to_str().unwrap(), "a.txt", true).unwrap();
         let cli = cli_diff(&dir, "a.txt", true);
@@ -450,14 +475,20 @@ mod tests {
     fn conflicted_path_falls_back_to_cli() {
         let dir = temp_repo("conflict");
         let run = |args: &[&str]| {
-            Command::new("git").args(args).current_dir(&dir).output().unwrap()
+            Command::new("git")
+                .args(args)
+                .current_dir(&dir)
+                .output()
+                .unwrap()
         };
         let base_branch_out = Command::new("git")
             .args(["symbolic-ref", "--short", "HEAD"])
             .current_dir(&dir)
             .output()
             .unwrap();
-        let base_branch = String::from_utf8_lossy(&base_branch_out.stdout).trim().to_string();
+        let base_branch = String::from_utf8_lossy(&base_branch_out.stdout)
+            .trim()
+            .to_string();
         run(&["checkout", "-qb", "feat"]);
         std::fs::write(dir.join("a.txt"), "one\ntwo\nFEAT\n").unwrap();
         run(&["commit", "-qam", "feat change"]);
@@ -494,7 +525,11 @@ mod tests {
         std::fs::write(dir.join("a.txt"), "ZERO\none\ntwo\nTHREE\n").unwrap();
 
         let lg2 = libgit2_blame(dir.to_str().unwrap(), "a.txt", 10_000).unwrap();
-        assert_eq!(lg2.len(), 4, "expected all 4 working-tree lines, got: {lg2:?}");
+        assert_eq!(
+            lg2.len(),
+            4,
+            "expected all 4 working-tree lines, got: {lg2:?}"
+        );
 
         assert_eq!(lg2[0].content, "ZERO");
         assert!(
@@ -535,7 +570,11 @@ mod tests {
         use std::process::Command;
         let dir = temp_repo("blame");
         let run = |args: &[&str]| {
-            Command::new("git").args(args).current_dir(&dir).output().unwrap();
+            Command::new("git")
+                .args(args)
+                .current_dir(&dir)
+                .output()
+                .unwrap();
         };
         std::fs::write(dir.join("a.txt"), "one\ntwo\nTHREE\n").unwrap();
         run(&["config", "user.name", "Second"]);
@@ -547,7 +586,13 @@ mod tests {
         let lg2 = libgit2_blame(dir.to_str().unwrap(), "a.txt", 10_000).unwrap();
 
         let out = Command::new("git")
-            .args(["blame", "--porcelain", "--diff-algorithm=histogram", "--", "a.txt"])
+            .args([
+                "blame",
+                "--porcelain",
+                "--diff-algorithm=histogram",
+                "--",
+                "a.txt",
+            ])
             .current_dir(&dir)
             .output()
             .unwrap();
@@ -556,13 +601,22 @@ mod tests {
             .lines()
             .filter_map(|l| {
                 let parts: Vec<&str> = l.split_whitespace().collect();
-                if parts.len() >= 3 && parts[0].len() == 40 { Some(parts[0].to_string()) } else { None }
+                if parts.len() >= 3 && parts[0].len() == 40 {
+                    Some(parts[0].to_string())
+                } else {
+                    None
+                }
             })
             .collect();
 
         assert_eq!(lg2.len(), cli_shas.len(), "line count differs");
         for (i, line) in lg2.iter().enumerate() {
-            assert_eq!(line.hash_full, cli_shas[i], "attribution differs at line {}", i + 1);
+            assert_eq!(
+                line.hash_full,
+                cli_shas[i],
+                "attribution differs at line {}",
+                i + 1
+            );
         }
         assert_eq!(lg2[0].content, "one");
         assert_eq!(lg2[3].content, "four");
@@ -570,30 +624,34 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Go/no-go gate, moved-block variant (adversarial review of PR #178,
-    /// Priority 5): the sequential-edit fixture above doesn't exercise a
-    /// reordered block. This one reorders a block *and* edits another line in
-    /// the very same commit, with duplicate `X` separator lines around each
-    /// block — confirmed (via `git diff --diff-algorithm=myers` vs
-    /// `=histogram` on this exact content) to actually produce differently
-    /// shaped hunks between the two algorithms, unlike a plain block move
-    /// with no nearby duplicate lines. If libgit2's default diffing (Myers,
-    /// no `histogram`/`patience` flag — `xdiff`'s default) disagreed with the
-    /// CLI's histogram output on *attribution*, this is where it would show,
-    /// even though the two algorithms already disagree on hunk shape here.
+    /// Documents a confirmed, git-version-dependent attribution divergence
+    /// (adversarial review of PR #178, Priority 5): this fixture reorders a
+    /// block *and* edits another line in the same commit, with duplicate `X`
+    /// separator lines around each block — confirmed (via `git diff
+    /// --diff-algorithm=myers` vs `=histogram` on this exact content) to
+    /// produce differently shaped hunks between the two algorithms. It
+    /// originally asserted full attribution equality on the theory that
+    /// blame doesn't need hunk-shape agreement to agree on attribution — that
+    /// held locally against git 2.50.1, but CI (macOS runner, git 2.55.0)
+    /// caught a real divergence: several moved-block lines got attributed to
+    /// different commits. `commands/read.rs::git_blame` no longer calls
+    /// `libgit2_blame` because of this (see its doc comment above), so this
+    /// no longer needs to be a hard equality gate — it stays as a visible,
+    /// non-panicking record of the divergence so it's never silently lost if
+    /// someone considers re-enabling the fast path.
     #[test]
-    fn blame_attribution_matches_the_cli_on_a_moved_block() {
+    fn blame_attribution_can_diverge_from_the_cli_on_a_moved_block() {
         use std::process::Command;
         let dir = temp_repo("blame-moved-block");
         let run = |args: &[&str]| {
-            Command::new("git").args(args).current_dir(&dir).output().unwrap();
+            Command::new("git")
+                .args(args)
+                .current_dir(&dir)
+                .output()
+                .unwrap();
         };
 
-        std::fs::write(
-            dir.join("a.txt"),
-            "X\nA1\nA2\nX\nB1\nB2\nX\nC1\nC2\nX\n",
-        )
-        .unwrap();
+        std::fs::write(dir.join("a.txt"), "X\nA1\nA2\nX\nB1\nB2\nX\nC1\nC2\nX\n").unwrap();
         run(&["config", "user.name", "Blocks"]);
         run(&["commit", "-qam", "three blocks: A B C"]);
 
@@ -601,18 +659,24 @@ mod tests {
         // combination is what makes Myers and histogram pick genuinely
         // different hunk boundaries (verified by hand against plain `git
         // diff` on this content), unlike an isolated pure reorder.
-        std::fs::write(
-            dir.join("a.txt"),
-            "X\nC1\nC2\nX\nAA2\nX\nB1\nB2\nX\n",
-        )
-        .unwrap();
+        std::fs::write(dir.join("a.txt"), "X\nC1\nC2\nX\nAA2\nX\nB1\nB2\nX\n").unwrap();
         run(&["config", "user.name", "Mover"]);
-        run(&["commit", "-qam", "move block C to the front, edit A2 -> AA2"]);
+        run(&[
+            "commit",
+            "-qam",
+            "move block C to the front, edit A2 -> AA2",
+        ]);
 
         let lg2 = libgit2_blame(dir.to_str().unwrap(), "a.txt", 10_000).unwrap();
 
         let out = Command::new("git")
-            .args(["blame", "--porcelain", "--diff-algorithm=histogram", "--", "a.txt"])
+            .args([
+                "blame",
+                "--porcelain",
+                "--diff-algorithm=histogram",
+                "--",
+                "a.txt",
+            ])
             .current_dir(&dir)
             .output()
             .unwrap();
@@ -621,21 +685,37 @@ mod tests {
             .lines()
             .filter_map(|l| {
                 let parts: Vec<&str> = l.split_whitespace().collect();
-                if parts.len() >= 3 && parts[0].len() == 40 { Some(parts[0].to_string()) } else { None }
+                if parts.len() >= 3 && parts[0].len() == 40 {
+                    Some(parts[0].to_string())
+                } else {
+                    None
+                }
             })
             .collect();
 
+        // Line count/content always agrees — only attribution can diverge,
+        // and only libgit2_blame's own consistency (not a live CLI match)
+        // is a real invariant now that read.rs never calls this path.
         assert_eq!(lg2.len(), cli_shas.len(), "line count differs");
         let mismatches: Vec<usize> = (0..lg2.len())
             .filter(|&i| lg2[i].hash_full != cli_shas[i])
             .collect();
-        assert!(
-            mismatches.is_empty(),
-            "attribution differs at lines {mismatches:?} (0-indexed); \
-             lg2={:?} cli={:?}",
-            lg2.iter().map(|l| &l.hash).collect::<Vec<_>>(),
-            cli_shas.iter().map(|s| &s[..7]).collect::<Vec<_>>(),
-        );
+        if !mismatches.is_empty() {
+            eprintln!(
+                "[known divergence] attribution differs at lines {mismatches:?} (0-indexed) \
+                 against this machine's git ({}); lg2={:?} cli={:?}",
+                String::from_utf8_lossy(
+                    &Command::new("git")
+                        .arg("--version")
+                        .output()
+                        .unwrap()
+                        .stdout
+                )
+                .trim(),
+                lg2.iter().map(|l| &l.hash).collect::<Vec<_>>(),
+                cli_shas.iter().map(|s| &s[..7]).collect::<Vec<_>>(),
+            );
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -648,13 +728,15 @@ mod tests {
         use std::process::Command;
         let dir = temp_repo("blame-symlink-escape");
         let run = |args: &[&str]| {
-            Command::new("git").args(args).current_dir(&dir).output().unwrap();
+            Command::new("git")
+                .args(args)
+                .current_dir(&dir)
+                .output()
+                .unwrap();
         };
 
-        let secret_dir = std::env::temp_dir().join(format!(
-            "gw-lg2-blame-secret-{}",
-            std::process::id()
-        ));
+        let secret_dir =
+            std::env::temp_dir().join(format!("gw-lg2-blame-secret-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&secret_dir);
         std::fs::create_dir_all(&secret_dir).unwrap();
         let secret_file = secret_dir.join("secret.txt");

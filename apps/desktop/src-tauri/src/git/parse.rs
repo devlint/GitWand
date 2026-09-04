@@ -195,8 +195,7 @@ pub(crate) fn parse_blame_porcelain(raw: &str, max_entries: usize) -> Vec<BlameL
         }
 
         if author.is_empty() && author_date.is_empty() && summary.is_empty() {
-            if let Some((cached_author, cached_date, cached_summary)) = meta_cache.get(&hash_full)
-            {
+            if let Some((cached_author, cached_date, cached_summary)) = meta_cache.get(&hash_full) {
                 author = cached_author.clone();
                 author_date = cached_date.clone();
                 summary = cached_summary.clone();
@@ -1810,7 +1809,10 @@ bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb 3 3
         assert_eq!(lines.len(), 3);
         // Repeated commit `bbbb...` on the third hunk carries no metadata
         // block in the raw porcelain text, but must resolve to Bob's info.
-        assert_eq!(lines[2].hash_full, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+        assert_eq!(
+            lines[2].hash_full,
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        );
         assert_eq!(lines[2].author, "Bob");
         assert_eq!(lines[2].author_date, "1704067201");
         assert_eq!(lines[2].summary, "second commit");

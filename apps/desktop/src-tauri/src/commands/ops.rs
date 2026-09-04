@@ -3027,13 +3027,9 @@ mod clone_fetch_channel_tests {
             .expect("git_fetch failed");
         assert!(result.success, "fetch should succeed: {}", result.message);
 
-        let new_sha = String::from_utf8_lossy(
-            &repo
-                .git(&["rev-parse", "origin/main"])
-                .stdout,
-        )
-        .trim()
-        .to_string();
+        let new_sha = String::from_utf8_lossy(&repo.git(&["rev-parse", "origin/main"]).stdout)
+            .trim()
+            .to_string();
         assert_eq!(
             new_sha, expected_sha,
             "origin/main must advance to the pushed commit after fetch"
@@ -3045,7 +3041,8 @@ mod clone_fetch_channel_tests {
             "expected at least the synthetic 'done' progress event"
         );
         assert!(
-            msgs.iter().any(|m| m.get("stage").and_then(|s| s.as_str()) == Some("done")),
+            msgs.iter()
+                .any(|m| m.get("stage").and_then(|s| s.as_str()) == Some("done")),
             "expected a 'done' stage event on success, got {:?}",
             *msgs
         );
@@ -3097,9 +3094,8 @@ mod clone_fetch_channel_tests {
 
         let msgs = received.lock().unwrap();
         assert!(
-            msgs.iter().any(|m| {
-                m.get("message").and_then(|s| s.as_str()) == Some(line.trim())
-            }),
+            msgs.iter()
+                .any(|m| { m.get("message").and_then(|s| s.as_str()) == Some(line.trim()) }),
             "expected the multi-byte line to decode intact, got {:?}",
             *msgs
         );
@@ -3131,7 +3127,9 @@ mod clone_fetch_channel_tests {
 
         let msgs = received.lock().unwrap();
         assert!(
-            !msgs.iter().any(|m| m.get("stage").and_then(|s| s.as_str()) == Some("done")),
+            !msgs
+                .iter()
+                .any(|m| m.get("stage").and_then(|s| s.as_str()) == Some("done")),
             "a failed fetch must not send a 'done' event, got {:?}",
             *msgs
         );
@@ -3161,11 +3159,15 @@ mod clone_fetch_channel_tests {
         ));
         assert!(result.is_ok(), "git_clone failed: {:?}", result.err());
         assert_eq!(result.unwrap(), dest.to_str().unwrap());
-        assert!(dest.join("a.txt").exists(), "cloned repo should contain a.txt");
+        assert!(
+            dest.join("a.txt").exists(),
+            "cloned repo should contain a.txt"
+        );
 
         let msgs = received.lock().unwrap();
         assert!(
-            msgs.iter().any(|m| m.get("stage").and_then(|s| s.as_str()) == Some("done")),
+            msgs.iter()
+                .any(|m| m.get("stage").and_then(|s| s.as_str()) == Some("done")),
             "expected a 'done' stage event, got {:?}",
             *msgs
         );

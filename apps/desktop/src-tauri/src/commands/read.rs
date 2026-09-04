@@ -1378,15 +1378,15 @@ pub(crate) async fn git_blame(
     // Limit to 10 000 blame entries to cap memory & runtime on huge files.
     const BLAME_MAX_ENTRIES: usize = 10_000;
 
-    // libgit2 fast path (v3.10.0). Only for the default algorithm: git2 exposes
-    // no --diff-algorithm equivalent, and blame attribution is user-visible, so
-    // a non-default setting must keep producing what the user asked for.
-    if algo == "histogram" {
-        match libgit2_blame(&cwd, &path, BLAME_MAX_ENTRIES) {
-            Ok(lines) => return Ok(lines),
-            Err(e) => eprintln!("[git_blame] libgit2 fast path failed ({e}); falling back to CLI"),
-        }
-    }
+    // The libgit2 fast path (`libgit2_blame`, v3.10.0) is CLI-only for blame:
+    // `blame_attribution_matches_the_cli_on_a_moved_block` proved a real,
+    // git-version-dependent attribution divergence between libgit2's bundled
+    // xdiff (Myers) and the CLI's histogram blame on a moved block (it passed
+    // locally against git 2.50.1 but failed in CI against git 2.55.0 — see
+    // PR #178 CI run). Blame attribution is user-visible, so per the plan's
+    // documented fallback (git/libgit2.rs `libgit2_blame` doc comment) this
+    // stays CLI-only. `libgit2_blame` and its tests remain as a regression
+    // guard against re-enabling this without re-verifying the divergence.
 
     let diff_algo_flag = format!("--diff-algorithm={}", algo);
     let output = git_cmd()

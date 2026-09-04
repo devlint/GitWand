@@ -369,7 +369,10 @@ mod tests {
         assert_eq!(classify_path(".git/refs/heads/main"), Some("refs"));
         assert_eq!(classify_path(".git/packed-refs"), Some("refs"));
         assert_eq!(classify_path(".git/MERGE_HEAD"), Some("mergeState"));
-        assert_eq!(classify_path(".git/rebase-merge/head-name"), Some("mergeState"));
+        assert_eq!(
+            classify_path(".git/rebase-merge/head-name"),
+            Some("mergeState")
+        );
     }
 
     #[test]
@@ -414,19 +417,31 @@ mod tests {
         ];
         let ev = coalesce(&batch).expect("batch has interesting paths");
         assert_eq!(ev.kinds, vec!["index".to_string(), "worktree".to_string()]);
-        assert_eq!(ev.paths, vec![".git/index".to_string(), "src/a.rs".to_string(), "src/b.rs".to_string()]);
+        assert_eq!(
+            ev.paths,
+            vec![
+                ".git/index".to_string(),
+                "src/a.rs".to_string(),
+                "src/b.rs".to_string()
+            ]
+        );
         assert!(!ev.truncated);
     }
 
     #[test]
     fn coalesce_returns_none_when_every_path_is_noise() {
-        let batch = vec![".git/objects/aa/bb".to_string(), "node_modules/x/y.js".to_string()];
+        let batch = vec![
+            ".git/objects/aa/bb".to_string(),
+            "node_modules/x/y.js".to_string(),
+        ];
         assert!(coalesce(&batch).is_none());
     }
 
     #[test]
     fn coalesce_caps_paths_and_flags_truncation() {
-        let batch: Vec<String> = (0..EVENT_PATH_CAP + 10).map(|i| format!("src/f{i}.rs")).collect();
+        let batch: Vec<String> = (0..EVENT_PATH_CAP + 10)
+            .map(|i| format!("src/f{i}.rs"))
+            .collect();
         let ev = coalesce(&batch).expect("worktree paths");
         assert_eq!(ev.paths.len(), EVENT_PATH_CAP);
         assert!(ev.truncated);
@@ -444,7 +459,11 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let run = |args: &[&str]| {
-            Command::new("git").args(args).current_dir(&dir).output().unwrap();
+            Command::new("git")
+                .args(args)
+                .current_dir(&dir)
+                .output()
+                .unwrap();
         };
         run(&["init", "-q"]);
         run(&["config", "user.email", "t@example.com"]);
@@ -455,11 +474,20 @@ mod tests {
 
         let root = std::fs::canonicalize(&dir).unwrap();
         let (tx, rx) = mpsc::channel::<notify::Result<notify::Event>>();
-        let mut watcher = notify::recommended_watcher(move |res| { let _ = tx.send(res); }).unwrap();
-        watcher.watch(&root, notify::RecursiveMode::Recursive).unwrap();
+        let mut watcher = notify::recommended_watcher(move |res| {
+            let _ = tx.send(res);
+        })
+        .unwrap();
+        watcher
+            .watch(&root, notify::RecursiveMode::Recursive)
+            .unwrap();
 
         std::fs::write(root.join("a.txt"), "two\n").unwrap();
-        Command::new("git").args(["add", "a.txt"]).current_dir(&root).output().unwrap();
+        Command::new("git")
+            .args(["add", "a.txt"])
+            .current_dir(&root)
+            .output()
+            .unwrap();
 
         // Drain for up to 3 s, then coalesce whatever arrived.
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
@@ -470,24 +498,44 @@ mod tests {
                     for p in ev.paths {
                         if let Ok(rel) = p.strip_prefix(&root) {
                             let rel = rel.to_string_lossy().replace('\\', "/");
-                            if !rel.is_empty() { batch.push(rel); }
+                            if !rel.is_empty() {
+                                batch.push(rel);
+                            }
                         }
                     }
                 }
                 _ => {
                     if batch.iter().any(|p| classify_path(p) == Some("index"))
                         && batch.iter().any(|p| classify_path(p) == Some("worktree"))
-                    { break; }
+                    {
+                        break;
+                    }
                 }
             }
         }
 
         let ev = coalesce(&batch).expect("expected at least one interesting path");
-        assert!(ev.kinds.contains(&"worktree".to_string()), "kinds: {:?}", ev.kinds);
-        assert!(ev.kinds.contains(&"index".to_string()), "kinds: {:?}", ev.kinds);
-        assert!(ev.paths.iter().any(|p| p == "a.txt"), "paths: {:?}", ev.paths);
+        assert!(
+            ev.kinds.contains(&"worktree".to_string()),
+            "kinds: {:?}",
+            ev.kinds
+        );
+        assert!(
+            ev.kinds.contains(&"index".to_string()),
+            "kinds: {:?}",
+            ev.kinds
+        );
+        assert!(
+            ev.paths.iter().any(|p| p == "a.txt"),
+            "paths: {:?}",
+            ev.paths
+        );
         // Object churn from `git add` must never surface.
-        assert!(!ev.paths.iter().any(|p| p.starts_with(".git/objects/")), "paths: {:?}", ev.paths);
+        assert!(
+            !ev.paths.iter().any(|p| p.starts_with(".git/objects/")),
+            "paths: {:?}",
+            ev.paths
+        );
 
         drop(watcher);
         let _ = std::fs::remove_dir_all(&root);
@@ -529,7 +577,11 @@ mod tests {
         let first = evt_rx
             .recv_timeout(Duration::from_millis(700))
             .expect("expected a flush within MAX_WAIT despite continuous churn");
-        assert!(first.kinds.contains(&"worktree".to_string()), "kinds: {:?}", first.kinds);
+        assert!(
+            first.kinds.contains(&"worktree".to_string()),
+            "kinds: {:?}",
+            first.kinds
+        );
 
         stop.store(true, Ordering::Relaxed);
     }
@@ -562,7 +614,10 @@ mod tests {
         let ev = evt_rx
             .recv_timeout(Duration::from_millis(300))
             .expect("expected an early flush once the raw batch cap was hit");
-        assert!(ev.truncated, "a flush forced by the raw batch cap must be marked truncated");
+        assert!(
+            ev.truncated,
+            "a flush forced by the raw batch cap must be marked truncated"
+        );
 
         stop.store(true, Ordering::Relaxed);
     }

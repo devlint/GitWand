@@ -128,15 +128,33 @@ fn main() -> ExitCode {
             to_json(git_branches_parity(cwd))
         }
         "git-diff" => {
-            let cwd = match must_str("cwd") { Ok(v) => v, Err(code) => return code };
-            let path = match must_str("path") { Ok(v) => v, Err(code) => return code };
-            let staged = input.get("staged").and_then(|v| v.as_bool()).unwrap_or(false);
+            let cwd = match must_str("cwd") {
+                Ok(v) => v,
+                Err(code) => return code,
+            };
+            let path = match must_str("path") {
+                Ok(v) => v,
+                Err(code) => return code,
+            };
+            let staged = input
+                .get("staged")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             to_json(git_diff_parity(cwd, path, staged))
         }
         "git-blame" => {
-            let cwd = match must_str("cwd") { Ok(v) => v, Err(code) => return code };
-            let path = match must_str("path") { Ok(v) => v, Err(code) => return code };
-            let algorithm = input.get("algorithm").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let cwd = match must_str("cwd") {
+                Ok(v) => v,
+                Err(code) => return code,
+            };
+            let path = match must_str("path") {
+                Ok(v) => v,
+                Err(code) => return code,
+            };
+            let algorithm = input
+                .get("algorithm")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
             to_json(git_blame_parity(cwd, path, algorithm))
         }
         "git-remote-info" => {
