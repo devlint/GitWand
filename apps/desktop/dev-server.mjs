@@ -1413,7 +1413,10 @@ async function handleRequest(req, res) {
         const resolvedCwd = resolve(cwd);
         // Discrete args so the optional pathspec can be passed after `--`
         // without string interpolation (v2.21.0 monorepo scope).
-        const statusArgs = ["status", "--porcelain=v2", "--branch"];
+        // `--untracked-files=all` mirrors git_status_cli / the libgit2 fast
+        // path (issue #181): git's default collapses a never-staged directory
+        // into a single `newfolder/` entry the sidebar tree cannot expand.
+        const statusArgs = ["status", "--porcelain=v2", "--branch", "--untracked-files=all"];
         if (pathspec) statusArgs.push("--", pathspec);
         const stdout = execFileSync(GIT, statusArgs, {
           cwd: resolvedCwd,

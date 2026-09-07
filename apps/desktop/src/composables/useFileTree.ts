@@ -42,11 +42,25 @@ function newNode<T extends PathLike>(name: string, path: string): FolderNode<T> 
   return { name, path, folders: new Map(), files: [], count: 0 };
 }
 
-/** The display leaf of a path. Untracked directory entries keep their trailing "/". */
-function leafName(path: string): string {
+/**
+ * The display leaf of a path. Untracked directory entries keep their trailing
+ * "/": since `--untracked-files=all` (issue #181) those are only untracked
+ * *nested git repos*, which git never expands.
+ *
+ * Exported because the sidebar's flat-list layout needs the same labels as the
+ * tree layout: `"nestedrepo/".split("/").pop()` is the empty string, which used
+ * to render as a nameless row.
+ */
+export function leafName(path: string): string {
   const segs = path.split("/").filter(Boolean);
   const leaf = segs[segs.length - 1] ?? path;
   return path.endsWith("/") ? `${leaf}/` : leaf;
+}
+
+/** The parent directory of a path, slash-terminated, or "" at the root. */
+export function parentDir(path: string): string {
+  const segs = path.split("/").filter(Boolean);
+  return segs.length > 1 ? `${segs.slice(0, -1).join("/")}/` : "";
 }
 
 /** Build a nested folder tree from a flat list of entries. */

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A brand-new folder showed no folder and no files in WIP Changes until it was staged** (#181). Both status implementations ran git's default `--untracked-files=normal`, which collapses a never-staged directory into a single `newfolder/` entry; the sidebar tree renders such a trailing-slash path as one opaque leaf row, with no chevron, no file count and nothing inside. Staging turned it into per-file entries, which is why the folder only appeared afterwards. The libgit2 fast path now sets `recurse_untracked_dirs`, and `git_status_cli` plus the dev-server route pass `--untracked-files=all`, so an untracked directory is listed file by file from the start, like every other change. The explicit flag also aligns the CLI path with the libgit2 one, which reported untracked files regardless of a repo-local `status.showUntrackedFiles`. Untracked *nested git repos* are still reported as a single `nestedrepo/` entry (git never expands those); the flat-list layout used to label that row with an empty string and now shows the directory name, sharing its label helpers with the tree layout.
+
 ### Security
 
 - Cleared 39 open Dependabot alerts (all `high`/`medium`, one `low`) via `pnpm update -r` across the monorepo, all resolved within existing semver ranges — no direct dependency needed a major-version bump. Most of the chain came from `@modelcontextprotocol/sdk` (`packages/mcp`, a published runtime dependency): `hono`, `@hono/node-server`, `express`, `express-rate-limit`, `body-parser`, `qs`, `ip-address`, `ajv`/`ajv-formats`, `undici`, `fast-uri`. The rest came from `@vscode/vsce` (dev-only VSIX packaging, `packages/vscode`): `cheerio`, `@textlint/linter-formatter` → `js-yaml`, `azure-devops-node-api` → `typed-rest-client`. A Linux-only `glib` alert (transitive via `tauri`'s GTK stack) is not yet actionable — no newer version is reachable within the current `tauri`/`tao`/`gtk-rs` dependency graph; tracked for the next `tauri` bump.

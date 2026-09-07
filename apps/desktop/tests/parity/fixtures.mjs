@@ -112,9 +112,11 @@ export function fixtureCursorOriginRemote() {
 
 /**
  * Fixture « dirty » : 3 commits, un fichier modifié non stagé, un nouveau
- * fichier untracked, un fichier stagé.
+ * fichier untracked, un fichier stagé, et un *dossier* entièrement untracked.
  *
- * Couvre les sections `unstaged`, `staged`, `untracked` de git_status.
+ * Couvre les sections `unstaged`, `staged`, `untracked` de git_status, dont
+ * la récursion dans les dossiers jamais stagés (issue #181 : sans
+ * `--untracked-files=all`, git ne remonte que `newdir/`).
  */
 export function fixtureDirty() {
   const cwd = mkTempRepo("gw-dirty-");
@@ -129,6 +131,10 @@ export function fixtureDirty() {
   execFileSync("git", ["-C", cwd, "add", "--", "c.txt"]);
   // d.txt untracked
   writeFileSync(join(cwd, "d.txt"), "delta\n", "utf-8");
+  // newdir/ : dossier jamais stagé, avec un sous-dossier
+  mkdirSync(join(cwd, "newdir", "sub"), { recursive: true });
+  writeFileSync(join(cwd, "newdir", "e.txt"), "epsilon\n", "utf-8");
+  writeFileSync(join(cwd, "newdir", "sub", "f.txt"), "zeta\n", "utf-8");
 
   return cwd;
 }

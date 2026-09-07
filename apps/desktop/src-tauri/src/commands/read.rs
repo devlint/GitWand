@@ -220,6 +220,14 @@ type FileStatusesResult =
 fn libgit2_file_statuses(repo: &git2::Repository) -> FileStatusesResult {
     let mut opts = git2::StatusOptions::new();
     opts.include_untracked(true)
+        // List every file inside a brand-new directory instead of the
+        // directory itself (issue #181). Without this, libgit2 reports
+        // `newfolder/` as a single entry, like git's default
+        // `--untracked-files=normal`, and the sidebar tree renders it as one
+        // opaque leaf row, so the folder's contents only became visible once
+        // staged. `git_status_cli` passes `--untracked-files=all` for the
+        // same reason.
+        .recurse_untracked_dirs(true)
         .include_ignored(false)
         .renames_head_to_index(true)
         .renames_index_to_workdir(true)
@@ -361,6 +369,13 @@ pub(crate) fn git_status_cli(cwd: String, pathspec: Option<String>) -> Result<Gi
         "status".to_string(),
         "--porcelain=v2".to_string(),
         "--branch".to_string(),
+        // Recurse into untracked directories (issue #181). git's default
+        // (`normal`) collapses a never-staged directory into a single
+        // `newfolder/` entry, which the sidebar tree cannot expand. Passing
+        // the flag explicitly also aligns this path with the libgit2 fast
+        // path, which reports untracked files regardless of a repo-local
+        // `status.showUntrackedFiles`.
+        "--untracked-files=all".to_string(),
     ];
     if let Some(ref p) = pathspec {
         let p = p.trim();
@@ -2670,6 +2685,49 @@ mod pathspec_tests {
             has_a,
             "unscoped status should show all changes: {:?}",
             all_paths
+        );
+    }
+
+    // ── Untracked directories (issue #181) ────────────────────
+    //
+    // git's default `--untracked-files=normal` collapses a brand-new
+    // directory into a single `newfolder/` entry. The sidebar tree builder
+    // renders such a trailing-slash path as one opaque leaf row, so neither
+    // the folder nor the files inside it were visible until the user staged
+    // them. Both status implementations must therefore recurse into
+    // untracked directories.
+
+    #[test]
+    fn git_status_lists_files_inside_untracked_directory() {
+        let repo = TempRepo::new();
+        repo.write("root.txt", "root");
+        repo.commit_all("root");
+
+        // Brand-new, never-staged directory, with a nested subdirectory.
+        repo.write("newfolder/a.txt", "a");
+        repo.write("newfolder/sub/b.txt", "b");
+
+        let expected = vec![
+            "newfolder/a.txt".to_string(),
+            "newfolder/sub/b.txt".to_string(),
+        ];
+
+        let cli = git_status_cli(repo.cwd(), None).expect("git_status_cli failed");
+        let mut cli_untracked = cli.untracked.clone();
+        cli_untracked.sort();
+        assert_eq!(
+            cli_untracked, expected,
+            "CLI: untracked dir should be listed file-by-file, got {:?}",
+            cli.untracked
+        );
+
+        let lg2 = git_status_libgit2(&repo.cwd()).expect("git_status_libgit2 failed");
+        let mut lg2_untracked = lg2.untracked.clone();
+        lg2_untracked.sort();
+        assert_eq!(
+            lg2_untracked, expected,
+            "libgit2: untracked dir should be listed file-by-file, got {:?}",
+            lg2.untracked
         );
     }
 

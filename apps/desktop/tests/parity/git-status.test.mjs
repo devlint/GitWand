@@ -15,7 +15,7 @@
  * On s'attend à une égalité structurelle après normalisation (camelCase).
  */
 
-import { describe, it, beforeAll, afterAll } from "vitest";
+import { describe, it, beforeAll, afterAll, expect } from "vitest";
 import { startDevServer } from "./dev-server-runner.mjs";
 import { assertParity } from "./harness.mjs";
 import { fixtureClean, fixtureDirty } from "./fixtures.mjs";
@@ -43,10 +43,19 @@ describe("parity: git-status", () => {
 
   it("fixtureDirty → staged + unstaged + untracked cohabitent", async () => {
     const cwd = fixtureDirty();
-    await assertParity(dev, {
+    const { rust, node } = await assertParity(dev, {
       command: "git-status",
       args: { cwd },
       httpPath: `/api/git-status?cwd=${encodeURIComponent(cwd)}`,
     });
+
+    // Issue #181 : un dossier jamais stagé doit remonter fichier par fichier,
+    // et non comme une entrée `newdir/` unique. La parité seule ne suffit pas
+    // ici : les deux backends pourraient être d'accord et tous les deux faux.
+    for (const side of [rust, node]) {
+      expect(side.untracked).toContain("newdir/e.txt");
+      expect(side.untracked).toContain("newdir/sub/f.txt");
+      expect(side.untracked).not.toContain("newdir/");
+    }
   });
 });
