@@ -335,6 +335,13 @@ const fr: Locale = {
 
   // ─── DiffViewer ─────────────────────────────────────────
   diff: {
+    newFolder: "Nouveau dossier",
+    newFolderCount: "{0} fichier(s)",
+    nestedRepo: "D\u00e9p\u00f4t Git imbriqu\u00e9",
+    nestedRepoHint:
+      "Ce dossier poss\u00e8de son propre .git, Git ne suit donc pas son contenu depuis ici. Ajoutez-le en sous-module, ignorez-le, ou supprimez son .git pour suivre les fichiers.",
+    nestedRepoOpen: "Ouvrir dans un nouvel onglet",
+    nestedRepoIgnore: "Ajouter \u00e0 .gitignore",
     noDiff: "Pas de diff disponible pour ce fichier",
     noDiffHint: "Fichier nouveau ou binaire",
     selectFile: "S\u00e9lectionnez un fichier pour voir le diff",

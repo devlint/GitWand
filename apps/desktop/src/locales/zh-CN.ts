@@ -331,6 +331,13 @@ const zhCN: Locale = {
   },
 
   diff: {
+    newFolder: "\u65b0\u6587\u4ef6\u5939",
+    newFolderCount: "{0} \u4e2a\u6587\u4ef6",
+    nestedRepo: "\u5d4c\u5957 Git \u4ed3\u5e93",
+    nestedRepoHint:
+      "\u8be5\u6587\u4ef6\u5939\u6709\u81ea\u5df1\u7684 .git\uff0c\u56e0\u6b64 Git \u4e0d\u4f1a\u4ece\u8fd9\u91cc\u8ddf\u8e2a\u5176\u5185\u5bb9\u3002\u53ef\u4ee5\u5c06\u5b83\u6dfb\u52a0\u4e3a\u5b50\u6a21\u5757\u3001\u5ffd\u7565\u5b83\uff0c\u6216\u5220\u9664\u5b83\u7684 .git \u4ee5\u8ddf\u8e2a\u8fd9\u4e9b\u6587\u4ef6\u3002",
+    nestedRepoOpen: "\u5728\u65b0\u6807\u7b7e\u9875\u4e2d\u6253\u5f00",
+    nestedRepoIgnore: "\u6dfb\u52a0\u5230 .gitignore",
     noDiff: "此文件没有可用的差异",
     noDiffHint: "新文件或二进制文件",
     selectFile: "选择文件以查看差异",

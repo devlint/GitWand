@@ -1052,6 +1052,15 @@ function handleOpenSubmodule(path: string) {
   openTab(abs);
 }
 
+/**
+ * An untracked nested repository, opened as its own tab (issue #183). Same
+ * treatment as a submodule, minus the trailing slash `git status` puts on a
+ * directory entry, which `openTab` must not see in the path it keys tabs by.
+ */
+function handleOpenNestedRepo(path: string) {
+  handleOpenSubmodule(path.replace(/\/+$/, ""));
+}
+
 // ─── Folder opening ─────────────────────────────────────
 async function handleOpenFolder() {
   const path = await pickFolder();
@@ -3852,6 +3861,8 @@ onUnmounted(() => {
                   @update:diff-mode="onDiffModeChange" @open-file-history="openFileHistory"
                   @open-in-editor="handleOpenInEditor" @stage-patch="stagePatch"
                   @select-dir-file="(path) => repoSelectFile(path, false)"
+                  @open-repo-tab="handleOpenNestedRepo"
+                  @add-to-gitignore="addToGitignore"
                   @dismiss-finding="(id) => commitReview.dismiss(id)" />
               </div>
 

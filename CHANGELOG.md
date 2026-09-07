@@ -7,9 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A panel for an untracked nested Git repository** (#183). A folder carrying its own `.git` is the one directory entry `git status` still reports as a single row, because git refuses to look inside it. Selecting it now explains why its contents are not tracked from here and offers the two things the app can act on: open it as its own repo tab, or add it to `.gitignore`. Its files are deliberately not listed, because `git ls-files --others` answers with the directory itself, so a file row would just reopen the same panel.
+
+### Changed
+
+- **`git_diff` is now covered by the parity suite.** It was absent from `parity_probe.rs`, which is why four drifts between the Rust backend and the dev-server accumulated unnoticed in a single command; three of the four above were found by the new `tests/parity/git-diff.test.mjs` rather than reported. Every git-read command the frontend consumes should have this coverage.
+
 ### Fixed
 
 - **A brand-new folder showed no folder and no files in WIP Changes until it was staged** (#181). Both status implementations ran git's default `--untracked-files=normal`, which collapses a never-staged directory into a single `newfolder/` entry; the sidebar tree renders such a trailing-slash path as one opaque leaf row, with no chevron, no file count and nothing inside. Staging turned it into per-file entries, which is why the folder only appeared afterwards. The libgit2 fast path now sets `recurse_untracked_dirs`, and `git_status_cli` plus the dev-server route pass `--untracked-files=all`, so an untracked directory is listed file by file from the start, like every other change. The explicit flag also aligns the CLI path with the libgit2 one, which reported untracked files regardless of a repo-local `status.showUntrackedFiles`. Untracked *nested git repos* are still reported as a single `nestedrepo/` entry (git never expands those); the flat-list layout used to label that row with an empty string and now shows the directory name, sharing its label helpers with the tree layout.
+- **`git_diff` on a directory path did nothing in the packaged app** (#183). The branch that turns an untracked directory into a file list existed only in the Node dev-server, and `GitDiff` carried no `isDirectory` / `newFiles` fields on the Rust side, although `backend.ts` had declared them for releases. Clicking such an entry therefore worked under `pnpm dev:web` and showed an empty panel in the shipped app. The Rust `git_diff` gained the branch, guarded by `safe_repo_path`, which also short-circuits the `--no-index` fallback that was spawning two git processes for nothing on a directory path.
+- **"Add to .gitignore" threw in the packaged app.** `backend.ts` has invoked a `git_add_to_gitignore` Tauri command since the context-menu action shipped, and no such command was ever registered: only the dev-server route existed. It is now implemented in Rust with the dev-server's semantics (create if absent, never duplicate an entry, always leave a trailing newline) plus a refusal for a multi-line entry, which would otherwise write rules the user never asked for. The same guard was mirrored into the dev-server route.
+- **A phantom context line at the end of every diff under `dev:web`.** The dev-server's diff parser classified context lines with `!line.startsWith("\\")`, which lets through the empty string `split("\n")` leaves after the trailing newline. This is verbatim the gotcha `AGENTS.md` documents; the Rust parser (`strip_prefix(' ')`) never had it.
+- **An unmodified tracked file rendered as an all-green whole-file addition under `dev:web`.** The dev-server ran its `--no-index` fallback for any path whose `git diff` came back empty, including a tracked file with nothing to show. It now checks `ls-files --error-unmatch` first, the guard the Rust implementation has always had.
+- The folder panel hardcoded `Nouveau dossier` and `fichier(s)` in French, in violation of the i18n rule. Six `diff.*` keys now cover it and the nested-repo panel, translated in all 5 locales.
 
 ### Security
 

@@ -224,6 +224,13 @@ pub fn git_log_parity(
     ))
 }
 
+/// Parity entry point for `git_diff`. Exposed because the directory branch
+/// (an untracked folder, or a nested repo) lived only in the Node dev-server
+/// for several releases and nothing compared the two (issue #183).
+pub fn git_diff_parity(cwd: String, path: String, staged: bool) -> Result<types::GitDiff, String> {
+    tauri::async_runtime::block_on(commands::read::git_diff(cwd, path, staged))
+}
+
 pub fn git_branches_parity(cwd: String) -> Result<Vec<types::GitBranch>, String> {
     tauri::async_runtime::block_on(commands::ops::git_branches(cwd, None))
 }
@@ -467,6 +474,7 @@ pub fn run() {
             commands::read::git_repo_state,
             commands::ops::git_rebase_action,
             commands::ops::git_interactive_rebase,
+            commands::ops::git_add_to_gitignore,
             commands::ops::git_discard,
             commands::read::git_show,
             commands::ops::git_branches,

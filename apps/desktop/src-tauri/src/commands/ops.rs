@@ -771,6 +771,45 @@ pub(crate) async fn git_interactive_rebase(
     Err(format!("git rebase -i failed: {}", msg))
 }
 
+// ─── .gitignore ────────────────────────────────────────────────
+
+/// Append `path` to the repo's `.gitignore`, once.
+///
+/// `backend.ts` has invoked this command since the context-menu action
+/// shipped, but only the Node dev-server route existed, so the action worked
+/// under `dev:web` and threw in the packaged app (issue #183). Semantics
+/// mirror `/api/git-gitignore`: create the file if absent, skip an entry that
+/// is already there, and always leave a trailing newline.
+#[tauri::command]
+pub(crate) async fn git_add_to_gitignore(cwd: String, path: String) -> Result<(), String> {
+    let entry = path.trim().to_string();
+    if entry.is_empty() {
+        return Err("gitignore entry must not be empty".to_string());
+    }
+    // The entry becomes one line of a config file. A newline inside it would
+    // silently add rules the user never asked for.
+    if entry.contains('\n') || entry.contains('\r') {
+        return Err("gitignore entry must be a single line".to_string());
+    }
+
+    let _repo = repo_lock::write(&cwd);
+    let file = safe_repo_path(&cwd, ".gitignore")?;
+    let existing = std::fs::read_to_string(&file).unwrap_or_default();
+
+    if existing.lines().any(|l| l == entry) {
+        return Ok(());
+    }
+
+    let mut next = existing;
+    if !next.is_empty() && !next.ends_with('\n') {
+        next.push('\n');
+    }
+    next.push_str(&entry);
+    next.push('\n');
+
+    std::fs::write(&file, next).map_err(|e| format!("Failed to write .gitignore: {}", e))
+}
+
 // ─── Git discard ───────────────────────────────────────────────
 
 #[tauri::command]
@@ -4456,6 +4495,68 @@ mod tree_conflict_tests {
         repo.git_ok(&["checkout", "-q", "feature"]);
         // Merge main into feature — conflicts, returns non-zero; ignore status.
         let _ = repo.git(&["merge", "--no-edit", "main"]);
+    }
+
+    // ── .gitignore append (issue #183) ────────────────────────
+    //
+    // `backend.ts` has invoked a `git_add_to_gitignore` Tauri command since
+    // the context-menu action shipped, but no such command existed: only the
+    // Node dev-server had the route. The action therefore worked under
+    // dev:web and threw in the packaged app. Semantics mirror
+    // `/api/git-gitignore`: append once, keep a trailing newline, never
+    // duplicate an entry.
+
+    #[test]
+    fn gitignore_append_creates_the_file_when_absent() {
+        let repo = TempRepo::new();
+        tauri::async_runtime::block_on(git_add_to_gitignore(repo.cwd(), "build/".to_string()))
+            .expect("git_add_to_gitignore failed");
+
+        let content = std::fs::read_to_string(repo.path.join(".gitignore")).unwrap();
+        assert_eq!(content, "build/\n");
+    }
+
+    #[test]
+    fn gitignore_append_does_not_duplicate_an_existing_entry() {
+        let repo = TempRepo::new();
+        repo.write(".gitignore", "node_modules/\nbuild/\n");
+
+        tauri::async_runtime::block_on(git_add_to_gitignore(repo.cwd(), "build/".to_string()))
+            .expect("git_add_to_gitignore failed");
+
+        let content = std::fs::read_to_string(repo.path.join(".gitignore")).unwrap();
+        assert_eq!(content, "node_modules/\nbuild/\n", "entry already present");
+    }
+
+    #[test]
+    fn gitignore_append_separates_from_a_file_with_no_trailing_newline() {
+        let repo = TempRepo::new();
+        repo.write(".gitignore", "node_modules/");
+
+        tauri::async_runtime::block_on(git_add_to_gitignore(repo.cwd(), "build/".to_string()))
+            .expect("git_add_to_gitignore failed");
+
+        let content = std::fs::read_to_string(repo.path.join(".gitignore")).unwrap();
+        assert_eq!(content, "node_modules/\nbuild/\n");
+    }
+
+    #[test]
+    fn gitignore_append_rejects_a_path_carrying_a_newline() {
+        let repo = TempRepo::new();
+        let err = tauri::async_runtime::block_on(git_add_to_gitignore(
+            repo.cwd(),
+            "build/\n*.key".to_string(),
+        ))
+        .expect_err("a multi-line entry must be refused");
+        assert!(
+            err.contains("single line"),
+            "error should explain the constraint, got: {}",
+            err
+        );
+        assert!(
+            !repo.path.join(".gitignore").exists(),
+            "nothing should be written on refusal"
+        );
     }
 
     #[test]

@@ -105,6 +105,19 @@ pub struct GitDiff {
     pub old_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "truncatedFromBytes")]
     pub truncated_from_bytes: Option<u64>,
+    /// Set when the requested path is a directory rather than a file (an
+    /// untracked directory entry from `git status`). There is no diff to show;
+    /// the UI renders a folder panel instead. See issue #183.
+    #[serde(skip_serializing_if = "Option::is_none", rename = "isDirectory")]
+    pub is_directory: Option<bool>,
+    /// The untracked files inside that directory, repo-relative.
+    #[serde(skip_serializing_if = "Option::is_none", rename = "newFiles")]
+    pub new_files: Option<Vec<String>>,
+    /// Set when the directory carries its own `.git`. Git never looks inside
+    /// such a directory, so `new_files` is empty and the UI shows a dedicated
+    /// panel rather than a file list that leads nowhere.
+    #[serde(skip_serializing_if = "Option::is_none", rename = "nestedRepo")]
+    pub nested_repo: Option<bool>,
 }
 
 // ─── Git log types ─────────────────────────────────────────────────

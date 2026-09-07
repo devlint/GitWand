@@ -331,6 +331,13 @@ const ptBR: Locale = {
 
   // ─── DiffViewer ─────────────────────────────────────────
   diff: {
+    newFolder: "Nova pasta",
+    newFolderCount: "{0} arquivo(s)",
+    nestedRepo: "Reposit\u00f3rio Git aninhado",
+    nestedRepoHint:
+      "Esta pasta tem o pr\u00f3prio .git, ent\u00e3o o Git n\u00e3o rastreia o conte\u00fado dela a partir daqui. Adicione-a como subm\u00f3dulo, ignore-a, ou remova o .git dela para rastrear os arquivos.",
+    nestedRepoOpen: "Abrir em uma nova aba",
+    nestedRepoIgnore: "Adicionar ao .gitignore",
     noDiff: "Nenhum diff disponível para este arquivo",
     noDiffHint: "Arquivo novo ou binário",
     selectFile: "Selecione um arquivo para ver o diff",

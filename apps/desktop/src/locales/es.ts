@@ -330,6 +330,13 @@ const es: Locale = {
 
   // ─── DiffViewer ─────────────────────────────────────────
   diff: {
+    newFolder: "Carpeta nueva",
+    newFolderCount: "{0} archivo(s)",
+    nestedRepo: "Repositorio Git anidado",
+    nestedRepoHint:
+      "Esta carpeta tiene su propio .git, por lo que Git no rastrea su contenido desde aqu\u00ed. A\u00f1\u00e1dela como subm\u00f3dulo, ign\u00f3rala, o elimina su .git para rastrear los archivos.",
+    nestedRepoOpen: "Abrir en una pesta\u00f1a nueva",
+    nestedRepoIgnore: "A\u00f1adir a .gitignore",
     noDiff: "No hay diff disponible para este archivo",
     noDiffHint: "Archivo nuevo o binario",
     selectFile: "Selecciona un archivo para ver el diff",

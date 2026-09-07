@@ -342,6 +342,13 @@ const en = {
 
   // ─── DiffViewer ─────────────────────────────────────────
   diff: {
+    newFolder: "New folder",
+    newFolderCount: "{0} file(s)",
+    nestedRepo: "Nested Git repository",
+    nestedRepoHint:
+      "This folder has its own .git, so Git does not track its contents from here. Add it as a submodule, ignore it, or remove its .git to track the files.",
+    nestedRepoOpen: "Open in a new tab",
+    nestedRepoIgnore: "Add to .gitignore",
     noDiff: "No diff available for this file",
     noDiffHint: "New or binary file",
     selectFile: "Select a file to view the diff",
