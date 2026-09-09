@@ -112,9 +112,11 @@ export function fixtureCursorOriginRemote() {
 
 /**
  * Fixture « dirty » : 3 commits, un fichier modifié non stagé, un nouveau
- * fichier untracked, un fichier stagé.
+ * fichier untracked, un fichier stagé, et un *dossier* entièrement untracked.
  *
- * Couvre les sections `unstaged`, `staged`, `untracked` de git_status.
+ * Couvre les sections `unstaged`, `staged`, `untracked` de git_status, dont
+ * la récursion dans les dossiers jamais stagés (issue #181 : sans
+ * `--untracked-files=all`, git ne remonte que `newdir/`).
  */
 export function fixtureDirty() {
   const cwd = mkTempRepo("gw-dirty-");
@@ -129,6 +131,10 @@ export function fixtureDirty() {
   execFileSync("git", ["-C", cwd, "add", "--", "c.txt"]);
   // d.txt untracked
   writeFileSync(join(cwd, "d.txt"), "delta\n", "utf-8");
+  // newdir/ : dossier jamais stagé, avec un sous-dossier
+  mkdirSync(join(cwd, "newdir", "sub"), { recursive: true });
+  writeFileSync(join(cwd, "newdir", "e.txt"), "epsilon\n", "utf-8");
+  writeFileSync(join(cwd, "newdir", "sub", "f.txt"), "zeta\n", "utf-8");
 
   return cwd;
 }
@@ -241,5 +247,36 @@ export function fixtureBlame() {
   commitFile(cwd, "a.txt", "one\ntwo\nthree\n", "c1", 0);
   commitFile(cwd, "a.txt", "one\ntwo\nTHREE\n", "c2", 1);
   commitFile(cwd, "a.txt", "one\nTWO\nTHREE\nfour\n", "c3", 2);
+  return cwd;
+}
+
+/**
+ * Fixture "untracked dirs": one never-staged folder with a subfolder, plus a
+ * nested git repo living inside the working tree.
+ *
+ * Covers the two shapes `git_diff` can be handed a directory path for
+ * (issue #183): a plain folder, whose files git lists, and a nested repo,
+ * which git refuses to look inside.
+ */
+export function fixtureUntrackedDirs() {
+  const cwd = mkTempRepo("gw-untracked-dirs-");
+  commitFile(cwd, "README.md", "# Parity Fixture\n", "initial commit", 0);
+  commitFile(cwd, "tracked.txt", "tracked\n", "add tracked.txt", 1);
+
+  // README.md modified, unstaged: a real diff to compare against.
+  // tracked.txt is left untouched: tracked with nothing to show.
+  writeFileSync(join(cwd, "README.md"), "# Parity Fixture\nmodified\n", "utf-8");
+
+  // newdir/: plain untracked folder, one level of nesting.
+  mkdirSync(join(cwd, "newdir", "sub"), { recursive: true });
+  writeFileSync(join(cwd, "newdir", "e.txt"), "epsilon\n", "utf-8");
+  writeFileSync(join(cwd, "newdir", "sub", "f.txt"), "zeta\n", "utf-8");
+
+  // inner/: an independent repo. git never lists its contents from here.
+  const inner = join(cwd, "inner");
+  mkdirSync(inner, { recursive: true });
+  execFileSync("git", ["init", "--initial-branch=main", "--quiet", inner]);
+  writeFileSync(join(inner, "c.txt"), "gamma\n", "utf-8");
+
   return cwd;
 }

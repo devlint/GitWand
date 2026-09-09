@@ -52,6 +52,10 @@ const emit = defineEmits<{
   "stage-patch": [patch: string];
   /** Emitted when user clicks a file inside a new untracked directory */
   "select-dir-file": [path: string];
+  /** Emitted when user wants to open a nested repository as its own tab */
+  "open-repo-tab": [path: string];
+  /** Emitted when user wants to add a path to .gitignore */
+  "add-to-gitignore": [path: string];
   /**
    * Emitted whenever the per-hunk/line selection changes. Used by hosts
    * (like SplitCommitModal) that need to observe selection without needing
@@ -826,17 +830,41 @@ function onDiffScroll() {
 
     <!-- New untracked directory: list its files -->
     <div class="diff-new-dir" v-else-if="diff?.isDirectory">
+      <!--
+        A directory carrying its own .git: git never looks inside it, so there
+        is no file list to show and none of the usual staging actions apply.
+        Name the situation and offer the two things the app can actually do
+        about it (issue #183).
+      -->
+      <div class="diff-nested-repo" v-if="diff.nestedRepo">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"
+            stroke="var(--color-accent)" stroke-width="1.5" fill="rgba(139,92,246,0.08)"/>
+          <circle cx="12" cy="13" r="2.2" stroke="var(--color-accent)" stroke-width="1.5"/>
+        </svg>
+        <span class="diff-nested-repo-title">{{ t('diff.nestedRepo') }}</span>
+        <span class="mono diff-nested-repo-path">{{ diff.path }}</span>
+        <p class="diff-nested-repo-hint muted">{{ t('diff.nestedRepoHint') }}</p>
+        <div class="diff-nested-repo-actions">
+          <button type="button" class="diff-nested-repo-open" @click="emit('open-repo-tab', diff.path)">
+            {{ t('diff.nestedRepoOpen') }}
+          </button>
+          <button type="button" class="diff-nested-repo-ignore" @click="emit('add-to-gitignore', diff.path)">
+            {{ t('diff.nestedRepoIgnore') }}
+          </button>
+        </div>
+      </div>
       <!-- Dir header -->
-      <div class="diff-dir-header">
+      <div class="diff-dir-header" v-if="!diff.nestedRepo">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
           <path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"
             stroke="var(--color-accent)" stroke-width="1.5" fill="rgba(139,92,246,0.08)"/>
         </svg>
-        <span class="diff-dir-header-title">Nouveau dossier</span>
-        <span class="diff-dir-header-count muted">{{ diff.newFiles?.length ?? 0 }} fichier{{ (diff.newFiles?.length ?? 0) > 1 ? 's' : '' }}</span>
+        <span class="diff-dir-header-title">{{ t('diff.newFolder') }}</span>
+        <span class="diff-dir-header-count muted">{{ t('diff.newFolderCount', diff.newFiles?.length ?? 0) }}</span>
       </div>
       <!-- File list -->
-      <ul class="diff-dir-files" v-if="diff.newFiles?.length">
+      <ul class="diff-dir-files" v-if="!diff.nestedRepo && diff.newFiles?.length">
         <li
           v-for="f in diff.newFiles"
           :key="f"
@@ -1367,6 +1395,61 @@ function onDiffScroll() {
   flex-direction: column;
   height: 100%;
   overflow: hidden;
+}
+
+/*
+ * Nested repository panel (issue #183). A directory carrying its own .git has
+ * no file list and no staging actions, so this replaces both with the two
+ * things the app can do about it.
+ */
+.diff-nested-repo {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin: auto;
+  padding: 24px 28px;
+  max-width: 460px;
+  text-align: center;
+}
+
+.diff-nested-repo-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.diff-nested-repo-path {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  word-break: break-all;
+}
+
+.diff-nested-repo-hint {
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 4px 0 0;
+}
+
+.diff-nested-repo-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.diff-nested-repo-actions button {
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.diff-nested-repo-actions button:hover {
+  border-color: var(--color-accent);
 }
 
 .diff-dir-header {

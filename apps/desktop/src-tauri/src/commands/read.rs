@@ -220,6 +220,14 @@ type FileStatusesResult =
 fn libgit2_file_statuses(repo: &git2::Repository) -> FileStatusesResult {
     let mut opts = git2::StatusOptions::new();
     opts.include_untracked(true)
+        // List every file inside a brand-new directory instead of the
+        // directory itself (issue #181). Without this, libgit2 reports
+        // `newfolder/` as a single entry, like git's default
+        // `--untracked-files=normal`, and the sidebar tree renders it as one
+        // opaque leaf row, so the folder's contents only became visible once
+        // staged. `git_status_cli` passes `--untracked-files=all` for the
+        // same reason.
+        .recurse_untracked_dirs(true)
         .include_ignored(false)
         .renames_head_to_index(true)
         .renames_index_to_workdir(true)
@@ -371,6 +379,13 @@ pub(crate) fn git_status_cli(cwd: String, pathspec: Option<String>) -> Result<Gi
         "status".to_string(),
         "--porcelain=v2".to_string(),
         "--branch".to_string(),
+        // Recurse into untracked directories (issue #181). git's default
+        // (`normal`) collapses a never-staged directory into a single
+        // `newfolder/` entry, which the sidebar tree cannot expand. Passing
+        // the flag explicitly also aligns this path with the libgit2 fast
+        // path, which reports untracked files regardless of a repo-local
+        // `status.showUntrackedFiles`.
+        "--untracked-files=all".to_string(),
     ];
     if let Some(ref p) = pathspec {
         let p = p.trim();
@@ -732,6 +747,16 @@ fn compute_main_commit_count(cwd: &str, branch: &str) -> i32 {
 #[tauri::command]
 pub(crate) async fn git_diff(cwd: String, path: String, staged: bool) -> Result<GitDiff, String> {
     let _repo = repo_lock::read(&cwd);
+    // A trailing slash means the sidebar handed us an untracked *directory*
+    // entry, which has no diff. List what is inside instead so the UI can
+    // render a folder panel. Mirrors `/api/git-diff` in dev-server.mjs, whose
+    // behavior the Rust side used to lack entirely (issue #183). It must stay
+    // ahead of the libgit2 fast path below: a directory is not a blob, so the
+    // fast path would error, fall back to the CLI and hand the UI an empty
+    // diff, which is exactly the bug #183 fixed.
+    if path.ends_with('/') {
+        return git_diff_directory(&cwd, path);
+    }
 
     // libgit2 fast path (v3.10.0): avoids a git subprocess on the hottest read
     // path in the app. Any error falls back to the CLI, which stays the
@@ -815,6 +840,53 @@ pub(crate) async fn git_diff(cwd: String, path: String, staged: bool) -> Result<
         status,
         old_path: None,
         truncated_from_bytes,
+        is_directory: None,
+        new_files: None,
+        nested_repo: None,
+    })
+}
+
+/// `git_diff` for a directory path: the untracked files inside it.
+///
+/// A directory carrying its own `.git` is reported as a nested repo with no
+/// file list. Git never looks inside one, so `ls-files --others` answers with
+/// the directory itself; listing that would hand the UI a row which reopens
+/// this very panel. Since `git status --untracked-files=all` (issue #181), a
+/// nested repo is in fact the only directory entry the sidebar can still
+/// produce.
+fn git_diff_directory(cwd: &str, path: String) -> Result<GitDiff, String> {
+    let dir = safe_repo_path(cwd, &path)?;
+
+    let raw: Vec<String> = git_cmd()
+        .args(["ls-files", "--others", "--exclude-standard", "--"])
+        .arg(&dir)
+        .current_dir(cwd)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| {
+            String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .filter(|l| !l.trim().is_empty())
+                .map(|l| l.to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // Two independent signals, either is enough: an own `.git` (a directory
+    // for a plain clone, a file for a worktree or an absorbed submodule), or
+    // git answering with the directory instead of its contents.
+    let nested = dir.join(".git").exists() || raw == [path.clone()];
+
+    Ok(GitDiff {
+        path,
+        hunks: Vec::new(),
+        status: None,
+        old_path: None,
+        truncated_from_bytes: None,
+        is_directory: Some(true),
+        new_files: Some(if nested { Vec::new() } else { raw }),
+        nested_repo: if nested { Some(true) } else { None },
     })
 }
 
@@ -1160,6 +1232,10 @@ pub(crate) async fn git_show(cwd: String, hash: String) -> Result<Vec<GitDiff>, 
                     // Truncation is only meaningful for the per-file diff
                     // command. Set None unconditionally here.
                     truncated_from_bytes: None,
+                    // Directory entries only reach the single-file `git_diff`.
+                    is_directory: None,
+                    new_files: None,
+                    nested_repo: None,
                 });
             }
             current_status = None;
@@ -1270,6 +1346,9 @@ pub(crate) async fn git_show(cwd: String, hash: String) -> Result<Vec<GitDiff>, 
             status: current_status.take(),
             old_path: current_old_path.take(),
             truncated_from_bytes: None, // see P2.4 note above
+            is_directory: None,
+            new_files: None,
+            nested_repo: None,
         });
     }
 
@@ -2657,6 +2736,154 @@ mod pathspec_tests {
             "unscoped status should show all changes: {:?}",
             all_paths
         );
+    }
+
+    // ── Untracked directories (issue #181) ────────────────────
+    //
+    // git's default `--untracked-files=normal` collapses a brand-new
+    // directory into a single `newfolder/` entry. The sidebar tree builder
+    // renders such a trailing-slash path as one opaque leaf row, so neither
+    // the folder nor the files inside it were visible until the user staged
+    // them. Both status implementations must therefore recurse into
+    // untracked directories.
+
+    #[test]
+    fn git_status_lists_files_inside_untracked_directory() {
+        let repo = TempRepo::new();
+        repo.write("root.txt", "root");
+        repo.commit_all("root");
+
+        // Brand-new, never-staged directory, with a nested subdirectory.
+        repo.write("newfolder/a.txt", "a");
+        repo.write("newfolder/sub/b.txt", "b");
+
+        let expected = vec![
+            "newfolder/a.txt".to_string(),
+            "newfolder/sub/b.txt".to_string(),
+        ];
+
+        let cli = git_status_cli(repo.cwd(), None).expect("git_status_cli failed");
+        let mut cli_untracked = cli.untracked.clone();
+        cli_untracked.sort();
+        assert_eq!(
+            cli_untracked, expected,
+            "CLI: untracked dir should be listed file-by-file, got {:?}",
+            cli.untracked
+        );
+
+        let lg2 = git_status_libgit2(&repo.cwd()).expect("git_status_libgit2 failed");
+        let mut lg2_untracked = lg2.untracked.clone();
+        lg2_untracked.sort();
+        assert_eq!(
+            lg2_untracked, expected,
+            "libgit2: untracked dir should be listed file-by-file, got {:?}",
+            lg2.untracked
+        );
+    }
+
+    // ── git_diff on a directory path (issue #183) ─────────────
+    //
+    // The sidebar can hand `git_diff` a path ending in "/" (an untracked
+    // directory entry from `git status`). Only the Node dev-server handled
+    // that: it listed the files inside and answered `isDirectory: true`, which
+    // `DiffViewer` renders as a "new folder" panel. Rust returned an ordinary
+    // empty diff, so the packaged app showed nothing where dev:web worked.
+
+    #[test]
+    fn git_diff_on_an_untracked_directory_lists_the_files_inside() {
+        let repo = TempRepo::new();
+        repo.write("root.txt", "root");
+        repo.commit_all("root");
+        repo.write("newfolder/a.txt", "a");
+        repo.write("newfolder/sub/b.txt", "b");
+
+        let diff =
+            tauri::async_runtime::block_on(git_diff(repo.cwd(), "newfolder/".to_string(), false))
+                .expect("git_diff on a directory failed");
+
+        assert_eq!(
+            diff.is_directory,
+            Some(true),
+            "should be flagged a directory"
+        );
+        assert_eq!(
+            diff.nested_repo, None,
+            "a plain folder is not a nested repo"
+        );
+        assert!(diff.hunks.is_empty(), "a directory has no hunks");
+        let mut files = diff.new_files.clone().unwrap_or_default();
+        files.sort();
+        assert_eq!(
+            files,
+            vec![
+                "newfolder/a.txt".to_string(),
+                "newfolder/sub/b.txt".to_string()
+            ],
+            "expected the files inside the directory, got {:?}",
+            diff.new_files
+        );
+    }
+
+    // A nested git repo is the one directory entry that survives
+    // `--untracked-files=all`: git refuses to look inside it. `git ls-files
+    // --others` then answers with the directory itself, so listing its
+    // "contents" would hand the UI a row that reopens the same panel. It is
+    // reported as a nested repo instead, with no file list.
+
+    #[test]
+    fn git_diff_on_an_untracked_nested_repo_reports_it_as_nested() {
+        let repo = TempRepo::new();
+        repo.write("root.txt", "root");
+        repo.commit_all("root");
+
+        // A second, independent repo living inside the working tree.
+        let inner = repo.path.join("inner");
+        std::fs::create_dir_all(&inner).unwrap();
+        let out = Command::new(git_binary())
+            .args(["init", "-q", "-b", "main"])
+            .current_dir(&inner)
+            .output()
+            .expect("git init (inner) failed to spawn");
+        assert!(out.status.success(), "git init (inner) failed");
+        std::fs::write(inner.join("c.txt"), "c").unwrap();
+
+        let diff =
+            tauri::async_runtime::block_on(git_diff(repo.cwd(), "inner/".to_string(), false))
+                .expect("git_diff on a nested repo failed");
+
+        assert_eq!(
+            diff.is_directory,
+            Some(true),
+            "should be flagged a directory"
+        );
+        assert_eq!(
+            diff.nested_repo,
+            Some(true),
+            "should be flagged a nested repo"
+        );
+        assert!(
+            diff.new_files.clone().unwrap_or_default().is_empty(),
+            "a nested repo's files belong to the other repo, got {:?}",
+            diff.new_files
+        );
+    }
+
+    // Guard against the directory branch swallowing ordinary files: a real
+    // file must still produce hunks.
+
+    #[test]
+    fn git_diff_on_a_file_is_unaffected_by_the_directory_branch() {
+        let repo = TempRepo::new();
+        repo.write("a.txt", "one\n");
+        repo.commit_all("a");
+        repo.write("a.txt", "two\n");
+
+        let diff = tauri::async_runtime::block_on(git_diff(repo.cwd(), "a.txt".to_string(), false))
+            .expect("git_diff on a file failed");
+
+        assert_eq!(diff.is_directory, None, "a file is not a directory");
+        assert_eq!(diff.nested_repo, None);
+        assert!(!diff.hunks.is_empty(), "expected hunks for a modified file");
     }
 
     // ── Remote branch existence without configured upstream ───────

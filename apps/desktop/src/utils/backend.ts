@@ -516,6 +516,12 @@ export interface GitDiff {
   /** List of new files inside the directory (when isDirectory=true) */
   newFiles?: string[];
   /**
+   * True when the directory carries its own `.git`. Git never looks inside
+   * one, so `newFiles` is empty and the UI shows a dedicated panel rather
+   * than a file list that leads back to this same directory (issue #183).
+   */
+  nestedRepo?: boolean;
+  /**
    * P2.4 — When set, the raw `git diff` output exceeded the backend's
    * truncation threshold (5 MB). Hunks were parsed from the truncated
    * prefix. The value is the *original* byte size, suitable for showing

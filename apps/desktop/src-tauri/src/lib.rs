@@ -224,15 +224,18 @@ pub fn git_log_parity(
     ))
 }
 
-pub fn git_branches_parity(cwd: String) -> Result<Vec<types::GitBranch>, String> {
-    tauri::async_runtime::block_on(commands::ops::git_branches(cwd, None))
-}
-
 /// Parity entry point for `git_diff`. Exercises the shipped implementation,
-/// libgit2 fast path included: the whole point is that its output is
-/// indistinguishable from the Node dev-server's CLI-based route.
+/// libgit2 fast path and directory branch included, both of which have drifted
+/// from the Node dev-server before: the directory branch (an untracked folder,
+/// or a nested repo) lived only in the dev-server for several releases with
+/// nothing comparing the two (issue #183), and the v3.10.0 libgit2 fast path
+/// has to stay indistinguishable from the CLI output that route produces.
 pub fn git_diff_parity(cwd: String, path: String, staged: bool) -> Result<types::GitDiff, String> {
     tauri::async_runtime::block_on(commands::read::git_diff(cwd, path, staged))
+}
+
+pub fn git_branches_parity(cwd: String) -> Result<Vec<types::GitBranch>, String> {
+    tauri::async_runtime::block_on(commands::ops::git_branches(cwd, None))
 }
 
 /// Parity entry point for `git_blame`. Same reasoning as `git_diff_parity`.
@@ -483,6 +486,7 @@ pub fn run() {
             commands::read::git_repo_state,
             commands::ops::git_rebase_action,
             commands::ops::git_interactive_rebase,
+            commands::ops::git_add_to_gitignore,
             commands::ops::git_discard,
             commands::read::git_show,
             commands::ops::git_branches,

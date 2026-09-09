@@ -104,6 +104,21 @@ fn main() -> ExitCode {
             };
             to_json(git_status_libgit2_parity(cwd))
         }
+        "git-diff" => {
+            let cwd = match must_str("cwd") {
+                Ok(v) => v,
+                Err(code) => return code,
+            };
+            let path = match must_str("path") {
+                Ok(v) => v,
+                Err(code) => return code,
+            };
+            let staged = input
+                .get("staged")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            to_json(git_diff_parity(cwd, path, staged))
+        }
         "git-log" => {
             let cwd = match must_str("cwd") {
                 Ok(v) => v,
@@ -126,21 +141,6 @@ fn main() -> ExitCode {
                 Err(code) => return code,
             };
             to_json(git_branches_parity(cwd))
-        }
-        "git-diff" => {
-            let cwd = match must_str("cwd") {
-                Ok(v) => v,
-                Err(code) => return code,
-            };
-            let path = match must_str("path") {
-                Ok(v) => v,
-                Err(code) => return code,
-            };
-            let staged = input
-                .get("staged")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            to_json(git_diff_parity(cwd, path, staged))
         }
         "git-blame" => {
             let cwd = match must_str("cwd") {

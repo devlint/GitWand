@@ -16,7 +16,13 @@ import { useCommitTemplates } from "../composables/useCommitTemplates";
 import { useArchivedBranches } from "../composables/useArchivedBranches";
 import { usePinnedBranches } from "../composables/usePinnedBranches";
 import { useAiPromptPresets } from "../composables/useAiPromptPresets";
-import { buildFileTree, flattenTree, type TreeRow } from "../composables/useFileTree";
+import {
+  buildFileTree,
+  flattenTree,
+  leafName,
+  parentDir,
+  type TreeRow,
+} from "../composables/useFileTree";
 import type { CommitTemplate } from "../composables/useSettings";
 import { gitBranchMerged } from "../utils/backend";
 import { loadSettings } from "../composables/useSettings";
@@ -735,13 +741,14 @@ function statusColor(status: string): string {
   return map[status] ?? "var(--color-text-muted)";
 }
 
+// Shared with the tree layout so both render an untracked directory entry
+// (`nestedrepo/`) with the same label instead of a blank one (issue #181).
 function fileName(path: string): string {
-  return path.split("/").pop() ?? path;
+  return leafName(path);
 }
 
 function fileDir(path: string): string {
-  const parts = path.split("/");
-  return parts.length > 1 ? parts.slice(0, -1).join("/") + "/" : "";
+  return parentDir(path);
 }
 
 const totalChanges = computed(() => props.files.length);

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildFileTree, flattenTree } from "../useFileTree";
+import { buildFileTree, flattenTree, leafName, parentDir } from "../useFileTree";
 import type { RepoFileEntry } from "../useGitRepo";
 
 function file(path: string): RepoFileEntry {
@@ -53,6 +53,21 @@ describe("buildFileTree / flattenTree", () => {
       "a",
       "a/b",
     ]);
+  });
+
+  it("labels a trailing-slash entry with its directory name, not an empty string", () => {
+    // With `--untracked-files=all` the only remaining trailing-slash entries
+    // are untracked *nested git repos*, which git never expands. The flat
+    // list layout used to render them with a blank name (issue #181):
+    // "nestedrepo/".split("/").pop() === "".
+    expect(leafName("nestedrepo/")).toBe("nestedrepo/");
+    expect(parentDir("nestedrepo/")).toBe("");
+    expect(leafName("libs/nestedrepo/")).toBe("nestedrepo/");
+    expect(parentDir("libs/nestedrepo/")).toBe("libs/");
+    // Plain files are unaffected.
+    expect(leafName("src/a.ts")).toBe("a.ts");
+    expect(parentDir("src/a.ts")).toBe("src/");
+    expect(parentDir("README.md")).toBe("");
   });
 
   it("is generic over any PathLike entry (e.g. commit diffs)", () => {

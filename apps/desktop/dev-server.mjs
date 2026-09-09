@@ -1609,7 +1609,17 @@ async function handleRequest(req, res) {
         // src-tauri/src/commands/read.rs (parity reference): a read-only
         // status must not rewrite `.git/index`, which the v3.10.0 watcher
         // would classify as an `index` change and refresh on.
-        const statusArgs = ["--no-optional-locks", "status", "--porcelain=v2", "--branch"];
+        // `--untracked-files=all` mirrors the same function and the libgit2
+        // fast path (issue #181): git's default collapses a never-staged
+        // directory into a single `newfolder/` entry the sidebar cannot
+        // expand. Keep both flags, and their order, in sync with read.rs.
+        const statusArgs = [
+          "--no-optional-locks",
+          "status",
+          "--porcelain=v2",
+          "--branch",
+          "--untracked-files=all",
+        ];
         if (pathspec) statusArgs.push("--", pathspec);
         const stdout = execFileSync(GIT, statusArgs, {
           cwd: resolvedCwd,
@@ -1818,14 +1828,26 @@ async function handleRequest(req, res) {
         // ── Directory: list new files inside instead of diffing ──────────
         if (path.endsWith("/")) {
           const absDir = join(resolvedCwd, path);
-          let newFiles = [];
+          let raw = [];
           try {
-            const r = spawnSync("git", ["ls-files", "--others", "--exclude-standard", absDir], {
+            const r = spawnSync(GIT, ["ls-files", "--others", "--exclude-standard", "--", absDir], {
               cwd: resolvedCwd, encoding: "utf-8",
             });
-            newFiles = (r.stdout || "").trim().split("\n").filter(Boolean);
+            raw = (r.stdout || "").trim().split("\n").filter(Boolean);
           } catch { /* ignore */ }
-          return jsonResponse(req, res, { path, hunks: [], isDirectory: true, newFiles });
+          // Two independent signals, either is enough: an own `.git` (a
+          // directory for a plain clone, a file for a worktree or an absorbed
+          // submodule), or git answering with the directory instead of its
+          // contents. Mirrors `git_diff_directory` in read.rs (issue #183);
+          // `nestedRepo` is omitted when false, as the Rust side skips None.
+          const nested = existsSync(join(absDir, ".git")) || (raw.length === 1 && raw[0] === path);
+          return jsonResponse(req, res, {
+            path,
+            hunks: [],
+            isDirectory: true,
+            newFiles: nested ? [] : raw,
+            ...(nested ? { nestedRepo: true } : {}),
+          });
         }
 
         const args = staged ? ["diff", "--cached", "--", path] : ["diff", "--", path];
@@ -1838,16 +1860,18 @@ async function handleRequest(req, res) {
 
         // ── New untracked file: fall back to --no-index diff (all lines green) ──
         //
-        // Guard: only for genuinely UNTRACKED files. A tracked file whose only
-        // change is already staged also yields an empty unstaged `git diff`;
-        // without this check the --no-index fallback would render the entire
-        // file as an addition instead of showing no unstaged change (mirrors
-        // the Rust `is_untracked` guard in commands/read.rs).
+        // Guard: only for genuinely UNTRACKED files, mirroring the Rust
+        // `git_diff`. A tracked file whose change is already staged also
+        // yields an empty unstaged `git diff`; without the check the fallback
+        // renders the entire file as an addition instead of showing no
+        // unstaged change. Drift found by tests/parity/git-diff (issue #183).
         if (!stdout.trim() && !staged) {
           const absFile = join(resolvedCwd, path);
-          const tracked = spawnSync("git", ["ls-files", "--error-unmatch", "--", path], {
-            cwd: resolvedCwd, encoding: "utf-8",
-          }).status === 0;
+          const tracked =
+            spawnSync(GIT, ["ls-files", "--error-unmatch", "--", path], {
+              cwd: resolvedCwd,
+              encoding: "utf-8",
+            }).status === 0;
           if (!tracked && existsSync(absFile) && !statSync(absFile).isDirectory()) {
             const r = spawnSync("git", ["diff", "--no-index", "--", "/dev/null", absFile], {
               cwd: resolvedCwd, encoding: "utf-8",
@@ -1900,6 +1924,13 @@ async function handleRequest(req, res) {
                 newLineNo: null,
               });
               oldLineNo++;
+              // Context lines start with a single space. Testing
+              // `!startsWith("\\")` instead lets the empty string that
+              // `split("\n")` leaves after the trailing newline through, which
+              // appended a phantom context line to every diff, and the Rust
+              // parser (`strip_prefix(' ')`) never did. This is the gotcha
+              // AGENTS.md documents; drift found by tests/parity/git-diff
+              // (issue #183).
             } else if (line.startsWith(" ")) {
               currentHunk.lines.push({
                 type: "context",
@@ -2845,6 +2876,12 @@ async function handleRequest(req, res) {
     if (url.pathname === "/api/git-gitignore" && req.method === "POST") {
       const { cwd, path: filePath } = await readBody(req);
       if (!cwd || !filePath) return jsonResponse(req, res, { error: "Missing cwd or path" }, 400);
+      // Mirrors the guard in the Rust `git_add_to_gitignore` (issue #183): the
+      // entry becomes one line of a config file, so a newline inside it would
+      // silently add rules the user never asked for.
+      if (/[\r\n]/.test(filePath)) {
+        return jsonResponse(req, res, { error: "gitignore entry must be a single line" }, 400);
+      }
       try {
         const resolvedCwd = resolve(cwd);
         const gitignorePath = join(resolvedCwd, ".gitignore");
