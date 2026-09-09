@@ -52,6 +52,8 @@ const emit = defineEmits<{
   resolveTreeConflict: [path: string, choice: "ours" | "theirs" | "delete"];
   reconstructConflict: [path: string];
   keepWorkingTree: [path: string];
+  /** Conflicted file GitWand cannot decode: hand it to the user's own editor. */
+  openExternally: [path: string];
 }>();
 
 // ─── Inline Edit State ──────────────────────────────────
@@ -831,8 +833,33 @@ useResizeObserver(contentEl, drawMinimap);
       </template>
     </div>
 
+    <!--
+      Unreadable conflict: git says the file is unmerged but its bytes could not
+      be decoded (read_file is read_to_string, so any non-UTF-8 file lands here).
+      There is no text to show hunks for, but the file still blocks the rebase,
+      so both side-picks are offered: they run `git checkout --ours/--theirs`,
+      which works on bytes and never needs to decode anything.
+    -->
+    <div v-if="file.loadError" class="me-tree-panel">
+      <h3 class="me-tree-title">{{ t('merge.unreadableTitle') }} — <span class="mono">{{ file.path }}</span></h3>
+      <p class="me-tree-explanation">{{ t('merge.unreadableExplanation') }}</p>
+      <div class="me-tree-actions">
+        <button class="me-bulk-btn" @click="emit('resolveTreeConflict', file.path, 'ours')">
+          {{ t('merge.unreadableKeepOurs') }}
+        </button>
+        <button class="me-bulk-btn" @click="emit('resolveTreeConflict', file.path, 'theirs')">
+          {{ t('merge.unreadableKeepTheirs') }}
+        </button>
+        <button class="me-bulk-btn" @click="emit('openExternally', file.path)">
+          {{ t('merge.unreadableOpenExternally') }}
+        </button>
+      </div>
+      <div class="me-tree-preview-label muted">{{ t('merge.unreadableReasonLabel') }}</div>
+      <pre class="me-tree-preview">{{ file.loadError }}</pre>
+    </div>
+
     <!-- Editor body: code + minimap -->
-    <div class="merge-body" v-if="!file.tree && !file.markerless">
+    <div class="merge-body" v-if="!file.tree && !file.markerless && !file.loadError">
       <div v-if="file.reconstructed" class="me-reconstructed-banner">
         <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
           <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm.75 10.5h-1.5v-1.5h1.5v1.5zm0-3h-1.5V4.5h1.5V8.5z"/>

@@ -4067,7 +4067,8 @@ onUnmounted(() => {
                   @apply-file-memory="(path, entry) => handleApplyFileMemory(path, entry)"
                   @resolve-tree-conflict="(path, choice) => handleResolveTreeConflict(path, choice)"
                   @reconstruct-conflict="(path) => handleReconstructConflict(path)"
-                  @keep-working-tree="(path) => handleKeepWorkingTree(path)" />
+                  @keep-working-tree="(path) => handleKeepWorkingTree(path)"
+                  @open-externally="(path) => handleOpenInEditor(path)" />
                 <FileHistoryViewer v-else-if="fileHistoryPath && repoFolderPath" :file-path="fileHistoryPath"
                   :cwd="repoFolderPath" @close="closeFileHistory"
                   @select-commit="(hash) => { closeFileHistory(); selectCommit(hash); viewMode = 'history'; }" />

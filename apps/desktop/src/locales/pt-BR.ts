@@ -774,6 +774,12 @@ const ptBR: Locale = {
     markerlessExplanation: "O Git registra um conflito para este arquivo, mas a cópia de trabalho não tem marcadores e não corresponde a nenhum dos lados.",
     reconstructConflict: "Reconstruir conflito",
     keepWorkingTree: "Manter minha versão (preparar como está)",
+    unreadableTitle: "O arquivo não pode ser lido como texto",
+    unreadableExplanation: "O Git relata este arquivo como em conflito, mas o conteúdo não é texto UTF-8 válido, portanto não há blocos para exibir. Costuma ser um artefato de build ou um binário. Você ainda pode resolvê-lo escolhendo um lado inteiro, o que opera sobre os bytes brutos, ou abri-lo no seu próprio editor.",
+    unreadableKeepOurs: "Manter nossa versão",
+    unreadableKeepTheirs: "Manter a versão deles",
+    unreadableOpenExternally: "Abrir no editor externo",
+    unreadableReasonLabel: "Motivo relatado",
   },
 
   // ─── PR creation ────────────────────────────────────────

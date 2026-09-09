@@ -773,6 +773,12 @@ const es: Locale = {
     markerlessExplanation: "Git registra un conflicto para este archivo, pero la copia de trabajo no tiene marcadores y no coincide con ningún lado.",
     reconstructConflict: "Reconstruir conflicto",
     keepWorkingTree: "Mantener mi versión (preparar tal cual)",
+    unreadableTitle: "El archivo no se puede leer como texto",
+    unreadableExplanation: "Git informa de un conflicto en este archivo, pero su contenido no es texto UTF-8 válido, así que no hay bloques que mostrar. Suele ser un artefacto de compilación o un binario. Aun así puedes resolverlo tomando un lado completo, lo que opera sobre los bytes en bruto, o abrirlo en tu propio editor.",
+    unreadableKeepOurs: "Mantener nuestra versión",
+    unreadableKeepTheirs: "Mantener su versión",
+    unreadableOpenExternally: "Abrir en un editor externo",
+    unreadableReasonLabel: "Motivo informado",
   },
 
   // ─── PR creation ────────────────────────────────────────

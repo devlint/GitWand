@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **One unreadable file made every conflict in the repo unresolvable.** Selecting a conflicted file opened the read-only diff instead of the merge editor, with no way to reach resolution at all: the sidebar listed N conflicts and the banner asked the user to resolve them, while nothing could be opened. `loadRealFiles` read every unmerged path inside a single `Promise.all`, and `read_file` is `std::fs::read_to_string`, which rejects any file that is not valid UTF-8. A minified build artifact or a Latin-1 source therefore rejected the whole batch, `openPath` caught it and called `loadDemoData()`, and the merge editor ended up holding fabricated demo paths, so the lookup for the real file returned null and `App.vue` fell through to `DiffViewer`. Each file now loads in isolation, and a failure degrades only itself. The demo set is also no longer used as an error handler for a real repository: replacing a user's conflicts with invented files hid the failure instead of reporting it.
+- **A conflicted file GitWand cannot decode now has a panel of its own.** It stays in the list, because git still counts it and the rebase will not continue until it is settled, and it offers the two side-picks plus opening it externally. Both picks go through `git checkout --ours/--theirs`, which operates on the raw bytes and never needs to decode the file.
+
 ## [3.10.0] - 2026-09-09
 
 ### Added

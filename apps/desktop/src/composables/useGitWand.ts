@@ -92,6 +92,17 @@ export interface ConflictFile {
    * The ours/theirs content shown to the user is unchanged; only the base was added.
    */
   baseEnriched?: boolean;
+  /**
+   * Set when the file is genuinely unmerged but its content could not be loaded
+   * — `read_file` is `read_to_string`, so any file that is not valid UTF-8 (a
+   * minified build artifact, a Latin-1 source) fails here. The entry is kept in
+   * the list rather than dropped: git still counts it as a conflict, the rebase
+   * will not continue until it is settled, and the sidebar count has to keep
+   * matching what the editor offers. It renders a dedicated panel that resolves
+   * the file at the git level (`checkout --ours/--theirs`), which needs no
+   * decoding at all.
+   */
+  loadError?: string;
 }
 
 export interface GlobalStats {
@@ -438,7 +449,14 @@ export function useGitWand() {
     } catch (err: any) {
       console.error("openPath error:", err);
       error.value = err.message ?? "Erreur inconnue";
-      await loadDemoData();
+      // Deliberately NOT loadDemoData() here. The demo set is a first-run
+      // affordance; using it as an error handler silently replaced a real
+      // repo's conflicts with fabricated paths (src/components/Header.tsx et
+      // al), so the failure surfaced as "the merge editor shows files I have
+      // never seen" or, worse, as nothing at all. An empty list plus `error`
+      // is honest, and lets the caller show why.
+      files.value = [];
+      selectedPath.value = null;
     } finally {
       loading.value = false;
     }
@@ -582,8 +600,32 @@ export function useGitWand() {
     // resolution of the app's lifetime.
     const core = await engine();
 
+    // Per-file isolation is load-bearing, not defensive politeness. Every path
+    // below can reject — `readFile` on a non-UTF-8 file, a worker RPC, a
+    // reconstruct — and a single rejection inside `Promise.all` used to reject
+    // the whole batch, which `openPath` caught by swapping in demo data. The
+    // net effect was that one unreadable build artifact made *every* conflict
+    // in the repo unresolvable, because `selectedFile` could no longer find the
+    // real path and `App.vue` fell through to the read-only DiffViewer. A file
+    // that cannot be loaded now degrades to its own entry, and only its own.
     const loaded: ConflictFile[] = await Promise.all(
-      allPaths.map(async (filePath) => {
+      allPaths.map(async (filePath): Promise<ConflictFile> => {
+        try {
+          return await loadOneConflict(filePath);
+        } catch (err: any) {
+          console.warn(`[gitwand] could not load conflicted file ${filePath}`, err);
+          return {
+            path: filePath,
+            content: "",
+            result: await core.resolveAsync("", filePath, resolveOptionsWithLlm, aiEndpointProxy),
+            loadError: err?.message ?? String(err),
+          };
+        }
+      }),
+    );
+
+    async function loadOneConflict(filePath: string): Promise<ConflictFile> {
+      {
         const tc = treeMap.get(filePath);
         if (tc) {
           // Tree conflict: do not parse markers. Read working-tree content best-effort (for preview).
@@ -661,8 +703,8 @@ export function useGitWand() {
           } catch { /* not reconstructable → fall through to plain result */ }
         }
         return { path: filePath, content, result };
-      }),
-    );
+      }
+    }
 
     files.value = loaded;
     if (loaded.length > 0) {

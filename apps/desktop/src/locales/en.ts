@@ -785,6 +785,12 @@ const en = {
     markerlessExplanation: "Git records a conflict for this file, but the working copy has no conflict markers and matches neither side.",
     reconstructConflict: "Reconstruct conflict",
     keepWorkingTree: "Keep my version (stage as-is)",
+    unreadableTitle: "File cannot be read as text",
+    unreadableExplanation: "Git reports this file as conflicted, but its contents are not valid UTF-8 text, so there are no hunks to show. It is usually a build artifact or a binary. You can still settle it by taking one side wholesale, which operates on the raw bytes, or open it in your own editor.",
+    unreadableKeepOurs: "Keep our version",
+    unreadableKeepTheirs: "Keep their version",
+    unreadableOpenExternally: "Open in external editor",
+    unreadableReasonLabel: "Reason reported",
   },
 
   // ─── PR creation ────────────────────────────────────────

@@ -763,6 +763,12 @@ const zhCN: Locale = {
     markerlessExplanation: "Git 为此文件记录了冲突，但工作副本没有冲突标记，且与任何一方都不匹配。",
     reconstructConflict: "重建冲突",
     keepWorkingTree: "保留我的版本（直接暂存）",
+    unreadableTitle: "无法以文本方式读取该文件",
+    unreadableExplanation: "Git 报告此文件存在冲突，但其内容不是有效的 UTF-8 文本，因此没有可显示的区块。这通常是构建产物或二进制文件。你仍然可以整体保留其中一方来解决它（该操作直接作用于原始字节），或在你自己的编辑器中打开它。",
+    unreadableKeepOurs: "保留我方版本",
+    unreadableKeepTheirs: "保留对方版本",
+    unreadableOpenExternally: "在外部编辑器中打开",
+    unreadableReasonLabel: "报告的原因",
   },
 
   pr: {

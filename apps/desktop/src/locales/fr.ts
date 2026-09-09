@@ -778,6 +778,12 @@ const fr: Locale = {
     markerlessExplanation: "Git enregistre un conflit pour ce fichier, mais la copie de travail n'a pas de marqueurs et ne correspond à aucun des deux côtés.",
     reconstructConflict: "Reconstruire le conflit",
     keepWorkingTree: "Garder ma version (stager tel quel)",
+    unreadableTitle: "Fichier illisible en tant que texte",
+    unreadableExplanation: "Git signale ce fichier comme étant en conflit, mais son contenu n'est pas du texte UTF-8 valide : il n'y a donc aucun bloc à afficher. C'est le plus souvent un artefact de build ou un binaire. Vous pouvez quand même le régler en prenant un côté en entier, ce qui travaille sur les octets bruts, ou l'ouvrir dans votre propre éditeur.",
+    unreadableKeepOurs: "Garder notre version",
+    unreadableKeepTheirs: "Garder leur version",
+    unreadableOpenExternally: "Ouvrir dans l'éditeur externe",
+    unreadableReasonLabel: "Raison signalée",
   },
 
   // ─── PR creation ────────────────────────────────────────
