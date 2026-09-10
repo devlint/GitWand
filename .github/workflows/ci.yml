@@ -193,7 +193,18 @@ jobs:
   # dependency.
   changes:
     name: Detect bundle-relevant changes
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Runs on push-to-main AND on same-repo pull requests. The PR case is the
+    # point: bundle-smoke is the only job that executes `tauri build`, and it
+    # used to be push-only, so a PR could be all-green and still break `main`.
+    # #180 did exactly that (npm/Rust Tauri plugin version mismatch) and left
+    # `main` red for six days behind green PR checks (issue #188 pt1).
+    #
+    # Fork PRs are excluded: the job signs with TAURI_SIGNING_PRIVATE_KEY, and
+    # secrets are not exposed to forks, so it could only fail there.
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-22.04
     outputs:
       bundle: ${{ steps.filter.outputs.bundle }}
@@ -205,10 +216,27 @@ jobs:
           # `git diff` below fail to resolve it.
           fetch-depth: 0
 
-      - name: Diff against the pre-push SHA
+      - name: Diff against the pre-push SHA (push) or the PR base (pull_request)
         id: filter
         run: |
           set -euo pipefail
+          # On a PR, diff the whole branch against its merge base. The filter is
+          # deliberately narrower than the push one below: only things that can
+          # break the *bundler* justify ~13 min on every PR that touches them.
+          # A frontend-only PR is covered by the push-to-main run.
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+            if git diff --name-only "$BASE" HEAD -- \
+                 apps/desktop/src-tauri \
+                 pnpm-lock.yaml \
+                 'apps/desktop/package.json' \
+                 .github/workflows/ci.yml | grep -q .; then
+              echo "bundle=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "bundle=false" >> "$GITHUB_OUTPUT"
+            fi
+            exit 0
+          fi
           BEFORE="${{ github.event.before }}"
           # All-zero SHA = first push to a brand-new ref (or a history
           # rewrite GitHub can't give us a real "before" for). We can't diff
