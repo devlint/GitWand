@@ -442,3 +442,96 @@ jobs:
             --submit `
             --token $env:WINGET_TOKEN
           Write-Host "::notice::Submitted Devlint.GitWand $version to microsoft/winget-pkgs"
+
+  # Publish gitwand-bin to the Arch User Repository.
+  #
+  # Original work by @t1gu1 in #100, rebased onto the current release.yml and
+  # hardened before landing (secret guard, pinned action, PKGBUILD test).
+  publish-aur:
+    name: Publish to AUR
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # The AUR secrets can only be created by the repo owner (they require an
+      # AUR account and an SSH key uploaded to it). Without this guard the job
+      # would fail every release until they exist, which is how a distribution
+      # nicety turns into a broken pipeline. Same shape as the Homebrew job
+      # above: absent credentials skip the step, they do not fail the release.
+      - name: Check AUR credentials
+        id: creds
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          AUR_USERNAME: ${{ secrets.AUR_USERNAME }}
+          AUR_EMAIL: ${{ secrets.AUR_EMAIL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${AUR_SSH_PRIVATE_KEY:-}" ] || [ -z "${AUR_USERNAME:-}" ] || [ -z "${AUR_EMAIL:-}" ]; then
+            echo "::warning::AUR_USERNAME / AUR_EMAIL / AUR_SSH_PRIVATE_KEY not all set — skipping AUR publish."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download the .deb from the release
+        if: steps.creds.outputs.ready == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          # The release matrix can report success moments before the asset is
+          # finalised on the release, so retry rather than fail on a race.
+          for attempt in 1 2 3; do
+            if gh release download "$GITHUB_REF_NAME" \
+                --pattern "GitWand_${VERSION}_amd64.deb" \
+                --dir . --repo "$GITHUB_REPOSITORY"; then
+              break
+            fi
+            echo "::warning::.deb not yet available on $GITHUB_REF_NAME (attempt $attempt/3) — sleeping 15s"
+            sleep 15
+          done
+          [ -s "GitWand_${VERSION}_amd64.deb" ] || {
+            echo "::error::GitWand_${VERSION}_amd64.deb missing from release $GITHUB_REF_NAME after retries"
+            exit 1
+          }
+
+      - name: Generate PKGBUILD
+        if: steps.creds.outputs.ready == 'true'
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          SHA256_DEB=$(sha256sum "GitWand_${VERSION}_amd64.deb" | awk '{print $1}')
+          SHA256_LICENSE=$(sha256sum LICENSE | awk '{print $1}')
+          sed -e "s/#VERSION#/${VERSION}/g" \
+              -e "s/#SHA256_DEB#/${SHA256_DEB}/g" \
+              -e "s/#SHA256_LICENSE#/${SHA256_LICENSE}/g" \
+              scripts/PKGBUILD.template > PKGBUILD
+          # A placeholder left unsubstituted would publish a PKGBUILD that can
+          # never validate its sources. Cheaper to catch here than on the AUR.
+          if grep -q '#[A-Z_]*#' PKGBUILD; then
+            echo "::error::PKGBUILD still contains unsubstituted placeholders:"
+            grep -n '#[A-Z_]*#' PKGBUILD
+            exit 1
+          fi
+          echo "--- generated PKGBUILD ---"
+          cat PKGBUILD
+
+      - name: Publish to the AUR
+        if: steps.creds.outputs.ready == 'true'
+        # Pinned to the v4.2.0 commit, not a moving tag: this action receives
+        # the AUR SSH private key, so a retagged upstream would silently get
+        # our credentials. Bump deliberately, with a diff.
+        uses: KSXGitHub/github-actions-deploy-aur@084b0d9b15415bf9cdb65d44dad1efe37a354050
+        with:
+          pkgname: gitwand-bin
+          pkgbuild: ./PKGBUILD
+          commit_username: ${{ secrets.AUR_USERNAME }}
+          commit_email: ${{ secrets.AUR_EMAIL }}
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: "Update to ${{ github.ref_name }}"
+          # Have makepkg actually build the package before it is published.
+          # Publishing a PKGBUILD nobody ever built is how Arch users end up
+          # reporting the breakage for us.
+          test: true

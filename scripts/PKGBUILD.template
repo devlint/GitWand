@@ -1,0 +1,29 @@
+# Maintainer: Laurent Guitton <laurent@devlint.fr>
+# Contributor: GitWand Release Bot <actions@github.com>
+
+pkgname=gitwand-bin
+pkgver=#VERSION#
+pkgrel=1
+pkgdesc="Automatic Git merge conflict resolution desktop client"
+arch=('x86_64')
+url="https://github.com/devlint/GitWand"
+license=('MIT')
+depends=('webkit2gtk-4.1' 'gtk3' 'libayatana-appindicator' 'xdotool' 'nss' 'libxtst')
+provides=('gitwand')
+conflicts=('gitwand')
+source_x86_64=(
+  "https://github.com/devlint/GitWand/releases/download/v${pkgver}/GitWand_${pkgver}_amd64.deb"
+  "LICENSE::https://raw.githubusercontent.com/devlint/GitWand/v${pkgver}/LICENSE"
+)
+sha256sums_x86_64=(
+  '#SHA256_DEB#'
+  '#SHA256_LICENSE#'
+)
+
+package() {
+  # Extract the Debian data file
+  bsdtar -xf data.tar.* -C "${pkgdir}"
+  
+  # Install the license file
+  install -Dm644 LICENSE -t "${pkgdir}/usr/share/licenses/${pkgname}/"
+}

@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **GitWand is published to the Arch User Repository as `gitwand-bin`.** A release now generates a `PKGBUILD` from the `.deb` it just built and pushes it to the AUR, so Arch users can install with any AUR helper instead of unpacking a Debian package by hand. Original work by [@t1gu1](https://github.com/t1gu1) in #100. The publish step is skipped with a warning when the AUR credentials are absent rather than failing the release, the third-party action is pinned to a commit rather than a moving tag because it receives the AUR SSH private key, and `makepkg` builds the package before it is published: verified end to end in an Arch container, where the generated `PKGBUILD` builds, installs, and puts `gitwand-desktop` and the licence where they belong.
+
 - **CI now checks that the packaged `.deb` actually starts.** Nothing did: `rust-check` compiles, `bundle-smoke` proves the bundler still produces a package, and neither ever ran the result. A new job installs the built `.deb` on **ubuntu-24.04** (Linux Mint 22's base, deliberately not the 22.04 it is built on) and launches it headless, failing unless the process is still alive after 20 seconds, since a GUI app has no success exit code. It captures the output a real GUI launch throws away: the `.desktop` entry ships `Terminal=false`, which is why #139 arrived with no diagnostics at all and sat unresolvable for a month.
 
 ### Fixed
