@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The dev-server accepted files the packaged app refuses.** `read_file` is `std::fs::read_to_string` in Rust, which rejects anything that is not valid UTF-8, while the dev-server's `readFileSync(path, "utf-8")` silently substituted `U+FFFD` and returned success. The two "worked" differently, which is worse than one of them failing: a non-UTF-8 file among a repository's conflicts made every conflict unresolvable in the packaged app while the same repository loaded fine under `pnpm dev:web`, so the bug could not be reproduced in the environment used for manual QA. The dev-server now decodes strictly and returns the same error string, and a new `tests/parity/read-file.test.mjs` asserts the two backends **refuse** the same input for the same reason, not merely that they accept the same input.
+
+### Changed
+
+- **`Bundle smoke build` now runs on pull requests that can break it.** It is the only job that executes `tauri build`, and it was gated to push-to-main, so a PR could be entirely green and still break `main` on merge, which is exactly what happened for six days after #180. It now also runs on same-repo PRs touching `apps/desktop/src-tauri`, the lockfile, `apps/desktop/package.json` or `ci.yml`. Fork PRs stay excluded because the job signs with a secret they cannot read.
+- **The release now verifies that the auto-update manifest is actually live.** GitHub Pages deduplicates deployments by commit sha, so the release job's deploy was a silent no-op whenever the tag pointed at a commit already deployed from `main`: every step green, "Reported success!" in the log, and the old manifest still being served. v3.10.1 shipped that way and advertised 3.10.0 to the updater. The job now fetches the published URL and fails, with the cause and the remedy, unless it serves the version just built.
+
 ## [3.10.1] - 2026-09-09
 
 ### Fixed
