@@ -247,6 +247,16 @@ pub fn git_blame_parity(
     tauri::async_runtime::block_on(commands::read::git_blame(cwd, path, algorithm))
 }
 
+/// Parity entry point for `read_file`. Exposed for the *failure* case above
+/// all: `read_file` is `std::fs::read_to_string`, which rejects a file that is
+/// not valid UTF-8, while the dev-server used to substitute U+FFFD and return
+/// success. That divergence hid a bug where one such file made every conflict
+/// in a repository unresolvable in the packaged app, while `pnpm dev:web`
+/// loaded it fine, so QA could not reproduce it (issue #188).
+pub fn read_file_parity(cwd: String, path: String) -> Result<String, String> {
+    tauri::async_runtime::block_on(commands::files::read_file(cwd, path))
+}
+
 pub fn git_remote_info_parity(cwd: String) -> Result<types::RemoteInfo, String> {
     tauri::async_runtime::block_on(commands::ops::git_remote_info(cwd))
 }

@@ -171,7 +171,14 @@ export async function readFile(cwd: string, path: string): Promise<string> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ cwd, path }),
   });
-  if (!res.ok) throw new Error(`Failed to read ${path}`);
+  if (!res.ok) {
+    // Surface the server's reason instead of a generic message: the Rust
+    // backend rejects a non-UTF-8 file with "…: stream did not contain valid
+    // UTF-8", and callers (and the parity suite) need the two paths to fail
+    // the same way, not merely to succeed the same way (issue #188).
+    const reason = await res.json().then((d) => d?.error).catch(() => null);
+    throw new Error(reason || `Failed to read ${path}`);
+  }
   const data = await res.json();
   return data.content;
 }

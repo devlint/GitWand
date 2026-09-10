@@ -280,3 +280,22 @@ export function fixtureUntrackedDirs() {
 
   return cwd;
 }
+
+/**
+ * Fixture "read-file": one ordinary UTF-8 text file, and one file whose bytes
+ * are not valid UTF-8 (a lone 0xFF, as a minified bundle or a Latin-1 source
+ * would produce).
+ *
+ * The invalid one is the point. Rust's `read_to_string` rejects it while
+ * `readFileSync(path, "utf-8")` used to substitute U+FFFD and succeed, and
+ * that gap hid a real bug from `pnpm dev:web` QA entirely (issue #188).
+ */
+export function fixtureReadFile() {
+  const cwd = mkTempRepo("gw-read-file-");
+  commitFile(cwd, "ok.txt", "héllo wörld\n", "add ok.txt", 0);
+
+  // Deliberately raw bytes, not a string: 0xFF is never a valid UTF-8 lead byte.
+  writeFileSync(join(cwd, "bad.bin"), Buffer.from([0x61, 0xff, 0xfe, 0x62, 0x0a]));
+
+  return cwd;
+}

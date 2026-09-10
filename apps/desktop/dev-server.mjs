@@ -1261,7 +1261,24 @@ async function handleRequest(req, res) {
       let fullPath;
       try { fullPath = safeRepoPath(cwd, path); }
       catch (e) { return jsonResponse(req, res, { error: e.message }, 400); }
-      const content = readFileSync(fullPath, "utf-8");
+      // Read bytes and decode strictly, mirroring the Rust `read_file`, which is
+      // `std::fs::read_to_string` and rejects anything that is not valid UTF-8.
+      // `readFileSync(..., "utf-8")` instead substitutes U+FFFD and succeeds, and
+      // that divergence is not cosmetic: a non-UTF-8 conflicted file made every
+      // conflict in a repo unresolvable in the packaged app while loading fine
+      // under `pnpm dev:web`, so manual QA could not reproduce it (issue #188).
+      // The error string matches Rust's `format!("Failed to read {}: {}", …)`
+      // so both backends fail identically, not just succeed identically.
+      let content;
+      try {
+        const bytes = readFileSync(fullPath);
+        content = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+      } catch (e) {
+        const reason = e instanceof TypeError
+          ? "stream did not contain valid UTF-8"
+          : e.message;
+        return jsonResponse(req, res, { error: `Failed to read ${path}: ${reason}` }, 400);
+      }
       return jsonResponse(req, res, { path, content });
     }
 
