@@ -33,10 +33,10 @@
 // proc-macro de Tauri génère une aide `__cmd__<name>` qui entre en conflit si
 // la fn elle-même est `pub`. Voir le bloc "Parity probe re-exports" dans lib.rs.
 use gitwand_desktop_lib::{
-    git_blame_parity, git_branches_parity, read_file_parity, git_commit_submodule_changes_parity, git_diff_parity,
+    git_blame_parity, git_branches_parity, git_commit_submodule_changes_parity, git_diff_parity,
     git_log_parity, git_remote_info_parity, git_stash_list_parity, git_status_libgit2_parity,
-    git_status_parity, git_submodule_branches_parity, scan_secrets_parity, snapshot_create_parity,
-    snapshot_list_parity, snapshot_prune_parity, snapshot_restore_parity,
+    git_status_parity, git_submodule_branches_parity, read_file_parity, scan_secrets_parity,
+    snapshot_create_parity, snapshot_list_parity, snapshot_prune_parity, snapshot_restore_parity,
 };
 use serde_json::{json, Value};
 use std::io::{self, Read};
