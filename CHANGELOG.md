@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **CI now checks that the packaged `.deb` actually starts.** Nothing did: `rust-check` compiles, `bundle-smoke` proves the bundler still produces a package, and neither ever ran the result. A new job installs the built `.deb` on **ubuntu-24.04** (Linux Mint 22's base, deliberately not the 22.04 it is built on) and launches it headless, failing unless the process is still alive after 20 seconds, since a GUI app has no success exit code. It captures the output a real GUI launch throws away: the `.desktop` entry ships `Terminal=false`, which is why #139 arrived with no diagnostics at all and sat unresolvable for a month.
+
 ### Fixed
 
 - **The dev-server accepted files the packaged app refuses.** `read_file` is `std::fs::read_to_string` in Rust, which rejects anything that is not valid UTF-8, while the dev-server's `readFileSync(path, "utf-8")` silently substituted `U+FFFD` and returned success. The two "worked" differently, which is worse than one of them failing: a non-UTF-8 file among a repository's conflicts made every conflict unresolvable in the packaged app while the same repository loaded fine under `pnpm dev:web`, so the bug could not be reproduced in the environment used for manual QA. The dev-server now decodes strictly and returns the same error string, and a new `tests/parity/read-file.test.mjs` asserts the two backends **refuse** the same input for the same reason, not merely that they accept the same input.

@@ -396,3 +396,71 @@ jobs:
             apps/desktop/src-tauri/target/ci/bundle/**/*.deb
             apps/desktop/src-tauri/target/ci/bundle/**/*.AppImage
           if-no-files-found: warn
+
+  # Does the packaged .deb actually start?
+  #
+  # Issue #139 ("Cannot open the App | deb | Linux Mint 22"): a user installed
+  # the .deb and the app never appeared. Nothing in CI covered that. rust-check
+  # compiles, bundle-smoke proves the bundler still produces a package, and
+  # neither one ever runs the thing. The gap is the same shape as the rest of
+  # #188: a green pipeline that never asserts the effect users care about.
+  #
+  # Deliberately on ubuntu-24.04, not the 22.04 the bundle is built on: Linux
+  # Mint 22 is Ubuntu 24.04 (noble), and "builds on jammy, refuses to start on
+  # noble" is exactly the failure class #139 reports. Running it on the build
+  # distro would test nothing.
+  #
+  # `.desktop` ships `Terminal=false`, so a GUI launch discards stderr and the
+  # user sees nothing at all — which is why #139 arrived with no diagnostics
+  # and sat for a month. This job captures that output.
+  deb-launch-smoke:
+    name: .deb installs and launches (ubuntu-24.04)
+    needs: bundle-smoke
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download the .deb built by bundle-smoke
+        uses: actions/download-artifact@v4
+        with:
+          name: bundle-smoke-ubuntu-22.04
+          path: bundle
+
+      - name: Install it the way a user would
+        run: |
+          set -euxo pipefail
+          # Same third-party apt source removal as every other Linux step here:
+          # Google's Chrome repo served a mismatched index on 2026-09-09 and
+          # took down every Ubuntu job in the repo (issue #188).
+          sudo rm -f /etc/apt/sources.list.d/google-chrome.list \
+                     /etc/apt/sources.list.d/google-chrome-*.list \
+                     /etc/apt/sources.list.d/*google*.sources
+          sudo apt-get update
+          DEB=$(find bundle -name '*.deb' | head -1)
+          [ -n "$DEB" ] || { echo "::error::bundle-smoke produced no .deb to test"; exit 1; }
+          echo "testing $DEB"
+          # `apt-get install ./file.deb` resolves declared dependencies from the
+          # noble archives, which is what a user double-clicking the file gets.
+          sudo apt-get install -y "./$DEB"
+          sudo apt-get install -y xvfb
+
+      - name: Launch it headless and require it to stay up
+        run: |
+          set -uo pipefail
+          export RUST_BACKTRACE=full
+          # A GUI app has no "success" exit code: staying alive IS the success.
+          # `timeout` returns 124 when it has to kill a still-running process,
+          # so 124 is what we want and anything else means it died on its own.
+          set +e
+          timeout 20 xvfb-run -a -s "-screen 0 1280x800x24" \
+            gitwand-desktop > launch.log 2>&1
+          code=$?
+          set -e
+          echo "--- captured output ---"
+          cat launch.log || true
+          echo "--- exit code: $code ---"
+          if [ "$code" = "124" ]; then
+            echo "::notice::gitwand-desktop was still running after 20s — it starts."
+            exit 0
+          fi
+          echo "::error::gitwand-desktop exited on its own with code $code instead of staying up."
+          echo "::error::That is issue #139's symptom: the .deb installs and the app never appears."
+          exit 1
