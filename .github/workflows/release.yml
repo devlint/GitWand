@@ -290,6 +290,39 @@ jobs:
       - name: Deploy to GitHub Pages
         uses: actions/deploy-pages@v4
 
+      # `deploy-pages` reporting success does not mean the site changed.
+      # GitHub Pages deduplicates by `pages_build_version`, which is the commit
+      # sha; a release tag points at the same commit `Deploy Website` already
+      # deployed on push to main, so Pages creates no new deployment, prints
+      # "Reported success!", and keeps serving the old content.
+      #
+      # That is exactly how v3.10.1 shipped complete artifacts while
+      # /update/latest.json still advertised 3.10.0: every step green, nobody
+      # would have received the update (issue #188 pt4). The only thing that
+      # distinguishes "deployed" from "reported deployed" is fetching the
+      # result, so fetch it and fail if it is not the version we just built.
+      - name: Verify the deployed manifest really serves this version
+        run: |
+          set -euo pipefail
+          URL=https://gitwand.app/update/latest.json
+          WANT="${GITHUB_REF_NAME#v}"
+          for attempt in 1 2 3 4 5 6; do
+            # Pages' CDN caches for 600s and ignores query strings, so a stale
+            # read here is expected for a while; retry rather than fail fast.
+            GOT=$(curl -fsS --max-time 20 "$URL" | jq -r .version || echo "")
+            if [ "$GOT" = "$WANT" ]; then
+              echo "::notice::$URL serves $GOT"
+              exit 0
+            fi
+            echo "attempt $attempt/6 — $URL serves '${GOT:-<unreachable>}', want '$WANT'; sleeping 60s"
+            sleep 60
+          done
+          echo "::error::$URL still serves '${GOT:-<unreachable>}' after 6 minutes, expected '$WANT'."
+          echo "::error::The auto-update manifest is NOT live: users will not be offered this release."
+          echo "::error::Most likely the Pages deployment was deduplicated against an earlier deploy of the same commit."
+          echo "::error::Fix: run the 'Deploy Website' workflow manually (workflow_dispatch) once the release is published."
+          exit 1
+
   # Bump the Homebrew cask in devlint/homebrew-tap to this release's version +
   # universal-DMG sha256, so `brew install --cask devlint/tap/gitwand` always
   # tracks the latest release. Only version + sha256 lines are rewritten, so
