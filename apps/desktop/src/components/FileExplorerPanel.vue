@@ -127,28 +127,40 @@ const docStates = new Map<number, EditorStateType>();
 const editLocked = ref(true);
 const editable = computed(() => !editLocked.value);
 
-const cm = useCodeMirror({
-  host: editorHost,
-  editable,
-  onDocChange: () => {
-    const tab = activeTab.value;
-    const state = cm.view.value?.state;
-    if (!tab || !state) return;
-    docStates.set(tab.id, state);
-    explorer.updateContent(props.repoPath, tab.id, state.doc.toString());
+const cm = useCodeMirror({ host: editorHost, editable });
+
+/**
+ * The doc-change listener for ONE tab, baked into that tab's `EditorState`.
+ *
+ * The tab id is captured here rather than read from `activeTab` at fire time,
+ * and that distinction is the whole point. `mountTab` awaits `waitForTabLoaded`
+ * and the grammar load while the PREVIOUS tab's view is still mounted and
+ * editable. A keystroke (or `onUndo`) in that window fires with `activeTab`
+ * already pointing at the new tab, so a listener that read it would write the
+ * old tab's text into the new tab's cache and into `explorer.updateContent` —
+ * and the new tab would then display, and on save write, the previous file's
+ * contents. Capturing per state is what the pre-v3.11 code did; the v3.11
+ * refactor briefly lost it.
+ */
+function updateListenerFor(tabId: number): Extension {
+  const libs = peekCodeMirror()!;
+  return libs.EditorView.updateListener.of((update) => {
+    if (!update.docChanged) return;
+    docStates.set(tabId, update.state);
+    explorer.updateContent(props.repoPath, tabId, update.state.doc.toString());
     // Editing shifts line numbers, so the committed blame no longer aligns:
     // drop this tab's cached model and turn blame off. Deferred to a
     // microtask to avoid dispatching a reconfigure from inside an update.
     if (blameEnabled.value) {
-      blameModels.delete(tab.id);
+      blameModels.delete(tabId);
       queueMicrotask(() => {
         if (!blameEnabled.value) return;
         blameEnabled.value = false;
-        applyBlame(tab.id);
+        applyBlame(tabId);
       });
     }
-  },
-});
+  });
+}
 
 // ── Blame gutter (opt-in, per tab) ──
 // A Compartment owned by THIS component, not the composable: `useCodeMirror`
@@ -283,7 +295,10 @@ async function mountTab(tab: FileTab) {
 
   let state = docStates.get(tab.id);
   if (!state) {
-    state = await cm.buildState(tab.content, tab.path, [blameCompartment!.of([])]);
+    state = await cm.buildState(tab.content, tab.path, [
+      blameCompartment!.of([]),
+      updateListenerFor(tab.id),
+    ]);
     if (activeTab.value?.id !== tab.id) return; // a newer tab switch happened while the grammar was loading — don't touch the shared view/docStates with a stale tab's state
     docStates.set(tab.id, state);
   }

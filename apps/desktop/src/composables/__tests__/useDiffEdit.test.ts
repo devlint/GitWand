@@ -166,6 +166,38 @@ describe("spliceHunk — line endings and the trailing newline", () => {
   });
 });
 
+describe("spliceHunk — a hunk that only deletes", () => {
+  /**
+   * `newCount === 0`: the hunk covers no lines on the new side at all. Its
+   * post-image is the empty string, and `"".split("\n")` is `[""]` rather than
+   * `[]`, so the length check compared one empty line against an empty slice
+   * and reported a perfectly fresh hunk as stale. The user would have been
+   * told "the file changed since this diff was computed" about a file nothing
+   * had touched.
+   */
+  const deleteOnly = (): DiffHunk => ({
+    header: "@@ -2,2 +1,0 @@",
+    oldStart: 2, oldCount: 2, newStart: 2, newCount: 0,
+    lines: [line("delete", "beta", 2, undefined), line("delete", "gamma", 3, undefined)],
+  });
+  const AFTER_DELETE = "alpha\ndelta\n";
+
+  it("is not mistaken for a stale hunk", () => {
+    const r = spliceHunk(AFTER_DELETE, deleteOnly(), "");
+    expect(r.ok, "nothing has changed under us").toBe(true);
+  });
+
+  it("re-inserting text lands at the right place", () => {
+    const r = spliceHunk(AFTER_DELETE, deleteOnly(), "restored");
+    expect(r.ok && r.text).toBe("alpha\nrestored\ndelta\n");
+  });
+
+  it("splicing its own (empty) post-image is still a no-op", () => {
+    const r = spliceHunk(AFTER_DELETE, deleteOnly(), hunkPostImage(deleteOnly()));
+    expect(r.ok && r.text).toBe(AFTER_DELETE);
+  });
+});
+
 describe("spliceHunk — git's own CRLF shape", () => {
   /**
    * Modelled on what the dev-server's parser actually returns, not on what a

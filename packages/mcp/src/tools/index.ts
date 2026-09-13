@@ -123,6 +123,12 @@ export function registerTools() {
             type: "boolean",
             description: `Only applies when operation is 'merge' (the default). ${REGENERATE_PARAM_DESCRIPTION}`,
           },
+          min_confidence_score: {
+            type: "number",
+            minimum: 0,
+            maximum: 100,
+            description: "Apply only resolutions whose confidence scores >= this (0-100). Combined with the policy's own label threshold, never instead of it: raising it can only ever apply LESS, never more, so it can never let through a hunk the engine already refused. Omit to use the repo's .gitwandrc minConfidenceScore, or no bar at all.",
+          },
         },
       },
     },

@@ -92,7 +92,12 @@ export function spliceHunk(
   // stale hunk on every single edit.
   const bare = (l: string) => (l.endsWith("\r") ? l.slice(0, -1) : l);
   const onDisk = lines.slice(from, to).map(bare);
-  const expected = hunkPostImage(hunk).split("\n").map(bare);
+  // A hunk that only deletes has `newCount === 0`, so it covers no lines at
+  // all. Its post-image is the empty string, and `"".split("\n")` is `[""]`,
+  // one empty line rather than none: comparing that against an empty slice
+  // always mismatched and reported a perfectly fresh hunk as stale.
+  const post = hunkPostImage(hunk);
+  const expected = count === 0 && post === "" ? [] : post.split("\n").map(bare);
   if (onDisk.length !== expected.length || onDisk.some((l, i) => l !== expected[i])) {
     return { ok: false, reason: "stale" };
   }
@@ -107,7 +112,13 @@ export function spliceHunk(
   // is followed by a LF, so text ending "three\r" keeps it and would produce a
   // doubled CR. That is exactly the shape `hunkPostImage` hands back for a
   // CRLF file, since git keeps the CR in line content.
-  const replacementLines = replacement.split(/\r?\n/).map(bare);
+  // Empty text into a zero-length range means "insert nothing". Without this,
+  // `"".split(/\r?\n/)` is `[""]` and the splice writes a blank line, so
+  // confirming an untouched delete-only hunk would ADD an empty line to the
+  // file. Replacing a non-empty range with "" still collapses it to one empty
+  // line, which is the honest reading of the user clearing the editor.
+  const replacementLines =
+    count === 0 && replacement === "" ? [] : replacement.split(/\r?\n/).map(bare);
 
   const head = lines
     .slice(0, from)
@@ -124,9 +135,11 @@ export function spliceHunk(
   // The replaced block ends with a terminator only if something follows it, or
   // if the last replaced line originally had one.
   const lastReplacedEnding = endings[to - 1] ?? "";
-  const body = replacementLines
-    .map((l, i) => (i < replacementLines.length - 1 ? l + eol : l + (tail ? eol : lastReplacedEnding)))
-    .join("");
+  const body = replacementLines.length === 0
+    ? ""
+    : replacementLines
+        .map((l, i) => (i < replacementLines.length - 1 ? l + eol : l + (tail ? eol : lastReplacedEnding)))
+        .join("");
 
   return { ok: true, text: head + body + tail };
 }
