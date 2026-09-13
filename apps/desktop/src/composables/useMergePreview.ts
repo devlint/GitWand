@@ -31,6 +31,7 @@ import type { GitWandOptions, MergeContext } from "@gitwand/core";
 // engine back in the boot chunk even after useGitWand.ts stopped doing so.
 // See ../utils/coreEngine.ts.
 import { engine } from "../utils/coreEngine.js";
+import { useResolutionSelection } from "./useResolutionSelection";
 
 // ─── Opérations prédictibles (v2.20.0) ───────────────────
 //
@@ -336,8 +337,17 @@ export function useMergePreview(cwd: () => string) {
   // read over the summary already computed. Same reasoning as
   // `wouldApplyAtThreshold` in `@gitwand/core`.
 
-  /** 0 disables the bar. Seeded from Settings by the caller. */
-  const threshold = ref(0);
+  /**
+   * The confidence bar. Deliberately the SHARED store's ref, not a local one.
+   *
+   * It was local, and that was a real bug: the panel filtered its own displayed
+   * counts while `useResolutionSelection.minScore` stayed 0, so the apply never
+   * saw the bar at all. A user could set 90%, watch the panel report "1 held
+   * back by the bar", press Merge and auto-resolve, and have the sub-90 hunk
+   * written anyway. Two refs for one concept cannot be kept in sync by
+   * discipline; there is now one.
+   */
+  const threshold = useResolutionSelection().minScore;
 
   /** Every hunk of every conflicting file, flattened once. */
   const allHunks = computed(() =>

@@ -82,6 +82,7 @@ vi.mock("../../utils/backend", () => ({
 }));
 
 import { useMergePreview } from "../useMergePreview";
+import { useResolutionSelection } from "../useResolutionSelection";
 
 beforeEach(() => {
   calls.resolve = 0;
@@ -156,6 +157,48 @@ describe("useMergePreview — confidence reaches the summary", () => {
     expect(hunk.confidenceLabel).toBe("high");
     expect(typeof hunk.reason).toBe("string");
     expect(hunk.reason.length, "the reason explains the verdict").toBeGreaterThan(0);
+  });
+});
+
+describe("useMergePreview — the bar is ONE bar", () => {
+  /**
+   * Regression test for a bug that made the whole control cosmetic.
+   *
+   * The panel used to filter its displayed counts through a ref of its own
+   * while `useResolutionSelection.minScore`, which is what actually gates an
+   * apply, stayed 0 forever. Nothing wrote it. So a user could set 90%, watch
+   * the panel report "1 held back by the bar", press Merge and auto-resolve,
+   * and have the sub-90 hunk written anyway, with the apply report then
+   * claiming estimate drift because the two numbers came from different
+   * filters.
+   *
+   * Two refs for one concept cannot be kept in sync by discipline, so there is
+   * now one. These assert the identity rather than the values, because values
+   * can agree by accident.
+   */
+  it("the preview threshold IS the shared selection bar", () => {
+    const { threshold } = useMergePreview(() => "/repo");
+    expect(threshold, "same ref object").toBe(useResolutionSelection().minScore);
+  });
+
+  it("moving the panel bar changes what the apply would write", () => {
+    const selection = useResolutionSelection();
+    selection.resetAll();
+    const { threshold } = useMergePreview(() => "/repo");
+    const res83 = {
+      autoResolved: true,
+      resolvedLines: ["x"],
+      hunk: { confidence: { score: 83 } },
+    } as never;
+
+    threshold.value = 0;
+    expect(selection.shouldApply("a.ts", 0, res83)).toBe(true);
+
+    threshold.value = 90;
+    expect(selection.shouldApply("a.ts", 0, res83), "the apply sees the bar").toBe(false);
+
+    threshold.value = 75;
+    expect(selection.shouldApply("a.ts", 0, res83)).toBe(true);
   });
 });
 

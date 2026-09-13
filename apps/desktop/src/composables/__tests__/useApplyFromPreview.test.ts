@@ -18,7 +18,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { useApplyFromPreview, type ApplyDeps } from "../useApplyFromPreview";
+import { useApplyFromPreview, assertOperationSucceeded, type ApplyDeps } from "../useApplyFromPreview";
 
 /** A conflict file as the orchestrator sees it. */
 const file = (path: string, remaining: number, autoResolved = 0) => ({
@@ -204,6 +204,39 @@ describe("useApplyFromPreview — failures never destroy work", () => {
 
     expect(out.finalized, "still conflicted after staging: do not continue").toBe(false);
     expect(out.stoppedReason).toBe("residual");
+  });
+});
+
+describe("assertOperationSucceeded — the wrappers that never throw", () => {
+  /**
+   * `useGitRepo.mergeBranch` and `cherryPick` catch everything into
+   * `error.value`, and also swallow a `{ success: false }` result. Wiring the
+   * orchestrator to them meant a merge git REFUSED came back looking like a
+   * clean success: no conflicts, the loop breaks immediately, and the report
+   * claimed `finalized: true` and "0 applied, 0 left" for an operation that
+   * never ran. Exactly the hazard this file's header calls out for
+   * `stageFiles`, caught there and missed here.
+   */
+  it("throws on an explicit failure, so op-failed is reachable at all", () => {
+    expect(() =>
+      assertOperationSucceeded({ success: false, message: "refusing to merge unrelated histories" }, "merge x"),
+    ).toThrow(/unrelated histories/);
+  });
+
+  it("uses a sensible message when git gave none", () => {
+    expect(() => assertOperationSucceeded({ success: false }, "merge topic")).toThrow(/merge topic/);
+  });
+
+  it("treats a CONFLICT as success: git did the work and stopped correctly", () => {
+    expect(() => assertOperationSucceeded({ success: false, conflicts: true }, "merge x")).not.toThrow();
+  });
+
+  it("accepts a plain success", () => {
+    expect(() => assertOperationSucceeded({ success: true }, "merge x")).not.toThrow();
+  });
+
+  it("throws rather than assuming success when there is no result at all", () => {
+    expect(() => assertOperationSucceeded(undefined, "merge x")).toThrow();
   });
 });
 

@@ -392,8 +392,10 @@ const {
 const previewingBranch = ref<string | null>(null);
 const previewOperation = ref<PreviewOperation>("merge");
 
-// v3.11 — the panel control is seeded from the Setting and is a per-preview
-// override: it is deliberately not persisted, and resets with the preview.
+// v3.11 — opening the predictor re-seeds the bar from the Setting, so a
+// per-preview override does not silently persist into the next preview.
+// `previewThreshold` IS the shared store's ref (see useMergePreview), so this
+// is the same value every apply path consults, not a display-only copy.
 watch(previewingBranch, (branch) => {
   if (branch) previewThreshold.value = settings.value.resolution.minConfidenceScore;
 });

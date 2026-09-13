@@ -89,7 +89,7 @@ import { useGitWand, type ApplyPredicate } from "./composables/useGitWand";
 import { useResolutionSelection, contentStamp } from "./composables/useResolutionSelection";
 import { getPendingSplitForHash, resolvePendingSplit } from "./composables/useInteractiveRebase";
 import { spliceHunk } from "./composables/useDiffEdit";
-import { useApplyFromPreview, type ApplyOutcome } from "./composables/useApplyFromPreview";
+import { useApplyFromPreview, assertOperationSucceeded, type ApplyOutcome } from "./composables/useApplyFromPreview";
 import { useResolutionMemory, type ResolutionMemoryEntry, type ResolutionStrategy } from "./composables/useResolutionMemory";
 import { useRepoTabs } from "./composables/useRepoTabs";
 import { useAiTasks } from "./composables/useAiTasks";
@@ -907,8 +907,19 @@ const { apply: runApplyFromPreview } = useApplyFromPreview({
     return gitRepoState(repoFolderPath.value ?? "");
   },
   snapshot: (cwd, kind, label) => snapshots.capture(cwd, kind, label) as never,
-  runMerge: async (ref_) => { await doMergeRaw(ref_, false); },
-  runCherryPick: async (sha) => { await doCherryPick([sha]); },
+  // Straight to the backend, NOT through useGitRepo's UI wrappers: those catch
+  // into `error.value` and never throw, so a refused merge would reach the
+  // orchestrator looking like a clean success. See assertOperationSucceeded.
+  runMerge: async (ref_) => {
+    const { gitMerge } = await import("./utils/backend");
+    const result = await gitMerge(repoFolderPath.value ?? "", ref_, false);
+    assertOperationSucceeded(result, `merge ${ref_}`);
+  },
+  runCherryPick: async (sha) => {
+    const { gitCherryPick } = await import("./utils/backend");
+    const result = await gitCherryPick(repoFolderPath.value ?? "", [sha]);
+    assertOperationSucceeded(result, `cherry-pick ${sha}`);
+  },
   runRebaseOnto: async (onto) => {
     const { gitRebaseOnto } = await import("./utils/backend");
     return gitRebaseOnto(repoFolderPath.value ?? "", onto);
@@ -925,9 +936,18 @@ const { apply: runApplyFromPreview } = useApplyFromPreview({
   finalize: async (operation) => {
     const { gitRebaseAction } = await import("./utils/backend");
     const cwd = repoFolderPath.value ?? "";
-    if (operation === "rebase") await gitRebaseAction(cwd, "continue");
-    else if (operation === "cherry-pick") await doCherryPickContinue();
-    else await doMergeContinue();
+    // Same reasoning as the runners above: doMergeContinue and
+    // doCherryPickContinue swallow failure into `error.value`, so a refused
+    // --continue would be reported as a finished merge.
+    if (operation === "rebase") {
+      await gitRebaseAction(cwd, "continue");
+      return;
+    }
+    const { gitMergeContinue, gitCherryPickContinue } = await import("./utils/backend");
+    const result = operation === "cherry-pick"
+      ? await gitCherryPickContinue(cwd)
+      : await gitMergeContinue(cwd);
+    assertOperationSucceeded(result as never, `${operation} --continue`);
   },
   applyPredicateFor,
 });
@@ -1690,9 +1710,21 @@ watch(
 watch(repoFolderPath, () => {
   commitReviewDecision.value = null;
   // v3.11 — the per-hunk opt-out set is keyed by repo-relative path, so it
-  // must not survive a repo change: the same path means a different file.
+  // must not survive a repo change: the same path means a different file. The
+  // confidence bar does: it is a user preference, so it is re-seeded from
+  // Settings rather than cleared.
   resolutionSelection.resetAll();
+  resolutionSelection.minScore.value = settings.value.resolution.minConfidenceScore;
 });
+
+// The bar governs every apply path, including the merge editor's "Resolve
+// auto" and the MERGE_HEAD automation, so it has to hold the Setting's value
+// whether or not the user ever opens the Conflict Predictor.
+watch(
+  () => settings.value.resolution.minConfidenceScore,
+  (score) => { resolutionSelection.minScore.value = score; },
+  { immediate: true },
+);
 
 function onDiscardSection(sectionKey: string, paths: string[]) {
   discardSectionConfirm.value = { sectionKey, paths };

@@ -101,6 +101,33 @@ export interface ApplyOutcome {
   estimateDrifted: boolean;
 }
 
+/**
+ * Honest runners for the two operations whose UI wrappers swallow failure.
+ *
+ * `useGitRepo.mergeBranch` and `cherryPick` catch everything into `error.value`
+ * and never throw, and they also swallow a `{ success: false }` result the same
+ * way. Wiring the orchestrator to them meant a merge git refused (dirty tree,
+ * unrelated histories, bad ref) came back looking like success: no conflicts,
+ * the loop breaks immediately, and the report claims `finalized: true` and
+ * "0 applied, 0 left" for an operation that never ran.
+ *
+ * That is the same hazard this file's header already calls out for
+ * `stageFiles`; it was caught there and missed here. These call the backend
+ * directly and throw, so the `op-failed` branch is actually reachable.
+ */
+export function assertOperationSucceeded(
+  result: { success?: boolean; conflicts?: boolean; message?: string } | undefined,
+  what: string,
+): void {
+  if (!result) throw new Error(`${what} returned no result`);
+  // A conflict IS a success for our purposes: git did the work and stopped
+  // where it should. Only a refusal is a failure.
+  if (result.conflicts) return;
+  if (result.success === false) {
+    throw new Error(result.message?.trim() || `${what} failed`);
+  }
+}
+
 /** Bounded so a pathological rebase reports instead of spinning forever. */
 const MAX_REBASE_STEPS = 100;
 
