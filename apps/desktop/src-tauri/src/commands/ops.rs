@@ -805,6 +805,69 @@ pub(crate) async fn git_interactive_rebase(
     Err(format!("git rebase -i failed: {}", msg))
 }
 
+/// Rebase the current branch onto `onto`, non-interactively.
+///
+/// v3.11 — added for apply-from-preview, which needs to run the operation the
+/// Conflict Predictor simulated. `ops.rs` already had `git_pull` (which can
+/// rebase), `git_rebase_action` (continue/skip/abort on an *in-progress*
+/// rebase) and `git_interactive_rebase`, but no plain `git rebase <onto>`.
+///
+/// Returns `conflict: true` when the rebase halts on a conflict, exactly like
+/// `git_interactive_rebase`, so the frontend drives continue/skip/abort
+/// through the same path afterwards.
+///
+/// `GIT_EDITOR=true` keeps git from opening an editor on a halt, and
+/// `GIT_TERMINAL_PROMPT=0` makes a credential prompt fail fast instead of
+/// hanging a headless process forever.
+#[tauri::command]
+pub(crate) async fn git_rebase_onto(
+    cwd: String,
+    onto: String,
+) -> Result<InteractiveRebaseResult, String> {
+    let target = onto.trim().to_string();
+    if target.is_empty() {
+        return Err("rebase target must not be empty".to_string());
+    }
+    // A ref starting with `-` would be read by git as an option. Every other
+    // argument is passed positionally, never interpolated into a shell string.
+    if target.starts_with('-') {
+        return Err(format!("invalid rebase target: {}", target));
+    }
+
+    let _repo = repo_lock::write(&cwd);
+    let _t0 = Instant::now();
+    let output = git_cmd()
+        .args(["rebase", &target])
+        .env("GIT_EDITOR", "true")
+        .env("EDITOR", "true")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("Failed to run git rebase: {}", e))?;
+    record_cmd(
+        "git rebase",
+        &cwd,
+        _t0.elapsed().as_millis() as u64,
+        output.status.code().unwrap_or(-1),
+    );
+
+    if output.status.success() {
+        return Ok(InteractiveRebaseResult { conflict: false });
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if stderr.contains("CONFLICT")
+        || stderr.contains("could not apply")
+        || stdout.contains("CONFLICT")
+        || stdout.contains("could not apply")
+    {
+        return Ok(InteractiveRebaseResult { conflict: true });
+    }
+    let msg = if stderr.is_empty() { stdout } else { stderr };
+    Err(format!("git rebase failed: {}", msg))
+}
+
 // ─── .gitignore ────────────────────────────────────────────────
 
 /// Append `path` to the repo's `.gitignore`, once.

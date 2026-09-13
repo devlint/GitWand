@@ -2945,6 +2945,30 @@ async function handleRequest(req, res) {
       }
     }
 
+    // POST /api/git-rebase-onto  { cwd, onto }  -> { conflict }
+    if (url.pathname === "/api/git-rebase-onto" && req.method === "POST") {
+      const { cwd, onto } = await readBody(req);
+      if (!cwd || !onto) return jsonResponse(req, res, { error: "Missing cwd or onto" }, 400);
+      const target = String(onto).trim();
+      if (!target) return jsonResponse(req, res, { error: "rebase target must not be empty" }, 400);
+      // A ref starting with "-" would be read by git as an option. Mirrors the
+      // Rust guard; every other argument is positional, never interpolated.
+      if (target.startsWith("-")) {
+        return jsonResponse(req, res, { error: `invalid rebase target: ${target}` }, 400);
+      }
+      const r = spawnSync(GIT, ["rebase", target], {
+        cwd: resolve(cwd),
+        encoding: "utf-8",
+        env: { ...process.env, GIT_EDITOR: "true", EDITOR: "true", GIT_TERMINAL_PROMPT: "0" },
+      });
+      if (r.status === 0) return jsonResponse(req, res, { conflict: false });
+      const stderr = (r.stderr || "").trim();
+      const stdout = (r.stdout || "").trim();
+      const halted = /CONFLICT|could not apply/.test(stderr) || /CONFLICT|could not apply/.test(stdout);
+      if (halted) return jsonResponse(req, res, { conflict: true });
+      return jsonResponse(req, res, { error: `git rebase failed: ${stderr || stdout}` }, 400);
+    }
+
     // POST /api/git-rebase-action  { cwd, action: "continue"|"abort"|"skip" }
     if (url.pathname === "/api/git-rebase-action" && req.method === "POST") {
       const { cwd, action } = await readBody(req);

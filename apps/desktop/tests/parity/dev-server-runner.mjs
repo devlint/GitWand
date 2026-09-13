@@ -96,8 +96,26 @@ export async function startDevServer() {
 
   return {
     port,
+    /**
+     * `Connection: close` on every request, deliberately.
+     *
+     * Node's global fetch (undici) pools keep-alive sockets, and the
+     * dev-server keeps Node's default `keepAliveTimeout` of 5 s. A suite whose
+     * gap between two requests exceeds that gets handed a socket the server
+     * has already closed, and the next request fails with ECONNRESET rather
+     * than with anything about the route under test.
+     *
+     * That is easy to miss because it depends on wall-clock timing: it only
+     * showed up once a suite doing real rebases on two clones per test made
+     * the gap long enough, and then only under full-suite load. Opting out of
+     * connection reuse costs a negligible handshake per request and removes
+     * the whole class of failure for every parity suite, not just the slow one.
+     */
     async fetch(pathAndQuery, init) {
-      return fetch(`${baseUrl}${pathAndQuery}`, init);
+      return fetch(`${baseUrl}${pathAndQuery}`, {
+        ...init,
+        headers: { ...(init?.headers ?? {}), connection: "close" },
+      });
     },
     async stop() {
       if (child.exitCode !== null) return;

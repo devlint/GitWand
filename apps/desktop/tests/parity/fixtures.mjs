@@ -377,3 +377,23 @@ export function fixturePreviewCherryPick() {
 
   return { cwd, root, topic, clean };
 }
+
+/**
+ * A topic branch that rebases onto `main` cleanly, or conflicts, depending on
+ * `conflicting`. Returned fresh each call: `git_rebase_onto` is destructive,
+ * so the two backends each need their own clone rather than sharing one cwd.
+ */
+export function fixtureRebaseOnto(conflicting) {
+  const cwd = mkTempRepo("gw-rebase-onto-");
+  commitFile(cwd, "shared.txt", "base\n", "base", 0);
+  commitFile(cwd, "side.txt", "side base\n", "add side.txt", 1);
+
+  execFileSync("git", ["-C", cwd, "checkout", "-b", "topic", "--quiet"]);
+  commitFile(cwd, conflicting ? "shared.txt" : "topic.txt", "topic work\n", "topic work", 2);
+
+  execFileSync("git", ["-C", cwd, "checkout", "main", "--quiet"]);
+  commitFile(cwd, conflicting ? "shared.txt" : "side.txt", "main work\n", "main work", 3);
+
+  execFileSync("git", ["-C", cwd, "checkout", "topic", "--quiet"]);
+  return cwd;
+}

@@ -1048,6 +1048,33 @@ export async function gitRebaseAction(
 }
 
 /**
+ * Rebase the current branch onto `onto`, non-interactively.
+ *
+ * v3.11 — apply-from-preview needs to actually run the operation the Conflict
+ * Predictor simulated. Returns `{ conflict }`, true when the rebase halted on
+ * a conflict, so the caller drives continue/skip/abort exactly as it does
+ * after `gitInteractiveRebase`.
+ */
+export async function gitRebaseOnto(
+  cwd: string,
+  onto: string,
+): Promise<{ conflict: boolean }> {
+  if (isTauri()) {
+    return tauriInvoke<{ conflict: boolean }>("git_rebase_onto", { cwd, onto });
+  }
+  const res = await devFetch(`${DEV_SERVER}/api/git-rebase-onto`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, onto }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(err.error ?? `git rebase onto ${onto} failed`);
+  }
+  return res.json();
+}
+
+/**
  * Start an interactive rebase with a caller-supplied todo list.
  * Returns `{ conflict }` — true when the rebase halted on a merge conflict.
  * Throws on a hard failure.

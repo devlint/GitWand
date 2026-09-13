@@ -34,10 +34,11 @@
 // la fn elle-même est `pub`. Voir le bloc "Parity probe re-exports" dans lib.rs.
 use gitwand_desktop_lib::{
     git_blame_parity, git_branches_parity, git_commit_submodule_changes_parity, git_diff_parity,
-    git_log_parity, git_remote_info_parity, git_stash_list_parity, git_status_libgit2_parity,
-    git_status_parity, git_submodule_branches_parity, preview_cherry_pick_parity,
-    preview_merge_parity, preview_rebase_parity, read_file_parity, scan_secrets_parity,
-    snapshot_create_parity, snapshot_list_parity, snapshot_prune_parity, snapshot_restore_parity,
+    git_log_parity, git_rebase_onto_parity, git_remote_info_parity, git_stash_list_parity,
+    git_status_libgit2_parity, git_status_parity, git_submodule_branches_parity,
+    preview_cherry_pick_parity, preview_merge_parity, preview_rebase_parity, read_file_parity,
+    scan_secrets_parity, snapshot_create_parity, snapshot_list_parity, snapshot_prune_parity,
+    snapshot_restore_parity,
 };
 use serde_json::{json, Value};
 use std::io::{self, Read};
@@ -142,6 +143,17 @@ fn main() -> ExitCode {
                 Err(code) => return code,
             };
             to_json(git_branches_parity(cwd))
+        }
+        "git-rebase-onto" => {
+            let cwd = match must_str("cwd") {
+                Ok(v) => v,
+                Err(code) => return code,
+            };
+            let onto = match must_str("onto") {
+                Ok(v) => v,
+                Err(code) => return code,
+            };
+            to_json(git_rebase_onto_parity(cwd, onto))
         }
         "preview-merge" => {
             let cwd = match must_str("cwd") {
