@@ -2410,7 +2410,12 @@ function submitRequestReviewers() {
 }
 .pdv-check-annotations:hover {
   background: var(--color-warning);
-  color: var(--color-bg-primary);
+  /* `--color-bg-primary` is not defined by either theme, so this declaration
+     was invalid and the colour stayed the base rule's `--color-warning`: on
+     hover the badge became orange text on an orange fill, which is unreadable.
+     `--color-bg` is the page background this knockout was reaching for, and it
+     flips with the theme. */
+  color: var(--color-bg);
 }
 
 /* ─── Intelligence tab ───────────────────────────────────── */

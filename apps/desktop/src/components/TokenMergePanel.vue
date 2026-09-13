@@ -76,7 +76,10 @@ const { t } = useI18n();
 .token-merge-panel__preview {
   font-family: var(--font-mono);
   font-size: 12px;
-  background: var(--color-bg-primary);
+  /* `--color-bg-primary` is not defined by either theme, so this block had no
+     background at all and sat directly on the panel. Same token, same fix, and
+     the same value as the sibling ResolutionPreviewPanel code block. */
+  background: var(--color-bg-tertiary);
   border-radius: var(--radius-sm);
   padding: 8px;
   overflow-x: auto;
