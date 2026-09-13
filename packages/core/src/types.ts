@@ -552,6 +552,19 @@ export interface GitWandOptions {
   resolveNonOverlapping?: boolean;
   /** Niveau de confiance minimum pour auto-résolution (défaut: "high") */
   minConfidence?: Confidence;
+  /**
+   * v3.11 — Barre de confiance NUMÉRIQUE supplémentaire, 0-100, combinée en ET
+   * avec `minConfidence`. `null`/absent = désactivée.
+   *
+   * Ne relâche jamais la barrière de label : un hunk doit passer les DEUX.
+   * C'est délibéré et structurel. `complex` score 60 (`makeScore(100, 100, 0)`
+   * → `100 - 100*0.40`), pas 0 : une barre numérique qui *remplacerait* la
+   * barrière de label appliquerait donc les hunks `complex` en silence sous
+   * tout seuil inférieur à 60, exactement la garantie que v3.9.0 a établie.
+   * Étant purement soustractive, aucune valeur ne peut appliquer plus que le
+   * moteur n'applique barre désactivée.
+   */
+  minConfidenceScore?: number | null;
   /** Mode verbose pour le logging (défaut: false) */
   verbose?: boolean;
   /**

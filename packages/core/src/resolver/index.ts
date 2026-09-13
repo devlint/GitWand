@@ -42,6 +42,7 @@ import { buildRegenerationPlan, type RegenerationPlan } from "../regenerate/plan
 import { isChangelogFile } from "./validation.js";
 import {
   CONFIDENCE_ORDER,
+  checkConfidenceGate,
   DEFAULT_OPTIONS,
   applyFileFrequencyPenalty,
   computeEffectiveMinConfidence,
@@ -235,11 +236,22 @@ function resolveHunk(
           reason: `Semantic merge (${dispatch.resolverUsed}) disabled by the "${fmtPolicy}" policy — it combines content from both sides.`,
         };
       }
-      if (CONFIDENCE_ORDER[effective.confidence.label] < CONFIDENCE_ORDER[fmtMinConfidence]) {
+      // v3.11 — barrière unique : label, puis barre numérique optionnelle.
+      // La barre est purement soustractive (cf. `checkConfidenceGate`).
+      const fmtGate = checkConfidenceGate(
+        effective.confidence,
+        fmtMinConfidence,
+        options.minConfidenceScore,
+      );
+      if (!fmtGate.passed) {
+        const because =
+          fmtGate.failedOn === "score"
+            ? `below the minConfidenceScore of ${fmtGate.required}`
+            : `insufficient (minimum required: ${fmtGate.required}, policy: ${fmtPolicy})`;
         return {
           hunk: effective,
           lines: null,
-          reason: `Confidence ${effective.confidence.label} (score: ${effective.confidence.score}) is insufficient to apply the format-aware resolution (minimum required: ${fmtMinConfidence}, policy: ${fmtPolicy}).`,
+          reason: `Confidence ${effective.confidence.label} (score: ${effective.confidence.score}) is ${because} to apply the format-aware resolution.`,
         };
       }
       return { hunk: effective, lines: dispatch.lines, reason: dispatch.reason };
@@ -258,11 +270,21 @@ function resolveHunk(
   const effectiveMinConfidence = computeEffectiveMinConfidence(policyCfg, options);
 
   // Vérifier le niveau de confiance minimum
-  if (CONFIDENCE_ORDER[hunk.confidence.label] < CONFIDENCE_ORDER[effectiveMinConfidence]) {
+  // v3.11 — même barrière que le chemin format-aware ci-dessus.
+  const gate = checkConfidenceGate(
+    hunk.confidence,
+    effectiveMinConfidence,
+    options.minConfidenceScore,
+  );
+  if (!gate.passed) {
+    const because =
+      gate.failedOn === "score"
+        ? `below the minConfidenceScore of ${gate.required}`
+        : `below the ${gate.required} required by the ${effectivePolicy} policy`;
     return {
       hunk,
       lines: null,
-      reason: `Confidence ${hunk.confidence.label} (score: ${hunk.confidence.score}) is below the ${effectiveMinConfidence} required by the ${effectivePolicy} policy.${dispatchNote ? ` [${dispatchNote}]` : ""}`,
+      reason: `Confidence ${hunk.confidence.label} (score: ${hunk.confidence.score}) is ${because}.${dispatchNote ? ` [${dispatchNote}]` : ""}`,
     };
   }
 

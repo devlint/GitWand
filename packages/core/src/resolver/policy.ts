@@ -14,7 +14,7 @@
  * Extrait de `resolver.ts` lors du split P1.1.
  */
 
-import type { ConflictHunk, Confidence, GitWandOptions } from "../types.js";
+import type { ConflictHunk, Confidence, ConfidenceScore, GitWandOptions } from "../types.js";
 import {
   DEFAULT_POLICY,
   effectivePolicyForFile,
@@ -28,6 +28,8 @@ export const DEFAULT_OPTIONS: Required<GitWandOptions> = {
   resolveWhitespace: true,
   resolveNonOverlapping: true,
   minConfidence: "high",
+  // v3.11 — barre numérique désactivée par défaut (cf. GitWandOptions)
+  minConfidenceScore: null,
   verbose: false,
   explainOnly: false,
   policy: DEFAULT_POLICY,
@@ -77,6 +79,45 @@ export function computeEffectivePolicy(
     options.patternOverrides,
   );
   return { policy, cfg: policyToConfig(policy) };
+}
+
+/**
+ * v3.11 — Normalise la barre numérique : seul un nombre fini dans [0, 100]
+ * est retenu, tout le reste désactive la barre. Une valeur hors bornes ou
+ * `NaN` ne doit jamais durcir *ni* relâcher le comportement par défaut.
+ */
+export function normalizeMinScore(v: number | null | undefined): number | null {
+  return typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 100 ? v : null;
+}
+
+/** Résultat de la double barrière (label puis score). */
+export type ConfidenceGateResult =
+  | { passed: true }
+  | { passed: false; failedOn: "label"; required: Confidence }
+  | { passed: false; failedOn: "score"; required: number };
+
+/**
+ * v3.11 — Barrière de confiance unique, partagée par les deux sites d'appel
+ * de `resolveHunk` (chemin format-aware et chemin textuel).
+ *
+ * Les deux critères sont combinés en ET, et le label est évalué en premier :
+ * la barre numérique ne peut que *retirer* des hunks de l'ensemble appliqué,
+ * jamais en ajouter. Voir `GitWandOptions.minConfidenceScore` pour pourquoi
+ * c'est structurel et non un détail d'implémentation.
+ */
+export function checkConfidenceGate(
+  confidence: ConfidenceScore,
+  minLabel: Confidence,
+  minScore: number | null,
+): ConfidenceGateResult {
+  if (CONFIDENCE_ORDER[confidence.label] < CONFIDENCE_ORDER[minLabel]) {
+    return { passed: false, failedOn: "label", required: minLabel };
+  }
+  const bar = normalizeMinScore(minScore);
+  if (bar !== null && confidence.score < bar) {
+    return { passed: false, failedOn: "score", required: bar };
+  }
+  return { passed: true };
 }
 
 /**

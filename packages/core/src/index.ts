@@ -173,6 +173,10 @@ export type { MergePolicy, PolicyConfig, GitWandrcConfig } from "./config.js";
 export { summarizeTiers } from "./stats/tiers.js";
 export type { ResolutionTier, TierSummary } from "./stats/tiers.js";
 
+// v3.11 — threshold query over an existing MergeResult (pure — see stats/threshold.ts)
+export { wouldApplyAtThreshold, summarizeAtThreshold } from "./stats/threshold.js";
+export type { ThresholdSummary } from "./stats/threshold.js";
+
 // v3.5.0 — Secrets scanner (pure, mirrored in Rust — see secrets/scanner.ts)
 export { scanSecrets, shannonEntropy, redact, isIgnored, DEFAULT_IGNORE_GLOBS } from "./secrets/scanner.js";
 export { BUILT_IN_PATTERNS } from "./secrets/patterns.js";
