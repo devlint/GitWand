@@ -1902,6 +1902,7 @@ const es: Locale = {
 
   // ─── MergeEditor inline AI actions ──────────────────────
   mergeEditor: {
+    editAriaLabel: "Editar el conflicto {0}",
     aiButton: "IA",
     aiLoading: "IA…",
     aiErrorPrefix: "IA",

@@ -1936,6 +1936,7 @@ const en = {
 
   // ─── MergeEditor inline AI actions ──────────────────────
   mergeEditor: {
+    editAriaLabel: "Edit conflict {0}",
     aiButton: "AI",
     aiLoading: "AI\u2026",
     aiErrorPrefix: "AI",

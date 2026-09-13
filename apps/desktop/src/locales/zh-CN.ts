@@ -1908,6 +1908,7 @@ const zhCN: Locale = {
 
   // ─── MergeEditor inline AI actions ──────────────────────
   mergeEditor: {
+    editAriaLabel: "\u7f16\u8f91\u51b2\u7a81 {0}",
     aiButton: "AI",
     aiLoading: "AI…",
     aiErrorPrefix: "AI",

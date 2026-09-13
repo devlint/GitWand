@@ -1902,6 +1902,7 @@ const ptBR: Locale = {
 
   // ─── MergeEditor inline AI actions ──────────────────────
   mergeEditor: {
+    editAriaLabel: "Editar o conflito {0}",
     aiButton: "IA",
     aiLoading: "IA…",
     aiErrorPrefix: "IA",

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import type { ConflictFile } from "../composables/useGitWand";
 import { useResolutionSelection, contentStamp } from "../composables/useResolutionSelection";
 import { summarizeTiers, type ConflictHunk } from "@gitwand/core";
@@ -22,6 +22,12 @@ import {
 import LlmTracePanel from "./LlmTracePanel.vue";
 import TokenMergePanel from "./TokenMergePanel.vue";
 import ResolutionPreviewPanel from "./ResolutionPreviewPanel.vue";
+// Async on purpose, and NOT a contradiction of the static-import justification
+// above: that one covers thin BaseModal wrappers with no heavy dependencies.
+// CodeEditor is the entry point to CodeMirror (~400 KB), and it sits behind a
+// `v-if` on a default-null flag, which is verbatim the apps/desktop/CLAUDE.md
+// rule. Opening the merge editor must not pay for it; clicking Edit does.
+const CodeEditor = defineAsyncComponent(() => import("./CodeEditor.vue"));
 import AiSparkle from "./AiSparkle.vue";
 // Not lazy-loaded: this is a thin wrapper around BaseModal (already always-eager
 // per the P1.2 perf exception list) with no heavy additional deps — same static-import
@@ -1114,13 +1120,21 @@ useResizeObserver(contentEl, drawMinimap);
                   >{{ t('common.cancel') }}</a>
                 </div>
               </div>
-              <textarea
-                class="edit-textarea mono"
+              <!-- `:key` is a correctness fix, not cosmetics. `requestAISuggestion`
+                   can point `editingHunkIndex` at a different hunk while a box is
+                   open; without the key Vue patches the existing component and
+                   CodeMirror's undo history survives across hunks, so enough
+                   Cmd+Z could resurrect hunk i's text into hunk j's write. -->
+              <CodeEditor
+                :key="seg.hunkIndex"
+                class="edit-cm"
                 v-model="editContent"
-                :aria-label="`Edit conflict ${seg.hunkIndex}`"
-                spellcheck="false"
-                rows="8"
-              ></textarea>
+                :file-path="props.file.path"
+                :aria-label="t('mergeEditor.editAriaLabel', String((seg.hunkIndex ?? 0) + 1))"
+                :min-lines="8"
+                :max-lines="24"
+                autofocus
+              />
             </div>
 
             <!-- ── Two-panel view (ours / theirs) ──────────── -->
@@ -1584,22 +1598,26 @@ useResizeObserver(contentEl, drawMinimap);
   gap: 0;
 }
 
-.edit-textarea {
+/* The textarea this replaces had `resize: vertical`. That is deliberately not
+   carried over: a CodeMirror view inside a user-resizable box fights its own
+   measurement loop, and max-lines plus internal scrolling covers what the drag
+   handle was for. */
+.edit-cm {
   width: 100%;
-  min-height: 120px;
-  padding: 12px 20px;
-  background: var(--color-bg);
-  color: var(--color-text);
+  padding: 0 20px 12px;
+}
+.edit-cm :deep(.cm-editor) {
   border: none;
   border-bottom: 1px solid var(--color-border);
+  border-radius: 0;
+  background: var(--color-bg);
   font-size: var(--text-md);
   line-height: 1.6;
-  resize: vertical;
-  outline: none;
   tab-size: 2;
 }
 
-.edit-textarea:focus {
+.edit-cm :deep(.cm-editor.cm-focused) {
+  outline: none;
   background: var(--color-bg-secondary);
   box-shadow: inset 0 0 0 2px var(--color-accent);
 }
