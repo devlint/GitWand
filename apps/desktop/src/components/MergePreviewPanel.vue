@@ -481,15 +481,27 @@ function basename(path: string): string {
   color: var(--color-text-secondary);
 }
 
+/* Design tokens only, with no colour fallback.
+   `--color-surface-1` / `--color-surface-2` were never defined by either
+   theme, so every one of these rules silently fell through to its hard-coded
+   Catppuccin fallback: a dark panel, while `--color-text` *is* defined and
+   resolves to near-black in light mode. The result was #1e1e2e behind #15151f
+   text, so the file names in this panel were invisible in light mode.
+   Nothing caught it because the panel had no dev-server route until v3.11 and
+   therefore never rendered at all under `pnpm dev:web`. */
 .preview-panel {
-  background: var(--color-surface-2, #1e1e2e);
-  border: 1px solid var(--color-border, #313244);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
   border-radius: 8px;
   padding: 10px 12px;
   font-size: 12px;
-  color: var(--color-text, #cdd6f4);
-  min-width: 240px;
-  max-width: 340px;
+  color: var(--color-text);
+  /* v3.11: 340px was sized for a stats row and a file list. The confidence
+     bar adds five stops on one line, and the apply row a button plus its
+     estimate, both of which wrapped into ragged two- and three-line blocks at
+     the old cap. */
+  min-width: 320px;
+  max-width: 460px;
 }
 
 .preview-panel--loading,
@@ -515,6 +527,10 @@ function basename(path: string): string {
   align-items: center;
   gap: 8px;
   margin-bottom: 8px;
+  /* Wrap rather than squeeze: the row holds two badges, the source branch and
+     the AI button, and the branch name is the only flexible item, so without
+     this it was the one thing that got ellipsized away to "← …". */
+  flex-wrap: wrap;
 }
 
 .preview-badge {
@@ -528,11 +544,13 @@ function basename(path: string): string {
 .preview-badge--warn   { background: var(--color-warning-soft); color: var(--color-warning); }
 
 .preview-branch {
-  flex: 1;
+  /* Keep enough room for a realistic branch name before ellipsizing. */
+  flex: 1 1 140px;
+  min-width: 120px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--color-subtext, #6c7086);
+  color: var(--color-text-muted);
   font-size: 11px;
 }
 
@@ -540,12 +558,12 @@ function basename(path: string): string {
   background: none;
   border: none;
   cursor: pointer;
-  color: var(--color-subtext, #6c7086);
+  color: var(--color-text-muted);
   padding: 0 2px;
   font-size: 12px;
   line-height: 1;
 }
-.preview-close:hover { color: var(--color-text, #cdd6f4); }
+.preview-close:hover { color: var(--color-text); }
 
 /* Tight-packing override so the global .btn--ai fits the compact
    preview header (the default 32px min-height is too tall here). */
@@ -587,7 +605,7 @@ function basename(path: string): string {
   background: none;
   border: none;
   cursor: pointer;
-  color: var(--color-subtext);
+  color: var(--color-text-muted);
   font-size: 12px;
   line-height: 1;
   padding: 0 2px;
@@ -629,7 +647,7 @@ function basename(path: string): string {
   gap: 6px;
   padding: 3px 6px;
   border-radius: 4px;
-  background: var(--color-surface-1, #181825);
+  background: var(--color-bg-tertiary);
 }
 
 .pf-icon {
@@ -664,7 +682,7 @@ function basename(path: string): string {
   gap: 2px;
   margin-bottom: 8px;
   padding: 2px;
-  background: var(--color-surface-1, #181825);
+  background: var(--color-bg-tertiary);
   border-radius: var(--radius-sm, 6px);
 }
 .preview-op {
@@ -674,14 +692,14 @@ function basename(path: string): string {
   cursor: pointer;
   padding: 3px 6px;
   font-size: var(--text-xs);
-  color: var(--color-subtext, #6c7086);
+  color: var(--color-text-muted);
   border-radius: var(--radius-xs, 4px);
   text-transform: capitalize;
 }
-.preview-op:hover { color: var(--color-text, #cdd6f4); }
+.preview-op:hover { color: var(--color-text); }
 .preview-op--active {
-  background: var(--color-surface-2, #1e1e2e);
-  color: var(--color-text, #cdd6f4);
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
   font-weight: var(--font-semibold);
 }
 
@@ -714,7 +732,7 @@ function basename(path: string): string {
   font-size: 9px;
   width: 10px;
   flex-shrink: 0;
-  color: var(--color-subtext, #6c7086);
+  color: var(--color-text-muted);
 }
 
 /* Hunk-by-hunk list */
@@ -732,13 +750,13 @@ function basename(path: string): string {
   gap: 6px;
   padding: 2px 6px;
   border-radius: 4px;
-  background: var(--color-surface-2, #1e1e2e);
+  background: var(--color-bg-secondary);
   font-size: var(--text-xs);
 }
 .preview-hunk--auto .ph-icon   { color: var(--color-success); }
 .preview-hunk--manual .ph-icon { color: var(--color-danger); }
 .ph-icon { width: 12px; text-align: center; flex-shrink: 0; }
-.ph-line { color: var(--color-subtext, #6c7086); white-space: nowrap; }
+.ph-line { color: var(--color-text-muted); white-space: nowrap; }
 .ph-type {
   flex: 1;
   font-family: var(--font-mono, monospace);
@@ -752,7 +770,7 @@ function basename(path: string): string {
 .preview-scratch {
   margin-top: 8px;
   padding-top: 8px;
-  border-top: 1px solid var(--color-border, #313244);
+  border-top: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -775,7 +793,7 @@ function basename(path: string): string {
 .preview-scratch-path {
   font-family: var(--font-mono, monospace);
   font-size: var(--text-xs);
-  color: var(--color-subtext, #6c7086);
+  color: var(--color-text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

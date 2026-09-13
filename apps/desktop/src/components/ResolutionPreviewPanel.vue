@@ -94,7 +94,7 @@ const { t } = useI18n();
 .resolution-preview-panel__preview {
   font-family: var(--font-mono);
   font-size: 12px;
-  background: var(--color-bg-primary);
+  background: var(--color-bg-tertiary);
   border-radius: var(--radius-sm);
   padding: 8px;
   overflow-x: auto;

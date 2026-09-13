@@ -61,7 +61,7 @@ export function useCodeMirror(options: UseCodeMirrorOptions) {
       {
         "&": {
           color: "var(--color-text)",
-          backgroundColor: "var(--color-bg-primary)",
+          backgroundColor: "var(--color-bg-secondary)",
         },
         ".cm-content": { caretColor: "var(--color-text)" },
         ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--color-text)" },
