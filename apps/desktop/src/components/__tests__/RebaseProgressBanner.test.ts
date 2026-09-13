@@ -130,7 +130,8 @@ describe("RebaseProgressBanner — split affordance", () => {
   it("keeps Continue disabled while conflicted, as it always was", () => {
     // Guarding the pre-existing behaviour the new class binding sits on top of.
     mountBanner({ pendingSplit: false, repoState: repoState({ hasConflict: true }) });
-    const cont = [...container.querySelectorAll<HTMLButtonElement>(".rpm-actions .rpm-btn")].at(-1);
+    const all = [...container.querySelectorAll<HTMLButtonElement>(".rpm-actions .rpm-btn")];
+    const cont = all[all.length - 1];
     expect(cont!.disabled).toBe(true);
   });
 
