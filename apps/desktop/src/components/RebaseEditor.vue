@@ -340,9 +340,19 @@ const pendingSplitAtHead = computed(() =>
 async function handleSplitAtHead() {
   const pending = pendingSplitAtHead.value;
   if (!pending) return;
+  // v3.11: `pending.fullHash` is the ORIGINAL pre-rebase commit, and it drives
+  // `getGitShow` for the modal's diff, while `gitSplitCommit` operates on HEAD.
+  // Whenever the replay rewrote the commit (a moved base, or a conflict the
+  // user just resolved) those are different commits, so the modal showed the
+  // pre-rebase diff while the split acted on the post-rebase content. A clean
+  // replay onto an unchanged base makes the two identical, which is why this
+  // went unnoticed. Split what is actually at HEAD; `pending` only decides
+  // whether to offer the action.
+  // This handler is only reachable at an `edit` stop, where git has already
+  // created the commit, so "HEAD" always names it.
   await splitCommit.openFor(
     props.cwd,
-    { hash: pending.fullHash, message: pending.message },
+    { hash: "HEAD", message: pending.message },
     // Post-split hook: clear the pending entry, then continue the rebase.
     async () => {
       resolvePendingSplit(pending.fullHash);

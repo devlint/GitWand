@@ -87,10 +87,26 @@ const pendingSplits = ref<Map<string, PendingSplit>>(new Map());
 export function getPendingSplitAtHead(
   progress: RebaseProgress | null,
 ): PendingSplit | null {
-  if (!progress || !progress.inProgress || !progress.currentHash) return null;
+  if (!progress || !progress.inProgress) return null;
+  return getPendingSplitForHash(progress.currentHash ?? null);
+}
+
+/**
+ * v3.11 — the same lookup, addressed by a bare hash.
+ *
+ * `RebaseEditor` has a `RebaseProgress` to hand; the app shell watching for
+ * halts only has `RepoOperationState.operationHead`, which the Rust backend
+ * reads from `.git/REBASE_HEAD`. Verified against real git: at both an `edit`
+ * stop and a conflict stop that is the *original* pre-rebase commit, which is
+ * exactly what `pendingSplits` is keyed by, so the two callers can share this.
+ *
+ * `getPendingSplitAtHead` delegates here so the prefix-matching rule cannot
+ * drift between them.
+ */
+export function getPendingSplitForHash(hash: string | null): PendingSplit | null {
+  if (!hash) return null;
   for (const entry of pendingSplits.value.values()) {
-    if (entry.fullHash.startsWith(progress.currentHash) ||
-        entry.shortHash === progress.currentHash) {
+    if (entry.fullHash.startsWith(hash) || entry.shortHash === hash) {
       return entry;
     }
   }

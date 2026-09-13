@@ -87,6 +87,7 @@ import { getPersistedDiffMode, persistDiffMode, type DiffMode } from "./utils/di
 import { isImagePath } from "./utils/imagePath";
 import { useGitWand, type ApplyPredicate } from "./composables/useGitWand";
 import { useResolutionSelection, contentStamp } from "./composables/useResolutionSelection";
+import { getPendingSplitForHash, resolvePendingSplit } from "./composables/useInteractiveRebase";
 import { useApplyFromPreview, type ApplyOutcome } from "./composables/useApplyFromPreview";
 import { useResolutionMemory, type ResolutionMemoryEntry, type ResolutionStrategy } from "./composables/useResolutionMemory";
 import { useRepoTabs } from "./composables/useRepoTabs";
@@ -1051,6 +1052,51 @@ async function handleSplitCommitRequest(entry: GitLogEntry) {
     message: entry.message,
     body: entry.body,
     parents: entry.parents,
+  });
+}
+
+/**
+ * v3.11 (#128 follow-up) — the split affordance on the rebase banner.
+ *
+ * Closing `RebaseEditor` for the conflict banner took "Split this commit…"
+ * with it, leaving only Continue/Skip/Abort for the rest of the rebase. The
+ * banner outlives the editor, so the affordance belongs there.
+ *
+ * `operationHead` is `.git/REBASE_HEAD`, which at both halt kinds is the
+ * ORIGINAL pre-rebase commit, and that is exactly what `pendingSplits` keys
+ * on. Gated on `!hasConflict` for correctness, not neatness: `gitSplitCommit`
+ * runs `reset --mixed HEAD^`, so HEAD has to BE the commit being split. At an
+ * `edit` stop it is; at a conflict stop the commit has not been created yet
+ * and HEAD is its parent.
+ */
+const pendingSplitAtHalt = computed(() => {
+  const st = repoOperationState.value;
+  if (!showRebaseBanner.value || !st || st.hasConflict) return null;
+  return getPendingSplitForHash(st.operationHead ?? null);
+});
+
+async function onRebaseBannerSplit() {
+  const pending = pendingSplitAtHalt.value;
+  const cwd = repoFolderPath.value;
+  if (!pending || !cwd) return;
+
+  // Deliberately NOT `pending.fullHash`, which is what the equivalent handler
+  // in RebaseEditor passes. That is the original pre-rebase commit, and it
+  // drives `getGitShow` for the modal's diff, while `gitSplitCommit` operates
+  // on HEAD. Whenever the replay rewrote the commit (a moved base, or a
+  // conflict the user just resolved) those are two different commits, so the
+  // modal would show the pre-rebase diff while the split acted on the
+  // post-rebase content. Use HEAD, which is the commit that will actually be
+  // split; `pending` only decides whether to offer the action at all.
+  // "HEAD" names the commit git just created at this `edit` stop, which is the
+  // one `reset --mixed HEAD^` will split.
+  await splitCommit.openFor(cwd, { hash: "HEAD", message: pending.message }, async () => {
+    // Keyed on the original hash, which is what `pendingSplits` stores.
+    resolvePendingSplit(pending.fullHash);
+    const { gitRebaseAction } = await import("./utils/backend");
+    await gitRebaseAction(cwd, "continue");
+    await refreshRepoState();
+    await repoRefresh();
   });
 }
 
@@ -4141,6 +4187,8 @@ onUnmounted(() => {
             <RebaseProgressBanner v-if="showRebaseBanner && repoOperationState" :repo-state="repoOperationState"
               :cwd="repoFolderPath ?? ''" :auto-resolving="rebaseAutoResolving"
               @action-done="onRebaseBannerActionDone"
+              :pending-split="pendingSplitAtHalt !== null"
+              @split="onRebaseBannerSplit"
               @auto-resolve="onRebaseBannerAutoResolve" @error="(msg) => { repoError = msg; }" />
 
             <!-- Conflict banner (merge or cherry-pick) — suppressed during a

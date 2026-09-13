@@ -19,12 +19,19 @@ const props = defineProps<{
   cwd: string;
   /** Driven by the parent while the whole-rebase auto-resolve loop runs. */
   autoResolving?: boolean;
+  /**
+   * v3.11 (#128 follow-up) — the halted commit was marked `split` in the
+   * interactive rebase. The parent resolves this; the banner only renders it.
+   */
+  pendingSplit?: boolean;
 }>();
 
 const emit = defineEmits<{
   (e: "action-done", action: "continue" | "abort" | "skip"): void;
   (e: "auto-resolve"): void;
   (e: "error", msg: string): void;
+  /** v3.11 — open the split modal for the commit this rebase is halted on. */
+  (e: "split"): void;
 }>();
 
 const busy = ref(false);
@@ -103,7 +110,25 @@ async function runAction(action: "continue" | "abort" | "skip") {
         <span v-if="autoResolving" class="rpm-spinner" aria-hidden="true" />
         {{ autoResolving ? t('rebase.resolveAutoBusy') : t('rebase.resolveAuto') }}
       </button>
-      <button class="rpm-btn rpm-btn--primary" :disabled="anyBusy || repoState.hasConflict"
+      <!-- v3.11 (#128 follow-up): closing RebaseEditor for the conflict banner
+           took the "Split this commit…" affordance with it, leaving only
+           Continue/Skip/Abort for the rest of the rebase.
+
+           Gated on `!hasConflict`, which is a correctness condition rather
+           than a cosmetic one. `gitSplitCommit` does `reset --mixed HEAD^`, so
+           it needs HEAD to BE the commit being split. Verified against real
+           git: at an `edit` stop HEAD is the freshly created commit, which is
+           right; at a conflict stop the commit does not exist yet and HEAD is
+           its parent, so splitting there would split the previous commit. -->
+      <button v-if="pendingSplit && !repoState.hasConflict"
+        class="rpm-btn rpm-btn--primary rpm-btn--split"
+        :disabled="anyBusy" @click="emit('split')">
+        {{ t('rebase.splitThisCommit') }}
+      </button>
+      <!-- Demoted to neutral while Split is offered, so the two primaries do
+           not compete (same treatment RebaseEditor gives them). -->
+      <button class="rpm-btn" :class="{ 'rpm-btn--primary': !(pendingSplit && !repoState.hasConflict) }"
+        :disabled="anyBusy || repoState.hasConflict"
         :title="repoState.hasConflict ? t('rebase.bannerConflictHint') : t('rebase.continue')"
         @click="runAction('continue')">
         <span v-if="busy" class="rpm-spinner" aria-hidden="true" />
