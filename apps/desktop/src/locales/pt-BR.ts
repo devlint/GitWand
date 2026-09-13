@@ -516,6 +516,10 @@ const ptBR: Locale = {
 
   // ─── Merge Preview ──────────────────────────────────────
   mergePreview: {
+    hunkHeldBack: "retido ({0}%)",
+    thresholdLabel: "Aplicar apenas acima de",
+    thresholdOff: "Nenhum",
+    thresholdSummary: "{0} auto-resolviveis, {1} retidos pelo limite, {2} manuais",
     aiRisk: "Avaliação de risco",
     aiRiskHint: "Pergunte à IA se este merge parece seguro.",
     aiRiskAnalyzing: "Analisando riscos…",
@@ -1072,6 +1076,13 @@ const ptBR: Locale = {
 
   // ─── Settings ───────────────────────────────────────────
   settings: {
+    resolution: {
+      title: "Confianca de resolucao",
+      subtitle: "Um limite sobre a confianca por hunk do motor, aplicado em toda resolucao do GitWand.",
+      minConfidenceScore: "Aplicar apenas acima de",
+      minConfidenceScoreHint: "Auto-resolucoes abaixo deste valor sao propostas em vez de aplicadas. Nunca deixa passar o que o motor ja recusou.",
+      barOff: "Nenhum",
+    },
     title: "Configurações",
     tabGeneral: "Geral",
     tabDock: "Dock",

@@ -520,6 +520,10 @@ const fr: Locale = {
 
   // ─── Merge Preview (Phase 8.1) ──────────────────────────
   mergePreview: {
+    hunkHeldBack: "retenu ({0} %)",
+    thresholdLabel: "Appliquer seulement au-dessus de",
+    thresholdOff: "Aucun",
+    thresholdSummary: "{0} auto-resolvables, {1} retenus par le seuil, {2} manuels",
     aiRisk: "Analyse des risques",
     aiRiskHint: "Demande \u00e0 l'IA un avis sur la s\u00e9curit\u00e9 de ce merge.",
     aiRiskAnalyzing: "Analyse des risques\u2026",
@@ -1080,6 +1084,13 @@ const fr: Locale = {
 
   // ─── Settings ───────────────────────────────────────────
   settings: {
+    resolution: {
+      title: "Confiance de resolution",
+      subtitle: "Un seuil sur la confiance par hunk du moteur, applique partout ou GitWand resout.",
+      minConfidenceScore: "Appliquer seulement au-dessus de",
+      minConfidenceScoreHint: "Les auto-resolutions sous ce score sont proposees au lieu d etre appliquees. Ne laisse jamais passer ce que le moteur a deja refuse.",
+      barOff: "Aucun",
+    },
     title: "Param\u00e8tres",
     tabGeneral: "G\u00e9n\u00e9ral",
     tabDock: "Dock",

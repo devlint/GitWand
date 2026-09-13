@@ -374,10 +374,20 @@ const {
   riskLevel: previewRisk,
   computePreview,
   reset: resetPreview,
+  threshold: previewThreshold,
+  estimatedAutoResolutions: previewEstimated,
+  heldByThreshold: previewHeldBack,
+  manualHunks: previewManualHunks,
 } = useMergePreview(() => props.cwd);
 
 const previewingBranch = ref<string | null>(null);
 const previewOperation = ref<PreviewOperation>("merge");
+
+// v3.11 — the panel control is seeded from the Setting and is a per-preview
+// override: it is deliberately not persisted, and resets with the preview.
+watch(previewingBranch, (branch) => {
+  if (branch) previewThreshold.value = settings.value.resolution.minConfidenceScore;
+});
 
 // ─── Commit picker (cherry-pick) ─────────────────────────────────
 // When the user selects cherry-pick as the preview operation, we need to
@@ -763,6 +773,11 @@ onUnmounted(() => {
                   :scratch-active="scratchActive"
                   :scratch-loading="scratchLoading"
                   :scratch-error="scratchError"
+                  :threshold="previewThreshold"
+                  :estimated-auto-resolutions="previewEstimated"
+                  :held-by-threshold="previewHeldBack"
+                  :manual-hunks="previewManualHunks"
+                  @update:threshold="previewThreshold = $event"
                   @update:operation="changePreviewOperation"
                   @resolve-in-scratch="handleResolveInScratch"
                   @scratch-merge-back="handleScratchMergeBack"

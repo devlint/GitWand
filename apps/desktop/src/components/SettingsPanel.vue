@@ -186,6 +186,10 @@ interface Settings {
   dockUnlocked: boolean;
   dockPosition: { x: number; y: number } | null;
   dockOrder: DockEntryId[];
+  // v3.11 — numeric confidence bar shared by every apply path (see useSettings)
+  resolution: {
+    minConfidenceScore: number;
+  };
   // Automation settings (v2.8)
   automations: {
     autoResolve: { enabled: boolean };
@@ -292,6 +296,7 @@ const defaultSettings: Settings = {
   dockUnlocked: false,
   dockPosition: null,
   dockOrder: [...DEFAULT_DOCK_ORDER],
+  resolution: { minConfidenceScore: 0 },
   automations: {
     autoResolve: { enabled: false },
     nightlyPull: { enabled: false, hour: 8, minute: 0 },
@@ -2855,6 +2860,36 @@ function deleteReleaseNoteTemplate(id: string) {
                   <span>{{ t('settings.commitReview.autoReReview') }}</span>
                 </label>
                 <span class="sp-hint">{{ t('settings.commitReview.autoReReviewHint') }}</span>
+              </div>
+            </div>
+
+            <!-- ─── Resolution confidence bar (v3.11) ──────── -->
+            <div class="sp-section-divider sp-section-divider--inner"></div>
+            <div class="sp-group">
+              <div class="sp-group__head">
+                <div class="sp-group__head-text">
+                  <span class="sp-group__label">{{ t('settings.resolution.title') }}</span>
+                  <span class="sp-group__sublabel">{{ t('settings.resolution.subtitle') }}</span>
+                </div>
+              </div>
+
+              <div class="sp-row">
+                <label class="sp-label" for="setting-min-confidence-score">
+                  {{ t('settings.resolution.minConfidenceScore') }}
+                </label>
+                <select
+                  id="setting-min-confidence-score"
+                  class="sp-select"
+                  :value="String(settings.resolution.minConfidenceScore)"
+                  @change="updateSetting('resolution', { minConfidenceScore: Number(($event.target as HTMLSelectElement).value) })"
+                >
+                  <option value="0">{{ t('settings.resolution.barOff') }}</option>
+                  <option value="60">60%</option>
+                  <option value="75">75%</option>
+                  <option value="90">90%</option>
+                  <option value="95">95%</option>
+                </select>
+                <span class="sp-hint">{{ t('settings.resolution.minConfidenceScoreHint') }}</span>
               </div>
             </div>
 

@@ -122,17 +122,57 @@
             v-for="(h, i) in f.hunks"
             :key="i"
             class="preview-hunk"
-            :class="h.autoResolved ? 'preview-hunk--auto' : 'preview-hunk--manual'"
+            :class="hunkClass(h)"
+            :title="`${h.confidenceScore}% (${h.confidenceLabel}) — ${h.reason}`"
           >
-            <span class="ph-icon">{{ h.autoResolved ? '✓' : '✕' }}</span>
+            <!-- A bar, not a number: the score is only actionable on the rows
+                 the bar is holding back, and those show it below. -->
+            <span
+              class="ph-confidence"
+              :class="`ph-confidence--${h.confidenceLabel}`"
+              aria-hidden="true"
+            ></span>
+            <span class="ph-icon">{{ hunkIcon(h) }}</span>
             <span class="ph-line">{{ t('mergePreview.hunkLine') }} {{ h.startLine }}</span>
             <span class="ph-type">{{ h.type }}</span>
             <span class="ph-status">
-              {{ h.autoResolved ? t('mergePreview.hunkAuto') : t('mergePreview.hunkManual') }}
+              <template v-if="isHeldBack(h)">
+                {{ t('mergePreview.hunkHeldBack', String(h.confidenceScore)) }}
+              </template>
+              <template v-else>
+                {{ h.autoResolved ? t('mergePreview.hunkAuto') : t('mergePreview.hunkManual') }}
+              </template>
             </span>
           </li>
         </ul>
       </div>
+    </div>
+
+    <!-- ─── Confidence bar (v3.11.0) ─────────────────────── -->
+    <div v-if="summary.conflictingFiles > 0" class="preview-bar">
+      <div class="preview-bar__head">
+        <span class="preview-bar__label">{{ t('mergePreview.thresholdLabel') }}</span>
+        <!-- Five stops, not a free slider: scores cluster around a handful of
+             dimension combinations, so ~95 continuous positions would do
+             nothing and invite false precision. -->
+        <div class="preview-bar__stops" role="group" :aria-label="t('mergePreview.thresholdLabel')">
+          <button
+            v-for="stop in THRESHOLD_STOPS"
+            :key="stop"
+            type="button"
+            class="preview-bar__stop"
+            :class="{ 'preview-bar__stop--active': threshold === stop }"
+            :aria-pressed="threshold === stop"
+            @click="emit('update:threshold', stop)"
+          >{{ stop === 0 ? t('mergePreview.thresholdOff') : `${stop}%` }}</button>
+        </div>
+      </div>
+      <p class="preview-bar__summary">
+        {{ t('mergePreview.thresholdSummary',
+             String(estimatedAutoResolutions),
+             String(heldByThreshold),
+             String(manualHunks)) }}
+      </p>
     </div>
 
     <!-- ─── Scratch worktree (v2.20.0) ───────────────────── -->
@@ -183,7 +223,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { useI18n } from "../composables/useI18n.js";
-import type { MergePreviewSummary, PreviewFileResult, PreviewFileStatus, PreviewOperation, RiskLevel } from "../composables/useMergePreview.js";
+import type { MergePreviewSummary, PreviewFileResult, PreviewFileStatus, PreviewHunk, PreviewOperation, RiskLevel } from "../composables/useMergePreview.js";
 import type { ScratchWorktree } from "../utils/backend.js";
 import { useAIProvider } from "../composables/useAIProvider.js";
 import { useMergeRisk } from "../composables/useMergeRisk.js";
@@ -206,6 +246,14 @@ const props = defineProps<{
   scratchLoading?: boolean;
   /** Error from the last scratch worktree op, surfaced inline. */
   scratchError?: string | null;
+  /** v3.11 — current numeric confidence bar, 0 disables it. */
+  threshold?: number;
+  /** Auto-resolutions surviving the bar. */
+  estimatedAutoResolutions?: number;
+  /** Auto-resolutions the bar alone is holding back. */
+  heldByThreshold?: number;
+  /** Hunks the engine refused outright; no bar can rescue these. */
+  manualHunks?: number;
 }>();
 
 const emit = defineEmits<{
@@ -217,7 +265,33 @@ const emit = defineEmits<{
   "scratch-merge-back": [];
   /** Abandon the scratch worktree. */
   "scratch-discard": [];
+  /** v3.11 — user moved the confidence bar. */
+  "update:threshold": [value: number];
 }>();
+
+// ─── v3.11 — confidence bar ─────────────────────────────
+/** Discrete stops. See the template for why this is not a free slider. */
+const THRESHOLD_STOPS = [0, 60, 75, 90, 95] as const;
+
+const threshold = computed(() => props.threshold ?? 0);
+const estimatedAutoResolutions = computed(() => props.estimatedAutoResolutions ?? 0);
+const heldByThreshold = computed(() => props.heldByThreshold ?? 0);
+const manualHunks = computed(() => props.manualHunks ?? 0);
+
+/** Auto-resolvable, but below the current bar. */
+function isHeldBack(h: PreviewHunk): boolean {
+  return h.autoResolved && h.confidenceScore < threshold.value;
+}
+
+function hunkClass(h: PreviewHunk): string {
+  if (isHeldBack(h)) return "preview-hunk--held";
+  return h.autoResolved ? "preview-hunk--auto" : "preview-hunk--manual";
+}
+
+function hunkIcon(h: PreviewHunk): string {
+  if (isHeldBack(h)) return "◌";
+  return h.autoResolved ? "✓" : "✕";
+}
 
 const OPERATIONS: PreviewOperation[] = ["merge", "rebase", "cherry-pick"];
 
@@ -298,6 +372,63 @@ function basename(path: string): string {
 </script>
 
 <style scoped>
+/* ─── v3.11 confidence bar ───────────────────────────── */
+.ph-confidence {
+  display: inline-block;
+  width: 3px;
+  align-self: stretch;
+  min-height: 12px;
+  border-radius: 2px;
+  background: var(--color-border);
+  flex: 0 0 auto;
+}
+.ph-confidence--certain,
+.ph-confidence--high { background: var(--color-success); }
+.ph-confidence--medium { background: var(--color-warning); }
+.ph-confidence--low { background: var(--color-danger); }
+
+.preview-hunk--held { opacity: 0.7; }
+.preview-hunk--held .ph-status { color: var(--color-warning); }
+
+.preview-bar {
+  border-top: 1px solid var(--color-border);
+  padding: 10px 12px;
+}
+.preview-bar__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.preview-bar__label {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+.preview-bar__stops {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+.preview-bar__stop {
+  border: 1px solid var(--color-border);
+  background: transparent;
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  color: var(--color-text-secondary);
+}
+.preview-bar__stop--active {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-accent-text);
+}
+.preview-bar__summary {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
 .preview-panel {
   background: var(--color-surface-2, #1e1e2e);
   border: 1px solid var(--color-border, #313244);

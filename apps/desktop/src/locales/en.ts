@@ -527,6 +527,10 @@ const en = {
 
   // ─── Merge Preview (Phase 8.1) ──────────────────────────
   mergePreview: {
+    hunkHeldBack: "held back ({0}%)",
+    thresholdLabel: "Apply only above",
+    thresholdOff: "Off",
+    thresholdSummary: "{0} auto-resolvable, {1} held back by the bar, {2} manual",
     aiRisk: "Risk assessment",
     aiRiskHint: "Ask the AI whether this merge looks safe.",
     aiRiskAnalyzing: "Analysing risks\u2026",
@@ -1087,6 +1091,13 @@ const en = {
 
   // ─── Settings ───────────────────────────────────────────
   settings: {
+    resolution: {
+      title: "Resolution confidence",
+      subtitle: "A bar on the engine per-hunk confidence, applied everywhere GitWand resolves.",
+      minConfidenceScore: "Apply only above",
+      minConfidenceScoreHint: "Auto-resolutions scoring below this are proposed instead of applied. Never lets through what the engine already refused.",
+      barOff: "Off",
+    },
     title: "Settings",
     // Tab titles
     tabGeneral: "General",

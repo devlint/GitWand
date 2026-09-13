@@ -515,6 +515,10 @@ const es: Locale = {
 
   // ─── Merge Preview ──────────────────────────────────────
   mergePreview: {
+    hunkHeldBack: "retenido ({0} %)",
+    thresholdLabel: "Aplicar solo por encima de",
+    thresholdOff: "Ninguno",
+    thresholdSummary: "{0} auto-resolubles, {1} retenidos por el umbral, {2} manuales",
     aiRisk: "Evaluación de riesgo",
     aiRiskHint: "Pregunta a la IA si este merge parece seguro.",
     aiRiskAnalyzing: "Analizando riesgos…",
@@ -1071,6 +1075,13 @@ const es: Locale = {
 
   // ─── Settings ───────────────────────────────────────────
   settings: {
+    resolution: {
+      title: "Confianza de resolucion",
+      subtitle: "Un umbral sobre la confianza por hunk del motor, aplicado dondequiera que GitWand resuelva.",
+      minConfidenceScore: "Aplicar solo por encima de",
+      minConfidenceScoreHint: "Las auto-resoluciones por debajo de este valor se proponen en lugar de aplicarse. Nunca deja pasar lo que el motor ya rechazo.",
+      barOff: "Ninguno",
+    },
     title: "Ajustes",
     tabGeneral: "General",
     tabDock: "Dock",

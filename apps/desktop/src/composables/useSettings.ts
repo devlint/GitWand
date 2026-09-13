@@ -251,6 +251,20 @@ export interface AppSettings {
    */
   dockOrder: DockEntryId[];
 
+  /**
+   * v3.11 — resolution policy shared by every apply path.
+   *
+   * `minConfidenceScore` is a numeric bar, 0-100, on the engine's per-hunk
+   * confidence. 0 disables it. It sits here rather than under
+   * `automations.autoResolve` on purpose: it governs the merge editor's
+   * "Resolve auto", the Conflict Predictor's apply and the MERGE_HEAD
+   * automation alike. One bar everywhere, or "apply only above 90%" would mean
+   * three different things in three places.
+   */
+  resolution: {
+    minConfidenceScore: number;
+  };
+
   /** Automation settings (v2.8). */
   automations: {
     /** Auto-resolve conflicts the moment MERGE_HEAD appears. */
@@ -480,6 +494,7 @@ export const defaultAppSettings: AppSettings = {
   dockUnlocked: false,
   dockPosition: null,
   dockOrder: [...DEFAULT_DOCK_ORDER],
+  resolution: { minConfidenceScore: 0 },
   automations: {
     autoResolve:    { enabled: false },
     nightlyPull:    { enabled: false, hour: 8, minute: 0 },

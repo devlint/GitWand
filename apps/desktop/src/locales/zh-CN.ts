@@ -511,6 +511,14 @@ const zhCN: Locale = {
   },
 
   mergePreview: {
+
+    hunkHeldBack: "已保留（{0}%）",
+
+    thresholdLabel: "仅应用高于",
+
+    thresholdOff: "关闭",
+
+    thresholdSummary: "{0} 个可自动解决，{1} 个被阈值保留，{2} 个需手动",
     aiRisk: "风险评估",
     aiRiskHint: "让 AI 判断此次合并是否安全。",
     aiRiskAnalyzing: "正在分析风险…",
@@ -1059,6 +1067,20 @@ const zhCN: Locale = {
   },
 
   settings: {
+
+    resolution: {
+
+      title: "\u89e3\u51b3\u7f6e\u4fe1\u5ea6",
+
+      subtitle: "\u5bf9\u5f15\u64ce\u6bcf\u4e2a\u51b2\u7a81\u5757\u7f6e\u4fe1\u5ea6\u7684\u9608\u503c\uff0c\u9002\u7528\u4e8e GitWand \u7684\u6240\u6709\u89e3\u51b3\u64cd\u4f5c\u3002",
+
+      minConfidenceScore: "\u4ec5\u5e94\u7528\u9ad8\u4e8e",
+
+      minConfidenceScoreHint: "\u4f4e\u4e8e\u6b64\u5206\u6570\u7684\u81ea\u52a8\u89e3\u51b3\u5c06\u6539\u4e3a\u63d0\u8bae\u800c\u975e\u76f4\u63a5\u5e94\u7528\u3002\u7edd\u4e0d\u4f1a\u653e\u884c\u5f15\u64ce\u5df2\u62d2\u7edd\u7684\u5185\u5bb9\u3002",
+
+      barOff: "\u5173\u95ed",
+
+    },
     title: "设置",
     tabGeneral: "通用",
     tabDock: "停靠栏",
