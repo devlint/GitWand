@@ -64,14 +64,45 @@ const BUDGETS = {
   // — comfortably under `any_chunk_max_kb`) appears in `dist/assets/`,
   // loaded only on the first real conflict resolution or merge-preview call.
   //
-  // Budget lowered to 900 (measured 829 KB rounded by this script, ~70 KB
-  // headroom) to lock the gain in. If a future change pushes this back up,
-  // look for a new *eager* (non-lazy) static import of `resolve`,
-  // `resolveAsync`, or `parseConflictMarkers` from "@gitwand/core" — the
-  // prior regression vector was `useMergePreview.ts`, reachable eagerly via
-  // `AppHeader.vue` → `BranchSelector.vue` (always-mounted header), not just
-  // `useGitWand.ts`.
-  main_max_kb: 900,
+  // Budget was lowered to 900 at v3.6.6 (measured 829 KB then) to lock that
+  // gain in. Re-baselined at v3.11.0: measured 893 KB, i.e. 7 KB of headroom,
+  // which is not a working margin — the next ordinary feature trips it.
+  //
+  // The growth is legitimate app code, checked rather than assumed. `en` is
+  // deliberately in the main chunk as the synchronous i18n fallback (see
+  // `useI18n.ts`), and the other four locales already stream in as their own
+  // ~100 KB chunks, so there is nothing to prune here. No vendor leaked in,
+  // and the resolution engine is still its own ~200 KB dynamic chunk.
+  //
+  // Raised to 950, calibrated against the failure it exists to catch rather
+  // than picked round. Measured on this tree by deliberately reintroducing the
+  // historical regression — a used, static `import { resolve } from
+  // "@gitwand/core"` in `useMergePreview.ts` — the main chunk goes
+  // 893 KB → 1085 KB. So 950 still catches that leak with ~135 KB to spare,
+  // while giving ordinary feature work somewhere to live.
+  //
+  // Two things worth knowing before tightening or "improving" this check:
+  //
+  //  - A *light* static import from "@gitwand/core" costs nothing. Rollup
+  //    tree-shakes `parseGitwandrc` / `summarizeTiers` (both zero-dep) out
+  //    without dragging the classifier: measured, main stayed at 893 KB. It is
+  //    pulling `resolve` / `resolveAsync` / `parseConflictMarkers` that hurts.
+  //  - A manifest-based "is core a static import of the entry" assertion does
+  //    NOT work, and was tried and removed here. Vite keeps core as its own
+  //    chunk in the manifest because it is also imported dynamically, while
+  //    duplicating its *contents* into main — so the manifest still reports
+  //    `dynamic` during exactly the regression we care about. A content
+  //    fingerprint does not work either: `ConflictType` names such as
+  //    `token_level_merge` legitimately appear once in main via UI code, so
+  //    the check would need a count threshold and would rot. The byte count is
+  //    blunt, and it is the thing that actually fires.
+  //
+  // The historical regression vector is an eager import of the engine, first
+  // via `useGitWand.ts`, then via `useMergePreview.ts`, which is reachable
+  // eagerly through `AppHeader.vue` → `BranchSelector.vue` (always-mounted
+  // header). A v3.11 change added exactly that again and was made dynamic
+  // before merge.
+  main_max_kb: 950,
 
   // Largest chunk other than main — usually a panel or vendor chunk.
   // If > 500 KB, time to investigate (typically means a vendor lib leaked
@@ -81,11 +112,15 @@ const BUDGETS = {
   // Total assets — a sanity bound. If > 5 MB raw something is very wrong
   // (e.g. monaco/wasm bundled by accident).
   //
-  // Measured on this tree (2026-08-18, this script's own byte-accurate sum,
-  // NOT `du -ch` which over-counts via block-size rounding): 4287 KB, i.e.
-  // ~86% of this budget. Kept at 5000 (leaves ~700 KB of headroom, enough
-  // for a locale addition or a CodeMirror language pack without being so
-  // loose the check stops meaning anything).
+  // Measured with this script's own byte-accurate sum, NOT `du -ch` which
+  // over-counts via block-size rounding:
+  //   2026-08-18 (v3.6.6)  4287 KB
+  //   2026-09-13 (v3.11.0) 4767 KB  — 233 KB of headroom left
+  //
+  // Kept at 5000. Unlike the main budget this one still has a working margin,
+  // and the four non-default locale chunks (387 KB combined) are the obvious
+  // lever if it ever gets tight, since they are already lazy and only count
+  // against this total.
   total_max_kb: 5_000,
 };
 
