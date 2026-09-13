@@ -257,6 +257,32 @@ pub fn read_file_parity(cwd: String, path: String) -> Result<String, String> {
     tauri::async_runtime::block_on(commands::files::read_file(cwd, path))
 }
 
+/// Parity entry points for the three Conflict Predictor commands. Until
+/// v3.11.0 the dev-server had no route for any of them: `previewMerge` POSTed
+/// to a path that did not exist and swallowed the failure into `[]`, and the
+/// other two were Tauri-only stubs returning `[]`. The whole predictor was
+/// therefore invisible under `pnpm dev:web`, reporting every merge as clean.
+pub fn preview_merge_parity(
+    cwd: String,
+    source_branch: String,
+) -> Result<Vec<types::FileMergePreview>, String> {
+    tauri::async_runtime::block_on(commands::read::preview_merge(cwd, source_branch))
+}
+
+pub fn preview_rebase_parity(
+    cwd: String,
+    onto: String,
+) -> Result<Vec<types::FileMergePreview>, String> {
+    tauri::async_runtime::block_on(commands::read::preview_rebase(cwd, onto))
+}
+
+pub fn preview_cherry_pick_parity(
+    cwd: String,
+    commit: String,
+) -> Result<Vec<types::FileMergePreview>, String> {
+    tauri::async_runtime::block_on(commands::read::preview_cherry_pick(cwd, commit))
+}
+
 pub fn git_remote_info_parity(cwd: String) -> Result<types::RemoteInfo, String> {
     tauri::async_runtime::block_on(commands::ops::git_remote_info(cwd))
 }

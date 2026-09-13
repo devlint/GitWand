@@ -546,6 +546,113 @@ function isValidCloneUrl(u) {
 }
 
 /** Parse `git log --format="%H\n%h\n%an\n%aI\n%s\n%b\n---END---"` output into FileLogEntry objects. */
+// ─── Conflict Predictor: 3-way merge simulation (v2.20.0 / v3.11.0) ────────
+//
+// Mirrors `commands/read.rs`: `rev_parse_verify`, `git_changed_files`,
+// `merge_file_preview` and `build_3way_preview`. The Rust side is the
+// reference implementation; these routes exist so `pnpm dev:web` behaves the
+// same, and `tests/parity/preview-*.test.mjs` compares the two byte for byte,
+// on failures as well as on successes.
+
+/** Resolve a ref to a commit sha, or throw the same message Rust throws. */
+function devRevParseVerify(cwd, rev) {
+  const r = spawnSync(GIT, ["rev-parse", "--verify", "--quiet", `${rev}^{commit}`], {
+    cwd, encoding: "utf-8",
+  });
+  const sha = (r.stdout || "").trim();
+  if (r.status !== 0 || !sha) throw new Error(`Unknown or invalid ref: ${rev}`);
+  return sha;
+}
+
+/** `git diff --name-only <base> <rev>`, dropping blank lines. */
+function devChangedFiles(cwd, base, rev) {
+  const r = spawnSync(GIT, ["diff", "--name-only", base, rev], { cwd, encoding: "utf-8" });
+  return (r.stdout || "").split("\n").map((l) => l).filter((l) => l.trim() !== "");
+}
+
+/** Contents of `path` at `rev`, or null when the file does not exist there. */
+function devShowFile(cwd, rev, path) {
+  const r = spawnSync(GIT, ["show", `${rev}:${path}`], { cwd, encoding: "buffer" });
+  return r.status === 0 ? r.stdout : null;
+}
+
+/**
+ * Simulate a 3-way merge of one file. `dir` is a scratch directory owned by
+ * the caller; `seq` keeps the three scratch names unique within it, since a
+ * path-derived name collapsed `a/b.ts` and `a.b.ts` onto the same prefix.
+ */
+function devMergeFilePreview(cwd, baseRef, oursRef, theirsRef, filePath, dir, seq) {
+  const baseBytes = devShowFile(cwd, baseRef, filePath);
+  const oursBytes = devShowFile(cwd, oursRef, filePath);
+  const theirsBytes = devShowFile(cwd, theirsRef, filePath);
+
+  // One side lacks the file entirely → add/delete conflict.
+  if (oursBytes === null || theirsBytes === null) {
+    return { file_path: filePath, conflict_content: "", has_conflicts: true, is_add_delete: true };
+  }
+
+  const baseP = join(dir, `${seq}.base`);
+  const oursP = join(dir, `${seq}.ours`);
+  const theirsP = join(dir, `${seq}.theirs`);
+  try {
+    writeFileSync(baseP, baseBytes ?? Buffer.alloc(0));
+    writeFileSync(oursP, oursBytes);
+    writeFileSync(theirsP, theirsBytes);
+  } catch {
+    return { file_path: filePath, conflict_content: "", has_conflicts: true, is_add_delete: false };
+  }
+
+  // `-L` is mandatory: without it git labels each side with the scratch file's
+  // absolute path, which then leaks into the markers the user reads.
+  const r = spawnSync(
+    GIT,
+    ["merge-file", "-p", "--diff3", "-L", "ours", "-L", "base", "-L", "theirs", oursP, baseP, theirsP],
+    { cwd, encoding: "utf-8" },
+  );
+  for (const f of [baseP, oursP, theirsP]) { try { unlinkSync(f); } catch { /* best effort */ } }
+
+  if (r.error) {
+    return { file_path: filePath, conflict_content: "", has_conflicts: true, is_add_delete: false };
+  }
+  const content = r.stdout || "";
+  // git merge-file exits 1 on conflict, 0 on a clean merge.
+  const hasConflicts = r.status !== 0 || content.includes("<<<<<<<");
+  return { file_path: filePath, conflict_content: content, has_conflicts: hasConflicts, is_add_delete: false };
+}
+
+/** Per-file 3-way preview over the intersection, then the unilateral changes. */
+function devBuild3WayPreview(cwd, ancestor, oursRef, theirsRef) {
+  const oursFiles = devChangedFiles(cwd, ancestor, oursRef);
+  const theirsFiles = devChangedFiles(cwd, ancestor, theirsRef);
+  const oursSet = new Set(oursFiles);
+  const theirsSet = new Set(theirsFiles);
+
+  const bothModified = theirsFiles.filter((f) => oursSet.has(f));
+  const onlyOurs = oursFiles.filter((f) => !theirsSet.has(f));
+  const onlyTheirs = theirsFiles.filter((f) => !oursSet.has(f));
+
+  const dir = mkdtempSync(join(tmpdir(), "gitwand-preview-"));
+  const results = [];
+  try {
+    let seq = 0;
+    for (const filePath of bothModified) {
+      results.push(devMergeFilePreview(cwd, ancestor, oursRef, theirsRef, filePath, dir, seq++));
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  for (const filePath of onlyOurs) {
+    results.push({ file_path: filePath, conflict_content: "", has_conflicts: false, is_add_delete: false });
+  }
+  for (const filePath of onlyTheirs) {
+    results.push({ file_path: filePath, conflict_content: "", has_conflicts: false, is_add_delete: false });
+  }
+
+  // Conflicts first, then path. Must match the Rust sort exactly.
+  results.sort((a, b) => (Number(b.has_conflicts) - Number(a.has_conflicts)) || (a.file_path < b.file_path ? -1 : a.file_path > b.file_path ? 1 : 0));
+  return results;
+}
+
 function parseFileLog(raw) {
   const entries = [];
   for (const block of raw.split("---END---")) {
@@ -1253,6 +1360,96 @@ async function handleRequest(req, res) {
       const wtMatchesSide = (ours.length > 0 && Buffer.compare(wt, ours) === 0) ||
                             (theirs.length > 0 && Buffer.compare(wt, theirs) === 0);
       return jsonResponse(req, res, { content, wtMatchesSide });
+    }
+
+    // POST /api/preview-merge  { cwd, sourceBranch }  → FileMergePreview[]
+    if (url.pathname === "/api/preview-merge" && req.method === "POST") {
+      const { cwd, sourceBranch } = await readBody(req);
+      if (!cwd || !sourceBranch) return jsonResponse(req, res, { error: "Missing cwd or sourceBranch" }, 400);
+      const resolvedCwd = resolve(cwd);
+      const mb = spawnSync(GIT, ["merge-base", "HEAD", sourceBranch], { cwd: resolvedCwd, encoding: "utf-8" });
+      if (mb.status !== 0) {
+        return jsonResponse(req, res, { error: `Cannot find merge-base: ${mb.stderr || ""}` }, 400);
+      }
+      const base = (mb.stdout || "").trim();
+      try {
+        return jsonResponse(req, res, devBuild3WayPreview(resolvedCwd, base, "HEAD", sourceBranch));
+      } catch (e) {
+        return jsonResponse(req, res, { error: e.message }, 400);
+      }
+    }
+
+    // POST /api/preview-rebase  { cwd, onto }  → FileMergePreview[]
+    if (url.pathname === "/api/preview-rebase" && req.method === "POST") {
+      const { cwd, onto } = await readBody(req);
+      if (!cwd || !onto) return jsonResponse(req, res, { error: "Missing cwd or onto" }, 400);
+      const resolvedCwd = resolve(cwd);
+      try {
+        const ontoSha = devRevParseVerify(resolvedCwd, onto);
+        const headSha = devRevParseVerify(resolvedCwd, "HEAD");
+
+        const mb = spawnSync(GIT, ["merge-base", headSha, ontoSha], { cwd: resolvedCwd, encoding: "utf-8" });
+        if (mb.status !== 0) {
+          return jsonResponse(req, res, {
+            error: `Cannot find merge-base between HEAD and ${onto}: ${(mb.stderr || "").trim()}`,
+          }, 400);
+        }
+        const mergeBase = (mb.stdout || "").trim();
+        if (!mergeBase) {
+          return jsonResponse(req, res, { error: `No common ancestor between HEAD and ${onto}` }, 400);
+        }
+
+        const rl = spawnSync(GIT, ["rev-list", "--reverse", `${mergeBase}..${headSha}`], { cwd: resolvedCwd, encoding: "utf-8" });
+        if (rl.status !== 0) {
+          return jsonResponse(req, res, { error: `rev-list failed: ${(rl.stderr || "").trim()}` }, 400);
+        }
+        const commits = (rl.stdout || "").split("\n").map((l) => l.trim()).filter(Boolean);
+
+        // Replay each commit: ours = onto, theirs = commit. Root commits have
+        // no parent to diff against and are skipped, as in Rust.
+        const all = [];
+        for (const commit of commits) {
+          let parent;
+          try { parent = devRevParseVerify(resolvedCwd, `${commit}^`); } catch { continue; }
+          all.push(...devBuild3WayPreview(resolvedCwd, parent, ontoSha, commit));
+        }
+
+        // Deduplicate per file, keeping the strongest conflict signal:
+        // is_add_delete (2) > has_conflicts (1) > clean (0).
+        const score = (p) => (p.is_add_delete ? 2 : p.has_conflicts ? 1 : 0);
+        const byFile = new Map();
+        for (const p of all) {
+          const existing = byFile.get(p.file_path);
+          if (!existing || score(p) > score(existing)) byFile.set(p.file_path, p);
+        }
+        const results = [...byFile.values()];
+        results.sort((a, b) => (Number(b.has_conflicts) - Number(a.has_conflicts)) || (a.file_path < b.file_path ? -1 : a.file_path > b.file_path ? 1 : 0));
+        return jsonResponse(req, res, results);
+      } catch (e) {
+        return jsonResponse(req, res, { error: e.message }, 400);
+      }
+    }
+
+    // POST /api/preview-cherry-pick  { cwd, commit }  → FileMergePreview[]
+    if (url.pathname === "/api/preview-cherry-pick" && req.method === "POST") {
+      const { cwd, commit } = await readBody(req);
+      if (!cwd || !commit) return jsonResponse(req, res, { error: "Missing cwd or commit" }, 400);
+      const resolvedCwd = resolve(cwd);
+      try {
+        const commitSha = devRevParseVerify(resolvedCwd, commit);
+        devRevParseVerify(resolvedCwd, "HEAD");
+        let parent;
+        try {
+          parent = devRevParseVerify(resolvedCwd, `${commitSha}^`);
+        } catch {
+          return jsonResponse(req, res, {
+            error: `Cannot preview cherry-pick of root commit ${commit} (no parent to diff against)`,
+          }, 400);
+        }
+        return jsonResponse(req, res, devBuild3WayPreview(resolvedCwd, parent, "HEAD", commitSha));
+      } catch (e) {
+        return jsonResponse(req, res, { error: e.message }, 400);
+      }
     }
 
     // POST /api/read-file  { cwd, path }

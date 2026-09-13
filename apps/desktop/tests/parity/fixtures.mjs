@@ -299,3 +299,81 @@ export function fixtureReadFile() {
 
   return cwd;
 }
+
+// ─── Conflict Predictor fixtures (v3.11.0) ─────────────────────────────────
+
+/**
+ * A repo where `main` and `topic` both edit the same file, plus a file each
+ * side touched alone, plus one added on `topic` and deleted on `main`.
+ *
+ * `paths.dotted` and `paths.slashed` both collapsed to the scratch prefix
+ * `a_b_ts` under the pre-v3.11 naming scheme, so they are here deliberately.
+ */
+export function fixturePreviewMerge() {
+  const cwd = mkTempRepo("gw-preview-merge-");
+  commitFile(cwd, "shared.txt", "base line\n", "base", 0);
+  commitFile(cwd, "a/b.ts", "slashed base\n", "add a/b.ts", 1);
+  commitFile(cwd, "a.b.ts", "dotted base\n", "add a.b.ts", 2);
+  commitFile(cwd, "doomed.txt", "delete me on main\n", "add doomed.txt", 3);
+
+  execFileSync("git", ["-C", cwd, "checkout", "-b", "topic", "--quiet"]);
+  commitFile(cwd, "shared.txt", "topic line\n", "topic edits shared", 4);
+  commitFile(cwd, "a/b.ts", "slashed topic\n", "topic edits a/b.ts", 5);
+  commitFile(cwd, "a.b.ts", "dotted topic\n", "topic edits a.b.ts", 6);
+  commitFile(cwd, "topic-only.txt", "only topic\n", "topic adds its own file", 7);
+  commitFile(cwd, "doomed.txt", "topic keeps editing it\n", "topic edits doomed", 8);
+
+  execFileSync("git", ["-C", cwd, "checkout", "main", "--quiet"]);
+  commitFile(cwd, "shared.txt", "main line\n", "main edits shared", 9);
+  commitFile(cwd, "a/b.ts", "slashed main\n", "main edits a/b.ts", 10);
+  commitFile(cwd, "a.b.ts", "dotted main\n", "main edits a.b.ts", 11);
+  commitFile(cwd, "main-only.txt", "only main\n", "main adds its own file", 12);
+  execFileSync("git", ["-C", cwd, "rm", "--quiet", "--", "doomed.txt"]);
+  execFileSync("git", ["-C", cwd, "commit", "-m", "main deletes doomed", "--quiet"], {
+    env: { ...process.env, ...commitEnv(13) },
+  });
+
+  return cwd;
+}
+
+/**
+ * A 3-commit topic stack where two of the commits touch the same file, so the
+ * per-file deduplication across replayed commits is actually exercised.
+ */
+export function fixturePreviewRebase() {
+  const cwd = mkTempRepo("gw-preview-rebase-");
+  commitFile(cwd, "shared.txt", "base\n", "base", 0);
+  commitFile(cwd, "other.txt", "other base\n", "add other.txt", 1);
+
+  execFileSync("git", ["-C", cwd, "checkout", "-b", "topic", "--quiet"]);
+  commitFile(cwd, "shared.txt", "topic step 1\n", "topic 1 edits shared", 2);
+  commitFile(cwd, "other.txt", "other topic\n", "topic 2 edits other", 3);
+  commitFile(cwd, "shared.txt", "topic step 3\n", "topic 3 edits shared again", 4);
+
+  execFileSync("git", ["-C", cwd, "checkout", "main", "--quiet"]);
+  commitFile(cwd, "shared.txt", "main moved on\n", "main edits shared", 5);
+
+  execFileSync("git", ["-C", cwd, "checkout", "topic", "--quiet"]);
+  return cwd;
+}
+
+/**
+ * A repo whose first commit is a root commit with no parent, used for the
+ * cherry-pick failure path, plus a normal conflicting commit on a side branch.
+ */
+export function fixturePreviewCherryPick() {
+  const cwd = mkTempRepo("gw-preview-cherry-");
+  commitFile(cwd, "shared.txt", "base\n", "root commit", 0);
+  const root = execFileSync("git", ["-C", cwd, "rev-parse", "HEAD"], { encoding: "utf-8" }).trim();
+
+  execFileSync("git", ["-C", cwd, "checkout", "-b", "topic", "--quiet"]);
+  commitFile(cwd, "shared.txt", "topic\n", "topic edits shared", 1);
+  const topic = execFileSync("git", ["-C", cwd, "rev-parse", "HEAD"], { encoding: "utf-8" }).trim();
+  commitFile(cwd, "fresh.txt", "brand new\n", "topic adds a new file", 2);
+  const clean = execFileSync("git", ["-C", cwd, "rev-parse", "HEAD"], { encoding: "utf-8" }).trim();
+
+  execFileSync("git", ["-C", cwd, "checkout", "main", "--quiet"]);
+  commitFile(cwd, "shared.txt", "main\n", "main edits shared", 3);
+
+  return { cwd, root, topic, clean };
+}

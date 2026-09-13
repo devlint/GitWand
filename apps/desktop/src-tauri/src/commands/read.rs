@@ -1551,13 +1551,16 @@ pub(crate) async fn preview_merge(
         .filter(|f| !ours_set.contains(f))
         .collect();
 
-    let tmp = std::env::temp_dir();
+    // Scratch propre à cet appel, supprimé au Drop : deux previews simultanées
+    // ne doivent jamais partager un fichier temporaire (cf. `ScratchDir`).
+    let scratch = ScratchDir::new("preview-merge")
+        .map_err(|e| format!("preview_merge: cannot create scratch dir: {}", e))?;
+    let tmp = scratch.path();
     let mut results: Vec<FileMergePreview> = Vec::new();
 
     // 6. Pour chaque fichier modifié des deux côtés → tenter git merge-file
     for file_path in both_modified {
-        let preview =
-            merge_file_preview(&git, &cwd, &base, "HEAD", &source_branch, file_path, &tmp);
+        let preview = merge_file_preview(&git, &cwd, &base, "HEAD", &source_branch, file_path, tmp);
         results.push(preview);
     }
 
@@ -1658,12 +1661,15 @@ fn build_3way_preview(
         .filter(|f| !ours_set.contains(f))
         .collect();
 
-    let tmp = std::env::temp_dir();
+    // Scratch propre à cet appel, supprimé au Drop (cf. `ScratchDir`).
+    let scratch = ScratchDir::new("preview-3way")
+        .map_err(|e| format!("preview: cannot create scratch dir: {}", e))?;
+    let tmp = scratch.path();
     let mut results: Vec<FileMergePreview> = Vec::new();
 
     for file_path in both_modified {
         results.push(merge_file_preview(
-            git, cwd, ancestor, ours_ref, theirs_ref, file_path, &tmp,
+            git, cwd, ancestor, ours_ref, theirs_ref, file_path, tmp,
         ));
     }
     for file_path in only_ours {
@@ -1847,6 +1853,46 @@ pub(crate) async fn preview_cherry_pick(
 
 /// Tente de merger les trois versions d'un fichier avec git merge-file.
 /// Retourne le contenu résultant (avec ou sans marqueurs de conflit).
+/// A uniquely named scratch directory, removed when it goes out of scope.
+///
+/// The preview drivers write the three sides of a simulated merge to disk for
+/// `git merge-file`. Those scratch files used to be named after the file path
+/// alone (`src_app_ts_ours.tmp`) directly in the shared temp dir, so two
+/// previews running at once on the same path in *different* repositories wrote
+/// and read the very same three files. That did not merely race: it returned a
+/// three-way merge assembled from two unrelated repositories.
+pub(crate) struct ScratchDir(std::path::PathBuf);
+
+impl ScratchDir {
+    fn new(tag: &str) -> std::io::Result<Self> {
+        static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!(
+            "gitwand-{}-{}-{}-{}",
+            tag,
+            std::process::id(),
+            n,
+            nanos
+        ));
+        std::fs::create_dir_all(&dir)?;
+        Ok(ScratchDir(dir))
+    }
+
+    fn path(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+
+impl Drop for ScratchDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 fn merge_file_preview(
     git: &str,
     cwd: &str,
@@ -1888,11 +1934,16 @@ fn merge_file_preview(
         _ => {}
     }
 
-    // Écrire les trois versions dans des fichiers temporaires
-    let prefix = file_path.replace(['/', '\\', '.'], "_");
-    let tmp_base = tmp.join(format!("{}_base.tmp", prefix));
-    let tmp_ours = tmp.join(format!("{}_ours.tmp", prefix));
-    let tmp_theirs = tmp.join(format!("{}_theirs.tmp", prefix));
+    // Écrire les trois versions dans des fichiers temporaires.
+    //
+    // Le nom vient d'un compteur, pas du chemin : `a/b.ts` et `a.b.ts`
+    // se réduisaient tous deux à `a_b_ts`. Le compteur garde aussi ce driver
+    // correct si la boucle appelante devient un jour parallèle (rayon).
+    static FILE_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = FILE_SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let tmp_base = tmp.join(format!("{}.base", seq));
+    let tmp_ours = tmp.join(format!("{}.ours", seq));
+    let tmp_theirs = tmp.join(format!("{}.theirs", seq));
 
     let write_or_empty = |path: &std::path::Path, bytes: &Option<Vec<u8>>| {
         let content = bytes.as_deref().unwrap_or(b"");
@@ -1912,11 +1963,22 @@ fn merge_file_preview(
     }
 
     // git merge-file -p <ours> <base> <theirs>  (note: ordre ours/base/theirs)
+    //
+    // `-L` est obligatoire : sans lui git étiquette chaque côté avec le nom du
+    // fichier qu'on lui passe, donc le chemin absolu du scratch se retrouve
+    // dans les marqueurs que l'utilisateur lit et recopie. Mêmes libellés que
+    // la route `/api/reconstruct-conflict` du dev-server, pour la parité.
     let merge_out = git_cmd()
         .args([
             "merge-file",
             "-p",
             "--diff3",
+            "-L",
+            "ours",
+            "-L",
+            "base",
+            "-L",
+            "theirs",
             tmp_ours.to_str().unwrap_or(""),
             tmp_base.to_str().unwrap_or(""),
             tmp_theirs.to_str().unwrap_or(""),
@@ -2412,6 +2474,182 @@ mod predictor_tests {
             conflicting(&previews).is_empty(),
             "non-overlapping cherry-pick must be clean: {:?}",
             conflicting(&previews)
+        );
+    }
+
+    /// The conflict markers a user reads must be labelled `ours` / `base` /
+    /// `theirs`, never the absolute path of a scratch file. `git merge-file`
+    /// labels each side with the filename it was handed unless `-L` says
+    /// otherwise, so without explicit labels the markers leak
+    /// `/var/folders/.../src_foo_ts_ours.tmp` into content the user copies.
+    #[test]
+    fn preview_markers_are_labelled_and_leak_no_temp_path() {
+        let repo = TempRepo::new();
+        repo.write("src/app.ts", "shared\n");
+        repo.commit_all("base");
+        let base = repo.head_sha();
+
+        repo.git(&["checkout", "-q", "-b", "topic"]);
+        repo.write("src/app.ts", "from topic\n");
+        repo.commit_all("topic edits");
+        let topic = repo.head_sha();
+
+        repo.git(&["checkout", "-q", "main"]);
+        repo.write("src/app.ts", "from main\n");
+        repo.commit_all("main edits");
+
+        let git = git_binary();
+        let previews = build_3way_preview(&git, repo.cwd(), &base, "HEAD", &topic).unwrap();
+        let p = previews
+            .iter()
+            .find(|p| p.file_path == "src/app.ts")
+            .expect("conflicting file must be reported");
+        assert!(p.has_conflicts, "the file really does conflict");
+
+        assert!(
+            p.conflict_content.contains("<<<<<<< ours"),
+            "ours side must be labelled: {:?}",
+            p.conflict_content
+        );
+        assert!(
+            p.conflict_content.contains("||||||| base"),
+            "base side must be labelled: {:?}",
+            p.conflict_content
+        );
+        assert!(
+            p.conflict_content.contains(">>>>>>> theirs"),
+            "theirs side must be labelled: {:?}",
+            p.conflict_content
+        );
+
+        let tmp_root = std::env::temp_dir();
+        let tmp_root = tmp_root.to_str().unwrap();
+        assert!(
+            !p.conflict_content.contains(tmp_root),
+            "no scratch path may leak into the markers (temp root {:?}): {:?}",
+            tmp_root,
+            p.conflict_content
+        );
+        assert!(
+            !p.conflict_content.contains(".tmp"),
+            "no scratch filename may leak into the markers: {:?}",
+            p.conflict_content
+        );
+    }
+
+    /// Two previews running at once must not read each other's scratch files.
+    /// The scratch names used to be derived from the file path alone, in the
+    /// shared temp dir, so two concurrent previews of the same path in
+    /// different repos raced on the very same three files.
+    #[test]
+    fn concurrent_previews_of_the_same_path_do_not_race() {
+        /// Build a repo whose `src/app.ts` conflicts, with side content that
+        /// identifies which repo it came from.
+        fn make(tag: &str) -> (TempRepo, String, String) {
+            let repo = TempRepo::new();
+            repo.write("src/app.ts", format!("shared-{}\n", tag).as_str());
+            repo.commit_all("base");
+            let base = repo.head_sha();
+            repo.git(&["checkout", "-q", "-b", "topic"]);
+            repo.write("src/app.ts", format!("topic-{}\n", tag).as_str());
+            repo.commit_all("topic edits");
+            let topic = repo.head_sha();
+            repo.git(&["checkout", "-q", "main"]);
+            repo.write("src/app.ts", format!("main-{}\n", tag).as_str());
+            repo.commit_all("main edits");
+            (repo, base, topic)
+        }
+
+        let (repo_a, base_a, topic_a) = make("aaa");
+        let (repo_b, base_b, topic_b) = make("bbb");
+
+        let cwd_a = repo_a.path.clone();
+        let cwd_b = repo_b.path.clone();
+
+        // Hammer both previews from two threads so the scratch writes interleave.
+        let ha = std::thread::spawn(move || {
+            let git = git_binary();
+            let cwd = cwd_a.to_str().unwrap().to_string();
+            (0..12)
+                .map(|_| {
+                    let pv = build_3way_preview(&git, &cwd, &base_a, "HEAD", &topic_a).unwrap();
+                    pv.into_iter()
+                        .find(|p| p.file_path == "src/app.ts")
+                        .unwrap()
+                        .conflict_content
+                })
+                .collect::<Vec<_>>()
+        });
+        let hb = std::thread::spawn(move || {
+            let git = git_binary();
+            let cwd = cwd_b.to_str().unwrap().to_string();
+            (0..12)
+                .map(|_| {
+                    let pv = build_3way_preview(&git, &cwd, &base_b, "HEAD", &topic_b).unwrap();
+                    pv.into_iter()
+                        .find(|p| p.file_path == "src/app.ts")
+                        .unwrap()
+                        .conflict_content
+                })
+                .collect::<Vec<_>>()
+        });
+
+        for content in ha.join().unwrap() {
+            assert!(
+                content.contains("aaa") && !content.contains("bbb"),
+                "repo A preview picked up repo B's scratch content: {:?}",
+                content
+            );
+        }
+        for content in hb.join().unwrap() {
+            assert!(
+                content.contains("bbb") && !content.contains("aaa"),
+                "repo B preview picked up repo A's scratch content: {:?}",
+                content
+            );
+        }
+    }
+
+    /// Paths that mangle to the same scratch prefix (`a/b.ts` and `a.b.ts`
+    /// both became `a_b_ts`) must still be previewed independently.
+    #[test]
+    fn paths_that_mangle_alike_do_not_collide() {
+        let repo = TempRepo::new();
+        repo.git(&["config", "core.precomposeunicode", "true"]);
+        std::fs::create_dir_all(repo.path.join("a")).unwrap();
+        repo.write("a/b.ts", "slashed base\n");
+        repo.write("a.b.ts", "dotted base\n");
+        repo.commit_all("base");
+        let base = repo.head_sha();
+
+        repo.git(&["checkout", "-q", "-b", "topic"]);
+        repo.write("a/b.ts", "slashed topic\n");
+        repo.write("a.b.ts", "dotted topic\n");
+        repo.commit_all("topic edits");
+        let topic = repo.head_sha();
+
+        repo.git(&["checkout", "-q", "main"]);
+        repo.write("a/b.ts", "slashed main\n");
+        repo.write("a.b.ts", "dotted main\n");
+        repo.commit_all("main edits");
+
+        let git = git_binary();
+        let previews = build_3way_preview(&git, repo.cwd(), &base, "HEAD", &topic).unwrap();
+
+        let slashed = previews.iter().find(|p| p.file_path == "a/b.ts").unwrap();
+        let dotted = previews.iter().find(|p| p.file_path == "a.b.ts").unwrap();
+
+        assert!(
+            slashed.conflict_content.contains("slashed")
+                && !slashed.conflict_content.contains("dotted"),
+            "a/b.ts must not be built from a.b.ts's scratch: {:?}",
+            slashed.conflict_content
+        );
+        assert!(
+            dotted.conflict_content.contains("dotted")
+                && !dotted.conflict_content.contains("slashed"),
+            "a.b.ts must not be built from a/b.ts's scratch: {:?}",
+            dotted.conflict_content
         );
     }
 
