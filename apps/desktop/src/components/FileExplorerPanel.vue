@@ -8,7 +8,8 @@ import { useDraggableResizable } from "../composables/useDraggableResizable";
 import type { RepoFileEntry } from "../composables/useGitRepo";
 import { getGitBlame } from "../utils/backend";
 import { buildBlameModel, type BlameGutterEntry } from "../composables/useBlameGutter";
-import type { EditorView as EditorViewType } from "@codemirror/view";
+import { useCodeMirror } from "../composables/useCodeMirror";
+import { peekCodeMirror } from "../utils/codemirrorLibs";
 import type { EditorState as EditorStateType, Extension } from "@codemirror/state";
 
 const props = defineProps<{
@@ -114,59 +115,64 @@ function onTabClose(tabId: number) {
   }
 }
 
-// ── CodeMirror 6 (lazy-loaded, one EditorView with per-tab cached EditorState) ──
+// ── CodeMirror 6 (shared wiring, one EditorView with per-tab cached state) ──
+//
+// v3.11: the loader, the view and the editable/theme compartments moved into
+// `useCodeMirror`. What stays here is everything that knows about *tabs*: the
+// per-tab `EditorState` cache, the blame models, and the "did the active tab
+// change while we awaited?" re-checks in `mountTab`. The composable
+// deliberately does not own mounting end to end, so this cache can survive.
 const editorHost = ref<HTMLElement | null>(null);
-let view: EditorViewType | null = null;
-let EditorViewCtor: typeof import("@codemirror/view").EditorView | null = null;
-let EditorStateCtor: typeof import("@codemirror/state").EditorState | null = null;
-let basicSetup: Extension | null = null;
-let oneDark: Extension | null = null;
-let undoCommand: typeof import("@codemirror/commands").undo | null = null;
 const docStates = new Map<number, EditorStateType>();
-// Global (not per-tab) editable toggle — a single Compartment shared by every
-// tab's EditorState, reconfigured whenever a tab is mounted/switched to so
-// editability always reflects the current `editLocked` value even for a tab
-// whose cached state predates the last lock toggle.
-let editableCompartment: InstanceType<typeof import("@codemirror/state").Compartment> | null = null;
 const editLocked = ref(true);
+const editable = computed(() => !editLocked.value);
+
+const cm = useCodeMirror({
+  host: editorHost,
+  editable,
+  onDocChange: () => {
+    const tab = activeTab.value;
+    const state = cm.view.value?.state;
+    if (!tab || !state) return;
+    docStates.set(tab.id, state);
+    explorer.updateContent(props.repoPath, tab.id, state.doc.toString());
+    // Editing shifts line numbers, so the committed blame no longer aligns:
+    // drop this tab's cached model and turn blame off. Deferred to a
+    // microtask to avoid dispatching a reconfigure from inside an update.
+    if (blameEnabled.value) {
+      blameModels.delete(tab.id);
+      queueMicrotask(() => {
+        if (!blameEnabled.value) return;
+        blameEnabled.value = false;
+        applyBlame(tab.id);
+      });
+    }
+  },
+});
 
 // ── Blame gutter (opt-in, per tab) ──
-// A shared Compartment (like editableCompartment) holds either an empty
-// extension (blame off) or a gutter built from the active tab's blame model.
-// Blame data is fetched once per tab via getGitBlame and cached in blameModels;
-// it reflects the *committed* file, so editing a tab clears its blame (see
-// updateListenerFor) — the button is also disabled while a tab is dirty.
+// A Compartment owned by THIS component, not the composable: `useCodeMirror`
+// has no business knowing what blame is, and `useBlameGutter.ts` is
+// deliberately CodeMirror-free. It holds either an empty extension (blame off)
+// or a gutter built from the active tab's model. Blame reflects the *committed*
+// file, so editing a tab clears it (see the update listener above).
 let blameCompartment: InstanceType<typeof import("@codemirror/state").Compartment> | null = null;
-let gutterFn: typeof import("@codemirror/view").gutter | null = null;
-let GutterMarkerCtor: typeof import("@codemirror/view").GutterMarker | null = null;
 const blameEnabled = ref(false);
 const blameModels = new Map<number, Map<number, BlameGutterEntry>>();
 
+/** Ensure the libs are loaded and this component's blame compartment exists. */
 async function ensureCodeMirrorLibs() {
-  if (EditorViewCtor) return;
-  const [{ EditorView, gutter, GutterMarker }, { EditorState, Compartment }, cmMeta, { oneDark: theme }, { undo }] = await Promise.all([
-    import("@codemirror/view"),
-    import("@codemirror/state"),
-    import("codemirror"),
-    import("@codemirror/theme-one-dark"),
-    import("@codemirror/commands"),
-  ]);
-  EditorViewCtor = EditorView;
-  EditorStateCtor = EditorState;
-  basicSetup = cmMeta.basicSetup;
-  oneDark = theme;
-  undoCommand = undo;
-  editableCompartment = new Compartment();
-  blameCompartment = new Compartment();
-  gutterFn = gutter;
-  GutterMarkerCtor = GutterMarker;
+  const libs = await cm.ensure();
+  blameCompartment ??= new libs.Compartment();
+  return libs;
 }
 
 // Build a CodeMirror gutter extension from a `finalLine → entry` blame model.
 // One marker per source line; continuation lines of a same-commit run render
 // blank (entry.showLabel === false) so the author shows once per block.
 function blameGutterExtension(model: Map<number, BlameGutterEntry>): Extension {
-  const GM = GutterMarkerCtor!;
+  const libs = peekCodeMirror()!;
+  const GM = libs.GutterMarker;
   class BlameMarker extends GM {
     constructor(public entry: BlameGutterEntry) {
       super();
@@ -182,7 +188,7 @@ function blameGutterExtension(model: Map<number, BlameGutterEntry>): Extension {
       return span;
     }
   }
-  return gutterFn!({
+  return libs.gutter({
     class: "cm-blame-gutter",
     // Rendered in CodeMirror's separate `.cm-gutters-after` container, to the
     // right of .cm-content, instead of alongside the line-number gutter on
@@ -215,10 +221,10 @@ async function ensureBlameForTab(tab: FileTab): Promise<boolean> {
 // Reconfigure the shared blame compartment on the live view for `tabId`:
 // the tab's gutter when blame is on and a model is cached, empty otherwise.
 function applyBlame(tabId: number) {
-  if (!view || !blameCompartment) return;
+  if (!cm.view.value || !blameCompartment) return;
   const model = blameEnabled.value ? blameModels.get(tabId) : undefined;
-  view.dispatch({ effects: blameCompartment.reconfigure(model ? blameGutterExtension(model) : []) });
-  docStates.set(tabId, view.state);
+  cm.reconfigure(blameCompartment, model ? blameGutterExtension(model) : []);
+  docStates.set(tabId, cm.view.value.state);
 }
 
 async function toggleBlame() {
@@ -232,39 +238,6 @@ async function toggleBlame() {
     }
   }
   if (activeTab.value) applyBlame(activeTab.value.id);
-}
-
-async function detectLanguageExtension(path: string) {
-  const [{ languages }, { LanguageDescription }] = await Promise.all([
-    import("@codemirror/language-data"),
-    import("@codemirror/language"),
-  ]);
-  const desc = LanguageDescription.matchFilename(languages, path);
-  if (!desc) return [];
-  try {
-    return [await desc.load()];
-  } catch {
-    return [];
-  }
-}
-
-function updateListenerFor(tabId: number) {
-  return EditorViewCtor!.updateListener.of((update) => {
-    if (!update.docChanged) return;
-    docStates.set(tabId, update.state);
-    explorer.updateContent(props.repoPath, tabId, update.state.doc.toString());
-    // Editing shifts line numbers, so the committed blame no longer aligns:
-    // drop this tab's cached model and turn blame off. Deferred to a
-    // microtask to avoid dispatching a reconfigure from inside an update.
-    if (blameEnabled.value) {
-      blameModels.delete(tabId);
-      queueMicrotask(() => {
-        if (!blameEnabled.value) return;
-        blameEnabled.value = false;
-        applyBlame(tabId);
-      });
-    }
-  });
 }
 
 function waitForTabLoaded(tab: FileTab): Promise<void> {
@@ -286,8 +259,7 @@ async function mountTab(tab: FileTab) {
   if (tab.binary) {
     // Binary files get a placeholder (see FileTab.binary) — tear down any
     // mounted editor so a previously-open text tab's view doesn't linger.
-    view?.destroy();
-    view = null;
+    cm.destroy();
     return;
   }
 
@@ -300,8 +272,7 @@ async function mountTab(tab: FileTab) {
     if (tab.binary) {
       // The read resolved to a binary file while we were waiting — re-check
       // and bail the same way the top-of-function binary guard does.
-      view?.destroy();
-      view = null;
+      cm.destroy();
       return;
     }
   }
@@ -312,31 +283,15 @@ async function mountTab(tab: FileTab) {
 
   let state = docStates.get(tab.id);
   if (!state) {
-    const langExt = await detectLanguageExtension(tab.path);
+    state = await cm.buildState(tab.content, tab.path, [blameCompartment!.of([])]);
     if (activeTab.value?.id !== tab.id) return; // a newer tab switch happened while the grammar was loading — don't touch the shared view/docStates with a stale tab's state
-    state = EditorStateCtor!.create({
-      doc: tab.content,
-      extensions: [
-        basicSetup!,
-        oneDark!,
-        langExt,
-        updateListenerFor(tab.id),
-        editableCompartment!.of(EditorViewCtor!.editable.of(!editLocked.value)),
-        blameCompartment!.of([]),
-      ],
-    });
     docStates.set(tab.id, state);
   }
 
-  if (!view) {
-    view = new EditorViewCtor!({ state, parent: editorHost.value });
-  } else {
-    view.setState(state);
-  }
-  // The global lock may have changed since this tab's cached state was last
-  // built or visited — always re-assert it so editability is consistent
-  // panel-wide, not just at the moment this tab's EditorState was created.
-  applyEditable(tab.id);
+  // `mount` re-asserts the lock and the theme, so a cached state built before
+  // the last toggle still comes back consistent with the rest of the panel.
+  cm.mount(state);
+  docStates.set(tab.id, cm.view.value!.state);
 
   // Re-assert blame for this tab: if blame is on, load its model (once) and
   // show the gutter; otherwise applyBlame clears any gutter carried over from
@@ -348,22 +303,19 @@ async function mountTab(tab: FileTab) {
   applyBlame(tab.id);
 }
 
-// Re-assert the current lock state onto the live view and cache the result
-// under `tabId`. No-op until the CodeMirror libs and a view are ready.
-function applyEditable(tabId: number) {
-  if (!view || !editableCompartment || !EditorViewCtor) return;
-  view.dispatch({ effects: editableCompartment.reconfigure(EditorViewCtor.editable.of(!editLocked.value)) });
-  docStates.set(tabId, view.state);
-}
-
 function toggleLock() {
+  // `editable` is a computed over `editLocked` and `useCodeMirror` watches it,
+  // so the live view reconfigures itself. We only re-cache the resulting state
+  // so this tab's cached copy does not carry the stale lock.
   editLocked.value = !editLocked.value;
-  if (activeTab.value) applyEditable(activeTab.value.id);
+  const tab = activeTab.value;
+  if (tab && cm.view.value) docStates.set(tab.id, cm.view.value.state);
 }
 
 function onUndo() {
-  if (editLocked.value || !view || !undoCommand) return;
-  undoCommand(view); // dispatches internally; the existing updateListener
+  const libs = peekCodeMirror();
+  if (editLocked.value || !cm.view.value || !libs) return;
+  libs.undo(cm.view.value); // dispatches internally; the existing updateListener
   // (see updateListenerFor) picks up the resulting docChanged transaction
   // and syncs it into useFileExplorer's tab.content, same as any keystroke.
 }
@@ -390,8 +342,7 @@ watch(
 );
 
 onBeforeUnmount(() => {
-  view?.destroy();
-  view = null;
+  cm.destroy();
 });
 
 function onKeyDown(e: KeyboardEvent) {
@@ -814,16 +765,17 @@ function onKeyDown(e: KeyboardEvent) {
    slot (.cm-gutters-after), to the right of .cm-content rather than beside
    the line-number gutter on the left, so showing/resizing it never shifts
    the code's horizontal position (PR #108 review). Shows `author · date`
-   once per same-commit run; full details on hover (title). The editor is
-   always the oneDark theme regardless of the app light/dark theme, so these
-   colours are hard-coded to oneDark's own gutter palette (background
-   #282c34, stone #7d8799, darkBackground #21252b) rather than the app
-   `--color-*` tokens — those rendered a light gutter on the dark editor in
-   light mode. */
+   once per same-commit run; full details on hover (title).
+
+   These were hard-coded to oneDark's own palette (#282c34 / #7d8799 /
+   #21252b) because the editor used to be oneDark whatever the app theme was,
+   so the `--color-*` tokens rendered a light gutter on a dark editor in light
+   mode. v3.11 makes the editor follow the app theme, so the tokens are now the
+   correct answer and the hard-coding is what would be wrong. */
 .fe__content :deep(.cm-blame-gutter) {
-  background-color: #282c34;
-  border-left: 1px solid #21252b;
-  color: #7d8799;
+  background-color: var(--color-bg-secondary);
+  border-left: 1px solid var(--color-border);
+  color: var(--color-text-muted);
   font-size: 11px;
 }
 .fe__content :deep(.cm-blame-marker) {
