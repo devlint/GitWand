@@ -88,6 +88,7 @@ import { isImagePath } from "./utils/imagePath";
 import { useGitWand, type ApplyPredicate } from "./composables/useGitWand";
 import { useResolutionSelection, contentStamp } from "./composables/useResolutionSelection";
 import { getPendingSplitForHash, resolvePendingSplit } from "./composables/useInteractiveRebase";
+import { spliceHunk } from "./composables/useDiffEdit";
 import { useApplyFromPreview, type ApplyOutcome } from "./composables/useApplyFromPreview";
 import { useResolutionMemory, type ResolutionMemoryEntry, type ResolutionStrategy } from "./composables/useResolutionMemory";
 import { useRepoTabs } from "./composables/useRepoTabs";
@@ -1053,6 +1054,40 @@ async function handleSplitCommitRequest(entry: GitLogEntry) {
     body: entry.body,
     parents: entry.parents,
   });
+}
+
+/**
+ * v3.11 — write an inline diff edit back to the working tree.
+ *
+ * DiffViewer hands up the hunk and the replacement text; the read, the splice
+ * and the write happen here because they are repo I/O and the component only
+ * renders. The file is re-read rather than spliced against whatever the diff
+ * was built from: it may have moved since (an external edit, the watcher, a
+ * branch switch), and `spliceHunk` refuses rather than writing one line off.
+ *
+ * The result is a plain working-tree change. It is not staged, and it is not
+ * turned into a patch: an edit is something you stage afterwards like any
+ * other, and synthesizing a unified patch from arbitrary text would mean
+ * re-diffing the hunk and surfacing apply failures as opaque backend errors.
+ */
+async function handleEditHunk(path: string, hunkIdx: number, replacement: string) {
+  const cwd = repoFolderPath.value;
+  const hunk = repoDiff.value?.hunks[hunkIdx];
+  if (!cwd || !hunk) return;
+
+  try {
+    const { readFile, writeFile } = await import("./utils/backend");
+    const current = await readFile(cwd, path);
+    const result = spliceHunk(current, hunk, replacement);
+    if (!result.ok) {
+      repoError.value = t("diff.editStale");
+      return;
+    }
+    await writeFile(cwd, path, result.text);
+    await repoRefresh();
+  } catch (err: unknown) {
+    repoError.value = `edit: ${err instanceof Error ? err.message : String(err)}`;
+  }
 }
 
 /**
@@ -4252,7 +4287,9 @@ onUnmounted(() => {
                   @select-dir-file="(path) => repoSelectFile(path, false)"
                   @open-repo-tab="handleOpenNestedRepo"
                   @add-to-gitignore="addToGitignore"
-                  @dismiss-finding="(id) => commitReview.dismiss(id)" />
+                  @dismiss-finding="(id) => commitReview.dismiss(id)"
+                  :editable="!repoSelectedFileStaged && !isSelectedFileConflicted"
+                  @edit-hunk="handleEditHunk" />
               </div>
 
               <div v-if="showCommitRail" class="sidebar-handle" :class="{ 'sidebar-handle--active': sidebarResizing }"

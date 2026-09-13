@@ -332,6 +332,12 @@ const zhCN: Locale = {
   },
 
   diff: {
+
+    editHunk: "\u7f16\u8f91\u6b64\u53d8\u66f4\u5757",
+
+    editBusy: "\u8bf7\u5148\u5b8c\u6210\u6b63\u5728\u7f16\u8f91\u7684\u53d8\u66f4\u5757",
+
+    editStale: "\u81ea\u8ba1\u7b97\u6b64\u5dee\u5f02\u4ee5\u6765\u6587\u4ef6\u5df2\u66f4\u6539\u3002\u8bf7\u5237\u65b0\u540e\u91cd\u8bd5\u3002",
     newFolder: "\u65b0\u6587\u4ef6\u5939",
     newFolderCount: "{0} \u4e2a\u6587\u4ef6",
     nestedRepo: "\u5d4c\u5957 Git \u4ed3\u5e93",

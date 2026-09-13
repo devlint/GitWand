@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, nextTick, watch, onMounted, onUnmounted, inject } from "vue";
+import { ref, computed, defineAsyncComponent, nextTick, watch, onMounted, onUnmounted, inject } from "vue";
 import { TOGGLE_GIT_TREE_KEY } from "../composables/branchPickerBridge";
 import type { GitDiff, DiffLine } from "../utils/backend";
 import { useI18n } from "../composables/useI18n";
@@ -8,6 +8,7 @@ import { detectLanguage, highlightLine } from "../utils/highlight";
 import { safeHtml } from "../composables/useSafeHtml";
 import { wordDiff, segmentsToHtml } from "../utils/wordDiff";
 import { buildPatch, selectWholeHunk, type LineSelection } from "../utils/patchBuilder";
+import { hunkPostImage } from "../composables/useDiffEdit";
 import type { ReviewFinding } from "../composables/usePrPreReview";
 import { fromFinding, annotationsByLine, worstSeverity, type LineAnnotation } from "../composables/prAnnotations";
 
@@ -39,6 +40,15 @@ const props = withDefaults(
      * severity gutter marker (no card) in side-by-side mode (decision D4).
      */
     findings?: ReviewFinding[];
+  /**
+   * v3.11 — allow editing a hunk in place. Default false, so every existing
+   * caller (SplitCommitModal, commit and file-history diffs) is unchanged.
+   * App.vue enables it only for an unstaged, non-conflicted working-tree file:
+   * a staged diff is index-vs-HEAD, so editing the working tree would not
+   * change what you are looking at, and a conflicted file belongs to
+   * MergeEditor.
+   */
+  editable?: boolean;
   }>(),
   { findings: () => [] },
 );
@@ -64,7 +74,71 @@ const emit = defineEmits<{
   "selection-change": [selection: LineSelection];
   /** Task 1b (v3.7.0) — user dismissed a commit-review finding inline. */
   "dismiss-finding": [id: string];
+  /**
+   * v3.11 — the user confirmed an inline hunk edit. The parent re-reads the
+   * file, splices and writes: the splice needs the current bytes on disk, and
+   * that I/O belongs to the app shell, not to a rendering component.
+   */
+  "edit-hunk": [path: string, hunkIdx: number, replacement: string];
 }>();
+
+// ─── v3.11 — editable diff (inline mode, one hunk at a time) ─────────────
+//
+// Deliberately narrow. Editing is offered only when the parent says the diff
+// is an unstaged, non-conflicted working-tree file, only in inline mode (there
+// is no single-column text substrate in side-by-side), and only for one hunk
+// at a time, which bounds every invalidation problem: while a hunk is open the
+// rest of the diff is frozen.
+//
+// The editor is seeded with the hunk's post-image, which is literally what is
+// on disk over that range, and written back with `writeFile` rather than a
+// synthesized patch. Building a valid unified patch out of arbitrary edited
+// text means re-diffing the hunk, and an apply failure surfaces as an opaque
+// backend error; writing the file is what `saveFile` and the File Explorer
+// already do, and it keeps the honest model that an edit is a working-tree
+// change you stage afterwards like any other.
+const CodeEditor = defineAsyncComponent(() => import("./CodeEditor.vue"));
+
+const editingHunkIdx = ref<number | null>(null);
+const editDraft = ref("");
+const editError = ref<string | null>(null);
+
+/** Editing is possible at all: parent opted in, inline mode, a real path. */
+const canEdit = computed(
+  () => props.editable === true && props.diffMode === "inline" && !!props.filePath,
+);
+
+function startHunkEdit(hunkIdx: number) {
+  if (!canEdit.value || editingHunkIdx.value !== null) return;
+  const hunk = props.diff?.hunks[hunkIdx];
+  if (!hunk) return;
+  editError.value = null;
+  editDraft.value = hunkPostImage(hunk);
+  editingHunkIdx.value = hunkIdx;
+}
+
+function cancelHunkEdit() {
+  editingHunkIdx.value = null;
+  editDraft.value = "";
+  editError.value = null;
+}
+
+/**
+ * Hand the edit up rather than performing it.
+ *
+ * The splice needs the file's CURRENT bytes, and reading and writing them is
+ * I/O this component has no business doing: DiffViewer renders, App.vue owns
+ * the repo. It also keeps the re-read honest, since the app shell is the thing
+ * that knows the cwd and can report a stale hunk the same way it reports any
+ * other repo error.
+ */
+function confirmHunkEdit() {
+  const hunkIdx = editingHunkIdx.value;
+  const path = props.filePath;
+  if (hunkIdx === null || !path) return;
+  emit("edit-hunk", path, hunkIdx, editDraft.value);
+  cancelHunkEdit();
+}
 
 // ─── Commit Review (Task 1b, v3.7.0) — findings anchored on diff lines ────
 
@@ -654,6 +728,17 @@ function onDiffScroll() {
       >
         <div class="hunk-header mono">
           <span class="hunk-header-text">{{ hunk.header }}</span>
+          <!-- v3.11: edit this hunk in place. Disabled, not hidden, while
+               another hunk is open, so the reason the action is unavailable is
+               visible rather than mysterious. -->
+          <button
+            v-if="canEdit"
+            class="hunk-edit-btn"
+            :disabled="editingHunkIdx !== null"
+            :title="editingHunkIdx !== null ? t('diff.editBusy') : t('diff.editHunk')"
+            :aria-label="t('diff.editHunk')"
+            @click="startHunkEdit(hunkIdx)"
+          >✎</button>
           <button
             v-if="selectable"
             class="hunk-stage-btn"
@@ -741,6 +826,36 @@ function onDiffScroll() {
                   </td>
                 </tr>
               </template>
+              <!-- v3.11 editable diff: a full-width escape row, the same shape
+                   as the finding rows above and subject to the same trap. The
+                   <td> stays a plain table-cell box (no display override) so
+                   `colspan` actually spans the diff; any flex lives on an
+                   inner div. A `td` with `display: flex` stops being a
+                   table-cell and the browser silently ignores `colspan`. -->
+              <tr v-if="editingHunkIdx === hunkIdx" class="diff-edit-row">
+                <td class="diff-edit-cell" :colspan="selectable ? 5 : 4">
+                  <div class="diff-edit-body">
+                    <div class="diff-edit-head">
+                      <span class="diff-edit-label">{{ t('diff.editHunk') }}</span>
+                      <button type="button" class="diff-edit-btn diff-edit-btn--primary" @click="confirmHunkEdit">
+                        {{ t('common.confirm') }}
+                      </button>
+                      <button type="button" class="diff-edit-btn" @click="cancelHunkEdit">
+                        {{ t('common.cancel') }}
+                      </button>
+                    </div>
+                    <p v-if="editError" class="diff-edit-error" role="alert">{{ editError }}</p>
+                    <CodeEditor
+                      v-model="editDraft"
+                      :file-path="filePath"
+                      :aria-label="t('diff.editHunk')"
+                      :min-lines="4"
+                      :max-lines="20"
+                      autofocus
+                    />
+                  </div>
+                </td>
+              </tr>
             </tbody>
           </table>
         </template>
@@ -909,6 +1024,57 @@ function onDiffScroll() {
 </template>
 
 <style scoped>
+/* ─── v3.11 editable diff ─────────────────────────────── */
+.hunk-edit-btn {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  padding: 0 6px;
+  font-size: 12px;
+}
+.hunk-edit-btn:disabled { opacity: 0.4; cursor: default; }
+.hunk-edit-btn:hover:not(:disabled) { color: var(--color-accent); }
+
+/* No display override here: see the template comment. */
+.diff-edit-cell {
+  padding: 0;
+  background: var(--color-bg-secondary);
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+}
+.diff-edit-body { padding: 8px 12px; }
+.diff-edit-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.diff-edit-label {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  margin-right: auto;
+}
+.diff-edit-btn {
+  border: 1px solid var(--color-border);
+  background: transparent;
+  border-radius: var(--radius-sm);
+  padding: 2px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  color: var(--color-text);
+}
+.diff-edit-btn--primary {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-accent-text);
+}
+.diff-edit-error {
+  margin: 0 0 6px;
+  font-size: 11px;
+  color: var(--color-danger);
+}
+
 .diff-viewer {
   display: flex;
   flex-direction: column;

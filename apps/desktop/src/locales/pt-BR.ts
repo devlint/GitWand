@@ -332,6 +332,9 @@ const ptBR: Locale = {
 
   // ─── DiffViewer ─────────────────────────────────────────
   diff: {
+    editHunk: "Editar este hunk",
+    editBusy: "Conclua primeiro o hunk em edi\u00e7\u00e3o",
+    editStale: "O arquivo mudou desde que este diff foi calculado. Atualize e tente novamente.",
     newFolder: "Nova pasta",
     newFolderCount: "{0} arquivo(s)",
     nestedRepo: "Reposit\u00f3rio Git aninhado",

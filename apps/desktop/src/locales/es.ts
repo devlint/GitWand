@@ -331,6 +331,9 @@ const es: Locale = {
 
   // ─── DiffViewer ─────────────────────────────────────────
   diff: {
+    editHunk: "Editar este hunk",
+    editBusy: "Termina primero el hunk que est\u00e1s editando",
+    editStale: "El archivo cambi\u00f3 desde que se calcul\u00f3 este diff. Actualiza e int\u00e9ntalo de nuevo.",
     newFolder: "Carpeta nueva",
     newFolderCount: "{0} archivo(s)",
     nestedRepo: "Repositorio Git anidado",

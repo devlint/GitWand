@@ -336,6 +336,9 @@ const fr: Locale = {
 
   // ─── DiffViewer ─────────────────────────────────────────
   diff: {
+    editHunk: "Modifier ce hunk",
+    editBusy: "Terminez d'abord le hunk en cours d'\u00e9dition",
+    editStale: "Le fichier a chang\u00e9 depuis le calcul de ce diff. Rafra\u00eechissez et r\u00e9essayez.",
     newFolder: "Nouveau dossier",
     newFolderCount: "{0} fichier(s)",
     nestedRepo: "D\u00e9p\u00f4t Git imbriqu\u00e9",

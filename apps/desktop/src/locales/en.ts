@@ -343,6 +343,9 @@ const en = {
 
   // ─── DiffViewer ─────────────────────────────────────────
   diff: {
+    editHunk: "Edit this hunk",
+    editBusy: "Finish the hunk you are editing first",
+    editStale: "The file changed since this diff was computed. Refresh and try again.",
     newFolder: "New folder",
     newFolderCount: "{0} file(s)",
     nestedRepo: "Nested Git repository",
