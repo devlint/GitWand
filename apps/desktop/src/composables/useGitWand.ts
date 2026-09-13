@@ -286,6 +286,86 @@ export function resolveAllConflictBlocks(
  * Manages file list, conflict analysis, resolution state,
  * undo/redo history, and inline editing.
  */
+/**
+ * v3.11 — predicate deciding whether one already-computed resolution should
+ * actually be written. Absent means "every resolution the engine applied",
+ * which is the pre-v3.11 behaviour.
+ */
+export type ApplyPredicate = (
+  index: number,
+  resolution: MergeResult["resolutions"][number],
+) => boolean;
+
+/**
+ * Build partially resolved content: replace applied hunks with their resolved
+ * lines, keep the conflict markers for the rest.
+ *
+ * An unapplied hunk is re-emitted from the **original text** it was buffered
+ * from, not rebuilt from parsed pieces, so its diff3 base section survives
+ * byte for byte. Losing the base would silently disable every diff3-only
+ * pattern on the next pass over the file.
+ */
+export function buildPartialContent(
+  original: string,
+  resolutions: MergeResult["resolutions"],
+  shouldApply?: ApplyPredicate,
+): string {
+  const lines = original.split("\n");
+  const output: string[] = [];
+  let conflictIdx = 0;
+  let inConflict = false;
+  let conflictBuffer: string[] = [];
+
+  for (const line of lines) {
+    if (line.startsWith("<<<<<<<")) {
+      inConflict = true;
+      conflictBuffer = [line];
+    } else if (line.startsWith(">>>>>>>") && inConflict) {
+      conflictBuffer.push(line);
+      const resolution = resolutions[conflictIdx];
+      // The engine's own verdict is the floor: a predicate can only ever
+      // narrow what it offered, never widen it.
+      const engineApplied = Boolean(resolution?.autoResolved && resolution.resolvedLines);
+      const apply =
+        engineApplied && (!shouldApply || shouldApply(conflictIdx, resolution));
+      if (apply) {
+        output.push(...resolution.resolvedLines!);
+      } else {
+        output.push(...conflictBuffer);
+      }
+      conflictIdx++;
+      inConflict = false;
+      conflictBuffer = [];
+    } else if (inConflict) {
+      conflictBuffer.push(line);
+    } else {
+      output.push(line);
+    }
+  }
+
+  return output.join("\n");
+}
+
+/**
+ * Decide what a file's content becomes once its resolutions are applied.
+ *
+ * `mergedContent` is the engine's fully-merged output, computed by applying
+ * **every** resolution. Taking it while a filter is active would therefore
+ * apply the very hunks the user held back, which is how a per-hunk opt-out
+ * turns decorative without anything appearing to fail. So the shortcut is
+ * legal only when no predicate was supplied at all, and deliberately not when
+ * the predicate merely happens to accept everything: the two paths must not
+ * produce different content for the same input.
+ */
+export function buildResolvedContent(
+  original: string,
+  result: Pick<MergeResult, "mergedContent" | "resolutions">,
+  shouldApply?: ApplyPredicate,
+): string | null {
+  if (!shouldApply && result.mergedContent) return result.mergedContent;
+  return buildPartialContent(original, result.resolutions, shouldApply);
+}
+
 export function useGitWand() {
   const { addToHistory } = useFolderHistory();
 
@@ -831,7 +911,7 @@ export async function fetchUsers() {
    * Handles mixed files (some auto-resolved, some not) by applying
    * auto-resolved hunks individually via replaceConflictByIndex.
    */
-  async function resolveAll() {
+  async function resolveAll(opts?: { shouldApply?: (path: string) => ApplyPredicate | undefined }) {
     return withFiles(async () => {
       pushUndo();
       const core = await engine();
@@ -840,29 +920,15 @@ export async function fetchUsers() {
         snapshot.map(async (f) => {
           if (f.result.stats.autoResolved === 0) return f;
 
-          if (f.result.mergedContent) {
-            // All conflicts resolved — use merged content directly
-            return {
-              ...f,
-              content: f.result.mergedContent,
-              result: await core.resolve(f.result.mergedContent, f.path, toRaw(resolveOptions.value)),
-            };
-          }
+          // Per-file predicate: the caller owns the selection state, which is
+          // keyed by path, so it hands us one predicate per file.
+          const shouldApply = opts?.shouldApply?.(f.path);
 
-          // Mixed file: apply auto-resolved hunks individually (reverse order
-          // to preserve conflict indices as we replace earlier blocks).
-          let newContent = f.content;
-          const resolutions = f.result.resolutions;
-          for (let i = resolutions.length - 1; i >= 0; i--) {
-            const res = resolutions[i];
-            if (res.autoResolved && res.resolvedLines) {
-              newContent = replaceConflictByIndex(
-                newContent,
-                i,
-                res.resolvedLines.join("\n"),
-              );
-            }
-          }
+          // `buildResolvedContent` owns the `mergedContent` shortcut and
+          // deliberately skips it whenever a predicate is active: that content
+          // already has every resolution baked in, held-back hunks included.
+          const newContent = buildResolvedContent(f.content, f.result, shouldApply);
+          if (newContent === null || newContent === f.content) return f;
 
           return {
             ...f,
@@ -886,18 +952,19 @@ export async function fetchUsers() {
 
   /**
    * Resolve a single file.
-   * If the core produced a full mergedContent (all hunks resolved), use it.
-   * Otherwise, build a partial resolution: apply resolved hunks and keep
-   * conflict markers for the remaining ones.
+   *
+   * With no `shouldApply` predicate this is the pre-v3.11 behaviour: the
+   * engine's `mergedContent` when it resolved everything, a partial build
+   * otherwise. With a predicate (v3.11 per-hunk opt-out and confidence bar)
+   * the `mergedContent` shortcut is skipped, because it already contains
+   * every resolution including the ones being held back.
    */
-  async function resolveFile(path: string) {
+  async function resolveFile(path: string, opts?: { shouldApply?: ApplyPredicate }) {
     return withFiles(async () => {
       const file = files.value.find((f) => f.path === path);
       if (!file) return;
 
-      // If core resolved everything → use mergedContent directly
-      // Otherwise → build partial content from resolutions
-      const newContent = file.result.mergedContent ?? buildPartialContent(file.content, file.result.resolutions);
+      const newContent = buildResolvedContent(file.content, file.result, opts?.shouldApply);
       if (!newContent || newContent === file.content) return;
 
       pushUndo();
@@ -905,44 +972,6 @@ export async function fetchUsers() {
     });
   }
 
-  /**
-   * Build partially resolved content: replace auto-resolved hunks with their
-   * resolved lines, keep conflict markers for unresolved hunks.
-   */
-  function buildPartialContent(
-    original: string,
-    resolutions: MergeResult["resolutions"],
-  ): string {
-    const lines = original.split("\n");
-    const output: string[] = [];
-    let conflictIdx = 0;
-    let inConflict = false;
-    let conflictBuffer: string[] = [];
-
-    for (const line of lines) {
-      if (line.startsWith("<<<<<<<")) {
-        inConflict = true;
-        conflictBuffer = [line];
-      } else if (line.startsWith(">>>>>>>") && inConflict) {
-        conflictBuffer.push(line);
-        const resolution = resolutions[conflictIdx];
-        if (resolution?.autoResolved && resolution.resolvedLines) {
-          output.push(...resolution.resolvedLines);
-        } else {
-          output.push(...conflictBuffer);
-        }
-        conflictIdx++;
-        inConflict = false;
-        conflictBuffer = [];
-      } else if (inConflict) {
-        conflictBuffer.push(line);
-      } else {
-        output.push(line);
-      }
-    }
-
-    return output.join("\n");
-  }
 
   /**
    * Manually resolve a specific hunk in a file.

@@ -752,6 +752,7 @@ const en = {
     resolveAutoSummaryBody: "{0} conflict(s) will be resolved as follows:",
     resolveAutoSummaryConfirm: "Confirm",
     resolveAutoSummaryCancel: "Cancel",
+    resolveAutoSummaryToggle: "Apply conflict {0}",
     bulkLabel: "Accept all:",
     bulkOurs: "Current",
     bulkTheirs: "Incoming",

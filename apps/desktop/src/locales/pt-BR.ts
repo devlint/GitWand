@@ -741,6 +741,7 @@ const ptBR: Locale = {
     resolveAutoSummaryBody: "{0} conflito(s) serão resolvidos assim:",
     resolveAutoSummaryConfirm: "Confirmar",
     resolveAutoSummaryCancel: "Cancelar",
+    resolveAutoSummaryToggle: "Aplicar o conflito {0}",
     bulkLabel: "Aceitar tudo:",
     bulkOurs: "Atual",
     bulkTheirs: "Recebido",

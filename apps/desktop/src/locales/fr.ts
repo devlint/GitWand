@@ -745,6 +745,7 @@ const fr: Locale = {
     resolveAutoSummaryBody: "{0} conflit(s) seront r\u00e9solus ainsi :",
     resolveAutoSummaryConfirm: "Confirmer",
     resolveAutoSummaryCancel: "Annuler",
+    resolveAutoSummaryToggle: "Appliquer le conflit {0}",
     bulkLabel: "Tout accepter :",
     bulkOurs: "Courante",
     bulkTheirs: "Entrante",

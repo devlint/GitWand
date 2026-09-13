@@ -19,6 +19,7 @@ import { createApp, defineComponent, h, reactive, nextTick, type App } from "vue
 import MergeEditor from "../MergeEditor.vue";
 import type { ConflictFile } from "../../composables/useGitWand";
 import type { ConflictHunk, HunkResolution } from "@gitwand/core";
+import { useResolutionSelection } from "../../composables/useResolutionSelection";
 
 class FakeResizeObserver {
   static instances: FakeResizeObserver[] = [];
@@ -73,6 +74,12 @@ let originalRO: typeof ResizeObserver | undefined;
 
 beforeEach(() => {
   localStorage.clear();
+  // v3.11 — the per-hunk opt-out store is a module-level singleton shared with
+  // the apply paths, so it outlives a component unmount by design (rejecting a
+  // hunk, tabbing away and back keeps the choice). Tests must therefore start
+  // from a clean store, exactly like localStorage above.
+  useResolutionSelection().resetAll();
+  useResolutionSelection().minScore.value = 0;
   FakeResizeObserver.instances = [];
   originalRO = (globalThis as { ResizeObserver?: typeof ResizeObserver }).ResizeObserver;
   (globalThis as { ResizeObserver: unknown }).ResizeObserver = FakeResizeObserver;

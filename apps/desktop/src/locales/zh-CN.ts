@@ -730,6 +730,7 @@ const zhCN: Locale = {
     resolveAutoSummaryBody: "将按以下方式解决 {0} 个冲突：",
     resolveAutoSummaryConfirm: "确认",
     resolveAutoSummaryCancel: "取消",
+    resolveAutoSummaryToggle: "应用冲突 {0}",
     bulkLabel: "全部接受：",
     bulkOurs: "当前",
     bulkTheirs: "传入",

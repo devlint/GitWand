@@ -85,7 +85,8 @@ import { useSplitCommit } from "./composables/useSplitCommit";
 import type { GitLogEntry } from "./utils/backend";
 import { getPersistedDiffMode, persistDiffMode, type DiffMode } from "./utils/diffMode";
 import { isImagePath } from "./utils/imagePath";
-import { useGitWand } from "./composables/useGitWand";
+import { useGitWand, type ApplyPredicate } from "./composables/useGitWand";
+import { useResolutionSelection, contentStamp } from "./composables/useResolutionSelection";
 import { useResolutionMemory, type ResolutionMemoryEntry, type ResolutionStrategy } from "./composables/useResolutionMemory";
 import { useRepoTabs } from "./composables/useRepoTabs";
 import { useAiTasks } from "./composables/useAiTasks";
@@ -209,6 +210,10 @@ const {
   selectFile: mergeSelectFile,
   refreshLlmFallbackConfig: mergeRefreshLlmFallbackConfig,
 } = useGitWand();
+
+// v3.11 — shared per-hunk opt-out + confidence bar. Module-level singleton, so
+// the merge editor, the summary modal and the apply paths all read one set.
+const resolutionSelection = useResolutionSelection();
 
 // ─── Repo mode (useGitRepo) — single shared instance ────
 const {
@@ -839,8 +844,48 @@ async function handleResolveHunk(path: string, hunkIndex: number, choice: "ours"
   await checkAndSaveIfResolved(path);
 }
 
+/**
+ * v3.11 — the predicate the apply paths consult, built from the shared
+ * selection store. App.vue owns both sides (the `useGitWand` instance and the
+ * singleton), so this is where they meet: `useGitWand` stays a pure function
+ * of its arguments and never reaches for hidden state.
+ *
+ * Returning `undefined` when nothing is filtered matters. It is what lets
+ * `buildResolvedContent` keep using the engine's `mergedContent` shortcut on
+ * the common path, instead of rebuilding content marker by marker every time.
+ */
+function applyPredicateFor(path: string): ApplyPredicate | undefined {
+  const file = mergeFiles.value.find((f) => f.path === path);
+  if (!file) return undefined;
+  const stamp = contentStamp(file.content);
+  const selection = resolutionSelection;
+  const anythingFiltered =
+    selection.minScore.value > 0 || selection.excludedCount(path) > 0;
+  if (!anythingFiltered) return undefined;
+  return (index, resolution) =>
+    selection.shouldApply(path, index, resolution as never, stamp);
+}
+
+/** Which hunk indices a filtered apply consumed, so the selection can remap. */
+function appliedIndicesFor(path: string, predicate: ApplyPredicate | undefined): number[] {
+  const file = mergeFiles.value.find((f) => f.path === path);
+  if (!file) return [];
+  const out: number[] = [];
+  file.result.resolutions.forEach((r, i) => {
+    const engineApplied = r.autoResolved && r.resolvedLines !== null;
+    if (engineApplied && (!predicate || predicate(i, r))) out.push(i);
+  });
+  return out;
+}
+
 async function handleResolveFile(path: string) {
-  await resolveFile(path);
+  const predicate = applyPredicateFor(path);
+  const consumed = appliedIndicesFor(path, predicate);
+  await resolveFile(path, { shouldApply: predicate });
+  // Indices renumber once blocks are removed; remap before anything reads the
+  // selection again, or a stale index would point at the wrong hunk.
+  const after = mergeFiles.value.find((f) => f.path === path);
+  if (after) resolutionSelection.remapAfterApply(path, consumed, contentStamp(after.content));
   await checkAndSaveIfResolved(path);
 }
 
@@ -1498,6 +1543,9 @@ watch(
 // plain staging change within the SAME repo (e.g. the "Review now" round trip).
 watch(repoFolderPath, () => {
   commitReviewDecision.value = null;
+  // v3.11 — the per-hunk opt-out set is keyed by repo-relative path, so it
+  // must not survive a repo change: the same path means a different file.
+  resolutionSelection.resetAll();
 });
 
 function onDiscardSection(sectionKey: string, paths: string[]) {
@@ -2540,7 +2588,7 @@ async function onRebaseBannerAutoResolve() {
       }
       // Resolve this step.
       await mergeOpenPath(cwd);
-      await resolveAll();
+      await resolveAll({ shouldApply: applyPredicateFor });
       await saveAllFiles();
       const resolved = mergeFiles.value
         .filter((f) => f.result.stats.totalConflicts === 0)
@@ -3502,7 +3550,7 @@ const scheduler = useScheduler({
   onLog: (msg) => pushErrorLog(msg),
   resolveConflicts: async () => {
     if (!repoFolderPath.value) return;
-    await resolveAll();
+    await resolveAll({ shouldApply: applyPredicateFor });
     await repoRefresh();
   },
   pullAndRebase: async () => {

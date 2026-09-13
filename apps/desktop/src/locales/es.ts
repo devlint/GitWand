@@ -740,6 +740,7 @@ const es: Locale = {
     resolveAutoSummaryBody: "Se resolverán {0} conflicto(s) así:",
     resolveAutoSummaryConfirm: "Confirmar",
     resolveAutoSummaryCancel: "Cancelar",
+    resolveAutoSummaryToggle: "Aplicar el conflicto {0}",
     bulkLabel: "Aceptar todo:",
     bulkOurs: "Actual",
     bulkTheirs: "Entrante",

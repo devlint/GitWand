@@ -6,6 +6,9 @@ const props = defineProps<{
   hunkId: number;
   explanation: string;
   accepted?: boolean;
+  /** v3.11 — the engine's per-hunk confidence, 0-100, and its discrete label. */
+  confidenceScore?: number;
+  confidenceLabel?: string;
 }>();
 
 const emit = defineEmits<{
@@ -20,6 +23,11 @@ const { t } = useI18n();
   <div class="resolution-preview-panel">
     <div class="resolution-preview-panel__header">
       <span class="resolution-preview-panel__title">{{ t('mergeEditor.resolutionPreview.title') }}</span>
+      <span
+        v-if="props.confidenceScore !== undefined"
+        class="resolution-preview-panel__score"
+        :class="`resolution-preview-panel__score--${props.confidenceLabel ?? 'low'}`"
+      >{{ props.confidenceScore }}%</span>
     </div>
     <p class="resolution-preview-panel__explanation">{{ props.explanation }}</p>
     <pre class="resolution-preview-panel__preview">{{ props.resolvedLines.join('\n') }}</pre>
@@ -64,6 +72,19 @@ const { t } = useI18n();
 .resolution-preview-panel__title {
   font-weight: 600;
   font-size: 13px;
+}
+.resolution-preview-panel__score {
+  margin-left: auto;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-secondary);
+}
+.resolution-preview-panel__score--certain,
+.resolution-preview-panel__score--high {
+  color: var(--color-success);
+}
+.resolution-preview-panel__score--medium {
+  color: var(--color-warning);
 }
 .resolution-preview-panel__explanation {
   font-size: 12px;

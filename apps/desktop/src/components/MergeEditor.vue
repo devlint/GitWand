@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import type { ConflictFile } from "../composables/useGitWand";
+import { useResolutionSelection, contentStamp } from "../composables/useResolutionSelection";
 import { summarizeTiers, type ConflictHunk } from "@gitwand/core";
 import { highlightConflict } from "../utils/diffHighlight";
 import { useI18n } from "../composables/useI18n";
@@ -247,10 +248,25 @@ function resolveHunkCustomWithMemory(path: string, hunkIndex: number, content: s
 // We track rejection client-side (per file path) because the core has
 // already produced the resolution — we don't want to re-run it. The set
 // is reset when the active file changes.
-const rejectedLlmHunks = ref<Set<number>>(new Set());
+// v3.11 — one store for every kind of "do not apply this hunk". It used to be
+// three independent refs, and `rejectedPreviewHunks` was read only by the
+// `v-if` that hid its own panel: rejecting a resolution hid the panel and then
+// applied the resolution anyway. Sharing one store with the code that actually
+// writes is what stops that from happening again.
+const selection = useResolutionSelection();
 
-/** Number of `llm_proposed` hunks the user explicitly rejected (this file). */
-const rejectedLlmCount = computed(() => rejectedLlmHunks.value.size);
+/** Fingerprint of the content the hunk indices were computed against. */
+const fileStamp = computed(() => contentStamp(props.file.content));
+
+/** Is this hunk excluded from the apply, whatever route excluded it? */
+function isHunkExcluded(hunkIndex: number): boolean {
+  return selection.isExcluded(props.file.path, hunkIndex, fileStamp.value);
+}
+
+/** Exclude one hunk from the apply (idempotent). */
+function excludeHunk(hunkIndex: number): void {
+  selection.setExcluded(props.file.path, hunkIndex, true, fileStamp.value);
+}
 
 /**
  * `file.result.stats.autoResolved` counts every hunk the core marked as
@@ -260,7 +276,7 @@ const rejectedLlmCount = computed(() => rejectedLlmHunks.value.size);
  * actually be applied.
  */
 const canResolve = computed(
-  () => props.file.result.stats.autoResolved - rejectedLlmCount.value > 0,
+  () => appliedResolutions.value.length > 0,
 );
 
 const hunks = computed(() => props.file.result.hunks);
@@ -325,7 +341,7 @@ function hasLlmTrace(hunk: ConflictHunk): boolean {
  */
 function showLlmPanelFor(hunkIndex: number, hunk: ConflictHunk): boolean {
   if (!hasLlmTrace(hunk)) return false;
-  if (rejectedLlmHunks.value.has(hunkIndex)) return false;
+  if (isHunkExcluded(hunkIndex)) return false;
   return true;
 }
 
@@ -341,10 +357,7 @@ function onLlmAccept(hunkId: string | number) {
 function onLlmReject(hunkId: string | number) {
   const idx = Number(hunkId);
   if (!Number.isFinite(idx)) return;
-  // Use a fresh Set so reactivity fires (computed `canResolve` recomputes).
-  const next = new Set(rejectedLlmHunks.value);
-  next.add(idx);
-  rejectedLlmHunks.value = next;
+  excludeHunk(idx);
   // Drop a previously-recorded accept so the UX badge doesn't lie.
   if (acceptedLlmHunks.value.has(idx)) {
     const a = new Set(acceptedLlmHunks.value);
@@ -386,8 +399,6 @@ function showTokenMergePanelFor(hunkIndex: number, hunk: ConflictHunk): boolean 
 // the "Résoudre auto" button would, via resolveHunkCustom. This replaces the
 // classic action bar's "Accepter les deux" for these hunks, which previously
 // did a raw ours+theirs concatenation instead of the engine's real merge.
-const rejectedPreviewHunks = ref<Set<number>>(new Set());
-
 function onPreviewAccept(hunkIndex: number) {
   const resolution = resolutions.value[hunkIndex];
   if (!resolution?.resolvedLines) return;
@@ -395,16 +406,16 @@ function onPreviewAccept(hunkIndex: number) {
 }
 
 function onPreviewReject(hunkIndex: number) {
-  const next = new Set(rejectedPreviewHunks.value);
-  next.add(hunkIndex);
-  rejectedPreviewHunks.value = next;
+  // Records the refusal where the apply path can see it, not merely where the
+  // panel's own `v-if` can. That gap was the bug.
+  excludeHunk(hunkIndex);
 }
 
 function showResolutionPreviewFor(hunkIndex: number, hunk: ConflictHunk): boolean {
   if (hunk.type === "llm_proposed" || hunk.type === "token_level_merge") return false;
   if (!resolutions.value[hunkIndex]?.autoResolved) return false;
   if (!resolutions.value[hunkIndex]?.resolvedLines) return false;
-  return !rejectedPreviewHunks.value.has(hunkIndex);
+  return !isHunkExcluded(hunkIndex);
 }
 
 // ─── Reset per-file UI-only state on file change ────────
@@ -419,21 +430,66 @@ watch(
   () => {
     editingHunkIndex.value = null;
     editContent.value = "";
-    rejectedLlmHunks.value = new Set();
     acceptedLlmHunks.value = new Set();
     rejectedTokenMergeHunks.value = new Set();
-    rejectedPreviewHunks.value = new Set();
+    // The opt-out set is deliberately NOT cleared here. It is keyed by path
+    // and guarded by a content stamp, so tabbing between two conflicted files
+    // and back keeps the user's choices instead of silently discarding them.
+    // It is cleared when the repository changes (App.vue).
   },
 );
 
 // ─── "Résoudre auto" summary confirmation ───────────────
 const showResolveAutoSummary = ref(false);
 
+/**
+ * The resolutions that would actually be written right now: everything the
+ * engine auto-resolved, minus what the confidence bar holds back, minus what
+ * the user ticked off. This is the single source the summary modal, the
+ * "Resolve auto" button's enabled state and its count all read, so they cannot
+ * disagree with each other or with what the apply does.
+ */
+const appliedResolutions = computed(() =>
+  resolutions.value
+    .map((r, hunkIndex) => ({
+      hunkIndex,
+      resolvedLines: r.resolvedLines,
+      score: r.hunk?.confidence?.score ?? 0,
+      label: r.hunk?.confidence?.label ?? "low",
+    }))
+    .filter((r, i) =>
+      selection.shouldApply(props.file.path, i, resolutions.value[i] as never, fileStamp.value),
+    ) as Array<{ hunkIndex: number; resolvedLines: string[]; score: number; label: string }>,
+);
+
+/** Everything the engine offered, annotated with whether it is currently on. */
 const autoResolutionsSummary = computed(() =>
   resolutions.value
-    .map((r, hunkIndex) => ({ hunkIndex, resolvedLines: r.resolvedLines, autoResolved: r.autoResolved }))
-    .filter((r) => r.autoResolved && r.resolvedLines !== null) as Array<{ hunkIndex: number; resolvedLines: string[] }>,
+    .map((r, hunkIndex) => ({
+      hunkIndex,
+      resolvedLines: r.resolvedLines,
+      score: r.hunk?.confidence?.score ?? 0,
+      label: String(r.hunk?.confidence?.label ?? "low"),
+      excluded: !selection.shouldApply(
+        props.file.path,
+        hunkIndex,
+        r as never,
+        fileStamp.value,
+      ),
+    }))
+    .filter((r) => r.resolvedLines !== null) as Array<{
+      hunkIndex: number;
+      resolvedLines: string[];
+      score: number;
+      label: string;
+      excluded: boolean;
+    }>,
 );
+
+/** Toggle one row from the summary modal. */
+function toggleSummaryRow(hunkIndex: number) {
+  selection.toggle(props.file.path, hunkIndex, fileStamp.value);
+}
 
 function confirmResolveAuto() {
   showResolveAutoSummary.value = false;
@@ -931,6 +987,8 @@ useResizeObserver(contentEl, drawMinimap);
               :resolved-lines="resolutions[seg.hunkIndex]!.resolvedLines!"
               :hunk-id="seg.hunkIndex"
               :explanation="hunkForSegment(seg)!.explanation"
+              :confidence-score="hunkForSegment(seg)!.confidence.score"
+              :confidence-label="hunkForSegment(seg)!.confidence.label"
               @accept="onPreviewAccept"
               @reject="onPreviewReject"
             />
@@ -1155,6 +1213,7 @@ useResizeObserver(contentEl, drawMinimap);
     <ResolveAutoSummaryModal
       v-if="showResolveAutoSummary"
       :resolutions="autoResolutionsSummary"
+      @toggle="toggleSummaryRow"
       @confirm="confirmResolveAuto"
       @cancel="showResolveAutoSummary = false"
     />
