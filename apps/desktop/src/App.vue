@@ -87,6 +87,7 @@ import { getPersistedDiffMode, persistDiffMode, type DiffMode } from "./utils/di
 import { isImagePath } from "./utils/imagePath";
 import { useGitWand, type ApplyPredicate } from "./composables/useGitWand";
 import { useResolutionSelection, contentStamp } from "./composables/useResolutionSelection";
+import { useApplyFromPreview, type ApplyOutcome } from "./composables/useApplyFromPreview";
 import { useResolutionMemory, type ResolutionMemoryEntry, type ResolutionStrategy } from "./composables/useResolutionMemory";
 import { useRepoTabs } from "./composables/useRepoTabs";
 import { useAiTasks } from "./composables/useAiTasks";
@@ -887,6 +888,70 @@ async function handleResolveFile(path: string) {
   const after = mergeFiles.value.find((f) => f.path === path);
   if (after) resolutionSelection.remapAfterApply(path, consumed, contentStamp(after.content));
   await checkAndSaveIfResolved(path);
+}
+
+// ─── Apply from preview (v3.11.0) ─────────────────────────
+//
+// The predictor simulates; applying runs the real operation and re-resolves
+// what git actually produced. The composable takes its dependencies
+// explicitly, so this is the one place that knows how to satisfy them.
+const applyingFromPreview = ref(false);
+const applyOutcome = ref<ApplyOutcome | null>(null);
+
+const { apply: runApplyFromPreview } = useApplyFromPreview({
+  cwd: () => repoFolderPath.value ?? "",
+  repoState: async () => {
+    const { gitRepoState } = await import("./utils/backend");
+    return gitRepoState(repoFolderPath.value ?? "");
+  },
+  snapshot: (cwd, kind, label) => snapshots.capture(cwd, kind, label) as never,
+  runMerge: async (ref_) => { await doMergeRaw(ref_, false); },
+  runCherryPick: async (sha) => { await doCherryPick([sha]); },
+  runRebaseOnto: async (onto) => {
+    const { gitRebaseOnto } = await import("./utils/backend");
+    return gitRebaseOnto(repoFolderPath.value ?? "", onto);
+  },
+  refresh: async () => { await repoRefresh(); await refreshRepoState(); },
+  // git's own conflicted set, not our in-memory list: it is the only thing
+  // that knows whether staging actually landed.
+  conflictedPaths: () => repoStatus.value?.conflicted ?? [],
+  openConflicts: async (cwd) => { await mergeOpenPath(cwd); },
+  resolveAll: (opts) => resolveAll(opts),
+  saveAll: () => saveAllFiles(),
+  stage: (paths) => stageFiles(paths),
+  files: () => mergeFiles.value as never,
+  finalize: async (operation) => {
+    const { gitRebaseAction } = await import("./utils/backend");
+    const cwd = repoFolderPath.value ?? "";
+    if (operation === "rebase") await gitRebaseAction(cwd, "continue");
+    else if (operation === "cherry-pick") await doCherryPickContinue();
+    else await doMergeContinue();
+  },
+  applyPredicateFor,
+});
+
+async function handleApplyFromPreview(operation: string, ref_: string, estimatedHunks: number) {
+  if (!repoFolderPath.value || applyingFromPreview.value) return;
+  applyingFromPreview.value = true;
+  applyOutcome.value = null;
+  try {
+    const out = await runApplyFromPreview(operation as never, ref_, estimatedHunks);
+    applyOutcome.value = out;
+    // Land the user on the first file that still needs them, if any.
+    if (out.residualFiles.length > 0) {
+      viewMode.value = "changes";
+      await repoSelectFile(out.residualFiles[0], false);
+    }
+  } catch (err: unknown) {
+    repoError.value = `apply: ${err instanceof Error ? err.message : String(err)}`;
+  } finally {
+    applyingFromPreview.value = false;
+  }
+}
+
+async function handleOpenResidual(path: string) {
+  viewMode.value = "changes";
+  await repoSelectFile(path, false);
 }
 
 async function handleResolveHunkCustom(path: string, hunkIndex: number, content: string) {
@@ -4021,6 +4086,10 @@ onUnmounted(() => {
       @sync="doSync" @publish="doPublish" @rebase-onto-remote="doRebaseOntoRemote" @merge-remote="doMergeRemote"
       @force-push="doForcePush" @discard-all="handleWipDiscardAll"
       @merge-branch="doMerge" @open-settings="settingsInitialTab = undefined; showSettings = true"
+      :applying-from-preview="applyingFromPreview" :apply-outcome="applyOutcome"
+      @apply-from-preview="handleApplyFromPreview"
+      @dismiss-apply="applyOutcome = null"
+      @open-residual="handleOpenResidual"
 
       :error-count="logUnreadCount" :is-offline="isOffline" @switch-branch="handleSwitchBranch" @open-logs="openLogsTab"
       @change-view="onViewModeChange"

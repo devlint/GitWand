@@ -520,6 +520,16 @@ const fr: Locale = {
 
   // ─── Merge Preview (Phase 8.1) ──────────────────────────
   mergePreview: {
+    applying: "Application\u2026",
+    applyAndMerge: "Fusionner et auto-r\u00e9soudre",
+    applyEstimate: "Estimation : {0} hunks sur {1} auto-r\u00e9solvables",
+    applyDone: "Termin\u00e9",
+    applyStopped: "Arr\u00eat sur les conflits qui vous attendent",
+    applyLoopBound: "Arr\u00eat apr\u00e8s trop d'\u00e9tapes de rebase",
+    applyFailed: "L'op\u00e9ration a \u00e9chou\u00e9",
+    applyCounts: "{0} appliqu\u00e9s, {1} restants \u00e0 r\u00e9soudre",
+    applyDrift: "L'aper\u00e7u estimait {0}. L'op\u00e9ration r\u00e9elle voit un merge diff\u00e9rent, les deux peuvent donc diverger.",
+    applyNoSnapshot: "Aucun snapshot n'a \u00e9t\u00e9 pris : pas de retour en un clic.",
     hunkHeldBack: "retenu ({0} %)",
     thresholdLabel: "Appliquer seulement au-dessus de",
     thresholdOff: "Aucun",

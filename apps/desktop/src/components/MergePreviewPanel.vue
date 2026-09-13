@@ -175,6 +175,34 @@
       </p>
     </div>
 
+    <!-- ─── Apply from preview (v3.11.0) ─────────────────── -->
+    <div v-if="summary.conflictingFiles > 0" class="preview-apply">
+      <button
+        type="button"
+        class="btn btn--primary preview-apply__btn"
+        :disabled="props.applying"
+        @click="emit('apply')"
+      >
+        <span v-if="props.applying">… {{ t('mergePreview.applying') }}</span>
+        <span v-else>{{ t('mergePreview.applyAndMerge') }}</span>
+      </button>
+      <!-- "Estimated" is load-bearing: the simulation and the real operation
+           use different merge algorithms and can see a different file set, so
+           this number is a prediction, not a promise. -->
+      <span class="preview-apply__estimate">
+        {{ t('mergePreview.applyEstimate',
+              String(estimatedAutoResolutions),
+              String(estimatedAutoResolutions + heldByThreshold + manualHunks)) }}
+      </span>
+    </div>
+
+    <MergeApplyReport
+      v-if="props.applyOutcome"
+      :outcome="props.applyOutcome"
+      @dismiss="emit('dismiss-apply')"
+      @open-residual="(p) => emit('open-residual', p)"
+    />
+
     <!-- ─── Scratch worktree (v2.20.0) ───────────────────── -->
     <div v-if="summary.conflictingFiles > 0" class="preview-scratch">
       <!-- Error from the last scratch operation -->
@@ -228,6 +256,8 @@ import type { ScratchWorktree } from "../utils/backend.js";
 import { useAIProvider } from "../composables/useAIProvider.js";
 import { useMergeRisk } from "../composables/useMergeRisk.js";
 import AiSparkle from "./AiSparkle.vue";
+import MergeApplyReport from "./MergeApplyReport.vue";
+import type { ApplyOutcome } from "../composables/useApplyFromPreview.js";
 
 const props = defineProps<{
   loading: boolean;
@@ -254,6 +284,10 @@ const props = defineProps<{
   heldByThreshold?: number;
   /** Hunks the engine refused outright; no bar can rescue these. */
   manualHunks?: number;
+  /** v3.11 — an apply is running. */
+  applying?: boolean;
+  /** v3.11 — what the last apply did, if one has run. */
+  applyOutcome?: ApplyOutcome | null;
 }>();
 
 const emit = defineEmits<{
@@ -267,6 +301,10 @@ const emit = defineEmits<{
   "scratch-discard": [];
   /** v3.11 — user moved the confidence bar. */
   "update:threshold": [value: number];
+  /** v3.11 — run the operation for real and apply the engine's resolutions. */
+  apply: [];
+  "dismiss-apply": [];
+  "open-residual": [path: string];
 }>();
 
 // ─── v3.11 — confidence bar ─────────────────────────────
@@ -372,6 +410,20 @@ function basename(path: string): string {
 </script>
 
 <style scoped>
+.preview-apply {
+  border-top: 1px solid var(--color-border);
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.preview-apply__btn { flex: 0 0 auto; }
+.preview-apply__estimate {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
 /* ─── v3.11 confidence bar ───────────────────────────── */
 .ph-confidence {
   display: inline-block;

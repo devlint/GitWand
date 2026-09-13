@@ -31,6 +31,7 @@ import Avatar from "../Avatar.vue";
 import { useI18n } from "../../composables/useI18n";
 import type { LocaleKey } from "../../locales";
 import { useMergePreview, type PreviewOperation } from "../../composables/useMergePreview";
+import type { ApplyOutcome } from "../../composables/useApplyFromPreview";
 import { useScratchWorktree } from "../../composables/useScratchWorktree";
 import { useRepoTabs } from "../../composables/useRepoTabs";
 import { useAIProvider } from "../../composables/useAIProvider";
@@ -61,6 +62,10 @@ const props = defineProps<{
   isSwitchingBranch: boolean;
   /** Path to the current repository (for merge preview). */
   cwd: string;
+  /** v3.11 — an apply-from-preview is running. */
+  applying?: boolean;
+  /** v3.11 — result of the last apply, rendered inside the preview panel. */
+  applyOutcome?: ApplyOutcome | null;
   }>();
 
   const currentBranchName = computed(() => {
@@ -80,6 +85,10 @@ const props = defineProps<{
   changeView: [mode: 'changes'];
   /** Navigate the Git Tree into a submodule (v2.15.1). Payload is the submodule path relative to cwd. */
   openSubmodule: [path: string];
+  /** v3.11 — run the previewed operation for real and apply the resolutions. */
+  applyFromPreview: [operation: PreviewOperation, ref: string, estimatedHunks: number];
+  dismissApply: [];
+  openResidual: [path: string];
 }>();
 
 // Whether the working tree has anything worth reporting — drives the
@@ -388,6 +397,18 @@ const previewOperation = ref<PreviewOperation>("merge");
 watch(previewingBranch, (branch) => {
   if (branch) previewThreshold.value = settings.value.resolution.minConfidenceScore;
 });
+
+/**
+ * Hand the parent the operation, its ref and the estimate the user just saw,
+ * so the report can say whether the real run matched what was promised.
+ */
+function onApplyFromPreview() {
+  const target = previewOperation.value === "cherry-pick"
+    ? (selectedCherryPickSha.value ?? previewingBranch.value)
+    : previewingBranch.value;
+  if (!target) return;
+  emit("applyFromPreview", previewOperation.value, target, previewEstimated.value);
+}
 
 // ─── Commit picker (cherry-pick) ─────────────────────────────────
 // When the user selects cherry-pick as the preview operation, we need to
@@ -777,6 +798,11 @@ onUnmounted(() => {
                   :estimated-auto-resolutions="previewEstimated"
                   :held-by-threshold="previewHeldBack"
                   :manual-hunks="previewManualHunks"
+                  :applying="props.applying"
+                  :apply-outcome="props.applyOutcome ?? null"
+                  @apply="onApplyFromPreview"
+                  @dismiss-apply="emit('dismissApply')"
+                  @open-residual="(p) => emit('openResidual', p)"
                   @update:threshold="previewThreshold = $event"
                   @update:operation="changePreviewOperation"
                   @resolve-in-scratch="handleResolveInScratch"

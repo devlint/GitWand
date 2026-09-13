@@ -527,6 +527,16 @@ const en = {
 
   // ─── Merge Preview (Phase 8.1) ──────────────────────────
   mergePreview: {
+    applying: "Applying\u2026",
+    applyAndMerge: "Merge & auto-resolve",
+    applyEstimate: "Estimated {0} of {1} hunks auto-resolvable",
+    applyDone: "Done",
+    applyStopped: "Stopped on the conflicts that need you",
+    applyLoopBound: "Stopped after too many rebase steps",
+    applyFailed: "The operation failed",
+    applyCounts: "{0} applied, {1} left to resolve",
+    applyDrift: "The preview estimated {0}. The real operation sees a different merge, so the two can differ.",
+    applyNoSnapshot: "No snapshot was captured, so there is no one-click way back.",
     hunkHeldBack: "held back ({0}%)",
     thresholdLabel: "Apply only above",
     thresholdOff: "Off",

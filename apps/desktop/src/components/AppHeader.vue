@@ -31,6 +31,7 @@
  */
 import { ref, computed, inject, watch, onMounted, onUnmounted, type Ref } from "vue";
 import type { Theme } from "../composables/useTheme";
+import type { ApplyOutcome } from "../composables/useApplyFromPreview";
 import type { GitBranch, WorktreeEntry } from "../utils/backend";
 import { branchSort } from "../utils/branchSort";
 import { useI18n } from "../composables/useI18n";
@@ -53,6 +54,10 @@ const { t } = useI18n();
 const askConfirm = inject<(options: any) => Promise<boolean>>("askConfirm");
 
 const props = defineProps<{
+  /** v3.11 — an apply-from-preview is running. */
+  applyingFromPreview?: boolean;
+  /** v3.11 — result of the last apply, rendered inside the preview panel. */
+  applyOutcome?: ApplyOutcome | null;
   hasFiles: boolean;
   theme: Theme;
   branchDisplay: string;
@@ -143,6 +148,10 @@ const emit = defineEmits<{
   /** User chose "Delete current branch" in BranchMenu — open the modal. */
   openDeleteModal: [];
   mergeBranch: [name: string, noFf: boolean];
+  /** v3.11 — apply from the Conflict Predictor. */
+  applyFromPreview: [operation: string, ref: string, estimatedHunks: number];
+  dismissApply: [];
+  openResidual: [path: string];
   loadBranches: [];
   // ── Other overlays ───────────────────────────────────────────
   openRebase: [];
@@ -469,6 +478,11 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
             @load-branches="emit('loadBranches')"
             @change-view="(mode) => emit('changeView', mode)"
             @open-submodule="(path) => emit('openSubmodule', path)"
+            :applying="props.applyingFromPreview"
+            :apply-outcome="props.applyOutcome ?? null"
+            @apply-from-preview="(op, r, n) => emit('applyFromPreview', op, r, n)"
+            @dismiss-apply="emit('dismissApply')"
+            @open-residual="(p) => emit('openResidual', p)"
           />
 
           <!-- BranchMenu + its two piggy-backed popovers.

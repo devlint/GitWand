@@ -397,3 +397,24 @@ export function fixtureRebaseOnto(conflicting) {
   execFileSync("git", ["-C", cwd, "checkout", "topic", "--quiet"]);
   return cwd;
 }
+
+/**
+ * A merge that conflicts in two files at once: one the engine resolves on its
+ * own (whitespace-only), one it must refuse (two incompatible rewrites).
+ * Exactly the mixed case apply-from-preview has to stop halfway through.
+ */
+export function fixtureApplyFromPreview() {
+  const cwd = mkTempRepo("gw-apply-preview-");
+  commitFile(cwd, "spacing.ts", "const a = 1;\n", "base spacing", 0);
+  commitFile(cwd, "hard.ts", "export const mode = \"base\";\n", "base hard", 1);
+
+  execFileSync("git", ["-C", cwd, "checkout", "-b", "topic", "--quiet"]);
+  commitFile(cwd, "spacing.ts", "const a  = 1;\n", "topic respaces", 2);
+  commitFile(cwd, "hard.ts", "export const mode = \"topic\";\n", "topic rewrites", 3);
+
+  execFileSync("git", ["-C", cwd, "checkout", "main", "--quiet"]);
+  commitFile(cwd, "spacing.ts", "const   a = 1;\n", "main respaces", 4);
+  commitFile(cwd, "hard.ts", "export const mode = \"main\";\n", "main rewrites", 5);
+
+  return cwd;
+}

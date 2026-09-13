@@ -516,6 +516,16 @@ const ptBR: Locale = {
 
   // ─── Merge Preview ──────────────────────────────────────
   mergePreview: {
+    applying: "Aplicando\u2026",
+    applyAndMerge: "Mesclar e auto-resolver",
+    applyEstimate: "Estimativa: {0} de {1} hunks auto-resolv\u00edveis",
+    applyDone: "Conclu\u00eddo",
+    applyStopped: "Parado nos conflitos que precisam de voc\u00ea",
+    applyLoopBound: "Parado ap\u00f3s passos de rebase demais",
+    applyFailed: "A opera\u00e7\u00e3o falhou",
+    applyCounts: "{0} aplicados, {1} restantes",
+    applyDrift: "A pr\u00e9via estimou {0}. A opera\u00e7\u00e3o real v\u00ea outra mesclagem, ent\u00e3o podem divergir.",
+    applyNoSnapshot: "Nenhum snapshot foi capturado, n\u00e3o h\u00e1 volta em um clique.",
     hunkHeldBack: "retido ({0}%)",
     thresholdLabel: "Aplicar apenas acima de",
     thresholdOff: "Nenhum",

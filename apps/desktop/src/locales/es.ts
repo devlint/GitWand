@@ -515,6 +515,16 @@ const es: Locale = {
 
   // ─── Merge Preview ──────────────────────────────────────
   mergePreview: {
+    applying: "Aplicando\u2026",
+    applyAndMerge: "Fusionar y auto-resolver",
+    applyEstimate: "Estimado: {0} de {1} hunks auto-resolubles",
+    applyDone: "Listo",
+    applyStopped: "Detenido en los conflictos que te necesitan",
+    applyLoopBound: "Detenido tras demasiados pasos de rebase",
+    applyFailed: "La operaci\u00f3n fall\u00f3",
+    applyCounts: "{0} aplicados, {1} por resolver",
+    applyDrift: "La vista previa estim\u00f3 {0}. La operaci\u00f3n real ve otra fusi\u00f3n, as\u00ed que pueden diferir.",
+    applyNoSnapshot: "No se captur\u00f3 ninguna instant\u00e1nea, no hay vuelta atr\u00e1s en un clic.",
     hunkHeldBack: "retenido ({0} %)",
     thresholdLabel: "Aplicar solo por encima de",
     thresholdOff: "Ninguno",
