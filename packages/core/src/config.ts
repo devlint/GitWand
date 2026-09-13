@@ -252,6 +252,20 @@ export interface GitWandrcConfig {
    */
   resolveGeneratedFiles?: boolean;
   /**
+   * v3.11 — Barre de confiance numérique, 0-100, combinée en ET avec le seuil
+   * de label de la politique. Absente = désactivée.
+   *
+   * Convention de dépôt plutôt que réglage d'application : « à partir de quel
+   * score ce dépôt accepte une auto-résolution » se décide par projet, comme
+   * `policy`. L'app desktop a son propre réglage équivalent pour l'utilisateur
+   * qui n'édite pas `.gitwandrc`.
+   *
+   * ```json
+   * { "minConfidenceScore": 90 }
+   * ```
+   */
+  minConfidenceScore?: number;
+  /**
    * v2.4 — Validation post-merge.
    * - `level: "balanced"` (défaut) : marqueurs résiduels + syntaxe + parse-tree
    * - `level: "strict"` : + tsc --noEmit et/ou eslint (Node.js uniquement, opt-in)
@@ -406,6 +420,19 @@ export function parseGitwandrc(json: string): GitWandrcConfig | null {
       if (Object.keys(patterns).length > 0) {
         result.patterns = patterns;
       }
+    }
+
+    // v3.11 — barre de confiance numérique. Tolérant comme le reste du parser :
+    // une valeur hors bornes ou non numérique est ignorée, pas fatale, donc une
+    // faute de frappe laisse la barre désactivée plutôt que de la placer
+    // silencieusement à un endroit non voulu.
+    if (
+      typeof parsed.minConfidenceScore === "number" &&
+      Number.isFinite(parsed.minConfidenceScore) &&
+      parsed.minConfidenceScore >= 0 &&
+      parsed.minConfidenceScore <= 100
+    ) {
+      result.minConfidenceScore = parsed.minConfidenceScore;
     }
 
     // Valider les patterns de fichiers auto-générés (P2.4).

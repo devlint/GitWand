@@ -20,6 +20,7 @@ import { detectMergeContext } from "../merge-context.js";
 import {
   buildRegenerationReport,
   loadGitwandrcResolveGeneratedFiles,
+  loadGitwandrcMinConfidenceScore,
   loadPersistedConventions,
   type RegenerationReportEntry,
 } from "../regenerate-report.js";
@@ -46,6 +47,12 @@ export function registerTools() {
           regenerate: {
             type: "boolean",
             description: REGENERATE_PARAM_DESCRIPTION,
+          },
+          min_confidence_score: {
+            type: "number",
+            minimum: 0,
+            maximum: 100,
+            description: "Apply only resolutions whose confidence scores >= this (0-100). Combined with the policy's own label threshold, never instead of it: raising it can only ever apply LESS, never more, so it can never let through a hunk the engine already refused. Omit to use the repo's .gitwandrc minConfidenceScore, or no bar at all.",
           },
         },
       },
@@ -78,6 +85,12 @@ export function registerTools() {
           regenerate: {
             type: "boolean",
             description: REGENERATE_PARAM_DESCRIPTION,
+          },
+          min_confidence_score: {
+            type: "number",
+            minimum: 0,
+            maximum: 100,
+            description: "Apply only resolutions whose confidence scores >= this (0-100). Combined with the policy's own label threshold, never instead of it: raising it can only ever apply LESS, never more, so it can never let through a hunk the engine already refused. Omit to use the repo's .gitwandrc minConfidenceScore, or no bar at all.",
           },
         },
       },
@@ -494,6 +507,17 @@ async function toolStatus(cwd: string, args: Record<string, unknown> = {}) {
   // so there is no higher-precedence "explicit call arg" tier here.
   const conventions = loadPersistedConventions(cwd);
   const resolveGeneratedFiles = loadGitwandrcResolveGeneratedFiles(cwd);
+  // v3.11 — numeric confidence bar. An explicit tool argument beats the repo's
+  // .gitwandrc, which beats no bar at all. Out-of-range values are dropped
+  // rather than clamped: guessing a different number than the caller asked for
+  // is worse than ignoring an unusable one.
+  const minConfidenceScore =
+    typeof args.min_confidence_score === "number" &&
+    Number.isFinite(args.min_confidence_score) &&
+    args.min_confidence_score >= 0 &&
+    args.min_confidence_score <= 100
+      ? args.min_confidence_score
+      : loadGitwandrcMinConfidenceScore(cwd);
 
   const aggregateByType: Partial<Record<ConflictType, number>> = {};
   const resultsForReport: Array<{ file: string; result: MergeResult }> = [];
@@ -509,6 +533,7 @@ async function toolStatus(cwd: string, args: Record<string, unknown> = {}) {
         mergeContext: detectMergeContext(cwd),
         conventions,
         resolveGeneratedFiles,
+        minConfidenceScore,
       });
       addByType(aggregateByType, result.stats.byType);
       resultsForReport.push({ file, result });
@@ -580,6 +605,17 @@ async function toolResolve(cwd: string, args: Record<string, unknown>) {
   // always wins over the convention.
   const conventions = loadPersistedConventions(cwd);
   const resolveGeneratedFiles = loadGitwandrcResolveGeneratedFiles(cwd);
+  // v3.11 — numeric confidence bar. An explicit tool argument beats the repo's
+  // .gitwandrc, which beats no bar at all. Out-of-range values are dropped
+  // rather than clamped: guessing a different number than the caller asked for
+  // is worse than ignoring an unusable one.
+  const minConfidenceScore =
+    typeof args.min_confidence_score === "number" &&
+    Number.isFinite(args.min_confidence_score) &&
+    args.min_confidence_score >= 0 &&
+    args.min_confidence_score <= 100
+      ? args.min_confidence_score
+      : loadGitwandrcMinConfidenceScore(cwd);
 
   const aggregateByType: Partial<Record<ConflictType, number>> = {};
   const resultsForReport: Array<{ file: string; result: MergeResult }> = [];
@@ -594,6 +630,7 @@ async function toolResolve(cwd: string, args: Record<string, unknown>) {
         mergeContext: detectMergeContext(cwd),
         conventions,
         resolveGeneratedFiles,
+        minConfidenceScore,
       });
       addByType(aggregateByType, result.stats.byType);
       resultsForReport.push({ file, result });
@@ -669,6 +706,17 @@ async function toolPreview(cwd: string, args: Record<string, unknown>) {
   // accuracy lot F/D (task 3) — same precedence as the CLI's Bug A/B fix.
   const conventions = loadPersistedConventions(cwd);
   const resolveGeneratedFiles = loadGitwandrcResolveGeneratedFiles(cwd);
+  // v3.11 — numeric confidence bar. An explicit tool argument beats the repo's
+  // .gitwandrc, which beats no bar at all. Out-of-range values are dropped
+  // rather than clamped: guessing a different number than the caller asked for
+  // is worse than ignoring an unusable one.
+  const minConfidenceScore =
+    typeof args.min_confidence_score === "number" &&
+    Number.isFinite(args.min_confidence_score) &&
+    args.min_confidence_score >= 0 &&
+    args.min_confidence_score <= 100
+      ? args.min_confidence_score
+      : loadGitwandrcMinConfidenceScore(cwd);
 
   const resultsForReport: Array<{ file: string; result: MergeResult }> = [];
   const previews = files.map((file) => {
@@ -683,6 +731,7 @@ async function toolPreview(cwd: string, args: Record<string, unknown>) {
         mergeContext: detectMergeContext(cwd),
         conventions,
         resolveGeneratedFiles,
+        minConfidenceScore,
       });
       resultsForReport.push({ file, result });
       return serializeResult(file, result);

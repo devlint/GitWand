@@ -49,6 +49,7 @@ function printHelp(): void {
   console.log(`  --no-whitespace       Don't resolve whitespace-only conflicts`);
   console.log(`  --resolve-generated   Auto-resolve generated files (lockfiles, dist/) — declined by default: regenerate them instead`);
   console.log(`  --regenerate          Re-run the ecosystem's generator (npm/pnpm/yarn-berry/composer/cargo) for declined lockfiles once their source of truth is clean/resolved (sandboxed git worktree, opt-in — see .gitwandrc "regenerate": true)`);
+  console.log(`  --min-confidence-score=N  Apply only resolutions scoring >= N (0-100). Combined with the policy's own threshold, never instead of it: it can only ever apply less. Also settable per repo via .gitwandrc "minConfidenceScore"`);
   console.log(`  --concurrency=N       Parallel file workers (default ${DEFAULT_CONCURRENCY}, min 1)`);
   console.log(`  --ci                  CI mode: JSON output + exit code 1 if unresolved`);
   console.log(`  --json                Output results as JSON (implies --ci behavior)`);

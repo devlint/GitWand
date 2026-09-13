@@ -72,6 +72,28 @@ export function loadPersistedConventions(cwd: string): RepoConventions | null {
  * signal the CLI's `loadGitwandrcResolveGeneratedFiles` returns, letting a
  * measured `generatedFiles` convention take over exactly as it does there.
  */
+/**
+ * v3.11 — the repo's numeric confidence bar from `.gitwandrc`, if it sets one.
+ * An explicit `min_confidence_score` tool argument wins over it.
+ */
+export function loadGitwandrcMinConfidenceScore(cwd: string): number | undefined {
+  const root = gitTry(cwd, ["rev-parse", "--show-toplevel"]);
+  if (!root) return undefined;
+
+  for (const filename of [".gitwandrc", ".gitwandrc.json"]) {
+    let content: string;
+    try {
+      content = readFileSync(join(root, filename), "utf-8");
+    } catch {
+      continue;
+    }
+    const parsed = parseGitwandrc(content);
+    if (parsed === null) continue;
+    return parsed.minConfidenceScore;
+  }
+  return undefined;
+}
+
 export function loadGitwandrcResolveGeneratedFiles(cwd: string): boolean | undefined {
   const root = gitTry(cwd, ["rev-parse", "--show-toplevel"]);
   if (!root) return undefined;

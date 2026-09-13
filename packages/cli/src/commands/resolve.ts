@@ -42,6 +42,7 @@ import {
   buildResolveLlmOptions,
   findGitRoot,
   loadGitwandrcResolveGeneratedFiles,
+  loadGitwandrcMinConfidenceScore,
 } from "../llm-config.js";
 import {
   runRegeneration,
@@ -54,6 +55,22 @@ import { loadPersistedConventions } from "./conventions.js";
  * l'installeur (ou un ré-échantillonnage malheureux) — même garde que celle
  * appliquée en pass 1 avant toute écriture. */
 const RESIDUAL_MARKER_RE = /^(?:<{7}|={7}|>{7})/m;
+
+/**
+ * v3.11 — parse `--min-confidence-score`. Returns undefined for anything that
+ * is not a finite number in [0, 100], so an unusable value falls through to
+ * `.gitwandrc` and then to "bar off" rather than aborting the command.
+ */
+export function parseMinConfidenceScore(raw: unknown): number | undefined {
+  if (typeof raw !== "string" && typeof raw !== "number") return undefined;
+  // `Number("")` is 0, which is in range and would read as a deliberate "off",
+  // silently overriding a bar the repo's .gitwandrc had set. A malformed flag
+  // must fall through to the config, not quietly beat it.
+  if (typeof raw === "string" && raw.trim() === "") return undefined;
+  const n = typeof raw === "number" ? raw : Number(raw.trim());
+  if (!Number.isFinite(n) || n < 0 || n > 100) return undefined;
+  return n;
+}
 
 export async function cmdResolve(
   files: string[],
@@ -79,6 +96,12 @@ export async function cmdResolve(
   // dépôt (`gitwand conventions`), si elles ont été dérivées. Jusqu'ici jamais
   // chargées ici : `options.conventions` restait toujours `undefined`, et la
   // précédence lot F de core ne pouvait donc jamais s'exercer depuis le CLI.
+  // v3.11 — numeric confidence bar. `--min-confidence-score` beats `.gitwandrc`,
+  // the same precedence `--resolve-generated` has. An unparsable or
+  // out-of-range flag value is ignored rather than fatal, so a typo leaves the
+  // bar off instead of silently setting it somewhere the user did not mean.
+  const minConfidenceScore: number | undefined =
+    parseMinConfidenceScore(flags["min-confidence-score"]) ?? loadGitwandrcMinConfidenceScore();
   const conventions = loadPersistedConventions(process.cwd());
   // accuracy lot C — contexte de merge : détecté depuis l'état .git ; null hors opération.
   // Rend déterministes les décisions qui en dépendent (versions modifiées des
@@ -220,6 +243,7 @@ export async function cmdResolve(
           verbose: false,
           resolveWhitespace,
           resolveGeneratedFiles,
+          minConfidenceScore,
           mergeContext,
           conventions,
           llmFallback: {
@@ -231,6 +255,7 @@ export async function cmdResolve(
           verbose: false,
           resolveWhitespace,
           resolveGeneratedFiles,
+          minConfidenceScore,
           mergeContext,
           conventions,
         });
