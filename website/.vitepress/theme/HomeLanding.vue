@@ -56,7 +56,7 @@ function setLocale(code: Locale) {
 }
 
 // ── Smart download URL (OS detection) ─────────────────────────────────────
-const LATEST = '3.11.0'
+const LATEST = '3.10.1'
 const RELEASES = 'https://github.com/devlint/GitWand/releases'
 
 // SSR-safe: start with the generic releases page, then switch to the
@@ -162,7 +162,7 @@ const i18n: Record<Locale, any> = {
     heroSub: "Ce petit coup au moral quand 12 fichiers passent au rouge ? Terminé. GitWand classe chaque hunk avec 8 patterns déterministes — sans deviner, sans halluciner — résout tout seul ceux qui n'étaient pas des décisions, et ne te rend que ce qui mérite ton cerveau. Natif, gratuit, MIT.",
     download: 'Télécharger',
     github: 'GitHub',
-    whatsNew: 'Nouveautés v3.11',
+    whatsNew: 'Nouveautés v3.10',
     docs: 'Documentation →',
     platforms: 'macOS · Linux · Windows',
     heroTabCli: 'CLI',
@@ -262,7 +262,7 @@ const i18n: Record<Locale, any> = {
     heroSub: "That sinking feeling when 12 files turn red? Gone. GitWand classifies every hunk with 8 deterministic patterns — no guessing, no hallucinations — auto-resolves the ones that were never decisions, and hands you only what's worth your brain. Native, free, MIT.",
     download: 'Download',
     github: 'GitHub',
-    whatsNew: "What's new in v3.11",
+    whatsNew: "What's new in v3.10",
     docs: 'Documentation →',
     platforms: 'macOS · Linux · Windows',
     heroTabCli: 'CLI',
@@ -362,7 +362,7 @@ const i18n: Record<Locale, any> = {
     heroSub: "¿Esa sensación de vacío cuando 12 archivos se ponen en rojo? Se acabó. GitWand clasifica cada hunk con 8 patrones deterministas — sin adivinar, sin alucinar — resuelve solo los que nunca fueron decisiones y te entrega únicamente lo que merece tu cerebro. Nativo, gratis, MIT.",
     download: 'Descargar',
     github: 'GitHub',
-    whatsNew: 'Novedades v3.11',
+    whatsNew: 'Novedades v3.10',
     docs: 'Documentación →',
     platforms: 'macOS · Linux · Windows',
     heroTabCli: 'CLI',
@@ -462,7 +462,7 @@ const i18n: Record<Locale, any> = {
     heroSub: "Aquele frio na barriga quando 12 arquivos ficam vermelhos? Acabou. O GitWand classifica cada hunk com 8 padrões deterministas — sem chutar, sem alucinar — resolve sozinho os que nunca foram decisões e devolve só o que merece seu cérebro. Nativo, gratuito, MIT.",
     download: 'Baixar',
     github: 'GitHub',
-    whatsNew: 'Novidades v3.11',
+    whatsNew: 'Novidades v3.10',
     docs: 'Documentação →',
     platforms: 'macOS · Linux · Windows',
     heroTabCli: 'CLI',
@@ -562,7 +562,7 @@ const i18n: Record<Locale, any> = {
     heroSub: "12 个文件同时变红的那种心凉？不会再有。GitWand 用 8 种确定性模式分类每个 hunk——不猜测、无幻觉——自动解决那些本就无需决定的冲突，只把真正值得你思考的部分交还给你。原生、免费、MIT。",
     download: '下载',
     github: 'GitHub',
-    whatsNew: 'v3.11 新特性',
+    whatsNew: 'v3.10 新特性',
     docs: '文档 →',
     platforms: 'macOS · Linux · Windows',
     heroTabCli: '命令行',
