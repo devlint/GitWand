@@ -5,6 +5,46 @@ description: Release history for GitWand — the native Git client with AI confl
 
 # Changelog
 
+## v3.11.0 — September 2026
+
+### The preview finally does something
+
+GitWand has been able to tell you what a merge would do since v2.20. It opened the two branches, worked out which conflicts its engine could settle on its own, showed you the numbers, and then left you exactly where you started: merge blind and hope, or build a scratch worktree and try it by hand. This release closes that loop. The panel now has a button, and pressing it carries out the merge you were just shown.
+
+What it does not do is write the simulation out to disk. The preview is a calculation over three snapshots of a file, with no index, no merge in progress, and no knowledge of renames, submodules or custom merge drivers. Applying runs the actual git operation and re-runs the engine against what git really produced, which is the only version of the answer that can be finished, continued, or handed back to you halfway. That is also why the button says "estimated": the two numbers can differ, and when they do the report says so rather than quietly presenting the second one as if it had been the promise all along.
+
+Three things it will never do, each one deliberate. It will never abort on your behalf, because an abort throws away conflict work you may already have done by hand and no snapshot can give you back the memory of which hunks you had checked. It will never continue past a conflict it could not settle: stopping there, with the merge still in progress, is precisely how control is handed back to you. And it does not assume that staging worked because nothing threw; it re-reads git's own list of conflicted files and believes that instead.
+
+### A bar you can set, on a number the engine already knew
+
+Every resolution the engine produces carries a confidence score out of 100. Until now nothing in GitWand ever compared that number to anything: the gate was a coarse label, and the score was computed and discarded. You can now say "only apply resolutions at 90 or above", from the app, from a repository's `.gitwandrc`, from the command line, or from an agent through MCP.
+
+The important part is what raising the bar cannot do. It is combined with the existing label gate, never substituted for it, which means moving it can only ever apply less than before, never more. It can never let through a conflict the engine had already refused to touch. That matters more than it sounds: a conflict the engine calls too complex to touch scores 60, so a bar that replaced the old gate rather than adding to it would have silently started applying exactly the hunks the previous release was built to protect.
+
+The predictor shows the scores it is talking about, and the five settings are fixed stops rather than a slider, because the scores cluster and a continuous control would offer ninety-five positions that change nothing while inviting false precision. Hunks held back by your bar and hunks the engine refused are drawn differently on purpose: lowering the bar will release the first and will never release the second, and a panel that showed them identically would imply otherwise.
+
+If you would rather decide hunk by hunk, you can. The summary now lists every proposed resolution with its score and a checkbox, including the ones currently switched off, because the point of that screen is to show what is about to happen, and that includes what is not.
+
+### Two text surfaces stop pretending
+
+Resolving a conflict by hand in GitWand meant typing into a plain text box: no highlighting, no line numbers, no undo beyond whatever the browser offered. The app has shipped a real code editor since v3.2, but it lived entirely inside the file explorer. It has been pulled out, and the surface where you do the hardest work in this app is now the same editor as the one where you browse.
+
+The diff became editable in the same movement. A pencil on a hunk opens an editor in place, so a typo can be fixed where you noticed it instead of after a detour through another panel. This is deliberately the narrowest version that is still useful: your own unstaged changes, one hunk at a time, in the single-column view. Everything underneath it is a pure text operation that rebuilds the file from its original bytes, so a file without a trailing newline keeps not having one, Windows line endings stay Windows line endings, and if the file moved since the diff was drawn the edit is refused rather than applied one line off. An edit that silently reformats a whole file is not a smaller bug than an edit that fails.
+
+### Split is back where it went missing
+
+When an interactive rebase hits a conflict, v3.6 stopped blocking you behind a modal and handed you a progress banner instead. That was the right call, and it quietly cost you the "Split this commit" action for the rest of the rebase, even on a commit you had explicitly marked to split. It is on the banner now, and only where it is actually safe: at an edit stop, where the commit exists and is the one you are standing on. At a conflict stop the commit has not been created yet and you are sitting on its parent, so a button there would have split the wrong commit entirely.
+
+### Told plainly: the predictor was lying under the dev server
+
+Worth recording, because it explains why several of this release's fixes exist. The conflict predictor had no backend route at all in the development environment used for manual testing. It did not fail: it answered that every merge, rebase and cherry-pick was conflict-free. Nobody could have seen the panel misbehave, because in that environment the panel had nothing to show. Adding the routes made it visible for the first time, and immediately surfaced a panel that was unreadable in light mode, two previews running at once reading each other's temporary files, and temporary paths leaking into the conflict markers people copy into their code.
+
+The same class of gap turned up between the confidence bar and the button meant to obey it: the panel counted with one setting and the apply consulted another that nothing ever wrote, so a bar set to 90 could report holding a hunk back and then write it anyway. And a merge git had refused outright, for a dirty tree or unrelated histories, came back looking like a clean success and was reported as "0 applied, 0 left to resolve" for an operation that had never run. Both are fixed, and both were found by review rather than by tests, which had been driving the correct contract past wiring that did not honour it.
+
+### What did not ship
+
+The v3.11 entry on the roadmap listed eleven items and this release carries four of them, the ones that together make up the resolution loop. Blame on libgit2, index-level staging, the history-aware AI fallback, the Finder-style folder navigation, queueing a pull request to merge when its checks pass, and two pieces of infrastructure verification are all still outstanding and carried over rather than dropped.
+
 ## v3.10.1 — September 2026
 
 ### One unreadable file no longer blocks every conflict
