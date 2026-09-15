@@ -384,6 +384,39 @@ const GITEA_PAGE_SIZE: i64 = 50;
 /// paging without bound.
 const GITEA_COUNT_CEILING: i64 = 300;
 
+/// Ceiling for the paging loops below that have no caller-supplied `limit`:
+/// PR comments, PR reviews, reviewer candidates (collaborators), and branches.
+/// Without a bound, a server that never returns an empty page (a bug, or a
+/// hostile deployment) would page forever. This is generous enough to cover
+/// every realistic PR conversation, review list, collaborator roster, or
+/// branch list, while still guaranteeing the loop terminates.
+const GITEA_LIST_CEILING: i64 = 300;
+
+/// Page through a Gitea list endpoint in fixed `GITEA_PAGE_SIZE` steps,
+/// accumulating up to `want` items. `url_for_page` builds the request URL for
+/// a given 1-based page number. See `needs_another_page` for the stop
+/// condition: a short but non-empty page (a lowered server cap) keeps paging
+/// rather than being read as the end.
+fn gitea_page_all(
+    ctx: &GiteaCtx,
+    want: usize,
+    url_for_page: impl Fn(i64) -> String,
+) -> Result<Vec<serde_json::Value>, String> {
+    let mut collected: Vec<serde_json::Value> = Vec::new();
+    let mut page = 1;
+    loop {
+        let resp = gitea_curl("GET", &url_for_page(page), None, &ctx.auth)?;
+        let arr = resp.as_array().cloned().unwrap_or_default();
+        let page_len = arr.len();
+        collected.extend(arr);
+        if !needs_another_page(collected.len(), want, page_len) {
+            break;
+        }
+        page += 1;
+    }
+    Ok(collected)
+}
+
 /// Slice a client-side accumulated result set down to the caller's requested
 /// window. `offset`/`per_page` are already clamped by the command before this
 /// is called, but a helper this cheap to misuse gets its own guard rather
@@ -547,6 +580,213 @@ pub(crate) async fn gitea_pr_files(cwd: String, index: i64) -> Result<Vec<String
         .as_array()
         .map(|arr| arr.iter().map(|f| jstr(f, "filename")).collect())
         .unwrap_or_default())
+}
+
+/// Shape a Gitea issue comment into the frontend's `PrReviewComment`.
+///
+/// Gitea's issue-comment endpoint carries no diff anchor, so `path` is empty
+/// and `line` is null. `usePrPanel` reads that as "conversation comment" and
+/// keeps the inline-comment affordances hidden.
+fn map_comment(v: &serde_json::Value) -> serde_json::Value {
+    serde_json::json!({
+        "id": jnum(v, "id"),
+        "body": jstr(v, "body"),
+        "author": jlogin(v, "user"),
+        "created_at": jstr(v, "created_at"),
+        "updated_at": jstr(v, "updated_at"),
+        "path": "",
+        "line": serde_json::Value::Null,
+        "original_line": serde_json::Value::Null,
+        "side": "RIGHT",
+        "start_line": serde_json::Value::Null,
+        "start_side": serde_json::Value::Null,
+        "in_reply_to_id": serde_json::Value::Null,
+        "diff_hunk": "",
+        "url": jstr(v, "html_url"),
+    })
+}
+
+/// Gitea review states are `APPROVED`, `REQUEST_CHANGES`, `COMMENT`, `PENDING`.
+/// The shared vocabulary uses `CHANGES_REQUESTED` and `COMMENTED`.
+fn map_review(v: &serde_json::Value) -> serde_json::Value {
+    let state = match jstr(v, "state").to_uppercase().as_str() {
+        "APPROVED" => "APPROVED",
+        "REQUEST_CHANGES" | "REQUEST_REVIEW" => "CHANGES_REQUESTED",
+        "COMMENT" => "COMMENTED",
+        "PENDING" => "PENDING",
+        other if !other.is_empty() => "COMMENTED",
+        _ => "",
+    };
+    serde_json::json!({
+        "id": jnum(v, "id"),
+        "state": state,
+        "body": jstr(v, "body"),
+        "user": { "login": jlogin(v, "user"), "avatar_url": "" },
+        "submitted_at": jstr(v, "submitted_at"),
+        "html_url": jstr(v, "html_url"),
+    })
+}
+
+fn map_issue(v: &serde_json::Value) -> Issue {
+    Issue {
+        number: jnum(v, "number"),
+        title: jstr(v, "title"),
+        state: jstr(v, "state"),
+        author: jlogin(v, "user"),
+        assignees: jnames(v, "assignees", "login"),
+        labels: jnames(v, "labels", "name"),
+        url: jstr(v, "html_url"),
+        created_at: jstr(v, "created_at"),
+        updated_at: jstr(v, "updated_at"),
+        milestone: v
+            .get("milestone")
+            .and_then(|m| m.get("title"))
+            .and_then(|s| s.as_str())
+            .unwrap_or("")
+            .to_string(),
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn gitea_pr_comments(
+    cwd: String,
+    index: i64,
+) -> Result<Vec<serde_json::Value>, String> {
+    let ctx = gitea_ctx(&cwd)?;
+    let want = GITEA_LIST_CEILING as usize;
+    let collected = gitea_page_all(&ctx, want, |page| {
+        format!(
+            "{}/issues/{}/comments?limit={}&page={}",
+            ctx.repo_api(),
+            index,
+            GITEA_PAGE_SIZE,
+            page
+        )
+    })?;
+    Ok(select_window(collected, 0, want as i64)
+        .iter()
+        .map(map_comment)
+        .collect())
+}
+
+#[tauri::command]
+pub(crate) async fn gitea_create_comment(
+    cwd: String,
+    index: i64,
+    body: String,
+) -> Result<serde_json::Value, String> {
+    let ctx = gitea_ctx(&cwd)?;
+    let url = format!("{}/issues/{}/comments", ctx.repo_api(), index);
+    let payload = serde_json::json!({ "body": body }).to_string();
+    let resp = gitea_curl("POST", &url, Some(&payload), &ctx.auth)?;
+    Ok(map_comment(&resp))
+}
+
+#[tauri::command]
+pub(crate) async fn gitea_update_comment(
+    cwd: String,
+    comment_id: i64,
+    body: String,
+) -> Result<(), String> {
+    let ctx = gitea_ctx(&cwd)?;
+    let url = format!("{}/issues/comments/{}", ctx.repo_api(), comment_id);
+    let payload = serde_json::json!({ "body": body }).to_string();
+    gitea_curl("PATCH", &url, Some(&payload), &ctx.auth)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) async fn gitea_delete_comment(cwd: String, comment_id: i64) -> Result<(), String> {
+    let ctx = gitea_ctx(&cwd)?;
+    let url = format!("{}/issues/comments/{}", ctx.repo_api(), comment_id);
+    gitea_curl("DELETE", &url, None, &ctx.auth)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) async fn gitea_list_reviews(
+    cwd: String,
+    index: i64,
+) -> Result<Vec<serde_json::Value>, String> {
+    let ctx = gitea_ctx(&cwd)?;
+    let want = GITEA_LIST_CEILING as usize;
+    let collected = gitea_page_all(&ctx, want, |page| {
+        format!(
+            "{}/pulls/{}/reviews?limit={}&page={}",
+            ctx.repo_api(),
+            index,
+            GITEA_PAGE_SIZE,
+            page
+        )
+    })?;
+    Ok(select_window(collected, 0, want as i64)
+        .iter()
+        .map(map_review)
+        .collect())
+}
+
+#[tauri::command]
+pub(crate) async fn gitea_list_issues(
+    cwd: String,
+    limit: Option<i64>,
+) -> Result<Vec<Issue>, String> {
+    let ctx = gitea_ctx(&cwd)?;
+    let want = limit.unwrap_or(30).max(1) as usize;
+    // `type=issues` keeps PRs out: Gitea's issue endpoint returns both.
+    let collected = gitea_page_all(&ctx, want, |page| {
+        format!(
+            "{}/issues?state=open&type=issues&limit={}&page={}",
+            ctx.repo_api(),
+            GITEA_PAGE_SIZE,
+            page
+        )
+    })?;
+    Ok(select_window(collected, 0, want as i64)
+        .iter()
+        .map(map_issue)
+        .collect())
+}
+
+#[tauri::command]
+pub(crate) async fn gitea_reviewer_candidates(
+    cwd: String,
+) -> Result<Vec<ReviewerCandidate>, String> {
+    let ctx = gitea_ctx(&cwd)?;
+    let want = GITEA_LIST_CEILING as usize;
+    let collected = gitea_page_all(&ctx, want, |page| {
+        format!(
+            "{}/collaborators?limit={}&page={}",
+            ctx.repo_api(),
+            GITEA_PAGE_SIZE,
+            page
+        )
+    })?;
+    Ok(select_window(collected, 0, want as i64)
+        .iter()
+        .map(|u| ReviewerCandidate {
+            login: jstr(u, "login"),
+            name: Some(jstr(u, "full_name")).filter(|s| !s.is_empty()),
+            avatar_url: Some(jstr(u, "avatar_url")).filter(|s| !s.is_empty()),
+        })
+        .collect())
+}
+
+#[tauri::command]
+pub(crate) async fn gitea_branches(cwd: String) -> Result<Vec<String>, String> {
+    let ctx = gitea_ctx(&cwd)?;
+    let want = GITEA_LIST_CEILING as usize;
+    let collected = gitea_page_all(&ctx, want, |page| {
+        format!(
+            "{}/branches?limit={}&page={}",
+            ctx.repo_api(),
+            GITEA_PAGE_SIZE,
+            page
+        )
+    })?;
+    Ok(select_window(collected, 0, want as i64)
+        .iter()
+        .map(|b| jstr(b, "name"))
+        .collect())
 }
 
 #[cfg(test)]
@@ -753,6 +993,22 @@ mod gitea_paging_tests {
     fn stops_at_exactly_enough() {
         assert!(!needs_another_page(50, 50, 10));
     }
+
+    #[test]
+    fn keeps_paging_up_to_the_list_ceiling_used_by_unbounded_endpoints() {
+        // `gitea_pr_comments`, `gitea_list_reviews`, `gitea_reviewer_candidates`
+        // and `gitea_branches` take no caller limit, so they page toward
+        // `GITEA_LIST_CEILING` instead. A short but non-empty page (a lowered
+        // server cap) must not be read as the end before the ceiling is hit.
+        let want = super::GITEA_LIST_CEILING as usize;
+        assert!(needs_another_page(want - 1, want, 1));
+    }
+
+    #[test]
+    fn stops_exactly_at_the_list_ceiling() {
+        let want = super::GITEA_LIST_CEILING as usize;
+        assert!(!needs_another_page(want, want, 50));
+    }
 }
 
 #[cfg(test)]
@@ -791,5 +1047,75 @@ mod gitea_host_port_tests {
             remote_host_port("git@git.acme.io:acme/app.git"),
             Some("git.acme.io".to_string())
         );
+    }
+}
+
+#[cfg(test)]
+mod gitea_comment_tests {
+    use super::{map_comment, map_issue, map_review};
+
+    #[test]
+    fn maps_an_issue_comment_onto_the_frontend_shape() {
+        let v: serde_json::Value = serde_json::from_str(
+            r#"{
+              "id": 7,
+              "body": "looks good",
+              "user": {"login": "alice"},
+              "created_at": "2026-09-01T10:00:00Z",
+              "updated_at": "2026-09-01T11:00:00Z",
+              "html_url": "https://git.acme.io/acme/app/pulls/42#issuecomment-7"
+            }"#,
+        )
+        .unwrap();
+        let c = map_comment(&v);
+        assert_eq!(c["id"], 7);
+        assert_eq!(c["author"], "alice");
+        assert_eq!(c["body"], "looks good");
+        // Conversation comments are not anchored to a diff line. The panel
+        // keys off `path` being empty to keep the inline affordances hidden.
+        assert_eq!(c["path"], "");
+        assert!(c["line"].is_null());
+        assert_eq!(c["side"], "RIGHT");
+    }
+
+    #[test]
+    fn maps_review_states_onto_the_shared_vocabulary() {
+        let mk = |state: &str| {
+            serde_json::from_str::<serde_json::Value>(&format!(
+                r#"{{"id": 3, "state": "{state}", "body": "b",
+                     "user": {{"login": "carol"}},
+                     "submitted_at": "2026-09-01T10:00:00Z",
+                     "html_url": "https://git.acme.io/r/1"}}"#
+            ))
+            .unwrap()
+        };
+        assert_eq!(map_review(&mk("APPROVED"))["state"], "APPROVED");
+        assert_eq!(map_review(&mk("REQUEST_CHANGES"))["state"], "CHANGES_REQUESTED");
+        assert_eq!(map_review(&mk("COMMENT"))["state"], "COMMENTED");
+        assert_eq!(map_review(&mk("PENDING"))["state"], "PENDING");
+        assert_eq!(map_review(&mk("APPROVED"))["user"]["login"], "carol");
+    }
+
+    #[test]
+    fn maps_a_repo_issue() {
+        let v: serde_json::Value = serde_json::from_str(
+            r#"{
+              "number": 12, "title": "Crash on save", "state": "open",
+              "user": {"login": "dave"},
+              "assignees": [{"login": "erin"}],
+              "labels": [{"name": "bug"}],
+              "html_url": "https://git.acme.io/acme/app/issues/12",
+              "created_at": "2026-09-01T10:00:00Z",
+              "updated_at": "2026-09-02T10:00:00Z",
+              "milestone": {"title": "v2"}
+            }"#,
+        )
+        .unwrap();
+        let i = map_issue(&v);
+        assert_eq!(i.number, 12);
+        assert_eq!(i.author, "dave");
+        assert_eq!(i.assignees, vec!["erin".to_string()]);
+        assert_eq!(i.labels, vec!["bug".to_string()]);
+        assert_eq!(i.milestone, "v2");
     }
 }
