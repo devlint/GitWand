@@ -90,7 +90,7 @@ packaged build, which is the failure mode being fixed elsewhere in the same rele
 | Rust | `src-tauri/src/commands/gitea.rs` | New module, ~20 `#[tauri::command]` |
 | Rust | `src-tauri/src/commands/mod.rs`, `src-tauri/src/lib.rs` | Module registration, handler list |
 | Rust | `src-tauri/src/git/parse.rs` | `detect_provider()` Gitea arm |
-| Rust | `src-tauri/src/commands/ops.rs` | Account-host matching in `git_remote_info` |
+| TS transport | `src/utils/backend.ts` | Account-host matching in the `gitRemoteInfo` wrapper |
 | TS transport | `src/utils/backend-gitea.ts` | New wrapper file, re-exported from `backend.ts` |
 | TS provider | `src/composables/forge/GiteaProvider.ts` | `ForgeProvider` implementation |
 | TS registry | `src/composables/forge/useForge.ts`, `forge/index.ts` | Lazy-loaded provider registration |
@@ -143,10 +143,21 @@ Two layers, in order.
    equal to `codeberg.org`. Ordered after the existing GitHub and GitLab arms so no current match
    changes. Stays a pure function of the URL, which keeps it unit-testable and keeps the
    `dev-server.mjs` mirror of the same chain honest.
-2. **Account-aware, in `git_remote_info` (`commands/ops.rs`).** When step 1 returns `"unknown"`, the
-   remote host is compared against the hosts of the configured Gitea accounts, which the frontend
-   passes in. A match yields `"gitea"`. No network call. No match leaves `"unknown"`, which the UI
-   already renders as "no forge integration" rather than falling back to GitHub.
+2. **Account-aware, in the `gitRemoteInfo` wrapper (`src/utils/backend.ts:2447`).** When the
+   backend returns `provider: "unknown"`, the remote host is compared against the hosts of the
+   configured Gitea accounts. A match rewrites the provider to `"gitea"`. No network call. No match
+   leaves `"unknown"`, which the UI already renders as "no forge integration" rather than falling
+   back to GitHub.
+
+   This layer sits in the frontend rather than in `git_remote_info` (`commands/ops.rs`), which is
+   where an earlier draft of this design put it. Three reasons, all verified against the tree:
+   `detect_provider()`'s only caller is `git_remote_info`, and that command's `provider` string is
+   consumed only by the frontend, so Rust never needs to know; the accounts live in `localStorage`,
+   which Rust cannot read, so passing hosts down the IPC boundary would be ceremony around data that
+   only travels one way; and the `gitRemoteInfo` wrapper is the single funnel through which both the
+   Tauri path and the `dev:web` path already pass, so one implementation covers both modes instead of
+   a Rust change plus a `dev-server.mjs` mirror that could then drift. The pure layer 1 stays in
+   `parse.rs` and keeps its parity test, so the duplicated substring chain remains locked.
 
 The existing `extract_remote_host()` handles both `git@host:owner/repo.git` and
 `scheme://[user@]host[:port]/owner/repo.git`, including a non-default port, which self-hosted Gitea
