@@ -368,6 +368,55 @@ fn gitea_state(state: &str) -> &'static str {
     }
 }
 
+/// Fixed server page size for the paging loops below. Deliberately not tied
+/// to the caller's requested `limit`/window: Gitea caps the `limit` query
+/// param at `MAX_RESPONSE_ITEMS` (50 by default, admin-lowerable), so asking
+/// for a bigger page in one shot risks silent truncation on a server with a
+/// lowered cap. Paging in fixed steps of the default cap and windowing
+/// client-side never hits that ceiling.
+const GITEA_PAGE_SIZE: i64 = 50;
+
+/// PR-prefetch ceiling already used elsewhere in this codebase, reused here
+/// as the count cap. Gitea's exact total lives in the `X-Total-Count`
+/// response header, which `curl_with_status` does not capture (a
+/// transport-level change that would touch every forge, out of scope for
+/// this fix). Above this ceiling `gitea_pr_count` under-reports rather than
+/// paging without bound.
+const GITEA_COUNT_CEILING: i64 = 300;
+
+/// Slice a client-side accumulated result set down to the caller's requested
+/// window. `offset`/`per_page` are already clamped by the command before this
+/// is called, but a helper this cheap to misuse gets its own guard rather
+/// than trusting every future caller: a negative offset reads as zero, and a
+/// non-positive `per_page` yields an empty window instead of panicking or
+/// wrapping.
+fn select_window(
+    items: Vec<serde_json::Value>,
+    offset: i64,
+    per_page: i64,
+) -> Vec<serde_json::Value> {
+    if per_page <= 0 {
+        return Vec::new();
+    }
+    let off = offset.max(0) as usize;
+    items.into_iter().skip(off).take(per_page as usize).collect()
+}
+
+/// Whether a paging loop should fetch one more page, given how many items
+/// have been collected so far (`collected`), how many are wanted (`want`),
+/// and the length of the page that was just fetched (`last_page_len`).
+///
+/// An empty page is the only reliable end-of-results signal: a server with a
+/// lowered `MAX_RESPONSE_ITEMS` returns pages shorter than `GITEA_PAGE_SIZE`
+/// on every request, which must not be read as "no more results" while there
+/// are still more to want.
+fn needs_another_page(collected: usize, want: usize, last_page_len: usize) -> bool {
+    if last_page_len == 0 {
+        return false;
+    }
+    collected < want
+}
+
 #[tauri::command]
 pub(crate) async fn gitea_list_prs(
     cwd: String,
@@ -378,23 +427,35 @@ pub(crate) async fn gitea_list_prs(
     let ctx = gitea_ctx(&cwd)?;
     let per_page = limit.unwrap_or(10).max(1);
     let off = offset.unwrap_or(0).max(0);
-    // Gitea pages are 1-indexed. Ask for one page big enough to cover the
-    // offset, then drop the entries before it.
-    let page = (off / per_page) + 1;
-    let extra = off % per_page;
-    let url = format!(
-        "{}/pulls?state={}&limit={}&page={}",
-        ctx.repo_api(),
-        gitea_state(&state),
-        per_page + extra,
-        page
-    );
-    let resp = gitea_curl("GET", &url, None, &ctx.auth)?;
-    let arr = resp.as_array().cloned().unwrap_or_default();
-    Ok(arr
+    let want = (off + per_page) as usize;
+
+    // Page from the start in fixed server pages, accumulating results, and
+    // window the accumulated list client-side. See `select_window` and
+    // `needs_another_page` for why: inflating the requested `limit` to reach
+    // the offset in one request silently truncates on a server with a
+    // lowered response cap.
+    let mut collected: Vec<serde_json::Value> = Vec::new();
+    let mut page = 1;
+    loop {
+        let url = format!(
+            "{}/pulls?state={}&limit={}&page={}",
+            ctx.repo_api(),
+            gitea_state(&state),
+            GITEA_PAGE_SIZE,
+            page
+        );
+        let resp = gitea_curl("GET", &url, None, &ctx.auth)?;
+        let arr = resp.as_array().cloned().unwrap_or_default();
+        let page_len = arr.len();
+        collected.extend(arr);
+        if !needs_another_page(collected.len(), want, page_len) {
+            break;
+        }
+        page += 1;
+    }
+
+    Ok(select_window(collected, off, per_page)
         .iter()
-        .skip(extra as usize)
-        .take(per_page as usize)
         .map(map_pr)
         .collect())
 }
@@ -405,13 +466,26 @@ pub(crate) async fn gitea_pr_count(cwd: String, state: String) -> Result<i64, St
         Ok(c) => c,
         Err(_) => return Ok(0),
     };
-    let url = format!(
-        "{}/pulls?state={}&limit=50&page=1",
-        ctx.repo_api(),
-        gitea_state(&state)
-    );
-    let resp = gitea_curl("GET", &url, None, &ctx.auth).unwrap_or(serde_json::Value::Null);
-    Ok(resp.as_array().map(|a| a.len() as i64).unwrap_or(0))
+    let want = GITEA_COUNT_CEILING as usize;
+    let mut collected: usize = 0;
+    let mut page = 1;
+    loop {
+        let url = format!(
+            "{}/pulls?state={}&limit={}&page={}",
+            ctx.repo_api(),
+            gitea_state(&state),
+            GITEA_PAGE_SIZE,
+            page
+        );
+        let resp = gitea_curl("GET", &url, None, &ctx.auth).unwrap_or(serde_json::Value::Null);
+        let page_len = resp.as_array().map(|a| a.len()).unwrap_or(0);
+        collected += page_len;
+        if !needs_another_page(collected, want, page_len) {
+            break;
+        }
+        page += 1;
+    }
+    Ok(collected.min(want) as i64)
 }
 
 #[tauri::command]
@@ -594,6 +668,90 @@ mod gitea_mapping_tests {
     fn tolerates_a_status_response_with_no_statuses_array() {
         let v: serde_json::Value = serde_json::from_str(r#"{"state": "pending"}"#).unwrap();
         assert!(map_status(&v).is_empty(), "no statuses means no checks, not a panic");
+    }
+}
+
+#[cfg(test)]
+mod gitea_paging_tests {
+    use super::{needs_another_page, select_window};
+
+    fn items(n: usize) -> Vec<serde_json::Value> {
+        (0..n as i64).map(|i| serde_json::json!({"number": i})).collect()
+    }
+
+    fn numbers(items: &[serde_json::Value]) -> Vec<i64> {
+        items.iter().map(|v| v["number"].as_i64().unwrap()).collect()
+    }
+
+    #[test]
+    fn windows_from_the_start() {
+        assert_eq!(numbers(&select_window(items(50), 0, 10)), (0..10).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn windows_a_page_aligned_offset() {
+        assert_eq!(numbers(&select_window(items(50), 20, 10)), (20..30).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn windows_the_offsets_that_used_to_shift_the_result() {
+        // Previously: limit was inflated to `per_page + (offset % per_page)`
+        // on a single request, which shifts the window instead of covering
+        // it whenever offset % per_page != 0.
+        assert_eq!(
+            numbers(&select_window(items(60), 15, 10)),
+            (15..25).collect::<Vec<_>>(),
+            "offset 15 limit 10 used to return items 20..30"
+        );
+        assert_eq!(
+            numbers(&select_window(items(60), 25, 10)),
+            (25..35).collect::<Vec<_>>(),
+            "offset 25 limit 10 used to return items 35..45"
+        );
+        assert_eq!(
+            numbers(&select_window(items(60), 33, 10)),
+            (33..43).collect::<Vec<_>>(),
+            "offset 33 limit 10 used to return items 42..52"
+        );
+    }
+
+    #[test]
+    fn offset_past_the_end_is_empty_not_a_panic() {
+        assert!(select_window(items(10), 20, 10).is_empty());
+    }
+
+    #[test]
+    fn zero_per_page_is_an_empty_window() {
+        assert!(select_window(items(10), 0, 0).is_empty());
+    }
+
+    #[test]
+    fn negative_offset_reads_as_zero() {
+        assert_eq!(numbers(&select_window(items(10), -5, 3)), vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn stops_on_an_empty_page() {
+        // Definitive end-of-results, even though far short of `want`.
+        assert!(!needs_another_page(30, 50, 0));
+    }
+
+    #[test]
+    fn stops_when_enough_is_collected() {
+        assert!(!needs_another_page(50, 50, 50));
+    }
+
+    #[test]
+    fn continues_on_a_short_but_nonempty_page_under_a_lowered_cap() {
+        // A server with MAX_RESPONSE_ITEMS lowered below GITEA_PAGE_SIZE
+        // returns a page shorter than requested on every call. That must not
+        // be read as the end while more is still wanted.
+        assert!(needs_another_page(20, 50, 20));
+    }
+
+    #[test]
+    fn stops_at_exactly_enough() {
+        assert!(!needs_another_page(50, 50, 10));
     }
 }
 
