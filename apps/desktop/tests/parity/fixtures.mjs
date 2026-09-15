@@ -111,6 +111,20 @@ export function fixtureCursorOriginRemote() {
 }
 
 /**
+ * Fixture « remote Gitea » : un commit, plus un remote `origin` pointant sur
+ * un host Gitea reconnaissable depuis l'URL seule (codeberg.org).
+ */
+export function fixtureGiteaRemote() {
+  const cwd = mkTempRepo("gw-gitea-remote-");
+  commitFile(cwd, "README.md", "# Parity Fixture\n", "initial commit", 0);
+  execFileSync("git", [
+    "-C", cwd, "remote", "add", "origin",
+    "https://codeberg.org/acme/checkout.git",
+  ]);
+  return cwd;
+}
+
+/**
  * Fixture « dirty » : 3 commits, un fichier modifié non stagé, un nouveau
  * fichier untracked, un fichier stagé, et un *dossier* entièrement untracked.
  *

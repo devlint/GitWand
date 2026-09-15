@@ -631,6 +631,8 @@ pub(crate) fn detect_provider(url: &str) -> &'static str {
         "gitlab"
     } else if url.contains("bitbucket.org") || url.contains("bitbucket") {
         "bitbucket"
+    } else if url.contains("codeberg.org") || url.contains("gitea") || url.contains("forgejo") {
+        "gitea"
     } else if url.contains("dev.azure.com") || url.contains("visualstudio.com") {
         "azure"
     } else {
@@ -1906,6 +1908,23 @@ mod remote_provider_tests {
             detect_provider("https://git.sr.ht/~acme/checkout"),
             "unknown"
         );
+    }
+
+    #[test]
+    fn detects_gitea_and_forgejo_hosts() {
+        assert_eq!(detect_provider("https://codeberg.org/acme/checkout.git"), "gitea");
+        assert_eq!(detect_provider("https://gitea.com/acme/checkout.git"), "gitea");
+        assert_eq!(detect_provider("git@gitea.acme.io:acme/checkout.git"), "gitea");
+        assert_eq!(detect_provider("https://forgejo.acme.io/acme/checkout.git"), "gitea");
+    }
+
+    #[test]
+    fn leaves_a_bare_self_hosted_host_unknown() {
+        // A self-hosted Gitea on a neutral hostname cannot be recognised from
+        // the URL alone. It resolves in the frontend against the configured
+        // accounts (see the gitRemoteInfo wrapper), so the pure function must
+        // stay honest rather than guess.
+        assert_eq!(detect_provider("https://git.acme.io/acme/checkout.git"), "unknown");
     }
 
     #[test]

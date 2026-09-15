@@ -6556,6 +6556,7 @@ async function handleRequest(req, res) {
         else if (remoteUrl.includes("origin.cursor.com")) provider = "cursor";
         else if (remoteUrl.includes("gitlab")) provider = "gitlab";
         else if (remoteUrl.includes("bitbucket")) provider = "bitbucket";
+        else if (remoteUrl.includes("codeberg.org") || remoteUrl.includes("gitea") || remoteUrl.includes("forgejo")) provider = "gitea";
         else if (remoteUrl.includes("dev.azure.com") || remoteUrl.includes("visualstudio.com")) provider = "azure";
         // NOTE: the Rust command additionally falls back to a `glab`/`gh auth
         // status --hostname <host>` CLI probe when the substring chain above
