@@ -776,6 +776,8 @@ pub fn run() {
             commands::bitbucket::bb_pr_ci_checks,
             commands::bitbucket::bb_pr_annotations,
             commands::bitbucket::bb_convert_draft_to_ready,
+            commands::gitea::gitea_current_user,
+            commands::gitea::gitea_validate_token,
             // ── MCP catalog ──
             commands::mcp_catalog::mcp_detect_configs,
             commands::mcp_catalog::mcp_read_config,

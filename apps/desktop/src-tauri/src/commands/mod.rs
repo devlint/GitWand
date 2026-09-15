@@ -5,6 +5,7 @@ pub(crate) mod credentials;
 pub(crate) mod curl_util;
 pub(crate) mod files;
 pub(crate) mod gh;
+pub(crate) mod gitea;
 pub(crate) mod github_api;
 pub(crate) mod gitlab;
 pub(crate) mod mcp_catalog;
