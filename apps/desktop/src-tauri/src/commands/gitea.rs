@@ -1312,7 +1312,7 @@ mod gitea_merge_retry_tests {
     #[test]
     fn does_not_retry_a_server_error() {
         // A 5xx may arrive after the server already committed the merge
-        // (a timeout, a crashed worker) — firing a second live POST at the
+        // (a timeout, a crashed worker). Firing a second live POST at the
         // merge endpoint on a 500/502 risks a double merge attempt, not a
         // version-mismatch retry.
         assert!(!should_retry_merge_with_legacy_field(500));
