@@ -792,6 +792,10 @@ pub fn run() {
             commands::gitea::gitea_list_issues,
             commands::gitea::gitea_reviewer_candidates,
             commands::gitea::gitea_branches,
+            commands::gitea::gitea_create_pr,
+            commands::gitea::gitea_merge_pr,
+            commands::gitea::gitea_checkout_pr,
+            commands::gitea::gitea_convert_draft_to_ready,
             // ── MCP catalog ──
             commands::mcp_catalog::mcp_detect_configs,
             commands::mcp_catalog::mcp_read_config,

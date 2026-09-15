@@ -771,6 +771,147 @@ pub(crate) async fn gitea_reviewer_candidates(
         .collect())
 }
 
+/// Build the merge request body. `use_legacy_field` swaps `merge_method` for
+/// `Do`, which older Gitea versions require.
+fn merge_payload(method: &str, use_legacy_field: bool) -> String {
+    let m = match method {
+        "squash" => "squash",
+        "rebase" => "rebase",
+        _ => "merge",
+    };
+    let body = if use_legacy_field {
+        serde_json::json!({ "Do": m })
+    } else {
+        serde_json::json!({ "merge_method": m })
+    };
+    body.to_string()
+}
+
+#[tauri::command]
+pub(crate) async fn gitea_create_pr(
+    cwd: String,
+    title: String,
+    body: String,
+    source_branch: String,
+    target_branch: String,
+) -> Result<PullRequest, String> {
+    let ctx = gitea_ctx(&cwd)?;
+    let head = if source_branch.is_empty() {
+        let out = hidden_cmd("git")
+            .args(["rev-parse", "--abbrev-ref", "HEAD"])
+            .current_dir(&cwd)
+            .output()
+            .map_err(|e| format!("git rev-parse: {}", e))?;
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    } else {
+        source_branch
+    };
+    if head.is_empty() {
+        return Err("Could not resolve the source branch.".to_string());
+    }
+    let base = if target_branch.is_empty() {
+        "main".to_string()
+    } else {
+        target_branch
+    };
+    let payload = serde_json::json!({
+        "title": title,
+        "body": body,
+        "head": head,
+        "base": base,
+    })
+    .to_string();
+    let resp = gitea_curl("POST", &format!("{}/pulls", ctx.repo_api()), Some(&payload), &ctx.auth)?;
+    Ok(map_pr(&resp))
+}
+
+#[tauri::command]
+pub(crate) async fn gitea_merge_pr(
+    cwd: String,
+    index: i64,
+    method: Option<String>,
+) -> Result<(), String> {
+    let ctx = gitea_ctx(&cwd)?;
+    let url = format!("{}/pulls/{}/merge", ctx.repo_api(), index);
+    let m = method.unwrap_or_else(|| "merge".to_string());
+
+    let payload = merge_payload(&m, false);
+    let (status, body) = gitea_curl_raw("POST", &url, Some(&payload), &ctx.auth, "application/json")?;
+    if status < 400 {
+        return Ok(());
+    }
+    // Older Gitea rejects `merge_method` and wants `Do`. Retry once before
+    // reporting, so the user never sees a version mismatch as a merge failure.
+    let legacy = merge_payload(&m, true);
+    let (status2, body2) =
+        gitea_curl_raw("POST", &url, Some(&legacy), &ctx.auth, "application/json")?;
+    if status2 < 400 {
+        return Ok(());
+    }
+    Err(format!(
+        "Gitea merge failed (HTTP {}: {}); retry with the legacy field also failed (HTTP {}: {})",
+        status,
+        body.trim(),
+        status2,
+        body2.trim()
+    ))
+}
+
+/// Fetch the PR head into a local branch and check it out.
+///
+/// Gitea exposes PR refs as `refs/pull/{index}/head`, same as GitHub. The
+/// fetch lands in `FETCH_HEAD` rather than directly updating `refs/heads/pr-N`:
+/// fetching straight into a named ref refuses outright when that branch is
+/// the one currently checked out ("refusing to fetch into branch ... checked
+/// out"), and even when it isn't, a plain (non-force) ref update fails on a
+/// PR that has been amended/rebased upstream since a previous checkout,
+/// because the update is not a fast-forward. Routing through `FETCH_HEAD`
+/// then `checkout -B` sidesteps both: `-B` creates the branch on first
+/// checkout and resets it in place on every later one, whether or not it is
+/// the branch already checked out, so re-checking out the same PR after it
+/// gained new commits just works instead of surfacing a raw git error.
+#[tauri::command]
+pub(crate) async fn gitea_checkout_pr(cwd: String, index: i64) -> Result<(), String> {
+    let branch = format!("pr-{}", index);
+    let refspec = format!("refs/pull/{}/head", index);
+    // Write guard: fetch + checkout mutate refs and the worktree, colliding on
+    // `.git/index.lock` with a concurrent read/write of the same repo. Held
+    // across both git ops (the RwLock is non-reentrant, acquire exactly once).
+    let _repo = crate::git::repo_lock::write(&cwd);
+    let fetch = hidden_cmd("git")
+        .args(["fetch", "origin", &refspec])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("git fetch: {}", e))?;
+    if !fetch.status.success() {
+        return Err(format!(
+            "git fetch failed: {}",
+            String::from_utf8_lossy(&fetch.stderr).trim()
+        ));
+    }
+    let checkout = hidden_cmd("git")
+        .args(["checkout", "-B", &branch, "FETCH_HEAD"])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("git checkout: {}", e))?;
+    if !checkout.status.success() {
+        return Err(format!(
+            "git checkout failed: {}",
+            String::from_utf8_lossy(&checkout.stderr).trim()
+        ));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) async fn gitea_convert_draft_to_ready(cwd: String, index: i64) -> Result<(), String> {
+    let ctx = gitea_ctx(&cwd)?;
+    let url = format!("{}/pulls/{}", ctx.repo_api(), index);
+    let payload = serde_json::json!({ "draft": false }).to_string();
+    gitea_curl("PATCH", &url, Some(&payload), &ctx.auth)?;
+    Ok(())
+}
+
 #[tauri::command]
 pub(crate) async fn gitea_branches(cwd: String) -> Result<Vec<String>, String> {
     let ctx = gitea_ctx(&cwd)?;
@@ -1047,6 +1188,31 @@ mod gitea_host_port_tests {
             remote_host_port("git@git.acme.io:acme/app.git"),
             Some("git.acme.io".to_string())
         );
+    }
+}
+
+#[cfg(test)]
+mod gitea_merge_payload_tests {
+    use super::merge_payload;
+
+    #[test]
+    fn sends_the_documented_field_first() {
+        let body = merge_payload("squash", false);
+        assert!(body.contains("\"merge_method\":\"squash\""), "got {body}");
+        assert!(!body.contains("\"Do\""));
+    }
+
+    #[test]
+    fn falls_back_to_the_legacy_field() {
+        let body = merge_payload("rebase", true);
+        assert!(body.contains("\"Do\":\"rebase\""), "got {body}");
+    }
+
+    #[test]
+    fn defaults_an_unknown_method_to_merge() {
+        // The forge contract allows "merge" | "squash" | "rebase". Anything
+        // else is a caller bug; a plain merge is the safe reading.
+        assert!(merge_payload("octopus", false).contains("\"merge_method\":\"merge\""));
     }
 }
 
