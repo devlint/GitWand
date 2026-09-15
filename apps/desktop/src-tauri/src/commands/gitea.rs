@@ -20,7 +20,6 @@
 
 use super::curl_util::{auth_header_config, curl_with_status};
 use crate::git::{hidden_cmd, parse_remote_owner_repo};
-use crate::types::*;
 
 /// Keychain service for a Settings-managed Gitea token.
 pub(crate) const GITEA_SERVICE: &str = "gitwand:gitea";
@@ -29,13 +28,19 @@ pub(crate) const GITEA_SERVICE: &str = "gitwand:gitea";
 /// authenticate. Resolved once per command from `cwd`.
 pub(crate) struct GiteaCtx {
     pub base: String,
+    // Consumed by Task 3's PR/issue commands; the allow comes off then.
+    #[allow(dead_code)]
     pub owner: String,
+    // Consumed by Task 3's PR/issue commands; the allow comes off then.
+    #[allow(dead_code)]
     pub repo: String,
     pub auth: String,
 }
 
 impl GiteaCtx {
     /// `https://<host>/api/v1/repos/<owner>/<repo>`
+    // Consumed by Task 3's PR/issue commands; the allow comes off then.
+    #[allow(dead_code)]
     fn repo_api(&self) -> String {
         format!("{}/api/v1/repos/{}/{}", self.base, self.owner, self.repo)
     }
@@ -57,6 +62,33 @@ fn normalize_base_url(raw: &str) -> String {
         out = stripped.trim_end_matches('/').to_string();
     }
     out
+}
+
+/// Extract `host[:port]` from a git remote URL, keeping an explicit port.
+///
+/// `crate::git::extract_remote_host` deliberately returns a bare host (its
+/// other caller, the `gh`/`glab auth status --hostname` probe from issue
+/// #168, wants exactly that), so it drops a custom port such as
+/// `ssh://git@forge.internal:2222/...`. Self-hosted Gitea commonly listens on
+/// a non-default port (the stock Docker image uses `:3000`), so the API base
+/// URL needs the port kept. This is local to `gitea.rs` on purpose: it is not
+/// a fix to `extract_remote_host`, which stays a bare-host helper.
+///
+/// The SCP-like form (`git@host:owner/repo.git`) never carries a port: the
+/// text after the colon there is the path, not a port, so that branch always
+/// returns a bare host.
+fn remote_host_port(url: &str) -> Option<String> {
+    if let Some(rest) = url.strip_prefix("git@") {
+        let host = rest.split(':').next()?;
+        return (!host.is_empty()).then(|| host.to_string());
+    }
+    let host_start = url.find("://")? + 3;
+    let rest = &url[host_start..];
+    let rest = rest
+        .rsplit_once('@')
+        .map_or(rest, |(_, host_part)| host_part);
+    let host_port = rest.split('/').next()?;
+    (!host_port.is_empty()).then(|| host_port.to_string())
 }
 
 /// Read the origin remote URL of `cwd`.
@@ -84,8 +116,11 @@ fn gitea_ctx(cwd: &str) -> Result<GiteaCtx, String> {
         return Err(format!("Could not read owner/repo from the remote URL: {}", url));
     }
     let token = gitea_token_for_host(&host)?;
+    // The keychain key stays the bare host (matches the frontend's account
+    // detection), but the API base URL needs the port when the remote has one.
+    let host_port = remote_host_port(&url).unwrap_or_else(|| host.clone());
     Ok(GiteaCtx {
-        base: normalize_base_url(&host),
+        base: normalize_base_url(&host_port),
         owner,
         repo,
         auth: auth_header_config("token", &token),
@@ -216,5 +251,44 @@ mod gitea_base_url_tests {
         // Gitea can be mounted under a path prefix. Dropping it would 404
         // every call, so only the api suffix and trailing slashes come off.
         assert_eq!(normalize_base_url("https://acme.io/gitea/"), "https://acme.io/gitea");
+    }
+}
+
+#[cfg(test)]
+mod gitea_host_port_tests {
+    use super::remote_host_port;
+
+    #[test]
+    fn drops_the_default_https_port() {
+        assert_eq!(
+            remote_host_port("https://git.acme.io/acme/app.git"),
+            Some("git.acme.io".to_string())
+        );
+    }
+
+    #[test]
+    fn keeps_an_explicit_http_port() {
+        assert_eq!(
+            remote_host_port("http://git.acme.io:3000/acme/app.git"),
+            Some("git.acme.io:3000".to_string())
+        );
+    }
+
+    #[test]
+    fn keeps_an_explicit_ssh_port() {
+        assert_eq!(
+            remote_host_port("ssh://git@git.acme.io:2222/acme/app.git"),
+            Some("git.acme.io:2222".to_string())
+        );
+    }
+
+    #[test]
+    fn treats_the_scp_like_colon_as_a_path_separator_not_a_port() {
+        // git@host:acme/app.git is SCP-like syntax: the text after the colon
+        // is the owner/repo path, not a port. There is no port in this form.
+        assert_eq!(
+            remote_host_port("git@git.acme.io:acme/app.git"),
+            Some("git.acme.io".to_string())
+        );
     }
 }
