@@ -20,6 +20,7 @@
 
 use super::curl_util::{auth_header_config, curl_with_status};
 use crate::git::{hidden_cmd, parse_remote_owner_repo};
+use crate::types::*;
 
 /// Keychain service for a Settings-managed Gitea token.
 pub(crate) const GITEA_SERVICE: &str = "gitwand:gitea";
@@ -28,19 +29,13 @@ pub(crate) const GITEA_SERVICE: &str = "gitwand:gitea";
 /// authenticate. Resolved once per command from `cwd`.
 pub(crate) struct GiteaCtx {
     pub base: String,
-    // Consumed by Task 3's PR/issue commands; the allow comes off then.
-    #[allow(dead_code)]
     pub owner: String,
-    // Consumed by Task 3's PR/issue commands; the allow comes off then.
-    #[allow(dead_code)]
     pub repo: String,
     pub auth: String,
 }
 
 impl GiteaCtx {
     /// `https://<host>/api/v1/repos/<owner>/<repo>`
-    // Consumed by Task 3's PR/issue commands; the allow comes off then.
-    #[allow(dead_code)]
     fn repo_api(&self) -> String {
         format!("{}/api/v1/repos/{}/{}", self.base, self.owner, self.repo)
     }
@@ -225,6 +220,261 @@ pub(crate) async fn gitea_validate_token(host: String, token: String) -> Result<
     Ok(login.to_string())
 }
 
+// ─── JSON helpers ───────────────────────────────────────────────────────────
+
+fn jstr(v: &serde_json::Value, key: &str) -> String {
+    v.get(key).and_then(|s| s.as_str()).unwrap_or("").to_string()
+}
+
+fn jnum(v: &serde_json::Value, key: &str) -> i64 {
+    v.get(key).and_then(|n| n.as_i64()).unwrap_or(0)
+}
+
+fn jlogin(v: &serde_json::Value, key: &str) -> String {
+    v.get(key)
+        .and_then(|u| u.get("login"))
+        .and_then(|s| s.as_str())
+        .unwrap_or("")
+        .to_string()
+}
+
+/// Collect `login` from an array of users, or `name` from an array of labels.
+fn jnames(v: &serde_json::Value, key: &str, field: &str) -> Vec<String> {
+    v.get(key)
+        .and_then(|a| a.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|e| e.get(field).and_then(|s| s.as_str()).map(String::from))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// `head.ref` / `base.ref` style lookups.
+fn jref(v: &serde_json::Value, side: &str, leaf: &str) -> String {
+    v.get(side)
+        .and_then(|s| s.get(leaf))
+        .and_then(|s| s.as_str())
+        .unwrap_or("")
+        .to_string()
+}
+
+/// Gitea's `mergeable` is a boolean; our contract is a string, with "" for
+/// unknown so the UI never disables merge on a missing field.
+fn mergeable_str(v: &serde_json::Value) -> String {
+    match v.get("mergeable").and_then(|m| m.as_bool()) {
+        Some(true) => "MERGEABLE".to_string(),
+        Some(false) => "CONFLICTING".to_string(),
+        None => String::new(),
+    }
+}
+
+fn map_pr(v: &serde_json::Value) -> PullRequest {
+    PullRequest {
+        // `number` is the per-repo index. `id` is a global database id and
+        // addressing a PR by it hits the wrong resource.
+        number: jnum(v, "number"),
+        title: jstr(v, "title"),
+        state: jstr(v, "state"),
+        author: jlogin(v, "user"),
+        branch: jref(v, "head", "ref"),
+        base: jref(v, "base", "ref"),
+        draft: v.get("draft").and_then(|d| d.as_bool()).unwrap_or(false),
+        created_at: jstr(v, "created_at"),
+        updated_at: jstr(v, "updated_at"),
+        url: jstr(v, "html_url"),
+        additions: jnum(v, "additions"),
+        deletions: jnum(v, "deletions"),
+        labels: jnames(v, "labels", "name"),
+        assignees: jnames(v, "assignees", "login"),
+        review_requested: jnames(v, "requested_reviewers", "login"),
+        review_decision: String::new(),
+        merge_state_status: String::new(),
+        checks_rollup: String::new(),
+        auto_merge: AutoMergeState::default(),
+        comment_count: jnum(v, "comments"),
+    }
+}
+
+fn map_pr_detail(v: &serde_json::Value) -> PullRequestDetail {
+    PullRequestDetail {
+        number: jnum(v, "number"),
+        title: jstr(v, "title"),
+        body: jstr(v, "body"),
+        state: jstr(v, "state"),
+        author: jlogin(v, "user"),
+        branch: jref(v, "head", "ref"),
+        base: jref(v, "base", "ref"),
+        draft: v.get("draft").and_then(|d| d.as_bool()).unwrap_or(false),
+        created_at: jstr(v, "created_at"),
+        updated_at: jstr(v, "updated_at"),
+        merged_at: jstr(v, "merged_at"),
+        url: jstr(v, "html_url"),
+        additions: jnum(v, "additions"),
+        deletions: jnum(v, "deletions"),
+        changed_files: jnum(v, "changed_files"),
+        comments: jnum(v, "comments"),
+        review_comments: 0,
+        labels: jnames(v, "labels", "name"),
+        reviewers: jnames(v, "requested_reviewers", "login"),
+        mergeable: mergeable_str(v),
+        checks_status: String::new(),
+        // Gitea exposes no cheap per-viewer merge permission here. `None` means
+        // unknown, which the UI must read as "allowed, gate on errors".
+        can_merge: None,
+        head_sha: jref(v, "head", "sha"),
+        auto_merge: AutoMergeState::default(),
+        auto_merge_support: gitea_auto_merge_support(),
+    }
+}
+
+/// Gitea does support `merge_when_checks_succeed`, but wiring it is a follow-up
+/// (see the spec, section 2). Report it unsupported and say what still works,
+/// following the Bitbucket precedent.
+fn gitea_auto_merge_support() -> AutoMergeSupport {
+    AutoMergeSupport {
+        supported: false,
+        reason: Some(
+            "GitWand does not queue auto-merge on Gitea yet. Merging immediately still works."
+                .to_string(),
+        ),
+    }
+}
+
+fn map_status(v: &serde_json::Value) -> Vec<CICheck> {
+    v.get("statuses")
+        .and_then(|a| a.as_array())
+        .map(|arr| {
+            arr.iter()
+                .map(|s| CICheck {
+                    name: jstr(s, "context"),
+                    state: jstr(s, "status"),
+                    conclusion: jstr(s, "status"),
+                    details_url: jstr(s, "target_url"),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+// ─── Commands ───────────────────────────────────────────────────────────────
+
+/// Gitea states: `open`, `closed`, `all`. Anything else reads as `open`.
+fn gitea_state(state: &str) -> &'static str {
+    match state.to_lowercase().as_str() {
+        "closed" | "merged" => "closed",
+        "all" => "all",
+        _ => "open",
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn gitea_list_prs(
+    cwd: String,
+    state: String,
+    limit: Option<i64>,
+    offset: Option<i64>,
+) -> Result<Vec<PullRequest>, String> {
+    let ctx = gitea_ctx(&cwd)?;
+    let per_page = limit.unwrap_or(10).max(1);
+    let off = offset.unwrap_or(0).max(0);
+    // Gitea pages are 1-indexed. Ask for one page big enough to cover the
+    // offset, then drop the entries before it.
+    let page = (off / per_page) + 1;
+    let extra = off % per_page;
+    let url = format!(
+        "{}/pulls?state={}&limit={}&page={}",
+        ctx.repo_api(),
+        gitea_state(&state),
+        per_page + extra,
+        page
+    );
+    let resp = gitea_curl("GET", &url, None, &ctx.auth)?;
+    let arr = resp.as_array().cloned().unwrap_or_default();
+    Ok(arr
+        .iter()
+        .skip(extra as usize)
+        .take(per_page as usize)
+        .map(map_pr)
+        .collect())
+}
+
+#[tauri::command]
+pub(crate) async fn gitea_pr_count(cwd: String, state: String) -> Result<i64, String> {
+    let ctx = match gitea_ctx(&cwd) {
+        Ok(c) => c,
+        Err(_) => return Ok(0),
+    };
+    let url = format!(
+        "{}/pulls?state={}&limit=50&page=1",
+        ctx.repo_api(),
+        gitea_state(&state)
+    );
+    let resp = gitea_curl("GET", &url, None, &ctx.auth).unwrap_or(serde_json::Value::Null);
+    Ok(resp.as_array().map(|a| a.len() as i64).unwrap_or(0))
+}
+
+#[tauri::command]
+pub(crate) async fn gitea_get_pr(cwd: String, index: i64) -> Result<PullRequestDetail, String> {
+    let ctx = gitea_ctx(&cwd)?;
+    let url = format!("{}/pulls/{}", ctx.repo_api(), index);
+    let resp = gitea_curl("GET", &url, None, &ctx.auth)?;
+    let mut detail = map_pr_detail(&resp);
+    if !detail.head_sha.is_empty() {
+        let status_url = format!("{}/commits/{}/status", ctx.repo_api(), detail.head_sha);
+        if let Ok(s) = gitea_curl("GET", &status_url, None, &ctx.auth) {
+            detail.checks_status = jstr(&s, "state");
+        }
+    }
+    Ok(detail)
+}
+
+/// Unified diff. `/pulls/{index}.diff` is the documented suffix form; some
+/// deployments only answer `/pulls/{index}/patch`, so fall back to it rather
+/// than surfacing a 404 as "no diff".
+#[tauri::command]
+pub(crate) async fn gitea_pr_diff(cwd: String, index: i64) -> Result<String, String> {
+    let ctx = gitea_ctx(&cwd)?;
+    let primary = format!("{}/pulls/{}.diff", ctx.repo_api(), index);
+    let (status, body) = gitea_curl_raw("GET", &primary, None, &ctx.auth, "*/*")?;
+    if status < 400 {
+        return Ok(body);
+    }
+    let fallback = format!("{}/pulls/{}/patch", ctx.repo_api(), index);
+    let (status2, body2) = gitea_curl_raw("GET", &fallback, None, &ctx.auth, "*/*")?;
+    if status2 >= 400 {
+        return Err(format!(
+            "Gitea diff failed (HTTP {} on .diff, HTTP {} on /patch)",
+            status, status2
+        ));
+    }
+    Ok(body2)
+}
+
+#[tauri::command]
+pub(crate) async fn gitea_pr_status(cwd: String, index: i64) -> Result<Vec<CICheck>, String> {
+    let ctx = gitea_ctx(&cwd)?;
+    let pr = gitea_curl("GET", &format!("{}/pulls/{}", ctx.repo_api(), index), None, &ctx.auth)?;
+    let sha = jref(&pr, "head", "sha");
+    if sha.is_empty() {
+        return Ok(Vec::new());
+    }
+    let url = format!("{}/commits/{}/status", ctx.repo_api(), sha);
+    let resp = gitea_curl("GET", &url, None, &ctx.auth)?;
+    Ok(map_status(&resp))
+}
+
+#[tauri::command]
+pub(crate) async fn gitea_pr_files(cwd: String, index: i64) -> Result<Vec<String>, String> {
+    let ctx = gitea_ctx(&cwd)?;
+    let url = format!("{}/pulls/{}/files?limit=100", ctx.repo_api(), index);
+    let resp = gitea_curl("GET", &url, None, &ctx.auth)?;
+    Ok(resp
+        .as_array()
+        .map(|arr| arr.iter().map(|f| jstr(f, "filename")).collect())
+        .unwrap_or_default())
+}
+
 #[cfg(test)]
 mod gitea_base_url_tests {
     use super::normalize_base_url;
@@ -251,6 +501,99 @@ mod gitea_base_url_tests {
         // Gitea can be mounted under a path prefix. Dropping it would 404
         // every call, so only the api suffix and trailing slashes come off.
         assert_eq!(normalize_base_url("https://acme.io/gitea/"), "https://acme.io/gitea");
+    }
+}
+
+#[cfg(test)]
+mod gitea_mapping_tests {
+    use super::{map_pr, map_pr_detail, map_status};
+
+    fn pr_json() -> serde_json::Value {
+        serde_json::from_str(
+            r#"{
+              "id": 99001,
+              "number": 42,
+              "title": "Add the thing",
+              "state": "open",
+              "draft": true,
+              "user": {"login": "alice"},
+              "head": {"ref": "feat/thing", "sha": "abc123"},
+              "base": {"ref": "main"},
+              "created_at": "2026-09-01T10:00:00Z",
+              "updated_at": "2026-09-02T10:00:00Z",
+              "merged_at": null,
+              "html_url": "https://git.acme.io/acme/app/pulls/42",
+              "additions": 12,
+              "deletions": 3,
+              "changed_files": 2,
+              "comments": 5,
+              "mergeable": true,
+              "labels": [{"name": "bug"}],
+              "assignees": [{"login": "bob"}],
+              "requested_reviewers": [{"login": "carol"}]
+            }"#,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn uses_the_pr_index_not_the_global_id() {
+        // Gitea's `id` is a database-wide id. Using it would address the wrong
+        // PR on every follow-up call.
+        assert_eq!(map_pr(&pr_json()).number, 42);
+        assert_eq!(map_pr_detail(&pr_json()).number, 42);
+    }
+
+    #[test]
+    fn maps_the_list_shape() {
+        let pr = map_pr(&pr_json());
+        assert_eq!(pr.title, "Add the thing");
+        assert_eq!(pr.author, "alice");
+        assert_eq!(pr.branch, "feat/thing");
+        assert_eq!(pr.base, "main");
+        assert!(pr.draft, "draft comes from the boolean, not a title prefix");
+        assert_eq!(pr.labels, vec!["bug".to_string()]);
+        assert_eq!(pr.assignees, vec!["bob".to_string()]);
+        assert_eq!(pr.review_requested, vec!["carol".to_string()]);
+        assert_eq!(pr.url, "https://git.acme.io/acme/app/pulls/42");
+    }
+
+    #[test]
+    fn maps_mergeable_boolean_onto_the_string_contract() {
+        let mut v = pr_json();
+        assert_eq!(map_pr_detail(&v).mergeable, "MERGEABLE");
+        v["mergeable"] = serde_json::Value::Bool(false);
+        assert_eq!(map_pr_detail(&v).mergeable, "CONFLICTING");
+        v["mergeable"] = serde_json::Value::Null;
+        assert_eq!(map_pr_detail(&v).mergeable, "", "absent means unknown, never a guess");
+    }
+
+    #[test]
+    fn carries_the_head_sha_for_the_status_call() {
+        assert_eq!(map_pr_detail(&pr_json()).head_sha, "abc123");
+    }
+
+    #[test]
+    fn maps_the_combined_status_into_checks() {
+        let v: serde_json::Value = serde_json::from_str(
+            r#"{"state": "success", "statuses": [
+                 {"context": "build", "status": "success", "target_url": "https://ci/1"},
+                 {"context": "lint", "status": "pending", "target_url": ""}
+               ]}"#,
+        )
+        .unwrap();
+        let checks = map_status(&v);
+        assert_eq!(checks.len(), 2);
+        assert_eq!(checks[0].name, "build");
+        assert_eq!(checks[0].conclusion, "success");
+        assert_eq!(checks[0].details_url, "https://ci/1");
+        assert_eq!(checks[1].state, "pending");
+    }
+
+    #[test]
+    fn tolerates_a_status_response_with_no_statuses_array() {
+        let v: serde_json::Value = serde_json::from_str(r#"{"state": "pending"}"#).unwrap();
+        assert!(map_status(&v).is_empty(), "no statuses means no checks, not a panic");
     }
 }
 
