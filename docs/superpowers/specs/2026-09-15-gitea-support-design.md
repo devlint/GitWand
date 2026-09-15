@@ -147,7 +147,7 @@ in an error message. This follows `bitbucket.rs` and uses the existing `auth_hea
 Two layers, in order.
 
 1. **Pure, in `detect_provider()`.** Returns `"gitea"` for a host containing `gitea` or `forgejo`, or
-   equal to `codeberg.org`. Ordered after the existing GitHub and GitLab arms so no current match
+   containing `codeberg.org`. Ordered after the existing GitHub and GitLab arms so no current match
    changes. Stays a pure function of the URL, which keeps it unit-testable and keeps the
    `dev-server.mjs` mirror of the same chain honest.
 2. **Account-aware, in the `gitRemoteInfo` wrapper (`src/utils/backend.ts:2447`).** When the
