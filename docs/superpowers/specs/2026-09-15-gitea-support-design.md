@@ -165,13 +165,16 @@ instances commonly use. It is reused as-is.
 
 ## 7. Command surface
 
-All commands are named `gitea_*`. Endpoints verified against the Gitea 1.24 API reference.
+All commands are named `gitea_*`. Endpoints verified against the Gitea 1.24 API reference. Twenty-one
+commands in total: the twenty below plus `gitea_validate_token`, which section 5 requires so the account
+form can validate before it stores anything.
 
 **Discovery**
 
 | Command | Endpoint |
 |---|---|
 | `gitea_current_user` | `GET /user` |
+| `gitea_validate_token` | `GET /user` with a token supplied directly, used by the account form before anything is stored |
 | `gitea_reviewer_candidates` | `GET /repos/{owner}/{repo}/collaborators` |
 | `gitea_branches` | `GET /repos/{owner}/{repo}/branches` |
 
