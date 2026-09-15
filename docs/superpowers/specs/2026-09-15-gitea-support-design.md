@@ -114,11 +114,18 @@ remote, never from a hardcoded string.
 
 ## 5. Authentication and accounts
 
-**Keychain entry.** Service `gitwand:gitea`, account key `<host>:<username>`, value the personal
-access token. Written through the existing generic `set_credential`
-(`src-tauri/src/commands/credentials.rs:36`), so no new keychain plumbing is needed. Removal works
-through the generic path in `SettingsAccountsTab.onRemove`, which splits `tokenKey` at the first
-`/` into service and account; Azure's two-entry special case does not apply.
+**Keychain entries.** Two, both under service `gitwand:gitea`, both written through the existing
+generic `set_credential` (`src-tauri/src/commands/credentials.rs:36`), so no new keychain plumbing
+is needed:
+
+- account key `<host>:<username>`, value the personal access token;
+- account key `<host>` alone, value the active username.
+
+The second is a pointer, and it exists because Rust knows the host from the remote but not the
+username: without it a keychain lookup has no key to read. Removal must therefore delete both, so
+Gitea needs a forge-specific branch in `SettingsAccountsTab.onRemove` for the same reason Azure has
+one. The generic path, which splits `tokenKey` at the first `/` and deletes a single entry, would
+leave the pointer behind.
 
 **Account record.** `Account.tokenKey` already encodes `"<service>/<account>"`, so
 `gitwand:gitea/git.acme.io:alice` carries the host with no schema change to `useAccounts.ts`. The
@@ -159,9 +166,14 @@ Two layers, in order.
    a Rust change plus a `dev-server.mjs` mirror that could then drift. The pure layer 1 stays in
    `parse.rs` and keeps its parity test, so the duplicated substring chain remains locked.
 
-The existing `extract_remote_host()` handles both `git@host:owner/repo.git` and
-`scheme://[user@]host[:port]/owner/repo.git`, including a non-default port, which self-hosted Gitea
-instances commonly use. It is reused as-is.
+`extract_remote_host()` handles both `git@host:owner/repo.git` and
+`scheme://[user@]host[:port]/owner/repo.git`, and is reused as-is for the detection match, which
+compares bare hosts. It is **not** enough for the API base URL: it splits on the first `:` or `/`
+and therefore drops the port (`parse.rs:1932` asserts exactly that for
+`ssh://git@forge.internal:2222/...`). Self-hosted Gitea commonly listens on a non-default port, the
+stock Docker image on `:3000`, so `gitea.rs` parses its own host and port for the base URL rather
+than routing it through the shared helper. The shared helper stays untouched: its other caller is
+the `gh`/`glab auth status --hostname` probe from #168, which wants a bare host.
 
 ## 7. Command surface
 
