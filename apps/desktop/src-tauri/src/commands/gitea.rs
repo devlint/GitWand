@@ -897,22 +897,25 @@ pub(crate) async fn gitea_merge_pr(
 /// synchronously testable without an async runtime (same pattern as
 /// `build_repo_tree` in `commands/files.rs`).
 ///
-/// Gitea exposes PR refs as `refs/pull/{index}/head`, same as GitHub. The
-/// fetch lands in `FETCH_HEAD` rather than directly updating `refs/heads/pr-N`:
-/// fetching straight into a named ref refuses outright when that branch is
-/// the one currently checked out ("refusing to fetch into branch ... checked
-/// out"), and even when it isn't, a plain (non-force) ref update fails on a
-/// PR that has been amended/rebased upstream since a previous checkout,
-/// because the update is not a fast-forward.
+/// What this does, in order:
 ///
-/// When `pr-{index}` already exists locally (a previous checkout of the same
-/// PR), moving it is only safe when it is a pure fast-forward: the local
-/// branch's tip must be an ancestor of the freshly-fetched head. If it is
-/// not, the local branch carries commits `FETCH_HEAD` does not (the user
-/// committed directly on it, or the PR ref moved sideways rather than
-/// forward), and resetting it with `checkout -B` would strand those commits,
-/// recoverable only through the reflog. Refuse instead, naming the branch so
-/// the user can rename or drop it.
+/// 1. Fetches the PR head (`refs/pull/{index}/head`, same layout as GitHub)
+///    into `FETCH_HEAD` rather than directly into `refs/heads/pr-N`, so the
+///    fetch can never collide with `pr-N` being the branch currently checked
+///    out: fetching straight into a named ref refuses outright in that case
+///    ("refusing to fetch into branch ... checked out"), and even when it
+///    isn't checked out, a plain (non-force) ref update fails whenever the PR
+///    has been amended/rebased upstream since a previous checkout, because
+///    the update is not a fast-forward.
+/// 2. Fast-forwards `pr-{index}` to `FETCH_HEAD` if it already exists
+///    locally, or creates it fresh at `FETCH_HEAD` if this is the first
+///    checkout of this PR, then checks it out.
+/// 3. Refuses, rather than resetting, when `pr-{index}` already exists and
+///    holds commits the fetched PR head does not (the user committed
+///    directly on it, or the PR ref moved sideways rather than forward):
+///    resetting with `checkout -B` in that case would strand those commits,
+///    recoverable only through the reflog. The error names the branch so the
+///    user can rename or drop it themselves.
 fn gitea_checkout_pr_inner(cwd: &str, index: i64) -> Result<(), String> {
     let branch = format!("pr-{}", index);
     let refspec = format!("refs/pull/{}/head", index);
