@@ -787,6 +787,28 @@ fn merge_payload(method: &str, use_legacy_field: bool) -> String {
     body.to_string()
 }
 
+/// Pick the base branch out of a repo object's `default_branch` field, e.g.
+/// the response of `GET /repos/{owner}/{repo}`. Falls back to `"main"` only
+/// when the field is missing or empty, an unexpected response shape rather
+/// than the expected way to learn the real default.
+fn default_branch_from_repo_json(v: &serde_json::Value) -> String {
+    let branch = jstr(v, "default_branch");
+    if branch.is_empty() {
+        "main".to_string()
+    } else {
+        branch
+    }
+}
+
+/// Resolve the repo's actual default branch for `gitea_create_pr`'s no-base
+/// case, rather than guessing `"main"`: a repo whose default is `master`,
+/// `develop`, or anything else would otherwise 404 or silently target an
+/// existing-but-wrong `main`.
+fn gitea_default_branch(ctx: &GiteaCtx) -> Result<String, String> {
+    let resp = gitea_curl("GET", &ctx.repo_api(), None, &ctx.auth)?;
+    Ok(default_branch_from_repo_json(&resp))
+}
+
 #[tauri::command]
 pub(crate) async fn gitea_create_pr(
     cwd: String,
@@ -810,7 +832,7 @@ pub(crate) async fn gitea_create_pr(
         return Err("Could not resolve the source branch.".to_string());
     }
     let base = if target_branch.is_empty() {
-        "main".to_string()
+        gitea_default_branch(&ctx)?
     } else {
         target_branch
     };
@@ -823,6 +845,17 @@ pub(crate) async fn gitea_create_pr(
     .to_string();
     let resp = gitea_curl("POST", &format!("{}/pulls", ctx.repo_api()), Some(&payload), &ctx.auth)?;
     Ok(map_pr(&resp))
+}
+
+/// Whether a merge failure should be retried with the legacy `Do` field.
+/// Only a client error (4xx) is plausibly "the server didn't understand the
+/// `merge_method` field". A 5xx (a timeout, a crashed worker) may already
+/// have committed the merge server-side by the time the error comes back, so
+/// retrying would fire a second live POST at the merge endpoint instead of a
+/// harmless field-name probe. Scoped to `400..500`, exclusive of `500`: the
+/// first attempt's error is returned as-is for anything at or above it.
+fn should_retry_merge_with_legacy_field(status: i32) -> bool {
+    (400..500).contains(&status)
 }
 
 #[tauri::command]
@@ -839,6 +872,9 @@ pub(crate) async fn gitea_merge_pr(
     let (status, body) = gitea_curl_raw("POST", &url, Some(&payload), &ctx.auth, "application/json")?;
     if status < 400 {
         return Ok(());
+    }
+    if !should_retry_merge_with_legacy_field(status) {
+        return Err(format!("Gitea merge failed (HTTP {}: {})", status, body.trim()));
     }
     // Older Gitea rejects `merge_method` and wants `Do`. Retry once before
     // reporting, so the user never sees a version mismatch as a merge failure.
@@ -857,7 +893,9 @@ pub(crate) async fn gitea_merge_pr(
     ))
 }
 
-/// Fetch the PR head into a local branch and check it out.
+/// Pure git logic behind `gitea_checkout_pr`, factored out so it is
+/// synchronously testable without an async runtime (same pattern as
+/// `build_repo_tree` in `commands/files.rs`).
 ///
 /// Gitea exposes PR refs as `refs/pull/{index}/head`, same as GitHub. The
 /// fetch lands in `FETCH_HEAD` rather than directly updating `refs/heads/pr-N`:
@@ -865,22 +903,27 @@ pub(crate) async fn gitea_merge_pr(
 /// the one currently checked out ("refusing to fetch into branch ... checked
 /// out"), and even when it isn't, a plain (non-force) ref update fails on a
 /// PR that has been amended/rebased upstream since a previous checkout,
-/// because the update is not a fast-forward. Routing through `FETCH_HEAD`
-/// then `checkout -B` sidesteps both: `-B` creates the branch on first
-/// checkout and resets it in place on every later one, whether or not it is
-/// the branch already checked out, so re-checking out the same PR after it
-/// gained new commits just works instead of surfacing a raw git error.
-#[tauri::command]
-pub(crate) async fn gitea_checkout_pr(cwd: String, index: i64) -> Result<(), String> {
+/// because the update is not a fast-forward.
+///
+/// When `pr-{index}` already exists locally (a previous checkout of the same
+/// PR), moving it is only safe when it is a pure fast-forward: the local
+/// branch's tip must be an ancestor of the freshly-fetched head. If it is
+/// not, the local branch carries commits `FETCH_HEAD` does not (the user
+/// committed directly on it, or the PR ref moved sideways rather than
+/// forward), and resetting it with `checkout -B` would strand those commits,
+/// recoverable only through the reflog. Refuse instead, naming the branch so
+/// the user can rename or drop it.
+fn gitea_checkout_pr_inner(cwd: &str, index: i64) -> Result<(), String> {
     let branch = format!("pr-{}", index);
     let refspec = format!("refs/pull/{}/head", index);
     // Write guard: fetch + checkout mutate refs and the worktree, colliding on
     // `.git/index.lock` with a concurrent read/write of the same repo. Held
-    // across both git ops (the RwLock is non-reentrant, acquire exactly once).
-    let _repo = crate::git::repo_lock::write(&cwd);
+    // across every git op below (the RwLock is non-reentrant, acquire exactly
+    // once).
+    let _repo = crate::git::repo_lock::write(cwd);
     let fetch = hidden_cmd("git")
         .args(["fetch", "origin", &refspec])
-        .current_dir(&cwd)
+        .current_dir(cwd)
         .output()
         .map_err(|e| format!("git fetch: {}", e))?;
     if !fetch.status.success() {
@@ -889,9 +932,32 @@ pub(crate) async fn gitea_checkout_pr(cwd: String, index: i64) -> Result<(), Str
             String::from_utf8_lossy(&fetch.stderr).trim()
         ));
     }
+
+    let branch_ref = format!("refs/heads/{}", branch);
+    let branch_exists = hidden_cmd("git")
+        .args(["rev-parse", "--verify", "--quiet", &branch_ref])
+        .current_dir(cwd)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    if branch_exists {
+        let is_ancestor = hidden_cmd("git")
+            .args(["merge-base", "--is-ancestor", &branch, "FETCH_HEAD"])
+            .current_dir(cwd)
+            .output()
+            .map_err(|e| format!("git merge-base: {}", e))?;
+        if !is_ancestor.status.success() {
+            return Err(format!(
+                "Local branch '{branch}' has commits the PR's current head does not; \
+                 checking it out would lose them. Rename or delete '{branch}' locally, \
+                 then try again."
+            ));
+        }
+    }
+
     let checkout = hidden_cmd("git")
         .args(["checkout", "-B", &branch, "FETCH_HEAD"])
-        .current_dir(&cwd)
+        .current_dir(cwd)
         .output()
         .map_err(|e| format!("git checkout: {}", e))?;
     if !checkout.status.success() {
@@ -901,6 +967,11 @@ pub(crate) async fn gitea_checkout_pr(cwd: String, index: i64) -> Result<(), Str
         ));
     }
     Ok(())
+}
+
+#[tauri::command]
+pub(crate) async fn gitea_checkout_pr(cwd: String, index: i64) -> Result<(), String> {
+    gitea_checkout_pr_inner(&cwd, index)
 }
 
 #[tauri::command]
@@ -1213,6 +1284,204 @@ mod gitea_merge_payload_tests {
         // The forge contract allows "merge" | "squash" | "rebase". Anything
         // else is a caller bug; a plain merge is the safe reading.
         assert!(merge_payload("octopus", false).contains("\"merge_method\":\"merge\""));
+    }
+}
+
+#[cfg(test)]
+mod gitea_merge_retry_tests {
+    use super::should_retry_merge_with_legacy_field;
+
+    #[test]
+    fn does_not_retry_just_below_the_client_error_range() {
+        assert!(!should_retry_merge_with_legacy_field(399));
+    }
+
+    #[test]
+    fn retries_the_low_end_of_the_client_error_range() {
+        assert!(should_retry_merge_with_legacy_field(400));
+    }
+
+    #[test]
+    fn retries_the_high_end_of_the_client_error_range() {
+        assert!(should_retry_merge_with_legacy_field(499));
+    }
+
+    #[test]
+    fn does_not_retry_a_server_error() {
+        // A 5xx may arrive after the server already committed the merge
+        // (a timeout, a crashed worker) — firing a second live POST at the
+        // merge endpoint on a 500/502 risks a double merge attempt, not a
+        // version-mismatch retry.
+        assert!(!should_retry_merge_with_legacy_field(500));
+        assert!(!should_retry_merge_with_legacy_field(502));
+    }
+}
+
+#[cfg(test)]
+mod gitea_default_branch_tests {
+    use super::default_branch_from_repo_json;
+
+    #[test]
+    fn reads_the_repos_default_branch() {
+        let v: serde_json::Value =
+            serde_json::from_str(r#"{"default_branch": "develop"}"#).unwrap();
+        assert_eq!(default_branch_from_repo_json(&v), "develop");
+    }
+
+    #[test]
+    fn falls_back_to_main_when_the_field_is_missing() {
+        let v: serde_json::Value = serde_json::from_str(r#"{}"#).unwrap();
+        assert_eq!(default_branch_from_repo_json(&v), "main");
+    }
+
+    #[test]
+    fn falls_back_to_main_when_the_field_is_empty() {
+        let v: serde_json::Value = serde_json::from_str(r#"{"default_branch": ""}"#).unwrap();
+        assert_eq!(default_branch_from_repo_json(&v), "main");
+    }
+}
+
+#[cfg(test)]
+mod gitea_checkout_tests {
+    use super::gitea_checkout_pr_inner;
+    use crate::git::hidden_cmd;
+    use std::path::PathBuf;
+
+    /// A throwaway git repo under the system temp dir, removed on drop.
+    struct TempRepo {
+        path: PathBuf,
+    }
+
+    impl Drop for TempRepo {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+
+    impl TempRepo {
+        fn new(label: &str) -> Self {
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let dir = std::env::temp_dir().join(format!(
+                "gw-gitea-checkout-{}-{}-{}",
+                std::process::id(),
+                label,
+                nanos
+            ));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            let repo = TempRepo { path: dir };
+            repo.git(&["init", "-q", "-b", "main"]);
+            repo.git(&["config", "user.name", "Test"]);
+            repo.git(&["config", "user.email", "test@example.com"]);
+            repo.git(&["config", "commit.gpgsign", "false"]);
+            repo
+        }
+
+        fn cwd(&self) -> String {
+            self.path.to_str().unwrap().to_string()
+        }
+
+        fn git(&self, args: &[&str]) -> std::process::Output {
+            let out = hidden_cmd("git")
+                .args(args)
+                .current_dir(&self.path)
+                .output()
+                .unwrap_or_else(|e| panic!("git {:?} failed to spawn: {}", args, e));
+            assert!(
+                out.status.success(),
+                "git {:?} failed: {}",
+                args,
+                String::from_utf8_lossy(&out.stderr)
+            );
+            out
+        }
+
+        fn write_commit(&self, rel: &str, content: &str, msg: &str) -> String {
+            std::fs::write(self.path.join(rel), content).unwrap();
+            self.git(&["add", "-A"]);
+            self.git(&["commit", "-q", "-m", msg]);
+            let out = self.git(&["rev-parse", "HEAD"]);
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        }
+
+        fn head_sha(&self) -> String {
+            let out = self.git(&["rev-parse", "HEAD"]);
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        }
+
+        fn current_branch(&self) -> String {
+            let out = self.git(&["rev-parse", "--abbrev-ref", "HEAD"]);
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        }
+    }
+
+    #[test]
+    fn checks_out_a_pr_ref_into_a_new_local_branch() {
+        let origin = TempRepo::new("origin-fresh");
+        origin.write_commit("a.txt", "one\n", "init");
+        let pr_sha = origin.write_commit("a.txt", "two\n", "pr work");
+        origin.git(&["update-ref", "refs/pull/42/head", &pr_sha]);
+
+        let local = TempRepo::new("local-fresh");
+        local.git(&["remote", "add", "origin", &origin.cwd()]);
+
+        gitea_checkout_pr_inner(&local.cwd(), 42).expect("first checkout should succeed");
+
+        assert_eq!(local.current_branch(), "pr-42");
+        assert_eq!(local.head_sha(), pr_sha);
+    }
+
+    #[test]
+    fn re_checkout_fast_forwards_when_the_pr_gained_commits() {
+        let origin = TempRepo::new("origin-ff");
+        origin.write_commit("a.txt", "one\n", "init");
+        let pr_sha1 = origin.write_commit("a.txt", "two\n", "pr work");
+        origin.git(&["update-ref", "refs/pull/7/head", &pr_sha1]);
+
+        let local = TempRepo::new("local-ff");
+        local.git(&["remote", "add", "origin", &origin.cwd()]);
+        gitea_checkout_pr_inner(&local.cwd(), 7).expect("first checkout should succeed");
+        assert_eq!(local.head_sha(), pr_sha1);
+
+        // The PR gains a new commit upstream, same local branch already
+        // checked out.
+        let pr_sha2 = origin.write_commit("a.txt", "three\n", "pr work 2");
+        origin.git(&["update-ref", "refs/pull/7/head", &pr_sha2]);
+
+        gitea_checkout_pr_inner(&local.cwd(), 7).expect("re-checkout should fast-forward");
+
+        assert_eq!(local.current_branch(), "pr-7");
+        assert_eq!(local.head_sha(), pr_sha2);
+    }
+
+    #[test]
+    fn refuses_to_discard_local_commits_on_the_pr_branch() {
+        let origin = TempRepo::new("origin-diverge");
+        origin.write_commit("a.txt", "one\n", "init");
+        let pr_sha = origin.write_commit("a.txt", "two\n", "pr work");
+        origin.git(&["update-ref", "refs/pull/9/head", &pr_sha]);
+
+        let local = TempRepo::new("local-diverge");
+        local.git(&["remote", "add", "origin", &origin.cwd()]);
+        gitea_checkout_pr_inner(&local.cwd(), 9).expect("first checkout should succeed");
+        assert_eq!(local.head_sha(), pr_sha);
+
+        // The user commits directly on the local pr-9 branch. The PR ref on
+        // origin does not move, so pr-9 now carries a commit FETCH_HEAD
+        // does not.
+        let local_only_sha = local.write_commit("mine.txt", "local work\n", "local edit");
+        assert_ne!(local_only_sha, pr_sha);
+
+        let err = gitea_checkout_pr_inner(&local.cwd(), 9)
+            .expect_err("re-checkout must refuse to discard the local commit");
+        assert!(err.contains("pr-9"), "got {err}");
+
+        // Nothing was reset: the branch and its extra commit are untouched.
+        assert_eq!(local.current_branch(), "pr-9");
+        assert_eq!(local.head_sha(), local_only_sha);
     }
 }
 
