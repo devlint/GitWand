@@ -9,7 +9,7 @@
 import { describe, it, beforeAll, afterAll } from "vitest";
 import { startDevServer } from "./dev-server-runner.mjs";
 import { assertParity } from "./harness.mjs";
-import { fixtureGiteaRemote } from "./fixtures.mjs";
+import { fixtureGiteaRemote, fixtureAzureForgejoMirrorRemote } from "./fixtures.mjs";
 
 describe("parity: gitea-remote-info", () => {
   /** @type {Awaited<ReturnType<typeof startDevServer>>} */
@@ -25,6 +25,18 @@ describe("parity: gitea-remote-info", () => {
 
   it("a codeberg.org remote reads as provider `gitea` on both sides", async () => {
     const cwd = fixtureGiteaRemote();
+    await assertParity(dev, {
+      command: "git-remote-info",
+      args: { cwd },
+      httpPath: `/api/git-remote-info?cwd=${encodeURIComponent(cwd)}`,
+    });
+  });
+
+  it("an Azure remote whose repo name contains \"forgejo\" still reads `azure`, not `gitea`, on both sides", async () => {
+    // The gitea arm matches "gitea"/"forgejo" as a bare substring anywhere in
+    // the URL, so it must be ordered after azure on both sides. This pins
+    // that order rather than only the branch shape.
+    const cwd = fixtureAzureForgejoMirrorRemote();
     await assertParity(dev, {
       command: "git-remote-info",
       args: { cwd },

@@ -1557,6 +1557,7 @@ const fr: Locale = {
     accountsGiteaTokenHint: "Gitea : Paramètres > Applications > Générer un jeton. Portées : lecture et écriture sur les dépôts et les tickets.",
     accountsGiteaUrlInvalid: "Saisissez une URL de serveur valide, par exemple https://git.acme.io",
     accountsGiteaTokenRequired: "Un jeton d'accès est requis.",
+    accountsGiteaHostTaken: "Un compte Gitea pour {0} existe déjà. Supprimez-le d'abord pour en ajouter un autre.",
     accountsDeleteConfirm: "Supprimer ce compte ?",
     // v2.12 Onglet Git
     git: {

@@ -1548,6 +1548,7 @@ const ptBR: Locale = {
     accountsGiteaTokenHint: "Gitea: Configurações > Aplicativos > Gerar token. Escopos: leitura e escrita de repositórios e issues.",
     accountsGiteaUrlInvalid: "Informe uma URL de servidor válida, por exemplo https://git.acme.io",
     accountsGiteaTokenRequired: "Um token de acesso é obrigatório.",
+    accountsGiteaHostTaken: "Já existe uma conta Gitea para {0}. Remova-a primeiro para adicionar outra.",
     accountsDeleteConfirm: "Remover esta conta?",
     // v2.12
     git: {

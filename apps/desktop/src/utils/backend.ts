@@ -2456,12 +2456,20 @@ export interface RemoteInfo {
  * Detection layer 2 for Gitea: a self-hosted instance on a neutral hostname is
  * unrecognisable from the URL alone, so the configured accounts are the
  * evidence. Exported for its unit test.
+ *
+ * Lowercases the extracted host before comparing: `hosts` (from
+ * `useAccounts.giteaHosts()`) is always lowercase, since the account form
+ * derives it via `giteaHostFromUrl`, which runs `URL.hostname` (itself always
+ * lowercase). Without this, a remote typed or cloned with mixed-case casing
+ * (`git@Git.ACME.io:...`) would silently miss a configured account.
  */
 export function giteaProviderHostMatches(remoteUrl: string, hosts: string[]): boolean {
   if (hosts.length === 0) return false;
-  const host = remoteUrl.startsWith("git@")
-    ? remoteUrl.slice(4).split(":")[0]
-    : remoteUrl.split("://")[1]?.split("/")[0]?.split("@").pop()?.split(":")[0] ?? "";
+  const host = (
+    remoteUrl.startsWith("git@")
+      ? remoteUrl.slice(4).split(":")[0]
+      : remoteUrl.split("://")[1]?.split("/")[0]?.split("@").pop()?.split(":")[0] ?? ""
+  ).toLowerCase();
   return host.length > 0 && hosts.includes(host);
 }
 

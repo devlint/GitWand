@@ -125,6 +125,23 @@ export function fixtureGiteaRemote() {
 }
 
 /**
+ * Fixture « remote Azure DevOps nommé forgejo-mirror » : un commit, plus un
+ * remote `origin` pointant sur `dev.azure.com`, dont le nom de dépôt contient
+ * "forgejo". Verrouille que la branche gitea (qui matche "gitea"/"forgejo" en
+ * sous-chaîne n'importe où dans l'URL) reste ordonnée après la branche azure
+ * des deux côtés, sinon ce remote misdétecte en `gitea` au lieu de `azure`.
+ */
+export function fixtureAzureForgejoMirrorRemote() {
+  const cwd = mkTempRepo("gw-azure-forgejo-remote-");
+  commitFile(cwd, "README.md", "# Parity Fixture\n", "initial commit", 0);
+  execFileSync("git", [
+    "-C", cwd, "remote", "add", "origin",
+    "https://dev.azure.com/acme/tools/_git/forgejo-mirror",
+  ]);
+  return cwd;
+}
+
+/**
  * Fixture « dirty » : 3 commits, un fichier modifié non stagé, un nouveau
  * fichier untracked, un fichier stagé, et un *dossier* entièrement untracked.
  *

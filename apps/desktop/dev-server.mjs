@@ -1074,6 +1074,16 @@ function giteaMapIssue(v) {
   };
 }
 
+/** Mirrors the Rust `normalize_base_url` in `commands/gitea.rs`: strips a
+ *  trailing slash and a trailing `/api/v1`, both pasted surprisingly often.
+ *  Used to normalize `GITWAND_GITEA_BASE` the same way the packaged app
+ *  normalizes the account's stored base URL. */
+function normalizeGiteaBase(raw) {
+  let out = raw.trim().replace(/\/+$/, "");
+  if (out.endsWith("/api/v1")) out = out.slice(0, -"/api/v1".length).replace(/\/+$/, "");
+  return out;
+}
+
 /** Mirrors the Rust `remote_host_port`: keeps an explicit port (self-hosted
  *  Gitea commonly runs on one, e.g. the stock Docker image's `:3000`) rather
  *  than assuming a default. The SCP-like form never carries a port. */
@@ -6781,16 +6791,20 @@ async function handleRequest(req, res) {
           return jsonResponse(req, res, { error: "No remote found" }, 404);
         }
         // Mirrors `detect_provider()` in src-tauri/src/git/parse.rs — keep the
-        // branch order identical. Locked by tests/parity/git-remote-info.test.mjs.
-        // Cursor Origin matches on `origin.cursor.com` (its git host) and NOT on
-        // a bare `cursor.com`, which is the web UI.
+        // branch order identical. Locked by tests/parity/git-remote-info.test.mjs
+        // and tests/parity/gitea-remote-info.test.mjs. The gitea arm matches the
+        // bare substrings "gitea"/"forgejo" anywhere in the URL, including the
+        // repo name, so it must come after azure: an Azure DevOps repo merely
+        // named `forgejo-mirror` would otherwise misdetect as gitea. Cursor
+        // Origin matches on `origin.cursor.com` (its git host) and NOT on a
+        // bare `cursor.com`, which is the web UI.
         let provider = "unknown";
         if (remoteUrl.includes("github.com")) provider = "github";
         else if (remoteUrl.includes("origin.cursor.com")) provider = "cursor";
         else if (remoteUrl.includes("gitlab")) provider = "gitlab";
         else if (remoteUrl.includes("bitbucket")) provider = "bitbucket";
-        else if (remoteUrl.includes("codeberg.org") || remoteUrl.includes("gitea") || remoteUrl.includes("forgejo")) provider = "gitea";
         else if (remoteUrl.includes("dev.azure.com") || remoteUrl.includes("visualstudio.com")) provider = "azure";
+        else if (remoteUrl.includes("codeberg.org") || remoteUrl.includes("gitea") || remoteUrl.includes("forgejo")) provider = "gitea";
         // NOTE: the Rust command additionally falls back to a `glab`/`gh auth
         // status --hostname <host>` CLI probe when the substring chain above
         // still lands on "unknown" (self-hosted forge on a hostname that
@@ -7701,12 +7715,23 @@ async function handleRequest(req, res) {
 
     // ── Gitea / Forgejo read routes ──────────────────────────────────────────
     //
-    // Real, deliberate difference from the packaged app, not an oversight:
-    // the Rust commands read the token from the OS keychain, which this
-    // Node process cannot reach. These routes read GITWAND_GITEA_TOKEN from
-    // the environment instead: export it before `pnpm dev:web` to exercise
-    // Gitea routes. Everything after auth (URL shape, response mapping) is
-    // the same as the packaged app.
+    // Two real, deliberate differences from the packaged app, not oversights:
+    //
+    // 1. Auth: the Rust commands read the token from the OS keychain, which
+    //    this Node process cannot reach. These routes read GITWAND_GITEA_TOKEN
+    //    from the environment instead: export it before `pnpm dev:web` to
+    //    exercise Gitea routes.
+    // 2. API base: the Rust commands take the base URL (scheme, host, port,
+    //    subpath) from the account's validated keychain entry, which this
+    //    process also cannot reach, since it only sees the git remote, which
+    //    carries no scheme. Guessing `https://` from the remote alone breaks
+    //    a stock local Gitea (plain http, e.g. Docker on :3000) and any
+    //    subpath install. GITWAND_GITEA_BASE overrides that guess when set;
+    //    export it alongside the token (e.g. `http://localhost:3000`) to
+    //    exercise a non-https or subpath server.
+    //
+    // Everything after auth and the base URL (path shape, response mapping)
+    // is the same as the packaged app.
     if (url.pathname.startsWith("/api/gitea-") && req.method === "GET") {
       const token = process.env.GITWAND_GITEA_TOKEN;
       if (!token) {
@@ -7726,7 +7751,10 @@ async function handleRequest(req, res) {
       if (!hostPort || !ownerRepo) {
         return jsonResponse(req, res, { error: `Could not read owner/repo from the remote URL: ${remote}` }, 400);
       }
-      const repoApi = `https://${hostPort}/api/v1/repos/${ownerRepo.owner}/${ownerRepo.repo}`;
+      const apiBase = process.env.GITWAND_GITEA_BASE
+        ? normalizeGiteaBase(process.env.GITWAND_GITEA_BASE)
+        : `https://${hostPort}`;
+      const repoApi = `${apiBase}/api/v1/repos/${ownerRepo.owner}/${ownerRepo.repo}`;
       const headers = { Authorization: `token ${token}`, Accept: "application/json" };
       const index = url.searchParams.get("index");
 
@@ -7739,7 +7767,7 @@ async function handleRequest(req, res) {
       try {
         switch (url.pathname) {
           case "/api/gitea-current-user": {
-            const r = await fetch(`https://${hostPort}/api/v1/user`, { headers });
+            const r = await fetch(`${apiBase}/api/v1/user`, { headers });
             if (!r.ok) throw new Error(`Gitea API error: HTTP ${r.status}`);
             const u = await r.json();
             return jsonResponse(req, res, u.login ?? "");

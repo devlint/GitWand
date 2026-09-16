@@ -633,12 +633,20 @@ pub(crate) async fn gitea_pr_status(cwd: String, index: i64) -> Result<Vec<CIChe
 #[tauri::command]
 pub(crate) async fn gitea_pr_files(cwd: String, index: i64) -> Result<Vec<String>, String> {
     let ctx = gitea_ctx(&cwd)?;
-    let url = format!("{}/pulls/{}/files?limit=100", ctx.repo_api(), index);
-    let resp = gitea_curl("GET", &url, None, &ctx.auth)?;
-    Ok(resp
-        .as_array()
-        .map(|arr| arr.iter().map(|f| jstr(f, "filename")).collect())
-        .unwrap_or_default())
+    let want = GITEA_LIST_CEILING as usize;
+    let collected = gitea_page_all(&ctx, want, |page| {
+        format!(
+            "{}/pulls/{}/files?limit={}&page={}",
+            ctx.repo_api(),
+            index,
+            GITEA_PAGE_SIZE,
+            page
+        )
+    })?;
+    Ok(select_window(collected, 0, want as i64)
+        .iter()
+        .map(|f| jstr(f, "filename"))
+        .collect())
 }
 
 /// Shape a Gitea issue comment into the frontend's `PrReviewComment`.

@@ -101,6 +101,50 @@ function saveActiveMap(map: Record<string, string>): void {
   }
 }
 
+// ─── Gitea host helpers (pure, unit-testable) ────────────────────────────────
+//
+// The pointer keychain entry that carries a Gitea account's active username
+// and validated base URL (`useCredentials.saveGiteaCredential`) is keyed by
+// bare host alone, while the account model above is multi-account per forge.
+// A second Gitea account on a host that already has one would silently
+// overwrite the first account's pointer, and removing either account could
+// leave the surviving one with no working pointer. These two predicates are
+// what SettingsAccountsTab.vue calls to avoid both: block the add, and only
+// delete the pointer on remove when no sibling account on the same host
+// remains. Kept here, not local to the component, so they are covered by
+// tests rather than only exercised through the form: the same precedent as
+// forgeUrls.ts's `giteaHostFromUrl`/`giteaBaseFromUrl`.
+
+/** Bare Gitea host encoded in `tokenKey` (`"gitwand:gitea/<host>:<username>"`), or `""`. */
+function giteaHostFromTokenKey(tokenKey: string): string {
+  return tokenKey.split("/")[1]?.split(":")[0] ?? "";
+}
+
+/**
+ * Whether `host` already has a configured Gitea account among `accounts`.
+ * Used to refuse adding a second one on the same host before it silently
+ * overwrites the first account's shared keychain pointer.
+ */
+export function giteaHostHasAccount(accounts: Account[], host: string): boolean {
+  return accounts.some((a) => a.forge === "gitea" && giteaHostFromTokenKey(a.tokenKey) === host);
+}
+
+/**
+ * Whether removing `removed` should also delete the shared `<host>` keychain
+ * pointer entry. Only true when no other Gitea account on the same host
+ * remains: the pointer is keyed by host alone, so a surviving sibling account
+ * still needs it, and deleting it out from under that sibling would make
+ * every one of its commands fail with "No Gitea account configured".
+ */
+export function giteaPointerShouldBeDeleted(accounts: Account[], removed: Account): boolean {
+  if (removed.forge !== "gitea") return false;
+  const host = giteaHostFromTokenKey(removed.tokenKey);
+  if (!host) return false;
+  return !accounts.some(
+    (a) => a.id !== removed.id && a.forge === "gitea" && giteaHostFromTokenKey(a.tokenKey) === host,
+  );
+}
+
 // ─── Singleton state ─────────────────────────────────────────────────────────
 // Shared across all useAccounts() calls in the same Vue app instance.
 
@@ -197,7 +241,7 @@ export function useAccounts() {
   function giteaHosts(): string[] {
     return _accounts.value
       .filter((a) => a.forge === "gitea")
-      .map((a) => a.tokenKey.split("/")[1]?.split(":")[0] ?? "")
+      .map((a) => giteaHostFromTokenKey(a.tokenKey))
       .filter((h) => h.length > 0);
   }
 

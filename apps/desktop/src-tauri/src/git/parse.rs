@@ -622,6 +622,13 @@ pub(crate) fn gh_pr_raw_to_pr(r: GhPrRaw) -> PullRequest {
 /// Cursor Origin (v3.8) is matched on its dedicated git host
 /// `origin.cursor.com`, NOT on a bare `cursor.com`: the latter is the web UI
 /// and would misfire on any URL merely containing it.
+///
+/// The gitea arm matches the bare substrings "gitea"/"forgejo" anywhere in
+/// the URL, including the repo name, so it must stay ordered after every
+/// other arm with a narrower match, azure included: an Azure DevOps repo
+/// merely named `forgejo-mirror` would otherwise misdetect as gitea. (The
+/// gitlab and bitbucket arms have the same broad-substring shape and the
+/// same latent azure collision; that predates this fix and is left alone.)
 pub(crate) fn detect_provider(url: &str) -> &'static str {
     if url.contains("github.com") {
         "github"
@@ -631,10 +638,10 @@ pub(crate) fn detect_provider(url: &str) -> &'static str {
         "gitlab"
     } else if url.contains("bitbucket.org") || url.contains("bitbucket") {
         "bitbucket"
-    } else if url.contains("codeberg.org") || url.contains("gitea") || url.contains("forgejo") {
-        "gitea"
     } else if url.contains("dev.azure.com") || url.contains("visualstudio.com") {
         "azure"
+    } else if url.contains("codeberg.org") || url.contains("gitea") || url.contains("forgejo") {
+        "gitea"
     } else {
         "unknown"
     }
@@ -644,6 +651,13 @@ pub(crate) fn detect_provider(url: &str) -> &'static str {
 /// `scheme://[user@]host[:port]/owner/repo.git`). Returns `None` for a URL
 /// shaped like neither form.
 ///
+/// Lowercased: hostnames are case-insensitive, but `gitea.rs`'s keychain
+/// lookup key is not (`git.acme.io` vs `Git.ACME.io` are different keyring
+/// accounts), and the stored key is always lowercase (`giteaHostFromUrl` on
+/// the frontend runs it through `URL.hostname`, which lowercases). Without
+/// this, a remote typed or cloned with mixed-case casing would silently miss
+/// a configured Gitea account.
+///
 /// Used as the input to the CLI-auth fallback in `git_remote_info`
 /// (`commands/ops.rs`) when `detect_provider` can't identify the forge from
 /// the URL text alone — e.g. a self-hosted GitLab instance on a hostname that
@@ -651,7 +665,7 @@ pub(crate) fn detect_provider(url: &str) -> &'static str {
 pub(crate) fn extract_remote_host(url: &str) -> Option<String> {
     if let Some(rest) = url.strip_prefix("git@") {
         let host = rest.split(':').next()?;
-        return (!host.is_empty()).then(|| host.to_string());
+        return (!host.is_empty()).then(|| host.to_lowercase());
     }
     let host_start = url.find("://")? + 3;
     let rest = &url[host_start..];
@@ -659,7 +673,7 @@ pub(crate) fn extract_remote_host(url: &str) -> Option<String> {
         .rsplit_once('@')
         .map_or(rest, |(_, host_part)| host_part);
     let host = rest.split(['/', ':']).next()?;
-    (!host.is_empty()).then(|| host.to_string())
+    (!host.is_empty()).then(|| host.to_lowercase())
 }
 
 pub(crate) fn parse_remote_owner_repo(url: &str) -> (String, String) {
@@ -1911,6 +1925,18 @@ mod remote_provider_tests {
     }
 
     #[test]
+    fn azure_wins_over_gitea_when_the_repo_name_contains_a_gitea_keyword() {
+        // The gitea arm matches on the substring "gitea"/"forgejo" anywhere in
+        // the URL, including the repo name, so it must be checked after the
+        // azure arm, not before, or a repo like `.../_git/forgejo-mirror` on
+        // dev.azure.com loses its Azure PR panel to a false gitea match.
+        assert_eq!(
+            detect_provider("https://dev.azure.com/acme/tools/_git/forgejo-mirror"),
+            "azure"
+        );
+    }
+
+    #[test]
     fn detects_gitea_and_forgejo_hosts() {
         assert_eq!(detect_provider("https://codeberg.org/acme/checkout.git"), "gitea");
         assert_eq!(detect_provider("https://gitea.com/acme/checkout.git"), "gitea");
@@ -1958,6 +1984,21 @@ mod remote_provider_tests {
     fn extract_remote_host_returns_none_for_malformed_urls() {
         assert_eq!(extract_remote_host("not-a-remote-url"), None);
         assert_eq!(extract_remote_host(""), None);
+    }
+
+    #[test]
+    fn extract_remote_host_lowercases_a_mixed_case_host() {
+        // The keychain lookup key for a Gitea account is always lowercase
+        // (the frontend derives it via `URL.hostname`), so a remote typed or
+        // cloned with mixed-case casing must still resolve to the same key.
+        assert_eq!(
+            extract_remote_host("git@Git.ACME.io:acme/checkout.git"),
+            Some("git.acme.io".to_string())
+        );
+        assert_eq!(
+            extract_remote_host("https://Git.ACME.io/acme/checkout.git"),
+            Some("git.acme.io".to_string())
+        );
     }
 
     #[test]

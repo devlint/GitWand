@@ -7,7 +7,7 @@
 
 import { ref, computed, watch } from "vue";
 import { useI18n } from "../composables/useI18n";
-import { useAccounts } from "../composables/useAccounts";
+import { useAccounts, giteaHostHasAccount, giteaPointerShouldBeDeleted } from "../composables/useAccounts";
 import { useCredentials } from "../composables/useCredentials";
 import { useGithubAuth, GITHUB_TOKEN_KEY } from "../composables/useGithubAuth";
 import { useAzureAuth, AZURE_TOKEN_KEY } from "../composables/useAzureAuth";
@@ -168,6 +168,12 @@ async function submitForm() {
     const host = giteaHostFromUrl(formServerUrl.value);
     const base = giteaBaseFromUrl(formServerUrl.value);
     if (!host || !base) { formError.value = t('settings.accountsGiteaUrlInvalid'); return; }
+    // The pointer keychain entry that carries the active username for a host
+    // is keyed by bare host alone (see useCredentials.saveGiteaCredential), so
+    // a second account on the same host would silently overwrite it and take
+    // over as the identity for every repo on that host, regardless of which
+    // account is marked active here. Refuse rather than let that happen.
+    if (giteaHostHasAccount(accounts.value, host)) { formError.value = t('settings.accountsGiteaHostTaken', host); return; }
     if (!formToken.value.trim()) { formError.value = t('settings.accountsGiteaTokenRequired'); return; }
     let login = "";
     try {
@@ -205,16 +211,21 @@ async function onRemove(id: string) {
     // Gitea stores two keychain entries under "gitwand:gitea": `<host>:<user>`
     // (the token) and `<host>` (the active-username pointer the Rust side
     // reads, since it knows the host from the remote but not the username).
-    // The generic single-entry delete below would only remove the token and
-    // leave the pointer behind: a stale-but-fails-closed lookup, not a
-    // security hole, but still a bug worth avoiding.
+    // The token entry is always this account's own, so it is always removed.
+    // The pointer is shared by every Gitea account on the same host (only one
+    // account per host is ever allowed to exist, see the add-form guard
+    // above), so it is only removed when this is the last one: deleting it
+    // out from under a surviving sibling account would make every one of its
+    // commands fail with "No Gitea account configured".
     const slash = acc.tokenKey.indexOf("/");
     if (slash !== -1) {
       const service = acc.tokenKey.slice(0, slash);
       const account = acc.tokenKey.slice(slash + 1);
       await removeCredential(service, account);
-      const colon = account.indexOf(":");
-      if (colon !== -1) await removeCredential(service, account.slice(0, colon));
+      if (giteaPointerShouldBeDeleted(accounts.value, acc)) {
+        const colon = account.indexOf(":");
+        if (colon !== -1) await removeCredential(service, account.slice(0, colon));
+      }
     }
   } else if (acc.tokenKey) {
     const slash = acc.tokenKey.indexOf("/");
