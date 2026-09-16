@@ -869,6 +869,22 @@ function snapshotBefore(cwd, enabled, kind, label) {
   }
 }
 
+/**
+ * Why a spawned CLI failed, in the words of whatever actually failed.
+ *
+ * `spawnSync` reports a failure to START the process on `result.error`
+ * (status is null, stderr undefined), which the auto-merge routes used to
+ * drop on the floor in favour of a generic "<cmd> failed". That hid the one
+ * case CI actually hits, a CLI that is not installed at all, and made the
+ * dev-server disagree with the Rust backend, which does surface its io error.
+ * Parity here is not cosmetic: `tests/parity/auto-merge-refusal.test.mjs`
+ * compares the CLASS of failure across the two backends.
+ */
+function spawnFailureDetail(result, generic) {
+  if (result.error) return String(result.error.message || result.error);
+  return (result.stderr || result.stdout || "").trim() || generic;
+}
+
 function jsonResponse(req, res, data, status = 200) {
   res.writeHead(status, corsHeaders(req));
   res.end(JSON.stringify(data));
@@ -5565,7 +5581,7 @@ async function handleRequest(req, res) {
           { cwd: resolve(cwd), encoding: "utf-8" },
         );
         if (r.status !== 0) {
-          const detail = (r.stderr || r.stdout || "").trim() || "gh pr merge --auto failed";
+          const detail = spawnFailureDetail(r, "gh pr merge --auto failed");
           return jsonResponse(req, res, { error: detail }, 500);
         }
         return jsonResponse(req, res, { ok: true });
@@ -5584,7 +5600,7 @@ async function handleRequest(req, res) {
           encoding: "utf-8",
         });
         if (r.status !== 0) {
-          const detail = (r.stderr || r.stdout || "").trim() || "gh pr merge --disable-auto failed";
+          const detail = spawnFailureDetail(r, "gh pr merge --disable-auto failed");
           return jsonResponse(req, res, { error: detail }, 500);
         }
         return jsonResponse(req, res, { ok: true });
@@ -5607,8 +5623,7 @@ async function handleRequest(req, res) {
         args.push("--yes", "--remove-source-branch");
         const r = spawnSync(GLAB, args, { cwd: resolve(cwd), encoding: "utf-8" });
         if (r.status !== 0) {
-          const detail = (r.stderr || r.stdout || "").trim() ||
-            "glab mr merge --when-pipeline-succeeds failed";
+          const detail = spawnFailureDetail(r, "glab mr merge --when-pipeline-succeeds failed");
           return jsonResponse(req, res, { error: detail }, 500);
         }
         return jsonResponse(req, res, { ok: true });
@@ -5634,8 +5649,7 @@ async function handleRequest(req, res) {
           { cwd: resolve(cwd), encoding: "utf-8" },
         );
         if (r.status !== 0) {
-          const detail = (r.stderr || r.stdout || "").trim() ||
-            "glab api cancel_merge_when_pipeline_succeeds failed";
+          const detail = spawnFailureDetail(r, "glab api cancel_merge_when_pipeline_succeeds failed");
           return jsonResponse(req, res, { error: detail }, 500);
         }
         return jsonResponse(req, res, { ok: true });

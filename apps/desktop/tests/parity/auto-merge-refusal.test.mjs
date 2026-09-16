@@ -42,21 +42,80 @@ async function nodeEnableAutoMergeGl(dev, cwd, iid, method) {
 
 /**
  * Collapse the parts that legitimately differ between the two backends down
- * to a single class. The dev-server route always shells out to `gh` CLI; the
- * Rust command instead goes through the GraphQL/REST path whenever a GitHub
- * token is configured locally (see `gh_enable_auto_merge_inner`), so the two
- * phrasings for "this repo has no forge remote" are NOT the same string even
- * on a machine with no network at all:
+ * to a single class.
+ *
+ * The dev-server route always shells out to the forge CLI; the Rust command
+ * goes through the GraphQL/REST path whenever a GitHub token is configured
+ * locally (see `gh_enable_auto_merge_inner`), so the two phrasings for "this
+ * repo has no forge remote" are NOT the same string even with no network:
  *   - `gh` CLI:        "no git remotes found"
  *   - Rust token path: "No 'origin' remote found in this repo."
- * Both mention the missing remote, which is the class this test pins. It must
- * NOT collapse an unrelated failure (a real network/auth error) into the same
- * bucket, so the check stays specific to "remote" rather than "any error".
+ *
+ * Which refusal you actually get depends on what the machine has, and that is
+ * the whole reason this returns a class rather than a boolean. A developer
+ * laptop has a keychain token or an authenticated `gh`, so the refusal really
+ * is about the missing remote. A CI runner has neither: `gh` is preinstalled
+ * but unauthenticated and refuses on the missing credential BEFORE it ever
+ * looks at remotes, and `glab` is not installed at all, so the spawn itself
+ * fails. Both are legitimate refusals of an operation that cannot proceed,
+ * and neither reaches the no-remote path.
+ *
+ * So: three recognised refusal classes, and `other` for everything else. The
+ * `other` bucket is what keeps this test honest, since an unrelated failure
+ * (a real network error, a changed CLI contract) must not pass as agreement.
  */
-function normalizeForgeError(msg) {
+function classifyForgeError(msg) {
   const lower = String(msg).toLowerCase();
-  return lower.includes("remote") ? "no-remote" : "other";
+  // Order matters: a missing binary's io error can mention a path containing
+  // almost anything, so the spawn failure is recognised before the others.
+  if (
+    lower.includes("no such file or directory") ||
+    lower.includes("os error 2") ||
+    lower.includes("executable file not found") ||
+    lower.includes("program not found") ||
+    // Node's phrasing for the same thing: `spawnSync glab ENOENT`.
+    lower.includes("enoent")
+  ) {
+    return "no-cli";
+  }
+  if (
+    lower.includes("auth login") ||
+    lower.includes("gh_token") ||
+    lower.includes("glab_token") ||
+    lower.includes("not authenticated")
+  ) {
+    return "no-auth";
+  }
+  if (lower.includes("remote")) return "no-remote";
+  return "other";
 }
+
+/** The refusals that mean "this operation could not proceed", as opposed to
+ *  an unrelated failure that must not pass as cross-side agreement. */
+const KNOWN_REFUSALS = ["no-remote", "no-auth", "no-cli"];
+
+/**
+ * Both backends must refuse, for a recognised reason, and for the SAME
+ * reason. The raw messages travel into the assertion text on purpose: when
+ * this last failed, the classes alone ("expected 'other' to be 'no-remote'")
+ * said nothing about what either side printed, and recovering that took a
+ * local reproduction of both CLIs.
+ */
+function expectSameRefusal(rust, node) {
+  expect(rust.ok, `rust unexpectedly accepted: ${rust.error}`).toBe(false);
+  expect(node.ok, `node unexpectedly accepted: ${node.error}`).toBe(false);
+  const rustClass = classifyForgeError(rust.error);
+  const nodeClass = classifyForgeError(node.error);
+  expect(
+    KNOWN_REFUSALS,
+    `rust refused for an unrecognised reason: ${rust.error}`,
+  ).toContain(rustClass);
+  expect(
+    nodeClass,
+    `the two backends refused for different reasons.\n  rust (${rustClass}): ${rust.error}\n  node (${nodeClass}): ${node.error}`,
+  ).toBe(rustClass);
+}
+
 
 /**
  * Detect `runProbe`'s timeout shape (`probe.mjs`'s `spawnSync(..., { timeout:
@@ -68,7 +127,7 @@ function normalizeForgeError(msg) {
  * decision. That takes minutes; `runProbe` kills the child at 10s via Node's
  * `spawnSync` timeout, which surfaces as `result.error.code === "ETIMEDOUT"`
  * (message `"spawnSync <bin> ETIMEDOUT"`) and `exitCode: -1`. Left
- * unrecognised, this looks exactly like `normalizeForgeError` classifying an
+ * unrecognised, this looks exactly like `classifyForgeError` bucketing an
  * ordinary mismatch as `"other"`: a phantom bug report, not a real one.
  */
 function looksLikeProbeTimeout(result) {
@@ -106,14 +165,7 @@ describe("parity: auto-merge refusal", () => {
       );
     }
 
-    expect(rust.ok, "rust unexpectedly accepted a repo with no forge remote").toBe(false);
-    expect(node.ok, "node unexpectedly accepted a repo with no forge remote").toBe(false);
-    // Pin the actual reason, not just cross-side agreement: if both sides
-    // failed for some unrelated cause (e.g. `gh` missing entirely), they'd
-    // still agree with each other while never having exercised the missing
-    // remote this test is named for.
-    expect(normalizeForgeError(rust.error)).toBe("no-remote");
-    expect(normalizeForgeError(node.error)).toBe(normalizeForgeError(rust.error));
+    expectSameRefusal(rust, node);
   });
 
   it("both backends refuse disabling auto-merge on a repo with no forge remote", async () => {
@@ -141,10 +193,7 @@ describe("parity: auto-merge refusal", () => {
       );
     }
 
-    expect(rust.ok, "rust unexpectedly accepted a repo with no forge remote").toBe(false);
-    expect(node.ok, "node unexpectedly accepted a repo with no forge remote").toBe(false);
-    expect(normalizeForgeError(rust.error)).toBe("no-remote");
-    expect(normalizeForgeError(node.error)).toBe(normalizeForgeError(rust.error));
+    expectSameRefusal(rust, node);
   });
 
   it("both backends refuse enabling auto-merge on a GitLab MR with no forge remote", async () => {
@@ -166,10 +215,7 @@ describe("parity: auto-merge refusal", () => {
       );
     }
 
-    expect(rust.ok, "rust unexpectedly accepted a repo with no forge remote").toBe(false);
-    expect(node.ok, "node unexpectedly accepted a repo with no forge remote").toBe(false);
-    expect(normalizeForgeError(rust.error)).toBe("no-remote");
-    expect(normalizeForgeError(node.error)).toBe(normalizeForgeError(rust.error));
+    expectSameRefusal(rust, node);
   });
 
   it("both backends refuse disabling auto-merge on a GitLab MR with no forge remote", async () => {
@@ -197,10 +243,7 @@ describe("parity: auto-merge refusal", () => {
       );
     }
 
-    expect(rust.ok, "rust unexpectedly accepted a repo with no forge remote").toBe(false);
-    expect(node.ok, "node unexpectedly accepted a repo with no forge remote").toBe(false);
-    expect(normalizeForgeError(rust.error)).toBe("no-remote");
-    expect(normalizeForgeError(node.error)).toBe(normalizeForgeError(rust.error));
+    expectSameRefusal(rust, node);
   });
 
   // Azure is intentionally absent from this suite. Every other az* command
