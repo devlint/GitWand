@@ -145,18 +145,24 @@ export function useCredentials() {
   /**
    * Store a Gitea token plus the host pointer the Rust side reads.
    *
-   * Two entries: `<host>` holds the active username, `<host>:<username>` holds
-   * the token. Rust knows the host from the remote but not the username, so the
-   * pointer is what makes a keychain lookup possible.
+   * `host` must be the bare host (no port): it is the keychain lookup key,
+   * and Rust derives the same bare host from the git remote, so a port here
+   * would make every lookup miss. Two entries: `<host>:<username>` holds the
+   * token; `<host>` holds a JSON pointer `{"username", "base"}`, where `base`
+   * is the full validated server URL (scheme, host, port). Rust knows the
+   * bare host from the remote but not the username, nor the exact scheme or
+   * port a self-hosted instance uses, so the pointer is what makes both a
+   * keychain lookup and the right API base URL possible.
    */
   async function saveGiteaCredential(
     host: string,
     username: string,
     token: string,
+    base: string,
   ): Promise<boolean> {
     const ok = await saveCredential(GITEA_SERVICE, `${host}:${username}`, token);
     if (!ok) return false;
-    return saveCredential(GITEA_SERVICE, host, username);
+    return saveCredential(GITEA_SERVICE, host, JSON.stringify({ username, base }));
   }
 
   return {

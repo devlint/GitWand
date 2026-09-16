@@ -135,3 +135,54 @@ export function forgeCommitUrl(remote: ForgeRemote, sha: string): string | null 
       return `https://github.com/${owner}/${repo}/commit/${sha}`;
   }
 }
+
+// ─── Gitea account-form URL parsing ────────────────────────────────────────
+//
+// Used by `SettingsAccountsTab.vue` to turn whatever the user pastes into the
+// "Server URL" field into the two shapes the rest of the Gitea path needs:
+// a bare host (the keychain lookup key) and a full base URL (what actually
+// goes over the wire). Extracted here, rather than kept local to the
+// component, so the normalization is pinned by tests rather than only
+// exercised through the form.
+
+/**
+ * Parses the bare Gitea server host (no port, no scheme) out of whatever the
+ * user typed. This is the keychain lookup key, which must match what the
+ * Rust side derives from the git remote (`extract_remote_host`, which also
+ * drops the port), so a port here would make every lookup miss.
+ *
+ * Returns `""` when the input can't be turned into a valid URL.
+ */
+export function giteaHostFromUrl(raw: string): string {
+  const trimmed = raw.trim().replace(/\/+$/, "");
+  const withScheme = /^https?:\/\//.test(trimmed) ? trimmed : `https://${trimmed}`;
+  try {
+    return new URL(withScheme).hostname;
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Parses the full normalised server URL out of whatever the user typed:
+ * scheme, host and port, plus any subpath, no trailing slash, no `/api/v1`
+ * suffix. This is what actually goes over the wire, so unlike the bare host
+ * above it must keep the port and scheme the user typed rather than dropping
+ * them: a self-hosted instance on plain http, or on a non-default port, is
+ * unreachable under a guessed https default. Mirrors `normalize_base_url()`
+ * in `src-tauri/src/commands/gitea.rs`; keep the two in sync.
+ *
+ * Returns `""` when the input can't be turned into a valid URL.
+ */
+export function giteaBaseFromUrl(raw: string): string {
+  const trimmed = raw.trim().replace(/\/+$/, "");
+  const withScheme = /^https?:\/\//.test(trimmed) ? trimmed : `https://${trimmed}`;
+  try {
+    const u = new URL(withScheme);
+    let base = `${u.protocol}//${u.host}${u.pathname}`.replace(/\/+$/, "");
+    if (base.endsWith("/api/v1")) base = base.slice(0, -"/api/v1".length);
+    return base;
+  } catch {
+    return "";
+  }
+}

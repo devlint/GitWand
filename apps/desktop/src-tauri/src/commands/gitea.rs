@@ -14,6 +14,18 @@
 //!   account = "<host>:<username>"
 //!   value   = "<token>"
 //!
+//! A second entry at `account = "<host>"` (no username) points at which
+//! `<host>:<username>` entry is active. Its value is JSON,
+//! `{"username": "...", "base": "..."}`, where `base` is the exact server
+//! URL (scheme, host, port) the account was validated against: the bare
+//! host alone cannot carry a non-default port or an `http://` scheme, and
+//! guessing either back from the git remote is how a self-hosted instance
+//! on plain http, or on a non-default port, ends up called on the wrong
+//! scheme or port. A pointer written before this field existed is a bare
+//! username string, not JSON: `gitea_token_for_host` falls back to treating
+//! it as one, with no stored base, in which case the API base is still
+//! guessed from the remote URL as before.
+//!
 //! The token is injected through `curl --config -` (stdin) as
 //! `Authorization: token <pat>`, Gitea's documented scheme. It never reaches
 //! argv, a log line, or the frontend.
@@ -110,25 +122,37 @@ fn gitea_ctx(cwd: &str) -> Result<GiteaCtx, String> {
     if owner.is_empty() || repo.is_empty() {
         return Err(format!("Could not read owner/repo from the remote URL: {}", url));
     }
-    let token = gitea_token_for_host(&host)?;
-    // The keychain key stays the bare host (matches the frontend's account
-    // detection), but the API base URL needs the port when the remote has one.
-    let host_port = remote_host_port(&url).unwrap_or_else(|| host.clone());
+    let cred = gitea_token_for_host(&host)?;
+    // The account's own validated base URL is the source of truth: it is the
+    // exact scheme/host/port the user configured, unlike the remote URL which
+    // can only be guessed at (and guesses https unconditionally). Only fall
+    // back to the guess when an older pointer format left no base stored.
+    let base = cred.base.unwrap_or_else(|| {
+        let host_port = remote_host_port(&url).unwrap_or_else(|| host.clone());
+        normalize_base_url(&host_port)
+    });
     Ok(GiteaCtx {
-        base: normalize_base_url(&host_port),
+        base,
         owner,
         repo,
-        auth: auth_header_config("token", &token),
+        auth: auth_header_config("token", &cred.token),
     })
 }
 
-/// Look up the stored token for `host`.
+/// The token and, when the pointer entry carries one, the account's own
+/// validated base URL for a host.
+struct GiteaCredential {
+    token: String,
+    base: Option<String>,
+}
+
+/// Look up the stored token (and base URL, when stored) for `host`.
 ///
 /// The keychain account key is `"<host>:<username>"`, and the username is not
 /// known here, so the frontend stores a second entry keyed by host alone
 /// pointing at the active username (see `backend-gitea.ts`). This reads that
 /// pointer, then the token itself.
-fn gitea_token_for_host(host: &str) -> Result<String, String> {
+fn gitea_token_for_host(host: &str) -> Result<GiteaCredential, String> {
     let pointer = keyring::Entry::new(GITEA_SERVICE, host)
         .map_err(|e| format!("keyring: {}", e))?
         .get_password()
@@ -138,8 +162,8 @@ fn gitea_token_for_host(host: &str) -> Result<String, String> {
                  Add one in Settings > Accounts."
             )
         })?;
-    // The pointer holds the active username for this host.
-    keyring::Entry::new(GITEA_SERVICE, &format!("{}:{}", host, pointer))
+    let (username, base) = parse_gitea_pointer(&pointer);
+    let token = keyring::Entry::new(GITEA_SERVICE, &format!("{}:{}", host, username))
         .map_err(|e| format!("keyring: {}", e))?
         .get_password()
         .map_err(|_| {
@@ -147,7 +171,27 @@ fn gitea_token_for_host(host: &str) -> Result<String, String> {
                 "Gitea credential for {host} is missing or unreadable. \
                  Re-add the account in Settings > Accounts."
             )
-        })
+        })?;
+    Ok(GiteaCredential { token, base })
+}
+
+/// Parse the pointer entry's value into `(username, base)`.
+///
+/// The current form writes JSON, `{"username": "...", "base": "..."}`. A
+/// pointer written before that field existed is a bare username string, not
+/// JSON: this falls back to treating the whole value as the username, with
+/// no base, which is exactly what the old format always meant. A malformed
+/// value (present JSON but no `username` key, or invalid JSON) degrades the
+/// same way rather than erroring, since the caller already has a clear
+/// "missing or unreadable" error path for a token lookup that then fails.
+fn parse_gitea_pointer(raw: &str) -> (String, Option<String>) {
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(raw) {
+        if let Some(username) = v.get("username").and_then(|u| u.as_str()) {
+            let base = v.get("base").and_then(|b| b.as_str()).map(str::to_string);
+            return (username.to_string(), base);
+        }
+    }
+    (raw.to_string(), None)
 }
 
 // ─── HTTP transport ─────────────────────────────────────────────────────────
@@ -1261,6 +1305,36 @@ mod gitea_host_port_tests {
         assert_eq!(
             remote_host_port("git@git.acme.io:acme/app.git"),
             Some("git.acme.io".to_string())
+        );
+    }
+}
+
+#[cfg(test)]
+mod gitea_pointer_tests {
+    use super::parse_gitea_pointer;
+
+    #[test]
+    fn parses_the_json_form_with_a_base() {
+        assert_eq!(
+            parse_gitea_pointer(r#"{"username":"alice","base":"http://git.acme.io:3000"}"#),
+            ("alice".to_string(), Some("http://git.acme.io:3000".to_string()))
+        );
+    }
+
+    #[test]
+    fn falls_back_to_the_legacy_bare_username_form() {
+        // Written by a build that predates the `base` field: a plain string,
+        // not JSON at all.
+        assert_eq!(parse_gitea_pointer("alice"), ("alice".to_string(), None));
+    }
+
+    #[test]
+    fn falls_back_on_a_malformed_value() {
+        // Valid JSON, but not the expected shape (no "username" key): treated
+        // the same as a bare username, using the whole raw string.
+        assert_eq!(
+            parse_gitea_pointer(r#"{"nope":"alice"}"#),
+            (r#"{"nope":"alice"}"#.to_string(), None)
         );
     }
 }

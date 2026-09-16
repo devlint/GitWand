@@ -12,6 +12,7 @@ import { useCredentials } from "../composables/useCredentials";
 import { useGithubAuth, GITHUB_TOKEN_KEY } from "../composables/useGithubAuth";
 import { useAzureAuth, AZURE_TOKEN_KEY } from "../composables/useAzureAuth";
 import { isTauri, azureSignOut, giteaValidateToken } from "../utils/backend";
+import { giteaHostFromUrl, giteaBaseFromUrl } from "../utils/forgeUrls";
 import type { ForgeName } from "../composables/forge/types";
 
 // In dev:web there is no Rust backend — the GitHub flow is a fake mock that
@@ -69,21 +70,6 @@ const formServerUrl = ref("");
 const formToken = ref("");
 const formError = ref<string | null>(null);
 const formSuccess = ref(false);
-
-/**
- * Parses a Gitea server host out of whatever the user typed (bare host,
- * `https://…`, trailing slash). Returns `""` when the input can't be turned
- * into a valid URL.
- */
-function giteaHostFromUrl(raw: string): string {
-  const trimmed = raw.trim().replace(/\/+$/, "");
-  const withScheme = /^https?:\/\//.test(trimmed) ? trimmed : `https://${trimmed}`;
-  try {
-    return new URL(withScheme).host;
-  } catch {
-    return "";
-  }
-}
 
 function openForm() {
   formForge.value = "github";
@@ -180,17 +166,21 @@ async function submitForm() {
 
   if (formForge.value === "gitea") {
     const host = giteaHostFromUrl(formServerUrl.value);
-    if (!host) { formError.value = t('settings.accountsGiteaUrlInvalid'); return; }
+    const base = giteaBaseFromUrl(formServerUrl.value);
+    if (!host || !base) { formError.value = t('settings.accountsGiteaUrlInvalid'); return; }
     if (!formToken.value.trim()) { formError.value = t('settings.accountsGiteaTokenRequired'); return; }
     let login = "";
     try {
-      login = await giteaValidateToken(host, formToken.value.trim());
+      // Validate against the full base (scheme + host + port), not the bare
+      // host: the bare host alone would force the guessed https default,
+      // defeating validation for a plain-http or non-default-port server.
+      login = await giteaValidateToken(base, formToken.value.trim());
     } catch (e) {
       formError.value = e instanceof Error ? e.message : String(e);
       return;
     }
     const username = formUsername.value.trim() || login;
-    const ok = await saveGiteaCredential(host, username, formToken.value.trim());
+    const ok = await saveGiteaCredential(host, username, formToken.value.trim(), base);
     if (!ok) { formError.value = credError.value ?? "Failed to save credential."; return; }
     tokenKey = `gitwand:gitea/${host}:${username}`;
     formUsername.value = username;

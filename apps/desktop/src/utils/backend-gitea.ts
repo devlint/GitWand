@@ -100,6 +100,14 @@ export async function giteaBranches(cwd: string): Promise<string[]> {
 
 // ─── Writes (Tauri only) ────────────────────────────────────────────────────
 
+/**
+ * Validates a token against a server before anything is stored, returning the
+ * login. `host` is passed straight to Rust's `normalize_base_url`, which
+ * accepts either a bare host or a full URL, so callers should pass the full
+ * validated base URL (scheme, host, port) here, not a bare host: a bare host
+ * would force the https default, defeating validation of a plain-http
+ * instance or one on a non-default port.
+ */
 export async function giteaValidateToken(host: string, token: string): Promise<string> {
   if (!isTauri()) throw new Error("giteaValidateToken requires Tauri");
   return tauriInvoke<string>("gitea_validate_token", { host, token });

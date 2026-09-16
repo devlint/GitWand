@@ -8,7 +8,7 @@
  * need the org/project pair, which only the remote URL carries.
  */
 import { describe, it, expect } from "vitest";
-import { forgeCommitUrl } from "../forgeUrls";
+import { forgeCommitUrl, giteaHostFromUrl, giteaBaseFromUrl } from "../forgeUrls";
 
 const SHA = "abc1234def5678";
 
@@ -119,5 +119,48 @@ describe("forgeCommitUrl — missing data", () => {
   it("returns null when owner or repo is missing on a path-based forge", () => {
     expect(forgeCommitUrl(remote("github", "", "checkout"), SHA)).toBeNull();
     expect(forgeCommitUrl(remote("github", "acme", ""), SHA)).toBeNull();
+  });
+});
+
+describe("giteaHostFromUrl / giteaBaseFromUrl: the account-form join", () => {
+  // A regression bug once had giteaHostFromUrl keep the port, which broke the
+  // keychain lookup (Rust's extract_remote_host always strips it), and had
+  // the base URL default to https unconditionally, which broke a plain-http
+  // self-hosted instance. Both are pinned here with exact strings.
+
+  it("drops the port from the bare host, keeps it in the base", () => {
+    expect(giteaHostFromUrl("http://git.acme.io:3000")).toBe("git.acme.io");
+    expect(giteaBaseFromUrl("http://git.acme.io:3000")).toBe("http://git.acme.io:3000");
+  });
+
+  it("keeps the scheme the user typed in the base, not a guessed default", () => {
+    expect(giteaHostFromUrl("http://git.acme.io")).toBe("git.acme.io");
+    expect(giteaBaseFromUrl("http://git.acme.io")).toBe("http://git.acme.io");
+  });
+
+  it("the default-port https case is unchanged: bare host, base with no port", () => {
+    expect(giteaHostFromUrl("https://git.acme.io")).toBe("git.acme.io");
+    expect(giteaBaseFromUrl("https://git.acme.io")).toBe("https://git.acme.io");
+  });
+
+  it("adds https when no scheme is typed at all", () => {
+    expect(giteaHostFromUrl("git.acme.io")).toBe("git.acme.io");
+    expect(giteaBaseFromUrl("git.acme.io")).toBe("https://git.acme.io");
+  });
+
+  it("strips a trailing slash and an /api/v1 suffix from the base", () => {
+    expect(giteaBaseFromUrl("https://git.acme.io/")).toBe("https://git.acme.io");
+    expect(giteaBaseFromUrl("https://git.acme.io/api/v1")).toBe("https://git.acme.io");
+    expect(giteaBaseFromUrl("https://git.acme.io/api/v1/")).toBe("https://git.acme.io");
+  });
+
+  it("keeps a subpath install in the base", () => {
+    expect(giteaBaseFromUrl("https://acme.io/gitea/")).toBe("https://acme.io/gitea");
+    expect(giteaHostFromUrl("https://acme.io/gitea/")).toBe("acme.io");
+  });
+
+  it("returns empty strings for input that can't become a valid URL", () => {
+    expect(giteaHostFromUrl("")).toBe("");
+    expect(giteaBaseFromUrl("")).toBe("");
   });
 });
