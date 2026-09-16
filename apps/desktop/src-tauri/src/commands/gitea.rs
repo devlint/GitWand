@@ -462,19 +462,43 @@ const GITEA_LIST_CEILING: i64 = 300;
 /// a given 1-based page number. See `needs_another_page` for the stop
 /// condition: a short but non-empty page (a lowered server cap) keeps paging
 /// rather than being read as the end.
+/// Identity of one item for duplicate detection: its `id` when it has one,
+/// otherwise the whole value. Branches carry `name` rather than `id`, so the
+/// fallback is what keeps this general.
+fn item_key(v: &serde_json::Value) -> String {
+    match v.get("id") {
+        Some(id) if !id.is_null() => id.to_string(),
+        _ => v.to_string(),
+    }
+}
+
 fn gitea_page_all(
     ctx: &GiteaCtx,
     want: usize,
     url_for_page: impl Fn(i64) -> String,
 ) -> Result<Vec<serde_json::Value>, String> {
     let mut collected: Vec<serde_json::Value> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut page = 1;
     loop {
         let resp = gitea_curl("GET", &url_for_page(page), None, &ctx.auth)?;
         let arr = resp.as_array().cloned().unwrap_or_default();
         let page_len = arr.len();
-        collected.extend(arr);
-        if !needs_another_page(collected.len(), want, page_len) {
+        // Count only what this page actually ADDS. An empty page is not the
+        // only end of a collection: `/issues/{index}/comments` ignores the
+        // `page` parameter entirely and serves the same items forever (Gitea
+        // 1.27.3, verified against a live server), so a loop that stops only
+        // on an empty page spins until the ceiling and returns the same
+        // comment hundreds of times. Every other endpoint we page does honour
+        // `page`, and for those this changes nothing.
+        let mut added = 0usize;
+        for item in arr {
+            if seen.insert(item_key(&item)) {
+                collected.push(item);
+                added += 1;
+            }
+        }
+        if added == 0 || !needs_another_page(collected.len(), want, page_len) {
             break;
         }
         page += 1;
@@ -611,20 +635,19 @@ pub(crate) async fn gitea_get_pr(cwd: String, index: i64) -> Result<PullRequestD
 #[tauri::command]
 pub(crate) async fn gitea_pr_diff(cwd: String, index: i64) -> Result<String, String> {
     let ctx = gitea_ctx(&cwd)?;
-    let primary = format!("{}/pulls/{}.diff", ctx.repo_api(), index);
-    let (status, body) = gitea_curl_raw("GET", &primary, None, &ctx.auth, "*/*")?;
-    if status < 400 {
-        return Ok(body);
+    // `/pulls/{index}.diff` is the documented suffix form and the only one
+    // that serves a unified diff. There used to be a fallback here to
+    // `/pulls/{index}/patch`, which was invented from a docs summary and is a
+    // 404 on a real server (verified on Gitea 1.27.3). The sibling that does
+    // exist, `/pulls/{index}.patch`, returns an mbox-formatted patch with
+    // commit headers rather than a diff, so falling back to it would feed the
+    // diff parser something it cannot read. One request, and a real error.
+    let url = format!("{}/pulls/{}.diff", ctx.repo_api(), index);
+    let (status, body) = gitea_curl_raw("GET", &url, None, &ctx.auth, "*/*")?;
+    if status >= 400 {
+        return Err(format!("Gitea diff failed (HTTP {})", status));
     }
-    let fallback = format!("{}/pulls/{}/patch", ctx.repo_api(), index);
-    let (status2, body2) = gitea_curl_raw("GET", &fallback, None, &ctx.auth, "*/*")?;
-    if status2 >= 400 {
-        return Err(format!(
-            "Gitea diff failed (HTTP {} on .diff, HTTP {} on /patch)",
-            status, status2
-        ));
-    }
-    Ok(body2)
+    Ok(body)
 }
 
 #[tauri::command]
@@ -853,18 +876,24 @@ pub(crate) async fn gitea_reviewer_candidates(
         .collect())
 }
 
-/// Build the merge request body. `use_legacy_field` swaps `merge_method` for
-/// `Do`, which older Gitea versions require.
-fn merge_payload(method: &str, use_legacy_field: bool) -> String {
+/// Build the merge request body.
+///
+/// The field is `Do`, not `merge_method`. Gitea 1.27.3 rejects
+/// `{"merge_method": ...}` with `422 [Do]: Required`, verified against a live
+/// server; the plan that introduced this command had it the other way round,
+/// on the strength of a docs summary. `use_alternate_field` exists because
+/// the two names have swapped places in Gitea's own history, so a version
+/// that wants `merge_method` is retried rather than reported as a failure.
+fn merge_payload(method: &str, use_alternate_field: bool) -> String {
     let m = match method {
         "squash" => "squash",
         "rebase" => "rebase",
         _ => "merge",
     };
-    let body = if use_legacy_field {
-        serde_json::json!({ "Do": m })
-    } else {
+    let body = if use_alternate_field {
         serde_json::json!({ "merge_method": m })
+    } else {
+        serde_json::json!({ "Do": m })
     };
     body.to_string()
 }
@@ -968,8 +997,9 @@ pub(crate) async fn gitea_merge_pr(
             body.trim()
         ));
     }
-    // Older Gitea rejects `merge_method` and wants `Do`. Retry once before
-    // reporting, so the user never sees a version mismatch as a merge failure.
+    // A Gitea that wants `merge_method` instead of `Do` is retried once
+    // rather than reported, so the user never sees a version difference as a
+    // merge failure. On 1.27.3 the first attempt is the one that succeeds.
     let legacy = merge_payload(&m, true);
     let (status2, body2) =
         gitea_curl_raw("POST", &url, Some(&legacy), &ctx.auth, "application/json")?;
@@ -977,7 +1007,7 @@ pub(crate) async fn gitea_merge_pr(
         return Ok(());
     }
     Err(format!(
-        "Gitea merge failed (HTTP {}: {}); retry with the legacy field also failed (HTTP {}: {})",
+        "Gitea merge failed (HTTP {}: {}); the retry with the alternate merge field also failed (HTTP {}: {})",
         status,
         body.trim(),
         status2,
@@ -1352,6 +1382,42 @@ mod gitea_paging_tests {
 }
 
 #[cfg(test)]
+mod gitea_duplicate_page_tests {
+    use super::item_key;
+
+    /// `/issues/{index}/comments` ignores `page` and serves the same items on
+    /// every request (Gitea 1.27.3, verified against a live server). The
+    /// paging loop therefore cannot rely on an empty page to stop, and dedupes
+    /// by identity instead. These pin the identity function that decision
+    /// rests on.
+    #[test]
+    fn keys_an_item_by_its_id_when_it_has_one() {
+        let a: serde_json::Value = serde_json::from_str(r#"{"id": 7, "body": "hi"}"#).unwrap();
+        let b: serde_json::Value = serde_json::from_str(r#"{"id": 7, "body": "edited"}"#).unwrap();
+        let c: serde_json::Value = serde_json::from_str(r#"{"id": 8, "body": "hi"}"#).unwrap();
+        assert_eq!(item_key(&a), item_key(&b), "same id is the same item");
+        assert_ne!(item_key(&a), item_key(&c), "different id is a different item");
+    }
+
+    #[test]
+    fn falls_back_to_the_whole_value_when_there_is_no_id() {
+        // Branches carry `name`, not `id`.
+        let a: serde_json::Value = serde_json::from_str(r#"{"name": "trunk"}"#).unwrap();
+        let b: serde_json::Value = serde_json::from_str(r#"{"name": "trunk"}"#).unwrap();
+        let c: serde_json::Value = serde_json::from_str(r#"{"name": "feature/x"}"#).unwrap();
+        assert_eq!(item_key(&a), item_key(&b));
+        assert_ne!(item_key(&a), item_key(&c));
+    }
+
+    #[test]
+    fn a_null_id_does_not_collapse_distinct_items() {
+        let a: serde_json::Value = serde_json::from_str(r#"{"id": null, "name": "one"}"#).unwrap();
+        let b: serde_json::Value = serde_json::from_str(r#"{"id": null, "name": "two"}"#).unwrap();
+        assert_ne!(item_key(&a), item_key(&b), "a null id must not make every item identical");
+    }
+}
+
+#[cfg(test)]
 mod gitea_host_port_tests {
     use super::remote_host_port;
 
@@ -1443,23 +1509,25 @@ mod gitea_merge_payload_tests {
     use super::merge_payload;
 
     #[test]
-    fn sends_the_documented_field_first() {
+    fn sends_do_first_because_that_is_what_gitea_accepts() {
+        // Verified against Gitea 1.27.3: {"merge_method": ...} is rejected
+        // with 422 [Do]: Required, and {"Do": ...} merges.
         let body = merge_payload("squash", false);
-        assert!(body.contains("\"merge_method\":\"squash\""), "got {body}");
-        assert!(!body.contains("\"Do\""));
+        assert!(body.contains("\"Do\":\"squash\""), "got {body}");
+        assert!(!body.contains("\"merge_method\""));
     }
 
     #[test]
-    fn falls_back_to_the_legacy_field() {
+    fn retries_with_the_alternate_field() {
         let body = merge_payload("rebase", true);
-        assert!(body.contains("\"Do\":\"rebase\""), "got {body}");
+        assert!(body.contains("\"merge_method\":\"rebase\""), "got {body}");
     }
 
     #[test]
     fn defaults_an_unknown_method_to_merge() {
         // The forge contract allows "merge" | "squash" | "rebase". Anything
         // else is a caller bug; a plain merge is the safe reading.
-        assert!(merge_payload("octopus", false).contains("\"merge_method\":\"merge\""));
+        assert!(merge_payload("octopus", false).contains("\"Do\":\"merge\""));
     }
 }
 

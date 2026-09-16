@@ -938,16 +938,36 @@ function giteaSelectWindow(items, offset, perPage) {
 /** Page through a Gitea list endpoint in fixed `GITEA_PAGE_SIZE` steps,
  *  accumulating up to `want` items. `urlForPage` builds the request URL for
  *  a given 1-based page number. */
+/** Mirrors `item_key` in commands/gitea.rs: an item's `id` when it has one,
+ *  the whole value otherwise (branches carry `name`, not `id`). */
+function giteaItemKey(v) {
+  return v && v.id !== undefined && v.id !== null ? `id:${JSON.stringify(v.id)}` : JSON.stringify(v);
+}
+
 async function giteaPageAll(urlForPage, headers, want) {
-  let collected = [];
+  const collected = [];
+  const seen = new Set();
   let page = 1;
   for (;;) {
     const r = await fetch(urlForPage(page), { headers });
     if (!r.ok) throw new Error(`Gitea API error: HTTP ${r.status}`);
     const arr = await r.json();
     const pageItems = Array.isArray(arr) ? arr : [];
-    collected = collected.concat(pageItems);
-    if (!giteaNeedsAnotherPage(collected.length, want, pageItems.length)) break;
+    // Count only what this page ADDS. An empty page is not the only end of a
+    // collection: `/issues/{index}/comments` ignores the `page` parameter and
+    // serves the same items forever (Gitea 1.27.3, verified against a live
+    // server), so stopping only on an empty page spins to the ceiling and
+    // returns the same comment hundreds of times. Mirrors `gitea_page_all`.
+    let added = 0;
+    for (const item of pageItems) {
+      const key = giteaItemKey(item);
+      if (!seen.has(key)) {
+        seen.add(key);
+        collected.push(item);
+        added += 1;
+      }
+    }
+    if (added === 0 || !giteaNeedsAnotherPage(collected.length, want, pageItems.length)) break;
     page += 1;
   }
   return collected;
@@ -7826,16 +7846,15 @@ async function handleRequest(req, res) {
             return jsonResponse(req, res, detail);
           }
           case "/api/gitea-pr-diff": {
-            // `/pulls/{index}.diff` is the documented suffix form; some
-            // deployments only answer `/pulls/{index}/patch`, so fall back
-            // to it rather than surfacing a 404 as "no diff".
+            // `/pulls/{index}.diff` is the documented suffix form and the
+            // only one that serves a unified diff. The fallback that used to
+            // sit here, `/pulls/{index}/patch`, is a 404 on a real server
+            // (verified on Gitea 1.27.3); the route that does exist,
+            // `/pulls/{index}.patch`, returns mbox with commit headers rather
+            // than a diff. Mirrors `gitea_pr_diff` in commands/gitea.rs.
             const r = await fetch(`${repoApi}/pulls/${index}.diff`, { headers });
-            if (r.ok) return jsonResponse(req, res, await r.text());
-            const r2 = await fetch(`${repoApi}/pulls/${index}/patch`, { headers });
-            if (!r2.ok) {
-              throw new Error(`Gitea diff failed (HTTP ${r.status} on .diff, HTTP ${r2.status} on /patch)`);
-            }
-            return jsonResponse(req, res, await r2.text());
+            if (!r.ok) throw new Error(`Gitea diff failed (HTTP ${r.status})`);
+            return jsonResponse(req, res, await r.text());
           }
           case "/api/gitea-pr-status": {
             const pr = await call(`/pulls/${index}`);
