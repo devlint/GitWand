@@ -341,6 +341,39 @@ function bulkResolve(choice: "ours" | "theirs" | "both") {
   emit("resolveFileBulk", props.file.path, choice);
 }
 
+// ─── Bulk AI resolution (issue #196) ────────────────────
+// Staged, not applied: unlike `bulkResolve` above this never emits
+// `resolveFileBulk` or touches merged content. Suggestions land in the same
+// per-hunk queue the single-hunk AI button uses, and the user still confirms
+// each one.
+const aiBatchTotal = ref(0);
+
+/** Unresolved hunks only: a hunk already staged or resolved is not re-asked. */
+function resolveAllWithAi() {
+  const items = hunks.value
+    .map((hunk, index) => ({ index, hunk }))
+    .filter(({ index }) => aiQueue.stateFor(index) !== "ready");
+  aiBatchTotal.value = items.length;
+  aiQueue.requestAll(items);
+}
+
+// Tracks what this batch actually queued, not every hunk in the file:
+// `requestAll` skips hunks that already have an answer, so dividing by the
+// file's full hunk count would read e.g. "8 of 12" forever on a second run.
+const aiBatchProgress = computed(() => {
+  const total = aiBatchTotal.value;
+  const left = aiQueue.pending.value + aiQueue.inFlight.value;
+  return t("merge.bulkAiProgress", String(total - left), String(total));
+});
+
+/** Shown once a batch has finished and at least one hunk failed. */
+const aiBatchSummary = computed(() => {
+  if (aiQueue.isRunning.value) return "";
+  const { ready, error } = aiQueue.summary.value;
+  if (error === 0) return "";
+  return t("merge.bulkAiSummary", String(ready), String(error));
+});
+
 /** Does a given hunk carry an `llm_proposed` decision with a trace? */
 function hasLlmTrace(hunk: ConflictHunk): boolean {
   return (
@@ -796,6 +829,17 @@ useResizeObserver(contentEl, drawMinimap);
         <button class="me-bulk-btn" @click="bulkResolve('ours')">{{ t('merge.bulkOurs') }}</button>
         <button class="me-bulk-btn" @click="bulkResolve('theirs')">{{ t('merge.bulkTheirs') }}</button>
         <button class="me-bulk-btn" @click="bulkResolve('both')">{{ t('merge.bulkBoth') }}</button>
+        <button
+          v-if="aiAvailable"
+          class="me-bulk-btn me-bulk-btn--ai"
+          @click="aiQueue.isRunning.value ? aiQueue.cancelAll() : resolveAllWithAi()"
+        >
+          <AiSparkle :size="12" :animated="aiQueue.isRunning.value" />
+          {{ aiQueue.isRunning.value
+              ? `${t('merge.bulkAiCancel')} (${aiBatchProgress})`
+              : t('merge.bulkAi') }}
+        </button>
+        <span v-if="aiBatchSummary" class="me-bulk-ai-summary muted">{{ aiBatchSummary }}</span>
         <span v-if="isGeneratedFileLocal" class="me-bulk-warn">{{ t('merge.bulkGeneratedWarning') }}</span>
       </div>
       <button
@@ -1898,6 +1942,19 @@ useResizeObserver(contentEl, drawMinimap);
 }
 .me-bulk-btn:hover {
   background: var(--hover-bg, rgba(0, 0, 0, 0.05));
+}
+.me-bulk-btn--ai {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--color-ai);
+  font-weight: var(--font-semibold);
+}
+.me-bulk-btn--ai:hover {
+  color: var(--color-ai-hover);
+}
+.me-bulk-ai-summary {
+  font-size: 11px;
 }
 .me-bulk-warn {
   font-size: 11px;

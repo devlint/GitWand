@@ -210,4 +210,72 @@ describe("MergeEditor AI queue", () => {
     release0({ resolvedContent: "SUGGESTED FOR HUNK 0", explanation: "why", confidence: "high" });
     await settle();
   });
+
+  it("stages every unresolved hunk and applies nothing", async () => {
+    suggest.mockResolvedValue({ resolvedContent: "merged", explanation: "why", confidence: "high" });
+
+    const file = fileWith([complexHunk(0), complexHunk(1), complexHunk(2)]);
+    // `mergedContent` is `MergeResult`'s actual field (there is no `.merged`);
+    // captured before the click and compared against itself, since a
+    // freshly-built one-hunk file would differ by construction anyway.
+    const before = file.result.mergedContent;
+    app = createApp(MergeEditor, { file, cwd: "/repo" });
+    app.mount(host);
+    await nextTick();
+
+    const bulkAi = host.querySelector(".me-bulk-btn--ai") as HTMLElement;
+    expect(bulkAi).toBeTruthy();
+    bulkAi.click();
+    await vi.waitFor(() => expect(suggest).toHaveBeenCalledTimes(3));
+
+    // Staged, not applied: the file's merged content is untouched.
+    expect(file.result.mergedContent).toBe(before);
+  });
+
+  it("offers a cancel while the batch runs", async () => {
+    suggest.mockReturnValue(new Promise(() => {}));
+    app = createApp(MergeEditor, { file: fileWith([complexHunk(0), complexHunk(1)]), cwd: "/repo" });
+    app.mount(host);
+    await nextTick();
+
+    (host.querySelector(".me-bulk-btn--ai") as HTMLElement).click();
+    await nextTick();
+
+    const btn = host.querySelector(".me-bulk-btn--ai") as HTMLElement;
+    expect(btn.textContent).toContain("Cancel");
+  });
+
+  it("restarts a fresh batch after a cancel", async () => {
+    // Cancel is only reachable from the UI once the bulk AI entry exists;
+    // nothing before Task 4 proved the queue actually runs again afterward.
+    const releases: Array<(v: unknown) => void> = [];
+    suggest.mockImplementation(() => new Promise((res) => { releases.push(res); }));
+
+    app = createApp(MergeEditor, { file: fileWith([complexHunk(0), complexHunk(1)]), cwd: "/repo" });
+    app.mount(host);
+    await nextTick();
+
+    const bulkAi = () => host.querySelector(".me-bulk-btn--ai") as HTMLElement;
+    bulkAi().click();
+    await nextTick();
+    expect(suggest).toHaveBeenCalledTimes(2);
+    expect(bulkAi().textContent).toContain("Cancel");
+
+    // Cancel mid-flight, then let the now-stale calls settle: a cancelled
+    // run's generation no longer matches, so this must not resurrect either
+    // hunk's suggestion.
+    bulkAi().click();
+    await nextTick();
+    releases[0]({ resolvedContent: "stale", explanation: "why", confidence: "high" });
+    releases[1]({ resolvedContent: "stale", explanation: "why", confidence: "high" });
+    await nextTick();
+    expect(bulkAi().textContent).not.toContain("Cancel");
+
+    // A second batch must really run the provider again, not silently no-op.
+    suggest.mockReset();
+    suggest.mockResolvedValue({ resolvedContent: "merged", explanation: "why", confidence: "high" });
+    bulkAi().click();
+    await vi.waitFor(() => expect(suggest).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(bulkAi().textContent).not.toContain("Cancel"));
+  });
 });
