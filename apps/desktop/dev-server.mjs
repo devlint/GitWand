@@ -1115,7 +1115,15 @@ function giteaMapIssue(v) {
  *  Used to normalize `GITWAND_GITEA_BASE` the same way the packaged app
  *  normalizes the account's stored base URL. */
 function normalizeGiteaBase(raw) {
-  let out = raw.trim().replace(/\/+$/, "");
+  const trimmed = raw.trim();
+  // Same scheme injection as the Rust side. Without it, GITWAND_GITEA_BASE
+  // set to a bare `localhost:3000` produces a relative string that `fetch`
+  // rejects, where the Rust command would have read it as https. The point of
+  // this function is to agree with `normalize_base_url`, so it agrees here
+  // too, including on preferring https for a scheme-less value.
+  const withScheme =
+    trimmed.startsWith("http://") || trimmed.startsWith("https://") ? trimmed : `https://${trimmed}`;
+  let out = withScheme.replace(/\/+$/, "");
   if (out.endsWith("/api/v1")) out = out.slice(0, -"/api/v1".length).replace(/\/+$/, "");
   return out;
 }

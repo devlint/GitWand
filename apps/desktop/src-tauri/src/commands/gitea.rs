@@ -1159,6 +1159,31 @@ mod gitea_base_url_tests {
         );
     }
 
+    /// The exact table `normalizeGiteaBase` in `dev-server.mjs` is checked
+    /// against. The two have to agree: the dev-server takes its base from
+    /// `GITWAND_GITEA_BASE` while the packaged app takes it from the account's
+    /// keychain entry, and a value that normalises differently on the two
+    /// sides sends `pnpm dev:web` at a different server than the app. Keep
+    /// this list and the JS one in step.
+    #[test]
+    fn agrees_with_the_dev_server_mirror() {
+        let cases = [
+            ("git.acme.io", "https://git.acme.io"),
+            ("http://git.acme.io:3000", "http://git.acme.io:3000"),
+            ("https://git.acme.io", "https://git.acme.io"),
+            ("https://git.acme.io/", "https://git.acme.io"),
+            ("https://git.acme.io/api/v1", "https://git.acme.io"),
+            ("https://git.acme.io/api/v1/", "https://git.acme.io"),
+            ("https://acme.io/gitea/", "https://acme.io/gitea"),
+            ("localhost:3000", "https://localhost:3000"),
+            ("  https://git.acme.io/api/v1//  ", "https://git.acme.io"),
+            ("acme.io/gitea/api/v1", "https://acme.io/gitea"),
+        ];
+        for (input, want) in cases {
+            assert_eq!(normalize_base_url(input), want, "input: {input:?}");
+        }
+    }
+
     #[test]
     fn keeps_a_subpath_install() {
         // Gitea can be mounted under a path prefix. Dropping it would 404
