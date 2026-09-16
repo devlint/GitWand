@@ -429,7 +429,13 @@ pub(crate) fn resolve_antigravity_binary() -> Option<String> {
 /// Claude / Codex / opencode / Copilot detectors: no prompt is sent to verify
 /// auth — that is confirmed implicitly on the first real `antigravity_cli_prompt`.
 #[tauri::command]
-pub(crate) fn detect_antigravity_cli() -> Result<AntigravityCliInfo, String> {
+pub(crate) async fn detect_antigravity_cli() -> Result<AntigravityCliInfo, String> {
+    tauri::async_runtime::spawn_blocking(detect_antigravity_cli_inner)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn detect_antigravity_cli_inner() -> Result<AntigravityCliInfo, String> {
     let binary = match resolve_antigravity_binary() {
         Some(b) => b,
         None => {
@@ -467,7 +473,20 @@ pub(crate) fn detect_antigravity_cli() -> Result<AntigravityCliInfo, String> {
 /// prepended as a Markdown section — same portable shape as the Claude /
 /// Codex / opencode / Copilot flows. Auth is managed by Antigravity itself.
 #[tauri::command]
-pub(crate) fn antigravity_cli_prompt(
+pub(crate) async fn antigravity_cli_prompt(
+    prompt: String,
+    system_prompt: Option<String>,
+    cwd: Option<String>,
+    model: Option<String>,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        antigravity_cli_prompt_inner(prompt, system_prompt, cwd, model)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn antigravity_cli_prompt_inner(
     prompt: String,
     system_prompt: Option<String>,
     cwd: Option<String>,
@@ -765,7 +784,13 @@ fn resolve_copilot_binary() -> Option<String> {
 /// Claude / Codex / opencode detectors: no prompt is sent to verify auth —
 /// that is confirmed implicitly on the first real `copilot_cli_prompt`.
 #[tauri::command]
-pub(crate) fn detect_copilot_cli() -> Result<CopilotCliInfo, String> {
+pub(crate) async fn detect_copilot_cli() -> Result<CopilotCliInfo, String> {
+    tauri::async_runtime::spawn_blocking(detect_copilot_cli_inner)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn detect_copilot_cli_inner() -> Result<CopilotCliInfo, String> {
     let binary = match resolve_copilot_binary() {
         Some(b) => b,
         None => {
@@ -798,7 +823,20 @@ pub(crate) fn detect_copilot_cli() -> Result<CopilotCliInfo, String> {
 }
 
 #[tauri::command]
-pub(crate) fn copilot_cli_prompt(
+pub(crate) async fn copilot_cli_prompt(
+    prompt: String,
+    system_prompt: Option<String>,
+    cwd: Option<String>,
+    model: Option<String>,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        copilot_cli_prompt_inner(prompt, system_prompt, cwd, model)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn copilot_cli_prompt_inner(
     prompt: String,
     system_prompt: Option<String>,
     cwd: Option<String>,
