@@ -29,6 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Today does **not** offer auto-merge for GitLab, on purpose. A GitLab merge-requests list payload carries `merge_when_pipeline_succeeds` but never the pipeline status itself, only the single-MR detail endpoint returns that, so whether arming is even possible cannot be known without opening the MR. The PR detail panel, which does load the single MR, still offers it there. A GitLab user who never sees the action in Today is seeing this limitation, not a bug.
 - Azure DevOps auto-merge is desktop-only, like every other Azure capability: its sign-in is an Entra device flow held in the OS keychain, which a Node dev-server process cannot reach. It cannot be exercised under `pnpm dev:web` and has no parity coverage as a result.
 
+- **Resolve all conflicts with AI** (#196). A fourth entry in the "Accept all:" bar asks the model for every unresolved hunk in the file, at most three at a time, with progress and a cancel. Suggestions are staged for review rather than applied: the confidence stance the engine is built on does not change because the request came in a batch. A busy hunk's whole action row disables while its suggestion is arriving, so it cannot be accepted mid-request.
+
 ### Fixed
 
 - **GitLab merge requests could not be merged at all.** `gl_merge_mr_inner` passed `--delete-source-branch` to `glab mr merge`, a flag that does not exist: `glab` answers `ERROR Unknown flag: --delete-source-branch.` and stops before doing anything, so every GitLab MR merge from GitWand has failed since the line was written. The correct flag is `--remove-source-branch`. The argument construction is now extracted into a pure `gl_merge_args(iid, method)` so a test can see it, pinned by five regression tests, the same shape `gl_state_flag` got for #138.
@@ -46,6 +48,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A latent flake in the parity harness.** The dev-server keeps Node's default 5 s `keepAliveTimeout` and undici pools keep-alive sockets, so any suite whose gap between two requests exceeds that is handed a socket the server already closed and fails with `ECONNRESET` rather than with anything about the route under test. The harness now sends `Connection: close`.
 
 - **The dev-server accepted files the packaged app refuses.** `read_file` is `std::fs::read_to_string` in Rust, which rejects anything that is not valid UTF-8, while the dev-server's `readFileSync(path, "utf-8")` silently substituted `U+FFFD` and returned success. The two "worked" differently, which is worse than one of them failing: a non-UTF-8 file among a repository's conflicts made every conflict unresolvable in the packaged app while the same repository loaded fine under `pnpm dev:web`, so the bug could not be reproduced in the environment used for manual QA. The dev-server now decodes strictly and returns the same error string, and a new `tests/parity/read-file.test.mjs` asserts the two backends **refuse** the same input for the same reason, not merely that they accept the same input.
+
+- **AI conflict resolution no longer collides with itself** (#196). Requesting a suggestion for a second hunk while the first was still running overwrote a single shared index, so the first answer was applied to the wrong hunk. State is now keyed per hunk, a hunk that is working greys out and refuses further clicks, and the twelve AI commands run on the blocking pool instead of pinning tokio workers that every other IPC call shares.
 
 ### Changed
 
