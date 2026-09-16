@@ -1860,6 +1860,7 @@ const en = {
     bitbucket: "Bitbucket",
     azure: "Azure DevOps",
     cursor: "Cursor Origin",
+    gitea: "Gitea / Forgejo",
     action: "Open Settings",
   },
 

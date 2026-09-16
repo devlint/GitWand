@@ -1836,6 +1836,7 @@ const fr: Locale = {
     bitbucket: "Bitbucket",
     azure: "Azure DevOps",
     cursor: "Cursor Origin",
+    gitea: "Gitea / Forgejo",
     action: "Ouvrir les Réglages",
   },
 

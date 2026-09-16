@@ -47,6 +47,7 @@ import("./AzureProvider").then((m) => _cache.set("azure", m.azureProvider));
 // keeps `getProviderByName("cursor")` from falling through to githubProvider and
 // firing `gh` CLI calls at origin.cursor.com.
 import("./CursorProvider").then((m) => _cache.set("cursor", m.cursorProvider));
+import("./GiteaProvider").then((m) => _cache.set("gitea", m.giteaProvider));
 
 /**
  * Retourne le ForgeProvider correspondant à un nom de forge déjà connu.

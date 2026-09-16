@@ -183,10 +183,11 @@ async function onRemove(id: string) {
 // ─── Display ─────────────────────────────────────────────────────────────────
 
 const forgeOrder: ForgeName[] = ["github", "gitlab", "bitbucket", "azure"];
-// `forgeOrder` above intentionally omits `cursor`: Cursor Origin has no account
-// to connect (detection only), so it must never appear in the accounts UI. The
-// label is still required to satisfy Record<ForgeName, string>.
-const forgeLabel: Record<ForgeName, string> = { github: "GitHub", gitlab: "GitLab", bitbucket: "Bitbucket", azure: "Azure DevOps", cursor: "Cursor Origin", unknown: "Unknown" };
+// `forgeOrder` above intentionally omits `cursor` and `gitea`: Cursor Origin has
+// no account to connect (detection only), and Gitea's account form/detection
+// lands in Task 8 (issue #193). Both labels are still required to satisfy
+// Record<ForgeName, string>.
+const forgeLabel: Record<ForgeName, string> = { github: "GitHub", gitlab: "GitLab", bitbucket: "Bitbucket", azure: "Azure DevOps", cursor: "Cursor Origin", gitea: "Gitea / Forgejo", unknown: "Unknown" };
 const knownForges = computed(() => forgeOrder.filter((f) => (accountsByForge.value[f]?.length ?? 0) > 0));
 const totalAccounts = computed(() => accounts.value.length);
 </script>

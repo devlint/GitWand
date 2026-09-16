@@ -1827,6 +1827,7 @@ const ptBR: Locale = {
     bitbucket: "Bitbucket",
     azure: "Azure DevOps",
     cursor: "Cursor Origin",
+    gitea: "Gitea / Forgejo",
     action: "Abrir Configurações",
   },
 
