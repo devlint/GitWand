@@ -882,6 +882,239 @@ function readBody(req) {
   });
 }
 
+// ─── Gitea / Forgejo dev-server helpers ────────────────────────────────────
+//
+// The functions below deliberately duplicate the response mapping owned by
+// `commands/gitea.rs` (`map_pr`, `map_pr_detail`, `map_status`, `map_comment`,
+// `map_issue`) and the paging helpers next to them (`gitea_page_all`,
+// `select_window`, `needs_another_page`, `GITEA_PAGE_SIZE`,
+// `GITEA_LIST_CEILING`), so this dev-server path returns the same mapped
+// shape the Rust commands return, not the raw Gitea API payload. This is a
+// duplicate on purpose (see the route block below) and must move with the
+// Rust one whenever it changes.
+
+const GITEA_PAGE_SIZE = 50;
+const GITEA_LIST_CEILING = 300;
+
+/** Gitea states: `open`, `closed`, `all`. Anything else reads as `open`. */
+function giteaState(state) {
+  const s = (state || "open").toLowerCase();
+  if (s === "closed" || s === "merged") return "closed";
+  if (s === "all") return "all";
+  return "open";
+}
+
+/** Whether a paging loop should fetch one more page. An empty page is the
+ *  only reliable end-of-results signal: a short but non-empty page means a
+ *  lowered server `MAX_RESPONSE_ITEMS`, not the end. */
+function giteaNeedsAnotherPage(collected, want, lastPageLen) {
+  if (lastPageLen === 0) return false;
+  return collected < want;
+}
+
+/** Slice a client-side accumulated result set down to the caller's window. */
+function giteaSelectWindow(items, offset, perPage) {
+  if (perPage <= 0) return [];
+  const off = Math.max(offset, 0);
+  return items.slice(off, off + perPage);
+}
+
+/** Page through a Gitea list endpoint in fixed `GITEA_PAGE_SIZE` steps,
+ *  accumulating up to `want` items. `urlForPage` builds the request URL for
+ *  a given 1-based page number. */
+async function giteaPageAll(urlForPage, headers, want) {
+  let collected = [];
+  let page = 1;
+  for (;;) {
+    const r = await fetch(urlForPage(page), { headers });
+    if (!r.ok) throw new Error(`Gitea API error: HTTP ${r.status}`);
+    const arr = await r.json();
+    const pageItems = Array.isArray(arr) ? arr : [];
+    collected = collected.concat(pageItems);
+    if (!giteaNeedsAnotherPage(collected.length, want, pageItems.length)) break;
+    page += 1;
+  }
+  return collected;
+}
+
+/** `head.ref` / `base.ref`-style lookup. */
+function giteaRef(v, side, leaf) {
+  return v?.[side]?.[leaf] ?? "";
+}
+
+function giteaLogin(v, key) {
+  return v?.[key]?.login ?? "";
+}
+
+/** Collect `login` from an array of users, or `name` from an array of labels. */
+function giteaNames(v, key, field) {
+  return (v?.[key] ?? []).map((e) => e?.[field]).filter(Boolean);
+}
+
+/** Gitea's `mergeable` is a boolean; the shared contract is a string, with
+ *  "" for unknown so the UI never disables merge on a missing field. */
+function giteaMergeableStr(v) {
+  if (v?.mergeable === true) return "MERGEABLE";
+  if (v?.mergeable === false) return "CONFLICTING";
+  return "";
+}
+
+/** Mirrors `map_pr`. */
+function giteaMapPr(v) {
+  return {
+    // `number` is the per-repo index. `id` is a global database id and
+    // addressing a PR by it hits the wrong resource.
+    number: v.number ?? 0,
+    title: v.title ?? "",
+    state: v.state ?? "",
+    author: giteaLogin(v, "user"),
+    branch: giteaRef(v, "head", "ref"),
+    base: giteaRef(v, "base", "ref"),
+    draft: v.draft ?? false,
+    created_at: v.created_at ?? "",
+    updated_at: v.updated_at ?? "",
+    url: v.html_url ?? "",
+    additions: v.additions ?? 0,
+    deletions: v.deletions ?? 0,
+    labels: giteaNames(v, "labels", "name"),
+    assignees: giteaNames(v, "assignees", "login"),
+    review_requested: giteaNames(v, "requested_reviewers", "login"),
+    review_decision: "",
+    merge_state_status: "",
+    checks_rollup: "",
+    autoMerge: { armed: false, available: false, reason: null },
+    comment_count: v.comments ?? 0,
+  };
+}
+
+/** Mirrors `map_pr_detail`. */
+function giteaMapPrDetail(v) {
+  return {
+    number: v.number ?? 0,
+    title: v.title ?? "",
+    body: v.body ?? "",
+    state: v.state ?? "",
+    author: giteaLogin(v, "user"),
+    branch: giteaRef(v, "head", "ref"),
+    base: giteaRef(v, "base", "ref"),
+    draft: v.draft ?? false,
+    created_at: v.created_at ?? "",
+    updated_at: v.updated_at ?? "",
+    merged_at: v.merged_at ?? "",
+    url: v.html_url ?? "",
+    additions: v.additions ?? 0,
+    deletions: v.deletions ?? 0,
+    changed_files: v.changed_files ?? 0,
+    comments: v.comments ?? 0,
+    review_comments: 0,
+    labels: giteaNames(v, "labels", "name"),
+    reviewers: giteaNames(v, "requested_reviewers", "login"),
+    mergeable: giteaMergeableStr(v),
+    checks_status: "",
+    // Gitea exposes no cheap per-viewer merge permission here. `null` means
+    // unknown, which the UI must read as "allowed, gate on errors".
+    can_merge: null,
+    head_sha: giteaRef(v, "head", "sha"),
+    autoMerge: { armed: false, available: false, reason: null },
+    // Gitea does support `merge_when_checks_succeed`, but wiring it is a
+    // follow-up. Report it unsupported and say what still works.
+    autoMergeSupport: {
+      supported: false,
+      reason: "GitWand does not queue auto-merge on Gitea yet. Merging immediately still works.",
+    },
+  };
+}
+
+/** Mirrors `map_status`. */
+function giteaMapStatus(v) {
+  return (v?.statuses ?? []).map((s) => ({
+    name: s.context ?? "",
+    state: s.status ?? "",
+    conclusion: s.status ?? "",
+    details_url: s.target_url ?? "",
+  }));
+}
+
+/** Mirrors `map_comment`. Gitea's issue-comment endpoint carries no diff
+ *  anchor, so `path` is empty and `line` is null: the PR panel reads that
+ *  as "conversation comment" and keeps inline-comment affordances hidden. */
+function giteaMapComment(v) {
+  return {
+    id: v.id ?? 0,
+    body: v.body ?? "",
+    author: giteaLogin(v, "user"),
+    created_at: v.created_at ?? "",
+    updated_at: v.updated_at ?? "",
+    path: "",
+    line: null,
+    original_line: null,
+    side: "RIGHT",
+    start_line: null,
+    start_side: null,
+    in_reply_to_id: null,
+    diff_hunk: "",
+    url: v.html_url ?? "",
+  };
+}
+
+/** Mirrors `map_issue`. Unlike the PR shapes above, the Rust `Issue` struct
+ *  serializes camelCase (`#[serde(rename_all = "camelCase")]`). */
+function giteaMapIssue(v) {
+  return {
+    number: v.number ?? 0,
+    title: v.title ?? "",
+    state: v.state ?? "",
+    author: giteaLogin(v, "user"),
+    assignees: giteaNames(v, "assignees", "login"),
+    labels: giteaNames(v, "labels", "name"),
+    url: v.html_url ?? "",
+    createdAt: v.created_at ?? "",
+    updatedAt: v.updated_at ?? "",
+    milestone: v.milestone?.title ?? "",
+  };
+}
+
+/** Mirrors the Rust `remote_host_port`: keeps an explicit port (self-hosted
+ *  Gitea commonly runs on one, e.g. the stock Docker image's `:3000`) rather
+ *  than assuming a default. The SCP-like form never carries a port. */
+function giteaHostPort(remoteUrl) {
+  if (remoteUrl.startsWith("git@")) {
+    const host = remoteUrl.slice(4).split(":")[0];
+    return host || null;
+  }
+  const schemeIdx = remoteUrl.indexOf("://");
+  if (schemeIdx < 0) return null;
+  let rest = remoteUrl.slice(schemeIdx + 3);
+  const at = rest.lastIndexOf("@");
+  if (at >= 0) rest = rest.slice(at + 1);
+  const hostPort = rest.split("/")[0];
+  return hostPort || null;
+}
+
+/** Mirrors the Rust `parse_remote_owner_repo`. */
+function giteaOwnerRepo(remoteUrl) {
+  const stripGit = (s) => (s.endsWith(".git") ? s.slice(0, -4) : s);
+  if (remoteUrl.startsWith("git@")) {
+    const colon = remoteUrl.indexOf(":");
+    if (colon >= 0) {
+      const clean = stripGit(remoteUrl.slice(colon + 1));
+      const slash = clean.indexOf("/");
+      if (slash > 0) return { owner: clean.slice(0, slash), repo: clean.slice(slash + 1) };
+    }
+  }
+  const schemeIdx = remoteUrl.indexOf("://");
+  if (schemeIdx >= 0) {
+    const path = remoteUrl.slice(schemeIdx + 3);
+    const slashPos = path.indexOf("/");
+    if (slashPos >= 0) {
+      const clean = stripGit(path.slice(slashPos + 1));
+      const slash2 = clean.indexOf("/");
+      if (slash2 > 0) return { owner: clean.slice(0, slash2), repo: clean.slice(slash2 + 1) };
+    }
+  }
+  return null;
+}
+
 /**
  * Extract `(host, port)` from a git remote URL.
  * Mirrors the Rust `parse_remote_host_port` helper in `commands/network.rs`.
@@ -7463,6 +7696,137 @@ async function handleRequest(req, res) {
         });
       } catch (e) {
         return jsonResponse(req, res, { error: e.message }, 500);
+      }
+    }
+
+    // ── Gitea / Forgejo read routes ──────────────────────────────────────────
+    //
+    // Real, deliberate difference from the packaged app, not an oversight:
+    // the Rust commands read the token from the OS keychain, which this
+    // Node process cannot reach. These routes read GITWAND_GITEA_TOKEN from
+    // the environment instead: export it before `pnpm dev:web` to exercise
+    // Gitea routes. Everything after auth (URL shape, response mapping) is
+    // the same as the packaged app.
+    if (url.pathname.startsWith("/api/gitea-") && req.method === "GET") {
+      const token = process.env.GITWAND_GITEA_TOKEN;
+      if (!token) {
+        return jsonResponse(req, res, {
+          error: "GITWAND_GITEA_TOKEN is not set. Export it before `pnpm dev:web` to exercise Gitea routes.",
+        }, 400);
+      }
+      const cwd = url.searchParams.get("cwd") || "";
+      let remote = "";
+      try {
+        remote = execFileSync(GIT, ["remote", "get-url", "origin"], { cwd, encoding: "utf-8" }).trim();
+      } catch {
+        return jsonResponse(req, res, { error: "No 'origin' remote found in this repo." }, 400);
+      }
+      const hostPort = giteaHostPort(remote);
+      const ownerRepo = giteaOwnerRepo(remote);
+      if (!hostPort || !ownerRepo) {
+        return jsonResponse(req, res, { error: `Could not read owner/repo from the remote URL: ${remote}` }, 400);
+      }
+      const repoApi = `https://${hostPort}/api/v1/repos/${ownerRepo.owner}/${ownerRepo.repo}`;
+      const headers = { Authorization: `token ${token}`, Accept: "application/json" };
+      const index = url.searchParams.get("index");
+
+      const call = async (suffix, asText = false) => {
+        const r = await fetch(`${repoApi}${suffix}`, { headers });
+        if (!r.ok) throw new Error(`Gitea API error: HTTP ${r.status}`);
+        return asText ? r.text() : r.json();
+      };
+
+      try {
+        switch (url.pathname) {
+          case "/api/gitea-current-user": {
+            const r = await fetch(`https://${hostPort}/api/v1/user`, { headers });
+            if (!r.ok) throw new Error(`Gitea API error: HTTP ${r.status}`);
+            const u = await r.json();
+            return jsonResponse(req, res, u.login ?? "");
+          }
+          case "/api/gitea-list-prs": {
+            const state = giteaState(url.searchParams.get("state"));
+            const perPage = Math.max(Number(url.searchParams.get("limit") ?? "10"), 1);
+            const offset = Math.max(Number(url.searchParams.get("offset") ?? "0"), 0);
+            const want = offset + perPage;
+            // Page from the start in fixed server pages, accumulating
+            // results, and window the accumulated list client-side. Gitea
+            // caps the `limit` query param at MAX_RESPONSE_ITEMS (50 by
+            // default, admin-lowerable), so inflating the requested limit
+            // to reach the offset in one request risks silent truncation.
+            const collected = await giteaPageAll(
+              (page) => `${repoApi}/pulls?state=${state}&limit=${GITEA_PAGE_SIZE}&page=${page}`,
+              headers,
+              want,
+            );
+            const windowed = giteaSelectWindow(collected, offset, perPage);
+            return jsonResponse(req, res, windowed.map(giteaMapPr));
+          }
+          case "/api/gitea-pr-count": {
+            const state = giteaState(url.searchParams.get("state"));
+            const want = GITEA_LIST_CEILING;
+            const collected = await giteaPageAll(
+              (page) => `${repoApi}/pulls?state=${state}&limit=${GITEA_PAGE_SIZE}&page=${page}`,
+              headers,
+              want,
+            );
+            return jsonResponse(req, res, Math.min(collected.length, want));
+          }
+          case "/api/gitea-get-pr": {
+            const pr = await call(`/pulls/${index}`);
+            const detail = giteaMapPrDetail(pr);
+            if (detail.head_sha) {
+              try {
+                const s = await call(`/commits/${detail.head_sha}/status`);
+                detail.checks_status = s?.state ?? "";
+              } catch { /* best-effort, mirrors the Rust `if let Ok` */ }
+            }
+            return jsonResponse(req, res, detail);
+          }
+          case "/api/gitea-pr-diff": {
+            // `/pulls/{index}.diff` is the documented suffix form; some
+            // deployments only answer `/pulls/{index}/patch`, so fall back
+            // to it rather than surfacing a 404 as "no diff".
+            const r = await fetch(`${repoApi}/pulls/${index}.diff`, { headers });
+            if (r.ok) return jsonResponse(req, res, await r.text());
+            const r2 = await fetch(`${repoApi}/pulls/${index}/patch`, { headers });
+            if (!r2.ok) {
+              throw new Error(`Gitea diff failed (HTTP ${r.status} on .diff, HTTP ${r2.status} on /patch)`);
+            }
+            return jsonResponse(req, res, await r2.text());
+          }
+          case "/api/gitea-pr-status": {
+            const pr = await call(`/pulls/${index}`);
+            const sha = giteaRef(pr, "head", "sha");
+            if (!sha) return jsonResponse(req, res, []);
+            const status = await call(`/commits/${sha}/status`);
+            return jsonResponse(req, res, giteaMapStatus(status));
+          }
+          case "/api/gitea-pr-comments": {
+            const collected = await giteaPageAll(
+              (page) => `${repoApi}/issues/${index}/comments?limit=${GITEA_PAGE_SIZE}&page=${page}`,
+              headers,
+              GITEA_LIST_CEILING,
+            );
+            const windowed = giteaSelectWindow(collected, 0, GITEA_LIST_CEILING);
+            return jsonResponse(req, res, windowed.map(giteaMapComment));
+          }
+          case "/api/gitea-list-issues": {
+            const want = Math.max(Number(url.searchParams.get("limit") ?? "30"), 1);
+            // `type=issues` keeps PRs out: Gitea's issue endpoint returns both.
+            const collected = await giteaPageAll(
+              (page) => `${repoApi}/issues?state=open&type=issues&limit=${GITEA_PAGE_SIZE}&page=${page}`,
+              headers,
+              want,
+            );
+            const windowed = giteaSelectWindow(collected, 0, want);
+            return jsonResponse(req, res, windowed.map(giteaMapIssue));
+          }
+          default:
+            return jsonResponse(req, res, { error: "Unknown Gitea route" }, 404);
+        }
+      } catch (err) {
+        return jsonResponse(req, res, { error: err.message }, 502);
       }
     }
 

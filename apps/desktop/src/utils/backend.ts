@@ -3961,5 +3961,6 @@ export async function gitCommitTemplatePath(cwd: string): Promise<string | null>
 export * from './backend-pr';
 export * from './backend-gitlab';
 export * from './backend-bitbucket';
+export * from './backend-gitea';
 export * from './backend-ai';
 
