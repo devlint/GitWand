@@ -125,6 +125,12 @@ pub(crate) fn resolve_codex_binary() -> Option<String> {
 /// command (`claude_cli_prompt`) propagates as an error.
 #[tauri::command]
 pub(crate) async fn detect_claude_cli() -> Result<ClaudeCliInfo, String> {
+    tauri::async_runtime::spawn_blocking(detect_claude_cli_inner)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn detect_claude_cli_inner() -> Result<ClaudeCliInfo, String> {
     let binary = match resolve_claude_binary() {
         Some(b) => b,
         None => {
@@ -166,6 +172,25 @@ pub(crate) async fn detect_claude_cli() -> Result<ClaudeCliInfo, String> {
 /// text in and get text back.
 #[tauri::command]
 pub(crate) async fn claude_cli_prompt(
+    prompt: String,
+    system_prompt: Option<String>,
+    cwd: Option<String>,
+    output_format: Option<String>,
+    model: Option<String>,
+) -> Result<String, String> {
+    // The body spawns a process and blocks on `.output()`. Inside the async
+    // runtime that pins one of tokio's worker threads for the whole model
+    // call, which is seconds to minutes, and a batch of them starves every
+    // other IPC command. `spawn_blocking` puts it on the blocking pool
+    // instead, which is what `ops.rs` already does for git subprocesses.
+    tauri::async_runtime::spawn_blocking(move || {
+        claude_cli_prompt_inner(prompt, system_prompt, cwd, output_format, model)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn claude_cli_prompt_inner(
     prompt: String,
     system_prompt: Option<String>,
     cwd: Option<String>,
@@ -247,6 +272,12 @@ pub(crate) async fn claude_cli_prompt(
 /// first real prompt via `codex_cli_prompt`.
 #[tauri::command]
 pub(crate) async fn detect_codex_cli() -> Result<CodexCliInfo, String> {
+    tauri::async_runtime::spawn_blocking(detect_codex_cli_inner)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn detect_codex_cli_inner() -> Result<CodexCliInfo, String> {
     let binary = match resolve_codex_binary() {
         Some(b) => b,
         None => {
@@ -281,6 +312,19 @@ pub(crate) async fn detect_codex_cli() -> Result<CodexCliInfo, String> {
 
 #[tauri::command]
 pub(crate) async fn codex_cli_prompt(
+    prompt: String,
+    system_prompt: Option<String>,
+    cwd: Option<String>,
+    model: Option<String>,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        codex_cli_prompt_inner(prompt, system_prompt, cwd, model)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn codex_cli_prompt_inner(
     prompt: String,
     system_prompt: Option<String>,
     cwd: Option<String>,
@@ -522,6 +566,12 @@ pub(crate) fn resolve_opencode_binary() -> Option<String> {
 /// confirmed implicitly on the first real `opencode_cli_prompt`.
 #[tauri::command]
 pub(crate) async fn detect_opencode_cli() -> Result<OpencodeCliInfo, String> {
+    tauri::async_runtime::spawn_blocking(detect_opencode_cli_inner)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn detect_opencode_cli_inner() -> Result<OpencodeCliInfo, String> {
     let binary = match resolve_opencode_binary() {
         Some(b) => b,
         None => {
@@ -555,6 +605,19 @@ pub(crate) async fn detect_opencode_cli() -> Result<OpencodeCliInfo, String> {
 
 #[tauri::command]
 pub(crate) async fn opencode_cli_prompt(
+    prompt: String,
+    system_prompt: Option<String>,
+    cwd: Option<String>,
+    model: Option<String>,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        opencode_cli_prompt_inner(prompt, system_prompt, cwd, model)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn opencode_cli_prompt_inner(
     prompt: String,
     system_prompt: Option<String>,
     cwd: Option<String>,
@@ -616,6 +679,12 @@ pub(crate) async fn opencode_cli_prompt(
 /// to free-text entry gracefully.
 #[tauri::command]
 pub(crate) async fn opencode_list_models() -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(opencode_list_models_inner)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn opencode_list_models_inner() -> Result<Vec<String>, String> {
     let binary = match resolve_opencode_binary() {
         Some(b) => b,
         None => return Ok(Vec::new()),
@@ -799,6 +868,12 @@ pub(crate) fn copilot_cli_prompt(
 /// in their browser and comes back to GitWand.
 #[tauri::command]
 pub(crate) async fn claude_cli_login() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(claude_cli_login_inner)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn claude_cli_login_inner() -> Result<(), String> {
     let binary = resolve_claude_binary()
         .ok_or_else(|| "Binaire `claude` introuvable. Installez-le d'abord.".to_string())?;
 
