@@ -1573,6 +1573,11 @@ const en = {
     accountsAzureDevMock: "Azure sign-in is only available in the desktop app.",
     accountsAzureWaiting: "Waiting for authorization…",
     accountsAzureConnected: "Connected as",
+    accountsGiteaUrlLabel: "Server URL",
+    accountsGiteaTokenLabel: "Access token",
+    accountsGiteaTokenHint: "Gitea: Settings > Applications > Generate Token. Scopes: repository and issue read and write.",
+    accountsGiteaUrlInvalid: "Enter a valid server URL, for example https://git.acme.io",
+    accountsGiteaTokenRequired: "An access token is required.",
     accountsDeleteConfirm: "Remove this account?",
     // v2.12 Git tab — branch + identity + templates
     git: {

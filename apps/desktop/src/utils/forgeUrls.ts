@@ -123,6 +123,14 @@ export function forgeCommitUrl(remote: ForgeRemote, sha: string): string | null 
       // `/commit/{sha}` risks a 404, so degrade to the repo page, which always
       // resolves. Upgrade once the permalink path is confirmed.
       return `${CURSOR_WEB_BASE}/${owner}/${repo}`;
+    case "gitea": {
+      // Self-hosted: the host must come from the remote, never a constant.
+      const host = url.startsWith("git@")
+        ? url.slice(4).split(":")[0]
+        : url.split("://")[1]?.split("/")[0] ?? "";
+      if (!host) return null;
+      return `https://${host}/${owner}/${repo}/commit/${sha}`;
+    }
     default:
       return `https://github.com/${owner}/${repo}/commit/${sha}`;
   }

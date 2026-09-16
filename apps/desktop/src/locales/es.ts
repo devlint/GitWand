@@ -1543,6 +1543,11 @@ const es: Locale = {
     accountsAzureDevMock: "El inicio de sesión de Azure solo está disponible en la aplicación de escritorio.",
     accountsAzureWaiting: "Esperando autorización…",
     accountsAzureConnected: "Conectado como",
+    accountsGiteaUrlLabel: "URL del servidor",
+    accountsGiteaTokenLabel: "Token de acceso",
+    accountsGiteaTokenHint: "Gitea: Configuración > Aplicaciones > Generar token. Permisos: lectura y escritura de repositorios e incidencias.",
+    accountsGiteaUrlInvalid: "Introduce una URL de servidor válida, por ejemplo https://git.acme.io",
+    accountsGiteaTokenRequired: "Se requiere un token de acceso.",
     accountsDeleteConfirm: "¿Eliminar esta cuenta?",
     // v2.12
     git: {

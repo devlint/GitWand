@@ -1554,6 +1554,11 @@ const zhCN: Locale = {
     accountsAzureDevMock: "Azure \u767b\u5f55\u4ec5\u5728\u684c\u9762\u5e94\u7528\u4e2d\u53ef\u7528\u3002",
     accountsAzureWaiting: "\u6b63\u5728\u7b49\u5f85\u6388\u6743\u2026",
     accountsAzureConnected: "\u5df2\u8fde\u63a5\u4e3a",
+    accountsGiteaUrlLabel: "\u670d\u52a1\u5668\u5730\u5740",
+    accountsGiteaTokenLabel: "\u8bbf\u95ee\u4ee4\u724c",
+    accountsGiteaTokenHint: "Gitea\uff1a\u8bbe\u7f6e > \u5e94\u7528 > \u751f\u6210\u4ee4\u724c\u3002\u6743\u9650\uff1a\u4ed3\u5e93\u548c\u5de5\u5355\u7684\u8bfb\u5199\u3002",
+    accountsGiteaUrlInvalid: "\u8bf7\u8f93\u5165\u6709\u6548\u7684\u670d\u52a1\u5668\u5730\u5740\uff0c\u4f8b\u5982 https://git.acme.io",
+    accountsGiteaTokenRequired: "\u9700\u8981\u8bbf\u95ee\u4ee4\u724c\u3002",
     accountsDeleteConfirm: "\u5220\u9664\u6b64\u8d26\u53f7\uff1f",
     // v2.12
     git: {

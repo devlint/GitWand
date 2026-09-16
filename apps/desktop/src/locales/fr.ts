@@ -1552,6 +1552,11 @@ const fr: Locale = {
     accountsAzureDevMock: "La connexion Azure n'est disponible que dans l'application desktop.",
     accountsAzureWaiting: "En attente d'autorisation…",
     accountsAzureConnected: "Connecté en tant que",
+    accountsGiteaUrlLabel: "URL du serveur",
+    accountsGiteaTokenLabel: "Jeton d'accès",
+    accountsGiteaTokenHint: "Gitea : Paramètres > Applications > Générer un jeton. Portées : lecture et écriture sur les dépôts et les tickets.",
+    accountsGiteaUrlInvalid: "Saisissez une URL de serveur valide, par exemple https://git.acme.io",
+    accountsGiteaTokenRequired: "Un jeton d'accès est requis.",
     accountsDeleteConfirm: "Supprimer ce compte ?",
     // v2.12 Onglet Git
     git: {

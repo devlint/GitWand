@@ -11,7 +11,7 @@ import { useAccounts } from "../composables/useAccounts";
 import { useCredentials } from "../composables/useCredentials";
 import { useGithubAuth, GITHUB_TOKEN_KEY } from "../composables/useGithubAuth";
 import { useAzureAuth, AZURE_TOKEN_KEY } from "../composables/useAzureAuth";
-import { isTauri, azureSignOut } from "../utils/backend";
+import { isTauri, azureSignOut, giteaValidateToken } from "../utils/backend";
 import type { ForgeName } from "../composables/forge/types";
 
 // In dev:web there is no Rust backend — the GitHub flow is a fake mock that
@@ -32,6 +32,7 @@ const {
   saving,
   error: credError,
   saveBitbucketCredential,
+  saveGiteaCredential,
   removeCredential,
 } = useCredentials();
 
@@ -64,15 +65,32 @@ const formForge = ref<ForgeName>("github");
 const formLabel = ref("");
 const formUsername = ref("");
 const formWorkspace = ref("");
+const formServerUrl = ref("");
 const formToken = ref("");
 const formError = ref<string | null>(null);
 const formSuccess = ref(false);
+
+/**
+ * Parses a Gitea server host out of whatever the user typed (bare host,
+ * `https://…`, trailing slash). Returns `""` when the input can't be turned
+ * into a valid URL.
+ */
+function giteaHostFromUrl(raw: string): string {
+  const trimmed = raw.trim().replace(/\/+$/, "");
+  const withScheme = /^https?:\/\//.test(trimmed) ? trimmed : `https://${trimmed}`;
+  try {
+    return new URL(withScheme).host;
+  } catch {
+    return "";
+  }
+}
 
 function openForm() {
   formForge.value = "github";
   formLabel.value = "";
   formUsername.value = "";
   formWorkspace.value = "";
+  formServerUrl.value = "";
   formToken.value = "";
   formError.value = null;
   formSuccess.value = false;
@@ -142,7 +160,9 @@ async function submitForm() {
   formSuccess.value = false;
 
   if (!formLabel.value.trim()) { formError.value = "Label is required."; return; }
-  if (!formUsername.value.trim()) { formError.value = "Username is required."; return; }
+  // Gitea derives the username from the token-validation login when left
+  // blank, so it is the one forge exempt from this upfront requirement.
+  if (formForge.value !== "gitea" && !formUsername.value.trim()) { formError.value = "Username is required."; return; }
 
   let tokenKey = "";
 
@@ -156,6 +176,24 @@ async function submitForm() {
     );
     if (!ok) { formError.value = credError.value ?? "Failed to save credential."; return; }
     tokenKey = `gitwand:bitbucket/${formWorkspace.value.trim()}`;
+  }
+
+  if (formForge.value === "gitea") {
+    const host = giteaHostFromUrl(formServerUrl.value);
+    if (!host) { formError.value = t('settings.accountsGiteaUrlInvalid'); return; }
+    if (!formToken.value.trim()) { formError.value = t('settings.accountsGiteaTokenRequired'); return; }
+    let login = "";
+    try {
+      login = await giteaValidateToken(host, formToken.value.trim());
+    } catch (e) {
+      formError.value = e instanceof Error ? e.message : String(e);
+      return;
+    }
+    const username = formUsername.value.trim() || login;
+    const ok = await saveGiteaCredential(host, username, formToken.value.trim());
+    if (!ok) { formError.value = credError.value ?? "Failed to save credential."; return; }
+    tokenKey = `gitwand:gitea/${host}:${username}`;
+    formUsername.value = username;
   }
 
   addAccount({ forge: formForge.value, label: formLabel.value.trim(), username: formUsername.value.trim(), tokenKey });
@@ -173,6 +211,21 @@ async function onRemove(id: string) {
     // the generic single-entry delete below would leave the refresh token
     // behind, able to silently mint new access tokens after sign-out.
     await azureSignOut();
+  } else if (acc.forge === "gitea") {
+    // Gitea stores two keychain entries under "gitwand:gitea": `<host>:<user>`
+    // (the token) and `<host>` (the active-username pointer the Rust side
+    // reads, since it knows the host from the remote but not the username).
+    // The generic single-entry delete below would only remove the token and
+    // leave the pointer behind: a stale-but-fails-closed lookup, not a
+    // security hole, but still a bug worth avoiding.
+    const slash = acc.tokenKey.indexOf("/");
+    if (slash !== -1) {
+      const service = acc.tokenKey.slice(0, slash);
+      const account = acc.tokenKey.slice(slash + 1);
+      await removeCredential(service, account);
+      const colon = account.indexOf(":");
+      if (colon !== -1) await removeCredential(service, account.slice(0, colon));
+    }
   } else if (acc.tokenKey) {
     const slash = acc.tokenKey.indexOf("/");
     if (slash !== -1) await removeCredential(acc.tokenKey.slice(0, slash), acc.tokenKey.slice(slash + 1));
@@ -182,11 +235,10 @@ async function onRemove(id: string) {
 
 // ─── Display ─────────────────────────────────────────────────────────────────
 
-const forgeOrder: ForgeName[] = ["github", "gitlab", "bitbucket", "azure"];
-// `forgeOrder` above intentionally omits `cursor` and `gitea`: Cursor Origin has
-// no account to connect (detection only), and Gitea's account form/detection
-// lands in Task 8 (issue #193). Both labels are still required to satisfy
-// Record<ForgeName, string>.
+const forgeOrder: ForgeName[] = ["github", "gitlab", "bitbucket", "azure", "gitea"];
+// `forgeOrder` above intentionally omits `cursor`: Cursor Origin has no
+// account to connect (detection only). Its label is still required to
+// satisfy Record<ForgeName, string>.
 const forgeLabel: Record<ForgeName, string> = { github: "GitHub", gitlab: "GitLab", bitbucket: "Bitbucket", azure: "Azure DevOps", cursor: "Cursor Origin", gitea: "Gitea / Forgejo", unknown: "Unknown" };
 const knownForges = computed(() => forgeOrder.filter((f) => (accountsByForge.value[f]?.length ?? 0) > 0));
 const totalAccounts = computed(() => accounts.value.length);
@@ -244,6 +296,7 @@ const totalAccounts = computed(() => accounts.value.length);
             <option value="gitlab">GitLab</option>
             <option value="bitbucket">Bitbucket</option>
             <option value="azure">Azure DevOps</option>
+            <option value="gitea">Gitea / Forgejo</option>
           </select>
         </div>
 
@@ -266,6 +319,18 @@ const totalAccounts = computed(() => accounts.value.length);
           <div class="sa-field">
             <label class="sa-label">{{ t('settings.accountsAppPasswordLabel') }}</label>
             <input v-model="formToken" type="password" class="sa-input" autocomplete="new-password" />
+          </div>
+        </template>
+
+        <template v-else-if="formForge === 'gitea'">
+          <div class="sa-field">
+            <label class="sa-label">{{ t('settings.accountsGiteaUrlLabel') }}</label>
+            <input v-model="formServerUrl" type="text" class="sa-input" placeholder="https://git.acme.io" />
+          </div>
+          <div class="sa-field">
+            <label class="sa-label">{{ t('settings.accountsGiteaTokenLabel') }}</label>
+            <input v-model="formToken" type="password" class="sa-input" autocomplete="new-password" />
+            <p class="sa-note">{{ t('settings.accountsGiteaTokenHint') }}</p>
           </div>
         </template>
 

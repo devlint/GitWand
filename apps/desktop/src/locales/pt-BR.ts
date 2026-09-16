@@ -1543,6 +1543,11 @@ const ptBR: Locale = {
     accountsAzureDevMock: "O login do Azure só está disponível no aplicativo desktop.",
     accountsAzureWaiting: "Aguardando autorização…",
     accountsAzureConnected: "Conectado como",
+    accountsGiteaUrlLabel: "URL do servidor",
+    accountsGiteaTokenLabel: "Token de acesso",
+    accountsGiteaTokenHint: "Gitea: Configurações > Aplicativos > Gerar token. Escopos: leitura e escrita de repositórios e issues.",
+    accountsGiteaUrlInvalid: "Informe uma URL de servidor válida, por exemplo https://git.acme.io",
+    accountsGiteaTokenRequired: "Um token de acesso é obrigatório.",
     accountsDeleteConfirm: "Remover esta conta?",
     // v2.12
     git: {

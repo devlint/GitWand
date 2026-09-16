@@ -189,6 +189,18 @@ export function useAccounts() {
     return _accounts.value.some((a) => a.forge === forge);
   }
 
+  /**
+   * Hosts of every configured Gitea account, parsed out of `tokenKey`
+   * (`"gitwand:gitea/<host>:<username>"`). Feeds detection layer 2 in
+   * `gitRemoteInfo`.
+   */
+  function giteaHosts(): string[] {
+    return _accounts.value
+      .filter((a) => a.forge === "gitea")
+      .map((a) => a.tokenKey.split("/")[1]?.split(":")[0] ?? "")
+      .filter((h) => h.length > 0);
+  }
+
   return {
     accounts,
     accountsByForge,
@@ -197,5 +209,6 @@ export function useAccounts() {
     activeAccount,
     setActiveAccount,
     hasAccounts,
+    giteaHosts,
   };
 }

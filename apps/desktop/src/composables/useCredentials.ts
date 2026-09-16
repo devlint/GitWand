@@ -138,6 +138,27 @@ export function useCredentials() {
     return removeCredential(BB_SERVICE, workspace);
   }
 
+  // ── Gitea-specific helpers ────────────────────────────────────────────────
+
+  const GITEA_SERVICE = "gitwand:gitea";
+
+  /**
+   * Store a Gitea token plus the host pointer the Rust side reads.
+   *
+   * Two entries: `<host>` holds the active username, `<host>:<username>` holds
+   * the token. Rust knows the host from the remote but not the username, so the
+   * pointer is what makes a keychain lookup possible.
+   */
+  async function saveGiteaCredential(
+    host: string,
+    username: string,
+    token: string,
+  ): Promise<boolean> {
+    const ok = await saveCredential(GITEA_SERVICE, `${host}:${username}`, token);
+    if (!ok) return false;
+    return saveCredential(GITEA_SERVICE, host, username);
+  }
+
   return {
     /** Whether a save/remove operation is in flight. */
     saving,
@@ -151,5 +172,7 @@ export function useCredentials() {
     saveBitbucketCredential,
     loadBitbucketCredential,
     removeBitbucketCredential,
+    // Gitea-specific
+    saveGiteaCredential,
   };
 }

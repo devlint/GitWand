@@ -31,6 +31,11 @@ import { CLOSED_AUTO_MERGE } from './backend-pr';
 // between the frontend, the Rust command, and the dev-server route.
 import type { SecretFinding, SecretsScanConfig } from '@gitwand/core';
 export type { SecretFinding, SecretsScanConfig };
+// Detection layer 2 for Gitea (self-hosted, neutral hostname): resolved by
+// matching configured account hosts rather than the URL. Static import is
+// safe here: useAccounts' module body only defines refs, and forge/types.ts
+// only imports types from backend.ts, so there is no runtime cycle.
+import { useAccounts } from '../composables/useAccounts';
 
 /** Open a native folder picker (Tauri only). */
 async function tauriOpenFolder(): Promise<string | null> {
@@ -2436,9 +2441,35 @@ export async function gitAutocomplete(cwd: string, partial: string): Promise<str
 export interface RemoteInfo {
   name: string;
   url: string;
-  provider: "github" | "gitlab" | "bitbucket" | "azure" | "cursor" | "unknown";
+  provider: "github" | "gitlab" | "bitbucket" | "azure" | "cursor" | "gitea" | "unknown";
   owner: string;
   repo: string;
+}
+
+/**
+ * Whether `remoteUrl`'s host is one of `hosts`.
+ *
+ * Detection layer 2 for Gitea: a self-hosted instance on a neutral hostname is
+ * unrecognisable from the URL alone, so the configured accounts are the
+ * evidence. Exported for its unit test.
+ */
+export function giteaProviderHostMatches(remoteUrl: string, hosts: string[]): boolean {
+  if (hosts.length === 0) return false;
+  const host = remoteUrl.startsWith("git@")
+    ? remoteUrl.slice(4).split(":")[0]
+    : remoteUrl.split("://")[1]?.split("/")[0]?.split("@").pop()?.split(":")[0] ?? "";
+  return host.length > 0 && hosts.includes(host);
+}
+
+/**
+ * Rewrites `provider: "unknown"` to `"gitea"` when the remote's host matches a
+ * configured Gitea account. Applied at both `gitRemoteInfo` return sites so
+ * the Tauri and dev:web paths behave identically.
+ */
+function applyGiteaAccountOverride(info: RemoteInfo): RemoteInfo {
+  if (info.provider !== "unknown" || !info.url) return info;
+  const hosts = useAccounts().giteaHosts();
+  return giteaProviderHostMatches(info.url, hosts) ? { ...info, provider: "gitea" } : info;
 }
 
 /**
@@ -2446,7 +2477,7 @@ export interface RemoteInfo {
  */
 export async function gitRemoteInfo(cwd: string): Promise<RemoteInfo> {
   if (isTauri()) {
-    return tauriInvoke<RemoteInfo>("git_remote_info", { cwd });
+    return applyGiteaAccountOverride(await tauriInvoke<RemoteInfo>("git_remote_info", { cwd }));
   }
   try {
     const res = await fetch(
@@ -2455,7 +2486,7 @@ export async function gitRemoteInfo(cwd: string): Promise<RemoteInfo> {
     if (!res.ok) {
       return { name: "origin", url: "", provider: "unknown", owner: "", repo: "" };
     }
-    return (await res.json()) as RemoteInfo;
+    return applyGiteaAccountOverride((await res.json()) as RemoteInfo);
   } catch {
     return { name: "origin", url: "", provider: "unknown", owner: "", repo: "" };
   }

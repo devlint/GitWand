@@ -132,6 +132,9 @@ export class GiteaProvider implements ForgeProvider {
   // ── Actions ───────────────────────────────────────────────────────────────
 
   createPR(cwd: string, input: CreatePRInput): Promise<PullRequest> {
+    // sourceBranch is left empty: the Rust side resolves it from HEAD. base,
+    // when omitted, is resolved by the Rust side to the repo's real default
+    // branch rather than a guessed constant like "main".
     return giteaCreatePr(cwd, input.title, input.body, "", input.base ?? "");
   }
 
@@ -174,6 +177,9 @@ export class GiteaProvider implements ForgeProvider {
     prNumber: number,
     params: CreatePrCommentParams,
   ): Promise<PrReviewComment> {
+    // Gitea's only comment endpoint is issue-style, with no diff-line anchor,
+    // so params' line-anchoring fields (path, line, side, …) are silently
+    // dropped here. Only body survives.
     return giteaCreateComment(cwd, prNumber, params.body);
   }
 
