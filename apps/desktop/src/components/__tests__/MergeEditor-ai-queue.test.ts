@@ -278,4 +278,25 @@ describe("MergeEditor AI queue", () => {
     await vi.waitFor(() => expect(suggest).toHaveBeenCalledTimes(2));
     await vi.waitFor(() => expect(bulkAi().textContent).not.toContain("Cancel"));
   });
+
+  it("does not mistake a lone per-hunk AI request for a running batch", async () => {
+    // The queue is file-wide and is also driven by each hunk's own AI
+    // action, so the bulk bar must track its own batch membership: without
+    // that, a single per-hunk request in flight makes `isRunning` true while
+    // nothing was ever queued through the bulk button, and the bulk button
+    // (wired to cancel while "running") would silently cancel a request the
+    // user never associated with a batch.
+    suggest.mockReturnValue(new Promise(() => {}));
+    app = createApp(MergeEditor, { file: fileWith([complexHunk(0), complexHunk(1)]), cwd: "/repo" });
+    app.mount(host);
+    await nextTick();
+
+    const aiLink = host.querySelector(".inline-action--ai") as HTMLElement;
+    aiLink.click();
+    await nextTick();
+
+    const bulkAi = host.querySelector(".me-bulk-btn--ai") as HTMLElement;
+    expect(bulkAi.textContent).not.toContain("Cancel");
+    expect(bulkAi.textContent).not.toMatch(/-\d/);
+  });
 });

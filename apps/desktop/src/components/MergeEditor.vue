@@ -88,8 +88,12 @@ function validateEditing(hunkIndex: number) {
 const aiQueue = useAiHunkQueue(() => props.file.path);
 
 // A different file means different hunk indices; keeping the old map would
-// show one file's suggestions against another's conflicts.
-watch(() => props.file.path, () => aiQueue.reset());
+// show one file's suggestions against another's conflicts, and any batch
+// membership tracked below means nothing against a new file's hunks either.
+watch(() => props.file.path, () => {
+  aiQueue.reset();
+  aiBatchIndices.value = new Set();
+});
 
 async function requestAISuggestion(hunkIndex: number, hunk: ConflictHunk) {
   const state = aiQueue.stateFor(hunkIndex);
@@ -346,30 +350,55 @@ function bulkResolve(choice: "ours" | "theirs" | "both") {
 // `resolveFileBulk` or touches merged content. Suggestions land in the same
 // per-hunk queue the single-hunk AI button uses, and the user still confirms
 // each one.
-const aiBatchTotal = ref(0);
+/**
+ * The hunks the current "Resolve all with AI" run queued. The queue itself
+ * is file-wide and is also driven by each hunk's own AI action, so the bulk
+ * bar has to track its own membership: without it, a single per-hunk
+ * request makes this button think a batch is running (and, since its click
+ * handler cancels while running, would silently cancel a request the user
+ * never associated with a batch).
+ */
+const aiBatchIndices = ref<Set<number>>(new Set());
 
 /** Unresolved hunks only: a hunk already staged or resolved is not re-asked. */
 function resolveAllWithAi() {
   const items = hunks.value
     .map((hunk, index) => ({ index, hunk }))
     .filter(({ index }) => aiQueue.stateFor(index) !== "ready");
-  aiBatchTotal.value = items.length;
+  aiBatchIndices.value = new Set(items.map((i) => i.index));
   aiQueue.requestAll(items);
 }
+
+/** True only while a hunk that THIS batch queued is still queued/loading. */
+const aiBatchRunning = computed(() =>
+  [...aiBatchIndices.value].some((i) => {
+    const s = aiQueue.stateFor(i);
+    return s === "queued" || s === "loading";
+  }),
+);
 
 // Tracks what this batch actually queued, not every hunk in the file:
 // `requestAll` skips hunks that already have an answer, so dividing by the
 // file's full hunk count would read e.g. "8 of 12" forever on a second run.
 const aiBatchProgress = computed(() => {
-  const total = aiBatchTotal.value;
-  const left = aiQueue.pending.value + aiQueue.inFlight.value;
+  const total = aiBatchIndices.value.size;
+  const left = [...aiBatchIndices.value].filter((i) => {
+    const s = aiQueue.stateFor(i);
+    return s === "queued" || s === "loading";
+  }).length;
   return t("merge.bulkAiProgress", String(total - left), String(total));
 });
 
-/** Shown once a batch has finished and at least one hunk failed. */
+/** Shown once this batch has finished and at least one of its hunks failed. */
 const aiBatchSummary = computed(() => {
-  if (aiQueue.isRunning.value) return "";
-  const { ready, error } = aiQueue.summary.value;
+  if (aiBatchRunning.value) return "";
+  let ready = 0;
+  let error = 0;
+  for (const i of aiBatchIndices.value) {
+    const s = aiQueue.stateFor(i);
+    if (s === "ready") ready += 1;
+    else if (s === "error") error += 1;
+  }
   if (error === 0) return "";
   return t("merge.bulkAiSummary", String(ready), String(error));
 });
@@ -832,10 +861,19 @@ useResizeObserver(contentEl, drawMinimap);
         <button
           v-if="aiAvailable"
           class="me-bulk-btn me-bulk-btn--ai"
-          @click="aiQueue.isRunning.value ? aiQueue.cancelAll() : resolveAllWithAi()"
+          @click="aiBatchRunning ? aiQueue.cancelAll() : resolveAllWithAi()"
         >
-          <AiSparkle :size="12" :animated="aiQueue.isRunning.value" />
-          {{ aiQueue.isRunning.value
+          <!--
+            Cancel calls `cancelAll()`, not a per-batch cancel: it also stops
+            any unrelated per-hunk request that happens to be in flight at
+            the same time. That is a deliberate choice, not an oversight. A
+            per-index cancel would be more surface in the queue composable
+            for a case nobody has asked for, and cancelling everything
+            AI-related when the user presses a visible Cancel button is the
+            predictable behaviour.
+          -->
+          <AiSparkle :size="12" :animated="aiBatchRunning" />
+          {{ aiBatchRunning
               ? `${t('merge.bulkAiCancel')} (${aiBatchProgress})`
               : t('merge.bulkAi') }}
         </button>
