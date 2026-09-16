@@ -112,6 +112,17 @@ function aiBusy(hunkIndex: number): boolean {
   return s === "queued" || s === "loading";
 }
 
+/**
+ * Guards every action in a hunk's row while its own AI suggestion is in
+ * flight, not just the AI button itself: without this, accepting a hunk
+ * mid-flight would let `requestAISuggestion`'s answer land on a hunk the
+ * user already resolved and reopen its editor on finished work.
+ */
+function onRowAction(hunkIndex: number, fn: () => void): void {
+  if (aiBusy(hunkIndex)) return;
+  fn();
+}
+
 function dismissAISuggestion(hunkIndex: number) {
   aiQueue.dismiss(hunkIndex);
 }
@@ -1004,28 +1015,32 @@ useResizeObserver(contentEl, drawMinimap);
               <a
                 class="inline-action inline-action--current"
                 :class="{ 'inline-action--recommended': isRecommended(hunkForSegment(seg)!, 'ours') }"
+                :aria-disabled="aiBusy(seg.hunkIndex!) ? 'true' : 'false'"
                 href="#"
-                @click.prevent="resolveHunkWithMemory(file.path, seg.hunkIndex!, 'ours')"
+                @click.prevent="onRowAction(seg.hunkIndex!, () => resolveHunkWithMemory(file.path, seg.hunkIndex!, 'ours'))"
               >{{ t('merge.acceptCurrent') }}<svg v-if="isRecommended(hunkForSegment(seg)!, 'ours')" class="recommend-icon" width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 1L9.5 5.5L14 7L9.5 8.5L8 13L6.5 8.5L2 7L6.5 5.5L8 1Z"/></svg></a>
               <span class="inline-sep">|</span>
               <a
                 class="inline-action inline-action--incoming"
                 :class="{ 'inline-action--recommended': isRecommended(hunkForSegment(seg)!, 'theirs') }"
+                :aria-disabled="aiBusy(seg.hunkIndex!) ? 'true' : 'false'"
                 href="#"
-                @click.prevent="resolveHunkWithMemory(file.path, seg.hunkIndex!, 'theirs')"
+                @click.prevent="onRowAction(seg.hunkIndex!, () => resolveHunkWithMemory(file.path, seg.hunkIndex!, 'theirs'))"
               >{{ t('merge.acceptIncoming') }}<svg v-if="isRecommended(hunkForSegment(seg)!, 'theirs')" class="recommend-icon" width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 1L9.5 5.5L14 7L9.5 8.5L8 13L6.5 8.5L2 7L6.5 5.5L8 1Z"/></svg></a>
               <span class="inline-sep">|</span>
               <a
                 class="inline-action inline-action--both"
                 :class="{ 'inline-action--recommended': isRecommended(hunkForSegment(seg)!, 'both') }"
+                :aria-disabled="aiBusy(seg.hunkIndex!) ? 'true' : 'false'"
                 href="#"
-                @click.prevent="resolveHunkWithMemory(file.path, seg.hunkIndex!, 'both')"
+                @click.prevent="onRowAction(seg.hunkIndex!, () => resolveHunkWithMemory(file.path, seg.hunkIndex!, 'both'))"
               >{{ t('merge.acceptBoth') }}<svg v-if="isRecommended(hunkForSegment(seg)!, 'both')" class="recommend-icon" width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 1L9.5 5.5L14 7L9.5 8.5L8 13L6.5 8.5L2 7L6.5 5.5L8 1Z"/></svg></a>
               <span class="inline-sep">|</span>
               <a
                 class="inline-action inline-action--edit"
+                :aria-disabled="aiBusy(seg.hunkIndex!) ? 'true' : 'false'"
                 href="#"
-                @click.prevent="startEditing(seg.hunkIndex!, hunkForSegment(seg)!)"
+                @click.prevent="onRowAction(seg.hunkIndex!, () => startEditing(seg.hunkIndex!, hunkForSegment(seg)!))"
               >{{ t('merge.customEdit') }}</a>
               <template v-if="aiAvailable">
                 <span class="inline-sep">|</span>
@@ -1043,9 +1058,10 @@ useResizeObserver(contentEl, drawMinimap);
                 <a
                   class="inline-action inline-action--explain"
                   :class="{ 'inline-action--loading': aiExplainLoading && explanationHunkIndex === seg.hunkIndex }"
+                  :aria-disabled="aiBusy(seg.hunkIndex!) ? 'true' : 'false'"
                   href="#"
                   :title="t('mergeEditor.explainTooltip')"
-                  @click.prevent="requestHunkExplanation(seg.hunkIndex!, hunkForSegment(seg)!)"
+                  @click.prevent="onRowAction(seg.hunkIndex!, () => requestHunkExplanation(seg.hunkIndex!, hunkForSegment(seg)!))"
                 >
                   <svg class="ai-icon" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
                     <path d="M8 14.5a.75.75 0 0 0 .75-.75v-1h-1.5v1a.75.75 0 0 0 .75.75Z" fill="currentColor" stroke="none"/>
@@ -1058,9 +1074,10 @@ useResizeObserver(contentEl, drawMinimap);
                 <span class="inline-sep">|</span>
                 <a
                   class="inline-action inline-action--memory"
+                  :aria-disabled="aiBusy(seg.hunkIndex!) ? 'true' : 'false'"
                   href="#"
                   :title="fileMemory.description"
-                  @click.prevent="applyFileMemory(seg.hunkIndex!, hunkForSegment(seg)!)"
+                  @click.prevent="onRowAction(seg.hunkIndex!, () => applyFileMemory(seg.hunkIndex!, hunkForSegment(seg)!))"
                 >
                   <svg class="ai-icon" width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
                     <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm1 10H7v-1.5h2V11zm0-3H7V5h2v3z"/>
