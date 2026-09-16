@@ -162,7 +162,12 @@ fn gitea_token_for_host(host: &str) -> Result<GiteaCredential, String> {
                  Add one in Settings > Accounts."
             )
         })?;
-    let (username, base) = parse_gitea_pointer(&pointer);
+    let (username, base) = parse_gitea_pointer(&pointer).map_err(|_| {
+        format!(
+            "Gitea account pointer for {host} is empty or unreadable. \
+             Re-add the account in Settings > Accounts."
+        )
+    })?;
     let token = keyring::Entry::new(GITEA_SERVICE, &format!("{}:{}", host, username))
         .map_err(|e| format!("keyring: {}", e))?
         .get_password()
@@ -184,14 +189,24 @@ fn gitea_token_for_host(host: &str) -> Result<GiteaCredential, String> {
 /// value (present JSON but no `username` key, or invalid JSON) degrades the
 /// same way rather than erroring, since the caller already has a clear
 /// "missing or unreadable" error path for a token lookup that then fails.
-fn parse_gitea_pointer(raw: &str) -> (String, Option<String>) {
+///
+/// An empty or whitespace-only pointer is the one case that errors instead
+/// of degrading: falling through to the bare-username branch would yield an
+/// empty username and go on to build a nonsense `"<host>:"` keychain key,
+/// which then fails anyway but with a confusing error about that key rather
+/// than about the account itself. The caller turns this into a clear,
+/// host-named message.
+fn parse_gitea_pointer(raw: &str) -> Result<(String, Option<String>), ()> {
+    if raw.trim().is_empty() {
+        return Err(());
+    }
     if let Ok(v) = serde_json::from_str::<serde_json::Value>(raw) {
         if let Some(username) = v.get("username").and_then(|u| u.as_str()) {
             let base = v.get("base").and_then(|b| b.as_str()).map(str::to_string);
-            return (username.to_string(), base);
+            return Ok((username.to_string(), base));
         }
     }
-    (raw.to_string(), None)
+    Ok((raw.to_string(), None))
 }
 
 // ─── HTTP transport ─────────────────────────────────────────────────────────
@@ -1317,7 +1332,7 @@ mod gitea_pointer_tests {
     fn parses_the_json_form_with_a_base() {
         assert_eq!(
             parse_gitea_pointer(r#"{"username":"alice","base":"http://git.acme.io:3000"}"#),
-            ("alice".to_string(), Some("http://git.acme.io:3000".to_string()))
+            Ok(("alice".to_string(), Some("http://git.acme.io:3000".to_string())))
         );
     }
 
@@ -1325,7 +1340,7 @@ mod gitea_pointer_tests {
     fn falls_back_to_the_legacy_bare_username_form() {
         // Written by a build that predates the `base` field: a plain string,
         // not JSON at all.
-        assert_eq!(parse_gitea_pointer("alice"), ("alice".to_string(), None));
+        assert_eq!(parse_gitea_pointer("alice"), Ok(("alice".to_string(), None)));
     }
 
     #[test]
@@ -1334,8 +1349,20 @@ mod gitea_pointer_tests {
         // the same as a bare username, using the whole raw string.
         assert_eq!(
             parse_gitea_pointer(r#"{"nope":"alice"}"#),
-            (r#"{"nope":"alice"}"#.to_string(), None)
+            Ok((r#"{"nope":"alice"}"#.to_string(), None))
         );
+    }
+
+    #[test]
+    fn errors_on_an_empty_pointer() {
+        // Falling through to the bare-username branch would yield an empty
+        // username and go on to build a nonsense "<host>:" keychain key.
+        assert_eq!(parse_gitea_pointer(""), Err(()));
+    }
+
+    #[test]
+    fn errors_on_a_whitespace_only_pointer() {
+        assert_eq!(parse_gitea_pointer("   "), Err(()));
     }
 }
 

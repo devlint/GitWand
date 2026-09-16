@@ -33,8 +33,12 @@ import type { SecretFinding, SecretsScanConfig } from '@gitwand/core';
 export type { SecretFinding, SecretsScanConfig };
 // Detection layer 2 for Gitea (self-hosted, neutral hostname): resolved by
 // matching configured account hosts rather than the URL. Static import is
-// safe here: useAccounts' module body only defines refs, and forge/types.ts
-// only imports types from backend.ts, so there is no runtime cycle.
+// safe here: forge/types.ts only imports types from backend.ts, so there is
+// no runtime cycle. useAccounts' module body does read localStorage at
+// import time (it initialises a module-level ref via loadAccounts()), which
+// is safe in every environment this code runs in: the Tauri webview and
+// every browser provide localStorage synchronously, and src/test-setup.ts
+// shims it for the node test environment.
 import { useAccounts } from '../composables/useAccounts';
 
 /** Open a native folder picker (Tauri only). */
