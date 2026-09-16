@@ -1396,7 +1396,11 @@ mod gitea_duplicate_page_tests {
         let b: serde_json::Value = serde_json::from_str(r#"{"id": 7, "body": "edited"}"#).unwrap();
         let c: serde_json::Value = serde_json::from_str(r#"{"id": 8, "body": "hi"}"#).unwrap();
         assert_eq!(item_key(&a), item_key(&b), "same id is the same item");
-        assert_ne!(item_key(&a), item_key(&c), "different id is a different item");
+        assert_ne!(
+            item_key(&a),
+            item_key(&c),
+            "different id is a different item"
+        );
     }
 
     #[test]
@@ -1413,7 +1417,11 @@ mod gitea_duplicate_page_tests {
     fn a_null_id_does_not_collapse_distinct_items() {
         let a: serde_json::Value = serde_json::from_str(r#"{"id": null, "name": "one"}"#).unwrap();
         let b: serde_json::Value = serde_json::from_str(r#"{"id": null, "name": "two"}"#).unwrap();
-        assert_ne!(item_key(&a), item_key(&b), "a null id must not make every item identical");
+        assert_ne!(
+            item_key(&a),
+            item_key(&b),
+            "a null id must not make every item identical"
+        );
     }
 }
 
