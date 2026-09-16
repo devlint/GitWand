@@ -268,7 +268,10 @@ fn gl_mr_to_detail(mr: &serde_json::Value) -> PullRequestDetail {
         // "Allow auto-merge" repo setting): any MR can request it, subject
         // only to the per-MR pipeline precondition `gl_auto_merge_state`
         // already checks.
-        auto_merge_support: crate::types::AutoMergeSupport { supported: true, reason: None },
+        auto_merge_support: crate::types::AutoMergeSupport {
+            supported: true,
+            reason: None,
+        },
     }
 }
 
@@ -1247,7 +1250,12 @@ fn gl_disable_auto_merge_args(iid: i64) -> Vec<String> {
         "projects/:fullpath/merge_requests/{}/cancel_merge_when_pipeline_succeeds",
         iid
     );
-    vec!["api".to_string(), "-X".to_string(), "POST".to_string(), endpoint]
+    vec![
+        "api".to_string(),
+        "-X".to_string(),
+        "POST".to_string(),
+        endpoint,
+    ]
 }
 
 fn gl_disable_auto_merge_inner(cwd: String, iid: i64) -> Result<(), String> {
@@ -2460,10 +2468,8 @@ mod gl_auto_merge_tests {
         // GitLab's list endpoint carries `merge_when_pipeline_succeeds` but not
         // `pipeline`/`head_pipeline` (verified 2026-09-14). Claiming "no
         // pipeline is running" here would be a false statement about the MR.
-        let v: serde_json::Value = serde_json::from_str(
-            r#"{"iid": 3, "merge_when_pipeline_succeeds": true}"#,
-        )
-        .unwrap();
+        let v: serde_json::Value =
+            serde_json::from_str(r#"{"iid": 3, "merge_when_pipeline_succeeds": true}"#).unwrap();
         let s = gl_auto_merge_state_from_list(&v);
         assert!(s.armed);
         assert!(!s.available);
@@ -2512,7 +2518,14 @@ mod gl_merge_args_tests {
     fn default_merge_uses_the_remove_source_branch_flag() {
         assert_eq!(
             gl_merge_args(7, "merge"),
-            vec!["mr", "merge", "7", "--yes", "--remove-source-branch", "--auto-merge=false"]
+            vec![
+                "mr",
+                "merge",
+                "7",
+                "--yes",
+                "--remove-source-branch",
+                "--auto-merge=false"
+            ]
         );
     }
 
@@ -2521,7 +2534,12 @@ mod gl_merge_args_tests {
         assert_eq!(
             gl_merge_args(7, "squash"),
             vec![
-                "mr", "merge", "7", "--squash", "--yes", "--remove-source-branch",
+                "mr",
+                "merge",
+                "7",
+                "--squash",
+                "--yes",
+                "--remove-source-branch",
                 "--auto-merge=false",
             ]
         );
@@ -2532,7 +2550,12 @@ mod gl_merge_args_tests {
         assert_eq!(
             gl_merge_args(7, "rebase"),
             vec![
-                "mr", "merge", "7", "--rebase", "--yes", "--remove-source-branch",
+                "mr",
+                "merge",
+                "7",
+                "--rebase",
+                "--yes",
+                "--remove-source-branch",
                 "--auto-merge=false",
             ]
         );
@@ -2542,7 +2565,14 @@ mod gl_merge_args_tests {
     fn an_unrecognised_method_falls_back_to_a_plain_merge() {
         assert_eq!(
             gl_merge_args(7, "bogus"),
-            vec!["mr", "merge", "7", "--yes", "--remove-source-branch", "--auto-merge=false"]
+            vec![
+                "mr",
+                "merge",
+                "7",
+                "--yes",
+                "--remove-source-branch",
+                "--auto-merge=false"
+            ]
         );
     }
 
@@ -2676,7 +2706,9 @@ mod gl_disable_auto_merge_args_tests {
     #[test]
     fn never_sends_the_nonexistent_update_attribute() {
         let args = gl_disable_auto_merge_args(7);
-        assert!(!args.iter().any(|a| a.contains("merge_when_pipeline_succeeds=")));
+        assert!(!args
+            .iter()
+            .any(|a| a.contains("merge_when_pipeline_succeeds=")));
         assert!(!args.iter().any(|a| a == "-f"));
         assert!(!args.iter().any(|a| a == "PUT"));
     }

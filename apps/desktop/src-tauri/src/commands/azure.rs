@@ -626,7 +626,10 @@ fn json_to_detail(r: &AzureRepo, pr: &serde_json::Value) -> PullRequestDetail {
         // "Allow auto-merge" repo setting): any non-draft PR can request it,
         // subject only to the per-PR draft precondition `az_auto_merge_state`
         // already checks.
-        auto_merge_support: crate::types::AutoMergeSupport { supported: true, reason: None },
+        auto_merge_support: crate::types::AutoMergeSupport {
+            supported: true,
+            reason: None,
+        },
     }
 }
 

@@ -35,12 +35,11 @@
 use gitwand_desktop_lib::{
     gh_disable_auto_merge_parity, gh_enable_auto_merge_parity, git_blame_parity,
     git_branches_parity, git_commit_submodule_changes_parity, git_diff_parity, git_log_parity,
-    git_rebase_onto_parity,
-    git_remote_info_parity, git_stash_list_parity, git_status_libgit2_parity, git_status_parity,
-    git_submodule_branches_parity, gl_disable_auto_merge_parity, gl_enable_auto_merge_parity,
-    preview_cherry_pick_parity, preview_merge_parity, preview_rebase_parity, read_file_parity,
-    scan_secrets_parity, snapshot_create_parity, snapshot_list_parity, snapshot_prune_parity,
-    snapshot_restore_parity,
+    git_rebase_onto_parity, git_remote_info_parity, git_stash_list_parity,
+    git_status_libgit2_parity, git_status_parity, git_submodule_branches_parity,
+    gl_disable_auto_merge_parity, gl_enable_auto_merge_parity, preview_cherry_pick_parity,
+    preview_merge_parity, preview_rebase_parity, read_file_parity, scan_secrets_parity,
+    snapshot_create_parity, snapshot_list_parity, snapshot_prune_parity, snapshot_restore_parity,
 };
 use serde_json::{json, Value};
 use std::io::{self, Read};

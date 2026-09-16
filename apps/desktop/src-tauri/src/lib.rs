@@ -302,11 +302,7 @@ pub fn git_stash_list_parity(cwd: String) -> Result<Vec<types::StashEntry>, Stri
 /// Parity entry point for `gh_enable_auto_merge`. Only a repo with no forge
 /// remote is checkable here (see the refusal test in `tests/parity/`): no
 /// test arms an auto-merge on a live PR.
-pub fn gh_enable_auto_merge_parity(
-    cwd: String,
-    number: i64,
-    method: String,
-) -> Result<(), String> {
+pub fn gh_enable_auto_merge_parity(cwd: String, number: i64, method: String) -> Result<(), String> {
     tauri::async_runtime::block_on(commands::gh::gh_enable_auto_merge(cwd, number, method))
 }
 

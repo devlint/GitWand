@@ -1263,7 +1263,10 @@ fn gh_viewer_can_merge_and_auto_merge_support(
     let Ok(v) = serde_json::from_slice::<serde_json::Value>(&output.stdout) else {
         return (None, fail_closed());
     };
-    let can_merge = v.get("permissions").and_then(|p| p.get("push")).and_then(|b| b.as_bool());
+    let can_merge = v
+        .get("permissions")
+        .and_then(|p| p.get("push"))
+        .and_then(|b| b.as_bool());
     // REST's `allow_auto_merge` is the same repository setting exposed as
     // `autoMergeAllowed` on GitHub's GraphQL `Repository` type, reachable via
     // `gh api graphql` (NOT `gh repo view --json autoMergeAllowed`, which
@@ -2025,13 +2028,14 @@ pub(crate) fn gh_auto_merge_support(
         .and_then(|v| v.as_bool())
         .unwrap_or(false)
     {
-        crate::types::AutoMergeSupport { supported: true, reason: None }
+        crate::types::AutoMergeSupport {
+            supported: true,
+            reason: None,
+        }
     } else {
         crate::types::AutoMergeSupport {
             supported: false,
-            reason: Some(
-                "Auto-merge is disabled in this repository's settings.".to_string(),
-            ),
+            reason: Some("Auto-merge is disabled in this repository's settings.".to_string()),
         }
     }
 }
@@ -2057,7 +2061,10 @@ mod gh_auto_merge_tests {
         let v: serde_json::Value = serde_json::from_str(r#"{"number": 7}"#).unwrap();
         let s = gh_auto_merge_state(&v);
         assert!(!s.armed);
-        assert!(s.available, "GitHub has no per-PR precondition beyond the repo setting");
+        assert!(
+            s.available,
+            "GitHub has no per-PR precondition beyond the repo setting"
+        );
     }
 
     #[test]
@@ -2071,8 +2078,7 @@ mod gh_auto_merge_tests {
 
     #[test]
     fn a_repo_with_auto_merge_disabled_is_unsupported_with_a_reason() {
-        let v: serde_json::Value =
-            serde_json::from_str(r#"{"autoMergeAllowed": false}"#).unwrap();
+        let v: serde_json::Value = serde_json::from_str(r#"{"autoMergeAllowed": false}"#).unwrap();
         let s = gh_auto_merge_support(&v);
         assert!(!s.supported);
         assert_eq!(
