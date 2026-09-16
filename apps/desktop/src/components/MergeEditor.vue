@@ -6,7 +6,8 @@ import { summarizeTiers, type ConflictHunk } from "@gitwand/core";
 import { highlightConflict } from "../utils/diffHighlight";
 import { useI18n } from "../composables/useI18n";
 import { safeHtml } from "../composables/useSafeHtml";
-import { useAIProvider, type ConflictContext } from "../composables/useAIProvider";
+import { useAIProvider } from "../composables/useAIProvider";
+import { useAiHunkQueue } from "../composables/useAiHunkQueue";
 
 import { useHunkExplanation } from "../composables/useHunkExplanation";
 import { useResizeObserver } from "../composables/useResizeObserver";
@@ -35,7 +36,7 @@ import AiSparkle from "./AiSparkle.vue";
 import ResolveAutoSummaryModal from "./ResolveAutoSummaryModal.vue";
 
 const { t, locale } = useI18n();
-const { isAvailable: aiAvailable, isLoading: aiLoading, lastError: aiError, suggest: aiSuggest } = useAIProvider();
+const { isAvailable: aiAvailable } = useAIProvider();
 const { isGenerating: aiExplainLoading, explain: aiExplain } = useHunkExplanation();
 const { findMatchingRule, executeRule } = useCustomAutomations();
 const { findMemory, saveMemory, markUsed, detectPattern: _dp, applyMemory: _am } = useResolutionMemory();
@@ -84,39 +85,35 @@ function validateEditing(hunkIndex: number) {
 }
 
 // ─── AI Suggestion ─────────────────────────────────────
-const aiSuggestionHunkIndex = ref<number | null>(null);
-const aiSuggestionContent = ref<string | null>(null);
-const aiSuggestionExplanation = ref<string | null>(null);
+const aiQueue = useAiHunkQueue(() => props.file.path);
+
+// A different file means different hunk indices; keeping the old map would
+// show one file's suggestions against another's conflicts.
+watch(() => props.file.path, () => aiQueue.reset());
 
 async function requestAISuggestion(hunkIndex: number, hunk: ConflictHunk) {
-  aiSuggestionHunkIndex.value = hunkIndex;
-  aiSuggestionContent.value = null;
-  aiSuggestionExplanation.value = null;
+  const state = aiQueue.stateFor(hunkIndex);
+  if (state === "queued" || state === "loading") return;
 
-  const ctx: ConflictContext = {
-    filePath: props.file.path,
-    base: hunk.baseLines?.join("\n") ?? "",
-    ours: hunk.oursLines.join("\n"),
-    theirs: hunk.theirsLines.join("\n"),
-  };
+  await aiQueue.request(hunkIndex, hunk);
 
-  try {
-    const suggestion = await aiSuggest(ctx);
-    aiSuggestionContent.value = suggestion.resolvedContent;
-    aiSuggestionExplanation.value = suggestion.explanation;
-    // Pre-fill the edit area so user can review and tweak
+  // Single-hunk behaviour is unchanged: the editor opens pre-filled so the
+  // user reviews before confirming. The batch deliberately does NOT do this,
+  // since only one hunk can be open at a time.
+  const suggestion = aiQueue.suggestionFor(hunkIndex);
+  if (suggestion && aiQueue.stateFor(hunkIndex) === "ready") {
     editContent.value = suggestion.resolvedContent;
     editingHunkIndex.value = hunkIndex;
-  } catch {
-    // Error is already in aiError ref
-    aiSuggestionHunkIndex.value = null;
   }
 }
 
-function dismissAISuggestion() {
-  aiSuggestionHunkIndex.value = null;
-  aiSuggestionContent.value = null;
-  aiSuggestionExplanation.value = null;
+function aiBusy(hunkIndex: number): boolean {
+  const s = aiQueue.stateFor(hunkIndex);
+  return s === "queued" || s === "loading";
+}
+
+function dismissAISuggestion(hunkIndex: number) {
+  aiQueue.dismiss(hunkIndex);
 }
 
 // ─── AI Explanation (Phase 1.3.2) ───────────────────────
@@ -1034,12 +1031,13 @@ useResizeObserver(contentEl, drawMinimap);
                 <span class="inline-sep">|</span>
                 <a
                   class="inline-action inline-action--ai"
-                  :class="{ 'inline-action--loading': aiLoading && aiSuggestionHunkIndex === seg.hunkIndex }"
+                  :class="{ 'inline-action--loading': aiBusy(seg.hunkIndex!) }"
+                  :aria-disabled="aiBusy(seg.hunkIndex!) ? 'true' : 'false'"
                   href="#"
                   @click.prevent="requestAISuggestion(seg.hunkIndex!, hunkForSegment(seg)!)"
                 >
-                  <AiSparkle :size="12" :animated="aiLoading && aiSuggestionHunkIndex === seg.hunkIndex" />
-                  {{ aiLoading && aiSuggestionHunkIndex === seg.hunkIndex ? t('mergeEditor.aiLoading') : t('mergeEditor.aiButton') }}
+                  <AiSparkle :size="12" :animated="aiBusy(seg.hunkIndex!)" />
+                  {{ aiBusy(seg.hunkIndex!) ? t('mergeEditor.aiLoading') : t('mergeEditor.aiButton') }}
                 </a>
                 <span class="inline-sep">|</span>
                 <a
@@ -1077,17 +1075,17 @@ useResizeObserver(contentEl, drawMinimap);
             </div>
 
             <!-- ── AI error banner ──────────────────────── -->
-            <div v-if="aiError && aiSuggestionHunkIndex === seg.hunkIndex" class="ai-error-banner">
-              <span>{{ t('mergeEditor.aiErrorPrefix') }} : {{ aiError }}</span>
-              <a href="#" @click.prevent="dismissAISuggestion" class="ai-error-close">OK</a>
+            <div v-if="aiQueue.errorFor(seg.hunkIndex!)" class="ai-error-banner">
+              <span>{{ t('mergeEditor.aiErrorPrefix') }} : {{ aiQueue.errorFor(seg.hunkIndex!) }}</span>
+              <a href="#" @click.prevent="dismissAISuggestion(seg.hunkIndex!)" class="ai-error-close">OK</a>
             </div>
 
             <!-- ── AI explanation banner ──────────────────── -->
-            <div v-if="aiSuggestionExplanation && editingHunkIndex === seg.hunkIndex && aiSuggestionHunkIndex === seg.hunkIndex" class="ai-explanation-banner">
+            <div v-if="aiQueue.suggestionFor(seg.hunkIndex!)?.explanation && editingHunkIndex === seg.hunkIndex" class="ai-explanation-banner">
               <svg class="ai-explanation-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
                 <path d="M8 1v2m0 10v2M1 8h2m10 0h2"/><circle cx="8" cy="8" r="4"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/>
               </svg>
-              <span>{{ aiSuggestionExplanation }}</span>
+              <span>{{ aiQueue.suggestionFor(seg.hunkIndex!)?.explanation }}</span>
             </div>
 
             <!-- ── Hunk NL explanation (Phase 1.3.2) ──────── -->
@@ -1105,7 +1103,7 @@ useResizeObserver(contentEl, drawMinimap);
             <!-- ── Inline Edit Mode ─────────────────────── -->
             <div v-if="editingHunkIndex === seg.hunkIndex" class="hunk-edit">
               <div class="edit-header">
-                <span class="edit-label">{{ aiSuggestionHunkIndex === seg.hunkIndex ? t('mergeEditor.aiSuggestionLabel') : t('merge.customEdit') }}</span>
+                <span class="edit-label">{{ aiQueue.stateFor(seg.hunkIndex!) === 'ready' ? t('mergeEditor.aiSuggestionLabel') : t('merge.customEdit') }}</span>
                 <div class="edit-actions-inline">
                   <a
                     class="inline-action inline-action--validate"
@@ -1465,6 +1463,11 @@ useResizeObserver(contentEl, drawMinimap);
 
 .inline-action--loading {
   opacity: 0.6;
+  pointer-events: none;
+}
+
+.inline-action[aria-disabled="true"] {
+  opacity: 0.55;
   pointer-events: none;
 }
 
