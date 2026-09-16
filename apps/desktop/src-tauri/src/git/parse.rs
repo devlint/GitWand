@@ -1938,10 +1938,22 @@ mod remote_provider_tests {
 
     #[test]
     fn detects_gitea_and_forgejo_hosts() {
-        assert_eq!(detect_provider("https://codeberg.org/acme/checkout.git"), "gitea");
-        assert_eq!(detect_provider("https://gitea.com/acme/checkout.git"), "gitea");
-        assert_eq!(detect_provider("git@gitea.acme.io:acme/checkout.git"), "gitea");
-        assert_eq!(detect_provider("https://forgejo.acme.io/acme/checkout.git"), "gitea");
+        assert_eq!(
+            detect_provider("https://codeberg.org/acme/checkout.git"),
+            "gitea"
+        );
+        assert_eq!(
+            detect_provider("https://gitea.com/acme/checkout.git"),
+            "gitea"
+        );
+        assert_eq!(
+            detect_provider("git@gitea.acme.io:acme/checkout.git"),
+            "gitea"
+        );
+        assert_eq!(
+            detect_provider("https://forgejo.acme.io/acme/checkout.git"),
+            "gitea"
+        );
     }
 
     #[test]
@@ -1950,7 +1962,10 @@ mod remote_provider_tests {
         // the URL alone. It resolves in the frontend against the configured
         // accounts (see the gitRemoteInfo wrapper), so the pure function must
         // stay honest rather than guess.
-        assert_eq!(detect_provider("https://git.acme.io/acme/checkout.git"), "unknown");
+        assert_eq!(
+            detect_provider("https://git.acme.io/acme/checkout.git"),
+            "unknown"
+        );
     }
 
     #[test]

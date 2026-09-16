@@ -120,7 +120,10 @@ fn gitea_ctx(cwd: &str) -> Result<GiteaCtx, String> {
         .ok_or_else(|| format!("Could not read a host from the remote URL: {}", url))?;
     let (owner, repo) = parse_remote_owner_repo(&url);
     if owner.is_empty() || repo.is_empty() {
-        return Err(format!("Could not read owner/repo from the remote URL: {}", url));
+        return Err(format!(
+            "Could not read owner/repo from the remote URL: {}",
+            url
+        ));
     }
     let cred = gitea_token_for_host(&host)?;
     // The account's own validated base URL is the source of truth: it is the
@@ -282,7 +285,10 @@ pub(crate) async fn gitea_validate_token(host: String, token: String) -> Result<
 // ─── JSON helpers ───────────────────────────────────────────────────────────
 
 fn jstr(v: &serde_json::Value, key: &str) -> String {
-    v.get(key).and_then(|s| s.as_str()).unwrap_or("").to_string()
+    v.get(key)
+        .and_then(|s| s.as_str())
+        .unwrap_or("")
+        .to_string()
 }
 
 fn jnum(v: &serde_json::Value, key: &str) -> i64 {
@@ -491,7 +497,11 @@ fn select_window(
         return Vec::new();
     }
     let off = offset.max(0) as usize;
-    items.into_iter().skip(off).take(per_page as usize).collect()
+    items
+        .into_iter()
+        .skip(off)
+        .take(per_page as usize)
+        .collect()
 }
 
 /// Whether a paging loop should fetch one more page, given how many items
@@ -620,7 +630,12 @@ pub(crate) async fn gitea_pr_diff(cwd: String, index: i64) -> Result<String, Str
 #[tauri::command]
 pub(crate) async fn gitea_pr_status(cwd: String, index: i64) -> Result<Vec<CICheck>, String> {
     let ctx = gitea_ctx(&cwd)?;
-    let pr = gitea_curl("GET", &format!("{}/pulls/{}", ctx.repo_api(), index), None, &ctx.auth)?;
+    let pr = gitea_curl(
+        "GET",
+        &format!("{}/pulls/{}", ctx.repo_api(), index),
+        None,
+        &ctx.auth,
+    )?;
     let sha = jref(&pr, "head", "sha");
     if sha.is_empty() {
         return Ok(Vec::new());
@@ -910,7 +925,12 @@ pub(crate) async fn gitea_create_pr(
         "base": base,
     })
     .to_string();
-    let resp = gitea_curl("POST", &format!("{}/pulls", ctx.repo_api()), Some(&payload), &ctx.auth)?;
+    let resp = gitea_curl(
+        "POST",
+        &format!("{}/pulls", ctx.repo_api()),
+        Some(&payload),
+        &ctx.auth,
+    )?;
     Ok(map_pr(&resp))
 }
 
@@ -936,12 +956,17 @@ pub(crate) async fn gitea_merge_pr(
     let m = method.unwrap_or_else(|| "merge".to_string());
 
     let payload = merge_payload(&m, false);
-    let (status, body) = gitea_curl_raw("POST", &url, Some(&payload), &ctx.auth, "application/json")?;
+    let (status, body) =
+        gitea_curl_raw("POST", &url, Some(&payload), &ctx.auth, "application/json")?;
     if status < 400 {
         return Ok(());
     }
     if !should_retry_merge_with_legacy_field(status) {
-        return Err(format!("Gitea merge failed (HTTP {}: {})", status, body.trim()));
+        return Err(format!(
+            "Gitea merge failed (HTTP {}: {})",
+            status,
+            body.trim()
+        ));
     }
     // Older Gitea rejects `merge_method` and wants `Do`. Retry once before
     // reporting, so the user never sees a version mismatch as a merge failure.
@@ -1082,21 +1107,36 @@ mod gitea_base_url_tests {
 
     #[test]
     fn keeps_an_explicit_port() {
-        assert_eq!(normalize_base_url("http://git.acme.io:3000"), "http://git.acme.io:3000");
+        assert_eq!(
+            normalize_base_url("http://git.acme.io:3000"),
+            "http://git.acme.io:3000"
+        );
     }
 
     #[test]
     fn strips_a_trailing_slash_and_an_api_suffix() {
-        assert_eq!(normalize_base_url("https://git.acme.io/"), "https://git.acme.io");
-        assert_eq!(normalize_base_url("https://git.acme.io/api/v1"), "https://git.acme.io");
-        assert_eq!(normalize_base_url("https://git.acme.io/api/v1/"), "https://git.acme.io");
+        assert_eq!(
+            normalize_base_url("https://git.acme.io/"),
+            "https://git.acme.io"
+        );
+        assert_eq!(
+            normalize_base_url("https://git.acme.io/api/v1"),
+            "https://git.acme.io"
+        );
+        assert_eq!(
+            normalize_base_url("https://git.acme.io/api/v1/"),
+            "https://git.acme.io"
+        );
     }
 
     #[test]
     fn keeps_a_subpath_install() {
         // Gitea can be mounted under a path prefix. Dropping it would 404
         // every call, so only the api suffix and trailing slashes come off.
-        assert_eq!(normalize_base_url("https://acme.io/gitea/"), "https://acme.io/gitea");
+        assert_eq!(
+            normalize_base_url("https://acme.io/gitea/"),
+            "https://acme.io/gitea"
+        );
     }
 }
 
@@ -1161,7 +1201,11 @@ mod gitea_mapping_tests {
         v["mergeable"] = serde_json::Value::Bool(false);
         assert_eq!(map_pr_detail(&v).mergeable, "CONFLICTING");
         v["mergeable"] = serde_json::Value::Null;
-        assert_eq!(map_pr_detail(&v).mergeable, "", "absent means unknown, never a guess");
+        assert_eq!(
+            map_pr_detail(&v).mergeable,
+            "",
+            "absent means unknown, never a guess"
+        );
     }
 
     #[test]
@@ -1189,7 +1233,10 @@ mod gitea_mapping_tests {
     #[test]
     fn tolerates_a_status_response_with_no_statuses_array() {
         let v: serde_json::Value = serde_json::from_str(r#"{"state": "pending"}"#).unwrap();
-        assert!(map_status(&v).is_empty(), "no statuses means no checks, not a panic");
+        assert!(
+            map_status(&v).is_empty(),
+            "no statuses means no checks, not a panic"
+        );
     }
 }
 
@@ -1198,21 +1245,32 @@ mod gitea_paging_tests {
     use super::{needs_another_page, select_window};
 
     fn items(n: usize) -> Vec<serde_json::Value> {
-        (0..n as i64).map(|i| serde_json::json!({"number": i})).collect()
+        (0..n as i64)
+            .map(|i| serde_json::json!({"number": i}))
+            .collect()
     }
 
     fn numbers(items: &[serde_json::Value]) -> Vec<i64> {
-        items.iter().map(|v| v["number"].as_i64().unwrap()).collect()
+        items
+            .iter()
+            .map(|v| v["number"].as_i64().unwrap())
+            .collect()
     }
 
     #[test]
     fn windows_from_the_start() {
-        assert_eq!(numbers(&select_window(items(50), 0, 10)), (0..10).collect::<Vec<_>>());
+        assert_eq!(
+            numbers(&select_window(items(50), 0, 10)),
+            (0..10).collect::<Vec<_>>()
+        );
     }
 
     #[test]
     fn windows_a_page_aligned_offset() {
-        assert_eq!(numbers(&select_window(items(50), 20, 10)), (20..30).collect::<Vec<_>>());
+        assert_eq!(
+            numbers(&select_window(items(50), 20, 10)),
+            (20..30).collect::<Vec<_>>()
+        );
     }
 
     #[test]
@@ -1340,7 +1398,10 @@ mod gitea_pointer_tests {
     fn parses_the_json_form_with_a_base() {
         assert_eq!(
             parse_gitea_pointer(r#"{"username":"alice","base":"http://git.acme.io:3000"}"#),
-            Ok(("alice".to_string(), Some("http://git.acme.io:3000".to_string())))
+            Ok((
+                "alice".to_string(),
+                Some("http://git.acme.io:3000".to_string())
+            ))
         );
     }
 
@@ -1348,7 +1409,10 @@ mod gitea_pointer_tests {
     fn falls_back_to_the_legacy_bare_username_form() {
         // Written by a build that predates the `base` field: a plain string,
         // not JSON at all.
-        assert_eq!(parse_gitea_pointer("alice"), Ok(("alice".to_string(), None)));
+        assert_eq!(
+            parse_gitea_pointer("alice"),
+            Ok(("alice".to_string(), None))
+        );
     }
 
     #[test]
@@ -1637,7 +1701,10 @@ mod gitea_comment_tests {
             .unwrap()
         };
         assert_eq!(map_review(&mk("APPROVED"))["state"], "APPROVED");
-        assert_eq!(map_review(&mk("REQUEST_CHANGES"))["state"], "CHANGES_REQUESTED");
+        assert_eq!(
+            map_review(&mk("REQUEST_CHANGES"))["state"],
+            "CHANGES_REQUESTED"
+        );
         assert_eq!(map_review(&mk("COMMENT"))["state"], "COMMENTED");
         assert_eq!(map_review(&mk("PENDING"))["state"], "PENDING");
         assert_eq!(map_review(&mk("APPROVED"))["user"]["login"], "carol");
