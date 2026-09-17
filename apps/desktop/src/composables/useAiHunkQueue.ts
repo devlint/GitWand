@@ -29,6 +29,36 @@ import { useAIProvider, type AISuggestion, type ConflictContext } from "./useAIP
  */
 export const AI_HUNK_CONCURRENCY = 3;
 
+/**
+ * Maps each of `keys` to the index it carries after a resolution consumed
+ * `appliedIndices`.
+ *
+ * Same arithmetic as `useResolutionSelection.remapAfterApply`, and the same
+ * rules: the surviving conflict blocks keep their relative order, so an old
+ * index becomes its rank among the survivors, and a key whose own hunk was
+ * consumed has nothing left to point at and is absent from the result rather
+ * than allowed to land on its neighbour.
+ *
+ * Pure and exported so it is testable without a component, and so the
+ * component can renumber its own index-keyed sets (the AI batch's membership)
+ * with the very same function the queue uses on its entries.
+ */
+export function remapHunkIndices(
+  keys: Iterable<number>,
+  appliedIndices: Iterable<number>,
+): Map<number, number> {
+  const applied = [...appliedIndices];
+  const consumed = new Set(applied);
+  const out = new Map<number, number>();
+  for (const key of keys) {
+    if (consumed.has(key)) continue;
+    let shift = 0;
+    for (const a of applied) if (a < key) shift += 1;
+    out.set(key, key - shift);
+  }
+  return out;
+}
+
 export type HunkAiState = "idle" | "queued" | "loading" | "ready" | "error";
 
 interface Entry {
@@ -52,10 +82,11 @@ export function useAiHunkQueue(filePath: () => string) {
   const inFlight = ref(0);
 
   /**
-   * Bumped by `cancelAll` and `reset`. A run whose generation no longer
-   * matches discards its result instead of writing it: a request already
-   * handed to the provider cannot be unsubscribed, so this is what makes the
-   * cancel correct rather than cosmetic.
+   * Bumped by `cancelAll`, `reset` and `remapAfterApply`. A run whose
+   * generation no longer matches discards its result instead of writing it:
+   * a request already handed to the provider cannot be unsubscribed, so this
+   * is what makes the cancel correct rather than cosmetic, and what makes a
+   * renumbering safe.
    */
   let generation = 0;
 
@@ -200,6 +231,43 @@ export function useAiHunkQueue(filePath: () => string) {
     patch(index, { state: "idle", suggestion: null, error: null });
   }
 
+  /**
+   * Renumber after a resolution consumed `appliedIndices`, instead of
+   * discarding everything.
+   *
+   * Settled entries (`ready` and `error`) are what survives: they are plain
+   * data about a hunk that is still there, only under a new index. Anything
+   * still in flight is discarded, conservatively: a run already handed to the
+   * provider captured its index in its closure, so after the renumbering its
+   * answer would be written onto the wrong hunk. Bumping the generation is
+   * exactly how `cancelAll` already makes those answers land nowhere, so this
+   * reuses that rather than adding an indirection layer between a run and the
+   * hunk it is for. Keeping in-flight work alive across a renumbering is a
+   * separate change (the run would have to carry a token the queue resolves
+   * to an index at write time).
+   *
+   * Still a strict improvement on `reset`, which drops staged answers the
+   * user already paid for along with the in-flight ones.
+   */
+  function remapAfterApply(appliedIndices: number[]): void {
+    generation += 1;
+    queue.value = [];
+    inFlight.value = 0;
+
+    const moved = remapHunkIndices(
+      Object.keys(entries.value).map(Number),
+      appliedIndices,
+    );
+    const next: Record<number, Entry> = {};
+    for (const [old, fresh] of moved) {
+      const entry = entryFor(old);
+      if (entry.state === "ready" || entry.state === "error") next[fresh] = entry;
+    }
+    entries.value = next;
+
+    for (const index of [...settlers.keys()]) settle(index);
+  }
+
   function reset(): void {
     generation += 1;
     queue.value = [];
@@ -220,6 +288,7 @@ export function useAiHunkQueue(filePath: () => string) {
     requestAll,
     cancelAll,
     dismiss,
+    remapAfterApply,
     reset,
   };
 }

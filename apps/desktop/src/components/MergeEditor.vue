@@ -7,7 +7,7 @@ import { highlightConflict } from "../utils/diffHighlight";
 import { useI18n } from "../composables/useI18n";
 import { safeHtml } from "../composables/useSafeHtml";
 import { useAIProvider } from "../composables/useAIProvider";
-import { useAiHunkQueue } from "../composables/useAiHunkQueue";
+import { useAiHunkQueue, remapHunkIndices } from "../composables/useAiHunkQueue";
 
 import { useHunkExplanation } from "../composables/useHunkExplanation";
 import { useResizeObserver } from "../composables/useResizeObserver";
@@ -103,6 +103,14 @@ const aiQueue = useAiHunkQueue(() => props.file.path);
 // down, which also keys on the hunk array's identity: resolving one conflict
 // renumbers every later one under the same path, and per-hunk AI state that
 // survives that renumbering is attributed to the wrong hunk.
+//
+// `consumedHunkIndex` is what lets that watcher renumber instead of reset in
+// the one case where the renumbering is knowable: a single-hunk resolution
+// this component asked for. Every such emit records the index it consumed
+// here, and the watcher reads it once, on the re-parse that emit causes. An
+// undo, a redo or a file-wide resolve records nothing, so those still drop
+// the lot, which is safe by construction.
+let consumedHunkIndex: number | null = null;
 
 /**
  * Open a hunk's already-staged suggestion for review. Reads the stored
@@ -258,6 +266,7 @@ function applyFileMemory(hunkIndex: number, hunk: ConflictHunk) {
   const resolved = applyMemory(fileMemory.value, hunk);
   if (resolved !== null) {
     markUsed(fileMemory.value.id);
+    consumedHunkIndex = hunkIndex;
     emit("resolveHunkCustom", props.file.path, hunkIndex, resolved);
   }
 }
@@ -271,6 +280,7 @@ function autoDetectPattern(hunk: ConflictHunk): ResolutionStrategy | null {
 
 // ─── Override resolveHunk to capture memory offer ───────
 function resolveHunkWithMemory(path: string, hunkIndex: number, choice: ManualChoice) {
+  consumedHunkIndex = hunkIndex;
   emit("resolveHunk", path, hunkIndex, choice);
   const strategy: ResolutionStrategy = choice === "ours" ? "ours"
     : choice === "theirs" ? "theirs"
@@ -280,6 +290,7 @@ function resolveHunkWithMemory(path: string, hunkIndex: number, choice: ManualCh
 }
 
 function resolveHunkCustomWithMemory(path: string, hunkIndex: number, content: string) {
+  consumedHunkIndex = hunkIndex;
   emit("resolveHunkCustom", path, hunkIndex, content);
   // For custom edits, try to detect an auto-learnable pattern
   const hunk = hunks.value[hunkIndex];
@@ -534,6 +545,7 @@ function onTokenMergeAccept(hunkIndex: number) {
   const hunk = hunks.value[hunkIndex];
   const proposal = hunk?.trace.tokenMergeTrace;
   if (!proposal) return;
+  consumedHunkIndex = hunkIndex;
   emit("resolveHunkCustom", props.file.path, hunkIndex, proposal.mergedLines.join("\n"));
 }
 
@@ -558,6 +570,7 @@ function showTokenMergePanelFor(hunkIndex: number, hunk: ConflictHunk): boolean 
 function onPreviewAccept(hunkIndex: number) {
   const resolution = resolutions.value[hunkIndex];
   if (!resolution?.resolvedLines) return;
+  consumedHunkIndex = hunkIndex;
   emit("resolveHunkCustom", props.file.path, hunkIndex, resolution.resolvedLines.join("\n"));
 }
 
@@ -591,12 +604,39 @@ function showResolutionPreviewFor(hunkIndex: number, hunk: ConflictHunk): boolea
 // index 1's.
 watch(
   [() => props.file.path, () => props.file.result.hunks],
-  () => {
+  ([nextPath, nextHunks], [prevPath, prevHunks]) => {
     editingHunkIndex.value = null;
     editContent.value = "";
     editSource.value = null;
     acceptedLlmHunks.value = new Set();
     rejectedTokenMergeHunks.value = new Set();
+
+    // Read once, whatever happens next: a recorded index that its own
+    // re-parse never arrived for (the store refuses a resolution whose
+    // content moved under it) must not be believed by some later re-parse.
+    const consumed = consumedHunkIndex;
+    consumedHunkIndex = null;
+
+    // Renumber only when the shape of the change is known: the same file, one
+    // conflict fewer, and the index of the one that went. Anything else (an
+    // undo, a redo, a file-wide resolve, a reload) could have moved any hunk,
+    // so it falls back to dropping everything, which is what this watcher
+    // always did. The AI queue keeps its settled answers across a renumber,
+    // so the user does not pay twice for hunks they have not touched; the
+    // batch's membership is index-keyed too and is renumbered by the same
+    // function, or it would start describing the wrong hunks.
+    const renumber =
+      consumed !== null
+      && nextPath === prevPath
+      && nextHunks.length === prevHunks.length - 1;
+    if (renumber) {
+      aiQueue.remapAfterApply([consumed]);
+      aiBatchIndices.value = new Set(
+        remapHunkIndices(aiBatchIndices.value, [consumed]).values(),
+      );
+      return;
+    }
+
     aiQueue.reset();
     aiBatchRun += 1;
     aiBatchIndices.value = new Set();

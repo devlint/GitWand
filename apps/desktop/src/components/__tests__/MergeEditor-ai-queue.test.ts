@@ -518,6 +518,74 @@ describe("MergeEditor AI queue", () => {
     expect(host.querySelector(".ai-explanation-banner")).toBeNull();
   });
 
+  it("keeps the other staged suggestions, renumbered, when one hunk is confirmed", async () => {
+    // Confirming one hunk renumbers the rest, and the blanket reset above
+    // threw away every answer the batch had already paid for, so a user who
+    // resolved the first of ten hunks had to buy the other nine again.
+    suggest.mockImplementation((ctx: { ours: string }) => Promise.resolve(answer(`merged for ${ctx.ours}`)));
+
+    const file = ref(fileWith([complexHunk(0), complexHunk(1), complexHunk(2)]));
+    app = createApp({ render: () => h(MergeEditor, { file: file.value, cwd: "/repo" }) });
+    app.mount(host);
+    await nextTick();
+
+    (host.querySelector(".me-bulk-btn--ai") as HTMLElement).click();
+    await vi.waitFor(() => expect(suggest).toHaveBeenCalledTimes(3));
+    await settle();
+    expect(host.querySelectorAll(".ai-staged-banner").length).toBe(3);
+
+    // Confirm hunk 0 the way a user does: open its staged answer, validate it.
+    (host.querySelectorAll<HTMLElement>(".ai-staged-review")[0]).click();
+    await settle();
+    (host.querySelector(".inline-action--validate") as HTMLElement).click();
+    await settle();
+
+    // What the parent hands back: the same path, one conflict fewer, the two
+    // survivors now at 0 and 1.
+    file.value = fileWith([complexHunk(1), complexHunk(2)]);
+    await settle();
+
+    const staged = [...host.querySelectorAll<HTMLElement>(".ai-staged-banner")];
+    expect(staged.length, "answers already paid for survive the renumbering").toBe(2);
+
+    // And each survivor carries the answer bought for ITS hunk, not its old
+    // neighbour's, which is the failure a plain carry-over would produce.
+    staged[0].querySelector<HTMLElement>(".ai-staged-review")!.click();
+    await settle();
+    const box = host.querySelector<HTMLElement>(".edit-cm .cm-editor");
+    const libs = await loadCodeMirror();
+    expect(libs.EditorView.findFromDOM(box!)?.state.doc.toString()).toBe("merged for ours1");
+    expect(suggest, "nothing was re-bought").toHaveBeenCalledTimes(3);
+  });
+
+  it("drops every staged suggestion when a file-wide resolve renumbers the hunks", async () => {
+    suggest.mockImplementation((ctx: { ours: string }) => Promise.resolve(answer(`merged for ${ctx.ours}`)));
+
+    const file = ref(fileWith([complexHunk(0), complexHunk(1)]));
+    app = createApp({ render: () => h(MergeEditor, { file: file.value, cwd: "/repo" }) });
+    app.mount(host);
+    await nextTick();
+
+    (host.querySelector(".me-bulk-btn--ai") as HTMLElement).click();
+    await vi.waitFor(() => expect(suggest).toHaveBeenCalledTimes(2));
+    await settle();
+
+    // "Keep ours" on the whole file. No hunk index describes what that
+    // consumed, so the renumbering cannot be derived and the reset stands —
+    // even though the hunk count then drops by exactly one, which is the
+    // same shape a single-hunk resolution has.
+    (host.querySelectorAll<HTMLElement>(".me-bulk-btn")[0]).click();
+    await settle();
+    file.value = fileWith([complexHunk(1)]);
+    await settle();
+
+    expect(host.querySelector(".ai-staged-banner"), "no answer may be re-attributed").toBeNull();
+    // And the survivor is askable again, rather than stuck reading `ready`.
+    suggest.mockClear();
+    (host.querySelector(".me-bulk-btn--ai") as HTMLElement).click();
+    await vi.waitFor(() => expect(suggest).toHaveBeenCalledTimes(1));
+  });
+
   it("does not mistake a lone per-hunk AI request for a running batch", async () => {
     // The queue is file-wide and is also driven by each hunk's own AI
     // action, so the bulk bar must track its own batch membership: without
