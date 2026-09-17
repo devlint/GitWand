@@ -79,6 +79,16 @@ export type ConfirmFn = (opts: {
   danger?: boolean;
 }) => Promise<boolean>;
 
+/** Options shared by the abort paths (design §3.1). */
+export interface AbortOptions {
+  /**
+   * True when a successful abort would discard resolution work the user has
+   * done, which is what makes the confirmation worth showing. App.vue passes
+   * `useGitWand`'s `canUndo`.
+   */
+  hasResolutionWork?: boolean;
+}
+
 export interface RepoFileEntry {
   path: string;
   status: "added" | "modified" | "deleted" | "renamed";
@@ -1138,15 +1148,31 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     }
   }
 
-  /** Abort an in-progress merge. */
-  async function abortMerge() {
-    if (!folderPath.value) return;
+  /**
+   * Abort an in-progress merge.
+   *
+   * @returns true only when git actually aborted. `git_merge_abort` returns
+   *   Ok with `success: false` when git refuses (e.g. "Entry not uptodate"),
+   *   so the field has to be read: a rejected promise is not the only failure.
+   *   The caller needs the boolean to decide whether to drop resolution state.
+   */
+  async function abortMerge(_opts: AbortOptions = {}): Promise<boolean> {
+    if (!folderPath.value) return false;
     try {
-      await gitMergeAbort(folderPath.value);
-      successMessage.value = "merge-aborted";
+      const result = await gitMergeAbort(folderPath.value);
+      // refresh() first on every path: loadStatus() writes its own failure
+      // into `error`, so assigning `error` before it would let a status
+      // failure overwrite git's reason for refusing.
       await refresh();
+      if (!result.success) {
+        error.value = `abort merge: ${result.message || "unknown error"}`;
+        return false;
+      }
+      successMessage.value = "merge-aborted";
+      return true;
     } catch (err: any) {
       error.value = `abort merge: ${err?.message || String(err)}`;
+      return false;
     }
   }
 
