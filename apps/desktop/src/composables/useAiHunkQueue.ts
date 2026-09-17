@@ -118,13 +118,22 @@ export function useAiHunkQueue(filePath: () => string) {
     return done;
   }
 
-  function requestAll(items: AiHunkRequest[]): void {
+  /**
+   * Resolves once every hunk this call queued has settled, one way or
+   * another, including when `cancelAll` settles them early. The caller needs
+   * that edge to know when its batch is over, rather than watching a derived
+   * "is anything still running" flag that a later unrelated request can
+   * re-raise.
+   */
+  function requestAll(items: AiHunkRequest[]): Promise<void> {
+    const started: Array<Promise<void>> = [];
     for (const item of items) {
       // A hunk that already has an answer is not asked again: running the
       // batch twice should not re-buy suggestions already staged.
       if (stateFor(item.index) === "ready") continue;
-      void request(item.index, item.hunk);
+      started.push(request(item.index, item.hunk));
     }
+    return Promise.all(started).then(() => undefined);
   }
 
   function pump(): void {
@@ -158,14 +167,18 @@ export function useAiHunkQueue(filePath: () => string) {
         error: err instanceof Error ? err.message : String(err),
       });
     } finally {
-      // A cancelled run does not touch the counter: `cancelAll` already zeroed
-      // it, and decrementing here would drive it negative and leave
-      // `isRunning` wrong for the next batch.
+      // A cancelled run touches nothing: `cancelAll` already zeroed the
+      // counter (decrementing here would drive it negative and leave
+      // `isRunning` wrong for the next batch) and already settled every
+      // outstanding promise. Settling from here too would resolve whatever
+      // resolver a NEWER request for the same index registered in the
+      // meantime, so its caller would wake up on a stale answer, read the
+      // hunk as still loading and give up: the retry would never open.
       if (gen === generation) {
         inFlight.value -= 1;
         pump();
+        settle(item.index);
       }
-      settle(item.index);
     }
   }
 

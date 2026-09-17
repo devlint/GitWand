@@ -6,7 +6,7 @@
  * further clicks, and a suggestion lands in the hunk it belongs to.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { createApp, nextTick, type App } from "vue";
+import { createApp, h, nextTick, ref, type App } from "vue";
 import type { ConflictFile } from "../../composables/useGitWand";
 import type { ConflictHunk } from "@gitwand/core";
 import { loadCodeMirror } from "../../utils/codemirrorLibs";
@@ -77,6 +77,29 @@ function fileWith(hunks: ConflictHunk[]): ConflictFile {
       validation: { valid: true, errors: [] },
     } as unknown as ConflictFile["result"],
   };
+}
+
+
+/** The shape `useAIProvider.suggest` resolves with. */
+const answer = (text: string) => ({ resolvedContent: text, explanation: "why", confidence: "high" as const });
+
+/**
+ * A file whose hunks at `resolvedIndices` were already resolved by the
+ * engine, which is what `showResolutionPreviewFor` keys on to hide their
+ * action row.
+ */
+function fileWithAutoResolved(hunks: ConflictHunk[], resolvedIndices: number[]): ConflictFile {
+  const file = fileWith(hunks);
+  const resolutions = file.result.resolutions as unknown as Array<Record<string, unknown>>;
+  for (const i of resolvedIndices) {
+    resolutions[i] = {
+      hunk: hunks[i],
+      resolvedLines: [`engine merge ${i}`],
+      autoResolved: true,
+      resolutionReason: "engine",
+    };
+  }
+  return file;
 }
 
 /**
@@ -277,6 +300,222 @@ describe("MergeEditor AI queue", () => {
     bulkAi().click();
     await vi.waitFor(() => expect(suggest).toHaveBeenCalledTimes(2));
     await vi.waitFor(() => expect(bulkAi().textContent).not.toContain("Cancel"));
+  });
+
+
+  it("surfaces a staged suggestion on the hunk's own row once the batch is over", async () => {
+    // A batch leaves no hunk in edit mode, and both places that rendered a
+    // ready suggestion were gated on the editor being open for that hunk, so
+    // three model calls used to buy nothing the user could see.
+    suggest.mockImplementation((ctx: { ours: string }) => Promise.resolve(answer(`merged for ${ctx.ours}`)));
+
+    app = createApp(MergeEditor, { file: fileWith([complexHunk(0), complexHunk(1)]), cwd: "/repo" });
+    app.mount(host);
+    await nextTick();
+
+    (host.querySelector(".me-bulk-btn--ai") as HTMLElement).click();
+    await vi.waitFor(() => expect(suggest).toHaveBeenCalledTimes(2));
+    await settle();
+
+    const staged = [...host.querySelectorAll<HTMLElement>(".ai-staged-banner")];
+    expect(staged.length, "every hunk that got an answer shows it").toBe(2);
+
+    // Opening one uses the stored answer. A second model call for something
+    // already paid for is the other half of the bug.
+    (staged[1].querySelector(".ai-staged-review") as HTMLElement).click();
+    await settle();
+    expect(suggest).toHaveBeenCalledTimes(2);
+
+    const box = host.querySelector<HTMLElement>(".edit-cm .cm-editor");
+    expect(box, "the editor opened on the staged suggestion").not.toBeNull();
+    const libs = await loadCodeMirror();
+    expect(libs.EditorView.findFromDOM(box!)?.state.doc.toString()).toBe("merged for ours1");
+  });
+
+  it("opens a staged answer from the hunk's AI action instead of asking again", async () => {
+    suggest.mockImplementation((ctx: { ours: string }) => Promise.resolve(answer(`merged for ${ctx.ours}`)));
+
+    app = createApp(MergeEditor, { file: fileWith([complexHunk(0), complexHunk(1)]), cwd: "/repo" });
+    app.mount(host);
+    await nextTick();
+
+    (host.querySelector(".me-bulk-btn--ai") as HTMLElement).click();
+    await vi.waitFor(() => expect(suggest).toHaveBeenCalledTimes(2));
+    await settle();
+
+    (host.querySelectorAll<HTMLElement>(".inline-action--ai")[0]).click();
+    await settle();
+
+    expect(suggest, "a staged answer is opened, not re-bought").toHaveBeenCalledTimes(2);
+    const box = host.querySelector<HTMLElement>(".edit-cm .cm-editor");
+    const libs = await loadCodeMirror();
+    expect(libs.EditorView.findFromDOM(box!)?.state.doc.toString()).toBe("merged for ours0");
+  });
+
+  it("discards a staged suggestion without opening it", async () => {
+    suggest.mockResolvedValue(answer("merged"));
+
+    app = createApp(MergeEditor, { file: fileWith([complexHunk(0)]), cwd: "/repo" });
+    app.mount(host);
+    await nextTick();
+
+    (host.querySelector(".me-bulk-btn--ai") as HTMLElement).click();
+    await vi.waitFor(() => expect(suggest).toHaveBeenCalledTimes(1));
+    await settle();
+
+    (host.querySelector(".ai-staged-discard") as HTMLElement).click();
+    await settle();
+    expect(host.querySelector(".ai-staged-banner")).toBeNull();
+    expect(host.querySelector(".hunk-edit")).toBeNull();
+  });
+
+  it("opens the retry after the call it replaced answers late", async () => {
+    // A cancelled run used to settle whatever promise a newer request for the
+    // same hunk had registered, so the caller woke up on the stale answer,
+    // read the hunk as still loading and opened nothing.
+    const releases: Array<(v: unknown) => void> = [];
+    suggest.mockImplementation(() => new Promise((res) => { releases.push(res); }));
+
+    app = createApp(MergeEditor, { file: fileWith([complexHunk(0), complexHunk(1)]), cwd: "/repo" });
+    app.mount(host);
+    await nextTick();
+
+    const bulkAi = () => host.querySelector(".me-bulk-btn--ai") as HTMLElement;
+    bulkAi().click();
+    await nextTick();
+    expect(suggest).toHaveBeenCalledTimes(2);
+    bulkAi().click();
+    await nextTick();
+
+    (host.querySelectorAll<HTMLElement>(".inline-action--ai")[0]).click();
+    await nextTick();
+    expect(suggest).toHaveBeenCalledTimes(3);
+
+    releases[0](answer("STALE"));
+    await settle();
+    expect(host.querySelector(".hunk-edit"), "the stale answer must not count as the retry").toBeNull();
+
+    releases[2](answer("FRESH"));
+    await settle();
+    const box = host.querySelector<HTMLElement>(".edit-cm .cm-editor");
+    expect(box, "the retry opens when its own call answers").not.toBeNull();
+    const libs = await loadCodeMirror();
+    expect(libs.EditorView.findFromDOM(box!)?.state.doc.toString()).toBe("FRESH");
+  });
+
+  it("does not re-arm the bulk cancel for a request made after the batch ended", async () => {
+    // Batch membership used to outlive the batch, so a later per-hunk request
+    // on a hunk that happened to be in it turned the bulk button back into a
+    // cancel, which would then kill that unrelated request.
+    suggest.mockImplementation((ctx: { ours: string }) =>
+      ctx.ours === "ours1" ? Promise.reject(new Error("model said no")) : Promise.resolve(answer("ok")),
+    );
+
+    app = createApp(MergeEditor, { file: fileWith([complexHunk(0), complexHunk(1)]), cwd: "/repo" });
+    app.mount(host);
+    await nextTick();
+
+    const bulkAi = () => host.querySelector(".me-bulk-btn--ai") as HTMLElement;
+    bulkAi().click();
+    await settle();
+    expect(bulkAi().textContent).not.toContain("Cancel");
+    // The split is still reported once the membership is gone.
+    expect(host.querySelector(".me-bulk-ai-summary")?.textContent).toContain("1 resolved, 1 failed");
+
+    suggest.mockReturnValue(new Promise(() => {}));
+    (host.querySelectorAll<HTMLElement>(".inline-action--ai")[1]).click();
+    await settle();
+
+    expect(bulkAi().textContent, "a lone per-hunk request is not a batch").not.toContain("Cancel");
+  });
+
+  it("resets per-hunk AI state when the hunks are re-parsed under the same path", async () => {
+    // Resolving one conflict renumbers every later one, and the parent hands
+    // back a new result under the SAME path, so a watcher on the path alone
+    // never fires and the old indices keep pointing at the wrong hunks.
+    suggest.mockResolvedValue(answer("merged"));
+
+    const file = ref(fileWith([complexHunk(0), complexHunk(1), complexHunk(2)]));
+    app = createApp({ render: () => h(MergeEditor, { file: file.value, cwd: "/repo" }) });
+    app.mount(host);
+    await nextTick();
+
+    (host.querySelectorAll<HTMLElement>(".inline-action--ai")[0]).click();
+    await settle();
+    expect(host.querySelector(".ai-explanation-banner")).not.toBeNull();
+
+    file.value = fileWith([complexHunk(1), complexHunk(2)]);
+    await settle();
+
+    expect(host.querySelector(".hunk-edit"), "an open edit box must not survive a re-parse").toBeNull();
+    expect(
+      host.querySelector(".ai-explanation-banner"),
+      "one hunk's explanation must not be re-attributed to another",
+    ).toBeNull();
+    expect(host.querySelector(".ai-staged-banner"), "no suggestion survives the renumbering").toBeNull();
+  });
+
+  it("runs a fresh batch after the hunks were renumbered", async () => {
+    // Falls out of the reset above: without it every surviving index still
+    // reads `ready`, so the batch filters everything out and the button
+    // silently does nothing.
+    suggest.mockResolvedValue(answer("merged"));
+
+    const file = ref(fileWith([complexHunk(0), complexHunk(1)]));
+    app = createApp({ render: () => h(MergeEditor, { file: file.value, cwd: "/repo" }) });
+    app.mount(host);
+    await nextTick();
+
+    (host.querySelector(".me-bulk-btn--ai") as HTMLElement).click();
+    await vi.waitFor(() => expect(suggest).toHaveBeenCalledTimes(2));
+    await settle();
+
+    file.value = fileWith([complexHunk(1)]);
+    await settle();
+
+    suggest.mockClear();
+    (host.querySelector(".me-bulk-btn--ai") as HTMLElement).click();
+    await vi.waitFor(() => expect(suggest).toHaveBeenCalledTimes(1));
+  });
+
+  it("does not ask the model about hunks the engine already resolved", async () => {
+    suggest.mockResolvedValue(answer("merged"));
+
+    const file = fileWithAutoResolved(
+      [complexHunk(0), complexHunk(1), complexHunk(2), complexHunk(3)],
+      [1, 2, 3],
+    );
+    app = createApp(MergeEditor, { file, cwd: "/repo" });
+    app.mount(host);
+    await nextTick();
+
+    (host.querySelector(".me-bulk-btn--ai") as HTMLElement).click();
+    await settle();
+
+    expect(suggest, "only the hunk that still needs a human is paid for").toHaveBeenCalledTimes(1);
+  });
+
+  it("labels a plain custom edit as a custom edit even when a suggestion is staged", async () => {
+    suggest.mockResolvedValue(answer("AI CONTENT"));
+
+    app = createApp(MergeEditor, { file: fileWith([complexHunk(0)]), cwd: "/repo" });
+    app.mount(host);
+    await nextTick();
+
+    (host.querySelector(".inline-action--ai") as HTMLElement).click();
+    await settle();
+    expect(host.querySelector(".edit-label")?.textContent).toContain("AI suggestion");
+
+    // Close it and reopen the SAME hunk through Custom edit. The box now
+    // holds `startEditing`'s ours-plus-theirs concatenation, so calling it an
+    // AI suggestion and showing the model's explanation under it is a lie.
+    ([...host.querySelectorAll<HTMLElement>(".edit-actions-inline .inline-action")].pop() as HTMLElement).click();
+    await settle();
+    (host.querySelector(".inline-action--edit") as HTMLElement).click();
+    await settle();
+
+    expect(host.querySelector(".edit-label")?.textContent).not.toContain("AI");
+    expect(host.querySelector(".ai-explanation-banner")).toBeNull();
   });
 
   it("does not mistake a lone per-hunk AI request for a running batch", async () => {

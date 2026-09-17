@@ -181,6 +181,37 @@ describe("useAiHunkQueue", () => {
     expect(suggest).toHaveBeenCalledTimes(2);
   });
 
+  it("does not let a cancelled run settle a later request for the same hunk", async () => {
+    // The user cancels, then asks again for the same hunk. The first call is
+    // already with the provider and cannot be unsubscribed, so it answers
+    // while the second is still in flight. Its answer must land nowhere: if
+    // it settles the SECOND request's promise, the caller wakes up, reads the
+    // hunk as still loading and gives up, and the retry never opens.
+    const stale = deferred<ReturnType<typeof answer>>();
+    const fresh = deferred<ReturnType<typeof answer>>();
+    suggest.mockReturnValueOnce(stale.promise).mockReturnValueOnce(fresh.promise);
+    const q = useAiHunkQueue(() => "a.ts");
+
+    const cancelled = q.request(0, hunk(0));
+    q.cancelAll();
+    await cancelled;
+
+    const retry = q.request(0, hunk(0));
+    let retrySettled = false;
+    void retry.then(() => { retrySettled = true; });
+
+    stale.resolve(answer("stale"));
+    for (let i = 0; i < 5; i += 1) await Promise.resolve();
+
+    expect(retrySettled, "the stale run must not settle the retry").toBe(false);
+    expect(q.stateFor(0)).toBe("loading");
+
+    fresh.resolve(answer("fresh"));
+    await retry;
+    expect(q.stateFor(0)).toBe("ready");
+    expect(q.suggestionFor(0)?.resolvedContent).toBe("fresh");
+  });
+
   it("passes the file path and the hunk's three sides to the provider", async () => {
     suggest.mockResolvedValue(answer("ok"));
     const q = useAiHunkQueue(() => "src/thing.ts");

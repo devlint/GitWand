@@ -68,47 +68,83 @@ const emit = defineEmits<{
 const editingHunkIndex = ref<number | null>(null);
 const editContent = ref("");
 
+/**
+ * How the open edit box was filled. The label above the box and the
+ * explanation banner under it used to key on the queue's state instead, so a
+ * plain Custom edit on a hunk that happened to carry a staged suggestion was
+ * labelled "AI suggestion" while holding `startEditing`'s mechanical
+ * ours-plus-theirs concatenation, with the model's explanation beneath it.
+ * Provenance is a property of the opening, not of the queue.
+ */
+const editSource = ref<"custom" | "ai" | null>(null);
+
 function startEditing(hunkIndex: number, hunk: ConflictHunk) {
   editContent.value = [...hunk.oursLines, ...hunk.theirsLines].join("\n");
+  editSource.value = "custom";
   editingHunkIndex.value = hunkIndex;
 }
 
 function cancelEditing() {
   editingHunkIndex.value = null;
   editContent.value = "";
+  editSource.value = null;
 }
 
 function validateEditing(hunkIndex: number) {
   resolveHunkCustomWithMemory(props.file.path, hunkIndex, editContent.value);
   editingHunkIndex.value = null;
   editContent.value = "";
+  editSource.value = null;
 }
 
 // ─── AI Suggestion ─────────────────────────────────────
 const aiQueue = useAiHunkQueue(() => props.file.path);
+// The reset of this state lives in the consolidated per-file watcher further
+// down, which also keys on the hunk array's identity: resolving one conflict
+// renumbers every later one under the same path, and per-hunk AI state that
+// survives that renumbering is attributed to the wrong hunk.
 
-// A different file means different hunk indices; keeping the old map would
-// show one file's suggestions against another's conflicts, and any batch
-// membership tracked below means nothing against a new file's hunks either.
-watch(() => props.file.path, () => {
-  aiQueue.reset();
-  aiBatchIndices.value = new Set();
-});
+/**
+ * Open a hunk's already-staged suggestion for review. Reads the stored
+ * answer, so it costs nothing: a suggestion that has been paid for is opened,
+ * never re-requested.
+ */
+function openAISuggestion(hunkIndex: number): void {
+  const suggestion = aiQueue.suggestionFor(hunkIndex);
+  if (!suggestion) return;
+  editContent.value = suggestion.resolvedContent;
+  editSource.value = "ai";
+  editingHunkIndex.value = hunkIndex;
+}
 
 async function requestAISuggestion(hunkIndex: number, hunk: ConflictHunk) {
   const state = aiQueue.stateFor(hunkIndex);
   if (state === "queued" || state === "loading") return;
 
+  // An answer is already staged for this hunk, typically by a batch: show it
+  // instead of buying a second one. Asking the model again is an explicit
+  // retry, which lives on the error banner where it belongs.
+  if (state === "ready") {
+    openAISuggestion(hunkIndex);
+    return;
+  }
+
   await aiQueue.request(hunkIndex, hunk);
 
   // Single-hunk behaviour is unchanged: the editor opens pre-filled so the
   // user reviews before confirming. The batch deliberately does NOT do this,
-  // since only one hunk can be open at a time.
-  const suggestion = aiQueue.suggestionFor(hunkIndex);
-  if (suggestion && aiQueue.stateFor(hunkIndex) === "ready") {
-    editContent.value = suggestion.resolvedContent;
-    editingHunkIndex.value = hunkIndex;
-  }
+  // since only one hunk can be open at a time; it stages instead, and the
+  // row's staged banner is how those answers are reached.
+  if (aiQueue.stateFor(hunkIndex) === "ready") openAISuggestion(hunkIndex);
+}
+
+/** Ask the model again for a hunk whose call failed. */
+async function retryAISuggestion(hunkIndex: number, hunk: ConflictHunk) {
+  if (aiBusy(hunkIndex)) return;
+  // Clears the error entry, so the request below is not short-circuited by a
+  // stale `ready`/`error` state.
+  aiQueue.dismiss(hunkIndex);
+  await requestAISuggestion(hunkIndex, hunk);
 }
 
 function aiBusy(hunkIndex: number): boolean {
@@ -351,22 +387,73 @@ function bulkResolve(choice: "ours" | "theirs" | "both") {
 // per-hunk queue the single-hunk AI button uses, and the user still confirms
 // each one.
 /**
- * The hunks the current "Resolve all with AI" run queued. The queue itself
+ * The hunks the RUNNING "Resolve all with AI" batch queued. The queue itself
  * is file-wide and is also driven by each hunk's own AI action, so the bulk
  * bar has to track its own membership: without it, a single per-hunk
  * request makes this button think a batch is running (and, since its click
  * handler cancels while running, would silently cancel a request the user
  * never associated with a batch).
+ *
+ * Emptied the moment the batch ends, cancel included. Membership that
+ * outlived its batch caused exactly the bug it was meant to prevent: a later
+ * per-hunk request on a hunk that happened to be in the last batch re-armed
+ * the cancel, which then killed that unrelated request.
  */
 const aiBatchIndices = ref<Set<number>>(new Set());
 
-/** Unresolved hunks only: a hunk already staged or resolved is not re-asked. */
-function resolveAllWithAi() {
+/**
+ * What the last finished batch achieved, snapshotted as it ends. The summary
+ * used to read it off `aiBatchIndices` afterwards, which is why that set had
+ * to stay populated past the end of its own batch.
+ */
+const aiBatchCounts = ref<{ ready: number; error: number } | null>(null);
+
+/**
+ * Distinguishes batches, so a cancelled batch's awaiter cannot clear the
+ * membership of the batch the user started right after it.
+ */
+let aiBatchRun = 0;
+
+/** Snapshot the outcome, then let the membership die with its batch. */
+function finishAiBatch(): void {
+  let ready = 0;
+  let error = 0;
+  for (const i of aiBatchIndices.value) {
+    const s = aiQueue.stateFor(i);
+    if (s === "ready") ready += 1;
+    else if (s === "error") error += 1;
+  }
+  aiBatchCounts.value = { ready, error };
+  aiBatchIndices.value = new Set();
+}
+
+/**
+ * Hunks that still need a human: everything the engine did not already
+ * resolve, minus what already carries a staged answer. The `autoResolved`
+ * test is the same signal `showResolutionPreviewFor` uses to hide those
+ * hunks' action rows, so the batch cannot pay for a hunk whose AI action the
+ * user could not even click.
+ */
+async function resolveAllWithAi() {
   const items = hunks.value
     .map((hunk, index) => ({ index, hunk }))
+    .filter(({ index }) => !resolutions.value[index]?.autoResolved)
     .filter(({ index }) => aiQueue.stateFor(index) !== "ready");
+  if (items.length === 0) return;
+
+  const run = (aiBatchRun += 1);
+  aiBatchCounts.value = null;
   aiBatchIndices.value = new Set(items.map((i) => i.index));
-  aiQueue.requestAll(items);
+  await aiQueue.requestAll(items);
+  if (run !== aiBatchRun) return;
+  finishAiBatch();
+}
+
+/** Bulk Cancel: ends the batch here rather than leaving its membership behind. */
+function cancelAiBatch(): void {
+  aiBatchRun += 1;
+  aiQueue.cancelAll();
+  finishAiBatch();
 }
 
 /** True only while a hunk that THIS batch queued is still queued/loading. */
@@ -389,18 +476,11 @@ const aiBatchProgress = computed(() => {
   return t("merge.bulkAiProgress", String(total - left), String(total));
 });
 
-/** Shown once this batch has finished and at least one of its hunks failed. */
+/** Shown once a batch has finished and at least one of its hunks failed. */
 const aiBatchSummary = computed(() => {
-  if (aiBatchRunning.value) return "";
-  let ready = 0;
-  let error = 0;
-  for (const i of aiBatchIndices.value) {
-    const s = aiQueue.stateFor(i);
-    if (s === "ready") ready += 1;
-    else if (s === "error") error += 1;
-  }
-  if (error === 0) return "";
-  return t("merge.bulkAiSummary", String(ready), String(error));
+  const counts = aiBatchCounts.value;
+  if (!counts || counts.error === 0) return "";
+  return t("merge.bulkAiSummary", String(counts.ready), String(counts.error));
 });
 
 /** Does a given hunk carry an `llm_proposed` decision with a trace? */
@@ -499,15 +579,28 @@ function showResolutionPreviewFor(hunkIndex: number, hunk: ConflictHunk): boolea
 // each reset one slice of this UI-only state (inline edit, LLM panel,
 // token-merge/preview panels). Splitting them made it easy to add a new ref
 // and forget to wire it into a reset — that's exactly what happened when
-// rejectedTokenMergeHunks/rejectedPreviewHunks landed. One watcher, one place
-// to extend.
+// rejectedTokenMergeHunks/rejectedPreviewHunks landed, and again when the AI
+// queue arrived with a path-only reset of its own. One watcher, one place to
+// extend.
+//
+// The hunk array's identity is watched alongside the path, and it is the half
+// that matters most: every ref here is keyed by hunk index, resolving one
+// conflict renumbers every later one, and the parent hands back a re-parsed
+// `result` under the SAME path. A path-only watcher never fires on that, so
+// index 2's AI suggestion, explanation and panel state would silently become
+// index 1's.
 watch(
-  () => props.file.path,
+  [() => props.file.path, () => props.file.result.hunks],
   () => {
     editingHunkIndex.value = null;
     editContent.value = "";
+    editSource.value = null;
     acceptedLlmHunks.value = new Set();
     rejectedTokenMergeHunks.value = new Set();
+    aiQueue.reset();
+    aiBatchRun += 1;
+    aiBatchIndices.value = new Set();
+    aiBatchCounts.value = null;
     // The opt-out set is deliberately NOT cleared here. It is keyed by path
     // and guarded by a content stamp, so tabbing between two conflicted files
     // and back keeps the user's choices instead of silently discarding them.
@@ -861,16 +954,18 @@ useResizeObserver(contentEl, drawMinimap);
         <button
           v-if="aiAvailable"
           class="me-bulk-btn me-bulk-btn--ai"
-          @click="aiBatchRunning ? aiQueue.cancelAll() : resolveAllWithAi()"
+          @click="aiBatchRunning ? cancelAiBatch() : resolveAllWithAi()"
         >
           <!--
-            Cancel calls `cancelAll()`, not a per-batch cancel: it also stops
-            any unrelated per-hunk request that happens to be in flight at
-            the same time. That is a deliberate choice, not an oversight. A
-            per-index cancel would be more surface in the queue composable
-            for a case nobody has asked for, and cancelling everything
-            AI-related when the user presses a visible Cancel button is the
-            predictable behaviour.
+            `cancelAiBatch` ends this batch and calls `cancelAll()`, not a
+            per-index cancel: it also stops any unrelated per-hunk request
+            that happens to be in flight at the same time. That is a
+            deliberate choice, not an oversight. A per-index cancel would be
+            more surface in the queue composable for a case nobody has asked
+            for, and cancelling everything AI-related when the user presses a
+            visible Cancel button is the predictable behaviour. What is NOT
+            acceptable is this button being armed at all outside a running
+            batch, which is why the membership it reads dies with its batch.
           -->
           <AiSparkle :size="12" :animated="aiBatchRunning" />
           {{ aiBatchRunning
@@ -1176,11 +1271,43 @@ useResizeObserver(contentEl, drawMinimap);
             <!-- ── AI error banner ──────────────────────── -->
             <div v-if="aiQueue.errorFor(seg.hunkIndex!)" class="ai-error-banner">
               <span>{{ t('mergeEditor.aiErrorPrefix') }} : {{ aiQueue.errorFor(seg.hunkIndex!) }}</span>
+              <!-- Asking the model again is an explicit action, and it lives
+                   here rather than being overloaded onto the hunk's AI entry:
+                   that entry now opens an answer already paid for. -->
+              <a
+                v-if="hunkForSegment(seg)"
+                href="#"
+                class="ai-error-retry"
+                @click.prevent="retryAISuggestion(seg.hunkIndex!, hunkForSegment(seg)!)"
+              >{{ t('mergeEditor.aiRetry') }}</a>
               <a href="#" @click.prevent="dismissAISuggestion(seg.hunkIndex!)" class="ai-error-close">OK</a>
             </div>
 
+            <!-- ── Staged AI suggestion, waiting to be reviewed ──────── -->
+            <!-- A batch leaves no hunk in edit mode, so without this row its
+                 answers would be invisible: both the explanation banner and
+                 the edit area render only for the hunk currently open. -->
+            <div
+              v-if="aiQueue.stateFor(seg.hunkIndex!) === 'ready' && editingHunkIndex !== seg.hunkIndex"
+              class="ai-staged-banner"
+            >
+              <AiSparkle :size="12" />
+              <span class="ai-staged-label">{{ t('mergeEditor.aiStagedReady') }}</span>
+              <a
+                href="#"
+                class="inline-action ai-staged-review"
+                @click.prevent="openAISuggestion(seg.hunkIndex!)"
+              >{{ t('mergeEditor.aiStagedReview') }}</a>
+              <span class="inline-sep">|</span>
+              <a
+                href="#"
+                class="inline-action ai-staged-discard"
+                @click.prevent="dismissAISuggestion(seg.hunkIndex!)"
+              >{{ t('mergeEditor.aiStagedDiscard') }}</a>
+            </div>
+
             <!-- ── AI explanation banner ──────────────────── -->
-            <div v-if="aiQueue.suggestionFor(seg.hunkIndex!)?.explanation && editingHunkIndex === seg.hunkIndex" class="ai-explanation-banner">
+            <div v-if="aiQueue.suggestionFor(seg.hunkIndex!)?.explanation && editingHunkIndex === seg.hunkIndex && editSource === 'ai'" class="ai-explanation-banner">
               <svg class="ai-explanation-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
                 <path d="M8 1v2m0 10v2M1 8h2m10 0h2"/><circle cx="8" cy="8" r="4"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/>
               </svg>
@@ -1202,7 +1329,10 @@ useResizeObserver(contentEl, drawMinimap);
             <!-- ── Inline Edit Mode ─────────────────────── -->
             <div v-if="editingHunkIndex === seg.hunkIndex" class="hunk-edit">
               <div class="edit-header">
-                <span class="edit-label">{{ aiQueue.stateFor(seg.hunkIndex!) === 'ready' ? t('mergeEditor.aiSuggestionLabel') : t('merge.customEdit') }}</span>
+                <!-- Keyed on how the box was opened, not on the queue: a
+                     Custom edit on a hunk that carries a staged suggestion is
+                     still a Custom edit. -->
+                <span class="edit-label">{{ editSource === 'ai' ? t('mergeEditor.aiSuggestionLabel') : t('merge.customEdit') }}</span>
                 <div class="edit-actions-inline">
                   <a
                     class="inline-action inline-action--validate"
@@ -1776,6 +1906,39 @@ useResizeObserver(contentEl, drawMinimap);
   font-weight: var(--font-semibold);
   font-size: var(--text-xs);
   text-decoration: none;
+}
+
+.ai-error-retry {
+  color: var(--color-danger);
+  font-weight: var(--font-semibold);
+  font-size: var(--text-xs);
+  text-decoration: none;
+  margin-left: auto;
+  margin-right: 12px;
+}
+
+.ai-staged-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 14px;
+  margin: 4px 12px;
+  background: var(--color-accent-soft);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-base);
+  color: var(--color-accent);
+}
+
+.ai-staged-label {
+  margin-right: auto;
+}
+
+/* Single-class selectors on purpose: prefixing them with the banner would
+   raise the specificity over `.inline-action` for no gain, and source order
+   already settles it. */
+.ai-staged-review,
+.ai-staged-discard {
+  color: var(--color-accent);
 }
 
 .ai-explanation-banner {
