@@ -115,6 +115,13 @@ uuid = { version = "1", features = ["v4"] }
 # @gitwand/core; see commands/secrets.rs.
 regex = "1"
 
+[dev-dependencies]
+# tokio is already in the tree (tauri depends on it) — this entry only makes
+# it nameable from `#[cfg(test)]` code, so a test can build a runtime with a
+# known worker count and prove the AI commands never occupy it (issue #196).
+# Dev-only: nothing here reaches the shipped binary or the release profile.
+tokio = { version = "1", default-features = false, features = ["rt", "rt-multi-thread", "time"] }
+
 # ─── Release profile (P2.4) ──────────────────────────────────
 #
 # Profile tuné pour la build de production (vs defaults Cargo conservateurs).

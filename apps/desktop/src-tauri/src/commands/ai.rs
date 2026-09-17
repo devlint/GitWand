@@ -975,3 +975,134 @@ fn claude_cli_login_inner() -> Result<(), String> {
     #[allow(unreachable_code)]
     Err("Plateforme non supportée".to_string())
 }
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::{Duration, Instant};
+
+    /// The name of the measurement test, as libtest addresses it. `module_path!`
+    /// carries the crate name in front, which the test filter does not use.
+    fn measurement_test_name() -> String {
+        let module = module_path!()
+            .split_once("::")
+            .map(|(_, rest)| rest)
+            .unwrap();
+        format!("{module}::ai_call_does_not_occupy_the_calling_runtime")
+    }
+
+    /// Writes a deliberately slow stand-in for the `claude` binary and returns
+    /// its directory. The real CLI takes seconds to minutes per call, which is
+    /// the entire reason these commands must not run on a runtime worker; a
+    /// fake reproduces that without spending a model call, and keeps the test
+    /// meaningful on CI, where no provider CLI is installed.
+    fn write_fake_claude() -> PathBuf {
+        static COUNTER: AtomicUsize = AtomicUsize::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::SeqCst);
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "gitwand-ai-blocking-{}-{}-{}",
+            std::process::id(),
+            n,
+            nanos
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let bin = dir.join("claude");
+        std::fs::write(&bin, "#!/bin/sh\nsleep 1\necho OK\n").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        dir
+    }
+
+    /// Issue #196: clicking the AI action froze the whole app until the model
+    /// answered. The body of these commands spawns a process and blocks on
+    /// `.output()`, so running it on a runtime worker pins that worker for the
+    /// length of a model call, and a batch of them starves every other IPC
+    /// command the app makes.
+    ///
+    /// This is the parent half. It cannot put the fake binary on its own PATH:
+    /// `set_var` mutates process-wide state while the rest of this suite is
+    /// spawning `git` from other threads. So the measurement runs in a child
+    /// process that inherits a PATH built with `Command::env`, which touches
+    /// nothing outside that child.
+    #[test]
+    fn ai_call_does_not_block_other_ipc() {
+        let dir = write_fake_claude();
+        let path = format!(
+            "{}:{}",
+            dir.display(),
+            std::env::var("PATH").unwrap_or_default()
+        );
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", &measurement_test_name(), "--nocapture"])
+            .env("GITWAND_AI_BLOCKING_CHILD", "1")
+            .env("PATH", path)
+            .output()
+            .unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+        assert!(
+            out.status.success(),
+            "the measurement failed:\n{}\n{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    /// The child half, and the actual measurement. Inert unless the parent
+    /// above started it, so a plain `cargo test` run does not execute it twice
+    /// (and never without the fake binary on PATH).
+    ///
+    /// The runtime has ONE worker on purpose: that is the sharpest form of the
+    /// property. Three calls are put in flight, then a plain 50ms timer is
+    /// awaited on that same runtime. If the calls were running on the worker,
+    /// the timer could not fire until all three had finished, so the elapsed
+    /// time would be the three seconds they take, not the fifty milliseconds
+    /// it asks for.
+    #[test]
+    fn ai_call_does_not_occupy_the_calling_runtime() {
+        if std::env::var("GITWAND_AI_BLOCKING_CHILD").is_err() {
+            return;
+        }
+
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+
+        let (elapsed, answers) = rt.block_on(async {
+            let started = Instant::now();
+            let calls: Vec<_> = (0..3)
+                .map(|_| {
+                    tokio::spawn(claude_cli_prompt(
+                        "ping".to_string(),
+                        None,
+                        None,
+                        None,
+                        None,
+                    ))
+                })
+                .collect();
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            let elapsed = started.elapsed();
+            let mut answers = Vec::new();
+            for call in calls {
+                answers.push(call.await.unwrap());
+            }
+            (elapsed, answers)
+        });
+
+        assert!(
+            elapsed < Duration::from_millis(600),
+            "a 50ms timer took {elapsed:?} to fire while three AI calls were in flight: \
+             the calls are holding the runtime worker instead of the blocking pool"
+        );
+        for answer in answers {
+            assert_eq!(answer.unwrap().trim(), "OK");
+        }
+    }
+}
