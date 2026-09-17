@@ -1736,11 +1736,18 @@ export async function gitCherryPickAbort(cwd: string): Promise<void> {
     await tauriInvoke("git_cherry_pick_abort", { cwd });
     return;
   }
-  await devFetch(`${DEV_SERVER}/api/git-cherry-pick-abort`, {
+  // The dev-server answers 200 with { success: false, message } on a failing
+  // abort, where the Rust command returns Err. Throwing here is what keeps a
+  // single failure path for both backends (design §3.6).
+  const res = await devFetch(`${DEV_SERVER}/api/git-cherry-pick-abort`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ cwd }),
   });
+  const body = (await res.json()) as { success?: boolean; message?: string };
+  if (!body.success) {
+    throw new Error(body.message || "cherry-pick --abort failed");
+  }
 }
 
 /**
