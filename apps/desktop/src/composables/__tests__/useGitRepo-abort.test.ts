@@ -19,6 +19,7 @@ vi.mock("../../utils/backend");
 import { useGitRepo } from "../useGitRepo";
 import {
   gitMergeAbort,
+  gitCherryPickAbort,
   getGitStatus,
   getGitLog,
 } from "../../utils/backend";
@@ -42,6 +43,7 @@ function makeRepo(confirm = vi.fn(async () => true)) {
 
 beforeEach(() => {
   vi.mocked(gitMergeAbort).mockReset();
+  vi.mocked(gitCherryPickAbort).mockReset();
 });
 
 describe("abortMerge", () => {
@@ -91,5 +93,44 @@ describe("abortMerge", () => {
 
     expect(ok).toBe(false);
     expect(gitMergeAbort).not.toHaveBeenCalled();
+  });
+});
+
+describe("cherryPickAbort", () => {
+  it("returns true, sets the toast and leaves cherry-pick mode on success", async () => {
+    const { repo } = makeRepo();
+    repo.isCherryPicking.value = true;
+    vi.mocked(gitCherryPickAbort).mockResolvedValue(undefined);
+
+    const ok = await repo.cherryPickAbort();
+
+    expect(ok).toBe(true);
+    expect(repo.successMessage.value).toBe("cherry-pick-aborted");
+    expect(repo.isCherryPicking.value).toBe(false);
+  });
+
+  it("stays in cherry-pick mode when the abort failed", async () => {
+    const { repo } = makeRepo();
+    repo.isCherryPicking.value = true;
+    vi.mocked(gitCherryPickAbort).mockRejectedValue(
+      new Error("error: no cherry-pick in progress"),
+    );
+
+    const ok = await repo.cherryPickAbort();
+
+    expect(ok).toBe(false);
+    expect(repo.isCherryPicking.value).toBe(true);
+    expect(repo.error.value).toContain("no cherry-pick in progress");
+    expect(repo.successMessage.value).not.toBe("cherry-pick-aborted");
+  });
+
+  it("returns false without calling git when no folder is open", async () => {
+    const { repo } = makeRepo();
+    repo.folderPath.value = null;
+
+    const ok = await repo.cherryPickAbort();
+
+    expect(ok).toBe(false);
+    expect(gitCherryPickAbort).not.toHaveBeenCalled();
   });
 });

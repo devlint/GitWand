@@ -1239,16 +1239,26 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     }
   }
 
-  async function cherryPickAbort() {
-    if (!folderPath.value) return;
+  /**
+   * Abort an in-progress cherry-pick.
+   *
+   * @returns true only when git actually aborted. `isCherryPicking` is cleared
+   *   on that branch alone — a failed abort leaves the sequencer on disk, and
+   *   dropping the flag would make the banner offer "Abort merge" for a
+   *   cherry-pick that is still in progress (design §3.4).
+   */
+  async function cherryPickAbort(_opts: AbortOptions = {}): Promise<boolean> {
+    if (!folderPath.value) return false;
     try {
       await gitCherryPickAbort(folderPath.value);
-      successMessage.value = "cherry-pick-aborted";
       await refresh();
-    } catch (err: any) {
-      error.value = `cherry-pick abort: ${err?.message ?? err}`;
-    } finally {
+      successMessage.value = "cherry-pick-aborted";
       isCherryPicking.value = false;
+      return true;
+    } catch (err: any) {
+      await refresh();
+      error.value = `cherry-pick abort: ${err?.message ?? err}`;
+      return false;
     }
   }
 
