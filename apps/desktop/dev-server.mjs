@@ -3054,39 +3054,8 @@ async function handleRequest(req, res) {
     }
 
     // POST /api/git-merge-continue  { cwd }
-    if (url.pathname === "/api/git-merge-continue" && req.method === "POST") {
-      const { cwd } = await readBody(req);
-      if (!cwd) return jsonResponse(req, res, { success: false, message: "Missing cwd" }, 400);
-      try {
-        const resolvedCwd = resolve(cwd);
-        const stdout = execSync('git -c core.editor=true merge --continue 2>&1', {
-          cwd: resolvedCwd,
-          encoding: "utf-8",
-          shell: true,
-          env: { ...process.env, GIT_MERGE_AUTOEDIT: "no", GIT_EDITOR: "true" },
-        });
-        return jsonResponse(req, res, { success: true, message: stdout.trim() || "Merge completed" });
-      } catch (err) {
-        return jsonResponse(req, res, { success: false, message: (err.stderr || err.stdout || err.message || "").toString().trim() });
-      }
-    }
 
     // POST /api/git-merge-abort  { cwd }
-    if (url.pathname === "/api/git-merge-abort" && req.method === "POST") {
-      const { cwd } = await readBody(req);
-      if (!cwd) return jsonResponse(req, res, { success: false, message: "Missing cwd" }, 400);
-      try {
-        const resolvedCwd = resolve(cwd);
-        execSync("git merge --abort 2>&1", {
-          cwd: resolvedCwd,
-          encoding: "utf-8",
-          shell: true,
-        });
-        return jsonResponse(req, res, { success: true, message: "Merge aborted" });
-      } catch (err) {
-        return jsonResponse(req, res, { success: false, message: ((err.stdout || "") + (err.stderr || "")).toString().trim() || err.message });
-      }
-    }
 
     // POST /api/git-cherry-pick  { cwd, hashes }
     if (url.pathname === "/api/git-cherry-pick" && req.method === "POST") {
@@ -3116,42 +3085,8 @@ async function handleRequest(req, res) {
     }
 
     // POST /api/git-cherry-pick-abort  { cwd }
-    if (url.pathname === "/api/git-cherry-pick-abort" && req.method === "POST") {
-      const { cwd } = await readBody(req);
-      if (!cwd) return jsonResponse(req, res, { success: false, message: "Missing cwd" }, 400);
-      try {
-        const resolvedCwd = resolve(cwd);
-        execSync("git cherry-pick --abort 2>&1", { cwd: resolvedCwd, encoding: "utf-8", shell: true });
-        return jsonResponse(req, res, { success: true, message: "Cherry-pick aborted" });
-      } catch (err) {
-        return jsonResponse(req, res, { success: false, message: ((err.stdout || "") + (err.stderr || "")).toString().trim() || err.message });
-      }
-    }
 
     // POST /api/git-cherry-pick-continue  { cwd }
-    if (url.pathname === "/api/git-cherry-pick-continue" && req.method === "POST") {
-      const { cwd } = await readBody(req);
-      if (!cwd) return jsonResponse(req, res, { success: false, message: "Missing cwd" }, 400);
-      try {
-        const resolvedCwd = resolve(cwd);
-        const stdout = execSync("git cherry-pick --continue 2>&1", {
-          cwd: resolvedCwd,
-          encoding: "utf-8",
-          shell: true,
-          env: { ...process.env, GIT_EDITOR: "true" },
-        });
-        const hasConflicts = stdout.includes("CONFLICT") || stdout.includes("conflict");
-        return jsonResponse(req, res, { success: !hasConflicts, conflicts: hasConflicts, message: stdout.trim() });
-      } catch (err) {
-        const combined = ((err.stderr || "") + (err.stdout || "")).toString();
-        const hasConflicts = combined.includes("CONFLICT") || combined.includes("conflict");
-        return jsonResponse(req, res, {
-          success: false,
-          conflicts: hasConflicts,
-          message: (err.stderr || err.stdout || err.message || "").toString().trim(),
-        });
-      }
-    }
 
     // POST /api/git-pull  { cwd, strategy?, autostash? }  strategy: "merge" | "rebase" | "ff-only"
     if (url.pathname === "/api/git-pull" && req.method === "POST") {
@@ -3258,17 +3193,45 @@ async function handleRequest(req, res) {
     }
 
     // POST /api/git-rebase-action  { cwd, action: "continue"|"abort"|"skip" }
-    if (url.pathname === "/api/git-rebase-action" && req.method === "POST") {
-      const { cwd, action } = await readBody(req);
-      if (!cwd || !["continue","abort","skip"].includes(action))
-        return jsonResponse(req, res, { error: "Missing cwd or invalid action" }, 400);
-      try {
-        const resolvedCwd = resolve(cwd);
-        execSync(`git rebase --${action}`, { cwd: resolvedCwd, encoding: "utf-8", shell: true, env: { ...process.env, GIT_EDITOR: "true", GIT_TERMINAL_PROMPT: "0" } });
-        return jsonResponse(req, res, { ok: true });
-      } catch (err) {
-        return jsonResponse(req, res, { error: err.stderr || err.message }, 500);
+
+    // POST /api/git-operation-action  { cwd, operation, action } -> { halted }
+    // Mirrors the Rust git_operation_action: three outcomes, not two. Replaces
+    // the five per-operation routes, which each ran a shell string (forbidden
+    // by AGENTS.md) and disagreed on how failure was reported.
+    if (url.pathname === "/api/git-operation-action" && req.method === "POST") {
+      const { cwd, operation, action } = await readBody(req);
+      const OPS = { merge: "merge", cherry_pick: "cherry-pick", revert: "revert", rebase: "rebase" };
+      const ACTIONS = { continue: "--continue", abort: "--abort", skip: "--skip" };
+      const op = OPS[operation];
+      const act = ACTIONS[action];
+      if (!cwd || !op || !act) {
+        return jsonResponse(req, res, { error: "Missing cwd or invalid operation/action" }, 400);
       }
+      if (op === "merge" && act === "--skip") {
+        return jsonResponse(req, res, { error: "git merge has no --skip" }, 400);
+      }
+      const r = spawnSync(GIT, [op, act], {
+        cwd: resolve(cwd),
+        encoding: "utf-8",
+        env: {
+          ...process.env,
+          GIT_EDITOR: "true",
+          EDITOR: "true",
+          GIT_MERGE_AUTOEDIT: "no",
+          GIT_TERMINAL_PROMPT: "0",
+          // The halted check below matches git's own words; pin the locale so
+          // it does not depend on how git was built (design §3).
+          LC_ALL: "C",
+          LANGUAGE: "",
+        },
+      });
+      if (r.status === 0) return jsonResponse(req, res, { halted: false });
+      const stderr = (r.stderr || "").trim();
+      const stdout = (r.stdout || "").trim();
+      if (/CONFLICT|could not apply/.test(stderr) || /CONFLICT|could not apply/.test(stdout)) {
+        return jsonResponse(req, res, { halted: true });
+      }
+      return jsonResponse(req, res, { error: `git ${op} ${act} failed: ${stderr || stdout}` }, 500);
     }
 
     // GET /api/git-file-diff?cwd=<path>&path=<file>&from=<hash>&to=<hash>
