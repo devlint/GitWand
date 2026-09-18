@@ -91,6 +91,8 @@ const es: Locale = {
     stashDone: "Cambios guardados en stash",
     mergeDone: "Merge completado",
     mergeAborted: "Merge abortado",
+    cherryPickDone: "Cherry-pick completado",
+    cherryPickAborted: "Cherry-pick abortado",
     resolveConflicts: "resuelve los conflictos para continuar",
     abortMerge: "Abortar merge",
     abortCherryPick: "Abortar cherry-pick",

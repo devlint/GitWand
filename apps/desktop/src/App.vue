@@ -210,6 +210,7 @@ const {
   saveAllFiles,
   undo,
   redo,
+  reset: mergeReset,
   selectFile: mergeSelectFile,
   refreshLlmFallbackConfig: mergeRefreshLlmFallbackConfig,
 } = useGitWand();
@@ -282,9 +283,9 @@ const {
   fetch: doFetch,
   mergeBranch: doMergeRaw,
   mergeContinue: doMergeContinue,
-  abortMerge: doAbortMerge,
+  abortMerge: repoAbortMerge,
   cherryPick: doCherryPick,
-  cherryPickAbort: doCherryPickAbort,
+  cherryPickAbort: repoCherryPickAbort,
   cherryPickContinue: doCherryPickContinue,
   isCherryPicking,
   discardFiles,
@@ -762,6 +763,8 @@ watch(repoSuccess, (val) => {
     "stash-done": { key: "header.stashDone" },
     "merge-done": { key: "header.mergeDone" },
     "merge-aborted": { key: "header.mergeAborted" },
+    "cherry-pick-done": { key: "header.cherryPickDone" },
+    "cherry-pick-aborted": { key: "header.cherryPickAborted" },
     "autostash-parked": { key: "header.pullAutostashParked" },
   };
   const info = meta[val];
@@ -3216,6 +3219,26 @@ function askConfirm(options: {
       resolve,
     };
   });
+}
+
+/**
+ * Abort the merge, then — only if git actually aborted — drop the resolution
+ * state it belonged to and leave the changes view, which now has nothing to
+ * show. `canUndo` is the "there is work to lose" signal that decides whether
+ * the composable asks for confirmation first (design §3.2, §3.5).
+ */
+async function doAbortMerge() {
+  const aborted = await repoAbortMerge({ hasResolutionWork: canUndo.value });
+  if (!aborted) return;
+  mergeReset();
+  viewMode.value = "graph";
+}
+
+async function doCherryPickAbort() {
+  const aborted = await repoCherryPickAbort({ hasResolutionWork: canUndo.value });
+  if (!aborted) return;
+  mergeReset();
+  viewMode.value = "graph";
 }
 
 // ─── Post-checkout "Update branch" prompt ────────────────

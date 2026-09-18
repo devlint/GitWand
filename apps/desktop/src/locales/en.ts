@@ -91,6 +91,8 @@ const en = {
     stashDone: "Changes stashed",
     mergeDone: "Merge completed",
     mergeAborted: "Merge aborted",
+    cherryPickDone: "Cherry-pick completed",
+    cherryPickAborted: "Cherry-pick aborted",
     resolveConflicts: "resolve conflicts to continue",
     abortMerge: "Abort merge",
     abortCherryPick: "Abort cherry-pick",
