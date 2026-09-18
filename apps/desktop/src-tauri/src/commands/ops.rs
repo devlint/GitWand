@@ -572,8 +572,6 @@ pub(crate) async fn git_merge(
     })
 }
 
-
-
 #[tauri::command]
 pub(crate) async fn git_pull(
     cwd: String,
@@ -625,7 +623,6 @@ pub(crate) async fn git_pull(
 }
 
 // ─── Git rebase ────────────────────────────────────────────────
-
 
 /// Result of an operation action. `halted` is true when git did its work and
 /// stopped on a further conflict — progress, not failure (design §3).
@@ -1534,8 +1531,6 @@ pub(crate) async fn git_cherry_pick(
         conflicts: Some(has_conflicts),
     })
 }
-
-
 
 // ─── Commit context menu operations ─────────────────────────
 
