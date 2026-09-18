@@ -416,6 +416,20 @@ export function useGitWand() {
     files.value = redoStack.value.pop()!;
   }
 
+  /**
+   * Drop every trace of the current resolution session.
+   *
+   * Called when the merge or cherry-pick the state described has been aborted
+   * (design §3.5). Without it `canUndo` stays true and the undo stack holds
+   * snapshots of files whose conflict no longer exists.
+   */
+  function reset() {
+    files.value = [];
+    selectedPath.value = null;
+    undoStack.value = [];
+    redoStack.value = [];
+  }
+
   // ─── Serialized resolution mutations (v3.10.0) ─────────
   /**
    * `core.resolve` became a Web Worker RPC in v3.10.0, so every resolution
@@ -1335,6 +1349,7 @@ export async function fetchUsers() {
     openPath,
     undo,
     redo,
+    reset,
     selectFile,
     refreshLlmFallbackConfig,
     resolveTreeConflictFile,
