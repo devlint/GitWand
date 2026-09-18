@@ -95,6 +95,11 @@ const ptBR: Locale = {
     resolveConflicts: "resolva os conflitos para continuar",
     abortMerge: "Abortar merge",
     abortCherryPick: "Abortar cherry-pick",
+    abortMergeConfirmTitle: "Abortar este merge?",
+    abortMergeConfirmMessage: "Suas resolu\u00e7\u00f5es deste merge ser\u00e3o descartadas. Os arquivos voltam ao estado anterior ao merge.",
+    abortCherryPickConfirmTitle: "Abortar este cherry-pick?",
+    abortCherryPickConfirmMessage: "Suas resolu\u00e7\u00f5es deste cherry-pick ser\u00e3o descartadas. Os arquivos voltam ao estado anterior.",
+    abortConfirmLabel: "Abortar",
     // Search trigger
     searchTooltip: "Buscar (\u2318K)",
     searchAriaLabel: "Abrir busca",

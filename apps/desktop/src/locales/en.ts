@@ -94,6 +94,11 @@ const en = {
     resolveConflicts: "resolve conflicts to continue",
     abortMerge: "Abort merge",
     abortCherryPick: "Abort cherry-pick",
+    abortMergeConfirmTitle: "Abort this merge?",
+    abortMergeConfirmMessage: "Your resolutions for this merge will be discarded. The files go back to how they were before the merge started.",
+    abortCherryPickConfirmTitle: "Abort this cherry-pick?",
+    abortCherryPickConfirmMessage: "Your resolutions for this cherry-pick will be discarded. The files go back to how they were before it started.",
+    abortConfirmLabel: "Abort",
     // Search trigger
     searchTooltip: "Search (\u2318K)",
     searchAriaLabel: "Open search",

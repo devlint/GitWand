@@ -94,6 +94,11 @@ const es: Locale = {
     resolveConflicts: "resuelve los conflictos para continuar",
     abortMerge: "Abortar merge",
     abortCherryPick: "Abortar cherry-pick",
+    abortMergeConfirmTitle: "\u00bfAbortar este merge?",
+    abortMergeConfirmMessage: "Se descartar\u00e1n tus resoluciones de este merge. Los archivos vuelven al estado anterior al merge.",
+    abortCherryPickConfirmTitle: "\u00bfAbortar este cherry-pick?",
+    abortCherryPickConfirmMessage: "Se descartar\u00e1n tus resoluciones de este cherry-pick. Los archivos vuelven al estado anterior.",
+    abortConfirmLabel: "Abortar",
     // Search trigger
     searchTooltip: "Buscar (\u2318K)",
     searchAriaLabel: "Abrir b\u00fasqueda",

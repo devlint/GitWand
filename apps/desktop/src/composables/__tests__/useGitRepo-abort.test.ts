@@ -16,7 +16,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("../../utils/backend");
 
-import { useGitRepo } from "../useGitRepo";
+import { useGitRepo, type ConfirmFn } from "../useGitRepo";
 import {
   gitMergeAbort,
   gitCherryPickAbort,
@@ -26,8 +26,17 @@ import {
 
 const CWD = "/repos/alpha";
 
+/**
+ * A stub for the injected modal. The parameter is annotated so that
+ * `confirm.mock.calls[0][0]` is typed as the confirmation options rather than
+ * an empty tuple — `vi.fn(async () => true)` would infer a zero-arg signature.
+ */
+function makeConfirm(answer: boolean) {
+  return vi.fn(async (_o: Parameters<ConfirmFn>[0]) => answer);
+}
+
 /** A repo composable already pointed at a folder, with refresh() harmless. */
-function makeRepo(confirm = vi.fn(async () => true)) {
+function makeRepo(confirm = makeConfirm(true)) {
   vi.mocked(getGitStatus).mockResolvedValue({
     staged: [],
     unstaged: [],
@@ -132,5 +141,61 @@ describe("cherryPickAbort", () => {
 
     expect(ok).toBe(false);
     expect(gitCherryPickAbort).not.toHaveBeenCalled();
+  });
+});
+
+describe("abort confirmation", () => {
+  it("asks before a merge abort that would discard resolution work", async () => {
+    const confirm = makeConfirm(true);
+    const { repo } = makeRepo(confirm);
+    vi.mocked(gitMergeAbort).mockResolvedValue({
+      success: true,
+      message: "Merge aborted",
+    } as any);
+
+    const ok = await repo.abortMerge({ hasResolutionWork: true });
+
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(confirm.mock.calls[0]?.[0]?.danger).toBe(true);
+    expect(ok).toBe(true);
+  });
+
+  it("does not ask when there is no resolution work", async () => {
+    const confirm = makeConfirm(true);
+    const { repo } = makeRepo(confirm);
+    vi.mocked(gitMergeAbort).mockResolvedValue({
+      success: true,
+      message: "Merge aborted",
+    } as any);
+
+    await repo.abortMerge();
+    await repo.abortMerge({ hasResolutionWork: false });
+
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it("returns false and runs no git command when the user declines", async () => {
+    const confirm = makeConfirm(false);
+    const { repo } = makeRepo(confirm);
+
+    const ok = await repo.abortMerge({ hasResolutionWork: true });
+
+    expect(ok).toBe(false);
+    expect(gitMergeAbort).not.toHaveBeenCalled();
+    expect(repo.error.value).toBeFalsy();
+  });
+
+  it("asks before a cherry-pick abort that would discard resolution work", async () => {
+    const confirm = makeConfirm(false);
+    const { repo } = makeRepo(confirm);
+    repo.isCherryPicking.value = true;
+
+    const ok = await repo.cherryPickAbort({ hasResolutionWork: true });
+
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(ok).toBe(false);
+    expect(gitCherryPickAbort).not.toHaveBeenCalled();
+    // Declining is not a failed abort — the mode flag must not move.
+    expect(repo.isCherryPicking.value).toBe(true);
   });
 });

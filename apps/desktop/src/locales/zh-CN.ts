@@ -99,6 +99,11 @@ const zhCN: Locale = {
     resolveConflicts: "请先解决冲突",
     abortMerge: "中止合并",
     abortCherryPick: "中止 cherry-pick",
+    abortMergeConfirmTitle: "中止此次合并？",
+    abortMergeConfirmMessage: "你对本次合并的冲突解决将被丢弃，文件会回到合并开始前的状态。",
+    abortCherryPickConfirmTitle: "中止此次 cherry-pick？",
+    abortCherryPickConfirmMessage: "你对本次 cherry-pick 的冲突解决将被丢弃，文件会回到开始前的状态。",
+    abortConfirmLabel: "中止",
     // Search trigger
     searchTooltip: "\u641c\u7d22 (\u2318K)",
     searchAriaLabel: "\u6253\u5f00\u641c\u7d22",

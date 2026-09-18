@@ -1156,8 +1156,19 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
    *   so the field has to be read: a rejected promise is not the only failure.
    *   The caller needs the boolean to decide whether to drop resolution state.
    */
-  async function abortMerge(_opts: AbortOptions = {}): Promise<boolean> {
+  async function abortMerge(abortOpts: AbortOptions = {}): Promise<boolean> {
     if (!folderPath.value) return false;
+    // Only worth a modal when there is something to lose (design §3.2). The
+    // signal is useGitWand's `canUndo`, handed down by App.vue.
+    if (abortOpts.hasResolutionWork && opts.confirm) {
+      const ok = await opts.confirm({
+        title: t("header.abortMergeConfirmTitle"),
+        message: t("header.abortMergeConfirmMessage"),
+        confirmLabel: t("header.abortConfirmLabel"),
+        danger: true,
+      });
+      if (!ok) return false;
+    }
     try {
       const result = await gitMergeAbort(folderPath.value);
       // refresh() first on every path: loadStatus() writes its own failure
@@ -1247,8 +1258,17 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
    *   dropping the flag would make the banner offer "Abort merge" for a
    *   cherry-pick that is still in progress (design §3.4).
    */
-  async function cherryPickAbort(_opts: AbortOptions = {}): Promise<boolean> {
+  async function cherryPickAbort(abortOpts: AbortOptions = {}): Promise<boolean> {
     if (!folderPath.value) return false;
+    if (abortOpts.hasResolutionWork && opts.confirm) {
+      const ok = await opts.confirm({
+        title: t("header.abortCherryPickConfirmTitle"),
+        message: t("header.abortCherryPickConfirmMessage"),
+        confirmLabel: t("header.abortConfirmLabel"),
+        danger: true,
+      });
+      if (!ok) return false;
+    }
     try {
       await gitCherryPickAbort(folderPath.value);
       await refresh();
