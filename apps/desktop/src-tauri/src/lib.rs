@@ -270,6 +270,18 @@ pub fn git_rebase_onto_parity(cwd: String, onto: String) -> Result<serde_json::V
         .map(|r| serde_json::json!({ "conflict": r.conflict }))
 }
 
+/// Parity entry point for `git_operation_action`. Destructive, so its parity
+/// test drives two independent fixture repos rather than comparing two runs
+/// against one working tree.
+pub fn git_operation_action_parity(
+    cwd: String,
+    operation: String,
+    action: String,
+) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::block_on(commands::ops::git_operation_action(cwd, operation, action))
+        .map(|r| serde_json::json!({ "halted": r.halted }))
+}
+
 pub fn preview_merge_parity(
     cwd: String,
     source_branch: String,
