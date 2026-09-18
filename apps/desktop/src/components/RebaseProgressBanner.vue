@@ -65,6 +65,24 @@ const isRebase = computed(() => operation.value === "rebase");
 /** git has no `merge --skip`, so the button must not exist for a merge. */
 const canSkip = computed(() => operation.value !== "merge");
 
+/**
+ * The banner's title names the operation. Without this it read "Rebase paused"
+ * during a merge — caught in manual QA, and exactly the kind of thing that
+ * makes a UI untrustworthy.
+ */
+const pausedTitle = computed(() => {
+  switch (operation.value) {
+    case "cherry_pick":
+      return t("header.pausedCherryPick");
+    case "revert":
+      return t("header.pausedRevert");
+    case "merge":
+      return t("header.pausedMerge");
+    default:
+      return t("rebase.bannerTitle");
+  }
+});
+
 /** The abort button names the operation it is abandoning. */
 const abortLabel = computed(() => {
   switch (operation.value) {
@@ -120,7 +138,7 @@ async function runAction(action: "continue" | "abort" | "skip") {
 
     <!-- Title + meta + hint, all inline -->
     <div class="rpm-text">
-      <span class="rpm-title">{{ t('rebase.bannerTitle') }}</span>
+      <span class="rpm-title">{{ pausedTitle }}</span>
       <span class="rpm-meta" v-if="shortHead || stepLabel">
         <code v-if="shortHead">{{ shortHead }}</code>
         <span v-if="repoState.targetBranch">→ <strong>{{ repoState.targetBranch }}</strong></span>
