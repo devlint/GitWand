@@ -188,6 +188,18 @@ When adding a new `#[tauri::command]` in Rust, add its typed wrapper in
 `backend.ts` in the same PR. Never call `invoke()` directly from a component or
 composable — always go through `backend.ts`.
 
+A command the frontend invokes must also have an entry in
+`apps/desktop/src/utils/commandRegistry.ts`, naming either its dev-server route
+or the reason it cannot have one. `commandRegistry.test.ts` fails otherwise.
+
+This is not bookkeeping: `pnpm dev:web` runs `dev-server.mjs`, not the Rust
+backend, so a command with no route means manual QA silently tests something
+other than what ships. A broken `glab` flag survived in `gl_merge_mr` for
+exactly that reason.
+
+Invoke with a string literal — `tauriInvoke("git_status", …)`. A name built at
+runtime is invisible to the registry, and the guard refuses it.
+
 ---
 
 ## Testing

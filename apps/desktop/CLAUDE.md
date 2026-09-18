@@ -80,6 +80,10 @@ Toutes les commandes Rust sont déclarées via `#[tauri::command]` dans `src-tau
 
 Quand on ajoute une commande Rust, le wrapper TS correspondant doit être ajouté dans la **même PR**.
 
+Et son entrée dans `src/utils/commandRegistry.ts` : route dev-server
+équivalente, ou raison documentée de son absence. `commandRegistry.test.ts`
+échoue sinon — voir AGENTS.md § IPC.
+
 ## Tests Vitest
 
 - Config principale : `vite.config.ts` (environnement `node` par défaut — un fichier qui touche réellement le DOM ajoute `// @vitest-environment jsdom` en tête de fichier)
