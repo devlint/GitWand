@@ -63,12 +63,23 @@ failure, carrying git's own message. `halted` is detected the way
 output. This is the same vocabulary as an initial `merge` that conflicts, which
 the codebase already treats as a non-failure.
 
-**The match must be locale-pinned.** git translates its messages, so a user
-whose environment sets `LANG=fr_FR.UTF-8` would fail the `CONFLICT` test and see
-progress reported as an error — the exact defect this section exists to remove.
-The command sets `LC_ALL=C` for the subprocess, and the contract test asserts
-the behaviour under a non-English locale. `git_rebase_onto` has the same latent
-weakness today and is fixed alongside.
+**The match is locale-pinned, defensively.** Matching git's own words makes the
+check depend on how git was built: git ships translations (`git-l10n`), and a
+build with NLS enabled under `LANG=fr_FR.UTF-8` can answer in French, which
+would fail the `CONFLICT` test and report progress as an error — the exact
+defect this section exists to remove.
+
+Measured, not assumed: on the development machine (Apple git 2.50.1, `fr_FR`
+locales installed) the output is **identical** under `LC_ALL=C` and
+`LC_ALL=fr_FR.UTF-8`, because that build carries no translations. So this is not
+a reproduced bug; it is a dependency on a build option we should not have. The
+command pins `LC_ALL=C` and `LANGUAGE=`, which costs nothing and removes the
+dependency. `git_rebase_onto` gets the same treatment.
+
+The contract test is deliberately one-sided for the same reason: it asserts the
+English markers, and only asserts that a translated run produces *some* output.
+A machine without the locale — or with a git without NLS, like this one — must
+not fail the suite over it.
 
 ## 4. Command layer
 
