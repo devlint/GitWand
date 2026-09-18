@@ -100,7 +100,6 @@ const es: Locale = {
     pausedCherryPick: "Cherry-pick en pausa",
     pausedRevert: "Revert en pausa",
     operationContinue: "Continuar",
-    operationSkip: "Omitir este commit",
     abortRevert: "Abortar revert",
     abortConfirmTitle: "\u00bfAbortar esta operaci\u00f3n?",
     abortConfirmMessage: "Se descartar\u00e1n tus resoluciones. Los archivos vuelven al estado anterior a la operaci\u00f3n.",

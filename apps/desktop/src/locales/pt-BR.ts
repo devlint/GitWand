@@ -101,7 +101,6 @@ const ptBR: Locale = {
     pausedCherryPick: "Cherry-pick pausado",
     pausedRevert: "Revert pausado",
     operationContinue: "Continuar",
-    operationSkip: "Pular este commit",
     abortRevert: "Abortar revert",
     abortConfirmTitle: "Abortar esta opera\u00e7\u00e3o?",
     abortConfirmMessage: "Suas resolu\u00e7\u00f5es ser\u00e3o descartadas. Os arquivos voltam ao estado anterior \u00e0 opera\u00e7\u00e3o.",

@@ -100,7 +100,6 @@ const en = {
     pausedCherryPick: "Cherry-pick paused",
     pausedRevert: "Revert paused",
     operationContinue: "Continue",
-    operationSkip: "Skip this commit",
     abortRevert: "Abort revert",
     abortConfirmTitle: "Abort this operation?",
     abortConfirmMessage: "Your resolutions will be discarded. The files go back to how they were before the operation started.",

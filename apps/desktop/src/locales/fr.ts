@@ -94,7 +94,6 @@ const fr: Locale = {
     pausedCherryPick: "Cherry-pick en pause",
     pausedRevert: "Revert en pause",
     operationContinue: "Continuer",
-    operationSkip: "Passer ce commit",
     abortRevert: "Annuler le revert",
     abortConfirmTitle: "Abandonner cette op\u00e9ration ?",
     abortConfirmMessage: "Vos r\u00e9solutions seront perdues. Les fichiers reviennent \u00e0 leur \u00e9tat d'avant l'op\u00e9ration.",

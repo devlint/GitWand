@@ -105,7 +105,6 @@ const zhCN: Locale = {
     pausedCherryPick: "cherry-pick 已暂停",
     pausedRevert: "revert 已暂停",
     operationContinue: "继续",
-    operationSkip: "跳过此提交",
     abortRevert: "中止 revert",
     abortConfirmTitle: "中止此操作？",
     abortConfirmMessage: "你的冲突解决将被丢弃，文件会回到操作开始前的状态。",
