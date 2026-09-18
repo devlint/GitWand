@@ -143,14 +143,26 @@ Create `apps/desktop/src/utils/commandRegistryParse.ts`:
  * its opening parenthesis instead of trying to match the whole call.
  */
 
-/** A `tauriInvoke` occurrence that is not a call we can read. */
-function isNonCall(before: string): boolean {
-  // Its own declaration, an import/export list, or prose in a comment.
+/**
+ * Is this `tauriInvoke` occurrence something other than a call we can read?
+ *
+ * Judged on the **current line only**. Looking at a window of preceding
+ * characters does not work: with 200 characters, the `export async function …`
+ * that encloses a call matches the import/export test, and 119 of 139 real
+ * invocations get rejected. The floor assertion in Step 5 is what catches
+ * this, so do not widen the window to "be safe".
+ */
+function isNonCall(linePrefix: string): boolean {
+  const trimmed = linePrefix.trimStart();
   return (
-    /function\s+$/.test(before) ||
-    /\bimport\b[^;]*$/.test(before) ||
-    /\bexport\b[^;]*$/.test(before) ||
-    /(^|\n)\s*(\/\/|\*|\/\*)[^\n]*$/.test(before)
+    // Its own declaration: `export async function tauriInvoke<T>(…)`.
+    /\bfunction\s+$/.test(linePrefix) ||
+    // A named import or re-export list that happens to contain the identifier.
+    /^\s*(import|export)\b/.test(linePrefix) ||
+    // Prose in a comment: ` * Timeout presets for tauriInvoke.`
+    trimmed.startsWith("//") ||
+    trimmed.startsWith("*") ||
+    trimmed.startsWith("/*")
   );
 }
 
@@ -162,8 +174,8 @@ export function findInvokedCommands(source: string): {
   const dynamic: string[] = [];
   let i = -1;
   while ((i = source.indexOf("tauriInvoke", i + 1)) !== -1) {
-    const before = source.slice(Math.max(0, i - 200), i);
-    if (isNonCall(before)) continue;
+    const lineStart = source.lastIndexOf("\n", i) + 1;
+    if (isNonCall(source.slice(lineStart, i))) continue;
     const paren = source.indexOf("(", i);
     if (paren === -1) continue;
     const after = source.slice(paren + 1).replace(/^\s+/, "");
