@@ -572,66 +572,7 @@ pub(crate) async fn git_merge(
     })
 }
 
-#[tauri::command]
-pub(crate) async fn git_merge_abort(cwd: String) -> Result<GitPushPullResult, String> {
-    let _repo = repo_lock::write(&cwd);
-    let _t0 = Instant::now();
-    let output = git_cmd()
-        .args(["merge", "--abort"])
-        .current_dir(&cwd)
-        .output()
-        .map_err(|e| format!("Failed to run git merge --abort: {}", e))?;
-    record_cmd(
-        "git merge --abort",
-        &cwd,
-        _t0.elapsed().as_millis() as u64,
-        output.status.code().unwrap_or(-1),
-    );
 
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-
-    Ok(GitPushPullResult {
-        success: output.status.success(),
-        message: if output.status.success() {
-            "Merge aborted".to_string()
-        } else {
-            stderr.trim().to_string()
-        },
-        conflicts: None,
-    })
-}
-
-#[tauri::command]
-pub(crate) async fn git_merge_continue(cwd: String) -> Result<GitPushPullResult, String> {
-    let _repo = repo_lock::write(&cwd);
-    let _t0 = Instant::now();
-    let output = git_cmd()
-        .args(["-c", "core.editor=true", "merge", "--continue"])
-        .current_dir(&cwd)
-        .env("GIT_MERGE_AUTOEDIT", "no")
-        .env("GIT_EDITOR", "true")
-        .output()
-        .map_err(|e| format!("Failed to run git merge --continue: {}", e))?;
-    record_cmd(
-        "git merge --continue",
-        &cwd,
-        _t0.elapsed().as_millis() as u64,
-        output.status.code().unwrap_or(-1),
-    );
-
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-
-    Ok(GitPushPullResult {
-        success: output.status.success(),
-        message: if output.status.success() {
-            stdout.trim().to_string()
-        } else {
-            stderr.trim().to_string()
-        },
-        conflicts: None,
-    })
-}
 
 #[tauri::command]
 pub(crate) async fn git_pull(
@@ -685,34 +626,94 @@ pub(crate) async fn git_pull(
 
 // ─── Git rebase ────────────────────────────────────────────────
 
-#[tauri::command]
-pub(crate) async fn git_rebase_action(cwd: String, action: String) -> Result<(), String> {
-    let arg = match action.as_str() {
-        "continue" | "abort" | "skip" => action.as_str(),
-        _ => return Err(format!("Unknown rebase action '{}'", action)),
+
+/// Result of an operation action. `halted` is true when git did its work and
+/// stopped on a further conflict — progress, not failure (design §3).
+#[derive(serde::Serialize)]
+pub(crate) struct OperationActionResult {
+    pub halted: bool,
+}
+
+/// Map an (operation, action) pair to git's argument vector.
+///
+/// Pure and separately tested: it is the whitelist, so nothing reaches git that
+/// is not one of these exact strings. `merge` has no `--skip` — git answers
+/// "unknown option" — so that pair is refused here rather than producing a
+/// confusing error from git itself.
+fn operation_action_args(operation: &str, action: &str) -> Result<Vec<&'static str>, String> {
+    let op = match operation {
+        "merge" => "merge",
+        "cherry_pick" => "cherry-pick",
+        "revert" => "revert",
+        "rebase" => "rebase",
+        _ => return Err(format!("Unknown operation '{}'", operation)),
     };
+    let act = match action {
+        "continue" => "--continue",
+        "abort" => "--abort",
+        "skip" => "--skip",
+        _ => return Err(format!("Unknown action '{}'", action)),
+    };
+    if op == "merge" && act == "--skip" {
+        return Err("git merge has no --skip".to_string());
+    }
+    Ok(vec![op, act])
+}
+
+/// Continue, abort or skip the operation in progress.
+///
+/// Replaces `git_merge_abort`, `git_merge_continue`, `git_cherry_pick_abort`,
+/// `git_cherry_pick_continue` and `git_rebase_action`, which carried three
+/// different error conventions between them (design §1).
+///
+/// Three outcomes, not two: `Ok(halted: false)` when the operation finished,
+/// `Ok(halted: true)` when git stopped on a further conflict, `Err` only when
+/// git actually refused. `LC_ALL=C` is pinned because the halted check matches
+/// git's own words, and whether git translates them depends on how it was
+/// built (design §3).
+#[tauri::command]
+pub(crate) async fn git_operation_action(
+    cwd: String,
+    operation: String,
+    action: String,
+) -> Result<OperationActionResult, String> {
+    let args = operation_action_args(&operation, &action)?;
+    let label = format!("git {} {}", args[0], args[1]);
+
     let _repo = repo_lock::write(&cwd);
     let _t0 = Instant::now();
     let output = git_cmd()
-        .args(["rebase", &format!("--{}", arg)])
+        .args(&args)
         .env("GIT_EDITOR", "true")
+        .env("EDITOR", "true")
         .env("GIT_TERMINAL_PROMPT", "0")
+        .env("LC_ALL", "C")
+        .env("LANGUAGE", "")
         .current_dir(&cwd)
         .output()
-        .map_err(|e| format!("Failed to run git rebase --{}: {}", arg, e))?;
+        .map_err(|e| format!("Failed to run {}: {}", label, e))?;
     record_cmd(
-        &format!("git rebase --{}", arg),
+        &label,
         &cwd,
         _t0.elapsed().as_millis() as u64,
         output.status.code().unwrap_or(-1),
     );
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let msg = if stderr.is_empty() { stdout } else { stderr };
-        return Err(format!("git rebase --{} failed: {}", arg, msg));
+
+    if output.status.success() {
+        return Ok(OperationActionResult { halted: false });
     }
-    Ok(())
+
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if stderr.contains("CONFLICT")
+        || stderr.contains("could not apply")
+        || stdout.contains("CONFLICT")
+        || stdout.contains("could not apply")
+    {
+        return Ok(OperationActionResult { halted: true });
+    }
+    let msg = if stderr.is_empty() { stdout } else { stderr };
+    Err(format!("{} failed: {}", label, msg))
 }
 
 /// Result of starting an interactive rebase. `conflict` is true when the rebase
@@ -841,6 +842,10 @@ pub(crate) async fn git_rebase_onto(
         .env("GIT_EDITOR", "true")
         .env("EDITOR", "true")
         .env("GIT_TERMINAL_PROMPT", "0")
+        // The conflict check below matches git's own words; pin the locale so
+        // it does not depend on how git was built (design §3).
+        .env("LC_ALL", "C")
+        .env("LANGUAGE", "")
         .current_dir(&cwd)
         .output()
         .map_err(|e| format!("Failed to run git rebase: {}", e))?;
@@ -1530,59 +1535,7 @@ pub(crate) async fn git_cherry_pick(
     })
 }
 
-#[tauri::command]
-pub(crate) async fn git_cherry_pick_abort(cwd: String) -> Result<(), String> {
-    let _t0 = Instant::now();
-    let output = git_cmd()
-        .args(["cherry-pick", "--abort"])
-        .current_dir(&cwd)
-        .output()
-        .map_err(|e| format!("Failed to abort cherry-pick: {}", e))?;
-    record_cmd(
-        "git cherry-pick --abort",
-        &cwd,
-        _t0.elapsed().as_millis() as u64,
-        output.status.code().unwrap_or(-1),
-    );
-    if !output.status.success() {
-        return Err(format!(
-            "cherry-pick --abort failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
-    }
-    Ok(())
-}
 
-#[tauri::command]
-pub(crate) async fn git_cherry_pick_continue(cwd: String) -> Result<GitPushPullResult, String> {
-    let _repo = repo_lock::write(&cwd);
-    let _t0 = Instant::now();
-    let output = git_cmd()
-        .args(["cherry-pick", "--continue"])
-        .current_dir(&cwd)
-        .env("GIT_EDITOR", "true") // skip editor for commit message
-        .output()
-        .map_err(|e| format!("Failed to continue cherry-pick: {}", e))?;
-    record_cmd(
-        "git cherry-pick --continue",
-        &cwd,
-        _t0.elapsed().as_millis() as u64,
-        output.status.code().unwrap_or(-1),
-    );
-
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-
-    Ok(GitPushPullResult {
-        success: output.status.success(),
-        message: if output.status.success() {
-            stdout
-        } else {
-            stderr
-        },
-        conflicts: None,
-    })
-}
 
 // ─── Commit context menu operations ─────────────────────────
 
@@ -6009,5 +5962,51 @@ mod merge_no_ff_tests {
             1,
             "default merge must fast-forward (1 parent) when possible"
         );
+    }
+}
+
+#[cfg(test)]
+mod operation_action_tests {
+    use super::operation_action_args;
+
+    #[test]
+    fn builds_args_for_each_supported_pair() {
+        assert_eq!(
+            operation_action_args("merge", "abort").unwrap(),
+            vec!["merge", "--abort"]
+        );
+        assert_eq!(
+            operation_action_args("merge", "continue").unwrap(),
+            vec!["merge", "--continue"]
+        );
+        assert_eq!(
+            operation_action_args("cherry_pick", "abort").unwrap(),
+            vec!["cherry-pick", "--abort"]
+        );
+        assert_eq!(
+            operation_action_args("cherry_pick", "skip").unwrap(),
+            vec!["cherry-pick", "--skip"]
+        );
+        assert_eq!(
+            operation_action_args("revert", "continue").unwrap(),
+            vec!["revert", "--continue"]
+        );
+        assert_eq!(
+            operation_action_args("rebase", "skip").unwrap(),
+            vec!["rebase", "--skip"]
+        );
+    }
+
+    #[test]
+    fn refuses_merge_skip_because_git_has_no_such_option() {
+        assert!(operation_action_args("merge", "skip").is_err());
+    }
+
+    #[test]
+    fn refuses_unknown_operation_or_action() {
+        assert!(operation_action_args("bisect", "abort").is_err());
+        assert!(operation_action_args("merge", "quit").is_err());
+        // An argument that would be read as an option must never reach git.
+        assert!(operation_action_args("--upload-pack=evil", "abort").is_err());
     }
 }
