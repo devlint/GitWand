@@ -176,6 +176,7 @@ const { isOffline: navIsOffline } = useNetworkStatus();
 const { isOnline: probedOnline, probeConnectivity } = useConnectivity();
 const isOffline = computed(() => navIsOffline.value || !probedOnline.value);
 import { isTauri, registerBrowserFolderPicker, pickFolder, checkForUpdates, fetchBetaUpdate, installUpdate, gitRepoState, openExternalUrl, ghIssueAddComment } from "./utils/backend";
+import { resolveConflictOperation } from "./utils/conflictOperation";
 import type { UpdateInfo, RepoOperationState, WorkspaceRepo, PullRequest } from "./utils/backend";
 import type { ForgeName } from "./composables/forge/types";
 import { onMarkdownLinkClick } from "./composables/useSafeHtml";
@@ -810,7 +811,7 @@ async function advanceToNextConflictOrFinalize() {
   await refreshRepoState();
   if (repoStatus.value && repoStatus.value.conflicted.length > 0) {
     await repoSelectFile(repoStatus.value.conflicted[0], false);
-  } else if (isCherryPicking.value) {
+  } else if (conflictOperation.value === "cherry_pick") {
     await doCherryPickContinue();
   } else if (
     repoOperationState.value?.state === "rebase" ||
@@ -2696,6 +2697,16 @@ const showRebase = ref(false);
 // ─── Rebase-in-progress state (plain rebase from pull --rebase) ──────────
 // Polled after every repo refresh so the banner appears/disappears automatically.
 const repoOperationState = ref<RepoOperationState | null>(null);
+/** What the repository on disk says is in progress — null when unreadable. */
+const repoDiskOperation = ref<RepoOperationState["state"] | null>(null);
+/**
+ * Which operation the conflict banner is looking at. The repository decides;
+ * `isCherryPicking` is only the fallback, because it is a frontend ref that
+ * does not survive opening a repo that is already mid-cherry-pick.
+ */
+const conflictOperation = computed(() =>
+  resolveConflictOperation(repoDiskOperation.value, isCherryPicking.value),
+);
 const showRebaseBanner = computed(() =>
   repoOperationState.value !== null &&
   (repoOperationState.value.state === "rebase" || repoOperationState.value.state === "rebase_interactive") &&
@@ -2704,9 +2715,19 @@ const showRebaseBanner = computed(() =>
 );
 
 async function refreshRepoState() {
-  if (!repoFolderPath.value) { repoOperationState.value = null; return; }
+  if (!repoFolderPath.value) {
+    repoOperationState.value = null;
+    repoDiskOperation.value = null;
+    return;
+  }
   try {
     const state = await gitRepoState(repoFolderPath.value);
+    // Kept separately from `repoOperationState`, which stays rebase-only on
+    // purpose: several call sites read `repoOperationState !== null` as "a
+    // rebase is in progress" (force-push preference, the wasRebasing
+    // snapshots, the auto-resolve loop). Widening it would silently turn a
+    // merge into a rebase for all of them.
+    repoDiskOperation.value = state.state;
     // Surface both plain and interactive rebase states — git ≥2.26 uses the
     // sequencer backend (creates rebase-merge/interactive) even for plain
     // pull --rebase.  We distinguish from a user-initiated RebaseEditor session
@@ -2716,6 +2737,9 @@ async function refreshRepoState() {
   } catch (err) {
     console.warn("[rebase] gitRepoState error:", err);
     repoOperationState.value = null;
+    // null, not "clean": a failed read knows nothing, and
+    // resolveConflictOperation falls back to the frontend flag for it.
+    repoDiskOperation.value = null;
   }
 }
 
@@ -4349,7 +4373,7 @@ onUnmounted(() => {
                 {{ repoStats.conflicted }} {{ repoStats.conflicted > 1 ? t('header.conflicts') : t('header.conflict') }}
                 — {{ t('header.resolveConflicts') }}
               </span>
-              <button v-if="isCherryPicking" class="conflict-abort-btn" @click="doCherryPickAbort">
+              <button v-if="conflictOperation === 'cherry_pick'" class="conflict-abort-btn" @click="doCherryPickAbort">
                 {{ t('header.abortCherryPick') }}
               </button>
               <button v-else class="conflict-abort-btn" @click="doAbortMerge">

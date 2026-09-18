@@ -195,3 +195,43 @@ describe("git cherry-pick --abort", () => {
     GIT_TEST_TIMEOUT_MS,
   );
 });
+
+/**
+ * The marker files `git_repo_state` keys off to name the operation in progress
+ * (dev-server.mjs /api/git-repo-state, and its Rust twin). The conflict banner
+ * now believes that answer over its own `isCherryPicking` ref, so if git ever
+ * stopped writing these, the banner would silently mislabel again.
+ */
+describe("the markers git_repo_state reads", () => {
+  it(
+    "writes CHERRY_PICK_HEAD and no MERGE_HEAD during a conflicted cherry-pick",
+    () => {
+      const dir = makeRepo();
+      git(dir, ["checkout", "-b", "feature"]);
+      writeFileSync(join(dir, "file.txt"), "feature\n");
+      git(dir, ["commit", "-am", "feature change"]);
+      const featureSha = git(dir, ["rev-parse", "HEAD"]).trim();
+      git(dir, ["checkout", "main"]);
+      writeFileSync(join(dir, "file.txt"), "main\n");
+      git(dir, ["commit", "-am", "main change"]);
+      const pick = tryGit(dir, ["cherry-pick", featureSha]);
+      expect(pick.status).not.toBe(0);
+
+      expect(existsSync(join(dir, ".git", "CHERRY_PICK_HEAD"))).toBe(true);
+      expect(existsSync(join(dir, ".git", "MERGE_HEAD"))).toBe(false);
+    },
+    GIT_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "writes MERGE_HEAD and no CHERRY_PICK_HEAD during a conflicted merge",
+    () => {
+      const dir = makeRepo();
+      makeConflictedMerge(dir);
+
+      expect(existsSync(join(dir, ".git", "MERGE_HEAD"))).toBe(true);
+      expect(existsSync(join(dir, ".git", "CHERRY_PICK_HEAD"))).toBe(false);
+    },
+    GIT_TEST_TIMEOUT_MS,
+  );
+});
