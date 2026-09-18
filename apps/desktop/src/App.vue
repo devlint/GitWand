@@ -176,7 +176,6 @@ const { isOffline: navIsOffline } = useNetworkStatus();
 const { isOnline: probedOnline, probeConnectivity } = useConnectivity();
 const isOffline = computed(() => navIsOffline.value || !probedOnline.value);
 import { isTauri, registerBrowserFolderPicker, pickFolder, checkForUpdates, fetchBetaUpdate, installUpdate, gitRepoState, openExternalUrl, ghIssueAddComment } from "./utils/backend";
-import { resolveConflictOperation } from "./utils/conflictOperation";
 import type { UpdateInfo, RepoOperationState, WorkspaceRepo, PullRequest } from "./utils/backend";
 import type { ForgeName } from "./composables/forge/types";
 import { onMarkdownLinkClick } from "./composables/useSafeHtml";
@@ -283,12 +282,8 @@ const {
   pull: doPull,
   fetch: doFetch,
   mergeBranch: doMergeRaw,
-  mergeContinue: doMergeContinue,
-  abortMerge: repoAbortMerge,
+  runOperationAction,
   cherryPick: doCherryPick,
-  cherryPickAbort: repoCherryPickAbort,
-  cherryPickContinue: doCherryPickContinue,
-  isCherryPicking,
   discardFiles,
   addToGitignore,
   branches,
@@ -811,19 +806,12 @@ async function advanceToNextConflictOrFinalize() {
   await refreshRepoState();
   if (repoStatus.value && repoStatus.value.conflicted.length > 0) {
     await repoSelectFile(repoStatus.value.conflicted[0], false);
-  } else if (conflictOperation.value === "cherry_pick") {
-    await doCherryPickContinue();
-  } else if (
-    repoOperationState.value?.state === "rebase" ||
-    repoOperationState.value?.state === "rebase_interactive"
-  ) {
-    // `git merge --continue` errors during a rebase ("no merge in progress").
-    // The rebase banner's own Continue button (RebaseProgressBanner.vue) is the
-    // correct control surface to finalize — leave it to the user (issue #128).
-  } else {
-    await doMergeContinue();
-    showMergeSuccess.value = true;
   }
+  // Nothing continues by itself. Resolving the last conflict used to run
+  // `merge --continue` / `cherry-pick --continue` straight away, which is how
+  // a success could be announced without checking, and it disagreed with the
+  // rebase policy already settled in #128. One rule now: the operation banner's
+  // Continue button is the only way forward, for every operation (design §6).
 }
 
 async function checkAndSaveIfResolved(filePath: string) {
@@ -938,20 +926,23 @@ const { apply: runApplyFromPreview } = useApplyFromPreview({
   stage: (paths) => stageFiles(paths),
   files: () => mergeFiles.value as never,
   finalize: async (operation) => {
-    const { gitRebaseAction } = await import("./utils/backend");
+    const { gitOperationAction } = await import("./utils/backend");
     const cwd = repoFolderPath.value ?? "";
     // Same reasoning as the runners above: doMergeContinue and
     // doCherryPickContinue swallow failure into `error.value`, so a refused
     // --continue would be reported as a finished merge.
     if (operation === "rebase") {
-      await gitRebaseAction(cwd, "continue");
+      await gitOperationAction(cwd, "rebase", "continue");
       return;
     }
-    const { gitMergeContinue, gitCherryPickContinue } = await import("./utils/backend");
-    const result = operation === "cherry-pick"
-      ? await gitCherryPickContinue(cwd)
-      : await gitMergeContinue(cwd);
-    assertOperationSucceeded(result as never, `${operation} --continue`);
+    // One command for every operation; it throws when git refused, and
+    // resolves with { halted } when git merely stopped on a further conflict,
+    // which is progress and not something to assert against.
+    await gitOperationAction(
+      cwd,
+      operation === "cherry-pick" ? "cherry_pick" : "merge",
+      "continue",
+    );
   },
   applyPredicateFor,
 });
@@ -1130,7 +1121,7 @@ async function handleEditHunk(path: string, hunkIdx: number, replacement: string
  */
 const pendingSplitAtHalt = computed(() => {
   const st = repoOperationState.value;
-  if (!showRebaseBanner.value || !st || st.hasConflict) return null;
+  if (!showOperationBanner.value || !st || st.hasConflict) return null;
   return getPendingSplitForHash(st.operationHead ?? null);
 });
 
@@ -1152,8 +1143,8 @@ async function onRebaseBannerSplit() {
   await splitCommit.openFor(cwd, { hash: "HEAD", message: pending.message }, async () => {
     // Keyed on the original hash, which is what `pendingSplits` stores.
     resolvePendingSplit(pending.fullHash);
-    const { gitRebaseAction } = await import("./utils/backend");
-    await gitRebaseAction(cwd, "continue");
+    const { gitOperationAction } = await import("./utils/backend");
+    await gitOperationAction(cwd, "rebase", "continue");
     await refreshRepoState();
     await repoRefresh();
   });
@@ -2699,17 +2690,20 @@ const showRebase = ref(false);
 const repoOperationState = ref<RepoOperationState | null>(null);
 /** What the repository on disk says is in progress — null when unreadable. */
 const repoDiskOperation = ref<RepoOperationState["state"] | null>(null);
-/**
- * Which operation the conflict banner is looking at. The repository decides;
- * `isCherryPicking` is only the fallback, because it is a frontend ref that
- * does not survive opening a repo that is already mid-cherry-pick.
- */
-const conflictOperation = computed(() =>
-  resolveConflictOperation(repoDiskOperation.value, isCherryPicking.value),
+/** True for a rebase specifically — several call sites below mean *that*, not
+ * "some operation is in progress", and would silently change meaning now that
+ * repoOperationState carries every operation. */
+const isRebasing = computed(() =>
+  repoOperationState.value?.state === "rebase" ||
+  repoOperationState.value?.state === "rebase_interactive",
 );
-const showRebaseBanner = computed(() =>
+
+/**
+ * The banner now drives every operation, not just a rebase: merge,
+ * cherry-pick and revert each get Continue/Abort there (design §6).
+ */
+const showOperationBanner = computed(() =>
   repoOperationState.value !== null &&
-  (repoOperationState.value.state === "rebase" || repoOperationState.value.state === "rebase_interactive") &&
   !showRebase.value &&   // don't overlap with the RebaseEditor (user-initiated interactive rebase)
   repoFolderPath.value !== ""
 );
@@ -2722,23 +2716,15 @@ async function refreshRepoState() {
   }
   try {
     const state = await gitRepoState(repoFolderPath.value);
-    // Kept separately from `repoOperationState`, which stays rebase-only on
-    // purpose: several call sites read `repoOperationState !== null` as "a
-    // rebase is in progress" (force-push preference, the wasRebasing
-    // snapshots, the auto-resolve loop). Widening it would silently turn a
-    // merge into a rebase for all of them.
     repoDiskOperation.value = state.state;
-    // Surface both plain and interactive rebase states — git ≥2.26 uses the
-    // sequencer backend (creates rebase-merge/interactive) even for plain
-    // pull --rebase.  We distinguish from a user-initiated RebaseEditor session
-    // via the showRebase flag (see showRebaseBanner computed above).
-    repoOperationState.value =
-      (state.state === "rebase" || state.state === "rebase_interactive") ? state : null;
+    // Every operation in progress, not just a rebase: the banner drives them
+    // all now. The places that specifically meant "a rebase is running" use
+    // the `isRebasing` computed instead of testing this ref for null.
+    repoOperationState.value = state.state === "clean" ? null : state;
   } catch (err) {
     console.warn("[rebase] gitRepoState error:", err);
     repoOperationState.value = null;
-    // null, not "clean": a failed read knows nothing, and
-    // resolveConflictOperation falls back to the frontend flag for it.
+    // null, not "clean": a failed read knows nothing at all.
     repoDiskOperation.value = null;
   }
 }
@@ -2750,19 +2736,11 @@ async function refreshRepoState() {
  * is gone after the refresh. Callers pass the pre-action `wasRebasing` snapshot.
  */
 function preferForcePushIfRebaseCompleted(wasRebasing: boolean) {
-  if (wasRebasing && repoOperationState.value === null) {
+  if (wasRebasing && !isRebasing.value) {
     forcePushPreferred.value = true;
   }
 }
 
-async function onRebaseBannerActionDone(action: "continue" | "abort" | "skip") {
-  // After continue/abort/skip: re-poll state, refresh repo
-  const wasRebasing = repoOperationState.value !== null;
-  await refreshRepoState();
-  await repoRefresh();
-  // Abort restores the pre-rebase state, so it must NOT flip the preference.
-  if (action !== "abort") preferForcePushIfRebaseCompleted(wasRebasing);
-}
 
 // Driven into RebaseProgressBanner so it can show a spinner during the loop.
 const rebaseAutoResolving = ref(false);
@@ -2779,16 +2757,20 @@ async function onRebaseBannerAutoResolve() {
   if (!repoFolderPath.value || rebaseAutoResolving.value) return;
   rebaseAutoResolving.value = true;
   const cwd = repoFolderPath.value;
-  const wasRebasing = repoOperationState.value !== null;
+  // Rebase-only loop: `isRebasing`, not `!== null`, now that the ref carries
+  // merge and cherry-pick too.
+  const wasRebasing = isRebasing.value;
   try {
-    const { gitRebaseAction } = await import("./utils/backend");
+    const { gitOperationAction } = await import("./utils/backend");
     for (let i = 0; i < 100; i++) {
       await refreshRepoState();
-      // Rebase finished (or no longer paused) — we're done.
-      if (!repoOperationState.value) break;
+      // Rebase finished (or no longer paused) — we're done. This loop is
+      // rebase-only, so it stops as soon as the repo is not rebasing.
+      const op = repoOperationState.value;
+      if (!isRebasing.value || !op) break;
       // Paused without conflicts (e.g. an `edit`/`break` stop) — just advance.
-      if (!repoOperationState.value.hasConflict) {
-        await gitRebaseAction(cwd, "continue");
+      if (!op.hasConflict) {
+        await gitOperationAction(cwd, "rebase", "continue");
         continue;
       }
       // Resolve this step.
@@ -2803,7 +2785,7 @@ async function onRebaseBannerAutoResolve() {
       // Couldn't fully resolve this step → stop and hand back to the user.
       if (repoStatus.value && repoStatus.value.conflicted.length > 0) break;
       // Step clear → advance the rebase and loop.
-      await gitRebaseAction(cwd, "continue");
+      await gitOperationAction(cwd, "rebase", "continue");
     }
     await refreshRepoState();
     await repoRefresh();
@@ -3246,23 +3228,37 @@ function askConfirm(options: {
 }
 
 /**
- * Abort the merge, then — only if git actually aborted — drop the resolution
- * state it belonged to and leave the changes view, which now has nothing to
- * show. `canUndo` is the "there is work to lose" signal that decides whether
- * the composable asks for confirmation first (design §3.2, §3.5).
+ * Run an operation action for the banner, and deal with what it leaves behind.
+ *
+ * One handler for every operation and every action. `canUndo` is the "there is
+ * work to lose" signal that makes the composable confirm an abort first; on an
+ * abort that git actually performed, the resolution state it belonged to is
+ * dropped and the changes view — which now has nothing to show — is left.
  */
-async function doAbortMerge() {
-  const aborted = await repoAbortMerge({ hasResolutionWork: canUndo.value });
-  if (!aborted) return;
-  mergeReset();
-  viewMode.value = "graph";
-}
-
-async function doCherryPickAbort() {
-  const aborted = await repoCherryPickAbort({ hasResolutionWork: canUndo.value });
-  if (!aborted) return;
-  mergeReset();
-  viewMode.value = "graph";
+async function onOperationAction(action: "continue" | "abort" | "skip") {
+  const wasRebasing = isRebasing.value;
+  const operationBefore = repoOperationState.value?.state ?? null;
+  const did = await runOperationAction(action, {
+    hasResolutionWork: canUndo.value,
+  });
+  await refreshRepoState();
+  await repoRefresh();
+  if (!did) return;
+  if (action === "abort") {
+    mergeReset();
+    viewMode.value = "graph";
+    return;
+  }
+  // Abort restores the pre-rebase state, so it must NOT flip the preference.
+  preferForcePushIfRebaseCompleted(wasRebasing);
+  // The merge-completed modal, on evidence rather than on assumption: the
+  // operation was a merge, git did not refuse, and the repository no longer
+  // reports one in progress. A `--continue` that merely halted on a further
+  // conflict leaves the state in place and so shows nothing, which is the
+  // whole point of distinguishing the two (design §3).
+  if (action === "continue" && operationBefore === "merge" && repoOperationState.value === null) {
+    showMergeSuccess.value = true;
+  }
 }
 
 // ─── Post-checkout "Update branch" prompt ────────────────
@@ -4354,32 +4350,13 @@ onUnmounted(() => {
             <!-- Plain rebase-in-progress banner (pull --rebase paused on conflicts).
                  Non-blocking: sits at the top of the view so the resolution area
                  below stays reachable. -->
-            <RebaseProgressBanner v-if="showRebaseBanner && repoOperationState" :repo-state="repoOperationState"
-              :cwd="repoFolderPath ?? ''" :auto-resolving="rebaseAutoResolving"
-              @action-done="onRebaseBannerActionDone"
+            <RebaseProgressBanner v-if="showOperationBanner && repoOperationState" :repo-state="repoOperationState"
+              :auto-resolving="rebaseAutoResolving"
+              :on-action="onOperationAction"
               :pending-split="pendingSplitAtHalt !== null"
               @split="onRebaseBannerSplit"
-              @auto-resolve="onRebaseBannerAutoResolve" @error="(msg) => { repoError = msg; }" />
+              @auto-resolve="onRebaseBannerAutoResolve" />
 
-            <!-- Conflict banner (merge or cherry-pick) — suppressed during a
-                 paused rebase, which has its own banner + Continue/Skip/Abort. -->
-            <div v-if="hasConflicts && !showRebaseBanner" class="conflict-banner" role="alert">
-              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
-                <path d="M9 1.5L16.5 15H1.5L9 1.5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" />
-                <path d="M9 7v3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-                <circle cx="9" cy="12.5" r="0.75" fill="currentColor" />
-              </svg>
-              <span class="conflict-text">
-                {{ repoStats.conflicted }} {{ repoStats.conflicted > 1 ? t('header.conflicts') : t('header.conflict') }}
-                — {{ t('header.resolveConflicts') }}
-              </span>
-              <button v-if="conflictOperation === 'cherry_pick'" class="conflict-abort-btn" @click="doCherryPickAbort">
-                {{ t('header.abortCherryPick') }}
-              </button>
-              <button v-else class="conflict-abort-btn" @click="doAbortMerge">
-                {{ t('header.abortMerge') }}
-              </button>
-            </div>
 
             <!-- ── Dashboard view: full-bleed, no side panel ── -->
             <DashboardView v-if="viewMode === 'dashboard'" class="view__content"
@@ -5358,38 +5335,9 @@ onUnmounted(() => {
 }
 
 /* ─── Merge conflict banner ──────────────────────────── */
-.conflict-banner {
-  display: flex;
-  align-items: center;
-  gap: var(--space-4);
-  padding: var(--space-4) var(--space-6);
-  background: var(--color-warning-bg);
-  border-left: 3px solid var(--color-warning);
-  color: var(--color-warning);
-  font-size: var(--font-size-md);
-  font-weight: var(--font-weight-medium);
-  flex-shrink: 0;
-}
 
-.conflict-text {
-  flex: 1;
-}
 
-.conflict-abort-btn {
-  padding: var(--space-2) var(--space-5);
-  border-radius: var(--radius-sm);
-  font-size: var(--font-size-base);
-  font-weight: var(--font-weight-semibold);
-  background: var(--color-bg-tertiary);
-  color: var(--color-text);
-  border: 1px solid var(--color-border);
-  cursor: pointer;
-  transition: background var(--transition-fast);
-}
 
-.conflict-abort-btn:hover {
-  background: var(--color-border);
-}
 
 /* ─── Toast ──────────────────────────────────────────── */
 .toast {

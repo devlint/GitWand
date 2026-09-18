@@ -42,7 +42,6 @@ import {
   gitStashApply,
   gitStashDrop,
   gitWorktreeList,
-  gitRepoState,
   type GitStatus,
   type GitDiff,
   type GitLogEntry,

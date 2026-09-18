@@ -2,8 +2,7 @@
 import { ref, computed } from "vue";
 import {
   gitCherryPick,
-  gitCherryPickAbort,
-  gitCherryPickContinue,
+  gitOperationAction,
   getGitLog,
   getGitBranches,
   type GitLogEntry,
@@ -93,7 +92,7 @@ async function doCherryPick() {
 
 async function abortPick() {
   try {
-    await gitCherryPickAbort(props.cwd);
+    await gitOperationAction(props.cwd, "cherry_pick", "abort");
     hasConflicts.value = false;
     error.value = null;
     success.value = "Cherry-pick aborted.";
@@ -106,12 +105,15 @@ async function abortPick() {
 async function continuePick() {
   isCherryPicking.value = true;
   try {
-    const result = await gitCherryPickContinue(props.cwd);
-    if (result.success) {
+    // `halted` means git advanced and stopped on the next commit's conflict —
+    // progress, not failure, so the panel stays in its conflict state instead
+    // of announcing completion.
+    const { halted } = await gitOperationAction(props.cwd, "cherry_pick", "continue");
+    if (halted) {
+      hasConflicts.value = true;
+    } else {
       hasConflicts.value = false;
       success.value = "Cherry-pick completed.";
-    } else {
-      error.value = result.message;
     }
     emit("refresh");
   } catch (err: any) {
