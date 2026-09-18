@@ -28,9 +28,18 @@ Taken on `main` at `f33f9f1`:
 |---|---|
 | `#[tauri::command]` declared | 283 |
 | registered in `generate_handler!` | 283 |
-| invoked by the frontend (`tauriInvoke("…")`) | 122 |
+| invoked by the frontend (`tauriInvoke("…")`) | 139 |
 | dev-server routes | 169 |
 | commands taking `repo_lock::write` | 36 (35 of them frontend-invoked) |
+
+**A second finding, which decides how the guard is written.** That 139 was
+first measured as 122 by a regex of the form `tauriInvoke<?[^>]*>?\(\s*"(\w+)"`.
+It silently missed 18 commands — among them `git_status`, `git_diff`, `git_log`
+and `git_blame` — because their type parameter contains a nested generic
+(`tauriInvoke<Array<{ hash_full: string; … }>>(…)`) and `[^>]*` stops at the
+first `>`. A guard that under-counts invocations passes while the audit it
+claims to perform is incomplete, which is worse than no guard. §4 therefore
+specifies the parse rather than leaving it to whoever writes it.
 
 **The finding that decides the approach:** there is no rule mapping a command
 name to a route name. All of these are real:
@@ -74,7 +83,7 @@ export const COMMAND_REGISTRY: Record<string, CommandRegistryEntry> = {
 - `cliPathOnly` is **documentation, not behaviour**. The dev-server keeps
   answering as it does today (§6).
 
-**Seeding the table.** 122 entries is too many to write by hand from nothing,
+**Seeding the table.** 139 entries is too many to write by hand from nothing,
 and too few to justify a generator kept around afterwards. The initial table is
 produced once by a throwaway script that pairs each invoked command with a route
 of a matching name, then **every unpaired command is resolved by hand** — that
@@ -85,7 +94,16 @@ exists, the guard (§4) is what keeps it true.
 ## 4. The guard
 
 A vitest test reads `src/utils/backend.ts`, `src/utils/backend-core.ts` and
-`dev-server.mjs` as text and asserts four things:
+`dev-server.mjs` as text and asserts four things.
+
+**How the invocations are found**, because a regex over the type parameter is
+demonstrably wrong (see §1): scan for each occurrence of the identifier
+`tauriInvoke`, skip the ones that are its own definition, an import, or a
+mention inside a comment (`* Timeout presets for tauriInvoke.` is one), then
+take the first `(` that follows and read what comes after it. A string literal
+is the command name; anything else fails assertion 4. Route declarations need
+no such care: all 171 of them are `url.pathname === "/api/…"`, with no
+`startsWith` or regex variant.
 
 1. **Every invoked command has an entry.** A command added to `backend.ts`
    without one fails the suite — this is what stops the drift recurring.
@@ -128,7 +146,7 @@ creating a new one.
   this lot combined. It is declared via `cliPathOnly`, not fixed.
 - **Failure modes of read commands.** A read that disagrees is visible on
   screen; a write that disagrees leaves a repository in the wrong state.
-- **Commands the frontend does not invoke.** 161 of the 283 are unreachable
+- **Commands the frontend does not invoke.** 144 of the 283 are unreachable
   from the UI; they are not a parity problem until something calls them.
 - **Making the dev-server refuse when a token is configured.** Considered and
   rejected: it would make `dev:web` unusable for forge commands for anyone with
