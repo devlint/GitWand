@@ -1,32 +1,30 @@
-import type { RepoOperationState } from "./backend";
+import type { OperationKind, RepoOperationState } from "./backend";
 
-/** The operations the conflict banner knows how to abort and continue. */
-export type ConflictOperation = "merge" | "cherry_pick";
+// The operation union has one definition, `OperationKind` in backend.ts, so
+// the composable and this helper cannot drift apart.
 
 /**
- * Decide which operation the conflict banner is looking at.
+ * Name the operation the repository is in, or null when there is none.
  *
- * `isCherryPicking` is a frontend ref set when *this app* starts a cherry-pick.
- * It does not survive opening a repository that is already mid-cherry-pick, so
- * on its own it made the banner offer "Abort merge" for a cherry-pick and the
- * post-resolution chain run `git merge --continue` where no MERGE_HEAD exists.
- * `gitRepoState` reads the repository itself (MERGE_HEAD / CHERRY_PICK_HEAD /
- * …), so when it knows, it decides.
- *
- * @param diskState what `gitRepoState` reported, or null when the call failed.
- * @param isCherryPicking `useGitRepo`'s flag — the fallback, and still correct
- *   when the app just started the cherry-pick and the disk read has not landed.
- * @returns "cherry_pick" or "merge". A `revert` maps to "merge": the app has no
- *   `git revert --abort` wrapper, so this preserves today's behaviour instead
- *   of offering a button that cannot work.
+ * The repository is the only source. #201 replaced the `isCherryPicking`
+ * frontend flag with this read — the flag was set when *this app* started a
+ * cherry-pick and so did not survive opening a repo that was already
+ * mid-cherry-pick — and this change removed the flag entirely, so there is no
+ * longer a second answer to fall back to.
  */
 export function resolveConflictOperation(
   diskState: RepoOperationState["state"] | null,
-  isCherryPicking: boolean,
-): ConflictOperation {
-  if (diskState === "cherry_pick") return "cherry_pick";
-  if (diskState === "merge" || diskState === "revert") return "merge";
-  // "clean", a rebase (the rebase banner owns that case), or an unreadable
-  // state: nothing authoritative, so the frontend flag is all we have.
-  return isCherryPicking ? "cherry_pick" : "merge";
+): OperationKind | null {
+  switch (diskState) {
+    case "merge":
+    case "cherry_pick":
+    case "revert":
+    case "rebase":
+      return diskState;
+    // An interactive rebase is still a rebase as far as continue/abort/skip go.
+    case "rebase_interactive":
+      return "rebase";
+    default:
+      return null;
+  }
 }

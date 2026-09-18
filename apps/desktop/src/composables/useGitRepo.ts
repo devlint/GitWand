@@ -18,8 +18,10 @@ import {
   gitPull,
   gitFetch,
   gitMerge,
-  gitMergeAbort,
-  gitMergeContinue,
+  gitOperationAction,
+  gitRepoState,
+  type OperationKind,
+  type OperationActionKind,
   gitDiscard,
   gitAmendCommit,
   gitStagePatch,
@@ -34,8 +36,6 @@ import {
   gitDeleteRemoteTag,
   gitRenameBranch,
   gitCherryPick,
-  gitCherryPickAbort,
-  gitCherryPickContinue,
   gitStash,
   gitStashPop,
   gitStashList,
@@ -57,6 +57,7 @@ import {
 import { requireOnline } from "../utils/networkGuard";
 import { clearUpdatePromptSkip } from "./useBranchUpdatePrompt";
 import { t } from "./useI18n";
+import { resolveConflictOperation } from "../utils/conflictOperation";
 import { useWorkspaceScope } from "./useWorkspaceScope";
 import { useSettings } from "./useSettings";
 import { useUndoToast } from "./useUndoToast";
@@ -1149,70 +1150,68 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
   }
 
   /**
-   * Abort an in-progress merge.
+   * Continue, abort or skip whatever operation the repository is in.
    *
-   * @returns true only when git actually aborted. `git_merge_abort` returns
-   *   Ok with `success: false` when git refuses (e.g. "Entry not uptodate"),
-   *   so the field has to be read: a rejected promise is not the only failure.
-   *   The caller needs the boolean to decide whether to drop resolution state.
+   * The operation is read from the repository, never from a frontend flag:
+   * that is the lesson of #201, where `isCherryPicking` did not survive
+   * opening a repo already mid-cherry-pick.
+   *
+   * @returns true when git did the thing — including when it halted on a
+   *   further conflict, which is progress, not failure (design §3).
    */
-  async function abortMerge(abortOpts: AbortOptions = {}): Promise<boolean> {
+  async function runOperationAction(
+    action: OperationActionKind,
+    abortOpts: AbortOptions = {},
+  ): Promise<boolean> {
     if (!folderPath.value) return false;
-    // Only worth a modal when there is something to lose (design §3.2). The
-    // signal is useGitWand's `canUndo`, handed down by App.vue.
-    if (abortOpts.hasResolutionWork && opts.confirm) {
+
+    let operation: OperationKind | null = null;
+    try {
+      const state = await gitRepoState(folderPath.value);
+      operation = resolveConflictOperation(state.state);
+    } catch {
+      operation = null;
+    }
+    if (!operation) return false;
+
+    // Only an abort destroys work, and only then is a modal worth showing.
+    if (action === "abort" && abortOpts.hasResolutionWork && opts.confirm) {
       const ok = await opts.confirm({
-        title: t("header.abortMergeConfirmTitle"),
-        message: t("header.abortMergeConfirmMessage"),
+        title: t("header.abortConfirmTitle"),
+        message: t("header.abortConfirmMessage"),
         confirmLabel: t("header.abortConfirmLabel"),
         danger: true,
       });
       if (!ok) return false;
     }
+
     try {
-      const result = await gitMergeAbort(folderPath.value);
-      // refresh() first on every path: loadStatus() writes its own failure
-      // into `error`, so assigning `error` before it would let a status
-      // failure overwrite git's reason for refusing.
+      await gitOperationAction(folderPath.value, operation, action);
+      // refresh() before any assignment to `error`: loadStatus() writes its own
+      // failures into the same ref and would overwrite git's reason (#201).
       await refresh();
-      if (!result.success) {
-        error.value = `abort merge: ${result.message || "unknown error"}`;
-        return false;
-      }
-      successMessage.value = "merge-aborted";
+      successMessage.value = `${operation}-${action}`;
       return true;
     } catch (err: any) {
-      error.value = `abort merge: ${err?.message || String(err)}`;
-      return false;
-    }
-  }
-
-  /** Continue a merge after all conflicts have been resolved. */
-  async function mergeContinue() {
-    if (!folderPath.value) return;
-    isMerging.value = true;
-    try {
-      const result = await gitMergeContinue(folderPath.value);
       await refresh();
-      if (result.success) {
-        successMessage.value = "merge-done";
-      } else {
-        error.value = `merge --continue: ${result.message || "unknown error"}`;
-      }
-    } catch (err: any) {
-      error.value = `merge --continue: ${err?.message || String(err)}`;
-    } finally {
-      isMerging.value = false;
+      error.value = `${operation} --${action}: ${err?.message || String(err)}`;
+      return false;
     }
   }
 
   // ─── Cherry-pick (Phase 8.2) ─────────────────────────────
 
-  const isCherryPicking = ref(false);
 
+  /**
+   * Start a cherry-pick.
+   *
+   * No mode flag is kept: the repository records the operation itself
+   * (`CHERRY_PICK_HEAD`), and `gitRepoState` is what reads it. The old
+   * `isCherryPicking` ref could not survive a reload or a repo opened while
+   * already mid-cherry-pick, which is what #201 had to work around.
+   */
   async function cherryPick(hashes: string[]) {
     if (!folderPath.value || hashes.length === 0) return;
-    isCherryPicking.value = true;
     try {
       const result = await gitCherryPick(folderPath.value, hashes);
       await refresh();
@@ -1222,16 +1221,15 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       const serverSaysConflicts = result.conflicts === true;
 
       if (hasConflictedFiles) {
-        // Stay in cherry-pick mode — isCherryPicking remains true until abort/continue
         viewMode.value = "changes";
         await selectFile(status.value!.conflicted[0], false);
-        return; // early return: do NOT reset isCherryPicking
+        return;
       } else if (serverSaysConflicts) {
         if (folderPath.value) await loadStatus(folderPath.value);
         if (status.value && status.value.conflicted.length > 0) {
           viewMode.value = "changes";
           await selectFile(status.value.conflicted[0], false);
-          return; // early return: do NOT reset isCherryPicking
+          return;
         } else {
           viewMode.value = "changes";
           error.value = `cherry-pick: ${result.message || "unknown error"}`;
@@ -1243,69 +1241,6 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       }
     } catch (err: any) {
       error.value = `cherry-pick: ${err?.message ?? err}`;
-    } finally {
-      if (!hasConflicts.value) {
-        isCherryPicking.value = false;
-      }
-    }
-  }
-
-  /**
-   * Abort an in-progress cherry-pick.
-   *
-   * @returns true only when git actually aborted. `isCherryPicking` is cleared
-   *   on that branch alone — a failed abort leaves the sequencer on disk, and
-   *   dropping the flag would make the banner offer "Abort merge" for a
-   *   cherry-pick that is still in progress (design §3.4).
-   */
-  async function cherryPickAbort(abortOpts: AbortOptions = {}): Promise<boolean> {
-    if (!folderPath.value) return false;
-    if (abortOpts.hasResolutionWork && opts.confirm) {
-      const ok = await opts.confirm({
-        title: t("header.abortCherryPickConfirmTitle"),
-        message: t("header.abortCherryPickConfirmMessage"),
-        confirmLabel: t("header.abortConfirmLabel"),
-        danger: true,
-      });
-      if (!ok) return false;
-    }
-    try {
-      await gitCherryPickAbort(folderPath.value);
-      await refresh();
-      successMessage.value = "cherry-pick-aborted";
-      isCherryPicking.value = false;
-      return true;
-    } catch (err: any) {
-      await refresh();
-      error.value = `cherry-pick abort: ${err?.message ?? err}`;
-      return false;
-    }
-  }
-
-  async function cherryPickContinue() {
-    if (!folderPath.value) return;
-    isCherryPicking.value = true;
-    try {
-      const result = await gitCherryPickContinue(folderPath.value);
-      await refresh();
-      if (result.success) {
-        successMessage.value = "cherry-pick-done";
-      } else if (result.conflicts) {
-        // More conflicts remain — stay in cherry-pick mode
-        if (status.value && status.value.conflicted.length > 0) {
-          viewMode.value = "changes";
-          await selectFile(status.value.conflicted[0], false);
-        }
-        return; // do NOT reset isCherryPicking
-      } else {
-        error.value = `cherry-pick continue: ${result.message}`;
-      }
-    } catch (err: any) {
-      error.value = `cherry-pick continue: ${err?.message ?? err}`;
-    } finally {
-      if (!hasConflicts.value) {
-        isCherryPicking.value = false;
-      }
     }
   }
 
@@ -1663,8 +1598,6 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     updateBranchFastForward,
     fetch: fetchRemote,
     mergeBranch,
-    mergeContinue,
-    abortMerge,
     discardFiles,
     addToGitignore,
     selectCommit,
@@ -1679,10 +1612,8 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     deleteRemoteTag,
     renameBranch,
     // Cherry-pick (Phase 8.2)
-    isCherryPicking,
     cherryPick,
-    cherryPickAbort,
-    cherryPickContinue,
+    runOperationAction,
     // Stash Manager (Phase 8.2)
     stashes,
     stashesLoading,
