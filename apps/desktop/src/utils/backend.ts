@@ -973,37 +973,51 @@ export async function gitMerge(cwd: string, branch: string, noFf: boolean = fals
   return res.json();
 }
 
-/**
- * Abort an in-progress merge.
- */
-export async function gitMergeAbort(cwd: string): Promise<GitPushPullResult> {
-  if (isTauri()) {
-    return tauriInvoke<GitPushPullResult>("git_merge_abort", { cwd });
-  }
-  const res = await devFetch(`${DEV_SERVER}/api/git-merge-abort`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ cwd }),
-  });
-  return res.json();
-}
 
-/**
- * Continue a merge after all conflicts are resolved.
- */
-export async function gitMergeContinue(cwd: string): Promise<GitPushPullResult> {
-  if (isTauri()) {
-    return tauriInvoke<GitPushPullResult>("git_merge_continue", { cwd });
-  }
-  const res = await devFetch(`${DEV_SERVER}/api/git-merge-continue`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ cwd }),
-  });
-  return res.json();
-}
 
 // ─── Git repo operation state ─────────────────────────────────
+
+/** The operations that can be in progress in a repository. */
+export type OperationKind = "merge" | "cherry_pick" | "revert" | "rebase";
+/** What can be done to the operation in progress. */
+export type OperationActionKind = "continue" | "abort" | "skip";
+
+/** Outcome of an operation action. See design §3: three outcomes, not two. */
+export interface OperationActionResult {
+  /** git did its work and stopped on a further conflict. Progress, not failure. */
+  halted: boolean;
+}
+
+/**
+ * Continue, abort or skip the operation in progress.
+ *
+ * Replaces the five per-operation wrappers, which disagreed on how failure was
+ * reported. Rejects only when git actually refused; a halt on a further
+ * conflict resolves with `halted: true`.
+ */
+export async function gitOperationAction(
+  cwd: string,
+  operation: OperationKind,
+  action: OperationActionKind,
+): Promise<OperationActionResult> {
+  if (isTauri()) {
+    return tauriInvoke<OperationActionResult>("git_operation_action", {
+      cwd,
+      operation,
+      action,
+    });
+  }
+  const res = await devFetch(`${DEV_SERVER}/api/git-operation-action`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cwd, operation, action }),
+  });
+  const body = (await res.json()) as { halted?: boolean; error?: string };
+  if (!res.ok) {
+    throw new Error(body.error || "operation action failed");
+  }
+  return { halted: body.halted === true };
+}
 
 export interface RepoOperationState {
   /** "clean" | "rebase" | "rebase_interactive" | "merge" | "cherry_pick" | "revert" */
@@ -1036,26 +1050,6 @@ export async function gitRepoState(cwd: string): Promise<RepoOperationState> {
   return res.json();
 }
 
-/**
- * Run `git rebase --continue`, `--abort`, or `--skip`.
- */
-export async function gitRebaseAction(
-  cwd: string,
-  action: 'continue' | 'abort' | 'skip'
-): Promise<void> {
-  if (isTauri()) {
-    return tauriInvoke<void>("git_rebase_action", { cwd, action });
-  }
-  const res = await devFetch(`${DEV_SERVER}/api/git-rebase-action`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ cwd, action }),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error ?? "git rebase action failed");
-  }
-}
 
 /**
  * Rebase the current branch onto `onto`, non-interactively.
@@ -1728,42 +1722,7 @@ export async function gitCherryPick(cwd: string, hashes: string[]): Promise<GitP
   return res.json();
 }
 
-/**
- * Abort an in-progress cherry-pick.
- */
-export async function gitCherryPickAbort(cwd: string): Promise<void> {
-  if (isTauri()) {
-    await tauriInvoke("git_cherry_pick_abort", { cwd });
-    return;
-  }
-  // The dev-server answers 200 with { success: false, message } on a failing
-  // abort, where the Rust command returns Err. Throwing here is what keeps a
-  // single failure path for both backends (design §3.6).
-  const res = await devFetch(`${DEV_SERVER}/api/git-cherry-pick-abort`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ cwd }),
-  });
-  const body = (await res.json()) as { success?: boolean; message?: string };
-  if (!body.success) {
-    throw new Error(body.message || "cherry-pick --abort failed");
-  }
-}
 
-/**
- * Continue a cherry-pick after resolving conflicts.
- */
-export async function gitCherryPickContinue(cwd: string): Promise<GitPushPullResult> {
-  if (isTauri()) {
-    return tauriInvoke<GitPushPullResult>("git_cherry_pick_continue", { cwd });
-  }
-  const res = await devFetch(`${DEV_SERVER}/api/git-cherry-pick-continue`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ cwd }),
-  });
-  return res.json();
-}
 
 // ─── Commit context-menu operations (v1.9) ─────────────────
 
