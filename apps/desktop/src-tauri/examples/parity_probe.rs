@@ -33,7 +33,7 @@
 // proc-macro de Tauri génère une aide `__cmd__<name>` qui entre en conflit si
 // la fn elle-même est `pub`. Voir le bloc "Parity probe re-exports" dans lib.rs.
 use gitwand_desktop_lib::{
-    gh_disable_auto_merge_parity, gh_enable_auto_merge_parity, git_blame_parity,
+    command_parity, gh_disable_auto_merge_parity, gh_enable_auto_merge_parity, git_blame_parity,
     git_branches_parity, git_commit_submodule_changes_parity, git_diff_parity, git_log_parity,
     git_operation_action_parity, git_rebase_onto_parity, git_remote_info_parity,
     git_stash_list_parity, git_status_libgit2_parity, git_status_parity,
@@ -50,7 +50,7 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
         eprintln!("usage: parity-probe <command>");
-        eprintln!("commands: git-operation-action, git-status, git-status-fast, git-log, git-branches, git-diff, git-blame, read-file, git-stash-list, git-submodule-branches, git-commit-submodule-changes, scan-secrets, gh-enable-auto-merge, gh-disable-auto-merge, gl-enable-auto-merge, gl-disable-auto-merge");
+        eprintln!("commands: command-parity, git-operation-action, git-status, git-status-fast, git-log, git-branches, git-diff, git-blame, read-file, git-stash-list, git-submodule-branches, git-commit-submodule-changes, scan-secrets, gh-enable-auto-merge, gh-disable-auto-merge, gl-enable-auto-merge, gl-disable-auto-merge");
         return ExitCode::from(2);
     }
 
@@ -184,6 +184,16 @@ fn main() -> ExitCode {
                 Err(code) => return code,
             };
             to_json(git_operation_action_parity(cwd, operation, action))
+        }
+        // Generic dispatch: `{ "command": "git_merge", "args": { … } }`.
+        // One arm instead of a wrapper-plus-arm pair per command.
+        "command-parity" => {
+            let name = match must_str("command") {
+                Ok(v) => v,
+                Err(code) => return code,
+            };
+            let args = input.get("args").cloned().unwrap_or_else(|| json!({}));
+            to_json(command_parity(name, args))
         }
         "preview-merge" => {
             let cwd = match must_str("cwd") {
