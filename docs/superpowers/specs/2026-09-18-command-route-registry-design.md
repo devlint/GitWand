@@ -132,6 +132,27 @@ state behind**. Asserting only "both failed" is too weak — two implementations
 can agree on refusal while leaving different working trees, and the state is
 what the caller acts on next.
 
+**Corrected after measurement.** This section originally assumed the parity
+harness could already reach these commands. It cannot: **5 of the 35 have a
+probe arm** (`git_operation_action`, `git_rebase_onto`, and the three
+`snapshot_*`). The other 30 would each need a `*_parity` wrapper in `lib.rs`
+*and* an arm in `parity_probe.rs` before a test can call them at all.
+
+Two consequences:
+
+1. **One generic probe arm instead of thirty specific ones.** The probe already
+   reads its input as JSON on stdin, so a single `command-parity` arm taking
+   `{ command, args }` and dispatching through a `match` replaces thirty
+   wrapper-plus-arm pairs with thirty short match arms.
+2. **A first tranche rather than all 35 at once**, chosen by a criterion rather
+   than by feel: the commands that **mutate the working tree or HEAD**, where a
+   divergent failure leaves the user's files in the wrong state —
+   `git_merge`, `git_cherry_pick`, `git_revert_commit`, `git_reset_to_commit`,
+   `git_discard`, `git_stash`, `git_stash_pop`, `git_stash_apply`,
+   `git_checkout_commit`, `git_switch_branch`. Commands that touch only the
+   index or refs (`git_stage`, `git_create_branch`, …) follow once the
+   mechanism has proven itself on these ten.
+
 **Cost, stated rather than discovered.** The parity suite is 81 tests across 24
 files today and boots a dev-server. One case per command, with fixtures shared
 per family (stash, submodule, worktree), keeps the addition proportionate. If a
