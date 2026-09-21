@@ -145,8 +145,28 @@ jobs:
         with:
           node-version: 22
 
-      - name: Wait for npm registry propagation
-        run: node -e "setTimeout(() => process.exit(0), 30000)"
+      - name: Wait until the published version is resolvable
+        shell: bash
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          # npm's registry offers no propagation guarantee, so a fixed sleep is
+          # a coin flip. v3.11.0's smoke test failed on all three runners 50s
+          # after a publish that had in fact succeeded — the packages were
+          # fine, the check was early. Poll the version endpoint (the full
+          # packument is served from a CDN cache and lags behind it), and fail
+          # only once the cap is reached, which would be a real publish problem
+          # rather than a slow one.
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' \
+              "https://registry.npmjs.org/@gitwand%2Fcli/${VER}")
+            if [ "$code" = "200" ]; then
+              echo "::notice::@gitwand/cli@${VER} resolvable after ~$((i * 10))s"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::@gitwand/cli@${VER} still not on the registry after 300s"
+          exit 1
 
       - name: npx @gitwand/cli --help
         shell: bash
