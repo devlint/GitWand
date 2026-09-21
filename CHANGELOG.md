@@ -33,6 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Two commands 404'd under `pnpm dev:web`.** `backend.ts` fetched `/api/git-commit-template-path` and `/api/git-config-identity`; `dev-server.mjs` declared neither, so the commit-template lookup silently returned null and the identity lookup threw, in web mode only. Both routes now exist and mirror the Rust commands, including their judgement calls: an unset `commit.template` is not an error, an unset `user.name` or `user.email` is. Found by the command-registry audit and pinned at parity, so the fix is the Rust behaviour rather than an approximation of it.
+
 - **A failed submodule update reported success under `pnpm dev:web`.** `/api/git-submodule-update-one` ran `git submodule update` and discarded the exit code, answering `{}` whatever happened, while the Rust command propagated the error. Found by the parity work below, which is the only thing that compares the two.
 
 - **The conflict banner reads the repository instead of a frontend flag.** `isCherryPicking` is set when *this app* starts a cherry-pick, so it did not survive opening a repository that was already mid-cherry-pick: the banner offered "Abort merge", and once the last conflict was resolved the app ran `git merge --continue` on a repo with no `MERGE_HEAD`. Both decisions now come from `git_repo_state`, which reads `MERGE_HEAD`/`CHERRY_PICK_HEAD` on disk, with the old flag kept only as the fallback for when that read fails. A conflicted `revert` still maps to the merge action, which is what the app actually has a wrapper for.

@@ -520,3 +520,83 @@ describe("parity on failure: index, ref and submodule commands", () => {
   // to assert parity on until it has a reachable refusal, and inventing one
   // would test the fixture rather than the command.
 });
+
+/**
+ * The two routes the registry audit found missing: `backend.ts` fetched
+ * `/api/git-commit-template-path` and `/api/git-config-identity`, and
+ * `dev-server.mjs` declared neither, so both 404'd under `pnpm dev:web`.
+ * Fixed here, and pinned at parity so the fix is the Rust behaviour rather
+ * than an approximation of it.
+ */
+describe("parity: the two routes the audit found missing", () => {
+  it("git_commit_template_path answers null identically when unset", async () => {
+    const rustDir = baseRepo();
+    const nodeDir = baseRepo();
+
+    const rust = rustRun(rustDir, "git_commit_template_path", {});
+    const node = await nodeRun(dev, "/api/git-commit-template-path", { cwd: nodeDir });
+
+    expect(rust.ok, `rust failed: ${rust.error}`).toBe(true);
+    expect(node.ok, `node failed: ${node.error}`).toBe(true);
+    expect(rust.value.path).toBeNull();
+  });
+
+  it("git_commit_template_path returns the same configured path on both sides", async () => {
+    const rustDir = baseRepo();
+    const nodeDir = baseRepo();
+    git(rustDir, ["config", "commit.template", ".gitmessage"]);
+    git(nodeDir, ["config", "commit.template", ".gitmessage"]);
+
+    const rust = rustRun(rustDir, "git_commit_template_path", {});
+    const res = await dev.fetch("/api/git-commit-template-path", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cwd: nodeDir }),
+    });
+    const nodeBody = await res.json();
+
+    expect(rust.value.path).toBe(".gitmessage");
+    expect(nodeBody.path).toBe(rust.value.path);
+  });
+
+  it("git_config_identity returns the same pair on both sides", async () => {
+    const rustDir = baseRepo();
+    const nodeDir = baseRepo();
+    for (const d of [rustDir, nodeDir]) {
+      git(d, ["config", "user.name", "Parity Person"]);
+      git(d, ["config", "user.email", "parity@gitwand.test"]);
+    }
+
+    const rust = rustRun(rustDir, "git_config_identity", {});
+    const res = await dev.fetch("/api/git-config-identity", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cwd: nodeDir }),
+    });
+    const nodeBody = await res.json();
+
+    expect(rust.ok, `rust failed: ${rust.error}`).toBe(true);
+    expect(rust.value).toEqual(["Parity Person", "parity@gitwand.test"]);
+    expect(nodeBody).toEqual(rust.value);
+  });
+
+  it("git_config_identity refuses an empty identity identically", async () => {
+    // The two backends are separate processes and inherit the developer's
+    // global git config, so "unconfigured" cannot be arranged by withholding
+    // one — an earlier version of this test read the machine's real name and
+    // passed on one side only. Setting the local values to empty is what both
+    // sides actually have to refuse.
+    const rustDir = baseRepo();
+    const nodeDir = baseRepo();
+    for (const d of [rustDir, nodeDir]) {
+      git(d, ["config", "user.name", ""]);
+      git(d, ["config", "user.email", ""]);
+    }
+
+    const rust = rustRun(rustDir, "git_config_identity", {});
+    const node = await nodeRun(dev, "/api/git-config-identity", { cwd: nodeDir });
+
+    expect(rust.ok, "rust unexpectedly succeeded").toBe(false);
+    expect(node.ok, "node unexpectedly succeeded").toBe(false);
+  });
+});

@@ -452,6 +452,16 @@ pub fn command_parity(
             s("label")?,
         ))
         .map(parity_ok_marker),
+        // Read commands, reachable here so the two 404s below can be pinned at
+        // parity rather than merely fixed.
+        "git_commit_template_path" => {
+            tauri::async_runtime::block_on(commands::read::git_commit_template_path(s("cwd")?))
+                .map(|p| serde_json::json!({ "path": p }))
+        }
+        "git_config_identity" => {
+            tauri::async_runtime::block_on(commands::read::git_config_identity(s("cwd")?))
+                .map(|(name, email)| serde_json::json!([name, email]))
+        }
         other => Err(format!("command-parity does not know '{}'", other)),
     }
 }
