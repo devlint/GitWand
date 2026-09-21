@@ -103,6 +103,16 @@ function repoShape(cwd) {
  */
 function rustRun(cwd, command, args) {
   const r = runProbe("command-parity", { command, args: { cwd, ...args } });
+  // A dispatcher that does not know the command looks exactly like a refusal,
+  // and a stale probe binary then turns every test in this file green for the
+  // wrong reason. Fail loudly instead — this cost a full round of phantom
+  // "divergences" once already.
+  if (/command-parity does not know/.test(String(r.error))) {
+    throw new Error(
+      `the probe has no arm for '${command}'. If you just added one, rebuild ` +
+        `it: cargo build --example parity-probe`,
+    );
+  }
   const refused = !r.ok || r.value?.success === false;
   return { ok: !refused, error: r.error ?? r.value?.message, value: r.value };
 }
@@ -113,7 +123,8 @@ async function nodeRun(dev, route, body) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  const data = await res.json().catch(() => ({}));
+  // A route may answer a literal `null` body; `.catch` does not fire for that.
+  const data = (await res.json().catch(() => null)) ?? {};
   // Several routes answer HTTP 200 with { success: false }; both shapes are a
   // refusal, and the caller cares about the refusal, not about the transport.
   const refused = !res.ok || data.success === false;
@@ -285,4 +296,227 @@ describe("parity on failure: stash and history commands", () => {
 
     expectSameRefusal(rust, node, rustDir, nodeDir);
   });
+});
+
+/**
+ * The index, ref and submodule commands.
+ *
+ * Several of these cannot be made to fail by their own semantics — `git stash
+ * clear` and `git submodule init` exit 0 on a repo that has nothing to clear or
+ * initialise. For those, the failure under test is a `cwd` that is not a
+ * repository at all, which is the case where `safe_repo_path()` on one side and
+ * `resolve()` on the other have the most room to disagree.
+ */
+describe("parity on failure: index, ref and submodule commands", () => {
+  /** A directory that exists but is not a git repository. */
+  function notARepo() {
+    const dir = mkdtempSync(join(tmpdir(), "gw-parity-notrepo-"));
+    dirs.push(dir);
+    writeFileSync(join(dir, "file.txt"), "not a repo\n");
+    return dir;
+  }
+
+  /** Both sides refuse; neither repository exists to compare, so only the refusal is asserted. */
+  function expectBothRefuse(rust, node) {
+    expect(rust.ok, `rust unexpectedly succeeded: ${JSON.stringify(rust.value)}`).toBe(false);
+    expect(node.ok, "node unexpectedly succeeded").toBe(false);
+  }
+
+  it("git_commit refuses an empty message identically", async () => {
+    const rustDir = baseRepo();
+    const nodeDir = baseRepo();
+    writeFileSync(join(rustDir, "file.txt"), "changed\n");
+    writeFileSync(join(nodeDir, "file.txt"), "changed\n");
+    git(rustDir, ["add", "."]);
+    git(nodeDir, ["add", "."]);
+
+    const rust = rustRun(rustDir, "git_commit", { message: "" });
+    const node = await nodeRun(dev, "/api/git-commit", { cwd: nodeDir, message: "" });
+
+    expectSameRefusal(rust, node, rustDir, nodeDir);
+  });
+
+  it("git_amend_commit refuses on a repo with no commit identically", async () => {
+    const rustDir = unbornRepo();
+    const nodeDir = unbornRepo();
+
+    const rust = rustRun(rustDir, "git_amend_commit", { message: "amended" });
+    const node = await nodeRun(dev, "/api/git-amend-commit", {
+      cwd: nodeDir,
+      message: "amended",
+    });
+
+    expectSameRefusal(rust, node, rustDir, nodeDir);
+  });
+
+  it("git_create_branch refuses a name that already exists identically", async () => {
+    const rustDir = baseRepo();
+    const nodeDir = baseRepo();
+
+    const rust = rustRun(rustDir, "git_create_branch", { name: "main" });
+    const node = await nodeRun(dev, "/api/git-create-branch", { cwd: nodeDir, name: "main" });
+
+    expectSameRefusal(rust, node, rustDir, nodeDir);
+  });
+
+  it("git_delete_branch refuses the checked-out branch identically", async () => {
+    const rustDir = baseRepo();
+    const nodeDir = baseRepo();
+
+    const rust = rustRun(rustDir, "git_delete_branch", { name: "main" });
+    const node = await nodeRun(dev, "/api/git-delete-branch", { cwd: nodeDir, name: "main" });
+
+    expectSameRefusal(rust, node, rustDir, nodeDir);
+  });
+
+  it("git_interactive_rebase refuses an unknown base identically", async () => {
+    const rustDir = baseRepo();
+    const nodeDir = baseRepo();
+
+    const rust = rustRun(rustDir, "git_interactive_rebase", { base: "deadbeef" });
+    const node = await nodeRun(dev, "/api/git-interactive-rebase", {
+      cwd: nodeDir,
+      base: "deadbeef",
+      todoLines: [],
+    });
+
+    expectSameRefusal(rust, node, rustDir, nodeDir);
+  });
+
+  it("git_pull refuses a repo with no remote identically", async () => {
+    const rustDir = baseRepo();
+    const nodeDir = baseRepo();
+
+    const rust = rustRun(rustDir, "git_pull", { strategy: "merge" });
+    const node = await nodeRun(dev, "/api/git-pull", { cwd: nodeDir, strategy: "merge" });
+
+    expectSameRefusal(rust, node, rustDir, nodeDir);
+  });
+
+  it("git_stage refuses a path outside the repository identically", async () => {
+    const rustDir = baseRepo();
+    const nodeDir = baseRepo();
+
+    const rust = rustRun(rustDir, "git_stage", { path: "../escape.txt" });
+    const node = await nodeRun(dev, "/api/git-stage", {
+      cwd: nodeDir,
+      paths: ["../escape.txt"],
+    });
+
+    expectSameRefusal(rust, node, rustDir, nodeDir);
+  });
+
+  it("git_unstage refuses a path outside the repository identically", async () => {
+    const rustDir = baseRepo();
+    const nodeDir = baseRepo();
+
+    const rust = rustRun(rustDir, "git_unstage", { path: "../escape.txt" });
+    const node = await nodeRun(dev, "/api/git-unstage", {
+      cwd: nodeDir,
+      paths: ["../escape.txt"],
+    });
+
+    expectSameRefusal(rust, node, rustDir, nodeDir);
+  });
+
+  it("git_stage_patch refuses a malformed patch identically", async () => {
+    const rustDir = baseRepo();
+    const nodeDir = baseRepo();
+    const garbage = "this is not a patch\n";
+
+    const rust = rustRun(rustDir, "git_stage_patch", { patch: garbage });
+    const node = await nodeRun(dev, "/api/git-stage-patch", { cwd: nodeDir, patch: garbage });
+
+    expectSameRefusal(rust, node, rustDir, nodeDir);
+  });
+
+  it("git_unstage_patch refuses a malformed patch identically", async () => {
+    const rustDir = baseRepo();
+    const nodeDir = baseRepo();
+    const garbage = "this is not a patch\n";
+
+    const rust = rustRun(rustDir, "git_unstage_patch", { patch: garbage });
+    const node = await nodeRun(dev, "/api/git-unstage-patch", { cwd: nodeDir, patch: garbage });
+
+    expectSameRefusal(rust, node, rustDir, nodeDir);
+  });
+
+  it("git_stash_drop refuses an empty stash identically", async () => {
+    const rustDir = baseRepo();
+    const nodeDir = baseRepo();
+
+    const rust = rustRun(rustDir, "git_stash_drop", { index: 0 });
+    const node = await nodeRun(dev, "/api/git-stash-drop", { cwd: nodeDir, index: 0 });
+
+    expectSameRefusal(rust, node, rustDir, nodeDir);
+  });
+
+  it("git_add_to_gitignore refuses a multi-line entry identically", async () => {
+    // Not a traversal: neither side validates the entry against the repo root,
+    // because the entry is a gitignore *pattern* and the file it is written to
+    // is always the repo's own .gitignore. What both sides do refuse is a
+    // newline, which would silently add rules the user never asked for (#183).
+    const rustDir = baseRepo();
+    const nodeDir = baseRepo();
+    const entry = "build\nsecrets.env";
+
+    const rust = rustRun(rustDir, "git_add_to_gitignore", { path: entry });
+    const node = await nodeRun(dev, "/api/git-gitignore", { cwd: nodeDir, path: entry });
+
+    expectSameRefusal(rust, node, rustDir, nodeDir);
+  });
+
+  it("git_submodule_add refuses an unreachable url identically", async () => {
+    const rustDir = baseRepo();
+    const nodeDir = baseRepo();
+    const url = "/nonexistent/not-a-repo.git";
+
+    const rust = rustRun(rustDir, "git_submodule_add", { url, path: "sub" });
+    const node = await nodeRun(dev, "/api/git-submodule-add", {
+      cwd: nodeDir,
+      url,
+      path: "sub",
+    });
+
+    expectSameRefusal(rust, node, rustDir, nodeDir);
+  });
+
+  it("git_submodule_update_one refuses an unknown submodule identically", async () => {
+    const rustDir = baseRepo();
+    const nodeDir = baseRepo();
+
+    const rust = rustRun(rustDir, "git_submodule_update_one", { path: "no-such-sub" });
+    const node = await nodeRun(dev, "/api/git-submodule-update-one", {
+      cwd: nodeDir,
+      path: "no-such-sub",
+    });
+
+    expectSameRefusal(rust, node, rustDir, nodeDir);
+  });
+
+  // The four below cannot be made to fail by their own semantics on a valid
+  // repository, so the failure under test is a cwd that is not a repository.
+  it("git_stash_clear refuses a cwd that is not a repository identically", async () => {
+    const rust = rustRun(notARepo(), "git_stash_clear", {});
+    const node = await nodeRun(dev, "/api/git-stash-clear", { cwd: notARepo() });
+    expectBothRefuse(rust, node);
+  });
+
+  it("git_submodule_init refuses a cwd that is not a repository identically", async () => {
+    const rust = rustRun(notARepo(), "git_submodule_init", {});
+    const node = await nodeRun(dev, "/api/git-submodule-init", { cwd: notARepo() });
+    expectBothRefuse(rust, node);
+  });
+
+  it("git_submodule_update refuses a cwd that is not a repository identically", async () => {
+    const rust = rustRun(notARepo(), "git_submodule_update", {});
+    const node = await nodeRun(dev, "/api/git-submodule-update", { cwd: notARepo() });
+    expectBothRefuse(rust, node);
+  });
+
+  // `snapshot_create` has no failure case to compare: it is typed
+  // `Result<Option<SnapshotMeta>, String>` and answers `Ok(None)` rather than
+  // erroring — even on a directory that is not a repository. There is nothing
+  // to assert parity on until it has a reachable refusal, and inventing one
+  // would test the fixture rather than the command.
 });
