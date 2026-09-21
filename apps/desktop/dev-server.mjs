@@ -3234,6 +3234,48 @@ async function handleRequest(req, res) {
       return jsonResponse(req, res, { error: `git ${op} ${act} failed: ${stderr || stdout}` }, 500);
     }
 
+    // POST /api/git-commit-template-path  { cwd } -> { path: string | null }
+    // Mirrors commands::read::git_commit_template_path. `backend.ts` has
+    // fetched this path since the feature shipped while no route existed, so
+    // it 404'd under dev:web; found by the command-registry audit.
+    if (url.pathname === "/api/git-commit-template-path" && req.method === "POST") {
+      const { cwd } = await readBody(req);
+      if (!cwd) return jsonResponse(req, res, { error: "Missing cwd" }, 400);
+      const r = spawnSync(GIT, ["config", "commit.template"], {
+        cwd: resolve(cwd),
+        encoding: "utf-8",
+      });
+      // Not configured is not an error, exactly as the Rust command decides.
+      if (r.status !== 0) return jsonResponse(req, res, { path: null });
+      const raw = (r.stdout || "").trim();
+      if (!raw) return jsonResponse(req, res, { path: null });
+      const home = process.env.HOME || process.env.USERPROFILE || "";
+      const expanded = raw.startsWith("~") ? home + raw.slice(1) : raw;
+      return jsonResponse(req, res, { path: expanded });
+    }
+
+    // POST /api/git-config-identity  { cwd } -> [name, email]
+    // Mirrors commands::read::git_config_identity, including its refusal: an
+    // unset name or email is an error, not an empty pair. Same audit finding.
+    if (url.pathname === "/api/git-config-identity" && req.method === "POST") {
+      const { cwd } = await readBody(req);
+      if (!cwd) return jsonResponse(req, res, { error: "Missing cwd" }, 400);
+      const at = resolve(cwd);
+      const read = (key) =>
+        (spawnSync(GIT, ["config", key], { cwd: at, encoding: "utf-8" }).stdout || "").trim();
+      const name = read("user.name");
+      const email = read("user.email");
+      if (!name || !email) {
+        return jsonResponse(
+          req,
+          res,
+          { error: "git user.name or user.email is not configured" },
+          500,
+        );
+      }
+      return jsonResponse(req, res, [name, email]);
+    }
+
     // GET /api/git-file-diff?cwd=<path>&path=<file>&from=<hash>&to=<hash>
     if (url.pathname === "/api/git-file-diff" && req.method === "GET") {
       const cwd = url.searchParams.get("cwd");
@@ -6652,10 +6694,17 @@ async function handleRequest(req, res) {
     if (url.pathname === "/api/git-submodule-update-one" && req.method === "POST") {
       try {
         const { cwd, path: smPath } = await readBody(req);
-        spawnSync(GIT, ["submodule", "update", "--remote", "--rebase", "--init", "--", smPath], {
+        // The exit code was discarded here: the route answered {} whatever git
+        // did, so a failed submodule update reported success under dev:web
+        // while the Rust command propagated the error. Found by parity.
+        const r = spawnSync(GIT, ["submodule", "update", "--remote", "--rebase", "--init", "--", smPath], {
           cwd: resolve(cwd),
           encoding: "utf-8",
         });
+        if (r.status !== 0) {
+          const msg = (r.stderr || r.stdout || "").toString().trim();
+          return jsonResponse(req, res, { error: msg || `git submodule update failed` }, 500);
+        }
         return jsonResponse(req, res, {});
       } catch (err) {
         return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);

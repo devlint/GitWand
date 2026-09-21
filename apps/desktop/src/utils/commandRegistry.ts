@@ -207,17 +207,15 @@ export const COMMAND_REGISTRY: Record<string, CommandRegistryEntry> = {
       "Runs the shell command the user authored in Settings, in their terminal. A dev-server has no terminal to attach it to.",
   },
 
+  // ─── Routes written to close a gap this audit found ───────────────────────
+  // Both were fetched by backend.ts while dev-server.mjs declared neither, so
+  // both 404'd under pnpm dev:web. Pinned at parity in write-failure.test.mjs.
+  git_commit_template_path: { route: "/api/git-commit-template-path" },
+  git_config_identity: { route: "/api/git-config-identity" },
+
   // ─── GAPs this audit found ────────────────────────────────────────────────
   // Nothing prevents these from having a route; they simply do not have one.
   // Listed as findings rather than dressed up as deliberate choices.
-  git_commit_template_path: {
-    desktopOnly:
-      "GAP: the wrapper fetches /api/git-commit-template-path, which dev-server.mjs never declares — the call 404s under pnpm dev:web.",
-  },
-  git_config_identity: {
-    desktopOnly:
-      "GAP: the wrapper fetches /api/git-config-identity, which dev-server.mjs never declares — the call 404s under pnpm dev:web.",
-  },
   git_autocomplete: {
     desktopOnly:
       "GAP: no dev-server route and no web branch, and nothing about branch and tag completion requires the desktop.",

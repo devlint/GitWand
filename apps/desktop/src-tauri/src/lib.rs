@@ -282,6 +282,190 @@ pub fn git_operation_action_parity(
         .map(|r| serde_json::json!({ "halted": r.halted }))
 }
 
+/// Collapse any success payload to a marker.
+///
+/// A closure cannot do this job: it would be monomorphised on its first use,
+/// and these commands return several different `Ok` types — `()` for some,
+/// `Option<SnapshotMeta>` for the ones that can take a snapshot. The tests
+/// assert on the repository, never on the payload.
+fn parity_ok_marker<T>(_: T) -> serde_json::Value {
+    serde_json::json!({ "ok": true })
+}
+
+/// Parity entry point for commands that would otherwise each need their own
+/// wrapper and probe arm.
+///
+/// The probe already takes JSON on stdin, so one dispatcher keyed on the
+/// command name covers many commands with short arms instead of as many
+/// wrapper-plus-arm pairs. Only commands the parity suite actually drives are
+/// listed; an unknown name is an error, never a silent no-op, because a test
+/// that quietly exercises nothing is worse than a missing test.
+pub fn command_parity(
+    command: String,
+    args: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let s = |key: &str| -> Result<String, String> {
+        args.get(key)
+            .and_then(|v| v.as_str())
+            .map(|v| v.to_string())
+            .ok_or_else(|| format!("missing required arg '{}' for {}", key, command))
+    };
+
+    // Signatures verified against commands/ops.rs. `snapshots_enabled` is
+    // forced to Some(false) everywhere it exists: a snapshot writes into the
+    // repository, and two independently built repositories would then differ
+    // for a reason that has nothing to do with the refusal under test.
+    match command.as_str() {
+        "git_merge" => tauri::async_runtime::block_on(commands::ops::git_merge(
+            s("cwd")?,
+            s("branch")?,
+            Some(false),
+        ))
+        .map(|r| serde_json::json!({ "success": r.success, "message": r.message })),
+        "git_cherry_pick" => tauri::async_runtime::block_on(commands::ops::git_cherry_pick(
+            s("cwd")?,
+            vec![s("hash")?],
+        ))
+        .map(|r| serde_json::json!({ "success": r.success, "message": r.message })),
+        "git_revert_commit" => tauri::async_runtime::block_on(commands::ops::git_revert_commit(
+            s("cwd")?,
+            s("hash")?,
+            None,
+        ))
+        .map(|r| serde_json::json!({ "success": r.success, "message": r.message })),
+        "git_reset_to_commit" => tauri::async_runtime::block_on(
+            commands::ops::git_reset_to_commit(s("cwd")?, s("hash")?, s("mode")?, Some(false)),
+        )
+        .map(parity_ok_marker),
+        "git_discard" => tauri::async_runtime::block_on(commands::ops::git_discard(
+            s("cwd")?,
+            vec![s("path")?],
+            false,
+            Some(false),
+        ))
+        .map(parity_ok_marker),
+        "git_stash" => tauri::async_runtime::block_on(commands::ops::git_stash(s("cwd")?, None))
+            .map(parity_ok_marker),
+        // Takes no index, unlike git_stash_apply.
+        "git_stash_pop" => tauri::async_runtime::block_on(commands::ops::git_stash_pop(s("cwd")?))
+            .map(parity_ok_marker),
+        "git_stash_apply" => tauri::async_runtime::block_on(commands::ops::git_stash_apply(
+            s("cwd")?,
+            args.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize,
+        ))
+        .map(parity_ok_marker),
+        "git_checkout_commit" => tauri::async_runtime::block_on(
+            commands::ops::git_checkout_commit(s("cwd")?, s("hash")?, Some(false)),
+        )
+        .map(parity_ok_marker),
+        "git_switch_branch" => tauri::async_runtime::block_on(commands::ops::git_switch_branch(
+            s("cwd")?,
+            s("branch")?,
+            Some(false),
+        ))
+        .map(parity_ok_marker),
+        "git_add_to_gitignore" => tauri::async_runtime::block_on(
+            commands::ops::git_add_to_gitignore(s("cwd")?, s("path")?),
+        )
+        .map(parity_ok_marker),
+        "git_amend_commit" => tauri::async_runtime::block_on(commands::ops::git_amend_commit(
+            s("cwd")?,
+            s("message")?,
+        ))
+        .map(parity_ok_marker),
+        "git_commit" => tauri::async_runtime::block_on(commands::ops::git_commit(
+            s("cwd")?,
+            s("message")?,
+            None,
+            None,
+        ))
+        .map(parity_ok_marker),
+        "git_create_branch" => tauri::async_runtime::block_on(commands::ops::git_create_branch(
+            s("cwd")?,
+            s("name")?,
+            false,
+            None,
+        ))
+        .map(parity_ok_marker),
+        "git_delete_branch" => tauri::async_runtime::block_on(commands::ops::git_delete_branch(
+            s("cwd")?,
+            s("name")?,
+            false,
+        ))
+        .map(parity_ok_marker),
+        "git_interactive_rebase" => tauri::async_runtime::block_on(
+            commands::ops::git_interactive_rebase(s("cwd")?, s("base")?, vec![]),
+        )
+        .map(|r| serde_json::json!({ "conflict": r.conflict })),
+        "git_pull" => tauri::async_runtime::block_on(commands::ops::git_pull(
+            s("cwd")?,
+            s("strategy")?,
+            Some(false),
+        ))
+        .map(|r| serde_json::json!({ "success": r.success, "message": r.message })),
+        "git_stage" => {
+            tauri::async_runtime::block_on(commands::ops::git_stage(s("cwd")?, vec![s("path")?]))
+                .map(parity_ok_marker)
+        }
+        "git_unstage" => {
+            tauri::async_runtime::block_on(commands::ops::git_unstage(s("cwd")?, vec![s("path")?]))
+                .map(parity_ok_marker)
+        }
+        "git_stage_patch" => {
+            tauri::async_runtime::block_on(commands::ops::git_stage_patch(s("cwd")?, s("patch")?))
+                .map(parity_ok_marker)
+        }
+        "git_unstage_patch" => {
+            tauri::async_runtime::block_on(commands::ops::git_unstage_patch(s("cwd")?, s("patch")?))
+                .map(parity_ok_marker)
+        }
+        "git_stash_clear" => {
+            tauri::async_runtime::block_on(commands::ops::git_stash_clear(s("cwd")?))
+                .map(parity_ok_marker)
+        }
+        "git_stash_drop" => tauri::async_runtime::block_on(commands::ops::git_stash_drop(
+            s("cwd")?,
+            args.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize,
+        ))
+        .map(parity_ok_marker),
+        "git_submodule_add" => tauri::async_runtime::block_on(commands::ops::git_submodule_add(
+            s("cwd")?,
+            s("url")?,
+            s("path")?,
+        ))
+        .map(parity_ok_marker),
+        "git_submodule_init" => {
+            tauri::async_runtime::block_on(commands::ops::git_submodule_init(s("cwd")?))
+                .map(parity_ok_marker)
+        }
+        "git_submodule_update" => tauri::async_runtime::block_on(
+            commands::ops::git_submodule_update(s("cwd")?, false, false),
+        )
+        .map(parity_ok_marker),
+        "git_submodule_update_one" => tauri::async_runtime::block_on(
+            commands::ops::git_submodule_update_one(s("cwd")?, s("path")?),
+        )
+        .map(parity_ok_marker),
+        "snapshot_create" => tauri::async_runtime::block_on(commands::snapshots::snapshot_create(
+            s("cwd")?,
+            s("kind")?,
+            s("label")?,
+        ))
+        .map(parity_ok_marker),
+        // Read commands, reachable here so the two 404s below can be pinned at
+        // parity rather than merely fixed.
+        "git_commit_template_path" => {
+            tauri::async_runtime::block_on(commands::read::git_commit_template_path(s("cwd")?))
+                .map(|p| serde_json::json!({ "path": p }))
+        }
+        "git_config_identity" => {
+            tauri::async_runtime::block_on(commands::read::git_config_identity(s("cwd")?))
+                .map(|(name, email)| serde_json::json!([name, email]))
+        }
+        other => Err(format!("command-parity does not know '{}'", other)),
+    }
+}
+
 pub fn preview_merge_parity(
     cwd: String,
     source_branch: String,
@@ -1320,5 +1504,35 @@ mod tests {
             extract(" M src/auth.ts\n?? ignored.ts\n"),
             vec!["src/auth.ts"]
         );
+    }
+}
+
+#[cfg(test)]
+mod command_parity_tests {
+    use super::command_parity;
+
+    #[test]
+    fn refuses_a_command_it_does_not_know() {
+        let err = command_parity(
+            "git_not_a_command".to_string(),
+            serde_json::json!({ "cwd": "/tmp" }),
+        )
+        .unwrap_err();
+        assert!(
+            err.contains("git_not_a_command"),
+            "error names the command: {err}"
+        );
+    }
+
+    #[test]
+    fn refuses_a_call_missing_a_required_argument() {
+        // `git_merge` needs a branch; the dispatcher must say so rather than
+        // passing an empty string to git.
+        let err = command_parity(
+            "git_merge".to_string(),
+            serde_json::json!({ "cwd": "/tmp" }),
+        )
+        .unwrap_err();
+        assert!(err.contains("branch"), "error names the missing arg: {err}");
     }
 }
