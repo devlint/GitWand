@@ -6,6 +6,12 @@ description: Technical articles on Git workflows, AI-powered conflict resolution
 # Blog
 
 <div class="blog-list">
+  <a href="/blog/v3-11-three-outcomes-not-two" class="blog-card">
+    <div class="blog-meta">September 21, 2026 · 9 min read</div>
+    <h2 class="blog-title">Three outcomes, not two: what went into GitWand v3.11</h2>
+    <p class="blog-excerpt">The Conflict Predictor stopped predicting and started running the merge, stopping on what needs a person. But the work that changed the most code came from a two-line bug report about a button that lied: "Abort merge" reported success over a merge that was still there. The cause outlived the symptom — four git operations modelled three different ways, and a missing distinction underneath all of them. <strong>An operation ends three ways, not two:</strong> it completes, it halts on a further conflict, or it fails. Plus an audit that found the development server was telling manual QA a different story from the shipped app — eleven gaps, three live defects.</p>
+    <span class="blog-read">Read article →</span>
+  </a>
   <a href="/blog/webmcp-gitwand-merge-room" class="blog-card">
     <div class="blog-meta">September 1, 2026 · 8 min read</div>
     <h2 class="blog-title">What WebMCP is, and how GitWand built (as far as we can tell) the first Git tool on it</h2>
