@@ -6652,10 +6652,17 @@ async function handleRequest(req, res) {
     if (url.pathname === "/api/git-submodule-update-one" && req.method === "POST") {
       try {
         const { cwd, path: smPath } = await readBody(req);
-        spawnSync(GIT, ["submodule", "update", "--remote", "--rebase", "--init", "--", smPath], {
+        // The exit code was discarded here: the route answered {} whatever git
+        // did, so a failed submodule update reported success under dev:web
+        // while the Rust command propagated the error. Found by parity.
+        const r = spawnSync(GIT, ["submodule", "update", "--remote", "--rebase", "--init", "--", smPath], {
           cwd: resolve(cwd),
           encoding: "utf-8",
         });
+        if (r.status !== 0) {
+          const msg = (r.stderr || r.stdout || "").toString().trim();
+          return jsonResponse(req, res, { error: msg || `git submodule update failed` }, 500);
+        }
         return jsonResponse(req, res, {});
       } catch (err) {
         return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
