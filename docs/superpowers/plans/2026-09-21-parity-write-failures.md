@@ -290,8 +290,17 @@ function repoShape(cwd) {
   };
 }
 
-const rustRun = (cwd, command, args) =>
-  runProbe("command-parity", { command, args: { cwd, ...args } });
+/**
+ * `runProbe`'s `ok` reflects the probe's EXIT CODE, which is not the question
+ * asked here: several of these commands return `Ok(GitPushPullResult)` with
+ * `success: false` when git refuses — the exact shape that produced #197.
+ * Reading only the exit code calls a refusal a success.
+ */
+function rustRun(cwd, command, args) {
+  const r = runProbe("command-parity", { command, args: { cwd, ...args } });
+  const refused = !r.ok || r.value?.success === false;
+  return { ok: !refused, error: r.error ?? r.value?.message, value: r.value };
+}
 
 async function nodeRun(dev, route, body) {
   const res = await dev.fetch(route, {
@@ -413,10 +422,12 @@ git commit -m "test(desktop): failure parity for merge, cherry-pick and checkout
 
 ```javascript
 describe("parity on failure: stash and history commands", () => {
-  it("git_stash refuses a clean tree identically", async () => {
-    // Nothing to stash: git exits non-zero and changes nothing.
-    const rustDir = baseRepo();
-    const nodeDir = baseRepo();
+  it("git_stash refuses a repo with no initial commit identically", async () => {
+    // A clean tree is NOT a refusal: `git stash` exits 0 with "No local
+    // changes to save". Before the first commit it genuinely fails, so the
+    // fixture is an `unbornRepo()` — init plus a staged file, no commit.
+    const rustDir = unbornRepo();
+    const nodeDir = unbornRepo();
 
     const rust = rustRun(rustDir, "git_stash", {});
     const node = await nodeRun(dev, "/api/git-stash", { cwd: nodeDir });
