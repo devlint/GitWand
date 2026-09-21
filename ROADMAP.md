@@ -6,38 +6,39 @@
 
 ## What's Next
 
-_Ordered by priority, last verified 2026-09-14 (v3.11.0 in progress: the resolution-loop half is done and merged, untagged, 3 lots left). The thread: the measured-accuracy engine re-founds the trust every later auto-apply feature spends, then make the app reactive and fast (Live Repo), close the resolution loop (preview-to-apply, whose confidence threshold is only meaningful **because** of the accuracy work), then workflow & comparison primitives, experimental voice input, and the v4.0 code-intelligence headline. Full renumbering history: `git log -p -- roadmap.md`._
+_Ordered by priority, last verified 2026-09-21 (v3.11.0 shipped; its two unfinished lots became v3.11.1 and v3.11.2 rather than holding the tag). The thread: the measured-accuracy engine re-founds the trust every later auto-apply feature spends, then make the app reactive and fast (Live Repo), close the resolution loop (preview-to-apply, whose confidence threshold is only meaningful **because** of the accuracy work), then workflow & comparison primitives, experimental voice input, and the v4.0 code-intelligence headline. Full renumbering history: `git log -p -- roadmap.md`._
 
 | Version | Codename | Why now |
 |---------|----------|---------|
-| **v3.11.0** | Merge preview-to-apply | Close the resolution loop: apply straight from preview, editable diff. Resolution-loop half done (PR #194), 3 lots left before the tag |
+| **v3.11.1** | History-aware LLM fallback | Give `llm_proposed` the blame and history of the conflicting lines, so the fallback argues from the code's past rather than from the hunk alone |
+| **v3.11.2** | Finder-like folder navigation | A real working-tree folder tree; the substrate `FolderDiffTree` was never meant to be |
 | **v3.12.0** | Stacked Branches | Native stacked PRs, sequenced after v3.11 (leans on preview→apply) |
 | **v3.13.0** | Combined Diffs | Multi-commit, non-contiguous aggregated diff |
 | **v3.14.0** | Voice Input | Experimental — local dictation via embedded Whisper |
 | **v4.0.0** (candidate) | Blast Radius | Code-graph impact before merge — the code-intelligence headline |
 
-_v3.10.0 — Live Repo — shipped; see [Shipped](#shipped) below and the full lot-by-lot detail in [CHANGELOG.md](./CHANGELOG.md). v3.11.0 is open: its resolution-loop half is on `main` and unreleased, the rest is listed below._
+_v3.11.0 — Merge preview-to-apply — shipped; see [Shipped](#shipped) below and the full lot-by-lot detail in [CHANGELOG.md](./CHANGELOG.md)._
 
 ---
 
-### v3.11.0 — Merge preview-to-apply + editable diff
+### v3.11.1 — History-aware LLM fallback
 
-_Inspired by Aurees. Close the loop between the Conflict Predictor (v2.20.0) and execution, and make the diff a place you can fix things._
+Enrich `llm_proposed` prompts with the blame and history of the conflicting
+lines — Greptile-style multi-hop context, computed locally. The open design
+questions, which is why this needs its own brainstorming pass rather than a
+plan: how much history is worth its tokens and its latency, and what the
+fallback does when blame is useless (a new file, a large rename).
 
-**Already landed (PR #194, merged to `main`, untagged).** The resolution-loop half: **apply from preview** ("Merge and auto-resolve" runs the real operation, re-runs the engine against what git produced, stages what passes the gates, stops on the residual, never auto-aborts and never auto-continues), the **numeric confidence bar** `minConfidenceScore` ANDed with the label gate and reachable from the desktop, `.gitwandrc`, the CLI and MCP, **per-hunk opt-out** with the score surfaced in the predictor behind a five-stop control, the **CodeMirror 6 extraction** out of `FileExplorerPanel.vue` now feeding the merge editor (the textarea is gone) and an **editable inline diff** over a pure splice layer, the **#128 split affordance** restored on the rebase banner, and the three missing `preview_*` dev-server routes plus `git_rebase_onto`, all parity-tested. Design and plan: `docs/superpowers/specs/2026-09-12-v3.11.0-preview-to-apply-{design,plan}.md`. Do not re-plan any of it.
+---
 
-**Remaining before the tag.** Three lots, independent of each other and of the half above, each needing its own planning pass:
+### v3.11.2 — Finder-like folder navigation
 
-- **Audit the remaining dev-server routes for Rust-behaviour drift** — **done.** `commandRegistry.ts` declares, for each of the 139 frontend-invoked commands, either its dev-server route or the reason it has none, and `commandRegistry.test.ts` fails when that stops being true (including on a `tauriInvoke` whose name is not a string literal, which the registry cannot see). Failure parity covers 27 write commands on a generic `command-parity` probe arm, asserting that both backends refuse **and** leave the same repository behind.
-  - **What the audit found.** 11 gaps, recorded in the registry rather than dressed up as deliberate. Two were live 404s and are **fixed**: `git_commit_template_path` and `git_config_identity` fetched routes `dev-server.mjs` never declared; both routes now exist and are pinned at parity. Nine more have no route and no obstacle to having one (`git_autocomplete`, `git_conflict_check`, `set_git_config`, the two `scratch_worktree_*`, the four `mcp_*`). Failure parity found one live divergence, now fixed: `/api/git-submodule-update-one` discarded git's exit code and answered success whatever happened. `gl_merge_mr`, previously suspected as the reason a broken `glab` flag went unnoticed, is now recorded as a gap.
-  - **Deliberately not covered, with reasons.** `git_fetch` takes a `tauri::ipc::Channel`, so no process without a Tauri runtime can call it — covering it means splitting the git work from the progress reporting. `workspace_fetch_all` and `workspace_pull_all` return a status vector rather than a `Result`, so they have no refusal to compare. `snapshot_create` answers `Ok(None)` instead of failing. The dev-server's CLI-only path for forge commands is declared through `cliPathOnly` on the four commands whose Rust body branches on a token directly; others reach that branch through helpers and were not traced.
-- **Gitea / Forgejo support** (issue #193): account sign-in with a personal access token, remote detection from the configured server host, and the PR and Today surface (list, detail, diff, CI status, comments, read-only reviews, create, merge, checkout, draft to ready). Design: `docs/superpowers/specs/2026-09-15-gitea-support-design.md`. **Manual QA against a live Gitea 1.27.3 has now been run** (2026-09-16), and it settled both version-dependent behaviours the opposite way round from the docs: the merge endpoint wants `Do` and rejects `merge_method` with `422 [Do]: Required`, so the request order was flipped; and `/pulls/{index}.diff` answers correctly while the `/patch` fallback the plan invented is a 404 that never existed, so it was removed. The QA also found a real defect no unit test could have: `/issues/{index}/comments` ignores the `page` parameter and serves the same items forever, so the paging loop returned one comment 300 times until it hit its ceiling.
-- **History-aware LLM fallback** — enrich `llm_proposed` prompts with the blame/history of the conflicting lines (Greptile-style multi-hop context, computed locally)
-- **Finder-like folder navigation** — a real working-tree folder tree (tree left, inline diff right, keyboard-operable, per-file status badges), reusing this version's CodeMirror integration; the `FolderDiffTree` inherited from v2.21.0 Monorepo Scope is diff-only and the wrong substrate, so this finally lands right-click "Scope here" on real ground, and gives macOS users a Finder-like mode to counter RelaGit/Strand's more rigid UIs
-
-_Three lots originally listed here are **not** blocking this release and have moved to [Later (unscheduled)](#later-unscheduled): libgit2 stage/unstage, measured and found not worth building; libgit2 blame, blocked on a git-version-dependent attribution divergence with no known fix; and the Linux inotify measurement, which needs real Linux hardware and may turn out to require nothing at all. None of the three can be completed by deciding to complete it, so none of them gets to hold the tag._
-
-_Three lots originally listed here are **not** blocking this release and have moved to [Later (unscheduled)](#later-unscheduled): libgit2 stage/unstage, measured and found not worth building; libgit2 blame, blocked on a git-version-dependent attribution divergence with no known fix; and the Linux inotify measurement, which needs real Linux hardware and may turn out to require nothing at all. None of the three can be completed by deciding to complete it, so none of them gets to hold the tag._
+A real working-tree folder tree: tree on the left, inline diff on the right,
+keyboard-operable, per-file status badges, reusing v3.11.0's CodeMirror
+integration. The `FolderDiffTree` inherited from v2.21.0 Monorepo Scope is
+diff-only and the wrong substrate, so this is a new surface rather than a
+reskin. It lands right-click "Scope here" on real ground, and gives macOS users
+a Finder-like mode to counter RelaGit and Strand's more rigid UIs.
 
 ---
 
@@ -187,6 +188,7 @@ Positioning: neither "yet another Git GUI" nor an IDE. A first-class Git navigat
 
 | Version | Highlights |
 |---------|-----------|
+| **v3.11.0** | **Merge preview-to-apply + editable diff** — "Merge and auto-resolve" runs the real operation and re-runs the engine against what git produced, applying what passes the gates and stopping on the residual; a numeric confidence bar (`minConfidenceScore`) ANDed with the label gate across desktop, `.gitwandrc`, CLI and MCP; per-hunk opt-out; CodeMirror 6 in the merge editor and an editable inline diff · **Gitea and Forgejo support** (#193) verified against a live 1.27.3 server · **Forge-side auto-merge** on GitHub, GitLab and Azure, with Bitbucket refusing honestly rather than pretending · **Abort and continue tell the truth** (#197, #202): one `git_operation_action` for merge, cherry-pick, revert and rebase, three outcomes instead of two, confirmation before discarding resolution work, and nothing auto-continues · **A declared Tauri-to-dev-server command registry** with a guard, plus failure parity for 27 write commands — which found and fixed a submodule update that reported success whatever git did, and two routes that 404'd under `dev:web` |
 | **v3.10.0** | **Live Repo** (#178) — a `notify` filesystem watcher replaces the 2s status poll, which becomes a 15s fallback; raw OS events are coalesced into typed `RepoChangeEvent`s over a scoped `tauri::ipc::Channel` (SSE under `dev:web`), one watcher per repo shared by N subscribers, designed as the hook for the v4.0 incremental indexer. libgit2 phase 1 lands on `git_diff` only (see Later (unscheduled) for why `git_blame` did not). `clone`/`fetch` progress moves off the global broadcast onto per-invoke channels, `packages/core` resolution moves into a Comlink Web Worker, and the Today inbox stops being read-only: merge, nudge and a direct jump into the resolver. |
 | **v3.9.1** | **No-fast-forward merge option** (#177) — the merge-into-current popover gets an "Always create a merge commit" checkbox, forcing `git merge --no-ff` even when a fast-forward is possible. Off by default · CLI update notice — `gitwand` checks npm for a newer version at most once every 24h and prints a one-line notice for a global (non-`npx`) install |
 | **v3.9.0** | **Engine Accuracy** — the engine's claims are now measured against ~1,700 real merges instead of asserted (`benchmark/`, 8 pinned public repos, byte-for-byte comparison with what teams actually committed) · no `complex` hunk is ever silently applied (`format_semantic` reclassification, scored and traced) · a resolution that breaks a format invariant (double `Unreleased`, duplicate JSON key) is retracted · generated files (lockfiles, bundles) decline by default instead of an auto-merge measured wrong ~100% of the time (`resolveGeneratedFiles` opt-in) · the engine knows what merge it's in (`MergeContext`) — version-identity conflicts resolve to the target branch, laravel agreement 24 → 83% · `package.json`/`composer.json` fragments merge by key instead of line-by-line · **`gitwand conventions`** measures a repo's own merge history to derive its policies, always losing to an explicit `.gitwandrc` · a sandboxed `--regenerate` tier runs the ecosystem's own installer in a disposable worktree for declined lockfiles, measured at 38.5% agreement against an 80% bar so it stays CLI-only rather than shipping to desktop · `benchmark-gate.yml` CI check blocks any future PR that regresses agreement on the pinned corpus |

@@ -5,6 +5,46 @@ description: Release history for GitWand — the native Git client with AI confl
 
 # Changelog
 
+## v3.11.0 — September 2026
+
+### The Conflict Predictor now does the merge
+
+Until now the predictor told you what a merge *would* do and then left you to it: merge blind, or detour through a scratch worktree. "Merge and auto-resolve" runs the real operation, re-runs the engine against what git actually produced, applies every resolution that clears the gates, stages them, and stops with the operation still in progress on whatever needs a human.
+
+It never aborts on your behalf — an abort discards hand resolution that no snapshot can give back — and it never continues past a residual. The button says "Estimated N" because the preview is a simulation over three blobs, with no index and no merge drivers; when the estimate and the outcome disagree, the report says so rather than quietly rounding.
+
+### A confidence bar you can actually set
+
+The engine has always scored each resolution. That score is now a number you can act on: `minConfidenceScore`, from 0 to 100, settable in the desktop app, in `.gitwandrc`, on the CLI and through the MCP tools. It is combined with the existing label gate rather than replacing it, which is the design rather than an implementation detail — `complex` scores 60, so a numeric gate on its own would have silently started applying complex hunks. Being purely subtractive, no setting of the bar can make GitWand apply more than it would with the bar off.
+
+Alongside it, the merge editor's summary lists every offered resolution with its score and a checkbox, so a single hunk can be declined without declining the rest.
+
+### The diff is a place you can fix things
+
+The merge editor's bare textarea is gone, replaced by CodeMirror 6: syntax highlighting, line numbers, real undo. And an inline diff hunk can now be edited where you are reading it — deliberately bounded to unstaged, non-conflicted files, one hunk at a time, writing back through a layer that reconstructs from the original bytes so trailing newlines and CRLF endings survive.
+
+### Gitea and Forgejo
+
+Sign in with a personal access token and the PR tab works on any self-hosted Gitea or Forgejo server: list, detail, diff, CI status, comments, create, merge, checkout, draft to ready. Verified against a live Gitea 1.27.3, which corrected two things the documentation had led us to believe and exposed a comment list that served the same comment three hundred times.
+
+### Merges that arm themselves
+
+A pull request whose checks have not finished can be told to merge itself once they pass, on GitHub, GitLab and Azure DevOps. Bitbucket has no such capability, and says so plainly instead of pretending. The action only ever appears on a PR that is not already mergeable — when a PR is clean, the plain merge sitting next to it is what you want.
+
+### Abort and continue stopped lying
+
+"Abort merge" used to report success even when git had refused, leaving the conflict on disk and the app claiming otherwise. The cause outlived the symptom: GitWand modelled merge, cherry-pick, revert and rebase four different ways, with three different conventions for reporting failure.
+
+They now share one command and one convention, built on a distinction that was missing everywhere — an operation ends in three ways, not two. It completes, it halts on a further conflict, or it fails. Collapsing the last two is what produced both a success message on a refusal and an error message on a cherry-pick that was simply advancing to the next commit.
+
+Alongside it: a revert you start can now be finished or abandoned, which was impossible before; abandoning work asks first; and nothing commits by itself when the last conflict is resolved — the banner's Continue button is the one way forward, for every operation.
+
+### Making `dev:web` tell the truth
+
+GitWand's own development server stands in for the Rust backend when the app runs in a browser, which is where most manual testing happens. If a command has no route there, or behaves differently, that testing quietly checks something other than what ships.
+
+Every command the interface calls now declares either its route or the reason it has none, with a test that fails when that stops being true. The audit found eleven gaps, two of them live defects, and a further round comparing how both sides *fail* — not just how they succeed — caught a submodule update that reported success whatever git did.
+
 ## v3.10.1 — September 2026
 
 ### One unreadable file no longer blocks every conflict

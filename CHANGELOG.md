@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.11.0] - 2026-09-21
+
 ### Added
 
 - **Apply from the Conflict Predictor, stopping only on what needs a human.** The predictor told you what *would* happen and then abandoned you: merge blind, or detour through a scratch worktree. "Merge and auto-resolve" now runs the real operation and re-runs the engine against what git actually produced, applies every resolution that passes the gates, stages them, and stops with the operation still in progress on the residual. It never auto-aborts (an abort discards hand resolution the snapshot cannot give back), never auto-continues past a residual, and never trusts `stageFiles`, whose errors land in a ref instead of throwing: success is verified by re-reading git's conflicted set. A snapshot is taken before the operation, not after. The button says "Estimated N", and the report says so again when the estimate and the outcome disagree, which they can by construction: the preview is a simulation over three blobs, with no index, no `MERGE_HEAD`, no rename detection and no `.gitattributes` merge drivers.
@@ -1537,6 +1539,7 @@ Design-system foundations — the app header and every overlay now ride on a sha
 - 28 tests covering all patterns + real-world scenarios (package.json, Laravel routes, Vue SFC, CSS, .env files)
 
 [Unreleased]: https://github.com/devlint/GitWand/compare/v3.10.1...HEAD
+[3.11.0]: https://github.com/devlint/GitWand/compare/v3.10.1...v3.11.0
 [3.10.1]: https://github.com/devlint/GitWand/compare/v3.10.0...v3.10.1
 [3.10.0]: https://github.com/devlint/GitWand/compare/v3.9.1...v3.10.0
 [3.9.1]: https://github.com/devlint/GitWand/compare/v3.9.0...v3.9.1
