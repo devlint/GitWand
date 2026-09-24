@@ -1,8 +1,12 @@
+const eol = (line: string): string => (line.endsWith("\r") ? line.slice(0, -1) : line);
+
 /**
  * v3.11.1 — Find where a hunk side's lines sit in that side's full file
  * (`git show :2:path` / `:3:path`). Line numbers in the conflicted file do
  * not match either side, because auto-merged regions shift them; searching
  * for the exact block does. `nearLine` only breaks ties between duplicates.
+ * A trailing `\r` is ignored on both sides: a CRLF working tree
+ * (core.autocrlf=true) is compared against LF stage blobs.
  */
 export function locateBlock(
   fileLines: string[],
@@ -14,7 +18,7 @@ export function locateBlock(
   for (let i = 0; i + block.length <= fileLines.length; i++) {
     let match = true;
     for (let j = 0; j < block.length; j++) {
-      if (fileLines[i + j] !== block[j]) {
+      if (eol(fileLines[i + j]) !== eol(block[j])) {
         match = false;
         break;
       }

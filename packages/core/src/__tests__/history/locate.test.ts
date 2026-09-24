@@ -18,4 +18,9 @@ describe("locateBlock", () => {
     expect(locateBlock(file, [], 1)).toBeNull();
     expect(locateBlock(["a"], ["a", "b"], 1)).toBeNull();
   });
+
+  it("matches across CRLF and LF line endings", () => {
+    expect(locateBlock(["a", "b", "c"], ["b\r", "c\r"], 1)).toEqual({ start: 2, end: 3 });
+    expect(locateBlock(["a\r", "b\r", "c\r"], ["b", "c"], 1)).toEqual({ start: 2, end: 3 });
+  });
 });
