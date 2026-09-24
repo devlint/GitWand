@@ -174,7 +174,7 @@ export async function runLlmFallbackPhase(
     const fileContext = extractHunkContext(conflictedContent, hunk, contextLines);
 
     let historySection: string | undefined;
-    let historyStats: HistoryStats = DISABLED_HISTORY_STATS;
+    let historyStats: HistoryStats = { ...DISABLED_HISTORY_STATS, reasons: [] };
     if (historyRunner) {
       const history = await collectHunkHistory(historyRunner, {
         filePath,

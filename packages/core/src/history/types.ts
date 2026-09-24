@@ -56,7 +56,8 @@ export interface HistoryConfig {
 
 export const HISTORY_BUDGET_MIN = 200;
 export const HISTORY_BUDGET_MAX = 8000;
-export const DEFAULT_HISTORY_CONFIG: HistoryConfig = { enabled: true, budgetTokens: 1500 };
+/** Frozen: shared by reference, spread it to get a mutable copy. */
+export const DEFAULT_HISTORY_CONFIG: Readonly<HistoryConfig> = Object.freeze({ enabled: true, budgetTokens: 1500 });
 
 export type HistoryStatsStatus = "included" | "truncated" | "unavailable" | "disabled";
 
@@ -67,12 +68,18 @@ export interface HistoryStats {
   estTokens: number;
 }
 
-export const DISABLED_HISTORY_STATS: HistoryStats = {
+/**
+ * Frozen (its `reasons` too): shared by reference, so a trace that needs a
+ * mutable `HistoryStats` takes `{ ...DISABLED_HISTORY_STATS, reasons: [] }`.
+ */
+export const DISABLED_HISTORY_STATS: Readonly<Omit<HistoryStats, "reasons">> & {
+  readonly reasons: readonly HistoryUnavailableReason[];
+} = Object.freeze({
   status: "disabled",
-  reasons: [],
+  reasons: Object.freeze([] as HistoryUnavailableReason[]),
   commitCount: 0,
   estTokens: 0,
-};
+});
 
 export interface HistoryRefs {
   operation?: MergeContext["operation"];
