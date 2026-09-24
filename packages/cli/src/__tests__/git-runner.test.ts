@@ -51,3 +51,11 @@ describe("makeCliGitRunner", () => {
     expect(bad.exitCode).not.toBe(0);
   });
 });
+
+describe("makeCliGitRunner — spawn failures", () => {
+  it("reports a spawn failure as -1, never as git's exit 1 (read by core as 'no merge base')", async () => {
+    const run = makeCliGitRunner(join(tmpdir(), "gitwand-cli-runner-does-not-exist"));
+    const r = await run(["merge-base", "HEAD", "HEAD"]);
+    expect(r.exitCode).toBe(-1);
+  });
+});

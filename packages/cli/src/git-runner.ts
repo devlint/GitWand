@@ -23,7 +23,10 @@ export function makeCliGitRunner(cwd: string = process.cwd()): GitRunner {
   return (args) =>
     new Promise((resolve) => {
       execFile("git", args, { cwd, env, encoding: "utf-8", maxBuffer: 16 * 1024 * 1024 }, (err, stdout) => {
-        const code = err ? (typeof (err as { code?: unknown }).code === "number" ? (err as { code: number }).code : 1) : 0;
+        // A numeric code is git's own exit status. Anything else (ENOENT for a
+        // missing cwd or git binary, ERR_CHILD_PROCESS_STDIO_MAXBUFFER, …) is a
+        // spawn failure: report -1, never 1, which core reads as "no merge base".
+        const code = err ? (typeof (err as { code?: unknown }).code === "number" ? (err as { code: number }).code : -1) : 0;
         resolve({ stdout: stdout ?? "", exitCode: code });
       });
     });
