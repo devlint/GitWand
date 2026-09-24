@@ -568,3 +568,14 @@ export default function App() {}`;
     });
   });
 });
+
+describe("v3.11.1 — llmFallback.history in .gitwandrc", () => {
+  it("parses and clamps the history block", () => {
+    const cfg = parseGitwandrc(JSON.stringify({ llmFallback: { enabled: true, history: { enabled: false, budgetTokens: 99999 } } }));
+    expect(cfg?.llmFallback?.history).toEqual({ enabled: false, budgetTokens: 8000 });
+  });
+  it("ignores an invalid history block", () => {
+    const cfg = parseGitwandrc(JSON.stringify({ llmFallback: { enabled: true, history: "yes" } }));
+    expect(cfg?.llmFallback?.history).toBeUndefined();
+  });
+});

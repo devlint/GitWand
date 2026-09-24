@@ -212,6 +212,13 @@ export interface LlmFallbackConfig {
    * Défaut : `"strict"`.
    */
   minMode?: import("./config.js").ValidationLevel;
+  /**
+   * v3.11.1 — History-aware prompts: the commits that changed the conflicting
+   * lines on each side since the merge base, within `budgetTokens`.
+   * Defaults: `{ enabled: true, budgetTokens: 1500 }`. Effective only when a
+   * `GitWandOptions.gitRunner` is injected.
+   */
+  history?: Partial<import("./history/types.js").HistoryConfig>;
 }
 
 /**
@@ -235,6 +242,8 @@ export interface LlmTrace {
   validationScore: number;
   /** La résolution LLM a-t-elle été acceptée ? (`false` = fallback sur `complex`) */
   accepted: boolean;
+  /** v3.11.1 — What history went into the prompt (absent on pre-v3.11.1 traces). */
+  history?: import("./history/types.js").HistoryStats;
 }
 
 // ─── Phase v2.6 — Refactoring-aware merge ────────────────────
@@ -622,6 +631,12 @@ export interface GitWandOptions {
    * cible gagne. Sans lui, ces cas sont proposés au lieu d'être appliqués.
    */
   mergeContext?: MergeContext | null;
+  /**
+   * v3.11.1 — Git access for the history-aware LLM fallback, injected by the
+   * caller (desktop: `gitExec`; CLI: `execFile`). Core never spawns git
+   * itself. `null`/absent: prompts carry no history.
+   */
+  gitRunner?: import("./history/types.js").GitRunner | null;
   /**
    * accuracy lot D — État des autres fichiers de ce merge (source de vérité
    * d'un fichier régénérable, ex: package.json pour package-lock.json).

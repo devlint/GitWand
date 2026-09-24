@@ -156,6 +156,9 @@ export type { RefMergeResult } from "./refactoring/index.js";
 export { tryLlmFallbackResolve } from "./resolvers/llm-fallback.js";
 export type { LlmResolveResult } from "./resolvers/llm-fallback.js";
 
+// v3.11.1 — History-aware LLM fallback (pure; git reached via an injected GitRunner)
+export * from "./history/index.js";
+
 export type { JsonMergeResult } from "./resolvers/json.js";
 export type { MarkdownMergeResult, MarkdownSection } from "./resolvers/markdown.js";
 export type { YamlMergeResult, YamlEntry } from "./resolvers/yaml.js";

@@ -36,6 +36,8 @@
  * Ou dans `package.json` sous la clé `"gitwand"`.
  */
 
+import { normalizeHistoryConfig } from "./history/types.js";
+
 // ─── ValidationLevel ──────────────────────────────────────
 
 /**
@@ -295,7 +297,8 @@ export interface GitWandrcConfig {
    *     "temperature": 0.0,
    *     "contextLines": 50,
    *     "minPostMergeScore": 80,
-   *     "minMode": "strict"
+   *     "minMode": "strict",
+   *     "history": { "enabled": true, "budgetTokens": 1500 }
    *   }
    * }
    * ```
@@ -308,6 +311,8 @@ export interface GitWandrcConfig {
     contextLines?: number;
     minPostMergeScore?: number;
     minMode?: ValidationLevel;
+    /** v3.11.1 — `{ enabled?: boolean, budgetTokens?: number }` (budget clamped to 200–8000). */
+    history?: Partial<import("./history/types.js").HistoryConfig>;
   };
   /**
    * v2.6 — Moteur RefMerge (expérimental, opt-in).
@@ -491,6 +496,9 @@ export function parseGitwandrc(json: string): GitWandrcConfig | null {
         fallback.minPostMergeScore = llm.minPostMergeScore;
       }
       if (validLevels.includes(llm.minMode)) fallback.minMode = llm.minMode as ValidationLevel;
+
+      const history = normalizeHistoryConfig(llm.history);
+      if (history) fallback.history = history;
 
       if (Object.keys(fallback).length > 0) {
         result.llmFallback = fallback;
