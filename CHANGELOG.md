@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- History-aware LLM prompts: `llm_proposed` and "Resolve with AI" now include, for each side, the commits since the merge base that changed the conflicting lines (messages, and range diffs within a token budget). Enabled by default; `llmFallback.history` in `.gitwandrc` (`enabled`, `budgetTokens` 200–8000) or Settings → AI to change it. `enabled: false` in `.gitwandrc` wins, so a repository can forbid sending its history to an AI provider. The LLM trace shows what history was sent.
+
 ## [3.11.0] - 2026-09-21
 
 ### Added
