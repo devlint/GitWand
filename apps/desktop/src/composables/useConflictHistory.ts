@@ -72,26 +72,29 @@ export function effectiveHistoryConfig(
 type HunkLike = { oursLines: string[]; theirsLines: string[]; startLine: number };
 
 /**
- * One renderer per conflict snapshot: it resolves the refs and the config
- * once, and shares the per-file git cache across every hunk it renders.
- * Resolves `undefined` when history is off or anything fails, so the caller
- * simply sends the prompt without it.
+ * One renderer per conflict snapshot: it resolves the refs once and shares
+ * the per-file git cache across every hunk it renders. The config (app
+ * settings + `.gitwandrc`) is re-read on every request, so turning history
+ * off applies to the very next "Resolve with AI". Resolves `undefined` when
+ * history is off or anything fails, so the caller simply sends the prompt
+ * without it.
  */
 export function createHunkHistoryRenderer(cwd: string) {
   const runGit = makeGitRunner(cwd);
   const cache = createHistoryCache();
-  let setup: Promise<{ refs: HistoryRefs; cfg: HistoryConfig }> | null = null;
+  let refsOnce: Promise<HistoryRefs> | null = null;
 
-  async function load() {
-    const [refs, rcRaw] = await Promise.all([detectHistoryRefs(cwd), readGitwandrc(cwd).catch(() => "")]);
+  async function currentConfig(): Promise<HistoryConfig> {
+    const rcRaw = await readGitwandrc(cwd).catch(() => "");
     const rc = parseLlmFallbackFromRc(rcRaw)?.history;
-    return { refs, cfg: effectiveHistoryConfig(loadSettings(), rc) };
+    return effectiveHistoryConfig(loadSettings(), rc);
   }
 
   return async (filePath: string, hunk: HunkLike): Promise<string | undefined> => {
     try {
-      const { refs, cfg } = await (setup ??= load());
+      const cfg = await currentConfig();
       if (!cfg.enabled) return undefined;
+      const refs = await (refsOnce ??= detectHistoryRefs(cwd));
       const history = await collectHunkHistory(runGit, { filePath, hunk, refs, cache });
       return renderHistorySection(history, cfg.budgetTokens, historyLabels(refs.operation)).text;
     } catch {

@@ -99,8 +99,9 @@ function validateEditing(hunkIndex: number) {
 }
 
 // ─── AI Suggestion ─────────────────────────────────────
-// v3.11.1 — one history renderer per conflict snapshot: a new file content
-// (next rebase step, re-load) means new refs, so it is rebuilt then.
+// v3.11.1 — one history renderer per conflict snapshot. It is rebuilt whenever
+// `props.file.content` changes: after each applied hunk as well as on the next
+// rebase step or a re-load. The settings are re-read on every request anyway.
 const historyRenderer = computed(() => {
   void props.file.content;
   return props.cwd ? createHunkHistoryRenderer(props.cwd) : null;

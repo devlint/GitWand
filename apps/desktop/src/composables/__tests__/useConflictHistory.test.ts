@@ -85,6 +85,12 @@ describe("createHunkHistoryRenderer", () => {
     localStorage.setItem("gitwand-settings", JSON.stringify({ aiHistoryEnabled: false }));
     expect(await createHunkHistoryRenderer(dir)("f.txt", hunk)).toBeUndefined();
   });
+  it("honours a settings change on the next request of the same renderer", async () => {
+    const render = createHunkHistoryRenderer(dir);
+    expect(await render("f.txt", hunk)).toContain("ours edit");
+    localStorage.setItem("gitwand-settings", JSON.stringify({ aiHistoryEnabled: false }));
+    expect(await render("f.txt", hunk)).toBeUndefined();
+  });
   it("returns undefined when .gitwandrc forbids it", async () => {
     state.rc = '{"llmFallback":{"history":{"enabled":false}}}';
     expect(await createHunkHistoryRenderer(dir)("f.txt", hunk)).toBeUndefined();
