@@ -529,6 +529,17 @@ export interface MergeContext {
   /** Noms de refs, pour les traces et explications uniquement — jamais parsés pour décider. */
   oursRef?: string;
   theirsRef?: string;
+  /**
+   * v3.11.1 — SHA of HEAD (the "ours" side). Used by the history-aware LLM
+   * fallback to query `git log` on the right commits. Never parsed to decide
+   * a resolution.
+   */
+  oursSha?: string;
+  /**
+   * v3.11.1 — SHA of the operation head (MERGE_HEAD / REBASE_HEAD /
+   * CHERRY_PICK_HEAD / REVERT_HEAD), the "theirs" side.
+   */
+  theirsSha?: string;
 }
 
 /**
