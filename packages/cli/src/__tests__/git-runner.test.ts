@@ -6,10 +6,10 @@
 
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { makeCliGitRunner, gitEnv } from "../git-runner.js";
+import { makeCliGitRunner, gitEnv, repoRelativePath } from "../git-runner.js";
 
 // Hermetic git env (fix round 1 — same rationale as merge-context-detect.test.ts's
 // HERMETIC_GIT_ENV): without it, the host's global/system git config (hooks, GPG
@@ -57,5 +57,38 @@ describe("makeCliGitRunner — spawn failures", () => {
     const run = makeCliGitRunner(join(tmpdir(), "gitwand-cli-runner-does-not-exist"));
     const r = await run(["merge-base", "HEAD", "HEAD"]);
     expect(r.exitCode).toBe(-1);
+  });
+});
+
+describe("repoRelativePath", () => {
+  it("turns a file path into the repo-root-relative, forward-slash path git stages use", () => {
+    const root = join(tmpdir(), "repo");
+    expect(repoRelativePath(root, join(root, "src", "a.ts"))).toBe("src/a.ts");
+    expect(repoRelativePath(root, join(root, "a.ts"))).toBe("a.ts");
+  });
+  it("returns null outside the repository", () => {
+    const root = join(tmpdir(), "repo");
+    expect(repoRelativePath(root, join(tmpdir(), "elsewhere", "a.ts"))).toBeNull();
+    expect(repoRelativePath(root, root)).toBeNull();
+  });
+});
+
+describe("makeCliGitRunner — from the repository root", () => {
+  it("reads a subdirectory file's stage with the root-relative path", async () => {
+    for (const [k, v] of Object.entries(HERMETIC_GIT_ENV)) vi.stubEnv(k, v);
+    dir = mkdtempSync(join(tmpdir(), "gitwand-cli-runner-"));
+    const env = { ...process.env, ...HERMETIC_GIT_ENV };
+    const g = (args: string[]) => execFileSync("git", args, { cwd: dir, env });
+    g(["init", "-q"]);
+    g(["config", "user.email", "t@e"]);
+    g(["config", "user.name", "T"]);
+    mkdirSync(join(dir, "sub"));
+    writeFileSync(join(dir, "sub", "f.txt"), "hello\n");
+    g(["add", "."]);
+    // A runner built at the root resolves `:0:<root-relative>` even though the
+    // file lives in a subdirectory the user may be running the CLI from.
+    const run = makeCliGitRunner(dir);
+    const path = repoRelativePath(dir, join(dir, "sub", "f.txt"));
+    expect(await run(["show", `:0:${path}`])).toEqual({ stdout: "hello\n", exitCode: 0 });
   });
 });

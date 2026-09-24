@@ -33,7 +33,7 @@ import {
 
 import { c, printBanner, WAND } from "../ui.js";
 import { getConflictedFiles, detectMergeContext } from "../git.js";
-import { makeCliGitRunner } from "../git-runner.js";
+import { makeCliGitRunner, repoRelativePath } from "../git-runner.js";
 import { parseConcurrency, runPool } from "../concurrency.js";
 import { buildPartialContent } from "../partial-content.js";
 import { buildCIReport } from "../reporting.js";
@@ -110,6 +110,12 @@ export async function cmdResolve(
   const mergeContext = detectMergeContext();
   const concurrency = parseConcurrency(flags.concurrency);
   const llmFallbackEnabled = flags["llm-fallback"] === true;
+
+  // v3.11.1 — History queries (`git show :2:<path>`, `log -L …:<path>`) take
+  // repo-root-relative paths, so the runner runs from the root, not from the
+  // (possibly nested) directory the CLI was started in.
+  const historyRoot = llmFallbackEnabled ? (findGitRoot() ?? process.cwd()) : process.cwd();
+  const historyGitRunner = makeCliGitRunner(historyRoot);
 
   // v2.5 — LLM fallback opt-in. Bascule de `resolve()` vers `resolveAsync()`
   // et injecte un endpoint Node (fetch natif) qui wrap Claude / OpenAI / Ollama.
@@ -240,13 +246,13 @@ export async function cmdResolve(
     // — comportement v2.4 intact. Avec le flag, on passe par `resolveAsync()`
     // qui supporte le pattern `llm_proposed` (priorité 998 dans le core).
     const result: MergeResult = llmFallbackEnabled && llmCliConfig !== null
-      ? await resolveAsync(content, file, {
+      ? await resolveAsync(content, repoRelativePath(historyRoot, filePath) ?? file, {
           verbose: false,
           resolveWhitespace,
           resolveGeneratedFiles,
           minConfidenceScore,
           mergeContext,
-          gitRunner: makeCliGitRunner(),
+          gitRunner: historyGitRunner,
           conventions,
           llmFallback: {
             ...buildResolveLlmOptions(llmCliConfig, llmFileConfig),

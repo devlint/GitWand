@@ -8,6 +8,7 @@
  */
 
 import { execFile } from "node:child_process";
+import { isAbsolute, relative, sep } from "node:path";
 import type { GitRunner } from "@gitwand/core";
 
 const SECRET_RE = /(API_KEY|TOKEN|SECRET|PASSWORD)$/i;
@@ -30,4 +31,15 @@ export function makeCliGitRunner(cwd: string = process.cwd()): GitRunner {
         resolve({ stdout: stdout ?? "", exitCode: code });
       });
     });
+}
+
+/**
+ * The path git's index stages (`:2:<path>`) and `log -L …:<path>` expect from
+ * a runner started at `repoRoot`: root-relative, forward slashes. `null` when
+ * `absPath` is not inside the repository.
+ */
+export function repoRelativePath(repoRoot: string, absPath: string): string | null {
+  const rel = relative(repoRoot, absPath);
+  if (!rel || rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return null;
+  return rel.split(sep).join("/");
 }
