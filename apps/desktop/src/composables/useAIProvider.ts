@@ -91,10 +91,12 @@ export interface ConflictContext {
   ours: string;
   /** "Theirs" version (incoming branch). */
   theirs: string;
-  /** Commit message from our branch (if available). */
-  ourCommitMessage?: string;
-  /** Commit message from their branch (if available). */
-  theirCommitMessage?: string;
+  /**
+   * v3.11.1 — Rendered "Why each side changed these lines" section from
+   * `@gitwand/core`'s `renderHistorySection`. Replaces the never-filled
+   * per-branch commit-message slots.
+   */
+  history?: string;
   /** Surrounding context (lines before/after the conflict). */
   surroundingContext?: string;
 }
@@ -161,14 +163,11 @@ Respond in JSON format:
 /**
  * Build the user prompt with conflict context.
  */
-function buildUserPrompt(ctx: ConflictContext): string {
+export function buildUserPrompt(ctx: ConflictContext): string {
   let prompt = `File: ${ctx.filePath}\n\n`;
 
-  if (ctx.ourCommitMessage || ctx.theirCommitMessage) {
-    prompt += `--- Commit context ---\n`;
-    if (ctx.ourCommitMessage) prompt += `Our branch: ${ctx.ourCommitMessage}\n`;
-    if (ctx.theirCommitMessage) prompt += `Their branch: ${ctx.theirCommitMessage}\n`;
-    prompt += `\n`;
+  if (ctx.history) {
+    prompt += `${ctx.history}\n\n`;
   }
 
   if (ctx.surroundingContext) {

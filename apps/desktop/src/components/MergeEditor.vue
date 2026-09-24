@@ -8,6 +8,7 @@ import { useI18n } from "../composables/useI18n";
 import { safeHtml } from "../composables/useSafeHtml";
 import { useAIProvider } from "../composables/useAIProvider";
 import { useAiHunkQueue, remapHunkIndices } from "../composables/useAiHunkQueue";
+import { createHunkHistoryRenderer } from "../composables/useConflictHistory";
 
 import { useHunkExplanation } from "../composables/useHunkExplanation";
 import { useResizeObserver } from "../composables/useResizeObserver";
@@ -98,7 +99,16 @@ function validateEditing(hunkIndex: number) {
 }
 
 // ─── AI Suggestion ─────────────────────────────────────
-const aiQueue = useAiHunkQueue(() => props.file.path);
+// v3.11.1 — one history renderer per conflict snapshot: a new file content
+// (next rebase step, re-load) means new refs, so it is rebuilt then.
+const historyRenderer = computed(() => {
+  void props.file.content;
+  return props.cwd ? createHunkHistoryRenderer(props.cwd) : null;
+});
+const aiQueue = useAiHunkQueue(
+  () => props.file.path,
+  (hunk) => historyRenderer.value?.(props.file.path, hunk) ?? Promise.resolve(undefined),
+);
 // The reset of this state lives in the consolidated per-file watcher further
 // down, which also keys on the hunk array's identity: resolving one conflict
 // renumbers every later one under the same path, and per-hunk AI state that

@@ -27,6 +27,17 @@ vi.mock("../../composables/useAIProvider", () => ({
   }),
 }));
 
+// v3.11.1 — MergeEditor now wires a real history renderer (createHunkHistoryRenderer)
+// into useAiHunkQueue, which hits gitExec/gitRepoState/readGitwandrc through
+// backend.ts. Unmocked, those fall through to a real `fetch` against the
+// (not running) dev-server and turn every `suggest()` call into a
+// network-timing-dependent multi-tick wait, which is exactly what this file's
+// single-`nextTick()` assertions were written to not need. Stub it out so
+// history resolves to `undefined` in one microtask, matching "history off".
+vi.mock("../../composables/useConflictHistory", () => ({
+  createHunkHistoryRenderer: () => async () => undefined,
+}));
+
 import MergeEditor from "../MergeEditor.vue";
 
 function complexHunk(n: number): ConflictHunk {
@@ -213,6 +224,12 @@ describe("MergeEditor AI queue", () => {
     expect(aiLinks[0].className, "hunk 0 stays marked busy").toContain("inline-action--loading");
     expect(aiLinks[0].getAttribute("aria-disabled")).toBe("true");
 
+    // Both requests now go through the (mocked) history renderer before
+    // reaching `suggest()`, which is an extra microtask hop past a single
+    // `nextTick()`. Wait for both calls to actually land before using the
+    // release functions they assign.
+    await vi.waitFor(() => expect(call).toBe(2));
+
     // Resolve hunk 1's (the second, not the first, request) and check the
     // answer lands in hunk 1's own editor. Targeting hunk 1 here, not hunk 0,
     // means an implementation that quietly defaults to the first or last
@@ -280,8 +297,9 @@ describe("MergeEditor AI queue", () => {
 
     const bulkAi = () => host.querySelector(".me-bulk-btn--ai") as HTMLElement;
     bulkAi().click();
-    await nextTick();
-    expect(suggest).toHaveBeenCalledTimes(2);
+    // Each request now goes through the (mocked) history renderer before
+    // reaching `suggest()`, an extra microtask hop past a single `nextTick()`.
+    await vi.waitFor(() => expect(suggest).toHaveBeenCalledTimes(2));
     expect(bulkAi().textContent).toContain("Cancel");
 
     // Cancel mid-flight, then let the now-stale calls settle: a cancelled
@@ -382,14 +400,14 @@ describe("MergeEditor AI queue", () => {
 
     const bulkAi = () => host.querySelector(".me-bulk-btn--ai") as HTMLElement;
     bulkAi().click();
-    await nextTick();
-    expect(suggest).toHaveBeenCalledTimes(2);
+    // Each request now goes through the (mocked) history renderer before
+    // reaching `suggest()`, an extra microtask hop past a single `nextTick()`.
+    await vi.waitFor(() => expect(suggest).toHaveBeenCalledTimes(2));
     bulkAi().click();
     await nextTick();
 
     (host.querySelectorAll<HTMLElement>(".inline-action--ai")[0]).click();
-    await nextTick();
-    expect(suggest).toHaveBeenCalledTimes(3);
+    await vi.waitFor(() => expect(suggest).toHaveBeenCalledTimes(3));
 
     releases[0](answer("STALE"));
     await settle();

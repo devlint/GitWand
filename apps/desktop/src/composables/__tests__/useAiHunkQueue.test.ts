@@ -256,6 +256,34 @@ describe("remapHunkIndices", () => {
   });
 });
 
+describe("v3.11.1 — history injection", () => {
+  beforeEach(() => suggest.mockReset());
+
+  it("passes the rendered history to suggest()", async () => {
+    suggest.mockResolvedValue(answer("x"));
+    const historyFor = vi.fn(async () => "## Why each side changed these lines:");
+    const q = useAiHunkQueue(() => "f.ts", historyFor);
+    await q.request(0, hunk(0));
+    expect(historyFor).toHaveBeenCalledWith(hunk(0));
+    expect(suggest.mock.calls[0][0].history).toBe("## Why each side changed these lines:");
+  });
+
+  it("omits history when the provider resolves undefined or throws", async () => {
+    suggest.mockResolvedValue(answer("x"));
+    const q = useAiHunkQueue(() => "f.ts", async () => { throw new Error("git down"); });
+    await q.request(0, hunk(0));
+    expect(suggest.mock.calls[0][0].history).toBeUndefined();
+    expect(q.stateFor(0)).toBe("ready");
+  });
+
+  it("works without a history provider (unchanged behaviour)", async () => {
+    suggest.mockResolvedValue(answer("x"));
+    const q = useAiHunkQueue(() => "f.ts");
+    await q.request(0, hunk(0));
+    expect(suggest.mock.calls[0][0]).not.toHaveProperty("history");
+  });
+});
+
 describe("useAiHunkQueue.remapAfterApply", () => {
   beforeEach(() => { suggest.mockReset(); });
 

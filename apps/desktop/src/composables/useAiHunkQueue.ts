@@ -74,7 +74,15 @@ export interface AiHunkRequest {
 
 const EMPTY: Entry = { state: "idle", suggestion: null, error: null };
 
-export function useAiHunkQueue(filePath: () => string) {
+export function useAiHunkQueue(
+  filePath: () => string,
+  /**
+   * v3.11.1 — Resolves the rendered history section for a hunk, or
+   * `undefined` when history is off. Never allowed to fail a suggestion:
+   * a rejection is treated as "no history".
+   */
+  historyFor?: (hunk: ConflictHunk) => Promise<string | undefined>,
+) {
   const { suggest } = useAIProvider();
 
   const entries = ref<Record<number, Entry>>({});
@@ -180,14 +188,16 @@ export function useAiHunkQueue(filePath: () => string) {
     inFlight.value += 1;
     patch(item.index, { state: "loading" });
 
-    const ctx: ConflictContext = {
-      filePath: filePath(),
-      base: item.hunk.baseLines?.join("\n") ?? "",
-      ours: item.hunk.oursLines.join("\n"),
-      theirs: item.hunk.theirsLines.join("\n"),
-    };
-
     try {
+      const history = historyFor ? await historyFor(item.hunk).catch(() => undefined) : undefined;
+      if (gen !== generation) return;
+      const ctx: ConflictContext = {
+        filePath: filePath(),
+        base: item.hunk.baseLines?.join("\n") ?? "",
+        ours: item.hunk.oursLines.join("\n"),
+        theirs: item.hunk.theirsLines.join("\n"),
+        ...(history ? { history } : {}),
+      };
       const suggestion = await suggest(ctx);
       if (gen !== generation) return;
       patch(item.index, { state: "ready", suggestion, error: null });
