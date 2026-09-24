@@ -154,7 +154,7 @@ export type { RefMergeResult } from "./refactoring/index.js";
 
 // v2.5 — LLM fallback resolver (consommateurs souhaitant invoquer directement)
 export { tryLlmFallbackResolve } from "./resolvers/llm-fallback.js";
-export type { LlmResolveResult } from "./resolvers/llm-fallback.js";
+export type { LlmResolveResult, LlmPromptExtras } from "./resolvers/llm-fallback.js";
 
 // v3.11.1 — History-aware LLM fallback (pure; git reached via an injected GitRunner)
 export * from "./history/index.js";

@@ -31,6 +31,17 @@ import { parseConflictMarkers } from "../parser.js";
 import { tryLlmFallbackResolve } from "../resolvers/llm-fallback.js";
 import { checkParseTreeValid, applyPostMergeRiskPenalty } from "./validate-parse-tree.js";
 import { validateMergedContent } from "./validation.js";
+import {
+  collectHunkHistory,
+  createHistoryCache,
+  historyLabels,
+  historyRefsFromMergeContext,
+  renderHistorySection,
+  DEFAULT_HISTORY_CONFIG,
+  DISABLED_HISTORY_STATS,
+  clampHistoryBudget,
+  type HistoryStats,
+} from "../history/index.js";
 
 // ─── Helpers ──────────────────────────────────────────────
 
@@ -125,6 +136,14 @@ export async function runLlmFallbackPhase(
 
   const contextLines = llmConfig.contextLines ?? 50;
 
+  // v3.11.1 — History-aware prompts. Collected lazily, only for the hunks
+  // actually sent to the model, so deterministic resolutions cost no git call.
+  const historyCfg = { ...DEFAULT_HISTORY_CONFIG, ...(llmConfig.history ?? {}) };
+  const historyRunner = historyCfg.enabled ? options.gitRunner : null;
+  const historyRefs = historyRefsFromMergeContext(options.mergeContext);
+  const labels = historyLabels(historyRefs.operation);
+  const historyCache = createHistoryCache();
+
   // Identifier les hunks llm_proposed non résolus.
   // Quand setLlmFallbackEnabled(true) était actif pendant resolve(), les hunks
   // qui auraient été "complex" ont été classifiés "llm_proposed". Leur score
@@ -154,7 +173,24 @@ export async function runLlmFallbackPhase(
     const hunk = r.hunk;
     const fileContext = extractHunkContext(conflictedContent, hunk, contextLines);
 
-    const llmResult = await tryLlmFallbackResolve(hunk, filePath, fileContext, llmConfig);
+    let historySection: string | undefined;
+    let historyStats: HistoryStats = DISABLED_HISTORY_STATS;
+    if (historyRunner) {
+      const history = await collectHunkHistory(historyRunner, {
+        filePath,
+        hunk,
+        refs: historyRefs,
+        cache: historyCache,
+      });
+      const rendered = renderHistorySection(history, clampHistoryBudget(historyCfg.budgetTokens), labels);
+      historySection = rendered.text;
+      historyStats = rendered.stats;
+    }
+
+    const llmResult = await tryLlmFallbackResolve(hunk, filePath, fileContext, llmConfig, {
+      historySection,
+      historyStats,
+    });
 
     if (llmResult.lines !== null) {
       // Résolution acceptée — mettre à jour le hunk et la résolution

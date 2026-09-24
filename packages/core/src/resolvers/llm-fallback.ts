@@ -12,6 +12,7 @@
  */
 
 import type { ConflictHunk, LlmFallbackConfig, LlmTrace } from "../types.js";
+import type { HistoryStats } from "../history/types.js";
 import { validateMergedContent } from "../resolver/validation.js";
 
 // ─── Types publics ──────────────────────────────────────────
@@ -24,6 +25,14 @@ export interface LlmResolveResult {
   reason: string;
   /** Trace d'audit complète (toujours présente, même en cas de refus) */
   llmTrace: LlmTrace;
+}
+
+/** v3.11.1 — Optional prompt enrichments computed by the pipeline. */
+export interface LlmPromptExtras {
+  /** Rendered "Why each side changed these lines" section, inserted before the hunk. */
+  historySection?: string;
+  /** Recorded on every returned `llmTrace` as `history`. */
+  historyStats?: HistoryStats;
 }
 
 // ─── Helpers internes ──────────────────────────────────────
@@ -91,6 +100,7 @@ function buildPrompt(
   filePath: string,
   fileContext: string,
   config: LlmFallbackConfig,
+  historySection?: string,
 ): string {
   const contextLines = config.contextLines ?? 50;
   const base = hunk.baseLines.join("\n");
@@ -114,7 +124,7 @@ function buildPrompt(
 \`\`\`
 ${fileContext}
 \`\`\`
-
+${historySection ? `\n${historySection}\n` : ""}
 ## Conflict hunk to resolve (line ${hunk.startLine}):
 \`\`\`
 ${conflictBlock}
@@ -187,10 +197,12 @@ export async function tryLlmFallbackResolve(
   filePath: string,
   fileContext: string,
   config: LlmFallbackConfig,
+  extras: LlmPromptExtras = {},
 ): Promise<LlmResolveResult> {
   const calledAt = new Date().toISOString();
   const model = config.model ?? "claude-sonnet-4-6";
   const minPostMergeScore = config.minPostMergeScore ?? 80;
+  const historyField = extras.historyStats ? { history: extras.historyStats } : {};
 
   // Vérification de l'endpoint (requis pour que le fallback fonctionne)
   if (!config.endpoint) {
@@ -202,6 +214,7 @@ export async function tryLlmFallbackResolve(
       rawResponseTruncated: "",
       validationScore: 0,
       accepted: false,
+      ...historyField,
     };
     return {
       lines: null,
@@ -210,7 +223,7 @@ export async function tryLlmFallbackResolve(
     };
   }
 
-  const prompt = buildPrompt(hunk, filePath, fileContext, config);
+  const prompt = buildPrompt(hunk, filePath, fileContext, config, extras.historySection);
   const promptHash = sha256Hex(prompt);
   const t0 = Date.now();
 
@@ -228,6 +241,7 @@ export async function tryLlmFallbackResolve(
       rawResponseTruncated: "",
       validationScore: 0,
       accepted: false,
+      ...historyField,
     };
     return {
       lines: null,
@@ -251,6 +265,7 @@ export async function tryLlmFallbackResolve(
       rawResponseTruncated,
       validationScore: 0,
       accepted: false,
+      ...historyField,
     };
     return {
       lines: null,
@@ -274,6 +289,7 @@ export async function tryLlmFallbackResolve(
     rawResponseTruncated,
     validationScore,
     accepted,
+    ...historyField,
   };
 
   if (!accepted) {
