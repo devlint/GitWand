@@ -103,10 +103,12 @@ This is on by default and adds itself as a new section between "Context" and "Co
   <commit body>
   <range diff>
 ### theirs (MERGE_HEAD)
-History unavailable: no commit since the merge base.
+History unavailable: no commit changed these lines since the merge base.
 ```
 
-For a cherry-pick or a revert, "theirs" is not compared against the merge base — git itself doesn't — but against the parent of the commit being applied, so the section shows exactly that one commit, the one actually being cherry-picked or reverted.
+For a cherry-pick, "theirs" is not compared against the merge base — git itself doesn't — but against the parent of the commit being applied, so the section shows exactly that one commit, the one actually being cherry-picked. For a revert, "theirs" is the commit being reverted: the section shows its message, without a range diff (the version of the file git stages for that side is the one from before that commit, so a line-range query could not be aligned with it).
+
+A commit that only moved or re-indented the lines is left out, since its diff says nothing about intent. If such reformatting is all a side did to those lines, the section keeps the newest of those commits — its subject, without the diff — rather than claiming that nothing changed them.
 
 ### Turning it off or tuning the budget
 
@@ -140,7 +142,17 @@ The newest commit's short SHA and subject line on each side that has history are
 
 ### When history is unavailable
 
-Not every conflict has useful history to offer — a brand-new file, an unrelated-histories merge, a side that only deleted the block, or a git query that timed out (2 seconds per hunk). Rather than sending nothing and pretending the history simply wasn't checked, GitWand says so explicitly on that side with a **"History unavailable: …"** line naming the reason (no commit since the merge base, no shared merge base, the side removed the block, the block could not be located, or the query timed out). If neither side has usable history, the whole section still appears, made up only of these lines, so the model knows the omission was deliberate rather than an oversight.
+Not every conflict has useful history to offer — a brand-new file, an unrelated-histories merge, a side that only deleted the block, or a git query that timed out (2 seconds per hunk). Rather than sending nothing and pretending the history simply wasn't checked, GitWand says so explicitly on that side with a **"History unavailable: …"** line naming the reason, one of:
+
+- "no commit changed these lines since the merge base"
+- "the two sides share no merge base"
+- "this side removed these lines, and no commit since the merge base explains it"
+- "these lines could not be located in this side's version of the file"
+- "the commits of the operation could not be identified"
+- "git did not answer in time"
+- "git could not read this side's history"
+
+If neither side has usable history, the whole section still appears, made up only of these lines, so the model knows the omission was deliberate rather than an oversight.
 
 The [audit trail](#audit-trail)'s `LlmTrace` gains a `history` field summarising what was sent (commit count, estimated tokens, whether it was truncated, or why it's unavailable), and in the desktop app the `LlmTracePanel` above each `llm_proposed` hunk shows a one-line summary, for example "History: 4 commits (≈900 tokens), truncated" or "History: not sent" when the feature is disabled.
 
@@ -211,7 +223,7 @@ The LLM is wrong sometimes. GitWand assumes you will catch it before commit.
 
 ### Will my code be sent to Anthropic, OpenAI, or anyone else?
 
-Only if you pick one of those as your provider, and only the hunks that GitWand could not resolve with deterministic patterns. The payload is the conflict (base, ours, theirs) plus ±50 lines of surrounding context. No file paths outside the hunk, no other files in the repo, no Git history, no credentials. If you pick Ollama or self-hosted MCP, nothing leaves your machine.
+Only if you pick one of those as your provider, and only the hunks that GitWand could not resolve with deterministic patterns. The payload is the conflict (base, ours, theirs) plus ±50 lines of surrounding context. No file paths outside the hunk, no other files in the repo, no credentials. Since v3.11.1 it also includes, for each side, the messages (and, budget allowing, the range diffs) of the commits since the merge base that touched the conflicting lines — see [Commit history in the prompt](#commit-history-in-the-prompt-v3-11-1) to turn that off. If you pick Ollama or self-hosted MCP, nothing leaves your machine.
 
 ### How much does it cost?
 
