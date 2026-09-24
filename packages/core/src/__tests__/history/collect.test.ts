@@ -172,6 +172,26 @@ describe("collectHunkHistory — degraded cases", () => {
     expect(h.ours.commits.map((c) => c.subject)).toEqual(["ours: edit c"]);
   });
 
+  it("keeps the newest reformat commit, without its diff, when it is the side's only change", async () => {
+    repo = makeRepo();
+    repo.write("f.txt", lines("a", "b", "c", "d", "e"));
+    repo.git(["add", "."]);
+    repo.git(["commit", "-qm", "base"]);
+    repo.git(["switch", "-qc", "side"]);
+    repo.write("f.txt", lines("a", "b", "C-theirs", "d", "e"));
+    repo.git(["commit", "-qam", "theirs: edit c"]);
+    repo.git(["switch", "-q", "main"]);
+    repo.write("f.txt", lines("a", "b", "  c", "d", "e"));
+    repo.git(["commit", "-qam", "ours: reindent only"]);
+    repo.git(["merge", "side"], { allowFail: true });
+    const hunk = firstHunk(repo, "f.txt");
+    const h = await collectHunkHistory(repo.runner, { filePath: "f.txt", hunk, refs: refs(repo, "merge", "MERGE_HEAD") });
+    expect(h.ours.status).toBe("ok");
+    expect(h.ours.reason).toBeUndefined();
+    expect(h.ours.commits.map((c) => c.subject)).toEqual(["ours: reindent only"]);
+    expect(h.ours.commits[0].rangeDiff).toBe("");
+  });
+
   it("locate-failed when the block is not in the side's staged file", async () => {
     repo = makeRepo();
     mergeConflict(repo);

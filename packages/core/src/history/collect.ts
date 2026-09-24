@@ -112,8 +112,13 @@ async function sideHistory(
       "--no-merges", "-n", "5", `--format=${LOG_FORMAT}`,
     ]);
     if (r.exitCode !== 0) return unavailable("git-error");
-    const commits = parseLog(r.stdout).filter((c) => !isPureMove(c.rangeDiff));
-    return commits.length > 0 ? { status: "ok", commits } : unavailable("no-commits");
+    const all = parseLog(r.stdout);
+    if (all.length === 0) return unavailable("no-commits");
+    const commits = all.filter((c) => !isPureMove(c.rangeDiff));
+    if (commits.length > 0) return { status: "ok", commits };
+    // Only moves / re-indents touched these lines: saying "no commit changed
+    // them" would be false. Keep the newest one's message, drop its noise diff.
+    return { status: "ok", commits: [{ ...all[0], rangeDiff: "" }] };
   } catch (err) {
     return unavailable(reasonFor(err));
   }
