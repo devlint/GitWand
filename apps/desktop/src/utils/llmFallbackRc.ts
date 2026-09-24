@@ -44,3 +44,21 @@ export function parseLlmFallbackFromRc(rawRc: string): LlmFallbackConfig | null 
   if (history) cfg.history = history;
   return cfg;
 }
+
+/**
+ * v3.11.1 — Build the `llmFallback` block written back by the Settings panel.
+ *
+ * The panel edits only a handful of fields; everything else the user put in
+ * the block (`history` opt-out, `model`, `maxTokens`, `temperature`, …) must
+ * survive a save. The edited fields win; `endpoint` is never persisted.
+ */
+export function mergeLlmFallbackForSave<T extends object>(
+  existing: unknown,
+  edited: T,
+): Record<string, unknown> & T {
+  const base = existing && typeof existing === "object" && !Array.isArray(existing)
+    ? { ...(existing as Record<string, unknown>) }
+    : {};
+  delete base.endpoint;
+  return { ...base, ...edited };
+}

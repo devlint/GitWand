@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from "vue";
 import { clampHistoryBudget } from "@gitwand/core";
+import { mergeLlmFallbackForSave } from "../utils/llmFallbackRc";
 import { useI18n } from "../composables/useI18n";
 import type { LocaleKey } from "../locales/en";
 import { useTierStats } from "../composables/useTierStats";
@@ -1073,13 +1074,14 @@ async function saveLlmFallback() {
     // the llmFallback key. Endpoint is never persisted (cf. §1.0).
     const next = {
       ...llmFallbackRcCache.value,
-      llmFallback: {
+      // Keep the keys this panel does not edit (history opt-out, model, …).
+      llmFallback: mergeLlmFallbackForSave(llmFallbackRcCache.value.llmFallback, {
         enabled: llmFallback.value.enabled,
         provider: llmFallback.value.provider,
         minPostMergeScore: llmFallback.value.minPostMergeScore,
         contextLines: llmFallback.value.contextLines,
         minMode: llmFallback.value.minMode,
-      },
+      }),
     };
     await writeGitwandrc(props.cwd!, next);
     llmFallbackRcCache.value = next;
