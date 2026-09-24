@@ -124,6 +124,24 @@ async function sideHistory(
   }
 }
 
+/**
+ * Revert: stage :3 is R^'s file, but a `-L a,b:path R~1..R` range would be
+ * read against R's file, so the line numbers would not line up. The one
+ * commit that matters is R itself: send its message, with no range diff.
+ */
+async function revertedCommit(run: Run, filePath: string, revertedSha: string): Promise<SideHistory> {
+  try {
+    const r = await run([
+      "log", "--no-color", `${revertedSha}~1..${revertedSha}`, "--no-merges", "-n", "1", `--format=${LOG_FORMAT}`, "--", filePath,
+    ]);
+    if (r.exitCode !== 0) return unavailable("git-error");
+    const commits = parseLog(r.stdout).map((c) => ({ ...c, rangeDiff: "" }));
+    return commits.length > 0 ? { status: "ok", commits } : unavailable("no-commits");
+  } catch (err) {
+    return unavailable(reasonFor(err));
+  }
+}
+
 export async function collectHunkHistory(runGit: GitRunner, input: CollectInput): Promise<HunkHistory> {
   const { oursSha, theirsSha, operation } = input.refs;
   if (!oursSha || !theirsSha) return both("no-sha");
@@ -151,15 +169,17 @@ export async function collectHunkHistory(runGit: GitRunner, input: CollectInput)
   // (e.g. already `git add`ed), not that both sides deleted it.
   if (file.ours === null && file.theirs === null) return both("locate-failed", file.mergeBase);
 
-  // cherry-pick / revert merge against the parent of the applied commit, so
-  // theirs is exactly that one commit rather than its whole branch.
-  const theirsRange =
-    operation === "cherry-pick" || operation === "revert" ? `${theirsSha}~1..${theirsSha}` : `${file.mergeBase}..${theirsSha}`;
+  // cherry-pick merges against the parent of the picked commit, so theirs is
+  // exactly that one commit rather than its whole branch. Revert is handled
+  // by `revertedCommit`: its stage :3 is R^, which `-L` cannot align with R.
+  const theirsRange = operation === "cherry-pick" ? `${theirsSha}~1..${theirsSha}` : `${file.mergeBase}..${theirsSha}`;
   const oursRange = `${file.mergeBase}..${oursSha}`;
 
   const [ours, theirs] = await Promise.all([
     sideHistory(run, input.filePath, oursRange, file.ours, input.hunk.oursLines, input.hunk.startLine),
-    sideHistory(run, input.filePath, theirsRange, file.theirs, input.hunk.theirsLines, input.hunk.startLine),
+    operation === "revert"
+      ? revertedCommit(run, input.filePath, theirsSha)
+      : sideHistory(run, input.filePath, theirsRange, file.theirs, input.hunk.theirsLines, input.hunk.startLine),
   ]);
   return { mergeBase: file.mergeBase, ours, theirs };
 }

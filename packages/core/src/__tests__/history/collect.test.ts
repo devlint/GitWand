@@ -101,6 +101,30 @@ describe("collectHunkHistory — rebase and cherry-pick", () => {
   });
 });
 
+describe("collectHunkHistory — revert", () => {
+  it("theirs is exactly the reverted commit, even when it shifted the lines", async () => {
+    repo = makeRepo();
+    repo.write("f.txt", lines("a", "b", "c", "d", "e"));
+    repo.git(["add", "."]);
+    repo.git(["commit", "-qm", "base"]);
+    // R inserts two lines above and edits c: R^'s line numbers (stage :3)
+    // no longer match R's file.
+    repo.write("f.txt", lines("x", "y", "a", "b", "C1", "d", "e"));
+    repo.git(["commit", "-qam", "R: change c", "-m", "why R did it"]);
+    repo.write("f.txt", lines("x", "y", "a", "b", "C2", "d", "e"));
+    repo.git(["commit", "-qam", "later: change c again"]);
+    repo.git(["revert", "--no-edit", "HEAD~1"], { allowFail: true });
+    const hunk = firstHunk(repo, "f.txt");
+    expect(hunk.theirsLines).toEqual(["c"]);
+    const h = await collectHunkHistory(repo.runner, { filePath: "f.txt", hunk, refs: refs(repo, "revert", "REVERT_HEAD") });
+    expect(h.theirs.status).toBe("ok");
+    expect(h.theirs.reason).toBeUndefined();
+    expect(h.theirs.commits.map((c) => c.subject)).toEqual(["R: change c"]);
+    expect(h.theirs.commits[0].body).toBe("why R did it");
+    expect(h.theirs.commits[0].rangeDiff).toBe("");
+  });
+});
+
 describe("collectHunkHistory — degraded cases", () => {
   it("no-sha when a SHA is missing, without calling git", async () => {
     const never: GitRunner = () => { throw new Error("must not be called"); };
