@@ -21,8 +21,9 @@
  * this layer — the panel surfaces the data, the parent decides the action.
  */
 import { computed, ref } from "vue";
-import type { LlmTrace } from "@gitwand/core";
+import type { LlmTrace, HistoryUnavailableReason } from "@gitwand/core";
 import { useI18n } from "../composables/useI18n";
+import type { LocaleKey } from "../locales";
 
 const { t } = useI18n();
 
@@ -54,6 +55,37 @@ const emit = defineEmits<{
 }>();
 
 // ─── Derived values ────────────────────────────────────
+
+const REASON_KEY: Record<HistoryUnavailableReason, string> = {
+  "no-sha": "noSha",
+  "no-merge-base": "noMergeBase",
+  "side-deleted": "sideDeleted",
+  "locate-failed": "locateFailed",
+  "no-commits": "noCommits",
+  timeout: "timeout",
+  "git-error": "gitError",
+};
+
+/** v3.11.1 — One-line summary of the history that went into the prompt. */
+const historyLine = computed<string | null>(() => {
+  const h = props.trace.history;
+  if (!h) return null;
+  const base = "mergeEditor.llmResolution.history.";
+  switch (h.status) {
+    case "included":
+      return t(`${base}included` as LocaleKey, h.commitCount, h.estTokens);
+    case "truncated":
+      return t(`${base}truncated` as LocaleKey, h.commitCount, h.estTokens);
+    case "disabled":
+      return t(`${base}disabled` as LocaleKey);
+    case "unavailable": {
+      const reason = h.reasons[0];
+      const label = reason ? t(`${base}reasons.${REASON_KEY[reason]}` as LocaleKey) : "—";
+      return t(`${base}unavailable` as LocaleKey, label);
+    }
+  }
+  return null;
+});
 
 /** 0–100 score, clamped defensively in case the core ever emits an outlier. */
 const score = computed(() => {
@@ -201,6 +233,10 @@ function onReject() {
             {{ copyState === 'ok' ? '✓' : copyState === 'err' ? '!' : 'Copy' }}
           </button>
         </dd>
+      </div>
+      <div v-if="historyLine" class="llm-trace__audit-item" data-testid="llm-trace-history">
+        <dt>{{ t('mergeEditor.llmResolution.history.label') }}</dt>
+        <dd class="mono">{{ historyLine }}</dd>
       </div>
     </dl>
 

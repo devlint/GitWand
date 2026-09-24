@@ -79,3 +79,28 @@ describe("LlmTracePanel actions", () => {
     expect(onAccept).toHaveBeenCalledWith(3);
   });
 });
+
+describe("v3.11.1 — history line", () => {
+  const mountWithHistory = (history: unknown) =>
+    mount({ trace: { ...trace, history } });
+
+  it("shows commits and tokens when included", () => {
+    mountWithHistory({ status: "included", reasons: [], commitCount: 4, estTokens: 900 });
+    expect(container.textContent).toContain("4 commits (≈900 tokens)");
+  });
+
+  it("says truncated", () => {
+    mountWithHistory({ status: "truncated", reasons: [], commitCount: 2, estTokens: 1500 });
+    expect(container.textContent).toContain("truncated");
+  });
+
+  it("shows the reason when unavailable", () => {
+    mountWithHistory({ status: "unavailable", reasons: ["no-merge-base"], commitCount: 0, estTokens: 0 });
+    expect(container.textContent).toContain("unavailable (no merge base)");
+  });
+
+  it("renders nothing for pre-v3.11.1 traces", () => {
+    mount({});
+    expect(container.querySelector("[data-testid='llm-trace-history']")).toBeNull();
+  });
+});
