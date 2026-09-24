@@ -1287,6 +1287,14 @@ const fr: Locale = {
         formRulesPlaceholder: "Ex. : Se concentrer sur les correctifs de sécurité, regrouper par backend/frontend, utiliser le français...",
       },
     },
+    aiHistory: {
+      title: "Historique des conflits pour l'IA",
+      hint: "Montrer à l'IA pourquoi chaque côté a modifié les lignes en conflit.",
+      enabled: "Inclure l'historique des commits dans les prompts de conflit",
+      enabledHint: "Les messages et diffs des commits ayant modifié les lignes en conflit sont envoyés au fournisseur d'IA configuré. Un dépôt peut l'interdire dans .gitwandrc (llmFallback.history.enabled: false).",
+      budget: "Budget d'historique (tokens)",
+      budgetHint: "Plafond de l'historique ajouté à chaque prompt (200–8000). Les diffs sont retirés en premier, puis les corps de message.",
+    },
     reviewAi: {
       title: "Review AI",
       hint: "Passe IA locale et opt-in sur les diffs de PR — constats de pré-review + résumé.",
@@ -1978,6 +1986,22 @@ const fr: Locale = {
       accept: "Accepter",
       accepted: "Accepté",
       details: "Détails de la trace",
+      history: {
+        label: "Historique",
+        included: "{0} commits (≈{1} tokens)",
+        truncated: "{0} commits (≈{1} tokens), tronqué",
+        unavailable: "indisponible ({0})",
+        disabled: "non envoyé",
+        reasons: {
+          noSha: "commits de l'opération inconnus",
+          noMergeBase: "pas de merge-base",
+          sideDeleted: "un côté a supprimé ces lignes",
+          locateFailed: "lignes introuvables",
+          noCommits: "aucun commit depuis le merge-base",
+          timeout: "git n'a pas répondu à temps",
+          gitError: "erreur git",
+        },
+      },
     },
     tokenLevelMerge: {
       title: "Fusion fine proposée (ligne + token)",

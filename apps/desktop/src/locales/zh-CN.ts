@@ -1361,6 +1361,14 @@ const zhCN: Locale = {
         formRulesPlaceholder: "例如，关注安全修复，按前端/后端分组，使用中文...",
       },
     },
+    aiHistory: {
+      title: "供 AI 参考的冲突历史",
+      hint: "让 AI 了解每一方为何修改了冲突的行。",
+      enabled: "在 AI 冲突提示中包含提交历史",
+      enabledHint: "修改了冲突行的提交的消息和 diff 会发送给已配置的 AI 提供商。仓库可以在 .gitwandrc 中禁止此行为（llmFallback.history.enabled: false）。",
+      budget: "历史预算（token）",
+      budgetHint: "每个提示中附加历史的上限（200–8000）。先移除 diff，再移除提交消息正文。",
+    },
     reviewAi: {
       title: "Review AI",
       hint: "本地、可选启用的 AI 分析，针对 PR 差异 —— 预审查发现项 + 摘要。",
@@ -1977,6 +1985,22 @@ const zhCN: Locale = {
       accept: "接受",
       accepted: "已接受",
       details: "追踪详情",
+      history: {
+        label: "历史",
+        included: "{0} 个提交（≈{1} token）",
+        truncated: "{0} 个提交（≈{1} token），已截断",
+        unavailable: "不可用（{0}）",
+        disabled: "未发送",
+        reasons: {
+          noSha: "无法确定操作的提交",
+          noMergeBase: "没有合并基础",
+          sideDeleted: "一方删除了这些行",
+          locateFailed: "找不到这些行",
+          noCommits: "自合并基础以来没有提交",
+          timeout: "git 超时",
+          gitError: "git 错误",
+        },
+      },
     },
     tokenLevelMerge: {
       title: "提议的精细合并（行 + 词法单元）",

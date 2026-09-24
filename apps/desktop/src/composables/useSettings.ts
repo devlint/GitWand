@@ -162,6 +162,14 @@ export interface AppSettings {
   /** Ollama model name. */
   aiOllamaModel: string;
   /**
+   * v3.11.1 — Send the commits that changed the conflicting lines to the AI
+   * provider with every conflict prompt. `.gitwandrc` `llmFallback.history.enabled: false`
+   * overrides this to off for that repository.
+   */
+  aiHistoryEnabled: boolean;
+  /** v3.11.1 — Token budget for that history (200–8000). */
+  aiHistoryBudgetTokens: number;
+  /**
    * Review AI settings (E3, v3.6.0) — provider is inherited from the
    * existing `aiProvider`/`aiEnabled` fields above; these four control the
    * opt-in pre-review pass (C) and PR summary (D). All opt-in — false/off
@@ -470,6 +478,8 @@ export const defaultAppSettings: AppSettings = {
   aiModelByProvider: {},
   aiOllamaUrl: "http://localhost:11434",
   aiOllamaModel: "codellama",
+  aiHistoryEnabled: true,
+  aiHistoryBudgetTokens: 1500,
   reviewAiPreReview: false,
   reviewAiConfidenceThreshold: 60,
   reviewAiMaxFindings: 15,

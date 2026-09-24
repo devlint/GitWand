@@ -1278,6 +1278,14 @@ const es: Locale = {
         formRulesPlaceholder: "p. ej., Centrarse en correcciones de seguridad, agrupar por backend/frontend, usar español...",
       },
     },
+    aiHistory: {
+      title: "Historial de conflictos para la IA",
+      hint: "Mostrar a la IA por qué cada lado cambió las líneas en conflicto.",
+      enabled: "Incluir el historial de commits en los prompts de conflicto",
+      enabledHint: "Los mensajes y diffs de los commits que cambiaron las líneas en conflicto se envían al proveedor de IA configurado. Un repositorio puede prohibirlo en .gitwandrc (llmFallback.history.enabled: false).",
+      budget: "Presupuesto de historial (tokens)",
+      budgetHint: "Límite del historial añadido a cada prompt (200–8000). Primero se eliminan los diffs, luego los cuerpos de los mensajes.",
+    },
     reviewAi: {
       title: "Review AI",
       hint: "Pase de IA local y opt-in sobre los diffs de PR — hallazgos de pre-revisión + resumen.",
@@ -1968,6 +1976,22 @@ const es: Locale = {
       accept: "Aceptar",
       accepted: "Aceptado",
       details: "Detalles de la traza",
+      history: {
+        label: "Historial",
+        included: "{0} commits (≈{1} tokens)",
+        truncated: "{0} commits (≈{1} tokens), truncado",
+        unavailable: "no disponible ({0})",
+        disabled: "no enviado",
+        reasons: {
+          noSha: "commits de la operación desconocidos",
+          noMergeBase: "sin merge base",
+          sideDeleted: "un lado eliminó estas líneas",
+          locateFailed: "líneas no encontradas",
+          noCommits: "ningún commit desde el merge base",
+          timeout: "git no respondió a tiempo",
+          gitError: "error de git",
+        },
+      },
     },
     tokenLevelMerge: {
       title: "Fusión fina propuesta (línea + token)",

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from "vue";
+import { clampHistoryBudget } from "@gitwand/core";
 import { useI18n } from "../composables/useI18n";
 import type { LocaleKey } from "../locales/en";
 import { useTierStats } from "../composables/useTierStats";
@@ -157,6 +158,9 @@ interface Settings {
   aiModelByProvider: Partial<Record<AIProvider, string>>;
   aiOllamaUrl: string;
   aiOllamaModel: string;
+  // v3.11.1 — send commit history for the conflicting lines with AI prompts.
+  aiHistoryEnabled: boolean;
+  aiHistoryBudgetTokens: number;
   // Review AI (E3, v3.6.0) — opt-in pre-review pass + PR summary settings.
   reviewAiPreReview: boolean;
   reviewAiConfidenceThreshold: number;
@@ -272,6 +276,8 @@ const defaultSettings: Settings = {
   aiModelByProvider: {},
   aiOllamaUrl: "http://localhost:11434",
   aiOllamaModel: "codellama",
+  aiHistoryEnabled: true,
+  aiHistoryBudgetTokens: 1500,
   reviewAiPreReview: false,
   reviewAiConfidenceThreshold: 60,
   reviewAiMaxFindings: 15,
@@ -2773,6 +2779,35 @@ function deleteReleaseNoteTemplate(id: string) {
                   placeholder="codellama" />
               </div>
             </template>
+
+            <!-- ─── AI history (v3.11.1) ─────────────────── -->
+            <div class="sp-section-divider sp-section-divider--inner"></div>
+            <div class="sp-group">
+              <div class="sp-group__head">
+                <div class="sp-group__head-text">
+                  <span class="sp-group__label">{{ t('settings.aiHistory.title') }}</span>
+                  <span class="sp-group__sublabel">{{ t('settings.aiHistory.hint') }}</span>
+                </div>
+              </div>
+
+              <div class="sp-row sp-row--checkbox">
+                <label class="sp-checkbox-label" for="setting-ai-history-enabled">
+                  <input id="setting-ai-history-enabled" type="checkbox" class="sp-checkbox"
+                    :checked="settings.aiHistoryEnabled"
+                    @change="updateSetting('aiHistoryEnabled', ($event.target as HTMLInputElement).checked)" />
+                  <span>{{ t('settings.aiHistory.enabled') }}</span>
+                </label>
+                <span class="sp-hint">{{ t('settings.aiHistory.enabledHint') }}</span>
+              </div>
+
+              <div v-if="settings.aiHistoryEnabled" class="sp-row">
+                <label class="sp-label" for="setting-ai-history-budget">{{ t('settings.aiHistory.budget') }}</label>
+                <input id="setting-ai-history-budget" class="sp-input mono" type="number" min="200" max="8000" step="100"
+                  :value="settings.aiHistoryBudgetTokens"
+                  @change="updateSetting('aiHistoryBudgetTokens', clampHistoryBudget(Number(($event.target as HTMLInputElement).value)))" />
+                <span class="sp-hint">{{ t('settings.aiHistory.budgetHint') }}</span>
+              </div>
+            </div>
 
             <!-- ─── Review AI (E3, v3.6.0) ─────────────────── -->
             <div class="sp-section-divider sp-section-divider--inner"></div>

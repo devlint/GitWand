@@ -1303,6 +1303,14 @@ const en = {
         formRulesPlaceholder: "e.g., Focus on security fixes, group by backend/frontend, use English...",
       },
     },
+    aiHistory: {
+      title: "Conflict history for AI",
+      hint: "Show the AI why each side changed the conflicting lines.",
+      enabled: "Include commit history in AI conflict prompts",
+      enabledHint: "The messages and diffs of the commits that changed the conflicting lines are sent to the configured AI provider. A repository can forbid this in .gitwandrc (llmFallback.history.enabled: false).",
+      budget: "History budget (tokens)",
+      budgetHint: "Upper bound on the history added to each prompt (200–8000). Diffs are dropped first, then message bodies.",
+    },
     reviewAi: {
       title: "Review AI",
       hint: "Local, opt-in AI pass over PR diffs — pre-review findings + summary.",
@@ -2002,6 +2010,22 @@ const en = {
       accept: "Accept",
       accepted: "Accepted",
       details: "Trace details",
+      history: {
+        label: "History",
+        included: "{0} commits (≈{1} tokens)",
+        truncated: "{0} commits (≈{1} tokens), truncated",
+        unavailable: "unavailable ({0})",
+        disabled: "not sent",
+        reasons: {
+          noSha: "operation commits unknown",
+          noMergeBase: "no merge base",
+          sideDeleted: "a side removed these lines",
+          locateFailed: "lines not found",
+          noCommits: "no commit since the merge base",
+          timeout: "git timed out",
+          gitError: "git error",
+        },
+      },
     },
     tokenLevelMerge: {
       title: "Fine-grained merge proposed (line + token)",
