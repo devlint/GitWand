@@ -33,6 +33,7 @@ import {
 
 import { c, printBanner, WAND } from "../ui.js";
 import { getConflictedFiles, detectMergeContext } from "../git.js";
+import { makeCliGitRunner } from "../git-runner.js";
 import { parseConcurrency, runPool } from "../concurrency.js";
 import { buildPartialContent } from "../partial-content.js";
 import { buildCIReport } from "../reporting.js";
@@ -245,6 +246,7 @@ export async function cmdResolve(
           resolveGeneratedFiles,
           minConfidenceScore,
           mergeContext,
+          gitRunner: makeCliGitRunner(),
           conventions,
           llmFallback: {
             ...buildResolveLlmOptions(llmCliConfig, llmFileConfig),

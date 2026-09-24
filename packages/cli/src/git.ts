@@ -81,6 +81,8 @@ export function detectMergeContext(cwd: string = process.cwd()): MergeContext | 
       targetSide: "ours",
       oursRef: revName(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]),
       theirsRef: revName(cwd, ["name-rev", "--name-only", "--refs=refs/heads/*", "--refs=refs/remotes/*", "MERGE_HEAD"]),
+      oursSha: revName(cwd, ["rev-parse", "HEAD"]),
+      theirsSha: revName(cwd, ["rev-parse", "MERGE_HEAD"]),
     };
   }
 
@@ -93,6 +95,8 @@ export function detectMergeContext(cwd: string = process.cwd()): MergeContext | 
       targetSide: "ours",
       oursRef: revName(cwd, ["name-rev", "--name-only", "--refs=refs/heads/*", "--refs=refs/remotes/*", "HEAD"]),
       theirsRef: readRefFile(join(dir, rebaseDir, "head-name")),
+      oursSha: revName(cwd, ["rev-parse", "HEAD"]),
+      theirsSha: revName(cwd, ["rev-parse", "REBASE_HEAD"]),
     };
   }
 
@@ -101,6 +105,8 @@ export function detectMergeContext(cwd: string = process.cwd()): MergeContext | 
       operation: "cherry-pick",
       targetSide: "ours",
       oursRef: revName(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]),
+      oursSha: revName(cwd, ["rev-parse", "HEAD"]),
+      theirsSha: revName(cwd, ["rev-parse", "CHERRY_PICK_HEAD"]),
     };
   }
 
@@ -109,6 +115,8 @@ export function detectMergeContext(cwd: string = process.cwd()): MergeContext | 
       operation: "revert",
       targetSide: "ours",
       oursRef: revName(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]),
+      oursSha: revName(cwd, ["rev-parse", "HEAD"]),
+      theirsSha: revName(cwd, ["rev-parse", "REVERT_HEAD"]),
     };
   }
 

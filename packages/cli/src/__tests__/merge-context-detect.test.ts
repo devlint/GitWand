@@ -94,6 +94,14 @@ describe("detectMergeContext", () => {
     expect(ctx?.theirsRef).toContain("feature");
   });
 
+  it("v3.11.1 — carries the HEAD and MERGE_HEAD SHAs", IT_TIMEOUT, () => {
+    makeDivergence(repo);
+    try { git(repo, ["merge", "feature"]); } catch { /* conflit attendu */ }
+    const ctx = detectMergeContext(repo);
+    expect(ctx?.oursSha).toBe(git(repo, ["rev-parse", "HEAD"]).trim());
+    expect(ctx?.theirsSha).toBe(git(repo, ["rev-parse", "MERGE_HEAD"]).trim());
+  });
+
   it("detects a rebase in progress, ours = the branch rebased onto", IT_TIMEOUT, () => {
     makeDivergence(repo);
     git(repo, ["checkout", "feature"]);
@@ -106,6 +114,15 @@ describe("detectMergeContext", () => {
     expect(ctx?.theirsRef).toContain("feature");
   });
 
+  it("v3.11.1 — carries the HEAD and REBASE_HEAD SHAs", IT_TIMEOUT, () => {
+    makeDivergence(repo);
+    git(repo, ["checkout", "feature"]);
+    try { git(repo, ["rebase", "main"]); } catch { /* conflit attendu */ }
+    const ctx = detectMergeContext(repo);
+    expect(ctx?.oursSha).toBe(git(repo, ["rev-parse", "HEAD"]).trim());
+    expect(ctx?.theirsSha).toBe(git(repo, ["rev-parse", "REBASE_HEAD"]).trim());
+  });
+
   it("detects a cherry-pick in progress", IT_TIMEOUT, () => {
     makeDivergence(repo);
     const sha = git(repo, ["rev-parse", "feature"]).trim();
@@ -114,6 +131,15 @@ describe("detectMergeContext", () => {
     expect(ctx?.operation).toBe("cherry-pick");
     expect(ctx?.targetSide).toBe("ours");
     expect(ctx?.oursRef).toBe("main");
+  });
+
+  it("v3.11.1 — carries the HEAD and CHERRY_PICK_HEAD SHAs", IT_TIMEOUT, () => {
+    makeDivergence(repo);
+    const sha = git(repo, ["rev-parse", "feature"]).trim();
+    try { git(repo, ["cherry-pick", sha]); } catch { /* conflit attendu */ }
+    const ctx = detectMergeContext(repo);
+    expect(ctx?.oursSha).toBe(git(repo, ["rev-parse", "HEAD"]).trim());
+    expect(ctx?.theirsSha).toBe(git(repo, ["rev-parse", "CHERRY_PICK_HEAD"]).trim());
   });
 
   it("works from a linked worktree (.git is a file)", IT_TIMEOUT, () => {

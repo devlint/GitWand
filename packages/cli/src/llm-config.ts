@@ -16,6 +16,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   parseGitwandrc,
+  DEFAULT_HISTORY_CONFIG,
   type GitWandrcConfig,
   type LlmFallbackConfig,
 } from "@gitwand/core";
@@ -213,6 +214,9 @@ export function buildResolveLlmOptions(
   if (fileConfig?.contextLines !== undefined) out.contextLines = fileConfig.contextLines;
   if (fileConfig?.minPostMergeScore !== undefined) out.minPostMergeScore = fileConfig.minPostMergeScore;
   if (fileConfig?.minMode !== undefined) out.minMode = fileConfig.minMode;
+
+  // v3.11.1 — history-aware prompts: on by default, `.gitwandrc` may turn off / resize.
+  out.history = { ...DEFAULT_HISTORY_CONFIG, ...(fileConfig?.history ?? {}) };
 
   return out;
 }
