@@ -19,10 +19,19 @@
  * `DataCloneError` on it). Callers must strip `endpoint` out of `options` and
  * pass `Comlink.proxy(endpoint)` as its own top-level `endpointProxy`
  * argument instead; `resolveAsync` below splices it back into the options
- * shape `@gitwand/core` expects before delegating.
+ * shape `@gitwand/core` expects before delegating. The git runner used for
+ * history-aware LLM prompts (v3.11.1) crosses the same boundary the same
+ * way, as its own top-level `gitRunnerProxy` argument.
  */
 import * as Comlink from "comlink";
-import { resolve, resolveAsync, parseConflictMarkers, type GitWandOptions, type LlmEndpoint } from "@gitwand/core";
+import {
+  resolve,
+  resolveAsync,
+  parseConflictMarkers,
+  type GitRunner,
+  type GitWandOptions,
+  type LlmEndpoint,
+} from "@gitwand/core";
 
 /**
  * Release a Comlink proxy received as an RPC argument, if it is one.
@@ -63,6 +72,7 @@ const api = {
     filePath: string,
     options?: GitWandOptions,
     endpointProxy?: LlmEndpoint,
+    gitRunnerProxy?: GitRunner,
   ) {
     const opts = endpointProxy
       ? {
@@ -70,8 +80,9 @@ const api = {
           llmFallback: { ...(options?.llmFallback ?? { enabled: false }), endpoint: endpointProxy },
         }
       : options;
+    const withRunner = gitRunnerProxy ? { ...opts, gitRunner: gitRunnerProxy } : opts;
     try {
-      return await resolveAsync(content, filePath, opts, structuralOpts);
+      return await resolveAsync(content, filePath, withRunner, structuralOpts);
     } finally {
       // Comlink's proxy transfer handler builds a *fresh* `MessageChannel`
       // every time a `Comlink.proxy()`-marked value is serialized, once per
@@ -83,6 +94,7 @@ const api = {
       // port. Safe to do unconditionally after the call: the proxy is
       // per-call, so nothing else can still be holding it.
       releaseProxy(endpointProxy);
+      releaseProxy(gitRunnerProxy);
     }
   },
   parseConflictMarkers(content: string) {

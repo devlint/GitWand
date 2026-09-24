@@ -69,6 +69,31 @@ describe("coreEngine facade", () => {
   });
 });
 
+describe("v3.11.1 — gitRunner reaches the core", () => {
+  it("passes the 5th argument as options.gitRunner (in-thread facade)", async () => {
+    const { engine } = await import("../coreEngine");
+    const core = await engine();
+    const calls: string[][] = [];
+    const runner = async (args: string[]) => { calls.push(args); return { stdout: "", exitCode: 1 }; };
+    const prompts: string[] = [];
+    const endpoint = { async call(p: string) { prompts.push(p); return "CANNOT_RESOLVE"; } };
+    // No diff3 base section (real git's default 2-way marker style): with a
+    // base present, the exact same "warn/info/debug" + "xml/text/json" values
+    // coincidentally satisfy the unrelated refactoring_aware_merge pattern's
+    // bijective-substitution heuristic (requires "diff3"), which auto-resolves
+    // the hunk before it ever reaches llm_proposed and the git runner never
+    // fires. See packages/core/src/patterns/refactoring-aware-merge.ts.
+    const content = "start\n<<<<<<< ours\nlevel = warn\nformat = xml\n=======\nlevel = debug\nformat = json\n>>>>>>> theirs\nend\n";
+    await core.resolveAsync(
+      content, "cfg.txt",
+      { validationLevel: "off", llmFallback: { enabled: true }, mergeContext: { operation: "merge", targetSide: "ours", oursSha: "a".repeat(40), theirsSha: "b".repeat(40) } },
+      endpoint, runner,
+    );
+    expect(calls[0]).toEqual(["merge-base", "a".repeat(40), "b".repeat(40)]);
+    expect(prompts[0]).toContain("History unavailable");
+  });
+});
+
 describe("coreEngine worker handshake", () => {
   afterEach(() => {
     vi.useRealTimers();

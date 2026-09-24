@@ -28,6 +28,8 @@ import { applyMemory, isGeneralizableStrategy, type ResolutionMemoryEntry } from
 import { useTierStats } from "./useTierStats";
 import { createSemaphore } from "../utils/concurrentMap";
 import { parseLlmFallbackFromRc } from "../utils/llmFallbackRc";
+import { makeGitRunner, readHeadSha, effectiveHistoryConfig } from "./useConflictHistory";
+import { loadSettings } from "./useSettings";
 
 /**
  * Reads the index via `git show` ×3 + runs `git merge-file` per call — up to 4
@@ -614,6 +616,9 @@ export function useGitWand() {
           operation,
           targetSide: "ours",
           theirsRef: (operation === "rebase" ? st.targetBranch : null) ?? undefined,
+          // v3.11.1 — SHAs for the history-aware LLM prompt; used for `git log`, never to decide.
+          oursSha: await readHeadSha(cwd),
+          theirsSha: st.operationHead ?? undefined,
         };
       }
     } catch {
@@ -637,8 +642,10 @@ export function useGitWand() {
     // still reactive Proxies when read through the parent Proxy's getter, so
     // the unwrap has to happen on the source (`toRaw(resolveOptions.value)`)
     // before spreading, not after.
+    // v3.11.1 — `.gitwandrc` `history.enabled: false` wins; otherwise app settings.
+    const historyCfg = effectiveHistoryConfig(loadSettings(), llmCfg?.history);
     const resolveOptionsWithLlm: GitWandOptions = (llmCfg?.enabled && aiEndpoint)
-      ? { ...toRaw(resolveOptions.value), mergeContext, llmFallback: { ...llmCfg } }
+      ? { ...toRaw(resolveOptions.value), mergeContext, llmFallback: { ...llmCfg, history: historyCfg } }
       : { ...toRaw(resolveOptions.value), mergeContext };
 
     // The LLM endpoint is a closure over useAIProvider, which reaches the AI
@@ -646,6 +653,12 @@ export function useGitWand() {
     // the worker as a Comlink proxy: the worker calls it, the call hops back
     // here, the answer hops forward. Never send it as plain data.
     const aiEndpointProxy = (llmCfg?.enabled && aiEndpoint) ? Comlink.proxy(aiEndpoint) : undefined;
+
+    // Same boundary rule as the endpoint: a live function crosses into the
+    // worker only as a top-level Comlink proxy, never nested in `options`.
+    const gitRunnerProxy = (llmCfg?.enabled && aiEndpoint && historyCfg.enabled)
+      ? Comlink.proxy(makeGitRunner(cwd))
+      : undefined;
 
     // Lazily load the engine once for this whole batch — memoized by
     // `engine()`, so the worker is only spun up on the very first conflict
@@ -669,7 +682,7 @@ export function useGitWand() {
           return {
             path: filePath,
             content: "",
-            result: await core.resolveAsync("", filePath, resolveOptionsWithLlm, aiEndpointProxy),
+            result: await core.resolveAsync("", filePath, resolveOptionsWithLlm, aiEndpointProxy, gitRunnerProxy),
             loadError: err?.message ?? String(err),
           };
         }
@@ -689,7 +702,7 @@ export function useGitWand() {
             // Tree conflicts render the dedicated panel, never hunks — produce a
             // trivial empty MergeResult instead of running the full resolver on
             // (possibly large) working-tree content. `content` above is kept for the preview.
-            result: await core.resolveAsync("", filePath, resolveOptionsWithLlm, aiEndpointProxy),
+            result: await core.resolveAsync("", filePath, resolveOptionsWithLlm, aiEndpointProxy, gitRunnerProxy),
             tree: { code: tc.code, hasOurs: tc.hasOurs, hasTheirs: tc.hasTheirs, hasBase: tc.hasBase },
           };
         }
@@ -713,7 +726,7 @@ export function useGitWand() {
         if (needsBaseRecovery) {
           try {
             const rec = await reconstructLimiter.run(() => reconstructConflict(cwd, filePath));
-            const enrichedResult = await core.resolveAsync(rec.content, filePath, resolveOptionsWithLlm, aiEndpointProxy);
+            const enrichedResult = await core.resolveAsync(rec.content, filePath, resolveOptionsWithLlm, aiEndpointProxy, gitRunnerProxy);
             const sameOursTheirs =
               enrichedResult.hunks.length === rawConflicts.length &&
               enrichedResult.hunks.every((h, i) =>
@@ -734,7 +747,7 @@ export function useGitWand() {
           } catch { /* no recoverable stage (e.g. add/add) → fall through to plain result */ }
         }
 
-        const result = await core.resolveAsync(content, filePath, resolveOptionsWithLlm, aiEndpointProxy);
+        const result = await core.resolveAsync(content, filePath, resolveOptionsWithLlm, aiEndpointProxy, gitRunnerProxy);
         // Unmerged file with no parseable markers → reconstruct the 3-way from the index.
         if (result.stats.totalConflicts === 0) {
           try {
@@ -745,7 +758,7 @@ export function useGitWand() {
                 return {
                   path: filePath,
                   content: rec.content,
-                  result: await core.resolveAsync(rec.content, filePath, resolveOptionsWithLlm, aiEndpointProxy),
+                  result: await core.resolveAsync(rec.content, filePath, resolveOptionsWithLlm, aiEndpointProxy, gitRunnerProxy),
                   reconstructed: true,
                 };
               }

@@ -19,10 +19,12 @@
  * RPC argument, not on a property nested inside `options` — see
  * `../workers/coreEngine.worker.ts` for the full rationale. Callers must
  * build `options` without a live `llmFallback.endpoint` and pass
- * `Comlink.proxy(endpoint)` here instead.
+ * `Comlink.proxy(endpoint)` here instead. The git runner used for
+ * history-aware LLM prompts (v3.11.1) crosses the same boundary the same
+ * way, as its own top-level `Comlink.proxy()` argument, `gitRunnerProxy`.
  */
 import * as Comlink from "comlink";
-import type { GitWandOptions, LlmEndpoint, MergeResult } from "@gitwand/core";
+import type { GitRunner, GitWandOptions, LlmEndpoint, MergeResult } from "@gitwand/core";
 import type { CoreEngineWorkerApi } from "../workers/coreEngine.worker";
 
 export interface CoreEngineFacade {
@@ -32,6 +34,7 @@ export interface CoreEngineFacade {
     filePath: string,
     options?: GitWandOptions,
     endpointProxy?: LlmEndpoint,
+    gitRunnerProxy?: GitRunner,
   ): Promise<MergeResult>;
   parseConflictMarkers(
     content: string,
@@ -58,10 +61,12 @@ async function inThreadFacade(): Promise<CoreEngineFacade> {
     async resolve(content, filePath, options) {
       return core.resolve(content, filePath, options as never);
     },
-    async resolveAsync(content, filePath, options, endpointProxy) {
-      const opts = endpointProxy
-        ? { ...options, llmFallback: { ...(options?.llmFallback ?? { enabled: false }), endpoint: endpointProxy } }
-        : options;
+    async resolveAsync(content, filePath, options, endpointProxy, gitRunnerProxy) {
+      let opts: GitWandOptions | undefined = options;
+      if (endpointProxy) {
+        opts = { ...opts, llmFallback: { ...(opts?.llmFallback ?? { enabled: false }), endpoint: endpointProxy } };
+      }
+      if (gitRunnerProxy) opts = { ...opts, gitRunner: gitRunnerProxy };
       return core.resolveAsync(content, filePath, opts as never, structuralOpts);
     },
     async parseConflictMarkers(content) {
