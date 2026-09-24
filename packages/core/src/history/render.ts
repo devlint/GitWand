@@ -63,11 +63,20 @@ interface SideModel {
   items: Item[];
 }
 
+/** A backtick fence longer than any backtick run in `text` (at least 3), so the content cannot close it. */
+function fenceFor(text: string): string {
+  const longest = Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length));
+  return "`".repeat(Math.max(3, longest + 1));
+}
+
 function renderCommit(item: Item): string {
   const { commit } = item;
   let out = `- ${commit.sha.slice(0, 7)} ${commit.date} ${commit.author}: ${commit.subject}`;
   if (item.body && commit.body) out += "\n" + commit.body.split("\n").map((l) => `  ${l}`).join("\n");
-  if (item.diff && commit.rangeDiff) out += "\n  ```diff\n" + commit.rangeDiff.split("\n").map((l) => `  ${l}`).join("\n") + "\n  ```";
+  if (item.diff && commit.rangeDiff) {
+    const fence = fenceFor(commit.rangeDiff);
+    out += `\n  ${fence}diff\n` + commit.rangeDiff.split("\n").map((l) => `  ${l}`).join("\n") + `\n  ${fence}`;
+  }
   return out;
 }
 

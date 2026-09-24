@@ -93,4 +93,18 @@ describe("renderHistorySection", () => {
     expect(stats.status).toBe("included");
     expect(stats.reasons).toEqual(["side-deleted", "no-commits"]);
   });
+
+  it("picks a diff fence longer than any backtick run in the diff", () => {
+    const md = "@@ -1,3 +1,3 @@\n ```js\n-old\n+new\n ```";
+    const h: HunkHistory = {
+      mergeBase: "f".repeat(40),
+      ours: { status: "ok", commits: [c(1, { rangeDiff: md })] },
+      theirs: { status: "ok", commits: [c(3, { rangeDiff: "@@ -1 +1 @@\n-a\n+b" })] },
+    };
+    const { text } = renderHistorySection(h, 8000);
+    expect(text).toContain("  ````diff\n");
+    expect(text).toContain("\n  ````\n");
+    // A diff without backticks keeps the usual three.
+    expect(text).toContain("  ```diff\n  @@ -1 +1 @@");
+  });
 });
