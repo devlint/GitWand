@@ -56,7 +56,7 @@ function setLocale(code: Locale) {
 }
 
 // ── Smart download URL (OS detection) ─────────────────────────────────────
-const LATEST = '3.11.0'
+const LATEST = '3.11.1'
 const RELEASES = 'https://github.com/devlint/GitWand/releases'
 
 // SSR-safe: start with the generic releases page, then switch to the
@@ -145,7 +145,7 @@ const i18n: Record<Locale, any> = {
     mcRow3: "Natif (sans Electron)",
     mcRow4: "Serveur MCP pour agents",
     agentsCta: "Découvrir IA & agents →",
-    heroAnnounce: "Nouveau dans la v3.11 — le Prédicteur de conflits applique vraiment le merge, et s'arrête sur ce qui vous revient",
+    heroAnnounce: "Nouveau dans la v3.11 — l'IA sait enfin pourquoi chaque côté a modifié le code en conflit",
     heroPoint1: "8 patterns déterministes — zéro pari sur ton code",
     heroPoint2: "100 % local — ton code ne quitte jamais ta machine",
     heroPoint3: "Un seul moteur — Desktop, CLI, VS Code & agents IA",
@@ -245,7 +245,7 @@ const i18n: Record<Locale, any> = {
     mcRow3: "Native (no Electron)",
     mcRow4: "MCP server for agents",
     agentsCta: "Explore AI & agents →",
-    heroAnnounce: "New in v3.11 — the Conflict Predictor runs the merge for real, and stops on what needs you",
+    heroAnnounce: "New in v3.11 — the AI now knows why each side changed the conflicting code",
     heroPoint1: "8 deterministic patterns — zero gambling with your code",
     heroPoint2: "100% local — your code never leaves your machine",
     heroPoint3: "One engine — Desktop, CLI, VS Code & AI agents",
@@ -345,7 +345,7 @@ const i18n: Record<Locale, any> = {
     mcRow3: "Nativo (sin Electron)",
     mcRow4: "Servidor MCP para agentes",
     agentsCta: "Explorar IA y agentes →",
-    heroAnnounce: "Nuevo en la v3.11 — el Predictor de conflictos hace el merge de verdad y se detiene en lo que te toca",
+    heroAnnounce: "Nuevo en la v3.11 — la IA ya sabe por qué cada lado cambió el código en conflicto",
     heroPoint1: "8 patrones deterministas — cero apuestas con tu código",
     heroPoint2: "100 % local — tu código nunca sale de tu máquina",
     heroPoint3: "Un solo motor — Desktop, CLI, VS Code y agentes de IA",
@@ -445,7 +445,7 @@ const i18n: Record<Locale, any> = {
     mcRow3: "Nativo (sem Electron)",
     mcRow4: "Servidor MCP para agentes",
     agentsCta: "Explorar IA e agentes →",
-    heroAnnounce: "Novidade na v3.11 — o Preditor de conflitos faz o merge de verdade e para no que depende de você",
+    heroAnnounce: "Novidade na v3.11 — a IA agora sabe por que cada lado alterou o código em conflito",
     heroPoint1: "8 padrões deterministas — zero aposta com seu código",
     heroPoint2: "100 % local — seu código nunca sai da sua máquina",
     heroPoint3: "Um único motor — Desktop, CLI, VS Code e agentes de IA",
@@ -545,7 +545,7 @@ const i18n: Record<Locale, any> = {
     mcRow3: "原生（无 Electron）",
     mcRow4: "面向代理的 MCP 服务器",
     agentsCta: "探索 AI 与代理 →",
-    heroAnnounce: "v3.11 新功能 — 冲突预测器真正执行合并，并在需要你决定的地方停下",
+    heroAnnounce: "v3.11 新功能 — AI 现在知道每一方为何修改了冲突代码",
     heroPoint1: "8 种确定性模式 — 绝不拿你的代码赌运气",
     heroPoint2: "100% 本地运行 — 代码永不离开你的机器",
     heroPoint3: "一个引擎 — 桌面端、CLI、VS Code 与 AI 代理",

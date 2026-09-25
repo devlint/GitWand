@@ -7,8 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.11.1] - 2026-09-25
+
 ### Added
-- History-aware LLM prompts: `llm_proposed` and "Resolve with AI" now include, for each side, the commits since the merge base that changed the conflicting lines (messages, and range diffs within a token budget). Enabled by default; `llmFallback.history` in `.gitwandrc` (`enabled`, `budgetTokens` 200–8000) or Settings → AI to change it. `enabled: false` in `.gitwandrc` wins, so a repository can forbid sending its history to an AI provider. The LLM trace shows what history was sent.
+- **History-aware LLM prompts.** When a conflict goes to a model, through the `llm_proposed` fallback or through "Resolve with AI", the prompt now says *why* each side changed the conflicting lines. For each side, it carries the commits since the merge base that touched those lines: their messages always, and their diffs limited to the conflicting range while a token budget allows. Before this, the model only ever saw the hunk.
+  - **Local, and lazy.** The algorithm lives in `@gitwand/core`, which stays browser-safe: the host injects a `GitRunner` (`gitExec` on the desktop, `execFile` in the CLI). Git is queried only for the hunks actually sent to a model, with a 2-second budget per hunk. History can make a prompt poorer, but it never makes a resolution fail.
+  - **Budgeted.** The default budget is 1 500 tokens, adjustable from 200 to 8 000. When the budget is exceeded, the diffs are dropped first, then the message bodies, then the oldest commits. The newest commit's subject on each side is always kept.
+  - **Explicit when useless.** The prompt says why history is missing instead of silently leaving it out: no merge base, a side that removed the lines, a timeout, and so on. Cherry-picks and reverts use only the applied commit on the theirs side. A side that only reformatted the lines shows its reformat commit instead of claiming that no commit touched them.
+  - **An opt-out a repository can enforce.** History is enabled by default, and can be turned off in Settings → AI or with `llmFallback.history` in `.gitwandrc`. `enabled: false` in `.gitwandrc` wins over the app setting on both desktop paths, so a repository can forbid sending its history to an AI provider. The LLM trace panel shows what was sent ("History: 2 commits (≈150 tokens)", or "not sent").
+- The CLI passes the operation's SHAs (`HEAD` and `MERGE_HEAD` / `REBASE_HEAD` / `CHERRY_PICK_HEAD` / `REVERT_HEAD`) and runs its history queries from the repository root. Variables that look like secrets (`*_API_KEY`, `*_TOKEN`, `*_SECRET`, `*_PASSWORD`) are stripped from the environment before git is spawned.
+
+### Fixed
+- **The merge editor never received the repository path.** `App.vue` did not bind `MergeEditor`'s optional `cwd` prop, so everything that reads it turned itself off without an error: custom automations and resolution-memory apply, as well as the new history section of "Resolve with AI". A source-level test now pins that call site, because an optional prop type-checks when it is forgotten.
+- Saving the LLM-fallback section of Settings rewrote `llmFallback` in `.gitwandrc` from the fields it edits, and dropped the rest: `model`, `maxTokens`, `temperature` and, now, a repository's `history` opt-out. Unknown keys are kept.
 
 ## [3.11.0] - 2026-09-21
 
@@ -1542,6 +1553,7 @@ Design-system foundations — the app header and every overlay now ride on a sha
 - 28 tests covering all patterns + real-world scenarios (package.json, Laravel routes, Vue SFC, CSS, .env files)
 
 [Unreleased]: https://github.com/devlint/GitWand/compare/v3.10.1...HEAD
+[3.11.1]: https://github.com/devlint/GitWand/compare/v3.11.0...v3.11.1
 [3.11.0]: https://github.com/devlint/GitWand/compare/v3.10.1...v3.11.0
 [3.10.1]: https://github.com/devlint/GitWand/compare/v3.10.0...v3.10.1
 [3.10.0]: https://github.com/devlint/GitWand/compare/v3.9.1...v3.10.0

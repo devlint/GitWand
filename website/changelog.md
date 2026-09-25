@@ -5,6 +5,30 @@ description: Release history for GitWand — the native Git client with AI confl
 
 # Changelog
 
+## v3.11.1 — September 2026
+
+### The model now knows why each side changed the code
+
+When GitWand can't resolve a conflict on its own and hands it to a model, whether automatically or when you click "Resolve with AI", the model used to get the hunk and a few lines of surrounding context. It saw what each side had written, never why. The prompt now answers that question. For each side, it lists the commits since the merge base that touched the conflicting lines: the messages always, and the diffs narrowed to those lines while the budget allows. A conflict between a rename and a bug fix reads very differently once the model knows which is which.
+
+All of it is computed locally, and only for the hunks that actually go to a model, so a conflict resolved deterministically costs nothing. Each hunk has a two-second budget. History can make a prompt poorer, but it can never make a resolution fail.
+
+### A budget, and honesty when there is nothing to say
+
+History is capped at 1,500 tokens by default, adjustable between 200 and 8,000. When a prompt is over the budget, the diffs go first, then the message bodies, then the oldest commits. The newest commit's subject on each side always stays.
+
+When there is no history worth sending, the prompt says so instead of leaving a silent gap. That covers two branches with no common ancestor, a side that simply deleted the lines, and git taking too long. The model learns that the absence is information. Cherry-picks and reverts use only the commit being applied. A side that only reformatted the lines shows its reformat commit, rather than claiming that nobody touched them.
+
+### Your repository decides what leaves the machine
+
+Commit messages and diffs are sent to whichever AI provider you have configured, so the feature can be turned off in Settings → AI. A repository can also turn it off for everyone, with `"history": { "enabled": false }` under `llmFallback` in its `.gitwandrc`. That setting wins over any individual preference. The LLM trace panel shows what was sent with each prompt, or that nothing was.
+
+### Two quiet bugs, found on the way
+
+Manual testing turned up the kind of bug that no error message ever reveals. The merge editor was never told which repository it was in. So everything that needed that information turned itself off without complaint: custom automations, applying a remembered resolution, and the new history of "Resolve with AI". All three work again, and a test now guards that one line.
+
+Saving the LLM-fallback settings was also rewriting that section of `.gitwandrc` from scratch, dropping whatever it didn't edit. Your model choice, and now a repository's history opt-out, survive a save.
+
 ## v3.11.0 — September 2026
 
 ### The Conflict Predictor now does the merge
