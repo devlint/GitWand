@@ -1,32 +1,172 @@
-/* ──────────────────────────────────────────────────────────
-   GitWand — VitePress theme overrides
-   Brand palette: purple #7C3AED · green #10B981
-   ────────────────────────────────────────────────────────── */
+/* ══════════════════════════════════════════════════════════════
+   GitWand — thème « Nocturne »
+   Source de vérité des tokens pour tout le site (landing, pages
+   marketing, docs, blog). Les composants n'ont plus le droit de
+   redéfinir une couleur : ils aliasent ce qui est ici.
+   ══════════════════════════════════════════════════════════════ */
 
+/* ──────────────────────────────────────────────────────────────
+   1. Tokens
+   ────────────────────────────────────────────────────────────── */
 :root {
-  --vp-c-brand-1: #7C3AED;
-  --vp-c-brand-2: #8B5CF6;
-  --vp-c-brand-3: #6D28D9;
-  --vp-c-brand-soft: rgba(124, 58, 237, 0.1);
+  /* Fonds */
+  --nc-canvas:        #0d0f1a;  /* canevas des pages marketing */
+  --nc-bg:            #161826;  /* aplat de section */
+  --nc-surface:       #232532;  /* cartes, panneaux */
+
+  /* Texte */
+  --nc-text:          #e9e9ed;
+
+  /* Accent (violet) */
+  --nc-accent:        #9184d9;
+  --nc-accent-100:    #f5f4ff;
+  --nc-accent-200:    #e7e5fe;
+  --nc-accent-300:    #d2cefd;
+  --nc-accent-400:    #b5abfc;
+  --nc-accent-500:    #968ae0;
+  --nc-accent-600:    #796cbf;
+  --nc-accent-700:    #5d5294;
+  --nc-accent-800:    #423a6a;
+  --nc-accent-900:    #2b2741;
+
+  /* Neutres */
+  --nc-neutral-100:   #f3f5fe;
+  --nc-neutral-200:   #e4e7f5;
+  --nc-neutral-300:   #cfd3e5;
+  --nc-neutral-400:   #b2b6ca;
+  --nc-neutral-500:   #9397ab;
+  --nc-neutral-600:   #75798c;
+  --nc-neutral-700:   #595d6c;
+  --nc-neutral-800:   #3f424d;
+  --nc-neutral-900:   #292b31;
+
+  /* Bandes « section » (bleu nuit saturé) */
+  --nc-section:       #262a60;
+  --nc-section-glow:  #353b80;
+  --nc-section-ghost: #4c5397;
+
+  /* Sémantique produit — conservé du thème précédent, réaccordé */
+  --nc-settled:       #7fd6b0;  /* hunk réglé */
+  --nc-waiting:       #e8c37a;  /* hunk en attente */
+  --nc-danger:        #e58a9e;  /* conflit dur / absence */
+
+  /* Traits */
+  --nc-divider:       color-mix(in srgb, var(--nc-text) 16%, transparent);
+  --nc-rule:          rgba(255, 255, 255, 0.09);
+  --nc-rule-soft:     rgba(255, 255, 255, 0.05);
+
+  /* Typographie */
+  --nc-font-sans:     "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --nc-font-mono:     "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --nc-weight-title:  500;
+  --nc-track-title:   -0.032em;
+
+  /* Rayons */
+  --nc-radius-sm:     4px;
+  --nc-radius-md:     8px;
+  --nc-radius-lg:     14px;
+  --nc-radius-xl:     16px;
+
+  /* Ombres */
+  --nc-shadow-sm:     0 0 0 1px var(--nc-neutral-800);
+  --nc-shadow-md:     0 0 0 1px var(--nc-neutral-700), 0 6px 18px rgba(0, 0, 0, 0.55);
+  --nc-shadow-lg:     0 0 0 1px var(--nc-neutral-500), 0 16px 40px rgba(0, 0, 0, 0.65);
+  --nc-glow:          0 0 34px color-mix(in srgb, var(--nc-accent) 28%, transparent);
+  --nc-glow-soft:     0 0 40px color-mix(in srgb, var(--nc-accent) 16%, transparent);
+
+  /* Courbes */
+  --nc-ease:          cubic-bezier(0.22, 1, 0.36, 1);
+  --nc-ease-out:      cubic-bezier(0.2, 0.7, 0.2, 1);
+
+  /* Rythme vertical des sections marketing */
+  --nc-section-gap:   96px;
+  --nc-measure:       1200px;
+}
+
+/* ──────────────────────────────────────────────────────────────
+   2. Animations partagées
+   ────────────────────────────────────────────────────────────── */
+@keyframes nc-pulse    { 0%, 100% { opacity: .25 } 50% { opacity: 1 } }
+@keyframes nc-blink    { 0%, 49% { opacity: 1 } 50%, 100% { opacity: 0 } }
+@keyframes nc-sweep    { 0% { transform: translateX(-120%) } 100% { transform: translateX(320%) } }
+@keyframes nc-marquee  { 0% { transform: translateX(0) } 100% { transform: translateX(-50%) } }
+@keyframes nc-aurora-a { 0%, 100% { transform: translate3d(0,0,0) scale(1) }   50% { transform: translate3d(6%, 4%, 0) scale(1.15) } }
+@keyframes nc-aurora-b { 0%, 100% { transform: translate3d(0,0,0) scale(1.1) } 50% { transform: translate3d(-8%, 6%, 0) scale(1) } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* ──────────────────────────────────────────────────────────────
+   3. Raccordement au thème VitePress
+   ────────────────────────────────────────────────────────────── */
+:root {
+  --vp-font-family-base: var(--nc-font-sans);
+  --vp-font-family-mono: var(--nc-font-mono);
+
+  --vp-c-brand-1: #5d5294;
+  --vp-c-brand-2: #796cbf;
+  --vp-c-brand-3: #423a6a;
+  --vp-c-brand-soft: rgba(145, 132, 217, 0.12);
+
+  --vp-button-brand-bg: var(--nc-accent-700);
+  --vp-button-brand-hover-bg: var(--nc-accent-600);
+  --vp-button-brand-border: transparent;
 }
 
 .dark {
-  --vp-c-brand-1: #8B5CF6;
-  --vp-c-brand-2: #7C3AED;
-  --vp-c-brand-soft: rgba(139, 92, 246, 0.12);
+  --vp-c-brand-1: var(--nc-accent-300);
+  --vp-c-brand-2: var(--nc-accent-200);
+  --vp-c-brand-3: var(--nc-accent-500);
+  --vp-c-brand-soft: color-mix(in srgb, var(--nc-accent) 18%, transparent);
+
+  --vp-c-bg:         var(--nc-canvas);
+  --vp-c-bg-alt:     var(--nc-bg);
+  --vp-c-bg-soft:    var(--nc-surface);
+  --vp-c-bg-elv:     var(--nc-surface);
+
+  --vp-c-text-1:     var(--nc-neutral-100);
+  --vp-c-text-2:     var(--nc-neutral-400);
+  --vp-c-text-3:     var(--nc-neutral-600);
+
+  --vp-c-divider:    var(--nc-neutral-800);
+  --vp-c-border:     var(--nc-neutral-800);
+  --vp-c-gutter:     var(--nc-neutral-900);
+
+  --vp-code-block-bg: var(--nc-bg);
+  --vp-button-brand-bg: var(--nc-accent-800);
+  --vp-button-brand-hover-bg: var(--nc-accent-700);
 }
 
-/* ── Navbar logo sizing ── */
-.VPNavBarTitle .logo {
-  height: 26px;
-  width: auto;
+/* Titres : même graisse et même chasse que la landing */
+.vp-doc h1,
+.vp-doc h2,
+.vp-doc h3,
+.VPHero .name,
+.VPHero .text {
+  font-weight: var(--nc-weight-title);
+  letter-spacing: var(--nc-track-title);
 }
+.vp-doc h1 { font-size: clamp(30px, 3.4vw, 40px); line-height: 1.08; }
+.vp-doc h2 { border-top-color: var(--vp-c-divider); }
 
-/* ── Home + marketing pillar pages: full width, no container constraints ── */
+/* ── Navbar ── */
+.VPNavBarTitle .logo { height: 26px; width: auto; }
+.dark .VPNavBar,
+.dark .VPNavBar.has-sidebar .content-body {
+  background: color-mix(in srgb, var(--nc-canvas) 82%, transparent);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+.VPNavBarMenuLink { font-size: 13.5px; }
+
+/* ── Pages marketing : pleine largeur ── */
 .VPPage:has(.gw-landing),
-.VPPage:has(.gw-page) {
-  padding-top: 0;
-}
+.VPPage:has(.gw-page) { padding-top: 0; }
 .VPPage:has(.gw-landing) > .container,
 .VPPage:has(.gw-landing) .vp-doc,
 .VPPage:has(.gw-page) > .container,
@@ -36,16 +176,153 @@
   margin: 0 !important;
 }
 
-/* ── Doc pages ── */
-.vp-doc a {
-  color: var(--vp-c-brand-1);
-}
-.vp-doc a:hover {
-  color: var(--vp-c-brand-2);
-}
+/* ── Contenu docs / blog ── */
+.vp-doc a { color: var(--vp-c-brand-1); text-underline-offset: 3px; }
+.vp-doc a:hover { color: var(--vp-c-brand-2); }
 
-/* ── Code blocks ── */
 .vp-doc :not(pre) > code {
+  font-family: var(--nc-font-mono);
+  font-size: 0.86em;
   color: var(--vp-c-brand-1);
   background: var(--vp-c-brand-soft);
+  border-radius: var(--nc-radius-sm);
 }
+.vp-doc div[class*='language-'] {
+  border-radius: var(--nc-radius-lg);
+  border: 1px solid var(--vp-c-divider);
+}
+.dark .vp-doc div[class*='language-'] { box-shadow: var(--nc-shadow-sm); }
+
+.vp-doc table { border-radius: var(--nc-radius-lg); overflow: hidden; }
+.vp-doc th {
+  font-family: var(--nc-font-mono);
+  font-size: 12.5px;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.dark .vp-doc th { background: var(--nc-accent-900); color: var(--nc-accent-200); }
+
+.vp-doc blockquote {
+  border-left-color: var(--nc-accent-600);
+  border-radius: 0 var(--nc-radius-md) var(--nc-radius-md) 0;
+}
+.dark .vp-doc blockquote { background: color-mix(in srgb, var(--nc-accent) 7%, transparent); }
+
+.dark .custom-block { border-radius: var(--nc-radius-lg); }
+
+/* ── Sidebar & sommaire ── */
+.dark .VPSidebarItem.is-active > .item > .link > .text { color: var(--nc-accent-200); }
+.VPDocOutlineItem a.outline-link:hover,
+.VPDocOutlineItem a.outline-link.active { color: var(--vp-c-brand-1); }
+
+/* ── Boutons VitePress ── */
+.VPButton { border-radius: var(--nc-radius-md); font-weight: 500; }
+.dark .VPButton.brand {
+  color: var(--nc-accent-100);
+  border-color: var(--nc-accent-600);
+  box-shadow: 0 0 22px color-mix(in srgb, var(--nc-accent) 22%, transparent);
+}
+
+/* ──────────────────────────────────────────────────────────────
+   4. Primitives des pages marketing
+   ────────────────────────────────────────────────────────────── */
+
+/* Surlignage typographique : « le merge se termine SANS TOI » */
+.nc-shine {
+  background: linear-gradient(100deg, var(--nc-accent-200), var(--nc-accent-500));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Étiquette mono au-dessus d'un titre de section */
+.nc-eyebrow {
+  font-family: var(--nc-font-mono);
+  font-size: 11.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--nc-accent-300);
+}
+
+/* Décor de fond : orbes aurora + grille masquée */
+.nc-aurora {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(90px);
+  pointer-events: none;
+}
+.nc-aurora--accent {
+  background: radial-gradient(circle, var(--nc-accent-600) 0%, transparent 62%);
+  opacity: 0.5;
+  animation: nc-aurora-a 16s ease-in-out infinite;
+}
+.nc-aurora--section {
+  background: radial-gradient(circle, var(--nc-section-ghost) 0%, transparent 65%);
+  opacity: 0.55;
+  animation: nc-aurora-b 20s ease-in-out infinite;
+}
+.nc-grid {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--nc-text) 9%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--nc-text) 9%, transparent) 1px, transparent 1px);
+  background-size: 64px 64px;
+  mask-image: radial-gradient(74% 64% at 50% 0%, #000 0%, transparent 78%);
+  -webkit-mask-image: radial-gradient(74% 64% at 50% 0%, #000 0%, transparent 78%);
+}
+
+/* Apparition au défilement (posée par le composant via IntersectionObserver) */
+[data-reveal] { opacity: 0; transform: translateY(20px); }
+[data-reveal].is-revealed {
+  opacity: 1;
+  transform: none;
+  transition: opacity 620ms var(--nc-ease-out), transform 620ms var(--nc-ease-out);
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-reveal] { opacity: 1; transform: none; }
+}
+
+/* ──────────────────────────────────────────────────────────────
+   5. Chrome VitePress sur les pages marketing
+   La landing est toujours sombre. Plutôt que de repeindre chaque
+   sélecteur du thème — qui gagne souvent en spécificité — on
+   redéfinit ses variables sur le <body> de ces pages : la barre de
+   navigation, le pied de page et le reste suivent tout seuls.
+   ────────────────────────────────────────────────────────────── */
+body:has(.gw-landing),
+body:has(.gw-page) {
+  --vp-c-bg:      var(--nc-canvas);
+  --vp-c-bg-alt:  var(--nc-bg);
+  --vp-c-bg-soft: var(--nc-surface);
+  --vp-c-bg-elv:  var(--nc-surface);
+
+  --vp-c-text-1:  var(--nc-neutral-100);
+  --vp-c-text-2:  var(--nc-neutral-300);
+  --vp-c-text-3:  var(--nc-neutral-500);
+
+  --vp-c-divider: var(--nc-neutral-800);
+  --vp-c-border:  var(--nc-neutral-800);
+  --vp-c-gutter:  var(--nc-neutral-900);
+
+  --vp-c-brand-1: var(--nc-accent-300);
+  --vp-c-brand-2: var(--nc-accent-200);
+  --vp-c-brand-3: var(--nc-accent-500);
+
+  --vp-nav-bg-color: color-mix(in srgb, var(--nc-canvas) 82%, transparent);
+  --vp-c-bg-alpha-with-backdrop: color-mix(in srgb, var(--nc-canvas) 82%, transparent);
+
+  background: var(--nc-canvas);
+}
+
+body:has(.gw-landing) .VPNavBar,
+body:has(.gw-page) .VPNavBar {
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+body:has(.gw-landing) .VPNavBar .divider,
+body:has(.gw-page) .VPNavBar .divider { display: none; }
+body:has(.gw-landing) .VPNavBarTitle .title,
+body:has(.gw-page) .VPNavBarTitle .title { color: var(--nc-accent-100); }

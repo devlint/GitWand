@@ -90,9 +90,9 @@ function cc(v?: CV) { return v === true ? 'y' : v === 'partial' ? 'p' : v === 's
 
 <style scoped>
 .cmp-block{
-  --purple:#8B5CF6;--green:#10B981;
-  --bg:#0c0c1a;--border:rgba(124,58,237,0.18);--border-soft:rgba(255,255,255,0.08);
-  --text:#e2e8f0;--muted:#94a3b8;
+  --purple:var(--nc-accent-300);--green:var(--nc-settled);
+  --bg:var(--nc-canvas);--border:var(--nc-neutral-800);--border-soft:var(--nc-rule-soft);
+  --text:var(--nc-text);--muted:var(--nc-neutral-400);
   margin:24px 0;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
 }
 .cmp-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:12px;background:var(--bg);}
@@ -103,13 +103,13 @@ function cc(v?: CV) { return v === true ? 'y' : v === 'partial' ? 'p' : v === 's
 .cmp thead th.cmp-gw{color:var(--purple);}
 .cmp-feat{text-align:left;font-weight:500;color:var(--text);}
 .cmp-uniq{margin-left:8px;font-size:10px;color:var(--purple);border:1px solid var(--border);border-radius:6px;padding:1px 6px;white-space:nowrap;}
-.cmp-gw{background:rgba(124,58,237,0.09);}
+.cmp-gw{background:rgba(145, 132, 217,0.09);}
 .cmp-cat td{text-align:left;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:0.05em;color:var(--muted);background:rgba(255,255,255,0.02);padding-top:18px;}
 .cmp-note{display:block;text-transform:none;letter-spacing:0;font-weight:400;font-size:12px;color:var(--muted);margin-top:4px;}
-.cmp-hl{background:rgba(124,58,237,0.03);}
+.cmp-hl{background:rgba(145, 132, 217,0.03);}
 .c-y{color:var(--green);font-weight:700;}
 .c-n{color:var(--muted);opacity:0.45;}
-.c-p{color:#fbbf24;}
+.c-p{color:var(--nc-waiting);}
 .c-s{font-size:11px;color:var(--purple);}
 .cmp-legend{font-size:12.5px;color:var(--muted);margin:10px 2px 0;}
 .cmp-legend a{color:var(--purple);}

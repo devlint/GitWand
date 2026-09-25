@@ -239,17 +239,17 @@ function pick(id: ToolId) {
 
 <style scoped>
 .gw-page{
-  --ink:#e8edf5;
-  --ink-dim:#9aa7bd;
-  --ground:#0c0c1a;
-  --ground-tell:#08080f;
-  --surface:#13131f;
-  --rule:rgba(255,255,255,0.09);
-  --rule-soft:rgba(255,255,255,0.05);
-  --brand:#a78bfa;
-  --settled:#34d399;
-  --waiting:#fbbf24;
-  --ease:cubic-bezier(0.22,1,0.36,1);
+  --ink:var(--nc-neutral-100);
+  --ink-dim:var(--nc-neutral-400);
+  --ground:var(--nc-canvas);
+  --ground-tell:#08090f;
+  --surface:var(--nc-surface);
+  --rule:var(--nc-rule);
+  --rule-soft:var(--nc-rule-soft);
+  --brand:var(--nc-accent-400);
+  --settled:var(--nc-settled);
+  --waiting:var(--nc-waiting);
+  --ease:var(--nc-ease);
   background:var(--ground);
   color:var(--ink);
   font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
@@ -262,10 +262,10 @@ function pick(id: ToolId) {
 .strip{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:13px;color:var(--ink-dim);padding:11px 15px;background:var(--surface);border:1px solid var(--rule-soft);border-radius:9px;}
 .strip code{font-family:'JetBrains Mono',monospace;font-size:0.92em;color:var(--ink);}
 .dot{width:7px;height:7px;border-radius:99px;background:var(--ink-dim);flex:none;}
-.strip--on .dot{background:var(--settled);box-shadow:0 0 0 3px rgba(52,211,153,0.16);}
+.strip--on .dot{background:var(--settled);box-shadow:0 0 0 3px rgba(127, 214, 176,0.16);}
 .strip--wait .dot{background:var(--brand);}
 .strip--legacy{color:var(--waiting);}
-.strip-fail{color:#f87171;}
+.strip-fail{color:var(--nc-danger);}
 
 .shop-head{margin:26px 0 22px;}
 .shop-h1{font-size:36px;line-height:1.1;font-weight:800;letter-spacing:-0.03em;margin:0 0 12px;max-width:18ch;text-wrap:balance;}
@@ -294,7 +294,7 @@ function pick(id: ToolId) {
 .feed-note{margin:12px 0 0;font-size:13px;color:var(--settled);}
 
 /* ── the break ────────────────────────────────────────────────────────── */
-.seam{height:0;border-top:1px solid var(--rule);box-shadow:0 -22px 44px -30px rgba(167,139,250,0.55);}
+.seam{height:0;border-top:1px solid var(--rule);box-shadow:0 -22px 44px -30px rgba(181, 171, 252,0.55);}
 
 /* ── showcase ─────────────────────────────────────────────────────────── */
 .tell{background:var(--ground-tell);padding:96px 0 100px;}

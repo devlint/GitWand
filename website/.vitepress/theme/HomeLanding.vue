@@ -12,37 +12,6 @@ function toggleFaq(i: number) {
   faqOpen.value = faqOpen.value === i ? null : i
 }
 
-// ── Terminal demo (hero animation) ────────────────────────────────────────────
-interface TermLine { text: string; type: 'cmd' | 'info' | 'ok' | 'warn' }
-const termLines = ref<TermLine[]>([])
-const termRunning = ref(false)
-
-function runTerminalDemo() {
-  if (termRunning.value) return
-  termRunning.value = true
-  termLines.value = []
-  const steps: Array<{ delay: number } & TermLine> = [
-    { delay: 0,    text: '$ gitwand resolve',                                                    type: 'cmd'  },
-    { delay: 600,  text: 'Scanning 12 conflicted files…',                                        type: 'info' },
-    { delay: 1100, text: '✓ package-lock.json    47/47  [same_change · certain]',                type: 'ok'   },
-    { delay: 1500, text: '✓ src/config.ts         3/3   [one_side_change · certain]',            type: 'ok'   },
-    { delay: 1900, text: '✓ tailwind.config.js    2/2   [non_overlapping · high]',               type: 'ok'   },
-    { delay: 2300, text: '✓ README.md             5/5   [whitespace_only · high]',               type: 'ok'   },
-    { delay: 2700, text: '○ src/auth.ts           1 hunk pending  [complex · review needed]',    type: 'warn' },
-    { delay: 3100, text: '─────────────────────────────────────────────',                        type: 'info' },
-    { delay: 3400, text: '57 hunks resolved · 1 left for you · 0 errors',                        type: 'cmd'  },
-  ]
-  steps.forEach(({ delay, text, type }) => {
-    setTimeout(() => {
-      termLines.value.push({ text, type })
-      if (type === 'cmd' && termLines.value.length > 1) termRunning.value = false
-    }, delay)
-  })
-}
-
-
-
-// Short labels keep the picker compact; `title` surfaces the full native name on hover.
 const LOCALES: { code: Locale; label: string; title: string }[] = [
   { code: 'en',    label: 'EN', title: 'English' },
   { code: 'fr',    label: 'FR', title: 'Français' },
@@ -72,17 +41,9 @@ onMounted(() => {
     downloadUrl.value = `${RELEASES}/download/v${LATEST}/GitWand_${LATEST}_x64-setup.exe`
   else if (/Linux/.test(ua))
     downloadUrl.value = `${RELEASES}/download/v${LATEST}/GitWand_${LATEST}_amd64.AppImage`
-  setTimeout(runTerminalDemo, 900)
 })
 
-// ── Hero visual: CLI ⇄ GUI toggle (#71) ───────────────────────────────────
-// The hero used to show only the terminal animation, which made GitWand read
-// as a CLI-only tool. This tab lets visitors flip to the desktop GUI screenshot
-// so the product's two faces are both visible above the fold. Defaults to the
-// GUI — GitWand is first and foremost a desktop app, so lead with it.
-const heroTab = ref<'cli' | 'gui'>('gui')
-
-// ── Screenshot slideshow ───────────────────────────────────────────────────
+// ── Captures affichées en plein écran depuis le hero ───────────────────────────────────────────────────
 const slides = [
   { src: '/screenshots/GitWand_dashboard.png',        alt: 'GitWand — dashboard' },
   { src: '/screenshots/GitWand_changes.png',          alt: 'GitWand — changes view' },
@@ -91,11 +52,6 @@ const slides = [
   { src: '/screenshots/GitWand_Worktree.png',         alt: 'GitWand — worktrees' },
   { src: '/screenshots/GitWand_settingAI.png',        alt: 'GitWand — AI settings' },
 ]
-const slideIndex = ref(0)
-function goToSlide(i: number) { slideIndex.value = i }
-function prevSlide() { slideIndex.value = (slideIndex.value - 1 + slides.length) % slides.length }
-function nextSlide() { slideIndex.value = (slideIndex.value + 1) % slides.length }
-
 const lightboxOpen = ref(false)
 const lightboxIndex = ref(0)
 function openLightbox(i: number) { lightboxIndex.value = i; lightboxOpen.value = true }
@@ -626,6 +582,298 @@ const i18n: Record<Locale, any> = {
 
 const t = computed(() => i18n[locale.value])
 
+// ── Copie de la trame « Nocturne » ───────────────────────────────────────────
+// Séparée de `i18n` pour que la refonte n'ait pas à réécrire l'ancien objet :
+// `t` sert les sections historiques, `nt` les nouvelles.
+const NC: Record<Locale, any> = {
+  en: {
+    badge: 'v3.11 — the Conflict Predictor replays the merge for real',
+    h1a: 'The merge ends', h1b: 'without you', h1c: '.',
+    sub: 'Eight deterministic patterns classify every hunk, settle the ones that carried no decision, and hand you back only what deserves your attention. Native, local, MIT.',
+    cta: 'Download GitWand',
+    copy: 'Copy', copied: 'Copied',
+    s1n: '57', s1l: 'hunks settled in the last merge',
+    s2n: '0.9 s', s2l: 'to classify all of them',
+    s3n: '1662', s3l: 'real merges replayed in tests',
+    winTitle: 'myapp — merge feature/settings',
+    winStatus: '56 settled · 1 for you',
+    cfEyebrow: 'In under a second',
+    cfTitle: 'This conflict was never a decision.',
+    cfBody: 'GitWand reads the semantics of the code, not just the lines. It recognises the pattern, applies the resolution and keeps the trace. You can read it back, replay it, challenge it.',
+    cfCta: 'How the engine works →',
+    cfHunk: 'hunk 1 / 57',
+    cfVerdict: '✓ prefer-theirs · confidence 97% · semantic',
+    cfTrace: 'see the trace →',
+    bTitle: 'Deterministic where the others guess',
+    bSub: 'Six reasons to keep it open all day.',
+    b1k: 'Deterministic', b1t: 'A score and a trace for every hunk',
+    b1d: 'Not one line was guessed. Every resolution is auditable, and replayable exactly.',
+    b1tag: '0 hallucinations',
+    b2k: 'Native', b2n: '~8 MB', b2d: 'Tauri 2 + Rust. Starts in under a second, not 150 MB of Electron.',
+    b3k: 'Keyboard', b3d: 'everything from the keyboard, nothing to hunt for',
+    b4k: 'Local', b4n: '100%', b4d: 'Your code stays on your machine. No account, no telemetry.',
+    b5k: 'MCP server', b5t: 'The same engine, wired into your agents',
+    b6k: 'Free', b6n: 'MIT', b6d: 'No seat licence, no trial wall, no account.',
+    band1: 'resolution patterns', band2: 'real merges replayed',
+    band3: 'interfaces, one engine', band4: 'hallucinations',
+    pTitle: 'The eight patterns', pSub: 'Registry v1.4, per-hunk confidence scoring.',
+    p1: 'Two indentation styles go in, one comes out.',
+    p2: 'You were both right, identically.',
+    p3: 'Only one side touched the area.',
+    p4: 'The imports moved, the code did not.',
+    p5: 'Two additions at the hunk edges, no overlap.',
+    p6t: '+3 in the registry', p6: 'Orchestrated by a versioned pattern registry.',
+    iTitle: 'One engine, three ways to use it',
+    iSub: 'Same resolutions, same traces, everywhere.',
+    i1t: 'Desktop app', i1d: 'Graph, diffs, PRs, worktrees and the day’s inbox in one native window.',
+    i2t: 'CLI', i2d: 'Scriptable, CI-friendly, full JSON output.',
+    i3t: 'VS Code extension', i3d: 'The engine where you already write, without switching windows.',
+    cli1: 'gitwand merge feature/settings', cli2: '✓ 56 hunks resolved',
+    cli3: '⚑ 1 hunk for you — api/client.ts', cli4: '→ trace: .gitwand/traces/merge.json',
+    aEyebrow: 'MCP · official registry · stdio · no API key',
+    aTitle: 'Your agents are good at code. Bad at merges.',
+    aBody: 'The MCP server settles the hunks that carry no decision and hands the hard cases to the agent with the full context: ours, theirs, base and the trace.',
+    aCta: 'Explore AI agents →', aCmdNote: '# one command is enough',
+    cmpTitle: 'Against the other clients', cmpCta: 'Full comparison →',
+    cmpAiOnly: 'AI only',
+    dlMeta: 'v3.11.0 — MIT',
+  },
+  fr: {
+    badge: 'v3.11 — le Conflict Predictor rejoue le merge pour de vrai',
+    h1a: 'Le merge se termine', h1b: 'sans toi', h1c: '.',
+    sub: 'Huit patterns déterministes classent chaque hunk, règlent ceux qui ne demandaient aucune décision, et te laissent uniquement ce qui vaut ton attention. Natif, local, MIT.',
+    cta: 'Télécharger GitWand',
+    copy: 'Copier', copied: 'Copié',
+    s1n: '57', s1l: 'hunks réglés au dernier merge',
+    s2n: '0,9 s', s2l: 'pour les classer tous',
+    s3n: '1662', s3l: 'merges réels rejoués en test',
+    winTitle: 'myapp — merge feature/settings',
+    winStatus: '56 réglés · 1 pour toi',
+    cfEyebrow: 'En moins d’une seconde',
+    cfTitle: 'Ce conflit n’était pas une décision.',
+    cfBody: 'GitWand lit la sémantique du code, pas seulement les lignes. Il reconnaît le pattern, applique la résolution et garde la trace. Tu peux la relire, la rejouer, la contester.',
+    cfCta: 'Comment fonctionne le moteur →',
+    cfHunk: 'hunk 1 / 57',
+    cfVerdict: '✓ prefer-theirs · confiance 97% · sémantique',
+    cfTrace: 'voir la trace →',
+    bTitle: 'Déterministe là où les autres devinent',
+    bSub: 'Six raisons de le garder ouvert toute la journée.',
+    b1k: 'Déterministe', b1t: 'Un score et une trace pour chaque hunk',
+    b1d: 'Aucune ligne n’a été devinée. Chaque résolution est auditable, et rejouable à l’identique.',
+    b1tag: '0 hallucination',
+    b2k: 'Natif', b2n: '~8 Mo', b2d: 'Tauri 2 + Rust. Démarrage sous la seconde, pas 150 Mo d’Electron.',
+    b3k: 'Clavier', b3d: 'tout au clavier, rien à chercher',
+    b4k: 'Local', b4n: '100 %', b4d: 'Ton code reste sur ta machine. Pas de compte, pas de télémétrie.',
+    b5k: 'Serveur MCP', b5t: 'Le même moteur, branché sur tes agents',
+    b6k: 'Libre', b6n: 'MIT', b6d: 'Pas de licence par siège, pas de mur d’essai, pas de compte.',
+    band1: 'patterns de résolution', band2: 'merges réels rejoués',
+    band3: 'interfaces, un seul moteur', band4: 'hallucination',
+    pTitle: 'Les huit patterns', pSub: 'Registre v1.4, scoring de confiance par hunk.',
+    p1: 'Deux styles d’indentation entrent, un seul ressort.',
+    p2: 'Vous aviez tous les deux raison, à l’identique.',
+    p3: 'Un seul côté a touché la zone.',
+    p4: 'Les imports ont bougé, pas le code.',
+    p5: 'Deux ajouts en bord de hunk, aucun recouvrement.',
+    p6t: '+3 dans le registre', p6: 'Orchestrés par un pattern registry versionné.',
+    iTitle: 'Un moteur, trois façons de l’utiliser',
+    iSub: 'Mêmes résolutions, mêmes traces, partout.',
+    i1t: 'Application desktop', i1d: 'Graphe, diffs, PR, worktrees et inbox du jour dans une fenêtre native.',
+    i2t: 'CLI', i2d: 'Scriptable, utilisable en CI, sortie JSON complète.',
+    i3t: 'Extension VS Code', i3d: 'Le moteur là où tu écris déjà, sans changer de fenêtre.',
+    cli1: 'gitwand merge feature/settings', cli2: '✓ 56 hunks résolus',
+    cli3: '⚑ 1 hunk pour toi — api/client.ts', cli4: '→ trace : .gitwand/traces/merge.json',
+    aEyebrow: 'MCP · registre officiel · stdio · sans clé API',
+    aTitle: 'Tes agents sont bons en code. Mauvais en merge.',
+    aBody: 'Le serveur MCP règle les hunks sans décision et transmet à l’agent les cas durs avec tout le contexte : ours, theirs, base et la trace.',
+    aCta: 'Explorer les agents IA →', aCmdNote: '# une commande suffit',
+    cmpTitle: 'Face aux autres clients', cmpCta: 'Comparatif complet →',
+    cmpAiOnly: 'IA seule',
+    dlMeta: 'v3.11.0 — MIT',
+  },
+  es: {
+    badge: 'v3.11 — el Conflict Predictor reproduce el merge de verdad',
+    h1a: 'El merge termina', h1b: 'sin ti', h1c: '.',
+    sub: 'Ocho patrones deterministas clasifican cada hunk, resuelven los que no exigían ninguna decisión y te devuelven solo lo que merece tu atención. Nativo, local, MIT.',
+    cta: 'Descargar GitWand',
+    copy: 'Copiar', copied: 'Copiado',
+    s1n: '57', s1l: 'hunks resueltos en el último merge',
+    s2n: '0,9 s', s2l: 'para clasificarlos todos',
+    s3n: '1662', s3l: 'merges reales reproducidos en pruebas',
+    winTitle: 'myapp — merge feature/settings',
+    winStatus: '56 resueltos · 1 para ti',
+    cfEyebrow: 'En menos de un segundo',
+    cfTitle: 'Este conflicto nunca fue una decisión.',
+    cfBody: 'GitWand lee la semántica del código, no solo las líneas. Reconoce el patrón, aplica la resolución y guarda la traza. Puedes releerla, reproducirla, discutirla.',
+    cfCta: 'Cómo funciona el motor →',
+    cfHunk: 'hunk 1 / 57',
+    cfVerdict: '✓ prefer-theirs · confianza 97% · semántico',
+    cfTrace: 'ver la traza →',
+    bTitle: 'Determinista donde los demás adivinan',
+    bSub: 'Seis razones para dejarlo abierto todo el día.',
+    b1k: 'Determinista', b1t: 'Una puntuación y una traza para cada hunk',
+    b1d: 'Ninguna línea fue adivinada. Cada resolución es auditable y reproducible al detalle.',
+    b1tag: '0 alucinaciones',
+    b2k: 'Nativo', b2n: '~8 MB', b2d: 'Tauri 2 + Rust. Arranca en menos de un segundo, no 150 MB de Electron.',
+    b3k: 'Teclado', b3d: 'todo desde el teclado, nada que buscar',
+    b4k: 'Local', b4n: '100 %', b4d: 'Tu código se queda en tu máquina. Sin cuenta, sin telemetría.',
+    b5k: 'Servidor MCP', b5t: 'El mismo motor, conectado a tus agentes',
+    b6k: 'Libre', b6n: 'MIT', b6d: 'Sin licencia por puesto, sin muro de prueba, sin cuenta.',
+    band1: 'patrones de resolución', band2: 'merges reales reproducidos',
+    band3: 'interfaces, un solo motor', band4: 'alucinaciones',
+    pTitle: 'Los ocho patrones', pSub: 'Registro v1.4, puntuación de confianza por hunk.',
+    p1: 'Entran dos estilos de indentación, sale uno.',
+    p2: 'Los dos teníais razón, de forma idéntica.',
+    p3: 'Solo un lado tocó la zona.',
+    p4: 'Los imports se movieron, el código no.',
+    p5: 'Dos añadidos en los bordes del hunk, sin solapamiento.',
+    p6t: '+3 en el registro', p6: 'Orquestados por un pattern registry versionado.',
+    iTitle: 'Un motor, tres formas de usarlo',
+    iSub: 'Las mismas resoluciones, las mismas trazas, en todas partes.',
+    i1t: 'Aplicación de escritorio', i1d: 'Grafo, diffs, PR, worktrees y la bandeja del día en una ventana nativa.',
+    i2t: 'CLI', i2d: 'Scriptable, lista para CI, salida JSON completa.',
+    i3t: 'Extensión de VS Code', i3d: 'El motor donde ya escribes, sin cambiar de ventana.',
+    cli1: 'gitwand merge feature/settings', cli2: '✓ 56 hunks resueltos',
+    cli3: '⚑ 1 hunk para ti — api/client.ts', cli4: '→ traza: .gitwand/traces/merge.json',
+    aEyebrow: 'MCP · registro oficial · stdio · sin clave API',
+    aTitle: 'Tus agentes son buenos con el código. Malos con los merges.',
+    aBody: 'El servidor MCP resuelve los hunks sin decisión y pasa los casos difíciles al agente con todo el contexto: ours, theirs, base y la traza.',
+    aCta: 'Explorar agentes de IA →', aCmdNote: '# basta con un comando',
+    cmpTitle: 'Frente a los demás clientes', cmpCta: 'Comparativa completa →',
+    cmpAiOnly: 'solo IA',
+    dlMeta: 'v3.11.0 — MIT',
+  },
+  'pt-BR': {
+    badge: 'v3.11 — o Conflict Predictor reproduz o merge de verdade',
+    h1a: 'O merge termina', h1b: 'sem você', h1c: '.',
+    sub: 'Oito padrões determinísticos classificam cada hunk, resolvem os que não exigiam decisão nenhuma e devolvem só o que merece a sua atenção. Nativo, local, MIT.',
+    cta: 'Baixar o GitWand',
+    copy: 'Copiar', copied: 'Copiado',
+    s1n: '57', s1l: 'hunks resolvidos no último merge',
+    s2n: '0,9 s', s2l: 'para classificar todos',
+    s3n: '1662', s3l: 'merges reais reproduzidos em teste',
+    winTitle: 'myapp — merge feature/settings',
+    winStatus: '56 resolvidos · 1 para você',
+    cfEyebrow: 'Em menos de um segundo',
+    cfTitle: 'Este conflito nunca foi uma decisão.',
+    cfBody: 'O GitWand lê a semântica do código, não apenas as linhas. Ele reconhece o padrão, aplica a resolução e guarda o rastro. Você pode reler, reproduzir e contestar.',
+    cfCta: 'Como o motor funciona →',
+    cfHunk: 'hunk 1 / 57',
+    cfVerdict: '✓ prefer-theirs · confiança 97% · semântico',
+    cfTrace: 'ver o rastro →',
+    bTitle: 'Determinístico onde os outros chutam',
+    bSub: 'Seis motivos para deixar aberto o dia inteiro.',
+    b1k: 'Determinístico', b1t: 'Uma pontuação e um rastro para cada hunk',
+    b1d: 'Nenhuma linha foi chutada. Toda resolução é auditável e reproduzível de forma idêntica.',
+    b1tag: '0 alucinação',
+    b2k: 'Nativo', b2n: '~8 MB', b2d: 'Tauri 2 + Rust. Abre em menos de um segundo, não 150 MB de Electron.',
+    b3k: 'Teclado', b3d: 'tudo pelo teclado, nada para procurar',
+    b4k: 'Local', b4n: '100 %', b4d: 'Seu código fica na sua máquina. Sem conta, sem telemetria.',
+    b5k: 'Servidor MCP', b5t: 'O mesmo motor, ligado aos seus agentes',
+    b6k: 'Livre', b6n: 'MIT', b6d: 'Sem licença por assento, sem muro de teste, sem conta.',
+    band1: 'padrões de resolução', band2: 'merges reais reproduzidos',
+    band3: 'interfaces, um só motor', band4: 'alucinação',
+    pTitle: 'Os oito padrões', pSub: 'Registro v1.4, pontuação de confiança por hunk.',
+    p1: 'Entram dois estilos de indentação, sai um.',
+    p2: 'Vocês dois estavam certos, de forma idêntica.',
+    p3: 'Só um lado tocou na área.',
+    p4: 'Os imports mudaram de lugar, o código não.',
+    p5: 'Duas adições nas bordas do hunk, sem sobreposição.',
+    p6t: '+3 no registro', p6: 'Orquestrados por um pattern registry versionado.',
+    iTitle: 'Um motor, três formas de usar',
+    iSub: 'As mesmas resoluções, os mesmos rastros, em todo lugar.',
+    i1t: 'Aplicativo desktop', i1d: 'Grafo, diffs, PRs, worktrees e a caixa do dia em uma janela nativa.',
+    i2t: 'CLI', i2d: 'Scriptável, pronta para CI, saída JSON completa.',
+    i3t: 'Extensão do VS Code', i3d: 'O motor onde você já escreve, sem trocar de janela.',
+    cli1: 'gitwand merge feature/settings', cli2: '✓ 56 hunks resolvidos',
+    cli3: '⚑ 1 hunk para você — api/client.ts', cli4: '→ rastro: .gitwand/traces/merge.json',
+    aEyebrow: 'MCP · registro oficial · stdio · sem chave de API',
+    aTitle: 'Seus agentes são bons em código. Ruins em merge.',
+    aBody: 'O servidor MCP resolve os hunks sem decisão e entrega os casos difíceis ao agente com todo o contexto: ours, theirs, base e o rastro.',
+    aCta: 'Explorar agentes de IA →', aCmdNote: '# um comando basta',
+    cmpTitle: 'Diante dos outros clientes', cmpCta: 'Comparativo completo →',
+    cmpAiOnly: 'só IA',
+    dlMeta: 'v3.11.0 — MIT',
+  },
+  'zh-CN': {
+    badge: 'v3.11 — 冲突预测器真正重放这次合并',
+    h1a: '合并结束时', h1b: '不必再找你', h1c: '。',
+    sub: '八种确定性模式为每个 hunk 分类，自动处理那些本就无需决策的部分，只把值得你关注的留给你。原生、本地、MIT。',
+    cta: '下载 GitWand',
+    copy: '复制', copied: '已复制',
+    s1n: '57', s1l: '上次合并自动处理的 hunk',
+    s2n: '0.9 秒', s2l: '完成全部分类',
+    s3n: '1662', s3l: '测试中重放的真实合并',
+    winTitle: 'myapp — merge feature/settings',
+    winStatus: '56 个已处理 · 1 个待你确认',
+    cfEyebrow: '不到一秒',
+    cfTitle: '这个冲突从来就不是一个决策。',
+    cfBody: 'GitWand 读的是代码语义，而不只是行。它识别模式、应用解决方案并保留轨迹。你可以回看、重放，也可以推翻它。',
+    cfCta: '了解引擎如何工作 →',
+    cfHunk: 'hunk 1 / 57',
+    cfVerdict: '✓ prefer-theirs · 置信度 97% · 语义',
+    cfTrace: '查看轨迹 →',
+    bTitle: '别人靠猜，它靠确定性',
+    bSub: '六个理由，让它整天开着。',
+    b1k: '确定性', b1t: '每个 hunk 都有分数和轨迹',
+    b1d: '没有一行是猜出来的。每次解决都可审计，并且能原样重放。',
+    b1tag: '0 次幻觉',
+    b2k: '原生', b2n: '约 8 MB', b2d: 'Tauri 2 + Rust。一秒内启动，而不是 150 MB 的 Electron。',
+    b3k: '键盘', b3d: '全部用键盘完成，无需四处寻找',
+    b4k: '本地', b4n: '100%', b4d: '代码留在你的机器上。无账号，无遥测。',
+    b5k: 'MCP 服务器', b5t: '同一个引擎，接入你的智能体',
+    b6k: '自由', b6n: 'MIT', b6d: '没有按席位授权，没有试用墙，不用注册。',
+    band1: '种解决模式', band2: '次重放的真实合并',
+    band3: '个界面，同一个引擎', band4: '次幻觉',
+    pTitle: '八种模式', pSub: '注册表 v1.4，按 hunk 计算置信度。',
+    p1: '两种缩进风格进去，只出来一种。',
+    p2: '你们两边都对，而且一模一样。',
+    p3: '只有一侧改动了这个区域。',
+    p4: 'import 换了位置，代码没变。',
+    p5: 'hunk 两端各有新增，互不重叠。',
+    p6t: '注册表中还有 3 种', p6: '由带版本号的 pattern registry 统一调度。',
+    iTitle: '一个引擎，三种用法',
+    iSub: '同样的解决方案，同样的轨迹，处处一致。',
+    i1t: '桌面应用', i1d: '提交图、差异、PR、worktree 和当日收件箱，都在一个原生窗口里。',
+    i2t: '命令行', i2d: '可脚本化，可用于 CI，输出完整 JSON。',
+    i3t: 'VS Code 扩展', i3d: '引擎就在你写代码的地方，无需切换窗口。',
+    cli1: 'gitwand merge feature/settings', cli2: '✓ 已解决 56 个 hunk',
+    cli3: '⚑ 1 个 hunk 待你处理 — api/client.ts', cli4: '→ 轨迹：.gitwand/traces/merge.json',
+    aEyebrow: 'MCP · 官方注册表 · stdio · 无需 API 密钥',
+    aTitle: '你的智能体擅长写代码，却不擅长合并。',
+    aBody: 'MCP 服务器处理掉无需决策的 hunk，并把难题连同完整上下文交给智能体：ours、theirs、base 和轨迹。',
+    aCta: '了解 AI 智能体 →', aCmdNote: '# 一条命令就够了',
+    cmpTitle: '与其他客户端相比', cmpCta: '完整对比 →',
+    cmpAiOnly: '仅 AI',
+    dlMeta: 'v3.11.0 — MIT',
+  },
+}
+const nt = computed(() => NC[locale.value])
+
+// ── Commande d'installation copiable (hero) ─────────────────────────────────
+const INSTALL_CMD = 'npm i -g @gitwand/cli'
+const copied = ref(false)
+async function copyInstall() {
+  try {
+    await navigator.clipboard.writeText(INSTALL_CMD)
+    copied.value = true
+    setTimeout(() => { copied.value = false }, 1800)
+  } catch {
+    /* presse-papiers indisponible : l'utilisateur peut toujours sélectionner le texte */
+  }
+}
+
+// Les cinq patterns nommés sur la landing ; les trois autres vivent dans le registre.
+const NC_PATTERNS = ['whitespace_only', 'same_change', 'one_side_change', 'reorder_only', 'insertion_at_boundary']
+
+// Comparatif compact du haut de page — le tableau complet reste sur /compare.
+const NC_COMPARE: { key: string; gw: string; ghd: string; gk: string }[] = [
+  { key: 'mcRow1', gw: '✓', ghd: '✗', gk: 'ai' },
+  { key: 'mcRow2', gw: '✓', ghd: '✓', gk: '✗' },
+  { key: 'mcRow3', gw: '✓', ghd: '✗', gk: '✗' },
+  { key: 'mcRow4', gw: '✓', ghd: '✗', gk: '✓' },
+]
+
+
 // ── Comparison table ──────────────────────────────────────────────────────────
 type CompareValue = boolean | 'partial' | 'soon'
 interface CompareRow {
@@ -707,6 +955,29 @@ function cellClass(v: CompareValue | undefined): string {
   if (v === 'soon') return 'cell-soon'
   return 'cell-no'
 }
+
+// ── Apparition au défilement (thème Nocturne) ────────────────────────────────
+// Posé ici plutôt que dans le template : aucune section n'a à porter l'attribut,
+// et le rendu SSR reste identique.
+onMounted(() => {
+  if (typeof window === 'undefined' || !('IntersectionObserver' in window)) return
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+  const targets = Array.from(
+    document.querySelectorAll('.gw-landing .nc-wrap > *, .gw-landing .nc-bento > *, .gw-landing .nc-trio > *'),
+  )
+  targets.forEach((el) => el.setAttribute('data-reveal', ''))
+  const io = new IntersectionObserver(
+    (entries) => {
+      entries.forEach((e) => {
+        if (!e.isIntersecting) return
+        e.target.classList.add('is-revealed')
+        io.unobserve(e.target)
+      })
+    },
+    { threshold: 0.12, rootMargin: '0px 0px -8% 0px' },
+  )
+  targets.forEach((el) => io.observe(el))
+})
 </script>
 
 <template>
@@ -730,418 +1001,314 @@ function cellClass(v: CompareValue | undefined): string {
     <!-- ══════════════════════════════════════
          1 · HERO
     ══════════════════════════════════════ -->
-    <section class="hero">
-      <!-- Ambient depth layers: dot grid + aurora glows (pure CSS, decorative) -->
-      <div class="hero-bg" aria-hidden="true">
-        <div class="hero-bg__grid"></div>
-        <div class="hero-bg__orb hero-bg__orb--purple"></div>
-        <div class="hero-bg__orb hero-bg__orb--green"></div>
+    <section class="nc-hero">
+      <div class="nc-hero__decor" aria-hidden="true">
+        <span class="nc-aurora nc-aurora--accent nc-hero__orb-a"></span>
+        <span class="nc-aurora nc-aurora--section nc-hero__orb-b"></span>
+        <span class="nc-grid"></span>
       </div>
-      <div class="hero-inner">
 
-        <!-- Left: text -->
-        <div class="hero-text">
-          <a class="hero-announce" href="/changelog">
-            <span class="hero-announce__dot"></span>
-            <span class="hero-announce__txt">{{ t.heroAnnounce }}</span>
-            <span class="hero-announce__arrow">→</span>
-          </a>
-          <h1 class="hero-h1">
-            {{ t.heroH1a }}<br>
-            <span class="gradient">{{ t.heroH1b }}</span>
-          </h1>
-          <p class="hero-sub">
-            {{ t.heroSub }}
-          </p>
-          <ul class="hero-points">
-            <li v-for="p in [t.heroPoint1, t.heroPoint2, t.heroPoint3]" :key="p" class="hero-point">
-              <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.4" opacity="0.35"/><path d="M5 8.2l2 2 4-4.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              <span>{{ p }}</span>
-            </li>
-          </ul>
-          <div class="hero-ctas">
-            <div class="btn-split">
-              <a :href="downloadUrl" class="btn-primary btn-split__main">
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 1v10M4 7l4 4 4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 13h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-                {{ t.download }}
-              </a>
-              <a href="https://github.com/devlint/GitWand/releases" class="btn-primary btn-split__aside" target="_blank" rel="noopener" :title="t.github">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 00-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0020 4.77 5.07 5.07 0 0019.91 1S18.73.65 16 2.48a13.38 13.38 0 00-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 005 4.77a5.44 5.44 0 00-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 009 18.13V22" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              </a>
-            </div>
-            <a href="/guide/getting-started" class="btn-ghost">
-              {{ t.docs }}
-            </a>
-          </div>
-          <p class="hero-platforms">{{ t.platforms }}<span class="hero-meta"> · {{ t.heroMeta }}</span></p>
-        </div>
+      <div class="nc-wrap nc-hero__body">
+        <a class="nc-pill" href="/changelog">
+          <span class="nc-pill__dot"></span>
+          {{ nt.badge }}
+          <span class="nc-pill__arrow">→</span>
+        </a>
 
-        <!-- Right: CLI ⇄ GUI toggle — GitWand is both a desktop app and a CLI -->
-        <div class="hero-visual">
-          <div class="hero-tabs" role="tablist" :aria-label="t.heroVisualAria">
-            <button
-              class="hero-tab" :class="{ 'hero-tab--active': heroTab === 'gui' }"
-              role="tab" :aria-selected="heroTab === 'gui'" @click="heroTab = 'gui'"
-            >{{ t.heroTabGui }}</button>
-            <button
-              class="hero-tab" :class="{ 'hero-tab--active': heroTab === 'cli' }"
-              role="tab" :aria-selected="heroTab === 'cli'" @click="heroTab = 'cli'"
-            >{{ t.heroTabCli }}</button>
-          </div>
+        <h1 class="nc-h1">
+          {{ nt.h1a }} <span class="nc-shine">{{ nt.h1b }}</span>{{ nt.h1c }}
+        </h1>
+        <p class="nc-lede">{{ nt.sub }}</p>
 
-          <div class="hero-stage">
-          <!-- GUI: desktop dashboard screenshot -->
-          <div class="hero-gui" :class="{ 'hero-pane--hidden': heroTab !== 'gui' }" role="tabpanel" :aria-hidden="heroTab !== 'gui'">
-            <img
-              src="/screenshots/GitWand_dashboard.png" :alt="t.heroGuiAlt"
-              class="hero-gui__img" width="1842" height="931"
-              loading="lazy" decoding="async"
-            />
-            <!-- Floating proof card: the engine's outcome, in one glance -->
-            <div class="hero-toast" aria-hidden="true">
-              <span class="hero-toast__icon">
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3 3 7-7.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              </span>
-              <span class="hero-toast__body">
-                <span class="hero-toast__title">{{ t.heroToastTitle }}</span>
-                <span class="hero-toast__sub">{{ t.heroToastSub }}</span>
-              </span>
-            </div>
-          </div>
-
-          <!-- CLI: terminal animation -->
-          <div class="hero-term" :class="{ 'hero-pane--hidden': heroTab !== 'cli' }" role="tabpanel" :aria-hidden="heroTab !== 'cli'">
-            <div class="hero-term__bar">
-              <span class="tl tl-r"></span><span class="tl tl-y"></span><span class="tl tl-g"></span>
-              <span class="hero-term__title">~/projects/myapp — gitwand</span>
-              <button class="hero-term__replay" :disabled="termRunning" @click="runTerminalDemo" :title="'↻ Replay'">↻</button>
-            </div>
-            <div class="hero-term__body">
-              <div
-                v-for="(line, i) in termLines" :key="i"
-                class="hero-term__line"
-                :class="`hero-term__line--${line.type}`"
-              >{{ line.text }}</div>
-              <span v-if="termRunning" class="hero-term__cursor">▋</span>
-            </div>
-          </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ══════════════════════════════════════
-         2 · STATS BAR
-    ══════════════════════════════════════ -->
-    <section class="stats-bar">
-      <div class="stat">
-        <span class="stat-n">{{ AUTO_PATTERN_COUNT }}</span>
-        <span class="stat-l">{{ t.statPatterns }}</span>
-      </div>
-      <div class="stat-sep"></div>
-      <div class="stat">
-        <span class="stat-n">1 662</span>
-        <span class="stat-l">{{ t.statResolved }}</span>
-      </div>
-      <div class="stat-sep"></div>
-      <div class="stat">
-        <span class="stat-n">3</span>
-        <span class="stat-l">{{ t.statInterfaces }}</span>
-      </div>
-    </section>
-
-    <!-- ══════════════════════════════════════
-         3 · TRUST BAR
-    ══════════════════════════════════════ -->
-    <section class="trust-bar">
-      <a class="trust-item trust-item--link" href="https://github.com/devlint/GitWand" target="_blank" rel="noopener">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 2l2.9 6.3 6.6.6-5 4.4 1.5 6.6L12 17.8 5.5 20.5 7 13.9l-5-4.4 6.6-.6L12 2z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
-        <span class="trust-txt">{{ t.trustStar }}</span>
-      </a>
-      <div class="trust-item"><span class="trust-strong">MIT</span><span class="trust-txt">{{ t.trustFree }}</span></div>
-      <div class="trust-item"><span class="trust-strong">~8&nbsp;MB</span><span class="trust-txt">{{ t.trustNative }}</span></div>
-      <div class="trust-item"><span class="trust-strong">0</span><span class="trust-txt">{{ t.trustDeterministic }}</span></div>
-    </section>
-
-    <!-- ══════════════════════════════════════
-         4 · CONFLICT DEMO — the "aha" moment
-    ══════════════════════════════════════ -->
-    <section class="conflict-section">
-      <div class="section-inner">
-        <h2 class="section-title">{{ t.conflictTitle }}</h2>
-        <p class="section-sub">{{ t.conflictSub }}</p>
-
-        <div class="conflict-demo">
-          <!-- Before -->
-          <div class="conflict-panel">
-            <div class="conflict-panel-head">
-              <span class="panel-dot panel-dot--red"></span>
-              {{ t.conflictBefore }}
-            </div>
-            <div class="conflict-code">
-              <div class="cc-line cc-conflict">  &lt;&lt;&lt;&lt;&lt;&lt;&lt; HEAD</div>
-              <div class="cc-line cc-ours">    <span class="k">const</span> theme = <span class="s">'dark'</span></div>
-              <div class="cc-line cc-conflict">  =======</div>
-              <div class="cc-line cc-theirs">    <span class="k">const</span> theme = localStorage.<span class="fn">getItem</span>(<span class="s">'theme'</span>) ?? <span class="s">'dark'</span></div>
-              <div class="cc-line cc-conflict">  &gt;&gt;&gt;&gt;&gt;&gt;&gt; feature/settings</div>
-            </div>
-          </div>
-
-          <!-- Arrow -->
-          <div class="conflict-arrow">
-            <svg width="40" height="40" viewBox="0 0 40 40" fill="none"><path d="M8 20h24M22 12l10 8-10 8" stroke="#7C3AED" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            <span>GitWand</span>
-          </div>
-
-          <!-- After -->
-          <div class="conflict-panel">
-            <div class="conflict-panel-head">
-              <span class="panel-dot panel-dot--green"></span>
-              {{ t.conflictAfter }}
-            </div>
-            <div class="conflict-code">
-              <div class="cc-line cc-resolved">    <span class="k">const</span> theme = localStorage.<span class="fn">getItem</span>(<span class="s">'theme'</span>) ?? <span class="s">'dark'</span></div>
-            </div>
-            <div class="conflict-badge">
-              <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M13.5 3.5l-7 7L3 7" stroke="#10B981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              {{ t.conflictBadge }}
-            </div>
-          </div>
-        </div>
-        <div class="section-cta-row">
-          <a href="/conflict-engine" class="btn-ghost">{{ t.conflictCta }}</a>
-        </div>
-      </div>
-    </section>
-
-    <!-- ══════════════════════════════════════
-         5 · 3 DOORS (pillars → pillar pages)
-    ══════════════════════════════════════ -->
-    <section class="hl-pillars">
-      <div class="section-inner">
-        <h2 class="section-title">{{ t.pillarsTitle }}</h2>
-        <p class="section-sub">{{ t.pillarsSub }}</p>
-        <div class="hl-pillars__grid">
-          <!-- Pillar 1 — Conflict resolution -->
-          <a class="hl-pillar hl-pillar--link" href="/conflict-engine">
-            <div class="hl-pillar__icon hl-pillar__icon--purple">
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M6 3v6a3 3 0 0 0 3 3h6a3 3 0 0 1 3 3v6"/>
-                <circle cx="6" cy="3" r="1.5"/>
-                <circle cx="18" cy="21" r="1.5"/>
-                <path d="M9 12l2 2 4-4"/>
-              </svg>
-            </div>
-            <h3 class="hl-pillar__title">{{ t.pillar1Title }}</h3>
-            <p class="hl-pillar__sub">{{ t.pillar1Sub }}</p>
-            <div class="hl-pillar__stat">
-              <span class="hl-pillar__stat-n">{{ t.pillar1Stat }}</span>
-              <span class="hl-pillar__stat-l">{{ t.pillar1StatLabel }}</span>
-            </div>
-            <span class="hl-pillar__cta">{{ t.pillar1Cta }}</span>
-          </a>
-
-          <!-- Pillar 2 — Native performance -->
-          <a class="hl-pillar hl-pillar--link" href="/features">
-            <div class="hl-pillar__icon hl-pillar__icon--green">
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
-              </svg>
-            </div>
-            <h3 class="hl-pillar__title">{{ t.pillar2Title }}</h3>
-            <p class="hl-pillar__sub">{{ t.pillar2Sub }}</p>
-            <div class="hl-pillar__stat">
-              <span class="hl-pillar__stat-n">{{ t.pillar2Stat }}</span>
-              <span class="hl-pillar__stat-l">{{ t.pillar2StatLabel }}</span>
-            </div>
-            <span class="hl-pillar__cta">{{ t.pillar2Cta }}</span>
-          </a>
-
-          <!-- Pillar 3 — AI assists -->
-          <a class="hl-pillar hl-pillar--link" href="/ai-agents">
-            <div class="hl-pillar__icon hl-pillar__icon--gradient">
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M12 3v3M12 18v3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M3 12h3M18 12h3M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/>
-                <circle cx="12" cy="12" r="3.2"/>
-              </svg>
-            </div>
-            <h3 class="hl-pillar__title">{{ t.pillar3Title }}</h3>
-            <p class="hl-pillar__sub">{{ t.pillar3Sub }}</p>
-            <div class="hl-pillar__stat">
-              <span class="hl-pillar__stat-n hl-pillar__stat-n--small">{{ t.pillar3Stat }}</span>
-              <span class="hl-pillar__stat-l">{{ t.pillar3StatLabel }}</span>
-            </div>
-            <span class="hl-pillar__cta">{{ t.pillar3Cta }}</span>
-          </a>
-        </div>
-      </div>
-    </section>
-
-    <!-- ══════════════════════════════════════
-         6 · SHOW THE INTERFACE (slideshow, moved up)
-    ══════════════════════════════════════ -->
-    <section class="preview-section">
-      <div class="section-inner">
-        <h2 class="section-title">{{ t.previewTitle }}</h2>
-        <p class="section-sub">{{ t.previewSub }}</p>
-
-        <div class="preview-slideshow preview-window">
-          <button class="slideshow-arrow slideshow-arrow--prev" @click="prevSlide" aria-label="Previous screenshot">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
-          </button>
-          <div class="slideshow-track" :style="{ transform: `translateX(-${slideIndex * 100}%)` }">
-            <img
-              v-for="(slide, i) in slides"
-              :key="i"
-              :src="slide.src"
-              :alt="slide.alt"
-              class="slideshow-img"
-              @click="openLightbox(i)"
-            />
-          </div>
-          <button class="slideshow-arrow slideshow-arrow--next" @click="nextSlide" aria-label="Next screenshot">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+        <div class="nc-hero__ctas">
+          <a class="nc-btn nc-btn--primary" :href="downloadUrl">{{ nt.cta }}</a>
+          <button class="nc-cmd" type="button" @click="copyInstall" :aria-label="nt.copy">
+            <span class="nc-cmd__prompt">$</span>
+            <code>npm i -g @gitwand/cli</code>
+            <span class="nc-cmd__hint">{{ copied ? nt.copied : nt.copy }}</span>
           </button>
         </div>
-        <div class="slideshow-dots">
-          <button
-            v-for="(_, i) in slides"
-            :key="i"
-            :class="['slideshow-dot', { 'slideshow-dot--active': i === slideIndex }]"
-            @click="goToSlide(i)"
-            :aria-label="`Screenshot ${i + 1}`"
+
+        <div class="nc-hero__figures">
+          <div class="nc-figure"><div class="nc-figure__n">{{ nt.s1n }}</div><div class="nc-figure__l">{{ nt.s1l }}</div></div>
+          <div class="nc-figure"><div class="nc-figure__n">{{ nt.s2n }}</div><div class="nc-figure__l">{{ nt.s2l }}</div></div>
+          <div class="nc-figure"><div class="nc-figure__n">{{ nt.s3n }}</div><div class="nc-figure__l">{{ nt.s3l }}</div></div>
+        </div>
+      </div>
+
+      <!-- Capture inclinée : la fenêtre « sort » du fond, puis se fond dedans -->
+      <div class="nc-wrap nc-shot">
+        <div class="nc-shot__frame">
+          <div class="nc-shot__bar">
+            <span class="nc-shot__dot"></span><span class="nc-shot__dot"></span><span class="nc-shot__dot"></span>
+            <span class="nc-shot__path">{{ nt.winTitle }}</span>
+            <span class="nc-shot__status">{{ nt.winStatus }}<span class="nc-caret">_</span></span>
+          </div>
+          <img
+            src="/screenshots/GitWand_dashboard.png"
+            :alt="t.heroGuiAlt"
+            width="1842" height="931" loading="eager" fetchpriority="high"
+            class="nc-shot__img"
+            @click="openLightbox(0)"
           />
         </div>
+        <div class="nc-shot__fade" aria-hidden="true"></div>
+      </div>
+    </section>
 
-        <Teleport to="body">
-          <div v-if="lightboxOpen" class="lightbox-overlay" @click.self="closeLightbox">
-            <button class="lightbox-close" @click="closeLightbox" aria-label="Close lightbox">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-            </button>
-            <button class="lightbox-arrow lightbox-arrow--prev" @click="lightboxPrev" aria-label="Previous">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
-            </button>
-            <img :src="slides[lightboxIndex].src" :alt="slides[lightboxIndex].alt" class="lightbox-img" />
-            <button class="lightbox-arrow lightbox-arrow--next" @click="lightboxNext" aria-label="Next">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
-            </button>
-            <div class="lightbox-dots">
-              <button
-                v-for="(_, i) in slides"
-                :key="i"
-                :class="['lightbox-dot', { 'lightbox-dot--active': i === lightboxIndex }]"
-                @click="lightboxIndex = i"
-                :aria-label="`Screenshot ${i + 1}`"
-              />
+    <!-- ══════════════════════════════════════
+         2 · BANDEAU D'INSTALLATION
+    ══════════════════════════════════════ -->
+    <div class="nc-marquee" aria-hidden="true">
+      <div class="nc-marquee__rail">
+        <div class="nc-marquee__track" v-for="pass in 2" :key="pass">
+          <template v-for="c in ['brew install --cask gitwand','npm i -g @gitwand/cli','winget install gitwand','code --install-extension gitwand','claude mcp add gitwand']" :key="pass + c">
+            <span>{{ c }}</span><span class="nc-marquee__sep">◆</span>
+          </template>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════
+         3 · DÉMO DE CONFLIT — le moment « ah oui »
+    ══════════════════════════════════════ -->
+    <section id="engine" class="nc-section">
+      <div class="nc-wrap nc-split">
+        <div class="nc-split__text">
+          <span class="nc-eyebrow">{{ nt.cfEyebrow }}</span>
+          <h2 class="nc-h2">{{ nt.cfTitle }}</h2>
+          <p class="nc-body">{{ nt.cfBody }}</p>
+          <a class="nc-btn nc-btn--ghost" href="/conflict-engine">{{ nt.cfCta }}</a>
+        </div>
+
+        <div class="nc-panel">
+          <div class="nc-panel__head">
+            <span>src/theme.ts</span><span class="nc-panel__hunk">{{ nt.cfHunk }}</span>
+          </div>
+          <div class="nc-panel__code">
+            <span class="nc-panel__sweep" aria-hidden="true"></span>
+            <div class="nc-code-marker">&lt;&lt;&lt;&lt;&lt;&lt;&lt; HEAD</div>
+            <div class="nc-code-drop">const theme = 'dark'</div>
+            <div class="nc-code-marker">=======</div>
+            <div class="nc-code-keep">const theme = localStorage.getItem('theme') ?? 'dark'</div>
+            <div class="nc-code-marker">&gt;&gt;&gt;&gt;&gt;&gt;&gt; feature/settings</div>
+          </div>
+          <div class="nc-panel__foot">
+            <span class="nc-panel__verdict">{{ nt.cfVerdict }}</span>
+            <a href="/conflict-engine">{{ nt.cfTrace }}</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════
+         4 · BENTO — six raisons
+    ══════════════════════════════════════ -->
+    <section class="nc-section">
+      <div class="nc-wrap">
+        <div class="nc-head">
+          <h2 class="nc-h2">{{ nt.bTitle }}</h2>
+          <span class="nc-head__sub">{{ nt.bSub }}</span>
+        </div>
+        <div class="nc-bento">
+          <div class="nc-card">
+            <span class="nc-eyebrow nc-eyebrow--sm">{{ nt.b1k }}</span>
+            <div class="nc-card__title">{{ nt.b1t }}</div>
+            <p class="nc-card__desc">{{ nt.b1d }}</p>
+            <div class="nc-tags"><span class="nc-tag">{{ nt.b1tag }}</span></div>
+          </div>
+          <div class="nc-card nc-card--stat">
+            <span class="nc-eyebrow nc-eyebrow--sm">{{ nt.b2k }}</span>
+            <div><div class="nc-card__n">{{ nt.b2n }}</div><div class="nc-card__desc">{{ nt.b2d }}</div></div>
+          </div>
+          <div class="nc-card nc-card--stat">
+            <span class="nc-eyebrow nc-eyebrow--sm">{{ nt.b3k }}</span>
+            <div class="nc-keys">
+              <kbd class="nc-key">⌘</kbd><kbd class="nc-key">K</kbd>
+              <span class="nc-card__desc">{{ nt.b3d }}</span>
             </div>
           </div>
-        </Teleport>
-      </div>
-    </section>
-
-    <!-- ══════════════════════════════════════
-         7 · WHY GITWAND — the 4 differentiators
-    ══════════════════════════════════════ -->
-    <section class="why-section">
-      <div class="section-inner">
-        <h2 class="section-title">{{ t.whyTitle }}</h2>
-        <p class="section-sub">{{ t.whySub }}</p>
-        <div class="why-grid">
-          <article class="why-card">
-            <div class="why-card__badge why-card__badge--purple">0</div>
-            <h3 class="why-card__title">{{ t.why1t }}</h3>
-            <p class="why-card__desc">{{ t.why1d }}</p>
-          </article>
-          <article class="why-card">
-            <div class="why-card__badge why-card__badge--green">MIT</div>
-            <h3 class="why-card__title">{{ t.why2t }}</h3>
-            <p class="why-card__desc">{{ t.why2d }}</p>
-          </article>
-          <article class="why-card">
-            <div class="why-card__badge why-card__badge--purple">~8&nbsp;MB</div>
-            <h3 class="why-card__title">{{ t.why3t }}</h3>
-            <p class="why-card__desc">{{ t.why3d }}</p>
-          </article>
-          <article class="why-card">
-            <div class="why-card__badge why-card__badge--green">MCP</div>
-            <h3 class="why-card__title">{{ t.why4t }}</h3>
-            <p class="why-card__desc">{{ t.why4d }}</p>
-          </article>
+          <div class="nc-card nc-card--stat">
+            <span class="nc-eyebrow nc-eyebrow--sm">{{ nt.b4k }}</span>
+            <div><div class="nc-card__n">{{ nt.b4n }}</div><div class="nc-card__desc">{{ nt.b4d }}</div></div>
+          </div>
+          <div class="nc-card">
+            <span class="nc-eyebrow nc-eyebrow--sm">{{ nt.b5k }}</span>
+            <div class="nc-card__title">{{ nt.b5t }}</div>
+            <div class="nc-tags">
+              <span class="nc-tag nc-tag--outline">Claude Code</span>
+              <span class="nc-tag nc-tag--outline">Cursor</span>
+              <span class="nc-tag nc-tag--outline">Windsurf</span>
+              <span class="nc-tag nc-tag--outline">Continue</span>
+            </div>
+          </div>
+          <div class="nc-card nc-card--stat">
+            <span class="nc-eyebrow nc-eyebrow--sm">{{ nt.b6k }}</span>
+            <div><div class="nc-card__n">{{ nt.b6n }}</div><div class="nc-card__desc">{{ nt.b6d }}</div></div>
+          </div>
         </div>
       </div>
     </section>
 
     <!-- ══════════════════════════════════════
-         8 · MINI COMPARE
+         5 · BANDE DE CHIFFRES
     ══════════════════════════════════════ -->
-    <section class="mini-compare-section">
-      <div class="section-inner">
-        <h2 class="section-title">{{ t.miniCompareTitle }}</h2>
-        <p class="section-sub">{{ t.miniCompareSub }}</p>
-        <div class="mini-compare-wrap">
-          <table class="mini-compare">
-            <thead>
-              <tr>
-                <th></th>
-                <th class="mc-gw">GitWand</th>
-                <th>GitHub Desktop</th>
-                <th>GitKraken</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td class="mc-feat">{{ t.mcRow1 }}</td>
-                <td class="mc-gw"><span class="mc-yes">✓</span></td>
-                <td><span class="mc-no">✗</span></td>
-                <td><span class="mc-partial">AI only</span></td>
-              </tr>
-              <tr>
-                <td class="mc-feat">{{ t.mcRow2 }}</td>
-                <td class="mc-gw"><span class="mc-yes">✓</span></td>
-                <td><span class="mc-yes">✓</span></td>
-                <td><span class="mc-no">✗</span></td>
-              </tr>
-              <tr>
-                <td class="mc-feat">{{ t.mcRow3 }}</td>
-                <td class="mc-gw"><span class="mc-yes">✓</span></td>
-                <td><span class="mc-no">✗</span></td>
-                <td><span class="mc-no">✗</span></td>
-              </tr>
-              <tr>
-                <td class="mc-feat">{{ t.mcRow4 }}</td>
-                <td class="mc-gw"><span class="mc-yes">✓</span></td>
-                <td><span class="mc-no">✗</span></td>
-                <td><span class="mc-yes">✓</span></td>
-              </tr>
-            </tbody>
-          </table>
+    <section class="nc-band">
+      <div class="nc-wrap nc-band__grid">
+        <div><div class="nc-band__n">{{ AUTO_PATTERN_COUNT }}</div><div class="nc-band__l">{{ nt.band1 }}</div></div>
+        <div><div class="nc-band__n">1662</div><div class="nc-band__l">{{ nt.band2 }}</div></div>
+        <div><div class="nc-band__n">3</div><div class="nc-band__l">{{ nt.band3 }}</div></div>
+        <div><div class="nc-band__n">0</div><div class="nc-band__l">{{ nt.band4 }}</div></div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════
+         6 · LES HUIT PATTERNS
+    ══════════════════════════════════════ -->
+    <section id="patterns" class="nc-section">
+      <div class="nc-wrap">
+        <div class="nc-head">
+          <h2 class="nc-h2">{{ nt.pTitle }}</h2>
+          <span class="nc-head__sub">{{ nt.pSub }}</span>
         </div>
-        <div class="section-cta-row">
-          <a href="/compare/" class="btn-ghost">{{ t.miniCompareCta }}</a>
+        <div class="nc-tiles">
+          <div class="nc-tile" v-for="(p, i) in NC_PATTERNS" :key="p">
+            <span class="nc-tile__n">{{ String(i + 1).padStart(2, '0') }}</span>
+            <div class="nc-tile__name">{{ p }}</div>
+            <div class="nc-tile__desc">{{ nt['p' + (i + 1)] }}</div>
+          </div>
+          <div class="nc-tile">
+            <span class="nc-tile__n">06 · 07 · 08</span>
+            <div class="nc-tile__name nc-tile__name--muted">{{ nt.p6t }}</div>
+            <div class="nc-tile__desc">{{ nt.p6 }}</div>
+          </div>
         </div>
       </div>
     </section>
 
     <!-- ══════════════════════════════════════
-         9 · AI AGENTS TEASER
+         7 · TROIS INTERFACES, UN MOTEUR
     ══════════════════════════════════════ -->
-    <section class="agents-teaser">
-      <div class="section-inner">
-        <span class="badge">{{ t.llmBadge }}</span>
-        <h2 class="section-title" style="margin-top:16px">{{ t.llmTitle }}</h2>
-        <p class="section-sub">{{ t.llmSub }}</p>
-        <div class="agents-chips">
-          <span class="llm-chip">Claude Code</span>
-          <span class="llm-chip">Cursor</span>
-          <span class="llm-chip">opencode</span>
-          <span class="llm-chip">Windsurf</span>
-          <span class="llm-chip">Continue</span>
+    <section id="interfaces" class="nc-section">
+      <div class="nc-wrap">
+        <div class="nc-head">
+          <h2 class="nc-h2">{{ nt.iTitle }}</h2>
+          <span class="nc-head__sub">{{ nt.iSub }}</span>
         </div>
-        <div class="section-cta-row">
-          <a href="/ai-agents" class="btn-primary">{{ t.agentsCta }}</a>
+        <div class="nc-trio">
+          <a class="nc-face" href="/guide/desktop">
+            <img src="/screenshots/GitWand_changes.png" :alt="nt.i1t" loading="lazy" width="1842" height="931" />
+            <div class="nc-face__body">
+              <div class="nc-face__title">{{ nt.i1t }}</div>
+              <div class="nc-face__desc">{{ nt.i1d }}</div>
+            </div>
+          </a>
+          <a class="nc-face" href="/guide/cli">
+            <div class="nc-face__term">
+              <div><span class="nc-face__prompt">$</span> {{ nt.cli1 }}</div>
+              <div class="nc-face__ok">{{ nt.cli2 }}</div>
+              <div class="nc-face__warn">{{ nt.cli3 }}</div>
+              <div class="nc-face__dim">{{ nt.cli4 }}</div>
+            </div>
+            <div class="nc-face__body">
+              <div class="nc-face__title">{{ nt.i2t }}</div>
+              <div class="nc-face__desc">{{ nt.i2d }}</div>
+            </div>
+          </a>
+          <a class="nc-face" href="/guide/vscode">
+            <img src="/screenshots/GitWand_GitTree.png" :alt="nt.i3t" loading="lazy" width="1842" height="931" />
+            <div class="nc-face__body">
+              <div class="nc-face__title">{{ nt.i3t }}</div>
+              <div class="nc-face__desc">{{ nt.i3d }}</div>
+            </div>
+          </a>
         </div>
       </div>
     </section>
+
+    <!-- ══════════════════════════════════════
+         8 · AGENTS IA — serveur MCP
+    ══════════════════════════════════════ -->
+    <section id="agents" class="nc-section">
+      <div class="nc-wrap">
+        <div class="nc-spot">
+          <div class="nc-spot__text">
+            <span class="nc-eyebrow nc-eyebrow--on-spot">{{ nt.aEyebrow }}</span>
+            <h2 class="nc-h2 nc-h2--spot">{{ nt.aTitle }}</h2>
+            <p class="nc-body nc-body--spot">{{ nt.aBody }}</p>
+            <a class="nc-btn nc-btn--primary" href="/ai-agents">{{ nt.aCta }}</a>
+          </div>
+          <div class="nc-spot__code">
+            <div class="nc-spot__comment">{{ nt.aCmdNote }}</div>
+            <div>claude mcp add gitwand \</div>
+            <div class="nc-spot__cont">-- npx -y @gitwand/mcp</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════
+         9 · COMPARATIF COMPACT
+    ══════════════════════════════════════ -->
+    <section id="compare" class="nc-section">
+      <div class="nc-wrap">
+        <div class="nc-head">
+          <h2 class="nc-h2">{{ nt.cmpTitle }}</h2>
+          <a class="nc-head__link" href="/compare/">{{ nt.cmpCta }}</a>
+        </div>
+        <div class="nc-matrix">
+          <div class="nc-matrix__row nc-matrix__row--head">
+            <span></span>
+            <span class="nc-matrix__self">GitWand</span>
+            <span>GitHub Desktop</span>
+            <span>GitKraken</span>
+          </div>
+          <div class="nc-matrix__row" v-for="row in NC_COMPARE" :key="row.key">
+            <span>{{ t[row.key] }}</span>
+            <span class="nc-matrix__yes">{{ row.gw }}</span>
+            <span :class="row.ghd === '✓' ? 'nc-matrix__other' : 'nc-matrix__no'">{{ row.ghd }}</span>
+            <span v-if="row.gk === 'ai'" class="nc-matrix__note">{{ nt.cmpAiOnly }}</span>
+            <span v-else :class="row.gk === '✓' ? 'nc-matrix__other' : 'nc-matrix__no'">{{ row.gk }}</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════
+         10 · TÉLÉCHARGEMENTS
+    ══════════════════════════════════════ -->
+    <section id="download" class="nc-section">
+      <div class="nc-wrap">
+        <div class="nc-head">
+          <h2 class="nc-h2">{{ t.platformsTitle }}</h2>
+          <span class="nc-head__sub">{{ nt.dlMeta }}</span>
+        </div>
+        <div class="nc-dl">
+          <a class="nc-dl__card" :href="dlMac"><span class="nc-dl__name">macOS</span><span class="nc-dl__sub">{{ t.plMacSub }}</span></a>
+          <a class="nc-dl__card" :href="dlLinux"><span class="nc-dl__name">Linux</span><span class="nc-dl__sub">{{ t.plLinuxSub }}</span></a>
+          <a class="nc-dl__card" :href="dlWin"><span class="nc-dl__name">Windows</span><span class="nc-dl__sub">{{ t.plWinSub }}</span></a>
+          <a class="nc-dl__card" href="https://www.npmjs.com/package/@gitwand/cli"><span class="nc-dl__name">{{ t.plCli }}</span><span class="nc-dl__sub">{{ t.plCliSub }}</span></a>
+          <a class="nc-dl__card" href="/guide/vscode"><span class="nc-dl__name">{{ t.plVscode }}</span><span class="nc-dl__sub">{{ t.plVscodeSub }}</span></a>
+        </div>
+      </div>
+    </section>
+
+    <!-- Visionneuse plein écran des captures (déclenchée depuis le hero) -->
+    <Teleport to="body">
+      <div v-if="lightboxOpen" class="lightbox-overlay" @click.self="closeLightbox">
+        <button class="lightbox-close" @click="closeLightbox" aria-label="Close">✕</button>
+        <button class="lightbox-arrow lightbox-arrow--prev" @click="lightboxPrev" aria-label="Previous">‹</button>
+        <img :src="slides[lightboxIndex].src" :alt="slides[lightboxIndex].alt" class="lightbox-img" />
+        <button class="lightbox-arrow lightbox-arrow--next" @click="lightboxNext" aria-label="Next">›</button>
+        <div class="lightbox-dots">
+          <button
+            v-for="(s, i) in slides" :key="s.src"
+            :class="['lightbox-dot', { 'lightbox-dot--active': i === lightboxIndex }]"
+            @click="lightboxIndex = i" :aria-label="s.alt"
+          ></button>
+        </div>
+      </div>
+    </Teleport>
 
     <!-- ══════════════════════════════════════
          10 · FAQ
@@ -1167,42 +1334,6 @@ function cellClass(v: CompareValue | undefined): string {
               <p>{{ item.a }}</p>
             </div>
           </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ══════════════════════════════════════
-         11 · PLATFORMS (download)
-    ══════════════════════════════════════ -->
-    <section class="platforms-section">
-      <div class="section-inner">
-        <h2 class="section-title">{{ t.platformsTitle }}</h2>
-        <div class="platforms-grid">
-          <a class="platform-card" :href="dlMac" target="_blank" rel="noopener">
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none"><path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2z" stroke="#8B5CF6" stroke-width="1.5"/><path d="M8 12.5c0-2.2 1.8-4 4-4s4 1.8 4 4-1.8 4-4 4-4-1.8-4-4z" stroke="#8B5CF6" stroke-width="1.5"/></svg>
-            <span class="pl-name">macOS</span>
-            <span class="pl-sub">{{ t.plMacSub }}</span>
-          </a>
-          <a class="platform-card" :href="dlLinux" target="_blank" rel="noopener">
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="#8B5CF6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            <span class="pl-name">Linux</span>
-            <span class="pl-sub">{{ t.plLinuxSub }}</span>
-          </a>
-          <a class="platform-card" :href="dlWin" target="_blank" rel="noopener">
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="8" height="8" rx="1" stroke="#8B5CF6" stroke-width="1.5"/><rect x="13" y="3" width="8" height="8" rx="1" stroke="#8B5CF6" stroke-width="1.5"/><rect x="3" y="13" width="8" height="8" rx="1" stroke="#8B5CF6" stroke-width="1.5"/><rect x="13" y="13" width="8" height="8" rx="1" stroke="#8B5CF6" stroke-width="1.5"/></svg>
-            <span class="pl-name">Windows</span>
-            <span class="pl-sub">{{ t.plWinSub }}</span>
-          </a>
-          <a class="platform-card" href="/guide/cli">
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none"><path d="M12 2l3 7h7l-5.5 4 2 7L12 16l-6.5 4 2-7L2 9h7l3-7z" stroke="#10B981" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            <span class="pl-name">{{ t.plCli }}</span>
-            <span class="pl-sub">{{ t.plCliSub }}</span>
-          </a>
-          <a class="platform-card" href="https://marketplace.visualstudio.com/items?itemName=Gitwand.gitwand-vscode" target="_blank" rel="noopener">
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none"><rect x="2" y="2" width="20" height="20" rx="4" stroke="#10B981" stroke-width="1.5"/><path d="M8 14l2.5-5L13 14M9 12h3" stroke="#10B981" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M15 9v6" stroke="#10B981" stroke-width="1.5" stroke-linecap="round"/></svg>
-            <span class="pl-name">{{ t.plVscode }}</span>
-            <span class="pl-sub">{{ t.plVscodeSub }}</span>
-          </a>
         </div>
       </div>
     </section>
@@ -1307,15 +1438,6 @@ function cellClass(v: CompareValue | undefined): string {
       </div>
     </section>
 
-    <!-- Featured badges -->
-    <section class="badge-section">
-      <a href="https://nicklaunches.com/products/gitwand/?utm_source=gitwand.app&utm_medium=badge&utm_campaign=featured" target="_blank" rel="noopener">
-        <img src="https://nicklaunches.com/badges/featured-dark.png" alt="GitWand on Nick Launches" width="244" height="56" />
-      </a>
-      <a href="https://www.foundrlist.com/product/gitwand?utm_source=badge&utm_medium=embed" target="_blank" rel="noopener">
-        <img src="https://www.foundrlist.com/api/badge/gitwand" alt="Featured on FoundrList" width="150" height="48" />
-      </a>
-    </section>
 
   </div>
 </template>
@@ -1333,15 +1455,15 @@ function cellClass(v: CompareValue | undefined): string {
   align-items: center;
   gap: 2px;
   padding: 3px;
-  background: rgba(124, 58, 237, 0.12);
-  border: 1px solid rgba(124, 58, 237, 0.35);
+  background: rgba(145, 132, 217, 0.12);
+  border: 1px solid rgba(145, 132, 217, 0.35);
   border-radius: 10px;
   backdrop-filter: blur(8px);
 }
 .lang-pill {
   background: transparent;
   border: none;
-  color: #c4b5fd;
+  color: var(--nc-accent-300);
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -1353,15 +1475,15 @@ function cellClass(v: CompareValue | undefined): string {
   line-height: 1.1;
 }
 .lang-pill:hover {
-  background: rgba(124, 58, 237, 0.2);
+  background: rgba(145, 132, 217, 0.2);
   color: #e9e5ff;
 }
 .lang-pill--active {
-  background: rgba(124, 58, 237, 0.45);
+  background: rgba(145, 132, 217, 0.45);
   color: #ffffff;
 }
 .lang-pill--active:hover {
-  background: rgba(124, 58, 237, 0.55);
+  background: rgba(145, 132, 217, 0.55);
   color: #ffffff;
 }
 
@@ -1369,20 +1491,22 @@ function cellClass(v: CompareValue | undefined): string {
    Base
 ─────────────────────────────────────────── */
 .gw-landing {
-  --gw-purple:       #7C3AED;
-  --gw-purple-light: #8B5CF6;
-  --gw-purple-dark:  #5B21B6;
-  --gw-green:        #10B981;
-  --gw-green-dark:   #059669;
-  --gw-bg:           #0c0c1a;
-  --gw-bg-2:         #111120;
-  --gw-bg-card:      #16162a;
-  --gw-bg-card-2:    #1c1c32;
-  --gw-border:       rgba(124,58,237,0.18);
-  --gw-border-soft:  rgba(255,255,255,0.06);
-  --gw-text:         #e2e8f0;
-  --gw-text-muted:   #94a3b8;
-  --gw-radius:       12px;
+  /* Alias vers les tokens Nocturne — cf. custom.css */
+  --gw-purple:       var(--nc-accent-500);
+  --gw-purple-light: var(--nc-accent-300);
+  --gw-purple-dark:  var(--nc-accent-700);
+  --gw-green:        var(--nc-settled);
+  --gw-green-dark:   #5cbb95;
+  --gw-bg:           var(--nc-canvas);
+  --gw-bg-2:         var(--nc-bg);
+  --gw-bg-card:      var(--nc-surface);
+  --gw-bg-card-2:    #2b2d3c;
+  --gw-border:       var(--nc-neutral-800);
+  --gw-border-soft:  var(--nc-rule-soft);
+  --gw-text:         var(--nc-text);
+  --gw-text-muted:   var(--nc-neutral-400);
+  --gw-radius:       var(--nc-radius-lg);
+  --gw-surface:      var(--nc-surface);
 
   width: 100%;
   background: var(--gw-bg);
@@ -1405,30 +1529,6 @@ function cellClass(v: CompareValue | undefined): string {
   text-align: center;
   color: var(--gw-text);
   margin: 0 0 12px;
-}
-.section-sub {
-  text-align: center;
-  color: var(--gw-text-muted);
-  font-size: 16px;
-  margin: 0 0 52px;
-}
-/* Brand accent on the second line of the hero H1. Solid, not clipped-gradient
-   text: a transparent text fill paints nothing wherever `background-clip: text`
-   isn't honoured (forced-colors, print), and the sweep bought nothing the brand
-   purple doesn't already carry. */
-.gradient {
-  color: var(--gw-purple-light);
-}
-.badge {
-  display: inline-block;
-  padding: 4px 12px;
-  border-radius: 20px;
-  border: 1px solid var(--gw-border);
-  font-size: 12px;
-  color: var(--gw-purple-light);
-  background: rgba(124,58,237,0.08);
-  margin-bottom: 20px;
-  letter-spacing: 0.02em;
 }
 .btn-primary {
   display: inline-flex;
@@ -1487,574 +1587,15 @@ function cellClass(v: CompareValue | undefined): string {
   padding: 14px 28px;
   font-size: 16px;
 }
-
-/* ───────────────────────────────────────────
-   HERO
-─────────────────────────────────────────── */
-.hero {
-  position: relative;
-  overflow: hidden;
-  padding: 88px 0 68px;
-  background: var(--gw-bg);
-  border-bottom: 1px solid var(--gw-border-soft);
-}
-
-/* ── Ambient depth layers ── */
-.hero-bg {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-.hero-bg__grid {
-  position: absolute;
-  inset: 0;
-  background-image: radial-gradient(rgba(148,163,184,0.13) 1px, transparent 1px);
-  background-size: 28px 28px;
-  /* Fade the dots out toward the bottom so the grid doesn't fight the content */
-  -webkit-mask-image: radial-gradient(ellipse 90% 75% at 50% 0%, #000 30%, transparent 75%);
-  mask-image: radial-gradient(ellipse 90% 75% at 50% 0%, #000 30%, transparent 75%);
-}
-.hero-bg__orb {
-  position: absolute;
-  border-radius: 50%;
-  filter: blur(90px);
-  opacity: 0.55;
-  animation: orbFloat 14s ease-in-out infinite alternate;
-}
-.hero-bg__orb--purple {
-  width: 560px;
-  height: 420px;
-  top: -160px;
-  right: -80px;
-  background: radial-gradient(circle, rgba(124,58,237,0.38) 0%, transparent 70%);
-}
-.hero-bg__orb--green {
-  width: 420px;
-  height: 340px;
-  bottom: -180px;
-  left: -120px;
-  background: radial-gradient(circle, rgba(16,185,129,0.20) 0%, transparent 70%);
-  animation-delay: -7s;
-}
 @keyframes orbFloat {
   from { transform: translate3d(0, 0, 0) scale(1); }
   to   { transform: translate3d(-30px, 24px, 0) scale(1.08); }
 }
-@media (prefers-reduced-motion: reduce) {
-  .hero-bg__orb { animation: none; }
-}
-.hero-inner { position: relative; z-index: 1; }
-
-/* ── Announcement pill (replaces the static version badge) ── */
-.hero-announce {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 14px 6px 11px;
-  margin-bottom: 22px;
-  border-radius: 999px;
-  border: 1px solid var(--gw-border);
-  background: linear-gradient(120deg, rgba(124,58,237,0.14), rgba(16,185,129,0.07));
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--gw-purple-light);
-  letter-spacing: 0.01em;
-  text-decoration: none;
-  transition: border-color 0.15s, box-shadow 0.15s;
-}
-.hero-announce:hover {
-  border-color: rgba(124,58,237,0.55);
-  box-shadow: 0 0 20px rgba(124,58,237,0.25);
-}
-.hero-announce__dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--gw-green);
-  box-shadow: 0 0 0 0 rgba(16,185,129,0.5);
-  animation: announcePulse 2.4s ease-out infinite;
-}
 @keyframes announcePulse {
-  0%   { box-shadow: 0 0 0 0 rgba(16,185,129,0.45); }
-  70%  { box-shadow: 0 0 0 7px rgba(16,185,129,0); }
-  100% { box-shadow: 0 0 0 0 rgba(16,185,129,0); }
+  0%   { box-shadow: 0 0 0 0 rgba(127, 214, 176,0.45); }
+  70%  { box-shadow: 0 0 0 7px rgba(127, 214, 176,0); }
+  100% { box-shadow: 0 0 0 0 rgba(127, 214, 176,0); }
 }
-@media (prefers-reduced-motion: reduce) {
-  .hero-announce__dot { animation: none; }
-}
-.hero-announce__arrow {
-  transition: transform 0.15s;
-}
-.hero-announce:hover .hero-announce__arrow { transform: translateX(3px); }
-
-/* ── Benefit checklist ── */
-.hero-points {
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-  margin: 0 0 30px;
-  padding: 0;
-}
-.hero-point {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 14px;
-  color: var(--gw-text);
-}
-.hero-point svg { color: var(--gw-green); flex-shrink: 0; }
-.hero-point span { color: var(--gw-text-muted); }
-.hero-meta { color: var(--gw-text-muted); opacity: 0.85; }
-.hero-inner {
-  max-width: 1100px;
-  margin: 0 auto;
-  padding: 0 28px;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 60px;
-  align-items: center;
-}
-.hero-h1 {
-  font-size: clamp(32px, 5vw, 52px);
-  font-weight: 800;
-  line-height: 1.15;
-  letter-spacing: -0.02em;
-  margin: 0 0 20px;
-  color: var(--gw-text);
-}
-.hero-sub {
-  font-size: 17px;
-  color: var(--gw-text-muted);
-  line-height: 1.65;
-  margin: 0 0 22px;
-  max-width: 460px;
-}
-.hero-ctas {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-bottom: 20px;
-}
-.hero-platforms {
-  font-size: 12px;
-  color: var(--gw-text-muted);
-  margin: 0;
-  letter-spacing: 0.04em;
-}
-
-/* ── App window (hero) ── */
-.app-window {
-  border-radius: 10px;
-  overflow: hidden;
-  border: 1px solid rgba(255,255,255,0.08);
-  box-shadow: 0 24px 60px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.04);
-  background: #12121f;
-}
-.app-screenshot {
-  display: block;
-  width: 100%;
-  height: auto;
-}
-.preview-screenshot {
-  display: block;
-  width: 100%;
-  height: auto;
-  margin-top: 8px;
-}
-.win-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 14px;
-  background: #1a1a2e;
-  border-bottom: 1px solid rgba(255,255,255,0.06);
-  position: relative;
-}
-.win-bar-right {
-  margin-left: auto;
-  display: flex;
-  gap: 2px;
-}
-.tl {
-  width: 11px;
-  height: 11px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-.tl-r { background: #ff5f57; }
-.tl-y { background: #febc2e; }
-.tl-g { background: #28c840; }
-.win-title {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  font-size: 11px;
-  color: #6c7086;
-  white-space: nowrap;
-}
-.win-body {
-  display: flex;
-  height: 300px;
-}
-
-/* ── Sidebar ── */
-.win-sidebar {
-  width: 175px;
-  min-width: 175px;
-  background: #12121f;
-  border-right: 1px solid rgba(255,255,255,0.05);
-  padding: 10px 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-.win-sidebar--lg {
-  width: 200px;
-  min-width: 200px;
-}
-.sb-section-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 12px;
-  font-size: 10px;
-  font-weight: 700;
-  color: #6c7086;
-  letter-spacing: 0.06em;
-}
-.sb-count {
-  font-size: 9px;
-  padding: 0 5px;
-  border-radius: 8px;
-  background: rgba(255,255,255,0.08);
-  color: #94a3b8;
-}
-.sb-count--green { background: rgba(16,185,129,0.15); color: #10B981; }
-.sb-count--red   { background: rgba(243,139,168,0.15); color: #f38ba8; }
-.sb-count--yellow { background: rgba(249,226,175,0.15); color: #f9e2af; }
-.sb-file {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 4px 12px;
-  font-size: 11px;
-  color: #cdd6f4;
-  cursor: default;
-}
-.sb-file--active { background: rgba(124,58,237,0.12); }
-.sb-file--conflict { opacity: 0.9; }
-.sb-badge {
-  font-size: 9px;
-  font-weight: 700;
-  width: 14px;
-  text-align: center;
-  flex-shrink: 0;
-}
-.sb-added   { color: #a6e3a1; }
-.sb-mod     { color: #f9e2af; }
-.sb-conflict { color: #f38ba8; }
-.sb-name {
-  font-family: 'Courier New', monospace;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.sb-commit {
-  margin-top: auto;
-  padding: 10px;
-  border-top: 1px solid rgba(255,255,255,0.05);
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.sb-input {
-  width: 100%;
-  background: rgba(255,255,255,0.05);
-  border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 5px;
-  padding: 5px 8px;
-  font-size: 10px;
-  color: #94a3b8;
-  outline: none;
-}
-.sb-btn {
-  background: var(--gw-purple);
-  color: #fff;
-  border-radius: 5px;
-  padding: 5px 0;
-  font-size: 10px;
-  font-weight: 600;
-  cursor: default;
-  text-align: center;
-}
-
-/* ── Diff viewer ── */
-.win-diff {
-  flex: 1;
-  overflow: hidden;
-  background: #0e0e1a;
-  display: flex;
-  flex-direction: column;
-}
-.win-diff--lg {
-  flex: 1;
-}
-.diff-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 14px;
-  background: #12121f;
-  border-bottom: 1px solid rgba(255,255,255,0.05);
-}
-.diff-actions {
-  display: flex;
-  gap: 4px;
-}
-.diff-pill {
-  font-size: 10px;
-  padding: 2px 8px;
-  border-radius: 4px;
-  background: rgba(124,58,237,0.15);
-  color: var(--gw-purple-light);
-  cursor: default;
-}
-.diff-pill--ghost {
-  background: none;
-  color: #6c7086;
-}
-.diff-lines {
-  padding: 8px 0;
-  overflow: hidden;
-  flex: 1;
-}
-.dl {
-  display: flex;
-  font-family: 'Courier New', 'Fira Code', monospace;
-  font-size: 10.5px;
-  line-height: 1.7;
-  white-space: nowrap;
-}
-.dl-n { color: #cdd6f4; }
-.dl-a { color: #a6e3a1; background: rgba(166,227,161,0.07); }
-.dl-d { color: #f38ba8; background: rgba(243,139,168,0.07); text-decoration: line-through; opacity: 0.7; }
-.ln {
-  width: 36px;
-  text-align: right;
-  padding-right: 12px;
-  color: #45475a;
-  flex-shrink: 0;
-  user-select: none;
-}
-.dc { flex: 1; padding: 0 14px; }
-.k  { color: #cba6f7; }
-.s  { color: #a6e3a1; }
-.fn { color: #89b4fa; }
-
-/* ───────────────────────────────────────────
-   STATS BAR
-─────────────────────────────────────────── */
-.stats-bar {
-  display: flex;
-  align-items: stretch;
-  justify-content: center;
-  gap: 18px;
-  padding: 36px 28px;
-  border-bottom: 1px solid var(--gw-border-soft);
-  background: var(--gw-bg-2);
-}
-.stat {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  padding: 22px 44px 20px;
-  background: var(--gw-bg-card);
-  border: 1px solid var(--gw-border);
-  border-radius: var(--gw-radius);
-  overflow: hidden;
-  transition: border-color 0.2s, transform 0.15s, box-shadow 0.2s;
-}
-/* Gradient hairline across the top of each stat card */
-.stat::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 2px;
-  background: linear-gradient(90deg, var(--gw-purple-light), var(--gw-green));
-  opacity: 0.55;
-  transition: opacity 0.2s;
-}
-.stat:hover {
-  border-color: rgba(124,58,237,0.45);
-  transform: translateY(-3px);
-  box-shadow: 0 14px 34px rgba(0,0,0,0.35);
-}
-.stat:hover::before { opacity: 1; }
-.stat-n {
-  font-size: 38px;
-  font-weight: 800;
-  color: var(--gw-purple-light);
-  line-height: 1;
-}
-.stat-l {
-  font-size: 12px;
-  color: var(--gw-text-muted);
-  text-align: center;
-}
-.stat-sep { display: none; }
-
-/* ───────────────────────────────────────────
-   CONFLICT RESOLUTION DEMO
-─────────────────────────────────────────── */
-.conflict-section {
-  padding: 80px 0;
-  background: var(--gw-bg-2);
-  border-top: 1px solid var(--gw-border-soft);
-  border-bottom: 1px solid var(--gw-border-soft);
-}
-.conflict-demo {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-}
-.conflict-panel {
-  flex: 1;
-  border-radius: var(--gw-radius);
-  overflow: hidden;
-  border: 1px solid var(--gw-border);
-  background: #0e0e1a;
-}
-.conflict-panel-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 16px;
-  font-size: 12px;
-  font-weight: 600;
-  background: #12121f;
-  border-bottom: 1px solid rgba(255,255,255,0.05);
-  color: var(--gw-text-muted);
-}
-.panel-dot {
-  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
-}
-.panel-dot--red   { background: #f38ba8; }
-.panel-dot--green { background: #10B981; }
-.conflict-code {
-  padding: 16px;
-  font-family: 'Courier New', monospace;
-  font-size: 12px;
-  line-height: 1.8;
-}
-.cc-line { padding: 1px 4px; border-radius: 3px; }
-.cc-conflict { color: #6c7086; font-style: italic; }
-.cc-ours     { color: #f38ba8; background: rgba(243,139,168,0.07); }
-.cc-theirs   { color: #a6e3a1; background: rgba(166,227,161,0.07); }
-.cc-resolved { color: #a6e3a1; background: rgba(166,227,161,0.07); }
-.conflict-badge {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 10px 16px;
-  font-size: 11px;
-  color: #10B981;
-  background: rgba(16,185,129,0.08);
-  border-top: 1px solid rgba(16,185,129,0.12);
-}
-.conflict-arrow {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-  color: var(--gw-purple-light);
-  font-size: 11px;
-  font-weight: 600;
-}
-
-/* ───────────────────────────────────────────
-   APP PREVIEW
-─────────────────────────────────────────── */
-.preview-section {
-  padding: 80px 0;
-  background: var(--gw-bg);
-}
-.preview-window {
-  border-radius: 12px;
-  overflow: hidden;
-  border: 1px solid rgba(255,255,255,0.08);
-  box-shadow: 0 32px 80px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.04);
-  background: #12121f;
-  margin-top: 8px;
-}
-.preview-window.preview-screenshot {
-  background: transparent;
-}
-.preview-slideshow {
-  overflow: hidden;
-  position: relative;
-}
-.slideshow-track {
-  display: flex;
-  transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-  will-change: transform;
-}
-.slideshow-img {
-  flex: 0 0 100%;
-  width: 100%;
-  display: block;
-  object-fit: cover;
-}
-.slideshow-dots {
-  display: flex;
-  justify-content: center;
-  gap: 10px;
-  margin-top: 20px;
-}
-.slideshow-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: rgba(255,255,255,0.18);
-  border: none;
-  cursor: pointer;
-  padding: 0;
-  transition: background 0.2s, transform 0.2s;
-}
-.slideshow-dot--active {
-  background: var(--gw-purple-light);
-  transform: scale(1.4);
-}
-.slideshow-dot:hover:not(.slideshow-dot--active) {
-  background: rgba(255,255,255,0.4);
-}
-.slideshow-arrow {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 2;
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  background: rgba(0,0,0,0.5);
-  border: 1px solid rgba(255,255,255,0.15);
-  color: rgba(255,255,255,0.85);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.2s, color 0.2s;
-  backdrop-filter: blur(4px);
-}
-.slideshow-arrow--prev { left: 12px; }
-.slideshow-arrow--next { right: 12px; }
-.slideshow-arrow:hover { background: rgba(124,58,237,0.6); color: #fff; }
-.slideshow-img { cursor: zoom-in; }
 
 /* ── Lightbox ──────────────────────────────── */
 .lightbox-overlay {
@@ -2109,7 +1650,7 @@ function cellClass(v: CompareValue | undefined): string {
   justify-content: center;
   transition: background 0.2s, color 0.2s;
 }
-.lightbox-arrow:hover { background: rgba(124,58,237,0.6); color: #fff; }
+.lightbox-arrow:hover { background: rgba(145, 132, 217,0.6); color: #fff; }
 .lightbox-dots {
   position: fixed;
   bottom: 24px;
@@ -2129,62 +1670,17 @@ function cellClass(v: CompareValue | undefined): string {
   transition: background 0.2s, transform 0.2s;
 }
 .lightbox-dot--active {
-  background: #8B5CF6;
+  background: var(--nc-accent-400);
   transform: scale(1.4);
 }
 @media (max-width: 600px) {
   .lightbox-arrow { display: none; }
   .lightbox-overlay { gap: 0; padding: 56px 8px 72px; }
-}
-.preview-window .win-body {
-  height: 380px;
+
 }
 
-/* ───────────────────────────────────────────
-   PLATFORMS
-─────────────────────────────────────────── */
-.platforms-section {
-  padding: 80px 0;
-  background: var(--gw-bg-2);
-  border-top: 1px solid var(--gw-border-soft);
-}
 .platforms-section .section-title {
   margin-bottom: 48px;
-}
-.platforms-grid {
-  display: flex;
-  justify-content: center;
-  flex-wrap: wrap;
-  gap: 16px;
-}
-.platform-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  padding: 24px 32px;
-  background: var(--gw-bg-card);
-  border: 1px solid var(--gw-border);
-  border-radius: var(--gw-radius);
-  min-width: 140px;
-  text-decoration: none;
-  color: inherit;
-  cursor: pointer;
-  transition: border-color 0.15s, transform 0.1s;
-}
-.platform-card:hover {
-  border-color: var(--gw-purple);
-  transform: translateY(-2px);
-}
-.pl-name {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--gw-text);
-}
-.pl-sub {
-  font-size: 11px;
-  color: var(--gw-text-muted);
-  text-align: center;
 }
 
 /* ───────────────────────────────────────────
@@ -2192,7 +1688,7 @@ function cellClass(v: CompareValue | undefined): string {
 ─────────────────────────────────────────── */
 .cta-section {
   padding: 100px 0;
-  background: radial-gradient(ellipse 70% 80% at 50% 100%, rgba(124,58,237,0.15) 0%, transparent 65%),
+  background: radial-gradient(ellipse 70% 80% at 50% 100%, rgba(145, 132, 217,0.15) 0%, transparent 65%),
               var(--gw-bg);
   border-top: 1px solid var(--gw-border-soft);
 }
@@ -2207,19 +1703,6 @@ function cellClass(v: CompareValue | undefined): string {
   gap: 16px;
 }
 .cta-logo { opacity: 0.9; }
-.badge-section {
-  padding: 40px 0 60px;
-  background: var(--gw-bg);
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: center;
-  gap: 20px;
-}
-.badge-section img {
-  display: block;
-  border: 0;
-}
 .cta-title {
   font-size: clamp(24px, 4vw, 36px);
   font-weight: 800;
@@ -2238,148 +1721,6 @@ function cellClass(v: CompareValue | undefined): string {
   flex-wrap: wrap;
   justify-content: center;
   margin-top: 8px;
-}
-
-/* ───────────────────────────────────────────
-   LLM / MCP SECTION
-─────────────────────────────────────────── */
-.llm-section {
-  padding: 96px 0;
-  background: linear-gradient(180deg, var(--gw-bg-2) 0%, var(--gw-bg) 100%);
-  border-top: 1px solid var(--gw-border-soft);
-  border-bottom: 1px solid var(--gw-border-soft);
-}
-.llm-section .section-sub {
-  margin-bottom: 60px;
-}
-.llm-layout {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 56px;
-  align-items: start;
-}
-.llm-steps {
-  display: flex;
-  flex-direction: column;
-}
-.llm-step {
-  display: flex;
-  gap: 20px;
-  align-items: flex-start;
-}
-.llm-step-num {
-  flex-shrink: 0;
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  background: rgba(124,58,237,0.15);
-  border: 1.5px solid rgba(124,58,237,0.4);
-  color: var(--gw-purple-light);
-  font-size: 14px;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  letter-spacing: 0;
-}
-.llm-step-num--ai {
-  background: linear-gradient(135deg, rgba(124,58,237,0.25), rgba(16,185,129,0.2));
-  border-color: rgba(16,185,129,0.5);
-  color: #6ee7b7;
-  font-size: 12px;
-}
-.llm-step-body {
-  padding-top: 8px;
-}
-.llm-step-title {
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--gw-text);
-  margin: 0 0 6px;
-}
-.llm-step-desc {
-  font-size: 14px;
-  color: var(--gw-text-muted);
-  line-height: 1.65;
-  margin: 0;
-}
-.llm-connector {
-  width: 1.5px;
-  height: 32px;
-  background: linear-gradient(180deg, rgba(124,58,237,0.4), rgba(124,58,237,0.15));
-  margin: 6px 0 6px 19px;
-}
-.llm-code-card {
-  background: var(--gw-bg-card);
-  border: 1px solid var(--gw-border);
-  border-radius: var(--gw-radius);
-  overflow: hidden;
-}
-.llm-code-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 14px;
-  background: #1a1a2e;
-  border-bottom: 1px solid rgba(255,255,255,0.06);
-}
-.llm-code-title {
-  font-size: 11px;
-  color: #6c7086;
-  margin-left: 6px;
-}
-.llm-code-block {
-  margin: 0;
-  padding: 20px 22px;
-  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
-  font-size: 13px;
-  line-height: 1.7;
-  color: var(--gw-text);
-  background: transparent;
-  border: none;
-  overflow-x: auto;
-}
-.lc-k { color: #c4b5fd; }
-.lc-s { color: #a6e3a1; }
-.lc-p { color: #94a3b8; }
-.llm-compat {
-  padding: 16px 20px;
-  border-top: 1px solid rgba(255,255,255,0.05);
-}
-.llm-compat-label {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--gw-text-muted);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  display: block;
-  margin-bottom: 10px;
-}
-.llm-compat-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.llm-chip {
-  font-size: 12px;
-  padding: 3px 10px;
-  border-radius: 20px;
-  border: 1px solid var(--gw-border);
-  color: var(--gw-purple-light);
-  background: rgba(124,58,237,0.07);
-}
-.llm-docs-link {
-  display: block;
-  padding: 14px 20px;
-  border-top: 1px solid rgba(255,255,255,0.05);
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--gw-purple-light);
-  text-decoration: none;
-  transition: color 0.15s;
-}
-.llm-docs-link:hover {
-  color: var(--gw-green);
 }
 
 /* ───────────────────────────────────────────
@@ -2565,12 +1906,12 @@ function cellClass(v: CompareValue | undefined): string {
 /* "+ you?" recruitment card — dashed placeholder slot in the grid */
 .contributor-card--you {
   border-style: dashed;
-  border-color: rgba(124,58,237,0.4);
-  background: rgba(124,58,237,0.04);
+  border-color: rgba(145, 132, 217,0.4);
+  background: rgba(145, 132, 217,0.04);
 }
 .contributor-card--you:hover {
   border-style: solid;
-  background: rgba(124,58,237,0.10);
+  background: rgba(145, 132, 217,0.10);
 }
 .contributor-card--you .contributor-name { color: var(--gw-purple-light); }
 .contributor-avatar--you {
@@ -2579,9 +1920,9 @@ function cellClass(v: CompareValue | undefined): string {
   font-size: 22px;
   font-weight: 700;
   color: var(--gw-purple-light);
-  background: rgba(124,58,237,0.10);
+  background: rgba(145, 132, 217,0.10);
   border-style: dashed;
-  border-color: rgba(124,58,237,0.4);
+  border-color: rgba(145, 132, 217,0.4);
 }
 
 /* ───────────────────────────────────────────
@@ -2623,469 +1964,18 @@ function cellClass(v: CompareValue | undefined): string {
 .sponsor-btn {
   flex-shrink: 0;
 }
-
-/* ───────────────────────────────────────────
-   COMPARISON TABLE
-─────────────────────────────────────────── */
-.compare-section {
-  padding: 96px 0;
-  background: var(--gw-bg-2);
-  border-top: 1px solid var(--gw-border-soft);
-}
 .compare-section .section-title { margin-bottom: 12px; }
-.compare-section .section-sub   { margin-bottom: 48px; }
-
-.compare-wrap {
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-  border: 1px solid var(--gw-border);
-  border-radius: var(--gw-radius);
-}
-
-.compare-table {
-  width: 100%;
-  min-width: 760px;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-
-/* ── Header row ── */
-.compare-table thead th {
-  padding: 14px 12px;
-  text-align: center;
-  font-size: 12px;
-  color: var(--gw-text-muted);
-  border-bottom: 1px solid var(--gw-border);
-  background: var(--gw-bg);
-  white-space: nowrap;
-  vertical-align: bottom;
-}
-.compare-feat-col {
-  text-align: left !important;
-  width: 220px;
-  min-width: 160px;
-}
-.compare-app-col { min-width: 110px; }
-
-.compare-app--gw {
-  background: rgba(139, 92, 246, 0.07) !important;
-  border-left: 1px solid rgba(139, 92, 246, 0.25);
-  border-right: 1px solid rgba(139, 92, 246, 0.25);
-}
-.compare-app-name {
-  display: block;
-  font-weight: 700;
-  font-size: 13px;
-  color: var(--gw-text);
-  margin-bottom: 3px;
-}
-.compare-app--gw .compare-app-name { color: var(--gw-purple-light); }
-.compare-app-meta {
-  display: block;
-  font-size: 10px;
-  color: var(--gw-text-muted);
-  font-family: var(--vp-font-family-mono, monospace);
-}
-
-/* ── Category rows ── */
-.compare-category-row td {
-  padding: 20px 16px 8px;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-  color: var(--gw-purple);
-  font-family: var(--vp-font-family-mono, monospace);
-  background: var(--gw-bg);
-  border-bottom: 1px solid var(--gw-border-soft);
-}
-.compare-category-row:first-child td { padding-top: 16px; }
-.compare-category-note {
-  display: block;
-  font-size: 11px;
-  font-weight: 400;
-  letter-spacing: 0;
-  text-transform: none;
-  color: var(--gw-text-muted);
-  font-family: inherit;
-  margin-top: 3px;
-  opacity: 0.8;
-}
-
-/* ── Feature rows ── */
-.compare-feat-row {
-  border-bottom: 1px solid var(--gw-border-soft);
-  transition: background 0.1s;
-}
-.compare-feat-row:last-child { border-bottom: none; }
-.compare-feat-row:hover { background: var(--gw-surface); }
-.compare-feat-row--highlight { background: rgba(139, 92, 246, 0.03); }
-.compare-feat-row--highlight:hover { background: rgba(139, 92, 246, 0.06); }
-
-.compare-feat-name {
-  padding: 11px 16px 11px 16px;
-  font-size: 13px;
-  color: var(--gw-text-muted);
-  text-align: left;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  white-space: nowrap;
-}
-.compare-exclusive {
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--gw-purple-light);
-  background: rgba(139, 92, 246, 0.15);
-  border-radius: 3px;
-  padding: 1px 5px;
-  font-family: var(--vp-font-family-mono, monospace);
-  flex-shrink: 0;
-}
-
-/* ── Value cells ── */
-.compare-cell {
-  text-align: center;
-  padding: 11px 8px;
-  font-size: 15px;
-  font-weight: 700;
-  font-family: var(--vp-font-family-mono, monospace);
-}
-.compare-cell.compare-app--gw {
-  background: rgba(139, 92, 246, 0.07);
-  border-left: 1px solid rgba(139, 92, 246, 0.15);
-  border-right: 1px solid rgba(139, 92, 246, 0.15);
-}
-.cell-yes     { color: var(--gw-green); }
-.cell-partial { color: #f59e0b; font-size: 17px; }
-.cell-no      { color: var(--gw-border); font-size: 13px; font-weight: 400; }
-.cell-soon    { color: var(--gw-purple-light); font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; font-family: var(--vp-font-family-mono, monospace); }
-
-.compare-note {
-  margin-top: 14px;
-  text-align: center;
-  font-size: 11px;
-  color: var(--gw-text-muted);
-  font-family: var(--vp-font-family-mono, monospace);
-  opacity: 0.7;
-}
-
-/* ───────────────────────────────────────────
-   HERO VISUAL — CLI ⇄ GUI toggle (#71)
-─────────────────────────────────────────── */
-.hero-visual {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-}
-.hero-tabs {
-  display: inline-flex;
-  gap: 4px;
-  padding: 4px;
-  background: var(--gw-bg-card);
-  border: 1px solid var(--gw-border);
-  border-radius: 999px;
-}
-.hero-tab {
-  appearance: none;
-  border: none;
-  background: transparent;
-  color: var(--gw-text-muted);
-  font-size: 13px;
-  font-weight: 600;
-  padding: 6px 18px;
-  border-radius: 999px;
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-}
-.hero-tab:hover { color: var(--gw-text); }
-.hero-tab--active {
-  background: var(--gw-purple);
-  color: #fff;
-}
-/* Stack both panels in a single grid cell: the stage sizes to the taller of the
-   two, so toggling the tab never changes the visual's height (no reflow). */
-.hero-stage {
-  display: grid;
-  width: 100%;
-  justify-items: center;
-  position: relative;
-}
-/* Soft dual-tone glow anchoring the visual to the page */
-.hero-stage::before {
-  content: '';
-  position: absolute;
-  inset: -8% -6%;
-  background:
-    radial-gradient(ellipse 60% 55% at 30% 40%, rgba(124,58,237,0.28) 0%, transparent 70%),
-    radial-gradient(ellipse 50% 45% at 75% 70%, rgba(16,185,129,0.14) 0%, transparent 70%);
-  filter: blur(28px);
-  z-index: 0;
-  pointer-events: none;
-}
-.hero-stage > * { position: relative; z-index: 1; }
-.hero-stage > * {
-  grid-area: 1 / 1;
-}
-.hero-pane--hidden {
-  /* visibility:hidden keeps the box in the grid cell (no reflow) while hiding it. */
-  visibility: hidden;
-}
-.hero-gui {
-  width: 100%;
-  max-width: 560px;
-  position: relative;
-}
-.hero-gui__img {
-  width: 100%;
-  height: auto;
-  display: block;
-  border-radius: 10px;
-  border: 1px solid rgba(255,255,255,0.10);
-  box-shadow:
-    0 32px 80px rgba(0,0,0,0.55),
-    0 12px 28px rgba(124,58,237,0.14),
-    0 0 0 1px rgba(124,58,237,0.14);
-}
-
-/* Floating proof card over the screenshot */
-.hero-toast {
-  position: absolute;
-  left: -14px;
-  bottom: 18px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 16px 10px 12px;
-  border-radius: 10px;
-  background: rgba(22, 22, 42, 0.92);
-  border: 1px solid rgba(16,185,129,0.35);
-  box-shadow: 0 16px 40px rgba(0,0,0,0.5), 0 0 24px rgba(16,185,129,0.10);
-  backdrop-filter: blur(10px);
-  animation: toastFloat 6s ease-in-out infinite alternate;
-}
 @keyframes toastFloat {
   from { transform: translateY(0); }
   to   { transform: translateY(-7px); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .hero-toast { animation: none; }
-}
-.hero-toast__icon {
-  display: grid;
-  place-items: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  background: rgba(16,185,129,0.16);
-  color: var(--gw-green);
-  flex-shrink: 0;
-}
-.hero-toast__body {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-.hero-toast__title {
-  font-size: 12.5px;
-  font-weight: 700;
-  color: var(--gw-text);
-  letter-spacing: 0.01em;
-}
-.hero-toast__sub {
-  font-size: 11px;
-  color: var(--gw-text-muted);
-}
-.hero-term {
-  width: 100%;
-  max-width: 520px;
-  background: #0d1117;
-  border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 10px;
-  overflow: hidden;
-  box-shadow: 0 24px 60px rgba(0,0,0,0.45), 0 0 0 1px rgba(124,58,237,0.12);
-  font-family: var(--vp-font-family-mono, 'ui-monospace', monospace);
-}
-.hero-term__bar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 10px 14px;
-  background: #161b22;
-  border-bottom: 1px solid rgba(255,255,255,0.06);
-}
-.hero-term__title {
-  flex: 1;
-  text-align: center;
-  font-size: 11px;
-  color: rgba(255,255,255,0.35);
-  pointer-events: none;
-  letter-spacing: 0.01em;
-}
-.hero-term__replay {
-  background: none;
-  border: none;
-  cursor: pointer;
-  color: rgba(255,255,255,0.25);
-  font-size: 14px;
-  line-height: 1;
-  padding: 2px 4px;
-  border-radius: 4px;
-  transition: color 0.15s, background 0.15s;
-}
-.hero-term__replay:hover:not(:disabled) {
-  color: rgba(255,255,255,0.65);
-  background: rgba(255,255,255,0.06);
-}
-.hero-term__replay:disabled { opacity: 0.3; cursor: default; }
-.hero-term__body {
-  padding: 16px 18px 20px;
-  min-height: 220px;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-.hero-term__line {
-  font-size: 12.5px;
-  line-height: 1.65;
-  white-space: pre;
-  animation: termFadeIn 0.18s ease both;
 }
 @keyframes termFadeIn {
   from { opacity: 0; transform: translateY(3px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-.hero-term__line--cmd  { color: rgba(255,255,255,0.92); font-weight: 600; }
-.hero-term__line--info { color: rgba(255,255,255,0.38); }
-.hero-term__line--ok   { color: #3fb950; }
-.hero-term__line--warn { color: #d29922; }
-.hero-term__cursor {
-  display: inline-block;
-  color: var(--gw-purple-light);
-  animation: termBlink 1s step-end infinite;
-  font-size: 14px;
-  line-height: 1;
-  margin-top: 4px;
-}
 @keyframes termBlink {
   0%, 100% { opacity: 1; }
   50%       { opacity: 0; }
-}
-
-
-
-
-
-
-
-
-
-
-/* ───────────────────────────────────────────
-   3 PILLARS (Wave 1)
-─────────────────────────────────────────── */
-.hl-pillars {
-  padding: 72px 0 64px;
-  background: var(--gw-bg);
-  border-bottom: 1px solid var(--gw-border-soft);
-}
-.hl-pillars__grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 24px;
-  margin-top: 8px;
-}
-.hl-pillar {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  padding: 28px 26px 26px;
-  background: var(--gw-bg-card);
-  border: 1px solid var(--gw-border);
-  border-radius: var(--gw-radius);
-  transition: border-color 0.2s, transform 0.15s, box-shadow 0.2s;
-}
-.hl-pillar:hover {
-  border-color: var(--gw-purple);
-  transform: translateY(-2px);
-  box-shadow: 0 16px 32px -16px rgba(124, 58, 237, 0.35);
-}
-.hl-pillar__icon {
-  width: 52px;
-  height: 52px;
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 2px;
-}
-.hl-pillar__icon--purple {
-  color: var(--gw-purple-light);
-  background: rgba(124, 58, 237, 0.12);
-}
-.hl-pillar__icon--green {
-  color: var(--gw-green);
-  background: rgba(16, 185, 129, 0.12);
-}
-.hl-pillar__icon--gradient {
-  color: var(--gw-green);
-  background: linear-gradient(135deg, rgba(124, 58, 237, 0.14), rgba(16, 185, 129, 0.16));
-}
-.hl-pillar__title {
-  font-size: 18px;
-  font-weight: 700;
-  margin: 0;
-  color: var(--gw-text);
-  line-height: 1.3;
-}
-.hl-pillar__sub {
-  font-size: 14px;
-  line-height: 1.6;
-  color: var(--gw-text-muted);
-  margin: 0;
-}
-.hl-pillar__stat {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  padding-top: 12px;
-  margin-top: auto;
-  border-top: 1px dashed var(--gw-border-soft);
-}
-.hl-pillar__stat-n {
-  font-size: 30px;
-  font-weight: 800;
-  line-height: 1;
-  color: var(--gw-purple-light);
-  letter-spacing: -0.02em;
-}
-.hl-pillar__stat-n--small {
-  font-size: 14px;
-  font-weight: 600;
-  letter-spacing: 0;
-}
-.hl-pillar__stat-l {
-  font-size: 12px;
-  color: var(--gw-text-muted);
-  line-height: 1.4;
-}
-.hl-pillar__cta {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--gw-purple-light);
-  text-decoration: none;
-  align-self: flex-start;
-  margin-top: 2px;
-  transition: color 0.15s, transform 0.1s;
-}
-.hl-pillar__cta:hover {
-  color: var(--gw-green);
-  transform: translateX(2px);
 }
 
 /* ───────────────────────────────────────────
@@ -3109,202 +1999,710 @@ function cellClass(v: CompareValue | undefined): string {
   .llm-layout { grid-template-columns: 1fr; gap: 40px; }
   .hl-pillars__grid { grid-template-columns: 1fr; gap: 16px; }
 }
-@media (max-width: 600px) {
-  .hero { padding: 60px 0 40px; }
-  .hero-announce { font-size: 11.5px; }
-  .hero-point { font-size: 13px; }
-  .hero-toast__sub { display: none; }
-  .hero-bg__orb { filter: blur(70px); }
-  .platforms-grid { flex-direction: column; align-items: center; }
-  .hero-term { max-width: 100%; }
-  .hero-term__line { white-space: pre-wrap; word-break: break-all; }
-  .hl-pillars { padding: 56px 0 48px; }
-  .hl-pillar { padding: 22px 20px; }
-}
-
-/* ───────────────────────────────────────────
-   REDESIGN 2026 — new sections
-─────────────────────────────────────────── */
-
-/* Trust bar (below stats) */
-.trust-bar {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  align-items: center;
-  gap: 14px;
-  padding: 22px 24px;
-  background: var(--gw-bg-2);
-  border-bottom: 1px solid var(--gw-border-soft);
-}
-.trust-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
-  border: 1px solid var(--gw-border);
-  border-radius: 999px;
-  font-size: 13px;
-  color: var(--gw-text-muted);
-  background: rgba(255, 255, 255, 0.02);
-}
-.trust-item--link {
-  text-decoration: none;
-  color: var(--gw-text);
-  transition: border-color 0.15s, color 0.15s;
-}
-.trust-item--link:hover {
-  border-color: var(--gw-purple);
-  color: var(--gw-purple-light);
-}
-.trust-item--link svg { color: var(--gw-purple-light); }
-.trust-strong {
-  font-weight: 800;
-  color: var(--gw-text);
-  letter-spacing: -0.01em;
-}
-.trust-txt { color: var(--gw-text-muted); }
-
-/* Section CTA row */
-.section-cta-row {
-  display: flex;
-  justify-content: center;
-  margin-top: 32px;
-}
-
-/* Pillars as clickable doors */
-.hl-pillar--link {
-  text-decoration: none;
-  color: inherit;
-  cursor: pointer;
-}
-
-/* Why GitWand — 4 differentiators */
-.why-section {
-  padding: 72px 0 64px;
-  background: var(--gw-bg-2);
-  border-bottom: 1px solid var(--gw-border-soft);
-}
-.why-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 20px;
-  margin-top: 8px;
-}
-.why-card {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 26px 22px;
-  background: var(--gw-bg-card);
-  border: 1px solid var(--gw-border);
-  border-radius: var(--gw-radius);
-  transition: border-color 0.2s, transform 0.15s;
-}
-.why-card:hover {
-  border-color: var(--gw-purple);
-  transform: translateY(-2px);
-}
-.why-card__badge {
-  align-self: flex-start;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 54px;
-  height: 40px;
-  padding: 0 12px;
-  border-radius: 10px;
-  font-size: 18px;
-  font-weight: 800;
-  letter-spacing: -0.01em;
-}
-.why-card__badge--purple {
-  color: var(--gw-purple-light);
-  background: rgba(124, 58, 237, 0.12);
-}
-.why-card__badge--green {
-  color: var(--gw-green);
-  background: rgba(16, 185, 129, 0.12);
-}
-.why-card__title {
-  font-size: 16px;
-  font-weight: 700;
-  margin: 0;
-  color: var(--gw-text);
-}
-.why-card__desc {
-  font-size: 14px;
-  line-height: 1.6;
-  color: var(--gw-text-muted);
-  margin: 0;
-}
-
-/* Mini comparison */
-.mini-compare-section {
-  padding: 72px 0 64px;
-  background: var(--gw-bg);
-  border-bottom: 1px solid var(--gw-border-soft);
-}
-.mini-compare-wrap {
-  margin-top: 8px;
-  overflow-x: auto;
-  border: 1px solid var(--gw-border);
-  border-radius: var(--gw-radius);
-}
-.mini-compare {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 14px;
-}
-.mini-compare th,
-.mini-compare td {
-  padding: 14px 18px;
-  text-align: center;
-  border-bottom: 1px solid var(--gw-border-soft);
-}
-.mini-compare thead th {
-  font-weight: 700;
-  color: var(--gw-text-muted);
-  background: var(--gw-bg-2);
-}
-.mini-compare tbody tr:last-child td { border-bottom: none; }
-.mini-compare .mc-feat {
-  text-align: left;
-  color: var(--gw-text);
-  font-weight: 500;
-}
-.mini-compare th.mc-gw,
-.mini-compare td.mc-gw {
-  background: rgba(124, 58, 237, 0.08);
-  color: var(--gw-purple-light);
-  font-weight: 700;
-}
-.mc-yes { color: var(--gw-green); font-weight: 700; }
-.mc-no { color: var(--gw-text-muted); opacity: 0.5; }
-.mc-partial { font-size: 12px; color: var(--gw-text-muted); }
-
-/* AI agents teaser */
-.agents-teaser {
-  padding: 72px 0 64px;
-  background: var(--gw-bg-2);
-  border-bottom: 1px solid var(--gw-border-soft);
-  text-align: center;
-}
-.agents-chips {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 10px;
-  margin: 28px 0 8px;
-}
 
 /* Responsive */
 @media (max-width: 860px) {
   .why-grid { grid-template-columns: repeat(2, 1fr); }
 }
-@media (max-width: 560px) {
-  .why-grid { grid-template-columns: 1fr; }
-  .trust-bar { gap: 10px; padding: 18px 16px; }
+
+/* ══════════════════════════════════════════════════════════════
+   NOCTURNE — trame de la landing
+   Tokens dans custom.css. Rien ici ne redéfinit une couleur.
+   ══════════════════════════════════════════════════════════════ */
+
+.gw-landing {
+  font-family: var(--nc-font-sans);
+  background: var(--nc-canvas);
+  color: var(--nc-text);
+  overflow-x: clip;
 }
 
+.nc-wrap {
+  position: relative;
+  max-width: var(--nc-measure);
+  margin: 0 auto;
+  padding: 0 24px;
+}
+.nc-section { padding-top: var(--nc-section-gap); }
+
+/* ── Typographie ── */
+.nc-h1 {
+  margin: 0;
+  max-width: 11em;
+  font-size: clamp(42px, 6.4vw, 78px);
+  line-height: 0.98;
+  font-weight: var(--nc-weight-title);
+  letter-spacing: -0.04em;
+  color: var(--nc-accent-100);
+}
+.nc-h2 {
+  margin: 0;
+  font-size: clamp(28px, 3.4vw, 40px);
+  line-height: 1.06;
+  font-weight: var(--nc-weight-title);
+  letter-spacing: -0.03em;
+  color: var(--nc-accent-100);
+}
+.nc-lede {
+  margin: 0;
+  font-size: clamp(16px, 1.7vw, 19px);
+  line-height: 1.5;
+  color: var(--nc-neutral-300);
+  max-width: 48ch;
+}
+.nc-body {
+  margin: 0;
+  font-size: 16.5px;
+  line-height: 1.6;
+  color: var(--nc-neutral-300);
+  max-width: 44ch;
+}
+.nc-eyebrow--sm { font-size: 10.5px; letter-spacing: 0.12em; }
+
+.nc-head {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 24px;
+}
+.nc-head__sub { font-size: 14.5px; color: var(--nc-neutral-400); }
+.nc-head__link { font-size: 14.5px; color: var(--nc-accent-300); text-decoration: none; }
+.nc-head__link:hover { color: var(--nc-accent-100); }
+
+/* ── Boutons ── */
+.nc-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: var(--nc-radius-md);
+  font-weight: 500;
+  text-decoration: none;
+  transition: transform 0.18s var(--nc-ease), border-color 0.18s var(--nc-ease),
+    background 0.18s var(--nc-ease), box-shadow 0.18s var(--nc-ease);
+}
+.nc-btn--primary {
+  padding: 14px 24px;
+  font-size: 16px;
+  color: var(--nc-accent-100);
+  border: 1px solid var(--nc-accent-300);
+  background: color-mix(in srgb, var(--nc-accent-800) 72%, transparent);
+  box-shadow: var(--nc-glow);
+}
+.nc-btn--primary:hover {
+  background: color-mix(in srgb, var(--nc-accent-700) 88%, transparent);
+  transform: translateY(-1px);
+}
+.nc-btn--ghost {
+  align-self: flex-start;
+  padding: 9px 14px;
+  font-size: 14.5px;
+  color: var(--nc-neutral-300);
+  border: 1px solid var(--nc-neutral-700);
+  background: transparent;
+}
+.nc-btn--ghost:hover { border-color: var(--nc-accent-500); color: var(--nc-accent-200); }
+
+/* ── Hero ── */
+.nc-hero { position: relative; overflow: hidden; }
+.nc-hero__decor { position: absolute; inset: 0; pointer-events: none; }
+.nc-hero__orb-a { top: -320px; left: 50%; width: 1100px; height: 760px; margin-left: -550px; }
+.nc-hero__orb-b { top: -220px; right: -180px; width: 760px; height: 620px; }
+.nc-hero__body {
+  padding-top: 64px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.nc-pill {
+  align-self: flex-start;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+  font-size: 13px;
+  color: var(--nc-accent-100);
+  border: 1px solid var(--nc-accent-600);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--nc-accent-800) 60%, transparent);
+  box-shadow: 0 0 26px color-mix(in srgb, var(--nc-accent) 18%, transparent);
+  text-decoration: none;
+  transition: border-color 0.18s var(--nc-ease), box-shadow 0.18s var(--nc-ease);
+}
+.nc-pill:hover {
+  border-color: var(--nc-accent-400);
+  box-shadow: 0 0 34px color-mix(in srgb, var(--nc-accent) 30%, transparent);
+}
+.nc-pill__dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--nc-accent-200);
+  animation: nc-pulse 1.6s ease-in-out infinite;
+}
+.nc-pill__arrow { color: var(--nc-accent-300); }
+
+.nc-hero__ctas {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding-top: 4px;
+}
+.nc-cmd {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 13px 14px;
+  font-family: var(--nc-font-mono);
+  font-size: 13px;
+  color: var(--nc-neutral-300);
+  background: var(--nc-surface);
+  border: 1px solid var(--nc-neutral-700);
+  border-radius: 9px;
+  cursor: pointer;
+  transition: border-color 0.18s var(--nc-ease);
+}
+.nc-cmd:hover { border-color: var(--nc-accent-500); }
+.nc-cmd code { font: inherit; background: none; color: inherit; padding: 0; }
+.nc-cmd__prompt { color: var(--nc-accent-300); }
+.nc-cmd__hint {
+  color: var(--nc-neutral-400);
+  border-left: 1px solid var(--nc-neutral-800);
+  padding-left: 10px;
+  min-width: 4.5em;
+  text-align: left;
+}
+
+.nc-hero__figures { display: flex; gap: 26px; flex-wrap: wrap; padding-top: 10px; }
+.nc-figure__n {
+  font-size: 30px;
+  font-weight: var(--nc-weight-title);
+  letter-spacing: -0.02em;
+  color: var(--nc-accent-100);
+}
+.nc-figure__l { font-size: 12.5px; color: var(--nc-neutral-400); }
+
+/* Capture inclinée */
+.nc-shot { margin-top: 56px; perspective: 1800px; }
+.nc-shot__frame {
+  transform: rotateX(6deg);
+  transform-origin: 50% 100%;
+  border: 1px solid var(--nc-accent-800);
+  border-radius: 16px 16px 0 0;
+  overflow: hidden;
+  background: var(--nc-surface);
+  box-shadow: 0 -10px 90px color-mix(in srgb, var(--nc-accent) 22%, transparent), var(--nc-shadow-lg);
+}
+.nc-shot__bar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 11px 15px;
+  border-bottom: 1px solid var(--nc-neutral-800);
+  font-family: var(--nc-font-mono);
+  font-size: 11.5px;
+}
+.nc-shot__dot { width: 9px; height: 9px; border-radius: 50%; background: var(--nc-neutral-700); }
+.nc-shot__path { margin-left: 10px; color: var(--nc-neutral-400); }
+.nc-shot__status { margin-left: auto; color: var(--nc-accent-200); }
+.nc-caret { animation: nc-blink 1.1s step-end infinite; }
+.nc-shot__img { display: block; width: 100%; cursor: zoom-in; }
+.nc-shot__fade {
+  /* z-index explicite : la fenêtre voisine est en rotateX, donc peinte en
+     avant-plan dans le contexte 3D — sans ça le fondu passe dessous. */
+  position: absolute;
+  z-index: 2;
+  inset: auto 0 0 0;
+  height: 150px;
+  background: linear-gradient(180deg, transparent, var(--nc-canvas));
+  pointer-events: none;
+}
+
+/* ── Bandeau défilant ── */
+.nc-marquee {
+  border-top: 1px solid var(--nc-neutral-800);
+  border-bottom: 1px solid var(--nc-neutral-800);
+  background: var(--nc-bg);
+  overflow: hidden;
+}
+.nc-marquee__rail { display: flex; width: max-content; animation: nc-marquee 26s linear infinite; }
+.nc-marquee__track {
+  display: flex;
+  align-items: center;
+  gap: 44px;
+  padding: 14px 22px;
+  font-family: var(--nc-font-mono);
+  font-size: 12.5px;
+  color: var(--nc-neutral-400);
+  white-space: nowrap;
+}
+.nc-marquee__sep { color: var(--nc-accent-500); }
+@media (prefers-reduced-motion: reduce) { .nc-marquee__rail { animation: none; } 
+}
+
+/* ── Démo de conflit ── */
+.nc-split {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 48px;
+  align-items: center;
+}
+.nc-split__text { display: flex; flex-direction: column; gap: 16px; }
+
+.nc-panel {
+  border: 1px solid var(--nc-accent-800);
+  border-radius: var(--nc-radius-lg);
+  background: var(--nc-surface);
+  box-shadow: 0 0 60px color-mix(in srgb, var(--nc-accent) 14%, transparent);
+  overflow: hidden;
+}
+.nc-panel__head,
+.nc-panel__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  font-family: var(--nc-font-mono);
+  font-size: 11.5px;
+  color: var(--nc-neutral-400);
+}
+.nc-panel__head { border-bottom: 1px solid var(--nc-neutral-800); }
+.nc-panel__foot { border-top: 1px solid var(--nc-neutral-800); font-size: 12px; }
+.nc-panel__foot a { color: var(--nc-neutral-300); text-decoration: none; }
+.nc-panel__foot a:hover { color: var(--nc-accent-200); }
+.nc-panel__hunk, .nc-panel__verdict { color: var(--nc-accent-200); }
+.nc-panel__code {
+  position: relative;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  font-family: var(--nc-font-mono);
+  font-size: 13px;
+  line-height: 1.7;
+  overflow: hidden;
+}
+.nc-panel__sweep {
+  position: absolute;
+  inset: 0;
+  width: 28%;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--nc-accent) 20%, transparent), transparent);
+  animation: nc-sweep 3.2s linear infinite;
+  pointer-events: none;
+}
+.nc-code-marker { color: var(--nc-neutral-500); }
+.nc-code-drop { color: var(--nc-neutral-400); text-decoration: line-through; }
+.nc-code-keep {
+  color: var(--nc-accent-100);
+  background: color-mix(in srgb, var(--nc-accent) 26%, transparent);
+  border-left: 2px solid var(--nc-accent-200);
+  border-radius: 5px;
+  padding: 4px 8px;
+  margin: 0 -8px;
+}
+
+/* ── Bento ── */
+.nc-bento {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 14px;
+}
+.nc-card {
+  min-width: 0;
+  border: 1px solid var(--nc-neutral-800);
+  border-radius: var(--nc-radius-lg);
+  padding: 24px;
+  background: var(--nc-surface);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: transform 0.2s var(--nc-ease), border-color 0.2s var(--nc-ease), box-shadow 0.2s var(--nc-ease);
+}
+.nc-card--stat { justify-content: space-between; gap: 18px; }
+.nc-card:hover {
+  transform: translateY(-4px);
+  border-color: var(--nc-accent-500);
+  box-shadow: var(--nc-glow-soft);
+}
+.nc-card__title { font-size: 20px; font-weight: var(--nc-weight-title); color: var(--nc-accent-100); }
+.nc-card__desc { margin: 0; font-size: 14px; line-height: 1.6; color: var(--nc-neutral-400); }
+.nc-card__n {
+  font-size: 38px;
+  font-weight: var(--nc-weight-title);
+  letter-spacing: -0.025em;
+  color: var(--nc-accent-100);
+  margin-bottom: 6px;
+}
+.nc-keys { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.nc-key {
+  font-family: var(--nc-font-mono);
+  font-size: 14px;
+  color: var(--nc-accent-100);
+  border: 1px solid var(--nc-neutral-700);
+  border-bottom-width: 2px;
+  border-radius: 7px;
+  padding: 7px 11px;
+  background: var(--nc-bg);
+}
+.nc-tags { display: flex; gap: 7px; flex-wrap: wrap; margin-top: 6px; }
+.nc-tag {
+  font-family: var(--nc-font-mono);
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--nc-accent-700);
+  background: color-mix(in srgb, var(--nc-accent-900) 70%, transparent);
+  color: var(--nc-accent-200);
+}
+.nc-tag--outline { background: transparent; border-color: var(--nc-neutral-700); color: var(--nc-neutral-300); }
+
+/* ── Bande de chiffres ── */
+.nc-band {
+  margin-top: var(--nc-section-gap);
+  background: linear-gradient(120deg, var(--nc-section) 0%, var(--nc-section-glow) 100%);
+  border-top: 1px solid var(--nc-section-ghost);
+  border-bottom: 1px solid var(--nc-section-ghost);
+}
+.nc-band__grid {
+  padding-top: 48px;
+  padding-bottom: 48px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 28px;
+}
+.nc-band__n {
+  font-size: clamp(34px, 4.4vw, 52px);
+  font-weight: var(--nc-weight-title);
+  letter-spacing: -0.03em;
+  color: var(--nc-accent-100);
+}
+.nc-band__l { font-size: 13.5px; color: var(--nc-accent-200); margin-top: 4px; }
+
+/* ── Grille des patterns ── */
+.nc-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1px;
+  background: var(--nc-neutral-800);
+  border: 1px solid var(--nc-neutral-800);
+  border-radius: var(--nc-radius-lg);
+  overflow: hidden;
+}
+.nc-tile {
+  background: var(--nc-bg);
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  transition: background 0.2s var(--nc-ease);
+}
+.nc-tile:hover { background: var(--nc-accent-900); }
+.nc-tile__n { font-family: var(--nc-font-mono); font-size: 10.5px; color: var(--nc-accent-300); }
+.nc-tile__name { font-family: var(--nc-font-mono); font-size: 14.5px; color: var(--nc-accent-100); }
+.nc-tile__name--muted { color: var(--nc-accent-200); }
+.nc-tile__desc { font-size: 13.5px; line-height: 1.55; color: var(--nc-neutral-400); }
+
+/* ── Trois interfaces ── */
+.nc-trio { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 16px; }
+.nc-face {
+  display: block;
+  border: 1px solid var(--nc-neutral-800);
+  border-radius: var(--nc-radius-lg);
+  overflow: hidden;
+  background: var(--nc-surface);
+  text-decoration: none;
+  transition: transform 0.2s var(--nc-ease), border-color 0.2s var(--nc-ease);
+}
+.nc-face:hover { transform: translateY(-4px); border-color: var(--nc-accent-600); }
+.nc-face img { display: block; width: 100%; border-bottom: 1px solid var(--nc-neutral-800); }
+.nc-face__term {
+  padding: 20px;
+  min-height: 176px;
+  font-family: var(--nc-font-mono);
+  font-size: 12.5px;
+  line-height: 1.95;
+  color: var(--nc-neutral-400);
+  border-bottom: 1px solid var(--nc-neutral-800);
+}
+.nc-face__prompt { color: var(--nc-accent-300); }
+.nc-face__ok { color: var(--nc-accent-200); }
+.nc-face__warn { color: var(--nc-text); }
+.nc-face__dim { color: var(--nc-neutral-500); }
+.nc-face__body { padding: 20px; display: flex; flex-direction: column; gap: 6px; }
+.nc-face__title { font-size: 17px; font-weight: var(--nc-weight-title); color: var(--nc-accent-100); }
+.nc-face__desc { font-size: 13.5px; line-height: 1.55; color: var(--nc-neutral-400); }
+
+/* ── Encart agents ── */
+.nc-spot {
+  position: relative;
+  border: 1px solid var(--nc-section-ghost);
+  border-radius: var(--nc-radius-xl);
+  overflow: hidden;
+  background: linear-gradient(135deg, var(--nc-section) 0%, var(--nc-section-glow) 78%);
+  box-shadow: 0 0 70px color-mix(in srgb, var(--nc-section-glow) 45%, transparent);
+  padding: 44px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+  gap: 36px;
+  align-items: center;
+}
+.nc-spot__text { display: flex; flex-direction: column; gap: 14px; align-items: flex-start; }
+.nc-eyebrow--on-spot { color: var(--nc-accent-200); }
+.nc-h2--spot { font-size: clamp(26px, 3.2vw, 38px); }
+.nc-body--spot { color: var(--nc-accent-200); max-width: 46ch; }
+.nc-spot__code {
+  border: 1px solid var(--nc-accent-600);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--nc-canvas) 74%, transparent);
+  padding: 20px;
+  font-family: var(--nc-font-mono);
+  font-size: 13px;
+  line-height: 1.95;
+  color: var(--nc-accent-100);
+  overflow-x: auto;
+}
+.nc-spot__comment { color: var(--nc-accent-300); }
+.nc-spot__cont { padding-left: 18px; }
+
+/* ── Comparatif compact ── */
+.nc-matrix {
+  border: 1px solid var(--nc-neutral-800);
+  border-radius: var(--nc-radius-lg);
+  overflow: hidden;
+  background: var(--nc-surface);
+}
+.nc-matrix__row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1.8fr) repeat(3, minmax(88px, 1fr));
+  align-items: center;
+  padding: 17px 22px;
+  border-bottom: 1px solid var(--nc-neutral-800);
+  font-size: 14.5px;
+}
+.nc-matrix__row:last-child { border-bottom: 0; }
+.nc-matrix__row--head {
+  padding: 15px 22px;
+  background: var(--nc-accent-900);
+  font-family: var(--nc-font-mono);
+  font-size: 12.5px;
+  color: var(--nc-neutral-400);
+}
+.nc-matrix__row--head > span:not(:first-child) { text-align: center; }
+.nc-matrix__self { color: var(--nc-accent-100); }
+.nc-matrix__yes { text-align: center; color: var(--nc-accent-200); font-size: 18px; }
+.nc-matrix__other { text-align: center; color: var(--nc-neutral-300); font-size: 18px; }
+.nc-matrix__no { text-align: center; color: var(--nc-neutral-600); }
+.nc-matrix__note { text-align: center; color: var(--nc-neutral-400); font-size: 12.5px; }
+
+/* ── Tuiles de téléchargement ── */
+.nc-dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; }
+.nc-dl__card {
+  border: 1px solid var(--nc-neutral-800);
+  border-radius: 12px;
+  padding: 20px;
+  background: var(--nc-surface);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  text-decoration: none;
+  transition: transform 0.2s var(--nc-ease), border-color 0.2s var(--nc-ease);
+}
+.nc-dl__card:hover { transform: translateY(-3px); border-color: var(--nc-accent-500); }
+.nc-dl__name { font-size: 16px; font-weight: 500; color: var(--nc-text); }
+.nc-dl__sub { font-size: 13px; color: var(--nc-neutral-400); }
+
+/* ── Ajustements mobiles ── */
+@media (max-width: 720px) {
+  .nc-section { padding-top: 64px; }
+  .nc-band { margin-top: 64px; }
+  .nc-spot { padding: 28px; }
+  .nc-shot__frame { transform: none; }
+  .nc-matrix__row { grid-template-columns: minmax(120px, 1.6fr) repeat(3, minmax(56px, 1fr)); font-size: 13px; padding: 14px; }
+  .nc-matrix__row--head { padding: 12px 14px; font-size: 11px; }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   Sections conservées du site précédent (FAQ, blog, contributeurs,
+   sponsoring, CTA final) réaccordées sur la trame Nocturne.
+   ══════════════════════════════════════════════════════════════ */
+
+.section-inner { max-width: var(--nc-measure); padding: 0 24px; }
+
+.faq-section,
+.blog-teaser-section,
+.contributors-section,
+.sponsor-section {
+  padding-top: var(--nc-section-gap);
+  padding-bottom: 0;
+  background: var(--nc-canvas);
+  border: 0;
+}
+
+.section-title {
+  text-align: left;
+  font-size: clamp(28px, 3.4vw, 40px);
+  line-height: 1.06;
+  font-weight: var(--nc-weight-title);
+  letter-spacing: -0.03em;
+  color: var(--nc-accent-100);
+  margin: 0 0 10px;
+}
+
+/* FAQ */
+.faq-list { max-width: none; }
+.faq-item {
+  background: var(--nc-surface);
+  border: 1px solid var(--nc-neutral-800);
+  border-radius: var(--nc-radius-lg);
+  margin-bottom: 10px;
+  transition: border-color 0.2s var(--nc-ease);
+}
+.faq-item--open { border-color: var(--nc-accent-600); }
+.faq-q { color: var(--nc-accent-100); font-weight: var(--nc-weight-title); letter-spacing: -0.012em; padding-left: 20px; padding-right: 20px; }
+.faq-a { color: var(--nc-neutral-400); padding-left: 20px; padding-right: 20px; }
+.faq-chevron { color: var(--nc-accent-300); }
+
+/* Blog */
+.blog-teaser-label,
+.contributors-label {
+  font-family: var(--nc-font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--nc-accent-300);
+}
+.blog-teaser-card,
+.contributor-card,
+.sponsor-card {
+  background: var(--nc-surface);
+  border: 1px solid var(--nc-neutral-800);
+  border-radius: var(--nc-radius-lg);
+  transition: transform 0.2s var(--nc-ease), border-color 0.2s var(--nc-ease), box-shadow 0.2s var(--nc-ease);
+}
+.blog-teaser-card:hover,
+.contributor-card:hover {
+  transform: translateY(-4px);
+  border-color: var(--nc-accent-500);
+  box-shadow: var(--nc-glow-soft);
+}
+.blog-teaser-title,
+.sponsor-title,
+.contributor-name { color: var(--nc-accent-100); font-weight: var(--nc-weight-title); }
+.blog-teaser-excerpt,
+.sponsor-sub,
+.contributor-role,
+.blog-teaser-meta { color: var(--nc-neutral-400); }
+.blog-teaser-meta { font-family: var(--nc-font-mono); font-size: 11.5px; }
+.blog-teaser-cta, .llm-docs-link { color: var(--nc-accent-300); }
+.sponsor-btn {
+  background: color-mix(in srgb, var(--nc-accent-800) 72%, transparent);
+  border: 1px solid var(--nc-accent-300);
+  color: var(--nc-accent-100);
+  box-shadow: var(--nc-glow);
+}
+
+/* CTA final — même traitement que le hero, aurore comprise */
+.cta-section {
+  position: relative;
+  overflow: hidden;
+  margin-top: 110px;
+  padding: 0;
+  border-top: 1px solid var(--nc-neutral-800);
+  background: var(--nc-canvas);
+}
+.cta-section::before {
+  content: '';
+  position: absolute;
+  bottom: -340px;
+  left: 50%;
+  width: 1000px;
+  height: 700px;
+  margin-left: -500px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--nc-accent-600) 0%, transparent 62%);
+  filter: blur(90px);
+  opacity: 0.55;
+  animation: nc-aurora-a 18s ease-in-out infinite;
+  pointer-events: none;
+}
+.cta-inner {
+  position: relative;
+  z-index: 1;
+  max-width: var(--nc-measure);
+  margin: 0 auto;
+  padding: 92px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 18px;
+  text-align: left;
+}
+.cta-logo { display: none; }
+.cta-title {
+  margin: 0;
+  max-width: 13em;
+  font-size: clamp(34px, 5vw, 58px);
+  line-height: 1;
+  font-weight: var(--nc-weight-title);
+  letter-spacing: -0.035em;
+  color: var(--nc-accent-100);
+  text-align: left;
+}
+.cta-sub {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.6;
+  color: var(--nc-neutral-300);
+  max-width: 46ch;
+  text-align: left;
+}
+.cta-btns { justify-content: flex-start; padding-top: 6px; }
+
+/* Boutons hérités */
+.btn-primary {
+  background: color-mix(in srgb, var(--nc-accent-800) 72%, transparent);
+  border: 1px solid var(--nc-accent-300);
+  color: var(--nc-accent-100);
+  font-weight: 500;
+  border-radius: var(--nc-radius-md);
+  box-shadow: var(--nc-glow);
+}
+.btn-primary:hover {
+  background: color-mix(in srgb, var(--nc-accent-700) 88%, transparent);
+  border-color: var(--nc-accent-200);
+  color: var(--nc-accent-100);
+}
+.btn-ghost {
+  border-color: var(--nc-neutral-700);
+  color: var(--nc-neutral-300);
+  border-radius: var(--nc-radius-md);
+  font-weight: 400;
+}
+.btn-ghost:hover { border-color: var(--nc-accent-500); color: var(--nc-accent-200); }
+.btn-split__main { border-right-color: color-mix(in srgb, var(--nc-accent-300) 45%, transparent); }
+
+/* Sélecteur de langue */
+.lang-pill {
+  font-family: var(--nc-font-mono);
+  font-size: 12px;
+  color: var(--nc-neutral-400);
+  border-color: var(--nc-neutral-800);
+  background: color-mix(in srgb, var(--nc-surface) 85%, transparent);
+}
+.lang-pill--active {
+  background: color-mix(in srgb, var(--nc-accent-800) 85%, transparent);
+  color: var(--nc-accent-100);
+  border-color: var(--nc-accent-600);
+}
+.lang-pill--active:hover {
+  background: color-mix(in srgb, var(--nc-accent-700) 90%, transparent);
+  color: var(--nc-accent-100);
+}
+
+/* Grilles : deux rangées de trois plutôt qu'une rangée de quatre + un trou */
+@media (min-width: 1024px) {
+  .nc-bento, .nc-tiles { grid-template-columns: repeat(3, 1fr); }
+}
 </style>

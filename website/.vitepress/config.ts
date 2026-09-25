@@ -5,6 +5,9 @@ import { fileURLToPath } from 'node:url'
 
 export default defineConfig({
   title: 'GitWand',
+  // Nocturne is a dark-only theme: force dark mode, which also removes the
+  // light/dark switch from the header.
+  appearance: 'force-dark',
   description: "Git's magic wand — smart conflict resolution & native Git client",
   base: '/',
 
@@ -44,6 +47,14 @@ export default defineConfig({
 
   head: [
     ['link', { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' }],
+    // Typographie du thème Nocturne : Inter pour le texte, JetBrains Mono pour
+    // tout ce qui cite du code (terminal, diffs, étiquettes, tableaux).
+    ['link', { rel: 'preconnect', href: 'https://fonts.googleapis.com' }],
+    ['link', { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' }],
+    ['link', {
+      rel: 'stylesheet',
+      href: 'https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap',
+    }],
     // Open Graph
     ['meta', { property: 'og:type', content: 'website' }],
     ['meta', { property: 'og:site_name', content: 'GitWand' }],
@@ -54,7 +65,7 @@ export default defineConfig({
     ['meta', { name: 'twitter:card', content: 'summary_large_image' }],
     ['meta', { name: 'twitter:image', content: 'https://gitwand.app/og-image.png' }],
     // Misc
-    ['meta', { name: 'theme-color', content: '#7c3aed' }],
+    ['meta', { name: 'theme-color', content: '#0d0f1a' }],
     // Google Search Console verification
     ['meta', { name: 'google-site-verification', content: 'hskwXWiX9CPY24yjaZt8QOYTh0uEQ4VMErKVRiZO7n4' }],
     // Agent discovery — RFC 8288 Link relations (HTML <link> fallback for static hosting)
