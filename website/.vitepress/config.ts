@@ -340,6 +340,7 @@ export default defineConfig({
           text: 'Blog',
           items: [
             { text: 'All articles', link: '/blog/' },
+            { text: 'Three outcomes, not two (v3.11)', link: '/blog/v3-11-three-outcomes-not-two' },
             { text: 'What WebMCP is, and the first Git tool on it', link: '/blog/webmcp-gitwand-merge-room' },
             { text: 'Best Git GUI clients in 2026', link: '/blog/best-git-gui-clients-2026' },
             { text: 'From four tools to one', link: '/blog/from-four-tools-to-one' },
