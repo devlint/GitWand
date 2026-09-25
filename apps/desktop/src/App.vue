@@ -4373,6 +4373,7 @@ onUnmounted(() => {
                   <button class="me-memory-btn" @click="dismissMemorizeToast">{{ t("common.close") }}</button>
                 </div>
                 <MergeEditor v-if="showingMergeEditor && mergeSelectedFile" :file="mergeSelectedFile"
+                  :cwd="repoFolderPath ?? undefined"
                   @resolve="handleResolveFile" @resolve-hunk="(path, idx, choice) => handleResolveHunk(path, idx, choice)"
                   @resolve-hunk-custom="(path, idx, content) => handleResolveHunkCustom(path, idx, content)"
                   @resolve-file-bulk="(path, choice) => handleResolveFileBulk(path, choice)"
