@@ -152,25 +152,47 @@ jobs:
           # npm's registry offers no propagation guarantee, so a fixed sleep is
           # a coin flip. v3.11.0's smoke test failed on all three runners 50s
           # after a publish that had in fact succeeded — the packages were
-          # fine, the check was early. Poll the version endpoint (the full
-          # packument is served from a CDN cache and lags behind it), and fail
-          # only once the cap is reached, which would be a real publish problem
-          # rather than a slow one.
+          # fine, the check was early.
+          #
+          # v3.11.1 then showed that polling the per-version endpoint
+          # (`/@gitwand%2Fcli/<ver>`) is not enough either: it answers 200
+          # straight from the origin, while `npx` resolves through the
+          # *abbreviated* packument (Accept: application/vnd.npm.install-v1+json),
+          # which sits behind a CDN cache and lags behind it. The check passed
+          # and npx still got ETARGET, on all three runners, for cli and for its
+          # dependency core. So poll exactly what the installer reads, for every
+          # package the smoke test installs, and fail only at the cap, which
+          # would be a real publish problem rather than a slow one.
           for i in $(seq 1 30); do
-            code=$(curl -s -o /dev/null -w '%{http_code}' \
-              "https://registry.npmjs.org/@gitwand%2Fcli/${VER}")
-            if [ "$code" = "200" ]; then
-              echo "::notice::@gitwand/cli@${VER} resolvable after ~$((i * 10))s"
+            missing=""
+            for pkg in core mcp cli; do
+              doc=$(curl -s -H 'Accept: application/vnd.npm.install-v1+json' \
+                "https://registry.npmjs.org/@gitwand%2F${pkg}")
+              case "$doc" in
+                *"\"${VER}\":"*) ;;
+                *) missing="$missing $pkg" ;;
+              esac
+            done
+            if [ -z "$missing" ]; then
+              echo "::notice::@gitwand/{core,mcp,cli}@${VER} resolvable after ~$((i * 10))s"
               exit 0
             fi
             sleep 10
           done
-          echo "::error::@gitwand/cli@${VER} still not on the registry after 300s"
+          echo "::error::still not resolvable after 300s:${missing}"
           exit 1
 
       - name: npx @gitwand/cli --help
         shell: bash
-        run: npx -y @gitwand/cli@${GITHUB_REF_NAME#v} --help
+        # A CDN edge can still serve a stale document to one runner after the
+        # poll above saw a fresh one, so allow a short retry before failing.
+        run: |
+          for i in 1 2 3; do
+            npx -y @gitwand/cli@${GITHUB_REF_NAME#v} --help && exit 0
+            echo "::warning::npx attempt $i failed, retrying in 20s"
+            sleep 20
+          done
+          exit 1
 
       - name: Probe @gitwand/mcp (stdio server — killed after 5s)
         shell: bash
