@@ -587,7 +587,7 @@ const t = computed(() => i18n[locale.value])
 // `t` sert les sections historiques, `nt` les nouvelles.
 const NC: Record<Locale, any> = {
   en: {
-    badge: 'v3.11 — the Conflict Predictor replays the merge for real',
+    badge: 'v3.11 — the AI now knows why each side changed the conflicting code',
     h1a: 'The merge ends', h1b: 'without you', h1c: '.',
     sub: 'Eight deterministic patterns classify every hunk, settle the ones that carried no decision, and hand you back only what deserves your attention. Native, local, MIT.',
     cta: 'Download GitWand',
@@ -639,7 +639,7 @@ const NC: Record<Locale, any> = {
     dlMeta: 'v3.11.0 — MIT',
   },
   fr: {
-    badge: 'v3.11 — le Conflict Predictor rejoue le merge pour de vrai',
+    badge: "v3.11 — l'IA sait enfin pourquoi chaque côté a modifié le code en conflit",
     h1a: 'Le merge se termine', h1b: 'sans toi', h1c: '.',
     sub: 'Huit patterns déterministes classent chaque hunk, règlent ceux qui ne demandaient aucune décision, et te laissent uniquement ce qui vaut ton attention. Natif, local, MIT.',
     cta: 'Télécharger GitWand',
@@ -691,7 +691,7 @@ const NC: Record<Locale, any> = {
     dlMeta: 'v3.11.0 — MIT',
   },
   es: {
-    badge: 'v3.11 — el Conflict Predictor reproduce el merge de verdad',
+    badge: 'v3.11 — la IA ya sabe por qué cada lado cambió el código en conflicto',
     h1a: 'El merge termina', h1b: 'sin ti', h1c: '.',
     sub: 'Ocho patrones deterministas clasifican cada hunk, resuelven los que no exigían ninguna decisión y te devuelven solo lo que merece tu atención. Nativo, local, MIT.',
     cta: 'Descargar GitWand',
@@ -743,7 +743,7 @@ const NC: Record<Locale, any> = {
     dlMeta: 'v3.11.0 — MIT',
   },
   'pt-BR': {
-    badge: 'v3.11 — o Conflict Predictor reproduz o merge de verdade',
+    badge: 'v3.11 — a IA agora sabe por que cada lado alterou o código em conflito',
     h1a: 'O merge termina', h1b: 'sem você', h1c: '.',
     sub: 'Oito padrões determinísticos classificam cada hunk, resolvem os que não exigiam decisão nenhuma e devolvem só o que merece a sua atenção. Nativo, local, MIT.',
     cta: 'Baixar o GitWand',
@@ -795,7 +795,7 @@ const NC: Record<Locale, any> = {
     dlMeta: 'v3.11.0 — MIT',
   },
   'zh-CN': {
-    badge: 'v3.11 — 冲突预测器真正重放这次合并',
+    badge: 'v3.11 — AI 现在知道每一方为何修改了冲突代码',
     h1a: '合并结束时', h1b: '不必再找你', h1c: '。',
     sub: '八种确定性模式为每个 hunk 分类，自动处理那些本就无需决策的部分，只把值得你关注的留给你。原生、本地、MIT。',
     cta: '下载 GitWand',
@@ -2328,6 +2328,7 @@ onMounted(() => {
 }
 .nc-card__title { font-size: 20px; font-weight: var(--nc-weight-title); color: var(--nc-accent-100); }
 .nc-card__desc { margin: 0; font-size: 14px; line-height: 1.6; color: var(--nc-neutral-400); }
+.nc-card__n + .nc-card__desc { margin-top: 12px; }
 .nc-card__n {
   font-size: 38px;
   font-weight: var(--nc-weight-title);
@@ -2378,7 +2379,7 @@ onMounted(() => {
   letter-spacing: -0.03em;
   color: var(--nc-accent-100);
 }
-.nc-band__l { font-size: 13.5px; color: var(--nc-accent-200); margin-top: 4px; }
+.nc-band__l { font-size: 13.5px; color: var(--nc-accent-200); margin-top: 12px; }
 
 /* ── Grille des patterns ── */
 .nc-tiles {
