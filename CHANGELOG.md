@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **The monorepo scope is remembered locally instead of in the repository.** Choosing a scope used to write it into the repository's `.gitwand-workspace.json`, and to create that file when it did not exist, so "Scope here" left an untracked file in any repo it was used in. The scope is now kept in the app's storage, per repository, and nothing is written to the repository. A scope already saved in a `.gitwand-workspace.json` is picked up once, the first time the repository opens, and the file is left as it is.
 
+### Fixed
+- **A conflicted file no longer shows its raw diff before the merge editor opens.** In Changes, selecting a conflicted file loads the repository's conflicts first, and for about 300 ms the view showed the plain diff instead: the conflict markers as added lines, with a clickable "Stage this hunk". It now shows "Loading…" until the merge editor is ready. A load that finishes after you have moved to another file no longer opens the merge editor on the wrong one.
+
 ## [3.11.2] - 2026-10-05
 
 ### Added
