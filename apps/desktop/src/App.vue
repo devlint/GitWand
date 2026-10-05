@@ -139,6 +139,7 @@ import {
 } from "./composables/branchPickerBridge";
 import { gitStash, gitStashPop, gitStashList, openInEditor, setGitConfig, gitDiscard, gitAddToGitignore, gitDeleteBranch, gitDeleteTag, gitDeleteRemoteTag, gitRemoteInfo, gitUnpushedTags, gitPushTags, gitMergeBase, gitResetToCommit, gitCommitSubmoduleChanges, gitSubmoduleCheckUpdates, scratchWorktreeCreate, scratchWorktreeDiscard, scratchWorktreeMergeBack, gitWorktreeList, gitWorktreeRemove, type CommitSubmoduleChange, type ScratchWorktree } from "./utils/backend";
 import { useCommitActions } from "./composables/useCommitActions";
+import { useConflictEditorSelection } from "./composables/useConflictEditorSelection";
 
 const { t, locale } = useI18n();
 const { settings, refreshSettings } = useSettings();
@@ -772,24 +773,16 @@ watch(repoSuccess, (val) => {
 });
 
 // ─── Conflict handling ──────────────────────────────────
-// When a conflicted file is selected, load it in useGitWand for resolution
-const showingMergeEditor = ref(false);
-
-// Watch both the conflicted flag AND the selected file path —
-// switching between two conflicted files keeps isConflicted=true
-// so we need to also react to the file path changing.
-watch(
-  [isSelectedFileConflicted, repoSelectedFile],
-  async ([isConflicted, filePath]) => {
-    if (isConflicted && repoFolderPath.value && filePath) {
-      await mergeOpenPath(repoFolderPath.value);
-      mergeSelectFile(filePath);
-      showingMergeEditor.value = true;
-    } else {
-      showingMergeEditor.value = false;
-    }
-  },
-);
+// When a conflicted file is selected, load it in useGitWand for resolution.
+// `mergeEditorPending` covers the load, so the diff never renders the raw
+// conflict markers in the meantime.
+const { showing: showingMergeEditor, pending: mergeEditorPending } = useConflictEditorSelection({
+  isConflicted: isSelectedFileConflicted,
+  filePath: repoSelectedFile,
+  repoPath: repoFolderPath,
+  openConflicts: mergeOpenPath,
+  selectConflict: mergeSelectFile,
+});
 
 /**
  * After resolving a hunk or file, check if the file is fully resolved.
@@ -4394,6 +4387,7 @@ onUnmounted(() => {
                   @reconstruct-conflict="(path) => handleReconstructConflict(path)"
                   @keep-working-tree="(path) => handleKeepWorkingTree(path)"
                   @open-externally="(path) => handleOpenInEditor(path)" />
+                <div v-else-if="mergeEditorPending" class="view__merge-pending" role="status">{{ t("common.loading") }}</div>
                 <FileHistoryViewer v-else-if="fileHistoryPath && repoFolderPath" :file-path="fileHistoryPath"
                   :cwd="repoFolderPath" @close="closeFileHistory"
                   @select-commit="(hash) => { closeFileHistory(); selectCommit(hash); viewMode = 'history'; }" />
@@ -5098,6 +5092,16 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   position: relative;
+}
+
+/* Stands in for the merge editor while a conflicted file's conflicts load. */
+.view__merge-pending {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
 }
 
 .view__rail {
