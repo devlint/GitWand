@@ -2568,7 +2568,6 @@ const zhCN: Locale = {
     active: "已限定到 {0}",
     hidden: "已隐藏 {0} 个提交",
     invalidNotice: "已保存的范围“{0}”不再存在 — 正在显示整个仓库。",
-    persistError: "无法保存工作区范围。",
   },
   terminal: {
     newTab: "新标签页",

@@ -2569,7 +2569,6 @@ const fr: Locale = {
     active: "Limité à {0}",
     hidden: "{0} commits masqués",
     invalidNotice: "Le périmètre enregistré « {0} » n'existe plus — affichage du dépôt entier.",
-    persistError: "Impossible d'enregistrer le périmètre de l'espace de travail.",
   },
   terminal: {
     newTab: "Nouvel onglet",

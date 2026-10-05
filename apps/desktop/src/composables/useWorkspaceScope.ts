@@ -1,5 +1,5 @@
 import { ref, computed, type Ref } from "vue";
-import { workspaceRead, workspaceWrite, pathExists, type WorkspaceConfig } from "../utils/backend";
+import { workspaceRead, pathExists } from "../utils/backend";
 import { useLogs } from "./useLogs";
 import { t } from "./useI18n";
 
@@ -11,54 +11,56 @@ import { t } from "./useI18n";
  * the whole repo. Single scope at a time (locked design decision).
  *
  * State is module-scoped (singleton, no Pinia) so every `useWorkspaceScope()`
- * call shares the same `activeScope`. Persistence is additive: the `scope`
- * field is merged into the existing per-repo `.gitwand-workspace.json` via
- * `workspaceRead` / `workspaceWrite`. No `AppSettings` field (per-repo state,
- * not a global setting).
+ * call shares the same `activeScope`.
+ *
+ * Persistence is local, per repo: the app's storage, keyed by repo path. The
+ * scope is a personal view preference, so it is never written into the
+ * repository. It used to be merged into the repo's `.gitwand-workspace.json`,
+ * which created that file, untracked, in any repo where someone picked a
+ * scope. A `scope` still present in such a file is read once, when nothing is
+ * stored locally for the repo, and the file is left untouched.
+ *
+ * The stored value is the scope path, or "" for the whole repo. A missing key
+ * means "never decided here", which is the only case that consults the file.
  */
+
+export const SCOPE_STORAGE_PREFIX = "gitwand-scope:";
 
 // Module-scoped singleton state.
 const activeScope: Ref<string | null> = ref(null);
 
-// The repo whose scope is currently loaded — needed so set/clear persist to
-// the right `.gitwand-workspace.json`.
+// The repo whose scope is currently loaded, so set/clear persist to the
+// right key.
 const scopeRepoPath: Ref<string | null> = ref(null);
 
 // Guard so the invalid-scope notice fires at most once per load.
 let _invalidNoticeShown = false;
 
-/**
- * Persist the current `scope` value into the repo's `.gitwand-workspace.json`,
- * merging it with the existing config (so `name` / `repos` are preserved).
- *
- * `workspaceRead` throws when no workspace file exists yet — in that case we
- * start from a minimal config rather than failing. Persistence errors are
- * non-fatal: surfaced as a warn log, never blocking the UI.
- */
-async function persistScope(repoPath: string, scope: string | null): Promise<void> {
-  let config: WorkspaceConfig;
+/** The locally stored scope: a path, "" for the whole repo, null if never stored. */
+function readStoredScope(repoPath: string): string | null {
   try {
-    config = await workspaceRead(repoPath);
+    return localStorage.getItem(SCOPE_STORAGE_PREFIX + repoPath);
   } catch {
-    // No workspace file yet — start from a minimal config. The directory name
-    // is a reasonable default workspace name.
-    const name = repoPath.split(/[\\/]/).filter(Boolean).pop() ?? repoPath;
-    config = { name, repos: [] };
+    return null;
   }
+}
 
-  const merged: WorkspaceConfig = { ...config };
-  if (scope) {
-    merged.scope = scope;
-  } else {
-    // Clearing: drop the field entirely (absent === whole repo).
-    delete merged.scope;
-  }
-
+/** Persist the scope locally. Storage errors are non-fatal: the scope still applies for this session. */
+function persistScope(repoPath: string, scope: string | null): void {
   try {
-    await workspaceWrite(repoPath, merged);
-  } catch (err: any) {
-    const { pushLog } = useLogs();
-    pushLog("warn", t("scope.persistError"), err?.message);
+    localStorage.setItem(SCOPE_STORAGE_PREFIX + repoPath, scope ?? "");
+  } catch {
+    /* storage unavailable: the scope is simply not remembered */
+  }
+}
+
+/** A `scope` left in the repo's `.gitwand-workspace.json` by an older version, if any. */
+async function readLegacyScope(repoPath: string): Promise<string | null> {
+  try {
+    return (await workspaceRead(repoPath))?.scope || null;
+  } catch {
+    // No workspace file / parse error → nothing to migrate.
+    return null;
   }
 }
 
@@ -67,9 +69,7 @@ async function persistScope(repoPath: string, scope: string | null): Promise<voi
  */
 async function setScope(path: string): Promise<void> {
   activeScope.value = path || null;
-  if (scopeRepoPath.value) {
-    await persistScope(scopeRepoPath.value, activeScope.value);
-  }
+  if (scopeRepoPath.value) persistScope(scopeRepoPath.value, activeScope.value);
 }
 
 /**
@@ -77,34 +77,24 @@ async function setScope(path: string): Promise<void> {
  */
 async function clearScope(): Promise<void> {
   activeScope.value = null;
-  if (scopeRepoPath.value) {
-    await persistScope(scopeRepoPath.value, null);
-  }
+  if (scopeRepoPath.value) persistScope(scopeRepoPath.value, null);
 }
 
 /**
  * Load the persisted scope for a repo on open.
  *
- * Reads `.gitwand-workspace.json`, validates the persisted scope path still
- * exists on disk (via `pathExists` → Rust `safe_repo_path`). On an invalid /
- * deleted path, falls back to whole repo (`null`) and surfaces a one-time
- * non-blocking notice. Never throws — a missing/malformed workspace file just
- * yields `null` (whole repo).
+ * Reads the local value, or migrates one from an older `.gitwand-workspace.json`
+ * the first time, then validates that the path still exists on disk (via
+ * `pathExists` → Rust `safe_repo_path`). On an invalid / deleted path, falls
+ * back to whole repo (`null`) and surfaces a one-time non-blocking notice.
+ * Never throws.
  */
 async function loadScope(repoPath: string): Promise<void> {
   scopeRepoPath.value = repoPath;
   _invalidNoticeShown = false;
 
-  let config: WorkspaceConfig | null = null;
-  try {
-    config = await workspaceRead(repoPath);
-  } catch {
-    // No workspace file / parse error → whole repo.
-    activeScope.value = null;
-    return;
-  }
-
-  const persisted = config?.scope;
+  const stored = readStoredScope(repoPath);
+  const persisted = stored !== null ? stored : await readLegacyScope(repoPath);
   if (!persisted) {
     activeScope.value = null;
     return;
@@ -117,9 +107,12 @@ async function loadScope(repoPath: string): Promise<void> {
   } catch {
     exists = false;
   }
+  // The repo may have changed while the check ran.
+  if (scopeRepoPath.value !== repoPath) return;
 
   if (exists) {
     activeScope.value = persisted;
+    persistScope(repoPath, persisted);
   } else {
     activeScope.value = null;
     if (!_invalidNoticeShown) {
@@ -127,8 +120,8 @@ async function loadScope(repoPath: string): Promise<void> {
       const { pushLog } = useLogs();
       pushLog("warn", t("scope.invalidNotice", persisted));
     }
-    // Drop the stale scope from the persisted config so it doesn't keep firing.
-    await persistScope(repoPath, null);
+    // Drop the stale scope locally so the notice doesn't keep firing.
+    persistScope(repoPath, null);
   }
 }
 

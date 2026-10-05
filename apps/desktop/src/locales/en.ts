@@ -2600,7 +2600,6 @@ const en = {
     active: "Scoped to {0}",
     hidden: "{0} commits hidden",
     invalidNotice: "Saved scope '{0}' no longer exists — showing the whole repo.",
-    persistError: "Could not save the workspace scope.",
   },
   terminal: {
     newTab: "New tab",
