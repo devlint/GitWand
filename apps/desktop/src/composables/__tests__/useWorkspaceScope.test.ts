@@ -1,5 +1,5 @@
+// @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { WorkspaceConfig } from "../../utils/backend";
 
 // Mock the backend IPC layer — no real Tauri / git.
 vi.mock("../../utils/backend", () => ({
@@ -21,66 +21,50 @@ vi.mock("../useLogs", () => ({
 }));
 
 import { workspaceRead, workspaceWrite, pathExists } from "../../utils/backend";
-import { useWorkspaceScope } from "../useWorkspaceScope";
+import { useWorkspaceScope, SCOPE_STORAGE_PREFIX } from "../useWorkspaceScope";
 
 const mockRead = vi.mocked(workspaceRead);
 const mockWrite = vi.mocked(workspaceWrite);
 const mockPathExists = vi.mocked(pathExists);
 
 const REPO = "/repos/monorepo";
+const stored = () => localStorage.getItem(SCOPE_STORAGE_PREFIX + REPO);
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  localStorage.clear();
   // Reset the module-scoped singleton between tests by loading a clean repo
   // with no persisted scope.
-  mockRead.mockResolvedValue({ name: "ws", repos: [] });
+  mockRead.mockRejectedValue(new Error("No workspace file found"));
   const { loadScope } = useWorkspaceScope();
   await loadScope(REPO);
+  localStorage.clear();
   vi.clearAllMocks();
 });
 
 describe("useWorkspaceScope", () => {
-  it("setScope updates activeScope and persists the scope field (round-trip)", async () => {
-    const existing: WorkspaceConfig = {
-      name: "ws",
-      repos: [{ path: "/repos/monorepo", name: "monorepo" }],
-    };
-    mockRead.mockResolvedValue(existing);
-    mockWrite.mockResolvedValue(undefined);
-
+  it("setScope updates activeScope and persists it locally, never in the repo", async () => {
     const { setScope, activeScope } = useWorkspaceScope();
     await setScope("packages/core");
 
     expect(activeScope.value).toBe("packages/core");
-    // Persisted by merging scope into the existing config (name + repos kept).
-    expect(mockWrite).toHaveBeenCalledTimes(1);
-    const [writtenPath, writtenConfig] = mockWrite.mock.calls[0];
-    expect(writtenPath).toBe(REPO);
-    expect(writtenConfig).toEqual({
-      name: "ws",
-      repos: [{ path: "/repos/monorepo", name: "monorepo" }],
-      scope: "packages/core",
-    });
+    expect(stored()).toBe("packages/core");
+    expect(mockWrite).not.toHaveBeenCalled();
   });
 
-  it("clearScope resets activeScope to null and drops the scope field", async () => {
-    mockRead.mockResolvedValue({ name: "ws", repos: [], scope: "packages/core" });
-    mockWrite.mockResolvedValue(undefined);
-
+  it("clearScope resets activeScope and records the whole repo, without touching the repo", async () => {
     const { setScope, clearScope, activeScope } = useWorkspaceScope();
     await setScope("packages/core");
-    expect(activeScope.value).toBe("packages/core");
-
     await clearScope();
+
     expect(activeScope.value).toBeNull();
-    // The last write must NOT carry a scope field (whole repo === absent).
-    const calls = mockWrite.mock.calls;
-    const lastWrite = calls[calls.length - 1];
-    expect(lastWrite[1]).not.toHaveProperty("scope");
+    // An empty value, not a missing key: the scope was decided, it is the whole repo.
+    expect(stored()).toBe("");
+    expect(mockWrite).not.toHaveBeenCalled();
   });
 
-  it("loadScope restores a persisted scope when the path still exists", async () => {
-    mockRead.mockResolvedValue({ name: "ws", repos: [], scope: "packages/core" });
+  it("loadScope restores the locally persisted scope when the path still exists", async () => {
+    localStorage.setItem(SCOPE_STORAGE_PREFIX + REPO, "packages/core");
     mockPathExists.mockResolvedValue(true);
 
     const { loadScope, activeScope } = useWorkspaceScope();
@@ -88,51 +72,87 @@ describe("useWorkspaceScope", () => {
 
     expect(mockPathExists).toHaveBeenCalledWith(REPO, "packages/core");
     expect(activeScope.value).toBe("packages/core");
+    // The local value wins: the workspace file is not consulted.
+    expect(mockRead).not.toHaveBeenCalled();
   });
 
-  it("loadScope falls back to whole repo + notice when the persisted path is gone", async () => {
-    mockRead.mockResolvedValue({ name: "ws", repos: [], scope: "packages/deleted" });
-    mockPathExists.mockResolvedValue(false);
-    mockWrite.mockResolvedValue(undefined);
+  it("loadScope keeps the whole repo when it was cleared locally, even if the file still has a scope", async () => {
+    localStorage.setItem(SCOPE_STORAGE_PREFIX + REPO, "");
+    mockRead.mockResolvedValue({ name: "ws", repos: [], scope: "packages/core" });
 
     const { loadScope, activeScope } = useWorkspaceScope();
     await loadScope(REPO);
 
-    // Invalid scope → whole repo.
     expect(activeScope.value).toBeNull();
-    // One-time non-blocking notice surfaced.
+    expect(mockRead).not.toHaveBeenCalled();
+  });
+
+  it("loadScope falls back to whole repo + one notice when the persisted path is gone", async () => {
+    localStorage.setItem(SCOPE_STORAGE_PREFIX + REPO, "packages/deleted");
+    mockPathExists.mockResolvedValue(false);
+
+    const { loadScope, activeScope } = useWorkspaceScope();
+    await loadScope(REPO);
+
+    expect(activeScope.value).toBeNull();
     expect(pushLog).toHaveBeenCalledTimes(1);
     expect(pushLog.mock.calls[0][0]).toBe("warn");
     expect(pushLog.mock.calls[0][1]).toContain("scope.invalidNotice");
-    // Stale scope scrubbed from the persisted config.
-    expect(mockWrite).toHaveBeenCalled();
-    const writeCalls = mockWrite.mock.calls;
-    expect(writeCalls[writeCalls.length - 1][1]).not.toHaveProperty("scope");
+    // The stale scope is dropped locally so the notice does not fire again.
+    expect(stored()).toBe("");
+    expect(mockWrite).not.toHaveBeenCalled();
   });
 
-  it("loadScope yields whole repo when no workspace file exists (read throws)", async () => {
+  it("loadScope yields whole repo when nothing is persisted anywhere", async () => {
     mockRead.mockRejectedValue(new Error("No workspace file found"));
 
     const { loadScope, activeScope } = useWorkspaceScope();
     await loadScope(REPO);
 
     expect(activeScope.value).toBeNull();
-    // No existence check needed when there's no persisted scope.
     expect(mockPathExists).not.toHaveBeenCalled();
+    expect(mockWrite).not.toHaveBeenCalled();
   });
 
-  it("setScope starts from a minimal config when no workspace file exists yet", async () => {
+  it("migrates a scope from an older .gitwand-workspace.json once, leaving the file untouched", async () => {
+    mockRead.mockResolvedValue({ name: "ws", repos: [], scope: "packages/core" });
+    mockPathExists.mockResolvedValue(true);
+
+    const { loadScope, activeScope } = useWorkspaceScope();
+    await loadScope(REPO);
+
+    expect(activeScope.value).toBe("packages/core");
+    expect(stored()).toBe("packages/core");
+    expect(mockWrite).not.toHaveBeenCalled();
+
+    // Next open reads the local value only.
+    mockRead.mockClear();
+    await loadScope(REPO);
+    expect(mockRead).not.toHaveBeenCalled();
+    expect(activeScope.value).toBe("packages/core");
+  });
+
+  it("scopes are kept per repository", async () => {
+    const OTHER = "/repos/other";
+    const { loadScope, setScope, activeScope } = useWorkspaceScope();
+    await setScope("packages/core");
+
     mockRead.mockRejectedValue(new Error("No workspace file found"));
-    mockWrite.mockResolvedValue(undefined);
+    await loadScope(OTHER);
+    expect(activeScope.value).toBeNull();
 
-    const { setScope } = useWorkspaceScope();
-    await setScope("apps/web");
+    mockPathExists.mockResolvedValue(true);
+    await loadScope(REPO);
+    expect(activeScope.value).toBe("packages/core");
+  });
 
-    expect(mockWrite).toHaveBeenCalledTimes(1);
-    const writtenConfig = mockWrite.mock.calls[0][1];
-    // Falls back to the repo dir basename as the workspace name.
-    expect(writtenConfig.name).toBe("monorepo");
-    expect(writtenConfig.repos).toEqual([]);
-    expect(writtenConfig.scope).toBe("apps/web");
+  it("still works when storage is unavailable", async () => {
+    const spy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("QuotaExceededError");
+    });
+    const { setScope, activeScope } = useWorkspaceScope();
+    await expect(setScope("packages/core")).resolves.toBeUndefined();
+    expect(activeScope.value).toBe("packages/core");
+    spy.mockRestore();
   });
 });

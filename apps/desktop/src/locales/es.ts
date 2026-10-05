@@ -2559,7 +2559,6 @@ const es: Locale = {
     active: "Acotado a {0}",
     hidden: "{0} commits ocultos",
     invalidNotice: "El ámbito guardado «{0}» ya no existe — mostrando todo el repositorio.",
-    persistError: "No se pudo guardar el ámbito del espacio de trabajo.",
   },
   terminal: {
     newTab: "Nueva pestaña",

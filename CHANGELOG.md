@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **The monorepo scope is remembered locally instead of in the repository.** Choosing a scope used to write it into the repository's `.gitwand-workspace.json`, and to create that file when it did not exist, so "Scope here" left an untracked file in any repo it was used in. The scope is now kept in the app's storage, per repository, and nothing is written to the repository. A scope already saved in a `.gitwand-workspace.json` is picked up once, the first time the repository opens, and the file is left as it is.
+
 ## [3.11.2] - 2026-10-05
 
 ### Added
