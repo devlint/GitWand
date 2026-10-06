@@ -5,6 +5,38 @@ description: Release history for GitWand — the native Git client with AI confl
 
 # Changelog
 
+## v3.12.0 — October 2026
+
+### A terminal of our own
+
+The integrated terminal used xterm.js. Its WebGL renderer is fast on a real GPU, but wherever the webview falls back to software GL, which is common on Linux, it repainted the whole canvas on every keystroke, and typing crawled. GitWand now draws the terminal itself. A small VT emulator keeps the screen, and each row is a plain line of the page that is rebuilt only when its content changes, at most once per frame. An echoed keystroke touches one row.
+
+The emulator covers what a shell and the AI CLIs actually use: 16, 256 and truecolor, scroll regions, the alternate screen, bracketed paste, mouse and focus reporting, synchronized output, and the startup queries Claude Code, Codex, Gemini, Copilot and Antigravity wait for before they draw. Selection, copy, paste, search, clickable links and scrollback work as before, and Shift+Enter inserts a newline in an AI CLI tab. Nerd Font icons from prompt themes, `eza` or `lsd` now show up without installing anything: GitWand ships Symbols Nerd Font Mono and fetches it only once an icon is drawn. The terminal also sits on the same surface as its tab and follows the light and dark themes. xterm.js and its four add-ons are gone from the dependencies.
+
+### Your work in progress lives in the Git Tree
+
+The dock's Changes entry is now a WIP tab attached to the Git Tree. Clicking it, or the WIP row at the top of the graph, selects your uncommitted changes: the right rail becomes the files and commit pane, and the selected file's diff covers the graph until you close it, which brings the graph back with the WIP still selected. Going back and forth no longer wipes the commit summary and description you were writing, including one the AI drafted.
+
+### Cherry-pick, but don't commit yet
+
+The commit menu gains "Cherry-pick as WIP". The commit's changes land in your index and working tree without being committed, so you can trim them, split them or fold them into your own work first. If the pick conflicts, the conflicted files open for resolution like any other change: in this mode git leaves no cherry-pick in progress, so there is nothing to continue or abort.
+
+### The graph follows a reset right away
+
+After a hard reset to an older commit, the Git Tree could keep showing the old branch and HEAD labels for half a minute. The log reload skipped itself whenever the newest commit had not changed, and with the remote branch still pointing at it, it never had. Reset and checkout now force the reload, and a forced reload fetches what you are looking at plus one page instead of the whole prefetched history, so it is quick too. Switching the branch or author filter, or the monorepo scope, no longer lets a page from the previous view land in the new one.
+
+### Discard works on staged files
+
+Discard used to be hidden on staged files. It now unstages them and restores the working tree. Testing it turned up two cases that also broke "Discard section": a staged rename, which left the old path deleted and the new one untracked, and a file added then edited, which made git refuse the whole batch so none of its files were discarded. Both now come back cleanly, and the discard snapshot is still there to undo it.
+
+### Smaller things
+
+On main or master with uncommitted changes, the WIP node now sits at the top of the trunk's lane instead of beside it. In Changes, a conflicted file no longer flashes its raw diff before the merge editor opens. And the monorepo scope is remembered in the app, per repository, instead of being written into the repository's `.gitwand-workspace.json`.
+
+### A dependency security pass
+
+The desktop app moves to rustls 0.23.45, which fixes how TLS 1.3 handshake messages were accepted across encryption levels; rustls carries the app's update checks. `@gitwand/mcp` picks up patched versions of `proxy-addr` (rated critical), `hono`, `ip-address` and `fast-uri`. They come with the MCP SDK's HTTP transport, which GitWand's stdio server does not use, but they are installed with the package. DOMPurify, which sanitizes rendered PR descriptions and markdown, moves to 3.4.16 for its upstream hardening.
+
 ## v3.11.2 — October 2026
 
 ### The File Explorer becomes a file browser

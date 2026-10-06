@@ -25,7 +25,7 @@ function setLocale(code: Locale) {
 }
 
 // ── Smart download URL (OS detection) ─────────────────────────────────────
-const LATEST = '3.11.2'
+const LATEST = '3.12.0'
 const RELEASES = 'https://github.com/devlint/GitWand/releases'
 
 // SSR-safe: start with the generic releases page, then switch to the
@@ -101,7 +101,7 @@ const i18n: Record<Locale, any> = {
     mcRow3: "Natif (sans Electron)",
     mcRow4: "Serveur MCP pour agents",
     agentsCta: "Découvrir IA & agents →",
-    heroAnnounce: "Nouveau dans la v3.11 — l'explorateur de fichiers devient un vrai navigateur, façon Finder",
+    heroAnnounce: "Nouveau dans la v3.12 — un terminal maison, rapide même sans GPU",
     heroPoint1: "8 patterns déterministes — zéro pari sur ton code",
     heroPoint2: "100 % local — ton code ne quitte jamais ta machine",
     heroPoint3: "Un seul moteur — Desktop, CLI, VS Code & agents IA",
@@ -118,7 +118,7 @@ const i18n: Record<Locale, any> = {
     heroSub: "Ce petit coup au moral quand 12 fichiers passent au rouge ? Terminé. GitWand classe chaque hunk avec 8 patterns déterministes — sans deviner, sans halluciner — résout tout seul ceux qui n'étaient pas des décisions, et ne te rend que ce qui mérite ton cerveau. Natif, gratuit, MIT.",
     download: 'Télécharger',
     github: 'GitHub',
-    whatsNew: 'Nouveautés v3.11',
+    whatsNew: 'Nouveautés v3.12',
     docs: 'Documentation →',
     platforms: 'macOS · Linux · Windows',
     heroTabCli: 'CLI',
@@ -201,7 +201,7 @@ const i18n: Record<Locale, any> = {
     mcRow3: "Native (no Electron)",
     mcRow4: "MCP server for agents",
     agentsCta: "Explore AI & agents →",
-    heroAnnounce: "New in v3.11 — the File Explorer becomes a Finder-like file browser",
+    heroAnnounce: "New in v3.12 — a built-in terminal, fast even without a GPU",
     heroPoint1: "8 deterministic patterns — zero gambling with your code",
     heroPoint2: "100% local — your code never leaves your machine",
     heroPoint3: "One engine — Desktop, CLI, VS Code & AI agents",
@@ -218,7 +218,7 @@ const i18n: Record<Locale, any> = {
     heroSub: "That sinking feeling when 12 files turn red? Gone. GitWand classifies every hunk with 8 deterministic patterns — no guessing, no hallucinations — auto-resolves the ones that were never decisions, and hands you only what's worth your brain. Native, free, MIT.",
     download: 'Download',
     github: 'GitHub',
-    whatsNew: "What's new in v3.11",
+    whatsNew: "What's new in v3.12",
     docs: 'Documentation →',
     platforms: 'macOS · Linux · Windows',
     heroTabCli: 'CLI',
@@ -301,7 +301,7 @@ const i18n: Record<Locale, any> = {
     mcRow3: "Nativo (sin Electron)",
     mcRow4: "Servidor MCP para agentes",
     agentsCta: "Explorar IA y agentes →",
-    heroAnnounce: "Nuevo en la v3.11 — el explorador de archivos se convierte en un navegador al estilo Finder",
+    heroAnnounce: "Nuevo en la v3.12 — un terminal propio, rápido incluso sin GPU",
     heroPoint1: "8 patrones deterministas — cero apuestas con tu código",
     heroPoint2: "100 % local — tu código nunca sale de tu máquina",
     heroPoint3: "Un solo motor — Desktop, CLI, VS Code y agentes de IA",
@@ -318,7 +318,7 @@ const i18n: Record<Locale, any> = {
     heroSub: "¿Esa sensación de vacío cuando 12 archivos se ponen en rojo? Se acabó. GitWand clasifica cada hunk con 8 patrones deterministas — sin adivinar, sin alucinar — resuelve solo los que nunca fueron decisiones y te entrega únicamente lo que merece tu cerebro. Nativo, gratis, MIT.",
     download: 'Descargar',
     github: 'GitHub',
-    whatsNew: 'Novedades v3.11',
+    whatsNew: 'Novedades v3.12',
     docs: 'Documentación →',
     platforms: 'macOS · Linux · Windows',
     heroTabCli: 'CLI',
@@ -401,7 +401,7 @@ const i18n: Record<Locale, any> = {
     mcRow3: "Nativo (sem Electron)",
     mcRow4: "Servidor MCP para agentes",
     agentsCta: "Explorar IA e agentes →",
-    heroAnnounce: "Novidade na v3.11 — o explorador de arquivos vira um navegador no estilo Finder",
+    heroAnnounce: "Novidade na v3.12 — um terminal próprio, rápido mesmo sem GPU",
     heroPoint1: "8 padrões deterministas — zero aposta com seu código",
     heroPoint2: "100 % local — seu código nunca sai da sua máquina",
     heroPoint3: "Um único motor — Desktop, CLI, VS Code e agentes de IA",
@@ -418,7 +418,7 @@ const i18n: Record<Locale, any> = {
     heroSub: "Aquele frio na barriga quando 12 arquivos ficam vermelhos? Acabou. O GitWand classifica cada hunk com 8 padrões deterministas — sem chutar, sem alucinar — resolve sozinho os que nunca foram decisões e devolve só o que merece seu cérebro. Nativo, gratuito, MIT.",
     download: 'Baixar',
     github: 'GitHub',
-    whatsNew: 'Novidades v3.11',
+    whatsNew: 'Novidades v3.12',
     docs: 'Documentação →',
     platforms: 'macOS · Linux · Windows',
     heroTabCli: 'CLI',
@@ -501,7 +501,7 @@ const i18n: Record<Locale, any> = {
     mcRow3: "原生（无 Electron）",
     mcRow4: "面向代理的 MCP 服务器",
     agentsCta: "探索 AI 与代理 →",
-    heroAnnounce: "v3.11 新功能 — 文件资源管理器升级为 Finder 式的文件浏览器",
+    heroAnnounce: "v3.12 新功能 — 自研终端渲染器，没有 GPU 也流畅",
     heroPoint1: "8 种确定性模式 — 绝不拿你的代码赌运气",
     heroPoint2: "100% 本地运行 — 代码永不离开你的机器",
     heroPoint3: "一个引擎 — 桌面端、CLI、VS Code 与 AI 代理",
@@ -518,7 +518,7 @@ const i18n: Record<Locale, any> = {
     heroSub: "12 个文件同时变红的那种心凉？不会再有。GitWand 用 8 种确定性模式分类每个 hunk——不猜测、无幻觉——自动解决那些本就无需决定的冲突，只把真正值得你思考的部分交还给你。原生、免费、MIT。",
     download: '下载',
     github: 'GitHub',
-    whatsNew: 'v3.11 新特性',
+    whatsNew: 'v3.12 新特性',
     docs: '文档 →',
     platforms: 'macOS · Linux · Windows',
     heroTabCli: '命令行',
@@ -587,7 +587,7 @@ const t = computed(() => i18n[locale.value])
 // `t` sert les sections historiques, `nt` les nouvelles.
 const NC: Record<Locale, any> = {
   en: {
-    badge: 'v3.11 — the File Explorer becomes a Finder-like file browser',
+    badge: 'v3.12 — a built-in terminal, fast even without a GPU',
     h1a: 'The merge ends', h1b: 'without you', h1c: '.',
     sub: 'Eight deterministic patterns classify every hunk, settle the ones that carried no decision, and hand you back only what deserves your attention. Native, local, MIT.',
     cta: 'Download GitWand',
@@ -639,7 +639,7 @@ const NC: Record<Locale, any> = {
     dlMeta: 'v3.11.0 — MIT',
   },
   fr: {
-    badge: "v3.11 — l'explorateur de fichiers devient un vrai navigateur, façon Finder",
+    badge: 'v3.12 — un terminal maison, rapide même sans GPU',
     h1a: 'Le merge se termine', h1b: 'sans toi', h1c: '.',
     sub: 'Huit patterns déterministes classent chaque hunk, règlent ceux qui ne demandaient aucune décision, et te laissent uniquement ce qui vaut ton attention. Natif, local, MIT.',
     cta: 'Télécharger GitWand',
@@ -691,7 +691,7 @@ const NC: Record<Locale, any> = {
     dlMeta: 'v3.11.0 — MIT',
   },
   es: {
-    badge: 'v3.11 — el explorador de archivos se convierte en un navegador al estilo Finder',
+    badge: 'v3.12 — un terminal propio, rápido incluso sin GPU',
     h1a: 'El merge termina', h1b: 'sin ti', h1c: '.',
     sub: 'Ocho patrones deterministas clasifican cada hunk, resuelven los que no exigían ninguna decisión y te devuelven solo lo que merece tu atención. Nativo, local, MIT.',
     cta: 'Descargar GitWand',
@@ -743,7 +743,7 @@ const NC: Record<Locale, any> = {
     dlMeta: 'v3.11.0 — MIT',
   },
   'pt-BR': {
-    badge: 'v3.11 — o explorador de arquivos vira um navegador no estilo Finder',
+    badge: 'v3.12 — um terminal próprio, rápido mesmo sem GPU',
     h1a: 'O merge termina', h1b: 'sem você', h1c: '.',
     sub: 'Oito padrões determinísticos classificam cada hunk, resolvem os que não exigiam decisão nenhuma e devolvem só o que merece a sua atenção. Nativo, local, MIT.',
     cta: 'Baixar o GitWand',
@@ -795,7 +795,7 @@ const NC: Record<Locale, any> = {
     dlMeta: 'v3.11.0 — MIT',
   },
   'zh-CN': {
-    badge: 'v3.11 — 文件资源管理器升级为 Finder 式的文件浏览器',
+    badge: 'v3.12 — 自研终端渲染器，没有 GPU 也流畅',
     h1a: '合并结束时', h1b: '不必再找你', h1c: '。',
     sub: '八种确定性模式为每个 hunk 分类，自动处理那些本就无需决策的部分，只把值得你关注的留给你。原生、本地、MIT。',
     cta: '下载 GitWand',

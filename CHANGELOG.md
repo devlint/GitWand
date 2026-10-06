@@ -7,12 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.12.0] - 2026-10-06
+
+### Added
+- **Cherry-pick a commit as work in progress.** The commit context menu, in the Git Tree and in the commit list, gains "Cherry-pick as WIP": the commit's changes land in the index and working tree without being committed (`git cherry-pick --no-commit`), so they can be edited, split or partly unstaged before you commit them. When the pick conflicts, the conflicted files open for resolution as ordinary WIP: with `--no-commit` git leaves no cherry-pick in progress, so there is nothing to continue or abort.
+
 ### Changed
+- **The WIP lives in the Git Tree.** The dock's Changes entry becomes a WIP tab attached to the Git Tree entry. Clicking it, or the WIP row at the top of the graph, selects your uncommitted changes: the right rail turns into the files and commit pane, and the selected file's diff covers the graph until you close it with the X, which returns to the graph with the WIP still selected. Moving between the WIP and the graph no longer clears the commit summary and description, including an AI-written draft. A saved dock order that still lists Changes is cleaned up on upgrade, and "Hide Changes when clean" now hides the WIP tab.
 - **The integrated terminal has its own renderer, and typing is fast again.** Terminals used xterm.js, whose WebGL renderer runs on the CPU wherever the webview falls back to software GL, which is common on Linux, so every keystroke repainted the whole canvas there. GitWand now draws the terminal itself (`utils/vt`): a small VT emulator keeps the screen, and each row is a plain DOM line that is rebuilt only when its content changes, at most once per frame, so an echoed keystroke touches one row. The emulator covers what the AI CLIs and a shell use: colours (16, 256 and truecolor), scroll regions, the alternate screen, bracketed paste, mouse and focus reporting, synchronized output, and the startup queries Claude Code, Codex, Gemini, Copilot and Antigravity wait for. Selection, copy (Ctrl+Shift+C, ⌘C), paste, search, Ctrl/⌘+click on links and scrollback (wheel, Shift+PageUp/PageDown) work as before. In an AI CLI tab, Shift+Enter inserts a newline. Nerd Font icons (prompt themes, `eza`/`lsd`, status lines) now display without installing anything: GitWand ships Symbols Nerd Font Mono (MIT, 1.2 MB), which the terminal fetches only once an icon is drawn. The terminal now sits on the same surface as its tab and follows the light / dark theme, and it reports those colours to programs that ask for them. xterm.js and its four add-ons (`@xterm/xterm`, `addon-fit`, `addon-search`, `addon-web-links`, `addon-webgl`) are no longer dependencies.
 - **The monorepo scope is remembered locally instead of in the repository.** Choosing a scope used to write it into the repository's `.gitwand-workspace.json`, and to create that file when it did not exist, so "Scope here" left an untracked file in any repo it was used in. The scope is now kept in the app's storage, per repository, and nothing is written to the repository. A scope already saved in a `.gitwand-workspace.json` is picked up once, the first time the repository opens, and the file is left as it is.
 
 ### Fixed
 - **A conflicted file no longer shows its raw diff before the merge editor opens.** In Changes, selecting a conflicted file loads the repository's conflicts first, and for about 300 ms the view showed the plain diff instead: the conflict markers as added lines, with a clickable "Stage this hunk". It now shows "Loading…" until the merge editor is ready. A load that finishes after you have moved to another file no longer opens the merge editor on the wrong one.
+- **The Git Tree updates as soon as a reset or a checkout moves HEAD (#213).** After `reset --hard` to an older commit, the graph kept the old branch and HEAD labels for up to half a minute, until the next poll: the reload skipped the log whenever its top commit had not changed, and with `origin/<branch>` still on the newest commit it never had. Reset and checkout now force the reload. A forced reload also stopped refetching the whole prefetched history (up to 5,000 commits): it fetches what you are looking at plus one page, and the background prefetch refills the rest. Changing the branch or author filter, or the monorepo scope, fetches the first page of the new view and drops pages still in flight for the old one.
+- **Staged files can be discarded.** The Discard action was hidden on staged files. It now unstages them first, then restores the working tree. Two cases also failed in "Discard section" before this: a staged rename (only the new path was unstaged, then git refused to check it out, leaving the old path deleted and the new one untracked), and a file added then edited (it went to both the checkout and the clean batches, and git rejected the whole checkout, so every other file in the batch kept its changes). Discarding the staged row of a partially staged file drops both halves; the discard snapshot and ⌘Z cover it.
+- **A WIP on the trunk head stays on the trunk's lane.** On main or master with uncommitted changes, the WIP node was pushed onto a side lane next to the trunk instead of sitting at the top of lane 0.
+
+### Security
+- **rustls 0.23.45 in the desktop app.** Earlier 0.23 releases accepted TLS 1.3 handshake messages across encryption-level boundaries. rustls carries the app's HTTPS traffic (update checks, launch telemetry).
+- **Patched transitive dependencies of `@gitwand/mcp`.** The MCP SDK pulls in express and hono for its HTTP transport: `proxy-addr` 2.0.8 (critical, IPv4-mapped IPv6 trust bypass), `hono` 4.13.13, `ip-address` 10.7.3 and `fast-uri` 4.2.1. GitWand's MCP server runs over stdio, so those HTTP paths do not run, but they are installed with the package. Dev and build tooling got the same treatment (`undici`, `brace-expansion`, `source-map-js`); `braces` has no patched release yet and only reaches the VS Code extension's packaging tools.
+- **DOMPurify 3.4.16.** The sanitizer behind rendered PR descriptions and markdown picks up upstream hardening against DOM clobbering through XML content.
 
 ## [3.11.2] - 2026-10-05
 
@@ -1581,7 +1595,8 @@ Design-system foundations — the app header and every overlay now ride on a sha
 - CI pipeline via GitHub Actions (Node 18, 20, 22)
 - 28 tests covering all patterns + real-world scenarios (package.json, Laravel routes, Vue SFC, CSS, .env files)
 
-[Unreleased]: https://github.com/devlint/GitWand/compare/v3.11.2...HEAD
+[Unreleased]: https://github.com/devlint/GitWand/compare/v3.12.0...HEAD
+[3.12.0]: https://github.com/devlint/GitWand/compare/v3.11.2...v3.12.0
 [3.11.2]: https://github.com/devlint/GitWand/compare/v3.11.1...v3.11.2
 [3.11.1]: https://github.com/devlint/GitWand/compare/v3.11.0...v3.11.1
 [3.11.0]: https://github.com/devlint/GitWand/compare/v3.10.1...v3.11.0
