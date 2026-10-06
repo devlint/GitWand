@@ -639,9 +639,15 @@ const layout = computed<DagLayout>(() => {
   // _pinSecondaryHashes are reused unchanged so lanesAllocated stays constant
   // and existing commits never jump to different lanes.
 
+  // WIP sitting directly on the trunk head (user is on main/master) starts the
+  // trunk chain itself — otherwise lane 0 is pre-claimed by the trunk head and
+  // the WIP node gets pushed onto a fresh lane beside it.
+  const trunkForLayout =
+    wipParent !== "" && wipParent === _pinTrunkHash ? "WIP" : _pinTrunkHash;
+
   _cachedLayout = computeDagLayout(
     commits,
-    _pinTrunkHash,
+    trunkForLayout,
     _pinSecondaryHashes.length > 0 ? _pinSecondaryHashes : undefined,
   );
   return _cachedLayout;

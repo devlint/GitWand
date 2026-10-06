@@ -18,7 +18,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { parseRefs } from "../dagLayout";
+import { computeDagLayout, parseRefs } from "../dagLayout";
 
 describe("parseRefs", () => {
   it("does not classify a slash-containing name as remote by default", () => {
@@ -58,5 +58,24 @@ describe("parseRefs", () => {
     expect(names).toContain("v2.0.0");
     const experiment = parsed.find((r) => r.name === "test/some_experiment");
     expect(experiment?.type).not.toBe("remote");
+  });
+});
+
+describe("computeDagLayout — WIP on trunk", () => {
+  const commits = [
+    { hashFull: "WIP", parents: ["m2"] },
+    { hashFull: "m2", parents: ["m1"] },
+    { hashFull: "m1", parents: [] },
+  ];
+
+  it("pushes WIP off lane 0 when the trunk is pinned from its head", () => {
+    const layout = computeDagLayout(commits, "m2");
+    expect(layout.nodes[0].lane).toBe(1);
+  });
+
+  it("keeps WIP on lane 0 when the trunk chain starts at the WIP node", () => {
+    const layout = computeDagLayout(commits, "WIP");
+    expect(layout.nodes.map((n) => n.lane)).toEqual([0, 0, 0]);
+    expect(layout.maxLane).toBe(0);
   });
 });
