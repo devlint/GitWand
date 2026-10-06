@@ -1406,8 +1406,6 @@ const en = {
     terminalCopyOnSelectHint: "Copy the selection to the clipboard as soon as it is made",
     terminalPasteOnRightClick: "Paste on right-click",
     terminalPasteOnRightClickHint: "Right-click pastes the clipboard instead of opening the menu",
-    terminalLegacyRenderer: "Legacy terminal renderer (xterm.js)",
-    terminalLegacyRendererHint: "The built-in renderer is faster. Switch back if a program draws incorrectly — applies to new tabs.",
     notifications: "Notifications",
     notificationsHint: "Show toast notifications (sync, push, errors)",
     notificationLevel: "PR activity notifications",

@@ -1464,8 +1464,6 @@ const zhCN: Locale = {
     terminalCopyOnSelectHint: "选中文本后立即复制到剪贴板",
     terminalPasteOnRightClick: "右键粘贴",
     terminalPasteOnRightClickHint: "右键直接粘贴剪贴板内容，而不是打开菜单",
-    terminalLegacyRenderer: "旧版终端渲染器（xterm.js）",
-    terminalLegacyRendererHint: "内置渲染器更快。若某个程序显示异常可切换回旧版——对新标签页生效。",
     notifications: "通知",
     notificationsHint: "显示通知提示（同步、推送、错误）",
     notificationLevel: "PR 活动通知",

@@ -1382,8 +1382,6 @@ const ptBR: Locale = {
     terminalCopyOnSelectHint: "Copiar a seleção para a área de transferência assim que for feita",
     terminalPasteOnRightClick: "Colar com clique direito",
     terminalPasteOnRightClickHint: "O clique direito cola a área de transferência em vez de abrir o menu",
-    terminalLegacyRenderer: "Renderizador de terminal legado (xterm.js)",
-    terminalLegacyRendererHint: "O renderizador integrado é mais rápido. Volte ao anterior se um programa for desenhado incorretamente — vale para novas abas.",
     notifications: "Notificações",
     notificationsHint: "Mostrar notificações toast (sincronização, push, erros)",
     notificationLevel: "Notificações de atividade de PR",

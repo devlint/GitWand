@@ -107,40 +107,13 @@ function ctxClear() { ctxEntry()?.term.clear(); closeCtxMenu(); }
 function ctxSelectAll() { ctxEntry()?.term.selectAll(); closeCtxMenu(); }
 function ctxSearch() { openSearch(); closeCtxMenu(); }
 
-// The slice of a terminal the panel drives. Implemented by the built-in
-// DomTerminal (utils/vt) and, behind the terminalLegacyRenderer setting, by an
-// xterm.js adapter.
-interface PanelTerm {
-  readonly cols: number;
-  readonly rows: number;
-  write(data: string): void;
-  paste(text: string): void;
-  getSelection(): string;
-  clear(): void;
-  selectAll(): void;
-  findNext(query: string, opts: { regex: boolean; caseSensitive: boolean }): boolean;
-  findPrevious(query: string, opts: { regex: boolean; caseSensitive: boolean }): boolean;
-  setFontSize(px: number): void;
-  onData(cb: (data: string) => void): void;
-  onTitleChange(cb: (title: string) => void): void;
-  onSelectionChange(cb: () => void): void;
-  dispose(): void;
-}
-
 // Terminal instances kept OUTSIDE Vue reactivity — plain Map only.
 type TermEntry = {
-  term: PanelTerm;
-  /** Resize the grid to the host element. */
-  fit: () => void;
+  term: DomTerminal;
   ro: ResizeObserver;
   sessionId: number;
 };
 const terms = new Map<number, TermEntry>(); // key = tab.id (local)
-let XtermCtor: any = null;
-let FitCtor: any = null;
-let WebglCtor: any = null;
-let SearchCtor: any = null;
-let WebLinksCtor: any = null;
 
 // Pending buffer for output chunks that arrive before the terminal is mounted.
 // Keyed by tab.id (same key space as terms). Not reactive — plain Map.
@@ -226,29 +199,6 @@ const panelStyle = computed(() => {
   };
 });
 
-async function ensureXtermLibs() {
-  if (XtermCtor) return;
-  const [
-    { Terminal },
-    { FitAddon },
-    { WebglAddon },
-    { SearchAddon },
-    { WebLinksAddon },
-  ] = await Promise.all([
-    import("@xterm/xterm"),
-    import("@xterm/addon-fit"),
-    import("@xterm/addon-webgl"),
-    import("@xterm/addon-search"),
-    import("@xterm/addon-web-links"),
-  ]);
-  XtermCtor = Terminal;
-  FitCtor = FitAddon;
-  WebglCtor = WebglAddon;
-  SearchCtor = SearchAddon;
-  WebLinksCtor = WebLinksAddon;
-  await import("@xterm/xterm/css/xterm.css");
-}
-
 // Tabs whose PTY has already received the post-boot resize kick (see below).
 const kicked = new Set<number>();
 
@@ -271,7 +221,7 @@ const kicked = new Set<number>();
 function kickResize(tab: TerminalTab) {
   const entry = terms.get(tab.id);
   if (!entry || tab.sessionId < 0) return;
-  entry.fit();
+  entry.term.fit();
   const { cols, rows } = entry.term;
   if (!cols || !rows) return;
   sessions.resize(tab.sessionId, cols, Math.max(1, rows - 1));
@@ -291,7 +241,7 @@ function refitWhenSized(tabId: number, el: HTMLElement, attempt = 0) {
     if (attempt < 20) setTimeout(() => refitWhenSized(tabId, el, attempt + 1), 100);
     return;
   }
-  entry.fit();
+  entry.term.fit();
   const tab = tabs.value.find((t) => t.id === tabId);
   if (tab && tab.sessionId >= 0) {
     sessions.resize(tab.sessionId, entry.term.cols, entry.term.rows);
@@ -300,16 +250,21 @@ function refitWhenSized(tabId: number, el: HTMLElement, attempt = 0) {
 }
 
 // Guards against concurrent mountTab() invocations for the same tab. Two watch
-// runs can overlap (the first awaits the dynamic xterm import) and would
-// otherwise both pass the `terms.has` check and mount two terminals.
+// runs can overlap (the first awaits nextTick) and would otherwise both pass
+// the `terms.has` check and mount two terminals.
 const mounting = new Set<number>();
 
-const termOptionsFontSize = () => settings.value.terminalFontSize ?? 13;
+async function mountTab(tab: TerminalTab) {
+  if (terms.has(tab.id) || mounting.has(tab.id)) return;
+  mounting.add(tab.id);
+  try {
+    await nextTick();
+    const el = hostRefs.value[tab.id];
+    if (!el || terms.has(tab.id)) return;
 
-/** Built-in renderer (utils/vt): DOM rows patched per frame, no WebGL. */
-function createDomTerm(tab: TerminalTab, el: HTMLElement): { term: PanelTerm; fit: () => void } {
+  // Built-in renderer (utils/vt): DOM rows patched per frame, no WebGL.
   const term = new DomTerminal({
-    fontSize: termOptionsFontSize(),
+    fontSize: settings.value.terminalFontSize ?? 13,
     // AI CLIs take Shift+Enter as "newline in the prompt"; shells get a plain CR.
     shiftEnterNewline: tab.type !== "shell",
     // App-level terminal shortcuts (new / close / switch tab) never reach the PTY.
@@ -319,64 +274,6 @@ function createDomTerm(tab: TerminalTab, el: HTMLElement): { term: PanelTerm; fi
     onLinkOpen: (url) => { openExternalUrl(url); },
   });
   term.open(el);
-  return { term, fit: () => { term.fit(); } };
-}
-
-/** Legacy xterm.js renderer, adapted to PanelTerm. */
-async function createXterm(el: HTMLElement): Promise<{ term: PanelTerm; fit: () => void }> {
-  await ensureXtermLibs();
-  // Paint xterm's canvas with the host's (tab-coloured) surface.
-  const cs = getComputedStyle(el);
-  const xt = new XtermCtor({
-    fontSize: termOptionsFontSize(),
-    cursorBlink: true,
-    theme: { background: cs.backgroundColor, foreground: cs.color },
-  });
-  const fit = new FitCtor();
-  const search = new SearchCtor();
-  xt.loadAddon(fit);
-  xt.loadAddon(search);
-  xt.loadAddon(new WebLinksCtor());
-  xt.open(el);
-  // WebGL2 renderer; falls back silently to the canvas renderer if unavailable.
-  const webgl = new WebglCtor();
-  try {
-    xt.loadAddon(webgl);
-  } catch {
-    webgl.dispose();
-  }
-  const term: PanelTerm = {
-    get cols() { return xt.cols; },
-    get rows() { return xt.rows; },
-    write: (d) => xt.write(d),
-    paste: (t) => xt.paste(t),
-    getSelection: () => xt.getSelection(),
-    clear: () => xt.clear(),
-    selectAll: () => xt.selectAll(),
-    findNext: (q, o) => search.findNext(q, o),
-    findPrevious: (q, o) => search.findPrevious(q, o),
-    setFontSize: (px) => { xt.options.fontSize = px; fit.fit(); },
-    onData: (cb) => { xt.onData(cb); },
-    onTitleChange: (cb) => { xt.onTitleChange(cb); },
-    onSelectionChange: (cb) => { xt.onSelectionChange(cb); },
-    dispose: () => xt.dispose(),
-  };
-  return { term, fit: () => fit.fit() };
-}
-
-async function mountTab(tab: TerminalTab) {
-  if (terms.has(tab.id) || mounting.has(tab.id)) return;
-  mounting.add(tab.id);
-  try {
-    const legacy = settings.value.terminalLegacyRenderer;
-    if (legacy) await ensureXtermLibs();
-    await nextTick();
-    const el = hostRefs.value[tab.id];
-    if (!el || terms.has(tab.id)) return;
-
-  const { term, fit } = legacy ? await createXterm(el) : createDomTerm(tab, el);
-
-  fit();
 
   // Fix 6 — Buffer keystrokes when the PTY is not yet ready (sessionId is -1).
   // Keystrokes typed while awaiting terminalOpen would otherwise call
@@ -403,7 +300,7 @@ async function mountTab(tab: TerminalTab) {
   });
 
   const ro = new ResizeObserver(() => {
-    fit();
+    term.fit();
     // Only sync the PTY once it actually exists. During the window before
     // terminalOpen resolves (sessionId === -1) a resize would call resize(-1),
     // which the backend rejects as "session not found" and the early layout is
@@ -413,7 +310,7 @@ async function mountTab(tab: TerminalTab) {
   });
   ro.observe(el);
 
-  terms.set(tab.id, { term, fit, ro, sessionId: tab.sessionId });
+  terms.set(tab.id, { term, ro, sessionId: tab.sessionId });
 
   // Flush any output that arrived before the terminal was mounted.
   const buffered = pendingChunks.get(tab.id);

@@ -92,7 +92,7 @@ function onKeyDown(e: KeyboardEvent) {
 
 // v3.7.0 review-round fix (finding #11): focus trap, initial focus, focus
 // restore. See docs/superpowers/plans/2026-08-19-v3.7.0-commit-review-review-fixes.md,
-// Task 11, for the full design rationale (nested modals, CodeMirror/xterm).
+// Task 11, for the full design rationale (nested modals, CodeMirror/terminal).
 const panelRef = ref<HTMLElement | null>(null);
 let previouslyFocused: HTMLElement | null = null;
 
@@ -101,7 +101,7 @@ let previouslyFocused: HTMLElement | null = null;
  * the Escape handler above): nested modals (e.g. `askConfirm` layered over
  * another modal) each get their own trap, and only the one that actually
  * contains focus reacts. An inner component that owns Tab itself
- * (CodeMirror indent, an xterm terminal) runs first in the bubble phase, so
+ * (CodeMirror indent, the integrated terminal) runs first in the bubble phase, so
  * this bails on `e.defaultPrevented`.
  */
 function onPanelKeyDown(e: KeyboardEvent) {
