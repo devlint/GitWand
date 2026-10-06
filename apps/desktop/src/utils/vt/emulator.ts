@@ -153,6 +153,12 @@ const DEC_GRAPHICS: Record<string, string> = {
 
 const MAX_PARAMS = 32;
 
+/** `#rrggbb` → X11 `rgb:rrrr/gggg/bbbb`. */
+function xrgb(hex: string): string {
+  const h = (i: number) => hex.slice(i, i + 2).repeat(2);
+  return `rgb:${h(1)}/${h(3)}/${h(5)}`;
+}
+
 const ASCII: string[] = Array.from({ length: 0x80 }, (_, i) => String.fromCharCode(i));
 
 export class VtEmulator {
@@ -181,6 +187,9 @@ export class VtEmulator {
     cursorVisible: true,
   };
   title = "";
+  /** Default colours reported to OSC 10 / 11 queries (`#rrggbb`). */
+  defaultFg = "#e5e5e5";
+  defaultBg = "#000000";
 
   // Dirty tracking for the renderer.
   private dirtyRows = new Set<number>();
@@ -1137,10 +1146,9 @@ export class VtEmulator {
         this.opts.onTitle?.(arg);
         break;
       case "10":
-        if (arg === "?") this.respond("\x1b]10;rgb:e5e5/e5e5/e5e5\x1b\\");
-        break;
       case "11":
-        if (arg === "?") this.respond("\x1b]11;rgb:0000/0000/0000\x1b\\");
+        // CLIs ask for the default colours to pick a light or dark theme.
+        if (arg === "?") this.respond(`\x1b]${id};${xrgb(id === "10" ? this.defaultFg : this.defaultBg)}\x1b\\`);
         break;
       default:
         // OSC 8 hyperlinks, OSC 52 clipboard (never honoured — a PTY child must

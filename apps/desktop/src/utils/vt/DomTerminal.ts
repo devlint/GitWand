@@ -44,6 +44,7 @@ const ANSI16 = [
   "#2e3436", "#cc0000", "#4e9a06", "#c4a000", "#3465a4", "#75507b", "#06989a", "#d3d7cf",
   "#555753", "#ef2929", "#8ae234", "#fce94f", "#729fcf", "#ad7fa8", "#34e2e2", "#eeeeec",
 ];
+// Fallbacks only — the live defaults come from the theme (see syncTheme).
 const DEFAULT_FG = "#e5e5e5";
 const DEFAULT_BG = "#000000";
 
@@ -72,12 +73,12 @@ const WORD_RE = /[\p{L}\p{N}_\-./~:@%+#?=&]/u;
 
 const STYLE_ID = "gw-vt-style";
 const CSS = `
-.gw-vt{position:relative;width:100%;height:100%;overflow:hidden;color:${DEFAULT_FG};cursor:text;user-select:none;-webkit-user-select:none;font-variant-ligatures:none;font-feature-settings:"liga" 0,"calt" 0;font-kerning:none;outline:none}
+.gw-vt{position:relative;width:100%;height:100%;overflow:hidden;color:var(--color-text,${DEFAULT_FG});cursor:text;user-select:none;-webkit-user-select:none;font-variant-ligatures:none;font-feature-settings:"liga" 0,"calt" 0;font-kerning:none;outline:none}
 .gw-vt-rows{position:absolute;left:0;top:0;right:0}
 .gw-vt-row{white-space:pre;overflow:hidden;contain:strict;width:100%}
 .gw-vt-g{display:inline-block;text-align:center;vertical-align:top;overflow:visible}
 .gw-vt-sel{background-image:linear-gradient(rgba(110,150,255,.45),rgba(110,150,255,.45))}
-.gw-vt-cur{outline:1px solid ${DEFAULT_FG};outline-offset:-1px}
+.gw-vt-cur{outline:1px solid currentColor;outline-offset:-1px}
 .gw-vt-input{position:absolute;width:1px;height:1px;opacity:0;padding:0;margin:0;border:0;resize:none;overflow:hidden;white-space:nowrap;caret-color:transparent;pointer-events:none}
 .gw-vt-thumb{position:absolute;right:1px;width:6px;border-radius:3px;background:rgba(255,255,255,.22);display:none;cursor:default}
 .gw-vt-thumb:hover{background:rgba(255,255,255,.4)}
@@ -89,6 +90,13 @@ function ensureStyle(): void {
   el.id = STYLE_ID;
   el.textContent = CSS;
   document.head.appendChild(el);
+}
+
+/** Computed `rgb(a)` → `#rrggbb`, or null when transparent / unparsable. */
+function cssToHex(css: string): string | null {
+  const m = /rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)(?:[,\s/]+([\d.]+))?/.exec(css);
+  if (!m || (m[4] !== undefined && Number(m[4]) === 0)) return null;
+  return "#" + [m[1], m[2], m[3]].map((v) => Number(v).toString(16).padStart(2, "0")).join("");
 }
 
 function escapeHtml(s: string): string {
@@ -118,6 +126,10 @@ export class DomTerminal {
   private thumb!: HTMLDivElement;
   private rowEls: HTMLDivElement[] = [];
   private rowHtml: string[] = [];
+
+  /** Theme default colours, used for inverse video and OSC 10/11 replies. */
+  private themeFg = DEFAULT_FG;
+  private themeBg = DEFAULT_BG;
 
   private cellW = 8;
   private cellH = 16;
@@ -191,7 +203,15 @@ export class DomTerminal {
     this.thumb = thumb;
 
     this.measure();
+    this.syncTheme();
     this.bindEvents();
+    // Follow the app's light / dark switch (<html data-theme>).
+    const mo = new MutationObserver(() => {
+      this.syncTheme();
+      this.refresh();
+    });
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "class", "style"] });
+    this.cleanups.push(() => mo.disconnect());
     // A web font finishing its load changes the cell metrics.
     document.fonts?.ready.then(() => {
       if (this.disposed) return;
@@ -305,6 +325,21 @@ export class DomTerminal {
     this.dataListeners = [];
     this.titleListeners = [];
     this.selectionListeners = [];
+  }
+
+  /** Read the default fg / bg the terminal actually shows. */
+  private syncTheme(): void {
+    const fg = cssToHex(getComputedStyle(this.root).color);
+    // The background is painted by the host — the first opaque ancestor.
+    let bg: string | null = null;
+    for (let el: HTMLElement | null = this.root; el && !bg; el = el.parentElement) {
+      bg = cssToHex(getComputedStyle(el).backgroundColor);
+    }
+    this.themeFg = fg ?? DEFAULT_FG;
+    this.themeBg = bg ?? DEFAULT_BG;
+    this.emu.defaultFg = this.themeFg;
+    this.emu.defaultBg = this.themeBg;
+    this.styleCache.clear();
   }
 
   // ─── Layout ──────────────────────────────────────────
@@ -472,8 +507,8 @@ export class DomTerminal {
     let fgCss = fg === DEFAULT_COLOR ? "" : colorCss(fg);
     let bgCss = bg === DEFAULT_COLOR ? "" : colorCss(bg);
     if (fl & INVERSE) {
-      const f = fgCss || DEFAULT_FG;
-      fgCss = bgCss || DEFAULT_BG;
+      const f = fgCss || this.themeFg;
+      fgCss = bgCss || this.themeBg;
       bgCss = f;
     }
     if (fl & HIDDEN) fgCss = "transparent";

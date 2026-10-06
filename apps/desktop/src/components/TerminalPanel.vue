@@ -325,7 +325,13 @@ function createDomTerm(tab: TerminalTab, el: HTMLElement): { term: PanelTerm; fi
 /** Legacy xterm.js renderer, adapted to PanelTerm. */
 async function createXterm(el: HTMLElement): Promise<{ term: PanelTerm; fit: () => void }> {
   await ensureXtermLibs();
-  const xt = new XtermCtor({ fontSize: termOptionsFontSize(), cursorBlink: true });
+  // Paint xterm's canvas with the host's (tab-coloured) surface.
+  const cs = getComputedStyle(el);
+  const xt = new XtermCtor({
+    fontSize: termOptionsFontSize(),
+    cursorBlink: true,
+    theme: { background: cs.backgroundColor, foreground: cs.color },
+  });
   const fit = new FitCtor();
   const search = new SearchCtor();
   xt.loadAddon(fit);
@@ -1074,7 +1080,8 @@ onBeforeUnmount(() => {
   position: absolute;
   inset: 0px 6px 7px;
   padding: 0px 7px;
-  background-color: black;
+  /* Same surface as the active tab, so tab and terminal read as one sheet. */
+  background-color: var(--bg-base, var(--color-bg));
   border-radius: 0px var(--radius-sm) var(--radius-sm) var(--radius-sm);
 }
 

@@ -276,6 +276,14 @@ describe("VtEmulator — queries", () => {
     expect(replies[1]).toContain("]10;rgb:");
   });
 
+  it("reports the configured default colours", () => {
+    const { e, replies } = emu();
+    e.defaultFg = "#15151f";
+    e.defaultBg = "#f4f4f8";
+    e.write("\x1b]10;?\x07\x1b]11;?\x07");
+    expect(replies).toEqual(["\x1b]10;rgb:1515/1515/1f1f\x1b\\", "\x1b]11;rgb:f4f4/f4f4/f8f8\x1b\\"]);
+  });
+
   it("answers DECRQM for known and unknown modes", () => {
     const { e, replies } = emu();
     e.write("\x1b[?2026$p\x1b[?2004h\x1b[?2004$p\x1b[?9999$p");
