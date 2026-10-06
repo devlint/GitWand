@@ -365,7 +365,7 @@ onBeforeUnmount(() => {
         <!-- The Git Tree entry carries the WIP tab glued to its right: one
              segmented control switching the tree between commits and the
              uncommitted work. -->
-        <div class="dock-seg" :class="{ 'dock-seg--active': id === 'graph' && (isActive(id) || wipActive) }">
+        <div class="dock-seg" :class="{ 'dock-seg--pair': id === 'graph', 'dock-seg--active': id === 'graph' && (isActive(id) || wipActive) }">
           <button
             class="dock-btn"
             :class="{ 'dock-btn--active': isActive(id), 'dock-btn--seg-left': id === 'graph' && showWipTab }"
@@ -643,7 +643,7 @@ onBeforeUnmount(() => {
   opacity: 1;
 }
 
-.dock-terminal:hover {
+.dock-terminal:not(.dock-terminal--active):hover {
   color: var(--color-text);
   background: var(--color-bg-secondary);
 }
@@ -682,7 +682,7 @@ onBeforeUnmount(() => {
   opacity: 1;
 }
 
-.dock-files:hover {
+.dock-files:not(.dock-files--active):hover {
   color: var(--color-text);
   background: var(--color-bg-secondary);
 }
@@ -736,7 +736,7 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-.dock-btn:hover {
+.dock-btn:not(.dock-btn--active):hover {
   background: var(--color-bg-hover, rgba(127, 127, 127, 0.12));
   color: var(--color-text);
 }
@@ -758,8 +758,9 @@ onBeforeUnmount(() => {
   border-radius: var(--radius-sm, 8px);
 }
 
+/* Active pair: frame + divider take the active tab's background colour. */
 .dock-seg--active {
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 35%, transparent);
+  box-shadow: inset 0 0 0 1px var(--color-accent-soft, rgba(139, 92, 246, 0.16));
 }
 
 .dock-btn--seg-left {
@@ -774,6 +775,20 @@ onBeforeUnmount(() => {
   border-top-left-radius: 0;
   border-bottom-left-radius: 0;
   box-shadow: inset 1px 0 0 var(--color-border);
+}
+
+.dock-seg--active .dock-btn--seg-right {
+  box-shadow: inset 1px 0 0 var(--color-accent-soft, rgba(139, 92, 246, 0.16));
+}
+
+/* Hovering the (inactive) pair: frame + divider take the hover background
+   colour. An active pair keeps its active border. */
+.dock-seg--pair:not(.dock-seg--active):hover {
+  box-shadow: inset 0 0 0 1px var(--color-bg-hover, rgba(127, 127, 127, 0.12));
+}
+
+.dock-seg--pair:not(.dock-seg--active):hover .dock-btn--seg-right {
+  box-shadow: inset 1px 0 0 var(--color-bg-hover, rgba(127, 127, 127, 0.12));
 }
 
 .dock-sep {
@@ -840,6 +855,20 @@ onBeforeUnmount(() => {
 .app-dock__pill--vertical .dock-btn--seg-right {
   border-radius: 0 0 var(--radius-sm, 8px) var(--radius-sm, 8px);
   box-shadow: inset 0 1px 0 var(--color-border);
+}
+
+.app-dock__pill--vertical .dock-seg--active .dock-btn--seg-right {
+  box-shadow: inset 0 1px 0 var(--color-accent-soft, rgba(139, 92, 246, 0.16));
+}
+
+.app-dock__pill--vertical .dock-seg--pair:not(.dock-seg--active):hover .dock-btn--seg-right {
+  box-shadow: inset 0 1px 0 var(--color-bg-hover, rgba(127, 127, 127, 0.12));
+}
+
+/* Pair active: hovering the other (inactive) tab outlines it in the active
+   tab's (darker) purple. Kept last — it outranks the pair hover/divider rules. */
+.dock-seg--active .dock-btn:not(.dock-btn--active):hover {
+  box-shadow: inset 0 0 0 1px var(--color-accent-soft, rgba(139, 92, 246, 0.16));
 }
 
 .app-dock__pill--vertical .dock-sep {
