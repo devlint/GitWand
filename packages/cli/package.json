@@ -41,7 +41,7 @@
   },
   "dependencies": {
     "@gitwand/core": "workspace:*",
-    "smol-toml": "^1.8.0",
+    "smol-toml": "^1.9.0",
     "yaml": "^2.9.0"
   },
   "devDependencies": {
