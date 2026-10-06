@@ -74,7 +74,8 @@ function mount(initial: Record<string, unknown>) {
   const loadBranches = vi.fn();
   app = createApp({
     setup() {
-      return () => h(CommitGraph, { ...props, onLoadBranches: loadBranches });
+      // Props are a loose reactive bag so tests can patch any field; cast past h()'s overloads.
+      return () => h(CommitGraph as any, { ...props, onLoadBranches: loadBranches });
     },
   });
   app.mount(container);
