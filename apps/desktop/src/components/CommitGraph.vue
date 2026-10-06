@@ -1375,7 +1375,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
           v-for="edge in visibleEdges"
           :key="'e-' + edge.fromIndex + '-' + edge.toIndex + '-' + edge.fromLane + '-' + edge.toLane"
           :d="edgePath(edge)"
-          :stroke="laneColor(edge.fromLane)"
+          :stroke="laneColor(edge.isMerge ? edge.toLane : edge.fromLane)"
           :stroke-width="edge.isMerge ? 1.2 : 1.6"
           :stroke-dasharray="edge.isMerge || (hasChanges && edge.fromIndex === 0) || stashByHash.has(renderedCommits[edge.fromIndex]?.hashFull) ? '3,3' : 'none'"
           fill="none"
