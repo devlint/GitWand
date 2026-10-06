@@ -9,6 +9,7 @@ import { useWorkspaceScope } from "../composables/useWorkspaceScope";
 import { PR_PANEL_KEY, type PrPanelState } from "../composables/usePrPanel";
 import { useBranchPrSearch } from "../composables/useBranchPrSearch";
 import { useResizeObserver } from "../composables/useResizeObserver";
+import { useStickyWidth } from "../composables/useStickyWidth";
 
 defineOptions({ inheritAttrs: false });
 
@@ -1092,29 +1093,8 @@ onUnmounted(clearLoadingHideTimer);
 // and a periodic refresh or branch switch briefly reloads only the first page
 // (fewer lanes) before pagination fills it back in — both visible as the left
 // column twitching. Grow immediately, but only shrink once the raw width has
-// held still for GRAPH_SHRINK_DELAY_MS with no page loading.
-const GRAPH_SHRINK_DELAY_MS = 1500;
-const graphWidth = ref(graphWidthRaw.value);
-let _graphShrinkTimer: ReturnType<typeof setTimeout> | null = null;
-function clearGraphShrinkTimer() {
-  if (_graphShrinkTimer !== null) {
-    clearTimeout(_graphShrinkTimer);
-    _graphShrinkTimer = null;
-  }
-}
-watch([graphWidthRaw, showLoadingMore], ([w, loading]) => {
-  clearGraphShrinkTimer();
-  if (w >= graphWidth.value) {
-    graphWidth.value = w;
-    return;
-  }
-  if (loading) return; // re-armed when the burst ends
-  _graphShrinkTimer = setTimeout(() => {
-    _graphShrinkTimer = null;
-    graphWidth.value = graphWidthRaw.value;
-  }, GRAPH_SHRINK_DELAY_MS);
-});
-onUnmounted(clearGraphShrinkTimer);
+// held still for 1.5 s with no page loading.
+const graphWidth = useStickyWidth(graphWidthRaw, showLoadingMore, 1500);
 
 function measureViewport() {
   if (scrollContainer.value) clientHeight.value = scrollContainer.value.clientHeight;
