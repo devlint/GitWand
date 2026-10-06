@@ -1381,6 +1381,8 @@ const es: Locale = {
     terminalCopyOnSelectHint: "Copiar la selección al portapapeles en cuanto se realiza",
     terminalPasteOnRightClick: "Pegar con clic derecho",
     terminalPasteOnRightClickHint: "El clic derecho pega el portapapeles en lugar de abrir el menú",
+    terminalLegacyRenderer: "Renderizador de terminal heredado (xterm.js)",
+    terminalLegacyRendererHint: "El renderizador integrado es más rápido. Vuelva al anterior si un programa se dibuja mal; se aplica a las pestañas nuevas.",
     notifications: "Notificaciones",
     notificationsHint: "Mostrar notificaciones emergentes (sincronización, push, errores)",
     notificationLevel: "Notificaciones de actividad de PR",

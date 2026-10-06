@@ -386,6 +386,12 @@ export interface AppSettings {
   terminalCopyOnSelect: boolean;
   /** Paste the clipboard on right-click instead of opening the context menu. Default: false. */
   terminalPasteOnRightClick: boolean;
+  /**
+   * Render terminals with xterm.js instead of the built-in DOM renderer
+   * (`utils/vt`). Escape hatch for an app the built-in emulator draws wrong.
+   * Applies to tabs opened afterwards. Default: false.
+   */
+  terminalLegacyRenderer: boolean;
 
   // ── v3.x File Explorer ───────────────────────────────────
   /**
@@ -535,6 +541,7 @@ export const defaultAppSettings: AppSettings = {
   terminalContextMenu:               true,
   terminalCopyOnSelect:              false,
   terminalPasteOnRightClick:         false,
+  terminalLegacyRenderer:            false,
   filesMode:                         "floating",
   filesPrevMode:                     "floating",
   filesHideOnNav:                    true,

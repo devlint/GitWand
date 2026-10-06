@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { ref, onBeforeUnmount, watch, nextTick, computed, onMounted, onActivated, watchEffect } from "vue";
-import { useTerminalSessions, type TerminalTab } from "../composables/useTerminalSessions";
+import { useTerminalSessions, resolveTerminalShortcut, type TerminalTab } from "../composables/useTerminalSessions";
 import { useI18n } from "../composables/useI18n";
 import { useSettings } from "../composables/useSettings";
 import { useDraggableResizable } from "../composables/useDraggableResizable";
-import { clipboardReadText, clipboardWriteText } from "../utils/backend";
+import { clipboardReadText, clipboardWriteText, openExternalUrl } from "../utils/backend";
+import { DomTerminal } from "../utils/vt/DomTerminal";
 
 const props = defineProps<{ repoPath: string }>();
 const emit = defineEmits<{
@@ -59,13 +60,16 @@ watchEffect((onCleanup) => {
   onCleanup(() => document.removeEventListener("click", close));
 });
 
-// Write the clipboard contents to a tab's PTY (the running shell), mirroring how
-// typed input flows through term.onData → sessions.write.
+// Paste the clipboard into a tab through its terminal, so bracketed paste is
+// honoured and the text then flows through onData → sessions.write like typing.
 async function pasteInto(tabId: number) {
   const tab = tabs.value.find((t) => t.id === tabId);
   if (!tab || tab.sessionId < 0) return;
   const text = await clipboardReadText();
-  if (text) sessions.write(tab.sessionId, text);
+  if (!text) return;
+  const entry = terms.get(tabId);
+  if (entry) entry.term.paste(text);
+  else sessions.write(tab.sessionId, text);
 }
 
 function onContextMenu(e: MouseEvent, tab: TerminalTab) {
@@ -86,7 +90,7 @@ function closeCtxMenu() { ctxMenu.value.visible = false; }
 
 function ctxEntry() {
   const id = ctxMenu.value.tabId;
-  return id == null ? undefined : xterms.get(id);
+  return id == null ? undefined : terms.get(id);
 }
 
 function ctxCopy() {
@@ -103,23 +107,43 @@ function ctxClear() { ctxEntry()?.term.clear(); closeCtxMenu(); }
 function ctxSelectAll() { ctxEntry()?.term.selectAll(); closeCtxMenu(); }
 function ctxSearch() { openSearch(); closeCtxMenu(); }
 
-// xterm instances kept OUTSIDE Vue reactivity — plain Map only.
-type XtermEntry = {
-  term: any;
-  fit: any;
-  search: any;       // SearchAddon — used by the search bar
+// The slice of a terminal the panel drives. Implemented by the built-in
+// DomTerminal (utils/vt) and, behind the terminalLegacyRenderer setting, by an
+// xterm.js adapter.
+interface PanelTerm {
+  readonly cols: number;
+  readonly rows: number;
+  write(data: string): void;
+  paste(text: string): void;
+  getSelection(): string;
+  clear(): void;
+  selectAll(): void;
+  findNext(query: string, opts: { regex: boolean; caseSensitive: boolean }): boolean;
+  findPrevious(query: string, opts: { regex: boolean; caseSensitive: boolean }): boolean;
+  setFontSize(px: number): void;
+  onData(cb: (data: string) => void): void;
+  onTitleChange(cb: (title: string) => void): void;
+  onSelectionChange(cb: () => void): void;
+  dispose(): void;
+}
+
+// Terminal instances kept OUTSIDE Vue reactivity — plain Map only.
+type TermEntry = {
+  term: PanelTerm;
+  /** Resize the grid to the host element. */
+  fit: () => void;
   ro: ResizeObserver;
   sessionId: number;
 };
-const xterms = new Map<number, XtermEntry>(); // key = tab.id (local)
+const terms = new Map<number, TermEntry>(); // key = tab.id (local)
 let XtermCtor: any = null;
 let FitCtor: any = null;
 let WebglCtor: any = null;
 let SearchCtor: any = null;
 let WebLinksCtor: any = null;
 
-// Pending buffer for output chunks that arrive before the xterm is mounted.
-// Keyed by tab.id (same key space as xterms). Not reactive — plain Map.
+// Pending buffer for output chunks that arrive before the terminal is mounted.
+// Keyed by tab.id (same key space as terms). Not reactive — plain Map.
 const pendingChunks = new Map<number, string[]>();
 
 // Keystroke input buffer for keystrokes typed before the PTY is ready
@@ -245,9 +269,9 @@ const kicked = new Set<number>();
 // terminal stays blank until a manual resize. A held delay guarantees two
 // distinct SIGWINCH the child must act on.
 function kickResize(tab: TerminalTab) {
-  const entry = xterms.get(tab.id);
+  const entry = terms.get(tab.id);
   if (!entry || tab.sessionId < 0) return;
-  entry.fit.fit();
+  entry.fit();
   const { cols, rows } = entry.term;
   if (!cols || !rows) return;
   sessions.resize(tab.sessionId, cols, Math.max(1, rows - 1));
@@ -261,13 +285,13 @@ function kickResize(tab: TerminalTab) {
 // unpredictable frame after a remount (v-if toggle, async component, fonts), so
 // a single rAF is unreliable. Stops as soon as one fit lands on a sized host.
 function refitWhenSized(tabId: number, el: HTMLElement, attempt = 0) {
-  const entry = xterms.get(tabId);
+  const entry = terms.get(tabId);
   if (!entry) return; // tab closed mid-retry
   if (el.offsetWidth === 0 || el.offsetHeight === 0) {
     if (attempt < 20) setTimeout(() => refitWhenSized(tabId, el, attempt + 1), 100);
     return;
   }
-  entry.fit.fit();
+  entry.fit();
   const tab = tabs.value.find((t) => t.id === tabId);
   if (tab && tab.sessionId >= 0) {
     sessions.resize(tab.sessionId, entry.term.cols, entry.term.rows);
@@ -277,36 +301,76 @@ function refitWhenSized(tabId: number, el: HTMLElement, attempt = 0) {
 
 // Guards against concurrent mountTab() invocations for the same tab. Two watch
 // runs can overlap (the first awaits the dynamic xterm import) and would
-// otherwise both pass the `xterms.has` check and mount two terminals.
+// otherwise both pass the `terms.has` check and mount two terminals.
 const mounting = new Set<number>();
 
-async function mountTab(tab: TerminalTab) {
-  if (xterms.has(tab.id) || mounting.has(tab.id)) return;
-  mounting.add(tab.id);
-  try {
-    await ensureXtermLibs();
-    await nextTick();
-    const el = hostRefs.value[tab.id];
-    if (!el || xterms.has(tab.id)) return;
+const termOptionsFontSize = () => settings.value.terminalFontSize ?? 13;
 
-  const term = new XtermCtor({ fontSize: settings.value.terminalFontSize ?? 13, cursorBlink: true });
+/** Built-in renderer (utils/vt): DOM rows patched per frame, no WebGL. */
+function createDomTerm(tab: TerminalTab, el: HTMLElement): { term: PanelTerm; fit: () => void } {
+  const term = new DomTerminal({
+    fontSize: termOptionsFontSize(),
+    // AI CLIs take Shift+Enter as "newline in the prompt"; shells get a plain CR.
+    shiftEnterNewline: tab.type !== "shell",
+    // App-level terminal shortcuts (new / close / switch tab) never reach the PTY.
+    customKeyHandler: (e) => resolveTerminalShortcut(e, true) === null,
+    readClipboard: clipboardReadText,
+    writeClipboard: clipboardWriteText,
+    onLinkOpen: (url) => { openExternalUrl(url); },
+  });
+  term.open(el);
+  return { term, fit: () => { term.fit(); } };
+}
+
+/** Legacy xterm.js renderer, adapted to PanelTerm. */
+async function createXterm(el: HTMLElement): Promise<{ term: PanelTerm; fit: () => void }> {
+  await ensureXtermLibs();
+  const xt = new XtermCtor({ fontSize: termOptionsFontSize(), cursorBlink: true });
   const fit = new FitCtor();
   const search = new SearchCtor();
-  term.loadAddon(fit);
-  term.loadAddon(search);
-  term.loadAddon(new WebLinksCtor());
-  term.open(el);
-
-  // WebGL2 renderer — GPU-accelerated rendering like Terax.
-  // Falls back silently to the built-in canvas renderer if WebGL2 is unavailable.
+  xt.loadAddon(fit);
+  xt.loadAddon(search);
+  xt.loadAddon(new WebLinksCtor());
+  xt.open(el);
+  // WebGL2 renderer; falls back silently to the canvas renderer if unavailable.
   const webgl = new WebglCtor();
   try {
-    term.loadAddon(webgl);
+    xt.loadAddon(webgl);
   } catch {
     webgl.dispose();
   }
+  const term: PanelTerm = {
+    get cols() { return xt.cols; },
+    get rows() { return xt.rows; },
+    write: (d) => xt.write(d),
+    paste: (t) => xt.paste(t),
+    getSelection: () => xt.getSelection(),
+    clear: () => xt.clear(),
+    selectAll: () => xt.selectAll(),
+    findNext: (q, o) => search.findNext(q, o),
+    findPrevious: (q, o) => search.findPrevious(q, o),
+    setFontSize: (px) => { xt.options.fontSize = px; fit.fit(); },
+    onData: (cb) => { xt.onData(cb); },
+    onTitleChange: (cb) => { xt.onTitleChange(cb); },
+    onSelectionChange: (cb) => { xt.onSelectionChange(cb); },
+    dispose: () => xt.dispose(),
+  };
+  return { term, fit: () => fit.fit() };
+}
 
-  fit.fit();
+async function mountTab(tab: TerminalTab) {
+  if (terms.has(tab.id) || mounting.has(tab.id)) return;
+  mounting.add(tab.id);
+  try {
+    const legacy = settings.value.terminalLegacyRenderer;
+    if (legacy) await ensureXtermLibs();
+    await nextTick();
+    const el = hostRefs.value[tab.id];
+    if (!el || terms.has(tab.id)) return;
+
+  const { term, fit } = legacy ? await createXterm(el) : createDomTerm(tab, el);
+
+  fit();
 
   // Fix 6 — Buffer keystrokes when the PTY is not yet ready (sessionId is -1).
   // Keystrokes typed while awaiting terminalOpen would otherwise call
@@ -333,7 +397,7 @@ async function mountTab(tab: TerminalTab) {
   });
 
   const ro = new ResizeObserver(() => {
-    fit.fit();
+    fit();
     // Only sync the PTY once it actually exists. During the window before
     // terminalOpen resolves (sessionId === -1) a resize would call resize(-1),
     // which the backend rejects as "session not found" and the early layout is
@@ -343,9 +407,9 @@ async function mountTab(tab: TerminalTab) {
   });
   ro.observe(el);
 
-  xterms.set(tab.id, { term, fit, search, ro, sessionId: tab.sessionId });
+  terms.set(tab.id, { term, fit, ro, sessionId: tab.sessionId });
 
-  // Flush any output that arrived before the xterm was mounted.
+  // Flush any output that arrived before the terminal was mounted.
   const buffered = pendingChunks.get(tab.id);
   if (buffered) {
     for (const chunk of buffered) term.write(chunk);
@@ -367,11 +431,23 @@ async function mountTab(tab: TerminalTab) {
   }
 }
 
-// Exposed so App.vue can route PTY chunks to the correct xterm instance.
-// Routes by stable tab.id (the Map key). If the xterm is not yet mounted,
+// Font-size changes from Settings apply live to every open tab.
+watch(
+  () => settings.value.terminalFontSize,
+  (px) => {
+    for (const [id, entry] of terms) {
+      entry.term.setFontSize(px ?? 13);
+      const tab = tabs.value.find((t) => t.id === id);
+      if (tab && tab.sessionId >= 0) sessions.resize(tab.sessionId, entry.term.cols, entry.term.rows);
+    }
+  },
+);
+
+// Exposed so App.vue can route PTY chunks to the correct terminal instance.
+// Routes by stable tab.id (the Map key). If the terminal is not yet mounted,
 // buffers the chunk so it is flushed when mountTab completes.
 function writeChunk(tabId: number, chunk: string) {
-  const entry = xterms.get(tabId);
+  const entry = terms.get(tabId);
   if (entry) {
     entry.term.write(chunk);
     // First output from the child → it has booted and the host is laid out.
@@ -393,7 +469,7 @@ watch(
     // Mount new tabs and refresh sessionId on existing ones.
     for (const tab of tabs.value) {
       await mountTab(tab);
-      const entry = xterms.get(tab.id);
+      const entry = terms.get(tab.id);
       if (entry && entry.sessionId !== tab.sessionId && tab.sessionId >= 0) {
         entry.sessionId = tab.sessionId;
         // Flush any keystrokes buffered while sessionId was -1.
@@ -411,19 +487,19 @@ watch(
         if (el) refitWhenSized(tab.id, el);
       }
     }
-    // Dispose xterms for closed tabs.
-    for (const id of [...xterms.keys()]) {
+    // Dispose terminals for closed tabs.
+    for (const id of [...terms.keys()]) {
       if (!tabs.value.some((t) => t.id === id)) {
-        const entry = xterms.get(id);
+        const entry = terms.get(id);
         entry?.ro.disconnect();
         entry?.term.dispose();
-        xterms.delete(id);
+        terms.delete(id);
         kicked.delete(id);
         pendingChunks.delete(id);
         pendingInput.delete(id); // Fix 6 — purge input buffer for closed tabs
       }
     }
-    // Purge buffered chunks for tabs that closed before their xterm mounted.
+    // Purge buffered chunks for tabs that closed before their terminal mounted.
     for (const id of pendingChunks.keys()) {
       if (!tabs.value.some((t) => t.id === id)) pendingChunks.delete(id);
     }
@@ -435,12 +511,12 @@ watch(
   { immediate: true },
 );
 
-// KeepAlive: the panel is deactivated (not unmounted) when hidden, so xterm
+// KeepAlive: the panel is deactivated (not unmounted) when hidden, so terminal
 // instances and their buffers survive a hide/show cycle. On re-show the host
-// elements are re-attached at a possibly different size and the WebGL renderer
-// needs a repaint, so refit every mounted tab once its host is sized again.
+// elements are re-attached at a possibly different size and need a repaint, so
+// refit every mounted tab once its host is sized again.
 onActivated(() => {
-  for (const id of xterms.keys()) {
+  for (const id of terms.keys()) {
     const el = hostRefs.value[id];
     if (el) refitWhenSized(id, el);
   }
@@ -474,12 +550,13 @@ function closeSearch() {
 function doSearch(direction: "next" | "prev") {
   const active = tabs.value.find(t => t.id === activeId.value);
   if (!active) return;
-  const entry = xterms.get(active.id);
-  if (!entry?.search || !searchQuery.value) return;
+  const entry = terms.get(active.id);
+  if (!entry || !searchQuery.value) return;
+  const opts = { regex: false, caseSensitive: false };
   const found =
     direction === "next"
-      ? entry.search.findNext(searchQuery.value, { regex: false, caseSensitive: false })
-      : entry.search.findPrevious(searchQuery.value, { regex: false, caseSensitive: false });
+      ? entry.term.findNext(searchQuery.value, opts)
+      : entry.term.findPrevious(searchQuery.value, opts);
   searchHasResult.value = found !== false;
 }
 
@@ -508,11 +585,11 @@ function commitRename(tab: TerminalTab) {
 }
 
 onBeforeUnmount(() => {
-  for (const [, entry] of xterms) {
+  for (const [, entry] of terms) {
     entry.ro.disconnect();
     entry.term.dispose();
   }
-  xterms.clear();
+  terms.clear();
   // No manual removeEventListener for the dropdown — watchEffect cleans it up
   // automatically when the component unmounts.
 });
@@ -654,7 +731,7 @@ onBeforeUnmount(() => {
       />
     </template>
 
-    <!-- xterm host elements — one per tab, visibility toggled via v-show -->
+    <!-- Terminal host elements — one per tab, visibility toggled via v-show -->
     <div class="tp__body">
       <!-- Search bar — shown when searchVisible is true -->
       <div v-if="searchVisible" class="tp__search">

@@ -1390,6 +1390,8 @@ const fr: Locale = {
     terminalCopyOnSelectHint: "Copier la sélection dans le presse-papiers dès qu'elle est faite",
     terminalPasteOnRightClick: "Coller au clic droit",
     terminalPasteOnRightClickHint: "Le clic droit colle le presse-papiers au lieu d'ouvrir le menu",
+    terminalLegacyRenderer: "Ancien moteur de rendu du terminal (xterm.js)",
+    terminalLegacyRendererHint: "Le moteur intégré est plus rapide. Revenez à l'ancien si un programme s'affiche mal — s'applique aux nouveaux onglets.",
     notifications: "Notifications",
     notificationsHint: "Afficher les notifications toast (sync, push, erreurs)",
     notificationLevel: "Notifications d'activité PR",

@@ -226,6 +226,7 @@ interface Settings {
   terminalContextMenu: boolean;
   terminalCopyOnSelect: boolean;
   terminalPasteOnRightClick: boolean;
+  terminalLegacyRenderer: boolean;
   filesMode: "floating" | "fullscreen" | "bottom";
   filesPrevMode: "floating" | "bottom";
   filesHideOnNav: boolean;
@@ -334,6 +335,7 @@ const defaultSettings: Settings = {
   terminalContextMenu: true,
   terminalCopyOnSelect: false,
   terminalPasteOnRightClick: false,
+  terminalLegacyRenderer: false,
   filesMode: "floating",
   filesPrevMode: "floating",
   filesHideOnNav: true,
@@ -2235,6 +2237,17 @@ function deleteReleaseNoteTemplate(id: string) {
               <span>{{ t('settings.terminalPasteOnRightClick') }}</span>
             </label>
             <span class="sp-hint">{{ t('settings.terminalPasteOnRightClickHint') }}</span>
+          </div>
+
+          <!-- Legacy xterm.js renderer -->
+          <div class="sp-row sp-row--checkbox">
+            <label class="sp-checkbox-label" for="setting-terminal-legacy-renderer">
+              <input id="setting-terminal-legacy-renderer" type="checkbox" class="sp-checkbox"
+                :checked="settings.terminalLegacyRenderer"
+                @change="updateSetting('terminalLegacyRenderer', ($event.target as HTMLInputElement).checked)" />
+              <span>{{ t('settings.terminalLegacyRenderer') }}</span>
+            </label>
+            <span class="sp-hint">{{ t('settings.terminalLegacyRendererHint') }}</span>
           </div>
         </template>
 
