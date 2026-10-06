@@ -190,6 +190,7 @@ const en = {
     tabLog: "Log",
     tabGraph: "Graph",
     gitTree: "Git Tree",
+    wipTab: "WIP",
     toggleCommitPanel: "Commit panel",
     togglePrPanel: "Pull requests panel",
     toggleFilesPanel: "Files panel",
@@ -1469,11 +1470,11 @@ const en = {
       showPrs: "Show PRs",
       showTerminal: "Show Terminal",
       showFiles: "Show Files",
-      gitTreeLocked: "Git Tree & Changes",
+      gitTreeLocked: "Git Tree & WIP",
       lockedHint: "Always shown — cannot be removed.",
       hideChangesWhenEmpty: {
-        label: "Hide Changes when clean",
-        help: "Hide the Changes entry while the working tree has no changes.",
+        label: "Hide WIP when clean",
+        help: "Hide the WIP tab next to the Git Tree while the working tree has no changes.",
       },
       iconsOnly: {
         label: "Icons only",
@@ -1484,7 +1485,7 @@ const en = {
         label: "Idle opacity",
         help: "Dock opacity when the cursor is not over it. It fades back to full on hover.",
       },
-      itemChanges: "Changes",
+      itemChanges: "Git Tree — WIP",
       appearance: {
         label: "Appearance",
       },

@@ -32,7 +32,7 @@ describe("v3.11.2 — Browse removed, the File Explorer panel is the file browse
   it("drops a stored 'files-view' dock id", () => {
     expect(DEFAULT_DOCK_ORDER).not.toContain("files-view");
     const stored = ["files-view", "changes", "graph", "prs", "dashboard", "launchpad"] as unknown as DockEntryId[];
-    expect(normalizeDockOrder(stored)).toEqual(["changes", "graph", "prs", "dashboard", "launchpad"]);
+    expect(normalizeDockOrder(stored)).toEqual(["graph", "prs", "dashboard", "launchpad"]);
     expect(normalizeDockOrder(["files-view"] as unknown as DockEntryId[])).toEqual(DEFAULT_DOCK_ORDER);
   });
 

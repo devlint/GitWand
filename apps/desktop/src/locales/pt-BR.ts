@@ -190,6 +190,7 @@ const ptBR: Locale = {
     tabLog: "Histórico",
     tabGraph: "Grafo",
     gitTree: "Árvore Git",
+    wipTab: "WIP",
     toggleCommitPanel: "Painel de commit",
     togglePrPanel: "Painel de pull requests",
     toggleFilesPanel: "Painel de arquivos",
@@ -1444,11 +1445,11 @@ const ptBR: Locale = {
       showPrs: "Mostrar PRs",
       showTerminal: "Mostrar terminal",
       showFiles: "Mostrar arquivos",
-      gitTreeLocked: "\u00c1rvore Git e Altera\u00e7\u00f5es",
+      gitTreeLocked: "Árvore Git e WIP",
       lockedHint: "Sempre vis\u00edveis \u2014 n\u00e3o podem ser removidos.",
       hideChangesWhenEmpty: {
-        label: "Ocultar Altera\u00e7\u00f5es quando limpo",
-        help: "Oculta a entrada Altera\u00e7\u00f5es quando a \u00e1rvore de trabalho n\u00e3o tem altera\u00e7\u00f5es.",
+        label: "Ocultar WIP quando limpo",
+        help: "Oculta a aba WIP ao lado da Árvore Git quando a árvore de trabalho não tem alterações.",
       },
       iconsOnly: {
         label: "Apenas \u00edcones",
@@ -1459,7 +1460,7 @@ const ptBR: Locale = {
         label: "Opacidade em repouso",
         help: "Opacidade do dock quando o cursor n\u00e3o est\u00e1 sobre ele. Volta a ficar opaco ao passar o mouse.",
       },
-      itemChanges: "Altera\u00e7\u00f5es",
+      itemChanges: "Árvore Git — WIP",
       appearance: {
         label: "Apar\u00eancia",
       },

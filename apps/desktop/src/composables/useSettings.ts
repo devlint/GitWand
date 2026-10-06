@@ -28,14 +28,16 @@ export type LaunchpadTab = "inbox" | "wip" | "prs" | "issues" | "team";
 /** Granularity of PR-activity OS notifications (v2.16). */
 export type NotificationLevel = "all" | "reviews" | "ci" | "none";
 /** Dock entry ids (subset of ViewMode) — used for dock ordering (v3). */
-export type DockEntryId = "launchpad" | "dashboard" | "prs" | "graph" | "changes";
+export type DockEntryId = "launchpad" | "dashboard" | "prs" | "graph";
 /** Canonical default dock order, left → right. */
-export const DEFAULT_DOCK_ORDER: DockEntryId[] = ["launchpad", "dashboard", "prs", "graph", "changes"];
+export const DEFAULT_DOCK_ORDER: DockEntryId[] = ["launchpad", "dashboard", "prs", "graph"];
 
 /**
  * Normalise a stored dock order so every entry is present exactly once:
  * keep the known/persisted order, then append any missing entries in default
  * order. Shared by AppDock (render order) and SettingsPanel (reorder list).
+ * Unknown ids are dropped — e.g. the retired "changes" entry, now the WIP tab
+ * glued to the Git Tree entry.
  */
 export function normalizeDockOrder(stored: DockEntryId[] | undefined): DockEntryId[] {
   const order = stored?.length ? stored : DEFAULT_DOCK_ORDER;
@@ -44,7 +46,7 @@ export function normalizeDockOrder(stored: DockEntryId[] | undefined): DockEntry
   return [...known, ...missing];
 }
 
-/** Per-entry "hidden from dock" flag. Git Tree & Changes are never hideable. */
+/** Per-entry "hidden from dock" flag. Git Tree (and its WIP tab) is never hideable. */
 export function isDockEntryHidden(
   id: DockEntryId,
   flags: Pick<AppSettings, "dockHideLaunchpad" | "dockHideDashboard" | "dockHidePrs">,

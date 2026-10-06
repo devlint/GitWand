@@ -189,6 +189,7 @@ const es: Locale = {
     tabLog: "Historial",
     tabGraph: "Gráfico",
     gitTree: "Árbol Git",
+    wipTab: "WIP",
     toggleCommitPanel: "Panel de commit",
     togglePrPanel: "Panel de pull requests",
     toggleFilesPanel: "Panel de archivos",
@@ -1444,11 +1445,11 @@ const es: Locale = {
       showPrs: "Mostrar PRs",
       showTerminal: "Mostrar terminal",
       showFiles: "Mostrar archivos",
-      gitTreeLocked: "Árbol Git y Cambios",
+      gitTreeLocked: "Árbol Git y WIP",
       lockedHint: "Siempre visibles — no se pueden quitar.",
       hideChangesWhenEmpty: {
-        label: "Ocultar Cambios si está limpio",
-        help: "Oculta la entrada Cambios cuando el árbol de trabajo no tiene cambios.",
+        label: "Ocultar WIP si está limpio",
+        help: "Oculta la pestaña WIP junto al Árbol Git cuando el árbol de trabajo no tiene cambios.",
       },
       iconsOnly: {
         label: "Solo iconos",
@@ -1459,7 +1460,7 @@ const es: Locale = {
         label: "Opacidad en reposo",
         help: "Opacidad del dock cuando el cursor no está encima. Vuelve a ser opaco al pasar el ratón.",
       },
-      itemChanges: "Cambios",
+      itemChanges: "Árbol Git — WIP",
       appearance: {
         label: "Apariencia",
       },
