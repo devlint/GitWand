@@ -196,8 +196,8 @@ export function useCommitActions(deps: Deps) {
       // 3. Remote delete (best effort, ignore if already gone)
       await gitDeleteRemoteTag(cwd, remote, name).catch(() => {});
 
-      // 4. Final refresh
-      await repoRefresh();
+      // 4. Final refresh — force: tag refs change without HEAD moving.
+      await repoRefresh(true);
     } catch (err: any) {
       repoError.value = err?.message ?? String(err);
     }
@@ -358,7 +358,8 @@ export function useCommitActions(deps: Deps) {
     try {
       await gitCreateTag(cwd, name, entry.hashFull, modal.value.tagMessage || undefined);
       closeModal();
-      await repoRefresh();
+      // Force: a new tag adds a ref without moving HEAD.
+      await repoRefresh(true);
     } catch (err: any) {
       modal.value.error = err?.message ?? String(err);
     } finally {

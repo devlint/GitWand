@@ -3406,6 +3406,8 @@ async function deleteTagInModal(tagName: string) {
   if (!cwd) return;
   try {
     await gitDeleteTag(cwd, tagName);
+    // Force: the tag ref is gone but HEAD hasn't moved.
+    await repoRefresh(true);
     pendingUnpushedTags.value = pendingUnpushedTags.value.filter(t => t !== tagName);
     if (pendingUnpushedTags.value.length === 0) {
       pushTagsConfirm.value = false;
@@ -4691,7 +4693,7 @@ onUnmounted(() => {
 
     <!-- Tags panel -->
     <TagsPanel v-if="showTags && repoFolderPath" :cwd="repoFolderPath" @close="showTags = false"
-      @refresh="repoRefresh()"
+      @refresh="repoRefresh(true)"
       @create-tag="showTags = false; handleTagCommit(repoLog[0] ?? null)" />
     <!-- Worktree manager (uses BaseModal internally → own Teleport + backdrop) -->
     <WorktreeManager v-if="showWorktrees && repoFolderPath" :cwd="repoFolderPath" :branches="branches"
