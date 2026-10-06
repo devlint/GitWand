@@ -1996,7 +1996,6 @@ function formatActivityDate(dateStr: string): string {
     >
       <!-- Discard : libellé selon la section -->
       <button
-        v-if="ctxMenu.file.section !== 'staged'"
         class="ctx-item ctx-item--danger"
         @click="onCtxDiscard"
       >
@@ -2007,7 +2006,7 @@ function formatActivityDate(dateStr: string): string {
       </button>
 
       <!-- Separator -->
-      <div class="ctx-separator" v-if="ctxMenu.file.section !== 'staged'"></div>
+      <div class="ctx-separator"></div>
 
       <!-- Absorb into original commit -->
       <button
