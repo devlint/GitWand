@@ -95,7 +95,7 @@ import { useRepoTabs } from "./composables/useRepoTabs";
 import { useAiTasks } from "./composables/useAiTasks";
 import { usePinnedBranches } from "./composables/usePinnedBranches";
 import { computeCheckoutPrompt, isUpdatePromptSkipped, skipUpdatePrompt } from "./composables/useBranchUpdatePrompt";
-import { useGitRepo, type ViewMode } from "./composables/useGitRepo";
+import { useGitRepo, type ViewMode, type RepoFileEntry } from "./composables/useGitRepo";
 import { useHeaderAlign } from "./composables/useHeaderAlign";
 import { useWorkspaceScope } from "./composables/useWorkspaceScope";
 import { useTheme } from "./composables/useTheme";
@@ -183,6 +183,7 @@ import type { ForgeName } from "./composables/forge/types";
 import { onMarkdownLinkClick } from "./composables/useSafeHtml";
 import { resolveDirtySwitchAction, type DirtyFile } from "./utils/branchSwitchDecision";
 import { resolveDirtyPullAction } from "./utils/pullDirtyDecision";
+import { planDiscard } from "./utils/discardPlan";
 import { requireOnline } from "./utils/networkGuard";
 // UpdateModal moved above (lazy-loaded) — type imported as UpdateModalType for the template ref
 
@@ -1641,7 +1642,9 @@ const repoSidebarListeners = {
   commit: (trailers: string) => handleCommitRequest(trailers),
   "update:commitSummary": (val: string) => { commitSummary.value = val; },
   "update:commitDescription": (val: string) => { commitDescription.value = val; },
-  discard: (path: string, section: string) => discardFiles([path], section === "untracked"),
+  discard: (path: string, section: string) => discardEntries(
+    repoFiles.value.filter(f => f.path === path && f.section === section),
+  ),
   discardSection: (sectionKey: string, paths: string[]) => onDiscardSection(sectionKey, paths),
   addToGitignore: (path: string) => addToGitignore(path),
   refresh: () => repoRefresh(),
@@ -3321,32 +3324,15 @@ async function onDiscardSectionConfirmed() {
     ? allFiles
     : allFiles.filter(f => ctx.paths.includes(f.path));
 
-  const staged = targetFiles.filter(f => f.section === 'staged');
-  const unstaged = targetFiles.filter(f => f.section === 'unstaged');
-  const untracked = targetFiles.filter(f => f.section === 'untracked');
+  await discardEntries(targetFiles);
+}
 
-  // 1. Unstage any staged files first
-  if (staged.length) {
-    await unstageFiles(staged.map(f => f.path));
-  }
-
-  // 2. Discard tracked files (was unstaged + was staged but not added)
-  const toCheckout = [
-    ...unstaged.map(f => f.path),
-    ...staged.filter(f => f.status !== 'added').map(f => f.path)
-  ];
-  if (toCheckout.length) {
-    await discardFiles(toCheckout, false);
-  }
-
-  // 3. Discard untracked files (was untracked + was staged added)
-  const toClean = [
-    ...untracked.map(f => f.path),
-    ...staged.filter(f => f.status === 'added').map(f => f.path)
-  ];
-  if (toClean.length) {
-    await discardFiles(toClean, true);
-  }
+/** Discard working-tree and index changes for the given entries (see `planDiscard`). */
+async function discardEntries(targetFiles: RepoFileEntry[]) {
+  const plan = planDiscard(targetFiles);
+  if (plan.unstage.length) await unstageFiles(plan.unstage);
+  if (plan.checkout.length) await discardFiles(plan.checkout, false);
+  if (plan.clean.length) await discardFiles(plan.clean, true);
 }
 
 function handleWipDiscardAll() {
