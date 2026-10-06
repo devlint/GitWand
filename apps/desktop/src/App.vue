@@ -95,7 +95,7 @@ import { useRepoTabs } from "./composables/useRepoTabs";
 import { useAiTasks } from "./composables/useAiTasks";
 import { usePinnedBranches } from "./composables/usePinnedBranches";
 import { computeCheckoutPrompt, isUpdatePromptSkipped, skipUpdatePrompt } from "./composables/useBranchUpdatePrompt";
-import { useGitRepo, type ViewMode } from "./composables/useGitRepo";
+import { useGitRepo, type ViewMode, type RepoFileEntry } from "./composables/useGitRepo";
 import { useWorkspaceScope } from "./composables/useWorkspaceScope";
 import { useTheme } from "./composables/useTheme";
 import { useI18n } from "./composables/useI18n";
@@ -1637,7 +1637,9 @@ const repoSidebarListeners = {
   commit: (trailers: string) => handleCommitRequest(trailers),
   "update:commitSummary": (val: string) => { commitSummary.value = val; },
   "update:commitDescription": (val: string) => { commitDescription.value = val; },
-  discard: (path: string, section: string) => discardFiles([path], section === "untracked"),
+  discard: (path: string, section: string) => discardEntries(
+    repoFiles.value.filter(f => f.path === path && f.section === section),
+  ),
   discardSection: (sectionKey: string, paths: string[]) => onDiscardSection(sectionKey, paths),
   addToGitignore: (path: string) => addToGitignore(path),
   refresh: () => repoRefresh(),
@@ -3317,6 +3319,15 @@ async function onDiscardSectionConfirmed() {
     ? allFiles
     : allFiles.filter(f => ctx.paths.includes(f.path));
 
+  await discardEntries(targetFiles);
+}
+
+/**
+ * Discard working-tree and index changes for the given entries. A plain
+ * `git checkout -- <path>` restores the worktree from the index, so a staged
+ * change would survive it — staged entries are unstaged first.
+ */
+async function discardEntries(targetFiles: RepoFileEntry[]) {
   const staged = targetFiles.filter(f => f.section === 'staged');
   const unstaged = targetFiles.filter(f => f.section === 'unstaged');
   const untracked = targetFiles.filter(f => f.section === 'untracked');
