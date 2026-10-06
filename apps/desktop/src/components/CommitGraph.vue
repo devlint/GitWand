@@ -898,13 +898,23 @@ function cy(index: number): number {
  * Straight down in child lane, then a rounded corner into the parent lane
  * at the parent row level. Creates a visible horizontal segment exactly at
  * the commit where branches connect. */
-function edgePath(e: { fromIndex: number; fromLane: number; toIndex: number; toLane: number }): string {
+function edgePath(e: { fromIndex: number; fromLane: number; toIndex: number; toLane: number; isMerge?: boolean }): string {
   const x1 = cx(e.fromLane);
   const y1 = cy(e.fromIndex);
   const x2 = cx(e.toLane);
   const y2 = cy(e.toIndex);
 
   if (x1 === x2) return `M${x1},${y1} L${x2},${y2}`;
+
+  // Merge edge: leave from the top of the merge dot, S-curve over one row
+  // into the merged branch's lane, then run straight down to the parent.
+  if (e.isMerge) {
+    const yStart = y1 - NODE_R;
+    const yEnd = Math.min(y2, y1 + ROW_H);
+    const yMid = (yStart + yEnd) / 2;
+    const s = `M${x1},${yStart} C${x1},${yMid} ${x2},${yMid} ${x2},${yEnd}`;
+    return yEnd < y2 ? `${s} L${x2},${y2}` : s;
+  }
 
   const r = Math.min(LANE_W * 0.6, (y2 - y1) * 0.35);
   const xSign = x2 < x1 ? -1 : 1;
