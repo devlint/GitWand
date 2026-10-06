@@ -4503,6 +4503,7 @@ onUnmounted(() => {
                   :pinned-branches="graphPinnedBranches"
                   :log-branch-filter="logBranchFilter"
                   :log-author-filter="logAuthorFilter"
+                  :wip-summary="commitSummary"
                   @set-log-branch-filter="setLogBranchFilter"
                   @set-log-author-filter="setLogAuthorFilter"
                   @select-commit="onGraphSelectCommit"

@@ -4,6 +4,8 @@ import type { GitLogEntry, GitBranch } from "../utils/backend";
 import { computeDagLayout, parseRefs, type DagLayout, type DagNode } from "../utils/dagLayout";
 import { useI18n } from "../composables/useI18n";
 import Avatar from "./Avatar.vue";
+import AiSparkle from "./AiSparkle.vue";
+import { useCommitMessage } from "../composables/useCommitMessage";
 import { filterCommitsLocal } from "../composables/useCommitSearch";
 import { useWorkspaceScope } from "../composables/useWorkspaceScope";
 import { PR_PANEL_KEY, type PrPanelState } from "../composables/usePrPanel";
@@ -47,6 +49,8 @@ const props = defineProps<{
   logBranchFilter?: "all" | "current";
   /** Filter commits to the current user's commits when set to "mine". */
   logAuthorFilter?: "all" | "mine";
+  /** Commit-draft summary, previewed on the WIP row ("// WIP: <summary>"). */
+  wipSummary?: string;
 }>();
 
 type CommitEvent =
@@ -543,6 +547,10 @@ const totalChanges = computed(() => {
   return props.repoStats.added + props.repoStats.modified + props.repoStats.deleted + props.repoStats.renamed;
 });
 const hasChanges = computed(() => totalChanges.value > 0);
+
+// WIP row preview: the draft summary, or an AI indicator while one is generated.
+const { isGenerating: isGeneratingCommitMsg } = useCommitMessage();
+const wipSummaryPreview = computed(() => props.wipSummary?.trim() ?? "");
 
 const displayCommits = computed(() => {
   if (!hasChanges.value) return props.commits;
@@ -1487,7 +1495,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
           @contextmenu="vc.entry.hashFull === 'WIP' ? openWipContextMenu($event) : openCommitContextMenu($event, vc.entry, vc.index)"
         >
           <template v-if="vc.entry.hashFull === 'WIP'">
-            <span class="cg-msg wip-msg">{{ vc.entry.message }}</span>
+            <span class="cg-msg wip-msg">{{ vc.entry.message }}<template v-if="isGeneratingCommitMsg">: <span class="wip-ai"><AiSparkle :size="11" />{{ t('sidebar.aiGeneratingTooltip') }}</span></template><template v-else-if="wipSummaryPreview">: <span class="wip-summary">{{ wipSummaryPreview }}</span></template></span>
             <span class="cg-meta wip-meta" v-if="props.repoStats">
               <span v-if="props.repoStats.added > 0" class="wip-stat wip-stat--added">+{{ props.repoStats.added }}</span>
               <span v-if="props.repoStats.modified > 0" class="wip-stat wip-stat--modified">~{{ props.repoStats.modified }}</span>
@@ -2478,6 +2486,21 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
   font-family: var(--font-mono);
   font-weight: 500;
   font-size: 11px;
+  white-space: nowrap;
+}
+
+.wip-summary {
+  font-weight: 400;
+  color: var(--color-text-muted);
+}
+
+.wip-ai {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 400;
+  color: var(--color-ai);
+  vertical-align: middle;
 }
 
 .wip-meta {
