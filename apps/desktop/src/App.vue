@@ -137,6 +137,7 @@ import {
   LAUNCHPAD_OPEN_REQUEST_KEY,
   TOGGLE_GIT_TREE_KEY,
   OPEN_SETTINGS_KEY,
+  COMMIT_MESSAGE_SINK_KEY,
 } from "./composables/branchPickerBridge";
 import { gitStash, gitStashPop, gitStashList, openInEditor, setGitConfig, gitDiscard, gitAddToGitignore, gitDeleteBranch, gitDeleteTag, gitDeleteRemoteTag, gitRemoteInfo, gitUnpushedTags, gitPushTags, gitMergeBase, gitResetToCommit, gitCommitSubmoduleChanges, gitSubmoduleCheckUpdates, scratchWorktreeCreate, scratchWorktreeDiscard, scratchWorktreeMergeBack, gitWorktreeList, gitWorktreeRemove, type CommitSubmoduleChange, type ScratchWorktree } from "./utils/backend";
 import { useCommitActions } from "./composables/useCommitActions";
@@ -511,6 +512,11 @@ provide(LOG_FOCUS_SEARCH_KEY, logFocusRequest);
 provide(LAUNCHPAD_OPEN_REQUEST_KEY, launchpadOpenRequest);
 provide(TOGGLE_GIT_TREE_KEY, () => { showGitTree.value = !showGitTree.value; });
 provide(OPEN_SETTINGS_KEY, (tab) => { settingsInitialTab.value = tab; showSettings.value = true; });
+provide(COMMIT_MESSAGE_SINK_KEY, (cwd, summary, description) => {
+  if (cwd !== (repoFolderPath.value ?? "")) return;
+  commitSummary.value = summary;
+  commitDescription.value = description;
+});
 provide("askConfirm", askConfirm);
 
 // ─── Multi-repo tabs (lightweight — paths only) ─────────

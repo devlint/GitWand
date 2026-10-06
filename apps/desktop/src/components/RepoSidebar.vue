@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, nextTick, onMounted, onUnmounted, watch, inject } from "vue";
-import { TOGGLE_GIT_TREE_KEY } from "../composables/branchPickerBridge";
+import { TOGGLE_GIT_TREE_KEY, COMMIT_MESSAGE_SINK_KEY } from "../composables/branchPickerBridge";
 import { type RepoFileEntry, type ViewMode } from "../composables/useGitRepo";
 import { gitRemoteInfo, getGitUser, type GitLogEntry, type GitBranch, type RemoteInfo, type GitUser, type GitDiff } from "../utils/backend";
 import PrListSidebar from "./PrListSidebar.vue";
@@ -644,9 +644,12 @@ function onDocClick(e: MouseEvent) {
 onMounted(() => document.addEventListener("click", onDocClick));
 onUnmounted(() => document.removeEventListener("click", onDocClick));
 
-function applyMessage(msg: string) {
+// Captured at setup: the AI call may resolve after this pane unmounted (view
+// switch), when emit() is a no-op. The App-level sink still reaches the draft.
+const commitMessageSink = inject(COMMIT_MESSAGE_SINK_KEY, null);
+
+function applyMessage(cwd: string, msg: string) {
   const [summary, ...rest] = msg.split("\n");
-  emit("update:commitSummary", summary.trim());
   let body = rest.join("\n").trim();
 
   // Append signature if setting is enabled
@@ -659,7 +662,12 @@ function applyMessage(msg: string) {
     }
   } catch { /* ignore */ }
 
-  emit("update:commitDescription", body);
+  if (commitMessageSink) {
+    commitMessageSink(cwd, summary.trim(), body);
+  } else {
+    emit("update:commitSummary", summary.trim());
+    emit("update:commitDescription", body);
+  }
 }
 
 async function onGenerateCommitMessage() {
@@ -668,12 +676,13 @@ async function onGenerateCommitMessage() {
   aiPresetMenuOpen.value = false;
   const lang = resolveCommitLang();
   const preset = activePreset.value;
+  const cwd = props.cwd;
   try {
-    const msg = await generateCommitMsg(props.cwd, {
+    const msg = await generateCommitMsg(cwd, {
       locale: lang as string,
       systemPromptOverride: preset?.systemPrompt,
     });
-    applyMessage(msg);
+    applyMessage(cwd, msg);
   } catch {
     // lastError is already set by the composable — the UI shows it.
   }
@@ -693,9 +702,10 @@ async function onAiAction(action: "regenerate" | "shorten" | "detail" | "changeL
   }
   const currentMsg = [props.commitSummary, props.commitDescription].filter(Boolean).join("\n");
   if (!currentMsg.trim()) return;
+  const cwd = props.cwd;
   try {
     const msg = await transformCommitMsg(action, currentMsg, targetLocale);
-    applyMessage(msg);
+    applyMessage(cwd, msg);
   } catch {
     // aiError is set by the composable.
   }
