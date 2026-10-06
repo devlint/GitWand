@@ -273,7 +273,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
   watch(activeScope, () => {
     if (!folderPath.value) return;
     void loadStatus(folderPath.value);
-    void loadLog();
+    void reloadLogForViewChange();
     void loadRevCounts();
   });
 
@@ -615,6 +615,10 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
   // scroll pagination continues past the ceiling.
   const PREFETCH_CEILING = 5000;
   let _prefetchToken = 0;
+  // Bumped whenever the log *view* changes (branch/author filter, monorepo
+  // scope). An in-flight page fetched for the previous view must not land in
+  // the new one, so loadLog/loadMoreLog drop results whose epoch is stale.
+  let _logViewEpoch = 0;
 
   function isCanonicalLogView(): boolean {
     return (
@@ -658,9 +662,13 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
    *   (push moving origin/HEAD, branch/tag/stash deletion, fetch) leave the top
    *   commit untouched, so without this they'd serve a stale log. Refetches at
    *   the current depth so a paginated view doesn't collapse back to page 1.
+   * @param viewChanged True when the filter/scope just changed: fetch only the
+   *   first page (the current depth belongs to the old view — up to the whole
+   *   prefetched history) and never keep the old view's entries.
    */
-  async function loadLog(count?: number, force = false) {
+  async function loadLog(count?: number, force = false, viewChanged = false) {
     if (!folderPath.value) return;
+    const epoch = _logViewEpoch;
     try {
       const authorEmail =
         logAuthorFilter.value === "mine"
@@ -672,7 +680,9 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       // only needs a cheap first-page probe to detect HEAD movement. Filtered
       // views reload at least what's visible so polling doesn't collapse a
       // paginated log back to page 1.
-      const pageSize = isCanon
+      const pageSize = viewChanged
+        ? LOG_PAGE
+        : isCanon
         ? force
           ? Math.max(LOG_PAGE, log.value.length)
           : LOG_PAGE
@@ -688,12 +698,15 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       );
       // Refresh the hidden-commit badge counts alongside the scoped log.
       await loadRevCounts();
+      // A newer view change superseded this fetch — its result is stale.
+      if (epoch !== _logViewEpoch) return;
 
       const head = entries[0]?.hashFull;
       if (isCanon) {
         const cached = LOG_CACHE.get(folderPath.value);
         const haveSameHead =
           !force &&
+          !viewChanged &&
           log.value.length >= entries.length &&
           log.value[0]?.hashFull === head;
         if (haveSameHead) {
@@ -749,6 +762,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
   async function loadMoreLog(pageSize: number = LOG_PAGE) {
     if (!folderPath.value || !logHasMore.value || logLoadingMore.value) return;
     logLoadingMore.value = true;
+    const epoch = _logViewEpoch;
     try {
       const authorEmail =
         logAuthorFilter.value === "mine"
@@ -765,6 +779,9 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
         isCurrentBranchOnly ? (status.value?.branch ?? undefined) : undefined,
         activeScope.value ?? undefined,
       );
+      // The view changed while this page was in flight — it belongs to the
+      // old filter/scope, don't append it to the new log.
+      if (epoch !== _logViewEpoch) return;
       // Dedupe: in all-refs mode the `--skip` offset counts filtered-out stash
       // pseudo-commits, so consecutive pages can overlap by a few commits.
       // Drop any hash we already have before appending.
@@ -784,14 +801,28 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     } catch (err: any) {
       error.value = `git log (page): ${err?.message ?? err}`;
     } finally {
-      logLoadingMore.value = false;
+      // A view change already reset the flag; don't clear a newer page's.
+      if (epoch === _logViewEpoch) logLoadingMore.value = false;
     }
   }
 
   async function setLogBranchFilter(filter: "all" | "current") {
     if (logBranchFilter.value === filter) return;
     logBranchFilter.value = filter;
-    await loadLog();
+    await reloadLogForViewChange();
+  }
+
+  /**
+   * Reload the log after the filter/scope changed. Cancels the canonical
+   * background prefetch and invalidates in-flight pages, then fetches the
+   * first page of the new view (or restores the cached full log when back on
+   * the canonical view).
+   */
+  async function reloadLogForViewChange() {
+    _logViewEpoch++;
+    _prefetchToken++;
+    logLoadingMore.value = false;
+    await loadLog(undefined, false, true);
   }
 
   /**
@@ -804,7 +835,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       currentGitUser.value = await getGitUser(folderPath.value);
     }
     logAuthorFilter.value = filter;
-    await loadLog();
+    await reloadLogForViewChange();
   }
 
   /**
