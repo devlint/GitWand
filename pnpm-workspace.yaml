@@ -16,16 +16,19 @@ overrides:
   # is the latest SDK, so it can't be bumped to escape them — pin the patched
   # versions here. The SDK's own ranges (hono ^4.11.4, express ^5.2.1,
   # ajv ^8.17.1) all accept these.
-  hono: "^4.12.25" # bumped from 4.12.14 — clears 8 hono CVEs (#6,#7,#9,#10,#11 + #41,#42,#43)
+  hono: "^4.13.7" # 4.13.7: hono/jsx boundary XSS (#121); earlier bumps cleared #6,#7,#9,#10,#11,#41,#42,#43
   # Security: force tmp >= 0.2.6 (CVE fix). @vscode/vsce pins it lower (0.2.5).
   tmp: "^0.2.7"
   # Security (Dependabot): transitive deps their parents cap below the patch.
   # Scoped by major so other versions in the tree stay untouched.
   "fast-uri@3": ">=3.1.2" # CVE-2026-6321, via ajv → MCP SDK (#8, #12)
+  "fast-uri@4": "^4.1.5" # via ajv → MCP SDK and secretlint → vsce (#97, #98, #110, #111)
+  "proxy-addr@2": "^2.0.8" # critical, IPv4-mapped IPv6 trust bypass; via express → MCP SDK (#124)
   "qs@6": ">=6.15.2" # via express → MCP SDK (#16)
-  "ip-address@10": ">=10.2.0" # via express-rate-limit → MCP SDK (#5)
+  "ip-address@10": "^10.7.1" # via express-rate-limit → MCP SDK (#5, #118, #119)
   "ws@8": ">=8.20.1" # CVE-2026-45736, via jsdom (#15)
-  "brace-expansion@5": ">=5.0.6" # CVE-2026-45149, v5 only via minimatch@10 (#14)
+  "brace-expansion@5": "^5.0.12" # via minimatch@10 → vsce (#14, #112, #114, #116)
+  "brace-expansion@2": "^2.1.7" # via minimatch → vue-tsc, dev-only (#113, #115, #117)
   # Dependabot transitive advisories (the three direct deps — dompurify,
   # markdown-it, vite — are bumped in their own Dependabot PRs #41/#42/#43).
   "shell-quote@1": ">=1.8.4" # GHSA-w7jw-789q-3m8p, critical — newline escaping (#26)
@@ -35,3 +38,7 @@ overrides:
   # Dependabot #44/#45/#47/#48/#49/#50/#51 — all via @vscode/vsce → cheerio,
   # dev-only tooling for packaging/publishing the VS Code extension.
   "undici@7": ">=7.28.0"
+  "undici@8": "^8.10.2" # #99–#109, same cheerio → vsce path, dev-only
+  # source-map-js: build-time only (@vue/compiler-sfc, postcss) (#125).
+  "source-map-js@1": "^1.2.2"
+  # braces <=3.0.3 (#122) has no patched release yet; dev-only, via vsce → secretlint.
