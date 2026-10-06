@@ -96,6 +96,7 @@ import { useAiTasks } from "./composables/useAiTasks";
 import { usePinnedBranches } from "./composables/usePinnedBranches";
 import { computeCheckoutPrompt, isUpdatePromptSkipped, skipUpdatePrompt } from "./composables/useBranchUpdatePrompt";
 import { useGitRepo, type ViewMode, type RepoFileEntry } from "./composables/useGitRepo";
+import { useHeaderAlign } from "./composables/useHeaderAlign";
 import { useWorkspaceScope } from "./composables/useWorkspaceScope";
 import { useTheme } from "./composables/useTheme";
 import { useI18n } from "./composables/useI18n";
@@ -1345,6 +1346,7 @@ watch(hasRepo, (has) => {
 
 // ─── Repo sidebar events ────────────────────────────────
 function onRepoFileSelect(path: string, staged: boolean) {
+  wipDiffOpen.value = true;
   repoSelectFile(path, staged);
 }
 
@@ -1353,6 +1355,8 @@ function onViewModeChange(mode: ViewMode) {
   if (showTerminal.value && settings.value.terminalHideOnNav) showTerminal.value = false;
   if (showFiles.value && settings.value.filesHideOnNav) showFiles.value = false;
   viewMode.value = mode;
+  // Re-clicking the WIP (row or dock tab) while its diff is closed reopens it.
+  if (mode === "changes") wipDiffOpen.value = true;
   if (mode === "changes" && !repoSelectedFile.value && repoFiles.value.length > 0) {
     const first = repoFiles.value[0];
     repoSelectFile(first.path, first.section === "staged");
@@ -4235,6 +4239,8 @@ const graphScrollIdx = ref<number | null>(null);
 
 /** Graph → select a commit: load its diffs, keep the graph, open no file. */
 function onGraphSelectCommit(hash: string) {
+  // Picking a commit while the WIP is selected leaves the WIP mode.
+  if (viewMode.value === "changes") viewMode.value = "graph";
   graphFileIdx.value = null;
   graphScrollIdx.value = null;
   selectCommit(hash);
@@ -4258,6 +4264,18 @@ function onGraphCloseDiff() {
   graphFileIdx.value = null;
   graphScrollIdx.value = null;
 }
+
+// ─── Git Tree WIP mode (viewMode === 'changes') ───────────
+// The WIP is the Git Tree's "uncommitted" selection: the right rail becomes the
+// Changes pane, and the selected WIP file's diff covers the graph until closed
+// (X returns to the graph, WIP still selected). Any fresh entry into the WIP
+// mode, or a file picked in the rail, reopens the diff — a selection that moves
+// on its own (stage, refresh) does not.
+const wipDiffOpen = ref(true);
+/** Centers the WIP close button on the header of whichever viewer is shown. */
+const wipDiffEl = ref<HTMLElement | null>(null);
+const { top: wipCloseTop } = useHeaderAlign(wipDiffEl, ".diff-header, .editor-header, .fhv-header, .idv-header", 28);
+watch(viewMode, (mode) => { if (mode === "changes") wipDiffOpen.value = true; });
 
 onMounted(() => {
   window.addEventListener("keydown", onKeyDown);
@@ -4359,63 +4377,6 @@ onUnmounted(() => {
               :status="repoStats" :ahead="aheadCount" :behind="behindCount" :needs-publish="needsPublish"
               @change-view="onViewModeChange" @select-commit="onDashboardSelectCommit" @push="handlePush" @sync="() => handlePull()" />
 
-            <!-- ── Changes view: diff │ collapsible right rail (files + commit) ── -->
-            <div v-else-if="viewMode === 'changes'" class="view view--changes">
-              <div class="view__content">
-                <div v-if="memorizeToast && showingMergeEditor" class="me-memory-offer">
-                  <span>{{ t("mergeEditor.memorizeFileOffer", memorizeToast.path.split('/').pop() || memorizeToast.path) }}</span>
-                  <button class="me-memory-btn me-memory-btn--save" @click="acceptMemorizeToast">{{ t("mergeEditor.memorySave") }}</button>
-                  <button class="me-memory-btn" @click="dismissMemorizeToast">{{ t("common.close") }}</button>
-                </div>
-                <MergeEditor v-if="showingMergeEditor && mergeSelectedFile" :file="mergeSelectedFile"
-                  :cwd="repoFolderPath ?? undefined"
-                  @resolve="handleResolveFile" @resolve-hunk="(path, idx, choice) => handleResolveHunk(path, idx, choice)"
-                  @resolve-hunk-custom="(path, idx, content) => handleResolveHunkCustom(path, idx, content)"
-                  @resolve-file-bulk="(path, choice) => handleResolveFileBulk(path, choice)"
-                  @apply-file-memory="(path, entry) => handleApplyFileMemory(path, entry)"
-                  @resolve-tree-conflict="(path, choice) => handleResolveTreeConflict(path, choice)"
-                  @reconstruct-conflict="(path) => handleReconstructConflict(path)"
-                  @keep-working-tree="(path) => handleKeepWorkingTree(path)"
-                  @open-externally="(path) => handleOpenInEditor(path)" />
-                <div v-else-if="mergeEditorPending" class="view__merge-pending" role="status">{{ t("common.loading") }}</div>
-                <FileHistoryViewer v-else-if="fileHistoryPath && repoFolderPath" :file-path="fileHistoryPath"
-                  :cwd="repoFolderPath" @close="closeFileHistory"
-                  @select-commit="(hash) => { closeFileHistory(); selectCommit(hash); viewMode = 'history'; }" />
-                <!--
-                Image files (PNG, JPEG, WebP, GIF, SVG) get the ImageDiffViewer
-                branch; the line-based DiffViewer would hit its "binary file"
-                dead-end and show nothing useful.
-              -->
-                <ImageDiffViewer v-else-if="isImagePath(repoSelectedFile) && repoFolderPath && repoSelectedFile"
-                  :cwd="repoFolderPath" :file-path="repoSelectedFile" old-rev="HEAD"
-                  :new-rev="repoSelectedFileStaged ? ':0' : ''" status="modified" />
-                <DiffViewer v-else ref="diffViewerRef" :diff="repoDiff" :file-path="repoSelectedFile" :diff-mode="diffMode" :selectable="true"
-                  :findings="findingsForSelectedFile"
-                  @update:diff-mode="onDiffModeChange" @open-file-history="openFileHistory"
-                  @open-in-editor="handleOpenInEditor" @stage-patch="stagePatch"
-                  @select-dir-file="(path) => repoSelectFile(path, false)"
-                  @open-repo-tab="handleOpenNestedRepo"
-                  @add-to-gitignore="addToGitignore"
-                  @dismiss-finding="(id) => commitReview.dismiss(id)"
-                  :editable="!repoSelectedFileStaged && !isSelectedFileConflicted"
-                  @edit-hunk="handleEditHunk" />
-              </div>
-
-              <div v-if="showCommitRail" class="sidebar-handle" :class="{ 'sidebar-handle--active': sidebarResizing }"
-                @mousedown="onSidebarMouseDown"></div>
-              <button class="commit-rail-toggle" :class="{ 'commit-rail-toggle--active': showCommitRail }"
-                @click="showCommitRail = !showCommitRail" :title="t('sidebar.toggleCommitPanel')"
-                :aria-pressed="showCommitRail">
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                  <path d="M13.5 3.5l-7 7L3 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-                </svg>
-                <span class="commit-rail-toggle__label">{{ t('sidebar.toggleCommitPanel') }}</span>
-              </button>
-              <aside v-if="showCommitRail" class="view__rail view__rail--right">
-                <RepoSidebar pane="changes" v-bind="repoSidebarProps" v-on="repoSidebarListeners" />
-              </aside>
-            </div>
-
             <!-- ── History view: commit list │ commit diff ── -->
             <div v-else-if="viewMode === 'history'" class="view view--history">
               <aside v-if="showSidebar" class="view__rail">
@@ -4452,11 +4413,62 @@ onUnmounted(() => {
             <!-- ── Git Tree view: full-screen commit graph ── -->
             <!-- Clicking a commit pops its file list in the right rail (no file
                  auto-focused); clicking a file swaps the graph for its diff while
-                 keeping the file rail visible. -->
-            <div v-else-if="viewMode === 'graph'" class="view view--graph">
+                 keeping the file rail visible.
+                 Clicking the WIP row enters the WIP mode (viewMode 'changes'):
+                 the rail becomes the Changes pane (files + commit) and the
+                 selected WIP file's diff covers the graph (X to return). -->
+            <div v-else-if="viewMode === 'graph' || viewMode === 'changes'" class="view view--graph">
               <div class="graph-main">
+                <div v-if="viewMode === 'changes' && wipDiffOpen" ref="wipDiffEl" class="graph-diff-full graph-diff-full--wip">
+                  <button class="graph-diff-close" :style="{ top: `${wipCloseTop - 1}px` }" @click="wipDiffOpen = false" :title="t('common.close')"
+                    :aria-label="t('common.close')">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                      <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+                    </svg>
+                  </button>
+                  <div class="view__content">
+                    <div v-if="memorizeToast && showingMergeEditor" class="me-memory-offer">
+                      <span>{{ t("mergeEditor.memorizeFileOffer", memorizeToast.path.split('/').pop() || memorizeToast.path) }}</span>
+                      <button class="me-memory-btn me-memory-btn--save" @click="acceptMemorizeToast">{{ t("mergeEditor.memorySave") }}</button>
+                      <button class="me-memory-btn" @click="dismissMemorizeToast">{{ t("common.close") }}</button>
+                    </div>
+                    <MergeEditor v-if="showingMergeEditor && mergeSelectedFile" :file="mergeSelectedFile"
+                      :cwd="repoFolderPath ?? undefined"
+                      @resolve="handleResolveFile" @resolve-hunk="(path, idx, choice) => handleResolveHunk(path, idx, choice)"
+                      @resolve-hunk-custom="(path, idx, content) => handleResolveHunkCustom(path, idx, content)"
+                      @resolve-file-bulk="(path, choice) => handleResolveFileBulk(path, choice)"
+                      @apply-file-memory="(path, entry) => handleApplyFileMemory(path, entry)"
+                      @resolve-tree-conflict="(path, choice) => handleResolveTreeConflict(path, choice)"
+                      @reconstruct-conflict="(path) => handleReconstructConflict(path)"
+                      @keep-working-tree="(path) => handleKeepWorkingTree(path)"
+                      @open-externally="(path) => handleOpenInEditor(path)" />
+                    <div v-else-if="mergeEditorPending" class="view__merge-pending" role="status">{{ t("common.loading") }}</div>
+                    <FileHistoryViewer v-else-if="fileHistoryPath && repoFolderPath" :file-path="fileHistoryPath"
+                      :cwd="repoFolderPath" @close="closeFileHistory"
+                      @select-commit="(hash) => { closeFileHistory(); selectCommit(hash); viewMode = 'history'; }" />
+                    <!--
+                      Image files (PNG, JPEG, WebP, GIF, SVG) get the ImageDiffViewer
+                      branch; the line-based DiffViewer would hit its "binary file"
+                      dead-end and show nothing useful.
+                    -->
+                    <ImageDiffViewer v-else-if="isImagePath(repoSelectedFile) && repoFolderPath && repoSelectedFile"
+                      :cwd="repoFolderPath" :file-path="repoSelectedFile" old-rev="HEAD"
+                      :new-rev="repoSelectedFileStaged ? ':0' : ''" status="modified" />
+                    <DiffViewer v-else ref="diffViewerRef" :diff="repoDiff" :file-path="repoSelectedFile" :diff-mode="diffMode" :selectable="true"
+                      :findings="findingsForSelectedFile"
+                      @update:diff-mode="onDiffModeChange" @open-file-history="openFileHistory"
+                      @open-in-editor="handleOpenInEditor" @stage-patch="stagePatch"
+                      @select-dir-file="(path) => repoSelectFile(path, false)"
+                      @open-repo-tab="handleOpenNestedRepo"
+                      @add-to-gitignore="addToGitignore"
+                      @dismiss-finding="(id) => commitReview.dismiss(id)"
+                      :editable="!repoSelectedFileStaged && !isSelectedFileConflicted"
+                      @edit-hunk="handleEditHunk" />
+                  </div>
+                </div>
+
                 <!-- A clicked file replaces the graph with its diff (X to return). -->
-                <div v-if="graphFileIdx !== null && selectedCommitHash" class="graph-diff-full">
+                <div v-else-if="viewMode === 'graph' && graphFileIdx !== null && selectedCommitHash" class="graph-diff-full">
                   <button class="graph-diff-close" @click="onGraphCloseDiff" :title="t('common.close')"
                     :aria-label="t('common.close')">
                     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -4471,7 +4483,7 @@ onUnmounted(() => {
                 </div>
 
                 <CommitGraph v-else class="graph-canvas"
-                  :commits="repoLog" :selected-hash="selectedCommitHash" :current-branch="repoStatus?.branch"
+                  :commits="repoLog" :selected-hash="viewMode === 'changes' ? 'WIP' : selectedCommitHash" :current-branch="repoStatus?.branch"
                   :fork-point-sha="graphForkPointSha" :repo-stats="repoStats" :branches="branches" :worktree-branches="worktreeBranches" :stashes="stashes"
                   :submodule-changes="submoduleChanges"
                   :branch-prs="branchPrs"
@@ -4517,19 +4529,36 @@ onUnmounted(() => {
                   @load-more="loadMoreLog"
                   @view-anchor="setLogViewAnchor" />
               </div>
-              <div v-if="showGraphRail && selectedCommitHash" class="sidebar-handle"
-                :class="{ 'sidebar-handle--active': sidebarResizing }" @mousedown="onSidebarMouseDown"></div>
-              <button v-if="selectedCommitHash" class="commit-rail-toggle" :class="{ 'commit-rail-toggle--active': showGraphRail }"
-                @click="showGraphRail = !showGraphRail" :title="t('sidebar.toggleFilesPanel')" :aria-pressed="showGraphRail">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" />
-                </svg>
-                <span class="commit-rail-toggle__label">{{ t('sidebar.toggleFilesPanel') }}</span>
-              </button>
-              <aside v-if="showGraphRail && selectedCommitHash" class="view__rail view__rail--right">
-                <RepoSidebar pane="history" v-bind="repoSidebarProps"
-                  :visible-file-idx="graphFileIdx ?? -1" @scroll-to-file="onGraphOpenFile" />
-              </aside>
+              <template v-if="viewMode === 'changes'">
+                <div v-if="showCommitRail" class="sidebar-handle" :class="{ 'sidebar-handle--active': sidebarResizing }"
+                  @mousedown="onSidebarMouseDown"></div>
+                <button class="commit-rail-toggle" :class="{ 'commit-rail-toggle--active': showCommitRail }"
+                  @click="showCommitRail = !showCommitRail" :title="t('sidebar.toggleCommitPanel')"
+                  :aria-pressed="showCommitRail">
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path d="M13.5 3.5l-7 7L3 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                  </svg>
+                  <span class="commit-rail-toggle__label">{{ t('sidebar.toggleCommitPanel') }}</span>
+                </button>
+                <aside v-if="showCommitRail" class="view__rail view__rail--right">
+                  <RepoSidebar pane="changes" v-bind="repoSidebarProps" v-on="repoSidebarListeners" />
+                </aside>
+              </template>
+              <template v-else>
+                <div v-if="showGraphRail && selectedCommitHash" class="sidebar-handle"
+                  :class="{ 'sidebar-handle--active': sidebarResizing }" @mousedown="onSidebarMouseDown"></div>
+                <button v-if="selectedCommitHash" class="commit-rail-toggle" :class="{ 'commit-rail-toggle--active': showGraphRail }"
+                  @click="showGraphRail = !showGraphRail" :title="t('sidebar.toggleFilesPanel')" :aria-pressed="showGraphRail">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" />
+                  </svg>
+                  <span class="commit-rail-toggle__label">{{ t('sidebar.toggleFilesPanel') }}</span>
+                </button>
+                <aside v-if="showGraphRail && selectedCommitHash" class="view__rail view__rail--right">
+                  <RepoSidebar pane="history" v-bind="repoSidebarProps"
+                    :visible-file-idx="graphFileIdx ?? -1" @scroll-to-file="onGraphOpenFile" />
+                </aside>
+              </template>
             </div>
 
             <!-- Issue detail view: in-app issue review (v2.22) -->
@@ -5171,6 +5200,19 @@ onUnmounted(() => {
   color: var(--color-text-muted);
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
+}
+
+/* The WIP diff's own header carries actions on its right edge — keep them
+   clear of the floating close button. */
+.graph-diff-full--wip :deep(.diff-header),
+.graph-diff-full--wip :deep(.editor-header),
+.graph-diff-full--wip :deep(.fhv-header),
+.graph-diff-full--wip :deep(.idv-header) {
+  padding-right: 49px;
+}
+
+.graph-diff-full--wip .graph-diff-close {
+  right: 9px;
 }
 
 .graph-diff-close:hover {
