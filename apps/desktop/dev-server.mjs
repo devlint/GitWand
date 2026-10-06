@@ -3339,15 +3339,15 @@ async function handleRequest(req, res) {
 
     // POST /api/git-merge-abort  { cwd }
 
-    // POST /api/git-cherry-pick  { cwd, hashes }
+    // POST /api/git-cherry-pick  { cwd, hashes, noCommit? }
     if (url.pathname === "/api/git-cherry-pick" && req.method === "POST") {
-      const { cwd, hashes } = await readBody(req);
+      const { cwd, hashes, noCommit } = await readBody(req);
       if (!cwd || !Array.isArray(hashes) || hashes.length === 0)
         return jsonResponse(req, res, { success: false, message: "Missing cwd or hashes" }, 400);
       try {
         const resolvedCwd = resolve(cwd);
         const { spawnSync } = await import("child_process");
-        const result = spawnSync("git", ["cherry-pick", ...hashes], {
+        const result = spawnSync("git", ["cherry-pick", ...(noCommit ? ["--no-commit"] : []), ...hashes], {
           cwd: resolvedCwd,
           encoding: "utf-8",
         });

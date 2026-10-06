@@ -69,7 +69,7 @@ interface Deps {
   repoRefresh: (forceLog?: boolean) => Promise<void>;
   onReset?: () => void;
   /** cherry-pick one or more commits (owned by useGitRepo — handles conflict flow). */
-  cherryPick: (hashes: string[]) => Promise<void>;
+  cherryPick: (hashes: string[], opts?: { noCommit?: boolean }) => Promise<void>;
   /** Branch deletion actions (owned by useGitRepo) */
   deleteBranch: (name: string) => Promise<void>;
   deleteRemoteBranch: (remote: string, name: string) => Promise<void>;
@@ -374,6 +374,11 @@ export function useCommitActions(deps: Deps) {
     await cherryPick([entry.hashFull]);
   }
 
+  /** Cherry-pick without committing — the changes land as WIP in the index. */
+  async function handleCherryPickCommitAsWip(entry: GitLogEntry) {
+    await cherryPick([entry.hashFull], { noCommit: true });
+  }
+
   // ── View on forge (fire-and-forget) ───────────────────
 
   async function handleViewOnForge(entry: GitLogEntry) {
@@ -408,6 +413,7 @@ export function useCommitActions(deps: Deps) {
     handleCreateBranchFromCommit,
     handleTagCommit,
     handleCherryPickCommit,
+    handleCherryPickCommitAsWip,
     handleViewOnForge,
     handleDeleteBranchRequest,
     handleDeleteTagRequest,
