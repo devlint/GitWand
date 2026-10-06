@@ -393,7 +393,10 @@ const { loadScope } = useWorkspaceScope();
 function switchToChangesWithFirstFile() {
   viewMode.value = "changes";
   const first = repoFiles.value[0];
-  if (first) repoSelectFile(first.path, first.section === "staged");
+  if (first) {
+    wipDiffOpen.value = true;
+    repoSelectFile(first.path, first.section === "staged");
+  }
 }
 
 async function applyStash(index: number) {
@@ -954,6 +957,7 @@ async function handleApplyFromPreview(operation: string, ref_: string, estimated
     // Land the user on the first file that still needs them, if any.
     if (out.residualFiles.length > 0) {
       viewMode.value = "changes";
+      wipDiffOpen.value = true;
       await repoSelectFile(out.residualFiles[0], false);
     }
   } catch (err: unknown) {
@@ -965,6 +969,7 @@ async function handleApplyFromPreview(operation: string, ref_: string, estimated
 
 async function handleOpenResidual(path: string) {
   viewMode.value = "changes";
+  wipDiffOpen.value = true;
   await repoSelectFile(path, false);
 }
 
@@ -1329,11 +1334,10 @@ watch(viewMode, async (mode) => {
   }
 });
 
-// When the Changes entry hides itself on a clean tree (opt-in), a user sitting
-// on the Changes view would be left staring at an empty pane — fall back to the
-// Git Tree instead.
-watch([() => repoFiles.value.length, () => settings.value.dockHideChangesWhenEmpty], ([count, hideWhenEmpty]) => {
-  if (hideWhenEmpty && count === 0 && viewMode.value === "changes") viewMode.value = "graph";
+// The WIP row disappears from the graph on a clean tree, so a user sitting in
+// the WIP mode would be left on an empty Changes pane — fall back to the Git Tree.
+watch(() => repoFiles.value.length, (count) => {
+  if (count === 0 && viewMode.value === "changes") viewMode.value = "graph";
 });
 
 // Also refresh the dashboard sidebar data when the repo itself changes.
@@ -1355,12 +1359,9 @@ function onViewModeChange(mode: ViewMode) {
   if (showTerminal.value && settings.value.terminalHideOnNav) showTerminal.value = false;
   if (showFiles.value && settings.value.filesHideOnNav) showFiles.value = false;
   viewMode.value = mode;
-  // Re-clicking the WIP (row or dock tab) while its diff is closed reopens it.
-  if (mode === "changes") wipDiffOpen.value = true;
-  if (mode === "changes" && !repoSelectedFile.value && repoFiles.value.length > 0) {
-    const first = repoFiles.value[0];
-    repoSelectFile(first.path, first.section === "staged");
-  }
+  // Entering the WIP (row or dock) only swaps the right rail to the Changes
+  // pane; the diff stays closed until the user picks a file there.
+  if (mode === "changes") wipDiffOpen.value = false;
 }
 
 // ─── Shared RepoSidebar binding (full-screen panes) ──────
@@ -1732,6 +1733,7 @@ const fileHistoryPath = ref<string | null>(null);
 
 function openFileHistory(path: string) {
   fileHistoryPath.value = path;
+  wipDiffOpen.value = true;
 }
 
 function closeFileHistory() {
@@ -4155,6 +4157,7 @@ async function onRebaseConflict() {
   await repoRefresh();
   viewMode.value = "changes";
   if (repoStatus.value?.conflicted.length) {
+    wipDiffOpen.value = true;
     await repoSelectFile(repoStatus.value.conflicted[0], false);
   } else {
     console.warn("[rebase] conflict halt reported but no conflicted files found in status");
@@ -4268,14 +4271,15 @@ function onGraphCloseDiff() {
 // ─── Git Tree WIP mode (viewMode === 'changes') ───────────
 // The WIP is the Git Tree's "uncommitted" selection: the right rail becomes the
 // Changes pane, and the selected WIP file's diff covers the graph until closed
-// (X returns to the graph, WIP still selected). Any fresh entry into the WIP
-// mode, or a file picked in the rail, reopens the diff — a selection that moves
-// on its own (stage, refresh) does not.
-const wipDiffOpen = ref(true);
+// (X returns to the graph, WIP still selected). Entering the WIP mode shows the
+// graph + Changes rail only; a file picked in the rail (or a flow that lands on
+// a specific file) opens the diff — a selection that moves on its own (stage,
+// refresh) does not.
+const wipDiffOpen = ref(false);
 /** Centers the WIP close button on the header of whichever viewer is shown. */
 const wipDiffEl = ref<HTMLElement | null>(null);
 const { top: wipCloseTop } = useHeaderAlign(wipDiffEl, ".diff-header, .editor-header, .fhv-header, .idv-header", 28);
-watch(viewMode, (mode) => { if (mode === "changes") wipDiffOpen.value = true; });
+watch(viewMode, (mode) => { if (mode !== "changes") wipDiffOpen.value = false; });
 
 onMounted(() => {
   window.addEventListener("keydown", onKeyDown);

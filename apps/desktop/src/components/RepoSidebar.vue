@@ -753,6 +753,12 @@ function fileDir(path: string): string {
 
 const totalChanges = computed(() => props.files.length);
 
+/** A file list the list/tree toggle applies to is on screen (WIP or commit). */
+const hasLayoutFiles = computed(() =>
+  (showPane("files", "changes") && totalChanges.value > 0) ||
+  (showPane("history") && (props.commitDiffs?.length ?? 0) > 0),
+);
+
 const unstagedCount = computed(() => props.repoStats.unstaged + props.repoStats.untracked);
 
 function onStageClick(e: Event, path: string) {
@@ -994,8 +1000,9 @@ function formatActivityDate(dateStr: string): string {
 <template>
   <nav class="repo-sidebar" :class="`repo-sidebar--${pane}`" :aria-label="t('sidebar.tabChanges')">
     <!-- Monorepo scope picker (v2.21.0) — self-hides unless the repo is a detected monorepo.
-         In the changes view it shares a row with the layout toggle (pushed to the right). -->
-    <div v-if="cwd && showPane('files', 'changes') && totalChanges > 0" class="changes-controls">
+         Shared by the WIP (changes) and commit (history) panes: it shares a row with
+         the list/tree layout toggle (pushed to the right) whenever there are files. -->
+    <div v-if="cwd && hasLayoutFiles" class="changes-controls">
       <ScopePicker :cwd="cwd" />
       <div
         class="layout-toggle"
@@ -1029,7 +1036,7 @@ function formatActivityDate(dateStr: string): string {
         </button>
       </div>
     </div>
-    <ScopePicker v-else-if="cwd && showPane('files', 'changes')" :cwd="cwd" />
+    <ScopePicker v-else-if="cwd && showPane('files', 'changes', 'history')" :cwd="cwd" />
 
     <!-- History file list -->
     <div class="sections" v-if="showPane('history')">
@@ -1038,39 +1045,6 @@ function formatActivityDate(dateStr: string): string {
           <span class="section-icon section-icon--history" style="color: var(--color-accent)">H</span>
           <span class="section-label">{{ t('header.files') }}</span>
           <span class="section-count" v-if="commitDiffs">{{ commitDiffs.length }}</span>
-          <span class="section-spacer"></span>
-          <!-- List / tree layout toggle -->
-          <div
-            v-if="commitDiffs && commitDiffs.length > 0"
-            class="layout-toggle"
-            role="group"
-            :aria-label="t('sidebar.viewLayout')"
-            @click.stop
-          >
-            <button
-              class="layout-toggle-btn"
-              :class="{ 'layout-toggle-btn--active': changesLayout === 'list' }"
-              @click="setChangesLayout('list')"
-              :title="t('sidebar.viewAsList')"
-              :aria-pressed="changesLayout === 'list'"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
-                <line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
-              </svg>
-            </button>
-            <button
-              class="layout-toggle-btn"
-              :class="{ 'layout-toggle-btn--active': changesLayout === 'tree' }"
-              @click="setChangesLayout('tree')"
-              :title="t('sidebar.viewAsTree')"
-              :aria-pressed="changesLayout === 'tree'"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M3 5h6l2 2h10v12H3z"/>
-              </svg>
-            </button>
-          </div>
         </div>
         <ul class="file-items" role="listbox" v-if="commitDiffs">
           <!-- Flat list layout -->
@@ -2122,6 +2096,10 @@ function formatActivityDate(dateStr: string): string {
   align-items: center;
   gap: var(--space-4);
   padding: var(--space-4) var(--space-2);
+  /* Height of the WIP action group (20px buttons + 1px border each side) plus
+     padding (border-box), so headers without one (commit files, conflicted)
+     line up with those that do. */
+  min-height: calc(22px + 2 * var(--space-4));
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-semibold);
   line-height: 1;

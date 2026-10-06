@@ -1450,10 +1450,6 @@ const ptBR: Locale = {
       showFiles: "Mostrar arquivos",
       gitTreeLocked: "Árvore Git e WIP",
       lockedHint: "Sempre vis\u00edveis \u2014 n\u00e3o podem ser removidos.",
-      hideChangesWhenEmpty: {
-        label: "Ocultar WIP quando limpo",
-        help: "Oculta a aba WIP ao lado da Árvore Git quando a árvore de trabalho não tem alterações.",
-      },
       iconsOnly: {
         label: "Apenas \u00edcones",
         help: "Oculta os r\u00f3tulos do dock e mostra apenas os \u00edcones.",
@@ -1490,7 +1486,6 @@ const ptBR: Locale = {
       menu: {
         remove: "Remover do dock",
         setStartup: "Definir como vista inicial",
-        hideChangesWhenEmpty: "Ocultar quando limpo",
         lock: "Bloquear o dock",
         unlock: "Desbloquear o dock",
         hideText: "Ocultar texto",
