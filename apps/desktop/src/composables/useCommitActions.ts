@@ -6,7 +6,7 @@
  * commit right-click menu exposes in CommitLog → RepoSidebar → App.
  *
  * Usage:
- *   const commitActions = useCommitActions({ repoFolderPath, repoError, loadLog, loadBranches, repoRefresh });
+ *   const commitActions = useCommitActions({ repoFolderPath, repoError, loadBranches, repoRefresh });
  *   // spread handlers on the template: v-bind="commitActions.handlers"
  */
 
@@ -59,12 +59,17 @@ export interface CommitActionModal {
 interface Deps {
   repoFolderPath: Ref<string | null>;
   repoError: Ref<string | null>;
-  loadLog: () => Promise<void>;
   loadBranches: () => void;
-  repoRefresh: () => Promise<void>;
+  /**
+   * `forceLog` bypasses the log's unchanged-top-commit fast path. Anything that
+   * moves HEAD must pass it: with `origin/<branch>` (or any other ref) still on
+   * the newest commit, the all-refs log's top is unchanged and the Git Tree
+   * would keep the old branch/HEAD labels until the next periodic fetch.
+   */
+  repoRefresh: (forceLog?: boolean) => Promise<void>;
   onReset?: () => void;
   /** cherry-pick one or more commits (owned by useGitRepo — handles conflict flow). */
-  cherryPick: (hashes: string[]) => Promise<void>;
+  cherryPick: (hashes: string[], opts?: { noCommit?: boolean }) => Promise<void>;
   /** Branch deletion actions (owned by useGitRepo) */
   deleteBranch: (name: string) => Promise<void>;
   deleteRemoteBranch: (remote: string, name: string) => Promise<void>;
@@ -80,7 +85,6 @@ export function useCommitActions(deps: Deps) {
   const {
     repoFolderPath,
     repoError,
-    loadLog,
     loadBranches,
     repoRefresh,
     cherryPick,
@@ -217,7 +221,7 @@ export function useCommitActions(deps: Deps) {
         useUndoToast().show(t("timeMachine.toastCheckout", entry.hash), snapshot?.id);
       }
       closeModal();
-      await Promise.all([loadLog(), repoRefresh()]);
+      await repoRefresh(true);
       loadBranches();
     } catch (err: any) {
       modal.value.error = err?.message ?? String(err);
@@ -254,8 +258,9 @@ export function useCommitActions(deps: Deps) {
         useUndoToast().show(t("timeMachine.toastReset", entry.hash), snapshot?.id);
       }
       closeModal();
-      // repoRefresh reloads staged/unstaged status — critical for --hard.
-      await Promise.all([loadLog(), repoRefresh()]);
+      // repoRefresh reloads staged/unstaged status — critical for --hard —
+      // and the forced log, so the Git Tree shows the branch at its new commit.
+      await repoRefresh(true);
       loadBranches();
       deps.onReset?.();
     } catch (err: any) {
@@ -369,6 +374,11 @@ export function useCommitActions(deps: Deps) {
     await cherryPick([entry.hashFull]);
   }
 
+  /** Cherry-pick without committing — the changes land as WIP in the index. */
+  async function handleCherryPickCommitAsWip(entry: GitLogEntry) {
+    await cherryPick([entry.hashFull], { noCommit: true });
+  }
+
   // ── View on forge (fire-and-forget) ───────────────────
 
   async function handleViewOnForge(entry: GitLogEntry) {
@@ -403,6 +413,7 @@ export function useCommitActions(deps: Deps) {
     handleCreateBranchFromCommit,
     handleTagCommit,
     handleCherryPickCommit,
+    handleCherryPickCommitAsWip,
     handleViewOnForge,
     handleDeleteBranchRequest,
     handleDeleteTagRequest,

@@ -159,6 +159,7 @@ const emit = defineEmits<{
   createBranchFromCommit: [entry: GitLogEntry];
   tagCommit: [entry: GitLogEntry];
   cherryPickCommit: [entry: GitLogEntry];
+  cherryPickCommitWip: [entry: GitLogEntry];
   viewOnForge: [entry: GitLogEntry];
   deleteBranch: [name: string, hasLocal: boolean, hasRemote: boolean, remoteName?: string];
   deleteTag: [name: string, hasLocal: boolean, hasRemote: boolean];
@@ -278,7 +279,7 @@ function onRowDblClick(entry: GitLogEntry) {
   onBranchDblClick(branch);
 }
 
-function onCtxEmit(event: "checkoutCommit" | "resetToCommit" | "revertCommit" | "createBranchFromCommit" | "tagCommit" | "cherryPickCommit" | "viewOnForge") {
+function onCtxEmit(event: "checkoutCommit" | "resetToCommit" | "revertCommit" | "createBranchFromCommit" | "tagCommit" | "cherryPickCommit" | "cherryPickCommitWip" | "viewOnForge") {
   const entry = ctxMenu.value.entry;
   if (!entry) return;
   if (event === "checkoutCommit")         emit("checkoutCommit", entry);
@@ -287,6 +288,7 @@ function onCtxEmit(event: "checkoutCommit" | "resetToCommit" | "revertCommit" | 
   else if (event === "createBranchFromCommit") emit("createBranchFromCommit", entry);
   else if (event === "tagCommit")         emit("tagCommit", entry);
   else if (event === "cherryPickCommit")  emit("cherryPickCommit", entry);
+  else if (event === "cherryPickCommitWip") emit("cherryPickCommitWip", entry);
   else if (event === "viewOnForge")       emit("viewOnForge", entry);
   closeCommitContextMenu();
 }
@@ -891,6 +893,21 @@ function abbrevAuthor(author: string): string {
             <path d="M8 4V1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
           </svg>
           <span>{{ t('commitCtx.cherryPick') }}</span>
+        </li>
+        <li
+          class="commit-ctx-menu-item"
+          :class="{ 'commit-ctx-menu-item--disabled': isCtxEntryHead }"
+          role="menuitem"
+          :title="isCtxEntryHead ? t('commitCtx.cherryPickHeadDisabled') : t('commitCtx.cherryPickWipHint')"
+          @click="!isCtxEntryHead && onCtxEmit('cherryPickCommitWip')"
+        >
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <circle cx="5" cy="13" r="2" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2 1.5"/>
+            <circle cx="11" cy="13" r="2" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2 1.5"/>
+            <path d="M5 11V7a3 3 0 0 1 3-3h0a3 3 0 0 1 3 3v4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+            <path d="M8 4V1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+          </svg>
+          <span>{{ t('commitCtx.cherryPickWip') }}</span>
         </li>
 
         <!-- Branch Deletion (v2.12) -->

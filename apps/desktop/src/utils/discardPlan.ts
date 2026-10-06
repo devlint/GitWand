@@ -1,0 +1,56 @@
+import type { RepoFileEntry } from "../composables/useGitRepo";
+
+/**
+ * The git steps that throw away every change in a set of sidebar entries,
+ * in the order the caller must run them:
+ *
+ *   1. `unstage`  → `git reset HEAD -- <paths>`
+ *   2. `checkout` → `git checkout -- <paths>` (restore from the index)
+ *   3. `clean`    → `git clean -f -- <paths>` (delete untracked files)
+ */
+export interface DiscardPlan {
+  unstage: string[];
+  checkout: string[];
+  clean: string[];
+}
+
+/**
+ * Plan a discard. A plain `git checkout -- <path>` restores the worktree from
+ * the index, so a staged change would survive it: staged entries are unstaged
+ * first. Once unstaged, a staged addition is an untracked file, and a staged
+ * rename is an untracked new path plus a deleted old path.
+ *
+ * A path that ends up untracked is never also passed to `checkout`: one
+ * unmatched pathspec makes git refuse the whole checkout, which would leave
+ * every other file in the batch untouched.
+ */
+export function planDiscard(entries: readonly RepoFileEntry[]): DiscardPlan {
+  const unstage = new Set<string>();
+  const checkout = new Set<string>();
+  const clean = new Set<string>();
+
+  for (const e of entries) {
+    if (e.section === "staged") {
+      unstage.add(e.path);
+      if (e.status === "renamed" && e.oldPath) {
+        unstage.add(e.oldPath);
+        checkout.add(e.oldPath);
+        clean.add(e.path);
+      } else if (e.status === "added" || e.status === "renamed") {
+        clean.add(e.path);
+      } else {
+        checkout.add(e.path);
+      }
+    } else if (e.section === "unstaged") {
+      checkout.add(e.path);
+    } else if (e.section === "untracked") {
+      clean.add(e.path);
+    }
+  }
+
+  return {
+    unstage: [...unstage],
+    checkout: [...checkout].filter((p) => !clean.has(p)),
+    clean: [...clean],
+  };
+}

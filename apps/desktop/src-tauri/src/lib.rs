@@ -337,6 +337,7 @@ pub fn command_parity(
         "git_cherry_pick" => tauri::async_runtime::block_on(commands::ops::git_cherry_pick(
             s("cwd")?,
             vec![s("hash")?],
+            None,
         ))
         .map(|r| serde_json::json!({ "success": r.success, "message": r.message })),
         "git_revert_commit" => tauri::async_runtime::block_on(commands::ops::git_revert_commit(

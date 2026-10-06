@@ -93,6 +93,8 @@ export interface RepoFileEntry {
   path: string;
   status: "added" | "modified" | "deleted" | "renamed";
   section: "staged" | "unstaged" | "untracked" | "conflicted";
+  /** Path before a rename — set only when `status` is "renamed". */
+  oldPath?: string;
 }
 
 /**
@@ -261,6 +263,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
   watch(folderPath, () => {
     branches.value = [];
     log.value = [];
+    _logViewAnchor = null;
   });
 
   /**
@@ -273,7 +276,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
   watch(activeScope, () => {
     if (!folderPath.value) return;
     void loadStatus(folderPath.value);
-    void loadLog();
+    void reloadLogForViewChange();
     void loadRevCounts();
   });
 
@@ -327,10 +330,10 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       result.push({ path: f, status: "modified", section: "conflicted" });
     }
     for (const f of s.staged) {
-      result.push({ path: f.path, status: f.status, section: "staged" });
+      result.push({ path: f.path, status: f.status, section: "staged", oldPath: f.oldPath });
     }
     for (const f of s.unstaged) {
-      result.push({ path: f.path, status: f.status, section: "unstaged" });
+      result.push({ path: f.path, status: f.status, section: "unstaged", oldPath: f.oldPath });
     }
     for (const f of s.untracked) {
       result.push({ path: f, status: "added", section: "untracked" });
@@ -615,6 +618,27 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
   // scroll pagination continues past the ceiling.
   const PREFETCH_CEILING = 5000;
   let _prefetchToken = 0;
+  // Bumped whenever the log *view* changes (branch/author filter, monorepo
+  // scope). An in-flight page fetched for the previous view must not land in
+  // the new one, so loadLog/loadMoreLog drop results whose epoch is stale.
+  let _logViewEpoch = 0;
+  // Hash of the deepest row the graph currently shows (reported on scroll).
+  // A forced reload keeps the log at least this deep so it doesn't shrink
+  // under a user who scrolled far down; otherwise it fetches the first page
+  // only and lets the background prefetch refill the rest.
+  let _logViewAnchor: string | null = null;
+
+  function setLogViewAnchor(hash: string | null) {
+    _logViewAnchor = hash;
+  }
+
+  /** Rows a forced reload must refetch up front: the viewed depth plus a page of margin. */
+  function forcedReloadDepth(): number {
+    const viewed = _logViewAnchor
+      ? log.value.findIndex((e) => e.hashFull === _logViewAnchor) + 1
+      : 0;
+    return Math.max(LOG_PAGE, Math.min(log.value.length, viewed + LOG_PAGE));
+  }
 
   function isCanonicalLogView(): boolean {
     return (
@@ -656,11 +680,16 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
    *   unchanged top-commit hash (the in-memory `haveSameHead` keep and the
    *   `LOG_CACHE` restore) and refetch fresh. Ref/decoration-only mutations
    *   (push moving origin/HEAD, branch/tag/stash deletion, fetch) leave the top
-   *   commit untouched, so without this they'd serve a stale log. Refetches at
-   *   the current depth so a paginated view doesn't collapse back to page 1.
+   *   commit untouched, so without this they'd serve a stale log. Refetches
+   *   only down to what the user is viewing (see `forcedReloadDepth`) — not the
+   *   whole prefetched history — and the background prefetch refills the rest.
+   * @param viewChanged True when the filter/scope just changed: fetch only the
+   *   first page (the current depth belongs to the old view — up to the whole
+   *   prefetched history) and never keep the old view's entries.
    */
-  async function loadLog(count?: number, force = false) {
+  async function loadLog(count?: number, force = false, viewChanged = false) {
     if (!folderPath.value) return;
+    const epoch = _logViewEpoch;
     try {
       const authorEmail =
         logAuthorFilter.value === "mine"
@@ -672,9 +701,11 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       // only needs a cheap first-page probe to detect HEAD movement. Filtered
       // views reload at least what's visible so polling doesn't collapse a
       // paginated log back to page 1.
-      const pageSize = isCanon
+      const pageSize = viewChanged
+        ? LOG_PAGE
+        : isCanon
         ? force
-          ? Math.max(LOG_PAGE, log.value.length)
+          ? forcedReloadDepth()
           : LOG_PAGE
         : (count ?? Math.max(LOG_PAGE, log.value.length));
       const entries = await getGitLog(
@@ -688,12 +719,15 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       );
       // Refresh the hidden-commit badge counts alongside the scoped log.
       await loadRevCounts();
+      // A newer view change superseded this fetch — its result is stale.
+      if (epoch !== _logViewEpoch) return;
 
       const head = entries[0]?.hashFull;
       if (isCanon) {
         const cached = LOG_CACHE.get(folderPath.value);
         const haveSameHead =
           !force &&
+          !viewChanged &&
           log.value.length >= entries.length &&
           log.value[0]?.hashFull === head;
         if (haveSameHead) {
@@ -749,6 +783,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
   async function loadMoreLog(pageSize: number = LOG_PAGE) {
     if (!folderPath.value || !logHasMore.value || logLoadingMore.value) return;
     logLoadingMore.value = true;
+    const epoch = _logViewEpoch;
     try {
       const authorEmail =
         logAuthorFilter.value === "mine"
@@ -765,6 +800,9 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
         isCurrentBranchOnly ? (status.value?.branch ?? undefined) : undefined,
         activeScope.value ?? undefined,
       );
+      // The view changed while this page was in flight — it belongs to the
+      // old filter/scope, don't append it to the new log.
+      if (epoch !== _logViewEpoch) return;
       // Dedupe: in all-refs mode the `--skip` offset counts filtered-out stash
       // pseudo-commits, so consecutive pages can overlap by a few commits.
       // Drop any hash we already have before appending.
@@ -784,14 +822,29 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     } catch (err: any) {
       error.value = `git log (page): ${err?.message ?? err}`;
     } finally {
-      logLoadingMore.value = false;
+      // A view change already reset the flag; don't clear a newer page's.
+      if (epoch === _logViewEpoch) logLoadingMore.value = false;
     }
   }
 
   async function setLogBranchFilter(filter: "all" | "current") {
     if (logBranchFilter.value === filter) return;
     logBranchFilter.value = filter;
-    await loadLog();
+    await reloadLogForViewChange();
+  }
+
+  /**
+   * Reload the log after the filter/scope changed. Cancels the canonical
+   * background prefetch and invalidates in-flight pages, then fetches the
+   * first page of the new view (or restores the cached full log when back on
+   * the canonical view).
+   */
+  async function reloadLogForViewChange() {
+    _logViewEpoch++;
+    _prefetchToken++;
+    _logViewAnchor = null;
+    logLoadingMore.value = false;
+    await loadLog(undefined, false, true);
   }
 
   /**
@@ -804,7 +857,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       currentGitUser.value = await getGitUser(folderPath.value);
     }
     logAuthorFilter.value = filter;
-    await loadLog();
+    await reloadLogForViewChange();
   }
 
   /**
@@ -1209,10 +1262,10 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
    * `isCherryPicking` ref could not survive a reload or a repo opened while
    * already mid-cherry-pick, which is what #201 had to work around.
    */
-  async function cherryPick(hashes: string[]) {
+  async function cherryPick(hashes: string[], opts: { noCommit?: boolean } = {}) {
     if (!folderPath.value || hashes.length === 0) return;
     try {
-      const result = await gitCherryPick(folderPath.value, hashes);
+      const result = await gitCherryPick(folderPath.value, hashes, opts.noCommit ?? false);
       await refresh();
 
       const hasConflictedFiles =
@@ -1235,6 +1288,11 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
         }
       } else if (!result.success) {
         error.value = `cherry-pick: ${result.message || "unknown error"}`;
+      } else if (opts.noCommit) {
+        // WIP pick: nothing was committed — show the picked files so the user
+        // can manage them before committing.
+        viewMode.value = "changes";
+        successMessage.value = "cherry-pick-wip-done";
       } else {
         successMessage.value = "cherry-pick-done";
       }
@@ -1584,6 +1642,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     loadMoreLog,
     setLogAuthorFilter,
     setLogBranchFilter,
+    setLogViewAnchor,
     stageFiles,
     stageAll,
     unstageFiles,

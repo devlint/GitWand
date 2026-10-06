@@ -61,6 +61,7 @@ type CommitEvent =
   | "create-branch-from-commit"
   | "tag-commit"
   | "cherry-pick-commit"
+  | "cherry-pick-commit-wip"
   | "view-on-forge"
   | "delete-tag"
   | "merge-into-current"
@@ -85,6 +86,7 @@ const emit = defineEmits<{
   "create-branch-from-commit": [entry: GitLogEntry];
   "tag-commit": [entry: GitLogEntry];
   "cherry-pick-commit": [entry: GitLogEntry];
+  "cherry-pick-commit-wip": [entry: GitLogEntry];
   "view-on-forge": [entry: GitLogEntry];
   "delete-branch": [name: string, hasLocal: boolean, hasRemote: boolean, remoteName?: string];
   "delete-worktree": [branch: string];
@@ -104,6 +106,8 @@ const emit = defineEmits<{
   "wip-quick-stash": [];
   "wip-quick-stash-ai": [];
   "load-more": [];
+  /** Hash of the deepest visible row — lets a forced log reload keep that depth. */
+  "view-anchor": [hash: string | null];
   /** Asks the parent to lazy-load branches — fired on search focus so the
    * branch autocomplete has data even when the graph is the first view. */
   "load-branches": [];
@@ -639,9 +643,15 @@ const layout = computed<DagLayout>(() => {
   // _pinSecondaryHashes are reused unchanged so lanesAllocated stays constant
   // and existing commits never jump to different lanes.
 
+  // WIP sitting directly on the trunk head (user is on main/master) starts the
+  // trunk chain itself — otherwise lane 0 is pre-claimed by the trunk head and
+  // the WIP node gets pushed onto a fresh lane beside it.
+  const trunkForLayout =
+    wipParent !== "" && wipParent === _pinTrunkHash ? "WIP" : _pinTrunkHash;
+
   _cachedLayout = computeDagLayout(
     commits,
-    _pinTrunkHash,
+    trunkForLayout,
     _pinSecondaryHashes.length > 0 ? _pinSecondaryHashes : undefined,
   );
   return _cachedLayout;
@@ -1117,6 +1127,10 @@ const visibleRange = computed(() => {
   const visibleRows = Math.ceil(ch / ROW_H);
   const last = Math.min(total - 1, first + visibleRows + 2 * OVERSCAN_ROWS);
   return { first, last };
+});
+
+watch(() => visibleRange.value.last, (last) => {
+  emit("view-anchor", renderedCommits.value[last]?.hashFull ?? null);
 });
 
 const visibleNodes = computed(() => {
@@ -1809,6 +1823,21 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
           <path d="M8 4V1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
         </svg>
         <span>{{ t('commitCtx.cherryPick') }}</span>
+      </li>
+      <li
+        class="commit-ctx-menu-item"
+        :class="{ 'commit-ctx-menu-item--disabled': isCtxEntryHead }"
+        role="menuitem"
+        :title="isCtxEntryHead ? t('commitCtx.cherryPickHeadDisabled') : t('commitCtx.cherryPickWipHint')"
+        @click="!isCtxEntryHead && onCtxEmit('cherry-pick-commit-wip')"
+      >
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <circle cx="5" cy="13" r="2" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2 1.5"/>
+          <circle cx="11" cy="13" r="2" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2 1.5"/>
+          <path d="M5 11V7a3 3 0 0 1 3-3h0a3 3 0 0 1 3 3v4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+          <path d="M8 4V1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+        </svg>
+        <span>{{ t('commitCtx.cherryPickWip') }}</span>
       </li>
 
       <!-- Branch Deletion (v2.12) — standard branches only -->

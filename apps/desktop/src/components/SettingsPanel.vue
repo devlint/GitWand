@@ -417,11 +417,10 @@ function dockEntryLabel(id: DockEntryId): string {
     case "dashboard": return t("settings.dock.itemDashboard");
     case "prs": return t("settings.dock.itemPrs");
     case "graph": return t("settings.dock.itemGitTree");
-    case "changes": return t("settings.dock.itemChanges");
   }
 }
 
-/** Persisted order, normalised so all five entries are always present. */
+/** Persisted order, normalised so all four entries are always present. */
 const dockOrder = computed<DockEntryId[]>(() => normalizeDockOrder(settings.value.dockOrder));
 
 function moveDockEntry(id: DockEntryId, dir: -1 | 1) {

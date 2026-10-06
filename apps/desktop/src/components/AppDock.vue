@@ -18,7 +18,7 @@ import { OPEN_SETTINGS_KEY } from "../composables/branchPickerBridge";
 
 const props = defineProps<{
   viewMode: ViewMode;
-  /** Uncommitted-file count — shown as a badge on the Changes entry. */
+  /** Uncommitted-file count — shown as a badge on the Git Tree's WIP tab. */
   changesCount?: number;
   /** Open-PR count — shown as a badge on the PRs entry. */
   prCount?: number;
@@ -51,10 +51,13 @@ const vertical = computed(() => settings.value.dockVertical);
 const idleOpacity = computed(() => settings.value.dockIdleOpacity ?? 0.45);
 
 function isHidden(id: DockEntryId): boolean {
-  // Changes hides itself while the working tree is clean, when the user opted in.
-  if (id === "changes" && settings.value.dockHideChangesWhenEmpty && !props.changesCount) return true;
   return isDockEntryHidden(id, settings.value);
 }
+
+/** The WIP tab (glued to the Git Tree entry) hides itself while the working
+ *  tree is clean, when the user opted in. */
+const showWipTab = computed(() => !(settings.value.dockHideChangesWhenEmpty && !props.changesCount));
+const wipActive = computed(() => props.viewMode === "changes");
 
 function entryLabel(id: DockEntryId): string {
   switch (id) {
@@ -62,11 +65,10 @@ function entryLabel(id: DockEntryId): string {
     case "dashboard": return t("sidebar.tabDashboard");
     case "prs": return "PRs";
     case "graph": return t("sidebar.gitTree");
-    case "changes": return t("sidebar.tabChanges");
   }
 }
 
-/** Persisted order, normalised so all five entries are always present. */
+/** Persisted order, normalised so all four entries are always present. */
 const orderedIds = computed<DockEntryId[]>(() => normalizeDockOrder(settings.value.dockOrder));
 
 /** Order, minus the entries the user has hidden. */
@@ -81,7 +83,6 @@ function isActive(id: DockEntryId): boolean {
 
 function badgeFor(id: DockEntryId): number | undefined {
   if (id === "prs") return props.prCount || undefined;
-  if (id === "changes") return props.changesCount || undefined;
   return undefined;
 }
 
@@ -202,18 +203,13 @@ function onMenuKey(e: KeyboardEvent) {
   if (e.key === "Escape") closeMenu();
 }
 
-/** Today / Dashboard / PRs can be removed; Git Tree & Changes cannot. */
+/** Today / Dashboard / PRs can be removed; Git Tree cannot. */
 function isRemovable(id: DockEntryId): boolean {
   return id === "launchpad" || id === "dashboard" || id === "prs";
 }
 
 function isStartup(id: DockEntryId): boolean {
   return settings.value.startupView === id;
-}
-
-/** Changes has no diff-less landing, so it is not offered as a startup view. */
-function canBeStartup(id: DockEntryId): boolean {
-  return id !== "changes";
 }
 
 // ── Per-target actions ──
@@ -225,7 +221,6 @@ function removeFromDock(id: DockEntryId) {
 }
 
 function setAsStartup(id: DockEntryId) {
-  if (id === "changes") return; // not a valid startup view
   patch({ startupView: id });
   closeMenu();
 }
@@ -367,45 +362,61 @@ onBeforeUnmount(() => {
       </button>
 
       <template v-for="(id, i) in visibleIds" :key="id">
-        <button
-          class="dock-btn"
-          :class="{ 'dock-btn--active': isActive(id) }"
-          :aria-pressed="isActive(id)"
-          :title="entryLabel(id)"
-          @click="emit('changeView', id)"
-          @contextmenu="openMenu($event, id)"
-        >
-          <!-- Today / Launchpad -->
-          <svg v-if="id === 'launchpad'" class="dock-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M4.5 16.5c-1.5 1-2 4-2 4s3-.5 4-2c.6-.85.5-2 .5-2"/>
-            <path d="M12 15l-3-3a11 11 0 0 1 7-9c2.5 0 4 1.5 4 4a11 11 0 0 1-9 7l1 1z"/>
-            <path d="M9 12H5s.5-2.5 2-3.5c1.3-.85 3-.5 3-.5"/>
-            <path d="M12 15v4s2.5-.5 3.5-2c.85-1.3.5-3 .5-3"/>
-            <circle cx="15" cy="9" r="1.2"/>
-          </svg>
-          <!-- Dashboard -->
-          <svg v-else-if="id === 'dashboard'" class="dock-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" />
-            <rect x="14" y="14" width="7" height="7" /><rect x="3" y="14" width="7" height="7" />
-          </svg>
-          <!-- PRs -->
-          <svg v-else-if="id === 'prs'" class="dock-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <circle cx="18" cy="18" r="3" /><circle cx="6" cy="6" r="3" />
-            <path d="M13 6h3a2 2 0 0 1 2 2v7" /><line x1="6" y1="9" x2="6" y2="21" />
-          </svg>
-          <!-- Git Tree -->
-          <svg v-else-if="id === 'graph'" class="dock-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <circle cx="6" cy="6" r="3" /><circle cx="6" cy="18" r="3" />
-            <circle cx="18" cy="12" r="3" /><path d="M6 9v6" /><path d="M18 9a9 9 0 0 1-9 9" />
-          </svg>
-          <!-- Changes -->
-          <svg v-else class="dock-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" />
-          </svg>
+        <!-- The Git Tree entry carries the WIP tab glued to its right: one
+             segmented control switching the tree between commits and the
+             uncommitted work. -->
+        <div class="dock-seg" :class="{ 'dock-seg--pair': id === 'graph', 'dock-seg--active': id === 'graph' && (isActive(id) || wipActive) }">
+          <button
+            class="dock-btn"
+            :class="{ 'dock-btn--active': isActive(id), 'dock-btn--seg-left': id === 'graph' && showWipTab }"
+            :aria-pressed="isActive(id)"
+            :title="entryLabel(id)"
+            @click="emit('changeView', id)"
+            @contextmenu="openMenu($event, id)"
+          >
+            <!-- Today / Launchpad -->
+            <svg v-if="id === 'launchpad'" class="dock-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M4.5 16.5c-1.5 1-2 4-2 4s3-.5 4-2c.6-.85.5-2 .5-2"/>
+              <path d="M12 15l-3-3a11 11 0 0 1 7-9c2.5 0 4 1.5 4 4a11 11 0 0 1-9 7l1 1z"/>
+              <path d="M9 12H5s.5-2.5 2-3.5c1.3-.85 3-.5 3-.5"/>
+              <path d="M12 15v4s2.5-.5 3.5-2c.85-1.3.5-3 .5-3"/>
+              <circle cx="15" cy="9" r="1.2"/>
+            </svg>
+            <!-- Dashboard -->
+            <svg v-else-if="id === 'dashboard'" class="dock-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" />
+              <rect x="14" y="14" width="7" height="7" /><rect x="3" y="14" width="7" height="7" />
+            </svg>
+            <!-- PRs -->
+            <svg v-else-if="id === 'prs'" class="dock-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="18" cy="18" r="3" /><circle cx="6" cy="6" r="3" />
+              <path d="M13 6h3a2 2 0 0 1 2 2v7" /><line x1="6" y1="9" x2="6" y2="21" />
+            </svg>
+            <!-- Git Tree -->
+            <svg v-else class="dock-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="6" cy="6" r="3" /><circle cx="6" cy="18" r="3" />
+              <circle cx="18" cy="12" r="3" /><path d="M6 9v6" /><path d="M18 9a9 9 0 0 1-9 9" />
+            </svg>
 
-          <span class="dock-label">{{ entryLabel(id) }}</span>
-          <span v-if="badgeFor(id)" class="dock-badge">{{ badgeFor(id) }}</span>
-        </button>
+            <span class="dock-label">{{ entryLabel(id) }}</span>
+            <span v-if="badgeFor(id)" class="dock-badge">{{ badgeFor(id) }}</span>
+          </button>
+          <button
+            v-if="id === 'graph' && showWipTab"
+            class="dock-btn dock-btn--seg-right"
+            :class="{ 'dock-btn--active': wipActive }"
+            :aria-pressed="wipActive"
+            :title="t('sidebar.wipTab')"
+            :aria-label="t('sidebar.wipTab')"
+            @click="emit('changeView', 'changes')"
+            @contextmenu="openMenu($event, id)"
+          >
+            <svg class="dock-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="8" stroke-dasharray="3 3" /><circle cx="12" cy="12" r="2.5" />
+            </svg>
+            <span v-if="changesCount" class="dock-badge">{{ changesCount }}</span>
+          </button>
+        </div>
 
         <!-- Keep the cross-repo / per-repo divider right after Today. -->
         <span v-if="id === 'launchpad' && i < visibleIds.length - 1" class="dock-sep" aria-hidden="true"></span>
@@ -523,12 +534,12 @@ onBeforeUnmount(() => {
           @click="removeFromDock(entryTarget)">
           {{ t('settings.dock.menu.remove') }}
         </button>
-        <button v-if="canBeStartup(entryTarget)" class="dock-menu-item" role="menuitemcheckbox"
+        <button class="dock-menu-item" role="menuitemcheckbox"
           :aria-checked="isStartup(entryTarget)" @click="setAsStartup(entryTarget)">
           {{ t('settings.dock.menu.setStartup') }}
           <span class="dock-menu-check">{{ isStartup(entryTarget) ? '✓' : '' }}</span>
         </button>
-        <button v-if="entryTarget === 'changes'" class="dock-menu-item" role="menuitemcheckbox"
+        <button v-if="entryTarget === 'graph'" class="dock-menu-item" role="menuitemcheckbox"
           :aria-checked="hideChangesWhenEmpty" @click="toggleHideChangesWhenEmpty">
           {{ t('settings.dock.menu.hideChangesWhenEmpty') }}
           <span class="dock-menu-check">{{ hideChangesWhenEmpty ? '✓' : '' }}</span>
@@ -632,7 +643,7 @@ onBeforeUnmount(() => {
   opacity: 1;
 }
 
-.dock-terminal:hover {
+.dock-terminal:not(.dock-terminal--active):hover {
   color: var(--color-text);
   background: var(--color-bg-secondary);
 }
@@ -671,7 +682,7 @@ onBeforeUnmount(() => {
   opacity: 1;
 }
 
-.dock-files:hover {
+.dock-files:not(.dock-files--active):hover {
   color: var(--color-text);
   background: var(--color-bg-secondary);
 }
@@ -725,7 +736,7 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-.dock-btn:hover {
+.dock-btn:not(.dock-btn--active):hover {
   background: var(--color-bg-hover, rgba(127, 127, 127, 0.12));
   color: var(--color-text);
 }
@@ -738,6 +749,46 @@ onBeforeUnmount(() => {
 .dock-btn:focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
+}
+
+/* Git Tree + WIP segmented pair: the two buttons share one rounded frame. */
+.dock-seg {
+  display: flex;
+  align-items: stretch;
+  border-radius: var(--radius-sm, 8px);
+}
+
+/* Active pair: frame + divider take the active tab's background colour. */
+.dock-seg--active {
+  box-shadow: inset 0 0 0 1px var(--color-accent-soft, rgba(139, 92, 246, 0.16));
+}
+
+.dock-btn--seg-left {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.dock-btn--seg-right {
+  /* Icon + badge only — no label, so keep it a compact tile. */
+  padding-left: var(--space-3, 9px);
+  padding-right: var(--space-3, 9px);
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  box-shadow: inset 1px 0 0 var(--color-border);
+}
+
+.dock-seg--active .dock-btn--seg-right {
+  box-shadow: inset 1px 0 0 var(--color-accent-soft, rgba(139, 92, 246, 0.16));
+}
+
+/* Hovering the (inactive) pair: frame + divider take the hover background
+   colour. An active pair keeps its active border. */
+.dock-seg--pair:not(.dock-seg--active):hover {
+  box-shadow: inset 0 0 0 1px var(--color-bg-hover, rgba(127, 127, 127, 0.12));
+}
+
+.dock-seg--pair:not(.dock-seg--active):hover .dock-btn--seg-right {
+  box-shadow: inset 1px 0 0 var(--color-bg-hover, rgba(127, 127, 127, 0.12));
 }
 
 .dock-sep {
@@ -791,6 +842,33 @@ onBeforeUnmount(() => {
 
 .app-dock__pill--vertical .dock-icon {
   transform: none;
+}
+
+.app-dock__pill--vertical .dock-seg {
+  flex-direction: column;
+}
+
+.app-dock__pill--vertical .dock-btn--seg-left {
+  border-radius: var(--radius-sm, 8px) var(--radius-sm, 8px) 0 0;
+}
+
+.app-dock__pill--vertical .dock-btn--seg-right {
+  border-radius: 0 0 var(--radius-sm, 8px) var(--radius-sm, 8px);
+  box-shadow: inset 0 1px 0 var(--color-border);
+}
+
+.app-dock__pill--vertical .dock-seg--active .dock-btn--seg-right {
+  box-shadow: inset 0 1px 0 var(--color-accent-soft, rgba(139, 92, 246, 0.16));
+}
+
+.app-dock__pill--vertical .dock-seg--pair:not(.dock-seg--active):hover .dock-btn--seg-right {
+  box-shadow: inset 0 1px 0 var(--color-bg-hover, rgba(127, 127, 127, 0.12));
+}
+
+/* Pair active: hovering the other (inactive) tab outlines it in the active
+   tab's (darker) purple. Kept last — it outranks the pair hover/divider rules. */
+.dock-seg--active .dock-btn:not(.dock-btn--active):hover {
+  box-shadow: inset 0 0 0 1px var(--color-accent-soft, rgba(139, 92, 246, 0.16));
 }
 
 .app-dock__pill--vertical .dock-sep {
