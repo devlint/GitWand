@@ -93,6 +93,8 @@ export interface RepoFileEntry {
   path: string;
   status: "added" | "modified" | "deleted" | "renamed";
   section: "staged" | "unstaged" | "untracked" | "conflicted";
+  /** Path before a rename — set only when `status` is "renamed". */
+  oldPath?: string;
 }
 
 /**
@@ -327,10 +329,10 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       result.push({ path: f, status: "modified", section: "conflicted" });
     }
     for (const f of s.staged) {
-      result.push({ path: f.path, status: f.status, section: "staged" });
+      result.push({ path: f.path, status: f.status, section: "staged", oldPath: f.oldPath });
     }
     for (const f of s.unstaged) {
-      result.push({ path: f.path, status: f.status, section: "unstaged" });
+      result.push({ path: f.path, status: f.status, section: "unstaged", oldPath: f.oldPath });
     }
     for (const f of s.untracked) {
       result.push({ path: f, status: "added", section: "untracked" });

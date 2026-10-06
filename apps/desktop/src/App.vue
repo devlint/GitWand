@@ -182,6 +182,7 @@ import type { ForgeName } from "./composables/forge/types";
 import { onMarkdownLinkClick } from "./composables/useSafeHtml";
 import { resolveDirtySwitchAction, type DirtyFile } from "./utils/branchSwitchDecision";
 import { resolveDirtyPullAction } from "./utils/pullDirtyDecision";
+import { planDiscard } from "./utils/discardPlan";
 import { requireOnline } from "./utils/networkGuard";
 // UpdateModal moved above (lazy-loaded) — type imported as UpdateModalType for the template ref
 
@@ -3322,38 +3323,12 @@ async function onDiscardSectionConfirmed() {
   await discardEntries(targetFiles);
 }
 
-/**
- * Discard working-tree and index changes for the given entries. A plain
- * `git checkout -- <path>` restores the worktree from the index, so a staged
- * change would survive it — staged entries are unstaged first.
- */
+/** Discard working-tree and index changes for the given entries (see `planDiscard`). */
 async function discardEntries(targetFiles: RepoFileEntry[]) {
-  const staged = targetFiles.filter(f => f.section === 'staged');
-  const unstaged = targetFiles.filter(f => f.section === 'unstaged');
-  const untracked = targetFiles.filter(f => f.section === 'untracked');
-
-  // 1. Unstage any staged files first
-  if (staged.length) {
-    await unstageFiles(staged.map(f => f.path));
-  }
-
-  // 2. Discard tracked files (was unstaged + was staged but not added)
-  const toCheckout = [
-    ...unstaged.map(f => f.path),
-    ...staged.filter(f => f.status !== 'added').map(f => f.path)
-  ];
-  if (toCheckout.length) {
-    await discardFiles(toCheckout, false);
-  }
-
-  // 3. Discard untracked files (was untracked + was staged added)
-  const toClean = [
-    ...untracked.map(f => f.path),
-    ...staged.filter(f => f.status === 'added').map(f => f.path)
-  ];
-  if (toClean.length) {
-    await discardFiles(toClean, true);
-  }
+  const plan = planDiscard(targetFiles);
+  if (plan.unstage.length) await unstageFiles(plan.unstage);
+  if (plan.checkout.length) await discardFiles(plan.checkout, false);
+  if (plan.clean.length) await discardFiles(plan.clean, true);
 }
 
 function handleWipDiscardAll() {
