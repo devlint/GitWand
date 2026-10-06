@@ -68,7 +68,9 @@ jobs:
 
       - name: Gate on agreement vs the committed baseline
         run: |
-          baseline=$(ls benchmark/results/*-baseline.json | sort | tail -1)
+          # sort -V, not sort: lexically "v3.11.1-…" sorts before "v3.8.0-…",
+          # so a newer baseline would be silently ignored.
+          baseline=$(ls benchmark/results/*-baseline.json | sort -V | tail -1)
           echo "baseline: $baseline"
           node benchmark/compare.mjs "$baseline" results/ci.json
 

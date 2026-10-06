@@ -1,0 +1,1421 @@
+{
+  "gitwandVersion": "3.11.1",
+  "corpusPinnedAt": "2026-09-25",
+  "refactoringAwareEnabled": false,
+  "reposRun": 11,
+  "reposFailed": 0,
+  "totals": {
+    "mergesScanned": 2827,
+    "mergesWithConflicts": 937,
+    "conflictedFiles": 3645,
+    "skippedFiles": 5952,
+    "resolveErrors": 0,
+    "mergeTreeErrors": 29,
+    "totalHunks": 9097,
+    "byType": {
+      "complex": 3577,
+      "value_only_change": 2609,
+      "generated_file": 1349,
+      "non_overlapping": 667,
+      "format_semantic": 621,
+      "insertion_at_boundary": 141,
+      "token_level_merge": 87,
+      "whitespace_only": 21,
+      "one_side_change": 13,
+      "same_change": 9,
+      "reorder_only": 3
+    },
+    "byTier": {
+      "trivial": 3463,
+      "advancedDeterministic": 708,
+      "model": 0,
+      "unresolved": 4926
+    },
+    "agreement": {
+      "filesFullyResolved": 1021,
+      "comparable": 1019,
+      "agreeExact": 668,
+      "agreeNormalized": 679,
+      "unavailable": 2
+    }
+  },
+  "headline": {
+    "autoResolvedHunks": 4171,
+    "autoResolvedShare": 45.85,
+    "residualHunks": 4926,
+    "residualShare": 54.15,
+    "agreementExactShare": 65.55,
+    "agreementComparableFiles": 1019
+  },
+  "perRepo": [
+    {
+      "repo": "prettier/prettier",
+      "language": "JavaScript",
+      "pinnedSha": "0bc958e734b00907e2bae2bae45c664ad8a1a2f7",
+      "mergesScanned": 237,
+      "maxMergesRequested": 300,
+      "mergesWithConflicts": 115,
+      "totalHunks": 1280,
+      "byTier": {
+        "trivial": 246,
+        "advancedDeterministic": 102,
+        "model": 0,
+        "unresolved": 932
+      },
+      "agreement": {
+        "filesFullyResolved": 117,
+        "comparable": 117,
+        "agreeExact": 58,
+        "exactShare": 49.57,
+        "disagreeExamples": [
+          {
+            "merge": "8609180f56",
+            "path": "website/versioned_docs/version-stable/browser.md",
+            "hunks": 1
+          },
+          {
+            "merge": "9c06bb2d01",
+            "path": "package.json",
+            "hunks": 2
+          },
+          {
+            "merge": "f80a7dc8dc",
+            "path": ".github/ISSUE_TEMPLATE/integration.md",
+            "hunks": 1
+          },
+          {
+            "merge": "f80a7dc8dc",
+            "path": "CHANGELOG.md",
+            "hunks": 1
+          },
+          {
+            "merge": "f80a7dc8dc",
+            "path": "docs/browser.md",
+            "hunks": 7
+          },
+          {
+            "merge": "f80a7dc8dc",
+            "path": "website/versioned_docs/version-stable/browser.md",
+            "hunks": 7
+          },
+          {
+            "merge": "883324dbb6",
+            "path": "scripts/tools/bundle-test/package.json",
+            "hunks": 1
+          },
+          {
+            "merge": "883324dbb6",
+            "path": "website/package.json",
+            "hunks": 1
+          },
+          {
+            "merge": "4a26d88f9a",
+            "path": "tests/config/format-test.js",
+            "hunks": 1
+          },
+          {
+            "merge": "a51568db85",
+            "path": "src/language-js/needs-parens.js",
+            "hunks": 1
+          },
+          {
+            "merge": "a51568db85",
+            "path": "src/language-js/utils/index.js",
+            "hunks": 1
+          },
+          {
+            "merge": "a51568db85",
+            "path": "tests/format/misc/errors/js/assignment/jsfmt.spec.js",
+            "hunks": 1
+          },
+          {
+            "merge": "a51568db85",
+            "path": "tests/format/misc/typescript-only/__snapshots__/jsfmt.spec.js.snap",
+            "hunks": 1
+          },
+          {
+            "merge": "daeb90f1ca",
+            "path": "package.json",
+            "hunks": 1
+          },
+          {
+            "merge": "a8869bef55",
+            "path": "package.json",
+            "hunks": 1
+          },
+          {
+            "merge": "a8869bef55",
+            "path": "tests/format/misc/typescript-only/jsfmt.spec.js",
+            "hunks": 1
+          },
+          {
+            "merge": "55fa0e9e0f",
+            "path": "package.json",
+            "hunks": 1
+          },
+          {
+            "merge": "9411aa2e47",
+            "path": "changelog_unreleased/typescript/13764.md",
+            "hunks": 1
+          },
+          {
+            "merge": "bb04cf072e",
+            "path": "src/cli/format-results-cache.js",
+            "hunks": 1
+          },
+          {
+            "merge": "bb04cf072e",
+            "path": "src/cli/format.js",
+            "hunks": 1
+          },
+          {
+            "merge": "bb04cf072e",
+            "path": "tests/integration/__tests__/cache.js",
+            "hunks": 12
+          },
+          {
+            "merge": "0b072060b5",
+            "path": "src/language-js/print/literal.js",
+            "hunks": 1
+          },
+          {
+            "merge": "298347c9fb",
+            "path": "netlify.toml",
+            "hunks": 1
+          },
+          {
+            "merge": "4d4947c284",
+            "path": "website/package.json",
+            "hunks": 1
+          },
+          {
+            "merge": "0e0f879c1a",
+            "path": "package.json",
+            "hunks": 2
+          }
+        ]
+      },
+      "autoResolvedShare": 27.19
+    },
+    {
+      "repo": "gohugoio/hugo",
+      "language": "Go",
+      "pinnedSha": "a25af7facfc9de3f17bcd82a9268ded595f0adb4",
+      "mergesScanned": 234,
+      "maxMergesRequested": 300,
+      "mergesWithConflicts": 123,
+      "totalHunks": 504,
+      "byTier": {
+        "trivial": 76,
+        "advancedDeterministic": 104,
+        "model": 0,
+        "unresolved": 324
+      },
+      "agreement": {
+        "filesFullyResolved": 63,
+        "comparable": 63,
+        "agreeExact": 19,
+        "exactShare": 30.16,
+        "disagreeExamples": [
+          {
+            "merge": "30a20122b7",
+            "path": ".github/workflows/stale.yml",
+            "hunks": 1
+          },
+          {
+            "merge": "30a20122b7",
+            "path": "AGENTS.md",
+            "hunks": 1
+          },
+          {
+            "merge": "304a7e5e74",
+            "path": "README.md",
+            "hunks": 1
+          },
+          {
+            "merge": "0c453420e6",
+            "path": "go.sum",
+            "hunks": 1
+          },
+          {
+            "merge": "e99eba39e7",
+            "path": "go.sum",
+            "hunks": 1
+          },
+          {
+            "merge": "3758456b31",
+            "path": "docs/content/en/functions/images/AutoOrient.md",
+            "hunks": 1
+          },
+          {
+            "merge": "3758456b31",
+            "path": "docs/content/en/getting-started/configuration.md",
+            "hunks": 2
+          },
+          {
+            "merge": "d19ed4d4e6",
+            "path": "docs/data/docs.yaml",
+            "hunks": 1
+          },
+          {
+            "merge": "e2dd4cd05f",
+            "path": "go.sum",
+            "hunks": 1
+          },
+          {
+            "merge": "db45dbbee8",
+            "path": "go.sum",
+            "hunks": 1
+          },
+          {
+            "merge": "8859be1c01",
+            "path": "go.sum",
+            "hunks": 1
+          },
+          {
+            "merge": "a838a27e4c",
+            "path": "go.sum",
+            "hunks": 1
+          },
+          {
+            "merge": "b95e156940",
+            "path": "go.sum",
+            "hunks": 1
+          },
+          {
+            "merge": "7e539cb398",
+            "path": "go.sum",
+            "hunks": 1
+          },
+          {
+            "merge": "b661132e0a",
+            "path": "docs/content/en/hugo-pipes/introduction.md",
+            "hunks": 1
+          },
+          {
+            "merge": "b661132e0a",
+            "path": "go.sum",
+            "hunks": 1
+          },
+          {
+            "merge": "9a215d6950",
+            "path": "go.sum",
+            "hunks": 1
+          },
+          {
+            "merge": "c9f2fa2663",
+            "path": "go.sum",
+            "hunks": 1
+          },
+          {
+            "merge": "ef518485ce",
+            "path": "go.sum",
+            "hunks": 1
+          },
+          {
+            "merge": "f04cc581e1",
+            "path": "go.sum",
+            "hunks": 1
+          },
+          {
+            "merge": "af23cdca9c",
+            "path": "go.sum",
+            "hunks": 1
+          },
+          {
+            "merge": "9d76b8fa34",
+            "path": "go.sum",
+            "hunks": 1
+          },
+          {
+            "merge": "6183184b96",
+            "path": "docs/content/en/functions/images/index.md",
+            "hunks": 1
+          },
+          {
+            "merge": "6183184b96",
+            "path": "go.sum",
+            "hunks": 1
+          },
+          {
+            "merge": "4b36498a85",
+            "path": ".gitignore",
+            "hunks": 1
+          }
+        ]
+      },
+      "autoResolvedShare": 35.71
+    },
+    {
+      "repo": "tauri-apps/tauri",
+      "language": "Rust + TypeScript",
+      "pinnedSha": "5e2856e3209d4ab16d21a1f828ff94b46a35a0b6",
+      "mergesScanned": 56,
+      "maxMergesRequested": 300,
+      "mergesWithConflicts": 22,
+      "totalHunks": 2129,
+      "byTier": {
+        "trivial": 726,
+        "advancedDeterministic": 85,
+        "model": 0,
+        "unresolved": 1318
+      },
+      "agreement": {
+        "filesFullyResolved": 103,
+        "comparable": 103,
+        "agreeExact": 39,
+        "exactShare": 37.86,
+        "disagreeExamples": [
+          {
+            "merge": "c426c0dca2",
+            "path": "core/tauri-build/CHANGELOG.md",
+            "hunks": 1
+          },
+          {
+            "merge": "c426c0dca2",
+            "path": "core/tauri-codegen/CHANGELOG.md",
+            "hunks": 1
+          },
+          {
+            "merge": "c426c0dca2",
+            "path": "core/tauri-macros/CHANGELOG.md",
+            "hunks": 1
+          },
+          {
+            "merge": "c426c0dca2",
+            "path": "core/tauri-runtime-wry/CHANGELOG.md",
+            "hunks": 1
+          },
+          {
+            "merge": "c426c0dca2",
+            "path": "core/tauri-runtime/CHANGELOG.md",
+            "hunks": 1
+          },
+          {
+            "merge": "c426c0dca2",
+            "path": "core/tauri/CHANGELOG.md",
+            "hunks": 1
+          },
+          {
+            "merge": "c426c0dca2",
+            "path": "tooling/api/CHANGELOG.md",
+            "hunks": 1
+          },
+          {
+            "merge": "c426c0dca2",
+            "path": "tooling/bundler/CHANGELOG.md",
+            "hunks": 1
+          },
+          {
+            "merge": "c426c0dca2",
+            "path": "tooling/cli/CHANGELOG.md",
+            "hunks": 1
+          },
+          {
+            "merge": "c426c0dca2",
+            "path": "tooling/cli/node/CHANGELOG.md",
+            "hunks": 1
+          },
+          {
+            "merge": "a9b87c057d",
+            "path": "core/tauri-macros/CHANGELOG.md",
+            "hunks": 1
+          },
+          {
+            "merge": "a9b87c057d",
+            "path": "core/tauri-runtime-wry/CHANGELOG.md",
+            "hunks": 1
+          },
+          {
+            "merge": "a9b87c057d",
+            "path": "core/tauri-runtime/src/lib.rs",
+            "hunks": 1
+          },
+          {
+            "merge": "a9b87c057d",
+            "path": "core/tauri-utils/CHANGELOG.md",
+            "hunks": 1
+          },
+          {
+            "merge": "a9b87c057d",
+            "path": "core/tauri/CHANGELOG.md",
+            "hunks": 1
+          },
+          {
+            "merge": "a9b87c057d",
+            "path": "tooling/api/CHANGELOG.md",
+            "hunks": 1
+          },
+          {
+            "merge": "a9b87c057d",
+            "path": "tooling/bundler/CHANGELOG.md",
+            "hunks": 1
+          },
+          {
+            "merge": "a9b87c057d",
+            "path": "tooling/cli/CHANGELOG.md",
+            "hunks": 1
+          },
+          {
+            "merge": "a9b87c057d",
+            "path": "tooling/cli/node/CHANGELOG.md",
+            "hunks": 1
+          },
+          {
+            "merge": "c6c59cf237",
+            "path": ".github/workflows/audit.yml",
+            "hunks": 1
+          },
+          {
+            "merge": "c6c59cf237",
+            "path": ".github/workflows/covector-version-or-publish.yml",
+            "hunks": 1
+          },
+          {
+            "merge": "c6c59cf237",
+            "path": "core/tauri-build/CHANGELOG.md",
+            "hunks": 1
+          },
+          {
+            "merge": "c6c59cf237",
+            "path": "core/tauri-codegen/CHANGELOG.md",
+            "hunks": 1
+          },
+          {
+            "merge": "c6c59cf237",
+            "path": "core/tauri-macros/CHANGELOG.md",
+            "hunks": 1
+          },
+          {
+            "merge": "c6c59cf237",
+            "path": "core/tauri-runtime-wry/CHANGELOG.md",
+            "hunks": 1
+          }
+        ]
+      },
+      "autoResolvedShare": 38.09
+    },
+    {
+      "repo": "laravel/framework",
+      "language": "PHP",
+      "pinnedSha": "bdc52237f0b7999916e5f09dd179e3f415762dd0",
+      "mergesScanned": 300,
+      "maxMergesRequested": 300,
+      "mergesWithConflicts": 184,
+      "totalHunks": 669,
+      "byTier": {
+        "trivial": 281,
+        "advancedDeterministic": 155,
+        "model": 0,
+        "unresolved": 233
+      },
+      "agreement": {
+        "filesFullyResolved": 234,
+        "comparable": 234,
+        "agreeExact": 197,
+        "exactShare": 84.19,
+        "disagreeExamples": [
+          {
+            "merge": "d9485b4c16",
+            "path": "src/Illuminate/Cache/composer.json",
+            "hunks": 1
+          },
+          {
+            "merge": "f096efedb1",
+            "path": "src/Illuminate/Collections/composer.json",
+            "hunks": 1
+          },
+          {
+            "merge": "062de19cb9",
+            "path": "src/Illuminate/Container/composer.json",
+            "hunks": 1
+          },
+          {
+            "merge": "062de19cb9",
+            "path": "src/Illuminate/Support/Facades/Http.php",
+            "hunks": 1
+          },
+          {
+            "merge": "062de19cb9",
+            "path": "src/Illuminate/Support/composer.json",
+            "hunks": 1
+          },
+          {
+            "merge": "062de19cb9",
+            "path": "tests/Http/HttpClientTest.php",
+            "hunks": 1
+          },
+          {
+            "merge": "1cd1d477b9",
+            "path": "src/Illuminate/Events/Dispatcher.php",
+            "hunks": 1
+          },
+          {
+            "merge": "8a69a6e2a6",
+            "path": "composer.json",
+            "hunks": 2
+          },
+          {
+            "merge": "8a69a6e2a6",
+            "path": "src/Illuminate/Pipeline/composer.json",
+            "hunks": 1
+          },
+          {
+            "merge": "8a69a6e2a6",
+            "path": "src/Illuminate/Testing/composer.json",
+            "hunks": 1
+          },
+          {
+            "merge": "8a69a6e2a6",
+            "path": "src/Illuminate/Validation/composer.json",
+            "hunks": 1
+          },
+          {
+            "merge": "7f20c6184f",
+            "path": ".github/workflows/databases.yml",
+            "hunks": 1
+          },
+          {
+            "merge": "f979990df3",
+            "path": "src/Illuminate/Foundation/Console/ApiInstallCommand.php",
+            "hunks": 1
+          },
+          {
+            "merge": "f979990df3",
+            "path": "src/Illuminate/Testing/TestResponse.php",
+            "hunks": 1
+          },
+          {
+            "merge": "4de9631236",
+            "path": "composer.json",
+            "hunks": 1
+          },
+          {
+            "merge": "7a732d5893",
+            "path": ".github/workflows/tests.yml",
+            "hunks": 3
+          },
+          {
+            "merge": "7a732d5893",
+            "path": "src/Illuminate/Database/composer.json",
+            "hunks": 1
+          },
+          {
+            "merge": "d86e742cdd",
+            "path": "src/Illuminate/Concurrency/composer.json",
+            "hunks": 1
+          },
+          {
+            "merge": "bd8aeb64d3",
+            "path": "src/Illuminate/Foundation/Application.php",
+            "hunks": 1
+          },
+          {
+            "merge": "f53c7bcddf",
+            "path": "composer.json",
+            "hunks": 1
+          },
+          {
+            "merge": "8bd7a9b02b",
+            "path": "src/Illuminate/Database/Query/Processors/MySqlProcessor.php",
+            "hunks": 1
+          },
+          {
+            "merge": "63797d30aa",
+            "path": "composer.json",
+            "hunks": 1
+          },
+          {
+            "merge": "6cb77505fd",
+            "path": ".github/workflows/tests.yml",
+            "hunks": 2
+          },
+          {
+            "merge": "14cb9f2926",
+            "path": "CHANGELOG.md",
+            "hunks": 1
+          },
+          {
+            "merge": "67a056290e",
+            "path": "CHANGELOG.md",
+            "hunks": 1
+          }
+        ]
+      },
+      "autoResolvedShare": 65.17
+    },
+    {
+      "repo": "expressjs/express",
+      "language": "JavaScript",
+      "pinnedSha": "023767fe9872e029271df1418f73401bff20ff40",
+      "mergesScanned": 200,
+      "maxMergesRequested": 200,
+      "mergesWithConflicts": 82,
+      "totalHunks": 586,
+      "byTier": {
+        "trivial": 136,
+        "advancedDeterministic": 111,
+        "model": 0,
+        "unresolved": 339
+      },
+      "agreement": {
+        "filesFullyResolved": 60,
+        "comparable": 60,
+        "agreeExact": 37,
+        "exactShare": 61.67,
+        "disagreeExamples": [
+          {
+            "merge": "e5feb9fcc9",
+            "path": "History.md",
+            "hunks": 1
+          },
+          {
+            "merge": "ea49706052",
+            "path": ".github/workflows/ci.yml",
+            "hunks": 2
+          },
+          {
+            "merge": "e9f9aaeebd",
+            "path": "appveyor.yml",
+            "hunks": 2
+          },
+          {
+            "merge": "e9f9aaeebd",
+            "path": "package.json",
+            "hunks": 5
+          },
+          {
+            "merge": "318fd4b543",
+            "path": "package.json",
+            "hunks": 2
+          },
+          {
+            "merge": "121fe9982b",
+            "path": "lib/request.js",
+            "hunks": 1
+          },
+          {
+            "merge": "62e12fe710",
+            "path": "lib/utils.js",
+            "hunks": 1
+          },
+          {
+            "merge": "c319fe260a",
+            "path": "lib/application.js",
+            "hunks": 1
+          },
+          {
+            "merge": "c319fe260a",
+            "path": "lib/utils.js",
+            "hunks": 1
+          },
+          {
+            "merge": "c319fe260a",
+            "path": "package.json",
+            "hunks": 2
+          },
+          {
+            "merge": "501e24e0a9",
+            "path": "lib/application.js",
+            "hunks": 1
+          },
+          {
+            "merge": "501e24e0a9",
+            "path": "package.json",
+            "hunks": 2
+          },
+          {
+            "merge": "7cafdb5824",
+            "path": "package.json",
+            "hunks": 3
+          },
+          {
+            "merge": "cd6df7699d",
+            "path": ".travis.yml",
+            "hunks": 1
+          },
+          {
+            "merge": "f6ec710534",
+            "path": "lib/utils.js",
+            "hunks": 1
+          },
+          {
+            "merge": "531f024e48",
+            "path": "LICENSE",
+            "hunks": 1
+          },
+          {
+            "merge": "531f024e48",
+            "path": "lib/utils.js",
+            "hunks": 3
+          },
+          {
+            "merge": "531f024e48",
+            "path": "test/app.use.js",
+            "hunks": 1
+          },
+          {
+            "merge": "f34944c539",
+            "path": "lib/request.js",
+            "hunks": 1
+          },
+          {
+            "merge": "f34944c539",
+            "path": "lib/response.js",
+            "hunks": 1
+          },
+          {
+            "merge": "35c50601bd",
+            "path": "test/app.router.js",
+            "hunks": 1
+          },
+          {
+            "merge": "49abd7bec1",
+            "path": "lib/response.js",
+            "hunks": 1
+          }
+        ]
+      },
+      "autoResolvedShare": 42.15
+    },
+    {
+      "repo": "symfony/symfony",
+      "language": "PHP",
+      "pinnedSha": "f1072d8902e3d397ab5f9190877fb947d259b0c3",
+      "mergesScanned": 300,
+      "maxMergesRequested": 300,
+      "mergesWithConflicts": 30,
+      "totalHunks": 229,
+      "byTier": {
+        "trivial": 37,
+        "advancedDeterministic": 3,
+        "model": 0,
+        "unresolved": 189
+      },
+      "agreement": {
+        "filesFullyResolved": 19,
+        "comparable": 19,
+        "agreeExact": 14,
+        "exactShare": 73.68,
+        "disagreeExamples": [
+          {
+            "merge": "ff7ac156ab",
+            "path": "CHANGELOG-8.0.md",
+            "hunks": 1
+          },
+          {
+            "merge": "f69beb9e95",
+            "path": "src/Symfony/Bridge/Monolog/composer.json",
+            "hunks": 1
+          },
+          {
+            "merge": "f69beb9e95",
+            "path": "src/Symfony/Component/Security/Core/Tests/Authentication/Token/Storage/UsageTrackingTokenStorageTest.php",
+            "hunks": 1
+          },
+          {
+            "merge": "4782b420f1",
+            "path": "src/Symfony/Component/VarDumper/Tests/Dumper/CliDumperTest.php",
+            "hunks": 1
+          },
+          {
+            "merge": "6654dd511f",
+            "path": "src/Symfony/Component/Scheduler/Generator/MessageGenerator.php",
+            "hunks": 1
+          }
+        ]
+      },
+      "autoResolvedShare": 17.47
+    },
+    {
+      "repo": "git/git",
+      "language": "C",
+      "pinnedSha": "f78ce2f7b6df702f93d40b85d6bda92a3f65da79",
+      "mergesScanned": 300,
+      "maxMergesRequested": 300,
+      "mergesWithConflicts": 34,
+      "totalHunks": 126,
+      "byTier": {
+        "trivial": 31,
+        "advancedDeterministic": 0,
+        "model": 0,
+        "unresolved": 95
+      },
+      "agreement": {
+        "filesFullyResolved": 16,
+        "comparable": 15,
+        "agreeExact": 14,
+        "exactShare": 93.33,
+        "disagreeExamples": [
+          {
+            "merge": "883a47ef64",
+            "path": "object-file.c",
+            "hunks": 1
+          }
+        ]
+      },
+      "autoResolvedShare": 24.6
+    },
+    {
+      "repo": "twbs/bootstrap",
+      "language": "SCSS/JS",
+      "pinnedSha": "ae7d4c5313121f9da1f63974c7bbc373665a979b",
+      "mergesScanned": 300,
+      "maxMergesRequested": 300,
+      "mergesWithConflicts": 36,
+      "totalHunks": 132,
+      "byTier": {
+        "trivial": 17,
+        "advancedDeterministic": 35,
+        "model": 0,
+        "unresolved": 80
+      },
+      "agreement": {
+        "filesFullyResolved": 35,
+        "comparable": 35,
+        "agreeExact": 9,
+        "exactShare": 25.71,
+        "disagreeExamples": [
+          {
+            "merge": "fca7531897",
+            "path": "scss/_variables.scss",
+            "hunks": 2
+          },
+          {
+            "merge": "5ad1049622",
+            "path": "scss/_variables.scss",
+            "hunks": 1
+          },
+          {
+            "merge": "38271b21d5",
+            "path": "scss/_variables.scss",
+            "hunks": 1
+          },
+          {
+            "merge": "babdf36c42",
+            "path": "docs/4.0/migration.md",
+            "hunks": 1
+          },
+          {
+            "merge": "1f42d79561",
+            "path": "scss/_forms.scss",
+            "hunks": 1
+          },
+          {
+            "merge": "1f42d79561",
+            "path": "scss/_input-group.scss",
+            "hunks": 1
+          },
+          {
+            "merge": "1f42d79561",
+            "path": "scss/_variables.scss",
+            "hunks": 1
+          },
+          {
+            "merge": "9501ed8725",
+            "path": "scss/mixins/_buttons.scss",
+            "hunks": 2
+          },
+          {
+            "merge": "64008ad721",
+            "path": "docs/4.0/migration.md",
+            "hunks": 1
+          },
+          {
+            "merge": "e62b121226",
+            "path": "scss/bootstrap.scss",
+            "hunks": 1
+          },
+          {
+            "merge": "d7302c221a",
+            "path": "docs/4.0/migration.md",
+            "hunks": 1
+          },
+          {
+            "merge": "21b874d19d",
+            "path": "scss/_variables.scss",
+            "hunks": 2
+          },
+          {
+            "merge": "d4eb0d4e73",
+            "path": "scss/_navbar.scss",
+            "hunks": 1
+          },
+          {
+            "merge": "5463d8436b",
+            "path": "scss/_variables.scss",
+            "hunks": 1
+          },
+          {
+            "merge": "b7cc8871be",
+            "path": "scss/_variables.scss",
+            "hunks": 1
+          },
+          {
+            "merge": "0c12ccbeb6",
+            "path": "docs/components/navbar.md",
+            "hunks": 1
+          },
+          {
+            "merge": "0c12ccbeb6",
+            "path": "scss/_navbar.scss",
+            "hunks": 1
+          },
+          {
+            "merge": "c4867cfedb",
+            "path": "js/src/dropdown.js",
+            "hunks": 1
+          },
+          {
+            "merge": "047d4a77da",
+            "path": "docs/assets/scss/_nav.scss",
+            "hunks": 1
+          },
+          {
+            "merge": "50d5f60696",
+            "path": "scss/_variables.scss",
+            "hunks": 1
+          },
+          {
+            "merge": "be4fc23fdb",
+            "path": "scss/_variables.scss",
+            "hunks": 5
+          },
+          {
+            "merge": "e11e6ec913",
+            "path": "scss/_list-group.scss",
+            "hunks": 1
+          },
+          {
+            "merge": "864343a3cc",
+            "path": "scss/_variables.scss",
+            "hunks": 1
+          },
+          {
+            "merge": "ccb5248205",
+            "path": "scss/_variables.scss",
+            "hunks": 1
+          },
+          {
+            "merge": "61b01f9b28",
+            "path": "scss/_variables.scss",
+            "hunks": 1
+          }
+        ]
+      },
+      "autoResolvedShare": 39.39
+    },
+    {
+      "repo": "umbraco/Umbraco-CMS",
+      "language": "C# + TypeScript",
+      "pinnedSha": "e81538b0400677a2fc319e6b1600b51645be3497",
+      "mergesScanned": 300,
+      "maxMergesRequested": 300,
+      "mergesWithConflicts": 160,
+      "totalHunks": 1333,
+      "byTier": {
+        "trivial": 493,
+        "advancedDeterministic": 42,
+        "model": 0,
+        "unresolved": 798
+      },
+      "agreement": {
+        "filesFullyResolved": 222,
+        "comparable": 221,
+        "agreeExact": 173,
+        "exactShare": 78.28,
+        "disagreeExamples": [
+          {
+            "merge": "ee9aa6f4e7",
+            "path": "tests/Umbraco.Tests.Benchmarks/Fixtures/SyntheticPublishedDocumentTreeFixture.cs",
+            "hunks": 1
+          },
+          {
+            "merge": "f81e6c5e1f",
+            "path": "src/Umbraco.Web.UI.Client/src/packages/documents/documents/tree/index.ts",
+            "hunks": 1
+          },
+          {
+            "merge": "2a7d40a0e0",
+            "path": "src/Umbraco.Web.UI.Client/src/libs/localization-api/localization.manager.ts",
+            "hunks": 1
+          },
+          {
+            "merge": "2a7d40a0e0",
+            "path": "src/Umbraco.Web.UI.Client/src/packages/core/collection/action/create/manifests.ts",
+            "hunks": 1
+          },
+          {
+            "merge": "2a7d40a0e0",
+            "path": "src/Umbraco.Web.UI.Client/src/packages/ufm/contexts/ufm.context.ts",
+            "hunks": 1
+          },
+          {
+            "merge": "45b4b2a132",
+            "path": "src/Umbraco.Cms.Api.Management/CLAUDE.md",
+            "hunks": 1
+          },
+          {
+            "merge": "45b4b2a132",
+            "path": "tests/Umbraco.Tests.AcceptanceTest/lib/helpers/MediaApiHelper.ts",
+            "hunks": 1
+          },
+          {
+            "merge": "c4f06b7e7f",
+            "path": "tests/Umbraco.Tests.Integration/Umbraco.Infrastructure/PropertyEditors/BlockEditorBackwardsCompatibilityTests.cs",
+            "hunks": 1
+          },
+          {
+            "merge": "a01e00afb1",
+            "path": "src/Umbraco.Core/Services/Changes/ContentTypeChangeTypes.cs",
+            "hunks": 1
+          },
+          {
+            "merge": "e1c3fdabc8",
+            "path": "src/Umbraco.Cms.StaticAssets/CLAUDE.md",
+            "hunks": 2
+          },
+          {
+            "merge": "0686c6984f",
+            "path": "src/Umbraco.Web.UI.Client/src/packages/documents/documents/publishing/workspace-context/document-publishing.workspace-context.ts",
+            "hunks": 1
+          },
+          {
+            "merge": "8dadad8256",
+            "path": "tests/Umbraco.Tests.Integration/Umbraco.Core/Services/ContentServiceTests.cs",
+            "hunks": 1
+          },
+          {
+            "merge": "a111dce133",
+            "path": "src/Umbraco.Web.UI.Client/src/packages/core/backend-api/types.gen.ts",
+            "hunks": 1
+          },
+          {
+            "merge": "6765f9032d",
+            "path": "src/Umbraco.Web.UI.Client/src/packages/documents/documents/utils.ts",
+            "hunks": 1
+          },
+          {
+            "merge": "7f2fe358b9",
+            "path": "src/Umbraco.Web.UI.Client/src/packages/documents/documents/workspace/document-workspace-split-view-variant-selector.element.ts",
+            "hunks": 2
+          },
+          {
+            "merge": "7f2fe358b9",
+            "path": "tests/Umbraco.Tests.Integration/Umbraco.Core/Services/ContentServiceTests.cs",
+            "hunks": 1
+          },
+          {
+            "merge": "6b28eee9ba",
+            "path": "src/Umbraco.Core/Configuration/Models/SecuritySettings.cs",
+            "hunks": 1
+          },
+          {
+            "merge": "4ac8a397d0",
+            "path": "src/Umbraco.Web.UI.Client/src/packages/content/content/types.ts",
+            "hunks": 1
+          },
+          {
+            "merge": "cb9ac904f6",
+            "path": "src/Umbraco.Web.UI.Client/src/packages/media/media/dropzone/media-dropzone.manager.ts",
+            "hunks": 1
+          },
+          {
+            "merge": "943d1eeccd",
+            "path": "src/Umbraco.Web.UI.Client/.storybook/preview.js",
+            "hunks": 1
+          },
+          {
+            "merge": "7d63afe8d6",
+            "path": "src/Umbraco.Web.UI.Client/.storybook/preview.js",
+            "hunks": 1
+          },
+          {
+            "merge": "f7a45dc9d6",
+            "path": "src/Umbraco.Web.UI.Client/src/packages/core/collection/action/create/manifests.ts",
+            "hunks": 1
+          },
+          {
+            "merge": "1dc47bf4a1",
+            "path": "src/Umbraco.Web.UI.Client/docs/package-development.md",
+            "hunks": 1
+          },
+          {
+            "merge": "81c8afbd44",
+            "path": "src/Umbraco.Web.UI.Client/docs/package-development.md",
+            "hunks": 1
+          },
+          {
+            "merge": "1edd6ec0bc",
+            "path": "src/Umbraco.Web.UI.Login/tsconfig.json",
+            "hunks": 1
+          }
+        ]
+      },
+      "autoResolvedShare": 40.14
+    },
+    {
+      "repo": "dotnet/efcore",
+      "language": "C# / MSBuild XML",
+      "pinnedSha": "980c0d2f8a957a5a2597c3b0d869fcfadfb41053",
+      "mergesScanned": 300,
+      "maxMergesRequested": 300,
+      "mergesWithConflicts": 108,
+      "totalHunks": 1898,
+      "byTier": {
+        "trivial": 1343,
+        "advancedDeterministic": 30,
+        "model": 0,
+        "unresolved": 525
+      },
+      "agreement": {
+        "filesFullyResolved": 114,
+        "comparable": 114,
+        "agreeExact": 92,
+        "exactShare": 80.7,
+        "disagreeExamples": [
+          {
+            "merge": "26bf07a979",
+            "path": "eng/common/core-templates/job/helix-job-monitor.yml",
+            "hunks": 2
+          },
+          {
+            "merge": "26bf07a979",
+            "path": "eng/common/core-templates/steps/send-to-helix.yml",
+            "hunks": 3
+          },
+          {
+            "merge": "b61f0f82ff",
+            "path": "eng/common/core-templates/job/job.yml",
+            "hunks": 1
+          },
+          {
+            "merge": "b61f0f82ff",
+            "path": "eng/common/core-templates/job/onelocbuild.yml",
+            "hunks": 1
+          },
+          {
+            "merge": "22583afcf8",
+            "path": "eng/common/core-templates/job/onelocbuild.yml",
+            "hunks": 2
+          },
+          {
+            "merge": "b08540737b",
+            "path": "eng/common/templates-official/post-build/common-variables.yml",
+            "hunks": 1
+          },
+          {
+            "merge": "b08540737b",
+            "path": "eng/common/templates/post-build/common-variables.yml",
+            "hunks": 1
+          },
+          {
+            "merge": "8f405fa77c",
+            "path": "eng/common/core-templates/steps/publish-logs.yml",
+            "hunks": 1
+          },
+          {
+            "merge": "7e0c3c6029",
+            "path": "eng/common/core-templates/steps/publish-logs.yml",
+            "hunks": 1
+          },
+          {
+            "merge": "6b19644dbb",
+            "path": "azure-pipelines-public.yml",
+            "hunks": 1
+          },
+          {
+            "merge": "b6afc51727",
+            "path": "eng/common/core-templates/post-build/post-build.yml",
+            "hunks": 1
+          },
+          {
+            "merge": "ee20f74e4e",
+            "path": "eng/common/core-templates/job/onelocbuild.yml",
+            "hunks": 1
+          },
+          {
+            "merge": "4a7fef35a1",
+            "path": "eng/common/core-templates/steps/publish-logs.yml",
+            "hunks": 1
+          },
+          {
+            "merge": "37e3a32acd",
+            "path": "eng/common/core-templates/steps/source-index-stage1-publish.yml",
+            "hunks": 1
+          },
+          {
+            "merge": "aeade61c30",
+            "path": "NuGet.config",
+            "hunks": 2
+          },
+          {
+            "merge": "77e1b50a6b",
+            "path": "NuGet.config",
+            "hunks": 2
+          },
+          {
+            "merge": "1ad6bcf62b",
+            "path": "NuGet.config",
+            "hunks": 2
+          },
+          {
+            "merge": "984471ecd5",
+            "path": "test/EFCore.Relational.Tests/Metadata/RelationalModelTest.cs",
+            "hunks": 1
+          },
+          {
+            "merge": "d23bbf49e5",
+            "path": "eng/common/templates-official/job/source-build.yml",
+            "hunks": 1
+          },
+          {
+            "merge": "d23bbf49e5",
+            "path": "eng/common/templates/job/onelocbuild.yml",
+            "hunks": 1
+          },
+          {
+            "merge": "d23bbf49e5",
+            "path": "eng/common/templates/variables/pool-providers.yml",
+            "hunks": 1
+          }
+        ]
+      },
+      "autoResolvedShare": 72.34
+    },
+    {
+      "repo": "microsoft/vscode",
+      "language": "TypeScript",
+      "pinnedSha": "e1fd8efce147d9b426c72d91390e494c1d2e7e46",
+      "mergesScanned": 300,
+      "maxMergesRequested": 300,
+      "mergesWithConflicts": 43,
+      "totalHunks": 211,
+      "byTier": {
+        "trivial": 77,
+        "advancedDeterministic": 41,
+        "model": 0,
+        "unresolved": 93
+      },
+      "agreement": {
+        "filesFullyResolved": 38,
+        "comparable": 38,
+        "agreeExact": 16,
+        "exactShare": 42.11,
+        "disagreeExamples": [
+          {
+            "merge": "544c272faa",
+            "path": "src/vs/workbench/contrib/mcp/browser/mcpCommandsAddConfiguration.ts",
+            "hunks": 1
+          },
+          {
+            "merge": "886b8ed653",
+            "path": "src/vs/workbench/contrib/modernUI/browser/media/connectedEditorTabs.css",
+            "hunks": 2
+          },
+          {
+            "merge": "dbfa70f755",
+            "path": "src/vs/workbench/contrib/modernUI/browser/media/connectedEditorTabs.css",
+            "hunks": 16
+          },
+          {
+            "merge": "dbfa70f755",
+            "path": "src/vs/workbench/contrib/modernUI/test/browser/modernUI.contribution.test.ts",
+            "hunks": 3
+          },
+          {
+            "merge": "acb66e25c8",
+            "path": "test/componentFixtures/blocks-ci-screenshots.md",
+            "hunks": 2
+          },
+          {
+            "merge": "3786ae918c",
+            "path": "src/vs/workbench/contrib/chat/test/browser/aiCustomization/customizationMigrationServiceImpl.test.ts",
+            "hunks": 1
+          },
+          {
+            "merge": "4d5ad8f8f4",
+            "path": "test/componentFixtures/blocks-ci-screenshots.md",
+            "hunks": 2
+          },
+          {
+            "merge": "88f2307b5d",
+            "path": "src/vs/sessions/contrib/sessions/test/browser/sessionsList.test.ts",
+            "hunks": 1
+          },
+          {
+            "merge": "3db81f25ac",
+            "path": "test/componentFixtures/blocks-ci-screenshots.md",
+            "hunks": 6
+          },
+          {
+            "merge": "e7d98681ee",
+            "path": "src/vs/sessions/contrib/sessions/test/browser/sessionsList.test.ts",
+            "hunks": 3
+          },
+          {
+            "merge": "e083d5f6bc",
+            "path": "src/vs/sessions/contrib/chat/browser/chat.contribution.ts",
+            "hunks": 1
+          },
+          {
+            "merge": "4859dc2b0f",
+            "path": "src/vs/sessions/contrib/chat/browser/chat.contribution.ts",
+            "hunks": 1
+          },
+          {
+            "merge": "34226af698",
+            "path": "test/componentFixtures/blocks-ci-screenshots.md",
+            "hunks": 1
+          },
+          {
+            "merge": "abcefef9fb",
+            "path": "src/vs/sessions/contrib/providers/agentHost/AGENT_HOST_SESSIONS_PROVIDER.md",
+            "hunks": 1
+          },
+          {
+            "merge": "abcefef9fb",
+            "path": "src/vs/sessions/contrib/providers/remoteAgentHost/REMOTE_AGENT_HOST_SESSIONS_PROVIDER.md",
+            "hunks": 1
+          },
+          {
+            "merge": "030d5aca27",
+            "path": "src/vs/platform/agentHost/node/agentHostMain.ts",
+            "hunks": 1
+          },
+          {
+            "merge": "27e3f76fea",
+            "path": "src/vs/platform/agentHost/node/agentSideEffects.ts",
+            "hunks": 1
+          },
+          {
+            "merge": "fe9ef0277b",
+            "path": "src/vs/platform/agentHost/test/node/copilotAgent.test.ts",
+            "hunks": 1
+          },
+          {
+            "merge": "b967f7a93a",
+            "path": "src/vs/platform/agentHost/node/agentHostServerMain.ts",
+            "hunks": 1
+          },
+          {
+            "merge": "b967f7a93a",
+            "path": "src/vs/platform/agentHost/test/node/agentService.test.ts",
+            "hunks": 1
+          },
+          {
+            "merge": "b967f7a93a",
+            "path": "src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/syncedCustomizationBundler.ts",
+            "hunks": 1
+          },
+          {
+            "merge": "b967f7a93a",
+            "path": "src/vs/workbench/contrib/chat/test/browser/agentSessions/agentHostChatContribution.test.ts",
+            "hunks": 1
+          }
+        ]
+      },
+      "autoResolvedShare": 55.92
+    }
+  ]
+}

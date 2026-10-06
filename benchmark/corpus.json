@@ -1,8 +1,8 @@
 {
-  "version": 2,
-  "pinnedAt": "2026-08-26",
+  "version": 3,
+  "pinnedAt": "2026-09-25",
   "note": "Every repository is pinned to a commit SHA rather than a branch, so a run today and a run in two years scan the same merges. Re-pinning is a deliberate act: bump `pinnedAt`, update the SHAs, and keep the old results file — a corpus that silently drifts cannot be used to compare two versions of an engine.",
-  "selection": "v2 — selected on MEASURED merge history, not language coverage: candidates were probed with `git rev-list --merges` plus a merge-tree conflict-rate sample (60 recent merges). Dropped: rust-lang/cargo (zero conflicted merges — merge queue), django/django (10), vuejs/core (35, squash-merge; it was also the 92-95% showcase, which is exactly why keeping it would have been flattering rather than informative). Probed and rejected: kubernetes, rails, godot (0/60 conflicted — merge queues). Every repository is pinned to a commit SHA; re-pinning is a deliberate act recorded in this field.",
+  "selection": "v2 — selected on MEASURED merge history, not language coverage: candidates were probed with `git rev-list --merges` plus a merge-tree conflict-rate sample (60 recent merges). Dropped: rust-lang/cargo (zero conflicted merges — merge queue), django/django (10), vuejs/core (35, squash-merge; it was also the 92-95% showcase, which is exactly why keeping it would have been flattering rather than informative). Probed and rejected: kubernetes, rails, godot (0/60 conflicted — merge queues). Every repository is pinned to a commit SHA; re-pinning is a deliberate act recorded in this field. v3 (2026-09-25) — added three repositories, probed with the same method (rev-list --merges over two years, plus merge-tree on the 60 most recent merges): umbraco/Umbraco-CMS 41/60 conflicted, dotnet/efcore 23/60, microsoft/vscode 13/60. The v2 repos keep their pins. Probed and rejected, for too few conflicts (at most 8/60): dotnet/roslyn, jellyfin/jellyfin, dotnet/maui, abpframework/abp, spring-projects/spring-boot, swiftlang/swift, odoo/odoo (forward-ports are cherry-picks), rust-lang/rust (bors: merges are tested before they land), meilisearch/meilisearch. Rejected for having no recent merges: AvaloniaUI/Avalonia (squash), NuGet/NuGet.Client (last merge 2021), rustdesk/rustdesk, servo/servo. The Rust, Java, Swift and Python ecosystems probed leave almost no conflicted merges in their history, so Rust stays covered by tauri alone.",
   "repos": [
     {
       "name": "prettier/prettier",
@@ -67,6 +67,30 @@
       "language": "SCSS/JS",
       "maxMerges": 300,
       "why": "Design-system repo: _variables.scss conflicts — a file family none of the format resolvers special-case, kept in as an adversarial case."
+    },
+    {
+      "name": "umbraco/Umbraco-CMS",
+      "url": "https://github.com/umbraco/Umbraco-CMS.git",
+      "sha": "e81538b0400677a2fc319e6b1600b51645be3497",
+      "language": "C# + TypeScript",
+      "maxMerges": 300,
+      "why": "Forward-merge culture (release/N → vN/dev → main): the first real .NET code in the corpus. The conflicted files in the probe were C# (75), TypeScript from the backoffice (73), package.json/package-lock.json (63), version.json (13) and a few .csproj/.props."
+    },
+    {
+      "name": "dotnet/efcore",
+      "url": "https://github.com/dotnet/efcore.git",
+      "sha": "980c0d2f8a957a5a2597c3b0d869fcfadfb41053",
+      "language": "C# / MSBuild XML",
+      "maxMerges": 300,
+      "why": "Dependency-flow merges between release branches: its conflicts are almost all version numbers in eng/Version.Details.xml, global.json, Versions.props and NuGet.config, formats the engine does not special-case. Kept as an adversarial case for version-identity conflicts, not as a measure of C# resolution."
+    },
+    {
+      "name": "microsoft/vscode",
+      "url": "https://github.com/microsoft/vscode.git",
+      "sha": "e1fd8efce147d9b426c72d91390e494c1d2e7e46",
+      "language": "TypeScript",
+      "maxMerges": 300,
+      "why": "A modern TypeScript codebase whose feature branches merge main back in, where most modern repos squash. 17 of the 25 conflicted files in the probe were .ts."
     }
   ]
 }
