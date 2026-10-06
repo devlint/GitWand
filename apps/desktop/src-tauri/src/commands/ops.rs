@@ -1506,7 +1506,9 @@ pub(crate) async fn git_cherry_pick(
     // `--no-commit` lands the picked changes in the index and working tree
     // instead of committing them ("cherry-pick as WIP"), so the user can
     // reshape them before committing. Git records no CHERRY_PICK_HEAD in this
-    // mode, so there is no operation left in progress afterwards.
+    // mode, so there is no operation left in progress afterwards — even on a
+    // conflict: the conflicted files are left to resolve as plain WIP, and
+    // `cherry-pick --continue/--abort` has nothing to act on.
     if no_commit.unwrap_or(false) {
         args.push("--no-commit".to_string());
     }

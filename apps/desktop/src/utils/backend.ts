@@ -1789,9 +1789,6 @@ export async function gitConflictCheck(cwd: string, targetBranch: string): Promi
 // ─── Cherry-pick (Phase 8.2) ───────────────────────────────
 
 /**
- * Cherry-pick one or more commits onto the current branch.
- */
-/**
  * Cherry-pick `hashes` onto HEAD. With `noCommit`, the changes are applied to
  * the index and working tree without committing (`--no-commit`), leaving them
  * as WIP for the user to edit, unstage or split before committing.
