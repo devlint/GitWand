@@ -4572,7 +4572,7 @@ onUnmounted(() => {
 
       <!-- Integrated git terminal (v3.0) — docked panel anchored at the bottom
            of app-body, below main, above the floating AppDock. -->
-      <!-- KeepAlive so toggling the panel deactivates (not unmounts) the xterm
+      <!-- KeepAlive so toggling the panel deactivates (not unmounts) the terminal
            instances — buffer + PTY view survive a hide/show cycle. -->
       <KeepAlive>
         <TerminalPanel
