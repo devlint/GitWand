@@ -261,6 +261,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
   watch(folderPath, () => {
     branches.value = [];
     log.value = [];
+    _logViewAnchor = null;
   });
 
   /**
@@ -619,6 +620,23 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
   // scope). An in-flight page fetched for the previous view must not land in
   // the new one, so loadLog/loadMoreLog drop results whose epoch is stale.
   let _logViewEpoch = 0;
+  // Hash of the deepest row the graph currently shows (reported on scroll).
+  // A forced reload keeps the log at least this deep so it doesn't shrink
+  // under a user who scrolled far down; otherwise it fetches the first page
+  // only and lets the background prefetch refill the rest.
+  let _logViewAnchor: string | null = null;
+
+  function setLogViewAnchor(hash: string | null) {
+    _logViewAnchor = hash;
+  }
+
+  /** Rows a forced reload must refetch up front: the viewed depth plus a page of margin. */
+  function forcedReloadDepth(): number {
+    const viewed = _logViewAnchor
+      ? log.value.findIndex((e) => e.hashFull === _logViewAnchor) + 1
+      : 0;
+    return Math.max(LOG_PAGE, Math.min(log.value.length, viewed + LOG_PAGE));
+  }
 
   function isCanonicalLogView(): boolean {
     return (
@@ -660,8 +678,9 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
    *   unchanged top-commit hash (the in-memory `haveSameHead` keep and the
    *   `LOG_CACHE` restore) and refetch fresh. Ref/decoration-only mutations
    *   (push moving origin/HEAD, branch/tag/stash deletion, fetch) leave the top
-   *   commit untouched, so without this they'd serve a stale log. Refetches at
-   *   the current depth so a paginated view doesn't collapse back to page 1.
+   *   commit untouched, so without this they'd serve a stale log. Refetches
+   *   only down to what the user is viewing (see `forcedReloadDepth`) — not the
+   *   whole prefetched history — and the background prefetch refills the rest.
    * @param viewChanged True when the filter/scope just changed: fetch only the
    *   first page (the current depth belongs to the old view — up to the whole
    *   prefetched history) and never keep the old view's entries.
@@ -684,7 +703,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
         ? LOG_PAGE
         : isCanon
         ? force
-          ? Math.max(LOG_PAGE, log.value.length)
+          ? forcedReloadDepth()
           : LOG_PAGE
         : (count ?? Math.max(LOG_PAGE, log.value.length));
       const entries = await getGitLog(
@@ -821,6 +840,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
   async function reloadLogForViewChange() {
     _logViewEpoch++;
     _prefetchToken++;
+    _logViewAnchor = null;
     logLoadingMore.value = false;
     await loadLog(undefined, false, true);
   }
@@ -1615,6 +1635,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     loadMoreLog,
     setLogAuthorFilter,
     setLogBranchFilter,
+    setLogViewAnchor,
     stageFiles,
     stageAll,
     unstageFiles,

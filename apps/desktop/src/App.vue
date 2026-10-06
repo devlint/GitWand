@@ -234,6 +234,7 @@ const {
   logLoadingMore,
   setLogAuthorFilter,
   setLogBranchFilter,
+  setLogViewAnchor,
   loading: repoLoading,
   error: repoError,
   successMessage: repoSuccess,
@@ -4524,7 +4525,8 @@ onUnmounted(() => {
                   @wip-quick-stash="handleWipQuickStash"
                   @wip-quick-stash-ai="handleWipQuickStashAi"
                   @load-branches="loadBranches"
-                  @load-more="loadMoreLog" />
+                  @load-more="loadMoreLog"
+                  @view-anchor="setLogViewAnchor" />
               </div>
               <div v-if="showGraphRail && selectedCommitHash" class="sidebar-handle"
                 :class="{ 'sidebar-handle--active': sidebarResizing }" @mousedown="onSidebarMouseDown"></div>
