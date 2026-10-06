@@ -1,6 +1,7 @@
 name: Perf benches
 
-# Runs the bench suite on every PR that touches apps/desktop/, and on push
+# Runs the bench suite on every PR that touches apps/desktop/ or
+# packages/core/ (desktop builds on @gitwand/core), and on push
 # to main. Compares against the committed baseline (apps/desktop/perf/
 # baseline.json) and fails the workflow if a bench regresses by > 15 %.
 
@@ -8,11 +9,13 @@ on:
   pull_request:
     paths:
       - "apps/desktop/**"
+      - "packages/core/**"
       - ".github/workflows/perf.yml"
   push:
     branches: [main]
     paths:
       - "apps/desktop/**"
+      - "packages/core/**"
       - ".github/workflows/perf.yml"
 
 jobs:

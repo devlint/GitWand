@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'website/**'
+      - 'packages/core/**'
   # Allow manual re-deploy without touching website/ (e.g. to republish
   # /update/latest.json after fixing a workflow bug).
   workflow_dispatch:
