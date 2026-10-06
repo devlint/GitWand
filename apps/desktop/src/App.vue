@@ -761,6 +761,7 @@ watch(repoSuccess, (val) => {
     "merge-done": { key: "header.mergeDone" },
     "merge-aborted": { key: "header.mergeAborted" },
     "cherry-pick-done": { key: "header.cherryPickDone" },
+    "cherry-pick-wip-done": { key: "header.cherryPickWipDone" },
     "cherry-pick-aborted": { key: "header.cherryPickAborted" },
     "autostash-parked": { key: "header.pullAutostashParked" },
   };
@@ -1172,6 +1173,7 @@ const {
   handleCreateBranchFromCommit,
   handleTagCommit,
   handleCherryPickCommit,
+  handleCherryPickCommitAsWip,
   handleViewOnForge,
   handleDeleteBranchRequest,
   handleDeleteTagRequest,
@@ -4504,6 +4506,7 @@ onUnmounted(() => {
                   @create-branch-from-commit="handleCreateBranchFromCommit"
                   @tag-commit="handleTagCommit"
                   @cherry-pick-commit="handleCherryPickCommit"
+                  @cherry-pick-commit-wip="handleCherryPickCommitAsWip"
                   @view-on-forge="handleViewOnForge"
                   @delete-branch="handleDeleteBranchRequest"
                   @delete-worktree="handleTreeDeleteWorktree"

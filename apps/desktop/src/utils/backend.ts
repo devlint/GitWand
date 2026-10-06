@@ -1791,14 +1791,23 @@ export async function gitConflictCheck(cwd: string, targetBranch: string): Promi
 /**
  * Cherry-pick one or more commits onto the current branch.
  */
-export async function gitCherryPick(cwd: string, hashes: string[]): Promise<GitPushPullResult> {
+/**
+ * Cherry-pick `hashes` onto HEAD. With `noCommit`, the changes are applied to
+ * the index and working tree without committing (`--no-commit`), leaving them
+ * as WIP for the user to edit, unstage or split before committing.
+ */
+export async function gitCherryPick(
+  cwd: string,
+  hashes: string[],
+  noCommit = false,
+): Promise<GitPushPullResult> {
   if (isTauri()) {
-    return tauriInvoke<GitPushPullResult>("git_cherry_pick", { cwd, hashes });
+    return tauriInvoke<GitPushPullResult>("git_cherry_pick", { cwd, hashes, noCommit });
   }
   const res = await devFetch(`${DEV_SERVER}/api/git-cherry-pick`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ cwd, hashes }),
+    body: JSON.stringify({ cwd, hashes, noCommit }),
   });
   return res.json();
 }

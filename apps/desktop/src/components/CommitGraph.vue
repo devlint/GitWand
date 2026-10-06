@@ -61,6 +61,7 @@ type CommitEvent =
   | "create-branch-from-commit"
   | "tag-commit"
   | "cherry-pick-commit"
+  | "cherry-pick-commit-wip"
   | "view-on-forge"
   | "delete-tag"
   | "merge-into-current"
@@ -85,6 +86,7 @@ const emit = defineEmits<{
   "create-branch-from-commit": [entry: GitLogEntry];
   "tag-commit": [entry: GitLogEntry];
   "cherry-pick-commit": [entry: GitLogEntry];
+  "cherry-pick-commit-wip": [entry: GitLogEntry];
   "view-on-forge": [entry: GitLogEntry];
   "delete-branch": [name: string, hasLocal: boolean, hasRemote: boolean, remoteName?: string];
   "delete-worktree": [branch: string];
@@ -1809,6 +1811,21 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
           <path d="M8 4V1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
         </svg>
         <span>{{ t('commitCtx.cherryPick') }}</span>
+      </li>
+      <li
+        class="commit-ctx-menu-item"
+        :class="{ 'commit-ctx-menu-item--disabled': isCtxEntryHead }"
+        role="menuitem"
+        :title="isCtxEntryHead ? t('commitCtx.cherryPickHeadDisabled') : t('commitCtx.cherryPickWipHint')"
+        @click="!isCtxEntryHead && onCtxEmit('cherry-pick-commit-wip')"
+      >
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <circle cx="5" cy="13" r="2" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2 1.5"/>
+          <circle cx="11" cy="13" r="2" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2 1.5"/>
+          <path d="M5 11V7a3 3 0 0 1 3-3h0a3 3 0 0 1 3 3v4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+          <path d="M8 4V1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+        </svg>
+        <span>{{ t('commitCtx.cherryPickWip') }}</span>
       </li>
 
       <!-- Branch Deletion (v2.12) — standard branches only -->

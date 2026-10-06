@@ -1209,10 +1209,10 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
    * `isCherryPicking` ref could not survive a reload or a repo opened while
    * already mid-cherry-pick, which is what #201 had to work around.
    */
-  async function cherryPick(hashes: string[]) {
+  async function cherryPick(hashes: string[], opts: { noCommit?: boolean } = {}) {
     if (!folderPath.value || hashes.length === 0) return;
     try {
-      const result = await gitCherryPick(folderPath.value, hashes);
+      const result = await gitCherryPick(folderPath.value, hashes, opts.noCommit ?? false);
       await refresh();
 
       const hasConflictedFiles =
@@ -1235,6 +1235,11 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
         }
       } else if (!result.success) {
         error.value = `cherry-pick: ${result.message || "unknown error"}`;
+      } else if (opts.noCommit) {
+        // WIP pick: nothing was committed — show the picked files so the user
+        // can manage them before committing.
+        viewMode.value = "changes";
+        successMessage.value = "cherry-pick-wip-done";
       } else {
         successMessage.value = "cherry-pick-done";
       }
