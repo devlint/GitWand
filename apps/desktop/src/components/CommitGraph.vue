@@ -104,6 +104,8 @@ const emit = defineEmits<{
   "wip-quick-stash": [];
   "wip-quick-stash-ai": [];
   "load-more": [];
+  /** Hash of the deepest visible row — lets a forced log reload keep that depth. */
+  "view-anchor": [hash: string | null];
   /** Asks the parent to lazy-load branches — fired on search focus so the
    * branch autocomplete has data even when the graph is the first view. */
   "load-branches": [];
@@ -1123,6 +1125,10 @@ const visibleRange = computed(() => {
   const visibleRows = Math.ceil(ch / ROW_H);
   const last = Math.min(total - 1, first + visibleRows + 2 * OVERSCAN_ROWS);
   return { first, last };
+});
+
+watch(() => visibleRange.value.last, (last) => {
+  emit("view-anchor", renderedCommits.value[last]?.hashFull ?? null);
 });
 
 const visibleNodes = computed(() => {

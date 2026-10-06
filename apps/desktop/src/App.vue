@@ -235,6 +235,7 @@ const {
   logLoadingMore,
   setLogAuthorFilter,
   setLogBranchFilter,
+  setLogViewAnchor,
   loading: repoLoading,
   error: repoError,
   successMessage: repoSuccess,
@@ -1189,7 +1190,6 @@ const {
 } = useCommitActions({
   repoFolderPath,
   repoError,
-  loadLog,
   loadBranches,
   repoRefresh,
   onReset: () => {
@@ -1793,7 +1793,8 @@ async function handleSwitchBranch(name: string, isRemote = false) {
     })) {
       try {
         await gitResetToCommit(repoFolderPath.value, remote, "hard", settings.value.snapshotsEnabled);
-        await repoRefresh();
+        // Force the log: HEAD moved, but the all-refs log's top commit may not have.
+        await repoRefresh(true);
         return;
       } catch (err: any) {
         repoError.value = `reset: ${err.message}`;
@@ -4111,7 +4112,8 @@ async function handleRebaseResetOnto(base: string) {
     await gitResetToCommit(repoFolderPath.value, base, "hard", settings.value.snapshotsEnabled);
     showRebase.value = false;
     rebaseInitialBase.value = undefined;
-    await repoRefresh();
+    // Force the log: HEAD moved, but the all-refs log's top commit may not have.
+    await repoRefresh(true);
   } catch (err: any) {
     repoError.value = `reset: ${err?.message ?? String(err)}`;
   }
@@ -4509,7 +4511,8 @@ onUnmounted(() => {
                   @wip-quick-stash="handleWipQuickStash"
                   @wip-quick-stash-ai="handleWipQuickStashAi"
                   @load-branches="loadBranches"
-                  @load-more="loadMoreLog" />
+                  @load-more="loadMoreLog"
+                  @view-anchor="setLogViewAnchor" />
               </div>
               <div v-if="showGraphRail && selectedCommitHash" class="sidebar-handle"
                 :class="{ 'sidebar-handle--active': sidebarResizing }" @mousedown="onSidebarMouseDown"></div>
