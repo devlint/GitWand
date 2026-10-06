@@ -16,6 +16,7 @@ import {
   BOLD, DIM, ITALIC, UNDERLINE, INVERSE, HIDDEN, STRIKE,
 } from "./emulator";
 import { keyToSequence } from "./keys";
+import nerdSymbolsUrl from "../../assets/fonts/SymbolsNerdFontMono-Regular.woff2?url";
 
 export interface DomTerminalOptions {
   fontSize?: number;
@@ -72,7 +73,18 @@ const URL_RE = /https?:\/\/[^\s<>"'`]+/g;
 const WORD_RE = /[\p{L}\p{N}_\-./~:@%+#?=&]/u;
 
 const STYLE_ID = "gw-vt-style";
+
+// Nerd Font icons (prompt themes, eza / lsd, AI CLI status lines) live in the
+// Private Use Area, which normal monospace fonts leave empty. "Symbols Nerd
+// Font Mono" carries only those glyphs; listed first in the font stack, its
+// unicode-range makes the browser use it for icons alone, and fetch the file
+// only once an icon is actually drawn.
+const NERD_FAMILY = "GitWand Nerd Symbols";
+const NERD_RANGE =
+  "U+23FB-23FE, U+2630, U+2665, U+26A1, U+276C-2771, U+2B58, U+E000-F8FF, U+F0000-F1AF0";
+
 const CSS = `
+@font-face{font-family:"${NERD_FAMILY}";src:url("${nerdSymbolsUrl}") format("woff2");unicode-range:${NERD_RANGE};font-display:block}
 .gw-vt{position:relative;width:100%;height:100%;overflow:hidden;color:var(--color-text,${DEFAULT_FG});cursor:text;user-select:none;-webkit-user-select:none;font-variant-ligatures:none;font-feature-settings:"liga" 0,"calt" 0;font-kerning:none;outline:none}
 .gw-vt-rows{position:absolute;left:0;top:0;right:0}
 .gw-vt-row{white-space:pre;overflow:hidden;contain:strict;width:100%}
@@ -160,8 +172,8 @@ export class DomTerminal {
   constructor(opts: DomTerminalOptions = {}) {
     this.opts = opts;
     this.fontSize = opts.fontSize ?? 13;
-    this.fontFamily = opts.fontFamily
-      ?? 'var(--font-mono, "JetBrains Mono"), "DejaVu Sans Mono", Menlo, Consolas, monospace';
+    this.fontFamily = `"${NERD_FAMILY}", ` + (opts.fontFamily
+      ?? 'var(--font-mono, "JetBrains Mono"), "DejaVu Sans Mono", Menlo, Consolas, monospace');
     this.emu = new VtEmulator(80, 24, {
       scrollback: opts.scrollback ?? 5000,
       onResponse: (s) => this.emit(this.dataListeners, s),
