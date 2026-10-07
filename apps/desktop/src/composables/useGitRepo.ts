@@ -1000,7 +1000,8 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       selectedFilePath.value = null;
       selectedFileStaged.value = false;
       diff.value = null;
-      await refresh();
+      // Force: amending rewrites HEAD, which may not be the log's top commit.
+      await refresh(true);
     } catch (err: any) {
       error.value = `amend: ${err?.message ?? err}`;
     }
@@ -1266,7 +1267,8 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     if (!folderPath.value || hashes.length === 0) return;
     try {
       const result = await gitCherryPick(folderPath.value, hashes, opts.noCommit ?? false);
-      await refresh();
+      // Force: in the all-refs log the new commit may not land on top.
+      await refresh(true);
 
       const hasConflictedFiles =
         status.value && status.value.conflicted.length > 0;
@@ -1322,7 +1324,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     if (!folderPath.value) return;
     try {
       await gitStashApply(folderPath.value, index);
-      await refresh();
+      await refresh(true);
     } catch (err: any) {
       error.value = `stash apply: ${err?.message ?? err}`;
     }
@@ -1333,10 +1335,9 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     try {
       await gitStashApply(folderPath.value, index);
       await gitStashDrop(folderPath.value, index);
-      await refresh();
-      await loadStashes();
       // Force: popping drops the stash ref, which the all-refs log renders.
-      await loadLog(undefined, true);
+      await refresh(true);
+      await loadStashes();
     } catch (err: any) {
       error.value = `stash pop: ${err?.message ?? err}`;
     }

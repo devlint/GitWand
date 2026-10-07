@@ -1154,7 +1154,8 @@ async function onRebaseBannerSplit() {
  */
 async function handleSplitCompleted(_hashes: { firstHash: string; secondHash: string }) {
   if (viewMode.value === "history" || showGitTree.value) {
-    await loadLog();
+    // Force: splitting rewrites HEAD, which may not be the log's top commit.
+    await loadLog(undefined, true);
   }
   // Refresh branches too — if we split the HEAD commit on a branch tip,
   // the branch's resolved SHA will have changed.
@@ -3406,6 +3407,8 @@ async function deleteTagInModal(tagName: string) {
   if (!cwd) return;
   try {
     await gitDeleteTag(cwd, tagName);
+    // Force: the tag ref is gone but HEAD hasn't moved.
+    await repoRefresh(true);
     pendingUnpushedTags.value = pendingUnpushedTags.value.filter(t => t !== tagName);
     if (pendingUnpushedTags.value.length === 0) {
       pushTagsConfirm.value = false;
@@ -3450,7 +3453,8 @@ async function handleWipQuickStash() {
   if (!cwd) return;
   try {
     await gitStash(cwd);
-    await repoRefresh();
+    // Force: the new stash ref shows in the all-refs log without moving HEAD.
+    await repoRefresh(true);
     repoSuccess.value = "stash-done";
   } catch (err: any) {
     repoError.value = `Quick stash failed: ${err.message}`;
@@ -3465,7 +3469,8 @@ async function handleWipQuickStashAi() {
       locale: uiLocale.value,
     });
     await gitStash(cwd, message || undefined);
-    await repoRefresh();
+    // Force: the new stash ref shows in the all-refs log without moving HEAD.
+    await repoRefresh(true);
     repoSuccess.value = "stash-done";
   } catch (err: any) {
     repoError.value = `Quick stash AI failed: ${err.message}`;
@@ -4139,7 +4144,8 @@ async function onRebaseDone() {
   showRebase.value = false;
   rebaseInitialBase.value = undefined;
   forcePushPreferred.value = true;
-  await repoRefresh();
+  // Force: the rebased branch may not hold the all-refs log's top commit.
+  await repoRefresh(true);
 }
 
 /**
@@ -4651,7 +4657,7 @@ onUnmounted(() => {
 
     <!-- Stash manager (uses BaseModal, owns its own overlay) -->
     <StashManager v-if="showStash && repoFolderPath" :cwd="repoFolderPath" @close="showStash = false"
-      @refresh="repoRefresh()" />
+      @refresh="repoRefresh(true)" />
 
     <!-- Time Machine (v3.8) — full repo history, snapshots + reflog -->
     <TimeMachinePanel v-if="showTimeMachine && repoFolderPath" :cwd="repoFolderPath"
@@ -4691,7 +4697,7 @@ onUnmounted(() => {
 
     <!-- Tags panel -->
     <TagsPanel v-if="showTags && repoFolderPath" :cwd="repoFolderPath" @close="showTags = false"
-      @refresh="repoRefresh()"
+      @refresh="repoRefresh(true)"
       @create-tag="showTags = false; handleTagCommit(repoLog[0] ?? null)" />
     <!-- Worktree manager (uses BaseModal internally → own Teleport + backdrop) -->
     <WorktreeManager v-if="showWorktrees && repoFolderPath" :cwd="repoFolderPath" :branches="branches"
