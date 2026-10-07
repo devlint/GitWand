@@ -518,6 +518,7 @@ const ptBR: Locale = {
     updateAvailableTitle: "Atualizar o branch?",
     updateAvailableOne: "« {0} » está 1 commit atrás de « {1} ». Atualizá-lo para o estado remoto mais recente?",
     updateAvailableMany: "« {0} » está {1} commits atrás de « {2} ». Atualizá-lo para o estado remoto mais recente?",
+    updateRewritten: "« {0} » foi reescrito em « {1} » (force-push) e você não tem commits próprios nele. Atualizá-lo para a versão remota?",
     updateBranch: "Atualizar o branch",
     continueLocal: "Continuar no branch local",
     continueLocalHint: "Não perguntaremos novamente para este branch.",

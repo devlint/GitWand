@@ -517,6 +517,7 @@ const zhCN: Locale = {
     updateAvailableTitle: "更新分支？",
     updateAvailableOne: "「{0}」落后「{1}」1 个提交。是否更新到最新的远程状态？",
     updateAvailableMany: "「{0}」落后「{2}」{1} 个提交。是否更新到最新的远程状态？",
+    updateRewritten: "「{0}」已在「{1}」上被重写（强制推送），且其中没有你自己的提交。是否更新到远程版本？",
     updateBranch: "更新分支",
     continueLocal: "继续使用本地分支",
     continueLocalHint: "此分支将不再询问。",

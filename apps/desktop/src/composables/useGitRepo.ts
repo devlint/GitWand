@@ -1106,12 +1106,16 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
   }
 
   /**
-   * Post-checkout "Update branch": stash-if-dirty → pull --ff-only → pop.
+   * Post-checkout "Update branch": stash-if-dirty → pull → pop.
    *
-   * Used by the dedicated prompt shown when checking out a behind-only branch
-   * (behind > 0, ahead == 0). `--ff-only` fetches and fast-forwards atomically
-   * and refuses anything non-fast-forward, so a stale ahead/behind status
-   * (race since the last fetch) degrades into a clean error, never a merge.
+   * - `"ff-only"` — the prompt for a behind-only branch (behind > 0, ahead == 0).
+   *   `--ff-only` fetches and fast-forwards atomically and refuses anything
+   *   non-fast-forward, so a stale ahead/behind status (race since the last
+   *   fetch) degrades into a clean error, never a merge.
+   * - `"rebase"` — the prompt for a branch whose upstream was rewritten and
+   *   that has no commits of its own (`isUpstreamRewriteOnly`, #223).
+   *   `pull --rebase` uses the fork-point, so it drops the old upstream commits
+   *   and lands exactly on the rewritten branch; a merge would conflict.
    *
    * Returns:
    * - "ok"           — branch updated (WIP restored if it was stashed)
@@ -1121,7 +1125,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
    *                    `message` carries the raw git error for the caller
    *                    to surface
    */
-  async function updateBranchFastForward(): Promise<{
+  async function updateBranchToUpstream(mode: "ff-only" | "rebase" = "ff-only"): Promise<{
     status: "ok" | "pop-conflict" | "failed";
     message?: string;
   }> {
@@ -1132,7 +1136,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     const dirty = !isClean.value;
     try {
       if (dirty) await gitStash(folderPath.value, "GitWand: update branch");
-      const result = await gitPull(folderPath.value, "ff-only");
+      const result = await gitPull(folderPath.value, mode);
       if (!result.success) {
         // The tree hasn't moved — the pop applies cleanly, restoring the WIP.
         if (dirty) await gitStashPop(folderPath.value).catch(() => {});
@@ -1654,7 +1658,7 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     amendCommit,
     push,
     pull,
-    updateBranchFastForward,
+    updateBranchToUpstream,
     fetch: fetchRemote,
     mergeBranch,
     discardFiles,

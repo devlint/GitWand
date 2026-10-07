@@ -94,7 +94,7 @@ import { useResolutionMemory, type ResolutionMemoryEntry, type ResolutionStrateg
 import { useRepoTabs } from "./composables/useRepoTabs";
 import { useAiTasks } from "./composables/useAiTasks";
 import { usePinnedBranches } from "./composables/usePinnedBranches";
-import { computeCheckoutPrompt, isUpdatePromptSkipped, skipUpdatePrompt } from "./composables/useBranchUpdatePrompt";
+import { computeCheckoutPrompt, isUpdatePromptSkipped, isUpstreamRewriteOnly, skipUpdatePrompt } from "./composables/useBranchUpdatePrompt";
 import { useGitRepo, type ViewMode, type RepoFileEntry } from "./composables/useGitRepo";
 import { useHeaderAlign } from "./composables/useHeaderAlign";
 import { useWorkspaceScope } from "./composables/useWorkspaceScope";
@@ -301,7 +301,7 @@ const {
   loadBranches,
   createBranch,
   switchBranch,
-  updateBranchFastForward,
+  updateBranchToUpstream,
   carryChangesToBranch,
   deleteBranch,
   deleteRemoteBranch,
@@ -1848,16 +1848,23 @@ async function handleSwitchBranch(name: string, isRemote = false) {
 async function promptPullIfBehind() {
   const s = repoStatus.value;
   if (!s || !repoFolderPath.value) return;
+  const diverged = !!s.remote && aheadCount.value > 0 && behindCount.value > 0;
   const kind = computeCheckoutPrompt({
     ahead: aheadCount.value,
     behind: behindCount.value,
     hasUpstream: !!s.remote,
+    // Only probed when diverged: a force-pushed upstream makes a branch with no
+    // commits of its own look diverged (#223).
+    upstreamRewritten: diverged && await isUpstreamRewriteOnly(repoFolderPath.value),
     // Lazy: only hits the settings blob when the branch is behind-only.
     isSkipped: () => isUpdatePromptSkipped(repoFolderPath.value!, s.branch),
   });
-  if (kind === "update") {
-    // Behind-only, no local divergence: dedicated fast-forward prompt.
-    branchUpdatePrompt.value = { branch: s.branch, behind: behindCount.value, remote: s.remote! };
+  if (kind === "update" || kind === "rewritten") {
+    // Behind-only, or diverged only through an upstream rewrite: dedicated
+    // prompt that updates the branch to its remote state.
+    branchUpdatePrompt.value = {
+      branch: s.branch, behind: behindCount.value, remote: s.remote!, rewritten: kind === "rewritten",
+    };
     return;
   }
   if (kind === "genericPull" && await askConfirm({
@@ -1865,7 +1872,8 @@ async function promptPullIfBehind() {
     message: t("branches.pullAfterCheckout"),
     confirmLabel: t("header.pull"),
   })) {
-    await handlePull(false);
+    // Honour the user's pull mode, like every other pull entry point.
+    await handlePull();
   }
 }
 
@@ -3285,14 +3293,16 @@ async function onOperationAction(action: "continue" | "abort" | "skip") {
 }
 
 // ─── Post-checkout "Update branch" prompt ────────────────
-// Shown when checking out a branch that is behind its upstream with no
-// local divergence (see useBranchUpdatePrompt.computeCheckoutPrompt).
+// Shown when checking out a branch that is behind its upstream with no local
+// divergence, or whose upstream was rewritten while it has no commits of its
+// own (see useBranchUpdatePrompt.computeCheckoutPrompt).
 
-const branchUpdatePrompt = ref<{ branch: string; behind: number; remote: string } | null>(null);
+const branchUpdatePrompt = ref<{ branch: string; behind: number; remote: string; rewritten: boolean } | null>(null);
 
 async function onBranchUpdateConfirm() {
+  const rewritten = branchUpdatePrompt.value?.rewritten ?? false;
   branchUpdatePrompt.value = null;
-  const res = await updateBranchFastForward();
+  const res = await updateBranchToUpstream(rewritten ? "rebase" : "ff-only");
   if (res.status === "pop-conflict") {
     repoError.value = t("branches.updatePopConflict");
     viewMode.value = "changes"; // surface the conflicted files
@@ -5072,10 +5082,12 @@ onUnmounted(() => {
       </template>
     </BaseModal>
 
-    <!-- Post-checkout "Update branch" prompt (behind-only, no divergence) -->
+    <!-- Post-checkout "Update branch" prompt (behind-only, or upstream rewritten) -->
     <BaseModal v-if="branchUpdatePrompt" :title="t('branches.updateAvailableTitle')" size="sm" role="alertdialog"
       @close="onBranchUpdateDismiss">
-      <p class="ptc-desc">{{ branchUpdatePrompt.behind === 1
+      <p class="ptc-desc">{{ branchUpdatePrompt.rewritten
+        ? t('branches.updateRewritten', branchUpdatePrompt.branch, branchUpdatePrompt.remote)
+        : branchUpdatePrompt.behind === 1
         ? t('branches.updateAvailableOne', branchUpdatePrompt.branch, branchUpdatePrompt.remote)
         : t('branches.updateAvailableMany', branchUpdatePrompt.branch, branchUpdatePrompt.behind, branchUpdatePrompt.remote) }}</p>
       <p v-if="isDirty()" class="ptc-desc">{{ t('branches.updateDirtyHint') }}</p>

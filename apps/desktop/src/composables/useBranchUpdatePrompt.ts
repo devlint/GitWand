@@ -11,29 +11,63 @@
  * via localStorage — same shape and lifecycle as useArchivedBranches.
  */
 
+import { gitExec } from "../utils/backend";
 import { loadSettings, normaliseCwd, saveSettings } from "./useSettings";
 
 // ─── decision ────────────────────────────────────────────────────────────────
 
-export type CheckoutPromptKind = "update" | "genericPull" | "none";
+export type CheckoutPromptKind = "update" | "rewritten" | "genericPull" | "none";
 
 /**
  * Pure decision: which prompt (if any) to show after a branch checkout.
  *
  * - behind-only + upstream + not muted → dedicated "Update branch" prompt
- * - diverged (ahead > 0 && behind > 0) → existing generic pull prompt
+ * - diverged only because the upstream was rewritten (force-push) and the
+ *   branch has no commits of its own + not muted → "rewritten" prompt (#223)
+ * - any other divergence (ahead > 0 && behind > 0) → generic pull prompt
  * - everything else → nothing
  */
 export function computeCheckoutPrompt(input: {
   ahead: number;
   behind: number;
   hasUpstream: boolean;
+  /** See `isUpstreamRewriteOnly` — only meaningful when diverged. */
+  upstreamRewritten?: boolean;
   /** Lazy so the settings blob is only parsed when the branch is behind-only. */
   isSkipped: () => boolean;
 }): CheckoutPromptKind {
   if (!input.hasUpstream || input.behind <= 0) return "none";
-  if (input.ahead > 0) return "genericPull";
+  if (input.ahead > 0) {
+    if (!input.upstreamRewritten) return "genericPull";
+    return input.isSkipped() ? "none" : "rewritten";
+  }
   return input.isSkipped() ? "none" : "update";
+}
+
+// ─── detection ───────────────────────────────────────────────────────────────
+
+/**
+ * True when the current branch diverges from its upstream only because the
+ * upstream was rewritten (rebased + force-pushed): every local commit was once
+ * on the upstream, so the user has no work of their own on the branch.
+ *
+ * That is exactly "git's fork-point equals the local tip" — the fork-point is
+ * found through the remote-tracking ref's reflog, the same logic
+ * `git pull --rebase` uses to drop the old upstream commits. A merge pull would
+ * instead merge the old history with its rewrite and conflict for nothing.
+ */
+export async function isUpstreamRewriteOnly(cwd: string): Promise<boolean> {
+  try {
+    const [fork, head] = await Promise.all([
+      gitExec(cwd, ["merge-base", "--fork-point", "@{upstream}", "HEAD"]),
+      gitExec(cwd, ["rev-parse", "HEAD"]),
+    ]);
+    if (fork.exitCode !== 0 || head.exitCode !== 0) return false;
+    const tip = head.stdout.trim();
+    return tip !== "" && fork.stdout.trim() === tip;
+  } catch {
+    return false;
+  }
 }
 
 // ─── persistence ─────────────────────────────────────────────────────────────
