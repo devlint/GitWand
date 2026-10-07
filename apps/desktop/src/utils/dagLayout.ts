@@ -275,6 +275,58 @@ export function computeDagLayout(
   return { nodes, edges, maxLane };
 }
 
+/** Per-lane lookup of what occupies each column, for edge-routing checks. */
+export interface LaneIndex {
+  /** Node rows per lane, ascending. */
+  nodeRows: Map<number, number[]>;
+  /** Edges per lane they run down (their `fromLane`). */
+  edgesByLane: Map<number, DagEdge[]>;
+}
+
+export function buildLaneIndex(layout: DagLayout): LaneIndex {
+  const nodeRows = new Map<number, number[]>();
+  for (const n of layout.nodes) {
+    const rows = nodeRows.get(n.lane);
+    if (rows) rows.push(n.index);
+    else nodeRows.set(n.lane, [n.index]);
+  }
+  for (const rows of nodeRows.values()) rows.sort((a, b) => a - b);
+  const edgesByLane = new Map<number, DagEdge[]>();
+  for (const e of layout.edges) {
+    const list = edgesByLane.get(e.fromLane);
+    if (list) list.push(e);
+    else edgesByLane.set(e.fromLane, [e]);
+  }
+  return { nodeRows, edgesByLane };
+}
+
+/**
+ * Whether a merge edge can run down its parent's lane (`toLane`) instead of
+ * its own. The layout only reserves the child's lane for an edge's height, so
+ * the parent's lane may hold other commits — or another branch's line — between
+ * the two rows; drawing through them would hide where the merge really lands.
+ * Edges converging on the same parent don't count: they share that segment.
+ */
+export function mergeLaneIsClear(index: LaneIndex, e: DagEdge): boolean {
+  const lo = e.fromIndex;
+  const hi = e.toIndex;
+  const rows = index.nodeRows.get(e.toLane) ?? [];
+  // First node row strictly after `lo` (binary search).
+  let a = 0;
+  let b = rows.length;
+  while (a < b) {
+    const m = (a + b) >> 1;
+    if (rows[m] <= lo) a = m + 1;
+    else b = m;
+  }
+  if (a < rows.length && rows[a] < hi) return false;
+  for (const o of index.edgesByLane.get(e.toLane) ?? []) {
+    if (o === e || o.toIndex === hi) continue;
+    if (o.fromIndex < hi && o.toIndex > lo) return false;
+  }
+  return true;
+}
+
 /**
  * Parse ref decoration string into individual labels, sorted by priority
  * (branch > remote > tag > head).

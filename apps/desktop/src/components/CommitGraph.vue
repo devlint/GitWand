@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import type { GitLogEntry, GitBranch } from "../utils/backend";
-import { computeDagLayout, parseRefs, type DagLayout, type DagNode } from "../utils/dagLayout";
+import { buildLaneIndex, computeDagLayout, mergeLaneIsClear, parseRefs, type DagEdge, type DagLayout, type DagNode } from "../utils/dagLayout";
 import { useI18n } from "../composables/useI18n";
 import Avatar from "./Avatar.vue";
 import { filterCommitsLocal } from "../composables/useCommitSearch";
@@ -882,13 +882,24 @@ function cy(index: number): number {
  * Straight down in child lane, then a rounded corner into the parent lane
  * at the parent row level. Creates a visible horizontal segment exactly at
  * the commit where branches connect. */
-function edgePath(e: { fromIndex: number; fromLane: number; toIndex: number; toLane: number }): string {
+function edgePath(e: DagEdge): string {
   const x1 = cx(e.fromLane);
   const y1 = cy(e.fromIndex);
   const x2 = cx(e.toLane);
   const y2 = cy(e.toIndex);
 
   if (x1 === x2) return `M${x1},${y1} L${x2},${y2}`;
+
+  // Merge edge whose parent lane is free down to the parent: S-curve over one
+  // row into the merged branch's lane, then run straight down to the parent.
+  // Otherwise keep the elbow, so the line doesn't run through other commits.
+  if (curvedMerges.value.has(e)) {
+    const yStart = y1 - NODE_R;
+    const yEnd = Math.min(y2, y1 + ROW_H);
+    const yMid = (yStart + yEnd) / 2;
+    const s = `M${x1},${yStart} C${x1},${yMid} ${x2},${yMid} ${x2},${yEnd}`;
+    return yEnd < y2 ? `${s} L${x2},${y2}` : s;
+  }
 
   const r = Math.min(LANE_W * 0.6, (y2 - y1) * 0.35);
   const xSign = x2 < x1 ? -1 : 1;
@@ -1167,6 +1178,16 @@ const visibleEdges = computed(() => {
   });
 });
 
+const laneIndex = computed(() => buildLaneIndex(layout.value));
+/** Visible merge edges drawn as an S-curve down their parent's lane. */
+const curvedMerges = computed(() => {
+  const out = new Set<DagEdge>();
+  for (const e of visibleEdges.value) {
+    if (e.isMerge && e.fromLane !== e.toLane && mergeLaneIsClear(laneIndex.value, e)) out.add(e);
+  }
+  return out;
+});
+
 interface VisibleCommit { entry: GitLogEntry; index: number }
 const visibleCommits = computed<VisibleCommit[]>(() => {
   const { first, last } = visibleRange.value;
@@ -1382,7 +1403,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
           v-for="edge in visibleEdges"
           :key="'e-' + edge.fromIndex + '-' + edge.toIndex + '-' + edge.fromLane + '-' + edge.toLane"
           :d="edgePath(edge)"
-          :stroke="laneColor(edge.fromLane)"
+          :stroke="laneColor(curvedMerges.has(edge) ? edge.toLane : edge.fromLane)"
           :stroke-width="edge.isMerge ? 1.2 : 1.6"
           :stroke-dasharray="edge.isMerge || (hasChanges && edge.fromIndex === 0) || stashByHash.has(renderedCommits[edge.fromIndex]?.hashFull) ? '3,3' : 'none'"
           fill="none"
