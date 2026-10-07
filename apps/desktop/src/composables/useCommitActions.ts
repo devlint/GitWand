@@ -166,7 +166,8 @@ export function useCommitActions(deps: Deps) {
         await deleteRemoteBranch(remote, branch);
       }
       closeModal();
-      await Promise.all([loadBranches(), repoRefresh()]);
+      // Force: deleted refs change the log's labels without moving HEAD.
+      await Promise.all([loadBranches(), repoRefresh(true)]);
     } catch (err: any) {
       modal.value.error = err?.message ?? String(err);
     } finally {
@@ -283,7 +284,9 @@ export function useCommitActions(deps: Deps) {
           ? t("commitCtx.revertConflicts")
           : result.message || t("commitCtx.revertFailed");
       }
-      await repoRefresh();
+      // Force: the all-refs log's top commit may belong to another branch,
+      // so a HEAD move alone doesn't invalidate the cached log.
+      await repoRefresh(true);
     } catch (err: any) {
       repoError.value = err?.message ?? String(err);
     }
@@ -304,7 +307,8 @@ export function useCommitActions(deps: Deps) {
     try {
       await gitCreateBranch(cwd, name, true, entry.hashFull);
       closeModal();
-      await Promise.all([repoRefresh(), loadBranches()]);
+      // Force: the new branch ref adds a label without moving the top commit.
+      await Promise.all([repoRefresh(true), loadBranches()]);
     } catch (err: any) {
       modal.value.error = err?.message ?? String(err);
     } finally {
