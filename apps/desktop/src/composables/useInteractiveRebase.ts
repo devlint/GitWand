@@ -15,6 +15,9 @@
 import { ref, computed } from "vue";
 import { gitExec, gitInteractiveRebase } from "../utils/backend";
 
+/** `git status --porcelain` XY codes of an unmerged (conflicted) path. */
+const UNMERGED = new Set(["DD", "AU", "UD", "UA", "DU", "AA", "UU"]);
+
 // ─── Types ──────────────────────────────────────────────────
 
 /**
@@ -215,9 +218,7 @@ export function useInteractiveRebase() {
 
       // Conflict detection via porcelain status
       const conflictCheck = await gitExec(cwd, ["status", "--porcelain"]);
-      const hasConflict = conflictCheck.stdout.split("\n").some(
-        (l) => l.startsWith("UU ") || l.startsWith("AA ") || l.startsWith("UD ") || l.startsWith("DU "),
-      );
+      const hasConflict = conflictCheck.stdout.split("\n").some((l) => UNMERGED.has(l.slice(0, 2)));
 
       const state: RebaseProgress = {
         inProgress: true,
@@ -233,6 +234,18 @@ export function useInteractiveRebase() {
       progress.value = null;
       return null;
     }
+  }
+
+  /**
+   * After a failed `--continue` / `--skip`: is the rebase still halted on a
+   * merge conflict? A fresh conflict prints `CONFLICT` / `could not apply`,
+   * but continuing with conflicts still unresolved prints `<file>: needs
+   * merge` instead (#223) — so ask the repo rather than parse stderr alone.
+   */
+  async function haltedOnConflict(cwd: string, stderr: string): Promise<boolean> {
+    const state = await detectRebaseState(cwd);
+    if (state?.inProgress && state.hasConflict) return true;
+    return !!state?.inProgress && (stderr.includes("CONFLICT") || stderr.includes("could not apply"));
   }
 
   // ── Start interactive rebase ──────────────────────────────
@@ -312,8 +325,7 @@ export function useInteractiveRebase() {
         "rebase", "--continue",
       ]);
       if (result.exitCode !== 0) {
-        if (result.stderr.includes("CONFLICT") || result.stderr.includes("could not apply")) {
-          await detectRebaseState(cwd);
+        if (await haltedOnConflict(cwd, result.stderr)) {
           return { success: true, conflict: true, inProgress: true };
         }
         throw new Error(result.stderr || "rebase --continue failed");
@@ -358,8 +370,7 @@ export function useInteractiveRebase() {
     try {
       const result = await gitExec(cwd, ["rebase", "--skip"]);
       if (result.exitCode !== 0) {
-        if (result.stderr.includes("CONFLICT") || result.stderr.includes("could not apply")) {
-          await detectRebaseState(cwd);
+        if (await haltedOnConflict(cwd, result.stderr)) {
           return { success: true, conflict: true, inProgress: true };
         }
         throw new Error(result.stderr || "rebase --skip failed");
