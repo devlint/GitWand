@@ -6,7 +6,7 @@
 
 ## What's Next
 
-_Ordered by priority, last verified 2026-10-06 (v3.12.0 shipped; Stacked Branches, Combined Diffs and Voice Input each moved one minor later). The thread: the measured-accuracy engine re-founds the trust every later auto-apply feature spends, then make the app reactive and fast (Live Repo), close the resolution loop (preview-to-apply, whose confidence threshold is only meaningful **because** of the accuracy work), then workflow & comparison primitives, experimental voice input, and the v4.0 code-intelligence headline. Full renumbering history: `git log -p -- roadmap.md`._
+_Ordered by priority, last verified 2026-10-07 (v3.12.0 shipped, five contributions merged on `main` unreleased; Stacked Branches, Combined Diffs and Voice Input each moved one minor later). The thread: the measured-accuracy engine re-founds the trust every later auto-apply feature spends, then make the app reactive and fast (Live Repo), close the resolution loop (preview-to-apply, whose confidence threshold is only meaningful **because** of the accuracy work), then workflow & comparison primitives, experimental voice input, and the v4.0 code-intelligence headline. Full renumbering history: `git log -p -- roadmap.md`._
 
 | Version | Codename | Why now |
 |---------|----------|---------|
@@ -16,6 +16,18 @@ _Ordered by priority, last verified 2026-10-06 (v3.12.0 shipped; Stacked Branche
 | **v4.0.0** (candidate) | Blast Radius | Code-graph impact before merge — the code-intelligence headline |
 
 _v3.12.0 (built-in terminal renderer, WIP in the Git Tree), v3.11.2 (Finder-like folder navigation), v3.11.1 (History-aware LLM fallback) and v3.11.0 (Merge preview-to-apply) shipped; see [Shipped](#shipped) below and the full detail in [CHANGELOG.md](./CHANGELOG.md)._
+
+---
+
+### On `main`, not released yet
+
+_Merged 2026-10-07 (contributions by @t1gu1); no release scheduled yet. Version number decided at tag time: #224 changes a v3.12.0 flow. Waiting on @t1gu1's test of #224 on `main` before cutting it._
+
+- **WIP as a Git Tree entry** (#224) — the dock's WIP tab and the "Hide WIP when clean" setting are removed; the WIP is a selectable row of the Git Tree, shown only when the tree is dirty. Entering it swaps the right rail to Changes, and the diff opens only once a file is picked. The WIP row previews the commit-draft summary, or an AI indicator while one is generated. AI commit messages and PR descriptions now survive navigating away mid-generation
+- **Merge edges as S-curves** (#227) — a merge edge curves into the merged branch's lane and runs down to its parent, when that lane is free down to the parent; otherwise it keeps the elbow
+- **Steadier graph width** (#225) — the lane column grows at once but only shrinks after 1.5 s of stability, with no page loading (`useStickyWidth`)
+- **No duplicate remote badge** (#226) — `origin/x` next to a local `x` on the same commit no longer shows twice after a project switch
+- **Forced refresh after ref-only operations** (#222) — tags, branches, stashes, amend, cherry-pick, revert, rebase and split refresh the Git Tree immediately
 
 ---
 
