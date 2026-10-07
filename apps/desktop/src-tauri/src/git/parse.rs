@@ -1383,9 +1383,12 @@ pub(crate) fn has_unresolved_conflicts(cwd: &str) -> bool {
         .current_dir(cwd)
         .output()
         .map(|o| {
-            String::from_utf8_lossy(&o.stdout)
-                .lines()
-                .any(|l| matches!(l.get(..2), Some("DD" | "AU" | "UD" | "UA" | "DU" | "AA" | "UU")))
+            String::from_utf8_lossy(&o.stdout).lines().any(|l| {
+                matches!(
+                    l.get(..2),
+                    Some("DD" | "AU" | "UD" | "UA" | "DU" | "AA" | "UU")
+                )
+            })
         })
         .unwrap_or(false)
 }
