@@ -49,12 +49,13 @@ const { t } = useI18n();
       <button
         type="button"
         class="bm-btn btn--ai tag-ai-btn"
+        :class="{ 'ai-loading': suggesting }"
         :disabled="busy || suggesting"
         :title="hint || t('branches.aiHint')"
         @click="emit('suggest')"
       >
         <AiSparkle :size="13" :animated="suggesting" />
-        {{ suggesting ? t('common.loading') : t('commitCtx.tagAiSuggest') }}
+        {{ suggesting ? t('common.generating') : t('commitCtx.tagAiSuggest') }}
       </button>
     </div>
     <input

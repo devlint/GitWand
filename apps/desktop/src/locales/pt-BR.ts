@@ -23,6 +23,7 @@ const ptBR: Locale = {
     delete: "Excluir",
     error: "Erro",
     loading: "Carregando…",
+    generating: "Gerando",
     no: "Não",
     ok: "OK",
     open: "Abrir",

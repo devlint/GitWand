@@ -1503,7 +1503,7 @@ function formatActivityDate(dateStr: string): string {
         <div v-if="ai.isAvailable.value" class="commit-ai-wrapper">
           <button
             class="commit-ai-btn"
-            :class="{ 'commit-ai-btn--loading': isGenerating }"
+            :class="{ 'commit-ai-btn--loading ai-loading': isGenerating }"
             :disabled="isGenerating || repoStats.staged === 0"
             :title="isGenerating ? t('sidebar.aiGeneratingTooltip') : t('sidebar.aiGenerateTooltip')"
             @click="onGenerateCommitMessage"

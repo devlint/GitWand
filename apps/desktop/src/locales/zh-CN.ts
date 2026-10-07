@@ -30,6 +30,7 @@ const zhCN: Locale = {
     delete: "删除",
     error: "错误",
     loading: "加载中…",
+    generating: "生成中",
     no: "否",
     ok: "确定",
     open: "打开",

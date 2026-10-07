@@ -163,6 +163,7 @@ watch(
         <button
           v-if="settings.snapshotAiLabels && item.snapshot && !aiLabels.labels.value[item.snapshot.id]"
           class="tm-ai"
+          :class="{ 'ai-loading': aiLabels.pending.value.has(item.snapshot.id) }"
           :disabled="aiLabels.pending.value.has(item.snapshot.id)"
           @click="aiLabels.generate(cwd, item.snapshot)"
         >

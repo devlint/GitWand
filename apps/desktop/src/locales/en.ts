@@ -22,6 +22,7 @@ const en = {
     delete: "Delete",
     error: "Error",
     loading: "Loading\u2026",
+    generating: "Generating",
     no: "No",
     ok: "OK",
     open: "Open",

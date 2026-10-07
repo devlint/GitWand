@@ -194,7 +194,7 @@ async function copy() {
       </label>
       <button
         class="bm-btn bm-btn--primary rn-btn-sm rn-generate"
-        :class="{ 'rn-generate--loading': isGenerating }"
+        :class="{ 'rn-generate--loading ai-loading': isGenerating }"
         :disabled="isGenerating || !from.trim() || !to.trim()"
         @click="runGenerate"
       >

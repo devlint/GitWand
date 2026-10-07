@@ -48,7 +48,7 @@
         :title="t('mergePreview.aiRiskHint')"
         @click="requestMergeRisk"
       >
-        <span v-if="isMergeRiskAssessing">… {{ t('mergePreview.aiRiskAnalyzing') }}</span>
+        <span v-if="isMergeRiskAssessing" class="ai-loading">… {{ t('mergePreview.aiRiskAnalyzing') }}</span>
         <span v-else class="preview-ai-label">
           <AiSparkle :size="14" />
           {{ t('mergePreview.aiRisk') }}
@@ -61,7 +61,7 @@
     <div v-if="riskOpen" class="preview-risk" role="status" aria-live="polite">
       <div class="preview-risk-body">
         <span v-if="mergeRiskError" class="preview-risk-error">{{ mergeRiskError }}</span>
-        <span v-else-if="isMergeRiskAssessing && !riskText">{{ t('mergePreview.aiRiskAnalyzing') }}</span>
+        <span v-else-if="isMergeRiskAssessing && !riskText" class="ai-loading">{{ t('mergePreview.aiRiskAnalyzing') }}</span>
         <span v-else>{{ riskText }}</span>
       </div>
       <button v-if="!isMergeRiskAssessing" class="preview-risk-close" @click="dismissRisk">✕</button>

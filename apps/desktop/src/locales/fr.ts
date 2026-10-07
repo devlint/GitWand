@@ -16,6 +16,7 @@ const fr: Locale = {
     delete: "Supprimer",
     error: "Erreur",
     loading: "Chargement\u2026",
+    generating: "Génération",
     no: "Non",
     ok: "OK",
     open: "Ouvrir",

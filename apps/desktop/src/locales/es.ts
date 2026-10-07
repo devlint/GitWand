@@ -22,6 +22,7 @@ const es: Locale = {
     delete: "Eliminar",
     error: "Error",
     loading: "Cargando…",
+    generating: "Generando",
     no: "No",
     ok: "Aceptar",
     open: "Abrir",
