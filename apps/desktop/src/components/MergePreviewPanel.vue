@@ -48,7 +48,7 @@
         :title="t('mergePreview.aiRiskHint')"
         @click="requestMergeRisk"
       >
-        <span v-if="isMergeRiskAssessing" class="ai-loading">… {{ t('mergePreview.aiRiskAnalyzing') }}</span>
+        <span v-if="isMergeRiskAssessing" class="ai-loading">{{ t('mergePreview.aiRiskAnalyzing') }}</span>
         <span v-else class="preview-ai-label">
           <AiSparkle :size="14" />
           {{ t('mergePreview.aiRisk') }}

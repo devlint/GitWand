@@ -1281,7 +1281,7 @@ useResizeObserver(contentEl, drawMinimap);
                   @click.prevent="requestAISuggestion(seg.hunkIndex!, hunkForSegment(seg)!)"
                 >
                   <AiSparkle :size="12" :animated="aiBusy(seg.hunkIndex!)" />
-                  {{ aiBusy(seg.hunkIndex!) ? t('mergeEditor.aiLoading') : t('mergeEditor.aiButton') }}
+                  {{ aiBusy(seg.hunkIndex!) ? t('common.generating') : t('mergeEditor.aiButton') }}
                 </a>
                 <span class="inline-sep">|</span>
                 <a

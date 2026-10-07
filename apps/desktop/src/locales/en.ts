@@ -559,7 +559,7 @@ const en = {
     thresholdSummary: "{0} auto-resolvable, {1} held back by the bar, {2} manual",
     aiRisk: "Risk assessment",
     aiRiskHint: "Ask the AI whether this merge looks safe.",
-    aiRiskAnalyzing: "Analysing risks\u2026",
+    aiRiskAnalyzing: "Analysing risks",
     analyzing: "Analyzing\u2026",
     noConflicts: "Clean merge",
     fullyAuto: "100\u00a0% auto-resolvable",
@@ -629,7 +629,7 @@ const en = {
     done: "Rebase completed",
     aiSquashSuggest: "Suggest a squash",
     aiSquashHint: "Analyses commits to propose squash groups by intent.",
-    aiSquashApplying: "Analysing\u2026",
+    aiSquashApplying: "Analysing",
     aiSquashApply: "Apply",
     aiSquashEmpty: "The AI found nothing to squash \u2014 every commit has a distinct intent.",
     aiSquashClose: "Close",
@@ -884,7 +884,7 @@ const en = {
       reviewersLoading: "Loading reviewers\u2026",
       // AI
       aiGenerate: "Generate with AI",
-      aiGenerating: "Generating\u2026",
+      aiGenerating: "Generating",
       aiHint: "Analyses the commits between the two branches to draft a title and a description.",
       aiReplaceConfirm: "The current title and description will be replaced. Continue?",
       // Built-in templates
@@ -1919,7 +1919,7 @@ const en = {
     kindCheckout: "Checkout",
     kindResolution: "Resolution applied",
     aiLabel: "Summarise with AI",
-    aiLabelPending: "Summarising…",
+    aiLabelPending: "Summarising",
     toastUndo: "Undo",
     toastDiscard: "Discarded {0} file(s)",
     toastReset: "Reset to {0}",
@@ -1981,7 +1981,6 @@ const en = {
   mergeEditor: {
     editAriaLabel: "Edit conflict {0}",
     aiButton: "AI",
-    aiLoading: "AI\u2026",
     aiErrorPrefix: "AI",
     aiSuggestionLabel: "AI suggestion \u2014 review and adjust",
     aiStagedReady: "AI suggestion ready",
@@ -1990,7 +1989,7 @@ const en = {
     aiRetry: "Retry",
     explainTooltip: "Explain this conflict in plain language",
     explain: "Explain",
-    explainAnalyzing: "Analysing\u2026",
+    explainAnalyzing: "Analysing",
     analyzingConflict: "Analysing conflict\u2026",
     // Custom automation
     automationRun: "Run automation",

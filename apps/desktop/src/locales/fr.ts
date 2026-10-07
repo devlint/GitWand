@@ -552,7 +552,7 @@ const fr: Locale = {
     thresholdSummary: "{0} auto-resolvables, {1} retenus par le seuil, {2} manuels",
     aiRisk: "Analyse des risques",
     aiRiskHint: "Demande \u00e0 l'IA un avis sur la s\u00e9curit\u00e9 de ce merge.",
-    aiRiskAnalyzing: "Analyse des risques\u2026",
+    aiRiskAnalyzing: "Analyse des risques",
     analyzing: "Analyse en cours\u2026",
     noConflicts: "Merge propre",
     fullyAuto: "100\u00a0% auto-résolvable",
@@ -622,7 +622,7 @@ const fr: Locale = {
     done: "Rebase termin\u00e9",
     aiSquashSuggest: "Sugg\u00e9rer un squash",
     aiSquashHint: "Analyse les commits pour proposer des groupes \u00e0 squasher par intention.",
-    aiSquashApplying: "Analyse\u2026",
+    aiSquashApplying: "Analyse",
     aiSquashApply: "Appliquer",
     aiSquashEmpty: "L'IA n'a rien trouv\u00e9 \u00e0 squasher \u2014 chaque commit a une intention distincte.",
     aiSquashClose: "Fermer",
@@ -877,7 +877,7 @@ const fr: Locale = {
       reviewersLoading: "Chargement des reviewers\u2026",
       // AI
       aiGenerate: "G\u00e9n\u00e9rer avec l'IA",
-      aiGenerating: "G\u00e9n\u00e9ration\u2026",
+      aiGenerating: "G\u00e9n\u00e9ration",
       aiHint: "Analyse les commits entre les deux branches pour proposer un titre et une description.",
       aiReplaceConfirm: "Le titre et la description actuels seront remplac\u00e9s. Continuer ?",
       // Built-in templates
@@ -1895,7 +1895,7 @@ const fr: Locale = {
     kindCheckout: "Checkout",
     kindResolution: "Résolution appliquée",
     aiLabel: "Résumer avec l'IA",
-    aiLabelPending: "Résumé en cours…",
+    aiLabelPending: "Résumé en cours",
     toastUndo: "Annuler",
     toastDiscard: "{0} fichier(s) abandonné(s)",
     toastReset: "Reset vers {0}",
@@ -1957,7 +1957,6 @@ const fr: Locale = {
   mergeEditor: {
     editAriaLabel: "Modifier le conflit {0}",
     aiButton: "IA",
-    aiLoading: "IA\u2026",
     aiErrorPrefix: "IA",
     aiSuggestionLabel: "Suggestion IA \u2014 relis et ajuste",
     aiStagedReady: "Suggestion IA prête",
@@ -1966,7 +1965,7 @@ const fr: Locale = {
     aiRetry: "Réessayer",
     explainTooltip: "Expliquer ce conflit en langage naturel",
     explain: "Expliquer",
-    explainAnalyzing: "Analyse\u2026",
+    explainAnalyzing: "Analyse",
     analyzingConflict: "Analyse du conflit\u2026",
     // Custom automation
     automationRun: "Lancer l'automatisation",
