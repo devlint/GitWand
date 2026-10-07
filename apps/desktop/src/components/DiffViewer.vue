@@ -1367,11 +1367,12 @@ function onDiffScroll() {
 }
 
 .line-content {
+  vertical-align: top;
   padding: 0 12px;
   font-size: var(--text-base);
-  white-space: pre;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* Never truncate code: soft-wrap long lines, keep indentation. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .diff-line--add .line-content {
@@ -1404,9 +1405,8 @@ function onDiffScroll() {
   width: calc(50% - 60px);
   padding: 0 8px;
   font-size: var(--text-base);
-  white-space: pre;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .sbs-gutter {

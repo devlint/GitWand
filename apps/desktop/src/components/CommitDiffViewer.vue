@@ -774,6 +774,7 @@ function onContentScroll(e: Event) {
   color: var(--color-text-subtle);
   opacity: 0.5;
   user-select: none;
+  vertical-align: top;
   border-right: 1px solid var(--color-border);
 }
 
@@ -785,17 +786,19 @@ function onContentScroll(e: Event) {
   font-size: var(--text-base);
   color: var(--color-text-muted);
   user-select: none;
+  vertical-align: top;
 }
 
 .cdv-line--add .cdv-line-marker { color: var(--color-success); font-weight: var(--font-bold); }
 .cdv-line--delete .cdv-line-marker { color: var(--color-danger); font-weight: var(--font-bold); }
 
 .cdv-line-content {
+  vertical-align: top;
   padding: 0 10px;
   font-size: var(--text-base);
-  white-space: pre;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* Never truncate code: soft-wrap long lines, keep indentation. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 /* ─── Side-by-side mode ──────────────────────────────── */
