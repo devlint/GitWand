@@ -9,6 +9,7 @@ import { useWorkspaceScope } from "../composables/useWorkspaceScope";
 import { PR_PANEL_KEY, type PrPanelState } from "../composables/usePrPanel";
 import { useBranchPrSearch } from "../composables/useBranchPrSearch";
 import { useResizeObserver } from "../composables/useResizeObserver";
+import { useStickyWidth } from "../composables/useStickyWidth";
 
 defineOptions({ inheritAttrs: false });
 
@@ -842,23 +843,6 @@ const graphWidthRaw = computed(() => {
   return Math.max(SVG_MIN_W, GRAPH_PAD + (layout.value.maxLane + 1) * LANE_W + GRAPH_PAD);
 });
 
-// While a pagination burst is running, the DAG is cut mid-history: branches
-// whose merge-base sits on a page not loaded yet hold transient extra lanes,
-// so maxLane (and thus the graph column width) can spike for one page and
-// settle on the next — visible as the left column twitching. Ratchet the
-// width while loading (grow only) and re-adopt the exact computed value once
-// the burst ends, so a repo/filter switch can still shrink it.
-let _burstMaxWidth = 0;
-const graphWidth = computed(() => {
-  const w = graphWidthRaw.value;
-  if (showLoadingMore.value) {
-    if (w > _burstMaxWidth) _burstMaxWidth = w;
-    return _burstMaxWidth;
-  }
-  _burstMaxWidth = w;
-  return w;
-});
-
 const totalHeight = computed(() => renderedCommits.value.length * ROW_H);
 
 // ─── Lane colours — rainbow spectrum left-to-right ───────
@@ -1103,6 +1087,14 @@ watch(() => props.hasMore, (has) => {
   }
 });
 onUnmounted(clearLoadingHideTimer);
+
+// The raw width is transient: a pagination burst cuts the DAG mid-history
+// (branches whose merge-base is on a page not loaded yet hold extra lanes),
+// and a periodic refresh or branch switch briefly reloads only the first page
+// (fewer lanes) before pagination fills it back in — both visible as the left
+// column twitching. Grow immediately, but only shrink once the raw width has
+// held still for 1.5 s with no page loading.
+const graphWidth = useStickyWidth(graphWidthRaw, showLoadingMore, 1500);
 
 function measureViewport() {
   if (scrollContainer.value) clientHeight.value = scrollContainer.value.clientHeight;
