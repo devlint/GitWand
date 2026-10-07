@@ -18,7 +18,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { computeDagLayout, parseRefs } from "../dagLayout";
+import { buildLaneIndex, computeDagLayout, mergeLaneIsClear, parseRefs } from "../dagLayout";
 
 describe("parseRefs", () => {
   it("does not classify a slash-containing name as remote by default", () => {
@@ -77,5 +77,74 @@ describe("computeDagLayout — WIP on trunk", () => {
     const layout = computeDagLayout(commits, "WIP");
     expect(layout.nodes.map((n) => n.lane)).toEqual([0, 0, 0]);
     expect(layout.maxLane).toBe(0);
+  });
+});
+
+describe("mergeLaneIsClear", () => {
+  function mergeEdge(layout: ReturnType<typeof computeDagLayout>) {
+    const e = layout.edges.find((x) => x.isMerge);
+    if (!e) throw new Error("no merge edge");
+    return e;
+  }
+
+  it("is clear when nothing sits in the merged branch's lane before its parent", () => {
+    // M merges feature f1 into main; f1 gets its own lane down to a1.
+    const layout = computeDagLayout([
+      { hashFull: "M", parents: ["a2", "f1"] },
+      { hashFull: "a2", parents: ["a1"] },
+      { hashFull: "f1", parents: ["a1"] },
+      { hashFull: "a1", parents: [] },
+    ]);
+    const e = mergeEdge(layout);
+    expect(e.toLane).not.toBe(e.fromLane);
+    expect(mergeLaneIsClear(buildLaneIndex(layout), e)).toBe(true);
+  });
+
+  it("is blocked when another commit sits in the parent's lane between the rows", () => {
+    // Feature F2 merges m2 from main, but main moved on (m3) — m3 sits on
+    // lane 0 between F2 and m2, so a curve into lane 0 would hide where the
+    // merge actually lands.
+    const layout = computeDagLayout(
+      [
+        { hashFull: "F2", parents: ["F1", "m2"] },
+        { hashFull: "m3", parents: ["m2"] },
+        { hashFull: "F1", parents: ["m1"] },
+        { hashFull: "m2", parents: ["m1"] },
+        { hashFull: "m1", parents: [] },
+      ],
+      "m3",
+    );
+    const e = mergeEdge(layout);
+    expect(e.toLane).toBe(0);
+    expect(mergeLaneIsClear(buildLaneIndex(layout), e)).toBe(false);
+  });
+
+  it("is blocked when an edge to another parent runs down the lane", () => {
+    const e = { fromIndex: 1, fromLane: 1, toIndex: 4, toLane: 0, isMerge: true };
+    const index = buildLaneIndex({
+      nodes: [
+        { index: 0, hash: "a", parents: ["z"], lane: 0 },
+        { index: 1, hash: "b", parents: ["c", "y"], lane: 1 },
+        { index: 4, hash: "y", parents: [], lane: 0 },
+        { index: 6, hash: "z", parents: [], lane: 0 },
+      ],
+      edges: [{ fromIndex: 0, fromLane: 0, toIndex: 6, toLane: 0, isMerge: false }, e],
+      maxLane: 1,
+    });
+    expect(mergeLaneIsClear(index, e)).toBe(false);
+  });
+
+  it("ignores an edge converging on the same parent", () => {
+    const e = { fromIndex: 1, fromLane: 1, toIndex: 4, toLane: 0, isMerge: true };
+    const index = buildLaneIndex({
+      nodes: [
+        { index: 0, hash: "a", parents: ["y"], lane: 0 },
+        { index: 1, hash: "b", parents: ["c", "y"], lane: 1 },
+        { index: 4, hash: "y", parents: [], lane: 0 },
+      ],
+      edges: [{ fromIndex: 0, fromLane: 0, toIndex: 4, toLane: 0, isMerge: false }, e],
+      maxLane: 1,
+    });
+    expect(mergeLaneIsClear(index, e)).toBe(true);
   });
 });
