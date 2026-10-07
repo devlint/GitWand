@@ -109,6 +109,8 @@ function cleanMessage(raw: string | undefined | null): string {
 }
 
 const isGenerating = ref(false);
+/** Repo the in-flight generation/transform belongs to (null when unknown). */
+const generatingCwd = ref<string | null>(null);
 const lastError = ref<string | null>(null);
 const lastMessage = ref<string | null>(null);
 
@@ -127,6 +129,7 @@ export function useCommitMessage() {
     const { locale = "fr", maxDiffChars = 16_000, systemPromptOverride } = options;
 
     isGenerating.value = true;
+    generatingCwd.value = cwd;
     lastError.value = null;
     lastMessage.value = null;
 
@@ -200,6 +203,7 @@ export function useCommitMessage() {
       throw err;
     } finally {
       isGenerating.value = false;
+      generatingCwd.value = null;
     }
   }
 
@@ -210,8 +214,10 @@ export function useCommitMessage() {
     action: CommitMessageAction,
     currentMessage: string,
     targetLocale?: string,
+    cwd?: string,
   ): Promise<string> {
     isGenerating.value = true;
+    generatingCwd.value = cwd ?? null;
     lastError.value = null;
 
     try {
@@ -235,11 +241,13 @@ export function useCommitMessage() {
       throw err;
     } finally {
       isGenerating.value = false;
+      generatingCwd.value = null;
     }
   }
 
   return {
     isGenerating,
+    generatingCwd,
     lastError,
     lastMessage,
     generate,

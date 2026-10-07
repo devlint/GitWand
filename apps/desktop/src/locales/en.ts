@@ -191,7 +191,6 @@ const en = {
     tabLog: "Log",
     tabGraph: "Graph",
     gitTree: "Git Tree",
-    wipTab: "WIP",
     toggleCommitPanel: "Commit panel",
     togglePrPanel: "Pull requests panel",
     toggleFilesPanel: "Files panel",

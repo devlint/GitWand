@@ -184,7 +184,6 @@ const fr: Locale = {
     tabLog: "Log",
     tabGraph: "Graphe",
     gitTree: "Arbre Git",
-    wipTab: "WIP",
     toggleCommitPanel: "Panneau de commit",
     togglePrPanel: "Panneau de pull requests",
     toggleFilesPanel: "Panneau de fichiers",

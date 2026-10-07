@@ -704,7 +704,7 @@ async function onAiAction(action: "regenerate" | "shorten" | "detail" | "changeL
   if (!currentMsg.trim()) return;
   const cwd = props.cwd;
   try {
-    const msg = await transformCommitMsg(action, currentMsg, targetLocale);
+    const msg = await transformCommitMsg(action, currentMsg, targetLocale, cwd);
     applyMessage(cwd, msg);
   } catch {
     // aiError is set by the composable.

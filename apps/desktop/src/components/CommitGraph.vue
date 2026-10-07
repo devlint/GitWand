@@ -549,7 +549,11 @@ const totalChanges = computed(() => {
 const hasChanges = computed(() => totalChanges.value > 0);
 
 // WIP row preview: the draft summary, or an AI indicator while one is generated.
-const { isGenerating: isGeneratingCommitMsg } = useCommitMessage();
+// The generation state is app-global: only show it on the repo it runs for.
+const { isGenerating, generatingCwd } = useCommitMessage();
+const isGeneratingCommitMsg = computed(() =>
+  isGenerating.value && (generatingCwd.value === null || generatingCwd.value === (props.cwd ?? "")),
+);
 const wipSummaryPreview = computed(() => props.wipSummary?.trim() ?? "");
 
 const displayCommits = computed(() => {

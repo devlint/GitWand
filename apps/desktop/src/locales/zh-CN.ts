@@ -194,7 +194,6 @@ const zhCN: Locale = {
     tabLog: "日志",
     tabGraph: "图谱",
     gitTree: "Git 树图",
-    wipTab: "WIP",
     toggleCommitPanel: "提交面板",
     togglePrPanel: "拉取请求面板",
     toggleFilesPanel: "文件面板",

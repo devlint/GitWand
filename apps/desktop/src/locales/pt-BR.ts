@@ -191,7 +191,6 @@ const ptBR: Locale = {
     tabLog: "Histórico",
     tabGraph: "Grafo",
     gitTree: "Árvore Git",
-    wipTab: "WIP",
     toggleCommitPanel: "Painel de commit",
     togglePrPanel: "Painel de pull requests",
     toggleFilesPanel: "Painel de arquivos",
