@@ -191,7 +191,6 @@ const en = {
     tabLog: "Log",
     tabGraph: "Graph",
     gitTree: "Git Tree",
-    wipTab: "WIP",
     toggleCommitPanel: "Commit panel",
     togglePrPanel: "Pull requests panel",
     toggleFilesPanel: "Files panel",
@@ -1475,10 +1474,6 @@ const en = {
       showFiles: "Show Files",
       gitTreeLocked: "Git Tree & WIP",
       lockedHint: "Always shown — cannot be removed.",
-      hideChangesWhenEmpty: {
-        label: "Hide WIP when clean",
-        help: "Hide the WIP tab next to the Git Tree while the working tree has no changes.",
-      },
       iconsOnly: {
         label: "Icons only",
         help: "Hide the text labels in the dock and show only icons.",
@@ -1515,7 +1510,6 @@ const en = {
       menu: {
         remove: "Remove from dock",
         setStartup: "Set as startup view",
-        hideChangesWhenEmpty: "Hide when clean",
         lock: "Lock dock",
         unlock: "Unlock dock",
         hideText: "Hide text",

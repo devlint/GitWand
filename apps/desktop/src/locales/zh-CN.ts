@@ -194,7 +194,6 @@ const zhCN: Locale = {
     tabLog: "日志",
     tabGraph: "图谱",
     gitTree: "Git 树图",
-    wipTab: "WIP",
     toggleCommitPanel: "提交面板",
     togglePrPanel: "拉取请求面板",
     toggleFilesPanel: "文件面板",
@@ -1155,10 +1154,6 @@ const zhCN: Locale = {
       showFiles: "显示文件",
       gitTreeLocked: "Git 树和 WIP",
       lockedHint: "始终显示 — 无法移除。",
-      hideChangesWhenEmpty: {
-        label: "工作区干净时隐藏「WIP」",
-        help: "当工作区没有更改时，隐藏 Git 树旁的「WIP」标签。",
-      },
       iconsOnly: {
         label: "仅图标",
         help: "隐藏停靠栏中的文字标签，仅显示图标。",
@@ -1195,7 +1190,6 @@ const zhCN: Locale = {
       menu: {
         remove: "从停靠栏移除",
         setStartup: "设为启动视图",
-        hideChangesWhenEmpty: "干净时隐藏",
         lock: "锁定停靠栏",
         unlock: "解锁停靠栏",
         hideText: "隐藏文字",

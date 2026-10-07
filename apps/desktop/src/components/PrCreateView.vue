@@ -33,26 +33,34 @@ const emit = defineEmits<{ (e: "cancel"): void }>();
 const p = inject<PrPanelState>(PR_PANEL_KEY)!;
 const { t, locale } = useI18n();
 const ai = useAIProvider();
-const { isGenerating: isGeneratingPrDescription, generate: generatePrDescription } = usePrDescription();
-const aiPrError = ref<string | null>(null);
+const {
+  isGenerating: isGeneratingPrDescription,
+  lastError: aiPrError,
+  generate: generatePrDescription,
+} = usePrDescription();
 
 async function generateWithAI() {
-  aiPrError.value = null;
   const hasContent = p.newPrTitle.value.trim() || p.newPrBody.value.trim();
   if (hasContent && !confirm(t("pr.create.aiReplaceConfirm"))) return;
+  // Write through `p` (App-level state), never through this instance: the
+  // view may have unmounted by the time the model answers, and the result
+  // must still land in the form when the user comes back. Dropped if the
+  // user switched repo meanwhile.
+  const cwd = props.cwd;
   try {
     // PR language: "english" (default) forces English; "ui" follows the app locale.
     const prLang = loadSettings().prAiLanguage === "ui" ? locale.value : "en";
     const result = await generatePrDescription(
-      props.cwd,
+      cwd,
       props.currentBranch,
       p.newPrBase.value,
       { locale: prLang },
     );
+    if (p.cwd.value !== cwd) return;
     if (result.title) p.newPrTitle.value = result.title;
     if (result.body) p.newPrBody.value = result.body;
-  } catch (err: any) {
-    aiPrError.value = err?.message ?? String(err);
+  } catch {
+    // lastError is set by the composable and survives navigation.
   }
 }
 
