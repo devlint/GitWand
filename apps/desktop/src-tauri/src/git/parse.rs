@@ -1385,7 +1385,7 @@ pub(crate) fn has_unresolved_conflicts(cwd: &str) -> bool {
         .map(|o| {
             String::from_utf8_lossy(&o.stdout)
                 .lines()
-                .any(|l| matches!(l.get(..2), Some("UU" | "AA" | "UD" | "DU" | "AU" | "UA")))
+                .any(|l| matches!(l.get(..2), Some("DD" | "AU" | "UD" | "UA" | "DU" | "AA" | "UU")))
         })
         .unwrap_or(false)
 }

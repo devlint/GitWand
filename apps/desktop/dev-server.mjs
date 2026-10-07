@@ -3411,7 +3411,7 @@ async function handleRequest(req, res) {
         const hasConflict = () => {
           try {
             const out = es("git status --porcelain", { cwd: resolvedCwd, encoding: "utf-8" });
-            return out.split("\n").some(l => ["UU","AA","UD","DU","AU","UA"].includes(l.slice(0,2)));
+            return out.split("\n").some(l => ["DD","AU","UD","UA","DU","AA","UU"].includes(l.slice(0,2)));
           } catch { return false; }
         };
 

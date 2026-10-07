@@ -12,7 +12,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -33,13 +33,30 @@ function gitEnv(): NodeJS.ProcessEnv {
   };
 }
 
-// Route the composable's gitExec to real git.
+// Route the composable's gitExec to real git, and gitRepoState to a reading
+// of the real .git directory — the same files `git_repo_state` reads.
 vi.mock("../../utils/backend", () => ({
   gitExec: vi.fn(async (cwd: string, args: string[]) => {
     const r = spawnSync("git", args, { cwd, env: gitEnv(), encoding: "utf-8" });
     return { stdout: r.stdout ?? "", stderr: r.stderr ?? "", exitCode: r.status ?? 1 };
   }),
   gitInteractiveRebase: vi.fn(),
+  gitRepoState: vi.fn(async (cwd: string) => {
+    const read = (p: string) => (existsSync(p) ? readFileSync(p, "utf-8").trim() : null);
+    const rebaseMerge = join(cwd, ".git", "rebase-merge");
+    if (!existsSync(rebaseMerge)) {
+      return { state: "clean", hasConflict: false, operationHead: null, targetBranch: null, step: 0, total: 0 };
+    }
+    const porcelain = execFileSync("git", ["status", "--porcelain"], { cwd, env: gitEnv(), encoding: "utf-8" });
+    return {
+      state: existsSync(join(rebaseMerge, "interactive")) ? "rebase_interactive" : "rebase",
+      hasConflict: porcelain.split("\n").some((l) => ["DD", "AU", "UD", "UA", "DU", "AA", "UU"].includes(l.slice(0, 2))),
+      operationHead: read(join(cwd, ".git", "REBASE_HEAD")),
+      targetBranch: (read(join(rebaseMerge, "head-name")) ?? "").replace("refs/heads/", "") || null,
+      step: Number(read(join(rebaseMerge, "msgnum")) ?? 0),
+      total: Number(read(join(rebaseMerge, "end")) ?? 0),
+    };
+  }),
 }));
 
 import { useInteractiveRebase } from "../useInteractiveRebase";
@@ -99,6 +116,25 @@ describe("rebaseContinue at a conflict stop", () => {
     const result = await rebase.rebaseContinue(repo);
     expect(result).toMatchObject({ success: true, inProgress: false });
     expect(isRebasing()).toBe(false);
+  }, GIT_TEST_TIMEOUT_MS);
+});
+
+describe("detectRebaseState", () => {
+  it("reads the halt from .git, not from translated `git status` prose", async () => {
+    // A locale the old regexes didn't list: git status says "Sie sind gerade
+    // beim Rebase" and nothing English or French.
+    const { gitExec } = await import("../../utils/backend");
+    vi.mocked(gitExec).mockImplementation(async (cwd: string, args: string[]) => {
+      if (args.includes("status") && !args.includes("--porcelain")) {
+        return { stdout: "Sie sind gerade beim Rebase von Branch 'topic'.\n", stderr: "", exitCode: 0 };
+      }
+      const r = spawnSync("git", args, { cwd, env: gitEnv(), encoding: "utf-8" });
+      return { stdout: r.stdout ?? "", stderr: r.stderr ?? "", exitCode: r.status ?? 1 };
+    });
+    const rebase = useInteractiveRebase();
+    const state = await rebase.detectRebaseState(repo);
+    expect(state).toMatchObject({ inProgress: true, hasConflict: true, headName: "topic", step: 1, total: 2 });
+    vi.mocked(gitExec).mockReset();
   }, GIT_TEST_TIMEOUT_MS);
 });
 
