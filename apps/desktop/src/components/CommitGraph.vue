@@ -955,6 +955,14 @@ function commitRefs(entry: GitLogEntry) {
         return { ...r, type: (match.isRemote ? 'remote' : 'branch') as 'remote' | 'branch' };
       }
       if (r.type === 'ambiguous') {
+        // Unresolved `<remote>/<name>` sitting on the same commit as a local
+        // `<name>` is its remote-tracking twin — classify it as remote so the
+        // dedup below hides it even while props.branches is still loading.
+        const slashIdx = r.name.indexOf('/');
+        const baseName = r.name.slice(slashIdx + 1);
+        if (refs.some(o => (o.type === 'branch' || o.type === 'ambiguous') && o.name === baseName)) {
+          return { ...r, type: 'remote' as const };
+        }
         return { ...r, type: 'branch' as const };
       }
     }
@@ -1055,6 +1063,23 @@ function onScroll() {
 watch(() => props.commits.length, () => {
   _loadMorePending = false;
 });
+
+// Branches are lazy-loaded by the parent and reset on every repo switch.
+// Without them commitRefs() cannot tell `origin/release/9.0.0` from a local
+// branch, so the remote twin of a local branch stays visible on the same row
+// until something else reloads the list. Ask once per repo as soon as the
+// graph has commits to decorate.
+let _branchesRequestedFor: string | null = null;
+watch(
+  () => [props.cwd, props.commits.length > 0, props.branches?.length ?? 0] as const,
+  ([cwd, hasCommits, branchCount]) => {
+    if (!cwd || !hasCommits || branchCount > 0) return;
+    if (_branchesRequestedFor === cwd) return;
+    _branchesRequestedFor = cwd;
+    emit("load-branches");
+  },
+  { immediate: true },
+);
 
 // Pagination loads pages in short bursts, so `loadingMore` flickers off between
 // consecutive pages — binding the spinner to it directly makes it remount (and
