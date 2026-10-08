@@ -1886,6 +1886,7 @@ const ptBR: Locale = {
     kindReset: "Reset",
     kindCheckout: "Checkout",
     kindResolution: "Resolução aplicada",
+    kindMergeBack: "Tarefa integrada",
     aiLabel: "Resumir com IA",
     aiLabelPending: "Resumindo",
     toastUndo: "Desfazer",

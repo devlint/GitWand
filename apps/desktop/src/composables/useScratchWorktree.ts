@@ -10,6 +10,7 @@
  */
 
 import { ref } from "vue";
+import { useSettings } from "./useSettings.js";
 import {
   scratchWorktreeCreate,
   scratchWorktreeMergeBack,
@@ -18,6 +19,7 @@ import {
 } from "../utils/backend.js";
 
 export function useScratchWorktree(cwd: () => string) {
+  const { settings } = useSettings();
   const active = ref<ScratchWorktree | null>(null);
   const loading = ref(false);
   const error = ref<string | null>(null);
@@ -51,7 +53,7 @@ export function useScratchWorktree(cwd: () => string) {
     loading.value = true;
     error.value = null;
     try {
-      await scratchWorktreeMergeBack(originCwd.value, active.value.path);
+      await scratchWorktreeMergeBack(originCwd.value, active.value.path, settings.value.snapshotsEnabled);
       active.value = null;
       originCwd.value = null;
       return true;

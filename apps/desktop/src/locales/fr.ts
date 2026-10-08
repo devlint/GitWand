@@ -1895,6 +1895,7 @@ const fr: Locale = {
     kindReset: "Reset",
     kindCheckout: "Checkout",
     kindResolution: "Résolution appliquée",
+    kindMergeBack: "Tâche ramenée",
     aiLabel: "Résumer avec l'IA",
     aiLabelPending: "Résumé en cours",
     toastUndo: "Annuler",
