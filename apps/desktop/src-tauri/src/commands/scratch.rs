@@ -251,21 +251,26 @@ fn scratch_worktree_create_impl(
 /// Bring the task's changes from the scratch worktree back into the main
 /// checkout, then (unless `keep_worktree`) remove + prune the scratch.
 ///
-/// Mechanism: the scratch worktree shares the repo's object database. We commit
-/// the outstanding work in the scratch — which also concludes a merge the user
-/// resolved there ("Resolve in scratch") — then squash-merge the scratch branch
-/// into the main checkout. The result lands as staged, uncommitted changes for
-/// the user to review.
+/// Mechanism: the scratch worktree shares the repo's object database. Once the
+/// guards below pass, we commit the outstanding work in the scratch — which
+/// also concludes a merge the user resolved there ("Resolve in scratch") — then
+/// squash-merge the scratch branch into the main checkout. The result lands as
+/// staged, uncommitted changes for the user to review.
 ///
 /// Until v3.12.x this overlaid the whole scratch tree (`checkout <branch> -- .`
 /// after `git rm`-ing everything absent from it). Once `main` had moved, that
 /// reverted what `main` changed, deleted what it added and overwrote
-/// uncommitted edits. Now nothing in the main checkout is touched unless all of
-/// this holds:
+/// uncommitted edits. Now the main checkout is never written unless all of the
+/// following holds. The first three are checked before anything is written,
+/// the scratch included, so those refusals leave the agent's work in progress
+/// as it was. The last needs the scratch committed, so a refusal there leaves
+/// that commit in the scratch, which loses nothing.
 ///
-/// - no unmerged index entries (an in-progress merge/rebase);
-/// - the main checkout's `HEAD` is in the scratch branch's history, so the
-///   squash is a fast-forward carrying exactly the task's work;
+/// - no unmerged index entries in the main checkout;
+/// - the main checkout's `HEAD` is in the scratch branch's history (or in the
+///   scratch's pending `MERGE_HEAD`), so the squash is a fast-forward carrying
+///   exactly the task's work;
+/// - no conflict marker left in the scratch's unmerged files;
 /// - git itself accepts the squash. `git merge` checks the whole change set
 ///   before writing anything, so it refuses — changing nothing — when an
 ///   uncommitted edit, an untracked file, an ignored file
@@ -299,6 +304,35 @@ fn has_unmerged_entries(dir: &Path) -> Result<bool, String> {
         .any(|l| l.len() >= 2 && CONFLICT_CODES.contains(&&l[..2])))
 }
 
+/// Unmerged files in `dir` whose working copy still has a conflict marker line.
+/// A binary file can't hold markers, so an unreadable one is taken as resolved.
+fn files_with_conflict_markers(dir: &Path) -> Result<Vec<String>, String> {
+    let output = git_cmd()
+        .args(["diff", "--name-only", "--diff-filter=U", "-z"])
+        .current_dir(dir)
+        .output()
+        .map_err(|e| format!("git diff failed to spawn: {}", e))?;
+    if !output.status.success() {
+        return Err(format!(
+            "git diff failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    let mut found: Vec<String> = String::from_utf8_lossy(&output.stdout)
+        .split('\0')
+        .filter(|p| !p.is_empty())
+        .filter(|p| {
+            std::fs::read_to_string(dir.join(p)).is_ok_and(|text| {
+                text.lines()
+                    .any(|l| l.starts_with("<<<<<<<") || l.starts_with(">>>>>>>"))
+            })
+        })
+        .map(str::to_string)
+        .collect();
+    found.dedup();
+    Ok(found)
+}
+
 fn scratch_worktree_merge_back_impl(
     cwd: String,
     scratch_path: String,
@@ -318,56 +352,48 @@ fn scratch_worktree_merge_back_impl(
 
     let scratch_branch = git_in(&scratch, &["symbolic-ref", "--short", "HEAD"])?;
 
-    // Commit any outstanding work in the scratch so its tree is a durable
-    // object in the shared DB. This only touches the scratch. A merge pending
-    // there is concluded by this commit, but not with conflict markers in it:
-    // `add -A` would silently mark them resolved.
-    let pending_conflicts = has_unmerged_entries(&scratch)?;
-    git_in(&scratch, &["add", "-A"])?;
-    if pending_conflicts {
-        let check = git_cmd()
-            .args(["diff", "--cached", "--check"])
-            .current_dir(&scratch)
-            .output()
-            .map_err(|e| format!("git diff --check failed to spawn: {}", e))?;
-        let report = String::from_utf8_lossy(&check.stdout);
-        let markers: Vec<&str> = report
-            .lines()
-            .filter(|l| l.contains("leftover conflict marker"))
-            .collect();
-        if !markers.is_empty() {
-            let _ = git_in(&scratch, &["reset", "-q"]);
-            return Err(format!(
-                "{} still has conflict markers; resolve them first: {}",
-                scratch_branch,
-                markers.join(", ")
-            ));
-        }
-    }
-    let scratch_status = git_in(&scratch, &["status", "--porcelain"])?;
-    if !scratch_status.trim().is_empty() {
-        git_in(
-            &scratch,
-            &["commit", "-q", "-m", "gitwand: scratch resolution"],
-        )?;
-    }
-
     // GUARD: the main checkout's HEAD must be in the task's history. Otherwise
     // `main` moved since the task was created (or the scratch started from
     // another branch and the current one was never merged into it), and
-    // bringing the scratch tree over would undo `main`'s side.
+    // bringing the scratch tree over would undo `main`'s side. A merge pending
+    // in the scratch counts: the commit concluding it has MERGE_HEAD as parent.
+    // Checked before anything is written, the scratch included: a refusal must
+    // not commit the agent's work in progress.
     let head = git_in(&repo_root, &["rev-parse", "--abbrev-ref", "HEAD"])?;
-    if git_in(
-        &repo_root,
-        &["merge-base", "--is-ancestor", "HEAD", &scratch_branch],
-    )
-    .is_err()
+    let in_task_history =
+        |rev: &str| git_in(&repo_root, &["merge-base", "--is-ancestor", "HEAD", rev]).is_ok();
+    let scratch_merge_head = git_in(&scratch, &["rev-parse", "-q", "--verify", "MERGE_HEAD"]).ok();
+    if !in_task_history(&scratch_branch)
+        && !scratch_merge_head.as_deref().is_some_and(in_task_history)
     {
         return Err(format!(
             "{h} is not in the history of {b}: {h} moved since {b} was created, or {b} started from another branch. Nothing was changed. Merge {h} into {b} first, then merge back",
             h = head,
             b = scratch_branch
         ));
+    }
+
+    // GUARD: no conflict markers left in the scratch's unmerged files. Read
+    // from disk rather than staged and checked: undoing an `add` with `reset`
+    // would end the user's merge in the scratch.
+    let markers = files_with_conflict_markers(&scratch)?;
+    if !markers.is_empty() {
+        return Err(format!(
+            "{} still has conflict markers; nothing was changed. Resolve them first: {}",
+            scratch_branch,
+            markers.join(", ")
+        ));
+    }
+
+    // Commit any outstanding work in the scratch so its tree is a durable
+    // object in the shared DB — which also concludes a merge resolved there.
+    git_in(&scratch, &["add", "-A"])?;
+    let scratch_status = git_in(&scratch, &["status", "--porcelain"])?;
+    if !scratch_status.trim().is_empty() {
+        git_in(
+            &scratch,
+            &["commit", "-q", "-m", "gitwand: scratch resolution"],
+        )?;
     }
 
     let nothing_to_bring =
@@ -1081,6 +1107,12 @@ mod tests {
                 .expect_err("conflict markers must not reach the main checkout");
         assert!(err.contains("conflict markers"), "got: {}", err);
         assert_eq!(repo.read("shared.txt"), "main\n");
+        // The refusal must not end the user's merge in the scratch.
+        assert_eq!(
+            scratch_state(&scratch),
+            ("UU shared.txt".to_string(), true),
+            "the scratch's merge must still be in progress"
+        );
 
         let _ = scratch_worktree_discard_impl(repo.cwd(), scratch.path);
     }
@@ -1104,5 +1136,35 @@ mod tests {
         assert_eq!(repo.read("mine.txt"), "my unsaved edit\n");
         let stashes = repo.git(&["stash", "list"]);
         assert!(stashes.stdout.is_empty(), "nothing left in the stash");
+    }
+
+    /// `git status --porcelain` of the scratch, and whether a merge is pending.
+    fn scratch_state(scratch: &ScratchWorktree) -> (String, bool) {
+        let dir = Path::new(&scratch.path);
+        let status = git_in(dir, &["status", "--porcelain"]).unwrap();
+        let merging = git_in(dir, &["rev-parse", "-q", "--verify", "MERGE_HEAD"]).is_ok();
+        (status, merging)
+    }
+
+    #[test]
+    fn merge_back_refusal_leaves_the_scratch_untouched() {
+        // A refused merge-back must not commit the agent's work in progress.
+        let repo = TempRepo::new();
+        repo.write("task.txt", "v1\n");
+        repo.commit_all("base");
+
+        let scratch = scratch_worktree_create_impl(repo.cwd(), None, None).expect("create");
+        repo.write("main.txt", "main moves on\n");
+        repo.commit_all("main moves on");
+        write_in(&scratch, "task.txt", "work in progress\n");
+
+        let dir = Path::new(&scratch.path);
+        let head_before = git_in(dir, &["rev-parse", "HEAD"]).unwrap();
+        scratch_worktree_merge_back_impl(repo.cwd(), scratch.path.clone(), Some(false), false)
+            .expect_err("main moved");
+        assert_eq!(git_in(dir, &["rev-parse", "HEAD"]).unwrap(), head_before);
+        assert_eq!(scratch_state(&scratch), ("M task.txt".to_string(), false));
+
+        let _ = scratch_worktree_discard_impl(repo.cwd(), scratch.path);
     }
 }
