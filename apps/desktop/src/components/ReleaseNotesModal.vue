@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, inject } from "vue";
+import { ref, computed, onMounted } from "vue";
 import { gitListTags, getGitBranches, gitExec, type GitBranch } from "../utils/backend";
 import { useI18n } from "../composables/useI18n";
 import { useSettings } from "../composables/useSettings";
 import { useReleaseNotes, releaseNotesLocale, FROM_PROJECT_START } from "../composables/useReleaseNotes";
 import BaseModal from "./BaseModal.vue";
-import { OPEN_SETTINGS_KEY } from "../composables/branchPickerBridge";
-import { useAiTemplates, getActiveTemplateId, requestedAiTemplateKind } from "../composables/useAiTemplates";
+import AiTemplateMenu from "./AiTemplateMenu.vue";
+import AiSparkle from "./AiSparkle.vue";
+import { useAiTemplates } from "../composables/useAiTemplates";
 
 const props = defineProps<{
   cwd: string;
@@ -23,21 +24,8 @@ const {
   lastError,
 } = useReleaseNotes();
 
-const openSettings = inject(OPEN_SETTINGS_KEY, undefined);
-const { templates, activate } = useAiTemplates("releaseNotes", () => props.cwd);
-const selectedTemplateId = ref<string | null>(null);
-
-function saveTemplate() {
-  activate(selectedTemplateId.value);
-}
-
-function goToSettings() {
-  emit("close");
-  if (openSettings) {
-    requestedAiTemplateKind.value = "releaseNotes";
-    openSettings("aiTemplates");
-  }
-}
+// Active AI template (picked from the Generate split button), shown on the button.
+const { activeTemplate } = useAiTemplates("releaseNotes", () => props.cwd);
 
 const from = ref("");
 const to = ref("HEAD");
@@ -85,7 +73,6 @@ async function previousBranch(localNames: string[]): Promise<string> {
 const { settings } = useSettings();
 
 onMounted(async () => {
-  selectedTemplateId.value = getActiveTemplateId("releaseNotes", props.cwd);
   const [, tags, headSha] = await Promise.all([
     getGitBranches(props.cwd, settings.value.defaultBranch)
       .then((b) => { branches.value = b; })
@@ -179,32 +166,31 @@ async function copy() {
           </optgroup>
         </select>
       </label>
-      <label class="rn-field">
-        <span class="rn-template-label-container">
-          <span>{{ t('dashboard.releaseNotesTemplate') }}</span>
-          <button class="rn-settings-link" @click="goToSettings" :title="t('dashboard.releaseNotesTemplateShortcut')">
-            <svg viewBox="0 0 24 24" width="12" height="12">
-              <path fill="currentColor" d="M19.43 12.98c.04-.32.07-.64.07-.98s-.03-.66-.07-.98l2.11-1.65c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.3-.61-.22l-2.49 1c-.52-.4-1.08-.73-1.69-.98l-.38-2.65C14.46 2.18 14.25 2 14 2h-4c-.25 0-.46.18-.49.42l-.38 2.65c-.61.25-1.17.59-1.69.98l-2.49-1c-.23-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64l2.11 1.65c-.04.32-.07.65-.07.98s.03.66.07.98l-2.11 1.65c-.19.15-.24.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1c.52.4 1.08.73 1.69.98l.38 2.65c.03.24.24.42.49.42h4c.25 0 .46-.18.49-.42l.38-2.65c.61-.25 1.17-.59 1.69-.98l2.49 1c.23.09.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.65zM12 15.5c-1.93 0-3.5-1.57-3.5-3.5s1.57-3.5 3.5-3.5 3.5 1.57 3.5 3.5-1.57 3.5-3.5 3.5z"/>
-            </svg>
-          </button>
-        </span>
-        <select v-model="selectedTemplateId" class="rn-input" @change="saveTemplate">
-          <option :value="null">{{ t('settings.aiTemplates.default') }}</option>
-          <option v-for="tpl in templates" :key="tpl.id" :value="tpl.id">{{ tpl.name }}</option>
-        </select>
-      </label>
-      <button
-        class="bm-btn bm-btn--primary rn-btn-sm rn-generate"
-        :class="{ 'rn-generate--loading ai-loading': isGenerating }"
-        :disabled="isGenerating || !from.trim() || !to.trim()"
-        @click="runGenerate"
-      >
-        <span class="rn-generate-label">{{ t('dashboard.releaseNotesGenerate') }}</span>
-        <svg v-if="isGenerating" class="rn-generate-loader" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
-          <circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.5" fill="none" opacity="0.3" />
-          <path d="M7 1.5A5.5 5.5 0 0112.5 7" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" />
-        </svg>
-      </button>
+      <div class="rn-split">
+        <button
+          type="button"
+          class="btn btn--ai rn-ai-btn rn-split-main"
+          :disabled="isGenerating || !from.trim() || !to.trim()"
+          @click="runGenerate"
+        >
+          <span v-if="isGenerating" class="rn-ai-label ai-loading">
+            <span class="rn-spinner" aria-hidden="true"></span>
+            {{ t('pr.create.aiGenerating') }}
+          </span>
+          <span v-else class="rn-ai-label">
+            <AiSparkle :size="13" />
+            {{ t('dashboard.releaseNotesGenerate') }}
+            <span v-if="activeTemplate" class="rn-active-tpl">· {{ activeTemplate.name }}</span>
+          </span>
+        </button>
+        <AiTemplateMenu
+          kind="releaseNotes"
+          :cwd="cwd"
+          :disabled="isGenerating"
+          chevron-class="btn btn--ai rn-ai-btn rn-split-chevron"
+          @manage="emit('close')"
+        />
+      </div>
     </div>
     <p v-if="lastError" class="rn-error">{{ lastError }}</p>
     <textarea
@@ -234,28 +220,6 @@ async function copy() {
 .rn-field { display: flex; flex-direction: column; gap: var(--space-1); font-size: var(--font-size-xs); color: var(--color-text-muted); }
 .rn-sep { padding-bottom: var(--space-3); color: var(--color-text-muted); }
 
-.rn-btn-sm {
-  height: 32px;
-  padding: var(--space-2) var(--space-4);
-  font-size: var(--font-size-sm);
-  line-height: 1;
-}
-
-/* Loader swap: keep the label in the DOM (reserves width across states and
-   locales) but hide it while generating, with the sparkle centred on top. */
-.rn-generate { position: relative; }
-.rn-generate--loading .rn-generate-label { visibility: hidden; }
-.rn-generate-loader {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  margin: -7px 0 0 -7px; /* half the 14px box — keeps it centred under rotation */
-  animation: rn-spin 0.7s linear infinite;
-}
-
-@keyframes rn-spin {
-  to { transform: rotate(360deg); }
-}
 
 .rn-input,
 .rn-textarea {
@@ -303,28 +267,63 @@ select.rn-input {
   border-left: 3px solid var(--color-danger, #ef4444);
 }
 
-.rn-template-label-container {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
+/* Generate split button — the PR view's AI button (.btn--ai + sparkle),
+   taller to line up with the ref selects. The chevron lives in
+   AiTemplateMenu, styled from here via :deep(). */
+.rn-split {
+  display: inline-flex;
+  margin-left: auto;
 }
-
-.rn-settings-link {
+.rn-split :deep(.btn.btn--ai.rn-ai-btn) {
+  height: 32px;
+  min-height: 32px;
+  padding: 0 12px;
+  font-size: var(--font-size-sm);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+}
+.rn-split :deep(.btn.btn--ai.rn-ai-btn:hover:not(:disabled)) {
+  color: var(--color-ai-text);
+  transform: none;
+  background:
+    linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-hover) 100%) padding-box,
+    linear-gradient(135deg, var(--color-accent) 0%, #c084fc 50%, var(--color-accent) 100%) border-box;
+}
+.rn-split .btn.btn--ai.rn-split-main {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.rn-split :deep(.btn.btn--ai.rn-split-chevron) {
+  padding: 0 8px;
+  margin-left: -1px;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+.rn-ai-label {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  background: none;
-  border: none;
-  padding: 0;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  opacity: 0.7;
-  transition: opacity var(--transition-fast), color var(--transition-fast);
+  gap: 6px;
 }
-
-.rn-settings-link:hover {
-  opacity: 1;
-  color: var(--color-accent);
+.rn-active-tpl {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.7;
+}
+.rn-spinner {
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: rn-spin 0.7s linear infinite;
+}
+@keyframes rn-spin {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rn-spinner { animation: none; }
 }
 </style>
 

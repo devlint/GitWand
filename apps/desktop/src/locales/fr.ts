@@ -332,8 +332,6 @@ const fr: Locale = {
     releaseNotesRemoteBranches: "Branches distantes",
     releaseNotesTags: "Tags",
     releaseNotesFromCreation: "Depuis la création du projet",
-    releaseNotesTemplate: "Modèle",
-    releaseNotesTemplateShortcut: "Configurer les modèles",
   },
 
   // ─── FileList (merge mode) ──────────────────────────────
@@ -1298,6 +1296,7 @@ const fr: Locale = {
       langOverrideNote: "Vous pouvez imposer une autre langue dans le modèle lui-même — écrivez-la à la place de ${lang}.",
       prFormatHint: "Continuez à demander un objet JSON avec les clés « title » et « body » — sinon la première ligne devient le titre et le reste la description.",
       picker: "Modèle IA",
+      manage: "Gérer les modèles…",
     },
     aiHistory: {
       title: "Historique des conflits pour l'IA",

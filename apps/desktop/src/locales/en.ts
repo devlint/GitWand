@@ -339,8 +339,6 @@ const en = {
     releaseNotesRemoteBranches: "Remote branches",
     releaseNotesTags: "Tags",
     releaseNotesFromCreation: "From the project creation",
-    releaseNotesTemplate: "Template",
-    releaseNotesTemplateShortcut: "Configure templates",
   },
 
   // ─── FileList (merge mode) ──────────────────────────────
@@ -1314,6 +1312,7 @@ const en = {
       langOverrideNote: "You can override the language in the template itself — write it instead of ${lang}.",
       prFormatHint: "Keep asking for a JSON object with \"title\" and \"body\" keys — otherwise the first line becomes the title and the rest the description.",
       picker: "AI template",
+      manage: "Manage templates…",
     },
     aiHistory: {
       title: "Conflict history for AI",

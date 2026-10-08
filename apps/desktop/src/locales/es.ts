@@ -327,8 +327,6 @@ const es: Locale = {
     releaseNotesRemoteBranches: "Ramas remotas",
     releaseNotesTags: "Etiquetas",
     releaseNotesFromCreation: "Desde la creación del proyecto",
-    releaseNotesTemplate: "Plantilla",
-    releaseNotesTemplateShortcut: "Configurar plantillas",
   },
 
   // ─── FileList (merge mode) ──────────────────────────────
@@ -1289,6 +1287,7 @@ const es: Locale = {
       langOverrideNote: "Puedes sobrescribir el idioma en la propia plantilla: escríbelo en lugar de ${lang}.",
       prFormatHint: "Sigue pidiendo un objeto JSON con las claves \"title\" y \"body\"; si no, la primera línea será el título y el resto la descripción.",
       picker: "Plantilla de IA",
+      manage: "Gestionar plantillas…",
     },
     aiHistory: {
       title: "Historial de conflictos para la IA",

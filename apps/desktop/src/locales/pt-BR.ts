@@ -328,8 +328,6 @@ const ptBR: Locale = {
     releaseNotesRemoteBranches: "Branches remotas",
     releaseNotesTags: "Tags",
     releaseNotesFromCreation: "Desde a criação do projeto",
-    releaseNotesTemplate: "Modelo",
-    releaseNotesTemplateShortcut: "Configurar modelos",
   },
 
   // ─── FileList (merge mode) ──────────────────────────────
@@ -1290,6 +1288,7 @@ const ptBR: Locale = {
       langOverrideNote: "Você pode sobrescrever o idioma no próprio modelo — escreva-o no lugar de ${lang}.",
       prFormatHint: "Continue pedindo um objeto JSON com as chaves \"title\" e \"body\" — caso contrário, a primeira linha vira o título e o resto a descrição.",
       picker: "Modelo de IA",
+      manage: "Gerenciar modelos…",
     },
     aiHistory: {
       title: "Histórico de conflitos para a IA",

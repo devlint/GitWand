@@ -330,8 +330,6 @@ const zhCN: Locale = {
     releaseNotesRemoteBranches: "远程分支",
     releaseNotesTags: "标签",
     releaseNotesFromCreation: "从项目创建开始",
-    releaseNotesTemplate: "模板",
-    releaseNotesTemplateShortcut: "配置模板",
   },
 
   fileList: {
@@ -1367,6 +1365,7 @@ const zhCN: Locale = {
       langOverrideNote: "你也可以在模板中直接指定语言——用具体语言替换 ${lang} 即可。",
       prFormatHint: "请继续要求返回包含 \"title\" 和 \"body\" 键的 JSON 对象，否则第一行会作为标题，其余部分作为描述。",
       picker: "AI 模板",
+      manage: "管理模板…",
     },
     aiHistory: {
       title: "供 AI 参考的冲突历史",
