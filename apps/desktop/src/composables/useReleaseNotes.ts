@@ -3,7 +3,8 @@ import { gitExec } from "../utils/backend";
 import { useAIProvider } from "./useAIProvider";
 import { localeLabels, type SupportedLocale } from "../locales";
 import { t } from "./useI18n";
-import { getActiveTemplate } from "./useReleaseNoteTemplates";
+import { getActiveTemplate } from "./useAiTemplates";
+import { applyLang, DEFAULT_TEMPLATE_PROMPTS } from "./aiTemplateDefaults";
 
 
 /**
@@ -92,33 +93,7 @@ Rules:
 - Keep the whole output under 3000 characters.`;
   }
 
-  return `You write clean, user-facing release notes from a list of Git
-commits.
-
-Rules:
-- Output strict Markdown, ready to paste into a GitHub release or a
-  CHANGELOG.md. No code fences around the whole thing, no preamble
-  outside the document itself.
-- Structure the notes with the following sections, ONLY if non-empty:
-    ## Added     — new user-facing features
-    ## Changed   — improvements, renames, perf
-    ## Fixed     — bug fixes
-    ## Security  — CVE / auth / trust fixes
-    ## Breaking changes — API / behaviour breaks (top priority)
-    ## Internal  — tooling / CI / refactor with no user impact
-- Each bullet is ONE line, user-centric, imperative. No commit hashes,
-  no author names, no trailers.
-- Merge commits, release bumps ("chore: 1.2.3"), and pure-noise
-  commits ("wip", "fix typo") should be collapsed into a single
-  bullet in the matching section, or dropped entirely.
-- Write every heading and bullet in ${lang}. Keep the headings in
-  ${lang} (Ajouté / Modifié / Corrigé / Sécurité / Changements bloquants
-  / Interne in French; Added / Changed / Fixed / Security / Breaking
-  changes / Internal in English).
-- Start the output with a single H2 heading that includes the target
-  ref (e.g. "## Release v1.3.0") — never higher than H2.
-- Keep the whole output under 3000 characters.
-- Do not invent features that aren't in the commit list.`;
+  return applyLang(DEFAULT_TEMPLATE_PROMPTS.releaseNotes, lang);
 }
 
 function buildUserPrompt(
@@ -240,12 +215,16 @@ export function useReleaseNotes() {
         throw new Error(t("errors.noCommitsInRange", fromRef, toRef));
       }
 
-      let systemPrompt = buildSystemPrompt(locale, fromProjectStart);
-      const template = getActiveTemplate(cwd);
-      if (template && template.customRules.trim()) {
-        systemPrompt += `\n\nAdditional instructions and custom rules:\n${template.customRules.trim()}`;
+      // A selected template replaces the default prompt — including the
+      // first-release variant, so the user prompt flags that case instead.
+      const template = getActiveTemplate("releaseNotes", cwd);
+      const systemPrompt = template
+        ? applyLang(template.systemPrompt, localeToEnglishName(locale))
+        : buildSystemPrompt(locale, fromProjectStart);
+      let userPrompt = buildUserPrompt(fromRef, toRef, commits);
+      if (template && fromProjectStart) {
+        userPrompt += "\nThis is the project's very first release: there is no previous version to compare against.";
       }
-      const userPrompt = buildUserPrompt(fromRef, toRef, commits);
 
       const raw = await ai.rawPrompt(systemPrompt, userPrompt);
       if (!raw) {

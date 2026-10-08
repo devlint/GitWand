@@ -3,6 +3,7 @@ import { gitExec } from "../utils/backend";
 import { useAIProvider } from "./useAIProvider";
 import { localeLabels, type SupportedLocale } from "../locales";
 import { t } from "./useI18n";
+import { applyLang, DEFAULT_TEMPLATE_PROMPTS } from "./aiTemplateDefaults";
 
 /**
  * Generates commit messages from the currently staged diff.
@@ -70,19 +71,7 @@ Rules:
 }
 
 function buildSystemPrompt(locale: string): string {
-  const lang = localeToEnglishName(locale);
-  return `You are a senior software engineer writing a Git commit message.
-
-Rules:
-1. Follow the Conventional Commits spec: "<type>(<optional scope>): <subject>".
-   Valid types: feat, fix, refactor, perf, docs, test, chore, build, ci, style.
-2. Subject line MUST be 72 characters or less, imperative mood, no trailing period.
-3. After the subject, leave a blank line, then optionally add a short body (1-3 lines)
-   explaining *why* the change was made. Skip the body for trivial changes.
-4. Write in ${lang}.
-5. Do not include trailers (Co-Authored-By, Signed-off-by, Reviewed-by…) — the user controls those via the GitWand trailer checkboxes.
-6. Never wrap your answer in code fences or add explanations — output ONLY the
-   raw commit message, ready to be passed to \`git commit -m\`.`;
+  return applyLang(DEFAULT_TEMPLATE_PROMPTS.commit, localeToEnglishName(locale));
 }
 
 function buildUserPrompt(diff: string, status: string): string {
@@ -185,7 +174,7 @@ export function useCommitMessage() {
       // The ${lang} placeholder in preset prompts is substituted at this point.
       const lang = localeToEnglishName(locale);
       const systemPrompt = systemPromptOverride
-        ? systemPromptOverride.replace(/\$\{lang\}/g, lang)
+        ? applyLang(systemPromptOverride, lang)
         : buildSystemPrompt(locale);
       const userPrompt = buildUserPrompt(diff, statusRes.stdout ?? "");
 

@@ -6,7 +6,7 @@ import { useSettings } from "../composables/useSettings";
 import { useReleaseNotes, FROM_PROJECT_START } from "../composables/useReleaseNotes";
 import BaseModal from "./BaseModal.vue";
 import { OPEN_SETTINGS_KEY } from "../composables/branchPickerBridge";
-import { useReleaseNoteTemplates, getActiveTemplateId } from "../composables/useReleaseNoteTemplates";
+import { useAiTemplates, getActiveTemplateId, requestedAiTemplateKind } from "../composables/useAiTemplates";
 
 const props = defineProps<{
   cwd: string;
@@ -24,7 +24,7 @@ const {
 } = useReleaseNotes();
 
 const openSettings = inject(OPEN_SETTINGS_KEY, undefined);
-const { templates, activate } = useReleaseNoteTemplates(() => props.cwd);
+const { templates, activate } = useAiTemplates("releaseNotes", () => props.cwd);
 const selectedTemplateId = ref<string | null>(null);
 
 function saveTemplate() {
@@ -34,7 +34,8 @@ function saveTemplate() {
 function goToSettings() {
   emit("close");
   if (openSettings) {
-    openSettings("releaseNotes");
+    requestedAiTemplateKind.value = "releaseNotes";
+    openSettings("aiTemplates");
   }
 }
 
@@ -84,7 +85,7 @@ async function previousBranch(localNames: string[]): Promise<string> {
 const { settings } = useSettings();
 
 onMounted(async () => {
-  selectedTemplateId.value = getActiveTemplateId(props.cwd);
+  selectedTemplateId.value = getActiveTemplateId("releaseNotes", props.cwd);
   const [, tags, headSha] = await Promise.all([
     getGitBranches(props.cwd, settings.value.defaultBranch)
       .then((b) => { branches.value = b; })
@@ -188,7 +189,7 @@ async function copy() {
           </button>
         </span>
         <select v-model="selectedTemplateId" class="rn-input" @change="saveTemplate">
-          <option :value="null">{{ t('settings.ai.releaseNotes.defaultTemplate') }}</option>
+          <option :value="null">{{ t('settings.aiTemplates.default') }}</option>
           <option v-for="tpl in templates" :key="tpl.id" :value="tpl.id">{{ tpl.name }}</option>
         </select>
       </label>

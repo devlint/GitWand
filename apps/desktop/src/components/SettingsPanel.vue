@@ -93,10 +93,25 @@ import {
 import { useLogs, type LogEntry } from "../composables/useLogs";
 import { useIdentity } from "../composables/useIdentity";
 import { useCommitTemplates } from "../composables/useCommitTemplates";
-import { useAiPromptPresets, BUILTIN_PRESETS } from "../composables/useAiPromptPresets";
-import { useReleaseNoteTemplates } from "../composables/useReleaseNoteTemplates";
+import {
+  AI_TEMPLATE_KINDS,
+  builtinTemplates,
+  userTemplates,
+  addTemplate as addAiTemplate,
+  updateTemplate as updateAiTemplate,
+  removeTemplate as removeAiTemplate,
+  requestedAiTemplateKind,
+  type AiTemplate,
+  type AiTemplateKind,
+} from "../composables/useAiTemplates";
+import { DEFAULT_TEMPLATE_ID } from "../composables/aiTemplateDefaults";
 import type { IdentityProfile, CommitTemplate, AiPromptPreset, DockEntryId, ReleaseNoteTemplate } from "../composables/useSettings";
-import { DEFAULT_DOCK_ORDER, normalizeDockOrder, refreshSettings as refreshSharedSettings } from "../composables/useSettings";
+import {
+  DEFAULT_DOCK_ORDER,
+  normalizeDockOrder,
+  refreshSettings as refreshSharedSettings,
+  settingsRevision,
+} from "../composables/useSettings";
 import { gitCommitTemplatePath, openExternalUrl } from "../utils/backend";
 export type { AIProvider };
 
@@ -108,7 +123,7 @@ const props = defineProps<{
   /** Accumulated error log passed down from App.vue */
   errorLog?: LogEntry[];
   /** Open directly on this tab (e.g. "logs" when clicking the error badge) */
-  initialTab?: "general" | "dock" | "dashboard" | "git" | "editor" | "terminal" | "ai" | "automations" | "logs" | "hooks" | "accounts" | "mcp" | "releaseNotes";
+  initialTab?: "general" | "dock" | "dashboard" | "git" | "editor" | "terminal" | "ai" | "automations" | "logs" | "hooks" | "accounts" | "mcp" | "aiTemplates";
   /** Current repo path (for Hooks tab) */
   cwd?: string;
 }>();
@@ -214,6 +229,8 @@ interface Settings {
   aiPromptPresets: AiPromptPreset[];
   activePresetIdByRepo: Record<string, string | null>;
   // v3 Release Note Templates
+  prTemplates: AiPromptPreset[];
+  activePrTemplateIdByRepo: Record<string, string | null>;
   releaseNoteTemplates: ReleaseNoteTemplate[];
   activeReleaseNoteTemplateIdByRepo: Record<string, string | null>;
   // v3.x terminal
@@ -321,6 +338,8 @@ const defaultSettings: Settings = {
   aiPromptPresets: [],
   activePresetIdByRepo: {},
   // v3 Release Note Templates
+  prTemplates: [],
+  activePrTemplateIdByRepo: {},
   releaseNoteTemplates: [],
   activeReleaseNoteTemplateIdByRepo: {},
   // v3.x terminal
@@ -435,7 +454,7 @@ function resetDockPosition() {
 }
 
 // ─── Tab navigation ──────────────────────────────────────
-type SettingsTab = "general" | "dock" | "dashboard" | "git" | "editor" | "terminal" | "ai" | "automations" | "logs" | "hooks" | "accounts" | "mcp" | "releaseNotes";
+type SettingsTab = "general" | "dock" | "dashboard" | "git" | "editor" | "terminal" | "ai" | "automations" | "logs" | "hooks" | "accounts" | "mcp" | "aiTemplates";
 const activeSettingsTab = ref<SettingsTab>(props.initialTab ?? "general");
 
 // ─── Logs tab — formatting + clipboard ──────────────────
@@ -515,7 +534,7 @@ const settingsTabs: { id: SettingsTab; icon: string }[] = [
   { id: "editor", icon: "editor" },
   { id: "terminal", icon: "terminal" },
   { id: "ai", icon: "ai" },
-  { id: "releaseNotes", icon: "releaseNotes" },
+  { id: "aiTemplates", icon: "aiTemplates" },
   { id: "accounts", icon: "accounts" },
   { id: "mcp", icon: "mcp" },
   { id: "automations", icon: "automations" },
@@ -531,7 +550,7 @@ const settingsTabs: { id: SettingsTab; icon: string }[] = [
 const settingsNavGroups: Array<{ labelKey: LocaleKey | null; tabs: SettingsTab[] }> = [
   { labelKey: "settings.navGroupApplication", tabs: ["general", "dock", "dashboard", "editor", "terminal"] },
   { labelKey: "settings.navGroupRepo", tabs: ["git", "hooks", "accounts"] },
-  { labelKey: "settings.navGroupAi", tabs: ["ai", "releaseNotes", "mcp", "automations"] },
+  { labelKey: "settings.navGroupAi", tabs: ["ai", "aiTemplates", "mcp", "automations"] },
   { labelKey: "settings.navGroupSystem", tabs: ["logs"] },
 ];
 
@@ -544,7 +563,7 @@ function tabLabel(id: SettingsTab): string {
     case "editor": return t("settings.tabEditor");
     case "terminal": return t("settings.tabTerminal");
     case "ai": return t("settings.tabAi");
-    case "releaseNotes": return t("settings.tabReleaseNotes");
+    case "aiTemplates": return t("settings.tabAiTemplates");
     case "accounts": return t("settings.tabAccounts");
     case "mcp": return t("settings.tabMcp");
     case "automations": return t("settings.tabAutomations");
@@ -1219,94 +1238,107 @@ async function doImportFromGitMessage() {
   }
 }
 
-// ─── v2.13 AI Prompt Presets ─────────────────────────────
+// ─── AI Templates (commit / PR / release notes) ─────────────
+// Built-ins (Default included) are read-only: view + duplicate. User
+// templates: edit + duplicate + delete. Duplicating opens a prefilled "add"
+// form, so cancelling leaves nothing behind.
 
-const { userPresets, add: addPreset, update: updatePreset, remove: removePreset } = useAiPromptPresets();
+const aiTemplateKind = ref<AiTemplateKind>(requestedAiTemplateKind.value ?? "commit");
+requestedAiTemplateKind.value = null;
 
-const presetForm = ref<{ name: string; description: string; systemPrompt: string }>({
+const aiTemplateKindLabel: Record<AiTemplateKind, LocaleKey> = {
+  commit: "settings.aiTemplates.kindCommit",
+  pr: "settings.aiTemplates.kindPr",
+  releaseNotes: "settings.aiTemplates.kindReleaseNotes",
+};
+const aiTemplateKindHint: Record<AiTemplateKind, LocaleKey> = {
+  commit: "settings.aiTemplates.hintCommit",
+  pr: "settings.aiTemplates.hintPr",
+  releaseNotes: "settings.aiTemplates.hintReleaseNotes",
+};
+
+const aiBuiltinTemplates = computed(() => builtinTemplates(aiTemplateKind.value));
+const aiUserTemplates = computed(() => {
+  void settingsRevision.value;
+  return userTemplates(aiTemplateKind.value);
+});
+
+const aiTemplateForm = ref<{ name: string; description: string; systemPrompt: string }>({
   name: "", description: "", systemPrompt: "",
 });
-const editingPresetId = ref<string | null>(null);
-const showPresetForm = ref(false);
+/** null = form closed; "view" = read-only built-in. */
+const aiTemplateFormMode = ref<"add" | "edit" | "view" | null>(null);
+const aiTemplateFormId = ref<string | null>(null);
 
-function openAddPreset() {
-  presetForm.value = { name: "", description: "", systemPrompt: "" };
-  editingPresetId.value = null;
-  showPresetForm.value = true;
+function aiTemplateName(tpl: AiTemplate): string {
+  return tpl.id === DEFAULT_TEMPLATE_ID ? t("settings.aiTemplates.default") : tpl.name;
 }
 
-function openEditPreset(preset: AiPromptPreset) {
-  presetForm.value = {
-    name: preset.name,
-    description: preset.description ?? "",
-    systemPrompt: preset.systemPrompt,
+function aiTemplateMeta(tpl: AiTemplate): string {
+  if (tpl.id === DEFAULT_TEMPLATE_ID) return t("settings.aiTemplates.defaultDescription");
+  return tpl.description || tpl.systemPrompt.split("\n", 1)[0];
+}
+
+function openAiTemplateForm(mode: "add" | "edit" | "view", tpl?: AiTemplate, name?: string) {
+  aiTemplateForm.value = {
+    name: name ?? (tpl ? aiTemplateName(tpl) : ""),
+    description: tpl?.description ?? "",
+    systemPrompt: tpl?.systemPrompt ?? "",
   };
-  editingPresetId.value = preset.id;
-  showPresetForm.value = true;
+  aiTemplateFormMode.value = mode;
+  aiTemplateFormId.value = mode === "add" ? null : tpl?.id ?? null;
 }
 
-function savePresetForm() {
-  const { name, description, systemPrompt } = presetForm.value;
-  if (!name.trim() || !systemPrompt.trim()) return;
-  if (editingPresetId.value) {
-    updatePreset(editingPresetId.value, { name, description: description || undefined, systemPrompt });
-  } else {
-    addPreset({ name, description: description || undefined, systemPrompt });
+function closeAiTemplateForm() {
+  aiTemplateFormMode.value = null;
+  aiTemplateFormId.value = null;
+}
+
+function duplicateAiTemplate(tpl: AiTemplate) {
+  openAiTemplateForm("add", tpl, t("settings.aiTemplates.copyName", aiTemplateName(tpl)));
+}
+
+function duplicateViewedAiTemplate() {
+  const tpl = aiBuiltinTemplates.value.find((b) => b.id === aiTemplateFormId.value);
+  if (tpl) duplicateAiTemplate(tpl);
+}
+
+/**
+ * The composable writes straight to localStorage; mirror the template fields
+ * into this panel's own copy so a later updateSetting() doesn't persist a
+ * stale list over them.
+ */
+function syncAiTemplateSettings() {
+  const fresh = loadSettings();
+  settings.value.aiPromptPresets = fresh.aiPromptPresets;
+  settings.value.activePresetIdByRepo = fresh.activePresetIdByRepo;
+  settings.value.prTemplates = fresh.prTemplates;
+  settings.value.activePrTemplateIdByRepo = fresh.activePrTemplateIdByRepo;
+  settings.value.releaseNoteTemplates = fresh.releaseNoteTemplates;
+  settings.value.activeReleaseNoteTemplateIdByRepo = fresh.activeReleaseNoteTemplateIdByRepo;
+}
+
+function saveAiTemplateForm() {
+  const name = aiTemplateForm.value.name.trim();
+  const systemPrompt = aiTemplateForm.value.systemPrompt;
+  if (!name || !systemPrompt.trim()) return;
+  const description = aiTemplateForm.value.description.trim() || undefined;
+  if (aiTemplateFormMode.value === "edit" && aiTemplateFormId.value) {
+    updateAiTemplate(aiTemplateKind.value, aiTemplateFormId.value, { name, description, systemPrompt });
+  } else if (aiTemplateFormMode.value === "add") {
+    addAiTemplate(aiTemplateKind.value, { name, description, systemPrompt });
   }
-  showPresetForm.value = false;
+  syncAiTemplateSettings();
+  closeAiTemplateForm();
 }
 
-// ─── v3 Release Note Templates ─────────────────────────────
-
-const {
-  templates: releaseNoteTemplates,
-  add: addReleaseNoteTemplate,
-  update: updateReleaseNoteTemplate,
-  remove: removeReleaseNoteTemplate,
-} = useReleaseNoteTemplates();
-
-const releaseNoteTemplateForm = ref<{ name: string; customRules: string }>({
-  name: "",
-  customRules: "",
-});
-const editingReleaseNoteTemplateId = ref<string | null>(null);
-const showReleaseNoteTemplateForm = ref(false);
-
-function openAddReleaseNoteTemplate() {
-  releaseNoteTemplateForm.value = { name: "", customRules: "" };
-  editingReleaseNoteTemplateId.value = null;
-  showReleaseNoteTemplateForm.value = true;
+function deleteAiTemplate(id: string) {
+  removeAiTemplate(aiTemplateKind.value, id);
+  syncAiTemplateSettings();
+  if (aiTemplateFormId.value === id) closeAiTemplateForm();
 }
 
-function openEditReleaseNoteTemplate(tpl: ReleaseNoteTemplate) {
-  releaseNoteTemplateForm.value = {
-    name: tpl.name,
-    customRules: tpl.customRules,
-  };
-  editingReleaseNoteTemplateId.value = tpl.id;
-  showReleaseNoteTemplateForm.value = true;
-}
-
-function saveReleaseNoteTemplateForm() {
-  const { name, customRules } = releaseNoteTemplateForm.value;
-  if (!name.trim() || !customRules.trim()) return;
-  if (editingReleaseNoteTemplateId.value) {
-    updateReleaseNoteTemplate(editingReleaseNoteTemplateId.value, { name, customRules });
-  } else {
-    addReleaseNoteTemplate({ name, customRules });
-  }
-  showReleaseNoteTemplateForm.value = false;
-  // Sync the local settings state
-  const updated = loadSettings();
-  settings.value.releaseNoteTemplates = updated.releaseNoteTemplates;
-}
-
-function deleteReleaseNoteTemplate(id: string) {
-  removeReleaseNoteTemplate(id);
-  const updated = loadSettings();
-  settings.value.releaseNoteTemplates = updated.releaseNoteTemplates;
-  settings.value.activeReleaseNoteTemplateIdByRepo = updated.activeReleaseNoteTemplateIdByRepo;
-}
+watch(aiTemplateKind, closeAiTemplateForm);
 
 </script>
 
@@ -1376,7 +1408,7 @@ function deleteReleaseNoteTemplate(id: string) {
                 <circle cx="8" cy="8" r="4" />
                 <circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none" />
               </svg>
-              <svg v-else-if="tab.icon === 'releaseNotes'" width="15" height="15" viewBox="0 0 16 16" fill="none"
+              <svg v-else-if="tab.icon === 'aiTemplates'" width="15" height="15" viewBox="0 0 16 16" fill="none"
                 stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M3 2h7l3 3v9H3z" />
                 <path d="M9 2v4h4" />
@@ -2960,99 +2992,6 @@ function deleteReleaseNoteTemplate(id: string) {
               </div>
             </div>
 
-            <!-- ─── Prompt Presets (v2.13) ─────────────────── -->
-            <div class="sp-section-divider sp-section-divider--inner"></div>
-            <div class="sp-group">
-              <div class="sp-group__head">
-                <div class="sp-group__head-text">
-                  <span class="sp-group__label">{{ t('settings.ai.presets.title') }}</span>
-                  <span class="sp-group__sublabel">{{ t('settings.ai.presets.hint') }}</span>
-                </div>
-                <button v-if="!showPresetForm" class="sp-group__action" @click="openAddPreset">
-                  <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.5"
-                    aria-hidden="true">
-                    <path d="M8 3v10M3 8h10" />
-                  </svg>
-                  {{ t('settings.ai.presets.add') }}
-                </button>
-              </div>
-
-              <div class="sp-group__body">
-                <!-- Built-in presets -->
-                <div v-for="preset in BUILTIN_PRESETS" :key="preset.id" class="sp-group__row sp-group__row--muted">
-                  <div class="sp-group__row-info">
-                    <span class="sp-group__row-name">{{ preset.name }}</span>
-                    <span class="sp-group__row-meta">{{ preset.description }}</span>
-                  </div>
-                  <div class="sp-group__row-aside" style="opacity:1">
-                    <span class="sp-tag">{{ t('settings.ai.presets.builtinBadge') }}</span>
-                  </div>
-                </div>
-
-                <!-- Divider built-in → custom -->
-                <div class="sp-group__sep">{{ t('settings.ai.presets.customLabel') }}</div>
-
-                <!-- Custom presets empty -->
-                <div v-if="userPresets.length === 0 && !showPresetForm" class="sp-group__empty">
-                  {{ t('settings.ai.presets.empty') }}
-                </div>
-
-                <!-- Custom preset rows -->
-                <div v-for="preset in userPresets" :key="preset.id" class="sp-group__row">
-                  <div class="sp-group__row-info">
-                    <span class="sp-group__row-name">{{ preset.name }}</span>
-                    <span class="sp-group__row-meta">{{ preset.description || '—' }}</span>
-                  </div>
-                  <div class="sp-group__row-aside">
-                    <button class="sp-ghost-btn" @click="openEditPreset(preset)"
-                      :title="t('settings.git.identityEdit')">
-                      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor"
-                        stroke-width="1.5">
-                        <path d="M11.5 2.5l2 2L5 13H3v-2L11.5 2.5z" />
-                      </svg>
-                    </button>
-                    <button class="sp-ghost-btn sp-ghost-btn--danger" @click="removePreset(preset.id)"
-                      :title="t('settings.git.identityDelete')">
-                      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor"
-                        stroke-width="1.5">
-                        <path d="M4 4l8 8M12 4l-8 8" />
-                      </svg>
-                    </button>
-                  </div>
-                </div>
-
-                <!-- Preset add/edit form -->
-                <div v-if="showPresetForm" class="sp-group__form">
-                  <div class="sp-group__form-grid sp-group__form-grid--1col">
-                    <div class="sp-field">
-                      <label class="sp-field__label">{{ t('settings.ai.presets.formName') }}</label>
-                      <input class="sp-input sp-input--sm" v-model="presetForm.name"
-                        :placeholder="t('settings.ai.presets.formName')" />
-                    </div>
-                    <div class="sp-field">
-                      <label class="sp-field__label">{{ t('settings.ai.presets.formDescription') }} <span
-                          class="sp-field__optional">— optionnel</span></label>
-                      <input class="sp-input sp-input--sm" v-model="presetForm.description"
-                        :placeholder="t('settings.ai.presets.formDescription')" />
-                    </div>
-                    <div class="sp-field">
-                      <label class="sp-field__label">Prompt système</label>
-                      <textarea class="sp-textarea sp-input--sm mono" v-model="presetForm.systemPrompt"
-                        :placeholder="t('settings.ai.presets.formPromptPlaceholder')" rows="6" />
-                      <span class="sp-field__hint">{{ t('settings.ai.presets.formLangHint') }}</span>
-                    </div>
-                  </div>
-                  <div class="sp-group__form-footer">
-                    <button class="btn btn--ghost sp-btn--sm" @click="showPresetForm = false">{{ t('common.cancel')
-                    }}</button>
-                    <button class="btn btn--primary sp-btn--sm" @click="savePresetForm"
-                      :disabled="!presetForm.name.trim() || !presetForm.systemPrompt.trim()">{{ t('common.save')
-                      }}</button>
-                  </div>
-                </div>
-              </div>
-            </div>
-
             <!-- AI info box -->
             <div class="sp-info-box">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
@@ -3176,45 +3115,88 @@ function deleteReleaseNoteTemplate(id: string) {
           </template>
         </template>
 
-        <!-- ═══ RELEASE NOTES ═══ -->
-        <template v-if="activeSettingsTab === 'releaseNotes'">
+        <!-- ═══ AI TEMPLATES ═══ -->
+        <template v-if="activeSettingsTab === 'aiTemplates'">
+          <div class="sp-row">
+            <div class="sp-label">{{ t('settings.aiTemplates.kindLabel') }}</div>
+            <div class="sp-auth-toggle sp-ait-kinds">
+              <button v-for="kind in AI_TEMPLATE_KINDS" :key="kind"
+                :class="['sp-auth-btn', { 'sp-auth-btn--active': aiTemplateKind === kind }]"
+                @click="aiTemplateKind = kind">
+                {{ t(aiTemplateKindLabel[kind]) }}
+              </button>
+            </div>
+          </div>
+
           <div class="sp-group">
             <div class="sp-group__head">
               <div class="sp-group__head-text">
-                <span class="sp-group__label">{{ t('settings.ai.releaseNotes.title') }}</span>
+                <span class="sp-group__label">{{ t(aiTemplateKindLabel[aiTemplateKind]) }}</span>
                 <span class="sp-group__sublabel">
-                  {{ t('settings.ai.releaseNotes.hint') }}
-                  <span style="display: block; margin-top: 4px; font-style: italic; opacity: 0.85;">
-                    {{ t('settings.ai.releaseNotes.sharedNote') }}
-                  </span>
+                  {{ t(aiTemplateKindHint[aiTemplateKind]) }}
+                  <span class="sp-ait-shared">{{ t('settings.aiTemplates.sharedNote') }}</span>
                 </span>
               </div>
             </div>
 
             <div class="sp-group__body">
-              <!-- Custom templates empty -->
-              <div v-if="settings.releaseNoteTemplates.length === 0 && !showReleaseNoteTemplateForm" class="sp-group__empty">
-                {{ t('settings.ai.releaseNotes.empty') }}
+              <!-- Built-in templates (Default first): read-only, view + duplicate -->
+              <div v-for="tpl in aiBuiltinTemplates" :key="tpl.id" class="sp-group__row sp-group__row--muted">
+                <div class="sp-group__row-info">
+                  <span class="sp-group__row-name">{{ aiTemplateName(tpl) }}</span>
+                  <span class="sp-group__row-meta">{{ aiTemplateMeta(tpl) }}</span>
+                </div>
+                <div class="sp-group__row-aside" style="opacity:1">
+                  <span class="sp-tag">{{ t('settings.aiTemplates.builtinBadge') }}</span>
+                  <button class="sp-ghost-btn" @click="openAiTemplateForm('view', tpl)"
+                    :title="t('settings.aiTemplates.view')" :aria-label="t('settings.aiTemplates.view')">
+                    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                      stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z" />
+                      <circle cx="8" cy="8" r="2" />
+                    </svg>
+                  </button>
+                  <button class="sp-ghost-btn" @click="duplicateAiTemplate(tpl)"
+                    :title="t('settings.aiTemplates.duplicate')" :aria-label="t('settings.aiTemplates.duplicate')">
+                    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                      stroke-width="1.5" stroke-linejoin="round">
+                      <rect x="5" y="5" width="9" height="9" rx="1.5" />
+                      <path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2h-6A1.5 1.5 0 0 0 2 3.5v6A1.5 1.5 0 0 0 3.5 11H5" />
+                    </svg>
+                  </button>
+                </div>
               </div>
 
-              <!-- Custom template rows -->
-              <div v-for="tpl in settings.releaseNoteTemplates" :key="tpl.id" class="sp-group__row">
+              <div class="sp-group__sep">{{ t('settings.aiTemplates.customLabel') }}</div>
+
+              <div v-if="aiUserTemplates.length === 0 && aiTemplateFormMode !== 'add'" class="sp-group__empty">
+                {{ t('settings.aiTemplates.empty') }}
+              </div>
+
+              <!-- User templates: edit + duplicate + delete -->
+              <div v-for="tpl in aiUserTemplates" :key="tpl.id" class="sp-group__row">
                 <div class="sp-group__row-info">
                   <span class="sp-group__row-name">{{ tpl.name }}</span>
-                  <span class="sp-group__row-meta mono" style="font-size: var(--font-size-xs); max-height: 48px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 500px;">
-                    {{ tpl.customRules }}
-                  </span>
+                  <span class="sp-group__row-meta">{{ aiTemplateMeta(tpl) }}</span>
                 </div>
                 <div class="sp-group__row-aside">
-                  <button class="sp-ghost-btn" @click="openEditReleaseNoteTemplate(tpl)"
-                    :title="t('settings.git.identityEdit')">
+                  <button class="sp-ghost-btn" @click="openAiTemplateForm('edit', tpl)"
+                    :title="t('settings.aiTemplates.edit')" :aria-label="t('settings.aiTemplates.edit')">
                     <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor"
                       stroke-width="1.5">
                       <path d="M11.5 2.5l2 2L5 13H3v-2L11.5 2.5z" />
                     </svg>
                   </button>
-                  <button class="sp-ghost-btn sp-ghost-btn--danger" @click="deleteReleaseNoteTemplate(tpl.id)"
-                    :title="t('settings.git.identityDelete')">
+                  <button class="sp-ghost-btn" @click="duplicateAiTemplate(tpl)"
+                    :title="t('settings.aiTemplates.duplicate')" :aria-label="t('settings.aiTemplates.duplicate')">
+                    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                      stroke-width="1.5" stroke-linejoin="round">
+                      <rect x="5" y="5" width="9" height="9" rx="1.5" />
+                      <path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2h-6A1.5 1.5 0 0 0 2 3.5v6A1.5 1.5 0 0 0 3.5 11H5" />
+                    </svg>
+                  </button>
+                  <button class="sp-ghost-btn sp-ghost-btn--danger" @click="deleteAiTemplate(tpl.id)"
+                    :title="t('settings.aiTemplates.delete')" :aria-label="t('settings.aiTemplates.delete')">
                     <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor"
                       stroke-width="1.5">
                       <path d="M4 4l8 8M12 4l-8 8" />
@@ -3223,33 +3205,59 @@ function deleteReleaseNoteTemplate(id: string) {
                 </div>
               </div>
 
-              <!-- Template add/edit form -->
-              <div v-if="showReleaseNoteTemplateForm" class="sp-group__form">
+              <button v-if="!aiTemplateFormMode" class="sp-group__row sp-ait-add" @click="openAiTemplateForm('add')">
+                <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.5"
+                  aria-hidden="true">
+                  <path d="M8 3v10M3 8h10" />
+                </svg>
+                {{ t('settings.aiTemplates.add') }}
+              </button>
+
+              <!-- Add / edit / view form -->
+              <div v-if="aiTemplateFormMode" class="sp-group__form">
                 <div class="sp-group__form-grid sp-group__form-grid--1col">
                   <div class="sp-field">
-                    <label class="sp-field__label">{{ t('settings.ai.releaseNotes.formName') }}</label>
-                    <input class="sp-input sp-input--sm" v-model="releaseNoteTemplateForm.name"
-                      :placeholder="t('settings.ai.releaseNotes.formName')" />
+                    <label class="sp-field__label">{{ t('settings.aiTemplates.formName') }}</label>
+                    <input class="sp-input sp-input--sm" v-model="aiTemplateForm.name"
+                      :readonly="aiTemplateFormMode === 'view'"
+                      :placeholder="t('settings.aiTemplates.formName')" />
                   </div>
                   <div class="sp-field">
-                    <label class="sp-field__label">{{ t('settings.ai.releaseNotes.formRules') }}</label>
-                    <textarea class="sp-textarea sp-input--sm mono" style="min-height: 260px;" v-model="releaseNoteTemplateForm.customRules"
-                      :placeholder="t('settings.ai.releaseNotes.formRulesPlaceholder')" rows="12" />
+                    <label class="sp-field__label">{{ t('settings.aiTemplates.formDescription') }}</label>
+                    <input class="sp-input sp-input--sm" v-model="aiTemplateForm.description"
+                      :readonly="aiTemplateFormMode === 'view'"
+                      :placeholder="t('settings.aiTemplates.formDescription')" />
+                  </div>
+                  <div class="sp-field">
+                    <label class="sp-field__label">{{ t('settings.aiTemplates.formPrompt') }}</label>
+                    <textarea class="sp-textarea sp-input--sm mono sp-ait-prompt" v-model="aiTemplateForm.systemPrompt"
+                      :readonly="aiTemplateFormMode === 'view'"
+                      :placeholder="t('settings.aiTemplates.formPromptPlaceholder')" rows="14" />
+                    <span class="sp-field__hint">
+                      {{ aiTemplateFormMode === 'view' ? t('settings.aiTemplates.readOnlyHint') : t('settings.aiTemplates.formLangHint') }}
+                    </span>
+                    <span v-if="aiTemplateKind === 'pr' && aiTemplateFormMode !== 'view'" class="sp-field__hint">
+                      {{ t('settings.aiTemplates.prFormatHint') }}
+                    </span>
                   </div>
                 </div>
                 <div class="sp-group__form-footer">
-                  <button class="btn btn--ghost sp-btn--sm" @click="showReleaseNoteTemplateForm = false">{{ t('common.cancel')
-                  }}</button>
-                  <button class="btn btn--primary sp-btn--sm" @click="saveReleaseNoteTemplateForm"
-                    :disabled="!releaseNoteTemplateForm.name.trim() || !releaseNoteTemplateForm.customRules.trim()">{{ t('common.save')
-                    }}</button>
+                  <template v-if="aiTemplateFormMode === 'view'">
+                    <button class="btn btn--ghost sp-btn--sm" @click="closeAiTemplateForm">{{ t('common.close') }}</button>
+                    <button class="btn btn--primary sp-btn--sm" @click="duplicateViewedAiTemplate">
+                      {{ t('settings.aiTemplates.duplicate') }}
+                    </button>
+                  </template>
+                  <template v-else>
+                    <button class="btn btn--ghost sp-btn--sm" @click="closeAiTemplateForm">{{ t('common.cancel') }}</button>
+                    <button class="btn btn--primary sp-btn--sm" @click="saveAiTemplateForm"
+                      :disabled="!aiTemplateForm.name.trim() || !aiTemplateForm.systemPrompt.trim()">
+                      {{ t('common.save') }}
+                    </button>
+                  </template>
                 </div>
               </div>
             </div>
-
-            <button v-if="!showReleaseNoteTemplateForm" class="btn btn--primary add-btn" @click="openAddReleaseNoteTemplate">
-                {{ t('settings.ai.releaseNotes.add') }}
-            </button>
           </div>
         </template>
 
@@ -3771,6 +3779,22 @@ function deleteReleaseNoteTemplate(id: string) {
   background: var(--color-accent);
   color: var(--color-accent-text);
   font-weight: var(--font-weight-semibold);
+}
+
+/* AI Templates kind switcher: 3 buttons, so every one but the last gets a divider. */
+.sp-ait-kinds .sp-auth-btn:not(:last-child) {
+  border-right: 1px solid var(--color-border);
+}
+
+.sp-ait-shared {
+  display: block;
+  margin-top: 4px;
+  font-style: italic;
+  opacity: 0.85;
+}
+
+.sp-ait-prompt {
+  min-height: 260px;
 }
 
 .sp-connect-flow {
@@ -4376,9 +4400,22 @@ function deleteReleaseNoteTemplate(id: string) {
   font-size: var(--font-size-sm);
 }
 
-.add-btn {
+/* "New template": a full-width row of the list, not a header action. */
+.sp-ait-add {
   width: 100%;
-  margin-top: 10px;
+  justify-content: center;
+  gap: 5px;
+  border-top: none;
+  border-left: none;
+  border-right: none;
+  color: var(--color-accent);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+}
+
+.sp-ait-add:hover {
+  background: var(--color-accent-soft);
 }
 
 /* ── v2.13 / sp-group extensions ─────────────────────── */

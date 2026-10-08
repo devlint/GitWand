@@ -2149,7 +2149,7 @@ function onPaletteSelectCommit(hash: string) {
 
 // ─── Settings panel ─────────────────────────────────────
 const showSettings = ref(false);
-const settingsInitialTab = ref<"general" | "dock" | "git" | "editor" | "ai" | "automations" | "logs" | "hooks" | "accounts" | "mcp" | "releaseNotes" | undefined>(undefined);
+const settingsInitialTab = ref<"general" | "dock" | "git" | "editor" | "ai" | "automations" | "logs" | "hooks" | "accounts" | "mcp" | "aiTemplates" | undefined>(undefined);
 
 // ─── Error log (in-memory ring buffer, feeds SettingsPanel Logs tab) ─
 // Uses the useLogs() singleton composable — no localStorage persistence so a

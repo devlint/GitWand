@@ -13,6 +13,7 @@ import { ref } from "vue";
 import type { DiffMode } from "../utils/diffMode";
 import type { BlameAlgorithm } from "../utils/backend";
 import type { AIProvider } from "./useAIProvider";
+import { DEFAULT_TEMPLATE_PROMPTS, LEGACY_RELEASE_NOTES_RULES_HEADER } from "./aiTemplateDefaults";
 import type { SwitchBehavior } from "../utils/branchSwitchDecision";
 import type { PullDirtyBehavior } from "../utils/pullDirtyDecision";
 
@@ -83,15 +84,11 @@ export interface CommitTemplate {
   body: string;
 }
 
-/** Named release note template (v3). */
-export interface ReleaseNoteTemplate {
-  /** UUID v4. */
-  id: string;
-  /** Display name, e.g. "Security focus", "SaaS". */
-  name: string;
-  /** Custom rules to be appended to the prompt. */
-  customRules: string;
-}
+/**
+ * Named release note template. Same shape as every AI template: a full system
+ * prompt replacing the default one (see useAiTemplates).
+ */
+export type ReleaseNoteTemplate = AiPromptPreset;
 
 
 /**
@@ -345,6 +342,16 @@ export interface AppSettings {
    * "use the default prompt". Special value "__builtin_*" for built-in presets.
    */
   activePresetIdByRepo: Record<string, string | null>;
+  // ── AI Templates: pull requests ───────────────────────────
+  /** User-defined AI templates for PR title + description generation. */
+  prTemplates: AiPromptPreset[];
+
+  /**
+   * ID of the active PR template per repo (keyed by cwd).
+   * Null / absent / "__builtin_default" means "use the default prompt".
+   */
+  activePrTemplateIdByRepo: Record<string, string | null>;
+
   // ── v3 Release Note Templates ─────────────────────────────
   /** Saved release note templates (v3). */
   releaseNoteTemplates: ReleaseNoteTemplate[];
@@ -523,6 +530,8 @@ export const defaultAppSettings: AppSettings = {
   aiPromptPresets:        [],
   activePresetIdByRepo:   {},
   // v3
+  prTemplates:                       [],
+  activePrTemplateIdByRepo:          {},
   releaseNoteTemplates:              [],
   activeReleaseNoteTemplateIdByRepo: {},
   // v3.x terminal
@@ -561,10 +570,33 @@ export function normaliseCwd(cwd: string): string {
 
 // ─── Load / save helpers ──────────────────────────────────
 
+/**
+ * Release note templates used to hold only `customRules` appended to the
+ * default prompt. Turn such a legacy entry into a full-prompt template that
+ * sends the model exactly what it used to receive.
+ */
+function migrateReleaseNoteTemplates(list: unknown): ReleaseNoteTemplate[] {
+  if (!Array.isArray(list)) return [];
+  return list.map((tpl) => {
+    if (typeof tpl?.systemPrompt === "string") return tpl as ReleaseNoteTemplate;
+    const rules = typeof tpl?.customRules === "string" ? tpl.customRules.trim() : "";
+    const base = DEFAULT_TEMPLATE_PROMPTS.releaseNotes;
+    return {
+      id: String(tpl?.id ?? crypto.randomUUID()),
+      name: String(tpl?.name ?? ""),
+      systemPrompt: rules ? `${base}\n\n${LEGACY_RELEASE_NOTES_RULES_HEADER}\n${rules}` : base,
+    };
+  });
+}
+
 export function loadSettings(): AppSettings {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
-    if (raw) return { ...defaultAppSettings, ...JSON.parse(raw) };
+    if (raw) {
+      const s: AppSettings = { ...defaultAppSettings, ...JSON.parse(raw) };
+      s.releaseNoteTemplates = migrateReleaseNoteTemplates(s.releaseNoteTemplates);
+      return s;
+    }
   } catch {
     // ignore
   }
