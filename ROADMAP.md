@@ -6,13 +6,15 @@
 
 ## What's Next
 
-_Ordered by priority, last verified 2026-10-07 (v3.12.0 shipped, five contributions merged on `main` unreleased; Stacked Branches, Combined Diffs and Voice Input each moved one minor later). The thread: the measured-accuracy engine re-founds the trust every later auto-apply feature spends, then make the app reactive and fast (Live Repo), close the resolution loop (preview-to-apply, whose confidence threshold is only meaningful **because** of the accuracy work), then workflow & comparison primitives, experimental voice input, and the v4.0 code-intelligence headline. Full renumbering history: `git log -p -- roadmap.md`._
+_Ordered by priority, last verified 2026-10-08 (v3.12.0 shipped, five contributions merged on `main` unreleased; Stacked Branches, Combined Diffs and Voice Input each moved one minor later; the 2026-10-08 changelog scan inserted Agent Control as v3.15.0, pushing Voice Input to v3.16.0, then the worktree audit widened it into Agent Workspaces and added a v3.12.x merge-back fix). The thread: the measured-accuracy engine re-founds the trust every later auto-apply feature spends, then make the app reactive and fast (Live Repo), close the resolution loop (preview-to-apply, whose confidence threshold is only meaningful **because** of the accuracy work), then workflow & comparison primitives, experimental voice input, and the v4.0 code-intelligence headline. Full renumbering history: `git log -p -- roadmap.md`._
 
 | Version | Codename | Why now |
 |---------|----------|---------|
+| **v3.12.x** (patch) | AI-task merge-back fix | Data-loss bug: merge-back overlays the scratch tree and reverts whatever `main` gained meanwhile |
 | **v3.13.0** | Stacked Branches | Native stacked PRs, sequenced after v3.11 (leans on preview→apply) |
 | **v3.14.0** | Combined Diffs | Multi-commit, non-contiguous aggregated diff |
-| **v3.15.0** | Voice Input | Experimental — local dictation via embedded Whisper |
+| **v3.15.0** | Agent Workspaces | Worktrees as provisioned environments (repo-defined setup/teardown hooks), real merge-back, cross-worktree conflict prediction, live agent status — GitKraken 12.x, VS Code 1.141 and Conductor shipped parts of it; Dendreo's `bin/worktree` shows what a real team needs |
+| **v3.16.0** | Voice Input | Experimental — local dictation via embedded Whisper |
 | **v4.0.0** (candidate) | Blast Radius | Code-graph impact before merge — the code-intelligence headline |
 
 _v3.12.0 (built-in terminal renderer, WIP in the Git Tree), v3.11.2 (Finder-like folder navigation), v3.11.1 (History-aware LLM fallback) and v3.11.0 (Merge preview-to-apply) shipped; see [Shipped](#shipped) below and the full detail in [CHANGELOG.md](./CHANGELOG.md)._
@@ -31,6 +33,18 @@ _Merged 2026-10-07 (contributions by @t1gu1); no release scheduled yet. Version 
 
 ---
 
+### v3.12.x (patch) — AI-task merge-back fix
+
+_Found in the 2026-10-08 worktree audit, reproduced on a throwaway repo with the exact command sequence._
+
+`scratch_worktree_merge_back` (`commands/scratch.rs`) does not merge: it `git rm`s every path present in `HEAD` but absent from the scratch branch, then runs `git checkout <scratch> -- .`. When `main` moved after the task was created, this **reverts** files `main` changed since, **deletes** files `main` added, **overwrites** uncommitted edits to tracked files (the only guard checks for unmerged entries), flattens the agent's commits into one uncommitted change, and takes no Time Machine snapshot first.
+
+- **Interim fix** — refuse when `main` is not an ancestor of the scratch fork point or when the main checkout has tracked edits, and say why; take a `pre-merge-back` snapshot (v3.8) before touching anything
+- **Real fix** (lands with v3.15 below) — merge or rebase the task branch through the v3.11 preview → apply flow, keeping the agent's commits
+- **Regression test** — the reproduction (fork, advance `main`, commit in scratch, merge back) as a `scratch.rs` test
+
+---
+
 ### v3.13.0 — Stacked Branches (native)
 
 _A differentiating feature: stacked PRs workflow without an external CLI (Graphite, ghstack…). Sequenced after v3.11.0 on purpose: Restack leans on the conflict preview → apply flow._
@@ -44,6 +58,10 @@ The paradigm: short stacked branches (`feat/step-1` → `feat/step-2` → `feat/
 **Restack** — Automatic detection when the base has moved; one-click "Restack" button (cascading `git rebase --onto`); conflict preview before execution (v3.11.0 preview-to-apply)
 
 **PRs** — "Submit stack": creates or updates GitHub PRs for each layer; automatic retarget when a layer is merged
+
+**Merged-PR detection** (from the 2026-10-08 changelog scan, Tower 17 / Windows 14) — "is this layer merged?" cannot rely on `git_branch_merged` (`read.rs`, `git branch --merged`): a squash- or rebase-merged PR leaves no ancestry, so the layer is never seen as merged and the retarget never fires. Ask the forge (merged PR whose head is this branch), fall back to a patch-id comparison against the target (`git cherry`). The same signal feeds the v2.12 Archived Branches: a "merged" hint with a one-click Archive on branches whose PR is merged
+
+**Stale-head guard** (from the same scan, Conductor 0.89) — a layer is merged only if the PR's head is still the commit reviewed locally: pass the expected `sha` to the forge merge endpoint (`rest_merge_pr` sends only `merge_method` today; GitHub refuses with 409 on mismatch, GitLab has the same parameter), and say so instead of merging commits nobody looked at. Applies to every in-app PR merge, not only stacks
 
 **Implementation** — Metadata in `.gitwand-workspace.json`; no external CLI dependency. Cascading Restack and per-layer Submit-stack progress stream via `tauri::ipc::Channel` (v3.10.0 pattern) rather than a new global `emit()` broadcast
 
@@ -63,7 +81,53 @@ _Inspired by GitBlade. A comparison primitive we lack: one aggregated diff acros
 
 ---
 
-### v3.15.0 — Voice Input (experimental)
+### v3.15.0 — Agent Workspaces
+
+_From the 2026-10-08 changelog scan and worktree audit. GitKraken 12.1→12.5 shows each agent session's live status, answers Claude Code / Codex / Copilot CLI permission requests from its panel and runs per-repo setup commands before an agent starts; VS Code 1.141 cleans up agent worktrees by disk use and merged PR; Conductor gives each workspace setup/archive scripts and a port range; Strand snapshots a worktree before removing it. Dendreo's own `bin/worktree` (~1,700 lines) shows the real need: a worktree is a running environment — its own containers, subdomain, tenant, test databases and reserved Vite port — that must be provisioned on create and torn down on delete. GitWand today creates and removes the git worktree only (`WorktreeManager.vue`, `scratch.rs`), launches Claude Code only, and then loses sight of the session._
+
+**Lifecycle hooks (the foundation)** — a `worktree` section in `.gitwandrc`, so the repo, not GitWand, says how to bring an environment up and down:
+
+```yaml
+worktree:
+  dir: .claude/worktrees            # default stays configurable; Claude Code / Dendreo convention
+  include: [.env, auth.json]        # or a .worktreeinclude file (Claude Code / Conductor / Strand)
+  setup: bin/worktree provision {name}
+  teardown: bin/worktree teardown {name}
+  url: bin/worktree url {name}
+```
+
+- `setup` runs after creation, streamed into a terminal tab; `teardown` runs **before** any removal (manual, merge-back, cleanup), and a failed teardown blocks the removal instead of orphaning containers, volumes and databases — what happens today when a Dendreo worktree is removed from GitWand
+- name, path, branch and base exported as `GITWAND_WORKTREE_*` variables; `url` output shown on the worktree card and openable
+- `include` copies ignored files only (same semantics as `.worktreeinclude`); symlink vs copy per entry, for agent config (`settings.local.json`, `mcp.json`) and shared dependency folders
+
+**Creation**
+- Base on the freshly fetched remote default branch by default (Claude Code, Dendreo, Conductor), not the local `HEAD` as AI tasks do today
+- Start from a branch, a remote branch, a PR (`pull/<n>/head`) or a Launchpad issue (GitKraken 12.4): branch named after it, issue body as the starting prompt
+- Agent picker (Claude Code, Codex, Gemini, opencode… — the providers GitWand already knows), not Claude Code hard-wired
+
+**Visibility**
+- A worktrees view, sortable and filterable, replacing the modal: branch, dirty count, ahead/behind, last activity, disk use, PR state, env URL, agent status
+- One WIP row per dirty worktree in the Git Tree (GitKraken 12.3), building on the #224 WIP-as-Git-Tree-entry work
+- Recognise worktrees created by other tools (`.claude/worktrees/`, Conductor, Superset…) and identify an agent session by its process, not by the presence of a `.claude/` folder — `detect_agent_tool` flags every worktree of a repo that commits `.claude/`, GitWand's own included
+
+**Agent status**
+- **Live status** — per session: running, waiting for input, idle, exited. Baseline with no integration: PTY output activity + process state (works for any CLI); richer states from each CLI's own hook mechanism where it has one, starting with Claude Code hooks. Shown on terminal tabs, in the worktrees view and as an OS notification when a background agent starts waiting
+- **Permission requests in-app** — when the CLI exposes it (Claude Code hooks first), surface the pending tool call with the exact command, Allow / Deny from the panel. Never auto-allow; an unanswered request stays pending in the terminal exactly as without GitWand
+
+**Bringing work back — where the engine pays off**
+- Merge-back becomes a real merge or rebase through the v3.11 preview → apply flow (completing the v3.12.x fix): conflicts previewed, auto-resolved by the engine, agent commits kept, snapshot taken
+- **Cross-worktree conflict prediction** — run the Conflict Predictor between parallel tasks and against the target before anything lands: "task A and task B will conflict on `useRepo.ts`, 3 hunks, 2 auto-resolvable". Strand only warns that two worktrees touch the same files; nobody predicts the actual conflicts. The headline of this release
+- Compare two attempts at the same task side by side, keep one (Strand)
+
+**Cleanup**
+- `git worktree lock` while an agent runs (Claude Code does the same), unlock when it exits
+- Clean up once the PR is merged (v3.13 merged-PR detection) or after N days inactive, single or batch (Dendreo's `clean --merged`), always through `teardown`
+- Snapshot before removal (v3.8 Time Machine), restorable as a new worktree (Strand)
+- Never touch a worktree that is locked, marked `.worktree-keep` (Dendreo's guard against Claude Desktop's cleaner), or owned by another orchestrator
+
+---
+
+### v3.16.0 — Voice Input (experimental)
 
 - **Local dictation**: microphone button in the commit panel — transcription via embedded Whisper (`whisper-rs` Rust) — zero cloud
 - **Optional AI enrichment**: pass dictated text through `useAIProvider` for conventional commit formatting
@@ -106,8 +170,11 @@ _Synthesis: none of the three addresses structured conflict-resolution AI (Stran
 
 **2026-10-08 scan** — **Multi-Git** ([AnthonyKopri/multi-git](https://github.com/AnthonyKopri/multi-git), MIT, Electron/Node): multi-account SSH, safety net, coding-agent launcher, JSON CLI + MCP. No conflict AI (ours/theirs/manual only). Most of its safety layer is already covered: Recovery Points / Recently Discarded ≈ Time Machine (v3.8.0), "behind upstream" fast-forward ≈ v3.6.0, MCP `dry_run` + structured refusals ≈ design principle 6. Two leads kept, in [Later (unscheduled)](#later-unscheduled): **SSH routing on identity profiles** and **opt-in auto fast-forward after fetch**. Discarded: passphrase vault (the system agent/keychain does the job), parity features (bisect, notes, LFS, patches).
 
+**2026-10-08 changelog scan** — April→October release notes of GitKraken, GitButler, Tower, Fork, Sublime Merge, GitHub Desktop, Strand, GitComet, RelaGit, GitSquid, plus Zed, VS Code, lazygit, Conductor, Nimbalyst and the jj GUIs. Promoted: Agent Control → **v3.15.0** (widened into Agent Workspaces after the worktree audit); merged-PR detection and stale-head merge guard → **v3.13.0**. **Gitoryx** ([gitoryx.com](https://www.gitoryx.com/changelog), v1.0.1, 2026-10-06) added after the scan: only gaps worth taking are guided bisect and the tracked-but-ignored warning (both in Later); sprint view, GitFlow and gitmoji discarded, changelog generation ≈ our tag-triggered release notes. Already covered or planned: cherry-pick/revert conflict indicator (Fork 2.66 ≈ Conflict Predictor v2.20), combined diff (Tower 14.1 ≈ v3.14), stacked PRs (GitButler 0.22, VS Code ≈ v3.13), Forgejo, file history, pickaxe search. **Moat alert:** GitButler 0.21 ships AI-assisted conflict resolution and `but resolve` (0.22), Gitoryx an auto-resolve "wand" for identical blocks (0.0.31) and AI conflict resolution (0.0.42), IntelliJ 2026.2 a "streamlined conflict resolution flow" — "nobody else does conflict AI" no longer holds for GitButler; the measured-accuracy benchmark (v3.9) is the answer to keep forward.
+
 **Still watching:**
 
+- **Per-hunk commit attribution for parallel agents** (Nimbalyst 0.75) — when several sessions edit the same file, each commits only its own hunks. Interesting once Agent Workspaces (v3.15) knows which session wrote what; speculative before.
 - **`GitUpKit`** ([gitup.co](https://gitup.co/)) — their SDK for building Git clients, worth studying.
 - **libgit2 phases 3-4** — migrate `git_log`/`git_show` (revwalk, the real win on 40k commits — but the object-fetch loop needs optimizing first) then `git_file_log` (`--follow`/rename tracking to reimplement). To schedule once phases 1-2 (v3.10/v3.11) are validated. `gix` as an alternative to be re-evaluated at that point.
 - **libgit2 for `list_repo_tree`** (candidate, 2026-10-01) — the File Explorer panel's one-shot tree is `git ls-files --cached --others --exclude-standard`, capped at 20,000 entries. It could read the index directly and classify untracked entries with `is_path_ignored`, the way v3.11.2's `list_repo_dir` does (66 ms for a 6,000-entry directory against 1.6 s with `git check-ignore`). Next step: retire `list_repo_tree` (no frontend caller since v3.11.2, when the panel moved onto `useLazyRepoTree`) or migrate it to libgit2 if a caller returns. Same rule as every libgit2 migration: measure first, keep the CLI fallback, cover it with parity tests. libgit2 stays off anything that runs filters, hooks or external config (LFS, signing, credentials), off writes, and off algorithms it implements differently (blame, histogram/patience diffs).
@@ -120,6 +187,10 @@ _Synthesis: none of the three addresses structured conflict-resolution AI (Stran
 
 ### Later (unscheduled)
 
+- **SHA-256 / reftable repositories** (2026-10-08 scan: GitButler 0.19.10, Sublime Merge 2130, Zed) — git handles them, but a few GitWand parsers assume 40-hex ids (`git/libgit2.rs:754`, `dev-server.mjs:4165`). Audit every such assumption and add a SHA-256 fixture repo to the parity tests.
+- **Guided bisect** (Gitoryx) — `bisect` exists only as an in-progress operation GitWand can abort (`ops.rs`). Add a start flow (pick good/bad from the Git Tree), Good / Bad / Skip on the current commit, remaining-steps counter, culprit commit opened at the end; optional `bisect run` with a user command.
+- **Tracked files matching `.gitignore`** (Gitoryx 0.0.43) — warn when tracked paths match an ignore rule (`git ls-files -ci --exclude-standard`) and offer to untrack them (`git rm --cached`, files kept on disk).
+- **Reset keeping local changes** (Sublime Merge 2132) — `git reset --keep` as a third mode beside soft/hard, refusing instead of discarding when a local edit would be overwritten.
 - **SSH routing on identity profiles + wrong-account guard** (from the 2026-10-08 Multi-Git scan) — the v2.12 profiles (`useIdentity.ts`) only inject `user.name`/`user.email` at commit time; authentication still goes through the global SSH config. Add an optional SSH key per profile, routed per operation via `GIT_SSH_COMMAND` (fetch/pull/push/clone), auto-select rules on the origin URL (`github.com/acme/` → Pro), and a pre-push check: the account the key actually signs in as (`ssh -T`, remembered per key) vs. the one the remote expects; on mismatch, block with an explicit override, force-push included. Real pain for anyone juggling work and personal accounts, and author + key always switch together, so a repo can no longer push as one account and commit as another.
 - **Opt-in auto fast-forward after fetch** (from the 2026-10-08 Multi-Git scan) — the 30 s periodic fetch (`useRepoPoller`) would fast-forward the current branch only when it is purely behind: an upstream exists, no local commits, no tracked edits, HEAD not detached, no merge or rebase in progress. Off by default, never merges or rebases; when it is on but blocked, the toolbar tooltip names the one condition holding it back. Reuses the v3.6.0 "Update branch" logic minus the stash.
 
@@ -183,6 +254,7 @@ Positioning: neither "yet another Git GUI" nor an IDE. A first-class Git navigat
 | **Tower** | Native | $69/yr | AI commits (Claude Code + Codex, v16 May 2026), multi-forge | Paid, no resolve engine |
 | **Sublime Merge** | Native | $99 | Ultra-fast, configurable `diff_algorithm` | No PR workflow, no AI, no auto-resolve |
 | **Strand** | Tauri 2 + React | Free/OSS | Agent-native worktree sessions (parallel agent workspaces), full worktree lifecycle (merge+archive+recovery), WCAG 2.1 a11y, published perf baselines | No conflict AI, mono-repo only, no Launchpad equivalent |
+| **Gitoryx** | Native (non-Electron) | Freemium (private repos capped at 30 commits on Free) | Very active (36 releases May→Oct 2026, v1.0 on 2026-10-01): guided bisect, identity profiles per repo, auto-resolve wand for identical conflict blocks + conflict map, AI conflict resolution and commit explanation, changelog generation | Proprietary, conflict handling shallow (identical blocks + LLM), no engine accuracy measurement |
 | **GitComet** | Rust + GPUI | Free/OSS | Zed-level responsiveness, dual GUI+headless (difftool/mergetool), Linux-first, documented perf on Chromium-scale repos | No AI, no worktrees, no multi-repo, no conflict resolution (strategy algo only) |
 | **RelaGit** | Electron + SolidJS | Free/OSS | Fine-grained reactivity (SolidJS), native AI SDK (`@ai-sdk/anthropic`) for commit suggestions, community theme ecosystem, popout windows | Electron (heavy), fragile beta, no worktree/launchpad, no structured conflict AI |
 
