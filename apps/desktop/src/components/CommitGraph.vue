@@ -1101,7 +1101,7 @@ const hoveredNode = computed(() =>
 );
 
 // Branch-colored highlight for the selected (0.2) or current (0.25) row.
-function rowHighlight(index: number): string | undefined {
+function activeHighlight(index: number): string | undefined {
   const entry = renderedCommits.value[index];
   if (!entry) return undefined;
   const lane = indexToLane.value.get(index) ?? 0;
@@ -1110,8 +1110,19 @@ function rowHighlight(index: number): string | undefined {
   return undefined;
 }
 
+// Band highlight color: the active search match wins over selected/current,
+// which win over a plain search match.
+function rowHighlight(index: number): string | undefined {
+  const hash = renderedCommits.value[index]?.hashFull;
+  if (!hash) return undefined;
+  if (hash === activeMatchHash.value) return "rgba(245, 158, 11, 0.40)";
+  return activeHighlight(index)
+    ?? (matchedHashSet.value.has(hash) ? "rgba(245, 158, 11, 0.20)" : undefined);
+}
+
+// Hover does nothing on selected or current branch rows (v2.14).
 function isRowHighlighted(index: number): boolean {
-  return rowHighlight(index) !== undefined;
+  return activeHighlight(index) !== undefined;
 }
 
 function onScroll() {
@@ -2581,8 +2592,11 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
   z-index: -1;
   pointer-events: none;
 }
+/* White wash layered over any search-match color, like the SVG hover rect. */
 .cg-row--hover:not(.cg-row--selected):not(.cg-row--current)::after {
-  background: rgba(255, 255, 255, 0.08);
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.08)),
+    var(--cg-row-hl, transparent);
 }
 
 .cg-row-hover {
@@ -2605,13 +2619,6 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
   color: var(--color-text-muted);
 }
 
-.cg-row--match {
-  background: rgba(245, 158, 11, 0.20);
-}
-
-.cg-row--match-active {
-  background: rgba(245, 158, 11, 0.40) !important;
-}
 
 .cg-row:focus-visible {
   outline: 2px solid var(--color-accent);
