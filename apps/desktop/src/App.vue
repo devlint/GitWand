@@ -391,23 +391,14 @@ watch(commitReview.lastError, (val) => {
 // Monorepo scope (v2.21.0) — restore persisted scope on repo open.
 const { loadScope } = useWorkspaceScope();
 
-function switchToChangesWithFirstFile() {
-  viewMode.value = "changes";
-  const first = repoFiles.value[0];
-  if (first) {
-    wipDiffOpen.value = true;
-    repoSelectFile(first.path, first.section === "staged");
-  }
-}
-
+// Applying / popping a stash keeps the user on the Git Tree — no jump to the
+// Changes view, no file auto-opened.
 async function applyStash(index: number) {
   await applyStashRepo(index);
-  switchToChangesWithFirstFile();
 }
 
 async function popStash(index: number) {
   await popStashRepo(index);
-  switchToChangesWithFirstFile();
 }
 
 // ─── Git Tree (now a full-screen view) ───────────────────
