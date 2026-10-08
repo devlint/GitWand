@@ -2615,30 +2615,16 @@ async function onAiTaskMergeBack() {
   if (!target || aiTaskCloseBusy.value) return;
   aiTaskCloseBusy.value = true;
   aiTaskCloseError.value = null;
-  const errText = (err: unknown) => String((err as { message?: string })?.message ?? err);
   try {
     const origin = await resolveAiTaskOrigin(target.path, target.projectPath);
-    // Stop the scratch's agent terminal first, so the agent stops writing to
-    // the scratch before merge-back reads it (a later write would be lost with
-    // the worktree), and no running process holds an index.lock or open handle
-    // that would block the worktree removal. A refused merge-back keeps the
-    // worktree and its files.
+    // Kill the scratch's agent terminal first so no running process holds an
+    // index.lock or open handle that would block the worktree removal.
     await termSessions.disposeRepo(target.path).catch(() => {});
     fileExplorer.disposeRepo(target.path);
-    try {
-      await scratchWorktreeMergeBack(origin, target.path, settings.value.snapshotsEnabled);
-    } catch (err) {
-      aiTaskCloseError.value = t("aiTask.errorMergeBack", errText(err));
-      return;
-    }
-    try {
-      await finalizeWorktreeRemoval(target.path, target.projectPath);
-    } catch (err) {
-      // The merge-back succeeded: only the cleanup failed.
-      aiTaskCloseError.value = t("aiTask.errorDelete", errText(err));
-    }
+    await scratchWorktreeMergeBack(origin, target.path, settings.value.snapshotsEnabled);
+    await finalizeWorktreeRemoval(target.path, target.projectPath);
   } catch (err) {
-    aiTaskCloseError.value = t("aiTask.errorMergeBack", errText(err));
+    aiTaskCloseError.value = t("aiTask.errorMergeBack", String((err as { message?: string })?.message ?? err));
   } finally {
     aiTaskCloseBusy.value = false;
   }

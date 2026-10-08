@@ -364,8 +364,12 @@ fn scratch_worktree_merge_back_impl(
         ));
     }
 
-    let scratch_branch = git_in(&scratch, &["symbolic-ref", "--short", "HEAD"])?;
-    let scratch_ref = format!("refs/heads/{}", scratch_branch);
+    // Full ref: `--short` answers `heads/<branch>` when a tag has the same name.
+    let scratch_ref = git_in(&scratch, &["symbolic-ref", "HEAD"])?;
+    let scratch_branch = scratch_ref
+        .strip_prefix("refs/heads/")
+        .unwrap_or(&scratch_ref)
+        .to_string();
 
     // GUARD: no unresolved conflict in the scratch.
     let unresolved = unresolved_conflicts(&scratch)?;
@@ -401,8 +405,9 @@ fn scratch_worktree_merge_back_impl(
     // the scratch branch lacks HEAD and the squash could not fast-forward.
     // That commit records the user's resolution, so the squash does undo
     // HEAD's side where they chose to. It is GitWand's own bookkeeping: no
-    // hooks (a reformatting hook would change what is brought back), no
-    // signing (it could prompt or fail).
+    // hooks at all (`--no-verify` alone still runs prepare-commit-msg and
+    // post-commit; a reformatting or tty-wanting hook would change or block
+    // what is brought back), no signing (it could prompt or fail).
     git_in(&scratch, &["add", "-A"])?;
     let scratch_status = git_in(&scratch, &["status", "--porcelain"])?;
     if !scratch_status.trim().is_empty() || scratch_merge_head.is_some() {
@@ -411,6 +416,8 @@ fn scratch_worktree_merge_back_impl(
             &[
                 "-c",
                 "commit.gpgsign=false",
+                "-c",
+                "core.hooksPath=/dev/null",
                 "commit",
                 "--no-verify",
                 "-q",
@@ -1258,12 +1265,21 @@ mod tests {
         repo.write("task.txt", "v1\n");
         repo.commit_all("base");
         // Hooks live in the common git dir: they also run in the scratch.
-        let hook = repo.path.join(".git/hooks/pre-commit");
-        std::fs::write(&hook, "#!/bin/sh\nexit 1\n").unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // `--no-verify` alone skips only pre-commit and commit-msg; a
+        // prepare-commit-msg hook (husky + commitizen wants a tty) still ran.
+        for name in [
+            "pre-commit",
+            "prepare-commit-msg",
+            "commit-msg",
+            "post-commit",
+        ] {
+            let hook = repo.path.join(".git/hooks").join(name);
+            std::fs::write(&hook, "#!/bin/sh\nexit 1\n").unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
         }
         repo.git(&["config", "commit.gpgsign", "true"]);
         repo.git(&["config", "gpg.program", "gitwand-no-such-gpg"]);
@@ -1338,5 +1354,28 @@ mod tests {
         scratch_worktree_merge_back_impl(repo.cwd(), scratch.path.clone(), Some(false))
             .expect("a staged resolution is resolved, whatever its content");
         assert_eq!(repo.read("f.txt"), fixture);
+    }
+
+    #[test]
+    fn merge_back_works_when_a_tag_is_named_like_the_scratch_branch() {
+        // `symbolic-ref --short` then answers `heads/<branch>`.
+        let repo = TempRepo::new();
+        repo.write("task.txt", "v1\n");
+        repo.commit_all("base");
+
+        let scratch = scratch_worktree_create_impl(repo.cwd(), None, None).expect("create");
+        repo.git(&["tag", &scratch.branch]);
+        write_in(&scratch, "task.txt", "agent edit\n");
+
+        scratch_worktree_merge_back_impl(repo.cwd(), scratch.path.clone(), Some(false))
+            .expect("an ambiguous name must not break merge-back");
+        assert_eq!(repo.read("task.txt"), "agent edit\n");
+        let branch_ref = format!("refs/heads/{}", scratch.branch);
+        assert!(
+            !git_at(&repo.cwd(), &["rev-parse", "--verify", "-q", &branch_ref])
+                .status
+                .success(),
+            "the scratch branch is still cleaned up"
+        );
     }
 }

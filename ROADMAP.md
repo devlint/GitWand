@@ -48,6 +48,11 @@ _Found in the 2026-10-08 worktree audit, reproduced on a throwaway repo with the
 - ~~**Interim fix**~~ — done in #233: refuses when the main checkout's `HEAD` is not in the task branch's history, then squash-merges the task branch — all or nothing, unrelated uncommitted edits survive, untracked and ignored files are never overwritten — after a `merge-back` snapshot (v3.8). Refuses while the main checkout is mid-operation or the scratch has unresolved (unstaged) conflicts
 - **Real fix** (lands with v3.15 below) — merge or rebase the task branch through the v3.11 preview → apply flow, keeping the agent's commits
 - ~~**Regression test**~~ — done in #233, with the overlap, untracked/ignored, file↔directory, case-only, pending-merge and snapshot cases
+- **Follow-ups from the #233 reviews** (low, no data loss):
+  - a cleanup failure after a successful squash (locked worktree, Windows file lock) is reported as a merge-back failure, and the task can't be closed — return success with a cleanup warning
+  - a "Task merged back" snapshot is taken even when git then refuses the squash — check before snapshotting
+  - record the task's base commit at creation: if the main checkout later switches to an ancestor branch, the squash brings the source branch's commits too
+  - stopping the agent terminal only kills the shell; a surviving child process can still write to the scratch after merge-back read it
 
 ---
 
