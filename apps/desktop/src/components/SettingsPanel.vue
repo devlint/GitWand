@@ -2777,7 +2777,11 @@ function deleteReleaseNoteTemplate(id: string) {
                  empty list falls back to free-text entry. -->
             <template v-if="hasModelPicker">
               <div class="sp-row">
-                <label class="sp-label" for="setting-ai-model">{{ t('settings.aiModelLabel') }}</label>
+                <div class="sp-label-row">
+                  <label class="sp-label" for="setting-ai-model">{{ t('settings.aiModelLabel') }}</label>
+                  <span class="sp-label-aside">(<button class="sp-text-btn sp-label-aside__btn"
+                      :disabled="modelsLoading" @click="loadModels()">{{ t('settings.aiModelCliRefresh') }}</button>)</span>
+                </div>
                 <select v-if="modelOptions.length > 0" id="setting-ai-model" class="sp-select"
                   :value="currentModel"
                   @change="onModelChange(($event.target as HTMLSelectElement).value)">
@@ -2794,9 +2798,6 @@ function deleteReleaseNoteTemplate(id: string) {
                   <template v-else-if="modelsError">{{ t('settings.aiModelsFetchError', modelsError) }}</template>
                   <template v-else-if="isCliAgentProvider">{{ t('settings.aiModelCliHint') }}</template>
                   <template v-else>{{ t('settings.aiModelsFetchedHint') }}</template>
-                  <button class="sp-text-btn" :disabled="modelsLoading" @click="loadModels()">
-                    {{ t('settings.aiModelCliRefresh') }}
-                  </button>
                 </span>
               </div>
 
@@ -3596,6 +3597,27 @@ function deleteReleaseNoteTemplate(id: string) {
   color: var(--color-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
+}
+
+/* Label with a small inline action after it — "MODEL (Refresh)". */
+.sp-label-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.sp-label-aside {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.sp-label-aside__btn {
+  font-size: inherit;
+}
+
+.sp-label-aside__btn:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 /* Dock — position row: checkbox on the left, reset button pushed to the right. */
