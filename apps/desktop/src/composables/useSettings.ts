@@ -346,6 +346,13 @@ export interface AppSettings {
   prTemplates: AiPromptPreset[];
 
   /**
+   * Output language picked per repo (keyed by cwd) and per AI template kind
+   * ("commit" | "pr" | "releaseNotes") from the AI button menu. Absent = the
+   * global default (commitMessageLang / prDescriptionLang / releaseNotesLang).
+   */
+  aiTemplateLangByRepo: Record<string, Record<string, string>>;
+
+  /**
    * ID of the active PR template per repo (keyed by cwd).
    * Null / absent / "__builtin_default" means "use the default prompt".
    */
@@ -531,6 +538,7 @@ export const defaultAppSettings: AppSettings = {
   activePresetIdByRepo:   {},
   // v3
   prTemplates:                       [],
+  aiTemplateLangByRepo:              {},
   activePrTemplateIdByRepo:          {},
   releaseNoteTemplates:              [],
   activeReleaseNoteTemplateIdByRepo: {},

@@ -109,7 +109,7 @@ async function runGenerate() {
       props.cwd,
       from.value,
       to.value,
-      { locale: getTemplateLang("releaseNotes") },
+      { locale: getTemplateLang("releaseNotes", props.cwd) },
     );
   } catch {
     markdown.value = "";

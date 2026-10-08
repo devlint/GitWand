@@ -12,8 +12,10 @@ import {
   findTemplate,
   getActiveTemplate,
   getActiveTemplateId,
+  getTemplateLang,
   removeTemplate,
   setActiveTemplate,
+  setTemplateLang,
   updateTemplate,
   userTemplates,
 } from "../useAiTemplates";
@@ -24,7 +26,7 @@ import {
   DEFAULT_TEMPLATE_PROMPTS,
   LEGACY_RELEASE_NOTES_RULES_HEADER,
 } from "../aiTemplateDefaults";
-import { loadSettings } from "../useSettings";
+import { loadSettings, saveSettings } from "../useSettings";
 
 const CWD = "/repos/alpha";
 
@@ -124,5 +126,21 @@ describe("applyLang", () => {
   it("substitutes every placeholder", () => {
     expect(applyLang("${lang} and ${lang}", "French")).toBe("French and French");
     expect(applyLang(DEFAULT_TEMPLATE_PROMPTS.pr, "English")).not.toContain("${lang}");
+  });
+});
+
+describe("output language per repo", () => {
+  it("defaults to English, then to the global setting", () => {
+    expect(getTemplateLang("pr", CWD)).toBe("en");
+    saveSettings({ ...loadSettings(), prDescriptionLang: "fr" });
+    expect(getTemplateLang("pr", CWD)).toBe("fr");
+  });
+
+  it("a repo's pick wins, only for that repo and that kind", () => {
+    saveSettings({ ...loadSettings(), commitMessageLang: "es" });
+    setTemplateLang("commit", CWD, "zh-CN");
+    expect(getTemplateLang("commit", CWD)).toBe("zh-CN");
+    expect(getTemplateLang("commit", "/repos/beta")).toBe("es");
+    expect(getTemplateLang("pr", CWD)).toBe("en");
   });
 });

@@ -231,6 +231,7 @@ interface Settings {
   activePresetIdByRepo: Record<string, string | null>;
   // v3 Release Note Templates
   prTemplates: AiPromptPreset[];
+  aiTemplateLangByRepo: Record<string, Record<string, string>>;
   activePrTemplateIdByRepo: Record<string, string | null>;
   releaseNoteTemplates: ReleaseNoteTemplate[];
   activeReleaseNoteTemplateIdByRepo: Record<string, string | null>;
@@ -341,6 +342,7 @@ const defaultSettings: Settings = {
   activePresetIdByRepo: {},
   // v3 Release Note Templates
   prTemplates: [],
+  aiTemplateLangByRepo: {},
   activePrTemplateIdByRepo: {},
   releaseNoteTemplates: [],
   activeReleaseNoteTemplateIdByRepo: {},
@@ -1315,6 +1317,7 @@ function syncAiTemplateSettings() {
   settings.value.aiPromptPresets = fresh.aiPromptPresets;
   settings.value.activePresetIdByRepo = fresh.activePresetIdByRepo;
   settings.value.prTemplates = fresh.prTemplates;
+  settings.value.aiTemplateLangByRepo = fresh.aiTemplateLangByRepo;
   settings.value.activePrTemplateIdByRepo = fresh.activePrTemplateIdByRepo;
   settings.value.releaseNoteTemplates = fresh.releaseNoteTemplates;
   settings.value.activeReleaseNoteTemplateIdByRepo = fresh.activeReleaseNoteTemplateIdByRepo;
@@ -3116,6 +3119,7 @@ watch(aiTemplateKind, closeAiTemplateForm);
               <option v-for="loc in supportedLocales" :key="loc" :value="loc">{{ localeLabels[loc] }}</option>
             </select>
             <span class="sp-hint">{{ t('settings.commitMessageLangHint') }}</span>
+            <span class="sp-hint">{{ t('settings.aiTemplates.langDefaultNote') }}</span>
             <span class="sp-hint">{{ t('settings.aiTemplates.langOverrideNote') }}</span>
           </div>
 
@@ -3127,6 +3131,7 @@ watch(aiTemplateKind, closeAiTemplateForm);
               <option v-for="loc in supportedLocales" :key="loc" :value="loc">{{ localeLabels[loc] }}</option>
             </select>
             <span class="sp-hint">{{ t('settings.prAiLanguageHint') }}</span>
+            <span class="sp-hint">{{ t('settings.aiTemplates.langDefaultNote') }}</span>
             <span class="sp-hint">{{ t('settings.aiTemplates.langOverrideNote') }}</span>
           </div>
 
@@ -3138,6 +3143,7 @@ watch(aiTemplateKind, closeAiTemplateForm);
               <option v-for="loc in supportedLocales" :key="loc" :value="loc">{{ localeLabels[loc] }}</option>
             </select>
             <span class="sp-hint">{{ t('settings.releaseNotesLangHint') }}</span>
+            <span class="sp-hint">{{ t('settings.aiTemplates.langDefaultNote') }}</span>
             <span class="sp-hint">{{ t('settings.aiTemplates.langOverrideNote') }}</span>
           </div>
 

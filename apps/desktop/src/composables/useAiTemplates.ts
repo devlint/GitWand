@@ -46,21 +46,30 @@ const STORAGE: Record<AiTemplateKind, { list: TemplateListKey; active: ActiveMap
 
 export const AI_TEMPLATE_KINDS: readonly AiTemplateKind[] = ["commit", "pr", "releaseNotes"];
 
-/** Setting holding each kind's output language (locale code; "" = English). */
+/** Global default output language of each kind (locale code; "" = English). */
 const LANG_SETTING: Record<AiTemplateKind, "commitMessageLang" | "prDescriptionLang" | "releaseNotesLang"> = {
   commit:       "commitMessageLang",
   pr:           "prDescriptionLang",
   releaseNotes: "releaseNotesLang",
 };
 
-/** Output language of a kind — the same setting as Settings → AI Templates. */
-export function getTemplateLang(kind: AiTemplateKind): string {
-  return loadSettings()[LANG_SETTING[kind]] || "en";
+/**
+ * Output language of a kind for a repo: the one picked for that repo from the
+ * AI button menu, else the global default from Settings → AI Templates, else
+ * English.
+ */
+export function getTemplateLang(kind: AiTemplateKind, cwd?: string): string {
+  const s = loadSettings();
+  const picked = cwd ? s.aiTemplateLangByRepo?.[cwd]?.[kind] : undefined;
+  return picked || s[LANG_SETTING[kind]] || "en";
 }
 
-export function setTemplateLang(kind: AiTemplateKind, lang: string): void {
+/** Remember the output language of a kind for one repo. */
+export function setTemplateLang(kind: AiTemplateKind, cwd: string, lang: string): void {
   const s = loadSettings();
-  s[LANG_SETTING[kind]] = lang;
+  const byRepo = { ...(s.aiTemplateLangByRepo ?? {}) };
+  byRepo[cwd] = { ...(byRepo[cwd] ?? {}), [kind]: lang };
+  s.aiTemplateLangByRepo = byRepo;
   saveSettings(s);
 }
 
@@ -176,7 +185,7 @@ export function useAiTemplates(kind: AiTemplateKind, getCwd?: () => string) {
 
   const lang = computed(() => {
     void settingsRevision.value;
-    return getTemplateLang(kind);
+    return getTemplateLang(kind, getCwd?.());
   });
 
   function activate(id: string | null) {
@@ -190,6 +199,8 @@ export function useAiTemplates(kind: AiTemplateKind, getCwd?: () => string) {
     activeTemplate,
     activate,
     lang,
-    setLang: (code: string) => setTemplateLang(kind, code),
+    setLang: (code: string) => {
+      if (getCwd) setTemplateLang(kind, getCwd(), code);
+    },
   };
 }

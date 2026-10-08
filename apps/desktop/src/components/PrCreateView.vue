@@ -51,8 +51,8 @@ async function generateWithAI() {
   // user switched repo meanwhile.
   const cwd = props.cwd;
   try {
-    // PR language: the Settings choice, English by default.
-    const prLang = getTemplateLang("pr");
+    // PR language: picked for this repo, else the Settings default.
+    const prLang = getTemplateLang("pr", cwd);
     const result = await generatePrDescription(
       cwd,
       props.currentBranch,

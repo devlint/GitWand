@@ -149,6 +149,7 @@ onUnmounted(close);
         maxHeight: `${menuPos.maxHeight}px`,
       }"
     >
+      <p class="atm-note">{{ t('settings.aiTemplates.perProjectNote') }}</p>
       <ul class="atm-list" role="menu">
         <li class="atm-title">{{ t('settings.aiTemplates.language') }}</li>
         <li class="atm-langs" role="group" :aria-label="t('settings.aiTemplates.language')">
@@ -203,8 +204,9 @@ onUnmounted(close);
   z-index: 1000;
   display: flex;
   flex-direction: column;
-  min-width: 220px;
-  max-width: 320px;
+  /* Wide enough for the per-project note in every locale (≤ 2 lines). */
+  min-width: 300px;
+  max-width: 340px;
   overflow: hidden;
   background: var(--color-bg);
   border: 1px solid var(--color-border);
@@ -312,14 +314,21 @@ onUnmounted(close);
   background: var(--color-border);
   cursor: default;
 }
+/* Fixed header above the scrolling list. */
+.atm-note {
+  flex-shrink: 0;
+  margin: 0;
+  padding: var(--space-3) 28px var(--space-3) var(--space-5);
+  font-size: var(--font-size-xs);
+  line-height: 1.35;
+  color: var(--color-text-muted);
+  border-bottom: 1px solid var(--color-border);
+}
 .atm-menu .atm-manage {
   flex-direction: row;
   align-items: center;
   gap: var(--space-3);
   padding-left: var(--space-5);
-  color: var(--color-text-muted);
-}
-.atm-menu .atm-manage:hover {
   color: var(--color-text);
 }
 </style>

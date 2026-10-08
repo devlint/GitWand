@@ -630,9 +630,9 @@ function applyMessage(cwd: string, msg: string) {
 
 async function onGenerateCommitMessage() {
   if (!props.cwd || isGenerating.value) return;
-  const lang = getTemplateLang("commit");
-  const preset = activePreset.value;
   const cwd = props.cwd;
+  const lang = getTemplateLang("commit", cwd);
+  const preset = activePreset.value;
   try {
     const msg = await generateCommitMsg(cwd, {
       locale: lang as string,

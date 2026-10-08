@@ -3863,7 +3863,7 @@ const scheduler = useScheduler({
     if (tags.length < 2) return;
     const sorted = [...tags].sort((a, b) => b.date.localeCompare(a.date));
     await generateReleaseNotesFn(repoFolderPath.value, sorted[1].name, sorted[0].name, {
-      locale: getTemplateLang("releaseNotes"),
+      locale: getTemplateLang("releaseNotes", repoFolderPath.value),
     });
   },
   triggerAiCommit: async () => {
