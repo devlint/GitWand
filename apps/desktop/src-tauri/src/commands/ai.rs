@@ -435,7 +435,9 @@ fn antigravity_list_models_inner() -> Result<Vec<AntigravityModel>, String> {
         return Ok(Vec::new());
     }
 
-    Ok(parse_antigravity_models(&String::from_utf8_lossy(&output.stdout)))
+    Ok(parse_antigravity_models(&String::from_utf8_lossy(
+        &output.stdout,
+    )))
 }
 
 /// Parse `agy models` stdout. Lines without a tab (the "Fetching available
@@ -452,7 +454,11 @@ fn parse_antigravity_models(stdout: &str) -> Vec<AntigravityModel> {
             let name = name.trim();
             Some(AntigravityModel {
                 id: id.to_string(),
-                name: if name.is_empty() { id.to_string() } else { name.to_string() },
+                name: if name.is_empty() {
+                    id.to_string()
+                } else {
+                    name.to_string()
+                },
             })
         })
         .collect()
@@ -509,7 +515,12 @@ fn parse_codex_models(json: &str) -> Vec<CodexModel> {
 
     let mut listed: Vec<(i64, CodexModel)> = entries
         .iter()
-        .filter(|m| m.get("visibility").and_then(|v| v.as_str()).unwrap_or("list") == "list")
+        .filter(|m| {
+            m.get("visibility")
+                .and_then(|v| v.as_str())
+                .unwrap_or("list")
+                == "list"
+        })
         .filter_map(|m| {
             let id = m.get("slug")?.as_str()?.trim();
             if id.is_empty() {
@@ -532,7 +543,10 @@ fn parse_codex_models(json: &str) -> Vec<CodexModel> {
                         .collect()
                 })
                 .unwrap_or_default();
-            let priority = m.get("priority").and_then(|p| p.as_i64()).unwrap_or(i64::MAX);
+            let priority = m
+                .get("priority")
+                .and_then(|p| p.as_i64())
+                .unwrap_or(i64::MAX);
             Some((
                 priority,
                 CodexModel {
@@ -1091,7 +1105,9 @@ fn copilot_list_models_inner() -> Result<Vec<String>, String> {
         return Ok(Vec::new());
     }
 
-    Ok(parse_copilot_models(&String::from_utf8_lossy(&output.stdout)))
+    Ok(parse_copilot_models(&String::from_utf8_lossy(
+        &output.stdout,
+    )))
 }
 
 /// Extract the `- "<id>"` lines that follow the `` `model`: `` heading of
@@ -1346,7 +1362,10 @@ mod tests {
                     \n\
                     \x20 `contextTier`: context window tier\n\
                     \x20   - \"default\"\n";
-        assert_eq!(parse_copilot_models(help), vec!["claude-sonnet-5", "gpt-5.5"]);
+        assert_eq!(
+            parse_copilot_models(help),
+            vec!["claude-sonnet-5", "gpt-5.5"]
+        );
         assert!(parse_copilot_models("no model section").is_empty());
     }
 
