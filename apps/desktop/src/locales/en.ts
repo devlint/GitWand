@@ -989,13 +989,13 @@ const en = {
       dismiss: "Dismiss",
       progress: "{0}/{1} files",
       empty: "No findings.",
-      running: "Analyzing…",
+      running: "Analyzing",
     },
     summary: {
       title: "Summary",
       regenerate: "Regenerate",
       copy: "Copy",
-      loading: "Generating summary…",
+      loading: "Generating summary",
       empty: "No summary yet.",
     },
     comment: {
@@ -1990,7 +1990,7 @@ const en = {
     explainTooltip: "Explain this conflict in plain language",
     explain: "Explain",
     explainAnalyzing: "Analysing",
-    analyzingConflict: "Analysing conflict\u2026",
+    analyzingConflict: "Analysing conflict",
     // Custom automation
     automationRun: "Run automation",
     automationRunning: "Running\u2026",
@@ -2046,7 +2046,7 @@ const en = {
   prInline: {
     aiCritiqueTooltip: "AI critique of this hunk",
     aiCritiqueButton: "Review",
-    aiCritiqueAnalyzing: "Analysing hunk\u2026",
+    aiCritiqueAnalyzing: "Analysing hunk",
   },
 
   // ─── Stash manager ──────────────────────────────────────
@@ -2083,7 +2083,7 @@ const en = {
   fileHistory: {
     explainChange: "Explain this change with AI",
     whyThisChange: "Why did this change?",
-    analyzingCommit: "Analysing commit\u2026",
+    analyzingCommit: "Analysing commit",
   },
 
   // ─── FileHistoryViewer — pickaxe + line-range (v1.9) ────

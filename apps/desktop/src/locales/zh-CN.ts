@@ -979,13 +979,13 @@ const zhCN: Locale = {
       dismiss: "驳回",
       progress: "{0}/{1} 个文件",
       empty: "暂无发现项。",
-      running: "分析中…",
+      running: "分析中",
     },
     summary: {
       title: "摘要",
       regenerate: "重新生成",
       copy: "复制",
-      loading: "正在生成摘要…",
+      loading: "正在生成摘要",
       empty: "暂无摘要。",
     },
     comment: {
@@ -1965,7 +1965,7 @@ const zhCN: Locale = {
     explainTooltip: "用自然语言解释此冲突",
     explain: "解释",
     explainAnalyzing: "分析中",
-    analyzingConflict: "分析冲突中…",
+    analyzingConflict: "分析冲突中",
     // Custom automation
     automationRun: "运行自动化",
     automationRunning: "运行中…",
@@ -2021,7 +2021,7 @@ const zhCN: Locale = {
   prInline: {
     aiCritiqueTooltip: "AI 对该代码段的点评",
     aiCritiqueButton: "审阅",
-    aiCritiqueAnalyzing: "正在分析代码段\u2026",
+    aiCritiqueAnalyzing: "正在分析代码段",
   },
 
   // ─── Stash manager ──────────────────────────────────────
@@ -2058,7 +2058,7 @@ const zhCN: Locale = {
   fileHistory: {
     explainChange: "用 AI 解释这次变更",
     whyThisChange: "为什么是这次变更？",
-    analyzingCommit: "正在分析提交\u2026",
+    analyzingCommit: "正在分析提交",
   },
 
   // ─── Scratch worktree (v2.20.0) ─────────────────────────

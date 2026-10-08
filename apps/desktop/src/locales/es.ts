@@ -973,13 +973,13 @@ const es: Locale = {
       dismiss: "Descartar",
       progress: "{0}/{1} archivos",
       empty: "Sin hallazgos.",
-      running: "Analizando…",
+      running: "Analizando",
     },
     summary: {
       title: "Resumen",
       regenerate: "Regenerar",
       copy: "Copiar",
-      loading: "Generando resumen…",
+      loading: "Generando resumen",
       empty: "Aún no hay resumen.",
     },
     comment: {
@@ -1956,7 +1956,7 @@ const es: Locale = {
     explainTooltip: "Explicar este conflicto en lenguaje natural",
     explain: "Explicar",
     explainAnalyzing: "Analizando",
-    analyzingConflict: "Analizando conflicto…",
+    analyzingConflict: "Analizando conflicto",
     // Custom automation
     automationRun: "Ejecutar automatización",
     automationRunning: "Ejecutando…",
@@ -2012,7 +2012,7 @@ const es: Locale = {
   prInline: {
     aiCritiqueTooltip: "Crítica IA de este bloque",
     aiCritiqueButton: "Revisar",
-    aiCritiqueAnalyzing: "Analizando bloque\u2026",
+    aiCritiqueAnalyzing: "Analizando bloque",
   },
 
   // ─── Stash manager ──────────────────────────────────────
@@ -2049,7 +2049,7 @@ const es: Locale = {
   fileHistory: {
     explainChange: "Explicar este cambio con IA",
     whyThisChange: "¿Por qué este cambio?",
-    analyzingCommit: "Analizando commit\u2026",
+    analyzingCommit: "Analizando commit",
   },
 
   // ─── Scratch worktree (v2.20.0) ─────────────────────────
