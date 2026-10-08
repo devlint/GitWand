@@ -13,7 +13,7 @@
  */
 
 import { ref, computed } from "vue";
-import { gitExec, gitInteractiveRebase } from "../utils/backend";
+import { gitExec, gitInteractiveRebase, gitRepoState } from "../utils/backend";
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -172,60 +172,22 @@ export function useInteractiveRebase() {
 
   async function detectRebaseState(cwd: string): Promise<RebaseProgress | null> {
     try {
-      // Most reliable check: `git status` long-form mentions
-      // "interactive rebase in progress" (English) or
-      // "rebase interactif en cours" (French) when a rebase is active.
-      // We force English output with LC_ALL=C via a harmless -c flag.
-      const st = await gitExec(cwd, [
-        "-c", "advice.statusHints=true",
-        "status",
-      ]);
-      const statusText = st.stdout;
-
-      // Match specifically the rebase-in-progress message, NOT the branch name
-      const isRebasing =
-        /interactive rebase in progress/.test(statusText) ||
-        /rebase interactif en cours/.test(statusText) ||
-        /You are currently rebasing/.test(statusText) ||
-        /Vous êtes en train de rebaser/.test(statusText);
-
-      if (!isRebasing) {
+      // Read the operation state from the .git directory (rebase-merge /
+      // rebase-apply) rather than parsing `git status` prose, which is
+      // translated — a rebase run under a locale we didn't list went unseen.
+      const repo = await gitRepoState(cwd);
+      if (repo.state !== "rebase" && repo.state !== "rebase_interactive") {
         progress.value = null;
         return null;
       }
 
-      // Parse step/total from status output
-      let step = 0;
-      let total = 0;
-      let headName = "";
-
-      const branchMatch = statusText.match(/rebasing branch '([^']+)'/);
-      if (branchMatch) headName = branchMatch[1];
-
-      const doneMatch = statusText.match(/\((\d+) commands? done\)/);
-      if (doneMatch) step = parseInt(doneMatch[1], 10);
-
-      const remainMatch = statusText.match(/\((\d+) remaining commands?\)/);
-      if (remainMatch) total = step + parseInt(remainMatch[1], 10);
-      else total = step;
-
-      // Get REBASE_HEAD for current hash
-      const rh = await gitExec(cwd, ["rev-parse", "--verify", "--quiet", "REBASE_HEAD"]);
-      const currentHash = rh.exitCode === 0 ? rh.stdout.trim().slice(0, 7) : "";
-
-      // Conflict detection via porcelain status
-      const conflictCheck = await gitExec(cwd, ["status", "--porcelain"]);
-      const hasConflict = conflictCheck.stdout.split("\n").some(
-        (l) => l.startsWith("UU ") || l.startsWith("AA ") || l.startsWith("UD ") || l.startsWith("DU "),
-      );
-
       const state: RebaseProgress = {
         inProgress: true,
-        step,
-        total,
-        currentHash,
-        hasConflict,
-        headName,
+        step: repo.step,
+        total: repo.total,
+        currentHash: repo.operationHead?.slice(0, 7) ?? "",
+        hasConflict: repo.hasConflict,
+        headName: repo.targetBranch ?? "",
       };
       progress.value = state;
       return state;
@@ -233,6 +195,18 @@ export function useInteractiveRebase() {
       progress.value = null;
       return null;
     }
+  }
+
+  /**
+   * After a failed `--continue` / `--skip`: is the rebase still halted on a
+   * merge conflict? A fresh conflict prints `CONFLICT` / `could not apply`,
+   * but continuing with conflicts still unresolved prints `<file>: needs
+   * merge` instead (#223) — so ask the repo rather than parse stderr alone.
+   */
+  async function haltedOnConflict(cwd: string, stderr: string): Promise<boolean> {
+    const state = await detectRebaseState(cwd);
+    if (state?.inProgress && state.hasConflict) return true;
+    return !!state?.inProgress && (stderr.includes("CONFLICT") || stderr.includes("could not apply"));
   }
 
   // ── Start interactive rebase ──────────────────────────────
@@ -312,8 +286,7 @@ export function useInteractiveRebase() {
         "rebase", "--continue",
       ]);
       if (result.exitCode !== 0) {
-        if (result.stderr.includes("CONFLICT") || result.stderr.includes("could not apply")) {
-          await detectRebaseState(cwd);
+        if (await haltedOnConflict(cwd, result.stderr)) {
           return { success: true, conflict: true, inProgress: true };
         }
         throw new Error(result.stderr || "rebase --continue failed");
@@ -358,8 +331,7 @@ export function useInteractiveRebase() {
     try {
       const result = await gitExec(cwd, ["rebase", "--skip"]);
       if (result.exitCode !== 0) {
-        if (result.stderr.includes("CONFLICT") || result.stderr.includes("could not apply")) {
-          await detectRebaseState(cwd);
+        if (await haltedOnConflict(cwd, result.stderr)) {
           return { success: true, conflict: true, inProgress: true };
         }
         throw new Error(result.stderr || "rebase --skip failed");

@@ -493,6 +493,11 @@ const hasTodo = computed(
           {{ t('rebase.abort') }}
         </button>
       </div>
+      <!-- The footer (and its error line) only exists with a todo list, which a
+           rebase resumed from another flow doesn't have — surface failures here. -->
+      <div v-if="inProgress && rebase.error.value" class="rb-error-box">
+        {{ rebase.error.value }}
+      </div>
 
       <!-- Base selection -->
       <template v-if="showBasePicker && !inProgress">
