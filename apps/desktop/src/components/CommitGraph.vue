@@ -1081,6 +1081,7 @@ const OVERSCAN_ROWS = 8;
 const scrollContainer = ref<HTMLDivElement | null>(null);
 const scrollTop = ref(0);
 const clientHeight = ref(0);
+const clientWidth = ref(0);
 
 let _loadMorePending = false;
 
@@ -1200,7 +1201,9 @@ onUnmounted(clearLoadingHideTimer);
 const graphWidth = useStickyWidth(graphWidthRaw, showLoadingMore, 1500);
 
 function measureViewport() {
-  if (scrollContainer.value) clientHeight.value = scrollContainer.value.clientHeight;
+  if (!scrollContainer.value) return;
+  clientHeight.value = scrollContainer.value.clientHeight;
+  clientWidth.value = scrollContainer.value.clientWidth;
 }
 
 // The whole component (including `.cg-scroll`) is behind `v-if="displayCommits.length > 0"`,
@@ -1425,6 +1428,10 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
     <div
       class="cg-scroll"
       ref="scrollContainer"
+      :style="{
+        '--cg-graph-w': graphWidth + 'px',
+        '--cg-shade-w': Math.max(clientWidth, graphWidth) + 'px',
+      }"
       @scroll="onScroll"
       @mousemove="onScrollMouseMove"
       @mouseleave="hoveredIndex = null"
@@ -1452,6 +1459,21 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
             <stop offset="33%" style="stop-color: hsla(35, 80%, 55%, 0.15);" />
             <stop offset="66%" style="stop-color: hsla(140, 80%, 55%, 0.15);" />
             <stop offset="100%" style="stop-color: var(--color-accent-soft);" />
+          </linearGradient>
+          <!-- One left-to-right shade across the whole row: spans the graph
+               column plus the commit row, continued there by --cg-row-shade. -->
+          <linearGradient
+            id="row-shade"
+            gradientUnits="userSpaceOnUse"
+            x1="0"
+            y1="0"
+            :x2="Math.max(clientWidth, graphWidth)"
+            y2="0"
+          >
+            <stop offset="0%" style="stop-color: #000; stop-opacity: 0.4;" />
+            <stop offset="50%" style="stop-color: #000; stop-opacity: 0.04;" />
+            <stop offset="90%" style="stop-color: #000; stop-opacity: 0.1;" />
+            <stop offset="100%" style="stop-color: #000; stop-opacity: 0.3;" />
           </linearGradient>
         </defs>
 
@@ -1492,6 +1514,18 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
           :y="hoveredNode.index * ROW_H + 1"
           :width="graphWidth - cx(hoveredNode.lane) + 11 + 20"
           :height="ROW_H - 2"
+          rx="8"
+        />
+        <!-- Shade over each band (tint + highlights). Drawn under edges and nodes. -->
+        <rect
+          v-for="node in visibleNodes"
+          :key="'s' + node.index"
+          class="cg-row-shade"
+          :x="cx(node.lane) - 11"
+          :y="node.index * ROW_H + 1"
+          :width="graphWidth - cx(node.lane) + 11 + 20"
+          :height="ROW_H - 2"
+          fill="url(#row-shade)"
           rx="8"
         />
         <!-- Edges first (behind nodes). R6: only visible edges are emitted.
@@ -2570,6 +2604,15 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
   overflow: hidden;
   white-space: nowrap;
   isolation: isolate;
+  /* Left-to-right shade over the row band: darkest at the start, lightest
+     mid-row, darker again over the last 10% at the right end. */
+  --cg-row-shade: linear-gradient(
+    to right,
+    rgba(0, 0, 0, 0.4) 0%,
+    rgba(0, 0, 0, 0.04) 50%,
+    rgba(0, 0, 0, 0.1) 90%,
+    rgba(0, 0, 0, 0.3) 100%
+  );
 }
 /* Tint continuing the SVG .cg-row-tint band up to the row's right end. */
 .cg-row::before {
@@ -2588,22 +2631,31 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
   position: absolute;
   inset: 1px 0 0 0;
   border-radius: 0 8px 8px 0;
-  background: var(--cg-row-hl, transparent);
+  background: var(--cg-row-shade), var(--cg-row-hl, transparent);
+  /* The shade layer is sized/offset to the whole row (graph column + commit
+     row) so it continues the SVG #row-shade gradient seamlessly. */
+  background-size: var(--cg-shade-w) 100%, auto;
+  background-position: calc(-1 * var(--cg-graph-w)) 0, 0 0;
+  background-repeat: no-repeat;
   z-index: -1;
   pointer-events: none;
 }
 /* White wash layered over any search-match color, like the SVG hover rect. */
 .cg-row--hover:not(.cg-row--selected):not(.cg-row--current)::after {
   background:
+    var(--cg-row-shade),
     linear-gradient(rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.08)),
     var(--cg-row-hl, transparent);
+  background-size: var(--cg-shade-w) 100%, auto, auto;
+  background-position: calc(-1 * var(--cg-graph-w)) 0, 0 0, 0 0;
 }
 
 .cg-row-hover {
   fill: rgba(255, 255, 255, 0.08);
 }
 .cg-row-active,
-.cg-row-hover {
+.cg-row-hover,
+.cg-row-shade {
   pointer-events: none;
 }
 
