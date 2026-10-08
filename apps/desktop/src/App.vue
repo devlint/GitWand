@@ -391,14 +391,21 @@ watch(commitReview.lastError, (val) => {
 // Monorepo scope (v2.21.0) — restore persisted scope on repo open.
 const { loadScope } = useWorkspaceScope();
 
-// Applying / popping a stash keeps the user on the Git Tree — no jump to the
-// Changes view, no file auto-opened.
+// Applying / popping a stash selects the WIP on the Git Tree: the right rail
+// shows the Changes pane, but no file is auto-opened over the graph.
+function focusWip() {
+  viewMode.value = "changes";
+  wipDiffOpen.value = false;
+}
+
 async function applyStash(index: number) {
   await applyStashRepo(index);
+  focusWip();
 }
 
 async function popStash(index: number) {
   await popStashRepo(index);
+  focusWip();
 }
 
 // ─── Git Tree (now a full-screen view) ───────────────────
