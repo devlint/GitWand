@@ -881,6 +881,20 @@ const indexToLane = computed(() => {
   return map;
 });
 
+const indexToNode = computed(() => {
+  const map = new Map<number, DagNode>();
+  for (const node of layout.value.nodes) map.set(node.index, node);
+  return map;
+});
+
+// Continuation of the SVG row tint across the commit row. The trunk gradient
+// ends on accent-soft, so trunk rows continue with that flat color.
+function rowTint(index: number): string | undefined {
+  const node = indexToNode.value.get(index);
+  if (!node) return undefined;
+  return nodeKind(node) === 'trunk' ? "var(--color-accent-soft)" : laneColorTint(node.lane);
+}
+
 // ─── SVG path helpers ────────────────────────────────
 function cx(lane: number): number {
   return GRAPH_PAD + lane * LANE_W + LANE_W / 2;
@@ -1069,6 +1083,36 @@ const scrollTop = ref(0);
 const clientHeight = ref(0);
 
 let _loadMorePending = false;
+
+// Hovered row index, tracked over the whole scroll area so the hover
+// highlight spans both the SVG graph column and the commit row.
+const hoveredIndex = ref<number | null>(null);
+
+function onScrollMouseMove(e: MouseEvent) {
+  const el = scrollContainer.value;
+  if (!el) return;
+  const y = e.clientY - el.getBoundingClientRect().top + el.scrollTop;
+  const index = Math.floor(y / ROW_H);
+  hoveredIndex.value = index >= 0 && index < renderedCommits.value.length ? index : null;
+}
+
+const hoveredNode = computed(() =>
+  hoveredIndex.value === null ? undefined : indexToNode.value.get(hoveredIndex.value),
+);
+
+// Branch-colored highlight for the selected (0.2) or current (0.25) row.
+function rowHighlight(index: number): string | undefined {
+  const entry = renderedCommits.value[index];
+  if (!entry) return undefined;
+  const lane = indexToLane.value.get(index) ?? 0;
+  if (entry.hashFull === props.selectedHash) return laneColor(lane, 0.2);
+  if (isCurrent(entry)) return laneColor(lane, 0.25);
+  return undefined;
+}
+
+function isRowHighlighted(index: number): boolean {
+  return rowHighlight(index) !== undefined;
+}
 
 function onScroll() {
   const el = scrollContainer.value;
@@ -1367,7 +1411,13 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
         </svg>
       </button>
     </div>
-    <div class="cg-scroll" ref="scrollContainer" @scroll="onScroll">
+    <div
+      class="cg-scroll"
+      ref="scrollContainer"
+      @scroll="onScroll"
+      @mousemove="onScrollMouseMove"
+      @mouseleave="hoveredIndex = null"
+    >
       <!-- SVG graph column -->
       <!-- No viewBox: it was identity (0 0 w h) so coordinates are plain px;
            with a viewBox the CSS width transition would stretch the drawing
@@ -1407,6 +1457,31 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
           rx="8"
           @click="node.hash === 'WIP' ? emit('change-view', 'changes') : emit('select-commit', node.hash)"
           @contextmenu="openCommitContextMenu($event, renderedCommits[node.index], node.index)"
+        />
+        <!-- Selected / current highlight over the row tint band, continued on
+             the commit row by --cg-row-hl. -->
+        <template v-for="node in visibleNodes" :key="'h' + node.index">
+          <rect
+            v-if="rowHighlight(node.index)"
+            class="cg-row-active"
+            :x="cx(node.lane) - 11"
+            :y="node.index * ROW_H + 1"
+            :width="graphWidth - cx(node.lane) + 11 + 20"
+            :height="ROW_H - 2"
+            :fill="rowHighlight(node.index)"
+            rx="8"
+          />
+        </template>
+        <!-- Hover highlight over the row tint band, continued on the commit
+             row by .cg-row--hover. -->
+        <rect
+          v-if="hoveredNode && !isRowHighlighted(hoveredNode.index)"
+          class="cg-row-hover"
+          :x="cx(hoveredNode.lane) - 11"
+          :y="hoveredNode.index * ROW_H + 1"
+          :width="graphWidth - cx(hoveredNode.lane) + 11 + 20"
+          :height="ROW_H - 2"
+          rx="8"
         />
         <!-- Edges first (behind nodes). R6: only visible edges are emitted.
              Key uses content (lanes + indices) so Vue can re-use DOM nodes
@@ -1524,15 +1599,13 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
             'cg-row--wip': vc.entry.hashFull === 'WIP',
             'cg-row--match': matchedHashSet.has(vc.entry.hashFull),
             'cg-row--match-active': vc.entry.hashFull === activeMatchHash,
+            'cg-row--hover': vc.index === hoveredIndex,
           }"
            :style="{
              top: vc.index * ROW_H + 'px',
              height: ROW_H + 'px',
-             backgroundColor: vc.entry.hashFull === selectedHash
-               ? laneColor(indexToLane.get(vc.index) ?? 0, 0.2)
-               : isCurrent(vc.entry)
-                 ? laneColor(indexToLane.get(vc.index) ?? 0, 0.25)
-                 : undefined
+             '--cg-row-tint': rowTint(vc.index),
+             '--cg-row-hl': rowHighlight(vc.index)
            }"          @click="vc.entry.hashFull === 'WIP' ? emit('change-view', 'changes') : emit('select-commit', vc.entry.hashFull)"          @dblclick="onRowDblClick(vc.entry)"
           @contextmenu="vc.entry.hashFull === 'WIP' ? openWipContextMenu($event) : openCommitContextMenu($event, vc.entry, vc.index)"
         >
@@ -2481,22 +2554,51 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
   padding: 0 12px 0 4px;
   cursor: pointer;
   font-size: 12px;
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-bg);
   transition: background 0.1s;
   overflow: hidden;
   white-space: nowrap;
+  isolation: isolate;
 }
-.cg-row:not(.cg-row--selected):not(.cg-row--current):hover {
-  background-color: rgba(255, 255, 255, 0.08) !important;
-  filter: brightness(1.15);
+/* Tint continuing the SVG .cg-row-tint band up to the row's right end. */
+.cg-row::before {
+  content: "";
+  position: absolute;
+  /* bottom 0: the 1px border-bottom already supplies the bottom gap */
+  inset: 1px 0 0 0;
+  border-radius: 0 8px 8px 0;
+  background: var(--cg-row-tint, transparent);
+  z-index: -1;
+  pointer-events: none;
+}
+/* Selected / current / hover highlight, same band shape as the tint. */
+.cg-row::after {
+  content: "";
+  position: absolute;
+  inset: 1px 0 0 0;
+  border-radius: 0 8px 8px 0;
+  background: var(--cg-row-hl, transparent);
+  z-index: -1;
+  pointer-events: none;
+}
+.cg-row--hover:not(.cg-row--selected):not(.cg-row--current)::after {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.cg-row-hover {
+  fill: rgba(255, 255, 255, 0.08);
+}
+.cg-row-active,
+.cg-row-hover {
+  pointer-events: none;
 }
 
 .cg-row--selected {
-  /* Dynamic branch-colored background is set in :style at 0.2 opacity */
+  /* Dynamic branch-colored highlight is set via --cg-row-hl at 0.2 opacity */
 }
 
 .cg-row--current {
-  /* Dynamic branch-colored background is set in :style at 0.25 opacity */
+  /* Dynamic branch-colored highlight is set via --cg-row-hl at 0.25 opacity */
 }
 
 .cg-row--wip {
@@ -2509,13 +2611,6 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
 
 .cg-row--match-active {
   background: rgba(245, 158, 11, 0.40) !important;
-}
-
-/* Hover does nothing on selected or current branch rows (v2.14) */
-.cg-row--selected:hover,
-.cg-row--current:hover {
-  filter: none;
-  background-color: transparent; /* fallback, but inline style wins */
 }
 
 .cg-row:focus-visible {
