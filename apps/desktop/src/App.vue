@@ -52,6 +52,7 @@ import { useSnapshots } from "./composables/useSnapshots";
 const TagsPanel = defineAsyncComponent(() => import("./components/TagsPanel.vue"));
 const WorktreeManager = defineAsyncComponent(() => import("./components/WorktreeManager.vue"));
 const SubmodulePanel = defineAsyncComponent(() => import("./components/SubmodulePanel.vue"));
+const ReleaseNotesModal = defineAsyncComponent(() => import("./components/ReleaseNotesModal.vue"));
 const LaunchpadView = defineAsyncComponent(() => import("./components/LaunchpadView.vue"));
 const AgentSessionsPanel = defineAsyncComponent(() => import("./components/AgentSessionsPanel.vue"));
 const AiTaskCloseModal = defineAsyncComponent(() => import("./components/AiTaskCloseModal.vue"));
@@ -3227,6 +3228,9 @@ const pendingQuickCreate = ref(false);
 // ─── Submodule panel ─────────────────────────────────────
 const showSubmodules = ref(false);
 
+// ─── Release notes modal (header button) ─────────────────
+const showReleaseNotes = ref(false);
+
 // ─── Discard-section confirmation modal ─────────────────
 const discardSectionConfirm = ref<{ sectionKey: string; paths: string[] } | null>(null);
 
@@ -4353,7 +4357,7 @@ onUnmounted(() => {
       @open-worktrees="(branch) => { pendingWorktreeBranch = branch; showWorktrees = true; }"
       @open-submodules="showSubmodules = true" @open-submodule="handleOpenSubmodule" @open-search="handleOpenSearch" @open-help="showHelp = true"
       :submodule-update-count="submoduleUpdateCount"
-      :stash-count="stashCount" @open-stash="showStash = true" @open-tags="showTags = true"
+      :stash-count="stashCount" @open-stash="showStash = true" @open-tags="showTags = true" @open-release-notes="showReleaseNotes = true"
       @open-time-machine="showTimeMachine = true" />
 
     <div class="app-body" :style="{ '--sidebar-width': sidebarWidth + 'px' }">
@@ -4729,6 +4733,10 @@ onUnmounted(() => {
       @close="showWorktrees = false; pendingWorktreeBranch = undefined; pendingQuickCreate = false;"
       @load-branches="loadBranches"
       @open-tab="(path) => { openTab(path); showWorktrees = false; pendingWorktreeBranch = undefined; pendingQuickCreate = false; }" />
+
+    <!-- Release notes generator (shared modal, also on Dashboard + Tags panel) -->
+    <ReleaseNotesModal v-if="showReleaseNotes && repoFolderPath" :cwd="repoFolderPath"
+      @close="showReleaseNotes = false" />
 
     <!-- Submodule panel (uses BaseModal internally → own Teleport + backdrop) -->
     <SubmodulePanel v-if="showSubmodules && repoFolderPath" :cwd="repoFolderPath" :updates="submoduleUpdates"

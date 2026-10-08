@@ -3,7 +3,12 @@ import { ref, computed, onMounted } from "vue";
 import { gitListTags, getGitBranches, gitExec, type GitBranch } from "../utils/backend";
 import { useI18n } from "../composables/useI18n";
 import { useSettings } from "../composables/useSettings";
-import { useReleaseNotes, FROM_PROJECT_START } from "../composables/useReleaseNotes";
+import {
+  useReleaseNotes,
+  FROM_PROJECT_START,
+  getReleaseNotesDraft,
+  isGeneratingReleaseNotes,
+} from "../composables/useReleaseNotes";
 import BaseModal from "./BaseModal.vue";
 import AiTemplateMenu from "./AiTemplateMenu.vue";
 import AiSparkle from "./AiSparkle.vue";
@@ -18,18 +23,19 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useI18n();
-const {
-  isGenerating,
-  generate: generateReleaseNotes,
-  lastError,
-} = useReleaseNotes();
+const { generate: generateReleaseNotes } = useReleaseNotes();
 
 // Active AI template (picked from the Generate split button), shown on the button.
 const { activeTemplate } = useAiTemplates("releaseNotes", () => props.cwd);
 
-const from = ref("");
-const to = ref("HEAD");
-const markdown = ref("");
+// Refs + generated text live in the per-repo draft, so they survive closing
+// the modal (and a generation still running when it closes).
+const draft = computed(() => getReleaseNotesDraft(props.cwd));
+const from = computed({ get: () => draft.value.from, set: (v: string) => { draft.value.from = v; } });
+const to = computed({ get: () => draft.value.to, set: (v: string) => { draft.value.to = v; } });
+const markdown = computed({ get: () => draft.value.markdown, set: (v: string) => { draft.value.markdown = v; } });
+const isGenerating = computed(() => isGeneratingReleaseNotes(props.cwd));
+const lastError = computed(() => draft.value.error);
 const copied = ref(false);
 
 // Ref pickers (tags + branches) for the from/to selects.
@@ -87,6 +93,9 @@ onMounted(async () => {
   const sorted = [...tags].sort((a, b) => b.date.localeCompare(a.date));
   tagNames.value = sorted.map((tg) => tg.name);
 
+  // Reopened: keep the refs the user had picked.
+  if (from.value) return;
+
   if (sorted.length) {
     // Default "from" = newest tag that is NOT on HEAD — otherwise `tag..HEAD`
     // would be an empty range. Fall back to the newest tag if every tag is on HEAD.
@@ -104,15 +113,20 @@ onMounted(async () => {
 
 async function runGenerate() {
   copied.value = false;
+  // Hold the draft itself, not the component: the modal may be closed (and
+  // unmounted) before the AI answers.
+  const d = draft.value;
+  d.error = null;
   try {
-    markdown.value = await generateReleaseNotes(
+    d.markdown = await generateReleaseNotes(
       props.cwd,
-      from.value,
-      to.value,
+      d.from,
+      d.to,
       { locale: getTemplateLang("releaseNotes", props.cwd) },
     );
-  } catch {
-    markdown.value = "";
+  } catch (err: unknown) {
+    d.markdown = "";
+    d.error = err instanceof Error ? err.message : String(err);
   }
 }
 
@@ -129,7 +143,7 @@ async function copy() {
 <template>
   <BaseModal
     :title="t('dashboard.releaseNotesTitle')"
-    size="lg"
+    size="2x"
     @close="emit('close')"
   >
     <p class="rn-desc">{{ t('dashboard.releaseNotesDesc') }}</p>

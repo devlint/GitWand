@@ -1,4 +1,4 @@
-import { ref } from "vue";
+import { ref, reactive } from "vue";
 import { gitExec } from "../utils/backend";
 import { useAIProvider } from "./useAIProvider";
 import { localeLabels, type SupportedLocale } from "../locales";
@@ -164,6 +164,36 @@ const isGenerating = ref(false);
 const lastError = ref<string | null>(null);
 const lastMarkdown = ref<string | null>(null);
 
+/**
+ * Per-repo state of the release-notes modal. Lives at module level so closing
+ * the modal keeps the refs and the generated text, and a generation started
+ * before closing still lands here when it finishes.
+ */
+export interface ReleaseNotesDraft {
+  from: string;
+  to: string;
+  markdown: string;
+  error: string | null;
+}
+
+const drafts = reactive(new Map<string, ReleaseNotesDraft>());
+const generatingCwds = reactive(new Set<string>());
+
+/** The repo's draft, created empty on first access. `from === ""` means not initialised yet. */
+export function getReleaseNotesDraft(cwd: string): ReleaseNotesDraft {
+  let d = drafts.get(cwd);
+  if (!d) {
+    drafts.set(cwd, { from: "", to: "HEAD", markdown: "", error: null });
+    d = drafts.get(cwd)!; // reactive proxy
+  }
+  return d;
+}
+
+/** True while release notes are being generated for this repo. */
+export function isGeneratingReleaseNotes(cwd: string | null | undefined): boolean {
+  return !!cwd && generatingCwds.has(cwd);
+}
+
 export function useReleaseNotes() {
   const ai = useAIProvider();
 
@@ -176,6 +206,7 @@ export function useReleaseNotes() {
     const { locale = "fr", maxCommitsChars = 24_000 } = options;
 
     isGenerating.value = true;
+    generatingCwds.add(cwd);
     lastError.value = null;
     lastMarkdown.value = null;
 
@@ -238,7 +269,8 @@ export function useReleaseNotes() {
       lastError.value = msg;
       throw err;
     } finally {
-      isGenerating.value = false;
+      generatingCwds.delete(cwd);
+      isGenerating.value = generatingCwds.size > 0;
     }
   }
 

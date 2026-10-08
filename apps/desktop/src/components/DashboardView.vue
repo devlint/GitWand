@@ -14,6 +14,7 @@ import {
 import type { ViewMode } from "../composables/useGitRepo";
 import { useI18n } from "../composables/useI18n";
 import { useSettings } from "../composables/useSettings";
+import { isGeneratingReleaseNotes } from "../composables/useReleaseNotes";
 import Avatar from "./Avatar.vue";
 import { useAIProvider } from "../composables/useAIProvider";
 import { renderMarkdown, safeHtml } from "../composables/useSafeHtml";
@@ -1254,7 +1255,7 @@ watch(
               >
                 <span class="dv-ai-label">
                   <AiSparkle :size="13" />
-                  {{ t('dashboard.releaseNotes') }}
+                  <span :class="{ 'ai-loading': isGeneratingReleaseNotes(props.cwd) }">{{ t('dashboard.releaseNotes') }}</span>
                 </span>
               </button>
             </div>

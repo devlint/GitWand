@@ -48,9 +48,13 @@ import BranchSelector from "./header/BranchSelector.vue";
 import SyncSplitButton from "./header/SyncSplitButton.vue";
 import BranchMenu from "./header/BranchMenu.vue";
 import SearchTrigger from "./header/SearchTrigger.vue";
+import AiSparkle from "./AiSparkle.vue";
+import { useAIProvider } from "../composables/useAIProvider";
+import { isGeneratingReleaseNotes } from "../composables/useReleaseNotes";
 import type { RepoTab } from "../composables/useRepoTabs";
 
 const { t } = useI18n();
+const ai = useAIProvider();
 const askConfirm = inject<(options: any) => Promise<boolean>>("askConfirm");
 
 const props = defineProps<{
@@ -167,6 +171,7 @@ const emit = defineEmits<{
   openHelp: [];
   openStash: [];
   openTags: [];
+  openReleaseNotes: [];
   /** v3.8: the rewind popover's footer link opens the full Time Machine. */
   openTimeMachine: [];
   discardAll: [];
@@ -588,6 +593,20 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
             <span>{{ t('submodule.title') }}</span>
             <span v-if="(submoduleUpdateCount ?? 0) > 0" class="header-action-btn__count">{{ submoduleUpdateCount }}</span>
           </button>
+
+          <!-- Release notes button -->
+          <template v-if="ai.isAvailable.value">
+            <div class="header-action-sep" aria-hidden="true"></div>
+            <button
+              class="btn btn--secondary header-action-btn"
+              :title="t('dashboard.releaseNotesHint')"
+              :aria-label="t('dashboard.releaseNotes')"
+              @click="emit('openReleaseNotes')"
+            >
+              <AiSparkle :size="14" />
+              <span :class="{ 'ai-loading': isGeneratingReleaseNotes(cwd) }">{{ t('dashboard.releaseNotes') }}</span>
+            </button>
+          </template>
 
           <!-- Merge-into picker (triggered by BranchMenu → onBranchMenuMerge) -->
           <div v-if="showMergePopover" class="merge-popover-anchor">
