@@ -1584,20 +1584,40 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
             :x2="graphWidth"
             y2="0"
           >
-            <!-- Light mode: white lift on the left fading out by 40%, then
-                 darkening to the right edge. Split stops at 40% keep the two
-                 colors from mixing into gray. -->
+            <!-- Light mode: white lift on the left fading out by 40%, then a
+                 light darkening to the right edge — the lane-colored ramp
+                 (#vibrant-ramp) carries the right side instead. Split stops at
+                 40% keep the two colors from mixing into gray. -->
             <template v-if="isLight">
               <stop offset="0%" style="stop-color: #fff; stop-opacity: 0.35;" />
               <stop offset="40%" style="stop-color: #fff; stop-opacity: 0;" />
               <stop offset="40%" style="stop-color: #000; stop-opacity: 0;" />
-              <stop offset="100%" style="stop-color: #000; stop-opacity: 0.4;" />
+              <stop offset="100%" style="stop-color: #000; stop-opacity: 0.12;" />
             </template>
             <template v-else>
               <stop offset="0%" style="stop-color: #000; stop-opacity: 0.4;" />
               <stop offset="100%" style="stop-color: #000; stop-opacity: 0;" />
             </template>
           </linearGradient>
+          <!-- Light mode: alpha ramp for the lane-colored band overlay — none up
+               to 40%, then rising to the graph's right edge. -->
+          <template v-if="isLight">
+            <linearGradient
+              id="vibrant-ramp-alpha"
+              gradientUnits="userSpaceOnUse"
+              x1="0"
+              y1="0"
+              :x2="graphWidth"
+              y2="0"
+            >
+              <stop offset="0%" style="stop-color: #fff; stop-opacity: 0;" />
+              <stop offset="40%" style="stop-color: #fff; stop-opacity: 0;" />
+              <stop offset="100%" style="stop-color: #fff; stop-opacity: 0.45;" />
+            </linearGradient>
+            <mask id="vibrant-ramp" maskUnits="userSpaceOnUse" x="0" y="0" :width="graphWidth + 40" :height="totalHeight">
+              <rect x="0" y="0" :width="graphWidth + 40" :height="totalHeight" fill="url(#vibrant-ramp-alpha)" />
+            </mask>
+          </template>
         </defs>
 
         <!-- Row tints: colored band from the commit node to the SVG right edge -->
@@ -1629,6 +1649,18 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
           :class="{ 'cg-row-hover--on': node.index === hoveredIndex && !isActiveRow(node.index) }"
           v-bind="bandRect(node)"
         />
+        <!-- Light mode: the band's own lane color (the rainbow for the trunk),
+             faded in toward the right edge so it ends vibrant, not dark. -->
+        <template v-if="isLight">
+          <rect
+            v-for="node in visibleNodes"
+            :key="'c' + node.index"
+            class="cg-row-overlay"
+            v-bind="bandRect(node)"
+            mask="url(#vibrant-ramp)"
+            :style="{ fill: nodeKind(node) === 'trunk' ? 'url(#trunk-gradient-stroke)' : laneColor(node.lane) }"
+          />
+        </template>
         <!-- Shade over each band (tint + highlights). Drawn under edges and nodes. -->
         <rect
           v-for="node in visibleNodes"
