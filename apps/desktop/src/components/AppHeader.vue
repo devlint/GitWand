@@ -603,7 +603,8 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
               :aria-label="t('dashboard.releaseNotes')"
               @click="emit('openReleaseNotes')"
             >
-              <AiSparkle :size="14" />
+              <span v-if="isGeneratingReleaseNotes(cwd)" class="spinner" aria-hidden="true"></span>
+              <AiSparkle v-else :size="14" />
               <span :class="{ 'ai-loading': isGeneratingReleaseNotes(cwd) }">{{ t('dashboard.releaseNotes') }}</span>
             </button>
           </template>

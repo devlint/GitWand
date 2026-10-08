@@ -214,7 +214,8 @@ async function pushAllTags() {
           :title="t('dashboard.releaseNotesHint')"
           @click="releaseNotesOpen = true"
         >
-          <AiSparkle :size="12" />
+          <span v-if="isGeneratingReleaseNotes(cwd)" class="spinner" style="width: 12px; height: 12px" aria-hidden="true"></span>
+          <AiSparkle v-else :size="12" />
           <span :class="{ 'ai-loading': isGeneratingReleaseNotes(cwd) }">{{ t('dashboard.releaseNotes') }}</span>
         </button>
       </div>

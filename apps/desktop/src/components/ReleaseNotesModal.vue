@@ -150,7 +150,7 @@ async function copy() {
     <div class="rn-refs">
       <label class="rn-field">
         <span>{{ t('dashboard.releaseNotesFrom') }}</span>
-        <select v-model="from" class="rn-input mono">
+        <select v-model="from" class="rn-input mono" :disabled="isGenerating">
           <option value="HEAD">HEAD</option>
           <option :value="FROM_PROJECT_START">{{ t('dashboard.releaseNotesFromCreation') }}</option>
           <optgroup v-if="tagNames.length" :label="t('dashboard.releaseNotesTags')">
@@ -167,7 +167,7 @@ async function copy() {
       <span class="rn-sep">..</span>
       <label class="rn-field">
         <span>{{ t('dashboard.releaseNotesTo') }}</span>
-        <select v-model="to" class="rn-input mono">
+        <select v-model="to" class="rn-input mono" :disabled="isGenerating">
           <option value="HEAD">HEAD</option>
           <optgroup v-if="tagNames.length" :label="t('dashboard.releaseNotesTags')">
             <option v-for="tn in tagNames" :key="`t-${tn}`" :value="tn">{{ tn }}</option>
@@ -210,7 +210,8 @@ async function copy() {
     <textarea
       v-model="markdown"
       class="rn-textarea mono"
-      rows="14"
+      :disabled="isGenerating"
+      rows="22"
       spellcheck="false"
       :placeholder="t('dashboard.releaseNotesPlaceholder')"
     />
@@ -255,6 +256,12 @@ async function copy() {
 .rn-textarea:focus {
   border-color: var(--color-accent);
   box-shadow: 0 0 0 3px var(--color-accent-soft);
+}
+
+.rn-input:disabled,
+.rn-textarea:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .rn-field .rn-input { min-width: 140px; }

@@ -1254,7 +1254,8 @@ watch(
                 @click="releaseNotesOpen = true"
               >
                 <span class="dv-ai-label">
-                  <AiSparkle :size="13" />
+                  <span v-if="isGeneratingReleaseNotes(props.cwd)" class="spinner" style="width: 13px; height: 13px" aria-hidden="true"></span>
+                  <AiSparkle v-else :size="13" />
                   <span :class="{ 'ai-loading': isGeneratingReleaseNotes(props.cwd) }">{{ t('dashboard.releaseNotes') }}</span>
                 </span>
               </button>
