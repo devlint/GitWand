@@ -983,13 +983,19 @@ function cy(index: number): number {
  * Straight down in child lane, then a rounded corner into the parent lane
  * at the parent row level. Creates a visible horizontal segment exactly at
  * the commit where branches connect. */
+// The WIP node is a hollow circle: edges leaving it start just past its rim
+// (radius + half the stroke + a small gap) instead of its center, so the line
+// doesn't show inside it.
+const WIP_RIM = NODE_R + 1.5 + 0.75 + 2;
+
 function edgePath(e: DagEdge): string {
   const x1 = cx(e.fromLane);
   const y1 = cy(e.fromIndex);
   const x2 = cx(e.toLane);
   const y2 = cy(e.toIndex);
+  const yFrom = renderedCommits.value[e.fromIndex]?.hashFull === 'WIP' ? y1 + WIP_RIM : y1;
 
-  if (x1 === x2) return `M${x1},${y1} L${x2},${y2}`;
+  if (x1 === x2) return `M${x1},${yFrom} L${x2},${y2}`;
 
   // Merge edge whose parent lane is free down to the parent: S-curve over one
   // row into the merged branch's lane, then run straight down to the parent.
@@ -1004,7 +1010,7 @@ function edgePath(e: DagEdge): string {
 
   const r = Math.min(LANE_W * 0.6, (y2 - y1) * 0.35);
   const xSign = x2 < x1 ? -1 : 1;
-  return `M${x1},${y1} L${x1},${y2 - r} Q${x1},${y2} ${x1 + xSign * r},${y2} L${x2},${y2}`;
+  return `M${x1},${yFrom} L${x1},${y2 - r} Q${x1},${y2} ${x1 + xSign * r},${y2} L${x2},${y2}`;
 }
 
 // ─── Helpers ─────────────────────────────────────────
@@ -1660,6 +1666,14 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
             :stroke="laneColor(node.lane)"
             stroke-width="1.5"
             stroke-dasharray="3,3"
+          />
+          <!-- WIP Node: tiny center dot -->
+          <circle
+            v-if="node.hash === 'WIP'"
+            :cx="cx(node.lane)"
+            :cy="cy(node.index)"
+            r="1.75"
+            :fill="laneColor(node.lane)"
           />
 
           <!-- Current commit indicator: outer ring -->
