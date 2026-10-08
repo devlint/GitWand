@@ -867,7 +867,18 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     if (!folderPath.value) return;
     selectedCommitHash.value = hash;
     try {
-      commitDiffs.value = await getGitShow(folderPath.value, hash);
+      const diffs = await getGitShow(folderPath.value, hash);
+      // Stashes are pushed with --include-untracked: those files live in the
+      // stash commit's 3rd parent, which `git show --first-parent` never sees.
+      if (stashes.value.some((s) => s.hash === hash)) {
+        try {
+          diffs.push(...(await getGitShow(folderPath.value, `${hash}^3`)));
+        } catch {
+          // No untracked part in this stash.
+        }
+      }
+      if (selectedCommitHash.value !== hash) return;
+      commitDiffs.value = diffs;
     } catch (err: any) {
       commitDiffs.value = [];
       error.value = `git show: ${err?.message ?? err}`;
