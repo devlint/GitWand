@@ -1701,6 +1701,9 @@ function submitRequestReviewers() {
   flex: 1;
   overflow-y: auto;
   padding: var(--space-6) var(--space-7);
+  /* Clear the floating AppDock (12px offset + pill + breathing room) so the
+     last content can scroll out from under it. */
+  padding-bottom: calc(var(--space-6) + var(--app-dock-height, 44px) + 2 * var(--space-4, 12px));
 }
 
 /* ─── Info tab ───────────────────────────────────────────── */
