@@ -529,6 +529,7 @@ const en = {
     updateAvailableTitle: "Update branch?",
     updateAvailableOne: "« {0} » is 1 commit behind « {1} ». Update it to the latest remote state?",
     updateAvailableMany: "« {0} » is {1} commits behind « {2} ». Update it to the latest remote state?",
+    updateRewritten: "« {0} » was rewritten on « {1} » (force-push) and you have no commits of your own on it. Update it to the remote version?",
     updateBranch: "Update branch",
     continueLocal: "Continue on local branch",
     continueLocalHint: "You won't be asked again for this branch.",

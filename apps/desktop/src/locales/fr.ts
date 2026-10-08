@@ -522,6 +522,7 @@ const fr: Locale = {
     updateAvailableTitle: "Mettre à jour la branche ?",
     updateAvailableOne: "« {0} » est en retard de 1 commit sur « {1} ». La mettre à jour vers l'état distant ?",
     updateAvailableMany: "« {0} » est en retard de {1} commits sur « {2} ». La mettre à jour vers l'état distant ?",
+    updateRewritten: "« {0} » a été réécrite sur « {1} » (force-push) et vous n'y avez aucun commit à vous. La mettre à jour vers la version distante ?",
     updateBranch: "Mettre à jour la branche",
     continueLocal: "Continuer sur la branche locale",
     continueLocalHint: "La question ne sera plus posée pour cette branche.",

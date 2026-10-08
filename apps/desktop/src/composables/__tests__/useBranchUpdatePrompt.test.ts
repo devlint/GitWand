@@ -45,6 +45,16 @@ describe("computeCheckoutPrompt", () => {
     ).toBe("genericPull");
   });
 
+  it("diverged only because upstream was rewritten (no own commits) → rewritten (#223)", () => {
+    expect(
+      computeCheckoutPrompt({ ahead: 2, behind: 3, hasUpstream: true, upstreamRewritten: true, isSkipped: () => false }),
+    ).toBe("rewritten");
+    // Same mute as the behind-only prompt: "continue on local branch".
+    expect(
+      computeCheckoutPrompt({ ahead: 2, behind: 3, hasUpstream: true, upstreamRewritten: true, isSkipped: () => true }),
+    ).toBe("none");
+  });
+
   it("not behind → none (clean, ahead-only)", () => {
     expect(
       computeCheckoutPrompt({ ahead: 0, behind: 0, hasUpstream: true, isSkipped: () => false }),

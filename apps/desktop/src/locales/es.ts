@@ -517,6 +517,7 @@ const es: Locale = {
     updateAvailableTitle: "¿Actualizar la rama?",
     updateAvailableOne: "« {0} » está 1 commit por detrás de « {1} ». ¿Actualizarla al último estado remoto?",
     updateAvailableMany: "« {0} » está {1} commits por detrás de « {2} ». ¿Actualizarla al último estado remoto?",
+    updateRewritten: "« {0} » fue reescrita en « {1} » (force-push) y no tienes commits propios en ella. ¿Actualizarla a la versión remota?",
     updateBranch: "Actualizar la rama",
     continueLocal: "Continuar en la rama local",
     continueLocalHint: "No se volverá a preguntar para esta rama.",
