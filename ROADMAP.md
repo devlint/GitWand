@@ -104,6 +104,8 @@ _Competitive scan from 2026-06-24 across 6 clients/tools (Snipara, GitDriv, GitU
 
 _Synthesis: none of the three addresses structured conflict-resolution AI (Strand = agent workspaces, GitComet = perf, RelaGit = design) — GitWand's moat (auto-resolve + multi-repo Launchpad + extensible CLI/MCP) stays intact. Worth cultivating: the v3.8–v3.11 pipeline (preview-to-apply) + v4.0 code graph to widen the gap. Worth borrowing from their respective strengths: published a11y/perf baselines (Strand, → v3.10 benchmark pass), SolidJS vs Vue 3 benchmark on heavy diffs (RelaGit, → v3.10 perf pass)._
 
+**2026-10-08 scan** — **Multi-Git** ([AnthonyKopri/multi-git](https://github.com/AnthonyKopri/multi-git), MIT, Electron/Node): multi-account SSH, safety net, coding-agent launcher, JSON CLI + MCP. No conflict AI (ours/theirs/manual only). Most of its safety layer is already covered: Recovery Points / Recently Discarded ≈ Time Machine (v3.8.0), "behind upstream" fast-forward ≈ v3.6.0, MCP `dry_run` + structured refusals ≈ design principle 6. Two leads kept, in [Later (unscheduled)](#later-unscheduled): **SSH routing on identity profiles** and **opt-in auto fast-forward after fetch**. Discarded: passphrase vault (the system agent/keychain does the job), parity features (bisect, notes, LFS, patches).
+
 **Still watching:**
 
 - **`GitUpKit`** ([gitup.co](https://gitup.co/)) — their SDK for building Git clients, worth studying.
@@ -117,6 +119,9 @@ _Synthesis: none of the three addresses structured conflict-resolution AI (Stran
 ---
 
 ### Later (unscheduled)
+
+- **SSH routing on identity profiles + wrong-account guard** (from the 2026-10-08 Multi-Git scan) — the v2.12 profiles (`useIdentity.ts`) only inject `user.name`/`user.email` at commit time; authentication still goes through the global SSH config. Add an optional SSH key per profile, routed per operation via `GIT_SSH_COMMAND` (fetch/pull/push/clone), auto-select rules on the origin URL (`github.com/acme/` → Pro), and a pre-push check: the account the key actually signs in as (`ssh -T`, remembered per key) vs. the one the remote expects; on mismatch, block with an explicit override, force-push included. Real pain for anyone juggling work and personal accounts, and author + key always switch together, so a repo can no longer push as one account and commit as another.
+- **Opt-in auto fast-forward after fetch** (from the 2026-10-08 Multi-Git scan) — the 30 s periodic fetch (`useRepoPoller`) would fast-forward the current branch only when it is purely behind: an upstream exists, no local commits, no tracked edits, HEAD not detached, no merge or rebase in progress. Off by default, never merges or rebases; when it is on but blocked, the toolbar tooltip names the one condition holding it back. Reuses the v3.6.0 "Update branch" logic minus the stash.
 
 - **GPU-first rendering on Linux** (follow-up to v3.12.0) — `lib.rs` still forces software rendering on every Linux launch (`WEBKIT_DISABLE_COMPOSITING_MODE`, `LIBGL_ALWAYS_SOFTWARE`, XWayland) to dodge the EGL aborts of #135/#139, so the whole UI is CPU-rasterized even on capable GPUs. A launch-pending marker that switches to software only after a launch dies before showing a window (with a `GITWAND_SOFTWARE_RENDER` override) was drafted in the #215 branch but never wired in, and was dropped from that PR. It touches the startup crash fix, so it needs testing on the affected setups (VM, Mint .deb, native Wayland) before it ships.
 - **Test the log view epoch** (follow-up to v3.12.0, #214) — the filter/scope change that drops in-flight log pages and the forced-reload depth (`forcedReloadDepth`) have no test; a `useGitRepo` test for "filter change while a page is in flight" would lock them in.
