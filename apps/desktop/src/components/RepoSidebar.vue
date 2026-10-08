@@ -2342,9 +2342,12 @@ function formatActivityDate(dateStr: string): string {
   align-items: center;
   justify-content: center;
   padding: 0 5px;
-  background: var(--color-ai-soft);
-  color: var(--color-ai);
-  border: 1px solid var(--color-ai);
+  /* Same skin as the PR view's AI button (.btn--ai): darker fill, multicolour border. */
+  background:
+    linear-gradient(var(--color-bg-secondary), var(--color-bg-secondary)) padding-box,
+    linear-gradient(135deg, var(--color-ai) 0%, #c084fc 50%, var(--color-ai) 100%) border-box;
+  color: var(--color-text);
+  border: 1px solid transparent;
   border-radius: calc(var(--radius-md) - 3px) 0 0 calc(var(--radius-md) - 3px);
   cursor: pointer;
   transition: background var(--transition-hover), border-color var(--transition-hover), color var(--transition-hover);
@@ -2362,9 +2365,11 @@ function formatActivityDate(dateStr: string): string {
   align-items: center;
   justify-content: center;
   width: 14px;
-  background: var(--color-ai-soft);
-  color: var(--color-ai);
-  border: 1px solid var(--color-ai);
+  background:
+    linear-gradient(var(--color-bg-secondary), var(--color-bg-secondary)) padding-box,
+    linear-gradient(135deg, var(--color-ai) 0%, #c084fc 50%, var(--color-ai) 100%) border-box;
+  color: var(--color-text);
+  border: 1px solid transparent;
   margin-left: -1px;
   border-radius: 0 calc(var(--radius-md) - 3px) calc(var(--radius-md) - 3px) 0;
   cursor: pointer;
@@ -2372,8 +2377,10 @@ function formatActivityDate(dateStr: string): string {
 }
 
 .commit-ai-wrapper :deep(.commit-ai-chevron:hover:not(:disabled)) {
-  background: var(--color-ai);
   color: var(--color-ai-text);
+  background:
+    linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-hover) 100%) padding-box,
+    linear-gradient(135deg, var(--color-accent) 0%, #c084fc 50%, var(--color-accent) 100%) border-box;
   z-index: 1;
 }
 
@@ -2383,8 +2390,10 @@ function formatActivityDate(dateStr: string): string {
 }
 
 .commit-ai-btn:hover:not(:disabled) {
-  background: var(--color-ai);
   color: var(--color-ai-text);
+  background:
+    linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-hover) 100%) padding-box,
+    linear-gradient(135deg, var(--color-accent) 0%, #c084fc 50%, var(--color-accent) 100%) border-box;
   z-index: 1;
 }
 
