@@ -504,7 +504,10 @@ fn scratch_worktree_discard_impl(cwd: String, scratch_path: String) -> Result<()
     let scratch = validate_scratch_path(&repo_root, &scratch_path)?;
 
     // Capture the branch name before removal so we can delete it afterwards.
-    let scratch_branch = git_in(&scratch, &["symbolic-ref", "--short", "-q", "HEAD"]).ok();
+    // Full ref: `--short` answers `heads/<branch>` when a tag has the same name.
+    let scratch_branch = git_in(&scratch, &["symbolic-ref", "-q", "HEAD"])
+        .ok()
+        .and_then(|r| r.strip_prefix("refs/heads/").map(str::to_string));
 
     git_in(
         &repo_root,
@@ -1267,6 +1270,10 @@ mod tests {
         // Hooks live in the common git dir: they also run in the scratch.
         // `--no-verify` alone skips only pre-commit and commit-msg; a
         // prepare-commit-msg hook (husky + commitizen wants a tty) still ran.
+        // Each hook leaves a trace before failing: git ignores post-commit's
+        // exit code, so only the trace shows whether it ran.
+        let trace = repo.path.parent().unwrap().join("hooks-ran");
+        let trace_sh = trace.to_string_lossy().replace('\\', "/");
         for name in [
             "pre-commit",
             "prepare-commit-msg",
@@ -1274,7 +1281,8 @@ mod tests {
             "post-commit",
         ] {
             let hook = repo.path.join(".git/hooks").join(name);
-            std::fs::write(&hook, "#!/bin/sh\nexit 1\n").unwrap();
+            let script = format!("#!/bin/sh\necho {} >> \"{}\"\nexit 1\n", name, trace_sh);
+            std::fs::write(&hook, script).unwrap();
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
@@ -1290,6 +1298,11 @@ mod tests {
         scratch_worktree_merge_back_impl(repo.cwd(), scratch.path.clone(), Some(false))
             .expect("the internal scratch commit must not run hooks or sign");
         assert_eq!(repo.read("task.txt"), "agent edit\n");
+        assert!(
+            !trace.exists(),
+            "no hook may run: {}",
+            std::fs::read_to_string(&trace).unwrap_or_default()
+        );
     }
 
     #[test]
@@ -1376,6 +1389,25 @@ mod tests {
                 .status
                 .success(),
             "the scratch branch is still cleaned up"
+        );
+    }
+
+    #[test]
+    fn discard_deletes_the_branch_when_a_tag_is_named_like_it() {
+        let repo = TempRepo::new();
+        repo.write("task.txt", "v1\n");
+        repo.commit_all("base");
+
+        let scratch = scratch_worktree_create_impl(repo.cwd(), None, None).expect("create");
+        repo.git(&["tag", &scratch.branch]);
+
+        scratch_worktree_discard_impl(repo.cwd(), scratch.path.clone()).expect("discard");
+        let branch_ref = format!("refs/heads/{}", scratch.branch);
+        assert!(
+            !git_at(&repo.cwd(), &["rev-parse", "--verify", "-q", &branch_ref])
+                .status
+                .success(),
+            "the scratch branch must not be left behind"
         );
     }
 }
