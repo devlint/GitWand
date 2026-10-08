@@ -2229,6 +2229,7 @@ const zhCN: Locale = {
     working: "处理中…",
     errorDelete: "删除工作树失败：{0}",
     errorMergeBack: "合并失败：{0}",
+    errorMergeBackLate: "任务的更改已暂存到主检出中，但它在关闭期间写入的内容无法合回：{0}。任务已保留。",
   },
 
   // ─── Submodules ─────────────────────────────────────────

@@ -261,12 +261,13 @@ fn scratch_worktree_create_impl(
 /// after `git rm`-ing everything absent from it). Once `main` had moved, that
 /// reverted what `main` changed, deleted what it added and overwrote
 /// uncommitted edits. Now the main checkout is never written unless all of the
-/// following holds. The first three are checked before anything is written,
+/// following holds. All but the last are checked before anything is written,
 /// the scratch included, so those refusals leave the agent's work in progress
 /// as it was. The last needs the scratch committed, so a refusal there leaves
 /// that commit in the scratch, which loses nothing.
 ///
-/// - no unmerged index entries in the main checkout;
+/// - no unmerged index entries, and no rebase, merge, cherry-pick, revert or
+///   bisect in progress, in the main checkout;
 /// - the main checkout's `HEAD` is in the scratch branch's history (or in the
 ///   scratch's pending `MERGE_HEAD`), so the squash is a fast-forward carrying
 ///   exactly the task's work;
@@ -279,6 +280,8 @@ fn scratch_worktree_create_impl(
 ///
 /// A Time Machine snapshot (`merge-back`) is taken right before the squash,
 /// unless `snapshots_enabled` is `Some(false)` or there is nothing to bring.
+/// Running it again on the same scratch is safe: with nothing new it is a
+/// no-op, otherwise it brings only what was written since.
 #[tauri::command]
 pub(crate) async fn scratch_worktree_merge_back(
     cwd: String,
@@ -305,7 +308,8 @@ fn has_unmerged_entries(dir: &Path) -> Result<bool, String> {
 }
 
 /// Unmerged files in `dir` whose working copy still has a conflict marker line.
-/// A binary file can't hold markers, so an unreadable one is taken as resolved.
+/// Scanned as bytes, so a non-UTF-8 text file is checked too; a binary file
+/// (one holding a NUL byte) can't hold markers and is taken as resolved.
 fn files_with_conflict_markers(dir: &Path) -> Result<Vec<String>, String> {
     let output = git_cmd()
         .args(["diff", "--name-only", "--diff-filter=U", "-z"])
@@ -322,15 +326,37 @@ fn files_with_conflict_markers(dir: &Path) -> Result<Vec<String>, String> {
         .split('\0')
         .filter(|p| !p.is_empty())
         .filter(|p| {
-            std::fs::read_to_string(dir.join(p)).is_ok_and(|text| {
-                text.lines()
-                    .any(|l| l.starts_with("<<<<<<<") || l.starts_with(">>>>>>>"))
+            std::fs::read(dir.join(p)).is_ok_and(|bytes| {
+                !bytes.contains(&0)
+                    && bytes
+                        .split(|b| *b == b'\n')
+                        .any(|l| l.starts_with(b"<<<<<<<") || l.starts_with(b">>>>>>>"))
             })
         })
         .map(str::to_string)
         .collect();
     found.dedup();
     Ok(found)
+}
+
+/// The git operation in progress in `dir`, if any, from the state files git
+/// keeps for it. `--git-path` resolves them for linked worktrees too.
+fn operation_in_progress(dir: &Path) -> Result<Option<&'static str>, String> {
+    const STATES: &[(&str, &str)] = &[
+        ("rebase-merge", "a rebase"),
+        ("rebase-apply", "a rebase"),
+        ("MERGE_HEAD", "a merge"),
+        ("CHERRY_PICK_HEAD", "a cherry-pick"),
+        ("REVERT_HEAD", "a revert"),
+        ("BISECT_LOG", "a bisect"),
+    ];
+    for (name, op) in STATES {
+        let path = git_in(dir, &["rev-parse", "--git-path", name])?;
+        if dir.join(path).exists() {
+            return Ok(Some(op));
+        }
+    }
+    Ok(None)
 }
 
 fn scratch_worktree_merge_back_impl(
@@ -348,6 +374,16 @@ fn scratch_worktree_merge_back_impl(
             "the main checkout has unresolved conflicting changes; resolve or abort them before merging back the scratch worktree"
                 .to_string(),
         );
+    }
+
+    // GUARD: no operation in progress in the main checkout, even one without
+    // unmerged entries (a rebase paused at `edit` or on a failed `exec`): the
+    // task would be folded into whatever that operation commits next.
+    if let Some(op) = operation_in_progress(&repo_root)? {
+        return Err(format!(
+            "the main checkout is in the middle of {}; finish or abort it before merging back the scratch worktree",
+            op
+        ));
     }
 
     let scratch_branch = git_in(&scratch, &["symbolic-ref", "--short", "HEAD"])?;
@@ -386,18 +422,40 @@ fn scratch_worktree_merge_back_impl(
     }
 
     // Commit any outstanding work in the scratch so its tree is a durable
-    // object in the shared DB — which also concludes a merge resolved there.
+    // object in the shared DB. A pending merge is concluded even when the
+    // index shows no change (the user kept only the scratch side): left open,
+    // the scratch branch lacks HEAD and the squash would be a real 3-way merge.
+    // That commit records the user's choice, so the squash then does undo
+    // HEAD's side of the conflict, as they resolved it. It is GitWand's own
+    // bookkeeping: no hooks (a reformatting hook would change what is brought
+    // back), no signing (it could prompt or fail).
     git_in(&scratch, &["add", "-A"])?;
     let scratch_status = git_in(&scratch, &["status", "--porcelain"])?;
-    if !scratch_status.trim().is_empty() {
+    if !scratch_status.trim().is_empty() || scratch_merge_head.is_some() {
         git_in(
             &scratch,
-            &["commit", "-q", "-m", "gitwand: scratch resolution"],
+            &[
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "--no-verify",
+                "-q",
+                "-m",
+                "gitwand: scratch resolution",
+            ],
         )?;
     }
 
-    let nothing_to_bring =
-        git_in(&repo_root, &["diff", "--quiet", "HEAD", &scratch_branch]).is_ok();
+    // Nothing to bring: the task changed nothing, or its tree is already in
+    // the main index (a second run after the agent was stopped, with no late
+    // write). Either way, no snapshot.
+    let nothing_to_bring = git_in(&repo_root, &["diff", "--quiet", "HEAD", &scratch_branch])
+        .is_ok()
+        || git_in(
+            &repo_root,
+            &["diff", "--cached", "--quiet", &scratch_branch],
+        )
+        .is_ok();
     if !nothing_to_bring {
         crate::commands::ops::snapshot_before(
             &repo_root.to_string_lossy(),
@@ -407,14 +465,16 @@ fn scratch_worktree_merge_back_impl(
         );
 
         // Explicit flags so the user's merge config can't change the meaning:
-        // `--ff` (merge.ff=false would reject --squash), `--no-autostash`
+        // `--ff-only` (merge.ff=false would reject --squash; and should the
+        // scratch move between the guard and here — the agent may still be
+        // running — git refuses rather than run a 3-way merge), `--no-autostash`
         // (merge.autoStash would move their edits aside and replay them),
         // `--no-verify-signatures` (the scratch commit is never signed).
         let output = git_cmd()
             .args([
                 "merge",
                 "--squash",
-                "--ff",
+                "--ff-only",
                 "--no-autostash",
                 "--no-verify-signatures",
                 "--no-overwrite-ignore",
@@ -441,8 +501,11 @@ fn scratch_worktree_merge_back_impl(
         &repo_root,
         &["worktree", "remove", "--force", &scratch.to_string_lossy()],
     )?;
-    // Best-effort delete of the now-unused scratch branch, then prune.
-    let _ = git_in(&repo_root, &["branch", "-D", &scratch_branch]);
+    // Best-effort delete of the now-unused scratch branch, then prune. Only a
+    // branch GitWand created: the user may have switched the scratch to theirs.
+    if scratch_branch.starts_with("gitwand-scratch-") {
+        let _ = git_in(&repo_root, &["branch", "-D", &scratch_branch]);
+    }
     git_in(&repo_root, &["worktree", "prune"])?;
 
     Ok(())
@@ -1164,6 +1227,178 @@ mod tests {
             .expect_err("main moved");
         assert_eq!(git_in(dir, &["rev-parse", "HEAD"]).unwrap(), head_before);
         assert_eq!(scratch_state(&scratch), ("M task.txt".to_string(), false));
+
+        let _ = scratch_worktree_discard_impl(repo.cwd(), scratch.path);
+    }
+
+    /// Two branches that conflict on `f.txt`: `feature` and `main` (checked out).
+    fn conflicting_branches(repo: &TempRepo, base: &[u8], feature: &[u8], main: &[u8]) {
+        std::fs::write(repo.path.join("f.txt"), base).unwrap();
+        repo.commit_all("base");
+        repo.git(&["checkout", "-q", "-b", "feature"]);
+        std::fs::write(repo.path.join("f.txt"), feature).unwrap();
+        repo.commit_all("feature");
+        repo.git(&["checkout", "-q", "main"]);
+        std::fs::write(repo.path.join("f.txt"), main).unwrap();
+        repo.commit_all("main");
+    }
+
+    fn git_at(dir: &str, args: &[&str]) -> std::process::Output {
+        Command::new(git_binary())
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .unwrap()
+    }
+
+    #[test]
+    fn merge_back_concludes_a_pending_merge_with_no_visible_change() {
+        // "Resolve in scratch" keeping only the scratch side: the index equals
+        // HEAD, but MERGE_HEAD is there. Unconcluded, the squash became a real
+        // 3-way merge that left conflict markers in the main checkout.
+        let repo = TempRepo::new();
+        conflicting_branches(&repo, b"base\n", b"feature side\n", b"main side\n");
+
+        let scratch = scratch_worktree_create_impl(repo.cwd(), Some("feature".to_string()), None)
+            .expect("create");
+        let _ = git_at(&scratch.path, &["merge", "--no-commit", "main"]);
+        git_at(&scratch.path, &["checkout", "--ours", "--", "f.txt"]);
+        git_at(&scratch.path, &["add", "f.txt"]);
+        assert_eq!(scratch_state(&scratch), (String::new(), true));
+
+        scratch_worktree_merge_back_impl(repo.cwd(), scratch.path.clone(), Some(false), false)
+            .expect("merge-back should conclude the merge and apply it");
+        assert_eq!(repo.read("f.txt"), "feature side\n");
+        let status = repo.git(&["status", "--porcelain"]);
+        assert!(
+            !String::from_utf8_lossy(&status.stdout).contains("UU"),
+            "no conflict left in the main checkout"
+        );
+    }
+
+    #[test]
+    fn merge_back_finds_conflict_markers_in_a_non_utf8_file() {
+        let repo = TempRepo::new();
+        conflicting_branches(
+            &repo,
+            b"caf\xe9\nbase\n",
+            b"caf\xe9\nfeat\n",
+            b"caf\xe9\nmain\n",
+        );
+
+        let scratch = scratch_worktree_create_impl(repo.cwd(), Some("feature".to_string()), None)
+            .expect("create");
+        let _ = git_at(&scratch.path, &["merge", "main"]);
+
+        let err =
+            scratch_worktree_merge_back_impl(repo.cwd(), scratch.path.clone(), Some(false), false)
+                .expect_err("markers in a Latin-1 file must be caught");
+        assert!(err.contains("conflict markers"), "got: {}", err);
+        assert_eq!(
+            std::fs::read(repo.path.join("f.txt")).unwrap(),
+            b"caf\xe9\nmain\n"
+        );
+
+        let _ = scratch_worktree_discard_impl(repo.cwd(), scratch.path);
+    }
+
+    #[test]
+    fn merge_back_refused_while_main_is_mid_rebase() {
+        let repo = TempRepo::new();
+        repo.write("a.txt", "v1\n");
+        repo.commit_all("c1");
+        repo.write("a.txt", "v2\n");
+        repo.commit_all("c2");
+
+        let scratch = scratch_worktree_create_impl(repo.cwd(), None, None).expect("create");
+        write_in(&scratch, "task.txt", "agent\n");
+
+        // A rebase stopped by a failing exec: in progress, no unmerged entry.
+        let _ = git_at(&repo.cwd(), &["rebase", "-x", "exit 1", "HEAD~1"]);
+        assert!(
+            repo.path.join(".git/rebase-merge").exists(),
+            "rebase paused"
+        );
+
+        let err =
+            scratch_worktree_merge_back_impl(repo.cwd(), scratch.path.clone(), Some(false), false)
+                .expect_err("merge-back must not land inside a paused rebase");
+        assert!(err.contains("rebase"), "should name the operation: {}", err);
+        assert!(!repo.path.join("task.txt").exists());
+
+        let _ = git_at(&repo.cwd(), &["rebase", "--abort"]);
+        let _ = scratch_worktree_discard_impl(repo.cwd(), scratch.path);
+    }
+
+    #[test]
+    fn merge_back_skips_commit_hooks_and_signing_in_the_scratch() {
+        let repo = TempRepo::new();
+        repo.write("task.txt", "v1\n");
+        repo.commit_all("base");
+        // Hooks live in the common git dir: they also run in the scratch.
+        let hook = repo.path.join(".git/hooks/pre-commit");
+        std::fs::write(&hook, "#!/bin/sh\nexit 1\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        repo.git(&["config", "commit.gpgsign", "true"]);
+        repo.git(&["config", "gpg.program", "gitwand-no-such-gpg"]);
+
+        let scratch = scratch_worktree_create_impl(repo.cwd(), None, None).expect("create");
+        write_in(&scratch, "task.txt", "agent edit\n");
+
+        scratch_worktree_merge_back_impl(repo.cwd(), scratch.path.clone(), Some(false), false)
+            .expect("the internal scratch commit must not run hooks or sign");
+        assert_eq!(repo.read("task.txt"), "agent edit\n");
+    }
+
+    #[test]
+    fn merge_back_keeps_a_branch_that_is_not_a_scratch_branch() {
+        let repo = TempRepo::new();
+        repo.write("task.txt", "v1\n");
+        repo.commit_all("base");
+
+        let scratch = scratch_worktree_create_impl(repo.cwd(), None, None).expect("create");
+        git_at(&scratch.path, &["checkout", "-q", "-b", "my-work"]);
+        write_in(&scratch, "task.txt", "agent edit\n");
+
+        scratch_worktree_merge_back_impl(repo.cwd(), scratch.path.clone(), Some(false), false)
+            .expect("merge-back");
+        assert!(
+            git_at(&repo.cwd(), &["rev-parse", "--verify", "-q", "my-work"])
+                .status
+                .success(),
+            "the user's own branch must survive the cleanup"
+        );
+    }
+
+    #[test]
+    fn merge_back_twice_is_idempotent_and_snapshots_once() {
+        // The AI-task close runs merge-back again after stopping the agent, to
+        // catch its late writes. With nothing new, the second run is a no-op.
+        use crate::git::snapshot::list_snapshots_inner;
+
+        let repo = TempRepo::new();
+        repo.write("task.txt", "v1\n");
+        repo.commit_all("base");
+
+        let scratch = scratch_worktree_create_impl(repo.cwd(), None, None).expect("create");
+        write_in(&scratch, "task.txt", "agent edit\n");
+        scratch_worktree_merge_back_impl(repo.cwd(), scratch.path.clone(), None, true)
+            .expect("first");
+        scratch_worktree_merge_back_impl(repo.cwd(), scratch.path.clone(), None, true)
+            .expect("second");
+        assert_eq!(repo.read("task.txt"), "agent edit\n");
+        assert_eq!(list_snapshots_inner(&repo.cwd()).unwrap().len(), 1);
+
+        // A late write is picked up by the second run.
+        write_in(&scratch, "late.txt", "written after\n");
+        scratch_worktree_merge_back_impl(repo.cwd(), scratch.path.clone(), None, true)
+            .expect("third");
+        assert_eq!(repo.read("late.txt"), "written after\n");
+        assert_eq!(repo.read("task.txt"), "agent edit\n");
 
         let _ = scratch_worktree_discard_impl(repo.cwd(), scratch.path);
     }

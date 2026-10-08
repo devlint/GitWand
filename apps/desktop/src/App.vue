@@ -2615,19 +2615,38 @@ async function onAiTaskMergeBack() {
   if (!target || aiTaskCloseBusy.value) return;
   aiTaskCloseBusy.value = true;
   aiTaskCloseError.value = null;
+  const errText = (err: unknown) => String((err as { message?: string })?.message ?? err);
   try {
-    const origin = await resolveAiTaskOrigin(target.path, target.projectPath);
-    // Merge back first, keeping the worktree: a refusal ("main moved",
-    // "uncommitted changes would be overwritten") must leave the agent's
-    // terminal running. Only then kill it, so no running process holds an
-    // index.lock or open handle that would block the worktree removal.
-    await scratchWorktreeMergeBack(origin, target.path, settings.value.snapshotsEnabled, true);
+    let origin: string;
+    try {
+      origin = await resolveAiTaskOrigin(target.path, target.projectPath);
+      // Merge back first, keeping the worktree: a refusal ("main moved",
+      // "uncommitted changes would be overwritten") must leave the agent's
+      // terminal running.
+      await scratchWorktreeMergeBack(origin, target.path, settings.value.snapshotsEnabled, true);
+    } catch (err) {
+      aiTaskCloseError.value = t("aiTask.errorMergeBack", errText(err));
+      return;
+    }
+    // Stop the agent, so no running process holds an index.lock or open handle
+    // that would block the worktree removal, then merge back once more: it
+    // brings what the agent wrote since the first run, and is a no-op otherwise.
     await termSessions.disposeRepo(target.path).catch(() => {});
     fileExplorer.disposeRepo(target.path);
-    await scratchWorktreeDiscard(origin, target.path);
-    await finalizeWorktreeRemoval(target.path, target.projectPath);
-  } catch (err) {
-    aiTaskCloseError.value = t("aiTask.errorMergeBack", String((err as { message?: string })?.message ?? err));
+    try {
+      await scratchWorktreeMergeBack(origin, target.path, settings.value.snapshotsEnabled, true);
+    } catch (err) {
+      // The first run's changes are already staged; the worktree is kept.
+      aiTaskCloseError.value = t("aiTask.errorMergeBackLate", errText(err));
+      return;
+    }
+    try {
+      await scratchWorktreeDiscard(origin, target.path);
+      await finalizeWorktreeRemoval(target.path, target.projectPath);
+    } catch (err) {
+      // The merge-back succeeded: only the cleanup failed.
+      aiTaskCloseError.value = t("aiTask.errorDelete", errText(err));
+    }
   } finally {
     aiTaskCloseBusy.value = false;
   }

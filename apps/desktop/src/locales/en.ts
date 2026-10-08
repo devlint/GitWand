@@ -2261,6 +2261,7 @@ const en = {
     working: "Working…",
     errorDelete: "Failed to delete worktree: {0}",
     errorMergeBack: "Failed to merge back: {0}",
+    errorMergeBackLate: "The task's changes are already staged in the main checkout, but what it wrote while closing couldn't be brought back: {0}. The task was kept.",
   },
 
   // ─── Submodules ─────────────────────────────────────────

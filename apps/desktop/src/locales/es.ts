@@ -2220,6 +2220,7 @@ const es: Locale = {
     working: "Procesando…",
     errorDelete: "Error al eliminar el worktree: {0}",
     errorMergeBack: "Error al fusionar: {0}",
+    errorMergeBackLate: "Los cambios de la tarea ya están preparados en el checkout principal, pero lo que escribió durante el cierre no se pudo traer: {0}. La tarea se ha conservado.",
   },
 
   // ─── Submodules ─────────────────────────────────────────
