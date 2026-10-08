@@ -70,6 +70,37 @@ export async function isUpstreamRewriteOnly(cwd: string): Promise<boolean> {
   }
 }
 
+/**
+ * The mirror case: the branch diverges because the LOCAL side was rewritten
+ * (rebased, reordered, squashed — in GitWand or the CLI), so nothing on the
+ * remote would be lost and the next push should be a force push, not a pull.
+ * Either signal is enough:
+ *
+ * - the upstream tip was once this branch's own tip (it is in the branch's
+ *   reflog): the remote only holds an older version of local history. This
+ *   survives conflicts resolved during the rebase, which change patches.
+ * - every commit only the upstream has still exists locally as a
+ *   patch-equivalent commit (covers a never-checked-out remote tip).
+ *
+ * A collaborator's new commit was never a local tip and has no local
+ * equivalent, so Sync stays the default whenever pulling is actually needed.
+ */
+export async function isLocalRewriteOfUpstream(cwd: string, branch: string): Promise<boolean> {
+  try {
+    const [upstream, reflog, upstreamOnly] = await Promise.all([
+      gitExec(cwd, ["rev-parse", "@{upstream}"]),
+      gitExec(cwd, ["reflog", "show", "--format=%H", `refs/heads/${branch}`]),
+      gitExec(cwd, ["rev-list", "--cherry-pick", "--right-only", "--no-merges", "HEAD...@{upstream}"]),
+    ]);
+    if (upstream.exitCode !== 0) return false;
+    const tip = upstream.stdout.trim();
+    if (reflog.exitCode === 0 && reflog.stdout.split("\n").some((h) => h.trim() === tip)) return true;
+    return upstreamOnly.exitCode === 0 && upstreamOnly.stdout.trim() === "";
+  } catch {
+    return false;
+  }
+}
+
 // ─── persistence ─────────────────────────────────────────────────────────────
 
 /** Mute the "Update branch" prompt for a branch. No-op if already muted. */

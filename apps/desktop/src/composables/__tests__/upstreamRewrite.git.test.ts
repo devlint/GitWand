@@ -39,7 +39,7 @@ vi.mock("../../utils/backend", () => ({
   }),
 }));
 
-import { isUpstreamRewriteOnly } from "../useBranchUpdatePrompt";
+import { isUpstreamRewriteOnly, isLocalRewriteOfUpstream } from "../useBranchUpdatePrompt";
 
 function git(cwd: string, args: string[]): string {
   return execFileSync("git", args, { cwd, env: gitEnv(), encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] });
@@ -121,5 +121,59 @@ describe("isUpstreamRewriteOnly", () => {
     const { me } = setup();
     git(me, ["switch", "-q", "-c", "local-only"]);
     expect(await isUpstreamRewriteOnly(me)).toBe(false);
+  }, GIT_TEST_TIMEOUT_MS);
+});
+
+/** main moves (on a file feat doesn't touch); `me` rebases feat onto it locally. */
+function rebaseLocallyOntoMovedMain(teammate: string, me: string) {
+  git(teammate, ["switch", "-q", "main"]);
+  commit(teammate, "m", "main\n", "m2");
+  git(teammate, ["push", "-q", "origin", "main"]);
+  git(me, ["fetch", "-q"]);
+  git(me, ["rebase", "-q", "origin/main"]);
+}
+
+describe("isLocalRewriteOfUpstream", () => {
+  it("is true after a local rebase that kept every upstream commit", async () => {
+    const { teammate, me } = setup();
+    rebaseLocallyOntoMovedMain(teammate, me);
+    expect(await isLocalRewriteOfUpstream(me, "feat")).toBe(true);
+  }, GIT_TEST_TIMEOUT_MS);
+
+  it("is true after a local rebase whose conflicts changed the patches", async () => {
+    const { teammate, me } = setup();
+    git(teammate, ["switch", "-q", "main"]);
+    commit(teammate, "f", "a\nMAIN\nc\n", "m2");
+    git(teammate, ["push", "-q", "origin", "main"]);
+    git(me, ["fetch", "-q"]);
+    spawnSync("git", ["rebase", "origin/main"], { cwd: me, env: gitEnv() });
+    writeFileSync(join(me, "f"), "a\nMAIN+FEAT\nc\n");
+    git(me, ["add", "f"]);
+    git(me, ["rebase", "--continue"]);
+    expect(await isLocalRewriteOfUpstream(me, "feat")).toBe(true);
+  }, GIT_TEST_TIMEOUT_MS);
+
+  it("is false when the upstream gained a commit the rebase doesn't have", async () => {
+    const { teammate, me } = setup();
+    git(teammate, ["switch", "-q", "feat"]);
+    commit(teammate, "i", "theirs\n", "their work");
+    git(teammate, ["push", "-q", "origin", "feat"]);
+    rebaseLocallyOntoMovedMain(teammate, me);
+    expect(await isLocalRewriteOfUpstream(me, "feat")).toBe(false);
+  }, GIT_TEST_TIMEOUT_MS);
+
+  it("is false for a genuine divergence without any rewrite", async () => {
+    const { teammate, me } = setup();
+    commit(me, "h", "mine\n", "my own work");
+    commit(teammate, "i", "theirs\n", "their work");
+    git(teammate, ["push", "-q", "origin", "feat"]);
+    git(me, ["fetch", "-q"]);
+    expect(await isLocalRewriteOfUpstream(me, "feat")).toBe(false);
+  }, GIT_TEST_TIMEOUT_MS);
+
+  it("is false without an upstream", async () => {
+    const { me } = setup();
+    git(me, ["switch", "-q", "-c", "local-only"]);
+    expect(await isLocalRewriteOfUpstream(me, "local-only")).toBe(false);
   }, GIT_TEST_TIMEOUT_MS);
 });

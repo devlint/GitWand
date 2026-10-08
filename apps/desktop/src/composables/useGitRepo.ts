@@ -54,6 +54,7 @@ import {
   gitAddToGitignore,
 } from "../utils/backend";
 import { requireOnline } from "../utils/networkGuard";
+import { isLocalRewriteOfUpstream } from "./useBranchUpdatePrompt";
 import { clearUpdatePromptSkip } from "./useBranchUpdatePrompt";
 import { t } from "./useI18n";
 import { resolveConflictOperation } from "../utils/conflictOperation";
@@ -200,6 +201,27 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       forcePushPreferred.value = key
         ? localStorage.getItem(key) === "1"
         : false;
+    },
+  );
+
+  // Diverged because local history was rewritten (a rebase from the CLI, a
+  // flow that doesn't flag it…): prefer force push without relying on every
+  // rewriting entry point to set the flag. One git call, only when diverged.
+  watch(
+    () => {
+      const s = status.value;
+      return s && s.ahead > 0 && s.behind > 0 ? `${s.branch}:${s.ahead}:${s.behind}` : null;
+    },
+    async (key) => {
+      const path = folderPath.value;
+      const branch = status.value?.branch;
+      if (!key || !path || !branch || forcePushPreferred.value) return;
+      if (await isLocalRewriteOfUpstream(path, branch)) {
+        // Still the same repo and divergence once the probe returns.
+        if (folderPath.value === path && status.value && status.value.ahead > 0 && status.value.behind > 0) {
+          forcePushPreferred.value = true;
+        }
+      }
     },
   );
 
