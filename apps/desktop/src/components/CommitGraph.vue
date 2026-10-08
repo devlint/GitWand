@@ -861,12 +861,16 @@ const totalHeight = computed(() => renderedCommits.value.length * ROW_H);
 // ─── Lane colours — rainbow spectrum left-to-right ───────
 // 45° hue steps: purple → pink → red → orange → yellow → green → cyan → blue
 // Cycles every 8 lanes; each branch gets a visually distinct color.
+function laneHue(lane: number): number {
+  return (280 + lane * 45) % 360;
+}
+
 function laneColor(lane: number, opacity?: number): string {
   if (lane === 0) {
     if (opacity === undefined) return "var(--color-accent)";
     return `color-mix(in srgb, var(--color-accent), transparent ${Math.round((1 - opacity) * 100)}%)`;
   }
-  const hue = (280 + lane * 45) % 360;
+  const hue = laneHue(lane);
   if (opacity === undefined) return solidLaneColor(hue);
   return `hsla(${hue}, 80%, 55%, ${opacity})`;
 }
@@ -887,18 +891,15 @@ function solidLaneColor(hue: number): string {
 // (passed as `active`) with no extra highlight on top.
 const { theme } = useTheme();
 const isLight = computed(() => theme.value === "light");
-const bandBoost = computed(() => (isLight.value ? 1.75 : 1));
 
 function bandAlpha(alpha: number): number {
-  return Math.min(1, alpha * bandBoost.value);
+  return Math.min(1, alpha * (isLight.value ? 1.75 : 1));
 }
 
-// Light mode bands use a deeper, more saturated hue so they don't read as
-// pastel over the white background.
+// Light mode bands use a deeper hue so they don't read as pastel over the
+// white background.
 function bandHsla(hue: number, alpha: number): string {
-  return isLight.value
-    ? `hsla(${hue}, 80%, 50%, ${alpha})`
-    : `hsla(${hue}, 80%, 55%, ${alpha})`;
+  return `hsla(${hue}, 80%, ${isLight.value ? 50 : 55}%, ${alpha})`;
 }
 
 /** Tint for the trunk / lane 0 band. */
@@ -910,20 +911,20 @@ function accentTint(active = false): string {
 /** Middle stops of the trunk rainbow tint. */
 function trunkMidAlpha(active = false): number {
   if (!isLight.value) return 0.19;
-  return active ? bandAlpha(0.17) : bandAlpha(0.2);
+  return bandAlpha(active ? 0.17 : 0.2);
 }
 
 // The magenta lane (hue 325) reads dull on dark mode at the regular tint, so
 // its default band takes roughly what selected rows used to look like, and its
 // selected / current highlight is pushed further (see activeHighlight).
 function isMagentaLane(lane: number): boolean {
-  return lane !== 0 && (280 + lane * 45) % 360 === 325;
+  return lane !== 0 && laneHue(lane) === 325;
 }
 
 function laneColorTint(lane: number, active = false): string {
   if (lane === 0) return accentTint(active);
   if (!isLight.value) return laneColor(lane, isMagentaLane(lane) ? 0.195 : 0.12);
-  return bandHsla((280 + lane * 45) % 360, active ? bandAlpha(0.12) : bandAlpha(0.2));
+  return bandHsla(laneHue(lane), bandAlpha(active ? 0.12 : 0.2));
 }
 
 function bandFill(node: DagNode): string {
@@ -934,36 +935,39 @@ function bandFill(node: DagNode): string {
   return laneColorTint(node.lane, active);
 }
 
-const indexToLane = computed(() => {
-  const map = new Map<number, number>();
-  for (const node of layout.value.nodes) map.set(node.index, node.lane);
-  return map;
-});
-
 const indexToNode = computed(() => {
   const map = new Map<number, DagNode>();
   for (const node of layout.value.nodes) map.set(node.index, node);
   return map;
 });
 
-/** How many times the trunk rainbow repeats across the row. */
-const TRUNK_RAINBOW_REPEATS = 1;
-
-/** Trunk rainbow stops, shared by the SVG gradients and the commit row. */
-function trunkStops(active = false): [string, number][] {
-  const accent = accentTint(active);
-  const orange = bandHsla(35, trunkMidAlpha(active));
-  const green = bandHsla(140, trunkMidAlpha(active));
-  const span = 100 / TRUNK_RAINBOW_REPEATS;
-  const stops: [string, number][] = [];
-  for (let i = 0; i < TRUNK_RAINBOW_REPEATS; i++) {
-    const start = i * span;
-    stops.push([accent, start], [orange, start + span / 3], [green, start + (2 * span) / 3]);
-  }
-  stops.push([accent, 100]);
-  return stops;
+function laneAt(index: number): number {
+  return indexToNode.value.get(index)?.lane ?? 0;
 }
 
+/** Trunk rainbow stops, shared by the SVG gradients and the commit row. */
+function trunkStops(active: boolean): [string, number][] {
+  const accent = accentTint(active);
+  const mid = trunkMidAlpha(active);
+  return [[accent, 0], [bandHsla(35, mid), 100 / 3], [bandHsla(140, mid), 200 / 3], [accent, 100]];
+}
+
+/** Trunk tint gradients: the regular one, and light mode's softer active one. */
+const trunkGradients = computed(() => [
+  { id: 'trunk-gradient-tint', stops: trunkStops(false) },
+  { id: 'trunk-gradient-tint-active', stops: trunkStops(true) },
+]);
+
+/** Shared geometry of a row band (tint, highlight, hover and shade rects). */
+function bandRect(node: DagNode) {
+  return {
+    x: cx(node.lane) - 11,
+    y: node.index * ROW_H + 1,
+    width: graphWidth.value - cx(node.lane) + 11 + 20,
+    height: ROW_H - 2,
+    rx: 8,
+  };
+}
 
 // ─── SVG path helpers ────────────────────────────────
 function cx(lane: number): number {
@@ -1181,7 +1185,7 @@ function activeHighlight(index: number): string | undefined {
   if (isLight.value) return undefined;
   const entry = renderedCommits.value[index];
   if (!entry) return undefined;
-  const lane = indexToLane.value.get(index) ?? 0;
+  const lane = laneAt(index);
   const magenta = isMagentaLane(lane);
   if (entry.hashFull === props.selectedHash) return laneColor(lane, magenta ? 0.3 : 0.2);
   if (isCurrent(entry)) return laneColor(lane, magenta ? 0.35 : 0.25);
@@ -1198,20 +1202,24 @@ function rowHighlight(index: number): string | undefined {
     ?? (matchedHashSet.value.has(hash) ? `rgba(245, 158, 11, ${bandAlpha(0.2)})` : undefined);
 }
 
+/** Visible bands carrying a highlight overlay, with its fill computed once. */
+const highlightedBands = computed(() =>
+  visibleNodes.value.flatMap((node) => {
+    const fill = rowHighlight(node.index);
+    return fill ? [{ node, fill }] : [];
+  }),
+);
+
 // Commit-row highlight. Light mode has no active overlay on the graph band
 // (active rows use the softer band there), so the commit row of an active row
 // gets a light wash of its lane color instead.
 function commitRowHighlight(index: number): string | undefined {
   const hl = rowHighlight(index);
   if (hl || !isLight.value || !isActiveRow(index)) return hl;
-  const lane = indexToLane.value.get(index) ?? 0;
-  return lane === 0 ? laneColor(0, 0.22) : bandHsla((280 + lane * 45) % 360, 0.22);
+  const lane = laneAt(index);
+  return lane === 0 ? laneColor(0, 0.22) : bandHsla(laneHue(lane), 0.22);
 }
 
-// Hover does nothing on selected or current branch rows (v2.14).
-function isRowHighlighted(index: number): boolean {
-  return isActiveRow(index);
-}
 
 function onScroll() {
   const el = scrollContainer.value;
@@ -1535,10 +1543,14 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
             <stop offset="66%" style="stop-color: #3eff88;" />
             <stop offset="100%" style="stop-color: var(--color-accent);" />
           </linearGradient>
-          <!-- Trunk lane multi-color gradient (subtle for row tints). Spans the
-               trunk band, from its start to the graph's right edge. -->
+          <!-- Trunk lane multi-color gradients (subtle for row tints). Span the
+               trunk band, from its start to the graph's right edge. The
+               "-active" one is light mode's softer tint for selected / current
+               rows. -->
           <linearGradient
-            id="trunk-gradient-tint"
+            v-for="g in trunkGradients"
+            :id="g.id"
+            :key="g.id"
             gradientUnits="userSpaceOnUse"
             :x1="cx(0) - 11"
             y1="0"
@@ -1546,23 +1558,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
             y2="0"
           >
             <stop
-              v-for="[color, offset] in trunkStops()"
-              :key="offset"
-              :offset="offset + '%'"
-              :style="{ stopColor: color }"
-            />
-          </linearGradient>
-          <!-- Light mode only: softer trunk tint for selected / current rows -->
-          <linearGradient
-            id="trunk-gradient-tint-active"
-            gradientUnits="userSpaceOnUse"
-            :x1="cx(0) - 11"
-            y1="0"
-            :x2="graphWidth"
-            y2="0"
-          >
-            <stop
-              v-for="[color, offset] in trunkStops(true)"
+              v-for="[color, offset] in g.stops"
               :key="offset"
               :offset="offset + '%'"
               :style="{ stopColor: color }"
@@ -1599,58 +1595,41 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
           v-for="node in visibleNodes"
           :key="'t' + node.index"
           class="cg-row-tint"
-          :x="cx(node.lane) - 11"
-          :y="node.index * ROW_H + 1"
-          :width="graphWidth - cx(node.lane) + 11 + 20"
-          :height="ROW_H - 2"
+          v-bind="bandRect(node)"
           :fill="bandFill(node)"
-          rx="8"
           @click="node.hash === 'WIP' ? emit('change-view', 'changes') : emit('select-commit', node.hash)"
           @contextmenu="openCommitContextMenu($event, renderedCommits[node.index], node.index)"
         />
         <!-- Selected / current highlight over the row tint band, continued on
              the commit row by --cg-row-hl. -->
-        <template v-for="node in visibleNodes" :key="'h' + node.index">
-          <rect
-            v-if="rowHighlight(node.index)"
-            class="cg-row-active"
-            :x="cx(node.lane) - 11"
-            :y="node.index * ROW_H + 1"
-            :width="graphWidth - cx(node.lane) + 11 + 20"
-            :height="ROW_H - 2"
-            :fill="rowHighlight(node.index)"
-            rx="8"
-          />
-        </template>
+        <rect
+          v-for="{ node, fill } in highlightedBands"
+          :key="'h' + node.index"
+          class="cg-row-overlay"
+          v-bind="bandRect(node)"
+          :fill="fill"
+        />
         <!-- Hover highlight over the row tint band, continued on the commit
              row by .cg-row--hover. -->
         <rect
-          v-if="hoveredNode && !isRowHighlighted(hoveredNode.index)"
-          class="cg-row-hover"
-          :x="cx(hoveredNode.lane) - 11"
-          :y="hoveredNode.index * ROW_H + 1"
-          :width="graphWidth - cx(hoveredNode.lane) + 11 + 20"
-          :height="ROW_H - 2"
-          rx="8"
+          v-if="hoveredNode && !isActiveRow(hoveredNode.index)"
+          class="cg-row-overlay cg-row-hover"
+          v-bind="bandRect(hoveredNode)"
         />
         <!-- Shade over each band (tint + highlights). Drawn under edges and nodes. -->
         <rect
           v-for="node in visibleNodes"
           :key="'s' + node.index"
-          class="cg-row-shade"
-          :x="cx(node.lane) - 11"
-          :y="node.index * ROW_H + 1"
-          :width="graphWidth - cx(node.lane) + 11 + 20"
-          :height="ROW_H - 2"
+          class="cg-row-overlay"
+          v-bind="bandRect(node)"
           fill="url(#row-shade)"
-          rx="8"
         />
         <!-- Right border closing each band at the graph's edge, in the node's
              lane color. -->
         <rect
           v-for="node in visibleNodes"
           :key="'r' + node.index"
-          class="cg-row-edge"
+          class="cg-row-overlay"
           :x="graphWidth - 2"
           :y="node.index * ROW_H + 1"
           width="2"
@@ -1771,8 +1750,6 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
             'cg-row--selected': vc.entry.hashFull === selectedHash,
             'cg-row--current': isCurrent(vc.entry),
             'cg-row--wip': vc.entry.hashFull === 'WIP',
-            'cg-row--match': matchedHashSet.has(vc.entry.hashFull),
-            'cg-row--match-active': vc.entry.hashFull === activeMatchHash,
             'cg-row--hover': vc.index === hoveredIndex,
           }"
            :style="{
@@ -1818,7 +1795,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
                 :key="r.name"
                 class="cg-ref"
                 :class="[`cg-ref--${r.type}`, r.type === 'branch' && r.name === props.currentBranch ? 'cg-ref--branch-current' : '']"
-                :style="(r.type === 'branch' || r.type === 'tag' || r.type === 'remote') ? { '--ref-lane-color': laneColor(indexToLane.get(vc.index) ?? 0) } : {}"
+                :style="(r.type === 'branch' || r.type === 'tag' || r.type === 'remote') ? { '--ref-lane-color': laneColor(laneAt(vc.index)) } : {}"
                 :title="r.name"
                 @contextmenu.stop="openCommitContextMenu($event, vc.entry, vc.index, r.name, r.type)"
                 @dblclick.stop="onBranchDblClick(r)"
@@ -2759,27 +2736,14 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
 .cg-row-hover {
   fill: var(--cg-hover-wash);
 }
-.cg-row-edge {
+/* Decorative rects drawn over the row tint band; clicks reach the tint. */
+.cg-row-overlay {
   pointer-events: none;
-}
-.cg-row-active,
-.cg-row-hover,
-.cg-row-shade {
-  pointer-events: none;
-}
-
-.cg-row--selected {
-  /* Dynamic branch-colored highlight is set via --cg-row-hl at 0.2 opacity */
-}
-
-.cg-row--current {
-  /* Dynamic branch-colored highlight is set via --cg-row-hl at 0.25 opacity */
 }
 
 .cg-row--wip {
   color: var(--color-text-muted);
 }
-
 
 .cg-row:focus-visible {
   outline: 2px solid var(--color-accent);
