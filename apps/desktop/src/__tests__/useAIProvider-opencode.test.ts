@@ -29,6 +29,7 @@ const {
   copilotCliPrompt,
   listOpencodeModels,
   listAntigravityModels,
+  listCopilotModels,
   detectClaudeCli,
 } = vi.hoisted(() => ({
   claudeCliPrompt: vi.fn(async () => "ok-claude"),
@@ -36,6 +37,7 @@ const {
   opencodeCliPrompt: vi.fn(async () => "ok-opencode"),
   copilotCliPrompt: vi.fn(async () => "ok-copilot"),
   listOpencodeModels: vi.fn(async () => ["anthropic/claude-x", "openai/gpt-y"]),
+  listCopilotModels: vi.fn(async () => ["claude-sonnet-5", "gpt-5.5"]),
   listAntigravityModels: vi.fn(async () => [
     { id: "gemini-3.8-flash-high", name: "Gemini 3.8 Flash (High)" },
   ]),
@@ -57,6 +59,7 @@ vi.mock("../utils/backend", () => ({
   copilotCliPrompt,
   listOpencodeModels,
   listAntigravityModels,
+  listCopilotModels,
   detectClaudeCli,
 }));
 
@@ -119,8 +122,10 @@ describe("listModelsForProvider", () => {
     expect(await listModelsForProvider("codex-cli")).toEqual([]);
   });
 
-  it("returns an empty list (free-text fallback) for Copilot", async () => {
-    expect(await listModelsForProvider("copilot-cli")).toEqual([]);
+  it("enumerates Copilot models with Copilot's effort range", async () => {
+    const models = await listModelsForProvider("copilot-cli");
+    expect(models.map((m) => m.id)).toEqual(["claude-sonnet-5", "gpt-5.5"]);
+    expect(models[0].efforts).toEqual(["none", "minimal", "low", "medium", "high", "xhigh", "max"]);
   });
 
   it("enumerates opencode models dynamically", async () => {

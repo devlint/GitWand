@@ -5763,6 +5763,32 @@ async function handleRequest(req, res) {
       }
     }
 
+    // GET /api/copilot-models  → { models: string[] }
+    // Copilot has no `models` command; the list is the `model` setting's
+    // `- "<id>"` lines in `copilot help config` — same parse as the Rust side.
+    if (url.pathname === "/api/copilot-models" && req.method === "GET") {
+      try {
+        const COPILOT = resolveBin("copilot");
+        const r = spawnSync(COPILOT, ["help", "config"], { encoding: "utf-8", maxBuffer: 8 * 1024 * 1024 });
+        if (r.status !== 0) {
+          return jsonResponse(req, res, { models: [] });
+        }
+        const lines = (r.stdout || "").split(/\r?\n/);
+        const start = lines.findIndex((l) => l.trimStart().startsWith("`model`:"));
+        const models = [];
+        if (start !== -1) {
+          for (const l of lines.slice(start + 1)) {
+            const m = l.trim().match(/^- "([^"]+)"$/);
+            if (!m) break;
+            models.push(m[1]);
+          }
+        }
+        return jsonResponse(req, res, { models });
+      } catch {
+        return jsonResponse(req, res, { models: [] });
+      }
+    }
+
     // GET /api/antigravity-cli-detect
     if (url.pathname === "/api/antigravity-cli-detect" && req.method === "GET") {
       try {

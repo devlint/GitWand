@@ -337,6 +337,31 @@ export async function copilotCliPrompt(
   return await res.text();
 }
 
+/**
+ * Enumerate the models Copilot accepts (parsed from `copilot help config`).
+ * Returns an empty array — never throws — when the binary is missing or the
+ * command fails, so callers can fall back to free-text entry.
+ */
+export async function listCopilotModels(): Promise<string[]> {
+  if (isTauri()) {
+    try {
+      return await tauriInvoke<string[]>("copilot_list_models");
+    } catch {
+      return [];
+    }
+  }
+  try {
+    const res = await devFetch(`${DEV_SERVER}/api/copilot-models`);
+    if (res.ok) {
+      const body = await res.json();
+      return Array.isArray(body?.models) ? body.models : [];
+    }
+  } catch {
+    // Dev server unavailable
+  }
+  return [];
+}
+
 // ─── Antigravity CLI provider ──────────────────────────────
 // Mirrors the Claude / Codex / opencode / Copilot CLI shape. Antigravity runs
 // one-shot prompts via `agy -p "<prompt>" [--model <m>]`. Auth is managed by

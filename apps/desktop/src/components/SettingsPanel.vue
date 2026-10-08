@@ -2769,7 +2769,8 @@ function deleteReleaseNoteTemplate(id: string) {
 
             <!-- Model + effort picker. The list is fetched from the provider
                  (Anthropic / OpenAI-compatible `models` endpoint, `opencode
-                 models`, `agy models`) or curated (Claude Code aliases); an
+                 models`, `agy models`, `copilot help config`) or curated
+                 (Claude Code aliases); an
                  empty list falls back to free-text entry. -->
             <template v-if="hasModelPicker">
               <div class="sp-row">

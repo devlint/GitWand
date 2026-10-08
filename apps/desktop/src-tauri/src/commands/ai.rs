@@ -981,6 +981,49 @@ fn copilot_cli_prompt_inner(
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
+/// Enumerate the models Copilot accepts. Copilot has no `models` command;
+/// the list lives in `copilot help config`, under the `model` setting, one
+/// `- "<id>"` line per model. Returns an empty list — never an error — when
+/// the binary is missing or the section cannot be found, so the Settings
+/// picker falls back to free-text entry.
+#[tauri::command]
+pub(crate) async fn copilot_list_models() -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(copilot_list_models_inner)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn copilot_list_models_inner() -> Result<Vec<String>, String> {
+    let binary = match resolve_copilot_binary() {
+        Some(b) => b,
+        None => return Ok(Vec::new()),
+    };
+
+    let output = match hidden_cmd(&binary).args(["help", "config"]).output() {
+        Ok(o) => o,
+        Err(_) => return Ok(Vec::new()),
+    };
+
+    if !output.status.success() {
+        return Ok(Vec::new());
+    }
+
+    Ok(parse_copilot_models(&String::from_utf8_lossy(&output.stdout)))
+}
+
+/// Extract the `- "<id>"` lines that follow the `` `model`: `` heading of
+/// `copilot help config`, stopping at the first line that is not one.
+fn parse_copilot_models(help: &str) -> Vec<String> {
+    help.lines()
+        .skip_while(|l| !l.trim_start().starts_with("`model`:"))
+        .skip(1)
+        .map_while(|l| {
+            let id = l.trim().strip_prefix("- \"")?.strip_suffix('"')?;
+            (!id.is_empty()).then(|| id.to_string())
+        })
+        .collect()
+}
+
 // ─── Claude OAuth login (opens a native terminal) ────────────────────────
 
 /// Launch `claude login` in the user's native terminal emulator. We don't
@@ -1208,5 +1251,19 @@ mod tests {
         assert_eq!(models[0].id, "gemini-3.8-flash-high");
         assert_eq!(models[0].name, "Gemini 3.8 Flash (High)");
         assert_eq!(models[1].id, "claude-sonnet-4-6");
+    }
+
+    #[test]
+    fn parse_copilot_models_reads_the_model_section_only() {
+        let help = "  `logLevel`: log level\n\
+                    \n\
+                    \x20 `model`: AI model to use for Copilot CLI\n\
+                    \x20   - \"claude-sonnet-5\"\n\
+                    \x20   - \"gpt-5.5\"\n\
+                    \n\
+                    \x20 `contextTier`: context window tier\n\
+                    \x20   - \"default\"\n";
+        assert_eq!(parse_copilot_models(help), vec!["claude-sonnet-5", "gpt-5.5"]);
+        assert!(parse_copilot_models("no model section").is_empty());
     }
 }

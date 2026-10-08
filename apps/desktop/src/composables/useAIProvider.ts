@@ -8,6 +8,7 @@ import {
   antigravityCliPrompt,
   listOpencodeModels,
   listAntigravityModels,
+  listCopilotModels,
   detectClaudeCli,
 } from "../utils/backend";
 import { t } from "./useI18n";
@@ -357,6 +358,9 @@ export interface AIModelOption {
   efforts: string[];
 }
 
+/** `copilot --reasoning-effort` possible values. */
+const COPILOT_EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
+
 /** Effort levels `claude --effort` accepts. */
 const CLAUDE_CODE_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 
@@ -377,8 +381,7 @@ export function providerEfforts(provider: AIProvider): string[] {
     case "claude-code-cli":
       return CLAUDE_CODE_EFFORTS;
     case "copilot-cli":
-      // `copilot --reasoning-effort` possible values.
-      return ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
+      return COPILOT_EFFORTS;
     case "codex-cli":
       // `model_reasoning_effort` values every Codex model accepts.
       return ["minimal", "low", "medium", "high"];
@@ -510,12 +513,14 @@ export async function listModelsForProvider(
       return (await listOpencodeModels()).map((id) => ({ id, name: id, efforts: [] }));
     case "antigravity-cli":
       return (await listAntigravityModels()).map((m) => ({ id: m.id, name: m.name, efforts: [] }));
+    case "copilot-cli":
+      // Copilot reports ids only, and one effort range for every model.
+      return (await listCopilotModels()).map((id) => ({ id, name: id, efforts: COPILOT_EFFORTS }));
     case "claude-code-cli":
       return CLAUDE_CODE_MODELS;
-    // Codex slugs change frequently and neither Codex nor Copilot has a
-    // non-interactive enumeration command — fall back to free-text entry.
+    // Codex slugs change frequently and the CLI has no enumeration command —
+    // fall back to free-text entry.
     case "codex-cli":
-    case "copilot-cli":
     default:
       return [];
   }
