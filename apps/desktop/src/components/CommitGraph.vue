@@ -847,6 +847,7 @@ const activeMatchHash = computed<string | null>(() => {
 
 // ─── Rendering constants ─────────────────────────────
 const ROW_H = 32; // height per commit row
+const LIST_PAD_TOP = 1; // space above the first row
 const LANE_W = 18; // width per lane
 const NODE_R = 4; // node circle radius
 const GRAPH_PAD = 12; // left padding before first lane
@@ -1165,7 +1166,7 @@ const hoveredIndex = ref<number | null>(null);
 function onScrollMouseMove(e: MouseEvent) {
   const el = scrollContainer.value;
   if (!el) return;
-  const y = e.clientY - el.getBoundingClientRect().top + el.scrollTop;
+  const y = e.clientY - el.getBoundingClientRect().top + el.scrollTop - LIST_PAD_TOP;
   const index = Math.floor(y / ROW_H);
   hoveredIndex.value = index >= 0 && index < renderedCommits.value.length ? index : null;
 }
@@ -1510,6 +1511,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
     <div
       class="cg-scroll"
       ref="scrollContainer"
+      :style="{ paddingTop: LIST_PAD_TOP + 'px' }"
       @scroll="onScroll"
       @mousemove="onScrollMouseMove"
       @mouseleave="hoveredIndex = null"
@@ -2694,11 +2696,11 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
 .cg-row {
   position: absolute;
   left: 0;
-  right: 0;
+  right: 2px;
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 0 12px 0 4px;
+  padding: 0 12px 0 5px;
   cursor: pointer;
   font-size: 12px;
   border-bottom: 1px solid var(--color-bg);
