@@ -469,18 +469,20 @@ function submitRequestReviewers() {
         <div class="pdv-hero-top">
           <div class="pdv-hero-title">
             <span class="pdv-pr-num">#{{ p.prDetail.value.number }}</span>
-            <h1 class="pdv-pr-title">{{ p.prDetail.value.title }}</h1>
-            <!-- SWR: cached detail is on screen; show a small badge while the
-                 background revalidation runs. -->
-            <span
-              v-if="p.detailRefreshing.value"
-              class="pdv-refresh-badge"
-              role="status"
-              :title="t('pr.detail.refreshing')"
-            >
-              <span class="pdv-spinner pdv-spinner--sm" aria-hidden="true"></span>
-              {{ t('pr.detail.refreshing') }}
-            </span>
+            <div class="pdv-hero-title-text">
+              <h1 class="pdv-pr-title">{{ p.prDetail.value.title }}</h1>
+              <!-- SWR: cached detail is on screen; show a small badge under the
+                   title while the background revalidation runs. -->
+              <span
+                v-if="p.detailRefreshing.value"
+                class="pdv-refresh-badge"
+                role="status"
+                :title="t('pr.detail.refreshing')"
+              >
+                <span class="pdv-spinner pdv-spinner--sm" aria-hidden="true"></span>
+                {{ t('pr.detail.refreshing') }}
+              </span>
+            </div>
           </div>
           <div class="pdv-hero-actions">
             <div class="pdv-hero-buttons">
@@ -1365,8 +1367,7 @@ function submitRequestReviewers() {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-  flex-shrink: 0;
-  align-self: center;
+  align-self: flex-start;
   font-size: var(--font-size-xs);
   color: var(--color-text-muted);
   white-space: nowrap;
@@ -1399,6 +1400,14 @@ function submitRequestReviewers() {
   /* The 280px basis is what makes the actions wrap onto their own line on
      narrow screens, rather than crushing the title. */
   flex: 1 1 280px;
+}
+
+/* Title + the refresh badge stacked under it. */
+.pdv-hero-title-text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
 }
 
 .pdv-pr-num {
