@@ -557,7 +557,7 @@ const hasTodo = computed(
                 :title="t('rebase.aiSquashHint')"
                 @click="handleSquashSuggest"
               >
-                <span v-if="isSuggestingSquash" class="rb-ai-label">
+                <span v-if="isSuggestingSquash" class="rb-ai-label ai-loading">
                   <span class="rb-ai-spinner" aria-hidden="true"></span>
                   {{ t('rebase.aiSquashApplying') }}
                 </span>

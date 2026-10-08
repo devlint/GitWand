@@ -454,7 +454,7 @@ function shortHash(hash: string): string {
         </div>
         <div class="fhv-blame-explain-body">
           <span v-if="blameExplainError" class="fhv-blame-explain-error">{{ blameExplainError }}</span>
-          <span v-else-if="isExplainingBlame && !blameExplainText">
+          <span v-else-if="isExplainingBlame && !blameExplainText" class="ai-loading">
             {{ t('fileHistory.analyzingCommit') }}
           </span>
           <span v-else>{{ blameExplainText }}</span>

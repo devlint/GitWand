@@ -652,7 +652,7 @@ function abbrevAuthor(author: string): string {
         :aria-label="t('log.searchAiHint')"
         @click="runAiSearch"
       >
-        <span v-if="isAiSearching">…</span>
+        <span v-if="isAiSearching" class="ai-loading">…</span>
         <AiSparkle v-else :size="16" />
       </button>
       <button

@@ -580,7 +580,7 @@ function removeReviewer(name: string) {
             :title="t('pr.create.aiHint')"
             @click="generateWithAI"
           >
-            <span v-if="isGeneratingPrDescription" class="pcv-ai-label">
+            <span v-if="isGeneratingPrDescription" class="pcv-ai-label ai-loading">
               <span class="pcv-spinner pcv-spinner--sm" aria-hidden="true"></span>
               {{ t('pr.create.aiGenerating') }}
             </span>

@@ -258,7 +258,7 @@ watch(() => props.cwd, loadStashes);
         @click="suggestMessage"
         :title="t('stash.aiSuggestTooltip')"
       >
-        <span v-if="isGeneratingMessage">…</span>
+        <span v-if="isGeneratingMessage" class="ai-loading">…</span>
         <span v-else class="sm-ai-label">
           <AiSparkle :size="13" />
           {{ t('stash.aiButton') }}

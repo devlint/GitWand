@@ -685,7 +685,7 @@ function submitRequestReviewers() {
                 >{{ t('pr.summary.copy') }}</button>
               </div>
             </header>
-            <div v-if="p.prSummaryLoading.value && !p.prSummary.value" class="pdv-summary-loading">
+            <div v-if="p.prSummaryLoading.value && !p.prSummary.value" class="pdv-summary-loading ai-loading">
               {{ t('pr.summary.loading') }}
             </div>
             <div v-else class="pdv-summary-body" v-html="renderMarkdown(p.prSummary.value)" />

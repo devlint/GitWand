@@ -614,6 +614,20 @@ button:focus-visible,
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* ─── AI loading ───────────────────────────────────────────── */
+/* Soft fade on anything showing an AI request in flight. `filter: opacity()`
+   rather than `opacity` so it stacks with a disabled button's own dimming. */
+.ai-loading {
+  animation: ai-loading-fade 1.6s ease-in-out infinite;
+}
+@keyframes ai-loading-fade {
+  0%, 100% { filter: opacity(1); }
+  50% { filter: opacity(0.6); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ai-loading { animation: none; }
+}
+
 /* ─── Word-level diff highlighting ─────────────────────────── */
 .wd-del {
   background: rgba(239, 68, 68, 0.3);

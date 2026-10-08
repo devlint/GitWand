@@ -4864,7 +4864,7 @@ onUnmounted(() => {
             @keydown.enter.prevent="confirmSwitchStash" @keydown.esc.prevent="cancelSwitchStash" />
           <button v-if="aiProvider.isAvailable.value" type="button" class="switch-stash-ai-btn"
             :disabled="isGeneratingSwitchStashMessage" @click="suggestSwitchStashMessage">
-            <span v-if="isGeneratingSwitchStashMessage">…</span>
+            <span v-if="isGeneratingSwitchStashMessage" class="ai-loading">…</span>
             <span v-else class="switch-stash-ai-label">
               <AiSparkle :size="13" />
               {{ t('common.ai') }}
@@ -5021,10 +5021,10 @@ onUnmounted(() => {
         <!-- AI suggestion strip -->
         <div v-if="isAIAvailable" class="tag-ai-row">
           <span class="tag-ai-hint">{{ t('commitCtx.tagAiHint') }}</span>
-          <button class="bm-btn btn--ai tag-ai-btn" :disabled="commitActionModal.busy || isTagAISuggesting"
-            @click="suggestTagWithAI">
+          <button class="bm-btn btn--ai tag-ai-btn" :class="{ 'ai-loading': isTagAISuggesting }"
+            :disabled="commitActionModal.busy || isTagAISuggesting" @click="suggestTagWithAI">
             <AiSparkle :size="13" :animated="isTagAISuggesting" />
-            {{ isTagAISuggesting ? t('common.loading') : t('commitCtx.tagAiSuggest') }}
+            {{ isTagAISuggesting ? t('common.generating') : t('commitCtx.tagAiSuggest') }}
           </button>
         </div>
         <input v-model="commitActionModal.tagName" type="text" class="cam-input"

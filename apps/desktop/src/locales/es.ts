@@ -22,6 +22,7 @@ const es: Locale = {
     delete: "Eliminar",
     error: "Error",
     loading: "Cargando…",
+    generating: "Generando",
     no: "No",
     ok: "Aceptar",
     open: "Abrir",
@@ -547,7 +548,7 @@ const es: Locale = {
     thresholdSummary: "{0} auto-resolubles, {1} retenidos por el umbral, {2} manuales",
     aiRisk: "Evaluación de riesgo",
     aiRiskHint: "Pregunta a la IA si este merge parece seguro.",
-    aiRiskAnalyzing: "Analizando riesgos…",
+    aiRiskAnalyzing: "Analizando riesgos",
     analyzing: "Analizando…",
     noConflicts: "Merge limpio",
     fullyAuto: "100 % auto-resoluble",
@@ -617,7 +618,7 @@ const es: Locale = {
     done: "Rebase completado",
     aiSquashSuggest: "Sugerir un squash",
     aiSquashHint: "Analiza los commits para proponer grupos de squash por intención.",
-    aiSquashApplying: "Analizando…",
+    aiSquashApplying: "Analizando",
     aiSquashApply: "Aplicar",
     aiSquashEmpty: "La IA no encontró nada que hacer squash — cada commit tiene una intención distinta.",
     aiSquashClose: "Cerrar",
@@ -868,7 +869,7 @@ const es: Locale = {
       reviewersHint: "Escribe un nombre y pulsa Intro, espacio o coma. Usa org/team-slug para un equipo. Los revisores serán notificados al crear la PR.",
       reviewersLoading: "Cargando revisores…",
       aiGenerate: "Generar con IA",
-      aiGenerating: "Generando…",
+      aiGenerating: "Generando",
       aiHint: "Analiza los commits entre las dos ramas para redactar un título y una descripción.",
       aiReplaceConfirm: "El título y la descripción actuales serán reemplazados. ¿Continuar?",
       // Built-in templates
@@ -973,13 +974,13 @@ const es: Locale = {
       dismiss: "Descartar",
       progress: "{0}/{1} archivos",
       empty: "Sin hallazgos.",
-      running: "Analizando…",
+      running: "Analizando",
     },
     summary: {
       title: "Resumen",
       regenerate: "Regenerar",
       copy: "Copiar",
-      loading: "Generando resumen…",
+      loading: "Generando resumen",
       empty: "Aún no hay resumen.",
     },
     comment: {
@@ -1886,7 +1887,7 @@ const es: Locale = {
     kindCheckout: "Checkout",
     kindResolution: "Resolución aplicada",
     aiLabel: "Resumir con IA",
-    aiLabelPending: "Resumiendo…",
+    aiLabelPending: "Resumiendo",
     toastUndo: "Deshacer",
     toastDiscard: "{0} archivo(s) descartado(s)",
     toastReset: "Reset a {0}",
@@ -1947,7 +1948,6 @@ const es: Locale = {
   mergeEditor: {
     editAriaLabel: "Editar el conflicto {0}",
     aiButton: "IA",
-    aiLoading: "IA…",
     aiErrorPrefix: "IA",
     aiSuggestionLabel: "Sugerencia IA — revisa y ajusta",
     aiStagedReady: "Sugerencia IA lista",
@@ -1956,8 +1956,8 @@ const es: Locale = {
     aiRetry: "Reintentar",
     explainTooltip: "Explicar este conflicto en lenguaje natural",
     explain: "Explicar",
-    explainAnalyzing: "Analizando…",
-    analyzingConflict: "Analizando conflicto…",
+    explainAnalyzing: "Analizando",
+    analyzingConflict: "Analizando conflicto",
     // Custom automation
     automationRun: "Ejecutar automatización",
     automationRunning: "Ejecutando…",
@@ -2013,7 +2013,7 @@ const es: Locale = {
   prInline: {
     aiCritiqueTooltip: "Crítica IA de este bloque",
     aiCritiqueButton: "Revisar",
-    aiCritiqueAnalyzing: "Analizando bloque\u2026",
+    aiCritiqueAnalyzing: "Analizando bloque",
   },
 
   // ─── Stash manager ──────────────────────────────────────
@@ -2050,7 +2050,7 @@ const es: Locale = {
   fileHistory: {
     explainChange: "Explicar este cambio con IA",
     whyThisChange: "¿Por qué este cambio?",
-    analyzingCommit: "Analizando commit\u2026",
+    analyzingCommit: "Analizando commit",
   },
 
   // ─── Scratch worktree (v2.20.0) ─────────────────────────

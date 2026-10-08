@@ -30,6 +30,7 @@ const zhCN: Locale = {
     delete: "删除",
     error: "错误",
     loading: "加载中…",
+    generating: "生成中",
     no: "否",
     ok: "确定",
     open: "打开",
@@ -560,7 +561,7 @@ const zhCN: Locale = {
     thresholdSummary: "{0} 个可自动解决，{1} 个被阈值保留，{2} 个需手动",
     aiRisk: "风险评估",
     aiRiskHint: "让 AI 判断此次合并是否安全。",
-    aiRiskAnalyzing: "正在分析风险…",
+    aiRiskAnalyzing: "正在分析风险",
     analyzing: "分析中…",
     noConflicts: "干净合并",
     fullyAuto: "100 % 可自动解决",
@@ -629,7 +630,7 @@ const zhCN: Locale = {
     done: "变基完成",
     aiSquashSuggest: "建议合并提交",
     aiSquashHint: "分析提交，按意图提出合并分组建议。",
-    aiSquashApplying: "分析中…",
+    aiSquashApplying: "分析中",
     aiSquashApply: "应用",
     aiSquashEmpty: "AI 没有发现可合并的提交 — 每个提交的意图都不同。",
     aiSquashClose: "关闭",
@@ -874,7 +875,7 @@ const zhCN: Locale = {
       reviewersHint: "输入名称后按 Enter、空格或逗号。团队使用 org/team-slug 格式。创建时会通知评审者。",
       reviewersLoading: "加载评审者中…",
       aiGenerate: "用 AI 生成",
-      aiGenerating: "生成中…",
+      aiGenerating: "生成中",
       aiHint: "分析两个分支间的提交，起草标题和描述。",
       aiReplaceConfirm: "当前标题和描述将被替换。继续吗？",
       // Built-in templates
@@ -979,13 +980,13 @@ const zhCN: Locale = {
       dismiss: "驳回",
       progress: "{0}/{1} 个文件",
       empty: "暂无发现项。",
-      running: "分析中…",
+      running: "分析中",
     },
     summary: {
       title: "摘要",
       regenerate: "重新生成",
       copy: "复制",
-      loading: "正在生成摘要…",
+      loading: "正在生成摘要",
       empty: "暂无摘要。",
     },
     comment: {
@@ -1896,7 +1897,7 @@ const zhCN: Locale = {
     kindCheckout: "切换",
     kindResolution: "已应用解决方案",
     aiLabel: "用 AI 总结",
-    aiLabelPending: "正在总结…",
+    aiLabelPending: "正在总结",
     toastUndo: "撤销",
     toastDiscard: "已丢弃 {0} 个文件",
     toastReset: "已重置到 {0}",
@@ -1956,7 +1957,6 @@ const zhCN: Locale = {
   mergeEditor: {
     editAriaLabel: "\u7f16\u8f91\u51b2\u7a81 {0}",
     aiButton: "AI",
-    aiLoading: "AI…",
     aiErrorPrefix: "AI",
     aiSuggestionLabel: "AI 建议 — 请复核并调整",
     aiStagedReady: "AI 建议已就绪",
@@ -1965,8 +1965,8 @@ const zhCN: Locale = {
     aiRetry: "重试",
     explainTooltip: "用自然语言解释此冲突",
     explain: "解释",
-    explainAnalyzing: "分析中…",
-    analyzingConflict: "分析冲突中…",
+    explainAnalyzing: "分析中",
+    analyzingConflict: "分析冲突中",
     // Custom automation
     automationRun: "运行自动化",
     automationRunning: "运行中…",
@@ -2022,7 +2022,7 @@ const zhCN: Locale = {
   prInline: {
     aiCritiqueTooltip: "AI 对该代码段的点评",
     aiCritiqueButton: "审阅",
-    aiCritiqueAnalyzing: "正在分析代码段\u2026",
+    aiCritiqueAnalyzing: "正在分析代码段",
   },
 
   // ─── Stash manager ──────────────────────────────────────
@@ -2059,7 +2059,7 @@ const zhCN: Locale = {
   fileHistory: {
     explainChange: "用 AI 解释这次变更",
     whyThisChange: "为什么是这次变更？",
-    analyzingCommit: "正在分析提交\u2026",
+    analyzingCommit: "正在分析提交",
   },
 
   // ─── Scratch worktree (v2.20.0) ─────────────────────────

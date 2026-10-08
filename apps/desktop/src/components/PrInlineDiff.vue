@@ -495,7 +495,7 @@ defineExpose({ scrollToHunk, scrollToLine, openComposeAtHunk, rows, currentRowId
             :title="t('prInline.aiCritiqueTooltip')"
             @click="requestHunkCritique(row.hunkIdx)"
           >
-            <span v-if="critiqueLoadingIdx === row.hunkIdx">…</span>
+            <span v-if="critiqueLoadingIdx === row.hunkIdx" class="ai-loading">…</span>
             <span v-else class="pid-ai-label">
               <AiSparkle :size="13" />
               {{ t('prInline.aiCritiqueButton') }}
@@ -518,7 +518,7 @@ defineExpose({ scrollToHunk, scrollToLine, openComposeAtHunk, rows, currentRowId
           </span>
           <span class="pid-critique-body">
             <span v-if="critiqueAiError && !critiqueResults[row.hunkIdx]" class="pid-critique-error">{{ critiqueAiError }}</span>
-            <span v-else-if="critiqueLoadingIdx === row.hunkIdx && !critiqueResults[row.hunkIdx]">
+            <span v-else-if="critiqueLoadingIdx === row.hunkIdx && !critiqueResults[row.hunkIdx]" class="ai-loading">
               {{ t('prInline.aiCritiqueAnalyzing') }}
             </span>
             <template v-else-if="critiqueResults[row.hunkIdx]">
@@ -745,7 +745,7 @@ defineExpose({ scrollToHunk, scrollToLine, openComposeAtHunk, rows, currentRowId
                 :title="t('prInline.aiCritiqueTooltip')"
                 @click="requestHunkCritique(row.hunkIdx)"
               >
-                <span v-if="critiqueLoadingIdx === row.hunkIdx">…</span>
+                <span v-if="critiqueLoadingIdx === row.hunkIdx" class="ai-loading">…</span>
                 <span v-else class="pid-ai-label">
                   <AiSparkle :size="13" />
                   {{ t('prInline.aiCritiqueButton') }}
@@ -766,7 +766,7 @@ defineExpose({ scrollToHunk, scrollToLine, openComposeAtHunk, rows, currentRowId
               </span>
               <span class="pid-critique-body">
                 <span v-if="critiqueAiError && !critiqueResults[row.hunkIdx]" class="pid-critique-error">{{ critiqueAiError }}</span>
-                <span v-else-if="critiqueLoadingIdx === row.hunkIdx && !critiqueResults[row.hunkIdx]">
+                <span v-else-if="critiqueLoadingIdx === row.hunkIdx && !critiqueResults[row.hunkIdx]" class="ai-loading">
                   {{ t('prInline.aiCritiqueAnalyzing') }}
                 </span>
                 <template v-else-if="critiqueResults[row.hunkIdx]">

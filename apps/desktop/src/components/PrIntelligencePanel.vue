@@ -507,12 +507,12 @@ watch(() => props.prDiffFiles, (files) => {
           </svg>
         </span>
         <h3 class="pi-section-title">{{ t('pr.preReview.title') }}</h3>
-        <span v-if="preReviewRunning" class="pi-badge pi-badge--ai">
+        <span v-if="preReviewRunning" class="pi-badge pi-badge--ai ai-loading">
           {{ t('pr.preReview.progress', preReviewProgress.done, preReviewProgress.total) }}
         </span>
       </header>
 
-      <div v-if="preReviewRunning && preReviewFindings.length === 0" class="pi-empty">
+      <div v-if="preReviewRunning && preReviewFindings.length === 0" class="pi-empty ai-loading">
         {{ t('pr.preReview.running') }}
       </div>
       <div v-else-if="preReviewFindings.length === 0" class="pi-empty">

@@ -1005,6 +1005,7 @@ useResizeObserver(contentEl, drawMinimap);
         <button
           v-if="aiAvailable"
           class="me-bulk-btn me-bulk-btn--ai"
+          :class="{ 'ai-loading': aiBatchRunning }"
           @click="aiBatchRunning ? cancelAiBatch() : resolveAllWithAi()"
         >
           <!--
@@ -1274,18 +1275,18 @@ useResizeObserver(contentEl, drawMinimap);
                 <span class="inline-sep">|</span>
                 <a
                   class="inline-action inline-action--ai"
-                  :class="{ 'inline-action--loading': aiBusy(seg.hunkIndex!) }"
+                  :class="{ 'inline-action--loading ai-loading': aiBusy(seg.hunkIndex!) }"
                   :aria-disabled="aiBusy(seg.hunkIndex!) ? 'true' : 'false'"
                   href="#"
                   @click.prevent="requestAISuggestion(seg.hunkIndex!, hunkForSegment(seg)!)"
                 >
                   <AiSparkle :size="12" :animated="aiBusy(seg.hunkIndex!)" />
-                  {{ aiBusy(seg.hunkIndex!) ? t('mergeEditor.aiLoading') : t('mergeEditor.aiButton') }}
+                  {{ aiBusy(seg.hunkIndex!) ? t('common.generating') : t('mergeEditor.aiButton') }}
                 </a>
                 <span class="inline-sep">|</span>
                 <a
                   class="inline-action inline-action--explain"
-                  :class="{ 'inline-action--loading': aiExplainLoading && explanationHunkIndex === seg.hunkIndex }"
+                  :class="{ 'inline-action--loading ai-loading': aiExplainLoading && explanationHunkIndex === seg.hunkIndex }"
                   :aria-disabled="aiBusy(seg.hunkIndex!) ? 'true' : 'false'"
                   href="#"
                   :title="t('mergeEditor.explainTooltip')"
@@ -1372,7 +1373,7 @@ useResizeObserver(contentEl, drawMinimap);
                 <path d="M6.5 13h3M7 14.5h2"/>
               </svg>
               <span v-if="explanationError" class="hunk-explanation-error">{{ explanationError }}</span>
-              <span v-else-if="aiExplainLoading && !hunkExplanations[seg.hunkIndex!]">{{ t('mergeEditor.analyzingConflict') }}</span>
+              <span v-else-if="aiExplainLoading && !hunkExplanations[seg.hunkIndex!]" class="ai-loading">{{ t('mergeEditor.analyzingConflict') }}</span>
               <span v-else>{{ hunkExplanations[seg.hunkIndex!] }}</span>
               <a v-if="!aiExplainLoading" class="hunk-explanation-close" href="#" @click.prevent="dismissExplanation">✕</a>
             </div>

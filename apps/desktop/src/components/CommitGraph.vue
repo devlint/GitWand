@@ -1537,7 +1537,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
           @contextmenu="vc.entry.hashFull === 'WIP' ? openWipContextMenu($event) : openCommitContextMenu($event, vc.entry, vc.index)"
         >
           <template v-if="vc.entry.hashFull === 'WIP'">
-            <span class="cg-msg wip-msg">{{ vc.entry.message }}<template v-if="isGeneratingCommitMsg">: <span class="wip-ai"><AiSparkle :size="11" />{{ t('sidebar.aiGeneratingTooltip') }}</span></template><template v-else-if="wipSummaryPreview">: <span class="wip-summary">{{ wipSummaryPreview }}</span></template></span>
+            <span class="cg-msg wip-msg">{{ vc.entry.message }}<template v-if="isGeneratingCommitMsg">: <span class="wip-ai ai-loading"><AiSparkle :size="11" />{{ t('sidebar.aiGeneratingTooltip') }}</span></template><template v-else-if="wipSummaryPreview">: <span class="wip-summary">{{ wipSummaryPreview }}</span></template></span>
             <span class="cg-meta wip-meta" v-if="props.repoStats">
               <span v-if="props.repoStats.added > 0" class="wip-stat wip-stat--added">+{{ props.repoStats.added }}</span>
               <span v-if="props.repoStats.modified > 0" class="wip-stat wip-stat--modified">~{{ props.repoStats.modified }}</span>
