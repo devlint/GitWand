@@ -123,7 +123,7 @@ import { resolveCommitReviewShortcut } from "./composables/commitReviewKeymap";
 import { useLaunchpadPrs } from "./composables/useLaunchpadPrs";
 import { diffLaunchpad, isBotAuthor, type LaunchpadEvent } from "./composables/useLaunchpadNotifications";
 import { osNotify } from "./composables/useOsNotification";
-import { useReleaseNotes } from "./composables/useReleaseNotes";
+import { useReleaseNotes, releaseNotesLocale } from "./composables/useReleaseNotes";
 import { useFolderHistory } from "./composables/useFolderHistory";
 import { useAppMenu } from "./composables/useAppMenu";
 import { useLogs } from "./composables/useLogs";
@@ -3861,7 +3861,9 @@ const scheduler = useScheduler({
     const tags = await gitListTags(repoFolderPath.value);
     if (tags.length < 2) return;
     const sorted = [...tags].sort((a, b) => b.date.localeCompare(a.date));
-    await generateReleaseNotesFn(repoFolderPath.value, sorted[1].name, sorted[0].name);
+    await generateReleaseNotesFn(repoFolderPath.value, sorted[1].name, sorted[0].name, {
+      locale: releaseNotesLocale(),
+    });
   },
   triggerAiCommit: async () => {
     // Surface the commit panel — the user will see staged files there

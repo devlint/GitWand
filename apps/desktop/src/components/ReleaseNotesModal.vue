@@ -3,7 +3,7 @@ import { ref, computed, onMounted, inject } from "vue";
 import { gitListTags, getGitBranches, gitExec, type GitBranch } from "../utils/backend";
 import { useI18n } from "../composables/useI18n";
 import { useSettings } from "../composables/useSettings";
-import { useReleaseNotes, FROM_PROJECT_START } from "../composables/useReleaseNotes";
+import { useReleaseNotes, releaseNotesLocale, FROM_PROJECT_START } from "../composables/useReleaseNotes";
 import BaseModal from "./BaseModal.vue";
 import { OPEN_SETTINGS_KEY } from "../composables/branchPickerBridge";
 import { useAiTemplates, getActiveTemplateId, requestedAiTemplateKind } from "../composables/useAiTemplates";
@@ -16,7 +16,7 @@ const emit = defineEmits<{
   (e: "close"): void;
 }>();
 
-const { t, locale } = useI18n();
+const { t } = useI18n();
 const {
   isGenerating,
   generate: generateReleaseNotes,
@@ -122,7 +122,7 @@ async function runGenerate() {
       props.cwd,
       from.value,
       to.value,
-      { locale: locale.value },
+      { locale: releaseNotesLocale() },
     );
   } catch {
     markdown.value = "";

@@ -150,8 +150,9 @@ interface Settings {
   gitPath: string;
   defaultBranch: string;
   commitSignature: boolean;
-  commitMessageLang: string; // "" = follow UI locale
-  prAiLanguage: "english" | "ui";
+  commitMessageLang: string; // locale code; "" (older saves) = English
+  releaseNotesLang: string; // locale code; "" (older saves) = English
+  prDescriptionLang: string; // locale code; "" (older saves) = English
   diffMode: DiffMode;
   pullMode: PullMode;
   switchBehavior: SwitchBehavior;
@@ -272,8 +273,9 @@ const defaultSettings: Settings = {
   gitPath: "",
   defaultBranch: "main",
   commitSignature: true,
-  commitMessageLang: "",
-  prAiLanguage: "english",
+  commitMessageLang: "en",
+  releaseNotesLang: "en",
+  prDescriptionLang: "en",
   diffMode: "inline",
   pullMode: "rebase",
   switchBehavior: "ask",
@@ -1504,28 +1506,6 @@ watch(aiTemplateKind, closeAiTemplateForm);
               <option value="auto">{{ t('settings.languageAuto') }}</option>
               <option v-for="loc in supportedLocales" :key="loc" :value="loc">{{ localeLabels[loc] }}</option>
             </select>
-          </div>
-
-          <!-- Commit message language -->
-          <div class="sp-row">
-            <label class="sp-label" for="setting-commit-lang">{{ t('settings.commitMessageLang') }}</label>
-            <select id="setting-commit-lang" class="sp-select" :value="settings.commitMessageLang"
-              @change="updateSetting('commitMessageLang', ($event.target as HTMLSelectElement).value)">
-              <option value="">{{ t('settings.commitMessageLangAuto') }}</option>
-              <option v-for="loc in supportedLocales" :key="loc" :value="loc">{{ localeLabels[loc] }}</option>
-            </select>
-            <span class="sp-hint">{{ t('settings.commitMessageLangHint') }}</span>
-          </div>
-
-          <!-- PR AI language -->
-          <div class="sp-row">
-            <label class="sp-label" for="setting-pr-ai-lang">{{ t('settings.prAiLanguage') }}</label>
-            <select id="setting-pr-ai-lang" class="sp-select" :value="settings.prAiLanguage"
-              @change="updateSetting('prAiLanguage', ($event.target as HTMLSelectElement).value as 'english' | 'ui')">
-              <option value="english">{{ t('settings.prAiLanguageEnglish') }}</option>
-              <option value="ui">{{ t('settings.prAiLanguageUi') }}</option>
-            </select>
-            <span class="sp-hint">{{ t('settings.prAiLanguageHint') }}</span>
           </div>
 
           <!-- Theme -->
@@ -3126,6 +3106,39 @@ watch(aiTemplateKind, closeAiTemplateForm);
                 {{ t(aiTemplateKindLabel[kind]) }}
               </button>
             </div>
+          </div>
+
+          <!-- Commit message language -->
+          <div v-if="aiTemplateKind === 'commit'" class="sp-row">
+            <label class="sp-label" for="setting-commit-lang">{{ t('settings.commitMessageLang') }}</label>
+            <select id="setting-commit-lang" class="sp-select" :value="settings.commitMessageLang || 'en'"
+              @change="updateSetting('commitMessageLang', ($event.target as HTMLSelectElement).value)">
+              <option v-for="loc in supportedLocales" :key="loc" :value="loc">{{ localeLabels[loc] }}</option>
+            </select>
+            <span class="sp-hint">{{ t('settings.commitMessageLangHint') }}</span>
+            <span class="sp-hint">{{ t('settings.aiTemplates.langOverrideNote') }}</span>
+          </div>
+
+          <!-- PR AI language -->
+          <div v-if="aiTemplateKind === 'pr'" class="sp-row">
+            <label class="sp-label" for="setting-pr-ai-lang">{{ t('settings.prAiLanguage') }}</label>
+            <select id="setting-pr-ai-lang" class="sp-select" :value="settings.prDescriptionLang || 'en'"
+              @change="updateSetting('prDescriptionLang', ($event.target as HTMLSelectElement).value)">
+              <option v-for="loc in supportedLocales" :key="loc" :value="loc">{{ localeLabels[loc] }}</option>
+            </select>
+            <span class="sp-hint">{{ t('settings.prAiLanguageHint') }}</span>
+            <span class="sp-hint">{{ t('settings.aiTemplates.langOverrideNote') }}</span>
+          </div>
+
+          <!-- Release notes language -->
+          <div v-if="aiTemplateKind === 'releaseNotes'" class="sp-row">
+            <label class="sp-label" for="setting-release-notes-lang">{{ t('settings.releaseNotesLang') }}</label>
+            <select id="setting-release-notes-lang" class="sp-select" :value="settings.releaseNotesLang || 'en'"
+              @change="updateSetting('releaseNotesLang', ($event.target as HTMLSelectElement).value)">
+              <option v-for="loc in supportedLocales" :key="loc" :value="loc">{{ localeLabels[loc] }}</option>
+            </select>
+            <span class="sp-hint">{{ t('settings.releaseNotesLangHint') }}</span>
+            <span class="sp-hint">{{ t('settings.aiTemplates.langOverrideNote') }}</span>
           </div>
 
           <div class="sp-group">

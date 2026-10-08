@@ -133,13 +133,12 @@ export interface AppSettings {
   blameAlgorithm: BlameAlgorithm;
   /** Auto-update channel (v2.0). "stable" = Tauri plugin auto-install; "beta" = manual fetch + browser-open. */
   updateChannel: "stable" | "beta";
-  /** Language used for AI-generated commit messages. "" = follow UI locale. */
+  /** Language used for AI-generated commit messages (locale code). "" = English. */
   commitMessageLang: string;
-  /**
-   * Language for AI-generated PR title/body. "english" (default — PRs are most
-   * often written in English) or "ui" to match the app's current locale.
-   */
-  prAiLanguage: "english" | "ui";
+  /** Language used for AI-generated release notes (locale code). "" = English. */
+  releaseNotesLang: string;
+  /** Language used for AI-generated PR titles and descriptions (locale code). "" = English. */
+  prDescriptionLang: string;
   /** Whether AI features are enabled. */
   aiEnabled: boolean;
   /** Active AI provider. */
@@ -475,8 +474,9 @@ export const defaultAppSettings: AppSettings = {
   notificationsByPeople: true,
   blameAlgorithm: "histogram",
   updateChannel: "stable",
-  commitMessageLang: "",
-  prAiLanguage: "english",
+  commitMessageLang: "en",
+  releaseNotesLang: "en",
+  prDescriptionLang: "en",
   aiEnabled: false,
   aiProvider: "none",
   aiApiKey: "",

@@ -119,7 +119,7 @@ const emit = defineEmits<{
   openCommitReview: [];
 }>();
 
-const { t, locale } = useI18n();
+const { t } = useI18n();
 
 /** v3.7.0 (Task 4) — the findings badge's tooltip gains an iter/coverage
  *  suffix once at least one review pass has completed this cycle. */
@@ -593,7 +593,7 @@ function buildTrailers(): string {
   return lines.join("\n");
 }
 
-/** Read the commit-message language from settings (empty string = follow UI locale). */
+/** Read the commit-message language from settings (empty string = unset). */
 function getCommitMessageLang(): string {
   try {
     const raw = localStorage.getItem("gitwand-settings");
@@ -608,9 +608,7 @@ function getCommitMessageLang(): string {
 /** Resolve the effective language code for AI generation. */
 function resolveCommitLang(): string {
   const explicit = getCommitMessageLang();
-  if (explicit) return explicit;
-  // Fallback: derive from UI locale
-  return locale.value.startsWith("en") ? "en" : locale.value.split("-")[0] || "fr";
+  return explicit || "en";
 }
 
 /** Persist the commit-message language setting. */

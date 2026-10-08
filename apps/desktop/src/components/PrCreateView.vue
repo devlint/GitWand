@@ -32,7 +32,7 @@ const props = defineProps<{
 const emit = defineEmits<{ (e: "cancel"): void }>();
 
 const p = inject<PrPanelState>(PR_PANEL_KEY)!;
-const { t, locale } = useI18n();
+const { t } = useI18n();
 const ai = useAIProvider();
 const {
   isGenerating: isGeneratingPrDescription,
@@ -55,8 +55,8 @@ async function generateWithAI() {
   // user switched repo meanwhile.
   const cwd = props.cwd;
   try {
-    // PR language: "english" (default) forces English; "ui" follows the app locale.
-    const prLang = loadSettings().prAiLanguage === "ui" ? locale.value : "en";
+    // PR language: the Settings choice, English by default.
+    const prLang = loadSettings().prDescriptionLang || "en";
     const result = await generatePrDescription(
       cwd,
       props.currentBranch,
