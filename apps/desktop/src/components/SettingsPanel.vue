@@ -89,6 +89,8 @@ import {
   type AIProvider,
   type AIModelOption,
   CLI_AGENT_PROVIDERS,
+  DEFAULT_CLAUDE_API_MODEL,
+  fallbackModelsForProvider,
   listModelsForProvider,
   providerEfforts,
 } from "../composables/useAIProvider";
@@ -276,7 +278,7 @@ const defaultSettings: Settings = {
   aiProvider: "none",
   aiApiKey: "",
   aiApiEndpoint: "https://api.anthropic.com",
-  aiModel: "claude-sonnet-4-20250514",
+  aiModel: DEFAULT_CLAUDE_API_MODEL,
   aiModelByProvider: {},
   aiEffortByProvider: {},
   aiOllamaUrl: "http://localhost:11434",
@@ -676,7 +678,7 @@ function onAIProviderChange(val: AIProvider) {
       updateSetting("aiApiEndpoint", "https://api.anthropic.com");
     }
     if (!settings.value.aiModel || settings.value.aiModel.startsWith("gpt-")) {
-      updateSetting("aiModel", "claude-sonnet-4-20250514");
+      updateSetting("aiModel", DEFAULT_CLAUDE_API_MODEL);
     }
   } else if (val === "openai-compat") {
     if (!settings.value.aiApiEndpoint || settings.value.aiApiEndpoint === "https://api.anthropic.com") {
@@ -912,7 +914,7 @@ async function loadModels(provider: AIProvider = settings.value.aiProvider) {
     if (request === modelsRequest) modelOptions.value = list;
   } catch (e) {
     if (request === modelsRequest) {
-      modelOptions.value = [];
+      modelOptions.value = fallbackModelsForProvider(provider);
       modelsError.value = (e as Error).message;
     }
   } finally {
@@ -2782,13 +2784,6 @@ function deleteReleaseNoteTemplate(id: string) {
                   <option v-if="isCliAgentProvider" value="">{{ t('settings.aiModelCliDefault') }}</option>
                   <option v-else-if="!currentModelOption && currentModel" :value="currentModel">{{ currentModel }}</option>
                   <option v-for="m in modelOptions" :key="m.id" :value="m.id">{{ modelOptionLabel(m) }}</option>
-                </select>
-                <select v-else-if="settings.aiProvider === 'claude'" id="setting-ai-model" class="sp-select"
-                  :value="currentModel"
-                  @change="onModelChange(($event.target as HTMLSelectElement).value)">
-                  <option value="claude-sonnet-4-20250514">{{ t('settings.aiModelSonnet') }}</option>
-                  <option value="claude-haiku-4-5-20251001">{{ t('settings.aiModelHaiku') }}</option>
-                  <option value="claude-opus-4-20250514">{{ t('settings.aiModelOpus') }}</option>
                 </select>
                 <input v-else id="setting-ai-model" class="sp-input mono" type="text"
                   :value="currentModel"

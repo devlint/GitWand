@@ -75,6 +75,9 @@ import {
   fetchAnthropicModels,
   listModelsForProvider,
   CLAUDE_CODE_MODELS,
+  CLAUDE_API_MODELS,
+  DEFAULT_CLAUDE_API_MODEL,
+  fallbackModelsForProvider,
   type AISettings,
 } from "../composables/useAIProvider";
 
@@ -150,9 +153,6 @@ describe("listModelsForProvider", () => {
     ]);
   });
 
-  it("returns an empty list for the Claude API without a key", async () => {
-    expect(await listModelsForProvider("claude", { aiApiKey: "", aiApiEndpoint: "" })).toEqual([]);
-  });
 });
 
 describe("effortForProvider", () => {
@@ -301,5 +301,18 @@ describe("fetchAnthropicModels", () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+});
+
+describe("Claude API default list", () => {
+  it("offers current models with their efforts before a key is entered", async () => {
+    const models = await listModelsForProvider("claude", { aiApiKey: "", aiApiEndpoint: "" });
+    expect(models).toBe(CLAUDE_API_MODELS);
+    expect(models.map((m) => m.id)).toContain(DEFAULT_CLAUDE_API_MODEL);
+  });
+
+  it("falls back to that list only for the Claude API", () => {
+    expect(fallbackModelsForProvider("claude")).toBe(CLAUDE_API_MODELS);
+    expect(fallbackModelsForProvider("openai-compat")).toEqual([]);
   });
 });

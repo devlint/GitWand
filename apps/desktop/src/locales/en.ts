@@ -1198,9 +1198,6 @@ const en = {
     aiShowKey: "Show",
     // AI tab — model
     aiModelLabel: "Model",
-    aiModelSonnet: "Claude Sonnet 4 (recommended)",
-    aiModelHaiku: "Claude Haiku 4.5 (fast)",
-    aiModelOpus: "Claude Opus 4 (premium)",
     // AI tab — Claude CLI
     aiCliStatus: "CLI status",
     aiCliDetecting: "Detecting\u2026",

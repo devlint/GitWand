@@ -131,7 +131,7 @@ function loadAISettings(): AISettings {
     aiProvider: "none",
     aiApiKey: "",
     aiApiEndpoint: "https://api.anthropic.com",
-    aiModel: "claude-sonnet-4-20250514",
+    aiModel: DEFAULT_CLAUDE_API_MODEL,
     aiOllamaUrl: "http://localhost:11434",
     aiOllamaModel: "codellama",
     aiModelByProvider: {},
@@ -362,8 +362,34 @@ export interface AIModelOption {
 /** `copilot --reasoning-effort` possible values. */
 const COPILOT_EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
 
+/** Effort levels every current Claude model accepts. */
+const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+
+/** Default model for the Claude API provider. */
+export const DEFAULT_CLAUDE_API_MODEL = "claude-opus-5-5";
+
+/**
+ * Current-generation Claude API models — what the picker shows before a key
+ * is entered, or when `GET /v1/models` fails. With a working key the live
+ * list replaces it.
+ */
+export const CLAUDE_API_MODELS: AIModelOption[] = [
+  { id: "claude-opus-5-5", name: "Claude Opus 5.5", efforts: CLAUDE_EFFORTS },
+  { id: "claude-fable-5-1", name: "Claude Fable 5.1", efforts: CLAUDE_EFFORTS },
+  { id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5", efforts: CLAUDE_EFFORTS },
+  { id: "claude-haiku-5-5", name: "Claude Haiku 5.5", efforts: CLAUDE_EFFORTS },
+];
+
+/**
+ * The list to show when a provider's own list is unavailable (no key yet,
+ * fetch failed). Empty = free-text entry.
+ */
+export function fallbackModelsForProvider(provider: AIProvider): AIModelOption[] {
+  return provider === "claude" ? CLAUDE_API_MODELS : [];
+}
+
 /** Effort levels `claude --effort` accepts. */
-const CLAUDE_CODE_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+const CLAUDE_CODE_EFFORTS = CLAUDE_EFFORTS;
 
 /** Stable model aliases accepted by `claude --model`. */
 export const CLAUDE_CODE_MODELS: AIModelOption[] = [
@@ -505,7 +531,7 @@ export async function listModelsForProvider(
 ): Promise<AIModelOption[]> {
   switch (provider) {
     case "claude":
-      if (!s?.aiApiKey) return [];
+      if (!s?.aiApiKey) return CLAUDE_API_MODELS;
       return fetchAnthropicModels(s.aiApiEndpoint, s.aiApiKey);
     case "openai-compat":
       if (!s?.aiApiEndpoint) return [];
