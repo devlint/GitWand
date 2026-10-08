@@ -3805,6 +3805,13 @@ watch(aiTemplateKind, closeAiTemplateForm);
   border-right: 1px solid var(--color-border);
 }
 
+/* Taller tabs: this switcher drives the whole section, so give it more weight. */
+.sp-ait-kinds .sp-auth-btn {
+  padding-top: var(--space-5);
+  padding-bottom: var(--space-5);
+  font-weight: var(--font-weight-semibold);
+}
+
 .sp-ait-shared {
   display: block;
   margin-top: 4px;
