@@ -1168,21 +1168,34 @@ let _loadMorePending = false;
 // Hovered row index, tracked over the whole scroll area so the hover
 // highlight spans both the SVG graph column and the commit row.
 const hoveredIndex = ref<number | null>(null);
+// Last pointer Y over the scroll area: a wheel scroll moves rows under a still
+// pointer without any mousemove, so onScroll recomputes the hover from it.
+let pointerClientY: number | null = null;
 
-function onScrollMouseMove(e: MouseEvent) {
+function updateHoveredIndex() {
   const el = scrollContainer.value;
-  if (!el) return;
-  const y = e.clientY - el.getBoundingClientRect().top + el.scrollTop - LIST_PAD_TOP;
+  if (!el || pointerClientY === null) return;
+  const y = pointerClientY - el.getBoundingClientRect().top + el.scrollTop - LIST_PAD_TOP;
   const index = Math.floor(y / ROW_H);
   hoveredIndex.value = index >= 0 && index < renderedCommits.value.length ? index : null;
 }
 
-// Branch-colored highlight for the selected (0.2) or current (0.25) row.
+function onScrollMouseMove(e: MouseEvent) {
+  pointerClientY = e.clientY;
+  updateHoveredIndex();
+}
+
+function onScrollMouseLeave() {
+  pointerClientY = null;
+  hoveredIndex.value = null;
+}
+
 function isActiveRow(index: number): boolean {
   const entry = renderedCommits.value[index];
   return !!entry && (entry.hashFull === props.selectedHash || isCurrent(entry));
 }
 
+// Branch-colored highlight for the selected (0.2) or current (0.25) row.
 function activeHighlight(index: number): string | undefined {
   // Light mode marks active rows through a softer band instead (see bandFill).
   if (isLight.value) return undefined;
@@ -1220,6 +1233,7 @@ function onScroll() {
   const el = scrollContainer.value;
   if (!el) return;
   scrollTop.value = el.scrollTop;
+  updateHoveredIndex();
   if (props.hasMore && !props.loadingMore && !_loadMorePending) {
     const remaining = el.scrollHeight - el.scrollTop - el.clientHeight;
     if (remaining < 1000) {
@@ -1520,7 +1534,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
       :style="{ paddingTop: LIST_PAD_TOP + 'px' }"
       @scroll="onScroll"
       @mousemove="onScrollMouseMove"
-      @mouseleave="hoveredIndex = null"
+      @mouseleave="onScrollMouseLeave"
     >
       <!-- SVG graph column -->
       <!-- No viewBox: it was identity (0 0 w h) so coordinates are plain px;
