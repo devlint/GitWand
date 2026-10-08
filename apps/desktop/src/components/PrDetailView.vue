@@ -855,8 +855,14 @@ function submitRequestReviewers() {
                 :title="t('pr.detail.aiUpdateHint')"
                 @click="updateDescriptionWithAI"
               >
-                <AiSparkle :size="13" />
-                {{ prDescription.isUpdating.value ? t('pr.detail.aiUpdating') : t('pr.detail.aiUpdate') }}
+                <span v-if="prDescription.isUpdating.value" class="pdv-desc-ai-label ai-loading">
+                  <span class="pdv-spinner pdv-spinner--sm" aria-hidden="true"></span>
+                  {{ t('pr.detail.aiUpdating') }}
+                </span>
+                <span v-else class="pdv-desc-ai-label">
+                  <AiSparkle :size="13" />
+                  {{ t('pr.detail.aiUpdate') }}
+                </span>
               </button>
               <div v-if="p.prDetail.value.body || descriptionDraft" class="pdv-desc-tabs" role="tablist">
                 <button
@@ -2230,6 +2236,11 @@ function submitRequestReviewers() {
   font-size: var(--font-size-sm);
   border-radius: var(--radius-sm);
   color: var(--color-text);
+}
+.pdv-desc-ai-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 .btn.btn--ai.pdv-desc-ai:hover:not(:disabled) {
   color: var(--color-ai-text);
