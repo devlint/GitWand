@@ -1170,10 +1170,6 @@ function onScrollMouseMove(e: MouseEvent) {
   hoveredIndex.value = index >= 0 && index < renderedCommits.value.length ? index : null;
 }
 
-const hoveredNode = computed(() =>
-  hoveredIndex.value === null ? undefined : indexToNode.value.get(hoveredIndex.value),
-);
-
 // Branch-colored highlight for the selected (0.2) or current (0.25) row.
 function isActiveRow(index: number): boolean {
   const entry = renderedCommits.value[index];
@@ -1201,14 +1197,6 @@ function rowHighlight(index: number): string | undefined {
   return activeHighlight(index)
     ?? (matchedHashSet.value.has(hash) ? `rgba(245, 158, 11, ${bandAlpha(0.2)})` : undefined);
 }
-
-/** Visible bands carrying a highlight overlay, with its fill computed once. */
-const highlightedBands = computed(() =>
-  visibleNodes.value.flatMap((node) => {
-    const fill = rowHighlight(node.index);
-    return fill ? [{ node, fill }] : [];
-  }),
-);
 
 // Commit-row highlight. Light mode has no active overlay on the graph band
 // (active rows use the softer band there), so the commit row of an active row
@@ -1596,25 +1584,28 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
           :key="'t' + node.index"
           class="cg-row-tint"
           v-bind="bandRect(node)"
-          :fill="bandFill(node)"
+          :style="{ fill: bandFill(node) }"
           @click="node.hash === 'WIP' ? emit('change-view', 'changes') : emit('select-commit', node.hash)"
           @contextmenu="openCommitContextMenu($event, renderedCommits[node.index], node.index)"
         />
-        <!-- Selected / current highlight over the row tint band, continued on
-             the commit row by --cg-row-hl. -->
+        <!-- Selected / current / search highlight over the row tint band,
+             continued on the commit row by --cg-row-hl. Always rendered
+             (transparent when off) so color changes animate. -->
         <rect
-          v-for="{ node, fill } in highlightedBands"
+          v-for="node in visibleNodes"
           :key="'h' + node.index"
           class="cg-row-overlay"
           v-bind="bandRect(node)"
-          :fill="fill"
+          :style="{ fill: rowHighlight(node.index) ?? 'transparent' }"
         />
         <!-- Hover highlight over the row tint band, continued on the commit
-             row by .cg-row--hover. -->
+             row by .cg-row--hover. One per row, faded in / out by opacity. -->
         <rect
-          v-if="hoveredNode && !isActiveRow(hoveredNode.index)"
+          v-for="node in visibleNodes"
+          :key="'v' + node.index"
           class="cg-row-overlay cg-row-hover"
-          v-bind="bandRect(hoveredNode)"
+          :class="{ 'cg-row-hover--on': node.index === hoveredIndex && !isActiveRow(node.index) }"
+          v-bind="bandRect(node)"
         />
         <!-- Shade over each band (tint + highlights). Drawn under edges and nodes. -->
         <rect
@@ -1634,7 +1625,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
           :y="node.index * ROW_H + 1"
           width="2"
           :height="ROW_H - 2"
-          :fill="laneColor(node.lane)"
+          :style="{ fill: laneColor(node.lane) }"
         />
         <!-- Edges first (behind nodes). R6: only visible edges are emitted.
              Key uses content (lanes + indices) so Vue can re-use DOM nodes
@@ -2722,23 +2713,31 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
   position: absolute;
   inset: 1px 0 0 0;
   border-radius: 0 8px 8px 0;
-  background: var(--cg-row-hl, transparent);
+  background-color: var(--cg-row-hl, transparent);
   z-index: -1;
   pointer-events: none;
+  transition: all 0.15s;
 }
-/* White wash layered over any search-match color, like the SVG hover rect. */
+/* Wash layered over any search-match color, like the SVG hover rect. An inset
+   shadow (not a gradient layer) so it animates. */
 .cg-row--hover:not(.cg-row--selected):not(.cg-row--current)::after {
-  background:
-    linear-gradient(var(--cg-hover-wash), var(--cg-hover-wash)),
-    var(--cg-row-hl, transparent);
+  box-shadow: inset 0 0 0 100vmax var(--cg-hover-wash);
 }
 
+.cg-row-tint {
+  transition: all 0.15s;
+}
 .cg-row-hover {
   fill: var(--cg-hover-wash);
+  opacity: 0;
+}
+.cg-row-hover--on {
+  opacity: 1;
 }
 /* Decorative rects drawn over the row tint band; clicks reach the tint. */
 .cg-row-overlay {
   pointer-events: none;
+  transition: all 0.15s;
 }
 
 .cg-row--wip {
