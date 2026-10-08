@@ -28,8 +28,6 @@ export interface CommitMessageOptions {
   systemPromptOverride?: string;
 }
 
-export type CommitMessageAction = "shorten" | "detail" | "changeLang";
-
 /** Map locale codes to their English name for prompts. Falls back to the locale label or code itself. */
 function localeToEnglishName(code: string): string {
   const map: Record<string, string> = {
@@ -39,35 +37,6 @@ function localeToEnglishName(code: string): string {
     pl: "Polish", sv: "Swedish", da: "Danish", nb: "Norwegian",
   };
   return map[code] ?? localeLabels[code as SupportedLocale] ?? code;
-}
-
-function buildTransformPrompt(action: CommitMessageAction, currentMessage: string, targetLocale?: string): { system: string; user: string } {
-  const base = `You are a senior software engineer editing a Git commit message.
-Rules:
-1. Follow Conventional Commits: "<type>(<optional scope>): <subject>".
-2. Subject line MUST be 72 characters or less, imperative mood, no trailing period.
-3. Do not include trailers (Co-Authored-By, Signed-off-by…) — the user adds those separately.
-4. Output ONLY the raw commit message — no code fences, no explanations.`;
-
-  switch (action) {
-    case "shorten":
-      return {
-        system: `${base}\n5. Make the message shorter and more concise. Remove the body if it exists. Keep only the essential information in the subject.`,
-        user: `Shorten this commit message:\n\n${currentMessage}`,
-      };
-    case "detail":
-      return {
-        system: `${base}\n5. Make the message more detailed. Add a body (2-4 lines) explaining WHY the change was made and WHAT it impacts. Keep the subject line intact or improve it.`,
-        user: `Add more detail to this commit message:\n\n${currentMessage}`,
-      };
-    case "changeLang": {
-      const lang = localeToEnglishName(targetLocale ?? "en");
-      return {
-        system: `${base}\n5. Translate the commit message to ${lang}. Keep the type/scope prefix as-is (they stay in English). Translate only the subject text and body.`,
-        user: `Translate this commit message to ${lang}:\n\n${currentMessage}`,
-      };
-    }
-  }
 }
 
 function buildSystemPrompt(locale: string): string {
@@ -98,7 +67,7 @@ function cleanMessage(raw: string | undefined | null): string {
 }
 
 const isGenerating = ref(false);
-/** Repo the in-flight generation/transform belongs to (null when unknown). */
+/** Repo the in-flight generation belongs to (null when unknown). */
 const generatingCwd = ref<string | null>(null);
 const lastError = ref<string | null>(null);
 const lastMessage = ref<string | null>(null);
@@ -196,50 +165,11 @@ export function useCommitMessage() {
     }
   }
 
-  /**
-   * Transform an existing commit message: shorten, add detail, or change language.
-   */
-  async function transform(
-    action: CommitMessageAction,
-    currentMessage: string,
-    targetLocale?: string,
-    cwd?: string,
-  ): Promise<string> {
-    isGenerating.value = true;
-    generatingCwd.value = cwd ?? null;
-    lastError.value = null;
-
-    try {
-      if (!ai.isAvailable.value) {
-        throw new Error(t("errors.noAiProviderShort"));
-      }
-      if (!currentMessage.trim()) {
-        throw new Error(t("errors.noMessageToTransform"));
-      }
-
-      const { system, user } = buildTransformPrompt(action, currentMessage, targetLocale);
-      const raw = await ai.rawPrompt(system, user);
-      if (!raw) throw new Error(t("errors.emptyAiResponse"));
-
-      const message = cleanMessage(raw);
-      lastMessage.value = message;
-      return message;
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      lastError.value = msg;
-      throw err;
-    } finally {
-      isGenerating.value = false;
-      generatingCwd.value = null;
-    }
-  }
-
   return {
     isGenerating,
     generatingCwd,
     lastError,
     lastMessage,
     generate,
-    transform,
   };
 }

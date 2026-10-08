@@ -19,8 +19,7 @@ import Avatar from "./Avatar.vue";
 import { useI18n } from "../composables/useI18n";
 import { useAIProvider } from "../composables/useAIProvider";
 import { usePrDescription } from "../composables/usePrDescription";
-import { loadSettings } from "../composables/useSettings";
-import { useAiTemplates } from "../composables/useAiTemplates";
+import { getTemplateLang, useAiTemplates } from "../composables/useAiTemplates";
 import AiSparkle from "./AiSparkle.vue";
 import AiTemplateMenu from "./AiTemplateMenu.vue";
 
@@ -53,7 +52,7 @@ async function generateWithAI() {
   const cwd = props.cwd;
   try {
     // PR language: the Settings choice, English by default.
-    const prLang = loadSettings().prDescriptionLang || "en";
+    const prLang = getTemplateLang("pr");
     const result = await generatePrDescription(
       cwd,
       props.currentBranch,

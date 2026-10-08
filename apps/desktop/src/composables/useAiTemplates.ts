@@ -46,6 +46,24 @@ const STORAGE: Record<AiTemplateKind, { list: TemplateListKey; active: ActiveMap
 
 export const AI_TEMPLATE_KINDS: readonly AiTemplateKind[] = ["commit", "pr", "releaseNotes"];
 
+/** Setting holding each kind's output language (locale code; "" = English). */
+const LANG_SETTING: Record<AiTemplateKind, "commitMessageLang" | "prDescriptionLang" | "releaseNotesLang"> = {
+  commit:       "commitMessageLang",
+  pr:           "prDescriptionLang",
+  releaseNotes: "releaseNotesLang",
+};
+
+/** Output language of a kind — the same setting as Settings → AI Templates. */
+export function getTemplateLang(kind: AiTemplateKind): string {
+  return loadSettings()[LANG_SETTING[kind]] || "en";
+}
+
+export function setTemplateLang(kind: AiTemplateKind, lang: string): void {
+  const s = loadSettings();
+  s[LANG_SETTING[kind]] = lang;
+  saveSettings(s);
+}
+
 /**
  * Kind the Settings → AI Templates tab should show next time it opens. Set by
  * a caller right before it opens Settings (e.g. the release notes modal's
@@ -156,6 +174,11 @@ export function useAiTemplates(kind: AiTemplateKind, getCwd?: () => string) {
     return getCwd ? getActiveTemplate(kind, getCwd()) : null;
   });
 
+  const lang = computed(() => {
+    void settingsRevision.value;
+    return getTemplateLang(kind);
+  });
+
   function activate(id: string | null) {
     if (!getCwd) return;
     setActiveTemplate(kind, getCwd(), id);
@@ -166,5 +189,7 @@ export function useAiTemplates(kind: AiTemplateKind, getCwd?: () => string) {
     activeTemplateId,
     activeTemplate,
     activate,
+    lang,
+    setLang: (code: string) => setTemplateLang(kind, code),
   };
 }

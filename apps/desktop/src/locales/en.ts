@@ -250,12 +250,6 @@ const en = {
     trailerRbHelp: "Adds \u201cReviewed-by: name\u201d to the commit. Records who reviewed and approved this change. Appears in the git history for traceability.",
     aiGenerateTooltip: "Generate message with AI",
     aiGeneratingTooltip: "Generating\u2026",
-    aiRegenerate: "Regenerate",
-    aiShorten: "Shorten",
-    aiDetail: "Add detail",
-    aiChangeLang: "Change language",
-    aiPreset: "Preset",
-    aiPresetDefault: "Default",
     // Empty
     cleanTree: "Working tree clean",
     viewLayout: "Changes layout",
@@ -1312,6 +1306,7 @@ const en = {
       langOverrideNote: "You can override the language in the template itself — write it instead of ${lang}.",
       prFormatHint: "Keep asking for a JSON object with \"title\" and \"body\" keys — otherwise the first line becomes the title and the rest the description.",
       picker: "AI template",
+      language: "Language",
       manage: "Manage templates…",
     },
     aiHistory: {
@@ -2315,7 +2310,6 @@ const en = {
     squashNeedsTwo: "At least two commits are required to suggest a squash.",
     missingParams: "Missing parameters (cwd, commit, or file).",
     noStagedChanges: "No staged changes \u2014 stage files before generating a message.",
-    noMessageToTransform: "No message to transform \u2014 generate one first.",
     noMergePreview: "No merge preview to analyze.",
     missingBranch: "Source or target branch is missing.",
     missingRefs: "Both references (source and target) are required.",

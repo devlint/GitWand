@@ -3,11 +3,11 @@ import { ref, computed, onMounted } from "vue";
 import { gitListTags, getGitBranches, gitExec, type GitBranch } from "../utils/backend";
 import { useI18n } from "../composables/useI18n";
 import { useSettings } from "../composables/useSettings";
-import { useReleaseNotes, releaseNotesLocale, FROM_PROJECT_START } from "../composables/useReleaseNotes";
+import { useReleaseNotes, FROM_PROJECT_START } from "../composables/useReleaseNotes";
 import BaseModal from "./BaseModal.vue";
 import AiTemplateMenu from "./AiTemplateMenu.vue";
 import AiSparkle from "./AiSparkle.vue";
-import { useAiTemplates } from "../composables/useAiTemplates";
+import { getTemplateLang, useAiTemplates } from "../composables/useAiTemplates";
 
 const props = defineProps<{
   cwd: string;
@@ -109,7 +109,7 @@ async function runGenerate() {
       props.cwd,
       from.value,
       to.value,
-      { locale: releaseNotesLocale() },
+      { locale: getTemplateLang("releaseNotes") },
     );
   } catch {
     markdown.value = "";

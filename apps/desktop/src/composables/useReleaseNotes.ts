@@ -5,7 +5,6 @@ import { localeLabels, type SupportedLocale } from "../locales";
 import { t } from "./useI18n";
 import { getActiveTemplate } from "./useAiTemplates";
 import { applyLang, DEFAULT_TEMPLATE_PROMPTS } from "./aiTemplateDefaults";
-import { loadSettings } from "./useSettings";
 
 
 /**
@@ -28,11 +27,6 @@ export interface ReleaseNotesOptions {
   locale?: string;
   /** Max characters of commit dump kept (default 24k). */
   maxCommitsChars?: number;
-}
-
-/** Language for release notes: the Settings choice, English by default. */
-export function releaseNotesLocale(): string {
-  return loadSettings().releaseNotesLang || "en";
 }
 
 function localeToEnglishName(code: string): string {

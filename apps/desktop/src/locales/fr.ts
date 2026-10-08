@@ -243,12 +243,6 @@ const fr: Locale = {
     trailerRbHelp: "Ajoute « Reviewed-by : nom» au commit. Enregistre qui a relu et approuvé ce changement. Visible dans l’historique git pour la traçabilité.",
     aiGenerateTooltip: "Générer un message avec l'IA",
     aiGeneratingTooltip: "Génération en cours\u2026",
-    aiRegenerate: "Régénérer",
-    aiShorten: "Raccourcir",
-    aiDetail: "Détailler",
-    aiPreset: "Préset",
-    aiPresetDefault: "Défaut",
-    aiChangeLang: "Changer de langue",
     // Empty
     cleanTree: "Espace de travail propre",
     viewLayout: "Disposition des changements",
@@ -1296,6 +1290,7 @@ const fr: Locale = {
       langOverrideNote: "Vous pouvez imposer une autre langue dans le modèle lui-même — écrivez-la à la place de ${lang}.",
       prFormatHint: "Continuez à demander un objet JSON avec les clés « title » et « body » — sinon la première ligne devient le titre et le reste la description.",
       picker: "Modèle IA",
+      language: "Langue",
       manage: "Gérer les modèles…",
     },
     aiHistory: {
@@ -2283,7 +2278,6 @@ const fr: Locale = {
     squashNeedsTwo: "Au moins deux commits sont n\u00e9cessaires pour sugg\u00e9rer un squash.",
     missingParams: "Param\u00e8tres manquants (cwd, commit ou fichier).",
     noStagedChanges: "Aucun changement stag\u00e9 \u2014 stage des fichiers avant de g\u00e9n\u00e9rer un message.",
-    noMessageToTransform: "Aucun message \u00e0 transformer \u2014 g\u00e9n\u00e8re d'abord un message.",
     noMergePreview: "Aucun aper\u00e7u de merge \u00e0 analyser.",
     missingBranch: "Branche source ou cible manquante.",
     missingRefs: "Les deux r\u00e9f\u00e9rences (source et cible) sont requises.",

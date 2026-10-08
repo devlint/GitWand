@@ -9,13 +9,14 @@ import { useI18n } from "../composables/useI18n";
 import Avatar from "./Avatar.vue";
 import { useCommitMessage } from "../composables/useCommitMessage";
 import { useAIProvider } from "../composables/useAIProvider";
-import { supportedLocales, localeLabels } from "../locales";
 import { useAbsorb, type AbsorbCandidate } from "../composables/useAbsorb";
 import { useIdentity } from "../composables/useIdentity";
 import { useCommitTemplates } from "../composables/useCommitTemplates";
 import { useArchivedBranches } from "../composables/useArchivedBranches";
 import { usePinnedBranches } from "../composables/usePinnedBranches";
 import { useAiPromptPresets } from "../composables/useAiPromptPresets";
+import AiTemplateMenu from "./AiTemplateMenu.vue";
+import { getTemplateLang } from "../composables/useAiTemplates";
 import {
   buildFileTree,
   flattenTree,
@@ -487,18 +488,10 @@ const openRepoLabel = computed<string>(() => {
 
 // ─── AI commit message generation ─────────────────────────
 const ai = useAIProvider();
-const { isGenerating, lastError: aiError, generate: generateCommitMsg, transform: transformCommitMsg } = useCommitMessage();
-const aiMenuOpen = ref(false);
-const aiLangMenuOpen = ref(false);
-
-// ─── v2.13 AI Prompt Presets ──────────────────────────────
-const {
-  allWithBuiltins: allPresets,
-  activePreset,
-  activePresetId,
-  activate: activatePreset,
-} = useAiPromptPresets(() => props.cwd);
-const aiPresetMenuOpen = ref(false);
+const { isGenerating, lastError: aiError, generate: generateCommitMsg } = useCommitMessage();
+// ─── AI template (commit kind) ────────────────────────────
+// Picked from the AI chevron menu (AiTemplateMenu); applied at generation.
+const { activePreset } = useAiPromptPresets(() => props.cwd);
 
 // ─── v2.12 Identity selector ─────────────────────────────
 
@@ -593,42 +586,9 @@ function buildTrailers(): string {
   return lines.join("\n");
 }
 
-/** Read the commit-message language from settings (empty string = unset). */
-function getCommitMessageLang(): string {
-  try {
-    const raw = localStorage.getItem("gitwand-settings");
-    if (raw) {
-      const s = JSON.parse(raw);
-      if (s.commitMessageLang) return s.commitMessageLang;
-    }
-  } catch { /* ignore */ }
-  return "";
-}
-
-/** Resolve the effective language code for AI generation. */
-function resolveCommitLang(): string {
-  const explicit = getCommitMessageLang();
-  return explicit || "en";
-}
-
-/** Persist the commit-message language setting. */
-function setCommitMessageLang(lang: string) {
-  try {
-    const raw = localStorage.getItem("gitwand-settings");
-    const s = raw ? JSON.parse(raw) : {};
-    s.commitMessageLang = lang;
-    localStorage.setItem("gitwand-settings", JSON.stringify(s));
-  } catch { /* ignore */ }
-}
-
 /** Close AI menu and identity/template menus when clicking outside */
 function onDocClick(e: MouseEvent) {
   const target = e.target as HTMLElement;
-  if (!target.closest(".commit-ai-wrapper")) {
-    aiMenuOpen.value = false;
-    aiLangMenuOpen.value = false;
-    aiPresetMenuOpen.value = false;
-  }
   if (!target.closest(".commit-identity")) {
     identityMenuOpen.value = false;
   }
@@ -670,9 +630,7 @@ function applyMessage(cwd: string, msg: string) {
 
 async function onGenerateCommitMessage() {
   if (!props.cwd || isGenerating.value) return;
-  aiMenuOpen.value = false;
-  aiPresetMenuOpen.value = false;
-  const lang = resolveCommitLang();
+  const lang = getTemplateLang("commit");
   const preset = activePreset.value;
   const cwd = props.cwd;
   try {
@@ -683,29 +641,6 @@ async function onGenerateCommitMessage() {
     applyMessage(cwd, msg);
   } catch {
     // lastError is already set by the composable — the UI shows it.
-  }
-}
-
-async function onAiAction(action: "regenerate" | "shorten" | "detail" | "changeLang", targetLocale?: string) {
-  aiMenuOpen.value = false;
-  aiLangMenuOpen.value = false;
-  if (isGenerating.value) return;
-  if (action === "regenerate") {
-    await onGenerateCommitMessage();
-    return;
-  }
-  // When changing language, also persist as new default
-  if (action === "changeLang" && targetLocale) {
-    setCommitMessageLang(targetLocale);
-  }
-  const currentMsg = [props.commitSummary, props.commitDescription].filter(Boolean).join("\n");
-  if (!currentMsg.trim()) return;
-  const cwd = props.cwd;
-  try {
-    const msg = await transformCommitMsg(action, currentMsg, targetLocale, cwd);
-    applyMessage(cwd, msg);
-  } catch {
-    // aiError is set by the composable.
   }
 }
 
@@ -1512,68 +1447,14 @@ function formatActivityDate(dateStr: string): string {
             </svg>
             <span v-else class="commit-ai-label">{{ t('common.ai') }}</span>
           </button>
-          <button
-            class="commit-ai-chevron"
+          <!-- Chevron + shared AI menu: language, then the template list -->
+          <AiTemplateMenu
+            kind="commit"
+            :cwd="cwd"
             :disabled="isGenerating"
-            @click.stop="aiMenuOpen = !aiMenuOpen"
-            aria-label="AI actions"
-          >
-            <svg width="8" height="8" viewBox="0 0 8 8" fill="none" aria-hidden="true">
-              <path d="M1.5 3L4 5.5L6.5 3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-          </button>
-          <ul v-if="aiMenuOpen" class="commit-ai-menu">
-            <li @click="onAiAction('regenerate')" :class="{ disabled: repoStats.staged === 0 }">
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 8a6 6 0 0110.47-4M14 8a6 6 0 01-10.47 4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M12 1v3h-3M4 15v-3h3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              {{ t('sidebar.aiRegenerate') }}
-            </li>
-            <li @click="onAiAction('shorten')" :class="{ disabled: !commitSummary }">
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3 4h10M3 8h6M3 12h8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
-              {{ t('sidebar.aiShorten') }}
-            </li>
-            <li @click="onAiAction('detail')" :class="{ disabled: !commitSummary }">
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3 4h10M3 8h10M3 12h10" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
-              {{ t('sidebar.aiDetail') }}
-            </li>
-            <li class="commit-ai-menu-parent" :class="{ disabled: !commitSummary }" @click.stop="commitSummary && (aiLangMenuOpen = !aiLangMenuOpen)">
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="5.5" stroke="currentColor" stroke-width="1.2"/><path d="M2.5 8h11M8 2.5c-1.5 2-1.5 9 0 11M8 2.5c1.5 2 1.5 9 0 11" stroke="currentColor" stroke-width="1.2"/></svg>
-              {{ t('sidebar.aiChangeLang') }}
-              <svg class="commit-ai-menu-arrow" width="8" height="8" viewBox="0 0 8 8" fill="none"><path d="M3 1.5L5.5 4L3 6.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              <ul v-if="aiLangMenuOpen" class="commit-ai-submenu">
-                <li v-for="loc in supportedLocales" :key="loc" @click.stop="onAiAction('changeLang', loc)" :class="{ 'is-active': loc === resolveCommitLang() }">
-                  <svg v-if="loc === resolveCommitLang()" class="commit-ai-check" width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2.5 6.5L5 9l4.5-6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                  {{ localeLabels[loc] }}
-                </li>
-              </ul>
-            </li>
-            <!-- Preset picker submenu (v2.13) -->
-            <li class="commit-ai-menu-sep"></li>
-            <li class="commit-ai-menu-parent" @click.stop="aiPresetMenuOpen = !aiPresetMenuOpen">
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M2 4h12M2 8h8M2 12h10" stroke-linecap="round"/><circle cx="13" cy="12" r="2"/></svg>
-              <span class="commit-ai-preset-label">
-                {{ t('sidebar.aiPreset') }}
-                <span v-if="activePreset" class="commit-ai-preset-name">{{ activePreset.name }}</span>
-              </span>
-              <svg class="commit-ai-menu-arrow" width="8" height="8" viewBox="0 0 8 8" fill="none"><path d="M3 1.5L5.5 4L3 6.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              <ul v-if="aiPresetMenuOpen" class="commit-ai-submenu commit-ai-preset-submenu">
-                <li @click.stop="activatePreset(null); aiPresetMenuOpen = false" :class="{ 'is-active': !activePresetId }">
-                  <svg v-if="!activePresetId" class="commit-ai-check" width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2.5 6.5L5 9l4.5-6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                  {{ t('sidebar.aiPresetDefault') }}
-                </li>
-                <li class="commit-ai-submenu-sep"></li>
-                <li
-                  v-for="preset in allPresets"
-                  :key="preset.id"
-                  @click.stop="activatePreset(preset.id); aiPresetMenuOpen = false"
-                  :class="{ 'is-active': activePresetId === preset.id }"
-                  :title="preset.description"
-                >
-                  <svg v-if="activePresetId === preset.id" class="commit-ai-check" width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2.5 6.5L5 9l4.5-6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                  {{ preset.name }}
-                </li>
-              </ul>
-            </li>
-          </ul>
+            placement="above"
+            chevron-class="commit-ai-chevron"
+          />
         </div>
         <!-- Template picker button -->
         <div v-if="templates.length > 0" class="commit-template-wrapper">
@@ -2476,7 +2357,7 @@ function formatActivityDate(dateStr: string): string {
   line-height: 1;
 }
 
-.commit-ai-chevron {
+.commit-ai-wrapper :deep(.commit-ai-chevron) {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2490,13 +2371,13 @@ function formatActivityDate(dateStr: string): string {
   transition: background var(--transition-hover), border-color var(--transition-hover);
 }
 
-.commit-ai-chevron:hover:not(:disabled) {
+.commit-ai-wrapper :deep(.commit-ai-chevron:hover:not(:disabled)) {
   background: var(--color-ai);
   color: var(--color-ai-text);
   z-index: 1;
 }
 
-.commit-ai-chevron:disabled {
+.commit-ai-wrapper :deep(.commit-ai-chevron:disabled) {
   opacity: 0.35;
   cursor: not-allowed;
 }
@@ -2514,137 +2395,6 @@ function formatActivityDate(dateStr: string): string {
 
 .commit-ai-btn--loading {
   color: var(--color-ai);
-}
-
-.commit-ai-menu {
-  position: absolute;
-  right: 0;
-  bottom: 100%;
-  margin-bottom: var(--space-2);
-  min-width: 180px;
-  background: var(--color-bg);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-popover);
-  z-index: 100;
-  list-style: none;
-  padding: var(--space-2) 0;
-}
-
-.commit-ai-menu li {
-  display: flex;
-  align-items: center;
-  gap: var(--space-4);
-  padding: var(--space-3) var(--space-5);
-  font-size: var(--font-size-sm);
-  color: var(--color-text);
-  cursor: pointer;
-  transition: background var(--transition-hover);
-}
-
-.commit-ai-menu li:hover:not(.disabled) {
-  background: var(--color-bg-tertiary);
-}
-
-.commit-ai-menu li.disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
-  pointer-events: none;
-}
-
-.commit-ai-menu-parent {
-  position: relative;
-}
-
-.commit-ai-menu-arrow {
-  margin-left: auto;
-  opacity: 0.5;
-}
-
-.commit-ai-submenu {
-  position: absolute;
-  right: 100%;
-  bottom: 0;
-  margin-right: var(--space-1);
-  min-width: 120px;
-  max-height: 280px;
-  overflow-y: auto;
-  background: var(--color-bg);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-popover);
-  list-style: none;
-  padding: var(--space-1) 0;
-  z-index: 101;
-}
-
-.commit-ai-submenu li {
-  position: relative;
-  display: flex;
-  align-items: center;
-  padding: 4px 10px 4px 26px;
-  font-size: var(--font-size-sm);
-  color: var(--color-text);
-  cursor: pointer;
-  transition: background var(--transition-hover);
-}
-
-.commit-ai-submenu li:hover {
-  background: var(--color-bg-tertiary);
-}
-
-.commit-ai-submenu li.is-active {
-  font-weight: 600;
-}
-
-/* Check sits in the fixed 30px gutter so toggling it never reflows the label. */
-.commit-ai-check {
-  position: absolute;
-  left: 8px;
-  top: 50%;
-  transform: translateY(-50%);
-  flex-shrink: 0;
-}
-
-/* Separator line in AI menu (v2.13) */
-.commit-ai-menu-sep {
-  border: none;
-  border-top: 1px solid var(--color-border);
-  margin: 3px 0;
-  padding: 0;
-  list-style: none;
-  pointer-events: none;
-}
-
-/* Separator line inside a submenu */
-.commit-ai-submenu-sep {
-  border: none;
-  border-top: 1px solid var(--color-border);
-  margin: 2px 0;
-  padding: 0;
-  list-style: none;
-  pointer-events: none;
-}
-
-/* Preset submenu — slightly wider to show preset names */
-.commit-ai-preset-submenu {
-}
-
-/* Preset label inline in the menu entry */
-.commit-ai-preset-label {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.commit-ai-preset-name {
-  font-size: 9px;
-  opacity: 0.7;
-  font-weight: 400;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .commit-ai-error {
