@@ -2203,10 +2203,22 @@ function submitRequestReviewers() {
 }
 
 /* AI description update */
-.btn.pdv-desc-ai {
+/* Same compact, square-cornered shape as the PR create form's AI button. */
+.btn.btn--ai.pdv-desc-ai {
   margin-right: auto;
-  font-size: var(--font-size-xs);
-  padding: 2px var(--space-4);
+  min-height: 26px;
+  /* Narrower left side: the sparkle glyph carries its own inset. */
+  padding: 4px 12px 4px 8px;
+  font-size: var(--font-size-sm);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+}
+.btn.btn--ai.pdv-desc-ai:hover:not(:disabled) {
+  color: var(--color-ai-text);
+  transform: none;
+  background:
+    linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-hover) 100%) padding-box,
+    linear-gradient(135deg, var(--color-accent) 0%, #c084fc 50%, var(--color-accent) 100%) border-box;
 }
 .pdv-desc-body--draft {
   border-color: var(--color-accent);
