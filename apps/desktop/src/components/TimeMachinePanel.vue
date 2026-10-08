@@ -56,6 +56,7 @@ function primary(item: TimelineItem): string {
     reset: t("timeMachine.kindReset"),
     checkout: t("timeMachine.kindCheckout"),
     resolution: t("timeMachine.kindResolution"),
+    "merge-back": t("timeMachine.kindMergeBack"),
   };
   return map[item.kind] ?? item.kind;
 }

@@ -25,6 +25,7 @@ _v3.12.0 (built-in terminal renderer, WIP in the Git Tree), v3.11.2 (Finder-like
 
 _Merged 2026-10-07/08 (mostly contributions by @t1gu1); no release scheduled yet. Version number decided at tag time: #224 changes a v3.12.0 flow. Waiting on @t1gu1's test of #224 on `main` before cutting it._
 
+- **AI-task merge-back no longer loses data** (#233, interim fix of the v3.12.x item below) — merge-back refuses once `main` moved since the task was created, then squash-merges the task branch (`git merge --squash --no-overwrite-ignore`), which refuses as a whole rather than overwrite an uncommitted edit, an untracked or ignored file, or a file/directory swap; a merge resolved in the scratch is concluded first, and a snapshot is taken before applying
 - **Rebase Continue at an unresolved conflict** (#228, #223 point 1) — the rebase modal no longer looks dead: a failed `--continue` / `--skip` that is still halted on a conflict hands off to the conflict banner + inline MergeEditor, and the modal shows the error. Rebase state is read from `.git` (`gitRepoState`) instead of translated `git status` prose, so it works in any git locale; `DD` counts as a conflict in Rust and the dev-server
 - **Force-pushed upstream at checkout** (#229, #223 points 2–3) — a branch with no commits of its own whose upstream was rewritten (fork-point = local tip) gets the "Update branch" prompt and lands on the new remote with `pull --rebase` instead of a conflicting merge; the generic diverged prompt honours the pull mode. Needs the remote-tracking reflog: without it, falls back to the generic prompt
 - **Diff lines wrap** (#231) — long lines in `DiffViewer` and `CommitDiffViewer` soft-wrap with their indentation instead of being cut with an ellipsis
@@ -44,9 +45,14 @@ _Found in the 2026-10-08 worktree audit, reproduced on a throwaway repo with the
 
 `scratch_worktree_merge_back` (`commands/scratch.rs`) does not merge: it `git rm`s every path present in `HEAD` but absent from the scratch branch, then runs `git checkout <scratch> -- .`. When `main` moved after the task was created, this **reverts** files `main` changed since, **deletes** files `main` added, **overwrites** uncommitted edits to tracked files (the only guard checks for unmerged entries), flattens the agent's commits into one uncommitted change, and takes no Time Machine snapshot first.
 
-- **Interim fix** — refuse when `main` is not an ancestor of the scratch fork point or when the main checkout has tracked edits, and say why; take a `pre-merge-back` snapshot (v3.8) before touching anything
+- ~~**Interim fix**~~ — done in #233: refuses when the main checkout's `HEAD` is not in the task branch's history, then squash-merges the task branch — all or nothing, unrelated uncommitted edits survive, untracked and ignored files are never overwritten — after a `merge-back` snapshot (v3.8). Refuses while the main checkout is mid-operation or the scratch has unresolved (unstaged) conflicts
 - **Real fix** (lands with v3.15 below) — merge or rebase the task branch through the v3.11 preview → apply flow, keeping the agent's commits
-- **Regression test** — the reproduction (fork, advance `main`, commit in scratch, merge back) as a `scratch.rs` test
+- ~~**Regression test**~~ — done in #233, with the overlap, untracked/ignored, file↔directory, case-only, pending-merge and snapshot cases
+- **Follow-ups from the #233 reviews** (low, no data loss):
+  - a cleanup failure after a successful squash (locked worktree, Windows file lock) is reported as a merge-back failure, and the task can't be closed — return success with a cleanup warning
+  - a "Task merged back" snapshot is taken even when git then refuses the squash — check before snapshotting
+  - record the task's base commit at creation: if the main checkout later switches to an ancestor branch, the squash brings the source branch's commits too
+  - stopping the agent terminal only kills the shell; a surviving child process can still write to the scratch after merge-back read it
 
 ---
 

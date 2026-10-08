@@ -2813,8 +2813,9 @@ export async function scratchWorktreeCreate(
 export async function scratchWorktreeMergeBack(
   cwd: string,
   scratchPath: string,
+  snapshotsEnabled?: boolean,
 ): Promise<void> {
-  await tauriInvoke<void>("scratch_worktree_merge_back", { cwd, scratchPath });
+  await tauriInvoke<void>("scratch_worktree_merge_back", { cwd, scratchPath, snapshotsEnabled });
 }
 
 /** Abandonne le worktree scratch (remove --force + prune), sans rien ramener. */

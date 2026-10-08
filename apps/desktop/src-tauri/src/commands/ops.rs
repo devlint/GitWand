@@ -18,7 +18,7 @@ use std::time::Instant;
 /// "no opinion" and snapshots; only an explicit `Some(false)` opts out. App
 /// settings live in exactly one place (the frontend), as everywhere else in
 /// this codebase, so Rust never reads them itself.
-fn snapshot_before(
+pub(crate) fn snapshot_before(
     cwd: &str,
     enabled: Option<bool>,
     kind: &str,

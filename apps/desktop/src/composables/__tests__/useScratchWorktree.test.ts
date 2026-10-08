@@ -57,7 +57,8 @@ describe("useScratchWorktree", () => {
 
     expect(ok).toBe(true);
     // Critical: must use the captured origin, NOT the now-active scratch cwd.
-    expect(mockMergeBack).toHaveBeenCalledWith("/repos/main", WT.path);
+    // Third arg: the snapshotsEnabled setting (default on).
+    expect(mockMergeBack).toHaveBeenCalledWith("/repos/main", WT.path, true);
   });
 
   it("discard targets the ORIGIN cwd and clears state", async () => {

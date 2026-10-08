@@ -1896,6 +1896,7 @@ const zhCN: Locale = {
     kindReset: "重置",
     kindCheckout: "切换",
     kindResolution: "已应用解决方案",
+    kindMergeBack: "已合回任务",
     aiLabel: "用 AI 总结",
     aiLabelPending: "正在总结",
     toastUndo: "撤销",

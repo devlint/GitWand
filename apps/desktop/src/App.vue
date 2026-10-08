@@ -2621,7 +2621,7 @@ async function onAiTaskMergeBack() {
     // index.lock or open handle that would block the worktree removal.
     await termSessions.disposeRepo(target.path).catch(() => {});
     fileExplorer.disposeRepo(target.path);
-    await scratchWorktreeMergeBack(origin, target.path);
+    await scratchWorktreeMergeBack(origin, target.path, settings.value.snapshotsEnabled);
     await finalizeWorktreeRemoval(target.path, target.projectPath);
   } catch (err) {
     aiTaskCloseError.value = t("aiTask.errorMergeBack", String((err as { message?: string })?.message ?? err));

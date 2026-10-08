@@ -1919,6 +1919,7 @@ const en = {
     kindReset: "Reset",
     kindCheckout: "Checkout",
     kindResolution: "Resolution applied",
+    kindMergeBack: "Task merged back",
     aiLabel: "Summarise with AI",
     aiLabelPending: "Summarising",
     toastUndo: "Undo",
