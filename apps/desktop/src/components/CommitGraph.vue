@@ -886,6 +886,49 @@ function solidLaneColor(hue: number): string {
   return `hsl(${hue}, 80%, 55%)`;
 }
 
+// Nodes and the band's right border are filled shapes, not thin lines, so in
+// light mode yellow and the two greens can be brighter there than the
+// darkened color their edges and ref chips need for contrast.
+const LIGHT_VIVID_NODE_HUES = new Set([55, 100, 145]);
+
+/** Color of a commit node (and, via `borderColor`, its band's right border). */
+function nodeColor(lane: number): string {
+  if (lane !== 0 && isLight.value) {
+    const hue = laneHue(lane);
+    if (LIGHT_VIVID_NODE_HUES.has(hue)) return `hsl(${hue}, 100%, 47%)`;
+  }
+  return laneColor(lane);
+}
+
+/**
+ * Color of the band's right border: the node color, except yellow and the
+ * greens in light mode, whose border is darker than their fade so the edge
+ * stays crisp.
+ */
+function borderColor(lane: number): string {
+  if (lane !== 0 && isLight.value) {
+    const hue = laneHue(lane);
+    if (hue === 55) return "hsl(55, 100%, 40%)";
+    if (LIGHT_VIVID_NODE_HUES.has(hue)) return `hsl(${hue}, 100%, 28%)`;
+  }
+  return nodeColor(lane);
+}
+
+/**
+ * Color of the light-mode band's right-side fade. For the vivid-node hues it
+ * sits between the bright node color and the darker right border (see
+ * `borderColor`), so the border reads as a distinct edge instead of melting
+ * into the fade. Yellow turns brown when deepened, so its fade stays brighter.
+ */
+function rampColor(lane: number): string {
+  if (lane !== 0 && isLight.value) {
+    const hue = laneHue(lane);
+    if (hue === 55) return `hsl(${hue}, 100%, 50%)`;
+    if (LIGHT_VIVID_NODE_HUES.has(hue)) return `hsl(${hue}, 100%, 33%)`;
+  }
+  return laneColor(lane);
+}
+
 // Row band colors read weaker on the light background, so light mode scales
 // their opacity up. Light mode also inverts the strengths: default rows get
 // the strong band, while selected / current rows drop back to the soft one
@@ -900,18 +943,23 @@ function bandAlpha(alpha: number): number {
 // Light mode bands use a deeper hue so they don't read as pastel over the
 // white background.
 function bandHsla(hue: number, alpha: number): string {
-  return `hsla(${hue}, 80%, ${isLight.value ? 50 : 55}%, ${alpha})`;
+  if (!isLight.value) return `hsla(${hue}, 80%, 55%, ${alpha})`;
+  // Yellow and the greens turn olive at 50% on white: lift and saturate them,
+  // yellow most of all.
+  if (hue === 55) return `hsla(${hue}, 100%, 58%, ${alpha})`;
+  if (LIGHT_VIVID_NODE_HUES.has(hue)) return `hsla(${hue}, 95%, 62%, ${alpha})`;
+  return `hsla(${hue}, 80%, 50%, ${alpha})`;
 }
 
 /** Tint for the trunk / lane 0 band. */
 function accentTint(active = false): string {
-  if (!isLight.value) return laneColor(0, 0.2);
+  if (!isLight.value) return laneColor(0, 0.26);
   return laneColor(0, active ? 0.52 : bandAlpha(0.2));
 }
 
 /** Middle stops of the trunk rainbow tint. */
 function trunkMidAlpha(active = false): number {
-  if (!isLight.value) return 0.19;
+  if (!isLight.value) return 0.25;
   return bandAlpha(active ? 0.17 : 0.2);
 }
 
@@ -924,7 +972,7 @@ function isMagentaLane(lane: number): boolean {
 
 function laneColorTint(lane: number, active = false): string {
   if (lane === 0) return accentTint(active);
-  if (!isLight.value) return laneColor(lane, isMagentaLane(lane) ? 0.195 : 0.12);
+  if (!isLight.value) return laneColor(lane, isMagentaLane(lane) ? 0.25 : 0.155);
   return bandHsla(laneHue(lane), bandAlpha(active ? 0.12 : 0.2));
 }
 
@@ -1584,20 +1632,40 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
             :x2="graphWidth"
             y2="0"
           >
-            <!-- Light mode: white lift on the left fading out by 40%, then
-                 darkening to the right edge. Split stops at 40% keep the two
-                 colors from mixing into gray. -->
+            <!-- Light mode: white lift on the left fading out by 40%, then a
+                 light darkening to the right edge — the lane-colored ramp
+                 (#vibrant-ramp) carries the right side instead. Split stops at
+                 40% keep the two colors from mixing into gray. -->
             <template v-if="isLight">
               <stop offset="0%" style="stop-color: #fff; stop-opacity: 0.35;" />
               <stop offset="40%" style="stop-color: #fff; stop-opacity: 0;" />
               <stop offset="40%" style="stop-color: #000; stop-opacity: 0;" />
-              <stop offset="100%" style="stop-color: #000; stop-opacity: 0.4;" />
+              <stop offset="100%" style="stop-color: #000; stop-opacity: 0.12;" />
             </template>
             <template v-else>
               <stop offset="0%" style="stop-color: #000; stop-opacity: 0.4;" />
               <stop offset="100%" style="stop-color: #000; stop-opacity: 0;" />
             </template>
           </linearGradient>
+          <!-- Light mode: alpha ramp for the lane-colored band overlay — none up
+               to 40%, then rising to the graph's right edge. -->
+          <template v-if="isLight">
+            <linearGradient
+              id="vibrant-ramp-alpha"
+              gradientUnits="userSpaceOnUse"
+              x1="0"
+              y1="0"
+              :x2="graphWidth"
+              y2="0"
+            >
+              <stop offset="0%" style="stop-color: #fff; stop-opacity: 0;" />
+              <stop offset="40%" style="stop-color: #fff; stop-opacity: 0;" />
+              <stop offset="100%" style="stop-color: #fff; stop-opacity: 0.45;" />
+            </linearGradient>
+            <mask id="vibrant-ramp" maskUnits="userSpaceOnUse" x="0" y="0" :width="graphWidth + 40" :height="totalHeight">
+              <rect x="0" y="0" :width="graphWidth + 40" :height="totalHeight" fill="url(#vibrant-ramp-alpha)" />
+            </mask>
+          </template>
         </defs>
 
         <!-- Row tints: colored band from the commit node to the SVG right edge -->
@@ -1629,6 +1697,18 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
           :class="{ 'cg-row-hover--on': node.index === hoveredIndex && !isActiveRow(node.index) }"
           v-bind="bandRect(node)"
         />
+        <!-- Light mode: the band's own lane color (the rainbow for the trunk),
+             faded in toward the right edge so it ends vibrant, not dark. -->
+        <template v-if="isLight">
+          <rect
+            v-for="node in visibleNodes"
+            :key="'c' + node.index"
+            class="cg-row-overlay"
+            v-bind="bandRect(node)"
+            mask="url(#vibrant-ramp)"
+            :style="{ fill: nodeKind(node) === 'trunk' ? 'url(#trunk-gradient-stroke)' : rampColor(node.lane) }"
+          />
+        </template>
         <!-- Shade over each band (tint + highlights). Drawn under edges and nodes. -->
         <rect
           v-for="node in visibleNodes"
@@ -1647,7 +1727,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
           :y="node.index * ROW_H + 1"
           width="2"
           :height="ROW_H - 2"
-          :style="{ fill: laneColor(node.lane) }"
+          :style="{ fill: borderColor(node.lane) }"
         />
         <!-- Edges first (behind nodes). R6: only visible edges are emitted.
              Key uses content (lanes + indices) so Vue can re-use DOM nodes
@@ -1677,7 +1757,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
             :cy="cy(node.index)"
             :r="NODE_R + 1.5"
             fill="none"
-            :stroke="laneColor(node.lane)"
+            :stroke="nodeColor(node.lane)"
             stroke-width="1.5"
             stroke-dasharray="3,3"
           />
@@ -1687,7 +1767,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
             :cx="cx(node.lane)"
             :cy="cy(node.index)"
             r="1.75"
-            :fill="laneColor(node.lane)"
+            :fill="nodeColor(node.lane)"
           />
 
           <!-- Current commit indicator: outer ring -->
@@ -1697,7 +1777,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
             :cy="cy(node.index)"
             :r="nodeKind(node) === 'trunk' ? NODE_R + 4 : (nodeKind(node) === 'merge' ? NODE_R + 3.5 : NODE_R + 2.5)"
             fill="none"
-            :stroke="nodeKind(node) === 'trunk' ? 'url(#trunk-gradient-stroke)' : laneColor(node.lane)"
+            :stroke="nodeKind(node) === 'trunk' ? 'url(#trunk-gradient-stroke)' : nodeColor(node.lane)"
             stroke-width="1.2"
           />
 
@@ -1709,7 +1789,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
             :width="NODE_R * 2"
             :height="NODE_R * 2"
             fill="none"
-            :stroke="laneColor(node.lane)"
+            :stroke="nodeColor(node.lane)"
             stroke-width="1.5"
             stroke-dasharray="2,2"
           />
@@ -1737,7 +1817,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
               :cx="cx(node.lane)"
               :cy="cy(node.index)"
               :r="NODE_R + 0.4"
-              :fill="laneColor(node.lane)"
+              :fill="nodeColor(node.lane)"
             />
           </template>
           <!-- Merge commit: solid filled, slightly larger circle -->
@@ -1746,7 +1826,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
             :cx="cx(node.lane)"
             :cy="cy(node.index)"
             :r="NODE_R + 1"
-            :fill="laneColor(node.lane)"
+            :fill="nodeColor(node.lane)"
           />
           <!-- Normal commit: solid filled circle -->
           <circle
@@ -1754,7 +1834,7 @@ const visibleCommits = computed<VisibleCommit[]>(() => {
             :cx="cx(node.lane)"
             :cy="cy(node.index)"
             :r="NODE_R"
-            :fill="laneColor(node.lane)"
+            :fill="nodeColor(node.lane)"
           />
         </g>
       </svg>
