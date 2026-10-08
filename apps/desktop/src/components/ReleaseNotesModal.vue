@@ -23,7 +23,7 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useI18n();
-const { generate: generateReleaseNotes } = useReleaseNotes();
+const { generateDraft } = useReleaseNotes();
 
 // Active AI template (picked from the Generate split button), shown on the button.
 const { activeTemplate } = useAiTemplates("releaseNotes", () => props.cwd);
@@ -31,11 +31,7 @@ const { activeTemplate } = useAiTemplates("releaseNotes", () => props.cwd);
 // Refs + generated text live in the per-repo draft, so they survive closing
 // the modal (and a generation still running when it closes).
 const draft = computed(() => getReleaseNotesDraft(props.cwd));
-const from = computed({ get: () => draft.value.from, set: (v: string) => { draft.value.from = v; } });
-const to = computed({ get: () => draft.value.to, set: (v: string) => { draft.value.to = v; } });
-const markdown = computed({ get: () => draft.value.markdown, set: (v: string) => { draft.value.markdown = v; } });
 const isGenerating = computed(() => isGeneratingReleaseNotes(props.cwd));
-const lastError = computed(() => draft.value.error);
 const copied = ref(false);
 
 // Ref pickers (tags + branches) for the from/to selects.
@@ -79,22 +75,25 @@ async function previousBranch(localNames: string[]): Promise<string> {
 const { settings } = useSettings();
 
 onMounted(async () => {
+  // Reopened: keep the refs the user had picked (no default to resolve).
+  const hasRefs = !!draft.value.from;
   const [, tags, headSha] = await Promise.all([
     getGitBranches(props.cwd, settings.value.defaultBranch)
       .then((b) => { branches.value = b; })
       .catch(() => { branches.value = []; }),
     gitListTags(props.cwd).catch(() => []),
-    gitExec(props.cwd, ["rev-parse", "HEAD"])
-      .then((r) => (r.exitCode === 0 ? (r.stdout ?? "").trim() : ""))
-      .catch(() => ""),
+    hasRefs
+      ? ""
+      : gitExec(props.cwd, ["rev-parse", "HEAD"])
+          .then((r) => (r.exitCode === 0 ? (r.stdout ?? "").trim() : ""))
+          .catch(() => ""),
   ]);
 
   // Newest tag first (max tagger/committer date).
   const sorted = [...tags].sort((a, b) => b.date.localeCompare(a.date));
   tagNames.value = sorted.map((tg) => tg.name);
 
-  // Reopened: keep the refs the user had picked.
-  if (from.value) return;
+  if (hasRefs) return;
 
   if (sorted.length) {
     // Default "from" = newest tag that is NOT on HEAD — otherwise `tag..HEAD`
@@ -102,38 +101,24 @@ onMounted(async () => {
     const beforeHead = headSha
       ? sorted.find((tg) => !sameCommit(tg.hash, headSha))
       : undefined;
-    from.value = (beforeHead ?? sorted[0])?.name ?? "";
+    draft.value.from = (beforeHead ?? sorted[0])?.name ?? "";
   } else {
     // No tags: fall back to the closest ancestor branch, then to the very first
     // commit ("from the project creation").
     const prev = await previousBranch(localBranchNames.value);
-    from.value = prev || FROM_PROJECT_START;
+    draft.value.from = prev || FROM_PROJECT_START;
   }
 });
 
-async function runGenerate() {
+function runGenerate() {
   copied.value = false;
-  // Hold the draft itself, not the component: the modal may be closed (and
-  // unmounted) before the AI answers.
-  const d = draft.value;
-  d.error = null;
-  try {
-    d.markdown = await generateReleaseNotes(
-      props.cwd,
-      d.from,
-      d.to,
-      { locale: getTemplateLang("releaseNotes", props.cwd) },
-    );
-  } catch (err: unknown) {
-    d.markdown = "";
-    d.error = err instanceof Error ? err.message : String(err);
-  }
+  void generateDraft(props.cwd, { locale: getTemplateLang("releaseNotes", props.cwd) });
 }
 
 async function copy() {
-  if (!markdown.value) return;
+  if (!draft.value.markdown) return;
   try {
-    await navigator.clipboard.writeText(markdown.value);
+    await navigator.clipboard.writeText(draft.value.markdown);
     copied.value = true;
     setTimeout(() => { copied.value = false; }, 1500);
   } catch { /* clipboard perms may be denied */ }
@@ -150,7 +135,7 @@ async function copy() {
     <div class="rn-refs">
       <label class="rn-field">
         <span>{{ t('dashboard.releaseNotesFrom') }}</span>
-        <select v-model="from" class="rn-input mono" :disabled="isGenerating">
+        <select v-model="draft.from" class="rn-input mono" :disabled="isGenerating">
           <option value="HEAD">HEAD</option>
           <option :value="FROM_PROJECT_START">{{ t('dashboard.releaseNotesFromCreation') }}</option>
           <optgroup v-if="tagNames.length" :label="t('dashboard.releaseNotesTags')">
@@ -167,7 +152,7 @@ async function copy() {
       <span class="rn-sep">..</span>
       <label class="rn-field">
         <span>{{ t('dashboard.releaseNotesTo') }}</span>
-        <select v-model="to" class="rn-input mono" :disabled="isGenerating">
+        <select v-model="draft.to" class="rn-input mono" :disabled="isGenerating">
           <option value="HEAD">HEAD</option>
           <optgroup v-if="tagNames.length" :label="t('dashboard.releaseNotesTags')">
             <option v-for="tn in tagNames" :key="`t-${tn}`" :value="tn">{{ tn }}</option>
@@ -184,7 +169,7 @@ async function copy() {
         <button
           type="button"
           class="btn btn--ai rn-ai-btn rn-split-main"
-          :disabled="isGenerating || !from.trim() || !to.trim()"
+          :disabled="isGenerating || !draft.from.trim() || !draft.to.trim()"
           @click="runGenerate"
         >
           <span v-if="isGenerating" class="rn-ai-label ai-loading">
@@ -206,9 +191,9 @@ async function copy() {
         />
       </div>
     </div>
-    <p v-if="lastError" class="rn-error">{{ lastError }}</p>
+    <p v-if="draft.error" class="rn-error">{{ draft.error }}</p>
     <textarea
-      v-model="markdown"
+      v-model="draft.markdown"
       class="rn-textarea mono"
       :disabled="isGenerating"
       rows="22"
@@ -216,7 +201,7 @@ async function copy() {
       :placeholder="t('dashboard.releaseNotesPlaceholder')"
     />
     <template #footer>
-      <button class="bm-btn bm-btn--ghost" :disabled="!markdown" @click="copy">
+      <button class="bm-btn bm-btn--ghost" :disabled="!draft.markdown" @click="copy">
         {{ copied ? t('dashboard.releaseNotesCopied') : t('dashboard.releaseNotesCopy') }}
       </button>
       <button class="bm-btn bm-btn--primary" @click="emit('close')">{{ t('common.close') }}</button>

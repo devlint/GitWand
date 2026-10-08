@@ -55,6 +55,7 @@ import type { RepoTab } from "../composables/useRepoTabs";
 
 const { t } = useI18n();
 const ai = useAIProvider();
+const releaseNotesBusy = computed(() => isGeneratingReleaseNotes(props.cwd));
 const askConfirm = inject<(options: any) => Promise<boolean>>("askConfirm");
 
 const props = defineProps<{
@@ -603,9 +604,8 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
               :aria-label="t('dashboard.releaseNotes')"
               @click="emit('openReleaseNotes')"
             >
-              <span v-if="isGeneratingReleaseNotes(cwd)" class="spinner" aria-hidden="true"></span>
-              <AiSparkle v-else :size="14" />
-              <span :class="{ 'ai-loading': isGeneratingReleaseNotes(cwd) }">{{ t('dashboard.releaseNotes') }}</span>
+              <AiSparkle :size="14" :busy="releaseNotesBusy" />
+              <span :class="{ 'ai-loading': releaseNotesBusy }">{{ t('dashboard.releaseNotes') }}</span>
             </button>
           </template>
 

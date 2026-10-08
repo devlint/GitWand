@@ -1,8 +1,9 @@
-import { ref, reactive } from "vue";
+import { reactive } from "vue";
 import { gitExec } from "../utils/backend";
 import { useAIProvider } from "./useAIProvider";
 import { localeLabels, type SupportedLocale } from "../locales";
 import { t } from "./useI18n";
+import { normaliseCwd } from "./useSettings";
 import { getActiveTemplate } from "./useAiTemplates";
 import { applyLang, DEFAULT_TEMPLATE_PROMPTS } from "./aiTemplateDefaults";
 
@@ -160,10 +161,6 @@ export async function latestTag(cwd: string): Promise<string> {
   }
 }
 
-const isGenerating = ref(false);
-const lastError = ref<string | null>(null);
-const lastMarkdown = ref<string | null>(null);
-
 /**
  * Per-repo state of the release-notes modal. Lives at module level so closing
  * the modal keeps the refs and the generated text, and a generation started
@@ -181,17 +178,14 @@ const generatingCwds = reactive(new Set<string>());
 
 /** The repo's draft, created empty on first access. `from === ""` means not initialised yet. */
 export function getReleaseNotesDraft(cwd: string): ReleaseNotesDraft {
-  let d = drafts.get(cwd);
-  if (!d) {
-    drafts.set(cwd, { from: "", to: "HEAD", markdown: "", error: null });
-    d = drafts.get(cwd)!; // reactive proxy
-  }
-  return d;
+  const key = normaliseCwd(cwd);
+  if (!drafts.has(key)) drafts.set(key, { from: "", to: "HEAD", markdown: "", error: null });
+  return drafts.get(key)!;
 }
 
-/** True while release notes are being generated for this repo. */
+/** True while the repo's draft is being generated. */
 export function isGeneratingReleaseNotes(cwd: string | null | undefined): boolean {
-  return !!cwd && generatingCwds.has(cwd);
+  return !!cwd && generatingCwds.has(normaliseCwd(cwd));
 }
 
 export function useReleaseNotes() {
@@ -205,80 +199,83 @@ export function useReleaseNotes() {
   ): Promise<string> {
     const { locale = "fr", maxCommitsChars = 24_000 } = options;
 
-    isGenerating.value = true;
-    generatingCwds.add(cwd);
-    lastError.value = null;
-    lastMarkdown.value = null;
+    if (!ai.isAvailable.value) {
+      throw new Error(t("errors.noAiProvider"));
+    }
+    if (!cwd) throw new Error(t("errors.noRepoOpen"));
+    if (!fromRef.trim() || !toRef.trim()) {
+      throw new Error(t("errors.missingRefs"));
+    }
+    if (fromRef === toRef) {
+      throw new Error(t("errors.sameRefs"));
+    }
 
+    // "From the project creation" → every commit reachable from the target
+    // ref (no lower bound). Otherwise the usual `from..to` range.
+    const fromProjectStart = fromRef === FROM_PROJECT_START;
+    const range = fromProjectStart ? toRef : `${fromRef}..${toRef}`;
+    const logRes = await gitExec(cwd, [
+      "log",
+      range,
+      "--no-decorate",
+      "--no-color",
+      "--pretty=format:--- %h%n%s%n%b",
+    ]);
+
+    if (logRes.exitCode !== 0) {
+      const stderr = (logRes.stderr ?? "").trim();
+      throw new Error(
+        stderr || `git log ${range} failed (exit ${logRes.exitCode})`,
+      );
+    }
+
+    const commits = clip((logRes.stdout ?? "").trim(), maxCommitsChars);
+    if (!commits) {
+      throw new Error(t("errors.noCommitsInRange", fromRef, toRef));
+    }
+
+    // A selected template replaces the default prompt — including the
+    // first-release variant, so the user prompt flags that case instead.
+    const template = getActiveTemplate("releaseNotes", cwd);
+    const systemPrompt = template
+      ? applyLang(template.systemPrompt, localeToEnglishName(locale))
+      : buildSystemPrompt(locale, fromProjectStart);
+    let userPrompt = buildUserPrompt(fromRef, toRef, commits);
+    if (template && fromProjectStart) {
+      userPrompt += "\nThis is the project's very first release: there is no previous version to compare against.";
+    }
+
+    const raw = await ai.rawPrompt(systemPrompt, userPrompt);
+    if (!raw) {
+      throw new Error(t("errors.emptyAiResponse"));
+    }
+    return stripPreamble(stripMarkdownFences(raw));
+  }
+
+  /**
+   * Generate into the repo's draft (its `from`/`to`), recording the result or
+   * error there. Lights the per-repo generating flag; a second call while one
+   * is in flight for the same repo is ignored.
+   */
+  async function generateDraft(cwd: string, options: ReleaseNotesOptions = {}): Promise<void> {
+    const key = normaliseCwd(cwd);
+    if (generatingCwds.has(key)) return;
+    const draft = getReleaseNotesDraft(cwd);
+    generatingCwds.add(key);
+    draft.error = null;
     try {
-      if (!ai.isAvailable.value) {
-        throw new Error(t("errors.noAiProvider"));
-      }
-      if (!cwd) throw new Error(t("errors.noRepoOpen"));
-      if (!fromRef.trim() || !toRef.trim()) {
-        throw new Error(t("errors.missingRefs"));
-      }
-      if (fromRef === toRef) {
-        throw new Error(t("errors.sameRefs"));
-      }
-
-      // "From the project creation" → every commit reachable from the target
-      // ref (no lower bound). Otherwise the usual `from..to` range.
-      const fromProjectStart = fromRef === FROM_PROJECT_START;
-      const range = fromProjectStart ? toRef : `${fromRef}..${toRef}`;
-      const logRes = await gitExec(cwd, [
-        "log",
-        range,
-        "--no-decorate",
-        "--no-color",
-        "--pretty=format:--- %h%n%s%n%b",
-      ]);
-
-      if (logRes.exitCode !== 0) {
-        const stderr = (logRes.stderr ?? "").trim();
-        throw new Error(
-          stderr || `git log ${range} failed (exit ${logRes.exitCode})`,
-        );
-      }
-
-      const commits = clip((logRes.stdout ?? "").trim(), maxCommitsChars);
-      if (!commits) {
-        throw new Error(t("errors.noCommitsInRange", fromRef, toRef));
-      }
-
-      // A selected template replaces the default prompt — including the
-      // first-release variant, so the user prompt flags that case instead.
-      const template = getActiveTemplate("releaseNotes", cwd);
-      const systemPrompt = template
-        ? applyLang(template.systemPrompt, localeToEnglishName(locale))
-        : buildSystemPrompt(locale, fromProjectStart);
-      let userPrompt = buildUserPrompt(fromRef, toRef, commits);
-      if (template && fromProjectStart) {
-        userPrompt += "\nThis is the project's very first release: there is no previous version to compare against.";
-      }
-
-      const raw = await ai.rawPrompt(systemPrompt, userPrompt);
-      if (!raw) {
-        throw new Error(t("errors.emptyAiResponse"));
-      }
-      const markdown = stripPreamble(stripMarkdownFences(raw));
-      lastMarkdown.value = markdown;
-      return markdown;
+      draft.markdown = await generate(cwd, draft.from, draft.to, options);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      lastError.value = msg;
-      throw err;
+      draft.markdown = "";
+      draft.error = err instanceof Error ? err.message : String(err);
     } finally {
-      generatingCwds.delete(cwd);
-      isGenerating.value = generatingCwds.size > 0;
+      generatingCwds.delete(key);
     }
   }
 
   return {
-    isGenerating,
-    lastError,
-    lastMarkdown,
     generate,
+    generateDraft,
     latestTag,
   };
 }

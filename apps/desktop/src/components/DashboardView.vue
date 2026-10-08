@@ -29,6 +29,7 @@ const { settings } = useSettings();
 const ai = useAIProvider();
 // ─── Release notes modal (shared with TagsPanel) ──────────
 const releaseNotesOpen = ref(false);
+const releaseNotesBusy = computed(() => isGeneratingReleaseNotes(props.cwd));
 
 const props = defineProps<{
   cwd: string;
@@ -1254,9 +1255,8 @@ watch(
                 @click="releaseNotesOpen = true"
               >
                 <span class="dv-ai-label">
-                  <span v-if="isGeneratingReleaseNotes(props.cwd)" class="spinner" style="width: 13px; height: 13px" aria-hidden="true"></span>
-                  <AiSparkle v-else :size="13" />
-                  <span :class="{ 'ai-loading': isGeneratingReleaseNotes(props.cwd) }">{{ t('dashboard.releaseNotes') }}</span>
+                  <AiSparkle :size="13" :busy="releaseNotesBusy" />
+                  <span :class="{ 'ai-loading': releaseNotesBusy }">{{ t('dashboard.releaseNotes') }}</span>
                 </span>
               </button>
             </div>

@@ -26,6 +26,7 @@ const ai = useAIProvider();
 // A release = a tag, so the entry point lives with Tags too. The automation
 // "release notes on tag creation" is unchanged (AutomationsPanel).
 const releaseNotesOpen = ref(false);
+const releaseNotesBusy = computed(() => isGeneratingReleaseNotes(props.cwd));
 
 // ─── State ──────────────────────────────────────────────
 const tags = ref<GitTag[]>([]);
@@ -214,9 +215,8 @@ async function pushAllTags() {
           :title="t('dashboard.releaseNotesHint')"
           @click="releaseNotesOpen = true"
         >
-          <span v-if="isGeneratingReleaseNotes(cwd)" class="spinner" style="width: 12px; height: 12px" aria-hidden="true"></span>
-          <AiSparkle v-else :size="12" />
-          <span :class="{ 'ai-loading': isGeneratingReleaseNotes(cwd) }">{{ t('dashboard.releaseNotes') }}</span>
+          <AiSparkle :size="12" :busy="releaseNotesBusy" />
+          <span :class="{ 'ai-loading': releaseNotesBusy }">{{ t('dashboard.releaseNotes') }}</span>
         </button>
       </div>
     </template>
