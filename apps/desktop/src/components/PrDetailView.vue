@@ -483,72 +483,75 @@ function submitRequestReviewers() {
             </span>
           </div>
           <div class="pdv-hero-actions">
-            <button class="pdv-btn" @click="openInBrowser(p.prDetail.value.url)" :title="p.forgeLabel.value">
-              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M6.5 3H3v10h10V9.5M9.5 2.5H13V6M13 3l-6 6" />
-              </svg>
-              <span>{{ p.forgeLabel.value }}</span>
-            </button>
-            <button class="pdv-btn" @click="p.checkoutPr(p.selectedPr.value!)">
-              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M3 8h10M8 3l5 5-5 5" />
-              </svg>
-              <span>{{ t('pr.detail.checkout') }}</span>
-            </button>
-            <button
-              v-if="isOpenPr && p.prDetail.value?.draft"
-              class="pdv-btn pdv-btn--accent"
-              @click="p.convertDraftToReady(p.selectedPr.value!)"
-            >
-              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M3 8l4 4 6-7"/>
-              </svg>
-              <span>{{ t('pr.detail.markAsReady') }}</span>
-            </button>
-            <button
-              v-if="isOpenPr"
-              class="pdv-btn pdv-btn--primary"
-              :disabled="p.mergeBlocked.value"
-              :title="p.mergeBlocked.value ? p.mergeBlockedReason.value : undefined"
-              @click="p.mergingPr.value = p.selectedPr.value"
-            >
-              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <circle cx="4" cy="4" r="2" />
-                <circle cx="4" cy="12" r="2" />
-                <circle cx="12" cy="12" r="2" />
-                <path d="M4 6v4" />
-                <path d="M4 12a8 8 0 0 0 8-8" />
-              </svg>
-              <span>{{ t('pr.detail.merge') }}</span>
-            </button>
-            <button
-              v-if="isOpenPr && p.autoMergeOffer.value.kind === 'arm'"
-              class="pdv-btn"
-              @click="p.armAutoMerge()"
-            >
-              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <circle cx="8" cy="8" r="6" />
-                <path d="M8 4.5V8l2.6 1.6" />
-              </svg>
-              <span>{{ t('pr.detail.autoMergeArm') }}</span>
-            </button>
-            <span v-else-if="isOpenPr && p.autoMergeOffer.value.kind === 'disarm'" class="pdv-automerge-armed">
-              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <circle cx="8" cy="8" r="6" />
-                <path d="M8 4.5V8l2.6 1.6" />
-              </svg>
-              <span>{{ t('pr.detail.autoMergeArmed') }}</span>
-              <button class="pdv-btn pdv-btn--sm pdv-btn--ghost" @click="p.disarmAutoMerge()">
-                {{ t('pr.detail.autoMergeDisarm') }}
+            <div class="pdv-hero-buttons">
+              <button class="pdv-btn" @click="openInBrowser(p.prDetail.value.url)" :title="p.forgeLabel.value">
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M6.5 3H3v10h10V9.5M9.5 2.5H13V6M13 3l-6 6" />
+                </svg>
+                <span>{{ p.forgeLabel.value }}</span>
               </button>
-            </span>
-            <span
-              v-else-if="isOpenPr && p.autoMergeOffer.value.kind === 'explain'"
+              <button class="pdv-btn" @click="p.checkoutPr(p.selectedPr.value!)">
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M3 8h10M8 3l5 5-5 5" />
+                </svg>
+                <span>{{ t('pr.detail.checkout') }}</span>
+              </button>
+              <button
+                v-if="isOpenPr && p.prDetail.value?.draft"
+                class="pdv-btn pdv-btn--accent"
+                @click="p.convertDraftToReady(p.selectedPr.value!)"
+              >
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M3 8l4 4 6-7"/>
+                </svg>
+                <span>{{ t('pr.detail.markAsReady') }}</span>
+              </button>
+              <button
+                v-if="isOpenPr"
+                class="pdv-btn pdv-btn--primary"
+                :disabled="p.mergeBlocked.value"
+                :title="p.mergeBlocked.value ? p.mergeBlockedReason.value : undefined"
+                @click="p.mergingPr.value = p.selectedPr.value"
+              >
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="4" cy="4" r="2" />
+                  <circle cx="4" cy="12" r="2" />
+                  <circle cx="12" cy="12" r="2" />
+                  <path d="M4 6v4" />
+                  <path d="M4 12a8 8 0 0 0 8-8" />
+                </svg>
+                <span>{{ t('pr.detail.merge') }}</span>
+              </button>
+              <button
+                v-if="isOpenPr && p.autoMergeOffer.value.kind === 'arm'"
+                class="pdv-btn"
+                @click="p.armAutoMerge()"
+              >
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="8" cy="8" r="6" />
+                  <path d="M8 4.5V8l2.6 1.6" />
+                </svg>
+                <span>{{ t('pr.detail.autoMergeArm') }}</span>
+              </button>
+              <span v-else-if="isOpenPr && p.autoMergeOffer.value.kind === 'disarm'" class="pdv-automerge-armed">
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="8" cy="8" r="6" />
+                  <path d="M8 4.5V8l2.6 1.6" />
+                </svg>
+                <span>{{ t('pr.detail.autoMergeArmed') }}</span>
+                <button class="pdv-btn pdv-btn--sm pdv-btn--ghost" @click="p.disarmAutoMerge()">
+                  {{ t('pr.detail.autoMergeDisarm') }}
+                </button>
+              </span>
+            </div>
+            <!-- Under the buttons, not beside them: the reason can be long. -->
+            <p
+              v-if="isOpenPr && p.autoMergeOffer.value.kind === 'explain'"
               class="pdv-automerge-unavailable"
               :title="autoMergeExplainReason || undefined"
             >
               {{ t('pr.detail.autoMergeUnavailable') }}<template v-if="autoMergeExplainReason">: {{ autoMergeExplainReason }}</template>
-            </span>
+            </p>
           </div>
         </div>
 
@@ -1387,7 +1390,9 @@ function submitRequestReviewers() {
   align-items: baseline;
   gap: var(--space-4);
   min-width: 0;
-  flex: 1;
+  /* The 280px basis is what makes the actions wrap onto their own line on
+     narrow screens, rather than crushing the title. */
+  flex: 1 1 280px;
 }
 
 .pdv-pr-num {
@@ -1413,9 +1418,21 @@ function submitRequestReviewers() {
 
 .pdv-hero-actions {
   display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-2);
+  /* Stays right-aligned when wrapped onto its own line. */
+  margin-left: auto;
+  min-width: 0;
+  max-width: 100%;
+}
+.pdv-hero-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: var(--space-3);
-  flex-shrink: 0;
   align-items: center;
+  max-width: 100%;
 }
 
 /* Forge-side auto-merge (v3.11.0): armed status + inline cancel. */
@@ -1435,11 +1452,12 @@ function submitRequestReviewers() {
 /* Disabled explanation row: the forge's own reason text is rendered as-is
    next to the label (never translated, see AGENTS.md's i18n rule). */
 .pdv-automerge-unavailable {
-  display: inline-flex;
-  align-items: center;
+  /* One line when there is room; wraps on narrow screens. */
+  margin: 0;
+  max-width: 100%;
   font-size: var(--font-size-sm);
   color: var(--color-text-muted);
-  white-space: nowrap;
+  text-align: right;
 }
 
 .pdv-hero-meta {
