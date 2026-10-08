@@ -145,6 +145,12 @@ export async function giteaConvertDraftToReady(cwd: string, index: number): Prom
   return tauriInvoke<void>("gitea_convert_draft_to_ready", { cwd, index });
 }
 
+/** Replace a PR's description. */
+export async function giteaUpdatePrBody(cwd: string, index: number, body: string): Promise<void> {
+  if (!isTauri()) throw new Error("giteaUpdatePrBody requires Tauri");
+  return tauriInvoke<void>("gitea_update_pr_body", { cwd, index, body });
+}
+
 export async function giteaCreateComment(
   cwd: string,
   index: number,

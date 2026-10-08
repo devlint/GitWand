@@ -225,6 +225,13 @@ export interface ForgeProvider {
   /** Convert a draft PR/MR to "ready for review". */
   convertDraftToReady(cwd: string, number: number): Promise<void>;
 
+  /**
+   * Replace the PR/MR description (Markdown body). Optional: forges without a
+   * write API for it (Cursor) omit it, and callers hide the action — see
+   * `forgeSupportsUpdateBody` in `usePrPanel`.
+   */
+  updatePRBody?(cwd: string, number: number, body: string): Promise<void>;
+
   // ── Comments ──────────────────────────────────────────────────────────────
 
   listComments(cwd: string, prNumber: number): Promise<PrReviewComment[]>;

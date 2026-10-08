@@ -30,6 +30,7 @@ import {
   giteaMergePr,
   giteaCheckoutPr,
   giteaConvertDraftToReady,
+  giteaUpdatePrBody,
   giteaReviewerCandidates,
   giteaBranches,
   ghPrConflictPreview,
@@ -160,6 +161,10 @@ export class GiteaProvider implements ForgeProvider {
 
   convertDraftToReady(cwd: string, number: number): Promise<void> {
     return giteaConvertDraftToReady(cwd, number);
+  }
+
+  updatePRBody(cwd: string, number: number, body: string): Promise<void> {
+    return giteaUpdatePrBody(cwd, number, body);
   }
 
   // ── Comments ──────────────────────────────────────────────────────────────

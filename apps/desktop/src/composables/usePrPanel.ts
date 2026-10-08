@@ -1184,6 +1184,34 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     }
   }
 
+  /** True when the active forge can rewrite a PR's description. */
+  const forgeSupportsUpdateBody = computed(() => typeof forge.value.updatePRBody === "function");
+
+  /**
+   * Replace a PR's description on the forge. Returns whether it was written so
+   * the caller can keep its draft on failure. On success the open detail is
+   * patched in place — no refetch, the forge just echoed back what we sent.
+   */
+  async function updatePrBody(number: number, body: string): Promise<boolean> {
+    if (!forge.value.updatePRBody) return false;
+    if (!(await requireOnline("pr edit"))) {
+      error.value = t("connectivity.offline.disabledOp");
+      return false;
+    }
+    try {
+      await forge.value.updatePRBody(cwd.value, number, body);
+      if (prDetail.value?.number === number) {
+        prDetail.value = { ...prDetail.value, body };
+        persistDetailCache();
+      }
+      success.value = t("pr.success.descriptionUpdated", number);
+      return true;
+    } catch (err: any) {
+      error.value = err.message;
+      return false;
+    }
+  }
+
   async function mergePr() {
     if (!mergingPr.value) return;
     if (!(await requireOnline("gh pr merge"))) {
@@ -1666,6 +1694,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     init, ensurePrsLoaded, loadRemote, loadPrs, loadMorePrs, loadCurrentUser, selectPr, loadDiff, loadChecks,
     revalidateOpenDetail,
     createPr, checkoutPr, mergePr, armAutoMerge, disarmAutoMerge, convertDraftToReady,
+    updatePrBody, forgeSupportsUpdateBody,
     handleCreateComment, handleReplyComment, handleEditComment,
     handleDeleteComment, handleApplySuggestion, handleAddToReview, handleSubmitReview,
     handleDismissReview, handleRequestReviewers, forgeSupportsDismissReview, forgeSupportsRequestReviewers,

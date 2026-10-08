@@ -40,6 +40,7 @@ import {
   ghPrHotspots,
   ghPrFileHistory,
   ghPrReady,
+  ghPrUpdateBody,
   ghListIssues,
 } from "../../utils/backend";
 
@@ -153,6 +154,10 @@ export class GitHubProvider implements ForgeProvider {
 
   convertDraftToReady(cwd: string, number: number): Promise<void> {
     return ghPrReady(cwd, number);
+  }
+
+  updatePRBody(cwd: string, number: number, body: string): Promise<void> {
+    return ghPrUpdateBody(cwd, number, body);
   }
 
   // ── Comments ──────────────────────────────────────────────────────────────

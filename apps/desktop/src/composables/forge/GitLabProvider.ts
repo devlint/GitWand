@@ -35,6 +35,7 @@ import {
   glDisableAutoMerge,
   glCheckoutMr,
   glConvertDraftToReady,
+  glMrUpdateDescription,
   glMrNotes,
   glMrCreateNote,
   glMrUpdateNote,
@@ -191,6 +192,10 @@ export class GitLabProvider implements ForgeProvider {
 
   convertDraftToReady(cwd: string, number: number): Promise<void> {
     return glConvertDraftToReady(cwd, number);
+  }
+
+  updatePRBody(cwd: string, number: number, body: string): Promise<void> {
+    return glMrUpdateDescription(cwd, number, body);
   }
 
   // ── Notes (comments) ───────────────────────────────────────────────────────

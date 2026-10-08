@@ -32,6 +32,7 @@ import {
   azEnableAutoMerge,
   azDisableAutoMerge,
   azPrReady,
+  azPrUpdateBody,
   azCheckoutPr,
   azPrComments,
   azPrCreateComment,
@@ -155,6 +156,10 @@ export class AzureProvider implements ForgeProvider {
 
   convertDraftToReady(cwd: string, number: number): Promise<void> {
     return azPrReady(cwd, number);
+  }
+
+  updatePRBody(cwd: string, number: number, body: string): Promise<void> {
+    return azPrUpdateBody(cwd, number, body);
   }
 
   // ── Comments ───────────────────────────────────────────────────────────────

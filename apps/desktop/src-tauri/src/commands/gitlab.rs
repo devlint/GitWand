@@ -1330,6 +1330,42 @@ pub(crate) async fn gl_convert_draft_to_ready(cwd: String, iid: i64) -> Result<(
         .map_err(|e| e.to_string())?
 }
 
+/// Replace a MR's description via `glab api` (`-f` sends it as a raw string).
+fn gl_mr_update_description_inner(cwd: String, iid: i64, body: String) -> Result<(), String> {
+    let endpoint = format!("projects/:fullpath/merge_requests/{}", iid);
+    let mut cmd = hidden_cmd("glab");
+    cmd.args([
+        "api",
+        "-X",
+        "PUT",
+        &endpoint,
+        "-f",
+        &format!("description={}", body),
+    ])
+    .current_dir(&cwd);
+    let output = output_with_timeout(cmd, GLAB_TIMEOUT)
+        .map_err(|e| format!("glab api update description: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "gl update description failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) async fn gl_mr_update_description(
+    cwd: String,
+    iid: i64,
+    body: String,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || gl_mr_update_description_inner(cwd, iid, body))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 /// Flatten a `/discussions` response into the flat note-array shape
 /// `/notes` used to return, preserving each note's own fields — notably
 /// `resolvable`/`resolved`, which the flat endpoint never carried (#161).

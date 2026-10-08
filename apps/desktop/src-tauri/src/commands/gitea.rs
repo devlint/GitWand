@@ -1108,6 +1108,20 @@ pub(crate) async fn gitea_convert_draft_to_ready(cwd: String, index: i64) -> Res
     Ok(())
 }
 
+/// Replace a PR's description.
+#[tauri::command]
+pub(crate) async fn gitea_update_pr_body(
+    cwd: String,
+    index: i64,
+    body: String,
+) -> Result<(), String> {
+    let ctx = gitea_ctx(&cwd)?;
+    let url = format!("{}/pulls/{}", ctx.repo_api(), index);
+    let payload = serde_json::json!({ "body": body }).to_string();
+    gitea_curl("PATCH", &url, Some(&payload), &ctx.auth)?;
+    Ok(())
+}
+
 #[tauri::command]
 pub(crate) async fn gitea_branches(cwd: String) -> Result<Vec<String>, String> {
     let ctx = gitea_ctx(&cwd)?;

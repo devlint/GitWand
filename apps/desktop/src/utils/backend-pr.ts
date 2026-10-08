@@ -559,6 +559,12 @@ export async function ghPrReady(cwd: string, number: number): Promise<void> {
   return tauriInvoke<void>("gh_pr_ready", { cwd, number });
 }
 
+/** Replace a PR's description (Markdown body). */
+export async function ghPrUpdateBody(cwd: string, number: number, body: string): Promise<void> {
+  if (!isTauri()) throw new Error("ghPrUpdateBody requires Tauri");
+  return tauriInvoke<void>("gh_pr_update_body", { cwd, number, body });
+}
+
 /** Dismiss a submitted review (B4, v3.6.0). */
 export async function ghDismissReview(
   cwd: string,
@@ -1421,6 +1427,11 @@ export async function azDisableAutoMerge(cwd: string, number: number): Promise<v
 
 export async function azPrReady(cwd: string, number: number): Promise<void> {
   if (isTauri()) return tauriInvoke<void>("az_pr_ready", { cwd, number });
+  throw new Error(AZURE_WEB_ONLY);
+}
+
+export async function azPrUpdateBody(cwd: string, number: number, body: string): Promise<void> {
+  if (isTauri()) return tauriInvoke<void>("az_pr_update_body", { cwd, number, body });
   throw new Error(AZURE_WEB_ONLY);
 }
 

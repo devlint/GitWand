@@ -26,8 +26,11 @@ import PrReactions from "./PrReactions.vue";
 import { resolvePrReviewShortcut, isEditableTarget } from "../composables/usePrReviewKeymap";
 import { usePrReviewNav } from "../composables/usePrReviewNav";
 import { useSettings } from "../composables/useSettings";
+import { useAIProvider } from "../composables/useAIProvider";
+import { usePrDescription } from "../composables/usePrDescription";
+import AiSparkle from "./AiSparkle.vue";
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
 
 const emit = defineEmits<{
   (e: "refresh"): void;
@@ -49,6 +52,57 @@ const isOpenPr = computed(() => {
 
 /** Local UI state for the PR description's formatted / raw switch. */
 const descriptionTab = ref<"formatted" | "raw">("formatted");
+
+// ─── AI description update ──────────────────────────────
+// The draft lives in usePrDescription's module state so it survives leaving
+// the view mid-generation; it is only shown on the PR it was made for.
+const ai = useAIProvider();
+const prDescription = usePrDescription();
+
+const canUpdateDescription = computed(() =>
+  isOpenPr.value && p.forgeSupportsUpdateBody.value && ai.isAvailable.value,
+);
+
+const descriptionDraft = computed(() => {
+  const d = prDescription.pendingUpdate.value;
+  return d && d.cwd === p.cwd.value && d.number === p.prDetail.value?.number ? d : null;
+});
+
+/** Editable in the Raw tab; writes back into the pending draft. */
+const draftBody = computed({
+  get: () => descriptionDraft.value?.body ?? "",
+  set: (body: string) => {
+    const d = prDescription.pendingUpdate.value;
+    if (d) prDescription.pendingUpdate.value = { ...d, body };
+  },
+});
+const draftHtml = computed(() => renderMarkdown(draftBody.value));
+
+const applyingDescription = ref(false);
+
+async function updateDescriptionWithAI() {
+  const detail = p.prDetail.value;
+  if (!detail) return;
+  // Same language setting as PR creation: English unless "follow the UI".
+  const prLang = settings.value.prAiLanguage === "ui" ? locale.value : "en";
+  try {
+    await prDescription.update(p.cwd.value, detail, { locale: prLang });
+    descriptionTab.value = "formatted";
+  } catch {
+    // updateError is set by the composable and rendered below.
+  }
+}
+
+async function applyDescriptionDraft() {
+  const d = descriptionDraft.value;
+  if (!d) return;
+  applyingDescription.value = true;
+  try {
+    if (await p.updatePrBody(d.number, d.body)) prDescription.clearPendingUpdate();
+  } finally {
+    applyingDescription.value = false;
+  }
+}
 
 const commitsUrl = computed(() => {
   const base = p.prDetail.value?.url || "";
@@ -790,7 +844,18 @@ function submitRequestReviewers() {
           <section class="pdv-section pdv-section--desc">
             <div class="pdv-desc-head">
               <h2 class="pdv-section-label">{{ t('pr.detail.description') }}</h2>
-              <div v-if="p.prDetail.value.body" class="pdv-desc-tabs" role="tablist">
+              <button
+                v-if="canUpdateDescription && !descriptionDraft"
+                type="button"
+                class="btn btn--ai pdv-desc-ai"
+                :disabled="prDescription.isUpdating.value"
+                :title="t('pr.detail.aiUpdateHint')"
+                @click="updateDescriptionWithAI"
+              >
+                <AiSparkle :size="13" />
+                {{ prDescription.isUpdating.value ? t('pr.detail.aiUpdating') : t('pr.detail.aiUpdate') }}
+              </button>
+              <div v-if="p.prDetail.value.body || descriptionDraft" class="pdv-desc-tabs" role="tablist">
                 <button
                   type="button"
                   role="tab"
@@ -813,7 +878,47 @@ function submitRequestReviewers() {
                 </button>
               </div>
             </div>
-            <div v-if="p.prDetail.value.body" class="pdv-desc-body">
+            <p v-if="prDescription.updateError.value && !descriptionDraft" class="pdv-desc-error">
+              {{ prDescription.updateError.value }}
+            </p>
+            <div v-if="descriptionDraft" class="pdv-desc-body pdv-desc-body--draft">
+              <p class="pdv-desc-draft-note">
+                <AiSparkle :size="12" />
+                {{ t('pr.detail.aiUpdateDraftNote') }}
+              </p>
+              <div
+                v-if="descriptionTab === 'formatted'"
+                class="pdv-body-formatted"
+                @click="handleDescriptionClick"
+                v-html="draftHtml"
+              />
+              <textarea
+                v-else
+                v-model="draftBody"
+                class="pdv-desc-draft-input"
+                spellcheck="true"
+                :aria-label="t('pr.detail.description')"
+              />
+              <div class="pdv-desc-draft-actions">
+                <button
+                  type="button"
+                  class="pdv-btn pdv-btn--sm pdv-btn--ghost"
+                  :disabled="applyingDescription"
+                  @click="prDescription.clearPendingUpdate()"
+                >
+                  {{ t('pr.detail.aiUpdateDiscard') }}
+                </button>
+                <button
+                  type="button"
+                  class="pdv-btn pdv-btn--sm pdv-btn--primary"
+                  :disabled="applyingDescription || !draftBody.trim()"
+                  @click="applyDescriptionDraft"
+                >
+                  {{ applyingDescription ? t('pr.detail.aiUpdateApplying') : t('pr.detail.aiUpdateApply') }}
+                </button>
+              </div>
+            </div>
+            <div v-else-if="p.prDetail.value.body" class="pdv-desc-body">
               <div
                 v-if="descriptionTab === 'formatted'"
                 class="pdv-body-formatted"
@@ -2095,6 +2200,54 @@ function submitRequestReviewers() {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   overflow: hidden;
+}
+
+/* AI description update */
+.btn.pdv-desc-ai {
+  margin-right: auto;
+  font-size: var(--font-size-xs);
+  padding: 2px var(--space-4);
+}
+.pdv-desc-body--draft {
+  border-color: var(--color-accent);
+}
+.pdv-desc-draft-note {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-3) var(--space-6);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  border-bottom: 1px solid var(--color-border);
+}
+.pdv-desc-draft-input {
+  display: block;
+  width: 100%;
+  min-height: 280px;
+  box-sizing: border-box;
+  margin: 0;
+  padding: var(--space-5) var(--space-6);
+  border: none;
+  outline: none;
+  resize: vertical;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  line-height: 1.6;
+}
+.pdv-desc-draft-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-6);
+  border-top: 1px solid var(--color-border);
+}
+.pdv-desc-error {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-danger);
 }
 
 .pdv-body-formatted {

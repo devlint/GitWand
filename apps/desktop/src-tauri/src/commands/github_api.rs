@@ -1490,6 +1490,21 @@ pub(crate) fn rest_pr_ready(cwd: &str, number: i64, token: &str) -> Result<(), S
     Ok(())
 }
 
+/// Replace a PR's description (body). `get_pr_json` resolves which repo
+/// (origin or upstream) actually holds the PR.
+pub(crate) fn rest_pr_update_body(
+    cwd: &str,
+    number: i64,
+    body: &str,
+    token: &str,
+) -> Result<(), String> {
+    let (repo, _pr) = get_pr_json(cwd, number, token)?;
+    let url = format!("{}/repos/{}/pulls/{}", API_BASE, repo, number);
+    let payload = serde_json::json!({ "body": body });
+    api_json("PATCH", &url, token, Some(&payload.to_string()))?;
+    Ok(())
+}
+
 /// GraphQL equivalent of `gh pr merge --auto`, for the configured-token path.
 ///
 /// `enablePullRequestAutoMerge` takes the PR's node id, resolved the same way

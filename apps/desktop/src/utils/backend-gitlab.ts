@@ -240,6 +240,12 @@ export async function glConvertDraftToReady(cwd: string, iid: number): Promise<v
   return tauriInvoke<void>("gl_convert_draft_to_ready", { cwd, iid });
 }
 
+/** Replace a MR's description. */
+export async function glMrUpdateDescription(cwd: string, iid: number, body: string): Promise<void> {
+  if (!isTauri()) throw new Error("glMrUpdateDescription requires Tauri");
+  return tauriInvoke<void>("gl_mr_update_description", { cwd, iid, body });
+}
+
 /**
  * Helper — map a raw GitLab note JSON object to a PrReviewComment.
  * GitLab notes are simpler than GitHub review comments: no diff-line

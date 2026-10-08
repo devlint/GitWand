@@ -180,6 +180,12 @@ export async function bbConvertDraftToReady(cwd: string, prId: number): Promise<
   return tauriInvoke<void>("bb_convert_draft_to_ready", { cwd, prId });
 }
 
+/** Replace a PR's description. */
+export async function bbUpdatePrDescription(cwd: string, prId: number, body: string): Promise<void> {
+  if (!isTauri()) throw new Error("bbUpdatePrDescription requires Tauri");
+  return tauriInvoke<void>("bb_update_pr_description", { cwd, prId, body });
+}
+
 /** Get the current Bitbucket user (from stored credentials). */
 export async function bbCurrentUser(cwd: string): Promise<string> {
   if (!isTauri()) throw new Error("bbCurrentUser requires Tauri");

@@ -1401,6 +1401,43 @@ pub(crate) async fn bb_convert_draft_to_ready(cwd: String, pr_id: i64) -> Result
     Ok(())
 }
 
+/// Replace a PR's description.
+///
+/// Bitbucket updates PRs with PUT, and a PUT that omits `reviewers` clears
+/// them — so the current title and reviewers are read first and sent back
+/// unchanged alongside the new description.
+#[tauri::command]
+pub(crate) async fn bb_update_pr_description(
+    cwd: String,
+    pr_id: i64,
+    body: String,
+) -> Result<(), String> {
+    let (workspace, slug) = parse_workspace_slug(&cwd)?;
+    let (username, app_password) = get_bb_creds(&cwd)?;
+    let auth_config = basic_auth_config(&username, &app_password);
+
+    let pr_url = format!("{}/pullrequests/{}", repo_api(&workspace, &slug), pr_id);
+    let pr = bb_curl("GET", &pr_url, None, &auth_config)?;
+    let reviewers: Vec<serde_json::Value> = pr
+        .get("reviewers")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .map(|r| serde_json::json!({ "uuid": js(r, "uuid") }))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let payload = serde_json::json!({
+        "title": js(&pr, "title"),
+        "description": body,
+        "reviewers": reviewers,
+    })
+    .to_string();
+    bb_curl("PUT", &pr_url, Some(&payload), &auth_config)?;
+    Ok(())
+}
+
 // ─── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
