@@ -1136,7 +1136,7 @@ const en = {
     tabGit: "Git",
     tabEditor: "Editor",
     tabTerminal: "Terminal",
-    tabAi: "AI",
+    tabAi: "AI (Core & Setup)",
     tabLogs: "Logs",
     // v3.7.0 review-round fix (finding #13a): nav sidebar group headers
     navGroupApplication: "Application",

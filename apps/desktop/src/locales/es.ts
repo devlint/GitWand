@@ -1119,7 +1119,7 @@ const es: Locale = {
     tabGit: "Git",
     tabEditor: "Editor",
     tabTerminal: "Terminal",
-    tabAi: "IA",
+    tabAi: "IA (Núcleo y configuración)",
     tabLogs: "Registros",
     // v3.7.0 review-round fix (finding #13a): encabezados de grupo de la nav
     navGroupApplication: "Aplicación",

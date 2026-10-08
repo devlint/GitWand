@@ -1120,7 +1120,7 @@ const ptBR: Locale = {
     tabGit: "Git",
     tabEditor: "Editor",
     tabTerminal: "Terminal",
-    tabAi: "IA",
+    tabAi: "IA (Núcleo e configuração)",
     tabLogs: "Registros",
     // v3.7.0 review-round fix (finding #13a): cabeçalhos de grupo da nav
     navGroupApplication: "Aplicativo",

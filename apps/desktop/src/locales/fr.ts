@@ -1128,7 +1128,7 @@ const fr: Locale = {
     tabGit: "Git",
     tabEditor: "\u00c9diteur",
     tabTerminal: "Terminal",
-    tabAi: "IA",
+    tabAi: "IA (Cœur & configuration)",
     tabLogs: "Journaux",
     // v3.7.0 review-round fix (finding #13a): en-têtes de groupe de la nav
     navGroupApplication: "Application",

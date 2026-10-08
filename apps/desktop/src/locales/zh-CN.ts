@@ -1197,7 +1197,7 @@ const zhCN: Locale = {
     tabGit: "Git",
     tabEditor: "编辑器",
     tabTerminal: "终端",
-    tabAi: "AI",
+    tabAi: "AI（核心与设置）",
     tabLogs: "日志",
     // v3.7.0 review-round fix (finding #13a): 导航栏分组标题
     navGroupApplication: "应用程序",
