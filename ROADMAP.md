@@ -6,7 +6,7 @@
 
 ## What's Next
 
-_Ordered by priority, last verified 2026-10-08 (v3.12.0 shipped, five contributions merged on `main` unreleased; Stacked Branches, Combined Diffs and Voice Input each moved one minor later; the 2026-10-08 changelog scan inserted Agent Control as v3.15.0, pushing Voice Input to v3.16.0, then the worktree audit widened it into Agent Workspaces and added a v3.12.x merge-back fix). The thread: the measured-accuracy engine re-founds the trust every later auto-apply feature spends, then make the app reactive and fast (Live Repo), close the resolution loop (preview-to-apply, whose confidence threshold is only meaningful **because** of the accuracy work), then workflow & comparison primitives, experimental voice input, and the v4.0 code-intelligence headline. Full renumbering history: `git log -p -- roadmap.md`._
+_Ordered by priority, last verified 2026-10-08 (v3.12.0 shipped, ten PRs merged on `main` unreleased; Stacked Branches, Combined Diffs and Voice Input each moved one minor later; the 2026-10-08 changelog scan inserted Agent Control as v3.15.0, pushing Voice Input to v3.16.0, then the worktree audit widened it into Agent Workspaces and added a v3.12.x merge-back fix). The thread: the measured-accuracy engine re-founds the trust every later auto-apply feature spends, then make the app reactive and fast (Live Repo), close the resolution loop (preview-to-apply, whose confidence threshold is only meaningful **because** of the accuracy work), then workflow & comparison primitives, experimental voice input, and the v4.0 code-intelligence headline. Full renumbering history: `git log -p -- roadmap.md`._
 
 | Version | Codename | Why now |
 |---------|----------|---------|
@@ -23,8 +23,13 @@ _v3.12.0 (built-in terminal renderer, WIP in the Git Tree), v3.11.2 (Finder-like
 
 ### On `main`, not released yet
 
-_Merged 2026-10-07 (contributions by @t1gu1); no release scheduled yet. Version number decided at tag time: #224 changes a v3.12.0 flow. Waiting on @t1gu1's test of #224 on `main` before cutting it._
+_Merged 2026-10-07/08 (mostly contributions by @t1gu1); no release scheduled yet. Version number decided at tag time: #224 changes a v3.12.0 flow. Waiting on @t1gu1's test of #224 on `main` before cutting it._
 
+- **Rebase Continue at an unresolved conflict** (#228, #223 point 1) — the rebase modal no longer looks dead: a failed `--continue` / `--skip` that is still halted on a conflict hands off to the conflict banner + inline MergeEditor, and the modal shows the error. Rebase state is read from `.git` (`gitRepoState`) instead of translated `git status` prose, so it works in any git locale; `DD` counts as a conflict in Rust and the dev-server
+- **Force-pushed upstream at checkout** (#229, #223 points 2–3) — a branch with no commits of its own whose upstream was rewritten (fork-point = local tip) gets the "Update branch" prompt and lands on the new remote with `pull --rebase` instead of a conflicting merge; the generic diverged prompt honours the pull mode. Needs the remote-tracking reflog: without it, falls back to the generic prompt
+- **Diff lines wrap** (#231) — long lines in `DiffViewer` and `CommitDiffViewer` soft-wrap with their indentation instead of being cut with an ellipsis
+- **AI loading animation** (#230) — every in-flight AI label or button fades in and out (off under `prefers-reduced-motion`); the loading labels drop their trailing ellipsis
+- **Unified Git Tree row highlight** (#232) — selection, current commit, search matches and hover light the graph band and the commit row together (active search match wins over selection); row bands, shade and branch chips retuned for the light theme; edges leave the WIP node at its rim, which gets a center dot
 - **WIP as a Git Tree entry** (#224) — the dock's WIP tab and the "Hide WIP when clean" setting are removed; the WIP is a selectable row of the Git Tree, shown only when the tree is dirty. Entering it swaps the right rail to Changes, and the diff opens only once a file is picked. The WIP row previews the commit-draft summary, or an AI indicator while one is generated. AI commit messages and PR descriptions now survive navigating away mid-generation
 - **Merge edges as S-curves** (#227) — a merge edge curves into the merged branch's lane and runs down to its parent, when that lane is free down to the parent; otherwise it keeps the elbow
 - **Steadier graph width** (#225) — the lane column grows at once but only shrinks after 1.5 s of stability, with no page loading (`useStickyWidth`)
