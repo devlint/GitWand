@@ -2617,11 +2617,14 @@ async function onAiTaskMergeBack() {
   aiTaskCloseError.value = null;
   try {
     const origin = await resolveAiTaskOrigin(target.path, target.projectPath);
-    // Kill the scratch's agent terminal first so no running process holds an
+    // Merge back first, keeping the worktree: a refusal ("main moved",
+    // "uncommitted changes would be overwritten") must leave the agent's
+    // terminal running. Only then kill it, so no running process holds an
     // index.lock or open handle that would block the worktree removal.
+    await scratchWorktreeMergeBack(origin, target.path, settings.value.snapshotsEnabled, true);
     await termSessions.disposeRepo(target.path).catch(() => {});
     fileExplorer.disposeRepo(target.path);
-    await scratchWorktreeMergeBack(origin, target.path, settings.value.snapshotsEnabled);
+    await scratchWorktreeDiscard(origin, target.path);
     await finalizeWorktreeRemoval(target.path, target.projectPath);
   } catch (err) {
     aiTaskCloseError.value = t("aiTask.errorMergeBack", String((err as { message?: string })?.message ?? err));
