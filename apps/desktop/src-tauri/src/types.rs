@@ -820,6 +820,15 @@ pub struct AntigravityModel {
     pub name: String,
 }
 
+/// One entry of Codex's model catalog (`codex debug models`): the `--model`
+/// slug, its display name, and the reasoning efforts it accepts.
+#[derive(Serialize)]
+pub struct CodexModel {
+    pub id: String,
+    pub name: String,
+    pub efforts: Vec<String>,
+}
+
 // ─── Git hooks ─────────────────────────────────────────────────────
 
 #[derive(Serialize)]

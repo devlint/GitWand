@@ -9,6 +9,7 @@ import {
   listOpencodeModels,
   listAntigravityModels,
   listCopilotModels,
+  listCodexModels,
   detectClaudeCli,
 } from "../utils/backend";
 import { t } from "./useI18n";
@@ -337,13 +338,13 @@ async function callAntigravityCli(
 //
 // Each provider exposes a model picker fed by whatever the provider can
 // enumerate: the Claude API and OpenAI-compatible endpoints are fetched
-// (`GET /v1/models`, `GET /models`), opencode and Antigravity are asked
-// through their CLI (`opencode models`, `agy models`), Claude Code accepts
-// stable aliases, and Codex / Copilot have no enumeration — an empty list
-// makes the Settings panel render a free-text input instead.
+// (`GET /v1/models`, `GET /models`), the CLIs are asked through their own
+// commands (`opencode models`, `agy models`, `copilot help config`, `codex
+// debug models`), and Claude Code accepts stable aliases. An empty list (CLI
+// missing, command failed) makes the Settings panel render a free-text input.
 
 /** Every effort level, in increasing order. */
-export const EFFORT_LEVELS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+export const EFFORT_LEVELS = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"] as const;
 
 /** A model the Settings picker can offer. */
 export interface AIModelOption {
@@ -383,8 +384,8 @@ export function providerEfforts(provider: AIProvider): string[] {
     case "copilot-cli":
       return COPILOT_EFFORTS;
     case "codex-cli":
-      // `model_reasoning_effort` values every Codex model accepts.
-      return ["minimal", "low", "medium", "high"];
+      // For a model typed by hand: the levels every catalog model accepts.
+      return ["low", "medium", "high"];
     default:
       return [];
   }
@@ -516,11 +517,10 @@ export async function listModelsForProvider(
     case "copilot-cli":
       // Copilot reports ids only, and one effort range for every model.
       return (await listCopilotModels()).map((id) => ({ id, name: id, efforts: COPILOT_EFFORTS }));
+    case "codex-cli":
+      return listCodexModels();
     case "claude-code-cli":
       return CLAUDE_CODE_MODELS;
-    // Codex slugs change frequently and the CLI has no enumeration command —
-    // fall back to free-text entry.
-    case "codex-cli":
     default:
       return [];
   }

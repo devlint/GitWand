@@ -24,7 +24,9 @@ use std::path::PathBuf;
 /// argument (never interpolated into a shell string), but it still comes from
 /// the frontend, so anything outside this list is dropped rather than
 /// forwarded.
-const EFFORT_LEVELS: &[&str] = &["none", "minimal", "low", "medium", "high", "xhigh", "max"];
+const EFFORT_LEVELS: &[&str] = &[
+    "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra",
+];
 
 /// The effort to forward, or `None` when it is empty or not a known level —
 /// in which case the CLI keeps its own default.
@@ -464,6 +466,87 @@ fn parse_antigravity_models(stdout: &str) -> Vec<AntigravityModel> {
 //   - `opencode models [provider]`                        — enumerate models
 //   - `opencode auth login`                               — provider auth
 //
+/// Enumerate Codex's model catalog (`codex debug models`, JSON). Codex
+/// refreshes it from the backend when it can and falls back to the catalog
+/// bundled with the binary, so this works logged out too. Hidden models
+/// (`visibility != "list"`) are dropped, the rest kept in Codex's own
+/// priority order. Returns an empty list — never an error — when the binary
+/// is missing or the output does not parse, so the Settings picker falls
+/// back to free-text entry.
+#[tauri::command]
+pub(crate) async fn codex_list_models() -> Result<Vec<CodexModel>, String> {
+    tauri::async_runtime::spawn_blocking(codex_list_models_inner)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn codex_list_models_inner() -> Result<Vec<CodexModel>, String> {
+    let binary = match resolve_codex_binary() {
+        Some(b) => b,
+        None => return Ok(Vec::new()),
+    };
+
+    let output = match hidden_cmd(&binary).args(["debug", "models"]).output() {
+        Ok(o) => o,
+        Err(_) => return Ok(Vec::new()),
+    };
+
+    if !output.status.success() {
+        return Ok(Vec::new());
+    }
+
+    Ok(parse_codex_models(&String::from_utf8_lossy(&output.stdout)))
+}
+
+fn parse_codex_models(json: &str) -> Vec<CodexModel> {
+    let catalog: serde_json::Value = match serde_json::from_str(json) {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+    let Some(entries) = catalog.get("models").and_then(|m| m.as_array()) else {
+        return Vec::new();
+    };
+
+    let mut listed: Vec<(i64, CodexModel)> = entries
+        .iter()
+        .filter(|m| m.get("visibility").and_then(|v| v.as_str()).unwrap_or("list") == "list")
+        .filter_map(|m| {
+            let id = m.get("slug")?.as_str()?.trim();
+            if id.is_empty() {
+                return None;
+            }
+            let name = m
+                .get("display_name")
+                .and_then(|n| n.as_str())
+                .filter(|n| !n.trim().is_empty())
+                .unwrap_or(id);
+            let efforts = m
+                .get("supported_reasoning_levels")
+                .and_then(|l| l.as_array())
+                .map(|levels| {
+                    levels
+                        .iter()
+                        .filter_map(|l| l.get("effort")?.as_str())
+                        .filter(|e| EFFORT_LEVELS.contains(e))
+                        .map(str::to_string)
+                        .collect()
+                })
+                .unwrap_or_default();
+            let priority = m.get("priority").and_then(|p| p.as_i64()).unwrap_or(i64::MAX);
+            Some((
+                priority,
+                CodexModel {
+                    id: id.to_string(),
+                    name: name.trim().to_string(),
+                    efforts,
+                },
+            ))
+        })
+        .collect();
+    listed.sort_by_key(|(priority, _)| *priority);
+    listed.into_iter().map(|(_, m)| m).collect()
+}
+
 // ─── Antigravity binary resolution ──────────────────────────────────────────
 // Antigravity CLI (google-antigravity/antigravity-cli). The binary is named
 // `agy` and defaults to ~/.local/bin/agy (curl installer).
@@ -1265,5 +1348,22 @@ mod tests {
                     \x20   - \"default\"\n";
         assert_eq!(parse_copilot_models(help), vec!["claude-sonnet-5", "gpt-5.5"]);
         assert!(parse_copilot_models("no model section").is_empty());
+    }
+
+    #[test]
+    fn parse_codex_models_keeps_listed_models_in_priority_order() {
+        let json = r#"{"models":[
+            {"slug":"gpt-6-astra","display_name":"GPT-6-Astra","visibility":"list","priority":2,
+             "supported_reasoning_levels":[{"effort":"low"},{"effort":"ultra"},{"effort":"bogus"}]},
+            {"slug":"gpt-hidden","display_name":"Hidden","visibility":"hide","priority":0},
+            {"slug":"gpt-6.1-sol","display_name":"GPT-6.1-Sol","visibility":"list","priority":1}
+        ]}"#;
+        let models = parse_codex_models(json);
+        assert_eq!(models.len(), 2);
+        assert_eq!(models[0].id, "gpt-6.1-sol");
+        assert!(models[0].efforts.is_empty());
+        assert_eq!(models[1].name, "GPT-6-Astra");
+        assert_eq!(models[1].efforts, vec!["low", "ultra"]);
+        assert!(parse_codex_models("not json").is_empty());
     }
 }

@@ -6,7 +6,7 @@
  *   1. `modelForProvider` / `listModelsForProvider` — the model-selection
  *      helpers backing the Settings second select. CLI agents are model-
  *      scoped via `aiModelByProvider`; opencode enumerates dynamically,
- *      Claude Code advertises curated aliases, Codex falls back to free text.
+ *      Claude Code advertises curated aliases, the other CLIs enumerate through their own commands.
  *
  *   2. Provider dispatch in `rawPrompt()` — the opencode-cli case must route
  *      to `opencodeCliPrompt`, and all three CLI agents must forward the
@@ -30,6 +30,7 @@ const {
   listOpencodeModels,
   listAntigravityModels,
   listCopilotModels,
+  listCodexModels,
   detectClaudeCli,
 } = vi.hoisted(() => ({
   claudeCliPrompt: vi.fn(async () => "ok-claude"),
@@ -37,6 +38,9 @@ const {
   opencodeCliPrompt: vi.fn(async () => "ok-opencode"),
   copilotCliPrompt: vi.fn(async () => "ok-copilot"),
   listOpencodeModels: vi.fn(async () => ["anthropic/claude-x", "openai/gpt-y"]),
+  listCodexModels: vi.fn(async () => [
+    { id: "gpt-6.1-sol", name: "GPT-6.1-Sol", efforts: ["low", "medium", "high", "ultra"] },
+  ]),
   listCopilotModels: vi.fn(async () => ["claude-sonnet-5", "gpt-5.5"]),
   listAntigravityModels: vi.fn(async () => [
     { id: "gemini-3.8-flash-high", name: "Gemini 3.8 Flash (High)" },
@@ -60,6 +64,7 @@ vi.mock("../utils/backend", () => ({
   listOpencodeModels,
   listAntigravityModels,
   listCopilotModels,
+  listCodexModels,
   detectClaudeCli,
 }));
 
@@ -118,8 +123,10 @@ describe("listModelsForProvider", () => {
     expect(await listModelsForProvider("claude-code-cli")).toEqual(CLAUDE_CODE_MODELS);
   });
 
-  it("returns an empty list (free-text fallback) for Codex", async () => {
-    expect(await listModelsForProvider("codex-cli")).toEqual([]);
+  it("enumerates the Codex catalog with per-model efforts", async () => {
+    expect(await listModelsForProvider("codex-cli")).toEqual([
+      { id: "gpt-6.1-sol", name: "GPT-6.1-Sol", efforts: ["low", "medium", "high", "ultra"] },
+    ]);
   });
 
   it("enumerates Copilot models with Copilot's effort range", async () => {

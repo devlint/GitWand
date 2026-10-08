@@ -372,7 +372,7 @@ const claudeSpawnEnv = (() => {
  * Effort levels the AI CLIs accept — same allowlist as the Rust backend's
  * `valid_effort`. Returns the level, or "" to let the CLI keep its default.
  */
-const EFFORT_LEVELS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
+const EFFORT_LEVELS = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
 function validEffort(effort) {
   const e = String(effort ?? "").trim();
   return EFFORT_LEVELS.includes(e) ? e : "";
@@ -5585,6 +5585,33 @@ async function handleRequest(req, res) {
         return res.writeHead(200, { ...corsHeaders(req), "Content-Type": "text/plain" }).end(r.stdout);
       } catch (err) {
         return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
+      }
+    }
+
+    // GET /api/codex-models  → { models: { id, name, efforts }[] }
+    // `codex debug models` dumps the JSON catalog (refreshed, or bundled when
+    // offline) — same filtering and ordering as the Rust `parse_codex_models`.
+    if (url.pathname === "/api/codex-models" && req.method === "GET") {
+      try {
+        const CODEX = resolveBin("codex");
+        const r = spawnSync(CODEX, ["debug", "models"], { encoding: "utf-8", maxBuffer: 32 * 1024 * 1024 });
+        if (r.status !== 0) {
+          return jsonResponse(req, res, { models: [] });
+        }
+        const entries = JSON.parse(r.stdout || "{}").models ?? [];
+        const models = entries
+          .filter((m) => (m.visibility ?? "list") === "list" && typeof m.slug === "string" && m.slug.trim())
+          .sort((a, b) => (a.priority ?? Infinity) - (b.priority ?? Infinity))
+          .map((m) => ({
+            id: m.slug.trim(),
+            name: (m.display_name || "").trim() || m.slug.trim(),
+            efforts: (m.supported_reasoning_levels ?? [])
+              .map((l) => l?.effort)
+              .filter((e) => EFFORT_LEVELS.includes(e)),
+          }));
+        return jsonResponse(req, res, { models });
+      } catch {
+        return jsonResponse(req, res, { models: [] });
       }
     }
 

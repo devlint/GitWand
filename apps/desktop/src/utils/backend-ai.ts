@@ -169,6 +169,41 @@ export async function codexCliPrompt(
   return await res.text();
 }
 
+/** One entry of Codex's model catalog (`codex debug models`). */
+export interface CodexModel {
+  /** Value passed to `codex exec --model`, e.g. `gpt-6.1-sol`. */
+  id: string;
+  /** Display name, e.g. `GPT-6.1-Sol`. */
+  name: string;
+  /** Reasoning efforts the model accepts, in Codex's order. */
+  efforts: string[];
+}
+
+/**
+ * Enumerate Codex's model catalog (`codex debug models`). Returns an empty
+ * array — never throws — when the binary is missing or the command fails, so
+ * callers can fall back to free-text entry.
+ */
+export async function listCodexModels(): Promise<CodexModel[]> {
+  if (isTauri()) {
+    try {
+      return await tauriInvoke<CodexModel[]>("codex_list_models");
+    } catch {
+      return [];
+    }
+  }
+  try {
+    const res = await devFetch(`${DEV_SERVER}/api/codex-models`);
+    if (res.ok) {
+      const body = await res.json();
+      return Array.isArray(body?.models) ? body.models : [];
+    }
+  } catch {
+    // Dev server unavailable
+  }
+  return [];
+}
+
 // ─── opencode CLI provider (v2.17) ─────────────────────────
 // Mirrors the Claude / Codex CLI shape. opencode runs one-shot prompts via
 // `opencode run [--model provider/model] "<prompt>"` and enumerates its
