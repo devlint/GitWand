@@ -2169,7 +2169,7 @@ function submitRequestReviewers() {
 .pdv-desc-tabs {
   display: inline-flex;
   background: var(--color-bg-tertiary);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-md);
   padding: 2px;
   gap: 2px;
 }
@@ -2178,7 +2178,7 @@ function submitRequestReviewers() {
   font-weight: var(--font-weight-medium);
   font-family: inherit;
   padding: 2px var(--space-4);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-sm);
   border: none;
   background: transparent;
   color: var(--color-text-muted);
