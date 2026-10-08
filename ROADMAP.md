@@ -45,7 +45,7 @@ _Found in the 2026-10-08 worktree audit, reproduced on a throwaway repo with the
 
 `scratch_worktree_merge_back` (`commands/scratch.rs`) does not merge: it `git rm`s every path present in `HEAD` but absent from the scratch branch, then runs `git checkout <scratch> -- .`. When `main` moved after the task was created, this **reverts** files `main` changed since, **deletes** files `main` added, **overwrites** uncommitted edits to tracked files (the only guard checks for unmerged entries), flattens the agent's commits into one uncommitted change, and takes no Time Machine snapshot first.
 
-- ~~**Interim fix**~~ — done in #233: refuses when the main checkout's `HEAD` is not in the task branch's history, then squash-merges the task branch — all or nothing, unrelated uncommitted edits survive, untracked and ignored files are never overwritten — after a `merge-back` snapshot (v3.8). The AI-task close keeps the agent's terminal alive when merge-back is refused
+- ~~**Interim fix**~~ — done in #233: refuses when the main checkout's `HEAD` is not in the task branch's history, then squash-merges the task branch — all or nothing, unrelated uncommitted edits survive, untracked and ignored files are never overwritten — after a `merge-back` snapshot (v3.8). Refuses while the main checkout is mid-operation or the scratch has unresolved (unstaged) conflicts
 - **Real fix** (lands with v3.15 below) — merge or rebase the task branch through the v3.11 preview → apply flow, keeping the agent's commits
 - ~~**Regression test**~~ — done in #233, with the overlap, untracked/ignored, file↔directory, case-only, pending-merge and snapshot cases
 

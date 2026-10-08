@@ -2220,7 +2220,6 @@ const ptBR: Locale = {
     working: "Processando…",
     errorDelete: "Falha ao excluir o worktree: {0}",
     errorMergeBack: "Falha ao fazer merge: {0}",
-    errorMergeBackLate: "As alterações da tarefa já estão preparadas no checkout principal, mas o que ela escreveu durante o fechamento não pôde ser trazido: {0}. A tarefa foi mantida.",
   },
 
   // ─── Submodules ─────────────────────────────────────────

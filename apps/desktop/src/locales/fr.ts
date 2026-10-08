@@ -2229,7 +2229,6 @@ const fr: Locale = {
     working: "En cours…",
     errorDelete: "Échec de la suppression du worktree : {0}",
     errorMergeBack: "Échec de la fusion : {0}",
-    errorMergeBackLate: "Les changements de la tâche sont déjà indexés dans le checkout principal, mais ce qu'elle a écrit pendant la fermeture n'a pas pu être ramené : {0}. La tâche est conservée.",
   },
 
   // ─── Submodules ─────────────────────────────────────────
