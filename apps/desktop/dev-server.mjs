@@ -367,6 +367,16 @@ const claudeSpawnEnv = (() => {
   delete clean.ANTHROPIC_AUTH_TOKEN;
   return clean;
 })();
+
+/**
+ * Effort levels the AI CLIs accept — same allowlist as the Rust backend's
+ * `valid_effort`. Returns the level, or "" to let the CLI keep its default.
+ */
+const EFFORT_LEVELS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
+function validEffort(effort) {
+  const e = String(effort ?? "").trim();
+  return EFFORT_LEVELS.includes(e) ? e : "";
+}
 console.log(`[dev-server] gh binary:  ${GH}`);
 console.log(`[dev-server] git binary: ${GIT}`);
 
@@ -5462,6 +5472,8 @@ async function handleRequest(req, res) {
         if (body.model && String(body.model).trim()) {
           claudeArgs.push("--model", String(body.model).trim());
         }
+        const claudeEffort = validEffort(body.effort);
+        if (claudeEffort) claudeArgs.push("--effort", claudeEffort);
         const r = spawnSync(CLAUDE, claudeArgs, {
           cwd: body.cwd || undefined,
           encoding: "utf-8",
@@ -5558,6 +5570,8 @@ async function handleRequest(req, res) {
         if (body.model && String(body.model).trim()) {
           codexArgs.push("--model", String(body.model).trim());
         }
+        const codexEffort = validEffort(body.effort);
+        if (codexEffort) codexArgs.push("-c", `model_reasoning_effort=${codexEffort}`);
         codexArgs.push(fullPrompt);
         const r = spawnSync(CODEX, codexArgs, {
           cwd: body.cwd || undefined,
@@ -5727,6 +5741,8 @@ async function handleRequest(req, res) {
         if (body.model && String(body.model).trim()) {
           cpArgs.push("--model", String(body.model).trim());
         }
+        const cpEffort = validEffort(body.effort);
+        if (cpEffort) cpArgs.push("--reasoning-effort", cpEffort);
         cpArgs.push("-p", fullPrompt);
         const cpEnv = { ...process.env };
         delete cpEnv.COPILOT_ALLOW_ALL;
@@ -5791,6 +5807,26 @@ async function handleRequest(req, res) {
         });
       } catch (err) {
         return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
+      }
+    }
+
+    // GET /api/antigravity-models  → { models: { id, name }[] }
+    if (url.pathname === "/api/antigravity-models" && req.method === "GET") {
+      try {
+        const AGY = resolveBin("agy");
+        const r = spawnSync(AGY, ["models"], { encoding: "utf-8", maxBuffer: 8 * 1024 * 1024 });
+        if (r.status !== 0) {
+          return jsonResponse(req, res, { models: [] });
+        }
+        // `<id>\t<name>` per line; the "Fetching available models..." banner has no tab.
+        const models = (r.stdout || "")
+          .split(/\r?\n/)
+          .map((l) => l.split("\t"))
+          .filter((parts) => parts.length >= 2 && parts[0].trim())
+          .map(([id, name]) => ({ id: id.trim(), name: name.trim() || id.trim() }));
+        return jsonResponse(req, res, { models });
+      } catch {
+        return jsonResponse(req, res, { models: [] });
       }
     }
 

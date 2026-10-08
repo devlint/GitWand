@@ -18,6 +18,21 @@ use crate::git::*;
 use crate::types::*;
 use std::path::PathBuf;
 
+// ─── Reasoning effort ────────────────────────────────────────────────────
+
+/// Effort levels any of the CLIs accept. The value is passed as its own
+/// argument (never interpolated into a shell string), but it still comes from
+/// the frontend, so anything outside this list is dropped rather than
+/// forwarded.
+const EFFORT_LEVELS: &[&str] = &["none", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+/// The effort to forward, or `None` when it is empty or not a known level —
+/// in which case the CLI keeps its own default.
+fn valid_effort(effort: Option<&String>) -> Option<&'static str> {
+    let e = effort?.trim();
+    EFFORT_LEVELS.iter().copied().find(|l| *l == e)
+}
+
 // ─── Claude binary resolution + env hygiene ──────────────────────────────
 
 /// Apply the API-key env strip to a `std::process::Command` before spawning.
@@ -177,6 +192,7 @@ pub(crate) async fn claude_cli_prompt(
     cwd: Option<String>,
     output_format: Option<String>,
     model: Option<String>,
+    effort: Option<String>,
 ) -> Result<String, String> {
     // The body spawns a process and blocks on `.output()`. Inside the async
     // runtime that pins one of tokio's worker threads for the whole model
@@ -184,7 +200,7 @@ pub(crate) async fn claude_cli_prompt(
     // other IPC command. `spawn_blocking` puts it on the blocking pool
     // instead, which is what `ops.rs` already does for git subprocesses.
     tauri::async_runtime::spawn_blocking(move || {
-        claude_cli_prompt_inner(prompt, system_prompt, cwd, output_format, model)
+        claude_cli_prompt_inner(prompt, system_prompt, cwd, output_format, model, effort)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -196,6 +212,7 @@ fn claude_cli_prompt_inner(
     cwd: Option<String>,
     output_format: Option<String>,
     model: Option<String>,
+    effort: Option<String>,
 ) -> Result<String, String> {
     let binary =
         resolve_claude_binary().ok_or_else(|| "Binaire `claude` introuvable".to_string())?;
@@ -226,6 +243,9 @@ fn claude_cli_prompt_inner(
         if !m.trim().is_empty() {
             cmd.args(["--model", m.trim()]);
         }
+    }
+    if let Some(e) = valid_effort(effort.as_ref()) {
+        cmd.args(["--effort", e]);
     }
     strip_claude_auth_env(&mut cmd);
     if let Some(dir) = cwd {
@@ -316,9 +336,10 @@ pub(crate) async fn codex_cli_prompt(
     system_prompt: Option<String>,
     cwd: Option<String>,
     model: Option<String>,
+    effort: Option<String>,
 ) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        codex_cli_prompt_inner(prompt, system_prompt, cwd, model)
+        codex_cli_prompt_inner(prompt, system_prompt, cwd, model, effort)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -329,6 +350,7 @@ fn codex_cli_prompt_inner(
     system_prompt: Option<String>,
     cwd: Option<String>,
     model: Option<String>,
+    effort: Option<String>,
 ) -> Result<String, String> {
     let binary = resolve_codex_binary().ok_or_else(|| "Binaire `codex` introuvable".to_string())?;
 
@@ -354,6 +376,11 @@ fn codex_cli_prompt_inner(
             cmd.args(["--model", m.trim()]);
         }
     }
+    // `codex exec` has no effort flag; the config override is the
+    // documented way to set it for one run.
+    if let Some(e) = valid_effort(effort.as_ref()) {
+        cmd.args(["-c", &format!("model_reasoning_effort={}", e)]);
+    }
     cmd.arg(&full_prompt);
     if let Some(dir) = cwd {
         if !dir.trim().is_empty() {
@@ -377,6 +404,56 @@ fn codex_cli_prompt_inner(
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+/// Enumerate the models Antigravity offers (`agy models`). Each line is
+/// `<id>\t<display name>`; the effort level is baked into the id
+/// (`gemini-3.8-flash-high`), so there is no separate effort to pick. Returns
+/// an empty list — never an error — when the binary is missing or the command
+/// fails, so the Settings picker falls back to free-text entry.
+#[tauri::command]
+pub(crate) async fn antigravity_list_models() -> Result<Vec<AntigravityModel>, String> {
+    tauri::async_runtime::spawn_blocking(antigravity_list_models_inner)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn antigravity_list_models_inner() -> Result<Vec<AntigravityModel>, String> {
+    let binary = match resolve_antigravity_binary() {
+        Some(b) => b,
+        None => return Ok(Vec::new()),
+    };
+
+    let output = match hidden_cmd(&binary).arg("models").output() {
+        Ok(o) => o,
+        Err(_) => return Ok(Vec::new()),
+    };
+
+    if !output.status.success() {
+        return Ok(Vec::new());
+    }
+
+    Ok(parse_antigravity_models(&String::from_utf8_lossy(&output.stdout)))
+}
+
+/// Parse `agy models` stdout. Lines without a tab (the "Fetching available
+/// models..." banner) are skipped.
+fn parse_antigravity_models(stdout: &str) -> Vec<AntigravityModel> {
+    stdout
+        .lines()
+        .filter_map(|l| {
+            let (id, name) = l.split_once('\t')?;
+            let id = id.trim();
+            if id.is_empty() {
+                return None;
+            }
+            let name = name.trim();
+            Some(AntigravityModel {
+                id: id.to_string(),
+                name: if name.is_empty() { id.to_string() } else { name.to_string() },
+            })
+        })
+        .collect()
 }
 
 // ─── opencode CLI provider (v2.17) ───────────────────────────────────────
@@ -828,9 +905,10 @@ pub(crate) async fn copilot_cli_prompt(
     system_prompt: Option<String>,
     cwd: Option<String>,
     model: Option<String>,
+    effort: Option<String>,
 ) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        copilot_cli_prompt_inner(prompt, system_prompt, cwd, model)
+        copilot_cli_prompt_inner(prompt, system_prompt, cwd, model, effort)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -841,6 +919,7 @@ fn copilot_cli_prompt_inner(
     system_prompt: Option<String>,
     cwd: Option<String>,
     model: Option<String>,
+    effort: Option<String>,
 ) -> Result<String, String> {
     let binary =
         resolve_copilot_binary().ok_or_else(|| "Binaire `copilot` introuvable".to_string())?;
@@ -873,6 +952,9 @@ fn copilot_cli_prompt_inner(
         if !m.trim().is_empty() {
             cmd.args(["--model", m.trim()]);
         }
+    }
+    if let Some(e) = valid_effort(effort.as_ref()) {
+        cmd.args(["--reasoning-effort", e]);
     }
     cmd.args(["-p", full_prompt.as_str()]);
     if let Some(dir) = cwd {
@@ -1084,6 +1166,7 @@ mod tests {
                         None,
                         None,
                         None,
+                        None,
                     ))
                 })
                 .collect();
@@ -1104,5 +1187,26 @@ mod tests {
         for answer in answers {
             assert_eq!(answer.unwrap().trim(), "OK");
         }
+    }
+
+    #[test]
+    fn valid_effort_keeps_known_levels_only() {
+        assert_eq!(valid_effort(Some(&"high".to_string())), Some("high"));
+        assert_eq!(valid_effort(Some(&" xhigh ".to_string())), Some("xhigh"));
+        assert_eq!(valid_effort(Some(&"".to_string())), None);
+        assert_eq!(valid_effort(Some(&"--model=x".to_string())), None);
+        assert_eq!(valid_effort(None), None);
+    }
+
+    #[test]
+    fn parse_antigravity_models_skips_banner() {
+        let out = "Fetching available models...\n\
+                   gemini-3.8-flash-high\tGemini 3.8 Flash (High)\n\
+                   claude-sonnet-4-6\tClaude Sonnet 4.6 (Thinking)\n";
+        let models = parse_antigravity_models(out);
+        assert_eq!(models.len(), 2);
+        assert_eq!(models[0].id, "gemini-3.8-flash-high");
+        assert_eq!(models[0].name, "Gemini 3.8 Flash (High)");
+        assert_eq!(models[1].id, "claude-sonnet-4-6");
     }
 }

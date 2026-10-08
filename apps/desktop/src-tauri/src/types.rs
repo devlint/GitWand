@@ -812,6 +812,14 @@ pub struct AntigravityCliInfo {
     pub detail: String,
 }
 
+/// One entry of `agy models`: the `--model` id and its human-readable name
+/// (e.g. `gemini-3.8-flash-high` / `Gemini 3.8 Flash (High)`).
+#[derive(Serialize)]
+pub struct AntigravityModel {
+    pub id: String,
+    pub name: String,
+}
+
 // ─── Git hooks ─────────────────────────────────────────────────────
 
 #[derive(Serialize)]

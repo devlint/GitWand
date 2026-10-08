@@ -159,6 +159,11 @@ export interface AppSettings {
    * each one's previous choice; empty/absent means "CLI default".
    */
   aiModelByProvider: Partial<Record<AIProvider, string>>;
+  /**
+   * Per-provider reasoning effort (`low` … `max`), keyed like
+   * `aiModelByProvider`. Empty/absent means "the model's own default".
+   */
+  aiEffortByProvider: Partial<Record<AIProvider, string>>;
   /** Ollama base URL. */
   aiOllamaUrl: string;
   /** Ollama model name. */
@@ -476,6 +481,7 @@ export const defaultAppSettings: AppSettings = {
   aiApiEndpoint: "https://api.anthropic.com",
   aiModel: "claude-sonnet-4-20250514",
   aiModelByProvider: {},
+  aiEffortByProvider: {},
   aiOllamaUrl: "http://localhost:11434",
   aiOllamaModel: "codellama",
   aiHistoryEnabled: true,

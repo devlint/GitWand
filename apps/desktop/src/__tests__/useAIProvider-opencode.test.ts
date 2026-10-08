@@ -28,6 +28,7 @@ const {
   opencodeCliPrompt,
   copilotCliPrompt,
   listOpencodeModels,
+  listAntigravityModels,
   detectClaudeCli,
 } = vi.hoisted(() => ({
   claudeCliPrompt: vi.fn(async () => "ok-claude"),
@@ -35,6 +36,9 @@ const {
   opencodeCliPrompt: vi.fn(async () => "ok-opencode"),
   copilotCliPrompt: vi.fn(async () => "ok-copilot"),
   listOpencodeModels: vi.fn(async () => ["anthropic/claude-x", "openai/gpt-y"]),
+  listAntigravityModels: vi.fn(async () => [
+    { id: "gemini-3.8-flash-high", name: "Gemini 3.8 Flash (High)" },
+  ]),
   // Keep the auto-fallback disabled so it never hijacks the explicit provider.
   detectClaudeCli: vi.fn(async () => ({
     found: false,
@@ -52,12 +56,15 @@ vi.mock("../utils/backend", () => ({
   opencodeCliPrompt,
   copilotCliPrompt,
   listOpencodeModels,
+  listAntigravityModels,
   detectClaudeCli,
 }));
 
 import {
   useAIProvider,
   modelForProvider,
+  effortForProvider,
+  fetchAnthropicModels,
   listModelsForProvider,
   CLAUDE_CODE_MODELS,
   type AISettings,
@@ -118,8 +125,37 @@ describe("listModelsForProvider", () => {
 
   it("enumerates opencode models dynamically", async () => {
     const models = await listModelsForProvider("opencode-cli");
-    expect(models).toEqual(["anthropic/claude-x", "openai/gpt-y"]);
+    expect(models).toEqual([
+      { id: "anthropic/claude-x", name: "anthropic/claude-x", efforts: [] },
+      { id: "openai/gpt-y", name: "openai/gpt-y", efforts: [] },
+    ]);
     expect(listOpencodeModels).toHaveBeenCalledTimes(1);
+  });
+
+  it("enumerates Antigravity models with their display name", async () => {
+    expect(await listModelsForProvider("antigravity-cli")).toEqual([
+      { id: "gemini-3.8-flash-high", name: "Gemini 3.8 Flash (High)", efforts: [] },
+    ]);
+  });
+
+  it("returns an empty list for the Claude API without a key", async () => {
+    expect(await listModelsForProvider("claude", { aiApiKey: "", aiApiEndpoint: "" })).toEqual([]);
+  });
+});
+
+describe("effortForProvider", () => {
+  const s = {
+    aiEffortByProvider: { "claude-code-cli": "xhigh", "codex-cli": "bogus", claude: "" },
+  } as unknown as AISettings;
+
+  it("returns a known effort level", () => {
+    expect(effortForProvider(s, "claude-code-cli")).toBe("xhigh");
+  });
+
+  it("drops unknown or empty levels", () => {
+    expect(effortForProvider(s, "codex-cli")).toBeUndefined();
+    expect(effortForProvider(s, "claude")).toBeUndefined();
+    expect(effortForProvider(s, "copilot-cli")).toBeUndefined();
   });
 });
 
@@ -141,7 +177,7 @@ describe("rawPrompt provider dispatch", () => {
       aiModelByProvider: { "codex-cli": "gpt-5-codex" },
     });
     await useAIProvider().rawPrompt("sys", "user");
-    expect(codexCliPrompt).toHaveBeenCalledWith("user", "sys", undefined, "gpt-5-codex");
+    expect(codexCliPrompt).toHaveBeenCalledWith("user", "sys", undefined, "gpt-5-codex", undefined);
   });
 
   it("forwards the per-provider model to Claude Code", async () => {
@@ -150,7 +186,7 @@ describe("rawPrompt provider dispatch", () => {
       aiModelByProvider: { "claude-code-cli": "opus" },
     });
     await useAIProvider().rawPrompt("sys", "user");
-    expect(claudeCliPrompt).toHaveBeenCalledWith("user", "sys", undefined, "text", "opus");
+    expect(claudeCliPrompt).toHaveBeenCalledWith("user", "sys", undefined, "text", "opus", undefined);
   });
 
   it("routes copilot-cli to copilotCliPrompt with the selected model", async () => {
@@ -160,12 +196,98 @@ describe("rawPrompt provider dispatch", () => {
     });
     const out = await useAIProvider().rawPrompt("sys", "user");
     expect(out).toBe("ok-copilot");
-    expect(copilotCliPrompt).toHaveBeenCalledWith("user", "sys", undefined, "gpt-5");
+    expect(copilotCliPrompt).toHaveBeenCalledWith("user", "sys", undefined, "gpt-5", undefined);
+  });
+
+  it("forwards the per-provider effort to Claude Code, Codex and Copilot", async () => {
+    setSettings({
+      aiProvider: "claude-code-cli",
+      aiEffortByProvider: { "claude-code-cli": "max", "codex-cli": "high", "copilot-cli": "low" },
+    });
+    await useAIProvider().rawPrompt("sys", "user");
+    expect(claudeCliPrompt).toHaveBeenCalledWith("user", "sys", undefined, "text", undefined, "max");
+
+    setSettings({ aiProvider: "codex-cli", aiEffortByProvider: { "codex-cli": "high" } });
+    await useAIProvider().rawPrompt("sys", "user");
+    expect(codexCliPrompt).toHaveBeenCalledWith("user", "sys", undefined, undefined, "high");
+
+    setSettings({ aiProvider: "copilot-cli", aiEffortByProvider: { "copilot-cli": "low" } });
+    await useAIProvider().rawPrompt("sys", "user");
+    expect(copilotCliPrompt).toHaveBeenCalledWith("user", "sys", undefined, undefined, "low");
   });
 
   it("passes undefined when no model is configured (CLI default)", async () => {
     setSettings({ aiProvider: "opencode-cli", aiModelByProvider: {} });
     await useAIProvider().rawPrompt("s", "u");
     expect(opencodeCliPrompt).toHaveBeenCalledWith("u", "s", undefined, undefined);
+  });
+});
+
+describe("fetchAnthropicModels", () => {
+  it("maps display name, id and supported effort levels, following pages", async () => {
+    const pages = [
+      {
+        data: [
+          {
+            id: "claude-opus-5-5",
+            display_name: "Claude Opus 5.5",
+            capabilities: {
+              effort: {
+                supported: true,
+                low: { supported: true },
+                medium: { supported: true },
+                high: { supported: true },
+                xhigh: { supported: true },
+                max: { supported: true },
+              },
+            },
+          },
+        ],
+        has_more: true,
+        last_id: "claude-opus-5-5",
+      },
+      {
+        data: [
+          {
+            id: "claude-haiku-4-5",
+            display_name: "Claude Haiku 4.5",
+            capabilities: { effort: { supported: false, low: { supported: false } } },
+          },
+        ],
+        has_more: false,
+        last_id: "claude-haiku-4-5",
+      },
+    ];
+    const urls: string[] = [];
+    const fetchMock = vi.fn(async (url: URL | string, init?: RequestInit) => {
+      urls.push(String(url));
+      expect((init?.headers as Record<string, string>)["x-api-key"]).toBe("sk-test");
+      return new Response(JSON.stringify(pages.shift()), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const models = await fetchAnthropicModels("https://api.anthropic.com/", "sk-test");
+      expect(models).toEqual([
+        {
+          id: "claude-opus-5-5",
+          name: "Claude Opus 5.5",
+          efforts: ["low", "medium", "high", "xhigh", "max"],
+        },
+        { id: "claude-haiku-4-5", name: "Claude Haiku 4.5", efforts: [] },
+      ]);
+      expect(urls[0]).toBe("https://api.anthropic.com/v1/models?limit=1000");
+      expect(urls[1]).toContain("after_id=claude-opus-5-5");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("throws on an API error so the panel can show why", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("bad key", { status: 401 })));
+    try {
+      await expect(fetchAnthropicModels("", "sk-bad")).rejects.toThrow(/401/);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
