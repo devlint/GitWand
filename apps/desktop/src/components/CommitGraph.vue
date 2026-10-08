@@ -953,13 +953,13 @@ function bandHsla(hue: number, alpha: number): string {
 
 /** Tint for the trunk / lane 0 band. */
 function accentTint(active = false): string {
-  if (!isLight.value) return laneColor(0, 0.2);
+  if (!isLight.value) return laneColor(0, 0.26);
   return laneColor(0, active ? 0.52 : bandAlpha(0.2));
 }
 
 /** Middle stops of the trunk rainbow tint. */
 function trunkMidAlpha(active = false): number {
-  if (!isLight.value) return 0.19;
+  if (!isLight.value) return 0.25;
   return bandAlpha(active ? 0.17 : 0.2);
 }
 
@@ -972,7 +972,7 @@ function isMagentaLane(lane: number): boolean {
 
 function laneColorTint(lane: number, active = false): string {
   if (lane === 0) return accentTint(active);
-  if (!isLight.value) return laneColor(lane, isMagentaLane(lane) ? 0.195 : 0.12);
+  if (!isLight.value) return laneColor(lane, isMagentaLane(lane) ? 0.25 : 0.155);
   return bandHsla(laneHue(lane), bandAlpha(active ? 0.12 : 0.2));
 }
 
