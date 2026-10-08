@@ -1490,17 +1490,18 @@ pub(crate) fn rest_pr_ready(cwd: &str, number: i64, token: &str) -> Result<(), S
     Ok(())
 }
 
-/// Replace a PR's description (body). `get_pr_json` resolves which repo
-/// (origin or upstream) actually holds the PR.
-pub(crate) fn rest_pr_update_body(
+/// Edit a PR's title and/or body. `get_pr_json` resolves which repo (origin
+/// or upstream) actually holds the PR.
+pub(crate) fn rest_pr_edit(
     cwd: &str,
     number: i64,
-    body: &str,
+    title: &Option<String>,
+    body: &Option<String>,
     token: &str,
 ) -> Result<(), String> {
+    let payload = super::pr_edit::edit_payload(title, body, "body")?;
     let (repo, _pr) = get_pr_json(cwd, number, token)?;
     let url = format!("{}/repos/{}/pulls/{}", API_BASE, repo, number);
-    let payload = serde_json::json!({ "body": body });
     api_json("PATCH", &url, token, Some(&payload.to_string()))?;
     Ok(())
 }

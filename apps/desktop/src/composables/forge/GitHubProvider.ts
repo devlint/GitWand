@@ -40,7 +40,7 @@ import {
   ghPrHotspots,
   ghPrFileHistory,
   ghPrReady,
-  ghPrUpdateBody,
+  ghPrEdit,
   ghListIssues,
 } from "../../utils/backend";
 
@@ -64,6 +64,7 @@ import type {
   ReviewerCandidate,
   Issue,
   Account,
+  PrEdit,
 } from "./types";
 
 export class GitHubProvider implements ForgeProvider {
@@ -156,8 +157,8 @@ export class GitHubProvider implements ForgeProvider {
     return ghPrReady(cwd, number);
   }
 
-  updatePRBody(cwd: string, number: number, body: string): Promise<void> {
-    return ghPrUpdateBody(cwd, number, body);
+  updatePR(cwd: string, number: number, edit: PrEdit): Promise<void> {
+    return ghPrEdit(cwd, number, edit);
   }
 
   // ── Comments ──────────────────────────────────────────────────────────────

@@ -38,7 +38,7 @@ import {
   bbPrCiChecks,
   bbPrAnnotations,
   bbConvertDraftToReady,
-  bbUpdatePrDescription,
+  bbPrEdit,
   bbListReviews,
   bbApprovePr,
   bbPrFiles,
@@ -70,6 +70,7 @@ import type {
   ReviewerCandidate,
   Issue,
   Account,
+  PrEdit,
 } from "./types";
 
 export class BitbucketProvider implements ForgeProvider {
@@ -188,8 +189,8 @@ export class BitbucketProvider implements ForgeProvider {
     return bbConvertDraftToReady(cwd, number);
   }
 
-  updatePRBody(cwd: string, number: number, body: string): Promise<void> {
-    return bbUpdatePrDescription(cwd, number, body);
+  updatePR(cwd: string, number: number, edit: PrEdit): Promise<void> {
+    return bbPrEdit(cwd, number, edit);
   }
 
   // ── Comments ───────────────────────────────────────────────────────────────

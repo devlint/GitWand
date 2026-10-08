@@ -1330,25 +1330,28 @@ pub(crate) async fn gl_convert_draft_to_ready(cwd: String, iid: i64) -> Result<(
         .map_err(|e| e.to_string())?
 }
 
-/// Replace a MR's description via `glab api` (`-f` sends it as a raw string).
-fn gl_mr_update_description_inner(cwd: String, iid: i64, body: String) -> Result<(), String> {
+/// Edit a MR's title and/or description via `glab api` (`-f` sends each
+/// value as a raw string).
+fn gl_mr_edit_inner(
+    cwd: String,
+    iid: i64,
+    title: Option<String>,
+    body: Option<String>,
+) -> Result<(), String> {
+    let fields = super::pr_edit::edit_fields(&title, &body, "description")?;
     let endpoint = format!("projects/:fullpath/merge_requests/{}", iid);
     let mut cmd = hidden_cmd("glab");
-    cmd.args([
-        "api",
-        "-X",
-        "PUT",
-        &endpoint,
-        "-f",
-        &format!("description={}", body),
-    ])
-    .current_dir(&cwd);
-    let output = output_with_timeout(cmd, GLAB_TIMEOUT)
-        .map_err(|e| format!("glab api update description: {}", e))?;
+    cmd.args(["api", "-X", "PUT", &endpoint]);
+    for (k, v) in &fields {
+        cmd.args(["-f", &format!("{}={}", k, v)]);
+    }
+    cmd.current_dir(&cwd);
+    let output =
+        output_with_timeout(cmd, GLAB_TIMEOUT).map_err(|e| format!("glab api edit MR: {}", e))?;
 
     if !output.status.success() {
         return Err(format!(
-            "gl update description failed: {}",
+            "gl edit MR failed: {}",
             String::from_utf8_lossy(&output.stderr)
         ));
     }
@@ -1356,12 +1359,13 @@ fn gl_mr_update_description_inner(cwd: String, iid: i64, body: String) -> Result
 }
 
 #[tauri::command]
-pub(crate) async fn gl_mr_update_description(
+pub(crate) async fn gl_mr_edit(
     cwd: String,
     iid: i64,
-    body: String,
+    title: Option<String>,
+    body: Option<String>,
 ) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || gl_mr_update_description_inner(cwd, iid, body))
+    tauri::async_runtime::spawn_blocking(move || gl_mr_edit_inner(cwd, iid, title, body))
         .await
         .map_err(|e| e.to_string())?
 }

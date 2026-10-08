@@ -18,6 +18,7 @@ import {
   PrReview,
   ReviewerCandidate,
   PrReaction,
+  type PrEdit,
 } from "./backend-pr";
 
 // ─── GitLab / glab CLI wrappers (§2.x Forge integrations) ──────────────────
@@ -240,10 +241,10 @@ export async function glConvertDraftToReady(cwd: string, iid: number): Promise<v
   return tauriInvoke<void>("gl_convert_draft_to_ready", { cwd, iid });
 }
 
-/** Replace a MR's description. */
-export async function glMrUpdateDescription(cwd: string, iid: number, body: string): Promise<void> {
-  if (!isTauri()) throw new Error("glMrUpdateDescription requires Tauri");
-  return tauriInvoke<void>("gl_mr_update_description", { cwd, iid, body });
+/** Edit a MR's title and/or description; an omitted field is left unchanged. */
+export async function glMrEdit(cwd: string, iid: number, edit: PrEdit): Promise<void> {
+  if (!isTauri()) throw new Error("glMrEdit requires Tauri");
+  return tauriInvoke<void>("gl_mr_edit", { cwd, iid, title: edit.title ?? null, body: edit.body ?? null });
 }
 
 /**

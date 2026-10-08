@@ -53,32 +53,57 @@ const isOpenPr = computed(() => {
 /** Local UI state for the PR description's formatted / raw switch. */
 const descriptionTab = ref<"formatted" | "raw">("formatted");
 
-// ─── AI description update ──────────────────────────────
-// The draft lives in usePrDescription's module state so it survives leaving
+// ─── Title / description editing ────────────────────────
+const canEditPr = computed(() => isOpenPr.value && p.forgeSupportsEdit.value);
+
+// The AI draft lives in usePrDescription's module state so it survives leaving
 // the view mid-generation; it is only shown on the PR it was made for.
 const ai = useAIProvider();
 const prDescription = usePrDescription();
 
-const canUpdateDescription = computed(() =>
-  isOpenPr.value && p.forgeSupportsUpdateBody.value && ai.isAvailable.value,
-);
+const canUpdateDescription = computed(() => canEditPr.value && ai.isAvailable.value);
 
 const descriptionDraft = computed(() => {
   const d = prDescription.pendingUpdate.value;
   return d && d.cwd === p.cwd.value && d.number === p.prDetail.value?.number ? d : null;
 });
 
-/** Editable in the Raw tab; writes back into the pending draft. */
-const draftBody = computed({
-  get: () => descriptionDraft.value?.body ?? "",
+/** Manual description edit in progress; null when not editing. */
+const editingBody = ref<string | null>(null);
+/** Manual title edit in progress; null when not editing. */
+const editingTitle = ref<string | null>(null);
+const titleInput = ref<HTMLInputElement | null>(null);
+const savingTitle = ref(false);
+const savingBody = ref(false);
+
+// A manual edit belongs to the PR it was started on.
+watch(
+  () => [p.cwd.value, p.prDetail.value?.number],
+  () => {
+    editingBody.value = null;
+    editingTitle.value = null;
+  },
+);
+
+/** Which editor the description panel shows: the AI draft wins over a manual edit. */
+const bodyEditor = computed<"ai" | "manual" | null>(() =>
+  descriptionDraft.value ? "ai" : editingBody.value !== null ? "manual" : null,
+);
+
+/** Editable in the Raw tab; writes back into whichever draft is open. */
+const editorBody = computed({
+  get: () =>
+    bodyEditor.value === "ai" ? descriptionDraft.value!.body : (editingBody.value ?? ""),
   set: (body: string) => {
-    const d = prDescription.pendingUpdate.value;
-    if (d) prDescription.pendingUpdate.value = { ...d, body };
+    if (bodyEditor.value === "ai") {
+      const d = prDescription.pendingUpdate.value;
+      if (d) prDescription.pendingUpdate.value = { ...d, body };
+    } else if (editingBody.value !== null) {
+      editingBody.value = body;
+    }
   },
 });
-const draftHtml = computed(() => renderMarkdown(draftBody.value));
-
-const applyingDescription = ref(false);
+const editorHtml = computed(() => renderMarkdown(editorBody.value));
 
 async function updateDescriptionWithAI() {
   const detail = p.prDetail.value;
@@ -93,14 +118,49 @@ async function updateDescriptionWithAI() {
   }
 }
 
-async function applyDescriptionDraft() {
-  const d = descriptionDraft.value;
-  if (!d) return;
-  applyingDescription.value = true;
+function startBodyEdit() {
+  editingBody.value = p.prDetail.value?.body ?? "";
+  descriptionTab.value = "raw";
+}
+
+function closeBodyEditor(kind: "ai" | "manual") {
+  if (kind === "ai") prDescription.clearPendingUpdate();
+  else editingBody.value = null;
+}
+
+async function saveBody() {
+  const number = p.prDetail.value?.number;
+  const kind = bodyEditor.value;
+  if (number == null || !kind) return;
+  savingBody.value = true;
   try {
-    if (await p.updatePrBody(d.number, d.body)) prDescription.clearPendingUpdate();
+    if (await p.updatePr(number, { body: editorBody.value })) closeBodyEditor(kind);
   } finally {
-    applyingDescription.value = false;
+    savingBody.value = false;
+  }
+}
+
+function startTitleEdit() {
+  editingTitle.value = p.prDetail.value?.title ?? "";
+  nextTick(() => {
+    titleInput.value?.focus();
+    titleInput.value?.select();
+  });
+}
+
+async function saveTitle() {
+  const detail = p.prDetail.value;
+  const title = editingTitle.value?.trim();
+  if (!detail || !title) return;
+  if (title === detail.title) {
+    editingTitle.value = null;
+    return;
+  }
+  savingTitle.value = true;
+  try {
+    if (await p.updatePr(detail.number, { title })) editingTitle.value = null;
+  } finally {
+    savingTitle.value = false;
   }
 }
 
@@ -470,7 +530,51 @@ function submitRequestReviewers() {
           <div class="pdv-hero-title">
             <span class="pdv-pr-num">#{{ p.prDetail.value.number }}</span>
             <div class="pdv-hero-title-text">
-              <h1 class="pdv-pr-title">{{ p.prDetail.value.title }}</h1>
+              <form v-if="editingTitle !== null" class="pdv-title-edit" @submit.prevent="saveTitle">
+                <input
+                  ref="titleInput"
+                  v-model="editingTitle"
+                  class="pdv-title-input"
+                  type="text"
+                  spellcheck="true"
+                  :aria-label="t('pr.detail.editTitle')"
+                  :disabled="savingTitle"
+                  @keydown.esc.prevent="editingTitle = null"
+                />
+                <div class="pdv-title-edit-actions">
+                  <button
+                    type="button"
+                    class="pdv-btn pdv-btn--sm pdv-btn--ghost"
+                    :disabled="savingTitle"
+                    @click="editingTitle = null"
+                  >
+                    {{ t('pr.detail.editCancel') }}
+                  </button>
+                  <button
+                    type="submit"
+                    class="pdv-btn pdv-btn--sm pdv-btn--primary"
+                    :disabled="savingTitle || !editingTitle.trim()"
+                  >
+                    {{ savingTitle ? t('pr.detail.editSaving') : t('pr.detail.editSave') }}
+                  </button>
+                </div>
+              </form>
+              <h1 v-else class="pdv-pr-title">
+                {{ p.prDetail.value.title }}
+                <button
+                  v-if="canEditPr"
+                  type="button"
+                  class="pdv-edit-btn pdv-edit-btn--title"
+                  :title="t('pr.detail.editTitle')"
+                  :aria-label="t('pr.detail.editTitle')"
+                  @click="startTitleEdit"
+                >
+                  <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M11 2.5l2.5 2.5L6 12.5l-3.2.7.7-3.2L11 2.5z" />
+                  <path d="M9.5 4l2.5 2.5" />
+                </svg>
+                </button>
+              </h1>
               <!-- SWR: cached detail is on screen; show a small badge under the
                    title while the background revalidation runs. -->
               <span
@@ -848,9 +952,24 @@ function submitRequestReviewers() {
           <!-- Description -->
           <section class="pdv-section pdv-section--desc">
             <div class="pdv-desc-head">
-              <h2 class="pdv-section-label">{{ t('pr.detail.description') }}</h2>
+              <span class="pdv-desc-title">
+                <h2 class="pdv-section-label">{{ t('pr.detail.description') }}</h2>
+                <button
+                  v-if="canEditPr && !bodyEditor"
+                  type="button"
+                  class="pdv-edit-btn"
+                  :title="t('pr.detail.editDescription')"
+                  :aria-label="t('pr.detail.editDescription')"
+                  @click="startBodyEdit"
+                >
+                  <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M11 2.5l2.5 2.5L6 12.5l-3.2.7.7-3.2L11 2.5z" />
+                  <path d="M9.5 4l2.5 2.5" />
+                </svg>
+                </button>
+              </span>
               <button
-                v-if="canUpdateDescription && !descriptionDraft"
+                v-if="canUpdateDescription && !bodyEditor"
                 type="button"
                 class="btn btn--ai pdv-desc-ai"
                 :disabled="prDescription.isUpdating.value"
@@ -866,7 +985,7 @@ function submitRequestReviewers() {
                   {{ t('pr.detail.aiUpdate') }}
                 </span>
               </button>
-              <div v-if="p.prDetail.value.body || descriptionDraft" class="pdv-desc-tabs" role="tablist">
+              <div v-if="p.prDetail.value.body || bodyEditor" class="pdv-desc-tabs" role="tablist">
                 <button
                   type="button"
                   role="tab"
@@ -892,40 +1011,46 @@ function submitRequestReviewers() {
             <p v-if="prDescription.updateError.value && !descriptionDraft" class="pdv-desc-error">
               {{ prDescription.updateError.value }}
             </p>
-            <div v-if="descriptionDraft" class="pdv-desc-body pdv-desc-body--draft">
+            <div v-if="bodyEditor" class="pdv-desc-body pdv-desc-body--draft">
               <p class="pdv-desc-draft-note">
-                <AiSparkle :size="12" />
-                {{ t('pr.detail.aiUpdateDraftNote') }}
+                <AiSparkle v-if="bodyEditor === 'ai'" :size="12" />
+                {{ bodyEditor === 'ai' ? t('pr.detail.aiUpdateDraftNote') : t('pr.detail.editDraftNote') }}
               </p>
               <div
                 v-if="descriptionTab === 'formatted'"
                 class="pdv-body-formatted"
                 @click="handleDescriptionClick"
-                v-html="draftHtml"
+                v-html="editorHtml"
               />
               <textarea
                 v-else
-                v-model="draftBody"
+                v-model="editorBody"
                 class="pdv-desc-draft-input"
                 spellcheck="true"
                 :aria-label="t('pr.detail.description')"
+                @keydown.esc.prevent="closeBodyEditor(bodyEditor)"
               />
               <div class="pdv-desc-draft-actions">
                 <button
                   type="button"
                   class="pdv-btn pdv-btn--sm pdv-btn--ghost"
-                  :disabled="applyingDescription"
-                  @click="prDescription.clearPendingUpdate()"
+                  :disabled="savingBody"
+                  @click="closeBodyEditor(bodyEditor)"
                 >
-                  {{ t('pr.detail.aiUpdateDiscard') }}
+                  {{ bodyEditor === 'ai' ? t('pr.detail.aiUpdateDiscard') : t('pr.detail.editCancel') }}
                 </button>
                 <button
                   type="button"
                   class="pdv-btn pdv-btn--sm pdv-btn--primary"
-                  :disabled="applyingDescription || !draftBody.trim()"
-                  @click="applyDescriptionDraft"
+                  :disabled="savingBody || (bodyEditor === 'ai' && !editorBody.trim())"
+                  @click="saveBody"
                 >
-                  {{ applyingDescription ? t('pr.detail.aiUpdateApplying') : t('pr.detail.aiUpdateApply') }}
+                  <template v-if="bodyEditor === 'ai'">
+                    {{ savingBody ? t('pr.detail.aiUpdateApplying') : t('pr.detail.aiUpdateApply') }}
+                  </template>
+                  <template v-else>
+                    {{ savingBody ? t('pr.detail.editSaving') : t('pr.detail.editSave') }}
+                  </template>
                 </button>
               </div>
             </div>
@@ -1402,12 +1527,80 @@ function submitRequestReviewers() {
   flex: 1 1 280px;
 }
 
+/* Small icon-only edit button (pencil) beside the title / description label. */
+.pdv-edit-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+.pdv-edit-btn:hover {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text);
+}
+.pdv-edit-btn:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+/* Inline after the last word of the title, centred on its line. */
+.pdv-edit-btn--title {
+  margin-left: var(--space-2);
+  vertical-align: middle;
+}
+
+/* Full-width input with its actions on a row underneath. */
+.pdv-title-edit {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  max-width: 700px;
+}
+.pdv-title-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+}
+.pdv-title-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
+  line-height: var(--line-height-snug);
+}
+.pdv-title-input:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-accent-soft);
+}
+
+.pdv-desc-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
 /* Title + the refresh badge stacked under it. */
 .pdv-hero-title-text {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
   min-width: 0;
+  /* Takes the row's remaining width so the title input can fill it. */
+  flex: 1;
 }
 
 .pdv-pr-num {

@@ -28,6 +28,7 @@ import type {
   Issue,
   AutoMergeState,
   AutoMergeSupport,
+  PrEdit,
 } from "../../utils/backend";
 import type { Account } from "../useAccounts";
 
@@ -49,6 +50,7 @@ export type {
   Account,
   AutoMergeState,
   AutoMergeSupport,
+  PrEdit,
 };
 
 // ─── Options / Inputs ───────────────────────────────────────────────────────
@@ -226,11 +228,12 @@ export interface ForgeProvider {
   convertDraftToReady(cwd: string, number: number): Promise<void>;
 
   /**
-   * Replace the PR/MR description (Markdown body). Optional: forges without a
-   * write API for it (Cursor) omit it, and callers hide the action — see
-   * `forgeSupportsUpdateBody` in `usePrPanel`.
+   * Edit the PR/MR title and/or description (Markdown body); a field left out
+   * of `edit` is unchanged. Optional: forges without a write API for it
+   * (Cursor) omit it, and callers hide the action — see `forgeSupportsEdit`
+   * in `usePrPanel`.
    */
-  updatePRBody?(cwd: string, number: number, body: string): Promise<void>;
+  updatePR?(cwd: string, number: number, edit: PrEdit): Promise<void>;
 
   // ── Comments ──────────────────────────────────────────────────────────────
 

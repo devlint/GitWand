@@ -30,7 +30,7 @@ import {
   giteaMergePr,
   giteaCheckoutPr,
   giteaConvertDraftToReady,
-  giteaUpdatePrBody,
+  giteaPrEdit,
   giteaReviewerCandidates,
   giteaBranches,
   ghPrConflictPreview,
@@ -58,6 +58,7 @@ import {
   type ReviewerCandidate,
   type Issue,
   type Account,
+  type PrEdit,
 } from "./types";
 
 export class GiteaProvider implements ForgeProvider {
@@ -163,8 +164,8 @@ export class GiteaProvider implements ForgeProvider {
     return giteaConvertDraftToReady(cwd, number);
   }
 
-  updatePRBody(cwd: string, number: number, body: string): Promise<void> {
-    return giteaUpdatePrBody(cwd, number, body);
+  updatePR(cwd: string, number: number, edit: PrEdit): Promise<void> {
+    return giteaPrEdit(cwd, number, edit);
   }
 
   // ── Comments ──────────────────────────────────────────────────────────────

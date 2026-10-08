@@ -1223,9 +1223,14 @@ fn rest_pr_ready(cwd: &str, number: i64) -> Result<(), String> {
     Ok(())
 }
 
-fn rest_pr_update_body(cwd: &str, number: i64, body: &str) -> Result<(), String> {
+fn rest_pr_edit(
+    cwd: &str,
+    number: i64,
+    title: &Option<String>,
+    body: &Option<String>,
+) -> Result<(), String> {
+    let payload = super::pr_edit::edit_payload(title, body, "description")?;
     let r = azure_repo(cwd)?;
-    let payload = serde_json::json!({ "description": body });
     let url = with_api_version(&format!("{}/pullrequests/{}", r.api_base(), number));
     az_json("PATCH", &url, Some(&payload.to_string()))?;
     Ok(())
@@ -1892,15 +1897,17 @@ pub(crate) async fn az_pr_ready(cwd: String, number: i64) -> Result<(), String> 
         .map_err(|e| e.to_string())?
 }
 
-/// Replace a PR's description. Azure caps descriptions at 4000 characters and
-/// rejects longer ones; its error message is surfaced as-is.
+/// Edit a PR's title and/or description (a `None` field is left unchanged).
+/// Azure caps descriptions at 4000 characters and rejects longer ones; its
+/// error message is surfaced as-is.
 #[tauri::command]
-pub(crate) async fn az_pr_update_body(
+pub(crate) async fn az_pr_edit(
     cwd: String,
     number: i64,
-    body: String,
+    title: Option<String>,
+    body: Option<String>,
 ) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || rest_pr_update_body(&cwd, number, &body))
+    tauri::async_runtime::spawn_blocking(move || rest_pr_edit(&cwd, number, &title, &body))
         .await
         .map_err(|e| e.to_string())?
 }

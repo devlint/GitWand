@@ -11,6 +11,7 @@ import {
   gitFileCount,
   gitRemoteInfo,
   type PullRequest,
+  type PrEdit,
   type PullRequestDetail,
   type CICheck,
   type CIAnnotation,
@@ -1184,27 +1185,36 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     }
   }
 
-  /** True when the active forge can rewrite a PR's description. */
-  const forgeSupportsUpdateBody = computed(() => typeof forge.value.updatePRBody === "function");
+  /** True when the active forge can edit a PR's title and description. */
+  const forgeSupportsEdit = computed(() => typeof forge.value.updatePR === "function");
 
   /**
-   * Replace a PR's description on the forge. Returns whether it was written so
-   * the caller can keep its draft on failure. On success the open detail is
-   * patched in place — no refetch, the forge just echoed back what we sent.
+   * Edit a PR's title and/or description on the forge. Returns whether it was
+   * written so the caller can keep its editor open on failure. On success the
+   * open detail and the list row are patched in place — no refetch, the forge
+   * just stored what we sent.
    */
-  async function updatePrBody(number: number, body: string): Promise<boolean> {
-    if (!forge.value.updatePRBody) return false;
+  async function updatePr(number: number, edit: PrEdit): Promise<boolean> {
+    if (!forge.value.updatePR) return false;
     if (!(await requireOnline("pr edit"))) {
       error.value = t("connectivity.offline.disabledOp");
       return false;
     }
     try {
-      await forge.value.updatePRBody(cwd.value, number, body);
+      await forge.value.updatePR(cwd.value, number, edit);
       if (prDetail.value?.number === number) {
-        prDetail.value = { ...prDetail.value, body };
+        prDetail.value = { ...prDetail.value, ...edit };
         persistDetailCache();
       }
-      success.value = t("pr.success.descriptionUpdated", number);
+      if (edit.title !== undefined) {
+        const title = edit.title;
+        prs.value = prs.value.map((pr) => (pr.number === number ? { ...pr, title } : pr));
+        if (selectedPr.value?.number === number) selectedPr.value = { ...selectedPr.value, title };
+        // Lists are cached with titles in them; drop them so the next load is fresh.
+        cache.invalidateLists(cwd.value);
+        PR_LIST_CACHE.delete(cwd.value);
+      }
+      success.value = t("pr.success.prUpdated", number);
       return true;
     } catch (err: any) {
       error.value = err.message;
@@ -1694,7 +1704,7 @@ export function usePrPanel(cwd: Ref<string>, opts: PrPanelOptions = {}) {
     init, ensurePrsLoaded, loadRemote, loadPrs, loadMorePrs, loadCurrentUser, selectPr, loadDiff, loadChecks,
     revalidateOpenDetail,
     createPr, checkoutPr, mergePr, armAutoMerge, disarmAutoMerge, convertDraftToReady,
-    updatePrBody, forgeSupportsUpdateBody,
+    updatePr, forgeSupportsEdit,
     handleCreateComment, handleReplyComment, handleEditComment,
     handleDeleteComment, handleApplySuggestion, handleAddToReview, handleSubmitReview,
     handleDismissReview, handleRequestReviewers, forgeSupportsDismissReview, forgeSupportsRequestReviewers,

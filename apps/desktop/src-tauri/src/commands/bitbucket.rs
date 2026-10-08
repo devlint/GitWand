@@ -1401,17 +1401,19 @@ pub(crate) async fn bb_convert_draft_to_ready(cwd: String, pr_id: i64) -> Result
     Ok(())
 }
 
-/// Replace a PR's description.
+/// Edit a PR's title and/or description (a `None` field is left unchanged).
 ///
 /// Bitbucket updates PRs with PUT, and a PUT that omits `reviewers` clears
-/// them — so the current title and reviewers are read first and sent back
-/// unchanged alongside the new description.
+/// them — so the current title, description and reviewers are read first and
+/// sent back for whatever the edit does not change.
 #[tauri::command]
-pub(crate) async fn bb_update_pr_description(
+pub(crate) async fn bb_pr_edit(
     cwd: String,
     pr_id: i64,
-    body: String,
+    title: Option<String>,
+    body: Option<String>,
 ) -> Result<(), String> {
+    super::pr_edit::edit_fields(&title, &body, "description")?;
     let (workspace, slug) = parse_workspace_slug(&cwd)?;
     let (username, app_password) = get_bb_creds(&cwd)?;
     let auth_config = basic_auth_config(&username, &app_password);
@@ -1429,8 +1431,8 @@ pub(crate) async fn bb_update_pr_description(
         .unwrap_or_default();
 
     let payload = serde_json::json!({
-        "title": js(&pr, "title"),
-        "description": body,
+        "title": title.unwrap_or_else(|| js(&pr, "title")),
+        "description": body.unwrap_or_else(|| js(&pr, "description")),
         "reviewers": reviewers,
     })
     .to_string();
