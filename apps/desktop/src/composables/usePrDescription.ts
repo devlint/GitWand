@@ -68,8 +68,9 @@ ${diffstat.trim() || "(empty)"}
 Write the PR description.`;
 }
 
-function buildUpdateSystemPrompt(locale: string): string {
+function buildUpdateSystemPrompt(cwd: string, locale: string): string {
   const lang = localeToEnglishName(locale);
+  const template = getActiveTemplate("pr", cwd);
   return `You are a senior engineer updating the description of an existing
 GitHub Pull Request so it reflects the latest state of the branch.
 
@@ -101,7 +102,16 @@ Rules:
 
 Output rules:
 - Output ONLY the new description as Markdown, no JSON, no code fences
-  around the whole answer, no preamble, no trailing prose.`;
+  around the whole answer, no preamble, no trailing prose.${template ? `
+
+The user picked a PR template. Follow its guidance on the description's
+structure, sections and tone — it takes precedence over the structure of the
+current description. Ignore its output-format rules (JSON, title): you still
+output ONLY the description as Markdown.
+
+--- PR template ---
+${applyLang(template.systemPrompt, lang)}
+--- end template ---` : ""}`;
 }
 
 function buildUpdateUserPrompt(
@@ -370,7 +380,7 @@ export function usePrDescription() {
 
       const masked = maskMedia(pr.body ?? "");
       const raw = await ai.rawPrompt(
-        buildUpdateSystemPrompt(locale),
+        buildUpdateSystemPrompt(cwd, locale),
         buildUpdateUserPrompt(pr.branch, pr.base, masked.text, commits, diffstat),
       );
       const text = unwrapMarkdown(raw ?? "");

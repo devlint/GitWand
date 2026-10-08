@@ -28,9 +28,11 @@ import { usePrReviewNav } from "../composables/usePrReviewNav";
 import { useSettings } from "../composables/useSettings";
 import { useAIProvider } from "../composables/useAIProvider";
 import { usePrDescription } from "../composables/usePrDescription";
+import { getTemplateLang, useAiTemplates } from "../composables/useAiTemplates";
 import AiSparkle from "./AiSparkle.vue";
+import AiTemplateMenu from "./AiTemplateMenu.vue";
 
-const { t, locale } = useI18n();
+const { t } = useI18n();
 
 const emit = defineEmits<{
   (e: "refresh"): void;
@@ -62,6 +64,8 @@ const ai = useAIProvider();
 const prDescription = usePrDescription();
 
 const canUpdateDescription = computed(() => canEditPr.value && ai.isAvailable.value);
+// Active PR template (picked from the AI split button), shown on the button.
+const { activeTemplate: activePrTemplate } = useAiTemplates("pr", () => p.cwd.value);
 
 const descriptionDraft = computed(() => {
   const d = prDescription.pendingUpdate.value;
@@ -108,10 +112,9 @@ const editorHtml = computed(() => renderMarkdown(editorBody.value));
 async function updateDescriptionWithAI() {
   const detail = p.prDetail.value;
   if (!detail) return;
-  // Same language setting as PR creation: English unless "follow the UI".
-  const prLang = settings.value.prAiLanguage === "ui" ? locale.value : "en";
+  // Same per-repo output language as PR creation.
   try {
-    await prDescription.update(p.cwd.value, detail, { locale: prLang });
+    await prDescription.update(p.cwd.value, detail, { locale: getTemplateLang("pr", p.cwd.value) });
     descriptionTab.value = "formatted";
   } catch {
     // updateError is set by the composable and rendered below.
@@ -968,23 +971,31 @@ function submitRequestReviewers() {
                 </svg>
                 </button>
               </span>
-              <button
-                v-if="canUpdateDescription && !bodyEditor"
-                type="button"
-                class="btn btn--ai pdv-desc-ai"
-                :disabled="prDescription.isUpdating.value"
-                :title="t('pr.detail.aiUpdateHint')"
-                @click="updateDescriptionWithAI"
-              >
-                <span v-if="prDescription.isUpdating.value" class="pdv-desc-ai-label ai-loading">
-                  <span class="pdv-spinner pdv-spinner--sm" aria-hidden="true"></span>
-                  {{ t('pr.detail.aiUpdating') }}
-                </span>
-                <span v-else class="pdv-desc-ai-label">
-                  <AiSparkle :size="13" />
-                  {{ t('pr.detail.aiUpdate') }}
-                </span>
-              </button>
+              <div v-if="canUpdateDescription && !bodyEditor" class="pdv-desc-ai-split">
+                <button
+                  type="button"
+                  class="btn btn--ai pdv-desc-ai pdv-desc-ai-main"
+                  :disabled="prDescription.isUpdating.value"
+                  :title="t('pr.detail.aiUpdateHint')"
+                  @click="updateDescriptionWithAI"
+                >
+                  <span v-if="prDescription.isUpdating.value" class="pdv-desc-ai-label ai-loading">
+                    <span class="pdv-spinner pdv-spinner--sm" aria-hidden="true"></span>
+                    {{ t('pr.detail.aiUpdating') }}
+                  </span>
+                  <span v-else class="pdv-desc-ai-label">
+                    <AiSparkle :size="13" />
+                    {{ t('pr.detail.aiUpdate') }}
+                    <span v-if="activePrTemplate" class="pdv-desc-ai-tpl">· {{ activePrTemplate.name }}</span>
+                  </span>
+                </button>
+                <AiTemplateMenu
+                  kind="pr"
+                  :cwd="p.cwd.value"
+                  :disabled="prDescription.isUpdating.value"
+                  chevron-class="btn btn--ai pdv-desc-ai-chevron"
+                />
+              </div>
               <div v-if="p.prDetail.value.body || bodyEditor" class="pdv-desc-tabs" role="tablist">
                 <button
                   type="button"
@@ -2432,9 +2443,14 @@ function submitRequestReviewers() {
 }
 
 /* AI description update */
-/* Same compact, square-cornered shape as the PR create form's AI button. */
-.btn.btn--ai.pdv-desc-ai {
+/* Same compact, square-cornered split button as the PR create form's AI
+   button. The chevron and its template menu live in AiTemplateMenu, styled
+   from here via :deep(). */
+.pdv-desc-ai-split {
+  display: inline-flex;
   margin-right: auto;
+}
+.btn.btn--ai.pdv-desc-ai {
   min-height: 26px;
   /* Narrower left side: the sparkle glyph carries its own inset. */
   padding: 4px 12px 4px 8px;
@@ -2446,6 +2462,32 @@ function submitRequestReviewers() {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+.btn.btn--ai.pdv-desc-ai-main {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.pdv-desc-ai-split :deep(.btn.btn--ai.pdv-desc-ai-chevron) {
+  min-height: 26px;
+  padding: 4px 8px;
+  margin-left: -1px;
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+.pdv-desc-ai-split :deep(.btn.btn--ai.pdv-desc-ai-chevron:hover:not(:disabled)) {
+  color: var(--color-ai-text);
+  transform: none;
+  background:
+    linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-hover) 100%) padding-box,
+    linear-gradient(135deg, var(--color-accent) 0%, #c084fc 50%, var(--color-accent) 100%) border-box;
+}
+.pdv-desc-ai-tpl {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.7;
 }
 .btn.btn--ai.pdv-desc-ai:hover:not(:disabled) {
   color: var(--color-ai-text);
