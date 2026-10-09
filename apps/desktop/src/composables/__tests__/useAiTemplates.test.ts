@@ -183,3 +183,29 @@ describe("AI language migration (existing installs)", () => {
     expect(loadSettings().commitMessageLang).toBe("en");
   });
 });
+
+describe("repo path keys", () => {
+  it("resolve across path spellings", () => {
+    setTemplateLang("pr", "C:\\repos\\alpha\\", "fr");
+    expect(getTemplateLang("pr", "C:/repos/alpha")).toBe("fr");
+    const id = addTemplate("pr", { name: "T", systemPrompt: "x ${lang}" });
+    setActiveTemplate("pr", "/repos/beta/", id);
+    expect(getActiveTemplateId("pr", "/repos/beta")).toBe(id);
+    setActiveTemplate("pr", "/repos/beta", null);
+    expect(getActiveTemplateId("pr", "/repos/beta/")).toBeNull();
+  });
+
+  it("still reads entries stored under a raw path, and migrates them on write", () => {
+    const s = loadSettings();
+    s.aiTemplateLangByRepo = { "/repos/gamma/": { commit: "es" } };
+    s.activePrTemplateIdByRepo = { "/repos/gamma/": "tpl" };
+    saveSettings(s);
+    expect(getTemplateLang("commit", "/repos/gamma/")).toBe("es");
+    expect(getActiveTemplateId("pr", "/repos/gamma/")).toBe("tpl");
+    setTemplateLang("commit", "/repos/gamma/", "fr");
+    setActiveTemplate("pr", "/repos/gamma/", null);
+    const after = loadSettings();
+    expect(Object.keys(after.aiTemplateLangByRepo)).toEqual(["/repos/gamma"]);
+    expect(getActiveTemplateId("pr", "/repos/gamma/")).toBeNull();
+  });
+});

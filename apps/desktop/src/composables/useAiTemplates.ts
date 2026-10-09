@@ -18,6 +18,7 @@
 import { computed, ref } from "vue";
 import {
   loadSettings,
+  normaliseCwd,
   saveSettings,
   settingsRevision,
   type AiPromptPreset,
@@ -58,9 +59,23 @@ const LANG_SETTING: Record<AiTemplateKind, "commitMessageLang" | "prDescriptionL
  * AI button menu, else the global default from Settings → AI Templates, else
  * English.
  */
+/**
+ * Per-repo maps are keyed by the normalised path (like drafts and the other
+ * per-repo settings). Entries stored before that may sit under the raw path,
+ * so reads try both.
+ */
+function repoEntry<T>(map: Record<string, T> | undefined, cwd: string): T | undefined {
+  return map?.[normaliseCwd(cwd)] ?? map?.[cwd];
+}
+
+/** Drop the raw-path key (legacy) once its value lives under the normalised one. */
+function dropRawKey<T>(map: Record<string, T>, cwd: string): void {
+  if (cwd !== normaliseCwd(cwd)) delete map[cwd];
+}
+
 export function getTemplateLang(kind: AiTemplateKind, cwd?: string): string {
   const s = loadSettings();
-  const picked = cwd ? s.aiTemplateLangByRepo?.[cwd]?.[kind] : undefined;
+  const picked = cwd ? repoEntry(s.aiTemplateLangByRepo, cwd)?.[kind] : undefined;
   return picked || s[LANG_SETTING[kind]] || "en";
 }
 
@@ -68,7 +83,9 @@ export function getTemplateLang(kind: AiTemplateKind, cwd?: string): string {
 export function setTemplateLang(kind: AiTemplateKind, cwd: string, lang: string): void {
   const s = loadSettings();
   const byRepo = { ...(s.aiTemplateLangByRepo ?? {}) };
-  byRepo[cwd] = { ...(byRepo[cwd] ?? {}), [kind]: lang };
+  const key = normaliseCwd(cwd);
+  byRepo[key] = { ...(repoEntry(byRepo, cwd) ?? {}), [kind]: lang };
+  dropRawKey(byRepo, cwd);
   s.aiTemplateLangByRepo = byRepo;
   saveSettings(s);
 }
@@ -104,7 +121,7 @@ export function findTemplate(kind: AiTemplateKind, id: string): AiTemplate | und
 }
 
 export function getActiveTemplateId(kind: AiTemplateKind, cwd: string): string | null {
-  const id = loadSettings()[STORAGE[kind].active]?.[cwd] ?? null;
+  const id = repoEntry(loadSettings()[STORAGE[kind].active], cwd) ?? null;
   return id === DEFAULT_TEMPLATE_ID ? null : id;
 }
 
@@ -157,8 +174,9 @@ export function removeTemplate(kind: AiTemplateKind, id: string): void {
 export function setActiveTemplate(kind: AiTemplateKind, cwd: string, id: string | null): void {
   const s = loadSettings();
   const active = { ...s[STORAGE[kind].active] };
-  if (id === null || id === DEFAULT_TEMPLATE_ID) delete active[cwd];
-  else active[cwd] = id;
+  delete active[cwd];
+  if (id === null || id === DEFAULT_TEMPLATE_ID) delete active[normaliseCwd(cwd)];
+  else active[normaliseCwd(cwd)] = id;
   s[STORAGE[kind].active] = active;
   saveSettings(s);
 }
