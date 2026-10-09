@@ -124,6 +124,44 @@ const ALLOWED_ATTR = [
 ];
 
 /**
+ * What the WHATWG URL parser ignores before parsing an attribute value:
+ * leading / trailing C0 controls and spaces, and ASCII tab / newline anywhere.
+ * `h&#9;ttps://host/x` (the entity decodes to a tab) is therefore a plain
+ * `https://host/x` to the browser, and must be one to us too.
+ */
+function normalizeUrlText(raw: string): string {
+  // eslint-disable-next-line no-control-regex
+  return raw.replace(/[\t\n\r]/g, "").replace(/^[\u0000-\u0020]+|[\u0000-\u0020]+$/g, "");
+}
+
+/**
+ * Bases that stand in for the document while classifying an image URL. Both
+ * are special schemes, as the webview's own is on Windows (http): there `\\host`
+ * and `/\\host` are network paths. Two of them because `scheme:host/x` is
+ * relative when `scheme` is the base's own — `https:tracker/x` against an
+ * https document — and absolute otherwise: a URL is local only if it is local
+ * against both, so its scheme cannot pick the base's.
+ */
+const LOCAL_IMAGE_BASES = [
+  new URL("https://gitwand-local.invalid/"),
+  new URL("ws://gitwand-local.invalid/"),
+];
+
+/**
+ * True unless `src` resolves to the document itself — i.e. it is relative.
+ * Decided by parsing, as the browser will: scheme-relative `//host`,
+ * backslash forms, `scheme:host` shorthands, absolute URLs of any scheme, and
+ * anything unparsable all count as remote.
+ */
+function isRemoteImageSrc(src: string): boolean {
+  try {
+    return LOCAL_IMAGE_BASES.some((base) => new URL(src, base).origin !== base.origin);
+  } catch {
+    return true;
+  }
+}
+
+/**
  * Tighten `<a>` targets and `img`/`a` protocols. DOMPurify already blocks
  * `javascript:` by default, but we also explicitly forbid `data:` outside
  * of a short whitelist of image mime types to keep the attack surface small.
@@ -142,13 +180,15 @@ function hardenLinksAndImages(node: Element) {
   }
   if (node.tagName === "IMG") {
     const src = node.getAttribute("src") ?? "";
-    if (/^\s*javascript:/i.test(src)) {
+    // Decide on what the browser will actually fetch, not on the raw text.
+    const norm = normalizeUrlText(src);
+    if (/^javascript:/i.test(norm)) {
       node.removeAttribute("src");
-    } else if (src.startsWith("data:")) {
-      if (!/^data:image\/(png|jpeg|gif|webp|svg\+xml);/i.test(src)) {
+    } else if (/^data:/i.test(norm)) {
+      if (!/^data:image\/(png|jpeg|gif|webp|svg\+xml);/i.test(norm)) {
         node.removeAttribute("src");
       }
-    } else if (/^\s*(https?:)?\/\//i.test(src) && !remoteImagesAllowed()) {
+    } else if (src && isRemoteImageSrc(norm) && !remoteImagesAllowed()) {
       // Remote image, not allowed: keep a visible placeholder (alt text) and
       // the URL in a title so the reader knows what was withheld.
       node.removeAttribute("src");

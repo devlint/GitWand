@@ -14,7 +14,7 @@
 import { computed, inject, nextTick, provide, ref, onMounted, onUnmounted, watch } from "vue";
 import { PR_PANEL_KEY, isMergeConflict, type PrPanelState } from "../composables/usePrPanel";
 import { renderMarkdown, onMarkdownLinkClick, hasBlockedRemoteImages } from "../composables/useSafeHtml";
-import { PR_REMOTE_IMAGES_KEY } from "../composables/useRemoteImages";
+import { PR_REMOTE_IMAGES_KEY, commentsWithheldImages } from "../composables/useRemoteImages";
 import RemoteImagesNotice from "./RemoteImagesNotice.vue";
 import Avatar from "./Avatar.vue";
 import { forgeAvatarUrl } from "../composables/useAvatar";
@@ -349,6 +349,12 @@ const descriptionHtml = computed(() => renderMarkdown(p.prDetail.value?.body, md
 const descriptionImagesBlocked = computed(() => hasBlockedRemoteImages(descriptionHtml.value));
 const timelineImagesBlocked = computed(() =>
   timeline.value.some((item) => hasBlockedRemoteImages(item.bodyHtml)),
+);
+// The inline review threads of the file shown in the Files tab render through
+// PrCommentThread, which follows `prImagesShown` (provided above). Offer the
+// same button there, or their withheld images could not be revealed.
+const inlineImagesBlocked = computed(() =>
+  commentsWithheldImages(p.commentsForFile.value, prImagesShown.value),
 );
 
 const fullscreenImageUrl = ref<string | null>(null);
@@ -1288,6 +1294,10 @@ function submitRequestReviewers() {
             </div>
             <!-- Diff viewer -->
             <div class="pdv-diff-viewer">
+              <RemoteImagesNotice
+                v-if="p.selectedDiff.value && inlineImagesBlocked"
+                @allow="prImagesShown = true"
+              />
               <PrInlineDiff
                 v-if="p.selectedDiff.value"
                 ref="prInlineDiffRef"

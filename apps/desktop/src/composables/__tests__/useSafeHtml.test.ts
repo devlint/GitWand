@@ -155,6 +155,47 @@ describe("renderMarkdown — markdown → sanitized HTML", () => {
     expect(out).toContain(url.replace(/&/g, "&amp;"));
   });
 
+  it("withholds remote images whatever spelling the URL parser forgives", () => {
+    // Each of these is fetched from tracker.example by a browser: the URL
+    // parser drops ASCII tab / newline anywhere and C0 controls / spaces at
+    // the ends, reads `\` as `/` in special schemes, and takes `https:host`
+    // as `https://host`. A prefix regex on the raw text missed them.
+    const payloads = [
+      "h&#9;ttps://tracker.example/p.gif",
+      "ht&#10;tp://tracker.example/p.gif",
+      "https:&#13;//tracker.example/p.gif",
+      "&#1;https://tracker.example/p.gif",
+      "&#31; //tracker.example/p.gif",
+      "\\\\tracker.example/p.gif",
+      "/\\tracker.example/p.gif",
+      "\\/tracker.example/p.gif",
+      "HTTPS://tracker.example/p.gif",
+      "https:tracker.example/p.gif",
+      "ftp://tracker.example/p.gif",
+    ];
+    for (const p of payloads) {
+      const out = safeHtml(`<img src="${p}" alt="a">`);
+      const img = new DOMParser().parseFromString(out, "text/html").querySelector("img");
+      expect(img?.getAttribute("src"), p).toBeNull();
+      expect(img?.className, p).toBe("md-img-blocked");
+    }
+    // DOMPurify drops a `file:` src on its own, before our hook sees it.
+    expect(safeHtml('<img src="file:///etc/p.png">')).not.toContain("file:");
+  });
+
+  it("keeps relative (same-document) images when remote ones are blocked", () => {
+    for (const src of ["x", "./img/a.png", "/abs/a.png", "img/a%20b.png"]) {
+      const out = safeHtml(`<img src="${src}">`);
+      expect(out, src).toContain(`src="${src}"`);
+      expect(hasBlockedRemoteImages(out), src).toBe(false);
+    }
+  });
+
+  it("drops non-image data: URLs even when disguised by whitespace", () => {
+    const out = safeHtml('<img src="&#9;data:text/html;base64,PHNjcmlwdD4=">');
+    expect(out).not.toContain("data:text/html");
+  });
+
   it("loads remote images for one render when the caller passes consent", () => {
     const md = "![shot](https://example.com/s.png)";
     const allowed = renderMarkdown(md, { allowRemoteImages: true });

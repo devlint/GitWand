@@ -13,6 +13,7 @@
  */
 import { computed, reactive, type InjectionKey, type Ref } from "vue";
 import { loadSettings, normaliseCwd, refreshSettings, saveSettings, useSettings } from "./useSettings";
+import { hasBlockedRemoteImages, renderMarkdown } from "./useSafeHtml";
 
 /** Provided by the PR detail view: whether the user accepted this PR's images. */
 export const PR_REMOTE_IMAGES_KEY: InjectionKey<Ref<boolean>> = Symbol("prRemoteImages");
@@ -52,4 +53,15 @@ export function useRepoRemoteImages(cwd: Ref<string | null | undefined>) {
   }
 
   return { allowed, allowForRepo };
+}
+
+/**
+ * Whether any of `comments` has remote images withheld while the PR's images
+ * are not `shown` — the cue for the "Show images" button above the inline
+ * review threads, which render through PrCommentThread and follow
+ * `PR_REMOTE_IMAGES_KEY`.
+ */
+export function commentsWithheldImages(comments: readonly { body: string }[], shown: boolean): boolean {
+  if (shown) return false;
+  return comments.some((c) => hasBlockedRemoteImages(renderMarkdown(c.body)));
 }
