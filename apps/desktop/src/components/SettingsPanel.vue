@@ -1806,6 +1806,37 @@ function openAiTemplateKind(kind: AiTemplateKind) {
                 t('settings.updateChannelStableHint') }}
             </span>
           </div>
+
+          <!-- Privacy: third-party requests the app makes on its own -->
+          <div class="sp-row sp-row--checkbox">
+            <label class="sp-checkbox-label" for="setting-remote-images">
+              <input id="setting-remote-images" type="checkbox" class="sp-checkbox"
+                :checked="settings.allowRemoteImages"
+                @change="updateSetting('allowRemoteImages', ($event.target as HTMLInputElement).checked)" />
+              <span>{{ t('settings.allowRemoteImages') }}</span>
+            </label>
+            <span class="sp-hint">{{ t('settings.allowRemoteImagesHint') }}</span>
+          </div>
+
+          <div class="sp-row sp-row--checkbox">
+            <label class="sp-checkbox-label" for="setting-gravatar">
+              <input id="setting-gravatar" type="checkbox" class="sp-checkbox"
+                :checked="settings.gravatarEnabled"
+                @change="updateSetting('gravatarEnabled', ($event.target as HTMLInputElement).checked)" />
+              <span>{{ t('settings.gravatarEnabled') }}</span>
+            </label>
+            <span class="sp-hint">{{ t('settings.gravatarEnabledHint') }}</span>
+          </div>
+
+          <div class="sp-row sp-row--checkbox">
+            <label class="sp-checkbox-label" for="setting-telemetry">
+              <input id="setting-telemetry" type="checkbox" class="sp-checkbox"
+                :checked="telemetryEnabled && !telemetryForcedOff" :disabled="telemetryForcedOff"
+                @change="onTelemetryChange(($event.target as HTMLInputElement).checked)" />
+              <span>{{ t('settings.telemetryEnabled') }}</span>
+            </label>
+            <span class="sp-hint">{{ telemetryForcedOff ? t('settings.telemetryForcedOff') : t('settings.telemetryEnabledHint') }}</span>
+          </div>
         </template>
 
         <!-- ═══ DASHBOARD ═══ -->
@@ -2118,37 +2149,6 @@ function openAiTemplateKind(kind: AiTemplateKind) {
               <span>{{ t('settings.liveRepoWatcher') }}</span>
             </label>
             <span class="sp-hint">{{ t('settings.liveRepoWatcherHint') }}</span>
-          </div>
-
-          <!-- Privacy: third-party requests the app makes on its own -->
-          <div class="sp-row sp-row--checkbox">
-            <label class="sp-checkbox-label" for="setting-remote-images">
-              <input id="setting-remote-images" type="checkbox" class="sp-checkbox"
-                :checked="settings.allowRemoteImages"
-                @change="updateSetting('allowRemoteImages', ($event.target as HTMLInputElement).checked)" />
-              <span>{{ t('settings.allowRemoteImages') }}</span>
-            </label>
-            <span class="sp-hint">{{ t('settings.allowRemoteImagesHint') }}</span>
-          </div>
-
-          <div class="sp-row sp-row--checkbox">
-            <label class="sp-checkbox-label" for="setting-gravatar">
-              <input id="setting-gravatar" type="checkbox" class="sp-checkbox"
-                :checked="settings.gravatarEnabled"
-                @change="updateSetting('gravatarEnabled', ($event.target as HTMLInputElement).checked)" />
-              <span>{{ t('settings.gravatarEnabled') }}</span>
-            </label>
-            <span class="sp-hint">{{ t('settings.gravatarEnabledHint') }}</span>
-          </div>
-
-          <div class="sp-row sp-row--checkbox">
-            <label class="sp-checkbox-label" for="setting-telemetry">
-              <input id="setting-telemetry" type="checkbox" class="sp-checkbox"
-                :checked="telemetryEnabled && !telemetryForcedOff" :disabled="telemetryForcedOff"
-                @change="onTelemetryChange(($event.target as HTMLInputElement).checked)" />
-              <span>{{ t('settings.telemetryEnabled') }}</span>
-            </label>
-            <span class="sp-hint">{{ telemetryForcedOff ? t('settings.telemetryForcedOff') : t('settings.telemetryEnabledHint') }}</span>
           </div>
 
           <!-- Blame diff algorithm -->
