@@ -672,15 +672,17 @@ export function saveSettings(s: AppSettings): void {
 // ─── Singleton reactive ref ───────────────────────────────
 // Shared across all useSettings() calls in the same Vue app instance.
 
-const _settings = ref<AppSettings>(loadSettings());
-
 /**
  * Monotonic counter bumped on every saveSettings() / refreshSettings().
  * Read it inside a computed (`settingsRevision.value`) to register a reactive
  * dependency on "settings changed", even when the underlying value is read
  * straight from localStorage rather than the `_settings` ref.
  */
+// Declared before `_settings`: the one-time AI language migration in
+// loadSettings() saves (and bumps this) while the module is still loading.
 export const settingsRevision = ref(0);
+
+const _settings = ref<AppSettings>(loadSettings());
 
 /** Re-read all settings from localStorage (call after SettingsPanel saves). */
 export function refreshSettings(): void {
