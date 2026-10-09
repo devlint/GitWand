@@ -25,6 +25,12 @@ interface TooltipEl extends HTMLElement {
     tip: HTMLElement;
     abort: AbortController;
   };
+  /** Current options, refreshed on every update so listeners never go stale. */
+  _tooltipOpts?: TooltipOptions | null;
+  /** Aborts the element's own listeners on unmount. */
+  _tooltipListeners?: AbortController;
+  /** True when the directive set aria-label itself (icon-only anchor). */
+  _tooltipOwnsLabel?: boolean;
 }
 
 const GAP = 7; // px gap between anchor and tooltip
@@ -116,34 +122,52 @@ function hide(el: TooltipEl) {
   delete el._tooltip;
 }
 
+/**
+ * Icon-only anchors have no text, so without a native `title` they would have
+ * no accessible name: mirror the tooltip text into aria-label for them. An
+ * anchor with visible text, or an explicit aria-label, is left alone.
+ */
+function syncAriaLabel(el: TooltipEl) {
+  const text = el._tooltipOpts?.text;
+  if (el._tooltipOwnsLabel) {
+    if (text) el.setAttribute("aria-label", text);
+    else { el.removeAttribute("aria-label"); el._tooltipOwnsLabel = false; }
+    return;
+  }
+  if (text && !el.hasAttribute("aria-label") && !el.textContent?.trim()) {
+    el.setAttribute("aria-label", text);
+    el._tooltipOwnsLabel = true;
+  }
+}
+
 export const vTooltip = {
   mounted(el: TooltipEl, { value }: { value: unknown }) {
-    const opts = getOptions(value);
-    if (!opts) return;
+    el._tooltipOpts = getOptions(value);
+    syncAriaLabel(el);
 
-    el.addEventListener("mouseenter", () => show(el, opts));
-    el.addEventListener("mouseleave", () => hide(el));
-    el.addEventListener("focus",      () => show(el, opts));
-    el.addEventListener("blur",       () => hide(el));
-    el.addEventListener("click",      () => hide(el));
+    const listeners = new AbortController();
+    const { signal } = listeners;
+    const open = () => { if (el._tooltipOpts) show(el, el._tooltipOpts); };
+    const close = () => hide(el);
+    el.addEventListener("mouseenter", open, { signal });
+    el.addEventListener("mouseleave", close, { signal });
+    el.addEventListener("focus", open, { signal });
+    el.addEventListener("blur", close, { signal });
+    el.addEventListener("click", close, { signal });
+    el._tooltipListeners = listeners;
   },
 
-  updated(el: TooltipEl, { value }: { value: unknown }) {
-    // If the tooltip text changed while visible, re-show with new text
-    hide(el);
-    const opts = getOptions(value);
-    if (!opts) return;
-
-    // Re-bind with fresh closure — easiest to just remove and re-add
-    // listeners by replacing the element's handler through a stored ref.
-    // Directives don't give us a clean way to do that without storing refs,
-    // so we use the unmounted + re-mounted pattern here by delegating to a
-    // shared handler set on the element.
-    el.addEventListener("mouseenter", () => show(el, opts));
-    el.addEventListener("mouseleave", () => hide(el));
+  updated(el: TooltipEl, { value, oldValue }: { value: unknown; oldValue: unknown }) {
+    el._tooltipOpts = getOptions(value);
+    syncAriaLabel(el);
+    if (!el._tooltip) return;
+    // Visible tooltip: refresh its text, or drop it if the text went away.
+    if (!el._tooltipOpts) hide(el);
+    else if (value !== oldValue) show(el, el._tooltipOpts);
   },
 
   beforeUnmount(el: TooltipEl) {
     hide(el);
+    el._tooltipListeners?.abort();
   },
 };
