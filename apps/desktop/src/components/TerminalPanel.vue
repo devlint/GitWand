@@ -901,13 +901,16 @@ onBeforeUnmount(() => {
   opacity: 0.7;
 }
 
-/* Fullscreen + hide: identical square buttons, centred in the tab bar. */
+/* Fullscreen + hide: identical square buttons, centred in the tab bar and
+   nudged up so they read as part of the bar rather than the tabs' baseline. */
 .tp__full,
 .tp__hide {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   align-self: center;
+  position: relative;
+  top: -3px;
   width: 30px;
   height: 30px;
   padding: 0;
@@ -997,7 +1000,9 @@ onBeforeUnmount(() => {
 .tp__host {
   position: absolute;
   inset: 0px 6px 7px;
-  padding: 0px 7px;
+  /* Small top gap so the first line doesn't touch the tab bar. The terminal
+     fits its rows to the remaining height (DomTerminal.fit). */
+  padding: 6px 7px 0;
   /* Same surface as the active tab, so tab and terminal read as one sheet. */
   background-color: var(--bg-base, var(--color-bg));
   border-radius: 0px var(--radius-sm) var(--radius-sm) var(--radius-sm);
@@ -1038,7 +1043,8 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: black;
+  /* Same surface as a terminal tab (.tp__host), in both themes. */
+  background-color: var(--bg-base, var(--color-bg));
   border-radius: 0px var(--radius-sm) var(--radius-sm) var(--radius-sm);
   color: var(--color-text-muted);
   font-size: var(--font-size-xl);
