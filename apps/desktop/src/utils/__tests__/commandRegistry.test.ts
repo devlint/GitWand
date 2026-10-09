@@ -23,7 +23,11 @@ const root = resolve(__dirname, "../../..");
 const read = (p: string) => readFileSync(resolve(root, p), "utf-8");
 
 const frontendSource =
-  read("src/utils/backend.ts") + "\n" + read("src/utils/backend-core.ts");
+  read("src/utils/backend.ts") +
+  "\n" +
+  read("src/utils/backend-core.ts") +
+  "\n" +
+  read("src/utils/backend-ai.ts");
 const { commands: invoked, dynamic } = findInvokedCommands(frontendSource);
 const routes = new Set(findDevServerRoutes(read("dev-server.mjs")));
 

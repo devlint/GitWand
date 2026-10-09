@@ -68,6 +68,7 @@ export async function claudeCliPrompt(
   cwd?: string,
   outputFormat: "text" | "json" = "text",
   model?: string,
+  effort?: string,
 ): Promise<string> {
   if (isTauri()) {
     return tauriInvoke<string>("claude_cli_prompt", {
@@ -76,12 +77,13 @@ export async function claudeCliPrompt(
       cwd,
       outputFormat,
       model,
+      effort,
     }, IPC_TIMEOUT.NONE);
   }
   const res = await devFetch(`${DEV_SERVER}/api/claude-cli-prompt`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt, systemPrompt, cwd, outputFormat, model }),
+    body: JSON.stringify({ prompt, systemPrompt, cwd, outputFormat, model, effort }),
   });
   if (!res.ok) {
     let msg = `claude CLI error ${res.status}`;
@@ -140,6 +142,7 @@ export async function codexCliPrompt(
   systemPrompt?: string,
   cwd?: string,
   model?: string,
+  effort?: string,
 ): Promise<string> {
   if (isTauri()) {
     return tauriInvoke<string>("codex_cli_prompt", {
@@ -147,12 +150,13 @@ export async function codexCliPrompt(
       systemPrompt,
       cwd,
       model,
+      effort,
     }, IPC_TIMEOUT.NONE);
   }
   const res = await devFetch(`${DEV_SERVER}/api/codex-cli-prompt`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt, systemPrompt, cwd, model }),
+    body: JSON.stringify({ prompt, systemPrompt, cwd, model, effort }),
   });
   if (!res.ok) {
     let msg = `codex CLI error ${res.status}`;
@@ -163,6 +167,41 @@ export async function codexCliPrompt(
     throw new Error(msg);
   }
   return await res.text();
+}
+
+/** One entry of Codex's model catalog (`codex debug models`). */
+export interface CodexModel {
+  /** Value passed to `codex exec --model`, e.g. `gpt-6.1-sol`. */
+  id: string;
+  /** Display name, e.g. `GPT-6.1-Sol`. */
+  name: string;
+  /** Reasoning efforts the model accepts, in Codex's order. */
+  efforts: string[];
+}
+
+/**
+ * Enumerate Codex's model catalog (`codex debug models`). Returns an empty
+ * array — never throws — when the binary is missing or the command fails, so
+ * callers can fall back to free-text entry.
+ */
+export async function listCodexModels(): Promise<CodexModel[]> {
+  if (isTauri()) {
+    try {
+      return await tauriInvoke<CodexModel[]>("codex_list_models");
+    } catch {
+      return [];
+    }
+  }
+  try {
+    const res = await devFetch(`${DEV_SERVER}/api/codex-models`);
+    if (res.ok) {
+      const body = await res.json();
+      return Array.isArray(body?.models) ? body.models : [];
+    }
+  } catch {
+    // Dev server unavailable
+  }
+  return [];
 }
 
 // ─── opencode CLI provider (v2.17) ─────────────────────────
@@ -306,6 +345,7 @@ export async function copilotCliPrompt(
   systemPrompt?: string,
   cwd?: string,
   model?: string,
+  effort?: string,
 ): Promise<string> {
   if (isTauri()) {
     return tauriInvoke<string>("copilot_cli_prompt", {
@@ -313,12 +353,13 @@ export async function copilotCliPrompt(
       systemPrompt,
       cwd,
       model,
+      effort,
     }, IPC_TIMEOUT.NONE);
   }
   const res = await devFetch(`${DEV_SERVER}/api/copilot-cli-prompt`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt, systemPrompt, cwd, model }),
+    body: JSON.stringify({ prompt, systemPrompt, cwd, model, effort }),
   });
   if (!res.ok) {
     let msg = `copilot CLI error ${res.status}`;
@@ -329,6 +370,31 @@ export async function copilotCliPrompt(
     throw new Error(msg);
   }
   return await res.text();
+}
+
+/**
+ * Enumerate the models Copilot accepts (parsed from `copilot help config`).
+ * Returns an empty array — never throws — when the binary is missing or the
+ * command fails, so callers can fall back to free-text entry.
+ */
+export async function listCopilotModels(): Promise<string[]> {
+  if (isTauri()) {
+    try {
+      return await tauriInvoke<string[]>("copilot_list_models");
+    } catch {
+      return [];
+    }
+  }
+  try {
+    const res = await devFetch(`${DEV_SERVER}/api/copilot-models`);
+    if (res.ok) {
+      const body = await res.json();
+      return Array.isArray(body?.models) ? body.models : [];
+    }
+  } catch {
+    // Dev server unavailable
+  }
+  return [];
 }
 
 // ─── Antigravity CLI provider ──────────────────────────────
@@ -399,6 +465,39 @@ export async function antigravityCliPrompt(
     throw new Error(msg);
   }
   return await res.text();
+}
+
+/** One entry of `agy models`. The effort level is part of the id. */
+export interface AntigravityModel {
+  /** Value passed to `agy --model`, e.g. `gemini-3.8-flash-high`. */
+  id: string;
+  /** Human-readable name, e.g. `Gemini 3.8 Flash (High)`. */
+  name: string;
+}
+
+/**
+ * Enumerate the models Antigravity offers (`agy models`). Returns an empty
+ * array — never throws — when the binary is missing or the command fails, so
+ * callers can fall back to free-text entry.
+ */
+export async function listAntigravityModels(): Promise<AntigravityModel[]> {
+  if (isTauri()) {
+    try {
+      return await tauriInvoke<AntigravityModel[]>("antigravity_list_models");
+    } catch {
+      return [];
+    }
+  }
+  try {
+    const res = await devFetch(`${DEV_SERVER}/api/antigravity-models`);
+    if (res.ok) {
+      const body = await res.json();
+      return Array.isArray(body?.models) ? body.models : [];
+    }
+  } catch {
+    // Dev server unavailable
+  }
+  return [];
 }
 
 /**

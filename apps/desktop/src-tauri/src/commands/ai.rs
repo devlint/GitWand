@@ -18,6 +18,23 @@ use crate::git::*;
 use crate::types::*;
 use std::path::PathBuf;
 
+// ─── Reasoning effort ────────────────────────────────────────────────────
+
+/// Effort levels any of the CLIs accept. The value is passed as its own
+/// argument (never interpolated into a shell string), but it still comes from
+/// the frontend, so anything outside this list is dropped rather than
+/// forwarded.
+const EFFORT_LEVELS: &[&str] = &[
+    "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra",
+];
+
+/// The effort to forward, or `None` when it is empty or not a known level —
+/// in which case the CLI keeps its own default.
+fn valid_effort(effort: Option<&String>) -> Option<&'static str> {
+    let e = effort?.trim();
+    EFFORT_LEVELS.iter().copied().find(|l| *l == e)
+}
+
 // ─── Claude binary resolution + env hygiene ──────────────────────────────
 
 /// Apply the API-key env strip to a `std::process::Command` before spawning.
@@ -177,6 +194,7 @@ pub(crate) async fn claude_cli_prompt(
     cwd: Option<String>,
     output_format: Option<String>,
     model: Option<String>,
+    effort: Option<String>,
 ) -> Result<String, String> {
     // The body spawns a process and blocks on `.output()`. Inside the async
     // runtime that pins one of tokio's worker threads for the whole model
@@ -184,7 +202,7 @@ pub(crate) async fn claude_cli_prompt(
     // other IPC command. `spawn_blocking` puts it on the blocking pool
     // instead, which is what `ops.rs` already does for git subprocesses.
     tauri::async_runtime::spawn_blocking(move || {
-        claude_cli_prompt_inner(prompt, system_prompt, cwd, output_format, model)
+        claude_cli_prompt_inner(prompt, system_prompt, cwd, output_format, model, effort)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -196,6 +214,7 @@ fn claude_cli_prompt_inner(
     cwd: Option<String>,
     output_format: Option<String>,
     model: Option<String>,
+    effort: Option<String>,
 ) -> Result<String, String> {
     let binary =
         resolve_claude_binary().ok_or_else(|| "Binaire `claude` introuvable".to_string())?;
@@ -226,6 +245,9 @@ fn claude_cli_prompt_inner(
         if !m.trim().is_empty() {
             cmd.args(["--model", m.trim()]);
         }
+    }
+    if let Some(e) = valid_effort(effort.as_ref()) {
+        cmd.args(["--effort", e]);
     }
     strip_claude_auth_env(&mut cmd);
     if let Some(dir) = cwd {
@@ -316,9 +338,10 @@ pub(crate) async fn codex_cli_prompt(
     system_prompt: Option<String>,
     cwd: Option<String>,
     model: Option<String>,
+    effort: Option<String>,
 ) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        codex_cli_prompt_inner(prompt, system_prompt, cwd, model)
+        codex_cli_prompt_inner(prompt, system_prompt, cwd, model, effort)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -329,6 +352,7 @@ fn codex_cli_prompt_inner(
     system_prompt: Option<String>,
     cwd: Option<String>,
     model: Option<String>,
+    effort: Option<String>,
 ) -> Result<String, String> {
     let binary = resolve_codex_binary().ok_or_else(|| "Binaire `codex` introuvable".to_string())?;
 
@@ -353,6 +377,11 @@ fn codex_cli_prompt_inner(
         if !m.trim().is_empty() {
             cmd.args(["--model", m.trim()]);
         }
+    }
+    // `codex exec` has no effort flag; the config override is the
+    // documented way to set it for one run.
+    if let Some(e) = valid_effort(effort.as_ref()) {
+        cmd.args(["-c", &format!("model_reasoning_effort={}", e)]);
     }
     cmd.arg(&full_prompt);
     if let Some(dir) = cwd {
@@ -379,6 +408,62 @@ fn codex_cli_prompt_inner(
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
+/// Enumerate the models Antigravity offers (`agy models`). Each line is
+/// `<id>\t<display name>`; the effort level is baked into the id
+/// (`gemini-3.8-flash-high`), so there is no separate effort to pick. Returns
+/// an empty list — never an error — when the binary is missing or the command
+/// fails, so the Settings picker falls back to free-text entry.
+#[tauri::command]
+pub(crate) async fn antigravity_list_models() -> Result<Vec<AntigravityModel>, String> {
+    tauri::async_runtime::spawn_blocking(antigravity_list_models_inner)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn antigravity_list_models_inner() -> Result<Vec<AntigravityModel>, String> {
+    let binary = match resolve_antigravity_binary() {
+        Some(b) => b,
+        None => return Ok(Vec::new()),
+    };
+
+    let output = match hidden_cmd(&binary).arg("models").output() {
+        Ok(o) => o,
+        Err(_) => return Ok(Vec::new()),
+    };
+
+    if !output.status.success() {
+        return Ok(Vec::new());
+    }
+
+    Ok(parse_antigravity_models(&String::from_utf8_lossy(
+        &output.stdout,
+    )))
+}
+
+/// Parse `agy models` stdout. Lines without a tab (the "Fetching available
+/// models..." banner) are skipped.
+fn parse_antigravity_models(stdout: &str) -> Vec<AntigravityModel> {
+    stdout
+        .lines()
+        .filter_map(|l| {
+            let (id, name) = l.split_once('\t')?;
+            let id = id.trim();
+            if id.is_empty() {
+                return None;
+            }
+            let name = name.trim();
+            Some(AntigravityModel {
+                id: id.to_string(),
+                name: if name.is_empty() {
+                    id.to_string()
+                } else {
+                    name.to_string()
+                },
+            })
+        })
+        .collect()
+}
+
 // ─── opencode CLI provider (v2.17) ───────────────────────────────────────
 //
 // opencode (sst/opencode) is a terminal AI coding agent. Like Claude Code
@@ -387,6 +472,95 @@ fn codex_cli_prompt_inner(
 //   - `opencode models [provider]`                        — enumerate models
 //   - `opencode auth login`                               — provider auth
 //
+/// Enumerate Codex's model catalog (`codex debug models`, JSON). Codex
+/// refreshes it from the backend when it can and falls back to the catalog
+/// bundled with the binary, so this works logged out too. Hidden models
+/// (`visibility != "list"`) are dropped, the rest kept in Codex's own
+/// priority order. Returns an empty list — never an error — when the binary
+/// is missing or the output does not parse, so the Settings picker falls
+/// back to free-text entry.
+#[tauri::command]
+pub(crate) async fn codex_list_models() -> Result<Vec<CodexModel>, String> {
+    tauri::async_runtime::spawn_blocking(codex_list_models_inner)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn codex_list_models_inner() -> Result<Vec<CodexModel>, String> {
+    let binary = match resolve_codex_binary() {
+        Some(b) => b,
+        None => return Ok(Vec::new()),
+    };
+
+    let output = match hidden_cmd(&binary).args(["debug", "models"]).output() {
+        Ok(o) => o,
+        Err(_) => return Ok(Vec::new()),
+    };
+
+    if !output.status.success() {
+        return Ok(Vec::new());
+    }
+
+    Ok(parse_codex_models(&String::from_utf8_lossy(&output.stdout)))
+}
+
+fn parse_codex_models(json: &str) -> Vec<CodexModel> {
+    let catalog: serde_json::Value = match serde_json::from_str(json) {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+    let Some(entries) = catalog.get("models").and_then(|m| m.as_array()) else {
+        return Vec::new();
+    };
+
+    let mut listed: Vec<(i64, CodexModel)> = entries
+        .iter()
+        .filter(|m| {
+            m.get("visibility")
+                .and_then(|v| v.as_str())
+                .unwrap_or("list")
+                == "list"
+        })
+        .filter_map(|m| {
+            let id = m.get("slug")?.as_str()?.trim();
+            if id.is_empty() {
+                return None;
+            }
+            let name = m
+                .get("display_name")
+                .and_then(|n| n.as_str())
+                .filter(|n| !n.trim().is_empty())
+                .unwrap_or(id);
+            let efforts = m
+                .get("supported_reasoning_levels")
+                .and_then(|l| l.as_array())
+                .map(|levels| {
+                    levels
+                        .iter()
+                        .filter_map(|l| l.get("effort")?.as_str())
+                        .filter(|e| EFFORT_LEVELS.contains(e))
+                        .map(str::to_string)
+                        .collect()
+                })
+                .unwrap_or_default();
+            let priority = m
+                .get("priority")
+                .and_then(|p| p.as_i64())
+                .unwrap_or(i64::MAX);
+            Some((
+                priority,
+                CodexModel {
+                    id: id.to_string(),
+                    name: name.trim().to_string(),
+                    efforts,
+                },
+            ))
+        })
+        .collect();
+    listed.sort_by_key(|(priority, _)| *priority);
+    listed.into_iter().map(|(_, m)| m).collect()
+}
+
 // ─── Antigravity binary resolution ──────────────────────────────────────────
 // Antigravity CLI (google-antigravity/antigravity-cli). The binary is named
 // `agy` and defaults to ~/.local/bin/agy (curl installer).
@@ -828,9 +1002,10 @@ pub(crate) async fn copilot_cli_prompt(
     system_prompt: Option<String>,
     cwd: Option<String>,
     model: Option<String>,
+    effort: Option<String>,
 ) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        copilot_cli_prompt_inner(prompt, system_prompt, cwd, model)
+        copilot_cli_prompt_inner(prompt, system_prompt, cwd, model, effort)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -841,6 +1016,7 @@ fn copilot_cli_prompt_inner(
     system_prompt: Option<String>,
     cwd: Option<String>,
     model: Option<String>,
+    effort: Option<String>,
 ) -> Result<String, String> {
     let binary =
         resolve_copilot_binary().ok_or_else(|| "Binaire `copilot` introuvable".to_string())?;
@@ -874,6 +1050,9 @@ fn copilot_cli_prompt_inner(
             cmd.args(["--model", m.trim()]);
         }
     }
+    if let Some(e) = valid_effort(effort.as_ref()) {
+        cmd.args(["--reasoning-effort", e]);
+    }
     cmd.args(["-p", full_prompt.as_str()]);
     if let Some(dir) = cwd {
         if !dir.trim().is_empty() {
@@ -897,6 +1076,51 @@ fn copilot_cli_prompt_inner(
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+/// Enumerate the models Copilot accepts. Copilot has no `models` command;
+/// the list lives in `copilot help config`, under the `model` setting, one
+/// `- "<id>"` line per model. Returns an empty list — never an error — when
+/// the binary is missing or the section cannot be found, so the Settings
+/// picker falls back to free-text entry.
+#[tauri::command]
+pub(crate) async fn copilot_list_models() -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(copilot_list_models_inner)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn copilot_list_models_inner() -> Result<Vec<String>, String> {
+    let binary = match resolve_copilot_binary() {
+        Some(b) => b,
+        None => return Ok(Vec::new()),
+    };
+
+    let output = match hidden_cmd(&binary).args(["help", "config"]).output() {
+        Ok(o) => o,
+        Err(_) => return Ok(Vec::new()),
+    };
+
+    if !output.status.success() {
+        return Ok(Vec::new());
+    }
+
+    Ok(parse_copilot_models(&String::from_utf8_lossy(
+        &output.stdout,
+    )))
+}
+
+/// Extract the `- "<id>"` lines that follow the `` `model`: `` heading of
+/// `copilot help config`, stopping at the first line that is not one.
+fn parse_copilot_models(help: &str) -> Vec<String> {
+    help.lines()
+        .skip_while(|l| !l.trim_start().starts_with("`model`:"))
+        .skip(1)
+        .map_while(|l| {
+            let id = l.trim().strip_prefix("- \"")?.strip_suffix('"')?;
+            (!id.is_empty()).then(|| id.to_string())
+        })
+        .collect()
 }
 
 // ─── Claude OAuth login (opens a native terminal) ────────────────────────
@@ -1084,6 +1308,7 @@ mod tests {
                         None,
                         None,
                         None,
+                        None,
                     ))
                 })
                 .collect();
@@ -1104,5 +1329,60 @@ mod tests {
         for answer in answers {
             assert_eq!(answer.unwrap().trim(), "OK");
         }
+    }
+
+    #[test]
+    fn valid_effort_keeps_known_levels_only() {
+        assert_eq!(valid_effort(Some(&"high".to_string())), Some("high"));
+        assert_eq!(valid_effort(Some(&" xhigh ".to_string())), Some("xhigh"));
+        assert_eq!(valid_effort(Some(&"".to_string())), None);
+        assert_eq!(valid_effort(Some(&"--model=x".to_string())), None);
+        assert_eq!(valid_effort(None), None);
+    }
+
+    #[test]
+    fn parse_antigravity_models_skips_banner() {
+        let out = "Fetching available models...\n\
+                   gemini-3.8-flash-high\tGemini 3.8 Flash (High)\n\
+                   claude-sonnet-4-6\tClaude Sonnet 4.6 (Thinking)\n";
+        let models = parse_antigravity_models(out);
+        assert_eq!(models.len(), 2);
+        assert_eq!(models[0].id, "gemini-3.8-flash-high");
+        assert_eq!(models[0].name, "Gemini 3.8 Flash (High)");
+        assert_eq!(models[1].id, "claude-sonnet-4-6");
+    }
+
+    #[test]
+    fn parse_copilot_models_reads_the_model_section_only() {
+        let help = "  `logLevel`: log level\n\
+                    \n\
+                    \x20 `model`: AI model to use for Copilot CLI\n\
+                    \x20   - \"claude-sonnet-5\"\n\
+                    \x20   - \"gpt-5.5\"\n\
+                    \n\
+                    \x20 `contextTier`: context window tier\n\
+                    \x20   - \"default\"\n";
+        assert_eq!(
+            parse_copilot_models(help),
+            vec!["claude-sonnet-5", "gpt-5.5"]
+        );
+        assert!(parse_copilot_models("no model section").is_empty());
+    }
+
+    #[test]
+    fn parse_codex_models_keeps_listed_models_in_priority_order() {
+        let json = r#"{"models":[
+            {"slug":"gpt-6-astra","display_name":"GPT-6-Astra","visibility":"list","priority":2,
+             "supported_reasoning_levels":[{"effort":"low"},{"effort":"ultra"},{"effort":"bogus"}]},
+            {"slug":"gpt-hidden","display_name":"Hidden","visibility":"hide","priority":0},
+            {"slug":"gpt-6.1-sol","display_name":"GPT-6.1-Sol","visibility":"list","priority":1}
+        ]}"#;
+        let models = parse_codex_models(json);
+        assert_eq!(models.len(), 2);
+        assert_eq!(models[0].id, "gpt-6.1-sol");
+        assert!(models[0].efforts.is_empty());
+        assert_eq!(models[1].name, "GPT-6-Astra");
+        assert_eq!(models[1].efforts, vec!["low", "ultra"]);
+        assert!(parse_codex_models("not json").is_empty());
     }
 }

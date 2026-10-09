@@ -106,11 +106,12 @@ compile_error!(
 
 // `strip_claude_auth_env` + `resolve_claude_binary` + `resolve_codex_binary`
 // + `resolve_opencode_binary` + `resolve_copilot_binary`
-// + `resolve_antigravity_binary` + 12 AI CLI commands
+// + `resolve_antigravity_binary` + 15 AI CLI commands
 // (detect_claude_cli, claude_cli_prompt, detect_codex_cli, codex_cli_prompt,
+// codex_list_models,
 // claude_cli_login, detect_opencode_cli, opencode_cli_prompt,
-// opencode_list_models, detect_copilot_cli, copilot_cli_prompt,
-// detect_antigravity_cli, antigravity_cli_prompt)
+// opencode_list_models, detect_copilot_cli, copilot_cli_prompt, copilot_list_models,
+// detect_antigravity_cli, antigravity_cli_prompt, antigravity_list_models)
 // migrated to `src/commands/ai.rs` (§3.4f).
 // Handler entries below route to `commands::ai::*`.
 
@@ -915,13 +916,16 @@ pub fn run() {
             commands::ops::pr_files,
             commands::ai::detect_codex_cli,
             commands::ai::codex_cli_prompt,
+            commands::ai::codex_list_models,
             commands::ai::detect_opencode_cli,
             commands::ai::opencode_cli_prompt,
             commands::ai::opencode_list_models,
             commands::ai::detect_copilot_cli,
             commands::ai::copilot_cli_prompt,
+            commands::ai::copilot_list_models,
             commands::ai::detect_antigravity_cli,
             commands::ai::antigravity_cli_prompt,
+            commands::ai::antigravity_list_models,
             commands::network::check_remote_reachable,
             commands::gitlab::detect_glab,
             commands::gitlab::gl_list_mrs,

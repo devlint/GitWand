@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from "vue";
+import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 import { clampHistoryBudget } from "@gitwand/core";
 import { mergeLlmFallbackForSave } from "../utils/llmFallbackRc";
 import { useI18n } from "../composables/useI18n";
@@ -87,8 +87,14 @@ export type NotificationLevel = "all" | "reviews" | "ci" | "none";
 // lives in `useAIProvider`.
 import {
   type AIProvider,
+  type AIModelOption,
   CLI_AGENT_PROVIDERS,
+  DEFAULT_CLAUDE_API_MODEL,
+  fallbackModelsForProvider,
+  isFetchableEndpoint,
+  isStaleEffort,
   listModelsForProvider,
+  providerEfforts,
 } from "../composables/useAIProvider";
 import { useLogs, type LogEntry } from "../composables/useLogs";
 import { useIdentity } from "../composables/useIdentity";
@@ -157,6 +163,8 @@ interface Settings {
   aiModel: string;
   // Per-provider model selection for CLI agents (v2.17)
   aiModelByProvider: Partial<Record<AIProvider, string>>;
+  // Per-provider reasoning effort (low … max)
+  aiEffortByProvider: Partial<Record<AIProvider, string>>;
   aiOllamaUrl: string;
   aiOllamaModel: string;
   // v3.11.1 — send commit history for the conflicting lines with AI prompts.
@@ -272,8 +280,9 @@ const defaultSettings: Settings = {
   aiProvider: "none",
   aiApiKey: "",
   aiApiEndpoint: "https://api.anthropic.com",
-  aiModel: "claude-sonnet-4-20250514",
+  aiModel: DEFAULT_CLAUDE_API_MODEL,
   aiModelByProvider: {},
+  aiEffortByProvider: {},
   aiOllamaUrl: "http://localhost:11434",
   aiOllamaModel: "codellama",
   aiHistoryEnabled: true,
@@ -478,7 +487,7 @@ function ensureAiDetect() {
   runOpencodeCliDetect();
   runCopilotCliDetect();
   runAntigravityCliDetect();
-  loadCliModels();
+  loadModels();
 }
 
 // Not `immediate` — the initial tab is handled in `onMounted`, which runs
@@ -658,24 +667,20 @@ function onAIProviderChange(val: AIProvider) {
   if (val === "claude-code-cli") {
     // Refresh detection when the user picks this provider.
     runClaudeCliDetect();
-    loadCliModels(val);
   } else if (val === "codex-cli") {
     runCodexCliDetect();
-    loadCliModels(val);
   } else if (val === "opencode-cli") {
     runOpencodeCliDetect();
-    loadCliModels(val);
   } else if (val === "copilot-cli") {
     runCopilotCliDetect();
   } else if (val === "antigravity-cli") {
     runAntigravityCliDetect();
-    loadCliModels(val);
   } else if (val === "claude") {
     if (!settings.value.aiApiEndpoint || settings.value.aiApiEndpoint === "https://api.openai.com/v1") {
       updateSetting("aiApiEndpoint", "https://api.anthropic.com");
     }
     if (!settings.value.aiModel || settings.value.aiModel.startsWith("gpt-")) {
-      updateSetting("aiModel", "claude-sonnet-4-20250514");
+      updateSetting("aiModel", DEFAULT_CLAUDE_API_MODEL);
     }
   } else if (val === "openai-compat") {
     if (!settings.value.aiApiEndpoint || settings.value.aiApiEndpoint === "https://api.anthropic.com") {
@@ -880,36 +885,132 @@ async function runAntigravityCliDetect() {
   }
 }
 
-// ─── Per-provider model picker for CLI agents (v2.17) ───
-const cliModelOptions = ref<string[]>([]);
-const cliModelsLoading = ref(false);
+// ─── Per-provider model + effort picker ───
+// The list comes from whatever the provider can enumerate (see
+// `listModelsForProvider`); an empty list means free-text entry.
+const modelOptions = ref<AIModelOption[]>([]);
+const modelsLoading = ref(false);
+const modelsError = ref("");
 const isCliAgentProvider = computed(() =>
   (CLI_AGENT_PROVIDERS as readonly string[]).includes(settings.value.aiProvider),
 );
+/** Providers whose model is picked in the shared model row. */
+const hasModelPicker = computed(() =>
+  isCliAgentProvider.value
+  || settings.value.aiProvider === "claude"
+  || settings.value.aiProvider === "openai-compat",
+);
+/** The API providers store their model in `aiModel`, CLIs per provider. */
+const usesApiModelField = computed(() =>
+  settings.value.aiProvider === "claude" || settings.value.aiProvider === "openai-compat",
+);
 
-async function loadCliModels(provider: AIProvider = settings.value.aiProvider) {
-  if (!(CLI_AGENT_PROVIDERS as readonly string[]).includes(provider)) {
-    cliModelOptions.value = [];
-    return;
-  }
-  cliModelsLoading.value = true;
+// A slow fetch for a previous provider/key must not overwrite a newer one.
+let modelsRequest = 0;
+async function loadModels(provider: AIProvider = settings.value.aiProvider) {
+  const request = ++modelsRequest;
+  modelsError.value = "";
+  modelsLoading.value = true;
   try {
-    cliModelOptions.value = await listModelsForProvider(provider);
-  } catch {
-    cliModelOptions.value = [];
+    const list = await listModelsForProvider(provider, settings.value);
+    if (request === modelsRequest) modelOptions.value = list;
+  } catch (e) {
+    if (request === modelsRequest) {
+      modelOptions.value = fallbackModelsForProvider(provider);
+      modelsError.value = (e as Error).message;
+    }
   } finally {
-    cliModelsLoading.value = false;
+    if (request === modelsRequest) modelsLoading.value = false;
   }
 }
 
-function currentCliModel(): string {
-  return settings.value.aiModelByProvider?.[settings.value.aiProvider] ?? "";
+// Refetch when the provider or key changes — debounced so typing a key does
+// not fire one request per keystroke. The endpoint is deliberately NOT
+// watched: the fetch sends the API key to it, so every keystroke would leak
+// the key to each half-typed host. It refetches on blur instead (see
+// `onEndpointBlur`). Only once the AI tab has been opened: before that,
+// nobody is looking at the list.
+let modelsReloadTimer: ReturnType<typeof setTimeout> | undefined;
+watch(
+  () => [settings.value.aiProvider, settings.value.aiApiKey],
+  () => {
+    if (!aiDetectDone) return;
+    modelOptions.value = [];
+    clearTimeout(modelsReloadTimer);
+    modelsReloadTimer = setTimeout(() => loadModels(), 500);
+  },
+);
+onUnmounted(() => clearTimeout(modelsReloadTimer));
+
+/** Endpoint field committed: refetch, but only for a complete URL. */
+function onEndpointBlur() {
+  if (!aiDetectDone || !isFetchableEndpoint(settings.value.aiApiEndpoint)) return;
+  clearTimeout(modelsReloadTimer);
+  modelOptions.value = [];
+  loadModels();
 }
 
-function onCliModelChange(val: string) {
-  const next = { ...(settings.value.aiModelByProvider ?? {}) };
+const currentModel = computed(() =>
+  usesApiModelField.value
+    ? settings.value.aiModel
+    : settings.value.aiModelByProvider?.[settings.value.aiProvider] ?? "",
+);
+const currentModelOption = computed(() =>
+  modelOptions.value.find((m) => m.id === currentModel.value),
+);
+const currentEffort = computed(
+  () => settings.value.aiEffortByProvider?.[settings.value.aiProvider] ?? "",
+);
+/**
+ * Effort levels for the selected model. A listed model says what it supports;
+ * otherwise fall back to what the provider accepts in general (empty for the
+ * API providers, where an unlisted model may support no effort at all).
+ */
+const effortOptions = computed(() =>
+  currentModelOption.value
+    ? currentModelOption.value.efforts
+    : providerEfforts(settings.value.aiProvider),
+);
+
+/** "Claude Opus 5.5 · claude-opus-5-5 · effort: low/medium/high". */
+function modelOptionLabel(m: AIModelOption): string {
+  const parts = [m.name];
+  if (m.id !== m.name) parts.push(m.id);
+  if (m.efforts.length) parts.push(`${t("settings.aiEffortShort")}: ${m.efforts.join("/")}`);
+  return parts.join(" · ");
+}
+
+// A saved effort can outlive the model that accepted it (model changed
+// elsewhere, list refreshed, provider renamed it). Only judged when the
+// current model is in the list: an unlisted model (fallback list after a
+// failed fetch, no key yet, free text) says nothing about what it accepts,
+// so its saved effort is kept.
+watch([modelOptions, currentModel], () => {
+  if (isStaleEffort(currentEffort.value, effortOptions.value, currentModelOption.value != null)) {
+    onEffortChange("");
+  }
+});
+
+function onModelChange(val: string) {
+  if (usesApiModelField.value) {
+    updateSetting("aiModel", val);
+  } else {
+    const next = { ...(settings.value.aiModelByProvider ?? {}) };
+    next[settings.value.aiProvider] = val;
+    updateSetting("aiModelByProvider", next);
+  }
+  // An effort the new model does not take would fail the next request. (The
+  // watch above covers it once the list is known; this also covers a
+  // free-text model, where the list is empty.)
+  if (currentEffort.value && !effortOptions.value.includes(currentEffort.value)) {
+    onEffortChange("");
+  }
+}
+
+function onEffortChange(val: string) {
+  const next = { ...(settings.value.aiEffortByProvider ?? {}) };
   next[settings.value.aiProvider] = val;
-  updateSetting("aiModelByProvider", next);
+  updateSetting("aiEffortByProvider", next);
 }
 
 async function runClaudeCliLogin() {
@@ -2284,29 +2385,6 @@ function deleteReleaseNoteTemplate(id: string) {
               <span class="sp-hint">{{ t('settings.aiProviderCliFallbackHint') }}</span>
             </div>
 
-            <!-- Per-provider model picker for CLI agents (v2.17). Dynamic
-                 enumeration for opencode (`opencode models`); curated aliases
-                 for Claude Code; free-text fallback for Codex. -->
-            <div v-if="isCliAgentProvider" class="sp-row">
-              <label class="sp-label" for="setting-ai-cli-model">{{ t('settings.aiModelLabel') }}</label>
-              <select v-if="cliModelOptions.length > 0" id="setting-ai-cli-model" class="sp-select"
-                :value="currentCliModel()"
-                @change="onCliModelChange(($event.target as HTMLSelectElement).value)">
-                <option value="">{{ t('settings.aiModelCliDefault') }}</option>
-                <option v-for="m in cliModelOptions" :key="m" :value="m">{{ m }}</option>
-              </select>
-              <input v-else id="setting-ai-cli-model" class="sp-input mono" type="text"
-                :value="currentCliModel()"
-                @input="onCliModelChange(($event.target as HTMLInputElement).value)"
-                :placeholder="t('settings.aiModelCliPlaceholder')" />
-              <span class="sp-hint">
-                {{ cliModelsLoading ? t('settings.aiModelCliLoading') : t('settings.aiModelCliHint') }}
-                <button v-if="settings.aiProvider === 'opencode-cli'" class="sp-text-btn" @click="loadCliModels()">
-                  {{ t('settings.aiModelCliRefresh') }}
-                </button>
-              </span>
-            </div>
-
             <!-- Claude provider -->
             <template v-if="settings.aiProvider === 'claude'">
               <!-- Auth mode selector -->
@@ -2414,15 +2492,6 @@ function deleteReleaseNoteTemplate(id: string) {
                 </div>
               </template>
 
-              <div class="sp-row">
-                <label class="sp-label" for="setting-ai-model-claude">{{ t('settings.aiModelLabel') }}</label>
-                <select id="setting-ai-model-claude" class="sp-select" :value="settings.aiModel"
-                  @change="updateSetting('aiModel', ($event.target as HTMLSelectElement).value)">
-                  <option value="claude-sonnet-4-20250514">{{ t('settings.aiModelSonnet') }}</option>
-                  <option value="claude-haiku-4-5-20251001">{{ t('settings.aiModelHaiku') }}</option>
-                  <option value="claude-opus-4-20250514">{{ t('settings.aiModelOpus') }}</option>
-                </select>
-              </div>
             </template>
 
             <!-- Claude Code CLI provider (piggyback on user's subscription) -->
@@ -2696,6 +2765,7 @@ function deleteReleaseNoteTemplate(id: string) {
                 <label class="sp-label" for="setting-ai-endpoint">{{ t('settings.aiCompatEndpoint') }}</label>
                 <input id="setting-ai-endpoint" class="sp-input mono" type="text" :value="settings.aiApiEndpoint"
                   @input="updateSetting('aiApiEndpoint', ($event.target as HTMLInputElement).value)"
+                  @blur="onEndpointBlur"
                   placeholder="https://api.openai.com/v1" />
                 <span class="sp-hint">{{ t('settings.aiCompatEndpointHint') }}</span>
               </div>
@@ -2724,10 +2794,48 @@ function deleteReleaseNoteTemplate(id: string) {
                 </div>
               </div>
 
+            </template>
+
+            <!-- Model + effort picker. The list is fetched from the provider
+                 (Anthropic / OpenAI-compatible `models` endpoint, `opencode
+                 models`, `agy models`, `copilot help config`, `codex debug
+                 models`) or curated
+                 (Claude Code aliases); an
+                 empty list falls back to free-text entry. -->
+            <template v-if="hasModelPicker">
               <div class="sp-row">
-                <label class="sp-label" for="setting-ai-model-compat">{{ t('settings.aiModelLabel') }}</label>
-                <input id="setting-ai-model-compat" class="sp-input mono" type="text" :value="settings.aiModel"
-                  @input="updateSetting('aiModel', ($event.target as HTMLInputElement).value)" placeholder="gpt-4o" />
+                <div class="sp-label-row">
+                  <label class="sp-label" for="setting-ai-model">{{ t('settings.aiModelLabel') }}</label>
+                  <span class="sp-label-aside">(<button class="sp-text-btn sp-label-aside__btn"
+                      :disabled="modelsLoading" @click="loadModels()">{{ t('settings.aiModelCliRefresh') }}</button>)</span>
+                </div>
+                <select v-if="modelOptions.length > 0" id="setting-ai-model" class="sp-select"
+                  :value="currentModel"
+                  @change="onModelChange(($event.target as HTMLSelectElement).value)">
+                  <option v-if="isCliAgentProvider" value="">{{ t('settings.aiModelCliDefault') }}</option>
+                  <option v-else-if="!currentModelOption && currentModel" :value="currentModel">{{ currentModel }}</option>
+                  <option v-for="m in modelOptions" :key="m.id" :value="m.id">{{ modelOptionLabel(m) }}</option>
+                </select>
+                <input v-else id="setting-ai-model" class="sp-input mono" type="text"
+                  :value="currentModel"
+                  @input="onModelChange(($event.target as HTMLInputElement).value)"
+                  :placeholder="settings.aiProvider === 'openai-compat' ? 'gpt-4o' : t('settings.aiModelCliPlaceholder')" />
+                <span class="sp-hint">
+                  <template v-if="modelsLoading">{{ t('settings.aiModelCliLoading') }}</template>
+                  <template v-else-if="modelsError">{{ t('settings.aiModelsFetchError', modelsError) }}</template>
+                  <template v-else-if="isCliAgentProvider">{{ t('settings.aiModelCliHint') }}</template>
+                  <template v-else>{{ t('settings.aiModelsFetchedHint') }}</template>
+                </span>
+              </div>
+
+              <div v-if="effortOptions.length > 0" class="sp-row">
+                <label class="sp-label" for="setting-ai-effort">{{ t('settings.aiEffortLabel') }}</label>
+                <select id="setting-ai-effort" class="sp-select" :value="currentEffort"
+                  @change="onEffortChange(($event.target as HTMLSelectElement).value)">
+                  <option value="">{{ t('settings.aiEffortDefault') }}</option>
+                  <option v-for="e in effortOptions" :key="e" :value="e">{{ e }}</option>
+                </select>
+                <span class="sp-hint">{{ t('settings.aiEffortHint') }}</span>
               </div>
             </template>
 
@@ -3516,6 +3624,27 @@ function deleteReleaseNoteTemplate(id: string) {
   color: var(--color-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
+}
+
+/* Label with a small inline action after it — "MODEL (Refresh)". */
+.sp-label-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.sp-label-aside {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.sp-label-aside__btn {
+  font-size: inherit;
+}
+
+.sp-label-aside__btn:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 /* Dock — position row: checkbox on the left, reset button pushed to the right. */

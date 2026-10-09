@@ -367,6 +367,16 @@ const claudeSpawnEnv = (() => {
   delete clean.ANTHROPIC_AUTH_TOKEN;
   return clean;
 })();
+
+/**
+ * Effort levels the AI CLIs accept — same allowlist as the Rust backend's
+ * `valid_effort`. Returns the level, or "" to let the CLI keep its default.
+ */
+const EFFORT_LEVELS = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
+function validEffort(effort) {
+  const e = String(effort ?? "").trim();
+  return EFFORT_LEVELS.includes(e) ? e : "";
+}
 console.log(`[dev-server] gh binary:  ${GH}`);
 console.log(`[dev-server] git binary: ${GIT}`);
 
@@ -5462,6 +5472,8 @@ async function handleRequest(req, res) {
         if (body.model && String(body.model).trim()) {
           claudeArgs.push("--model", String(body.model).trim());
         }
+        const claudeEffort = validEffort(body.effort);
+        if (claudeEffort) claudeArgs.push("--effort", claudeEffort);
         const r = spawnSync(CLAUDE, claudeArgs, {
           cwd: body.cwd || undefined,
           encoding: "utf-8",
@@ -5558,6 +5570,8 @@ async function handleRequest(req, res) {
         if (body.model && String(body.model).trim()) {
           codexArgs.push("--model", String(body.model).trim());
         }
+        const codexEffort = validEffort(body.effort);
+        if (codexEffort) codexArgs.push("-c", `model_reasoning_effort=${codexEffort}`);
         codexArgs.push(fullPrompt);
         const r = spawnSync(CODEX, codexArgs, {
           cwd: body.cwd || undefined,
@@ -5571,6 +5585,33 @@ async function handleRequest(req, res) {
         return res.writeHead(200, { ...corsHeaders(req), "Content-Type": "text/plain" }).end(r.stdout);
       } catch (err) {
         return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
+      }
+    }
+
+    // GET /api/codex-models  → { models: { id, name, efforts }[] }
+    // `codex debug models` dumps the JSON catalog (refreshed, or bundled when
+    // offline) — same filtering and ordering as the Rust `parse_codex_models`.
+    if (url.pathname === "/api/codex-models" && req.method === "GET") {
+      try {
+        const CODEX = resolveBin("codex");
+        const r = spawnSync(CODEX, ["debug", "models"], { encoding: "utf-8", maxBuffer: 32 * 1024 * 1024, timeout: 15000 });
+        if (r.status !== 0) {
+          return jsonResponse(req, res, { models: [] });
+        }
+        const entries = JSON.parse(r.stdout || "{}").models ?? [];
+        const models = entries
+          .filter((m) => (m.visibility ?? "list") === "list" && typeof m.slug === "string" && m.slug.trim())
+          .sort((a, b) => (a.priority ?? Infinity) - (b.priority ?? Infinity))
+          .map((m) => ({
+            id: m.slug.trim(),
+            name: (m.display_name || "").trim() || m.slug.trim(),
+            efforts: (m.supported_reasoning_levels ?? [])
+              .map((l) => l?.effort)
+              .filter((e) => EFFORT_LEVELS.includes(e)),
+          }));
+        return jsonResponse(req, res, { models });
+      } catch {
+        return jsonResponse(req, res, { models: [] });
       }
     }
 
@@ -5727,6 +5768,8 @@ async function handleRequest(req, res) {
         if (body.model && String(body.model).trim()) {
           cpArgs.push("--model", String(body.model).trim());
         }
+        const cpEffort = validEffort(body.effort);
+        if (cpEffort) cpArgs.push("--reasoning-effort", cpEffort);
         cpArgs.push("-p", fullPrompt);
         const cpEnv = { ...process.env };
         delete cpEnv.COPILOT_ALLOW_ALL;
@@ -5744,6 +5787,32 @@ async function handleRequest(req, res) {
         return res.writeHead(200, { ...corsHeaders(req), "Content-Type": "text/plain" }).end(r.stdout);
       } catch (err) {
         return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
+      }
+    }
+
+    // GET /api/copilot-models  → { models: string[] }
+    // Copilot has no `models` command; the list is the `model` setting's
+    // `- "<id>"` lines in `copilot help config` — same parse as the Rust side.
+    if (url.pathname === "/api/copilot-models" && req.method === "GET") {
+      try {
+        const COPILOT = resolveBin("copilot");
+        const r = spawnSync(COPILOT, ["help", "config"], { encoding: "utf-8", maxBuffer: 8 * 1024 * 1024, timeout: 15000 });
+        if (r.status !== 0) {
+          return jsonResponse(req, res, { models: [] });
+        }
+        const lines = (r.stdout || "").split(/\r?\n/);
+        const start = lines.findIndex((l) => l.trimStart().startsWith("`model`:"));
+        const models = [];
+        if (start !== -1) {
+          for (const l of lines.slice(start + 1)) {
+            const m = l.trim().match(/^- "([^"]+)"$/);
+            if (!m) break;
+            models.push(m[1]);
+          }
+        }
+        return jsonResponse(req, res, { models });
+      } catch {
+        return jsonResponse(req, res, { models: [] });
       }
     }
 
@@ -5791,6 +5860,26 @@ async function handleRequest(req, res) {
         });
       } catch (err) {
         return jsonResponse(req, res, { error: err.stderr?.toString() || err.message }, 500);
+      }
+    }
+
+    // GET /api/antigravity-models  → { models: { id, name }[] }
+    if (url.pathname === "/api/antigravity-models" && req.method === "GET") {
+      try {
+        const AGY = resolveBin("agy");
+        const r = spawnSync(AGY, ["models"], { encoding: "utf-8", maxBuffer: 8 * 1024 * 1024, timeout: 15000 });
+        if (r.status !== 0) {
+          return jsonResponse(req, res, { models: [] });
+        }
+        // `<id>\t<name>` per line; the "Fetching available models..." banner has no tab.
+        const models = (r.stdout || "")
+          .split(/\r?\n/)
+          .map((l) => l.split("\t"))
+          .filter((parts) => parts.length >= 2 && parts[0].trim())
+          .map(([id, name]) => ({ id: id.trim(), name: name.trim() || id.trim() }));
+        return jsonResponse(req, res, { models });
+      } catch {
+        return jsonResponse(req, res, { models: [] });
       }
     }
 

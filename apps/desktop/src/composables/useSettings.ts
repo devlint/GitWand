@@ -159,6 +159,11 @@ export interface AppSettings {
    * each one's previous choice; empty/absent means "CLI default".
    */
   aiModelByProvider: Partial<Record<AIProvider, string>>;
+  /**
+   * Per-provider reasoning effort (`low` … `max`), keyed like
+   * `aiModelByProvider`. Empty/absent means "the model's own default".
+   */
+  aiEffortByProvider: Partial<Record<AIProvider, string>>;
   /** Ollama base URL. */
   aiOllamaUrl: string;
   /** Ollama model name. */
@@ -474,8 +479,11 @@ export const defaultAppSettings: AppSettings = {
   aiProvider: "none",
   aiApiKey: "",
   aiApiEndpoint: "https://api.anthropic.com",
-  aiModel: "claude-sonnet-4-20250514",
+  // Same as `DEFAULT_CLAUDE_API_MODEL` (useAIProvider) — not imported, since
+  // loading useAIProvider starts CLI detection as a side effect.
+  aiModel: "claude-opus-5-5",
   aiModelByProvider: {},
+  aiEffortByProvider: {},
   aiOllamaUrl: "http://localhost:11434",
   aiOllamaModel: "codellama",
   aiHistoryEnabled: true,

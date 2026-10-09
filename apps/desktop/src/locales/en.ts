@@ -1198,9 +1198,6 @@ const en = {
     aiShowKey: "Show",
     // AI tab — model
     aiModelLabel: "Model",
-    aiModelSonnet: "Claude Sonnet 4 (recommended)",
-    aiModelHaiku: "Claude Haiku 4.5 (fast)",
-    aiModelOpus: "Claude Opus 4 (premium)",
     // AI tab — Claude CLI
     aiCliStatus: "CLI status",
     aiCliDetecting: "Detecting\u2026",
@@ -1242,6 +1239,12 @@ const en = {
     aiModelCliLoading: "Loading models…",
     aiModelCliHint: "Choose the model this CLI agent uses, or keep its default.",
     aiModelCliRefresh: "Refresh",
+    aiModelsFetchedHint: "Models listed by the provider for this key.",
+    aiModelsFetchError: "Couldn't load the model list: {0}",
+    aiEffortLabel: "Effort",
+    aiEffortShort: "effort",
+    aiEffortDefault: "Default (model's own setting)",
+    aiEffortHint: "How much the model reasons before answering. Higher is slower and costs more.",
     // AI tab — OpenAI-compat
     aiCompatEndpoint: "API endpoint",
     aiCompatEndpointHint: "Compatible with OpenAI, Mistral, Groq, Azure, etc.",

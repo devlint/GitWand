@@ -46,6 +46,21 @@ export const COMMAND_REGISTRY: Record<string, CommandRegistryEntry> = {
   // same branch through helpers (`gh_list_prs_inner` and friends), and finding
   // them means following call chains this audit did not undertake. Treat an
   // absent `cliPathOnly` on a forge command as "not checked", not as "agrees".
+  antigravity_cli_prompt: { route: "/api/antigravity-cli-prompt" },
+  antigravity_list_models: { route: "/api/antigravity-models" },
+  claude_cli_login: { route: "/api/claude-cli-login" },
+  claude_cli_prompt: { route: "/api/claude-cli-prompt" },
+  codex_cli_prompt: { route: "/api/codex-cli-prompt" },
+  codex_list_models: { route: "/api/codex-models" },
+  copilot_cli_prompt: { route: "/api/copilot-cli-prompt" },
+  copilot_list_models: { route: "/api/copilot-models" },
+  detect_antigravity_cli: { route: "/api/antigravity-cli-detect" },
+  detect_claude_cli: { route: "/api/claude-cli-detect" },
+  detect_codex_cli: { route: "/api/codex-cli-detect" },
+  detect_copilot_cli: { route: "/api/copilot-cli-detect" },
+  detect_opencode_cli: { route: "/api/opencode-cli-detect" },
+  opencode_cli_prompt: { route: "/api/opencode-cli-prompt" },
+  opencode_list_models: { route: "/api/opencode-models" },
   agent_session_launch: { route: "/api/agent-session-launch" },
   agent_session_list: { route: "/api/agent-session-list" },
   bb_list_issues: { route: "/api/bb-list-issues" },
