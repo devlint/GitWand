@@ -6,6 +6,8 @@ import { useSettings } from "../composables/useSettings";
 import { useDraggableResizable } from "../composables/useDraggableResizable";
 import { clipboardReadText, clipboardWriteText, openExternalUrl } from "../utils/backend";
 import { DomTerminal } from "../utils/vt/DomTerminal";
+import AiSparkle from "./AiSparkle.vue";
+import AgentIcon from "./AgentIcon.vue";
 
 const props = defineProps<{ repoPath: string }>();
 const emit = defineEmits<{
@@ -35,9 +37,18 @@ watchEffect((onCleanup) => {
   onCleanup(() => document.removeEventListener("click", close));
 });
 
-function openDropdown(e: MouseEvent) {
+const menuRef = ref<HTMLElement | null>(null);
+/** The panel is docked at the bottom: when it is short, open the menu upward. */
+const menuUp = ref(false);
+
+async function openDropdown(e: MouseEvent) {
   e.stopPropagation();
   showDropdown.value = !showDropdown.value;
+  if (!showDropdown.value) return;
+  menuUp.value = false;
+  await nextTick();
+  const menu = menuRef.value;
+  if (menu && menu.getBoundingClientRect().bottom > window.innerHeight - 8) menuUp.value = true;
 }
 
 function selectDropdownItem(action: () => void) {
@@ -267,8 +278,9 @@ async function mountTab(tab: TerminalTab) {
     fontSize: settings.value.terminalFontSize ?? 13,
     // AI CLIs take Shift+Enter as "newline in the prompt"; shells get a plain CR.
     shiftEnterNewline: tab.type !== "shell",
-    // App-level terminal shortcuts (new / close / switch tab) never reach the PTY.
-    customKeyHandler: (e) => resolveTerminalShortcut(e, true) === null,
+    // App-level terminal shortcuts (new / close / switch tab, search) never
+    // reach the PTY — Ctrl+F would otherwise also send ^F (page down in vim/less).
+    customKeyHandler: (e) => resolveTerminalShortcut(e, true) === null && !isSearchChord(e),
     readClipboard: clipboardReadText,
     writeClipboard: clipboardWriteText,
     onLinkOpen: (url) => { openExternalUrl(url); },
@@ -437,6 +449,9 @@ const searchVisible = ref(false);
 const searchQuery = ref("");
 const searchHasResult = ref(true);
 
+/** Shortcut shown in the search button's tooltip (see onKeyDown). */
+const searchShortcut = navigator.platform.toUpperCase().includes("MAC") ? "⌘F" : "Ctrl+F";
+
 function openSearch() {
   searchVisible.value = true;
   nextTick(() => {
@@ -463,8 +478,13 @@ function doSearch(direction: "next" | "prev") {
   searchHasResult.value = found !== false;
 }
 
+/** ⌘F / Ctrl+F — opens the terminal search (see onKeyDown). */
+function isSearchChord(e: KeyboardEvent): boolean {
+  return (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "f";
+}
+
 function onKeyDown(e: KeyboardEvent) {
-  if ((e.metaKey || e.ctrlKey) && e.key === "f") {
+  if (isSearchChord(e)) {
     e.preventDefault();
     openSearch();
   }
@@ -529,9 +549,10 @@ onBeforeUnmount(() => {
           @blur="commitRename(tab)"
         />
         <span v-else class="tp__tab-label">
-          <span class="tp__tab-icon" :class="`tp__tab-icon--${tab.type}`">
-            {{ tab.type === 'claude' ? 'C' : tab.type === 'codex' ? '⚡' : tab.type === 'opencode' ? 'O' : tab.type === 'antigravity' ? '↑' : '$' }}
-          </span>
+          <svg v-if="tab.type === 'shell'" class="tp__tab-icon tp__tab-icon--shell" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
+          </svg>
+          <AgentIcon v-else class="tp__tab-icon" :agent="tab.type" />
           {{ tab.title }}
           <span v-if="tab.hasUnread && tab.id !== activeId" class="tp__unread" />
         </span>
@@ -544,34 +565,66 @@ onBeforeUnmount(() => {
       </button>
 
       <div class="tp__new-wrap">
-        <button class="tp__new" :title="t('terminal.newTab')" @click="openDropdown">+</button>
-        <div v-if="showDropdown" class="tp__menu" @click.stop>
-          <button class="tp__menu-item" @click="selectDropdownItem(() => emit('new'))">
+        <button
+          class="tp__new"
+          v-tooltip="t('terminal.newTab')"
+          :aria-label="t('terminal.newTab')"
+          aria-haspopup="menu"
+          :aria-expanded="showDropdown"
+          @click="openDropdown"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+            <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+        </button>
+        <div
+          v-if="showDropdown"
+          ref="menuRef"
+          class="tp__menu"
+          :class="{ 'tp__menu--up': menuUp }"
+          role="menu"
+          @click.stop
+        >
+          <button class="tp__menu-item" role="menuitem" @click="selectDropdownItem(() => emit('new'))">
+            <svg class="tp__menu-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
+            </svg>
             {{ t('terminal.menuShell') }}
           </button>
-          <button class="tp__menu-item" @click="selectDropdownItem(() => emit('new-agent', 'claude'))">
+          <button class="tp__menu-item" role="menuitem" @click="selectDropdownItem(() => emit('new-agent', 'claude'))">
+            <AgentIcon class="tp__menu-icon" agent="claude" />
             {{ t('terminal.menuClaude') }}
           </button>
-          <button class="tp__menu-item" @click="selectDropdownItem(() => emit('new-agent', 'codex'))">
+          <button class="tp__menu-item" role="menuitem" @click="selectDropdownItem(() => emit('new-agent', 'codex'))">
+            <AgentIcon class="tp__menu-icon" agent="codex" />
             {{ t('terminal.menuCodex') }}
           </button>
-          <button class="tp__menu-item" @click="selectDropdownItem(() => emit('new-agent', 'opencode'))">
+          <button class="tp__menu-item" role="menuitem" @click="selectDropdownItem(() => emit('new-agent', 'opencode'))">
+            <AgentIcon class="tp__menu-icon" agent="opencode" />
             {{ t('terminal.menuOpenCode') }}
           </button>
-          <button class="tp__menu-item" @click="selectDropdownItem(() => emit('new-agent', 'antigravity'))">
+          <button class="tp__menu-item" role="menuitem" @click="selectDropdownItem(() => emit('new-agent', 'antigravity'))">
+            <AgentIcon class="tp__menu-icon" agent="antigravity" />
             {{ t('terminal.menuAntigravity') }}
           </button>
-          <button class="tp__menu-item" @click="selectDropdownItem(() => emit('open-sessions'))">
+          <div class="tp__menu-separator" role="separator"></div>
+          <button class="tp__menu-item" role="menuitem" @click="selectDropdownItem(() => emit('open-sessions'))">
+            <svg class="tp__menu-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <line x1="9" y1="6" x2="20" y2="6"/><line x1="9" y1="12" x2="20" y2="12"/><line x1="9" y1="18" x2="20" y2="18"/>
+              <circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/>
+            </svg>
             {{ t('terminal.menuSessions') }}
           </button>
-          <button class="tp__menu-item tp__menu-item--accent" @click="selectDropdownItem(() => emit('new-ai-task'))">
+          <div class="tp__menu-separator" role="separator"></div>
+          <button class="tp__menu-item tp__menu-item--accent" role="menuitem" @click="selectDropdownItem(() => emit('new-ai-task'))">
+            <AiSparkle class="tp__menu-icon" :size="14" />
             {{ t('terminal.menuNewAiTask') }}
           </button>
         </div>
       </div>
       <button
         class="tp__full"
-        :title="fullscreen ? t('terminal.exitFullscreen') : t('terminal.fullscreen')"
+        v-tooltip="fullscreen ? t('terminal.exitFullscreen') : t('terminal.fullscreen')"
         :aria-label="fullscreen ? t('terminal.exitFullscreen') : t('terminal.fullscreen')"
         @click="toggleFullscreen"
       >
@@ -584,7 +637,11 @@ onBeforeUnmount(() => {
           <line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/>
         </svg>
       </button>
-      <button class="tp__hide" :title="t('terminal.hide')" @click="emit('close')">✕</button>
+      <button class="tp__hide" v-tooltip="t('terminal.hide')" :aria-label="t('terminal.hide')" @click="emit('close')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
     </div>
 
     <!-- Width / corner resize handles — floating mode only (fullscreen and
@@ -646,10 +703,10 @@ onBeforeUnmount(() => {
           @keyup.enter="doSearch('next')"
           @keyup.shift.enter="doSearch('prev')"
         />
-        <button class="tp__search-btn" @click="doSearch('prev')" :title="t('terminal.searchPrev')">↑</button>
-        <button class="tp__search-btn" @click="doSearch('next')" :title="t('terminal.searchNext')">↓</button>
+        <button class="tp__search-btn" @click="doSearch('prev')" v-tooltip="t('terminal.searchPrev')" :aria-label="t('terminal.searchPrev')">↑</button>
+        <button class="tp__search-btn" @click="doSearch('next')" v-tooltip="t('terminal.searchNext')" :aria-label="t('terminal.searchNext')">↓</button>
         <span v-if="!searchHasResult" class="tp__search-noresult">{{ t('terminal.searchNoResult') }}</span>
-        <button class="tp__search-close" @click="closeSearch">×</button>
+        <button class="tp__search-close" @click="closeSearch" v-tooltip="t('terminal.searchClose')" :aria-label="t('terminal.searchClose')">×</button>
       </div>
       <div class="tp__hosts">
         <div
@@ -670,12 +727,12 @@ onBeforeUnmount(() => {
         <button
           v-if="tabs.length && !searchVisible"
           class="tp__search-fab"
-          :title="t('terminal.ctxSearch')"
+          v-tooltip="t('terminal.searchOpen', searchShortcut)"
           :aria-label="t('terminal.ctxSearch')"
           @click="openSearch"
         >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="10" cy="10" r="7"/><line x1="20" y1="20" x2="14.95" y2="14.95"/>
           </svg>
         </button>
       </div>
@@ -811,7 +868,9 @@ onBeforeUnmount(() => {
 .tp__tabs {
   display: flex;
   gap: 2px;
-  align-items: center;
+  /* Stretch, not center: the + button takes the tabs' full height so it sits
+     flush on the terminal surface like a tab does. */
+  align-items: stretch;
   padding: 1px 6px 0px;
   margin-bottom: 0px;
   flex-shrink: 0;
@@ -859,47 +918,41 @@ onBeforeUnmount(() => {
 }
 
 .tp__new {
-  border: none;
-  cursor: pointer;
-  padding: 3.5px 20px;
-  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
-  color: inherit;
-  font-size: var(--font-size-2xl);
-  font-weight: var(--font-weight-bold);
-  background: var(--bg-base, var(--color-bg));
-  opacity: 0.7;
-}
-
-.tp__full {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  margin-left: auto;
   border: none;
+  cursor: pointer;
+  padding: 0 16px;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  color: inherit;
   background: var(--bg-base, var(--color-bg));
   opacity: 0.7;
-  cursor: pointer;
-  padding: 7px 9px;
-  border-radius: var(--radius-sm);
-  color: inherit;
-  position: relative;
-  top: -2px;
 }
 
+/* Fullscreen + hide: identical square buttons, centred in the tab bar and
+   nudged up so they read as part of the bar rather than the tabs' baseline. */
+.tp__full,
 .tp__hide {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  align-self: center;
+  position: relative;
+  top: -3px;
+  width: 30px;
+  height: 30px;
+  padding: 0;
   border: none;
   background: var(--bg-base, var(--color-bg));
   opacity: 0.7;
   cursor: pointer;
-  padding: 4px 9px;
   border-radius: var(--radius-sm);
   color: inherit;
-  font-size: var(--font-size-xl);
-  position: relative;
-  top: -2px;
+}
+
+.tp__full {
+  margin-left: auto;
 }
 
 .tp__new:hover,
@@ -976,7 +1029,9 @@ onBeforeUnmount(() => {
 .tp__host {
   position: absolute;
   inset: 0px 6px 7px;
-  padding: 0px 7px;
+  /* Small top gap so the first line doesn't touch the tab bar. The terminal
+     fits its rows to the remaining height (DomTerminal.fit). */
+  padding: 6px 7px 0;
   /* Same surface as the active tab, so tab and terminal read as one sheet. */
   background-color: var(--bg-base, var(--color-bg));
   border-radius: 0px var(--radius-sm) var(--radius-sm) var(--radius-sm);
@@ -1017,7 +1072,8 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: black;
+  /* Same surface as a terminal tab (.tp__host), in both themes. */
+  background-color: var(--bg-base, var(--color-bg));
   border-radius: 0px var(--radius-sm) var(--radius-sm) var(--radius-sm);
   color: var(--color-text-muted);
   font-size: var(--font-size-xl);
@@ -1040,44 +1096,75 @@ onBeforeUnmount(() => {
 
 .tp__new-wrap {
   position: relative;
+  display: flex;
 }
 
+/* "+" menu — same look as the tab bar's "+" menu (RepoTabStrip). */
 .tp__menu {
   position: absolute;
-  top: 100%;
+  top: calc(100% + 4px);
   left: 0;
-  background: var(--bg-elevated, var(--color-bg-secondary));
-  border: 1px solid var(--border, var(--color-border));
-  border-radius: var(--radius-sm);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   z-index: 100;
-  min-width: 140px;
-  padding: 2px 0;
+  min-width: 200px;
+  padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+}
+
+.tp__menu--up {
+  top: auto;
+  bottom: calc(100% + 4px);
 }
 
 .tp__menu-item {
-  display: block;
-  width: 100%;
-  padding: 6px 12px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
   text-align: left;
-  background: none;
-  border: none;
-  cursor: pointer;
-  font-size: 14px;
-  color: var(--text, var(--color-text));
   white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
 }
 
 .tp__menu-item:hover {
-  background: var(--hover, var(--color-hover));
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
 }
 
-.tp__menu-item--accent {
+/* Left icon slot — one 14px column for every item. */
+.tp__menu-icon {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  color: var(--color-text-muted);
+}
+
+.tp__menu-item:hover svg.tp__menu-icon {
   color: var(--color-accent);
-  font-weight: 500;
-  border-top: 1px solid var(--color-border);
-  margin-top: 2px;
-  padding-top: 8px;
+}
+
+
+.tp__menu-separator {
+  height: 1px;
+  margin: var(--space-2) 0;
+  background: var(--color-border);
+}
+
+.tp__menu-item--accent,
+.tp__menu-item--accent .tp__menu-icon {
+  color: var(--color-accent);
 }
 
 /* Right-click context menu — teleported to <body>, positioned at the cursor. */
@@ -1168,37 +1255,15 @@ onBeforeUnmount(() => {
 .tp__tab-label {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
 }
 
 .tp__tab-icon {
-  font-size: 10px;
+  flex-shrink: 0;
+}
+
+.tp__tab-icon--shell {
   opacity: 0.6;
-  font-family: monospace;
-  min-width: 12px;
-}
-
-.tp__tab-icon--claude {
-  color: var(--color-accent);
-  opacity: 1;
-  font-weight: bold;
-}
-
-.tp__tab-icon--codex {
-  color: #a370f7;
-  opacity: 1;
-}
-
-.tp__tab-icon--opencode {
-  color: #3b82f6;
-  opacity: 1;
-  font-weight: bold;
-}
-
-.tp__tab-icon--antigravity {
-  color: #10b981;
-  opacity: 1;
-  font-weight: bold;
 }
 
 .tp__unread {

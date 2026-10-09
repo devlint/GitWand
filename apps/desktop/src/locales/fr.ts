@@ -2619,6 +2619,8 @@ const fr: Locale = {
     searchNoResult: "Aucun résultat",
     searchPrev: "Précédent (Maj+Entrée)",
     searchNext: "Suivant (Entrée)",
+    searchClose: "Fermer la recherche (Échap)",
+    searchOpen: "Rechercher ({0})",
     menuHideOnNav: "Masquer au changement de menu",
     menuLayout: "Disposition",
     modeFullscreen: "Plein écran",

@@ -2609,6 +2609,8 @@ const es: Locale = {
     searchNoResult: "Sin resultados",
     searchPrev: "Anterior (Shift+Enter)",
     searchNext: "Siguiente (Enter)",
+    searchClose: "Cerrar búsqueda (Esc)",
+    searchOpen: "Buscar ({0})",
     menuHideOnNav: "Ocultar al cambiar de menú",
     menuLayout: "Disposición",
     modeFullscreen: "Pantalla completa",
