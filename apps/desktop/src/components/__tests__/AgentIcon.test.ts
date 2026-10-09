@@ -2,15 +2,16 @@
 import { describe, it, expect } from "vitest";
 import { createApp, h } from "vue";
 import AgentIcon from "../AgentIcon.vue";
+import antigravitySvg from "../../assets/agents/antigravity.svg?raw";
 
 describe("AgentIcon", () => {
   it("gives each instance its own gradient/mask/filter ids", () => {
     const host = document.createElement("div");
     const app = createApp({
       render: () => [
-        h(AgentIcon, { agent: "antigravity" }),
-        h(AgentIcon, { agent: "antigravity" }),
         h(AgentIcon, { agent: "codex" }),
+        h(AgentIcon, { agent: "codex" }),
+        h(AgentIcon, { agent: "claude" }),
       ],
     });
     app.mount(host);
@@ -29,6 +30,28 @@ describe("AgentIcon", () => {
       for (const r of refs) expect(own.has(r)).toBe(true);
     }
     app.unmount();
+  });
+
+  it("renders the filter-heavy Antigravity mark as a cached image, at the given size", () => {
+    const host = document.createElement("div");
+    const app = createApp({
+      render: () => [h(AgentIcon, { agent: "antigravity" }), h(AgentIcon, { agent: "antigravity", size: 16 })],
+    });
+    app.mount(host);
+    const imgs = [...host.querySelectorAll("img")];
+    expect(imgs).toHaveLength(2);
+    expect(imgs[0].getAttribute("src")).toMatch(/antigravity\.svg/);
+    expect(imgs.map((i) => i.getAttribute("width"))).toEqual(["14", "16"]);
+    expect(imgs[0].getAttribute("alt")).toBe("");
+    app.unmount();
+  });
+
+  it("keeps every url(#…) reference of the Antigravity file pointing at one of its own ids", () => {
+    const svg = antigravitySvg;
+    const ids = new Set([...svg.matchAll(/\bid="([^"]+)"/g)].map((m) => m[1]));
+    const refs = [...svg.matchAll(/url\(#([^)]+)\)/g)].map((m) => m[1]);
+    expect(refs.length).toBeGreaterThan(0);
+    for (const r of refs) expect(ids.has(r)).toBe(true);
   });
 
   it("follows currentColor for the single-colour OpenCode mark", () => {

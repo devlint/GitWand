@@ -32,6 +32,8 @@ interface TooltipEl extends HTMLElement {
     abort: AbortController;
     reposition: () => void;
     opts: TooltipOptions;
+    /** The anchor's own aria-describedby, restored on hide (null: none). */
+    describedBy?: string | null;
   };
   /** Current binding value — refreshed by `updated`, read at show time. */
   _tooltipOpts?: TooltipOptions | null;
@@ -42,6 +44,7 @@ interface TooltipEl extends HTMLElement {
 }
 
 const GAP = 7; // px gap between anchor and tooltip
+let tipSeq = 0;
 
 function getOptions(value: unknown): TooltipOptions | null {
   if (!value) return null;
@@ -96,6 +99,7 @@ function show(el: TooltipEl, opts: TooltipOptions) {
   tip.className = "gw-tooltip";
   tip.textContent = opts.text;
   tip.setAttribute("role", "tooltip");
+  tip.id = `gw-tooltip-${++tipSeq}`;
   document.body.appendChild(tip);
 
   // Auto-position: below when anchor is in the top half of the viewport,
@@ -129,6 +133,23 @@ function show(el: TooltipEl, opts: TooltipOptions) {
   window.addEventListener("resize", onResize, { signal, passive: true });
 
   el._tooltip = { tip, abort, reposition, opts };
+  describe(el, tip, opts.text);
+}
+
+/**
+ * While shown, link the tooltip as the anchor's description, so a screen
+ * reader announces it on focus — what a native `title` used to provide.
+ * Skipped when the text already is the anchor's accessible name (icon-only
+ * anchor, identical aria-label or visible text): it would be read twice.
+ */
+function describe(el: TooltipEl, tip: HTMLElement, text: string) {
+  const visible = el._tooltip;
+  if (!visible) return;
+  const name = el.getAttribute("aria-label") ?? el.textContent?.trim() ?? "";
+  if (el._tooltipOwnsLabel || name === text.trim()) return;
+  const own = el.getAttribute("aria-describedby");
+  visible.describedBy = own;
+  el.setAttribute("aria-describedby", own ? `${own} ${tip.id}` : tip.id);
 }
 
 /** Matches the `.gw-tooltip--leaving` opacity transition in main.css. */
@@ -141,9 +162,13 @@ const FADE_OUT_MS = 500;
  */
 function hide(el: TooltipEl) {
   if (!el._tooltip) return;
-  const { tip, abort } = el._tooltip;
+  const { tip, abort, describedBy } = el._tooltip;
   abort.abort();
   delete el._tooltip;
+  if (describedBy !== undefined) {
+    if (describedBy) el.setAttribute("aria-describedby", describedBy);
+    else el.removeAttribute("aria-describedby");
+  }
   tip.classList.remove("gw-tooltip--visible");
   tip.classList.add("gw-tooltip--leaving");
   setTimeout(() => tip.remove(), FADE_OUT_MS);

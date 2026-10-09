@@ -5,7 +5,7 @@ import { useI18n } from "../composables/useI18n";
 import { useSettings } from "../composables/useSettings";
 import { useDraggableResizable } from "../composables/useDraggableResizable";
 import { clipboardReadText, clipboardWriteText, openExternalUrl } from "../utils/backend";
-import { DomTerminal } from "../utils/vt/DomTerminal";
+import { DomTerminal, IS_MAC } from "../utils/vt/DomTerminal";
 import AiSparkle from "./AiSparkle.vue";
 import AgentIcon from "./AgentIcon.vue";
 
@@ -450,7 +450,9 @@ const searchQuery = ref("");
 const searchHasResult = ref(true);
 
 /** Shortcut shown in the search button's tooltip (see onKeyDown). */
-const searchShortcut = navigator.platform.toUpperCase().includes("MAC") ? "⌘F" : "Ctrl+F";
+const searchShortcut = IS_MAC ? "⌘F" : "Ctrl+F";
+/** The same shortcut for assistive tech (aria-keyshortcuts syntax). */
+const searchKeyShortcuts = IS_MAC ? "Meta+F" : "Control+F";
 
 function openSearch() {
   searchVisible.value = true;
@@ -580,44 +582,44 @@ onBeforeUnmount(() => {
         <div
           v-if="showDropdown"
           ref="menuRef"
-          class="tp__menu"
+          class="gw-menu tp__menu"
           :class="{ 'tp__menu--up': menuUp }"
           role="menu"
           @click.stop
         >
-          <button class="tp__menu-item" role="menuitem" @click="selectDropdownItem(() => emit('new'))">
+          <button class="gw-menu__item tp__menu-item" role="menuitem" @click="selectDropdownItem(() => emit('new'))">
             <svg class="tp__menu-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
             </svg>
             {{ t('terminal.menuShell') }}
           </button>
-          <button class="tp__menu-item" role="menuitem" @click="selectDropdownItem(() => emit('new-agent', 'claude'))">
+          <button class="gw-menu__item tp__menu-item" role="menuitem" @click="selectDropdownItem(() => emit('new-agent', 'claude'))">
             <AgentIcon class="tp__menu-icon" agent="claude" />
             {{ t('terminal.menuClaude') }}
           </button>
-          <button class="tp__menu-item" role="menuitem" @click="selectDropdownItem(() => emit('new-agent', 'codex'))">
+          <button class="gw-menu__item tp__menu-item" role="menuitem" @click="selectDropdownItem(() => emit('new-agent', 'codex'))">
             <AgentIcon class="tp__menu-icon" agent="codex" />
             {{ t('terminal.menuCodex') }}
           </button>
-          <button class="tp__menu-item" role="menuitem" @click="selectDropdownItem(() => emit('new-agent', 'opencode'))">
+          <button class="gw-menu__item tp__menu-item" role="menuitem" @click="selectDropdownItem(() => emit('new-agent', 'opencode'))">
             <AgentIcon class="tp__menu-icon" agent="opencode" />
             {{ t('terminal.menuOpenCode') }}
           </button>
-          <button class="tp__menu-item" role="menuitem" @click="selectDropdownItem(() => emit('new-agent', 'antigravity'))">
+          <button class="gw-menu__item tp__menu-item" role="menuitem" @click="selectDropdownItem(() => emit('new-agent', 'antigravity'))">
             <AgentIcon class="tp__menu-icon" agent="antigravity" />
             {{ t('terminal.menuAntigravity') }}
           </button>
-          <div class="tp__menu-separator" role="separator"></div>
-          <button class="tp__menu-item" role="menuitem" @click="selectDropdownItem(() => emit('open-sessions'))">
+          <div class="gw-menu__separator" role="separator"></div>
+          <button class="gw-menu__item tp__menu-item" role="menuitem" @click="selectDropdownItem(() => emit('open-sessions'))">
             <svg class="tp__menu-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <line x1="9" y1="6" x2="20" y2="6"/><line x1="9" y1="12" x2="20" y2="12"/><line x1="9" y1="18" x2="20" y2="18"/>
               <circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/>
             </svg>
             {{ t('terminal.menuSessions') }}
           </button>
-          <div class="tp__menu-separator" role="separator"></div>
-          <button class="tp__menu-item tp__menu-item--accent" role="menuitem" @click="selectDropdownItem(() => emit('new-ai-task'))">
-            <AiSparkle class="tp__menu-icon" :size="14" />
+          <div class="gw-menu__separator" role="separator"></div>
+          <button class="gw-menu__item tp__menu-item tp__menu-item--ai" role="menuitem" @click="selectDropdownItem(() => emit('new-ai-task'))">
+            <AiSparkle class="tp__menu-icon" :size="14" :animated="false" />
             {{ t('terminal.menuNewAiTask') }}
           </button>
         </div>
@@ -729,6 +731,7 @@ onBeforeUnmount(() => {
           class="tp__search-fab"
           v-tooltip="t('terminal.searchOpen', searchShortcut)"
           :aria-label="t('terminal.ctxSearch')"
+          :aria-keyshortcuts="searchKeyShortcuts"
           @click="openSearch"
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -1099,48 +1102,19 @@ onBeforeUnmount(() => {
   display: flex;
 }
 
-/* "+" menu — same look as the tab bar's "+" menu (RepoTabStrip). */
+/* "+" menu — look from the shared .gw-menu / .gw-menu__item (main.css),
+   the same as the tab bar's "+" menu (RepoTabStrip). */
 .tp__menu {
   position: absolute;
   top: calc(100% + 4px);
   left: 0;
   z-index: 100;
   min-width: 200px;
-  padding: var(--space-2);
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-md);
 }
 
 .tp__menu--up {
   top: auto;
   bottom: calc(100% + 4px);
-}
-
-.tp__menu-item {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-2) var(--space-4);
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--color-text);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
-  text-align: left;
-  white-space: nowrap;
-  cursor: pointer;
-  transition: background var(--transition-fast), color var(--transition-fast);
-}
-
-.tp__menu-item:hover {
-  background: var(--color-accent-soft);
-  color: var(--color-accent);
 }
 
 /* Left icon slot — one 14px column for every item. */
@@ -1155,16 +1129,19 @@ onBeforeUnmount(() => {
   color: var(--color-accent);
 }
 
-
-.tp__menu-separator {
-  height: 1px;
-  margin: var(--space-2) 0;
-  background: var(--color-border);
+/* AI entry: the AI colour, like every other AI action (see AiSparkle). */
+.tp__menu-item--ai,
+.tp__menu-item--ai .tp__menu-icon {
+  color: var(--color-ai);
 }
 
-.tp__menu-item--accent,
-.tp__menu-item--accent .tp__menu-icon {
-  color: var(--color-accent);
+.tp__menu-item--ai:hover {
+  background: var(--color-ai-soft);
+}
+
+.tp__menu-item--ai:hover,
+.tp__menu-item--ai:hover .tp__menu-icon {
+  color: var(--color-ai-hover);
 }
 
 /* Right-click context menu — teleported to <body>, positioned at the cursor. */
