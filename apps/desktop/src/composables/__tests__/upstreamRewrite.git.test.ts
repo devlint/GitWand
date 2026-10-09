@@ -39,7 +39,12 @@ vi.mock("../../utils/backend", () => ({
   }),
 }));
 
-import { isUpstreamRewriteOnly, isLocalRewriteOfUpstream } from "../useBranchUpdatePrompt";
+import {
+  isUpstreamRewriteOnly,
+  isLocalRewriteOfUpstream,
+  probeLocalRewriteOfUpstream,
+  evaluateAutoForcePush,
+} from "../useBranchUpdatePrompt";
 
 function git(cwd: string, args: string[]): string {
   return execFileSync("git", args, { cwd, env: gitEnv(), encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] });
@@ -175,5 +180,86 @@ describe("isLocalRewriteOfUpstream", () => {
     const { me } = setup();
     git(me, ["switch", "-q", "-c", "local-only"]);
     expect(await isLocalRewriteOfUpstream(me, "local-only")).toBe(false);
+  }, GIT_TEST_TIMEOUT_MS);
+});
+
+describe("isLocalRewriteOfUpstream — remote merge commits", () => {
+  it("is false when the upstream holds a merge commit with content of its own", async () => {
+    const { teammate, me } = setup();
+    // Teammate merges a moved main into feat, adding a file inside the merge.
+    git(teammate, ["switch", "-q", "main"]);
+    commit(teammate, "m", "main\n", "m2");
+    git(teammate, ["push", "-q", "origin", "main"]);
+    git(teammate, ["switch", "-q", "feat"]);
+    git(teammate, ["merge", "-q", "--no-ff", "--no-commit", "main"]);
+    writeFileSync(join(teammate, "extra"), "only in the merge\n");
+    git(teammate, ["add", "extra"]);
+    git(teammate, ["commit", "-q", "-m", "merge main into feat"]);
+    git(teammate, ["push", "-q", "origin", "feat"]);
+    // Meanwhile `me` rebases its (older) feat onto main without that merge.
+    git(me, ["fetch", "-q"]);
+    git(me, ["rebase", "-q", "origin/main", "feat"]);
+    expect(git(me, ["rev-list", "--count", "HEAD...@{upstream}"]).trim()).not.toBe("0");
+    expect(await isLocalRewriteOfUpstream(me, "feat")).toBe(false);
+  }, GIT_TEST_TIMEOUT_MS);
+});
+
+describe("probeLocalRewriteOfUpstream", () => {
+  it("reports the upstream sha it judged", async () => {
+    const { teammate, me } = setup();
+    rebaseLocallyOntoMovedMain(teammate, me);
+    const probe = await probeLocalRewriteOfUpstream(me, "feat");
+    expect(probe.safe).toBe(true);
+    expect(probe.upstream).toBe(git(me, ["rev-parse", "origin/feat"]).trim());
+  }, GIT_TEST_TIMEOUT_MS);
+
+  it("has no upstream without tracking", async () => {
+    const { me } = setup();
+    git(me, ["switch", "-q", "-c", "local-only"]);
+    expect(await probeLocalRewriteOfUpstream(me, "local-only")).toEqual({ safe: false, upstream: null });
+  }, GIT_TEST_TIMEOUT_MS);
+});
+
+describe("evaluateAutoForcePush", () => {
+  it("sets the preference with the judged upstream sha after a local rewrite", async () => {
+    const { teammate, me } = setup();
+    rebaseLocallyOntoMovedMain(teammate, me);
+    const v = await evaluateAutoForcePush(me, "feat", { preferred: false, autoSha: null });
+    expect(v).toEqual({ action: "set", upstream: git(me, ["rev-parse", "origin/feat"]).trim() });
+  }, GIT_TEST_TIMEOUT_MS);
+
+  it("clears an auto preference once a collaborator's push lands in origin/feat", async () => {
+    const { teammate, me } = setup();
+    // Collaborator pushes on top of what I pushed; I rebase before fetching it.
+    git(teammate, ["switch", "-q", "feat"]);
+    commit(teammate, "i", "theirs\n", "their work");
+    git(teammate, ["push", "-q", "origin", "feat"]);
+    git(teammate, ["switch", "-q", "main"]);
+    commit(teammate, "m", "main\n", "m2");
+    git(teammate, ["push", "-q", "origin", "main"]);
+    git(me, ["fetch", "-q", "origin", "main"]);
+    git(me, ["rebase", "-q", "origin/main"]);
+    const first = await evaluateAutoForcePush(me, "feat", { preferred: false, autoSha: null });
+    expect(first.action).toBe("set");
+    const autoSha = (first as { upstream: string }).upstream;
+    // Auto-fetch brings their commit in: the same preference must now be dropped.
+    git(me, ["fetch", "-q"]);
+    expect(await evaluateAutoForcePush(me, "feat", { preferred: true, autoSha })).toEqual({ action: "clear" });
+  }, GIT_TEST_TIMEOUT_MS);
+
+  it("leaves an explicit preference (no recorded sha) alone, even if the probe says no", async () => {
+    const { teammate, me } = setup();
+    commit(me, "h", "mine\n", "my own work");
+    commit(teammate, "i", "theirs\n", "their work");
+    git(teammate, ["push", "-q", "origin", "feat"]);
+    git(me, ["fetch", "-q"]);
+    expect(await evaluateAutoForcePush(me, "feat", { preferred: true, autoSha: null })).toEqual({ action: "keep" });
+  }, GIT_TEST_TIMEOUT_MS);
+
+  it("keeps an auto preference whose upstream is unchanged and still safe", async () => {
+    const { teammate, me } = setup();
+    rebaseLocallyOntoMovedMain(teammate, me);
+    const autoSha = git(me, ["rev-parse", "origin/feat"]).trim();
+    expect(await evaluateAutoForcePush(me, "feat", { preferred: true, autoSha })).toEqual({ action: "keep" });
   }, GIT_TEST_TIMEOUT_MS);
 });

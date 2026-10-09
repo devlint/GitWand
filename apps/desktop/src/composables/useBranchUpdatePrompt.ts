@@ -80,25 +80,70 @@ export async function isUpstreamRewriteOnly(cwd: string): Promise<boolean> {
  *   reflog): the remote only holds an older version of local history. This
  *   survives conflicts resolved during the rebase, which change patches.
  * - every commit only the upstream has still exists locally as a
- *   patch-equivalent commit (covers a never-checked-out remote tip).
+ *   patch-equivalent commit (covers a never-checked-out remote tip). Merge
+ *   commits are NOT skipped here: a remote-only merge can carry content of its
+ *   own (conflict resolution, an added file) that has no patch-equivalent
+ *   locally, and a force push would delete it. Any such merge makes it unsafe.
  *
  * A collaborator's new commit was never a local tip and has no local
  * equivalent, so Sync stays the default whenever pulling is actually needed.
+ *
+ * Returns the `@{upstream}` sha the verdict was computed against so callers can
+ * tell when it goes stale (the remote-tracking ref moved).
  */
-export async function isLocalRewriteOfUpstream(cwd: string, branch: string): Promise<boolean> {
+export async function probeLocalRewriteOfUpstream(
+  cwd: string,
+  branch: string,
+): Promise<{ safe: boolean; upstream: string | null }> {
   try {
     const [upstream, reflog, upstreamOnly] = await Promise.all([
       gitExec(cwd, ["rev-parse", "@{upstream}"]),
       gitExec(cwd, ["reflog", "show", "--format=%H", `refs/heads/${branch}`]),
-      gitExec(cwd, ["rev-list", "--cherry-pick", "--right-only", "--no-merges", "HEAD...@{upstream}"]),
+      gitExec(cwd, ["rev-list", "--cherry-pick", "--right-only", "HEAD...@{upstream}"]),
     ]);
-    if (upstream.exitCode !== 0) return false;
+    if (upstream.exitCode !== 0) return { safe: false, upstream: null };
     const tip = upstream.stdout.trim();
-    if (reflog.exitCode === 0 && reflog.stdout.split("\n").some((h) => h.trim() === tip)) return true;
-    return upstreamOnly.exitCode === 0 && upstreamOnly.stdout.trim() === "";
+    if (!tip) return { safe: false, upstream: null };
+    if (reflog.exitCode === 0 && reflog.stdout.split("\n").some((h) => h.trim() === tip)) {
+      return { safe: true, upstream: tip };
+    }
+    return { safe: upstreamOnly.exitCode === 0 && upstreamOnly.stdout.trim() === "", upstream: tip };
   } catch {
-    return false;
+    return { safe: false, upstream: null };
   }
+}
+
+export async function isLocalRewriteOfUpstream(cwd: string, branch: string): Promise<boolean> {
+  return (await probeLocalRewriteOfUpstream(cwd, branch)).safe;
+}
+
+export type AutoForcePushVerdict =
+  | { action: "set"; upstream: string }
+  | { action: "clear" }
+  | { action: "keep" };
+
+/**
+ * Re-evaluate the auto-detected "prefer force push" state. `autoSha` is the
+ * upstream tip recorded when the preference was auto-set (null when it is off
+ * or was chosen explicitly — a reset, a rebase the user ran — which is never
+ * revoked here).
+ *
+ * - probe safe  -> set (records the judged upstream; no-op if already recorded)
+ * - probe unsafe, preference was auto -> clear (the remote gained something)
+ * - otherwise keep
+ */
+export async function evaluateAutoForcePush(
+  cwd: string,
+  branch: string,
+  state: { preferred: boolean; autoSha: string | null },
+): Promise<AutoForcePushVerdict> {
+  if (state.preferred && state.autoSha === null) return { action: "keep" };
+  const probe = await probeLocalRewriteOfUpstream(cwd, branch);
+  if (probe.safe && probe.upstream) {
+    if (state.preferred && state.autoSha === probe.upstream) return { action: "keep" };
+    return { action: "set", upstream: probe.upstream };
+  }
+  return state.preferred ? { action: "clear" } : { action: "keep" };
 }
 
 // ─── persistence ─────────────────────────────────────────────────────────────

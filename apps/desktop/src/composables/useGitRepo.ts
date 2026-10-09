@@ -54,8 +54,7 @@ import {
   gitAddToGitignore,
 } from "../utils/backend";
 import { requireOnline } from "../utils/networkGuard";
-import { isLocalRewriteOfUpstream } from "./useBranchUpdatePrompt";
-import { clearUpdatePromptSkip } from "./useBranchUpdatePrompt";
+import { clearUpdatePromptSkip, evaluateAutoForcePush } from "./useBranchUpdatePrompt";
 import { t } from "./useI18n";
 import { resolveConflictOperation } from "../utils/conflictOperation";
 import { useWorkspaceScope } from "./useWorkspaceScope";
@@ -123,6 +122,22 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
   const successMessage = ref<string | null>(null);
   const viewMode = ref<ViewMode>("dashboard");
   const forcePushPreferred = ref(false);
+  /**
+   * Set only while `forcePushPreferred` was switched on by the divergence probe
+   * (not by a reset / rebase the user ran): the `@{upstream}` sha it judged
+   * safe to overwrite. Drives re-validation and the explicit push lease.
+   */
+  const autoForcePushSha = ref<string | null>(null);
+  let settingAutoForcePush = false;
+  // Any other way of changing the preference makes it the user's own choice
+  // (or turns it off): the auto record no longer applies.
+  watch(
+    forcePushPreferred,
+    () => {
+      if (!settingAutoForcePush) autoForcePushSha.value = null;
+    },
+    { flush: "sync" },
+  );
 
   // ── Monorepo scope (v2.21.0) ────────────────────────────────────────────
   const { activeScope } = useWorkspaceScope();
@@ -185,10 +200,12 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
   }
 
   // Persist forcePushPreferred to localStorage so it survives app reloads.
-  watch(forcePushPreferred, (val) => {
+  // An auto-detected preference is stored as `auto:<sha>` so a restart keeps
+  // the lease it was judged against; an explicit one stays "1".
+  watch([forcePushPreferred, autoForcePushSha], ([val, sha]) => {
     const key = forcePushKey();
     if (!key) return;
-    if (val) localStorage.setItem(key, "1");
+    if (val) localStorage.setItem(key, sha ? `auto:${sha}` : "1");
     else localStorage.removeItem(key);
   });
 
@@ -198,32 +215,75 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
     (branch) => {
       if (!branch) return;
       const key = forcePushKey();
-      forcePushPreferred.value = key
-        ? localStorage.getItem(key) === "1"
-        : false;
+      const stored = key ? localStorage.getItem(key) : null;
+      const autoSha = stored?.startsWith("auto:") ? stored.slice(5) : null;
+      settingAutoForcePush = true;
+      try {
+        forcePushPreferred.value = stored === "1" || !!autoSha;
+        autoForcePushSha.value = autoSha || null;
+      } finally {
+        settingAutoForcePush = false;
+      }
     },
   );
 
   // Diverged because local history was rewritten (a rebase from the CLI, a
   // flow that doesn't flag it…): prefer force push without relying on every
-  // rewriting entry point to set the flag. One git call, only when diverged.
-  watch(
-    () => {
-      const s = status.value;
-      return s && s.ahead > 0 && s.behind > 0 ? `${s.branch}:${s.ahead}:${s.behind}` : null;
-    },
-    async (key) => {
-      const path = folderPath.value;
-      const branch = status.value?.branch;
-      if (!key || !path || !branch || forcePushPreferred.value) return;
-      if (await isLocalRewriteOfUpstream(path, branch)) {
-        // Still the same repo and divergence once the probe returns.
-        if (folderPath.value === path && status.value && status.value.ahead > 0 && status.value.behind > 0) {
+  // rewriting entry point to set the flag. The verdict is re-evaluated on every
+  // status refresh — origin/<branch> can move under us (auto-fetch) and a
+  // verdict about the old tip says nothing about the new one — and an
+  // auto-detected preference is dropped as soon as the probe turns negative or
+  // `@{upstream}` is no longer the sha it was judged against. Explicit
+  // preferences (reset, rebase run in-app) are never revoked here.
+  let forcePushProbeSeq = 0;
+  watch(status, async (s) => {
+    const seq = ++forcePushProbeSeq;
+    const path = folderPath.value;
+    if (!s || !path || !s.branch) return;
+    const diverged = s.ahead > 0 && s.behind > 0;
+    const startPreferred = forcePushPreferred.value;
+    const startAutoSha = autoForcePushSha.value;
+    // Nothing to judge or invalidate: not diverged and no auto record.
+    if (!diverged && startAutoSha === null) return;
+    const verdict = await evaluateAutoForcePush(path, s.branch, {
+      preferred: startPreferred,
+      autoSha: startAutoSha,
+    });
+    // The answer is only good for the exact repo / branch / divergence it was
+    // asked about, and only if nothing newer or the user changed the state.
+    const cur = status.value;
+    if (
+      seq !== forcePushProbeSeq ||
+      folderPath.value !== path ||
+      !cur ||
+      cur.branch !== s.branch ||
+      cur.ahead !== s.ahead ||
+      cur.behind !== s.behind ||
+      forcePushPreferred.value !== startPreferred ||
+      autoForcePushSha.value !== startAutoSha
+    ) {
+      return;
+    }
+    settingAutoForcePush = true;
+    try {
+      if (verdict.action === "set") {
+        if (diverged) {
           forcePushPreferred.value = true;
+          autoForcePushSha.value = verdict.upstream;
+        } else if (verdict.upstream !== startAutoSha) {
+          // Not diverged: a "set" here would flip every plain ahead-only branch.
+          // The only thing to do is drop a record for an upstream that moved.
+          forcePushPreferred.value = false;
+          autoForcePushSha.value = null;
         }
+      } else if (verdict.action === "clear") {
+        forcePushPreferred.value = false;
+        autoForcePushSha.value = null;
       }
-    },
-  );
+    } finally {
+      settingAutoForcePush = false;
+    }
+  });
 
   // Commit editor state
   const COMMIT_SIGNATURE = "\u{1FA84} Commit via GitWand";
@@ -1040,7 +1100,16 @@ export function useGitRepo(opts: { confirm?: ConfirmFn } = {}) {
       // this covers both a genuine first publish and a branch that exists on
       // the remote but lost its tracking config.
       const publish = needsUpstream.value;
-      const result = await gitPush(folderPath.value, publish, force);
+      // An auto-detected preference was judged against one remote tip: pass it
+      // as an explicit lease so the push is refused if the remote moved since.
+      const leaseSha = force ? autoForcePushSha.value : null;
+      const leaseBranch = status.value?.branch;
+      const result = await gitPush(
+        folderPath.value,
+        publish,
+        force,
+        leaseSha && leaseBranch ? { branch: leaseBranch, sha: leaseSha } : undefined,
+      );
       if (!result.success) {
         error.value = `push: ${result.message}`;
       } else {
