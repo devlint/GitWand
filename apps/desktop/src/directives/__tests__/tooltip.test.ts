@@ -4,7 +4,7 @@
  * many times a second during a fetch). It must not stack trigger listeners,
  * nor tear down a visible tooltip whose content did not change.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { vTooltip } from "../tooltip";
 
 const tips = () => document.querySelectorAll(".gw-tooltip");
@@ -20,6 +20,10 @@ describe("v-tooltip", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
     vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 0);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it("does not stack listeners across updates", () => {
@@ -74,6 +78,34 @@ describe("v-tooltip", () => {
     vTooltip.updated(el, { value: "Push" });
     el.dispatchEvent(new Event("mouseenter"));
     expect(tips()[0].textContent).toBe("Push");
+  });
+
+  it("hides a visible tooltip when a resize flips `when`", () => {
+    let labelHidden = true;
+    const el = mount({ text: "Stash", when: () => labelHidden });
+    el.dispatchEvent(new Event("focus"));
+    expect(tips()).toHaveLength(1);
+
+    labelHidden = false; // window widened past the breakpoint
+    window.dispatchEvent(new Event("resize"));
+    expect(tips()).toHaveLength(0);
+  });
+
+  it("passes the anchor element to `when`", () => {
+    const when = vi.fn(() => true);
+    const el = mount({ text: "Stash", when });
+    el.dispatchEvent(new Event("mouseenter"));
+    expect(when).toHaveBeenCalledWith(el);
+  });
+
+  it("re-shows a visible tooltip when its position changes", () => {
+    const el = mount({ text: "Stash", position: "top" });
+    el.dispatchEvent(new Event("mouseenter"));
+    const tip = tips()[0];
+
+    vTooltip.updated(el, { value: { text: "Stash", position: "left" } });
+    expect(tips()).toHaveLength(1);
+    expect(tips()[0]).not.toBe(tip);
   });
 
   it("removes its listeners on unmount", () => {

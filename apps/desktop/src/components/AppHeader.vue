@@ -55,11 +55,12 @@ import type { RepoTab } from "../composables/useRepoTabs";
 
 const { t } = useI18n();
 
-// Must match the `max-width: 1350px` breakpoint in <style> that hides the
-// action-button labels — tooltips only appear once the label is gone.
-// One shared MediaQueryList: `.matches` is live, no need to re-query per hover.
-const iconModeQuery = window.matchMedia("(max-width: 1350px)");
-const isIconMode = () => iconModeQuery.matches;
+// Tooltips only appear once the CSS breakpoint has hidden the button's label;
+// reading the rendered state keeps the breakpoint in one place (<style>).
+const isLabelHidden = (btn: HTMLElement) => {
+  const label = btn.querySelector(".header-action-btn__label");
+  return !!label && getComputedStyle(label).display === "none";
+};
 const ai = useAIProvider();
 const releaseNotesBusy = computed(() => isGeneratingReleaseNotes(props.cwd));
 const askConfirm = inject<(options: any) => Promise<boolean>>("askConfirm");
@@ -645,7 +646,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
         <div class="header-action-sep" aria-hidden="true"></div>
         <button
           class="btn btn--secondary header-action-btn"
-          v-tooltip="{ text: t('stash.title'), when: isIconMode }"
+          v-tooltip="{ text: t('stash.title'), when: isLabelHidden }"
           :aria-label="t('stash.title')"
           @click="emit('openStash')"
         >
@@ -654,14 +655,14 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
             <path d="M1 3h22v5H1z"/>
             <path d="M10 12h4"/>
           </svg>
-          <span>{{ t('stash.title') }}</span>
+          <span class="header-action-btn__label">{{ t('stash.title') }}</span>
           <span v-if="(stashCount ?? 0) > 0" class="header-action-btn__count">{{ stashCount }}</span>
         </button>
 
         <!-- Tags button -->
         <button
           class="btn btn--secondary header-action-btn"
-          v-tooltip="{ text: t('tags.title'), when: isIconMode }"
+          v-tooltip="{ text: t('tags.title'), when: isLabelHidden }"
           :aria-label="t('tags.title')"
           @click="emit('openTags')"
         >
@@ -669,13 +670,13 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
             <path d="M2 2h6l6 6-6 6-6-6V2z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
             <circle cx="5.5" cy="5.5" r="1.2" fill="currentColor"/>
           </svg>
-          <span>{{ t('tags.title') }}</span>
+          <span class="header-action-btn__label">{{ t('tags.title') }}</span>
         </button>
 
         <!-- Worktrees button -->
         <button
           class="btn btn--secondary header-action-btn"
-          v-tooltip="{ text: t('worktree.title'), when: isIconMode }"
+          v-tooltip="{ text: t('worktree.title'), when: isLabelHidden }"
           :aria-label="t('worktree.title')"
           @click="emit('openWorktrees')"
         >
@@ -685,13 +686,13 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
             <rect x="5.5" y="9" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.3" fill="none" />
             <path d="M4.5 7v1.5M11.5 7v1.5M4.5 8.5h7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
           </svg>
-          <span>{{ t('worktree.title') }}</span>
+          <span class="header-action-btn__label">{{ t('worktree.title') }}</span>
         </button>
 
         <!-- Submodules button -->
         <button
           class="btn btn--secondary header-action-btn"
-          v-tooltip="{ text: t('submodule.title'), when: isIconMode }"
+          v-tooltip="{ text: t('submodule.title'), when: isLabelHidden }"
           :aria-label="t('submodule.title')"
           @click="emit('openSubmodules')"
         >
@@ -699,7 +700,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
             <rect x="3" y="3" width="10" height="10" rx="1.5" stroke="currentColor" stroke-width="1.3" fill="none" />
             <rect x="6" y="6" width="4" height="4" rx="0.5" stroke="currentColor" stroke-width="1.3" fill="none" />
           </svg>
-          <span>{{ t('submodule.title') }}</span>
+          <span class="header-action-btn__label">{{ t('submodule.title') }}</span>
           <span v-if="(submoduleUpdateCount ?? 0) > 0" class="header-action-btn__count">{{ submoduleUpdateCount }}</span>
         </button>
 
@@ -713,7 +714,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
             @click="emit('openReleaseNotes')"
           >
             <AiSparkle :size="14" :busy="releaseNotesBusy" />
-            <span :class="{ 'ai-loading': releaseNotesBusy }">{{ t('dashboard.releaseNotes') }}</span>
+            <span class="header-action-btn__label" :class="{ 'ai-loading': releaseNotesBusy }">{{ t('dashboard.releaseNotes') }}</span>
           </button>
         </template>
       </div>
@@ -780,8 +781,8 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
    aria-label and the v-tooltip, which only shows in this mode), then the row
    wraps instead of overflowing. */
 @media (max-width: 1350px) {
-  /* Keep in sync with iconModeQuery in <script setup>. */
-  .header-action-btn > span:not(.header-action-btn__count) {
+  /* AppHeader's isLabelHidden() reads this to decide when tooltips show. */
+  .header-action-btn__label {
     display: none;
   }
   .header-action-btn {
@@ -795,6 +796,16 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
     flex-wrap: wrap;
     row-gap: var(--space-3);
     padding-block: var(--space-3);
+    /* Popovers anchor to the whole (now multi-row) header row instead of
+       .header-left, so they open below the icon row rather than over it. */
+    position: relative;
+  }
+  .header-left {
+    position: static;
+  }
+  .app-header__row .merge-popover-anchor,
+  .app-header__row .undo-popover-anchor {
+    left: var(--space-6);
   }
   .header-actions {
     order: 1;
@@ -822,6 +833,10 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
     order: 2;
     flex: 1 1 100%;
     margin-left: 0;
+  }
+  .app-header__row .merge-popover-anchor,
+  .app-header__row .undo-popover-anchor {
+    left: var(--space-4);
   }
   .merge-popover,
   .undo-popover {

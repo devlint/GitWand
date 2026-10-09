@@ -4,7 +4,7 @@
  * Usage:
  *   <button v-tooltip="'Push to remote'">…</button>
  *   <button v-tooltip="{ text: 'Push', position: 'left' }">…</button>
- *   <button v-tooltip="{ text: 'Push', when: () => isCompact() }">…</button>
+ *   <button v-tooltip="{ text: 'Push', when: (el) => isCompact(el) }">…</button>
  *
  * Positions: "top" (default) | "bottom" | "left" | "right"
  *
@@ -19,8 +19,11 @@ type TooltipPosition = "top" | "bottom" | "left" | "right";
 interface TooltipOptions {
   text: string;
   position?: TooltipPosition;
-  /** Evaluated on each hover/focus; the tooltip is skipped when it returns false. */
-  when?: () => boolean;
+  /**
+   * Evaluated on hover/focus, on resize and on update with the anchor element;
+   * the tooltip is skipped (or hidden) while it returns false.
+   */
+  when?: (el: HTMLElement) => boolean;
 }
 
 interface TooltipEl extends HTMLElement {
@@ -28,6 +31,7 @@ interface TooltipEl extends HTMLElement {
     tip: HTMLElement;
     abort: AbortController;
     reposition: () => void;
+    opts: TooltipOptions;
   };
   /** Current binding value — refreshed by `updated`, read at show time. */
   _tooltipOpts?: TooltipOptions | null;
@@ -84,7 +88,7 @@ function place(tip: HTMLElement, anchor: HTMLElement, position: TooltipPosition)
 
 function show(el: TooltipEl, opts: TooltipOptions) {
   hide(el); // ensure clean state
-  if (opts.when && !opts.when()) return;
+  if (opts.when && !opts.when(el)) return;
 
   const tip = document.createElement("div");
   tip.className = "gw-tooltip";
@@ -112,9 +116,15 @@ function show(el: TooltipEl, opts: TooltipOptions) {
   // Keep position fresh on scroll / resize
   const reposition = () => place(tip, el, pos);
   window.addEventListener("scroll", reposition, { signal, passive: true, capture: true });
-  window.addEventListener("resize", reposition, { signal, passive: true });
+  // A resize can also flip `when` (e.g. a breakpoint brings the label back).
+  const onResize = () => {
+    const when = (el._tooltipOpts ?? opts).when;
+    if (when && !when(el)) hide(el);
+    else reposition();
+  };
+  window.addEventListener("resize", onResize, { signal, passive: true });
 
-  el._tooltip = { tip, abort, reposition };
+  el._tooltip = { tip, abort, reposition, opts };
 }
 
 function hide(el: TooltipEl) {
@@ -152,8 +162,10 @@ export const vTooltip = {
     // leave a visible tooltip alone unless its content actually changed.
     const visible = el._tooltip;
     if (!visible) return;
-    if (!opts || (opts.when && !opts.when())) {
+    if (!opts || (opts.when && !opts.when(el))) {
       hide(el);
+    } else if (visible.opts.position !== opts.position) {
+      show(el, opts);
     } else if (visible.tip.textContent !== opts.text) {
       visible.tip.textContent = opts.text;
       visible.reposition();
