@@ -125,7 +125,6 @@ function submitForm() {
 
 <template>
   <div class="aup-panel">
-    <p class="aup-subtitle">{{ t("automations.subtitle") }}</p>
 
     <!-- ── Auto-resolve ─────────────────────────────────── -->
     <div class="aup-card">
@@ -360,13 +359,6 @@ function submitForm() {
   display: flex;
   flex-direction: column;
   gap: 12px;
-}
-
-.aup-subtitle {
-  font-size: 12px;
-  color: var(--color-text-muted);
-  margin: 0 0 4px;
-  line-height: 1.5;
 }
 
 /* ── Card ───────────────────────────────────────────────── */

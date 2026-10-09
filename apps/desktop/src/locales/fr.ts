@@ -1459,6 +1459,9 @@ const fr: Locale = {
 
     // Disposition du tableau de bord
     dashboard: {
+      layout: {
+        label: "Mise en page",
+      },
       readmeFirst: {
         label: "Afficher le README en premier",
         help: "Place la carte README au-dessus des rangées contributeurs et activité.",
@@ -1549,6 +1552,22 @@ const fr: Locale = {
     tabAiTemplates: "Modèles IA",
     tabAccounts: "Comptes",
     tabMcp: "MCP",
+    // Settings page header descriptions (one per tab, shown under the title)
+    pageDesc: {
+      general: "Langue de l'interface, thème, notifications et canal de mise à jour.",
+      dock: "Choisissez les vues affichées dans le dock, leur ordre et la vue d'ouverture.",
+      dashboard: "Choisissez les sections affichées sur le tableau de bord du dépôt et si le README apparaît en premier.",
+      git: "Exécutable Git, identités, modèles de commit, et comportement du pull, du changement de branche et du blame.",
+      editor: "Éditeur externe et affichage des diffs et du code.",
+      terminal: "Disposition, shell et apparence du terminal intégré.",
+      ai: "Activez les fonctions IA, choisissez un fournisseur et configurez le modèle utilisé par GitWand.",
+      aiTemplates: "Personnalisez les prompts utilisés pour les messages de commit, les descriptions de PR et les revues.",
+      accounts: "Connectez vos comptes GitHub, GitLab et Bitbucket pour les pull requests et les fonctions distantes.",
+      mcp: "Gérez les serveurs MCP disponibles pour les fonctions IA de GitWand.",
+      automations: "Tâches optionnelles exécutées automatiquement selon des événements Git ou un planning.",
+      hooks: "Scripts exécutés lors d'événements Git dans le dépôt courant.",
+      logs: "Erreurs et avertissements récents enregistrés pendant cette session.",
+    },
     accountsEmpty: "Aucun compte configuré. Ajoutez-en un pour activer GitLab et Bitbucket.",
     accountsAdd: "Ajouter un compte",
     accountsRemove: "Supprimer",

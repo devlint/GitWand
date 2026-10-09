@@ -1475,6 +1475,9 @@ const en = {
 
     // Dashboard layout
     dashboard: {
+      layout: {
+        label: "Layout",
+      },
       readmeFirst: {
         label: "Show README first",
         help: "Move the README card above the contributors and activity rows.",
@@ -1566,6 +1569,22 @@ const en = {
     // Accounts + MCP tabs (v2.10)
     tabAccounts: "Accounts",
     tabMcp: "MCP",
+    // Settings page header descriptions (one per tab, shown under the title)
+    pageDesc: {
+      general: "Interface language, theme, notifications and update channel.",
+      dock: "Choose which views appear in the dock, in what order, and where the app opens.",
+      dashboard: "Choose which sections the repository dashboard shows, and whether the README comes first.",
+      git: "Git executable, identities, commit templates, and how pull, branch switching and blame behave.",
+      editor: "External editor and how diffs and code are displayed.",
+      terminal: "Integrated terminal layout, shell and appearance.",
+      ai: "Enable AI features, choose a provider and configure the model GitWand uses.",
+      aiTemplates: "Customize the prompts used for commit messages, PR descriptions and reviews.",
+      accounts: "Connect GitHub, GitLab and Bitbucket accounts for pull requests and remote features.",
+      mcp: "Manage the MCP servers available to GitWand's AI features.",
+      automations: "Opt-in tasks that run automatically based on Git events or a schedule.",
+      hooks: "Scripts that run on Git events in the current repository.",
+      logs: "Recent errors and warnings recorded during this session.",
+    },
     accountsEmpty: "No accounts configured. Add one to enable GitLab and Bitbucket.",
     accountsAdd: "Add account",
     accountsRemove: "Remove",

@@ -284,7 +284,6 @@ onMounted(() => {
   <div class="hooks-panel">
     <!-- Header -->
     <div class="hp-header">
-      <span class="hp-title">{{ t("hooks.title") }}</span>
       <div class="hp-actions">
         <button class="bm-btn bm-btn--ghost hp-btn-sm" @click="loadHooks" :disabled="loading">
           {{ t("hooks.reload") }}
@@ -471,14 +470,8 @@ onMounted(() => {
 .hp-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   margin-bottom: 16px;
-}
-
-.hp-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--color-text-primary);
 }
 
 .hp-actions {

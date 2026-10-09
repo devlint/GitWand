@@ -585,6 +585,10 @@ function tabLabel(id: SettingsTab): string {
   }
 }
 
+function tabDescription(id: SettingsTab): string {
+  return t(`settings.pageDesc.${id}` as LocaleKey);
+}
+
 // ─── Language ──────────────────────────────────────────
 const selectedLocale = computed({
   get: () => (isAuto.value ? "auto" : locale.value),
@@ -1449,7 +1453,7 @@ watch(aiTemplateKind, closeAiTemplateForm);
 </script>
 
 <template>
-  <BaseModal size="xl" :title="t('settings.title')" :bodyFlush="true" :scrollOwn="true" @close="emit('close')">
+  <BaseModal size="screen" :title="t('settings.title')" :bodyFlush="true" :scrollOwn="true" @close="emit('close')">
     <template #title-icon>
       <span class="bm-title-icon" aria-hidden="true">
         <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
@@ -1600,6 +1604,12 @@ watch(aiTemplateKind, closeAiTemplateForm);
 
       <!-- ── Right content area ── -->
       <div class="sp-content">
+
+        <!-- Page title + intro, same look as HelpView's section header -->
+        <header class="sp-page-header">
+          <h2 class="sp-page-title">{{ tabLabel(activeSettingsTab) }}</h2>
+          <p class="sp-page-intro">{{ tabDescription(activeSettingsTab) }}</p>
+        </header>
 
         <!-- ═══ GÉNÉRAL ═══ -->
         <template v-if="activeSettingsTab === 'general'">
@@ -1854,6 +1864,11 @@ watch(aiTemplateKind, closeAiTemplateForm);
         </template>
 
         <template v-if="activeSettingsTab === 'dashboard'">
+          <!-- ── Layout ── -->
+          <div class="sp-row">
+            <span class="sp-label">{{ t('settings.dashboard.layout.label') }}</span>
+          </div>
+
           <!-- README first row -->
           <div class="sp-row sp-row--checkbox">
             <label class="sp-checkbox-label" for="setting-dashboard-readme-first">
@@ -3412,7 +3427,6 @@ watch(aiTemplateKind, closeAiTemplateForm);
         <!-- ═══ LOGS ═══ -->
         <template v-if="activeSettingsTab === 'logs'">
           <div class="sp-logs-header">
-            <h3 class="sp-section-title">{{ t('settings.logsTitle') }}</h3>
             <div class="sp-logs-actions">
               <button v-if="(props.errorLog?.length ?? 0) > 0" class="bm-btn bm-btn--ghost" @click="copyAllLogs">
                 {{ t('settings.logsCopyAll') }}
@@ -3451,32 +3465,36 @@ watch(aiTemplateKind, closeAiTemplateForm);
 .sp-layout {
   display: flex;
   flex-direction: row;
-  height: 72vh;
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
 
 /* ─── Left nav sidebar ─────────────────────────────────── */
+/* Mirrors HelpView's .help-nav / .help-nav__item look. */
 .sp-nav {
-  width: 196px;
+  width: 220px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--color-border);
-  padding: var(--space-4) 0 var(--space-3);
+  padding: var(--space-5, 16px) 0 var(--space-3);
   overflow-y: auto;
-  background: var(--color-bg-subtle, var(--color-bg));
 }
 
 .sp-nav-group {
-  padding: 0 var(--space-3) var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1, 2px);
+  padding: 0 var(--space-4, 12px) var(--space-5);
 }
 
 .sp-nav-group-label {
   display: block;
-  padding: var(--space-2) var(--space-3);
-  font-size: 11px;
-  font-weight: var(--font-weight-semibold);
-  color: var(--color-text-subtle, var(--color-text-muted));
+  padding: var(--space-2) var(--space-4, 12px);
+  font-size: 12px;
+  font-weight: var(--font-weight-bold, 700);
+  color: var(--color-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.07em;
   user-select: none;
@@ -3487,26 +3505,27 @@ watch(aiTemplateKind, closeAiTemplateForm);
   align-items: center;
   gap: var(--space-3);
   width: 100%;
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-sm);
-  font-size: 13px;
-  font-weight: var(--font-weight-medium);
-  color: var(--color-text-muted);
-  background: none;
+  padding: var(--space-3, 6px) var(--space-4, 12px);
+  border-radius: var(--radius-md, 6px);
+  font-size: var(--font-size-base, 13px);
+  font-weight: var(--font-weight-semibold, 600);
+  color: var(--color-text);
+  background: transparent;
   border: none;
   cursor: pointer;
   text-align: left;
-  transition: background var(--transition-fast), color var(--transition-fast);
+  transition: background var(--transition-base), color var(--transition-base);
 }
 
 .sp-nav-item:hover {
-  background: var(--color-bg-elevated, var(--color-surface));
+  background: var(--color-bg-tertiary);
   color: var(--color-text);
 }
 
-.sp-nav-item--active {
-  background: var(--color-bg-elevated, var(--color-surface));
-  color: var(--color-text);
+.sp-nav-item--active,
+.sp-nav-item--active:hover {
+  background: var(--color-accent-soft, rgba(99, 102, 241, 0.1));
+  color: var(--color-accent);
 }
 
 .sp-nav-item svg {
@@ -3596,14 +3615,43 @@ watch(aiTemplateKind, closeAiTemplateForm);
 }
 
 /* ─── Right content area ───────────────────────────────── */
+/* Content is capped at 1200px wide, but the scroll container itself spans
+   to the window edge so the scrollbar sits at the far right. The cap comes
+   from a growing right padding: % padding resolves against .sp-layout's
+   width, so (100% - 220px nav) is this element's width. Base padding
+   matches HelpView's .help-content. */
 .sp-content {
   flex: 1;
   min-width: 0;
-  padding: var(--space-7) var(--space-8);
+  padding: var(--space-8, 32px) var(--space-10, 48px);
+  padding-right: max(var(--space-10, 48px), calc(100% - 220px - 1200px + var(--space-10, 48px)));
   display: flex;
   flex-direction: column;
   gap: var(--space-6);
   overflow-y: auto;
+}
+
+/* Mirrors HelpView's .help-section__title / .help-section__intro. The
+   header's margin stacks on .sp-content's gap for extra air before the
+   first setting. */
+.sp-page-header {
+  padding-bottom: var(--space-7);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.sp-page-title {
+  font-size: var(--font-size-2xl, 20px);
+  font-weight: var(--font-weight-bold, 700);
+  color: var(--color-text);
+  line-height: 1.2;
+  margin: 0 0 var(--space-1, 2px);
+}
+
+.sp-page-intro {
+  font-size: var(--font-size-lg, 14px);
+  color: var(--color-text-muted);
+  line-height: 1.6;
+  margin: 0;
 }
 
 .sp-row {
@@ -3648,9 +3696,27 @@ watch(aiTemplateKind, closeAiTemplateForm);
 .sp-label {
   font-size: var(--font-size-base);
   font-weight: var(--font-weight-semibold);
-  color: var(--color-text-muted);
+  color: var(--color-text);
   text-transform: uppercase;
   letter-spacing: 0.04em;
+  margin-top: var(--space-6);
+  padding-left: var(--space-4);
+  border-left: 2px solid var(--color-accent);
+  line-height: 1.2;
+}
+
+/* Inside a label row the row itself carries the top spacing. */
+.sp-label-row {
+  margin-top: var(--space-6);
+}
+.sp-label-row .sp-label {
+  margin-top: 0;
+}
+
+/* First setting right under the header line: tighter top spacing. */
+.sp-page-header + .sp-row > .sp-label,
+.sp-page-header + .sp-row > .sp-label-row {
+  margin-top: var(--space-4);
 }
 
 /* Label with a small inline action after it — "MODEL (Refresh)". */
@@ -4125,7 +4191,7 @@ watch(aiTemplateKind, closeAiTemplateForm);
 .sp-logs-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: var(--space-4);
 }
 

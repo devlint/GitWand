@@ -1450,6 +1450,9 @@ const es: Locale = {
 
     // Disposición del panel
     dashboard: {
+      layout: {
+        label: "Diseño",
+      },
       readmeFirst: {
         label: "Mostrar el README primero",
         help: "Coloca la tarjeta README encima de las filas de colaboradores y actividad.",
@@ -1540,6 +1543,22 @@ const es: Locale = {
     tabAiTemplates: "Plantillas de IA",
     tabAccounts: "Cuentas",
     tabMcp: "MCP",
+    // Settings page header descriptions (one per tab, shown under the title)
+    pageDesc: {
+      general: "Idioma de la interfaz, tema, notificaciones y canal de actualizaciones.",
+      dock: "Elige qué vistas aparecen en el dock, en qué orden y dónde se abre la aplicación.",
+      dashboard: "Elige qué secciones muestra el panel del repositorio y si el README aparece primero.",
+      git: "Ejecutable de Git, identidades, plantillas de commit y el comportamiento de pull, cambio de rama y blame.",
+      editor: "Editor externo y cómo se muestran los diffs y el código.",
+      terminal: "Disposición, shell y apariencia del terminal integrado.",
+      ai: "Activa las funciones de IA, elige un proveedor y configura el modelo que usa GitWand.",
+      aiTemplates: "Personaliza los prompts usados para mensajes de commit, descripciones de PR y revisiones.",
+      accounts: "Conecta cuentas de GitHub, GitLab y Bitbucket para pull requests y funciones remotas.",
+      mcp: "Gestiona los servidores MCP disponibles para las funciones de IA de GitWand.",
+      automations: "Tareas opcionales que se ejecutan automáticamente según eventos de Git o un horario.",
+      hooks: "Scripts que se ejecutan con eventos de Git en el repositorio actual.",
+      logs: "Errores y advertencias recientes registrados durante esta sesión.",
+    },
     accountsEmpty: "No hay cuentas configuradas. Añade una para activar GitLab y Bitbucket.",
     accountsAdd: "Añadir cuenta",
     accountsRemove: "Eliminar",

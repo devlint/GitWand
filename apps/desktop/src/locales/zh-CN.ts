@@ -1527,6 +1527,9 @@ const zhCN: Locale = {
 
     // \u4eea\u8868\u76d8\u5e03\u5c40
     dashboard: {
+      layout: {
+        label: "布局",
+      },
       readmeFirst: {
         label: "\u4f18\u5148\u663e\u793a README",
         help: "\u5c06 README \u5361\u7247\u79fb\u5230\u8d21\u732e\u8005\u548c\u6d3b\u52a8\u884c\u7684\u4e0a\u65b9\u3002",
@@ -1551,6 +1554,22 @@ const zhCN: Locale = {
     tabAiTemplates: "AI 模板",
     tabAccounts: "\u8d26\u53f7",
     tabMcp: "MCP",
+    // Settings page header descriptions (one per tab, shown under the title)
+    pageDesc: {
+      general: "界面语言、主题、通知和更新通道。",
+      dock: "选择在 Dock 中显示哪些视图、它们的顺序以及应用启动时打开的视图。",
+      dashboard: "选择仓库仪表盘显示哪些部分，以及是否优先显示 README。",
+      git: "Git 可执行文件、身份、提交模板，以及 pull、切换分支和 blame 的行为。",
+      editor: "外部编辑器以及 diff 和代码的显示方式。",
+      terminal: "集成终端的布局、Shell 和外观。",
+      ai: "启用 AI 功能、选择提供商并配置 GitWand 使用的模型。",
+      aiTemplates: "自定义用于提交信息、PR 描述和代码审查的提示词。",
+      accounts: "连接 GitHub、GitLab 和 Bitbucket 账户，用于拉取请求和远程功能。",
+      mcp: "管理 GitWand AI 功能可用的 MCP 服务器。",
+      automations: "根据 Git 事件或计划自动运行的可选任务。",
+      hooks: "在当前仓库的 Git 事件上运行的脚本。",
+      logs: "本次会话中记录的最近错误和警告。",
+    },
     accountsEmpty: "\u672a\u914d\u7f6e\u8d26\u53f7\u3002\u6dfb\u52a0\u4e00\u4e2a\u4ee5\u542f\u7528 GitLab \u548c Bitbucket\u3002",
     accountsAdd: "\u6dfb\u52a0\u8d26\u53f7",
     accountsRemove: "\u5220\u9664",
