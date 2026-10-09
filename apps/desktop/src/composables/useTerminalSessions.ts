@@ -35,6 +35,9 @@ export interface TerminalTab {
 const tabsByRepo = reactive(new Map<string, TerminalTab[]>());
 const activeByRepo = reactive(new Map<string, number | null>());
 let nextLocalId = 1;
+// openTab calls still awaiting their PTY, by tab id: disposeRepo waits for
+// them, so no session spawned meanwhile outlives the repo's disposal.
+const opening = new Map<number, Promise<unknown>>();
 
 // Debounce refresh par repo.
 const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -63,6 +66,7 @@ export function __resetForTests(): void {
   tabsByRepo.clear();
   activeByRepo.clear();
   nextLocalId = 1;
+  opening.clear();
   for (const timer of debounceTimers.values()) clearTimeout(timer);
   debounceTimers.clear();
   firstPendingAt.clear();
@@ -101,6 +105,25 @@ export function useTerminalSessions() {
     // Taille initiale standard ; le panel re-fit au mount.
     // Route output by stable tab.id so chunks arriving before terminalOpen
     // resolves (and before sessionId is assigned) are never dropped.
+    const done = spawnInto(tab, list, repoPath, cwd, onChunk, opts);
+    opening.set(tab.id, done);
+    try {
+      await done;
+    } finally {
+      opening.delete(tab.id);
+    }
+    return tab;
+  }
+
+  async function spawnInto(
+    tab: TerminalTab,
+    list: TerminalTab[],
+    repoPath: string,
+    cwd: string,
+    onChunk: (tabId: number, chunk: string) => void,
+    opts?: { shell?: string; type?: TerminalTabType },
+  ): Promise<void> {
+    const tabType = tab.type;
     try {
       const sessionId = await terminalOpen(
         cwd,
@@ -127,7 +150,7 @@ export function useTerminalSessions() {
       const stillExists = list.includes(tab);
       if (!stillExists) {
         await terminalClose(sessionId);
-        return tab; // caller has the ref; the tab is already gone from the list
+        return; // caller has the ref; the tab is already gone from the list
       }
 
       tab.sessionId = sessionId;
@@ -144,7 +167,6 @@ export function useTerminalSessions() {
       }
       throw err; // re-throw so the caller (App.vue) can surface the error
     }
-    return tab;
   }
 
   async function closeTab(repoPath: string, tabId: number): Promise<void> {
@@ -187,12 +209,15 @@ export function useTerminalSessions() {
     if (t) { clearTimeout(t); debounceTimers.delete(repoPath); }
     firstPendingAt.delete(repoPath);
     const list = listFor(repoPath);
-    // Independent IPC calls — close all sessions concurrently.
-    await Promise.all(
-      list.filter((tab) => tab.sessionId >= 0).map((tab) => terminalClose(tab.sessionId)),
-    );
-    tabsByRepo.set(repoPath, []);
+    // Emptied in place: a tab still spawning checks this very array once its
+    // PTY is up, and closes it when gone (openTab's Fix 3) — we wait for that.
+    const tabs = list.splice(0);
     activeByRepo.set(repoPath, null);
+    // Independent IPC calls — close all sessions concurrently.
+    await Promise.all([
+      ...tabs.filter((tab) => tab.sessionId >= 0).map((tab) => terminalClose(tab.sessionId)),
+      ...tabs.map((tab) => opening.get(tab.id)?.catch(() => {})),
+    ]);
   }
 
   function notifyOutput(repoPath: string): void {

@@ -8140,13 +8140,38 @@ async function handleRequest(req, res) {
         branchName = `gitwand-scratch-${slug}-${Math.floor(ts / 1000)}`;
       }
       const scratchPath = join(resolve(resolvedCwd, ".."), branchName);
-      const ref = sourceBranch ?? "HEAD";
+      // Same rule as Rust: a blank source means HEAD, i.e. an AI task.
+      const fromHead = !sourceBranch?.trim();
+      const ref = fromHead ? "HEAD" : sourceBranch;
       try {
         execFileSync("git", ["worktree", "add", "-b", branchName, scratchPath, ref], { cwd: resolvedCwd, encoding: "utf-8" });
+        // Mirror Rust: an AI task (no explicit source) records the commit it
+        // starts from, for merge-back's base guard; `branch -D` drops it.
+        if (fromHead) {
+          try {
+            const base = execFileSync("git", ["rev-parse", "HEAD"], { cwd: resolvedCwd, encoding: "utf-8" }).trim();
+            let source = base;
+            try {
+              source = execFileSync("git", ["symbolic-ref", "--short", "-q", "HEAD"], { cwd: resolvedCwd, encoding: "utf-8" }).trim() || base;
+            } catch {}
+            execFileSync("git", ["config", `branch.${branchName}.gitwandBase`, base], { cwd: resolvedCwd });
+            execFileSync("git", ["config", `branch.${branchName}.gitwandSource`, source], { cwd: resolvedCwd });
+          } catch (e) {
+            // As Rust does: no half-created task left behind.
+            try { execFileSync("git", ["worktree", "remove", "--force", scratchPath], { cwd: resolvedCwd }); } catch {}
+            try { execFileSync("git", ["branch", "-D", branchName], { cwd: resolvedCwd }); } catch {}
+            throw e;
+          }
+        } else {
+          // A stale record a same-named branch may have left.
+          for (const key of ["gitwandBase", "gitwandSource"]) {
+            try { execFileSync("git", ["config", "--unset", `branch.${branchName}.${key}`], { cwd: resolvedCwd }); } catch {}
+          }
+        }
         return jsonResponse(req, res, {
           path: scratchPath,
           branch: branchName,
-          source_branch: sourceBranch ?? "HEAD",
+          source_branch: ref,
           created_at: Math.floor(ts / 1000),
         });
       } catch (e) {

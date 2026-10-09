@@ -342,21 +342,27 @@ const commitReviewNav = useCommitReviewNav({
   onHelp: () => showCommitReviewNavHelp(),
 });
 
-/** Shared transient toast for Commit Review's own non-error feedback (the
- *  `?` help reminder, a clean-pass confirmation) — reuses the existing toast
- *  affordance rather than inventing a second one (verifier issue #5). */
-function showCommitReviewToast(title: string, detail: string) {
+/**
+ * The shared toast (Commit Review feedback, Launchpad actions, repo
+ * successes…), shown for `ms`. `ms = 0` makes it sticky: shown until
+ * dismissed; a toast shown meanwhile parks it, and it comes back once that
+ * one is gone.
+ */
+function showDetailToast(title: string, detail: string | null, ms = 3000) {
+  if (stickyToast) parkedToasts.push(stickyToast);
   if (successTimer != null) { window.clearTimeout(successTimer); successTimer = null; }
+  if (dismissTimer != null) { window.clearTimeout(dismissTimer); dismissTimer = null; }
+  stickyToast = ms === 0 ? { title, detail } : null;
   successToastLeaving.value = false;
   successToast.value = title;
-  successToastDetail.value = detail;
-  successTimer = window.setTimeout(dismissToast, 3000);
+  successToastDetail.value = detail || null;
+  if (ms > 0) successTimer = window.setTimeout(dismissToast, ms);
 }
 
 /** `?` — a one-line toast (per the plan: reuse the existing toast
  *  affordance, no new help modal). */
 function showCommitReviewNavHelp() {
-  showCommitReviewToast(
+  showDetailToast(
     t("commitReview.navHelp"),
     `${t("commitReview.navNext")} (N) · ${t("commitReview.navPrev")} (P) · ${t("commitReview.dismiss")} (X)`,
   );
@@ -368,7 +374,7 @@ function showCommitReviewNavHelp() {
  *  Called from `reviewStaged` below only when the run actually completed
  *  (not skipped, not superseded) and produced no error. */
 function showCommitReviewCleanToast() {
-  showCommitReviewToast(t("commitReview.summaryClean"), "");
+  showDetailToast(t("commitReview.summaryClean"), null);
 }
 
 /** Task 2 (v3.7.0) — the commit-review keymap is only "active" (bare-letter
@@ -732,26 +738,29 @@ const successToastDetail = ref<string | null>(null);
 const successToastLeaving = ref(false);
 const memorizeToast = ref<{ path: string; strategy: ResolutionStrategy } | null>(null);
 let successTimer: number | null = null;
+// The fade-out of a dismissed toast, cancelled when a new one replaces it.
+let dismissTimer: number | null = null;
+// The sticky toast on screen, and the ones covered since, shown again in turn.
+let stickyToast: { title: string; detail: string | null } | null = null;
+const parkedToasts: { title: string; detail: string | null }[] = [];
 
 function dismissToast() {
+  if (dismissTimer != null) return; // already fading out (double click)
+  // Dismissed by hand before its timer: the timer must not close the next one.
+  if (successTimer != null) { window.clearTimeout(successTimer); successTimer = null; }
+  stickyToast = null;
   successToastLeaving.value = true;
-  window.setTimeout(() => {
+  dismissTimer = window.setTimeout(() => {
     successToast.value = null;
     successToastDetail.value = null;
     successToastLeaving.value = false;
     successTimer = null;
+    dismissTimer = null;
+    const parked = parkedToasts.pop();
+    if (parked) showDetailToast(parked.title, parked.detail, 0);
   }, 200);
 }
 
-/** Transient toast for Launchpad mutating actions (merge/nudge) — reuses the
- *  existing toast affordance rather than inventing a second one. */
-function showLaunchpadToast(title: string) {
-  if (successTimer != null) { window.clearTimeout(successTimer); successTimer = null; }
-  successToastLeaving.value = false;
-  successToast.value = title;
-  successToastDetail.value = null;
-  successTimer = window.setTimeout(dismissToast, 3000);
-}
 
 watch(repoSuccess, (val) => {
   if (!val) return;
@@ -761,9 +770,6 @@ watch(repoSuccess, (val) => {
   if (val === "merge-done" && showMergeSuccess.value) return;
   // Respect the notifications setting
   if (!settings.value.notifications) return;
-
-  if (successTimer != null) { window.clearTimeout(successTimer); successTimer = null; }
-  successToastLeaving.value = false;
 
   const meta: Record<string, { key: string; detail?: string }> = {
     "already-up-to-date": { key: "header.syncUpToDate" },
@@ -778,11 +784,12 @@ watch(repoSuccess, (val) => {
     "autostash-parked": { key: "header.pullAutostashParked" },
   };
   const info = meta[val];
-  successToast.value = info ? t(info.key as any) : val;
-  successToastDetail.value = new Date().toLocaleString(undefined, {
-    weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit",
-  });
-  successTimer = window.setTimeout(dismissToast, 3000);
+  showDetailToast(
+    info ? t(info.key as any) : val,
+    new Date().toLocaleString(undefined, {
+      weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit",
+    }),
+  );
 });
 
 // ─── Conflict handling ──────────────────────────────────
@@ -2617,12 +2624,23 @@ async function onAiTaskMergeBack() {
   aiTaskCloseError.value = null;
   try {
     const origin = await resolveAiTaskOrigin(target.path, target.projectPath);
-    // Kill the scratch's agent terminal first so no running process holds an
-    // index.lock or open handle that would block the worktree removal.
-    await termSessions.disposeRepo(target.path).catch(() => {});
+    // Stop the scratch's agent terminal first: nothing may write to the
+    // scratch while it is read and merged, nor hold a handle blocking its
+    // removal. Not swallowed, unlike Delete: if it fails, don't merge.
+    await termSessions.disposeRepo(target.path);
     fileExplorer.disposeRepo(target.path);
-    await scratchWorktreeMergeBack(origin, target.path, settings.value.snapshotsEnabled);
-    await finalizeWorktreeRemoval(target.path, target.projectPath);
+    const { cleanup_warning } = await scratchWorktreeMergeBack(origin, target.path, settings.value.snapshotsEnabled);
+    // Merged from here on, whatever follows. A scratch that couldn't be
+    // removed is left detached, its branch deleted: a plain worktree now.
+    try {
+      await finalizeWorktreeRemoval(target.path, target.projectPath);
+    } catch (err) {
+      console.error("[ai-task] refresh after merge-back failed:", err);
+      aiTaskClose.value = null;
+      if (!cleanup_warning) showDetailToast(t("aiTask.mergedRefreshFailed"), String((err as { message?: string })?.message ?? err));
+    }
+    // No auto-dismiss: it may be the only sign the worktree is still there.
+    if (cleanup_warning) showDetailToast(t("aiTask.mergedCleanupFailed"), cleanup_warning, 0);
   } catch (err) {
     aiTaskCloseError.value = t("aiTask.errorMergeBack", String((err as { message?: string })?.message ?? err));
   } finally {
@@ -2996,7 +3014,7 @@ async function openLaunchpadMergePr(pr: PullRequest & { repoPath?: string }) {
   // not `!prPanel.error.value` (sticky from any unrelated prior PR action,
   // so it can both mask a genuine failure and suppress today's success).
   if (prPanel.mergingPr.value === null) {
-    showLaunchpadToast(t("launchpad.toast.merged"));
+    showDetailToast(t("launchpad.toast.merged"), null);
   } else {
     // On failure `prPanel.error` is only rendered inside PrDetailView, which
     // isn't mounted from the Launchpad — funnel it into the app-wide
@@ -3060,7 +3078,7 @@ async function openLaunchpadAutoMergePr(pr: PullRequest & { repoPath?: string })
   if (prPanel.error.value) {
     repoError.value = prPanel.error.value;
   } else {
-    showLaunchpadToast(t("launchpad.toast.autoMergeArmed"));
+    showDetailToast(t("launchpad.toast.autoMergeArmed"), null);
   }
 }
 
@@ -3103,7 +3121,7 @@ async function confirmNudgePr() {
   try {
     await ghIssueAddComment(pr.repoPath!, pr.number, comment);
     nudgeConfirm.value = null;
-    showLaunchpadToast(t("launchpad.toast.nudged"));
+    showDetailToast(t("launchpad.toast.nudged"), null);
   } catch (err: any) {
     repoError.value = err?.message ?? String(err);
     if (nudgeConfirm.value) nudgeConfirm.value.busy = false;
@@ -4352,6 +4370,7 @@ onUnmounted(() => {
       :applying-from-preview="applyingFromPreview" :apply-outcome="applyOutcome"
       @apply-from-preview="handleApplyFromPreview"
       @dismiss-apply="applyOutcome = null"
+      @scratch-cleanup-warning="(d: string) => showDetailToast(t('aiTask.mergedCleanupFailed'), d, 0)"
       @open-residual="handleOpenResidual"
 
       :error-count="logUnreadCount" :is-offline="isOffline" @switch-branch="handleSwitchBranch" @open-logs="openLogsTab"

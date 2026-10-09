@@ -2257,6 +2257,8 @@ const ptBR: Locale = {
     working: "Processando…",
     errorDelete: "Falha ao excluir o worktree: {0}",
     errorMergeBack: "Falha ao fazer merge: {0}",
+    mergedCleanupFailed: "Merge feito, mas a pasta do worktree não pôde ser removida. Exclua-a manualmente.",
+    mergedRefreshFailed: "Merge feito. A atualização da tela falhou: recarregue o repositório para ver o resultado.",
   },
 
   // ─── Submodules ─────────────────────────────────────────

@@ -8,7 +8,7 @@ vi.mock("../../utils/backend", () => ({
 }));
 
 import { useTerminalSessions, __resetForTests, simulateChunkForTab } from "../useTerminalSessions";
-import { terminalClose } from "../../utils/backend";
+import { terminalClose, terminalOpen } from "../../utils/backend";
 
 describe("useTerminalSessions", () => {
   beforeEach(() => {
@@ -105,6 +105,24 @@ describe("useTerminalSessions", () => {
     await s.disposeRepo("/repo/b");
     expect(s.tabsFor("/repo/b")).toHaveLength(0);
     expect(terminalClose).toHaveBeenCalled();
+  });
+
+  it("disposeRepo attend et ferme un onglet dont le PTY s'ouvre encore", async () => {
+    const s = useTerminalSessions();
+    let spawned!: (id: number) => void;
+    vi.mocked(terminalOpen).mockImplementationOnce(
+      () => new Promise<number>((resolve) => { spawned = resolve; }),
+    );
+    const opening = s.openTab("/repo/a", "/repo/a", () => {});
+    let disposed = false;
+    const disposing = s.disposeRepo("/repo/a").then(() => { disposed = true; });
+    await Promise.resolve();
+    expect(disposed).toBe(false); // still waiting for the spawn
+    spawned(7);
+    await disposing;
+    await opening;
+    expect(terminalClose).toHaveBeenCalledWith(7);
+    expect(s.tabsFor("/repo/a")).toHaveLength(0);
   });
 
   it("openTab crée un onglet de type 'shell' par défaut", async () => {

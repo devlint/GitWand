@@ -89,6 +89,8 @@ const props = defineProps<{
   applyFromPreview: [operation: PreviewOperation, ref: string, estimatedHunks: number];
   dismissApply: [];
   openResidual: [path: string];
+  /** Merged back, but the scratch couldn't be removed: git's message. */
+  scratchCleanupWarning: [detail: string];
 }>();
 
 // Whether the working tree has anything worth reporting — drives the
@@ -456,6 +458,7 @@ const {
   active: scratchActive,
   loading: scratchLoading,
   error: scratchError,
+  cleanupWarning: scratchCleanupWarning,
   originCwd: scratchOriginCwd,
   create: createScratch,
   mergeBack: scratchMergeBack,
@@ -493,6 +496,8 @@ async function handleScratchMergeBack() {
   if (scratchOriginCwd.value) openTab(scratchOriginCwd.value);
   const ok = await scratchMergeBack();
   if (ok) closeScratchTab();
+  // Shown app-wide (sticky toast): this panel is usually off screen by now.
+  if (ok && scratchCleanupWarning.value) emit("scratchCleanupWarning", scratchCleanupWarning.value);
 }
 
 async function handleScratchDiscard() {

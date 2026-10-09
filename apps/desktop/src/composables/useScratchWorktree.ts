@@ -23,6 +23,9 @@ export function useScratchWorktree(cwd: () => string) {
   const active = ref<ScratchWorktree | null>(null);
   const loading = ref(false);
   const error = ref<string | null>(null);
+  // Set when merge-back succeeded but the scratch couldn't be removed (git's
+  // message). The merge stands; the leftover worktree is deleted by hand.
+  const cleanupWarning = ref<string | null>(null);
   // Main-repo cwd captured at create time. merge-back / discard MUST run from the
   // ORIGIN checkout, not from `cwd()` — once we open the scratch in a new tab the
   // reactive `cwd()` follows the active tab and would otherwise point at the
@@ -34,6 +37,7 @@ export function useScratchWorktree(cwd: () => string) {
     const origin = cwd();
     loading.value = true;
     error.value = null;
+    cleanupWarning.value = null;
     try {
       const wt = await scratchWorktreeCreate(origin, sourceBranch);
       active.value = wt;
@@ -52,8 +56,12 @@ export function useScratchWorktree(cwd: () => string) {
     if (!active.value || !originCwd.value) return false;
     loading.value = true;
     error.value = null;
+    cleanupWarning.value = null;
     try {
-      await scratchWorktreeMergeBack(originCwd.value, active.value.path, settings.value.snapshotsEnabled);
+      const outcome = await scratchWorktreeMergeBack(originCwd.value, active.value.path, settings.value.snapshotsEnabled);
+      // Merged even when the scratch couldn't be removed: it is then left
+      // detached, its branch deleted, a plain worktree to delete by hand.
+      cleanupWarning.value = outcome.cleanup_warning;
       active.value = null;
       originCwd.value = null;
       return true;
@@ -70,6 +78,7 @@ export function useScratchWorktree(cwd: () => string) {
     if (!active.value || !originCwd.value) return false;
     loading.value = true;
     error.value = null;
+    cleanupWarning.value = null;
     try {
       await scratchWorktreeDiscard(originCwd.value, active.value.path);
       active.value = null;
@@ -83,5 +92,5 @@ export function useScratchWorktree(cwd: () => string) {
     }
   }
 
-  return { active, loading, error, originCwd, create, mergeBack, discard };
+  return { active, loading, error, cleanupWarning, originCwd, create, mergeBack, discard };
 }
