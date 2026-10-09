@@ -800,9 +800,6 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
 .header-action-btn--icon .header-action-btn__label {
   display: none;
 }
-.header-action-btn.header-action-btn--icon {
-  padding-inline: var(--space-4);
-}
 
 /* Narrower: the icon actions drop to their own row under branch + sync. */
 @media (max-width: 975px) {
