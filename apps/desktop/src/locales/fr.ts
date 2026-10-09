@@ -1554,6 +1554,7 @@ const fr: Locale = {
     tabAiTemplates: "Modèles IA",
     tabAccounts: "Comptes",
     tabMcp: "MCP",
+    versionLabel: "Version : {0}",
     // Settings page header descriptions (one per tab, shown under the title)
     pageDesc: {
       general: "Langue de l'interface, thème, notifications et canal de mise à jour.",

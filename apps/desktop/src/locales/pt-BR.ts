@@ -1545,6 +1545,7 @@ const ptBR: Locale = {
     tabAiTemplates: "Modelos de IA",
     tabAccounts: "Contas",
     tabMcp: "MCP",
+    versionLabel: "Versão: {0}",
     // Settings page header descriptions (one per tab, shown under the title)
     pageDesc: {
       general: "Idioma da interface, tema, notificações e canal de atualização.",

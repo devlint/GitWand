@@ -1633,17 +1633,7 @@ function openAiTemplateKind(kind: AiTemplateKind) {
         </div>
 
         <div class="sp-nav-spacer" />
-        <div class="sp-nav-footer">
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"
-            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <circle cx="8" cy="3" r="1.5" />
-            <circle cx="3" cy="11" r="1.5" />
-            <circle cx="13" cy="11" r="1.5" />
-            <path d="M8 4.5v3L3 9.6M8 7.5l5 2.1" />
-          </svg>
-          <span class="sp-nav-footer-name">GitWand</span>
-          <span class="sp-nav-footer-version">v{{ appVersion }}</span>
-        </div>
+        <div class="sp-nav-footer">{{ t('settings.versionLabel', appVersion) }}</div>
       </nav>
 
       <!-- ── Right content area ── -->
@@ -3658,24 +3648,20 @@ function openAiTemplateKind(kind: AiTemplateKind) {
   flex: 1;
 }
 
+/* Version centred both ways in the strip below the line. The negative
+   bottom margin cancels .sp-nav's bottom padding so the strip is symmetric. */
 .sp-nav-footer {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  justify-content: center;
+  min-height: 40px;
+  margin-bottom: calc(-1 * var(--space-3));
   padding: var(--space-3) var(--space-5);
   font-size: 11px;
-  color: var(--color-text-subtle, var(--color-text-muted));
-  opacity: 0.7;
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-muted);
   border-top: 1px solid var(--color-border);
   margin-top: var(--space-2);
-}
-
-.sp-nav-footer-name {
-  font-weight: var(--font-weight-semibold);
-}
-
-.sp-nav-footer-version {
-  opacity: 0.6;
 }
 
 /* ─── Right content area ───────────────────────────────── */

@@ -1571,6 +1571,7 @@ const en = {
     // Accounts + MCP tabs (v2.10)
     tabAccounts: "Accounts",
     tabMcp: "MCP",
+    versionLabel: "Version: {0}",
     // Settings page header descriptions (one per tab, shown under the title)
     pageDesc: {
       general: "Interface language, theme, notifications and update channel.",

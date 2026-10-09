@@ -1556,6 +1556,7 @@ const zhCN: Locale = {
     tabAiTemplates: "AI 模板",
     tabAccounts: "\u8d26\u53f7",
     tabMcp: "MCP",
+    versionLabel: "版本：{0}",
     // Settings page header descriptions (one per tab, shown under the title)
     pageDesc: {
       general: "界面语言、主题、通知和更新通道。",
