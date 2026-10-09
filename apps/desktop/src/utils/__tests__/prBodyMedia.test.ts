@@ -38,6 +38,67 @@ describe("maskMedia", () => {
   });
 });
 
+describe("maskMedia edge cases", () => {
+  it("protects a literal [[IMAGE_n]] already in the body (round trip)", () => {
+    const body = "Use the `[[IMAGE_1]]` token.\n![a](https://x.test/a.png)\nAnd [[IMAGE_2]] again.";
+    const { text, media } = maskMedia(body);
+    // None of the original placeholder text survives in what the model sees.
+    expect(text).toBe("Use the [[IMAGE_1]] token.\n[[IMAGE_2]]\nAnd [[IMAGE_3]] again.");
+    expect(media).toEqual(["`[[IMAGE_1]]`", "![a](https://x.test/a.png)", "[[IMAGE_2]]"]);
+    expect(restoreMedia(text, media)).toBe(body);
+  });
+
+  it("does not let an unclosed <video> swallow text up to a later </video>", () => {
+    const body = "<video src=a.mp4>\nSome text that must stay\n<video src=b.mp4></video>";
+    const { text, media } = maskMedia(body);
+    expect(media).toEqual(["<video src=b.mp4></video>"]);
+    expect(text).toContain("Some text that must stay");
+    expect(restoreMedia(text, media)).toBe(body);
+  });
+
+  it("handles a self-closed <video /> and <picture /> without spanning", () => {
+    const body = '<video src="a.mp4" />\nKeep me\n<picture />\nAlso keep\n<video src="b.mp4"></video>';
+    const { text, media } = maskMedia(body);
+    expect(media).toEqual(['<video src="a.mp4" />', "<picture />", '<video src="b.mp4"></video>']);
+    expect(text).toBe("[[IMAGE_1]]\nKeep me\n[[IMAGE_2]]\nAlso keep\n[[IMAGE_3]]");
+  });
+
+  it("keeps an image URL with balanced parentheses whole", () => {
+    const img = "![a](https://x.test/a_(1).png)";
+    const linked = "[![b](https://x.test/b_(2).png)](https://x.test/page_(3))";
+    const { text, media } = maskMedia(`${img}\ntext after\n${linked}`);
+    expect(media).toEqual([img, linked]);
+    expect(text).toBe("[[IMAGE_1]]\ntext after\n[[IMAGE_2]]");
+  });
+
+  it("leaves media inside fenced code blocks untouched", () => {
+    const body = [
+      "Example:",
+      "```md",
+      "![demo](https://x.test/demo.png)",
+      "[[IMAGE_1]]",
+      "```",
+      "~~~~",
+      '<img src="x.png">',
+      "~~~~",
+      "![real](https://x.test/real.png)",
+    ].join("\n");
+    const { text, media } = maskMedia(body);
+    expect(media).toEqual(["[[IMAGE_1]]", "![real](https://x.test/real.png)"]);
+    expect(text).toContain("![demo](https://x.test/demo.png)");
+    expect(text).toContain('<img src="x.png">');
+    expect(text).not.toContain("![real]");
+    expect(restoreMedia(text, media)).toBe(body);
+  });
+
+  it("treats an unclosed fence as running to the end of the body", () => {
+    const body = "![a](https://x.test/a.png)\n```\n![b](https://x.test/b.png)";
+    const { text, media } = maskMedia(body);
+    expect(media).toEqual(["![a](https://x.test/a.png)"]);
+    expect(text).toBe("[[IMAGE_1]]\n```\n![b](https://x.test/b.png)");
+  });
+});
+
 describe("restoreMedia", () => {
   const media = ["![a](https://x.test/a.png)", '<img src="https://x.test/b.png">'];
 

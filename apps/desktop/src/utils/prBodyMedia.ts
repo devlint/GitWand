@@ -18,26 +18,41 @@ export interface MaskedMedia {
   media: string[];
 }
 
+/** `(…)` of a markdown link/image: allows spaces (titles) and one level of nested parens. */
+const PAREN = String.raw`\((?:[^()]|\([^()]*\))*\)`;
+
+/**
+ * A literal `[[IMAGE_n]]` already present in the body. It would be
+ * indistinguishable from our own placeholders on the way back, so it is
+ * protected like media: swapped out and restored verbatim.
+ */
+const LITERAL_PLACEHOLDER = "`?" + String.raw`\[\[\s*IMAGE_\d+\s*\]\]` + "`?";
+
 /**
  * Media snippets, in alternation order. Wrappers come before what they wrap
  * so a `<picture>` or a linked image is kept as one unit rather than having
- * its inner `<img>` / `![…](…)` pulled out of it.
+ * its inner `<img>` / `![…](…)` pulled out of it. A wrapper's lazy span may
+ * not contain another opening tag of the same kind, so an unclosed or
+ * self-closed `<video>` never swallows everything up to a later `</video>`.
  */
-const MEDIA_RE = new RegExp(
-  [
-    String.raw`<picture\b[\s\S]*?<\/picture>`,
-    String.raw`<video\b[\s\S]*?<\/video>`,
-    String.raw`<img\b[^>]*>`,
-    // Linked image: [![alt](src)](href)
-    String.raw`\[!\[[^\]]*\]\([^)]*\)\]\([^)]*\)`,
-    String.raw`!\[[^\]]*\]\([^)]*\)`,
-    // GitHub renders a bare attachment URL on its own line as an image/video.
-    String.raw`^[ \t]*https?:\/\/(?:github\.com\/user-attachments\/assets\/|(?:private-)?user-images\.githubusercontent\.com\/)\S+[ \t]*$`,
-    // Any other bare media URL on its own line.
-    String.raw`^[ \t]*https?:\/\/\S+\.(?:png|jpe?g|gif|webp|svg|mp4|mov|webm)(?:\?\S*)?[ \t]*$`,
-  ].join("|"),
-  "gim",
-);
+const MEDIA_ALTERNATIVES = [
+  String.raw`<picture\b[^>]*\/>`,
+  String.raw`<picture\b(?:(?!<picture\b)[\s\S])*?<\/picture>`,
+  String.raw`<video\b[^>]*\/>`,
+  String.raw`<video\b(?:(?!<video\b)[\s\S])*?<\/video>`,
+  String.raw`<img\b[^>]*>`,
+  // Linked image: [![alt](src)](href)
+  String.raw`\[!\[[^\]]*\]` + PAREN + String.raw`\]` + PAREN,
+  String.raw`!\[[^\]]*\]` + PAREN,
+  // GitHub renders a bare attachment URL on its own line as an image/video.
+  String.raw`^[ \t]*https?:\/\/(?:github\.com\/user-attachments\/assets\/|(?:private-)?user-images\.githubusercontent\.com\/)\S+[ \t]*$`,
+  // Any other bare media URL on its own line.
+  String.raw`^[ \t]*https?:\/\/\S+\.(?:png|jpe?g|gif|webp|svg|mp4|mov|webm)(?:\?\S*)?[ \t]*$`,
+];
+
+const MEDIA_RE = new RegExp([...MEDIA_ALTERNATIVES, LITERAL_PLACEHOLDER].join("|"), "gim");
+/** Inside fenced code only literal placeholders are protected; media there is just code. */
+const LITERAL_RE = new RegExp(LITERAL_PLACEHOLDER, "gi");
 
 /** Tolerates the usual model drift: spacing, case, backtick wrapping. */
 const PLACEHOLDER_RE = /`?\[\[\s*IMAGE_(\d+)\s*\]\]`?/gi;
@@ -46,13 +61,50 @@ export function placeholder(n: number): string {
   return `[[IMAGE_${n}]]`;
 }
 
+const FENCE_OPEN_RE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+
+/**
+ * Split a body into runs of lines that are inside / outside fenced code
+ * blocks (CommonMark: a fence closes on the same character, at least as long,
+ * with nothing else on the line; an unclosed fence runs to the end).
+ */
+function splitFences(body: string): { code: boolean; text: string }[] {
+  const parts: { code: boolean; text: string }[] = [];
+  let fence: { ch: string; len: number } | null = null;
+  const push = (code: boolean, line: string) => {
+    const last = parts[parts.length - 1];
+    if (last && last.code === code) last.text += line;
+    else parts.push({ code, text: line });
+  };
+  for (const line of body.split(/(?<=\n)/)) {
+    const bare = line.replace(/\r?\n$/, "");
+    if (!fence) {
+      const m = FENCE_OPEN_RE.exec(bare);
+      if (m && !(m[1]![0] === "`" && m[2]!.includes("`"))) {
+        fence = { ch: m[1]![0]!, len: m[1]!.length };
+        push(true, line);
+      } else {
+        push(false, line);
+      }
+    } else {
+      push(true, line);
+      const t = bare.trim();
+      if (t.length >= fence.len && t === fence.ch.repeat(t.length)) fence = null;
+    }
+  }
+  return parts;
+}
+
 export function maskMedia(body: string): MaskedMedia {
   const media: string[] = [];
-  const text = body.replace(MEDIA_RE, (match) => {
+  const mask = (match: string) => {
     const leading = match.match(/^[ \t]*/)![0];
     media.push(match.trim());
     return leading + placeholder(media.length);
-  });
+  };
+  const text = splitFences(body)
+    .map((part) => part.text.replace(part.code ? LITERAL_RE : MEDIA_RE, mask))
+    .join("");
   return { text, media };
 }
 
