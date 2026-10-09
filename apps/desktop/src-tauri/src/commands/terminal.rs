@@ -351,8 +351,9 @@ fn close_sessions(mut handles: Vec<PtyHandle>, wait_leaders: bool) {
 /// group (portable-pty `setsid`s it); what it spawns stays in that group,
 /// except jobs an interactive shell moves to their own, of which the
 /// foreground one is the terminal's group — taken only while its leader is
-/// still in this session, so a stale, reused id is never signalled. A
-/// background job of the shell, or a process that called `setsid`, survives.
+/// still in this session, so a stale, reused id is never signalled. Survive:
+/// a background job of the shell, a process that called `setsid`, and a
+/// foreground job whose leader already exited.
 #[cfg(unix)]
 fn session_groups(h: &PtyHandle) -> Vec<libc::pid_t> {
     let Some(leader) = h.child.process_id().map(|p| p as libc::pid_t) else {
@@ -369,22 +370,26 @@ fn session_groups(h: &PtyHandle) -> Vec<libc::pid_t> {
     groups
 }
 
-/// SIGHUP `groups`, give them up to 500 ms to empty, then SIGKILL what is
-/// left. Every member counts, not only the leaders: an agent still saving its
-/// session after its shell exited gets the whole grace period. `reap` runs
-/// before each check, for the caller to reap its own children.
+/// SIGHUP `groups`, give them up to 500 ms to empty, then SIGKILL the ones
+/// still populated. Every member counts, not only the leaders: an agent
+/// still saving its session after its shell exited gets the whole grace
+/// period. `reap` runs before each check, for the caller to reap its own
+/// children. An emptied group is not signalled again: its id is free for
+/// reuse once its leader is reaped.
 #[cfg(unix)]
 fn stop_groups(groups: &[libc::pid_t], mut reap: impl FnMut()) {
     signal_groups(groups, libc::SIGHUP);
     let deadline = Instant::now() + Duration::from_millis(500);
+    let mut alive: Vec<libc::pid_t> = groups.to_vec();
     loop {
         reap();
-        if groups.iter().all(|&g| !group_alive(g)) || Instant::now() >= deadline {
+        alive.retain(|&g| group_alive(g));
+        if alive.is_empty() || Instant::now() >= deadline {
             break;
         }
         std::thread::sleep(Duration::from_millis(10));
     }
-    signal_groups(groups, libc::SIGKILL);
+    signal_groups(&alive, libc::SIGKILL);
 }
 
 #[cfg(unix)]

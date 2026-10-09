@@ -127,11 +127,6 @@ fn base_config_key(branch: &str) -> String {
     format!("branch.{}.gitwandBase", branch)
 }
 
-/// Config key set once a task's branch has been merged back.
-fn merged_config_key(branch: &str) -> String {
-    format!("branch.{}.gitwandMerged", branch)
-}
-
 /// Create a sibling worktree based on `source_branch` (defaults to the current
 /// HEAD when `None`). The branch/dir is named `gitwand-scratch-<slug>` from the
 /// supplied `name`, falling back to `gitwand-scratch-<timestamp>` when no usable
@@ -305,8 +300,7 @@ fn scratch_worktree_create_impl(
 /// dry run shows git would refuse it.
 ///
 /// Once the squash is done, the merge-back has succeeded: failing to remove
-/// the scratch afterwards is reported as `cleanup_warning`, not as an error,
-/// and the branch is marked merged so a retry only finishes the cleanup.
+/// the scratch afterwards is reported as `cleanup_warning`, not as an error.
 #[tauri::command]
 pub(crate) async fn scratch_worktree_merge_back(
     cwd: String,
@@ -382,19 +376,6 @@ fn scratch_worktree_merge_back_impl(
         .strip_prefix("refs/heads/")
         .unwrap_or(&scratch_ref)
         .to_string();
-
-    // Already merged, only the cleanup failed: finish it. Never squash again,
-    // the scratch may be half-deleted by then and its gaps would be brought
-    // back as deletions.
-    if git_in(
-        &repo_root,
-        &["config", "--get", &merged_config_key(&scratch_branch)],
-    )
-    .is_ok()
-    {
-        let cleanup_warning = remove_scratch(&repo_root, &scratch, &scratch_branch);
-        return Ok(ScratchMergeBackOutcome { cleanup_warning });
-    }
 
     // GUARD: the main checkout is not mid-operation, conflicted or not (a
     // rebase paused at `edit` has no unmerged entry): the task would be folded
@@ -539,35 +520,35 @@ fn scratch_worktree_merge_back_impl(
         }
     }
 
-    // Merged: a retry after a failed cleanup only finishes the cleanup. Gone
-    // with the branch's config section once `branch -D` runs.
-    let _ = git_in(
-        &repo_root,
-        &["config", &merged_config_key(&scratch_branch), "true"],
-    );
-
     // The task is merged by now, so a cleanup failure is only a warning.
-    let cleanup_warning = remove_scratch(&repo_root, &scratch, &scratch_branch);
+    let cleanup_warning = remove_scratch(&repo_root, &scratch, Some(&scratch_branch)).err();
     Ok(ScratchMergeBackOutcome { cleanup_warning })
 }
 
-/// Remove the scratch worktree, prune any dangling registration, then delete
-/// the scratch branch. Returns the removal's error, if any.
-fn remove_scratch(repo_root: &Path, scratch: &Path, scratch_branch: &str) -> Option<String> {
-    let warning = git_in(
+/// Remove the scratch worktree and prune its registration, then delete the
+/// scratch branch: only one GitWand created, the user may have switched the
+/// scratch to theirs. When the removal fails (locked worktree, Windows file
+/// lock), what is left is detached first, so the branch still goes: no
+/// `gitwand-scratch-*` branch survives to collide with a later task, and the
+/// leftover is a plain worktree no merge-back can target. Detaching keeps the
+/// files as they are.
+fn remove_scratch(
+    repo_root: &Path,
+    scratch: &Path,
+    scratch_branch: Option<&str>,
+) -> Result<(), String> {
+    let removed = git_in(
         repo_root,
         &["worktree", "remove", "--force", &scratch.to_string_lossy()],
-    )
-    .err();
-    // Best-effort delete of the now-unused scratch branch. Only a branch
-    // GitWand created: the user may have switched the scratch to theirs. Git
-    // keeps it while a surviving worktree has it checked out; a merge-back
-    // retry or a discard drops it then.
-    let _ = git_in(repo_root, &["worktree", "prune"]);
-    if scratch_branch.starts_with("gitwand-scratch-") {
-        let _ = git_in(repo_root, &["branch", "-D", scratch_branch]);
+    );
+    if removed.is_err() {
+        let _ = git_in(scratch, &["checkout", "-q", "--detach"]);
     }
-    warning
+    let _ = git_in(repo_root, &["worktree", "prune"]);
+    if let Some(branch) = scratch_branch.filter(|b| b.starts_with("gitwand-scratch-")) {
+        let _ = git_in(repo_root, &["branch", "-D", branch]);
+    }
+    removed.map(|_| ())
 }
 
 /// Abandon the scratch worktree: `git worktree remove --force` + `git worktree
@@ -590,18 +571,7 @@ fn scratch_worktree_discard_impl(cwd: String, scratch_path: String) -> Result<()
         .ok()
         .and_then(|r| r.strip_prefix("refs/heads/").map(str::to_string));
 
-    git_in(
-        &repo_root,
-        &["worktree", "remove", "--force", &scratch.to_string_lossy()],
-    )?;
-    if let Some(branch) = scratch_branch {
-        if branch.starts_with("gitwand-scratch-") {
-            let _ = git_in(&repo_root, &["branch", "-D", &branch]);
-        }
-    }
-    git_in(&repo_root, &["worktree", "prune"])?;
-
-    Ok(())
+    remove_scratch(&repo_root, &scratch, scratch_branch.as_deref())
 }
 
 #[cfg(test)]
@@ -1608,21 +1578,23 @@ mod tests {
         let warning = outcome.cleanup_warning.expect("cleanup failure reported");
         assert!(warning.contains("locked"), "got: {}", warning);
 
-        // Still an AI task: a retry, once unlocked, only finishes the cleanup,
-        // even when the failed removal left the scratch half-deleted.
-        std::fs::remove_file(Path::new(&scratch.path).join("task.txt")).unwrap();
-        repo.git(&["worktree", "unlock", &scratch.path]);
-        let outcome = scratch_worktree_merge_back_impl(repo.cwd(), scratch.path.clone(), None)
-            .expect("retrying an applied merge-back is harmless");
-        assert!(outcome.cleanup_warning.is_none());
-        assert_eq!(repo.read("task.txt"), "agent edit\n");
-        assert!(!Path::new(&scratch.path).exists());
+        // The task is closed: its branch is gone, the leftover is detached.
         let branch_ref = format!("refs/heads/{}", scratch.branch);
         assert!(
             !git_at(&repo.cwd(), &["rev-parse", "--verify", "-q", &branch_ref])
                 .status
                 .success()
         );
+        assert!(!git_at(&scratch.path, &["symbolic-ref", "-q", "HEAD"])
+            .status
+            .success());
+        assert_eq!(
+            std::fs::read_to_string(Path::new(&scratch.path).join("task.txt")).unwrap(),
+            "agent edit\n",
+            "detaching leaves the files alone"
+        );
+        repo.git(&["worktree", "unlock", &scratch.path]);
+        repo.git(&["worktree", "remove", "--force", &scratch.path]);
     }
 
     #[test]

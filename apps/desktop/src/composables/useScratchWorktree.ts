@@ -59,13 +59,11 @@ export function useScratchWorktree(cwd: () => string) {
     cleanupWarning.value = null;
     try {
       const outcome = await scratchWorktreeMergeBack(originCwd.value, active.value.path, settings.value.snapshotsEnabled);
+      // Merged even when the scratch couldn't be removed: it is then left
+      // detached, its branch deleted, a plain worktree to delete by hand.
       cleanupWarning.value = outcome.cleanup_warning;
-      // Still on disk: keep it, so discarding it (or a retry, which only
-      // finishes the cleanup) also drops its branch.
-      if (!outcome.cleanup_warning) {
-        active.value = null;
-        originCwd.value = null;
-      }
+      active.value = null;
+      originCwd.value = null;
       return true;
     } catch (e) {
       error.value = e instanceof Error ? e.message : String(e);

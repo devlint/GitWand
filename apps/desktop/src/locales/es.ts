@@ -2097,7 +2097,7 @@ const es: Locale = {
     openIsolated: "Abrir worktree aislado",
     mergeBack: "Traer los cambios de vuelta",
     discard: "Descartar el worktree temporal",
-    mergedCleanupFailed: "Cambios traídos de vuelta, pero el worktree temporal sigue en el disco. Descártalo para terminar.",
+    mergedCleanupFailed: "Cambios traídos de vuelta, pero el worktree temporal sigue en el disco. Elimínalo desde la lista de worktrees.",
     created: "Worktree temporal creado",
     mergedBack: "Cambios traídos de vuelta al checkout principal",
     discarded: "Worktree temporal descartado",

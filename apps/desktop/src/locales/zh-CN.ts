@@ -2106,7 +2106,7 @@ const zhCN: Locale = {
     openIsolated: "打开隔离工作树",
     mergeBack: "将更改合并回来",
     discard: "丢弃临时工作树",
-    mergedCleanupFailed: "更改已合并回来，但临时工作树仍留在磁盘上。请丢弃它以完成操作。",
+    mergedCleanupFailed: "更改已合并回来，但临时工作树仍留在磁盘上。请在 worktree 列表中删除它。",
     created: "已创建临时工作树",
     mergedBack: "更改已合并回主检出",
     discarded: "已丢弃临时工作树",

@@ -345,13 +345,14 @@ const commitReviewNav = useCommitReviewNav({
 /**
  * The shared toast (Commit Review feedback, Launchpad actions, repo
  * successes…), shown for `ms`. `ms = 0` makes it sticky: shown until
- * dismissed, and not replaced by a transient one meanwhile.
+ * dismissed; a transient toast shown meanwhile parks it, and it comes back
+ * once that one is gone.
  */
 function showDetailToast(title: string, detail: string | null, ms = 3000) {
-  if (stickyToast && ms > 0) return;
+  if (stickyToast && ms > 0) parkedToast = stickyToast;
   if (successTimer != null) { window.clearTimeout(successTimer); successTimer = null; }
   if (dismissTimer != null) { window.clearTimeout(dismissTimer); dismissTimer = null; }
-  stickyToast = ms === 0;
+  stickyToast = ms === 0 ? { title, detail } : null;
   successToastLeaving.value = false;
   successToast.value = title;
   successToastDetail.value = detail || null;
@@ -739,12 +740,14 @@ const memorizeToast = ref<{ path: string; strategy: ResolutionStrategy } | null>
 let successTimer: number | null = null;
 // The fade-out of a dismissed toast, cancelled when a new one replaces it.
 let dismissTimer: number | null = null;
-let stickyToast = false;
+// The sticky toast on screen, and one a transient toast is covering.
+let stickyToast: { title: string; detail: string | null } | null = null;
+let parkedToast: { title: string; detail: string | null } | null = null;
 
 function dismissToast() {
   // Dismissed by hand before its timer: the timer must not close the next one.
   if (successTimer != null) { window.clearTimeout(successTimer); successTimer = null; }
-  stickyToast = false;
+  stickyToast = null;
   successToastLeaving.value = true;
   dismissTimer = window.setTimeout(() => {
     successToast.value = null;
@@ -752,6 +755,9 @@ function dismissToast() {
     successToastLeaving.value = false;
     successTimer = null;
     dismissTimer = null;
+    const parked = parkedToast;
+    parkedToast = null;
+    if (parked) showDetailToast(parked.title, parked.detail, 0);
   }, 200);
 }
 
@@ -2562,12 +2568,9 @@ async function resolveAiTaskOrigin(path: string, projectPath?: string): Promise<
   return main.path;
 }
 
-/**
- * Tear down a scratch worktree once it has been removed from disk.
- * `keepTask`: it is still on disk, keep it registered as an AI task.
- */
-async function finalizeWorktreeRemoval(path: string, projectPath: string, { keepTask = false } = {}) {
-  if (!keepTask) aiTasks.unregister(path);
+/** Tear down a scratch worktree once it has been removed from disk. */
+async function finalizeWorktreeRemoval(path: string, projectPath: string) {
+  aiTasks.unregister(path);
   void refreshWorktreeCount(projectPath);
   aiTaskClose.value = null;
   // Reload the project's main checkout so the removed worktree AND its now-
@@ -2626,10 +2629,10 @@ async function onAiTaskMergeBack() {
     await termSessions.disposeRepo(target.path).catch(() => {});
     fileExplorer.disposeRepo(target.path);
     const { cleanup_warning } = await scratchWorktreeMergeBack(origin, target.path, settings.value.snapshotsEnabled);
-    // Merged from here on, whatever follows. When the scratch couldn't be
-    // removed, it stays an AI task: deleting it then also drops its branch.
+    // Merged from here on, whatever follows. A scratch that couldn't be
+    // removed is left detached, its branch deleted: a plain worktree now.
     try {
-      await finalizeWorktreeRemoval(target.path, target.projectPath, { keepTask: cleanup_warning != null });
+      await finalizeWorktreeRemoval(target.path, target.projectPath);
     } catch (err) {
       console.error("[ai-task] refresh after merge-back failed:", err);
       aiTaskClose.value = null;

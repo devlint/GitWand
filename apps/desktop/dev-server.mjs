@@ -8146,8 +8146,15 @@ async function handleRequest(req, res) {
         // Mirror Rust: an AI task (no explicit source) records the commit it
         // starts from, for merge-back's base guard; `branch -D` drops it.
         if (!sourceBranch?.trim()) {
-          const base = execFileSync("git", ["rev-parse", "HEAD"], { cwd: resolvedCwd, encoding: "utf-8" }).trim();
-          execFileSync("git", ["config", `branch.${branchName}.gitwandBase`, base], { cwd: resolvedCwd });
+          try {
+            const base = execFileSync("git", ["rev-parse", "HEAD"], { cwd: resolvedCwd, encoding: "utf-8" }).trim();
+            execFileSync("git", ["config", `branch.${branchName}.gitwandBase`, base], { cwd: resolvedCwd });
+          } catch (e) {
+            // As Rust does: no half-created task left behind.
+            try { execFileSync("git", ["worktree", "remove", "--force", scratchPath], { cwd: resolvedCwd }); } catch {}
+            try { execFileSync("git", ["branch", "-D", branchName], { cwd: resolvedCwd }); } catch {}
+            throw e;
+          }
         }
         return jsonResponse(req, res, {
           path: scratchPath,
