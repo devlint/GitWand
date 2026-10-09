@@ -8,11 +8,13 @@
  * a long branch name eats into the same room.
  *
  * Each check expands every item, then collapses them in order while the row
- * or any direct child still overflows — synchronously, so no intermediate
- * layout ever paints. `collapsed` (reactive) holds the keys collapsed by the
- * last check; bind the collapsed class from it so Vue and the DOM agree.
+ * or any direct child still overflows; if even all-collapsed overflows, it
+ * switches the row to its wrapped layout (`wrapClass`) and fits again — all
+ * synchronously, so no intermediate layout ever paints. `collapsed` and
+ * `wrapped` (reactive) hold the last result; bind the classes from them so
+ * Vue and the DOM agree.
  *
- * Checks run on resize of the row and of its children (branch name, counts and
+ * Checks run (on the next frame) on resize of the row and of its children (branch name, counts and
  * locale all change their widths). Children added later (v-if) are picked up
  * after each render.
  */
@@ -45,9 +47,25 @@ function collapseOrder(el: HTMLElement): number {
   return Number.isFinite(order) ? order : Number.POSITIVE_INFINITY;
 }
 
-export function useCollapseOnOverflow(target: Ref<HTMLElement | null>, collapsedClass: string) {
+export interface CollapseOnOverflowOptions {
+  /** Class put on each collapsed item. */
+  collapsedClass: string;
+  /**
+   * Class put on the row when collapsing every item still doesn't fit — its
+   * CSS should let the row wrap. The items are then measured again in the
+   * wrapped layout, where they usually get their labels back.
+   */
+  wrapClass?: string;
+}
+
+export function useCollapseOnOverflow(
+  target: Ref<HTMLElement | null>,
+  { collapsedClass, wrapClass }: CollapseOnOverflowOptions,
+) {
   const collapsed = ref<ReadonlySet<string>>(new Set());
+  const wrapped = ref(false);
   let observer: ResizeObserver | null = null;
+  let pendingFrame = 0;
   const observed = new Set<Element>();
 
   function check() {
@@ -58,16 +76,26 @@ export function useCollapseOnOverflow(target: Ref<HTMLElement | null>, collapsed
     );
     const tooWide = () => overflows(row) || Array.from(row.children).some(overflows);
 
-    for (const item of items) item.classList.remove(collapsedClass);
-    const keys = new Set<string>();
-    for (const item of items) {
-      if (!tooWide()) break;
-      item.classList.add(collapsedClass);
-      keys.add(item.dataset.collapseKey!);
-    }
+    /** Expand everything, then collapse in order until the row fits. */
+    const fit = (wrap: boolean) => {
+      if (wrapClass) row.classList.toggle(wrapClass, wrap);
+      for (const item of items) item.classList.remove(collapsedClass);
+      const keys = new Set<string>();
+      for (const item of items) {
+        if (!tooWide()) break;
+        item.classList.add(collapsedClass);
+        keys.add(item.dataset.collapseKey!);
+      }
+      return keys;
+    };
+
+    let keys = fit(false);
+    const wrap = !!wrapClass && tooWide();
+    if (wrap) keys = fit(true);
 
     const prev = collapsed.value;
     if (keys.size !== prev.size || [...keys].some((k) => !prev.has(k))) collapsed.value = keys;
+    wrapped.value = wrap;
   }
 
   function observeAll() {
@@ -89,11 +117,17 @@ export function useCollapseOnOverflow(target: Ref<HTMLElement | null>, collapsed
 
   onMounted(() => {
     if (typeof ResizeObserver === "undefined") return;
-    // A collapse resizes sibling children within the callback; the browser
-    // reports those next frame (raising a benign "ResizeObserver loop" error
-    // event, unhandled in this app), where the check reaches the same answer
-    // and settles.
-    observer = new ResizeObserver(() => check());
+    // Deferred to the next frame: a check run inside the callback resizes the
+    // row (wrap) and sibling children, which the browser can't deliver in the
+    // same pass and reports as a "ResizeObserver loop" error. The follow-up
+    // notification then finds the same answer and settles.
+    observer = new ResizeObserver(() => {
+      if (pendingFrame) return;
+      pendingFrame = requestAnimationFrame(() => {
+        pendingFrame = 0;
+        check();
+      });
+    });
     observeAll();
     check();
   });
@@ -104,7 +138,9 @@ export function useCollapseOnOverflow(target: Ref<HTMLElement | null>, collapsed
     observer?.disconnect();
     observer = null;
     observed.clear();
+    if (pendingFrame) cancelAnimationFrame(pendingFrame);
+    pendingFrame = 0;
   });
 
-  return { collapsed, check };
+  return { collapsed, wrapped, check };
 }

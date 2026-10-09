@@ -61,7 +61,11 @@ const { t } = useI18n();
 // vary by locale, branch names by repo. A collapsed button's tooltip stands in
 // for its label.
 const headerRow = ref<HTMLElement | null>(null);
-const { collapsed: collapsedActions } = useCollapseOnOverflow(headerRow, "header-action-btn--icon");
+const { collapsed: collapsedActions, wrapped: headerWrapped } = useCollapseOnOverflow(headerRow, {
+  collapsedClass: "header-action-btn--icon",
+  // Last resort once every action is icon-only: actions drop to their own row.
+  wrapClass: "app-header__row--wrapped",
+});
 const isCollapsed = (key: string) => collapsedActions.value.has(key);
 const iconTooltip = (key: string, text: string) => ({ text, when: () => isCollapsed(key) });
 const ai = useAIProvider();
@@ -462,7 +466,7 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
     </div>
 
     <!-- ── Row 2: Main action row ───────────────────────────── -->
-    <div ref="headerRow" class="app-header__row">
+    <div ref="headerRow" class="app-header__row" :class="{ 'app-header__row--wrapped': headerWrapped }">
       <!-- Left cluster: branch selector + sync + branch actions -->
       <div class="header-left">
         <!-- Fallback: "Open" button when no repo is open -->
@@ -801,30 +805,33 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
   display: none;
 }
 
-/* Narrower: the icon actions drop to their own row under branch + sync. */
-@media (max-width: 975px) {
-  .app-header__row {
-    flex-wrap: wrap;
-    row-gap: var(--space-3);
-    padding-block: var(--space-3);
-    /* Popovers anchor to the whole (now multi-row) header row instead of
-       .header-left, so they open below the icon row rather than over it. */
-    position: relative;
-  }
-  .header-left {
-    position: static;
-  }
-  .app-header__row .merge-popover-anchor,
-  .app-header__row .undo-popover-anchor {
-    left: var(--space-6);
-  }
-  .header-actions {
-    order: 1;
-    flex-basis: 100%;
-  }
-  .header-actions > .header-action-sep:first-child {
-    display: none;
-  }
+/* Set by useCollapseOnOverflow when even icon-only actions don't fit: they
+   drop to their own row under branch + sync (and usually get their labels
+   back there). */
+.app-header__row--wrapped {
+  flex-wrap: wrap;
+  row-gap: var(--space-3);
+  padding-block: var(--space-3);
+}
+.app-header__row--wrapped .header-actions {
+  order: 1;
+  flex-basis: 100%;
+}
+.app-header__row--wrapped .header-actions > .header-action-sep:first-child {
+  display: none;
+}
+
+/* Once the header spans several rows, popovers anchor to the whole row
+   instead of .header-left, so they open below the other rows, not over them. */
+.app-header__row--wrapped {
+  position: relative;
+}
+.app-header__row--wrapped .header-left {
+  position: static;
+}
+.app-header__row--wrapped .merge-popover-anchor,
+.app-header__row--wrapped .undo-popover-anchor {
+  left: var(--space-6);
 }
 
 @media (max-width: 640px) {
@@ -832,10 +839,12 @@ onUnmounted(() => document.removeEventListener("click", onDocClick, true));
     flex-wrap: wrap;
     gap: var(--space-3);
     padding: var(--space-3) var(--space-4);
+    position: relative; /* multi-row here too: see popover anchoring above */
   }
   .header-left {
     flex-wrap: wrap;
     gap: var(--space-3);
+    position: static;
   }
   .header-action-sep {
     display: none;

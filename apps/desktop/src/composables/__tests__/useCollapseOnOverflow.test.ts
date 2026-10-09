@@ -11,10 +11,13 @@ import { createApp, defineComponent, h, ref, nextTick, type App, type VNode } fr
 import { useCollapseOnOverflow } from "../useCollapseOnOverflow";
 
 const CLASS = "is-icon";
+const WRAP = "is-wrapped";
 const FULL = 100; // px per expanded item
 const ICON = 40; // px per collapsed item
 
 let room = 600;
+/** Room the group gets once the row wraps it onto its own line. */
+let wrapRoom = 600;
 let roCallback: () => void = () => {};
 const observe = vi.fn();
 const unobserve = vi.fn();
@@ -29,10 +32,12 @@ class FakeResizeObserver {
 
 const rect = (left: number, right: number) => ({ left, right, top: 0, bottom: 20 }) as DOMRect;
 
-/** Row and group are `room` wide; items sit side by side from x = 0. */
+/** Row and group are `room` wide (`wrapRoom` once wrapped); items sit side by side from x = 0. */
 function fakeRect(this: Element): DOMRect {
   const el = this as HTMLElement;
-  if (el.dataset.row || el.dataset.group) return rect(0, room);
+  const row = el.closest("[data-row]");
+  const width = row?.classList.contains(WRAP) ? wrapRoom : room;
+  if (el.dataset.row || el.dataset.group) return rect(0, width);
   if (el.dataset.popover) return rect(0, 5000); // an open menu sticking far out
   if (el.dataset.collapseKey) {
     let left = 0;
@@ -48,13 +53,17 @@ let app: App | null = null;
 
 type Item = { key: string; order?: number };
 
-function mountRow(items: Item[] | (() => Item[]), extra: () => VNode[] = () => []) {
+function mountRow(
+  items: Item[] | (() => Item[]),
+  extra: () => VNode[] = () => [],
+  wrapClass?: string,
+) {
   const list = typeof items === "function" ? items : () => items;
-  let collapsed!: ReturnType<typeof useCollapseOnOverflow>["collapsed"];
+  let state!: ReturnType<typeof useCollapseOnOverflow>;
   const Comp = defineComponent({
     setup() {
       const row = ref<HTMLElement | null>(null);
-      ({ collapsed } = useCollapseOnOverflow(row, CLASS));
+      state = useCollapseOnOverflow(row, { collapsedClass: CLASS, wrapClass });
       return () =>
         h("div", { ref: row, "data-row": "1" }, [
           h(
@@ -75,7 +84,12 @@ function mountRow(items: Item[] | (() => Item[]), extra: () => VNode[] = () => [
   const row = container.firstElementChild as HTMLElement;
   const iconKeys = () =>
     Array.from(row.querySelectorAll(`.${CLASS}`)).map((b) => (b as HTMLElement).dataset.collapseKey);
-  return { row, iconKeys, collapsed: () => [...collapsed.value].sort() };
+  return {
+    row,
+    iconKeys,
+    collapsed: () => [...state.collapsed.value].sort(),
+    wrapped: () => state.wrapped.value,
+  };
 }
 
 // Five items, DOM order left → right; the rightmost collapses first.
@@ -90,8 +104,11 @@ const ACTIONS: Item[] = [
 describe("useCollapseOnOverflow", () => {
   beforeEach(() => {
     vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+    // Observer-driven checks are deferred to the next frame; run it right away.
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => (cb(0), 0)); // 0: nothing left pending
     vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(fakeRect);
     room = 600;
+    wrapRoom = 600;
     observe.mockClear();
     unobserve.mockClear();
   });
@@ -147,6 +164,39 @@ describe("useCollapseOnOverflow", () => {
     room = 440;
     roCallback();
     expect(iconKeys()).toEqual(["releaseNotes"]);
+  });
+
+  it("without a wrapClass, never wraps", () => {
+    room = 100;
+    const { wrapped, row } = mountRow(ACTIONS);
+    expect(wrapped()).toBe(false);
+    expect(row.classList.contains(WRAP)).toBe(false);
+  });
+
+  it("wraps only once collapsing everything still overflows, then refits", () => {
+    room = 150; // even 5 × 40 = 200 overflows on one line
+    wrapRoom = 440; // on its own line: one collapse is enough
+    const { row, wrapped, iconKeys } = mountRow(ACTIONS, undefined, WRAP);
+    expect(wrapped()).toBe(true);
+    expect(row.classList.contains(WRAP)).toBe(true);
+    expect(iconKeys()).toEqual(["releaseNotes"]);
+  });
+
+  it("does not wrap while collapsing is enough, and unwraps once it is again", () => {
+    room = 330; // three collapses fit on one line
+    const { row, wrapped, iconKeys } = mountRow(ACTIONS, undefined, WRAP);
+    expect(wrapped()).toBe(false);
+    expect(iconKeys()).toHaveLength(3);
+
+    room = 150;
+    roCallback();
+    expect(wrapped()).toBe(true);
+
+    room = 330;
+    roCallback();
+    expect(wrapped()).toBe(false);
+    expect(row.classList.contains(WRAP)).toBe(false);
+    expect(iconKeys()).toHaveLength(3);
   });
 
   it("ignores an absolutely positioned popover sticking out of the row", () => {
